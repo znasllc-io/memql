@@ -102,9 +102,9 @@ func TestParseLiteralTypes_BothPathsEquivalent(t *testing.T) {
 			// langparser path -- read the AST directly so the test
 			// doesn't depend on whether the engine default is
 			// flipped (still OFF in #258).
-			langNode, err := parseViaLangparser(tc.query, false)
+			langRes, err := parseViaLangparser(tc.query, false)
 			require.NoError(t, err, "langparser path: parse failed")
-			langComp := assertComparison(t, langNode)
+			langComp := assertComparison(t, langRes.Root)
 			require.True(t, reflect.DeepEqual(tc.want, langComp.Value),
 				"langparser path: want %#v (%T), got %#v (%T)",
 				tc.want, tc.want, langComp.Value, langComp.Value)
@@ -146,9 +146,9 @@ func TestParseLiteralTypes_NumericLiteralHelper(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.query, func(t *testing.T) {
-			node, err := parseViaLangparser(tc.query, false)
+			res, err := parseViaLangparser(tc.query, false)
 			require.NoError(t, err)
-			comp := assertComparison(t, node)
+			comp := assertComparison(t, res.Root)
 			require.Equalf(t, tc.wantType, reflectTypeName(comp.Value),
 				"want %s, got %T (value=%v)", tc.wantType, comp.Value, comp.Value)
 			require.Equal(t, tc.wantVal, comp.Value)

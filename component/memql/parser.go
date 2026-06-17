@@ -101,30 +101,34 @@ func (e *MemQLEngine) parseWithFunctions(query string, fns *FunctionRegistry, sp
 	}
 
 	// #250: langparser is the sole runtime parser. parseViaLangparser
-	// returns a typed ErrUnsupportedQueryShape for the 8 shapes the
+	// returns a typed ErrUnsupportedQueryShape for the shapes the
 	// langparser doesn't cover (shape / select / in / concept==memql:
-	// version / trailing-comma / @timestamp / :=); other errors are
-	// genuine parse failures and propagate raw. The legacy memql
-	// parser fallback (the post-#249 soak posture) is retired now
-	// that sub-epic #286 migrated cognition's runtime callsites.
+	// version / trailing-comma); other errors are genuine parse failures
+	// and propagate raw. The legacy memql parser fallback (the post-#249
+	// soak posture) is retired now that sub-epic #286 migrated cognition's
+	// runtime callsites.
 	//
-	// inlineSpecs / timestamp / useLatest stay nil/zero -- the
-	// detector rejects the shapes that would have populated them.
-	root, err := parseViaLangparser(trimmed, allowInline)
+	// #1558: under allowInline (the gated MCP Tier-3 path) the two inline
+	// shapes -- a trailing `@timestamp`/`@latest` asOf modifier and a
+	// leading `name := expr` inline-spec definition -- are PARSED here
+	// (rather than rejected) and surfaced on the result, so they populate
+	// timestamp / useLatest / inlineSpecs below. For every other caller
+	// (allowInline=false) those fields stay zero/nil exactly as before.
+	parsed, err := parseViaLangparser(trimmed, allowInline)
 	if err != nil {
 		return nil, err
 	}
-	if root == nil {
+	if parsed.Root == nil {
 		return nil, ErrEmptyQuery
 	}
 
 	plan := &QueryPlan{
-		Root:          root,
+		Root:          parsed.Root,
 		Mutations:     nil,
 		Filters:       nil,
 		Relationships: nil,
-		Timestamp:     nil,
-		UseLatest:     false,
+		Timestamp:     parsed.Timestamp,
+		UseLatest:     parsed.UseLatest,
 		CacheHints:    nil,
 		ConceptFields: make(map[string][]FieldReference),
 		Metadata: metadataSelection{
@@ -139,10 +143,10 @@ func (e *MemQLEngine) parseWithFunctions(query string, fns *FunctionRegistry, sp
 		return nil, err
 	}
 	plan.Root = normalizedRoot
-	// #250: inline-spec definitions are rejected at parseViaLangparser
-	// (unsupportedQueryShape returns the typed error for `:=`), so
-	// inlineSpecs is always nil here.
-	if err := e.resolvePlanSpecs(plan, nil); err != nil {
+	// #1558: inline-spec definitions parsed under allowInline land in
+	// parsed.InlineSpecs; resolvePlanSpecs expands the SpecReference root
+	// against them. For non-inline callers this is nil (unchanged).
+	if err := e.resolvePlanSpecs(plan, parsed.InlineSpecs); err != nil {
 		return nil, err
 	}
 	// Resolve function calls after spec resolution

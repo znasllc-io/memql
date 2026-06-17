@@ -108,6 +108,53 @@ func (r *mcpAutomationRunner) RunAutomation(ctx context.Context, owner, name str
 	return out, nil
 }
 
+// RunInlineAutomation compiles ad-hoc automation .memql source submitted at
+// call time and runs its action chain directly, NEVER persisting (#1558). It
+// reuses the Phase-4 path verbatim: Loader.CompileSource compiles the source
+// (same parse -> resolve -> trigger-normalize -> compile -> validate pipeline
+// as on-disk automations, against the loader's registry read-only -- nothing is
+// registered), then RunBundleDryRun runs the compiled action chain through the
+// manual Executor under the engine's Gate-2 ISOLATED sandbox: reads are real,
+// mutations are isolated to an ephemeral sandbox partition, and webhooks are
+// recorded-and-blocked. There is no durable-write code path here at all, so the
+// run can never touch the live store.
+func (r *mcpAutomationRunner) RunInlineAutomation(ctx context.Context, owner, source string, input map[string]any) (map[string]any, error) {
+	if strings.TrimSpace(source) == "" {
+		return nil, fmt.Errorf("automation source is required")
+	}
+	if r.loader == nil {
+		return nil, fmt.Errorf("automation loader is not wired")
+	}
+	// Compile the submitted source to resolve the automation name (and surface
+	// parse/bind diagnostics) before running it. The compile is read-only --
+	// nothing is registered into the loader's registry.
+	const origin = "inline-automation.memql"
+	auto, err := r.loader.CompileSource(source, origin)
+	if err != nil {
+		return nil, err
+	}
+	if auto == nil || strings.TrimSpace(auto.Name) == "" {
+		return nil, fmt.Errorf("inline automation source did not compile to a named automation")
+	}
+	req := memql.DryRunRequest{
+		AutomationName:   auto.Name,
+		AutomationSource: source,
+		TriggerEvent:     &memql.DryRunTriggerEvent{Topic: "mcp.inline." + auto.Name, Kind: "manual", Payload: input},
+		Mode:             memql.DryRunModeIsolated,
+	}
+	report, err := memql.RunBundleDryRun(r.ownerEnvelope(ctx, owner), r.engine, req)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"inline":     true,
+		"persisted":  false,
+		"automation": auto.Name,
+		"ok":         report.OK,
+		"report":     report,
+	}, nil
+}
+
 // PromotedAutomationTools returns MCP tool descriptors for every @mcp-promoted
 // automation, sorted by name.
 func (r *mcpAutomationRunner) PromotedAutomationTools() []map[string]any {

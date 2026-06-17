@@ -69,6 +69,13 @@ type AutomationRunner interface {
 	// authz envelope with input as the synthetic trigger event (skips trigger
 	// matching). dryRun isolates writes (Gate-2 sandbox) for a safe preview.
 	RunAutomation(ctx context.Context, owner, name string, input map[string]any, dryRun bool) (map[string]any, error)
+	// RunInlineAutomation compiles ad-hoc automation .memql SOURCE submitted at
+	// call time and runs its action chain directly through the Phase-4 manual
+	// Executor path, NEVER persisting -- the run is isolated so writes land in an
+	// ephemeral sandbox partition and webhooks are recorded-and-blocked. Tier-3
+	// (inline); gated server-side to the inline tier + owner/developer before this
+	// is reached. (#1558)
+	RunInlineAutomation(ctx context.Context, owner, source string, input map[string]any) (map[string]any, error)
 	// PromotedAutomationTools returns MCP tool descriptors for @mcp automations.
 	PromotedAutomationTools() []map[string]any
 	// IsPromotedAutomation reports whether name is an @mcp-promoted automation.
@@ -95,12 +102,13 @@ func automationRunnerFromContext(ctx context.Context) AutomationRunner {
 // authoring / inline ops (define lands in Phase 3 #1533; inline query in
 // Phase 5 #1535).
 const (
-	toolRunQuery      = "run_query"
-	toolRunMutation   = "run_mutation"
-	toolRunAutomation = "run_automation"
-	toolDefine        = "define"
-	toolPromote       = "promote"
-	toolQuery         = "query"
+	toolRunQuery            = "run_query"
+	toolRunMutation         = "run_mutation"
+	toolRunAutomation       = "run_automation"
+	toolDefine              = "define"
+	toolPromote             = "promote"
+	toolQuery               = "query"
+	toolRunInlineAutomation = "run_inline_automation"
 )
 
 // mcpSession carries the per-connection authoring state: the owner (the acting
@@ -193,6 +201,18 @@ func listMCPTools(eng Engine, role string, tier Tier) []map[string]any {
 				"required":   []any{"query"},
 			},
 		})
+		out = append(out, map[string]any{
+			"name":        toolRunInlineAutomation,
+			"description": "Compile ad-hoc automation .memql source submitted at call time and run its action chain directly, NEVER persisting (isolated: writes land in an ephemeral sandbox partition, webhooks are recorded-and-blocked). Requires the inline tier + owner/developer role.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"source": map[string]any{"type": "string", "description": "The automation .memql source to compile and run."},
+					"input":  map[string]any{"type": "object", "description": "Payload bound as the synthetic trigger event."},
+				},
+				"required": []any{"source"},
+			},
+		})
 	}
 	// @mcp-promoted query/mutation constructs surface as first-class tools
 	// (Phase 4 #1534), in addition to staying reachable via run_query/run_mutation.
@@ -254,6 +274,8 @@ func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, name s
 		return handlePromote(ctx, eng, role, tier, args)
 	case toolQuery:
 		return handleInlineQuery(ctx, eng, role, tier, args)
+	case toolRunInlineAutomation:
+		return handleInlineAutomation(ctx, role, tier, args)
 	default:
 		// A first-class @mcp-promoted query/mutation is called by its own name
 		// with its args directly; route it to the named-construct executor.
@@ -414,6 +436,41 @@ func handleInlineQuery(ctx context.Context, eng Engine, role string, tier Tier, 
 	payload, mErr := json.Marshal(res.OutputPayload())
 	if mErr != nil {
 		return errorResult(fmt.Sprintf("inline query: encode result: %v", mErr))
+	}
+	return textResult(string(payload))
+}
+
+// handleInlineAutomation implements the Tier-3 `run_inline_automation` op
+// (#1558): both gates first (inline tier + CanRunInline, server-side), then
+// hand the submitted automation source to the runner, which compiles it via
+// the Phase-4 Loader.CompileSource path and runs the action chain through the
+// manual Executor WITHOUT persisting (the isolated Gate-2 sandbox). This is the
+// automation analogue of handleInlineQuery: ad-hoc source in, action-chain
+// trace out, zero durable side effects.
+func handleInlineAutomation(ctx context.Context, role string, tier Tier, args map[string]any) map[string]any {
+	if !tierAllows(tier, classInline) {
+		return errorResult("run_inline_automation is not permitted: deployment tier is " + tier.String() + " (set MEMQL_MCP_MODE=inline)")
+	}
+	if !roleCanRunInline(role) {
+		return errorResult("run_inline_automation requires the owner or developer role")
+	}
+	r := automationRunnerFromContext(ctx)
+	if r == nil {
+		return errorResult("run_inline_automation is unavailable: no automation runner is wired in this deployment")
+	}
+	source, _ := args["source"].(string)
+	if strings.TrimSpace(source) == "" {
+		return errorResult("run_inline_automation requires automation 'source' (.memql)")
+	}
+	input, _ := args["input"].(map[string]any)
+	owner := mcpSessionFromContext(ctx).owner
+	res, err := r.RunInlineAutomation(ctx, owner, source, input)
+	if err != nil {
+		return errorResult(fmt.Sprintf("inline automation failed: %v", err))
+	}
+	payload, mErr := json.Marshal(res)
+	if mErr != nil {
+		return errorResult(fmt.Sprintf("inline automation: encode result: %v", mErr))
 	}
 	return textResult(string(payload))
 }
