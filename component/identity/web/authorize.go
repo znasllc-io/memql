@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/identity"
 	webtempl "github.com/znasllc-io/memql/component/identity/web/templ"
 )
 
@@ -48,13 +49,16 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 
 	// Step 1: validate client_id + redirect_uri BEFORE anything else.
 	// Never redirect on a failure here -- the redirect_uri is untrusted.
-	if clientID == "" || s.Cfg.FindClient(clientID) == nil {
+	// Resolve through the unified resolver (static config first, then the
+	// DB-backed oauthClient store) so dynamically-registered (RFC 7591)
+	// clients work exactly like static IDENTITY_REGISTERED_CLIENTS.
+	if clientID == "" || identity.ResolveClient(r.Context(), s.Cfg, s.Store, clientID) == nil {
 		s.renderAuthorizeError(w, http.StatusBadRequest,
 			"Unknown client",
 			"The application requesting access is not registered with this server. The authorization request cannot continue.")
 		return
 	}
-	if redirectURI == "" || !s.Cfg.AllowsRedirectURI(clientID, redirectURI) {
+	if redirectURI == "" || !identity.ClientAllowsRedirectURI(r.Context(), s.Cfg, s.Store, clientID, redirectURI) {
 		s.renderAuthorizeError(w, http.StatusBadRequest,
 			"Invalid redirect URI",
 			"The redirect URI in this authorization request is not registered for the requesting application. For your security, the request cannot continue.")

@@ -150,7 +150,8 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (*VerifyResult, e
 	// catches operators removing a redirectURI between issue and consume).
 	// Skipped for admin-session links — they carry no clientId.
 	if !adminSession {
-		if v.Cfg.FindClient(clientId) == nil || !v.Cfg.AllowsRedirectURI(clientId, redirectURI) {
+		if identity.ResolveClient(ctx, v.Cfg, v.Store, clientId) == nil ||
+			!identity.ClientAllowsRedirectURI(ctx, v.Cfg, v.Store, clientId, redirectURI) {
 			v.auditFailure(ctx, "magic_link_consume", in, "client_or_redirect_revoked")
 			return nil, ErrOAuthCtxCorrupted
 		}

@@ -194,10 +194,13 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 		if in.ClientId == "" {
 			return ErrUnknownClient
 		}
-		if i.Cfg.FindClient(in.ClientId) == nil {
+		// Resolve through the unified resolver so dynamically-registered
+		// (RFC 7591) clients in the store work exactly like static
+		// IDENTITY_REGISTERED_CLIENTS.
+		if identity.ResolveClient(ctx, i.Cfg, i.Store, in.ClientId) == nil {
 			return ErrUnknownClient
 		}
-		if in.RedirectURI == "" || !i.Cfg.AllowsRedirectURI(in.ClientId, in.RedirectURI) {
+		if in.RedirectURI == "" || !identity.ClientAllowsRedirectURI(ctx, i.Cfg, i.Store, in.ClientId, in.RedirectURI) {
 			return ErrRedirectMismatch
 		}
 	}

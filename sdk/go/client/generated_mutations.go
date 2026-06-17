@@ -4221,6 +4221,72 @@ func MutationCreateNoteBuild(args MutationCreateNoteArgs) string {
 	return b.String()
 }
 
+// MutationCreateOAuthClient -- Persist a dynamically-registered public OAuth client (RFC 7591).
+//
+// Bound concept: oauthClient.
+type MutationCreateOAuthClientArgs struct {
+	ClientId                string
+	ClientName              string
+	RedirectURIsJSON        string
+	GrantTypes              string
+	ResponseTypes           string
+	TokenEndpointAuthMethod string
+	RegisteredAt            string
+}
+
+// MutationCreateOAuthClient calls the engine mutation mutationCreateOAuthClient.
+func (qc *QueryClient) MutationCreateOAuthClient(ctx context.Context, args MutationCreateOAuthClientArgs) (*Result, error) {
+	call := MutationCreateOAuthClientBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateOAuthClient", call)
+}
+
+func MutationCreateOAuthClientBuild(args MutationCreateOAuthClientArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateOAuthClient({")
+	b.WriteString("clientId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ClientId))
+	if args.ClientName != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("clientName: ")
+		b.WriteString(fmt.Sprintf("%q", args.ClientName))
+	}
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("redirectURIsJSON: ")
+	b.WriteString(fmt.Sprintf("%q", args.RedirectURIsJSON))
+	if args.GrantTypes != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("grantTypes: ")
+		b.WriteString(fmt.Sprintf("%q", args.GrantTypes))
+	}
+	if args.ResponseTypes != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("responseTypes: ")
+		b.WriteString(fmt.Sprintf("%q", args.ResponseTypes))
+	}
+	if args.TokenEndpointAuthMethod != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("tokenEndpointAuthMethod: ")
+		b.WriteString(fmt.Sprintf("%q", args.TokenEndpointAuthMethod))
+	}
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("registeredAt: ")
+	b.WriteString(fmt.Sprintf("%q", args.RegisteredAt))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationCreatePATIdentity -- Create a Personal Access Token identity (api_key) owned by a user. Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.
 //
 // Bound concept: identity.

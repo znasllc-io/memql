@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -53,6 +54,19 @@ type AuthCodeRow struct {
 	ExpiresAt          time.Time
 	ConsumedAt         time.Time // zero = not consumed
 	CreatedAt          time.Time
+}
+
+// OAuthClientRow projects a v1:identity:oauthClient row -- a public
+// client minted at dynamic client registration (RFC 7591). No secret
+// is issued for public clients, so there is no secret field.
+type OAuthClientRow struct {
+	ClientId                string
+	ClientName              string
+	RedirectURIs            []string
+	GrantTypes              string
+	ResponseTypes           string
+	TokenEndpointAuthMethod string
+	CreatedAt               time.Time
 }
 
 // UserRow projects a v1:identity:user row.
@@ -272,6 +286,78 @@ func (s *Store) LookupAuthCodeByCodeHash(ctx context.Context, codeHash string) (
 		ExpiresAt:          g.time("expiresAt"),
 		ConsumedAt:         g.time("consumedAt"),
 		CreatedAt:          g.time("createdAt"),
+	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// OAuth clients (dynamic client registration, RFC 7591)
+// ---------------------------------------------------------------------------
+
+// CreateOAuthClient persists a dynamically-registered public OAuth
+// client. redirectURIs is marshaled to a JSON array string (the
+// concept stores it as a string column, mirroring
+// clusterSettings.registeredClientsJSON). createdAt is an RFC3339
+// timestamp the caller stamps.
+func (s *Store) CreateOAuthClient(
+	ctx context.Context,
+	clientId, clientName string,
+	redirectURIs []string,
+	grantTypes, responseTypes, tokenEndpointAuthMethod, registeredAt string,
+) error {
+	if redirectURIs == nil {
+		redirectURIs = []string{}
+	}
+	uriJSON, err := json.Marshal(redirectURIs)
+	if err != nil {
+		return fmt.Errorf("identity.store: marshal redirect_uris: %w", err)
+	}
+	var b strings.Builder
+	b.WriteString(`mutationCreateOAuthClient({`)
+	writeKVString(&b, "clientId", clientId, true)
+	writeKVString(&b, "clientName", clientName, false)
+	writeKVString(&b, "redirectURIsJSON", string(uriJSON), false)
+	writeKVString(&b, "grantTypes", grantTypes, false)
+	writeKVString(&b, "responseTypes", responseTypes, false)
+	writeKVString(&b, "tokenEndpointAuthMethod", tokenEndpointAuthMethod, false)
+	writeKVString(&b, "registeredAt", registeredAt, false)
+	b.WriteString(`})`)
+	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
+		return fmt.Errorf("identity.store: create oauth client: %w", err)
+	}
+	return nil
+}
+
+// LookupOAuthClientByClientId returns the dynamically-registered OAuth
+// client row matching clientId, or nil if none exists. The stored
+// redirectURIsJSON array is unmarshaled back into RedirectURIs.
+func (s *Store) LookupOAuthClientByClientId(ctx context.Context, clientId string) (*OAuthClientRow, error) {
+	query := fmt.Sprintf(`queryOAuthClientByClientId({clientId: "%s"})`, escapeMemQLString(clientId))
+	nodes, err := s.executeAndExtract(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("identity.store: lookup oauth client: %w", err)
+	}
+	if len(nodes) == 0 {
+		return nil, nil
+	}
+	node := nodes[0]
+	if node == nil {
+		return nil, nil
+	}
+	g := newFieldGetter(node)
+	var uris []string
+	if raw := g.str("redirectURIsJSON"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &uris); err != nil {
+			return nil, fmt.Errorf("identity.store: unmarshal redirect_uris for client %q: %w", clientId, err)
+		}
+	}
+	return &OAuthClientRow{
+		ClientId:                firstNonEmpty(g.str("clientId"), node.GetId()),
+		ClientName:              g.str("clientName"),
+		RedirectURIs:            uris,
+		GrantTypes:              g.str("grantTypes"),
+		ResponseTypes:           g.str("responseTypes"),
+		TokenEndpointAuthMethod: g.str("tokenEndpointAuthMethod"),
+		CreatedAt:               g.time("registeredAt"),
 	}, nil
 }
 
