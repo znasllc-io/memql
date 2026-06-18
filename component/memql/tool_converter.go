@@ -44,10 +44,15 @@ func toolDeclToTool(decl *ast.ToolDecl, origin string) ([]*Tool, error) {
 		case "array":
 			prop["type"] = "array"
 			// OpenAI's function-tool schema requires array properties
-			// to specify "items" with a "type" field. Default to a
-			// generic object item when no nested schema is declared,
-			// matching what parseToolMemQL emitted.
-			prop["items"] = map[string]any{"type": "object"}
+			// to specify "items". A DSL tool field can't declare an
+			// item type, so emit a permissive empty schema ({}) rather
+			// than forcing {"type":"object"}. The old object default
+			// made every scalar-array tool uncallable -- e.g.
+			// notesCreate.tags (a list of string tags) rejected its
+			// strings with `items/type: expected object, but got
+			// string` (#1606). An empty items schema accepts scalars
+			// and objects alike.
+			prop["items"] = map[string]any{}
 		default:
 			// Unknown type -- fall back to string. Mirrors the
 			// legacy parser's default; an unknown type isn't a hard
