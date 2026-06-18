@@ -705,8 +705,27 @@ func propertyToJSONSchema(prop parsedProperty) (map[string]any, error) {
 	case "float":
 		schema["type"] = "number"
 	case "datetime":
-		schema["type"] = "string"
-		schema["format"] = "date-time"
+		if prop.required {
+			schema["type"] = "string"
+			schema["format"] = "date-time"
+		} else {
+			// An OPTIONAL datetime field must also accept the "unset"
+			// sentinels callers and templates use for "no value yet": an
+			// empty string "" (the coalesce(x,"") / clear-a-field
+			// convention) and JSON null. Forcing format:date-time on those
+			// made every optional datetime effectively required and blocked
+			// creates/updates that legitimately leave the field empty --
+			// in-flight worker invocations (completedAt), un-released
+			// workspaces (releasedAt), todos with no deadline (dueAt),
+			// clearing a scheduled deletion (deletionScheduledAt), etc.
+			// (memql#1629). A NON-empty value must still be a valid RFC3339
+			// date-time, so garbage strings are still rejected.
+			schema["oneOf"] = []any{
+				map[string]any{"type": "string", "format": "date-time"},
+				map[string]any{"type": "string", "maxLength": 0},
+				map[string]any{"type": "null"},
+			}
+		}
 	case "enum":
 		schema["type"] = "string"
 		if len(prop.enumValues) > 0 {
