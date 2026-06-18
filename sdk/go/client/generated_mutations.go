@@ -7948,6 +7948,28 @@ func MutationPruneHarnessSemanticMemoryBuild(args MutationPruneHarnessSemanticMe
 	return b.String()
 }
 
+// MutationReadyHarnessStep -- Promote a step to ready (pending -> ready when dependsOn is satisfied, or blocked -> ready when the blocker finishes). Read-merges the prior row so owned-tier fields are preserved. The engine step guard validates the transition and rejects an illegal source status. Without this mutation the state machine is stuck at 'pending' (#1635).
+//
+// Bound concept: step.
+type MutationReadyHarnessStepArgs struct {
+	StepId string
+}
+
+// MutationReadyHarnessStep calls the engine mutation mutationReadyHarnessStep.
+func (qc *QueryClient) MutationReadyHarnessStep(ctx context.Context, args MutationReadyHarnessStepArgs) (*Result, error) {
+	call := MutationReadyHarnessStepBuild(args)
+	return qc.executeNamed(ctx, "mutationReadyHarnessStep", call)
+}
+
+func MutationReadyHarnessStepBuild(args MutationReadyHarnessStepArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationReadyHarnessStep({")
+	b.WriteString("stepId: ")
+	b.WriteString(fmt.Sprintf("%q", args.StepId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationRecordBundleDryRun -- Record the Gate 2 (tiered behavioral dry-run, #958) result on a bundle and transition status. status is dryRunPassed on success or failed otherwise; dryRunReport carries the trace + side-effect manifest + cost estimate (the Gate 3 approval artifact).
 //
 // Bound concept: bundle.
