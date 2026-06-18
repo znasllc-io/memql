@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -12,7 +13,7 @@ func TestApplyToolDefaults_FillsMissing(t *testing.T) {
 	args := map[string]any{"keyword": "go"}
 	defaults := map[string]any{"spaceId": "v1:cognition:space:abc", "keyword": "ignored"}
 
-	got := applyToolDefaults(tool, args, defaults)
+	got := applyToolDefaults(context.Background(), tool, args, defaults)
 	want := map[string]any{
 		"keyword": "go",                       // LLM-supplied value preserved
 		"spaceId": "v1:cognition:space:abc",   // default fills missing
@@ -40,7 +41,7 @@ func TestApplyToolDefaults_AutoInjectedServerWins(t *testing.T) {
 		"participantId": "v1:cognition:participant:real",
 	}
 
-	got := applyToolDefaults(tool, args, defaults)
+	got := applyToolDefaults(context.Background(), tool, args, defaults)
 	want := map[string]any{
 		"spaceId":       "v1:cognition:space:real",       // server wins
 		"agentId":       "v1:agents:agent:real",          // server wins
@@ -69,7 +70,7 @@ func TestApplyToolDefaults_AutoInjectedNoDefaultStripsLLMValue(t *testing.T) {
 		// note: no ownerUserId here
 	}
 
-	got := applyToolDefaults(tool, args, defaults)
+	got := applyToolDefaults(context.Background(), tool, args, defaults)
 	want := map[string]any{
 		"keyword": "go",
 	}
@@ -94,7 +95,7 @@ func TestApplyToolDefaults_NilToolPreservesLegacyBehavior(t *testing.T) {
 		"spaceId": "v1:cognition:space:real",
 	}
 
-	got := applyToolDefaults(nil, args, defaults)
+	got := applyToolDefaults(context.Background(), nil, args, defaults)
 	want := map[string]any{
 		"ownerUserId": "forged", // unchanged -- no @autoInjected info available
 		"spaceId":     "v1:cognition:space:real",
@@ -110,7 +111,7 @@ func TestApplyToolDefaults_NilArgsAllocatesWhenNeeded(t *testing.T) {
 	tool := &Tool{Name: "t"}
 	defaults := map[string]any{"spaceId": "v1:cognition:space:abc"}
 
-	got := applyToolDefaults(tool, nil, defaults)
+	got := applyToolDefaults(context.Background(), tool, nil, defaults)
 	want := map[string]any{"spaceId": "v1:cognition:space:abc"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("applyToolDefaults(nil args) = %v, want %v", got, want)
@@ -121,7 +122,7 @@ func TestApplyToolDefaults_NoDefaultsNoArgsReturnsNil(t *testing.T) {
 	// No defaults, no LLM args, no auto-injected fields -- nothing
 	// to do, return nil.
 	tool := &Tool{Name: "t"}
-	got := applyToolDefaults(tool, nil, nil)
+	got := applyToolDefaults(context.Background(), tool, nil, nil)
 	if got != nil {
 		t.Errorf("applyToolDefaults(nil,nil) = %v, want nil", got)
 	}
@@ -141,7 +142,7 @@ func TestApplyToolDefaults_AutoInjectedStripsEvenWhenNoDefaults(t *testing.T) {
 		"ownerUserId": "forged",
 		"keyword":     "go",
 	}
-	got := applyToolDefaults(tool, args, nil)
+	got := applyToolDefaults(context.Background(), tool, args, nil)
 	want := map[string]any{
 		"keyword": "go",
 	}

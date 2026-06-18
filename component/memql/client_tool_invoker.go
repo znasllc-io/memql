@@ -135,6 +135,36 @@ func strictUnknownArgs(ctx context.Context) bool {
 	return v
 }
 
+// mcpToolExecutionKey signals that a tool call is executing on behalf of
+// an MCP connector session (memql#1684). When set, applyToolDefaults
+// preserves caller-supplied values for @autoInjected fields that have no
+// server default (e.g. spaceId on recentChat, where no agent runtime is
+// present to stamp the space). In the normal agent execution path, the
+// server default ALWAYS wins and any LLM-supplied autoInjected value is
+// dropped (security: LLM cannot forge ownerUserId / spaceId / agentId).
+// Over MCP the caller IS the authenticated user, not an LLM, so a
+// caller-supplied spaceId is a legitimate input that must be honoured.
+type mcpToolExecutionKey struct{}
+
+// WithMCPToolExecution stamps the context to indicate this tool dispatch
+// originated from the MCP connector. Stamped by callMCPTool in
+// component/mcp/tool_surface.go; checked by applyToolDefaults to
+// preserve caller-supplied @autoInjected values when no server default
+// is available (memql#1684).
+func WithMCPToolExecution(ctx context.Context) context.Context {
+	return context.WithValue(ctx, mcpToolExecutionKey{}, true)
+}
+
+// mcpToolExecution reports whether the context was stamped by the MCP
+// connector tool-dispatch path.
+func mcpToolExecution(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(mcpToolExecutionKey{}).(bool)
+	return v
+}
+
 // providerOverrideKey carries an optional LLM provider name that
 // si_tool_loop's InvokeSIChatWithFilteredTools should pass as the
 // SIInvocation.ProviderOverride. Lets callers (e.g. delegate_takeover)

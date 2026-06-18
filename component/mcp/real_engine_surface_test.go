@@ -116,15 +116,13 @@ func TestRealEngineExposesResourcesAndPrompts(t *testing.T) {
 	t.Logf("real-engine MCP surface: %d resources, %d prompts", len(resources), len(prompts))
 }
 
-// TestRealEngineCuratedToolSurface pins the #1646 curated tool-surface decision
+// TestRealEngineCuratedToolSurface pins the curated tool-surface decision
 // over a real, fully-loaded engine: describeFunction (function/arg
-// introspection) is re-added to the curated @mcp allowlist because it
-// materially improves MCP-client usability, while recentChat stays
-// intentionally EXCLUDED -- its spaceId is @autoInjected/server-stamped from
-// the agent runtime (memql#107), which has no value over an MCP session, so
-// exposing it would dispatch with a blank spaceId. searchUsers (already @mcp)
-// stays in. This fails before the @mcp tag is added to describeFunction and
-// passes after.
+// introspection) is in the curated @mcp allowlist because it materially
+// improves MCP-client usability; recentChat is restored (#1684) because the
+// autoInjected-spaceId blocker is fixed via WithMCPToolExecution in
+// applyToolDefaults -- MCP callers now supply spaceId directly. searchUsers
+// (already @mcp) stays in. This is the #1596/#1646/#1684 gate.
 func TestRealEngineCuratedToolSurface(t *testing.T) {
 	eng := loadedEngine(t)
 
@@ -141,7 +139,64 @@ func TestRealEngineCuratedToolSurface(t *testing.T) {
 	if !names["searchUsers"] {
 		t.Errorf("searchUsers (already @mcp) must remain in the curated MCP surface; got tools %v", names)
 	}
-	if names["recentChat"] {
-		t.Errorf("recentChat must be EXCLUDED from the curated MCP surface (autoInjected spaceId, #1646); got tools %v", names)
+	// recentChat restored: autoInjected spaceId is now preserved for MCP callers
+	// (caller supplies spaceId directly; server still stamps it in agent context).
+	if !names["recentChat"] {
+		t.Errorf("recentChat must be in the curated MCP surface (#1684); got tools %v", names)
 	}
+}
+
+// TestHarnessStepChainReachableOverMCP asserts that the full harness
+// add→ready→start→complete/fail mutation chain is promoted onto the MCP
+// surface via @mcp (memql#1679). These are the @mcp-promoted query/mutation
+// tools that expose the step state machine over the connector; without
+// mutationReadyHarnessStep the chain was stuck at 'pending' forever.
+func TestHarnessStepChainReachableOverMCP(t *testing.T) {
+	eng := loadedEngine(t)
+
+	// @mcp-promoted mutations surface via MCPPromotedFunctionTools, not the
+	// tool registry (tool{} constructs). Collect promoted function names.
+	promoted := map[string]bool{}
+	for _, m := range eng.MCPPromotedFunctionTools() {
+		if n, _ := m["name"].(string); n != "" {
+			promoted[n] = true
+		}
+	}
+
+	chain := []string{
+		"mutationCreateHarnessPlan",
+		"mutationAddHarnessStep",
+		"mutationReadyHarnessStep", // the critical missing link (#1679)
+		"mutationStartHarnessStep",
+		"mutationCompleteHarnessStep",
+		"mutationFailHarnessStep",
+		"mutationRecordHarnessObservation",
+	}
+	for _, name := range chain {
+		if !promoted[name] {
+			t.Errorf("harness mutation %q is not @mcp-promoted; the step chain is unreachable over the connector (promoted: %v)", name, promoted)
+		}
+	}
+
+	// Sanity: the MCP server surface (tools/list) must also include these
+	// as first-class tool entries (via MCPPromotedFunctionTools appended
+	// in listMCPTools).
+	s := NewServer(slog.Default(), "memql-mcp", "test", eng, Config{})
+	toolList := rpcList(t, s, "tools/list", "tools")
+	toolNames := map[string]bool{}
+	for _, raw := range toolList {
+		m, _ := raw.(map[string]any)
+		if m == nil {
+			continue
+		}
+		if n, _ := m["name"].(string); n != "" {
+			toolNames[n] = true
+		}
+	}
+	for _, name := range chain {
+		if !toolNames[name] {
+			t.Errorf("harness mutation %q is missing from tools/list over the MCP server (chain must be fully reachable, #1679)", name)
+		}
+	}
+	t.Logf("harness step-chain MCP surface: all %d mutations present in tools/list", len(chain))
 }

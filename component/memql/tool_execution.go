@@ -305,7 +305,7 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 	// server default ALWAYS wins (forged LLM values dropped); other defaults
 	// are fill-if-missing. Idempotent for callers that already pre-merged
 	// (si_tool_loop.go), so it is safe defense-in-depth there too.
-	args = applyToolDefaults(tool, args, common.ToolDefaultsFromContext(ctx))
+	args = applyToolDefaults(ctx, tool, args, common.ToolDefaultsFromContext(ctx))
 
 	// Universal agent-only enforcement. Without an acting-agent role
 	// on ctx, the call is by definition not from an agent and the

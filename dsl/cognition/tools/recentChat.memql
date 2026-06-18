@@ -26,12 +26,13 @@
 //   the frontend renders a click-to-jump chip in the chat panel.
 
 @enabled
+@mcp
 @handler(type="function", name="recentChat")
 @executionTime("fast")
 @description("Read recent space-chat content + space context. Read-only. The assistant's window into the space's utterance stream.")
 tool recentChat {
-  spaceId    string  @required @autoInjected @description("v1:cognition:space.id of the active space. Server-stamped from the agent runtime; the central validator drops any LLM-supplied value before dispatch (memql#107).")
-  agentId    string  @autoInjected @description("Calling agent id. Server-stamped from the agent runtime; the central validator drops any LLM-supplied value before dispatch (memql#107).")
+  spaceId    string  @required @autoInjected @description("v1:cognition:space.id of the active space. In agent runtime: server-stamped (caller-supplied value dropped). Over MCP: caller MUST supply this -- no agent runtime is present to stamp it (memql#1684).")
+  agentId    string  @autoInjected @description("Calling agent id. Server-stamped from the agent runtime. Over MCP: may be omitted; the handler works without it.")
   operation  string  @required @enum("readRecent", "readByKeyword", "readByTime", "getSpaceContext", "listParticipants") @description("Which read operation to dispatch. readRecent and readByKeyword are the most common; getSpaceContext and listParticipants are useful when the assistant needs to reason about who is here / what the space is for.")
   count      int     @description("readRecent: how many recent utterances (default 20, max 100).")
   keyword    string  @description("readByKeyword: substring (case-insensitive) to match against utterance text.")
