@@ -18,7 +18,7 @@ tool notesList {
 }
 
 @enabled
-@handler(type="query", query="mutationCreateNote({noteId: \"$args.noteId\", title: \"$args.title\", body: \"$args.body\", tags: $args.tags})")
+@handler(type="function", name="mutationCreateNote")
 @executionTime("fast")
 @description("Create a note for the user. Owned: the new note is owned by the caller (server-stamped). Pass a fresh unique noteId. title and tags are optional; body is required.")
 @mcp

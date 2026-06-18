@@ -18,7 +18,7 @@ tool todosList {
 }
 
 @enabled
-@handler(type="query", query="mutationCreateTodo({todoId: \"$args.todoId\", title: \"$args.title\", dueAt: \"$args.dueAt\", priority: \"$args.priority\", sourceResponsibilityId: \"$args.sourceResponsibilityId\"})")
+@handler(type="function", name="mutationCreateTodo")
 @executionTime("fast")
 @description("Create a to-do for the user. Owned: the new to-do is owned by the caller (server-stamped). Pass a fresh unique todoId. dueAt (RFC3339), priority (low/medium/high), and sourceResponsibilityId are optional.")
 @mcp

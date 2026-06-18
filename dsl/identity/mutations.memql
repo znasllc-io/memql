@@ -678,8 +678,6 @@ mutation delegation mutationCreateDelegation {
     args.expiresAt
     args.note
     active: true
-    revokedAt: nil
-    revokedBySubject: nil
   }
 }
 
@@ -1648,7 +1646,7 @@ mutation user mutationSetUserActiveSpace {
 //
 
 @enabled
-@description("Update the singleton cluster-settings row from the admin UI.")
+@description("Update the singleton cluster-settings row from the admin UI. Read-merges the existing row (update()): only the fields the caller actually passes change; every omitted field -- internalDomains, brand*, TTLs, bootstrap*, etc. -- inherits from the persisted row instead of being wiped to its empty default (memql#1686). registrationMode + internalDefaultRole stay @required because the admin form always submits them.")
 mutation clusterSettings mutationUpdateClusterSettings {
   args {
     id                         string  @required
@@ -1678,34 +1676,33 @@ mutation clusterSettings mutationUpdateClusterSettings {
     refreshCookieSameSite      string
     authoredAutomationsEnabled bool
   }
-  insert {
-    args.id
-    clusterDomain: coalesce(args.clusterDomain, "")
-    brandName: coalesce(args.brandName, "")
-    brandPrimaryColor: coalesce(args.brandPrimaryColor, "")
-    brandLogoDataURI: coalesce(args.brandLogoDataURI, "")
-    brandIconDataURI: coalesce(args.brandIconDataURI, "")
+  update {
+    id: args.id
+    args.clusterDomain
+    args.brandName
+    args.brandPrimaryColor
+    args.brandLogoDataURI
+    args.brandIconDataURI
     args.registrationMode
-    registrationDomains: coalesce(args.registrationDomains, "")
-    internalDomains: coalesce(args.internalDomains, "")
+    args.registrationDomains
+    args.internalDomains
     args.internalDefaultRole
-    registeredClientsJSON: coalesce(args.registeredClientsJSON, "")
-    accessRequestNotifyEmails: coalesce(args.accessRequestNotifyEmails, "")
-    accessRequestNotifyThrottleMins: 5
-    bootstrapEmail: coalesce(args.bootstrapEmail, "")
-    bootstrapFirstName: coalesce(args.bootstrapFirstName, "")
-    bootstrapLastName: coalesce(args.bootstrapLastName, "")
-    bootstrapPhone: coalesce(args.bootstrapPhone, "")
-    bootstrapPrimaryRole: coalesce(args.bootstrapPrimaryRole, "")
-    bootstrapGender: coalesce(args.bootstrapGender, "")
-    bootstrapBirthdate: coalesce(args.bootstrapBirthdate, "")
-    bootstrappedAt: coalesce(args.bootstrappedAt, "")
-    accessTokenTTLSeconds: coalesce(args.accessTokenTTLSeconds, 0)
-    refreshTokenTTLSeconds: coalesce(args.refreshTokenTTLSeconds, 0)
-    magicLinkTTLSeconds: coalesce(args.magicLinkTTLSeconds, 0)
-    invitationTTLDays: coalesce(args.invitationTTLDays, 0)
-    refreshCookieSameSite: coalesce(args.refreshCookieSameSite, "")
-    authoredAutomationsEnabled: coalesce(args.authoredAutomationsEnabled, true)
+    args.registeredClientsJSON
+    args.accessRequestNotifyEmails
+    args.bootstrapEmail
+    args.bootstrapFirstName
+    args.bootstrapLastName
+    args.bootstrapPhone
+    args.bootstrapPrimaryRole
+    args.bootstrapGender
+    args.bootstrapBirthdate
+    args.bootstrappedAt
+    args.accessTokenTTLSeconds
+    args.refreshTokenTTLSeconds
+    args.magicLinkTTLSeconds
+    args.invitationTTLDays
+    args.refreshCookieSameSite
+    args.authoredAutomationsEnabled
   }
 }
 
@@ -1718,13 +1715,13 @@ mutation clusterSettings mutationUpdateClusterSettings {
 // The caller is responsible for passing the full updated payload.
 
 @enabled
-@description("Insert a new version of an identity record with the provided payload.")
+@description("Update an identity record. Read-merges the existing row (update()): only the fields in `payload` change; every omitted field (identityType discriminator, credentials, label, active, usableByAgents) inherits from the persisted row instead of being wiped (memql#1628 class). The row must already exist (use mutationCreateIdentity to create).")
 mutation identity mutationUpdateIdentity {
   args {
     identityId  string  @required
     payload     object  @required
   }
-  insert {
+  update {
     id: args.identityId
     args.payload
   }
