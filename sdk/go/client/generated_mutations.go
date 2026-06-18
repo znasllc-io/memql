@@ -503,7 +503,7 @@ func MutationAssignResponsibilityBuild(args MutationAssignResponsibilityArgs) st
 // Bound concept: document.
 type MutationAttachDocumentToDomainArgs struct {
 	DocumentId      string
-	AttachedDomains map[string]any
+	AttachedDomains []any
 }
 
 // MutationAttachDocumentToDomain calls the engine mutation mutationAttachDocumentToDomain.
@@ -2247,7 +2247,7 @@ func MutationCreateAvatarPersonaBuild(args MutationCreateAvatarPersonaArgs) stri
 	return b.String()
 }
 
-// MutationCreateCalendarEvent -- Create a native calendar event owned by the authenticated caller. ownerUserId is stamped from actor.userId (caller-scoped write); createdBy is engine-stamped from the auth context. source defaults to 'native'. The reactive harness's reminder triggers pick the row up via queryUpcomingEvents. Pass `eventId` to control the id (idempotent re-create), else the engine assigns one.
+// MutationCreateCalendarEvent -- Create a native calendar event owned by the authenticated caller. ownerUserId is stamped from actor.userId (caller-scoped write); createdAt + createdBy are engine-stamped row intrinsics (NOT payload fields -- declaring them is rejected as reserved, memql#1673); source defaults to 'native'. The reactive harness's reminder triggers pick the row up via queryUpcomingEvents. Pass `eventId` to control the id (idempotent re-create), else the engine assigns one.
 //
 // Bound concept: calendarEvent.
 type MutationCreateCalendarEventArgs struct {
@@ -6446,16 +6446,11 @@ func MutationDeleteCalendarEventBuild(args MutationDeleteCalendarEventArgs) stri
 	return b.String()
 }
 
-// MutationDeleteKnowledgeDomain -- Soft-delete a knowledge domain by flipping active=false. Agents that reference the domain keep working; the domain just stops appearing in the builder picker.
+// MutationDeleteKnowledgeDomain -- Soft-delete a knowledge domain by flipping active=false. Read-merges the existing row (update()): only `active` changes; name/description/category/relevantForRoles/requiredByToolSlugs/refreshCadenceDays/source/scope/tier/predefined and every other field inherit from the persisted row instead of being wiped to their create-time defaults (memql#1628 -- the old full-replacement insert nulled them). Agents that reference the domain keep working; it just stops appearing in the builder picker.
 //
 // Bound concept: knowledgeDomain.
 type MutationDeleteKnowledgeDomainArgs struct {
-	DomainId            string
-	Name                string
-	Description         string
-	Category            string
-	RelevantForRoles    []any
-	RequiredByToolSlugs []any
+	DomainId string
 }
 
 // MutationDeleteKnowledgeDomain calls the engine mutation mutationDeleteKnowledgeDomain.
@@ -6469,39 +6464,6 @@ func MutationDeleteKnowledgeDomainBuild(args MutationDeleteKnowledgeDomainArgs) 
 	b.WriteString("mutationDeleteKnowledgeDomain({")
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	if b.Len() > 31 {
-		b.WriteString(", ")
-	}
-	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if args.Description != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("description: ")
-		b.WriteString(fmt.Sprintf("%q", args.Description))
-	}
-	if args.Category != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("category: ")
-		b.WriteString(fmt.Sprintf("%q", args.Category))
-	}
-	if args.RelevantForRoles != nil {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("relevantForRoles: ")
-		b.WriteString(renderMemQLValue(args.RelevantForRoles))
-	}
-	if args.RequiredByToolSlugs != nil {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("requiredByToolSlugs: ")
-		b.WriteString(renderMemQLValue(args.RequiredByToolSlugs))
-	}
 	b.WriteString("})")
 	return b.String()
 }
@@ -10768,7 +10730,7 @@ func MutationToggleComputerUseEnabledBuild(args MutationToggleComputerUseEnabled
 	return b.String()
 }
 
-// MutationTouchSession -- Insert a new version of an auth-session record (typically used as a heartbeat to bump lastActivityAt).
+// MutationTouchSession -- Update an auth-session record (typically a heartbeat to bump lastActivityAt). Read-merges the existing row (update()): only the fields in `payload` change; the @required discriminators (subject, tokenHash, source, expiresAt) and every other omitted field inherit from the persisted row instead of having to be re-supplied (memql#1628). The session row must already exist.
 //
 // Bound concept: authSession.
 type MutationTouchSessionArgs struct {
@@ -10930,7 +10892,7 @@ func MutationUpdateCalendarEventBuild(args MutationUpdateCalendarEventArgs) stri
 	return b.String()
 }
 
-// MutationUpdateClusterSettings -- Update the singleton cluster-settings row from the admin UI.
+// MutationUpdateClusterSettings -- Update the singleton cluster-settings row from the admin UI. Read-merges the existing row (update()): only the fields the caller actually passes change; every omitted field -- internalDomains, brand*, TTLs, bootstrap*, etc. -- inherits from the persisted row instead of being wiped to its empty default (memql#1686). registrationMode + internalDefaultRole stay @required because the admin form always submits them.
 //
 // Bound concept: clusterSettings.
 type MutationUpdateClusterSettingsArgs struct {
@@ -11365,7 +11327,7 @@ func MutationUpdateGuideBuild(args MutationUpdateGuideArgs) string {
 	return b.String()
 }
 
-// MutationUpdateIdentity -- Insert a new version of an identity record with the provided payload.
+// MutationUpdateIdentity -- Update an identity record. Read-merges the existing row (update()): only the fields in `payload` change; every omitted field (identityType discriminator, credentials, label, active, usableByAgents) inherits from the persisted row instead of being wiped (memql#1628 class). The row must already exist (use mutationCreateIdentity to create).
 //
 // Bound concept: identity.
 type MutationUpdateIdentityArgs struct {
@@ -11588,7 +11550,7 @@ func MutationUpdateParticipantPresenceBuild(args MutationUpdateParticipantPresen
 	return b.String()
 }
 
-// MutationUpdateParticipantStatus -- Insert a new version of a participant record (typically used to update status).
+// MutationUpdateParticipantStatus -- Update a participant record (typically status). Read-merges the existing row (update()): only the fields in `payload` change; every omitted field inherits from the persisted row instead of being wiped (memql#1628 class). The participant row must already exist (created on join).
 //
 // Bound concept: participant.
 type MutationUpdateParticipantStatusArgs struct {
@@ -11999,7 +11961,7 @@ func MutationUpdateSceneBuild(args MutationUpdateSceneArgs) string {
 	return b.String()
 }
 
-// MutationUpdateSessionDevices -- Insert a new version of a session record (typically used to update device state).
+// MutationUpdateSessionDevices -- Update a session record's device state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, spaceId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.
 //
 // Bound concept: session.
 type MutationUpdateSessionDevicesArgs struct {
@@ -12027,7 +11989,7 @@ func MutationUpdateSessionDevicesBuild(args MutationUpdateSessionDevicesArgs) st
 	return b.String()
 }
 
-// MutationUpdateSessionStreams -- Insert a new version of a session record (typically used to update streams).
+// MutationUpdateSessionStreams -- Update a session record's stream state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, spaceId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.
 //
 // Bound concept: session.
 type MutationUpdateSessionStreamsArgs struct {
