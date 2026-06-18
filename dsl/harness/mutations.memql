@@ -4,8 +4,9 @@
 // create and advance the harness working state (epic #590, #582).
 //
 // Plan lifecycle:   mutationCreateHarnessPlan
-// Step lifecycle:   mutationAddHarnessStep, mutationStartHarnessStep,
-//                   mutationCompleteHarnessStep, mutationFailHarnessStep
+// Step lifecycle:   mutationAddHarnessStep, mutationReadyHarnessStep,
+//                   mutationStartHarnessStep, mutationCompleteHarnessStep,
+//                   mutationFailHarnessStep
 // Observation:      mutationRecordHarnessObservation
 //
 // State-machine enforcement: the step status transitions (pending ->
@@ -80,6 +81,31 @@ mutation step mutationAddHarnessStep {
     args.input
     attempt: 0
     provenanceMutation: "mutationAddHarnessStep"
+  }
+}
+
+// mutationReadyHarnessStep
+// =========
+// Promote a step to ready: pending -> ready (dependsOn satisfied) or
+// blocked -> ready (blocker finished). Without this write the step
+// state machine is unreachable past 'pending' -- mutationAddHarnessStep
+// lands the step in 'pending' and the engine guard only admits
+// 'ready' -> 'running', so start/complete/fail could never fire
+// (#1635). update() read-merges the prior row, so the owned-tier
+// fields (ownerUserId, planId, title, ...) are preserved. The engine
+// step guard validates the transition and rejects an illegal source
+// status (e.g. done -> ready). The failed -> ready retry path (which
+// must also bump attempt) stays a separate write.
+@enabled
+@description("Promote a step to ready (pending -> ready when dependsOn is satisfied, or blocked -> ready when the blocker finishes). Read-merges the prior row so owned-tier fields are preserved. The engine step guard validates the transition and rejects an illegal source status. Without this mutation the state machine is stuck at 'pending' (#1635).")
+mutation step mutationReadyHarnessStep {
+  args {
+    stepId  string  @required
+  }
+  update {
+    id: args.stepId
+    status: "ready"
+    provenanceMutation: "mutationReadyHarnessStep"
   }
 }
 
