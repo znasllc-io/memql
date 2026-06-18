@@ -1,7 +1,7 @@
 # Staging overlay -> 0.9.61, with identity 0.9.62 (OAuth consent) +
-# mcp 0.9.64 (#1594 tools/call logging + execute timeout + dump-on-timeout;
-# the diagnostic prereq for the P0 #1595). Prior: mcp 0.9.63 (branded connector
-# icon #1590). OAuth consent hotfix:
+# mcp 0.9.65 (#1595 actor.userId envelope so queryCurrentUser resolves the
+# caller + #1602 unknown-tool JSON-RPC error). Prior: mcp 0.9.64 (#1594
+# logging + execute timeout + dump-on-timeout). OAuth consent hotfix:
 # DCR magic-link flow #1587 + app name+logo #1588). identity-only rebuild on the
 # build server; all other images stay at their 0.9.61 digests. Engine/carrier/mcp images rebuilt from main on the
 # GitHub BUILD SERVER (OIDC->ACR; the first release through that path) carrying
@@ -47,10 +47,11 @@ images:
     digest: sha256:8b51d2c0961e469f4e2cef855eed0c0645ef2cc5eed1b75e326f7ab3f39aa6b4
   # memql-mcp (epic memql#1550): remote MCP node, engine-built on the GitHub
   # build server (#1581 wired it into build-engine-images + the release tooling).
-  # 0.9.64: rebuilt from main carrying #1594 (tools/call logging + execute
-  # timeout + goroutine-dump-on-timeout) -- the diagnostic for the P0 #1595.
+  # 0.9.65: rebuilt from main carrying #1595 (stamp actor.userId/role on every
+  # engine-backed call so queryCurrentUser resolves the caller) + #1602
+  # (unknown tool -> JSON-RPC error). Prior 0.9.64 carried #1594.
   - name: acrmemql.azurecr.io/memql-mcp
-    digest: sha256:7f89cdfe7a8f5be393b39a6dd0494a47989c8c2ac03336e7121219f957303b05
+    digest: sha256:6fd2df12bc39190c04b36992f9e7307d33a8649b767d2174b6e95f10070e4c2d
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:10036ae29f6374cbb1b6a3f9456115da843f3c52f9c4012a2cfcea927f252501
   - name: livekit/livekit-server
