@@ -138,6 +138,24 @@ query user queryActiveUsers {
   shape   userFull
 }
 
+// querySearchUsers backs the searchUsers MCP tool (#1682). The tool
+// declares an optional `active` filter; before this query the handler
+// was a bare `concept==v1:identity:user` scan that silently ignored
+// `active` (and `limit`) and returned every user. The `active` predicate
+// is arg-conditional: omit it to list all users, pass true/false to gate
+// on liveness. The `limit` cap is applied by the tool handler's outer
+// paginate() wrapper, not here, since the struct-query paginate directive
+// only accepts a literal.
+@enabled
+@description("Search users, optionally gated by active status. Omit `active` to list every user; pass true to return only active users or false for only deactivated ones. Backs the searchUsers tool.")
+query user querySearchUsers {
+  args {
+    active  boolean
+  }
+  filter  when(args.active) { payload.active==args.active }
+  shape   userFull
+}
+
 // ---- queries/v1/identity/auditEventsByActor.memql ----
 
 // auditEventsByActor - Audit events where the user was the actor

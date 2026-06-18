@@ -20,7 +20,7 @@ tool describeFunction {
 // Search for users in the system.
 
 @enabled
-@handler(type="query", query="concept==v1:identity:user")
+@handler(type="query", query="paginate(querySearchUsers({active: $args.active}), $args.limit)")
 @executionTime("fast")
 @description("Search for users")
 @mcp
