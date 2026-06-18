@@ -688,12 +688,22 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		}, nil
 
 	case *ConditionalFilterExpression:
-		// Process conditional filter: check if the arg exists
+		// Process conditional filter: check if the arg is present AND
+		// non-nil. A present-but-nil value is treated as absent: tool
+		// handlers materialize an omitted optional arg as an explicit
+		// `null` (e.g. todosList's `queryTodos({done: $args.done})`
+		// collapses the unfilled placeholder to `null`), so a plain
+		// `exists` check would let nil leak into the guarded predicate
+		// (`payload.done == args.done`) and fail the query with
+		// "unsupported literal type <nil>". Dropping on nil keeps the
+		// `when(args.x) { ... }` guard's "absent -> drop the predicate"
+		// semantics intact for that path. #1631.
 		if args != nil {
-			_, exists := getNestedValue(args, node.ArgPath)
-			if !exists {
-				// Argument not provided - skip this filter entirely
-				// Return nil to indicate this node should be removed
+			value, exists := getNestedValue(args, node.ArgPath)
+			if !exists || value == nil {
+				// Argument not provided (or explicitly nil) - skip this
+				// filter entirely. Return nil to indicate this node
+				// should be removed.
 				return nil, nil
 			}
 		}
