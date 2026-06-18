@@ -83,15 +83,31 @@ func (r *mcpAutomationRunner) RunAutomation(ctx context.Context, owner, name str
 		return nil, fmt.Errorf("automation loader is not wired")
 	}
 
+	// Resolve the requested name to a runnable automation through the SAME
+	// canonical resolver on BOTH the dry-run and live paths (memql#1663), so
+	// they cannot diverge. LoadByName accepts the automation name or a wrapped
+	// logic construct's name (full `logicXxx` or bare form) and returns a clear
+	// "not a runnable entry point" error for an internal-only logic construct.
+	auto, err := r.loader.LoadByName(name)
+	if err != nil {
+		return nil, err
+	}
+	if auto == nil {
+		return nil, fmt.Errorf("automation %q not found", name)
+	}
+
 	if dryRun {
-		src, ok := memql.DSLConstructSource(r.logger, "automation", name)
+		// Fetch the resolved automation's source by its CANONICAL name -- the
+		// dry-run sandbox re-parses the source, and resolving via LoadByName
+		// first guarantees the same construct the live path would execute.
+		src, ok := memql.DSLConstructSource(r.logger, "automation", auto.Name)
 		if !ok {
-			return nil, fmt.Errorf("automation %q not found in the DSL tree (dry-run needs its source)", name)
+			return nil, fmt.Errorf("automation %q resolved but its source was not found in the DSL tree (dry-run needs its source)", auto.Name)
 		}
 		req := memql.DryRunRequest{
-			AutomationName:   name,
+			AutomationName:   auto.Name,
 			AutomationSource: src,
-			TriggerEvent:     &memql.DryRunTriggerEvent{Topic: "mcp.run." + name, Kind: "manual", Payload: input},
+			TriggerEvent:     &memql.DryRunTriggerEvent{Topic: "mcp.run." + auto.Name, Kind: "manual", Payload: input},
 			Mode:             memql.DryRunModeIsolated,
 		}
 		report, err := memql.RunBundleDryRun(ctx, r.engine, req)
@@ -101,15 +117,8 @@ func (r *mcpAutomationRunner) RunAutomation(ctx context.Context, owner, name str
 		return map[string]any{"dryRun": true, "ok": report.OK, "report": report}, nil
 	}
 
-	auto, err := r.loader.LoadByName(name)
-	if err != nil {
-		return nil, err
-	}
-	if auto == nil {
-		return nil, fmt.Errorf("automation %q not found", name)
-	}
 	ev := &events.Event{
-		Topic:     "mcp.run." + name,
+		Topic:     "mcp.run." + auto.Name,
 		Kind:      events.KindNodeCreated,
 		Payload:   input,
 		Timestamp: time.Now().UTC(),
