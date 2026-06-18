@@ -1,16 +1,18 @@
-# Staging overlay -> 0.9.61, with identity 0.9.62 (OAuth consent) +
-# mcp 0.9.65 (#1595 actor.userId envelope so queryCurrentUser resolves the
-# caller + #1602 unknown-tool JSON-RPC error). Prior: mcp 0.9.64 (#1594
-# logging + execute timeout + dump-on-timeout). OAuth consent hotfix:
-# DCR magic-link flow #1587 + app name+logo #1588). identity-only rebuild on the
-# build server; all other images stay at their 0.9.61 digests. Engine/carrier/mcp images rebuilt from main on the
-# GitHub BUILD SERVER (OIDC->ACR; the first release through that path) carrying
-# the MCP remote transport + node (#1550), OAuth 2.1 for custom connectors
-# (#1556: PKCE/discovery/authorize/DCR), the three MCP follow-ups (#1557/#1558/
-# #1559), and the webhook SSRF default-deny (#1561). NEW: the memql-mcp node now
-# ships a real digest (placeholder retired). copresent SPA digest unchanged from
-# 0.9.60 (frontend source didn't change). livekit pin (#1043) + NODE_IP patch
-# preserved.
+# Staging overlay -> 0.9.66: MCP connector hardening wave 2 (epic #1609).
+# identity + mcp re-pinned to 0.9.66 (engine-built on the GitHub BUILD SERVER,
+# OIDC->ACR):
+#   - memql-identity #1607: the OAuth token endpoint now implements the
+#     refresh_token grant, so claude.ai can silently refresh its 15-min access
+#     token instead of dropping the connector session at expiry.
+#   - memql-mcp #1606: under-specified object/array tool-arg types no longer
+#     reflect to over-strict JSON schema (scalar arrays + free-form
+#     partial-update payloads are callable again) + #1605: generatedOutput
+#     artifact indexing stops failing on null producedBy* refs.
+# All other images stay at their 0.9.63 digests, so engineVersion +
+# builtAgainstEngine remain 0.9.63 (carrier coherence). Prior: mcp 0.9.65 (#1595
+# actor.userId envelope + #1602 unknown-tool JSON-RPC error); identity 0.9.62
+# (OAuth consent). copresent SPA digest unchanged. livekit pin (#1043) + NODE_IP
+# patch preserved.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -32,7 +34,7 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:41e62c23d82e25ed9c7d8c9d58f57596341f7ce5d4dda7b1b0f617fb1bcd84c3
+    digest: sha256:ddc44aa638c801a8b6f4f90e67aa9c8b55cdb8f2ef622c261dff6e2ca7beb21b
   - name: acrmemql.azurecr.io/memql-bff-copresent
     digest: sha256:da86b7d03fba6555aa2ddc95578efa19611af64fa9b92a9ffad6a2b238a30375
   - name: acrmemql.azurecr.io/memql-cognition
@@ -47,11 +49,12 @@ images:
     digest: sha256:8b51d2c0961e469f4e2cef855eed0c0645ef2cc5eed1b75e326f7ab3f39aa6b4
   # memql-mcp (epic memql#1550): remote MCP node, engine-built on the GitHub
   # build server (#1581 wired it into build-engine-images + the release tooling).
-  # 0.9.65: rebuilt from main carrying #1595 (stamp actor.userId/role on every
-  # engine-backed call so queryCurrentUser resolves the caller) + #1602
-  # (unknown tool -> JSON-RPC error). Prior 0.9.64 carried #1594.
+  # 0.9.66: rebuilt from main carrying #1606 (object/array tool-arg schema no
+  # longer over-strict -> scalar arrays + free-form partial-update payloads
+  # callable) + #1605 (generatedOutput artifact indexing coalesces null
+  # producedBy* refs). Prior 0.9.65 carried #1595 + #1602.
   - name: acrmemql.azurecr.io/memql-mcp
-    digest: sha256:6fd2df12bc39190c04b36992f9e7307d33a8649b767d2174b6e95f10070e4c2d
+    digest: sha256:37d5b92550fdafe631ea5b5c4f5ff5230eef4c677b9058fa22df4f071b408885
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:10036ae29f6374cbb1b6a3f9456115da843f3c52f9c4012a2cfcea927f252501
   - name: livekit/livekit-server
