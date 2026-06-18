@@ -1,20 +1,17 @@
-# Staging overlay -> 0.9.68: FULL-STACK release of the MCP connector run-2 QA
-# wave (epics #1627 + #1609). All eight engine + carrier images re-pinned to
-# 0.9.68, built on the GitHub BUILD SERVER (OIDC->ACR): engine (identity/voice/
-# mcp) from main; carrier (bff/cognition/agent/planner/workbench) rebuilt
-# against engine main -> engineVersion + builtAgainstEngine bumped 0.9.67 ->
-# 0.9.68. copresent SPA source unchanged (digest identical, re-tagged 0.9.68 for
-# coherence). This wave fixes the run-2 connector findings across both lanes:
-#   Lane A (engine): #1628 update/revoke/delete read-merge, #1629 literal
-#     now/null date-time + nullable optionals, #1630 arg-vs-concept type
-#     contradictions, #1631 nil-filter literal, #1633 dropped/unknown args.
-#   Lane B (DSL): #1625 searchUsers concept, #1626 indexer null fields, #1632
-#     safety concept bindings, #1634 task read-consistency, #1635 harness
-#     pending->ready, #1636-1640 space/participant/session/presence,
-#     #1641 knowledgeBridge shape, #1642/#1643a cluster node, #1644 worker
-#     soft-delete, #1645 assignResponsibility scope, #1646 describeFunction.
-# Follow-ups #1659 (actor.isClusterOwner) + #1663 (run_automation resolver)
-# ship in a later cut. livekit pin (#1043) + NODE_IP patch preserved.
+# Staging overlay -> 0.9.69: FULL-STACK follow-up cut for the two Lane A engine
+# handoffs from the run-2 QA wave (epic #1627). All eight engine + carrier images
+# re-pinned to 0.9.69, built on the GitHub BUILD SERVER (OIDC->ACR): engine
+# (identity/voice/mcp) from main; carrier (bff/cognition/agent/planner/workbench)
+# rebuilt against engine main -> engineVersion + builtAgainstEngine bumped
+# 0.9.68 -> 0.9.69. copresent SPA source unchanged (digest identical, re-tagged
+# 0.9.69 for coherence). This cut carries the two follow-ups that merged just
+# after the 0.9.68 images were built:
+#   #1659 actor.isClusterOwner resolved to a constant before the ctx-less
+#     post-filter (querySystemActiveAuthoringBundles via the connector).
+#   #1663 deterministic run_automation name resolution + dry-run source lookup
+#     (DSLConstructSource kind no longer hardcoded; Loader.LoadByName canonical).
+# (0.9.68 shipped the rest of the run-2 wave: Lane A #1628-#1633 + Lane B
+# #1625-#1646.) livekit pin (#1043) + NODE_IP patch preserved.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -36,19 +33,19 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:110a647e380e56f21e0372f506b0adb19da6de53686cf2cd7b7b9218d4cdd0e5
+    digest: sha256:090c61a395880ebab82f9020c2d4ea6edfc7484558c43bbf5261b4a54d3e8d43
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:305bd863b0e3e114f63abbc2090874ca54fa62f01bfc1e9e89aa8859421a52dd
+    digest: sha256:cb4d39131567f2be69ae545e77c0795b1e49f582233aa3ddabae773827306511
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:cbd5aa0ef6f2f90d6b84fabcb4f6af205651f4de69ea5fad95a166710a889e37
+    digest: sha256:e624283cebff1f24d195ae55afe43a0a225424fc4c19806509b5a9646720207b
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:663226e86196d765251058ae19552717467447f29e0458399018b0b9c441497b
+    digest: sha256:ad1d5e602afc7dae0ba81095273d45411956ddb66be9425b5ecf64cdbfa43ace
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:6df5e2e12aad7ea3d1b591bf96a9206400b6eb9b1a5953c136adeb32de92c9aa
+    digest: sha256:342cb0174f1b0b31f33a0ebc3ab2cd463e85ece604ee407d907cfd36164f0adb
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:a28d170808e017d74cb060548e68e10d6c5c8118fceb730681392d6f45eae6a6
+    digest: sha256:0a540b638879cafe42fa0396faf0438573c586ed3ea02ce2a8067c0b2f48cf46
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:b7db71e718346a127dfe06b3ea19a6861ee9eaee18a088149707e89954c3b6c8
+    digest: sha256:0485ab0080b92c63db3b44c033b2ffb723327f7f20419fcc1d716ef528d3490e
   # memql-mcp (epic memql#1550): remote MCP node, engine-built on the GitHub
   # build server (#1581 wired it into build-engine-images + the release tooling).
   # 0.9.68: rebuilt from main carrying the full run-2 QA wave (Lane A engine
@@ -56,7 +53,7 @@ images:
   # now includes describeFunction (#1646); searchUsers points at v1:identity:user
   # (#1625).
   - name: acrmemql.azurecr.io/memql-mcp
-    digest: sha256:ae45fd4d5dd17866dc455197802b83448a09a72f6bb39ad4a29d154d17545768
+    digest: sha256:e9f4f1fb9d209edf101163f1171d2fb517d60d61495c692b98e9800231aa1f44
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:75e566e71e30d0b35c6c6708dda34a37ab9f2a74ec575f18c0787beffc949bf2
   - name: livekit/livekit-server
