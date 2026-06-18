@@ -3633,7 +3633,7 @@ func QuerySystemActiveAuthoringBundlesBuild(args QuerySystemActiveAuthoringBundl
 
 // QueryTaskStateById -- Latest persisted state for a Task (planner reads this on resume).
 //
-// Bound concept: plan.
+// Bound concept: taskState.
 type QueryTaskStateByIdArgs struct {
 	TaskId string
 }
@@ -3655,7 +3655,7 @@ func QueryTaskStateByIdBuild(args QueryTaskStateByIdArgs) string {
 
 // QueryTasksForPlan -- All Tasks for a Plan, in seq order.
 //
-// Bound concept: taskState.
+// Bound concept: task.
 type QueryTasksForPlanArgs struct {
 	PlanId string
 }
