@@ -1,8 +1,10 @@
 package memql
 
 import (
+	"encoding/json"
 	"testing"
 
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/stretchr/testify/require"
 )
 
@@ -559,6 +561,209 @@ func TestResolveComparisonForExecution(t *testing.T) {
 			}
 			require.NotNil(t, result)
 			require.Equal(t, tc.expectedValue, result.Value)
+		})
+	}
+}
+
+// TestNodeMatchesComparison_ProvenanceName is the #1670 regression test.
+// The per-user seed dedup query contains a `provenance.name=="<seedName>"`
+// term. Before the fix, nodeMatchesComparison recognised `provenance` as
+// an intrinsic field (kind=intrinsicFieldProvenance) but had no case for it
+// in the switch -- falling through to `default` and returning
+// `field "provenance.name" is not supported in queries`. The combined-filter
+// path compiled the SQL successfully (provenance->>'name' = ?) and the DB
+// scan found the right row, but executeCombinedFilterQuery re-evaluated the
+// full expression tree in-process on every candidate, hitting the same
+// missing case and propagating the error, so lookupOrMintPerUserId always
+// fell back to the deterministic id and logged 42× WARN per boot.
+func TestNodeMatchesComparison_ProvenanceName(t *testing.T) {
+	makeNode := func(provJSON string) memorynodes.MemoryNode {
+		return memorynodes.MemoryNode{
+			ID:         "v1:agents:agent:test-id",
+			Concept:    "v1:agents:agent",
+			Provenance: json.RawMessage(provJSON),
+		}
+	}
+
+	cases := []struct {
+		name      string
+		nodeJSON  string
+		leaf      string
+		op        ComparisonOperator
+		value     string
+		wantMatch bool
+		wantErr   bool
+	}{
+		{
+			name:      "provenance.name matches seed name (the #1670 dedup case)",
+			nodeJSON:  `{"kind":"seed","name":"trainerAgent"}`,
+			leaf:      "name",
+			op:        OpEq,
+			value:     "trainerAgent",
+			wantMatch: true,
+		},
+		{
+			name:      "provenance.name does not match different seed",
+			nodeJSON:  `{"kind":"seed","name":"assistant"}`,
+			leaf:      "name",
+			op:        OpEq,
+			value:     "trainerAgent",
+			wantMatch: false,
+		},
+		{
+			name:      "provenance.name != match (ne operator, different name)",
+			nodeJSON:  `{"kind":"seed","name":"assistant"}`,
+			leaf:      "name",
+			op:        OpNe,
+			value:     "trainerAgent",
+			wantMatch: true,
+		},
+		{
+			name:      "provenance.kind matches",
+			nodeJSON:  `{"kind":"seed","name":"plannerAgent"}`,
+			leaf:      "kind",
+			op:        OpEq,
+			value:     "seed",
+			wantMatch: true,
+		},
+		{
+			name:      "provenance.kind does not match",
+			nodeJSON:  `{"kind":"mutation","name":"mutationCreateAgent"}`,
+			leaf:      "kind",
+			op:        OpEq,
+			value:     "seed",
+			wantMatch: false,
+		},
+		{
+			name:      "provenance.trigger matches",
+			nodeJSON:  `{"kind":"automation","name":"autoProvision","trigger":"graph.node.created.v1:identity:user"}`,
+			leaf:      "trigger",
+			op:        OpEq,
+			value:     "graph.node.created.v1:identity:user",
+			wantMatch: true,
+		},
+		{
+			name:      "provenance.via matches",
+			nodeJSON:  `{"kind":"seed","name":"assistant","via":"mutationCreateAgent"}`,
+			leaf:      "via",
+			op:        OpEq,
+			value:     "mutationCreateAgent",
+			wantMatch: true,
+		},
+		{
+			name:      "empty provenance JSON returns no-match (not error)",
+			nodeJSON:  ``,
+			leaf:      "name",
+			op:        OpEq,
+			value:     "trainerAgent",
+			wantMatch: false,
+		},
+		{
+			name:      "provenance leaf absent returns no-match",
+			nodeJSON:  `{"kind":"seed","name":"assistant"}`,
+			leaf:      "trigger",
+			op:        OpEq,
+			value:     "something",
+			wantMatch: false,
+		},
+		{
+			name:    "unsupported leaf returns error",
+			nodeJSON: `{"kind":"seed","name":"assistant"}`,
+			leaf:    "unknown",
+			op:      OpEq,
+			value:   "x",
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			node := makeNode(tc.nodeJSON)
+			cmp := &ComparisonExpression{
+				Field:    FieldReference{Parts: []string{"provenance", tc.leaf}, Raw: "provenance." + tc.leaf},
+				Operator: tc.op,
+				Value:    tc.value,
+			}
+			match, err := nodeMatchesComparison(node, cmp, map[string]map[string]any{})
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.wantMatch, match)
+		})
+	}
+}
+
+// TestProvenanceLeafFromJSON pins the helper that extracts a single leaf
+// from a raw provenance JSON blob.
+func TestProvenanceLeafFromJSON(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		leaf string
+		want string
+	}{
+		{"present leaf", `{"kind":"seed","name":"assistant"}`, "name", "assistant"},
+		{"present kind", `{"kind":"mutation","name":"mutationCreateAgent"}`, "kind", "mutation"},
+		{"present via", `{"kind":"seed","name":"assistant","via":"mutationCreateAgent"}`, "via", "mutationCreateAgent"},
+		{"absent leaf returns empty", `{"kind":"seed","name":"assistant"}`, "trigger", ""},
+		{"empty JSON returns empty", ``, "name", ""},
+		{"malformed JSON returns empty", `{bad}`, "name", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := provenanceLeafFromJSON(json.RawMessage(tc.raw), tc.leaf)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestCompileProvenanceComparison_SQLPath pins the SQL compile side of
+// provenance filtering so both the SQL path and the post-filter path (above)
+// stay in sync.
+func TestCompileProvenanceComparison_SQLPath(t *testing.T) {
+	cases := []struct {
+		name    string
+		leaf    string
+		op      ComparisonOperator
+		value   string
+		wantSQL string
+		wantErr bool
+	}{
+		{
+			name:    "name eq",
+			leaf:    "name",
+			op:      OpEq,
+			value:   "trainerAgent",
+			wantSQL: "provenance->>'name' =",
+		},
+		{
+			name:    "kind ne",
+			leaf:    "kind",
+			op:      OpNe,
+			value:   "seed",
+			wantSQL: "provenance->>'kind' <>",
+		},
+		{
+			name:    "unsupported leaf errors",
+			leaf:    "badleaf",
+			op:      OpEq,
+			value:   "x",
+			wantErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := compileProvenanceComparison(tc.leaf, tc.op, tc.value)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Contains(t, got.sql, tc.wantSQL)
+			require.Len(t, got.args, 1)
+			require.Equal(t, tc.value, got.args[0])
 		})
 	}
 }

@@ -1429,6 +1429,31 @@ func nodeMatchesComparison(node memorynodes.MemoryNode, cmp *ComparisonExpressio
 				return false, err
 			}
 			return compareTimestamp(node.CreatedAt, want, cmp.Operator)
+		case intrinsicFieldProvenance:
+			// provenance.<leaf> post-filter: unmarshal the node's Provenance JSONB
+			// and compare the named leaf. Leaf allowlist mirrors compileProvenanceComparison
+			// (kind|name|trigger|via). This is the post-filter counterpart to the SQL
+			// path; both must handle the same leaf set so the combined-filter scan and
+			// the post-filter agree on what is filterable.
+			// #1670: the missing post-filter case caused every per-user seed dedup-lookup
+			// to fail with "field \"provenance.name\" is not supported in queries" even
+			// though the SQL path ran and returned the right row, because executeCombined-
+			// FilterQuery re-evaluates the full expression tree in-process on every
+			// candidate after the DB scan -- and the in-process evaluator had no case here.
+			if len(cmp.Field.Parts) < 2 {
+				return false, fmt.Errorf("provenance filters require a leaf path (e.g. provenance.kind)")
+			}
+			leaf := strings.ToLower(strings.TrimSpace(cmp.Field.Parts[1]))
+			switch leaf {
+			case "kind", "name", "trigger", "via":
+			default:
+				return false, fmt.Errorf("provenance.%s is not a supported leaf (kind|name|trigger|via)", leaf)
+			}
+			want, err := ensureString(cmp.Value)
+			if err != nil {
+				return false, fmt.Errorf("provenance.%s comparison requires a string: %w", leaf, err)
+			}
+			return compareStringValues(provenanceLeafFromJSON(node.Provenance, leaf), strings.TrimSpace(want), cmp.Operator)
 		default:
 			return false, fmt.Errorf("field %q is not supported in queries", cmp.Field.Raw)
 		}
@@ -1766,6 +1791,22 @@ func valueInCollection(actual any, collection *normalizedCollection) (bool, erro
 	default:
 		return false, fmt.Errorf("unsupported collection kind %v", collection.kind)
 	}
+}
+
+// provenanceLeafFromJSON extracts a named leaf from a raw provenance JSONB value.
+// Returns empty string when raw is nil/empty, the JSON is malformed, or the
+// leaf is absent. The leaf set matches compileProvenanceComparison:
+// kind, name, trigger, via.
+func provenanceLeafFromJSON(raw json.RawMessage, leaf string) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return ""
+	}
+	v, _ := m[leaf].(string)
+	return v
 }
 
 func (e *MemQLEngine) executeFilterQuery(ctx context.Context, cmp *ComparisonExpression, filter compiledExpression, timestamp *time.Time, target int, sorter *compiledSort) ([]memorynodes.MemoryNode, error) {
