@@ -378,7 +378,7 @@ func QueryActiveSpaceIdsBuild(args QueryActiveSpaceIdsArgs) string {
 	return "queryActiveSpaceIds({})"
 }
 
-// QueryActiveSpaces -- Returns spaces with status='active' (the default), scoped to the caller's per-row authz reach. Optional userId arg narrows to a specific creator. Used by the cockpit Chat tab to populate the space list.
+// QueryActiveSpaces -- Returns spaces with status='active' (the default), scoped to the caller's per-row authz reach. Optional userId arg narrows to a specific owner (matches payload.ownerUserId, a v1:identity:user id -- NOT the createdBy email). Used by the cockpit Chat tab to populate the space list.
 //
 // Bound concept: space.
 type QueryActiveSpacesArgs struct {
@@ -702,7 +702,7 @@ func QueryApprovalRequestByIdBuild(args QueryApprovalRequestByIdArgs) string {
 	return b.String()
 }
 
-// QueryArchivedSpaces -- Returns spaces with space.status == 'archived'. Optional filter: userId (createdBy).
+// QueryArchivedSpaces -- Returns spaces with space.status == 'archived'. Optional filter: userId (matches payload.ownerUserId, a user id).
 //
 // Bound concept: space.
 type QueryArchivedSpacesArgs struct {
@@ -3228,7 +3228,7 @@ func QueryRunningTrainAgentPlansBuild(args QueryRunningTrainAgentPlansArgs) stri
 	return "queryRunningTrainAgentPlans({})"
 }
 
-// QuerySavedSpaces -- Returns spaces with space.status == 'saved'. Optional filter: userId (createdBy).
+// QuerySavedSpaces -- Returns spaces with space.status == 'saved'. Optional filter: userId (matches payload.ownerUserId, a user id). Saved spaces carry active=false, so this query gates on status=='saved' + traitIsNotDeleted rather than traitIsActiveRecord (which would exclude every saved row).
 //
 // Bound concept: space.
 type QuerySavedSpacesArgs struct {
