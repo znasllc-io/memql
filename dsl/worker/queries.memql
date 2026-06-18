@@ -9,7 +9,7 @@ use worker.concepts.{ invocation, registration }
 @enabled
 @description("List worker invocation rows for retention pruning. Caller filters by age.")
 query invocation queryExpiredWorkerInvocations {
-  filter  payload.action!=""
+  filter  payload.action!="" && traitIsNotDeleted
   shape   workerInvocationFull
 }
 
@@ -31,7 +31,7 @@ query invocation queryInvocationsForPlan {
   args {
     planId  string  @required
   }
-  filter  payload.planId==args.planId
+  filter  payload.planId==args.planId && traitIsNotDeleted
   shape   workerInvocationFull
 }
 
@@ -58,7 +58,7 @@ query invocation queryInvocationsForUser {
   args {
     ownerUserId  string  @required
   }
-  filter  payload.ownerUserId==args.ownerUserId
+  filter  payload.ownerUserId==args.ownerUserId && traitIsNotDeleted
   shape   workerInvocationFull
 }
 

@@ -3274,6 +3274,31 @@ func QueryScenesForGuideBuild(args QueryScenesForGuideArgs) string {
 	return b.String()
 }
 
+// QuerySearchUsers -- Search users, optionally gated by active status. Omit `active` to list every user; pass true to return only active users or false for only deactivated ones. Backs the searchUsers tool.
+//
+// Bound concept: user.
+type QuerySearchUsersArgs struct {
+	Active    bool
+	ActiveSet bool // set true to send active; required because zero-value bool is ambiguous
+}
+
+// QuerySearchUsers calls the engine query querySearchUsers.
+func (qc *QueryClient) QuerySearchUsers(ctx context.Context, args QuerySearchUsersArgs) (*Result, error) {
+	call := QuerySearchUsersBuild(args)
+	return qc.executeNamed(ctx, "querySearchUsers", call)
+}
+
+func QuerySearchUsersBuild(args QuerySearchUsersArgs) string {
+	var b strings.Builder
+	b.WriteString("querySearchUsers({")
+	if args.ActiveSet {
+		b.WriteString("active: ")
+		b.WriteString(fmt.Sprintf("%v", args.Active))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // QuerySiParticipantForSpace -- Find the active SI participant in a space.
 //
 // Bound concept: participant.

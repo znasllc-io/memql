@@ -1098,6 +1098,23 @@ func compilePayloadComparison(path []string, op ComparisonOperator, value any) (
 			return compiledExpression{}, fmt.Errorf("unsupported payload value type")
 		}
 
+		// NULL-safe inequality (#1685): a payload field that is ABSENT
+		// (JSON null / key missing -> the ->> extraction yields SQL NULL)
+		// is logically DISTINCT FROM any concrete value, so a `!=`
+		// predicate must MATCH it. Plain SQL `<>` returns NULL (not true)
+		// when either side is NULL, which silently drops every row that
+		// lacks the field -- the bug behind traitIsNotDeleted
+		// (`payload.deleted != true`) excluding rows that never had a
+		// `deleted` key (the concept @default isn't always stamped). Use
+		// IS DISTINCT FROM so absent == not-equal == included. OpEq keeps
+		// plain `=` (absent is correctly NOT equal to the value).
+		if op == OpNe {
+			return compiledExpression{
+				sql:  fmt.Sprintf("(%s IS DISTINCT FROM ?)", expr),
+				args: []any{normalized},
+			}, nil
+		}
+
 		sqlOp, err := sqlOperatorForComparison(op)
 		if err != nil {
 			return compiledExpression{}, err
@@ -1485,7 +1502,12 @@ func nodeMatchesComparison(node memorynodes.MemoryNode, cmp *ComparisonExpressio
 			return exists && value != nil, nil
 		default:
 			if !exists {
-				return false, nil
+				// NULL-safe inequality (#1685): an absent field is DISTINCT
+				// FROM any concrete value, so `!=` MATCHES it -- mirrors the
+				// SQL IS DISTINCT FROM path so the post-filter and the SQL
+				// scan agree. Every other operator treats absent as a
+				// non-match.
+				return cmp.Operator == OpNe, nil
 			}
 			return compareScalarValues(value, cmp.Operator, cmp.Value)
 		}
@@ -1622,10 +1644,55 @@ func compareScalarValues(actual any, op ComparisonOperator, expected any) (bool,
 			return inSet, nil
 		}
 		return !inSet, nil
+	case OpHas:
+		// OpHas tests array containment: does the array field `actual`
+		// contain the scalar `expected`. The parser desugars the
+		// canonical membership form `<scalar> in payload.<arrayField>`
+		// to `payload.<arrayField> has <scalar>` (#976), so by the time
+		// it reaches the in-memory evaluator the array field is `actual`
+		// (LHS) and the membership scalar is `expected` (RHS). The SQL
+		// fast-path compiles this via the @> containment operator; this
+		// branch is the post-filter / non-pushdown mirror (#1674).
+		items, ok := payloadArrayElements(actual)
+		if !ok {
+			// Field is absent or not an array -> contains nothing.
+			return false, nil
+		}
+		for _, item := range items {
+			match, err := compareEquality(item, expected, OpEq)
+			if err != nil {
+				// Heterogeneous element vs scalar type mismatch is a
+				// non-match, not a query failure.
+				continue
+			}
+			if match {
+				return true, nil
+			}
+		}
+		return false, nil
 	default:
 		return false, fmt.Errorf("operator %q is not supported for payload comparisons", op)
 	}
 	return false, nil
+}
+
+// payloadArrayElements normalizes a payload field value into a []any
+// for in-memory array operations (OpHas). JSONB arrays decode to []any,
+// but defensively handle the typed-slice shapes the payload cache can
+// surface too.
+func payloadArrayElements(value any) ([]any, bool) {
+	switch v := value.(type) {
+	case []any:
+		return v, true
+	case []string:
+		out := make([]any, len(v))
+		for i := range v {
+			out[i] = v[i]
+		}
+		return out, true
+	default:
+		return nil, false
+	}
 }
 
 func compareEquality(actual any, expected any, op ComparisonOperator) (bool, error) {
