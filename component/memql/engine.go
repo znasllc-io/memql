@@ -646,6 +646,20 @@ func (e *MemQLEngine) executeMutationFunctionCall(ctx context.Context, call *Fun
 		args = make(map[string]any)
 	}
 
+	// Strict unknown-arg rejection at the MCP boundary (memql#1633): a
+	// caller-supplied arg the mutation never declares would otherwise be
+	// silently dropped on the way into the template -- losing valid data
+	// with no signal, and in some cases leaving a @required concept field
+	// unsatisfied. Surface it as an error instead, mirroring the unknown-
+	// tool rejection from memql#1602. Only active when the caller opted in
+	// via WithStrictUnknownArgs (the MCP run_mutation / @mcp path); internal
+	// callers stay lenient.
+	if strictUnknownArgs(ctx) {
+		if err := rejectUnknownArgs(fn, args); err != nil {
+			return nil, err
+		}
+	}
+
 	// Validate args using the function's args-block schema.
 	validator := newFunctionValidator(fns.Snapshot(), nil)
 	if err := validator.validateFunctionArgs(fn, args); err != nil {

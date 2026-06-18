@@ -28,6 +28,34 @@ func newFunctionValidator(functions map[string]*Function, specs *SpecRegistry) *
 	}
 }
 
+// rejectUnknownArgs returns an error naming the first caller-supplied
+// argument that the function's args { ... } block does not declare, unless
+// the function explicitly opted into open args via @additionalProperties(true).
+// Used by the strict MCP mutation-call path (memql#1633) to turn a silent
+// arg-drop into a loud failure. A function with no declared args schema is
+// treated as open (nothing to validate against).
+func rejectUnknownArgs(fn *Function, args map[string]any) error {
+	if fn == nil || fn.ArgsSchema == nil || len(fn.ArgsSchema.Fields) == 0 {
+		return nil
+	}
+	if fn.ArgsSchema.AdditionalProperties != nil && *fn.ArgsSchema.AdditionalProperties {
+		return nil
+	}
+	declared := make(map[string]struct{}, len(fn.ArgsSchema.Fields))
+	for _, field := range fn.ArgsSchema.Fields {
+		if field == nil || strings.TrimSpace(field.Name) == "" {
+			continue
+		}
+		declared[field.Name] = struct{}{}
+	}
+	for key := range args {
+		if _, ok := declared[key]; !ok {
+			return fmt.Errorf("mutation %q: unexpected argument %q (not declared in the mutation's args; supplying it would silently drop the value -- check the argument name)", fn.Name, key)
+		}
+	}
+	return nil
+}
+
 // validateFunctionArgs validates the provided arguments against the function's assertions.
 func (v *functionValidator) validateFunctionArgs(fn *Function, args map[string]any) error {
 	if fn == nil || fn.ArgsSchema == nil || len(fn.ArgsSchema.Fields) == 0 {

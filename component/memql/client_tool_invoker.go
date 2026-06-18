@@ -109,6 +109,32 @@ func ActingAgentIdFromContext(ctx context.Context) string {
 	return ""
 }
 
+type strictUnknownArgsKey struct{}
+
+// WithStrictUnknownArgs returns a child context that opts the top-level
+// mutation-function-call path into strict argument validation: a caller-
+// supplied argument that the mutation's args { ... } block does not declare
+// is rejected with an error instead of being silently dropped (memql#1633).
+//
+// Scoped to the MCP boundary (run_mutation / first-class @mcp mutation calls)
+// rather than the whole engine: the internal automation / gRPC / inlined
+// query-expansion paths stay lenient so this can't turn a benign extra arg on
+// some existing live caller into a hard runtime failure. The MCP surface is
+// where the silent-drop data loss was observed (Run-2 QA staging) and mirrors
+// the unknown-tool rejection added for the MCP server in memql#1602.
+func WithStrictUnknownArgs(ctx context.Context) context.Context {
+	return context.WithValue(ctx, strictUnknownArgsKey{}, true)
+}
+
+// strictUnknownArgs reports whether WithStrictUnknownArgs was set on ctx.
+func strictUnknownArgs(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(strictUnknownArgsKey{}).(bool)
+	return v
+}
+
 // providerOverrideKey carries an optional LLM provider name that
 // si_tool_loop's InvokeSIChatWithFilteredTools should pass as the
 // SIInvocation.ProviderOverride. Lets callers (e.g. delegate_takeover)

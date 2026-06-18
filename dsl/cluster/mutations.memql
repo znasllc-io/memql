@@ -12,6 +12,7 @@ mutation cluster mutationCreateCluster {
     name                string  @required
     region              string
     environment         string  @required
+    status              string  @enum("bootstrapping", "healthy", "degraded", "shutting_down")
     databaseId          string
     identityProviderId  string
     version             string
@@ -21,7 +22,7 @@ mutation cluster mutationCreateCluster {
     args.region
     args.environment
     seedNodeTypes: ["bff", "cognition", "planner"]
-    status: "healthy"
+    status: coalesce(args.status, "healthy")
     args.databaseId
     args.identityProviderId
     args.version
@@ -84,11 +85,13 @@ mutation identityProvider mutationCreateIdentityProvider {
 @description("Register a node in the cluster")
 mutation node mutationCreateNode {
   args {
-    id        string
-    nodeType  string  @required
-    address   string
-    health    string
-    lastSeen  string
+    id            string
+    nodeType      string    @required
+    address       string
+    health        string
+    lastSeen      string
+    capabilities  []string
+    labels        object
   }
   insert {
     id: coalesce(args.id, concat("node-", hash(concat(args.nodeType, ":", timestamp()))))
@@ -97,8 +100,8 @@ mutation node mutationCreateNode {
     parentId: ""
     health: coalesce(args.health, "healthy")
     lastSeen: coalesce(args.lastSeen, timestamp())
-    capabilities: []
-    labels: {}
+    capabilities: coalesce(args.capabilities, [])
+    labels: coalesce(args.labels, {})
   }
 }
 
@@ -110,16 +113,20 @@ mutation node mutationCreateNode {
 @description("Record a node lifecycle event")
 mutation spawnEvent mutationCreateSpawnEvent {
   args {
-    nodeId    string  @required
-    nodeType  string  @required
-    action    string  @required
-    reason    string
+    nodeId       string  @required
+    nodeType     string  @required
+    action       string  @required
+    initiatorId  string
+    reason       string
+    metadata     object
   }
   insert {
     args.nodeId
     args.nodeType
     args.action
+    args.initiatorId
     args.reason
+    args.metadata
   }
 }
 

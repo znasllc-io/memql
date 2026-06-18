@@ -1679,12 +1679,17 @@ mutation user mutationScheduleAccountDeletion {
 @description("Set or clear the caller's activeSpaceId. Empty spaceId clears the pointer.")
 mutation user mutationSetUserActiveSpace {
   args {
-    userId   string  @required
-    spaceId  string
+    userId         string  @required
+    spaceId        string
+    activeSpaceId  string
   }
   update {
     id: args.userId
-    activeSpaceId: coalesce(args.spaceId, "")
+    // Accept either `spaceId` (the param-style name; what the SPA and the
+    // 2-Spaces QA suite pass) or `activeSpaceId` (the concept-field name; what
+    // the 1-Identity QA suite passed and silently lost). Both land on the
+    // concept's activeSpaceId field; empty/missing clears the pointer. (#1633)
+    activeSpaceId: coalesce(args.spaceId, args.activeSpaceId, "")
   }
 }
 

@@ -282,6 +282,10 @@ func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, name s
 		return errorResult("mcp tool surface unavailable: engine not connected")
 	}
 	ctx = memql.WithActingAgentRole(ctx, role)
+	// Reject unknown mutation args at the MCP boundary instead of silently
+	// dropping them (memql#1633). Scoped to MCP calls so internal engine
+	// callers stay lenient; mirrors the unknown-tool rejection (memql#1602).
+	ctx = memql.WithStrictUnknownArgs(ctx)
 
 	switch name {
 	case toolRunQuery, toolRunMutation:
