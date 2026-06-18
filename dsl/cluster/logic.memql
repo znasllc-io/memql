@@ -92,14 +92,21 @@ logic logicRegisterNode {
   body {
   // Create the node record. Pass the peer's NodeId as the explicit
   // concept id so later rows from NodeStatusWriter share the same
-  // time-series timeline. `args.event.payload.node.id` is always populated
-  // by EmitSystemStartup (defaults to a generated UUID if MEMQL_NODE_ID
-  // is unset), so we don't need a fallback here.
+  // time-series timeline (EmitSystemStartup always populates
+  // node.id -- a generated UUID when MEMQL_NODE_ID is unset).
+  //
+  // Every field is bound with an EXPLICIT key + coalesce, mirroring
+  // logicDeregisterNode (#1643): a multi-segment path like
+  // `args.event.payload.node.id` is NOT eligible for the bare `args.X`
+  // object-literal shorthand (only simple identifiers are), so the old
+  // shorthand form corrupted the arg map -- nodeType never reached
+  // mutationCreateNode ("required argument nodeType is missing"). `flavor`
+  // was also dropped: it is not a mutationCreateNode arg (the insert body
+  // never reads it).
   nodeRecord := mutationCreateNode({
-    args.event.payload.node.id,
-    nodeType: args.event.payload.node.type,
-    flavor:   coalesce(args.event.payload.node.flavor, ""),
-    args.event.payload.node.address
+    id:       coalesce(args.event.payload.node.id, ""),
+    nodeType: coalesce(args.event.payload.node.type, ""),
+    address:  coalesce(args.event.payload.node.address, "")
   })
 
   // Record the spawn event. The mutation schema only accepts the flat

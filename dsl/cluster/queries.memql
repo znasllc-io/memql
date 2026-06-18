@@ -73,8 +73,11 @@ query cluster queryExistingCluster {
 // logicAccessRequestExpirySweep / logicPurgeExpiredArchivedSpaces.
 
 @enabled
-@description("Latest-per-id cluster node rows whose health is not already 'stopped'. Drives the stale-node prune cron.")
+@description("Latest-per-id cluster node rows whose health is not already 'stopped'. When olderThan is supplied, restricts to rows whose lastSeen is strictly before it (RFC3339 cutoff). Drives the stale-node prune cron.")
 query node queryStaleClusterNodes {
-  filter  payload.health!="stopped"
+  args {
+    olderThan  string  @description("Optional RFC3339 cutoff; when set, only rows whose lastSeen is strictly before it are returned.")
+  }
+  filter  payload.health!="stopped" && when(args.olderThan) { payload.lastSeen<args.olderThan }
   asOf    latest
 }
