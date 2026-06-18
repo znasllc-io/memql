@@ -518,6 +518,39 @@ func resolveFileUseDeclarations(file *languageParser.File, version string, regis
 			return fmt.Errorf("use declaration %q requires at least domain.entity", u.Path)
 		}
 
+		// Form B (`use <ns>.<construct>.{ name1, name2 }`): the dotted path
+		// is a MODULE HINT, not a concept id. Resolve each imported NAME by
+		// trailing-segment match against the registry. Names that don't
+		// resolve to a concept are non-concept construct imports (logic /
+		// shapes / specs / mutations / queries / traits / builtins / ...)
+		// and are TOLERATED -- they're symbols the function registry resolves
+		// at runtime, never concepts the automation compile must bind. This
+		// mirrors memql.ConceptResolver.resolveUseDeclarations. Treating the
+		// path itself as a concept id (the legacy Form-A branch below) would
+		// synthesize a bogus `v1:<ns>:logic` id from `use <ns>.logic.{ ... }`
+		// and fail every Form-B automation at the dry-run compile step --
+		// the regression behind memql#1681 (the dry-run source extractor
+		// prepends the file-top `use` imports, which the unified-tree load
+		// path strips, so only the dry-run/inline path exercised this).
+		if len(u.Names) > 0 {
+			nsHint := parts[startIdx] // namespace segment (after any version)
+			for _, name := range u.Names {
+				if _, dup := symbols[name]; dup {
+					continue
+				}
+				conceptId, err := resolveConceptByTrailingSegment(registry, name, nsHint)
+				if err != nil {
+					// Non-concept construct import (e.g. a `logic` symbol) --
+					// tolerate it and let the function registry bind it at run
+					// time.
+					continue
+				}
+				symbols[name] = conceptId
+			}
+			continue
+		}
+
+		// Form A (legacy, no brace-list): the dotted path IS the concept id.
 		conceptParts := parts[startIdx:]
 		conceptId := resolvedVersion + ":" + strings.Join(conceptParts, ":")
 
@@ -585,6 +618,56 @@ func resolveFileUseDeclarations(file *languageParser.File, version string, regis
 	}
 
 	return nil
+}
+
+// resolveConceptByTrailingSegment resolves a bare imported name (the leaf of a
+// Form-B `use <ns>.<construct>.{ <name> }` import) to its canonical concept id
+// by trailing-segment match against the registry, disambiguating an ambiguous
+// trailing segment with nsHint (the namespace segment of the importing path).
+// Returns an error when no concept matches -- the caller treats that as a
+// non-concept construct import (logic / shape / spec / mutation / query / ...)
+// and tolerates it. Mirrors
+// memql.ConceptResolver.resolveBareConceptNameWithNamespace; kept local to the
+// automations package to avoid widening the memql resolver's exported surface.
+func resolveConceptByTrailingSegment(registry memoryNodes.Registry, name, nsHint string) (string, error) {
+	if registry == nil {
+		return "", fmt.Errorf("concept registry not available")
+	}
+	var matches []string
+	for _, c := range registry.List() {
+		if c == nil {
+			continue
+		}
+		idx := strings.LastIndex(c.Name, ":")
+		if idx < 0 {
+			continue
+		}
+		if c.Name[idx+1:] == name {
+			matches = append(matches, c.Name)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no registered concept has trailing segment %q", name)
+	case 1:
+		return matches[0], nil
+	}
+	// Ambiguous trailing segment: disambiguate by the namespace hint from the
+	// importing `use` path, keeping only matches that carry it as an interior
+	// segment (`:<nsHint>:`).
+	if nsHint != "" {
+		needle := ":" + nsHint + ":"
+		var nsMatches []string
+		for _, m := range matches {
+			if strings.Contains(m, needle) {
+				nsMatches = append(nsMatches, m)
+			}
+		}
+		if len(nsMatches) == 1 {
+			return nsMatches[0], nil
+		}
+	}
+	return "", fmt.Errorf("ambiguous concept name %q matches %d concepts: %s", name, len(matches), strings.Join(matches, ", "))
 }
 
 // normalizeStructuredTriggers walks every FunctionDef in the file and
