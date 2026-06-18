@@ -410,6 +410,62 @@ func TestReactiveLoop_ConvergenceDedup(t *testing.T) {
 	}
 }
 
+// --- assign scope (#1680) --------------------------------------------------
+
+// TestAssign_OnlyWritesRoutingFields locks in memql#1680: the assign path
+// must only write targetKind / assignedAgentId / assignedRoleSlug. Intake
+// fields (trigger, schedule, status, successCriteria, notifyHow,
+// intakeStatus) must never appear in the mutation call even when the
+// responsibility row carries them.
+func TestAssign_OnlyWritesRoutingFields(t *testing.T) {
+	eng := &fakeEngine{}
+	r := NewReactiveLoop(eng, testLogger())
+	r.assign(
+		ownerActorContext(context.Background(), "u1"),
+		"v1:planner:responsibility:r1", "specialist", "v1:agents:agent:spec1", "marketing",
+	)
+	exec, _, _ := eng.snapshot()
+	if countContains(exec, "mutationAssignResponsibility") == 0 {
+		t.Fatalf("assign must call mutationAssignResponsibility")
+	}
+	// Intake fields must NEVER appear in the mutation call (memql#1680).
+	intakeFields := []string{"trigger", "schedule", "successCriteria", "notifyHow", "intakeStatus"}
+	for _, call := range exec {
+		if !strings.Contains(call, "mutationAssignResponsibility") {
+			continue
+		}
+		for _, field := range intakeFields {
+			if strings.Contains(call, field) {
+				t.Fatalf("mutationAssignResponsibility must not include intake field %q (memql#1680); got:\n  %s", field, call)
+			}
+		}
+	}
+}
+
+// TestAssign_RoleOnly_OmitsAssignedAgentId locks in the role-only case of
+// memql#1680: when only a role slug is provided (agentId == ""), the
+// mutation call must NOT stamp assignedAgentId so it does not clear or
+// overwrite an existing agent binding on the row. The partial-update merge
+// will inherit the previous row's assignedAgentId instead.
+func TestAssign_RoleOnly_OmitsAssignedAgentId(t *testing.T) {
+	eng := &fakeEngine{}
+	r := NewReactiveLoop(eng, testLogger())
+	// role-only: empty agentId, non-empty roleSlug
+	r.assign(
+		ownerActorContext(context.Background(), "u1"),
+		"v1:planner:responsibility:r1", "specialist", "", "marketing",
+	)
+	exec, _, _ := eng.snapshot()
+	if countContains(exec, "mutationAssignResponsibility") == 0 {
+		t.Fatalf("assign must call mutationAssignResponsibility even for a role-only call")
+	}
+	for _, call := range exec {
+		if strings.Contains(call, "mutationAssignResponsibility") && strings.Contains(call, "assignedAgentId") {
+			t.Fatalf("role-only assign must not stamp assignedAgentId in the mutation call (memql#1680); got:\n  %s", call)
+		}
+	}
+}
+
 // --- helpers ---------------------------------------------------------------
 
 // latestOccurrenceBefore sanity: a daily 09:00 schedule observed at
