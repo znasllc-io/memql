@@ -49,7 +49,18 @@ logic logicIndexGeneratedOutput {
     event  object  @required
   }
   body {
-    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, generatedOutput), ownerUserId: args.event.payload.ownerUserId, lens: "artifact", kind: "generated_output", source: args.event.payload.source, title: args.event.payload.title, summary: args.event.payload.summary, format: args.event.payload.format, mimeType: args.event.payload.mimeType, live: false, spaceId: args.event.payload.spaceId, agentId: args.event.payload.producedByAgentId, producedByPlanId: args.event.payload.producedByPlanId, producedByWorkerId: args.event.payload.producedByWorkerId, producedByWorkerName: args.event.payload.producedByWorkerName })
+    // coalesce(..., "") on every OPTIONAL ref. Only source=computer_use
+    // outputs carry a worker id; agent/workbench/standalone outputs lack
+    // producedByAgentId / producedByPlanId / spaceId / summary /
+    // mimeType. An absent arg reference resolves to no value and is
+    // dropped to an explicit null, which the v1:library:artifact string
+    // fields reject ("expected string, but got null") -- so artifact
+    // indexing failed for EVERY non-computer-use generated output. The
+    // artifact field descriptions already define the empty string as the
+    // absent value, so "" is the correct coalesce target.
+    // ownerUserId / title / format / source are @required on
+    // generatedOutput, so they always carry a value and pass through bare.
+    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, generatedOutput), ownerUserId: args.event.payload.ownerUserId, lens: "artifact", kind: "generated_output", source: args.event.payload.source, title: args.event.payload.title, summary: coalesce(args.event.payload.summary, ""), format: args.event.payload.format, mimeType: coalesce(args.event.payload.mimeType, ""), live: false, spaceId: coalesce(args.event.payload.spaceId, ""), agentId: coalesce(args.event.payload.producedByAgentId, ""), producedByPlanId: coalesce(args.event.payload.producedByPlanId, ""), producedByWorkerId: coalesce(args.event.payload.producedByWorkerId, ""), producedByWorkerName: coalesce(args.event.payload.producedByWorkerName, "") })
     return indexed
   }
 }
