@@ -54,7 +54,7 @@ images:
   # now includes describeFunction (#1646); searchUsers points at v1:identity:user
   # (#1625).
   - name: acrmemql.azurecr.io/memql-mcp
-    digest: sha256:ea3b7b2a9b63008bf7dc9f54383acfe617ec3409bb1b8572e443547b1637526b
+    digest: sha256:e7c43ff951feb4fa75baf3897f9d1713dd713dcc469944af9a5525c4f8080c98
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:75e566e71e30d0b35c6c6708dda34a37ab9f2a74ec575f18c0787beffc949bf2
   - name: livekit/livekit-server
