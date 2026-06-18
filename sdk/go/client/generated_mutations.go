@@ -2247,7 +2247,7 @@ func MutationCreateAvatarPersonaBuild(args MutationCreateAvatarPersonaArgs) stri
 	return b.String()
 }
 
-// MutationCreateCalendarEvent -- Create a native calendar event owned by the authenticated caller. ownerUserId + createdBy are stamped from actor.userId (caller-scoped write); source defaults to 'native'. The reactive harness's reminder triggers pick the row up via queryUpcomingEvents. Pass `eventId` to control the id (idempotent re-create), else the engine assigns one.
+// MutationCreateCalendarEvent -- Create a native calendar event owned by the authenticated caller. ownerUserId is stamped from actor.userId (caller-scoped write); createdBy is engine-stamped from the auth context. source defaults to 'native'. The reactive harness's reminder triggers pick the row up via queryUpcomingEvents. Pass `eventId` to control the id (idempotent re-create), else the engine assigns one.
 //
 // Bound concept: calendarEvent.
 type MutationCreateCalendarEventArgs struct {
