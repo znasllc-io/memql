@@ -425,7 +425,7 @@ func MutationApproveAccessRequestBuild(args MutationApproveAccessRequestArgs) st
 	return b.String()
 }
 
-// MutationArchiveSpace -- Insert a new version of a space record (typically used to archive a space). Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload -- per-row authz already gates that only the owner reaches this mutation, and at create time ownerUserId == actor.userId. memql#401.
+// MutationArchiveSpace -- Insert a new version of a space record (typically used to archive a space). Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload -- per-row authz already gates that only the owner reaches this mutation, and at create time ownerUserId == actor.userId. Also stamps archivedAt (now) when the caller's payload omits it, so queryArchivedSpaces (which gates on status=='archived', not archivedAt presence) and the retention cron see a complete archived row even from minimal-payload callers. memql#401 / #1637.
 //
 // Bound concept: space.
 type MutationArchiveSpaceArgs struct {
@@ -8844,7 +8844,7 @@ func MutationRemoveAgentFromSpaceBuild(args MutationRemoveAgentFromSpaceArgs) st
 	return b.String()
 }
 
-// MutationRenameSpace -- Insert a new version of a space record (typically used to rename a space). Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).
+// MutationRenameSpace -- Partial-update a space record (read-merge-write; typically used to rename a space). Only the fields in the caller's payload change; all other fields are preserved. Server-side stamps ownerUserId from actor.userId (memql#401 / #1637).
 //
 // Bound concept: space.
 type MutationRenameSpaceArgs struct {
@@ -10879,9 +10879,9 @@ func MutationToggleComputerUseEnabledBuild(args MutationToggleComputerUseEnabled
 	return b.String()
 }
 
-// MutationTouchSession -- Insert a new version of a session record (typically used as a heartbeat).
+// MutationTouchSession -- Insert a new version of an auth-session record (typically used as a heartbeat to bump lastActivityAt).
 //
-// Bound concept: session.
+// Bound concept: authSession.
 type MutationTouchSessionArgs struct {
 	SessionId string
 	Payload   map[string]any

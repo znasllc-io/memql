@@ -5,7 +5,7 @@
 
 use cognition.concepts.{ audioOverride, chunk, request, response, greetSuppression, micState, misrouteFeedback, participant, presence, privateUtterance, session, space, utterance, videoOverride }
 use agents.concepts.{ agent }
-use identity.concepts.{ user }
+use identity.concepts.{ user, authSession }
 
 @enabled
 @description("Add the caller's agent to a space's roster. forUserId is server-stamped; per-user-per-space 3-cap and agent-ownership are enforced by the engine guard.")
@@ -42,7 +42,7 @@ mutation participant mutationAddAgentToSpace {
 // The caller is responsible for passing the full updated payload (e.g., active=false, status="archived").
 
 @enabled
-@description("Insert a new version of a space record (typically used to archive a space). Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload -- per-row authz already gates that only the owner reaches this mutation, and at create time ownerUserId == actor.userId. memql#401.")
+@description("Insert a new version of a space record (typically used to archive a space). Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload -- per-row authz already gates that only the owner reaches this mutation, and at create time ownerUserId == actor.userId. Also stamps archivedAt (now) when the caller's payload omits it, so queryArchivedSpaces (which gates on status=='archived', not archivedAt presence) and the retention cron see a complete archived row even from minimal-payload callers. memql#401 / #1637.")
 mutation space mutationArchiveSpace {
   args {
     spaceId  string  @required
@@ -52,6 +52,7 @@ mutation space mutationArchiveSpace {
     id: args.spaceId
     ownerUserId: actor.userId
     args.payload
+    archivedAt: coalesce(args.payload.archivedAt, timestamp())
   }
 }
 
@@ -616,17 +617,23 @@ mutation participant mutationRemoveAgentFromSpace {
 // renameSpace
 // ===========
 //
-// Inserts a new version of a space record with the provided payload.
-// The caller is responsible for passing the full updated payload (append-only model).
+// Partial-update (read-merge-write) of a space record. The caller passes
+// only the fields it wants to change (typically payload={name}); `update`
+// merges them onto the existing row so goal / maxAgents / maxHumans /
+// status / active are preserved. Using `insert` here was a full-record-
+// replacement footgun -- a partial payload wiped every unstated field to
+// null (memql#1637). Mirrors the planner partial-update mutations
+// (mutationStartPlan, mutationCompleteToolInvocation) and the guide /
+// calendar / identity `update { id, args.payload }` pattern.
 
 @enabled
-@description("Insert a new version of a space record (typically used to rename a space). Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).")
+@description("Partial-update a space record (read-merge-write; typically used to rename a space). Only the fields in the caller's payload change; all other fields are preserved. Server-side stamps ownerUserId from actor.userId (memql#401 / #1637).")
 mutation space mutationRenameSpace {
   args {
     spaceId  string  @required
     payload  object  @required
   }
-  insert {
+  update {
     id: args.spaceId
     ownerUserId: actor.userId
     args.payload
@@ -1051,12 +1058,15 @@ mutation micState mutationSetUserMicState {
 // touchSession
 // ============
 //
-// Inserts a new version of a session record with the provided payload.
-// Typically used to bump lastActivityAt (append-only heartbeat).
+// Inserts a new version of a v1:identity:authSession record with the
+// provided payload. Typically used to bump lastActivityAt (append-only
+// heartbeat). Bound to authSession -- NOT v1:cognition:session, which
+// requires participantId/spaceId that an auth session never carries
+// (memql#1639).
 
 @enabled
-@description("Insert a new version of a session record (typically used as a heartbeat).")
-mutation session mutationTouchSession {
+@description("Insert a new version of an auth-session record (typically used as a heartbeat to bump lastActivityAt).")
+mutation authSession mutationTouchSession {
   args {
     sessionId  string  @required
     payload    object  @required
@@ -1092,9 +1102,15 @@ mutation presence mutationUpdateParticipantPresence {
     intent           object
   }
   insert {
+    // participantId is a canonical colon id (v1:cognition:participant:...);
+    // a bare concat would yield "presence-v1:cognition:..." whose colons are
+    // rejected as an invalid shortId. hash() encodes it to a colon-free,
+    // deterministic digest so latest-wins reads still collapse on the same
+    // (participant) pair (memql#1640). The explicit-presenceId workaround
+    // still wins via coalesce.
     id: coalesce(
       args.presenceId,
-      concat("presence-", args.participantId)
+      concat("presence-", hash(args.participantId))
     )
     args.spaceId
     args.participantId

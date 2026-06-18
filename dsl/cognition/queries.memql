@@ -11,18 +11,21 @@ query participant queryActiveHumanParticipants {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==args.spaceId && payload.participantType=="human" && traitStatusIsActive && traitIsActiveRecord
+  filter  payload.spaceId==args.spaceId && payload.participantType=="human" && traitStatusIsActive
   shape   participantFull
 }
 
 @enabled
-@description("Returns spaces with status='active' (the default), scoped to the caller's per-row authz reach. Optional userId arg narrows to a specific creator. Used by the cockpit Chat tab to populate the space list.")
+@description("Returns spaces with status='active' (the default), scoped to the caller's per-row authz reach. Optional userId arg narrows to a specific owner (matches payload.ownerUserId, a v1:identity:user id -- NOT the createdBy email). Used by the cockpit Chat tab to populate the space list.")
 @mcp
 query space queryActiveSpaces {
   args {
     userId  string
   }
-  filter  traitIsActiveRecord && traitStatusIsActive && traitIsNotArchived && when(args.userId) { createdBy==args.userId }
+  // Authz: gate on payload.ownerUserId==actor.userId (the caller only ever
+  // sees their own spaces). The optional args.userId narrows further but is
+  // redundant for a self-scoped caller; kept for wire-compat.
+  filter  traitIsActiveRecord && traitStatusIsActive && traitIsNotArchived && payload.ownerUserId==actor.userId && when(args.userId) { payload.ownerUserId==args.userId }
   shape   spaceFull
 }
 
@@ -121,7 +124,7 @@ query utterance queryAgentInteractionCount {
 @enabled
 @description("Returns every archived space in the partition, for the purge cron's per-row retention check.")
 query space queryAllArchivedSpacesAcrossUsers {
-  filter  traitIsActiveRecord && traitStatusIsArchived
+  filter  traitStatusIsArchived && traitIsNotDeleted
   shape   spaceFull
 }
 
@@ -142,21 +145,26 @@ query space queryAllArchivedSpacesAcrossUsers {
 // purge.
 //
 // Arguments:
-//   userId (string, optional)   - Filter by creator (matches createdBy).
-//                                 Frontend passes the current user's
-//                                 primary email.
+//   userId (string, optional)   - Filter by owner (matches payload.ownerUserId,
+//                                 a v1:identity:user id -- NOT the createdBy
+//                                 email). Frontend passes the current user's id.
 //
 // Returns:
 //   Array of space records via the spaceFull shape (includes archivedAt).
 //
+// NOTE: archived spaces carry active=false (mutationArchiveSpace /
+// copresentMutations.archiveSpace set it), so this query does NOT apply
+// traitIsActiveRecord -- that would exclude every archived row. It gates
+// on status=='archived' and excludes hard-delete tombstones via
+// traitIsNotDeleted.
 
 @enabled
-@description("Returns spaces with space.status == 'archived'. Optional filter: userId (createdBy).")
+@description("Returns spaces with space.status == 'archived'. Optional filter: userId (matches payload.ownerUserId, a user id).")
 query space queryArchivedSpaces {
   args {
     userId  string
   }
-  filter  traitIsActiveRecord && traitStatusIsArchived && when(args.userId) { createdBy==args.userId }
+  filter  traitStatusIsArchived && traitIsNotDeleted && payload.ownerUserId==actor.userId && when(args.userId) { payload.ownerUserId==args.userId }
   shape   spaceFull
 }
 
@@ -440,22 +448,22 @@ query session queryParticipantSession {
 // Drives the Saved tab in the SpacesListPanel.
 //
 // Arguments:
-//   userId (string, optional)   - Filter by creator (matches createdBy).
-//                                 Frontend passes the current user's
-//                                 primary email so each user sees their
-//                                 own saved spaces.
+//   userId (string, optional)   - Filter by owner (matches payload.ownerUserId,
+//                                 a v1:identity:user id -- NOT the createdBy
+//                                 email). Frontend passes the current user's id
+//                                 so each user sees their own saved spaces.
 //
 // Returns:
 //   Array of space records via the spaceFull shape.
 //
 
 @enabled
-@description("Returns spaces with space.status == 'saved'. Optional filter: userId (createdBy).")
+@description("Returns spaces with space.status == 'saved'. Optional filter: userId (matches payload.ownerUserId, a user id). Saved spaces carry active=false, so this query gates on status=='saved' + traitIsNotDeleted rather than traitIsActiveRecord (which would exclude every saved row).")
 query space querySavedSpaces {
   args {
     userId  string
   }
-  filter  traitIsActiveRecord && traitStatusIsSaved && when(args.userId) { createdBy==args.userId }
+  filter  traitStatusIsSaved && traitIsNotDeleted && payload.ownerUserId==actor.userId && when(args.userId) { payload.ownerUserId==args.userId }
   shape   spaceFull
 }
 
