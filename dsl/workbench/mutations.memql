@@ -24,7 +24,6 @@ mutation workspace mutationProvisionWorkspace {
     args.planId
     status: "provisioned"
     args.storageRoot
-    createdAt: now
     lastUsedAt: now
     releasedAt: ""
     releasedReason: ""

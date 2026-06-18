@@ -173,28 +173,56 @@ func TestCalendarCreate1673_HandlerQueryBoolSubstitution(t *testing.T) {
 	})
 }
 
-// TestCalendarCreate1673_MutationNoReservedCreatedBy guards against #1673
-// blocker 2: the insert block of mutationCreateCalendarEvent must NOT declare
-// the reserved field "createdBy". The engine auto-stamps createdBy from
-// actor.userId; explicitly setting it causes "insert() payload declares
-// reserved field" at mutation-execution time.
-func TestCalendarCreate1673_MutationNoReservedCreatedBy(t *testing.T) {
+// TestCalendarCreate1673_MutationNoReservedFields guards against #1673:
+// the insert block of mutationCreateCalendarEvent must NOT declare ANY
+// engine-reserved payload field. createdAt + createdBy are both reserved
+// (component/database/memory-nodes/constants.go reservedPayloadFields);
+// the executeInsert guard rejects any reserved key in the payload at
+// mutation-execution time with "insert() payload ... declares reserved
+// field". The engine auto-stamps these intrinsics. `id` is exempt -- it is
+// extracted from the insert block as the node identity before the guard,
+// so it is the one reserved name an insert block legitimately assigns.
+//
+// The original fix (#1691) only dropped createdBy and left createdAt: now,
+// so calendar create still failed on createdAt -- this generalized guard
+// would have caught that. A DSL-text check rather than a real-engine insert
+// because the latter is Postgres-gated; #1694 carries the real-engine path.
+func TestCalendarCreate1673_MutationNoReservedFields(t *testing.T) {
 	content := dslCalendarMutationsSource(t)
 
-	// The insert block for mutationCreateCalendarEvent must NOT contain
-	// `createdBy: actor.userId`. The engine stamps it from the auth context.
-	if strings.Contains(content, "createdBy: actor.userId") {
-		// Locate the insert block for context.
-		excerpt := content
-		if idx := strings.Index(content, "insert {"); idx >= 0 {
-			end := idx + 300
-			if end > len(content) {
-				end = len(content)
-			}
-			excerpt = content[idx:end]
-		}
-		t.Errorf("mutationCreateCalendarEvent insert block declares reserved field \"createdBy: actor.userId\" -- remove it; the engine stamps createdBy automatically from actor.userId\nexcerpt:\n%s", excerpt)
+	insert := mutationInsertBlock(content, "mutationCreateCalendarEvent")
+	if insert == "" {
+		t.Fatal("could not locate mutationCreateCalendarEvent insert block in dsl/calendar/mutations.memql")
 	}
+
+	// reserved-minus-id: id is extracted as the node identity before the
+	// reserved-field guard, so an insert block may assign it; the rest must
+	// never appear as a payload assignment.
+	reserved := []string{"createdAt", "createdBy", "concept", "partition", "payload", "schema", "type"}
+	for _, f := range reserved {
+		if strings.Contains(insert, f+":") {
+			t.Errorf("mutationCreateCalendarEvent insert block declares reserved field %q -- remove it; the engine auto-stamps it. The executeInsert guard rejects reserved keys at execution time.\ninsert block:\n%s", f, insert)
+		}
+	}
+}
+
+// mutationInsertBlock returns the text of the insert { ... } block for the
+// named mutation, or "" if not found.
+func mutationInsertBlock(content, mutationName string) string {
+	start := strings.Index(content, mutationName)
+	if start < 0 {
+		return ""
+	}
+	ins := strings.Index(content[start:], "insert {")
+	if ins < 0 {
+		return ""
+	}
+	ins += start
+	end := strings.Index(content[ins:], "}")
+	if end < 0 {
+		return content[ins:]
+	}
+	return content[ins : ins+end+1]
 }
 
 // propKeys returns the string keys of a map, for diagnostic messages.

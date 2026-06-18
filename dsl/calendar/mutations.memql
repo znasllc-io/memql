@@ -36,7 +36,6 @@ mutation calendarEvent mutationCreateCalendarEvent {
     args.recurrence
     source:    "native"
     deleted:   false
-    createdAt: now
   }
 }
 
