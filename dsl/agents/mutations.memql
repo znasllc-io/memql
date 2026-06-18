@@ -82,12 +82,12 @@ mutation agentAuthorization mutationCreateAgentAuthorization {
 }
 
 @enabled
-@description("Soft-delete an agent (active:false, deleted:true).")
+@description("Soft-delete an agent (active:false, deleted:true). Read-merges the existing row so the caller only passes the agent id; every other required field (kind, name, ...) inherits from the persisted row instead of being re-supplied (memql#1628).")
 mutation agent mutationDeleteAgent {
   args {
     agentId  string  @required
   }
-  insert {
+  update {
     id: args.agentId
     active: false
     deleted: true
@@ -95,12 +95,12 @@ mutation agent mutationDeleteAgent {
 }
 
 @enabled
-@description("Soft-revoke a standing authorization. User-revocable from the agent's settings at any time.")
+@description("Soft-revoke a standing authorization. User-revocable from the agent's settings at any time. Read-merges the existing row so the caller only passes the auth id; agentId/userId/planKind/spaceScope inherit from the persisted row (memql#1628).")
 mutation agentAuthorization mutationRevokeAgentAuthorization {
   args {
     authId  string  @required
   }
-  insert {
+  update {
     id: args.authId
     active: false
   }

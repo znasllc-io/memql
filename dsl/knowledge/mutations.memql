@@ -12,7 +12,7 @@ mutation document mutationAttachDocumentToDomain {
     documentId       string  @required
     attachedDomains  object  @required
   }
-  insert {
+  update {
     id: args.documentId
     args.attachedDomains
   }
@@ -344,7 +344,7 @@ mutation document mutationUpdateDocumentValidation {
     validatedBy       string
     validatedAt       string
   }
-  insert {
+  update {
     id: args.documentId
     args.validationStatus
     args.validatedBy
@@ -390,7 +390,7 @@ mutation spreadsheetRow mutationUpdateSpreadsheetRow {
     diffFromMatched       object
     embeddedAsChunkId     string
   }
-  insert {
+  update {
     id: args.rowId
     args.validationStatus
     args.validatedBy

@@ -588,18 +588,12 @@ func MutationBumpMissingCapabilitySightingBuild(args MutationBumpMissingCapabili
 	return b.String()
 }
 
-// MutationBumpPATLastUsedAt -- Bump the lastUsedAt stamp on a PAT identity. Best-effort; callers must not fail the request on error.
+// MutationBumpPATLastUsedAt -- Bump the lastUsedAt stamp on a PAT identity. Best-effort; callers must not fail the request on error. Read-merges the existing row so only lastUsedAt changes; identityType/credentials/label/active/usableByAgents inherit from the persisted row instead of being re-supplied (memql#1628).
 //
 // Bound concept: identity.
 type MutationBumpPATLastUsedAtArgs struct {
-	IdentityId        string
-	UserId            string
-	Label             string
-	KeyHash           string
-	Active            bool
-	UsableByAgents    bool
-	UsableByAgentsSet bool // set true to send usableByAgents; required because zero-value bool is ambiguous
-	LastUsedAt        string
+	IdentityId string
+	LastUsedAt string
 }
 
 // MutationBumpPATLastUsedAt calls the engine mutation mutationBumpPATLastUsedAt.
@@ -613,33 +607,6 @@ func MutationBumpPATLastUsedAtBuild(args MutationBumpPATLastUsedAtArgs) string {
 	b.WriteString("mutationBumpPATLastUsedAt({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("label: ")
-	b.WriteString(fmt.Sprintf("%q", args.Label))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("keyHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("active: ")
-	b.WriteString(fmt.Sprintf("%v", args.Active))
-	if args.UsableByAgentsSet {
-		if b.Len() > 27 {
-			b.WriteString(", ")
-		}
-		b.WriteString("usableByAgents: ")
-		b.WriteString(fmt.Sprintf("%v", args.UsableByAgents))
-	}
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
@@ -6435,7 +6402,7 @@ func MutationDecayHarnessSemanticMemoryBuild(args MutationDecayHarnessSemanticMe
 	return b.String()
 }
 
-// MutationDeleteAgent -- Soft-delete an agent (active:false, deleted:true).
+// MutationDeleteAgent -- Soft-delete an agent (active:false, deleted:true). Read-merges the existing row so the caller only passes the agent id; every other required field (kind, name, ...) inherits from the persisted row instead of being re-supplied (memql#1628).
 //
 // Bound concept: agent.
 type MutationDeleteAgentArgs struct {
@@ -9118,7 +9085,7 @@ func MutationRevertRecordBuild(args MutationRevertRecordArgs) string {
 	return b.String()
 }
 
-// MutationRevokeAgentAuthorization -- Soft-revoke a standing authorization. User-revocable from the agent's settings at any time.
+// MutationRevokeAgentAuthorization -- Soft-revoke a standing authorization. User-revocable from the agent's settings at any time. Read-merges the existing row so the caller only passes the auth id; agentId/userId/planKind/spaceScope inherit from the persisted row (memql#1628).
 //
 // Bound concept: agentAuthorization.
 type MutationRevokeAgentAuthorizationArgs struct {
@@ -9140,19 +9107,13 @@ func MutationRevokeAgentAuthorizationBuild(args MutationRevokeAgentAuthorization
 	return b.String()
 }
 
-// MutationRevokeAuthSession -- Mark a bearer-token session revoked while preserving the discriminator fields the projection requires.
+// MutationRevokeAuthSession -- Mark a bearer-token session revoked. Read-merges the existing row so only revokedReason + revokedAt change; the discriminator fields (subject, tokenHash, source, expiresAt, userId) and the rotation bookkeeping inherit from the persisted row instead of being re-supplied (memql#1628).
 //
 // Bound concept: authSession.
 type MutationRevokeAuthSessionArgs struct {
 	SessionId string
-	Subject   string
-	TokenHash string
-	// Enum: bff_exchange | oidc_cookie
-	Source    string
-	ExpiresAt string
 	// Enum: user_action | all_sessions | admin
 	RevokedReason string
-	UserId        string
 }
 
 // MutationRevokeAuthSession calls the engine mutation mutationRevokeAuthSession.
@@ -9169,35 +9130,8 @@ func MutationRevokeAuthSessionBuild(args MutationRevokeAuthSessionArgs) string {
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
-	b.WriteString("subject: ")
-	b.WriteString(fmt.Sprintf("%q", args.Subject))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("tokenHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("source: ")
-	b.WriteString(fmt.Sprintf("%q", args.Source))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("expiresAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
 	b.WriteString("revokedReason: ")
 	b.WriteString(fmt.Sprintf("%q", args.RevokedReason))
-	if args.UserId != "" {
-		if b.Len() > 27 {
-			b.WriteString(", ")
-		}
-		b.WriteString("userId: ")
-		b.WriteString(fmt.Sprintf("%q", args.UserId))
-	}
 	b.WriteString("})")
 	return b.String()
 }
@@ -9230,20 +9164,11 @@ func MutationRevokeDelegationBuild(args MutationRevokeDelegationArgs) string {
 	return b.String()
 }
 
-// MutationRevokeNodeTokenIdentity -- Revoke a node_token identity by flipping active=false on the row. Whole-replace update semantics require restating every credentials field. memql#350.
+// MutationRevokeNodeTokenIdentity -- Revoke a node_token identity by flipping active=false on the row. Read-merges the existing row so only `active` changes; the credentials block + every other field inherit from the persisted row instead of being re-supplied (memql#1628 -- replaces the old whole-replace restate-every-credentials-field pattern). memql#350.
 //
 // Bound concept: identity.
 type MutationRevokeNodeTokenIdentityArgs struct {
-	IdentityId       string
-	UserId           string
-	NodeId           string
-	NodeType         string
-	KeyHash          string
-	MintedBy         string
-	ExpiresAt        string
-	LastConnectAt    string
-	BootstrappedAt   string
-	BootstrappedFrom string
+	IdentityId string
 }
 
 // MutationRevokeNodeTokenIdentity calls the engine mutation mutationRevokeNodeTokenIdentity.
@@ -9257,65 +9182,15 @@ func MutationRevokeNodeTokenIdentityBuild(args MutationRevokeNodeTokenIdentityAr
 	b.WriteString("mutationRevokeNodeTokenIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("nodeId: ")
-	b.WriteString(fmt.Sprintf("%q", args.NodeId))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("nodeType: ")
-	b.WriteString(fmt.Sprintf("%q", args.NodeType))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("keyHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("mintedBy: ")
-	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("expiresAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("lastConnectAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.LastConnectAt))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("bootstrappedAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("bootstrappedFrom: ")
-	b.WriteString(fmt.Sprintf("%q", args.BootstrappedFrom))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationRevokePATIdentity -- Soft-revoke a PAT identity (api_key) by inserting a new version with active=false.
+// MutationRevokePATIdentity -- Soft-revoke a PAT identity (api_key) by flipping active=false. Read-merges the existing row so only `active` changes; identityType/credentials/label/usableByAgents inherit from the persisted row instead of being re-supplied (memql#1628).
 //
 // Bound concept: identity.
 type MutationRevokePATIdentityArgs struct {
-	IdentityId        string
-	UserId            string
-	Label             string
-	KeyHash           string
-	UsableByAgents    bool
-	UsableByAgentsSet bool // set true to send usableByAgents; required because zero-value bool is ambiguous
+	IdentityId string
 }
 
 // MutationRevokePATIdentity calls the engine mutation mutationRevokePATIdentity.
@@ -9329,28 +9204,6 @@ func MutationRevokePATIdentityBuild(args MutationRevokePATIdentityArgs) string {
 	b.WriteString("mutationRevokePATIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("label: ")
-	b.WriteString(fmt.Sprintf("%q", args.Label))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("keyHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if args.UsableByAgentsSet {
-		if b.Len() > 27 {
-			b.WriteString(", ")
-		}
-		b.WriteString("usableByAgents: ")
-		b.WriteString(fmt.Sprintf("%v", args.UsableByAgents))
-	}
 	b.WriteString("})")
 	return b.String()
 }
@@ -10767,17 +10620,12 @@ func MutationSoftDeleteWorkerInvocationBuild(args MutationSoftDeleteWorkerInvoca
 	return b.String()
 }
 
-// MutationStampNodeTokenBootstrap -- Update audit fields on a node_token identity row when the bootstrap handler issues a fresh JWT for it. memql#343.
+// MutationStampNodeTokenBootstrap -- Update audit fields on a node_token identity row when the bootstrap handler issues a fresh JWT for it. memql#343. Read-merges the existing row and deep-merges credentials (@mergeFields) so only the rotating keyHash + bootstrappedAt/bootstrappedFrom change; nodeId/nodeType/mintedBy/expiresAt/lastConnectAt inherit from the persisted row instead of being re-supplied or wiped (memql#1628).
 //
 // Bound concept: identity.
 type MutationStampNodeTokenBootstrapArgs struct {
 	IdentityId       string
-	UserId           string
-	NodeId           string
-	NodeType         string
 	KeyHash          string
-	MintedBy         string
-	ExpiresAt        string
 	BootstrappedAt   string
 	BootstrappedFrom string
 }
@@ -10796,33 +10644,8 @@ func MutationStampNodeTokenBootstrapBuild(args MutationStampNodeTokenBootstrapAr
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
-	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("nodeId: ")
-	b.WriteString(fmt.Sprintf("%q", args.NodeId))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("nodeType: ")
-	b.WriteString(fmt.Sprintf("%q", args.NodeType))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("mintedBy: ")
-	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("expiresAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
@@ -11606,13 +11429,11 @@ func MutationUpdateMissingCapabilityStatusBuild(args MutationUpdateMissingCapabi
 	return b.String()
 }
 
-// MutationUpdateNodeHealth -- Record a node health transition
+// MutationUpdateNodeHealth -- Record a node health transition. Read-merges the existing v1:cluster:node row (created on startup by logicRegisterNode under the same NodeId) so only health + lastSeen change; nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to \"\" and reset capabilities/labels on every transition).
 //
 // Bound concept: node.
 type MutationUpdateNodeHealthArgs struct {
 	Id       string
-	NodeType string
-	Address  string
 	Health   string
 	LastSeen string
 }
@@ -11628,18 +11449,6 @@ func MutationUpdateNodeHealthBuild(args MutationUpdateNodeHealthArgs) string {
 	b.WriteString("mutationUpdateNodeHealth({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 26 {
-		b.WriteString(", ")
-	}
-	b.WriteString("nodeType: ")
-	b.WriteString(fmt.Sprintf("%q", args.NodeType))
-	if args.Address != "" {
-		if b.Len() > 26 {
-			b.WriteString(", ")
-		}
-		b.WriteString("address: ")
-		b.WriteString(fmt.Sprintf("%q", args.Address))
-	}
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}

@@ -38,25 +38,14 @@ mutation accessRequest mutationApproveAccessRequest {
 // shape (identityType discriminator, credentials, active flag).
 
 @enabled
-@description("Bump the lastUsedAt stamp on a PAT identity. Best-effort; callers must not fail the request on error.")
+@description("Bump the lastUsedAt stamp on a PAT identity. Best-effort; callers must not fail the request on error. Read-merges the existing row so only lastUsedAt changes; identityType/credentials/label/active/usableByAgents inherit from the persisted row instead of being re-supplied (memql#1628).")
 mutation identity mutationBumpPATLastUsedAt {
   args {
     identityId      string  @required
-    userId          string  @required
-    label           string  @required
-    keyHash         string  @required
-    active          bool    @required
-    usableByAgents  bool
     lastUsedAt      string  @required
   }
-  insert {
+  update {
     id: args.identityId
-    args.userId
-    identityType: "api_key"
-    credentials: {keyHash: args.keyHash}
-    args.label
-    usableByAgents: coalesce(args.usableByAgents, false)
-    args.active
     args.lastUsedAt
   }
 }
@@ -1105,35 +1094,22 @@ mutation identity mutationCreateNodeTokenIdentity {
 // either an earlier bootstrap or an operator-CLI mint.
 
 @enabled
-@description("Update audit fields on a node_token identity row when the bootstrap handler issues a fresh JWT for it. memql#343.")
+@mergeFields("credentials")
+@description("Update audit fields on a node_token identity row when the bootstrap handler issues a fresh JWT for it. memql#343. Read-merges the existing row and deep-merges credentials (@mergeFields) so only the rotating keyHash + bootstrappedAt/bootstrappedFrom change; nodeId/nodeType/mintedBy/expiresAt/lastConnectAt inherit from the persisted row instead of being re-supplied or wiped (memql#1628).")
 mutation identity mutationStampNodeTokenBootstrap {
   args {
     identityId        string  @required
-    userId            string  @required
-    nodeId            string  @required
-    nodeType          string  @required
     keyHash           string  @required
-    mintedBy          string  @required
-    expiresAt         string  @required
     bootstrappedAt    string  @required
     bootstrappedFrom  string  @required
   }
   update {
     id: args.identityId
-    args.userId
-    identityType: "node_token"
     credentials: {
-        nodeId: args.nodeId,
-        nodeType: args.nodeType,
         keyHash: args.keyHash,
-        mintedBy: args.mintedBy,
-        expiresAt: args.expiresAt,
-        lastConnectAt: "",
         bootstrappedAt: args.bootstrappedAt,
         bootstrappedFrom: args.bootstrappedFrom
       }
-    label: args.nodeType
-    usableByAgents: false
     active: true
   }
 }
@@ -1163,36 +1139,13 @@ mutation identity mutationStampNodeTokenBootstrap {
 // the revoked row -- useful for incident triage.
 
 @enabled
-@description("Revoke a node_token identity by flipping active=false on the row. Whole-replace update semantics require restating every credentials field. memql#350.")
+@description("Revoke a node_token identity by flipping active=false on the row. Read-merges the existing row so only `active` changes; the credentials block + every other field inherit from the persisted row instead of being re-supplied (memql#1628 -- replaces the old whole-replace restate-every-credentials-field pattern). memql#350.")
 mutation identity mutationRevokeNodeTokenIdentity {
   args {
-    identityId        string  @required
-    userId            string  @required
-    nodeId            string  @required
-    nodeType          string  @required
-    keyHash           string  @required
-    mintedBy          string  @required
-    expiresAt         string  @required
-    lastConnectAt     string  @required
-    bootstrappedAt    string  @required
-    bootstrappedFrom  string  @required
+    identityId  string  @required
   }
   update {
     id: args.identityId
-    args.userId
-    identityType: "node_token"
-    credentials: {
-        nodeId: args.nodeId,
-        nodeType: args.nodeType,
-        keyHash: args.keyHash,
-        mintedBy: args.mintedBy,
-        expiresAt: args.expiresAt,
-        lastConnectAt: args.lastConnectAt,
-        bootstrappedAt: args.bootstrappedAt,
-        bootstrappedFrom: args.bootstrappedFrom
-      }
-    label: args.nodeType
-    usableByAgents: false
     active: false
   }
 }
@@ -1463,24 +1416,14 @@ mutation accessRequest mutationRejectAccessRequest {
 //
 
 @enabled
-@description("Mark a bearer-token session revoked while preserving the discriminator fields the projection requires.")
+@description("Mark a bearer-token session revoked. Read-merges the existing row so only revokedReason + revokedAt change; the discriminator fields (subject, tokenHash, source, expiresAt, userId) and the rotation bookkeeping inherit from the persisted row instead of being re-supplied (memql#1628).")
 mutation authSession mutationRevokeAuthSession {
   args {
     sessionId      string  @required
-    subject        string  @required
-    tokenHash      string  @required
-    source         string  @required  @enum("bff_exchange", "oidc_cookie")
-    expiresAt      string  @required
     revokedReason  string  @required  @enum("user_action", "all_sessions", "admin")
-    userId         string
   }
-  insert {
+  update {
     id: args.sessionId
-    userId: coalesce(args.userId, "")
-    args.subject
-    args.tokenHash
-    args.source
-    args.expiresAt
     args.revokedReason
     revokedAt: timestamp()
   }
@@ -1523,22 +1466,13 @@ mutation delegation mutationRevokeDelegation {
 // the discriminator (identityType=api_key) and credentials.keyHash.
 
 @enabled
-@description("Soft-revoke a PAT identity (api_key) by inserting a new version with active=false.")
+@description("Soft-revoke a PAT identity (api_key) by flipping active=false. Read-merges the existing row so only `active` changes; identityType/credentials/label/usableByAgents inherit from the persisted row instead of being re-supplied (memql#1628).")
 mutation identity mutationRevokePATIdentity {
   args {
-    identityId      string  @required
-    userId          string  @required
-    label           string  @required
-    keyHash         string  @required
-    usableByAgents  bool
+    identityId  string  @required
   }
-  insert {
+  update {
     id: args.identityId
-    args.userId
-    identityType: "api_key"
-    credentials: {keyHash: args.keyHash}
-    args.label
-    usableByAgents: coalesce(args.usableByAgents, false)
     active: false
   }
 }

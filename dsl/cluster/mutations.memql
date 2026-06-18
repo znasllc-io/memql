@@ -144,23 +144,16 @@ mutation spawnEvent mutationCreateSpawnEvent {
 // subscribes to for live topology updates.
 
 @enabled
-@description("Record a node health transition")
+@description("Record a node health transition. Read-merges the existing v1:cluster:node row (created on startup by logicRegisterNode under the same NodeId) so only health + lastSeen change; nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to \"\" and reset capabilities/labels on every transition).")
 mutation node mutationUpdateNodeHealth {
   args {
     id        string  @required
-    nodeType  string  @required
-    address   string
     health    string  @required
     lastSeen  string  @required
   }
-  insert {
-    args.id
-    args.nodeType
-    address: coalesce(args.address, "")
-    parentId: ""
+  update {
+    id: args.id
     args.health
     args.lastSeen
-    capabilities: []
-    labels: {}
   }
 }
