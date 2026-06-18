@@ -89,8 +89,10 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 			decl.AllowedRoles = attrStringListValue(attr)
 		case "scopes":
 			decl.Scopes = attrStringListValue(attr)
+		case "mcp":
+			decl.MCPExposed = true
 		default:
-			return nil, newParseErrorf(&p.current, "tool %q: unknown annotation @%s -- supported: @allowedRoles, @clientExecution, @description, @destructive, @enabled, @executionTime, @handler, @rateLimit, @requiresConfirmation, @scopes", decl.Name, attr.Name)
+			return nil, newParseErrorf(&p.current, "tool %q: unknown annotation @%s -- supported: @allowedRoles, @clientExecution, @description, @destructive, @enabled, @executionTime, @handler, @mcp, @rateLimit, @requiresConfirmation, @scopes", decl.Name, attr.Name)
 		}
 	}
 

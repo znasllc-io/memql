@@ -228,6 +228,38 @@ tool uiClick {
 	}
 }
 
+// TestParseToolDecl_MCPExposed locks @mcp as a flag annotation on a tool
+// that flips ToolDecl.MCPExposed -- the opt-in for the curated MCP
+// connector surface (memql#1596).
+func TestParseToolDecl_MCPExposed(t *testing.T) {
+	source := `@mcp
+@description("Create a note")
+tool notesCreate {
+  body  string  @required
+}`
+
+	got, err := ParseToolDecl(source)
+	if err != nil {
+		t.Fatalf("ParseToolDecl: %v", err)
+	}
+	if !got.MCPExposed {
+		t.Error("MCPExposed = false, want true")
+	}
+
+	// Absent @mcp -> MCPExposed stays false (untagged tools are excluded
+	// once any tool is curated).
+	plain, err := ParseToolDecl(`@description("x")
+tool plainTool {
+  arg  string  @required
+}`)
+	if err != nil {
+		t.Fatalf("ParseToolDecl(plain): %v", err)
+	}
+	if plain.MCPExposed {
+		t.Error("MCPExposed = true for untagged tool, want false")
+	}
+}
+
 // TestParseToolDecl_AllowedRoles locks @allowedRoles("a", "b") as a
 // positional string list landing on ToolDecl.AllowedRoles in order.
 func TestParseToolDecl_AllowedRoles(t *testing.T) {

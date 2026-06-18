@@ -106,6 +106,7 @@ func toolDeclToTool(decl *ast.ToolDecl, origin string) ([]*Tool, error) {
 		InputSchema:        json.RawMessage(schemaJSON),
 		AutoInjectedFields: autoInjected,
 		ClientExecution:    decl.ClientExecution,
+		MCPExposed:         decl.MCPExposed,
 		Origin:             origin,
 	}
 	if len(decl.AllowedRoles) > 0 {

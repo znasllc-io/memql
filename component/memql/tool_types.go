@@ -39,6 +39,13 @@ type Tool struct {
 	// by tools that affect browser UI (CoPresent Operator primitives).
 	ClientExecution bool `json:"clientExecution,omitempty"`
 
+	// MCPExposed, when true, opts this tool into the curated MCP
+	// connector surface (memql#1596). The MCP node's tools/list reflects
+	// only MCPExposed tools once ANY tool carries the flag; with zero
+	// tagged tools the full surface is reflected, so the annotation is
+	// inert until the curated set is tagged.
+	MCPExposed bool `json:"mcpExposed,omitempty"`
+
 	// Scopes the tool requires ("read" | "navigate" | "highlight" |
 	// "create" | "update" | "delete" | "identity" | "billing"). The
 	// caller's granted scope set must be a superset or the dispatcher
@@ -154,6 +161,7 @@ func (t *Tool) clone() *Tool {
 		Name:            t.Name,
 		Description:     t.Description,
 		ClientExecution: t.ClientExecution,
+		MCPExposed:      t.MCPExposed,
 		Origin:          t.Origin,
 	}
 

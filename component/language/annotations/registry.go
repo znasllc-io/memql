@@ -47,7 +47,7 @@ var ByReceiver = map[string][]string{
 	"Tool": {
 		"description", "enabled", "disabled", "handler", "executionTime",
 		"destructive", "requiresConfirmation", "rateLimit",
-		"clientExecution", "allowedRoles", "scopes",
+		"clientExecution", "allowedRoles", "scopes", "mcp",
 	},
 	"Builtin": {
 		"description", "enabled", "disabled", "internal", "executor", "alias", "args", "sdk",
@@ -84,7 +84,7 @@ var Docs = map[string]string{
 	"trigger": "Event trigger for automations. Format: @trigger(event=\"graph.node.created.*.v1:ns:concept\") or @trigger(schedule=\"0 0 * * * *\").",
 	"filter":  "Filter expression for automation triggers.",
 	// MCP promotion (epic memql#1529 Phase 4 #1534).
-	"mcp": "Promote this query/mutation/automation into its own first-class MCP tool (otherwise it stays reachable via the generic run_query / run_mutation / run_automation dispatchers).",
+	"mcp": "Expose this construct on the MCP connector surface. On a query/mutation/automation it promotes the construct into its own first-class MCP tool (otherwise it stays reachable via the generic run_query / run_mutation / run_automation dispatchers). On a tool it opts the tool into the curated connector allowlist: once ANY tool carries @mcp, tools/list reflects only @mcp tools (otherwise -- zero tagged -- the full tool surface is reflected, so the annotation is inert until the curated set is tagged).",
 	// Tool.
 	"handler":              "Tool handler configuration. Format: @handler(type=\"query\", query=\"...\") / @handler(type=\"function\", name=\"...\").",
 	"executionTime":        "Expected execution time hint: \"fast\", \"medium\", or \"slow\".",

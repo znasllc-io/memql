@@ -259,3 +259,62 @@ func TestNamedCallQuery(t *testing.T) {
 		t.Error("empty name should error")
 	}
 }
+
+// TestListMCPTools_CuratedAllowlist pins the #1596 curated surface: once
+// ANY tool carries @mcp (Tool.MCPExposed), tools/list reflects ONLY the
+// @mcp tools; with zero tagged tools the annotation is inert and the full
+// reflected surface shows. The meta-tools are unaffected either way.
+func TestListMCPTools_CuratedAllowlist(t *testing.T) {
+	mcpTool := func(name string) *memql.Tool {
+		return &memql.Tool{Name: name, Description: name + " desc", MCPExposed: true}
+	}
+
+	// Inert: no tool tagged -> full reflected surface (back-compat).
+	t.Run("inert when none tagged", func(t *testing.T) {
+		eng := &fakeEngine{reg: &fakeRegistry{tools: []*memql.Tool{
+			tool("alpha", nil, false),
+			tool("beta", nil, false),
+		}}}
+		names := toolNames(listMCPTools(eng, "assistant", TierSealed))
+		if !names["alpha"] || !names["beta"] {
+			t.Fatalf("with zero @mcp tools, full surface must show; got %v", names)
+		}
+	})
+
+	// Curated: one tool tagged -> only @mcp tools reflected; untagged
+	// (e.g. an infra/admin tool, #1597) is dropped. Meta-tools still present.
+	t.Run("allowlist when any tagged", func(t *testing.T) {
+		eng := &fakeEngine{reg: &fakeRegistry{tools: []*memql.Tool{
+			mcpTool("notesCreate"),         // curated -> shown
+			tool("clusterSweep", nil, false), // untagged infra -> hidden
+		}}}
+		names := toolNames(listMCPTools(eng, "assistant", TierSealed))
+		if !names["notesCreate"] {
+			t.Errorf("@mcp tool notesCreate must be in the curated surface; got %v", names)
+		}
+		if names["clusterSweep"] {
+			t.Errorf("untagged tool clusterSweep must be excluded from the curated surface; got %v", names)
+		}
+		// run_query / run_mutation / run_automation meta-tools are not gated.
+		if !names["run_query"] {
+			t.Errorf("meta-tools must remain present under curation; got %v", names)
+		}
+	})
+
+	// Curation respects the role gate too: an @mcp tool restricted to a
+	// role the caller lacks is still dropped.
+	t.Run("curation composes with role gate", func(t *testing.T) {
+		restricted := &memql.Tool{Name: "gaOnly", Description: "d", MCPExposed: true, AllowedRoles: []string{"assistant"}}
+		eng := &fakeEngine{reg: &fakeRegistry{tools: []*memql.Tool{
+			mcpTool("notesCreate"),
+			restricted,
+		}}}
+		names := toolNames(listMCPTools(eng, "specialist", TierSealed))
+		if !names["notesCreate"] {
+			t.Errorf("notesCreate should be visible to specialist; got %v", names)
+		}
+		if names["gaOnly"] {
+			t.Errorf("assistant-restricted @mcp tool must be hidden from specialist; got %v", names)
+		}
+	})
+}
