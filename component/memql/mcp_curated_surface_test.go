@@ -24,6 +24,10 @@ func TestMCPCuratedToolSurface(t *testing.T) {
 		"todosCreate", "todosList", "todosUpdate", "todosComplete",
 		"calendarCreate", "calendarList", "calendarFind", "calendarUpdate", "calendarDelete",
 		"searchUsers",
+		// describeFunction re-added to the curated surface: #1646 supersedes the
+		// #1597 decision to exclude it. Function/arg introspection materially
+		// improves MCP-client usability, so it is intentionally @mcp-tagged.
+		"describeFunction",
 	}
 
 	registry := newToolRegistry()
@@ -40,12 +44,6 @@ func TestMCPCuratedToolSurface(t *testing.T) {
 		if !tool.MCPExposed {
 			t.Errorf("curated tool %q is not @mcp-tagged (MCPExposed=false) -- it would be dropped from the connector surface", name)
 		}
-	}
-
-	// describeFunction is an introspection meta-tool, intentionally EXCLUDED
-	// from the connector (#1597) -- it must stay untagged.
-	if tool, err := registry.Get("describeFunction"); err == nil && tool.MCPExposed {
-		t.Errorf("describeFunction is @mcp-tagged but should be excluded from the curated connector surface (#1597)")
 	}
 
 	// The set of @mcp-tagged engine tools must be EXACTLY the curated set --

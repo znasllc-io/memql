@@ -115,3 +115,33 @@ func TestRealEngineExposesResourcesAndPrompts(t *testing.T) {
 
 	t.Logf("real-engine MCP surface: %d resources, %d prompts", len(resources), len(prompts))
 }
+
+// TestRealEngineCuratedToolSurface pins the #1646 curated tool-surface decision
+// over a real, fully-loaded engine: describeFunction (function/arg
+// introspection) is re-added to the curated @mcp allowlist because it
+// materially improves MCP-client usability, while recentChat stays
+// intentionally EXCLUDED -- its spaceId is @autoInjected/server-stamped from
+// the agent runtime (memql#107), which has no value over an MCP session, so
+// exposing it would dispatch with a blank spaceId. searchUsers (already @mcp)
+// stays in. This fails before the @mcp tag is added to describeFunction and
+// passes after.
+func TestRealEngineCuratedToolSurface(t *testing.T) {
+	eng := loadedEngine(t)
+
+	names := map[string]bool{}
+	for _, m := range listMCPTools(asEngine(eng), "assistant", TierSealed) {
+		if n, _ := m["name"].(string); n != "" {
+			names[n] = true
+		}
+	}
+
+	if !names["describeFunction"] {
+		t.Errorf("describeFunction must be in the curated MCP surface (#1646); got tools %v", names)
+	}
+	if !names["searchUsers"] {
+		t.Errorf("searchUsers (already @mcp) must remain in the curated MCP surface; got tools %v", names)
+	}
+	if names["recentChat"] {
+		t.Errorf("recentChat must be EXCLUDED from the curated MCP surface (autoInjected spaceId, #1646); got tools %v", names)
+	}
+}
