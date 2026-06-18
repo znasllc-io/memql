@@ -228,7 +228,7 @@ query plan queryWaitingPlansForUser {
 
 @enabled
 @description("Latest persisted state for a Task (planner reads this on resume).")
-query plan queryTaskStateById {
+query taskState queryTaskStateById {
   args {
     taskId  string  @required
   }
@@ -253,7 +253,7 @@ query plan queryTaskStateById {
 
 @enabled
 @description("All Tasks for a Plan, in seq order.")
-query taskState queryTasksForPlan {
+query task queryTasksForPlan {
   args {
     planId  string  @required
   }

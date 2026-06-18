@@ -884,5 +884,114 @@ func stripLineComment(line string) string {
 	return line
 }
 
+// TestQueryConceptMatchesShapeConcept asserts that every struct-form query
+// is bound (in its `query <Concept> <name>` signature) to the SAME concept as
+// the `@row` shape it projects.
+//
+// Background (memql#1634): a query's signature concept names the table the
+// engine SCANS; the shape only projects fields. When the two disagree the
+// query scans the wrong concept and returns [] for rows that were written
+// under the other concept -- silently, with no load-time or parse-time error.
+// The 2026-05 signature-bound-concept migration (commit f7b6ab3) SWAPPED the
+// bindings for two planner queries: queryTaskStateById became `query plan`
+// (reads taskState via taskStateFull) and queryTasksForPlan became
+// `query taskState` (reads task via taskFull). Both returned [] right after
+// successful creates. This invariant catches that class at test time.
+//
+// Only `@row` (concept-bound) shapes are checked. `@actor`-only shapes carry
+// no concept in their signature (single identifier after `shape`) and are
+// skipped -- a query never scans an actor envelope.
+func TestQueryConceptMatchesShapeConcept(t *testing.T) {
+	tree := Tree()
+	paths, err := dslfs.WalkMemqlFiles(tree)
+	if err != nil {
+		t.Fatalf("WalkMemqlFiles: %v", err)
+	}
+
+	readFile := func(p string) string {
+		f, openErr := tree.Open(p)
+		if openErr != nil {
+			t.Fatalf("open %s: %v", p, openErr)
+		}
+		raw, readErr := io.ReadAll(f)
+		f.Close()
+		if readErr != nil {
+			t.Fatalf("read %s: %v", p, readErr)
+		}
+		return string(raw)
+	}
+
+	// `shape <Concept> <name> {` -> concept-bound (@row / mixed). The
+	// single-identifier `shape <name> {` form is @actor-only (no concept).
+	shapeDeclRe := regexp.MustCompile(`^\s*shape\s+(\w+)\s+(\w+)\s*\{`)
+	// `query <Concept> <name> {`
+	queryDeclRe := regexp.MustCompile(`^\s*query\s+(\w+)\s+(\w+)\s*\{`)
+	// `shape <shapeName>` clause inside a query body.
+	shapeClauseRe := regexp.MustCompile(`^\s*shape\s+(\w+)\s*$`)
+
+	// Exempted (query -> shape) pairs: a shape deliberately REUSED across two
+	// sibling concepts with an identical field layout. The query's scan
+	// concept is correct (a mutation writes rows under it); only the projection
+	// borrows a shape whose signature names the other sibling. This is NOT the
+	// #1634 wrong-scan bug. variableFull projects {key,value,...} shared by
+	// platform's globalVariable + partitionVariable.
+	sharedShapeExempt := map[string]string{
+		"queryGlobalVariable":  "variableFull",
+		"queryGlobalVariables": "variableFull",
+	}
+
+	// Pass 1: global shapeName -> concept (concept-bound shapes only).
+	shapeConcept := map[string]string{}
+	for _, p := range paths {
+		if strings.HasPrefix(p, "_reference/") || !strings.HasSuffix(p, "shapes.memql") {
+			continue
+		}
+		for _, line := range strings.Split(readFile(p), "\n") {
+			if m := shapeDeclRe.FindStringSubmatch(stripLineComment(line)); m != nil {
+				shapeConcept[m[2]] = m[1]
+			}
+		}
+	}
+
+	// Pass 2: walk queries; compare each query's concept to its shape's concept.
+	type violation struct {
+		file, query, queryConcept, shape, shapeConcept string
+	}
+	var violations []violation
+	for _, p := range paths {
+		if strings.HasPrefix(p, "_reference/") || !strings.HasSuffix(p, "queries.memql") {
+			continue
+		}
+		var curQuery, curConcept string
+		for _, raw := range strings.Split(readFile(p), "\n") {
+			line := stripLineComment(raw)
+			if m := queryDeclRe.FindStringSubmatch(line); m != nil {
+				curConcept, curQuery = m[1], m[2]
+				continue
+			}
+			m := shapeClauseRe.FindStringSubmatch(line)
+			if m == nil || curQuery == "" {
+				continue
+			}
+			shapeName := m[1]
+			sc, ok := shapeConcept[shapeName]
+			if !ok {
+				// @actor-only shape or unknown -> nothing to compare.
+				curQuery = ""
+				continue
+			}
+			if sc != curConcept && sharedShapeExempt[curQuery] != shapeName {
+				violations = append(violations, violation{p, curQuery, curConcept, shapeName, sc})
+			}
+			curQuery = ""
+		}
+	}
+
+	for _, v := range violations {
+		t.Errorf("%s: query %q is bound to concept %q but projects @row shape %q bound to concept %q -- the query will scan %q and return [] for rows written under %q (memql#1634)",
+			v.file, v.query, v.queryConcept, v.shape, v.shapeConcept, v.queryConcept, v.shapeConcept)
+	}
+}
+
 // Compile-time guarantee that fs is referenced.
 var _ fs.FS = (fs.FS)(nil)
