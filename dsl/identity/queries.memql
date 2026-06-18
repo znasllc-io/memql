@@ -198,7 +198,7 @@ query auditEvent queryAuditEventsByActor {
 // See queryAuditEventsByActor for the full rationale.
 //
 // Arguments:
-//   userId (string, required) - v1:identity:user.id of the target
+//   targetId (string, required) - v1:identity:user.id of the target
 //
 // Returns:
 //   Zero or more audit-event rows in auditEventFull shape.
@@ -209,12 +209,12 @@ query auditEvent queryAuditEventsByActor {
 // Companion of `queryAuditEventsByActor`; same admin-only audit
 // view. Proper admin gating is a #54 follow-up.
 @public
-@description("Audit events where targetId equals the supplied userId. Pair with queryAuditEventsByActor for full per-user history (no OR operator in the filter grammar yet).")
+@description("Audit events where targetId equals the supplied targetId. Pair with queryAuditEventsByActor for full per-user history (no OR operator in the filter grammar yet).")
 query auditEvent queryAuditEventsByTarget {
   args {
-    userId  string  @required
+    targetId  string  @required
   }
-  filter  payload.targetId==args.userId
+  filter  payload.targetId==args.targetId
   shape   auditEventFull
 }
 
