@@ -15,6 +15,7 @@ query note queryNotes {
 
 @enabled
 @description("Fetch a single note by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's note even with its id. Used by the update tool to confirm the row exists before re-inserting a new version.")
+@mcp
 query note queryNoteById {
   args {
     noteId  string  @required

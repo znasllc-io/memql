@@ -13,6 +13,7 @@ use common.traits.{ traitIsNotDeleted }
 
 @enabled
 @description("Get a single calendar event by node id. Self-scoped: the ownerUserId==actor.userId predicate guarantees a caller can only fetch their own events. Backs the calendar tool's update/delete pre-read and the event detail view.")
+@mcp
 query calendarEvent queryCalendarEventById {
   args {
     eventId  string  @required
@@ -23,6 +24,7 @@ query calendarEvent queryCalendarEventById {
 
 @enabled
 @description("List the authenticated caller's events whose start falls within a [windowStart, windowEnd] instant range, in start order. The reactive harness's reminder responsibilities read this for the 'remind me the day before X' condition (pass windowStart=now, windowEnd=now+lookahead). Self-scoped via actor.userId -- another user's events are never returned.")
+@mcp
 query calendarEvent queryUpcomingEvents {
   args {
     windowStart  datetime  @required @description("Inclusive lower bound on payload.startsAt (typically `now`).")

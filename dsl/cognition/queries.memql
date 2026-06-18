@@ -17,6 +17,7 @@ query participant queryActiveHumanParticipants {
 
 @enabled
 @description("Returns spaces with status='active' (the default), scoped to the caller's per-row authz reach. Optional userId arg narrows to a specific creator. Used by the cockpit Chat tab to populate the space list.")
+@mcp
 query space queryActiveSpaces {
   args {
     userId  string
