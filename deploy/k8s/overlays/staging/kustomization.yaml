@@ -1,20 +1,20 @@
-# Staging overlay -> 0.9.67: FULL-STACK release of MCP connector hardening wave 2
-# (epic #1609). ALL nine images re-pinned to 0.9.67, built on the GitHub BUILD
-# SERVER (OIDC->ACR): engine (identity/voice/mcp) from main; carrier
-# (bff/cognition/agent/planner/workbench) + SPA (copresent) rebuilt against
-# engine main -> engineVersion + builtAgainstEngine bumped 0.9.63 -> 0.9.67.
-# This supersedes the mcp-only 0.9.67 pin and brings the carrier nodes onto the
-# same engine, so the fixes that run OFF the mcp node take effect in production:
-#   - #1614: coalesce honors an empty-string fallback across all four evaluators
-#     -> #1605 generatedOutput artifact indexing now yields "" (not nil) on the
-#     carrier nodes (bff/agent) where that automation runs; WARN noise cleared.
-#   - #1608: seed dedup resolves the canonical concept id (no v1::agent) on
-#     every node's startup sweep.
-#   - #1596/#1597: @mcp curated connector tool surface (~456 -> ~21).
-#   - #1599: shared-session MCP automation runner.
-#   - #1606: object/array tool-arg schema; #1607: identity refresh_token grant;
-#     #1598: resources/prompts smoke assertion.
-# livekit pin (#1043) + NODE_IP patch preserved.
+# Staging overlay -> 0.9.68: FULL-STACK release of the MCP connector run-2 QA
+# wave (epics #1627 + #1609). All eight engine + carrier images re-pinned to
+# 0.9.68, built on the GitHub BUILD SERVER (OIDC->ACR): engine (identity/voice/
+# mcp) from main; carrier (bff/cognition/agent/planner/workbench) rebuilt
+# against engine main -> engineVersion + builtAgainstEngine bumped 0.9.67 ->
+# 0.9.68. copresent SPA source unchanged (digest identical, re-tagged 0.9.68 for
+# coherence). This wave fixes the run-2 connector findings across both lanes:
+#   Lane A (engine): #1628 update/revoke/delete read-merge, #1629 literal
+#     now/null date-time + nullable optionals, #1630 arg-vs-concept type
+#     contradictions, #1631 nil-filter literal, #1633 dropped/unknown args.
+#   Lane B (DSL): #1625 searchUsers concept, #1626 indexer null fields, #1632
+#     safety concept bindings, #1634 task read-consistency, #1635 harness
+#     pending->ready, #1636-1640 space/participant/session/presence,
+#     #1641 knowledgeBridge shape, #1642/#1643a cluster node, #1644 worker
+#     soft-delete, #1645 assignResponsibility scope, #1646 describeFunction.
+# Follow-ups #1659 (actor.isClusterOwner) + #1663 (run_automation resolver)
+# ship in a later cut. livekit pin (#1043) + NODE_IP patch preserved.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -36,28 +36,27 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:e2e20eb00d47f4535e18123f29d6c73945664570baf98f1d7b31b4f7b227f98f
+    digest: sha256:110a647e380e56f21e0372f506b0adb19da6de53686cf2cd7b7b9218d4cdd0e5
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:d989c3b5b2c7e84c5465e50d24af6b6215971705b2e946f4090b2a6f715abbf4
+    digest: sha256:305bd863b0e3e114f63abbc2090874ca54fa62f01bfc1e9e89aa8859421a52dd
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:4f4d1391450bbda50af4a99e52eb286708aa4140515be15ff357c7e0d2438a51
+    digest: sha256:cbd5aa0ef6f2f90d6b84fabcb4f6af205651f4de69ea5fad95a166710a889e37
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:c4e1d047380b2fee050f9b1be3dcf714edea455a564a28184e951815ced7681e
+    digest: sha256:663226e86196d765251058ae19552717467447f29e0458399018b0b9c441497b
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:215de13cc9b87b46e6b65cdad7aa609e608d0100ed8a46d0d12af0f85036df1a
+    digest: sha256:6df5e2e12aad7ea3d1b591bf96a9206400b6eb9b1a5953c136adeb32de92c9aa
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:a74054a238db8648ea76e03d6e25a5afa43359070dbe317f9422b7107be19308
+    digest: sha256:a28d170808e017d74cb060548e68e10d6c5c8118fceb730681392d6f45eae6a6
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:ff842a85d0f32cf144b758f96feb22caf7a731e3f149a1e2c1aacab116168354
+    digest: sha256:b7db71e718346a127dfe06b3ea19a6861ee9eaee18a088149707e89954c3b6c8
   # memql-mcp (epic memql#1550): remote MCP node, engine-built on the GitHub
   # build server (#1581 wired it into build-engine-images + the release tooling).
-  # 0.9.67: rebuilt from main carrying the curated tool surface (#1596/#1597),
-  # shared-session automation runner (#1599), the coalesce empty-fallback fix
-  # (#1614, which makes #1605 effective), the seed concept-id fix (#1608), and
-  # the resources/prompts smoke assertion (#1598). Prior 0.9.66 carried #1606 +
-  # #1605; 0.9.65 carried #1595 + #1602.
+  # 0.9.68: rebuilt from main carrying the full run-2 QA wave (Lane A engine
+  # fixes #1628-#1633 + Lane B DSL fixes #1625-#1646). The curated tool surface
+  # now includes describeFunction (#1646); searchUsers points at v1:identity:user
+  # (#1625).
   - name: acrmemql.azurecr.io/memql-mcp
-    digest: sha256:aee8756cc6c2ecbc32cc4f8a3964b91a1e7846569add1b6246afa94c13f63ae0
+    digest: sha256:ae45fd4d5dd17866dc455197802b83448a09a72f6bb39ad4a29d154d17545768
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:75e566e71e30d0b35c6c6708dda34a37ab9f2a74ec575f18c0787beffc949bf2
   - name: livekit/livekit-server
