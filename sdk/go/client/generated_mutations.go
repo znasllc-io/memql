@@ -2359,9 +2359,11 @@ func MutationCreateCalendarEventBuild(args MutationCreateCalendarEventArgs) stri
 //
 // Bound concept: cluster.
 type MutationCreateClusterArgs struct {
-	Name               string
-	Region             string
-	Environment        string
+	Name        string
+	Region      string
+	Environment string
+	// Enum: bootstrapping | healthy | degraded | shutting_down
+	Status             string
 	DatabaseId         string
 	IdentityProviderId string
 	Version            string
@@ -2390,6 +2392,13 @@ func MutationCreateClusterBuild(args MutationCreateClusterArgs) string {
 	}
 	b.WriteString("environment: ")
 	b.WriteString(fmt.Sprintf("%q", args.Environment))
+	if args.Status != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(fmt.Sprintf("%q", args.Status))
+	}
 	if args.DatabaseId != "" {
 		if b.Len() > 23 {
 			b.WriteString(", ")
@@ -4051,11 +4060,13 @@ func MutationCreateMemoryBuild(args MutationCreateMemoryArgs) string {
 //
 // Bound concept: node.
 type MutationCreateNodeArgs struct {
-	Id       string
-	NodeType string
-	Address  string
-	Health   string
-	LastSeen string
+	Id           string
+	NodeType     string
+	Address      string
+	Health       string
+	LastSeen     string
+	Capabilities []string
+	Labels       map[string]any
 }
 
 // MutationCreateNode calls the engine mutation mutationCreateNode.
@@ -4096,6 +4107,20 @@ func MutationCreateNodeBuild(args MutationCreateNodeArgs) string {
 		}
 		b.WriteString("lastSeen: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastSeen))
+	}
+	if args.Capabilities != nil {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("capabilities: ")
+		b.WriteString(renderMemQLValue(args.Capabilities))
+	}
+	if args.Labels != nil {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("labels: ")
+		b.WriteString(renderMemQLValue(args.Labels))
 	}
 	b.WriteString("})")
 	return b.String()
@@ -5371,10 +5396,12 @@ func MutationCreateSpaceBuild(args MutationCreateSpaceArgs) string {
 //
 // Bound concept: spawnEvent.
 type MutationCreateSpawnEventArgs struct {
-	NodeId   string
-	NodeType string
-	Action   string
-	Reason   string
+	NodeId      string
+	NodeType    string
+	Action      string
+	InitiatorId string
+	Reason      string
+	Metadata    map[string]any
 }
 
 // MutationCreateSpawnEvent calls the engine mutation mutationCreateSpawnEvent.
@@ -5398,12 +5425,26 @@ func MutationCreateSpawnEventBuild(args MutationCreateSpawnEventArgs) string {
 	}
 	b.WriteString("action: ")
 	b.WriteString(fmt.Sprintf("%q", args.Action))
+	if args.InitiatorId != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("initiatorId: ")
+		b.WriteString(fmt.Sprintf("%q", args.InitiatorId))
+	}
 	if args.Reason != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
+	}
+	if args.Metadata != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("metadata: ")
+		b.WriteString(renderMemQLValue(args.Metadata))
 	}
 	b.WriteString("})")
 	return b.String()
@@ -5463,8 +5504,10 @@ func MutationCreateSpreadsheetRowBuild(args MutationCreateSpreadsheetRowArgs) st
 //
 // Bound concept: task.
 type MutationCreateTaskArgs struct {
-	TaskId           string
-	PlanId           string
+	TaskId string
+	PlanId string
+	// Enum: semantic | toolInvocation
+	Category         string
 	Kind             string
 	Seq              int
 	Phase            string
@@ -5491,6 +5534,13 @@ func MutationCreateTaskBuild(args MutationCreateTaskArgs) string {
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	if args.Category != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("category: ")
+		b.WriteString(fmt.Sprintf("%q", args.Category))
+	}
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
@@ -7493,6 +7543,7 @@ func MutationLogMissingCapabilityBuild(args MutationLogMissingCapabilityArgs) st
 type MutationMarkChunkSupersededArgs struct {
 	ChunkId          string
 	SupersededAt     string
+	Reason           string
 	SupersededReason string
 }
 
@@ -7512,6 +7563,13 @@ func MutationMarkChunkSupersededBuild(args MutationMarkChunkSupersededArgs) stri
 	}
 	b.WriteString("supersededAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.SupersededAt))
+	if args.Reason != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reason: ")
+		b.WriteString(fmt.Sprintf("%q", args.Reason))
+	}
 	if args.SupersededReason != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
@@ -10618,8 +10676,9 @@ func MutationSetSpaceGoalBuild(args MutationSetSpaceGoalArgs) string {
 //
 // Bound concept: user.
 type MutationSetUserActiveSpaceArgs struct {
-	UserId  string
-	SpaceId string
+	UserId        string
+	SpaceId       string
+	ActiveSpaceId string
 }
 
 // MutationSetUserActiveSpace calls the engine mutation mutationSetUserActiveSpace.
@@ -10639,6 +10698,13 @@ func MutationSetUserActiveSpaceBuild(args MutationSetUserActiveSpaceArgs) string
 		}
 		b.WriteString("spaceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	}
+	if args.ActiveSpaceId != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("activeSpaceId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ActiveSpaceId))
 	}
 	b.WriteString("})")
 	return b.String()

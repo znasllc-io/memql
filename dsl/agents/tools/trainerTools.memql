@@ -63,9 +63,9 @@ tool writeKnowledgeChunk {
 @executionTime("fast")
 @description("Flag an existing chunk as outdated (mode='refresh' only). Sets superseded=true so retrieval stops surfacing it; the row is preserved for audit. Pair with a fresh writeKnowledgeChunk when you have replacement content.")
 tool markChunkSuperseded {
-  chunkId           string  @required @description("Id of the existing chunk to deprecate (from the existingCorpus you were given).")
-  supersededAt      string  @required @description("RFC3339 timestamp of when you marked it outdated (use `now`).")
-  supersededReason  string  @description("Why it's outdated, e.g. 'superseded by 2026 figures', 'source page removed'.")
+  chunkId       string  @required @description("Id of the existing chunk to deprecate (from the existingCorpus you were given).")
+  supersededAt  string  @required @description("RFC3339 timestamp of when you marked it outdated (use `now`).")
+  reason        string  @description("Why it's outdated, e.g. 'superseded by 2026 figures', 'source page removed'.")
 }
 
 @enabled

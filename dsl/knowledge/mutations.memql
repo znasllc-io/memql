@@ -482,12 +482,17 @@ mutation documentChunk mutationMarkChunkSuperseded {
   args {
     chunkId           string  @required
     supersededAt      string  @required
+    reason            string
     supersededReason  string
   }
   update {
     id: args.chunkId
     superseded: true
     args.supersededAt
-    args.supersededReason
+    // The Trainer Agent's prompt calls markChunkSuperseded(chunkId, reason),
+    // so the natural arg name is `reason`; the concept field is
+    // `supersededReason`. Accept either and land it on the concept field --
+    // previously `reason` was silently dropped. (#1633)
+    supersededReason: coalesce(args.reason, args.supersededReason, "")
   }
 }

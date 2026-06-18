@@ -403,6 +403,7 @@ mutation task mutationCreateTask {
   args {
     taskId            string
     planId            string  @required
+    category          string  @enum("semantic", "toolInvocation")
     kind              string  @required
     seq               int     @required
     phase             string
@@ -413,6 +414,11 @@ mutation task mutationCreateTask {
   insert {
     id: args.taskId
     args.planId
+    // category is @required on the v1:planner:task concept; the concept-level
+    // @default("semantic") is NOT applied on insert, so a caller-supplied
+    // category was silently dropped and the insert failed "missing properties:
+    // category". Accept it as an arg and default to "semantic" here. (#1633)
+    category: coalesce(args.category, "semantic")
     args.kind
     status: "queued"
     args.seq
