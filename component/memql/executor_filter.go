@@ -15,11 +15,26 @@ import (
 	"github.com/znasllc-io/memql/component/language/ast"
 )
 
+// constantBoolExpression is an internal post-filter node carrying a
+// pre-resolved boolean. `actor.<field>` comparisons are query-time constants
+// (the resolved auth envelope) and are already enforced once in the SQL WHERE
+// clause; resolveActorComparisonsToConstants folds them to a constant here so
+// the ctx-less post-filter evaluator preserves the AND/OR truth value without
+// re-resolving actor state it cannot see (#1659). It is never produced by the
+// parser -- only by the pre-post-filter rewrite.
+type constantBoolExpression struct {
+	value bool
+}
+
+func (*constantBoolExpression) isExpressionNode() {}
+
 func nodeMatchesExpression(node memorynodes.MemoryNode, expr ExpressionNode, payloadCache map[string]map[string]any) (bool, error) {
 	if expr == nil {
 		return true, nil
 	}
 	switch n := expr.(type) {
+	case *constantBoolExpression:
+		return n.value, nil
 	case *ComparisonExpression:
 		return nodeMatchesComparison(node, n, payloadCache)
 	case *LogicalExpression:
@@ -150,6 +165,48 @@ func compileActorFieldComparison(ctx context.Context, node *ComparisonExpression
 	}, nil
 }
 
+// resolveActorComparisonsToConstants walks an expression tree and replaces
+// every `actor.<field> <op> <value>` comparison with a constantBoolExpression
+// carrying the comparison's query-time result. The actor value is resolved
+// from the request's AccessContext via resolveActorPath -- the SAME resolver
+// the SQL-compile path (compileActorFieldComparison) uses -- so the post-filter
+// evaluates the gate identically to the WHERE clause (no divergence, gate
+// enforced exactly once). Non-actor nodes pass through unchanged. Returns a NEW
+// tree; the input AST may be cached upstream and must not be mutated (#1659).
+func resolveActorComparisonsToConstants(ctx context.Context, expr ExpressionNode) (ExpressionNode, error) {
+	if expr == nil {
+		return nil, nil
+	}
+	switch n := expr.(type) {
+	case *ComparisonExpression:
+		if !isActorFieldComparison(n) {
+			return expr, nil
+		}
+		subPath := strings.Join(n.Field.Parts[1:], ".")
+		actorValue, err := resolveActorPath(ctx, subPath, n.Operator)
+		if err != nil {
+			return nil, err
+		}
+		match, err := compareScalarValues(actorValue, n.Operator, n.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &constantBoolExpression{value: match}, nil
+	case *LogicalExpression:
+		left, err := resolveActorComparisonsToConstants(ctx, n.Left)
+		if err != nil {
+			return nil, err
+		}
+		right, err := resolveActorComparisonsToConstants(ctx, n.Right)
+		if err != nil {
+			return nil, err
+		}
+		return &LogicalExpression{Op: n.Op, Left: left, Right: right}, nil
+	default:
+		return expr, nil
+	}
+}
+
 // executeCombinedFilterQuery executes a query using a combined SQL filter.
 // This is similar to executeFilterQuery but doesn't require a ComparisonExpression node.
 func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr ExpressionNode, filter compiledExpression, timestamp *time.Time, target int, sorter *compiledSort) ([]memorynodes.MemoryNode, error) {
@@ -230,6 +287,19 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 	// Expand all spec references in the expression tree before post-filtering.
 	// This is necessary because nodeMatchesExpression doesn't have access to the specs registry.
 	expandedExpr, err := e.expandSpecReferences(expr)
+	if err != nil {
+		return nil, err
+	}
+
+	// Fold `actor.<field>` comparisons to their query-time boolean constant
+	// before post-filtering (#1659). The actor gate is already enforced once in
+	// the SQL WHERE clause (compileActorFieldComparison binds the resolved actor
+	// value as a parameter); the ctx-less nodeMatchesExpression has no actor.*
+	// handling, so without this fold an `actor.isClusterOwner==true` term blows
+	// up with "field \"actor.isClusterOwner\" is not supported in queries"
+	// whenever the scan returns a candidate row. Folding to a constant preserves
+	// AND/OR truth values exactly while keeping the gate enforced exactly once.
+	expandedExpr, err = resolveActorComparisonsToConstants(ctx, expandedExpr)
 	if err != nil {
 		return nil, err
 	}
