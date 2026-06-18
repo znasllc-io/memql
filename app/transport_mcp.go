@@ -47,11 +47,18 @@ func (a *App) transportMCP() {
 		ToolTimeout: parseToolTimeout(os.Getenv("MEMQL_MCP_TOOL_TIMEOUT")),
 	}
 
+	// #1599: build the automation runner ONCE and share it across every MCP
+	// session. It holds no per-session state (engine / event bus / loader are
+	// node-shared; the owner is taken from each call's args), and it memoizes
+	// the @mcp-promoted automation set -- so a connector's per-session
+	// tools/list no longer re-parses the whole automation tree ("automations
+	// loaded count=36") on every `initialize`.
+	sharedRunner := newMCPAutomationRunner(a)
 	newServer := func(c mcp.Config) *mcp.Server {
 		s := mcp.NewServer(a.Logger, "memql-mcp", a.Version, a.engine, c)
 		// Phase 4 (#1534): wire the automation runner (run_automation + @mcp
 		// automations) over the automation Loader + a dedicated manual Executor.
-		s.SetAutomationRunner(newMCPAutomationRunner(a))
+		s.SetAutomationRunner(sharedRunner)
 		return s
 	}
 

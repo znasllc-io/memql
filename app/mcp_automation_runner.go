@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -27,11 +28,27 @@ import (
 
 // mcpAutomationRunner implements mcp.AutomationRunner over the live automation
 // Loader + a dedicated manual Executor + the engine.
+//
+// One runner is built at bootstrap and shared across every MCP session
+// (#1599): it carries no per-session state -- the engine, event bus, and
+// automation loader are all node-shared, and RunAutomation takes the owner
+// from the call args. Sharing it means a connector's per-session tools/list
+// no longer rebuilds the runner or re-parses the whole automation tree
+// ("automations loaded count=36") on every `initialize`.
 type mcpAutomationRunner struct {
 	loader *automations.Loader
 	exec   *automations.Executor
 	engine *memql.MemQLEngine
 	logger *slog.Logger
+
+	// promoted memoizes the @mcp-promoted automation set. That set is fixed
+	// at DSL load time, so it is enumerated once (a single LoadAll) and
+	// reused -- guarded for concurrent access from multiple sessions'
+	// tools/list. promotedLoaded only flips on a successful load, so a
+	// transient load error retries on the next call rather than caching nil.
+	promotedMu     sync.Mutex
+	promoted       []*automations.Automation
+	promotedLoaded bool
 }
 
 // newMCPAutomationRunner builds the runner from the app's automation
@@ -194,6 +211,11 @@ func (r *mcpAutomationRunner) IsPromotedAutomation(name string) bool {
 // promotedAutomations loads every automation and filters to the @mcp-promoted
 // ones. Errors degrade to an empty list (the surface is best-effort discovery).
 func (r *mcpAutomationRunner) promotedAutomations() []*automations.Automation {
+	r.promotedMu.Lock()
+	defer r.promotedMu.Unlock()
+	if r.promotedLoaded {
+		return r.promoted
+	}
 	if r.loader == nil {
 		return nil
 	}
@@ -202,7 +224,7 @@ func (r *mcpAutomationRunner) promotedAutomations() []*automations.Automation {
 		if r.logger != nil {
 			r.logger.Warn("mcp: failed to enumerate automations for @mcp promotion", "error", err)
 		}
-		return nil
+		return nil // not cached; retry on the next call
 	}
 	out := make([]*automations.Automation, 0)
 	for _, a := range all {
@@ -211,7 +233,9 @@ func (r *mcpAutomationRunner) promotedAutomations() []*automations.Automation {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
+	r.promoted = out
+	r.promotedLoaded = true
+	return r.promoted
 }
 
 // ownerEnvelope stamps the owner's writer AccessContext onto ctx when none is
