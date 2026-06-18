@@ -61,7 +61,7 @@ func applyToolDefaults(ctx context.Context, tool *Tool, args map[string]any, def
 		return args
 	}
 	if args == nil {
-		args = make(map[string]any, len(defaults)+len(schemaDefaults))
+		args = map[string]any{}
 	}
 
 	autoInjected := map[string]struct{}{}
