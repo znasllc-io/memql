@@ -4278,6 +4278,29 @@ func (p *Parser) parseWhenGuard() (ExpressionNode, error) {
 	return &ConditionalFilterExpr{ArgPath: argPath, Filter: inner}, nil
 }
 
+// isNullComparisonLiteral reports whether a parsed comparison RHS is the
+// null/nil literal in any of its surface forms: the `nil` keyword
+// (*NilExpr), the `null` identifier (which parseValue lowers to a plain
+// Go nil, NOT the string "null"), or a bare "null" string. All three
+// mean "compare against absence", so `field == <null>` / `field != <null>`
+// must lower to OpMissing / OpNotMissing (SQL IS NULL / IS NOT NULL)
+// rather than binding nil as a scalar literal -- the latter reaches the
+// executor's literal normalizer and fails the whole query with
+// "unsupported literal type <nil>" (e.g. queryDueRefreshDomains's
+// `payload.refreshCadenceDays != null`). #1631.
+func isNullComparisonLiteral(value any) bool {
+	if value == nil {
+		return true
+	}
+	if _, isNil := value.(*NilExpr); isNil {
+		return true
+	}
+	if strVal, ok := value.(string); ok && strVal == "null" {
+		return true
+	}
+	return false
+}
+
 // parseComparison parses field comparison expressions.
 func (p *Parser) parseComparison() (ExpressionNode, error) {
 	if !p.check(TokenIdentifier) {
@@ -4360,14 +4383,7 @@ func (p *Parser) parseComparison() (ExpressionNode, error) {
 
 	// Handle == nil/null and != nil/null → OpMissing/OpNotMissing
 	if op == OpEq || op == OpNe {
-		if _, isNil := value.(*NilExpr); isNil {
-			if op == OpEq {
-				op = OpMissing
-			} else {
-				op = OpNotMissing
-			}
-			value = nil
-		} else if strVal, ok := value.(string); ok && strVal == "null" {
+		if isNullComparisonLiteral(value) {
 			if op == OpEq {
 				op = OpMissing
 			} else {
@@ -4453,14 +4469,7 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 
 		// Handle == nil/null and != nil/null → OpMissing/OpNotMissing
 		if op == OpEq || op == OpNe {
-			if _, isNil := value.(*NilExpr); isNil {
-				if op == OpEq {
-					op = OpMissing
-				} else {
-					op = OpNotMissing
-				}
-				value = nil
-			} else if strVal, ok := value.(string); ok && strVal == "null" {
+			if isNullComparisonLiteral(value) {
 				if op == OpEq {
 					op = OpMissing
 				} else {

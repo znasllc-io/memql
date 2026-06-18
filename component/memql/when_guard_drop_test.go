@@ -53,6 +53,23 @@ func TestWhenGuardDrop(t *testing.T) {
 			t.Fatalf("op=%v absent: expected the guard dropped to leave payload.b, got %#v", op, got)
 		}
 
+		// Arg present-but-nil -> treated as absent and dropped. #1631: tool
+		// handlers materialize an omitted optional arg as an explicit `null`
+		// (todosList's `queryTodos({done: $args.done})` collapses the
+		// unfilled placeholder to `null`), so the args map carries the key
+		// with a nil value. Before the fix this slipped past the existence
+		// check, leaked nil into `payload.done == args.done`, and failed the
+		// query with "unsupported literal type <nil>". It must drop exactly
+		// like the absent case.
+		gotNil, err := v.expandExpressionWithArgs(build(op), map[string]any{"flag": nil})
+		if err != nil {
+			t.Fatalf("op=%v present-nil: %v", op, err)
+		}
+		cmpNil, ok := gotNil.(*ComparisonExpression)
+		if !ok || cmpNil.Field.Raw != "payload.b" {
+			t.Fatalf("op=%v present-nil: expected the guard dropped to leave payload.b, got %#v", op, gotNil)
+		}
+
 		// Arg present -> the guard unwraps to its inner expression, and the
 		// connective is preserved over both terms.
 		got2, err := v.expandExpressionWithArgs(build(op), map[string]any{"flag": "on"})
