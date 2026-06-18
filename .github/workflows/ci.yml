@@ -236,6 +236,39 @@ jobs:
           CGO_ENABLED: '1'
         run: go test -tags voice -count=1 -timeout=300s ./integrations/voice/...
 
+  # Node-tag compile lane (#1584). go-checks builds/tests with the DEFAULT
+  # build tags, so a file gated behind a node build tag
+  # (`//go:build identity|mcp|cognition|agent|planner|workbench`) is NEVER
+  # compiled in CI -- a tagged-only compile error passes every PR gate and
+  # only fails at image-build time on the GitHub build server. That gap
+  # surfaced the 0.9.61 break: #1570 changed Store.CreateAuthCode but missed
+  # app/integrations_identity.go (`//go:build identity`); go-checks stayed
+  # green and `go build -tags identity` only failed when build-engine-images
+  # built the identity image. This matrix compiles every CGO-free node tag so
+  # a tagged-only break is a required-check failure pre-merge. The `voice` tag
+  # is NOT here -- it needs CGO_ENABLED=1 + the libopus C deps and is already
+  # covered by the build-voice lane below. Gates on `go` (like build-voice):
+  # a tagged build compiles the whole module, so any Go change can break it.
+  build-node-tags:
+    name: build node tags
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: [identity, mcp, cognition, agent, planner, workbench]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: '1.26.4'
+          cache: true
+      - name: go build -tags ${{ matrix.tag }}
+        run: go build -tags ${{ matrix.tag }} ./...
+      - name: go vet -tags ${{ matrix.tag }}
+        run: go vet -tags ${{ matrix.tag }} ./...
+
   # TypeScript SDK lane. Gates on `sdkts` (sdk/ts/** + the generator) so a
   # pure Go change that doesn't touch the generator skips the Node lane.
   sdk-ts-typecheck:
@@ -267,6 +300,7 @@ jobs:
       - changes
       - go-checks
       - build-voice
+      - build-node-tags
       - sdk-ts-typecheck
     runs-on: ubuntu-latest
     steps:
