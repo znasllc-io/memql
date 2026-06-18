@@ -1,17 +1,18 @@
-# Staging overlay -> 0.9.69: FULL-STACK follow-up cut for the two Lane A engine
-# handoffs from the run-2 QA wave (epic #1627). All eight engine + carrier images
-# re-pinned to 0.9.69, built on the GitHub BUILD SERVER (OIDC->ACR): engine
-# (identity/voice/mcp) from main; carrier (bff/cognition/agent/planner/workbench)
-# rebuilt against engine main -> engineVersion + builtAgainstEngine bumped
-# 0.9.68 -> 0.9.69. copresent SPA source unchanged (digest identical, re-tagged
-# 0.9.69 for coherence). This cut carries the two follow-ups that merged just
-# after the 0.9.68 images were built:
-#   #1659 actor.isClusterOwner resolved to a constant before the ctx-less
-#     post-filter (querySystemActiveAuthoringBundles via the connector).
-#   #1663 deterministic run_automation name resolution + dry-run source lookup
-#     (DSLConstructSource kind no longer hardcoded; Loader.LoadByName canonical).
-# (0.9.68 shipped the rest of the run-2 wave: Lane A #1628-#1633 + Lane B
-# #1625-#1646.) livekit pin (#1043) + NODE_IP patch preserved.
+# Staging overlay -> 0.9.71: FULL-STACK run-3 QA cut (epic #1672). All 9 engine
+# + carrier + SPA images re-pinned to 0.9.71, built on the GitHub BUILD SERVER
+# (OIDC->ACR): engine (identity/voice/mcp) from main; carrier (bff/cognition/
+# agent/planner/workbench) rebuilt against engine main -> engineVersion +
+# builtAgainstEngine bumped 0.9.69 -> 0.9.71. copresent SPA source unchanged
+# (digest identical, re-tagged 0.9.71 for coherence). This cut carries the full
+# run-3 remaining-failures wave merged after 0.9.70:
+#   Lane A (engine cross-cutting): #1674 has-operator, #1675/#1685 query-trait
+#     gaps, #1676/#1683 literal-into-typed-field, #1677 attach object-vs-array,
+#     #1678/#1686 read-merge, #1681 logic-construct compile, #1682 reflection.
+#   Lane B (per-construct/DSL + curation): #1670 seed-dedup provenance filter,
+#     #1671 registerNode spawnEvent, #1673 calendar allDay/createdBy, #1679 +
+#     #1684 connector surface (@mcp harness chain + recentChat), #1680
+#     assignResponsibility scope, #1687 query arg-rename + SI predicate.
+# livekit pin (#1043) + NODE_IP patch preserved.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -33,19 +34,19 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:090c61a395880ebab82f9020c2d4ea6edfc7484558c43bbf5261b4a54d3e8d43
+    digest: sha256:0d26ecc4e0320bb1f19453889672a5c9934931f3b15711e3db6ae45976a415f7
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:cb4d39131567f2be69ae545e77c0795b1e49f582233aa3ddabae773827306511
+    digest: sha256:455ba448eefadf0c16c8dc041ae2f6a243a89676b0999a3fe1274c8f893ead04
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:e624283cebff1f24d195ae55afe43a0a225424fc4c19806509b5a9646720207b
+    digest: sha256:e20427b72871f859a2cf08b95c2f83a8b40ca7249d9ae65fff44a22723e2a1de
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:ad1d5e602afc7dae0ba81095273d45411956ddb66be9425b5ecf64cdbfa43ace
+    digest: sha256:a03061b1e1a394e59f0cd850be575c34e3c38913112d8e04e8580b4178207fe8
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:342cb0174f1b0b31f33a0ebc3ab2cd463e85ece604ee407d907cfd36164f0adb
+    digest: sha256:30394672eca0dc206637d1a201b48d5f1880dac9d49dcce35bf68b8e7b8ea69f
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:0a540b638879cafe42fa0396faf0438573c586ed3ea02ce2a8067c0b2f48cf46
+    digest: sha256:22a8c4a10764857fb7fe77f46011f03e09ad406a687e6fbd933eccf00d32cf4b
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:0485ab0080b92c63db3b44c033b2ffb723327f7f20419fcc1d716ef528d3490e
+    digest: sha256:2235352666359ece080f23340ebab65b91cc6932ab6c54b4407829b6bd299be4
   # memql-mcp (epic memql#1550): remote MCP node, engine-built on the GitHub
   # build server (#1581 wired it into build-engine-images + the release tooling).
   # 0.9.68: rebuilt from main carrying the full run-2 QA wave (Lane A engine
@@ -53,7 +54,7 @@ images:
   # now includes describeFunction (#1646); searchUsers points at v1:identity:user
   # (#1625).
   - name: acrmemql.azurecr.io/memql-mcp
-    digest: sha256:901f5e15c9aca48a2561f03a337a7205444f4322134c869d51169ec12337307b
+    digest: sha256:ea3b7b2a9b63008bf7dc9f54383acfe617ec3409bb1b8572e443547b1637526b
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:75e566e71e30d0b35c6c6708dda34a37ab9f2a74ec575f18c0787beffc949bf2
   - name: livekit/livekit-server
