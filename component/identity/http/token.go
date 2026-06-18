@@ -17,15 +17,17 @@ import (
 	"github.com/znasllc-io/memql/component/identity/refresh"
 )
 
-// tokenRequest is the body of POST /oauth/token. We only support the
-// authorization_code grant type in v1; the password / client_credentials
-// grants are out of scope.
+// tokenRequest is the body of POST /oauth/token. We support the
+// authorization_code grant (initial code redemption) and the
+// refresh_token grant (silent re-issue of an expired access token).
+// The password / client_credentials grants are out of scope.
 type tokenRequest struct {
 	GrantType    string `json:"grant_type"`
 	Code         string `json:"code"`
 	ClientId     string `json:"client_id"`
 	RedirectURI  string `json:"redirect_uri"`
 	CodeVerifier string `json:"code_verifier,omitempty"`
+	RefreshToken string `json:"refresh_token,omitempty"`
 }
 
 // tokenResponse mirrors the RFC 6749 §5.1 successful-response shape.
@@ -44,8 +46,14 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if body.GrantType != "authorization_code" {
-		s.writeJSONError(w, http.StatusBadRequest, "unsupported_grant_type", "only authorization_code is supported")
+	switch body.GrantType {
+	case "authorization_code":
+		// Handled inline below.
+	case "refresh_token":
+		s.handleRefreshTokenGrant(w, r, body)
+		return
+	default:
+		s.writeJSONError(w, http.StatusBadRequest, "unsupported_grant_type", "only authorization_code and refresh_token are supported")
 		return
 	}
 	if body.Code == "" || body.ClientId == "" || body.RedirectURI == "" {
@@ -278,6 +286,93 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleRefreshTokenGrant implements the OAuth 2.1 refresh_token grant
+// at the token endpoint (RFC 6749 §6). claude.ai (and any stock OAuth
+// client) posts grant_type=refresh_token + refresh_token=<...> when its
+// 15-minute access token expires; without this branch the client falls
+// back to a full re-authorization and the connector session drops. The
+// rotation logic is shared with /auth/refresh via s.Rotator: the
+// presented token is validated against the stored hash, a fresh access +
+// rotated refresh token are minted, and the OLD refresh token is
+// invalidated (its hash no longer points at the row outside the short
+// reuse-grace window).
+//
+// Unlike /auth/refresh we read the refresh token ONLY from the request
+// body -- an OAuth client tracks the token itself and presents it
+// explicitly; there is no cookie to fall back to on this path.
+func (s *Server) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request, body *tokenRequest) {
+	if s.Rotator == nil {
+		eid := generateErrorId()
+		if s.Logger != nil {
+			s.Logger.Error("token_refresh_no_rotator", slog.String("error_id", eid))
+		}
+		s.writeJSONError(w, http.StatusInternalServerError, "internal_error", "refresh unavailable; reference "+eid)
+		return
+	}
+
+	presented := strings.TrimSpace(body.RefreshToken)
+	if presented == "" {
+		s.writeJSONError(w, http.StatusBadRequest, "invalid_request", "refresh_token is required")
+		return
+	}
+
+	// When a client_id is presented (claude.ai sends the id it received
+	// at registration), confirm it still resolves. Public clients only
+	// (token_endpoint_auth_method=none); there is no client secret to
+	// check. A missing client_id is tolerated -- the refresh token itself
+	// is the credential and is bound to the session row.
+	if body.ClientId != "" &&
+		identity.ResolveClient(r.Context(), s.Cfg, s.Store, body.ClientId) == nil {
+		s.writeJSONError(w, http.StatusBadRequest, "invalid_client", "client_id is not registered")
+		return
+	}
+
+	res, err := s.Rotator.Rotate(r.Context(), refresh.RotateInput{
+		PresentedRefreshToken: presented,
+		SourceIP:              clientIP(r),
+		UserAgent:             r.Header.Get("User-Agent"),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, refresh.ErrSessionNotFound),
+			errors.Is(err, refresh.ErrSessionRevoked),
+			errors.Is(err, refresh.ErrSessionExpired),
+			errors.Is(err, refresh.ErrTokenMismatch):
+			// Stale / revoked / stolen refresh token. RFC 6749 §5.2:
+			// invalid_grant. The client re-runs the full authorization
+			// flow from here.
+			s.writeJSONError(w, http.StatusBadRequest, "invalid_grant", "refresh token is no longer valid")
+			return
+		case errors.Is(err, refresh.ErrNoToken):
+			s.writeJSONError(w, http.StatusBadRequest, "invalid_request", "refresh_token is required")
+			return
+		default:
+			eid := generateErrorId()
+			if s.Logger != nil {
+				s.Logger.Error("token_refresh_failed",
+					slog.String("error_id", eid),
+					slog.String("error", err.Error()))
+			}
+			s.writeJSONError(w, http.StatusInternalServerError, "internal_error", "refresh failed; reference "+eid)
+			return
+		}
+	}
+
+	// Roll the refresh-token cookie forward too, mirroring /auth/refresh,
+	// so a browser-based OAuth client keeps a live cookie. Harmless for
+	// non-browser clients (claude.ai) -- they read the rotated token off
+	// the JSON body.
+	live := s.effectiveTokenSettings(r.Context())
+	setRefreshCookie(w, res.RefreshToken, s.Cfg.BaseURL, live.RefreshCookieSameSite)
+
+	writeJSON(w, http.StatusOK, tokenResponse{
+		AccessToken:  res.AccessToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    res.ExpiresIn,
+		RefreshToken: res.RefreshToken,
+	})
+}
+
 // readTokenRequest accepts both application/json (memQL/CoPresent
 // SPAs) and the OAuth-canonical x-www-form-urlencoded body so external
 // integrations can call the endpoint with a stock OAuth client.
@@ -299,6 +394,7 @@ func readTokenRequest(r *http.Request) (*tokenRequest, error) {
 		ClientId:     r.Form.Get("client_id"),
 		RedirectURI:  r.Form.Get("redirect_uri"),
 		CodeVerifier: r.Form.Get("code_verifier"),
+		RefreshToken: r.Form.Get("refresh_token"),
 	}, nil
 }
 
