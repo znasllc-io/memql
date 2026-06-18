@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/provenance"
 )
@@ -484,7 +485,20 @@ func rowStringField(row map[string]any, field string) string {
 // through to the deterministic id rather than yet another UUID --
 // any subsequent retry will then converge on that same value.
 func (m *SeedMaterializer) lookupOrMintPerUserId(ctx context.Context, def *SeedDefinition, userId string) (string, error) {
-	query := buildPerUserDedupQuery(def, userId)
+	conceptId, err := m.canonicalSeedConceptID(def)
+	if err != nil {
+		// #1608: cannot resolve the canonical concept id (e.g. the
+		// signature-form binding left UseNamespace empty AND the bare
+		// name doesn't resolve). Surface LOUDLY rather than firing a
+		// malformed "v1::<concept>" lookup that silently fails; the
+		// deterministic-id fallback keeps seeding correct.
+		if m.engine.Logger != nil {
+			m.engine.Logger.Error("seed materializer: cannot resolve canonical concept id for per-user seed dedup; using deterministic id (dedup guard skipped)",
+				"seed", def.Name, "concept", def.UseConcept, "namespace", def.UseNamespace, "error", err.Error())
+		}
+		return deterministicPerUserSeedId(def, userId), nil
+	}
+	query := buildPerUserDedupQuery(def, userId, conceptId)
 	result, err := m.engine.Execute(systemActorContext(ctx), query)
 	if err != nil {
 		if m.engine.Logger != nil {
@@ -543,12 +557,58 @@ func (m *SeedMaterializer) lookupOrMintPerUserId(ctx context.Context, def *SeedD
 //
 // Pure (no engine / no IO) so the regression test can assert the built
 // query parses without standing up an engine.
-func buildPerUserDedupQuery(def *SeedDefinition, userId string) string {
-	conceptId := fmt.Sprintf("v1:%s:%s", def.UseNamespace, def.UseConcept)
+// conceptId is the canonical concept id the caller resolved (e.g.
+// "v1:agents:agent"). It is passed in -- rather than rebuilt from
+// def.UseNamespace here -- because the signature-form seed binding leaves
+// UseNamespace empty, and `fmt.Sprintf("v1:%s:%s", "", "agent")` produced
+// the malformed "v1::agent" whose registry lookup always failed, silently
+// disabling the dedup guard and spamming a fallback WARN every seed sweep
+// (#1608). The caller (lookupOrMintPerUserId) now resolves the real
+// canonical id via the concept registry.
+func buildPerUserDedupQuery(def *SeedDefinition, userId, conceptId string) string {
 	return fmt.Sprintf(
 		`concept==%s; payload.ownerUserId==%s; provenance.name==%s`,
 		dslStringLiteral(conceptId), dslStringLiteral(userId), dslStringLiteral(def.Name),
 	)
+}
+
+// canonicalSeedConceptID resolves a per-user seed's bound concept to its
+// canonical id (e.g. "v1:agents:agent"). When the parser captured the
+// namespace (Form B `use <ns>.<concept>`) it is honoured directly; for
+// the signature form, where UseNamespace is empty (#1608), the bare
+// concept name is resolved through the registry by the same trailing-
+// segment match the loader's ConceptResolver uses. Returns a loud error
+// (never a malformed "v1::<concept>") so the caller can fall back to the
+// deterministic id rather than firing a doomed registry lookup.
+func (m *SeedMaterializer) canonicalSeedConceptID(def *SeedDefinition) (string, error) {
+	if def == nil || def.UseConcept == "" {
+		return "", fmt.Errorf("seed has no concept binding")
+	}
+	var reg memoryNodes.Registry
+	if m != nil && m.engine != nil {
+		reg = m.engine.Concepts()
+	}
+	// Explicit namespace (Form B): honour it, verifying against the
+	// registry when one is available.
+	if def.UseNamespace != "" {
+		id := fmt.Sprintf("v1:%s:%s", def.UseNamespace, def.UseConcept)
+		if reg == nil {
+			return id, nil
+		}
+		if _, err := reg.Get(id); err == nil {
+			return id, nil
+		}
+		// Fall through to bare-name resolution: the declared namespace
+		// didn't resolve, so trust the concept name over a stale binding.
+	}
+	if reg == nil {
+		return "", fmt.Errorf("no concept registry to resolve bare concept %q", def.UseConcept)
+	}
+	id, err := NewConceptResolver(reg).resolveBareConceptName(def.UseConcept)
+	if err != nil {
+		return "", fmt.Errorf("resolve bare concept %q: %w", def.UseConcept, err)
+	}
+	return id, nil
 }
 
 // dslStringLiteral renders a value as a DSL string literal safe to drop

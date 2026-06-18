@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // applyDevDefaultAvatarPersona is the dev-only hook that stamps a default
@@ -327,7 +329,7 @@ func TestBuildPerUserDedupQuery_ParsesWithColonBearingUserId(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			q := buildPerUserDedupQuery(tc.def, tc.user)
+			q := buildPerUserDedupQuery(tc.def, tc.user, "v1:"+tc.def.UseNamespace+":"+tc.def.UseConcept)
 
 			// (a) The colon-bearing id literal is quoted, not bare.
 			mustContain(t, q, `payload.ownerUserId=="`+tc.user+`"`)
@@ -399,7 +401,7 @@ func TestBuildPerUserDedupQuery_AllSeedAgentsExactStringsParse(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildPerUserDedupQuery(tc.def, user)
+			got := buildPerUserDedupQuery(tc.def, user, "v1:"+tc.def.UseNamespace+":"+tc.def.UseConcept)
 			if got != tc.want {
 				t.Fatalf("built query mismatch\n got: %s\nwant: %s", got, tc.want)
 			}
@@ -415,4 +417,65 @@ func mustContain(t *testing.T, haystack, needle string) {
 	if !strings.Contains(haystack, needle) {
 		t.Errorf("expected output to contain %q\nfull output:\n%s", needle, haystack)
 	}
+}
+
+// TestCanonicalSeedConceptID_1608 pins the #1608 fix: a signature-form
+// per-user seed binding leaves UseNamespace empty, and the dedup query
+// previously composed the malformed "v1::agent" (doubled colon) whose
+// registry lookup always failed -- silently disabling the dedup guard.
+// canonicalSeedConceptID now resolves the bare concept name to its real
+// canonical id via the registry, and fails LOUDLY (never returns a
+// malformed id) when it can't.
+func TestCanonicalSeedConceptID_1608(t *testing.T) {
+	reg := &memoryNodes.MemoryRegistry{}
+	reg.ReplaceAll(map[string]*memoryNodes.Concept{
+		"v1:agents:agent":  {Name: "v1:agents:agent"},
+		"v1:identity:user": {Name: "v1:identity:user"},
+	})
+	m := &SeedMaterializer{engine: &MemQLEngine{concepts: reg}}
+
+	// Empty namespace (the buggy signature-form case) resolves to the
+	// canonical id instead of "v1::agent".
+	t.Run("empty namespace resolves via registry", func(t *testing.T) {
+		id, err := m.canonicalSeedConceptID(&SeedDefinition{Name: "plannerAgent", UseConcept: "agent"})
+		if err != nil {
+			t.Fatalf("canonicalSeedConceptID: %v", err)
+		}
+		if id != "v1:agents:agent" {
+			t.Fatalf("conceptId = %q, want v1:agents:agent", id)
+		}
+		if strings.Contains(id, "::") {
+			t.Fatalf("resolved id %q still malformed (doubled colon)", id)
+		}
+	})
+
+	// Explicit namespace is honoured directly (Form B binding).
+	t.Run("explicit namespace honoured", func(t *testing.T) {
+		id, err := m.canonicalSeedConceptID(&SeedDefinition{Name: "assistant", UseNamespace: "agents", UseConcept: "agent"})
+		if err != nil || id != "v1:agents:agent" {
+			t.Fatalf("conceptId = %q, err = %v; want v1:agents:agent", id, err)
+		}
+	})
+
+	// Unresolvable concept fails loudly (error), so the caller falls back
+	// to the deterministic id rather than firing a malformed lookup.
+	t.Run("unresolvable concept errors loudly", func(t *testing.T) {
+		_, err := m.canonicalSeedConceptID(&SeedDefinition{Name: "ghost", UseConcept: "doesNotExist"})
+		if err == nil {
+			t.Fatal("expected an error resolving an unregistered concept, got nil")
+		}
+	})
+
+	// The end-to-end dedup query built from the resolved id targets the
+	// real concept -- never the malformed v1::agent.
+	t.Run("dedup query uses canonical id", func(t *testing.T) {
+		id, _ := m.canonicalSeedConceptID(&SeedDefinition{Name: "plannerAgent", UseConcept: "agent"})
+		q := buildPerUserDedupQuery(&SeedDefinition{Name: "plannerAgent", UseConcept: "agent"}, "v1:identity:user:abc", id)
+		if !strings.Contains(q, `concept=="v1:agents:agent"`) {
+			t.Fatalf("query does not target canonical concept: %s", q)
+		}
+		if strings.Contains(q, "v1::") {
+			t.Fatalf("query still contains malformed concept id: %s", q)
+		}
+	})
 }
