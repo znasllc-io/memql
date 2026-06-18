@@ -567,11 +567,25 @@ func (r *ReactiveLoop) mintOrExtendSpecialist(ctx context.Context, userId string
 // doesn't block honoring (the routing result is already in hand for this
 // tick), it just means the row's binding isn't durable until the next
 // successful tick.
+//
+// Only non-empty optional fields (assignedAgentId, assignedRoleSlug) are
+// included in the mutation call. Passing an empty string would write "" onto
+// the row, clearing any existing binding. Omitting the field lets the
+// partial-update merge keep the responsibility's previous value -- so a
+// role-only assignment does not clear an existing agent binding, and an
+// assistant-route call does not blank an existing roleSlug. (#1680)
 func (r *ReactiveLoop) assign(ctx context.Context, respId, targetKind, agentId, roleSlug string) {
-	q := fmt.Sprintf(
-		`mutationAssignResponsibility({responsibilityId:%q, targetKind:%q, assignedAgentId:%q, assignedRoleSlug:%q})`,
-		respId, targetKind, agentId, roleSlug,
-	)
+	args := map[string]any{
+		"responsibilityId": respId,
+		"targetKind":       targetKind,
+	}
+	if agentId != "" {
+		args["assignedAgentId"] = agentId
+	}
+	if roleSlug != "" {
+		args["assignedRoleSlug"] = roleSlug
+	}
+	q := fmt.Sprintf(`mutationAssignResponsibility(%s)`, encodeArgs(args))
 	if _, err := r.engine.Execute(ctx, q); err != nil {
 		r.logger.Warn("planner reactive loop: assign failed",
 			"responsibilityId", respId, "agentId", agentId, "error", err)
