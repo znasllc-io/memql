@@ -30,21 +30,24 @@ func dslCalendarMutationsSource(t *testing.T) string {
 }
 
 // TestCalendarCreate1673_AllDayBoolDefault is the #1673 regression guard:
-// calendarCreate.allDay is a boolean field. Before the fix the tool schema had
-// `"default": "false"` (a string) because @default("false") stored the literal
-// string, and the handler used the pre-quoted form `"$args.allDay"` which
-// produced a MemQL string literal instead of a bare bool.
+// calendarCreate.allDay is a boolean field with NO schema default.
 //
-// Two classes of bug were fixed:
-//  1. Tool-field @default("false") → JSON schema had `"default": "false"` (string
-//     in a boolean field), which caused some LLMs / MCP clients to call the tool
-//     with allDay="false" (string) instead of allDay=false (bool).
-//  2. Handler `"allDay": "$args.allDay"` (pre-quoted form) → when allDay arrived
-//     as a string the MemQL query got `"allDay": "false"` (string literal),
-//     rejected by mutationCreateCalendarEvent with "expected bool, got string".
+// Original bug + the now-superseded partial fix: @default("false") put a
+// string "default" into the boolean field's JSON schema, so some LLM/MCP
+// clients called the tool with allDay="false" (string); and the handler
+// interpolated `"$args.allDay"` into a MemQL query string, so allDay arrived
+// as the string literal "false" -> mutationCreateCalendarEvent rejected it
+// with "expected bool, got string". An interim fix kept the type="query"
+// handler with a bare `$args.allDay` token, but that still left the OTHER
+// optionals (endsAt/location/notes/recurrence) as quoted "$args.x" slots that
+// render the literal string "null" when omitted (the #1683 class), and it
+// still relied on the malformed string default.
 //
-// After the fix: @default(false) (no string default in schema) + bare handler
-// form `allDay: $args.allDay` (direct bool expression, not a quoted string slot).
+// Shipped fix (memql#1672): calendarCreate dispatches via a typed
+// type="function" handler -> the structural args map is passed straight to
+// mutationCreateCalendarEvent (no $args string interpolation at all), and the
+// allDay tool field carries NO @default, so the schema advertises a clean
+// boolean with no string default. Omitted optionals simply stay absent.
 func TestCalendarCreate1673_AllDayBoolDefault(t *testing.T) {
 	registry := newToolRegistry()
 	if _, err := LoadUnifiedTools(slog.Default(), registry); err != nil {
@@ -77,35 +80,41 @@ func TestCalendarCreate1673_AllDayBoolDefault(t *testing.T) {
 		t.Errorf("calendarCreate.allDay type = %q, want \"boolean\"", got)
 	}
 
-	// After @default(false) (unquoted bool), attrStringValue returns "" so no
-	// "default" key lands in the JSON schema. This prevents a string-typed default
-	// from confusing LLMs or MCP clients into passing allDay as a string. The
-	// mutation handles the absent field via coalesce(args.allDay, false).
+	// No "default" key may land in the JSON schema -- a string default
+	// ("false") confuses LLMs / MCP clients into passing allDay as a string.
+	// The mutation handles the absent field via coalesce(args.allDay, false).
 	if defVal, exists := allDayProp["default"]; exists {
-		t.Errorf("calendarCreate.allDay schema has \"default\": %v (%T); want no default key (a string default confuses LLM into passing \"false\" as a string instead of false as a bool)", defVal, defVal)
+		t.Errorf("calendarCreate.allDay schema has \"default\": %v (%T); want no default key", defVal, defVal)
 	}
 
-	// The handler query template must use the BARE form $args.allDay (not the
-	// pre-quoted form "$args.allDay") so a bool value flows through as a MemQL
-	// bool expression rather than a string literal.
+	// The handler must be a typed function handler targeting the mutation --
+	// NOT a type="query" string-interpolation handler. This eliminates the
+	// $args string-substitution slot entirely (the root of both the bool-as-
+	// string and the omitted-optional-as-"null" bug classes).
 	if tool.Handler == nil {
-		t.Fatal("calendarCreate.Handler is nil; expected a query handler")
+		t.Fatal("calendarCreate.Handler is nil; expected a function handler")
 	}
-	handlerQuery := tool.Handler.Query
-
-	if strings.Contains(handlerQuery, `"$args.allDay"`) {
-		t.Errorf("calendarCreate handler uses pre-quoted form \"$args.allDay\" -- must use bare form allDay: $args.allDay to preserve bool type;\nquery=%s", handlerQuery)
+	if tool.Handler.Type != "function" {
+		t.Errorf("calendarCreate handler type = %q, want \"function\" (typed dispatch, no $args string interpolation)", tool.Handler.Type)
 	}
-	if !strings.Contains(handlerQuery, `$args.allDay`) {
-		t.Errorf("calendarCreate handler missing $args.allDay placeholder;\nquery=%s", handlerQuery)
+	if tool.Handler.FunctionName != "mutationCreateCalendarEvent" {
+		t.Errorf("calendarCreate handler function = %q, want \"mutationCreateCalendarEvent\"", tool.Handler.FunctionName)
+	}
+	// A function handler carries no query template -- there is no string slot
+	// for allDay (or any optional) to be coerced to a string / "null".
+	if strings.Contains(tool.Handler.Query, "$args") {
+		t.Errorf("calendarCreate function handler must not carry a $args query template; query=%q", tool.Handler.Query)
 	}
 }
 
-// TestCalendarCreate1673_HandlerQueryBoolSubstitution verifies that
-// substituteArgsInMemqlQuery, when applied to the calendarCreate handler
-// template, produces a bare bool (not a quoted string literal) for allDay in
-// both the timed-event (allDay=false) and all-day-event (allDay=true) cases.
-func TestCalendarCreate1673_HandlerQueryBoolSubstitution(t *testing.T) {
+// TestCalendarCreate1673_HandlerIsTypedFunction verifies the shipped fix
+// routes calendarCreate through a typed function handler so the args map is
+// passed structurally to the mutation. With no string-interpolation template,
+// an omitted optional (allDay / endsAt / location / notes / recurrence) is
+// simply absent from the call rather than rendered as the literal "null" /
+// "false" string -- the bug class that the prior type="query" handler left
+// open for every optional except allDay.
+func TestCalendarCreate1673_HandlerIsTypedFunction(t *testing.T) {
 	registry := newToolRegistry()
 	if _, err := LoadUnifiedTools(slog.Default(), registry); err != nil {
 		t.Fatalf("LoadUnifiedTools: %v", err)
@@ -118,82 +127,34 @@ func TestCalendarCreate1673_HandlerQueryBoolSubstitution(t *testing.T) {
 	if tool.Handler == nil {
 		t.Fatal("calendarCreate.Handler is nil")
 	}
-	tmpl := tool.Handler.Query
-
-	t.Run("timed event allDay=false produces bare false", func(t *testing.T) {
-		args := map[string]any{
-			"title":    "Karate class",
-			"startsAt": "2026-06-18T09:00:00Z",
-			"allDay":   false, // Go bool -- what the engine receives from the LLM
-		}
-		got := substituteArgsInMemqlQuery(tmpl, args)
-
-		// The rendered query must contain bare `false` (not the JSON string
-		// `"false"`). encodeForMemqlSubstitution for a Go bool produces
-		// the bare token via fmt.Sprintf("%t", v), so the result CANNOT be
-		// wrapped in JSON quotes when the bare-substitution path ran correctly.
-		if strings.Contains(got, `"false"`) {
-			t.Errorf("timed event: allDay rendered as quoted string literal \"false\" in MemQL query; want bare bool false\nquery=%s", got)
-		}
-		if !strings.Contains(got, "false") {
-			t.Errorf("timed event: value false missing from rendered query\nquery=%s", got)
-		}
-	})
-
-	t.Run("all-day event allDay=true produces bare true", func(t *testing.T) {
-		args := map[string]any{
-			"title":    "Birthday",
-			"startsAt": "2026-06-18T00:00:00Z",
-			"allDay":   true,
-		}
-		got := substituteArgsInMemqlQuery(tmpl, args)
-
-		if strings.Contains(got, `"true"`) {
-			t.Errorf("all-day event: allDay rendered as quoted string literal \"true\" in MemQL query; want bare bool true\nquery=%s", got)
-		}
-		if !strings.Contains(got, "true") {
-			t.Errorf("all-day event: value true missing from rendered query\nquery=%s", got)
-		}
-	})
-
-	t.Run("omitted allDay resolves to null not a placeholder", func(t *testing.T) {
-		// When the LLM omits allDay entirely, the placeholder cleanup in
-		// substituteArgsInMemqlQuery must resolve $args.allDay → null.
-		// The mutation body handles null via coalesce(args.allDay, false).
-		args := map[string]any{
-			"title":    "Meeting",
-			"startsAt": "2026-06-18T14:00:00Z",
-			// allDay intentionally absent
-		}
-		got := substituteArgsInMemqlQuery(tmpl, args)
-
-		if strings.Contains(got, `"$args.allDay"`) || strings.Contains(got, `$args.allDay`) {
-			t.Errorf("omitted allDay left an unreplaced placeholder in the rendered query\nquery=%s", got)
-		}
-	})
+	if tool.Handler.Type != "function" || tool.Handler.FunctionName != "mutationCreateCalendarEvent" {
+		t.Fatalf("calendarCreate handler = {type:%q, fn:%q}; want a function handler targeting mutationCreateCalendarEvent",
+			tool.Handler.Type, tool.Handler.FunctionName)
+	}
 }
 
-// TestCalendarCreate1673_MutationNoReservedCreatedBy guards against #1673
+// TestCalendarCreate1673_MutationNoReservedFields guards against #1673
 // blocker 2: the insert block of mutationCreateCalendarEvent must NOT declare
-// the reserved field "createdBy". The engine auto-stamps createdBy from
-// actor.userId; explicitly setting it causes "insert() payload declares
-// reserved field" at mutation-execution time.
-func TestCalendarCreate1673_MutationNoReservedCreatedBy(t *testing.T) {
+// the engine-reserved fields "createdBy" OR "createdAt". Both are stamped by
+// the engine (createdBy from actor.userId, createdAt = now); declaring either
+// in the payload triggers "insert() payload declares reserved field" at
+// mutation-execution time and blocks calendar create entirely. (An interim
+// fix removed only createdBy but left createdAt: now, which is also reserved.)
+func TestCalendarCreate1673_MutationNoReservedFields(t *testing.T) {
 	content := dslCalendarMutationsSource(t)
 
-	// The insert block for mutationCreateCalendarEvent must NOT contain
-	// `createdBy: actor.userId`. The engine stamps it from the auth context.
-	if strings.Contains(content, "createdBy: actor.userId") {
-		// Locate the insert block for context.
-		excerpt := content
-		if idx := strings.Index(content, "insert {"); idx >= 0 {
-			end := idx + 300
-			if end > len(content) {
-				end = len(content)
+	for _, reserved := range []string{"createdBy: actor.userId", "createdAt: now"} {
+		if strings.Contains(content, reserved) {
+			excerpt := content
+			if idx := strings.Index(content, "mutation calendarEvent mutationCreateCalendarEvent"); idx >= 0 {
+				end := idx + 600
+				if end > len(content) {
+					end = len(content)
+				}
+				excerpt = content[idx:end]
 			}
-			excerpt = content[idx:end]
+			t.Errorf("mutationCreateCalendarEvent insert block declares reserved field %q -- remove it; the engine stamps createdAt/createdBy automatically\nexcerpt:\n%s", reserved, excerpt)
 		}
-		t.Errorf("mutationCreateCalendarEvent insert block declares reserved field \"createdBy: actor.userId\" -- remove it; the engine stamps createdBy automatically from actor.userId\nexcerpt:\n%s", excerpt)
 	}
 }
 
