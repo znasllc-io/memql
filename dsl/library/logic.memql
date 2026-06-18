@@ -37,7 +37,16 @@ logic logicIndexDocument {
     event  object  @required
   }
   body {
-    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, document), ownerUserId: args.event.payload.uploadedBy, lens: "artifact", kind: "document", source: "uploaded", title: args.event.payload.fileName, summary: args.event.payload.summary, format: args.event.payload.format, mimeType: args.event.payload.mimeType, live: false, spaceId: args.event.payload.spaceId, producedByPlanId: args.event.payload.planId, validationStatus: args.event.payload.validationStatus })
+    // coalesce(..., "") on the OPTIONAL string fields, mirroring the #1605
+    // fix on the generatedOutput path below. document.summary is optional and
+    // resolves to an explicit null when absent, which the v1:library:artifact
+    // string fields reject ("expected string, but got null"). mimeType /
+    // spaceId / planId are @required on document today but are coalesced
+    // defensively so an upstream contract change can't reopen this. format is
+    // an @enum field ("" is not a member), so it stays raw -- it is @required
+    // on document and never null; validationStatus is coalesced to "none"
+    // inside mutationCreateArtifact.
+    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, document), ownerUserId: args.event.payload.uploadedBy, lens: "artifact", kind: "document", source: "uploaded", title: args.event.payload.fileName, summary: coalesce(args.event.payload.summary, ""), format: args.event.payload.format, mimeType: coalesce(args.event.payload.mimeType, ""), live: false, spaceId: coalesce(args.event.payload.spaceId, ""), producedByPlanId: coalesce(args.event.payload.planId, ""), validationStatus: args.event.payload.validationStatus })
     return indexed
   }
 }
@@ -72,7 +81,10 @@ logic logicIndexNote {
     event  object  @required
   }
   body {
-    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, note), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "note", source: "agent_generated", title: coalesce(args.event.payload.title, "Untitled note"), summary: args.event.payload.body, live: false })
+    // coalesce(..., "") on summary -- note.body is @required upstream but is
+    // coalesced defensively so a null body can never re-trigger the
+    // artifact-null rejection. title already falls back to "Untitled note".
+    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, note), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "note", source: "agent_generated", title: coalesce(args.event.payload.title, "Untitled note"), summary: coalesce(args.event.payload.body, ""), live: false })
     return indexed
   }
 }
@@ -84,7 +96,10 @@ logic logicIndexTodo {
     event  object  @required
   }
   body {
-    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, todo), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "todo", source: "agent_generated", title: args.event.payload.title, live: false })
+    // title is @required on both todo and the artifact mutation; coalesce to
+    // "Untitled to-do" (mirroring logicIndexNote) so a null title can never
+    // fail the @required artifact title.
+    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, todo), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "todo", source: "agent_generated", title: coalesce(args.event.payload.title, "Untitled to-do"), live: false })
     return indexed
   }
 }
@@ -96,7 +111,10 @@ logic logicIndexCalendarEvent {
     event  object  @required
   }
   body {
-    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, calendarEvent), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "calendar_event", source: "agent_generated", title: args.event.payload.title, live: false })
+    // title is @required on both calendarEvent and the artifact mutation;
+    // coalesce to "Untitled event" so a null title can never fail the
+    // @required artifact title.
+    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, calendarEvent), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "calendar_event", source: "agent_generated", title: coalesce(args.event.payload.title, "Untitled event"), live: false })
     return indexed
   }
 }
@@ -108,7 +126,11 @@ logic logicIndexMemory {
     event  object  @required
   }
   body {
-    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, memory), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "memory", source: "agent_generated", title: args.event.payload.title, summary: args.event.payload.summary, agentId: args.event.payload.agentId, spaceId: args.event.payload.spaceId, live: false })
+    // coalesce(..., "") on the OPTIONAL fields. memory.summary / agentId /
+    // spaceId are all optional and resolve to an explicit null when absent,
+    // which the v1:library:artifact string fields reject -- this is the
+    // failure observed live on 0.9.67 (#1626). title is @required upstream.
+    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, memory), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "memory", source: "agent_generated", title: args.event.payload.title, summary: coalesce(args.event.payload.summary, ""), agentId: coalesce(args.event.payload.agentId, ""), spaceId: coalesce(args.event.payload.spaceId, ""), live: false })
     return indexed
   }
 }
@@ -120,7 +142,14 @@ logic logicIndexLiveSource {
     event  object  @required
   }
   body {
-    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, liveSource), ownerUserId: args.event.payload.ownerId, lens: "record", kind: "live_source", source: "live", title: args.event.payload.name, summary: args.event.payload.description, live: true, scope: args.event.payload.scope })
+    // coalesce(..., "") on ownerUserId + summary. liveSource.ownerId is
+    // OPTIONAL -- workspace-scoped sources carry no owner, so it resolves to
+    // null; the artifact's @required ownerUserId is satisfied by "" (the
+    // empty-owner value the workspace-source path expects), but rejects null.
+    // description is @required upstream but coalesced defensively. scope
+    // carries a @default("workspace") so it is always present; it is an @enum
+    // ("" is not a member) and stays raw.
+    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, liveSource), ownerUserId: coalesce(args.event.payload.ownerId, ""), lens: "record", kind: "live_source", source: "live", title: args.event.payload.name, summary: coalesce(args.event.payload.description, ""), live: true, scope: args.event.payload.scope })
     return indexed
   }
 }
