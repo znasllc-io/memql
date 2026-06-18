@@ -19,6 +19,7 @@ query todo queryTodos {
 
 @enabled
 @description("Fetch a single to-do by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's to-do even with its id. Used by the complete / update tools to confirm the row exists before re-inserting a new version.")
+@mcp
 query todo queryTodoById {
   args {
     todoId  string  @required

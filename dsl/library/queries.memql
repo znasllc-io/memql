@@ -56,6 +56,7 @@ query artifact queryLibraryArtifactsBySpace {
 
 @enabled
 @description("Fetch a single Library artifact index row by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content.")
+@mcp
 query artifact queryLibraryArtifactById {
   args {
     artifactId  string  @required

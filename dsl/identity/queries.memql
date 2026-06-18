@@ -1018,6 +1018,7 @@ query user queryUserById {
 
 @enabled
 @description("Get the authenticated caller's own user record. Self-scoped via actor.userId (no args) -- the caller cannot read another user's row.")
+@mcp
 query user queryCurrentUser {
   filter  id==actor.userId && traitIsActiveRecord
   shape   userFull
