@@ -598,14 +598,11 @@ mutation participant mutationRemoveAgentFromSpace {
     spaceId  string  @required
     agentId  string  @required
   }
-  insert {
+  update {
     id: concat("si-", hash(concat(
       canonicalId(args.agentId, agent), ":",
       canonicalId(args.spaceId, space)
     )))
-    args.spaceId
-    args.agentId
-    participantType: "si"
     status: "left"
     leftAt: timestamp()
   }

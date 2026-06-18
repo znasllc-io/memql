@@ -14,7 +14,7 @@ mutation record mutationCheckRecord {
     newCheckCount  number  @required
     newState       string  @required
   }
-  insert {
+  update {
     id: args.recordId
     checkCount: args.newCheckCount
     lastCheckedBy: args.identityId
@@ -56,7 +56,7 @@ mutation record mutationConfirmRecord {
     newConfirmCount  number  @required
     newState         string  @required
   }
-  insert {
+  update {
     id: args.recordId
     confirmCount: args.newConfirmCount
     lastConfirmedBy: args.identityId
@@ -233,11 +233,9 @@ mutation record mutationDeleteRecord {
   args {
     recordId  string  @required
   }
-  insert {
+  update {
     id: args.recordId
-    payload: {
-      active: false
-    }
+    active: false
   }
 }
 
@@ -279,7 +277,7 @@ mutation record mutationRevertRecord {
     checkCount    number  @required
     confirmCount  number  @required
   }
-  insert {
+  update {
     id: args.recordId
     validationState: args.toState
     args.checkCount
@@ -377,17 +375,15 @@ mutation record mutationUpdateRecord {
     naturalKeyValue  string
     confidence       number
   }
-  insert {
+  update {
     id: args.recordId
-    payload: {
-      args.data,
-      args.label,
-      args.naturalKeyField,
-      args.naturalKeyValue,
-      args.confidence,
-      validationState: "draft",
-      checkCount: 0,
-      confirmCount: 0
-    }
+    args.data
+    args.label
+    args.naturalKeyField
+    args.naturalKeyValue
+    args.confidence
+    validationState: "draft"
+    checkCount: 0
+    confirmCount: 0
   }
 }
