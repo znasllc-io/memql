@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
 )
 
@@ -139,13 +140,27 @@ func jsonSchemaType(t string) string {
 }
 
 // DSLConstructSource returns the raw `.memql` source slice for a named
-// function-family construct (query / mutation / logic / automation / spec) by
-// scanning the embedded/override DSL tree. Used by the MCP run_automation
-// dry-run path, which feeds the source into the Gate-2 behavioral sandbox.
+// construct (query / mutation / logic / automation) by scanning the
+// embedded/override DSL tree. Used by the MCP run_automation dry-run path,
+// which feeds the source into the Gate-2 behavioral sandbox.
 // Returns false when no slice with that (kind, name) is found.
+//
+// Automations are NOT function-registry constructs, so ExtractFunctionSlices
+// deliberately skips them (the function-parse pipeline has no automation case).
+// They are sliced by the dedicated ExtractAutomationSlices instead, so a
+// kind=="automation" lookup actually resolves -- the dry-run gap reported in
+// memql#1663, where the kind was hardcoded to "automation" against an extractor
+// that never emits automation slices. The lookup is now keyed on the ACTUAL
+// construct kind the caller asks for.
 func DSLConstructSource(logger *slog.Logger, kind, name string) (string, bool) {
 	for _, raw := range baseloader.ReadAll(logger) {
-		for _, slice := range ExtractFunctionSlices(raw.Content) {
+		var slices []FunctionSlice
+		if kind == string(languageParser.FunctionTypeAutomation) {
+			slices = ExtractAutomationSlices(raw.Content)
+		} else {
+			slices = ExtractFunctionSlices(raw.Content)
+		}
+		for _, slice := range slices {
 			if string(slice.Kind) == kind && slice.Name == name {
 				return slice.Source, true
 			}

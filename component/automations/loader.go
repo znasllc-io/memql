@@ -14,6 +14,7 @@ import (
 	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/compiler"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 var inlineStepBlockPattern = regexp.MustCompile(`:=\s*(query|mutation|shape|webhook|event|publishEvent)\s*(if\s+[^{]+)?\{`)
@@ -187,20 +188,147 @@ func (l *Loader) CompileSource(source, origin string) (*Automation, error) {
 	return l.compileMemQL(source, origin)
 }
 
-// LoadByName loads a specific automation by name.
+// LoadByName loads a runnable automation by its canonical name.
+//
+// Canonical-name rule (memql#1663). run_automation runs AUTOMATIONS -- the
+// `automation <name>` construct is the runnable entry point (it carries the
+// trigger + the step chain). Resolution is deterministic and tries, in order:
+//
+//  1. Exact automation name (e.g. registerNode / deregisterNode /
+//     bootstrapCluster / pruneStaleClusterNodes / expireDelegations). This is
+//     the canonical, documented name and the only previously-supported form.
+//  2. A wrapped LOGIC construct's name, in either spelling -- the full
+//     `logicXxx` construct name OR its bare invocation form `xxx` (strip the
+//     `logic` prefix, lowercase the first letter) -- resolving to the unique
+//     automation whose step invokes that logic. This makes a logic construct
+//     reachable by the name an author naturally reaches for (the QA pain in
+//     #1663: `logicRevokeExpiredDelegations` / `revokeExpiredDelegations` both
+//     now resolve to the `expireDelegations` automation that wraps them).
+//
+// If no automation matches but the name corresponds to a logic construct that
+// no automation wraps, a clear "not a runnable entry point" error is returned
+// (it is internal-only) -- which beats the old misleading "not found".
+//
+// Both the live and the dry-run run_automation paths resolve through this one
+// method, so they cannot diverge.
 func (l *Loader) LoadByName(name string) (*Automation, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("automation name is required")
+	}
+
 	automations, err := l.LoadAll()
 	if err != nil {
 		return nil, err
 	}
 
+	// 1. Exact automation name -- the canonical entry point.
 	for _, a := range automations {
 		if a.Name == name {
 			return a, nil
 		}
 	}
 
+	// 2. Logic-alias resolution. A wrapped logic construct resolves to the
+	//    automation whose step invokes it, accepting both the full `logicXxx`
+	//    name and the bare invocation form.
+	full := fullLogicName(name)
+	bare := bareLogicName(name)
+	for _, a := range automations {
+		for _, invoked := range invokedLogicNames(a) {
+			if invoked == name || invoked == full || bareLogicName(invoked) == bare {
+				return a, nil
+			}
+		}
+	}
+
+	// 3. Distinguish a logic construct that exists but is internal-only (no
+	//    wrapping automation) from a name that matches nothing at all.
+	if _, ok := memql.DSLConstructSource(l.logger, "logic", full); ok {
+		return nil, fmt.Errorf(
+			"%q is a logic construct but no automation wraps it, so it is not a runnable entry point via run_automation", name)
+	}
+
 	return nil, fmt.Errorf("automation %q not found", name)
+}
+
+// invokedLogicNames returns the full `logicXxx` construct names invoked by an
+// automation's steps (walking nested parallel / forEach / switch containers).
+// A `logic <bare> { ... }` step is rewritten by the parser into a function-call
+// step whose Function.Name is the full `logicXxx` form, so these are exactly
+// the StepTypeFunction steps whose name carries the `logic` kind prefix.
+func invokedLogicNames(a *Automation) []string {
+	if a == nil {
+		return nil
+	}
+	var out []string
+	var walk func(steps []*Step)
+	visit := func(s *Step) {
+		if s == nil {
+			return
+		}
+		if s.Type == StepTypeFunction && s.Function != nil && isLogicConstructName(s.Function.Name) {
+			out = append(out, s.Function.Name)
+		}
+		if s.Parallel != nil {
+			walk(s.Parallel.Branches)
+		}
+		if s.ForEach != nil {
+			walk(s.ForEach.Do)
+		}
+		if s.Switch != nil {
+			for _, c := range s.Switch.Cases {
+				if c != nil {
+					walk(c.Steps)
+					walk([]*Step{c.Step})
+				}
+			}
+			if s.Switch.Default != nil {
+				walk(s.Switch.Default.Steps)
+				walk([]*Step{s.Switch.Default.Step})
+			}
+		}
+	}
+	walk = func(steps []*Step) {
+		for _, s := range steps {
+			visit(s)
+		}
+	}
+	walk(a.Steps)
+	return out
+}
+
+// isLogicConstructName reports whether name is a full `logicXxx` construct name
+// (the `logic` kind prefix followed by an upper-cased first letter -- so it does
+// not misfire on an ordinary identifier like "logical").
+func isLogicConstructName(name string) bool {
+	const prefix = "logic"
+	if !strings.HasPrefix(name, prefix) || len(name) <= len(prefix) {
+		return false
+	}
+	c := name[len(prefix)]
+	return c >= 'A' && c <= 'Z'
+}
+
+// fullLogicName returns the full `logicXxx` construct name for name. If name is
+// already in that form it is returned unchanged; otherwise the bare form is
+// promoted (`logic` + Title-cased first letter).
+func fullLogicName(name string) string {
+	if isLogicConstructName(name) || name == "" {
+		return name
+	}
+	return "logic" + strings.ToUpper(name[:1]) + name[1:]
+}
+
+// bareLogicName returns the bare invocation form of a logic name (strip the
+// `logic` prefix, lowercase the first letter). A name not in `logicXxx` form is
+// returned unchanged, so it composes safely with already-bare inputs.
+func bareLogicName(name string) string {
+	if !isLogicConstructName(name) {
+		return name
+	}
+	rest := name[len("logic"):]
+	return strings.ToLower(rest[:1]) + rest[1:]
 }
 
 // loadMemQL loads and compiles a .memql file from embedded filesystem.

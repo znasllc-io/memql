@@ -219,6 +219,82 @@ func ExtractFunctionSlices(source string) []FunctionSlice {
 	return slices
 }
 
+// automationDeclHeader matches a top-level `automation NAME {` header at
+// column 0. Automations are NOT function-registry constructs, so they are
+// deliberately excluded from ExtractFunctionSlices (see the doc comment on
+// functionDeclHeader). But the MCP run_automation dry-run path still needs an
+// automation's raw source to feed the Gate-2 behavioral sandbox, so this
+// dedicated header lets ExtractAutomationSlices recover that source text
+// without routing it through the function-parse pipeline.
+var automationDeclHeader = regexp.MustCompile(
+	`(?m)^[ \t]*automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`,
+)
+
+// ExtractAutomationSlices scans `source` for top-level `automation NAME { ... }`
+// declarations and returns each as a self-contained slice (preamble + file-top
+// `use` imports + body), mirroring ExtractFunctionSlices but for automations.
+//
+// Every returned slice carries Kind == FunctionTypeAutomation. This is the
+// companion extractor that makes DSLConstructSource resolve an automation's
+// source for the dry-run path (memql#1663) -- ExtractFunctionSlices skips
+// automations because the function-parse pipeline has no automation case, but
+// the dry-run sandbox only needs the source TEXT, not a parsed *Function.
+func ExtractAutomationSlices(source string) []FunctionSlice {
+	scan := languageParser.BlankComments(source)
+	matches := automationDeclHeader.FindAllStringSubmatchIndex(scan, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+
+	usePreamble := extractUseDeclarations(source)
+
+	var slices []FunctionSlice
+	for _, m := range matches {
+		headerStart := m[0]
+		headerEnd := m[1]
+
+		// Only extract top-level (brace-depth-0) declarations.
+		if braceDepthBefore(scan, headerStart) != 0 {
+			continue
+		}
+
+		name := source[m[2]:m[3]]
+
+		// The opening `{` is the last char of the header match.
+		openIdx := headerEnd - 1
+		closeIdx := findMatchingCloseBraceRune(scan, openIdx)
+		if closeIdx < 0 {
+			continue
+		}
+
+		// Walk backwards for the @-attribute / comment preamble.
+		preambleStart := headerStart
+		for k := headerStart - 1; k >= 0; k-- {
+			lineStart := strings.LastIndexByte(source[:k], '\n') + 1
+			line := strings.TrimRight(source[lineStart:k+1], "\r\n")
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "@") || strings.HasPrefix(trimmed, "//") {
+				preambleStart = lineStart
+				k = lineStart - 1
+				continue
+			}
+			break
+		}
+
+		body := source[preambleStart : closeIdx+1]
+		if usePreamble != "" {
+			body = usePreamble + body
+		}
+		slices = append(slices, FunctionSlice{
+			Source: body,
+			Kind:   languageParser.FunctionTypeAutomation,
+			Name:   name,
+		})
+	}
+
+	return slices
+}
+
 // extractUseDeclarations returns every file-top `use ... .{ ... }`
 // declaration concatenated with newlines + a trailing blank line.
 // Used by ExtractFunctionSlices to prepend the file's import context
