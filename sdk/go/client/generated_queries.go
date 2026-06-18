@@ -3580,10 +3580,12 @@ func QuerySpreadsheetRowsForDocumentBuild(args QuerySpreadsheetRowsForDocumentAr
 	return b.String()
 }
 
-// QueryStaleClusterNodes -- Latest-per-id cluster node rows whose health is not already 'stopped'. Drives the stale-node prune cron.
+// QueryStaleClusterNodes -- Latest-per-id cluster node rows whose health is not already 'stopped'. When olderThan is supplied, restricts to rows whose lastSeen is strictly before it (RFC3339 cutoff). Drives the stale-node prune cron.
 //
 // Bound concept: node.
 type QueryStaleClusterNodesArgs struct {
+	// Optional RFC3339 cutoff; when set, only rows whose lastSeen is strictly before it are returned.
+	OlderThan string
 }
 
 // QueryStaleClusterNodes calls the engine query queryStaleClusterNodes.
@@ -3593,8 +3595,14 @@ func (qc *QueryClient) QueryStaleClusterNodes(ctx context.Context, args QuerySta
 }
 
 func QueryStaleClusterNodesBuild(args QueryStaleClusterNodesArgs) string {
-	_ = args
-	return "queryStaleClusterNodes({})"
+	var b strings.Builder
+	b.WriteString("queryStaleClusterNodes({")
+	if args.OlderThan != "" {
+		b.WriteString("olderThan: ")
+		b.WriteString(fmt.Sprintf("%q", args.OlderThan))
+	}
+	b.WriteString("})")
+	return b.String()
 }
 
 // QueryStrandedCandidatePlans -- Plans still in a pre-dispatch status (planning / queued). Backs the stranded-plan watchdog (memql#1389); the age + dedup check runs Go-side.
