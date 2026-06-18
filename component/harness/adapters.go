@@ -245,34 +245,16 @@ func (w *EngineWriter) ClaimStep(ctx context.Context, _ string, stepID string, _
 // same mutation). Kept to satisfy the Writer interface.
 func (w *EngineWriter) StartStep(_ context.Context, _ string) error { return nil }
 
-// MarkStepReady transitions a pending/blocked step to ready. The #582
-// state machine treats pending->ready and blocked->ready as legal edges,
-// but the #582 mutation surface ships no dedicated ready-promotion write
-// (addStep hardcodes status=pending; the transition mutations only cover
-// running/done/failed). The promotion is therefore expressed as a raw
-// re-version insert against v1:harness:step carrying status="ready":
-// executeInsert routes it through validateHarnessStepTransition (the same
-// guard the named mutations hit), which validates pending->ready /
-// blocked->ready and rejects anything illegal. Raw insert does NOT
-// read-merge, so every required field is re-asserted from the StepView.
+// MarkStepReady transitions a pending/blocked step to ready via
+// mutationReadyHarnessStep (#1635) -- the dedicated ready-promotion write the
+// original #582 mutation surface lacked (addStep hardcoded status=pending; the
+// transition mutations only covered running/done/failed, so this used to be a
+// raw re-version insert re-asserting every field). The mutation is an update
+// (read-merge): it flips status pending->ready / blocked->ready by id and
+// routes through validateHarnessStepTransition (the same guard the named
+// transition mutations hit), so no field re-assertion is needed.
 func (w *EngineWriter) MarkStepReady(ctx context.Context, step StepView) error {
-	payload := map[string]any{
-		"ownerUserId":        step.OwnerUserId,
-		"planId":             step.PlanID,
-		"title":              firstNonEmpty(step.Title, "step "+step.ID),
-		"status":             StepStatusReady,
-		"idempotencyKey":     step.IdempotencyKey,
-		"dependsOn":          step.DependsOn,
-		"attempt":            step.Attempt,
-		"provenanceMutation": "harnessReconciler.markStepReady",
-	}
-	if step.Input != nil {
-		payload["input"] = step.Input
-	}
-	q := fmt.Sprintf(
-		`insert(%q, id=%q, payload=%s)`,
-		memorynodes.ConceptHarnessStep, step.ID, mustJSON(payload),
-	)
+	q := fmt.Sprintf(`mutationReadyHarnessStep({stepId:%q})`, step.ID)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
 		return fmt.Errorf("mark step %q ready: %w", step.ID, err)
 	}
