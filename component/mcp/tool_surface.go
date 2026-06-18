@@ -286,6 +286,13 @@ func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, name s
 	// dropping them (memql#1633). Scoped to MCP calls so internal engine
 	// callers stay lenient; mirrors the unknown-tool rejection (memql#1602).
 	ctx = memql.WithStrictUnknownArgs(ctx)
+	// Flag this as an MCP-originated tool execution so applyToolDefaults
+	// preserves caller-supplied values for @autoInjected fields that have
+	// no server default (e.g. spaceId on recentChat -- no agent runtime is
+	// present on the MCP path to stamp the space). Over MCP the caller IS
+	// the authenticated user, so their spaceId is a legitimate input
+	// (memql#1684).
+	ctx = memql.WithMCPToolExecution(ctx)
 
 	switch name {
 	case toolRunQuery, toolRunMutation:
