@@ -7,6 +7,7 @@
 @handler(type="query", query="help({\"name\": \"$args.name\"})")
 @executionTime("fast")
 @description("Get detailed usage guidance for a MemQL named function (docs, args schema, and key calling rules)")
+@mcp
 tool describeFunction {
   name  string  @required @description("The function name to describe (e.g., activeSpaces)")
 }
@@ -19,7 +20,7 @@ tool describeFunction {
 // Search for users in the system.
 
 @enabled
-@handler(type="query", query="concept==v1:memql:backend:user")
+@handler(type="query", query="concept==v1:identity:user")
 @executionTime("fast")
 @description("Search for users")
 @mcp
