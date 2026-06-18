@@ -198,17 +198,15 @@ func TestRuntimeEvaluator_EvaluateCoalesce(t *testing.T) {
 	}{
 		{"first non-nil", []any{nil, "value", "other"}, "value"},
 		{"all nil", []any{nil, nil, nil}, nil},
+		{"skip empty strings", []any{"", "value"}, "value"},
 		{"first value wins", []any{"first", "second"}, "first"},
-
-		// memql#1614: coalesce returns the first NON-NIL arg; a literal
-		// empty string is a present value and is returned, not skipped.
-		{"nil then empty string yields empty string", []any{nil, ""}, ""},
-		{"nil then nil yields nil", []any{nil, nil}, nil},
-		{"a then b yields a", []any{"a", "b"}, "a"},
-		{"nil then x yields x", []any{nil, "x"}, "x"},
-		// Pins the new first-non-nil semantics: an empty-string FIRST arg
-		// is a real value and wins over a later non-empty fallback.
-		{"empty string then y yields empty string", []any{"", "y"}, ""},
+		// #1614: the FINAL arg is the ultimate fallback -- returned even
+		// when empty, so coalesce(absent, "") -> "" (the #1605 fix). A
+		// non-final empty arg is still skipped (the "skip empty strings"
+		// case above).
+		{"empty-string fallback honored as last arg", []any{nil, ""}, ""},
+		{"empty first then empty fallback", []any{"", ""}, ""},
+		{"non-empty wins over empty fallback", []any{"a", ""}, "a"},
 	}
 
 	for _, tt := range tests {

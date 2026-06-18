@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/automations"
@@ -133,7 +134,14 @@ func TestResolveArgValueRef_UnresolvedBuiltin_DropsToNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != nil {
-		t.Fatalf("unresolved builtin arg = %#v, want nil (never the raw expression literal)", got)
+	// #1614: the final "" arg is the ultimate fallback, so an unresolved
+	// first arm now yields the empty STRING (not nil). The #580 protection
+	// is unchanged and remains the point of this test: the result is NEVER
+	// the raw expression literal `coalesce(...)`.
+	if got != "" {
+		t.Fatalf("unresolved builtin arg = %#v, want \"\" (the empty-string fallback; #1614)", got)
+	}
+	if s, ok := got.(string); ok && strings.Contains(s, "coalesce(") {
+		t.Fatalf("raw expression literal leaked through (#580): %q", s)
 	}
 }

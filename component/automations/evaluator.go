@@ -514,7 +514,7 @@ func (e *Evaluator) evaluateCoalesce(expr string) (any, error) {
 		return nil, nil
 	}
 
-	for _, raw := range args {
+	for i, raw := range args {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			continue
@@ -525,7 +525,17 @@ func (e *Evaluator) evaluateCoalesce(expr string) (any, error) {
 			continue
 		}
 
-		// Treat empty strings as missing.
+		// #1614: the FINAL arg is the ultimate fallback -- return it even
+		// when it resolves to "" (so coalesce(absent, "") -> ""). A
+		// NON-final arg that resolves to nil or "" is treated as missing
+		// and skipped, so coalesce("", fallback) / coalesce(emptyField,
+		// fallback) still fall through.
+		if i == len(args)-1 {
+			return val, nil
+		}
+		if val == nil {
+			continue
+		}
 		if s, isString := val.(string); isString && strings.TrimSpace(s) == "" {
 			continue
 		}

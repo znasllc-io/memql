@@ -517,7 +517,7 @@ func splitTopLevelArgs(inner string) ([]string, error) {
 // rely on `coalesce(args.X, "fallback")` to land the fallback when
 // args.X is absent.
 func evaluateCoalesceArgs(rawArgs []string, evaluator *Evaluator) (any, error) {
-	for _, raw := range rawArgs {
+	for i, raw := range rawArgs {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			continue
@@ -525,6 +525,15 @@ func evaluateCoalesceArgs(rawArgs []string, evaluator *Evaluator) (any, error) {
 		val, err := evaluateScalarArg(raw, evaluator)
 		if err != nil {
 			return nil, err
+		}
+		// #1614: the FINAL arg is the ultimate fallback -- return it even
+		// when it resolves to "" (so coalesce(absent, "") -> "" reaches a
+		// string field; the #1605 artifact-index logic relies on this).
+		// A NON-final arg that resolves to nil or "" is treated as missing
+		// and skipped, so coalesce("", fallback) and coalesce(emptyField,
+		// fallback) still fall through.
+		if i == len(rawArgs)-1 {
+			return val, nil
 		}
 		if val == nil {
 			continue
