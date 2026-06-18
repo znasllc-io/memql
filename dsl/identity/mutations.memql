@@ -666,16 +666,16 @@ mutation clusterSettings mutationSetAuthoredAutomationsEnabled {
 @description("Create a new delegation granting an agent scoped authority on behalf of an identity.")
 mutation delegation mutationCreateDelegation {
   args {
-    delegationId     string
-    identityId       string  @required
-    identitySubject  string  @required
-    identityType     string  @required  @enum("human", "synthetic")
-    agentId          string  @required
-    agentSubject     string  @required
-    roleCeiling      string  @required
-    scopes           object  @required
-    expiresAt        string
-    note             string
+    delegationId      string
+    identityId        string    @required
+    identitySubject   string    @required
+    identityType      string    @required  @enum("human", "synthetic")
+    agentId           string    @required
+    roleCeiling       string    @required  @enum("owner", "admin", "writer", "reader")
+    scopes            []string  @required
+    createdBySubject  string    @required
+    expiresAt         string
+    note              string
   }
   insert {
     id: args.delegationId
@@ -683,9 +683,9 @@ mutation delegation mutationCreateDelegation {
     args.identitySubject
     args.identityType
     args.agentId
-    args.agentSubject
     args.roleCeiling
     args.scopes
+    args.createdBySubject
     args.expiresAt
     args.note
     active: true
@@ -1355,8 +1355,8 @@ mutation accessRequest mutationExpireAccessRequest {
 @description("Replace a user's legalAcceptance array (caller must read-modify-write to append).")
 mutation user mutationRecordLegalAcceptance {
   args {
-    userId           string  @required
-    legalAcceptance  object  @required
+    userId           string    @required
+    legalAcceptance  []object  @required
   }
   update {
     id: args.userId

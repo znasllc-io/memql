@@ -93,10 +93,10 @@ mutation documentChunk mutationCreateDocumentChunk {
 mutation domainEntitySchema mutationCreateDomainEntitySchema {
   args {
     schemaId                string
-    domainId                string  @required
-    entityKind              string  @required
-    keyFields               object  @required
-    displayFields           object
+    domainId                string    @required
+    entityKind              string    @required
+    keyFields               []string  @required
+    displayFields           []string
     inferredFromDocumentId  string
     inferredFromTaskId      string
     confirmedBy             string

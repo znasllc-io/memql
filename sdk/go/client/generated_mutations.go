@@ -2722,11 +2722,12 @@ type MutationCreateDelegationArgs struct {
 	// Enum: human | synthetic
 	IdentityType string
 	AgentId      string
-	AgentSubject string
-	RoleCeiling  string
-	Scopes       map[string]any
-	ExpiresAt    string
-	Note         string
+	// Enum: owner | admin | writer | reader
+	RoleCeiling      string
+	Scopes           []string
+	CreatedBySubject string
+	ExpiresAt        string
+	Note             string
 }
 
 // MutationCreateDelegation calls the engine mutation mutationCreateDelegation.
@@ -2765,11 +2766,6 @@ func MutationCreateDelegationBuild(args MutationCreateDelegationArgs) string {
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
-	b.WriteString("agentSubject: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentSubject))
-	if b.Len() > 26 {
-		b.WriteString(", ")
-	}
 	b.WriteString("roleCeiling: ")
 	b.WriteString(fmt.Sprintf("%q", args.RoleCeiling))
 	if b.Len() > 26 {
@@ -2777,6 +2773,11 @@ func MutationCreateDelegationBuild(args MutationCreateDelegationArgs) string {
 	}
 	b.WriteString("scopes: ")
 	b.WriteString(renderMemQLValue(args.Scopes))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("createdBySubject: ")
+	b.WriteString(fmt.Sprintf("%q", args.CreatedBySubject))
 	if args.ExpiresAt != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
@@ -2988,8 +2989,8 @@ type MutationCreateDomainEntitySchemaArgs struct {
 	SchemaId               string
 	DomainId               string
 	EntityKind             string
-	KeyFields              map[string]any
-	DisplayFields          map[string]any
+	KeyFields              []string
+	DisplayFields          []string
 	InferredFromDocumentId string
 	InferredFromTaskId     string
 	ConfirmedBy            string
@@ -7837,8 +7838,8 @@ type MutationPersistTaskStateArgs struct {
 	TaskId            string
 	WorkingMemory     map[string]any
 	ReasoningChain    string
-	ToolCallHistory   map[string]any
-	PendingSubPlanIds map[string]any
+	ToolCallHistory   []map[string]any
+	PendingSubPlanIds []string
 }
 
 // MutationPersistTaskState calls the engine mutation mutationPersistTaskState.
@@ -8181,7 +8182,7 @@ func MutationRecordHarnessObservationBuild(args MutationRecordHarnessObservation
 // Bound concept: user.
 type MutationRecordLegalAcceptanceArgs struct {
 	UserId          string
-	LegalAcceptance map[string]any
+	LegalAcceptance []map[string]any
 }
 
 // MutationRecordLegalAcceptance calls the engine mutation mutationRecordLegalAcceptance.
