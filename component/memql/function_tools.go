@@ -205,12 +205,26 @@ func jsonSchemaForArgsField(f *FunctionArgsField) map[string]any {
 			}
 		}
 		obj := map[string]any{
-			"type":                 "object",
-			"properties":           props,
-			"additionalProperties": false,
+			"type":       "object",
+			"properties": props,
 		}
-		if f.AdditionalProperties != nil {
+		// additionalProperties resolution:
+		//   1. explicit @additionalProperties wins.
+		//   2. a free-form object (no declared sub-fields) defaults to
+		//      OPEN -- otherwise additionalProperties:false rejects
+		//      every key, making the whole partial-update family
+		//      (mutationUpdateTodo.payload, notesUpdate, ...) uncallable
+		//      even though the payload is documented to carry the
+		//      changed fields (#1606).
+		//   3. an object WITH declared sub-fields stays CLOSED, so the
+		//      schema is descriptive and typo args are rejected.
+		switch {
+		case f.AdditionalProperties != nil:
 			obj["additionalProperties"] = *f.AdditionalProperties
+		case len(props) == 0:
+			obj["additionalProperties"] = true
+		default:
+			obj["additionalProperties"] = false
 		}
 		if len(required) > 0 {
 			obj["required"] = required
