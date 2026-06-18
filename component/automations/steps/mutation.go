@@ -920,13 +920,21 @@ func (e *MutationExecutor) evaluateCoalesce(evaluator *automations.Evaluator, ex
 	argsStr := expr[9 : len(expr)-1]
 	args := e.splitFunctionArgs(argsStr)
 
-	for _, arg := range args {
+	for i, arg := range args {
 		val, err := e.evaluateValue(evaluator, strings.TrimSpace(arg))
 		if err != nil {
 			continue // Skip errors, try next
 		}
+		// #1614: the FINAL arg is the ultimate fallback -- return it even
+		// when it resolves to "" (so coalesce(absent, "") -> "" reaches a
+		// string field; the #1605 artifact-index fallback). A NON-final arg
+		// that resolves to nil or "" is treated as missing and skipped, so
+		// coalesce(emptyUserId, subject) keeps falling through to subject
+		// and the "builtin arg resolved to nil" WARN clears.
+		if i == len(args)-1 {
+			return val, nil
+		}
 		if val != nil {
-			// Also check for empty string
 			if s, ok := val.(string); ok && s == "" {
 				continue
 			}
