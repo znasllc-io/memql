@@ -77,6 +77,21 @@ type ResponsibilityIntakeDispatcher struct {
 	// before a second node claims.
 	mu      sync.Mutex
 	claimed map[string]struct{}
+	// dispatched is the PERMANENT (never-released) set of responsibility ids
+	// this process has already run first-pass intake for. Distinct from
+	// `claimed`, which releases after the run so the row can be re-evaluated.
+	//
+	// memQL is append-only: every successful update() (including the
+	// routing-only mutationAssignResponsibility) materialises as a new row
+	// that re-fires graph.node.created. Without a permanent guard, assigning
+	// an agent to a still-draft responsibility (intakeStatus=='') re-enters
+	// first-pass intake, which re-infers trigger/schedule from the bare
+	// statement and CLOBBERS the user's explicit cadence (recurring->standing,
+	// schedule blanked) -- memql#1645. First-pass intake is a once-per-row
+	// authoring step; this set enforces that within the process even when a
+	// prior run failed (leaving intakeStatus=='') or the claim was released.
+	// Cross-replica re-fire is still gated durably by the intakeStatus!='' read.
+	dispatched map[string]struct{}
 }
 
 // NewResponsibilityIntakeDispatcher constructs a dispatcher pinned to the
@@ -86,9 +101,10 @@ func NewResponsibilityIntakeDispatcher(engine Engine, logger *slog.Logger) *Resp
 		logger = slog.Default()
 	}
 	return &ResponsibilityIntakeDispatcher{
-		engine:  engine,
-		logger:  logger,
-		claimed: make(map[string]struct{}),
+		engine:     engine,
+		logger:     logger,
+		claimed:    make(map[string]struct{}),
+		dispatched: make(map[string]struct{}),
 	}
 }
 
@@ -110,20 +126,23 @@ func (d *ResponsibilityIntakeDispatcher) HandleResponsibilityCreated(ev events.E
 }
 
 // HandleResponsibilityUpdated is the event-bus subscriber for
-// graph.node.updated.v1:planner:responsibility. Two cases:
-//   - a draft that somehow still has intakeStatus=” (e.g. created in a
-//     non-draft status then flipped) -> first-pass intake.
+// graph.node.updated.v1:planner:responsibility. It handles exactly one case:
 //   - a row parked in intakeStatus='awaitingAnswers' that now carries an
 //     intakeResponse (the user answered) -> fold the answers back.
+//
+// First-pass intake is NOT (re-)triggered from the updated path. It belongs
+// to the create path (HandleResponsibilityCreated): mutationCreateResponsibility
+// always inserts in status='draft' intakeStatus='', so the created event fully
+// covers genuine first authoring. Re-triggering first-pass on an arbitrary
+// update is the memql#1645 footgun -- a routing-only mutationAssignResponsibility
+// materialises a fresh row version and would otherwise re-run the inference
+// cascade, clobbering the user's explicit trigger/schedule.
 func (d *ResponsibilityIntakeDispatcher) HandleResponsibilityUpdated(ev events.Event) {
-	id, status, intakeStatus, hasResponse, ok := extractResponsibilityIntakeFields(ev)
+	id, _, intakeStatus, hasResponse, ok := extractResponsibilityIntakeFields(ev)
 	if !ok {
 		return
 	}
-	switch {
-	case status == "draft" && intakeStatus == "":
-		d.dispatchFirstPass(id)
-	case intakeStatus == "awaitingAnswers" && hasResponse:
+	if intakeStatus == "awaitingAnswers" && hasResponse {
 		// The user answered the parked questions; finalize in a detached
 		// goroutine (it makes a second LLM call).
 		go d.runFoldAnswers(context.Background(), id)
@@ -134,6 +153,20 @@ func (d *ResponsibilityIntakeDispatcher) HandleResponsibilityUpdated(ev events.E
 // goroutine (the bus dispatches subscribers synchronously and the intake
 // prompt is a multi-second LLM call).
 func (d *ResponsibilityIntakeDispatcher) dispatchFirstPass(id string) {
+	// Permanent once-per-row guard (memql#1645): first-pass intake is an
+	// authoring step that must run at most once per responsibility. An
+	// update() such as the routing-only mutationAssignResponsibility re-fires
+	// graph.node.created (append-only materialisation), which would otherwise
+	// re-enter first-pass on a still-draft row and clobber the user's explicit
+	// trigger/schedule. Skip if we've already dispatched first-pass for this id.
+	d.mu.Lock()
+	if _, done := d.dispatched[id]; done {
+		d.mu.Unlock()
+		return
+	}
+	d.dispatched[id] = struct{}{}
+	d.mu.Unlock()
+
 	if !d.claim(id) {
 		return
 	}
