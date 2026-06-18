@@ -357,8 +357,15 @@ query utterance queryHasSIResponseForReply {
 // queryParticipantByAgentSpace - Check if Agent Already in Space
 // ===============================================================
 //
-// Checks if a specific AI agent is already participating in a space.
-// Used to prevent duplicate AI participant records during auto-join.
+// Checks if a specific SI agent is already participating in a space
+// (status != "left"). Returns both "active" and "idle" participants --
+// any participant that has NOT left the space. Used to prevent
+// duplicate SI participant records during auto-join.
+//
+// NOTE: participant has no `active` boolean field; liveness is
+// governed by `status`. This query intentionally uses
+// `payload.status!="left"` (not traitIsActiveRecord) so SI rows are
+// not silently excluded.
 //
 // Arguments:
 //   spaceId (string, required)  - The space ID to check
@@ -382,7 +389,7 @@ query participant queryParticipantByAgentSpace {
     spaceId  string  @required
     agentId  string  @required
   }
-  filter  payload.spaceId==args.spaceId && payload.agentId==args.agentId && payload.status!="left" && traitIsActiveRecord
+  filter  payload.spaceId==args.spaceId && payload.agentId==args.agentId && payload.status!="left"
   shape   participantFull
 }
 

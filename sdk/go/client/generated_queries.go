@@ -820,11 +820,11 @@ func QueryAuditEventsByActorBuild(args QueryAuditEventsByActorArgs) string {
 	return b.String()
 }
 
-// QueryAuditEventsByTarget -- Audit events where targetId equals the supplied userId. Pair with queryAuditEventsByActor for full per-user history (no OR operator in the filter grammar yet).
+// QueryAuditEventsByTarget -- Audit events where targetId equals the supplied targetId. Pair with queryAuditEventsByActor for full per-user history (no OR operator in the filter grammar yet).
 //
 // Bound concept: auditEvent.
 type QueryAuditEventsByTargetArgs struct {
-	UserId string
+	TargetId string
 }
 
 // QueryAuditEventsByTarget calls the engine query queryAuditEventsByTarget.
@@ -836,8 +836,8 @@ func (qc *QueryClient) QueryAuditEventsByTarget(ctx context.Context, args QueryA
 func QueryAuditEventsByTargetBuild(args QueryAuditEventsByTargetArgs) string {
 	var b strings.Builder
 	b.WriteString("queryAuditEventsByTarget({")
-	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString("targetId: ")
+	b.WriteString(fmt.Sprintf("%q", args.TargetId))
 	b.WriteString("})")
 	return b.String()
 }
