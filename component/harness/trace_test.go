@@ -18,7 +18,7 @@ func TestAssembleTrace_OrdersByCreatedAt(t *testing.T) {
 		{At: at(base, 0), Kind: EventKindPlan, NodeID: "p1", Status: PlanStatusOpen, Mutation: "mutationCreateHarnessPlan", Content: "the goal"},
 		{At: at(base, 3), Kind: EventKindObservation, NodeID: "o1", StepID: "s1", ObservationKind: "tool_result", Content: "did a thing", Data: map[string]any{"toolName": "search"}},
 		{At: at(base, 2), Kind: EventKindStep, NodeID: "s1", StepID: "s1", Status: StepStatusRunning, Mutation: "mutationStartHarnessStep"},
-		{At: at(base, 1), Kind: EventKindStep, NodeID: "s1", StepID: "s1", Status: StepStatusReady, Mutation: "harnessReconciler.markStepReady"},
+		{At: at(base, 1), Kind: EventKindStep, NodeID: "s1", StepID: "s1", Status: StepStatusReady, Mutation: "mutationReadyHarnessStep"},
 		{At: at(base, 6), Kind: EventKindPlan, NodeID: "p1", Status: PlanStatusDone, Mutation: "harnessReconciler.setPlanStatus", Content: "the goal"},
 	}
 
