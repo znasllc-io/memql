@@ -35,6 +35,7 @@ use harness.concepts.{ plan, step, observation, semanticMemory, consolidationCur
 // server-stamped from actor.userId so the caller cannot land a plan
 // owned by someone else.
 @enabled
+@mcp
 @description("Create a v1:harness:plan in status='open'. ownerUserId is stamped from actor.userId (owned tier). Single write path for plan creation.")
 mutation plan mutationCreateHarnessPlan {
   args {
@@ -60,6 +61,7 @@ mutation plan mutationCreateHarnessPlan {
 // attempt starts at 0; status starts at pending and walks the state
 // machine via the transition mutations below.
 @enabled
+@mcp
 @description("Add a v1:harness:step to a plan, status='pending', attempt=0. ownerUserId is stamped from actor.userId (owned tier). Creating the step emits graph.node.created.*.v1:harness:step automatically on insert.")
 mutation step mutationAddHarnessStep {
   args {
@@ -97,6 +99,7 @@ mutation step mutationAddHarnessStep {
 // status (e.g. done -> ready). The failed -> ready retry path (which
 // must also bump attempt) stays a separate write.
 @enabled
+@mcp
 @description("Promote a step to ready (pending -> ready when dependsOn is satisfied, or blocked -> ready when the blocker finishes). Read-merges the prior row so owned-tier fields are preserved. The engine step guard validates the transition and rejects an illegal source status. Without this mutation the state machine is stuck at 'pending' (#1635).")
 mutation step mutationReadyHarnessStep {
   args {
@@ -116,6 +119,7 @@ mutation step mutationReadyHarnessStep {
 // guard rejects this when the prior status is not 'ready' (e.g.
 // done -> running is invalid).
 @enabled
+@mcp
 @description("Claim a ready step (ready -> running). Stamps assignedAgent + startedAt. The engine step guard rejects the transition when the prior status is not 'ready'.")
 mutation step mutationStartHarnessStep {
   args {
@@ -136,6 +140,7 @@ mutation step mutationStartHarnessStep {
 // Record a running step's result: running -> done (terminal). The
 // engine guard rejects this when the prior status is not 'running'.
 @enabled
+@mcp
 @description("Record a running step's result (running -> done). done is terminal. The engine step guard rejects the transition when the prior status is not 'running'.")
 mutation step mutationCompleteHarnessStep {
   args {
@@ -158,6 +163,7 @@ mutation step mutationCompleteHarnessStep {
 // separate write that bumps attempt; the engine guard enforces that
 // failStep only fires from 'running'.
 @enabled
+@mcp
 @description("Mark a running step failed (running -> failed). Stamps errorMessage + completedAt. The engine step guard rejects the transition when the prior status is not 'running'. Retry (failed -> ready, attempt++) is a separate write.")
 mutation step mutationFailHarnessStep {
   args {
@@ -181,6 +187,7 @@ mutation step mutationFailHarnessStep {
 // node_vectors keyed by this observation's id so it becomes
 // semantically recall-able (#585).
 @enabled
+@mcp
 @description("Append a v1:harness:observation for a step (tool_result / error / note / decision). ownerUserId stamped from actor.userId (owned tier). content is the embedding source for semantic recall (#585).")
 mutation observation mutationRecordHarnessObservation {
   args {

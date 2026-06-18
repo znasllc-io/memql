@@ -28,6 +28,12 @@ func TestMCPCuratedToolSurface(t *testing.T) {
 		// #1597 decision to exclude it. Function/arg introspection materially
 		// improves MCP-client usability, so it is intentionally @mcp-tagged.
 		"describeFunction",
+		// recentChat restored to the MCP surface (#1684): the run-2 exclusion
+		// rationale (autoInjected spaceId has no value over MCP) is fixed by
+		// WithMCPToolExecution in applyToolDefaults -- a caller-supplied spaceId
+		// is now preserved when no server default is available. MCP callers MUST
+		// supply spaceId; in-agent execution still stamps it server-side.
+		"recentChat",
 	}
 
 	registry := newToolRegistry()

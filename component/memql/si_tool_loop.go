@@ -140,7 +140,7 @@ func (e *MemQLEngine) InvokeSIChatWithTools(ctx context.Context, templateId stri
 			// fields with the server's default, or drops them when
 			// the server has no default.
 			tool, err := e.tools.Get(toolName)
-			args = applyToolDefaults(tool, args, common.ToolDefaultsFromContext(ctx))
+			args = applyToolDefaults(ctx, tool, args, common.ToolDefaultsFromContext(ctx))
 			var toolResultStr string
 			if err != nil {
 				// Structured not_found error (#584) -- the model can reason
@@ -526,7 +526,7 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredToolsOpts(ctx context.Context, tem
 			// -- the dispatch path's unknown-tool branch rejects the
 			// call.
 			tool, _ := e.tools.Get(tn)
-			args = applyToolDefaults(tool, args, common.ToolDefaultsFromContext(ctx))
+			args = applyToolDefaults(ctx, tool, args, common.ToolDefaultsFromContext(ctx))
 
 			pending = append(pending, pendingCall{
 				index:   i,
