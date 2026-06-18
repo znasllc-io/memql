@@ -226,14 +226,20 @@ func (e *RuntimeEvaluator) EvaluateConcat(args ...any) string {
 	return builder.String()
 }
 
-// EvaluateCoalesce resolves a coalesce(a, b, ...) expression.
+// EvaluateCoalesce resolves a coalesce(a, b, ...) expression by returning
+// the first NON-NIL argument. A literal empty string is a real, present
+// value -- it is returned, not skipped (memql#1614). This makes an explicit
+// empty-string fallback expressible: coalesce(nil, "") -> "". Skipping "" the
+// way the previous implementation did made `coalesce(maybeAbsent, "")`
+// resolve to nil, which is exactly how a null reached a non-required string
+// field and tripped JSON-schema validation downstream (the artifact-index
+// failure in #1605, the live `builtin arg resolved to nil` WARNs on the
+// node-lifecycle automations). This aligns the automation-step / runtime
+// evaluator with the mutation-template `evalCoalesce`, which already honors
+// the empty-string fallback.
 func (e *RuntimeEvaluator) EvaluateCoalesce(args ...any) any {
 	for _, arg := range args {
 		if arg != nil {
-			// Check for empty strings too
-			if s, ok := arg.(string); ok && s == "" {
-				continue
-			}
 			return arg
 		}
 	}
