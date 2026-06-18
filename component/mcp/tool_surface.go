@@ -150,8 +150,28 @@ func listMCPTools(eng Engine, role string, tier Tier) []map[string]any {
 	out := make([]map[string]any, 0)
 	if eng != nil {
 		if reg := eng.Tools(); reg != nil {
-			for _, t := range reg.List() {
+			all := reg.List()
+			// #1596 curated surface: once ANY tool carries @mcp
+			// (Tool.MCPExposed), tools/list reflects ONLY @mcp tools --
+			// an opt-in allowlist that trims the 456-tool surface to an
+			// intentional set and keeps the infra/admin/cluster/identity/
+			// sweep families off the connector (#1597) simply by not
+			// tagging them. With zero tagged tools the annotation is inert
+			// and the full reflected surface shows, so this is a no-op
+			// until the curated set is tagged. The meta-tools + @mcp-
+			// promoted functions appended below are unaffected by this gate.
+			curated := false
+			for _, t := range all {
+				if t != nil && t.MCPExposed {
+					curated = true
+					break
+				}
+			}
+			for _, t := range all {
 				if t == nil || t.ClientExecution {
+					continue
+				}
+				if curated && !t.MCPExposed {
 					continue
 				}
 				if !t.IsAllowedForRole(role) {
