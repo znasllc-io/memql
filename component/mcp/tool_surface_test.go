@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -38,6 +39,8 @@ type fakeEngine struct {
 	toolName      string
 	toolArgs      map[string]any
 	roleSeen      string
+	actorUserSeen string // auth.AccessContext.UserId observed during ExecuteToolByName
+	actorRoleSeen string // auth.AccessContext.Role observed during ExecuteToolByName
 	query         string
 	authoredOwner string
 	authoredReg   *memql.AuthoredRuntimeRegistry
@@ -55,6 +58,10 @@ func (e *fakeEngine) Tools() ToolLister { return e.reg }
 func (e *fakeEngine) ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error) {
 	e.toolName, e.toolArgs = name, args
 	e.roleSeen = memql.ActingAgentRoleFromContext(ctx)
+	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
+		e.actorUserSeen = ac.UserId
+		e.actorRoleSeen = string(ac.Role)
+	}
 	tool, err := e.reg.Get(name)
 	if err != nil {
 		return "", err

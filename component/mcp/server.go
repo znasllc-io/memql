@@ -32,6 +32,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -274,6 +275,14 @@ func (s *Server) handleMessage(ctx context.Context, raw []byte) *rpcResponse {
 
 // route dispatches a parsed (non-notification) request to its handler.
 func (s *Server) route(ctx context.Context, req *rpcRequest) *rpcResponse {
+	// Stamp the authenticated actor onto the context so the engine's query
+	// evaluator resolves actor.userId / actor.role for self-scoped reads
+	// (queryCurrentUser et al.) and per-row authz. The MCP layer previously only
+	// set the agent ROLE; without the auth AccessContext a reflected query tool
+	// ran with an empty actor and self-scoped reads failed with "id cannot be
+	// empty" (#1595). Applies to every engine-backed method (tools/call,
+	// resources/read, prompts/get).
+	ctx = s.withActorEnvelope(ctx)
 	switch req.Method {
 	case "initialize":
 		return successResponse(req.ID, s.initializeResult(req.Params))
@@ -309,6 +318,57 @@ func (s *Server) route(ctx context.Context, req *rpcRequest) *rpcResponse {
 	}
 }
 
+// withActorEnvelope stamps the session's authenticated identity onto ctx as an
+// auth.AccessContext so engine query/mutation evaluation resolves actor.userId /
+// actor.role (and the per-row authz model applies the real identity). The
+// acting user + role come from the verified token (http) or the env pins
+// (stdio), resolved once at session creation into s.cfg. It is a no-op when the
+// session has no acting user (an unauthenticated stdio session) or when the
+// context already carries a non-empty AccessContext (so a richer envelope from
+// the transport is never clobbered).
+func (s *Server) withActorEnvelope(ctx context.Context) context.Context {
+	user := strings.TrimSpace(s.cfg.ActingUser)
+	if user == "" {
+		return ctx
+	}
+	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil && strings.TrimSpace(ac.UserId) != "" {
+		return ctx
+	}
+	return auth.ContextWithAccess(ctx, &auth.AccessContext{
+		UserId: user,
+		Role:   auth.Role(strings.TrimSpace(s.cfg.ActingRole)),
+	})
+}
+
+// isDispatchableTool reports whether name resolves to something this server can
+// actually dispatch: a generic/authoring meta-tool, a reflected engine tool, an
+// @mcp-promoted query/mutation, or an @mcp-promoted automation. A name matching
+// none of these does not exist and a tools/call for it is a protocol error
+// (codeMethodNotFnd) rather than a 200 isError result. Tier/role gating is NOT
+// applied here -- a gated-out-but-real tool is "known" and its handler reports
+// the permission denial in-band; only a genuinely nonexistent name is rejected.
+func (s *Server) isDispatchableTool(name string) bool {
+	switch name {
+	case toolRunQuery, toolRunMutation, toolRunAutomation,
+		toolDefine, toolPromote, toolQuery, toolRunInlineAutomation:
+		return true
+	}
+	if eng := asEngine(s.engine); eng != nil {
+		if reg := eng.Tools(); reg != nil {
+			if t, err := reg.Get(name); err == nil && t != nil {
+				return true
+			}
+		}
+		if _, ok := eng.MCPPromotedFunctionKind(name); ok {
+			return true
+		}
+	}
+	if s.autoRunner != nil && s.autoRunner.IsPromotedAutomation(name) {
+		return true
+	}
+	return false
+}
+
 // handleToolsCall dispatches an MCP tools/call. Tool-level failures are
 // reported inside the result (isError:true) per the MCP convention; only
 // malformed requests produce a JSON-RPC protocol error.
@@ -324,6 +384,15 @@ func (s *Server) handleToolsCall(ctx context.Context, id json.RawMessage, params
 	}
 	if strings.TrimSpace(p.Name) == "" {
 		return errorResponse(id, codeInvalidParams, "tools/call requires a tool name")
+	}
+	// Unknown tool -> a JSON-RPC protocol error, NOT a 200 with isError:true. A
+	// name the server does not advertise was never a real call; surfacing it as a
+	// successful-looking response masks the mistake. (A tool that EXISTS but
+	// fails -- including a meta-tool like run_query whose named construct is
+	// missing -- still reports in-band via isError, per the MCP convention.)
+	if !s.isDispatchableTool(p.Name) {
+		return errorResponse(id, codeMethodNotFnd,
+			fmt.Sprintf("unknown tool %q: not an available tool on this MCP server", p.Name))
 	}
 	// Attach the per-connection authoring session (owner + non-durable registry)
 	// so define/promote and authored call-by-name resolve against it, plus the
