@@ -10,7 +10,7 @@ use knowledge.concepts.{ document, documentChunk, domainEntitySchema, entityInde
 mutation document mutationAttachDocumentToDomain {
   args {
     documentId       string  @required
-    attachedDomains  object  @required
+    attachedDomains  array   @required
   }
   update {
     id: args.documentId
@@ -279,23 +279,13 @@ mutation validationEvent mutationCreateValidationEvent {
 }
 
 @enabled
-@description("Soft-delete a knowledge domain by flipping active=false. Agents that reference the domain keep working; the domain just stops appearing in the builder picker.")
+@description("Soft-delete a knowledge domain by flipping active=false. Read-merges the existing row (update()): only `active` changes; name/description/category/relevantForRoles/requiredByToolSlugs/refreshCadenceDays/source/scope/tier/predefined and every other field inherit from the persisted row instead of being wiped to their create-time defaults (memql#1628 -- the old full-replacement insert nulled them). Agents that reference the domain keep working; it just stops appearing in the builder picker.")
 mutation knowledgeDomain mutationDeleteKnowledgeDomain {
   args {
-    domainId             string  @required
-    name                 string  @required
-    description          string
-    category             string
-    relevantForRoles     array
-    requiredByToolSlugs  array
+    domainId  string  @required
   }
-  insert {
+  update {
     id: args.domainId
-    args.name
-    args.description
-    category: coalesce(args.category, "business")
-    relevantForRoles: coalesce(args.relevantForRoles, [])
-    requiredByToolSlugs: coalesce(args.requiredByToolSlugs, [])
     active: false
   }
 }

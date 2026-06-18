@@ -1062,13 +1062,13 @@ mutation micState mutationSetUserMicState {
 // (memql#1639).
 
 @enabled
-@description("Insert a new version of an auth-session record (typically used as a heartbeat to bump lastActivityAt).")
+@description("Update an auth-session record (typically a heartbeat to bump lastActivityAt). Read-merges the existing row (update()): only the fields in `payload` change; the @required discriminators (subject, tokenHash, source, expiresAt) and every other omitted field inherit from the persisted row instead of having to be re-supplied (memql#1628). The session row must already exist.")
 mutation authSession mutationTouchSession {
   args {
     sessionId  string  @required
     payload    object  @required
   }
-  insert {
+  update {
     id: args.sessionId
     args.payload
   }
@@ -1131,13 +1131,13 @@ mutation presence mutationUpdateParticipantPresence {
 // The caller is responsible for passing the full updated payload.
 
 @enabled
-@description("Insert a new version of a participant record (typically used to update status).")
+@description("Update a participant record (typically status). Read-merges the existing row (update()): only the fields in `payload` change; every omitted field inherits from the persisted row instead of being wiped (memql#1628 class). The participant row must already exist (created on join).")
 mutation participant mutationUpdateParticipantStatus {
   args {
     participantId  string  @required
     payload        object  @required
   }
-  insert {
+  update {
     id: args.participantId
     args.payload
   }
@@ -1152,13 +1152,13 @@ mutation participant mutationUpdateParticipantStatus {
 // The caller is responsible for passing the full updated payload.
 
 @enabled
-@description("Insert a new version of a session record (typically used to update device state).")
+@description("Update a session record's device state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, spaceId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.")
 mutation session mutationUpdateSessionDevices {
   args {
     sessionId  string  @required
     payload    object  @required
   }
-  insert {
+  update {
     id: args.sessionId
     args.payload
   }
@@ -1173,13 +1173,13 @@ mutation session mutationUpdateSessionDevices {
 // The caller is responsible for passing the full updated payload.
 
 @enabled
-@description("Insert a new version of a session record (typically used to update streams).")
+@description("Update a session record's stream state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, spaceId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.")
 mutation session mutationUpdateSessionStreams {
   args {
     sessionId  string  @required
     payload    object  @required
   }
-  insert {
+  update {
     id: args.sessionId
     args.payload
   }

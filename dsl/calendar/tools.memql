@@ -36,7 +36,7 @@ tool calendarFind {
 }
 
 @enabled
-@handler(type="query", query="mutationCreateCalendarEvent({\"title\": \"$args.title\", \"startsAt\": \"$args.startsAt\", \"endsAt\": \"$args.endsAt\", allDay: $args.allDay, \"location\": \"$args.location\", \"notes\": \"$args.notes\", \"recurrence\": \"$args.recurrence\"})")
+@handler(type="function", name="mutationCreateCalendarEvent")
 @executionTime("fast")
 @description("Create a native calendar event for the caller. The event is owned by the caller (ownerUserId is stamped server-side from the auth context); source is 'native'. Returns the created event. Use ISO-8601 / RFC3339 timestamps for startsAt / endsAt.")
 @mcp
@@ -44,7 +44,7 @@ tool calendarCreate {
   title       string  @required @description("Event title, e.g. 'Karate class'.")
   startsAt    string  @required @description("Event start as an RFC3339 timestamp.")
   endsAt      string  @description("Event end as an RFC3339 timestamp. Omit for a point-in-time reminder.")
-  allDay      boolean @default(false) @description("True for a date-scoped all-day event (no meaningful clock time).")
+  allDay      boolean @description("True for a date-scoped all-day event (no meaningful clock time). Omit to default to false.")
   location    string  @description("Free-form location text.")
   notes       string  @description("Free-form notes / description.")
   recurrence  string  @description("Optional RFC-5545 RRULE recurrence rule (e.g. 'FREQ=WEEKLY;BYDAY=TU,TH').")
