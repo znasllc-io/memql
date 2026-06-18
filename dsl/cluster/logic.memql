@@ -112,9 +112,15 @@ logic logicRegisterNode {
   // Record the spawn event. The mutation schema only accepts the flat
   // fields below; version/address aren't persisted on the event (they
   // already live on the node record from mutationCreateNode above).
+  // Every field is bound with an EXPLICIT key + coalesce, mirroring
+  // the nodeRecord step above (#1671): a multi-segment path like
+  // args.event.payload.node.type evaluates to nil when the field is
+  // absent; passing nil for a @required arg triggers "required
+  // argument missing" at validation time. coalesce(...,"") ensures a
+  // non-nil string reaches mutationCreateSpawnEvent.
   spawnEvent := mutationCreateSpawnEvent({
     nodeId:   coalesce(args.event.payload.node.id, ""),
-    nodeType: args.event.payload.node.type,
+    nodeType: coalesce(args.event.payload.node.type, ""),
     action:   "spawned",
     reason:   "system.startup"
   })
