@@ -1,14 +1,15 @@
-# Staging overlay -> 0.9.74: FULL-STACK cut (deploy #1748) carrying the MCP
-# conformance 100%-green wave (epic #1731): #1727 first-class event binding into
-# logic step-arg scope on the run_automation dry-run path; #1728
-# queryDelegationsByIdentity returns active AND revoked rows; #1729
-# mutationRevokeDelegation authoritatively forces active=false + revokedAt;
-# #1730 engine `count` query directive (queryUserCount -> {count: N}).
+# Staging overlay -> 0.9.75: FULL-STACK cut (deploy #1775). Carries the
+# security wave (all open CodeQL/Scorecard code-scanning alerts remediated,
+# #1767), the action-library phases 2-5 + planner emission/dispatch/search
+# (#1737-1740, #1758), compile-time event.* field validation via @eventField
+# (#1743), seed-materialization 53300 backoff (#1753), and cluster
+# health-write self-heal (#1755).
 # All 9 engine + carrier + SPA images built on the GitHub BUILD SERVER
-# (OIDC->ACR) against engine main 45b248a; engineVersion + builtAgainstEngine
-# bumped 0.9.73 -> 0.9.74. copresent SPA source unchanged (digest identical to
-# 0.9.73, re-tagged 0.9.74 for coherence). Digests hand-applied (not promote.sh,
-# which would drop the livekit pin + NODE_IP patch below).
+# (OIDC->ACR) against engine main 639e6bc; engineVersion + builtAgainstEngine
+# bumped 0.9.74 -> 0.9.75. copresent SPA source unchanged (digest identical to
+# 0.9.74, re-tagged 0.9.75 for coherence). Digests hand-applied from
+# releases/0.9.75.yaml (not promote.sh, which would drop the livekit pin +
+# NODE_IP patch below).
 # livekit pin (#1043) + NODE_IP patch preserved.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -31,24 +32,24 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:53f20aeafa3bd4ac1bcc364ec797c240207ef3f77ec50aa67fa7e406e84029fa
+    digest: sha256:de11d5410fd21e163f4cc1ebca212b2287e7d575012616b0e6b86801f518ccb0
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:644620903a80b884986119227c597e0609d8cf0350118769eef20ff039aea0a7
+    digest: sha256:eafea4cc5c6816617a21b681b5a75dadf95dea9ade5d92dfcab8396e2da210d8
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:a22e4f4ccf4f961070d3946513e72a101a68bf3f9203c5797f7dfa6df4acced7
+    digest: sha256:d2dde14154b2b5f6f01b256c8203bae690ad20506de8931b1fc8686f2bbc3ec8
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:3914bfd62cbe14e3c2f6ce19cd4c1fe8529c0140bd38f477588cafc5ed677a5e
+    digest: sha256:1d2a747a1ca86c020e6e8ce7f123c399140689bb86733747346481267f5009b3
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:e0a5413bc3c20f89e0fbcc680b4598d575dc27eac51e943bdfa1c34363e332ed
+    digest: sha256:2d15b933e526010726ac5c614ab02ca62500002b61d1925a06413fb9f89e5e59
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:397fcd9d4ed3f0065346005a7f3eea35d1d8fbecb25ab5136e39010324e520c5
+    digest: sha256:d9de2afe9459e3677b0da73c743920d187119b5479b8747d803d80051dc4135c
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:e2d3897337cb0081ff42f98fd96767ab70f446a1b9e59197bf062741caf530e4
+    digest: sha256:6a6d3bf16bd49dcd94ebe3d0661a3c096fa7ae6df708a699234ed904f39a38e6
   # memql-mcp (epic memql#1550): remote MCP node, engine-built on the GitHub
   # build server (#1581 wired it into build-engine-images + the release tooling).
-  # 0.9.74: rebuilt from main 45b248a alongside the rest of the conformance wave.
+  # 0.9.75: rebuilt from main 639e6bc alongside the rest of the full-stack wave.
   - name: acrmemql.azurecr.io/memql-mcp
-    digest: sha256:deecea6e5756f90fb08da9074fde0cce4950ae8ca29dff2c3c7c3e23f803fb00
+    digest: sha256:79d8e4d893a0f6f2a837f9ac96456b71fae1d808caeca7d9548996702d3cc463
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:75e566e71e30d0b35c6c6708dda34a37ab9f2a74ec575f18c0787beffc949bf2
   - name: livekit/livekit-server
