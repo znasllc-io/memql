@@ -2,6 +2,8 @@ package planner
 
 import (
 	"context"
+	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 )
@@ -123,5 +125,33 @@ func TestEntitlementResolve_PicksLatestVersion(t *testing.T) {
 	ent := r.Resolve(context.Background(), "v1:identity:user:alice")
 	if ent.MaxConcurrentTasks != 20 || ent.Tier != "team" {
 		t.Fatalf("latest version (team/20) should win; got %+v", ent)
+	}
+}
+
+// TestEntIntClampsToInt32Range verifies entInt narrows JSON-decoded
+// numerics to the 32-bit int range so the int conversion is overflow-safe
+// on every platform (CodeQL go/incorrect-integer-conversion).
+func TestEntIntClampsToInt32Range(t *testing.T) {
+	cases := []struct {
+		name string
+		in   any
+		want int
+	}{
+		{"int", 5, 5},
+		{"int64", int64(11), 11},
+		{"float64", float64(12), 12},
+		{"float32", float32(13), 13},
+		{"json.Number", json.Number("14"), 14},
+		{"string", "15", 15},
+		{"overflow-high-int64", int64(math.MaxInt32) + 1, 0},
+		{"overflow-high-float", float64(1) + math.MaxInt32, 0},
+		{"unknown", struct{}{}, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := entInt(tc.in); got != tc.want {
+				t.Fatalf("entInt(%v) = %d, want %d", tc.in, got, tc.want)
+			}
+		})
 	}
 }

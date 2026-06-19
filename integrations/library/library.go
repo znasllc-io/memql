@@ -49,6 +49,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -575,17 +576,32 @@ func intArg(v any) (int, bool) {
 	case int:
 		return t, true
 	case int64:
-		return int(t), true
+		return safeIntFromFloat(float64(t)), true
 	case float64:
-		return int(t), true
+		return safeIntFromFloat(t), true
 	case float32:
-		return int(t), true
+		return safeIntFromFloat(float64(t)), true
 	case json.Number:
 		if f, err := t.Float64(); err == nil {
-			return int(f), true
+			return safeIntFromFloat(f), true
 		}
 	}
 	return 0, false
+}
+
+// safeIntFromFloat narrows a numeric value to int, clamping to the
+// 32-bit range (the worst-case int width) so the conversion is
+// overflow-safe on every platform. These args are small counts /
+// limits, so clamping a nonsensically-large value is harmless and
+// keeps the narrowing provably bounded.
+func safeIntFromFloat(v float64) int {
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if v < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int(v)
 }
 
 // extractRows normalizes the engine's Execute return into a uniform

@@ -174,14 +174,14 @@ func entInt(v any) int {
 	case int:
 		return n
 	case int64:
-		return int(n)
+		return clampInt64ToInt(n, 0)
 	case float64:
-		return int(n)
+		return clampFloatToInt(n, 0)
 	case float32:
-		return int(n)
+		return clampFloatToInt(float64(n), 0)
 	case json.Number:
 		i, _ := n.Int64()
-		return int(i)
+		return clampInt64ToInt(i, 0)
 	case string:
 		i, _ := strconv.Atoi(strings.TrimSpace(n))
 		return i
