@@ -288,6 +288,65 @@ jobs:
       - name: test sdk/ts
         run: make sdk-ts-test
 
+  # MCP conformance suite (memql#1715) -- the capstone regression gate for epic
+  # #1704. Unlike go-checks (which has no database, so every *_db_test.go skips),
+  # this job provisions a TimescaleDB service so the DB-backed contract dimensions
+  # actually RUN and gate: per-tool create->read->update->delete lifecycle,
+  # inclusion/exclusion filtered queries (#1708), canonical array envelope (#1710),
+  # partial-update-preserves-siblings (#1709), @pii scrub on hard-delete (#1711),
+  # event-trigger logic binding (#1706), bare-literal AST eval (#1705), plus the
+  # DB-free single-schema-source (#1713), system-id (#1712), and entry-point
+  # (#1707) dimensions. The suite migrates the blank service DB on first connect
+  # (the production NewMemoryNodesDatabase + Start path) and publishes a pass-rate
+  # line + a step-summary table per build. Gates on go OR dsl (a DSL change can
+  # move a contract); push + merge_group run it unconditionally so the merge
+  # candidate that actually lands is gated. Added to ci-required below.
+  conformance:
+    name: mcp-conformance
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
+    runs-on: ubuntu-latest
+    services:
+      # Same image the dev cluster + cluster-e2e use; bundles TimescaleDB +
+      # pgvector so the memory-nodes migrations (hypertable + vector) apply.
+      postgres:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_USER: memql
+          POSTGRES_PASSWORD: memql_dev
+          POSTGRES_DB: memql
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U memql"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: '1.26.4'
+          cache: true
+      # Create the extensions the migrations expect (mirrors docker/init-db.sql,
+      # which a service container can't mount). The suite migrates the rest.
+      - name: create required Postgres extensions
+        run: |
+          for i in $(seq 1 30); do
+            PGPASSWORD=memql_dev pg_isready -h localhost -U memql && break
+            echo "waiting for postgres ($i)"; sleep 2
+          done
+          PGPASSWORD=memql_dev psql -h localhost -U memql -d memql -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+          CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+          CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+          CREATE EXTENSION IF NOT EXISTS vector;
+          SQL
+      - name: mcp conformance suite (regression gate, seeded test DB)
+        run: go test -count=1 -timeout=300s -v ./test/conformance/...
+
   # Aggregator -- the SINGLE required status check for branch protection.
   # It always runs (even when every lane is path-skipped) and fails only if
   # a lane it depends on actually failed or was cancelled; a `skipped` lane
@@ -302,6 +361,7 @@ jobs:
       - build-voice
       - build-node-tags
       - sdk-ts-typecheck
+      - conformance
     runs-on: ubuntu-latest
     steps:
       - name: verify required lanes succeeded or were skipped
