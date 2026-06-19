@@ -572,13 +572,16 @@ query auditEvent queryExpiredAuditEvents {
 // expiredConsumedAuthCodes - Auth codes past their expiry
 // =========================================================
 //
-// Returns auth-code rows whose expiresAt is before the supplied
-// `now` cutoff. RFC 6749 mandates a ~60s TTL for auth codes, so
-// rows churn quickly; a sweep keeps the table compact.
+// Returns CONSUMED auth-code rows whose expiresAt is before the
+// supplied `now` cutoff. RFC 6749 mandates a ~60s TTL for auth codes,
+// so rows churn quickly; a sweep keeps the table compact.
 //
-// Returns rows regardless of consumedAt: a consumed-then-expired
-// row is just as eligible for cleanup as an unspent-then-expired
-// one. Both can never be redeemed again.
+// memql#1714: the filter gates on consumedAt!="" so behaviour matches
+// the name. An unspent-but-expired code is intentionally NOT returned
+// here -- the consume handler may still be racing to redeem it, and a
+// sweep keyed only on expiry could delete a row out from under an
+// in-flight token exchange. Expiry-only cleanup of unspent codes is a
+// separate concern; this query is the spent-code reaper.
 //
 // `now` is passed in (rather than inline timestamp()) per the
 // pattern in queryExpiredActiveDelegations.
@@ -591,12 +594,12 @@ query auditEvent queryExpiredAuditEvents {
 //
 
 @enabled
-@description("Auth codes whose expiresAt is before the supplied cutoff.")
+@description("CONSUMED auth codes whose expiresAt is before the supplied cutoff. Both predicates are load-bearing: the name says `Consumed`, so the consumedAt gate (memql#1714) keeps the result set to spent-then-expired codes and never sweeps an unspent-but-expired code that a redemption is still racing against.")
 query authCode queryExpiredConsumedAuthCodes {
   args {
     now  string  @required
   }
-  filter  payload.expiresAt<args.now
+  filter  payload.expiresAt<args.now && payload.consumedAt!=""
   shape   authCodeFull
 }
 

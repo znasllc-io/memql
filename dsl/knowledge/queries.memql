@@ -45,12 +45,12 @@ query document queryDocumentById {
 // Backs the Knowledge page detail view ("what's in this domain").
 
 @enabled
-@description("Validated Documents attached to a knowledge domain.")
+@description("Validated Documents attached to a knowledge domain. attachedDomains is a []string, so membership (`in`) is the correct join -- memql#1708: the old `payload.attachedDomains==args.domainId` compared the whole list against a scalar and never matched, so the detail view came back empty even for a validated, correctly-attached Document.")
 query document queryDocumentsForDomain {
   args {
     domainId  string  @required
   }
-  filter  payload.attachedDomains==args.domainId && payload.validationStatus=="validated"
+  filter  args.domainId in payload.attachedDomains && payload.validationStatus=="validated"
   shape   documentFull
 }
 
