@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -423,4 +424,33 @@ func versionNumbers(eng *stubEngine) []int {
 	}
 	sort.Ints(nums)
 	return nums
+}
+
+// TestIntArgClampsToInt32Range verifies the numeric coercion narrows
+// JSON-decoded values to the 32-bit int range so the int conversion is
+// overflow-safe on every platform (CodeQL go/incorrect-integer-conversion).
+func TestIntArgClampsToInt32Range(t *testing.T) {
+	cases := []struct {
+		name string
+		in   any
+		want int
+		ok   bool
+	}{
+		{"int", 7, 7, true},
+		{"int64", int64(42), 42, true},
+		{"float64", float64(10), 10, true},
+		{"float32", float32(3), 3, true},
+		{"json.Number", json.Number("99"), 99, true},
+		{"overflow-high", float64(1) + math.MaxInt32, math.MaxInt32, true},
+		{"overflow-low", float64(-1) + math.MinInt32, math.MinInt32, true},
+		{"non-numeric", "nope", 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := intArg(tc.in)
+			if got != tc.want || ok != tc.ok {
+				t.Fatalf("intArg(%v) = (%d, %t), want (%d, %t)", tc.in, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
 }
