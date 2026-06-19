@@ -31,7 +31,7 @@ func (e *MemQLEngine) MCPPromotedFunctionTools() []map[string]any {
 		out = append(out, map[string]any{
 			"name":        fn.Name,
 			"description": desc,
-			"inputSchema": fn.mcpInputSchema(),
+			"inputSchema": FunctionInputJSONSchema(fn),
 		})
 	}
 	return out
@@ -74,10 +74,19 @@ func (e *MemQLEngine) mcpPromotedFunctions() []*Function {
 	return out
 }
 
-// mcpInputSchema renders a function's args-block schema as a JSON-schema object
-// (the shape MCP tools advertise). A function with no args block yields an empty
-// object schema.
-func (fn *Function) mcpInputSchema() map[string]any {
+// FunctionInputJSONSchema renders a function's args-block schema as a JSON-Schema
+// object -- THE single source of truth for a function's MCP input contract
+// (memql#1713). Both the @mcp typed-wrapper surface (MCPPromotedFunctionTools)
+// and the describeFunction/help introspection payload render through this one
+// function, so the two contracts can never diverge: there is exactly one
+// renderer over fn.ArgsSchema. A function with no args block yields an empty
+// object schema {"type":"object"}.
+//
+// Completeness: every constraint the args-block declares (type, enum, format,
+// minimum/maximum, maxLength, pattern, array items, nested object
+// properties+required, additionalProperties) is carried into the schema, so a
+// connector consumer sees the full, correct contract rather than a bare type.
+func FunctionInputJSONSchema(fn *Function) map[string]any {
 	schema := map[string]any{"type": "object"}
 	if fn == nil || fn.ArgsSchema == nil || len(fn.ArgsSchema.Fields) == 0 {
 		return schema
@@ -97,16 +106,24 @@ func (fn *Function) mcpInputSchema() map[string]any {
 	if len(required) > 0 {
 		schema["required"] = required
 	}
+	if fn.ArgsSchema.AdditionalProperties != nil {
+		schema["additionalProperties"] = *fn.ArgsSchema.AdditionalProperties
+	}
 	return schema
 }
 
 // argsFieldToJSONSchema maps one args field to a JSON-schema property. memQL
-// scalar type names are mapped to JSON-schema types; enum / format constraints
-// carry through.
+// scalar type names map to JSON-schema types; every declared constraint
+// (enum / format / numeric bounds / maxLength / pattern / array items / nested
+// object fields) carries through so the rendered schema is complete.
 func argsFieldToJSONSchema(f *FunctionArgsField) map[string]any {
 	prop := map[string]any{}
-	if t := jsonSchemaType(f.Type); t != "" {
-		prop["type"] = t
+	if f == nil {
+		return prop
+	}
+	jsType := jsonSchemaType(f.Type)
+	if jsType != "" {
+		prop["type"] = jsType
 	}
 	if len(f.Enum) > 0 {
 		prop["enum"] = append([]any(nil), f.Enum...)
@@ -114,8 +131,42 @@ func argsFieldToJSONSchema(f *FunctionArgsField) map[string]any {
 	if f.Format != "" {
 		prop["format"] = f.Format
 	}
+	if f.Minimum != nil {
+		prop["minimum"] = *f.Minimum
+	}
+	if f.Maximum != nil {
+		prop["maximum"] = *f.Maximum
+	}
+	if f.MaxLength > 0 {
+		prop["maxLength"] = f.MaxLength
+	}
+	if f.Pattern != "" {
+		prop["pattern"] = f.Pattern
+	}
 	if f.Items != nil {
 		prop["items"] = argsFieldToJSONSchema(f.Items)
+	}
+	// Nested object fields project into properties + required, mirroring the
+	// top-level rendering so a structured object arg advertises its full shape.
+	if jsType == "object" && len(f.Nested) > 0 {
+		nprops := make(map[string]any, len(f.Nested))
+		nrequired := make([]any, 0)
+		for _, nf := range f.Nested {
+			if nf == nil || nf.Name == "" {
+				continue
+			}
+			nprops[nf.Name] = argsFieldToJSONSchema(nf)
+			if !nf.Optional {
+				nrequired = append(nrequired, nf.Name)
+			}
+		}
+		prop["properties"] = nprops
+		if len(nrequired) > 0 {
+			prop["required"] = nrequired
+		}
+		if f.AdditionalProperties != nil {
+			prop["additionalProperties"] = *f.AdditionalProperties
+		}
 	}
 	return prop
 }

@@ -474,6 +474,83 @@ func (e *MemQLEngine) evaluateToolsExpression(ctx context.Context) ([]memorynode
 
 // evaluateHelpExpression returns full details for a specific function or tool.
 // Searches functions first, then tools. Returns all metadata and configuration.
+// functionHelpPayload builds the describeFunction/help introspection payload for
+// a named function. Its `inputSchema` is rendered by FunctionInputJSONSchema --
+// the SAME single source of truth the @mcp typed-wrapper surface uses
+// (memql#1713) -- so describeFunction and the typed MCP wrappers can never
+// advertise a divergent contract. The legacy flat `argsSchema` list is retained
+// for back-compat (also derived from the same fields) but the authoritative
+// machine-readable contract is `inputSchema`.
+func functionHelpPayload(fn *Function) map[string]any {
+	if fn == nil {
+		return nil
+	}
+	payload := map[string]any{
+		"type":        "function",
+		"name":        fn.Name,
+		"description": fn.Description,
+		"kind":        fn.FunctionKind,
+		"enabled":     fn.Enabled,
+	}
+	// Add optional fields if present
+	if fn.Version != "" {
+		payload["version"] = fn.Version
+	}
+	if fn.Deprecated != "" {
+		payload["deprecated"] = fn.Deprecated
+	}
+	if fn.Role != "" {
+		payload["role"] = fn.Role
+	}
+	if fn.Permission != "" {
+		payload["permission"] = fn.Permission
+	}
+	if fn.Timeout != "" {
+		payload["timeout"] = fn.Timeout
+	}
+	if fn.CacheTTL != "" {
+		payload["cacheTTL"] = fn.CacheTTL
+	}
+	if fn.ArgsSchema != nil && len(fn.ArgsSchema.Fields) > 0 {
+		argsSchema := make([]map[string]any, 0, len(fn.ArgsSchema.Fields))
+		for _, field := range fn.ArgsSchema.Fields {
+			argsSchema = append(argsSchema, map[string]any{
+				"name":     field.Name,
+				"type":     field.Type,
+				"optional": field.Optional,
+			})
+		}
+		payload["argsSchema"] = argsSchema
+	}
+	// inputSchema is the authoritative JSON-Schema contract, generated from the
+	// single source of truth shared with the @mcp typed wrappers. Always present
+	// (an args-less function yields {"type":"object"}).
+	payload["inputSchema"] = FunctionInputJSONSchema(fn)
+	if strings.TrimSpace(fn.UsageDoc) != "" {
+		payload["usageDoc"] = strings.TrimSpace(fn.UsageDoc)
+	}
+	// Canonical query result envelope (memql#1710): every query returns its rows
+	// as an array regardless of cardinality -- [] for no match, [x] for a single
+	// match, [x, y, ...] for many. A single match is NEVER unwrapped to a bare
+	// object, so callers iterate one shape.
+	if strings.EqualFold(strings.TrimSpace(fn.FunctionKind), "query") {
+		payload["resultEnvelope"] = "array: query results are always a JSON array (0 results -> [], 1 -> [x], many -> [x, y, ...]); a single match is never collapsed to a bare object"
+	}
+	if excerpt := strings.TrimSpace(functionSchemaReferenceExcerpt()); excerpt != "" {
+		payload["schemaReferenceExcerpt"] = excerpt
+	}
+	if fn.Internal {
+		payload["internal"] = true
+	}
+	if fn.Idempotent {
+		payload["idempotent"] = true
+	}
+	if fn.Audit {
+		payload["audit"] = true
+	}
+	return payload
+}
+
 func (e *MemQLEngine) evaluateHelpExpression(ctx context.Context, args map[string]any) ([]memorynodes.MemoryNode, error) {
 	name, ok := args["name"].(string)
 	if !ok || name == "" {
@@ -490,65 +567,7 @@ func (e *MemQLEngine) evaluateHelpExpression(ctx context.Context, args map[strin
 	// Try functions first
 	if e.functions != nil {
 		if fn, err := e.functions.Get(name); err == nil && fn != nil {
-			resultPayload = map[string]any{
-				"type":        "function",
-				"name":        fn.Name,
-				"description": fn.Description,
-				"kind":        fn.FunctionKind,
-				"enabled":     fn.Enabled,
-			}
-			// Add optional fields if present
-			if fn.Version != "" {
-				resultPayload["version"] = fn.Version
-			}
-			if fn.Deprecated != "" {
-				resultPayload["deprecated"] = fn.Deprecated
-			}
-			if fn.Role != "" {
-				resultPayload["role"] = fn.Role
-			}
-			if fn.Permission != "" {
-				resultPayload["permission"] = fn.Permission
-			}
-			if fn.Timeout != "" {
-				resultPayload["timeout"] = fn.Timeout
-			}
-			if fn.CacheTTL != "" {
-				resultPayload["cacheTTL"] = fn.CacheTTL
-			}
-			if fn.ArgsSchema != nil && len(fn.ArgsSchema.Fields) > 0 {
-				argsSchema := make([]map[string]any, 0, len(fn.ArgsSchema.Fields))
-				for _, field := range fn.ArgsSchema.Fields {
-					argsSchema = append(argsSchema, map[string]any{
-						"name":     field.Name,
-						"type":     field.Type,
-						"optional": field.Optional,
-					})
-				}
-				resultPayload["argsSchema"] = argsSchema
-			}
-			if strings.TrimSpace(fn.UsageDoc) != "" {
-				resultPayload["usageDoc"] = strings.TrimSpace(fn.UsageDoc)
-			}
-			// Canonical query result envelope (memql#1710): every query returns
-			// its rows as an array regardless of cardinality -- [] for no match,
-			// [x] for a single match, [x, y, ...] for many. A single match is
-			// NEVER unwrapped to a bare object, so callers iterate one shape.
-			if strings.EqualFold(strings.TrimSpace(fn.FunctionKind), "query") {
-				resultPayload["resultEnvelope"] = "array: query results are always a JSON array (0 results -> [], 1 -> [x], many -> [x, y, ...]); a single match is never collapsed to a bare object"
-			}
-			if excerpt := strings.TrimSpace(functionSchemaReferenceExcerpt()); excerpt != "" {
-				resultPayload["schemaReferenceExcerpt"] = excerpt
-			}
-			if fn.Internal {
-				resultPayload["internal"] = true
-			}
-			if fn.Idempotent {
-				resultPayload["idempotent"] = true
-			}
-			if fn.Audit {
-				resultPayload["audit"] = true
-			}
+			resultPayload = functionHelpPayload(fn)
 		}
 	}
 
