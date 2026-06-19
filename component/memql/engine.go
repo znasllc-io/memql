@@ -477,6 +477,28 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		return result, nil
 	}
 
+	// Top-level literal value: a Logic whose body returns a bare scalar /
+	// arg path (e.g. `return args.event.topic` or `return 1`) resolves --
+	// after function-call arg substitution folds the ArgRefExpression into
+	// a concrete value, or after the parser reduces a quoted literal -- to a
+	// *LiteralValueNode at plan.Root. There is no node-set to evaluate: the
+	// scalar IS the result. Wrap it as the function's return value, the same
+	// way the BuiltinFunctionExpression branch above and
+	// executeLogicFunctionCall package a Logic's output. Without this branch
+	// the literal falls through to the node-set evaluator
+	// (evaluateExpressionSetWithContext), which has no LiteralValueNode case
+	// and fails the whole call with "unsupported expression node
+	// *memql.LiteralValueNode" -- the memql#1705 logicConsolidateMemory
+	// dry-run failure. (#1090 short-circuits the bare-literal case earlier in
+	// the LogicRunner; this is the engine-level backstop that also covers the
+	// single-return logic path, which never routes through the LogicRunner.)
+	if literal, ok := plan.Root.(*LiteralValueNode); ok {
+		result := newExecuteResult(nil)
+		result.setOutput(literal.Value)
+		e.emitQueryExecutedEvent(startTime, result, false)
+		return result, nil
+	}
+
 	if plan.Root == nil {
 		return nil, fmt.Errorf("query must include at least one filter or relationship expression")
 	}
