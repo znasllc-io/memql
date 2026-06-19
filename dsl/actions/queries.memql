@@ -1,0 +1,21 @@
+// queries.memql
+//
+// Read paths in the `actions` namespace (epic #1734). Phase 0 (#1735)
+// ships queryActionCandidatesForPlan -- list the captured candidate traces
+// for a plan, so the trace capture is inspectable end to end.
+//
+// Authorization (owned tier): the filter pins payload.ownerUserId ==
+// actor.userId, so a caller only ever reads its own captured traces.
+
+use actions.concepts.{ candidate }
+use actions.shapes.{ candidateFull }
+
+@enabled
+@description("List v1:actions:candidate traces captured for a plan, newest-first by createdAt (owned tier). #1735.")
+query candidate queryActionCandidatesForPlan {
+  args {
+    planId  string  @required
+  }
+  filter  payload.planId == args.planId && payload.ownerUserId == actor.userId
+  shape   candidateFull
+}

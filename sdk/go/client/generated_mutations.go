@@ -7958,6 +7958,64 @@ func MutationReadyHarnessStepBuild(args MutationReadyHarnessStepArgs) string {
 	return b.String()
 }
 
+// MutationRecordActionCandidate -- Record a v1:actions:candidate trace (the captured capability sequence + value/resource provenance for one LLM step, #1735). ownerUserId is stamped from actor.userId (owned tier). status is always 'candidate' on insert.
+//
+// Bound concept: candidate.
+type MutationRecordActionCandidateArgs struct {
+	CandidateId   string
+	PlanId        string
+	StepId        string
+	Calls         []map[string]any
+	ResourceEdges []map[string]any
+	CallCount     int
+}
+
+// MutationRecordActionCandidate calls the engine mutation mutationRecordActionCandidate.
+func (qc *QueryClient) MutationRecordActionCandidate(ctx context.Context, args MutationRecordActionCandidateArgs) (*Result, error) {
+	call := MutationRecordActionCandidateBuild(args)
+	return qc.executeNamed(ctx, "mutationRecordActionCandidate", call)
+}
+
+func MutationRecordActionCandidateBuild(args MutationRecordActionCandidateArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRecordActionCandidate({")
+	if args.CandidateId != "" {
+		b.WriteString("candidateId: ")
+		b.WriteString(fmt.Sprintf("%q", args.CandidateId))
+	}
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("planId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("stepId: ")
+	b.WriteString(fmt.Sprintf("%q", args.StepId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("calls: ")
+	b.WriteString(renderMemQLValue(args.Calls))
+	if args.ResourceEdges != nil {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("resourceEdges: ")
+		b.WriteString(renderMemQLValue(args.ResourceEdges))
+	}
+	if args.CallCount != 0 {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("callCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.CallCount))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationRecordBundleDryRun -- Record the Gate 2 (tiered behavioral dry-run, #958) result on a bundle and transition status. status is dryRunPassed on success or failed otherwise; dryRunReport carries the trace + side-effect manifest + cost estimate (the Gate 3 approval artifact).
 //
 // Bound concept: bundle.
