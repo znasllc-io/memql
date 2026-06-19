@@ -379,18 +379,6 @@ func clampInt64ToInt(v int64, def int) int {
 	return int(v)
 }
 
-// clampFloatToInt narrows a float64 to int, clamping to the 32-bit range
-// (worst-case int width) so the conversion is provably overflow-safe on
-// every platform. The float-counterpart of clampInt64ToInt; the planner
-// coerces JSON-decoded numerics (versions, counts) that arrive as
-// float64 through this single narrowing sink.
-func clampFloatToInt(v float64, def int) int {
-	if v > math.MaxInt32 || v < math.MinInt32 {
-		return def
-	}
-	return int(v)
-}
-
 // domainNameOrId returns the human name when present, else the id.
 func domainNameOrId(name, id string) string {
 	if name != "" {

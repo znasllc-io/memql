@@ -214,12 +214,12 @@ func bestRef(actionID string, payload map[string]any) string {
 	if payload != nil {
 		switch v := payload["version"].(type) {
 		case float64:
-			if iv := clampFloatToInt(v, 0); iv >= 1 {
+			if iv := clampFloatToInt(v); iv >= 1 {
 				ref = actionpin.Ref{ID: actionID, Version: iv}
 			}
 		case json.Number:
 			if n, err := v.Int64(); err == nil && n >= 1 {
-				ref = actionpin.Ref{ID: actionID, Version: clampInt64ToInt(n, 0)}
+				ref = actionpin.Ref{ID: actionID, Version: clampToInt(n)}
 			}
 		}
 	}

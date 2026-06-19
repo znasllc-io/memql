@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -174,17 +175,44 @@ func entInt(v any) int {
 	case int:
 		return n
 	case int64:
-		return clampInt64ToInt(n, 0)
+		return clampToInt(n)
 	case float64:
-		return clampFloatToInt(n, 0)
+		return clampFloatToInt(n)
 	case float32:
-		return clampFloatToInt(float64(n), 0)
+		return clampFloatToInt(float64(n))
 	case json.Number:
 		i, _ := n.Int64()
-		return clampInt64ToInt(i, 0)
+		return clampToInt(i)
 	case string:
 		i, _ := strconv.Atoi(strings.TrimSpace(n))
 		return i
 	}
 	return 0
+}
+
+// clampToInt narrows an int64 to int, clamping at the platform int bounds so a
+// 32-bit build cannot silently overflow on a large value
+// (go/incorrect-integer-conversion). On a 64-bit build int == int64, so the
+// guards are never taken and the value passes through unchanged.
+func clampToInt(i int64) int {
+	if i > math.MaxInt {
+		return math.MaxInt
+	}
+	if i < math.MinInt {
+		return math.MinInt
+	}
+	return int(i)
+}
+
+// clampFloatToInt truncates a float toward zero into int, clamping at the
+// platform int bounds so an out-of-range magnitude cannot overflow the
+// conversion.
+func clampFloatToInt(f float64) int {
+	if f >= math.MaxInt {
+		return math.MaxInt
+	}
+	if f <= math.MinInt {
+		return math.MinInt
+	}
+	return int(f)
 }
