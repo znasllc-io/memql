@@ -38,8 +38,7 @@ func TestApplyShapeTemplateNodeSelection(t *testing.T) {
 	value, err := applyShapeTemplate(context.Background(), bundle, template, nil, nil)
 	require.NoError(t, err)
 
-	result, ok := value.(map[string]any)
-	require.True(t, ok)
+	result := singleShapeRow(t, value)
 	require.Equal(t, "Weekly Sync", result["title"])
 	require.Equal(t, "v1:conversation", result["concept"])
 	require.Equal(t, "v1:conversation:conv-1", result["id"])
@@ -88,8 +87,7 @@ func TestApplyShapeTemplateChildren(t *testing.T) {
 	value, err := applyShapeTemplate(context.Background(), bundle, template, nil, nil)
 	require.NoError(t, err)
 
-	result, ok := value.(map[string]any)
-	require.True(t, ok)
+	result := singleShapeRow(t, value)
 
 	rawMessages, ok := result["messages"]
 	require.True(t, ok)
@@ -109,6 +107,75 @@ func mustShapeFieldRef(t *testing.T, raw string) FieldReference {
 	ref, err := parseFieldReferenceLiteral(raw)
 	require.NoError(t, err)
 	return ref
+}
+
+// singleShapeRow asserts the canonical query result envelope (memql#1710):
+// applyShapeTemplate ALWAYS returns an array, so a single-match projection is a
+// one-element []any whose sole element is the projected row map. It returns
+// that row for the caller's field assertions.
+func singleShapeRow(t *testing.T, value any) map[string]any {
+	t.Helper()
+	arr, ok := value.([]any)
+	require.Truef(t, ok, "expected canonical array envelope ([]any), got %T", value)
+	require.Lenf(t, arr, 1, "expected exactly one row in the envelope")
+	row, ok := arr[0].(map[string]any)
+	require.Truef(t, ok, "expected row to be a map[string]any, got %T", arr[0])
+	return row
+}
+
+// TestApplyShapeTemplateCanonicalEnvelope locks the memql#1710 contract: every
+// shape-projected query returns the SAME shape regardless of cardinality --
+// 0 -> [], 1 -> [x], many -> [x, y, ...]. A single match is never collapsed to
+// a bare object. This is the single central enforcement point, so asserting it
+// here guarantees no per-query divergence.
+func TestApplyShapeTemplateCanonicalEnvelope(t *testing.T) {
+	mkNode := func(id string) *memqlv1.MemoryNode {
+		payloadStruct, err := structpb.NewStruct(map[string]any{"name": id})
+		require.NoError(t, err)
+		return &memqlv1.MemoryNode{Id: id, Concept: "v1:thing", Payload: payloadStruct}
+	}
+	template := &shapeNodeFunc{
+		Fields: []FieldReference{
+			mustShapeFieldRef(t, "id"),
+			mustShapeFieldRef(t, "payload.name"),
+		},
+	}
+
+	t.Run("empty -> []", func(t *testing.T) {
+		bundle := &memqlv1.GraphBundle{Nodes: nil, Edges: nil, RootIds: nil}
+		value, err := applyShapeTemplate(context.Background(), bundle, template, nil, nil)
+		require.NoError(t, err)
+		arr, ok := value.([]any)
+		require.Truef(t, ok, "empty result must be an array, got %T", value)
+		require.Len(t, arr, 0)
+	})
+
+	t.Run("single -> [x]", func(t *testing.T) {
+		bundle := &memqlv1.GraphBundle{
+			Nodes:   []*memqlv1.MemoryNode{mkNode("v1:thing:a")},
+			RootIds: []string{"v1:thing:a"},
+		}
+		value, err := applyShapeTemplate(context.Background(), bundle, template, nil, nil)
+		require.NoError(t, err)
+		arr, ok := value.([]any)
+		require.Truef(t, ok, "single result must be an array, got %T", value)
+		require.Len(t, arr, 1)
+		row, ok := arr[0].(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, "v1:thing:a", row["id"])
+	})
+
+	t.Run("many -> [x, y, ...]", func(t *testing.T) {
+		bundle := &memqlv1.GraphBundle{
+			Nodes:   []*memqlv1.MemoryNode{mkNode("v1:thing:a"), mkNode("v1:thing:b")},
+			RootIds: []string{"v1:thing:a", "v1:thing:b"},
+		}
+		value, err := applyShapeTemplate(context.Background(), bundle, template, nil, nil)
+		require.NoError(t, err)
+		arr, ok := value.([]any)
+		require.Truef(t, ok, "multi result must be an array, got %T", value)
+		require.Len(t, arr, 2)
+	})
 }
 
 func TestRenderMatchSpecCondition(t *testing.T) {
@@ -163,8 +230,7 @@ func TestRenderMatchSpecCondition(t *testing.T) {
 	value, err := applyShapeTemplate(context.Background(), bundle, template, nil, specs)
 	require.NoError(t, err)
 
-	result, ok := value.(map[string]any)
-	require.True(t, ok)
+	result := singleShapeRow(t, value)
 
 	// Single-field node("id") returns the value directly (not wrapped in a map)
 	idValue, ok := result["id"].(string)
@@ -221,8 +287,7 @@ func TestRenderMatchComparisonCondition(t *testing.T) {
 	value, err := applyShapeTemplate(context.Background(), bundle, template, nil, nil)
 	require.NoError(t, err)
 
-	result, ok := value.(map[string]any)
-	require.True(t, ok)
+	result := singleShapeRow(t, value)
 	require.Equal(t, "Active Account", result["displayStatus"])
 }
 
@@ -275,8 +340,7 @@ func TestRenderMatchDefaultFallback(t *testing.T) {
 	value, err := applyShapeTemplate(context.Background(), bundle, template, nil, specs)
 	require.NoError(t, err)
 
-	result, ok := value.(map[string]any)
-	require.True(t, ok)
+	result := singleShapeRow(t, value)
 	require.Equal(t, "unknown", result["origin"])
 }
 
@@ -337,8 +401,7 @@ func TestRenderMatchShortCircuit(t *testing.T) {
 	value, err := applyShapeTemplate(context.Background(), bundle, template, nil, nil)
 	require.NoError(t, err)
 
-	result, ok := value.(map[string]any)
-	require.True(t, ok)
+	result := singleShapeRow(t, value)
 	require.Equal(t, "B", result["grade"])
 }
 
@@ -389,8 +452,7 @@ func TestRenderMatchWithInOperator(t *testing.T) {
 	value, err := applyShapeTemplate(context.Background(), bundle, template, nil, nil)
 	require.NoError(t, err)
 
-	result, ok := value.(map[string]any)
-	require.True(t, ok)
+	result := singleShapeRow(t, value)
 	require.Equal(t, "North America", result["region"])
 }
 
@@ -434,8 +496,7 @@ func TestRenderMatchWithMissingOperator(t *testing.T) {
 	value, err := applyShapeTemplate(context.Background(), bundle, template, nil, nil)
 	require.NoError(t, err)
 
-	result, ok := value.(map[string]any)
-	require.True(t, ok)
+	result := singleShapeRow(t, value)
 	require.Equal(t, false, result["hasMiddleName"])
 }
 
@@ -471,8 +532,7 @@ func TestRenderJSONWithNode(t *testing.T) {
 	value, err := applyShapeTemplate(context.Background(), bundle, template, nil, nil)
 	require.NoError(t, err)
 
-	result, ok := value.(map[string]any)
-	require.True(t, ok)
+	result := singleShapeRow(t, value)
 
 	payloadJSON, ok := result["payloadJSON"].(string)
 	require.True(t, ok)
@@ -515,8 +575,7 @@ func TestRenderJSONWithObject(t *testing.T) {
 	value, err := applyShapeTemplate(context.Background(), bundle, template, nil, nil)
 	require.NoError(t, err)
 
-	result, ok := value.(map[string]any)
-	require.True(t, ok)
+	result := singleShapeRow(t, value)
 
 	profileJSON, ok := result["profileJSON"].(string)
 	require.True(t, ok)
@@ -546,8 +605,7 @@ func TestRenderJSONWithNilInner(t *testing.T) {
 	value, err := applyShapeTemplate(context.Background(), bundle, template, nil, nil)
 	require.NoError(t, err)
 
-	result, ok := value.(map[string]any)
-	require.True(t, ok)
+	result := singleShapeRow(t, value)
 	require.Equal(t, "null", result["data"])
 }
 
@@ -574,8 +632,7 @@ func TestRenderJSONWithLiteral(t *testing.T) {
 	value, err := applyShapeTemplate(context.Background(), bundle, template, nil, nil)
 	require.NoError(t, err)
 
-	result, ok := value.(map[string]any)
-	require.True(t, ok)
+	result := singleShapeRow(t, value)
 	require.Equal(t, `"hello world"`, result["stringJSON"])
 	require.Equal(t, `42`, result["numberJSON"])
 	require.Equal(t, `true`, result["boolJSON"])
