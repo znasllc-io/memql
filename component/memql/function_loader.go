@@ -367,6 +367,15 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		return nil, err
 	}
 
+	// Field-level event-schema validation (memql#1743): a Logic that OPTS IN by
+	// declaring `@eventField(...)` has every `event.payload.<field>` reference
+	// checked against that declared schema -- rejecting typos / fields the
+	// (possibly synthetic) triggering event cannot carry. Opt-in, so unannotated
+	// logics are unaffected (zero false-rejects).
+	if err := validateLogicEventFields(rawSourceForUsage, funcDef); err != nil {
+		return nil, err
+	}
+
 	// Validate the function name matches the file-derived function name.
 	if funcDef.Name != "" && funcDef.Name != expectedName {
 		return nil, fmt.Errorf("function name %q does not match expected name %q", funcDef.Name, expectedName)

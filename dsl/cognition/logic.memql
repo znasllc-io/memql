@@ -48,6 +48,7 @@ use cognition.queries.{ queryExpiredArchivedSpaces, queryHasSIResponseForReply, 
 use identity.queries.{ queryUserById, queryUsersActiveInSpace }
 
 @description("Triggered when a v1:cognition:space is created with status='active'. Auto-joins the creator's currently-active assistant as a v1:cognition:participant on the new space, with forUserId=creator and isGroupGA=true (so the participant guard prevents non-elevated callers from removing it via the Roster tab). This is the ONLY AI participant a space carries (maxAgents=1, one-assistant model copresent #124). Idempotent. Emits 'si.auto-joined' for observability.")
+@eventField("id", "ownerUserId")
 logic logicAutoJoinSI {
   args {
     event object @required
@@ -228,6 +229,7 @@ logic logicBootstrapSession {
 // dispatch, then emits this event with pre-loaded context when a
 // non-streaming SI response is needed.
 @description("Generates and inserts an SI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via mutationSendTextUtterance, and bumps participant presence to idle. Idempotent via queryHasSIResponseForReply.")
+@eventField("agentId", "promptData", "promptTemplateId", "siParticipantId", "spaceId", "utteranceId")
 logic logicGenerateResponse {
   args {
     event object @required
@@ -365,6 +367,7 @@ logic logicPurgeExpiredArchivedSpaces {
 // sibling automation when needed (deferred until the frontend wiring
 // shows the need).
 @description("Phase 7 of chat-architecture. Triggered when a user's activeSpaceId pointer changes. When exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team to Group thread. Idempotent via content-addressed stateIds.")
+@eventField("activeSpaceId", "id")
 logic logicVoiceMigrationOnSecondHuman {
   args {
     event object @required
@@ -475,6 +478,7 @@ logic logicEnsureDailySpaceForCaller {
 // every time the user re-auths, today's daily is guaranteed to
 // exist before any read query the SPA might issue.
 @description("Fires on every v1:identity:authSession create (one per login). Calls dailyspace.ensureForUser for the authenticating user; the idempotent insert collapses to a no-op when today's daily already exists. This is the path that makes the cron-frequency concern moot -- every login guarantees today's daily exists before the SPA reads.")
+@eventField("subject", "userId")
 logic logicEnsureDailySpaceOnAuthSession {
   args {
     event object @required
