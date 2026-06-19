@@ -64,6 +64,7 @@ import (
 	cron "github.com/robfig/cron/v3"
 
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 const (
@@ -634,7 +635,7 @@ func (r *ReactiveLoop) createResponsibilityPlan(ctx context.Context, userId stri
 		// regardless of this bookkeeping space.
 		spaceId = "system:reactive-loop"
 	}
-	planId := fmt.Sprintf("proactive:%s:%d", stripIdLastSegment(respId), time.Now().UnixNano())
+	planId := id.NewSystemNodeShortId("proactive", respId)
 	goal := statement
 	if goal == "" {
 		goal = "Honor responsibility " + respId

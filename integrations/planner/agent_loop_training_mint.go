@@ -24,6 +24,7 @@ import (
 	"fmt"
 
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // mintApprovedTrainingPlan handles an approved spawnTrainingPlan decision.
@@ -75,8 +76,10 @@ func (l *PlannerAgentLoop) mintApprovedTrainingPlan(ctx context.Context, planId 
 
 	// Deterministic child id keyed on the approving Plan -- one training
 	// run per approval (idempotent if the loop re-dispatches the same
-	// approved decision).
-	trainPlanId := fmt.Sprintf("train:%s", planId)
+	// approved decision). SystemNodeShortId stays deterministic (no
+	// uniqueness token) so the idempotency holds, while guaranteeing a
+	// colon-free bare id the engine accepts (issue #1712).
+	trainPlanId := id.SystemNodeShortId("train", planId)
 	goal := fmt.Sprintf("Train specialist on %q (user-approved)", topic)
 	call := fmt.Sprintf(
 		`mutationCreatePlan({"planId": %q, "spaceId": %q, "parentPlanId": %q, "kind": "trainSpecialist", "goal": %q, "requestedBy": %q, "triggerSource": "user.approved", "input": %s})`,

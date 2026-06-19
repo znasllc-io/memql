@@ -32,6 +32,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // planLifecycle holds the ids the handler stamps as it walks the
@@ -74,11 +76,14 @@ func (i *Integration) beginPlan(
 	}
 
 	now := time.Now().UTC()
-	planId := fmt.Sprintf("train:%s:%d", stripIdPrefix(agentId), now.UnixNano())
+	planId := id.NewSystemNodeShortId("train", agentId)
+	// Task ids derive deterministically from the (already bare) planId so
+	// the three steps stay stably keyed to their plan; SystemNodeShortId
+	// keeps them colon-free bare ids the engine accepts (issue #1712).
 	taskIds := [3]string{
-		planId + ":t0:capabilities",
-		planId + ":t1:identityVector",
-		planId + ":t2:distillPrompt",
+		id.SystemNodeShortId(planId, "t0-capabilities"),
+		id.SystemNodeShortId(planId, "t1-identityVector"),
+		id.SystemNodeShortId(planId, "t2-distillPrompt"),
 	}
 
 	addedDomainsCount := len(addedDomainIds)

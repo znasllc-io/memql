@@ -535,22 +535,10 @@ func (c *Concept) validateShortId(nodeId string) error {
 	if c == nil {
 		return nil
 	}
-	trimmed := strings.TrimSpace(nodeId)
-	if trimmed == "" {
-		return nil // empty handled downstream
-	}
-	// Shape (1): bare, no colons -> ok.
-	if !strings.ContainsRune(trimmed, ':') {
-		return nil
-	}
-	// Shape (2): concept-qualified.
-	if strings.HasPrefix(trimmed, c.Name+":") {
-		return nil
-	}
-	return fmt.Errorf(
-		"shortId %q must be a bare slug/UUID (no colons) or the concept-prefixed form (%q); got something else (see docs/public/concepts/identifiers.md)",
-		trimmed, c.Name+":<short>",
-	)
+	// Delegate to the single source of truth in core/id so the storage
+	// gate and every system-automation id generator (issue #1712) agree
+	// on exactly one rule.
+	return id.ValidateShortId(c.Name, nodeId)
 }
 
 func (c *Concept) storageId(nodeId string) string {

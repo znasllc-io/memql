@@ -51,6 +51,7 @@ import (
 	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 const (
@@ -105,7 +106,7 @@ func (i *Integration) enqueueRetryPlan(
 	now := time.Now().UTC()
 	nextAttemptAt := now.Add(retryBackoff(0))
 
-	planId := fmt.Sprintf("trainretry:%s:%s:%d", stripIdPrefix(agentId), step, now.UnixNano())
+	planId := id.NewSystemNodeShortId("trainretry", agentId, step)
 	goal := fmt.Sprintf("Retry training step (%s)", humanStep(step))
 
 	inputJSON := mustJSON(map[string]any{

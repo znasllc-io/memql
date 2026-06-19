@@ -42,6 +42,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 const (
@@ -313,7 +314,7 @@ func (c *RefreshCron) spawnRefreshPlan(ctx context.Context, row map[string]any) 
 		requestedBy = refreshSystemRequester
 	}
 
-	planId := fmt.Sprintf("refresh:%s:%d", stripDomainId(domainId), time.Now().UnixNano())
+	planId := id.NewSystemNodeShortId("refresh", domainId)
 	goal := fmt.Sprintf("Refresh knowledge domain %q (cadence backstop)", domainNameOrId(domainName, domainId))
 
 	input := map[string]any{
@@ -382,17 +383,6 @@ func clampInt64ToInt(v int64, def int) int {
 func domainNameOrId(name, id string) string {
 	if name != "" {
 		return name
-	}
-	return id
-}
-
-// stripDomainId returns the last colon-segment of a domain id for use
-// in a readable plan id (the full canonical id is colon-heavy).
-func stripDomainId(id string) string {
-	for i := len(id) - 1; i >= 0; i-- {
-		if id[i] == ':' {
-			return id[i+1:]
-		}
 	}
 	return id
 }
