@@ -135,11 +135,18 @@ func (a *App) harnessInnerLoop() harness.InnerLoop {
 			stepID: step.ID,
 			planID: step.PlanID,
 		}
+		traceSink := newCandidateTraceSink()
 		opts := &memql.ToolLoopOptions{
 			IdempotencyKey: step.IdempotencyKey,
 			Observations:   sink,
+			TraceSink:      traceSink,
 		}
 		out, err := a.engine.InvokeSIChatWithFilteredToolsOpts(ctx, template, data, nil, opts)
+		// Action-library trace capture (#1735): persist the captured
+		// capability sequence as a v1:actions:candidate. Best-effort and
+		// non-fatal -- a trace-write error never fails the step, and a
+		// failed step's partial trace is still recorded (useful provenance).
+		a.recordActionCandidate(ctx, step, traceSink)
 		if err != nil {
 			return nil, sink.toolCalls, err
 		}

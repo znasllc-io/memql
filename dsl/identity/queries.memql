@@ -497,7 +497,7 @@ query delegation queryDelegationsByIdentity {
   args {
     identityId  string  @required
   }
-  filter  payload.identityId==args.identityId && traitIsActiveRecord
+  filter  payload.identityId==args.identityId
   shape   delegationFull
 }
 
@@ -1050,21 +1050,20 @@ query user queryCurrentUser {
 // userCount - Count of active users
 // =================================
 //
-// Returns every active user row -- the admin handler counts the
-// resulting bundle in Go (the MemQL grammar doesn't have an
-// aggregate count() yet). Mirrors queryActiveUsers without the
-// optional role / groupId filters; the admin dashboard only needs
-// the cardinality.
+// Returns the cardinality of the active-user set as a self-describing
+// {count: N} aggregate, computed server-side via the `count` query
+// directive. Mirrors queryActiveUsers' filter without the optional
+// role / groupId filters; the admin dashboard only needs the count.
 //
 // Returns:
-//   Active user rows in userFull shape. Caller takes len().
+//   {count: N} -- N is the number of active v1:identity:user rows.
 //
 
 @enabled
-@description("Every active v1:identity:user row. Caller takes len() to derive a count.")
+@description("Count of active v1:identity:user rows. Returns a {count: N} aggregate.")
 query user queryUserCount {
   filter  traitIsActiveRecord
-  shape   userFull
+  count
 }
 
 // ---- queries/v1/identity/usersActiveInSpace.memql ----

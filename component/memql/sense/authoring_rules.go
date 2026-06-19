@@ -90,6 +90,8 @@ func walkExpressionsForDirectives(funcDef *parser.FunctionDef, node parser.Node,
 		reportDirectiveExpr(funcDef, "select", source, out)
 	case *parser.DepthExpr:
 		reportDirectiveExpr(funcDef, "withDepth", source, out)
+	case *parser.CountExpr:
+		reportDirectiveExpr(funcDef, "count", source, out)
 	case *parser.ShapeExpr:
 		reportDirectiveExpr(funcDef, "shape", source, out)
 	case *parser.TimestampExpr:

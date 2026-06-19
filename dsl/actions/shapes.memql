@@ -1,0 +1,20 @@
+// shapes.memql
+//
+// Reusable projections in the `actions` namespace (epic #1734). Phase 0
+// (#1735) ships candidateFull -- the read projection over a captured trace.
+
+use actions.concepts.{ candidate }
+
+@row
+@description("Full v1:actions:candidate projection: every field the action-library browse/recall surfaces need to inspect a captured trace (#1735).")
+shape candidate candidateFull {
+  row.id
+  payload.ownerUserId
+  payload.planId
+  payload.stepId
+  payload.status
+  payload.calls
+  payload.resourceEdges
+  payload.callCount
+  row.createdAt
+}

@@ -1,0 +1,49 @@
+// mutations.memql
+//
+// Write paths in the `actions` namespace (epic #1734). Phase 0 (#1735)
+// ships ONE: mutationRecordActionCandidate -- the single path that records
+// a captured trace as a v1:actions:candidate row.
+//
+// Authorization (owned tier): ownerUserId is stamped from actor.userId so
+// the caller cannot land a candidate owned by someone else; the conformance
+// classifier reads actor.userId in the insert body and buckets this as
+// owned. Provenance: provenanceMutation is stamped with this mutation's own
+// name; the engine stamps createdBy from the authenticated actor.
+//
+// Id handling mirrors mutationRecordHarnessObservation: candidateId is
+// optional -- when omitted the engine assigns the id on insert.
+
+use actions.concepts.{ candidate }
+
+// mutationRecordActionCandidate
+// =============================
+// Append a v1:actions:candidate trace for a completed LLM step. The
+// ordered capability calls (with per-arg value provenance) and the
+// resource-dependency edges are computed Go-side by the data-flow tracer
+// (component/harness/actiontrace) and handed in as already-structured
+// arrays; the mutation stays declarative.
+// Internal write path: the harness Go side calls this after each LLM step;
+// it is NOT exposed on the MCP/SDK surface (no @mcp / @sdk).
+@enabled
+@description("Record a v1:actions:candidate trace (the captured capability sequence + value/resource provenance for one LLM step, #1735). ownerUserId is stamped from actor.userId (owned tier). status is always 'candidate' on insert.")
+mutation candidate mutationRecordActionCandidate {
+  args {
+    candidateId   string
+    planId        string    @required
+    stepId        string    @required
+    calls         []object  @required
+    resourceEdges []object
+    callCount     int
+  }
+  insert {
+    id: args.candidateId
+    ownerUserId: actor.userId
+    args.planId
+    args.stepId
+    status: "candidate"
+    args.calls
+    args.resourceEdges
+    args.callCount
+    provenanceMutation: "mutationRecordActionCandidate"
+  }
+}

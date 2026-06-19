@@ -697,6 +697,20 @@ type ToolLoopOptions struct {
 	ContextBudget *ContextBudget
 	// Observations, when set, receives note/stop/error observations.
 	Observations ToolLoopObservationSink
+	// TraceSink, when set, receives each freshly-executed tool call in call
+	// order for action-library trace capture (#1735, epic #1734). Nil sink =
+	// no capture (zero behavior change). Cache/idempotency hits are not
+	// re-emitted -- the first occurrence of a call is captured.
+	TraceSink ToolTraceSink
+}
+
+// ToolTraceSink receives each executed tool call so the action library can
+// capture the concrete capability sequence a step performed (#1735). It is
+// invoked once per fresh tool execution (success or error), in call order,
+// with the parsed args and the (raw, JSON-decoded) result. A nil sink means
+// no capture.
+type ToolTraceSink interface {
+	RecordToolCall(capability string, args map[string]any, result any, isError bool)
 }
 
 // resolvedRetryPolicy returns the effective retry policy for these options.
@@ -714,4 +728,13 @@ func (o *ToolLoopOptions) recordObservation(ctx context.Context, kind, text stri
 		return
 	}
 	o.Observations.RecordObservation(ctx, kind, text, meta)
+}
+
+// recordToolCall is a nil-safe helper: forwards an executed tool call to the
+// trace sink when wired, otherwise no-ops (#1735).
+func (o *ToolLoopOptions) recordToolCall(capability string, args map[string]any, result any, isError bool) {
+	if o == nil || o.TraceSink == nil {
+		return
+	}
+	o.TraceSink.RecordToolCall(capability, args, result, isError)
 }

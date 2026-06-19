@@ -658,6 +658,25 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredToolsOpts(ctx context.Context, tem
 					toolsExecuted++
 				}
 			}
+
+			// Action-library trace capture (#1735): emit each freshly-executed
+			// tool call to the trace sink in call order, with parsed args + the
+			// JSON-decoded result. pending[ri] and results[ri] correspond (the
+			// goroutine wrote results[ri] for pending[ri]). Cache/idempotency
+			// hits are intentionally skipped -- the first occurrence of a call
+			// is what we capture. Nil sink = no-op.
+			if opts != nil && opts.TraceSink != nil {
+				for ri := range pending {
+					r := results[ri]
+					var resultPayload any
+					if s := strings.TrimSpace(r.resultStr); s != "" {
+						if err := json.Unmarshal([]byte(s), &resultPayload); err != nil {
+							resultPayload = r.resultStr
+						}
+					}
+					opts.recordToolCall(pending[ri].name, pending[ri].args, resultPayload, r.isError)
+				}
+			}
 		}
 
 		// Append all results in order.

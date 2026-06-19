@@ -219,6 +219,26 @@ query context queryLatestSpaceContextForSpace {
 }
 ```
 
+### Counting
+
+A `count` clause makes the query return the cardinality of the
+matching set as a self-describing `{count: N}` aggregate computed
+server-side, instead of the rows themselves:
+
+```memql
+query user queryUserCount {
+  filter  traitIsActiveRecord
+  count
+}
+```
+
+`count` is mutually exclusive with `shape`, `sort`, and `paginate`
+(a count has no projection, ordering, or window). The count reflects
+the deduped, latest-version, post-filtered set -- the same row
+pipeline a normal query uses -- so it is correct under the
+time-series versioning model. Callers read `count` off the returned
+object rather than taking `len()` on a row array.
+
 ---
 
 ## Mutation Functions
@@ -358,7 +378,13 @@ automation autoJoinSI {
 ```
 
 Inside the logic function, the triggering event is bound as `args`, so
-`args.event.payload.<field>` is how the body reaches the event data.
+`args.event.payload.<field>` is how the body reaches the event data. The
+event is a first-class, in-scope value the engine threads into EVERY nested
+step's argument resolution, and it binds identically across every invocation
+surface -- a real graph event, the live `run_automation` path, and the
+`run_automation` dry-run preview (memql#1727). Run a logic without an event
+in scope (a misconfigured/direct call) and `event.*` references degrade to
+empty rather than erroring.
 
 ### Scheduled
 

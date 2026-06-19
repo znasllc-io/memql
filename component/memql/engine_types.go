@@ -40,6 +40,10 @@ type QueryPlan struct {
 	ShapeTemplateName string // Named shape reference; resolved at execution time
 	IncludeBundle     bool   // when true, include bundle in shape response
 	InlineSpecs       map[string]*Spec
+	// Count, when true, makes the query return a numeric {count: N}
+	// aggregate over the matching set instead of the rows themselves.
+	// Peeled off the outermost CountExpression by applyDirectiveWrappers.
+	Count bool
 }
 
 // RelationshipNode identifies relationship traversals declared within a query.
@@ -363,6 +367,17 @@ type DepthExpression struct {
 }
 
 func (*DepthExpression) isExpressionNode() {}
+
+// CountExpression aggregates its target expression to a numeric row
+// count instead of materializing rows. Execution returns a
+// self-describing {count: N} envelope. Like the other directive
+// wrappers it is peeled off into the plan (plan.Count) by
+// applyDirectiveWrappers and must be the outermost node.
+type CountExpression struct {
+	Target ExpressionNode
+}
+
+func (*CountExpression) isExpressionNode() {}
 
 // ShapeExpression applies a result-shaping template to the target expression.
 type ShapeExpression struct {

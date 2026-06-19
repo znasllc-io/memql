@@ -233,6 +233,12 @@ func applyDirectiveWrappers(plan *QueryPlan) (ExpressionNode, error) {
 			depth := node.Depth
 			plan.Depth = &depth
 			expr = node.Target
+		case *CountExpression:
+			if plan.Count {
+				return nil, fmt.Errorf("multiple count() directives are not supported")
+			}
+			plan.Count = true
+			expr = node.Target
 		case *ShapeExpression:
 			if plan.ShapeTemplate != nil || plan.ShapeTemplateName != "" {
 				return nil, fmt.Errorf("multiple shape() directives are not supported")
@@ -255,7 +261,7 @@ func ensureNoDirectiveNodes(expr ExpressionNode) error {
 		return nil
 	}
 	switch node := expr.(type) {
-	case *SortExpression, *SelectExpression, *PaginateExpression, *TimestampExpression, *DepthExpression, *ShapeExpression:
+	case *SortExpression, *SelectExpression, *PaginateExpression, *TimestampExpression, *DepthExpression, *CountExpression, *ShapeExpression:
 		return fmt.Errorf("directive functions (e.g., paginate()) must be the outermost wrapper around the query expression")
 	case *LogicalExpression:
 		if err := ensureNoDirectiveNodes(node.Left); err != nil {
@@ -695,6 +701,8 @@ func collectConceptFields(expr ExpressionNode, acc map[string][]FieldReference) 
 		collectConceptFields(node.Target, acc)
 	case *DepthExpression:
 		collectConceptFields(node.Target, acc)
+	case *CountExpression:
+		collectConceptFields(node.Target, acc)
 	case *ShapeExpression:
 		collectConceptFields(node.Target, acc)
 	case *BuiltinFunctionExpression:
@@ -762,6 +770,8 @@ func collectCacheHints(expr ExpressionNode, acc map[string]int64) {
 	case *TimestampExpression:
 		collectCacheHints(node.Target, acc)
 	case *DepthExpression:
+		collectCacheHints(node.Target, acc)
+	case *CountExpression:
 		collectCacheHints(node.Target, acc)
 	case *ShapeExpression:
 		collectCacheHints(node.Target, acc)
