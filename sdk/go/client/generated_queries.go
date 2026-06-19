@@ -58,6 +58,28 @@ func QueryAccountEntitlementBuild(args QueryAccountEntitlementArgs) string {
 	return b.String()
 }
 
+// QueryActionCandidatesForPlan -- List v1:actions:candidate traces captured for a plan, newest-first by createdAt (owned tier). #1735.
+//
+// Bound concept: candidate.
+type QueryActionCandidatesForPlanArgs struct {
+	PlanId string
+}
+
+// QueryActionCandidatesForPlan calls the engine query queryActionCandidatesForPlan.
+func (qc *QueryClient) QueryActionCandidatesForPlan(ctx context.Context, args QueryActionCandidatesForPlanArgs) (*Result, error) {
+	call := QueryActionCandidatesForPlanBuild(args)
+	return qc.executeNamed(ctx, "queryActionCandidatesForPlan", call)
+}
+
+func QueryActionCandidatesForPlanBuild(args QueryActionCandidatesForPlanArgs) string {
+	var b strings.Builder
+	b.WriteString("queryActionCandidatesForPlan({")
+	b.WriteString("planId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryActiveAgentRoles -- List every active agentRole row. Backs the role picker on the cockpit's agent-creation surface and on the role-management view. predefined rows render with a lock icon; user-created rows are fully editable.
 //
 // Bound concept: agentRole.

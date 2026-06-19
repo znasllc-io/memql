@@ -1,0 +1,36 @@
+// concepts.memql
+//
+// The `actions` namespace -- the action library (epic #1734): a growing,
+// pgvector-indexed library of reusable, replayable actions the planner
+// composes plans from and the agent loop replays without an LLM.
+//
+// Phase 0 (#1735, trace capture) lands ONE concept: `candidate`. It is the
+// raw material every later phase builds on -- a captured, provenance-traced
+// record of the concrete capability sequence an LLM step performed. No
+// replay, no resolver, no trust ladder yet (those are Phases 1-4); this
+// phase only records what happened, with enough provenance that a later
+// phase can mint a parameterized action from it.
+//
+// Why a candidate is a MemoryNode: it inherits time-ordered history,
+// per-row authz (ownerUserId), provenance (createdBy + provenanceMutation),
+// and event emission for free -- the same substrate the harness spine
+// (#582) rides.
+//
+// Authorization (owned tier): ownerUserId is the per-row authz key, stamped
+// from actor.userId by the recording mutation; the read path filters on
+// payload.ownerUserId == actor.userId.
+
+@version("1.0.0")
+@namespace("actions")
+@description("A captured trace of the concrete capability sequence an LLM step performed, with value + resource provenance per call (#1735). Minted as status='candidate' on first run; a later phase graduates it into a library action. This is the foundation record of the action library (epic #1734) -- no replay yet.")
+@displayCard(primary="stepId", secondary="status", tertiary="ownerUserId", status="status")
+concept candidate {
+  ownerUserId   string  @required  @description("v1:identity:user.id of the owner. The per-row authz key (owned tier), stamped from actor.userId by mutationRecordActionCandidate.")
+  planId        string  @required  @description("v1:harness:plan.id the trace was captured under.")
+  stepId        string  @required  @description("v1:harness:step.id whose dispatch produced this trace.")
+  status        enum("candidate", "promoted", "discarded")  @required  @default("candidate")  @description("Trust-ladder state. candidate = captured, not yet a library action; promoted = graduated into a library action (Phase 4); discarded = rejected or superseded.")
+  calls         []object  @required  @description("Ordered traced capability calls, in execution order. Each entry: {index, capability, isError, args:[{name, value, source:{kind, ref, fragment}}]}. source.kind is one of stepInput | planInput | upstreamResult | literal -- derived by data-flow tracing (provenance, NOT synthesis): a value that traced to a witnessed source is bound; an untraceable value stays literal (we never invent a binding).")
+  resourceEdges []object  @description("Resource-dependency edges: a later call reads a resource (path/handle) an earlier call referenced. Each entry: {fromCallIndex, toCallIndex, resource}. These become the world-group edges that pin coupled actions to one surface in Phase 2 (decision A).")
+  callCount     int  @description("Number of captured calls (len(calls)). A convenience field for filtering trivial/empty traces.")
+  provenanceMutation  string  @description("Name of the mutation that produced this candidate version (audit trail).")
+}
