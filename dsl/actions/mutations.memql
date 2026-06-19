@@ -233,3 +233,24 @@ mutation action mutationDecayAction {
     provenanceMutation: "mutationDecayAction"
   }
 }
+
+// mutationBumpActionVersion
+// =========================
+// Bump an action's monotonic version (Phase 5 #1740). References pin by
+// default, so an edited action lands a new version and existing pins stay on
+// the old one until the verified upgrade migration bumps them. The new version
+// value is computed engine-side (the MemQL parser has no arithmetic) and
+// handed in. update read-merges so the captured calls + ownerUserId persist.
+@enabled
+@description("Bump a v1:actions:action monotonic version on edit (Phase 5 #1740; value computed engine-side). Pins stay on the prior version until the verified upgrade migration moves them.")
+mutation action mutationBumpActionVersion {
+  args {
+    actionId  string  @required
+    version   int     @required
+  }
+  update {
+    id: args.actionId
+    args.version
+    provenanceMutation: "mutationBumpActionVersion"
+  }
+}

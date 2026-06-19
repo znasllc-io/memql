@@ -58,6 +58,34 @@ func QueryAccountEntitlementBuild(args QueryAccountEntitlementArgs) string {
 	return b.String()
 }
 
+// QueryActionByIdAndVersion -- Resolve a pinned v1:actions:action reference (id + version) for the calling owner -- pin-by-default resolution (Phase 5 #1740). Owned tier.
+//
+// Bound concept: action.
+type QueryActionByIdAndVersionArgs struct {
+	ActionId string
+	Version  int
+}
+
+// QueryActionByIdAndVersion calls the engine query queryActionByIdAndVersion.
+func (qc *QueryClient) QueryActionByIdAndVersion(ctx context.Context, args QueryActionByIdAndVersionArgs) (*Result, error) {
+	call := QueryActionByIdAndVersionBuild(args)
+	return qc.executeNamed(ctx, "queryActionByIdAndVersion", call)
+}
+
+func QueryActionByIdAndVersionBuild(args QueryActionByIdAndVersionArgs) string {
+	var b strings.Builder
+	b.WriteString("queryActionByIdAndVersion({")
+	b.WriteString("actionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ActionId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("version: ")
+	b.WriteString(fmt.Sprintf("%v", args.Version))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryActionByInputFingerprint -- Resolve an active v1:actions:action by inputFingerprint for the calling owner -- the literal-replay lookup (Phase 1 #1736).
 //
 // Bound concept: action.
