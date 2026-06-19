@@ -576,12 +576,18 @@ func intArg(v any) (int, bool) {
 	case int:
 		return t, true
 	case int64:
-		return safeIntFromFloat(float64(t)), true
+		return safeIntFromInt64(t), true
 	case float64:
 		return safeIntFromFloat(t), true
 	case float32:
 		return safeIntFromFloat(float64(t)), true
 	case json.Number:
+		// Prefer the integer parse so a large whole number keeps full
+		// precision; the int64 result is bound-checked below. Fall back
+		// to the float parse for fractional values.
+		if i, err := t.Int64(); err == nil {
+			return safeIntFromInt64(i), true
+		}
 		if f, err := t.Float64(); err == nil {
 			return safeIntFromFloat(f), true
 		}
@@ -589,11 +595,24 @@ func intArg(v any) (int, bool) {
 	return 0, false
 }
 
-// safeIntFromFloat narrows a numeric value to int, clamping to the
-// 32-bit range (the worst-case int width) so the conversion is
-// overflow-safe on every platform. These args are small counts /
-// limits, so clamping a nonsensically-large value is harmless and
-// keeps the narrowing provably bounded.
+// safeIntFromInt64 narrows an int64 to int, clamping to the 32-bit range
+// (the worst-case int width) so the conversion is overflow-safe on every
+// platform. Bound-checked on the int64 source directly so the narrowing
+// is provably bounded (go/incorrect-integer-conversion).
+func safeIntFromInt64(v int64) int {
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if v < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int(v)
+}
+
+// safeIntFromFloat narrows a float64 to int, clamping to the 32-bit range
+// (the worst-case int width, exactly representable in float64) so the
+// conversion is overflow-safe on every platform. These args are small
+// counts / limits, so clamping a nonsensically-large value is harmless.
 func safeIntFromFloat(v float64) int {
 	if v > math.MaxInt32 {
 		return math.MaxInt32
