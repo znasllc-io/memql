@@ -7599,18 +7599,20 @@ func MutationMarkResponsibilityIntakePendingBuild(args MutationMarkResponsibilit
 //
 // Bound concept: action.
 type MutationMintActionArgs struct {
-	ActionId          string
-	Slug              string
-	Intent            string
-	Capability        string
-	InputFingerprint  string
-	Calls             []map[string]any
-	ResourceEdges     []map[string]any
-	RecordedResult    map[string]any
-	ResultFingerprint string
-	RecordedSurface   string
-	ProvenancePlanId  string
-	ProvenanceStepId  string
+	ActionId            string
+	Slug                string
+	Intent              string
+	Capability          string
+	InputFingerprint    string
+	Calls               []map[string]any
+	ResourceEdges       []map[string]any
+	ParamBindings       []map[string]any
+	TemplateFingerprint string
+	RecordedResult      map[string]any
+	ResultFingerprint   string
+	RecordedSurface     string
+	ProvenancePlanId    string
+	ProvenanceStepId    string
 }
 
 // MutationMintAction calls the engine mutation mutationMintAction.
@@ -7659,6 +7661,20 @@ func MutationMintActionBuild(args MutationMintActionArgs) string {
 		}
 		b.WriteString("resourceEdges: ")
 		b.WriteString(renderMemQLValue(args.ResourceEdges))
+	}
+	if args.ParamBindings != nil {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("paramBindings: ")
+		b.WriteString(renderMemQLValue(args.ParamBindings))
+	}
+	if args.TemplateFingerprint != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("templateFingerprint: ")
+		b.WriteString(fmt.Sprintf("%q", args.TemplateFingerprint))
 	}
 	if args.RecordedResult != nil {
 		if b.Len() > 20 {

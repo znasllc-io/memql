@@ -32,6 +32,9 @@ shape action actionFull {
   payload.inputFingerprint
   payload.calls
   payload.resourceEdges
+  payload.paramBindings
+  payload.templateFingerprint
+  payload.steps
   payload.recordedResult
   payload.resultFingerprint
   payload.recordedSurface

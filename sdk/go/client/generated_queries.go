@@ -80,6 +80,28 @@ func QueryActionByInputFingerprintBuild(args QueryActionByInputFingerprintArgs) 
 	return b.String()
 }
 
+// QueryActionByTemplateFingerprint -- Resolve an active v1:actions:action by templateFingerprint (input structure) for the calling owner -- the parameterized-replay lookup (Phase 3 #1738). Owned tier.
+//
+// Bound concept: action.
+type QueryActionByTemplateFingerprintArgs struct {
+	TemplateFingerprint string
+}
+
+// QueryActionByTemplateFingerprint calls the engine query queryActionByTemplateFingerprint.
+func (qc *QueryClient) QueryActionByTemplateFingerprint(ctx context.Context, args QueryActionByTemplateFingerprintArgs) (*Result, error) {
+	call := QueryActionByTemplateFingerprintBuild(args)
+	return qc.executeNamed(ctx, "queryActionByTemplateFingerprint", call)
+}
+
+func QueryActionByTemplateFingerprintBuild(args QueryActionByTemplateFingerprintArgs) string {
+	var b strings.Builder
+	b.WriteString("queryActionByTemplateFingerprint({")
+	b.WriteString("templateFingerprint: ")
+	b.WriteString(fmt.Sprintf("%q", args.TemplateFingerprint))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryActionCandidatesForPlan -- List v1:actions:candidate traces captured for a plan, newest-first by createdAt (owned tier). #1735.
 //
 // Bound concept: candidate.

@@ -45,3 +45,18 @@ query surface querySurfacesForOwner {
   filter  payload.ownerUserId == actor.userId && traitStatusIsActive
   shape   surfaceFull
 }
+
+// queryActionByTemplateFingerprint -- Phase 3 (#1738) parameterized-replay
+// lookup. Matches an action by the STRUCTURE of the step input (key set hash),
+// so an action minted for one input can replay on a different input with the
+// same shape via parameter re-binding. Owned tier; superseded by the planner's
+// semantic search once wired.
+@enabled
+@description("Resolve an active v1:actions:action by templateFingerprint (input structure) for the calling owner -- the parameterized-replay lookup (Phase 3 #1738). Owned tier.")
+query action queryActionByTemplateFingerprint {
+  args {
+    templateFingerprint  string  @required
+  }
+  filter  payload.templateFingerprint == args.templateFingerprint && traitStatusIsActive && payload.ownerUserId == actor.userId
+  shape   actionFull
+}

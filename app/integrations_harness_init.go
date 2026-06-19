@@ -137,10 +137,18 @@ func (a *App) harnessInnerLoop() harness.InnerLoop {
 		actionExisted := false
 		if replayEnabled {
 			inputFP = actionreplay.Fingerprint(step.Input)
+			// Exact-input replay (Phase 1, fingerprint-verified).
 			if replayed, result, found := a.tryReplayAction(ctx, step, inputFP); replayed {
 				return result, 0, nil // token-free: zero LLM tool calls
-			} else {
-				actionExisted = found
+			} else if found {
+				actionExisted = true
+			}
+			// Parameterized replay on VARYING input (Phase 3 #1738): match by
+			// the input's structural template fingerprint and re-bind params.
+			if replayed, result, found := a.tryParameterizedReplay(ctx, step); replayed {
+				return result, 0, nil // token-free
+			} else if found {
+				actionExisted = true
 			}
 		}
 
