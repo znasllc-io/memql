@@ -70,6 +70,17 @@ var bindingErrorSignatures = []string{
 var allowedNonBindingFailures = []string{
 	"unknown builtin executor", // integration.dailyspace.ensureForUser not registered here
 	`function "si"`,            // si() positional-arg render quirk (pre-existing, live-path-identical)
+	// logicGenerateResponse validates its (correctly-bound) siParticipantId
+	// against a cognition participant row + actor write-authz the lightweight
+	// conformance engine does not seed. Whether part-1727 happens to exist in
+	// the shared conformance DB depends on test ordering, so this validation
+	// failure surfaced intermittently and tripped the "unexpected error" arm
+	// (#1759). It lands PAST event binding -- and both signatures are keyed on
+	// the RESOLVED id "part-1727", so a genuine binding regression (a null-bound
+	// id would yield `participant "" not found`) still fails rather than being
+	// masked here.
+	`participant "part-1727" not found`, // getLatestParticipantPayload: no seeded participant row
+	`as participant "part-1727"`,        // auth validation: no actor write-authz in conformance
 }
 
 func runEventDryRunBinding(t *testing.T, e *Env) {
