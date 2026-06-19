@@ -174,3 +174,58 @@ func TestQueryStructFormBackwardCompatPlainFilterShape(t *testing.T) {
 		t.Errorf("backward-compat output broken, got:\n%s", out)
 	}
 }
+
+// memql#1730: the `count` struct-query clause wraps the filter in a
+// `count(...)` directive so the engine returns a {count: N} aggregate
+// instead of a row set. count is the outermost wrapper and mutually
+// exclusive with shape / sort / paginate.
+func TestQueryStructFormCountDirective(t *testing.T) {
+	source := `query user queryUserCount {
+  filter  traitIsActiveRecord
+  count
+}`
+	out, err := NormaliseQuerySource(source)
+	if err != nil {
+		t.Fatalf("NormaliseQuerySource: %v", err)
+	}
+	want := `count(concept==user;traitIsActiveRecord)`
+	if !strings.Contains(out, want) {
+		t.Errorf("expected count wrap %q, got:\n%s", want, out)
+	}
+}
+
+func TestQueryStructFormCountNoFilter(t *testing.T) {
+	source := `query user queryAllUserCount {
+  count
+}`
+	out, err := NormaliseQuerySource(source)
+	if err != nil {
+		t.Fatalf("NormaliseQuerySource: %v", err)
+	}
+	want := `count(concept==user)`
+	if !strings.Contains(out, want) {
+		t.Errorf("expected bare count wrap %q, got:\n%s", want, out)
+	}
+}
+
+func TestQueryStructFormCountRejectsShape(t *testing.T) {
+	source := `query user queryUserCount {
+  filter  traitIsActiveRecord
+  count
+  shape   userFull
+}`
+	if _, err := NormaliseQuerySource(source); err == nil {
+		t.Fatal("expected count + shape to be rejected as mutually exclusive")
+	}
+}
+
+func TestQueryStructFormCountRejectsPaginate(t *testing.T) {
+	source := `query user queryUserCount {
+  filter  traitIsActiveRecord
+  count
+  paginate 10
+}`
+	if _, err := NormaliseQuerySource(source); err == nil {
+		t.Fatal("expected count + paginate to be rejected")
+	}
+}

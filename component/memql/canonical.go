@@ -28,6 +28,8 @@ func canonicalExpression(expr ExpressionNode) string {
 		target := canonicalExpression(node.Target)
 		fields := canonicalFieldReferenceStrings(node.Fields)
 		return fmt.Sprintf("select(%s|%s)", target, strings.Join(fields, ","))
+	case *CountExpression:
+		return fmt.Sprintf("count(%s)", canonicalExpression(node.Target))
 	case *SpecReferenceExpression:
 		return fmt.Sprintf("spec(%s)", strings.ToLower(strings.TrimSpace(node.Name)))
 	case *SIExpression:

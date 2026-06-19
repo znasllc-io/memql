@@ -186,6 +186,17 @@ type DepthExpr struct {
 func (*DepthExpr) node()           {}
 func (*DepthExpr) expressionNode() {}
 
+// CountExpr aggregates its target expression to a numeric row count
+// instead of materializing the matching rows. The query returns a
+// self-describing {count: N} envelope. Like the other directive
+// wrappers it must be the outermost node around a query expression.
+type CountExpr struct {
+	Target ExpressionNode
+}
+
+func (*CountExpr) node()           {}
+func (*CountExpr) expressionNode() {}
+
 // ShapeExpr applies a result-shaping template to the target expression.
 type ShapeExpr struct {
 	Target        ExpressionNode

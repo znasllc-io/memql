@@ -689,6 +689,11 @@ func extractConceptFromExpression(expr ExpressionNode) string {
 			return ""
 		}
 		return extractConceptFromExpression(node.Target)
+	case *CountExpression:
+		if node == nil {
+			return ""
+		}
+		return extractConceptFromExpression(node.Target)
 	default:
 		return ""
 	}

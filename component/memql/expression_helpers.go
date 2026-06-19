@@ -170,6 +170,10 @@ func cloneExpressionNode(expr ExpressionNode) ExpressionNode {
 			Target: cloneExpressionNode(node.Target),
 			Depth:  node.Depth,
 		}
+	case *CountExpression:
+		return &CountExpression{
+			Target: cloneExpressionNode(node.Target),
+		}
 	case *LiteralValueNode:
 		// A literal value substituted in for an arg reference (#1705). The
 		// Value is an opaque `any` -- a shallow copy is correct (the runtime
