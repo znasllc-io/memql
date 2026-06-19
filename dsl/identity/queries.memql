@@ -497,7 +497,7 @@ query delegation queryDelegationsByIdentity {
   args {
     identityId  string  @required
   }
-  filter  payload.identityId==args.identityId && traitIsActiveRecord
+  filter  payload.identityId==args.identityId
   shape   delegationFull
 }
 
