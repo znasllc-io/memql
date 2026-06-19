@@ -21,6 +21,7 @@ import (
 	_ "github.com/znasllc-io/memql/integrations/chat"
 	_ "github.com/znasllc-io/memql/integrations/dailyspace"
 	_ "github.com/znasllc-io/memql/integrations/database"
+	_ "github.com/znasllc-io/memql/integrations/actionsearch"
 	_ "github.com/znasllc-io/memql/integrations/email"
 	_ "github.com/znasllc-io/memql/integrations/embedding"
 	_ "github.com/znasllc-io/memql/integrations/fileprocessor"

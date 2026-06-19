@@ -105,3 +105,20 @@ query action queryActionById {
   filter  id == args.actionId && payload.ownerUserId == actor.userId
   shape   actionFull
 }
+
+// searchActions -- the planner's library retrieval primitive (#1758). A
+// Go-backed cosine search over action `intent` embeddings (node_vectors,
+// vectorField='intent'), returning the top-k active actions ranked by
+// _similarity. Owner-scoped in the Go handler (builtins carry their
+// owner-scope in Go, like recall) -- the per-row-authz conformance classifier
+// scans struct query/mutation headers, not builtins, so this is documented
+// here for the audit trail.
+@enabled
+@sdk
+@executor("integration.actionSearch.searchActions")
+@args(profile="object")
+builtin searchActions {
+  text      string  @required
+  k         integer
+  provider  string
+}
