@@ -35,6 +35,12 @@ func nodeMatchesExpression(node memorynodes.MemoryNode, expr ExpressionNode, pay
 	switch n := expr.(type) {
 	case *constantBoolExpression:
 		return n.value, nil
+	case *LiteralValueNode:
+		// A literal in predicate position acts as a boolean constant via
+		// truthiness -- the post-filter counterpart to constantBoolExpression
+		// (#1705). Mirrors how the spec evaluator treats a literal (specTruthy)
+		// so the SQL-compile path and the in-process post-filter agree.
+		return literalTruthy(n.Value), nil
 	case *ComparisonExpression:
 		return nodeMatchesComparison(node, n, payloadCache)
 	case *LogicalExpression:

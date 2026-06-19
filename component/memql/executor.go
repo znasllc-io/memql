@@ -278,6 +278,16 @@ func (e *MemQLEngine) evaluateExpressionSetWithContext(ctx context.Context, expr
 		return nil, fmt.Errorf("error() cannot be evaluated in query context; it is only valid in automation onError handlers")
 	case *ErrorExpression:
 		return nil, fmt.Errorf("error() cannot be evaluated in query context; it is only valid in automation control flow")
+	case *LiteralValueNode:
+		// A bare literal is a scalar value, not a node-set filter. It only
+		// reaches here if a literal-valued expression is used where a row
+		// filter is expected (e.g. a logic body that returns a literal but
+		// is consumed as a query). Execute() intercepts a literal at
+		// plan.Root and returns it as a scalar BEFORE evaluateExpression
+		// runs, so this branch is the explicit, descriptive guard for the
+		// misuse case rather than the generic "unsupported expression node"
+		// default (#1705).
+		return nil, fmt.Errorf("a literal value (%v) cannot be used as a row filter; literals are valid as comparison values or as a logic return, not as a node-set expression", node.Value)
 	case nil:
 		return map[string]memorynodes.MemoryNode{}, nil
 	default:

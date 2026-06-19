@@ -1,6 +1,30 @@
 package memql
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
+
+// literalTruthy reports the boolean value of a literal in predicate
+// position. Mirrors specTruthy (expression_evaluator.go) so the SQL
+// post-filter (nodeMatchesExpression) and the spec evaluator agree on
+// what a bare literal means as a boolean constant (#1705): nil/false/""/0
+// are falsy, everything else truthy.
+func literalTruthy(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return false
+	case bool:
+		return t
+	case string:
+		return strings.TrimSpace(t) != ""
+	case int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		float32, float64:
+		return fmt.Sprintf("%v", t) != "0"
+	}
+	return true
+}
 
 // ensureBooleanExpression walks an expression tree and rejects nodes
 // that cannot evaluate to a boolean -- the contract every spec body
@@ -146,7 +170,30 @@ func cloneExpressionNode(expr ExpressionNode) ExpressionNode {
 			Target: cloneExpressionNode(node.Target),
 			Depth:  node.Depth,
 		}
+	case *LiteralValueNode:
+		// A literal value substituted in for an arg reference (#1705). The
+		// Value is an opaque `any` -- a shallow copy is correct (the runtime
+		// treats it as immutable, the same as ComparisonExpression.Value).
+		// Before this case the default returned nil, silently nil-ing out
+		// plan.Root whenever a logic body resolved to a literal -- the
+		// memql#1090 / #1705 class of "query must include at least one
+		// filter" / "unsupported expression node" failures.
+		return &LiteralValueNode{Value: node.Value}
+	case *constantBoolExpression:
+		return &constantBoolExpression{value: node.value}
+	case *CallerRefExpression:
+		return &CallerRefExpression{}
+	case *ErrorRefExpression:
+		return &ErrorRefExpression{}
+	case *ErrorExpression:
+		return &ErrorExpression{Message: cloneExpressionNode(node.Message)}
 	default:
+		// EXHAUSTIVE over every ExpressionNode implementer (asserted by
+		// TestCloneExpressionNode_ExhaustiveNodeCoverage, which builds one of
+		// each and fails if clone returns nil). A nil here would silently drop
+		// the node from plan.Root / a sub-tree and surface much later as an
+		// opaque downstream error, so a new node type added without a case is
+		// caught at test time rather than at runtime (#1705).
 		return nil
 	}
 }

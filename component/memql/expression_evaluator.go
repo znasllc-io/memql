@@ -45,6 +45,11 @@ func evaluateSpecExpression(goCtx context.Context, engine *MemQLEngine, expr Exp
 		return evaluateSpecLogical(goCtx, engine, node, ctx)
 	case *FunctionCallExpression:
 		return evaluateSpecFunctionCall(goCtx, engine, node, ctx)
+	case *LiteralValueNode:
+		// A literal in a spec body (e.g. an arg reference substituted to a
+		// concrete value, or a bare constant) evaluates to its value; the
+		// caller applies specTruthy for the boolean fold (#1705).
+		return node.Value, nil
 	case *BuiltinFunctionExpression:
 		return nil, fmt.Errorf("builtin function %q is not evaluable inside a spec body", node.Name)
 	}
