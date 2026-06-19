@@ -36,7 +36,7 @@ var ByReceiver = map[string][]string{
 		"mergeFields", "mcp",
 	},
 	"Logic": {
-		"description", "enabled", "disabled",
+		"description", "enabled", "disabled", "entrypoint",
 	},
 	"Automation": {
 		"description", "enabled", "disabled", "trigger", "filter", "mcp",
@@ -74,6 +74,7 @@ var Docs = map[string]string{
 	"enabled":     "Enable this definition. Functions are disabled by default.",
 	"disabled":    "Disable this definition.",
 	"description": "Human-readable description of this definition.",
+	"entrypoint":  "On a logic: mark it a top-level run_automation entry point. The loader auto-generates a wrapping automation so the logic is invokable by name (full `logicXxx` or bare form); a registry audit fails the build if an @entrypoint logic has no invocation path. Use for logics meant to be called directly by a client (no triggering event), not ones already wrapped by a triggered automation.",
 	"internal":    "Hide from external API discovery.",
 	"public":      "Per-row-authz marker: this query/mutation is intentionally callable without a caller-scope filter (concept catalogs, pre-auth login paths). See docs/public/operate/auth/per-row-authz-audit.md.",
 	"actor":       "On a mutation: resolves auth-context (`actor.X`) fields. On a shape: kind marker -- projects the auth-context envelope (actor.userId / role / ...).",
