@@ -1,17 +1,17 @@
-# Staging overlay -> 0.9.71: FULL-STACK run-3 QA cut (epic #1672). All 9 engine
-# + carrier + SPA images re-pinned to 0.9.71, built on the GitHub BUILD SERVER
-# (OIDC->ACR): engine (identity/voice/mcp) from main; carrier (bff/cognition/
-# agent/planner/workbench) rebuilt against engine main -> engineVersion +
-# builtAgainstEngine bumped 0.9.69 -> 0.9.71. copresent SPA source unchanged
-# (digest identical, re-tagged 0.9.71 for coherence). This cut carries the full
-# run-3 remaining-failures wave merged after 0.9.70:
-#   Lane A (engine cross-cutting): #1674 has-operator, #1675/#1685 query-trait
-#     gaps, #1676/#1683 literal-into-typed-field, #1677 attach object-vs-array,
-#     #1678/#1686 read-merge, #1681 logic-construct compile, #1682 reflection.
-#   Lane B (per-construct/DSL + curation): #1670 seed-dedup provenance filter,
-#     #1671 registerNode spawnEvent, #1673 calendar allDay/createdBy, #1679 +
-#     #1684 connector surface (@mcp harness chain + recentChat), #1680
-#     assignResponsibility scope, #1687 query arg-rename + SI predicate.
+# Staging overlay -> 0.9.73: FULL-STACK QA cut (epic #1704, run-4 remaining
+# failures). All 9 engine + carrier + SPA images re-pinned to 0.9.73, built on
+# the GitHub BUILD SERVER (OIDC->ACR): engine (identity/voice/mcp) from main;
+# carrier (bff/cognition/agent/planner/workbench) built against engine main ->
+# engineVersion + builtAgainstEngine bumped 0.9.71 -> 0.9.73. copresent SPA
+# source unchanged (digest identical, re-tagged 0.9.73 for coherence). This cut
+# carries the full epic #1704 production-readiness wave (all 11 children):
+#   #1705 LiteralValueNode evaluator + exhaustive AST dispatch; #1706 first-class
+#   event-context binding in the logic engine; #1707 entry-point automation
+#   registration invariant; #1708/#1714 query predicate/join correctness audit;
+#   #1709 engine-level read-merge for all non-create mutations; #1710 canonical
+#   array query-result envelope; #1711 @pii annotation -> generic hard-delete
+#   scrub; #1712 centralized valid-ID generator; #1713 single MCP schema source
+#   of truth; #1715 MCP conformance suite + CI regression gate.
 # livekit pin (#1043) + NODE_IP patch preserved.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -34,19 +34,19 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:0d26ecc4e0320bb1f19453889672a5c9934931f3b15711e3db6ae45976a415f7
+    digest: sha256:d9c9c4296595872890ad43b206688a0976ab5d38a081c7241b8536d61786d3e4
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:455ba448eefadf0c16c8dc041ae2f6a243a89676b0999a3fe1274c8f893ead04
+    digest: sha256:83e47082a3c803d1b0dbfe2aa6138c718741efbe87b43dafdec9242800bce529
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:e20427b72871f859a2cf08b95c2f83a8b40ca7249d9ae65fff44a22723e2a1de
+    digest: sha256:9374adf324abd5374198d34da8837d3ffaaa5c7d40b27532e66799ee971992a6
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:a03061b1e1a394e59f0cd850be575c34e3c38913112d8e04e8580b4178207fe8
+    digest: sha256:63679f2d35532e0f45861863c22a43f5a8a9a3e52ec58ea0f0b2b44f026726db
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:30394672eca0dc206637d1a201b48d5f1880dac9d49dcce35bf68b8e7b8ea69f
+    digest: sha256:e901c857c0ce9e5e6be77eebddb4412fe972d387d6495c1bdc02ff0ef765217f
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:22a8c4a10764857fb7fe77f46011f03e09ad406a687e6fbd933eccf00d32cf4b
+    digest: sha256:b56653ebd6dec103fcf9a9fb0d124af8f136d329105c188ee3c6ea6e35ebaf76
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:2235352666359ece080f23340ebab65b91cc6932ab6c54b4407829b6bd299be4
+    digest: sha256:1c0f098411d342df879f9ee4aeda282888e42d902e2aca78e499816aa868c8d2
   # memql-mcp (epic memql#1550): remote MCP node, engine-built on the GitHub
   # build server (#1581 wired it into build-engine-images + the release tooling).
   # 0.9.68: rebuilt from main carrying the full run-2 QA wave (Lane A engine
@@ -54,7 +54,7 @@ images:
   # now includes describeFunction (#1646); searchUsers points at v1:identity:user
   # (#1625).
   - name: acrmemql.azurecr.io/memql-mcp
-    digest: sha256:e7c43ff951feb4fa75baf3897f9d1713dd713dcc469944af9a5525c4f8080c98
+    digest: sha256:b9c8e06354407d214451e339a1e5952f3e59b460c963c4cb2e7fd1bab47b61dc
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:75e566e71e30d0b35c6c6708dda34a37ab9f2a74ec575f18c0787beffc949bf2
   - name: livekit/livekit-server
