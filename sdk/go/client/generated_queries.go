@@ -58,6 +58,28 @@ func QueryAccountEntitlementBuild(args QueryAccountEntitlementArgs) string {
 	return b.String()
 }
 
+// QueryActionById -- Resolve a floating v1:actions:action reference by id (latest version) for the calling owner -- floating-ref resolution (#1758). Owned tier.
+//
+// Bound concept: action.
+type QueryActionByIdArgs struct {
+	ActionId string
+}
+
+// QueryActionById calls the engine query queryActionById.
+func (qc *QueryClient) QueryActionById(ctx context.Context, args QueryActionByIdArgs) (*Result, error) {
+	call := QueryActionByIdBuild(args)
+	return qc.executeNamed(ctx, "queryActionById", call)
+}
+
+func QueryActionByIdBuild(args QueryActionByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryActionById({")
+	b.WriteString("actionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ActionId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryActionByIdAndVersion -- Resolve a pinned v1:actions:action reference (id + version) for the calling owner -- pin-by-default resolution (Phase 5 #1740). Owned tier.
 //
 // Bound concept: action.

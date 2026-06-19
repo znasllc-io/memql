@@ -1151,6 +1151,7 @@ const (
 	StepTypeSwitch     StepType = "switch"
 	StepTypeFunction   StepType = "function"
 	StepTypeAutomation StepType = "automation"
+	StepTypeAction     StepType = "action"
 )
 
 // QueryStepConfig configures a query step.
@@ -1167,6 +1168,16 @@ type MutationStepConfig struct {
 type FunctionStepConfig struct {
 	Name string
 	Args map[string]any
+}
+
+// ActionStepConfig configures an action-library replay step (#1758, epic
+// #1734): `action { ref: "act_x@3", args: {...}, surface: "..." }`. Ref is a
+// pinned-by-default action reference (id@version); Surface is an optional
+// explicit surface binding the resolver honors first.
+type ActionStepConfig struct {
+	Ref     string
+	Args    map[string]any
+	Surface string
 }
 
 // ForEachStepConfig configures iteration over a collection.

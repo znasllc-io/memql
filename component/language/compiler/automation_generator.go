@@ -844,6 +844,22 @@ func (c *Compiler) compileStep(step *parser.StepDef) (map[string]any, error) {
 			}
 		}
 
+	case parser.StepTypeAction:
+		if cfg, ok := step.Config.(*parser.ActionStepConfig); ok {
+			action := map[string]any{"ref": cfg.Ref}
+			if cfg.Surface != "" {
+				action["surface"] = cfg.Surface
+			}
+			if len(cfg.Args) > 0 {
+				compiled := make(map[string]any, len(cfg.Args))
+				for k, v := range cfg.Args {
+					compiled[k] = c.compileStepHelperValue(v)
+				}
+				action["args"] = compiled
+			}
+			output["action"] = action
+		}
+
 	case parser.StepTypeForEach:
 		if cfg, ok := step.Config.(*parser.ForEachStepConfig); ok {
 			forEach := map[string]any{

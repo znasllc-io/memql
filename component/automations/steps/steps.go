@@ -166,6 +166,7 @@ func NewRegistry() *Registry {
 	r.Register(automations.StepTypeWebhook, &WebhookExecutor{})
 	r.Register(automations.StepTypeEvent, &EventExecutor{})
 	r.Register(automations.StepTypeFunction, &FunctionExecutor{})
+	r.Register(automations.StepTypeAction, &ActionExecutor{})
 	r.Register(automations.StepTypeAutomation, &AutomationExecutor{})
 	r.Register(automations.StepTypeForEach, &ForEachExecutor{Registry: r})
 	r.Register(automations.StepTypeParallel, &ParallelExecutor{Registry: r})
