@@ -142,7 +142,7 @@ func (s *sandboxStepRegistry) interceptLogicFunction(ctx context.Context, step *
 
 	started := time.Now()
 	s.note(step.ID, "logic "+name+" run in sandbox (nested side effects intercepted)")
-	args := s.resolveFunctionArgs(step.Function, stepCtx)
+	args := s.resolveLogicCallArgs(step.Function, stepCtx)
 	runner := automations.NewLogicRunner(s.engine, s, nil)
 	out, err := runner.RunLogic(ctx, name, fn.LogicSteps, args)
 	now := time.Now()
@@ -232,6 +232,50 @@ func (s *sandboxStepRegistry) resolveFunctionArgs(fn *automations.FunctionStepCo
 			val = v
 		}
 		resolved[k] = val
+	}
+	return resolved
+}
+
+// resolveLogicCallArgs resolves a forwarded LOGIC call's args through the SAME
+// resolver the live FunctionExecutor uses (resolveArgsRefs), so a logic
+// dispatched in the dry-run sandbox receives byte-for-byte the args it would on
+// the live path -- and, critically, the triggering-event envelope under its
+// declared `event` input.
+//
+// Why this differs from resolveFunctionArgs (memql#1727): an authored wrapper
+// step forwards the event as the BARE runtime-reference token `event`
+// (`logic autoJoinSI { event: event }`, the #418-pinned spelling). The live
+// FunctionExecutor's resolveArgsRefs special-cases that token (isRuntimeReference
+// recognises a bare `event`) and resolves it to the seeded event envelope
+// object. The mutation-style evaluateValue resolveFunctionArgs uses does NOT --
+// it treats bare `event` as a literal string, so RunLogic received
+// args["event"] = "event" and every nested `args.event.payload.X` navigated into
+// a string and resolved to null. That made the first nested step feeding such a
+// reference to a @required argument fail with "required argument <x> is missing"
+// for all five event-trigger logics on the dry-run / run_automation path, even
+// though the live path (fixed in #1706) bound the event correctly. Converging
+// the logic-forwarding arg resolution onto the live resolver makes the two
+// surfaces bind the event identically and cannot drift.
+func (s *sandboxStepRegistry) resolveLogicCallArgs(fn *automations.FunctionStepConfig, stepCtx *automations.StepContext) map[string]any {
+	if fn == nil || len(fn.Args) == 0 || stepCtx == nil || stepCtx.Evaluator == nil {
+		return map[string]any{}
+	}
+	resolved, err := resolveArgsRefs(fn.Args, stepCtx.Evaluator)
+	if err != nil {
+		resolved = fn.Args
+	}
+	// A logic call's named-arg block compiles to a SINGLE positional object arg
+	// ({"0": {event: ...}}). The live FunctionExecutor flattens that {"0": obj}
+	// shape (renderFunctionArgs) so the engine binds the inner object as the
+	// logic's named args; the LogicRunner likewise expects the flat
+	// {event: ...} map (newEvaluatorForLogic reads args["event"]). Unwrap the
+	// positional object here so the dry-run hands RunLogic the SAME flat shape --
+	// without this the event lands at args["0"]["event"], args["event"] is nil,
+	// and the event binding is lost (memql#1727).
+	if len(resolved) == 1 {
+		if obj, ok := resolved["0"].(map[string]any); ok {
+			return obj
+		}
 	}
 	return resolved
 }
