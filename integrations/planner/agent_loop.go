@@ -646,7 +646,13 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 		// phases set but no Tasks created.
 		return l.invokeAndDispatchIter(ctx, planId, iter+1, conv)
 	case "dispatchTask":
-		if err := l.insertDispatchedTask(ctx, planId, d.Task); err != nil {
+		// Action-library emission (#1758, epic #1734): before dispatching the
+		// LLM task, see if a reusable library action already accomplishes this
+		// sub-goal; on a REUSE/ADAPT verdict the task is rewritten to an
+		// action-typed step the harness replays token-free. No-op unless
+		// MEMQL_ACTION_REPLAY_ENABLED is set.
+		task := l.maybeSubstituteActionStep(ctx, d.Task)
+		if err := l.insertDispatchedTask(ctx, planId, task); err != nil {
 			return err
 		}
 		// Re-invoke so the planner can emit the next task (or
