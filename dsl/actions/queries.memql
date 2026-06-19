@@ -93,3 +93,15 @@ query action queryActionByIdAndVersion {
   filter  id == args.actionId && payload.version == args.version && payload.ownerUserId == actor.userId
   shape   actionFull
 }
+
+// queryActionById -- floating-ref resolution (#1758). Resolves a bare action
+// reference (no @version) to the latest version of that action. Owned tier.
+@enabled
+@description("Resolve a floating v1:actions:action reference by id (latest version) for the calling owner -- floating-ref resolution (#1758). Owned tier.")
+query action queryActionById {
+  args {
+    actionId  string  @required
+  }
+  filter  id == args.actionId && payload.ownerUserId == actor.userId
+  shape   actionFull
+}

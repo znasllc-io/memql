@@ -115,6 +115,7 @@ type (
 	QueryStepConfig         = ast.QueryStepConfig
 	MutationStepConfig      = ast.MutationStepConfig
 	FunctionStepConfig      = ast.FunctionStepConfig
+	ActionStepConfig        = ast.ActionStepConfig
 	ForEachStepConfig       = ast.ForEachStepConfig
 	ParallelStepConfig      = ast.ParallelStepConfig
 	SwitchStepConfig        = ast.SwitchStepConfig
@@ -230,6 +231,7 @@ var (
 	RelParentOf              = ast.RelParentOf
 	SortAsc                  = ast.SortAsc
 	SortDesc                 = ast.SortDesc
+	StepTypeAction           = ast.StepTypeAction
 	StepTypeAutomation       = ast.StepTypeAutomation
 	StepTypeForEach          = ast.StepTypeForEach
 	StepTypeFunction         = ast.StepTypeFunction

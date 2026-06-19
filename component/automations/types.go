@@ -205,6 +205,9 @@ const (
 	// StepTypeFunction invokes a registered MemQL function.
 	StepTypeFunction StepType = "function"
 
+	// StepTypeAction replays an action-library action by reference (#1758).
+	StepTypeAction StepType = "action"
+
 	// StepTypeForEach iterates over a collection.
 	StepTypeForEach StepType = "forEach"
 
@@ -279,6 +282,9 @@ type Step struct {
 
 	// Function configuration (type: "function")
 	Function *FunctionStepConfig `json:"function,omitempty"`
+
+	// Action configuration (type: "action") -- action-library replay (#1758).
+	Action *ActionStepConfig `json:"action,omitempty"`
 
 	// Automation configuration (type: "automation")
 	Automation *AutomationStepConfig `json:"automation,omitempty"`
@@ -448,6 +454,19 @@ type FunctionStepConfig struct {
 	Name string `json:"name"`
 	// Args are optional function arguments passed at invocation time.
 	Args map[string]any `json:"args,omitempty"`
+}
+
+// ActionStepConfig configures an action-library replay step (#1758, epic
+// #1734).
+type ActionStepConfig struct {
+	// Ref is the pinned-by-default action reference (id@version, or a bare id
+	// to float to the latest version).
+	Ref string `json:"ref"`
+	// Args bind the action's parameters at invocation time.
+	Args map[string]any `json:"args,omitempty"`
+	// Surface is an optional explicit surface binding the resolver honors
+	// before policy/availability.
+	Surface string `json:"surface,omitempty"`
 }
 
 // AutomationStepConfig configures invoking another automation.

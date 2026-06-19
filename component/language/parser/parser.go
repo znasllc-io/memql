@@ -1442,6 +1442,10 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 			// Concurrent fan-out step (memql#1368): the body is the
 			// config block parsed by parseParallelStepConfig.
 			stepType = StepTypeParallel
+		case "action":
+			// Action-library replay step (#1758): the body is the config
+			// block parsed by parseActionStepConfig.
+			stepType = StepTypeAction
 		case "shape", "webhook", "event", "publishEvent", "publishevent":
 			return nil, newParseErrorf(&p.current, "inline %s blocks are no longer supported; use named function calls instead", p.current.Literal)
 		default:
@@ -3198,6 +3202,8 @@ func (p *Parser) parseStep() (*StepDef, error) {
 			stepType = StepTypeSwitch
 		case "function":
 			stepType = StepTypeFunction
+		case "action":
+			stepType = StepTypeAction
 		default:
 			stepType = StepTypeQuery // default to query
 		}
@@ -3271,10 +3277,71 @@ func (p *Parser) parseStepConfig(stepType StepType) (any, error) {
 	case StepTypeFunction:
 		return p.parseFunctionStepConfig()
 
+	case StepTypeAction:
+		return p.parseActionStepConfig()
+
 	default:
 		// For other step types, skip until closing brace
 		return nil, nil
 	}
+}
+
+// parseActionStepConfig parses an action-library replay step body:
+//
+//	action { ref: "act_x@3", args: { ... }, surface: "workbench" }
+//
+// ref (the pinned-by-default action reference) is required; args + surface
+// are optional. (#1758, epic #1734.)
+func (p *Parser) parseActionStepConfig() (any, error) {
+	cfg := &ActionStepConfig{
+		Args: map[string]any{},
+	}
+
+	for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
+		if !p.check(TokenIdentifier) {
+			p.advance()
+			continue
+		}
+
+		key := strings.ToLower(p.current.Literal)
+		p.advance()
+
+		// Support both "key: value" and "key=value" forms.
+		if p.check(TokenColon) || (p.check(TokenOperator) && p.current.Literal == "=") {
+			p.advance()
+		} else {
+			continue
+		}
+
+		val, err := p.parseValue()
+		if err != nil {
+			return nil, err
+		}
+
+		switch key {
+		case "ref", "action":
+			if str, ok := val.(string); ok {
+				cfg.Ref = str
+			}
+		case "surface":
+			if str, ok := val.(string); ok {
+				cfg.Surface = str
+			}
+		case "args":
+			if m, ok := val.(map[string]any); ok {
+				cfg.Args = m
+			}
+		}
+
+		if p.check(TokenComma) {
+			p.advance()
+		}
+	}
+
+	if cfg.Ref == "" {
+		return nil, newParseErrorf(&p.current, "action step requires a non-empty ref (e.g. ref: \"act_x@3\")")
+	}
+	return cfg, nil
 }
 
 func (p *Parser) parseFunctionStepConfig() (any, error) {
