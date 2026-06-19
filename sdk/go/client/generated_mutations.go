@@ -554,6 +554,34 @@ func MutationAttachPlanFeedbackBuild(args MutationAttachPlanFeedbackArgs) string
 	return b.String()
 }
 
+// MutationBumpActionVersion -- Bump a v1:actions:action monotonic version on edit (Phase 5 #1740; value computed engine-side). Pins stay on the prior version until the verified upgrade migration moves them.
+//
+// Bound concept: action.
+type MutationBumpActionVersionArgs struct {
+	ActionId string
+	Version  int
+}
+
+// MutationBumpActionVersion calls the engine mutation mutationBumpActionVersion.
+func (qc *QueryClient) MutationBumpActionVersion(ctx context.Context, args MutationBumpActionVersionArgs) (*Result, error) {
+	call := MutationBumpActionVersionBuild(args)
+	return qc.executeNamed(ctx, "mutationBumpActionVersion", call)
+}
+
+func MutationBumpActionVersionBuild(args MutationBumpActionVersionArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationBumpActionVersion({")
+	b.WriteString("actionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ActionId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("version: ")
+	b.WriteString(fmt.Sprintf("%v", args.Version))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationBumpMissingCapabilitySighting -- Per Q7 missing-capability surface: a repeat sighting of an already-logged gap. Increments sightingCount and refreshes lastSeenAt. The Planner Agent calls this when it encounters a known gap; aggregated counts feed the platform-roadmap prioritization view.
 //
 // Bound concept: missingCapability.

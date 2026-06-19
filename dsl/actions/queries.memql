@@ -79,3 +79,17 @@ query action queryActiveActionsForOwner {
   filter  payload.ownerUserId == actor.userId && traitStatusIsActive
   shape   actionFull
 }
+
+// queryActionByIdAndVersion -- pin resolution (Phase 5 #1740). Resolves a
+// pinned reference (id@version) to the exact action version, so a bundle that
+// pinned act_x@3 always replays version 3 regardless of later edits. Owned tier.
+@enabled
+@description("Resolve a pinned v1:actions:action reference (id + version) for the calling owner -- pin-by-default resolution (Phase 5 #1740). Owned tier.")
+query action queryActionByIdAndVersion {
+  args {
+    actionId  string  @required
+    version   int     @required
+  }
+  filter  id == args.actionId && payload.version == args.version && payload.ownerUserId == actor.userId
+  shape   actionFull
+}
