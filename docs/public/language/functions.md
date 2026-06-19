@@ -219,6 +219,26 @@ query context queryLatestSpaceContextForSpace {
 }
 ```
 
+### Counting
+
+A `count` clause makes the query return the cardinality of the
+matching set as a self-describing `{count: N}` aggregate computed
+server-side, instead of the rows themselves:
+
+```memql
+query user queryUserCount {
+  filter  traitIsActiveRecord
+  count
+}
+```
+
+`count` is mutually exclusive with `shape`, `sort`, and `paginate`
+(a count has no projection, ordering, or window). The count reflects
+the deduped, latest-version, post-filtered set -- the same row
+pipeline a normal query uses -- so it is correct under the
+time-series versioning model. Callers read `count` off the returned
+object rather than taking `len()` on a row array.
+
 ---
 
 ## Mutation Functions

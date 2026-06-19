@@ -141,7 +141,7 @@ frequently hit traps:
 ## 1. Query-level directives are NOT valid inside function bodies
 
 **Rule.** `sort()`, `paginate()`, `asOf()`, `select()`, `withDepth()`,
-and `shape()` are query-level *directives*. They wrap an entire
+`count()`, and `shape()` are query-level *directives*. They wrap an entire
 expression at the **outermost** layer of a query string and only work
 when called by the top-level query parser. The **function loader**
 (which validates `.memql` function definitions at engine init) treats

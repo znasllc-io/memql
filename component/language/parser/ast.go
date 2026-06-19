@@ -35,6 +35,7 @@ type (
 	SelectExpr              = ast.SelectExpr
 	TimestampExpr           = ast.TimestampExpr
 	DepthExpr               = ast.DepthExpr
+	CountExpr               = ast.CountExpr
 	ShapeExpr               = ast.ShapeExpr
 	FunctionCallExpr        = ast.FunctionCallExpr
 	BuiltinFunctionExpr     = ast.BuiltinFunctionExpr

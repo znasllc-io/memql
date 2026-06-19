@@ -513,6 +513,17 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		return nil, err
 	}
 
+	// #1730: aggregate count directive. The query was authored with a
+	// `count` clause (no shape), so return a self-describing {count: N}
+	// envelope computed server-side instead of materializing rows. The
+	// count reflects the deduped, latest-version, post-filtered set --
+	// the same pipeline normal queries use -- because a raw SQL COUNT(*)
+	// would over-count under the time-series versioning model (multiple
+	// versions per id) and skip the in-process post-filter / actor folds.
+	if plan.Count {
+		return e.executeCountPlan(ctx, plan, effectiveTimestamp, sorter, startTime)
+	}
+
 	var cacheKey string
 	useCache := e.cache != nil && len(plan.Mutations) == 0
 	signature := ""
@@ -575,6 +586,36 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// Emit query executed event
 	e.emitQueryExecutedEvent(startTime, result, false)
 
+	return result, nil
+}
+
+// executeCountPlan computes a numeric {count: N} aggregate for a query
+// authored with the `count` directive (#1730). It runs the same
+// dedup + latest-version + post-filter pipeline a normal query uses
+// (via evaluateExpressionSet), then returns the cardinality of the
+// matching set rather than the rows. We fetch up to MaxWindow
+// candidates so the count is not silently capped at the smaller
+// default page size (MaxResults) the row path uses. A true SQL-pushdown
+// COUNT(*) is a future optimization tracked separately -- it cannot be
+// a naive COUNT because the versioned hypertable stores multiple rows
+// per id and the latest-version re-filter happens in Go.
+func (e *MemQLEngine) executeCountPlan(ctx context.Context, plan *QueryPlan, timestamp *time.Time, sorter *compiledSort, startTime time.Time) (*ExecuteResult, error) {
+	if plan.Root == nil {
+		return nil, ErrEmptyQuery
+	}
+
+	set, err := e.evaluateExpressionSet(ctx, plan.Root, timestamp, e.config.MaxWindow, sorter)
+	if err != nil {
+		return nil, err
+	}
+
+	count := int64(len(set))
+	result := newExecuteResult(nil)
+	result.setOutput(map[string]any{"count": count})
+	result.setIncludeBundle(false)
+	result.SetCount(count)
+
+	e.emitQueryExecutedEvent(startTime, result, false)
 	return result, nil
 }
 

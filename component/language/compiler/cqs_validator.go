@@ -175,6 +175,8 @@ func visitExpression(expr parser.ExpressionNode, known map[string]struct{}, call
 		visitExpression(e.Target, known, calls)
 	case *parser.DepthExpr:
 		visitExpression(e.Target, known, calls)
+	case *parser.CountExpr:
+		visitExpression(e.Target, known, calls)
 	case *parser.RelationshipExpr:
 		visitExpression(e.Target, known, calls)
 	case *parser.ShapeExpr:

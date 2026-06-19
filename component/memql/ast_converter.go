@@ -102,6 +102,8 @@ func (c *ASTConverter) ConvertExpression(expr languageParser.ExpressionNode) (Ex
 		return c.convertTimestampExpr(node)
 	case *languageParser.DepthExpr:
 		return c.convertDepthExpr(node)
+	case *languageParser.CountExpr:
+		return c.convertCountExpr(node)
 	case *languageParser.ShapeExpr:
 		return c.convertShapeExpr(node)
 	case *languageParser.FunctionCallExpr:
@@ -396,6 +398,20 @@ func (c *ASTConverter) convertDepthExpr(expr *languageParser.DepthExpr) (*DepthE
 		Target: target,
 		Depth:  expr.Depth,
 	}, nil
+}
+
+// convertCountExpr converts languageParser.CountExpr to memql.CountExpression.
+func (c *ASTConverter) convertCountExpr(expr *languageParser.CountExpr) (*CountExpression, error) {
+	if expr == nil {
+		return nil, nil
+	}
+
+	target, err := c.ConvertExpression(expr.Target)
+	if err != nil {
+		return nil, fmt.Errorf("convert count target: %w", err)
+	}
+
+	return &CountExpression{Target: target}, nil
 }
 
 // convertShapeExpr converts languageParser.ShapeExpr to memql.ShapeExpression.

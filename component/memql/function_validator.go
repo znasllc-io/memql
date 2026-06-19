@@ -695,6 +695,15 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 			Depth:  node.Depth,
 		}, nil
 
+	case *CountExpression:
+		target, err := v.expandExpressionWithArgs(node.Target, args)
+		if err != nil {
+			return nil, err
+		}
+		return &CountExpression{
+			Target: target,
+		}, nil
+
 	case *ShapeExpression:
 		target, err := v.expandExpressionWithArgs(node.Target, args)
 		if err != nil {
@@ -915,6 +924,8 @@ func hasFunctionCalls(expr ExpressionNode) bool {
 	case *TimestampExpression:
 		return hasFunctionCalls(node.Target)
 	case *DepthExpression:
+		return hasFunctionCalls(node.Target)
+	case *CountExpression:
 		return hasFunctionCalls(node.Target)
 	case *ShapeExpression:
 		return hasFunctionCalls(node.Target)

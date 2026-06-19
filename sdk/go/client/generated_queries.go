@@ -3892,7 +3892,7 @@ func QueryUserByIdBuild(args QueryUserByIdArgs) string {
 	return b.String()
 }
 
-// QueryUserCount -- Every active v1:identity:user row. Caller takes len() to derive a count.
+// QueryUserCount -- Count of active v1:identity:user rows. Returns a {count: N} aggregate.
 //
 // Bound concept: user.
 type QueryUserCountArgs struct {

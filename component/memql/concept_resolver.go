@@ -371,6 +371,8 @@ func (r *ConceptResolver) resolveNode(node languageParser.Node, symbols map[stri
 		return r.resolveNode(n.Target, symbols)
 	case *languageParser.DepthExpr:
 		return r.resolveNode(n.Target, symbols)
+	case *languageParser.CountExpr:
+		return r.resolveNode(n.Target, symbols)
 	case *languageParser.ShapeExpr:
 		return r.resolveNode(n.Target, symbols)
 	case *languageParser.ConditionalFilterExpr:

@@ -288,6 +288,7 @@ func NormaliseQuerySource(source string) (string, error) {
 type structQueryBody struct {
 	filter   string
 	shape    string
+	count    bool
 	argsText string
 	sort     string
 	paginate string
@@ -299,10 +300,16 @@ func emitQuery(name, conceptId, body string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if parsed.count && parsed.shape != "" {
+		return "", fmt.Errorf("`count` and `shape` are mutually exclusive on a query")
+	}
+	if parsed.count && (parsed.sort != "" || parsed.paginate != "") {
+		return "", fmt.Errorf("`count` cannot be combined with `sort` or `paginate`")
+	}
 	var sb strings.Builder
 	emitFuncHeader(&sb, "Query", name, parsed.argsText, "(any, error)")
 	sb.WriteString("  return ")
-	sb.WriteString(buildStructQueryExpr(conceptId, parsed.filter, parsed.shape, parsed.sort, parsed.paginate, parsed.asOf))
+	sb.WriteString(buildStructQueryExpr(conceptId, parsed.filter, parsed.shape, parsed.sort, parsed.paginate, parsed.asOf, parsed.count))
 	sb.WriteString(", nil\n}")
 	return sb.String(), nil
 }
@@ -335,6 +342,8 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 			return nil, fmt.Errorf("inline `concept` line is no longer supported; declare the concept via a file-top `use <ns>.<concept>` directive instead")
 		case strings.HasPrefix(line, "filter"):
 			out.filter = strings.TrimSpace(strings.TrimPrefix(line, "filter"))
+		case line == "count":
+			out.count = true
 		case strings.HasPrefix(line, "shape"):
 			out.shape = strings.TrimSpace(strings.TrimPrefix(line, "shape"))
 		case strings.HasPrefix(line, "sort"):
@@ -369,7 +378,7 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 // handwritten `shape(paginate(sort(...)))` runtime form, which
 // blocked memql#286's migration of cognition's space-context
 // callsites away from runtime shape() (memql#288, memql#290).
-func buildStructQueryExpr(conceptId, filter, shape, sort, paginate, asOf string) string {
+func buildStructQueryExpr(conceptId, filter, shape, sort, paginate, asOf string, count bool) string {
 	base := "concept==" + conceptId
 	if filter != "" {
 		base += ";" + filter
@@ -382,6 +391,12 @@ func buildStructQueryExpr(conceptId, filter, shape, sort, paginate, asOf string)
 	}
 	if paginate != "" {
 		base = fmt.Sprintf("paginate(%s, %s)", base, paginate)
+	}
+	// count is the outermost wrapper and mutually exclusive with shape
+	// (enforced in emitQuery). It aggregates the matching set to a
+	// numeric {count: N} envelope.
+	if count {
+		return fmt.Sprintf("count(%s)", base)
 	}
 	if shape != "" {
 		return fmt.Sprintf("shape(%s, %q)", base, shape)

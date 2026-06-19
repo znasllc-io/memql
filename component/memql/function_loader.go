@@ -673,6 +673,9 @@ func ensureBoundConceptFilter(expr ExpressionNode, boundConcept string) Expressi
 	case *DepthExpression:
 		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
 		return n
+	case *CountExpression:
+		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
+		return n
 	}
 	conceptCmp := &ComparisonExpression{
 		Field:    FieldReference{Raw: "concept", Parts: []string{"concept"}},
@@ -764,6 +767,10 @@ func resolveBareConcept(expr ExpressionNode, boundConcept string) ExpressionNode
 			Template:      n.Template,
 			TemplateName:  n.TemplateName,
 			IncludeBundle: n.IncludeBundle,
+		}
+	case *CountExpression:
+		return &CountExpression{
+			Target: resolveBareConcept(n.Target, boundConcept),
 		}
 	default:
 		return expr
@@ -972,6 +979,8 @@ func collectFunctionRefsRecursive(expr ExpressionNode, refs *[]string) {
 	case *TimestampExpression:
 		collectFunctionRefsRecursive(node.Target, refs)
 	case *DepthExpression:
+		collectFunctionRefsRecursive(node.Target, refs)
+	case *CountExpression:
 		collectFunctionRefsRecursive(node.Target, refs)
 	case *ShapeExpression:
 		collectFunctionRefsRecursive(node.Target, refs)

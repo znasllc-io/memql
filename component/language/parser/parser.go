@@ -4647,6 +4647,8 @@ func (p *Parser) parseFunctionCall(name string) (ExpressionNode, error) {
 		return p.parseAsOfFunction()
 	case "withdepth":
 		return p.parseWithDepthFunction()
+	case "count":
+		return p.parseCountFunction()
 	}
 
 	// Handle shape() specially - two forms: shape(expr, template) or shape({ source, template })
@@ -5089,6 +5091,25 @@ func (p *Parser) parseWithDepthFunction() (ExpressionNode, error) {
 	}
 
 	return &DepthExpr{Target: target, Depth: depth}, nil
+}
+
+// parseCountFunction parses the single-paren form `count(target)` and
+// produces a *CountExpr. Unlike the other directives it takes no tail
+// arguments -- it aggregates the matching set to a numeric count, so
+// the only argument is the target filter expression. The opening `(`
+// is already consumed by the caller (parseFunctionCall).
+func (p *Parser) parseCountFunction() (ExpressionNode, error) {
+	if p.check(TokenParenClose) {
+		return nil, newParseErrorf(&p.current, "count() requires an expression argument")
+	}
+	target, err := p.parseDirectiveTarget()
+	if err != nil {
+		return nil, err
+	}
+	if err := p.expect(TokenParenClose); err != nil {
+		return nil, err
+	}
+	return &CountExpr{Target: target}, nil
 }
 
 // expectPositiveIntegerLiteral consumes the current TokenNumber and
