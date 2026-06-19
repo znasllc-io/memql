@@ -243,3 +243,147 @@ func TestReadMerge_UpdateNodeHealth_PreservesAddress(t *testing.T) {
 	require.Equal(t, "10.0.0.7:50051", p["address"], "address must be preserved when omitted (memql#1628)")
 	require.Equal(t, "bff", p["nodeType"], "nodeType preserved")
 }
+
+// ---------------------------------------------------------------------------
+// memql#1709 -- engine-level read-merge for ALL non-create mutations.
+//
+// #1628/#1686 fixed read-merge mutation-by-mutation (converting each broken
+// insert{} to update{}). #1709 moves the read-merge into the ONE engine
+// chokepoint (executeWrite, shared by executeInsert + executeUpdate) so a
+// write onto an existing id read-merges REGARDLESS of whether the mutation
+// was authored as insert{} or update{}. The two regressions the issue lists
+// (mutationLeaveSpace, mutationRevokeDelegation) are still authored as
+// insert{} with a partial payload -- they are NOT hand-converted; the engine
+// change is the canonical fix. Plus a concept-agnostic proof that a raw
+// insert() onto an existing id now read-merges.
+// ---------------------------------------------------------------------------
+
+// TestReadMerge_LeaveSpace_PreservesParticipantFields is the Run-4 regression
+// for mutationLeaveSpace (dsl/cognition/mutations.memql): authored as
+// `insert { id: args.participantId; args.payload }`. A minimal leave payload
+// (status=left + leftAt) used to reject with
+// `” does not validate ... missing 'displayName','participantType','spaceId'`.
+// With the engine-level read-merge (memql#1709) the partial merges onto the
+// stored participant row: status flips to left while displayName /
+// participantType / spaceId / agentId / forUserId are inherited.
+func TestReadMerge_LeaveSpace_PreservesParticipantFields(t *testing.T) {
+	eng, db, ctx := readMergeTestEngine(t)
+	const conceptName = "v1:cognition:participant"
+
+	// Seed an SI participant under the elevated system actor. The id is
+	// content-addressed on (agentId, spaceId), so capture the stored id the
+	// create returns and target the leave at exactly that row.
+	storedId := runMutation(t, ctx, eng, "mutationJoinSpaceAsSI", map[string]any{
+		"spaceId":     "space-" + uniqueSuffix("leave"),
+		"agentId":     "agent-" + uniqueSuffix("leave"),
+		"displayName": "Faye",
+		"forUserId":   "user-1709",
+	})
+	before := latestPayload(t, ctx, db, conceptName, storedId)
+	require.Equal(t, "active", before["status"], "seed participant starts active")
+
+	// The fix: MINIMAL leave -- only status + leftAt, NO displayName /
+	// participantType / spaceId. Before #1709 this rejected as
+	// "missing properties"; now it read-merges.
+	runMutation(t, ctx, eng, "mutationLeaveSpace", map[string]any{
+		"participantId": storedId,
+		"payload": map[string]any{
+			"status": "left",
+			"leftAt": "2026-06-18T01:00:00Z",
+		},
+	})
+
+	p := latestPayload(t, ctx, db, conceptName, storedId)
+	require.Equal(t, "left", p["status"], "status must flip to left")
+	require.Equal(t, "2026-06-18T01:00:00Z", p["leftAt"], "leftAt must be stamped")
+	// Omitted required + identity fields inherited from the prior row.
+	require.Equal(t, before["displayName"], p["displayName"], "displayName preserved (memql#1709)")
+	require.Equal(t, before["participantType"], p["participantType"], "participantType preserved (memql#1709)")
+	require.Equal(t, before["spaceId"], p["spaceId"], "spaceId preserved (memql#1709)")
+	require.Equal(t, before["agentId"], p["agentId"], "agentId preserved (memql#1709)")
+	require.Equal(t, before["forUserId"], p["forUserId"], "forUserId preserved (memql#1709)")
+}
+
+// TestReadMerge_RevokeDelegation_PreservesFields is the Run-4 regression for
+// mutationRevokeDelegation (dsl/identity/mutations.memql): authored as
+// `insert { id: args.delegationId; args.payload }`. A minimal revoke payload
+// (active=false + revocation metadata) used to reject with
+// `” does not validate ... missing 'identityId','identitySubject',
+// 'identityType','agentId','roleCeiling','createdBySubject'`. With the
+// engine-level read-merge (memql#1709) the partial merges onto the stored
+// delegation row: active flips to false while every discriminator field is
+// inherited.
+func TestReadMerge_RevokeDelegation_PreservesFields(t *testing.T) {
+	eng, db, ctx := readMergeTestEngine(t)
+	const conceptName = "v1:identity:delegation"
+
+	storedId := runMutation(t, ctx, eng, "mutationCreateDelegation", map[string]any{
+		"delegationId":     "deleg-" + uniqueSuffix("revoke"),
+		"identityId":       "ident-1709",
+		"identitySubject":  "user:alice",
+		"identityType":     "human",
+		"agentId":          "agent-1709",
+		"roleCeiling":      "writer",
+		"scopes":           []any{"spaces:read", "spaces:write"},
+		"createdBySubject": "user:alice",
+	})
+	before := latestPayload(t, ctx, db, conceptName, storedId)
+	require.Equal(t, true, before["active"], "seed delegation starts active")
+
+	// The fix: MINIMAL revoke -- active=false + revocation metadata only.
+	runMutation(t, ctx, eng, "mutationRevokeDelegation", map[string]any{
+		"delegationId": storedId,
+		"payload": map[string]any{
+			"active":           false,
+			"revokedAt":        "2026-06-18T02:00:00Z",
+			"revokedBySubject": "user:alice",
+		},
+	})
+
+	p := latestPayload(t, ctx, db, conceptName, storedId)
+	require.Equal(t, false, p["active"], "revoke must flip active=false")
+	require.Equal(t, "2026-06-18T02:00:00Z", p["revokedAt"], "revokedAt must be stamped")
+	// Omitted required fields inherited from the prior row.
+	require.Equal(t, before["identityId"], p["identityId"], "identityId preserved (memql#1709)")
+	require.Equal(t, before["identitySubject"], p["identitySubject"], "identitySubject preserved (memql#1709)")
+	require.Equal(t, before["identityType"], p["identityType"], "identityType preserved (memql#1709)")
+	require.Equal(t, before["agentId"], p["agentId"], "agentId preserved (memql#1709)")
+	require.Equal(t, before["roleCeiling"], p["roleCeiling"], "roleCeiling preserved (memql#1709)")
+	require.Equal(t, before["createdBySubject"], p["createdBySubject"], "createdBySubject preserved (memql#1709)")
+	require.Equal(t, before["scopes"], p["scopes"], "scopes preserved (memql#1709)")
+}
+
+// TestReadMerge_RawInsertOntoExistingId_ReadMerges is the concept-agnostic
+// systemic proof: a RAW insert() (not a named mutation) whose id already names
+// a stored row now read-merges. This is the engine behaviour that makes the
+// whole non-create class safe -- it is what fixes leaveSpace / revokeDelegation
+// without touching their DSL. The partial insert omits BOTH required node
+// fields (nodeType + address); before memql#1709 it rejected as
+// "missing properties", after it inherits them and only flips health.
+func TestReadMerge_RawInsertOntoExistingId_ReadMerges(t *testing.T) {
+	eng, db, ctx := readMergeTestEngine(t)
+	const conceptName = "v1:cluster:node"
+
+	storedId := runMutation(t, ctx, eng, "mutationCreateNode", map[string]any{
+		"id":       "node-" + uniqueSuffix("rawmerge"),
+		"nodeType": "cognition",
+		"address":  "10.0.0.9:50051",
+		"health":   "healthy",
+	})
+	before := latestPayload(t, ctx, db, conceptName, storedId)
+
+	// A RAW insert() onto the existing canonical id with a partial payload
+	// that omits the @required nodeType + address. JSON object literals are
+	// valid MemQL call-arg syntax; the id is a plain string literal (the
+	// canonical id carries colons but no quotes).
+	expr := fmt.Sprintf(`insert("%s", id="%s", payload={"health":"degraded"})`, conceptName, storedId)
+	res, err := eng.Execute(ctx, expr)
+	require.NoError(t, err,
+		"raw insert() onto an existing id with a partial payload must read-merge, not reject (memql#1709)")
+	require.NotNil(t, res)
+
+	p := latestPayload(t, ctx, db, conceptName, storedId)
+	require.Equal(t, "degraded", p["health"], "the supplied field wins")
+	require.Equal(t, before["nodeType"], p["nodeType"], "omitted @required nodeType inherited (memql#1709)")
+	require.Equal(t, before["address"], p["address"], "omitted @required address inherited (memql#1709)")
+}
