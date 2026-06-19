@@ -2,9 +2,12 @@ package app
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/uptrace/bun"
 
+	"github.com/znasllc-io/memql/component/automations"
+	automationSteps "github.com/znasllc-io/memql/component/automations/steps"
 	"github.com/znasllc-io/memql/component/harness"
 	"github.com/znasllc-io/memql/component/harness/actionreplay"
 	"github.com/znasllc-io/memql/component/memql"
@@ -120,6 +123,18 @@ func (a *App) setupHarnessReconciler() {
 // full claim -> dispatch -> observe -> complete path end to end.
 func (a *App) harnessInnerLoop() harness.InnerLoop {
 	return func(ctx context.Context, step harness.StepView) (map[string]any, int, error) {
+		// Action-library replay step (#1758): a planner-emitted step whose
+		// input is `{type:"action", ref:"id@version", args:{...}}` references a
+		// reusable library action by id. Dispatch it through the merged
+		// ActionExecutor (literal/parameterized replay + composite recursion)
+		// with ZERO LLM tool calls, instead of running an LLM template. The
+		// planner only emits these when MEMQL_ACTION_REPLAY_ENABLED is on
+		// (the emission side gates), so on shared main this branch never
+		// triggers -- nothing authors action-typed harness steps otherwise.
+		if at, _ := step.Input["type"].(string); at == "action" {
+			return a.dispatchActionStep(ctx, step)
+		}
+
 		template, _ := step.Input["template"].(string)
 		if template == "" {
 			// No LLM template configured for this step: pass the input
@@ -185,6 +200,42 @@ func (a *App) harnessInnerLoop() harness.InnerLoop {
 		}
 		return result, sink.toolCalls, nil
 	}
+}
+
+// dispatchActionStep replays a planner-emitted action-library step (#1758).
+// The step input is `{type:"action", ref:"id@version", args:{...},
+// surface?:"..."}`; we hand it to the merged ActionExecutor, which resolves
+// the action row, re-binds its captured capability calls from `args`, and
+// recurses into composite child refs -- all token-free (no LLM). The
+// step's recorded result is the executor's `{replayed, ref, results}`
+// payload, surfaced as the harness step output so downstream steps + recall
+// see what ran. Returns 0 tool calls (replay makes no SI calls).
+func (a *App) dispatchActionStep(ctx context.Context, step harness.StepView) (map[string]any, int, error) {
+	ref, _ := step.Input["ref"].(string)
+	if ref == "" {
+		return nil, 0, fmt.Errorf("action step %q: missing ref", step.ID)
+	}
+	cfg := &automations.ActionStepConfig{Ref: ref}
+	if m, ok := step.Input["args"].(map[string]any); ok {
+		cfg.Args = m
+	}
+	if s, ok := step.Input["surface"].(string); ok {
+		cfg.Surface = s
+	}
+	astep := &automations.Step{ID: step.ID, Type: automations.StepTypeAction, Action: cfg}
+	sctx := &automations.StepContext{Engine: a.engine, Logger: a.Logger}
+
+	res, err := (&automationSteps.ActionExecutor{}).Execute(ctx, astep, sctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("action step %q (ref %q): %w", step.ID, ref, err)
+	}
+	out := map[string]any{}
+	if m, ok := res.Result.(map[string]any); ok {
+		out = m
+	} else if res.Result != nil {
+		out["result"] = res.Result
+	}
+	return out, 0, nil
 }
 
 // harnessObservationSink is the concrete ToolLoopObservationSink (#584
