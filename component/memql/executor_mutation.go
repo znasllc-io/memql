@@ -27,142 +27,91 @@ func (e *MemQLEngine) executeMutation(ctx context.Context, mutation MutationNode
 	}
 }
 
-// executeUpdate runs the update() form: read the latest existing row
-// by id, splat the partial payload on top, validate the merged result
-// against the concept schema, then persist the merged row. Bridges
-// the time-series-storage / mental-model-of-update gap so a caller
-// can write `update(id=X, payload={status: "running"})` without
-// re-passing every required field.
+// writeMeta carries the read-merge bookkeeping executeWrite gathers for
+// its callers -- specifically the data executeUpdate needs to publish the
+// graph.node.updated transition event without re-reading the row.
+type writeMeta struct {
+	// priorExisted is true when a row already existed at the target id,
+	// i.e. the write was an update (read-merge) rather than a create.
+	priorExisted bool
+	// priorStatus is the prior row's `status` field (empty when absent),
+	// surfaced as the event's `oldStatus` so transition-only automations
+	// can gate on a real state change (#1158).
+	priorStatus string
+	// finalPayloadJSON is the merged-and-written payload, marshalled for
+	// the transition event's flattened-field shape.
+	finalPayloadJSON string
+	// conceptName is the canonical concept the row was written under.
+	conceptName string
+}
+
+// executeUpdate runs the update() form: read the latest existing row by
+// id, splat the partial payload on top, validate the merged result
+// against the concept schema, persist the merged row, and additionally
+// publish graph.node.updated so transition subscribers can distinguish a
+// state change from a birth.
 //
-// Failure modes:
-//   - id missing: error (we can't merge against nothing)
-//   - no prior row at this id: error (use insert() to create the row first)
-//   - merged payload fails concept schema validation: error (validation
-//     bubbles up the same way executeInsert's does)
+// The read-merge itself lives in executeWrite (the single write
+// chokepoint shared with executeInsert -- memql#1709), so update() and a
+// partial insert() onto an existing id behave identically: omitted fields
+// inherit from the persisted row. update()'s only extra contract is that
+// the row MUST already exist (requirePrior=true); a missing row is an
+// error pointing the caller at insert().
 //
-// On success, the new row appended to the time-series carries the
-// merged payload; queries by id return it as the latest version.
+// On success, the new row appended to the time-series carries the merged
+// payload; queries by id return it as the latest version.
 func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) (*ExecuteResult, error) {
 	if e.concepts == nil {
 		return nil, fmt.Errorf("concept registry is not initialized")
 	}
 
-	conceptName := strings.TrimSpace(mutation.Concept)
-	if conceptName == "" {
+	if strings.TrimSpace(mutation.Concept) == "" {
 		return nil, fmt.Errorf("update() mutation must specify a concept")
 	}
-
-	id := strings.TrimSpace(mutation.ID)
-	if id == "" {
+	if strings.TrimSpace(mutation.ID) == "" {
 		return nil, fmt.Errorf("update() requires an explicit id; use insert() to create new rows")
 	}
-
-	conceptMeta, err := e.concepts.Get(conceptName)
-	if err != nil {
-		return nil, fmt.Errorf("concept %q not found: %w", conceptName, err)
-	}
-
-	rawPayload := strings.TrimSpace(mutation.PayloadRaw)
-	if rawPayload == "" {
+	if strings.TrimSpace(mutation.PayloadRaw) == "" {
 		return nil, fmt.Errorf("update() mutation payload is required")
 	}
 
-	partialPayload := make(map[string]any)
-	if err := json.Unmarshal([]byte(rawPayload), &partialPayload); err != nil {
-		return nil, fmt.Errorf("invalid payload JSON for update() mutation: %w", err)
-	}
-
-	// Look up the latest existing row by id. Partition is still used
-	// downstream for the event publish topic; the Query call itself no
-	// longer filters on partition post-#56 phase 3.
-	readPartition := e.partitionForConcept(ctx, conceptMeta.Name)
-	store := &bunStore{db: e.database()}
-	priorNodes, err := conceptMeta.Query(ctx, store, memorynodes.QueryParams{
-		IDs:   []string{id},
-		Limit: 1,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("update(): read latest row for concept %q id %q: %w", conceptName, id, err)
-	}
-	if len(priorNodes) == 0 {
-		return nil, fmt.Errorf("update(): no existing row for concept %q id %q (use insert() to create)", conceptName, id)
-	}
-
-	// Decode prior payload and merge the partial fields on top.
-	// Shallow merge: top-level fields in the partial replace those
-	// in the prior; nested objects aren't deep-merged. Matches the
-	// "patch this status field" mental model -- callers wanting a
-	// nested merge can read-modify-write themselves, or a named
-	// mutation can opt specific object fields into engine-side
-	// deep-merge via @mergeFields (mutation.MergeFields below) so a
-	// single-key write doesn't wipe sibling keys (memql#1339).
-	priorPayloadJSON, err := priorNodes[0].Payload.MarshalJSON()
-	if err != nil {
-		return nil, fmt.Errorf("update(): marshal prior payload: %w", err)
-	}
-	mergedPayload := make(map[string]any)
-	if err := json.Unmarshal(priorPayloadJSON, &mergedPayload); err != nil {
-		return nil, fmt.Errorf("update(): decode prior payload: %w", err)
-	}
-	// Capture the PRIOR status before the partial overwrites it (#1158), so the
-	// graph.node.updated event can carry oldStatus. Transition-only automations
-	// (e.g. releaseWorkspaceOnPlanTerminal) can then gate on
-	// `oldStatus != terminal && newStatus == terminal` and fire exactly once
-	// per transition instead of re-running on every update. Empty string when
-	// the concept has no `status` field -- additive, so the field is simply
-	// absent from the event for those concepts.
-	priorStatus, _ := mergedPayload["status"].(string)
-	mergePayloadFields(mergedPayload, partialPayload, mutation.MergeFields)
-
-	mergedJSON, err := json.Marshal(mergedPayload)
-	if err != nil {
-		return nil, fmt.Errorf("update(): marshal merged payload: %w", err)
-	}
-
-	// Hand off to executeInsert with the merged payload. The merged
-	// payload now satisfies every @required field (because the prior
-	// row did, and shallow-merge can't drop fields), so schema
-	// validation inside Concept.Create will pass.
-	mergedMutation := mutation
-	mergedMutation.Kind = ast.MutationKindInsert
-	mergedMutation.PayloadRaw = string(mergedJSON)
-	result, err := e.executeInsert(ctx, mergedMutation)
+	result, meta, err := e.executeWrite(ctx, mutation, true)
 	if err != nil {
 		return result, err
 	}
 
-	// memQL is append-only: every successful update() materialises as
-	// a new row that fires graph.node.created via executeInsert. Most
-	// subscribers want one or the other -- automations like
-	// emitScopeElevationCanvasCard fire on the FIRST insert (kind +
-	// initial status), backend handlers like cognition's
-	// plan-execution want only the state-transition deltas (the same
-	// concept already exists; a subsequent insert means "moved to
-	// running / succeeded / failed"). Mixing both onto
-	// graph.node.created forced subscribers to gate via a status
-	// filter and hope the same status never recurs.
+	// memQL is append-only: every successful write materialises as a new
+	// row that fires graph.node.created via executeWrite. Most subscribers
+	// want one or the other -- automations like emitScopeElevationCanvasCard
+	// fire on the FIRST insert (kind + initial status), backend handlers
+	// like cognition's plan-execution want only the state-transition deltas
+	// (the same concept already exists; a subsequent write means "moved to
+	// running / succeeded / failed"). Mixing both onto graph.node.created
+	// forced subscribers to gate via a status filter and hope the same
+	// status never recurs.
 	//
 	// Solution: also publish graph.node.updated on the update() path.
-	// Subscribers tracking transitions can listen on .updated and
-	// skip the noise of every initial creation; subscribers tracking
-	// births still listen on .created. Both events carry the same
-	// payload so callers can pick whichever signal fits their model.
+	// Subscribers tracking transitions listen on .updated and skip the
+	// noise of every initial creation; subscribers tracking births still
+	// listen on .created. Both events carry the same payload so callers
+	// can pick whichever signal fits their model.
 	if result != nil && result.Bundle != nil && len(result.Bundle.Nodes) > 0 {
 		updatedNode := result.Bundle.Nodes[0]
+		// Partition is used only for the event publish topic; the read
+		// itself no longer filters on partition post-#56 phase 3.
+		readPartition := e.partitionForConcept(ctx, meta.conceptName)
 		eventPayload := map[string]any{
 			"id":        updatedNode.Id,
 			"nodeId":    updatedNode.Id,
-			"concept":   conceptMeta.Name,
+			"concept":   meta.conceptName,
 			"nodeType":  updatedNode.Type,
 			"partition": readPartition,
 		}
-		// Flatten payload fields onto the event for direct filter
-		// access -- mirrors the executeInsert publish shape so
-		// subscribers can use the same pattern across .created and
-		// .updated. Decode the merged JSON we already have rather
-		// than re-marshalling the proto payload.
+		// Flatten payload fields onto the event for direct filter access --
+		// mirrors the executeWrite publish shape so subscribers can use the
+		// same pattern across .created and .updated.
 		var payloadMap map[string]any
-		if err := json.Unmarshal([]byte(mergedMutation.PayloadRaw), &payloadMap); err == nil {
+		if err := json.Unmarshal([]byte(meta.finalPayloadJSON), &payloadMap); err == nil {
 			maps.Copy(eventPayload, payloadMap)
 			eventPayload["payload"] = payloadMap
 		}
@@ -170,16 +119,43 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 		// flatten so the new payload can't clobber it). Only when present, to
 		// keep the event additive for concepts without a status field. Lets
 		// .updated subscribers detect a real state transition vs a no-op rewrite.
-		if priorStatus != "" {
-			eventPayload["oldStatus"] = priorStatus
+		if meta.priorStatus != "" {
+			eventPayload["oldStatus"] = meta.priorStatus
 		}
 		e.publishEvent(
-			events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, conceptMeta.Name),
+			events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, meta.conceptName),
 			events.KindNodeUpdated,
 			eventPayload,
 		)
 	}
 	return result, nil
+}
+
+// loadPriorPayload reads the latest stored version of (concept, id) and
+// returns its decoded payload. exists is false (with a nil map, nil error)
+// when no row is present -- the create case. Partition is not a filter
+// dimension post-#56 phase 3, so a bare id lookup is correct.
+func (e *MemQLEngine) loadPriorPayload(ctx context.Context, conceptMeta *memorynodes.Concept, id string) (payload map[string]any, exists bool, err error) {
+	store := &bunStore{db: e.database()}
+	priorNodes, err := conceptMeta.Query(ctx, store, memorynodes.QueryParams{
+		IDs:   []string{id},
+		Limit: 1,
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("read latest row for concept %q id %q: %w", conceptMeta.Name, id, err)
+	}
+	if len(priorNodes) == 0 {
+		return nil, false, nil
+	}
+	priorJSON, err := priorNodes[0].Payload.MarshalJSON()
+	if err != nil {
+		return nil, false, fmt.Errorf("marshal prior payload for concept %q id %q: %w", conceptMeta.Name, id, err)
+	}
+	decoded := make(map[string]any)
+	if err := json.Unmarshal(priorJSON, &decoded); err != nil {
+		return nil, false, fmt.Errorf("decode prior payload for concept %q id %q: %w", conceptMeta.Name, id, err)
+	}
+	return decoded, true, nil
 }
 
 // mergePayloadFields splats the partial update payload onto the prior
@@ -239,47 +215,114 @@ func deepMergeObjects(prior, partial map[string]any) map[string]any {
 	return out
 }
 
+// executeInsert is the create-or-upsert entry point: it delegates to the
+// shared executeWrite chokepoint with requirePrior=false, so a write whose
+// id has no prior row creates it, while a write onto an existing id
+// read-merges (memql#1709). The writeMeta is discarded -- only executeUpdate
+// needs it for the transition event.
 func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) (*ExecuteResult, error) {
+	result, _, err := e.executeWrite(ctx, mutation, false)
+	return result, err
+}
+
+// executeWrite is the single mutation write path for BOTH insert() and
+// update(). It performs the engine-level read-merge that makes partial
+// payloads safe across the entire update/delete/revoke/transition class
+// (memql#1709): when the target id already names a stored row, the supplied
+// payload is treated as a DELTA and shallow-merged on top of the persisted
+// payload before validation, so omitted fields are preserved rather than
+// wiped or rejected as "missing required property". When no prior row
+// exists the supplied payload is the full create payload, validated as-is.
+//
+// This hoists what used to be a per-mutation concern (each update/revoke/
+// delete mutation had to either be authored as update{} or re-state every
+// required field) into one place, so a mutation authored as insert{} that
+// is semantically an update -- e.g. mutationLeaveSpace, mutationRevokeDelegation
+// -- preserves siblings automatically, without a DSL change.
+//
+// requirePrior gates the update() contract: when true (the update() path)
+// a missing prior row is an error pointing the caller at insert(); when
+// false (the insert() path) a missing prior row is a normal create.
+func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, requirePrior bool) (*ExecuteResult, writeMeta, error) {
+	var meta writeMeta
 	if e.concepts == nil {
-		return nil, fmt.Errorf("concept registry is not initialized")
+		return nil, meta, fmt.Errorf("concept registry is not initialized")
 	}
 
 	conceptName := strings.TrimSpace(mutation.Concept)
 	if conceptName == "" {
-		return nil, fmt.Errorf("insert() mutation must specify a concept")
+		return nil, meta, fmt.Errorf("mutation must specify a concept")
 	}
 
 	conceptMeta, err := e.concepts.Get(conceptName)
 	if err != nil {
-		return nil, fmt.Errorf("concept %q not found: %w", conceptName, err)
+		return nil, meta, fmt.Errorf("concept %q not found: %w", conceptName, err)
 	}
+	meta.conceptName = conceptMeta.Name
 
 	rawPayload := strings.TrimSpace(mutation.PayloadRaw)
 	if rawPayload == "" {
-		return nil, fmt.Errorf("insert() mutation payload is required")
+		return nil, meta, fmt.Errorf("mutation payload is required")
 	}
 
 	payload := make(map[string]any)
 	if err := json.Unmarshal([]byte(rawPayload), &payload); err != nil {
-		return nil, fmt.Errorf("invalid payload JSON for insert() mutation: %w", err)
+		return nil, meta, fmt.Errorf("invalid payload JSON for mutation: %w", err)
 	}
 
 	// Reserved-field check at mutation time. The concept-load validator
 	// already rejects reserved field names in concept definitions, but
-	// the payload on an insert() call bypasses that check. Without this
+	// the payload on a mutation call bypasses that check. Without this
 	// guard, a caller could write insert("v1:foo", payload={partition: "_system"})
 	// and silently clobber engine-level storage fields. Fail closed.
-	// See docs/public/language/authoring-rules.md entry #12 (partitionName
+	// Runs on the supplied delta (a persisted prior row can't carry a
+	// reserved field, so merging can't introduce one). See
+	// docs/public/language/authoring-rules.md entry #12 (partitionName
 	// convention) and component/database/memory-nodes/constants.go for
 	// the full reserved list.
 	for key := range payload {
 		if memorynodes.IsReservedPayloadField(key) {
-			return nil, fmt.Errorf(
-				"insert() payload for concept %q declares reserved field %q; "+
+			return nil, meta, fmt.Errorf(
+				"mutation payload for concept %q declares reserved field %q; "+
 					"rename the field (for example partition -> partitionName) "+
 					"or use the dedicated engine mechanism for that attribute",
 				conceptMeta.Name, key)
 		}
+	}
+
+	// ENGINE-LEVEL READ-MERGE (memql#1709). When the target id already
+	// names a stored row, load it and shallow-merge the supplied delta on
+	// top so omitted fields inherit from the persisted payload. This is the
+	// uniform default for every "write to an existing row" -- update,
+	// delete (status flip), revoke (active=false), transition -- regardless
+	// of whether the mutation was authored as update{} or insert{}. A
+	// genuine create (no prior row, or an auto-generated id) skips the read
+	// and validates the supplied payload in full.
+	//
+	// mergeFields opts named object fields into a recursive deep-merge
+	// (memql#1339); the default is top-level replacement, so a restated
+	// nested object still replaces wholesale and only OMITTED top-level
+	// fields are inherited.
+	id := strings.TrimSpace(mutation.ID)
+	if id != "" {
+		priorPayload, existed, err := e.loadPriorPayload(ctx, conceptMeta, id)
+		if err != nil {
+			return nil, meta, err
+		}
+		meta.priorExisted = existed
+		if existed {
+			// Capture the PRIOR status before the delta overwrites it
+			// (#1158) so executeUpdate can surface it as oldStatus.
+			meta.priorStatus, _ = priorPayload["status"].(string)
+			mergePayloadFields(priorPayload, payload, mutation.MergeFields)
+			payload = priorPayload
+		}
+	}
+	if requirePrior && !meta.priorExisted {
+		if id == "" {
+			return nil, meta, fmt.Errorf("update() requires an explicit id; use insert() to create new rows")
+		}
+		return nil, meta, fmt.Errorf("update(): no existing row for concept %q id %q (use insert() to create)", conceptName, id)
 	}
 
 	// Auto-canonicalize @relationship payload fields. Every concept's
@@ -306,13 +349,13 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 	// paths uniformly; the named-mutation pre-call stays as a no-op
 	// idempotent belt-and-suspenders.
 	if err := e.canonicalizeRelationshipFields(ctx, conceptMeta.Name, payload); err != nil {
-		return nil, fmt.Errorf("canonicalize relationship fields: %w", err)
+		return nil, meta, fmt.Errorf("canonicalize relationship fields: %w", err)
 	}
 
 	// Validate structured action utterances (limits + allowlist support).
 	if conceptMeta.Name == memorynodes.ConceptCognitionUtterance {
 		if err := validateCognitionActionUtterancePayload(payload); err != nil {
-			return nil, err
+			return nil, meta, err
 		}
 	}
 
@@ -321,25 +364,25 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 	if mutation.ParentRef != nil {
 		parentId := strings.TrimSpace(*mutation.ParentRef)
 		if parentId == "" {
-			return nil, fmt.Errorf("parent hint must not be empty")
+			return nil, meta, fmt.Errorf("parent hint must not be empty")
 		}
 
 		parentDefs := filterRelationshipDefinitions(conceptDefs, relationshipTypeParent, []string{relationshipDirectionOutgoing, relationshipDirectionBidirectional})
 		if len(parentDefs) == 0 {
-			return nil, fmt.Errorf("no relationship definition for parent on concept %q", conceptMeta.Name)
+			return nil, meta, fmt.Errorf("no relationship definition for parent on concept %q", conceptMeta.Name)
 		}
 		if len(parentDefs) > 1 {
-			return nil, fmt.Errorf("multiple parent relationship definitions for concept %q; unable to apply parent hint", conceptMeta.Name)
+			return nil, meta, fmt.Errorf("multiple parent relationship definitions for concept %q; unable to apply parent hint", conceptMeta.Name)
 		}
 		if err := setPayloadValue(payload, parentDefs[0].Field, parentId); err != nil {
-			return nil, fmt.Errorf("apply parent relationship hint: %w", err)
+			return nil, meta, fmt.Errorf("apply parent relationship hint: %w", err)
 		}
 	}
 
 	if mutation.AliasOfRef != nil {
 		aliasId := strings.TrimSpace(*mutation.AliasOfRef)
 		if aliasId == "" {
-			return nil, fmt.Errorf("aliasOf hint must not be empty")
+			return nil, meta, fmt.Errorf("aliasOf hint must not be empty")
 		}
 
 		aliasDefs := filterRelationshipDefinitions(conceptDefs, relationshipTypeAlias, nil)
@@ -348,23 +391,23 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 		}
 
 		if len(aliasDefs) == 0 {
-			return nil, fmt.Errorf("no relationship definition for alias on concept %q", conceptMeta.Name)
+			return nil, meta, fmt.Errorf("no relationship definition for alias on concept %q", conceptMeta.Name)
 		}
 		if len(aliasDefs) > 1 {
-			return nil, fmt.Errorf("multiple alias relationship definitions for concept %q; unable to apply aliasOf hint", conceptMeta.Name)
+			return nil, meta, fmt.Errorf("multiple alias relationship definitions for concept %q; unable to apply aliasOf hint", conceptMeta.Name)
 		}
 		if err := setPayloadValue(payload, aliasDefs[0].Field, aliasId); err != nil {
-			return nil, fmt.Errorf("apply alias relationship hint: %w", err)
+			return nil, meta, fmt.Errorf("apply alias relationship hint: %w", err)
 		}
 	}
 
 	actor, err := mutationActor(ctx)
 	if err != nil {
-		return nil, err
+		return nil, meta, err
 	}
 	if conceptMeta.Name == memorynodes.ConceptCognitionUtterance {
 		if err := e.validateCognitionUtteranceWriteAuthorization(ctx, payload, actor); err != nil {
-			return nil, err
+			return nil, meta, err
 		}
 	}
 	// SI-participant guard: server-stamps forUserId, enforces per-user
@@ -372,7 +415,7 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 	// participants. See validateAndStampParticipantPayload.
 	if conceptMeta.Name == memorynodes.ConceptCognitionParticipant {
 		if err := e.validateAndStampParticipantPayload(ctx, payload, mutation.ID, actor); err != nil {
-			return nil, err
+			return nil, meta, err
 		}
 	}
 	// Agent-role lock guard: rejects writes that would remove any id
@@ -390,10 +433,10 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 	// agent_kind_actor_validation.go and znasllc-io/memql#403.
 	if conceptMeta.Name == conceptAgentsAgent {
 		if err := e.validateAgentLockedItems(ctx, payload, mutation.ID, actor); err != nil {
-			return nil, err
+			return nil, meta, err
 		}
 		if err := e.validateAgentKindActorScope(ctx, payload, actor); err != nil {
-			return nil, err
+			return nil, meta, err
 		}
 	}
 	// Harness step guard: enforces the v1:harness:step status state
@@ -404,7 +447,7 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 	// (which read-merges then routes here). See harness_step_validation.go.
 	if conceptMeta.Name == memorynodes.ConceptHarnessStep {
 		if err := e.validateHarnessStepTransition(ctx, payload, mutation.ID); err != nil {
-			return nil, err
+			return nil, meta, err
 		}
 	}
 	// Generic feedback-intake guard (epic memql#1404 / memql#1405): the
@@ -416,7 +459,7 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 	// planner_feedback_validation.go.
 	if conceptMeta.Name == conceptPlannerPlan {
 		if err := e.validateFeedbackIntakeTransition(ctx, payload, mutation.ID, actor); err != nil {
-			return nil, err
+			return nil, meta, err
 		}
 	}
 
@@ -439,7 +482,7 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 	store := &bunStore{db: e.database()}
 	result, err := conceptMeta.Create(ctx, store, createParams)
 	if err != nil {
-		return nil, err
+		return nil, meta, err
 	}
 
 	created := memorynodes.MemoryNode{
@@ -454,7 +497,7 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 
 	apiNode, err := toAPIMemoryNode(&created)
 	if err != nil {
-		return nil, err
+		return nil, meta, err
 	}
 
 	e.invalidateCache()
@@ -504,7 +547,14 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 		RootIds: []string{apiNode.Id},
 	}
 
-	return newExecuteResult(bundle), nil
+	// Capture the final written payload for executeUpdate's transition
+	// event (avoids a re-read). result.Payload is the validated, stored
+	// payload after merge + server-side stamps.
+	if len(result.Payload) > 0 {
+		meta.finalPayloadJSON = string(result.Payload)
+	}
+
+	return newExecuteResult(bundle), meta, nil
 }
 
 func (e *MemQLEngine) fetchNodesByIds(ctx context.Context, ids []string, timestamp *time.Time, allowed map[string]map[string]struct{}, limit int) ([]memorynodes.MemoryNode, error) {
