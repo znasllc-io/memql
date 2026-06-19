@@ -56,10 +56,11 @@ func TestLoadByName_CanonicalResolution(t *testing.T) {
 		// `expireDelegations`, yet it must resolve.
 		{name: "revokeExpiredDelegations", wantAuto: "expireDelegations"},
 
-		// A logic construct that exists but no automation wraps -> a clear
-		// not-a-runnable-entry-point error, NOT a misleading "not found".
-		{name: "logicEnsureDailySpaceForCaller", wantErr: "not a runnable entry point"},
-		{name: "ensureDailySpaceForCaller", wantErr: "not a runnable entry point"},
+		// An @entrypoint logic with no authored wrapper resolves to its
+		// auto-generated wrapping automation (memql#1707) -- it is now a
+		// runnable entry point in both the full `logicXxx` and bare forms.
+		{name: "logicEnsureDailySpaceForCaller", wantAuto: "ensureDailySpaceForCallerEntrypoint"},
+		{name: "ensureDailySpaceForCaller", wantAuto: "ensureDailySpaceForCallerEntrypoint"},
 
 		// Genuinely unknown name -> plain "not found" (and NOT the
 		// not-a-runnable-entry-point error).

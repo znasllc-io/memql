@@ -455,6 +455,7 @@ logic logicProvisionDailySpaceOnUserCreate {
 // without forcing them to also know how to build a triggering
 // event.
 @enabled
+@entrypoint
 @description("Ensure today's daily space exists for the authenticated caller. Top-level Execute entry point for interactive clients; resolves userId from the request's auth context inside the dailyspace integration.")
 logic logicEnsureDailySpaceForCaller {
   body {
