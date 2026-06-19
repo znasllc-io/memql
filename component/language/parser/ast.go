@@ -168,6 +168,7 @@ var (
 	AttrRetry                = ast.AttrRetry
 	AttrRole                 = ast.AttrRole
 	AttrSchedule             = ast.AttrSchedule
+	AttrScrubPii             = ast.AttrScrubPii
 	AttrUse                  = ast.AttrUse
 	AttrUseSpec              = ast.AttrUseSpec
 	AttrUseTrait             = ast.AttrUseTrait

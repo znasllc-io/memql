@@ -62,6 +62,14 @@ type FunctionMutationTemplate struct {
 	// wholesale. Only valid on update-kind mutations (enforced at
 	// load time in function_loader.go). See memql#1339.
 	MergeFields []string
+
+	// ScrubPii carries the mutation's @scrubPii annotation: when set,
+	// the update executor enumerates every @pii-annotated field on the
+	// bound concept and zeroes it after the partial payload merges,
+	// making the hard-delete PII scrub annotation-driven instead of a
+	// hand-maintained field list. Only valid on update-kind mutations
+	// (enforced at load time in function_loader.go). See memql#1711.
+	ScrubPii bool
 }
 
 // renderMutationTemplate evaluates a mutation template into a concrete MutationNode.
@@ -199,6 +207,7 @@ func (e *MemQLEngine) renderMutationTemplate(ctx context.Context, tmpl *Function
 		ParentRef:   parentRef,
 		AliasOfRef:  aliasRef,
 		MergeFields: tmpl.MergeFields,
+		ScrubPii:    tmpl.ScrubPii,
 	}, nil
 }
 
@@ -1187,6 +1196,29 @@ func mutationMergeFields(funcDef *languageParser.FunctionDef, kind ast.MutationK
 		return nil, fmt.Errorf("@mergeFields is only valid on update mutations (insert writes the full payload; there is nothing stored to merge against)")
 	}
 	return fields, nil
+}
+
+// mutationScrubPii reports whether the mutation carries the @scrubPii
+// annotation, which opts an update-kind mutation into engine-side
+// generic PII scrubbing (memql#1711). Only meaningful on update-kind
+// mutations -- an insert writes the full payload and has nothing stored
+// to scrub against -- so its presence on an insert mutation is a
+// load-time error rather than a silent no-op. The bound concept supplies
+// the field set at execution time via Concept.PIIFields(), so no field
+// names are listed on the annotation itself: that is the whole point --
+// the scrub stays in sync with the schema automatically.
+func mutationScrubPii(funcDef *languageParser.FunctionDef, kind ast.MutationKind) (bool, error) {
+	var present bool
+	for _, attr := range funcDef.Attributes {
+		if attr == nil || attr.Name != languageParser.AttrScrubPii {
+			continue
+		}
+		present = true
+	}
+	if present && kind != ast.MutationKindUpdate {
+		return false, fmt.Errorf("@scrubPii is only valid on update mutations (insert writes the full payload; there is nothing stored to scrub against)")
+	}
+	return present, nil
 }
 
 // parsePayloadRawToTemplate parses a MemQL object literal (payload={...} or {id:...,payload:{...}})

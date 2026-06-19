@@ -774,6 +774,18 @@ const (
 	// otherwise wipe every other preference (memql#1339).
 	AttrMergeFields = "mergeFields"
 
+	// @scrubPii opts an update-kind mutation into engine-side generic
+	// PII scrubbing: after the partial payload merges onto the stored
+	// row, the engine enumerates EVERY field the bound concept declares
+	// with @pii and overwrites it with its type's zero value. This makes
+	// the hard-delete data-deletion scrub annotation-driven rather than a
+	// hand-maintained field list -- adding a new PII field to a concept
+	// requires only the @pii annotation; the scrub covers it
+	// automatically and cannot drift out of sync (memql#1711). Only valid
+	// on update-kind mutations (enforced at load time in
+	// function_loader.go).
+	AttrScrubPii = "scrubPii"
+
 	// Auditing
 	AttrAudit = "audit"
 

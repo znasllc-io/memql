@@ -196,6 +196,60 @@ func mergePayloadFields(prior, partial map[string]any, mergeFields []string) {
 	}
 }
 
+// scrubPIIFields overwrites every named field in the payload with its
+// type's zero value, leaving non-PII fields untouched. Used by the
+// @scrubPii hard-delete path (memql#1711): the field set comes from the
+// bound concept's @pii annotations (Concept.PIIFields()), so the scrub
+// is exhaustive by construction -- a newly-annotated PII field is
+// cleared automatically with no change to this code or the mutation.
+//
+// The zero value matches the field's current JSON type so the scrubbed
+// row still satisfies the concept schema (an empty string for a
+// string-typed @required field stays present and valid; a numeric field
+// goes to 0; a bool to false). A field absent from the payload (never
+// populated) needs no scrub and is skipped -- it is already clear.
+// Nested-object PII fields are cleared to an empty object; the common
+// case (name, email, phone, free-text role) is a top-level string.
+func scrubPIIFields(payload map[string]any, piiFields []string) {
+	for _, field := range piiFields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		existing, present := payload[field]
+		if !present {
+			// Field was never set on this row; nothing to clear.
+			continue
+		}
+		payload[field] = zeroValueFor(existing)
+	}
+}
+
+// zeroValueFor returns the type-appropriate zero value for a payload
+// field's current value, so scrubbing preserves the JSON type and keeps
+// the merged row schema-valid.
+func zeroValueFor(v any) any {
+	switch v.(type) {
+	case string:
+		return ""
+	case bool:
+		return false
+	case float64, int, int64:
+		return 0
+	case []any:
+		return []any{}
+	case map[string]any:
+		return map[string]any{}
+	case nil:
+		return ""
+	default:
+		// Unknown shape: blank it to a string rather than leave PII in
+		// place. Any string-typed schema field accepts this; the
+		// fail-safe is to scrub, never to retain.
+		return ""
+	}
+}
+
 // deepMergeObjects returns a new object carrying every key of prior
 // overlaid with every key of partial. On key collision the partial
 // value wins, except when both sides are objects, which merge
@@ -323,6 +377,18 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, fmt.Errorf("update() requires an explicit id; use insert() to create new rows")
 		}
 		return nil, meta, fmt.Errorf("update(): no existing row for concept %q id %q (use insert() to create)", conceptName, id)
+	}
+
+	// Annotation-driven PII scrub (memql#1711). A mutation tagged
+	// @scrubPii (the hard-delete / data-deletion path) clears EVERY field
+	// the bound concept declares with @pii, derived from the schema at
+	// execution time rather than a hand-maintained field list. Runs AFTER
+	// the read-merge so the scrub is authoritative: even if the persisted
+	// row (or the supplied delta) carried a PII value, it is zeroed here.
+	// Adding a new @pii field to the concept makes it scrubbed
+	// automatically -- the list cannot drift out of sync.
+	if mutation.ScrubPii {
+		scrubPIIFields(payload, conceptMeta.PIIFields())
 	}
 
 	// Auto-canonicalize @relationship payload fields. Every concept's

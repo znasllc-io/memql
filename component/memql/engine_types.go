@@ -412,6 +412,14 @@ type MutationNode struct {
 	// from a mutation's @mergeFields annotation; always empty for raw
 	// update() query strings and unannotated mutations. See memql#1339.
 	MergeFields []string
+
+	// ScrubPii is set from a mutation's @scrubPii annotation: when true,
+	// executeUpdate enumerates every @pii-annotated field on the bound
+	// concept (Concept.PIIFields()) and zeroes it after the partial
+	// payload merges, making the hard-delete PII scrub annotation-driven
+	// rather than a hand-maintained field list. Always false for raw
+	// update() query strings and unannotated mutations. See memql#1711.
+	ScrubPii bool
 }
 
 func cloneSIInvocation(src *SIInvocation) *SIInvocation {

@@ -33,7 +33,7 @@ var ByReceiver = map[string][]string{
 	},
 	"Mutation": {
 		"description", "enabled", "disabled", "internal", "actor", "public",
-		"mergeFields", "mcp",
+		"mergeFields", "scrubPii", "mcp",
 	},
 	"Logic": {
 		"description", "enabled", "disabled", "entrypoint",
@@ -79,6 +79,7 @@ var Docs = map[string]string{
 	"public":      "Per-row-authz marker: this query/mutation is intentionally callable without a caller-scope filter (concept catalogs, pre-auth login paths). See docs/public/operate/auth/per-row-authz-audit.md.",
 	"actor":       "On a mutation: resolves auth-context (`actor.X`) fields. On a shape: kind marker -- projects the auth-context envelope (actor.userId / role / ...).",
 	"mergeFields": "On an update mutation: deep-merge the named object-typed payload fields into the stored object instead of replacing them wholesale, so sibling keys survive a single-key write. Format: @mergeFields(\"preferences\").",
+	"scrubPii":    "On an update mutation (the hard-delete / data-deletion path): after the partial payload merges, zero EVERY field the bound concept marks @pii. The field set is derived from the schema, so a newly-annotated PII field is scrubbed automatically with no change to the mutation. Bare flag, no arguments. See memql#1711.",
 	// Query / spec.
 	"shape": "Optional: pin the shape a spec's predicate reads (the eval strategy is otherwise derived from the body's field references).",
 	// Automation.
