@@ -7,8 +7,9 @@
 // Authorization (owned tier): the filter pins payload.ownerUserId ==
 // actor.userId, so a caller only ever reads its own captured traces.
 
-use actions.concepts.{ candidate }
-use actions.shapes.{ candidateFull }
+use actions.concepts.{ candidate, action }
+use actions.shapes.{ candidateFull, actionFull }
+use common.traits.{ traitStatusIsActive }
 
 @enabled
 @description("List v1:actions:candidate traces captured for a plan, newest-first by createdAt (owned tier). #1735.")
@@ -18,4 +19,18 @@ query candidate queryActionCandidatesForPlan {
   }
   filter  payload.planId == args.planId && payload.ownerUserId == actor.userId
   shape   candidateFull
+}
+
+// queryActionByInputFingerprint -- the literal-replay lookup (Phase 1 #1736).
+// The harness computes a stable hash of the dispatched step input and asks
+// for an active action minted under the same fingerprint; a hit is replayed
+// token-free, a miss falls through to the LLM. Owned tier.
+@enabled
+@description("Resolve an active v1:actions:action by inputFingerprint for the calling owner -- the literal-replay lookup (Phase 1 #1736).")
+query action queryActionByInputFingerprint {
+  args {
+    inputFingerprint  string  @required
+  }
+  filter  payload.inputFingerprint == args.inputFingerprint && traitStatusIsActive && payload.ownerUserId == actor.userId
+  shape   actionFull
 }

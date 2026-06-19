@@ -6,6 +6,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/znasllc-io/memql/component/harness"
+	"github.com/znasllc-io/memql/component/harness/actionreplay"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/integrations"
@@ -126,6 +127,23 @@ func (a *App) harnessInnerLoop() harness.InnerLoop {
 			return map[string]any{"echo": step.Input}, 0, nil
 		}
 
+		// Action-library literal replay (#1736): if a prior identical-input
+		// run was minted into an action, replay its captured calls token-free
+		// and skip the LLM entirely. Gated OFF by default
+		// (MEMQL_ACTION_REPLAY_ENABLED) so this is a no-op on shared main until
+		// an operator opts in.
+		replayEnabled := actionReplayEnabled()
+		inputFP := ""
+		actionExisted := false
+		if replayEnabled {
+			inputFP = actionreplay.Fingerprint(step.Input)
+			if replayed, result, found := a.tryReplayAction(ctx, step, inputFP); replayed {
+				return result, 0, nil // token-free: zero LLM tool calls
+			} else {
+				actionExisted = found
+			}
+		}
+
 		data := map[string]any{}
 		for k, v := range step.Input {
 			data[k] = v
@@ -150,7 +168,14 @@ func (a *App) harnessInnerLoop() harness.InnerLoop {
 		if err != nil {
 			return nil, sink.toolCalls, err
 		}
-		return map[string]any{"text": out}, sink.toolCalls, nil
+		result := map[string]any{"text": out}
+		// Mint a replayable action from this successful run, but only when no
+		// action already existed for this input (avoids duplicate rows on a
+		// stale-replay fall-through). #1736.
+		if replayEnabled && !actionExisted {
+			a.mintActionFromRun(ctx, step, inputFP, traceSink, result)
+		}
+		return result, sink.toolCalls, nil
 	}
 }
 

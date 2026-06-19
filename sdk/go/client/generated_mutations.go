@@ -7595,6 +7595,102 @@ func MutationMarkResponsibilityIntakePendingBuild(args MutationMarkResponsibilit
 	return b.String()
 }
 
+// MutationMintAction -- Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1, #1736). ownerUserId stamped from actor.userId (owned tier). Stores the replayable capability calls keyed by inputFingerprint.
+//
+// Bound concept: action.
+type MutationMintActionArgs struct {
+	ActionId          string
+	Slug              string
+	Intent            string
+	Capability        string
+	InputFingerprint  string
+	Calls             []map[string]any
+	RecordedResult    map[string]any
+	ResultFingerprint string
+	RecordedSurface   string
+	ProvenancePlanId  string
+	ProvenanceStepId  string
+}
+
+// MutationMintAction calls the engine mutation mutationMintAction.
+func (qc *QueryClient) MutationMintAction(ctx context.Context, args MutationMintActionArgs) (*Result, error) {
+	call := MutationMintActionBuild(args)
+	return qc.executeNamed(ctx, "mutationMintAction", call)
+}
+
+func MutationMintActionBuild(args MutationMintActionArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationMintAction({")
+	if args.ActionId != "" {
+		b.WriteString("actionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ActionId))
+	}
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("slug: ")
+	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("intent: ")
+	b.WriteString(fmt.Sprintf("%q", args.Intent))
+	if args.Capability != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("capability: ")
+		b.WriteString(fmt.Sprintf("%q", args.Capability))
+	}
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("inputFingerprint: ")
+	b.WriteString(fmt.Sprintf("%q", args.InputFingerprint))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("calls: ")
+	b.WriteString(renderMemQLValue(args.Calls))
+	if args.RecordedResult != nil {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("recordedResult: ")
+		b.WriteString(renderMemQLValue(args.RecordedResult))
+	}
+	if args.ResultFingerprint != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("resultFingerprint: ")
+		b.WriteString(fmt.Sprintf("%q", args.ResultFingerprint))
+	}
+	if args.RecordedSurface != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("recordedSurface: ")
+		b.WriteString(fmt.Sprintf("%q", args.RecordedSurface))
+	}
+	if args.ProvenancePlanId != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("provenancePlanId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ProvenancePlanId))
+	}
+	if args.ProvenanceStepId != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("provenanceStepId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ProvenanceStepId))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationMintSkill -- Mint a new v1:agents:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId + mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check.
 //
 // Bound concept: skill.
@@ -8751,6 +8847,40 @@ func MutationRefreshWorkerRegistrationBuild(args MutationRefreshWorkerRegistrati
 		b.WriteString("lastConnectedFromIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastConnectedFromIP))
 	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationReinforceAction -- Reinforce a v1:actions:action after a verified replay: set the engine-computed reliability + reinforceCount and reset the decay clock (Phase 1 #1736; surface-aware decay lands in Phase 4 #1739).
+//
+// Bound concept: action.
+type MutationReinforceActionArgs struct {
+	ActionId       string
+	Reliability    any
+	ReinforceCount int
+}
+
+// MutationReinforceAction calls the engine mutation mutationReinforceAction.
+func (qc *QueryClient) MutationReinforceAction(ctx context.Context, args MutationReinforceActionArgs) (*Result, error) {
+	call := MutationReinforceActionBuild(args)
+	return qc.executeNamed(ctx, "mutationReinforceAction", call)
+}
+
+func MutationReinforceActionBuild(args MutationReinforceActionArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationReinforceAction({")
+	b.WriteString("actionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ActionId))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("reliability: ")
+	b.WriteString(fmt.Sprintf("%q", args.Reliability))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("reinforceCount: ")
+	b.WriteString(fmt.Sprintf("%v", args.ReinforceCount))
 	b.WriteString("})")
 	return b.String()
 }
