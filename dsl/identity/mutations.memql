@@ -1441,19 +1441,33 @@ mutation authSession mutationRevokeAuthSession {
 // revokeDelegation
 // ================
 //
-// Revoke a delegation by setting active=false and recording
-// revocation metadata.
+// Revoke a delegation by AUTHORITATIVELY flipping active=false and
+// stamping revocation metadata. A revoke is a state transition, not a
+// field patch -- the terminal state cannot depend on caller input.
+//
+// Authored as an update{} (read-merge) so every other field
+// (identityId / identitySubject / agentId / roleCeiling / scopes /
+// note / ...) inherits from the persisted row; the engine-level
+// read-merge (memql#1709) preserves the omitted siblings. The mutation
+// itself forces `active: false` and guarantees `revokedAt` is set, so a
+// caller cannot leave the row in an inconsistent (still-active) state by
+// omitting or contradicting those fields (memql#1729). revokedBySubject
+// is caller-sourced (the human subject, or `system:expiry` for the
+// expiry cron) and recorded for audit.
 
 @enabled
-@description("Revoke a delegation by deactivating it and recording revocation metadata.")
+@description("Revoke a delegation: authoritatively flips active=false and stamps revokedAt/revokedBySubject regardless of caller input. Read-merges the persisted row so every other field is preserved (memql#1729).")
 mutation delegation mutationRevokeDelegation {
   args {
-    delegationId  string  @required
-    payload       object  @required
+    delegationId      string  @required
+    revokedBySubject  string
+    revokedAt         string
   }
-  insert {
+  update {
     id: args.delegationId
-    args.payload
+    active: false
+    revokedAt: coalesce(args.revokedAt, timestamp())
+    revokedBySubject: coalesce(args.revokedBySubject, "")
   }
 }
 

@@ -304,15 +304,14 @@ func TestReadMerge_LeaveSpace_PreservesParticipantFields(t *testing.T) {
 	require.Equal(t, before["forUserId"], p["forUserId"], "forUserId preserved (memql#1709)")
 }
 
-// TestReadMerge_RevokeDelegation_PreservesFields is the Run-4 regression for
-// mutationRevokeDelegation (dsl/identity/mutations.memql): authored as
-// `insert { id: args.delegationId; args.payload }`. A minimal revoke payload
-// (active=false + revocation metadata) used to reject with
-// `” does not validate ... missing 'identityId','identitySubject',
-// 'identityType','agentId','roleCeiling','createdBySubject'`. With the
-// engine-level read-merge (memql#1709) the partial merges onto the stored
-// delegation row: active flips to false while every discriminator field is
-// inherited.
+// TestReadMerge_RevokeDelegation_PreservesFields is the regression for
+// mutationRevokeDelegation (dsl/identity/mutations.memql). The mutation is
+// authored as an update{} (read-merge) that AUTHORITATIVELY forces
+// `active: false` and stamps revocation metadata regardless of caller input
+// (memql#1729): the caller supplies only delegationId (+ optional
+// revokedBySubject / revokedAt), never the terminal state. The engine-level
+// read-merge (memql#1709) inherits every omitted discriminator field from the
+// stored delegation row while active flips to false.
 func TestReadMerge_RevokeDelegation_PreservesFields(t *testing.T) {
 	eng, db, ctx := readMergeTestEngine(t)
 	const conceptName = "v1:identity:delegation"
@@ -330,19 +329,19 @@ func TestReadMerge_RevokeDelegation_PreservesFields(t *testing.T) {
 	before := latestPayload(t, ctx, db, conceptName, storedId)
 	require.Equal(t, true, before["active"], "seed delegation starts active")
 
-	// The fix: MINIMAL revoke -- active=false + revocation metadata only.
+	// The fix (memql#1729): the caller passes ONLY the revoker subject + time;
+	// it never supplies `active`. The mutation forces active=false itself, so
+	// the terminal state cannot depend on (or be subverted by) caller input.
 	runMutation(t, ctx, eng, "mutationRevokeDelegation", map[string]any{
-		"delegationId": storedId,
-		"payload": map[string]any{
-			"active":           false,
-			"revokedAt":        "2026-06-18T02:00:00Z",
-			"revokedBySubject": "user:alice",
-		},
+		"delegationId":     storedId,
+		"revokedAt":        "2026-06-18T02:00:00Z",
+		"revokedBySubject": "user:alice",
 	})
 
 	p := latestPayload(t, ctx, db, conceptName, storedId)
-	require.Equal(t, false, p["active"], "revoke must flip active=false")
+	require.Equal(t, false, p["active"], "revoke must authoritatively flip active=false")
 	require.Equal(t, "2026-06-18T02:00:00Z", p["revokedAt"], "revokedAt must be stamped")
+	require.Equal(t, "user:alice", p["revokedBySubject"], "revokedBySubject must be recorded")
 	// Omitted required fields inherited from the prior row.
 	require.Equal(t, before["identityId"], p["identityId"], "identityId preserved (memql#1709)")
 	require.Equal(t, before["identitySubject"], p["identitySubject"], "identitySubject preserved (memql#1709)")
