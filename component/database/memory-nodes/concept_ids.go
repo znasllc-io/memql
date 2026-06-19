@@ -35,6 +35,14 @@ const (
 	ConceptHarnessObservation = "v1:harness:observation"
 )
 
+// Action-library concepts (v1:actions:*) -- the reusable, replayable
+// action library (epic #1734). `action.intent` is embedded into
+// node_vectors (vectorField='intent') so the planner can cosine-search
+// the library (#1758).
+const (
+	ConceptActionsAction = "v1:actions:action"
+)
+
 // Authoring domain concepts (v1:authoring:*) -- the graph-stored
 // substrate for planner-authored DSL bundles (epic #954). The construct
 // row is the per-construct member of a bundle and the catalog's reuse

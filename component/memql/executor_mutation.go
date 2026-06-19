@@ -581,6 +581,14 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		e.embedHarnessObservation(ctx, result.ID, result.Payload)
 	}
 
+	// Embed a freshly-minted action-library action's `intent` into
+	// node_vectors (vectorField='intent') so the planner can cosine-search
+	// the library (#1758). Same best-effort contract as observations -- the
+	// action row is durable regardless of embed success.
+	if conceptMeta.Name == memorynodes.ConceptActionsAction {
+		e.embedActionIntent(ctx, result.ID, result.Payload)
+	}
+
 	// Emit node created event
 	// Flatten node payload fields into event for easier filter access
 	// This allows filters to use "participantType==\"human\"" instead of "payload.participantType==\"human\""
@@ -863,5 +871,46 @@ func (e *MemQLEngine) embedHarnessObservation(ctx context.Context, id string, pa
 	}
 	if e.Logger != nil {
 		e.Logger.Debug("harness observation embedded for recall", "id", id, "content_len", len(content))
+	}
+}
+
+// embedActionIntent embeds a freshly-inserted v1:actions:action's `intent`
+// into node_vectors (vectorField='intent') so the action library is
+// cosine-searchable by the planner (#1758). Mirrors embedHarnessObservation:
+// it dispatches the already-registered integration.embedding.store capability
+// (one embedding write-path), and is best-effort -- any failure (no embedding
+// integration on this binary, empty intent, embed error) is logged and
+// swallowed; the action row is already durable and a re-embed can backfill.
+func (e *MemQLEngine) embedActionIntent(ctx context.Context, id string, payload []byte) {
+	if e.integrations == nil || strings.TrimSpace(id) == "" || len(payload) == 0 {
+		return
+	}
+	handler, ok := e.integrations.Get("integration.embedding.store")
+	if !ok {
+		return
+	}
+	var p map[string]any
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return
+	}
+	intent, _ := p["intent"].(string)
+	if strings.TrimSpace(intent) == "" {
+		return
+	}
+	args := map[string]any{
+		"nodeId":      id,
+		"text":        intent,
+		"concept":     memorynodes.ConceptActionsAction,
+		"vectorField": "intent",
+	}
+	if _, err := handler(ctx, args, 1); err != nil {
+		if e.Logger != nil {
+			e.Logger.Warn("action intent embed failed (planner search will skip this action until backfilled)",
+				"id", id, "error", err)
+		}
+		return
+	}
+	if e.Logger != nil {
+		e.Logger.Debug("action intent embedded for planner search", "id", id, "intent_len", len(intent))
 	}
 }

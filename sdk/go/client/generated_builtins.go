@@ -397,6 +397,42 @@ func RestoreDocumentVersionBuild(args RestoreDocumentVersionArgs) string {
 	return b.String()
 }
 
+// SearchActions wraps the builtin named "searchActions".
+type SearchActionsArgs struct {
+	Text     string
+	K        int
+	Provider string
+}
+
+// SearchActions calls the engine builtin searchActions.
+func (qc *QueryClient) SearchActions(ctx context.Context, args SearchActionsArgs) (*Result, error) {
+	call := SearchActionsBuild(args)
+	return qc.executeNamed(ctx, "searchActions", call)
+}
+
+func SearchActionsBuild(args SearchActionsArgs) string {
+	var b strings.Builder
+	b.WriteString("searchActions({")
+	b.WriteString("text: ")
+	b.WriteString(fmt.Sprintf("%q", args.Text))
+	if args.K != 0 {
+		if b.Len() > 15 {
+			b.WriteString(", ")
+		}
+		b.WriteString("k: ")
+		b.WriteString(fmt.Sprintf("%v", args.K))
+	}
+	if args.Provider != "" {
+		if b.Len() > 15 {
+			b.WriteString(", ")
+		}
+		b.WriteString("provider: ")
+		b.WriteString(fmt.Sprintf("%q", args.Provider))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // TrainAgent -- Train an agent: replace capabilities.domains + .tools, eager-embed chunks, refresh identity vector, distill system prompt. Bracketed by a Plan + 3 Tasks for canvas + Tasks-page visibility.
 type TrainAgentArgs struct {
 	AgentId     string
