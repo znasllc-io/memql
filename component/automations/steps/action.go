@@ -49,19 +49,6 @@ func (e *ActionExecutor) Execute(ctx context.Context, step *automations.Step, st
 		return fail(fmt.Sprintf("invalid action ref %q: %v", step.Action.Ref, err))
 	}
 
-	// Resolve the action row: a pinned ref binds an exact version; a floating
-	// ref tracks the latest version of the id.
-	var query string
-	if ref.Floating {
-		query = fmt.Sprintf(`queryActionById({actionId:%q})`, ref.ID)
-	} else {
-		query = fmt.Sprintf(`queryActionByIdAndVersion({actionId:%q, version:%d})`, ref.ID, ref.Version)
-	}
-	payload, ok := resolveActionPayload(ctx, stepCtx, query)
-	if !ok {
-		return fail(fmt.Sprintf("action %q not found", step.Action.Ref))
-	}
-
 	// The step's args are the input the action's parameters re-bind from.
 	input := map[string]any{}
 	for k, v := range step.Action.Args {
@@ -73,26 +60,11 @@ func (e *ActionExecutor) Execute(ctx context.Context, step *automations.Step, st
 		}
 	}
 
-	calls := actionReplayCalls(payload)
-	if len(calls) == 0 {
-		return fail(fmt.Sprintf("action %q has no replayable calls", step.Action.Ref))
-	}
-
-	rebound := make([]actionreplay.ReplayCall, 0, len(calls))
-	for _, c := range calls {
-		rebound = append(rebound, actionreplay.ReplayCall{
-			Index:      c.Index,
-			Capability: c.Capability,
-			Args:       parambind.BindArgs(c, input),
-		})
-	}
-
 	if stepCtx.Logger != nil {
-		stepCtx.Logger.Debug("executing action step",
-			"step", step.ID, "ref", step.Action.Ref, "calls", len(rebound))
+		stepCtx.Logger.Debug("executing action step", "step", step.ID, "ref", step.Action.Ref)
 	}
 
-	results, _, rerr := actionreplay.Replay(ctx, stepCtx.Engine, rebound)
+	results, rerr := e.replayActionRef(ctx, stepCtx, ref, input, 0)
 	if rerr != nil {
 		return fail(fmt.Sprintf("action %q replay failed: %v", step.Action.Ref, rerr))
 	}
@@ -106,6 +78,116 @@ func (e *ActionExecutor) Execute(ctx context.Context, step *automations.Step, st
 	result.CompletedAt = time.Now()
 	result.Duration = result.CompletedAt.Sub(result.StartedAt)
 	return result, nil
+}
+
+// maxCompositeDepth bounds composite recursion so a cyclic composite (a
+// composite that references itself, directly or transitively) cannot spin.
+const maxCompositeDepth = 8
+
+// replayActionRef resolves an action by reference and replays it, recursing
+// into a composite's child action refs. A primitive replays its captured
+// capability calls (re-bound from input); a composite walks its ordered child
+// steps, binds each child's input from the composite's argTemplate, and
+// recurses. Returns the concatenated child results.
+func (e *ActionExecutor) replayActionRef(ctx context.Context, stepCtx *Context, ref actionpin.Ref, input map[string]any, depth int) ([]any, error) {
+	if depth > maxCompositeDepth {
+		return nil, fmt.Errorf("composite action nesting exceeds %d (cycle?)", maxCompositeDepth)
+	}
+
+	var query string
+	if ref.Floating {
+		query = fmt.Sprintf(`queryActionById({actionId:%q})`, ref.ID)
+	} else {
+		query = fmt.Sprintf(`queryActionByIdAndVersion({actionId:%q, version:%d})`, ref.ID, ref.Version)
+	}
+	payload, ok := resolveActionPayload(ctx, stepCtx, query)
+	if !ok {
+		return nil, fmt.Errorf("action %q not found", actionpin.Format(ref))
+	}
+
+	if kind, _ := payload["kind"].(string); kind == "composite" {
+		return e.replayComposite(ctx, stepCtx, payload, input, depth)
+	}
+
+	// primitive: replay the captured calls, re-binding params from input.
+	calls := actionReplayCalls(payload)
+	if len(calls) == 0 {
+		return nil, fmt.Errorf("action %q has no replayable calls", actionpin.Format(ref))
+	}
+	rebound := make([]actionreplay.ReplayCall, 0, len(calls))
+	for _, c := range calls {
+		rebound = append(rebound, actionreplay.ReplayCall{
+			Index:      c.Index,
+			Capability: c.Capability,
+			Args:       parambind.BindArgs(c, input),
+		})
+	}
+	results, _, rerr := actionreplay.Replay(ctx, stepCtx.Engine, rebound)
+	return results, rerr
+}
+
+// replayComposite walks a composite action's ordered child steps, binding each
+// child's input from the composite input via the step's argTemplate, and
+// recurses. Child results are concatenated in step order.
+func (e *ActionExecutor) replayComposite(ctx context.Context, stepCtx *Context, payload map[string]any, input map[string]any, depth int) ([]any, error) {
+	stepsRaw, ok := payload["steps"].([]any)
+	if !ok || len(stepsRaw) == 0 {
+		return nil, fmt.Errorf("composite action has no steps")
+	}
+	var all []any
+	for i, s := range stepsRaw {
+		sm, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		childRef, rerr := compositeChildRef(sm)
+		if rerr != nil {
+			return nil, fmt.Errorf("composite step %d: %w", i, rerr)
+		}
+		childInput := bindChildArgs(sm["argTemplate"], input)
+		res, err := e.replayActionRef(ctx, stepCtx, childRef, childInput, depth+1)
+		if err != nil {
+			return nil, fmt.Errorf("composite step %d (%s): %w", i, actionpin.Format(childRef), err)
+		}
+		all = append(all, res...)
+	}
+	return all, nil
+}
+
+// compositeChildRef builds a child action reference from a composite step
+// entry {actionId, version?}. A present version >= 1 pins it; otherwise the
+// child floats to the latest version.
+func compositeChildRef(sm map[string]any) (actionpin.Ref, error) {
+	id, _ := sm["actionId"].(string)
+	if id == "" {
+		return actionpin.Ref{}, fmt.Errorf("missing actionId")
+	}
+	if v, ok := sm["version"].(float64); ok && v >= 1 {
+		return actionpin.Ref{ID: id, Version: int(v)}, nil
+	}
+	return actionpin.Ref{ID: id, Floating: true}, nil
+}
+
+// bindChildArgs maps a composite step's argTemplate to the child's input. An
+// argTemplate value that is a string naming a key in the composite input binds
+// to that input value (composite param -> child arg); any other value passes
+// through literally. Pure + unit-tested.
+func bindChildArgs(tmpl any, input map[string]any) map[string]any {
+	out := map[string]any{}
+	m, ok := tmpl.(map[string]any)
+	if !ok {
+		return out
+	}
+	for childKey, v := range m {
+		if s, ok := v.(string); ok {
+			if bound, present := input[s]; present {
+				out[childKey] = bound
+				continue
+			}
+		}
+		out[childKey] = v
+	}
+	return out
 }
 
 // resolveActionPayload runs the resolution query and returns the first matching
