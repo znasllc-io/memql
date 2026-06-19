@@ -1214,11 +1214,21 @@ mutation identity mutationCreateVoiceAgentTokenIdentity {
 // sweep), so the trail is preserved even though the user record
 // is tombstoned.
 //
-// Display fields (displayName, primaryEmail) are blanked out as a
-// privacy measure: the row stays around for foreign-key integrity
-// (e.g. authSession.userId, auditEvent.actorUserId) but PII is
-// removed. Captured email addresses on audit rows are
-// point-in-time copies and not affected.
+// PII is scrubbed as a data-deletion measure: the row stays around
+// for foreign-key integrity (e.g. authSession.userId,
+// auditEvent.actorUserId) but every personally-identifying field is
+// cleared. The scrub is annotation-driven (@scrubPii, memql#1711):
+// the engine enumerates every field the user concept marks with
+// @pii (displayName, firstName, lastName, primaryEmail, phone,
+// primaryRole, gender, birthdate) and zeroes it after the partial
+// payload merges. This replaced the old hand-maintained
+// `displayName: "" / primaryEmail: ""` list that left firstName,
+// lastName, phone, primaryRole, and gender populated on the
+// tombstoned row -- a GDPR/data-deletion gap. Adding a new PII field
+// to the user concept now requires only the @pii annotation; the
+// scrub covers it automatically and cannot drift out of sync.
+// Captured email addresses on audit rows are point-in-time copies
+// and not affected.
 //
 // If a future MemQL release adds delete() (true row removal), this
 // mutation can flip to that path; the sweep cron's contract
@@ -1232,7 +1242,8 @@ mutation identity mutationCreateVoiceAgentTokenIdentity {
 //
 
 @enabled
-@description("Hard-delete (soft-delete + PII scrub) a user after the deletion-cooldown sweep.")
+@scrubPii
+@description("Hard-delete (soft-delete + generic @pii scrub) a user after the deletion-cooldown sweep.")
 mutation user mutationDeleteUserHard {
   args {
     userId  string  @required
@@ -1240,8 +1251,6 @@ mutation user mutationDeleteUserHard {
   update {
     id: args.userId
     active: false
-    displayName: ""
-    primaryEmail: ""
   }
 }
 

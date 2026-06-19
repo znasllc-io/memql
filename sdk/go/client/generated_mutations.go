@@ -6518,7 +6518,7 @@ func MutationDeleteSpaceNowBuild(args MutationDeleteSpaceNowArgs) string {
 	return b.String()
 }
 
-// MutationDeleteUserHard -- Hard-delete (soft-delete + PII scrub) a user after the deletion-cooldown sweep.
+// MutationDeleteUserHard -- Hard-delete (soft-delete + generic @pii scrub) a user after the deletion-cooldown sweep.
 //
 // Bound concept: user.
 type MutationDeleteUserHardArgs struct {

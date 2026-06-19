@@ -248,6 +248,11 @@ type parsedProperty struct {
 	maximum   *float64
 	immutable bool
 	secret    bool
+	// pii marks the field as personally-identifying data. Surfaces as
+	// the x-pii custom JSON-Schema keyword so the engine's hard-delete
+	// scrub (memql#1711) can enumerate and zero every such field
+	// generically instead of relying on a hand-maintained list.
+	pii bool
 	// Phase 3 discriminated-union variants
 	variantDiscriminator string
 	variants             []parsedPropertyVariant
@@ -526,6 +531,8 @@ func applyPropertyAttribute(prop *parsedProperty, attr *parser.Attribute) error 
 		prop.immutable = true
 	case "secret":
 		prop.secret = true
+	case "pii":
+		prop.pii = true
 	case "variant":
 		// @variant(discriminator="field") is handled structurally
 		// in propertyDeclToParsed (it triggers variant-branch
@@ -693,6 +700,9 @@ func propertyToJSONSchema(prop parsedProperty) (map[string]any, error) {
 	}
 	if prop.secret {
 		schema["x-secret"] = true
+	}
+	if prop.pii {
+		schema["x-pii"] = true
 	}
 
 	switch prop.typeName {

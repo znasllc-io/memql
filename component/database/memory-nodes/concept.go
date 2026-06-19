@@ -484,6 +484,44 @@ func (c *Concept) RequiredFields() []string {
 	return result
 }
 
+// PIIFields returns the names of every top-level field the concept's
+// definition schema marks with the x-pii custom keyword (emitted from
+// the field's @pii annotation). The engine's hard-delete scrub
+// (memql#1711) consults this list to zero every personally-identifying
+// field generically, so adding a new PII field to a concept needs only
+// the @pii annotation -- the scrub picks it up automatically and cannot
+// drift out of sync with a hand-maintained list. Returns nil when the
+// concept declares no PII fields. Order follows JSON map iteration and
+// is not significant -- the scrub clears every name regardless.
+func (c *Concept) PIIFields() []string {
+	if c == nil {
+		return nil
+	}
+	raw, ok := c.Schemas[definitionSchemaKey]
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+
+	var schema struct {
+		Properties map[string]struct {
+			PII bool `json:"x-pii"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return nil
+	}
+
+	result := make([]string, 0, len(schema.Properties))
+	for name, prop := range schema.Properties {
+		if prop.PII {
+			if trimmed := strings.TrimSpace(name); trimmed != "" {
+				result = append(result, trimmed)
+			}
+		}
+	}
+	return result
+}
+
 func toNode(node *MemoryNode) Node {
 	if node == nil {
 		return Node{}

@@ -436,6 +436,11 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				return nil, fmt.Errorf("function %q: %w", expectedName, err)
 			}
 
+			scrubPii, err := mutationScrubPii(funcDef, stmt.Kind)
+			if err != nil {
+				return nil, fmt.Errorf("function %q: %w", expectedName, err)
+			}
+
 			// Handle object-literal syntax: insert("concept", { id: ..., payload: {...} })
 			// If the payloadObj includes an id or payload key, normalize them.
 			var idTemplate any = stmt.IDTemplate
@@ -492,6 +497,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				ParentTemplate:         parentTemplate,
 				AliasOfTemplate:        aliasOfTemplate,
 				MergeFields:            mergeFields,
+				ScrubPii:               scrubPii,
 			}
 			fn.ExprSource = extractExpressionFromContent(content)
 
