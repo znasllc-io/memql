@@ -1114,7 +1114,23 @@ func compilePayloadComparison(path []string, op ComparisonOperator, value any) (
 		// `deleted` key (the concept @default isn't always stamped). Use
 		// IS DISTINCT FROM so absent == not-equal == included. OpEq keeps
 		// plain `=` (absent is correctly NOT equal to the value).
+		//
+		// EXCEPTION -- comparison to the empty string (#1708/#1714): `!= ""`
+		// is the canonical "field is set" idiom across the DSL
+		// (traitIsDeletionScheduled = `deletionScheduledAt != ""`,
+		// queryExpiredConsumedAuthCodes = `consumedAt != ""`, etc). An ABSENT
+		// string field is logically EQUAL to "" (both mean "not set"), so it
+		// must NOT match `!= ""`. Under the #1685 IS DISTINCT FROM rule those
+		// queries wrongly returned every row whose field was absent (all
+		// active users / all expired codes). COALESCE the NULL to '' so an
+		// absent field reads as empty and is correctly excluded.
 		if op == OpNe {
+			if s, ok := normalized.(string); ok && s == "" {
+				return compiledExpression{
+					sql:  fmt.Sprintf("(COALESCE(%s, '') <> ?)", expr),
+					args: []any{normalized},
+				}, nil
+			}
 			return compiledExpression{
 				sql:  fmt.Sprintf("(%s IS DISTINCT FROM ?)", expr),
 				args: []any{normalized},
@@ -1507,13 +1523,23 @@ func nodeMatchesComparison(node memorynodes.MemoryNode, cmp *ComparisonExpressio
 		case OpNotMissing:
 			return exists && value != nil, nil
 		default:
-			if !exists {
+			if !exists || value == nil {
 				// NULL-safe inequality (#1685): an absent field is DISTINCT
 				// FROM any concrete value, so `!=` MATCHES it -- mirrors the
 				// SQL IS DISTINCT FROM path so the post-filter and the SQL
 				// scan agree. Every other operator treats absent as a
 				// non-match.
-				return cmp.Operator == OpNe, nil
+				//
+				// EXCEPTION (#1708/#1714): `!= ""` is the "is set" idiom; an
+				// absent string field equals "" (not set) and must NOT match.
+				// Mirrors the COALESCE(expr,'') <> '' SQL path above.
+				if cmp.Operator == OpNe {
+					if s, ok := cmp.Value.(string); ok && s == "" {
+						return false, nil
+					}
+					return true, nil
+				}
+				return false, nil
 			}
 			return compareScalarValues(value, cmp.Operator, cmp.Value)
 		}

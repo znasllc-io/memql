@@ -1079,10 +1079,13 @@ func QueryAvatarPersonaByIdBuild(args QueryAvatarPersonaByIdArgs) string {
 	return b.String()
 }
 
-// QueryAvatarPersonas -- List every active CUSTOM Simli avatar persona in the operator catalog (memql#609 / Simli-only memql#1239). Backs the Create-Assistant persona picker (copresent#239); the SPA filters to the user's selected gender client-side over this small catalog. Hard-filtered to vendor==simli: Anam is render-blocked (memql#1236), so only our custom Simli avatars may surface. Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql.
+// QueryAvatarPersonas -- List active avatar personas in the operator catalog (memql#609). Backs the Create-Assistant persona picker (copresent#239); the SPA filters to the user's selected gender client-side over this small catalog. `vendor` is an OPTIONAL filter -- omit it to list every active persona across vendors; pass vendor=\"simli\" to scope to custom Simli avatars (memql#1708: the predicate was a hardcoded vendor==simli that silently dropped every other vendor's personas from the list, even though by-id reads returned them). Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql.
 //
 // Bound concept: avatarPersona.
 type QueryAvatarPersonasArgs struct {
+	// Optional vendor filter. Omit to list every active persona; pass to scope to one vendor.
+	// Enum: anam | simli
+	Vendor string
 }
 
 // QueryAvatarPersonas calls the engine query queryAvatarPersonas.
@@ -1092,8 +1095,14 @@ func (qc *QueryClient) QueryAvatarPersonas(ctx context.Context, args QueryAvatar
 }
 
 func QueryAvatarPersonasBuild(args QueryAvatarPersonasArgs) string {
-	_ = args
-	return "queryAvatarPersonas({})"
+	var b strings.Builder
+	b.WriteString("queryAvatarPersonas({")
+	if args.Vendor != "" {
+		b.WriteString("vendor: ")
+		b.WriteString(fmt.Sprintf("%q", args.Vendor))
+	}
+	b.WriteString("})")
+	return b.String()
 }
 
 // QueryAwaitingFeedbackPlansPastTimeout -- Plans in awaitingFeedback whose feedbackRequest.timeoutAt is in the past. Backs feedbackTimeoutAutoPause.
@@ -1470,7 +1479,7 @@ func QueryDocumentVersionsForOwnerBuild(args QueryDocumentVersionsForOwnerArgs) 
 	return b.String()
 }
 
-// QueryDocumentsForDomain -- Validated Documents attached to a knowledge domain.
+// QueryDocumentsForDomain -- Validated Documents attached to a knowledge domain. attachedDomains is a []string, so membership (`in`) is the correct join -- memql#1708: the old `payload.attachedDomains==args.domainId` compared the whole list against a scalar and never matched, so the detail view came back empty even for a validated, correctly-attached Document.
 //
 // Bound concept: document.
 type QueryDocumentsForDomainArgs struct {
@@ -1735,7 +1744,7 @@ func QueryExpiredAuditEventsBuild(args QueryExpiredAuditEventsArgs) string {
 	return "queryExpiredAuditEvents({})"
 }
 
-// QueryExpiredConsumedAuthCodes -- Auth codes whose expiresAt is before the supplied cutoff.
+// QueryExpiredConsumedAuthCodes -- CONSUMED auth codes whose expiresAt is before the supplied cutoff. Both predicates are load-bearing: the name says `Consumed`, so the consumedAt gate (memql#1714) keeps the result set to spent-then-expired codes and never sweeps an unspent-but-expired code that a redemption is still racing against.
 //
 // Bound concept: authCode.
 type QueryExpiredConsumedAuthCodesArgs struct {

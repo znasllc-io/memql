@@ -201,9 +201,12 @@ query skillChangeEvent querySkillChangeEventsForAgent {
 }
 
 @enabled
-@description("List every active CUSTOM Simli avatar persona in the operator catalog (memql#609 / Simli-only memql#1239). Backs the Create-Assistant persona picker (copresent#239); the SPA filters to the user's selected gender client-side over this small catalog. Hard-filtered to vendor==simli: Anam is render-blocked (memql#1236), so only our custom Simli avatars may surface. Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql.")
+@description("List active avatar personas in the operator catalog (memql#609). Backs the Create-Assistant persona picker (copresent#239); the SPA filters to the user's selected gender client-side over this small catalog. `vendor` is an OPTIONAL filter -- omit it to list every active persona across vendors; pass vendor=\"simli\" to scope to custom Simli avatars (memql#1708: the predicate was a hardcoded vendor==simli that silently dropped every other vendor's personas from the list, even though by-id reads returned them). Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql.")
 query avatarPersona queryAvatarPersonas {
-  filter  traitIsActiveRecord && payload.vendor=="simli"
+  args {
+    vendor  string  @enum("anam", "simli")  @description("Optional vendor filter. Omit to list every active persona; pass to scope to one vendor.")
+  }
+  filter  traitIsActiveRecord && when(args.vendor) { payload.vendor==args.vendor }
   shape   avatarPersonaFull
 }
 
