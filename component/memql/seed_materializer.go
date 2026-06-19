@@ -4,16 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"math/rand"
 	"os"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/provenance"
+)
+
+// Seed-write resilience knobs (#1753). A full-stack release roll restarts every
+// node-type's replicas at once; the combined connection demand momentarily
+// exceeds the Postgres ceiling and seed materialization writes fail in a burst
+// with SQLSTATE 53300 (remaining connection slots reserved). Rather than
+// ERROR-drop the seed, treat 53300 as TRANSIENT and retry with a jittered,
+// lengthening backoff so a momentary surge never loses a seed row. The window
+// (~sum of base*attempt) comfortably outlasts the observed ~3s startup storm.
+const (
+	seedWriteMaxAttempts = 6
+	seedWriteBaseBackoff = 300 * time.Millisecond
 )
 
 // devDefaultAvatarPersonaEnv names the dev-only knob that auto-assigns an
@@ -657,10 +672,73 @@ func (m *SeedMaterializer) invokeCreateMutation(ctx context.Context, conceptName
 		return fmt.Errorf("render args: %w", err)
 	}
 	query := fmt.Sprintf("%s(%s)", mutationName, rendered)
-	if _, err := m.engine.Execute(systemActorContext(ctx), query); err != nil {
+	if err := m.executeSeedWriteWithRetry(ctx, query); err != nil {
 		return fmt.Errorf("%s: %w", mutationName, err)
 	}
 	return nil
+}
+
+// executeSeedWriteWithRetry runs a seed mutation, treating a connection-slot
+// storm (SQLSTATE 53300, the all-nodes full-stack-roll surge in #1753) as a
+// TRANSIENT condition: it backs off with a jittered, lengthening delay and
+// retries instead of dropping the seed, so a momentary surge never loses a row.
+// Non-transient errors return immediately. The seed writes are idempotent at
+// the row level (global seeds key off a stable id; per-user off (concept,
+// owner, provenance)), so a retried write converges rather than duplicating.
+func (m *SeedMaterializer) executeSeedWriteWithRetry(ctx context.Context, query string) error {
+	var logger *slog.Logger
+	if m.engine != nil {
+		logger = m.engine.Logger
+	}
+	return retryOnDBSurge(ctx, logger, func() error {
+		_, err := m.engine.Execute(systemActorContext(ctx), query)
+		return err
+	})
+}
+
+// retryOnDBSurge runs `do`, retrying only on a transient DB connection surge
+// with a jittered, lengthening backoff. Extracted from the engine call so it is
+// unit-testable with a scripted closure (the engine itself is a concrete type).
+func retryOnDBSurge(ctx context.Context, logger *slog.Logger, do func() error) error {
+	var err error
+	for attempt := 1; attempt <= seedWriteMaxAttempts; attempt++ {
+		if err = do(); err == nil || !isTransientDBSurge(err) {
+			return err
+		}
+		if attempt == seedWriteMaxAttempts {
+			break
+		}
+		// Jittered linear backoff: base*attempt + [0,base) jitter, so the
+		// ~20-pod surge doesn't re-converge into a synchronized retry storm.
+		backoff := time.Duration(attempt)*seedWriteBaseBackoff + time.Duration(rand.Int63n(int64(seedWriteBaseBackoff)))
+		if logger != nil {
+			logger.Warn("seed materializer: transient DB connection surge; backing off and retrying",
+				"attempt", attempt, "maxAttempts", seedWriteMaxAttempts, "backoff", backoff.String())
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+	}
+	return err
+}
+
+// isTransientDBSurge reports whether a DB error is the connection-slot
+// exhaustion of a full-stack roll (SQLSTATE 53300) or a transient connection
+// drop -- worth backing off and retrying rather than ERROR-dropping the seed.
+// Conservative: a validation/logic error must NOT be retried.
+func isTransientDBSurge(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "53300") || // too_many_connections / remaining connection slots reserved
+		strings.Contains(s, "remaining connection slots are reserved") ||
+		strings.Contains(s, "too many clients already") ||
+		strings.Contains(s, "connection refused") ||
+		strings.Contains(s, "connection reset") ||
+		strings.Contains(s, "the database system is") // starting up / in recovery
 }
 
 // renderArgsObject emits a MemQL object literal with bare identifier
