@@ -91,7 +91,7 @@ func (w *NodeStatusWriter) Handle(ctx context.Context, peer *nodev1.PeerInfo, ol
 			Subject: "system:node-status-writer",
 		})
 
-		if err := w.engine.Execute(execCtx, query); err != nil {
+		if err := w.persistHealthTransition(execCtx, query, nodeId, nodeType, address, healthLabel, lastSeenISO); err != nil {
 			w.logger.Error("status_writer: failed to persist health transition",
 				"peer_id", nodeId,
 				"from", old.String(),
@@ -107,6 +107,91 @@ func (w *NodeStatusWriter) Handle(ctx context.Context, peer *nodev1.PeerInfo, ol
 			"to", new.String(),
 		)
 	}()
+}
+
+// Status-write resilience knobs (#1755). The initial health write for a peer
+// can hit a transient DB error during a full-stack roll (e.g. SQLSTATE 53300
+// too_many_connections, the #1753 surge); a bounded retry rides over it
+// instead of dropping the write.
+const (
+	statusWriteMaxAttempts  = 3
+	statusWriteRetryBackoff = 200 * time.Millisecond
+)
+
+// persistHealthTransition upserts a peer's v1:cluster:node health row (#1755).
+//
+// The normal path is the read-merge mutationUpdateNodeHealth (preserves
+// nodeType/address/capabilities/labels). But that depends on the row already
+// existing -- created by the peer's own logicRegisterNode at startup. When that
+// initial write never committed (the peer's registration, or its first
+// transition, hit a transient DB error during a roll), the row is missing and
+// EVERY subsequent update fails permanently with "no existing row ... use
+// insert()", wedging health tracking for that peer for its whole lifetime.
+//
+// So when the update reports a missing row we fall back to an insert
+// (mutationCreateNode) carrying this transition's health -- the row self-heals
+// instead of staying wedged. Transient DB errors on either call are retried
+// with a bounded backoff.
+func (w *NodeStatusWriter) persistHealthTransition(ctx context.Context, updateQuery, nodeId, nodeType, address, health, lastSeenISO string) error {
+	err := w.execWithRetry(ctx, updateQuery)
+	if err == nil || !isMissingRowErr(err) {
+		return err
+	}
+
+	// Row doesn't exist yet -> insert it carrying this transition's health so
+	// the next transition's update finds a row to read-merge.
+	createQuery, cerr := buildCreateNodeHealthCall(nodeId, nodeType, address, health, lastSeenISO)
+	if cerr != nil {
+		return cerr
+	}
+	w.logger.Warn("status_writer: health row missing; inserting to self-heal",
+		"peer_id", nodeId,
+		"health", health,
+	)
+	return w.execWithRetry(ctx, createQuery)
+}
+
+// execWithRetry runs a mutation, retrying only on transient DB errors with a
+// linear backoff. Non-transient errors (including "no existing row") return
+// immediately so the caller can branch on them.
+func (w *NodeStatusWriter) execWithRetry(ctx context.Context, query string) error {
+	var err error
+	for attempt := 1; attempt <= statusWriteMaxAttempts; attempt++ {
+		if err = w.engine.Execute(ctx, query); err == nil || !isTransientErr(err) {
+			return err
+		}
+		if attempt == statusWriteMaxAttempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(attempt) * statusWriteRetryBackoff):
+		}
+	}
+	return err
+}
+
+// isMissingRowErr reports whether an update failed because the target row does
+// not exist (the engine's update() guard: "no existing row ... use insert()").
+func isMissingRowErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "no existing row")
+}
+
+// isTransientErr reports whether a DB error is worth retrying: connection-slot
+// exhaustion (SQLSTATE 53300, the #1753 roll surge that triggers #1755) or a
+// transient connection drop / recovery. Deliberately conservative -- a
+// logic/validation error (incl. "no existing row") must NOT be retried.
+func isTransientErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "53300") || // too_many_connections (the #1753 surge)
+		strings.Contains(s, "too many clients already") ||
+		strings.Contains(s, "connection refused") ||
+		strings.Contains(s, "connection reset") ||
+		strings.Contains(s, "the database system is") // starting up / in recovery
 }
 
 // HealthLabel converts a NodeHealthStatus enum value to the lowercase
@@ -185,4 +270,34 @@ func buildUpdateNodeHealthCall(nodeId, nodeType, address, health, lastSeenISO st
 		return "", err
 	}
 	return "mutationUpdateNodeHealth(" + string(body) + ")", nil
+}
+
+// buildCreateNodeHealthCall formats the insert fallback (#1755): when the
+// read-merge update reports a missing row, this inserts the v1:cluster:node row
+// under the peer's NodeId carrying this transition's health, so health tracking
+// self-heals instead of wedging. Shares the createNode mutation the peer's own
+// logicRegisterNode uses, so the row shape is identical.
+func buildCreateNodeHealthCall(nodeId, nodeType, address, health, lastSeenISO string) (string, error) {
+	if strings.TrimSpace(nodeId) == "" {
+		return "", fmt.Errorf("status_writer: nodeId is required")
+	}
+	if strings.TrimSpace(nodeType) == "" {
+		return "", fmt.Errorf("status_writer: nodeType is required")
+	}
+	if strings.TrimSpace(health) == "" {
+		return "", fmt.Errorf("status_writer: health is required")
+	}
+
+	args := map[string]string{
+		"id":       nodeId,
+		"nodeType": nodeType,
+		"address":  address,
+		"health":   health,
+		"lastSeen": lastSeenISO,
+	}
+	body, err := json.Marshal(args)
+	if err != nil {
+		return "", err
+	}
+	return "mutationCreateNode(" + string(body) + ")", nil
 }
