@@ -106,11 +106,57 @@ func run(ctx context.Context, c gateConfig) error {
 	if c.token == "" {
 		return errors.New("authenticated query: no JWT (set --jwt or $MEMQL_SVC_JWT)")
 	}
-	if err := checkAuthQuery(ctx, c); err != nil {
+	if err := checkAuthQueryWithRetry(ctx, c); err != nil {
 		return fmt.Errorf("authenticated query: %w", err)
 	}
 	fmt.Println("deploy-gate-check: 2/2 authenticated query OK (BFF accepted the service_account JWT; engine answered)")
 	return nil
+}
+
+// errTransientGate marks a gate failure that is worth retrying within a single
+// gate run -- a freshly-promoted node whose verifier hasn't yet fetched the
+// signing key from the identity JWKS (so a valid service_account JWT is briefly
+// rejected as Unauthenticated), or a node that is up but not yet serving
+// (Unavailable). A persistent rejection still fails the gate after the retries
+// are spent; this only smooths the JWKS/startup warm-up race (#1782).
+var errTransientGate = errors.New("transient gate error")
+
+const (
+	authRetryAttempts = 6               // ~30s total tolerance for JWKS warm-up
+	authRetryDelay    = 5 * time.Second // verifier JWKS refresh-on-unknown-kid is sub-second; 5s spacing is generous
+)
+
+// checkAuthQueryWithRetry runs checkAuthQuery, retrying ONLY transient
+// (Unauthenticated/Unavailable) failures with bounded backoff so a JWKS/startup
+// warm-up race on a fresh color does not abort an otherwise-healthy promotion
+// (#1782). Real auth rejections (PermissionDenied) and any other error fail
+// immediately.
+func checkAuthQueryWithRetry(ctx context.Context, c gateConfig) error {
+	var lastErr error
+	for attempt := 1; attempt <= authRetryAttempts; attempt++ {
+		err := checkAuthQuery(ctx, c)
+		if err == nil {
+			if attempt > 1 {
+				fmt.Printf("deploy-gate-check: authenticated query recovered on attempt %d (warm-up race)\n", attempt)
+			}
+			return nil
+		}
+		if !errors.Is(err, errTransientGate) {
+			return err
+		}
+		lastErr = err
+		if attempt == authRetryAttempts {
+			break
+		}
+		fmt.Printf("deploy-gate-check: transient auth failure (attempt %d/%d), retrying in %s: %v\n",
+			attempt, authRetryAttempts, authRetryDelay, err)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(authRetryDelay):
+		}
+	}
+	return lastErr
 }
 
 // readyzURLFor returns the readiness URL: the explicit override, else the
@@ -224,10 +270,17 @@ func checkAuthQuery(ctx context.Context, c gateConfig) error {
 // out the auth-rejection and backend-down cases the gate exists to catch.
 func classifyGRPC(stage string, err error) error {
 	switch status.Code(err) {
-	case codes.Unauthenticated, codes.PermissionDenied:
+	case codes.Unauthenticated:
+		// Transient during a promotion: the freshly-promoted color's verifier
+		// may not have fetched the token's signing key from the identity JWKS
+		// yet. Marked retryable (#1782); a persistent rejection still fails the
+		// gate once the in-run retries are spent.
+		return fmt.Errorf("%s: AUTH REJECTED (%s) -- service_account JWT not accepted on this surface yet (#691/#1782): %w", stage, status.Code(err), errTransientGate)
+	case codes.PermissionDenied:
+		// Authorization, not a warm-up race -- a real deny. Do not retry.
 		return fmt.Errorf("%s: AUTH REJECTED (%s) -- the service_account JWT was not accepted on this surface (#691)", stage, status.Code(err))
 	case codes.Unavailable:
-		return fmt.Errorf("%s: backend UNAVAILABLE (%s) -- the node is down/unready", stage, status.Code(err))
+		return fmt.Errorf("%s: backend UNAVAILABLE (%s) -- the node is down/unready: %w", stage, status.Code(err), errTransientGate)
 	default:
 		return fmt.Errorf("%s: %w", stage, err)
 	}

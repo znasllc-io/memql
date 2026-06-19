@@ -1,8 +1,12 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/znasllc-io/memql/component/language/parser"
 )
@@ -48,5 +52,30 @@ func TestReadyzURLFor(t *testing.T) {
 		if got := readyzURLFor(c.addr, c.override); got != c.want {
 			t.Errorf("readyzURLFor(%q,%q) = %q, want %q", c.addr, c.override, got, c.want)
 		}
+	}
+}
+
+// TestClassifyGRPCTransientMarking pins the #1782 retry contract: a JWKS/startup
+// warm-up race (Unauthenticated) and an unready backend (Unavailable) are marked
+// errTransientGate so checkAuthQueryWithRetry retries them, while a real
+// authorization deny (PermissionDenied) is NOT retryable and fails the gate now.
+func TestClassifyGRPCTransientMarking(t *testing.T) {
+	cases := []struct {
+		name      string
+		code      codes.Code
+		transient bool
+	}{
+		{"unauthenticated-warmup", codes.Unauthenticated, true},
+		{"unavailable-unready", codes.Unavailable, true},
+		{"permission-denied-real", codes.PermissionDenied, false},
+		{"internal-other", codes.Internal, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := classifyGRPC("recv", status.Error(tc.code, "boom"))
+			if got := errors.Is(err, errTransientGate); got != tc.transient {
+				t.Fatalf("classifyGRPC(%s): transient=%v, want %v (err=%v)", tc.code, got, tc.transient, err)
+			}
+		})
 	}
 }
