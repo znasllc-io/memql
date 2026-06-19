@@ -64,6 +64,8 @@ mutation action mutationMintAction {
     slug              string    @required
     intent            string    @required
     capability        string
+    sideEffectClass   string
+    status            string
     inputFingerprint  string    @required
     calls             []object  @required
     resourceEdges     []object
@@ -81,6 +83,8 @@ mutation action mutationMintAction {
     args.slug
     args.intent
     args.capability
+    sideEffectClass: coalesce(args.sideEffectClass, "write")
+    status: coalesce(args.status, "active")
     args.inputFingerprint
     args.calls
     args.resourceEdges
@@ -168,5 +172,64 @@ mutation surface mutationSetSurfaceAvailability {
     args.available
     lastSeen: now()
     provenanceMutation: "mutationSetSurfaceAvailability"
+  }
+}
+
+// mutationConfirmAction
+// =====================
+// Promote a confirm-gated candidate action to active after a human confirms
+// it (Phase 4 #1739). A real-machine write/exec action mints as candidate and
+// is held off the replay ladder (the active-only replay queries skip it) until
+// this confirm flips it to active. update read-merges so the captured calls +
+// ownerUserId are preserved. Internal write path driven by the confirm UI.
+@enabled
+@description("Confirm a candidate v1:actions:action, promoting it to active so it is offered for replay (Phase 4 #1739, the human gate for real-machine side effects).")
+mutation action mutationConfirmAction {
+  args {
+    actionId  string  @required
+  }
+  update {
+    id: args.actionId
+    status: "active"
+    provenanceMutation: "mutationConfirmAction"
+  }
+}
+
+// mutationDeprecateAction
+// =======================
+// Deprecate an action whose reliability fell below the floor (Phase 4 #1739).
+// A deprecated action is kept (append-only) but excluded from the active-only
+// replay queries, so it is no longer offered. Driven by the consolidation
+// decay sweep.
+@enabled
+@description("Deprecate a v1:actions:action (reliability below floor or superseded), removing it from replay (Phase 4 #1739).")
+mutation action mutationDeprecateAction {
+  args {
+    actionId  string  @required
+  }
+  update {
+    id: args.actionId
+    status: "deprecated"
+    provenanceMutation: "mutationDeprecateAction"
+  }
+}
+
+// mutationDecayAction
+// ===================
+// Set an action's decayed reliability (Phase 4 #1739). The decayed value is
+// computed engine-side from lastReinforced age (the MemQL parser has no
+// arithmetic, mirroring the semanticMemory decay mutation) and handed in by
+// the consolidation sweep.
+@enabled
+@description("Set a v1:actions:action decayed reliability from the consolidation sweep (Phase 4 #1739; value computed engine-side).")
+mutation action mutationDecayAction {
+  args {
+    actionId     string  @required
+    reliability  float   @required
+  }
+  update {
+    id: args.actionId
+    args.reliability
+    provenanceMutation: "mutationDecayAction"
   }
 }

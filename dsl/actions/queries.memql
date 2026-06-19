@@ -60,3 +60,22 @@ query action queryActionByTemplateFingerprint {
   filter  payload.templateFingerprint == args.templateFingerprint && traitStatusIsActive && payload.ownerUserId == actor.userId
   shape   actionFull
 }
+
+// queryActionsPendingConfirm -- the confirm UI's worklist (Phase 4 #1739):
+// candidate actions awaiting a human confirm before they replay. Owned tier.
+@enabled
+@description("List the calling owner's candidate v1:actions:action rows awaiting confirmation (real-machine side effects gate on a human, Phase 4 #1739). Owned tier.")
+query action queryActionsPendingConfirm {
+  filter  payload.status == "candidate" && payload.ownerUserId == actor.userId
+  shape   actionFull
+}
+
+// queryActiveActionsForOwner -- the consolidation sweep's input (Phase 4
+// #1739): the owner's active actions, to decay unused ones + deprecate those
+// below the reliability floor. Owned tier.
+@enabled
+@description("List the calling owner's active v1:actions:action rows for the consolidation decay/deprecate sweep (Phase 4 #1739). Owned tier.")
+query action queryActiveActionsForOwner {
+  filter  payload.ownerUserId == actor.userId && traitStatusIsActive
+  shape   actionFull
+}

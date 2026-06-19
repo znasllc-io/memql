@@ -878,6 +878,28 @@ func MutationCompleteToolInvocationBuild(args MutationCompleteToolInvocationArgs
 	return b.String()
 }
 
+// MutationConfirmAction -- Confirm a candidate v1:actions:action, promoting it to active so it is offered for replay (Phase 4 #1739, the human gate for real-machine side effects).
+//
+// Bound concept: action.
+type MutationConfirmActionArgs struct {
+	ActionId string
+}
+
+// MutationConfirmAction calls the engine mutation mutationConfirmAction.
+func (qc *QueryClient) MutationConfirmAction(ctx context.Context, args MutationConfirmActionArgs) (*Result, error) {
+	call := MutationConfirmActionBuild(args)
+	return qc.executeNamed(ctx, "mutationConfirmAction", call)
+}
+
+func MutationConfirmActionBuild(args MutationConfirmActionArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationConfirmAction({")
+	b.WriteString("actionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ActionId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationConfirmRecord -- Human confirm a data record, updating confirm count and validation state
 //
 // Bound concept: record.
@@ -6374,6 +6396,34 @@ func MutationCreateWorkerTokenIdentityBuild(args MutationCreateWorkerTokenIdenti
 	return b.String()
 }
 
+// MutationDecayAction -- Set a v1:actions:action decayed reliability from the consolidation sweep (Phase 4 #1739; value computed engine-side).
+//
+// Bound concept: action.
+type MutationDecayActionArgs struct {
+	ActionId    string
+	Reliability any
+}
+
+// MutationDecayAction calls the engine mutation mutationDecayAction.
+func (qc *QueryClient) MutationDecayAction(ctx context.Context, args MutationDecayActionArgs) (*Result, error) {
+	call := MutationDecayActionBuild(args)
+	return qc.executeNamed(ctx, "mutationDecayAction", call)
+}
+
+func MutationDecayActionBuild(args MutationDecayActionArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationDecayAction({")
+	b.WriteString("actionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ActionId))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("reliability: ")
+	b.WriteString(fmt.Sprintf("%q", args.Reliability))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationDecayHarnessSemanticMemory -- Decay an unreinforced v1:harness:semanticMemory: lower confidence to the engine-computed decayed value. lastReinforced is intentionally NOT reset (decay keeps measuring age from the last real reinforcement). ownerUserId re-stamped from actor.userId (owned tier). A belief that decays below the prune floor is then retired via mutationPruneHarnessSemanticMemory.
 //
 // Bound concept: semanticMemory.
@@ -6536,6 +6586,28 @@ func MutationDeleteUserHardBuild(args MutationDeleteUserHardArgs) string {
 	b.WriteString("mutationDeleteUserHard({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationDeprecateAction -- Deprecate a v1:actions:action (reliability below floor or superseded), removing it from replay (Phase 4 #1739).
+//
+// Bound concept: action.
+type MutationDeprecateActionArgs struct {
+	ActionId string
+}
+
+// MutationDeprecateAction calls the engine mutation mutationDeprecateAction.
+func (qc *QueryClient) MutationDeprecateAction(ctx context.Context, args MutationDeprecateActionArgs) (*Result, error) {
+	call := MutationDeprecateActionBuild(args)
+	return qc.executeNamed(ctx, "mutationDeprecateAction", call)
+}
+
+func MutationDeprecateActionBuild(args MutationDeprecateActionArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationDeprecateAction({")
+	b.WriteString("actionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ActionId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -7603,6 +7675,8 @@ type MutationMintActionArgs struct {
 	Slug                string
 	Intent              string
 	Capability          string
+	SideEffectClass     string
+	Status              string
 	InputFingerprint    string
 	Calls               []map[string]any
 	ResourceEdges       []map[string]any
@@ -7644,6 +7718,20 @@ func MutationMintActionBuild(args MutationMintActionArgs) string {
 		}
 		b.WriteString("capability: ")
 		b.WriteString(fmt.Sprintf("%q", args.Capability))
+	}
+	if args.SideEffectClass != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sideEffectClass: ")
+		b.WriteString(fmt.Sprintf("%q", args.SideEffectClass))
+	}
+	if args.Status != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
 	if b.Len() > 20 {
 		b.WriteString(", ")

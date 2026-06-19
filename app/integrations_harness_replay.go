@@ -10,6 +10,7 @@ import (
 	"github.com/znasllc-io/memql/component/harness"
 	"github.com/znasllc-io/memql/component/harness/actionreplay"
 	"github.com/znasllc-io/memql/component/harness/actiontrace"
+	"github.com/znasllc-io/memql/component/harness/actiontrust"
 	"github.com/znasllc-io/memql/component/harness/parambind"
 	"github.com/znasllc-io/memql/component/harness/surfaceresolver"
 )
@@ -307,6 +308,17 @@ func (a *App) mintActionFromRun(ctx context.Context, step harness.StepView, inpu
 		slug = "action"
 	}
 
+	// Phase 4 (#1739): surface-aware trust gate. Classify the action's side
+	// effect from its dominant capability and gate on (sideEffectClass,
+	// surface): a read anywhere or a write/exec in the sandbox workbench
+	// auto-promotes (mints active); a real-machine write/exec mints as
+	// candidate, held off the active-only replay queries until a human
+	// confirms. Phase 1's default surface is the sandbox workbench, so the
+	// common case still auto-promotes.
+	sideEffectClass := actiontrust.ClassifySideEffect(dominantCap)
+	const recordedSurfaceKind = "workbench"
+	status := actiontrust.InitialStatus(actiontrust.Gate(sideEffectClass, recordedSurfaceKind))
+
 	callsJSON, err := json.Marshal(calls)
 	if err != nil {
 		return
@@ -325,8 +337,8 @@ func (a *App) mintActionFromRun(ctx context.Context, step harness.StepView, inpu
 	}
 
 	q := fmt.Sprintf(
-		`mutationMintAction({slug:%q, intent:%q, capability:%q, inputFingerprint:%q, calls:%s, resourceEdges:%s, paramBindings:%s, templateFingerprint:%q, recordedResult:%s, resultFingerprint:%q, recordedSurface:%q, provenancePlanId:%q, provenanceStepId:%q})`,
-		slug, intent, dominantCap, inputFP, string(callsJSON), string(edgesJSON), string(bindingsJSON), templateFP, string(resultJSON), resultFP, "workbench", step.PlanID, step.ID,
+		`mutationMintAction({slug:%q, intent:%q, capability:%q, sideEffectClass:%q, status:%q, inputFingerprint:%q, calls:%s, resourceEdges:%s, paramBindings:%s, templateFingerprint:%q, recordedResult:%s, resultFingerprint:%q, recordedSurface:%q, provenancePlanId:%q, provenanceStepId:%q})`,
+		slug, intent, dominantCap, sideEffectClass, status, inputFP, string(callsJSON), string(edgesJSON), string(bindingsJSON), templateFP, string(resultJSON), resultFP, recordedSurfaceKind, step.PlanID, step.ID,
 	)
 	adapter := &CognitionEngineAdapter{Engine: a.engine}
 	if _, err := adapter.Execute(ctx, q); err != nil && a.Logger != nil {

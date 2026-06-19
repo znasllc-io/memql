@@ -124,6 +124,40 @@ func QueryActionCandidatesForPlanBuild(args QueryActionCandidatesForPlanArgs) st
 	return b.String()
 }
 
+// QueryActionsPendingConfirm -- List the calling owner's candidate v1:actions:action rows awaiting confirmation (real-machine side effects gate on a human, Phase 4 #1739). Owned tier.
+//
+// Bound concept: action.
+type QueryActionsPendingConfirmArgs struct {
+}
+
+// QueryActionsPendingConfirm calls the engine query queryActionsPendingConfirm.
+func (qc *QueryClient) QueryActionsPendingConfirm(ctx context.Context, args QueryActionsPendingConfirmArgs) (*Result, error) {
+	call := QueryActionsPendingConfirmBuild(args)
+	return qc.executeNamed(ctx, "queryActionsPendingConfirm", call)
+}
+
+func QueryActionsPendingConfirmBuild(args QueryActionsPendingConfirmArgs) string {
+	_ = args
+	return "queryActionsPendingConfirm({})"
+}
+
+// QueryActiveActionsForOwner -- List the calling owner's active v1:actions:action rows for the consolidation decay/deprecate sweep (Phase 4 #1739). Owned tier.
+//
+// Bound concept: action.
+type QueryActiveActionsForOwnerArgs struct {
+}
+
+// QueryActiveActionsForOwner calls the engine query queryActiveActionsForOwner.
+func (qc *QueryClient) QueryActiveActionsForOwner(ctx context.Context, args QueryActiveActionsForOwnerArgs) (*Result, error) {
+	call := QueryActiveActionsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "queryActiveActionsForOwner", call)
+}
+
+func QueryActiveActionsForOwnerBuild(args QueryActiveActionsForOwnerArgs) string {
+	_ = args
+	return "queryActiveActionsForOwner({})"
+}
+
 // QueryActiveAgentRoles -- List every active agentRole row. Backs the role picker on the cockpit's agent-creation surface and on the role-management view. predefined rows render with a lock icon; user-created rows are fully editable.
 //
 // Bound concept: agentRole.
