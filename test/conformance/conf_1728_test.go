@@ -57,14 +57,13 @@ func TestConf1728DelegationsByIdentityIncludesRevoked(t *testing.T) {
 		t.Fatalf("#1728 pre-revoke: active delegation %s missing from queryActiveDelegationsByIdentitySubject; got %v", storedID, idIDs(activeBefore))
 	}
 
-	// REVOKE -- write a new version with active=false. Read the live payload
-	// first so the revoking version preserves every required field.
-	live := e.latestPayload(t, "v1:identity:delegation", storedID)
-	live["active"] = false
-	live["revokedBySubject"] = ownerUID
+	// REVOKE -- mutationRevokeDelegation authoritatively forces active=false
+	// and stamps revokedAt regardless of caller input (memql#1729); the caller
+	// supplies only the revoker subject. The engine read-merge preserves every
+	// other required field from the stored row.
 	e.runMutation(t, "mutationRevokeDelegation", map[string]any{
-		"delegationId": storedID,
-		"payload":      live,
+		"delegationId":     storedID,
+		"revokedBySubject": ownerUID,
 	})
 
 	// Ground-truth: the latest version really is inactive.
