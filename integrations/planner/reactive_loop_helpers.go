@@ -187,18 +187,6 @@ func toStringList(v any) []string {
 	}
 }
 
-// stripIdLastSegment returns the last colon-segment of a canonical id
-// for a readable plan id (the full id is colon-heavy). Mirrors
-// stripDomainId in refresh_cron.go but kept distinct to avoid coupling.
-func stripIdLastSegment(id string) string {
-	for i := len(id) - 1; i >= 0; i-- {
-		if id[i] == ':' {
-			return id[i+1:]
-		}
-	}
-	return id
-}
-
 // compactResponsibilities projects the responsibility rows into the
 // compact shape the reactiveConductor prompt expects, dropping the
 // fields the conductor doesn't reason over (condition payloads, scope
