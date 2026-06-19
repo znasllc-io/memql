@@ -358,7 +358,13 @@ automation autoJoinSI {
 ```
 
 Inside the logic function, the triggering event is bound as `args`, so
-`args.event.payload.<field>` is how the body reaches the event data.
+`args.event.payload.<field>` is how the body reaches the event data. The
+event is a first-class, in-scope value the engine threads into EVERY nested
+step's argument resolution, and it binds identically across every invocation
+surface -- a real graph event, the live `run_automation` path, and the
+`run_automation` dry-run preview (memql#1727). Run a logic without an event
+in scope (a misconfigured/direct call) and `event.*` references degrade to
+empty rather than erroring.
 
 ### Scheduled
 
