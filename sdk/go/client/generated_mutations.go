@@ -7605,6 +7605,7 @@ type MutationMintActionArgs struct {
 	Capability        string
 	InputFingerprint  string
 	Calls             []map[string]any
+	ResourceEdges     []map[string]any
 	RecordedResult    map[string]any
 	ResultFingerprint string
 	RecordedSurface   string
@@ -7652,6 +7653,13 @@ func MutationMintActionBuild(args MutationMintActionArgs) string {
 	}
 	b.WriteString("calls: ")
 	b.WriteString(renderMemQLValue(args.Calls))
+	if args.ResourceEdges != nil {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("resourceEdges: ")
+		b.WriteString(renderMemQLValue(args.ResourceEdges))
+	}
 	if args.RecordedResult != nil {
 		if b.Len() > 20 {
 			b.WriteString(", ")
@@ -8846,6 +8854,64 @@ func MutationRefreshWorkerRegistrationBuild(args MutationRefreshWorkerRegistrati
 		}
 		b.WriteString("lastConnectedFromIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastConnectedFromIP))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationRegisterSurface -- Register a v1:actions:surface (workbench / computer-use:<machineId> / mcp:<server>) with its served capabilities + availability + failover priority. ownerUserId stamped from actor.userId (owned tier). #1737.
+//
+// Bound concept: surface.
+type MutationRegisterSurfaceArgs struct {
+	SurfaceId    string
+	Slug         string
+	Kind         string
+	MachineId    string
+	Capabilities []string
+	Priority     int
+}
+
+// MutationRegisterSurface calls the engine mutation mutationRegisterSurface.
+func (qc *QueryClient) MutationRegisterSurface(ctx context.Context, args MutationRegisterSurfaceArgs) (*Result, error) {
+	call := MutationRegisterSurfaceBuild(args)
+	return qc.executeNamed(ctx, "mutationRegisterSurface", call)
+}
+
+func MutationRegisterSurfaceBuild(args MutationRegisterSurfaceArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRegisterSurface({")
+	if args.SurfaceId != "" {
+		b.WriteString("surfaceId: ")
+		b.WriteString(fmt.Sprintf("%q", args.SurfaceId))
+	}
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("slug: ")
+	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("kind: ")
+	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	if args.MachineId != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("machineId: ")
+		b.WriteString(fmt.Sprintf("%q", args.MachineId))
+	}
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("capabilities: ")
+	b.WriteString(renderMemQLValue(args.Capabilities))
+	if args.Priority != 0 {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("priority: ")
+		b.WriteString(fmt.Sprintf("%v", args.Priority))
 	}
 	b.WriteString("})")
 	return b.String()
@@ -10682,6 +10748,34 @@ func MutationSetSpaceGoalBuild(args MutationSetSpaceGoalArgs) string {
 	}
 	b.WriteString("goal: ")
 	b.WriteString(renderMemQLValue(args.Goal))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationSetSurfaceAvailability -- Set a v1:actions:surface availability flag (the resolver's failover signal) and refresh its lastSeen heartbeat. #1737.
+//
+// Bound concept: surface.
+type MutationSetSurfaceAvailabilityArgs struct {
+	SurfaceId string
+	Available bool
+}
+
+// MutationSetSurfaceAvailability calls the engine mutation mutationSetSurfaceAvailability.
+func (qc *QueryClient) MutationSetSurfaceAvailability(ctx context.Context, args MutationSetSurfaceAvailabilityArgs) (*Result, error) {
+	call := MutationSetSurfaceAvailabilityBuild(args)
+	return qc.executeNamed(ctx, "mutationSetSurfaceAvailability", call)
+}
+
+func MutationSetSurfaceAvailabilityBuild(args MutationSetSurfaceAvailabilityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationSetSurfaceAvailability({")
+	b.WriteString("surfaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SurfaceId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("available: ")
+	b.WriteString(fmt.Sprintf("%v", args.Available))
 	b.WriteString("})")
 	return b.String()
 }

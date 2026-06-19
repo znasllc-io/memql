@@ -7,8 +7,8 @@
 // Authorization (owned tier): the filter pins payload.ownerUserId ==
 // actor.userId, so a caller only ever reads its own captured traces.
 
-use actions.concepts.{ candidate, action }
-use actions.shapes.{ candidateFull, actionFull }
+use actions.concepts.{ candidate, action, surface }
+use actions.shapes.{ candidateFull, actionFull, surfaceFull }
 use common.traits.{ traitStatusIsActive }
 
 @enabled
@@ -33,4 +33,15 @@ query action queryActionByInputFingerprint {
   }
   filter  payload.inputFingerprint == args.inputFingerprint && traitStatusIsActive && payload.ownerUserId == actor.userId
   shape   actionFull
+}
+
+// querySurfacesForOwner -- the resolver's registry read (Phase 2 #1737).
+// Returns the owner's active execution surfaces; the surfaceresolver filters
+// by capability + availability in Go and applies the precedence/world-group
+// logic. Owned tier.
+@enabled
+@description("List the calling owner's active v1:actions:surface registry entries for the capability->surface resolver (Phase 2 #1737). Owned tier.")
+query surface querySurfacesForOwner {
+  filter  payload.ownerUserId == actor.userId && traitStatusIsActive
+  shape   surfaceFull
 }

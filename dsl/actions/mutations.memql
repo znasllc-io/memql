@@ -66,6 +66,7 @@ mutation action mutationMintAction {
     capability        string
     inputFingerprint  string    @required
     calls             []object  @required
+    resourceEdges     []object
     recordedResult    object
     resultFingerprint string
     recordedSurface   string
@@ -80,6 +81,7 @@ mutation action mutationMintAction {
     args.capability
     args.inputFingerprint
     args.calls
+    args.resourceEdges
     args.recordedResult
     args.resultFingerprint
     args.recordedSurface
@@ -110,5 +112,57 @@ mutation action mutationReinforceAction {
     args.reinforceCount
     lastReinforced: now()
     provenanceMutation: "mutationReinforceAction"
+  }
+}
+
+// mutationRegisterSurface
+// =======================
+// Register (or re-version) an execution surface in the resolver's registry
+// (Phase 2, #1737). ownerUserId is stamped from actor.userId (owned tier).
+// The served capability verbs + availability + failover priority are the
+// data the resolver binds against.
+@enabled
+@description("Register a v1:actions:surface (workbench / computer-use:<machineId> / mcp:<server>) with its served capabilities + availability + failover priority. ownerUserId stamped from actor.userId (owned tier). #1737.")
+mutation surface mutationRegisterSurface {
+  args {
+    surfaceId    string
+    slug         string    @required
+    kind         string    @required
+    machineId    string
+    capabilities []string  @required
+    priority     int
+  }
+  insert {
+    id: args.surfaceId
+    ownerUserId: actor.userId
+    args.slug
+    args.kind
+    args.machineId
+    args.capabilities
+    available: true
+    priority: coalesce(args.priority, 100)
+    status: "active"
+    lastSeen: now()
+    provenanceMutation: "mutationRegisterSurface"
+  }
+}
+
+// mutationSetSurfaceAvailability
+// ==============================
+// Flip a surface's availability (the failover signal) and stamp the
+// heartbeat clock. update read-merges so the served capabilities + slug are
+// preserved. #1737.
+@enabled
+@description("Set a v1:actions:surface availability flag (the resolver's failover signal) and refresh its lastSeen heartbeat. #1737.")
+mutation surface mutationSetSurfaceAvailability {
+  args {
+    surfaceId  string   @required
+    available  boolean  @required
+  }
+  update {
+    id: args.surfaceId
+    args.available
+    lastSeen: now()
+    provenanceMutation: "mutationSetSurfaceAvailability"
   }
 }

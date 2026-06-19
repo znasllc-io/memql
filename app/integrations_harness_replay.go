@@ -9,6 +9,8 @@ import (
 
 	"github.com/znasllc-io/memql/component/harness"
 	"github.com/znasllc-io/memql/component/harness/actionreplay"
+	"github.com/znasllc-io/memql/component/harness/actiontrace"
+	"github.com/znasllc-io/memql/component/harness/surfaceresolver"
 )
 
 // actionReplayEnabled reports whether action-library literal replay (#1736) is
@@ -71,10 +73,168 @@ func (a *App) tryReplayAction(ctx context.Context, step harness.StepView, inputF
 	}
 
 	a.reinforceAction(ctx, id, payload)
+
+	result = map[string]any{"replayed": true}
 	if rr, ok := payload["recordedResult"].(map[string]any); ok && rr != nil {
-		return true, rr, found
+		// Copy so we can annotate without mutating the parsed payload.
+		result = map[string]any{}
+		for k, v := range rr {
+			result[k] = v
+		}
 	}
-	return true, map[string]any{"replayed": true}, found
+	// Phase 2 (#1737): resolve a surface per world group and tag the result so
+	// reads carry their resolved surface. Best-effort -- if no surfaces are
+	// registered the replay still returns on the default surface.
+	if tag := a.resolveReplaySurfaces(ctx, payload, calls); tag != nil {
+		result["resolvedSurfaces"] = tag
+	}
+	return true, result, found
+}
+
+// resolveReplaySurfaces consults the surface registry + resolver to bind each
+// replayed call to a surface (decision A: coupled calls pin to one surface),
+// returning a per-call {capability, surface} tag plus any forced cross-world
+// transfers. Returns nil when no surfaces are registered or resolution can't
+// proceed -- replay then uses the default surface unchanged.
+func (a *App) resolveReplaySurfaces(ctx context.Context, payload map[string]any, calls []actionreplay.ReplayCall) map[string]any {
+	surfaces := a.loadOwnerSurfaces(ctx)
+	if len(surfaces) == 0 {
+		return nil
+	}
+	rcalls := make([]surfaceresolver.Call, 0, len(calls))
+	for _, c := range calls {
+		rcalls = append(rcalls, surfaceresolver.Call{Index: c.Index, Capability: c.Capability})
+	}
+	edges := parseSurfaceEdges(payload["resourceEdges"])
+	plan, err := surfaceresolver.ResolvePlan(rcalls, edges, "", "", surfaces)
+	if err != nil {
+		if a.Logger != nil {
+			a.Logger.Debug("surface resolution skipped; using default surface", "error", err)
+		}
+		return nil
+	}
+	perCall := make([]map[string]any, 0, len(plan.Resolutions))
+	for _, r := range plan.Resolutions {
+		perCall = append(perCall, map[string]any{
+			"callIndex":  r.CallIndex,
+			"capability": r.Capability,
+			"surface":    r.Surface.Slug,
+			"groupId":    r.GroupID,
+		})
+	}
+	tag := map[string]any{"calls": perCall}
+	if len(plan.Transfers) > 0 {
+		transfers := make([]map[string]any, 0, len(plan.Transfers))
+		for _, t := range plan.Transfers {
+			transfers = append(transfers, map[string]any{
+				"resource":    t.Resource,
+				"fromSurface": t.FromSurface.Slug,
+				"toSurface":   t.ToSurface.Slug,
+				"fromCall":    t.FromCall,
+				"toCall":      t.ToCall,
+			})
+		}
+		tag["transfers"] = transfers
+	}
+	return tag
+}
+
+// loadOwnerSurfaces reads the calling owner's registered surfaces via
+// querySurfacesForOwner and projects them for the resolver.
+func (a *App) loadOwnerSurfaces(ctx context.Context) []surfaceresolver.Surface {
+	adapter := &CognitionEngineAdapter{Engine: a.engine}
+	res, err := adapter.Execute(ctx, `querySurfacesForOwner()`)
+	if err != nil {
+		return nil
+	}
+	m, ok := res.(map[string]any)
+	if !ok {
+		return nil
+	}
+	bundle, ok := m["bundle"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	nodes, ok := bundle["nodes"].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]surfaceresolver.Surface, 0, len(nodes))
+	for _, n := range nodes {
+		node, ok := n.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := node["id"].(string)
+		p, ok := node["payload"].(map[string]any)
+		if !ok {
+			continue
+		}
+		avail := true
+		if b, ok := p["available"].(bool); ok {
+			avail = b
+		}
+		prio := 100
+		if f, ok := p["priority"].(float64); ok {
+			prio = int(f)
+		}
+		slug, _ := p["slug"].(string)
+		kind, _ := p["kind"].(string)
+		machineID, _ := p["machineId"].(string)
+		out = append(out, surfaceresolver.Surface{
+			ID:           id,
+			Slug:         slug,
+			Kind:         kind,
+			MachineID:    machineID,
+			Capabilities: stringSlice(p["capabilities"]),
+			Available:    avail,
+			Priority:     prio,
+		})
+	}
+	return out
+}
+
+// parseSurfaceEdges converts a stored resourceEdges JSON array into resolver
+// edges.
+func parseSurfaceEdges(v any) []surfaceresolver.ResourceEdge {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]surfaceresolver.ResourceEdge, 0, len(arr))
+	for _, e := range arr {
+		m, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		from, _ := m["fromCallIndex"].(float64)
+		to, _ := m["toCallIndex"].(float64)
+		resource, _ := m["resource"].(string)
+		out = append(out, surfaceresolver.ResourceEdge{
+			FromCallIndex: int(from),
+			ToCallIndex:   int(to),
+			Resource:      resource,
+		})
+	}
+	return out
+}
+
+// stringSlice coerces a JSON []any (or []string) into []string.
+func stringSlice(v any) []string {
+	switch t := v.(type) {
+	case []string:
+		return t
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			if s, ok := e.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 // mintActionFromRun mints a v1:actions:action (primitive) from a just-completed
@@ -82,16 +242,30 @@ func (a *App) tryReplayAction(ctx context.Context, step harness.StepView, inputF
 // Only the successfully-executed (non-error) captured calls are stored, with
 // their literal args. Best-effort: a mint failure never fails the step.
 func (a *App) mintActionFromRun(ctx context.Context, step harness.StepView, inputFP string, sink *candidateTraceSink, recordedResult map[string]any) {
-	captured := sink.captured()
-	calls := make([]map[string]any, 0, len(captured))
-	resultsForFP := make([]any, 0, len(captured))
-	dominantCap := ""
-	for _, c := range captured {
+	// Build the non-error captured subset, re-indexed 0..n so the stored
+	// calls and the resource edges share one contiguous index space.
+	subset := make([]actiontrace.CapturedCall, 0, len(sink.captured()))
+	for _, c := range sink.captured() {
 		if c.IsError {
 			continue
 		}
+		subset = append(subset, actiontrace.CapturedCall{
+			Index:      len(subset),
+			Capability: c.Capability,
+			Args:       c.Args,
+			Result:     c.Result,
+		})
+	}
+	if len(subset) == 0 {
+		return // nothing replayable (pure-reasoning step)
+	}
+
+	calls := make([]map[string]any, 0, len(subset))
+	resultsForFP := make([]any, 0, len(subset))
+	dominantCap := ""
+	for _, c := range subset {
 		calls = append(calls, map[string]any{
-			"index":      len(calls),
+			"index":      c.Index,
 			"capability": c.Capability,
 			"args":       c.Args,
 		})
@@ -100,8 +274,13 @@ func (a *App) mintActionFromRun(ctx context.Context, step harness.StepView, inpu
 			dominantCap = c.Capability
 		}
 	}
-	if len(calls) == 0 {
-		return // nothing replayable (pure-reasoning step)
+
+	// Resource-coupling edges over the SAME re-indexed subset, so Phase 2's
+	// world-group resolver indexes line up with the stored calls.
+	trace := actiontrace.Trace(subset, actiontrace.ProvenanceSources{StepInput: step.Input})
+	edges := trace.ResourceEdges
+	if edges == nil {
+		edges = []actiontrace.ResourceEdge{}
 	}
 
 	resultFP := actionreplay.Fingerprint(resultsForFP)
@@ -118,14 +297,18 @@ func (a *App) mintActionFromRun(ctx context.Context, step harness.StepView, inpu
 	if err != nil {
 		return
 	}
+	edgesJSON, err := json.Marshal(edges)
+	if err != nil {
+		return
+	}
 	resultJSON, err := json.Marshal(recordedResult)
 	if err != nil {
 		return
 	}
 
 	q := fmt.Sprintf(
-		`mutationMintAction({slug:%q, intent:%q, capability:%q, inputFingerprint:%q, calls:%s, recordedResult:%s, resultFingerprint:%q, recordedSurface:%q, provenancePlanId:%q, provenanceStepId:%q})`,
-		slug, intent, dominantCap, inputFP, string(callsJSON), string(resultJSON), resultFP, "workbench", step.PlanID, step.ID,
+		`mutationMintAction({slug:%q, intent:%q, capability:%q, inputFingerprint:%q, calls:%s, resourceEdges:%s, recordedResult:%s, resultFingerprint:%q, recordedSurface:%q, provenancePlanId:%q, provenanceStepId:%q})`,
+		slug, intent, dominantCap, inputFP, string(callsJSON), string(edgesJSON), string(resultJSON), resultFP, "workbench", step.PlanID, step.ID,
 	)
 	adapter := &CognitionEngineAdapter{Engine: a.engine}
 	if _, err := adapter.Execute(ctx, q); err != nil && a.Logger != nil {

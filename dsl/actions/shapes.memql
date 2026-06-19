@@ -3,7 +3,7 @@
 // Reusable projections in the `actions` namespace (epic #1734). Phase 0
 // (#1735) ships candidateFull -- the read projection over a captured trace.
 
-use actions.concepts.{ candidate, action }
+use actions.concepts.{ candidate, action, surface }
 
 @row
 @description("Full v1:actions:candidate projection: every field the action-library browse/recall surfaces need to inspect a captured trace (#1735).")
@@ -31,6 +31,7 @@ shape action actionFull {
   payload.sideEffectClass
   payload.inputFingerprint
   payload.calls
+  payload.resourceEdges
   payload.recordedResult
   payload.resultFingerprint
   payload.recordedSurface
@@ -38,5 +39,21 @@ shape action actionFull {
   payload.reinforceCount
   payload.version
   payload.status
+  row.createdAt
+}
+
+@row
+@description("Full v1:actions:surface projection: the fields the resolver needs to bind a capability to a surface (Phase 2 #1737).")
+shape surface surfaceFull {
+  row.id
+  payload.ownerUserId
+  payload.slug
+  payload.kind
+  payload.machineId
+  payload.capabilities
+  payload.available
+  payload.priority
+  payload.status
+  payload.lastSeen
   row.createdAt
 }
