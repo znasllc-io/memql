@@ -34,3 +34,48 @@ concept candidate {
   callCount     int  @description("Number of captured calls (len(calls)). A convenience field for filtering trivial/empty traces.")
   provenanceMutation  string  @description("Name of the mutation that produced this candidate version (audit trail).")
 }
+
+// action -- a reusable, replayable library entry (Phase 1, #1736).
+//
+// Phase 1 mints a `primitive` action from a candidate trace once an LLM step
+// completes: it stores the concrete capability sequence the step performed
+// plus an `inputFingerprint` (a stable hash of the dispatched step input) and
+// a `resultFingerprint` (a stable hash of the recorded tool results). On the
+// next dispatch of a step with the SAME inputFingerprint, the harness replays
+// the stored calls via ExecuteToolByName (default surface, no LLM); if the
+// replay's result fingerprint matches the recorded one, the recorded result
+// is returned and `reliability` is reinforced -- otherwise the harness falls
+// back to the LLM. This is "literal replay keyed on input fingerprint against
+// the default surface only" (the doc, Phase 1).
+//
+// What is deliberately NOT here yet: the capability->surface resolver and
+// world groups (Phase 2 #1737), automatic parameterization + composites
+// (Phase 3 #1738), and the surface-aware trust ladder that gates auto-promote
+// vs confirm (Phase 4 #1739). `capability`, `recordedSurface`, `reliability`,
+// `reinforceCount`, and `version` are carried now so those phases extend the
+// row rather than migrate it.
+@version("1.0.0")
+@namespace("actions")
+@description("A reusable, replayable library entry minted from a candidate trace (Phase 1, #1736). A primitive stores one or more captured capability calls with literal args, keyed by inputFingerprint, and replays them token-free on identical input against the default surface. Reliability rises on verified replay; mismatches fall back to the LLM.")
+@displayCard(primary="slug", secondary="status", tertiary="ownerUserId", status="status")
+concept action {
+  ownerUserId       string  @required  @description("v1:identity:user.id of the owner. The per-row authz key (owned tier), stamped from actor.userId by mutationMintAction.")
+  slug              string  @required  @description("Human-readable name (e.g. the dominant capability slug). Not unique on its own; (ownerUserId, inputFingerprint) is the replay key.")
+  kind              enum("primitive", "composite")  @required  @default("primitive")  @description("primitive = one or more captured capability calls replayed directly. composite = an ordered list of child action references (Phase 3 #1738). Phase 1 mints only primitives.")
+  intent            string  @required  @description("Natural-language description of what the action does -- the future embedding source for retrieval (Phase 3). Phase 1 derives it from the step goal/input.")
+  capability        string  @description("The dominant abstract verb the action performs (e.g. fs.writeFile). Provenance/labelling in Phase 1; the capability->surface resolver consumes it in Phase 2 (#1737).")
+  sideEffectClass   enum("read", "write", "exec")  @required  @default("write")  @description("Coarse risk class, used by the surface-aware trust gate in Phase 4 (#1739). Phase 1 records it (defaulting conservatively to write) but does not yet gate on it.")
+  inputFingerprint  string  @required  @description("Stable hash of the dispatched step input that minted this action. THE literal-replay key: a later step whose input hashes to the same value replays this action instead of calling the LLM.")
+  calls             []object  @required  @description("Ordered capability calls to replay, in execution order. Each entry: {index, capability, args}. args are the literal recorded argument map (parameterization lands in Phase 3 #1738). Error/cache-hit calls are excluded at mint time.")
+  recordedResult    object  @description("The step result the minting run produced (returned verbatim on a verified replay, since the LLM synthesis is not reproducible without the model).")
+  resultFingerprint string  @description("Stable hash of the recorded tool results. A replay must reproduce this fingerprint to be trusted; a mismatch decays trust and falls back to the LLM.")
+  recordedSurface   string  @description("Provenance only: the surface the action was captured on (Phase 1 is always the default surface). Replay re-resolves in Phase 2 (#1737); this never constrains where it runs.")
+  reliability       float  @required  @default("0.5")  @description("Confidence in [0,1]. Rises on a verified successful replay (fingerprint match), decays on mismatch/disuse (Phase 4). Below a floor an action is deprecated and no longer offered (Phase 4 #1739).")
+  reinforceCount    int  @required  @default("0")  @description("Number of verified successful replays observed. Bumped by mutationReinforceAction (value computed engine-side, MemQL has no arithmetic).")
+  lastReinforced    datetime  @description("When the action was last reinforced -- the decay clock for Phase 4 consolidation.")
+  version           int  @required  @default("1")  @description("Monotonic version, bumped on every edit. Pin-by-default references and the verified upgrade migration land in Phase 5 (#1740).")
+  status            enum("candidate", "active", "deprecated")  @required  @default("active")  @description("Trust-ladder state. Phase 1 mints directly as active (replay is fingerprint-verified, so it is safe to offer); the candidate->active->deprecated ladder with surface-aware gating lands in Phase 4 (#1739).")
+  provenancePlanId  string  @description("v1:harness:plan.id of the run that minted this action.")
+  provenanceStepId  string  @description("v1:harness:step.id of the run that minted this action.")
+  provenanceMutation  string  @description("Name of the mutation that produced this action version (audit trail).")
+}

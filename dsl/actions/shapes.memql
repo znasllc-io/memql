@@ -3,7 +3,7 @@
 // Reusable projections in the `actions` namespace (epic #1734). Phase 0
 // (#1735) ships candidateFull -- the read projection over a captured trace.
 
-use actions.concepts.{ candidate }
+use actions.concepts.{ candidate, action }
 
 @row
 @description("Full v1:actions:candidate projection: every field the action-library browse/recall surfaces need to inspect a captured trace (#1735).")
@@ -16,5 +16,27 @@ shape candidate candidateFull {
   payload.calls
   payload.resourceEdges
   payload.callCount
+  row.createdAt
+}
+
+@row
+@description("Full v1:actions:action projection: the fields the harness replay path needs to resolve + replay an action (Phase 1 #1736).")
+shape action actionFull {
+  row.id
+  payload.ownerUserId
+  payload.slug
+  payload.kind
+  payload.intent
+  payload.capability
+  payload.sideEffectClass
+  payload.inputFingerprint
+  payload.calls
+  payload.recordedResult
+  payload.resultFingerprint
+  payload.recordedSurface
+  payload.reliability
+  payload.reinforceCount
+  payload.version
+  payload.status
   row.createdAt
 }

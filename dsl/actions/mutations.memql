@@ -47,3 +47,68 @@ mutation candidate mutationRecordActionCandidate {
     provenanceMutation: "mutationRecordActionCandidate"
   }
 }
+
+// mutationMintAction
+// ==================
+// Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1,
+// #1736). ownerUserId is stamped from actor.userId (owned tier). The harness
+// calls this after an LLM step succeeds, passing the captured replayable
+// calls + the input/result fingerprints; kind/sideEffectClass/reliability/
+// reinforceCount/version/status take their concept @default values.
+// Internal write path -- not on the MCP/SDK surface.
+@enabled
+@description("Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1, #1736). ownerUserId stamped from actor.userId (owned tier). Stores the replayable capability calls keyed by inputFingerprint.")
+mutation action mutationMintAction {
+  args {
+    actionId          string
+    slug              string    @required
+    intent            string    @required
+    capability        string
+    inputFingerprint  string    @required
+    calls             []object  @required
+    recordedResult    object
+    resultFingerprint string
+    recordedSurface   string
+    provenancePlanId  string
+    provenanceStepId  string
+  }
+  insert {
+    id: args.actionId
+    ownerUserId: actor.userId
+    args.slug
+    args.intent
+    args.capability
+    args.inputFingerprint
+    args.calls
+    args.recordedResult
+    args.resultFingerprint
+    args.recordedSurface
+    args.provenancePlanId
+    args.provenanceStepId
+    provenanceMutation: "mutationMintAction"
+  }
+}
+
+// mutationReinforceAction
+// =======================
+// Bump an action's reliability + reinforceCount after a verified successful
+// replay (fingerprint match). The new values are computed engine-side (the
+// MemQL parser has no arithmetic, mirroring the semanticMemory reinforce
+// pattern) and handed in. update read-merges the prior row, so ownerUserId
+// and the captured calls are preserved. Internal write path.
+@enabled
+@description("Reinforce a v1:actions:action after a verified replay: set the engine-computed reliability + reinforceCount and reset the decay clock (Phase 1 #1736; surface-aware decay lands in Phase 4 #1739).")
+mutation action mutationReinforceAction {
+  args {
+    actionId       string  @required
+    reliability    float   @required
+    reinforceCount int     @required
+  }
+  update {
+    id: args.actionId
+    args.reliability
+    args.reinforceCount
+    lastReinforced: now()
+    provenanceMutation: "mutationReinforceAction"
+  }
+}

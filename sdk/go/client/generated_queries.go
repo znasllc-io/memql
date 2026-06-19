@@ -58,6 +58,28 @@ func QueryAccountEntitlementBuild(args QueryAccountEntitlementArgs) string {
 	return b.String()
 }
 
+// QueryActionByInputFingerprint -- Resolve an active v1:actions:action by inputFingerprint for the calling owner -- the literal-replay lookup (Phase 1 #1736).
+//
+// Bound concept: action.
+type QueryActionByInputFingerprintArgs struct {
+	InputFingerprint string
+}
+
+// QueryActionByInputFingerprint calls the engine query queryActionByInputFingerprint.
+func (qc *QueryClient) QueryActionByInputFingerprint(ctx context.Context, args QueryActionByInputFingerprintArgs) (*Result, error) {
+	call := QueryActionByInputFingerprintBuild(args)
+	return qc.executeNamed(ctx, "queryActionByInputFingerprint", call)
+}
+
+func QueryActionByInputFingerprintBuild(args QueryActionByInputFingerprintArgs) string {
+	var b strings.Builder
+	b.WriteString("queryActionByInputFingerprint({")
+	b.WriteString("inputFingerprint: ")
+	b.WriteString(fmt.Sprintf("%q", args.InputFingerprint))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryActionCandidatesForPlan -- List v1:actions:candidate traces captured for a plan, newest-first by createdAt (owned tier). #1735.
 //
 // Bound concept: candidate.
