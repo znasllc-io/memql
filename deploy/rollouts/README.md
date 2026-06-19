@@ -87,7 +87,7 @@ kubectl apply -f deploy/rollouts/bff-rollout.yaml
 #    against bff-preview. On green, promote (autoPromotionEnabled=false here):
 kubectl argo rollouts promote bff -n memql
 # 4. New logins flip to the new color; the old color keeps serving open streams
-#    until they drain (scaleDownDelaySeconds=3600 + #615), then scales down.
+#    until they drain (scaleDownDelaySeconds=300 + #615), then scales down.
 kubectl argo rollouts get rollout bff -n memql --watch
 # Assert: the held WS client never dropped; new logins hit the new color.
 # Rollback (if needed): kubectl argo rollouts abort bff -n memql
