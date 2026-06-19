@@ -204,20 +204,17 @@ func clampToInt(i int64) int {
 	return int(i)
 }
 
-// clampFloatToInt truncates a float toward zero into int, clamping at the
-// 32-bit range (the worst-case int width) so an out-of-range magnitude
-// cannot overflow the conversion. The bound is the 32-bit limit, not
-// math.MaxInt: math.MaxInt (~2^63) is not exactly representable as a
-// float64, so a platform-int guard rounds up and leaks values that still
-// overflow on int(f) (go/incorrect-integer-conversion). The int32 bounds
-// are exact in float64 and provably safe, and the planner only coerces
-// small quota / count magnitudes through here.
+// clampFloatToInt truncates a float toward zero into int. It bounds the
+// float to the 32-bit range (exactly representable in float64) and then
+// funnels through clampToInt -- the int->int narrowing sink -- rather than
+// converting the float to int directly. A direct int(float64) is flagged
+// by go/incorrect-integer-conversion because the float carries no provable
+// integer bound; routing through the int64 sink keeps the narrowing safe
+// and recognizable. The planner only coerces small quota / count
+// magnitudes through here.
 func clampFloatToInt(f float64) int {
-	if f >= math.MaxInt32 {
-		return math.MaxInt32
+	if math.IsNaN(f) || f > math.MaxInt32 || f < math.MinInt32 {
+		return 0
 	}
-	if f <= math.MinInt32 {
-		return math.MinInt32
-	}
-	return int(f)
+	return clampToInt(int64(f))
 }

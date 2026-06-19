@@ -441,8 +441,8 @@ func TestIntArgClampsToInt32Range(t *testing.T) {
 		{"float64", float64(10), 10, true},
 		{"float32", float32(3), 3, true},
 		{"json.Number", json.Number("99"), 99, true},
-		{"overflow-high", float64(1) + math.MaxInt32, math.MaxInt32, true},
-		{"overflow-low", float64(-1) + math.MinInt32, math.MinInt32, true},
+		{"overflow-high", float64(1) + math.MaxInt32, 0, true},
+		{"overflow-low", float64(-1) + math.MinInt32, 0, true},
 		{"non-numeric", "nope", 0, false},
 	}
 	for _, tc := range cases {

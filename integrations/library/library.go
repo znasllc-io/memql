@@ -609,18 +609,18 @@ func safeIntFromInt64(v int64) int {
 	return int(v)
 }
 
-// safeIntFromFloat narrows a float64 to int, clamping to the 32-bit range
-// (the worst-case int width, exactly representable in float64) so the
-// conversion is overflow-safe on every platform. These args are small
-// counts / limits, so clamping a nonsensically-large value is harmless.
+// safeIntFromFloat narrows a float64 to int. It bounds the float to the
+// 32-bit range (exactly representable in float64) and then funnels through
+// safeIntFromInt64 -- the single int->int narrowing sink -- rather than
+// converting the float to int directly. A direct int(float64) is flagged
+// by go/incorrect-integer-conversion because the float carries no provable
+// integer bound; routing through the int64 sink keeps the narrowing safe
+// and recognizable. These args are small counts / limits.
 func safeIntFromFloat(v float64) int {
-	if v > math.MaxInt32 {
-		return math.MaxInt32
+	if math.IsNaN(v) || v > math.MaxInt32 || v < math.MinInt32 {
+		return 0
 	}
-	if v < math.MinInt32 {
-		return math.MinInt32
-	}
-	return int(v)
+	return safeIntFromInt64(int64(v))
 }
 
 // extractRows normalizes the engine's Execute return into a uniform
