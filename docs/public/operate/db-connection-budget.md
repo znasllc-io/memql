@@ -1,3 +1,12 @@
+---
+title: Database connection budget & graceful-deploy standard
+audience: public
+status: stable
+area: operate
+sinceVersion: 0.9.75
+owner: znas
+---
+
 # Database connection budget & graceful-deploy standard
 
 This is the standard for keeping the cluster's Postgres (Tiger Cloud in
