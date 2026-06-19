@@ -3700,6 +3700,23 @@ func QueryStrandedCandidatePlansBuild(args QueryStrandedCandidatePlansArgs) stri
 	return "queryStrandedCandidatePlans({})"
 }
 
+// QuerySurfacesForOwner -- List the calling owner's active v1:actions:surface registry entries for the capability->surface resolver (Phase 2 #1737). Owned tier.
+//
+// Bound concept: surface.
+type QuerySurfacesForOwnerArgs struct {
+}
+
+// QuerySurfacesForOwner calls the engine query querySurfacesForOwner.
+func (qc *QueryClient) QuerySurfacesForOwner(ctx context.Context, args QuerySurfacesForOwnerArgs) (*Result, error) {
+	call := QuerySurfacesForOwnerBuild(args)
+	return qc.executeNamed(ctx, "querySurfacesForOwner", call)
+}
+
+func QuerySurfacesForOwnerBuild(args QuerySurfacesForOwnerArgs) string {
+	_ = args
+	return "querySurfacesForOwner({})"
+}
+
 // QuerySystemActiveAuthoringBundles -- ADMIN/SYSTEM: every active authoring bundle across ALL owners (NOT owner-scoped). Cluster-owner gated. Backs the boot-time authored-runtime re-arm (#1039) that re-registers active bundles' automations after a restart.
 //
 // Bound concept: bundle.
