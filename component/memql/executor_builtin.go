@@ -530,6 +530,13 @@ func (e *MemQLEngine) evaluateHelpExpression(ctx context.Context, args map[strin
 			if strings.TrimSpace(fn.UsageDoc) != "" {
 				resultPayload["usageDoc"] = strings.TrimSpace(fn.UsageDoc)
 			}
+			// Canonical query result envelope (memql#1710): every query returns
+			// its rows as an array regardless of cardinality -- [] for no match,
+			// [x] for a single match, [x, y, ...] for many. A single match is
+			// NEVER unwrapped to a bare object, so callers iterate one shape.
+			if strings.EqualFold(strings.TrimSpace(fn.FunctionKind), "query") {
+				resultPayload["resultEnvelope"] = "array: query results are always a JSON array (0 results -> [], 1 -> [x], many -> [x, y, ...]); a single match is never collapsed to a bare object"
+			}
 			if excerpt := strings.TrimSpace(functionSchemaReferenceExcerpt()); excerpt != "" {
 				resultPayload["schemaReferenceExcerpt"] = excerpt
 			}

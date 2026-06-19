@@ -43,14 +43,15 @@ func MaterializeRows(v any) []map[string]any {
 	}
 	// In-process: extract the canonical OutputPayload first. When
 	// ShapeTemplate was applied, OutputPayload returns the projected
-	// rows directly (a []any of maps for multi-row results, or a
-	// bare map[string]any when the projection collapsed to a single
-	// row -- applyShapeTemplate strips the array wrapper for len==1).
-	// When no shape, OutputPayload returns the GraphBundle and the
-	// JSON-roundtrip path below extracts its nodes.
+	// rows as an array -- [] / [x] / [x, y, ...] -- under the canonical
+	// envelope (memql#1710); applyShapeTemplate no longer collapses a
+	// single result to a bare map. When no shape, OutputPayload returns
+	// the GraphBundle and the JSON-roundtrip path below extracts its
+	// nodes. The bare-map case is still accepted defensively for wire
+	// callers / non-query payloads that may present a single object.
 	if er, ok := v.(*ExecuteResult); ok {
 		payload := er.OutputPayload()
-		// Single-row projection: bare map IS the row.
+		// Defensive: a bare map IS a single row.
 		if m, ok := payload.(map[string]any); ok {
 			return []map[string]any{m}
 		}
@@ -105,9 +106,9 @@ func rowsFromLoose(v any) []map[string]any {
 	case map[string]any:
 		// Projection keys first -- the shape-projected output lands
 		// under one of these depending on which engine builder ran.
-		// applyShapeTemplate collapses a single-result projection to
-		// the bare map (no surrounding array), so we have to accept
-		// both shapes under each key.
+		// Under the canonical envelope (memql#1710) a shaped query is
+		// always an array, but the bare-map form is still accepted
+		// defensively for wire callers / non-query payloads.
 		for _, key := range []string{"output", "rows", "items", "results", "data", "nodes"} {
 			switch sub := x[key].(type) {
 			case []any:

@@ -133,12 +133,17 @@ func applyShapeTemplate(ctx context.Context, bundle *memqlv1.GraphBundle, tmpl s
 		results = append(results, value)
 	}
 
-	if len(results) == 0 {
-		return []any{}, nil
-	}
-	if len(results) == 1 {
-		return results[0], nil
-	}
+	// Canonical query result envelope (memql#1710): a shape-projected query
+	// ALWAYS returns an array, so 0 / 1 / many results serialize to the same
+	// shape -- [] / [x] / [x, y, ...]. This is the single, central enforcement
+	// point for the contract: every shaped query funnels through here, so no
+	// per-query code path can diverge. Previously a single match was unwrapped
+	// to a bare object (`return results[0]`), which forced every consumer to
+	// special-case single-vs-multi; that unwrap lived ONLY here, so removing it
+	// makes the array envelope universal.
+	//
+	// `results` is initialised via make([]any, 0, ...), so the empty case is a
+	// non-nil empty slice that marshals to `[]` (not `null`).
 	return results, nil
 }
 
