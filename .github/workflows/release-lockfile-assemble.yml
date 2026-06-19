@@ -66,10 +66,13 @@ jobs:
         run: |
           set -euo pipefail
           : "${ENGINE_VERSION:=$VERSION}"
-          # The 8 lockfile components == their ACR repository names (see
+          # The 9 lockfile components == their ACR repository names (see
           # scripts/release/assemble-lockfile.sh). Resolve each :<version>
           # tag's digest and export it as DIGEST_<comp_with_underscores>.
-          comps="memql-identity memql-cognition memql-voice memql-agent memql-planner memql-workbench memql-bff-copresent copresent"
+          # memql-mcp is engine-built (build-engine-images) like identity/voice
+          # and MUST be in this list or assemble-lockfile.sh fails with
+          # "no digest for memql-mcp (set DIGEST_memql_mcp)".
+          comps="memql-identity memql-cognition memql-voice memql-mcp memql-agent memql-planner memql-workbench memql-bff-copresent copresent"
           for c in $comps; do
             digest="$(az acr repository show --name "$ACR_NAME" --image "${c}:${VERSION}" --query digest -o tsv 2>/dev/null || true)"
             if [ -z "$digest" ]; then
