@@ -67,6 +67,8 @@ mutation action mutationMintAction {
     inputFingerprint  string    @required
     calls             []object  @required
     resourceEdges     []object
+    paramBindings     []object
+    templateFingerprint string
     recordedResult    object
     resultFingerprint string
     recordedSurface   string
@@ -82,6 +84,8 @@ mutation action mutationMintAction {
     args.inputFingerprint
     args.calls
     args.resourceEdges
+    args.paramBindings
+    args.templateFingerprint
     args.recordedResult
     args.resultFingerprint
     args.recordedSurface

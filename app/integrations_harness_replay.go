@@ -10,8 +10,16 @@ import (
 	"github.com/znasllc-io/memql/component/harness"
 	"github.com/znasllc-io/memql/component/harness/actionreplay"
 	"github.com/znasllc-io/memql/component/harness/actiontrace"
+	"github.com/znasllc-io/memql/component/harness/parambind"
 	"github.com/znasllc-io/memql/component/harness/surfaceresolver"
 )
+
+// paramReplayReliabilityFloor gates parameterized (varying-input) replay: an
+// action minted from a single run only replays on a DIFFERENT input once it
+// has proven reliable, since varying-input replay has no recorded result to
+// verify against. Exact-input replay (Phase 1) is fingerprint-verified and
+// has no such floor.
+const paramReplayReliabilityFloor = 0.7
 
 // actionReplayEnabled reports whether action-library literal replay (#1736) is
 // turned on. It is OFF by default: with the flag unset the harness behaves
@@ -283,6 +291,12 @@ func (a *App) mintActionFromRun(ctx context.Context, step harness.StepView, inpu
 		edges = []actiontrace.ResourceEdge{}
 	}
 
+	// Phase 3 (#1738): per-call parameter bindings (which args trace to the
+	// step input) + the structural template fingerprint, so the action can
+	// replay on VARYING input by re-binding witnessed params.
+	paramBindings := buildParamBindings(trace, step.Input)
+	templateFP := actionreplay.Fingerprint(parambind.TemplateFingerprintKeys(step.Input))
+
 	resultFP := actionreplay.Fingerprint(resultsForFP)
 	intent, _ := step.Input["goal"].(string)
 	if strings.TrimSpace(intent) == "" {
@@ -301,14 +315,18 @@ func (a *App) mintActionFromRun(ctx context.Context, step harness.StepView, inpu
 	if err != nil {
 		return
 	}
+	bindingsJSON, err := json.Marshal(paramBindings)
+	if err != nil {
+		return
+	}
 	resultJSON, err := json.Marshal(recordedResult)
 	if err != nil {
 		return
 	}
 
 	q := fmt.Sprintf(
-		`mutationMintAction({slug:%q, intent:%q, capability:%q, inputFingerprint:%q, calls:%s, resourceEdges:%s, recordedResult:%s, resultFingerprint:%q, recordedSurface:%q, provenancePlanId:%q, provenanceStepId:%q})`,
-		slug, intent, dominantCap, inputFP, string(callsJSON), string(edgesJSON), string(resultJSON), resultFP, "workbench", step.PlanID, step.ID,
+		`mutationMintAction({slug:%q, intent:%q, capability:%q, inputFingerprint:%q, calls:%s, resourceEdges:%s, paramBindings:%s, templateFingerprint:%q, recordedResult:%s, resultFingerprint:%q, recordedSurface:%q, provenancePlanId:%q, provenanceStepId:%q})`,
+		slug, intent, dominantCap, inputFP, string(callsJSON), string(edgesJSON), string(bindingsJSON), templateFP, string(resultJSON), resultFP, "workbench", step.PlanID, step.ID,
 	)
 	adapter := &CognitionEngineAdapter{Engine: a.engine}
 	if _, err := adapter.Execute(ctx, q); err != nil && a.Logger != nil {
@@ -383,4 +401,152 @@ func parseReplayCalls(v any) []actionreplay.ReplayCall {
 		out = append(out, actionreplay.ReplayCall{Index: idx, Capability: capability, Args: args})
 	}
 	return out
+}
+
+// buildParamBindings maps the data-flow tracer's per-arg provenance into the
+// parambind binding shape stored on the action: an arg that traced to the
+// step input becomes a stepInput binding (re-bound on replay); everything else
+// stays a literal. For a fragment binding, the witnessed substring (the source
+// value at record time) is captured so it can be substituted on replay.
+func buildParamBindings(trace actiontrace.CandidateTrace, stepInput map[string]any) []map[string]any {
+	out := make([]map[string]any, 0, len(trace.Calls))
+	for _, c := range trace.Calls {
+		bindings := make([]map[string]any, 0, len(c.Args))
+		for _, a := range c.Args {
+			b := map[string]any{"name": a.Name}
+			if a.Source.Kind == actiontrace.SourceStepInput {
+				b["kind"] = string(parambind.SourceStepInput)
+				b["ref"] = a.Source.Ref
+				b["literal"] = a.Value
+				if a.Source.Fragment {
+					b["fragment"] = true
+					if s, ok := a.Value.(string); ok {
+						b["template"] = s
+					}
+					if fv, ok := lookupString(stepInput, a.Source.Ref); ok {
+						b["fragmentValue"] = fv
+					}
+				}
+			} else {
+				b["kind"] = string(parambind.SourceLiteral)
+				b["literal"] = a.Value
+			}
+			bindings = append(bindings, b)
+		}
+		out = append(out, map[string]any{
+			"index":      c.Index,
+			"capability": c.Capability,
+			"bindings":   bindings,
+		})
+	}
+	return out
+}
+
+// tryParameterizedReplay matches an action by the structural template
+// fingerprint of the current step input and, if the action is reliable enough,
+// re-binds its params from the current input and replays the rebound calls
+// (no LLM). Unlike exact replay there is no recorded result to verify against,
+// so it is gated on reliability; the result is the freshly produced tool
+// output. Returns found=true when a template-matching action existed.
+func (a *App) tryParameterizedReplay(ctx context.Context, step harness.StepView) (replayed bool, result map[string]any, found bool) {
+	templateFP := actionreplay.Fingerprint(parambind.TemplateFingerprintKeys(step.Input))
+	adapter := &CognitionEngineAdapter{Engine: a.engine}
+	res, err := adapter.Execute(ctx, fmt.Sprintf(`queryActionByTemplateFingerprint({templateFingerprint:%q})`, templateFP))
+	if err != nil {
+		return false, nil, false
+	}
+	payload, id, ok := firstActionRow(res)
+	if !ok {
+		return false, nil, false
+	}
+	found = true
+
+	rel, _ := payload["reliability"].(float64)
+	if rel < paramReplayReliabilityFloor {
+		// Known but not yet trusted for varying-input replay.
+		return false, nil, found
+	}
+	pcalls := parseParamCalls(payload["paramBindings"])
+	if len(pcalls) == 0 {
+		return false, nil, found
+	}
+	// Re-bind each call's args from the CURRENT step input, then replay.
+	rcalls := make([]actionreplay.ReplayCall, 0, len(pcalls))
+	for _, pc := range pcalls {
+		rcalls = append(rcalls, actionreplay.ReplayCall{
+			Index:      pc.Index,
+			Capability: pc.Capability,
+			Args:       parambind.BindArgs(pc, step.Input),
+		})
+	}
+	results, _, err := actionreplay.Replay(ctx, a.engine, rcalls)
+	if err != nil {
+		if a.Logger != nil {
+			a.Logger.Debug("parameterized replay missed; falling back to LLM",
+				"action", id, "step", step.ID, "error", err)
+		}
+		return false, nil, found
+	}
+	a.reinforceAction(ctx, id, payload)
+	out := map[string]any{"replayed": true, "parameterized": true, "results": results}
+	if tag := a.resolveReplaySurfaces(ctx, payload, rcalls); tag != nil {
+		out["resolvedSurfaces"] = tag
+	}
+	return true, out, found
+}
+
+// parseParamCalls converts a stored paramBindings JSON array into parambind
+// calls.
+func parseParamCalls(v any) []parambind.Call {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]parambind.Call, 0, len(arr))
+	for i, e := range arr {
+		m, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		capability, _ := m["capability"].(string)
+		idx := i
+		if f, ok := m["index"].(float64); ok {
+			idx = int(f)
+		}
+		call := parambind.Call{Index: idx, Capability: capability}
+		if barr, ok := m["bindings"].([]any); ok {
+			for _, be := range barr {
+				bm, ok := be.(map[string]any)
+				if !ok {
+					continue
+				}
+				name, _ := bm["name"].(string)
+				kind, _ := bm["kind"].(string)
+				ref, _ := bm["ref"].(string)
+				frag, _ := bm["fragment"].(bool)
+				tmpl, _ := bm["template"].(string)
+				fragVal, _ := bm["fragmentValue"].(string)
+				call.Bindings = append(call.Bindings, parambind.Binding{
+					Name:          name,
+					Kind:          parambind.SourceKind(kind),
+					Ref:           ref,
+					Fragment:      frag,
+					Template:      tmpl,
+					FragmentValue: fragVal,
+					Literal:       bm["literal"],
+				})
+			}
+		}
+		out = append(out, call)
+	}
+	return out
+}
+
+// lookupString resolves a dotted ref into the step input and coerces to string.
+func lookupString(root map[string]any, ref string) (string, bool) {
+	args := parambind.BindArgs(parambind.Call{Bindings: []parambind.Binding{{Name: "_", Kind: parambind.SourceStepInput, Ref: ref}}}, root)
+	if s, ok := args["_"].(string); ok {
+		return s, true
+	}
+	return "", false
 }
