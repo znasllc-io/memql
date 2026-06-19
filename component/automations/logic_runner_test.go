@@ -237,6 +237,65 @@ func TestLogicRunner_SeedsCallerArgsEverywhere(t *testing.T) {
 	}
 }
 
+// TestLogicRunner_EventBindingIsFirstClass pins the memql#1706 first-class
+// event-context binding: the triggering event is resolvable from step
+// argument expressions via BOTH the author-facing `args.event.payload.X`
+// path and the bare `event.payload.X` root, with the SAME object backing
+// both spellings -- this is exactly what nested-step argument resolution
+// reads when threading the event into a step's args.
+func TestLogicRunner_EventBindingIsFirstClass(t *testing.T) {
+	r := NewLogicRunner(nil, nil, nil)
+	args := map[string]any{
+		"event": map[string]any{
+			"topic":   "node.created",
+			"payload": map[string]any{"activeSpaceId": "space-xyz", "id": "user-2"},
+		},
+	}
+	ev := r.newEvaluatorForLogic(args)
+
+	for _, expr := range []string{
+		`$args.event.payload.activeSpaceId`, // author-facing form in the live logics
+		`$event.payload.activeSpaceId`,      // bare form after the compiler's lift
+	} {
+		val, err := ev.EvaluateValue(expr)
+		if err != nil {
+			t.Fatalf("evaluate %s: %v", expr, err)
+		}
+		if val != "space-xyz" {
+			t.Errorf("%s = %#v, want %q (event must thread into step arg scope)", expr, val, "space-xyz")
+		}
+	}
+}
+
+// TestLogicRunner_EventBindingSeededWhenAbsent pins the defensive fallback:
+// even when the caller passes NO `event` arg, the bare `event` root is
+// seeded with a well-formed empty envelope so `event.payload.X` resolves to
+// empty rather than failing on an unbound root. Before #1706 the `event`
+// root was seeded only when an `event` arg was present, so this resolution
+// had no root to walk.
+func TestLogicRunner_EventBindingSeededWhenAbsent(t *testing.T) {
+	r := NewLogicRunner(nil, nil, nil)
+	ev := r.newEvaluatorForLogic(map[string]any{"spaceId": "space-abc"})
+
+	// The envelope itself is a well-formed object (not nil).
+	envelope, err := ev.EvaluateValue(`$event`)
+	if err != nil {
+		t.Fatalf("evaluate $event: %v", err)
+	}
+	if _, ok := envelope.(map[string]any); !ok {
+		t.Fatalf("$event = %#v (%T), want a well-formed envelope object", envelope, envelope)
+	}
+
+	// A missing payload field resolves cleanly to empty -- no unbound-root error.
+	val, err := ev.EvaluateValue(`$event.payload.id`)
+	if err != nil {
+		t.Fatalf("evaluate $event.payload.id with no event arg: %v (must degrade to empty, not error)", err)
+	}
+	if val != nil && val != "" {
+		t.Errorf("$event.payload.id = %#v, want nil/empty for the synthetic envelope", val)
+	}
+}
+
 // TestLogicRunner_PreservesReturnStep pins the compile->JSON->loader
 // round-trip: the compiler peels the parser's synthetic `_return`
 // step out of the steps slice and emits it as a top-level
@@ -738,12 +797,12 @@ func TestLogicRunner_EvaluateLocalExpr_PreservesNonLiterals(t *testing.T) {
 // literal. Guards the memql#1090 fix against over-reach.
 func TestTryEvaluateLiteralLocally_StrictMatching(t *testing.T) {
 	literals := map[string]any{
-		"1":       int64(1),
-		"1.5":     1.5,
-		`"x"`:     "x",
-		"true":    true,
-		"false":   false,
-		"null":    nil,
+		"1":     int64(1),
+		"1.5":   1.5,
+		`"x"`:   "x",
+		"true":  true,
+		"false": false,
+		"null":  nil,
 	}
 	for expr, want := range literals {
 		val, ok := tryEvaluateLiteralLocally(expr)

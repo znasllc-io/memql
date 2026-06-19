@@ -767,9 +767,23 @@ func (r *LogicRunner) compileBodyToAutomation(fnName string, body *languageParse
 // newEvaluatorForLogic builds an evaluator seeded with the caller's
 // args under every spelling Logic step bodies might use: `args` (the
 // author-facing form), `ctx` (the legacy runtime form), and
-// `event` (when the caller passes the event payload through,
-// matching how automation steps see it). $input mirrors args so
-// the existing $input.X expression resolver works too.
+// `event` (the first-class triggering-event binding). $input mirrors
+// args so the existing $input.X expression resolver works too.
+//
+// First-class event-context binding (memql#1706): the triggering event
+// is bound as a top-level, in-scope value resolvable from EVERY step's
+// argument expressions -- both the author-facing `args.event.payload.X`
+// (through the `args` map) and the bare `event.payload.X` form (through
+// this dedicated `event` root). The SAME object backs both spellings.
+// Seeding is UNCONDITIONAL with a well-formed empty envelope fallback so
+// a bare `event.payload.X` reference resolves to empty (never to an
+// unbound-root resolution error) even on a misconfigured/direct call
+// that forgot to pass `event` -- mirroring the synthetic-envelope
+// philosophy the automation executor uses for schedule-triggered runs
+// (buildEventEnvelope, #418). Compile-time validation
+// (validateLogicEventBinding) guarantees every event-reading logic
+// DECLARES `event` as a required input, so the real path always carries
+// a concrete event; the fallback is purely defensive.
 func (r *LogicRunner) newEvaluatorForLogic(args map[string]any) *Evaluator {
 	evaluator := NewEvaluator()
 	if args == nil {
@@ -782,17 +796,29 @@ func (r *LogicRunner) newEvaluatorForLogic(args map[string]any) *Evaluator {
 		"output": nil,
 		"error":  "",
 	})
-	// The `event` arg is the conventional plumb-through for cron /
-	// graph-event-triggered logics. When present, expose it as a
-	// top-level variable so step expressions matching the
-	// automation flow (`event.payload.X`) resolve.
-	if eventVal, ok := args["event"]; ok {
-		evaluator.SetCustom("event", eventVal)
-	}
+	evaluator.SetCustom("event", logicEventBinding(args))
 	if r.logger != nil {
 		evaluator.SetLogger(r.logger)
 	}
 	return evaluator
+}
+
+// logicEventBinding resolves the first-class `event` value bound into a
+// logic's step scope. It returns the caller-passed `event` arg verbatim
+// when present, otherwise a well-formed empty envelope
+// (`{topic, kind, payload:{}}`) so `event.payload.X` / `args.event.payload.X`
+// references resolve to empty rather than failing on an unbound `event`
+// root. Keeping the SAME object under both the `args.event` path and the
+// bare `event` root means the two spellings can never drift.
+func logicEventBinding(args map[string]any) any {
+	if eventVal, ok := args["event"]; ok && eventVal != nil {
+		return eventVal
+	}
+	return map[string]any{
+		"topic":   "",
+		"kind":    "",
+		"payload": map[string]any{},
+	}
 }
 
 // Compile-time check that LogicRunner satisfies the engine's

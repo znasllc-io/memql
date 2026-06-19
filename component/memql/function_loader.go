@@ -358,6 +358,15 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		return nil, err
 	}
 
+	// First-class event-context binding (memql#1706): a Logic that reads the
+	// triggering event must declare `event` as an input so the runner threads
+	// it into every nested step's argument-resolution scope. The inverse of
+	// the declared-usage Logic exemption above -- declared-but-unused `event`
+	// is fine (cron logics), used-but-undeclared `event` is a hard error.
+	if err := validateLogicEventBinding(rawSourceForUsage, funcDef); err != nil {
+		return nil, err
+	}
+
 	// Validate the function name matches the file-derived function name.
 	if funcDef.Name != "" && funcDef.Name != expectedName {
 		return nil, fmt.Errorf("function name %q does not match expected name %q", funcDef.Name, expectedName)
