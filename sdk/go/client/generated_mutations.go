@@ -9156,12 +9156,13 @@ func MutationRevokeAuthSessionBuild(args MutationRevokeAuthSessionArgs) string {
 	return b.String()
 }
 
-// MutationRevokeDelegation -- Revoke a delegation by deactivating it and recording revocation metadata.
+// MutationRevokeDelegation -- Revoke a delegation: authoritatively flips active=false and stamps revokedAt/revokedBySubject regardless of caller input. Read-merges the persisted row so every other field is preserved (memql#1729).
 //
 // Bound concept: delegation.
 type MutationRevokeDelegationArgs struct {
-	DelegationId string
-	Payload      map[string]any
+	DelegationId     string
+	RevokedBySubject string
+	RevokedAt        string
 }
 
 // MutationRevokeDelegation calls the engine mutation mutationRevokeDelegation.
@@ -9175,11 +9176,20 @@ func MutationRevokeDelegationBuild(args MutationRevokeDelegationArgs) string {
 	b.WriteString("mutationRevokeDelegation({")
 	b.WriteString("delegationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DelegationId))
-	if b.Len() > 26 {
-		b.WriteString(", ")
+	if args.RevokedBySubject != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("revokedBySubject: ")
+		b.WriteString(fmt.Sprintf("%q", args.RevokedBySubject))
 	}
-	b.WriteString("payload: ")
-	b.WriteString(renderMemQLValue(args.Payload))
+	if args.RevokedAt != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("revokedAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.RevokedAt))
+	}
 	b.WriteString("})")
 	return b.String()
 }

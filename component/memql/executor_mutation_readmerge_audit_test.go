@@ -127,22 +127,29 @@ func TestReadMergeAudit_EveryMutationRoutesThroughReadMergePath(t *testing.T) {
 	t.Logf("  update-kind mutations: %v", updateKind)
 }
 
-// TestReadMergeAudit_Run4Regressions pins the two mutations the issue calls
-// out as still-broken in Run 4 (mutationLeaveSpace, mutationRevokeDelegation).
-// They are authored as insert{} with an explicit id and a partial payload --
-// the exact shape that used to reject with "” does not validate ... missing
-// properties". The engine-level read-merge (memql#1709) is the canonical fix:
-// because they target an explicit id, executeWrite read-merges the partial
-// onto the stored row. This test asserts they retain that shape (insert-kind
-// + explicit id) so the audit documents that they depend on the engine fix
-// rather than a per-mutation DSL conversion (which the issue explicitly said
-// NOT to apply). The behavioural preservation proofs are
-// TestReadMerge_LeaveSpace_* and TestReadMerge_RevokeDelegation_* in the
-// DB-gated file.
+// TestReadMergeAudit_Run4Regressions pins mutationLeaveSpace -- one of the two
+// mutations the issue called out as still-broken in Run 4. It is authored as
+// insert{} with an explicit id and a partial payload -- the exact shape that
+// used to reject with "” does not validate ... missing properties". The
+// engine-level read-merge (memql#1709) is the canonical fix: because it targets
+// an explicit id, executeWrite read-merges the partial onto the stored row.
+// This test asserts it retains that shape (insert-kind + explicit id) so the
+// audit documents that it depends on the engine fix rather than a per-mutation
+// DSL conversion. The behavioural preservation proof is TestReadMerge_LeaveSpace_*
+// in the DB-gated file.
+//
+// mutationRevokeDelegation was the OTHER Run-4 mutation, but it has since been
+// intentionally converted to an update{} (read-merge) form (memql#1729): a
+// revoke is a state transition, so the terminal state (active=false +
+// revokedAt) must be forced by the mutation itself rather than supplied by the
+// caller's payload. That authoritative form is asserted by
+// TestReadMerge_RevokeDelegation_PreservesFields (DB-gated) and the
+// conf_1729 conformance dimension; it is excluded here precisely because it is
+// now update-kind by design.
 func TestReadMergeAudit_Run4Regressions(t *testing.T) {
 	templates := loadAllMutationTemplates(t)
 
-	for _, name := range []string{"mutationLeaveSpace", "mutationRevokeDelegation"} {
+	for _, name := range []string{"mutationLeaveSpace"} {
 		tmpl, ok := templates[name]
 		require.True(t, ok, "%s must be registered from the unified tree", name)
 		require.True(t, hasExplicitID(tmpl),
@@ -153,4 +160,15 @@ func TestReadMergeAudit_Run4Regressions(t *testing.T) {
 			"%s is intentionally left as insert{}; the engine-level read-merge (memql#1709) "+
 				"is the canonical fix, not a per-mutation update{} conversion", name)
 	}
+
+	// mutationRevokeDelegation must be update-kind (authoritative revoke,
+	// memql#1729) -- the inverse assertion, so a regression back to insert{}
+	// (where the caller payload could leave the row active) fails here.
+	revoke, ok := templates["mutationRevokeDelegation"]
+	require.True(t, ok, "mutationRevokeDelegation must be registered from the unified tree")
+	require.True(t, hasExplicitID(revoke),
+		"mutationRevokeDelegation must target an explicit id (memql#1729)")
+	require.Equal(t, ast.MutationKindUpdate, revoke.Kind,
+		"mutationRevokeDelegation must be update-kind so it authoritatively forces "+
+			"active=false regardless of caller input (memql#1729)")
 }
