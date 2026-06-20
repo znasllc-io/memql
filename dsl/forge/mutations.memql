@@ -154,6 +154,32 @@ mutation request mutationRequestChanges {
 }
 
 // ---------------------------------------------------------------------------
+// mutationAttachToRequest -- link one v1:common:attachment to a request by
+// writing the full (updated) attachmentIds array. The mutation DSL update
+// block replaces array fields on write; it cannot natively append a single
+// element. Callers must read-modify-write: fetch the current attachmentIds
+// via forgeRequestById (or queryRequestById), append the new id client-side,
+// and pass the resulting array here. This mirrors the
+// mutationRecordLegalAcceptance pattern -- the closest workable approach
+// until the DSL gains a native arrayAppend expression. update read-merges
+// all other request fields (body, status, submitter, priority, etc.) so
+// they survive unchanged.
+// ---------------------------------------------------------------------------
+@enabled
+@description("Link a v1:common:attachment to a v1:forge:request by replacing its attachmentIds array. Caller must read-modify-write: fetch the existing attachmentIds, append the new id, pass the full array here. update read-merges all other request fields.")
+mutation request mutationAttachToRequest {
+  args {
+    requestId      string    @required
+    attachmentIds  []string  @required
+  }
+  update {
+    id: args.requestId
+    args.attachmentIds
+    provenanceMutation: "mutationAttachToRequest"
+  }
+}
+
+// ---------------------------------------------------------------------------
 // mutationRecordRequestEvent -- append an audit/pipeline event. actorUserId +
 // actorRole stamped from the auth context.
 // ---------------------------------------------------------------------------

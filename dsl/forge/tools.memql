@@ -137,3 +137,15 @@ tool forgeRecordMentoring {
   requestId  string  @required @description("Id of the request that was mentored (from forgeSubmitRequest).")
   note       string  @required @description("The mentoring explanation text Claude generated and showed to the user. Stored verbatim as the event note so the audit trail captures exactly what was taught.")
 }
+
+// ----- attachments -----
+
+@enabled
+@handler(type="function", name="logicAttachToRequest")
+@executionTime("fast")
+@description("Attach ONE screenshot or file (a v1:common:attachment id) to an existing forge request. Callable repeatedly to accumulate multiple attachments. Internally fetches the current attachmentIds array, appends the new id, and writes the full updated array -- no clobbering of existing attachments. The v1:common:attachment must already exist (uploaded via the space attachments endpoint).")
+@mcp
+tool forgeAttachToRequest {
+  requestId     string  @required @description("Id of the v1:forge:request to attach to.")
+  attachmentId  string  @required @description("Id of the v1:common:attachment to link. The attachment must already be uploaded (POST /spaces/{spaceId}/attachments). Call this tool once per file; each call appends without clobbering.")
+}
