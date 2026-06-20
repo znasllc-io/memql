@@ -42,6 +42,8 @@ func TestMCPCuratedToolSurface(t *testing.T) {
 		"forgeValidationQueue", "forgeValidateRequest",
 		"forgeApprovalQueue", "forgeApproveRequest",
 		"forgeRequestChanges",
+		// forgeAttachToRequest (#1790): links a v1:common:attachment to a request.
+		"forgeAttachToRequest",
 		// forgeRecordMentoring (#1789): records a `mentored` event after Claude
 		// teaches a non-owner submitter about the area they touched.
 		"forgeRecordMentoring",

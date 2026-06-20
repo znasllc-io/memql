@@ -94,6 +94,32 @@ func LogicAccountDeletionSweepBuild(args LogicAccountDeletionSweepArgs) string {
 	return b.String()
 }
 
+// LogicAttachToRequest -- Append one v1:common:attachment id to a v1:forge:request's attachmentIds array. Fetches the current row, appends the new id, writes the full updated array via mutationAttachToRequest. Backed by the step evaluator's append() -- the closest native append the DSL supports without a Go builtin.
+type LogicAttachToRequestArgs struct {
+	RequestId    string
+	AttachmentId string
+}
+
+// LogicAttachToRequest calls the engine logic logicAttachToRequest.
+func (qc *QueryClient) LogicAttachToRequest(ctx context.Context, args LogicAttachToRequestArgs) (*Result, error) {
+	call := LogicAttachToRequestBuild(args)
+	return qc.executeNamed(ctx, "logicAttachToRequest", call)
+}
+
+func LogicAttachToRequestBuild(args LogicAttachToRequestArgs) string {
+	var b strings.Builder
+	b.WriteString("logicAttachToRequest({")
+	b.WriteString("requestId: ")
+	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
+	b.WriteString("attachmentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // LogicAuditEventRetentionSweep -- Daily 02:00 UTC sweep over v1:identity:auditEvent rows older than IDENTITY_AUDIT_LOG_RETENTION_DAYS. Observation-only today: emits an 'identity.audit.retention.observed' event with the candidate count -- MemQL has no delete() mutation and AuditEvent's append-only semantics forbid soft-delete via active=false. Per-row delete lands when one of those gaps closes.
 type LogicAuditEventRetentionSweepArgs struct {
 	Event map[string]any

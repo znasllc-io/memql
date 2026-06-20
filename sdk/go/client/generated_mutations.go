@@ -628,6 +628,34 @@ func MutationAttachPlanFeedbackBuild(args MutationAttachPlanFeedbackArgs) string
 	return b.String()
 }
 
+// MutationAttachToRequest -- Link a v1:common:attachment to a v1:forge:request by replacing its attachmentIds array. Caller must read-modify-write: fetch the existing attachmentIds, append the new id, pass the full array here. update read-merges all other request fields.
+//
+// Bound concept: request.
+type MutationAttachToRequestArgs struct {
+	RequestId     string
+	AttachmentIds []string
+}
+
+// MutationAttachToRequest calls the engine mutation mutationAttachToRequest.
+func (qc *QueryClient) MutationAttachToRequest(ctx context.Context, args MutationAttachToRequestArgs) (*Result, error) {
+	call := MutationAttachToRequestBuild(args)
+	return qc.executeNamed(ctx, "mutationAttachToRequest", call)
+}
+
+func MutationAttachToRequestBuild(args MutationAttachToRequestArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationAttachToRequest({")
+	b.WriteString("requestId: ")
+	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("attachmentIds: ")
+	b.WriteString(renderMemQLValue(args.AttachmentIds))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationBumpActionVersion -- Bump a v1:actions:action monotonic version on edit (Phase 5 #1740; value computed engine-side). Pins stay on the prior version until the verified upgrade migration moves them.
 //
 // Bound concept: action.
