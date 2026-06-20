@@ -45,7 +45,7 @@ tool forgeActiveProjects {}
 @enabled
 @handler(type="function", name="mutationCreateRequest")
 @executionTime("fast")
-@description("Submit a forge request (bug, feature, chore, question, or an HR action) for a project. submitterUserId + submitterRole are stamped server-side from the caller. status lands 'submitted' and is auto-routed by role (owner fast-tracks; a developer goes to approval; a non-developer goes to validation first). Pass a fresh unique requestId. IMPORTANT: if the caller is NOT an owner, take a moment to teach them about the part of the system or company their request touches -- a short, friendly explanation -- so they learn while they file.")
+@description("Submit a forge request (bug, feature, chore, question, or an HR action) for a project. submitterUserId + submitterRole are stamped server-side from the caller. status lands 'submitted' and is auto-routed by role (owner fast-tracks; a developer goes to approval; a non-developer goes to validation first). Pass a fresh unique requestId. MENTORING SEQUENCE (mandatory for non-owner submitters): after this tool returns successfully, check whether the submitter is NOT an owner. If so: (1) call the forgeMentoringExplanation prompt with the project slug, request type, title, and body to generate a short teaching explanation of the area they are touching; (2) show that explanation to the user as a friendly follow-on message; (3) immediately call forgeRecordMentoring to record a 'mentored' requestEvent on this request (pass the explanation as the note). Owner submissions skip the mentoring sequence entirely.")
 @mcp
 tool forgeSubmitRequest {
   requestId  string  @required @description("Fresh unique id for the request, e.g. a UUID. The caller mints it so it can reference the row immediately.")
@@ -123,4 +123,17 @@ tool forgeApproveRequest {
 tool forgeRequestChanges {
   requestId   string  @required @description("Id of the request to send back.")
   resolution  string  @required @description("Why it's being sent back / what needs to change.")
+}
+
+// ----- mentoring -----
+
+@enabled
+@handler(type="function", name="mutationRecordRequestEvent")
+@executionTime("fast")
+@description("Record a 'mentored' requestEvent after Claude has delivered a teaching explanation to a non-owner submitter. Call this immediately after showing the mentoring explanation to the user. Pass the request id, kind='mentored', and the explanation text as the note. Owner submissions skip this tool -- only call it when the submitter role is NOT 'owner'.")
+@mcp
+tool forgeRecordMentoring {
+  eventId    string  @description("Fresh unique id for the event, e.g. a UUID. Optional -- the engine mints one if absent.")
+  requestId  string  @required @description("Id of the request that was mentored (from forgeSubmitRequest).")
+  note       string  @required @description("The mentoring explanation text Claude generated and showed to the user. Stored verbatim as the event note so the audit trail captures exactly what was taught.")
 }
