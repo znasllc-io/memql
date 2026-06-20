@@ -1,0 +1,99 @@
+// concepts.memql
+//
+// The `forge` namespace -- the company-operating-system bundle: the MCP
+// surface a team talks to (through Claude) to run development AND people-ops
+// across MULTIPLE projects/clients, with every request flowing through a
+// role-gated approval pipeline and living forever in the time-series graph.
+//
+// Forge is agnostic: one `request` spine serves bugs, features, and (later)
+// HR flows (time off, check-in) -- discriminated by `type`, routed by the
+// submitter's role. It sits ON TOP of the apps it develops (memql,
+// memql-cockpit, copresent, future clients) -- it is NOT core.
+//
+// Scope/authz (first slice):
+//   - These concepts are PARTITION-scoped (no @scope) -- team-shared within a
+//     tenant, so a validator/approver can read a submitter's request. This is
+//     deliberately NOT the owned tier (which would hide other people's rows).
+//   - Read gating to developers/owners is enforced at the QUERY layer via the
+//     forge role traits (traits.memql). The transition guard ("only an owner
+//     may flip a request to approved") needs an engine-side pre-insert guard
+//     (mirroring component/memql/harness_step_validation.go) -- noted as a
+//     follow-up; the DSL alone cannot express a role-gated state machine.
+//
+// Role mapping (cluster roles are owner/admin/writer/reader -- there is no
+// literal "developer" role, so personas map on):
+//   owner   -> Jose: final approval + fast-track (self-approve), execute/deploy
+//   admin   -> senior developer: may validate AND approve to staging
+//   writer  -> junior developer: first-line validation
+//   reader  -> non-developer employee: submit-only; gets the mentoring layer
+//
+// NOTE: `type` is a reserved row intrinsic in MemQL, so the request "kind"
+// field is named `requestType` (not `type`).
+
+// ---------------------------------------------------------------------------
+// project -- a unit of work context forge operates against. Lets the SAME
+// bundle serve memql, copresent-for-clientA, copresent-for-clientB, etc.
+// without baking any one app in. (A project is a row, not a partition: one
+// tenant/company can run many projects; cross-CLIENT isolation is the
+// partition boundary above this.)
+// ---------------------------------------------------------------------------
+@version("1.0.0")
+@namespace("forge")
+@description("A project/codebase forge develops against (e.g. memql, copresent for a given client). Requests are scoped to a project so one agnostic bundle serves many apps. Partition-scoped: team-shared within the tenant.")
+@displayCard(primary="name", secondary="targetApp", tertiary="status", status="status")
+concept project {
+  slug         string  @required  @description("Stable short id, e.g. 'memql', 'copresent-acme'. Unique within the partition.")
+  name         string  @required  @description("Human-readable project name.")
+  targetApp    string  @description("Which app this project develops (memql / memql-cockpit / copresent / ...).")
+  repo         string  @description("Git repository URL or path.")
+  description  string  @description("What this project is.")
+  status       enum("active", "archived")  @required  @default("active")  @description("active = accepting requests; archived = read-only history.")
+  createdByUserId  string  @description("v1:identity:user.id of whoever registered the project.")
+  provenanceMutation  string  @description("Name of the mutation that produced this version (audit trail).")
+}
+
+// ---------------------------------------------------------------------------
+// request -- the spine. A typed unit of work submitted by a team member,
+// moving through a role-gated approval pipeline. Bug/feature today; HR types
+// (timeOff/checkIn) layer on as just new `type` + pipeline config later.
+// ---------------------------------------------------------------------------
+@version("1.0.0")
+@namespace("forge")
+@description("A request a team member submits through Claude -> the forge MCP surface: a bug, feature, or (later) HR action. Routed by submitterRole through the approval pipeline (submitted -> needs_validation -> validated -> needs_approval -> approved -> queued). Partition-scoped so validators/approvers can read it. Every transition is recorded as a v1:forge:requestEvent for a full time-series audit trail.")
+@displayCard(primary="title", secondary="requestType", tertiary="status", status="status")
+concept request {
+  projectId      string  @required  @description("v1:forge:project.id this request targets.")
+  requestType    enum("bug", "feature", "chore", "question", "timeOff", "checkIn")  @required  @default("bug")  @description("Request kind (named requestType because `type` is a reserved row intrinsic). Drives which pipeline applies. First slice centers bug/feature; HR types are modelled so they ride the same spine.")
+  title          string  @required  @description("Short summary of the request.")
+  body           string  @required  @description("The full prompt/description -- what the submitter wants, what they saw, repro steps.")
+  submitterUserId  string  @required  @description("v1:identity:user.id of the submitter. Stamped from actor.userId by mutationCreateRequest -- the caller cannot submit as someone else.")
+  submitterRole  enum("owner", "admin", "writer", "reader")  @required  @description("The submitter's cluster role at submit time. Stamped from actor.role. THE routing key: owner short-circuits the chain; reader requires validation + approval and triggers the mentoring layer.")
+  attachmentIds  []string  @description("v1:common:attachment ids -- screenshots/files the submitter (via Claude) attached. Reuses the common attachment concept.")
+  priority       enum("low", "normal", "high", "urgent")  @required  @default("normal")  @description("Submitter/triager priority.")
+  status         enum("submitted", "needs_validation", "validated", "needs_approval", "approved", "changes_requested", "rejected", "queued")  @required  @default("submitted")  @description("Approval-pipeline state. mutationCreateRequest lands 'submitted'; routeRequest sets the next state by role; validate/approve transitions advance it; 'queued' = approved and waiting for implementation (auto-execute lands when the actions substrate is wired).")
+  targetEnv      enum("staging", "production")  @required  @default("staging")  @description("Where an approved request deploys. Defaults to staging.")
+  validatedByUserId  string  @description("v1:identity:user.id of the developer who validated. Set on the validated transition.")
+  approvedByUserId   string  @description("v1:identity:user.id of the approver (owner). Set on the approved transition.")
+  resolution     string  @description("Free-form outcome note when the request reaches a terminal state.")
+  provenanceMutation  string  @description("Name of the mutation that produced this version (audit trail).")
+}
+
+// ---------------------------------------------------------------------------
+// requestEvent -- the append-only pipeline/audit trail. One row per
+// transition or note. This is the time-series record of "who did what when"
+// that makes forge the brain/memory of the company.
+// ---------------------------------------------------------------------------
+@version("1.0.0")
+@namespace("forge")
+@description("An append-only event in a request's lifecycle: a routing decision, validation, approval, rejection, comment, or mentoring touch. The time-series audit trail for a request -- every transition is one row, never mutated.")
+@displayCard(primary="kind", secondary="requestId", tertiary="actorUserId", status="kind")
+concept requestEvent {
+  requestId   string  @required  @description("v1:forge:request.id this event belongs to.")
+  kind        enum("submitted", "routed", "validated", "changes_requested", "approved", "rejected", "commented", "mentored")  @required  @description("What happened.")
+  actorUserId string  @required  @description("v1:identity:user.id who produced the event. Stamped from actor.userId.")
+  actorRole   string  @description("The actor's cluster role at event time.")
+  fromStatus  string  @description("Request status before this event (for transitions).")
+  toStatus    string  @description("Request status after this event (for transitions).")
+  note        string  @description("Free-form note: validation comment, rejection reason, mentoring summary, etc.")
+  provenanceMutation  string  @description("Name of the mutation that produced this event (audit trail).")
+}

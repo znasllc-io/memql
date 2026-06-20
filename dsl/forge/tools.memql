@@ -1,0 +1,126 @@
+// tools.memql
+//
+// The `forge` MCP surface -- the tools a team member's Claude calls to run
+// development + people-ops. One tool binds to exactly one handler (a named
+// mutation, or a query/statement). Per-row identity is stamped server-side
+// inside the bound mutation (submitter/validator/approver = actor), so no
+// tool call can act as someone else.
+//
+// Gating: submit + "my requests" are open to every authenticated team member.
+// The validation/approval QUEUE tools run developer/owner-gated queries
+// (traits.memql), so a non-developer calling them gets an empty list. The
+// hard transition guard (only an owner may approve) is the engine pre-insert
+// follow-up noted in mutations.memql.
+//
+// Mentoring: forgeSubmitRequest's description instructs Claude to teach a
+// non-owner submitter about what they're looking at while filing -- the
+// "learn about the company as you work" layer. (A dedicated mentoring prompt
+// lands in the next slice.)
+
+// ----- projects -----
+
+@enabled
+@handler(type="function", name="mutationCreateProject")
+@executionTime("fast")
+@description("Register a project forge develops against (e.g. memql, copresent for a client). Pass a fresh unique projectId. Use this once per app/codebase; requests reference projectId.")
+@mcp
+tool forgeRegisterProject {
+  projectId    string  @required @description("Fresh unique id for the project, e.g. a UUID. The caller mints it so it can reference the row immediately.")
+  slug         string  @required @description("Stable short id, e.g. 'memql' or 'copresent-acme'.")
+  name         string  @required @description("Human-readable project name.")
+  targetApp    string  @description("Which app this develops: memql / memql-cockpit / copresent / ...")
+  repo         string  @description("Git repository URL or path.")
+  description  string  @description("What the project is.")
+}
+
+@enabled
+@handler(type="query", query="queryActiveProjects({})")
+@executionTime("fast")
+@description("List the active forge projects. Use this to resolve a projectId before submitting a request.")
+@mcp
+tool forgeActiveProjects {}
+
+// ----- submit + browse (open to all team members) -----
+
+@enabled
+@handler(type="function", name="mutationCreateRequest")
+@executionTime("fast")
+@description("Submit a forge request (bug, feature, chore, question, or an HR action) for a project. submitterUserId + submitterRole are stamped server-side from the caller. status lands 'submitted' and is auto-routed by role (owner fast-tracks; a developer goes to approval; a non-developer goes to validation first). Pass a fresh unique requestId. IMPORTANT: if the caller is NOT an owner, take a moment to teach them about the part of the system or company their request touches -- a short, friendly explanation -- so they learn while they file.")
+@mcp
+tool forgeSubmitRequest {
+  requestId  string  @required @description("Fresh unique id for the request, e.g. a UUID. The caller mints it so it can reference the row immediately.")
+  projectId   string  @required @description("v1:forge:project.id this request targets (from forgeActiveProjects).")
+  requestType string  @enum("bug", "feature", "chore", "question", "timeOff", "checkIn") @description("Request kind. Defaults to bug.")
+  title      string  @required @description("Short summary of the request.")
+  body       string  @required @description("Full description: what they want, what they saw, repro steps. Capture the employee's words plus any analysis Claude added.")
+  priority   string  @enum("low", "normal", "high", "urgent") @description("Optional priority. Defaults to normal.")
+}
+
+@enabled
+@handler(type="query", query="queryMyRequests({})")
+@executionTime("fast")
+@description("List the caller's own submitted requests, newest first.")
+@mcp
+tool forgeMyRequests {}
+
+@enabled
+@handler(type="query", query="queryRequestById({requestId: \"$args.requestId\"})")
+@executionTime("fast")
+@description("Get a single forge request by id (full detail).")
+@mcp
+tool forgeRequestById {
+  requestId  string  @required @description("Id of the request to fetch.")
+}
+
+@enabled
+@handler(type="query", query="queryRequestEvents({requestId: \"$args.requestId\"})")
+@executionTime("fast")
+@description("Get the full lifecycle/audit trail for a request (submitted, routed, validated, approved, ...), newest first.")
+@mcp
+tool forgeRequestHistory {
+  requestId  string  @required @description("Id of the request whose history to fetch.")
+}
+
+// ----- developer/owner queues + transitions -----
+
+@enabled
+@handler(type="query", query="queryValidationQueue({})")
+@executionTime("fast")
+@description("List requests awaiting first-line developer validation. Developer/owner only -- returns empty for others.")
+@mcp
+tool forgeValidationQueue {}
+
+@enabled
+@handler(type="function", name="mutationValidateRequest")
+@executionTime("fast")
+@description("Validate a request (developer action): advances it to 'needs_approval' and stamps the validator from the caller. Validate from the validation queue.")
+@mcp
+tool forgeValidateRequest {
+  requestId  string  @required @description("Id of the request to validate.")
+}
+
+@enabled
+@handler(type="query", query="queryApprovalQueue({})")
+@executionTime("fast")
+@description("List validated requests awaiting owner approval. Owner only -- returns empty for others.")
+@mcp
+tool forgeApprovalQueue {}
+
+@enabled
+@handler(type="function", name="mutationApproveRequest")
+@executionTime("fast")
+@description("Approve a request (owner action): advances it to 'queued' (ready to implement; auto-execute/deploy lands when the actions substrate is wired) and stamps the approver from the caller.")
+@mcp
+tool forgeApproveRequest {
+  requestId  string  @required @description("Id of the request to approve.")
+}
+
+@enabled
+@handler(type="function", name="mutationRequestChanges")
+@executionTime("fast")
+@description("Send a request back for changes (developer/owner action) with a reason: sets status 'changes_requested'.")
+@mcp
+tool forgeRequestChanges {
+  requestId   string  @required @description("Id of the request to send back.")
+  resolution  string  @required @description("Why it's being sent back / what needs to change.")
+}

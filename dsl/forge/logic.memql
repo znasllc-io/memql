@@ -1,0 +1,50 @@
+// logic.memql
+//
+// Orchestration logic for the `forge` namespace.
+//
+// logicRouteRequest -- the role-based router. Fired by the routeRequest
+// automation when a v1:forge:request is created (status 'submitted'), it sets
+// the next pipeline state from the submitter's role:
+//
+//   owner          -> queued       (fast-track: self-approved, ready to
+//                                    implement; auto-execute/deploy lands when
+//                                    the actions substrate is wired)
+//   admin / writer -> needs_approval (a developer's own report skips
+//                                    first-line validation)
+//   reader         -> needs_validation (a non-developer's request must be
+//                                    validated by a developer, then approved)
+//
+// The three guards are mutually exclusive, so exactly one transition fires.
+// Each `if cond { mutation }` only runs its side effect when the guard holds
+// (same pattern as data.logicConflictDetection's guarded publishEvent).
+//
+// No loop risk: the trigger is node.created; mutationAdvanceRequest is an
+// update (node.updated), which does not re-fire this automation.
+//
+// The mentoring touch for non-owners (Claude teaches the submitter about what
+// they're looking at) is driven client-side via the forge prompts + the
+// submitRequest tool description; a server-side `mentored` event is recorded
+// when that happens. (Prompts land in the next slice.)
+
+use forge.mutations.{ mutationAdvanceRequest, mutationRecordRequestEvent }
+
+@enabled
+@description("Route a newly-submitted v1:forge:request to its next pipeline state by submitter role (owner -> queued; developer -> needs_approval; non-developer -> needs_validation). Records a 'routed' audit event.")
+logic logicRouteRequest {
+  args {
+    event  object  @required
+  }
+  body {
+    fastTrack := if args.event.payload.submitterRole == "owner" {
+      mutationAdvanceRequest({ requestId: args.event.payload.id, status: "queued", approvedByUserId: args.event.payload.submitterUserId })
+    }
+    toApproval := if args.event.payload.submitterRole == "admin" || args.event.payload.submitterRole == "writer" {
+      mutationAdvanceRequest({ requestId: args.event.payload.id, status: "needs_approval" })
+    }
+    toValidation := if args.event.payload.submitterRole == "reader" {
+      mutationAdvanceRequest({ requestId: args.event.payload.id, status: "needs_validation" })
+    }
+    recordRouted := mutationRecordRequestEvent({ requestId: args.event.payload.id, kind: "routed", fromStatus: "submitted", note: "routed by submitter role" })
+    return args.event.payload.id
+  }
+}
