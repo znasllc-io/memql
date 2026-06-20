@@ -528,6 +528,15 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 	}
+	// Forge request guard (issue #1787): enforces the v1:forge:request
+	// approval-pipeline state machine and role authority. The append-only
+	// DSL cannot gate a transition on actor.role, so the rule lives here.
+	// See forge_request_validation.go.
+	if conceptMeta.Name == conceptForgeRequest {
+		if err := e.validateForgeRequestTransition(ctx, payload, mutation.ID); err != nil {
+			return nil, meta, err
+		}
+	}
 
 	createParams := memorynodes.CreateParams{
 		Actor:   actor,
