@@ -127,6 +127,27 @@ func (c *Compiler) compileStepHelperValue(v any) any {
 	return v
 }
 
+// positionalArgValues reports whether args is a pure positional arg map
+// (exactly the keys "0".."len-1") and, if so, returns the values in index
+// order. A positional builtin call (`append(arr, item)`, `coalesce(a, b)`)
+// stores its operands this way; rendering them positionally avoids the
+// invalid `name(0=v0, 1=v1)` named form. Returns (nil, false) for any map
+// that isn't a contiguous 0-based positional set (named args, gaps).
+func positionalArgValues(args map[string]any) ([]any, bool) {
+	if len(args) == 0 {
+		return nil, false
+	}
+	out := make([]any, len(args))
+	for i := range out {
+		v, ok := args[strconv.Itoa(i)]
+		if !ok {
+			return nil, false
+		}
+		out[i] = v
+	}
+	return out, true
+}
+
 // argRefPattern matches the `arg("path")` stringification ArgRefExpr emits
 // from expressionToString. The path is captured for rewrite. Anchored on
 // `arg(` not just `arg` so identifiers ending in `arg` don't match.
@@ -344,11 +365,19 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	// either the FunctionDef wrapper or the AutomationDef body, so check both.
 	output["mcpPromoted"] = attributeFlagPresent(def.Attributes, "mcp") || attributeFlagPresent(automation.Attributes, "mcp")
 
-	// If there's a return statement, add it as final computation metadata
+	// If there's a return statement, add it as final computation metadata.
+	// The return expression must go through the SAME reference rewrites as
+	// every other step value (compileStepHelperValue, line ~99): without
+	// convertArgReferences a `return args.X` body stringifies to the raw
+	// `arg("X")` shape, which the runtime evaluator has no handler for -- it
+	// reaches engine.Execute as a bare query and fails with `function "arg"
+	// not found`. That is the multi-step half of the #1840 forge outage
+	// (logicAttachToRequest `return args.requestId`, logicRouteRequest
+	// `return args.event.payload.id`); the single-return half is fixed in
+	// substituteArgRefValue. convertEventReferences is applied for symmetry
+	// (a `return event.X` body in an automation logic resolves the same way).
 	if returnStep != nil {
-		// The return is handled in the automation executor
-		// We can add it as a special marker
-		output["_return"] = c.expressionToString(returnStep.Config.(*parser.QueryStepConfig).Query)
+		output["_return"] = convertArgReferences(convertEventReferences(c.expressionToString(returnStep.Config.(*parser.QueryStepConfig).Query)))
 	}
 
 	return &AutomationOutput{
@@ -994,12 +1023,32 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 		return fmt.Sprintf("%s%s%s", left, sep, right)
 
 	case *parser.FunctionCallExpr:
-		args := []string{}
-		for k, v := range e.Args {
-			args = append(args, fmt.Sprintf("%s=%v", k, c.valueToString(v)))
-		}
-		if len(args) == 0 {
+		if len(e.Args) == 0 {
 			return fmt.Sprintf("%s()", e.Name)
+		}
+		// A positional builtin (`append(arr, item)`, `coalesce(a, b)`) carries
+		// its args under the index keys "0","1",.... Render those POSITIONALLY,
+		// not as `0=v0, 1=v1`: the named form is invalid source for a
+		// positional builtin and lands verbatim in the step value -- the #1840
+		// forge attach corruption (`attachmentIds: [0="...", 1="..."]`). Mixed /
+		// named args keep the `k=v` shape but are emitted in a STABLE key order
+		// so the serialization is deterministic (Go map iteration is randomised,
+		// which otherwise flips `0=..,1=..` between runs).
+		if positional, ok := positionalArgValues(e.Args); ok {
+			parts := make([]string, len(positional))
+			for i, v := range positional {
+				parts[i] = c.valueToString(v)
+			}
+			return fmt.Sprintf("%s(%s)", e.Name, strings.Join(parts, ", "))
+		}
+		keys := make([]string, 0, len(e.Args))
+		for k := range e.Args {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		args := make([]string, len(keys))
+		for i, k := range keys {
+			args[i] = fmt.Sprintf("%s=%v", k, c.valueToString(e.Args[k]))
 		}
 		return fmt.Sprintf("%s(%s)", e.Name, strings.Join(args, ", "))
 

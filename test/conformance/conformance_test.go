@@ -20,13 +20,14 @@ func allChecks() []check {
 		entrypointCheck(),   // #1707
 		literalEvalCheck(),  // #1705
 		// DB-backed dimensions (run in the CI conformance job).
-		lifecycleCheck(),          // #1715 contract
-		filterCheck(),             // #1708
-		partialUpdateCheck(),      // #1709
-		envelopeCheck(),           // #1710
-		piiScrubCheck(),           // #1711
-		eventTriggerCheck(),       // #1706
-		eventDryRunBindingCheck(), // #1727
+		lifecycleCheck(),               // #1715 contract
+		filterCheck(),                  // #1708
+		partialUpdateCheck(),           // #1709
+		envelopeCheck(),                // #1710
+		piiScrubCheck(),                // #1711
+		eventTriggerCheck(),            // #1706
+		eventDryRunBindingCheck(),      // #1727
+		forgeLogicArgResolutionCheck(), // #1840
 	}
 }
 

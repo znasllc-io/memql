@@ -527,6 +527,36 @@ func substituteArgRefValue(v any, args map[string]any) any {
 			return val
 		}
 		return nil
+	case *ast.ArgRefExpr:
+		// The PARSER arg-ref node. A nested call inside a Logic body
+		// (`mutationRecordRequestEvent({ note: args.note })`) reaches the F.6
+		// hoist with its object-literal arg values still carried as raw parser
+		// nodes -- convertFunctionCallExpr shallow-copies a FunctionCallExpr's
+		// Args verbatim, so the inner `args.note` is never converted to the
+		// engine-side *ArgReference. Without this case the node passed straight
+		// through to the mutation validator as `*ast.ArgRefExpr`, which is the
+		// #1840 forge approval-pipeline outage ("expected string, got
+		// *ast.ArgRefExpr" across routing / audit / mentoring / attach). Resolve
+		// it the same way as *ArgReference -- the parser already stripped the
+		// `args.` prefix, so Path keys directly into the caller args map.
+		if t == nil {
+			return nil
+		}
+		if val, ok := getNestedValue(args, t.Path); ok {
+			return val
+		}
+		return nil
+	case *ArgRefExpression:
+		// The engine-side arg-ref node (convertArgRefExpr's output). Same
+		// resolution as the parser node above; handled here so any path that
+		// produces the converted form is covered symmetrically.
+		if t == nil {
+			return nil
+		}
+		if val, ok := getNestedValue(args, t.Path); ok {
+			return val
+		}
+		return nil
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for k, val := range t {
