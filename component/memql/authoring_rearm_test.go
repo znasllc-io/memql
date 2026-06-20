@@ -202,3 +202,111 @@ func TestRearm_NilRegistryErrors(t *testing.T) {
 		t.Fatal("expected an error when the registry is nil")
 	}
 }
+
+// TestRearm_EmptyActiveBundleIsSkippedNotFailed: an ACTIVE bundle with zero
+// member constructs must be counted as Skipped -- not Failed, not Rearmed.
+// This is the core regression test for #1808: mcp-promote-* bundles (and any
+// partially-created bundle whose construct write failed) are left ACTIVE in the
+// DB with no constructs; before the fix every boot logged one WARN per such
+// bundle. The Skipped counter tracks them and FailedIds stays empty, which means
+// the WARN path (on non-nil err) is never reached for these bundles.
+func TestRearm_EmptyActiveBundleIsSkippedNotFailed(t *testing.T) {
+	// emptyBundle is active but has zero member constructs (simulates an
+	// mcp-promote-* or partially-created bundle).
+	emptyBundle := AuthoringBundleRow{
+		Id:          "v1:authoring:bundle:mcp-promote-abc123",
+		OwnerUserId: "owner-promote",
+		Title:       "MCP durable promotion",
+		Status:      BundleActive,
+		Version:     1,
+	}
+	// goodBundle is a normal automation bundle that should still re-arm.
+	goodBundle, goodConstructs := rearmableBundle("v1:authoring:bundle:good", "owner-good")
+
+	store := &fakeRearmStore{
+		active: []AuthoringBundleRow{emptyBundle, goodBundle},
+		constructs: map[string][]AuthoringConstructRow{
+			// emptyBundle intentionally omitted -- zero constructs
+			goodBundle.Id: goodConstructs,
+		},
+	}
+
+	registry := NewAuthoredRuntimeRegistry()
+	deps := AuthoredRuntimeDeps{
+		Registry: registry,
+		RegisterHook: func(c *AuthoredConstruct) error {
+			return nil
+		},
+	}
+
+	res, err := rearmActiveBundlesWithStore(context.Background(), store, deps)
+	if err != nil {
+		t.Fatalf("re-arm: %v", err)
+	}
+
+	// The empty bundle must be counted as Skipped, not Failed or Rearmed.
+	// If it were counted as Failed it would appear in FailedIds and trigger a
+	// per-bundle WARN in the boot log -- the exact flood #1808 reports.
+	if res.Skipped != 1 {
+		t.Errorf("expected 1 skipped bundle, got %d", res.Skipped)
+	}
+	if len(res.FailedIds) != 0 {
+		t.Errorf("expected no failed bundles, got %v", res.FailedIds)
+	}
+	if res.Rearmed != 1 {
+		t.Errorf("expected 1 rearmed bundle (the good one), got %d", res.Rearmed)
+	}
+	if res.Seen != 2 {
+		t.Errorf("expected 2 seen, got %d", res.Seen)
+	}
+
+	// The good bundle's constructs must still be registered (fault isolation).
+	if registry.Count() != 2 {
+		t.Errorf("expected 2 registered constructs from the good bundle, got %d", registry.Count())
+	}
+}
+
+// TestRearm_MixOfEmptyAndNormalAndFailed: an empty bundle (skipped), a good
+// bundle (rearmed), and a failing bundle (failed) in the same pass -- all three
+// counters advance independently, no cascade.
+func TestRearm_MixOfEmptyAndNormalAndFailed(t *testing.T) {
+	emptyBundle := AuthoringBundleRow{
+		Id:          "v1:authoring:bundle:mcp-promote-xyz",
+		OwnerUserId: "owner-promote",
+		Status:      BundleActive,
+		Version:     1,
+	}
+	goodBundle, goodConstructs := rearmableBundle("v1:authoring:bundle:good", "owner-good")
+	badBundle, _ := rearmableBundle("v1:authoring:bundle:bad", "owner-bad")
+
+	store := &fakeRearmStore{
+		active: []AuthoringBundleRow{emptyBundle, goodBundle, badBundle},
+		constructs: map[string][]AuthoringConstructRow{
+			goodBundle.Id: goodConstructs,
+			// emptyBundle: no entry (zero constructs)
+		},
+		loadErr: map[string]error{
+			badBundle.Id: fmt.Errorf("transient db read error"),
+		},
+	}
+
+	registry := NewAuthoredRuntimeRegistry()
+	deps := AuthoredRuntimeDeps{Registry: registry}
+
+	res, err := rearmActiveBundlesWithStore(context.Background(), store, deps)
+	if err != nil {
+		t.Fatalf("re-arm: %v", err)
+	}
+	if res.Seen != 3 {
+		t.Errorf("expected 3 seen, got %d", res.Seen)
+	}
+	if res.Rearmed != 1 {
+		t.Errorf("expected 1 rearmed, got %d", res.Rearmed)
+	}
+	if res.Skipped != 1 {
+		t.Errorf("expected 1 skipped, got %d", res.Skipped)
+	}
+	if len(res.FailedIds) != 1 || res.FailedIds[0] != badBundle.Id {
+		t.Errorf("expected 1 failed (the bad bundle), got %v", res.FailedIds)
+	}
+}
