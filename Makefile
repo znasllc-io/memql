@@ -620,6 +620,17 @@ deploy-setup:
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
+.PHONY: conn-headroom-check
+
+## Connection-headroom deploy gate (memql#1820, from the #1817 53300 spike):
+## check whether the fleet's projected DB connections fit the instance budget.
+## Override the budget via env: MAX_CONNECTIONS, RESERVED_CONNECTIONS,
+## MAX_OPEN_CONNS. Exits non-zero when the peak would exceed budget.
+##   make conn-headroom-check
+##   MAX_CONNECTIONS=300 make conn-headroom-check
+conn-headroom-check:
+	@bash scripts/deploy/conn-headroom-check.sh
+
 .PHONY: db-provision blob-provision livekit-provision deploy deploy-rollback
 
 ## Provision (create-or-verify) a dedicated Azure Storage account + blob
