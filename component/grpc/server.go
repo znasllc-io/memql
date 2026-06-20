@@ -1611,13 +1611,16 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 			// no-op for voice-agent sessions by design (avoids a double-log).
 			content, execErr := s.relayClientToolToBrowser(ctx, tool.Name, argsJSON, spaceId)
 			if execErr != nil {
-				return s.sendCallToolResult(envelope.GetMessageId(), requestId, nil, true, execErr.Error())
+				// Surface a clean, user-legible message for the fast-fail
+				// browser-unreachable case (#1834) so voice doesn't speak a
+				// bare "it timed out"; genuine browser errors pass through.
+				return s.sendCallToolResult(envelope.GetMessageId(), requestId, nil, true, userFacingClientToolError(execErr))
 			}
 			return s.sendCallToolResult(envelope.GetMessageId(), requestId, content, false, "")
 		}
 		content, execErr := s.executeClientTool(ctx, tool.Name, args, envelope.GetMessageId())
 		if execErr != nil {
-			return s.sendCallToolResult(envelope.GetMessageId(), requestId, nil, true, execErr.Error())
+			return s.sendCallToolResult(envelope.GetMessageId(), requestId, nil, true, userFacingClientToolError(execErr))
 		}
 		return s.sendCallToolResult(envelope.GetMessageId(), requestId, content, false, "")
 	}
@@ -1764,14 +1767,19 @@ func (s *streamSession) executeClientTool(ctx context.Context, toolName string, 
 	ch := s.registerClientToolWaiter(callId)
 	defer s.unregisterClientToolWaiter(callId)
 
-	const defaultTimeoutMs = 30000
 	call := &memqlv1.ClientToolCall{
 		CallId:        callId,
 		TurnId:        turnId,
 		AgentId:       memqlengine.ActingAgentIdFromContext(ctx),
 		ToolName:      toolName,
 		ArgumentsJson: argsJSON,
-		TimeoutMs:     defaultTimeoutMs,
+		TimeoutMs:     clientToolTimeoutMs(toolName),
+	}
+	if s.logger != nil {
+		s.logger.Info("client-tool waiter registered",
+			"component", ComponentName, "path", "browser",
+			"call_id", callId, "tool", toolName,
+			"timeout_ms", clientToolWaitTimeout(toolName).Milliseconds())
 	}
 	if err := s.sendServerMessage("", &memqlv1.MemqlServerMessage{
 		Payload: &memqlv1.MemqlServerMessage_ClientToolCall{
@@ -1781,22 +1789,29 @@ func (s *streamSession) executeClientTool(ctx context.Context, toolName string, 
 		return nil, fmt.Errorf("send client tool call: %w", err)
 	}
 
-	timeout := time.Duration(call.TimeoutMs) * time.Millisecond
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-time.After(timeout):
-		return nil, fmt.Errorf("client tool %q timed out after %v", toolName, timeout)
-	case result := <-ch:
-		if result.GetIsError() {
-			errMsg := result.GetErrorMessage()
-			if errMsg == "" {
-				errMsg = "client tool execution failed"
-			}
-			return nil, errors.New(errMsg)
-		}
-		return result.GetContent(), nil
+	result, outcome, elapsed := awaitClientToolResult(ctx, ch, toolName)
+	if s.logger != nil {
+		s.logger.Info("client-tool waiter resolved",
+			"component", ComponentName, "path", "browser",
+			"call_id", callId, "tool", toolName,
+			"outcome", string(outcome), "elapsed_ms", elapsed.Milliseconds())
 	}
+	switch outcome {
+	case clientToolCancelled:
+		return nil, ctx.Err()
+	case clientToolTimedOut:
+		// Browser gone / unreachable: fail fast with the typed, user-legible
+		// error so the caller surfaces a clear message (#1834).
+		return nil, clientToolUnreachableError(toolName, elapsed)
+	}
+	if result.GetIsError() {
+		errMsg := result.GetErrorMessage()
+		if errMsg == "" {
+			errMsg = "client tool execution failed"
+		}
+		return nil, errors.New(errMsg)
+	}
+	return result.GetContent(), nil
 }
 
 func (s *streamSession) registerClientToolWaiter(callId string) chan *memqlv1.ClientToolResult {
@@ -1862,6 +1877,12 @@ func (s *streamSession) InvokeClientTool(
 		ArgumentsJson: argsJSON,
 		TimeoutMs:     clientToolTimeoutMs(toolName),
 	}
+	if s.logger != nil {
+		s.logger.Info("client-tool waiter registered",
+			"component", ComponentName, "path", "agent",
+			"call_id", callId, "tool", toolName,
+			"timeout_ms", clientToolWaitTimeout(toolName).Milliseconds())
+	}
 	if err := s.sendServerMessage("", &memqlv1.MemqlServerMessage{
 		Payload: &memqlv1.MemqlServerMessage_ClientToolCall{
 			ClientToolCall: call,
@@ -1870,44 +1891,51 @@ func (s *streamSession) InvokeClientTool(
 		return nil, fmt.Errorf("send client tool call: %w", err)
 	}
 
-	timeout := time.Duration(call.TimeoutMs) * time.Millisecond
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-time.After(timeout):
-		// Timing out a client tool is not by itself fatal to the
-		// agent's tool loop — the user may have stepped away from
-		// the screen, or the ask card never rendered. Return a
-		// synthesised result the agent can read and decide what to
-		// do (typically: release control with a polite "you stepped
-		// away — resume anytime" summary). For uiAskUser we model
-		// the timeout as an empty answer, matching the prompt's
-		// "empty answer = user dismissed" contract; for other tools
-		// we surface a structured {timedOut: true} payload so they
-		// don't fail silently.
-		return synthesiseTimeoutResult(toolName, timeout), nil
-	case result := <-ch:
-		if result.GetIsError() {
-			errMsg := result.GetErrorMessage()
-			if errMsg == "" {
-				errMsg = "client tool execution failed"
-			}
-			return nil, errors.New(errMsg)
-		}
-		out := &memqlengine.ToolCallResult{
-			Content: make([]memqlengine.ToolResultContent, 0, len(result.GetContent())),
-		}
-		for _, c := range result.GetContent() {
-			out.Content = append(out.Content, memqlengine.ToolResultContent{
-				Type:     c.GetType(),
-				Text:     c.GetText(),
-				MimeType: c.GetMimeType(),
-				Data:     c.GetData(),
-				URI:      c.GetUri(),
-			})
-		}
-		return out, nil
+	result, outcome, elapsed := awaitClientToolResult(ctx, ch, toolName)
+	if s.logger != nil {
+		s.logger.Info("client-tool waiter resolved",
+			"component", ComponentName, "path", "agent",
+			"call_id", callId, "tool", toolName,
+			"outcome", string(outcome), "elapsed_ms", elapsed.Milliseconds())
 	}
+	switch outcome {
+	case clientToolCancelled:
+		return nil, ctx.Err()
+	case clientToolTimedOut:
+		if toolName == "uiAskUser" {
+			// uiAskUser blocks on a human, not the browser handshake. An
+			// unanswered ask is "user dismissed", not "browser unreachable":
+			// return a synthesised empty-answer result the agent reads and
+			// releases control gracefully -- never the fast-fail typed error.
+			return synthesiseTimeoutResult(toolName, clientToolWaitTimeout(toolName)), nil
+		}
+		// Interactive UI tool: the browser is gone / unreachable. Fail fast
+		// with the typed, user-legible error so the agent loop surfaces a
+		// clear message instead of stalling (#1834).
+		return nil, clientToolUnreachableError(toolName, elapsed)
+	}
+
+	// Responded: the browser returned a result.
+	if result.GetIsError() {
+		errMsg := result.GetErrorMessage()
+		if errMsg == "" {
+			errMsg = "client tool execution failed"
+		}
+		return nil, errors.New(errMsg)
+	}
+	out := &memqlengine.ToolCallResult{
+		Content: make([]memqlengine.ToolResultContent, 0, len(result.GetContent())),
+	}
+	for _, c := range result.GetContent() {
+		out.Content = append(out.Content, memqlengine.ToolResultContent{
+			Type:     c.GetType(),
+			Text:     c.GetText(),
+			MimeType: c.GetMimeType(),
+			Data:     c.GetData(),
+			URI:      c.GetUri(),
+		})
+	}
+	return out, nil
 }
 
 // synthesiseTimeoutResult builds the result the agent sees when a
@@ -2049,23 +2077,15 @@ func (s *streamSession) guardClientToolArgs(toolName, argsJSON string) (string, 
 	return string(rewritten), nil
 }
 
-// clientToolTimeoutMs picks how long InvokeClientTool will block
-// waiting for a ClientToolResult from the connected frontend. Most
-// tools are instant UI taps (click, type, highlight) so 30s is plenty.
-// Dialogue tools that block on human input (uiAskUser) need a much
-// longer ceiling -- the user has to read the question, think, and
-// respond. The keys here are product-specific tool names; if they go
-// stale, the default still applies.
+// clientToolTimeoutMs is the ClientToolCall.TimeoutMs stamped on the wire so
+// the cognition relay's TTL sweeper knows the call's declared deadline. It
+// mirrors the in-process wait (clientToolWaitTimeout): the fast interactive
+// ceiling for programmatic UI tools (#1834), the longer human-input ceiling
+// for uiAskUser. Note the cognition relay still clamps its correlation
+// lifetime up to pendingClientToolCallTTL (60s), so the 60s backstop is
+// preserved regardless of this value.
 func clientToolTimeoutMs(toolName string) int32 {
-	switch toolName {
-	case "uiAskUser":
-		// 2 minutes. Longer than a human takes to answer a one-sentence
-		// prompt, short enough that a genuinely abandoned session
-		// surfaces as an error rather than an indefinite hang.
-		return 120000
-	default:
-		return 30000
-	}
+	return int32(clientToolWaitTimeout(toolName).Milliseconds())
 }
 
 // callerRoleFromMetadata pulls the caller's agent role (if any) from
