@@ -1,14 +1,12 @@
-# Staging overlay -> 0.9.78: FULL-STACK cut (deploy of the #1817 connection-
-# lifecycle hardening). Carries database.go pool right-sizing (MaxIdleConns
-# 3->1, ConnMaxIdleTime 10m->2m), per-connection idle reapers
-# (idle_in_transaction_session_timeout + idle_session_timeout) + application_name
-# stamping (#1818), and preStop drain on every DB-connecting node.
-# All 9 engine + carrier + SPA images built on the GitHub BUILD SERVER
-# (OIDC->ACR) against engine main a8c8d52; engineVersion + builtAgainstEngine
-# bumped 0.9.75 -> 0.9.78. copresent SPA source unchanged (digest identical,
-# re-tagged 0.9.78 for coherence). Digests hand-applied from releases/0.9.78.yaml
-# (not promote.sh, which would drop the livekit pin + NODE_IP patch below).
-# livekit pin (#1043) + NODE_IP patch preserved.
+# Staging overlay -> 0.9.79: FULL-STACK cut (forge approval-pipeline +
+# identity claim-email wave, epic #1825). Fixes the forge transition guard
+# bare-vs-canonical id lookup that wedged the pipeline (#1826), forgeRecordMentoring
+# missing kind (#1827), forgeAttachToRequest array (#1828), the identity restart
+# claim-email spam (#1829), the reader-path needs_validation->needs_approval graph
+# edge + per-role coverage (#1830). All 9 images built on the GitHub BUILD SERVER
+# (OIDC->ACR) against engine main 0cffa4d; engineVersion 0.9.78 -> 0.9.79. copresent
+# SPA unchanged (digest identical, re-tagged for coherence). Digests hand-applied
+# from releases/0.9.79.yaml. livekit pin (#1043) + NODE_IP patch preserved.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -30,24 +28,24 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:45565d0fd5382ed4832d9252a4f78ccf59c553fc39ef8e6dfe869f4dc380c07b
+    digest: sha256:1ee014c5595a0e0011c12c5ae9a67768604547f27911d0fbc54a04e861fd95ea
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:2e03247ff7b7d86a6564e584f1774766c2edfee590924295171c4c33fee40f62
+    digest: sha256:3b59ee99f0a10a75a32f8a71b6f895bf986335c15bb23e4bcd35c8b2f5725b63
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:469f6ec7280ce51426fc5aa926e7cca24096e2557031840c0e65a6b4b389c7bb
+    digest: sha256:4c86ccc7578434a18b8b73fbf76ba1e32f3689a0cccf745a035e72648778232b
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:835526b15c4fac978ade67519e5f9685edf4171752a7a78f0f83c09903df9e77
+    digest: sha256:2e45c16af03b56f601c690ab4428bc307a04210ca1f20e9f4b05fde2092cf2ed
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:0c09bf20cf59fb5e336506984c692080664a4701f7ace29da85cda0b2597d98e
+    digest: sha256:b4b44c5c711d50da762454479aa07cba395af8a0fc52c6281d18213a409a5769
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:6eb64c28d060c92d30ee2f7586fcd61f673ea9c89c0d8864a18d9fbc20ca944e
+    digest: sha256:726bab19b3addd10444bd5520e8dc8a6e59e0b354e0ce7fabf553bb8846f3ad8
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:e346b36383c3b7e40fc86c099931b1208bbe03e6f40d20a321033760784b58b7
+    digest: sha256:e0344286de79191badadd6aaeee63a31fdd9e1047fca2cc0464b1ed1c64d8818
   # memql-mcp (epic memql#1550): remote MCP node, engine-built on the GitHub
   # build server (#1581 wired it into build-engine-images + the release tooling).
   # 0.9.75: rebuilt from main 639e6bc alongside the rest of the full-stack wave.
   - name: acrmemql.azurecr.io/memql-mcp
-    digest: sha256:fe9fa2f47718ddbdcb2256afbd0e95cfda4b5fd402267a08f1220c6bd37d0aae
+    digest: sha256:b76f26c6f62b00f53e6536d7a080ef7a0b477fc5ed73f47d5c5913f8ad5e3ddd
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:75e566e71e30d0b35c6c6708dda34a37ab9f2a74ec575f18c0787beffc949bf2
   - name: livekit/livekit-server
