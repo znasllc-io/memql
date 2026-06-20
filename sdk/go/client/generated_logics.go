@@ -711,6 +711,26 @@ func LogicRolloverDailySpaceBuild(args LogicRolloverDailySpaceArgs) string {
 	return b.String()
 }
 
+// LogicRouteRequest -- Route a newly-submitted v1:forge:request to its next pipeline state by submitter role (owner -> queued; developer -> needs_approval; non-developer -> needs_validation). Records a 'routed' audit event.
+type LogicRouteRequestArgs struct {
+	Event map[string]any
+}
+
+// LogicRouteRequest calls the engine logic logicRouteRequest.
+func (qc *QueryClient) LogicRouteRequest(ctx context.Context, args LogicRouteRequestArgs) (*Result, error) {
+	call := LogicRouteRequestBuild(args)
+	return qc.executeNamed(ctx, "logicRouteRequest", call)
+}
+
+func LogicRouteRequestBuild(args LogicRouteRequestArgs) string {
+	var b strings.Builder
+	b.WriteString("logicRouteRequest({")
+	b.WriteString("event: ")
+	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString("})")
+	return b.String()
+}
+
 // LogicVoiceMigrationOnSecondHuman -- Phase 7 of chat-architecture. Triggered when a user's activeSpaceId pointer changes. When exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team to Group thread. Idempotent via content-addressed stateIds.
 type LogicVoiceMigrationOnSecondHumanArgs struct {
 	Event map[string]any

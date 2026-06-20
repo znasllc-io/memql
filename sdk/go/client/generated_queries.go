@@ -443,6 +443,23 @@ func QueryActivePlansForUserBuild(args QueryActivePlansForUserArgs) string {
 	return "queryActivePlansForUser({})"
 }
 
+// QueryActiveProjects -- List active v1:forge:project rows.
+//
+// Bound concept: project.
+type QueryActiveProjectsArgs struct {
+}
+
+// QueryActiveProjects calls the engine query queryActiveProjects.
+func (qc *QueryClient) QueryActiveProjects(ctx context.Context, args QueryActiveProjectsArgs) (*Result, error) {
+	call := QueryActiveProjectsBuild(args)
+	return qc.executeNamed(ctx, "queryActiveProjects", call)
+}
+
+func QueryActiveProjectsBuild(args QueryActiveProjectsArgs) string {
+	_ = args
+	return "queryActiveProjects({})"
+}
+
 // QueryActiveResponsibilities -- The caller's active + enabled responsibilities -- the live working set. Owned tier (ownerUserId == actor.userId). status filtered via traitStatusIsActive; enabled==true drops soft-disabled rows.
 //
 // Bound concept: responsibility.
@@ -828,6 +845,23 @@ func (qc *QueryClient) QueryAllSafetyClassifications(ctx context.Context, args Q
 func QueryAllSafetyClassificationsBuild(args QueryAllSafetyClassificationsArgs) string {
 	_ = args
 	return "queryAllSafetyClassifications({})"
+}
+
+// QueryApprovalQueue -- The approval queue: validated requests awaiting owner approval. Owner only (traitForgeApprover).
+//
+// Bound concept: request.
+type QueryApprovalQueueArgs struct {
+}
+
+// QueryApprovalQueue calls the engine query queryApprovalQueue.
+func (qc *QueryClient) QueryApprovalQueue(ctx context.Context, args QueryApprovalQueueArgs) (*Result, error) {
+	call := QueryApprovalQueueBuild(args)
+	return qc.executeNamed(ctx, "queryApprovalQueue", call)
+}
+
+func QueryApprovalQueueBuild(args QueryApprovalQueueArgs) string {
+	_ = args
+	return "queryApprovalQueue({})"
 }
 
 // QueryApprovalRequestById -- Returns a single v1:safety:approvalRequest by id. Backs the cockpit drill-down view (follow-up in memql-cockpit) and the `mutationResolveApprovalRequest` read-modify-write path.
@@ -2763,6 +2797,23 @@ func QueryMissingCapabilityByKindAndNameBuild(args QueryMissingCapabilityByKindA
 	return b.String()
 }
 
+// QueryMyRequests -- List the caller's own submitted requests, newest-first. Open to any team member.
+//
+// Bound concept: request.
+type QueryMyRequestsArgs struct {
+}
+
+// QueryMyRequests calls the engine query queryMyRequests.
+func (qc *QueryClient) QueryMyRequests(ctx context.Context, args QueryMyRequestsArgs) (*Result, error) {
+	call := QueryMyRequestsBuild(args)
+	return qc.executeNamed(ctx, "queryMyRequests", call)
+}
+
+func QueryMyRequestsBuild(args QueryMyRequestsArgs) string {
+	_ = args
+	return "queryMyRequests({})"
+}
+
 // QueryNodeTokenIdentities -- List every node_token identity across the cluster (active + inactive). memql#343.
 //
 // Bound concept: identity.
@@ -3196,6 +3247,50 @@ func QueryPolicyTracesForPolicyBuild(args QueryPolicyTracesForPolicyArgs) string
 	return b.String()
 }
 
+// QueryProjectById -- Resolve a v1:forge:project by id.
+//
+// Bound concept: project.
+type QueryProjectByIdArgs struct {
+	ProjectId string
+}
+
+// QueryProjectById calls the engine query queryProjectById.
+func (qc *QueryClient) QueryProjectById(ctx context.Context, args QueryProjectByIdArgs) (*Result, error) {
+	call := QueryProjectByIdBuild(args)
+	return qc.executeNamed(ctx, "queryProjectById", call)
+}
+
+func QueryProjectByIdBuild(args QueryProjectByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryProjectById({")
+	b.WriteString("projectId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ProjectId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryProjectRequests -- List requests by project, newest-first.
+//
+// Bound concept: request.
+type QueryProjectRequestsArgs struct {
+	ProjectId string
+}
+
+// QueryProjectRequests calls the engine query queryProjectRequests.
+func (qc *QueryClient) QueryProjectRequests(ctx context.Context, args QueryProjectRequestsArgs) (*Result, error) {
+	call := QueryProjectRequestsBuild(args)
+	return qc.executeNamed(ctx, "queryProjectRequests", call)
+}
+
+func QueryProjectRequestsBuild(args QueryProjectRequestsArgs) string {
+	var b strings.Builder
+	b.WriteString("queryProjectRequests({")
+	b.WriteString("projectId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ProjectId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryProvisionedWorkspaces -- List provisioned workspaces for inventory / debugging. Filtered to status=provisioned so released rows don't clutter the view.
 //
 // Bound concept: workspace.
@@ -3281,6 +3376,50 @@ func QueryRecordsByStateBuild(args QueryRecordsByStateArgs) string {
 		b.WriteString("importSource: ")
 		b.WriteString(fmt.Sprintf("%q", args.ImportSource))
 	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryRequestById -- Resolve a single v1:forge:request by id (detail view).
+//
+// Bound concept: request.
+type QueryRequestByIdArgs struct {
+	RequestId string
+}
+
+// QueryRequestById calls the engine query queryRequestById.
+func (qc *QueryClient) QueryRequestById(ctx context.Context, args QueryRequestByIdArgs) (*Result, error) {
+	call := QueryRequestByIdBuild(args)
+	return qc.executeNamed(ctx, "queryRequestById", call)
+}
+
+func QueryRequestByIdBuild(args QueryRequestByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryRequestById({")
+	b.WriteString("requestId: ")
+	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryRequestEvents -- The full audit trail for a request, newest-first.
+//
+// Bound concept: requestEvent.
+type QueryRequestEventsArgs struct {
+	RequestId string
+}
+
+// QueryRequestEvents calls the engine query queryRequestEvents.
+func (qc *QueryClient) QueryRequestEvents(ctx context.Context, args QueryRequestEventsArgs) (*Result, error) {
+	call := QueryRequestEventsBuild(args)
+	return qc.executeNamed(ctx, "queryRequestEvents", call)
+}
+
+func QueryRequestEventsBuild(args QueryRequestEventsArgs) string {
+	var b strings.Builder
+	b.WriteString("queryRequestEvents({")
+	b.WriteString("requestId: ")
+	b.WriteString(fmt.Sprintf("%q", args.RequestId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -4231,6 +4370,23 @@ func QueryValidationLogBuild(args QueryValidationLogArgs) string {
 	}
 	b.WriteString("})")
 	return b.String()
+}
+
+// QueryValidationQueue -- The validation queue: requests awaiting first-line developer validation. Developer/owner only (traitForgeDeveloper).
+//
+// Bound concept: request.
+type QueryValidationQueueArgs struct {
+}
+
+// QueryValidationQueue calls the engine query queryValidationQueue.
+func (qc *QueryClient) QueryValidationQueue(ctx context.Context, args QueryValidationQueueArgs) (*Result, error) {
+	call := QueryValidationQueueBuild(args)
+	return qc.executeNamed(ctx, "queryValidationQueue", call)
+}
+
+func QueryValidationQueueBuild(args QueryValidationQueueArgs) string {
+	_ = args
+	return "queryValidationQueue({})"
 }
 
 // QueryVideoOverridesForSpace -- Active video overrides for every agent in a space. Read by the voice-agent process at session start.
