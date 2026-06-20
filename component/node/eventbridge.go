@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component"
@@ -193,7 +194,58 @@ func (eb *EventBridge) HandleInbound(evt *nodev1.EventForward) {
 		OriginNodeId: evt.OriginNodeId,
 	}
 
+	// Scoped delivery trace for the client-tool relay legs (memql#1835): we
+	// received a relay request/response from a peer and are about to publish
+	// it onto this node's local bus where the relay subscriber (cognition's
+	// handleClientToolResponse, or the bff's browser stream) picks it up.
+	// Pairs with the "mesh forward" log on the sending node so one
+	// reproduction shows whether each hop landed.
+	if isClientToolRelayTopic(evt.Topic) {
+		eb.logger.Info("client-tool relay: mesh event received from peer",
+			"topic", evt.Topic,
+			"callId", relayCallIdFromPayload(payload),
+			"event_id", evt.EventId,
+			"origin_node", evt.OriginNodeId,
+		)
+	}
+
 	eb.publishViaBus(localEvent)
+}
+
+// isClientToolRelayTopic reports whether a topic carries a cross-node
+// client-tool relay graph event (request agent->browser, or response
+// browser->agent). Scopes the delivery trace in eventbridge so the hot
+// fast-path stays quiet for ordinary events (memql#1835).
+func isClientToolRelayTopic(topic string) bool {
+	return strings.Contains(topic, "v1:cognition:client:tool:request") ||
+		strings.Contains(topic, "v1:cognition:client:tool:response")
+}
+
+// relayCallIdFromForward pulls the relay callId out of a forward's payload
+// for correlation in the delivery trace. Best-effort: returns "" when the
+// payload is absent or the field is missing.
+func relayCallIdFromForward(forward *nodev1.EventForward) string {
+	if forward == nil || forward.Payload == nil {
+		return ""
+	}
+	return relayCallIdFromPayload(forward.Payload.AsMap())
+}
+
+// relayCallIdFromPayload reads the callId field from a flattened graph-event
+// payload (the relay concepts carry it top-level; tolerate the nested shape).
+func relayCallIdFromPayload(payload map[string]any) string {
+	if payload == nil {
+		return ""
+	}
+	if v, ok := payload["callId"].(string); ok && v != "" {
+		return v
+	}
+	if nested, ok := payload["payload"].(map[string]any); ok {
+		if v, ok := nested["callId"].(string); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 // run is the lifecycle loop. It subscribes to the local bus and watches
@@ -281,10 +333,13 @@ func (eb *EventBridge) forwardToPeers(forward *nodev1.EventForward, decision rou
 	}
 
 	sent := 0
+	var skippedTypes []string
 	for _, peer := range targets {
 		if conn, ok := eb.peerManager.sendTarget(peer); ok {
 			conn.Send(msg)
 			sent++
+		} else if peer != nil && peer.Info != nil {
+			skippedTypes = append(skippedTypes, peer.Info.NodeType)
 		}
 	}
 
@@ -296,6 +351,36 @@ func (eb *EventBridge) forwardToPeers(forward *nodev1.EventForward, decision rou
 			"targets", len(targets),
 			"broadcast", decision.Broadcast,
 		)
+	}
+
+	// Scoped delivery trace for the client-tool relay legs (memql#1835).
+	// These graph events ride the best-effort mesh fast-path; a target peer
+	// with no live outbound Connection (e.g. reaped after a heartbeat lapse,
+	// see stream_handler.go) is skipped SILENTLY above. That silent skip is
+	// the exact mechanism by which a `uiRequestControl` (or any UI-takeover)
+	// tool call reaches the model but never the browser, stranding the turn.
+	// Surface it at INFO so a single reproduction pinpoints whether the
+	// request/response actually left this node and to how many peers.
+	if isClientToolRelayTopic(forward.Topic) {
+		callId := relayCallIdFromForward(forward)
+		eb.logger.Info("client-tool relay: mesh forward",
+			"topic", forward.Topic,
+			"callId", callId,
+			"event_id", forward.EventId,
+			"sent", sent,
+			"targets", len(targets),
+			"skipped_types", strings.Join(skippedTypes, ","),
+			"origin_node", forward.OriginNodeId,
+		)
+		if sent == 0 {
+			eb.logger.Warn("client-tool relay: mesh forward reached ZERO connected peers -- event dropped on the fast path",
+				"topic", forward.Topic,
+				"callId", callId,
+				"event_id", forward.EventId,
+				"targets", len(targets),
+				"skipped_types", strings.Join(skippedTypes, ","),
+			)
+		}
 	}
 }
 
