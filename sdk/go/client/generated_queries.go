@@ -3269,6 +3269,28 @@ func QueryProjectByIdBuild(args QueryProjectByIdArgs) string {
 	return b.String()
 }
 
+// QueryProjectBySlug -- Resolve a v1:forge:project by its stable slug (e.g. 'memql', 'copresent-acme'). Claude uses this to go from a human-supplied name to a projectId before submitting a request or filtering requests. Returns at most one row because slugs are unique within a partition.
+//
+// Bound concept: project.
+type QueryProjectBySlugArgs struct {
+	Slug string
+}
+
+// QueryProjectBySlug calls the engine query queryProjectBySlug.
+func (qc *QueryClient) QueryProjectBySlug(ctx context.Context, args QueryProjectBySlugArgs) (*Result, error) {
+	call := QueryProjectBySlugBuild(args)
+	return qc.executeNamed(ctx, "queryProjectBySlug", call)
+}
+
+func QueryProjectBySlugBuild(args QueryProjectBySlugArgs) string {
+	var b strings.Builder
+	b.WriteString("queryProjectBySlug({")
+	b.WriteString("slug: ")
+	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryProjectRequests -- List requests by project, newest-first.
 //
 // Bound concept: request.

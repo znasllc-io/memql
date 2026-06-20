@@ -42,6 +42,16 @@ tool forgeRegisterProject {
 @mcp
 tool forgeActiveProjects {}
 
+@enabled
+@handler(type="query", query="queryProjectBySlug({slug: \"$args.slug\"})")
+@executionTime("fast")
+@description("Resolve a forge project by its human-readable slug (e.g. 'memql', 'copresent-acme') to the full project row including its id. Use this when the caller says a project name in natural language so you can obtain the projectId for subsequent requests. Slugs are unique within the caller's partition (tenant), so this always returns at most one project.")
+@allowedRoles("owner", "admin", "developer", "writer", "reader")
+@mcp
+tool forgeResolveProject {
+  slug  string  @required  @description("The stable short slug of the project, e.g. 'memql' or 'copresent-acme'.")
+}
+
 // ----- submit + browse (open to all team members) -----
 
 @enabled

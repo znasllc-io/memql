@@ -37,7 +37,9 @@ func TestMCPCuratedToolSurface(t *testing.T) {
 		// Forge company-operating-system surface (#1786): the full development +
 		// people-ops workflow (submit, browse, validate, approve, send back).
 		// Role-gated in the engine via the pre-insert guard (#1787).
-		"forgeRegisterProject", "forgeActiveProjects",
+		// forgeResolveProject added in #1792: slug->projectId resolver so Claude
+		// can go from a human project name to the id needed for request submission.
+		"forgeRegisterProject", "forgeActiveProjects", "forgeResolveProject",
 		"forgeSubmitRequest", "forgeMyRequests", "forgeRequestById", "forgeRequestHistory",
 		"forgeValidationQueue", "forgeValidateRequest",
 		"forgeApprovalQueue", "forgeApproveRequest",

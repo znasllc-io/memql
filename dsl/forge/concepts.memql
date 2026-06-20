@@ -20,6 +20,24 @@
 //     (mirroring component/memql/harness_step_validation.go) -- noted as a
 //     follow-up; the DSL alone cannot express a role-gated state machine.
 //
+// Cross-client isolation (partition model):
+//   - The partition is the hard tenant boundary in memQL. Every row's composite
+//     PK is (partition, id, createdAt); the engine stamps partition from the
+//     caller's auth envelope and appends WHERE partition = $envelope to every
+//     query automatically. No DSL filter is needed -- isolation is structural.
+//   - One partition per client/company. ClientA and ClientB each operate in
+//     separate partitions; their forge project and request rows are physically
+//     segregated. A session authed into ClientA's partition cannot read or write
+//     ClientB's rows.
+//   - Within a partition, the project concept provides a second isolation tier:
+//     requests are scoped to a projectId (an FK on v1:forge:request.projectId),
+//     so project-A and project-B requests stay separate in queries even though
+//     they share the same partition (same team, different codebases).
+//   - Isolation hierarchy (outer -> inner):
+//       partition (engine-enforced, automatic)
+//         └── project row (v1:forge:project, one per codebase/client)
+//               └── request rows (filtered by request.projectId)
+//
 // Role mapping (cluster roles are owner/admin/writer/reader -- there is no
 // literal "developer" role, so personas map on):
 //   owner   -> Jose: final approval + fast-track (self-approve), execute/deploy
