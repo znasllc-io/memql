@@ -77,9 +77,16 @@ var forgeRequestTransitions = map[string]map[string]bool{
 		forgeStatusQueued:          true,
 	},
 	forgeStatusNeedsValidation: {
-		forgeStatusValidated:    true,
-		forgeStatusChangesReq:   true,
-		forgeStatusRejected:     true,
+		// mutationValidateRequest promotes a developer-validated request
+		// straight to needs_approval in one hop (it stamps validatedByUserId
+		// and sets status=needs_approval), so this edge MUST exist or the
+		// guard rejects the reader-path validation and the request wedges at
+		// needs_validation (#1830 per-role coverage caught this; the
+		// `validated` intermediate below has no producing mutation).
+		forgeStatusNeedsApproval: true,
+		forgeStatusValidated:     true,
+		forgeStatusChangesReq:    true,
+		forgeStatusRejected:      true,
 	},
 	forgeStatusValidated: {
 		forgeStatusNeedsApproval: true,
@@ -98,6 +105,25 @@ var forgeRequestTransitions = map[string]map[string]bool{
 	forgeStatusApproved: {},
 	forgeStatusRejected: {},
 	forgeStatusQueued:   {},
+}
+
+// canonicalForgeRequestID normalizes a forge-request id to the canonical
+// stored form "{concept}:{shortId}". Forge tools + the routeRequest
+// automation pass the BARE short id (e.g. "r-selftest-003"); the engine
+// stores rows canonical ("v1:forge:request:r-selftest-003"). The guard's
+// prior-version lookup must match the stored form, so it canonicalizes here
+// (already-canonical ids pass through unchanged, empty stays empty). Pure +
+// unit-tested (#1830) -- this is the exact derivation whose absence let the
+// pipeline-wedge bug ship (#1826).
+func canonicalForgeRequestID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
+	}
+	if strings.HasPrefix(id, conceptForgeRequest+":") {
+		return id
+	}
+	return conceptForgeRequest + ":" + id
 }
 
 // validForgeRequestStatus reports whether s is a known request status.
@@ -283,13 +309,11 @@ func (e *MemQLEngine) getLatestForgeRequestPayload(ctx context.Context, requestI
 	// "{concept}:{shortId}" id ("v1:forge:request:r-selftest-003"). A bare-id
 	// lookup therefore misses the prior version on every UPDATE, so the guard
 	// wrongly took the no-prior branch and rejected every transition with
-	// "a new request must start in status submitted" -- wedging the whole	// approval pipeline (and the router's own update) at "submitted" (#1826).
+	// "a new request must start in status submitted" -- wedging the whole
+	// approval pipeline (and the router's own update) at "submitted" (#1826).
 	// Match BOTH the canonical and the raw id so the prior version is found
 	// regardless of which form the caller passed.
-	canonicalID := requestID
-	if !strings.HasPrefix(requestID, conceptForgeRequest+":") {
-		canonicalID = conceptForgeRequest + ":" + requestID
-	}
+	canonicalID := canonicalForgeRequestID(requestID)
 
 	var node memorynodes.MemoryNode
 	err := db.NewSelect().
