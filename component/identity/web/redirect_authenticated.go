@@ -32,6 +32,17 @@ type MintSSOAuthCodeInput struct {
 	State       string
 	SourceIP    string
 	UserAgent   string
+
+	// CodeChallenge / CodeChallengeMethod carry the OAuth 2.1 PKCE
+	// challenge (RFC 7636) when the SSO short-circuit is reached via
+	// the /authorize endpoint (a PKCE-required client, e.g. the
+	// claude.ai MCP connector). The adapter MUST persist these onto the
+	// minted auth-code row so the client's /oauth/token exchange --
+	// which presents the matching code_verifier -- validates against a
+	// PKCE-bound code. Empty for the legacy CoPresent SPA SSO path
+	// (no PKCE), which keeps minting a non-PKCE code exactly as before.
+	CodeChallenge       string
+	CodeChallengeMethod string
 }
 
 // MintSSOAuthCodeResult carries the plaintext code back to the
@@ -127,6 +138,13 @@ func (s *Server) redirectIfAuthenticated(target string, next http.HandlerFunc) h
 		urlRedirectURI := strings.TrimSpace(q.Get("redirect_uri"))
 		urlReturnTo := strings.TrimSpace(q.Get("return_to"))
 		urlState := strings.TrimSpace(q.Get("state"))
+		// PKCE challenge from an OAuth 2.1 /authorize flow (RFC 7636).
+		// When present (PKCE-required client, e.g. the claude.ai MCP
+		// connector hitting GET /authorize), it MUST be bound onto the
+		// SSO-minted auth code so the /oauth/token exchange validates.
+		// Absent on the legacy CoPresent SPA SSO path (/login?return_to=).
+		urlCodeChallenge := strings.TrimSpace(q.Get("code_challenge"))
+		urlCodeChallengeMethod := strings.TrimSpace(q.Get("code_challenge_method"))
 
 		// No OAuth context anywhere -> this is the bare-revisit
 		// case. Just bounce to the in-product target (typically
@@ -153,6 +171,10 @@ func (s *Server) redirectIfAuthenticated(target string, next http.HandlerFunc) h
 			State:       state,
 			SourceIP:    clientIP(r),
 			UserAgent:   r.Header.Get("User-Agent"),
+			// Bind PKCE when the /authorize flow supplied a challenge.
+			// Empty for the CoPresent SPA SSO path (unchanged).
+			CodeChallenge:       urlCodeChallenge,
+			CodeChallengeMethod: urlCodeChallengeMethod,
 		})
 		if err != nil {
 			if s.Logger != nil {
