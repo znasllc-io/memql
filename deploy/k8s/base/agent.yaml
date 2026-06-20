@@ -40,6 +40,13 @@ spec:
       containers:
         - name: agent
           image: acrmemql.azurecr.io/memql-agent:0.9.9
+          # preStop drain (memql#1817): pause before SIGTERM so the node
+          # deregisters and its DB pool closes gracefully instead of being
+          # SIGKILLed at the grace deadline and orphaning Postgres backends.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
           ports:
             - { name: http, containerPort: 8085 }
             - { name: grpc, containerPort: 50051 }
