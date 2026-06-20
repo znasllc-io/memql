@@ -174,6 +174,58 @@ func MutationAdvanceHarnessConsolidationCursorBuild(args MutationAdvanceHarnessC
 	return b.String()
 }
 
+// MutationAdvanceRequest -- Transition a v1:forge:request to a new status (the approval pipeline edges). update read-merges the prior row. The role guard belongs in an engine pre-insert hook (follow-up).
+//
+// Bound concept: request.
+type MutationAdvanceRequestArgs struct {
+	RequestId         string
+	Status            string
+	ValidatedByUserId string
+	ApprovedByUserId  string
+	Resolution        string
+}
+
+// MutationAdvanceRequest calls the engine mutation mutationAdvanceRequest.
+func (qc *QueryClient) MutationAdvanceRequest(ctx context.Context, args MutationAdvanceRequestArgs) (*Result, error) {
+	call := MutationAdvanceRequestBuild(args)
+	return qc.executeNamed(ctx, "mutationAdvanceRequest", call)
+}
+
+func MutationAdvanceRequestBuild(args MutationAdvanceRequestArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationAdvanceRequest({")
+	b.WriteString("requestId: ")
+	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(fmt.Sprintf("%q", args.Status))
+	if args.ValidatedByUserId != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("validatedByUserId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ValidatedByUserId))
+	}
+	if args.ApprovedByUserId != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("approvedByUserId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ApprovedByUserId))
+	}
+	if args.Resolution != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("resolution: ")
+		b.WriteString(fmt.Sprintf("%q", args.Resolution))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationAppendDocumentVersion -- Append an immutable document-version snapshot to a logical document's history. Handler-invoked (integration.library.editDocument / restoreDocumentVersion) -- ownerUserId is threaded from the backing document's owner, versionNumber + versionId are computed server-side from the current latest. Append-only: every call inserts a new immutable row; nothing is overwritten.
 //
 // Bound concept: documentVersion.
@@ -421,6 +473,28 @@ func MutationApproveAccessRequestBuild(args MutationApproveAccessRequestArgs) st
 		b.WriteString("reviewerNote: ")
 		b.WriteString(fmt.Sprintf("%q", args.ReviewerNote))
 	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationApproveRequest -- Approve a v1:forge:request (owner action): set status 'queued' (ready to implement) and stamp approvedByUserId from actor.userId.
+//
+// Bound concept: request.
+type MutationApproveRequestArgs struct {
+	RequestId string
+}
+
+// MutationApproveRequest calls the engine mutation mutationApproveRequest.
+func (qc *QueryClient) MutationApproveRequest(ctx context.Context, args MutationApproveRequestArgs) (*Result, error) {
+	call := MutationApproveRequestBuild(args)
+	return qc.executeNamed(ctx, "mutationApproveRequest", call)
+}
+
+func MutationApproveRequestBuild(args MutationApproveRequestArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationApproveRequest({")
+	b.WriteString("requestId: ")
+	b.WriteString(fmt.Sprintf("%q", args.RequestId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -4498,6 +4572,66 @@ func MutationCreatePlanBuild(args MutationCreatePlanArgs) string {
 	return b.String()
 }
 
+// MutationCreateProject -- Register a v1:forge:project. createdByUserId is stamped from actor.userId.
+//
+// Bound concept: project.
+type MutationCreateProjectArgs struct {
+	ProjectId   string
+	Slug        string
+	Name        string
+	TargetApp   string
+	Repo        string
+	Description string
+}
+
+// MutationCreateProject calls the engine mutation mutationCreateProject.
+func (qc *QueryClient) MutationCreateProject(ctx context.Context, args MutationCreateProjectArgs) (*Result, error) {
+	call := MutationCreateProjectBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateProject", call)
+}
+
+func MutationCreateProjectBuild(args MutationCreateProjectArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateProject({")
+	if args.ProjectId != "" {
+		b.WriteString("projectId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ProjectId))
+	}
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("slug: ")
+	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(fmt.Sprintf("%q", args.Name))
+	if args.TargetApp != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("targetApp: ")
+		b.WriteString(fmt.Sprintf("%q", args.TargetApp))
+	}
+	if args.Repo != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("repo: ")
+		b.WriteString(fmt.Sprintf("%q", args.Repo))
+	}
+	if args.Description != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(fmt.Sprintf("%q", args.Description))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationCreateRecord -- Create a data record in draft validation state awaiting check and confirmation
 //
 // Bound concept: record.
@@ -4681,6 +4815,72 @@ func MutationCreateRecordBatchBuild(args MutationCreateRecordBatchArgs) string {
 		}
 		b.WriteString("confidence: ")
 		b.WriteString(fmt.Sprintf("%v", args.Confidence))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationCreateRequest -- Submit a v1:forge:request. submitterUserId + submitterRole are stamped server-side from actor (no spoofing). status lands 'submitted'; the routeRequest automation routes it by role.
+//
+// Bound concept: request.
+type MutationCreateRequestArgs struct {
+	RequestId     string
+	ProjectId     string
+	RequestType   string
+	Title         string
+	Body          string
+	AttachmentIds []string
+	Priority      string
+}
+
+// MutationCreateRequest calls the engine mutation mutationCreateRequest.
+func (qc *QueryClient) MutationCreateRequest(ctx context.Context, args MutationCreateRequestArgs) (*Result, error) {
+	call := MutationCreateRequestBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateRequest", call)
+}
+
+func MutationCreateRequestBuild(args MutationCreateRequestArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateRequest({")
+	if args.RequestId != "" {
+		b.WriteString("requestId: ")
+		b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	}
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("projectId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ProjectId))
+	if args.RequestType != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("requestType: ")
+		b.WriteString(fmt.Sprintf("%q", args.RequestType))
+	}
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("title: ")
+	b.WriteString(fmt.Sprintf("%q", args.Title))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("body: ")
+	b.WriteString(fmt.Sprintf("%q", args.Body))
+	if args.AttachmentIds != nil {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("attachmentIds: ")
+		b.WriteString(renderMemQLValue(args.AttachmentIds))
+	}
+	if args.Priority != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("priority: ")
+		b.WriteString(fmt.Sprintf("%q", args.Priority))
 	}
 	b.WriteString("})")
 	return b.String()
@@ -8608,6 +8808,66 @@ func MutationRecordPlannerInvocationBuild(args MutationRecordPlannerInvocationAr
 	return b.String()
 }
 
+// MutationRecordRequestEvent -- Append a v1:forge:requestEvent (the time-series audit trail). actorUserId + actorRole stamped from actor.
+//
+// Bound concept: requestEvent.
+type MutationRecordRequestEventArgs struct {
+	EventId    string
+	RequestId  string
+	Kind       string
+	FromStatus string
+	ToStatus   string
+	Note       string
+}
+
+// MutationRecordRequestEvent calls the engine mutation mutationRecordRequestEvent.
+func (qc *QueryClient) MutationRecordRequestEvent(ctx context.Context, args MutationRecordRequestEventArgs) (*Result, error) {
+	call := MutationRecordRequestEventBuild(args)
+	return qc.executeNamed(ctx, "mutationRecordRequestEvent", call)
+}
+
+func MutationRecordRequestEventBuild(args MutationRecordRequestEventArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRecordRequestEvent({")
+	if args.EventId != "" {
+		b.WriteString("eventId: ")
+		b.WriteString(fmt.Sprintf("%q", args.EventId))
+	}
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("kind: ")
+	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	if args.FromStatus != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("fromStatus: ")
+		b.WriteString(fmt.Sprintf("%q", args.FromStatus))
+	}
+	if args.ToStatus != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("toStatus: ")
+		b.WriteString(fmt.Sprintf("%q", args.ToStatus))
+	}
+	if args.Note != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("note: ")
+		b.WriteString(fmt.Sprintf("%q", args.Note))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationRecordResponsibilityEvaluation -- Record the outcome of an evaluation/run on a v1:planner:responsibility: stamp lastEvaluatedAt to now() and lastResult to the run headline. Called by the reactive-loop evaluator (epic #632) after a reactive condition check, a recurring scheduled tick, or a standing review. ownerUserId re-stamped from actor.userId (owned tier).
 //
 // Bound concept: responsibility.
@@ -9241,6 +9501,34 @@ func MutationRenameSpaceBuild(args MutationRenameSpaceArgs) string {
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationRequestChanges -- Send a v1:forge:request back for changes: set status 'changes_requested' with a reason.
+//
+// Bound concept: request.
+type MutationRequestChangesArgs struct {
+	RequestId  string
+	Resolution string
+}
+
+// MutationRequestChanges calls the engine mutation mutationRequestChanges.
+func (qc *QueryClient) MutationRequestChanges(ctx context.Context, args MutationRequestChangesArgs) (*Result, error) {
+	call := MutationRequestChangesBuild(args)
+	return qc.executeNamed(ctx, "mutationRequestChanges", call)
+}
+
+func MutationRequestChangesBuild(args MutationRequestChangesArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRequestChanges({")
+	b.WriteString("requestId: ")
+	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("resolution: ")
+	b.WriteString(fmt.Sprintf("%q", args.Resolution))
 	b.WriteString("})")
 	return b.String()
 }
@@ -12691,6 +12979,28 @@ func MutationUpdateWorkerLastSeenBuild(args MutationUpdateWorkerLastSeenArgs) st
 		b.WriteString("lastConnectedFromIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastConnectedFromIP))
 	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationValidateRequest -- Validate a v1:forge:request (developer action): set status 'needs_approval' and stamp validatedByUserId from actor.userId.
+//
+// Bound concept: request.
+type MutationValidateRequestArgs struct {
+	RequestId string
+}
+
+// MutationValidateRequest calls the engine mutation mutationValidateRequest.
+func (qc *QueryClient) MutationValidateRequest(ctx context.Context, args MutationValidateRequestArgs) (*Result, error) {
+	call := MutationValidateRequestBuild(args)
+	return qc.executeNamed(ctx, "mutationValidateRequest", call)
+}
+
+func MutationValidateRequestBuild(args MutationValidateRequestArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationValidateRequest({")
+	b.WriteString("requestId: ")
+	b.WriteString(fmt.Sprintf("%q", args.RequestId))
 	b.WriteString("})")
 	return b.String()
 }

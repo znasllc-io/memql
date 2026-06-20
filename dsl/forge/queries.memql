@@ -1,0 +1,83 @@
+// queries.memql
+//
+// Read paths in the `forge` namespace.
+//
+// Gating: "my requests" + "request by id" are open to any authenticated team
+// member (submitters read their own work). The validation + approval QUEUES
+// are gated to developers/owners via the forge role traits, so a
+// non-developer can never list other people's requests to act on them.
+
+use forge.concepts.{ project, request, requestEvent }
+use forge.shapes.{ projectFull, requestFull, requestEventFull }
+use forge.traits.{ traitForgeDeveloper, traitForgeApprover }
+use common.traits.{ traitStatusIsActive }
+
+@enabled
+@description("Resolve a v1:forge:project by id.")
+query project queryProjectById {
+  args {
+    projectId  string  @required
+  }
+  filter  id == args.projectId
+  shape   projectFull
+}
+
+@enabled
+@description("List active v1:forge:project rows.")
+query project queryActiveProjects {
+  filter  traitStatusIsActive
+  shape   projectFull
+}
+
+@enabled
+@description("List the caller's own submitted requests, newest-first. Open to any team member.")
+query request queryMyRequests {
+  filter  payload.submitterUserId == actor.userId
+  shape   requestFull
+}
+
+@enabled
+@description("Resolve a single v1:forge:request by id (detail view).")
+query request queryRequestById {
+  args {
+    requestId  string  @required
+  }
+  filter  id == args.requestId
+  shape   requestFull
+}
+
+@enabled
+@description("List requests by project, newest-first.")
+query request queryProjectRequests {
+  args {
+    projectId  string  @required
+  }
+  filter  payload.projectId == args.projectId
+  shape   requestFull
+}
+
+// ----- developer/owner-gated queues -----
+
+@enabled
+@description("The validation queue: requests awaiting first-line developer validation. Developer/owner only (traitForgeDeveloper).")
+query request queryValidationQueue {
+  filter  payload.status == "needs_validation" && traitForgeDeveloper
+  shape   requestFull
+}
+
+@enabled
+@description("The approval queue: validated requests awaiting owner approval. Owner only (traitForgeApprover).")
+query request queryApprovalQueue {
+  filter  payload.status == "needs_approval" && traitForgeApprover
+  shape   requestFull
+}
+
+@enabled
+@description("The full audit trail for a request, newest-first.")
+query requestEvent queryRequestEvents {
+  args {
+    requestId  string  @required
+  }
+  filter  payload.requestId == args.requestId
+  shape   requestEventFull
+}

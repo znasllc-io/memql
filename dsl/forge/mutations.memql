@@ -1,0 +1,182 @@
+// mutations.memql
+//
+// Write paths in the `forge` namespace. ownerUserId-style stamping: the
+// submitter/actor identity + role are stamped server-side from the auth
+// context (actor.userId / actor.role) so a caller cannot submit, validate,
+// or approve as someone else.
+//
+// State-machine note: these mutations express the transitions declaratively
+// (update read-merges the prior row). The ROLE GUARD on a transition (e.g.
+// "only an owner may set status=approved") is NOT enforced here -- the DSL
+// cannot gate a transition on actor.role. That guard belongs in an engine
+// pre-insert hook (mirroring component/memql/harness_step_validation.go) and
+// is tracked as a follow-up. The query-layer gating (traits.memql) keeps
+// non-developers from ever reaching the queues in the first place.
+
+use forge.concepts.{ project, request, requestEvent }
+
+// ---------------------------------------------------------------------------
+// mutationCreateProject -- register a project forge develops against.
+// ---------------------------------------------------------------------------
+@enabled
+@description("Register a v1:forge:project. createdByUserId is stamped from actor.userId.")
+mutation project mutationCreateProject {
+  args {
+    projectId    string
+    slug         string  @required
+    name         string  @required
+    targetApp    string
+    repo         string
+    description  string
+  }
+  insert {
+    id: args.projectId
+    args.slug
+    args.name
+    args.targetApp
+    args.repo
+    args.description
+    status: "active"
+    createdByUserId: actor.userId
+    provenanceMutation: "mutationCreateProject"
+  }
+}
+
+// ---------------------------------------------------------------------------
+// mutationCreateRequest -- submit a request. submitterUserId + submitterRole
+// are stamped from the auth context; status always lands 'submitted' and the
+// routeRequest automation (fired by node.created) sets the role-based next
+// state. Returns the created request.
+// ---------------------------------------------------------------------------
+@enabled
+@description("Submit a v1:forge:request. submitterUserId + submitterRole are stamped server-side from actor (no spoofing). status lands 'submitted'; the routeRequest automation routes it by role.")
+mutation request mutationCreateRequest {
+  args {
+    requestId      string
+    projectId      string    @required
+    requestType    string
+    title          string    @required
+    body           string    @required
+    attachmentIds  []string
+    priority       string
+  }
+  insert {
+    id: args.requestId
+    args.projectId
+    requestType: coalesce(args.requestType, "bug")
+    args.title
+    args.body
+    submitterUserId: actor.userId
+    submitterRole: actor.role
+    args.attachmentIds
+    priority: coalesce(args.priority, "normal")
+    status: "submitted"
+    targetEnv: "staging"
+    provenanceMutation: "mutationCreateRequest"
+  }
+}
+
+// ---------------------------------------------------------------------------
+// mutationAdvanceRequest -- the generic transition. update read-merges so
+// untouched fields (body, submitter, attachments) survive. Callers pass the
+// target status and the relevant actor stamp (validatedByUserId /
+// approvedByUserId). Pair every call with mutationRecordRequestEvent.
+// ---------------------------------------------------------------------------
+@enabled
+@description("Transition a v1:forge:request to a new status (the approval pipeline edges). update read-merges the prior row. The role guard belongs in an engine pre-insert hook (follow-up).")
+mutation request mutationAdvanceRequest {
+  args {
+    requestId          string  @required
+    status             string  @required
+    validatedByUserId  string
+    approvedByUserId   string
+    resolution         string
+  }
+  update {
+    id: args.requestId
+    args.status
+    args.validatedByUserId
+    args.approvedByUserId
+    args.resolution
+    provenanceMutation: "mutationAdvanceRequest"
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Purpose-built transitions -- stamp the acting user from the auth context so
+// the tool surface (one handler per tool) can't be spoofed. Each is an update
+// (read-merges the prior row). The matching requestEvent is recorded
+// separately (see the follow-up note: a node.updated -> recordTransition
+// automation will append the audit event automatically).
+// ---------------------------------------------------------------------------
+
+@enabled
+@description("Validate a v1:forge:request (developer action): set status 'needs_approval' and stamp validatedByUserId from actor.userId.")
+mutation request mutationValidateRequest {
+  args {
+    requestId  string  @required
+  }
+  update {
+    id: args.requestId
+    status: "needs_approval"
+    validatedByUserId: actor.userId
+    provenanceMutation: "mutationValidateRequest"
+  }
+}
+
+@enabled
+@description("Approve a v1:forge:request (owner action): set status 'queued' (ready to implement) and stamp approvedByUserId from actor.userId.")
+mutation request mutationApproveRequest {
+  args {
+    requestId  string  @required
+  }
+  update {
+    id: args.requestId
+    status: "queued"
+    approvedByUserId: actor.userId
+    provenanceMutation: "mutationApproveRequest"
+  }
+}
+
+@enabled
+@description("Send a v1:forge:request back for changes: set status 'changes_requested' with a reason.")
+mutation request mutationRequestChanges {
+  args {
+    requestId  string  @required
+    resolution string  @required
+  }
+  update {
+    id: args.requestId
+    status: "changes_requested"
+    args.resolution
+    provenanceMutation: "mutationRequestChanges"
+  }
+}
+
+// ---------------------------------------------------------------------------
+// mutationRecordRequestEvent -- append an audit/pipeline event. actorUserId +
+// actorRole stamped from the auth context.
+// ---------------------------------------------------------------------------
+@enabled
+@description("Append a v1:forge:requestEvent (the time-series audit trail). actorUserId + actorRole stamped from actor.")
+mutation requestEvent mutationRecordRequestEvent {
+  args {
+    eventId     string
+    requestId   string  @required
+    kind        string  @required
+    fromStatus  string
+    toStatus    string
+    note        string
+  }
+  insert {
+    id: args.eventId
+    args.requestId
+    args.kind
+    actorUserId: actor.userId
+    actorRole: actor.role
+    args.fromStatus
+    args.toStatus
+    args.note
+    provenanceMutation: "mutationRecordRequestEvent"
+  }
+}

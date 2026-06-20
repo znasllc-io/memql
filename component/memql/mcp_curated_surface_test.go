@@ -34,6 +34,14 @@ func TestMCPCuratedToolSurface(t *testing.T) {
 		// is now preserved when no server default is available. MCP callers MUST
 		// supply spaceId; in-agent execution still stamps it server-side.
 		"recentChat",
+		// Forge company-operating-system surface (#1786): the full development +
+		// people-ops workflow (submit, browse, validate, approve, send back).
+		// Role-gated in the engine via the pre-insert guard (#1787).
+		"forgeRegisterProject", "forgeActiveProjects",
+		"forgeSubmitRequest", "forgeMyRequests", "forgeRequestById", "forgeRequestHistory",
+		"forgeValidationQueue", "forgeValidateRequest",
+		"forgeApprovalQueue", "forgeApproveRequest",
+		"forgeRequestChanges",
 	}
 
 	registry := newToolRegistry()

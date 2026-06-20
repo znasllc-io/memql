@@ -1,0 +1,22 @@
+// automations.memql
+//
+// Event-driven orchestration for the `forge` namespace.
+//
+// routeRequest -- the first forge automation. Fires when a v1:forge:request
+// is created (the submitRequest tool -> mutationCreateRequest -> node.created)
+// and routes it through logicRouteRequest by submitter role. This is the
+// idiomatic MemQL shape: an MCP tool writes a node, a node.created automation
+// orchestrates. The whole pipeline (validate -> approve -> implement) hangs
+// off this spine; later phase automations (spike, implement, deploy) trigger
+// off subsequent request transitions.
+
+use forge.logic.{ logicRouteRequest }
+
+@enabled
+@trigger(event="node.created", concept="v1:forge:request", partition="*")
+@description("On submission of a v1:forge:request, route it to its next approval-pipeline state by the submitter's role (owner fast-track / developer -> needs_approval / non-developer -> needs_validation) and record a 'routed' audit event.")
+automation routeRequest {
+  step run {
+    logic routeRequest { event: event }
+  }
+}
