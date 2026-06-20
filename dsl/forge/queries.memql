@@ -6,6 +6,54 @@
 // member (submitters read their own work). The validation + approval QUEUES
 // are gated to developers/owners via the forge role traits, so a
 // non-developer can never list other people's requests to act on them.
+//
+// ---------------------------------------------------------------------------
+// Multi-project scoping & partition isolation -- design notes
+// ---------------------------------------------------------------------------
+//
+// PROJECT SCOPING (within a partition / tenant)
+//
+//   A v1:forge:project row represents one codebase/client engagement.
+//   v1:forge:request.projectId binds each request to exactly one project.
+//   Queries that filter on projectId (queryProjectRequests) therefore
+//   produce a project-scoped result set:
+//
+//     requests(A) ∩ requests(B) = ∅    for distinct projectIds A, B
+//
+//   Claude resolves a human-supplied slug ("memql", "copresent-acme") to a
+//   projectId via queryProjectBySlug, then passes that id to
+//   queryProjectRequests, forgeSubmitRequest, etc. The slug is stable and
+//   human-readable; the id is the row-stable FK. The two-step resolution
+//   means Claude never guesses UUIDs and never conflates projects.
+//
+// CROSS-CLIENT ISOLATION (partition boundary)
+//
+//   The partition is the hard tenant-isolation boundary in memQL. Every row
+//   carries a `partition` column; the engine stamps it from the caller's
+//   auth envelope and appends `WHERE partition = $envelope` to every query
+//   automatically. There is NO DSL filter needed on the client side -- the
+//   engine enforces it unconditionally.
+//
+//   Forge maps onto this model as follows:
+//
+//     - One partition per client/company.  ClientA and ClientB each have their
+//       own partition id (typically provisioned when the tenant is onboarded).
+//     - All v1:forge:project and v1:forge:request rows for ClientA land in
+//       ClientA's partition; the engine's WHERE clause guarantees ClientB's
+//       session can never read them and vice-versa.
+//     - Within a single client's partition, project rows further carve out
+//       per-project silos at the application layer via projectId filtering.
+//
+//   Summary of the isolation hierarchy:
+//
+//     partition (engine-enforced)
+//       └── project row (application-enforced via projectId FK on request)
+//             └── request rows (filtered by queryProjectRequests)
+//
+//   To add a new client: provision a new partition (identity admin tool),
+//   onboard users into it, then call forgeRegisterProject to seed their
+//   projects. The forge DSL requires NO code changes for a new client --
+//   partition isolation is structural and automatic.
 
 use forge.concepts.{ project, request, requestEvent }
 use forge.shapes.{ projectFull, requestFull, requestEventFull }
@@ -26,6 +74,16 @@ query project queryProjectById {
 @description("List active v1:forge:project rows.")
 query project queryActiveProjects {
   filter  traitStatusIsActive
+  shape   projectFull
+}
+
+@enabled
+@description("Resolve a v1:forge:project by its stable slug (e.g. 'memql', 'copresent-acme'). Claude uses this to go from a human-supplied name to a projectId before submitting a request or filtering requests. Returns at most one row because slugs are unique within a partition.")
+query project queryProjectBySlug {
+  args {
+    slug  string  @required
+  }
+  filter  payload.slug == args.slug
   shape   projectFull
 }
 
