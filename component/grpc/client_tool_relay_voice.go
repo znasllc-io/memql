@@ -175,6 +175,23 @@ func (s *streamSession) relayClientToolToBrowser(
 	ch := s.registerClientToolWaiter(callId)
 	defer s.unregisterClientToolWaiter(callId)
 
+	// Also serve the DURABLE-SUBSTRATE return channel for this call so the
+	// browser response reaches THIS node reliably, independent of best-effort
+	// mesh delivery. Root cause of the #1835 voice strand: the response was
+	// broadcast over the mesh and reached cognition + the sibling agent replica
+	// instantly but this waiter's node ~30s late (after the 30s timeout had
+	// already fired) -- the agent node had no return path the response could be
+	// ADDRESSED to. The voice relay sets requestId==callId, so cognition's
+	// no-pending-entry Deliver(callId) targets agentTurnKey(callId); serving it
+	// here fires this node's clientToolWaiters[callId] over the durable,
+	// replica-addressed substrate (the same return leg the text/agent path
+	// already uses, #1265). The event-bus path stays as a best-effort fast-path;
+	// whichever lands first wins, the other is an idempotent no-op.
+	if srv := s.service.clientToolResultServer; srv != nil {
+		srv.BeginTurn(ctx, callId)
+		defer srv.EndTurn(callId)
+	}
+
 	// Bound the browser round-trip by the per-tool ceiling: the fast
 	// interactive ceiling for programmatic UI tools (uiClick / uiRequestControl
 	// / ...) so an unreachable browser fails fast and legibly (#1834), the

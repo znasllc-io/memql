@@ -68,6 +68,13 @@ const (
 	// but-legitimate response doesn't race the sweeper. Keep small; its
 	// only job is absorbing network jitter on the response leg.
 	pendingClientToolCallGrace = 15 * time.Second
+
+	// Bound for the speculative substrate Deliver cognition makes when a browser
+	// response has no pending entry on this replica (the voice/service relay path
+	// parks its waiter on the emitting node, addressed by callId -- #1835). Kept
+	// short: a live voice waiter replies in ms; a true orphan has no server, so
+	// this just bounds how long the throwaway delivery goroutine lives.
+	clientToolNoEntryDeliverTimeout = 8 * time.Second
 )
 
 // pendingClientToolCall records the correlation for a client-tool call
@@ -274,7 +281,37 @@ func (c *CognitionIntegration) handleClientToolResponse(event events.Event) {
 
 	raw, ok := c.pendingClientToolCalls.LoadAndDelete(callId)
 	if !ok {
-		// Response arrived after sweep or for an unknown call -- drop.
+		// No pending entry on THIS cognition replica. This is the normal shape
+		// for the VOICE/service relay path (#1420): the waiter lives on the node
+		// that emitted the call, which sets requestId==callId and serves
+		// agentTurnKey(callId) over the durable substrate. Best-effort mesh
+		// delivery of the browser response to that node can be slow or dropped
+		// (#1835: it reached cognition instantly but the waiter's node ~30s late,
+		// after the 30s timeout fired), so don't just drop -- proactively deliver
+		// over the durable, replica-addressed substrate keyed by callId. For a
+		// true orphan (already swept, or a text turn whose key isn't callId) no
+		// server is listening and Deliver returns found=false -- harmless. Run it
+		// off the event-handler goroutine with a bounded context so a missing
+		// server can't stall the subscriber.
+		if c.clientToolResultClient != nil {
+			payload := node.ClientToolResultPayload{
+				CallID: callId, ContentJSON: contentJSON,
+				IsError: isError, ErrorMessage: errorMessage,
+			}
+			go func(id string, p node.ClientToolResultPayload) {
+				dctx, cancel := context.WithTimeout(context.Background(), clientToolNoEntryDeliverTimeout)
+				defer cancel()
+				found, err := c.clientToolResultClient.Deliver(dctx, id, p)
+				if err != nil {
+					c.Logger.Warn("client-tool relay: no-entry substrate Deliver failed",
+						"callId", id, "error", err)
+					return
+				}
+				c.Logger.Info("client-tool relay: no-entry substrate Deliver",
+					"callId", id, "waiterFound", found)
+			}(callId, payload)
+			return
+		}
 		c.Logger.Warn("client-tool relay: response without pending entry",
 			"callId", callId)
 		return
