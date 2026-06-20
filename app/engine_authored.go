@@ -151,7 +151,7 @@ func (a *App) rearmActiveAuthoredBundles() {
 		return
 	}
 	a.Logger.Info("authored bundles re-armed on boot",
-		"seen", res.Seen, "rearmed", res.Rearmed, "failed", len(res.FailedIds))
+		"seen", res.Seen, "rearmed", res.Rearmed, "skipped", res.Skipped, "failed", len(res.FailedIds))
 }
 
 // authoredAutomationsEnabledFlag reads the cluster-wide global kill switch from

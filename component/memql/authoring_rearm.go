@@ -36,6 +36,7 @@ package memql
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
 )
@@ -63,11 +64,13 @@ func registerBundleConstructs(register []*AuthoredConstruct, deps AuthoredRuntim
 }
 
 // RearmResult reports what a boot re-arm did: how many active bundles were seen,
-// how many re-registered successfully, and the bundle ids that failed (so the
-// boot log records exactly which capabilities did NOT come back).
+// how many re-registered successfully, how many were skipped as inert (zero
+// member constructs), and the bundle ids that failed (so the boot log records
+// exactly which capabilities did NOT come back).
 type RearmResult struct {
 	Seen      int      `json:"seen"`
 	Rearmed   int      `json:"rearmed"`
+	Skipped   int      `json:"skipped,omitempty"`
 	FailedIds []string `json:"failedIds,omitempty"`
 }
 
@@ -99,6 +102,11 @@ type rearmStore interface {
 	LoadConstructsForOwner(ctx context.Context, owner, bundleId string) ([]AuthoringConstructRow, error)
 }
 
+// errEmptyBundle is an internal sentinel returned by rearmOneBundle when a
+// bundle has no member constructs. It signals "nothing to do" (not a failure)
+// so the caller can count it as skipped rather than failed. It is not exported.
+var errEmptyBundle = fmt.Errorf("authoring: active bundle has no member constructs (inert -- skipped)")
+
 // rearmActiveBundlesWithStore is the store-driven core, split out so it is unit
 // testable with a fake rearmStore (no live DB).
 func rearmActiveBundlesWithStore(ctx context.Context, store rearmStore, deps AuthoredRuntimeDeps) (RearmResult, error) {
@@ -113,11 +121,19 @@ func rearmActiveBundlesWithStore(ctx context.Context, store rearmStore, deps Aut
 
 	result := RearmResult{Seen: len(bundles)}
 	for _, bundle := range bundles {
-		if err := rearmOneBundle(ctx, store, bundle, deps); err != nil {
+		rearmErr := rearmOneBundle(ctx, store, bundle, deps)
+		if rearmErr == errEmptyBundle {
+			// Empty active bundle -- inert, not a failure. Don't add to FailedIds
+			// and don't emit a per-bundle WARN. The summary log at the end of the
+			// boot sequence already includes the Skipped count.
+			result.Skipped++
+			continue
+		}
+		if rearmErr != nil {
 			result.FailedIds = append(result.FailedIds, bundle.Id)
 			if deps.Logger != nil {
 				deps.Logger.Warn("authored bundle re-arm failed (other bundles unaffected)",
-					"bundleId", bundle.Id, "owner", bundle.OwnerUserId, "error", err)
+					"bundleId", bundle.Id, "owner", bundle.OwnerUserId, "error", rearmErr)
 			}
 			continue
 		}
@@ -137,13 +153,30 @@ func rearmActiveBundlesWithStore(ctx context.Context, store rearmStore, deps Aut
 // status-transition outputs are ignored here -- the bundle is already active and
 // its deps are already catalogued; re-arm only re-establishes the live
 // registrations.
+//
+// If the bundle has zero member constructs it is treated as inert and skipped
+// (returns nil). This handles the mcp-promote-* class of bundles that are
+// enumerated by the system-active query but handled by RehydratePromotedConstructs
+// on the separate rehydration path, as well as any bundle left partially created
+// by a failed write (bundle activated, construct write failed). Returning nil
+// keeps the bundle out of the FailedIds list so it does not produce a per-bundle
+// WARN flood on every boot.
 func rearmOneBundle(ctx context.Context, store rearmStore, bundle AuthoringBundleRow, deps AuthoredRuntimeDeps) error {
 	constructs, err := store.LoadConstructsForOwner(ctx, bundle.OwnerUserId, bundle.Id)
 	if err != nil {
 		return fmt.Errorf("load constructs: %w", err)
 	}
 	if len(constructs) == 0 {
-		return fmt.Errorf("active bundle has no member constructs (was it partially retired?)")
+		// No member constructs: treat as inert. Two legitimate scenarios:
+		//   1. mcp-promote-* bundle -- plain-construct promotions handled by
+		//      RehydratePromotedConstructs; the automation re-arm should skip them.
+		//      (The production store also filters these out by prefix, but this
+		//      guard makes fakeRearmStore-based tests and any future store
+		//      implementations safe by default.)
+		//   2. Partially-created bundle -- bundle was activated but the subsequent
+		//      construct write failed, leaving an empty active bundle.
+		// Return the sentinel so the caller counts this as Skipped, not Failed.
+		return errEmptyBundle
 	}
 
 	// Reuse the activation planner to compute the construct set to register.
@@ -184,6 +217,15 @@ func (s *engineRearmStore) LoadSystemActiveBundles(ctx context.Context) ([]Autho
 	}
 	out := make([]AuthoringBundleRow, 0, len(res.Bundle.Nodes))
 	for _, node := range res.Bundle.Nodes {
+		// Skip durable-promote bundles: they are NOT automation bundles and are
+		// rehydrated by RehydratePromotedConstructs on a separate boot path.
+		// Including them here would cause a spurious WARN for every mcp-promote-*
+		// bundle that exists (they have no automation constructs, so re-arm has
+		// nothing to do for them). Mirror the same prefix filter that
+		// enginePromoteRehydrateStore.LoadPromotedBundles applies in reverse.
+		if strings.HasPrefix(node.GetId(), durablePromoteBundlePrefix) {
+			continue
+		}
 		payload, err := nodePayloadJSON(node)
 		if err != nil {
 			return nil, err
