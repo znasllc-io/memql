@@ -609,6 +609,26 @@ func LogicPurgeExpiredSafetyClassificationsBuild(args LogicPurgeExpiredSafetyCla
 	return b.String()
 }
 
+// LogicRecordTransition -- On v1:forge:request node.updated: append exactly one v1:forge:requestEvent for the four post-creation pipeline transitions (validated / approved / changes_requested / rejected). Each guard is mutually exclusive; at most one fires per invocation. Returns early (no write) for unrecognised statuses.
+type LogicRecordTransitionArgs struct {
+	Event map[string]any
+}
+
+// LogicRecordTransition calls the engine logic logicRecordTransition.
+func (qc *QueryClient) LogicRecordTransition(ctx context.Context, args LogicRecordTransitionArgs) (*Result, error) {
+	call := LogicRecordTransitionBuild(args)
+	return qc.executeNamed(ctx, "logicRecordTransition", call)
+}
+
+func LogicRecordTransitionBuild(args LogicRecordTransitionArgs) string {
+	var b strings.Builder
+	b.WriteString("logicRecordTransition({")
+	b.WriteString("event: ")
+	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString("})")
+	return b.String()
+}
+
 // LogicRefreshDueKnowledgeDomains -- Reads candidate knowledge-domain rows via queryDueRefreshDomains; for each, the Go-side cron handler (registered by the planner-service init path) evaluates the elapsed-since-lastSeededAt check and spawns a trainSpecialist Plan per matching row. Per Q9 the schema-side cadence + runtime-side spawn are deliberately split -- the DSL filter is broad (active + non-null refreshCadenceDays), the precise elapsed-time math runs in Go where arithmetic on datetime fields is cheap.
 type LogicRefreshDueKnowledgeDomainsArgs struct {
 	Event map[string]any
