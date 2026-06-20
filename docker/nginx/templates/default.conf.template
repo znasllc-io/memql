@@ -85,7 +85,8 @@ server {
                 agent.${DOMAIN}
                 cognition.${DOMAIN}
                 planner.${DOMAIN}
-                voice.${DOMAIN};
+                voice.${DOMAIN}
+                mcp.${DOMAIN};
     return 301 https://$host$request_uri;
 }
 
@@ -389,6 +390,81 @@ server {
         proxy_set_header Upgrade    $http_upgrade;
         proxy_set_header Connection "upgrade";
 
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+
+# -----------------------------------------------------------------
+# MCP node -- remote Model Context Protocol head (memql#1550 /
+# memql#1810). TLS terminated here; plain HTTP forwarded to the
+# mcp service on :8090 (the node serves the Streamable HTTP
+# protocol head at POST/GET/DELETE /mcp, auth-gated by the app
+# layer with identity bearer JWTs -- no second auth layer here).
+#
+# STICKY SESSIONS: an MCP session (Mcp-Session-Id) maps to an
+# in-process *mcp.Server on exactly ONE replica. nginx:alpine is
+# open-source nginx (no nginx-plus), so the `sticky` directive is
+# NOT available. Instead we use `hash $http_mcp_session_id
+# consistent` on the upstream, which deterministically routes every
+# request carrying the same Mcp-Session-Id header to the same
+# replica -- the functional equivalent of cookie session-affinity.
+# A fresh request (no Mcp-Session-Id yet) lands on an arbitrary
+# replica and the server-assigned id from the response pins all
+# follow-ups. This mirrors the staging ingress-nginx cookie
+# session-affinity (mcp_route) in intent, adapted to nginx:alpine.
+#
+# Long read/send timeouts + buffering off keep the GET /mcp SSE
+# notification channel open and unbuffered, matching the
+# staging-mcp ingress annotations (proxy-read-timeout: 3600 /
+# proxy-send-timeout: 3600 / proxy-buffering: off).
+# -----------------------------------------------------------------
+
+# Upstream for the mcp service; hash on Mcp-Session-Id for
+# per-session replica pinning across the 2-replica deploy.
+# Using consistent hash so only 1/N sessions remap when a replica
+# is added or removed (ring-hash semantics).
+upstream mcp_http {
+    hash $http_mcp_session_id consistent;
+    server mcp:8090;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name mcp.${DOMAIN};
+
+    ssl_certificate     /etc/nginx/certs/dev.crt;
+    ssl_certificate_key /etc/nginx/certs/dev.key;
+
+    location / {
+        # Variable-based upstream passes through the runtime resolver
+        # so a rebuilt mcp container doesn't strand nginx on a stale IP.
+        # The hash-based sticky routing is handled by the upstream block
+        # above; the variable here bypasses the config-load cache per
+        # the resolver pattern used throughout this file.
+        set $mcp_target mcp:8090;
+        proxy_pass http://$mcp_target;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+
+        # Pass Mcp-Session-Id through unmodified so the mcp node
+        # can route the request to the correct in-process session.
+        proxy_pass_request_headers on;
+
+        # SSE (GET /mcp notification channel): disable buffering so
+        # events are flushed to the client immediately rather than
+        # accumulating in nginx's proxy buffer. Mirrors the staging
+        # ingress-nginx proxy-buffering: off annotation.
+        proxy_buffering off;
+
+        # Long timeouts for the persistent SSE channel (GET /mcp).
+        # Mirrors staging-mcp ingress (proxy-read-timeout: 3600 /
+        # proxy-send-timeout: 3600).
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
     }

@@ -589,6 +589,106 @@ services:
     networks:
       - memql-cluster
 
+  # MCP node -- remote Model Context Protocol head (epic memql#1550,
+  # memql#1810 local parity).
+  #
+  # Engine-built (BUILD_TAGS=mcp, no CoPresent DSL -- it exposes the
+  # memQL engine tool surface, not the CoPresent product DSL). Like
+  # identity, this node runs its own in-process engine against the
+  # shared DB; it does NOT dial a mesh parent (no MEMQL_PARENT_ADDRESS).
+  #
+  # 2 replicas -- staging parity (memql#1810). An MCP session
+  # (Mcp-Session-Id) maps to an in-process *mcp.Server on one replica;
+  # sticky routing is required for follow-up requests to land on the
+  # same replica. The nginx front door uses `hash $http_mcp_session_id
+  # consistent` on the mcp_http upstream for session-level pinning
+  # (nginx:alpine is open-source -- the `sticky` directive is
+  # nginx-plus only). This mirrors staging's cookie session-affinity
+  # (mcp_route) in intent, adapted to the local nginx:alpine image.
+  #
+  # MCP head listens on :8090 (MEMQL_MCP_HTTP_ADDR=:8090,
+  # MEMQL_MCP_TRANSPORT=http), matching staging (deploy/k8s/base/mcp.yaml).
+  # Auth is mandatory + default-deny at the app layer (identity bearer JWT
+  # on /mcp) -- no second auth layer at the nginx level.
+  #
+  # No DB migrations (identity owns migrations). No host port publish
+  # for :8090 (reached only through the nginx front door on
+  # mcp.${DOMAIN}); the standard :8085 health-check server is also
+  # not published -- internal only, same as the other replicated nodes.
+  mcp:
+    build:
+      # Engine-built: the memql engine Dockerfile with BUILD_TAGS=mcp.
+      # mcp is an engine-only node (no CoPresent DSL) -- same as identity
+      # and voice (see the node-image-source table in CLAUDE.md).
+      # Build context is the engine repo root (docker/../ = repo root).
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        BUILD_TAGS: mcp
+    deploy:
+      # Staging parity (memql#1810): 2 replicas exercise the per-session
+      # sticky routing path. No container_name/hostname/static
+      # MEMQL_NODE_ID -> each replica gets a unique hostname-derived id.
+      replicas: 2
+    env_file:
+      - ${GENESIS_ENV_FILE:-../.env.local}
+    environment:
+      MEMQL_NODE_TYPE: mcp
+      # memql#1042 fix: force MEMQL_NODE_ID empty so the per-replica
+      # hostname id (memql#1213) wins over the shared "bff-local" that
+      # leaks in from the genesis env_file. Empty -> os.Hostname().
+      MEMQL_NODE_ID: ""
+      MEMQL_NODE_ADDRESS: mcp:50060
+      MEMQL_NODE_SERVICE_ADDRESS: ":50060"
+      MEMQL_GRPC_ADDRESS: ":50051"
+      SERVER_ADDRESS: "0.0.0.0:8085"
+      # MCP remote transport (child B env surface, memql#1551).
+      MEMQL_MCP_TRANSPORT: "http"
+      MEMQL_MCP_HTTP_ADDR: ":8090"
+      # Public URL advertised in /.well-known/oauth-protected-resource
+      # and 401 WWW-Authenticate resource_metadata hint. Local clusters
+      # use the TLS subdomain fronted by nginx (mcp.${DOMAIN}).
+      MEMQL_MCP_PUBLIC_URL: https://mcp.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}
+      # Capability tier (Gate A). authoring = named tools + session-scoped
+      # define; role gate (Gate B) still applies on top. Mirrors staging.
+      MEMQL_MCP_MODE: authoring
+      # MEMQL_MCP_ROLE / MEMQL_MCP_USER intentionally UNSET: the acting
+      # identity is taken from the caller's verified token claims, so every
+      # caller acts as themselves rather than a shared pinned identity.
+      # Identity verifier (bearer-JWT auth for /mcp). Local cluster uses
+      # the in-cluster plaintext http://identity:8081 endpoint (TLS is
+      # terminated at the nginx front door, not on the service).
+      IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-https://identity.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}}
+      # IDENTITY_ENABLED=false: the mcp node does NOT run the full identity
+      # web UI / login flow; it only uses the identity verifier for bearer
+      # JWT validation on /mcp. Mirrors staging (deploy/k8s/base/mcp.yaml).
+      IDENTITY_ENABLED: "false"
+      # Allow the in-cluster plaintext http://identity:8081 node-bootstrap
+      # (the worker self-mints its class="node" JWT). Without this the
+      # node sends no auth header and every NodeService.Stream call fails.
+      MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP: ${MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP:-1}
+      # Node-bootstrap secret (memql#338). When set on both this node
+      # AND the identity service, a node that boots without an
+      # operator-provisioned MEMQL_NODE_TOKEN self-mints a class="node"
+      # JWT via identity's POST /node/bootstrap. Default is a known dev
+      # value so `docker compose up` works out of the box; production
+      # overrides via .env.local or shell export.
+      MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
+      # No DB migrations -- identity owns the one-time migration.
+      # Mirrors staging env (deploy/k8s/base/mcp.yaml).
+      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
+      MEMORY_NODES_DATABASE_MIGRATE_ON_START: "false"
+      MEMORY_NODES_DATABASE_AUTO_MIGRATE: "false"
+      SERVER_ALLOWED_ORIGINS: "*"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+    networks:
+      - memql-cluster
+
   # Identity node -- in-house auth provider (magic-link, JWT issuance,
   # JWKS publishing, web UI, admin app, PAT management).
   #
