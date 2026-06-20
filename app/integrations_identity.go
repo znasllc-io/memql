@@ -287,7 +287,14 @@ func (a *App) integrationsIdentity() {
 			ctx,
 			codeId, plain, hash,
 			in.ClientId, in.RedirectURI, in.State,
-			"", "", // codeChallenge, codeChallengeMethod -- SSO mint has no PKCE context (#1570)
+			// Bind the PKCE challenge when the SSO short-circuit was
+			// reached via an OAuth 2.1 /authorize flow (e.g. the claude.ai
+			// MCP connector). The client's /oauth/token exchange presents
+			// the matching code_verifier, which /oauth/token validates
+			// against this stored challenge. Empty on the legacy CoPresent
+			// SPA SSO path (no PKCE) -- mints a non-PKCE code as before
+			// (#1556; previously always empty, #1570).
+			in.CodeChallenge, in.CodeChallengeMethod,
 			in.UserId,
 			"", // identityId -- no specific credential row tracked for SSO mint
 			"", // magicLinkRequestId -- the original sign-in's magic link, not surfaced

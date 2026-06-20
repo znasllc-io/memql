@@ -292,7 +292,16 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// metadata document). A browser-based OAuth client opens this; it
 	// validates the code-flow params and funnels into the magic-link
 	// login carrying the PKCE-bound OAuth context.
-	mux.HandleFunc("GET /authorize", wrap(s.handleAuthorize))
+	//
+	// Wrapped with preAuth (redirectIfAuthenticated) so an ALREADY-
+	// signed-in user (e.g. the cluster owner who just claimed ownership)
+	// connecting an OAuth client gets the SSO short-circuit -- mint a
+	// PKCE-bound auth code and 303 straight to redirect_uri?code=...&
+	// state=... -- instead of being shown the email/login form again,
+	// which dropped the OAuth context and landed them on /admin/ (#1556).
+	// Unauthenticated callers fall through to handleAuthorize (the
+	// consent/login page), unchanged.
+	mux.HandleFunc("GET /authorize", wrap(preAuth(s.handleAuthorize)))
 	mux.HandleFunc("GET /check-email", wrap(s.handleCheckEmail))
 	mux.HandleFunc("GET /logout-complete", wrap(s.handleLogoutComplete))
 	mux.HandleFunc("GET /error", wrap(s.handleError))
