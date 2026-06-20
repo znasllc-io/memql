@@ -79,8 +79,17 @@ var allowedNonBindingFailures = []string{
 	// the RESOLVED id "part-1727", so a genuine binding regression (a null-bound
 	// id would yield `participant "" not found`) still fails rather than being
 	// masked here.
-	`participant "part-1727" not found`, // getLatestParticipantPayload: no seeded participant row
-	`as participant "part-1727"`,        // auth validation: no actor write-authz in conformance
+	// The id renders either bare ("part-1727") or fully-qualified
+	// ("v1:cognition:participant:part-1727") depending on which step surfaces the
+	// failure (mutationSendTextUtterance uses the canonical id) and on shared-DB
+	// test ordering -- hence both forms are tolerated. Both still anchor on the
+	// RESOLVED id, so a genuine null-bind regression (participant "" not found)
+	// is not masked. Without the fully-qualified variants this dimension flaked
+	// intermittently in the merge queue (memql#1821).
+	`participant "part-1727" not found`,                          // getLatestParticipantPayload: no seeded participant row (bare id)
+	`participant "v1:cognition:participant:part-1727" not found`, // mutationSendTextUtterance: no seeded row (fully-qualified id)
+	`as participant "part-1727"`,                                 // auth validation: no actor write-authz in conformance (bare id)
+	`as participant "v1:cognition:participant:part-1727"`,        // auth validation (fully-qualified id)
 }
 
 func runEventDryRunBinding(t *testing.T, e *Env) {
