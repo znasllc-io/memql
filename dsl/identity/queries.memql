@@ -460,16 +460,25 @@ query authSession queryAuthSessionsForSubject {
 //   Empty when the first-run wizard hasn't completed yet -- callers
 //   fall back to env-derived defaults.
 //
-// Filter: just the concept. v1:identity:clusterSettings is a singleton
-// (id="cluster"), so the concept-level latest-version-per-id semantic
-// gives us one row. The previous attempt at `id=="cluster"` filtered
-// against the canonical id (`_system:v1:identity:clusterSettings:cluster`)
-// and matched nothing -- the bare slug "cluster" never equals the
-// canonical form. Memory note reference_id_canonical_format.md.
+// Filter: pin to id=="cluster" (the canonical singleton key). Without
+// the id filter the query scans ALL v1:identity:clusterSettings rows
+// and returns one per distinct id; if a stale or miskeyed row exists
+// alongside the canonical one, Nodes[0] can be either row depending
+// on scan order -- non-deterministic across replicas (#1807).
+//
+// id=="cluster" is a short-slug filter. The engine's resolveFullId
+// expands it to the full storage id "v1:identity:clusterSettings:cluster"
+// before the SQL WHERE clause is built, so it correctly matches the
+// row the writer inserted via mutationCreateClusterSettings({id:"cluster",...}).
+// The comment that led to this filter being removed previously mentioned
+// `_system:v1:identity:clusterSettings:cluster` -- that prefix was
+// retired when partition-scoping was removed; the current canonical form
+// is plain `v1:identity:clusterSettings:cluster`.
 
 @enabled
-@description("Latest singleton cluster-settings row.")
+@description("Latest singleton cluster-settings row, pinned to id=cluster.")
 query clusterSettings queryClusterSettingsCurrent {
+  filter  id=="cluster"
   shape   clusterSettingsFull
 }
 

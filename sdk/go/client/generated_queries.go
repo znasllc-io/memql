@@ -1379,7 +1379,7 @@ func QueryClusterNodesBuild(args QueryClusterNodesArgs) string {
 	return "queryClusterNodes({})"
 }
 
-// QueryClusterSettingsCurrent -- Latest singleton cluster-settings row.
+// QueryClusterSettingsCurrent -- Latest singleton cluster-settings row, pinned to id=cluster.
 //
 // Bound concept: clusterSettings.
 type QueryClusterSettingsCurrentArgs struct {
