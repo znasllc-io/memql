@@ -50,6 +50,21 @@ function validate_inputs() {
     info "validating lockfile coherence before promotion..."
     bash "$SCRIPT_DIR/coherence-check.sh" "$LOCKFILE" || {
         echo "ERROR: refusing to promote an incoherent lockfile"; exit 1; }
+
+    # Connection-headroom gate (memql#1820, from the #1817 53300 spike): block a
+    # promotion whose projected Sigma(replicas x MAX_OPEN_CONNS) + surge + blue-
+    # green overlap would exceed the target instance's connection budget.
+    # ENFORCED when the operator declares the instance budget (MAX_CONNECTIONS);
+    # advisory otherwise (we can't know the budget without it).
+    local headroom="$REPO_ROOT/scripts/deploy/conn-headroom-check.sh"
+    if [ -n "${MAX_CONNECTIONS:-}" ]; then
+        info "checking connection headroom (budget MAX_CONNECTIONS=$MAX_CONNECTIONS)..."
+        bash "$headroom" || {
+            echo "ERROR: refusing to promote -- projected DB connections exceed the instance budget (SQLSTATE 53300 risk). Right-size MAX_OPEN_CONNS / replicas / surge, add a pooler, or raise the instance max_connections."; exit 1; }
+    else
+        info "connection-headroom check (advisory -- set MAX_CONNECTIONS for the target instance to enforce):"
+        bash "$headroom" || true
+    fi
 }
 
 # Render the images: block for the overlay kustomization from the lockfile.
