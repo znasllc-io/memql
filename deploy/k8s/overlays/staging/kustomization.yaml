@@ -1,16 +1,16 @@
-# Staging overlay -> 0.9.81: forge approval-pipeline fix (#1840) + coherent
-# full-stack convergence. Resolves the logic-layer arg-resolution outage that
-# took down routing / audit trail / mentoring / attachments on the forge tools:
-#   - single-return logic (forgeRecordMentoring): *ast.ArgRefExpr now resolves;
-#   - multi-step logic return (forgeAttachToRequest / routeRequest): _return now
-#     goes through convertArgReferences (`function "arg" not found` gone);
-#   - positional builtin render (append): `0=v0, 1=v1` corruption fixed.
-# Also converges staging off a badly-skewed prior rollout (bff pods had been
-# split across 0.9.75/78/79/80) onto a single coherent version. All 9 images
-# built on the GitHub BUILD SERVER (OIDC->ACR) against engine main 7301e41;
-# engineVersion 0.9.80 -> 0.9.81. SPA unchanged (re-tagged, same digest).
-# Digests hand-applied from releases/0.9.81.yaml. livekit pin (#1043) + NODE_IP
-# patch preserved.
+# Staging overlay -> 0.9.82: client-tool relay (UI takeover) FIX. The voice/
+# service relay parked its waiter on the agent node and depended on best-effort
+# mesh broadcast to return the browser response there; it reached cognition +
+# the sibling agent replica instantly but the waiter's own node ~30s late, after
+# the 30s timeout -- so "change the theme" over chat/voice always timed out
+# (epic #1833). Fix (#1843, closes #1835): deliver the response over the durable,
+# replica-addressed substrate (BeginTurn(callId) on the agent + cognition
+# Deliver(callId) on no-pending-entry), the same return leg the text path uses.
+# Built on the 0.9.81 forge wave (everything on main as of engine 98142b0).
+# All 9 images built on the GitHub BUILD SERVER (OIDC->ACR) against engine main
+# 98142b0; engineVersion 0.9.81 -> 0.9.82. SPA unchanged (engine-only fix,
+# re-tagged, same digest). Digests hand-applied from releases/0.9.82.yaml.
+# livekit pin (#1043) + NODE_IP patch preserved.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -32,24 +32,24 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:11a2b9013d7159be6071f11b664390d706aef1acb380c98f2f15686574751bbd
+    digest: sha256:040535378d8e95b5495f423f463c376597304bbd08df275cfc1de9b2025a05cc
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:138edf15dc7d4ccc92df8f52c47c7406409d96e9c864a85b6ba4d7b471632d4d
+    digest: sha256:0ed5af62897d2ae091cc1dc185161ffe5ae869fb997567f1b9387b33923f265e
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:e6f8dddad64dc5702e19df85b1132b9d52ab183ea4875dc5966cf2dc31eca28c
+    digest: sha256:015243fcb0865c1a3049bfc4e99a54a7afdfaf8755d2bbaede1d6639fdca29e6
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:4216cb35be4cfffea5cafd6407d1b8a9a6d4ce71d44b5a652a2c4512eae1acb4
+    digest: sha256:263a65a3f3e5ca01c3f92473aff5c6d410ff8941a10f8a3951991bec2eb0712d
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:5513e32a7ef77fad93c7652e31f8a647da9a6062fcdc2f1d5019db4e24c2525c
+    digest: sha256:15a8591de3521f87fa92dfb0f6427ad7f3dbabb54a2d9b8b80eacf78b7684e00
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:8104a4473539eae9ed4f9487a85d38bf1aba2a686008b1af99760d7643a523a0
+    digest: sha256:72e01449af33868dd2dbeb236f8cc8e03b0c23333f559d217c9fbfded8ae01e4
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:bc99d7b8879e3765b3f78236a1c41cb80f7360553f1d9fbcb519e37e1c3a314a
+    digest: sha256:bd36013bbd572b3306637b1990e78ddcc5817b970bcc58e376278648103b2ef8
   # memql-mcp (epic memql#1550): remote MCP node, engine-built on the GitHub
   # build server (#1581 wired it into build-engine-images + the release tooling).
-  # 0.9.81: rebuilt from main 7301e41 alongside the rest of the full-stack wave.
+  # 0.9.82: rebuilt from main 98142b0 alongside the rest of the full-stack wave.
   - name: acrmemql.azurecr.io/memql-mcp
-    digest: sha256:047e22736f7ace053d4b03c67c62ad1ed352cdc2d09bf1125fd027b1d4722b44
+    digest: sha256:a939894472c483592f7f31bb91e21753407ed528d3353ddbcc1d1ac3fce3652e
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:c4215ab65f1f1622c4c4e71788905351dd68fec065f292f510357f35e5d3aeb3
   - name: livekit/livekit-server
