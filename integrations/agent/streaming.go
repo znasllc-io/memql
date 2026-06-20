@@ -556,6 +556,7 @@ StreamLoop:
 
 		hadSuccess := false
 		wheelContested := false
+		clientToolUnreachable := false
 		for _, tc := range turnCalls {
 			args := parseToolArgs(tc.Arguments)
 			// Ensure args is a non-nil map BEFORE agent-context
@@ -622,6 +623,13 @@ StreamLoop:
 				sink.ToolResult(tc.ID, "", execErr.Error())
 				if strings.Contains(execErr.Error(), wheelContestedMarker) {
 					wheelContested = true
+				}
+				// Interactive client-tool timeout (memql#1834): the browser is
+				// gone / unreachable. Like WHEEL_CONTESTED this is terminal --
+				// further UI tool calls will also strand -- so flag it for the
+				// fast break below instead of looping to the all-errored cap.
+				if strings.Contains(execErr.Error(), clientToolUnreachableMarker) {
+					clientToolUnreachable = true
 				}
 				// Repeated-identical-failure breaker (memql#1128): abort the
 				// whole turn rather than loop to maxIterations when the model
@@ -707,6 +715,23 @@ StreamLoop:
 				textChunks++
 			}
 			r.logger.Info("agent streaming: wheel contested -- breaking loop",
+				"iter", iter)
+			break
+		}
+
+		// CLIENT_TOOL_UNREACHABLE (memql#1834): an interactive client-executed
+		// UI tool timed out with no browser response -- the browser is gone or
+		// unreachable across nodes. Retrying just burns iterations against a
+		// browser that isn't answering, so break immediately and surface a
+		// concise, actionable message rather than stalling to the wallclock cap
+		// and surfacing a bare timeout.
+		if clientToolUnreachable {
+			if !hasMeaningfulTail(&fullText, 40) {
+				sink.TextDelta(clientToolUnreachableUserMessage)
+				fullText.WriteString(clientToolUnreachableUserMessage)
+				textChunks++
+			}
+			r.logger.Info("agent streaming: client tool unreachable -- breaking loop",
 				"iter", iter)
 			break
 		}
@@ -949,6 +974,20 @@ func needsIterationSeparator(b *strings.Builder) bool {
 // Kept in sync with the string the frontend's ClientToolRelayBridge +
 // requestControl primitive emit.
 const wheelContestedMarker = "WHEEL_CONTESTED"
+
+// clientToolUnreachableMarker mirrors the sentinel component/grpc stamps on the
+// typed error returned when an interactive client-executed UI tool
+// (uiRequestControl / uiClick / ...) times out with no browser response
+// (memql#1834). When the tool loop sees it, it breaks immediately and surfaces
+// clientToolUnreachableUserMessage instead of letting the model retry against a
+// browser that isn't answering -- the same shape as the WHEEL_CONTESTED break.
+// Kept in sync with component/grpc/client_tool_failfast.go.
+const clientToolUnreachableMarker = "CLIENT_TOOL_UNREACHABLE"
+
+// clientToolUnreachableUserMessage is the concise, actionable reply streamed to
+// the user when an interactive UI tool can't reach the browser. Kept in sync
+// with component/grpc/client_tool_failfast.go.
+const clientToolUnreachableUserMessage = "I couldn't reach the app to take control of the screen — please try again, and reload the page if it keeps happening."
 
 // hasMeaningfulTail reports whether the text the agent has streamed
 // so far contains at least `minTrailingChars` non-whitespace chars in

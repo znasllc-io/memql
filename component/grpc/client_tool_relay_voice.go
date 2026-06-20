@@ -58,15 +58,6 @@ const (
 	// eventPatternClientToolResponse so the voice relay observes the same
 	// browser-originated response events.
 	eventPatternClientToolResponseVoice = "graph.node.created.v1:cognition:client:tool:response"
-
-	// voiceClientToolTimeout bounds a voice-driven client-tool round-trip
-	// (request emitted -> browser executes -> response lands). Matches the
-	// 30s ordinary-UI budget executeClientTool uses; the voice executor's
-	// own per-call timeout (#1430, defaultToolCallTimeout 45s) is a longer
-	// outer bound, so the browser round-trip is the binding deadline and a
-	// browser-gone case surfaces here as a clean timeout error rather than
-	// stranding the voice tool worker.
-	voiceClientToolTimeout = 30 * time.Second
 )
 
 // startClientToolResponseRelay subscribes the service to browser-originated
@@ -184,8 +175,18 @@ func (s *streamSession) relayClientToolToBrowser(
 	ch := s.registerClientToolWaiter(callId)
 	defer s.unregisterClientToolWaiter(callId)
 
-	timeout := voiceClientToolTimeout
+	// Bound the browser round-trip by the per-tool ceiling: the fast
+	// interactive ceiling for programmatic UI tools (uiClick / uiRequestControl
+	// / ...) so an unreachable browser fails fast and legibly (#1834), the
+	// longer human-input ceiling for uiAskUser.
+	timeout := clientToolWaitTimeout(toolName)
 	expiresAt := time.Now().Add(timeout).UTC()
+	if s.logger != nil {
+		s.logger.Info("client-tool waiter registered",
+			"component", ComponentName, "path", "voice",
+			"call_id", callId, "tool", toolName, "space_id", spaceId,
+			"timeout_ms", timeout.Milliseconds())
+	}
 
 	// Reuse the SAME request mutation + node shape the agent relay uses
 	// (mutationEmitClientToolRequest); the request node id is keyed by callId so
@@ -219,24 +220,38 @@ func (s *streamSession) relayClientToolToBrowser(
 			"component", ComponentName, "call_id", callId, "tool", toolName, "space_id", spaceId)
 	}
 
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-time.After(timeout):
-		return nil, fmt.Errorf("client tool %q timed out after %v (no browser response)", toolName, timeout)
-	case result := <-ch:
-		if result == nil {
-			return nil, fmt.Errorf("client tool %q relay closed without a result", toolName)
-		}
-		if result.GetIsError() {
-			errMsg := result.GetErrorMessage()
-			if errMsg == "" {
-				errMsg = "client tool execution failed in the browser"
-			}
-			return nil, fmt.Errorf("%s", errMsg)
-		}
-		return result.GetContent(), nil
+	result, outcome, elapsed := awaitClientToolResult(ctx, ch, toolName)
+	if s.logger != nil {
+		s.logger.Info("client-tool waiter resolved",
+			"component", ComponentName, "path", "voice",
+			"call_id", callId, "tool", toolName,
+			"outcome", string(outcome), "elapsed_ms", elapsed.Milliseconds())
 	}
+	switch outcome {
+	case clientToolCancelled:
+		return nil, ctx.Err()
+	case clientToolTimedOut:
+		if toolName == "uiAskUser" {
+			// uiAskUser blocks on a human; keep a plain timeout error rather
+			// than the browser-unreachable fast-fail message.
+			return nil, fmt.Errorf("client tool %q timed out after %v (no user response)", toolName, elapsed.Round(time.Millisecond))
+		}
+		// Browser gone / unreachable: fail fast with the typed, user-legible
+		// error so the voice model tells the user instead of speaking a bare
+		// "it timed out" (#1834).
+		return nil, clientToolUnreachableError(toolName, elapsed)
+	}
+	if result == nil {
+		return nil, fmt.Errorf("client tool %q relay closed without a result", toolName)
+	}
+	if result.GetIsError() {
+		errMsg := result.GetErrorMessage()
+		if errMsg == "" {
+			errMsg = "client tool execution failed in the browser"
+		}
+		return nil, fmt.Errorf("%s", errMsg)
+	}
+	return result.GetContent(), nil
 }
 
 // escapeGraphJSONString renders a Go string as a safely-quoted JSON string
