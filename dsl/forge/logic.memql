@@ -28,6 +28,38 @@
 
 use forge.mutations.{ mutationAdvanceRequest, mutationRecordRequestEvent }
 
+// ---------------------------------------------------------------------------
+// logicRecordTransition -- append one requestEvent per post-creation pipeline
+// transition. Called by the recordTransition node.updated automation.
+//
+// Status → kind mapping (the canonical pipeline edges after routing):
+//   needs_approval      -> "validated"          (developer validated the request)
+//   queued              -> "approved"            (owner approved; ready to implement)
+//   changes_requested   -> "changes_requested"   (reviewer sent it back)
+//   rejected            -> "rejected"            (terminal rejection)
+//
+// Status values NOT handled here (handled elsewhere or terminal with no event):
+//   submitted           -> initial insert; 'routed' is recorded by routeRequest
+//   needs_validation    -> the routeRequest automation records 'routed' already
+//   validated           -> intermediate state set by mutationValidateRequest
+//                         before the approval hop; no standalone event kind;
+//                         mapped via the needs_approval transition above
+//
+// Loop guard (two layers):
+//   1. This automation writes v1:forge:requestEvent (a DIFFERENT concept),
+//      so mutationRecordRequestEvent never fires graph.node.updated on the
+//      v1:forge:request concept -- the trigger cannot re-fire.
+//   2. The status whitelist below means an update that changes only a non-status
+//      field (e.g. priority bump) is caught by the empty-kind guard and returns
+//      early with no write. The `if kind != "" { ... }` guard is the single
+//      re-entry / double-record fence.
+//
+// Prior-status availability: the engine publishes graph.node.updated with
+// `event.oldStatus` set to the prior row's `status` field (#1158 / executor_mutation.go).
+// `args.event.oldStatus` is therefore the fromStatus for the transition;
+// `args.event.payload.status` is the toStatus (the new status after the update).
+// ---------------------------------------------------------------------------
+
 @enabled
 @description("Route a newly-submitted v1:forge:request to its next pipeline state by submitter role (owner -> queued; developer -> needs_approval; non-developer -> needs_validation). Records a 'routed' audit event.")
 logic logicRouteRequest {
@@ -46,5 +78,53 @@ logic logicRouteRequest {
     }
     recordRouted := mutationRecordRequestEvent({ requestId: args.event.payload.id, kind: "routed", fromStatus: "submitted", note: "routed by submitter role" })
     return args.event.payload.id
+  }
+}
+
+@enabled
+@description("On v1:forge:request node.updated: append exactly one v1:forge:requestEvent for the four post-creation pipeline transitions (validated / approved / changes_requested / rejected). Each guard is mutually exclusive; at most one fires per invocation. Returns early (no write) for unrecognised statuses.")
+logic logicRecordTransition {
+  args {
+    event  object  @required
+  }
+  body {
+    toStatus   := coalesce(args.event.payload.status, "")
+    fromStatus := coalesce(args.event.oldStatus, "")
+    requestId  := coalesce(args.event.payload.id, "")
+
+    // Four mutually exclusive guards -- exactly one fires on a recognised
+    // status; the rest are no-ops (condition evaluates false, step skipped).
+    // MemQL logic bodies use := for every declaration; bodies inside `if`
+    // blocks must be function calls (not string literals), so each mapped
+    // status gets its own mutationRecordRequestEvent call.
+    //
+    // Mapping (toStatus -> kind):
+    //   needs_approval    -> "validated"          (developer validated the request)
+    //   queued            -> "approved"           (owner approved; ready to implement)
+    //   changes_requested -> "changes_requested"  (reviewer sent it back)
+    //   rejected          -> "rejected"           (terminal rejection)
+    //
+    // Statuses NOT mapped (handled elsewhere or no standalone event kind):
+    //   submitted / needs_validation -> routeRequest records "routed"
+    //   validated (intermediate)     -> no standalone kind; next hop is needs_approval
+    //
+    // Loop guard (two layers):
+    //   1. mutationRecordRequestEvent writes v1:forge:requestEvent (a DIFFERENT
+    //      concept), so it NEVER triggers graph.node.updated on v1:forge:request.
+    //   2. The per-status guards only fire on the four whitelisted values, so
+    //      updates that change only non-status fields are always silent.
+    evtValidated        := if toStatus == "needs_approval" {
+      mutationRecordRequestEvent({ requestId: requestId, kind: "validated",         fromStatus: fromStatus, toStatus: toStatus })
+    }
+    evtApproved         := if toStatus == "queued" {
+      mutationRecordRequestEvent({ requestId: requestId, kind: "approved",          fromStatus: fromStatus, toStatus: toStatus })
+    }
+    evtChangesRequested := if toStatus == "changes_requested" {
+      mutationRecordRequestEvent({ requestId: requestId, kind: "changes_requested", fromStatus: fromStatus, toStatus: toStatus })
+    }
+    evtRejected         := if toStatus == "rejected" {
+      mutationRecordRequestEvent({ requestId: requestId, kind: "rejected",          fromStatus: fromStatus, toStatus: toStatus })
+    }
+    return toStatus
   }
 }
