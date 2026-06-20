@@ -23,6 +23,7 @@
 @handler(type="function", name="mutationCreateProject")
 @executionTime("fast")
 @description("Register a project forge develops against (e.g. memql, copresent for a client). Pass a fresh unique projectId. Use this once per app/codebase; requests reference projectId.")
+@allowedRoles("owner", "admin", "developer", "writer")
 @mcp
 tool forgeRegisterProject {
   projectId    string  @required @description("Fresh unique id for the project, e.g. a UUID. The caller mints it so it can reference the row immediately.")
@@ -37,6 +38,7 @@ tool forgeRegisterProject {
 @handler(type="query", query="queryActiveProjects({})")
 @executionTime("fast")
 @description("List the active forge projects. Use this to resolve a projectId before submitting a request.")
+@allowedRoles("owner", "admin", "developer", "writer", "reader")
 @mcp
 tool forgeActiveProjects {}
 
@@ -46,6 +48,7 @@ tool forgeActiveProjects {}
 @handler(type="function", name="mutationCreateRequest")
 @executionTime("fast")
 @description("Submit a forge request (bug, feature, chore, question, or an HR action) for a project. submitterUserId + submitterRole are stamped server-side from the caller. status lands 'submitted' and is auto-routed by role (owner fast-tracks; a developer goes to approval; a non-developer goes to validation first). Pass a fresh unique requestId. MENTORING SEQUENCE (mandatory for non-owner submitters): after this tool returns successfully, check whether the submitter is NOT an owner. If so: (1) call the forgeMentoringExplanation prompt with the project slug, request type, title, and body to generate a short teaching explanation of the area they are touching; (2) show that explanation to the user as a friendly follow-on message; (3) immediately call forgeRecordMentoring to record a 'mentored' requestEvent on this request (pass the explanation as the note). Owner submissions skip the mentoring sequence entirely.")
+@allowedRoles("owner", "admin", "developer", "writer", "reader")
 @mcp
 tool forgeSubmitRequest {
   requestId  string  @required @description("Fresh unique id for the request, e.g. a UUID. The caller mints it so it can reference the row immediately.")
@@ -60,6 +63,7 @@ tool forgeSubmitRequest {
 @handler(type="query", query="queryMyRequests({})")
 @executionTime("fast")
 @description("List the caller's own submitted requests, newest first.")
+@allowedRoles("owner", "admin", "developer", "writer", "reader")
 @mcp
 tool forgeMyRequests {}
 
@@ -67,6 +71,7 @@ tool forgeMyRequests {}
 @handler(type="query", query="queryRequestById({requestId: \"$args.requestId\"})")
 @executionTime("fast")
 @description("Get a single forge request by id (full detail).")
+@allowedRoles("owner", "admin", "developer", "writer", "reader")
 @mcp
 tool forgeRequestById {
   requestId  string  @required @description("Id of the request to fetch.")
@@ -76,6 +81,7 @@ tool forgeRequestById {
 @handler(type="query", query="queryRequestEvents({requestId: \"$args.requestId\"})")
 @executionTime("fast")
 @description("Get the full lifecycle/audit trail for a request (submitted, routed, validated, approved, ...), newest first.")
+@allowedRoles("owner", "admin", "developer", "writer")
 @mcp
 tool forgeRequestHistory {
   requestId  string  @required @description("Id of the request whose history to fetch.")
@@ -87,6 +93,7 @@ tool forgeRequestHistory {
 @handler(type="query", query="queryValidationQueue({})")
 @executionTime("fast")
 @description("List requests awaiting first-line developer validation. Developer/owner only -- returns empty for others.")
+@allowedRoles("owner", "admin", "developer", "writer")
 @mcp
 tool forgeValidationQueue {}
 
@@ -94,6 +101,7 @@ tool forgeValidationQueue {}
 @handler(type="function", name="mutationValidateRequest")
 @executionTime("fast")
 @description("Validate a request (developer action): advances it to 'needs_approval' and stamps the validator from the caller. Validate from the validation queue.")
+@allowedRoles("owner", "admin", "developer", "writer")
 @mcp
 tool forgeValidateRequest {
   requestId  string  @required @description("Id of the request to validate.")
@@ -103,6 +111,7 @@ tool forgeValidateRequest {
 @handler(type="query", query="queryApprovalQueue({})")
 @executionTime("fast")
 @description("List validated requests awaiting owner approval. Owner only -- returns empty for others.")
+@allowedRoles("owner", "admin", "developer", "writer")
 @mcp
 tool forgeApprovalQueue {}
 
@@ -110,6 +119,7 @@ tool forgeApprovalQueue {}
 @handler(type="function", name="mutationApproveRequest")
 @executionTime("fast")
 @description("Approve a request (owner action): advances it to 'queued' (ready to implement; auto-execute/deploy lands when the actions substrate is wired) and stamps the approver from the caller.")
+@allowedRoles("owner", "admin", "developer", "writer")
 @mcp
 tool forgeApproveRequest {
   requestId  string  @required @description("Id of the request to approve.")
@@ -119,6 +129,7 @@ tool forgeApproveRequest {
 @handler(type="function", name="mutationRequestChanges")
 @executionTime("fast")
 @description("Send a request back for changes (developer/owner action) with a reason: sets status 'changes_requested'.")
+@allowedRoles("owner", "admin", "developer", "writer")
 @mcp
 tool forgeRequestChanges {
   requestId   string  @required @description("Id of the request to send back.")
@@ -131,6 +142,7 @@ tool forgeRequestChanges {
 @handler(type="function", name="mutationRecordRequestEvent")
 @executionTime("fast")
 @description("Record a 'mentored' requestEvent after Claude has delivered a teaching explanation to a non-owner submitter. Call this immediately after showing the mentoring explanation to the user. Pass the request id, kind='mentored', and the explanation text as the note. Owner submissions skip this tool -- only call it when the submitter role is NOT 'owner'.")
+@allowedRoles("owner", "admin", "developer", "writer", "reader")
 @mcp
 tool forgeRecordMentoring {
   eventId    string  @description("Fresh unique id for the event, e.g. a UUID. Optional -- the engine mints one if absent.")
@@ -144,6 +156,7 @@ tool forgeRecordMentoring {
 @handler(type="function", name="logicAttachToRequest")
 @executionTime("fast")
 @description("Attach ONE screenshot or file (a v1:common:attachment id) to an existing forge request. Callable repeatedly to accumulate multiple attachments. Internally fetches the current attachmentIds array, appends the new id, and writes the full updated array -- no clobbering of existing attachments. The v1:common:attachment must already exist (uploaded via the space attachments endpoint).")
+@allowedRoles("owner", "admin", "developer", "writer", "reader")
 @mcp
 tool forgeAttachToRequest {
   requestId     string  @required @description("Id of the v1:forge:request to attach to.")
