@@ -278,10 +278,23 @@ func (e *MemQLEngine) getLatestForgeRequestPayload(ctx context.Context, requestI
 		return nil, fmt.Errorf("memory engine database not configured")
 	}
 
+	// Forge tools (and the routeRequest automation) pass the BARE short id
+	// (e.g. "r-selftest-003"), but the engine stores rows under the canonical
+	// "{concept}:{shortId}" id ("v1:forge:request:r-selftest-003"). A bare-id
+	// lookup therefore misses the prior version on every UPDATE, so the guard
+	// wrongly took the no-prior branch and rejected every transition with
+	// "a new request must start in status submitted" -- wedging the whole	// approval pipeline (and the router's own update) at "submitted" (#1826).
+	// Match BOTH the canonical and the raw id so the prior version is found
+	// regardless of which form the caller passed.
+	canonicalID := requestID
+	if !strings.HasPrefix(requestID, conceptForgeRequest+":") {
+		canonicalID = conceptForgeRequest + ":" + requestID
+	}
+
 	var node memorynodes.MemoryNode
 	err := db.NewSelect().
 		Model(&node).
-		Where("id = ?", requestID).
+		Where("(id = ? OR id = ?)", canonicalID, requestID).
 		Where("concept = ?", conceptForgeRequest).
 		OrderExpr(`"createdAt" DESC`).
 		Limit(1).

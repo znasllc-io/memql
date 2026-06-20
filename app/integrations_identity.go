@@ -430,6 +430,20 @@ func (a *App) attemptAutoBootstrap(
 			"component", identity.ComponentName)
 		return
 	}
+	// Idempotency (memql#1829): only send the one-time claim email on the
+	// FIRST boot, when no clusterSettings row exists yet. On every subsequent
+	// restart a row is already present (bootstrap was initiated on an earlier
+	// boot; the claim email was already sent), so re-running this would spam
+	// the owner with a fresh "claim the cluster" email each time the identity
+	// pod restarts -- even though nothing was purged. The owner claims via the
+	// original email's magic link; a lost email is re-issued explicitly through
+	// the /setup form, NOT by an identity restart.
+	if existing, err := store.ReadClusterSettings(ctx); err == nil && existing != nil {
+		a.Logger.Info("identity auto-bootstrap skipped: clusterSettings already present (awaiting owner claim); not re-sending the claim email on restart",
+			"owner_email", cfg.Bootstrap.OwnerEmail,
+			"component", identity.ComponentName)
+		return
+	}
 	// System actor is required by the engine for any mutation. The
 	// identity service owns this row, so 'system:identity-svc' is
 	// the correct attribution -- same actor SystemActorMiddleware

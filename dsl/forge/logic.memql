@@ -146,9 +146,29 @@ logic logicAttachToRequest {
     attachmentId  string  @required
   }
   body {
-    existing    := queryRequestById({ requestId: args.requestId })
-    updatedIds  := append(existing.First().payload.attachmentIds, args.attachmentId)
-    attach      := mutationAttachToRequest({ requestId: args.requestId, attachmentIds: updatedIds })
+    existing := queryRequestById({ requestId: args.requestId })
+    attach   := mutationAttachToRequest({ requestId: args.requestId, attachmentIds: append(existing.First().payload.attachmentIds, args.attachmentId) })
     return args.requestId
+  }
+}
+
+// ---------------------------------------------------------------------------
+// logicRecordMentoring -- the forgeRecordMentoring tool handler. The tool
+// surface intentionally does NOT expose `kind` (it is always "mentored"), so
+// it cannot point straight at mutationRecordRequestEvent -- that mutation
+// requires `kind`, and a direct mapping left it unset, failing with
+// "required argument kind is missing" (#1827). This wrapper injects the
+// constant kind="mentored" and forwards the caller's id / requestId / note.
+// ---------------------------------------------------------------------------
+@enabled
+@description("Record a 'mentored' v1:forge:requestEvent after a non-owner submitter was taught about the area they touched. Injects kind='mentored' and forwards the note verbatim.")
+logic logicRecordMentoring {
+  args {
+    eventId    string
+    requestId  string  @required
+    note       string  @required
+  }
+  body {
+    return mutationRecordRequestEvent({ eventId: args.eventId, requestId: args.requestId, kind: "mentored", note: args.note })
   }
 }
