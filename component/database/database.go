@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -254,7 +255,25 @@ func defaultConfig() *config {
 			if err != nil {
 				return nil, err
 			}
-			connector := pgdriver.NewConnector(pgdriver.WithDSN(normalized))
+
+			// Per-connection session safety net (memql#1817). These SET
+			// commands run on EVERY backend pgdriver opens (incl. reconnects),
+			// so a session that gets wedged self-clears at the DB instead of
+			// pinning a connection slot until the process exits -- the missing
+			// "DB-side reaping" leg (epic #1778 child G), done in code so it
+			// holds identically in every environment.
+			opts := []pgdriver.Option{pgdriver.WithDSN(normalized)}
+			if params := sessionConnParams(); len(params) > 0 {
+				opts = append(opts, pgdriver.WithConnParams(params))
+			}
+			// Stamp application_name so pg_stat_activity attributes each
+			// backend to a node type -- turns a future 53300 triage from a
+			// guess into a GROUP BY.
+			if appName := dbApplicationName(); appName != "" {
+				opts = append(opts, pgdriver.WithApplicationName(appName))
+			}
+
+			connector := pgdriver.NewConnector(opts...)
 			cfg := connector.Config()
 
 			// Only configure TLS if sslmode is not explicitly disabled
@@ -295,10 +314,10 @@ func defaultConfig() *config {
 			// 25/node x ~20 pods at surge blew past the Tiger Cloud ceiling ->
 			// 53300 storms). Override per env via MAX_OPEN_CONNS / MAX_IDLE_CONNS;
 			// budget = (max_connections - reserved) / max_pods(steady+surge).
-			db.SetMaxOpenConns(10)                  // Max concurrent connections per node
-			db.SetMaxIdleConns(3)                   // Keep a few idle connections warm
-			db.SetConnMaxLifetime(1 * time.Hour)    // Rotate connections hourly
-			db.SetConnMaxIdleTime(10 * time.Minute) // Close idle connections after 10min
+			db.SetMaxOpenConns(10)                 // Max concurrent connections per node
+			db.SetMaxIdleConns(1)                  // Keep ONE idle connection warm (memql#1817)
+			db.SetConnMaxLifetime(1 * time.Hour)   // Rotate connections hourly
+			db.SetConnMaxIdleTime(2 * time.Minute) // Close idle connections after 2min (memql#1817)
 
 			return db, nil
 		},
@@ -1211,4 +1230,83 @@ const envDBTLSInsecureSkipVerify = "MEMQL_DB_TLS_INSECURE_SKIP_VERIFY"
 // Returns false (verify) unless the env var is literally "1".
 func dbTLSInsecureSkipVerifyOptIn() bool {
 	return strings.TrimSpace(os.Getenv(envDBTLSInsecureSkipVerify)) == "1"
+}
+
+// Per-connection session safety net (memql#1817). pgdriver applies these as
+// `SET <name> TO <value>` on every backend it opens, so they bound the
+// lifetime of a wedged or orphaned session at the DB instead of letting it
+// pin a connection slot until the process exits.
+const (
+	envDBIdleInTxTimeoutMs    = "MEMQL_DB_IDLE_IN_TX_TIMEOUT_MS"
+	envDBIdleSessionTimeoutMs = "MEMQL_DB_IDLE_SESSION_TIMEOUT_MS"
+	envDBAppName              = "MEMQL_DB_APP_NAME"
+
+	// 60s: reap a session left idle mid-transaction (a pod that died after
+	// BEGIN). Safe default -- healthy code never sits idle-in-transaction.
+	defaultIdleInTxTimeoutMs = 60000
+	// 5min: reap ANY idle session, which clears orphaned backends left by an
+	// ungracefully-killed pod (the "no self-recovery" mechanism in #1817).
+	// Safe as a default because it is ABOVE the client-side idle reaping
+	// (ConnMaxIdleTime 2min, MaxIdleConns 1), so a LIVE pod always closes its
+	// own idle pool connection first -- the server timeout only bites a
+	// connection the client can no longer close (i.e. a dead pod's orphan).
+	// Long-lived holders stay busy (cron leader polls every 10s), so they are
+	// never idle long enough to trip it. Set to 0 to disable.
+	defaultIdleSessionTimeoutMs = 300000
+)
+
+// sessionConnParams builds the per-connection SET parameters applied to every
+// backend (memql#1817). A value of 0 (or unset, for the off-by-default knob)
+// omits the parameter so the server default stands.
+func sessionConnParams() map[string]any {
+	params := map[string]any{}
+
+	if ms := envIntDefault(envDBIdleInTxTimeoutMs, defaultIdleInTxTimeoutMs); ms > 0 {
+		params["idle_in_transaction_session_timeout"] = strconv.Itoa(ms)
+	}
+	if ms := envIntDefault(envDBIdleSessionTimeoutMs, defaultIdleSessionTimeoutMs); ms > 0 {
+		params["idle_session_timeout"] = strconv.Itoa(ms)
+	}
+
+	return params
+}
+
+// dbApplicationName derives the Postgres application_name so pg_stat_activity
+// attributes each backend to a node type (memql#1817 -- turns a 53300 triage
+// from a guess into a GROUP BY). Override with MEMQL_DB_APP_NAME.
+func dbApplicationName() string {
+	if v := strings.TrimSpace(os.Getenv(envDBAppName)); v != "" {
+		return v
+	}
+
+	nodeType := strings.TrimSpace(os.Getenv("MEMQL_NODE_TYPE"))
+	host, _ := os.Hostname()
+	host = strings.TrimSpace(host)
+
+	switch {
+	case nodeType != "" && host != "":
+		return "memql-" + nodeType + "/" + host
+	case nodeType != "":
+		return "memql-" + nodeType
+	case host != "":
+		return "memql/" + host
+	default:
+		return "memql"
+	}
+}
+
+// envIntDefault reads an integer env var, returning def when unset, blank, or
+// unparseable.
+func envIntDefault(key string, def int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return def
+	}
+
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return def
+	}
+
+	return n
 }
