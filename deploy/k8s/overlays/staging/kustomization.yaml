@@ -32,24 +32,24 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:de11d5410fd21e163f4cc1ebca212b2287e7d575012616b0e6b86801f518ccb0
+    digest: sha256:38276967f50eca348d392b2d1de402db11e1b90a6b15705785d2322c9e5a3fc8
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:eafea4cc5c6816617a21b681b5a75dadf95dea9ade5d92dfcab8396e2da210d8
+    digest: sha256:50a3f5c40d695f1fea17bab69cf96549b74390e1a31afbeb756a68d6c1124e19
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:d2dde14154b2b5f6f01b256c8203bae690ad20506de8931b1fc8686f2bbc3ec8
+    digest: sha256:5484955704f9377656f41cb20e14ac4d24d9756c6d5ce60f43e9c2f629c3664b
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:1d2a747a1ca86c020e6e8ce7f123c399140689bb86733747346481267f5009b3
+    digest: sha256:40efcf91f6b0d0e5abe83201278de5f840e11ecd5e831499f2a63c309245f92d
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:2d15b933e526010726ac5c614ab02ca62500002b61d1925a06413fb9f89e5e59
+    digest: sha256:65171dfe7417322498f04c20819f958319b3a7e781b2dfa716f7ca7af2105eb5
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:d9de2afe9459e3677b0da73c743920d187119b5479b8747d803d80051dc4135c
+    digest: sha256:384e4cbeb80bf790a45f8c6bd5a953380d8e3e3c4705fbac3bee85826755fc5c
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:6a6d3bf16bd49dcd94ebe3d0661a3c096fa7ae6df708a699234ed904f39a38e6
+    digest: sha256:f30a19942e1687e338fbb7d35a8b6bb43848b43c935a4a05679e9e60959b1958
   # memql-mcp (epic memql#1550): remote MCP node, engine-built on the GitHub
   # build server (#1581 wired it into build-engine-images + the release tooling).
   # 0.9.75: rebuilt from main 639e6bc alongside the rest of the full-stack wave.
   - name: acrmemql.azurecr.io/memql-mcp
-    digest: sha256:79d8e4d893a0f6f2a837f9ac96456b71fae1d808caeca7d9548996702d3cc463
+    digest: sha256:8ecb12f9c59598d287982b1a1ffe9f5274004b7d5afe0aa482e6390422d98e88
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:75e566e71e30d0b35c6c6708dda34a37ab9f2a74ec575f18c0787beffc949bf2
   - name: livekit/livekit-server
