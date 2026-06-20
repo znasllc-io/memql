@@ -635,6 +635,40 @@ func LogicPurgeExpiredSafetyClassificationsBuild(args LogicPurgeExpiredSafetyCla
 	return b.String()
 }
 
+// LogicRecordMentoring -- Record a 'mentored' v1:forge:requestEvent after a non-owner submitter was taught about the area they touched. Injects kind='mentored' and forwards the note verbatim.
+type LogicRecordMentoringArgs struct {
+	EventId   string
+	RequestId string
+	Note      string
+}
+
+// LogicRecordMentoring calls the engine logic logicRecordMentoring.
+func (qc *QueryClient) LogicRecordMentoring(ctx context.Context, args LogicRecordMentoringArgs) (*Result, error) {
+	call := LogicRecordMentoringBuild(args)
+	return qc.executeNamed(ctx, "logicRecordMentoring", call)
+}
+
+func LogicRecordMentoringBuild(args LogicRecordMentoringArgs) string {
+	var b strings.Builder
+	b.WriteString("logicRecordMentoring({")
+	if args.EventId != "" {
+		b.WriteString("eventId: ")
+		b.WriteString(fmt.Sprintf("%q", args.EventId))
+	}
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
+	b.WriteString("note: ")
+	b.WriteString(fmt.Sprintf("%q", args.Note))
+	b.WriteString("})")
+	return b.String()
+}
+
 // LogicRecordTransition -- On v1:forge:request node.updated: append exactly one v1:forge:requestEvent for the four post-creation pipeline transitions (validated / approved / changes_requested / rejected). Each guard is mutually exclusive; at most one fires per invocation. Returns early (no write) for unrecognised statuses.
 type LogicRecordTransitionArgs struct {
 	Event map[string]any
