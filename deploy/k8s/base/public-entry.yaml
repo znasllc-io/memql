@@ -119,6 +119,20 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    # Sticky sessions for the MCP head: an Mcp-Session-Id maps to an in-process
+    # *mcp.Server on ONE pod, so every follow-up /mcp request (POST calls + the
+    # GET SSE channel) must return to the pod that created the session. nginx
+    # cookie affinity sets `mcp_route` on the first response and routes by it
+    # thereafter -> HA across >1 mcp replica without 404-on-wrong-pod.
+    # SameSite=None; Secure so the cross-origin remote connector echoes it back.
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/affinity-mode: "persistent"
+    nginx.ingress.kubernetes.io/session-cookie-name: "mcp_route"
+    nginx.ingress.kubernetes.io/session-cookie-path: "/"
+    nginx.ingress.kubernetes.io/session-cookie-samesite: "None"
+    nginx.ingress.kubernetes.io/session-cookie-secure: "true"
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "3600"
+    nginx.ingress.kubernetes.io/session-cookie-change-on-failure: "true"
 spec:
   ingressClassName: nginx
   tls:

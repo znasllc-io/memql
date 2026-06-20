@@ -17,11 +17,14 @@
 # -- the named tool surface + session-scoped `define`. `define`/`promote` and
 # inline DSL stay gated by the caller's role (Gate B) on top of the tier.
 #
-# SINGLE REPLICA (deliberate): an MCP session (Mcp-Session-Id) maps to an
-# in-process *mcp.Server on ONE pod. With >1 replica + round-robin ingress a
-# follow-up request can land on a pod that never saw the session -> 404. HA
-# needs sticky sessions (ingress session-affinity on Mcp-Session-Id) -- a
-# tracked follow-up, not the first cut. Until then: replicas: 1.
+# HA (2 replicas) WITH STICKY SESSIONS: an MCP session (Mcp-Session-Id) maps to
+# an in-process *mcp.Server on ONE pod, so a follow-up request MUST return to
+# the pod that created the session. The public-entry ingress (staging-mcp) pins
+# this with nginx cookie session-affinity (affinity: cookie, cookie `mcp_route`,
+# SameSite=None; Secure so the cross-origin connector echoes it): the first /mcp
+# response sets the route cookie for the serving pod, and every subsequent
+# request (POST calls + the GET SSE channel) carries it back to that pod. With
+# stickiness in place we run >1 replica for availability.
 #
 # TLS: the public-entry ingress (mcp.staging.copresent.ai) terminates TLS and
 # forwards plain HTTP to :8090, so this node serves the head over plain HTTP
@@ -41,7 +44,7 @@ metadata:
     app.kubernetes.io/part-of: memql
     memql/node-type: mcp
 spec:
-  replicas: 1
+  replicas: 2
   strategy:
     type: RollingUpdate
     rollingUpdate:
