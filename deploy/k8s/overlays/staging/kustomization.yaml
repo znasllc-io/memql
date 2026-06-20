@@ -32,7 +32,7 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:38276967f50eca348d392b2d1de402db11e1b90a6b15705785d2322c9e5a3fc8
+    digest: sha256:f46e2782e3bb01ca68763a32afde164a4ff7c75047256ea8b3f2ff2d7d4c4d25
   - name: acrmemql.azurecr.io/memql-bff-copresent
     digest: sha256:50a3f5c40d695f1fea17bab69cf96549b74390e1a31afbeb756a68d6c1124e19
   - name: acrmemql.azurecr.io/memql-cognition
