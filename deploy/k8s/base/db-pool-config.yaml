@@ -1,0 +1,60 @@
+# Shared Postgres connection-pool bounds for every DB-connecting node
+# (znasllc-io/memql#1858).
+#
+# WHY THIS EXISTS
+# Every staging deploy tripped a Postgres connection-exhaustion storm
+# (SQLSTATE=53300 -- "remaining connection slots are reserved for roles with
+# privileges of the pg_use_reserved_connections role"). Root cause: the
+# per-pod database/sql pool was never bounded by env, so each node fell back
+# to the engine's conservative-but-still-too-high default and -- multiplied by
+# the steady mesh fleet PLUS the rollout surge -- the transient connection
+# count blew past Tiger Cloud staging's small max_connections ceiling.
+#
+# These keys carry the MEMORY_NODES_DATABASE_ prefix because the memory-nodes
+# database reads its pool config through that env prefix
+# (component/database/memory-nodes/database.go: memoryNodesDatabaseEnvPrefix);
+# the bare MAX_OPEN_CONNS / MAX_IDLE_CONNS names are NOT read.
+#
+# CONNECTION BUDGET (measured on Tiger Cloud staging xahn9ru4v6, 2026-06-20)
+#   max_connections                 = 105
+#   superuser_reserved_connections  =  12
+#   reserved_connections            =   5   (the pg_use_reserved_connections
+#                                            pool named in the 53300 error)
+#   reserved total                  =  17
+#   non-mesh overhead (observed)    ~  29   (a leaked `deployer` pool holding
+#                                            21 idle conns + ~3 exporters +
+#                                            ~5 admin/psql headroom)
+#   => usable for the mesh          ~  59
+#
+#   DB-connecting node types (8): identity, bff, cognition, voice, agent,
+#   planner, workbench, mcp -- each replicas=2 => 16 steady DB pods. With the
+#   rollout surge bounded to 0 (see the maxSurge:0 strategy patch on those
+#   Deployments) worst-case pods during a roll stays at ~16 instead of ~24.
+#   One memory-nodes pool per pod.
+#
+#   With MAX_OPEN_CONNS=4 / MAX_IDLE_CONNS=2:
+#     realistic deploy draw (16 pods idle-holding 2, ~1/3 bursting to 4) ~= 42
+#       -> ~17 headroom under the 59 usable slots, EVEN WITH the deployer leak.
+#     absolute worst (all 16 saturate to 4)                             =  64
+#       -> clears 59 once the separate `deployer` leak (out of scope here) is
+#          reaped; never reached in practice at idle=2.
+#
+# Idle is held at 2 (not 0/1) so a steadily-busy node keeps a small warm pool
+# without round-tripping a fresh TCP+TLS connect per query, while idle nodes
+# release back toward 2 rather than pinning 10. Lifetime/idle-time rotation
+# (ConnMaxLifetime 1h, ConnMaxIdleTime 2min) is set in the engine default and
+# is unchanged here.
+#
+# Per-env override: copy this ConfigMap into an overlay (or patch the values)
+# if prod's instance has a larger max_connections.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memql-db-pool
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: memql-db-pool
+    app.kubernetes.io/part-of: memql
+data:
+  MEMORY_NODES_DATABASE_MAX_OPEN_CONNS: "4"
+  MEMORY_NODES_DATABASE_MAX_IDLE_CONNS: "2"

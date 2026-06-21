@@ -28,6 +28,15 @@ metadata:
     memql/node-type: identity
 spec:
   replicas: 2
+  # Bound the roll so identity doesn't surge a 3rd pod (its DB pool) onto the
+  # connection budget (memql#1858). Default RollingUpdate is 25%/25% (= surge 1
+  # at 2 replicas); pin to drain-before-start. identity stays available because
+  # the other replica keeps serving JWKS while one rolls.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: identity
@@ -66,6 +75,10 @@ spec:
           envFrom:
             - secretRef:
                 name: memql-secrets
+            # Bounded Postgres pool (MAX_OPEN_CONNS/MAX_IDLE_CONNS) so the
+            # mesh stays under max_connections during a rollout (memql#1858).
+            - configMapRef:
+                name: memql-db-pool
           env:
             - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
             - { name: SERVICE_NAME, value: "memQL" }
