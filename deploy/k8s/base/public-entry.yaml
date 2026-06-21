@@ -7,6 +7,7 @@
 #   app.staging.copresent.ai       -> copresent SPA (+ same-origin proxy to BFF/identity)
 #   identity.staging.copresent.ai  -> identity service (login UI, /setup, /admin)
 #   mcp.staging.copresent.ai       -> mcp node (remote MCP head, /mcp; memql#1550)
+#   bff.staging.copresent.ai       -> bff raw gRPC (native clients, e.g. memql-cockpit)
 # All A records point at the ingress controller's static public IP.
 ---
 apiVersion: cert-manager.io/v1
@@ -143,3 +144,36 @@ spec:
       http:
         paths:
           - { path: /, pathType: Prefix, backend: { service: { name: mcp, port: { number: 8090 } } } }
+---
+# bff.staging.copresent.ai -> bff RAW gRPC (MemqlService.Stream) for native
+# clients like memql-cockpit. Browsers use the WS bridge at app../memql; native
+# gRPC clients have no front door otherwise (the bff's :50051 is internal-only),
+# which left the cockpit stuck "connecting" against the non-existent host.
+# nginx terminates TLS (cert-manager) and forwards h2c gRPC to bff-active:50051 --
+# the SAME active-color target /memql uses, so native + browser logins land on
+# the same color. Mirrors bff.local.znas.io locally (env-agnostic). memql#1854.
+#
+# Needs a DNS record: bff.staging.copresent.ai A 57.162.162.149 (GoDaddy; or a
+# CNAME to app.staging.copresent.ai). cert-manager issues the cert once it
+# resolves -- the HTTP-01 solver uses its own ingress, so the GRPC backend
+# annotation here doesn't interfere with the ACME challenge.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: staging-bff-grpc
+  namespace: memql
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [bff.staging.copresent.ai]
+      secretName: bff-staging-copresent-tls
+  rules:
+    - host: bff.staging.copresent.ai
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: bff-active, port: { number: 50051 } } } }
