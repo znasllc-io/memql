@@ -425,25 +425,62 @@ func (a *App) attemptAutoBootstrap(
 	if !cfg.Bootstrap.HasAllRequired() {
 		return
 	}
-	if store.IsClusterBootstrapped(ctx) {
-		a.Logger.Info("identity auto-bootstrap skipped: cluster already bootstrapped",
-			"component", identity.ComponentName)
-		return
-	}
-	// Idempotency (memql#1829): only send the one-time claim email on the
-	// FIRST boot, when no clusterSettings row exists yet. On every subsequent
-	// restart a row is already present (bootstrap was initiated on an earlier
-	// boot; the claim email was already sent), so re-running this would spam
-	// the owner with a fresh "claim the cluster" email each time the identity
-	// pod restarts -- even though nothing was purged. The owner claims via the
-	// original email's magic link; a lost email is re-issued explicitly through
-	// the /setup form, NOT by an identity restart.
-	if existing, err := store.ReadClusterSettings(ctx); err == nil && existing != nil {
-		a.Logger.Info("identity auto-bootstrap skipped: clusterSettings already present (awaiting owner claim); not re-sending the claim email on restart",
+
+	// Decide what to do from the cluster's CLAIMED state, not from
+	// bootstrappedAt alone (memql#1864). EvaluateAutoBootstrap gates the
+	// one-time claim email on "was the cluster ever claimed" — an
+	// existing owner user is definitional proof it was, even when the
+	// bootstrappedAt stamp went missing. Crucially it is FAIL-SAFE: a
+	// non-nil error means a boot-time DB read failed (e.g. during the
+	// #1858 53300 storm) and we CANNOT determine state, so we must NOT
+	// send the email. Bounded retry first; on persistent error, log +
+	// return without emailing. Never fall through to send on error.
+	action, err := a.evaluateAutoBootstrapWithRetry(ctx, store)
+	if err != nil {
+		a.Logger.Warn("identity auto-bootstrap skipped: could not determine cluster claim state (DB read error); NOT sending the claim email (fail-safe)",
+			"error", err,
 			"owner_email", cfg.Bootstrap.OwnerEmail,
 			"component", identity.ComponentName)
 		return
 	}
+	switch action {
+	case identity.BootstrapActionSkip:
+		a.Logger.Info("identity auto-bootstrap skipped: cluster already bootstrapped",
+			"component", identity.ComponentName)
+		return
+	case identity.BootstrapActionSelfHeal:
+		// An owner user exists but bootstrappedAt was never stamped (the
+		// verifier's stamp write was swallowed on a prior boot, memql#1864).
+		// The cluster IS claimed — reconcile the stamp so /setup 404s and
+		// IsClusterBootstrapped reports true, and do NOT email. Stamp under
+		// the system actor (mutation requires one).
+		stampCtx := identity.ContextWithSystemActor(ctx)
+		if stampErr := store.StampClusterBootstrapped(stampCtx); stampErr != nil {
+			a.Logger.Warn("identity auto-bootstrap: self-heal stamp failed; will retry on next boot; NOT sending the claim email (owner already exists)",
+				"error", stampErr,
+				"owner_email", cfg.Bootstrap.OwnerEmail,
+				"component", identity.ComponentName)
+			return
+		}
+		a.Logger.Info("identity auto-bootstrap: self-healed missing bootstrappedAt stamp (owner already exists); claim email suppressed",
+			"owner_email", cfg.Bootstrap.OwnerEmail,
+			"component", identity.ComponentName)
+		return
+	case identity.BootstrapActionSuppress:
+		// Idempotency (memql#1829): clusterSettings row already present but
+		// no owner yet. The claim email was already sent on the boot that
+		// created the row; re-running would spam the owner on every restart.
+		// The owner claims via the original email's magic link; a lost email
+		// is re-issued explicitly through /setup, NOT by an identity restart.
+		a.Logger.Info("identity auto-bootstrap skipped: clusterSettings already present (awaiting owner claim); not re-sending the claim email on restart",
+			"owner_email", cfg.Bootstrap.OwnerEmail,
+			"component", identity.ComponentName)
+		return
+	case identity.BootstrapActionSend:
+		// Truly fresh cluster (no stamp, no owner, no row, reads succeeded).
+		// Fall through to persist the row + send exactly one claim email.
+	}
+
 	// System actor is required by the engine for any mutation. The
 	// identity service owns this row, so 'system:identity-svc' is
 	// the correct attribution -- same actor SystemActorMiddleware
@@ -500,6 +537,48 @@ func (a *App) attemptAutoBootstrap(
 		"owner_email", cfg.Bootstrap.OwnerEmail,
 		"domain", cfg.Bootstrap.Domain,
 		"component", identity.ComponentName)
+}
+
+// autoBootstrapReadRetries bounds how many times the claim-email guard
+// re-reads cluster state before giving up. The #1858 53300 connection
+// storm is transient (seconds), so a couple of short retries usually
+// rides through it and lets the guard make a definitive decision
+// instead of failing safe (which is correct but leaves the owner
+// un-emailed on a genuinely fresh cluster).
+const autoBootstrapReadRetries = 3
+
+// autoBootstrapRetryDelay is the gap between guard read retries.
+var autoBootstrapRetryDelay = 500 * time.Millisecond
+
+// evaluateAutoBootstrapWithRetry runs EvaluateAutoBootstrap, retrying
+// on a read error up to autoBootstrapReadRetries times. A retried error
+// is almost always the transient DB storm (#1858); a definitive
+// decision (any action, nil error) returns immediately. If every
+// attempt errors, the final error propagates so the caller fails safe
+// and does NOT send the claim email.
+func (a *App) evaluateAutoBootstrapWithRetry(
+	ctx context.Context,
+	store identity.BootstrapGuardStore,
+) (identity.BootstrapAction, error) {
+	var action identity.BootstrapAction
+	var err error
+	for attempt := 0; attempt < autoBootstrapReadRetries; attempt++ {
+		action, err = identity.EvaluateAutoBootstrap(ctx, store)
+		if err == nil {
+			return action, nil
+		}
+		if attempt < autoBootstrapReadRetries-1 {
+			a.Logger.Warn("identity auto-bootstrap: cluster-state read failed; retrying before fail-safe",
+				"error", err, "attempt", attempt+1,
+				"component", identity.ComponentName)
+			select {
+			case <-ctx.Done():
+				return identity.BootstrapActionSkip, ctx.Err()
+			case <-time.After(autoBootstrapRetryDelay):
+			}
+		}
+	}
+	return identity.BootstrapActionSkip, err
 }
 
 // transportIdentity mounts the identity service's HTTP routes on

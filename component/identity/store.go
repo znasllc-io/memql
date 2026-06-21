@@ -41,19 +41,19 @@ type MagicLinkRow struct {
 
 // AuthCodeRow projects a v1:identity:authCode row.
 type AuthCodeRow struct {
-	ID                 string
-	CodeHash           string
-	ClientId           string
-	RedirectURI        string
-	State              string
+	ID                  string
+	CodeHash            string
+	ClientId            string
+	RedirectURI         string
+	State               string
 	CodeChallenge       string
 	CodeChallengeMethod string
-	UserId             string
-	IdentityId         string
-	MagicLinkRequestId string
-	ExpiresAt          time.Time
-	ConsumedAt         time.Time // zero = not consumed
-	CreatedAt          time.Time
+	UserId              string
+	IdentityId          string
+	MagicLinkRequestId  string
+	ExpiresAt           time.Time
+	ConsumedAt          time.Time // zero = not consumed
+	CreatedAt           time.Time
 }
 
 // OAuthClientRow projects a v1:identity:oauthClient row -- a public
@@ -273,19 +273,19 @@ func (s *Store) LookupAuthCodeByCodeHash(ctx context.Context, codeHash string) (
 	}
 	g := newFieldGetter(node)
 	return &AuthCodeRow{
-		ID:                 firstNonEmpty(g.str("id"), node.GetId()),
-		CodeHash:           g.str("codeHash"),
-		ClientId:           g.str("clientId"),
-		RedirectURI:        g.str("redirectURI"),
-		State:              g.str("state"),
+		ID:                  firstNonEmpty(g.str("id"), node.GetId()),
+		CodeHash:            g.str("codeHash"),
+		ClientId:            g.str("clientId"),
+		RedirectURI:         g.str("redirectURI"),
+		State:               g.str("state"),
 		CodeChallenge:       g.str("codeChallenge"),
 		CodeChallengeMethod: g.str("codeChallengeMethod"),
-		UserId:             g.str("userId"),
-		IdentityId:         g.str("identityId"),
-		MagicLinkRequestId: g.str("magicLinkRequestId"),
-		ExpiresAt:          g.time("expiresAt"),
-		ConsumedAt:         g.time("consumedAt"),
-		CreatedAt:          g.time("createdAt"),
+		UserId:              g.str("userId"),
+		IdentityId:          g.str("identityId"),
+		MagicLinkRequestId:  g.str("magicLinkRequestId"),
+		ExpiresAt:           g.time("expiresAt"),
+		ConsumedAt:          g.time("consumedAt"),
+		CreatedAt:           g.time("createdAt"),
 	}, nil
 }
 
@@ -711,18 +711,18 @@ func (s *Store) StampNodeTokenBootstrap(
 // "(bootstrapped)" in the Minted-by column when MintedBy starts with
 // "system:".
 type NodeTokenRow struct {
-	ID                string
-	UserId            string
-	NodeId            string
-	NodeType          string
-	KeyHash           string
-	MintedBy          string
-	ExpiresAt         string
-	LastConnectAt     string
-	BootstrappedAt    string
-	BootstrappedFrom  string
-	Active            bool
-	CreatedAt         time.Time
+	ID               string
+	UserId           string
+	NodeId           string
+	NodeType         string
+	KeyHash          string
+	MintedBy         string
+	ExpiresAt        string
+	LastConnectAt    string
+	BootstrappedAt   string
+	BootstrappedFrom string
+	Active           bool
+	CreatedAt        time.Time
 }
 
 // ListNodeTokenIdentities returns every node_token identity row in
@@ -1023,20 +1023,62 @@ func (s *Store) CountActiveUsers(ctx context.Context) (int, error) {
 //
 // On error (engine down, query failure), returns false — fail-closed.
 // The wizard remains accessible so the operator can recover.
+//
+// CAUTION: this collapses "definitely not bootstrapped" and "couldn't
+// determine (DB error)" into the same false. That is correct for the
+// /login gate (fail-closed) but DANGEROUS for the claim-email guard,
+// which must NOT treat an error as "unclaimed" or it re-spams the
+// owner on every transient DB hiccup (memql#1864). Callers that need
+// to distinguish the two must use IsClusterBootstrappedE.
 func (s *Store) IsClusterBootstrapped(ctx context.Context) bool {
-	nodes, err := s.executeAndExtract(ctx, `queryClusterSettingsCurrent({})`)
-	if err != nil || len(nodes) == 0 || nodes[0] == nil || nodes[0].Payload == nil {
+	ok, err := s.IsClusterBootstrappedE(ctx)
+	if err != nil {
 		return false
+	}
+	return ok
+}
+
+// IsClusterBootstrappedE is the error-returning form of
+// IsClusterBootstrapped. It returns (true, nil) when bootstrappedAt is
+// set, (false, nil) when the row is absent or the field is empty, and
+// (false, err) when the underlying query fails. The claim-email guard
+// (memql#1864) uses this so a transient DB error at boot is treated as
+// "unknown -> do not send" rather than "unclaimed -> send".
+func (s *Store) IsClusterBootstrappedE(ctx context.Context) (bool, error) {
+	nodes, err := s.executeAndExtract(ctx, `queryClusterSettingsCurrent({})`)
+	if err != nil {
+		return false, fmt.Errorf("identity.store: is cluster bootstrapped: %w", err)
+	}
+	if len(nodes) == 0 || nodes[0] == nil || nodes[0].Payload == nil {
+		return false, nil
 	}
 	fields := nodes[0].Payload.GetFields()
 	if fields == nil {
-		return false
+		return false, nil
 	}
 	v, ok := fields["bootstrappedAt"]
 	if !ok || v == nil {
-		return false
+		return false, nil
 	}
-	return strings.TrimSpace(v.GetStringValue()) != ""
+	return strings.TrimSpace(v.GetStringValue()) != "", nil
+}
+
+// HasOwnerUser reports whether at least one active user with the
+// cluster-owner role exists. An existing owner is definitional proof
+// the cluster was claimed (the only sanctioned path that mints an
+// owner is the wizard / auto-bootstrap magic-link consume), so the
+// claim email must NEVER auto-send once this is true — regardless of
+// whether the bootstrappedAt stamp landed (memql#1864).
+//
+// Error-returning by design: a DB failure must surface as "unknown",
+// not be silently swallowed into "no owner", so the caller can
+// fail-safe (do not send) rather than re-spam the owner.
+func (s *Store) HasOwnerUser(ctx context.Context) (bool, error) {
+	nodes, err := s.executeAndExtract(ctx, `queryActiveUsers({role: "owner"})`)
+	if err != nil {
+		return false, fmt.Errorf("identity.store: has owner user: %w", err)
+	}
+	return len(nodes) > 0, nil
 }
 
 // Internal helpers
