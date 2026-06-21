@@ -46,6 +46,7 @@ logic logicBootstrapCluster {
       name:               "development",
       environment:        "development",
       region:             "local",
+      provider:           coalesce(args.event.payload.provider, ""),
       args.event.payload.node.version
     })
   }

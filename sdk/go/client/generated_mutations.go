@@ -2486,6 +2486,7 @@ type MutationCreateClusterArgs struct {
 	DatabaseId         string
 	IdentityProviderId string
 	Version            string
+	Provider           string
 }
 
 // MutationCreateCluster calls the engine mutation mutationCreateCluster.
@@ -2538,6 +2539,13 @@ func MutationCreateClusterBuild(args MutationCreateClusterArgs) string {
 		}
 		b.WriteString("version: ")
 		b.WriteString(fmt.Sprintf("%q", args.Version))
+	}
+	if args.Provider != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("provider: ")
+		b.WriteString(fmt.Sprintf("%q", args.Provider))
 	}
 	b.WriteString("})")
 	return b.String()
@@ -2919,6 +2927,118 @@ func MutationCreateDelegationBuild(args MutationCreateDelegationArgs) string {
 		}
 		b.WriteString("note: ")
 		b.WriteString(fmt.Sprintf("%q", args.Note))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationCreateDeployment -- Create a v1:cluster:deployment record at deploy start (status defaults to pending). Uses deploymentId as the concept id so status transitions append to one timeline. #1872.
+//
+// Bound concept: deployment.
+type MutationCreateDeploymentArgs struct {
+	DeploymentId string
+	// Enum: pending | in_progress | succeeded | failed | superseded | rolled_back
+	Status      string
+	Version     string
+	ImageDigest string
+	Provider    string
+	// Enum: development | staging | production
+	Environment          string
+	Region               string
+	ClusterId            string
+	TriggeredBy          string
+	Notes                string
+	Changelog            string
+	PreviousDeploymentId string
+}
+
+// MutationCreateDeployment calls the engine mutation mutationCreateDeployment.
+func (qc *QueryClient) MutationCreateDeployment(ctx context.Context, args MutationCreateDeploymentArgs) (*Result, error) {
+	call := MutationCreateDeploymentBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateDeployment", call)
+}
+
+func MutationCreateDeploymentBuild(args MutationCreateDeploymentArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateDeployment({")
+	b.WriteString("deploymentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
+	if args.Status != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(fmt.Sprintf("%q", args.Status))
+	}
+	if args.Version != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("version: ")
+		b.WriteString(fmt.Sprintf("%q", args.Version))
+	}
+	if args.ImageDigest != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("imageDigest: ")
+		b.WriteString(fmt.Sprintf("%q", args.ImageDigest))
+	}
+	if args.Provider != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("provider: ")
+		b.WriteString(fmt.Sprintf("%q", args.Provider))
+	}
+	if args.Environment != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("environment: ")
+		b.WriteString(fmt.Sprintf("%q", args.Environment))
+	}
+	if args.Region != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("region: ")
+		b.WriteString(fmt.Sprintf("%q", args.Region))
+	}
+	if args.ClusterId != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("clusterId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ClusterId))
+	}
+	if args.TriggeredBy != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("triggeredBy: ")
+		b.WriteString(fmt.Sprintf("%q", args.TriggeredBy))
+	}
+	if args.Notes != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("notes: ")
+		b.WriteString(fmt.Sprintf("%q", args.Notes))
+	}
+	if args.Changelog != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("changelog: ")
+		b.WriteString(fmt.Sprintf("%q", args.Changelog))
+	}
+	if args.PreviousDeploymentId != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("previousDeploymentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PreviousDeploymentId))
 	}
 	b.WriteString("})")
 	return b.String()
@@ -11849,6 +11969,35 @@ func MutationUpdateClusterSettingsBuild(args MutationUpdateClusterSettingsArgs) 
 		b.WriteString("authoredAutomationsEnabled: ")
 		b.WriteString(fmt.Sprintf("%v", args.AuthoredAutomationsEnabled))
 	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationUpdateDeploymentStatus -- Transition a v1:cluster:deployment's status (pending -> in_progress -> succeeded|failed; succeeded -> superseded; any -> rolled_back). Read-merge update: only status + updatedAt change, deploy metadata inherits. #1872.
+//
+// Bound concept: deployment.
+type MutationUpdateDeploymentStatusArgs struct {
+	DeploymentId string
+	// Enum: pending | in_progress | succeeded | failed | superseded | rolled_back
+	Status string
+}
+
+// MutationUpdateDeploymentStatus calls the engine mutation mutationUpdateDeploymentStatus.
+func (qc *QueryClient) MutationUpdateDeploymentStatus(ctx context.Context, args MutationUpdateDeploymentStatusArgs) (*Result, error) {
+	call := MutationUpdateDeploymentStatusBuild(args)
+	return qc.executeNamed(ctx, "mutationUpdateDeploymentStatus", call)
+}
+
+func MutationUpdateDeploymentStatusBuild(args MutationUpdateDeploymentStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationUpdateDeploymentStatus({")
+	b.WriteString("deploymentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(fmt.Sprintf("%q", args.Status))
 	b.WriteString("})")
 	return b.String()
 }

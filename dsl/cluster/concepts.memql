@@ -15,6 +15,7 @@ concept cluster {
   databaseId        string  @description("Node ID of the v1:cluster:database record for this cluster's database.")
   identityProviderId  string  @description("Node ID of the v1:cluster:identityProvider record.")
   version           string  @description("memQL version running on this cluster.")
+  provider          string  @description("Cloud provider / deploy target backing this cluster: 'docker-local' (local Docker) or 'azure' (AKS). Empty until stamped by the deploy driver (#1872).")
 }
 
 // ---- concepts/v1/cluster/database/concept.memql ----
@@ -109,4 +110,23 @@ concept trainingResult {
   identityError       string  @description("Step B's error message when identityVectorWrote is false. Empty when Step B succeeded.")
   distillError        string  @description("Step C's error message when systemPromptWrote is false. Empty when Step C succeeded.")
   step                string  @description("For trainAgentRetryStep results: which step was retried ('identityVector' or 'distillPrompt'). Empty for the main trainAgent capability.")
+}
+
+@version("1.0.0")
+@namespace("cluster")
+@description("A persisted deployment record (foundation of epic #1871, issue #1872). Append-only + time-series like the other cluster concepts: the row is written at deploy start (pending/in_progress) and every status transition appends a new payload version under the SAME concept id (the deploymentId, which is also the rollout hash) -- so the full lifecycle is reconstructable asOf any time, and `asOf latest` collapses to the deployment's current status. The CDC path emits graph.node.created/updated.<partition>.v1:cluster:deployment on every write, which the cockpit Deployments view subscribes to (same mechanism v1:cluster:node uses for live topology). The image digest -- previously only in releases/*.yaml on disk -- now lands in the data layer so history, node<->deploy linkage, next-version suggestion, and rollback can all be served from a query.")
+concept deployment {
+  deploymentId         string  @required @description("Stable deployment id; also the Argo rollout hash. Used as the concept row id so status transitions append to one timeline.")
+  status               enum("pending", "in_progress", "succeeded", "failed", "superseded", "rolled_back")  @default("pending") @description("Deployment lifecycle status. pending -> in_progress -> succeeded | failed; succeeded -> superseded when a newer deploy promotes; any -> rolled_back on an explicit rollback.")
+  version              string  @description("memQL semver being deployed (e.g. '2026.6.21').")
+  imageDigest          string  @description("Resolved container image digest for this deploy (sha256:...). Empty until the build/lockfile resolves it.")
+  provider             string  @description("Deploy target / cloud provider: 'docker-local' (local Docker) or 'azure' (AKS).")
+  environment          enum("development", "staging", "production")  @description("Target environment for this deployment.")
+  region               string  @description("Cloud region (e.g. 'us-central1') or 'local'.")
+  clusterId            string  @description("Node id of the v1:cluster:cluster this deployment targets. Plain string FK (not a @relationship -- cross-concept references use FK fields).")
+  triggeredBy          string  @description("v1:identity:user.id of the operator who initiated the deploy.")
+  updatedAt            datetime  @description("Timestamp of the most recent status transition. The row intrinsic createdAt carries the deploy-start time.")
+  notes                string  @description("Optional free-form operator notes.")
+  changelog            string  @description("Optional changelog / release-notes summary for this version.")
+  previousDeploymentId string  @description("Optional deploymentId of the deploy this one supersedes. Plain string FK (not a @relationship).")
 }

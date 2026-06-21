@@ -52,6 +52,10 @@ func (a *App) setupDeployControlService() {
 		Logger:   a.Logger,
 		Audit:    auditLogger,
 		RepoRoot: repoRoot,
+		// Engine persists deployments as v1:cluster:deployment records
+		// (#1872): write RPCs record at deploy start + transition on
+		// resolution. The engine satisfies identity.EngineExecutor.
+		Engine: a.engine,
 	})
 	if err != nil {
 		a.fatal("deploy-control service: build failed", "error", err,

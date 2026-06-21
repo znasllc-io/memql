@@ -1519,6 +1519,50 @@ func QueryDependentsOfConstructBuild(args QueryDependentsOfConstructArgs) string
 	return b.String()
 }
 
+// QueryDeploymentById -- All status-transition rows for one deployment, by deploymentId, oldest-to-newest (full lifecycle history; reconstructable asOf any time). #1872.
+//
+// Bound concept: deployment.
+type QueryDeploymentByIdArgs struct {
+	DeploymentId string
+}
+
+// QueryDeploymentById calls the engine query queryDeploymentById.
+func (qc *QueryClient) QueryDeploymentById(ctx context.Context, args QueryDeploymentByIdArgs) (*Result, error) {
+	call := QueryDeploymentByIdBuild(args)
+	return qc.executeNamed(ctx, "queryDeploymentById", call)
+}
+
+func QueryDeploymentByIdBuild(args QueryDeploymentByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryDeploymentById({")
+	b.WriteString("deploymentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryDeploymentsForCluster -- Deployment history for a cluster: latest-per-deploymentId rows (asOf latest -> current status per deployment) filtered to a clusterId. Backs the cockpit Deployments history list (consumer sorts newest-first by createdAt). #1872.
+//
+// Bound concept: deployment.
+type QueryDeploymentsForClusterArgs struct {
+	ClusterId string
+}
+
+// QueryDeploymentsForCluster calls the engine query queryDeploymentsForCluster.
+func (qc *QueryClient) QueryDeploymentsForCluster(ctx context.Context, args QueryDeploymentsForClusterArgs) (*Result, error) {
+	call := QueryDeploymentsForClusterBuild(args)
+	return qc.executeNamed(ctx, "queryDeploymentsForCluster", call)
+}
+
+func QueryDeploymentsForClusterBuild(args QueryDeploymentsForClusterArgs) string {
+	var b strings.Builder
+	b.WriteString("queryDeploymentsForCluster({")
+	b.WriteString("clusterId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ClusterId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryDetectConflicts -- Find confirmed records that may conflict with a new record by natural key + record type
 //
 // Bound concept: record.
