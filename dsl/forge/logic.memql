@@ -135,9 +135,20 @@ logic logicRecordTransition {
 // attachmentId (scalar). This logic function fetches the current request row,
 // appends the new id to the existing attachmentIds array via the DSL append()
 // function (available in the step evaluator), and writes the full updated array
-// via mutationAttachToRequest. Idempotent: if the id is already present the
-// append() still fires, so callers should not call this twice for the same id.
-// (A dedup guard would require in-DSL array-membership checks not yet supported.)
+// via mutationAttachToRequest.
+//
+// Sequential attaches APPEND without clobbering: append() reads the existing
+// step-result array (`existing.First().payload.attachmentIds`) and adds the new
+// id, so calling this N times yields the N ids in order. On the FIRST attach the
+// row has no attachmentIds yet, so the read resolves to an absent array and
+// append() starts fresh with the single id. (#1848 fixed the prior corruption
+// where the unresolved read leaked its raw source text as a literal array
+// element; see component/language/compiler stepMethodAccessorPath +
+// component/automations/steps evaluateAppend.)
+//
+// Not deduped: re-attaching an already-present id appends a duplicate (an in-DSL
+// array-membership guard isn't supported yet), so callers should avoid attaching
+// the same id twice.
 @enabled
 @description("Append one v1:common:attachment id to a v1:forge:request's attachmentIds array. Fetches the current row, appends the new id, writes the full updated array via mutationAttachToRequest. Backed by the step evaluator's append() -- the closest native append the DSL supports without a Go builtin.")
 logic logicAttachToRequest {

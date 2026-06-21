@@ -890,7 +890,11 @@ func (e *MutationExecutor) evaluateAppend(evaluator *automations.Evaluator, expr
 		return nil, fmt.Errorf("append() requires exactly 2 arguments, got %d", len(args))
 	}
 
-	arrVal, err := e.evaluateValue(evaluator, strings.TrimSpace(args[0]))
+	// Normalize the array argument the same way evaluateValue does internally
+	// (`.First()` -> `.first`, etc.) so the unresolved-path guard below can
+	// compare the resolved value against the form EvaluateString would echo.
+	arrArg := normalizeStepMethodAccessors(strings.TrimSpace(args[0]))
+	arrVal, err := e.evaluateValue(evaluator, arrArg)
 	if err != nil {
 		return nil, fmt.Errorf("evaluating append() array argument: %w", err)
 	}
@@ -904,6 +908,23 @@ func (e *MutationExecutor) evaluateAppend(evaluator *automations.Evaluator, expr
 		return append(arr, itemVal), nil
 	case nil:
 		return []any{itemVal}, nil
+	case string:
+		// #1848: the array argument did NOT resolve to an array -- it came back
+		// as raw source text. This happens when the read-merge source path
+		// (`existing.first.payload.attachmentIds`) points at a row field that is
+		// absent/null: the compiler renders the unresolved member-access as a
+		// quoted string literal, so evaluateValue strips the quotes and echoes
+		// the path text verbatim. Appending to THAT literal is exactly the
+		// corrupted `["existing.first.payload.attachmentIds", "att-..."]` write
+		// reported in #1848 (same "raw source must never reach a mutation" class
+		// as #574/#580). When the leftover string is path-shaped (a leaked
+		// expression, not real user data) treat the array as absent and start
+		// fresh with the item only.
+		if automations.LooksLikePath(arr) {
+			return []any{itemVal}, nil
+		}
+		// A genuine scalar string value: preserve the historical 2-element shape.
+		return []any{arrVal, itemVal}, nil
 	default:
 		// If it's not an array, create a new array with both elements
 		return []any{arrVal, itemVal}, nil

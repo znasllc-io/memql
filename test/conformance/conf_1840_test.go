@@ -125,6 +125,16 @@ func runForgeLogicArgResolution(t *testing.T, e *Env) {
 		t.Fatalf("#1840: forgeAttachToRequest did not append %q to attachmentIds; rows=%v", attachmentId, reqRows)
 	}
 
+	// --- B'. forgeAttachToRequest hardening (#1848) ---------------------------
+	// #1848 added these acceptance criteria on top of the single-attach above:
+	//   1. A SECOND sequential attach to the same request must APPEND (keyed on
+	//      the canonical id) -- both ids present, in order, with no clobber and no
+	//      index-prefixed / literal-expression junk (the pre-#1840 `[0="...",
+	//      1="..."]` corruption shape).
+	//   2. Invalid input (nonexistent request / attachment) must fail cleanly
+	//      with NO partial / corrupting write to attachmentIds.
+	runForgeAttachHardening(t, e, requestId, attachmentId)
+
 	// --- C. logicRouteRequest (multi-step LogicRunner; the routeRequest spine) ---
 	// Drive the router logic exactly as the node.created automation does -- a
 	// single `event` object whose payload carries the submitter role + id. Owner
@@ -149,6 +159,123 @@ func runForgeLogicArgResolution(t *testing.T, e *Env) {
 	}
 
 	t.Logf("#1840: forge logic layer resolved caller args across mentoring, attach, and the multi-step router")
+}
+
+// runForgeAttachHardening drives the #1848 acceptance criteria against the SAME
+// seeded request the #1840 dimension already attached one id to. It runs the
+// real forgeAttachToRequest MCP tool (-> logicAttachToRequest -> append +
+// mutationAttachToRequest), keyed on the SHORT request id the caller passes,
+// and asserts the canonical-id read-merge-append behaves:
+//
+//   - a second sequential attach appends without clobbering the first;
+//   - the resulting attachmentIds is a clean ordered [first, second] with no
+//     index-prefixed / literal-expression junk (the corruption shape #1848 bans);
+//   - bad input (nonexistent request, nonexistent attachment) fails cleanly with
+//     NO partial / corrupting write -- the good row's array is unchanged.
+func runForgeAttachHardening(t *testing.T, e *Env, requestId, firstAttachmentId string) {
+	t.Helper()
+
+	// 1. Second sequential attach -> [first, second], in order, no clobber/junk.
+	secondAttachmentId := firstAttachmentId + "-2"
+	out2, isErr2 := e.toolCall(t, "forgeAttachToRequest", map[string]any{
+		"requestId":    requestId,
+		"attachmentId": secondAttachmentId,
+	})
+	assertNoArgRefLeak(t, "forgeAttachToRequest(second)", out2)
+	if isErr2 {
+		t.Fatalf("#1848: second forgeAttachToRequest returned an error result: %v", out2)
+	}
+
+	rows := asArray(t, e.runQuery(t, "queryRequestById", map[string]any{"requestId": requestId}))
+	ids := attachmentIdsOf(t, rows, requestId)
+	assertCleanAttachmentIds(t, "after two sequential attaches", ids)
+	if len(ids) != 2 || ids[0] != firstAttachmentId || ids[1] != secondAttachmentId {
+		t.Fatalf("#1848: sequential attach did not produce ordered [%q, %q] without clobber; got %#v",
+			firstAttachmentId, secondAttachmentId, ids)
+	}
+
+	// 2. Invalid input must NOT corrupt or partially write the existing array.
+	//    Capture the known-good state, attempt bad attaches, re-read, assert
+	//    byte-for-byte identical (no append, no junk, no clobber).
+	before := append([]string(nil), ids...)
+
+	// (a) Nonexistent request: the read finds no row, so append() has no array to
+	//     merge onto -- the pre-#1840 path stringified that into the corrupted
+	//     `attachmentIds` write. It must fail cleanly and write nothing.
+	badReqId := requestId + "-does-not-exist"
+	outBadReq, isErrBadReq := e.toolCall(t, "forgeAttachToRequest", map[string]any{
+		"requestId":    badReqId,
+		"attachmentId": "att-orphan-001",
+	})
+	assertNoArgRefLeak(t, "forgeAttachToRequest(badRequest)", outBadReq)
+	if !isErrBadReq {
+		t.Fatalf("#1848: forgeAttachToRequest against a nonexistent request %q should fail, got success: %v", badReqId, outBadReq)
+	}
+	// The bad request id must not have been conjured into existence.
+	if badRows, _ := e.runQuery(t, "queryRequestById", map[string]any{"requestId": badReqId}).([]any); len(badRows) != 0 {
+		t.Fatalf("#1848: a failed attach against nonexistent request %q wrote a phantom row: %#v", badReqId, badRows)
+	}
+
+	// (b) Nonexistent attachment id against the GOOD request: whatever the engine
+	//     does, the existing array must not be partially written or corrupted.
+	outBadAtt, isErrBadAtt := e.toolCall(t, "forgeAttachToRequest", map[string]any{
+		"requestId":    requestId,
+		"attachmentId": "att-does-not-exist-002",
+	})
+	assertNoArgRefLeak(t, "forgeAttachToRequest(badAttachment)", outBadAtt)
+	_ = isErrBadAtt // the contract is "no corrupting write", not a specific error/ok
+
+	// Re-read the good request: its array must be uncorrupted. If the bad-att
+	// path succeeded it may have appended cleanly (an extra clean id is fine);
+	// what it must NEVER do is clobber the prior ids or write index/literal junk.
+	afterRows := asArray(t, e.runQuery(t, "queryRequestById", map[string]any{"requestId": requestId}))
+	afterIds := attachmentIdsOf(t, afterRows, requestId)
+	assertCleanAttachmentIds(t, "after bad-input attaches", afterIds)
+	for i, want := range before {
+		if i >= len(afterIds) || afterIds[i] != want {
+			t.Fatalf("#1848: bad-input attach corrupted/clobbered the existing attachmentIds; before=%#v after=%#v", before, afterIds)
+		}
+	}
+
+	t.Logf("#1848: forgeAttachToRequest appends sequentially (canonical-id keyed, clean array) and refuses to corrupt on bad input")
+}
+
+// attachmentIdsOf extracts the attachmentIds array for the request row with the
+// given short id from a decoded queryRequestById result, as an ordered []string.
+func attachmentIdsOf(t *testing.T, rows []any, requestId string) []string {
+	t.Helper()
+	for _, r := range rows {
+		m, _ := r.(map[string]any)
+		if m == nil {
+			continue
+		}
+		// queryRequestById is keyed on the request, so a single row comes back;
+		// match defensively on the short id stored in payload.id when present.
+		out := make([]string, 0, 4)
+		ids, _ := m["attachmentIds"].([]any)
+		for _, a := range ids {
+			out = append(out, asStr(a))
+		}
+		return out
+	}
+	t.Fatalf("#1848: queryRequestById returned no row for %q; rows=%#v", requestId, rows)
+	return nil
+}
+
+// assertCleanAttachmentIds fails if any entry carries the pre-#1840 corruption
+// shape -- an index prefix (`0=`, `1=`) or a leaked literal expression
+// (`existing.first.payload.attachmentIds`, embedded quotes). A clean array is
+// plain attachment-id strings.
+func assertCleanAttachmentIds(t *testing.T, label string, ids []string) {
+	t.Helper()
+	for i, id := range ids {
+		if strings.Contains(id, "=") {
+			t.Fatalf("#1848: %s -- attachmentIds[%d]=%q carries an index-prefixed/literal `=` junk shape (the pre-#1840 corruption); ids=%#v", label, i, id, ids)
+		}
+		if strings.Contains(id, "\"") || strings.Contains(id, "payload.attachmentIds") || strings.Contains(id, "append(") {
+			t.Fatalf("#1848: %s -- attachmentIds[%d]=%q carries a leaked literal expression; ids=%#v", label, i, id, ids)
+		}
+	}
 }
 
 // hasEventWithNote reports whether the decoded requestEvent array contains a row

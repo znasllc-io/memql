@@ -34,6 +34,46 @@ func bareDottedIdentifier(s string) bool {
 	return true
 }
 
+// stepMethodAccessorPath reports whether s is a dotted reference whose only
+// non-identifier segments are no-arg method accessors -- `First()`, `Last()`,
+// `Empty()`, `Count()`, `Len()`, `Nodes()`, `Ran()` (the step-result accessors
+// the runtime evaluator understands and normalizeStepMethodAccessors rewrites
+// to dotted shorthand). Examples that match:
+//
+//	existing.First().payload.attachmentIds
+//	rows.Last().id
+//
+// This is the unquoted-runtime-reference companion to bareDottedIdentifier for
+// the method-accessor case (which bareDottedIdentifier rejects because the
+// `()` fail isSimpleIdentifier). It is intentionally strict: a segment with any
+// argument inside the parens (a real function call) does NOT match, so genuine
+// literal strings or other expressions are still quoted.
+func stepMethodAccessorPath(s string) bool {
+	if s == "" || strings.HasPrefix(s, ".") || strings.HasSuffix(s, ".") {
+		return false
+	}
+	// Must actually carry a method accessor; otherwise bareDottedIdentifier
+	// already covers the plain-dotted case.
+	if !strings.Contains(s, "()") {
+		return false
+	}
+	parts := strings.Split(s, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	for _, p := range parts {
+		if isSimpleIdentifier(p) {
+			continue
+		}
+		// A no-arg method accessor: `Name()`.
+		if strings.HasSuffix(p, "()") && isSimpleIdentifier(strings.TrimSuffix(p, "()")) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 // isSimpleIdentifier returns true for [a-zA-Z_][a-zA-Z0-9_]*.
 func isSimpleIdentifier(s string) bool {
 	if s == "" {
@@ -226,6 +266,19 @@ func isRuntimeReference(s string) bool {
 	// Bare dotted identifiers (e.g., agent.id) should be preserved for runtime resolution.
 	// If authors want a literal string containing dots, they should quote it explicitly.
 	if bareDottedIdentifier(strings.TrimSpace(s)) {
+		return true
+	}
+
+	// Step-method-accessor paths (e.g. `existing.First().payload.attachmentIds`)
+	// are runtime references too. The parser captures these as raw source-text
+	// strings when they appear as a positional-builtin operand (e.g. the array
+	// arg of `append(existing.First().payload.attachmentIds, args.x)`). Without
+	// this check valueToString quotes the whole thing into a STRING LITERAL --
+	// so it never resolves against the step result and the literal source text
+	// leaks into the write (the #1848 `["existing.first.payload.attachmentIds",
+	// ...]` corruption). Recognise the `<ident>.First()/.Last()/...` shape and
+	// keep it unquoted so the evaluator's resolvePath navigates the step result.
+	if stepMethodAccessorPath(strings.TrimSpace(s)) {
 		return true
 	}
 
