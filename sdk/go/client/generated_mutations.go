@@ -8836,7 +8836,7 @@ func MutationRecordPlannerInvocationBuild(args MutationRecordPlannerInvocationAr
 	return b.String()
 }
 
-// MutationRecordRequestEvent -- Append a v1:forge:requestEvent (the time-series audit trail). actorUserId + actorRole stamped from actor.
+// MutationRecordRequestEvent -- Append a v1:forge:requestEvent (the time-series audit trail). actorUserId + actorRole stamped from actor. requestId is normalized to the short id form (shortId()) so the trail keys consistently whether the caller passes a canonical node id (automation path) or a bare short id (tool path) -- #1859.
 //
 // Bound concept: requestEvent.
 type MutationRecordRequestEventArgs struct {
