@@ -260,6 +260,131 @@ func TestTextChunksStreamToWSOwningReplica(t *testing.T) {
 	}
 }
 
+// TestClientToolRequestSurvivesDepeeredFastPath is the focused proof for
+// memql#1846: the cross-node client-tool relay REQUEST leg (cognition -> browser)
+// reaches the WS-owning bff replica EVEN WHEN the mesh fast-path cannot deliver
+// it -- the de-peer window after a bff blue-green cutover.
+//
+// The scenario is the request-leg twin of TestChatReplyCrossReplicaDelivery:
+// producer node (cognition) and consumer node (the bff owning the browser WS)
+// share ONLY the durable outbox store -- there is NO mesh connection between
+// them (modelling the de-peered/reaped peer whose Connection==nil, so
+// forwardToPeers silently skips it). On the pre-#1846 path the request rode the
+// mesh fast-path ONLY and the WS-owning replica never saw it, so the UI takeover
+// silently dropped. With the request concept on the substrate, the WS-owning bff
+// still pulls it durably, keyed by space, and fans it onto its local bus where
+// the browser's space subscription dispatches the tool.
+func TestClientToolRequestSurvivesDepeeredFastPath(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// One durable store, shared across replicas. NO mesh link between producer
+	// and consumer -- the de-peer window, where the substrate is the only path.
+	store := newFakeOutboxStore()
+	const spaceID = "v1:cognition:space:takeover"
+	key := RoutingKey{Kind: "space", ID: spaceID}
+
+	// Consumer: bff-2 owns the browser's WebSocket for this space (the freshly
+	// cut-over replica that cognition has de-peered). It subscribes to the space
+	// and fans the durable stream back onto its local bus.
+	sink := &busSink{}
+	consumer := newConsumerDelivery(t, ctx, "bff-2", store, sink)
+	consumer.ensureSubscribed(key)
+
+	// Producer: cognition relays a client-tool REQUEST (uiRequestControl) by
+	// emitting a v1:cognition:client:tool:request graph node keyed by the space.
+	producer := NewChatReplyDelivery(
+		&Identity{ID: "cognition-1", Type: NodeTypeCognition},
+		NewSubstrate(store, time.Minute, nil, nil),
+		events.NewBus(),
+		false, // not bff: producer-only
+		nil,
+	)
+	if producer == nil {
+		t.Fatal("producer NewChatReplyDelivery returned nil")
+	}
+
+	requestTopic := events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptClientToolRequest)
+	const callID = "call-takeover-1"
+	// Drive it through onLocalEvent (not publishDeliverable directly) so the test
+	// exercises the real producer path: the topic gate + space-key resolution +
+	// per-occurrence EventID keying.
+	producer.onLocalEvent(ctx, events.Event{
+		Topic:     requestTopic,
+		Kind:      events.KindNodeCreated,
+		Timestamp: time.Now(),
+		Payload: map[string]any{
+			"id":       callID, // request row id is the callId
+			"callId":   callID,
+			"toolName": "uiRequestControl",
+			"spaceId":  spaceID,
+		},
+	})
+
+	// The request must reach bff-2's local bus -- the browser dispatches it there.
+	got := waitForEvents(t, sink, 1)
+	if got[0].Topic != requestTopic {
+		t.Fatalf("delivered wrong topic: got %q want %q", got[0].Topic, requestTopic)
+	}
+	if cid, _ := got[0].Payload["callId"].(string); cid != callID {
+		t.Fatalf("delivered wrong callId: got %q want %q", cid, callID)
+	}
+	// Stamped remote so the local EventBridge will NOT loop it back onto the mesh.
+	if !got[0].IsRemote() {
+		t.Fatalf("re-published request must be marked remote, got %q", got[0].OriginNodeId)
+	}
+	// Cursor advanced past the delivered seq -- a reconnect would not replay it.
+	if err := waitForCursor(t, store, key, "bff-2", 1); err != nil {
+		t.Fatalf("cursor did not advance after delivery: %v", err)
+	}
+}
+
+// TestClientToolRequestExactlyOnceAcrossPaths proves the browser never
+// dispatches a relayed client-tool request twice when the mesh fast-path hint
+// and the durable pull both carry the SAME request occurrence (the common case:
+// the de-peer window is partial, not total). The producer keys the Deliverable
+// EventID per occurrence (rowId@ts) on BOTH paths, so the substrate's
+// per-subscription dedup collapses them to one delivery.
+func TestClientToolRequestExactlyOnceAcrossPaths(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := newFakeOutboxStore()
+	const spaceID = "v1:cognition:space:dup-takeover"
+	key := RoutingKey{Kind: "space", ID: spaceID}
+
+	sink := &busSink{}
+	consumer := newConsumerDelivery(t, ctx, "bff-1", store, sink)
+	consumer.ensureSubscribed(key)
+
+	dl := Deliverable{
+		EventID:    "call-dup@1700000000000000000",
+		Key:        key,
+		Topic:      events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptClientToolRequest),
+		Kind:       events.KindNodeCreated,
+		Payload:    map[string]any{"id": "call-dup", "callId": "call-dup", "spaceId": spaceID},
+		OriginNode: "cognition-1",
+	}
+	sub := NewSubstrate(store, time.Minute, nil, nil)
+	// Same EventID published twice (mesh-hint copy + durable re-produce); the
+	// outbox idempotently no-ops the second, so the browser sees it once.
+	if _, err := sub.Publish(ctx, dl); err != nil {
+		t.Fatalf("publish 1: %v", err)
+	}
+	if _, err := sub.Publish(ctx, dl); err != nil {
+		t.Fatalf("publish 2: %v", err)
+	}
+
+	got := waitForEvents(t, sink, 1)
+	if len(got) != 1 {
+		t.Fatalf("exactly-once violated: delivered %d copies", len(got))
+	}
+	time.Sleep(50 * time.Millisecond)
+	if n := len(sink.snapshot()); n != 1 {
+		t.Fatalf("exactly-once violated: delivered %d copies", n)
+	}
+}
+
 // waitForCursor polls until the stored cursor for (key, consumer) reaches at
 // least want, or times out.
 func waitForCursor(t *testing.T, store *fakeOutboxStore, key RoutingKey, consumer string, want int64) error {
@@ -419,17 +544,19 @@ func TestChatReplySelfEchoSuppressed(t *testing.T) {
 // never catch a constant that drifted from the DSL.
 func TestChatReplyTopicGate(t *testing.T) {
 	literals := map[string]string{
-		"utterance":   "v1:cognition:utterance",
-		"presence":    "v1:cognition:participant:presence",
-		"textChunk":   "v1:cognition:text:chunk",
-		"canvasState": "v1:copresent:canvasState",
+		"utterance":         "v1:cognition:utterance",
+		"presence":          "v1:cognition:participant:presence",
+		"textChunk":         "v1:cognition:text:chunk",
+		"canvasState":       "v1:copresent:canvasState",
+		"clientToolRequest": "v1:cognition:client:tool:request",
 	}
 	if conceptUtterance != literals["utterance"] ||
 		conceptPresence != literals["presence"] ||
 		conceptTextChunk != literals["textChunk"] ||
-		conceptCanvasState != literals["canvasState"] {
-		t.Fatalf("chat-reply concept ids drifted from the DSL: got %q/%q/%q/%q",
-			conceptUtterance, conceptPresence, conceptTextChunk, conceptCanvasState)
+		conceptCanvasState != literals["canvasState"] ||
+		conceptClientToolRequest != literals["clientToolRequest"] {
+		t.Fatalf("chat-reply concept ids drifted from the DSL: got %q/%q/%q/%q/%q",
+			conceptUtterance, conceptPresence, conceptTextChunk, conceptCanvasState, conceptClientToolRequest)
 	}
 	on := []string{
 		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptUtterance),
@@ -438,6 +565,8 @@ func TestChatReplyTopicGate(t *testing.T) {
 		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptTextChunk),
 		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptCanvasState),
 		events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, conceptCanvasState),
+		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptClientToolRequest),
+		events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, conceptClientToolRequest),
 	}
 	for _, topic := range on {
 		if !isChatReplyTopic(topic) {
