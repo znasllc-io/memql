@@ -292,3 +292,67 @@ func TestDispatcherSendAssignsId(t *testing.T) {
 		t.Errorf("sent message_id %q does not match returned id %q", sent.GetMessageId(), id)
 	}
 }
+
+// TestDispatcherClosesEventChOnStreamLoss proves that when the stream
+// goes away, Run() closes the event channel so a
+// `for ev := range d.Events()` consumer terminates instead of leaking a
+// goroutine per closed connection (memql#1842).
+func TestDispatcherClosesEventChOnStreamLoss(t *testing.T) {
+	stream := newMockStream()
+	d := NewDispatcher(stream, nil)
+	go d.Run()
+
+	// A range consumer: signals on rangeDone when the channel closes.
+	rangeDone := make(chan struct{})
+	go func() {
+		defer close(rangeDone)
+		for range d.Events() { //nolint:revive // draining until close
+		}
+	}()
+
+	// Drop the stream: closing recvCh makes Recv() return an error, so
+	// Run() exits its loop and (via the exit defer) closes eventCh.
+	if err := stream.CloseSend(); err != nil {
+		t.Fatalf("CloseSend: %v", err)
+	}
+
+	select {
+	case <-rangeDone:
+		// range returned -> eventCh was closed. No leak.
+	case <-time.After(2 * time.Second):
+		t.Fatal("range over Events() did not terminate after stream loss -- eventCh leaked")
+	}
+
+	// A direct receive on a closed channel returns ok==false.
+	if _, ok := <-d.Events(); ok {
+		t.Fatal("expected Events() channel to be closed (ok==false)")
+	}
+}
+
+// TestDispatcherClosesEventChOnStop proves the same termination guarantee
+// on an intentional Stop() (clean shutdown), not just on stream error.
+func TestDispatcherClosesEventChOnStop(t *testing.T) {
+	stream := newMockStream()
+	d := NewDispatcher(stream, nil)
+	go d.Run()
+
+	rangeDone := make(chan struct{})
+	go func() {
+		defer close(rangeDone)
+		for range d.Events() { //nolint:revive // draining until close
+		}
+	}()
+
+	// Intentional shutdown: Stop() closes stopCh, then dropping the
+	// stream unblocks Recv() so Run() observes stopCh and returns.
+	d.Stop()
+	if err := stream.CloseSend(); err != nil {
+		t.Fatalf("CloseSend: %v", err)
+	}
+
+	select {
+	case <-rangeDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("range over Events() did not terminate after Stop() -- eventCh leaked")
+	}
+}
