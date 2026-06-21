@@ -108,11 +108,31 @@ const (
 // dead -- the reply popped in atomically when the utterance landed via the
 // substrate. Per-key seq also guarantees the committed utterance sorts after
 // the turn's last chunk on the same space key.
+//
+// clientToolRequest (memql#1846): the cross-node client-tool relay REQUEST leg
+// (cognition/voice -> browser). Cognition emits a v1:cognition:client:tool:request
+// graph node carrying a required spaceId; the browser picks it up off its space
+// subscription on the WS-owning bff replica and dispatches the UI-takeover tool.
+// Before #1846 that request rode ONLY the best-effort mesh fast-path
+// (EventBridge.forwardToPeers -> sendTarget), which silently skips any peer with
+// Connection==nil. After a bff blue-green cutover the WS-owning replica is
+// de-peered/reaped on cognition (it is the gRPC client, registered Monitored
+// with no AttachConnection, so its entry is Connection==nil essentially always),
+// so the request silently dropped and the UI takeover never appeared -- the
+// request-leg twin of the #1835 response-leg drop fixed by #1843. Routing it
+// through the substrate (keyed by space, exactly like the utterance it
+// accompanies) makes the WS-owning bff replica consume it durably regardless of
+// mesh de-peering. The fast-path stays as the low-latency hint; the substrate's
+// per-(key,consumer) EventID dedup collapses the two copies so the browser never
+// dispatches the tool twice. The request row id is the callId (deterministic),
+// and the producer keys the Deliverable EventID per occurrence (rowId@ts) like
+// every other chat-reply topic, so a re-emit is its own durable row.
 const (
-	conceptUtterance   = "v1:cognition:utterance"
-	conceptPresence    = "v1:cognition:participant:presence"
-	conceptTextChunk   = "v1:cognition:text:chunk"
-	conceptCanvasState = "v1:copresent:canvasState"
+	conceptUtterance         = "v1:cognition:utterance"
+	conceptPresence          = "v1:cognition:participant:presence"
+	conceptTextChunk         = "v1:cognition:text:chunk"
+	conceptCanvasState       = "v1:copresent:canvasState"
+	conceptClientToolRequest = "v1:cognition:client:tool:request"
 )
 
 // Space-interest concept ids (memql#1316): graph events that signal "a client
@@ -389,11 +409,13 @@ func (d *ChatReplyDelivery) warn(msg string, args ...any) {
 
 // --- pure helpers (no receiver state; unit-testable directly) ----------------
 
-// isChatReplyTopic reports whether a topic is a chat-reply graph event
-// (created/updated for utterance / presence / canvasState). Deleted events are
-// not part of the reply stream the browser renders.
+// isChatReplyTopic reports whether a topic is a graph event that must reach the
+// bff replica owning a user's WebSocket: the chat-reply stream (created/updated
+// for utterance / presence / textChunk / canvasState) plus the cross-node
+// client-tool relay REQUEST leg (created/updated for clientToolRequest, #1846).
+// Deleted events are not part of the stream the browser renders/dispatches.
 func isChatReplyTopic(topic string) bool {
-	for _, concept := range []string{conceptUtterance, conceptPresence, conceptTextChunk, conceptCanvasState} {
+	for _, concept := range []string{conceptUtterance, conceptPresence, conceptTextChunk, conceptCanvasState, conceptClientToolRequest} {
 		if topic == events.BuildTopicWithConcept(events.TopicGraphNodeCreated, concept) ||
 			topic == events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, concept) {
 			return true
