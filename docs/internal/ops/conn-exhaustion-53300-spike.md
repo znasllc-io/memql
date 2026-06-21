@@ -166,6 +166,48 @@ Tiger console compute calculator). The code fixes reduce the floor and
 stop the bleed; the resize makes capacity durable. Tracked as the resize
 follow-up off #1817.
 
+## Leaked `deployer` tooling-role pool (memql#1861)
+
+While root-causing the deploy connection storm (#1858) we found a separate,
+durable leak: a `deployer`-role pool holding **~21 idle connections, 8h+ old**
+on the staging instance. With `max_connections=105` and ~17 reserved, that one
+leak permanently ate roughly **a third** of the usable mesh budget — which is
+why #1858 had to pin `MAX_OPEN_CONNS=4`.
+
+**Why the app's own reaper didn't catch it.** The app fleet connects as the
+Tiger master role (`tsdbadmin`) and reaps its own idle connections client-side
+(`CONN_MAX_IDLE_TIME_MS` + the per-session `idle_session_timeout` /
+`idle_in_transaction_session_timeout` stamped in `component/database/database.go`,
+#1817). `deployer` is a **separate** least-privilege credential used by deploy
+tooling (gate / migrate / promote / exporters). Nothing in any repo opens a
+`deployer` pool with a client-side reaper, so a tool that opens a pool and never
+closes it leaves its backends idle indefinitely.
+
+**Fix — reap at the role, not the client.** Rather than hunt down every tool
+that might leak a `deployer` pool, install a server-side idle reaper on the role
+itself so it is leak-proof regardless of which client misbehaves:
+
+```sql
+ALTER ROLE deployer SET idle_session_timeout = '300000ms';
+ALTER ROLE deployer SET idle_in_transaction_session_timeout = '300000ms';
+```
+
+5 min comfortably outlives any legitimate gate/migrate/promote run while killing
+the 8h+ leaks. This only affects **new** connections, so the existing leaked
+backends are terminated in the same pass. Both knobs are PG14+ / Tiger-supported.
+
+Owner-run, via the same recovery script (the master DSN has `ALTER ROLE`
+privilege over `deployer`):
+
+```bash
+scripts/ops/conn-recover.sh deployer-inspect   # read-only: find the leaking client
+scripts/ops/conn-recover.sh deployer-reclaim   # install role reaper + terminate leaks
+```
+
+After the reclaim sticks, the ~21 slots are back and the per-pod
+`MAX_OPEN_CONNS` (cut to 4 under #1858) can be raised back toward the default 10
+— see [the budget standard](../../public/operate/db-connection-budget.md).
+
 ## Reproduction / verification
 
 - Reproduce: roll a full-stack deploy while issuing a small concurrent
@@ -186,6 +228,9 @@ Scoped off this spike (see memql#1817):
 - **Deploy-gate connection-headroom check** (epic #1778 child F): block a
   promotion whose projected Σ(pods × MaxOpen) + surge would exceed
   `max_connections − reserved`.
+- **Reclaim the leaked `deployer` pool + install the role-level idle reaper**
+  (memql#1861, owner-run): `scripts/ops/conn-recover.sh deployer-reclaim`. Then
+  re-evaluate whether `MAX_OPEN_CONNS` can be raised off the #1858 floor of 4.
 - **Confirm the `pg_stat_activity` breakdown** once a slot is free (run
   `scripts/ops/conn-recover.sh capture`) and append the table here — now
   attributable by `application_name` thanks to the stamping above.

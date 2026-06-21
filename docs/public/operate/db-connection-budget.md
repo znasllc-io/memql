@@ -66,9 +66,19 @@ replicas or a pooler.
   the workload's `terminationGracePeriodSeconds` allows the pool to close before
   SIGKILL.
 - **Idle reaping** (child G): `CONN_MAX_IDLE_TIME_MS` + `CONN_MAX_LIFETIME_MS`
-  bound how long a connection lingers. For DB-side safety also set
-  `idle_in_transaction_session_timeout` on the instance so a wedged client can't
-  hold a slot indefinitely (Tiger Cloud / local both support it).
+  bound how long an *app* connection lingers, and the app stamps
+  `idle_session_timeout` + `idle_in_transaction_session_timeout` as per-session
+  params so a wedged app client can't hold a slot indefinitely (Tiger Cloud /
+  local both support it).
+- **Tooling-role idle reaper** (memql#1861): the app fleet reaps its own idle
+  connections, but **non-app tooling roles do not** — a deploy/migrate/promote
+  job or exporter that connects under a separate role (e.g. `deployer`) and
+  leaks an unclosed pool will pin idle slots for hours, eating the budget. There
+  is no client-side reaper to rely on there, so set the backstop on the *role*:
+  `ALTER ROLE <role> SET idle_session_timeout = '300000ms'` (+
+  `idle_in_transaction_session_timeout`). This reaps a leaked pool regardless of
+  which client opened it. Apply + reclaim with
+  `scripts/ops/conn-recover.sh deployer-reclaim`.
 - **Blue-green drain window** (child E, memql#1780): the bff Rollout's
   `scaleDownDelaySeconds` was cut 3600→300 so a promotion stops holding a full
   extra bff color (pods + pools) for an hour. See `deploy/rollouts/README.md`.
