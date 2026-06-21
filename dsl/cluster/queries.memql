@@ -25,6 +25,54 @@ query nodeType queryClusterNodeTypes {
 query node queryClusterNodes {
 }
 
+// ---- queries/v1/cluster/nodesForDeployment.memql ----
+
+// All cluster nodes belonging to a given deployment (#1873). A
+// deployment's topology = every node stamped with its deploymentId at
+// registration (logicRegisterNode). `asOf latest` collapses the
+// append-only v1:cluster:node stream to one row per node id (its current
+// state), mirroring queryStaleClusterNodes -- so this returns the live
+// membership of the deployment, not every historical liveness row.
+//
+// Authz: no user-scope field is referenced (filters on payload.deploymentId,
+// infrastructure topology), so this lands in the conformance "other" bucket
+// alongside queryClusterNodes / queryStaleClusterNodes -- no caller-check
+// needed (per-row-authz-audit.md).
+
+@enabled
+@description("Latest-per-id cluster node rows for one deploymentId -- the live topology of that deployment (#1873). asOf latest collapses the append-only node stream to current state per node.")
+query node queryNodesForDeployment {
+  args {
+    deploymentId  string  @required
+  }
+  filter  payload.deploymentId == args.deploymentId
+  asOf    latest
+}
+
+// ---- queries/v1/cluster/nodesNotInDeployment.memql ----
+
+// Orphan-node detector (#1873): latest-per-id cluster nodes whose
+// deploymentId differs from the caller-supplied current deployment id.
+// These are still-running pods left over from a PREVIOUS deploy -- the
+// stale-node clutter the cockpit Topology view highlights and the reaper
+// (#1874) reconciles. The caller passes the cluster's CURRENT deploymentId
+// (MemQL has no subquery, so "the active deployment" is resolved by the
+// consumer and passed in). `asOf latest` -> current state per node so a
+// node that has since re-registered under the current deployment drops out.
+//
+// Authz: filters on payload.deploymentId only (infrastructure topology, no
+// user-scope field) -> conformance "other" bucket, same as queryClusterNodes.
+
+@enabled
+@description("Latest-per-id cluster nodes whose deploymentId != the supplied current deployment -- orphans from a previous deploy (feeds the reaper #1874 + cockpit orphan highlight). #1873.")
+query node queryNodesNotInDeployment {
+  args {
+    deploymentId  string  @required
+  }
+  filter  payload.deploymentId != args.deploymentId
+  asOf    latest
+}
+
 // ---- queries/v1/cluster/clusterSpawnEvents.memql ----
 
 // Returns all cluster spawn events (node lifecycle: spawned, stopped, failed).

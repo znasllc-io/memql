@@ -102,6 +102,13 @@ spec:
             # MEMQL_NODE_ID=bff-local (set-if-absent) so PeerManager keys each
             # node distinctly.
             - { name: MEMQL_NODE_ID, valueFrom: { fieldRef: { fieldPath: metadata.name } } }
+            # Deployment id (#1873): ties this node's v1:cluster:node row to the
+            # deploy that created it. pod-template-hash is unique per rollout
+            # revision, so every pod of one deploy shares it and a pod left over
+            # from a previous deploy carries a different value -- the orphan
+            # signal queryNodesNotInDeployment surfaces. Stamped at registration
+            # by logicRegisterNode via EmitSystemStartup (MEMQL_DEPLOYMENT_ID).
+            - { name: MEMQL_DEPLOYMENT_ID, valueFrom: { fieldRef: { fieldPath: "metadata.labels['pod-template-hash']" } } }
             - { name: MEMQL_NODE_SERVICE_ADDRESS, value: ":50060" }
             - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
             - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }

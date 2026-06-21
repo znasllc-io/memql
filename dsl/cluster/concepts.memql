@@ -66,6 +66,10 @@ concept node {
   lastSeen      datetime  @description("ISO 8601 timestamp of the most recent heartbeat (or registration if none received yet).")
   capabilities  []string  @description("Fully qualified capability names this node offers (e.g. integration.cognition.scoreUtterance).")
   labels        object  @description("Arbitrary metadata key-value pairs.")
+  deploymentId  string  @description("Stable id of the deployment that created this node (#1873). Injected at registration from the rollout (MEMQL_DEPLOYMENT_ID; downward-API pod/rollout template hash in k8s, 'local' in dev). Plain string FK to v1:cluster:deployment.deploymentId -- a deployment's topology is every node with the same deploymentId, and a node whose deploymentId != the cluster's current deployment is an orphan from a previous deploy (feeds the reaper #1874 + cockpit orphan highlight).")
+  provider      string  @description("Cloud provider / deploy target backing this node: 'docker-local' (local Docker) or 'azure' (AKS). Stamped at registration from the system.startup payload (#1873).")
+  environment   string  @description("Deployment environment this node runs in: development / staging / production. Stamped at registration from MEMQL_ENVIRONMENT (#1873).")
+  region        string  @description("Cloud region (e.g. 'us-central1') or 'local'. Stamped at registration from MEMQL_REGION (#1873).")
 }
 
 @version("1.0.0")
