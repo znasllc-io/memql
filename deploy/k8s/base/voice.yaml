@@ -16,8 +16,10 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+      # Drain old before starting new so a roll doesn't transiently double this
+      # node's Postgres pools and overshoot max_connections (memql#1858).
+      maxUnavailable: 1
+      maxSurge: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: voice
@@ -53,6 +55,10 @@ spec:
           envFrom:
             - secretRef:
                 name: memql-secrets
+            # Bounded Postgres pool (MAX_OPEN_CONNS/MAX_IDLE_CONNS) so the
+            # mesh stays under max_connections during a rollout (memql#1858).
+            - configMapRef:
+                name: memql-db-pool
           env:
             - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
             - { name: SERVICE_NAME, value: "memQL" }

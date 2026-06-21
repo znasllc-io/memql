@@ -39,6 +39,11 @@ spec:
           envFrom:
             - secretRef:
                 name: memql-secrets
+            # Bounded Postgres pool (MAX_OPEN_CONNS/MAX_IDLE_CONNS) so the
+            # one-shot migrate Job can't add an unbounded pool to the budget
+            # during a deploy (memql#1858).
+            - configMapRef:
+                name: memql-db-pool
           env:
             - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
             - { name: SERVICE_NAME, value: "memQL" }

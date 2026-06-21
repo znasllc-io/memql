@@ -29,6 +29,11 @@ namespace: memql
 
 resources:
   - namespace.yaml
+  # Shared Postgres connection-pool bounds (MAX_OPEN_CONNS / MAX_IDLE_CONNS)
+  # consumed via envFrom: configMapRef on every DB-connecting node, so the
+  # whole mesh stays under Tiger Cloud's max_connections during a rollout
+  # (znasllc-io/memql#1858).
+  - db-pool-config.yaml
   - identity.yaml
   - bff.yaml
   - cognition.yaml
