@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // RuntimeContext provides the context for evaluating accessor expressions.
@@ -325,6 +327,31 @@ func (e *RuntimeEvaluator) EvaluateHash(str any) string {
 	}
 	hash := sha256.Sum256([]byte(fmt.Sprintf("%v", str)))
 	return hex.EncodeToString(hash[:])
+}
+
+// EvaluateShortId resolves shortId(value) to the bare short id by
+// stripping any `<concept>:` prefix. The inverse of EvaluateCanonicalId.
+// Idempotent (an already-bare value passes through unchanged); empty /
+// nil input yields "". Mirrors the mutation-template builtin so
+// automations + queries normalize ids to one short form. See #1859.
+func (e *RuntimeEvaluator) EvaluateShortId(value any) string {
+	if value == nil {
+		return ""
+	}
+	v := strings.TrimSpace(fmt.Sprintf("%v", value))
+	if v == "" {
+		return ""
+	}
+	if e.ctx != nil && e.ctx.Engine != nil {
+		return e.ctx.Engine.shortIdValue(v)
+	}
+	// No engine wired: do the structural split inline so the builtin
+	// still works in evaluation contexts without a full engine.
+	_, short, err := id.ParseNodeId(v)
+	if err != nil || short == "" {
+		return v
+	}
+	return short
 }
 
 // EvaluateCanonicalId resolves canonicalId(value, "<conceptType>") to

@@ -122,6 +122,21 @@ var BuiltinFunctions = map[string]BuiltinDef{
 		Doc:        "Compute SHA-256 hash of a string value.",
 		Parameters: []Parameter{{Label: "value", Documentation: "String to hash."}},
 	},
+	"shortId": {
+		Signature: `shortId(value string)`,
+		Doc: "Extract the bare short id from an id-shaped value -- the inverse of canonicalId.\n\n" +
+			"Strips the `<partition>:<concept>:` prefix from a canonical node id (e.g. " +
+			"`v1:forge:request:r-001` -> `r-001`) and returns the trailing bare slug. " +
+			"Idempotent: a value that is already bare (no version-tagged concept prefix) is " +
+			"returned unchanged, so calling it on an already-short id is a no-op.\n\n" +
+			"Use it to normalize a foreign-key / audit field to one consistent (short) id form " +
+			"regardless of whether the caller passes a canonical node id or a bare slug -- e.g. " +
+			"`requestId: shortId(args.requestId)` so the audit trail keys consistently across the " +
+			"automation (canonical) and tool (short) write paths (#1859).",
+		Parameters: []Parameter{
+			{Label: "value", Documentation: "Id-shaped value (canonical or bare). Empty input returns empty."},
+		},
+	},
 	"canonicalId": {
 		Signature: `canonicalId(value, concept)`,
 		Doc: "Normalize an id-shaped value to canonical form (`<partition>:<concept>:<bareSlug>`).\n\n" +

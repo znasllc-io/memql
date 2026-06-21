@@ -456,6 +456,21 @@ type HashExpr struct {
 func (*HashExpr) node()           {}
 func (*HashExpr) expressionNode() {}
 
+// ShortIdExpr extracts the bare short id from an id-shaped value:
+// shortId(value). The inverse of canonicalId -- it strips the
+// `<partition>:<concept>:` prefix from a canonical node id and returns
+// the trailing bare slug. Idempotent: a value that is already bare (no
+// version-tagged concept prefix) is returned unchanged, so calling it
+// on a tool-path short id is a no-op. Used to normalize a foreign-key /
+// audit field to one consistent (short) id form regardless of whether
+// the caller passes a canonical or bare id (#1859).
+type ShortIdExpr struct {
+	Target ExpressionNode
+}
+
+func (*ShortIdExpr) node()           {}
+func (*ShortIdExpr) expressionNode() {}
+
 // CanonicalIdExpr normalizes an id-shaped value to canonical form
 // for the named concept: canonicalId(value, "<conceptType>").
 //
@@ -1341,10 +1356,10 @@ func (*ConceptDecl) node() {}
 // The converter (builtinDeclToFunction in the memql package) walks
 // Fields + Attributes to produce a Function with Type=builtin.
 type BuiltinDecl struct {
-	Name       string         // builtin name
-	Attributes []*Attribute   // builtin-level annotations
+	Name       string          // builtin name
+	Attributes []*Attribute    // builtin-level annotations
 	Fields     []*BuiltinField // body field declarations
-	Path       string         // source path, for errors/diagnostics
+	Path       string          // source path, for errors/diagnostics
 }
 
 func (*BuiltinDecl) node() {}
@@ -1388,10 +1403,10 @@ type BuiltinField struct {
 // form becomes load-bearing again, the lexer grows triple-quoted
 // support first.
 type PromptDecl struct {
-	Name       string        // prompt name
-	Attributes []*Attribute  // prompt-level annotations
+	Name       string         // prompt name
+	Attributes []*Attribute   // prompt-level annotations
 	Fields     []*PromptField // body field declarations (the input schema)
-	Path       string        // source path, for errors/diagnostics
+	Path       string         // source path, for errors/diagnostics
 }
 
 func (*PromptDecl) node() {}
@@ -1741,15 +1756,15 @@ func (*PolicyDecl) node() {}
 // to the existing `seedDecl` / `seedBlock` internal types) can walk
 // the tree without re-parsing.
 type SeedDecl struct {
-	Name             string       // declaration name (`seed XXX`)
-	SignatureConcept string       // bound concept from the two-identifier signature, if any
-	Description      string       // @description
-	Namespace        string       // @namespace
-	Version          string       // @version
-	Scope            string       // @scope: "global" | "perUser" (empty -> loader applies default)
-	TemplateFile     string       // @templateFile path (optional)
-	Body             *SeedBlock   // root body block (always non-nil)
-	Path             string       // source path, for errors/diagnostics
+	Name             string     // declaration name (`seed XXX`)
+	SignatureConcept string     // bound concept from the two-identifier signature, if any
+	Description      string     // @description
+	Namespace        string     // @namespace
+	Version          string     // @version
+	Scope            string     // @scope: "global" | "perUser" (empty -> loader applies default)
+	TemplateFile     string     // @templateFile path (optional)
+	Body             *SeedBlock // root body block (always non-nil)
+	Path             string     // source path, for errors/diagnostics
 }
 
 func (*SeedDecl) node() {}

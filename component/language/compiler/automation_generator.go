@@ -1217,6 +1217,9 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 	case *parser.HashExpr:
 		return fmt.Sprintf("hash(%s)", c.expressionToString(e.Target))
 
+	case *parser.ShortIdExpr:
+		return fmt.Sprintf("shortId(%s)", c.expressionToString(e.Target))
+
 	case *parser.CanonicalIdExpr:
 		// Round-trips canonicalId(value, "<conceptType>") back to its
 		// source form. Without this case, the default branch below
@@ -2158,6 +2161,9 @@ func (c *Compiler) expressionToJSONExpr(expr parser.ExpressionNode) string {
 
 	case *parser.HashExpr:
 		return fmt.Sprintf("hash(%s)", c.expressionToJSONExpr(e.Target))
+
+	case *parser.ShortIdExpr:
+		return fmt.Sprintf("shortId(%s)", c.expressionToJSONExpr(e.Target))
 
 	case *parser.ContainsExpr:
 		return fmt.Sprintf("contains(%s, %s)",

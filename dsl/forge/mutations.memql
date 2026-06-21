@@ -182,9 +182,21 @@ mutation request mutationAttachToRequest {
 // ---------------------------------------------------------------------------
 // mutationRecordRequestEvent -- append an audit/pipeline event. actorUserId +
 // actorRole stamped from the auth context.
+//
+// requestId is normalized to the SHORT id form via shortId() (#1859). The two
+// caller paths feed two id shapes:
+//   - automation path (logicRouteRequest / logicRecordTransition) passes
+//     args.event.payload.id, which is the CANONICAL node id
+//     (v1:forge:request:r-...) of the created/updated request row;
+//   - tool path (logicRecordMentoring) passes the SHORT tool arg (r-...).
+// Without normalization the audit trail splits across both forms and
+// forgeRequestHistory(<shortId>) finds only the tool-written events.
+// shortId() strips the `v1:forge:request:` concept prefix; it is idempotent
+// (a no-op on an already-short id), so the tool path is unaffected. This single
+// write-side point keeps every requestEvent.requestId in one short form.
 // ---------------------------------------------------------------------------
 @enabled
-@description("Append a v1:forge:requestEvent (the time-series audit trail). actorUserId + actorRole stamped from actor.")
+@description("Append a v1:forge:requestEvent (the time-series audit trail). actorUserId + actorRole stamped from actor. requestId is normalized to the short id form (shortId()) so the trail keys consistently whether the caller passes a canonical node id (automation path) or a bare short id (tool path) -- #1859.")
 mutation requestEvent mutationRecordRequestEvent {
   args {
     eventId     string
@@ -196,7 +208,7 @@ mutation requestEvent mutationRecordRequestEvent {
   }
   insert {
     id: args.eventId
-    args.requestId
+    requestId: shortId(args.requestId)
     args.kind
     actorUserId: actor.userId
     actorRole: actor.role

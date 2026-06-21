@@ -1589,8 +1589,8 @@ func (p *Parser) parseConceptDecl(attrs []*Attribute) (*ConceptDecl, error) {
 // signature shapes are accepted, mirroring the hand-rolled
 // shape_parser.go this is migrating off of:
 //
-//   shape <name> { <path>; <path>; ... }              -- bare form
-//   shape <Concept> <name> { <path>; <path>; ... }    -- concept-bound
+//	shape <name> { <path>; <path>; ... }              -- bare form
+//	shape <Concept> <name> { <path>; <path>; ... }    -- concept-bound
 //
 // Body grammar: each entry is a dotted-path identifier (the lexer
 // consumes `payload.X.Y` as one TokenIdentifier). Entries may be
@@ -1662,10 +1662,10 @@ func (p *Parser) parseShapeDecl(attrs []*Attribute) (*ShapeDecl, error) {
 
 // parseBuiltinDecl parses a struct-form builtin declaration:
 //
-//   builtin <name> {
-//     <field> <type> [@required]
-//     ...
-//   }
+//	builtin <name> {
+//	  <field> <type> [@required]
+//	  ...
+//	}
 //
 // Body grammar: each field is `name type` followed by zero or more
 // `@annotation` attributes. The langparser's lexer already strips
@@ -1762,10 +1762,10 @@ func (p *Parser) parseBuiltinField() (*BuiltinField, error) {
 
 // parsePromptDecl parses a struct-form prompt declaration:
 //
-//   prompt <name> {
-//     <field> <type> [@required] [@description("...")]
-//     ...
-//   }
+//	prompt <name> {
+//	  <field> <type> [@required] [@description("...")]
+//	  ...
+//	}
 //
 // Body grammar mirrors parseBuiltinDecl: each field is `name type`
 // followed by zero or more `@annotation` attributes; the next ident
@@ -2201,6 +2201,8 @@ func expressionToFunctionCall(e ExpressionNode) (*FunctionCallExpr, bool) {
 		return &FunctionCallExpr{Name: "concat", Args: args}, true
 	case *HashExpr:
 		return &FunctionCallExpr{Name: "hash", Args: map[string]any{"0": t.Target}}, true
+	case *ShortIdExpr:
+		return &FunctionCallExpr{Name: "shortId", Args: map[string]any{"0": t.Target}}, true
 	case *CanonicalIdExpr:
 		return &FunctionCallExpr{Name: "canonicalId", Args: map[string]any{
 			"0": t.Value, "1": t.Concept,
@@ -4673,6 +4675,9 @@ func (p *Parser) parseFunctionCall(name string) (ExpressionNode, error) {
 		return p.parseTrimFunction()
 	case "hash":
 		return p.parseHashFunction()
+	case "shortid":
+		// Lower-cased dispatch; the DSL spells it `shortId(...)`.
+		return p.parseShortIdFunction()
 	case "canonicalid":
 		// The dispatch above lower-cases the function name (`strings.ToLower(name)`)
 		// so the case label MUST be lowercase too. The DSL still spells the call
@@ -5937,6 +5942,22 @@ func (p *Parser) parseHashFunction() (ExpressionNode, error) {
 	}
 
 	return &HashExpr{Target: target}, nil
+}
+
+// parseShortIdFunction parses shortId(value) - strip the canonical
+// concept prefix and return the bare short id. Single-arg, mirrors
+// lower/upper/trim/hash.
+func (p *Parser) parseShortIdFunction() (ExpressionNode, error) {
+	target, err := p.parseExpressionArg()
+	if err != nil {
+		return nil, err
+	}
+
+	if err := p.expect(TokenParenClose); err != nil {
+		return nil, err
+	}
+
+	return &ShortIdExpr{Target: target}, nil
 }
 
 // parseCanonicalIdFunction parses canonicalId(value, "<conceptType>")
