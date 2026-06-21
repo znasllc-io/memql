@@ -58,13 +58,12 @@ spec:
             value: bff-preview
       # After the flip, keep the old color up briefly to drain its open streams
       # (#615 + the #616 activeStreams primitive) before the controller scales it
-      # down. Held to 5 min (was 3600s/1h): an hour of doubled bff pods + DB
-      # connection pools per deploy was a top contributor to deploy-time resource
-      # overlap, the 53300 connection storm (#1753), and staging cost (#1780).
-      # 300s still drains most streams; older streams reconnect to the new color,
-      # and #616 lets the controller scale down earlier once streams hit zero.
-      # Per-env override is fine (env-agnostic config) if prod needs longer.
-      scaleDownDelaySeconds: 300
+      # down. Lowered 300->120 (#1858): the doubled bff pods + their DB pools held
+      # for 5 min were a top contributor to the deploy-time 53300 connection-budget
+      # overlap. 120s still drains most streams; older streams reconnect to the new
+      # color, and #616 already scales down earlier once activeStreams hit zero --
+      # so the ceiling rarely binds. Per-env override is fine if prod needs longer.
+      scaleDownDelaySeconds: 120
 ---
 # Preview Service the Rollout points new (pre-promotion) pods at, so the gate can
 # exercise the new color in-cluster before any user traffic flips to it. The
