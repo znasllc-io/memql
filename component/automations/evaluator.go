@@ -663,6 +663,64 @@ func splitCoalesceArgs(s string) ([]string, error) {
 	return args, nil
 }
 
+// conditionRootSegment reports the explicit reference root of a bare dotted
+// path when that root must resolve against itself rather than the implicit
+// `event.` prefix EvaluateFilterValue applies to unprefixed paths. It returns
+// the root segment string (truthy) for a known explicit root, or "" when the
+// path should keep the legacy `event.`-prefixed resolution.
+//
+// Explicit roots are the values the logic/automation evaluator seeds or the
+// resolvePath root switch understands: the caller-arg + context roots a logic
+// body reads (`args`, `ctx`, `input`), the loop item (`item` or the configured
+// item name), recorded step results (`steps`), and the resolver-backed roots
+// (`var` / `systemVar` / `secret` / `systemSecret` / `automation`). `event` is
+// intentionally NOT listed: a bare `event.X` already short-circuits the prefix
+// in EvaluateFilterValue and keeps its existing pass-through, so behaviour for
+// the common `payload.X` / `event.X` filter shapes is unchanged. A first
+// segment that merely matches a seeded custom key also qualifies so a logic
+// that seeds an extra root resolves it explicitly.
+func (e *Evaluator) conditionRootSegment(expr string) string {
+	dot := strings.Index(expr, ".")
+	if dot <= 0 {
+		return ""
+	}
+	root := expr[:dot]
+	switch root {
+	case "args", "ctx", "input", "item", "steps",
+		"var", "systemVar", "secret", "systemSecret", "automation":
+		return root
+	}
+	if root == e.itemName && e.item != nil {
+		return root
+	}
+	if _, ok := e.custom[root]; ok && root != "event" {
+		return root
+	}
+	return ""
+}
+
+// isBareStepIdentifier reports whether expr is a single identifier
+// (`[A-Za-z_][A-Za-z0-9_]*`, no dots / parens / operators) -- the shape a bare
+// step-variable reference (`toStatus`) takes as a comparison operand. The
+// caller still gates resolution on the identifier actually matching a recorded
+// step, so a plain word literal that isn't a step name is unaffected.
+func isBareStepIdentifier(expr string) bool {
+	if expr == "" {
+		return false
+	}
+	for i, r := range expr {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r == '_':
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // EvaluateFilterValue resolves a value in a filter context.
 // Bare paths like "payload.X" are auto-resolved to "$event.payload.X".
 // This allows cleaner filter syntax without requiring explicit $event. prefix.
@@ -731,6 +789,23 @@ func (e *Evaluator) EvaluateFilterValue(expr string) (any, error) {
 		return sum / float64(len(arr)), nil
 	}
 
+	// Bare step-variable reference: a single identifier (no dot) that names a
+	// recorded step result. A logic body's guard like `if toStatus == "queued"`
+	// (logicRecordTransition, where `toStatus := coalesce(...)` is a prior step)
+	// reaches here as the bare operand `toStatus`. Without this it fails
+	// looksLikePath (no dot), falls through to the literal-string fallback, and
+	// the comparison tests the path TEXT ("toStatus" != "queued") -- so every
+	// `toStatus`-guarded mutationRecordRequestEvent step was skipped (the other
+	// half of #1847). Scoped strictly to recorded step ids so a genuine string
+	// literal (`"owner"`, `submitted`) is never swallowed.
+	if isBareStepIdentifier(expr) {
+		if _, known := e.steps[expr]; known {
+			if val, err := e.resolvePath("steps." + expr + ".result"); err == nil {
+				return val, nil
+			}
+		}
+	}
+
 	// Check if this looks like a path (contains dots, alphanumeric/underscore only)
 	if looksLikePath(expr) {
 		// Step-result references (memql#1366): a `steps.<id>.<field>` path in
@@ -752,6 +827,26 @@ func (e *Evaluator) EvaluateFilterValue(expr string) (any, error) {
 				}
 			}
 		}
+		// Explicit-root references resolve against their OWN root, never the
+		// implicit `event.` prefix. A logic body guard like
+		// `args.event.payload.submitterRole == "owner"` (or `ctx.X`, `input.X`,
+		// `item.X`, `steps.X`) names its root explicitly; forcing the `event.`
+		// prefix turned it into `event.args.event....` which never resolves, so
+		// the guard fell through to a LITERAL string and evaluated false -- the
+		// #1847 outage: every guarded `name := if <args-cond> { mutation }` step
+		// in a logic body invoked as an automation step (logicRouteRequest's
+		// fast-track / approval / validation transitions, logicRecordTransition's
+		// whole body) was silently skipped while the UNGUARDED steps ran. Resolve
+		// these against resolvePath's root switch directly (the same path
+		// `$<root>.X` takes). `event.X` keeps its existing pass-through below.
+		if e.conditionRootSegment(expr) != "" {
+			if val, err := e.resolvePath(expr); err == nil {
+				return val, nil
+			}
+			// Fall through to literal if the explicit-root path doesn't resolve.
+			return expr, nil
+		}
+
 		// Try resolving as $event.{path} first
 		// If it already starts with "event.", don't add the prefix again
 		path := expr

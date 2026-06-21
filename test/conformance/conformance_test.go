@@ -28,6 +28,7 @@ func allChecks() []check {
 		eventTriggerCheck(),            // #1706
 		eventDryRunBindingCheck(),      // #1727
 		forgeLogicArgResolutionCheck(), // #1840
+		automationLogicFullBodyCheck(), // #1847
 	}
 }
 
