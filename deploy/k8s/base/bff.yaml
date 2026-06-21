@@ -15,6 +15,7 @@ spec:
   # (the BFF is the user connection anchor). With maxUnavailable=0 +
   # maxSurge=1 a ready new pod always exists before an old one is removed.
   replicas: 2
+  revisionHistoryLimit: 1   # keep active + 1 previous (rollback); auto-GC older RS (#1858 cleanup)
   strategy:
     type: RollingUpdate
     rollingUpdate:

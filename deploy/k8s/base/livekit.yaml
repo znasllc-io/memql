@@ -55,6 +55,7 @@ spec:
   # Single replica: no Redis configured, so this is a standalone node. Scaling
   # past 1 requires the Redis-backed multi-node setup (future work).
   replicas: 1
+  revisionHistoryLimit: 1   # keep active + 1 previous (rollback); auto-GC older RS (#1858 cleanup)
   strategy:
     type: RollingUpdate
     rollingUpdate:

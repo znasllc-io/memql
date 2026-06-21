@@ -28,6 +28,7 @@ metadata:
     memql/node-type: identity
 spec:
   replicas: 2
+  revisionHistoryLimit: 1   # keep active + 1 previous (rollback); auto-GC older RS (#1858 cleanup)
   # Bound the roll so identity doesn't surge a 3rd pod (its DB pool) onto the
   # connection budget (memql#1858). Default RollingUpdate is 25%/25% (= surge 1
   # at 2 replicas); pin to drain-before-start. identity stays available because
