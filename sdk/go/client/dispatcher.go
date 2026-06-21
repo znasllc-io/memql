@@ -81,6 +81,18 @@ func (d *Dispatcher) Run() {
 		if !wasIntentional {
 			close(d.unexpectedCh)
 		}
+		// Close eventCh so `for ev := range d.Events()` consumers
+		// terminate when the stream goes away instead of blocking
+		// forever (one leaked goroutine per closed connection,
+		// memql#1842). This is panic-safe: eventCh has exactly one
+		// sender -- the non-blocking `select { case d.eventCh <- msg:
+		// default: }` in Run()'s loop above -- and it runs on THIS
+		// same goroutine. The loop has already returned by the time
+		// this defer fires, so no send can race the close. The defer
+		// runs exactly once (Run() is called once per dispatcher), so
+		// there's no double-close. Receivers see a closed channel:
+		// `range` ends, and `<-ch` returns (zero, false).
+		close(d.eventCh)
 	}()
 	for {
 		msg, err := d.stream.Recv()
