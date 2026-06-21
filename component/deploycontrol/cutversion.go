@@ -6,9 +6,12 @@
 // version for an environment and proposes the next major / minor / patch.
 // CutVersion (write) creates a new pending v1:cluster:deployment record
 // at the chosen version with the resolved image digest -- ready for the
-// deploy driver (#1878) to ship. Both are owner/admin gated (#728); the
-// DSL mirror is spec("requiresOwnerOrAdmin") in dsl/deployment/specs.memql,
-// which gates the mutationCreateDeployment this flow reuses.
+// deploy driver (#1878) to ship. Both are developer-or-above gated
+// (#1876): cutting a version is a forward-deploy action, so
+// developer/admin/owner may do it (SuggestNextVersion is its read
+// companion and shares the gate so a developer can size the cut). The
+// DSL mirror is spec("requiresDeveloperOrAbove") in
+// dsl/deployment/specs.memql.
 package deploycontrol
 
 import (
@@ -26,14 +29,15 @@ import (
 )
 
 // SuggestNextVersion proposes the next major/minor/patch off the env's
-// current version (#1877). Read-only; owner/admin gated, not audited on
-// success (a denial emits a blocked audit event via authorize).
+// current version (#1877). Read-only; developer-or-above gated as the
+// read companion to CutVersion (#1876), not audited on success (a
+// denial emits a blocked audit event via authorizeDeploy).
 func (s *Service) SuggestNextVersion(ctx context.Context, req *memqlv1.SuggestNextVersionRequest) (*memqlv1.SuggestNextVersionResult, error) {
 	consoleEnv := req.GetEnv()
 	if !validEnvs[consoleEnv] {
 		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid env %q (want staging|prod)", consoleEnv)
 	}
-	if _, err := s.authorize(ctx, "suggest_version", map[string]any{"env": consoleEnv}); err != nil {
+	if _, err := s.authorizeDeploy(ctx, "suggest_version", map[string]any{"env": consoleEnv}); err != nil {
 		return nil, err
 	}
 
@@ -66,9 +70,9 @@ func (s *Service) SuggestNextVersion(ctx context.Context, req *memqlv1.SuggestNe
 
 // CutVersion creates a new pending deployment at the chosen next version
 // (#1877). The target is the current version bumped by `bump` (patch
-// default), or an explicit `version` override. Owner/admin gated; emits
-// exactly one audit event (success / failure). Invalid or duplicate
-// versions are rejected.
+// default), or an explicit `version` override. Developer-or-above gated
+// (#1876); emits exactly one audit event (success / failure). Invalid or
+// duplicate versions are rejected.
 func (s *Service) CutVersion(ctx context.Context, req *memqlv1.CutVersionRequest) (*memqlv1.ActionResult, error) {
 	consoleEnv := req.GetEnv()
 	if !validEnvs[consoleEnv] {
@@ -90,7 +94,9 @@ func (s *Service) CutVersion(ctx context.Context, req *memqlv1.CutVersionRequest
 	}
 
 	detail := map[string]any{"env": consoleEnv, "bump": bump, "requestedVersion": explicit}
-	act, err := s.authorize(ctx, "cut_version", detail)
+	// Cutting a version is a forward-deploy action: developer-or-above
+	// (#1876).
+	act, err := s.authorizeDeploy(ctx, "cut_version", detail)
 	if err != nil {
 		return nil, err
 	}

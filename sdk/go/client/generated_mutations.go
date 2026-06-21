@@ -2565,7 +2565,7 @@ type MutationCreateClusterSettingsArgs struct {
 	RegistrationMode    string
 	RegistrationDomains string
 	InternalDomains     string
-	// Enum: owner | admin | writer | reader
+	// Enum: owner | admin | developer | writer | reader
 	InternalDefaultRole           string
 	RegisteredClientsJSON         string
 	AccessRequestNotifyEmails     string
@@ -2858,7 +2858,7 @@ type MutationCreateDelegationArgs struct {
 	// Enum: human | synthetic
 	IdentityType string
 	AgentId      string
-	// Enum: owner | admin | writer | reader
+	// Enum: owner | admin | developer | writer | reader
 	RoleCeiling      string
 	Scopes           []string
 	CreatedBySubject string
@@ -6091,7 +6091,7 @@ type MutationCreateUserArgs struct {
 	UserId       string
 	DisplayName  string
 	PrimaryEmail string
-	// Enum: owner | admin | writer | reader
+	// Enum: owner | admin | developer | writer | reader
 	Role        string
 	GroupIds    map[string]any
 	Preferences map[string]any
@@ -6156,7 +6156,7 @@ type MutationCreateUserOnFirstLoginArgs struct {
 	PrimaryRole  string
 	Gender       string
 	Birthdate    string
-	// Enum: owner | admin | writer | reader
+	// Enum: owner | admin | developer | writer | reader
 	Role        string
 	Internal    bool
 	GroupIds    map[string]any
@@ -11798,7 +11798,7 @@ type MutationUpdateClusterSettingsArgs struct {
 	RegistrationMode    string
 	RegistrationDomains string
 	InternalDomains     string
-	// Enum: owner | admin | writer | reader
+	// Enum: owner | admin | developer | writer | reader
 	InternalDefaultRole           string
 	RegisteredClientsJSON         string
 	AccessRequestNotifyEmails     string

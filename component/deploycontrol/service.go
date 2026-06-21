@@ -160,17 +160,43 @@ func resolveActor(ctx context.Context) (actor, bool) {
 // authorize resolves the caller and enforces the owner/admin gate
 // (#728). On deny it emits a blocked audit event for the given verb +
 // detail and returns a PermissionDenied status error. The returned
-// actor is valid only when err == nil.
+// actor is valid only when err == nil. This is the default gate for
+// every write RPC except the forward-deploy actions (cut + deploy),
+// which loosen to developer-or-above via authorizeDeploy (#1876).
 func (s *Service) authorize(ctx context.Context, verb string, detail map[string]any) (actor, error) {
+	return s.authorizeWith(ctx, verb, detail, auth.AtLeastAdmin, "owner or admin")
+}
+
+// authorizeDeploy enforces the developer-or-above gate for the
+// forward-deploy actions -- cut version + deploy (memql#1876, epic
+// #1871). Developer/admin/owner may ship; writer/reader stay
+// read-only. Rollback deliberately stays on the stricter authorize
+// (owner/admin) gate: developer can deploy forward but not roll back.
+func (s *Service) authorizeDeploy(ctx context.Context, verb string, detail map[string]any) (actor, error) {
+	return s.authorizeWith(ctx, verb, detail, auth.AtLeastDeveloper, "developer, admin, or owner")
+}
+
+// authorizeWith is the shared gate body: resolve the caller, run the
+// supplied role predicate, and on deny emit a blocked audit event for
+// the verb + detail before returning a PermissionDenied (or
+// Unauthenticated, when no actor is present) status error. The returned
+// actor is valid only when err == nil.
+func (s *Service) authorizeWith(
+	ctx context.Context,
+	verb string,
+	detail map[string]any,
+	allow func(auth.UserContext) bool,
+	requirement string,
+) (actor, error) {
 	act, ok := resolveActor(ctx)
 	if !ok {
 		s.emitAudit(ctx, verb, actor{}, detail, identity.AuditOutcomeBlocked, "no authenticated actor")
 		return actor{}, status.Error(codes.Unauthenticated, "deploy console: no authenticated caller")
 	}
-	if !auth.AtLeastAdmin(act.userContext()) {
-		s.emitAudit(ctx, verb, act, detail, identity.AuditOutcomeBlocked, "caller is not owner/admin")
+	if !allow(act.userContext()) {
+		s.emitAudit(ctx, verb, act, detail, identity.AuditOutcomeBlocked, "caller role not permitted: "+string(act.role))
 		return actor{}, status.Errorf(codes.PermissionDenied,
-			"deploy console: %s requires owner or admin role (have %q)", verb, act.role)
+			"deploy console: %s requires %s role (have %q)", verb, requirement, act.role)
 	}
 	return act, nil
 }

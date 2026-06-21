@@ -1,33 +1,43 @@
 // specs.memql
 //
-// Deployment-namespace specs. The Deployment Console
-// (znasllc-io/memql#725 + #728) is gated to owner/admin; this context-
-// spec mirrors the canonical requiresAdmin in dsl/_reference/_spec.memql
-// and binds to the actorEnvelope @actor shape so it evaluates
-// in-process against the auth context. The DeployControlService Go
-// layer enforces the same predicate via auth.AtLeastAdmin; this spec
-// is the DSL-side mirror so policies / queries can delegate to it via
-// spec("requiresOwnerOrAdmin").
+// Deployment-namespace specs. These context-specs bind to the
+// actorEnvelope @actor shape so they evaluate in-process against the
+// auth context. They are the DSL-side mirrors of the role gates the
+// DeployControlService Go layer enforces (component/deploycontrol);
+// policies / queries can delegate to them via spec("name").
 //
-// #1872 (persisted deployments) reuses this same owner/admin gate for
-// the deployment-lifecycle mutations: mutationCreateDeployment +
+// Two gates, per the role matrix decided in #1876 (epic #1871):
+//
+//   - requiresOwnerOrAdmin: the original Deployment Console gate (#728).
+//     Mirrors auth.AtLeastAdmin. Still the gate for ROLLBACK
+//     (RollbackDeployment) -- developer can deploy forward but not roll
+//     back -- and for the legacy console actions (DeployStaging /
+//     Promote / Rollback / RolloutAction / GetDeploymentStatus).
+//
+//   - requiresDeveloperOrAbove: the FORWARD-DEPLOY gate (#1876).
+//     Mirrors auth.AtLeastDeveloper (developer / admin / owner). Gates
+//     CutVersion + Deploy (and the SuggestNextVersion read companion).
+//     A developer is engineering power that may cut + ship a version;
+//     writer/reader stay read-only.
+//
+// #1872 (persisted deployments): mutationCreateDeployment +
 // mutationUpdateDeploymentStatus (dsl/cluster/mutations.memql) are only
-// ever invoked from the owner/admin-gated DeployControlService write
-// RPCs, so the deploy-start write and every status transition inherit
-// the same authorization decision the console read/write path enforces.
-//
-// #1877 (cut a version) reuses the SAME gate: the SuggestNextVersion
-// (read) + CutVersion (write) RPCs both run s.authorize -> owner/admin,
-// and CutVersion creates the new pending deployment via that same
-// mutationCreateDeployment -- so the cut-version path inherits this
-// predicate too. owner/admin gating is sufficient for now; the
-// developer-role split is tracked separately in #1876.
+// ever invoked from these Go-gated write RPCs, so the deploy-start write
+// and every status transition inherit the same authorization decision
+// the console read/write path enforces.
 
 use common.shapes.{ actorEnvelope }
 
 @enabled
-@description("Caller must hold owner or admin role to use the Deployment Console.")
+@description("Caller must hold owner or admin role. The rollback + legacy-console gate (#728); also the upper bound on actions a developer may NOT perform (rollback).")
 @shape("actorEnvelope")
 spec requiresOwnerOrAdmin {
   actor.role == "admin" || actor.role == "owner"
+}
+
+@enabled
+@description("Caller must hold developer, admin, or owner role. The forward-deploy gate (#1876): cut a version + deploy. Writer/reader are read-only; rollback stays owner/admin via requiresOwnerOrAdmin.")
+@shape("actorEnvelope")
+spec requiresDeveloperOrAbove {
+  actor.role == "developer" || actor.role == "admin" || actor.role == "owner"
 }
