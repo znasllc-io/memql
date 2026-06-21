@@ -37,16 +37,22 @@ TIGER_SVC="${TIGER_SVC:-xahn9ru4v6}"   # staging Tiger service id
 NS="${NS:-memql}"
 PGCONNECT_TIMEOUT_S="${PGCONNECT_TIMEOUT_S:-8}"
 
-# deployer-role reaper (memql#1861). The tooling role that leaks idle pools.
-DEPLOYER_ROLE="${DEPLOYER_ROLE:-deployer}"
-# Reap deployer backends idle longer than this (server-side backstop + the
-# one-time terminate threshold). 5min comfortably outlives any legitimate
-# gate/migrate/promote run while killing the 8h+ leaks (#1861).
+# deployer leak reclaim (memql#1861). The leaking client stamps this
+# application_name (there is no 'deployer' Postgres role).
+DEPLOYER_APPNAME="${DEPLOYER_APPNAME:-deployer}"
+# Reclaim backends idle longer than this. 5min comfortably outlives any
+# legitimate gate/migrate/promote run while killing the 8h+ leaks (#1861).
 DEPLOYER_IDLE_TIMEOUT_MS="${DEPLOYER_IDLE_TIMEOUT_MS:-300000}"
 
 # DB-connecting node -> steady replica count (restored after recover).
+# bff is intentionally NOT in this list: it is an argo Rollout whose serving
+# pods are owned by the Rollout, while the `bff` Deployment is only the
+# workloadRef pod template and MUST stay scaled to 0. Scaling deployment/bff up
+# (as an earlier version of this script did on restore) spawns a SECOND bff
+# ReplicaSet that double-draws DB connections and drives 53300 (memql#1868).
+# See enforce_bff_rollout_invariant().
 NODE_REPLICAS=(
-  "bff=2" "cognition=2" "agent=2" "planner=2"
+  "cognition=2" "agent=2" "planner=2"
   "voice=2" "workbench=2" "identity=2" "mcp=1"
 )
 
@@ -98,6 +104,21 @@ function scale_fleet() {
     echo "  kubectl scale deployment/$node -> $target"
     kubectl -n "$NS" scale deployment "$node" --replicas="$target" 2>&1 | sed 's/^/    /'
   done
+  enforce_bff_rollout_invariant
+}
+
+function enforce_bff_rollout_invariant() {
+  # bff is an argo Rollout; the `bff` Deployment is only the workloadRef pod
+  # template and MUST stay scaled to 0 (the Rollout owns the serving pods, and
+  # ArgoCD ignores the Deployment's /spec/replicas). Pin it to 0 on every
+  # scale_fleet call so a recover run can NEVER leave a second bff ReplicaSet
+  # running -- that duplicate double-draws DB connections and drives 53300
+  # (memql#1868). To actually drain bff's own connections, scale the Rollout via
+  # `kubectl argo rollouts` directly; this script deliberately does not, to avoid
+  # perturbing a blue-green promotion mid-incident.
+  echo "  pinning bff workloadRef Deployment -> 0 (Rollout owns bff pods; memql#1868)"
+  kubectl -n "$NS" scale deployment bff --replicas=0 2>&1 | sed 's/^/    /' \
+    || echo "    (no bff Deployment to pin; ok)"
 }
 
 function abort_bff_rollout() {
@@ -129,8 +150,11 @@ function recover() {
 }
 
 function deployer_inspect() {
-  # Snapshot the deployer tooling-role backends so the leaking client can be
-  # identified by application_name / client_addr / age (memql#1861).
+  # Snapshot the leaking backends by application_name so the source client can
+  # be identified by client_addr / age (memql#1861). The leak is a CLIENT that
+  # stamps application_name='deployer' (a deploy/migrate process) and never
+  # closes its pool -- there is NO Postgres role named 'deployer', so the match
+  # is on application_name, not usename.
   local d
   d="$(dsn)"
   if [ -z "$d" ]; then
@@ -139,33 +163,27 @@ function deployer_inspect() {
   fi
   export PGCONNECT_TIMEOUT="$PGCONNECT_TIMEOUT_S"
 
-  echo "===== '$DEPLOYER_ROLE' backends: count by state ====="
-  psql "$d" -c "SELECT count(*), state, application_name
+  echo "===== application_name='$DEPLOYER_APPNAME' backends: count by state + client ====="
+  psql "$d" -c "SELECT count(*), state, client_addr, usename
                 FROM pg_stat_activity
-                WHERE usename = '$DEPLOYER_ROLE'
-                GROUP BY 2,3 ORDER BY 1 DESC;" 2>&1
+                WHERE application_name = '$DEPLOYER_APPNAME'
+                GROUP BY 2,3,4 ORDER BY 1 DESC;" 2>&1
 
-  echo "===== '$DEPLOYER_ROLE' backends: oldest first (leak hunt) ====="
-  psql "$d" -c "SELECT pid, application_name, client_addr, state,
+  echo "===== application_name='$DEPLOYER_APPNAME' backends: oldest first (leak hunt) ====="
+  psql "$d" -c "SELECT pid, usename, client_addr, state,
                        now()-state_change AS in_state, left(query,40) AS q
                 FROM pg_stat_activity
-                WHERE usename = '$DEPLOYER_ROLE'
+                WHERE application_name = '$DEPLOYER_APPNAME'
                 ORDER BY state_change ASC NULLS FIRST LIMIT 40;" 2>&1
-
-  echo "===== role-level idle reaper currently set on '$DEPLOYER_ROLE' ====="
-  psql "$d" -At -c "SELECT unnest(rolconfig) FROM pg_roles
-                    WHERE rolname = '$DEPLOYER_ROLE'
-                      AND rolconfig IS NOT NULL;" 2>&1
-  echo "(blank above = no role-level idle_session_timeout backstop yet)"
 }
 
 function deployer_reclaim() {
-  # Two parts (memql#1861):
-  #   1. Install the PERMANENT server-side backstop on the role itself, so a
-  #      leaked deployer pool is reaped no matter which client opened it. Only
-  #      affects NEW connections.
-  #   2. Terminate the EXISTING leaked idle / idle-in-transaction backends to
-  #      reclaim the slots right now.
+  # Terminate the leaked idle backends stamped application_name='deployer' to
+  # reclaim the slots now (memql#1861). There is no 'deployer' ROLE, so there is
+  # no ALTER ROLE backstop to install -- the DURABLE fix is to stop the source
+  # client (identify it by client_addr below and make it close its pool / set an
+  # idle timeout). Reclaim is owner-run; it only kills sessions idle past the
+  # threshold (a live gate/migrate run is never mid-statement that long).
   local d
   d="$(dsn)"
   if [ -z "$d" ]; then
@@ -180,19 +198,12 @@ function deployer_reclaim() {
   deployer_inspect
   echo
 
-  echo "### installing permanent role-level idle reaper on '$DEPLOYER_ROLE' (${DEPLOYER_IDLE_TIMEOUT_MS}ms) ###"
-  # idle_session_timeout reaps plain idle sessions; idle_in_transaction guards a
-  # wedged client holding a slot mid-transaction. Both are PG14+ / Tiger-supported.
-  psql "$d" \
-    -c "ALTER ROLE \"$DEPLOYER_ROLE\" SET idle_session_timeout = '${DEPLOYER_IDLE_TIMEOUT_MS}ms';" \
-    -c "ALTER ROLE \"$DEPLOYER_ROLE\" SET idle_in_transaction_session_timeout = '${DEPLOYER_IDLE_TIMEOUT_MS}ms';" 2>&1
-
-  echo "### terminating existing '$DEPLOYER_ROLE' backends idle > ${secs}s ###"
-  psql "$d" -c "SELECT pid,
+  echo "### terminating leaked application_name='$DEPLOYER_APPNAME' backends idle > ${secs}s ###"
+  psql "$d" -c "SELECT pid, client_addr,
                        pg_terminate_backend(pid) AS terminated,
                        now()-state_change AS was_idle_for
                 FROM pg_stat_activity
-                WHERE usename = '$DEPLOYER_ROLE'
+                WHERE application_name = '$DEPLOYER_APPNAME'
                   AND state IN ('idle', 'idle in transaction')
                   AND state_change < now() - interval '${secs} seconds'
                   AND pid <> pg_backend_pid();" 2>&1
@@ -201,9 +212,11 @@ function deployer_reclaim() {
   echo "### AFTER ###"
   deployer_inspect
   echo
-  echo "NOTE: the ALTER ROLE backstop is permanent + leak-proof. Once the"
-  echo "reclaimed slots stay free, the per-pod MAX_OPEN_CONNS (cut to 4 under"
-  echo "#1858) can be raised back toward the default 10 -- see"
+  echo "DURABLE FIX: this only reclaims the CURRENT leak. The source client"
+  echo "(see client_addr above) keeps re-leaking ~1 conn per run until it is"
+  echo "stopped or made to close its pool. Once the leak source is fixed and"
+  echo "the slots stay free, the per-pod MAX_OPEN_CONNS (cut to 4 under #1858)"
+  echo "can be raised back toward 10 -- see"
   echo "docs/public/operate/db-connection-budget.md (#1861)."
 }
 
@@ -214,13 +227,13 @@ Usage: $0 <capture|recover|deployer-inspect|deployer-reclaim>
   capture           Snapshot max_connections + pg_stat_activity (needs one free slot).
   recover           Capture, drain the DB-connecting fleet to 0, re-capture the
                     pg_stat_activity breakdown, then restore steady replicas.
-  deployer-inspect  Snapshot the '$DEPLOYER_ROLE' tooling-role backends to find a
-                    leaked idle pool (memql#1861). Read-only.
-  deployer-reclaim  Install a permanent role-level idle reaper on '$DEPLOYER_ROLE'
-                    and terminate its existing leaked idle backends (memql#1861).
+  deployer-inspect  Snapshot the application_name='$DEPLOYER_APPNAME' backends to find
+                    the leaking client by client_addr (memql#1861). Read-only.
+  deployer-reclaim  Terminate the leaked idle application_name='$DEPLOYER_APPNAME'
+                    backends (memql#1861). Stop the source client for the durable fix.
 
 Env overrides: TIGER_SVC ($TIGER_SVC), NS ($NS), PGCONNECT_TIMEOUT_S,
-               DEPLOYER_ROLE ($DEPLOYER_ROLE), DEPLOYER_IDLE_TIMEOUT_MS ($DEPLOYER_IDLE_TIMEOUT_MS).
+               DEPLOYER_APPNAME ($DEPLOYER_APPNAME), DEPLOYER_IDLE_TIMEOUT_MS ($DEPLOYER_IDLE_TIMEOUT_MS).
 EOF
 }
 

@@ -166,47 +166,62 @@ Tiger console compute calculator). The code fixes reduce the floor and
 stop the bleed; the resize makes capacity durable. Tracked as the resize
 follow-up off #1817.
 
-## Leaked `deployer` tooling-role pool (memql#1861)
+## Leaked `application_name=deployer` pool (memql#1861)
 
 While root-causing the deploy connection storm (#1858) we found a separate,
-durable leak: a `deployer`-role pool holding **~21 idle connections, 8h+ old**
-on the staging instance. With `max_connections=105` and ~17 reserved, that one
-leak permanently ate roughly **a third** of the usable mesh budget — which is
-why #1858 had to pin `MAX_OPEN_CONNS=4`.
+durable leak: **~28 idle connections, up to 12h old** on the staging instance,
+all stamped **`application_name='deployer'`**, owned by the **`postgres`
+superuser**, from a single client (Tailscale `100.126.218.80`), each last-running
+`pg_advisory_unlock(...)` and growing ~1 connection per ~30 min. With
+`max_connections=105` and ~17 reserved, that leak ate roughly **a third** of the
+usable mesh budget — a major reason #1858 had to pin `MAX_OPEN_CONNS=4`.
 
-**Why the app's own reaper didn't catch it.** The app fleet connects as the
-Tiger master role (`tsdbadmin`) and reaps its own idle connections client-side
-(`CONN_MAX_IDLE_TIME_MS` + the per-session `idle_session_timeout` /
-`idle_in_transaction_session_timeout` stamped in `component/database/database.go`,
-#1817). `deployer` is a **separate** least-privilege credential used by deploy
-tooling (gate / migrate / promote / exporters). Nothing in any repo opens a
-`deployer` pool with a client-side reaper, so a tool that opens a pool and never
-closes it leaves its backends idle indefinitely.
+**It is NOT a `deployer` role.** There is no Postgres role named `deployer`
+(`ALTER ROLE deployer` → "role does not exist"). The leak is a *client* — a
+deploy/migration-type process connecting as the `postgres` superuser and
+stamping `application_name=deployer` — that opens a connection and never closes
+it. (The app fleet itself connects as the Tiger master role `tsdbadmin` and
+reaps its own idle connections client-side via `CONN_MAX_IDLE_TIME_MS` + the
+per-session `idle_session_timeout` stamped in `component/database/database.go`,
+#1817 — so the app is not the leaker.)
 
-**Fix — reap at the role, not the client.** Rather than hunt down every tool
-that might leak a `deployer` pool, install a server-side idle reaper on the role
-itself so it is leak-proof regardless of which client misbehaves:
-
-```sql
-ALTER ROLE deployer SET idle_session_timeout = '300000ms';
-ALTER ROLE deployer SET idle_in_transaction_session_timeout = '300000ms';
-```
-
-5 min comfortably outlives any legitimate gate/migrate/promote run while killing
-the 8h+ leaks. This only affects **new** connections, so the existing leaked
-backends are terminated in the same pass. Both knobs are PG14+ / Tiger-supported.
-
-Owner-run, via the same recovery script (the master DSN has `ALTER ROLE`
-privilege over `deployer`):
+**Reclaim (owner-run, needs SUPERUSER).** The leaked sessions are owned by
+`postgres`, and *only a superuser may terminate a superuser's sessions* — so
+`tsdbadmin` (the recovery DSN) CANNOT kill them. Reclaim with the
+postgres-superuser DSN (the same credential the leaking tool uses):
 
 ```bash
-scripts/ops/conn-recover.sh deployer-inspect   # read-only: find the leaking client
-scripts/ops/conn-recover.sh deployer-reclaim   # install role reaper + terminate leaks
+SUPERUSER_DSN='postgresql://postgres:…@<host>:<port>/tsdb?sslmode=require' \
+  scripts/ops/conn-recover.sh ... # or the staged /tmp reclaim helper
+# terminates idle sessions WHERE application_name='deployer'
 ```
 
-After the reclaim sticks, the ~21 slots are back and the per-pod
+`conn-recover.sh deployer-inspect` (read-only, runs as `tsdbadmin`) still finds
+the leak and prints the source `client_addr`. `deployer-reclaim` attempts the
+terminate but needs a superuser DSN to succeed against `postgres`-owned sessions.
+
+**Durable fix = stop the source.** There is no role to put a server-side reaper
+on, so terminating only reclaims the *current* leak — the source process keeps
+re-leaking until it is stopped or made to close its pool / set an idle timeout.
+Identify it by the `client_addr` from `deployer-inspect`.
+
+After the reclaim sticks, the ~28 slots are back and the per-pod
 `MAX_OPEN_CONNS` (cut to 4 under #1858) can be raised back toward the default 10
 — see [the budget standard](../../public/operate/db-connection-budget.md).
+
+## bff is Rollout-managed — never scale its Deployment up (memql#1868)
+
+`bff` is an argo **Rollout** that adopts the `bff` Deployment via `workloadRef`
+(`scaleDown: onsuccess`). The Deployment is **only the pod template and must stay
+scaled to 0** — the Rollout owns the serving pods, and ArgoCD ignores the
+Deployment's `/spec/replicas` (see `deploy/argocd/apps/rollouts.yaml`). Scaling
+`deployment/bff` **up** spawns a SECOND bff ReplicaSet that double-draws DB
+connections and is itself a 53300 driver. A recovery drain that scales
+`deployment/bff` back to 2 on restore recreates exactly that overlap — so
+`conn-recover.sh` keeps bff out of the Deployment scale set and pins
+`deployment/bff` to 0 (`enforce_bff_rollout_invariant`, memql#1868). To drain
+bff's own connections, scale the Rollout via `kubectl argo rollouts`, not the
+Deployment.
 
 ## Reproduction / verification
 
@@ -228,9 +243,11 @@ Scoped off this spike (see memql#1817):
 - **Deploy-gate connection-headroom check** (epic #1778 child F): block a
   promotion whose projected Σ(pods × MaxOpen) + surge would exceed
   `max_connections − reserved`.
-- **Reclaim the leaked `deployer` pool + install the role-level idle reaper**
-  (memql#1861, owner-run): `scripts/ops/conn-recover.sh deployer-reclaim`. Then
-  re-evaluate whether `MAX_OPEN_CONNS` can be raised off the #1858 floor of 4.
+- **Reclaim the leaked `application_name=deployer` pool + stop the source**
+  (memql#1861, owner-run, needs SUPERUSER): terminate the idle sessions, then
+  stop the leaking client (identified by `client_addr` from
+  `conn-recover.sh deployer-inspect`). Then re-evaluate whether `MAX_OPEN_CONNS`
+  can be raised off the #1858 floor of 4.
 - **Confirm the `pg_stat_activity` breakdown** once a slot is free (run
   `scripts/ops/conn-recover.sh capture`) and append the table here — now
   attributable by `application_name` thanks to the stamping above.

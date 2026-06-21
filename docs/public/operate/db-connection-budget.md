@@ -70,15 +70,17 @@ replicas or a pooler.
   `idle_session_timeout` + `idle_in_transaction_session_timeout` as per-session
   params so a wedged app client can't hold a slot indefinitely (Tiger Cloud /
   local both support it).
-- **Tooling-role idle reaper** (memql#1861): the app fleet reaps its own idle
-  connections, but **non-app tooling roles do not** — a deploy/migrate/promote
-  job or exporter that connects under a separate role (e.g. `deployer`) and
-  leaks an unclosed pool will pin idle slots for hours, eating the budget. There
-  is no client-side reaper to rely on there, so set the backstop on the *role*:
-  `ALTER ROLE <role> SET idle_session_timeout = '300000ms'` (+
-  `idle_in_transaction_session_timeout`). This reaps a leaked pool regardless of
-  which client opened it. Apply + reclaim with
-  `scripts/ops/conn-recover.sh deployer-reclaim`.
+- **Watch for non-app client leaks** (memql#1861): the app fleet reaps its own
+  idle connections, but a **separate deploy/migrate/promote tool or exporter**
+  that opens a pool and never closes it has no such reaper — it will pin idle
+  slots for hours and eat the budget. On staging this showed up as ~28 idle
+  backends stamped `application_name=deployer`, connecting as the `postgres`
+  superuser, growing ~1 per 30 min. Find them with
+  `scripts/ops/conn-recover.sh deployer-inspect` (read-only) and reclaim with the
+  postgres-superuser DSN (only a superuser may terminate superuser-owned
+  sessions). The durable fix is to **stop the leaking client** (identified by its
+  `client_addr`) and make it close its pool / set an idle timeout — there is no
+  shared role to put a server-side reaper on.
 - **Blue-green drain window** (child E, memql#1780): the bff Rollout's
   `scaleDownDelaySeconds` was cut 3600→300 so a promotion stops holding a full
   extra bff color (pods + pools) for an hour. See `deploy/rollouts/README.md`.
