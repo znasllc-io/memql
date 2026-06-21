@@ -46,6 +46,10 @@ spec:
       # Graceful shutdown (#552 + zero-downtime #615): grace period must
       # exceed preStop (5s) + MEMQL_SHUTDOWN_DRAIN_DELAY (5s) + the app Stop
       # budget (30s) so endpoint-deregistration + drain + GracefulStop finish.
+      # memql#1875: the app drain now also CLOSES the Postgres pool as an
+      # explicit phase (after in-flight work quiesces, before the Stop sweep),
+      # so a draining pod releases its TigerDB connections within this window
+      # instead of holding them until process exit.
       terminationGracePeriodSeconds: 60
 
       containers:

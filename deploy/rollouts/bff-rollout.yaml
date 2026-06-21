@@ -63,6 +63,14 @@ spec:
       # overlap. 120s still drains most streams; older streams reconnect to the new
       # color, and #616 already scales down earlier once activeStreams hit zero --
       # so the ceiling rarely binds. Per-env override is fine if prod needs longer.
+      #
+      # memql#1875: the old color no longer holds its Postgres pool for the whole
+      # window. When the controller scales the old ReplicaSet down (SIGTERM ->
+      # preStop -> app drain), app/run.go now CLOSES the DB pool as an explicit
+      # drain phase before the dependency Stop sweep, so the old color's TigerDB
+      # sessions are handed back promptly at teardown rather than lingering. This
+      # shrinks the worst-case overlap; lowering scaleDownDelaySeconds further is
+      # an option once the TigerDB max_connections ceiling is confirmed.
       scaleDownDelaySeconds: 120
 ---
 # Preview Service the Rollout points new (pre-promotion) pods at, so the gate can
