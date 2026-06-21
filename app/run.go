@@ -265,11 +265,48 @@ func Run(cfg RunConfig) {
 	// before the Stop sweep closes the transport. No-op on non-mesh binaries.
 	application.MarkNodeStopped()
 
+	// Release the database connection pool as an explicit drain phase
+	// (memql#1875). The node is already de-routed (readiness 503, gossip
+	// DRAINING) and in-flight work has drained, so hand the TigerDB sessions
+	// back NOW -- before the (potentially slow, per-dependency-timeout-bounded)
+	// Stop sweep below -- rather than holding up to MaxOpenConns connections
+	// open the whole time the process lingers in the blue-green scale-down
+	// window. This shrinks the deploy-time connection overlap that exhausts the
+	// instance ceiling (SQLSTATE 53300). Runs AFTER EmitSystemShutdown +
+	// MarkNodeStopped (which still need the DB) and is idempotent with the DB
+	// component's own Stop in the sweep.
+	application.releaseDatabasePools(timeout)
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	stop(shutdownCtx, application.Dependencies...)
 
 	cfg.Logger.Info("shutdown complete")
+}
+
+// releaseDatabasePools closes the node's database connection pool as an
+// explicit drain phase, BEFORE the dependency Stop sweep, so a draining
+// blue-green color hands its TigerDB connections back promptly instead of
+// holding them until process exit (memql#1875). No-op on a build without a
+// database handle. The released-connection counts are logged so a deploy can
+// observe the drop in active connections per node.
+func (a *App) releaseDatabasePools(timeout time.Duration) {
+	if a == nil || a.db == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	stats := a.db.ClosePool(ctx)
+
+	a.Logger.Info("released database connection pool on drain",
+		"openConnections", stats.OpenConnections,
+		"inUse", stats.InUse,
+		"idle", stats.Idle,
+		"maxOpenConnections", stats.MaxOpenConnections,
+		"waitCount", stats.WaitCount,
+	)
 }
 
 // applyShutdownDrain runs the graceful-drain step (#552): mark the node

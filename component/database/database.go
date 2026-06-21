@@ -773,6 +773,67 @@ func (d *Database) Stop(ctx context.Context) {
 	}
 }
 
+// PoolStats returns a snapshot of the underlying *sql.DB connection-pool
+// statistics (open / in-use / idle counts + wait metrics). The bool reports
+// whether a live pool handle was present: false when the database has not
+// connected yet or has already been closed. Surfaces per-node active-
+// connection counts for the periodic pool-stats log and the drain sequence so
+// a deploy can watch the cluster-wide connection total against the TigerDB
+// ceiling (memql#1875).
+func (d *Database) PoolStats() (sql.DBStats, bool) {
+	d.Lock()
+	db := d.DB
+	d.Unlock()
+
+	if db == nil {
+		return sql.DBStats{}, false
+	}
+
+	return db.Stats(), true
+}
+
+// ClosePool stops the connection monitor and closes the underlying pool,
+// handing every open connection back to the database server. It is the
+// explicit, intention-revealing entry point the drain sequence calls so a
+// draining node releases its TigerDB sessions PROMPTLY instead of holding up
+// to MaxOpenConns connections open until the process finally exits at the end
+// of the blue-green scale-down window (memql#1875). Returns the pre-close pool
+// stats so the caller can log how many connections were released.
+//
+// The monitor is stopped first (via Stop) so the ticker reconnect loop can't
+// race in and re-open the pool we're about to close. Closing is then done
+// directly as well, so the method also works (and stays idempotent) when the
+// lifecycle was never started or has already stopped -- a second call, e.g.
+// the later dependency Stop sweep, is a harmless no-op.
+func (d *Database) ClosePool(ctx context.Context) sql.DBStats {
+	stats, _ := d.PoolStats()
+
+	// Cancel the monitor first so a ticker tick can't reconnect after we close.
+	// No-op (ErrLifecycleNotRunning, swallowed) when not running.
+	d.Stop(ctx)
+
+	// Stop's OnStop hook (cleanupAfterRun) already closes + nils the handles
+	// when the lifecycle was running. Guard the not-running path by closing any
+	// handle still present, so ClosePool releases connections unconditionally.
+	d.Lock()
+	db := d.DB
+	bunDB := d.Bun
+	d.DB = nil
+	d.Bun = nil
+	d.isRunning = false
+	d.Unlock()
+
+	if bunDB != nil {
+		_ = bunDB.Close()
+	}
+
+	if db != nil {
+		_ = db.Close()
+	}
+
+	return stats
+}
+
 func (d *Database) run(ctx context.Context, markStarted func()) error {
 	ctx = ensureContext(ctx)
 
@@ -824,8 +885,34 @@ func (d *Database) run(ctx context.Context, markStarted func()) error {
 					d.Logger.Error("monitoring failed", "dsn", d.safeDSN())
 				}
 			}
+
+			// Surface per-node active-connection counts on the monitor
+			// interval so a deploy can watch the cluster-wide connection
+			// total against the TigerDB ceiling and confirm draining nodes
+			// release their pools (memql#1875). Lightweight: one line per
+			// monitor tick, reusing the existing ticker (no new goroutine).
+			d.logPoolStats()
 		}
 	}
+}
+
+// logPoolStats emits a single concise connection-pool line (open / in-use /
+// idle vs. the configured max, plus wait pressure). A no-op when no live pool
+// handle is present. Called on the monitor interval from run (memql#1875).
+func (d *Database) logPoolStats() {
+	stats, ok := d.PoolStats()
+	if !ok {
+		return
+	}
+
+	d.Logger.Info("db pool stats",
+		"open", stats.OpenConnections,
+		"inUse", stats.InUse,
+		"idle", stats.Idle,
+		"maxOpen", stats.MaxOpenConnections,
+		"waitCount", stats.WaitCount,
+		"waitDuration", stats.WaitDuration.String(),
+	)
 }
 
 func (d *Database) prepareForRun(ctx context.Context) (context.Context, context.CancelFunc, error) {
