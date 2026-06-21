@@ -246,6 +246,8 @@ them.
 | `MEMQL_NODE_SERVICE_ADDRESS`   | `:50052`                 | NodeService gRPC listen address.                                                                                       |
 | `MEMQL_NODE_FLAVOR`            | empty                    | Optional sub-type metadata; reserved for future use.                                                                   |
 | `MEMQL_NODE_LABELS`            | empty                    | Comma-separated `k=v` metadata (e.g. `region=us-west,tier=prod`).                                                      |
+| `MEMQL_NODE_RECONCILE_INTERVAL_SECONDS` | `3`            | Active topology reconciliation loop interval (#1874). How often the leader replica reaps superseded-deployment orphans + mesh-absent nodes from `v1:cluster:node`. Integer seconds; non-positive/invalid -> default. |
+| `MEMQL_NODE_RECONCILE_GRACE_SECONDS`    | `20`           | Grace window before a node continuously ABSENT from the live mesh is retired (#1874). Rides over transient gossip-propagation gaps; tighter than `MEMQL_NODE_STALE_PRUNE_MINUTES` (the 30-min lazy backstop). Integer seconds; non-positive/invalid -> default. |
 
 #### Transport
 

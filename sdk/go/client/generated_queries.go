@@ -4055,6 +4055,23 @@ func QueryStrandedCandidatePlansBuild(args QueryStrandedCandidatePlansArgs) stri
 	return "queryStrandedCandidatePlans({})"
 }
 
+// QuerySupersededDeployments -- Latest-per-deploymentId deployment rows whose status is terminal-not-active (superseded / failed / rolled_back) -- the deployments whose still-registered nodes are orphans. Feeds the active-topology reaper (#1874). asOf latest -> current status per deployment.
+//
+// Bound concept: deployment.
+type QuerySupersededDeploymentsArgs struct {
+}
+
+// QuerySupersededDeployments calls the engine query querySupersededDeployments.
+func (qc *QueryClient) QuerySupersededDeployments(ctx context.Context, args QuerySupersededDeploymentsArgs) (*Result, error) {
+	call := QuerySupersededDeploymentsBuild(args)
+	return qc.executeNamed(ctx, "querySupersededDeployments", call)
+}
+
+func QuerySupersededDeploymentsBuild(args QuerySupersededDeploymentsArgs) string {
+	_ = args
+	return "querySupersededDeployments({})"
+}
+
 // QuerySurfacesForOwner -- List the calling owner's active v1:actions:surface registry entries for the capability->surface resolver (Phase 2 #1737). Owned tier.
 //
 // Bound concept: surface.

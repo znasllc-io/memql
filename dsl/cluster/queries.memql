@@ -174,3 +174,37 @@ query deployment queryDeploymentById {
   filter  payload.deploymentId == args.deploymentId
   shape   deploymentFull
 }
+
+// ---- queries/v1/cluster/supersededDeployments.memql ----
+
+// Deployment-aware reaper input (#1874). Returns ONE row per deployment
+// (latest-per-deploymentId via `asOf latest`) whose CURRENT status is a
+// terminal-not-active one -- superseded (a newer deploy promoted past it),
+// failed, or rolled_back. These are exactly the deployments whose nodes are
+// orphans: still-registered pods from a deploy that is no longer the active
+// or in-flight one. The active-topology reconciler (TopologyReconciler,
+// component/node/reconciler.go) reads this set every tick and immediately
+// retires (health="stopped") any non-stopped v1:cluster:node whose
+// deploymentId lands in it -- so a superseded deployment's nodes clear from
+// topology within seconds of promotion completing, instead of waiting on the
+// liveness lapse or the 30-min prune.
+//
+// Why status-driven (not "deploymentId != currentId"): keying off the
+// deployment's recorded status avoids cutting an OLD deployment's pods while
+// they are still in-flight during a rollover overlap -- a node is only an
+// orphan once its deployment is explicitly marked superseded/failed/
+// rolled_back by the deploy driver. A node whose deploymentId has NO
+// deployment row (e.g. the dev "local" id) never matches, so local/dev
+// clusters are untouched by the orphan path.
+//
+// Authz: filters on payload.status only (infrastructure topology, no
+// user-scope field) -> conformance "other" bucket, same as
+// queryNodesNotInDeployment / queryDeploymentsForCluster.
+
+@enabled
+@description("Latest-per-deploymentId deployment rows whose status is terminal-not-active (superseded / failed / rolled_back) -- the deployments whose still-registered nodes are orphans. Feeds the active-topology reaper (#1874). asOf latest -> current status per deployment.")
+query deployment querySupersededDeployments {
+  filter  payload.status in ["superseded", "failed", "rolled_back"]
+  shape   deploymentFull
+  asOf    latest
+}

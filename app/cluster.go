@@ -488,6 +488,33 @@ func (a *App) cluster() {
 		if a.grpcServer != nil {
 			a.grpcServer.SetNodeMaintenanceHandler(&appNodeMaintenanceHandler{app: a})
 		}
+
+		// Active topology reconciliation / fast reaper (epic memql#1871,
+		// memql#1874). Every mesh replica starts the loop; a Postgres advisory
+		// lock elects ONE cluster-wide leader that reconciles, so two replicas
+		// never double-retire the same node. It drives topology freshness to
+		// seconds by retiring (a) nodes whose deployment is superseded/failed/
+		// rolled_back (querySupersededDeployments, immediate) and (b) nodes
+		// continuously absent from the live mesh past a short grace window --
+		// the crash/OOM/forced-replace case the gossip status writer misses and
+		// the 30-min prune (logicPruneStaleClusterNodes) only mops up lazily.
+		// The prune stays as the backstop; both write the same idempotent
+		// terminal health="stopped", so they never conflict. Wired here in app/
+		// because the reconciler needs the PeerManager (mesh view), the engine
+		// (queries + the retire mutation), and the cluster DB (the advisory
+		// lock) all resolved -- exactly the cluster-phase neighborhood the
+		// WorkerDialer is wired in.
+		if a.engine != nil {
+			dbGetter := func() *bun.DB {
+				if a.db == nil {
+					return nil
+				}
+				return a.db.BunDB()
+			}
+			a.Dependencies = append(a.Dependencies, node.NewTopologyReconciler(
+				nodeIdentity, peerMgr, a.engine, dbGetter, a.Logger,
+			))
+		}
 	}
 
 	// Expose node identity in /healthz so load balancers can route by type.
