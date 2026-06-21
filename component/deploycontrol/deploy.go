@@ -16,9 +16,9 @@
 //     it through the driver, landing in `rolled_back` on success.
 //
 // Deploy is developer-or-above gated (#1876): developer/admin/owner may
-// ship a cut version forward. RollbackDeployment stays on the stricter
-// owner/admin gate (#728) -- developer can deploy forward but not roll
-// back. Both emit exactly one audit event via finishWrite.
+// ship a cut version forward. RollbackDeployment is gated more strictly
+// -- owner-only (#1876) -- so developer and admin can deploy forward but
+// not roll back. Both emit exactly one audit event via finishWrite.
 package deploycontrol
 
 import (
@@ -99,14 +99,16 @@ func (s *Service) Deploy(ctx context.Context, req *memqlv1.DeployRequest) (*memq
 // color flip: it creates a NEW deployment record pointing at the
 // historical digest (previousDeploymentId -> toDeploymentId) and runs
 // that record through the driver, landing in `rolled_back` on success or
-// `failed` on driver error. Owner/admin gated; emits one audit event.
+// `failed` on driver error. Rollback is owner-only (#1876); emits one
+// audit event.
 func (s *Service) RollbackDeployment(ctx context.Context, req *memqlv1.RollbackDeploymentRequest) (*memqlv1.ActionResult, error) {
 	toID := strings.TrimSpace(req.GetToDeploymentId())
 	if toID == "" {
 		return nil, status.Error(codes.InvalidArgument, "deploy console: to_deployment_id is required")
 	}
 	detail := map[string]any{"toDeploymentId": toID}
-	act, err := s.authorize(ctx, "rollback_deployment", detail)
+	// rollback is owner-only (#1876): not even admin may roll back.
+	act, err := s.authorizeOwner(ctx, "rollback_deployment", detail)
 	if err != nil {
 		return nil, err
 	}

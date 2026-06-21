@@ -160,9 +160,11 @@ func resolveActor(ctx context.Context) (actor, bool) {
 // authorize resolves the caller and enforces the owner/admin gate
 // (#728). On deny it emits a blocked audit event for the given verb +
 // detail and returns a PermissionDenied status error. The returned
-// actor is valid only when err == nil. This is the default gate for
-// every write RPC except the forward-deploy actions (cut + deploy),
-// which loosen to developer-or-above via authorizeDeploy (#1876).
+// actor is valid only when err == nil. This is the owner/admin gate for
+// the legacy console actions (DeployStaging / Promote / Rollback /
+// RolloutAction / GetDeploymentStatus); the #1876 actions use the
+// looser authorizeDeploy (cut + deploy) or the stricter authorizeOwner
+// (rollback_deployment).
 func (s *Service) authorize(ctx context.Context, verb string, detail map[string]any) (actor, error) {
 	return s.authorizeWith(ctx, verb, detail, auth.AtLeastAdmin, "owner or admin")
 }
@@ -170,10 +172,18 @@ func (s *Service) authorize(ctx context.Context, verb string, detail map[string]
 // authorizeDeploy enforces the developer-or-above gate for the
 // forward-deploy actions -- cut version + deploy (memql#1876, epic
 // #1871). Developer/admin/owner may ship; writer/reader stay
-// read-only. Rollback deliberately stays on the stricter authorize
-// (owner/admin) gate: developer can deploy forward but not roll back.
+// read-only. Rollback is gated more strictly (owner-only) via
+// authorizeOwner: developer (and admin) can deploy forward but not
+// roll back.
 func (s *Service) authorizeDeploy(ctx context.Context, verb string, detail map[string]any) (actor, error) {
 	return s.authorizeWith(ctx, verb, detail, auth.AtLeastDeveloper, "developer, admin, or owner")
+}
+
+// authorizeOwner enforces the owner-only gate -- the strictest tier,
+// reserved for rollback (memql#1876, per the locked role matrix). Not
+// even admin may roll back; only the cluster owner can.
+func (s *Service) authorizeOwner(ctx context.Context, verb string, detail map[string]any) (actor, error) {
+	return s.authorizeWith(ctx, verb, detail, auth.IsOwner, "owner")
 }
 
 // authorizeWith is the shared gate body: resolve the caller, run the

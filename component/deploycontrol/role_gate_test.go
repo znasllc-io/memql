@@ -63,21 +63,58 @@ func TestDeveloperGate(t *testing.T) {
 		}
 	})
 
-	t.Run("developer is REJECTED on rollback", func(t *testing.T) {
-		eng := &fakeEngine{}
-		audit := &fakeAudit{}
-		svc := newTestServiceWithEngine(t, &fakeExecutor{}, audit, eng)
+	t.Run("admin may cut a version", func(t *testing.T) {
+		eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{deploymentNode("production", "succeeded", "1.4.2")}}
+		svc := newTestServiceWithEngine(t, &fakeExecutor{}, &fakeAudit{}, eng)
 
-		_, err := svc.RollbackDeployment(ctxWithRole(auth.RoleDeveloper), &memqlv1.RollbackDeploymentRequest{ToDeploymentId: "d1"})
-		if status.Code(err) != codes.PermissionDenied {
-			t.Fatalf("developer rollback code = %v, want PermissionDenied", status.Code(err))
+		res, err := svc.CutVersion(ctxWithRole(auth.RoleAdmin), &memqlv1.CutVersionRequest{Env: "prod", Bump: "patch"})
+		if err != nil {
+			t.Fatalf("admin CutVersion: %v", err)
 		}
-		// Gate fails closed: the engine is never touched on denial.
-		if len(eng.queries) != 0 {
-			t.Errorf("denied rollback must not touch the engine, got %v", eng.queries)
+		if !res.GetOk() {
+			t.Fatalf("ok = false: %q", res.GetMessage())
 		}
-		if len(audit.events) != 1 || audit.events[0].Outcome != "blocked" {
-			t.Errorf("want one blocked audit event, got %+v", audit.events)
+	})
+
+	// rollback is OWNER-ONLY (#1876): neither developer NOR admin may roll
+	// back, even though both may cut + deploy forward.
+	for _, role := range []auth.Role{auth.RoleDeveloper, auth.RoleAdmin} {
+		role := role
+		t.Run(string(role)+" is REJECTED on rollback", func(t *testing.T) {
+			eng := &fakeEngine{}
+			audit := &fakeAudit{}
+			svc := newTestServiceWithEngine(t, &fakeExecutor{}, audit, eng)
+
+			_, err := svc.RollbackDeployment(ctxWithRole(role), &memqlv1.RollbackDeploymentRequest{ToDeploymentId: "d1"})
+			if status.Code(err) != codes.PermissionDenied {
+				t.Fatalf("%s rollback code = %v, want PermissionDenied", role, status.Code(err))
+			}
+			// Gate fails closed: the engine is never touched on denial.
+			if len(eng.queries) != 0 {
+				t.Errorf("denied rollback must not touch the engine, got %v", eng.queries)
+			}
+			if len(audit.events) != 1 || audit.events[0].Outcome != "blocked" {
+				t.Errorf("want one blocked audit event, got %+v", audit.events)
+			}
+		})
+	}
+
+	t.Run("owner may roll back", func(t *testing.T) {
+		eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{
+			fullDeploymentNode(map[string]any{
+				"deploymentId": "good1", "status": "succeeded", "version": "1.2.0",
+				"imageDigest": "sha256:def", "provider": "azure", "environment": "staging",
+			}),
+		}}
+		exec := &fakeExecutor{promoteOut: "SUCCESS: rolled back"}
+		svc := newTestServiceWithEngine(t, exec, &fakeAudit{}, eng)
+
+		res, err := svc.RollbackDeployment(ctxWithRole(auth.RoleOwner), &memqlv1.RollbackDeploymentRequest{ToDeploymentId: "good1"})
+		if err != nil {
+			t.Fatalf("owner RollbackDeployment: %v", err)
+		}
+		if !res.GetOk() {
+			t.Fatalf("ok = false: %q", res.GetMessage())
 		}
 	})
 
