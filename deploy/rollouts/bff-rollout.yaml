@@ -17,6 +17,14 @@
 # deploy-gate.yaml) against the PREVIEW service BEFORE traffic flips. A failed
 # analysis aborts the promotion and keeps the active (stable) color serving --
 # automatic rollback, no `rollout undo`.
+#
+# DEPLOY DRIVER (znasllc-io/memql#1878): the deploycontrol "azure" driver
+# (component/deploycontrol/driver.go) reuses THIS rollout's path. Deploy /
+# RollbackDeployment run scripts/release/promote.sh, which pins the
+# digest-authority overlay; Argo CD + this blue/green Rollout's prePromotion
+# gate then reconcile and cut over. Rollback redeploys a historical release's
+# pinned digest through the same promote path (NOT a color flip -- the previous
+# color only survives the scale-down window).
 apiVersion: argoproj.io/v1alpha1
 kind: Rollout
 metadata:
