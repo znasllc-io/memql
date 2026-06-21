@@ -29,6 +29,7 @@ func allChecks() []check {
 		eventDryRunBindingCheck(),      // #1727
 		forgeLogicArgResolutionCheck(), // #1840
 		automationLogicFullBodyCheck(), // #1847
+		forgeAuditShortIdCheck(),       // #1859
 	}
 }
 

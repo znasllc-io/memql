@@ -147,6 +147,9 @@ func (c *ASTConverter) ConvertExpression(expr languageParser.ExpressionNode) (Ex
 	case *languageParser.HashExpr:
 		return c.convertPositionalBuiltin("hash",
 			[]languageParser.ExpressionNode{node.Target})
+	case *languageParser.ShortIdExpr:
+		return c.convertPositionalBuiltin("shortId",
+			[]languageParser.ExpressionNode{node.Target})
 	case *languageParser.CanonicalIdExpr:
 		// canonicalId(value, concept) -- Concept is a string literal
 		// at parse time (the concept's bare name), so encode it as a

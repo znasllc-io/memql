@@ -66,6 +66,7 @@ type (
 	TrimExpr                = ast.TrimExpr
 	ContainsExpr            = ast.ContainsExpr
 	HashExpr                = ast.HashExpr
+	ShortIdExpr             = ast.ShortIdExpr
 	CanonicalIdExpr         = ast.CanonicalIdExpr
 	AndExpr                 = ast.AndExpr
 	OrExpr                  = ast.OrExpr

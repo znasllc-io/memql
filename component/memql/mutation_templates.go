@@ -509,6 +509,19 @@ func (e *mutationTemplateEvaluator) evalString(ctx context.Context, s string) (a
 		return e.evalHash(ctx, trimmed)
 	}
 
+	// shortId(value) -- strip the canonical concept prefix from an
+	// id-shaped value and return the bare short id. The inverse of
+	// canonicalId. Idempotent: a value already bare (no version-tagged
+	// concept prefix) is returned unchanged, so it is a no-op on a
+	// tool-path short id. Used to keep foreign-key / audit fields (e.g.
+	// v1:forge:requestEvent.requestId) in one consistent short form
+	// regardless of whether the caller passes a canonical node id
+	// (automation path: args.event.payload.id) or a bare slug (tool
+	// path: args.requestId). See #1859.
+	if strings.HasPrefix(trimmed, "shortId(") && strings.HasSuffix(trimmed, ")") {
+		return e.evalShortId(ctx, trimmed)
+	}
+
 	// canonicalId(value, "<concept>") -- normalize an id-shaped value
 	// to canonical form (`<partition>:<concept>:<bareSlug>`) regardless
 	// of input shape (bare slug or already-canonical). The engine
@@ -949,6 +962,35 @@ func (e *mutationTemplateEvaluator) evalHash(ctx context.Context, expr string) (
 	}
 	sum := sha256.Sum256([]byte(input))
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// evalShortId resolves shortId(value) into the bare short id, stripping
+// any `<concept>:` prefix. The inverse of evalCanonicalId. Idempotent:
+// an already-bare value passes through unchanged. Empty/missing input
+// yields "". Single argument, mirrors evalHash. See #1859.
+func (e *mutationTemplateEvaluator) evalShortId(ctx context.Context, expr string) (string, error) {
+	arg, ok, err := parseSingleArg(expr, "shortId")
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("shortId() requires one argument")
+	}
+	raw := strings.TrimSpace(arg)
+	var input string
+	if isQuotedString(raw) {
+		input = unquoteSafe(raw)
+	} else {
+		ev, err := e.evalString(ctx, raw)
+		if err != nil {
+			return "", err
+		}
+		if ev == nil || isMissing(ev) {
+			return "", nil
+		}
+		input = fmt.Sprintf("%v", ev)
+	}
+	return e.engine.shortIdValue(input), nil
 }
 
 // evalCanonicalId resolves canonicalId(value, "<conceptType>") into

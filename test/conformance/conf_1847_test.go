@@ -88,8 +88,11 @@ func runAutomationLogicFullBody(t *testing.T, e *Env) {
 	}
 
 	// The 'routed' audit event (mutationRecordRequestEvent) is the other
-	// unreferenced side-effecting step.
-	routedEvents := asArray(t, e.runQuery(t, "queryRequestEvents", map[string]any{"requestId": canonicalRouteId}))
+	// unreferenced side-effecting step. The audit event is keyed by the SHORT
+	// request id (mutationRecordRequestEvent normalizes requestId via shortId(),
+	// #1859) -- read it back by the short id. (The dedicated short-vs-canonical
+	// audit-key contract lives in conf_1859_test.go.)
+	routedEvents := asArray(t, e.runQuery(t, "queryRequestEvents", map[string]any{"requestId": routeRequestId}))
 	if !hasEventKind(routedEvents, "routed") {
 		t.Fatalf("#1847: routeRequest did not write a 'routed' requestEvent "+
 			"(multi-step logic body's mutationRecordRequestEvent step was skipped); events=%v", routedEvents)
@@ -119,7 +122,9 @@ func runAutomationLogicFullBody(t *testing.T, e *Env) {
 	updatedEvent["oldStatus"] = "submitted"
 	fireForgeAutomation(t, e, "recordTransition", "node.updated", events.KindNodeUpdated, updatedEvent)
 
-	transitionEvents := asArray(t, e.runQuery(t, "queryRequestEvents", map[string]any{"requestId": canonicalTransitionId}))
+	// Read by the SHORT id -- mutationRecordRequestEvent keys the event under the
+	// normalized short requestId (shortId(), #1859).
+	transitionEvents := asArray(t, e.runQuery(t, "queryRequestEvents", map[string]any{"requestId": transitionRequestId}))
 	if !hasEventKind(transitionEvents, "approved") {
 		t.Fatalf("#1847: recordTransition did not write an 'approved' requestEvent on the queued transition "+
 			"(multi-step logic body's guarded mutationRecordRequestEvent step was skipped); events=%v", transitionEvents)
