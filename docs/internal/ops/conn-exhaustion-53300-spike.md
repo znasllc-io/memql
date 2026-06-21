@@ -166,48 +166,40 @@ Tiger console compute calculator). The code fixes reduce the floor and
 stop the bleed; the resize makes capacity durable. Tracked as the resize
 follow-up off #1817.
 
-## Leaked `application_name=deployer` pool (memql#1861)
+## `application_name=deployer` slots are Tiger's control plane (memql#1822, #1861)
 
-While root-causing the deploy connection storm (#1858) we found a separate,
-durable leak: **~28 idle connections, up to 12h old** on the staging instance,
-all stamped **`application_name='deployer'`**, owned by the **`postgres`
-superuser**, from a single client (Tailscale `100.126.218.80`), each last-running
-`pg_advisory_unlock(...)` and growing ~1 connection per ~30 min. With
-`max_connections=105` and ~17 reserved, that leak ate roughly **a third** of the
-usable mesh budget — a major reason #1858 had to pin `MAX_OPEN_CONNS=4`.
+The persistent `application_name='deployer'` idle connections that eat a chunk
+of the staging budget are **Tiger Cloud's OWN control-plane process, not a memql
+leak** — root-caused and tracked in **#1822** (this section supersedes the
+earlier "tooling-role pool" framing in #1861, which is a duplicate of #1822).
 
-**It is NOT a `deployer` role.** There is no Postgres role named `deployer`
-(`ALTER ROLE deployer` → "role does not exist"). The leak is a *client* — a
-deploy/migration-type process connecting as the `postgres` superuser and
-stamping `application_name=deployer` — that opens a connection and never closes
-it. (The app fleet itself connects as the Tiger master role `tsdbadmin` and
-reaps its own idle connections client-side via `CONN_MAX_IDLE_TIME_MS` + the
-per-session `idle_session_timeout` stamped in `component/database/database.go`,
-#1817 — so the app is not the leaker.)
+Fingerprint (live capture): `usename=postgres` (the REAL superuser — customers
+only get `tsdbadmin`), `application_name=deployer`, client `100.126.218.80`
+(Tiger control plane), query
+`pg_advisory_unlock('pg_catalog.pg_class'::regclass::int, …)` = TimescaleDB
+extension/DDL management. They accrue ~1–2/hr, idle for hours/days, and have held
+up to ~49/105 slots. The memql app is NOT the source (it connects as `tsdbadmin`
+and reaps its own idle connections client-side, #1817).
 
-**Reclaim (owner-run, needs SUPERUSER).** The leaked sessions are owned by
-`postgres`, and *only a superuser may terminate a superuser's sessions* — so
-`tsdbadmin` (the recovery DSN) CANNOT kill them. Reclaim with the
-postgres-superuser DSN (the same credential the leaking tool uses):
+**They are un-killable by us.** Only a superuser may terminate a superuser's
+sessions, and customers don't get the `postgres` superuser — so `tsdbadmin` (the
+recovery DSN) gets *"Only roles with SUPERUSER may terminate processes of roles
+with SUPERUSER"*. `conn-recover.sh deployer-inspect` (read-only, as `tsdbadmin`)
+still surfaces the count + `client_addr` for diagnosis; `deployer-reclaim` only
+succeeds if handed an actual superuser DSN.
 
-```bash
-SUPERUSER_DSN='postgresql://postgres:…@<host>:<port>/tsdb?sslmode=require' \
-  scripts/ops/conn-recover.sh ... # or the staged /tmp reclaim helper
-# terminates idle sessions WHERE application_name='deployer'
-```
+**Remediation (owner; see #1822 for the locked decision):**
+1. Free path first — cycle Postgres to drop all superuser sessions:
+   `tiger service stop xahn9ru4v6 && tiger service start xahn9ru4v6` (~1–2 min
+   staging blip; app auto-reconnects).
+2. Server-side reaper that catches ANY source (incl. these): `ALTER DATABASE
+   tsdb SET idle_session_timeout='300000'` + `idle_in_transaction_session_timeout='60000'`.
+3. If it recurs, it's a Tiger platform issue — **open a Tiger Cloud support
+   ticket** (+ the resize that #1822 closed on, which enlarges the budget).
 
-`conn-recover.sh deployer-inspect` (read-only, runs as `tsdbadmin`) still finds
-the leak and prints the source `client_addr`. `deployer-reclaim` attempts the
-terminate but needs a superuser DSN to succeed against `postgres`-owned sessions.
-
-**Durable fix = stop the source.** There is no role to put a server-side reaper
-on, so terminating only reclaims the *current* leak — the source process keeps
-re-leaking until it is stopped or made to close its pool / set an idle timeout.
-Identify it by the `client_addr` from `deployer-inspect`.
-
-After the reclaim sticks, the ~28 slots are back and the per-pod
-`MAX_OPEN_CONNS` (cut to 4 under #1858) can be raised back toward the default 10
-— see [the budget standard](../../public/operate/db-connection-budget.md).
+Once the slots are reclaimed, the per-pod `MAX_OPEN_CONNS` (cut to 4 under #1858)
+can be raised back toward 10 — see
+[the budget standard](../../public/operate/db-connection-budget.md).
 
 ## bff is Rollout-managed — never scale its Deployment up (memql#1868)
 
@@ -243,11 +235,10 @@ Scoped off this spike (see memql#1817):
 - **Deploy-gate connection-headroom check** (epic #1778 child F): block a
   promotion whose projected Σ(pods × MaxOpen) + surge would exceed
   `max_connections − reserved`.
-- **Reclaim the leaked `application_name=deployer` pool + stop the source**
-  (memql#1861, owner-run, needs SUPERUSER): terminate the idle sessions, then
-  stop the leaking client (identified by `client_addr` from
-  `conn-recover.sh deployer-inspect`). Then re-evaluate whether `MAX_OPEN_CONNS`
-  can be raised off the #1858 floor of 4.
+- **Tiger control-plane `deployer` slots** (memql#1822): clear via
+  `tiger service stop/start` or the DB-level idle reaper; if recurring, a Tiger
+  Cloud support ticket + the resize #1822 closed on. Then re-evaluate whether
+  `MAX_OPEN_CONNS` can be raised off the #1858 floor of 4. (#1861 is a duplicate.)
 - **Confirm the `pg_stat_activity` breakdown** once a slot is free (run
   `scripts/ops/conn-recover.sh capture`) and append the table here — now
   attributable by `application_name` thanks to the stamping above.

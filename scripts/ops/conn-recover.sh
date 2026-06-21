@@ -37,11 +37,14 @@ TIGER_SVC="${TIGER_SVC:-xahn9ru4v6}"   # staging Tiger service id
 NS="${NS:-memql}"
 PGCONNECT_TIMEOUT_S="${PGCONNECT_TIMEOUT_S:-8}"
 
-# deployer leak reclaim (memql#1861). The leaking client stamps this
-# application_name (there is no 'deployer' Postgres role).
+# deployer-slot diagnosis (memql#1822). These idle backends stamp this
+# application_name; on Tiger Cloud they are the managed CONTROL PLANE (usename
+# postgres, TimescaleDB extension mgmt), NOT a memql leak and NOT a Postgres role.
+# inspect is read-only; reclaim only works with a real superuser DSN (tsdbadmin
+# cannot terminate postgres-owned sessions) -- the real fix is Tiger-side
+# (tiger service stop/start, a DB-level idle reaper, or a support ticket).
 DEPLOYER_APPNAME="${DEPLOYER_APPNAME:-deployer}"
-# Reclaim backends idle longer than this. 5min comfortably outlives any
-# legitimate gate/migrate/promote run while killing the 8h+ leaks (#1861).
+# Only consider sessions idle longer than this for the (superuser-only) terminate.
 DEPLOYER_IDLE_TIMEOUT_MS="${DEPLOYER_IDLE_TIMEOUT_MS:-300000}"
 
 # DB-connecting node -> steady replica count (restored after recover).
@@ -178,12 +181,12 @@ function deployer_inspect() {
 }
 
 function deployer_reclaim() {
-  # Terminate the leaked idle backends stamped application_name='deployer' to
-  # reclaim the slots now (memql#1861). There is no 'deployer' ROLE, so there is
-  # no ALTER ROLE backstop to install -- the DURABLE fix is to stop the source
-  # client (identify it by client_addr below and make it close its pool / set an
-  # idle timeout). Reclaim is owner-run; it only kills sessions idle past the
-  # threshold (a live gate/migrate run is never mid-statement that long).
+  # Attempt to terminate the idle backends stamped application_name='deployer'
+  # (memql#1822). On Tiger Cloud these are the managed control plane owned by the
+  # `postgres` superuser, so this terminate FAILS as `tsdbadmin` ("only roles
+  # with SUPERUSER may terminate ..."); it succeeds only if `dsn()` resolves to a
+  # real superuser. The real remediation is Tiger-side: `tiger service stop/start`,
+  # a DB-level idle reaper, or a support ticket (see the 53300 ops runbook).
   local d
   d="$(dsn)"
   if [ -z "$d" ]; then
@@ -212,12 +215,12 @@ function deployer_reclaim() {
   echo "### AFTER ###"
   deployer_inspect
   echo
-  echo "DURABLE FIX: this only reclaims the CURRENT leak. The source client"
-  echo "(see client_addr above) keeps re-leaking ~1 conn per run until it is"
-  echo "stopped or made to close its pool. Once the leak source is fixed and"
-  echo "the slots stay free, the per-pod MAX_OPEN_CONNS (cut to 4 under #1858)"
-  echo "can be raised back toward 10 -- see"
-  echo "docs/public/operate/db-connection-budget.md (#1861)."
+  echo "NOTE: if the terminate above was permission-denied, these are Tiger's"
+  echo "control-plane sessions (memql#1822) -- clear them Tiger-side:"
+  echo "  tiger service stop $TIGER_SVC && tiger service start $TIGER_SVC"
+  echo "or a DB-level reaper (ALTER DATABASE ... SET idle_session_timeout), or a"
+  echo "Tiger Cloud support ticket if recurring. See"
+  echo "docs/internal/ops/conn-exhaustion-53300-spike.md (#1822)."
 }
 
 function usage() {
@@ -227,10 +230,10 @@ Usage: $0 <capture|recover|deployer-inspect|deployer-reclaim>
   capture           Snapshot max_connections + pg_stat_activity (needs one free slot).
   recover           Capture, drain the DB-connecting fleet to 0, re-capture the
                     pg_stat_activity breakdown, then restore steady replicas.
-  deployer-inspect  Snapshot the application_name='$DEPLOYER_APPNAME' backends to find
-                    the leaking client by client_addr (memql#1861). Read-only.
-  deployer-reclaim  Terminate the leaked idle application_name='$DEPLOYER_APPNAME'
-                    backends (memql#1861). Stop the source client for the durable fix.
+  deployer-inspect  Snapshot the application_name='$DEPLOYER_APPNAME' backends by
+                    client_addr (memql#1822; Tiger control plane). Read-only.
+  deployer-reclaim  Attempt to terminate idle application_name='$DEPLOYER_APPNAME'
+                    backends (memql#1822). Needs a superuser DSN; else clear Tiger-side.
 
 Env overrides: TIGER_SVC ($TIGER_SVC), NS ($NS), PGCONNECT_TIMEOUT_S,
                DEPLOYER_APPNAME ($DEPLOYER_APPNAME), DEPLOYER_IDLE_TIMEOUT_MS ($DEPLOYER_IDLE_TIMEOUT_MS).
