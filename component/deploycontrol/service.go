@@ -53,6 +53,12 @@ type Options struct {
 	Executor Executor
 	// Clock is the time source (defaults to time.Now UTC).
 	Clock func() time.Time
+	// Engine, when set, persists deployments as v1:cluster:deployment
+	// records (#1872): the write RPCs write a record at deploy start
+	// (in_progress) and transition it (succeeded/failed) as the rollout
+	// resolves. Optional -- nil leaves the deploy path unchanged (no
+	// persistence), which is what unit tests + engineless binaries get.
+	Engine identity.EngineExecutor
 }
 
 // Service implements memqlv1.DeployControlServiceServer.
@@ -64,6 +70,7 @@ type Service struct {
 	repoRoot string
 	exec     Executor
 	clock    func() time.Time
+	engine   identity.EngineExecutor
 }
 
 // NewService constructs the deploy-control service.
@@ -96,6 +103,7 @@ func NewService(opts Options) (*Service, error) {
 		repoRoot: repoRoot,
 		exec:     executor,
 		clock:    clock,
+		engine:   opts.Engine,
 	}, nil
 }
 
@@ -216,7 +224,13 @@ func (s *Service) DeployStaging(ctx context.Context, req *memqlv1.DeployStagingR
 	if err != nil {
 		return nil, err
 	}
+	// Persist the deployment record (#1872): write at deploy start
+	// (in_progress) so a record exists even if the process dies
+	// mid-rollout, then transition to succeeded/failed once promote.sh
+	// returns. Best-effort: never blocks the deploy.
+	deploymentID := s.recordDeployment(ctx, "staging", version, s.resolveImageDigest(version), act)
 	out, runErr := s.exec.RunPromote(ctx, version, "staging")
+	s.transitionDeployment(ctx, deploymentID, transitionStatusForErr(runErr))
 	return s.finishWrite(ctx, "deploy_staging", act, detail, out, runErr,
 		map[string]string{"env": "staging", "version": version}), nil
 }
@@ -233,7 +247,11 @@ func (s *Service) Promote(ctx context.Context, req *memqlv1.PromoteRequest) (*me
 	if err != nil {
 		return nil, err
 	}
+	// Persist the deployment record (#1872), same pattern as
+	// DeployStaging: in_progress at start, succeeded/failed on return.
+	deploymentID := s.recordDeployment(ctx, "prod", version, s.resolveImageDigest(version), act)
 	out, runErr := s.exec.RunPromote(ctx, version, "prod")
+	s.transitionDeployment(ctx, deploymentID, transitionStatusForErr(runErr))
 	return s.finishWrite(ctx, "promote", act, detail, out, runErr,
 		map[string]string{"env": "prod", "version": version}), nil
 }

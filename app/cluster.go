@@ -707,8 +707,15 @@ func (a *App) EmitSystemStartup() {
 	}
 
 	// Include environment/region.
-	payload["environment"] = firstNonEmptyStr(os.Getenv("MEMQL_ENVIRONMENT"), os.Getenv("MEMQL_REGION"), "development")
+	environment := firstNonEmptyStr(os.Getenv("MEMQL_ENVIRONMENT"), os.Getenv("MEMQL_REGION"), "development")
+	payload["environment"] = environment
 	payload["region"] = firstNonEmptyStr(os.Getenv("MEMQL_REGION"), "local")
+
+	// Include the deploy provider / cloud target (#1872) so cluster
+	// bootstrap can stamp it on the v1:cluster:cluster row. Explicit
+	// MEMQL_DEPLOY_PROVIDER wins; otherwise derive from the environment
+	// (local Docker for development, AKS/azure for staging + prod).
+	payload["provider"] = deployProvider(environment)
 
 	a.eventBus.Publish(events.Event{
 		Topic:   events.TopicSystemStartup,
@@ -805,4 +812,19 @@ func firstNonEmptyStr(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// deployProvider resolves the deploy target / cloud provider stamped on
+// the v1:cluster:cluster row and the system.startup payload (#1872).
+// MEMQL_DEPLOY_PROVIDER is the explicit override; otherwise it derives
+// from the environment: local Docker ("docker-local") for development,
+// AKS ("azure") for staging + production.
+func deployProvider(environment string) string {
+	if p := strings.TrimSpace(os.Getenv("MEMQL_DEPLOY_PROVIDER")); p != "" {
+		return p
+	}
+	if strings.EqualFold(strings.TrimSpace(environment), "development") {
+		return "docker-local"
+	}
+	return "azure"
 }

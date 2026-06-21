@@ -8,6 +8,13 @@
 // layer enforces the same predicate via auth.AtLeastAdmin; this spec
 // is the DSL-side mirror so policies / queries can delegate to it via
 // spec("requiresOwnerOrAdmin").
+//
+// #1872 (persisted deployments) reuses this same owner/admin gate for
+// the deployment-lifecycle mutations: mutationCreateDeployment +
+// mutationUpdateDeploymentStatus (dsl/cluster/mutations.memql) are only
+// ever invoked from the owner/admin-gated DeployControlService write
+// RPCs, so the deploy-start write and every status transition inherit
+// the same authorization decision the console read/write path enforces.
 
 use common.shapes.{ actorEnvelope }
 

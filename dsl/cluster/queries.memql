@@ -3,7 +3,8 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cluster.concepts.{ cluster, node, nodeType, spawnEvent }
+use cluster.concepts.{ cluster, deployment, node, nodeType, spawnEvent }
+use cluster.shapes.{ deploymentFull }
 
 @enabled
 @description("Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...)")
@@ -80,4 +81,48 @@ query node queryStaleClusterNodes {
   }
   filter  payload.health!="stopped" && when(args.olderThan) { payload.lastSeen<args.olderThan }
   asOf    latest
+}
+
+// ---- queries/v1/cluster/deploymentsForCluster.memql ----
+
+// Deployment history for a cluster (#1872). Returns ONE row per
+// deployment -- the LATEST payload version per deploymentId via
+// `asOf latest`, so each entry reflects the deployment's CURRENT
+// status (pending/in_progress/succeeded/failed/superseded/rolled_back).
+// The deployment store is append-only (one row appended per status
+// transition under the same concept id = deploymentId), so a plain scan
+// would return every transition; asOf latest collapses to the current
+// state. Ordering newest-first by createdAt is applied by the consumer
+// (cockpit Deployments view), mirroring queryClusterNodes' "CLI dedupes
+// + sorts" note -- the MemQL query planner has no order/limit clause.
+
+@enabled
+@description("Deployment history for a cluster: latest-per-deploymentId rows (asOf latest -> current status per deployment) filtered to a clusterId. Backs the cockpit Deployments history list (consumer sorts newest-first by createdAt). #1872.")
+query deployment queryDeploymentsForCluster {
+  args {
+    clusterId  string  @required
+  }
+  filter  payload.clusterId == args.clusterId
+  shape   deploymentFull
+  asOf    latest
+}
+
+// ---- queries/v1/cluster/deploymentById.memql ----
+
+// Full status-transition history for a single deployment (#1872).
+// Filters on payload.deploymentId (NOT the canonical row id, which would
+// need partition+concept prefixing) so the caller passes the bare
+// deploymentId. Returns EVERY appended row for that deployment -- the
+// complete lifecycle timeline -- so a deployment's status is
+// reconstructable asOf any point in time (acceptance criterion). No asOf
+// directive: the consumer wants all versions, not the latest.
+
+@enabled
+@description("All status-transition rows for one deployment, by deploymentId, oldest-to-newest (full lifecycle history; reconstructable asOf any time). #1872.")
+query deployment queryDeploymentById {
+  args {
+    deploymentId  string  @required
+  }
+  filter  payload.deploymentId == args.deploymentId
+  shape   deploymentFull
 }
