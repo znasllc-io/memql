@@ -52,6 +52,21 @@ service DeployControlService {
   // ship. Owner/admin gated; emits an audit event. Invalid / duplicate
   // versions are rejected.
   rpc CutVersion(CutVersionRequest) returns (ActionResult);
+
+  // Deploy ships a cut `pending` deployment record (#1877) to its
+  // target, selecting the driver by the record's provider
+  // (docker-local | azure) and transitioning the record
+  // in_progress -> succeeded | failed (#1878). Owner/admin gated; emits
+  // an audit event.
+  rpc Deploy(DeployRequest) returns (ActionResult);
+
+  // RollbackDeployment redeploys a prior SUCCEEDED deployment's stored
+  // image digest through the SAME driver (#1878) -- NOT a blue-green
+  // color flip (the previous color only survives the scale-down window).
+  // It creates a new deployment record pointing at the historical digest
+  // and runs it through the driver, landing in rolled_back on success.
+  // Owner/admin gated; emits an audit event.
+  rpc RollbackDeployment(RollbackDeploymentRequest) returns (ActionResult);
 }
 
 // -----------------------------------------------------------------------------
@@ -106,6 +121,19 @@ message CutVersionRequest {
   // X.Y.Z). When set, bump is ignored and this version is cut directly
   // (still rejected if it is invalid or already exists for the env).
   string version = 3;
+}
+
+message DeployRequest {
+  // deployment_id is the cut (pending) v1:cluster:deployment record to
+  // ship. The driver is selected by the record's stored provider.
+  string deployment_id = 1;
+}
+
+message RollbackDeploymentRequest {
+  // to_deployment_id is the prior SUCCEEDED deployment whose stored image
+  // digest is redeployed. A new deployment record is created for the
+  // rollback (previousDeploymentId -> this id); the original is untouched.
+  string to_deployment_id = 1;
 }
 
 // -----------------------------------------------------------------------------

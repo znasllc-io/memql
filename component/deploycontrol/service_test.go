@@ -23,9 +23,13 @@ type fakeExecutor struct {
 	promoteCalls  [][2]string // (version, env)
 	rollbackCalls [][2]string // (env, sha)
 	rolloutCalls  [][3]string // (env, rollout, action)
+	composeCalls  []string    // (version) for RunDockerComposeDeploy
 
 	promoteOut string
 	promoteErr error
+
+	composeOut string
+	composeErr error
 
 	argoJSON     []byte
 	rolloutsJSON []byte
@@ -46,6 +50,11 @@ func (f *fakeExecutor) RunRollback(_ context.Context, env, sha string) (string, 
 func (f *fakeExecutor) RunRolloutAction(_ context.Context, env, rollout, action string) (string, error) {
 	f.rolloutCalls = append(f.rolloutCalls, [3]string{env, rollout, action})
 	return action + " " + rollout, nil
+}
+
+func (f *fakeExecutor) RunDockerComposeDeploy(_ context.Context, version string) (string, error) {
+	f.composeCalls = append(f.composeCalls, version)
+	return f.composeOut, f.composeErr
 }
 
 func (f *fakeExecutor) KubectlJSON(_ context.Context, args ...string) ([]byte, error) {

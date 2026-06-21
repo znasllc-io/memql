@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 )
@@ -29,6 +30,15 @@ type Executor interface {
 	// RunRolloutAction runs `kubectl argo rollouts <action> <rollout>
 	// -n memql` for action in {promote, abort}.
 	RunRolloutAction(ctx context.Context, env, rollout, action string) (output string, err error)
+
+	// RunDockerComposeDeploy brings the local staging-parity cluster up
+	// with fresh images via
+	// `docker compose -f docker/docker-compose.cluster.yml up -d --build`.
+	// Backs the docker-local deploy driver (#1878). version is
+	// informational only -- local images are built from the working tree,
+	// not a pinned ACR digest -- and is exported as MEMQL_DEPLOY_VERSION
+	// in the child env for any compose-side stamping.
+	RunDockerComposeDeploy(ctx context.Context, version string) (output string, err error)
 
 	// KubectlJSON runs `kubectl <args...>` and returns stdout. Used for
 	// the read paths (argo app / rollouts / analysisruns -o json).
@@ -63,6 +73,18 @@ func (e *execExecutor) RunRollback(ctx context.Context, env, sha string) (string
 
 func (e *execExecutor) RunRolloutAction(ctx context.Context, env, rollout, action string) (string, error) {
 	return e.run(ctx, e.repoRoot, "kubectl", "argo", "rollouts", action, rollout, "-n", "memql")
+}
+
+func (e *execExecutor) RunDockerComposeDeploy(ctx context.Context, version string) (string, error) {
+	composeFile := filepath.Join("docker", "docker-compose.cluster.yml")
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", composeFile, "up", "-d", "--build")
+	cmd.Dir = e.repoRoot
+	cmd.Env = append(os.Environ(), "MEMQL_DEPLOY_VERSION="+version)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	err := cmd.Run()
+	return out.String(), err
 }
 
 func (e *execExecutor) KubectlJSON(ctx context.Context, args ...string) ([]byte, error) {

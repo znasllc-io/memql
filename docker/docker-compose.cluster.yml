@@ -9,6 +9,14 @@
 #   make dev-cluster-restart         (fresh binaries, data preserved)
 #   make dev-cluster-restart-purge   (fresh binaries + fresh DB)
 #
+# DEPLOY DRIVER (memql#1878). This compose is what the deploycontrol
+# "docker-local" driver (component/deploycontrol/driver.go) wraps: a
+# Deploy of a deployment record whose provider=="docker-local" runs
+# `docker compose -f docker/docker-compose.cluster.yml up -d --build`,
+# bringing this staging-parity cluster up with fresh images. The same
+# Deploy / RollbackDeployment action drives the azure (AKS/Argo) target
+# when the record's provider=="azure".
+#
 # PARITY GOAL (memql#1212). This compose is built to match the staging
 # AKS topology (deploy/k8s/base/*.yaml) so cluster-only bugs -- replica
 # fan-out, cross-node event double-delivery, leader/singleton races --

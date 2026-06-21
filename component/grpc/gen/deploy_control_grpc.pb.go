@@ -26,6 +26,8 @@ const (
 	DeployControlService_RolloutAction_FullMethodName       = "/znasllc.memql.deploycontrol.v1.DeployControlService/RolloutAction"
 	DeployControlService_SuggestNextVersion_FullMethodName  = "/znasllc.memql.deploycontrol.v1.DeployControlService/SuggestNextVersion"
 	DeployControlService_CutVersion_FullMethodName          = "/znasllc.memql.deploycontrol.v1.DeployControlService/CutVersion"
+	DeployControlService_Deploy_FullMethodName              = "/znasllc.memql.deploycontrol.v1.DeployControlService/Deploy"
+	DeployControlService_RollbackDeployment_FullMethodName  = "/znasllc.memql.deploycontrol.v1.DeployControlService/RollbackDeployment"
 )
 
 // DeployControlServiceClient is the client API for DeployControlService service.
@@ -74,6 +76,19 @@ type DeployControlServiceClient interface {
 	// ship. Owner/admin gated; emits an audit event. Invalid / duplicate
 	// versions are rejected.
 	CutVersion(ctx context.Context, in *CutVersionRequest, opts ...grpc.CallOption) (*ActionResult, error)
+	// Deploy ships a cut `pending` deployment record (#1877) to its
+	// target, selecting the driver by the record's provider
+	// (docker-local | azure) and transitioning the record
+	// in_progress -> succeeded | failed (#1878). Owner/admin gated; emits
+	// an audit event.
+	Deploy(ctx context.Context, in *DeployRequest, opts ...grpc.CallOption) (*ActionResult, error)
+	// RollbackDeployment redeploys a prior SUCCEEDED deployment's stored
+	// image digest through the SAME driver (#1878) -- NOT a blue-green
+	// color flip (the previous color only survives the scale-down window).
+	// It creates a new deployment record pointing at the historical digest
+	// and runs it through the driver, landing in rolled_back on success.
+	// Owner/admin gated; emits an audit event.
+	RollbackDeployment(ctx context.Context, in *RollbackDeploymentRequest, opts ...grpc.CallOption) (*ActionResult, error)
 }
 
 type deployControlServiceClient struct {
@@ -154,6 +169,26 @@ func (c *deployControlServiceClient) CutVersion(ctx context.Context, in *CutVers
 	return out, nil
 }
 
+func (c *deployControlServiceClient) Deploy(ctx context.Context, in *DeployRequest, opts ...grpc.CallOption) (*ActionResult, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ActionResult)
+	err := c.cc.Invoke(ctx, DeployControlService_Deploy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *deployControlServiceClient) RollbackDeployment(ctx context.Context, in *RollbackDeploymentRequest, opts ...grpc.CallOption) (*ActionResult, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ActionResult)
+	err := c.cc.Invoke(ctx, DeployControlService_RollbackDeployment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DeployControlServiceServer is the server API for DeployControlService service.
 // All implementations must embed UnimplementedDeployControlServiceServer
 // for forward compatibility.
@@ -200,6 +235,19 @@ type DeployControlServiceServer interface {
 	// ship. Owner/admin gated; emits an audit event. Invalid / duplicate
 	// versions are rejected.
 	CutVersion(context.Context, *CutVersionRequest) (*ActionResult, error)
+	// Deploy ships a cut `pending` deployment record (#1877) to its
+	// target, selecting the driver by the record's provider
+	// (docker-local | azure) and transitioning the record
+	// in_progress -> succeeded | failed (#1878). Owner/admin gated; emits
+	// an audit event.
+	Deploy(context.Context, *DeployRequest) (*ActionResult, error)
+	// RollbackDeployment redeploys a prior SUCCEEDED deployment's stored
+	// image digest through the SAME driver (#1878) -- NOT a blue-green
+	// color flip (the previous color only survives the scale-down window).
+	// It creates a new deployment record pointing at the historical digest
+	// and runs it through the driver, landing in rolled_back on success.
+	// Owner/admin gated; emits an audit event.
+	RollbackDeployment(context.Context, *RollbackDeploymentRequest) (*ActionResult, error)
 	mustEmbedUnimplementedDeployControlServiceServer()
 }
 
@@ -230,6 +278,12 @@ func (UnimplementedDeployControlServiceServer) SuggestNextVersion(context.Contex
 }
 func (UnimplementedDeployControlServiceServer) CutVersion(context.Context, *CutVersionRequest) (*ActionResult, error) {
 	return nil, status.Error(codes.Unimplemented, "method CutVersion not implemented")
+}
+func (UnimplementedDeployControlServiceServer) Deploy(context.Context, *DeployRequest) (*ActionResult, error) {
+	return nil, status.Error(codes.Unimplemented, "method Deploy not implemented")
+}
+func (UnimplementedDeployControlServiceServer) RollbackDeployment(context.Context, *RollbackDeploymentRequest) (*ActionResult, error) {
+	return nil, status.Error(codes.Unimplemented, "method RollbackDeployment not implemented")
 }
 func (UnimplementedDeployControlServiceServer) mustEmbedUnimplementedDeployControlServiceServer() {}
 func (UnimplementedDeployControlServiceServer) testEmbeddedByValue()                              {}
@@ -378,6 +432,42 @@ func _DeployControlService_CutVersion_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DeployControlService_Deploy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeployRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeployControlServiceServer).Deploy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeployControlService_Deploy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeployControlServiceServer).Deploy(ctx, req.(*DeployRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DeployControlService_RollbackDeployment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RollbackDeploymentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeployControlServiceServer).RollbackDeployment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeployControlService_RollbackDeployment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeployControlServiceServer).RollbackDeployment(ctx, req.(*RollbackDeploymentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DeployControlService_ServiceDesc is the grpc.ServiceDesc for DeployControlService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -412,6 +502,14 @@ var DeployControlService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CutVersion",
 			Handler:    _DeployControlService_CutVersion_Handler,
+		},
+		{
+			MethodName: "Deploy",
+			Handler:    _DeployControlService_Deploy_Handler,
+		},
+		{
+			MethodName: "RollbackDeployment",
+			Handler:    _DeployControlService_RollbackDeployment_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
