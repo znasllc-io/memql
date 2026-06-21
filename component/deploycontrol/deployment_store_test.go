@@ -5,22 +5,39 @@ import (
 	"strings"
 	"testing"
 
-	memqlengine "github.com/znasllc-io/memql/component/memql"
-	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/auth"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
 // fakeEngine records the queries Execute is asked to run so tests can
 // assert which deployment mutations a write RPC emitted. Satisfies
-// identity.EngineExecutor.
+// identity.EngineExecutor. Read (query*) calls return queryNodes as a
+// GraphBundle; mutation* calls return mutationErr (nil by default) --
+// supporting both the #1872 deploy-path tests (which only inspect
+// queries) and the #1877 cut-version tests (which need query results +
+// write-failure injection).
 type fakeEngine struct {
 	queries []string
+
+	queryNodes  []*memqlv1.MemoryNode // returned for query* Execute calls
+	queryErr    error                 // injected error for query* calls
+	mutationErr error                 // injected error for mutation* calls
 }
 
 func (f *fakeEngine) Execute(_ context.Context, query string) (*memqlengine.ExecuteResult, error) {
 	f.queries = append(f.queries, query)
-	return &memqlengine.ExecuteResult{}, nil
+	if strings.HasPrefix(query, "mutation") {
+		if f.mutationErr != nil {
+			return nil, f.mutationErr
+		}
+		return &memqlengine.ExecuteResult{}, nil
+	}
+	if f.queryErr != nil {
+		return nil, f.queryErr
+	}
+	return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: f.queryNodes}}, nil
 }
 
 func newTestServiceWithEngine(t *testing.T, exec Executor, audit identity.AuditLogger, eng identity.EngineExecutor) *Service {

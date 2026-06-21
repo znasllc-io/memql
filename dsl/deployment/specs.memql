@@ -15,6 +15,13 @@
 // ever invoked from the owner/admin-gated DeployControlService write
 // RPCs, so the deploy-start write and every status transition inherit
 // the same authorization decision the console read/write path enforces.
+//
+// #1877 (cut a version) reuses the SAME gate: the SuggestNextVersion
+// (read) + CutVersion (write) RPCs both run s.authorize -> owner/admin,
+// and CutVersion creates the new pending deployment via that same
+// mutationCreateDeployment -- so the cut-version path inherits this
+// predicate too. owner/admin gating is sufficient for now; the
+// developer-role split is tracked separately in #1876.
 
 use common.shapes.{ actorEnvelope }
 
