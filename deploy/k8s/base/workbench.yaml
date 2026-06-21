@@ -14,6 +14,7 @@ spec:
   # singleton -- cron leader + the event-execution guard collapse any
   # cross-replica double-fire (watch the guard's duplicatesPrevented metric).
   replicas: 2
+  revisionHistoryLimit: 1   # keep active + 1 previous (rollback); auto-GC older RS (#1858 cleanup)
   strategy:
     type: RollingUpdate
     rollingUpdate:

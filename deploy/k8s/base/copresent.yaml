@@ -25,6 +25,7 @@ spec:
   # crashes, and node drains. (The memQL node-types stay single-replica for
   # now -- see deploy/k8s/README.md "Multi-replica HA".)
   replicas: 2
+  revisionHistoryLimit: 1   # keep active + 1 previous (rollback); auto-GC older RS (#1858 cleanup)
   strategy:
     type: RollingUpdate
     rollingUpdate:
