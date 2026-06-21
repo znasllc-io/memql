@@ -582,7 +582,7 @@ mutation clusterSettings mutationCreateClusterSettings {
     registrationMode           string  @required  @enum("open", "domain_restricted", "invite_only", "waitlist")
     registrationDomains        string
     internalDomains            string
-    internalDefaultRole        string  @required  @enum("owner", "admin", "writer", "reader")
+    internalDefaultRole        string  @required  @enum("owner", "admin", "developer", "writer", "reader")
     registeredClientsJSON      string
     accessRequestNotifyEmails  string
     bootstrapEmail             string
@@ -660,7 +660,7 @@ mutation delegation mutationCreateDelegation {
     identitySubject   string    @required
     identityType      string    @required  @enum("human", "synthetic")
     agentId           string    @required
-    roleCeiling       string    @required  @enum("owner", "admin", "writer", "reader")
+    roleCeiling       string    @required  @enum("owner", "admin", "developer", "writer", "reader")
     scopes            []string  @required
     createdBySubject  string    @required
     expiresAt         string
@@ -844,7 +844,7 @@ mutation user mutationCreateUser {
     userId        string  @required
     displayName   string  @required
     primaryEmail  string  @required
-    role          string  @enum("owner", "admin", "writer", "reader")
+    role          string  @enum("owner", "admin", "developer", "writer", "reader")
     groupIds      object
     preferences   object
   }
@@ -906,7 +906,7 @@ mutation user mutationCreateUserOnFirstLogin {
     primaryRole   string
     gender        string
     birthdate     string
-    role          string  @enum("owner", "admin", "writer", "reader")
+    role          string  @enum("owner", "admin", "developer", "writer", "reader")
     internal      bool    @required
     groupIds      object
     preferences   object
@@ -1681,7 +1681,7 @@ mutation clusterSettings mutationUpdateClusterSettings {
     registrationMode           string  @required  @enum("open", "domain_restricted", "invite_only", "waitlist")
     registrationDomains        string
     internalDomains            string
-    internalDefaultRole        string  @required  @enum("owner", "admin", "writer", "reader")
+    internalDefaultRole        string  @required  @enum("owner", "admin", "developer", "writer", "reader")
     registeredClientsJSON      string
     accessRequestNotifyEmails  string
     bootstrapEmail             string

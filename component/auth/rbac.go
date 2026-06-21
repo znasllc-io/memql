@@ -202,6 +202,15 @@ func AtLeastAdmin(u UserContext) bool {
 	return u.Role == RoleOwner || u.Role == RoleAdmin
 }
 
+// AtLeastDeveloper returns true if the user has owner, admin, or developer
+// role. This is the deploy-action gate for cutting versions + deploying
+// (memql#1876): engineering power (developer) plus the two admin tiers can
+// ship, while writer/reader stay read-only. Rollback keeps the stricter
+// AtLeastAdmin gate -- developer can deploy forward but not roll back.
+func AtLeastDeveloper(u UserContext) bool {
+	return u.Role == RoleOwner || u.Role == RoleAdmin || u.Role == RoleDeveloper
+}
+
 // CanWrite returns true if the user has owner, admin, developer, or writer
 // role. Readers cannot write.
 func CanWrite(u UserContext) bool {
