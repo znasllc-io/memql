@@ -4307,6 +4307,10 @@ type MutationCreateNodeArgs struct {
 	LastSeen     string
 	Capabilities []string
 	Labels       map[string]any
+	DeploymentId string
+	Provider     string
+	Environment  string
+	Region       string
 }
 
 // MutationCreateNode calls the engine mutation mutationCreateNode.
@@ -4361,6 +4365,34 @@ func MutationCreateNodeBuild(args MutationCreateNodeArgs) string {
 		}
 		b.WriteString("labels: ")
 		b.WriteString(renderMemQLValue(args.Labels))
+	}
+	if args.DeploymentId != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("deploymentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
+	}
+	if args.Provider != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("provider: ")
+		b.WriteString(fmt.Sprintf("%q", args.Provider))
+	}
+	if args.Environment != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("environment: ")
+		b.WriteString(fmt.Sprintf("%q", args.Environment))
+	}
+	if args.Region != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("region: ")
+		b.WriteString(fmt.Sprintf("%q", args.Region))
 	}
 	b.WriteString("})")
 	return b.String()

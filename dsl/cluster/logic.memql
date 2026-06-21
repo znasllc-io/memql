@@ -104,10 +104,22 @@ logic logicRegisterNode {
   // mutationCreateNode ("required argument nodeType is missing"). `flavor`
   // was also dropped: it is not a mutationCreateNode arg (the insert body
   // never reads it).
+  // deploymentId + provider/environment/region tie this node row to the
+  // deployment that created it (#1873). deploymentId arrives on the
+  // top-level startup payload (EmitSystemStartup reads MEMQL_DEPLOYMENT_ID,
+  // injected per-deploy by the rollout via downward API; "local" in dev).
+  // provider/environment/region already ride the top-level payload (the
+  // same fields logicBootstrapCluster stamps on the cluster row). All are
+  // multi-segment paths, so they need an EXPLICIT key + coalesce (see the
+  // #1643/#1671 note above) -- the bare `args.X` shorthand is identifier-only.
   nodeRecord := mutationCreateNode({
-    id:       coalesce(args.event.payload.node.id, ""),
-    nodeType: coalesce(args.event.payload.node.type, ""),
-    address:  coalesce(args.event.payload.node.address, "")
+    id:           coalesce(args.event.payload.node.id, ""),
+    nodeType:     coalesce(args.event.payload.node.type, ""),
+    address:      coalesce(args.event.payload.node.address, ""),
+    deploymentId: coalesce(args.event.payload.deploymentId, ""),
+    provider:     coalesce(args.event.payload.provider, ""),
+    environment:  coalesce(args.event.payload.environment, ""),
+    region:       coalesce(args.event.payload.region, "")
   })
 
   // Record the spawn event. The mutation schema only accepts the flat

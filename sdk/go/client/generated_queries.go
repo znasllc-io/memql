@@ -2925,6 +2925,50 @@ func QueryNodeTokenIdentityByIdBuild(args QueryNodeTokenIdentityByIdArgs) string
 	return b.String()
 }
 
+// QueryNodesForDeployment -- Latest-per-id cluster node rows for one deploymentId -- the live topology of that deployment (#1873). asOf latest collapses the append-only node stream to current state per node.
+//
+// Bound concept: node.
+type QueryNodesForDeploymentArgs struct {
+	DeploymentId string
+}
+
+// QueryNodesForDeployment calls the engine query queryNodesForDeployment.
+func (qc *QueryClient) QueryNodesForDeployment(ctx context.Context, args QueryNodesForDeploymentArgs) (*Result, error) {
+	call := QueryNodesForDeploymentBuild(args)
+	return qc.executeNamed(ctx, "queryNodesForDeployment", call)
+}
+
+func QueryNodesForDeploymentBuild(args QueryNodesForDeploymentArgs) string {
+	var b strings.Builder
+	b.WriteString("queryNodesForDeployment({")
+	b.WriteString("deploymentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryNodesNotInDeployment -- Latest-per-id cluster nodes whose deploymentId != the supplied current deployment -- orphans from a previous deploy (feeds the reaper #1874 + cockpit orphan highlight). #1873.
+//
+// Bound concept: node.
+type QueryNodesNotInDeploymentArgs struct {
+	DeploymentId string
+}
+
+// QueryNodesNotInDeployment calls the engine query queryNodesNotInDeployment.
+func (qc *QueryClient) QueryNodesNotInDeployment(ctx context.Context, args QueryNodesNotInDeploymentArgs) (*Result, error) {
+	call := QueryNodesNotInDeploymentBuild(args)
+	return qc.executeNamed(ctx, "queryNodesNotInDeployment", call)
+}
+
+func QueryNodesNotInDeploymentBuild(args QueryNodesNotInDeploymentArgs) string {
+	var b strings.Builder
+	b.WriteString("queryNodesNotInDeployment({")
+	b.WriteString("deploymentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryNoteById -- Fetch a single note by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's note even with its id. Used by the update tool to confirm the row exists before re-inserting a new version.
 //
 // Bound concept: note.

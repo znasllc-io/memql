@@ -717,6 +717,16 @@ func (a *App) EmitSystemStartup() {
 	// (local Docker for development, AKS/azure for staging + prod).
 	payload["provider"] = deployProvider(environment)
 
+	// Include the deployment id (#1873) so logicRegisterNode can stamp it
+	// (plus provider/environment/region, already on this payload) on the
+	// v1:cluster:node row -- tying every node to the deployment that created
+	// it. MEMQL_DEPLOYMENT_ID is injected per-deploy by the rollout (k8s
+	// downward API from the pod/rollout template hash). Falls back to
+	// "local" in dev so the node row always carries a non-empty deploymentId
+	// (a single logical local deployment), satisfying the #1873 acceptance
+	// criterion and the orphan-detection contract (queryNodesNotInDeployment).
+	payload["deploymentId"] = firstNonEmptyStr(os.Getenv("MEMQL_DEPLOYMENT_ID"), "local")
+
 	a.eventBus.Publish(events.Event{
 		Topic:   events.TopicSystemStartup,
 		Kind:    events.KindSystemStartup,

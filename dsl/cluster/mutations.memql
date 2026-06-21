@@ -94,6 +94,10 @@ mutation node mutationCreateNode {
     lastSeen      string
     capabilities  []string
     labels        object
+    deploymentId  string
+    provider      string
+    environment   string
+    region        string
   }
   insert {
     id: coalesce(args.id, concat("node-", hash(concat(args.nodeType, ":", timestamp()))))
@@ -104,6 +108,10 @@ mutation node mutationCreateNode {
     lastSeen: coalesce(args.lastSeen, timestamp())
     capabilities: coalesce(args.capabilities, [])
     labels: coalesce(args.labels, {})
+    deploymentId: coalesce(args.deploymentId, "")
+    provider: coalesce(args.provider, "")
+    environment: coalesce(args.environment, "")
+    region: coalesce(args.region, "")
   }
 }
 
