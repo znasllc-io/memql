@@ -336,10 +336,49 @@ func resolveArgsRefs(args map[string]any, evaluator *automations.Evaluator) (map
 // delegate any string that looks like a builtin call to it.
 var sharedArgEvaluator = &MutationExecutor{}
 
+// isBareStepArgIdentifier reports whether s is a single identifier
+// (`[A-Za-z_][A-Za-z0-9_]*`, no dots / parens / operators) -- the shape a bare
+// step-variable reference takes when passed straight through as a mutation /
+// function arg. The caller gates resolution on the identifier actually matching
+// a recorded step, so a plain word literal is never mistaken for a step.
+func isBareStepArgIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r == '_':
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // resolveArgValueRef resolves a single arg value, recursing into maps and arrays.
 func resolveArgValueRef(v any, evaluator *automations.Evaluator) (any, error) {
 	switch val := v.(type) {
 	case string:
+		// Bare step-variable reference: a single identifier (no dot / call /
+		// operator) that names a recorded step result. A logic body's later
+		// step passes a prior `name := <call>` result straight through as a
+		// mutation arg -- e.g. logicRecordTransition's
+		// `mutationRecordRequestEvent({ requestId: requestId, fromStatus:
+		// fromStatus, toStatus: toStatus })`, where requestId / fromStatus /
+		// toStatus are all earlier coalesce(...) steps. Without this the bare
+		// identifier renders as its own LITERAL NAME ("requestId") into the
+		// write, so the audit row carried `requestId:"requestId"` and the
+		// transition was unqueryable -- the third facet of #1847. Scoped
+		// strictly to identifiers that match a recorded step so genuine word
+		// literals ("approved", "submitted") are untouched.
+		if evaluator != nil && isBareStepArgIdentifier(val) {
+			if resolved, ok := evaluator.StepResultValue(val); ok {
+				return resolved, nil
+			}
+		}
 		// concat() has its own arg-time evaluator that recurses into
 		// nested builtins. Kept separate because evaluateArgConcat was
 		// written to handle concat's specific splitting rules.
