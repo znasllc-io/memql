@@ -215,8 +215,23 @@ func forgeRequestRoleAllowed(status, role string) bool {
 //     approval-pipeline graph (with owner fast-track).
 //  3. The actor's cluster role is sufficient to set the target status.
 //
+// The system actor is exempt from the role-authority check (#1847): the
+// routeRequest automation (dsl/forge/automations.memql) enacts the
+// submitter-role-derived transition -- owner -> "queued",
+// admin/writer -> "needs_approval", reader -> "needs_validation" -- under
+// the SYSTEM actor (role="system"). Re-checking the system actor's OWN
+// role against forgeRequestRoleAllowed is wrong: it has no submitter role,
+// so the role gate would reject the owner/admin/writer routes (only the
+// reader path, which is not role-gated, slipped through), aborting
+// logicRouteRequest before it recorded the "routed" requestEvent and
+// leaving the request stuck "submitted" with empty history. The submitter
+// authority was already enforced when the request was submitted; this
+// guard exempts the system actor exactly like its sibling guards
+// (validateFeedbackIntakeTransition, validateCognitionUtteranceAuth,
+// validateAgentKindActor).
+//
 // Called from executor.executeInsert; not part of the public API.
-func (e *MemQLEngine) validateForgeRequestTransition(ctx context.Context, payload map[string]any, requestID string) error {
+func (e *MemQLEngine) validateForgeRequestTransition(ctx context.Context, payload map[string]any, requestID string, actor string) error {
 	if payload == nil {
 		return fmt.Errorf("v1:forge:request: payload is required")
 	}
@@ -227,6 +242,16 @@ func (e *MemQLEngine) validateForgeRequestTransition(ctx context.Context, payloa
 	}
 	if !validForgeRequestStatus(newStatus) {
 		return fmt.Errorf("v1:forge:request: unknown status %q", newStatus)
+	}
+
+	// System-actor bypass (#1847): the routeRequest automation runs the
+	// transition under the system actor; its role is not the submitter's, so
+	// skip the role/graph guards entirely (the submitter's authority was
+	// checked at submit time). Mirrors the sibling guards' isSystemActor
+	// early-return.
+	identity, _ := auth.UserIdentityFromContext(ctx)
+	if isSystemActor(identity, actor) {
+		return nil
 	}
 
 	// Resolve actor role from context (fails closed: empty = reader).
@@ -253,6 +278,16 @@ func (e *MemQLEngine) validateForgeRequestTransition(ctx context.Context, payloa
 		priorStatus = forgeStatusSubmitted
 	}
 
+	return forgeRequestTransitionDecision(priorStatus, newStatus, role)
+}
+
+// forgeRequestTransitionDecision is the pure (priorStatus -> newStatus, role)
+// decision applied to a re-version once the prior row has been loaded. Split
+// out of validateForgeRequestTransition so the transition-graph + role-
+// authority combination is unit-testable without a database (the
+// system-actor bypass and the prior-row load are the only impure parts).
+// Returns nil when the transition is permitted, or a descriptive error.
+func forgeRequestTransitionDecision(priorStatus, newStatus, role string) error {
 	if !forgeRequestTransitionAllowed(priorStatus, newStatus, role) {
 		return fmt.Errorf(
 			"v1:forge:request: invalid transition %q -> %q",
