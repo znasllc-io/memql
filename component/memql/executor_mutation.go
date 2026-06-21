@@ -533,7 +533,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// DSL cannot gate a transition on actor.role, so the rule lives here.
 	// See forge_request_validation.go.
 	if conceptMeta.Name == conceptForgeRequest {
-		if err := e.validateForgeRequestTransition(ctx, payload, mutation.ID); err != nil {
+		if err := e.validateForgeRequestTransition(ctx, payload, mutation.ID, actor); err != nil {
 			return nil, meta, err
 		}
 	}
