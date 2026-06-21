@@ -40,6 +40,18 @@ service DeployControlService {
   // RolloutAction promotes or aborts an in-flight Argo Rollout via
   // `kubectl argo rollouts promote|abort`.
   rpc RolloutAction(RolloutActionRequest) returns (ActionResult);
+
+  // SuggestNextVersion reads the latest succeeded deployment's version
+  // for an environment (#1877) and proposes the next major / minor /
+  // patch semver. Read-only; owner/admin gated, not audited per call.
+  rpc SuggestNextVersion(SuggestNextVersionRequest) returns (SuggestNextVersionResult);
+
+  // CutVersion creates a new pending deployment record (#1877) at the
+  // chosen next version (bump the current, or an explicit override) with
+  // the resolved image digest -- ready for the deploy driver (#1878) to
+  // ship. Owner/admin gated; emits an audit event. Invalid / duplicate
+  // versions are rejected.
+  rpc CutVersion(CutVersionRequest) returns (ActionResult);
 }
 
 // -----------------------------------------------------------------------------
@@ -75,6 +87,25 @@ message RolloutActionRequest {
   string rollout = 2;
   // action is "promote" or "abort".
   string action = 3;
+}
+
+message SuggestNextVersionRequest {
+  // env is "staging" or "prod" -- selects which environment's current
+  // version is read.
+  string env = 1;
+}
+
+message CutVersionRequest {
+  // env is "staging" or "prod".
+  string env = 1;
+  // bump selects the semver part to increment off the current version:
+  // "major" | "minor" | "patch". Empty defaults to "patch". Ignored
+  // when version is set.
+  string bump = 2;
+  // version is an optional explicit version override (clean semver
+  // X.Y.Z). When set, bump is ignored and this version is cut directly
+  // (still rejected if it is invalid or already exists for the env).
+  string version = 3;
 }
 
 // -----------------------------------------------------------------------------
@@ -174,6 +205,29 @@ message GateLeg {
   bool passed = 2;
   // detail carries the leg's message / phase.
   string detail = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Cut-version suggestion (read)
+// -----------------------------------------------------------------------------
+
+// SuggestNextVersionResult carries the current version + the three
+// next-version proposals (#1877).
+message SuggestNextVersionResult {
+  // current_version is the version the proposals are computed from: the
+  // latest succeeded deployment for the env, falling back to the on-disk
+  // overlay's promoted version. Empty when neither is known (proposals
+  // are then seeded from 0.0.0).
+  string current_version = 1;
+  // next_major / next_minor / next_patch are the proposed clean-semver
+  // bumps of current_version (e.g. current 1.2.3 -> 2.0.0 / 1.3.0 / 1.2.4).
+  string next_major = 2;
+  string next_minor = 3;
+  string next_patch = 4;
+  // source records where current_version came from: "deployment" (a
+  // succeeded v1:cluster:deployment record), "overlay" (the on-disk
+  // kustomization), or "none".
+  string source = 5;
 }
 
 // -----------------------------------------------------------------------------

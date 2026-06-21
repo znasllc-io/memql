@@ -24,6 +24,8 @@ const (
 	DeployControlService_Promote_FullMethodName             = "/znasllc.memql.deploycontrol.v1.DeployControlService/Promote"
 	DeployControlService_Rollback_FullMethodName            = "/znasllc.memql.deploycontrol.v1.DeployControlService/Rollback"
 	DeployControlService_RolloutAction_FullMethodName       = "/znasllc.memql.deploycontrol.v1.DeployControlService/RolloutAction"
+	DeployControlService_SuggestNextVersion_FullMethodName  = "/znasllc.memql.deploycontrol.v1.DeployControlService/SuggestNextVersion"
+	DeployControlService_CutVersion_FullMethodName          = "/znasllc.memql.deploycontrol.v1.DeployControlService/CutVersion"
 )
 
 // DeployControlServiceClient is the client API for DeployControlService service.
@@ -62,6 +64,16 @@ type DeployControlServiceClient interface {
 	// RolloutAction promotes or aborts an in-flight Argo Rollout via
 	// `kubectl argo rollouts promote|abort`.
 	RolloutAction(ctx context.Context, in *RolloutActionRequest, opts ...grpc.CallOption) (*ActionResult, error)
+	// SuggestNextVersion reads the latest succeeded deployment's version
+	// for an environment (#1877) and proposes the next major / minor /
+	// patch semver. Read-only; owner/admin gated, not audited per call.
+	SuggestNextVersion(ctx context.Context, in *SuggestNextVersionRequest, opts ...grpc.CallOption) (*SuggestNextVersionResult, error)
+	// CutVersion creates a new pending deployment record (#1877) at the
+	// chosen next version (bump the current, or an explicit override) with
+	// the resolved image digest -- ready for the deploy driver (#1878) to
+	// ship. Owner/admin gated; emits an audit event. Invalid / duplicate
+	// versions are rejected.
+	CutVersion(ctx context.Context, in *CutVersionRequest, opts ...grpc.CallOption) (*ActionResult, error)
 }
 
 type deployControlServiceClient struct {
@@ -122,6 +134,26 @@ func (c *deployControlServiceClient) RolloutAction(ctx context.Context, in *Roll
 	return out, nil
 }
 
+func (c *deployControlServiceClient) SuggestNextVersion(ctx context.Context, in *SuggestNextVersionRequest, opts ...grpc.CallOption) (*SuggestNextVersionResult, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SuggestNextVersionResult)
+	err := c.cc.Invoke(ctx, DeployControlService_SuggestNextVersion_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *deployControlServiceClient) CutVersion(ctx context.Context, in *CutVersionRequest, opts ...grpc.CallOption) (*ActionResult, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ActionResult)
+	err := c.cc.Invoke(ctx, DeployControlService_CutVersion_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DeployControlServiceServer is the server API for DeployControlService service.
 // All implementations must embed UnimplementedDeployControlServiceServer
 // for forward compatibility.
@@ -158,6 +190,16 @@ type DeployControlServiceServer interface {
 	// RolloutAction promotes or aborts an in-flight Argo Rollout via
 	// `kubectl argo rollouts promote|abort`.
 	RolloutAction(context.Context, *RolloutActionRequest) (*ActionResult, error)
+	// SuggestNextVersion reads the latest succeeded deployment's version
+	// for an environment (#1877) and proposes the next major / minor /
+	// patch semver. Read-only; owner/admin gated, not audited per call.
+	SuggestNextVersion(context.Context, *SuggestNextVersionRequest) (*SuggestNextVersionResult, error)
+	// CutVersion creates a new pending deployment record (#1877) at the
+	// chosen next version (bump the current, or an explicit override) with
+	// the resolved image digest -- ready for the deploy driver (#1878) to
+	// ship. Owner/admin gated; emits an audit event. Invalid / duplicate
+	// versions are rejected.
+	CutVersion(context.Context, *CutVersionRequest) (*ActionResult, error)
 	mustEmbedUnimplementedDeployControlServiceServer()
 }
 
@@ -182,6 +224,12 @@ func (UnimplementedDeployControlServiceServer) Rollback(context.Context, *Rollba
 }
 func (UnimplementedDeployControlServiceServer) RolloutAction(context.Context, *RolloutActionRequest) (*ActionResult, error) {
 	return nil, status.Error(codes.Unimplemented, "method RolloutAction not implemented")
+}
+func (UnimplementedDeployControlServiceServer) SuggestNextVersion(context.Context, *SuggestNextVersionRequest) (*SuggestNextVersionResult, error) {
+	return nil, status.Error(codes.Unimplemented, "method SuggestNextVersion not implemented")
+}
+func (UnimplementedDeployControlServiceServer) CutVersion(context.Context, *CutVersionRequest) (*ActionResult, error) {
+	return nil, status.Error(codes.Unimplemented, "method CutVersion not implemented")
 }
 func (UnimplementedDeployControlServiceServer) mustEmbedUnimplementedDeployControlServiceServer() {}
 func (UnimplementedDeployControlServiceServer) testEmbeddedByValue()                              {}
@@ -294,6 +342,42 @@ func _DeployControlService_RolloutAction_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DeployControlService_SuggestNextVersion_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SuggestNextVersionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeployControlServiceServer).SuggestNextVersion(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeployControlService_SuggestNextVersion_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeployControlServiceServer).SuggestNextVersion(ctx, req.(*SuggestNextVersionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DeployControlService_CutVersion_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CutVersionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeployControlServiceServer).CutVersion(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeployControlService_CutVersion_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeployControlServiceServer).CutVersion(ctx, req.(*CutVersionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DeployControlService_ServiceDesc is the grpc.ServiceDesc for DeployControlService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -320,6 +404,14 @@ var DeployControlService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RolloutAction",
 			Handler:    _DeployControlService_RolloutAction_Handler,
+		},
+		{
+			MethodName: "SuggestNextVersion",
+			Handler:    _DeployControlService_SuggestNextVersion_Handler,
+		},
+		{
+			MethodName: "CutVersion",
+			Handler:    _DeployControlService_CutVersion_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
