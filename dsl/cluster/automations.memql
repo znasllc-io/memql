@@ -54,6 +54,16 @@ automation registerNode {
 // by K8s rollovers) as live. Env-agnostic: identical in local cluster
 // compose and staging -- only the window config differs per env.
 //
+// BACKSTOP, not the fast path (#1874). The active reconciliation loop
+// (TopologyReconciler, component/node/reconciler.go) now drives topology
+// freshness to SECONDS -- it retires superseded-deployment orphans
+// immediately and mesh-absent (crashed/OOM/forced-replace) nodes within a
+// short grace window. This 30-min cron remains purely as the lazy safety net
+// for anything the fast path missed (the fast loop disabled, or no reconcile
+// leader). The two never write conflicting statuses: both append the same
+// idempotent terminal health="stopped", and queryStaleClusterNodes excludes
+// already-stopped rows, so once the fast path retires a node this cron skips it.
+//
 // Six-field cron (sec min hour dom mon dow): minute 0,10,20,30,40,50.
 @enabled
 @trigger(schedule="0 */10 * * * *")

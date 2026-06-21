@@ -154,6 +154,15 @@ logic logicRegisterNode {
 // marks those rows terminal so topology / CLI / WorkerDialer stop
 // treating dead pods as live.
 //
+// BACKSTOP to the fast reaper (#1874). The active reconciliation loop
+// (TopologyReconciler, component/node/reconciler.go) is the primary path now
+// -- it retires superseded-deployment orphans (querySupersededDeployments)
+// immediately and mesh-absent nodes within a short grace window, in seconds.
+// This 30-min prune stays only as the lazy safety net for whatever the fast
+// path missed. Both append the SAME idempotent terminal health="stopped" and
+// queryStaleClusterNodes excludes already-stopped rows, so they can never
+// write conflicting statuses for the same node.
+//
 // Mechanism (mirrors logicPurgeExpiredArchivedSpaces /
 // logicAccessRequestExpirySweep):
 //   1. queryStaleClusterNodes returns the LATEST row per id whose health
