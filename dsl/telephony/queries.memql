@@ -8,7 +8,7 @@ use telephony.shapes.{ numberFull, callFull }
 
 @enabled
 @description("ADMIN: DIDs provisioned to a partition, newest first. Cluster-owner gated -- numbers are cluster infrastructure.")
-query number numbersByPartition {
+query number queryNumbersByPartition {
   args {
     partitionId  string  @required
   }
@@ -19,7 +19,7 @@ query number numbersByPartition {
 
 @enabled
 @description("ADMIN: every provisioned DID across all partitions, newest first. Cluster-owner gated. Backs the cockpit numbers view.")
-query number allNumbers {
+query number queryAllNumbers {
   filter  actor.isClusterOwner==true
   sort    "createdAt", "desc"
   paginate 100
@@ -28,7 +28,7 @@ query number allNumbers {
 
 @enabled
 @description("ADMIN: call records for a partition, newest first. Cluster-owner gated. Powers billing + observability.")
-query call callsByPartition {
+query call queryCallsByPartition {
   args {
     partitionId  string  @required
   }
@@ -40,7 +40,7 @@ query call callsByPartition {
 
 @enabled
 @description("ADMIN: call records that touched a specific DID (as caller or callee), newest first. Cluster-owner gated.")
-query call callsByNumber {
+query call queryCallsByNumber {
   args {
     e164  string  @required
   }
