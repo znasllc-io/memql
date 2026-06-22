@@ -1252,7 +1252,14 @@ query identity queryWorkerTokensForUser {
     userId  string  @required
   }
   filter  traitIdentityIsWorkerToken && payload.userId==args.userId
-  shape   identityFull
+  // Pagination (5.2 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table token pull. The engine emits a
+  // nextCursor on a full page; an inbound cursor (ExecuteQueryMsg.cursor)
+  // continues the keyset scan. Literal page size -- the struct-query paginate
+  // directive only accepts an integer literal, not an arg expression.
+  sort     "createdAt", "desc"
+  paginate 50
+  shape    identityFull
 }
 
 // ---- queries/v1/identity/nodeTokenIdentityByBinding.memql ----
