@@ -47,6 +47,14 @@ spec:
           env:
             - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
             - { name: SERVICE_NAME, value: "memQL" }
+            # Stamp a distinct, attributable application_name on this one-shot
+            # Job's Postgres backend so a pg_stat_activity triage can never
+            # confuse the migration cycle with the leaked `deployer` pool
+            # (memql#1933/#1861). The Job connects as the app role, closes its
+            # pool on exit (Database.Stop -> db.Close), keeps only one
+            # short-lived idle conn (CONN_MAX_IDLE_TIME_MS), and is TTL-reaped --
+            # so the deploy + migration cycle adds no growing idle backlog.
+            - { name: MEMQL_DB_APP_NAME, value: "memql-migrate" }
             # This Job is the one that migrates -- force it on regardless of
             # any envelope value.
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "true" }

@@ -75,12 +75,16 @@ replicas or a pooler.
   that opens a pool and never closes it has no such reaper — it will pin idle
   slots for hours and eat the budget. On staging this showed up as ~28 idle
   backends stamped `application_name=deployer`, connecting as the `postgres`
-  superuser, growing ~1 per 30 min. Find them with
-  `scripts/ops/conn-recover.sh deployer-inspect` (read-only) and reclaim with the
-  postgres-superuser DSN (only a superuser may terminate superuser-owned
-  sessions). The durable fix is to **stop the leaking client** (identified by its
-  `client_addr`) and make it close its pool / set an idle timeout — there is no
-  shared role to put a server-side reaper on.
+  superuser, growing ~1 per 30 min. Detect them with
+  `scripts/deploy/deployer-pool-reap.sh inspect` (read-only) and reclaim with
+  `scripts/deploy/deployer-pool-reap.sh reap --confirm` and the postgres-superuser
+  DSN (only a superuser may terminate superuser-owned sessions; the reaper is
+  guarded — read-only without `--confirm`, and only ever targets idle,
+  `deployer`-stamped, past-threshold backends). The durable fix is to **stop the
+  leaking client** (identified by its `client_addr`) and make it close its pool /
+  set an idle timeout — there is no shared role to put a server-side reaper on.
+  The in-cluster deploy + migration cycle does not leak (the migrate Job closes
+  its pool on exit and stamps `application_name=memql-migrate`, memql#1933).
 - **Blue-green drain window** (child E, memql#1780): the bff Rollout's
   `scaleDownDelaySeconds` was cut 3600→300 so a promotion stops holding a full
   extra bff color (pods + pools) for an hour. See `deploy/rollouts/README.md`.
