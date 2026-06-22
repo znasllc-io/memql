@@ -8,7 +8,7 @@ import (
 // Slugify normalizes a name into the canonical kebab-case shortId
 // form used for memQL catalog rows (concepts whose identity is a
 // stable human-chosen name -- v1:agents:agentRole,
-// v1:common:knowledgeDomain, v1:cluster:nodeType, etc.).
+// v1:knowledge:knowledgeDomain, v1:cluster:nodeType, etc.).
 //
 // Rules:
 //   - Insert a dash on each lowercase->uppercase boundary so

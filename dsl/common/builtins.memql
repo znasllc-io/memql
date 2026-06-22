@@ -291,7 +291,7 @@ builtin knowledgeAugmentDomainGenerate {
 // ==========================================================
 //
 // Split a document into chunks, embed each chunk, and persist both the
-// chunk rows (v1:common:documentChunk) and their vectors (node_vectors).
+// chunk rows (v1:knowledge:documentChunk) and their vectors (node_vectors).
 // Idempotent by {domainId, sourceRef, seq, text} hash -- re-ingesting
 // the same source replaces the embeddings on conflict.
 
@@ -478,7 +478,7 @@ builtin seedAllDomainContent {
 //
 // Generate ~30 retrievable chunks for one domain via the
 // seedDomainContent prompt, embed them, store them as
-// v1:common:documentChunk rows. Idempotent at a given
+// v1:knowledge:documentChunk rows. Idempotent at a given
 // recipeVersion via deterministic chunk ids.
 //
 // Invoked by:

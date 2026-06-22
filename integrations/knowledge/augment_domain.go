@@ -425,7 +425,7 @@ func (i *Integration) storeAugmentChunk(
 	if _, err := i.engine.Execute(ctx, insertQuery); err != nil {
 		return fmt.Errorf("insert chunk: %w", err)
 	}
-	if err := i.storeVector(ctx, chunkId, "v1:common:documentChunk", vec); err != nil {
+	if err := i.storeVector(ctx, chunkId, "v1:knowledge:documentChunk", vec); err != nil {
 		return fmt.Errorf("persist vector: %w", err)
 	}
 	return nil
@@ -433,7 +433,7 @@ func (i *Integration) storeAugmentChunk(
 
 // lookupDomainMeta resolves the human-readable name + description for
 // any domain id (catalog or user-created) by reading the
-// v1:common:knowledgeDomain row directly. Falls back to the bare id
+// v1:knowledge:knowledgeDomain row directly. Falls back to the bare id
 // + an empty description if the row is missing -- the prompt still
 // runs, just less context-rich.
 func (i *Integration) lookupDomainMeta(ctx context.Context, domainId string) (string, string, error) {

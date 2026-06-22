@@ -180,7 +180,7 @@ func TestRun3_TouchSession_ReadMerge(t *testing.T) {
 // other field (name / description / category / source / scope / tier / ...).
 func TestRun3_DeleteKnowledgeDomain_ReadMerge(t *testing.T) {
 	eng, db, ctx := readMergeTestEngine(t)
-	const conceptName = "v1:common:knowledgeDomain"
+	const conceptName = "v1:knowledge:knowledgeDomain"
 
 	domainId := "kd-" + uniqueSuffix("del")
 	// Seed via the create mutation (full row). Reuse the canonical stored id.

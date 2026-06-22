@@ -22,7 +22,7 @@ func TestSystemPlanIdsAreValid(t *testing.T) {
 
 	// Realistic colon-laden source ids drawn from live rows.
 	respId := "v1:planner:responsibility:d6ac657f-1234-5678-9abc-def012345678"
-	domainId := "v1:common:knowledgeDomain:sales-playbook"
+	domainId := "v1:knowledge:knowledgeDomain:sales-playbook"
 	parentPlanId := "v1:planner:plan:abc-123"
 
 	cases := map[string]string{

@@ -3849,7 +3849,7 @@ func MutationCreateImageRegionBuild(args MutationCreateImageRegionArgs) string {
 	return b.String()
 }
 
-// MutationCreateKnowledgeBridge -- Insert a v1:common:knowledgeBridge row. Caller is the knowledge integration's bridge generator -- one bridge per unique (roleSlug, sortedDomainIds) pair across the whole tenant.
+// MutationCreateKnowledgeBridge -- Insert a v1:knowledge:knowledgeBridge row. Caller is the knowledge integration's bridge generator -- one bridge per unique (roleSlug, sortedDomainIds) pair across the whole tenant.
 //
 // Bound concept: knowledgeBridge.
 type MutationCreateKnowledgeBridgeArgs struct {

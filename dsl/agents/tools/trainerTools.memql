@@ -49,7 +49,7 @@ tool fetchUrl {
 @description("Persist a distilled knowledge chunk into the target domain. source is hard-stamped 'trainerAgent' and the chunk lands validated (canonical). sourceRef is REQUIRED and MUST point at a real URL or named source you consulted -- no fabricated citations.")
 tool writeKnowledgeChunk {
   chunkId      string   @required @description("Stable chunk id. Use a deterministic id (e.g. a hash of domainId+sourceRef+seq) so re-runs are idempotent.")
-  domainId     string   @required @description("Target v1:common:knowledgeDomain id -- the one domain this Plan trains against (from the Plan input).")
+  domainId     string   @required @description("Target v1:knowledge:knowledgeDomain id -- the one domain this Plan trains against (from the Plan input).")
   text         string   @required @description("The chunk text. Plain, self-contained, grounded in the cited source.")
   sourceRef    string   @required @description("Where the chunk came from, e.g. 'url:https://...'. The Trainer's no-fabricated-citations invariant: every chunk points at a real consulted source.")
   seq          integer  @default("0") @description("Order within this training run (0-based).")

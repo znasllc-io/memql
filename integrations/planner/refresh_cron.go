@@ -215,7 +215,7 @@ func (c *RefreshCron) pollOnce(ctx context.Context) {
 }
 
 // HandleDomainUpdated is the event-driven stale-signal path (Q9). It
-// subscribes to graph.node.updated.v1:common:knowledgeDomain. When a
+// subscribes to graph.node.updated.v1:knowledge:knowledgeDomain. When a
 // domain's staleSignalCount crosses the threshold (bumped by the
 // Planner Agent's markKnowledgeDomainStale tool), it spawns an
 // immediate trainSpecialist(mode='refresh') Plan rather than waiting

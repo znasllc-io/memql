@@ -32,7 +32,7 @@ func runSystemID(t *testing.T, e *Env) {
 	// concept, no matter how compound the source context is.
 	inputs := []string{
 		"v1:planner:responsibility:d6ac657f-1234-5678-9abc-def012345678",
-		"v1:common:knowledgeDomain:sales-playbook",
+		"v1:knowledge:knowledgeDomain:sales-playbook",
 		"v1:planner:plan:abc-123",
 		"bare-already",
 		"",

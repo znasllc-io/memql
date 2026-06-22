@@ -55,7 +55,7 @@ func (c *CognitionIntegration) retrieveVoiceGroundingBlock(ctx context.Context, 
 
 	args, err := json.Marshal(map[string]any{
 		"text":    query,
-		"concept": "v1:common:documentChunk",
+		"concept": "v1:knowledge:documentChunk",
 		"domains": clean,
 		"limit":   5,
 	})

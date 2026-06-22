@@ -1577,7 +1577,7 @@ func (r *Replier) retrieveKnowledgeChunks(ctx context.Context, query string, dom
 	const wantK = 5
 	args, err := json.Marshal(map[string]any{
 		"text":    query,
-		"concept": "v1:common:documentChunk",
+		"concept": "v1:knowledge:documentChunk",
 		"domains": domains,
 		"limit":   wantK,
 	})
@@ -1897,7 +1897,7 @@ func citeAsTraining(domain map[string]any, _ string) string {
 
 func citeAsBridge(domain map[string]any, _ string) string {
 	// Bridges intentionally don't have a domain row to look up
-	// (they live on v1:common:knowledgeBridge). The bridge's id
+	// (they live on v1:knowledge:knowledgeBridge). The bridge's id
 	// itself is opaque to the user; we just say "cross-domain
 	// knowledge" so the citation is honest without being noisy.
 	if name := domainDisplayName(domain); name != "" {
@@ -2001,8 +2001,8 @@ func prettifyDomainId(id string) string {
 // assignment so the formatter still works.
 //
 // Canonical-id construction: chunk.payload.domainId is the BARE slug
-// (e.g. "customer-relations"). v1:common:knowledgeDomain rows live at
-// canonical id `<partition>:v1:common:knowledgeDomain:<slug>`, and
+// (e.g. "customer-relations"). v1:knowledge:knowledgeDomain rows live at
+// canonical id `<partition>:v1:knowledge:knowledgeDomain:<slug>`, and
 // queryKnowledgeDomainById's `?.id == args.domainId` filter compares
 // against the FULL canonical form -- bare slugs never match. We
 // reconstruct the canonical id by extracting the partition prefix
@@ -2028,7 +2028,7 @@ func (r *Replier) enrichChunksForRender(ctx context.Context, chunks []map[string
 		// would fail the lookup:
 		//
 		// 1. Bridges (id prefix "bridge-") have their metadata on
-		//    v1:common:knowledgeBridge instead of knowledgeDomain;
+		//    v1:knowledge:knowledgeBridge instead of knowledgeDomain;
 		//    the lookup would always miss. Source: crossDomainBridge.
 		//
 		// 2. App-structure domain (currently just "copresent-ui")
@@ -2128,9 +2128,9 @@ func isLinkableSource(source string) bool {
 // knowledgeDomain id from a chunk's canonical id + the chunk's bare
 // domain slug.
 //
-//	chunkId = "default:v1:common:documentChunk:seed-3767..."
+//	chunkId = "default:v1:knowledge:documentChunk:seed-3767..."
 //	bareSlug = "customer-relations"
-//	-> "default:v1:common:knowledgeDomain:customer-relations"
+//	-> "default:v1:knowledge:knowledgeDomain:customer-relations"
 //
 // We pull the partition (first segment) from the chunk id and join
 // with the knowledgeDomain concept prefix + slug. If the chunk id
@@ -2145,14 +2145,14 @@ func canonicalDomainIdFromChunkId(chunkId, bareSlug string) string {
 		return bareSlug
 	}
 	// Partition is the segment up to the first ':'. We need the
-	// concept ('v1:common:documentChunk') NOT to leak into the
+	// concept ('v1:knowledge:documentChunk') NOT to leak into the
 	// reconstructed id, so we split off just the partition piece.
 	colon := strings.Index(chunkId, ":")
 	if colon <= 0 {
 		return bareSlug
 	}
 	partition := chunkId[:colon]
-	return partition + ":v1:common:knowledgeDomain:" + bareSlug
+	return partition + ":v1:knowledge:knowledgeDomain:" + bareSlug
 }
 
 // lookupDomainCached fetches a knowledgeDomain row by id, memoising
@@ -2160,7 +2160,7 @@ func canonicalDomainIdFromChunkId(chunkId, bareSlug string) string {
 // chunks that share the same domain.
 //
 // `domainId` is expected to be the FULL canonical id (e.g.
-// "default:v1:common:knowledgeDomain:customer-relations"). Bare
+// "default:v1:knowledge:knowledgeDomain:customer-relations"). Bare
 // slugs won't match the query's `?.id == args.domainId` filter --
 // see canonicalDomainIdFromChunkId for the reconstruction.
 //

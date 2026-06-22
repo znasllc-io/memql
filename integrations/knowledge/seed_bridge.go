@@ -13,8 +13,8 @@ package knowledge
 //
 //   - Bridge id = sha256(roleSlug + ":" + sortedDomainIds.join(","))
 //     truncated to 16 hex chars, prefixed "bridge-".
-//   - The bridge metadata lives on a v1:common:knowledgeBridge row.
-//   - The bridge chunks live as v1:common:documentChunk rows where
+//   - The bridge metadata lives on a v1:knowledge:knowledgeBridge row.
+//   - The bridge chunks live as v1:knowledge:documentChunk rows where
 //     domainId == bridgeId. Same retrieval path as regular per-domain
 //     chunks; no special retrieval logic needed.
 //   - Agents whose (role, domains) match a bridge get the bridge id
@@ -409,7 +409,7 @@ func (i *Integration) ensureKnowledgeBridgeHandler(
 	return []memorynodesNode{
 		{
 			ID:        fmt.Sprintf("knowledgeBridge-result:%d", time.Now().UnixNano()),
-			Concept:   "v1:common:knowledgeBridge",
+			Concept:   "v1:knowledge:knowledgeBridge",
 			Payload:   payload,
 			CreatedAt: time.Now(),
 		},

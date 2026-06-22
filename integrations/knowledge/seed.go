@@ -103,7 +103,7 @@ func wikipediaArticlesFor(domainId string) []string {
 // standardDomains mirrors the former hardcoded KNOWLEDGE_DOMAINS list
 // that used to live on the CoPresent frontend in agentDefaults.ts. We
 // seed it into the database on startup so the frontend (and any other
-// client) can query v1:common:knowledgeDomain instead of carrying the
+// client) can query v1:knowledge:knowledgeDomain instead of carrying the
 // list in-bundle. The RelevantForRoles slice maps the old
 // ROLE_DOMAIN_MAP: a domain whose RelevantForRoles contains role "X"
 // will surface in role X's picker.
@@ -1939,7 +1939,7 @@ func (i *Integration) domainExists(ctx context.Context, domainId string) bool {
 	sqlText := `
 		SELECT COUNT(1) FROM "MemoryNodes"
 		WHERE partition = $1
-		  AND concept = 'v1:common:knowledgeDomain'
+		  AND concept = 'v1:knowledge:knowledgeDomain'
 		  AND (payload->>'active' = 'true' OR payload->>'active' IS NULL)
 		  AND id LIKE $2
 	`
@@ -1962,7 +1962,7 @@ func (i *Integration) chunkExistsForSource(ctx context.Context, domainId, source
 	sqlText := `
 		SELECT COUNT(1) FROM "MemoryNodes"
 		WHERE partition = $1
-		  AND concept = 'v1:common:documentChunk'
+		  AND concept = 'v1:knowledge:documentChunk'
 		  AND (payload->>'domainId') = $2
 		  AND (payload->>'sourceRef') = $3
 	`
@@ -1972,7 +1972,7 @@ func (i *Integration) chunkExistsForSource(ctx context.Context, domainId, source
 	return count > 0
 }
 
-// purgeChunksForSource hard-deletes every v1:common:documentChunk
+// purgeChunksForSource hard-deletes every v1:knowledge:documentChunk
 // row (and its node_vectors row) for a given (domain, sourceRef)
 // pair in the active partition. Called from the seed right before
 // a re-ingest when a text change is detected, so the new version is
@@ -1991,7 +1991,7 @@ func (i *Integration) purgeChunksForSource(ctx context.Context, domainId, source
 		DELETE FROM node_vectors
 		WHERE id IN (
 		    SELECT id FROM "MemoryNodes"
-		    WHERE concept = 'v1:common:documentChunk'
+		    WHERE concept = 'v1:knowledge:documentChunk'
 		      AND (payload->>'domainId') = $1
 		      AND (payload->>'sourceRef') = $2
 		)
@@ -2001,7 +2001,7 @@ func (i *Integration) purgeChunksForSource(ctx context.Context, domainId, source
 	}
 	chunkSQL := `
 		DELETE FROM "MemoryNodes"
-		WHERE concept = 'v1:common:documentChunk'
+		WHERE concept = 'v1:knowledge:documentChunk'
 		  AND (payload->>'domainId') = $1
 		  AND (payload->>'sourceRef') = $2
 	`
@@ -2028,7 +2028,7 @@ func (i *Integration) chunkExistsById(ctx context.Context, chunkId string) bool 
 	sqlText := `
 		SELECT COUNT(1) FROM "MemoryNodes"
 		WHERE partition = $1
-		  AND concept = 'v1:common:documentChunk'
+		  AND concept = 'v1:knowledge:documentChunk'
 		  AND id = $2
 	`
 	if err := i.db().QueryRowContext(ctx, sqlText, partition, chunkId).Scan(&count); err != nil {

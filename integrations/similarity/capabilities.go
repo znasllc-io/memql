@@ -21,7 +21,7 @@
 //
 //	similarTo({
 //	  text:    "<free-form query>",
-//	  concept: "v1:common:documentChunk",
+//	  concept: "v1:knowledge:documentChunk",
 //	  domains: ["copresent-ui"],   // optional
 //	  limit:   5,                   // default 5
 //	  provider: "embedding3Small"   // default
@@ -101,7 +101,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Handler:     i.similarToHandler,
 			ArgsSchema: map[string]string{
 				"text":     "string (required) - the free-text query to embed and search by",
-				"concept":  "string (required) - concept id of the nodes to search (e.g. v1:common:documentChunk)",
+				"concept":  "string (required) - concept id of the nodes to search (e.g. v1:knowledge:documentChunk)",
 				"domains":  "[]string (optional) - payload.domainId values to scope the search to; empty = all domains",
 				"limit":    "int (optional) - max nodes to return (default 5)",
 				"provider": "string (optional) - embedding provider name (default embedding3Small)",

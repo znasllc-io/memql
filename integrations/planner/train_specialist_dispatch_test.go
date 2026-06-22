@@ -320,7 +320,7 @@ func TestRefreshCron_SpawnRefreshPlanCallShape(t *testing.T) {
 	eng := &fakeEngine{}
 	c := NewRefreshCron(eng, nil)
 	row := map[string]any{
-		"id":      "default:v1:common:knowledgeDomain:physics_qm",
+		"id":      "default:v1:knowledge:knowledgeDomain:physics_qm",
 		"name":    "Quantum Mechanics",
 		"ownerId": "",
 	}
@@ -350,7 +350,7 @@ func TestRefreshCron_StaleSignalThreshold(t *testing.T) {
 	c := NewRefreshCron(eng, nil)
 
 	below := events.Event{Payload: map[string]any{
-		"id": "default:v1:common:knowledgeDomain:physics_qm",
+		"id": "default:v1:knowledge:knowledgeDomain:physics_qm",
 		"payload": map[string]any{
 			"staleSignalCount": float64(2),
 			"name":             "Quantum Mechanics",
@@ -362,7 +362,7 @@ func TestRefreshCron_StaleSignalThreshold(t *testing.T) {
 	}
 
 	at := events.Event{Payload: map[string]any{
-		"id": "default:v1:common:knowledgeDomain:physics_qm",
+		"id": "default:v1:knowledge:knowledgeDomain:physics_qm",
 		"payload": map[string]any{
 			"staleSignalCount": float64(staleSignalRefreshThreshold),
 			"name":             "Quantum Mechanics",

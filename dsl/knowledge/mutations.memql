@@ -167,7 +167,7 @@ mutation imageRegion mutationCreateImageRegion {
 }
 
 @enabled
-@description("Insert a v1:common:knowledgeBridge row. Caller is the knowledge integration's bridge generator -- one bridge per unique (roleSlug, sortedDomainIds) pair across the whole tenant.")
+@description("Insert a v1:knowledge:knowledgeBridge row. Caller is the knowledge integration's bridge generator -- one bridge per unique (roleSlug, sortedDomainIds) pair across the whole tenant.")
 mutation knowledgeBridge mutationCreateKnowledgeBridge {
   args {
     bridgeId        string  @required

@@ -830,7 +830,7 @@ func (i *Integration) embedDomainContent(
 				"chunkId", c.id, "err", err)
 			continue
 		}
-		if err := i.storeVector(ctx, c.id, "v1:common:documentChunk", vec); err != nil {
+		if err := i.storeVector(ctx, c.id, "v1:knowledge:documentChunk", vec); err != nil {
 			i.Logger.Warn("training.trainAgent: store vector failed",
 				"chunkId", c.id, "err", err)
 			continue
@@ -904,7 +904,7 @@ func (i *Integration) fetchDomainLabels(
 // stripIdPrefix returns the last colon-separated segment of an id
 // so the agent's short-slug reference (`business_administration`)
 // matches the canonical id
-// (`default:v1:common:knowledgeDomain:business_administration`).
+// (`default:v1:knowledge:knowledgeDomain:business_administration`).
 func stripIdPrefix(id string) string {
 	if id == "" {
 		return ""
@@ -1064,7 +1064,7 @@ func (i *Integration) distillSystemPrompt(
 //
 // `domainId` is the bare slug (e.g. "edu_pedagogy"). The DB stores
 // the chunk's `domainId` field in CANONICAL form
-// (`<partition>:v1:common:knowledgeDomain:<slug>`) because the
+// (`<partition>:v1:knowledge:knowledgeDomain:<slug>`) because the
 // concept declares an @relationship on that field, and the engine
 // canonicalises the bare slug at insert time. So we have to match
 // against BOTH forms here -- bare slug for any callers / older
@@ -1081,7 +1081,7 @@ func (i *Integration) queryChunksForDomain(
 	partition string,
 	domainId string,
 ) ([]chunkRef, error) {
-	canonicalDomainId := fmt.Sprintf("%s:v1:common:knowledgeDomain:%s", partition, domainId)
+	canonicalDomainId := fmt.Sprintf("%s:v1:knowledge:knowledgeDomain:%s", partition, domainId)
 	rows, err := i.db().QueryContext(
 		ctx,
 		`SELECT DISTINCT ON (chunk.id)
@@ -1089,7 +1089,7 @@ func (i *Integration) queryChunksForDomain(
 		        chunk.payload->>'text' AS text
 		 FROM "MemoryNodes" chunk
 		 WHERE chunk.partition = $1
-		   AND chunk.concept = 'v1:common:documentChunk'
+		   AND chunk.concept = 'v1:knowledge:documentChunk'
 		   AND (
 		     chunk.payload->>'domainId' = $2
 		     OR chunk.payload->>'domainId' = $3
@@ -1318,7 +1318,7 @@ func (i *Integration) backfillStampIfMissing(ctx context.Context, domainId strin
 		return
 	}
 	partition := i.resolvePartition(ctx)
-	canonicalId := partition + ":v1:common:knowledgeDomain:" + domainId
+	canonicalId := partition + ":v1:knowledge:knowledgeDomain:" + domainId
 	res, err := i.engine.Execute(
 		ctx,
 		fmt.Sprintf(`queryKnowledgeDomainById({domainId: %s})`, quoteString(canonicalId)),
@@ -1379,7 +1379,7 @@ func (i *Integration) domainNeedsRefresh(ctx context.Context, domainId string) (
 	// what training.trainAgent passes via addedDomains) never match.
 	// Reconstruct the canonical id using the request's partition.
 	partition := i.resolvePartition(ctx)
-	canonicalId := partition + ":v1:common:knowledgeDomain:" + domainId
+	canonicalId := partition + ":v1:knowledge:knowledgeDomain:" + domainId
 	res, err := i.engine.Execute(
 		ctx,
 		fmt.Sprintf(`queryKnowledgeDomainById({domainId: %s})`, quoteString(canonicalId)),
