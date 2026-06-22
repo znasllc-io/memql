@@ -39,6 +39,7 @@ package parser
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -87,7 +88,7 @@ func rewriteEachBlock(
 	header *regexp.Regexp,
 	kindLabel string,
 	needsConcept bool,
-	emit func(name, conceptId, body string) (string, error),
+	emit func(name, conceptId, body, preamble string) (string, error),
 ) (string, error) {
 	// Detect headers against a comment-blanked view so a `<kind> <name>
 	// {` (or `func (Receiver) ...`) token inside a `//` / `/* */`
@@ -136,13 +137,35 @@ func rewriteEachBlock(
 		}
 
 		body := out[openIdx+1 : closeIdx]
-		rewritten, err := emit(name, conceptId, body)
+		preamble := precedingAnnotationBlock(out, h[0])
+		rewritten, err := emit(name, conceptId, body, preamble)
 		if err != nil {
 			return "", fmt.Errorf("%s %q: %w", kindLabel, name, err)
 		}
 		out = out[:h[0]] + rewritten + out[closeIdx+1:]
 	}
 	return out, nil
+}
+
+// precedingAnnotationBlock returns the contiguous run of annotation
+// (`@...`) and comment (`//`) lines immediately preceding the
+// construct header at headerStart. A blank line or any non-annotation/
+// non-comment line terminates the block. The returned text lets a
+// per-construct emitter inspect the construct's annotations (e.g.
+// `@unbounded("reason")`) without re-parsing the whole file.
+func precedingAnnotationBlock(src string, headerStart int) string {
+	blockStart := headerStart
+	for k := headerStart - 1; k >= 0; {
+		lineStart := strings.LastIndexByte(src[:k], '\n') + 1
+		line := strings.TrimSpace(strings.TrimRight(src[lineStart:k+1], "\r\n"))
+		if strings.HasPrefix(line, "@") || strings.HasPrefix(line, "//") {
+			blockStart = lineStart
+			k = lineStart - 1
+			continue
+		}
+		break
+	}
+	return src[blockStart:headerStart]
 }
 
 // emitFuncHeader writes the procedural function preamble: optional
@@ -295,7 +318,20 @@ type structQueryBody struct {
 	asOf     string
 }
 
-func emitQuery(name, conceptId, body string) (string, error) {
+// UnboundedPaginateWindow is the explicit paginate window the rewriter
+// injects when a query carries `@unbounded("reason")`. It signals the
+// engine that the author has deliberately opted the query out of the
+// implicit list-cap backstop (epic 5, issue 5.1 / memql#1965): an
+// `@unbounded` query reads the full matching set, so the rewriter wraps
+// it in an explicit `paginate(base, <UnboundedPaginateWindow>)`. That
+// makes plan.Limit non-nil, which the engine reads as "explicit window
+// requested" and therefore skips the default 50-row cap. The engine
+// still clamps the realized window to MEMORY_ENGINE_MAX_WINDOW, so this
+// is a "give me everything up to the hard ceiling" request, not a way
+// to bypass the absolute window ceiling.
+const UnboundedPaginateWindow = 1000000
+
+func emitQuery(name, conceptId, body, preamble string) (string, error) {
 	parsed, err := parseStructQueryBody(body)
 	if err != nil {
 		return "", err
@@ -306,12 +342,62 @@ func emitQuery(name, conceptId, body string) (string, error) {
 	if parsed.count && (parsed.sort != "" || parsed.paginate != "") {
 		return "", fmt.Errorf("`count` cannot be combined with `sort` or `paginate`")
 	}
+
+	// `@unbounded("reason")` opt-out (memql#1965). The author has
+	// deliberately marked this query as a legitimate full-set read.
+	// It is mutually exclusive with the bounding directives -- a query
+	// that already paginates / sorts is bounded, not unbounded -- and
+	// with count (an aggregate, never a row set). When present we inject
+	// an explicit paginate window so the engine's runtime list-cap
+	// backstop treats the query as explicitly windowed and does not clamp
+	// it to the implicit 50-row default.
+	reason, hasUnbounded, err := unboundedReason(preamble)
+	if err != nil {
+		return "", err
+	}
+	if hasUnbounded {
+		if reason == "" {
+			return "", fmt.Errorf("`@unbounded` requires a non-empty reason string: @unbounded(\"why this query reads the full set\")")
+		}
+		if parsed.paginate != "" || parsed.sort != "" {
+			return "", fmt.Errorf("`@unbounded` cannot be combined with `paginate` or `sort` -- a paginated/sorted query is already bounded; drop @unbounded or drop the directive")
+		}
+		if parsed.count {
+			return "", fmt.Errorf("`@unbounded` cannot be combined with `count` -- count returns an aggregate, not a row set")
+		}
+		parsed.paginate = strconv.Itoa(UnboundedPaginateWindow)
+	}
+
 	var sb strings.Builder
 	emitFuncHeader(&sb, "Query", name, parsed.argsText, "(any, error)")
 	sb.WriteString("  return ")
 	sb.WriteString(buildStructQueryExpr(conceptId, parsed.filter, parsed.shape, parsed.sort, parsed.paginate, parsed.asOf, parsed.count))
 	sb.WriteString(", nil\n}")
 	return sb.String(), nil
+}
+
+// unboundedReasonRe matches `@unbounded("reason")` and captures the
+// reason string. The reason is mandatory (memql#1965): every full-set
+// read must carry a one-line justification so the audit report can
+// enumerate why each bypass is legitimate.
+var unboundedReasonRe = regexp.MustCompile(`@unbounded\s*\(\s*"((?:[^"\\]|\\.)*)"\s*\)`)
+
+// unboundedBareRe matches a bare `@unbounded` (no argument list), which
+// is rejected -- the reason is required.
+var unboundedBareRe = regexp.MustCompile(`@unbounded\b`)
+
+// unboundedReason inspects a construct's preamble for the
+// `@unbounded("reason")` annotation. Returns the captured reason, a
+// presence flag, and an error if the annotation is present but
+// malformed (bare, or empty/whitespace reason).
+func unboundedReason(preamble string) (string, bool, error) {
+	if m := unboundedReasonRe.FindStringSubmatch(preamble); m != nil {
+		return strings.TrimSpace(m[1]), true, nil
+	}
+	if unboundedBareRe.MatchString(preamble) {
+		return "", true, fmt.Errorf("`@unbounded` requires a reason string: @unbounded(\"why this query reads the full set\")")
+	}
+	return "", false, nil
 }
 
 func parseStructQueryBody(body string) (*structQueryBody, error) {
@@ -432,7 +518,7 @@ type structMutationBody struct {
 	writeTarget string // bare concept name from `<kind> <name> { ... }`
 }
 
-func emitMutation(name, conceptId, body string) (string, error) {
+func emitMutation(name, conceptId, body, _preamble string) (string, error) {
 	parsed, err := parseStructMutationBody(body)
 	if err != nil {
 		return "", err
@@ -655,7 +741,7 @@ func NormaliseLogicSource(source string) (string, error) {
 
 var logicBodyBlockHeader = regexp.MustCompile(`(^|[\n\r])[ \t]*body[ \t]*\{`)
 
-func emitLogic(name, _conceptId, body string) (string, error) {
+func emitLogic(name, _conceptId, body, _preamble string) (string, error) {
 	argsText, err := extractArgsBlock(body)
 	if err != nil {
 		return "", err
@@ -732,7 +818,7 @@ type automationStep struct {
 	call string
 }
 
-func emitAutomation(name, _conceptId, body string) (string, error) {
+func emitAutomation(name, _conceptId, body, _preamble string) (string, error) {
 	steps, err := parseAutomationSteps(body)
 	if err != nil {
 		return "", err

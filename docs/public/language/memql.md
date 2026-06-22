@@ -285,7 +285,7 @@ Configuration variables (prefixed with `MEMQL_WS_`) let you tune the gateway:
 | Fields               | `concept`, `id`, `type`, `createdAt`, `createdBy`, or `payload.<path>`.                                         |
 | Operators            | `==`, `!=`, `>`, `>=`, `<`, `<=`, `==nil`, `!=nil` (plus `in` in DSL filter clauses — see Operator Reference).  |
 | Parentheses          | Group complex logic: `(concept==v1:assistant \|\| concept==v1:examples:persona) && payload.active==true`.       |
-| Limit & offset       | Use `paginate(<expr>, limit, offset?)` to request explicit windows; omitting it applies the engine defaults (limit=`MEMORY_ENGINE_MAX_RESULTS`, offset=`0`). |
+| Limit & offset       | Use `paginate(<expr>, limit, offset?)` to request explicit windows; omitting both `paginate` and `sort` caps the read at `MEMORY_ENGINE_DEFAULT_LIST_CAP` (default 50, the unmarked-list backstop), offset=`0`. |
 
 > **Retired operator forms.** The legacy `;`-as-AND and `,`-as-OR separators, the `has` membership operator, the `?.` optional-chain prefix, and the `??` null-coalescing operator are all retired (#977, and `??` in the struct-form Phase 4 work). The parser rejects them in authored DSL filters with migration-pointing errors. Use `&&` / `||`, `in`, `when(args.x) { ... }`, and `coalesce(a, b, ...)` respectively.
 
@@ -437,11 +437,20 @@ sort(
 
 ### Pagination
 
-`paginate(<expr>, limit, offset?)` constrains result windows. When omitted, the engine uses the defaults (`limit = MEMORY_ENGINE_MAX_RESULTS`, `offset = 0`). The function:
+`paginate(<expr>, limit, offset?)` constrains result windows. The function:
 
 - Requires at least one integer argument (limit) greater than zero.
 - Accepts an optional second integer argument for offset.
 - Can be combined with other helpers (e.g., `sort(paginate(...), ...)`).
+
+**Default-cap backstop (memql#1965).** A query that arrives with NO
+explicit window — neither `paginate` nor `sort` — is treated as an
+unmarked list read and capped at `MEMORY_ENGINE_DEFAULT_LIST_CAP`
+(default **50**), not `MEMORY_ENGINE_MAX_RESULTS`. This bounds the blast
+radius of an accidental full-table read. A query that paginates or sorts
+states its own window (capped at `MEMORY_ENGINE_MAX_WINDOW`); a query
+marked `@unbounded("reason")` is rewritten to an explicit wide paginate
+and bypasses the 50-cap. See the [pagination authoring rule](authoring-rules.md#23-list-returning-queries-must-declare-their-bound).
 
 ```
 paginate(concept==v1:examples:module && payload.worldId=="v1:examples:world:world-aurora", 200, 400)

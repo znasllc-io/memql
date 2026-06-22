@@ -29,7 +29,7 @@ package annotations
 // the editor projection of each decl parser's accepted set.
 var ByReceiver = map[string][]string{
 	"Query": {
-		"description", "enabled", "disabled", "internal", "public", "mcp",
+		"description", "enabled", "disabled", "internal", "public", "mcp", "unbounded",
 	},
 	"Mutation": {
 		"description", "enabled", "disabled", "internal", "actor", "public",
@@ -86,6 +86,8 @@ var Docs = map[string]string{
 	// Automation.
 	"trigger": "Event trigger for automations. Format: @trigger(event=\"graph.node.created.*.v1:ns:concept\") or @trigger(schedule=\"0 0 * * * *\").",
 	"filter":  "Filter expression for automation triggers.",
+	// Pagination opt-out (epic 5, memql#1965).
+	"unbounded": "On a list-returning query: opt out of the pagination authoring rule and the implicit 50-row runtime cap. Format: @unbounded(\"reason\"). The reason string is REQUIRED -- it documents why this query is a legitimate full-set read (small bounded catalog, sweep job, etc.) and is enumerated by the pagination audit report. A query that paginates/sorts is already bounded and must NOT carry @unbounded; the engine clamps the realized window to MEMORY_ENGINE_MAX_WINDOW regardless. See docs/public/language/authoring-rules.md.",
 	// MCP promotion (epic memql#1529 Phase 4 #1534).
 	"mcp": "Expose this construct on the MCP connector surface. On a query/mutation/automation it promotes the construct into its own first-class MCP tool (otherwise it stays reachable via the generic run_query / run_mutation / run_automation dispatchers). On a tool it opts the tool into the curated connector allowlist: once ANY tool carries @mcp, tools/list reflects only @mcp tools (otherwise -- zero tagged -- the full tool surface is reflected, so the annotation is inert until the curated set is tagged).",
 	// Tool.

@@ -505,7 +505,7 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 
 	effectiveTimestamp := plan.Timestamp
 
-	limit, offset := e.effectiveWindow(plan.Limit, plan.Offset)
+	limit, offset := e.effectiveWindow(plan.Limit, plan.Offset, e.defaultListLimit(plan))
 	depth := e.effectiveDepth(plan.Depth)
 
 	sorter, err := compileSortFields(plan.Sort)
@@ -1170,8 +1170,34 @@ func (e *MemQLEngine) database() *bun.DB {
 	return e.db
 }
 
-func (e *MemQLEngine) effectiveWindow(limitPtr, offsetPtr *int) (int, int) {
-	limit := e.config.MaxResults
+// defaultListLimit returns the implicit row limit the engine applies
+// when a query declares NO explicit window. A query whose author wrote
+// neither a `paginate` directive (plan.Limit set) nor a `sort` directive
+// (plan.Sort populated) is an UNMARKED list read: the pagination runtime
+// backstop (epic 5, memql#1965) caps it at config.DefaultListCap (50 by
+// default) so it can never pull the whole table. Everything else --
+// explicit paginate, explicit sort, the count aggregate, or an
+// `@unbounded("reason")` query (rewritten to an explicit paginate) --
+// states its own window and falls back to MaxResults, the pre-#1965
+// behaviour.
+//
+// The cap is intentionally a backstop, not a hard window: it only
+// changes the DEFAULT, so a query that genuinely needs more rows opts
+// in by paginating, sorting, or marking @unbounded. This is the "safe to
+// ship independently" half of #1965 -- it bounds blast radius without
+// requiring the authoring sweep (issue 5.3).
+func (e *MemQLEngine) defaultListLimit(plan *QueryPlan) int {
+	if plan != nil && plan.Limit == nil && len(plan.Sort) == 0 {
+		return e.config.DefaultListCap
+	}
+	return e.config.MaxResults
+}
+
+func (e *MemQLEngine) effectiveWindow(limitPtr, offsetPtr *int, defaultLimit int) (int, int) {
+	limit := defaultLimit
+	if limit <= 0 {
+		limit = e.config.MaxResults
+	}
 	if limitPtr != nil && *limitPtr > 0 {
 		limit = *limitPtr
 	}
