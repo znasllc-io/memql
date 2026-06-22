@@ -272,16 +272,18 @@ func TestPresenceAutoIdIsValidShortId(t *testing.T) {
 
 // queryFilterBody extracts the filter expression from a loaded query's
 // ExprSource. Loaded queries store the rewritten procedural form whose body
-// is `return shape(concept==X;<filter>, "shapeName"), nil`. We return the
-// <filter> portion (between the first `;` after concept== and the trailing
-// `, "shape"`) so substring assertions target the predicate, not the
-// surrounding doc-comment / args block.
+// is `return shape(concept==X;<filter>, "shapeName"), nil` -- or, when the
+// query declares sort+paginate (5.2 / epic #1964), the directive-wrapped form
+// `return shape(paginate(sort(concept==X;<filter>, ...), N), "shapeName"), nil`.
+// We anchor on `concept==` (robust to the sort/paginate wrapping) and return
+// everything after the first `;` separator, so substring assertions target the
+// predicate, not the surrounding doc-comment / args block / directive args.
 func queryFilterBody(t *testing.T, exprSource string) string {
 	t.Helper()
-	idx := strings.Index(exprSource, "shape(concept==")
-	require.GreaterOrEqual(t, idx, 0, "query ExprSource has no shape(concept== body: %q", exprSource)
+	idx := strings.Index(exprSource, "concept==")
+	require.GreaterOrEqual(t, idx, 0, "query ExprSource has no concept== body: %q", exprSource)
 	rest := exprSource[idx:]
 	semi := strings.Index(rest, ";")
-	require.GreaterOrEqual(t, semi, 0, "shape() body has no concept== separator: %q", rest)
+	require.GreaterOrEqual(t, semi, 0, "query body has no concept== filter separator: %q", rest)
 	return rest[semi+1:]
 }

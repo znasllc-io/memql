@@ -26,7 +26,12 @@ query space queryActiveSpaces {
   // sees their own spaces). The optional args.userId narrows further but is
   // redundant for a self-scoped caller; kept for wire-compat.
   filter  traitIsActiveRecord && traitStatusIsActive && traitIsNotArchived && payload.ownerUserId==actor.userId && when(args.userId) { payload.ownerUserId==args.userId }
-  shape   spaceFull
+  // Pagination (5.2 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full spaces-list pull. Literal page size --
+  // the struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
+  shape    spaceFull
 }
 
 @enabled
@@ -165,7 +170,12 @@ query space queryArchivedSpaces {
     userId  string
   }
   filter  traitStatusIsArchived && traitIsNotDeleted && payload.ownerUserId==actor.userId && when(args.userId) { payload.ownerUserId==args.userId }
-  shape   spaceFull
+  // Pagination (5.2 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id). Literal page size -- struct-query paginate takes an
+  // integer literal only.
+  sort     "createdAt", "desc"
+  paginate 50
+  shape    spaceFull
 }
 
 // ---- queries/v1/cognition/ownedSpaceById.memql ----
@@ -471,7 +481,12 @@ query space querySavedSpaces {
     userId  string
   }
   filter  traitStatusIsSaved && traitIsNotDeleted && payload.ownerUserId==actor.userId && when(args.userId) { payload.ownerUserId==args.userId }
-  shape   spaceFull
+  // Pagination (5.2 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id). Literal page size -- struct-query paginate takes an
+  // integer literal only.
+  sort     "createdAt", "desc"
+  paginate 50
+  shape    spaceFull
 }
 
 // ---- queries/v1/cognition/aiParticipantForSpace.memql ----
@@ -573,7 +588,13 @@ query utterance querySpaceUtterances {
     utteranceType    string
   }
   filter  payload.spaceId==args.spaceId && when(args.participantId) { payload.participantId==args.participantId } && when(args.utteranceType) { payload.utteranceType==args.utteranceType }
-  shape   utteranceFull
+  // Pagination (5.2 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of the full message-history pull. The append-only
+  // utterance stream is the canonical keyset-eligible shape. Literal page size
+  // -- struct-query paginate takes an integer literal only.
+  sort     "createdAt", "desc"
+  paginate 50
+  shape    utteranceFull
 }
 
 // ---- queries/v1/cognition/userMicStatesForSpace.memql ----
