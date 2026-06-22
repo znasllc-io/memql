@@ -59,8 +59,8 @@ func TestLoadByName_CanonicalResolution(t *testing.T) {
 		// An @entrypoint logic with no authored wrapper resolves to its
 		// auto-generated wrapping automation (memql#1707) -- it is now a
 		// runnable entry point in both the full `logicXxx` and bare forms.
-		{name: "logicEnsureDailySpaceForCaller", wantAuto: "ensureDailySpaceForCallerEntrypoint"},
-		{name: "ensureDailySpaceForCaller", wantAuto: "ensureDailySpaceForCallerEntrypoint"},
+		{name: "logicServiceVersionProbe", wantAuto: "serviceVersionProbeEntrypoint"},
+		{name: "serviceVersionProbe", wantAuto: "serviceVersionProbeEntrypoint"},
 
 		// Genuinely unknown name -> plain "not found" (and NOT the
 		// not-a-runnable-entry-point error).

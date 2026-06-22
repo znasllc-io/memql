@@ -115,9 +115,8 @@ func runEventDryRunBinding(t *testing.T, e *Env) {
 			"spaceId": "space-1727", "utteranceId": "utt-1727", "siParticipantId": "part-1727",
 			"agentId": "agent-1727", "promptTemplateId": "cognitionReply", "promptData": map[string]any{},
 		}},
-		{"logicEnsureDailySpaceOnAuthSession", map[string]any{
-			"userId": "user-1727", "subject": "v1:identity:user:user-1727",
-		}},
+		// (logicEnsureDailySpaceOnAuthSession moved to the CoPresent pack in
+		// #1976; the remaining cognition/data logics keep this coverage.)
 		{"logicConflictDetection", map[string]any{
 			"id": "rec-1727", "spaceId": "space-1727", "recordType": "contact",
 			"naturalKeyField": "email", "naturalKeyValue": "a@example.com",

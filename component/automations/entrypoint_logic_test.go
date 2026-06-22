@@ -52,16 +52,17 @@ func TestEntryPointLogicAuditCatchesOrphan(t *testing.T) {
 }
 
 // TestEntryPointLogicInvokable proves the headline acceptance case:
-// logicEnsureDailySpaceForCaller is invokable via run_automation. It resolves
-// through LoadByName (both spellings) to an auto-generated wrapper whose step
-// invokes the logic, and the live + dry-run paths converge on the same source.
+// logicServiceVersionProbe (the engine-only @entrypoint example, memql#1707)
+// is invokable via run_automation. It resolves through LoadByName (both
+// spellings) to an auto-generated wrapper whose step invokes the logic, and
+// the live + dry-run paths converge on the same source.
 func TestEntryPointLogicInvokable(t *testing.T) {
 	loader := newResolverLoader(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	const wrapperName = "ensureDailySpaceForCallerEntrypoint"
+	const wrapperName = "serviceVersionProbeEntrypoint"
 
-	for _, input := range []string{"logicEnsureDailySpaceForCaller", "ensureDailySpaceForCaller"} {
+	for _, input := range []string{"logicServiceVersionProbe", "serviceVersionProbe"} {
 		t.Run(input, func(t *testing.T) {
 			auto, err := loader.LoadByName(input)
 			if err != nil {
@@ -74,12 +75,12 @@ func TestEntryPointLogicInvokable(t *testing.T) {
 			names := invokedLogicNames(auto)
 			found := false
 			for _, n := range names {
-				if n == "logicEnsureDailySpaceForCaller" {
+				if n == "logicServiceVersionProbe" {
 					found = true
 				}
 			}
 			if !found {
-				t.Fatalf("wrapper %q does not invoke logicEnsureDailySpaceForCaller (steps invoke %v)", wrapperName, names)
+				t.Fatalf("wrapper %q does not invoke logicServiceVersionProbe (steps invoke %v)", wrapperName, names)
 			}
 
 			// Dry-run source fetch by the resolved canonical name -- exactly what
@@ -96,7 +97,7 @@ func TestEntryPointLogicInvokable(t *testing.T) {
 }
 
 // TestEntryPointWrapperGenerated confirms the generator surfaces
-// logicEnsureDailySpaceForCaller as an @entrypoint logic with a no-arg call
+// logicServiceVersionProbe as an @entrypoint logic with a no-arg call
 // shape (the logic declares no args block).
 func TestEntryPointWrapperGenerated(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -104,21 +105,21 @@ func TestEntryPointWrapperGenerated(t *testing.T) {
 
 	var got *memql.EntryPointLogicWrapper
 	for i := range wrappers {
-		if wrappers[i].LogicName == "logicEnsureDailySpaceForCaller" {
+		if wrappers[i].LogicName == "logicServiceVersionProbe" {
 			got = &wrappers[i]
 		}
 	}
 	if got == nil {
-		t.Fatalf("logicEnsureDailySpaceForCaller not surfaced as @entrypoint; got %d wrappers", len(wrappers))
+		t.Fatalf("logicServiceVersionProbe not surfaced as @entrypoint; got %d wrappers", len(wrappers))
 	}
-	if got.BareName != "ensureDailySpaceForCaller" {
-		t.Errorf("BareName = %q, want ensureDailySpaceForCaller", got.BareName)
+	if got.BareName != "serviceVersionProbe" {
+		t.Errorf("BareName = %q, want serviceVersionProbe", got.BareName)
 	}
-	if got.WrapperName != "ensureDailySpaceForCallerEntrypoint" {
-		t.Errorf("WrapperName = %q, want ensureDailySpaceForCallerEntrypoint", got.WrapperName)
+	if got.WrapperName != "serviceVersionProbeEntrypoint" {
+		t.Errorf("WrapperName = %q, want serviceVersionProbeEntrypoint", got.WrapperName)
 	}
 	// The logic takes no args, so the generated call is the empty-object form.
-	if !strings.Contains(got.Source, "logic ensureDailySpaceForCaller {}") {
+	if !strings.Contains(got.Source, "logic serviceVersionProbe {}") {
 		t.Errorf("generated source should call the logic with no args:\n%s", got.Source)
 	}
 }
