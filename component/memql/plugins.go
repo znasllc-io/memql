@@ -29,7 +29,19 @@ type PluginContext struct {
 	// BunDB returns the database handle, or nil if the node-type binary
 	// runs without a database. Plug-ins that need DB access should return
 	// an error from their factory when nil.
+	//
+	// This is the MAIN, transaction-POOLED endpoint -- use it for all bulk
+	// queries and mutations.
 	BunDB func() *bun.DB
+
+	// DirectBunDB returns the handle for the DIRECT (non-pooled) endpoint,
+	// falling back to the main pool when DIRECT_DSN is unset. Plug-ins that
+	// hold a SESSION across statements -- session-scoped advisory locks,
+	// leader election -- must resolve their *bun.DB through this getter so
+	// they bypass the transaction pooler, which recycles a server backend
+	// between statements and would drop a held session-scoped lock
+	// (epic memql#1925). Bulk traffic must NOT use this getter.
+	DirectBunDB func() *bun.DB
 
 	// VisionProvider returns the default vision-capable SI provider, or nil.
 	VisionProvider func() common.VisionSIProvider
