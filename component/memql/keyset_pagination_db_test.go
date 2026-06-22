@@ -323,6 +323,55 @@ func TestKeysetPagination_FallbackOrderByEndsWithIdAsc(t *testing.T) {
 		"compiled-sorter keyset ORDER BY must also end with id ASC")
 }
 
+// TestKeysetPagination_LoadBoundedFirstPageWalksFullSet is the
+// realistic-row-count load proof for the epic-5 verification (5.11 / memql#1975):
+// seed 500 append-only rows (the shape of a busy space's message history, a hot
+// per-user token list, or a long spaces list) and confirm the hot-path read does
+// NOT pull the universe. It asserts:
+//
+//   - the FIRST page is BOUNDED to the page size (50 -- the production `paginate
+//     50` default), NOT a 500-row full-table pull;
+//   - the keyset walk reconstructs the FULL 500-row set in descending-createdAt
+//     order across exactly ceil(500/50)=10 pages with NO duplicate and NO gap;
+//   - every non-final page is exactly the page size (a full window each time the
+//     cursor advances -- no short reads that would signal a broken predicate).
+//
+// 500 rows at pageSize 50 mirrors querySpaceUtterances / queryActiveSpaces /
+// queryWorkerTokensForUser, all of which carry `sort "createdAt","desc"` +
+// `paginate 50` on main. Postgres-gated (skips without a reachable DB) like its
+// siblings in this file.
+func TestKeysetPagination_LoadBoundedFirstPageWalksFullSet(t *testing.T) {
+	eng, db, _ := readMergeTestEngine(t)
+	ctx := clusterOwnerCtx("u-keyset-load")
+	sfx := uniqueSuffix("keyset-load")
+	owner := "kb:" + sfx
+
+	base := time.Date(2026, 6, 22, 0, 0, 0, 0, time.UTC)
+	const total = 500
+	const pageSize = 50 // the production `paginate 50` default
+	want := make([]string, 0, total)
+	for i := 0; i < total; i++ {
+		id := fmt.Sprintf("v1:cognition:utterance:%s-%04d", sfx, i)
+		seedKeysetRow(t, ctx, db, id, base.Add(time.Duration(i)*time.Second), owner)
+		want = append([]string{id}, want...) // prepend -> newest-first
+	}
+
+	// The FIRST page must be bounded to pageSize, NOT a 500-row full pull.
+	res1, err := eng.Execute(ContextWithCursor(ctx, ""), keysetPageQuery(owner, pageSize))
+	require.NoError(t, err)
+	page1 := pageIDs(t, res1)
+	require.Len(t, page1, pageSize,
+		"first page must be bounded to the page size, not a full-table pull of all %d rows", total)
+	require.Equal(t, want[:pageSize], page1, "page 1 must be the newest pageSize rows in createdAt-desc order")
+	require.NotEmpty(t, res1.GetMeta().Cursor, "a full first page over a larger set must mint a nextCursor")
+
+	// The keyset walk must reconstruct the full set with no dup / no gap.
+	got := walkAllPages(t, ctx, eng, owner, pageSize, "")
+	require.Equal(t, want, got,
+		"keyset walk over %d rows must reconstruct the full descending-createdAt set with no overlap / no gap", total)
+	require.Len(t, dedupe(got), total, "no id may appear twice across the %d-row walk", total)
+}
+
 func dedupe(in []string) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(in))
