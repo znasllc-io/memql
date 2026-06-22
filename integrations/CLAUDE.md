@@ -280,11 +280,9 @@ Uses VisionSIProvider for image descriptions.
 
 Runs on the agent build only. Holds the streaming AI tool-loop
 (`streaming.go`), the chat replier (`replier.go`), the
-respondToUser-envelope schema + parser (`envelope.go`), the AiSuggest
-dispatcher (`suggest.go`) handling the full domain set
-(spaces / spaceTitle / agents / groups / groupDescription /
-agentCardSummary / spaceCardSummary / groupCardSummary / knowledge),
-and the prompt context builder (`prompt_data.go`).
+respondToUser-envelope schema + parser (`envelope.go`), and the prompt
+context builder (`prompt_data.go`). (AiSuggest is no longer handled here --
+it dispatches via the suggest-domain registry; see below.)
 
 The unified `MEMQL_TOOL_LOOP_MAX_ITERATIONS` cap (200) gates both
 streaming and non-streaming tool loops.
@@ -297,16 +295,17 @@ name (no engine executor exists), parses the args as
 list. See `envelope.go` -- the schema, tool definition, and parser
 all live there.
 
-The `spaceTitle` and `groupDescription` domains are lightweight
-single-field generations (purpose -> title; name -> one-line
-description) used by the create-modal blur handlers on the frontend.
-Schema + prompt + post-process for each lives in
-`component/server/sihttp/space_title_suggest.go` and
-`group_description_suggest.go`. The richer `spaces` / `agents` /
-`groups` domains return full payloads (description + suggested member
-ids + roles). The three `*CardSummary` domains generate the LLM body
-that lands on the agent / space / group canvas-creation cards;
-`knowledge` powers the CoPresent KnowledgeModal's domain picker.
+**AiSuggest domains (memql#1959).** `AiSuggestMsg` dispatch is generic in
+core (`component/grpc/ai_handlers.go` + the `memql.RegisterSuggestDomain`
+registry in `component/memql/suggest_registry.go`). `knowledge` registers
+from core; the CoPresent product domains (spaces / spaceTitle / agents /
+groups / groupDescription / agentCardSummary / spaceCardSummary /
+groupCardSummary) register from the pack
+(`memql-bff-copresent/integrations/copresent/suggest`, build-tag `copresent`).
+`spaceTitle` / `groupDescription` are lightweight single-field generations
+(create-modal blur handlers); the richer `spaces` / `agents` / `groups`
+return full payloads; the `*CardSummary` domains generate canvas-card bodies;
+`knowledge` powers the KnowledgeModal domain picker.
 
 ---
 
