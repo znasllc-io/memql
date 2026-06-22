@@ -213,6 +213,22 @@ func resolveActorComparisonsToConstants(ctx context.Context, expr ExpressionNode
 	}
 }
 
+// combinedFilterOrderExprs returns the SQL ORDER BY expressions for the
+// combined-filter scan. The result MUST end with `id ASC`: the keyset cursor
+// predicate's tie-breaker is `id > ?`, which is only correct when rows sharing
+// an identical createdAt are ordered by `id ASC` — otherwise two equal-timestamp
+// rows straddling a page boundary can be skipped or duplicated. A compiled
+// sorter always appends the `createdAt DESC, id ASC` fallback (compileSortFields),
+// so its orderExpressions() are airtight; the nil-sorter fallback below must
+// match that same contract, not just `createdAt DESC`. Centralizing the order
+// list here keeps the keyset predicate and the SQL row order from drifting apart.
+func combinedFilterOrderExprs(sorter *compiledSort) []string {
+	if sorter != nil {
+		return sorter.orderExpressions()
+	}
+	return []string{`"createdAt" DESC`, `id ASC`}
+}
+
 // executeCombinedFilterQuery executes a query using a combined SQL filter.
 // This is similar to executeFilterQuery but doesn't require a ComparisonExpression node.
 func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr ExpressionNode, filter compiledExpression, timestamp *time.Time, target int, sorter *compiledSort) ([]memorynodes.MemoryNode, error) {
@@ -236,11 +252,26 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 		query = query.Where(`"createdAt" <= ?`, timestamp.UTC())
 	}
 
-	orderExprs := []string{`"createdAt" DESC`}
-	if sorter != nil {
-		orderExprs = sorter.orderExpressions()
+	// Keyset cursor (5.12): when a continuation cursor is present, push the
+	// keyset predicate `(createdAt, id) <keyset> (?, ?)` into SQL so deep pages
+	// continue from the encoded position instead of scanning + discarding an
+	// offset window. Composed with the existing filter + asOf-timestamp WHERE
+	// above and the per-row authz the filter already carries; ordered by the
+	// declared sort below; LIMIT bounded to the page target (no *2 over-fetch).
+	keyset, hasKeyset := keysetFromContext(ctx)
+	if hasKeyset {
+		if eligible, createdAtDesc := keysetEligibleSort(sorter); eligible {
+			predicate, args := keysetWhere(keyset, createdAtDesc)
+			query = query.Where(predicate, args...)
+		} else {
+			// Non-keyset-eligible ordering reached the SQL path with a cursor
+			// set; do not push an incorrect predicate. The engine gates this
+			// upstream, so this is a defensive no-op.
+			hasKeyset = false
+		}
 	}
-	for _, expr := range orderExprs {
+
+	for _, expr := range combinedFilterOrderExprs(sorter) {
 		if strings.TrimSpace(expr) == "" {
 			continue
 		}
@@ -257,6 +288,13 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 
 	sqlLimit := fetchTarget * 2
 	if sqlLimit < fetchTarget {
+		sqlLimit = fetchTarget
+	}
+	if hasKeyset {
+		// The keyset predicate already excludes the prior page, so there is no
+		// scan-and-discard tail to over-fetch against; cap the SQL LIMIT at the
+		// page target. (The post-scan dedup below still collapses any older
+		// versions of the same id into one logical row.)
 		sqlLimit = fetchTarget
 	}
 

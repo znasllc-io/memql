@@ -25,7 +25,8 @@ func (s *Server) SetWiring(w *bus.Wiring) {
 // not configured.
 func (s *service) executeQueryViaBus(ctx context.Context, query string, clientId string) (*memqlv1.Result, error) {
 	if s.wiring == nil {
-		return s.executeQuery(ctx, query, clientId)
+		// Cursor (if any) already rides ctx via ContextWithCursor upstream.
+		return s.executeQuery(ctx, query, clientId, "")
 	}
 
 	// Build the bus request

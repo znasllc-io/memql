@@ -22,13 +22,20 @@ type QueryPlan struct {
 	// for later steps + the `_return` expression. Single-statement
 	// Logic bodies don't set this -- their fn.Expr is evaluated
 	// directly via the normal query expression path.
-	LogicCall         *FunctionCallExpression
-	Filters           []FilterNode
-	Relationships     []RelationshipNode
-	Timestamp         *time.Time
-	UseLatest         bool
-	Limit             *int
-	Offset            *int
+	LogicCall     *FunctionCallExpression
+	Filters       []FilterNode
+	Relationships []RelationshipNode
+	Timestamp     *time.Time
+	UseLatest     bool
+	Limit         *int
+	Offset        *int
+	// After carries an opaque inbound keyset cursor (see cursor.go). When set,
+	// the executor pushes a `WHERE (createdAt, id) <keyset> (?, ?)` predicate
+	// into SQL and continues from the encoded position instead of scanning and
+	// discarding an offset window. Threaded onto the plan from the request
+	// context (ContextWithCursor) by the engine; nil for offset / unpaginated
+	// queries.
+	After             *string
 	Depth             *int
 	Sort              []SortField
 	CacheHints        map[string]int64
