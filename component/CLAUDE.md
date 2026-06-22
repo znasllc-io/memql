@@ -17,7 +17,6 @@ component/
 ├── database/          # Database providers
 │   └── memory-nodes/  # PostgreSQL + TimescaleDB
 ├── server/            # HTTP/WebSocket servers
-│   ├── sihttp/        # AI suggest schemas + helpers (used by grpc/ai_handlers.go)
 │   ├── memqlws/       # MemQL WebSocket
 │   ├── audiows/       # Audio WebSocket
 │   └── polyphonws/    # Polyphon WebSocket (multi-agent voice)
@@ -113,18 +112,18 @@ component/
 - ASR/TTS provider bridge (OpenAI); LLM provider bridge (OpenAI, Anthropic) for AI
 - Turn policy and scoring
 
-### server/sihttp/ - **AI Suggest Schema / Helpers**
-**Purpose:** Shared helpers that feed the gRPC AI-suggest handlers.
+### AiSuggest extension point (suggest domains)
 
-The AI HTTP endpoints have been retired; all AI operations live on
-`MemqlService.Stream` via `AiChatMsg` / `AiSpeechMsg` / `AiTranscribeMsg` /
-`AiSuggestMsg`. What remains in `sihttp/` is the prompt + JSON-schema
-material that the gRPC suggest handler in `grpc/ai_handlers.go` imports:
-- `SpaceSuggestSchemaJSON` + `SpaceAgent` type
-- `GroupSuggestSchemaJSON` + `GroupUser` type
-- `suggest_logic.go` -- `BuildSpaceSuggestMessages`,
-  `PostProcessSpaceSuggestion`, `BuildGroupSuggestMessages`,
-  `PostProcessGroupSuggestion`
+`AiSuggestMsg` dispatch lives on `MemqlService.Stream` (`grpc/ai_handlers.go`).
+The handler is generic: it resolves a registered handler for the request
+`domain` via `memql.RegisterSuggestDomain` / `LookupSuggestDomain`
+(`component/memql/suggest_registry.go`) and runs the shared structured-output
+path. The `knowledge` domain registers from core
+(`component/memql/suggest_knowledge.go`); the CoPresent product domains
+(spaces / spaceTitle / agents / groups / groupDescription / *CardSummary /
+guide) register from the pack (`memql-bff-copresent/integrations/copresent/
+suggest`, build-tag `copresent`), so engine-only core carries no product
+suggest helpers (memql#1959)
 
 ### fileprocessor/ - **File Processing**
 **Purpose:** Extract content from uploaded files
@@ -411,7 +410,6 @@ docker-compose logs memql | grep "query.*ms"
 | **memql/** | Query engine | `engine.go`, `executor.go`, `parser.go`, `function_loader.go`, `si_tool_loop.go` (AI tool loop), `si_providers.go` (AI providers), `prompt_loader.go`, `provider_loader.go`, `shape_loader.go` |
 | **database/** | Database layer | `memory-nodes/database.go` |
 | **server/** | HTTP/WS servers | `server.go`, `memqlws/`, `audiows/`, `polyphonws/` |
-| **server/sihttp/** | AI suggest schemas + helpers for gRPC | `space_suggest.go`, `group_suggest.go`, `suggest_logic.go` |
 | **auth/** | Auth context helpers + RBAC + delegation + identity resolver | `context.go`, `identity.go`, `rbac.go`, `security.go`, `identity_resolver.go` |
 | **identity/** | In-house identity service (magic-link, JWT issuance, JWKS, admin UI, PAT) | `identity.go`, `keys.go`, `jwt.go`, `jwks.go`, `verifier/` (per-node verifier) |
 | **polyphon/** | Voice pipeline | `cognition.go`, `session.go` |
