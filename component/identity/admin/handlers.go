@@ -14,6 +14,7 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
 	webtempl "github.com/znasllc-io/memql/component/identity/web/templ"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
 // ---------------------------------------------------------------------------
@@ -877,31 +878,49 @@ type userView struct {
 // queryUsers returns active users matching the optional substring
 // filter. The MemQL grammar doesn't support LIKE, so the filter is
 // applied in Go after the query.
+//
+// queryActiveUsers is `paginate 50` now (5.3 / epic #1964), so a single
+// Execute returns only the first 50 users. This admin list view needs
+// the COMPLETE set (the Go-side substring filter further narrows it), so
+// walk the keyset cursor across all pages instead of silently rendering
+// only the first 50 (5.10b).
 func (s *AdminServer) queryUsers(ctx context.Context, q string) ([]userView, error) {
-	res, err := s.Engine.Execute(ctx, `queryActiveUsers({})`)
-	if err != nil {
-		return nil, err
-	}
 	out := []userView{}
-	if res == nil || res.Bundle == nil {
-		return out, nil
-	}
 	needle := strings.ToLower(strings.TrimSpace(q))
-	for _, n := range res.Bundle.Nodes {
-		uv := userViewFromNode(n)
-		if uv == nil {
-			continue
+	cursor := ""
+	for i := 0; i < maxUserPageWalk; i++ {
+		res, err := s.Engine.Execute(memqlengine.ContextWithCursor(ctx, cursor), `queryActiveUsers({})`)
+		if err != nil {
+			return nil, err
 		}
-		if needle != "" {
-			if !strings.Contains(strings.ToLower(uv.DisplayName), needle) &&
-				!strings.Contains(strings.ToLower(uv.PrimaryEmail), needle) {
+		if res == nil || res.Bundle == nil {
+			break
+		}
+		for _, n := range res.Bundle.Nodes {
+			uv := userViewFromNode(n)
+			if uv == nil {
 				continue
 			}
+			if needle != "" {
+				if !strings.Contains(strings.ToLower(uv.DisplayName), needle) &&
+					!strings.Contains(strings.ToLower(uv.PrimaryEmail), needle) {
+					continue
+				}
+			}
+			out = append(out, *uv)
 		}
-		out = append(out, *uv)
+		if res.Meta == nil || res.Meta.Cursor == "" {
+			break
+		}
+		cursor = res.Meta.Cursor
 	}
 	return out, nil
 }
+
+// maxUserPageWalk bounds the keyset walk over queryActiveUsers (50/page)
+// so a mis-paginated query can never spin forever -- 50k users is far
+// beyond any real cluster, but a hard stop nonetheless.
+const maxUserPageWalk = 1000
 
 func (s *AdminServer) queryUserById(ctx context.Context, userId string) (*userView, error) {
 	q := fmt.Sprintf(`queryUserById({userId: %q})`, userId)

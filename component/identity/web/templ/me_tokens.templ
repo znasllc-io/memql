@@ -13,13 +13,17 @@ type MeTokenRow struct {
 
 // MeTokensData drives /me/tokens. `NewToken` + `NewLabel` are non-empty
 // only on the response that follows a successful POST — the plaintext
-// token is shown ONCE.
+// token is shown ONCE. `NextCursor` is the opaque keyset continuation
+// token: non-empty when more token rows remain beyond this page, in
+// which case the template renders a "Show more" link to
+// /me/tokens?cursor=<NextCursor> (5.10b / epic #1964).
 type MeTokensData struct {
-	Layout   LayoutData
-	Flash    *Flash
-	NewToken string
-	NewLabel string
-	Tokens   []MeTokenRow
+	Layout     LayoutData
+	Flash      *Flash
+	NewToken   string
+	NewLabel   string
+	Tokens     []MeTokenRow
+	NextCursor string
 }
 
 templ MeTokens(data MeTokensData) {
@@ -73,6 +77,13 @@ templ MeTokens(data MeTokensData) {
 								}
 							</tbody>
 						</table>
+						if data.NextCursor != "" {
+							<p class="load-more">
+								<a class="btn btn-secondary btn-small" href={ templ.SafeURL("/me/tokens?cursor=" + data.NextCursor) }>
+									Show more tokens
+								</a>
+							</p>
+						}
 					}
 				</div>
 			</section>
