@@ -28,7 +28,6 @@ shape call callFull {
   payload.requestId
   payload.agentId
   payload.userId
-  payload.spaceId
   payload.promptName
   payload.policyName
   payload.vendor

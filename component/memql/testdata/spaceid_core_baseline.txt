@@ -38,10 +38,6 @@ component/polyphon/providers.go
 component/polyphon/score_engine.go
 component/polyphon/session.go
 component/polyphon/types.go
-component/router/fallback.go
-component/router/observer.go
-component/router/router.go
-component/router/types.go
 component/server/attachment_handler.go
 component/server/attachment_store.go
 component/server/audiows/handler.go

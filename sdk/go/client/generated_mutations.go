@@ -8851,7 +8851,6 @@ type MutationRecordRouterCallArgs struct {
 	RequestId            string
 	AgentId              string
 	UserId               string
-	SpaceId              string
 	PromptName           string
 	PolicyName           string
 	Vendor               string
@@ -8908,13 +8907,6 @@ func MutationRecordRouterCallBuild(args MutationRecordRouterCallArgs) string {
 		}
 		b.WriteString("userId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UserId))
-	}
-	if args.SpaceId != "" {
-		if b.Len() > 26 {
-			b.WriteString(", ")
-		}
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	}
 	if args.PromptName != "" {
 		if b.Len() > 26 {
