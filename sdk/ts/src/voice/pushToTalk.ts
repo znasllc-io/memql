@@ -93,11 +93,11 @@ class TranscriptionSession {
 
     const unregister = this.dispatcher.registerStream(this.requestId, (msg: ServerMessage) => {
       const payload = readServerPayload(msg);
-      if (payload?.kind === "siTranscribeStreamDelta") {
+      if (payload?.kind === "aiTranscribeStreamDelta") {
         if (this.opts.onPartial) {
           this.opts.onPartial(deltaToPartial(payload.value));
         }
-      } else if (payload?.kind === "siTranscribeStreamComplete") {
+      } else if (payload?.kind === "aiTranscribeStreamComplete") {
         resolveFinal({
           text: payload.value.text ?? "",
           durationMs: numberFromWire(payload.value.durationMs),
@@ -148,7 +148,7 @@ class TranscriptionSession {
 
   private sendStart(): void {
     this.dispatcher.send({
-      siTranscribeStreamStart: {
+      aiTranscribeStreamStart: {
         requestId: this.requestId,
         format: this.opts.audio.encoding,
         sampleRate: this.opts.audio.sampleRate,
@@ -161,7 +161,7 @@ class TranscriptionSession {
 
   private sendChunk(audio: Uint8Array): void {
     this.dispatcher.send({
-      siTranscribeStreamChunk: {
+      aiTranscribeStreamChunk: {
         requestId: this.requestId,
         audio: bytesToBase64(audio),
       },
@@ -170,7 +170,7 @@ class TranscriptionSession {
 
   private sendEnd(cancel: boolean): void {
     this.dispatcher.send({
-      siTranscribeStreamEnd: {
+      aiTranscribeStreamEnd: {
         requestId: this.requestId,
         ...(cancel ? { cancel: true } : {}),
       },

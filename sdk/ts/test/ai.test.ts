@@ -1,5 +1,5 @@
-// Mock-dispatcher tests for the SI surface (siChat / siSpeech /
-// siTranscribe / siSuggest + siChatStream). The mock fakes
+// Mock-dispatcher tests for the SI surface (aiChat / aiSpeech /
+// aiTranscribe / aiSuggest + aiChatStream). The mock fakes
 // Dispatcher's send / sendAndWait / registerStream paths so we can
 // drive replies into the SDK without spinning up a real WebSocket.
 //
@@ -9,10 +9,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { siChat, siChatStream } from "../src/si/chat.js";
-import { siSpeech } from "../src/si/speech.js";
-import { siTranscribe } from "../src/si/transcribe.js";
-import { siSuggest } from "../src/si/suggest.js";
+import { aiChat, aiChatStream } from "../src/ai/chat.js";
+import { aiSpeech } from "../src/ai/speech.js";
+import { aiTranscribe } from "../src/ai/transcribe.js";
+import { aiSuggest } from "../src/ai/suggest.js";
 import type { Dispatcher } from "../src/client/dispatcher.js";
 import type { ClientMessage, ServerMessage } from "../src/client/wire.js";
 
@@ -109,22 +109,22 @@ class MockDispatcher {
   }
 }
 
-test("siChat -- one-shot round trip resolves with assistant message", async () => {
+test("aiChat -- one-shot round trip resolves with assistant message", async () => {
   const mock = new MockDispatcher();
-  const promise = siChat(
+  const promise = aiChat(
     mock.asDispatcher(),
     [{ role: "user", content: "Hi there" }],
     { provider: "chat54Mini" },
   );
 
-  const sent = mock.lastSent() as unknown as { siChat?: { messages?: unknown[]; provider?: string; stream?: boolean; requestId?: string } };
-  assert.ok(sent.siChat, "siChat payload present");
-  assert.equal(sent.siChat?.provider, "chat54Mini");
-  assert.equal(sent.siChat?.stream, undefined, "stream flag omitted on one-shot");
-  assert.equal(sent.siChat?.messages?.length, 1);
+  const sent = mock.lastSent() as unknown as { aiChat?: { messages?: unknown[]; provider?: string; stream?: boolean; requestId?: string } };
+  assert.ok(sent.aiChat, "aiChat payload present");
+  assert.equal(sent.aiChat?.provider, "chat54Mini");
+  assert.equal(sent.aiChat?.stream, undefined, "stream flag omitted on one-shot");
+  assert.equal(sent.aiChat?.messages?.length, 1);
 
   mock.reply({
-    siChatResult: {
+    aiChatResult: {
       requestId: mock.lastRequestId(),
       message: { role: "assistant", content: "Hello!" },
     },
@@ -136,25 +136,25 @@ test("siChat -- one-shot round trip resolves with assistant message", async () =
   assert.equal(result.provider, "chat54Mini");
 });
 
-test("siChat -- throws on QueryError reply", async () => {
+test("aiChat -- throws on QueryError reply", async () => {
   const mock = new MockDispatcher();
-  const promise = siChat(mock.asDispatcher(), [{ role: "user", content: "Hi" }]);
+  const promise = aiChat(mock.asDispatcher(), [{ role: "user", content: "Hi" }]);
   mock.reply({ queryError: { requestId: mock.lastRequestId(), error: { message: "boom" } } });
-  await assert.rejects(promise, /siChat: boom/);
+  await assert.rejects(promise, /aiChat: boom/);
 });
 
-test("siChat -- rejects empty messages array", async () => {
+test("aiChat -- rejects empty messages array", async () => {
   const mock = new MockDispatcher();
   await assert.rejects(
-    () => siChat(mock.asDispatcher(), []),
+    () => aiChat(mock.asDispatcher(), []),
     /messages array must be non-empty/,
   );
 });
 
-test("siChat -- propagates AbortSignal", async () => {
+test("aiChat -- propagates AbortSignal", async () => {
   const mock = new MockDispatcher();
   const ac = new AbortController();
-  const promise = siChat(
+  const promise = aiChat(
     mock.asDispatcher(),
     [{ role: "user", content: "Hi" }],
     { signal: ac.signal },
@@ -163,12 +163,12 @@ test("siChat -- propagates AbortSignal", async () => {
   await assert.rejects(promise);
 });
 
-test("siChatStream -- chunks land in deltas iterator, final result resolves", async () => {
+test("aiChatStream -- chunks land in deltas iterator, final result resolves", async () => {
   const mock = new MockDispatcher();
-  const handle = siChatStream(mock.asDispatcher(), [{ role: "user", content: "Hello" }]);
+  const handle = aiChatStream(mock.asDispatcher(), [{ role: "user", content: "Hello" }]);
 
-  const sent = mock.lastSent() as unknown as { siChat?: { stream?: boolean; requestId?: string } };
-  assert.equal(sent.siChat?.stream, true);
+  const sent = mock.lastSent() as unknown as { aiChat?: { stream?: boolean; requestId?: string } };
+  assert.equal(sent.aiChat?.stream, true);
   const requestId = mock.lastRequestId();
 
   // Drive 3 chunks then the terminal result.
@@ -179,11 +179,11 @@ test("siChatStream -- chunks land in deltas iterator, final result resolves", as
     }
   })();
 
-  mock.streamFrame(requestId, { siChunk: { requestId, index: 0, textDelta: "Hel" } });
-  mock.streamFrame(requestId, { siChunk: { requestId, index: 1, textDelta: "lo " } });
-  mock.streamFrame(requestId, { siChunk: { requestId, index: 2, textDelta: "world" } });
+  mock.streamFrame(requestId, { aiChunk: { requestId, index: 0, textDelta: "Hel" } });
+  mock.streamFrame(requestId, { aiChunk: { requestId, index: 1, textDelta: "lo " } });
+  mock.streamFrame(requestId, { aiChunk: { requestId, index: 2, textDelta: "world" } });
   mock.streamFrame(requestId, {
-    siChatResult: {
+    aiChatResult: {
       requestId,
       message: { role: "assistant", content: "Hello world" },
     },
@@ -196,33 +196,33 @@ test("siChatStream -- chunks land in deltas iterator, final result resolves", as
   assert.equal(result.message.content, "Hello world");
 });
 
-test("siChatStream -- queryError surfaces on result + iterator", async () => {
+test("aiChatStream -- queryError surfaces on result + iterator", async () => {
   const mock = new MockDispatcher();
-  const handle = siChatStream(mock.asDispatcher(), [{ role: "user", content: "x" }]);
+  const handle = aiChatStream(mock.asDispatcher(), [{ role: "user", content: "x" }]);
   const requestId = mock.lastRequestId();
 
   mock.streamFrame(requestId, {
     queryError: { requestId, error: { message: "provider down" } },
   });
 
-  await assert.rejects(handle.result, /siChatStream: provider down/);
+  await assert.rejects(handle.result, /aiChatStream: provider down/);
 });
 
-test("siSpeech -- decodes base64 audio + format", async () => {
+test("aiSpeech -- decodes base64 audio + format", async () => {
   const mock = new MockDispatcher();
-  const promise = siSpeech(mock.asDispatcher(), "speak this", {
+  const promise = aiSpeech(mock.asDispatcher(), "speak this", {
     voice: "alto",
     format: "wav",
   });
 
-  const sent = mock.lastSent() as unknown as { siSpeech?: { input?: string; voice?: string; format?: string } };
-  assert.equal(sent.siSpeech?.input, "speak this");
-  assert.equal(sent.siSpeech?.voice, "alto");
+  const sent = mock.lastSent() as unknown as { aiSpeech?: { input?: string; voice?: string; format?: string } };
+  assert.equal(sent.aiSpeech?.input, "speak this");
+  assert.equal(sent.aiSpeech?.voice, "alto");
 
   const audioBytes = new Uint8Array([0x52, 0x49, 0x46, 0x46]); // "RIFF"
   const b64 = Buffer.from(audioBytes).toString("base64");
   mock.reply({
-    siSpeechResult: {
+    aiSpeechResult: {
       requestId: mock.lastRequestId(),
       audio: b64,
       format: "wav",
@@ -234,56 +234,56 @@ test("siSpeech -- decodes base64 audio + format", async () => {
   assert.equal(result.format, "wav");
 });
 
-test("siSpeech -- rejects empty input", async () => {
+test("aiSpeech -- rejects empty input", async () => {
   const mock = new MockDispatcher();
   await assert.rejects(
-    () => siSpeech(mock.asDispatcher(), ""),
+    () => aiSpeech(mock.asDispatcher(), ""),
     /input string must be non-empty/,
   );
 });
 
-test("siTranscribe -- encodes audio + returns text", async () => {
+test("aiTranscribe -- encodes audio + returns text", async () => {
   const mock = new MockDispatcher();
   const audio = new Uint8Array([1, 2, 3, 4, 5]);
-  const promise = siTranscribe(mock.asDispatcher(), audio, { mimeType: "audio/wav" });
+  const promise = aiTranscribe(mock.asDispatcher(), audio, { mimeType: "audio/wav" });
 
-  const sent = mock.lastSent() as unknown as { siTranscribe?: { audio?: string; mimeType?: string } };
-  assert.equal(sent.siTranscribe?.mimeType, "audio/wav");
+  const sent = mock.lastSent() as unknown as { aiTranscribe?: { audio?: string; mimeType?: string } };
+  assert.equal(sent.aiTranscribe?.mimeType, "audio/wav");
   // Decode the base64-encoded audio in the sent envelope and confirm
   // it round-trips back to the original bytes.
-  const decoded = Buffer.from(sent.siTranscribe?.audio ?? "", "base64");
+  const decoded = Buffer.from(sent.aiTranscribe?.audio ?? "", "base64");
   assert.deepEqual(Array.from(decoded), Array.from(audio));
 
   mock.reply({
-    siTranscribeResult: { requestId: mock.lastRequestId(), text: "hello world" },
+    aiTranscribeResult: { requestId: mock.lastRequestId(), text: "hello world" },
   });
 
   const result = await promise;
   assert.equal(result.text, "hello world");
 });
 
-test("siTranscribe -- rejects empty audio", async () => {
+test("aiTranscribe -- rejects empty audio", async () => {
   const mock = new MockDispatcher();
   await assert.rejects(
-    () => siTranscribe(mock.asDispatcher(), new Uint8Array(0)),
+    () => aiTranscribe(mock.asDispatcher(), new Uint8Array(0)),
     /audio bytes must be non-empty/,
   );
 });
 
-test("siSuggest -- forwards domain + payload, returns structured result", async () => {
+test("aiSuggest -- forwards domain + payload, returns structured result", async () => {
   const mock = new MockDispatcher();
-  const promise = siSuggest(
+  const promise = aiSuggest(
     mock.asDispatcher(),
     "spaceTitle",
     { description: "a brainstorm session" },
   );
 
-  const sent = mock.lastSent() as unknown as { siSuggest?: { domain?: string; payload?: Record<string, unknown> } };
-  assert.equal(sent.siSuggest?.domain, "spaceTitle");
-  assert.deepEqual(sent.siSuggest?.payload, { description: "a brainstorm session" });
+  const sent = mock.lastSent() as unknown as { aiSuggest?: { domain?: string; payload?: Record<string, unknown> } };
+  assert.equal(sent.aiSuggest?.domain, "spaceTitle");
+  assert.deepEqual(sent.aiSuggest?.payload, { description: "a brainstorm session" });
 
   mock.reply({
-    siSuggestResult: {
+    aiSuggestResult: {
       requestId: mock.lastRequestId(),
       domain: "spaceTitle",
       result: { title: "Brainstorm session" },
@@ -295,10 +295,10 @@ test("siSuggest -- forwards domain + payload, returns structured result", async 
   assert.deepEqual(result.result, { title: "Brainstorm session" });
 });
 
-test("siSuggest -- rejects empty domain", async () => {
+test("aiSuggest -- rejects empty domain", async () => {
   const mock = new MockDispatcher();
   await assert.rejects(
-    () => siSuggest(mock.asDispatcher(), "", {}),
+    () => aiSuggest(mock.asDispatcher(), "", {}),
     /domain string must be non-empty/,
   );
 });
