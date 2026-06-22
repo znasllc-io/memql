@@ -54,7 +54,7 @@ type Options struct {
 // New builds a Telnyx Client. It errors when the API key is missing.
 func New(opts Options) (*Client, error) {
 	if strings.TrimSpace(opts.APIKey) == "" {
-		return nil, fmt.Errorf("telnyx: API key is required (set TELNYX_API_KEY)")
+		return nil, fmt.Errorf("telnyx: API key is required (set MEMQL_TELEPHONY_TELNYX_API_KEY)")
 	}
 	base := opts.BaseURL
 	if base == "" {
@@ -268,7 +268,7 @@ type updateNumberRequest struct {
 // ConnectionID).
 func (c *Client) ConfigureInbound(ctx context.Context, e164, sipEdgeURI string) error {
 	if c.connectionID == "" {
-		return fmt.Errorf("telnyx: ConfigureInbound requires a connection id (set TELNYX_CONNECTION_ID for the SIP edge %q)", sipEdgeURI)
+		return fmt.Errorf("telnyx: ConfigureInbound requires a connection id (set MEMQL_TELEPHONY_TELNYX_CONNECTION_ID for the SIP edge %q)", sipEdgeURI)
 	}
 	id, err := c.numberID(ctx, e164)
 	if err != nil {

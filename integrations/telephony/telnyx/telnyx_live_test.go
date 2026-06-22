@@ -3,7 +3,7 @@
 // Live Telnyx API integration test. Excluded from the default build; run
 // against the real API with credentials:
 //
-//	TELNYX_API_KEY=... go test -tags telnyx_live -run TestLive ./integrations/telephony/telnyx
+//	MEMQL_TELEPHONY_TELNYX_API_KEY=... go test -tags telnyx_live -run TestLive ./integrations/telephony/telnyx
 //
 // It only exercises read-only search + list (no purchase) so it is safe to
 // run without spending money. A full buy/configure/release round-trip is an
@@ -21,11 +21,11 @@ import (
 
 func liveClient(t *testing.T) *Client {
 	t.Helper()
-	key := os.Getenv("TELNYX_API_KEY")
+	key := os.Getenv("MEMQL_TELEPHONY_TELNYX_API_KEY")
 	if key == "" {
-		t.Skip("TELNYX_API_KEY not set; skipping live Telnyx test")
+		t.Skip("MEMQL_TELEPHONY_TELNYX_API_KEY not set; skipping live Telnyx test")
 	}
-	c, err := New(Options{APIKey: key, ConnectionID: os.Getenv("TELNYX_CONNECTION_ID")})
+	c, err := New(Options{APIKey: key, ConnectionID: os.Getenv("MEMQL_TELEPHONY_TELNYX_CONNECTION_ID")})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

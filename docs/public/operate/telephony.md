@@ -60,14 +60,15 @@ external-secrets in cluster); the package never reads secrets directly.
 | Env var | Purpose |
 |---|---|
 | `MEMQL_TELEPHONY_CARRIER` | Active carrier name (default `telnyx`). |
-| `TELNYX_API_KEY` | Telnyx v2 API key. Resolved at carrier selection; a missing key errors only on first use. |
-| `TELNYX_CONNECTION_ID` | The Telnyx connection fronting the `livekit/sip` edge. Inbound DIDs are assigned to it so PSTN calls route to the edge. Required for `ConfigureInbound`. |
+| `MEMQL_TELEPHONY_TELNYX_API_KEY` | Telnyx v2 API key. Resolved at carrier selection; a missing key errors only on first use. |
+| `MEMQL_TELEPHONY_TELNYX_CONNECTION_ID` | The Telnyx connection fronting the `livekit/sip` edge. Inbound DIDs are assigned to it so PSTN calls route to the edge. Required for `ConfigureInbound`. |
+| `MEMQL_TELEPHONY_TELNYX_BASE_URL` | Optional override for the Telnyx v2 API root (default `https://api.telnyx.com/v2`). Mainly for tests / sandboxes. |
 
 A read-only live API test (`-tags telnyx_live`) exercises search + list
 against the real account without spending money:
 
 ```bash
-TELNYX_API_KEY=... go test -tags telnyx_live -run TestLive ./integrations/telephony/telnyx
+MEMQL_TELEPHONY_TELNYX_API_KEY=... go test -tags telnyx_live -run TestLive ./integrations/telephony/telnyx
 ```
 
 A full buy / configure / release round-trip provisions a real DID and is an
