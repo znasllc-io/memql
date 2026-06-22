@@ -8,7 +8,9 @@
 // Forge is agnostic: one `request` spine serves bugs, features, and (later)
 // HR flows (time off, check-in) -- discriminated by `type`, routed by the
 // submitter's role. It sits ON TOP of the apps it develops (memql,
-// memql-cockpit, copresent, future clients) -- it is NOT core.
+// memql-cockpit, copresent, future clients) -- it is a CORE memQL platform
+// capability (partition-scoped team-ops backbone, product-agnostic, reused by
+// any cluster), NOT a CoPresent product surface.
 //
 // Scope/authz (first slice):
 //   - These concepts are PARTITION-scoped (no @scope) -- team-shared within a
