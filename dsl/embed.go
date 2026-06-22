@@ -68,22 +68,42 @@ var (
 // against the live engine the same way agents/, cluster/, cognition/
 // do today.
 //
-// Panics on empty domain or nil tree -- both are programming errors
-// in the init() path.
+// Namespace ownership is validated at registration time: the domain
+// must not be empty, must not contain a '/', must not collide with a
+// core embedded domain, and must not collide with another pack's
+// already-registered domain (see ValidatePackDomain). A collision is a
+// FATAL programming error in the init() path -- RegisterTree panics
+// (consistent with its other guards) so a pack that would shadow a core
+// namespace or fight another pack for one fails loudly at startup
+// instead of silently mis-binding.
+//
+// Panics on empty/slash/colliding domain or nil tree.
 func RegisterTree(domain string, tree fs.FS) {
-	domain = strings.TrimSpace(domain)
-	if domain == "" {
-		panic("dsl.RegisterTree: domain must be non-empty")
-	}
-	if strings.Contains(domain, "/") {
-		panic("dsl.RegisterTree: domain must not contain '/' (got: " + domain + ")")
-	}
 	if tree == nil {
 		panic("dsl.RegisterTree: tree must not be nil")
 	}
+	trimmed := strings.TrimSpace(domain)
 	pluginTreesMu.Lock()
 	defer pluginTreesMu.Unlock()
-	pluginTrees[domain] = tree
+	if err := ValidatePackDomain(trimmed, coreDomains(), registeredPluginDomainsLocked()); err != nil {
+		panic("dsl.RegisterTree: " + err.Error())
+	}
+	pluginTrees[trimmed] = tree
+}
+
+// UnregisterTree removes a previously registered plug-in domain from the
+// unified tree. Production packs register once at init() and never
+// unregister; this exists for test teardown (and registry symmetry): the
+// fail-loud duplicate-domain guard in RegisterTree means a test can no
+// longer re-register the same domain to "replace" a throwaway overlay, so
+// it must remove it explicitly instead. No-op when the domain isn't
+// registered. Only touches the plug-in registry -- core embedded domains
+// don't live there and are never affected.
+func UnregisterTree(domain string) {
+	domain = strings.TrimSpace(domain)
+	pluginTreesMu.Lock()
+	defer pluginTreesMu.Unlock()
+	delete(pluginTrees, domain)
 }
 
 // Tree returns an fs.FS rooted at the unified DSL tree. Each top-
