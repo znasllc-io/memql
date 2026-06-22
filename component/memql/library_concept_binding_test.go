@@ -33,7 +33,9 @@ func TestLibraryQueriesRegister(t *testing.T) {
 		{"queryLibraryArtifacts", "v1:library:artifact"},
 		{"queryLibraryArtifactsByLens", "v1:library:artifact"},
 		{"queryLibraryArtifactsByKind", "v1:library:artifact"},
-		{"queryLibraryArtifactsBySpace", "v1:library:artifact"},
+		// queryLibraryArtifactsBySpace moved to the CoPresent pack
+		// (dsl/copresent) in Epic 3 3.6 (memql#1903) -- the per-space facet
+		// is a product surface; it's no longer registered in engine-only core.
 		{"queryLibraryArtifactById", "v1:library:artifact"},
 		{"queryGeneratedOutputById", "v1:library:generatedOutput"},
 		{"queryMemoryById", "v1:library:memory"},

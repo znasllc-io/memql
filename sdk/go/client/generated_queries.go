@@ -2608,28 +2608,6 @@ func QueryLibraryArtifactsByLensBuild(args QueryLibraryArtifactsByLensArgs) stri
 	return b.String()
 }
 
-// QueryLibraryArtifactsBySpace -- List the caller's Library rows scoped to one space -- backs the per-space facet filter. Owned: ownerUserId==actor.userId gates the row set; payload.spaceId narrows to the given space.
-//
-// Bound concept: artifact.
-type QueryLibraryArtifactsBySpaceArgs struct {
-	SpaceId string
-}
-
-// QueryLibraryArtifactsBySpace calls the engine query queryLibraryArtifactsBySpace.
-func (qc *QueryClient) QueryLibraryArtifactsBySpace(ctx context.Context, args QueryLibraryArtifactsBySpaceArgs) (*Result, error) {
-	call := QueryLibraryArtifactsBySpaceBuild(args)
-	return qc.executeNamed(ctx, "queryLibraryArtifactsBySpace", call)
-}
-
-func QueryLibraryArtifactsBySpaceBuild(args QueryLibraryArtifactsBySpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("queryLibraryArtifactsBySpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	b.WriteString("})")
-	return b.String()
-}
-
 // QueryLibraryWorkspaceLiveSources -- List the partition's workspace-scoped live sources for the Library Records lens. Non-owned by design: workspace liveSources have no single owner (empty ownerUserId), so this reads kind=live_source AND scope=workspace with no caller gate and the frontend merges it into the owned Records results. Private live sources are excluded here -- they surface through the owner-gated queries. See the @public justification above (#723).
 //
 // Bound concept: artifact.
