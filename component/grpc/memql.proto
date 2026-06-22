@@ -360,6 +360,12 @@ enum UserRole {
   USER_ROLE_ADMIN = 2;
   USER_ROLE_WRITER = 3;
   USER_ROLE_READER = 4;
+  // USER_ROLE_DEVELOPER is engineering power (authoring + inline DSL +
+  // deploy/cut-version) without user management (#1532 / #1876). Sits in
+  // the privileged tier alongside admin (different powers, not a strict
+  // ordering). Added to the wire so MyAccess can surface it to the
+  // cockpit's deploy-control gating (#1886).
+  USER_ROLE_DEVELOPER = 5;
 }
 
 // -----------------------------------------------------------------------------

@@ -45,6 +45,12 @@ const (
 	// RoleAdmin can administer non-owner users / partitions but
 	// cannot transfer cluster ownership.
 	RoleAdmin Role = "admin"
+	// RoleDeveloper is engineering power (authoring + inline DSL +
+	// deploy/cut-version) without user management (#1532 / #1876). Sits
+	// in the privileged tier alongside admin (different powers, not a
+	// strict ordering): a developer may cut + deploy a version forward
+	// but may not roll back (owner-only).
+	RoleDeveloper Role = "developer"
 	// RoleWriter can read + write rows the user is granted access to.
 	RoleWriter Role = "writer"
 	// RoleReader can read rows the user is granted access to but
@@ -59,6 +65,8 @@ func roleFromProto(r memqlv1.UserRole) Role {
 		return RoleOwner
 	case memqlv1.UserRole_USER_ROLE_ADMIN:
 		return RoleAdmin
+	case memqlv1.UserRole_USER_ROLE_DEVELOPER:
+		return RoleDeveloper
 	case memqlv1.UserRole_USER_ROLE_WRITER:
 		return RoleWriter
 	case memqlv1.UserRole_USER_ROLE_READER:

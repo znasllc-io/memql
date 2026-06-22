@@ -31,6 +31,12 @@ const (
 	UserRole_USER_ROLE_ADMIN       UserRole = 2
 	UserRole_USER_ROLE_WRITER      UserRole = 3
 	UserRole_USER_ROLE_READER      UserRole = 4
+	// USER_ROLE_DEVELOPER is engineering power (authoring + inline DSL +
+	// deploy/cut-version) without user management (#1532 / #1876). Sits in
+	// the privileged tier alongside admin (different powers, not a strict
+	// ordering). Added to the wire so MyAccess can surface it to the
+	// cockpit's deploy-control gating (#1886).
+	UserRole_USER_ROLE_DEVELOPER UserRole = 5
 )
 
 // Enum value maps for UserRole.
@@ -41,6 +47,7 @@ var (
 		2: "USER_ROLE_ADMIN",
 		3: "USER_ROLE_WRITER",
 		4: "USER_ROLE_READER",
+		5: "USER_ROLE_DEVELOPER",
 	}
 	UserRole_value = map[string]int32{
 		"USER_ROLE_UNSPECIFIED": 0,
@@ -48,6 +55,7 @@ var (
 		"USER_ROLE_ADMIN":       2,
 		"USER_ROLE_WRITER":      3,
 		"USER_ROLE_READER":      4,
+		"USER_ROLE_DEVELOPER":   5,
 	}
 )
 
@@ -13642,13 +13650,14 @@ const file_memql_proto_rawDesc = "" +
 	"\x05state\x18\x05 \x01(\tR\x05state\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x06 \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\a \x01(\tR\ferrorMessage*{\n" +
+	"\rerror_message\x18\a \x01(\tR\ferrorMessage*\x94\x01\n" +
 	"\bUserRole\x12\x19\n" +
 	"\x15USER_ROLE_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fUSER_ROLE_OWNER\x10\x01\x12\x13\n" +
 	"\x0fUSER_ROLE_ADMIN\x10\x02\x12\x14\n" +
 	"\x10USER_ROLE_WRITER\x10\x03\x12\x14\n" +
-	"\x10USER_ROLE_READER\x10\x04*\xcc\x02\n" +
+	"\x10USER_ROLE_READER\x10\x04\x12\x17\n" +
+	"\x13USER_ROLE_DEVELOPER\x10\x05*\xcc\x02\n" +
 	"\x10SubscriptionKind\x12!\n" +
 	"\x1dSUBSCRIPTION_KIND_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bSUBSCRIPTION_KIND_TELEMETRY\x10d\x12\x1e\n" +
