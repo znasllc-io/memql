@@ -89,7 +89,7 @@ unconditionally compiled in core.
 ---
 
 ## Downstream issue rescoping (from this sign-off)
-- **3.4 (#1901):** moves **guide + curriculum** only. Knowledge **stays core** — its only task is fixing the `@namespace("common")` anomaly *in place*.
+- **3.4 (#1901):** moves **guide + curriculum** DSL only (id-preserving via pack `RegisterTree`). Two tails were spun out during execution: the knowledge `@namespace` fix is a **breaking id migration** → **#1960** (knowledge stays core); the live `guide` suggest path rides the core `AiSuggest` gRPC handler, a CoPresent-coupled surface the inventory missed → **#1959** (decouple via an extension point; blocks G3). `guide_suggest.go` stays in core until #1959.
 - **3.5 (#1902):** moves **avatardirect, avatarvendor, dailyspace, chat** only. Knowledge integration **stays core**.
 - **3.6 (#1903):** the one real split is **library** (spine core / space-facet pack). All other former "split-case" concepts (forge, actions, calendar/notes/todos, liveknowledge, unmetCapability/guardrailHealth) are **confirmed CORE** — no move.
 - **3.2 (#1899):** unchanged — `spaceId → partitionId` across voice/cognition/planner/data/common/identity/agents/router/platform.

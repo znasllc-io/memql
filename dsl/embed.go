@@ -31,7 +31,12 @@ import (
 // walker can apply the soft-disable rule consistently (whereas the
 // default behavior would skip them at the embed step entirely).
 //
-//go:embed all:actions all:agents all:authoring all:calendar all:cluster all:cognition all:common all:curriculum all:data all:deployment all:forge all:guide all:harness all:identity all:knowledge all:library all:memql all:notes all:observability all:planner all:platform all:policies all:providers all:router all:safety all:todos all:workbench all:worker
+// Epic 3 (memql#1901): the `guide` + `curriculum` domains were extracted to
+// the CoPresent pack (memql-bff-copresent/dsl/{guide,curriculum}); core no
+// longer embeds them. Carrier-built nodes get them via the pack's
+// RegisterTree; engine-only core builds omit them (ids preserved: v1:guide:*
+// / v1:curriculum:*).
+//go:embed all:actions all:agents all:authoring all:calendar all:cluster all:cognition all:common all:data all:deployment all:forge all:harness all:identity all:knowledge all:library all:memql all:notes all:observability all:planner all:platform all:policies all:providers all:router all:safety all:todos all:workbench all:worker
 var embedFS embed.FS
 
 // pluginTrees holds the additional DSL subtrees registered by external
