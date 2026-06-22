@@ -26,7 +26,7 @@ In the default build (no tags), BFF code is included.
 | **bff** | (none, default) | Backend for frontend | Engine + PeerManager + EventBridge + NodeServer + WorkerDialer + AiForwardRouter |
 | **voice** | `voice` | Voice transport (audio WS, LiveKit) | Engine + PeerManager + EventBridge + Polyphon transport + NodeServer |
 | **cognition** | `cognition` | Cognition pipeline | Engine + PeerManager + EventBridge + Polyphon + NodeServer |
-| **agent** | `agent` | Task execution, SI | Engine + PeerManager + EventBridge + SI + Tools + NodeServer |
+| **agent** | `agent` | Task execution, AI | Engine + PeerManager + EventBridge + AI + Tools + NodeServer |
 | **planner** | `planner` | Task planning | Engine + PeerManager + EventBridge + NodeServer |
 
 ---

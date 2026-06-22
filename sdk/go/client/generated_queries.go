@@ -2211,7 +2211,7 @@ func QueryGreetingUtteranceBuild(args QueryGreetingUtteranceArgs) string {
 	return b.String()
 }
 
-// QueryGroupGAForSpace -- Active SI (group GA) participant for a space. Callers must pass the canonical spaceId.
+// QueryGroupGAForSpace -- Active AI (group GA) participant for a space. Callers must pass the canonical spaceId.
 //
 // Bound concept: participant.
 type QueryGroupGAForSpaceArgs struct {
@@ -2233,7 +2233,7 @@ func QueryGroupGAForSpaceBuild(args QueryGroupGAForSpaceArgs) string {
 	return b.String()
 }
 
-// QueryHasAIResponseForReply -- Check if an SI response already exists for a given utterance (idempotency check).
+// QueryHasAIResponseForReply -- Check if an AI response already exists for a given utterance (idempotency check).
 //
 // Bound concept: utterance.
 type QueryHasAIResponseForReplyArgs struct {
@@ -3580,7 +3580,7 @@ func QuerySearchUsersBuild(args QuerySearchUsersArgs) string {
 	return b.String()
 }
 
-// QuerySiParticipantForSpace -- Find the active SI participant in a space.
+// QuerySiParticipantForSpace -- Find the active AI participant in a space.
 //
 // Bound concept: participant.
 type QuerySiParticipantForSpaceArgs struct {

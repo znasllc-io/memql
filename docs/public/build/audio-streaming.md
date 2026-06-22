@@ -400,7 +400,7 @@ The audio WebSocket also supports TTS synthesis for the "Read Aloud" feature in 
 
 ### Read Aloud Feature
 
-The "Read Aloud" feature allows any chat message to be spoken by the SI agent.
+The "Read Aloud" feature allows any chat message to be spoken by the AI agent.
 
 #### Synthesize Request (Client to Server)
 
@@ -449,7 +449,7 @@ Sent immediately when TTS synthesis begins:
 | `format` | string | Audio format: `"wav"` (each chunk is complete WAV file) |
 | `sampleRate` | number | Sample rate in Hz |
 | `spaceId` | string | Space ID for context |
-| `participantId` | string | SI participant ID generating the audio |
+| `participantId` | string | AI participant ID generating the audio |
 | `text` | string | The text being synthesized |
 
 #### TTS Chunk Response (Server to Client)
@@ -481,7 +481,7 @@ Streamed back as TTS generates audio. **Each chunk is a complete WAV file** that
 | `sequence` | number | Chunk sequence number (starts at 0) |
 | `done` | boolean | `true` for last chunk |
 | `spaceId` | string | Space ID for context |
-| `participantId` | string | SI participant ID generating the audio |
+| `participantId` | string | AI participant ID generating the audio |
 | `text` | string | The text being synthesized |
 
 #### TTS Ended Response (Server to Client)
@@ -502,7 +502,7 @@ Sent when TTS synthesis completes or fails:
 | `type` | string | Always `"tts_ended"` |
 | `requestId` | string | Matches the synthesize request |
 | `spaceId` | string | Space ID for context |
-| `participantId` | string | SI participant ID |
+| `participantId` | string | AI participant ID |
 | `cancelled` | boolean | `true` if TTS was cancelled (optional) |
 | `error` | string | Error message if TTS failed (optional) |
 
@@ -552,7 +552,7 @@ for await (const chunk of ttsStream) {
 7. Server sends "tts_ended" on completion
 ```
 
-**Voice consistency:** The agent's `providerConfig.voice.voiceId` is used, ensuring the SI agent has a consistent voice identity.
+**Voice consistency:** The agent's `providerConfig.voice.voiceId` is used, ensuring the AI agent has a consistent voice identity.
 
 ### TTS Configuration
 

@@ -157,7 +157,7 @@ func (a *App) engineAndBus() {
 	// dispatcher. Reuses the same step registry the automation
 	// scheduler uses so Logic step executors (function / query /
 	// mutation / forEach / parallel / switch) get the same
-	// integration plug-ins, SI providers, and caching behaviour.
+	// integration plug-ins, AI providers, and caching behaviour.
 	// When this binary doesn't include the automations package
 	// the engine keeps its "no LogicRunner wired" error path and
 	// single-step Logic dispatch continues to work unchanged.
@@ -194,13 +194,13 @@ func (a *App) engineAndBus() {
 		}()
 	}
 
-	// SI Router: embedded in every SI-calling node. Takes the provider
+	// AI Router: embedded in every AI-calling node. Takes the provider
 	// registry (for lookup + pricing) and the engine (to write
 	// v1:router:call rows via mutationRecordRouterCall). The router is
 	// never a separate node; it's a library the agent replier, the
 	// gRPC AI handlers, and future policy-driven call sites all share.
 	a.router = router.New(a.engine.Providers(), a.engine.Policies(), a.engine, a.Logger)
-	a.Logger.Info("SI Router initialized",
+	a.Logger.Info("AI Router initialized",
 		"providers", a.engine.Providers().Count(),
 		"policies", a.engine.Policies().Count(),
 		"default", a.engine.Providers().Default(),

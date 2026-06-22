@@ -6,15 +6,15 @@ package agent
 // the Python voice-agent's realtime_output.py).
 //
 // Why this exists. In the cascade path cognition owns the assistant turn end
-// to end: a VoiceAgentTurnRequest runs the agent loop and inserts the SI reply
+// to end: a VoiceAgentTurnRequest runs the agent loop and inserts the AI reply
 // utterance itself (with citations off the respondToUser envelope). The
 // realtime executor (#457) replaces that -- gpt-realtime both thinks and speaks
-// and never routes through VoiceAgentTurnRequest -- so nothing inserts the SI
+// and never routes through VoiceAgentTurnRequest -- so nothing inserts the AI
 // utterance and every utterance-backed surface (chat, canvas, conductor
 // history, audit) goes dark for voice turns. This forwarder closes that gap by
 // capturing the model's final transcript, deriving citations from the injected
 // grounding (CitationResolver), and sending VoiceAgentRealtimeOutput to the
-// existing handler (handleVoiceAgentRealtimeOutput), which inserts an SI
+// existing handler (handleVoiceAgentRealtimeOutput), which inserts an AI
 // utterance whose wire shape is byte-for-byte identical to a text/cascade reply
 // (copresent#135 already renders this shape).
 //
@@ -35,10 +35,10 @@ import (
 )
 
 // RealtimeOutputForwarder forwards the realtime model's spoken output to memQL
-// as SI utterances. One per session. It holds the space + GA attribution and
+// as AI utterances. One per session. It holds the space + GA attribution and
 // the citation resolver; Forward mints a reply id (the chat streaming-replyId
 // contract), derives citations, and sends VoiceAgentRealtimeOutput. The server
-// inserts the SI utterance and acks with the canonical row id. Mirrors
+// inserts the AI utterance and acks with the canonical row id. Mirrors
 // realtime_output.py::RealtimeOutputForwarder.
 type RealtimeOutputForwarder struct {
 	client    realtimeOutputSender

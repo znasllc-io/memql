@@ -7,7 +7,7 @@ package steps
 // MutationExecutor.evaluateValue) and LOGIC-TIME (logic-body RHS / return ->
 // the LogicRunner's local-leaf entry automations.EvaluateLocalExpr). Same
 // syntax, two implementations -- so a fix to one silently leaves the other
-// broken (exactly how the #575/#580 ghost SI survived).
+// broken (exactly how the #575/#580 ghost AI survived).
 //
 // This matrix runs ONE table of (expression, seeded steps) -> expected value
 // against BOTH entry points, using REAL *memql.ExecuteResult step results (the
@@ -21,7 +21,7 @@ package steps
 //     Evaluator.EvaluateValue).
 //   - localExprCases: the local-expression subset logic bodies actually use --
 //     coalesce + step-method calls (.First()/.Len()/.Empty()) AND a method-THEN-
-//     field path inside a coalesce arg (the ghost-SI shape) -- run through the
+//     field path inside a coalesce arg (the ghost-AI shape) -- run through the
 //     FULL logic-time path (EvaluateLocalExpr) vs arg-time evaluateValue. They
 //     all converge.
 
@@ -166,7 +166,7 @@ var localExprCases = []conformanceCase{
 		want:  false,
 	},
 	{
-		// The ghost-SI shape (#575/#580): a method-THEN-field path inside a
+		// The ghost-AI shape (#575/#580): a method-THEN-field path inside a
 		// coalesce arg. Both evaluators now navigate it to the node id rather
 		// than ever flowing the raw expression text (memql#593).
 		name:  "coalesce_method_then_field",

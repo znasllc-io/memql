@@ -133,7 +133,7 @@ type RecordedMutation struct {
 	Partition string         `json:"partition"`
 }
 
-// RecordedAiCall is one metered SI read (ai()) the automation made. Reads run
+// RecordedAiCall is one metered AI read (ai()) the automation made. Reads run
 // for REAL against the live providers; the manifest records the cost so the
 // approver sees what the automation will spend in production.
 type RecordedAiCall struct {

@@ -1,8 +1,8 @@
 // Package polyphon implements the Polyphon multi-agent voice conversation
-// orchestration system. It scores multiple SI agents, manages turn-taking,
+// orchestration system. It scores multiple AI agents, manages turn-taking,
 // and decides which agent should respond to human utterances.
 //
-// Polyphon (from Greek "polyphōnía" — many voices) enables up to 3 SI agents
+// Polyphon (from Greek "polyphōnía" — many voices) enables up to 3 AI agents
 // and 5 humans to participate in natural real-time voice conversations.
 package polyphon
 
@@ -21,7 +21,7 @@ const (
 	PlatformOpenAI VoicePlatform = "openai"
 )
 
-// MaxAgentsPerSpace is the maximum number of SI agents in a Polyphon session.
+// MaxAgentsPerSpace is the maximum number of AI agents in a Polyphon session.
 const MaxAgentsPerSpace = 3
 
 // MaxHumansPerSpace is the maximum number of human participants in a Polyphon session.
@@ -60,7 +60,7 @@ type Mention struct {
 	Role            MentionRole `json:"role"`
 }
 
-// AgentCandidate represents an SI agent being evaluated by the score engine.
+// AgentCandidate represents an AI agent being evaluated by the score engine.
 type AgentCandidate struct {
 	ID                   string                 `json:"id"`
 	ParticipantId        string                 `json:"participantId"`
@@ -95,7 +95,7 @@ type AgentScore struct {
 	Factors       []ScoringFactor `json:"factors"`
 	ShouldRespond bool            `json:"shouldRespond"`
 	Reason        string          `json:"reason"`
-	ToolsNeeded   bool            `json:"toolsNeeded,omitempty"` // SI router signals the agent needs tools for this utterance
+	ToolsNeeded   bool            `json:"toolsNeeded,omitempty"` // AI router signals the agent needs tools for this utterance
 }
 
 // ScoreDecision is the output of the score engine for a given utterance.
@@ -105,7 +105,7 @@ type ScoreDecision struct {
 	Winner            *AgentScore       `json:"winner,omitempty"`
 	Scores            []AgentScore      `json:"scores"`
 	Action            string            `json:"action"`     // "respond", "continue", "silence"
-	Confidence        string            `json:"confidence"` // "high", "medium", "low" -- determines whether SI router is invoked
+	Confidence        string            `json:"confidence"` // "high", "medium", "low" -- determines whether AI router is invoked
 	Continuation      bool              `json:"continuation"`
 	ConversationPhase ConversationPhase `json:"conversationPhase,omitempty"`
 	ResponseDelay     time.Duration     `json:"-"`
@@ -173,7 +173,7 @@ type ScoringWeights struct {
 
 // DefaultScoringWeights returns the default scoring factor weights.
 //
-// The cognitionRouting SI prompt is the primary turn-taking decision; the
+// The cognitionRouting AI prompt is the primary turn-taking decision; the
 // heuristic scorer produces signals the router reads (per-agent fit,
 // intent, mentions) rather than itself picking the winner. That's why
 // ConversationalThread is zeroed: the router already sees the previous
@@ -224,7 +224,7 @@ type PolyphonSession struct {
 	StateMachine          *ConversationStateMachine `json:"-"`
 	Prediction            *PredictiveState          `json:"prediction,omitempty"`
 	PendingEvents         []map[string]any          `json:"pendingEvents,omitempty"` // Queue for notifications to surface
-	CompactedSummary      string                    `json:"-"`                       // Zone 1: SI-generated summary of old messages
+	CompactedSummary      string                    `json:"-"`                       // Zone 1: AI-generated summary of old messages
 	LastCompactionAt      time.Time                 `json:"-"`                       // When compaction last ran
 	CompactionIndex       int                       `json:"-"`                       // Transcript index up to which summary covers
 	CreatedAt             time.Time                 `json:"createdAt"`
@@ -238,7 +238,7 @@ type SessionParticipant struct {
 	JoinedAt      time.Time `json:"joinedAt"`
 }
 
-// SessionAgent represents an SI agent participant in a Polyphon session.
+// SessionAgent represents an AI agent participant in a Polyphon session.
 type SessionAgent struct {
 	AgentId       string    `json:"agentId"`
 	ParticipantId string    `json:"participantId"`
@@ -392,7 +392,7 @@ type HeartbeatAction struct {
 
 // HeartbeatEvaluator evaluates whether the score engine should take proactive
 // action during a heartbeat tick. Implementations can be swapped for
-// different strategies (e.g., rule-based, SI-powered, hybrid).
+// different strategies (e.g., rule-based, AI-powered, hybrid).
 type HeartbeatEvaluator interface {
 	Evaluate(session *PolyphonSession, candidates []AgentCandidate) *HeartbeatAction
 }
@@ -404,7 +404,7 @@ type HeartbeatEvaluator interface {
 // PredictiveState represents the score engine's anticipation of where the
 // conversation is heading. Updated asynchronously by the PredictiveAnalyzer.
 //
-// FUTURE: The actual prediction logic (SI-powered conversation phase
+// FUTURE: The actual prediction logic (AI-powered conversation phase
 // classification, topic anticipation, intent forecasting) will be added
 // in a follow-up implementation. This type and the PredictiveAnalyzer
 // interface establish the extension points.
@@ -428,7 +428,7 @@ type PredictiveState struct {
 // what might happen next. The score engine uses this to make better routing
 // decisions and take proactive actions.
 //
-// FUTURE: Initial implementation will use a cheap SI model call to classify
+// FUTURE: Initial implementation will use a cheap AI model call to classify
 // conversation phase and anticipate topics. More sophisticated prediction
 // (topic modeling, intent classification, conversation trajectory) can be
 // layered on later.

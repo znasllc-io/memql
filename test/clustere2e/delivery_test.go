@@ -12,7 +12,7 @@
 // a v1:cognition:utterance row via mutationSendTextUtterance and counts
 // cross-replica delivery, rather than driving a real LLM reply. That
 // exercises the same component/node EventBridge.forwardToPeers path as
-// the live chat reply, deterministically and without SI provider keys.
+// the live chat reply, deterministically and without AI provider keys.
 //
 // HOW IT REPRODUCED THE BUG (historical) AND HOW IT IS NOW GREEN
 // --------------------------------------------------------------

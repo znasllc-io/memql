@@ -164,7 +164,7 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 	// speech-to-speech) is built only when MEMQL_VOICE_EXECUTOR=realtime
 	// resolved cleanly; otherwise (the default, or a realtime fallback) the
 	// cascade path is built -- no regression. Both publish the agent's local
-	// audio track and register a SpeakSink so unsolicited SI replies reach
+	// audio track and register a SpeakSink so unsolicited AI replies reach
 	// playout (conductor gate B); OnTrackSubscribed feeds each remote human
 	// track into the chosen bridge.
 	bridgeCtx, bridgeCancel := context.WithCancel(ctx)

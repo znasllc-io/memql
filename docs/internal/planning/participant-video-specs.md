@@ -82,7 +82,7 @@ no new token mutation, no new room concept.
 6. **Active-speaker = LiveKit's `ActiveSpeakersChanged` event.**
    Already wired in `usePolyphonRoom`; this branch reuses it as the
    source of truth for both layouts. The existing
-   `presenceState === 'responding'` signal continues to drive the SI
+   `presenceState === 'responding'` signal continues to drive the AI
    "thinking" pill but is **not** used for the video spotlight.
 7. **No new wire envelopes.** `PolyphonRoomTokenMsg` already returns
    what we need. Vision frames stay server-internal (Bridge Agent →

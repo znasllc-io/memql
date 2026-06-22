@@ -1,7 +1,7 @@
 package memql
 
 // unified_policy_loader.go loads the live policy system in the tree:
-// SI Router routing policies — struct-form `policy NAME { }` blocks
+// AI Router routing policies — struct-form `policy NAME { }` blocks
 // with @primary / @fallback / @maxLatencyMs / @preferredRole
 // annotations, consumed by Router to resolve a policy name to a
 // provider chain. Source: dsl/policies/policies.memql.

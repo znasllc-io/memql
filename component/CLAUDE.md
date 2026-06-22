@@ -17,7 +17,7 @@ component/
 ├── database/          # Database providers
 │   └── memory-nodes/  # PostgreSQL + TimescaleDB
 ├── server/            # HTTP/WebSocket servers
-│   ├── sihttp/        # SI suggest schemas + helpers (used by grpc/ai_handlers.go)
+│   ├── sihttp/        # AI suggest schemas + helpers (used by grpc/ai_handlers.go)
 │   ├── memqlws/       # MemQL WebSocket
 │   ├── audiows/       # Audio WebSocket
 │   └── polyphonws/    # Polyphon WebSocket (multi-agent voice)
@@ -68,8 +68,8 @@ component/
 - `executor.go` - Query execution logic
 - `parser.go` - MemQL query parsing
 - `function_loader.go` - Function loading and registration
-- `si_tool_loop.go` - SI tool calling loop (MCP integration)
-- `si_providers.go` - SI provider registry (OpenAI, Anthropic) with ChatSIProvider, VisionSIProvider, TTSSIProvider, ChatStreamProvider interfaces
+- `si_tool_loop.go` - AI tool calling loop (MCP integration)
+- `si_providers.go` - AI provider registry (OpenAI, Anthropic) with ChatSIProvider, VisionSIProvider, TTSSIProvider, ChatStreamProvider interfaces
 - `integration_provider.go` - IntegrationProvider interface and IntegrationCapability struct
 - `integration_registry.go` - Thread-safe registry for integration providers and capabilities
 - `integration_engine.go` - IntegrationEngineAccess narrow interface for integrations
@@ -83,7 +83,7 @@ component/
 - Manages automation lifecycle
 - Registers and executes functions (Query, Mutation, Automation, Prompt, Provider, Shape)
 - Loads prompts, providers, and shapes from `.memql` files
-- Handles SI tool calling (MCP integration)
+- Handles AI tool calling (MCP integration)
 
 ### database/memory-nodes/ - **Database Layer**
 **Purpose:** PostgreSQL + TimescaleDB connection and migrations
@@ -110,13 +110,13 @@ component/
 **What It Does:**
 - Score-engine-based turn management for multi-agent conversations
 - Session lifecycle management
-- ASR/TTS provider bridge (OpenAI); LLM provider bridge (OpenAI, Anthropic) for SI
+- ASR/TTS provider bridge (OpenAI); LLM provider bridge (OpenAI, Anthropic) for AI
 - Turn policy and scoring
 
-### server/sihttp/ - **SI Suggest Schema / Helpers**
-**Purpose:** Shared helpers that feed the gRPC SI-suggest handlers.
+### server/sihttp/ - **AI Suggest Schema / Helpers**
+**Purpose:** Shared helpers that feed the gRPC AI-suggest handlers.
 
-The SI HTTP endpoints have been retired; all SI operations live on
+The AI HTTP endpoints have been retired; all AI operations live on
 `MemqlService.Stream` via `AiChatMsg` / `AiSpeechMsg` / `AiTranscribeMsg` /
 `AiSuggestMsg`. What remains in `sihttp/` is the prompt + JSON-schema
 material that the gRPC suggest handler in `grpc/ai_handlers.go` imports:
@@ -227,9 +227,9 @@ The heart of the system - executes all MemQL queries.
    - Execute with type checking
    - Cache compiled functions
 
-4. **SI Tool Integration**
+4. **AI Tool Integration**
    - Expose functions as MCP tools
-   - Handle tool calling from SI
+   - Handle tool calling from AI
    - Bounded iteration loop
    - Error handling
 
@@ -276,7 +276,7 @@ type MemQLEngine interface {
 
 ### IntegrationEngineAccess Interface
 
-Narrow interface for integrations -- excludes SI orchestration methods (InvokeSI,
+Narrow interface for integrations -- excludes AI orchestration methods (InvokeSI,
 InvokeSIChatWithTools). Integrations receive this instead of the full engine.
 
 ```go
@@ -408,10 +408,10 @@ docker-compose logs memql | grep "query.*ms"
 
 | Component | Purpose | Key Files |
 |-----------|---------|-----------|
-| **memql/** | Query engine | `engine.go`, `executor.go`, `parser.go`, `function_loader.go`, `si_tool_loop.go` (SI tool loop), `si_providers.go` (SI providers), `prompt_loader.go`, `provider_loader.go`, `shape_loader.go` |
+| **memql/** | Query engine | `engine.go`, `executor.go`, `parser.go`, `function_loader.go`, `si_tool_loop.go` (AI tool loop), `si_providers.go` (AI providers), `prompt_loader.go`, `provider_loader.go`, `shape_loader.go` |
 | **database/** | Database layer | `memory-nodes/database.go` |
 | **server/** | HTTP/WS servers | `server.go`, `memqlws/`, `audiows/`, `polyphonws/` |
-| **server/sihttp/** | SI suggest schemas + helpers for gRPC | `space_suggest.go`, `group_suggest.go`, `suggest_logic.go` |
+| **server/sihttp/** | AI suggest schemas + helpers for gRPC | `space_suggest.go`, `group_suggest.go`, `suggest_logic.go` |
 | **auth/** | Auth context helpers + RBAC + delegation + identity resolver | `context.go`, `identity.go`, `rbac.go`, `security.go`, `identity_resolver.go` |
 | **identity/** | In-house identity service (magic-link, JWT issuance, JWKS, admin UI, PAT) | `identity.go`, `keys.go`, `jwt.go`, `jwks.go`, `verifier/` (per-node verifier) |
 | **polyphon/** | Voice pipeline | `cognition.go`, `session.go` |

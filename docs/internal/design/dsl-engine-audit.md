@@ -80,7 +80,7 @@ flowchart TB
     end
 
     subgraph Engine["7. Engine + execution"]
-        ENG["engine.go<br/>1923 LOC<br/>orchestrator + Execute<br/>+ SI entry points"]
+        ENG["engine.go<br/>1923 LOC<br/>orchestrator + Execute<br/>+ AI entry points"]
         EBUS["engine_bus.go<br/>404 LOC<br/>channel handlers"]
         EXEC["executor.go<br/>5063 LOC<br/>expression eval +<br/>SQL compile + builtins"]
         RUN["runtime_evaluator.go<br/>725 LOC"]
@@ -312,7 +312,7 @@ construct concerns -- they were just never separated:
   the mutation paths under `insert/update`
 - **Builtin dispatch:** `initBuiltinExecutorHandlers` + its 40-case
   handler table
-- **SI integration:** the SI-call portions at the bottom of the file
+- **AI integration:** the AI-call portions at the bottom of the file
 
 Proposed split:
 ```
@@ -320,7 +320,7 @@ executor_filter.go    -- compile* + buildJSON* + sqlOperator*
 executor_query.go     -- evaluateExpression*
 executor_mutation.go  -- evaluateShape* + mutation eval
 executor_builtin.go   -- initBuiltinExecutorHandlers + dispatch
-executor_si.go        -- SI invocation paths
+executor_si.go        -- AI invocation paths
 executor.go           -- shared helpers + receiver definitions
 ```
 
@@ -335,7 +335,7 @@ review surface tractable. **Estimated post-split: 6 files of
 - Registry accessors (Shapes, Specs, Providers, etc. -- thin
   getters)
 - Execute() + plan resolution + cache
-- SI integration entry points (`InvokeSI`,
+- AI integration entry points (`InvokeSI`,
   `InvokeSIChatWithTools`)
 - Variable + secret resolution
 

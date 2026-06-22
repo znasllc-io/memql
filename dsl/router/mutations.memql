@@ -6,7 +6,7 @@
 use router.concepts.{ budget, call }
 
 @enabled
-@description("Record a single SI call through the memQL SI Router. Writes one v1:router:call row per call for observability, usage reporting, and cost attribution.")
+@description("Record a single AI call through the memQL AI Router. Writes one v1:router:call row per call for observability, usage reporting, and cost attribution.")
 mutation call mutationRecordRouterCall {
   args {
     callId              string  @required

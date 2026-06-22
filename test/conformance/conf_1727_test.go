@@ -51,7 +51,7 @@ func eventDryRunBindingCheck() check {
 // EVENT NOT BINDING into nested step scope. With the event bound, every
 // @required argument these five logics feed from event.* is present, so any of
 // these signatures appearing is a #1727 regression. Environmental failures that
-// are NOT binding failures (an SI provider / integration the lightweight
+// are NOT binding failures (an AI provider / integration the lightweight
 // conformance engine does not register, the pre-existing ai() positional-arg
 // render quirk) are explicitly tolerated -- they occur identically on the live
 // path and land PAST the event-binding point.

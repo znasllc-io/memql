@@ -9,7 +9,7 @@ import (
 )
 
 // TestExtractGAReplyFromEvent_SkipsRealtimeVoiceOutput pins the #478 double-speak
-// guard: an SI utterance the realtime model already spoke natively
+// guard: an AI utterance the realtime model already spoke natively
 // (source.outputMethod="realtimeVoice") must NOT be matched by the speak
 // subscriber, otherwise the model would re-voice its own reply.
 func TestExtractGAReplyFromEvent_SkipsRealtimeVoiceOutput(t *testing.T) {

@@ -20,7 +20,7 @@ func (e *MemQLEngine) InvokeAIChatWithTools(ctx context.Context, templateId stri
 		return "", fmt.Errorf("engine is nil")
 	}
 	if e.aiRuntime == nil || e.prompts == nil || e.providers == nil {
-		return "", fmt.Errorf("SI runtime is not configured")
+		return "", fmt.Errorf("AI runtime is not configured")
 	}
 
 	// Render the prompt template into a system message.
@@ -197,7 +197,7 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 		return "", fmt.Errorf("engine is nil")
 	}
 	if e.aiRuntime == nil || e.prompts == nil || e.providers == nil {
-		return "", fmt.Errorf("SI runtime is not configured")
+		return "", fmt.Errorf("AI runtime is not configured")
 	}
 
 	// Tool-set scoping hook (#588): when opts.ScopedTools is non-empty,

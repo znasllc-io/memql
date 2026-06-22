@@ -54,7 +54,7 @@ type mcpAutomationRunner struct {
 // newMCPAutomationRunner builds the runner from the app's automation
 // infrastructure. The Executor is dedicated to manual MCP runs (separate from
 // the core scheduler's), sharing the engine + event bus + step registry so the
-// steps, integrations, and SI providers behave identically.
+// steps, integrations, and AI providers behave identically.
 func newMCPAutomationRunner(a *App) *mcpAutomationRunner {
 	exec := automations.NewExecutor(automations.ExecutorOptions{
 		Logger:       a.Logger,

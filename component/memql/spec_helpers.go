@@ -37,8 +37,8 @@ func parseStandaloneExpression(input string) (ExpressionNode, error) {
 // any node in the tree is an *AIExpression. Used by spec_parser.go
 // (still alive pending #329's Stage 1C migration) at registration
 // time to populate `Spec.UsesAI`, which downstream callers (the
-// planner's SI budget gate, observability) read to decide whether
-// to wrap a spec evaluation in the SI-call envelope.
+// planner's AI budget gate, observability) read to decide whether
+// to wrap a spec evaluation in the AI-call envelope.
 func detectAIUsage(expr ExpressionNode) bool {
 	if expr == nil {
 		return false

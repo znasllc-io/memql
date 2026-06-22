@@ -14,7 +14,7 @@ owner: znas
 
 ## TL;DR
 
-Two active caches in the system (a third one exists as dead code — `component/cache/cache.go` has no consumers in the build). **Both had metrics disabled.** That's now fixed (Ristretto metrics on for the result cache; manual counters on the SI cache). What you'll see going forward in BFF logs:
+Two active caches in the system (a third one exists as dead code — `component/cache/cache.go` has no consumers in the build). **Both had metrics disabled.** That's now fixed (Ristretto metrics on for the result cache; manual counters on the AI cache). What you'll see going forward in BFF logs:
 
 ```
 {"component":"siCache","msg":"cache stats","hits":42,"misses":17,"hitRatio":0.71,"size":59}
@@ -25,7 +25,7 @@ Numbers are written periodically (every 5 minutes when the cache is non-empty) a
 
 ## The three caches
 
-### 1. SI response cache (`component/memql/si_cache.go`)
+### 1. AI response cache (`component/memql/si_cache.go`)
 
 **What it caches:** LLM call results — chat completions, structured outputs, anything returned by `siRuntime.Invoke`.
 
@@ -85,13 +85,13 @@ It looks like an older caching layer that got designed but never wired up, or on
 
 - No new debug HTTP endpoint for stats. The 5-minute log emission is enough for Phase 0 baselining; a real `/debug/cache-stats` endpoint is a Phase 4 task once we know what dashboards we want.
 - No alerting on low hit rates. Same reason — we need a baseline first to know what "low" means.
-- No fix for the unbounded SI cache or the unbounded fallback map. Those are real bugs but addressing them requires picking eviction policies, which is its own design decision and shouldn't block the Phase 1+2 reference migration.
+- No fix for the unbounded AI cache or the unbounded fallback map. Those are real bugs but addressing them requires picking eviction policies, which is its own design decision and shouldn't block the Phase 1+2 reference migration.
 
 ## What we'll know after a week of dev usage
 
 Once the metrics emit have soaked, we can answer:
 
-- **SI cache hit rate.** If it's near 0%, the hash-keyed shape is killing us and the vector-classification cache primitive (Phase 1.2) is more urgent than ever.
+- **AI cache hit rate.** If it's near 0%, the hash-keyed shape is killing us and the vector-classification cache primitive (Phase 1.2) is more urgent than ever.
 - **Concept cache hit rate.** Should be high (>80%) if our query workload has any repetition. Low hit rate would point to either over-aggressive eviction or cache-key bugs.
 - **Result cache hit rate.** Should depend heavily on query workload. Hard to predict.
 - **Eviction frequency.** If high on either ristretto cache, the size limits are too tight.

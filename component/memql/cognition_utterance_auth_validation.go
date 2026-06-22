@@ -63,7 +63,7 @@ func (e *MemQLEngine) validateCognitionUtteranceWriteAuthorization(ctx context.C
 	identity, _ := auth.UserIdentityFromContext(ctx)
 	if participantType == "si" || participantType == "system" {
 		// Allow transcript-only realtime voice utterances from any authenticated user
-		// These are just transcriptions of what the SI already said via voice
+		// These are just transcriptions of what the AI already said via voice
 		if isTranscriptOnlyUtterance(payload) {
 			return nil
 		}

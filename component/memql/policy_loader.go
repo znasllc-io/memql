@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-// PolicyRegistry holds the parsed SI Router policies loaded at engine
+// PolicyRegistry holds the parsed AI Router policies loaded at engine
 // startup. Policies are immutable for the life of the process -- we
 // reload on restart, not at runtime. Keyed by policy name.
 type PolicyRegistry struct {
@@ -83,7 +83,7 @@ func (r *PolicyRegistry) Count() int {
 
 // loadAIPolicies returns an empty registry. Pass 3 of the DSL
 // restructure migration retired the legacy walk over
-// dsl/v1/policies/. SI Router policies now live in
+// dsl/v1/policies/. AI Router policies now live in
 // dsl/policies/routing.memql and load via a unified loader
 // (LoadUnifiedRoutingPolicies) called from engine.go. This stub
 // keeps the function signature so the bootstrap call site

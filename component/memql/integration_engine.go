@@ -9,10 +9,10 @@ import (
 
 // IntegrationEngineAccess is the interface integrations receive instead of the
 // full MemQLEngine. It provides capability registration, protocol-level
-// streaming, MemQL function execution, SI prompt invocation, and prompt
+// streaming, MemQL function execution, AI prompt invocation, and prompt
 // rendering.
 //
-// SI invocation (InvokeAI) is exposed here because the cognition integration
+// AI invocation (InvokeAI) is exposed here because the cognition integration
 // drives score-based agent routing from Go with dynamic per-utterance
 // context (participants, recent turns, scoring signals). Expressing that in
 // the DSL would require building a query string every turn; calling
@@ -30,7 +30,7 @@ type IntegrationEngineAccess interface {
 	Execute(ctx context.Context, query string) (*ExecuteResult, error)
 
 	// InvokeAI runs a prompt template by ID with the given data map,
-	// routing through the engine's SI provider registry (including cache
+	// routing through the engine's AI provider registry (including cache
 	// and provider-override plumbing). Equivalent to `ai("<id>", {...data})`
 	// in the DSL, but callable from Go without having to build and parse
 	// a query string. The DSL form is only valid inside shape() projection

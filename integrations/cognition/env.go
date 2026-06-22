@@ -8,7 +8,7 @@ import (
 )
 
 // CognitionEnvKeys defines the environment variable keys for Cognition logging configuration.
-// Note: All other configuration (SI enabled, provider, history limit) comes from
+// Note: All other configuration (AI enabled, provider, history limit) comes from
 // v1:platform:partitionVariable concept records, resolved at runtime via VariableResolver.
 type CognitionEnvKeys struct {
 	LoggerLevel string

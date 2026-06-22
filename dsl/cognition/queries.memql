@@ -314,9 +314,9 @@ query utterance queryFeedbackAnnouncementForPlan {
 // which often has isGroupGA missing/false even though the
 // underlying participant IS the GA. Filtering by participantType
 // + status is sufficient under v1 (each user has at most one
-// active SI participant per space; that's their GA).
+// active AI participant per space; that's their GA).
 @enabled
-@description("Active SI (group GA) participant for a space. Callers must pass the canonical spaceId.")
+@description("Active AI (group GA) participant for a space. Callers must pass the canonical spaceId.")
 query participant queryGroupGAForSpace {
   args {
     spaceId  string  @required
@@ -327,22 +327,22 @@ query participant queryGroupGAForSpace {
 
 // ---- queries/v1/cognition/hasAIResponseForReply.memql ----
 
-// queryHasAIResponseForReply - Idempotency Check for SI Response
+// queryHasAIResponseForReply - Idempotency Check for AI Response
 // ================================================================
 //
-// Checks whether an SI response already exists for a given utterance.
-// Used as an idempotency guard to prevent duplicate SI responses
+// Checks whether an AI response already exists for a given utterance.
+// Used as an idempotency guard to prevent duplicate AI responses
 // when the same event is processed multiple times.
 //
 // Arguments:
 //   replyToId (string, required)     - The utterance ID being replied to
-//   participantId (string, required) - The SI participant ID that would be responding
+//   participantId (string, required) - The AI participant ID that would be responding
 //
 // Returns:
 //   Array of matching utterance records (0 = no response yet, 1+ = already responded)
 
 @enabled
-@description("Check if an SI response already exists for a given utterance (idempotency check).")
+@description("Check if an AI response already exists for a given utterance (idempotency check).")
 query utterance queryHasAIResponseForReply {
   args {
     replyToId  string  @required
@@ -357,14 +357,14 @@ query utterance queryHasAIResponseForReply {
 // queryParticipantByAgentSpace - Check if Agent Already in Space
 // ===============================================================
 //
-// Checks if a specific SI agent is already participating in a space
+// Checks if a specific AI agent is already participating in a space
 // (status != "left"). Returns both "active" and "idle" participants --
 // any participant that has NOT left the space. Used to prevent
-// duplicate SI participant records during auto-join.
+// duplicate AI participant records during auto-join.
 //
 // NOTE: participant has no `active` boolean field; liveness is
 // governed by `status`. This query intentionally uses
-// `payload.status!="left"` (not traitIsActiveRecord) so SI rows are
+// `payload.status!="left"` (not traitIsActiveRecord) so AI rows are
 // not silently excluded.
 //
 // Arguments:
@@ -476,21 +476,21 @@ query space querySavedSpaces {
 
 // ---- queries/v1/cognition/aiParticipantForSpace.memql ----
 
-// queryAIParticipantForSpace - Find Active SI Participant in Space
+// queryAIParticipantForSpace - Find Active AI Participant in Space
 // =================================================================
 //
-// Finds the active SI participant in a given space. Returns the first
-// SI participant with status "active". Used by the cognition automation
-// to identify which SI agent is responding in a space.
+// Finds the active AI participant in a given space. Returns the first
+// AI participant with status "active". Used by the cognition automation
+// to identify which AI agent is responding in a space.
 //
 // Arguments:
 //   spaceId (string, required) - The space to search in
 //
 // Returns:
-//   Array of SI participant records (typically 0 or 1)
+//   Array of AI participant records (typically 0 or 1)
 
 @enabled
-@description("Find the active SI participant in a space.")
+@description("Find the active AI participant in a space.")
 query participant querySiParticipantForSpace {
   args {
     spaceId  string  @required

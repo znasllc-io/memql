@@ -523,7 +523,7 @@ func (c *CognitionIntegration) routeWithAI(
 	schemaJSON := buildRoutingSchema(candidates)
 	raw, err := c.engine.InvokeAIStructured(ctx, "cognitionRouting", data, "cognitionRouting", schemaJSON, true)
 	if err != nil {
-		return nil, fmt.Errorf("invoke routing SI: %w", err)
+		return nil, fmt.Errorf("invoke routing AI: %w", err)
 	}
 
 	routing, err := parseRoutingResult(raw)
@@ -544,7 +544,7 @@ func (c *CognitionIntegration) routeWithAI(
 					Weight: 0,
 					Value:  0,
 					Score:  0,
-					Detail: fmt.Sprintf("SI router: silence (%s)", routing.Reason),
+					Detail: fmt.Sprintf("AI router: silence (%s)", routing.Reason),
 				}},
 			},
 		}, nil
@@ -559,7 +559,7 @@ func (c *CognitionIntegration) routeWithAI(
 	// / "X takes this" / "greeted X" pattern and swap in that agent.
 	if fixed, overrode := reconcileRoutingWithReason(&routing, candidates); overrode {
 		if c != nil && c.Logger != nil {
-			c.Logger.Warn("cognition: SI router self-contradicted; overriding agentName from reason",
+			c.Logger.Warn("cognition: AI router self-contradicted; overriding agentName from reason",
 				"originalAgentName", routing.AgentName,
 				"reasonNamed", fixed.Name,
 				"reason", routing.Reason)
@@ -577,7 +577,7 @@ func (c *CognitionIntegration) routeWithAI(
 		}
 	}
 	if chosen == nil {
-		return nil, fmt.Errorf("SI router returned unknown agent: id=%q name=%q", routing.AgentId, routing.AgentName)
+		return nil, fmt.Errorf("AI router returned unknown agent: id=%q name=%q", routing.AgentId, routing.AgentName)
 	}
 
 	base := &routingOutcome{
@@ -589,7 +589,7 @@ func (c *CognitionIntegration) routeWithAI(
 		Winner: &polyphon.AgentScore{
 			AgentId:       chosen.ID,
 			AgentName:     chosen.Name,
-			TotalScore:    100, // SI-routed: treated as highest confidence
+			TotalScore:    100, // AI-routed: treated as highest confidence
 			ShouldRespond: true,
 			Reason:        routing.Reason,
 			ToolsNeeded:   routing.ToolsNeeded,
@@ -598,7 +598,7 @@ func (c *CognitionIntegration) routeWithAI(
 				Weight: 100,
 				Value:  1.0,
 				Score:  100,
-				Detail: fmt.Sprintf("SI router: %s", routing.Reason),
+				Detail: fmt.Sprintf("AI router: %s", routing.Reason),
 			}},
 		},
 	}

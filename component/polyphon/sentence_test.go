@@ -145,10 +145,10 @@ func TestSplitSentences(t *testing.T) {
 		},
 		{
 			name:  "long multi-sentence response",
-			input: "Welcome to the platform! I'm Sofia, your SI assistant. I can help you with tours, surveys, and general questions. What would you like to explore today?",
+			input: "Welcome to the platform! I'm Sofia, your AI assistant. I can help you with tours, surveys, and general questions. What would you like to explore today?",
 			expected: []string{
 				"Welcome to the platform!",
-				"I'm Sofia, your SI assistant.",
+				"I'm Sofia, your AI assistant.",
 				"I can help you with tours, surveys, and general questions.",
 				"What would you like to explore today?",
 			},

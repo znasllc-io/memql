@@ -89,7 +89,7 @@ make deploy VERSION=X
 - **Language:** Go 1.26.1+
 - **Database:** PostgreSQL 16 + TimescaleDB
 - **API:** gRPC (primary) + WebSocket bridge for browsers + HTTP for OAuth callbacks / health / file uploads
-- **SI:** Centralized provider system (OpenAI, Anthropic) on `MemqlService.Stream`
+- **AI:** Centralized provider system (OpenAI, Anthropic) on `MemqlService.Stream`
 - **Auth:** in-house identity service (magic-link + JWT, JWKS-published)
 
 ### Query Language
@@ -198,7 +198,7 @@ memQL/
 │   ├── server/            # HTTP/WebSocket servers
 │   └── auth/              # Authentication
 ├── integrations/          # External service integrations
-│   ├── cognition/         # SI collaboration
+│   ├── cognition/         # AI collaboration
 │   └── audio/             # Audio streaming
 ├── dsl/                   # The MemQL DSL tree (one directory per namespace)
 │   ├── cognition/         # e.g. concepts.memql, queries.memql, mutations.memql,
@@ -354,4 +354,4 @@ Apache License 2.0 — see [LICENSE](LICENSE).
 
 ---
 
-**memQL - Time-series memory graph database for SI-powered collaboration**
+**memQL - Time-series memory graph database for AI-powered collaboration**

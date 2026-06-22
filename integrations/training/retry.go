@@ -1,7 +1,7 @@
 // Background retry of best-effort training steps.
 //
 // Steps B (identity vector) and C (distilled system prompt) call
-// out to external SI providers (embedding API + LLM API) and CAN
+// out to external AI providers (embedding API + LLM API) and CAN
 // fail for transient reasons -- rate limits, brief 5xx, network
 // blips. The handler already does one in-handler retry (~1.5s
 // backoff) which catches the bulk of those. When that's still not

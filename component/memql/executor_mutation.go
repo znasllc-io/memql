@@ -476,7 +476,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 	}
-	// SI-participant guard: server-stamps forUserId, enforces per-user
+	// AI-participant guard: server-stamps forUserId, enforces per-user
 	// 3-cap, and protects the pinned owner GA from removal. Skips human
 	// participants. See validateAndStampParticipantPayload.
 	if conceptMeta.Name == memorynodes.ConceptCognitionParticipant {

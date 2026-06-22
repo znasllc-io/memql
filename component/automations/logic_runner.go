@@ -45,7 +45,7 @@ type LogicRunner struct {
 
 // NewLogicRunner constructs a LogicRunner. The step registry and engine
 // must be the same instances the automation scheduler / executor use --
-// per-step caching, integration plug-ins, and SI providers all hang off
+// per-step caching, integration plug-ins, and AI providers all hang off
 // the engine, and the step executors look them up via stepCtx.Engine.
 func NewLogicRunner(engine *memql.MemQLEngine, registry StepExecutorRegistry, logger *slog.Logger) *LogicRunner {
 	if logger == nil {
@@ -97,7 +97,7 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 		// logicBootstrapSession's session.created) fails its emit step with
 		// "event bus not configured" -- and because the compiler topologically
 		// orders steps with no inter-dependency arbitrarily, that abort can land
-		// BEFORE the load-bearing mutation step (the SI join / session insert),
+		// BEFORE the load-bearing mutation step (the AI join / session insert),
 		// so the side effect never runs at all. The engine's bus is wired at app
 		// bootstrap (SetEventBus) before this runner is constructed, so it's
 		// non-nil at runtime; stripped binaries with no bus keep the prior

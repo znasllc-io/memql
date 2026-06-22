@@ -209,7 +209,7 @@ func (a *App) harnessInnerLoop() harness.InnerLoop {
 // recurses into composite child refs -- all token-free (no LLM). The
 // step's recorded result is the executor's `{replayed, ref, results}`
 // payload, surfaced as the harness step output so downstream steps + recall
-// see what ran. Returns 0 tool calls (replay makes no SI calls).
+// see what ran. Returns 0 tool calls (replay makes no AI calls).
 func (a *App) dispatchActionStep(ctx context.Context, step harness.StepView) (map[string]any, int, error) {
 	ref, _ := step.Input["ref"].(string)
 	if ref == "" {

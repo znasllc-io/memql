@@ -6,7 +6,7 @@ import (
 )
 
 // ChatMessage represents a message in a chat conversation with proper roles.
-// This enables proper multi-turn conversation support with SI models.
+// This enables proper multi-turn conversation support with AI models.
 type ChatMessage struct {
 	Role    string // "system", "user", or "assistant"
 	Content string
@@ -19,7 +19,7 @@ type ChatMessage struct {
 	ToolCalls []ToolCall
 }
 
-// ChatAIProvider provides chat-based SI completion with proper message roles.
+// ChatAIProvider provides chat-based AI completion with proper message roles.
 // Providers that support multi-turn conversations should implement this interface.
 type ChatAIProvider interface {
 	// CallChat sends a conversation with proper message roles to the model.
@@ -89,7 +89,7 @@ type ToolCallingChatAIProvider interface {
 	CallChatWithTools(ctx context.Context, messages []ChatMessage, tools []ToolDefinition) (*ToolCallingChatResult, error)
 }
 
-// StreamChunk represents a single chunk from a streaming SI response.
+// StreamChunk represents a single chunk from a streaming AI response.
 type StreamChunk struct {
 	Content string
 	Done    bool
@@ -129,7 +129,7 @@ type VisionContent struct {
 	Data     []byte // Raw image bytes
 }
 
-// VisionAIProvider provides image understanding capabilities for SI models.
+// VisionAIProvider provides image understanding capabilities for AI models.
 type VisionAIProvider interface {
 	CallVision(ctx context.Context, prompt string, images []VisionContent) (string, error)
 }
@@ -140,9 +140,9 @@ type VisionAIProvider interface {
 
 // toolDefaultsCtxKey is the context key for injecting default argument values
 // into tool calls. When set, these defaults are merged into every tool call's
-// arguments UNLESS the SI model already provided a value for that key.
+// arguments UNLESS the AI model already provided a value for that key.
 // This allows callers (e.g., cognition) to inject spaceId, participantId,
-// etc. without relying on the SI model to include them.
+// etc. without relying on the AI model to include them.
 type toolDefaultsCtxKey struct{}
 
 // ContextWithToolDefaults returns a new context carrying default tool argument values.

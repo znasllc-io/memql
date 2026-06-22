@@ -5,7 +5,7 @@
 
 @version("1.0.0")
 @namespace("router")
-@description("Spend limit for a partition or a specific agent within a partition. The router checks the current-period spend against this cap before every SI call; over-budget calls are refused with a typed error that surfaces in the UI as a clear 'budget reached' state. Rolls over at periodType boundary (UTC day, week, or month).")
+@description("Spend limit for a partition or a specific agent within a partition. The router checks the current-period spend against this cap before every AI call; over-budget calls are refused with a typed error that surfaces in the UI as a clear 'budget reached' state. Rolls over at periodType boundary (UTC day, week, or month).")
 concept budget {
   scope            enum("partition", "agent")  @required  @description("Whether this budget caps the whole partition or a single agent.")
   scopeId          string  @description("When scope=agent, the v1:agents:agent id being capped. Empty when scope=partition.")
@@ -19,14 +19,14 @@ concept budget {
 
 @version("1.0.0")
 @namespace("router")
-@description("One SI invocation recorded by the memQL SI Router. Every call through the router -- agent replies, prompt renders, suggest endpoints, TTS, transcription -- produces exactly one row here with attribution, token counts, latency, and cost. Partition-scoped usage ledger; the time-series axis rides the shared MemoryNodes hypertable.")
+@description("One AI invocation recorded by the memQL AI Router. Every call through the router -- agent replies, prompt renders, suggest endpoints, TTS, transcription -- produces exactly one row here with attribution, token counts, latency, and cost. Partition-scoped usage ledger; the time-series axis rides the shared MemoryNodes hypertable.")
 concept call {
-  requestId           string  @required  @description("Correlates this SI call to an upstream request -- cognition turn, suggest envelope, prompt invocation. Free-form string; uniqueness is not enforced across partitions.")
-  agentId             string  @description("Agent whose reply this call was generating; empty for non-agent SI calls (suggest, render, TTS, etc).")
+  requestId           string  @required  @description("Correlates this AI call to an upstream request -- cognition turn, suggest envelope, prompt invocation. Free-form string; uniqueness is not enforced across partitions.")
+  agentId             string  @description("Agent whose reply this call was generating; empty for non-agent AI calls (suggest, render, TTS, etc).")
   userId              string  @description("Identity subject of the end-user driving this call, when resolvable. Empty for system-triggered calls.")
   // Epic 3 3.2 (#1899): spaceId (a CoPresent product notion) dropped from the
-  // core SI call ledger. The tenant scope is `partition` (already recorded on
-  // this row); per-space SI-cost attribution is a product concern for the
+  // core AI call ledger. The tenant scope is `partition` (already recorded on
+  // this row); per-space AI-cost attribution is a product concern for the
   // CoPresent pack, not core.
   promptName          string  @description("Name of the MemQL prompt invoked when the call went through InvokeAI (e.g. agentReply, cognitionRouting).")
   policyName          string  @description("Routing policy that picked the provider. Reserved for Phase 2+ when policies land; Phase 1 leaves this empty.")
@@ -59,7 +59,7 @@ concept call {
 
 @version("1.0.0")
 @namespace("router")
-@description("Virtual projection of a registered SI provider entry. Never persisted -- rows are produced at query time by the integration.router.listModels capability from the live provider registry. Lives in the concept registry so the engine can shape results without a database round-trip.")
+@description("Virtual projection of a registered AI provider entry. Never persisted -- rows are produced at query time by the integration.router.listModels capability from the live provider registry. Lives in the concept registry so the engine can shape results without a database round-trip.")
 concept modelCatalog {
   providerName              string  @description("Registry name (e.g. stream54Mini).")
   providerType              string  @description("Raw @type annotation from the .memql file (OpenAI, AnthropicStream, etc).")
@@ -78,7 +78,7 @@ concept modelCatalog {
 
 @version("1.0.0")
 @namespace("router")
-@description("Virtual projection of a registered SI Router policy. Never persisted -- rows are produced at query time by the integration.router.listPolicies capability from the live policy registry. Lives in the concept registry so the engine can shape results without a database round-trip.")
+@description("Virtual projection of a registered AI Router policy. Never persisted -- rows are produced at query time by the integration.router.listPolicies capability from the live policy registry. Lives in the concept registry so the engine can shape results without a database round-trip.")
 concept policyCatalog {
   name                   string  @description("Policy name, e.g. balancedChat.")
   description            string  @description("Human-readable description from the @description annotation.")

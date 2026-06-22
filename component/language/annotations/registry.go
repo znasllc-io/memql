@@ -105,7 +105,7 @@ var Docs = map[string]string{
 	"alias":    "Additional name the builtin is registered under.",
 	"sdk":      "Generator marker (sdk/gen reads from source); no engine effect.",
 	// Prompt.
-	"defaultProvider": "Default SI provider for prompt execution.",
+	"defaultProvider": "Default AI provider for prompt execution.",
 	"templateFile":    "External template file path for prompts.",
 	// Provider.
 	"type":     "Provider vendor type (e.g., \"OpenAI\", \"Anthropic\"); on a concept, the row kind (\"object\"/\"collection\"/\"reference\").",

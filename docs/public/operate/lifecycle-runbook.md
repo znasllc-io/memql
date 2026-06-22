@@ -190,7 +190,7 @@ cluster and runs the cross-replica delivery gate (`make cluster-e2e` →
   reordered, or duplicated chunk). Exercises the #1266 ordered/backpressured
   streaming contract over the same substrate.
 
-Both are synthetic-event tests (no SI provider keys): the streamed turn drives a
+Both are synthetic-event tests (no AI provider keys): the streamed turn drives a
 sequence of utterance rows whose ids encode their order, so ordering is
 observable without a live LLM.
 

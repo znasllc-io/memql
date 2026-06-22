@@ -329,7 +329,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	return nil
 }
 
-// ReloadAIProviders re-loads the SI provider registry from .memql
+// ReloadAIProviders re-loads the AI provider registry from .memql
 // files and re-resolves auth placeholders. Intended for the dev-
 // refresh workflow: after wiping the database and re-seeding
 // secrets, providers that eager-loaded against an empty concept
@@ -337,7 +337,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 // values from v1:platform:globalSecret instead of falling back to OS env.
 //
 // Concurrency: assumes the engine is in a quiescent state (no
-// in-flight SI calls). The dev-refresh workflow runs this after
+// in-flight AI calls). The dev-refresh workflow runs this after
 // `make secrets-seed` completes and before any user traffic arrives.
 // Production callers (post-rotation) should similarly drain in-flight
 // calls before invoking; the swap is non-atomic across providers.

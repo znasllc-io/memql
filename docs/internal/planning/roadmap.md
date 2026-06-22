@@ -98,7 +98,7 @@ This is admin tooling, not a user-facing CLI feature.
 `v1:platform:partition.config` is a free-form `object` field today. We
 should formalize per-partition settings:
 
-- Default SI provider (a customer might prefer Anthropic over OpenAI).
+- Default AI provider (a customer might prefer Anthropic over OpenAI).
 - Rate limits (per-partition token budget).
 - Retention windows (how long before timeseries data ages out).
 - Allowed integrations (some customers can't use third-party storage).

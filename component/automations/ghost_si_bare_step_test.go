@@ -9,7 +9,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// Regression for memql#580 (the ghost SI / "two assistants" bug).
+// Regression for memql#580 (the ghost AI / "two assistants" bug).
 //
 // The autoJoinAI logic body derives the GA participant id with:
 //
@@ -24,7 +24,7 @@ import (
 // "getActiveGA" instead of the query's *ExecuteResult, every downstream
 // getGA.First().id collapsed to nil, and the unevaluated
 // coalesce(getGA.First().id, "") literal flowed into the mutation as the
-// agentId -> ghost SI.
+// agentId -> ghost AI.
 //
 // These tests pin the fix: a bare identifier that names a KNOWN step now
 // resolves to that step's result in the logic-runner evaluator too; a bare
@@ -58,7 +58,7 @@ func TestBareStepResolvesToResult_LogicRunnerEvaluator(t *testing.T) {
 		t.Fatalf("EvaluateValue: %v", err)
 	}
 	if _, isStr := gotVal.(string); isStr {
-		t.Fatalf("EvaluateValue(\"getActiveGA\") = %#v (a literal string) -- the memql#580 ghost-SI bug; want the step ExecuteResult", gotVal)
+		t.Fatalf("EvaluateValue(\"getActiveGA\") = %#v (a literal string) -- the memql#580 ghost-AI bug; want the step ExecuteResult", gotVal)
 	}
 	if gotVal != any(active) {
 		t.Fatalf("EvaluateValue(\"getActiveGA\") = %#v, want the getActiveGA ExecuteResult", gotVal)

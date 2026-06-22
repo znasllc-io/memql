@@ -45,7 +45,7 @@ func TestAICacheKey_Deterministic(t *testing.T) {
 	key2 := buildAICacheKey("template1", "openai", "prompt text")
 
 	if key1 != key2 {
-		t.Error("SI cache key should be deterministic")
+		t.Error("AI cache key should be deterministic")
 	}
 }
 

@@ -186,8 +186,8 @@ func (cb *ContextBuilder) getAgentExchangesById(transcript []TranscriptEntry, ag
 	return exchanges
 }
 
-// buildQuickSummary creates a brief non-SI summary by listing speakers and topics.
-// Used as a fallback before SI compaction runs.
+// buildQuickSummary creates a brief non-AI summary by listing speakers and topics.
+// Used as a fallback before AI compaction runs.
 func buildQuickSummary(entries []TranscriptEntry) string {
 	if len(entries) == 0 {
 		return ""

@@ -401,7 +401,7 @@ func resolveArgValueRef(v any, evaluator *automations.Evaluator) (any, error) {
 				// Fail closed: `val` IS a recognised builtin expression here, so
 				// its raw source text is never a valid value. Passing it through
 				// verbatim is exactly how an unevaluated `coalesce(...)` literal
-				// landed in a mutation arg and became the ghost-SI agentId
+				// landed in a mutation arg and became the ghost-AI agentId
 				// (memql#574/#580). Return nil so the literal can never reach the
 				// graph as data; the caller's guards decide what nil means.
 				evaluator.Warnf("builtin arg resolution failed; dropping to nil",

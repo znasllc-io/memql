@@ -191,7 +191,7 @@ Only users with `owner` or `admin` role can create agents. The backend enforces 
 
 ### Overview
 
-The "System" assistant is a privileged SI persona meant exclusively for platform setup, configuration, and administrative workflows. It is restricted to users with `owner` or `admin` roles.
+The "System" assistant is a privileged AI persona meant exclusively for platform setup, configuration, and administrative workflows. It is restricted to users with `owner` or `admin` roles.
 
 ### Visibility Restrictions
 

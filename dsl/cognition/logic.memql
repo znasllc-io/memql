@@ -36,9 +36,9 @@
 // "unexpected token $" class of errors we hit during the refactor).
 //
 // SIDE EFFECTS:
-// - Creates v1:cognition:participant records (SI type) for the
+// - Creates v1:cognition:participant records (AI type) for the
 //   creator's GA and each specialist agent (only if missing).
-// - bootstrapSession automation creates sessions for new SI
+// - bootstrapSession automation creates sessions for new AI
 //   participants.
 // - Emits "si.auto-joined" event for observability.
 use agents.queries.{ queryAgentById, queryAssistantAgentForUser }
@@ -82,7 +82,7 @@ logic logicAutoJoinAI {
   // memql#580: bare step identifiers (getActiveGA / getFallbackGA) now
   // resolve to their step result in BOTH the logic-runner evaluator and
   // the arg-time evaluator (#575 fixed only the latter, which is why this
-  // automation kept inserting a ghost SI whose agentId was the unevaluated
+  // automation kept inserting a ghost AI whose agentId was the unevaluated
   // literal `coalesce(getGA.First().id, "")`). A builtin arg that still
   // fails to resolve now drops to nil instead of passing its raw source
   // text through, so an unevaluated expression can never reach a mutation.
@@ -223,12 +223,12 @@ logic logicBootstrapSession {
 }
 
 // automations/v1/cognition/generateResponse/automation.memql
-// Generates and inserts an SI response when the cognition integration
+// Generates and inserts an AI response when the cognition integration
 // determines that a response is needed. The Go handler performs event
 // reception, concurrent context loading, Polyphon scoring, and streaming
 // dispatch, then emits this event with pre-loaded context when a
-// non-streaming SI response is needed.
-@description("Generates and inserts an SI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via mutationSendTextUtterance, and bumps participant presence to idle. Idempotent via queryHasAIResponseForReply.")
+// non-streaming AI response is needed.
+@description("Generates and inserts an AI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via mutationSendTextUtterance, and bumps participant presence to idle. Idempotent via queryHasAIResponseForReply.")
 @eventField("agentId", "promptData", "promptTemplateId", "siParticipantId", "spaceId", "utteranceId")
 logic logicGenerateResponse {
   args {
@@ -239,11 +239,11 @@ logic logicGenerateResponse {
   //   spaceId           - Space where the utterance was sent
   //   utteranceId       - The triggering utterance node ID
   //   triggerText       - The utterance text that triggered the response
-  //   siParticipantId   - The SI participant that should respond
-  //   agentId           - The agent concept ID for the responding SI
+  //   siParticipantId   - The AI participant that should respond
+  //   agentId           - The agent concept ID for the responding AI
   //   promptTemplateId  - Which prompt template to use (e.g., "cognitionReply")
   //   promptData        - Pre-assembled prompt data (assistant, space, participants, history, etc.)
-  //   toolNames         - Tool whitelist for the SI response
+  //   toolNames         - Tool whitelist for the AI response
 
   // Check idempotency -- skip if we already responded to this utterance
   existingResponse := queryHasAIResponseForReply({
@@ -251,12 +251,12 @@ logic logicGenerateResponse {
     participantId: args.event.payload.siParticipantId
   })
 
-  // Generate SI response via the prompt template
+  // Generate AI response via the prompt template
   aiResponse := if existingResponse.Empty() {
     ai(args.event.payload.promptTemplateId, args.event.payload.promptData)
   }
 
-  // Insert the SI response as a new utterance
+  // Insert the AI response as a new utterance
   insertResponse := if existingResponse.Empty() {
     mutationSendTextUtterance({
       args.event.payload.spaceId,

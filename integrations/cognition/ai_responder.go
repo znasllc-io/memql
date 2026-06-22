@@ -16,10 +16,10 @@ import (
 
 const systemActorId = "system:cognition-integration"
 
-// Context key for passing selection reason from cognition to SI responder.
+// Context key for passing selection reason from cognition to AI responder.
 type selectionReasonKey struct{}
 
-// Context key for passing utterance intent from cognition to SI responder.
+// Context key for passing utterance intent from cognition to AI responder.
 type intentContextKey struct{}
 
 // contextWithIntent attaches the utterance intent to the context.
@@ -33,10 +33,10 @@ func intentFromContext(ctx context.Context) *polyphon.IntentResult {
 	return v
 }
 
-// Context key for passing SI router's toolsNeeded signal to SI responder.
+// Context key for passing AI router's toolsNeeded signal to AI responder.
 type toolsNeededContextKey struct{}
 
-// contextWithToolsNeeded attaches the SI router's toolsNeeded flag to the
+// contextWithToolsNeeded attaches the AI router's toolsNeeded flag to the
 // context. Always set the explicit value (true OR false) when the router
 // returned a decision -- callers downstream rely on the tri-state
 // (unset / true / false) to decide whether to gate tools on this turn.
@@ -44,7 +44,7 @@ func contextWithToolsNeeded(ctx context.Context, needed bool) context.Context {
 	return context.WithValue(ctx, toolsNeededContextKey{}, needed)
 }
 
-// toolsNeededFromContext extracts the SI router's toolsNeeded flag along
+// toolsNeededFromContext extracts the AI router's toolsNeeded flag along
 // with a "set" flag. When set is false the router didn't produce an
 // opinion (heuristic-only path) and callers should keep their default
 // behavior. When set is true callers should respect the value: false
@@ -311,7 +311,7 @@ type conversationMessage struct {
 }
 
 // participantInfo holds display name and type for a participant, used for
-// attributing history messages to humans vs. SI agents.
+// attributing history messages to humans vs. AI agents.
 type participantInfo struct {
 	DisplayName     string
 	ParticipantType string
@@ -341,7 +341,7 @@ func buildHistoryFromRecentUtterances(recent []map[string]any, siParticipantId s
 				DisplayName:     name,
 				ParticipantType: pType,
 			}
-			// For SI participants, extract role from description if available.
+			// For AI participants, extract role from description if available.
 			if pType == "si" {
 				if desc, ok := p["description"].(string); ok && desc != "" {
 					info.AgentRole = strings.TrimSpace(desc)
@@ -378,15 +378,15 @@ func buildHistoryFromRecentUtterances(recent []map[string]any, siParticipantId s
 			role = "assistant"
 		}
 
-		// Prefix user messages with the speaker's display name so the SI
+		// Prefix user messages with the speaker's display name so the AI
 		// knows who said what in a multi-participant conversation.
-		// For peer SI agents, use [Agent: Name (Role)] attribution so the
+		// For peer AI agents, use [Agent: Name (Role)] attribution so the
 		// responding agent can distinguish human vs. agent messages.
 		content := text
 		if role == "user" {
 			if info, ok := infoMap[pid]; ok {
 				if info.ParticipantType == "si" {
-					// Peer SI agent: include agent attribution with role.
+					// Peer AI agent: include agent attribution with role.
 					if info.AgentRole != "" {
 						content = "[Agent: " + info.DisplayName + " (" + info.AgentRole + ")]: " + text
 					} else {
@@ -403,8 +403,8 @@ func buildHistoryFromRecentUtterances(recent []map[string]any, siParticipantId s
 	return out
 }
 
-// buildPeerActivitySummary builds a summary of recent activity from peer SI agents.
-// For each peer SI agent (excluding the current agent), it finds their most recent
+// buildPeerActivitySummary builds a summary of recent activity from peer AI agents.
+// For each peer AI agent (excluding the current agent), it finds their most recent
 // utterance and returns a summary with name, role, last topic, and how many messages ago.
 func buildPeerActivitySummary(recentUtterances []map[string]any, currentAgentParticipantId string, participants []map[string]any) []map[string]any {
 	currentAgentParticipantId = strings.TrimSpace(currentAgentParticipantId)
@@ -412,7 +412,7 @@ func buildPeerActivitySummary(recentUtterances []map[string]any, currentAgentPar
 		return nil
 	}
 
-	// Build lookup of SI participants (excluding current agent).
+	// Build lookup of AI participants (excluding current agent).
 	type peerInfo struct {
 		Name string
 		Role string
@@ -525,7 +525,7 @@ func contextWithSystemActor(ctx context.Context) context.Context {
 	return auth.ContextWithToken(ctx, token)
 }
 
-// findAIParticipant finds an active SI participant in a space.
+// findAIParticipant finds an active AI participant in a space.
 // Returns the participant with its node ID populated (needed for creating utterances).
 // Delegates to the aiParticipantForSpace MemQL query function.
 func (c *CognitionIntegration) findAIParticipant(ctx context.Context, spaceId string) (*participantPayload, error) {
@@ -538,7 +538,7 @@ func (c *CognitionIntegration) findAIParticipant(ctx context.Context, spaceId st
 	}
 
 	// The MemQL function returns shaped data with id at top level.
-	nodeId, payload, err := extractNodeIdAndPayload(result, "SI participant")
+	nodeId, payload, err := extractNodeIdAndPayload(result, "AI participant")
 	if err != nil {
 		c.Logger.Debug("findAIParticipant extraction failed", "error", err)
 		return nil, err
@@ -657,7 +657,7 @@ func (c *CognitionIntegration) toolsForContext(spaceType string, noTools bool, a
 	return tools
 }
 
-// generateAIResponse calls the SI provider to generate a response.
+// generateAIResponse calls the AI provider to generate a response.
 // The spaceId parameter identifies the space; prompt context is loaded via caches.
 func (c *CognitionIntegration) generateAIResponse(ctx context.Context, agent *agentPayload, trigger string, spaceId string, participants []map[string]any, recentUtterances []map[string]any, history []conversationMessage, si spaceInfo, attachmentSummaries []map[string]any, peerAgents ...*agentPayload) (string, error) {
 	if c == nil || c.engine == nil {
@@ -756,7 +756,7 @@ func (c *CognitionIntegration) generateAIResponse(ctx context.Context, agent *ag
 		data["spaceContext"] = spaceContext
 	}
 
-	// Include attachment summaries so the SI knows what files have been shared.
+	// Include attachment summaries so the AI knows what files have been shared.
 	if len(attachmentSummaries) > 0 {
 		data["attachmentSummaries"] = attachmentSummaries
 	}
@@ -799,7 +799,7 @@ func (c *CognitionIntegration) generateAIResponse(ctx context.Context, agent *ag
 	// form here because it's parser-restricted to shape() projection
 	// contexts; we need a top-level one-shot call with the full assembled
 	// data map. Provider selection, caching, and tool-calling plumbing all
-	// still happen inside the engine's SI runtime.
+	// still happen inside the engine's AI runtime.
 	result, aiErr := c.engine.InvokeAI(ctx, "cognitionReply", data)
 
 	var text string
@@ -876,7 +876,7 @@ func stripRawToolCalls(text string) string {
 
 // insertSystemActionUtterance writes an `action`-typed utterance into a
 // space. Used for non-conversational signals the user should see but
-// that should NOT trigger another SI response loop -- unmet-capability
+// that should NOT trigger another AI response loop -- unmet-capability
 // notices ("nobody in this space could pick this up"), reactive-agent
 // activity surfaces ("Marketing is investigating..."), etc. The
 // cognition_handler filter on utteranceType in {"system", "action"}
@@ -977,7 +977,7 @@ func (c *CognitionIntegration) insertSystemActionUtterance(ctx context.Context, 
 	return nil
 }
 
-// insertAIResponse inserts the SI response as a new utterance.
+// insertAIResponse inserts the AI response as a new utterance.
 // The source parameter controls the output metadata (outputMethod, tier, pipeline).
 // When source is nil, defaults to text/text.
 //
@@ -1006,13 +1006,13 @@ func (c *CognitionIntegration) insertAIResponse(ctx context.Context, spaceId str
 		utteranceId = fmt.Sprintf("utt-si-%d", time.Now().UnixNano())
 	}
 
-	// CRITICAL: Use the SI participant's node ID, NOT the agent ID.
+	// CRITICAL: Use the AI participant's node ID, NOT the agent ID.
 	// The frontend looks up the sender using: participantMap.get(utterance.participantId)
-	// This must match the SI participant's ID in v1:cognition:participant, not the agent template ID.
+	// This must match the AI participant's ID in v1:cognition:participant, not the agent template ID.
 	participantId := aiParticipant.ID
 	if participantId == "" {
 		// Fallback: should not happen if findAIParticipant works correctly
-		return fmt.Errorf("SI participant has no ID (this is a bug)")
+		return fmt.Errorf("AI participant has no ID (this is a bug)")
 	}
 
 	// Build source JSON; default to a text-output pipeline when not
@@ -1041,7 +1041,7 @@ func (c *CognitionIntegration) insertAIResponse(ctx context.Context, spaceId str
 		return fmt.Errorf("marshal source: %w", err)
 	}
 
-	c.Logger.Debug("inserting SI response",
+	c.Logger.Debug("inserting AI response",
 		"utteranceId", utteranceId,
 		"spaceId", spaceId,
 		"participantId", participantId,
@@ -1252,7 +1252,7 @@ func sourceMapFromAny(v any) map[string]string {
 	return nil
 }
 
-// hasAIResponseForReply checks whether an SI response already exists for a given utterance.
+// hasAIResponseForReply checks whether an AI response already exists for a given utterance.
 // Delegates to the hasAIResponseForReply MemQL query function.
 func (c *CognitionIntegration) queryHasAIResponseForReply(ctx context.Context, spaceId, siParticipantId, replyToId string) bool {
 	if c == nil || c.engine == nil {
@@ -1299,7 +1299,7 @@ func (c *CognitionIntegration) getUtteranceTextAndParticipant(ctx context.Contex
 	return text, participantId, nil
 }
 
-// getParticipantsForPrompt retrieves participants for SI prompt context.
+// getParticipantsForPrompt retrieves participants for AI prompt context.
 // Delegates to the spaceParticipants MemQL query function.
 func (c *CognitionIntegration) getParticipantsForPrompt(ctx context.Context, spaceId string) ([]map[string]any, error) {
 	if c == nil || c.engine == nil {

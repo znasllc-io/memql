@@ -52,7 +52,7 @@ var PolicyExposableConfig = []PolicyConfigField{
 		Key:         "defaultProvider",
 		FieldName:   "SiDefaultProvider",
 		Sensitive:   false,
-		Description: "Default SI provider name (e.g. chat54Mini).",
+		Description: "Default AI provider name (e.g. chat54Mini).",
 	},
 	{
 		Key:         "sttProvider",

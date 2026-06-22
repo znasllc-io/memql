@@ -16,7 +16,7 @@ import (
 	"github.com/znasllc-io/memql/core/env"
 )
 
-// nonstreaming.go -- the background / batch SI execution lane (memql#896).
+// nonstreaming.go -- the background / batch AI execution lane (memql#896).
 //
 // Planner-dispatched plan/task execution turns run HERE, not through the
 // interactive streaming path (streaming.go). The two lanes share prompt

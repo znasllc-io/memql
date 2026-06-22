@@ -13,10 +13,10 @@ import (
 )
 
 // participantPerUserAgentCap is the per-(user, space) maximum number of
-// active SI participants. Under the one-assistant space model
+// active AI participants. Under the one-assistant space model
 // (copresent #124) a space carries EXACTLY ONE assistant -- the owner's
 // active one, auto-joined by autoJoinAI. Specialists and system agents
-// never participate in spaces, so the per-user SI cap is 1. This is the
+// never participate in spaces, so the per-user AI cap is 1. This is the
 // Go-side enforcement of the declarative space.maxAgents=1 default.
 const participantPerUserAgentCap = 1
 
@@ -26,11 +26,11 @@ const participantPerUserAgentCap = 1
 const defaultMaxHumansPerSpace = 5
 
 // validateAndStampParticipantPayload runs the engine pre-insert guard for
-// v1:cognition:participant rows that target SI participants. Phase 1.4 of
+// v1:cognition:participant rows that target AI participants. Phase 1.4 of
 // the chat-architecture plan: per-user team rosters with forUserId
 // scoping, the per-user-per-space 3-cap, and GA-pin protection.
 //
-// Behavior summary (SI participants only -- human participants pass
+// Behavior summary (AI participants only -- human participants pass
 // through untouched):
 //
 //  1. forUserId is server-stamped from the authenticated caller for
@@ -43,7 +43,7 @@ const defaultMaxHumansPerSpace = 5
 //     may supply any forUserId. The autoJoinAI automation relies on
 //     this to land the owner GA with forUserId = space-creator.
 //
-//  3. Per-user-per-space 3-cap. Counts current-active SI participants
+//  3. Per-user-per-space 3-cap. Counts current-active AI participants
 //     in the same space that share the resolved forUserId, excluding
 //     the participant id being inserted. Reject when post-insert
 //     count would exceed 3 (i.e., new row is status='active' AND
@@ -65,7 +65,7 @@ func (e *MemQLEngine) validateAndStampParticipantPayload(ctx context.Context, pa
 	participantType := strings.TrimSpace(stringFromAny(payload["participantType"]))
 	if participantType != "si" {
 		// Human participants are capped per-space by the space's
-		// maxHumans (default 5). Other non-SI types (if any) pass
+		// maxHumans (default 5). Other non-AI types (if any) pass
 		// through untouched.
 		if participantType == "human" {
 			return e.validateHumanParticipantCap(ctx, payload, mutationId)
@@ -146,7 +146,7 @@ func (e *MemQLEngine) validateAndStampParticipantPayload(ctx context.Context, pa
 	return nil
 }
 
-// countActiveAIParticipantsForUser counts distinct SI participant ids in
+// countActiveAIParticipantsForUser counts distinct AI participant ids in
 // the given space whose latest version is status='active' and whose
 // forUserId matches the supplied user. Excludes the supplied excludeId
 // (the participant id about to be inserted) so a re-version of the same

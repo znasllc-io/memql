@@ -197,7 +197,7 @@ type VoiceGateSignals struct {
 	// (>= 1.0 means a structured @mention or a strong start-of-utterance name
 	// match -- decisive engage). #477 section 3.1.
 	DirectAddressScore float64
-	// CandidateCount is the number of SI candidates eligible this turn. 1 means
+	// CandidateCount is the number of AI candidates eligible this turn. 1 means
 	// a single-agent room (1-on-1 / one GA) -- the gate is off, the WHO is
 	// settled. #477 section 3.2.
 	CandidateCount int

@@ -9,7 +9,7 @@ under epic [#271](https://github.com/znasllc-io/memql/issues/271).
 Run on any environment that was cluster-booted before [PR #274](https://github.com/znasllc-io/memql/pull/274)
 landed. Symptom: a user's agent list contains multiple rows for the
 same `role` (e.g. three "Assistant" entries in the participant panel),
-or the daily space participant panel shows multiple SI participants
+or the daily space participant panel shows multiple AI participants
 that all share the same display name.
 
 The PR #274 fix prevents NEW duplicates by making the seed materializer
@@ -40,7 +40,7 @@ to the env var.
 1. Loads every distinct `v1:agents:agent` (or any concept) row whose
    `provenance.kind = 'seed'` and `payload.ownerUserId` is non-empty
    — the per-user seed-materialized rows.
-2. Loads every non-`left` `v1:cognition:participant` SI row pointing
+2. Loads every non-`left` `v1:cognition:participant` AI row pointing
    at any of those agents.
 3. For each `(provenance.name, ownerUserId)` group, computes the
    canonical id `<concept>:<seedName>-<bareUserId>` (mirrors

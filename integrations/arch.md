@@ -20,7 +20,7 @@ integrations/
 ├── auth/        capabilities.go        # resolveUser, checkPermission
 ├── audio/       resample.go, wav.go    # PCM16 sample-rate conversion
 ├── cognition/                          # routing + conductor + client-tool relay
-├── agent/                              # SI tool-loop + replier + suggest
+├── agent/                              # AI tool-loop + replier + suggest
 ├── copresent/   routing.go             # CoPresent-specific event routing rules
 ├── database/    capabilities.go        # healthCheck, stats
 ├── email/                              # Microsoft Graph / SMTP / Log senders
@@ -32,7 +32,7 @@ integrations/
 ├── avatarvendor/                       # CGO-free Anam/Simli vendor REST + dispatch core
 ├── avatardirect/                       # Direct/Guide avatar: mint LiveKit room + bring Anam up
 ├── openai/      asr.go, tts.go         # Polyphon ASR/TTS via OpenAI Realtime + /v1/audio/speech
-├── router/                             # SI router ledger + integration
+├── router/                             # AI router ledger + integration
 ├── similarity/                         # pgvector similarTo() builtin
 └── stt/                                # Speech-to-text (transcribe + streaming)
 ```
@@ -72,7 +72,7 @@ type IntegrationProvider interface {
 
 Integrations receive `IntegrationEngineAccess` (a narrow interface)
 rather than the full `MemQLEngine` -- it deliberately excludes
-`InvokeSI` / `InvokeSIChatWithTools` so SI orchestration stays in MemQL
+`InvokeSI` / `InvokeSIChatWithTools` so AI orchestration stays in MemQL
 DSL functions or routed via the `si()` builtin. The `RegisterPlugin`
 surface enforces the same separation by the shape of `PluginContext`.
 
@@ -112,10 +112,10 @@ handler by FQN, executes it, and returns via `ReplyTo`.
 Capabilities registered: `cognitionScore`, `cognitionTrackPresence`,
 `cognitionForwardToBridgeAgent`.
 
-## Agent (SI tool-loop + replier + suggest)
+## Agent (AI tool-loop + replier + suggest)
 
 `integrations/agent/` runs on the `agent` build, holds the streaming
-SI tool-loop (`streaming.go`), the chat replier
+AI tool-loop (`streaming.go`), the chat replier
 (`replier.go`), the suggest dispatcher (`suggest.go`), and the prompt
 context builder (`prompt_data.go`). The tool loop hits a unified
 `MEMQL_TOOL_LOOP_MAX_ITERATIONS` cap (200 today) shared with the
@@ -190,7 +190,7 @@ Self-registering plug-in. Capability:
 | `identity` | identity-side helpers (resolve etc.) |
 | `knowledge` | corpus seed + lookup helpers |
 | `avatardirect` | `startSession` / `stopSession` (direct/Guide Anam avatar) |
-| `router` | SI router ledger writes |
+| `router` | AI router ledger writes |
 | `similarity` | pgvector `similarTo()` builtin |
 
 ## Adding a new integration

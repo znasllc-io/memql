@@ -28,10 +28,10 @@ keyword header -- and lives in a per-namespace, per-construct file
 | **Mutation** | Write one row (`insert` or `update`) of a concept |
 | **Logic** | Imperative orchestration block called from automation steps |
 | **Automation** | Event- or schedule-triggered workflow |
-| **Prompt** | SI prompt template with a typed input schema |
-| **Provider** | SI vendor + model configuration |
+| **Prompt** | AI prompt template with a typed input schema |
+| **Provider** | AI vendor + model configuration |
 | **Shape** | Reusable field-projection template |
-| **Tool** | SI-callable surface over a query / mutation / builtin |
+| **Tool** | AI-callable surface over a query / mutation / builtin |
 | **Builtin** | Go-backed operation behind a declarative schema |
 
 > **Retired: receiver-function constructs.** The legacy
@@ -457,7 +457,7 @@ Verified author-surface helpers (see `component/language/parser`):
 | `year(ts)` / `quarter(ts)` / `month(ts)` / `dayOfMonth(ts)` | Components |
 | `isAnniversary(ts)` / `isFirstDayOfQuarter(ts)` | Calendar predicates |
 
-### SI
+### AI
 
 | Function | Description | Example |
 |----------|-------------|---------|
@@ -468,7 +468,7 @@ Verified author-surface helpers (see `component/language/parser`):
 
 ## Prompt Functions
 
-Prompts define SI templates with typed input schemas and a default
+Prompts define AI templates with typed input schemas and a default
 provider. Struct form: the body is a **bare field list** -- it IS the
 input schema. Declared in `dsl/<namespace>/prompts.memql`; the
 rendered template is a Go text/template file named by `@templateFile`.
@@ -495,7 +495,7 @@ prompt cognitionCompaction {
 | Attribute | Description |
 |-----------|-------------|
 | `@description` | Human-readable description of the prompt |
-| `@defaultProvider` | Default SI provider name to use |
+| `@defaultProvider` | Default AI provider name to use |
 | `@templateFile` | Go text/template file for the prompt |
 
 ### Input Field Types
@@ -506,13 +506,13 @@ prompt cognitionCompaction {
 | `object` | JSON object |
 | `[]object` | Array of JSON objects |
 | `@required` | Field modifier marking the field as required |
-| `@description("...")` | Per-field documentation surfaced to the SI layer |
+| `@description("...")` | Per-field documentation surfaced to the AI layer |
 
 ---
 
 ## Provider Functions
 
-Providers define SI vendor + model configurations (OpenAI and
+Providers define AI vendor + model configurations (OpenAI and
 Anthropic are the supported vendors). Struct form, consolidated in
 `dsl/providers/providers.memql`.
 
@@ -568,7 +568,7 @@ provider anthropic {
 
 ## Tool Functions
 
-Tools are the SI-callable surface over queries, mutations, and
+Tools are the AI-callable surface over queries, mutations, and
 builtins, declared in `dsl/<namespace>/tools.memql`. The body is the
 tool's input schema; `@handler` binds it to the operation it runs:
 

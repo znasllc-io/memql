@@ -1,6 +1,6 @@
 # memQL - Time-Series Memory Graph Database
 
-**Type:** Time-series database with event-driven automations and SI integration
+**Type:** Time-series database with event-driven automations and AI integration
 **Language:** Go + MemQL DSL
 **Stack:** PostgreSQL + TimescaleDB extension
 **Purpose:** Store and query time-series memory nodes with semantic relationships
@@ -56,8 +56,8 @@ memQL/
 │   │   ├── specs.memql        Specification predicates
 │   │   ├── shapes.memql       Reusable shape templates
 │   │   ├── builtins.memql     Go-backed executors
-│   │   ├── tools.memql        SI tool definitions
-│   │   ├── prompts.memql      SI prompt schemas (+ prompts/*.tmpl)
+│   │   ├── tools.memql        AI tool definitions
+│   │   ├── prompts.memql      AI prompt schemas (+ prompts/*.tmpl)
 │   │   ├── automations.memql  Event-driven workflows
 │   │   └── ...                (not every namespace carries every construct)
 │   └── _reference/    Per-construct authoring reference skeletons
@@ -95,11 +95,11 @@ memQL/
 | `dsl/<ns>/queries.memql` | Query functions | MemQL | — |
 | `dsl/<ns>/mutations.memql` | Mutation functions | MemQL | — |
 | `dsl/<ns>/specs.memql` | Specification predicates | MemQL | — |
-| `dsl/<ns>/tools.memql` | SI tool definitions | MemQL | — |
-| `dsl/<ns>/prompts.memql` | SI prompt schemas (+ `prompts/*.tmpl`) | MemQL | — |
-| `dsl/providers/providers.memql` | SI provider configurations | MemQL | — |
+| `dsl/<ns>/tools.memql` | AI tool definitions | MemQL | — |
+| `dsl/<ns>/prompts.memql` | AI prompt schemas (+ `prompts/*.tmpl`) | MemQL | — |
+| `dsl/providers/providers.memql` | AI provider configurations | MemQL | — |
 | `dsl/<ns>/shapes.memql` | Reusable shape templates | MemQL | — |
-| `dsl/policies/policies.memql` | SI provider-selection policies | MemQL | — |
+| `dsl/policies/policies.memql` | AI provider-selection policies | MemQL | — |
 | `integrations/` | External service integrations + DSL capabilities | Go | [→](integrations/CLAUDE.md) |
 | `component/` | Core service components | Go | [→](component/CLAUDE.md) |
 | `component/bus/` | Channel-based component communication bus | Go | -- |
@@ -276,7 +276,7 @@ frontend coordination.
 - **Language:** Go 1.26.1+
 - **Database:** PostgreSQL 16 + TimescaleDB
 - **API:** gRPC (`MemqlService.Stream` is the primary surface) + HTTP for the documented exceptions (OAuth, health, file uploads, Polyphon room tokens) + WebSocket bridge to the gRPC stream for browsers (`/memql/ws`)
-- **SI:** Centralized provider system (OpenAI, Anthropic). All SI ops on gRPC; HTTP path retired.
+- **AI:** Centralized provider system (OpenAI, Anthropic). All AI ops on gRPC; HTTP path retired.
 - **Auth:** in-house identity service (magic-link + JWT, JWKS-published)
 - **Query Language:** MemQL DSL
 
@@ -308,7 +308,7 @@ frontend coordination.
 │  └──────┬───────┘  └──────────────┘  └──────────┘ │
 │         │                                          │
 │    ┌────┴────────┐ ┌──────────────┐               │
-│    │ SI Provider │ │ Integrations │ ┌──────────┐ │
+│    │ AI Provider │ │ Integrations │ ┌──────────┐ │
 │    │  Registry   │ │ (Cognition,  │ │ NemoClaw │ │
 │    │(OpenAI,     │ │  Audio, etc) │ │ (Coding  │ │
 │    │ Anthropic)  │ └──────────────┘ │  Agent)  │ │
@@ -316,7 +316,7 @@ frontend coordination.
 │    └────┬────────┘                                │
 │         │                                          │
 │    ┌────┴────────────────────┐  ┌──────────────┐ │
-│    │  SI gRPC Messages       │  │ MemQL Sense  │ │
+│    │  AI gRPC Messages       │  │ MemQL Sense  │ │
 │    │  (MemqlService.Stream): │  │ (Language     │ │
 │    │  AiChatMsg, AiSpeechMsg,│  │  Intelligence)│ │
 │    │  AiTranscribeMsg,       │  │ Tokenize,     │ │
@@ -353,13 +353,13 @@ go build -tags planner .         # planner    (25 MB, -53%)
         │  Node    │ │  Node    │ │  Node    │ │  Node    │ │  Node    │
         └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘
          backend      voice        cognition     planning     task exec
-         for front.   transport    pipeline       orchestr.    SI work
+         for front.   transport    pipeline       orchestr.    AI work
 ```
 
 - **BFF** (default): Backend for frontend, domain-specific API surface
 - **Voice**: Voice transport (audio WS, LiveKit)
 - **Cognition**: Cognition pipeline, Polyphon
-- **Agent**: Task execution, SI work, tool calling
+- **Agent**: Task execution, AI work, tool calling
 - **Planner**: Task planning and orchestration
 
 Nodes discover each other via mesh. All nodes share a single
@@ -509,18 +509,18 @@ These endpoints **must** remain HTTP due to external protocol requirements:
 
 ### gRPC-Only Endpoints (HTTP Retired)
 
-The legacy SI and Polyphon HTTP paths have been removed. Everything lives
+The legacy AI and Polyphon HTTP paths have been removed. Everything lives
 on `MemqlService.Stream` now; cross-node proxying rides `AiForwardRouter`.
 
 | Category | gRPC Message Types | Handler |
 |----------|--------------------|---------|
-| **SI service-to-service** | `AiChatMsg`, `AiSpeechMsg`, `AiTranscribeMsg`, `AiSuggestMsg` (space / group / agent) | `ai_handlers.go` |
+| **AI service-to-service** | `AiChatMsg`, `AiSpeechMsg`, `AiTranscribeMsg`, `AiSuggestMsg` (space / group / agent) | `ai_handlers.go` |
 | **Streaming transcription** | `AiTranscribeStreamStart` / `Chunk` / `End` + `AiTranscribeStreamDelta` / `Complete` | `ai_transcribe_stream.go` -- multi-message flow keyed by `request_id`, forwarded BFF -> Voice via `AiForwardRouter.ForwardContinuation` |
 | **Polyphon internal** | `PolyphonRoomTokenMsg`, `PolyphonStatusMsg`, `PolyphonUtteranceMsg` | `polyphon_handlers.go` |
 | **Concepts API** | `ConceptsListMsg`, `ConceptsSubscribeMsg` | `concepts_handlers.go` |
 | **Guest invites** | `SendGuestInviteMsg`, `ResolveGuestInviteMsg`, `ResendGuestInviteEmailMsg`, `CancelGuestInviteMsg` | `guest_handlers.go` |
 
-### For SI Agents and Developers
+### For AI Agents and Developers
 
 When implementing new functionality in memQL:
 
@@ -535,9 +535,9 @@ When implementing new functionality in memQL:
 
 ---
 
-## SI Integration
+## AI Integration
 
-memQL centralizes all SI operations through a pluggable provider system:
+memQL centralizes all AI operations through a pluggable provider system:
 
 ### Provider System
 - **Multi-provider architecture** - Unified interfaces (`ChatSIProvider`, `VisionSIProvider`, `TTSSIProvider`, `ChatStreamProvider`) with pluggable backends
@@ -546,9 +546,9 @@ memQL centralizes all SI operations through a pluggable provider system:
 - **Provider configuration** - MemQL provider records in `dsl/providers/providers.memql`
 - **Provider selection** - Default provider via config, or per-request via `provider` parameter
 
-### SI Endpoints (gRPC on `MemqlService.Stream`)
+### AI Endpoints (gRPC on `MemqlService.Stream`)
 
-All SI operations go through gRPC message types on the single bidirectional
+All AI operations go through gRPC message types on the single bidirectional
 stream `MemqlService.Stream`:
 
 - `AiChatMsg` / `AiChatResult` / `AiStreamChunk` -- chat completions (streaming + non-streaming)
@@ -726,7 +726,7 @@ mismatch drops fitScore by 0.4+; total tool gap routes to the GA with
 
 **Conversational continuity.** The conductor receives an explicit
 `lastResponder` input (computed in `conductor_consult.go` from the
-transcript -- the most-recent SI participant to speak before this
+transcript -- the most-recent AI participant to speak before this
 human utterance). The "Conversational continuity" meta-principle in
 `conductorTurn.tmpl` requires the primary to stay with that agent
 when the user's turn is a follow-up shape ("ok cool", "btw", "what
@@ -772,12 +772,12 @@ with a clickable chip linking to the named knowledge domain. When
 the agent used no trained sources, citations is an empty array.
 
 ### Coding Agent (OpenClaw / NemoClaw)
-- **Currently:** OpenClaw (MIT license) - Open-source SI coding/automation agent, hardened
+- **Currently:** OpenClaw (MIT license) - Open-source AI coding/automation agent, hardened
   - Pinned to v2026.2.26+ (patches CVE-2026-25253: 1-click RCE)
   - Gateway bound to internal network only, community skills disabled
   - Shared instance for all agents, each with isolated workspace
   - Per-agent workspaces at `/workspaces/{agentId}/`
-  - SI calls routed through memQL's centralized provider system
+  - AI calls routed through memQL's centralized provider system
 - **Upgrade path:** NVIDIA NemoClaw (Apache 2.0) adds OpenShell sandboxing — swap image when container is published
 - **Development:** the standalone `docker-compose.nemoclaw.yml` overlay was retired (memql#1311); a coding-agent sidecar for the parity cluster is pending re-home (memql#1310)
 - **Cloud:** runs as a sidecar container alongside the agent node on AKS
@@ -1011,7 +1011,7 @@ How the DSL constructs lean on each other. Each layer can only depend
         ▼           ▼           ▼             ▼
    ┌─────────┐ ┌─────────┐ ┌──────────┐ ┌────────────┐
    │ Shapes  │ │Mutations│ │ Builtins │ │ Providers  │
-   │ @row /  │ │ inserts │ │ Go-backed│ │ SI vendor  │
+   │ @row /  │ │ inserts │ │ Go-backed│ │ AI vendor  │
    │ @actor  │ │ on rows │ │ executors│ │ + model    │
    │ + traits│ │         │ │          │ │            │
    └────┬────┘ └─────────┘ └──────────┘ └────────────┘
@@ -1034,7 +1034,7 @@ How the DSL constructs lean on each other. Each layer can only depend
                  ▼
            ┌────────────┐    ┌────────────┐
            │ Automations│    │   Tools    │
-           │ event →    │◄───┤ SI-callable│
+           │ event →    │◄───┤ AI-callable│
            │ side-effect│    │ definitions│
            └────────────┘    └────────────┘
                  │
@@ -1074,7 +1074,7 @@ How the DSL constructs lean on each other. Each layer can only depend
   body.
 - **Builtins** wrap Go integrations behind a declarative schema, so
   they look like regular DSL function calls.
-- **Providers** are SI vendor + model + auth records; **prompts**
+- **Providers** are AI vendor + model + auth records; **prompts**
   pin a default provider and pull rendered templates over it.
 - **Queries** stitch concept + filter (specs) + projection (shapes)
   + args into a typed read. Phase B 2026-05: the struct form
@@ -1085,12 +1085,12 @@ How the DSL constructs lean on each other. Each layer can only depend
   "Procedural form (internal only)" below.)
 - **Automations** are event-triggered side-effects. They consume
   the layers above them and never the other way around.
-- **Tools** are the SI-facing surface of queries + mutations +
+- **Tools** are the AI-facing surface of queries + mutations +
   builtins. The tool loop binds tool-call args to handler args and
   forwards.
-- **Policies** are empty-bodied SI provider-selection records
+- **Policies** are empty-bodied AI provider-selection records
   (`@primary` / `@fallback` / `@maxLatencyMs` / `@preferredRole`),
-  consumed by the SI Router to resolve a provider chain. (The
+  consumed by the AI Router to resolve a provider chain. (The
   retired decision-policy tier — caller-based authz / feature-gating
   decisions — is gone, #984; use **specs** via `spec("name")` for
   caller-context boolean checks.)
@@ -1159,10 +1159,10 @@ etc.).
 
 ## Policies
 
-The live `policy` construct is an **SI provider-selection record**:
+The live `policy` construct is an **AI provider-selection record**:
 empty-bodied, annotated with `@primary` / `@fallback` /
 `@maxLatencyMs` / `@preferredRole`, consolidated in
-`dsl/policies/policies.memql` and consumed by the SI Router to pick
+`dsl/policies/policies.memql` and consumed by the AI Router to pick
 chat/voice/embedding providers. That is the only policy surface with
 live constructs.
 
@@ -1403,7 +1403,7 @@ Logic functions don't write `ctx.output = ...`; the body's
 trailing `return <expr>` is the function's return value.
 
 ### Prompts
-SI prompt templates with input schemas and default providers. Struct
+AI prompt templates with input schemas and default providers. Struct
 form, mirrors concepts / shapes / tools / providers / builtins —
 the body is a bare input-schema field list, no `@input` wrapper.
 Logic prompts (routing / suggest / classification) use the
@@ -1424,7 +1424,7 @@ Two legacy forms are retired (both rejected at parse time):
 - `@input { ... }` — body-level wrapper around the field list.
 
 ### Providers
-SI provider configurations (OpenAI, Anthropic -- the only supported
+AI provider configurations (OpenAI, Anthropic -- the only supported
 vendors). Struct form, mirrors concepts / shapes / tools.
 ```memql
 @description("OpenAI GPT-5.4 Mini -- balanced cost/latency chat")
@@ -1619,7 +1619,7 @@ tier that once hosted caller-based boolean predicates is retired
 `policy` construct is provider-selection only.
 
 ### Tools
-SI-callable tool definitions — struct form, mirrors how concepts +
+AI-callable tool definitions — struct form, mirrors how concepts +
 shapes read. The body is a list of input-schema fields with types
 and annotations (`@required`, `@default`, `@enum`, `@description`).
 ```memql
@@ -1643,7 +1643,7 @@ builtin's input schema; the actual implementation is the Go
 integration named by `@executor`.
 ```memql
 @enabled
-@description("Score an utterance for an SI participant")
+@description("Score an utterance for an AI participant")
 @executor("integration.cognition.scoreUtterance")
 @args(profile="object")
 builtin cognitionScore {

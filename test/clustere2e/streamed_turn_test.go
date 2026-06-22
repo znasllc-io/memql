@@ -10,7 +10,7 @@
 // WHY A SYNTHETIC CHUNK STREAM (same rationale as delivery_test.go)
 // ----------------------------------------------------------------
 // The live token stream is an LLM reply delta (component/memql CallStream),
-// which needs SI provider keys and is non-deterministic. The gate instead
+// which needs AI provider keys and is non-deterministic. The gate instead
 // drives the SAME substrate streaming path with synthetic, ordered chunks:
 // each chunk is a v1:cognition:utterance row whose id ENCODES its sequence
 // (`...:<runID>-NNNN`), so ordering is observable from the graph event alone

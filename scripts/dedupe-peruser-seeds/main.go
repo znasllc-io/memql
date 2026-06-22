@@ -112,9 +112,9 @@ func run(ctx context.Context, dsn string, execute bool) error {
 
 	participants, err := loadAIParticipantRows(ctx, db, agents)
 	if err != nil {
-		return fmt.Errorf("load SI participant rows: %w", err)
+		return fmt.Errorf("load AI participant rows: %w", err)
 	}
-	fmt.Printf("loaded %d distinct non-left SI participants pointing at seed agents\n", len(participants))
+	fmt.Printf("loaded %d distinct non-left AI participants pointing at seed agents\n", len(participants))
 
 	plan := ComputePlan(agents, participants)
 	printPlan(plan)
@@ -194,7 +194,7 @@ ORDER BY id, "createdAt" DESC`
 	return out, rows.Err()
 }
 
-// loadAIParticipantRows pulls the latest non-left SI participant
+// loadAIParticipantRows pulls the latest non-left AI participant
 // row per id whose agentId points at any of the seed-materialized
 // agents from loadSeedAgentRows. Scoping the lookup to known seed
 // agents keeps the result small even on large clusters and means

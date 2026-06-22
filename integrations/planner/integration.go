@@ -165,7 +165,7 @@ type PlannerIntegration struct {
 type PlannerArg func(*PlannerIntegration)
 
 // WithEngine wires the engine adapter the integration uses for
-// queryPlanById + mutationUpdatePlanStatus + insert SI utterance.
+// queryPlanById + mutationUpdatePlanStatus + insert AI utterance.
 func WithEngine(engine Engine) PlannerArg {
 	return func(p *PlannerIntegration) { p.engine = engine }
 }

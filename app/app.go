@@ -89,9 +89,9 @@ type App struct {
 	authoredScheduler *automations.AuthoredScheduler
 	authoredBreaker   *automations.AuthoredBreaker
 
-	// Phase 3c: SI Router -- the single point every SI call flows through.
+	// Phase 3c: AI Router -- the single point every AI call flows through.
 	// Constructed after the engine is initialized so it can read the
-	// provider registry. Embedded in every node that calls SI; it is
+	// provider registry. Embedded in every node that calls AI; it is
 	// never a standalone node type.
 	router *router.Router
 

@@ -11,7 +11,7 @@ owner: znas
 
 **Last Updated:** 2026-02-21
 
-This document describes the event pub/sub system in MemQL, which enables real-time notifications for graph mutations, queries, SI completions, and session lifecycle events.
+This document describes the event pub/sub system in MemQL, which enables real-time notifications for graph mutations, queries, AI completions, and session lifecycle events.
 
 ## Architecture
 
@@ -33,7 +33,7 @@ This document describes the event pub/sub system in MemQL, which enables real-ti
 │  Event Emitters                                               │
 │  • MemQL Engine (node created/deleted/updated)                │
 │  • Query executor (query executed)                            │
-│  • SI runtime (completion started/finished/error)             │
+│  • AI runtime (completion started/finished/error)             │
 │  • System (session opened/closed, subscription changes)       │
 └───────────────────────────────────────────────────────────────┘
 ```
@@ -94,13 +94,13 @@ user-chosen partition name.
 }
 ```
 
-### SI Completion Events
+### AI Completion Events
 
 | Topic | Kind | Description |
 |-------|------|-------------|
-| `si.completion.started` | `SI_COMPLETION_STARTED` | Emitted when an SI request begins |
-| `si.completion.finished` | `SI_COMPLETION_FINISHED` | Emitted when an SI request succeeds |
-| `si.completion.error` | `SI_COMPLETION_ERROR` | Emitted when an SI request fails |
+| `si.completion.started` | `SI_COMPLETION_STARTED` | Emitted when an AI request begins |
+| `si.completion.finished` | `SI_COMPLETION_FINISHED` | Emitted when an AI request succeeds |
+| `si.completion.error` | `SI_COMPLETION_ERROR` | Emitted when an AI request fails |
 
 **Payload for started/finished:**
 ```json
@@ -338,7 +338,7 @@ enum EventKind {
   EVENT_KIND_NODE_UPDATED = 303;
   // Query events (400s)
   EVENT_KIND_QUERY_EXECUTED = 400;
-  // SI events (500s)
+  // AI events (500s)
   EVENT_KIND_AI_EVENT = 500;
   EVENT_KIND_AI_COMPLETION_STARTED = 501;
   EVENT_KIND_AI_COMPLETION_FINISHED = 502;

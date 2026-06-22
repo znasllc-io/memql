@@ -33,7 +33,7 @@ func newAIRuntime(logger *slog.Logger, prompts *PromptRegistry, providers *Provi
 	}
 }
 
-// SetEventBus wires the event bus for SI completion events.
+// SetEventBus wires the event bus for AI completion events.
 func (r *aiRuntime) SetEventBus(bus *events.Bus) {
 	if r == nil {
 		return

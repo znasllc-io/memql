@@ -149,7 +149,7 @@ type RealtimeExecutor struct {
 	// cognition/text leg already committed to chat (the legacy authored-text
 	// path: an unsolicited VoiceAgentSpeak push, or the A2 tool loop's
 	// directive_mode-empty TurnComplete -- both carry text read off an
-	// already-inserted SI utterance). RealtimeInstructionsForReply tells the
+	// already-inserted AI utterance). RealtimeInstructionsForReply tells the
 	// model NOT to read it verbatim, so capturing the spoken rendition would
 	// land a second, diverging assistant bubble for the same reply. The
 	// spoken-transcript bubble must have exactly one writer (#1427): set by
@@ -1154,7 +1154,7 @@ func (e *RealtimeExecutor) drainEvents() {
 	}
 }
 
-// captureOutput forwards one completed assistant transcript to memQL as an SI
+// captureOutput forwards one completed assistant transcript to memQL as an AI
 // utterance (#458 output capture). Runs on its own goroutine so the wire
 // round-trip never blocks the event drain. A nil forwarder or a blank
 // transcript is a no-op; a failed insert is logged (the voice turn still

@@ -1,4 +1,4 @@
-// todos domain -- the SI-facing `todos` tool surface.
+// todos domain -- the AI-facing `todos` tool surface.
 //
 // Four operations -- list / create / complete / update -- each wired
 // to a named owned query or mutation. The assistant invokes these to

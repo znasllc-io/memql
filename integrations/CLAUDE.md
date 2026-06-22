@@ -18,7 +18,7 @@ Integrations are **protocol adapters**. They bridge external services (OpenAI vo
 
 ### What Integrations DO NOT DO (belongs in MemQL DSL)
 - Query orchestration (fetching data, assembling context)
-- SI invocation (calling prompts, tool-calling loops)
+- AI invocation (calling prompts, tool-calling loops)
 - Business logic (deciding who responds, building conversation history)
 - Data mutations (inserting records, updating nodes)
 
@@ -72,7 +72,7 @@ External Service <-- [protocol response]
 integrations/
 ├── CLAUDE.md          # This file
 ├── arch.md           # Architecture documentation
-├── agent/            # SI tool-loop + chat replier + AiSuggest dispatcher (agent build only)
+├── agent/            # AI tool-loop + chat replier + AiSuggest dispatcher (agent build only)
 ├── audio/            # PCM16 resampling for the Polyphon pipeline
 ├── avatarvendor/     # CGO-free Anam/Simli avatar-vendor REST + dispatch core (shared by voice-agent + direct/Guide avatar)
 ├── auth/             # resolveUser, checkPermission
@@ -87,7 +87,7 @@ integrations/
 ├── knowledge/        # Corpus seed + lookup helpers (concept:* surfaces for agents)
 ├── avatardirect/     # Direct/Guide avatar: mint LiveKit room + bring Anam up (avatarDirectStartSession)
 ├── openai/           # Polyphon ASR/TTS via OpenAI (Realtime transcription + /v1/audio/speech)
-├── router/           # SI router ledger
+├── router/           # AI router ledger
 ├── similarity/       # pgvector similarTo() builtin
 ├── stt/              # Speech-to-text (batch transcribe capability + streaming session)
 └── training/         # Per-agent train pipeline (identity embedding + distilled system prompt + just-in-time knowledge seeding)
@@ -132,7 +132,7 @@ correction-shaped utterances ("sorry I meant X", "actually no",
 action lands as actionable instead of conversational.
 
 **Conversational continuity.** The conductor receives an explicit
-`lastResponder` input (most-recent SI to speak before this human
+`lastResponder` input (most-recent AI to speak before this human
 utterance), surfaced as its own field at the top of
 `conductorTurn.tmpl`. The "Conversational continuity"
 meta-principle requires the primary to stay with that agent when
@@ -278,7 +278,7 @@ Uses VisionSIProvider for image descriptions.
 
 ## Agent integration (`agent/`)
 
-Runs on the agent build only. Holds the streaming SI tool-loop
+Runs on the agent build only. Holds the streaming AI tool-loop
 (`streaming.go`), the chat replier (`replier.go`), the
 respondToUser-envelope schema + parser (`envelope.go`), the AiSuggest
 dispatcher (`suggest.go`) handling the full domain set
@@ -423,7 +423,7 @@ docker-compose logs -f memql | grep "cognition"
 # Turn state
 docker-compose logs -f memql | grep "turn state"
 
-# SI responses
+# AI responses
 docker-compose logs -f memql | grep "ai.*response"
 ```
 
@@ -438,7 +438,7 @@ docker-compose logs -f memql | grep "ai.*response"
 
 ## Environment Variables
 
-### SI Providers (Cognition Integration)
+### AI Providers (Cognition Integration)
 ```bash
 MEMQL_SI_OPENAI_API_KEY=sk-...         # OpenAI provider
 MEMQL_SI_ANTHROPIC_API_KEY=sk-ant-...  # Anthropic provider

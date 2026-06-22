@@ -125,12 +125,12 @@ cannot be used as identifier names anywhere in the author surface:
 | `mutation` | Write function. |
 | `logic` | Imperative orchestration block. |
 | `automation` | Event-triggered workflow. |
-| `tool` | SI-callable surface. |
-| `prompt` | SI prompt template. |
-| `provider` | SI vendor + model config. |
+| `tool` | AI-callable surface. |
+| `prompt` | AI prompt template. |
+| `provider` | AI vendor + model config. |
 | `builtin` | Go-backed operation wrapper. |
 | `seed` | Declarative row template. |
-| `policy` | SI provider-selection record (`@primary` / `@fallback`). The decision-policy tier is retired (#984). |
+| `policy` | AI provider-selection record (`@primary` / `@fallback`). The decision-policy tier is retired (#984). |
 
 Plus body-level keywords inside specific constructs: `args`, `body`,
 `filter`, `shape`, `insert`, `update`, `step`, `params`, `auth`,
@@ -150,7 +150,7 @@ parser's allow-list (search `allowedXAnnotations` in
 | `@description("...")` | Every construct. |
 | `@enabled` / `@disabled` | Lifecycle on queries / mutations / logic / automations / traits / tools / builtins / prompts / providers / specs / seeds. `@disabled` means "not loaded right now", not "deprecated" -- that axis is `@deprecated`. `@disabled` on a `@base` provider propagates to every child that `@extends` it. |
 | `@deprecated("hint")` | Functions, automations, tools, builtins. |
-| `@internal` | Functions; hides from SI tool surfaces + external docs. |
+| `@internal` | Functions; hides from AI tool surfaces + external docs. |
 
 **Cross-construct dependencies do NOT go through annotations.** The
 legacy `@useConcept` / `@useShape` / `@useQuery` / `@useMutation` /

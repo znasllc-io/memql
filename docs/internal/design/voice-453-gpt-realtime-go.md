@@ -311,7 +311,7 @@ Dispatched in `receiveLoop` on the `type` string (GA event names):
 | `response.output_audio.delta`                 | **Streamed model audio.** Base64 PCM16; decode and hand to the LiveKit publisher (#451). This is the first-audio-frame stamp T5 (#432 section 5.1). |
 | `response.output_audio.done`                  | Audio for one item finished.                                                           |
 | `response.output_audio_transcript.delta`      | Streamed text of what the model is saying. Accumulate (same `interimBuf` pattern as `asr.go`) for the utterance capture (#437). |
-| `response.output_audio_transcript.done`       | Final transcript for the item -> forward as an SI utterance via `VoiceAgentRealtimeOutput` (mirrors `realtime_output.RealtimeOutputForwarder`). |
+| `response.output_audio_transcript.done`       | Final transcript for the item -> forward as an AI utterance via `VoiceAgentRealtimeOutput` (mirrors `realtime_output.RealtimeOutputForwarder`). |
 | `response.function_call_arguments.delta`      | Streamed tool-call arguments (one call). Accumulate per `call_id`.                      |
 | `response.function_call_arguments.done`       | Tool call complete: `{ call_id, name, arguments }`. Dispatch async (section 5).         |
 | `response.done`                               | Response finished. Clear `RealtimeResponseInFlight`. Also carries the consolidated output items (incl. any function calls) as a backstop if the streamed `.done` was missed. |

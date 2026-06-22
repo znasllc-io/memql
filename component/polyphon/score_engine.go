@@ -96,7 +96,7 @@ func (c *ScoreEngine) ProcessUtterance(_ context.Context, utterance Utterance, c
 		decision.ConversationPhase = session.StateMachine.Phase()
 	}
 
-	// Classify confidence to determine whether the SI router should be invoked.
+	// Classify confidence to determine whether the AI router should be invoked.
 	decision.Confidence = classifyConfidence(scores, candidates, utterance)
 
 	// Always update the thread to the winning agent. This ensures follow-up
@@ -198,9 +198,9 @@ func (c *ScoreEngine) Scorer() *Scorer {
 }
 
 // classifyConfidence determines how confident the heuristic scoring is about
-// its winner. Used to decide whether the SI router should be invoked:
-//   - "high": clear Tier 1 match (direct address, solo agent, continuation) -- skip SI router
-//   - "low": ambiguous scores -- SI router should be invoked
+// its winner. Used to decide whether the AI router should be invoked:
+//   - "high": clear Tier 1 match (direct address, solo agent, continuation) -- skip AI router
+//   - "low": ambiguous scores -- AI router should be invoked
 func classifyConfidence(scores []AgentScore, candidates []AgentCandidate, utterance Utterance) string {
 	if len(scores) == 0 {
 		return "low"
@@ -232,7 +232,7 @@ func classifyConfidence(scores []AgentScore, candidates []AgentCandidate, uttera
 	}
 
 	// High: follow-up or affirmation with active thread, but ONLY if the winner
-	// has a clear lead. When scores are close (spread < 15), defer to the SI Router
+	// has a clear lead. When scores are close (spread < 15), defer to the AI Router
 	// for better intent-based routing.
 	if utterance.Intent != nil {
 		switch utterance.Intent.Primary {
@@ -247,7 +247,7 @@ func classifyConfidence(scores []AgentScore, candidates []AgentCandidate, uttera
 			}
 			if hasContinuation {
 				if len(scores) >= 2 && scores[0].TotalScore-scores[1].TotalScore < 15 {
-					return "low" // Close race: SI Router decides.
+					return "low" // Close race: AI Router decides.
 				}
 				return "high"
 			}

@@ -353,7 +353,7 @@ func withSectionableLogic(bundle authoringBundle) authoringBundle {
 
 // classifySectionable runs the cheap goalComplexityTriage prompt and returns
 // BOTH the complexity verdict and the optional sectionable shape parsed off the
-// SAME response (one call, two reads). A nil/blank goal or an SI error yields a
+// SAME response (one call, two reads). A nil/blank goal or an AI error yields a
 // non-sectionable zero decision + unknown complexity so the caller routes
 // normally.
 func (l *PlannerAgentLoop) classifySectionable(ctx context.Context, goal, nowRFC3339 string) (goalComplexity, string, sectionableDecision, error) {

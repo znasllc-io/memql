@@ -141,7 +141,7 @@ func (m *SessionManager) RemoveHuman(spaceId, participantId string) {
 	// If no humans left, the session should be cleaned up by the caller.
 }
 
-// AddAgent registers an SI agent in the session.
+// AddAgent registers an AI agent in the session.
 func (m *SessionManager) AddAgent(spaceId string, agentId, participantId, name string) error {
 	session := m.GetOrCreate(spaceId)
 
@@ -170,7 +170,7 @@ func (m *SessionManager) AddAgent(spaceId string, agentId, participantId, name s
 	return nil
 }
 
-// RemoveAgent removes an SI agent from the session.
+// RemoveAgent removes an AI agent from the session.
 func (m *SessionManager) RemoveAgent(spaceId, agentId string) {
 	session := m.Get(spaceId)
 	if session == nil {

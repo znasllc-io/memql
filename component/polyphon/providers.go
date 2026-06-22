@@ -175,7 +175,7 @@ type RoomProvider interface {
 	GetRoomInfo(ctx context.Context, spaceId string) (*RoomInfo, error)
 }
 
-// AgentRoomConfig describes an SI agent to be added to a room.
+// AgentRoomConfig describes an AI agent to be added to a room.
 type AgentRoomConfig struct {
 	AgentId    string `json:"agentId"`
 	Name       string `json:"name"`

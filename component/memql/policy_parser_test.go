@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestParsePolicyMemQL_GoldenPath locks the SI-router policy
+// TestParsePolicyMemQL_GoldenPath locks the AI-router policy
 // surface: @primary + @fallback + tuning knobs + empty `policy NAME { }`
 // declaration.
 //

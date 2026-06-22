@@ -92,7 +92,7 @@ agent runs on.
 
 The MemQL DSL lets you declare a system's behavior as data: `concept`
 (schema), `mutation`/`query` (writes/reads), `automation`
-(event → side-effect), `logic` (procedures), `tool` (the SI-callable
+(event → side-effect), `logic` (procedures), `tool` (the AI-callable
 surface), `prompt`, `provider`, `spec`, `shape`. An event triggers an
 automation triggers a tool — without you wiring callbacks in Go and
 redeploying. The same declarations drive validation, authorization

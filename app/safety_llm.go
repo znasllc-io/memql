@@ -13,7 +13,7 @@ import (
 )
 
 // EnvSafetyLLMProvider opts a node into the LLM semantic classifier
-// (memql#230). When set + matched by a registered structured-chat SI
+// (memql#230). When set + matched by a registered structured-chat AI
 // provider, app boot includes the LLM layer in the chain. Unset (or
 // unmatched) leaves the rules-only default -- the system runs in
 // shadow mode end-to-end, the LLM classifier is opt-in per node.

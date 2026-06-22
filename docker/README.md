@@ -45,7 +45,7 @@ Export `MEMQL_PACKAGES_TOKEN` (read:packages for the @visionarys-io +
 | **bff** | 2 | 8088 (HTTP), 50051 (gRPC) | Backend-for-frontend / API surface |
 | **cognition** | 2 | 8085 | Conversation intelligence |
 | **voice** | 2 | 8085 | ASR/TTS pipeline (`/memql/audio`) |
-| **agent** | 2 | 8085 (HTTP), 50051 (gRPC) | Task execution / SI work + WorkerService |
+| **agent** | 2 | 8085 (HTTP), 50051 (gRPC) | Task execution / AI work + WorkerService |
 | **planner** | 2 | 8085 | Task planning + orchestration |
 | **workbench** | 2 | 8085 | Per-Plan sandboxed exec environment |
 | **identity** | 2 | 8081 | Magic-link auth, JWKS, admin UI |

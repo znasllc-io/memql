@@ -142,14 +142,14 @@ prompt conductorTurn {
   // when older messages have rolled out.
   sessionSummary string            @description("Rolling 1-2 sentence summary of what's been going on in this room.")
 
-  // Last-responder anchor. Display name of the most-recent SI to
+  // Last-responder anchor. Display name of the most-recent AI to
   // speak before this turn. Surfaced as its own input (separate
   // from the transcript) so the LLM treats it as a high-weight
   // signal for implicit follow-ups -- the user's "ok cool" / "btw"
   // / "how" turn defaults primary to this agent unless an
   // @-mention or domain pivot redirects. Empty on the very first
-  // turn or when no SI has spoken yet.
-  lastResponder  string            @description("Display name of the most-recent SI participant to speak before this turn; the implicit addressee of follow-up shapes.")
+  // turn or when no AI has spoken yet.
+  lastResponder  string            @description("Display name of the most-recent AI participant to speak before this turn; the implicit addressee of follow-up shapes.")
 }
 
 // Provider: chat54Nano (gpt-5.4-nano), the fastest structured-

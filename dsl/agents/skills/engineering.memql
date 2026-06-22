@@ -38,7 +38,7 @@ seed skill memql-dsl-author {
   predefined:    true
 }
 
-@description("gRPC service surfaces on MemqlService.Stream + NodeService.Stream: oneof envelope grammar, handler wiring, the multiplexed-request_id streaming protocols (SI transcription, agent turn generation, client-tool relay). Pairs with go-backend-engineering for actual server-side implementation.")
+@description("gRPC service surfaces on MemqlService.Stream + NodeService.Stream: oneof envelope grammar, handler wiring, the multiplexed-request_id streaming protocols (AI transcription, agent turn generation, client-tool relay). Pairs with go-backend-engineering for actual server-side implementation.")
 seed skill grpc-services {
   slug:          "grpc-services"
   name:          "gRPC Services"

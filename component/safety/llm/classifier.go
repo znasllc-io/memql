@@ -43,7 +43,7 @@ const (
 // (which read from env). Tests inject everything; production reads
 // from env via app boot.
 type Options struct {
-	// Provider is the structured-output SI provider. Required.
+	// Provider is the structured-output AI provider. Required.
 	Provider common.ChatStructuredProvider
 	// Timeout bounds the per-call LLM round-trip. 0 = read from
 	// EnvTimeoutMs (default 5s).
@@ -75,7 +75,7 @@ type Classifier struct {
 
 // NewClassifier constructs a Classifier from the given Options.
 // Returns an error when Provider is nil -- the package can't reach
-// the SI surface without one.
+// the AI surface without one.
 func NewClassifier(opts Options) (*Classifier, error) {
 	if opts.Provider == nil {
 		return nil, errors.New("safety/llm: Provider is required")

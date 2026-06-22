@@ -49,7 +49,7 @@ import (
 // plugin.go from PluginContext.Agents + .Engine.
 //
 // The engine handle lets the handler call mutationCreatePlan via the
-// engine's Execute path -- the canonical write path. No SI / LLM
+// engine's Execute path -- the canonical write path. No AI / LLM
 // providers are needed at this layer anymore: dispatch (the actual
 // agent-tool-loop work) is owned by the planner integration's
 // agent-loop subscriber, which is the only side that needs provider

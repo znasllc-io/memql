@@ -1385,7 +1385,7 @@ type BuiltinField struct {
 //
 //	@enabled / @disabled              lifecycle (engine-side flags)
 //	@description("text")              documentation
-//	@defaultProvider("name")          SI provider pinned by default
+//	@defaultProvider("name")          AI provider pinned by default
 //	@templateFile("file.tmpl")        sidecar template path (relative to the prompt .memql file)
 //
 // Field grammar mirrors BuiltinField: `<name> <type> [@required
@@ -1541,7 +1541,7 @@ type RelationshipDecl struct {
 	Direction   string // "outgoing", "incoming", "bidirectional"
 }
 
-// ProviderDecl is the shared-frontend AST node for an SI provider
+// ProviderDecl is the shared-frontend AST node for an AI provider
 // declaration. Mirrors ConceptDecl in role: the langparser produces
 // this typed node so the per-construct loader
 // (component/memql.LoadUnifiedProviders) can consume it without
@@ -1615,7 +1615,7 @@ type ProviderDecl struct {
 
 func (*ProviderDecl) node() {}
 
-// ToolDecl is the shared-frontend AST node for an SI tool
+// ToolDecl is the shared-frontend AST node for an AI tool
 // declaration. Mirrors ConceptDecl / ShapeDecl / ProviderDecl in
 // role: the langparser produces this typed node so the per-construct
 // loader (component/memql.LoadUnifiedTools) can consume it without
@@ -1678,7 +1678,7 @@ type ToolFieldDecl struct {
 	Default      string   // @default("x") value, stored as a string regardless of the field's declared type
 }
 
-// PolicyDecl is the shared-frontend AST node for an SI Router
+// PolicyDecl is the shared-frontend AST node for an AI Router
 // routing policy declaration. Mirrors ConceptDecl / ShapeDecl /
 // ProviderDecl / ToolDecl in role: the langparser produces this
 // typed node so the per-construct loader
@@ -1703,7 +1703,7 @@ type ToolFieldDecl struct {
 //
 // Distinct from cross-cutting decision policies (`func (Policy)
 // name { ... }`) which are parsed via the general function-parser
-// path. This node represents only the SI-Router provider-chain
+// path. This node represents only the AI-Router provider-chain
 // shape.
 type PolicyDecl struct {
 	Name                  string

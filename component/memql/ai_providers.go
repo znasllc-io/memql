@@ -347,7 +347,7 @@ func (r *ProviderRegistry) finalizeDefault(logger *slog.Logger) {
 			return
 		}
 		if logger != nil {
-			logger.Warn("default SI provider unavailable; selecting first available entry",
+			logger.Warn("default AI provider unavailable; selecting first available entry",
 				"component", ComponentName,
 				"provider", r.defaultProvider)
 		}
@@ -466,7 +466,7 @@ func (r *ProviderRegistry) TTSProviderByName(name string) (TTSAIProvider, bool) 
 	})
 }
 
-// ChatProvider returns a non-streaming chat provider suitable for synchronous SI calls
+// ChatProvider returns a non-streaming chat provider suitable for synchronous AI calls
 // (e.g., suggest endpoints). If defaultName is provided and exists, returns that;
 // otherwise returns the first available non-streaming chat provider, or nil if none configured.
 //
@@ -595,7 +595,7 @@ func (r *ProviderRegistry) SuggestChatProvider() common.ChatAIProvider {
 }
 
 // isNonStreamingType returns true for provider types that use synchronous (non-streaming)
-// chat completions. These are safe for suggest/non-streaming SI calls.
+// chat completions. These are safe for suggest/non-streaming AI calls.
 func isNonStreamingType(providerType string) bool {
 	switch strings.ToLower(providerType) {
 	case "openai", "openaichat", "anthropic", "anthropicchat":
@@ -903,7 +903,7 @@ func resolveAuthPlaceholders(values map[string]string) (map[string]string, error
 	return resolved, nil
 }
 
-// streamingHTTPClient returns an HTTP client tuned for SI streaming
+// streamingHTTPClient returns an HTTP client tuned for AI streaming
 // providers. We deliberately do NOT set http.Client.Timeout because
 // streams are intentionally long-running; that field aborts the entire
 // request including the body read. Instead we set transport-level

@@ -483,7 +483,7 @@ func (e *Evaluator) EvaluateValue(expr string) (any, error) {
 	// rendering the identifier as its OWN NAME (a literal string). That literal
 	// then defeats the downstream `getGA.First().id` read and feeds an
 	// unevaluated coalesce(...) expression into a mutation arg -- the memql#580
-	// ghost-SI root cause. The logic-runner path bottoms out here (via
+	// ghost-AI root cause. The logic-runner path bottoms out here (via
 	// EvaluateStepReference / evaluateScalarArg), and #575 only patched the
 	// arg-time evaluator, leaving this one literalising bare steps. Guarded on a
 	// real step id so non-step bare literals keep prior behaviour (a bare

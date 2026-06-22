@@ -5,7 +5,7 @@ import "github.com/znasllc-io/memql/core/common"
 // BFFBootstrap creates dependencies for a BFF (Backend For Frontend) node.
 // BFF nodes serve domain-specific frontends.
 // They have: Engine + PeerManager + EventBridge + NodeServer.
-// They do NOT have: SI providers, voice pipeline.
+// They do NOT have: AI providers, voice pipeline.
 type BFFBootstrap struct{}
 
 func (*BFFBootstrap) NodeDependencies(ctx BootstrapContext) ([]common.Dependency, error) {

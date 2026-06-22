@@ -57,7 +57,7 @@ func (c *Collector) Collect(ctx context.Context) map[string]string {
 	// 5. Source context
 	c.collectSource(ctx, m)
 
-	// 6. SI context
+	// 6. AI context
 	c.collectAI(ctx, m)
 
 	// 7. Lineage context

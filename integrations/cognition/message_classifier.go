@@ -25,7 +25,7 @@ import (
 //
 // First-iteration cache is hash-keyed (exact-string match);
 // vector-keyed near-duplicate hits are a Phase 4 enhancement
-// once we can measure baseline hit rates from the SI cache
+// once we can measure baseline hit rates from the AI cache
 // metrics shipped in Phase 0.
 
 // MessageClassification is the structured-output shape returned
@@ -144,7 +144,7 @@ const messageClassificationSchemaJSON = `{
 }`
 
 // messageClassifier wraps a hash-keyed in-memory cache around the
-// messageClassification SI prompt. The cache key is derived from
+// messageClassification AI prompt. The cache key is derived from
 // the user's text + the previous agent's text (so identical user
 // phrasings in different conversational contexts get classified
 // distinctly -- "yeah show me" after a soft offer means something
@@ -152,7 +152,7 @@ const messageClassificationSchemaJSON = `{
 //
 // First iteration: hash-keyed. Vector-keyed near-duplicate hits
 // are a Phase 4 enhancement once we have the baseline hit-rate
-// numbers from the SI cache metrics shipped in Phase 0.
+// numbers from the AI cache metrics shipped in Phase 0.
 type messageClassifier struct {
 	logger *slog.Logger
 	engine MemQLEngine
@@ -228,7 +228,7 @@ func (mc *messageClassifier) Classify(
 		true,
 	)
 	if err != nil {
-		mc.logger.Warn("messageClassifier: SI call failed; defaulting to unknown",
+		mc.logger.Warn("messageClassifier: AI call failed; defaulting to unknown",
 			"err", err, "userText", userText)
 		return classifyUnknown(fmt.Sprintf("LLM error: %v", err))
 	}

@@ -31,7 +31,7 @@ This document establishes the **opinionated technologies and practices** for mem
 | **Database** | PostgreSQL + TimescaleDB | 16 + latest | Time-series memory graph |
 | **API** | HTTP + gRPC | - | REST and real-time communication |
 | **WebSocket** | Native Go | - | Real-time collaboration |
-| **SI** | Multi-provider (OpenAI, Anthropic) | latest | All SI text/chat/vision/speech goes through gRPC on `MemqlService.Stream` (`AiChatMsg`, `AiSpeechMsg`, `AiTranscribeMsg`, `AiSuggestMsg`). The legacy SI HTTP path is gone. |
+| **AI** | Multi-provider (OpenAI, Anthropic) | latest | All AI text/chat/vision/speech goes through gRPC on `MemqlService.Stream` (`AiChatMsg`, `AiSpeechMsg`, `AiTranscribeMsg`, `AiSuggestMsg`). The legacy AI HTTP path is gone. |
 | **Auth** | In-house identity service | - | Magic-link login, JWT, JWKS-published; PAT for CLI |
 | **Container** | Docker | latest | Local development |
 | **Orchestration** | Docker Compose | 3.8+ | Multi-container management |
@@ -380,7 +380,7 @@ for the full design.
    delete what's no longer needed.
 4. **Commit messages:** Clear, imperative mood. Subject under ~70
    chars. Body explains the why.
-5. **Co-authoring:** Include SI contributions
+5. **Co-authoring:** Include AI contributions
    (`Co-Authored-By: Claude ... <noreply@anthropic.com>`).
 
 ### Docker Practices

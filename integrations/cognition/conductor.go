@@ -27,7 +27,7 @@ import (
 // The conductor refactor splits orchestration cleanly:
 //
 //   - Cognition has the state. It observes utterances + presence + scoring
-//     output, runs heuristics + the SI router, and decides things like
+//     output, runs heuristics + the AI router, and decides things like
 //     "this agent should chime in briefly with the IT angle" or "skip
 //     the takeover opener -- the user addressed the room."
 //   - The agent prompt has identity + style + constraints. Decisions made

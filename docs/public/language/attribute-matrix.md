@@ -350,7 +350,7 @@ sets; unknown annotations are rejected at load time:
   lifecycle flags.
 - **Providers**: `@description`, `@extends`, `@model`, `@base`,
   `@type`, lifecycle flags.
-- **Policies** (SI provider selection): `@primary`, `@fallback`,
+- **Policies** (AI provider selection): `@primary`, `@fallback`,
   `@maxLatencyMs`, `@maxTimeToFirstTokenMs`, `@preferredRole`,
   `@description`.
 - **Specs / traits**: `@description`, optional `@shape("name")` on

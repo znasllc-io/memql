@@ -8,7 +8,7 @@ import (
 
 // transportVoiceEndpoints sets up transport for a voice node.
 // Includes: gRPC, WebSocket, Polyphon voice, STT. The legacy
-// HTTP SI endpoints (/si/speech, /si/transcribe, /si/chat, /si/*/suggest)
+// HTTP AI endpoints (/si/speech, /si/transcribe, /si/chat, /si/*/suggest)
 // have been retired -- callers use MemqlService.Stream with AiSpeechMsg /
 // AiTranscribeMsg / AiChatMsg / AiSuggestMsg instead. Cross-node AI
 // requests ride through BFF's AiForwardRouter.

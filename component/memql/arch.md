@@ -60,11 +60,11 @@ The engine package follows a **compiler pipeline architecture** with clear separ
 │   │                        engine/memql/                                   │      │
 │   │                                                                        │      │
 │   │   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐               │      │
-│   │   │ Executor │  │ Relations│  │   SI     │  │  Cache   │               │      │
+│   │   │ Executor │  │ Relations│  │   AI     │  │  Cache   │               │      │
 │   │   │          │  │          │  │ Runtime  │  │          │               │      │
 │   │   └──────────┘  └──────────┘  └──────────┘  └──────────┘               │      │
 │   │                                                                        │      │
-│   │   Responsibility: Query Execution, DB Operations, SI Invocation        │      │
+│   │   Responsibility: Query Execution, DB Operations, AI Invocation        │      │
 │   └────────────────────────────────────────────────────────────────────────┘      │
 │                                      │                                            │
 │                                      ▼                                            │
@@ -323,18 +323,18 @@ Executes queries against TimescaleDB and orchestrates supporting services.
 │  │  ├── specs         (Query specifications)                 │  │
 │  │  ├── functions     (Named functions)                      │  │
 │  │  ├── tools         (Tool definitions)                     │  │
-│  │  ├── prompts       (SI prompt templates)                  │  │
-│  │  └── providers     (SI provider configs)                  │  │
+│  │  ├── prompts       (AI prompt templates)                  │  │
+│  │  └── providers     (AI provider configs)                  │  │
 │  │                                                           │  │
 │  │  Services:                                                │  │
 │  │  ├── cache         (Result caching)                       │  │
-│  │  ├── siRuntime     (SI invocation)                        │  │
+│  │  ├── siRuntime     (AI invocation)                        │  │
 │  │  └── eventBus      (Event publishing)                     │  │
 │  │                                                           │  │
 │  │  Methods:                                                 │  │
 │  │  ├── Execute()           (Run queries)                    │  │
 │  │  ├── ResolveVariable()   (Fetch from v1:platform:partitionVariable)   │  │
-│  │  └── InvokeSI()          (Execute SI prompts)             │  │
+│  │  └── InvokeSI()          (Execute AI prompts)             │  │
 │  │                                                           │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │                                                                 │
@@ -377,7 +377,7 @@ Executes queries against TimescaleDB and orchestrates supporting services.
 | `runtime_evaluator.go` | Accessor expression evaluation at runtime |
 | `relations.go` | Relationship traversal |
 | `shape_template.go` | Result shaping |
-| `si_runtime.go` | SI provider invocation |
+| `si_runtime.go` | AI provider invocation |
 | `result_cache.go` | Query result caching |
 | `function_loader.go` | Load .memql functions |
 | `spec_loader.go` | Load specifications |

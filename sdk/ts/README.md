@@ -87,9 +87,9 @@ const final = await pushToTalk(conn.dispatcher, audioStream, {
 });
 ```
 
-### SI (chat / speech / transcribe / suggest)
+### AI (chat / speech / transcribe / suggest)
 
-One-shot SI ops on `MemqlService.Stream`. Each helper takes the
+One-shot AI ops on `MemqlService.Stream`. Each helper takes the
 connection's `Dispatcher` directly and returns a typed result.
 
 ```ts
@@ -295,7 +295,7 @@ const unregister = registerClientToolHandler(conn.dispatcher, async (call, signa
 ```
 npm run build     # tsc -> dist
 npm run typecheck # tsc --noEmit
-npm test          # compile + run node:test against the identity/SI/voice surface
+npm test          # compile + run node:test against the identity/AI/voice surface
 ```
 
 ESM only, strict TypeScript, browser-targeted (`lib: ES2022 + DOM`).

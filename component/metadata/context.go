@@ -64,7 +64,7 @@ func SourceMetaFromContext(ctx context.Context) *SourceMeta {
 	return sm
 }
 
-// --- SI metadata ---
+// --- AI metadata ---
 
 type aiMetaKey struct{}
 
@@ -72,11 +72,11 @@ type aiMetaKey struct{}
 type AIMeta struct {
 	AgentId   string // Agent node ID
 	AgentName string // Agent display name
-	Provider  string // SI provider name (e.g., "claudeSonnet")
+	Provider  string // AI provider name (e.g., "claudeSonnet")
 	Model     string // Model identifier (e.g., "claude-sonnet-4-6")
 	TokensIn  int    // Input tokens consumed
 	TokensOut int    // Output tokens generated
-	LatencyMs int    // SI call duration in milliseconds
+	LatencyMs int    // AI call duration in milliseconds
 	ToolCalls int    // Number of tool calls made
 }
 

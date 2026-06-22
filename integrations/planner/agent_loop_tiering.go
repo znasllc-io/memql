@@ -19,7 +19,7 @@
 //     is the pure, deterministic, unit-tested decision: below the
 //     escalation iteration it returns ("", false) -> no override -> the
 //     prompt's cheap default is used; at/after it returns the reasoning
-//     provider + reasoning=true and the loop wraps the SI context with a
+//     provider + reasoning=true and the loop wraps the AI context with a
 //     provider override for that call.
 //
 // Because a trivial/moderate plan converges in 1-2 iterations (and a

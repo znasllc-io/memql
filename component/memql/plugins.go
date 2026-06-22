@@ -43,7 +43,7 @@ const PluginContractVersion = 1
 type PluginContext struct {
 	Logger *slog.Logger
 
-	// Engine provides DSL execution, SI invocation, tool dispatch, and
+	// Engine provides DSL execution, AI invocation, tool dispatch, and
 	// streaming provider lookups. Use this for anything that speaks to the
 	// MemQL engine surface.
 	Engine IntegrationEngineAccess
@@ -65,7 +65,7 @@ type PluginContext struct {
 	// (epic memql#1925). Bulk traffic must NOT use this getter.
 	DirectBunDB func() *bun.DB
 
-	// VisionProvider returns the default vision-capable SI provider, or nil.
+	// VisionProvider returns the default vision-capable AI provider, or nil.
 	VisionProvider func() common.VisionAIProvider
 
 	// EmbeddingProviderByName returns a named embedding provider, or an
@@ -97,13 +97,13 @@ type PluginContext struct {
 	// (vendor API keys, OAuth client secrets, integration credentials).
 	ResolveSystemSecret func(ctx context.Context, name string) (string, error)
 
-	// Providers is the SI provider registry. Plug-ins that catalog
+	// Providers is the AI provider registry. Plug-ins that catalog
 	// providers (e.g. the router admin integration listing available
 	// models) read from it directly. Lives on the engine -- pointer is
 	// stable for the life of the process.
 	Providers *ProviderRegistry
 
-	// Policies is the SI Router policy registry loaded from
+	// Policies is the AI Router policy registry loaded from
 	// policies/v1/*.memql. Same stability contract as Providers.
 	Policies *PolicyRegistry
 
