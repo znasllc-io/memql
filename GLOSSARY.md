@@ -24,6 +24,7 @@ The complete map of memQL documentation. Layout + rules:
 - [Architecture](docs/public/concepts/architecture.md) · [Events](docs/public/concepts/events.md) · [Identifiers](docs/public/concepts/identifiers.md)
 - [Data Validation](docs/public/concepts/data-validation.md) · [Concept Versioning](docs/public/concepts/concept-versioning.md) · [Concept Seeding](docs/public/concepts/concept-seeding.md)
 - [Permissions & Access Control](docs/public/concepts/permissions-and-access-control.md) · [Tool ↔ Knowledge-Domain Pattern](docs/public/concepts/tool-knowledge-domain-pattern.md)
+- [Partition Scoping](docs/public/concepts/partition-scoping.md) -- the canonical tenant scope; core scopes by partition, not spaceId
 
 ### The Language (`language/`)
 - [MemQL Language](docs/public/language/memql.md) — the DSL reference (also embedded in the binary; see `docs/embed.go`).
