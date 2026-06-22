@@ -132,12 +132,15 @@ func (s *bunStore) QueryMemoryNodes(ctx context.Context, params memorynodes.Quer
 	return nodes, nil
 }
 
-func (e *MemQLEngine) evaluateExpression(ctx context.Context, expr ExpressionNode, timestamp *time.Time, limit, offset int, sorter *compiledSort) ([]memorynodes.MemoryNode, error) {
+func (e *MemQLEngine) evaluateExpression(ctx context.Context, expr ExpressionNode, timestamp *time.Time, limit int, sorter *compiledSort) ([]memorynodes.MemoryNode, error) {
 	if expr == nil {
 		return nil, nil
 	}
 
-	target := e.fetchTarget(limit, offset)
+	// First page bounds via SQL LIMIT directly (no in-memory offset
+	// slice): fetchTarget pushes `limit` down as the query LIMIT.
+	// Continuation is the keyset cursor (5.12), not an offset skip.
+	target := e.fetchTarget(limit)
 	if sorter != nil && sorter.needsFullScan() {
 		target = e.config.MaxWindow
 	}
@@ -150,12 +153,6 @@ func (e *MemQLEngine) evaluateExpression(ctx context.Context, expr ExpressionNod
 	nodes, err := mapToSortedSlice(set, sorter)
 	if err != nil {
 		return nil, err
-	}
-	if offset > 0 {
-		if offset >= len(nodes) {
-			return []memorynodes.MemoryNode{}, nil
-		}
-		nodes = nodes[offset:]
 	}
 
 	effectiveLimit := limit

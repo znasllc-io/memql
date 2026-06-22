@@ -744,13 +744,10 @@ func (c *Compiler) compileInputExpression(expr parser.ExpressionNode) (map[strin
 		"query": queryStr,
 	}
 
-	// Extract limit/offset if present
+	// Extract limit (page size) if present
 	if pag, ok := expr.(*parser.PaginateExpr); ok {
 		if pag.Limit != nil {
 			input["limit"] = *pag.Limit
-		}
-		if pag.Offset != nil {
-			input["offset"] = *pag.Offset
 		}
 	}
 
@@ -1120,9 +1117,6 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 		args := []string{}
 		if e.Limit != nil {
 			args = append(args, fmt.Sprintf("limit=%d", *e.Limit))
-		}
-		if e.Offset != nil {
-			args = append(args, fmt.Sprintf("offset=%d", *e.Offset))
 		}
 		return fmt.Sprintf("paginate(%s)(%s)", strings.Join(args, ","), c.expressionToString(e.Target))
 

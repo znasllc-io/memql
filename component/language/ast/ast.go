@@ -148,11 +148,10 @@ type SortExpr struct {
 func (*SortExpr) node()           {}
 func (*SortExpr) expressionNode() {}
 
-// PaginateExpr limits and offsets results produced by its target expression.
+// PaginateExpr limits the results produced by its target expression.
 type PaginateExpr struct {
 	Target ExpressionNode
 	Limit  *int
-	Offset *int
 }
 
 func (*PaginateExpr) node()           {}

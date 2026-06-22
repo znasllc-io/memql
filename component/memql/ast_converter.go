@@ -338,11 +338,6 @@ func (c *ASTConverter) convertPaginateExpr(expr *languageParser.PaginateExpr) (*
 		result.Limit = &limit
 	}
 
-	if expr.Offset != nil {
-		offset := *expr.Offset
-		result.Offset = &offset
-	}
-
 	return result, nil
 }
 

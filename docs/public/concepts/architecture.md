@@ -271,7 +271,7 @@ The parser uses recursive descent with the following grammar productions:
 │  │   ├── RelationshipExpr     // parentOf(), childOf(), etc.                         │
 │  │   ├── FunctionCallExpr     // userFunc(args)                                      │
 │  │   ├── SortExpr             // sort(fields)(...)                                   │
-│  │   ├── PaginateExpr         // paginate(limit, offset)(...)                        │
+│  │   ├── PaginateExpr         // paginate(limit)(...)                                │
 │  │   ├── SelectExpr           // select(fields)(...)                                 │
 │  │   ├── DepthExpr            // depth(n)(...)                                       │
 │  │   ├── ShapeExpr            // shape(template)(...)                                │

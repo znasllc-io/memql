@@ -285,7 +285,7 @@ Configuration variables (prefixed with `MEMQL_WS_`) let you tune the gateway:
 | Fields               | `concept`, `id`, `type`, `createdAt`, `createdBy`, or `payload.<path>`.                                         |
 | Operators            | `==`, `!=`, `>`, `>=`, `<`, `<=`, `==nil`, `!=nil` (plus `in` in DSL filter clauses — see Operator Reference).  |
 | Parentheses          | Group complex logic: `(concept==v1:assistant \|\| concept==v1:examples:persona) && payload.active==true`.       |
-| Limit & offset       | Use `paginate(<expr>, limit, offset?)` to request explicit windows; omitting both `paginate` and `sort` caps the read at `MEMORY_ENGINE_DEFAULT_LIST_CAP` (default 50, the unmarked-list backstop), offset=`0`. |
+| Limit                | Use `paginate(<expr>, limit)` to request an explicit page size; omitting both `paginate` and `sort` caps the read at `MEMORY_ENGINE_DEFAULT_LIST_CAP` (default 50, the unmarked-list backstop). Continuation is via keyset cursors, not an offset skip. |
 
 > **Retired operator forms.** The legacy `;`-as-AND and `,`-as-OR separators, the `has` membership operator, the `?.` optional-chain prefix, and the `??` null-coalescing operator are all retired (#977, and `??` in the struct-form Phase 4 work). The parser rejects them in authored DSL filters with migration-pointing errors. Use `&&` / `||`, `in`, `when(args.x) { ... }`, and `coalesce(a, b, ...)` respectively.
 
@@ -336,7 +336,7 @@ Directives wrap filters and apply transformations or constraints. They must encl
 |-----------|-------------|---------|
 | `asOf()` | Evaluate the expression at a specific timestamp | `asOf(concept==v1:assistant, "2025-01-01T00:00:00Z")` |
 | `sort()` | Order results by field(s) | `sort(concept==v1:assistant, "createdAt", "desc")` |
-| `paginate()` | Limit and offset results | `paginate(concept==v1:assistant, 10, 0)` |
+| `paginate()` | Bound the result page size (LIMIT) | `paginate(concept==v1:assistant, 10)` |
 | `withDepth()` | Limit traversal depth for relationships | `withDepth(parentOf(...), 2)` |
 
 Directives can be nested: `sort(paginate(concept==v1:assistant, 10), "createdAt", "desc")` returns assistants sorted by creation date with pagination. Relationship functions (`parentOf()`, `childOf()`, `contains()`, ...) participate directly in the expression tree inside the directive stack.
@@ -437,11 +437,16 @@ sort(
 
 ### Pagination
 
-`paginate(<expr>, limit, offset?)` constrains result windows. The function:
+`paginate(<expr>, limit)` bounds the result page size. The function:
 
-- Requires at least one integer argument (limit) greater than zero.
-- Accepts an optional second integer argument for offset.
+- Requires a single integer argument (limit) greater than zero — the page size.
 - Can be combined with other helpers (e.g., `sort(paginate(...), ...)`).
+- **Continuation is keyset, not offset.** Offset pagination was removed
+  (epic 5, 5.13 / memql#1993): it was O(offset) and drifted under
+  concurrent inserts. To fetch the next page, pass the `nextCursor` from
+  the prior response back as the query cursor; the engine pushes a
+  `WHERE (createdAt, id) <keyset> (?, ?)` predicate and continues from the
+  encoded position. The first page is bounded by a plain SQL `LIMIT`.
 
 **Default-cap backstop (memql#1965).** A query that arrives with NO
 explicit window — neither `paginate` nor `sort` — is treated as an
@@ -453,7 +458,7 @@ marked `@unbounded("reason")` is rewritten to an explicit wide paginate
 and bypasses the 50-cap. See the [pagination authoring rule](authoring-rules.md#23-list-returning-queries-must-declare-their-bound).
 
 ```
-paginate(concept==v1:examples:module && payload.worldId=="v1:examples:world:world-aurora", 200, 400)
+paginate(concept==v1:examples:module && payload.worldId=="v1:examples:world:world-aurora", 200)
 ```
 
 ### Temporal Snapshots
@@ -1667,7 +1672,7 @@ coalesce(args.nickname, args.name, "Unknown")
 ```text
 asOf(expr, "timestamp")         # Historical query
 sort(expr, "field", "desc")     # Sort by field descending
-paginate(expr, limit, offset?)  # Pagination
+paginate(expr, limit)           # Page size (keyset cursor continues)
 withDepth(traversal, n)         # Limit relationship depth
 ```
 
