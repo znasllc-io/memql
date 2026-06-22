@@ -45,7 +45,7 @@ func TestMintApprovedTrainingPlan_MintsAndSucceeds(t *testing.T) {
 		},
 	}
 	skills := []map[string]any{
-		{"id": "v1:agents:skill:law-1", "domainIds": []any{"v1:common:knowledgeDomain:fr-law"}},
+		{"id": "v1:agents:skill:law-1", "domainIds": []any{"v1:knowledge:knowledgeDomain:fr-law"}},
 	}
 	fe := trainingFakeEngine(parent, agent, skills)
 	l := newTestLoop(fe)
@@ -62,7 +62,7 @@ func TestMintApprovedTrainingPlan_MintsAndSucceeds(t *testing.T) {
 	if countContains(exec, "trainSpecialist") < 1 {
 		t.Fatalf("minted Plan must be kind=trainSpecialist")
 	}
-	if countContains(exec, "v1:common:knowledgeDomain:fr-law") < 1 {
+	if countContains(exec, "v1:knowledge:knowledgeDomain:fr-law") < 1 {
 		t.Fatalf("minted Plan input must carry the resolved domainId from the specialist's skill")
 	}
 	if countContains(exec, `"succeeded"`) != 1 {
@@ -133,13 +133,13 @@ func TestResolveSpecialistPrimaryDomain(t *testing.T) {
 	}
 	skills := []map[string]any{
 		{"id": "v1:agents:skill:empty", "domainIds": []any{}},
-		{"id": "v1:agents:skill:has-dom", "domainIds": []any{"v1:common:knowledgeDomain:d2", "v1:common:knowledgeDomain:d3"}},
+		{"id": "v1:agents:skill:has-dom", "domainIds": []any{"v1:knowledge:knowledgeDomain:d2", "v1:knowledge:knowledgeDomain:d3"}},
 	}
 	fe := trainingFakeEngine(map[string]any{}, agent, skills)
 	l := newTestLoop(fe)
 
 	got := l.resolveSpecialistPrimaryDomain(context.Background(), "v1:agents:agent:spec-1")
-	if got != "v1:common:knowledgeDomain:d2" {
+	if got != "v1:knowledge:knowledgeDomain:d2" {
 		t.Fatalf("expected first domain of the first domain-bearing skill, got %q", got)
 	}
 }

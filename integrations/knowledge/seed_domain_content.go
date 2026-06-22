@@ -471,7 +471,7 @@ func (i *Integration) storeSeedChunk(
 	if _, err := i.engine.Execute(ctx, insertQuery); err != nil {
 		return fmt.Errorf("insert chunk: %w", err)
 	}
-	if err := i.storeVector(ctx, chunkId, "v1:common:documentChunk", vec); err != nil {
+	if err := i.storeVector(ctx, chunkId, "v1:knowledge:documentChunk", vec); err != nil {
 		return fmt.Errorf("persist vector: %w", err)
 	}
 	return nil

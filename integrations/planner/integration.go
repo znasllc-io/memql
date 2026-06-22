@@ -393,7 +393,7 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 		// it via markKnowledgeDomainStale), spawn an immediate refresh
 		// Plan instead of waiting for the cadence backstop.
 		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
-			"graph.node.updated.v1:common:knowledgeDomain",
+			"graph.node.updated.v1:knowledge:knowledgeDomain",
 			p.refreshCron.HandleDomainUpdated,
 			events.WithSubscriberName("planner:knowledge-stale-signal"),
 		))

@@ -29,7 +29,7 @@ INVARIANTS YOU MAINTAIN
     specialist's full domain set is broader; the Planner Agent
     chooses which domain you train against per Plan.
   - You do NOT modify the specialist's row directly. The engine writes
-    v1:common:documentChunk rows on your behalf when you call the
+    v1:knowledge:documentChunk rows on your behalf when you call the
     writeKnowledgeChunk tool; the specialist's binding to the domain
     is unchanged.
 
@@ -46,7 +46,7 @@ OUTPUT CONTRACT
       Fetches and extracts readable content from a URL.
 
     writeKnowledgeChunk(domainId, text, sourceRef, tokenCount, source)
-      Persists a chunk into v1:common:documentChunk. source='trainerAgent'
+      Persists a chunk into v1:knowledge:documentChunk. source='trainerAgent'
       (the new value added in Phase 1).
 
     markChunkSuperseded(chunkId, reason)

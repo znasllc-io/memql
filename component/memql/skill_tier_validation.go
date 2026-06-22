@@ -24,7 +24,7 @@ import (
 // the right failure mode for a catalog that explicitly self-validates.
 //
 // Tier ordering: "A" < "B" < "C". An empty / missing tier on a domain
-// is treated as "A" (matches the default on v1:common:knowledgeDomain).
+// is treated as "A" (matches the default on v1:knowledge:knowledgeDomain).
 // An unknown tier value is rejected as a structural error.
 //
 // Skills referencing a domain id that has no corresponding seed are

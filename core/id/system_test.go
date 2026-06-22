@@ -46,7 +46,7 @@ func TestSystemNodeShortIdGeneratorsAreValid(t *testing.T) {
 	// Colon-laden, realistic inputs drawn from the live failure.
 	inputs := []string{
 		"v1:planner:responsibility:d6ac657f-1234-5678-9abc-def012345678",
-		"v1:common:knowledgeDomain:sales-playbook",
+		"v1:knowledge:knowledgeDomain:sales-playbook",
 		"v1:planner:plan:abc-123",
 		"bare-already",
 		"", // empty label/context edge case

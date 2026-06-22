@@ -89,7 +89,7 @@ func (i *Integration) embedChunkHandler(ctx context.Context, args map[string]any
 	if err != nil {
 		return nil, fmt.Errorf("knowledge.embedChunk: embed chunk %q: %w", chunkId, err)
 	}
-	if err := i.storeVector(ctx, chunkId, "v1:common:documentChunk", vec); err != nil {
+	if err := i.storeVector(ctx, chunkId, "v1:knowledge:documentChunk", vec); err != nil {
 		return nil, fmt.Errorf("knowledge.embedChunk: store vector for %q: %w", chunkId, err)
 	}
 
@@ -176,7 +176,7 @@ func (i *Integration) embedDomainItemsHandler(ctx context.Context, args map[stri
 			failed++
 			continue
 		}
-		if serr := i.storeVector(ctx, c.id, "v1:common:documentChunk", vec); serr != nil {
+		if serr := i.storeVector(ctx, c.id, "v1:knowledge:documentChunk", vec); serr != nil {
 			i.Logger.Warn("knowledge.embedDomainItems: store vector failed",
 				"chunkId", c.id, "err", serr)
 			failed++
@@ -249,7 +249,7 @@ func (i *Integration) loadChunk(ctx context.Context, chunkId string) (*chunkRow,
 		        COALESCE(chunk.payload->>'documentId', ''),
 		        COALESCE(chunk.payload->>'validationStatus', '')
 		 FROM "MemoryNodes" chunk
-		 WHERE chunk.concept = 'v1:common:documentChunk'
+		 WHERE chunk.concept = 'v1:knowledge:documentChunk'
 		   AND chunk.id = $1
 		 ORDER BY chunk."createdAt" DESC
 		 LIMIT 1`,
@@ -279,7 +279,7 @@ func (i *Integration) queryChunksForDomain(
 	domainId string,
 	documentId string,
 ) ([]chunkRow, error) {
-	canonicalDomainId := fmt.Sprintf("%s:v1:common:knowledgeDomain:%s", partition, domainId)
+	canonicalDomainId := fmt.Sprintf("%s:v1:knowledge:knowledgeDomain:%s", partition, domainId)
 
 	// The optional documentId filter is appended as an extra predicate.
 	// Parameters: $1 partition, $2 domainId, $3 canonicalDomainId,
@@ -293,7 +293,7 @@ func (i *Integration) queryChunksForDomain(
 		        COALESCE(chunk.payload->>'validationStatus', '') AS validation_status
 		 FROM "MemoryNodes" chunk
 		 WHERE chunk.partition = $1
-		   AND chunk.concept = 'v1:common:documentChunk'
+		   AND chunk.concept = 'v1:knowledge:documentChunk'
 		   AND (
 		     chunk.payload->>'domainId' = $2
 		     OR chunk.payload->>'domainId' = $3
@@ -377,7 +377,7 @@ func (i *Integration) rollupDocumentEmbeddingStatus(ctx context.Context, partiti
 		   SELECT DISTINCT ON (chunk.id) chunk.id
 		   FROM "MemoryNodes" chunk
 		   WHERE chunk.partition = $1
-		     AND chunk.concept = 'v1:common:documentChunk'
+		     AND chunk.concept = 'v1:knowledge:documentChunk'
 		     AND chunk.payload->>'documentId' = $2
 		     AND COALESCE(chunk.payload->>'validationStatus', '') <> 'rejected'
 		   ORDER BY chunk.id, chunk."createdAt" DESC

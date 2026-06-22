@@ -1,6 +1,6 @@
 // Package knowledge provides retrieval-augmented generation primitives for
-// agents: chunking + embedding text into v1:common:documentChunk rows
-// scoped to a v1:common:knowledgeDomain, and cosine similarity retrieval
+// agents: chunking + embedding text into v1:knowledge:documentChunk rows
+// scoped to a v1:knowledge:knowledgeDomain, and cosine similarity retrieval
 // filtered by a set of domain IDs.
 //
 // Capabilities exposed to the DSL:
@@ -298,7 +298,7 @@ func Chunk(text string, size, overlap int) []string {
 }
 
 // ingestHandler chunks, embeds, and persists a document. Each chunk
-// becomes a v1:common:documentChunk row with a deterministic id derived
+// becomes a v1:knowledge:documentChunk row with a deterministic id derived
 // from domainId + sourceRef + seq so re-ingesting the same source is
 // idempotent (the engine treats same-id inserts as new time-series
 // versions; the latest wins and the vector is replaced via ON CONFLICT).
@@ -375,7 +375,7 @@ func (i *Integration) ingestHandler(ctx context.Context, args map[string]any, _ 
 			return nil, fmt.Errorf("knowledge.ingest: insert chunk %d: %w", seq, err)
 		}
 
-		if err := i.storeVector(ctx, chunkId, "v1:common:documentChunk", vec); err != nil {
+		if err := i.storeVector(ctx, chunkId, "v1:knowledge:documentChunk", vec); err != nil {
 			return nil, fmt.Errorf("knowledge.ingest: persist vector chunk %d: %w", seq, err)
 		}
 		stored++
