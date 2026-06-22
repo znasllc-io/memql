@@ -83,6 +83,85 @@ services:
       - memql-cluster
     restart: unless-stopped
 
+  # PgBouncer -- transaction-mode connection pooler fronting the local
+  # Postgres (epic memql#1925, local parity memql#1932). This is the local
+  # stand-in for Tiger Cloud's managed PgBouncer pooler: it mirrors the prod
+  # HYBRID ENDPOINT SPLIT locally so dev reproduces prod exactly (only the
+  # DSNs differ per env, never the architecture).
+  #
+  #   - Mesh nodes' main DSN  -> pgbouncer:6432 (this transaction pool).
+  #     All bulk query/mutation traffic. Because a transaction-mode pooler
+  #     hands a server backend back to the pool BETWEEN statements, N client
+  #     connections multiplex onto far fewer Postgres backends -- so a deploy
+  #     surge (blue-green + rolling replicas) that transiently doubles the
+  #     node count NO LONGER exhausts Postgres connection slots (the SQLSTATE
+  #     53300 storm this epic kills). max_client_conn (200) >> the backend
+  #     ceiling (default_pool_size 20 per db/user) is the surge multiplier.
+  #   - Coordination/migration traffic -> postgres:5432 DIRECTLY via each
+  #     node's DIRECT_DSN (resolved through DirectBunDB()). Session-scoped
+  #     advisory locks + migrations must NOT ride the pooler.
+  #
+  # POOLER SAFETY (transaction mode): memQL's bun pgdriver speaks the SIMPLE
+  # query protocol (no server-side prepared statements), so it is compatible
+  # with transaction pooling out of the box -- no extra config needed there.
+  # ignore_startup_parameters includes extra_float_digits (+ the params the
+  # driver may send at startup) so PgBouncer does not reject the connection.
+  #
+  # AUTH: trust, matching the local Postgres (POSTGRES_HOST_AUTH_METHOD:
+  # trust). No new secret -- the same memql/memql_dev creds the rest of the
+  # compose already uses. Prod auth is handled by the managed Tiger pooler.
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: memql-pgbouncer
+    hostname: pgbouncer
+    environment:
+      # Upstream Postgres (the in-network service name + creds the rest of
+      # the compose already defines -- reused, not re-declared).
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: memql
+      DB_PASSWORD: memql_dev
+      DB_NAME: memql
+      # PgBouncer listens on the conventional 6432 (kept distinct from
+      # Postgres 5432 so the direct endpoint stays reachable side by side).
+      LISTEN_PORT: "6432"
+      LISTEN_ADDR: "0.0.0.0"
+      # trust mirrors the local Postgres trust auth; clients still send the
+      # memql/memql_dev creds in the DSN, PgBouncer connects upstream as memql.
+      AUTH_TYPE: trust
+      ADMIN_USERS: memql
+      # TRANSACTION mode is the whole point: server backend returned to the
+      # pool between statements -> the surge-decoupling multiplier.
+      POOL_MODE: transaction
+      # Bounded to mirror prod proportions at sane small local values:
+      # many client conns multiplexed onto a small backend pool.
+      MAX_CLIENT_CONN: "200"
+      DEFAULT_POOL_SIZE: "20"
+      MIN_POOL_SIZE: "5"
+      RESERVE_POOL_SIZE: "5"
+      RESERVE_POOL_TIMEOUT: "3"
+      # bun pgdriver sends extra_float_digits at startup; transaction-mode
+      # PgBouncer must ignore it (and the other benign startup params) or it
+      # rejects the connection. Simple query protocol => no prepared-stmt config.
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits,options,application_name
+    ports:
+      # Publish the pool on the host so a local psql / cockpit can dial it too
+      # (parity-litmus: connect via 6432 -> pooled, via 5432 -> direct).
+      - "6432:6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # busybox nc (alpine base) -- pooler is accepting connections.
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 6432 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - memql-cluster
+    restart: unless-stopped
+
   # BFF node -- backend for frontend, primary API surface + mesh parent.
   # 2 replicas (staging parity). No container_name/hostname/static
   # MEMQL_NODE_ID -> each replica gets a unique hostname-derived id.
@@ -121,7 +200,19 @@ services:
       # themselves, so this is a first-boot safety net -- not the
       # long-term source of truth.
       MEMQL_WORKER_PEERS: "voice=voice:50059,agent=agent:50055,cognition=cognition:50054,planner=planner:50056,workbench=workbench:50060"
-      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
+      # Connection pooling -- hybrid endpoint split (epic memql#1925, local
+      # parity memql#1932). The main pool (all bulk query/mutation traffic)
+      # rides the PgBouncer TRANSACTION pool, so a deploy/restart surge of
+      # replicas no longer maps 1:1 to Postgres backends -- exactly the prod
+      # (Tiger Cloud PgBouncer) shape. Only the DSN differs per env; the
+      # architecture is identical everywhere.
+      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@pgbouncer:6432/memql?sslmode=disable
+      # Direct (NON-pooled) endpoint for session-stateful work -- session
+      # advisory locks (cognition dispatch gate / cron leader / reconciler /
+      # planner admission, resolved via DirectBunDB()) and migrations. These
+      # bypass the transaction pooler, which would recycle the server backend
+      # out from under a held session lock. Points straight at Postgres.
+      MEMORY_NODES_DATABASE_DIRECT_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
       MEMQL_GRPC_ADDRESS: ":50051"
       SERVER_ADDRESS: "0.0.0.0:8088"
       IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
@@ -148,6 +239,8 @@ services:
       replicas: 2
     depends_on:
       postgres:
+        condition: service_healthy
+      pgbouncer:
         condition: service_healthy
       identity:
         condition: service_healthy
@@ -305,7 +398,19 @@ services:
       # dialer.SetDialTypes(NodeTypeAgent) in app/cluster.go.
       MEMQL_WORKER_PEERS: "agent=agent:50055"
 
-      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
+      # Connection pooling -- hybrid endpoint split (epic memql#1925, local
+      # parity memql#1932). The main pool (all bulk query/mutation traffic)
+      # rides the PgBouncer TRANSACTION pool, so a deploy/restart surge of
+      # replicas no longer maps 1:1 to Postgres backends -- exactly the prod
+      # (Tiger Cloud PgBouncer) shape. Only the DSN differs per env; the
+      # architecture is identical everywhere.
+      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@pgbouncer:6432/memql?sslmode=disable
+      # Direct (NON-pooled) endpoint for session-stateful work -- session
+      # advisory locks (cognition dispatch gate / cron leader / reconciler /
+      # planner admission, resolved via DirectBunDB()) and migrations. These
+      # bypass the transaction pooler, which would recycle the server backend
+      # out from under a held session lock. Points straight at Postgres.
+      MEMORY_NODES_DATABASE_DIRECT_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
       MEMQL_GRPC_ADDRESS: ":50051"
       SERVER_ADDRESS: "0.0.0.0:8085"
       IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
@@ -321,6 +426,8 @@ services:
       replicas: 2
     depends_on:
       postgres:
+        condition: service_healthy
+      pgbouncer:
         condition: service_healthy
       identity:
         condition: service_healthy
@@ -358,7 +465,19 @@ services:
       MEMQL_NODE_ADDRESS: voice:50059
       MEMQL_NODE_SERVICE_ADDRESS: ":50059"
       MEMQL_PARENT_ADDRESS: bff:50058
-      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
+      # Connection pooling -- hybrid endpoint split (epic memql#1925, local
+      # parity memql#1932). The main pool (all bulk query/mutation traffic)
+      # rides the PgBouncer TRANSACTION pool, so a deploy/restart surge of
+      # replicas no longer maps 1:1 to Postgres backends -- exactly the prod
+      # (Tiger Cloud PgBouncer) shape. Only the DSN differs per env; the
+      # architecture is identical everywhere.
+      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@pgbouncer:6432/memql?sslmode=disable
+      # Direct (NON-pooled) endpoint for session-stateful work -- session
+      # advisory locks (cognition dispatch gate / cron leader / reconciler /
+      # planner admission, resolved via DirectBunDB()) and migrations. These
+      # bypass the transaction pooler, which would recycle the server backend
+      # out from under a held session lock. Points straight at Postgres.
+      MEMORY_NODES_DATABASE_DIRECT_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
       MEMQL_GRPC_ADDRESS: ":50051"
       SERVER_ADDRESS: "0.0.0.0:8085"
       IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
@@ -404,6 +523,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
       identity:
         condition: service_healthy
     networks:
@@ -443,7 +564,19 @@ services:
       MEMQL_WORKBENCH_REMOTE: "1"
       MEMQL_WORKER_PEERS: "workbench=workbench:50060"
 
-      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
+      # Connection pooling -- hybrid endpoint split (epic memql#1925, local
+      # parity memql#1932). The main pool (all bulk query/mutation traffic)
+      # rides the PgBouncer TRANSACTION pool, so a deploy/restart surge of
+      # replicas no longer maps 1:1 to Postgres backends -- exactly the prod
+      # (Tiger Cloud PgBouncer) shape. Only the DSN differs per env; the
+      # architecture is identical everywhere.
+      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@pgbouncer:6432/memql?sslmode=disable
+      # Direct (NON-pooled) endpoint for session-stateful work -- session
+      # advisory locks (cognition dispatch gate / cron leader / reconciler /
+      # planner admission, resolved via DirectBunDB()) and migrations. These
+      # bypass the transaction pooler, which would recycle the server backend
+      # out from under a held session lock. Points straight at Postgres.
+      MEMORY_NODES_DATABASE_DIRECT_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
       MEMQL_GRPC_ADDRESS: ":50051"
       SERVER_ADDRESS: "0.0.0.0:8085"
       IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
@@ -467,6 +600,8 @@ services:
       replicas: 2
     depends_on:
       postgres:
+        condition: service_healthy
+      pgbouncer:
         condition: service_healthy
       identity:
         condition: service_healthy
@@ -517,7 +652,19 @@ services:
       # Inter-node peer auth (memql#338).
       MEMQL_NODE_TOKEN: ${MEMQL_WORKBENCH_NODE_TOKEN:-}
 
-      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
+      # Connection pooling -- hybrid endpoint split (epic memql#1925, local
+      # parity memql#1932). The main pool (all bulk query/mutation traffic)
+      # rides the PgBouncer TRANSACTION pool, so a deploy/restart surge of
+      # replicas no longer maps 1:1 to Postgres backends -- exactly the prod
+      # (Tiger Cloud PgBouncer) shape. Only the DSN differs per env; the
+      # architecture is identical everywhere.
+      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@pgbouncer:6432/memql?sslmode=disable
+      # Direct (NON-pooled) endpoint for session-stateful work -- session
+      # advisory locks (cognition dispatch gate / cron leader / reconciler /
+      # planner admission, resolved via DirectBunDB()) and migrations. These
+      # bypass the transaction pooler, which would recycle the server backend
+      # out from under a held session lock. Points straight at Postgres.
+      MEMORY_NODES_DATABASE_DIRECT_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
       MEMQL_GRPC_ADDRESS: ":50051"
       SERVER_ADDRESS: "0.0.0.0:8085"
       IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
@@ -539,6 +686,8 @@ services:
       - workbench_workspaces:/var/lib/memql/workbenches
     depends_on:
       postgres:
+        condition: service_healthy
+      pgbouncer:
         condition: service_healthy
       identity:
         condition: service_healthy
@@ -575,7 +724,19 @@ services:
       MEMQL_NODE_SERVICE_ADDRESS: ":50056"
       MEMQL_PARENT_ADDRESS: bff:50058
 
-      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
+      # Connection pooling -- hybrid endpoint split (epic memql#1925, local
+      # parity memql#1932). The main pool (all bulk query/mutation traffic)
+      # rides the PgBouncer TRANSACTION pool, so a deploy/restart surge of
+      # replicas no longer maps 1:1 to Postgres backends -- exactly the prod
+      # (Tiger Cloud PgBouncer) shape. Only the DSN differs per env; the
+      # architecture is identical everywhere.
+      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@pgbouncer:6432/memql?sslmode=disable
+      # Direct (NON-pooled) endpoint for session-stateful work -- session
+      # advisory locks (cognition dispatch gate / cron leader / reconciler /
+      # planner admission, resolved via DirectBunDB()) and migrations. These
+      # bypass the transaction pooler, which would recycle the server backend
+      # out from under a held session lock. Points straight at Postgres.
+      MEMORY_NODES_DATABASE_DIRECT_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
       MEMQL_GRPC_ADDRESS: ":50051"
       SERVER_ADDRESS: "0.0.0.0:8085"
       IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
@@ -591,6 +752,8 @@ services:
       replicas: 2
     depends_on:
       postgres:
+        condition: service_healthy
+      pgbouncer:
         condition: service_healthy
       identity:
         condition: service_healthy
@@ -685,12 +848,26 @@ services:
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
       # No DB migrations -- identity owns the one-time migration.
       # Mirrors staging env (deploy/k8s/base/mcp.yaml).
-      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
+      # Connection pooling -- hybrid endpoint split (epic memql#1925, local
+      # parity memql#1932). The main pool (all bulk query/mutation traffic)
+      # rides the PgBouncer TRANSACTION pool, so a deploy/restart surge of
+      # replicas no longer maps 1:1 to Postgres backends -- exactly the prod
+      # (Tiger Cloud PgBouncer) shape. Only the DSN differs per env; the
+      # architecture is identical everywhere.
+      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@pgbouncer:6432/memql?sslmode=disable
+      # Direct (NON-pooled) endpoint for session-stateful work -- session
+      # advisory locks (cognition dispatch gate / cron leader / reconciler /
+      # planner admission, resolved via DirectBunDB()) and migrations. These
+      # bypass the transaction pooler, which would recycle the server backend
+      # out from under a held session lock. Points straight at Postgres.
+      MEMORY_NODES_DATABASE_DIRECT_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
       MEMORY_NODES_DATABASE_MIGRATE_ON_START: "false"
       MEMORY_NODES_DATABASE_AUTO_MIGRATE: "false"
       SERVER_ALLOWED_ORIGINS: "*"
     depends_on:
       postgres:
+        condition: service_healthy
+      pgbouncer:
         condition: service_healthy
       identity:
         condition: service_healthy
@@ -737,7 +914,19 @@ services:
       # replicas (the memql#1042 node-id-collision chat-outage shape).
       MEMQL_NODE_ADDRESS: identity:50061
       MEMQL_NODE_SERVICE_ADDRESS: ":50061"
-      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
+      # Connection pooling -- hybrid endpoint split (epic memql#1925, local
+      # parity memql#1932). The main pool (all bulk query/mutation traffic)
+      # rides the PgBouncer TRANSACTION pool, so a deploy/restart surge of
+      # replicas no longer maps 1:1 to Postgres backends -- exactly the prod
+      # (Tiger Cloud PgBouncer) shape. Only the DSN differs per env; the
+      # architecture is identical everywhere.
+      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@pgbouncer:6432/memql?sslmode=disable
+      # Direct (NON-pooled) endpoint for session-stateful work -- session
+      # advisory locks (cognition dispatch gate / cron leader / reconciler /
+      # planner admission, resolved via DirectBunDB()) and migrations. These
+      # bypass the transaction pooler, which would recycle the server backend
+      # out from under a held session lock. Points straight at Postgres.
+      MEMORY_NODES_DATABASE_DIRECT_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
       MEMQL_GRPC_ADDRESS: ":50051"
       SERVER_ADDRESS: "0.0.0.0:8081"
       IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
@@ -810,6 +999,10 @@ services:
     # service name still work in-cluster and DNS-round-robin across replicas.
     depends_on:
       postgres:
+        condition: service_healthy
+      # Identity's main pool rides the pooler too (its migrations + advisory
+      # work go to DIRECT_DSN/postgres via DirectBunDB()), so wait for it.
+      pgbouncer:
         condition: service_healthy
     volumes:
       - cluster_identity_keys:/var/identity/keys

@@ -40,6 +40,14 @@ services:
     ports: !override []
     container_name: !reset null
 
+  # PgBouncer transaction pooler (memql#1932): same co-tenant treatment as
+  # postgres -- drop the host publish of 6432 and reset the fixed name so two
+  # CI clusters on one daemon don't collide. The mesh still reaches it by the
+  # `pgbouncer` service name on the cluster network.
+  pgbouncer:
+    ports: !override []
+    container_name: !reset null
+
   identity:
     ports: !override []
     container_name: !reset null

@@ -41,6 +41,8 @@ memql#1260 (adopt as first-class + close/justify divergences).
 | voice-agent (LiveKit participant) | layered via `docker-compose.polyphon.yml` (opt-in) | in base (`replicas: 1`) | **divergent -- justified** (needs OpenAI/LiveKit creds) |
 | Health probes / graceful drain | bff+identity healthcheck only; no `/livez` split, no preStop | startup+readiness `/healthz` + liveness `/livez` + preStop on every node | **divergent -- deferred to Phase 3** (#1268/#1269) |
 | Database | local Postgres + TimescaleDB | Tiger Cloud | **config only** |
+| Connection pooling | `edoburu/pgbouncer` (transaction mode, `:6432`) fronting local Postgres | Tiger Cloud managed PgBouncer (transaction mode) | **identical architecture** (config only -- the pooler endpoint differs per env) |
+| DB endpoint split | mesh main pool -> `pgbouncer:6432`; advisory locks + migrations -> `postgres:5432` (`DIRECT_DSN`) | same hybrid split (pooler vs direct) | **identical** |
 | Blob storage | Azurite emulator | Azure Blob | **config only** |
 | Secrets / keys | dev defaults | Key Vault via ESO | **config only** |
 
@@ -157,6 +159,59 @@ Front door (TLS `*.local.znas.io` subdomains, :443 -- memql#1313):
 - Agent (WorkerService.Stream): <https://agent.local.znas.io>
 - LiveKit signaling: `ws://localhost:7880` (dev key `devkey` / secret `secret`)
 
+## Connection pooling litmus (memql#1925 / #1932)
+
+The cluster fronts the local Postgres with `edoburu/pgbouncer` in
+**transaction mode** on `:6432`, mirroring the Tiger Cloud managed
+PgBouncer pooler staging uses. This reproduces the prod **hybrid
+endpoint split** locally so the deploy-time connection storm
+(SQLSTATE 53300) is reproducible-then-fixed on the parity cluster:
+
+- **Mesh nodes' main pool** (all bulk query/mutation traffic) ->
+  `MEMORY_NODES_DATABASE_DSN = postgres://...@pgbouncer:6432/memql`.
+  Transaction mode hands a server backend back to the pool *between
+  statements*, so `max_client_conn` (200) decouples from the small
+  backend pool (`default_pool_size` 20). A restart/redeploy surge that
+  transiently doubles the replica count therefore no longer maps 1:1
+  to Postgres backends and cannot exhaust connection slots.
+- **Coordination + migrations** (session-scoped advisory locks --
+  cognition dispatch gate / cron leader / reconciler / planner
+  admission -- and the migrator) ->
+  `MEMORY_NODES_DATABASE_DIRECT_DSN = postgres://...@postgres:5432/memql`,
+  resolved through `DirectBunDB()`. These bypass the pooler, which would
+  recycle the backend out from under a held session lock.
+
+Pooler safety: memQL's bun `pgdriver` speaks the **simple query
+protocol** (no server-side prepared statements), so transaction pooling
+is compatible out of the box; PgBouncer's `ignore_startup_parameters`
+includes `extra_float_digits` so the driver's startup params aren't
+rejected.
+
+Verify the split after `make dev-cluster-up`:
+
+```bash
+# 1. The pooler is up and in transaction mode (PgBouncer admin console):
+psql 'postgres://memql:memql_dev@localhost:6432/pgbouncer?sslmode=disable' -c 'SHOW POOLS;'
+psql 'postgres://memql:memql_dev@localhost:6432/pgbouncer?sslmode=disable' -c 'SHOW CONFIG;' | grep pool_mode
+#   -> pool_mode = transaction
+
+# 2. Mesh nodes connect VIA the pool: client connections on the pooler...
+psql 'postgres://memql:memql_dev@localhost:6432/pgbouncer?sslmode=disable' -c 'SHOW CLIENTS;'
+#   ...multiplex onto far fewer SERVER backends:
+psql 'postgres://memql:memql_dev@localhost:6432/pgbouncer?sslmode=disable' -c 'SHOW SERVERS;'
+
+# 3. The direct endpoint is still reachable side by side (advisory-lock
+#    + migration path), and advisory locks are held there, NOT on 6432:
+psql 'postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable' \
+  -c "SELECT count(*) FROM pg_locks WHERE locktype='advisory';"
+```
+
+The surge test: `make dev-cluster-restart` rebuilds + rolls every mesh
+node (the local analogue of a deploy). With the pooler in place the
+transient extra backends are absorbed by transaction multiplexing
+rather than each new client opening its own direct Postgres backend, so
+the roll completes without 53300.
+
 ## Worked example: reproduce the duplicate-utterance bug (#1217)
 
 memql#1217 is "the assistant utterance is duplicated on staging
@@ -249,7 +304,10 @@ regression, not a divergence:
 
 ### Config-only -- EXPECTED to differ
 
-- `MEMORY_NODES_DATABASE_DSN` (local Postgres vs Tiger Cloud).
+- `MEMORY_NODES_DATABASE_DSN` / `MEMORY_NODES_DATABASE_DIRECT_DSN` (local
+  `pgbouncer:6432` + `postgres:5432` vs Tiger Cloud's managed pooler +
+  direct endpoints). The **hybrid split itself is identical** -- only the
+  endpoints differ. See the connection-pooling litmus above.
 - Blob backend (Azurite connection string vs Azure Blob via genesis).
 - LiveKit keys (dev `devkey`/`secret` vs ESO-synced Key Vault secret).
 - Bootstrap/dev escape hatches (`MEMQL_IDENTITY_ALLOW_INSECURE_*`,
