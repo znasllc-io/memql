@@ -69,7 +69,7 @@ var bindingErrorSignatures = []string{
 // PAST event binding, so they prove the binding resolved.
 var allowedNonBindingFailures = []string{
 	"unknown builtin executor", // integration.dailyspace.ensureForUser not registered here
-	`function "si"`,            // ai() positional-arg render quirk (pre-existing, live-path-identical)
+	`function "ai"`,            // ai() positional-arg render quirk (pre-existing, live-path-identical)
 	// logicGenerateResponse validates its (correctly-bound) siParticipantId
 	// against a cognition participant row + actor write-authz the lightweight
 	// conformance engine does not seed. Whether part-1727 happens to exist in
