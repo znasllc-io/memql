@@ -376,34 +376,6 @@ func QueryActiveDelegationsForAgentBuild(args QueryActiveDelegationsForAgentArgs
 	return b.String()
 }
 
-// QueryActiveGreetSuppression -- Active (non-expired) greet-on-join suppression for a space (copresent#252). greet-on-join reads this before firing the opening greeting and skips when a row is returned. Callers pass `now` (RFC3339); the filter keeps only suppressions whose expiresAt is still in the future.
-//
-// Bound concept: greetSuppression.
-type QueryActiveGreetSuppressionArgs struct {
-	SpaceId string
-	Now     string
-}
-
-// QueryActiveGreetSuppression calls the engine query queryActiveGreetSuppression.
-func (qc *QueryClient) QueryActiveGreetSuppression(ctx context.Context, args QueryActiveGreetSuppressionArgs) (*Result, error) {
-	call := QueryActiveGreetSuppressionBuild(args)
-	return qc.executeNamed(ctx, "queryActiveGreetSuppression", call)
-}
-
-func QueryActiveGreetSuppressionBuild(args QueryActiveGreetSuppressionArgs) string {
-	var b strings.Builder
-	b.WriteString("queryActiveGreetSuppression({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 29 {
-		b.WriteString(", ")
-	}
-	b.WriteString("now: ")
-	b.WriteString(fmt.Sprintf("%q", args.Now))
-	b.WriteString("})")
-	return b.String()
-}
-
 // QueryActiveHumanParticipants -- Get active human participants in a space
 //
 // Bound concept: participant.
@@ -2481,50 +2453,6 @@ func QueryLatestLiveSnapshotForSourceBuild(args QueryLatestLiveSnapshotForSource
 	return b.String()
 }
 
-// QueryLatestSpaceContextForSpace -- Returns the latest v1:cognition:space:context row for a given spaceId, shaped via spaceContextFull. memql#294 in-tree exerciser for the wired sort + paginate struct-query directives; also directly unblocks memql#288's Go-side migration of getSpaceContextForPrompt away from a handwritten paginate(sort(filter, ...)) runtime query. Returns at most 1 row.
-//
-// Bound concept: context.
-type QueryLatestSpaceContextForSpaceArgs struct {
-	SpaceId string
-}
-
-// QueryLatestSpaceContextForSpace calls the engine query queryLatestSpaceContextForSpace.
-func (qc *QueryClient) QueryLatestSpaceContextForSpace(ctx context.Context, args QueryLatestSpaceContextForSpaceArgs) (*Result, error) {
-	call := QueryLatestSpaceContextForSpaceBuild(args)
-	return qc.executeNamed(ctx, "queryLatestSpaceContextForSpace", call)
-}
-
-func QueryLatestSpaceContextForSpaceBuild(args QueryLatestSpaceContextForSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("queryLatestSpaceContextForSpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	b.WriteString("})")
-	return b.String()
-}
-
-// QueryLatestSpaceContextSnapshot -- Returns just payload.snapshot from the most-recent v1:cognition:space:context row for a given spaceId. Backs the deterministic-comparison path in getLatestSpaceContextSnapshot (memql#290) -- shape projects only payload.snapshot to minimise wire payload vs. the full spaceContextFull projection (which carries computedAt / lastUpdatedAt / spaceId / id / createdAt the comparison doesn't need). Returns at most 1 row.
-//
-// Bound concept: context.
-type QueryLatestSpaceContextSnapshotArgs struct {
-	SpaceId string
-}
-
-// QueryLatestSpaceContextSnapshot calls the engine query queryLatestSpaceContextSnapshot.
-func (qc *QueryClient) QueryLatestSpaceContextSnapshot(ctx context.Context, args QueryLatestSpaceContextSnapshotArgs) (*Result, error) {
-	call := QueryLatestSpaceContextSnapshotBuild(args)
-	return qc.executeNamed(ctx, "queryLatestSpaceContextSnapshot", call)
-}
-
-func QueryLatestSpaceContextSnapshotBuild(args QueryLatestSpaceContextSnapshotArgs) string {
-	var b strings.Builder
-	b.WriteString("queryLatestSpaceContextSnapshot({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	b.WriteString("})")
-	return b.String()
-}
-
 // QueryLibraryArtifactById -- Fetch a single Library artifact index row by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content.
 //
 // Bound concept: artifact.
@@ -3668,30 +3596,6 @@ func QuerySkillNeedsRefreshBuild(args QuerySkillNeedsRefreshArgs) string {
 	return b.String()
 }
 
-// QuerySpaceContext -- Returns runtime context snapshots for spaces. Optional filter: spaceId
-//
-// Bound concept: context.
-type QuerySpaceContextArgs struct {
-	SpaceId string
-}
-
-// QuerySpaceContext calls the engine query querySpaceContext.
-func (qc *QueryClient) QuerySpaceContext(ctx context.Context, args QuerySpaceContextArgs) (*Result, error) {
-	call := QuerySpaceContextBuild(args)
-	return qc.executeNamed(ctx, "querySpaceContext", call)
-}
-
-func QuerySpaceContextBuild(args QuerySpaceContextArgs) string {
-	var b strings.Builder
-	b.WriteString("querySpaceContext({")
-	if args.SpaceId != "" {
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	}
-	b.WriteString("})")
-	return b.String()
-}
-
 // QuerySpaceMedia -- Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view (visionarys-io/copresent src/hooks/useCopresent.ts).
 //
 // Bound concept: media.
@@ -3800,28 +3704,6 @@ func QuerySpaceParticipantsBuild(args QuerySpaceParticipantsArgs) string {
 		b.WriteString("participantType: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
 	}
-	b.WriteString("})")
-	return b.String()
-}
-
-// QuerySpacePrivateUtterancesForViewer -- Returns the caller's Team-tab privateUtterance rows in a space. The forUserId predicate binds to actor.userId server-side so cross-user reads are impossible.
-//
-// Bound concept: privateUtterance.
-type QuerySpacePrivateUtterancesForViewerArgs struct {
-	SpaceId string
-}
-
-// QuerySpacePrivateUtterancesForViewer calls the engine query querySpacePrivateUtterancesForViewer.
-func (qc *QueryClient) QuerySpacePrivateUtterancesForViewer(ctx context.Context, args QuerySpacePrivateUtterancesForViewerArgs) (*Result, error) {
-	call := QuerySpacePrivateUtterancesForViewerBuild(args)
-	return qc.executeNamed(ctx, "querySpacePrivateUtterancesForViewer", call)
-}
-
-func QuerySpacePrivateUtterancesForViewerBuild(args QuerySpacePrivateUtterancesForViewerArgs) string {
-	var b strings.Builder
-	b.WriteString("querySpacePrivateUtterancesForViewer({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -4230,28 +4112,6 @@ func (qc *QueryClient) QueryUserDefaults(ctx context.Context, args QueryUserDefa
 func QueryUserDefaultsBuild(args QueryUserDefaultsArgs) string {
 	_ = args
 	return "queryUserDefaults({})"
-}
-
-// QueryUserMicStatesForSpace -- Latest mic state rows per user for a space.
-//
-// Bound concept: micState.
-type QueryUserMicStatesForSpaceArgs struct {
-	SpaceId string
-}
-
-// QueryUserMicStatesForSpace calls the engine query queryUserMicStatesForSpace.
-func (qc *QueryClient) QueryUserMicStatesForSpace(ctx context.Context, args QueryUserMicStatesForSpaceArgs) (*Result, error) {
-	call := QueryUserMicStatesForSpaceBuild(args)
-	return qc.executeNamed(ctx, "queryUserMicStatesForSpace", call)
-}
-
-func QueryUserMicStatesForSpaceBuild(args QueryUserMicStatesForSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("queryUserMicStatesForSpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	b.WriteString("})")
-	return b.String()
 }
 
 // QueryUsersActiveInSpace -- Returns users whose activeSpaceId == arg(spaceId). Active-human roster per the activity model (Phase 4).
