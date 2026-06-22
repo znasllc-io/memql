@@ -13,7 +13,6 @@ mutation call mutationRecordRouterCall {
     requestId           string  @required
     agentId             string
     userId              string
-    spaceId             string
     promptName          string
     policyName          string
     vendor              string  @required
@@ -42,7 +41,6 @@ mutation call mutationRecordRouterCall {
     args.requestId
     args.agentId
     args.userId
-    args.spaceId
     args.promptName
     args.policyName
     args.vendor

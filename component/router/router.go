@@ -252,7 +252,6 @@ func buildRouterCallArgs(rec CallRecord, callId string) map[string]any {
 		"requestId":          rec.RequestId,
 		"agentId":            rec.AgentId,
 		"userId":             rec.UserId,
-		"spaceId":            rec.SpaceId,
 		"promptName":         rec.PromptName,
 		"policyName":         rec.PolicyName,
 		"vendor":             rec.Vendor,

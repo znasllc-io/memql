@@ -329,7 +329,6 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	routerReq := router.ResolveRequest{
 		RequestId:        msg.RequestId,
 		AgentId:          msg.AgentId,
-		SpaceId:          msg.SpaceId,
 		PromptName:       "agentReply",
 		ExplicitProvider: explicitProvider,
 		PolicyName:       policyName,

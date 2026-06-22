@@ -47,13 +47,14 @@ type ResolveRequest struct {
 	// stamps a UUID when the caller leaves this empty.
 	RequestId string
 
-	// AgentId, UserId, SpaceId, PromptName are attribution fields
-	// written straight to the v1:router:call row. Leave empty when
-	// a given dimension doesn't apply (e.g. AgentId is empty for a
-	// suggest call).
+	// AgentId, UserId, PromptName are attribution fields written
+	// straight to the v1:router:call row. Leave empty when a given
+	// dimension doesn't apply (e.g. AgentId is empty for a suggest
+	// call). (Epic 3 3.2 #1899: the CoPresent space-attribution field
+	// was dropped -- the tenant scope is Partition; per-space SI-cost
+	// attribution is a CoPresent-pack concern.)
 	AgentId    string
 	UserId     string
-	SpaceId    string
 	PromptName string
 
 	// Partition is the tenant scope. The mutation call is executed
@@ -101,7 +102,6 @@ type CallRecord struct {
 	Partition  string
 	AgentId    string
 	UserId     string
-	SpaceId    string
 	PromptName string
 	PolicyName string // Phase 1: always empty
 
