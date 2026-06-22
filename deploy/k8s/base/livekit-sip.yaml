@@ -1,0 +1,148 @@
+# Self-hosted livekit/sip -- the SIP<->WebRTC edge that turns a PSTN call into
+# a LiveKit room participant (inbound) and dials a number into a room on demand
+# (outbound). Epic 4 telephony (memql#1910). No Twilio.
+#
+# Topology:
+#   PSTN <-> carrier SIP trunk (Telnyx) <-> livekit-sip (this) <-> livekit-server
+#            (signaling TLS 5061 / 5060; media RTP) over Redis-shared state.
+#
+# The SIP edge authenticates to livekit-server with the same self-chosen
+# API key/secret pair the BFF/voice token minter uses (POLYPHON_LIVEKIT_API_*
+# in livekit-secrets) and coordinates session/trunk state with the server over
+# Redis (livekit-redis). Trunks + dispatch rules themselves are created
+# programmatically by the memQL telephony integration via the LiveKit SIP API,
+# not declared here.
+#
+# Ports exposed to the carrier (LoadBalancer):
+#   - SIP signaling: UDP/TCP 5060 (plain) + TCP 5061 (TLS).
+#   - RTP media: a bounded UDP range (sized to concurrent-call volume).
+# Locked down with loadBalancerSourceRanges = carrier signaling IPs (owner sets
+# the real Telnyx ranges in the staging overlay). TLS/SRTP terminate here.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: livekit-sip-config
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: livekit-sip
+    app.kubernetes.io/part-of: memql
+data:
+  config.yaml: |
+    # livekit-server signaling endpoint (in-cluster ws).
+    ws_url: ws://livekit:7880
+    # api_key / api_secret come from env (SIP_LK_API_KEY / SIP_LK_API_SECRET),
+    # not this file.
+    redis:
+      address: livekit-redis:6379
+    # SIP signaling port (plain). TLS 5061 is fronted at the LoadBalancer.
+    sip_port: 5060
+    # RTP media port range -- keep in lockstep with the Service port list and
+    # the concurrent-call budget. 10000-10040 = ~20 concurrent calls (2 ports
+    # each). Raise both here and in the Service to scale.
+    rtp_port: 10000-10040
+    use_external_ip: true
+    logging:
+      level: info
+      json: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: livekit-sip
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: livekit-sip
+    app.kubernetes.io/part-of: memql
+spec:
+  # Single replica: SIP session state is Redis-coordinated, but scaling past 1
+  # needs the per-replica media port mapping worked out (future work, sized to
+  # call volume). Start at 1 for staging proof.
+  replicas: 1
+  revisionHistoryLimit: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: livekit-sip
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: livekit-sip
+        app.kubernetes.io/part-of: memql
+    spec:
+      # Avoid k8s service-link env injection colliding with the SIP server's
+      # own config flags (same reason as livekit-server, #1043).
+      enableServiceLinks: false
+      volumes:
+        - name: config
+          configMap:
+            name: livekit-sip-config
+      containers:
+        - name: livekit-sip
+          image: livekit/sip:v1.4.1
+          args: ["--config", "/etc/livekit-sip/config.yaml"]
+          ports:
+            - { name: sip-udp, containerPort: 5060, protocol: UDP }
+            - { name: sip-tcp, containerPort: 5060, protocol: TCP }
+            - { name: sip-tls, containerPort: 5061, protocol: TCP }
+          env:
+            # Authenticate to livekit-server with the shared key/secret pair.
+            - name: SIP_LK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: livekit-secrets
+                  key: POLYPHON_LIVEKIT_API_KEY
+            - name: SIP_LK_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: livekit-secrets
+                  key: POLYPHON_LIVEKIT_API_SECRET
+          volumeMounts:
+            - { name: config, mountPath: /etc/livekit-sip, readOnly: true }
+          readinessProbe:
+            tcpSocket: { port: 5060 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: 5060 }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits: { memory: 1Gi }
+---
+# SIP signaling + RTP media (LoadBalancer) -- reachable by the carrier.
+# Mixed UDP+TCP on one Azure LB IP; externalTrafficPolicy=Local preserves the
+# carrier source IP (needed for the source-range allowlist to be meaningful).
+#
+# SECURITY: loadBalancerSourceRanges MUST be set to the carrier's signaling IP
+# ranges in the env overlay before going live. The 0.0.0.0/0 placeholder here
+# is deliberately overridden in deploy/k8s/overlays/<env>; an open SIP port is
+# a toll-fraud magnet.
+apiVersion: v1
+kind: Service
+metadata:
+  name: livekit-sip
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: livekit-sip
+    app.kubernetes.io/part-of: memql
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-mixed-protocols: "true"
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  # Overridden per-env with the carrier signaling ranges (Telnyx). Placeholder
+  # only -- never ship 0.0.0.0/0 to production.
+  loadBalancerSourceRanges:
+    - 0.0.0.0/0
+  selector:
+    app.kubernetes.io/name: livekit-sip
+  ports:
+    - { name: sip-udp, port: 5060, targetPort: 5060, protocol: UDP }
+    - { name: sip-tcp, port: 5060, targetPort: 5060, protocol: TCP }
+    - { name: sip-tls, port: 5061, targetPort: 5061, protocol: TCP }

@@ -1,0 +1,69 @@
+# Redis for LiveKit server <-> livekit/sip coordination (memql#1910).
+#
+# The self-hosted livekit-server currently runs standalone (no Redis). The SIP
+# edge (livekit/sip) communicates with the server over Redis: trunk/dispatch
+# state and SIP<->room session signaling ride Redis pub/sub. Adding Redis is a
+# prerequisite for telephony; once present, livekit-server is configured to use
+# it too (see livekit.yaml redis block) so the two share state.
+#
+# In-cluster only (ClusterIP, no auth, ephemeral): this Redis carries only
+# transient LiveKit signaling, not durable data. Single replica is sufficient.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: livekit-redis
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: livekit-redis
+    app.kubernetes.io/part-of: memql
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: livekit-redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: livekit-redis
+        app.kubernetes.io/part-of: memql
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          args: ["--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+          ports:
+            - { name: redis, containerPort: 6379, protocol: TCP }
+          readinessProbe:
+            tcpSocket: { port: 6379 }
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: 6379 }
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 320Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: livekit-redis
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: livekit-redis
+    app.kubernetes.io/part-of: memql
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: livekit-redis
+  ports:
+    - { name: redis, port: 6379, targetPort: 6379, protocol: TCP }

@@ -37,6 +37,14 @@ data:
       use_external_ip: false
       enable_loopback_candidate: false
     # keys come from the LIVEKIT_KEYS env (ESO-synced secret), not this file.
+    # Redis: shared with the livekit/sip edge (memql#1910). livekit/sip
+    # coordinates trunk/session state with this server over Redis, so the
+    # server must point at the same instance (deploy/k8s/base/redis.yaml).
+    # Required for telephony. NOTE: this moves the server from standalone to
+    # Redis-backed routing -- verify the existing voice/video path on staging
+    # after rollout before relying on telephony.
+    redis:
+      address: livekit-redis:6379
     logging:
       level: info
       json: true

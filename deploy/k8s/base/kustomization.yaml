@@ -54,6 +54,11 @@ resources:
   # Self-hosted LiveKit server + its ESO-synced secret (memql#1043).
   - livekit.yaml
   - externalsecret-livekit.yaml
+  # Telephony (memql#1910): Redis for server<->sip coordination, the
+  # livekit/sip PSTN edge, and the carrier-credential ESO secret.
+  - redis.yaml
+  - livekit-sip.yaml
+  - externalsecret-telephony.yaml
   # Go voice-agent -- assistant's voice participant in LiveKit rooms (memql#1049).
   - voice-agent.yaml
   # Connection-budget monitor: */5 leak/storm early-warning (memql#1958).
