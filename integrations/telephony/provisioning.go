@@ -66,12 +66,16 @@ func (i *Integration) handleSearchNumbers(ctx context.Context, args map[string]a
 	if err := requireOwnerOrAdmin(ctx); err != nil {
 		return nil, err
 	}
+	carrier, err := i.requireCarrier()
+	if err != nil {
+		return nil, err
+	}
 	q := NumberQuery{
 		AreaCode: asString(args["areaCode"]),
 		Type:     NumberType(asString(args["type"])),
 		Limit:    asInt(args["limit"]),
 	}
-	nums, err := i.carrier.SearchNumbers(ctx, q)
+	nums, err := carrier.SearchNumbers(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +105,11 @@ func (i *Integration) handleBuyNumber(ctx context.Context, args map[string]any, 
 	if purpose == "" {
 		purpose = "both"
 	}
-	num, err := i.carrier.BuyNumber(ctx, providerID)
+	carrier, err := i.requireCarrier()
+	if err != nil {
+		return nil, err
+	}
+	num, err := carrier.BuyNumber(ctx, providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +117,7 @@ func (i *Integration) handleBuyNumber(ctx context.Context, args map[string]any, 
 	i.recordNumber(ctx, num, partitionID, purpose)
 	// Point the DID at our SIP edge + provision inbound routing so it accepts
 	// calls immediately.
-	if err := i.carrier.ConfigureInbound(ctx, num.E164, i.sipEdgeURI); err != nil && i.logger != nil {
+	if err := carrier.ConfigureInbound(ctx, num.E164, i.sipEdgeURI); err != nil && i.logger != nil {
 		i.logger.Warn("telephony: configure-inbound after buy failed", "e164", num.E164, "err", err)
 	}
 	if trunkID, terr := i.EnsureInboundTrunk(ctx); terr == nil {
@@ -117,7 +125,7 @@ func (i *Integration) handleBuyNumber(ctx context.Context, args map[string]any, 
 			i.logger.Warn("telephony: dispatch rule after buy failed", "e164", num.E164, "err", derr)
 		}
 	}
-	num.Carrier = i.carrier.Name()
+	num.Carrier = carrier.Name()
 	return handleNode("telephony:number:bought", num), nil
 }
 
@@ -129,7 +137,11 @@ func (i *Integration) handleConfigureInbound(ctx context.Context, args map[strin
 	if e164 == "" || partitionID == "" {
 		return nil, fmt.Errorf("telephony.configureInboundNumber: e164 and partitionId are required")
 	}
-	if err := i.carrier.ConfigureInbound(ctx, e164, i.sipEdgeURI); err != nil {
+	carrier, err := i.requireCarrier()
+	if err != nil {
+		return nil, err
+	}
+	if err := carrier.ConfigureInbound(ctx, e164, i.sipEdgeURI); err != nil {
 		return nil, err
 	}
 	return i.handleProvisionInbound(ctx, map[string]any{"e164": e164, "partitionId": partitionID}, 0)
@@ -143,7 +155,11 @@ func (i *Integration) handleReleaseNumber(ctx context.Context, args map[string]a
 	if e164 == "" {
 		return nil, fmt.Errorf("telephony.releaseNumber: e164 is required")
 	}
-	if err := i.carrier.ReleaseNumber(ctx, e164); err != nil {
+	carrier, err := i.requireCarrier()
+	if err != nil {
+		return nil, err
+	}
+	if err := carrier.ReleaseNumber(ctx, e164); err != nil {
 		return nil, err
 	}
 	return handleNode("telephony:number:released", map[string]string{"e164": e164}), nil
