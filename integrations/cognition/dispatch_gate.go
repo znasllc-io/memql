@@ -109,19 +109,28 @@ const feedbackAnnounceGateLockClass int32 = 0x464E4452
 // NO-OP on single replica. The lone replica always wins pg_try_advisory_lock,
 // so local/single-node dev (one cognition replica) is unaffected.
 type dispatchGate struct {
-	dbGetter func() *bun.DB
-	logger   *slog.Logger
+	// directDBGetter resolves the DIRECT (non-pooled) *bun.DB. The gate holds a
+	// session-scoped Postgres advisory lock across a whole turn (incl. the
+	// multi-second LLM call), so it MUST run on the direct endpoint:
+	// transaction-mode PgBouncer recycles the server backend between statements
+	// and would silently drop a held session lock (epic memql#1925). When
+	// DIRECT_DSN is unset, DirectBunDB() falls back to the main pool, so
+	// local/single-pool behavior is unchanged.
+	directDBGetter func() *bun.DB
+	logger         *slog.Logger
 }
 
-// newDispatchGate builds a gate over a lazy *bun.DB getter (the DB may not be
-// Ready at construction, so resolution is deferred to each call, matching
-// cron_leader / admission). A nil getter or nil logger is tolerated -- the gate
-// then proceeds (fails safe) on every call.
-func newDispatchGate(dbGetter func() *bun.DB, logger *slog.Logger) *dispatchGate {
+// newDispatchGate builds a gate over a lazy DIRECT *bun.DB getter (the DB may
+// not be Ready at construction, so resolution is deferred to each call,
+// matching cron_leader / admission). The getter MUST resolve the direct
+// (non-pooled) endpoint -- the gate's session-scoped advisory locks cannot
+// survive a transaction-mode pooler (epic memql#1925). A nil getter or nil
+// logger is tolerated -- the gate then proceeds (fails safe) on every call.
+func newDispatchGate(directDBGetter func() *bun.DB, logger *slog.Logger) *dispatchGate {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &dispatchGate{dbGetter: dbGetter, logger: logger}
+	return &dispatchGate{directDBGetter: directDBGetter, logger: logger}
 }
 
 // dispatchGateNoop is the release returned whenever the gate failed safe (no
@@ -141,10 +150,10 @@ func dispatchGateNoop() {}
 //     SAFE and proceeds (the returned release is a no-op; the err is for
 //     logging only).
 func (g *dispatchGate) tryDispatch(ctx context.Context, utteranceId string) (proceed bool, release func(), err error) {
-	if g == nil || g.dbGetter == nil {
+	if g == nil || g.directDBGetter == nil {
 		return true, dispatchGateNoop, nil // fail safe: no DB accounting available
 	}
-	db := g.dbGetter()
+	db := g.directDBGetter()
 	if db == nil || db.DB == nil {
 		return true, dispatchGateNoop, nil // fail safe: DB not ready (e.g. single-binary dev before Ready)
 	}
@@ -218,10 +227,10 @@ func dispatchGateLockKey(utteranceId string) int32 {
 // NO-OP on single replica. The lone replica always wins, so single-node dev is
 // unaffected.
 func (g *dispatchGate) tryGreet(ctx context.Context, spaceId, agentId string) (proceed bool, release func(), err error) {
-	if g == nil || g.dbGetter == nil {
+	if g == nil || g.directDBGetter == nil {
 		return true, dispatchGateNoop, nil // fail safe: no DB accounting available
 	}
-	db := g.dbGetter()
+	db := g.directDBGetter()
 	if db == nil || db.DB == nil {
 		return true, dispatchGateNoop, nil // fail safe: DB not ready
 	}
@@ -299,10 +308,10 @@ func greetGateLockKey(spaceId, agentId string) int32 {
 // NO-OP on single replica. The lone replica always wins, so single-node dev is
 // unaffected.
 func (g *dispatchGate) tryAnnounceFeedback(ctx context.Context, spaceId, planId string) (proceed bool, release func(), err error) {
-	if g == nil || g.dbGetter == nil {
+	if g == nil || g.directDBGetter == nil {
 		return true, dispatchGateNoop, nil // fail safe: no DB accounting available
 	}
-	db := g.dbGetter()
+	db := g.directDBGetter()
 	if db == nil || db.DB == nil {
 		return true, dispatchGateNoop, nil // fail safe: DB not ready
 	}
