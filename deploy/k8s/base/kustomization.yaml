@@ -7,17 +7,20 @@
 # images: transformer replaces them with the pinned digest.
 #
 # NO database resource: staging/prod use the managed Tiger Cloud DB
-# (xahn9ru4v6) via the MEMORY_NODES_DATABASE_DSN key in memql-secrets.
+# (xahn9ru4v6) via the MEMORY_NODES_DATABASE_DSN (transaction pooler) +
+# MEMORY_NODES_DATABASE_DIRECT_DSN (direct) keys in memql-secrets (#1925).
 #
 # The `memql-secrets` Secret is intentionally NOT listed here -- it carries
 # real values and is created out-of-band (see secret.example.yaml). Create it
-# BEFORE applying this kustomization so the pods can mount it.
+# BEFORE applying this kustomization so the pods can mount it. $POOLER_DSN is
+# the transaction-pooler string (tsdb_transaction:39578).
 #
 #   kubectl apply -f deploy/k8s/namespace.yaml
 #   kubectl create secret generic memql-secrets -n memql \
 #     --from-literal=MEMQL_MASTER_KEY="$MEMQL_MASTER_KEY" \
 #     --from-literal=MEMQL_GENESIS_B64="$(base64 < ~/.memql/genesis.znas)" \
-#     --from-literal=MEMORY_NODES_DATABASE_DSN="$(tiger db connection-string xahn9ru4v6 --with-password)"
+#     --from-literal=MEMORY_NODES_DATABASE_DSN="$POOLER_DSN" \
+#     --from-literal=MEMORY_NODES_DATABASE_DIRECT_DSN="$(tiger db connection-string xahn9ru4v6 --with-password)"
 #   kubectl apply -k deploy/k8s/overlays/staging   # digest-pinned (#699)
 #
 # identity comes up first (runs the one-time migration + serves JWKS); the
