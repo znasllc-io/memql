@@ -744,6 +744,62 @@
         "exts": [
           ".proto"
         ]
+      },
+      {
+        "old": "SiForward",
+        "new": "AiForward",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SiTranscribe",
+        "new": "AiTranscribe",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SiChat",
+        "new": "AiChat",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SiStream",
+        "new": "AiStream",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SiSpeech",
+        "new": "AiSpeech",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SiSuggest",
+        "new": "AiSuggest",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SiChunk",
+        "new": "AiChunk",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
       }
     ],
     "dsl-keyword": [

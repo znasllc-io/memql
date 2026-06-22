@@ -509,7 +509,7 @@ func (pm *PeerManager) SetParentConnection(conn *peerConnection) {
 }
 
 // AttachConnection binds an outbound *peerConnection to the PeerEntry for
-// the given nodeId so downstream code (SIForwardRouter, EventBridge,
+// the given nodeId so downstream code (AiForwardRouter, EventBridge,
 // CapabilityRouter) can call Send on it. Callers MUST hold the
 // connection's lifetime until DetachConnection is invoked or the entry
 // is removed; PeerManager does not own the connection.

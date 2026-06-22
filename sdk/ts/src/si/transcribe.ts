@@ -1,6 +1,6 @@
 // siTranscribe wraps MemqlClientMessage.si_transcribe (one-shot STT).
 // The streaming counterpart lives in ../voice/pushToTalk.ts.
-// SITranscribeMsg.audio is `string` in the proto -- the caller hands
+// AiTranscribeMsg.audio is `string` in the proto -- the caller hands
 // over raw bytes and we base64-encode them for the protojson envelope.
 
 import type { Dispatcher } from "../client/dispatcher.js";

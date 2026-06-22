@@ -132,11 +132,11 @@ type App struct {
 	opDrainOnce   sync.Once
 	opDrainReason atomic.Value // string
 
-	// agentForwarder is the SIForwardRouter used on cognition binaries
+	// agentForwarder is the AiForwardRouter used on cognition binaries
 	// to forward AgentGenerateTurnMsg to agent peers. Nil on all other
 	// node types (BFF uses its own aiForwarder on grpcServer for a
 	// different forwarding flow).
-	agentForwarder *memqlgrpc.SIForwardRouter
+	agentForwarder *memqlgrpc.AiForwardRouter
 
 	// deliverySubstrate is the durable outbox+cursor mesh delivery substrate
 	// (memql#1263), constructed once in the cluster phase and shared by every

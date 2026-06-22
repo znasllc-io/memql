@@ -25,7 +25,7 @@ import (
 //
 // Step 3 was done with AgentForwarder.ForwardContinuation, which re-uses the
 // ORIGINAL bff/cognition->agent peer *Connection cached on the in-flight
-// SIForwardRouter entry. On agent-replica churn (rollout, restart, the #1245
+// AiForwardRouter entry. On agent-replica churn (rollout, restart, the #1245
 // dead-peer skip) that cached connection is stale, the continuation Send fails,
 // the parked waiter times out, and the agent gets 0 turns -- the exact
 // memql#1245 symptom this epic exists to remove.

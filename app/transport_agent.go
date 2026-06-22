@@ -59,9 +59,9 @@ func (a *App) transportAgent() {
 		}
 	}
 
-	// AI endpoints live on MemqlService.Stream: SIChatMsg, SISuggestMsg,
-	// SISpeechMsg, SITranscribeMsg. The legacy /si/* HTTP endpoints are
-	// gone; cross-node proxying rides SIForwardRequest.
+	// AI endpoints live on MemqlService.Stream: AiChatMsg, AiSuggestMsg,
+	// AiSpeechMsg, AiTranscribeMsg. The legacy /si/* HTTP endpoints are
+	// gone; cross-node proxying rides AiForwardRequest.
 
 	a.createHTTPServer()
 }

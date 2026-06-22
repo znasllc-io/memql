@@ -13,7 +13,7 @@ import (
 // phase. Called from cluster.go after NewAiForwardRouter constructs the
 // forwarder. On binaries without cognition (agent, planner) this file
 // is absent; the default build and cognition build both include it.
-func (a *App) attachAgentForwarderToCognition(fwd *memqlgrpc.SIForwardRouter) {
+func (a *App) attachAgentForwarderToCognition(fwd *memqlgrpc.AiForwardRouter) {
 	if a.cognitionIntegration == nil {
 		return
 	}

@@ -141,7 +141,7 @@ func (d *Dispatcher) Run() {
 		}
 
 		// Streaming-session routing: messages on multi-reply protocols
-		// (SITranscribeStream*, VoiceAgent*, polyphon) carry a session
+		// (AiTranscribeStream*, VoiceAgent*, polyphon) carry a session
 		// request_id rather than the per-message correlate_to. Route
 		// them to any listener registered via RegisterStream.
 		if reqId := streamRequestId(msg); reqId != "" {
@@ -289,7 +289,7 @@ func (d *Dispatcher) Events() <-chan *memqlv1.MemqlServerMessage {
 // incoming messages and an unregister function the caller must invoke
 // when the session is over.
 //
-// Used by streaming protocols (SITranscribeStream*, VoiceAgent*,
+// Used by streaming protocols (AiTranscribeStream*, VoiceAgent*,
 // polyphon) where multiple replies share a session id rather than the
 // per-message message_id used by SendAndWait. The Dispatcher routes
 // matching messages here before falling through to the global event
@@ -322,10 +322,10 @@ func streamRequestId(msg *memqlv1.MemqlServerMessage) string {
 		return ""
 	}
 	switch p := msg.Payload.(type) {
-	case *memqlv1.MemqlServerMessage_SiTranscribeStreamDelta:
-		return p.SiTranscribeStreamDelta.GetRequestId()
-	case *memqlv1.MemqlServerMessage_SiTranscribeStreamComplete:
-		return p.SiTranscribeStreamComplete.GetRequestId()
+	case *memqlv1.MemqlServerMessage_AiTranscribeStreamDelta:
+		return p.AiTranscribeStreamDelta.GetRequestId()
+	case *memqlv1.MemqlServerMessage_AiTranscribeStreamComplete:
+		return p.AiTranscribeStreamComplete.GetRequestId()
 	}
 	return ""
 }

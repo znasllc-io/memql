@@ -9,9 +9,9 @@ import (
 // transportVoiceEndpoints sets up transport for a voice node.
 // Includes: gRPC, WebSocket, Polyphon voice, STT. The legacy
 // HTTP SI endpoints (/si/speech, /si/transcribe, /si/chat, /si/*/suggest)
-// have been retired -- callers use MemqlService.Stream with SISpeechMsg /
-// SITranscribeMsg / SIChatMsg / SISuggestMsg instead. Cross-node AI
-// requests ride through BFF's SIForwardRouter.
+// have been retired -- callers use MemqlService.Stream with AiSpeechMsg /
+// AiTranscribeMsg / AiChatMsg / AiSuggestMsg instead. Cross-node AI
+// requests ride through BFF's AiForwardRouter.
 func (a *App) transportVoiceEndpoints() {
 	a.transportBase()
 

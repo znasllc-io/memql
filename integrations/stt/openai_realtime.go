@@ -32,7 +32,7 @@ func NewOpenAIRealtimeProvider(asr *openaivoice.ASRClient, logger *slog.Logger) 
 }
 
 // Name returns the provider identifier used in log lines and
-// SITranscribeStreamComplete payloads.
+// AiTranscribeStreamComplete payloads.
 func (p *OpenAIRealtimeProvider) Name() string { return "openai-realtime" }
 
 // StartStream opens a streaming transcription session on the Realtime API

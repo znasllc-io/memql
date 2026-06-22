@@ -176,8 +176,8 @@ func newTestStreamSession(svc *service, stream memqlv1.MemqlService_StreamServer
 
 // TestTokenStreamSubstrate_RoundTripOrdered proves the worker-side producer and
 // the bff-side consumer agree on the wire: producing N token deltas + Done to the
-// substrate yields, on the consumer, N ordered SIChunk deltas (with monotonic
-// Index) followed by exactly one SIChatResult carrying the assembled text.
+// substrate yields, on the consumer, N ordered AiChunk deltas (with monotonic
+// Index) followed by exactly one AiChatResult carrying the assembled text.
 func TestTokenStreamSubstrate_RoundTripOrdered(t *testing.T) {
 	sub := newFakeSubstrate()
 	const requestId = "chat-1"
@@ -213,9 +213,9 @@ func TestTokenStreamSubstrate_RoundTripOrdered(t *testing.T) {
 	}
 	var lastIdx int64 = -1
 	for i, tok := range tokens {
-		chunk := msgs[i].GetSiChunk()
+		chunk := msgs[i].GetAiChunk()
 		if chunk == nil {
-			t.Fatalf("msg %d not an SIChunk: %+v", i, msgs[i])
+			t.Fatalf("msg %d not an AiChunk: %+v", i, msgs[i])
 		}
 		if chunk.GetTextDelta() != tok {
 			t.Fatalf("delta %d = %q, want %q", i, chunk.GetTextDelta(), tok)
@@ -228,9 +228,9 @@ func TestTokenStreamSubstrate_RoundTripOrdered(t *testing.T) {
 			t.Fatalf("delta %d correlate=%q want corr-1", i, msgs[i].CorrelateTo)
 		}
 	}
-	result := msgs[len(tokens)].GetSiChatResult()
+	result := msgs[len(tokens)].GetAiChatResult()
 	if result == nil {
-		t.Fatalf("terminal not an SIChatResult: %+v", msgs[len(tokens)])
+		t.Fatalf("terminal not an AiChatResult: %+v", msgs[len(tokens)])
 	}
 	if got := result.GetMessage().GetContent(); got != "Hello world" {
 		t.Fatalf("final content = %q, want %q", got, "Hello world")
@@ -279,12 +279,12 @@ func TestTokenStreamSubstrate_CrossReplicaReplay(t *testing.T) {
 		t.Fatalf("want 11 msgs (10 deltas + result), got %d", len(msgs))
 	}
 	for i := 0; i < 10; i++ {
-		if got := msgs[i].GetSiChunk().GetTextDelta(); got != fmt.Sprintf("t%d", i) {
+		if got := msgs[i].GetAiChunk().GetTextDelta(); got != fmt.Sprintf("t%d", i) {
 			t.Fatalf("delta %d = %q (lost/reordered on replica takeover)", i, got)
 		}
 	}
-	if msgs[10].GetSiChatResult() == nil {
-		t.Fatalf("stream did not end with SIChatResult")
+	if msgs[10].GetAiChatResult() == nil {
+		t.Fatalf("stream did not end with AiChatResult")
 	}
 }
 
@@ -326,7 +326,7 @@ func TestTokenStreamSubstrate_ProviderError(t *testing.T) {
 }
 
 // TestTranscriptStreamSubstrate_RoundTrip proves the audio path: the worker's
-// transcribe send-sink translates SITranscribeStreamDelta/Complete into substrate
+// transcribe send-sink translates AiTranscribeStreamDelta/Complete into substrate
 // frames, and the bff consumer reconstructs the same wire messages in order,
 // preserving isFinal / confidence / provider.
 func TestTranscriptStreamSubstrate_RoundTrip(t *testing.T) {
@@ -338,22 +338,22 @@ func TestTranscriptStreamSubstrate_RoundTrip(t *testing.T) {
 	worker := testServiceWithSubstrate(sub, "voice-1")
 	send := worker.newTranscriptStreamSink(context.Background(), requestId, nil)
 	if err := send(&memqlv1.MemqlServerMessage{
-		Payload: &memqlv1.MemqlServerMessage_SiTranscribeStreamDelta{
-			SiTranscribeStreamDelta: &memqlv1.SITranscribeStreamDelta{
+		Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamDelta{
+			AiTranscribeStreamDelta: &memqlv1.AiTranscribeStreamDelta{
 				RequestId: requestId, Text: "hel", IsFinal: false, Confidence: 0.8,
 			}}}); err != nil {
 		t.Fatalf("delta 1: %v", err)
 	}
 	if err := send(&memqlv1.MemqlServerMessage{
-		Payload: &memqlv1.MemqlServerMessage_SiTranscribeStreamDelta{
-			SiTranscribeStreamDelta: &memqlv1.SITranscribeStreamDelta{
+		Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamDelta{
+			AiTranscribeStreamDelta: &memqlv1.AiTranscribeStreamDelta{
 				RequestId: requestId, Text: "hello", IsFinal: true, Confidence: 0.95,
 			}}}); err != nil {
 		t.Fatalf("delta 2: %v", err)
 	}
 	if err := send(&memqlv1.MemqlServerMessage{
-		Payload: &memqlv1.MemqlServerMessage_SiTranscribeStreamComplete{
-			SiTranscribeStreamComplete: &memqlv1.SITranscribeStreamComplete{
+		Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamComplete{
+			AiTranscribeStreamComplete: &memqlv1.AiTranscribeStreamComplete{
 				RequestId: requestId, Text: "hello", DurationMs: 123, Provider: "fake",
 			}}}); err != nil {
 		t.Fatalf("complete: %v", err)
@@ -376,15 +376,15 @@ func TestTranscriptStreamSubstrate_RoundTrip(t *testing.T) {
 	if len(msgs) != 3 {
 		t.Fatalf("want 3 msgs (2 deltas + complete), got %d: %+v", len(msgs), msgs)
 	}
-	d1 := msgs[0].GetSiTranscribeStreamDelta()
+	d1 := msgs[0].GetAiTranscribeStreamDelta()
 	if d1 == nil || d1.GetText() != "hel" || d1.GetIsFinal() || d1.GetConfidence() < 0.79 || d1.GetConfidence() > 0.81 {
 		t.Fatalf("delta 1 mismatch: %+v", d1)
 	}
-	d2 := msgs[1].GetSiTranscribeStreamDelta()
+	d2 := msgs[1].GetAiTranscribeStreamDelta()
 	if d2 == nil || d2.GetText() != "hello" || !d2.GetIsFinal() {
 		t.Fatalf("delta 2 mismatch: %+v", d2)
 	}
-	c := msgs[2].GetSiTranscribeStreamComplete()
+	c := msgs[2].GetAiTranscribeStreamComplete()
 	if c == nil || c.GetText() != "hello" || c.GetDurationMs() != 123 || c.GetProvider() != "fake" {
 		t.Fatalf("complete mismatch: %+v", c)
 	}

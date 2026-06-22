@@ -19,28 +19,28 @@ type QueryExecutor interface {
 	Execute(ctx context.Context, query string) (*memqlengine.ExecuteResult, error)
 }
 
-// SIForwardHandler is the worker-side entry point for a forwarded AI /
+// AiForwardHandler is the worker-side entry point for a forwarded AI /
 // voice request. The nodeService invokes it when an inbound
-// NodeClientMessage carries an SIForwardRequest. The handler reads the
+// NodeClientMessage carries an AiForwardRequest. The handler reads the
 // request, dispatches to the appropriate local AI handler, and uses
 // `send` to deliver each response back to the originating BFF wrapped
-// in an SIForwardResponse.
+// in an AiForwardResponse.
 //
 // Left as an interface (rather than concrete type) to keep component/node/
 // independent of component/grpc/. The gRPC service registers a concrete
 // implementation via SetAiForwardHandler during bootstrap.
-type SIForwardHandler interface {
-	HandleForwardedRequest(ctx context.Context, req *nodev1.SIForwardRequest, send func(*nodev1.NodeServerMessage) error)
+type AiForwardHandler interface {
+	HandleForwardedRequest(ctx context.Context, req *nodev1.AiForwardRequest, send func(*nodev1.NodeServerMessage) error)
 	CancelForwardedRequest(ctx context.Context, requestId string)
 }
 
-// SIForwardResponseSink is the BFF-side receiver for responses to
-// forwards originated here. Each inbound SIForwardResponse on a peer
+// AiForwardResponseSink is the BFF-side receiver for responses to
+// forwards originated here. Each inbound AiForwardResponse on a peer
 // connection is routed through this sink (registered via
-// SetAiForwardResponseSink). On the gRPC side an SIForwardRouter
+// SetAiForwardResponseSink). On the gRPC side an AiForwardRouter
 // satisfies this contract.
-type SIForwardResponseSink interface {
-	Dispatch(resp *nodev1.SIForwardResponse)
+type AiForwardResponseSink interface {
+	Dispatch(resp *nodev1.AiForwardResponse)
 }
 
 // WorkbenchForwardHandler is the workbench-node-side entry point
@@ -85,8 +85,8 @@ type nodeService struct {
 	identity                 *Identity
 	peerManager              *PeerManager
 	queryExecutor            QueryExecutor                // set via SetQueryExecutor for cross-node query forwarding
-	aiForwardHandler         SIForwardHandler             // worker-side handler; nil on BFF binaries
-	aiForwardResponse        SIForwardResponseSink        // BFF-side response sink; nil on worker binaries
+	aiForwardHandler         AiForwardHandler             // worker-side handler; nil on BFF binaries
+	aiForwardResponse        AiForwardResponseSink        // BFF-side response sink; nil on worker binaries
 	workbenchForwardHandler  WorkbenchForwardHandler      // workbench-side handler; nil on non-workbench binaries
 	workbenchForwardResponse WorkbenchForwardResponseSink // agent-side response sink; nil on non-agent binaries
 	eventInbound             EventInbound                 // bridges peer-forwarded events onto the local bus
@@ -332,11 +332,11 @@ func (s *nodeService) handleMessage(peerId string, msg *nodev1.NodeClientMessage
 	case *nodev1.NodeClientMessage_QueryForward:
 		s.handleQueryForward(peerId, payload.QueryForward, stream)
 
-	case *nodev1.NodeClientMessage_SiForwardRequest:
-		s.handleAiForwardRequest(peerId, payload.SiForwardRequest, stream)
+	case *nodev1.NodeClientMessage_AiForwardRequest:
+		s.handleAiForwardRequest(peerId, payload.AiForwardRequest, stream)
 
-	case *nodev1.NodeClientMessage_SiForwardCancel:
-		s.handleAiForwardCancel(peerId, payload.SiForwardCancel)
+	case *nodev1.NodeClientMessage_AiForwardCancel:
+		s.handleAiForwardCancel(peerId, payload.AiForwardCancel)
 
 	case *nodev1.NodeClientMessage_WorkbenchForwardRequest:
 		s.handleWorkbenchForwardRequest(peerId, payload.WorkbenchForwardRequest, stream)
@@ -474,16 +474,16 @@ func (s *nodeService) SetQueryExecutor(executor QueryExecutor) {
 }
 
 // SetAiForwardHandler installs the worker-side handler invoked for
-// inbound SIForwardRequest messages. Left nil on BFF binaries (they
+// inbound AiForwardRequest messages. Left nil on BFF binaries (they
 // don't execute forwards locally; they only originate them).
-func (s *nodeService) SetAiForwardHandler(h SIForwardHandler) {
+func (s *nodeService) SetAiForwardHandler(h AiForwardHandler) {
 	s.aiForwardHandler = h
 }
 
 // SetAiForwardResponseSink installs the BFF-side sink for inbound
-// SIForwardResponse messages. Left nil on worker binaries (they never
+// AiForwardResponse messages. Left nil on worker binaries (they never
 // receive responses; they only originate them).
-func (s *nodeService) SetAiForwardResponseSink(sink SIForwardResponseSink) {
+func (s *nodeService) SetAiForwardResponseSink(sink AiForwardResponseSink) {
 	s.aiForwardResponse = sink
 }
 
@@ -503,7 +503,7 @@ func (s *nodeService) SetWorkbenchForwardResponseSink(sink WorkbenchForwardRespo
 
 // handleAiForwardRequest dispatches a forwarded AI/voice request to the
 // registered handler and streams responses back on the peer's stream.
-func (s *nodeService) handleAiForwardRequest(peerId string, req *nodev1.SIForwardRequest, stream nodev1.NodeService_StreamServer) {
+func (s *nodeService) handleAiForwardRequest(peerId string, req *nodev1.AiForwardRequest, stream nodev1.NodeService_StreamServer) {
 	if s.aiForwardHandler == nil {
 		s.logger.Warn("ai forward request received but no handler configured",
 			"peer_id", peerId, "request_id", req.GetRequestId(),
@@ -511,8 +511,8 @@ func (s *nodeService) handleAiForwardRequest(peerId string, req *nodev1.SIForwar
 		_ = stream.Send(&nodev1.NodeServerMessage{
 			MessageId:   id.NewShortId(),
 			CorrelateTo: req.GetRequestId(),
-			Payload: &nodev1.NodeServerMessage_SiForwardResponse{
-				SiForwardResponse: &nodev1.SIForwardResponse{
+			Payload: &nodev1.NodeServerMessage_AiForwardResponse{
+				AiForwardResponse: &nodev1.AiForwardResponse{
 					RequestId: req.GetRequestId(),
 					Done:      true,
 				},
@@ -531,7 +531,7 @@ func (s *nodeService) handleAiForwardRequest(peerId string, req *nodev1.SIForwar
 
 // handleAiForwardCancel forwards a cancel notification to the worker-side
 // handler so it can release resources held for an in-flight request.
-func (s *nodeService) handleAiForwardCancel(peerId string, cancel *nodev1.SIForwardCancel) {
+func (s *nodeService) handleAiForwardCancel(peerId string, cancel *nodev1.AiForwardCancel) {
 	if cancel == nil || s.aiForwardHandler == nil {
 		return
 	}

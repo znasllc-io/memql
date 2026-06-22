@@ -153,7 +153,7 @@ func (s *streamSession) handleAgentPreemptTurn(_ *memqlv1.MemqlClientMessage, ms
 //     client-executed tool. Blocking the read loop that long would
 //     silence every other message on the same connection (heartbeats,
 //     other turns, and crucially the ClientToolResult continuation
-//     the cross-node client-tool relay delivers via SIForwardRequest
+//     the cross-node client-tool relay delivers via AiForwardRequest
 //     to unblock that same waiter -- self-deadlock by design).
 //  2. AgentGenerateTurnDelta / Complete writes are already goroutine-
 //     safe on sendServerMessage, so relocating the Handle() call off
@@ -189,7 +189,7 @@ func (s *streamSession) handleAgentGenerateTurn(envelope *memqlv1.MemqlClientMes
 	// replier too.
 	ctx := s.stream.Context()
 	// Re-hydrate cross-node provenance: AgentGenerateTurn typically
-	// arrives via SIForward from cognition. Any row the agent tool
+	// arrives via AiForward from cognition. Any row the agent tool
 	// loop writes (utterances, tool side-effects) stamps the caller's
 	// provenance instead of a fresh agent-side default.
 	ctx = contextWithEnvelopeProvenance(ctx, envelope)
@@ -231,7 +231,7 @@ func (s *streamSession) handleAgentGenerateTurn(envelope *memqlv1.MemqlClientMes
 // AgentGenerateTurnComplete (or AgentTurnError) envelope. Called from a
 // goroutine so the stream read loop that dispatched the
 // AgentGenerateTurn envelope is free to accept continuation messages
-// (ClientToolResult from the cluster relay, SIForwardCancel, ...) while
+// (ClientToolResult from the cluster relay, AiForwardCancel, ...) while
 // the turn is still running.
 func (s *streamSession) runAgentTurn(
 	ctx context.Context,

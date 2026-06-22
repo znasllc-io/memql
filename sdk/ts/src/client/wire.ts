@@ -50,7 +50,7 @@ export interface MyAccessPayload {
   requestId?: string;
 }
 
-export interface SITranscribeStreamStartPayload {
+export interface AiTranscribeStreamStartPayload {
   requestId: string;
   format: string; // "pcm16" | "opus" | "webm" | "wav"
   sampleRate: number;
@@ -59,12 +59,12 @@ export interface SITranscribeStreamStartPayload {
   provider?: string;
 }
 
-export interface SITranscribeStreamChunkPayload {
+export interface AiTranscribeStreamChunkPayload {
   requestId: string;
   audio: string; // base64-encoded bytes (protojson encoding of `bytes`)
 }
 
-export interface SITranscribeStreamEndPayload {
+export interface AiTranscribeStreamEndPayload {
   requestId: string;
   cancel?: boolean;
 }
@@ -170,24 +170,24 @@ export interface ToolResultContentWire {
 
 // One-shot SI envelopes (chat / speech / transcribe / suggest).
 // Mirror MemqlClientMessage oneof slots 18..21 (proto schema:
-// component/grpc/memql.proto::SIChatMsg .. SISuggestMsg). Replies
+// component/grpc/memql.proto::AiChatMsg .. AiSuggestMsg). Replies
 // are correlated to the originating envelope's messageId via
 // correlateTo, not via the per-payload requestId.
 
-export interface SIChatMessageWire {
+export interface AiChatMessageWire {
   role: string;
   content: string;
   name?: string;
 }
 
-export interface SIChatPayload {
+export interface AiChatPayload {
   requestId: string;
-  messages: SIChatMessageWire[];
+  messages: AiChatMessageWire[];
   provider?: string;
   stream?: boolean;
 }
 
-export interface SISpeechPayload {
+export interface AiSpeechPayload {
   requestId: string;
   input: string;
   voice?: string;
@@ -195,13 +195,13 @@ export interface SISpeechPayload {
   provider?: string;
 }
 
-export interface SITranscribePayload {
+export interface AiTranscribePayload {
   requestId: string;
   audio: string; // base64-encoded bytes
   mimeType?: string;
 }
 
-export interface SISuggestPayload {
+export interface AiSuggestPayload {
   requestId: string;
   domain: string;
   payload?: Record<string, unknown>; // google.protobuf.Struct -> plain object
@@ -225,13 +225,13 @@ type ClientPayload =
   | { rotateAuth: RotateAuthPayload }
   | { conceptsList: ConceptsListPayload }
   | { myAccess: MyAccessPayload }
-  | { siChat: SIChatPayload }
-  | { siSpeech: SISpeechPayload }
-  | { siTranscribe: SITranscribePayload }
-  | { siSuggest: SISuggestPayload }
-  | { siTranscribeStreamStart: SITranscribeStreamStartPayload }
-  | { siTranscribeStreamChunk: SITranscribeStreamChunkPayload }
-  | { siTranscribeStreamEnd: SITranscribeStreamEndPayload }
+  | { siChat: AiChatPayload }
+  | { siSpeech: AiSpeechPayload }
+  | { siTranscribe: AiTranscribePayload }
+  | { siSuggest: AiSuggestPayload }
+  | { siTranscribeStreamStart: AiTranscribeStreamStartPayload }
+  | { siTranscribeStreamChunk: AiTranscribeStreamChunkPayload }
+  | { siTranscribeStreamEnd: AiTranscribeStreamEndPayload }
   | { sendGuestInvite: SendGuestInvitePayload }
   | { resolveGuestInvite: ResolveGuestInvitePayload }
   | { joinSpaceAsGuest: JoinSpaceAsGuestPayload }
@@ -320,49 +320,49 @@ export interface HeartbeatPayload {
   [key: string]: unknown;
 }
 
-export interface SITranscribeStreamDeltaPayload {
+export interface AiTranscribeStreamDeltaPayload {
   requestId: string;
   text?: string;
   isFinal?: boolean;
   confidence?: number;
 }
 
-export interface SITranscribeStreamCompletePayload {
+export interface AiTranscribeStreamCompletePayload {
   requestId: string;
   text?: string;
   durationMs?: string | number;
   provider?: string;
 }
 
-// One-shot SI reply envelopes. SIChatResult mirrors SIChatMsg (the
-// streaming-chat path interleaves SIStreamChunk frames for in-progress
-// deltas and lands a terminal SIChatResult with the assembled message).
-export interface SIChatResultPayload {
+// One-shot SI reply envelopes. AiChatResult mirrors AiChatMsg (the
+// streaming-chat path interleaves AiStreamChunk frames for in-progress
+// deltas and lands a terminal AiChatResult with the assembled message).
+export interface AiChatResultPayload {
   requestId: string;
-  message?: SIChatMessageWire;
+  message?: AiChatMessageWire;
 }
 
-export interface SISpeechResultPayload {
+export interface AiSpeechResultPayload {
   requestId: string;
   audio?: string; // base64-encoded bytes (protojson encoding of `bytes`)
   format?: string;
 }
 
-export interface SITranscribeResultPayload {
+export interface AiTranscribeResultPayload {
   requestId: string;
   text?: string;
 }
 
-export interface SISuggestResultPayload {
+export interface AiSuggestResultPayload {
   requestId: string;
   domain?: string;
   result?: Record<string, unknown>;
 }
 
-// SIStreamChunk envelopes interleave during streaming chat. The
+// AiStreamChunk envelopes interleave during streaming chat. The
 // `chunk` oneof unmarshals to exactly one of `textDelta` (string),
 // `jsonDelta` (object), or `metadata` (object) per frame.
-export interface SIStreamChunkPayload {
+export interface AiStreamChunkPayload {
   streamId?: string;
   provider?: string;
   requestId: string;
@@ -560,13 +560,13 @@ type ServerPayload =
   | { conceptsListResult: ConceptsListResultPayload }
   | { myAccessResult: MyAccessResultPayload }
   | { rotateAuthResult: RotateAuthResultPayload }
-  | { siChatResult: SIChatResultPayload }
-  | { siSpeechResult: SISpeechResultPayload }
-  | { siTranscribeResult: SITranscribeResultPayload }
-  | { siSuggestResult: SISuggestResultPayload }
-  | { siChunk: SIStreamChunkPayload }
-  | { siTranscribeStreamDelta: SITranscribeStreamDeltaPayload }
-  | { siTranscribeStreamComplete: SITranscribeStreamCompletePayload }
+  | { siChatResult: AiChatResultPayload }
+  | { siSpeechResult: AiSpeechResultPayload }
+  | { siTranscribeResult: AiTranscribeResultPayload }
+  | { siSuggestResult: AiSuggestResultPayload }
+  | { siChunk: AiStreamChunkPayload }
+  | { siTranscribeStreamDelta: AiTranscribeStreamDeltaPayload }
+  | { siTranscribeStreamComplete: AiTranscribeStreamCompletePayload }
   | { sendGuestInviteResult: SendGuestInviteResultPayload }
   | { resolveGuestInviteResult: ResolveGuestInviteResultPayload }
   | { joinSpaceAsGuestResult: JoinSpaceAsGuestResultPayload }
@@ -593,13 +593,13 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "conceptsListResult"; value: ConceptsListResultPayload }
   | { kind: "myAccessResult"; value: MyAccessResultPayload }
   | { kind: "rotateAuthResult"; value: RotateAuthResultPayload }
-  | { kind: "siChatResult"; value: SIChatResultPayload }
-  | { kind: "siSpeechResult"; value: SISpeechResultPayload }
-  | { kind: "siTranscribeResult"; value: SITranscribeResultPayload }
-  | { kind: "siSuggestResult"; value: SISuggestResultPayload }
-  | { kind: "siChunk"; value: SIStreamChunkPayload }
-  | { kind: "siTranscribeStreamDelta"; value: SITranscribeStreamDeltaPayload }
-  | { kind: "siTranscribeStreamComplete"; value: SITranscribeStreamCompletePayload }
+  | { kind: "siChatResult"; value: AiChatResultPayload }
+  | { kind: "siSpeechResult"; value: AiSpeechResultPayload }
+  | { kind: "siTranscribeResult"; value: AiTranscribeResultPayload }
+  | { kind: "siSuggestResult"; value: AiSuggestResultPayload }
+  | { kind: "siChunk"; value: AiStreamChunkPayload }
+  | { kind: "siTranscribeStreamDelta"; value: AiTranscribeStreamDeltaPayload }
+  | { kind: "siTranscribeStreamComplete"; value: AiTranscribeStreamCompletePayload }
   | { kind: "sendGuestInviteResult"; value: SendGuestInviteResultPayload }
   | { kind: "resolveGuestInviteResult"; value: ResolveGuestInviteResultPayload }
   | { kind: "joinSpaceAsGuestResult"; value: JoinSpaceAsGuestResultPayload }
@@ -627,24 +627,24 @@ export function readServerPayload(msg: ServerMessage):
   if (m.rotateAuthResult)
     return { kind: "rotateAuthResult", value: m.rotateAuthResult as RotateAuthResultPayload };
   if (m.siChatResult)
-    return { kind: "siChatResult", value: m.siChatResult as SIChatResultPayload };
+    return { kind: "siChatResult", value: m.siChatResult as AiChatResultPayload };
   if (m.siSpeechResult)
-    return { kind: "siSpeechResult", value: m.siSpeechResult as SISpeechResultPayload };
+    return { kind: "siSpeechResult", value: m.siSpeechResult as AiSpeechResultPayload };
   if (m.siTranscribeResult)
-    return { kind: "siTranscribeResult", value: m.siTranscribeResult as SITranscribeResultPayload };
+    return { kind: "siTranscribeResult", value: m.siTranscribeResult as AiTranscribeResultPayload };
   if (m.siSuggestResult)
-    return { kind: "siSuggestResult", value: m.siSuggestResult as SISuggestResultPayload };
+    return { kind: "siSuggestResult", value: m.siSuggestResult as AiSuggestResultPayload };
   if (m.siChunk)
-    return { kind: "siChunk", value: m.siChunk as SIStreamChunkPayload };
+    return { kind: "siChunk", value: m.siChunk as AiStreamChunkPayload };
   if (m.siTranscribeStreamDelta)
     return {
       kind: "siTranscribeStreamDelta",
-      value: m.siTranscribeStreamDelta as SITranscribeStreamDeltaPayload,
+      value: m.siTranscribeStreamDelta as AiTranscribeStreamDeltaPayload,
     };
   if (m.siTranscribeStreamComplete)
     return {
       kind: "siTranscribeStreamComplete",
-      value: m.siTranscribeStreamComplete as SITranscribeStreamCompletePayload,
+      value: m.siTranscribeStreamComplete as AiTranscribeStreamCompletePayload,
     };
   if (m.sendGuestInviteResult)
     return { kind: "sendGuestInviteResult", value: m.sendGuestInviteResult as SendGuestInviteResultPayload };
@@ -689,7 +689,7 @@ export function readServerPayload(msg: ServerMessage):
 // in dispatcher.go). Empty when the message does not belong to a
 // known streaming family.
 //
-// SIChatResult appears here so the terminal frame in a streaming chat
+// AiChatResult appears here so the terminal frame in a streaming chat
 // session (siChatStream, which uses dispatcher.send without
 // registering in `pending`) routes to the per-requestId stream
 // listener. The non-streaming siChat path uses sendAndWait, which

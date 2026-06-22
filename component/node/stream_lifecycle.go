@@ -31,7 +31,7 @@ import (
 //     AiStreamChunk deltas + the terminal AiChatResult / AgentGenerateTurnComplete.)
 //   - Audio streaming:   Start{stt session opens} -> Delta{interim transcript,
 //     isFinal, confidence} ... -> Complete{final transcript}. (component/grpc/
-//     si_transcribe_stream.go: SITranscribeStreamStart/Delta/Complete.)
+//     si_transcribe_stream.go: AiTranscribeStreamStart/Delta/Complete.)
 //
 // This layer encodes that lifecycle as typed phases on the chunk Topic and a
 // small reserved payload schema, so the producer side calls Start/Delta/
@@ -46,7 +46,7 @@ import (
 // request/response RPC migration (memql#1265, substrate_rpc.go) lands at. The
 // live grpc-handler cutover (pointing si_forward.go's token relay and
 // si_transcribe_stream.go's audio relay at a StreamSession/StreamSink instead of
-// the ad-hoc SIForwardResponse mesh push) and the retirement of the superseded
+// the ad-hoc AiForwardResponse mesh push) and the retirement of the superseded
 // forwards ride memql#1267, which is gated on #1264 #1265 #1266 together -- the
 // same per-path gating used for the RPC pattern.
 

@@ -1,5 +1,5 @@
 // siSpeech wraps MemqlClientMessage.si_speech (text-to-speech).
-// One-shot request/reply: SISpeechMsg -> SISpeechResult carrying
+// One-shot request/reply: AiSpeechMsg -> AiSpeechResult carrying
 // the synthesized audio bytes (decoded from protojson base64).
 
 import type { Dispatcher } from "../client/dispatcher.js";

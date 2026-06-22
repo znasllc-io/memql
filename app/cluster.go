@@ -115,16 +115,16 @@ func (a *App) cluster() {
 	// a follow-up).
 	//
 	// Wire AI/voice forwarding across the cluster:
-	//   * On BFF binaries: install the outbound SIForwardRouter on the
+	//   * On BFF binaries: install the outbound AiForwardRouter on the
 	//     gRPC server (so AI handlers proxy to workers), the
 	//     WorkerDialer to open one outbound NodeService stream per
 	//     worker type (seeded by MEMQL_WORKER_PEERS, then reconciled
 	//     against v1:cluster:node via event + 30s ticker), and the
 	//     response sinks on every inbound channel the BFF might receive
-	//     SIForwardResponse over (NodeServer, ParentConnector, the
+	//     AiForwardResponse over (NodeServer, ParentConnector, the
 	//     dialer's own streams).
-	//   * On worker binaries: install the SIForwardHandler shim on
-	//     NodeServer so each inbound SIForwardRequest dispatches into
+	//   * On worker binaries: install the AiForwardHandler shim on
+	//     NodeServer so each inbound AiForwardRequest dispatches into
 	//     the local grpcServer's AI handlers as if the client had
 	//     connected directly.
 	var peerMgr *node.PeerManager
@@ -305,7 +305,7 @@ func (a *App) cluster() {
 		if nodeIdentity.Type == node.NodeTypeBFF {
 			// BFF-side forwarding: create the router, plug it into the
 			// gRPC AI handlers, and point the parent connector at it
-			// so it can dispatch inbound SIForwardResponse messages.
+			// so it can dispatch inbound AiForwardResponse messages.
 			forwarder := memqlgrpc.NewAiForwardRouter(peerMgr, a.Logger)
 			if a.grpcServer != nil {
 				a.grpcServer.SetAiForwarder(forwarder)
@@ -340,10 +340,10 @@ func (a *App) cluster() {
 			}
 		} else {
 			// Worker-side: install the shim handler on NodeServer so
-			// inbound SIForwardRequest messages route into the local
+			// inbound AiForwardRequest messages route into the local
 			// gRPC AI handlers.
 			if nodeServer != nil && a.grpcServer != nil {
-				nodeServer.SetAiForwardHandler(a.grpcServer.SIForwardHandler())
+				nodeServer.SetAiForwardHandler(a.grpcServer.AiForwardHandler())
 			}
 
 			// Agent-side client-tool RPC return channel (memql#1265): the agent
@@ -368,7 +368,7 @@ func (a *App) cluster() {
 			// Cognition + Planner both originate AgentGenerateTurnMsg
 			// forwards to agent peers (cognition for chat-driven
 			// turns, planner for Plan-execution dispatch). Each gets
-			// its own SIForwardRouter + WorkerDialer narrowed to
+			// its own AiForwardRouter + WorkerDialer narrowed to
 			// agent peers. The router is also exposed to the
 			// integration of the same name so it can Forward() from
 			// its handlers.

@@ -1,6 +1,6 @@
 // Package voice is the SDK's voice subpackage. It exposes higher-
 // level voice operations built on top of the wire-level
-// SITranscribeStream* protocol family carried by MemqlService.Stream.
+// AiTranscribeStream* protocol family carried by MemqlService.Stream.
 //
 // PushToTalk is the canonical entry point: open a streaming session,
 // feed audio bytes from a caller-supplied reader, surface partial
@@ -67,7 +67,7 @@ type Options struct {
 	// Empty uses the cluster default.
 	Provider string
 
-	// ChunkBytes is the size of each SITranscribeStreamChunk payload
+	// ChunkBytes is the size of each AiTranscribeStreamChunk payload
 	// read from the audio source. Smaller chunks = lower latency,
 	// more gRPC frames. Recommended: 1280 bytes (40ms of 16kHz mono
 	// PCM16). Defaults to 1280 when zero.
@@ -82,13 +82,13 @@ type Options struct {
 
 // PushToTalk runs a streaming transcription session end-to-end:
 // opens the gRPC stream session, copies audio from the supplied
-// io.Reader to the server in ChunkBytes-sized SITranscribeStreamChunk
+// io.Reader to the server in ChunkBytes-sized AiTranscribeStreamChunk
 // messages, calls opts.OnPartial as deltas arrive, and returns the
 // resolved FinalTranscript on completion.
 //
 // Lifecycle:
 //   - The reader is consumed until EOF (clean end-of-utterance) or
-//     a non-EOF read error (session aborted with SITranscribeStreamEnd
+//     a non-EOF read error (session aborted with AiTranscribeStreamEnd
 //     cancel=true).
 //   - On ctx cancellation, the session is aborted similarly.
 //   - On stream-level failure (server crash, network drop), an error
@@ -125,8 +125,8 @@ func PushToTalk(
 	// Send the session-start envelope. Server picks up the request_id
 	// here and routes every Delta/Complete back to it.
 	start := &memqlv1.MemqlClientMessage{
-		Payload: &memqlv1.MemqlClientMessage_SiTranscribeStreamStart{
-			SiTranscribeStreamStart: &memqlv1.SITranscribeStreamStart{
+		Payload: &memqlv1.MemqlClientMessage_AiTranscribeStreamStart{
+			AiTranscribeStreamStart: &memqlv1.AiTranscribeStreamStart{
 				RequestId:    requestId,
 				Format:       opts.Audio.Encoding,
 				SampleRate:   opts.Audio.SampleRate,
@@ -178,19 +178,19 @@ func PushToTalk(
 				return nil, fmt.Errorf("voice.PushToTalk: reply channel closed before Complete")
 			}
 			switch p := msg.Payload.(type) {
-			case *memqlv1.MemqlServerMessage_SiTranscribeStreamDelta:
+			case *memqlv1.MemqlServerMessage_AiTranscribeStreamDelta:
 				if opts.OnPartial != nil {
 					opts.OnPartial(PartialTranscript{
-						Text:       p.SiTranscribeStreamDelta.GetText(),
-						IsFinal:    p.SiTranscribeStreamDelta.GetIsFinal(),
-						Confidence: p.SiTranscribeStreamDelta.GetConfidence(),
+						Text:       p.AiTranscribeStreamDelta.GetText(),
+						IsFinal:    p.AiTranscribeStreamDelta.GetIsFinal(),
+						Confidence: p.AiTranscribeStreamDelta.GetConfidence(),
 					})
 				}
-			case *memqlv1.MemqlServerMessage_SiTranscribeStreamComplete:
+			case *memqlv1.MemqlServerMessage_AiTranscribeStreamComplete:
 				final = &FinalTranscript{
-					Text:       p.SiTranscribeStreamComplete.GetText(),
-					DurationMs: p.SiTranscribeStreamComplete.GetDurationMs(),
-					Provider:   p.SiTranscribeStreamComplete.GetProvider(),
+					Text:       p.AiTranscribeStreamComplete.GetText(),
+					DurationMs: p.AiTranscribeStreamComplete.GetDurationMs(),
+					Provider:   p.AiTranscribeStreamComplete.GetProvider(),
 				}
 				return final, nil
 			}
@@ -222,8 +222,8 @@ func streamAudio(
 		n, err := audio.Read(buf)
 		if n > 0 {
 			chunk := &memqlv1.MemqlClientMessage{
-				Payload: &memqlv1.MemqlClientMessage_SiTranscribeStreamChunk{
-					SiTranscribeStreamChunk: &memqlv1.SITranscribeStreamChunk{
+				Payload: &memqlv1.MemqlClientMessage_AiTranscribeStreamChunk{
+					AiTranscribeStreamChunk: &memqlv1.AiTranscribeStreamChunk{
 						RequestId: requestId,
 						// Copy the slice -- buf is reused next iteration.
 						Audio: append([]byte(nil), buf[:n]...),
@@ -246,8 +246,8 @@ func streamAudio(
 
 func sendEnd(dispatcher *client.Dispatcher, requestId string, cancel bool) error {
 	end := &memqlv1.MemqlClientMessage{
-		Payload: &memqlv1.MemqlClientMessage_SiTranscribeStreamEnd{
-			SiTranscribeStreamEnd: &memqlv1.SITranscribeStreamEnd{
+		Payload: &memqlv1.MemqlClientMessage_AiTranscribeStreamEnd{
+			AiTranscribeStreamEnd: &memqlv1.AiTranscribeStreamEnd{
 				RequestId: requestId,
 				Cancel:    cancel,
 			},

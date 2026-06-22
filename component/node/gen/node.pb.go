@@ -108,8 +108,8 @@ type NodeClientMessage struct {
 	//	*NodeClientMessage_CapabilityQuery
 	//	*NodeClientMessage_CapabilityResponse
 	//	*NodeClientMessage_QueryForward
-	//	*NodeClientMessage_SiForwardRequest
-	//	*NodeClientMessage_SiForwardCancel
+	//	*NodeClientMessage_AiForwardRequest
+	//	*NodeClientMessage_AiForwardCancel
 	//	*NodeClientMessage_WorkbenchForwardRequest
 	//	*NodeClientMessage_WorkbenchForwardCancel
 	Payload       isNodeClientMessage_Payload `protobuf_oneof:"payload"`
@@ -265,19 +265,19 @@ func (x *NodeClientMessage) GetQueryForward() *QueryForward {
 	return nil
 }
 
-func (x *NodeClientMessage) GetSiForwardRequest() *SIForwardRequest {
+func (x *NodeClientMessage) GetAiForwardRequest() *AiForwardRequest {
 	if x != nil {
-		if x, ok := x.Payload.(*NodeClientMessage_SiForwardRequest); ok {
-			return x.SiForwardRequest
+		if x, ok := x.Payload.(*NodeClientMessage_AiForwardRequest); ok {
+			return x.AiForwardRequest
 		}
 	}
 	return nil
 }
 
-func (x *NodeClientMessage) GetSiForwardCancel() *SIForwardCancel {
+func (x *NodeClientMessage) GetAiForwardCancel() *AiForwardCancel {
 	if x != nil {
-		if x, ok := x.Payload.(*NodeClientMessage_SiForwardCancel); ok {
-			return x.SiForwardCancel
+		if x, ok := x.Payload.(*NodeClientMessage_AiForwardCancel); ok {
+			return x.AiForwardCancel
 		}
 	}
 	return nil
@@ -345,12 +345,12 @@ type NodeClientMessage_QueryForward struct {
 	QueryForward *QueryForward `protobuf:"bytes,60,opt,name=query_forward,json=queryForward,proto3,oneof"`
 }
 
-type NodeClientMessage_SiForwardRequest struct {
-	SiForwardRequest *SIForwardRequest `protobuf:"bytes,70,opt,name=si_forward_request,json=siForwardRequest,proto3,oneof"`
+type NodeClientMessage_AiForwardRequest struct {
+	AiForwardRequest *AiForwardRequest `protobuf:"bytes,70,opt,name=ai_forward_request,json=aiForwardRequest,proto3,oneof"`
 }
 
-type NodeClientMessage_SiForwardCancel struct {
-	SiForwardCancel *SIForwardCancel `protobuf:"bytes,71,opt,name=si_forward_cancel,json=siForwardCancel,proto3,oneof"`
+type NodeClientMessage_AiForwardCancel struct {
+	AiForwardCancel *AiForwardCancel `protobuf:"bytes,71,opt,name=ai_forward_cancel,json=aiForwardCancel,proto3,oneof"`
 }
 
 type NodeClientMessage_WorkbenchForwardRequest struct {
@@ -381,9 +381,9 @@ func (*NodeClientMessage_CapabilityResponse) isNodeClientMessage_Payload() {}
 
 func (*NodeClientMessage_QueryForward) isNodeClientMessage_Payload() {}
 
-func (*NodeClientMessage_SiForwardRequest) isNodeClientMessage_Payload() {}
+func (*NodeClientMessage_AiForwardRequest) isNodeClientMessage_Payload() {}
 
-func (*NodeClientMessage_SiForwardCancel) isNodeClientMessage_Payload() {}
+func (*NodeClientMessage_AiForwardCancel) isNodeClientMessage_Payload() {}
 
 func (*NodeClientMessage_WorkbenchForwardRequest) isNodeClientMessage_Payload() {}
 
@@ -407,7 +407,7 @@ type NodeServerMessage struct {
 	//	*NodeServerMessage_CapabilityResponse
 	//	*NodeServerMessage_NodeShutdown
 	//	*NodeServerMessage_QueryResponse
-	//	*NodeServerMessage_SiForwardResponse
+	//	*NodeServerMessage_AiForwardResponse
 	//	*NodeServerMessage_WorkbenchForwardResponse
 	Payload       isNodeServerMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
@@ -571,10 +571,10 @@ func (x *NodeServerMessage) GetQueryResponse() *QueryResponse {
 	return nil
 }
 
-func (x *NodeServerMessage) GetSiForwardResponse() *SIForwardResponse {
+func (x *NodeServerMessage) GetAiForwardResponse() *AiForwardResponse {
 	if x != nil {
-		if x, ok := x.Payload.(*NodeServerMessage_SiForwardResponse); ok {
-			return x.SiForwardResponse
+		if x, ok := x.Payload.(*NodeServerMessage_AiForwardResponse); ok {
+			return x.AiForwardResponse
 		}
 	}
 	return nil
@@ -637,8 +637,8 @@ type NodeServerMessage_QueryResponse struct {
 	QueryResponse *QueryResponse `protobuf:"bytes,60,opt,name=query_response,json=queryResponse,proto3,oneof"`
 }
 
-type NodeServerMessage_SiForwardResponse struct {
-	SiForwardResponse *SIForwardResponse `protobuf:"bytes,70,opt,name=si_forward_response,json=siForwardResponse,proto3,oneof"`
+type NodeServerMessage_AiForwardResponse struct {
+	AiForwardResponse *AiForwardResponse `protobuf:"bytes,70,opt,name=ai_forward_response,json=aiForwardResponse,proto3,oneof"`
 }
 
 type NodeServerMessage_WorkbenchForwardResponse struct {
@@ -667,7 +667,7 @@ func (*NodeServerMessage_NodeShutdown) isNodeServerMessage_Payload() {}
 
 func (*NodeServerMessage_QueryResponse) isNodeServerMessage_Payload() {}
 
-func (*NodeServerMessage_SiForwardResponse) isNodeServerMessage_Payload() {}
+func (*NodeServerMessage_AiForwardResponse) isNodeServerMessage_Payload() {}
 
 func (*NodeServerMessage_WorkbenchForwardResponse) isNodeServerMessage_Payload() {}
 
@@ -1543,7 +1543,7 @@ func (x *QueryResponse) GetError() string {
 	return ""
 }
 
-// SIForwardRequest carries an AI / voice envelope from a BFF node to a
+// AiForwardRequest carries an AI / voice envelope from a BFF node to a
 // worker node that has the required provider registered. The body is the
 // proto-serialized MemqlClientMessage the BFF originally received from
 // its client -- the worker unmarshals it and dispatches to its local
@@ -1556,7 +1556,7 @@ func (x *QueryResponse) GetError() string {
 // `auth` carries the originating principal's claims (subject, email,
 // role) so the worker can reconstruct a TokenInfo and enforce the same
 // ACLs it would have applied if the client had connected directly.
-type SIForwardRequest struct {
+type AiForwardRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	Auth          map[string]string      `protobuf:"bytes,2,rep,name=auth,proto3" json:"auth,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
@@ -1565,20 +1565,20 @@ type SIForwardRequest struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SIForwardRequest) Reset() {
-	*x = SIForwardRequest{}
+func (x *AiForwardRequest) Reset() {
+	*x = AiForwardRequest{}
 	mi := &file_node_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SIForwardRequest) String() string {
+func (x *AiForwardRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SIForwardRequest) ProtoMessage() {}
+func (*AiForwardRequest) ProtoMessage() {}
 
-func (x *SIForwardRequest) ProtoReflect() protoreflect.Message {
+func (x *AiForwardRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_node_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1590,40 +1590,40 @@ func (x *SIForwardRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SIForwardRequest.ProtoReflect.Descriptor instead.
-func (*SIForwardRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use AiForwardRequest.ProtoReflect.Descriptor instead.
+func (*AiForwardRequest) Descriptor() ([]byte, []int) {
 	return file_node_proto_rawDescGZIP(), []int{15}
 }
 
-func (x *SIForwardRequest) GetRequestId() string {
+func (x *AiForwardRequest) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *SIForwardRequest) GetAuth() map[string]string {
+func (x *AiForwardRequest) GetAuth() map[string]string {
 	if x != nil {
 		return x.Auth
 	}
 	return nil
 }
 
-func (x *SIForwardRequest) GetMemqlEnvelope() []byte {
+func (x *AiForwardRequest) GetMemqlEnvelope() []byte {
 	if x != nil {
 		return x.MemqlEnvelope
 	}
 	return nil
 }
 
-// SIForwardResponse carries a worker's response back to the originating
+// AiForwardResponse carries a worker's response back to the originating
 // BFF. Streamed responses (e.g. aiChat with stream=true) send multiple
 // messages with the same request_id. `done=true` marks the last one.
 //
 // `memql_server_msg` is a proto-serialized memqlv1.MemqlServerMessage
-// (SIChunk / SIChatResult / SISpeechResult / SITranscribeResult /
-// SISuggestResult / ListToolsResult / CallToolResult / QueryError).
-type SIForwardResponse struct {
+// (AiChunk / AiChatResult / AiSpeechResult / AiTranscribeResult /
+// AiSuggestResult / ListToolsResult / CallToolResult / QueryError).
+type AiForwardResponse struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	RequestId      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	MemqlServerMsg []byte                 `protobuf:"bytes,2,opt,name=memql_server_msg,json=memqlServerMsg,proto3" json:"memql_server_msg,omitempty"`
@@ -1632,20 +1632,20 @@ type SIForwardResponse struct {
 	sizeCache      protoimpl.SizeCache
 }
 
-func (x *SIForwardResponse) Reset() {
-	*x = SIForwardResponse{}
+func (x *AiForwardResponse) Reset() {
+	*x = AiForwardResponse{}
 	mi := &file_node_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SIForwardResponse) String() string {
+func (x *AiForwardResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SIForwardResponse) ProtoMessage() {}
+func (*AiForwardResponse) ProtoMessage() {}
 
-func (x *SIForwardResponse) ProtoReflect() protoreflect.Message {
+func (x *AiForwardResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_node_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1657,56 +1657,56 @@ func (x *SIForwardResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SIForwardResponse.ProtoReflect.Descriptor instead.
-func (*SIForwardResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use AiForwardResponse.ProtoReflect.Descriptor instead.
+func (*AiForwardResponse) Descriptor() ([]byte, []int) {
 	return file_node_proto_rawDescGZIP(), []int{16}
 }
 
-func (x *SIForwardResponse) GetRequestId() string {
+func (x *AiForwardResponse) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *SIForwardResponse) GetMemqlServerMsg() []byte {
+func (x *AiForwardResponse) GetMemqlServerMsg() []byte {
 	if x != nil {
 		return x.MemqlServerMsg
 	}
 	return nil
 }
 
-func (x *SIForwardResponse) GetDone() bool {
+func (x *AiForwardResponse) GetDone() bool {
 	if x != nil {
 		return x.Done
 	}
 	return false
 }
 
-// SIForwardCancel signals the worker that the BFF's client cancelled
+// AiForwardCancel signals the worker that the BFF's client cancelled
 // the request (stream closed, explicit cancel message). The worker
 // should stop producing responses for `request_id` and clean up.
-type SIForwardCancel struct {
+type AiForwardCancel struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SIForwardCancel) Reset() {
-	*x = SIForwardCancel{}
+func (x *AiForwardCancel) Reset() {
+	*x = AiForwardCancel{}
 	mi := &file_node_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SIForwardCancel) String() string {
+func (x *AiForwardCancel) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SIForwardCancel) ProtoMessage() {}
+func (*AiForwardCancel) ProtoMessage() {}
 
-func (x *SIForwardCancel) ProtoReflect() protoreflect.Message {
+func (x *AiForwardCancel) ProtoReflect() protoreflect.Message {
 	mi := &file_node_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1718,12 +1718,12 @@ func (x *SIForwardCancel) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SIForwardCancel.ProtoReflect.Descriptor instead.
-func (*SIForwardCancel) Descriptor() ([]byte, []int) {
+// Deprecated: Use AiForwardCancel.ProtoReflect.Descriptor instead.
+func (*AiForwardCancel) Descriptor() ([]byte, []int) {
 	return file_node_proto_rawDescGZIP(), []int{17}
 }
 
-func (x *SIForwardCancel) GetRequestId() string {
+func (x *AiForwardCancel) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
@@ -1739,7 +1739,7 @@ func (x *SIForwardCancel) GetRequestId() string {
 // per-Plan workspace. Single round-trip semantics (no streaming);
 // the agent's tool loop waits synchronously for the response.
 //
-// Unlike SIForward, this is a structured envelope (not a byte-wrapped
+// Unlike AiForward, this is a structured envelope (not a byte-wrapped
 // MemqlClientMessage) because the workbench surface is a flat
 // integration capability, not a gRPC message type. Args are encoded
 // as JSON to keep the wire shape stable across action-specific arg
@@ -1920,7 +1920,7 @@ func (x *WorkbenchForwardResponse) GetErrorMessage() string {
 	return ""
 }
 
-// WorkbenchForwardCancel mirrors SIForwardCancel. The agent's tool
+// WorkbenchForwardCancel mirrors AiForwardCancel. The agent's tool
 // loop fires it when the LLM call upstream is cancelled before the
 // workbench finishes; the workbench should stop in-flight work
 // for the request_id and free resources (kill exec, abort http_fetch).
@@ -2045,8 +2045,8 @@ const file_node_proto_rawDesc = "" +
 	"\x10capability_query\x18( \x01(\v2&.znasllc.memql.node.v1.CapabilityQueryH\x00R\x0fcapabilityQuery\x12\\\n" +
 	"\x13capability_response\x18) \x01(\v2).znasllc.memql.node.v1.CapabilityResponseH\x00R\x12capabilityResponse\x12J\n" +
 	"\rquery_forward\x18< \x01(\v2#.znasllc.memql.node.v1.QueryForwardH\x00R\fqueryForward\x12W\n" +
-	"\x12si_forward_request\x18F \x01(\v2'.znasllc.memql.node.v1.SIForwardRequestH\x00R\x10siForwardRequest\x12T\n" +
-	"\x11si_forward_cancel\x18G \x01(\v2&.znasllc.memql.node.v1.SIForwardCancelH\x00R\x0fsiForwardCancel\x12l\n" +
+	"\x12ai_forward_request\x18F \x01(\v2'.znasllc.memql.node.v1.AiForwardRequestH\x00R\x10aiForwardRequest\x12T\n" +
+	"\x11ai_forward_cancel\x18G \x01(\v2&.znasllc.memql.node.v1.AiForwardCancelH\x00R\x0faiForwardCancel\x12l\n" +
 	"\x19workbench_forward_request\x18P \x01(\v2..znasllc.memql.node.v1.WorkbenchForwardRequestH\x00R\x17workbenchForwardRequest\x12i\n" +
 	"\x18workbench_forward_cancel\x18Q \x01(\v2-.znasllc.memql.node.v1.WorkbenchForwardCancelH\x00R\x16workbenchForwardCancel\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
@@ -2072,7 +2072,7 @@ const file_node_proto_rawDesc = "" +
 	"\x13capability_response\x18) \x01(\v2).znasllc.memql.node.v1.CapabilityResponseH\x00R\x12capabilityResponse\x12J\n" +
 	"\rnode_shutdown\x182 \x01(\v2#.znasllc.memql.node.v1.NodeShutdownH\x00R\fnodeShutdown\x12M\n" +
 	"\x0equery_response\x18< \x01(\v2$.znasllc.memql.node.v1.QueryResponseH\x00R\rqueryResponse\x12Z\n" +
-	"\x13si_forward_response\x18F \x01(\v2(.znasllc.memql.node.v1.SIForwardResponseH\x00R\x11siForwardResponse\x12o\n" +
+	"\x13ai_forward_response\x18F \x01(\v2(.znasllc.memql.node.v1.AiForwardResponseH\x00R\x11aiForwardResponse\x12o\n" +
 	"\x1aworkbench_forward_response\x18P \x01(\v2/.znasllc.memql.node.v1.WorkbenchForwardResponseH\x00R\x18workbenchForwardResponse\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
@@ -2162,20 +2162,20 @@ const file_node_proto_rawDesc = "" +
 	"\vresult_json\x18\x03 \x01(\fR\n" +
 	"resultJson\x12\x14\n" +
 	"\x05error\x18\x04 \x01(\tR\x05error\"\xe9\x01\n" +
-	"\x10SIForwardRequest\x12\x1d\n" +
+	"\x10AiForwardRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12E\n" +
-	"\x04auth\x18\x02 \x03(\v21.znasllc.memql.node.v1.SIForwardRequest.AuthEntryR\x04auth\x12%\n" +
+	"\x04auth\x18\x02 \x03(\v21.znasllc.memql.node.v1.AiForwardRequest.AuthEntryR\x04auth\x12%\n" +
 	"\x0ememql_envelope\x18\x04 \x01(\fR\rmemqlEnvelope\x1a7\n" +
 	"\tAuthEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x03\x10\x04R\tpartition\"p\n" +
-	"\x11SIForwardResponse\x12\x1d\n" +
+	"\x11AiForwardResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12(\n" +
 	"\x10memql_server_msg\x18\x02 \x01(\fR\x0ememqlServerMsg\x12\x12\n" +
 	"\x04done\x18\x03 \x01(\bR\x04done\"0\n" +
-	"\x0fSIForwardCancel\x12\x1d\n" +
+	"\x0fAiForwardCancel\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\"\xf3\x02\n" +
 	"\x17WorkbenchForwardRequest\x12\x1d\n" +
@@ -2247,9 +2247,9 @@ var file_node_proto_goTypes = []any{
 	(*CapabilityResponse)(nil),       // 13: znasllc.memql.node.v1.CapabilityResponse
 	(*QueryForward)(nil),             // 14: znasllc.memql.node.v1.QueryForward
 	(*QueryResponse)(nil),            // 15: znasllc.memql.node.v1.QueryResponse
-	(*SIForwardRequest)(nil),         // 16: znasllc.memql.node.v1.SIForwardRequest
-	(*SIForwardResponse)(nil),        // 17: znasllc.memql.node.v1.SIForwardResponse
-	(*SIForwardCancel)(nil),          // 18: znasllc.memql.node.v1.SIForwardCancel
+	(*AiForwardRequest)(nil),         // 16: znasllc.memql.node.v1.AiForwardRequest
+	(*AiForwardResponse)(nil),        // 17: znasllc.memql.node.v1.AiForwardResponse
+	(*AiForwardCancel)(nil),          // 18: znasllc.memql.node.v1.AiForwardCancel
 	(*WorkbenchForwardRequest)(nil),  // 19: znasllc.memql.node.v1.WorkbenchForwardRequest
 	(*WorkbenchForwardResponse)(nil), // 20: znasllc.memql.node.v1.WorkbenchForwardResponse
 	(*WorkbenchForwardCancel)(nil),   // 21: znasllc.memql.node.v1.WorkbenchForwardCancel
@@ -2261,7 +2261,7 @@ var file_node_proto_goTypes = []any{
 	nil,                              // 27: znasllc.memql.node.v1.PeerInfo.LabelsEntry
 	nil,                              // 28: znasllc.memql.node.v1.SpawnRequest.LabelsEntry
 	nil,                              // 29: znasllc.memql.node.v1.SpawnRequest.EnvEntry
-	nil,                              // 30: znasllc.memql.node.v1.SIForwardRequest.AuthEntry
+	nil,                              // 30: znasllc.memql.node.v1.AiForwardRequest.AuthEntry
 	nil,                              // 31: znasllc.memql.node.v1.WorkbenchForwardRequest.AuthEntry
 	(*timestamppb.Timestamp)(nil),    // 32: google.protobuf.Timestamp
 	(*structpb.Struct)(nil),          // 33: google.protobuf.Struct
@@ -2278,8 +2278,8 @@ var file_node_proto_depIdxs = []int32{
 	12, // 8: znasllc.memql.node.v1.NodeClientMessage.capability_query:type_name -> znasllc.memql.node.v1.CapabilityQuery
 	13, // 9: znasllc.memql.node.v1.NodeClientMessage.capability_response:type_name -> znasllc.memql.node.v1.CapabilityResponse
 	14, // 10: znasllc.memql.node.v1.NodeClientMessage.query_forward:type_name -> znasllc.memql.node.v1.QueryForward
-	16, // 11: znasllc.memql.node.v1.NodeClientMessage.si_forward_request:type_name -> znasllc.memql.node.v1.SIForwardRequest
-	18, // 12: znasllc.memql.node.v1.NodeClientMessage.si_forward_cancel:type_name -> znasllc.memql.node.v1.SIForwardCancel
+	16, // 11: znasllc.memql.node.v1.NodeClientMessage.ai_forward_request:type_name -> znasllc.memql.node.v1.AiForwardRequest
+	18, // 12: znasllc.memql.node.v1.NodeClientMessage.ai_forward_cancel:type_name -> znasllc.memql.node.v1.AiForwardCancel
 	19, // 13: znasllc.memql.node.v1.NodeClientMessage.workbench_forward_request:type_name -> znasllc.memql.node.v1.WorkbenchForwardRequest
 	21, // 14: znasllc.memql.node.v1.NodeClientMessage.workbench_forward_cancel:type_name -> znasllc.memql.node.v1.WorkbenchForwardCancel
 	24, // 15: znasllc.memql.node.v1.NodeServerMessage.metadata:type_name -> znasllc.memql.node.v1.NodeServerMessage.MetadataEntry
@@ -2294,7 +2294,7 @@ var file_node_proto_depIdxs = []int32{
 	13, // 24: znasllc.memql.node.v1.NodeServerMessage.capability_response:type_name -> znasllc.memql.node.v1.CapabilityResponse
 	22, // 25: znasllc.memql.node.v1.NodeServerMessage.node_shutdown:type_name -> znasllc.memql.node.v1.NodeShutdown
 	15, // 26: znasllc.memql.node.v1.NodeServerMessage.query_response:type_name -> znasllc.memql.node.v1.QueryResponse
-	17, // 27: znasllc.memql.node.v1.NodeServerMessage.si_forward_response:type_name -> znasllc.memql.node.v1.SIForwardResponse
+	17, // 27: znasllc.memql.node.v1.NodeServerMessage.ai_forward_response:type_name -> znasllc.memql.node.v1.AiForwardResponse
 	20, // 28: znasllc.memql.node.v1.NodeServerMessage.workbench_forward_response:type_name -> znasllc.memql.node.v1.WorkbenchForwardResponse
 	25, // 29: znasllc.memql.node.v1.NodeHello.labels:type_name -> znasllc.memql.node.v1.NodeHello.LabelsEntry
 	6,  // 30: znasllc.memql.node.v1.NodeWelcome.peers:type_name -> znasllc.memql.node.v1.PeerInfo
@@ -2308,7 +2308,7 @@ var file_node_proto_depIdxs = []int32{
 	29, // 38: znasllc.memql.node.v1.SpawnRequest.env:type_name -> znasllc.memql.node.v1.SpawnRequest.EnvEntry
 	32, // 39: znasllc.memql.node.v1.EventForward.ts:type_name -> google.protobuf.Timestamp
 	33, // 40: znasllc.memql.node.v1.EventForward.payload:type_name -> google.protobuf.Struct
-	30, // 41: znasllc.memql.node.v1.SIForwardRequest.auth:type_name -> znasllc.memql.node.v1.SIForwardRequest.AuthEntry
+	30, // 41: znasllc.memql.node.v1.AiForwardRequest.auth:type_name -> znasllc.memql.node.v1.AiForwardRequest.AuthEntry
 	31, // 42: znasllc.memql.node.v1.WorkbenchForwardRequest.auth:type_name -> znasllc.memql.node.v1.WorkbenchForwardRequest.AuthEntry
 	1,  // 43: znasllc.memql.node.v1.NodeService.Stream:input_type -> znasllc.memql.node.v1.NodeClientMessage
 	2,  // 44: znasllc.memql.node.v1.NodeService.Stream:output_type -> znasllc.memql.node.v1.NodeServerMessage
@@ -2335,8 +2335,8 @@ func file_node_proto_init() {
 		(*NodeClientMessage_CapabilityQuery)(nil),
 		(*NodeClientMessage_CapabilityResponse)(nil),
 		(*NodeClientMessage_QueryForward)(nil),
-		(*NodeClientMessage_SiForwardRequest)(nil),
-		(*NodeClientMessage_SiForwardCancel)(nil),
+		(*NodeClientMessage_AiForwardRequest)(nil),
+		(*NodeClientMessage_AiForwardCancel)(nil),
 		(*NodeClientMessage_WorkbenchForwardRequest)(nil),
 		(*NodeClientMessage_WorkbenchForwardCancel)(nil),
 	}
@@ -2352,7 +2352,7 @@ func file_node_proto_init() {
 		(*NodeServerMessage_CapabilityResponse)(nil),
 		(*NodeServerMessage_NodeShutdown)(nil),
 		(*NodeServerMessage_QueryResponse)(nil),
-		(*NodeServerMessage_SiForwardResponse)(nil),
+		(*NodeServerMessage_AiForwardResponse)(nil),
 		(*NodeServerMessage_WorkbenchForwardResponse)(nil),
 	}
 	type x struct{}
