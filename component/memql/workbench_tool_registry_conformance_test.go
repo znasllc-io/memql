@@ -52,12 +52,11 @@ tool workbenchHost {
 	const domain = "carrierconformance1133"
 	memqldsl.RegisterTree(domain, overlay)
 	t.Cleanup(func() {
-		// RegisterTree's only knob is "register same domain replaces". Overwrite
-		// with an EMPTY-BUT-WALKABLE FS (fstest.MapFS{}) so the domain no longer
-		// contributes a tools.memql to other tests, yet still ReadDir/Walk-s
-		// cleanly. A custom Open-only FS that errors on ReadDir would poison the
-		// shared dsl.Tree() walk for every later test in this package.
-		memqldsl.RegisterTree(domain, fstest.MapFS{})
+		// Remove the throwaway overlay so its tools.memql does not leak into
+		// later tests' dsl.Tree() walk. UnregisterTree is the clean teardown:
+		// RegisterTree now fails loud on a duplicate domain (issue 2.4), so the
+		// old "re-register the same domain to replace it" trick would panic.
+		memqldsl.UnregisterTree(domain)
 	})
 
 	// Sanity: the overlay is reachable through the layered Tree() exactly the

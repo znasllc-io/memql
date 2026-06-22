@@ -91,6 +91,21 @@ func RegisterTree(domain string, tree fs.FS) {
 	pluginTrees[trimmed] = tree
 }
 
+// UnregisterTree removes a previously registered plug-in domain from the
+// unified tree. Production packs register once at init() and never
+// unregister; this exists for test teardown (and registry symmetry): the
+// fail-loud duplicate-domain guard in RegisterTree means a test can no
+// longer re-register the same domain to "replace" a throwaway overlay, so
+// it must remove it explicitly instead. No-op when the domain isn't
+// registered. Only touches the plug-in registry -- core embedded domains
+// don't live there and are never affected.
+func UnregisterTree(domain string) {
+	domain = strings.TrimSpace(domain)
+	pluginTreesMu.Lock()
+	defer pluginTreesMu.Unlock()
+	delete(pluginTrees, domain)
+}
+
 // Tree returns an fs.FS rooted at the unified DSL tree. Each top-
 // level entry under the FS is a domain folder (cognition/,
 // common/, providers/, policies/, ...) plus any domains contributed
