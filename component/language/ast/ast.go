@@ -778,8 +778,13 @@ const (
 	AttrPermission = "permission"
 
 	// Performance
-	AttrTimeout   = "timeout"
-	AttrCache     = "cache"
+	AttrTimeout = "timeout"
+	AttrCache   = "cache"
+	// AttrNocache is the clearer opt-out alias for @cache(ttl="0") on a
+	// query (epic 5, issue 5.6 / memql#1970). It forces "never cache",
+	// overriding the default-on caching for pure reads. Equivalent to
+	// @cache(ttl="0"); the parser maps it to CacheTTL="0".
+	AttrNocache   = "nocache"
 	AttrRateLimit = "rateLimit"
 
 	// Reliability

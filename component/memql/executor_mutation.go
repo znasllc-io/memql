@@ -127,6 +127,12 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 			events.KindNodeUpdated,
 			eventPayload,
 		)
+		// 5.6 (memql#1970): the update() path's underlying executeWrite
+		// already emitted a cache.invalidate for the row's concept (every
+		// write materialises a new row and fires graph.node.created), so a
+		// second emit here would be redundant -- the eviction already
+		// fired. We keep update() free of an extra invalidate; the create
+		// path is the single emit point per write.
 	}
 	return result, nil
 }
@@ -624,6 +630,13 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		events.KindNodeCreated,
 		eventPayload,
 	)
+	// 5.6 (memql#1970): also emit the dedicated cache-invalidation event
+	// on its own broadcast channel. ONLY the result-cache evictor
+	// subscribes, and a single cache.invalidate.* routing rule forwards
+	// it to every node -- so cross-node eviction needs no per-concept
+	// graph forwarding (which would risk double-firing automations on
+	// sibling replicas). Same commit point as the graph-write publish.
+	e.publishCacheInvalidate(conceptMeta.Name)
 
 	bundle := &memqlv1.GraphBundle{
 		Nodes:   []*memqlv1.MemoryNode{apiNode},

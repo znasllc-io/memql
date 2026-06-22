@@ -59,40 +59,23 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.deleted.v1:cluster:*", TargetType: ""},
 		{Pattern: "graph.node.created.v1:cognition:*", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:cognition:*", TargetType: ""},
-		// Result-cache invalidation forwarding (epic 5, issue 5.5 /
-		// memql#1969). A cached read must be evicted on EVERY replica when a
-		// dependent row is written anywhere in the mesh; the invalidation
-		// subscriber (graph.node.*.#) only fires on a node when the write
-		// reaches it. So for each concept a query @cache's whose writes are
-		// NOT already forwarded by the default set above, forward exactly that
-		// concept's create/update/delete -- SCOPED TO THE CONCEPT, not the
-		// namespace. Concept-scoping is deliberate: forwarding a whole
-		// namespace (e.g. v1:agents:*) would newly republish unrelated
-		// lifecycle events onto peer buses and can double-fire automations that
-		// assumed single-node delivery -- e.g. reRouteNeedsAgentOnAgentCreate
-		// keys on graph.node.created.v1:agents:agent (memql#1396, has a history
-		// of over-firing). The three cached concepts below are admin-config
-		// concepts with NO automation keyed on them, so scoping them is both
-		// safe and the minimum the cache needs.
-		//   v1:agents:agentRole -- queryActiveAgentRoles / queryAgentRoleBySlug
-		//   v1:agents:skill     -- queryActiveSkills / queryActiveSkillsFull / querySkillBySlug
-		//   v1:router:budget    -- queryRouterBudgets
-		{Pattern: "graph.node.created.v1:agents:agentRole", TargetType: ""},
-		{Pattern: "graph.node.updated.v1:agents:agentRole", TargetType: ""},
-		{Pattern: "graph.node.deleted.v1:agents:agentRole", TargetType: ""},
-		{Pattern: "graph.node.created.v1:agents:skill", TargetType: ""},
-		{Pattern: "graph.node.updated.v1:agents:skill", TargetType: ""},
-		{Pattern: "graph.node.deleted.v1:agents:skill", TargetType: ""},
-		{Pattern: "graph.node.created.v1:router:budget", TargetType: ""},
-		{Pattern: "graph.node.updated.v1:router:budget", TargetType: ""},
-		{Pattern: "graph.node.deleted.v1:router:budget", TargetType: ""},
-		// v1:cognition:utterance create/update are ALREADY forwarded by the
-		// broad cognition rules above; only its delete needs adding (the
-		// append-only utterance stream is rarely hard-deleted, but a cross-node
-		// purge must still evict the cached page on sibling replicas). Scoped
-		// to the utterance concept rather than broadening the cognition delete
-		// to the whole namespace.
-		{Pattern: "graph.node.deleted.v1:cognition:utterance", TargetType: ""},
+		// Result-cache invalidation forwarding (epic 5, issue 5.6 /
+		// memql#1970). ONE broadcast rule forwards the dedicated
+		// cache-invalidation channel to every node type. Every graph write
+		// emits cache.invalidate.<concept> on this separate topic (see
+		// MemQLEngine.publishCacheInvalidate); ONLY the result-cache evictor
+		// subscribes to it (no automations, no other consumers), so
+		// forwarding it everywhere has ZERO side effects. This SUPERSEDES the
+		// per-concept graph-write cache rules 5.5 added (the
+		// v1:agents:agentRole / v1:agents:skill / v1:router:budget
+		// create/update/delete rules and the v1:cognition:utterance delete
+		// rule), which are now retired: they coupled cache eviction to
+		// per-concept graph-write forwarding and carried an automation-
+		// double-fire risk if ever broadened (e.g.
+		// reRouteNeedsAgentOnAgentCreate on graph.node.created.v1:agents:agent,
+		// memql#1396). A cached read on any replica is now evicted purely via
+		// this broadcast channel, with zero per-concept routing rules.
+		{Pattern: "cache.invalidate.*", TargetType: ""},
 		// Planner graph events: BFF owns the writes (mutationCreatePlan
 		// fires on BFF), the planner-tagged binary subscribes
 		// graph.node.created.v1:planner:plan in its

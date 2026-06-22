@@ -2866,6 +2866,10 @@ func (p *Parser) processFunctionAttributes(d *FunctionDef, attributes []*Attribu
 			} else {
 				d.CacheTTL = getAttrString(attr)
 			}
+		case AttrNocache:
+			// @nocache is the clearer opt-out alias for @cache(ttl="0")
+			// (5.6 / memql#1970): force "never cache", overriding default-on.
+			d.CacheTTL = "0"
 		case AttrRetry:
 			if v := getAttrArgString(attr, "count"); v != "" {
 				d.Retry, _ = strconv.Atoi(v)

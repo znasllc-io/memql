@@ -172,3 +172,33 @@ func ConceptFromGraphNodeTopic(topic string) (string, bool) {
 	}
 	return "", false
 }
+
+// TopicCacheInvalidateForConcept returns the dedicated cache-invalidation
+// topic for the given concept (epic 5, issue 5.6 / memql#1970).
+// Example: TopicCacheInvalidateForConcept("v1:cognition:utterance")
+// returns "cache.invalidate.v1:cognition:utterance". This is the
+// separate broadcast channel ONLY the result-cache evictor subscribes
+// to; a single `cache.invalidate.*` routing rule forwards it to every
+// node, so eviction propagates cross-node with no per-concept graph
+// forwarding (which would risk firing automations on sibling replicas).
+func TopicCacheInvalidateForConcept(conceptId string) string {
+	return BuildTopicWithConcept(TopicCacheInvalidate, conceptId)
+}
+
+// ConceptFromCacheInvalidateTopic extracts the concept id from a
+// cache.invalidate.{conceptId} topic, the inverse of
+// TopicCacheInvalidateForConcept. Returns the concept id and true on a
+// match; "" and false otherwise. The concept id is the entire remainder
+// after the "cache.invalidate." prefix (it carries colon segments, no
+// further dots).
+func ConceptFromCacheInvalidateTopic(topic string) (string, bool) {
+	prefix := TopicCacheInvalidate + "."
+	if !strings.HasPrefix(topic, prefix) {
+		return "", false
+	}
+	concept := strings.TrimSpace(topic[len(prefix):])
+	if concept == "" {
+		return "", false
+	}
+	return concept, true
+}

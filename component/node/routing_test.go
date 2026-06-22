@@ -79,64 +79,88 @@ func TestRegisterRoutingRule_PluginAdds(t *testing.T) {
 	}
 }
 
-// TestEvaluateRouting_CachedConceptForwarding pins the cross-node
-// correctness guarantee for result-cache adoption (epic 5, issue 5.5 /
-// memql#1969): every concept a query @cache's must have ALL THREE graph write
-// kinds (created / updated / deleted) forwarded to peers, or its 5.4
-// invalidation subscriber never fires on sibling replicas and the cached read
-// goes stale cross-node. A single-node green test would not catch this -- the
-// eviction is per-Ristretto-per-node.
-func TestEvaluateRouting_CachedConceptForwarding(t *testing.T) {
+// TestEvaluateRouting_CacheInvalidateBroadcast pins the cross-node
+// correctness guarantee for default-on result caching (epic 5, issue 5.6 /
+// memql#1970): the dedicated cache-invalidation channel is forwarded to EVERY
+// node by a SINGLE broadcast rule, so a write to ANY concept evicts the
+// dependent cached read on sibling replicas. A single-node green test would
+// not catch a missing forward -- the eviction is per-Ristretto-per-node.
+//
+// This SUPERSEDES the 5.5 per-concept graph-write cache rules: eviction no
+// longer depends on a routing rule per cached concept. Any concept's
+// cache.invalidate event rides the one broadcast rule.
+func TestEvaluateRouting_CacheInvalidateBroadcast(t *testing.T) {
 	rules := defaultRoutingRules()
 
-	// Concepts cached in 5.5. Each must forward create+update+delete.
-	cachedConcepts := []string{
-		"v1:agents:agentRole",    // queryActiveAgentRoles / queryAgentRoleBySlug
-		"v1:agents:skill",        // queryActiveSkills / queryActiveSkillsFull / querySkillBySlug
-		"v1:router:budget",       // queryRouterBudgets
-		"v1:cognition:utterance", // querySpaceUtterances
+	// Arbitrary concepts (including ones with no per-concept rule whatsoever)
+	// must all have their cache-invalidation event forwarded cross-node via the
+	// single cache.invalidate.* broadcast rule.
+	concepts := []string{
+		"v1:agents:agentRole",
+		"v1:agents:skill",
+		"v1:router:budget",
+		"v1:cognition:utterance",
+		"v1:cognition:space",       // default-cached, never had a per-concept cache rule
+		"v1:knowledge:document",    // arbitrary concept -- broadcast covers it
+		"v1:somenamespace:whatever", // even a concept the engine has never seen
 	}
 
-	for _, concept := range cachedConcepts {
-		for _, action := range []string{"created", "updated", "deleted"} {
-			topic := "graph.node." + action + "." + concept
-			d := evaluateRouting(rules, topic)
-			if !d.Forward {
-				t.Errorf("cached concept %q write %q must forward cross-node (else 5.4 eviction goes stale on siblings), but it does not", concept, action)
-			}
-			if !d.Broadcast {
-				t.Errorf("cached concept %q write %q must broadcast to all replicas, got targeted %q", concept, action, d.TargetType)
-			}
+	for _, concept := range concepts {
+		topic := "cache.invalidate." + concept
+		d := evaluateRouting(rules, topic)
+		if !d.Forward {
+			t.Errorf("cache.invalidate for concept %q must forward cross-node via the broadcast rule, but it does not", concept)
+		}
+		if !d.Broadcast {
+			t.Errorf("cache.invalidate for concept %q must broadcast to all replicas, got targeted %q", concept, d.TargetType)
 		}
 	}
 }
 
-// TestEvaluateRouting_CacheRulesAreConceptScoped is the blast-radius guard for
-// the 5.5 forwarding rules (memql#1969 coordinator review): the new cache rules
-// must be SCOPED TO THE CACHED CONCEPT, never the whole namespace. Forwarding
-// all of v1:agents:* / v1:router:* would newly republish unrelated lifecycle
-// events onto peer buses and can double-fire automations that assumed
-// single-node delivery (e.g. reRouteNeedsAgentOnAgentCreate on
-// graph.node.created.v1:agents:agent, memql#1396). These sibling concepts share
-// the namespace with a cached concept but are NOT cached, so the cache rules
-// must NOT forward them. (v1:cognition:* is intentionally excluded -- it is
-// already broadly forwarded by the pre-existing default cognition rules.)
-func TestEvaluateRouting_CacheRulesAreConceptScoped(t *testing.T) {
+// TestEvaluateRouting_PerConceptCacheRulesRetired confirms the 5.5 per-concept
+// cache routing rules (memql#1969) are GONE (epic 5, issue 5.6 / memql#1970):
+// cache eviction now rides the dedicated cache.invalidate.* broadcast channel,
+// not per-concept graph-write forwarding. The retired rules forwarded these
+// graph.node.* topics solely to drive cross-node eviction; with the broadcast
+// channel they must no longer be forwarded as graph writes, so they can't
+// republish lifecycle events onto peer buses (the automation-double-fire risk
+// the old approach carried -- e.g. reRouteNeedsAgentOnAgentCreate on
+// v1:agents:agent, memql#1396).
+//
+// NOTE: v1:cognition:* create/update stays forwarded by the PRE-EXISTING broad
+// cognition rules (cognition's own delivery, not cache) -- so we assert only on
+// the agents/router cache concepts and the cognition utterance DELETE (whose
+// forward existed ONLY for the cache and is now retired).
+func TestEvaluateRouting_PerConceptCacheRulesRetired(t *testing.T) {
 	rules := defaultRoutingRules()
 
-	// Non-cached siblings in the namespaces the 5.5 rules touch. None of these
-	// may be forwarded by the cache rules (created/updated; the namespaces have
-	// no default forward, so a forward here means an over-broad wildcard crept
-	// back in).
-	notNewlyForwarded := []string{
-		"graph.node.created.v1:agents:agent",              // the over-firing automation's trigger
-		"graph.node.updated.v1:agents:agent",              //
-		"graph.node.created.v1:agents:agentAuthorization", // trust grants
-		"graph.node.created.v1:router:route",              // hypothetical sibling
+	// These graph.node.* topics had a 5.5 cache forward rule that is now
+	// retired. None may be forwarded as a graph write any longer.
+	retired := []string{
+		"graph.node.created.v1:agents:agentRole",
+		"graph.node.updated.v1:agents:agentRole",
+		"graph.node.deleted.v1:agents:agentRole",
+		"graph.node.created.v1:agents:skill",
+		"graph.node.updated.v1:agents:skill",
+		"graph.node.deleted.v1:agents:skill",
+		"graph.node.created.v1:router:budget",
+		"graph.node.updated.v1:router:budget",
+		"graph.node.deleted.v1:router:budget",
+		"graph.node.deleted.v1:cognition:utterance", // cache-only forward, retired
 	}
-	for _, topic := range notNewlyForwarded {
+	for _, topic := range retired {
 		if d := evaluateRouting(rules, topic); d.Forward {
-			t.Errorf("topic %q must NOT be forwarded -- the 5.5 cache rules must be concept-scoped, not namespace-wide (blast-radius regression: a namespace wildcard would republish unrelated lifecycle events and risk a cross-node automation double-fire)", topic)
+			t.Errorf("topic %q must NOT be forwarded -- the 5.5 per-concept cache routing rule is retired in 5.6 (eviction rides cache.invalidate.* now); a forward here means a retired rule lingered", topic)
+		}
+	}
+
+	// Sanity: the non-cache sibling concepts that were never forwarded stay so.
+	for _, topic := range []string{
+		"graph.node.created.v1:agents:agent",              // the over-firing automation's trigger
+		"graph.node.created.v1:agents:agentAuthorization", // trust grants
+	} {
+		if d := evaluateRouting(rules, topic); d.Forward {
+			t.Errorf("topic %q must NOT be forwarded (no cache rule, no default forward)", topic)
 		}
 	}
 }
