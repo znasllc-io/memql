@@ -115,12 +115,108 @@ The fleet has leaked/accumulated connections and every engine pod is `0/1`
 4. Re-enable auto-sync **and explicitly scale the fleet back up** (identity
    first) — ArgoCD will not restore replicas on its own.
 
+## Connection pooling (hybrid endpoint split) — SHIPPED (memql#1925)
+
+Right-sizing + `scaleDownDelay` kept the budget under the ceiling at steady
+state, but a full-stack roll still tipped it: blue-green bff + rolling mesh
+briefly doubles the pod count, and `pods × MAX_OPEN_CONNS` + the leaked
+`deployer` pool blew past Tiger's ~88 usable direct slots → the 53300 storm
+that wedged 0.9.87. The structural fix is **Tiger Cloud transaction-mode
+pooling (PgBouncer)** via a **hybrid endpoint split**:
+
+- **Bulk traffic** (the bun pool — all queries + mutations, every mesh pod) →
+  `MEMORY_NODES_DATABASE_DSN` points at the **transaction pooler** (db
+  `tsdb_transaction`, pooler port `39578`). Client connections decouple from
+  Postgres backends, so a deploy surge no longer maps 1:1 to direct slots —
+  the surge-killing multiplier.
+- **Session-stateful traffic** (the 4 advisory-lock / leader components +
+  migrations) → `MEMORY_NODES_DATABASE_DIRECT_DSN` points at the **direct**
+  (non-pooled) endpoint (db `tsdb`). A transaction-mode pooler recycles a
+  server backend between statements, which would drop a held session-scoped
+  advisory lock; these few, bounded connections take a direct slot instead.
+
+Code: `Database.DirectBunDB()` returns the direct pool when `DIRECT_DSN` is set,
+else falls back to the main pool (env-agnostic — local/dev without a pooler is
+unaffected). bun's `pgdriver` speaks the simple query protocol (no server-side
+prepared statements), so transaction pooling is safe. Wiring + the
+`kubectl create secret` recipe: `deploy/k8s/base/README.md`. Local parity:
+the in-compose PgBouncer in `docker/docker-compose.cluster.yml`.
+
+### Budget under the pooler
+
+The dangerous deploy-overlap term now applies only to the **direct** budget,
+which carries just the session-stateful set — a handful of leader-lock holders
+(cron leader, topology reconciler, cognition dispatch/greet/feedback gates,
+planner admission) plus the one-shot migrate Job — each a single held
+connection, not `replicas × MAX_OPEN_CONNS`. Bulk pods multiplex through the
+pooler, whose server-side pool to Postgres is capped (`default_pool_size`)
+regardless of client count. So:
+
+```
+direct_backends  ≈  Σ(session-stateful holders)  +  migrate (1, transient)
+pooler_backends  ≤  pooler default_pool_size                 (independent of pod/client surge)
+REQUIRE:  direct_backends + pooler_backends  ≤  max_connections − reserved
+```
+
+### Verifying a deploy surge no longer storms (memql#1935)
+
+Prove the storm is gone by re-running the 0.9.87 scenario under the pooler and
+watching the instance backend count stay under budget throughout.
+
+1. **Cut staging onto the pooler** (one-time): recreate `memql-secrets` with
+   `DSN` → pooler and `DIRECT_DSN` → direct, then roll the pods (identity
+   first). Exact command: `deploy/k8s/base/README.md`. With `DIRECT_DSN` unset
+   this is a no-op (single-pool fallback), so the cutover is the trigger.
+2. **Start the watcher** against the instance (read-only; queries the direct
+   endpoint, which sees every backend on the instance):
+   ```bash
+   DIRECT_DSN="$(tiger db connection-string xahn9ru4v6 --with-password)" \
+     scripts/deploy/conn-surge-watch.sh --interval=5
+   ```
+   It prints, each tick, total backends vs budget + the `application_name`
+   breakdown (mesh pods stamp `memql-<type>`, the migrate Job `memql-migrate`),
+   and tracks the peak.
+3. **Trigger a full-stack roll** — the wedging scenario: blue-green bff + the
+   rolling mesh (all node-types). e.g. bump the staging overlay digests / run
+   the normal deploy so every Deployment rolls and the bff Rollout does its
+   blue-green cutover.
+4. **Watch for SQLSTATE 53300** in the pods throughout the roll (the
+   authoritative signal):
+   ```bash
+   kubectl logs -n memql -l app.kubernetes.io/part-of=memql --tail=-1 --prefix \
+     | grep -iE '53300|remaining connection slots' || echo "no 53300 — good"
+   ```
+5. **Stop the watcher** (Ctrl-C) and read its summary.
+
+**Pass / fail (acceptance):**
+- **PASS** — the full roll completes with **zero** SQLSTATE 53300 and **no**
+  manual connection-reaping / scale-to-0 recovery; the watcher's peak backend
+  count stayed under budget (capture peak vs budget in the epic).
+- **FAIL** — any 53300, or the peak approached/exceeded the budget (the surge
+  still pressures direct slots — re-check that bulk `DSN` actually points at the
+  pooler and only the session-stateful set is on `DIRECT_DSN`).
+
+Quick manual cross-check while a roll is in flight (run via the direct DSN):
+```sql
+-- total backends vs the instance ceiling
+SELECT count(*) AS backends,
+       (SELECT setting::int FROM pg_settings WHERE name='max_connections') AS max_conn
+FROM pg_stat_activity WHERE datname IS NOT NULL;
+
+-- who holds them (the #1817 application_name attribution)
+SELECT coalesce(nullif(application_name,''),'(none)') AS app,
+       count(*) FILTER (WHERE state='active') AS active,
+       count(*) FILTER (WHERE state LIKE 'idle%') AS idle,
+       count(*) AS total
+FROM pg_stat_activity WHERE datname IS NOT NULL
+GROUP BY 1 ORDER BY total DESC;
+```
+
 ## Future levers (tracked, not yet needed)
 
-- **Connection pooler** (pgbouncer sidecar or Tiger Cloud pooling, transaction
-  mode) to decouple pod count from DB connections — epic memql#1778 child C.
-  Deferred while right-sizing + scaleDownDelay keep the budget under the ceiling;
-  revisit if replica counts grow.
+- **Connection pooler** — **SHIPPED** (epic memql#1925). Tiger Cloud
+  transaction-mode pooling now fronts bulk traffic so pod count no longer maps
+  1:1 to DB backends; see "Connection pooling (hybrid endpoint split)" below.
 - **Deploy-gate connection-headroom check** (child F): have the gate assert DB
   connection headroom before promoting. Partly covered today by the gate's
   startup/auth resilience (memql#1782); a dedicated headroom metric is the next
