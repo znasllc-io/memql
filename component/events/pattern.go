@@ -150,3 +150,25 @@ func TopicNodeUpdated(conceptId string) string {
 func TopicNodeDeleted(conceptId string) string {
 	return BuildTopicWithConcept(TopicGraphNodeDeleted, conceptId)
 }
+
+// ConceptFromGraphNodeTopic extracts the concept id from a
+// graph.node.{created,updated,deleted}.{conceptId} topic, the inverse
+// of BuildTopicWithConcept for the graph-node CDC topics. Returns the
+// concept id (e.g. "v1:cognition:utterance") and true on a match;
+// returns "" and false for any topic that is not a graph-node CDC
+// topic or carries no concept suffix. The concept id itself contains
+// dot-free colon segments, so it is the entire remainder after the
+// "graph.node.<action>." prefix.
+func ConceptFromGraphNodeTopic(topic string) (string, bool) {
+	for _, base := range []string{TopicGraphNodeCreated, TopicGraphNodeUpdated, TopicGraphNodeDeleted} {
+		prefix := base + "."
+		if strings.HasPrefix(topic, prefix) {
+			concept := strings.TrimSpace(topic[len(prefix):])
+			if concept == "" {
+				return "", false
+			}
+			return concept, true
+		}
+	}
+	return "", false
+}

@@ -15,9 +15,28 @@ import (
 // can baseline hit / miss / eviction-cost via Stats(); the engine
 // bootstrap launches a background log emitter (every 5 minutes)
 // when the cache is non-empty.
+//
+// Invalidation (5.4): caching a result is unsafe without a way to
+// drop it the moment a row it depends on is written. resultCache
+// maintains a concept -> cached-plan-keys dependency index keyed by
+// the concept(s) a cached plan reads. On a graph write to a concept
+// the engine's event-bus subscriber calls evictConcept, which drops
+// exactly the dependent keys (index-keyed eviction, never a full
+// cache scan). The index is the source of truth for "which keys does
+// concept C feed"; Ristretto's own eviction (LFU / TTL) can drop a
+// key from under us, so the index is treated as best-effort (a stale
+// index entry whose key is already gone is harmless) and pruned on
+// the eviction sweep.
 type resultCache struct {
 	cache *ristretto.Cache
 	mu    sync.RWMutex
+
+	// depIndex maps a concept id (e.g. "v1:cognition:utterance") to
+	// the set of cache keys whose cached result depends on that
+	// concept. Guarded by depMu, separate from mu so an eviction
+	// sweep doesn't hold the Ristretto get/set hot-path lock.
+	depMu    sync.Mutex
+	depIndex map[string]map[string]struct{}
 }
 
 // ResultCacheStats exposes a snapshot of Ristretto's internal
@@ -53,7 +72,8 @@ func newResultCache(size int64) (*resultCache, error) {
 	}
 
 	return &resultCache{
-		cache: rc,
+		cache:    rc,
+		depIndex: make(map[string]map[string]struct{}),
 	}, nil
 }
 
@@ -78,7 +98,14 @@ func (c *resultCache) get(key string) (*ExecuteResult, bool) {
 	return cloneExecuteResult(tree), true
 }
 
-func (c *resultCache) set(key string, tree *ExecuteResult, ttl time.Duration) {
+// set stores the result under key for ttl and records the concepts
+// the cached plan reads so a later write to any of them can evict
+// this key. concepts is the dependency set the engine resolves from
+// the plan (its bound/filter concept) and the returned bundle's rows;
+// an empty concepts slice still caches the row but leaves it
+// invalidation-blind, so the engine only caches when it can name at
+// least one dependency concept.
+func (c *resultCache) set(key string, tree *ExecuteResult, ttl time.Duration, concepts []string) {
 	if c == nil || c.cache == nil || tree == nil || ttl <= 0 {
 		return
 	}
@@ -89,9 +116,66 @@ func (c *resultCache) set(key string, tree *ExecuteResult, ttl time.Duration) {
 	}
 
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	c.cache.SetWithTTL(key, copy, 1, ttl)
+	c.mu.Unlock()
+
+	c.recordDependencies(key, concepts)
+}
+
+// recordDependencies adds key to the dependency set of every concept
+// it reads. Cheap map inserts under depMu; no Ristretto contact.
+func (c *resultCache) recordDependencies(key string, concepts []string) {
+	if c == nil || len(concepts) == 0 {
+		return
+	}
+
+	c.depMu.Lock()
+	defer c.depMu.Unlock()
+
+	if c.depIndex == nil {
+		c.depIndex = make(map[string]map[string]struct{})
+	}
+	for _, concept := range concepts {
+		if concept == "" {
+			continue
+		}
+		keys := c.depIndex[concept]
+		if keys == nil {
+			keys = make(map[string]struct{})
+			c.depIndex[concept] = keys
+		}
+		keys[key] = struct{}{}
+	}
+}
+
+// evictConcept drops every cached result that depends on the given
+// concept and returns the number of keys evicted. Index-keyed: it
+// touches only the keys recorded for that concept, never the whole
+// cache. Safe to call on every node holding a cache; a no-op when no
+// cached plan reads the concept. Called from the engine's graph-write
+// event subscriber, which fires on every replica (local writes and
+// mesh-forwarded remote writes both republish onto the local bus).
+func (c *resultCache) evictConcept(concept string) int {
+	if c == nil || c.cache == nil || concept == "" {
+		return 0
+	}
+
+	c.depMu.Lock()
+	keys := c.depIndex[concept]
+	delete(c.depIndex, concept)
+	c.depMu.Unlock()
+
+	if len(keys) == 0 {
+		return 0
+	}
+
+	c.mu.Lock()
+	for key := range keys {
+		c.cache.Del(key)
+	}
+	c.mu.Unlock()
+
+	return len(keys)
 }
 
 func (c *resultCache) close() {
@@ -99,6 +183,10 @@ func (c *resultCache) close() {
 		return
 	}
 	c.cache.Close()
+
+	c.depMu.Lock()
+	c.depIndex = make(map[string]map[string]struct{})
+	c.depMu.Unlock()
 }
 
 // Stats returns a point-in-time snapshot of Ristretto's metrics.

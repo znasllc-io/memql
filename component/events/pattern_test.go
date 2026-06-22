@@ -113,3 +113,30 @@ func TestBuildTopicWithConcept(t *testing.T) {
 		})
 	}
 }
+
+func TestConceptFromGraphNodeTopic(t *testing.T) {
+	tests := []struct {
+		name        string
+		topic       string
+		wantConcept string
+		wantOK      bool
+	}{
+		{"created", "graph.node.created.v1:cognition:utterance", "v1:cognition:utterance", true},
+		{"updated", "graph.node.updated.v1:test:widget", "v1:test:widget", true},
+		{"deleted", "graph.node.deleted.v1:planner:plan", "v1:planner:plan", true},
+		{"roundtrips with builder", TopicNodeCreated("v1:cluster:node"), "v1:cluster:node", true},
+		{"no concept suffix", "graph.node.created", "", false},
+		{"non graph topic", "query.executed", "", false},
+		{"unrelated", "automation.fired.v1:x:y", "", false},
+		{"empty", "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotConcept, gotOK := ConceptFromGraphNodeTopic(tt.topic)
+			if gotConcept != tt.wantConcept || gotOK != tt.wantOK {
+				t.Errorf("ConceptFromGraphNodeTopic(%q) = (%q, %v), want (%q, %v)",
+					tt.topic, gotConcept, gotOK, tt.wantConcept, tt.wantOK)
+			}
+		})
+	}
+}
