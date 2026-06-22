@@ -179,8 +179,8 @@ func TestErrorEnvelopeSurfacesDetail(t *testing.T) {
 
 func TestRegisteredAsDefaultCarrier(t *testing.T) {
 	// register.go init() must have registered telnyx; SelectCarrier("") with
-	// TELNYX_API_KEY present builds it.
-	t.Setenv("TELNYX_API_KEY", "k")
+	// MEMQL_TELEPHONY_TELNYX_API_KEY present builds it.
+	t.Setenv("MEMQL_TELEPHONY_TELNYX_API_KEY", "k")
 	c, err := telephony.SelectCarrier("")
 	if err != nil {
 		t.Fatalf("SelectCarrier: %v", err)
