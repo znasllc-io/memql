@@ -10,34 +10,36 @@ import (
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 )
 
-// TestResultCacheInvalidation_CrossNode proves the 5.4 cross-node
+// TestResultCacheInvalidation_CrossNode proves the 5.6 cross-node
 // guarantee: each replica runs its OWN result cache, so an eviction
-// triggered by a graph write handled on replica A must ALSO evict the
+// triggered by a write handled on replica A must ALSO evict the
 // dependent cached result on replica B. It wires the real path -- two
 // engines on two buses, the real EventBridge forward (A) + inbound
 // republish (B), gated by the real routing rules -- not a single shared
 // cache.
 //
+// 5.6 architecture (memql#1970). Eviction rides a DEDICATED broadcast
+// channel: every graph write emits cache.invalidate.<concept>, ONLY the
+// result-cache evictor subscribes to it, and the single
+// cache.invalidate.* broadcast rule (in defaultRoutingRules) forwards it
+// to every node. This test publishes that event -- NOT a graph.node.*
+// write -- and registers NO per-concept routing rule: the broadcast rule
+// already in the default set is the only forwarding the cache needs.
+//
 // WHY THIS FAILS AGAINST SINGLE-NODE-ASSUMING CODE. The eviction
 // subscriber listens on each engine's LOCAL bus. A write on A only
-// reaches B's local bus if a routing rule forwards graph.node.* for the
-// concept across the mesh. Without that forward (the default-deny mesh),
-// A evicts its own cache and B is never told -- B keeps serving the
-// stale cached result. The test registers the forward rule for the test
-// concept and asserts B's cache is evicted; drop the rule (or the
-// inbound republish) and the final assertion fails, exactly the
+// reaches B's local bus if a routing rule forwards the event across the
+// mesh. Drop the cache.invalidate.* broadcast rule (or the inbound
+// republish) and B keeps serving the stale cached result -- exactly the
 // false-green single-node trap.
 func TestResultCacheInvalidation_CrossNode(t *testing.T) {
 	const concept = "v1:crossnodecachetest:widget"
 	const cacheKey = "cross-node-key"
 
-	// A graph write to the test concept must fan out to every peer so the
-	// invalidation subscriber fires on each replica's independent cache.
-	// Mirrors what 5.5 adoption does for each newly-@cache'd concept.
-	RegisterRoutingRule(RoutingRule{
-		Pattern:    "graph.node.*." + concept,
-		TargetType: "",
-	})
+	// No per-concept routing rule is registered: 5.6 evicts cross-node
+	// purely via the cache.invalidate.* broadcast rule baked into
+	// defaultRoutingRules. This is the proof the per-concept rules are
+	// unnecessary.
 
 	// --- Replica A (where the write is handled) ---
 	busA := events.NewBus(events.WithLogger(testLogger()))
@@ -108,14 +110,15 @@ func TestResultCacheInvalidation_CrossNode(t *testing.T) {
 		return engineB.ResultCacheContainsForInvalidationTest(cacheKey)
 	})
 
-	// A graph write to the concept is handled on replica A: it publishes
-	// onto A's local bus (engine subscriber evicts A) and the EventBridge
-	// forwards it to peers (-> B's inbound -> B's local bus -> B's engine
-	// subscriber evicts B).
+	// A write to the concept is handled on replica A: it emits the
+	// dedicated cache-invalidation event onto A's local bus (engine
+	// subscriber evicts A) and the EventBridge forwards it to peers via the
+	// cache.invalidate.* broadcast rule (-> B's inbound -> B's local bus ->
+	// B's engine subscriber evicts B).
 	writeEvent := events.NewEvent(
-		events.TopicNodeUpdated(concept),
-		events.KindNodeUpdated,
-		map[string]any{"id": "row-1"},
+		events.TopicCacheInvalidateForConcept(concept),
+		events.KindCacheInvalidate,
+		map[string]any{"concept": concept},
 	)
 	busA.PublishSync(writeEvent) // local-bus eviction on A
 	ebA.onLocalEvent(writeEvent) // mesh forward to B

@@ -164,6 +164,7 @@ var (
 	AttrIdempotent           = ast.AttrIdempotent
 	AttrInternal             = ast.AttrInternal
 	AttrMergeFields          = ast.AttrMergeFields
+	AttrNocache              = ast.AttrNocache
 	AttrPermission           = ast.AttrPermission
 	AttrPublic               = ast.AttrPublic
 	AttrRateLimit            = ast.AttrRateLimit

@@ -82,6 +82,12 @@ const (
 	KindSystemStartup
 	// KindSystemShutdown is emitted when a node begins shutting down.
 	KindSystemShutdown
+
+	// KindCacheInvalidate is emitted on the dedicated cache-invalidation
+	// channel (epic 5, issue 5.6 / memql#1970) alongside every graph
+	// write, carrying the written row's concept so the result-cache
+	// evictor can drop dependent cached results on every replica.
+	KindCacheInvalidate
 )
 
 // String returns a human-readable name for the event kind.
@@ -143,6 +149,8 @@ func (k Kind) String() string {
 		return "spawn_completed"
 	case KindSpawnFailed:
 		return "spawn_failed"
+	case KindCacheInvalidate:
+		return "cache_invalidate"
 	default:
 		return "unspecified"
 	}
@@ -154,6 +162,15 @@ const (
 	TopicGraphNodeCreated = "graph.node.created"
 	TopicGraphNodeDeleted = "graph.node.deleted"
 	TopicGraphNodeUpdated = "graph.node.updated"
+
+	// Cache invalidation events (epic 5, issue 5.6 / memql#1970). A
+	// dedicated broadcast channel: every graph write also emits
+	// cache.invalidate.<concept> here, ONLY the result-cache evictor
+	// subscribes to it, and a single broadcast routing rule forwards it
+	// to every node. Decoupling cache eviction from per-concept
+	// graph-write forwarding removes the automation-double-fire risk
+	// 5.5's per-concept graph forwarding would have carried.
+	TopicCacheInvalidate = "cache.invalidate"
 
 	// Query events
 	TopicQueryExecuted = "query.executed"

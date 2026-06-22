@@ -97,3 +97,75 @@ Once the metrics emit have soaked, we can answer:
 - **Eviction frequency.** If high on either ristretto cache, the size limits are too tight.
 
 These numbers feed directly into Phase 1's design (where to put the new vector cache, how to size it) and Phase 2's tuning.
+
+---
+
+## 5.6 — Broadcast cache-invalidation channel + default-on caching (memql#1970)
+
+5.4 built the invalidation primitive; 5.5 adopted `@cache(ttl=)` on a few hot
+reads and forwarded each cached concept's graph writes cross-node with a
+per-concept routing rule. 5.6 fixes the architecture, then turns caching on by
+default.
+
+### Dedicated broadcast invalidation channel
+
+- **Topic:** `cache.invalidate.<concept>`. Emitted on every graph write
+  (`MemQLEngine.publishCacheInvalidate`, at the same commit point as
+  `graph.node.created.<concept>` in `executor_mutation.go`).
+- **One broadcast routing rule** — `cache.invalidate.*` → forwarded to ALL node
+  types (`component/node/routing.go`). Not one rule per concept.
+- **Only the result-cache evictor subscribes** (`cache.invalidate.#`, in
+  `StartCacheInvalidationSubscriber`). No automations, no other consumers — so
+  forwarding it everywhere has ZERO side effects. This is what removes the
+  automation-double-fire risk that broadening the 5.5 per-concept *graph-write*
+  forwarding would have carried (e.g. `reRouteNeedsAgentOnAgentCreate` on
+  `graph.node.created.v1:agents:agent`, memql#1396).
+- **Retired (superseded):** the 5.5 per-concept cache routing rules —
+  `v1:agents:agentRole`, `v1:agents:skill`, `v1:router:budget`
+  (created/updated/deleted) and the `deleted.v1:cognition:utterance` rule.
+  Cognition's pre-existing broad `v1:cognition:*` create/update forwarding stays
+  (it serves cognition's own delivery, not cache).
+
+### Default-on caching for pure reads
+
+A pure (no-mutation) read now caches by default, with no `@cache` annotation,
+under these guards (all in `component/memql/result_cache_policy.go` + the
+cache-set site in `engine.go`):
+
+1. **Default backstop TTL: 60s** (`defaultResultCacheTTLSeconds`). A safety
+   bound on worst-case staleness; invalidation normally evicts long before it
+   lapses. Clamped to `CACHE_MAX_TTL` when configured.
+2. **5.4 invariant kept:** a result is cached only when ≥1 dependency concept can
+   be named (`dependencyConceptsForResult`). An un-nameable-dependency result is
+   never cached (it could never be invalidated).
+3. **Staleness denylist** (`cacheDenylistedConceptPrefixes`): a result is NOT
+   default-cached if any of its dependency concepts is denylisted. Current list:
+   - `v1:identity:*` — authn/authz state must read live (a revoked session /
+     downgraded role / deleted credential cannot be served stale).
+   The denylist gates the DEFAULT path only; an explicit `@cache(ttl=N)` still
+   wins (the author opted in knowingly).
+4. **Actor-scoped cache key.** The cache key is built from the plan's canonical
+   signature, which renders an actor reference (`payload.ownerUserId ==
+   actor.userId`, `actor.role == ...`) identically for every caller. With
+   default-on this would let two users collide on one cache entry for an owned
+   query. So when a plan references the actor (`planReferencesActor`, spec-aware),
+   the resolved actor identity (`actorCacheKeyComponent`: userId|role|identityId)
+   is folded into the key. Actor-independent reads keep one shared key across
+   callers.
+
+### Opt-out
+
+- `@cache(ttl="0")` — explicit never-cache (unchanged).
+- `@nocache` — clearer alias for `@cache(ttl="0")`; maps to `CacheTTL="0"` at
+  parse time. Use it for reads that must always be live (auth, monotonic
+  counters, presence).
+- An explicit positive `@cache(ttl=N)` overrides the default (longer or shorter).
+
+### Cross-node proof
+
+`component/node/TestResultCacheInvalidation_CrossNode` (always-in-CI): two
+engines on two buses, the real EventBridge forward + inbound republish, gated by
+the `cache.invalidate.*` broadcast rule, with NO per-concept routing rule — a
+write on replica A evicts the cached result on replica B.
+`test/clustere2e/result_cache_default_on_test.go` is the live-cluster
+confirmation on a no-`@cache` read (`queryActiveSpaces`).

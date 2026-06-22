@@ -353,6 +353,26 @@ func (e *MemQLEngine) publishEvent(topic string, kind events.Kind, payload map[s
 	e.eventBus.Publish(event)
 }
 
+// publishCacheInvalidate emits the dedicated cache-invalidation event
+// (epic 5, issue 5.6 / memql#1970) for a written concept on the
+// separate cache.invalidate.<concept> channel. ONLY the result-cache
+// evictor subscribes to this channel, and a single broadcast routing
+// rule (cache.invalidate.*) forwards it to every node -- so cross-node
+// eviction is decoupled from per-concept graph-write forwarding and
+// carries zero side effects (no automations, no other consumers). The
+// payload is just the concept; eviction is index-keyed off it.
+func (e *MemQLEngine) publishCacheInvalidate(concept string) {
+	concept = strings.TrimSpace(concept)
+	if concept == "" {
+		return
+	}
+	e.publishEvent(
+		events.TopicCacheInvalidateForConcept(concept),
+		events.KindCacheInvalidate,
+		map[string]any{"concept": concept},
+	)
+}
+
 // emitQueryExecutedEvent emits a query executed event with timing and result info.
 func (e *MemQLEngine) emitQueryExecutedEvent(startTime time.Time, result *ExecuteResult, cached bool) {
 	if e.eventBus == nil {
@@ -554,6 +574,18 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	signature := ""
 	if plan.Root != nil {
 		signature = canonicalExpression(plan.Root)
+		// CORRECTNESS for default-on caching (epic 5, issue 5.6 /
+		// memql#1970): the canonical signature renders an actor reference
+		// identically for every caller (the userId/role resolves later and
+		// never reaches the signature). An owned query
+		// (`payload.ownerUserId == actor.userId`) would otherwise collide
+		// across users and serve caller B caller A's rows. When the plan
+		// depends on the actor, fold the resolved actor identity into the
+		// signature so each caller keys independently. Actor-independent
+		// reads keep one shared key across callers.
+		if e.planReferencesActor(plan.Root) {
+			signature = "actor:" + actorCacheKeyComponent(ctx) + "\x1f" + signature
+		}
 	}
 	fieldSignature := projectionSignature(plan.Fields, plan.ConceptFields, plan.Metadata)
 	// Resolve named shape reference to a compiled template.
@@ -630,13 +662,21 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 
 	if useCache && result.Bundle != nil {
 		if ttl := e.cacheTTLForBundle(result.Bundle, plan.CacheHints); ttl > 0 {
-			// Record the concept(s) this result depends on so a graph
-			// write to any of them evicts the key (5.4). Only cache when
-			// we can name at least one dependency concept -- an
-			// un-invalidatable cached result would go stale on the next
-			// write with no way to drop it.
+			// Record the concept(s) this result depends on so a write to
+			// any of them evicts the key (5.4, via the cache.invalidate.*
+			// channel). Only cache when we can name at least one dependency
+			// concept -- an un-invalidatable cached result would go stale on
+			// the next write with no way to drop it.
 			deps := dependencyConceptsForResult(plan, result.Bundle)
-			if len(deps) > 0 {
+			// 5.6 default-on (memql#1970): never default-cache a result that
+			// depends on a denylisted concept (auth/identity must read live).
+			// An EXPLICIT positive @cache(ttl=N) still wins -- the author
+			// opted in knowingly -- so the denylist gates only the no-hint
+			// default path. plan.CacheHints is non-empty iff the query
+			// carried @cache.
+			denylisted := anyConceptCacheDenylisted(deps)
+			explicitHint := len(plan.CacheHints) > 0
+			if len(deps) > 0 && (explicitHint || !denylisted) {
 				e.cache.set(cacheKey, result, ttl, deps)
 			}
 		}
@@ -957,10 +997,19 @@ func (e *MemQLEngine) cacheTTLForBundle(bundle *memqlv1.GraphBundle, hints map[s
 		return hintTTL
 	}
 
-	// No hints means no cache. Concept-level @cache fallback was
-	// retired alongside the @cache annotation in the concept audit;
-	// query authors opt in explicitly via @cache(N) on the query.
-	return 0
+	// No explicit hints: default-on caching (epic 5, issue 5.6 /
+	// memql#1970). A pure read (no mutation -- the caller already gated on
+	// len(plan.Mutations)==0) caches by default with a conservative
+	// backstop TTL, relying on 5.4 invalidation + the cache.invalidate.*
+	// broadcast channel for freshness. The two further guards -- the
+	// "at least one dependency concept must be named" 5.4 invariant and
+	// the staleness denylist -- are enforced at the cache-set call site in
+	// execute(), where the dependency concept set is in hand.
+	def := time.Duration(defaultResultCacheTTLSeconds) * time.Second
+	if globalMax > 0 && def > globalMax {
+		def = globalMax
+	}
+	return def
 }
 
 func (e *MemQLEngine) globalCacheMaxTTL() time.Duration {

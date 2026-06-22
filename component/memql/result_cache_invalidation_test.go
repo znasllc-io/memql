@@ -57,9 +57,10 @@ func TestResultCache_EvictConcept_DropsDependentKeys(t *testing.T) {
 }
 
 // TestResultCache_InvalidationSubscriber_GraphWriteEvictsResult is the
-// acceptance test: a query result is cached, a graph write to that
-// concept fires on the engine's event bus, and the next read is a cache
-// MISS (no stale read). It exercises the real engine subscriber wiring
+// acceptance test: a query result is cached, a cache.invalidate for that
+// concept fires on the engine's event bus (the dedicated 5.6 channel
+// every graph write emits), and the next read is a cache MISS (no stale
+// read). It exercises the real engine subscriber wiring
 // (StartCacheInvalidationSubscriber) against a real events.Bus, scoped
 // to the engine lifecycle context.
 func TestResultCache_InvalidationSubscriber_GraphWriteEvictsResult(t *testing.T) {
@@ -86,10 +87,10 @@ func TestResultCache_InvalidationSubscriber_GraphWriteEvictsResult(t *testing.T)
 		t.Fatal("precondition: result should be cached before the write")
 	}
 
-	// A graph write to that concept must evict the cached result.
+	// A cache.invalidate for that concept must evict the cached result.
 	bus.PublishSync(events.Event{
-		Topic: events.TopicNodeUpdated(concept), // graph.node.updated.v1:test:widget
-		Kind:  events.Kind(0),
+		Topic: events.TopicCacheInvalidateForConcept(concept), // cache.invalidate.v1:test:widget
+		Kind:  events.KindCacheInvalidate,
 	})
 
 	// The subscriber handler runs in a delivery goroutine; poll for the miss.
@@ -122,8 +123,8 @@ func TestResultCache_InvalidationSubscriber_UnrelatedWriteKeepsResult(t *testing
 	waitForCacheKey(t, cache, "plan-key")
 
 	bus.PublishSync(events.Event{
-		Topic: events.TopicNodeCreated("v1:test:gadget"), // unrelated concept
-		Kind:  events.Kind(0),
+		Topic: events.TopicCacheInvalidateForConcept("v1:test:gadget"), // unrelated concept
+		Kind:  events.KindCacheInvalidate,
 	})
 
 	// Give any (wrong) eviction a chance to run, then assert still cached.
