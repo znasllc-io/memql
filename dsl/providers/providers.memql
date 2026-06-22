@@ -115,7 +115,7 @@ provider chat54Nano {
 // ===================================================
 //
 // Sister provider to stream54Pro for the synchronous chat path
-// (suggest endpoints, voice-path InvokeSI). Same reasoning as
+// (suggest endpoints, voice-path InvokeAI). Same reasoning as
 // stream54Pro: aliases to `gpt-5.4` because `gpt-5.4-pro` is the
 // responses-API-only "pro" tier and rejects v1/chat/completions
 // requests with a 404 "not a chat model" error. Switch the

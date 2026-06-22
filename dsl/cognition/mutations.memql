@@ -489,9 +489,9 @@ mutation participant mutationJoinSpaceAsHuman {
   }
 }
 
-// ---- mutations/v1/cognition/joinSpaceAsSI.memql ----
+// ---- mutations/v1/cognition/joinSpaceAsAI.memql ----
 
-// joinSpaceAsSI
+// joinSpaceAsAI
 // ============
 //
 // Creates (or re-creates) an SI participant record for a space.

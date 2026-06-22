@@ -989,7 +989,8 @@
     "siParticipantId",
     "siOpenaiApiKey",
     "siOpenaiProjectId",
-    "siDefaultProvider"
+    "siDefaultProvider",
+    "siParticipantId[A-Za-z0-9_]*"
   ],
   "_scan_only": "denylist_substrings suppress G1-scan noise: any token CONTAINING one of these uppercase English roots is not an AI identifier. Scan-only -- never used by the rename pass (no allowlisted AI token contains any of these).",
   "denylist_substrings": [
@@ -1074,6 +1075,12 @@
     "SUBSIDI",
     "SUPERSIS",
     "SUPERSESSION",
-    "ELISION"
+    "ELISION",
+    "BUSINESS",
+    "RISING",
+    "INTRINSIC",
+    "TTSIndicator",
+    "SInt",
+    "CFNumber"
   ]
 }

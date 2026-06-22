@@ -1,12 +1,3 @@
----
-title: Platformization Program — Master Plan
-audience: internal
-status: draft
-area: internal
-sinceVersion: "0.9.87"
-owner: znas
----
-
 # Platformization Program — Master Plan
 
 Four-epic program to turn MemQL into a clean, plug-and-play platform and land

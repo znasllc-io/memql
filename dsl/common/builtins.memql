@@ -189,7 +189,7 @@ builtin error {
 // ================================================
 //
 // Extract plain text from files (PDF, DOCX, images, text).
-// Uses VisionSIProvider for image descriptions.
+// Uses VisionAIProvider for image descriptions.
 
 @enabled
 @executor("integration.files.extractText")
