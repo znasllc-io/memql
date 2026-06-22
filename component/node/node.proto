@@ -34,8 +34,8 @@ message NodeClientMessage {
     CapabilityQuery capability_query = 40;
     CapabilityResponse capability_response = 41;
     QueryForward query_forward = 60;
-    SIForwardRequest si_forward_request = 70;
-    SIForwardCancel si_forward_cancel = 71;
+    AiForwardRequest ai_forward_request = 70;
+    AiForwardCancel ai_forward_cancel = 71;
     WorkbenchForwardRequest workbench_forward_request = 80;
     WorkbenchForwardCancel workbench_forward_cancel = 81;
   }
@@ -58,7 +58,7 @@ message NodeServerMessage {
     CapabilityResponse capability_response = 41;
     NodeShutdown node_shutdown = 50;
     QueryResponse query_response = 60;
-    SIForwardResponse si_forward_response = 70;
+    AiForwardResponse ai_forward_response = 70;
     WorkbenchForwardResponse workbench_forward_response = 80;
   }
 }
@@ -214,7 +214,7 @@ message QueryResponse {
 // AI / voice request forwarding
 // ---------------------------------------------------------------------------
 
-// SIForwardRequest carries an AI / voice envelope from a BFF node to a
+// AiForwardRequest carries an AI / voice envelope from a BFF node to a
 // worker node that has the required provider registered. The body is the
 // proto-serialized MemqlClientMessage the BFF originally received from
 // its client -- the worker unmarshals it and dispatches to its local
@@ -227,7 +227,7 @@ message QueryResponse {
 // `auth` carries the originating principal's claims (subject, email,
 // role) so the worker can reconstruct a TokenInfo and enforce the same
 // ACLs it would have applied if the client had connected directly.
-message SIForwardRequest {
+message AiForwardRequest {
   string request_id = 1;
   map<string, string> auth = 2;
   reserved 3;
@@ -235,23 +235,23 @@ message SIForwardRequest {
   bytes memql_envelope = 4;  // Serialized memqlv1.MemqlClientMessage
 }
 
-// SIForwardResponse carries a worker's response back to the originating
+// AiForwardResponse carries a worker's response back to the originating
 // BFF. Streamed responses (e.g. aiChat with stream=true) send multiple
 // messages with the same request_id. `done=true` marks the last one.
 //
 // `memql_server_msg` is a proto-serialized memqlv1.MemqlServerMessage
-// (SIChunk / SIChatResult / SISpeechResult / SITranscribeResult /
-// SISuggestResult / ListToolsResult / CallToolResult / QueryError).
-message SIForwardResponse {
+// (AiChunk / AiChatResult / AiSpeechResult / AiTranscribeResult /
+// AiSuggestResult / ListToolsResult / CallToolResult / QueryError).
+message AiForwardResponse {
   string request_id = 1;
   bytes memql_server_msg = 2;
   bool done = 3;
 }
 
-// SIForwardCancel signals the worker that the BFF's client cancelled
+// AiForwardCancel signals the worker that the BFF's client cancelled
 // the request (stream closed, explicit cancel message). The worker
 // should stop producing responses for `request_id` and clean up.
-message SIForwardCancel {
+message AiForwardCancel {
   string request_id = 1;
 }
 
@@ -264,7 +264,7 @@ message SIForwardCancel {
 // per-Plan workspace. Single round-trip semantics (no streaming);
 // the agent's tool loop waits synchronously for the response.
 //
-// Unlike SIForward, this is a structured envelope (not a byte-wrapped
+// Unlike AiForward, this is a structured envelope (not a byte-wrapped
 // MemqlClientMessage) because the workbench surface is a flat
 // integration capability, not a gRPC message type. Args are encoded
 // as JSON to keep the wire shape stable across action-specific arg
@@ -297,7 +297,7 @@ message WorkbenchForwardResponse {
   string error_message = 4;
 }
 
-// WorkbenchForwardCancel mirrors SIForwardCancel. The agent's tool
+// WorkbenchForwardCancel mirrors AiForwardCancel. The agent's tool
 // loop fires it when the LLM call upstream is cancelled before the
 // workbench finishes; the workbench should stop in-flight work
 // for the request_id and free resources (kill exec, abort http_fetch).

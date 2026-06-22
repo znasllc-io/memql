@@ -39,7 +39,7 @@ type transcribeStream struct {
 	// direct-client path this is streamSession.sendServerMessage wrapped
 	// in a function that preserves correlate_to; on the forwarded path
 	// it is forwardedStream.Send, which re-wraps each
-	// MemqlServerMessage into an SIForwardResponse. Using the SAME
+	// MemqlServerMessage into an AiForwardResponse. Using the SAME
 	// send for deltas and the final Complete preserves ordering and
 	// lets isTerminalServerPayload close the inflight only on Complete.
 	send func(*memqlv1.MemqlServerMessage) error
@@ -67,7 +67,7 @@ type transcribeStream struct {
 // Subsequent Chunk / End envelopes find the session by request_id.
 func (s *streamSession) handleAiTranscribeStreamStart(
 	envelope *memqlv1.MemqlClientMessage,
-	msg *memqlv1.SITranscribeStreamStart,
+	msg *memqlv1.AiTranscribeStreamStart,
 ) error {
 	if msg == nil {
 		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument,
@@ -136,7 +136,7 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 
 	// Outbound sink for this stream's Delta/Complete messages. On a mesh worker
 	// the durable substrate is the delivery path (memql#1266): translate each
-	// outgoing SITranscribeStream* message into an ordered StreamSession frame on
+	// outgoing AiTranscribeStream* message into an ordered StreamSession frame on
 	// stream:<requestId>, so the WS-owning bff consumes it back surviving a
 	// mid-stream replica switch. Single-node / non-mesh binaries send directly on
 	// the local stream as before.
@@ -180,7 +180,7 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 // streaming session identified by request_id.
 func (s *streamSession) handleAiTranscribeStreamChunk(
 	envelope *memqlv1.MemqlClientMessage,
-	msg *memqlv1.SITranscribeStreamChunk,
+	msg *memqlv1.AiTranscribeStreamChunk,
 ) error {
 	if msg == nil {
 		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument,
@@ -234,7 +234,7 @@ func (s *streamSession) handleAiTranscribeStreamChunk(
 // emitting Complete.
 func (s *streamSession) handleAiTranscribeStreamEnd(
 	envelope *memqlv1.MemqlClientMessage,
-	msg *memqlv1.SITranscribeStreamEnd,
+	msg *memqlv1.AiTranscribeStreamEnd,
 ) error {
 	if msg == nil {
 		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument,
@@ -247,7 +247,7 @@ func (s *streamSession) handleAiTranscribeStreamEnd(
 	}
 
 	// BFF proxy: forward End to the same worker; the worker will emit
-	// SITranscribeStreamComplete (or close silently on cancel) and the
+	// AiTranscribeStreamComplete (or close silently on cancel) and the
 	// BFF's inflight entry closes on the terminal response.
 	if s.shouldProxyAI(nodeTargetForTranscribe()) {
 		if !s.service.aiForwarder.HasInflight(requestId) {
@@ -276,8 +276,8 @@ func (s *streamSession) handleAiTranscribeStreamEnd(
 		ts.waitForPumpDone(500 * time.Millisecond)
 		cancelMsg := &memqlv1.MemqlServerMessage{
 			CorrelateTo: ts.correlate,
-			Payload: &memqlv1.MemqlServerMessage_SiTranscribeStreamComplete{
-				SiTranscribeStreamComplete: &memqlv1.SITranscribeStreamComplete{
+			Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamComplete{
+				AiTranscribeStreamComplete: &memqlv1.AiTranscribeStreamComplete{
 					RequestId:  requestId,
 					Text:       "",
 					DurationMs: time.Since(ts.startTime).Milliseconds(),
@@ -328,8 +328,8 @@ func (s *streamSession) handleAiTranscribeStreamEnd(
 
 	complete := &memqlv1.MemqlServerMessage{
 		CorrelateTo: ts.correlate,
-		Payload: &memqlv1.MemqlServerMessage_SiTranscribeStreamComplete{
-			SiTranscribeStreamComplete: &memqlv1.SITranscribeStreamComplete{
+		Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamComplete{
+			AiTranscribeStreamComplete: &memqlv1.AiTranscribeStreamComplete{
 				RequestId:  requestId,
 				Text:       text,
 				DurationMs: durationMs,
@@ -353,7 +353,7 @@ func (s *streamSession) handleAiTranscribeStreamEnd(
 }
 
 // pumpDeltas drains the STT provider's interim result channel and
-// relays each as an SITranscribeStreamDelta. Exits when the provider
+// relays each as an AiTranscribeStreamDelta. Exits when the provider
 // closes its Receive channel (Finalize / Close). Duplicate consecutive
 // texts are skipped: providers that emit accumulated text would
 // otherwise send the same final sentence again on every "utterance
@@ -388,8 +388,8 @@ func (ts *transcribeStream) pumpDeltas(logger interface {
 
 		delta := &memqlv1.MemqlServerMessage{
 			CorrelateTo: ts.correlate,
-			Payload: &memqlv1.MemqlServerMessage_SiTranscribeStreamDelta{
-				SiTranscribeStreamDelta: &memqlv1.SITranscribeStreamDelta{
+			Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamDelta{
+				AiTranscribeStreamDelta: &memqlv1.AiTranscribeStreamDelta{
 					RequestId:  ts.requestId,
 					Text:       text,
 					IsFinal:    result.IsFinal,

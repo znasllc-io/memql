@@ -66,7 +66,7 @@ func (s *polyphonASRSession) SendAudio(audio []byte) error {
 }
 
 // Receive returns the channel of interim + final transcription results.
-// The gRPC layer drains this and emits SITranscribeStreamDelta per item.
+// The gRPC layer drains this and emits AiTranscribeStreamDelta per item.
 func (s *polyphonASRSession) Receive() <-chan TranscriptionResult {
 	return s.results
 }

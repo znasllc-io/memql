@@ -143,7 +143,7 @@ func TestWorkerDialer_RedialsAfterExternalClose(t *testing.T) {
 // waitForAttachedPeer polls the PeerManager until the given nodeId appears
 // with a non-nil Connection. Non-nil Connection is the signal that
 // NodeWelcome was processed and the outbound *peerConnection was bound via
-// AttachConnection -- this is what SIForwardRouter and EventBridge rely on
+// AttachConnection -- this is what AiForwardRouter and EventBridge rely on
 // to Send to the peer.
 func waitForAttachedPeer(t *testing.T, pm *PeerManager, nodeId string, timeout time.Duration, what string) {
 	t.Helper()

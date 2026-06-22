@@ -23,7 +23,7 @@ import (
 // agent's tool loop invokes a client-executed tool (e.g. `uiReadState`),
 // the agent's streamSession emits a ClientToolCall envelope. That
 // envelope rides the forwardedStream back to cognition as an
-// SIForwardResponse (see cognition/agent_forward.go consumeAgentTurnStream).
+// AiForwardResponse (see cognition/agent_forward.go consumeAgentTurnStream).
 //
 // The browser is on a *different* node (BFF). So ClientToolCall cannot
 // reach the browser by stream topology alone. This relay closes the
@@ -41,7 +41,7 @@ import (
 //      the pending entry by callId, wraps the payload in a
 //      ClientToolResult MemqlClientMessage and hands it to
 //      agentForwarder.ForwardContinuation, which delivers it back to
-//      the agent node as a fresh SIForwardRequest. The agent's
+//      the agent node as a fresh AiForwardRequest. The agent's
 //      service-scoped waiter (see component/grpc/server.go
 //      clientToolWaiters) fires and the parked tool loop returns.
 //
@@ -79,7 +79,7 @@ const (
 
 // pendingClientToolCall records the correlation for a client-tool call
 // that cognition relayed from agent -> browser and is awaiting the
-// matching response. requestId refers to the in-flight SIForwardRouter
+// matching response. requestId refers to the in-flight AiForwardRouter
 // entry so ForwardContinuation can address the same stream.
 type pendingClientToolCall struct {
 	requestId string

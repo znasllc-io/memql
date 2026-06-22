@@ -7,7 +7,7 @@ import "github.com/znasllc-io/memql/core/common"
 // MCP hosts (epic memql#1529). Like the workbench node it is a minimal mesh
 // citizen: Engine + PeerManager + EventBridge + NodeServer (+ ParentConnector
 // when an upstream is configured). It does NOT dial workers or run the
-// SIForward outbound routing the BFF does; it speaks MCP over its own
+// AiForward outbound routing the BFF does; it speaks MCP over its own
 // transport (stdio in Phase 0) and reads the engine in-process.
 type MCPBootstrap struct{}
 

@@ -20,7 +20,7 @@ service MemqlService {
 
 // Provenance is the engine-stamped origin metadata stored as an
 // intrinsic on every MemoryNodes row. Carried on the envelope so
-// cross-node forwarders (proxySI / SIForward / NodeService) can
+// cross-node forwarders (proxyAI / AiForward / NodeService) can
 // propagate the caller's originating attribution across hops --
 // otherwise a row written on the receiver gets stamped with the
 // receiver's default Mutation(name) and loses the "kicked off by
@@ -64,10 +64,10 @@ message MemqlClientMessage {
     ListToolsMsg list_tools = 16;
     CallToolMsg call_tool = 17;
     // AI operations
-    SIChatMsg si_chat = 18;
-    SISpeechMsg si_speech = 19;
-    SITranscribeMsg si_transcribe = 20;
-    SISuggestMsg si_suggest = 21;
+    AiChatMsg ai_chat = 18;
+    AiSpeechMsg ai_speech = 19;
+    AiTranscribeMsg ai_transcribe = 20;
+    AiSuggestMsg ai_suggest = 21;
     // Identity and delegation operations
     IdentityCreateMsg identity_create = 22;
     IdentityUpdateMsg identity_update = 23;
@@ -93,14 +93,14 @@ message MemqlClientMessage {
     // Streaming transcription (multi-message, keyed by request_id).
     // Start opens a provider session; Chunk pushes audio bytes; End
     // closes the session (or cancels). Server replies with repeated
-    // SITranscribeStreamDelta + final SITranscribeStreamComplete.
-    SITranscribeStreamStart si_transcribe_stream_start = 41;
-    SITranscribeStreamChunk si_transcribe_stream_chunk = 42;
-    SITranscribeStreamEnd si_transcribe_stream_end = 43;
-    // Agent turn generation (cognition -> agent via NodeService.SIForwardRequest).
+    // AiTranscribeStreamDelta + final AiTranscribeStreamComplete.
+    AiTranscribeStreamStart ai_transcribe_stream_start = 41;
+    AiTranscribeStreamChunk ai_transcribe_stream_chunk = 42;
+    AiTranscribeStreamEnd ai_transcribe_stream_end = 43;
+    // Agent turn generation (cognition -> agent via NodeService.AiForwardRequest).
     // Agent node handles this message exactly as if a client had connected
     // directly; cognition wraps the serialized MemqlClientMessage in a
-    // NodeClientMessage{SIForwardRequest} and ships it over the inter-node
+    // NodeClientMessage{AiForwardRequest} and ships it over the inter-node
     // stream. Streamed replies come back as AgentGenerateTurnDelta (N)
     // followed by AgentGenerateTurnComplete (1).
     AgentGenerateTurnMsg agent_generate_turn = 44;
@@ -250,16 +250,16 @@ message MemqlServerMessage {
     QueryResultChunk query_result = 11;
     QueryErrorMsg query_error = 12;
     EventNotification event = 20;
-    SIStreamChunk si_chunk = 30;
+    AiStreamChunk ai_chunk = 30;
     HeartbeatMsg heartbeat = 40;
     // MCP Tool results
     ListToolsResult list_tools_result = 50;
     CallToolResult call_tool_result = 51;
     // AI results
-    SIChatResult si_chat_result = 55;
-    SISpeechResult si_speech_result = 56;
-    SITranscribeResult si_transcribe_result = 57;
-    SISuggestResult si_suggest_result = 58;
+    AiChatResult ai_chat_result = 55;
+    AiSpeechResult ai_speech_result = 56;
+    AiTranscribeResult ai_transcribe_result = 57;
+    AiSuggestResult ai_suggest_result = 58;
     // Identity and delegation results
     IdentityResult identity_result = 60;
     DelegationResult delegation_result = 61;
@@ -278,11 +278,11 @@ message MemqlServerMessage {
     ConceptsSubscribeResult concepts_subscribe_result = 79;
     // Access / authorization
     MyAccessResult my_access_result = 80;
-    // Streaming transcription replies (see SITranscribeStreamStart).
+    // Streaming transcription replies (see AiTranscribeStreamStart).
     // Delta fires repeatedly with the full accumulated text; Complete
     // is the terminal message carrying the final transcript.
-    SITranscribeStreamDelta si_transcribe_stream_delta = 81;
-    SITranscribeStreamComplete si_transcribe_stream_complete = 82;
+    AiTranscribeStreamDelta ai_transcribe_stream_delta = 81;
+    AiTranscribeStreamComplete ai_transcribe_stream_complete = 82;
     // Agent turn streaming replies (see AgentGenerateTurnMsg).
     AgentGenerateTurnDelta agent_generate_turn_delta = 83;
     AgentGenerateTurnComplete agent_generate_turn_complete = 84;
@@ -491,7 +491,7 @@ enum EventKind {
 // AI streaming
 // -----------------------------------------------------------------------------
 
-message SIStreamChunk {
+message AiStreamChunk {
   string stream_id = 1;
   string provider = 2;
   string request_id = 3;
@@ -721,25 +721,25 @@ message ClientToolResult {
 // AI Operations
 // -----------------------------------------------------------------------------
 
-message SIChatMsg {
+message AiChatMsg {
   string request_id = 1;
-  repeated SIChatMessage messages = 2;
+  repeated AiChatMessage messages = 2;
   string provider = 3;
   bool stream = 4;
 }
 
-message SIChatMessage {
+message AiChatMessage {
   string role = 1;
   string content = 2;
   string name = 3;
 }
 
-message SIChatResult {
+message AiChatResult {
   string request_id = 1;
-  SIChatMessage message = 2;
+  AiChatMessage message = 2;
 }
 
-message SISpeechMsg {
+message AiSpeechMsg {
   string request_id = 1;
   string input = 2;
   string voice = 3;
@@ -747,19 +747,19 @@ message SISpeechMsg {
   string provider = 5;
 }
 
-message SISpeechResult {
+message AiSpeechResult {
   string request_id = 1;
   bytes audio = 2;
   string format = 3;
 }
 
-message SITranscribeMsg {
+message AiTranscribeMsg {
   string request_id = 1;
   string audio = 2;
   string mime_type = 3;
 }
 
-message SITranscribeResult {
+message AiTranscribeResult {
   string request_id = 1;
   string text = 2;
 }
@@ -767,7 +767,7 @@ message SITranscribeResult {
 // Streaming transcription: Start / Chunk / End (client -> server).
 // All messages in a stream share the same request_id. Opening two
 // streams with the same request_id is an error.
-message SITranscribeStreamStart {
+message AiTranscribeStreamStart {
   string request_id = 1;
   string format = 2;           // "pcm16", "opus", "webm", "wav", ...
   int32 sample_rate = 3;       // e.g. 16000
@@ -776,12 +776,12 @@ message SITranscribeStreamStart {
   string provider = 6;         // optional, e.g. "openai-realtime" or "openai-whisper" -- overrides default.
 }
 
-message SITranscribeStreamChunk {
+message AiTranscribeStreamChunk {
   string request_id = 1;
   bytes audio = 2;             // raw audio bytes in the format declared by Start
 }
 
-message SITranscribeStreamEnd {
+message AiTranscribeStreamEnd {
   string request_id = 1;
   bool cancel = 2;             // true = abort without emitting Complete
 }
@@ -790,27 +790,27 @@ message SITranscribeStreamEnd {
 // Delta carries the full accumulated text so far (not incremental
 // tokens) so the client can set the input field directly on each
 // event. is_final=true marks the last Delta before Complete.
-message SITranscribeStreamDelta {
+message AiTranscribeStreamDelta {
   string request_id = 1;
   string text = 2;
   bool is_final = 3;
   float confidence = 4;        // optional, 0.0-1.0
 }
 
-message SITranscribeStreamComplete {
+message AiTranscribeStreamComplete {
   string request_id = 1;
   string text = 2;
   int64 duration_ms = 3;
   string provider = 4;         // provider name, e.g. "openai-realtime", "openai-whisper".
 }
 
-message SISuggestMsg {
+message AiSuggestMsg {
   string request_id = 1;
   string domain = 2;
   google.protobuf.Struct payload = 3;
 }
 
-message SISuggestResult {
+message AiSuggestResult {
   string request_id = 1;
   string domain = 2;
   google.protobuf.Struct result = 3;
@@ -1167,7 +1167,7 @@ message MyAccessResult {
 // -----------------------------------------------------------------------------
 //
 // Cognition selects a speaker via Polyphon scoring, then ships an
-// AgentGenerateTurnMsg to an agent peer via NodeService.SIForwardRequest.
+// AgentGenerateTurnMsg to an agent peer via NodeService.AiForwardRequest.
 // The agent node renders the prompt, runs the tool-calling loop (or a
 // non-tool generation for polyphon-text / voice paths), and streams
 // AgentGenerateTurnDelta replies back, terminating with a single
@@ -1887,7 +1887,7 @@ message VoiceAgentTurnRequest {
 // phrase starts synthesizing before the full response is ready.
 //
 // text_delta is the incremental chunk -- DO NOT pass the full
-// accumulated text. (Contrast with SITranscribeStreamDelta which
+// accumulated text. (Contrast with AiTranscribeStreamDelta which
 // is full-accumulated; that's an ASR ergonomic.)
 message VoiceAgentTurnDelta {
   string request_id = 1;

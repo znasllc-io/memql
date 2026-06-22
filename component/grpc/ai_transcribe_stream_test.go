@@ -131,11 +131,11 @@ func TestTranscribeStream_PumpDedupesConsecutiveIdenticalText(t *testing.T) {
 		t.Fatalf("expected 2 deltas, got %d (%v)", len(msgs), msgs)
 	}
 
-	d1 := msgs[0].GetSiTranscribeStreamDelta()
+	d1 := msgs[0].GetAiTranscribeStreamDelta()
 	if d1 == nil || d1.GetText() != "hello" {
 		t.Errorf("first delta: want text=\"hello\", got %+v", d1)
 	}
-	d2 := msgs[1].GetSiTranscribeStreamDelta()
+	d2 := msgs[1].GetAiTranscribeStreamDelta()
 	if d2 == nil || d2.GetText() != "hello world" {
 		t.Errorf("second delta: want text=\"hello world\", got %+v", d2)
 	}
@@ -178,7 +178,7 @@ func TestTranscribeStream_PumpSkipsEmptyText(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 delta, got %d", len(msgs))
 	}
-	if got := msgs[0].GetSiTranscribeStreamDelta().GetText(); got != "finally" {
+	if got := msgs[0].GetAiTranscribeStreamDelta().GetText(); got != "finally" {
 		t.Errorf("want text=\"finally\", got %q", got)
 	}
 }
@@ -223,15 +223,15 @@ func TestTranscribeStream_PumpFiltersHallucinatedAndLowConfidenceFinals(t *testi
 	if len(msgs) != 3 {
 		var texts []string
 		for _, m := range msgs {
-			texts = append(texts, m.GetSiTranscribeStreamDelta().GetText())
+			texts = append(texts, m.GetAiTranscribeStreamDelta().GetText())
 		}
 		t.Fatalf("expected 3 deltas (interim + 2 high-conf finals), got %d: %v", len(msgs), texts)
 	}
 
 	got := []string{
-		msgs[0].GetSiTranscribeStreamDelta().GetText(),
-		msgs[1].GetSiTranscribeStreamDelta().GetText(),
-		msgs[2].GetSiTranscribeStreamDelta().GetText(),
+		msgs[0].GetAiTranscribeStreamDelta().GetText(),
+		msgs[1].GetAiTranscribeStreamDelta().GetText(),
+		msgs[2].GetAiTranscribeStreamDelta().GetText(),
 	}
 	want := []string{"okay so", "let us begin the meeting", "okay"}
 	for i := range want {

@@ -25,18 +25,18 @@ import (
 // BFF side: outbound forwarding + response routing
 // -----------------------------------------------------------------------------
 
-// SIForwardRouter coordinates outbound AI/voice forwards from a BFF to
+// AiForwardRouter coordinates outbound AI/voice forwards from a BFF to
 // worker peers (Voice / Agent) and routes responses back to the
 // originating handler.
 //
 // One instance lives on the BFF (injected via Server.SetAiForwarder).
 // The gRPC AI handlers call Forward() to dispatch a request; the router
 // finds a healthy peer of the target node type, wraps the caller's
-// original MemqlClientMessage into an SIForwardRequest, sends it, and
+// original MemqlClientMessage into an AiForwardRequest, sends it, and
 // returns a channel that emits each response MemqlServerMessage the
 // worker produces. Responses arrive here via Dispatch(), which is hooked
 // into the peer connection's inbound message handler.
-type SIForwardRouter struct {
+type AiForwardRouter struct {
 	peerMgr *node.PeerManager
 	logger  *slog.Logger
 
@@ -55,13 +55,13 @@ type inflightEntry struct {
 	peer   *node.PeerEntry
 }
 
-// NewAiForwardRouter constructs an SIForwardRouter. It's a BFF-only
+// NewAiForwardRouter constructs an AiForwardRouter. It's a BFF-only
 // component; non-BFF binaries leave the field nil on the service.
-func NewAiForwardRouter(peerMgr *node.PeerManager, logger *slog.Logger) *SIForwardRouter {
+func NewAiForwardRouter(peerMgr *node.PeerManager, logger *slog.Logger) *AiForwardRouter {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &SIForwardRouter{
+	return &AiForwardRouter{
 		peerMgr:  peerMgr,
 		logger:   logger,
 		inflight: make(map[string]*inflightEntry),
@@ -71,13 +71,13 @@ func NewAiForwardRouter(peerMgr *node.PeerManager, logger *slog.Logger) *SIForwa
 // Forward sends `envelope` to a healthy peer of `targetType` and returns
 // a channel that emits each MemqlServerMessage the worker produces. The
 // channel is closed once the worker signals done=true on its
-// SIForwardResponse, or when ctx is cancelled.
+// AiForwardResponse, or when ctx is cancelled.
 //
 // requestId correlates the response stream; it should match
 // envelope.MessageId so the worker's response's correlate_to (and the
 // client's expectation) match. On error (no peer available, failed to
 // queue on peer connection) the channel is not returned.
-func (r *SIForwardRouter) Forward(
+func (r *AiForwardRouter) Forward(
 	ctx context.Context,
 	requestId string,
 	targetType node.NodeType,
@@ -124,8 +124,8 @@ func (r *SIForwardRouter) Forward(
 		if peer.Connection != nil {
 			peer.Connection.Send(&nodev1.NodeClientMessage{
 				MessageId: id.NewShortId(),
-				Payload: &nodev1.NodeClientMessage_SiForwardCancel{
-					SiForwardCancel: &nodev1.SIForwardCancel{RequestId: requestId},
+				Payload: &nodev1.NodeClientMessage_AiForwardCancel{
+					AiForwardCancel: &nodev1.AiForwardCancel{RequestId: requestId},
 				},
 			})
 		}
@@ -133,14 +133,14 @@ func (r *SIForwardRouter) Forward(
 
 	// Dispatch the request.
 	_ = partition
-	fwd := &nodev1.SIForwardRequest{
+	fwd := &nodev1.AiForwardRequest{
 		RequestId:     requestId,
 		Auth:          authClaims,
 		MemqlEnvelope: envBytes,
 	}
 	msg := &nodev1.NodeClientMessage{
 		MessageId: id.NewShortId(),
-		Payload:   &nodev1.NodeClientMessage_SiForwardRequest{SiForwardRequest: fwd},
+		Payload:   &nodev1.NodeClientMessage_AiForwardRequest{AiForwardRequest: fwd},
 	}
 	if peer.Connection == nil {
 		r.cleanupInflight(requestId)
@@ -157,11 +157,11 @@ func (r *SIForwardRouter) Forward(
 	return respCh, nil
 }
 
-// Dispatch routes an inbound SIForwardResponse from a worker back to
+// Dispatch routes an inbound AiForwardResponse from a worker back to
 // the caller's response channel. Installed as a hook on peer connections
 // (see node.PeerManager's per-connection onMessage wiring in
 // parent_connector.go / direct_peer.go).
-func (r *SIForwardRouter) Dispatch(resp *nodev1.SIForwardResponse) {
+func (r *AiForwardRouter) Dispatch(resp *nodev1.AiForwardResponse) {
 	if r == nil || resp == nil {
 		return
 	}
@@ -201,7 +201,7 @@ func (r *SIForwardRouter) Dispatch(resp *nodev1.SIForwardResponse) {
 
 // cleanupInflight removes the request from the inflight table and
 // closes its response channel so the caller unblocks.
-func (r *SIForwardRouter) cleanupInflight(requestId string) {
+func (r *AiForwardRouter) cleanupInflight(requestId string) {
 	r.mu.Lock()
 	entry, ok := r.inflight[requestId]
 	if ok {
@@ -221,7 +221,7 @@ func (r *SIForwardRouter) cleanupInflight(requestId string) {
 //
 // Errors if no inflight entry exists for `requestId` or if the peer's
 // outbound connection has gone away since Start.
-func (r *SIForwardRouter) ForwardContinuation(
+func (r *AiForwardRouter) ForwardContinuation(
 	requestId string,
 	authClaims map[string]string,
 	partition string,
@@ -252,8 +252,8 @@ func (r *SIForwardRouter) ForwardContinuation(
 	_ = partition
 	entry.peer.Connection.Send(&nodev1.NodeClientMessage{
 		MessageId: id.NewShortId(),
-		Payload: &nodev1.NodeClientMessage_SiForwardRequest{
-			SiForwardRequest: &nodev1.SIForwardRequest{
+		Payload: &nodev1.NodeClientMessage_AiForwardRequest{
+			AiForwardRequest: &nodev1.AiForwardRequest{
 				RequestId:     requestId,
 				Auth:          authClaims,
 				MemqlEnvelope: envBytes,
@@ -271,7 +271,7 @@ func (r *SIForwardRouter) ForwardContinuation(
 // HasInflight reports whether a forward stream is currently open for the
 // given request_id. Useful for the BFF-side continuation handlers to
 // distinguish "stream never started" from "stream already closed".
-func (r *SIForwardRouter) HasInflight(requestId string) bool {
+func (r *AiForwardRouter) HasInflight(requestId string) bool {
 	if r == nil {
 		return false
 	}
@@ -283,7 +283,7 @@ func (r *SIForwardRouter) HasInflight(requestId string) bool {
 
 // selectPeer picks a healthy peer of the given type. Prefers HEALTHY
 // over DEGRADED; errors if no peer is available.
-func (r *SIForwardRouter) selectPeer(targetType node.NodeType) (*node.PeerEntry, error) {
+func (r *AiForwardRouter) selectPeer(targetType node.NodeType) (*node.PeerEntry, error) {
 	peers := r.peerMgr.ByType(targetType)
 	if len(peers) == 0 {
 		return nil, fmt.Errorf("no %s node available", targetType)
@@ -319,16 +319,16 @@ func (r *SIForwardRouter) selectPeer(targetType node.NodeType) (*node.PeerEntry,
 // -----------------------------------------------------------------------------
 
 // HandleForwardedRequest is the entry point invoked by the NodeService
-// stream_handler when it receives an SIForwardRequest. It unpacks the
+// stream_handler when it receives an AiForwardRequest. It unpacks the
 // embedded MemqlClientMessage, reconstructs the caller's auth context,
-// builds a thin session that sends responses back via SIForwardResponse,
+// builds a thin session that sends responses back via AiForwardResponse,
 // and dispatches to the same handler the client would have hit directly.
 //
 // send is the NodeService server's send function (sends NodeServerMessage
 // back to the originating BFF).
 func (s *service) HandleForwardedRequest(
 	ctx context.Context,
-	req *nodev1.SIForwardRequest,
+	req *nodev1.AiForwardRequest,
 	send func(*nodev1.NodeServerMessage) error,
 ) {
 	if req == nil || send == nil {
@@ -355,7 +355,7 @@ func (s *service) HandleForwardedRequest(
 
 	// Build a forwardedStream that implements MemqlService_StreamServer
 	// by wrapping each outbound MemqlServerMessage into an
-	// SIForwardResponse delivered via `send`.
+	// AiForwardResponse delivered via `send`.
 	fs := &forwardedStream{
 		ctx:       ctx,
 		requestId: requestId,
@@ -379,20 +379,20 @@ func (s *service) HandleForwardedRequest(
 
 	// Dispatch to the appropriate handler based on the envelope payload.
 	switch payload := envelope.GetPayload().(type) {
-	case *memqlv1.MemqlClientMessage_SiTranscribe:
-		_ = sess.handleAiTranscribe(&envelope, payload.SiTranscribe)
-	case *memqlv1.MemqlClientMessage_SiTranscribeStreamStart:
-		_ = sess.handleAiTranscribeStreamStart(&envelope, payload.SiTranscribeStreamStart)
-	case *memqlv1.MemqlClientMessage_SiTranscribeStreamChunk:
-		_ = sess.handleAiTranscribeStreamChunk(&envelope, payload.SiTranscribeStreamChunk)
-	case *memqlv1.MemqlClientMessage_SiTranscribeStreamEnd:
-		_ = sess.handleAiTranscribeStreamEnd(&envelope, payload.SiTranscribeStreamEnd)
-	case *memqlv1.MemqlClientMessage_SiSpeech:
-		_ = sess.handleAiSpeech(&envelope, payload.SiSpeech)
-	case *memqlv1.MemqlClientMessage_SiChat:
-		_ = sess.handleAiChat(&envelope, payload.SiChat)
-	case *memqlv1.MemqlClientMessage_SiSuggest:
-		_ = sess.handleAiSuggest(&envelope, payload.SiSuggest)
+	case *memqlv1.MemqlClientMessage_AiTranscribe:
+		_ = sess.handleAiTranscribe(&envelope, payload.AiTranscribe)
+	case *memqlv1.MemqlClientMessage_AiTranscribeStreamStart:
+		_ = sess.handleAiTranscribeStreamStart(&envelope, payload.AiTranscribeStreamStart)
+	case *memqlv1.MemqlClientMessage_AiTranscribeStreamChunk:
+		_ = sess.handleAiTranscribeStreamChunk(&envelope, payload.AiTranscribeStreamChunk)
+	case *memqlv1.MemqlClientMessage_AiTranscribeStreamEnd:
+		_ = sess.handleAiTranscribeStreamEnd(&envelope, payload.AiTranscribeStreamEnd)
+	case *memqlv1.MemqlClientMessage_AiSpeech:
+		_ = sess.handleAiSpeech(&envelope, payload.AiSpeech)
+	case *memqlv1.MemqlClientMessage_AiChat:
+		_ = sess.handleAiChat(&envelope, payload.AiChat)
+	case *memqlv1.MemqlClientMessage_AiSuggest:
+		_ = sess.handleAiSuggest(&envelope, payload.AiSuggest)
 	case *memqlv1.MemqlClientMessage_ListTools:
 		_ = sess.handleListTools(&envelope, payload.ListTools)
 	case *memqlv1.MemqlClientMessage_CallTool:
@@ -400,7 +400,7 @@ func (s *service) HandleForwardedRequest(
 	case *memqlv1.MemqlClientMessage_AgentGenerateTurn:
 		// Cognition -> agent forward: run the agent replier which streams
 		// AgentGenerateTurnDelta + AgentGenerateTurnComplete through the
-		// forwardedStream, each wrapped in SIForwardResponse.
+		// forwardedStream, each wrapped in AiForwardResponse.
 		_ = sess.handleAgentGenerateTurn(&envelope, payload.AgentGenerateTurn)
 	case *memqlv1.MemqlClientMessage_ClientToolResult:
 		// Cluster relay: a client-executed tool ran in the browser and
@@ -423,12 +423,12 @@ func (s *service) HandleForwardedRequest(
 
 	// The handlers are async (spawn goroutines). We do NOT send a final
 	// "done" marker here because the goroutines send their own final
-	// MemqlServerMessage (SIChatResult, SISpeechResult, etc.), and
-	// forwardedStream.Send marks the corresponding SIForwardResponse
+	// MemqlServerMessage (AiChatResult, AiSpeechResult, etc.), and
+	// forwardedStream.Send marks the corresponding AiForwardResponse
 	// with done=true when it sees a terminal response type.
 }
 
-// CancelForwardedRequest is the worker-side hook for SIForwardCancel
+// CancelForwardedRequest is the worker-side hook for AiForwardCancel
 // messages. For now we just log; the handlers exit naturally when
 // their context is cancelled (the NodeService stream's Context()
 // cancels when the peer connection drops), and a future refinement
@@ -443,12 +443,12 @@ func (s *service) CancelForwardedRequest(_ context.Context, requestId string) {
 // aiForwardHandlerShim defers resolution of the worker-side handler
 // until after Run() has populated the service. Registered with the
 // NodeServer during bootstrap on worker binaries; the NodeServer reads
-// the shim once per inbound SIForwardRequest.
+// the shim once per inbound AiForwardRequest.
 type aiForwardHandlerShim struct {
 	ref *serviceRef
 }
 
-func (h *aiForwardHandlerShim) HandleForwardedRequest(ctx context.Context, req *nodev1.SIForwardRequest, send func(*nodev1.NodeServerMessage) error) {
+func (h *aiForwardHandlerShim) HandleForwardedRequest(ctx context.Context, req *nodev1.AiForwardRequest, send func(*nodev1.NodeServerMessage) error) {
 	if h == nil || h.ref == nil || h.ref.svc == nil {
 		// Service not yet constructed (Run() hasn't fired) or binary
 		// doesn't have the worker-side service configured. Surface a
@@ -457,8 +457,8 @@ func (h *aiForwardHandlerShim) HandleForwardedRequest(ctx context.Context, req *
 		_ = send(&nodev1.NodeServerMessage{
 			MessageId:   id.NewShortId(),
 			CorrelateTo: req.GetRequestId(),
-			Payload: &nodev1.NodeServerMessage_SiForwardResponse{
-				SiForwardResponse: &nodev1.SIForwardResponse{
+			Payload: &nodev1.NodeServerMessage_AiForwardResponse{
+				AiForwardResponse: &nodev1.AiForwardResponse{
 					RequestId:      req.GetRequestId(),
 					MemqlServerMsg: errBytes,
 					Done:           true,
@@ -524,8 +524,8 @@ func (s *service) sendForwardError(
 	_ = send(&nodev1.NodeServerMessage{
 		MessageId:   id.NewShortId(),
 		CorrelateTo: requestId,
-		Payload: &nodev1.NodeServerMessage_SiForwardResponse{
-			SiForwardResponse: &nodev1.SIForwardResponse{
+		Payload: &nodev1.NodeServerMessage_AiForwardResponse{
+			AiForwardResponse: &nodev1.AiForwardResponse{
 				RequestId:      requestId,
 				MemqlServerMsg: errBytes,
 				Done:           true,
@@ -536,7 +536,7 @@ func (s *service) sendForwardError(
 
 // -----------------------------------------------------------------------------
 // forwardedStream: implements MemqlService_StreamServer for worker-side
-// forwarded requests. Send wraps into SIForwardResponse; the other
+// forwarded requests. Send wraps into AiForwardResponse; the other
 // methods are no-ops appropriate to a one-shot server-push context.
 // -----------------------------------------------------------------------------
 
@@ -556,17 +556,17 @@ func (f *forwardedStream) Send(msg *memqlv1.MemqlServerMessage) error {
 		return err
 	}
 
-	// Mark the SIForwardResponse as terminal when the payload is itself
-	// a terminal response type. Streaming chat sends SIChunk for each
-	// delta; the terminal is SIChatResult. For non-streaming types the
+	// Mark the AiForwardResponse as terminal when the payload is itself
+	// a terminal response type. Streaming chat sends AiChunk for each
+	// delta; the terminal is AiChatResult. For non-streaming types the
 	// single response is the terminal.
 	done := isTerminalServerPayload(msg.GetPayload())
 
 	wrapped := &nodev1.NodeServerMessage{
 		MessageId:   id.NewShortId(),
 		CorrelateTo: f.requestId,
-		Payload: &nodev1.NodeServerMessage_SiForwardResponse{
-			SiForwardResponse: &nodev1.SIForwardResponse{
+		Payload: &nodev1.NodeServerMessage_AiForwardResponse{
+			AiForwardResponse: &nodev1.AiForwardResponse{
 				RequestId:      f.requestId,
 				MemqlServerMsg: b,
 				Done:           done,
@@ -603,15 +603,15 @@ func (f *forwardedStream) RecvMsg(_ any) error { return io.EOF }
 
 // isTerminalServerPayload reports whether a MemqlServerMessage payload
 // represents the last message for its request (so the enclosing
-// SIForwardResponse can carry done=true). Stream chunks are NOT
-// terminal; their following SIChatResult is.
+// AiForwardResponse can carry done=true). Stream chunks are NOT
+// terminal; their following AiChatResult is.
 func isTerminalServerPayload(p any) bool {
 	switch p.(type) {
-	case *memqlv1.MemqlServerMessage_SiChatResult,
-		*memqlv1.MemqlServerMessage_SiSpeechResult,
-		*memqlv1.MemqlServerMessage_SiTranscribeResult,
-		*memqlv1.MemqlServerMessage_SiTranscribeStreamComplete,
-		*memqlv1.MemqlServerMessage_SiSuggestResult,
+	case *memqlv1.MemqlServerMessage_AiChatResult,
+		*memqlv1.MemqlServerMessage_AiSpeechResult,
+		*memqlv1.MemqlServerMessage_AiTranscribeResult,
+		*memqlv1.MemqlServerMessage_AiTranscribeStreamComplete,
+		*memqlv1.MemqlServerMessage_AiSuggestResult,
 		*memqlv1.MemqlServerMessage_ListToolsResult,
 		*memqlv1.MemqlServerMessage_CallToolResult,
 		// Agent-turn forwarding: Delta is streamed mid-turn (not
@@ -645,7 +645,7 @@ func nodeTargetForTranscribe() node.NodeType { return node.NodeTypeVoice }
 
 // shouldProxyAI reports whether an AI handler should short-circuit
 // to the forwarder rather than executing locally. True when:
-//   - an SIForwardRouter is installed (BFF binary with at least one
+//   - an AiForwardRouter is installed (BFF binary with at least one
 //     worker peer),
 //   - a healthy peer of the target type is available, AND
 //   - this binary is compiled as a BFF (the compile-time node type

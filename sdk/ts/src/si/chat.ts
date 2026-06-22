@@ -1,17 +1,17 @@
 // siChat / siChatStream wrap MemqlClientMessage.si_chat. The
 // non-streaming path is a single correlateTo round-trip resolving
-// to SIChatResult. The streaming path opens a registerStream
-// session keyed by requestId so the interleaved SIStreamChunk
+// to AiChatResult. The streaming path opens a registerStream
+// session keyed by requestId so the interleaved AiStreamChunk
 // frames flow to the caller as deltas before the terminal
-// SIChatResult lands.
+// AiChatResult lands.
 
 import type { Dispatcher } from "../client/dispatcher.js";
 import { newShortId } from "../client/id.js";
 import {
   readServerPayload,
   type ServerMessage,
-  type SIChatMessageWire,
-  type SIStreamChunkPayload,
+  type AiChatMessageWire,
+  type AiStreamChunkPayload,
 } from "../client/wire.js";
 
 export interface SiChatMessage {
@@ -34,23 +34,23 @@ export interface SiChatStreamDelta {
   index: number;
   done: boolean;
   // Exactly one of textDelta / jsonDelta / metadata is set per
-  // chunk, mirroring the SIStreamChunk oneof.
+  // chunk, mirroring the AiStreamChunk oneof.
   textDelta?: string;
   jsonDelta?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
 }
 
 export interface SiChatStreamHandle {
-  // deltas yields every SIStreamChunk frame in order and ends
-  // when the terminal SIChatResult lands (or the session aborts).
+  // deltas yields every AiStreamChunk frame in order and ends
+  // when the terminal AiChatResult lands (or the session aborts).
   deltas: AsyncIterable<SiChatStreamDelta>;
-  // result resolves with the assembled SIChatResult after the
+  // result resolves with the assembled AiChatResult after the
   // delta stream ends. Throws on session error or abort.
   result: Promise<SiChatResult>;
 }
 
 // siChat issues a non-streaming chat completion (single
-// SIChatResult reply). Throws on QueryError or transport failure.
+// AiChatResult reply). Throws on QueryError or transport failure.
 export async function siChat(
   dispatcher: Dispatcher,
   messages: SiChatMessage[],
@@ -90,7 +90,7 @@ export async function siChat(
 
 // siChatStream issues a streaming chat completion. The returned
 // handle exposes the interleaved chunk frames as an async iterable
-// and resolves to the final SIChatResult once the assembled reply
+// and resolves to the final AiChatResult once the assembled reply
 // lands. Cancel mid-stream via opts.signal.
 export function siChatStream(
   dispatcher: Dispatcher,
@@ -218,7 +218,7 @@ export function siChatStream(
   return { deltas, result: resultPromise };
 }
 
-function toWireMessage(m: SiChatMessage): SIChatMessageWire {
+function toWireMessage(m: SiChatMessage): AiChatMessageWire {
   return {
     role: m.role,
     content: m.content,
@@ -226,7 +226,7 @@ function toWireMessage(m: SiChatMessage): SIChatMessageWire {
   };
 }
 
-function fromWireMessage(m: SIChatMessageWire | undefined): SiChatMessage {
+function fromWireMessage(m: AiChatMessageWire | undefined): SiChatMessage {
   return {
     role: m?.role ?? "",
     content: m?.content ?? "",
@@ -234,7 +234,7 @@ function fromWireMessage(m: SIChatMessageWire | undefined): SiChatMessage {
   };
 }
 
-function chunkToDelta(c: SIStreamChunkPayload): SiChatStreamDelta {
+function chunkToDelta(c: AiStreamChunkPayload): SiChatStreamDelta {
   return {
     index: numberFromWire(c.index),
     done: c.done === true,

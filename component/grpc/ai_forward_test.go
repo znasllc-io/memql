@@ -60,10 +60,10 @@ func TestAiForwardRouter_DispatchRoutesByRequestId(t *testing.T) {
 	serverMsg := &memqlv1.MemqlServerMessage{
 		MessageId:   "resp-1",
 		CorrelateTo: "req-42",
-		Payload: &memqlv1.MemqlServerMessage_SiChatResult{
-			SiChatResult: &memqlv1.SIChatResult{
+		Payload: &memqlv1.MemqlServerMessage_AiChatResult{
+			AiChatResult: &memqlv1.AiChatResult{
 				RequestId: "req-42",
-				Message: &memqlv1.SIChatMessage{
+				Message: &memqlv1.AiChatMessage{
 					Role:    "assistant",
 					Content: "hello",
 				},
@@ -75,7 +75,7 @@ func TestAiForwardRouter_DispatchRoutesByRequestId(t *testing.T) {
 		t.Fatalf("marshal server msg: %v", err)
 	}
 
-	router.Dispatch(&nodev1.SIForwardResponse{
+	router.Dispatch(&nodev1.AiForwardResponse{
 		RequestId:      "req-42",
 		MemqlServerMsg: raw,
 		Done:           true,
@@ -86,8 +86,8 @@ func TestAiForwardRouter_DispatchRoutesByRequestId(t *testing.T) {
 		if got == nil {
 			t.Fatal("channel delivered nil message")
 		}
-		if got.GetSiChatResult().GetMessage().GetContent() != "hello" {
-			t.Errorf("unexpected content: %q", got.GetSiChatResult().GetMessage().GetContent())
+		if got.GetAiChatResult().GetMessage().GetContent() != "hello" {
+			t.Errorf("unexpected content: %q", got.GetAiChatResult().GetMessage().GetContent())
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("timed out waiting for dispatched message")
@@ -122,7 +122,7 @@ func TestAiForwardRouter_DispatchOrphanedResponse(t *testing.T) {
 	router := NewAiForwardRouter(peerMgr, testLogger())
 
 	// No inflight entry. Dispatch should be a no-op.
-	router.Dispatch(&nodev1.SIForwardResponse{
+	router.Dispatch(&nodev1.AiForwardResponse{
 		RequestId: "does-not-exist",
 		Done:      true,
 	})
@@ -224,17 +224,17 @@ func TestAiForwardRouter_ForwardContinuation_PeerWithoutConnection(t *testing.T)
 }
 
 // TestIsTerminalServerPayload_StreamComplete verifies the terminal
-// marker includes SITranscribeStreamComplete so the BFF's inflight
+// marker includes AiTranscribeStreamComplete so the BFF's inflight
 // closes on the stream's final message.
 func TestIsTerminalServerPayload_StreamComplete(t *testing.T) {
-	complete := &memqlv1.MemqlServerMessage_SiTranscribeStreamComplete{}
+	complete := &memqlv1.MemqlServerMessage_AiTranscribeStreamComplete{}
 	if !isTerminalServerPayload(complete) {
-		t.Error("SITranscribeStreamComplete should be terminal")
+		t.Error("AiTranscribeStreamComplete should be terminal")
 	}
 
 	// Delta must remain non-terminal (many Deltas flow before Complete).
-	delta := &memqlv1.MemqlServerMessage_SiTranscribeStreamDelta{}
+	delta := &memqlv1.MemqlServerMessage_AiTranscribeStreamDelta{}
 	if isTerminalServerPayload(delta) {
-		t.Error("SITranscribeStreamDelta must not be terminal")
+		t.Error("AiTranscribeStreamDelta must not be terminal")
 	}
 }

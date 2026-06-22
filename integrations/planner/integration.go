@@ -66,7 +66,7 @@ type Engine interface {
 // AgentForwarder is the wire-level interface the planner uses to
 // ship AgentGenerateTurnMsg to an agent peer. Same shape as
 // cognition's AgentForwarder; satisfied on cluster-mode planner
-// binaries by memqlgrpc.SIForwardRouter (separate instance from the
+// binaries by memqlgrpc.AiForwardRouter (separate instance from the
 // cognition one -- both routers connect to the same agent peer mesh
 // but maintain independent in-flight request tables).
 type AgentForwarder interface {
@@ -282,7 +282,7 @@ func NewPlannerIntegration(_ context.Context, opts ...PlannerArg) (*PlannerInteg
 }
 
 // SetAgentForwarder installs the agent-turn forwarder. Called from
-// app.cluster after the SIForwardRouter is constructed. Without a
+// app.cluster after the AiForwardRouter is constructed. Without a
 // forwarder, plan-execution dispatches log a warning and skip.
 func (p *PlannerIntegration) SetAgentForwarder(fwd AgentForwarder) {
 	if p == nil {

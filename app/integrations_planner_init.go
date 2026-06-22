@@ -24,7 +24,7 @@ import (
 // integrations are happy with the same shim.
 //
 // AgentForwarder is installed separately via cluster.go after the
-// SIForwardRouter is constructed. Without a forwarder, plan-
+// AiForwardRouter is constructed. Without a forwarder, plan-
 // execution dispatches log a warning and skip; that's the
 // intended behavior on dev / single-binary builds where the
 // forwarder doesn't exist.
@@ -54,7 +54,7 @@ func (a *App) setupPlannerIntegration() {
 	}
 
 	// Stash on the app so cluster.go can wire the agent forwarder
-	// onto it after the SIForwardRouter resolves.
+	// onto it after the AiForwardRouter resolves.
 	a.plannerIntegration = plannerIntegration
 	if a.agentForwarder != nil {
 		plannerIntegration.SetAgentForwarder(a.agentForwarder)

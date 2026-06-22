@@ -26,8 +26,8 @@ import (
 // stream:<requestId>:
 //
 //   - Producer (worker -- agent for token, voice for audio): instead of pushing
-//     each SIStreamChunk / SITranscribeStreamDelta + the terminal back over the
-//     forwardedStream (the ad-hoc SIForwardResponse mesh push that the star-mesh
+//     each AiStreamChunk / AiTranscribeStreamDelta + the terminal back over the
+//     forwardedStream (the ad-hoc AiForwardResponse mesh push that the star-mesh
 //     bug drops/duplicates across replicas), the handler opens a StreamSession on
 //     stream:<requestId> and emits Start -> Delta* -> Complete/Fail. The durable
 //     outbox row is the cross-replica guarantee; the mesh fast-path (memql#1289)
@@ -41,7 +41,7 @@ import (
 //     fixes; today a streamed chunk is lost the same way a reply is).
 //
 // The wire contract to the browser is UNCHANGED: the consumer reconstructs the
-// same MemqlServerMessage payloads (SIChunk / SIChatResult / Transcribe Delta /
+// same MemqlServerMessage payloads (AiChunk / AiChatResult / Transcribe Delta /
 // Complete) the direct path produced, so the SPA needs no change.
 
 // streamConsumerID is the durable cursor identity for a bff consuming a stream.
@@ -73,7 +73,7 @@ func (s *service) streamingOverSubstrate() bool {
 
 // isForwardedSession reports whether this streamSession is serving a request
 // FORWARDED from a bff (the worker side: s.stream is a *forwardedStream wrapping
-// SIForwardResponse), as opposed to a direct client stream (single-binary, where
+// AiForwardResponse), as opposed to a direct client stream (single-binary, where
 // s.stream IS the browser's stream). The streaming producer routes to the
 // substrate ONLY on the forwarded path: that is the cross-node delivery leg the
 // substrate fixes. On a direct client stream there is no cross-node hop and no
@@ -110,7 +110,7 @@ func (s *service) newTranscriptStreamSession(requestId string) *node.StreamSessi
 // its handler and produces frames to stream:<requestId>) and starts the given
 // consumer, which subscribes stream:<requestId> and renders frames to the
 // client. The forwarded-response channel from the worker carries only the
-// terminal SIForwardResponse{Done} (the worker no longer sends streamed payloads
+// terminal AiForwardResponse{Done} (the worker no longer sends streamed payloads
 // over it), so it is drained-and-discarded to clean up the inflight entry; the
 // substrate is the single delivery path for the streamed content.
 func (s *streamSession) proxyAIStream(
@@ -154,7 +154,7 @@ func (s *streamSession) proxyAIStream(
 // the client via consumeTokenStream.
 func (s *streamSession) produceTokenStreamToSubstrate(ctx context.Context, requestId string, chunks <-chan common.StreamChunk) {
 	// The streamed content rides the substrate, but the forward inflight on the
-	// bff still needs a terminal SIForwardResponse{Done} to be cleaned up (the
+	// bff still needs a terminal AiForwardResponse{Done} to be cleaned up (the
 	// content no longer flows over forwardedStream). Emit one bare terminal over
 	// the forwardedStream on EVERY exit path. The bff's proxyAIStream drains and
 	// DISCARDS forward responses, so this terminal closes the inflight without
@@ -201,8 +201,8 @@ func (s *streamSession) produceTokenStreamToSubstrate(ctx context.Context, reque
 // closeForwardInflight sends a single bare terminal over the worker's
 // forwardedStream so the bff's Forward() inflight entry is cleaned up once the
 // streamed content has been delivered over the substrate. forwardedStream.Send
-// marks the enclosing SIForwardResponse Done because the payload is a terminal
-// type (SIChatResult). It is a no-op when s.stream is not a forwardedStream
+// marks the enclosing AiForwardResponse Done because the payload is a terminal
+// type (AiChatResult). It is a no-op when s.stream is not a forwardedStream
 // (single-binary), which never reaches the substrate producer anyway. The
 // payload here is intentionally empty: it exists only to close the inflight and
 // is discarded by the bff (proxyAIStream drains forward responses).
@@ -211,15 +211,15 @@ func (s *streamSession) closeForwardInflight(requestId string) {
 		return
 	}
 	_ = s.stream.Send(&memqlv1.MemqlServerMessage{
-		Payload: &memqlv1.MemqlServerMessage_SiChatResult{
-			SiChatResult: &memqlv1.SIChatResult{RequestId: requestId},
+		Payload: &memqlv1.MemqlServerMessage_AiChatResult{
+			AiChatResult: &memqlv1.AiChatResult{RequestId: requestId},
 		},
 	})
 }
 
 // newTranscriptStreamSink returns a send func that the worker-side transcribe
 // handler uses in place of the direct stream.Send: it translates each outgoing
-// SITranscribeStreamDelta / SITranscribeStreamComplete MemqlServerMessage into an
+// AiTranscribeStreamDelta / AiTranscribeStreamComplete MemqlServerMessage into an
 // ordered StreamSession frame on stream:<requestId>. The session is started
 // lazily on first use and the Complete message ends it; the isFinal / confidence
 // / duration / provider fields ride the frame Meta so the consumer reconstructs
@@ -245,28 +245,28 @@ func (s *service) newTranscriptStreamSink(ctx context.Context, requestId string,
 			return
 		}
 		_ = rawSend(&memqlv1.MemqlServerMessage{
-			Payload: &memqlv1.MemqlServerMessage_SiTranscribeStreamComplete{
-				SiTranscribeStreamComplete: &memqlv1.SITranscribeStreamComplete{RequestId: requestId},
+			Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamComplete{
+				AiTranscribeStreamComplete: &memqlv1.AiTranscribeStreamComplete{RequestId: requestId},
 			},
 		})
 	}
 	return func(m *memqlv1.MemqlServerMessage) error {
 		switch p := m.GetPayload().(type) {
-		case *memqlv1.MemqlServerMessage_SiTranscribeStreamDelta:
+		case *memqlv1.MemqlServerMessage_AiTranscribeStreamDelta:
 			if err := ensureStart(); err != nil {
 				return err
 			}
-			d := p.SiTranscribeStreamDelta
+			d := p.AiTranscribeStreamDelta
 			_, err := sess.DeltaWithMeta(ctx, d.GetText(), map[string]any{
 				"isFinal":    d.GetIsFinal(),
 				"confidence": float64(d.GetConfidence()),
 			})
 			return err
-		case *memqlv1.MemqlServerMessage_SiTranscribeStreamComplete:
+		case *memqlv1.MemqlServerMessage_AiTranscribeStreamComplete:
 			if err := ensureStart(); err != nil {
 				return err
 			}
-			c := p.SiTranscribeStreamComplete
+			c := p.AiTranscribeStreamComplete
 			_, err := sess.Complete(ctx, c.GetText(), map[string]any{
 				"durationMs": float64(c.GetDurationMs()),
 				"provider":   c.GetProvider(),
@@ -288,12 +288,12 @@ func (s *service) newTranscriptStreamSink(ctx context.Context, requestId string,
 }
 
 // consumeTokenStream subscribes the bff to a token stream and renders each frame
-// to the client as the SIChunk deltas + the terminal SIChatResult, exactly as
+// to the client as the AiChunk deltas + the terminal AiChatResult, exactly as
 // the direct streaming path produced them. It runs in its own goroutine for the
 // life of the stream (until terminal or ctx cancellation) and Acks each frame to
 // advance the durable cursor. The Start frame carries no client-visible payload
 // (it opens the durable stream); Delta frames carry token text; the Complete
-// frame carries the final assembled text for the SIChatResult.
+// frame carries the final assembled text for the AiChatResult.
 func (s *streamSession) consumeTokenStream(ctx context.Context, correlate, requestId string) {
 	frames, ack, err := node.SubscribeStreamFrames(ctx, s.service.deliverySubstrate, requestId, s.service.streamConsumerID())
 	if err != nil {
@@ -308,12 +308,12 @@ func (s *streamSession) consumeTokenStream(ctx context.Context, correlate, reque
 		case node.StreamPhaseDelta:
 			if frame.Data != "" {
 				s.renderToClient(correlate, &memqlv1.MemqlServerMessage{
-					Payload: &memqlv1.MemqlServerMessage_SiChunk{
-						SiChunk: &memqlv1.SIStreamChunk{
+					Payload: &memqlv1.MemqlServerMessage_AiChunk{
+						AiChunk: &memqlv1.AiStreamChunk{
 							StreamId:  requestId,
 							RequestId: requestId,
 							Index:     idx,
-							Chunk:     &memqlv1.SIStreamChunk_TextDelta{TextDelta: frame.Data},
+							Chunk:     &memqlv1.AiStreamChunk_TextDelta{TextDelta: frame.Data},
 						},
 					},
 				})
@@ -321,10 +321,10 @@ func (s *streamSession) consumeTokenStream(ctx context.Context, correlate, reque
 			}
 		case node.StreamPhaseComplete:
 			s.renderToClient(correlate, &memqlv1.MemqlServerMessage{
-				Payload: &memqlv1.MemqlServerMessage_SiChatResult{
-					SiChatResult: &memqlv1.SIChatResult{
+				Payload: &memqlv1.MemqlServerMessage_AiChatResult{
+					AiChatResult: &memqlv1.AiChatResult{
 						RequestId: requestId,
-						Message: &memqlv1.SIChatMessage{
+						Message: &memqlv1.AiChatMessage{
 							Role:    "assistant",
 							Content: frame.Data,
 						},
@@ -341,8 +341,8 @@ func (s *streamSession) consumeTokenStream(ctx context.Context, correlate, reque
 }
 
 // consumeTranscriptStream subscribes the bff to an audio transcription stream
-// and renders each frame to the client as the SITranscribeStreamDelta deltas +
-// the terminal SITranscribeStreamComplete. The Delta frames carry the interim
+// and renders each frame to the client as the AiTranscribeStreamDelta deltas +
+// the terminal AiTranscribeStreamComplete. The Delta frames carry the interim
 // transcript (with isFinal/confidence packed into Meta); the Complete frame
 // carries the final transcript + duration/provider in Meta.
 func (s *streamSession) consumeTranscriptStream(ctx context.Context, correlate, requestId string) {
@@ -357,8 +357,8 @@ func (s *streamSession) consumeTranscriptStream(ctx context.Context, correlate, 
 			// Opening frame: no client-visible payload.
 		case node.StreamPhaseDelta:
 			s.renderToClient(correlate, &memqlv1.MemqlServerMessage{
-				Payload: &memqlv1.MemqlServerMessage_SiTranscribeStreamDelta{
-					SiTranscribeStreamDelta: &memqlv1.SITranscribeStreamDelta{
+				Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamDelta{
+					AiTranscribeStreamDelta: &memqlv1.AiTranscribeStreamDelta{
 						RequestId:  requestId,
 						Text:       frame.Data,
 						IsFinal:    metaBool(frame.Meta, "isFinal"),
@@ -368,8 +368,8 @@ func (s *streamSession) consumeTranscriptStream(ctx context.Context, correlate, 
 			})
 		case node.StreamPhaseComplete:
 			s.renderToClient(correlate, &memqlv1.MemqlServerMessage{
-				Payload: &memqlv1.MemqlServerMessage_SiTranscribeStreamComplete{
-					SiTranscribeStreamComplete: &memqlv1.SITranscribeStreamComplete{
+				Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamComplete{
+					AiTranscribeStreamComplete: &memqlv1.AiTranscribeStreamComplete{
 						RequestId:  requestId,
 						Text:       frame.Data,
 						DurationMs: int64(metaFloat(frame.Meta, "durationMs")),
@@ -381,8 +381,8 @@ func (s *streamSession) consumeTranscriptStream(ctx context.Context, correlate, 
 			_ = s.sendQueryError(requestId, correlate, codes.Internal, frame.Err)
 		case node.StreamPhaseCancel:
 			s.renderToClient(correlate, &memqlv1.MemqlServerMessage{
-				Payload: &memqlv1.MemqlServerMessage_SiTranscribeStreamComplete{
-					SiTranscribeStreamComplete: &memqlv1.SITranscribeStreamComplete{
+				Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamComplete{
+					AiTranscribeStreamComplete: &memqlv1.AiTranscribeStreamComplete{
 						RequestId: requestId,
 						Text:      "",
 						Provider:  metaString(frame.Meta, "provider"),

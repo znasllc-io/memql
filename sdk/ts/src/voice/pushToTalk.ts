@@ -1,6 +1,6 @@
 // pushToTalk mirrors sdk/go/voice/pushtotalk.go. It opens a streaming
 // transcription session, pumps audio bytes from a ReadableStream as
-// SITranscribeStreamChunk envelopes, surfaces deltas via onPartial,
+// AiTranscribeStreamChunk envelopes, surfaces deltas via onPartial,
 // and resolves with the final transcript on completion.
 //
 // The SDK owns the wire protocol; the caller owns the audio source --
@@ -13,7 +13,7 @@ import { newShortId } from "../client/id.js";
 import {
   readServerPayload,
   type ServerMessage,
-  type SITranscribeStreamDeltaPayload,
+  type AiTranscribeStreamDeltaPayload,
 } from "../client/wire.js";
 
 export interface AudioFormat {
@@ -198,7 +198,7 @@ class TranscriptionSession {
   }
 }
 
-function deltaToPartial(d: SITranscribeStreamDeltaPayload): PartialTranscript {
+function deltaToPartial(d: AiTranscribeStreamDeltaPayload): PartialTranscript {
   return {
     text: d.text ?? "",
     isFinal: d.isFinal === true,

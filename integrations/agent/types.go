@@ -1,7 +1,7 @@
 // Package agent hosts the agent-node reply pipeline: prompt rendering, the
 // bounded tool-calling loop, and the non-streaming fallback. Cognition no
 // longer generates agent replies locally -- it ships AgentGenerateTurnMsg
-// to an agent node via NodeService.SIForwardRequest and streams deltas back
+// to an agent node via NodeService.AiForwardRequest and streams deltas back
 // for client fan-out.
 package agent
 

@@ -59,7 +59,7 @@ func TestForwardedAuthClaimsForTurn_DailySpaceNoPlanId(t *testing.T) {
 }
 
 // assertForwardedActorNonEmpty rebuilds the agent-node ctx exactly as the
-// SIForwardRouter does (auth.ContextWithForwardedClaims) and asserts an
+// AiForwardRouter does (auth.ContextWithForwardedClaims) and asserts an
 // actor resolves -- the precondition for taskstamp.createAdHocPlan and the
 // safety recorder to persist instead of failing with "no actor found in
 // context".
