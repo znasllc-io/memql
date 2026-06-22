@@ -147,7 +147,7 @@ func (c *Collector) collectSource(ctx context.Context, m map[string]string) {
 	set(m, "source.trigger", sm.Trigger)
 }
 
-// collectAI extracts synthetic intelligence execution metadata.
+// collectAI extracts AI execution metadata.
 func (c *Collector) collectAI(ctx context.Context, m map[string]string) {
 	si := AIMetaFromContext(ctx)
 	if si == nil {

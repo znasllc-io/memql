@@ -1,12 +1,3 @@
----
-title: Epic 2 — Platform / plugin architecture
-audience: internal
-status: draft
-area: internal
-sinceVersion: "0.9.87"
-owner: znas
----
-
 # Epic 2 — Platform / plugin architecture
 
 Formalize MemQL as a plug-and-play platform: a stable extension contract that

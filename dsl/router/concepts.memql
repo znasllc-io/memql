@@ -25,7 +25,7 @@ concept call {
   agentId             string  @description("Agent whose reply this call was generating; empty for non-agent SI calls (suggest, render, TTS, etc).")
   userId              string  @description("Identity subject of the end-user driving this call, when resolvable. Empty for system-triggered calls.")
   spaceId             string  @description("Cognition space the call ran inside, when applicable.")
-  promptName          string  @description("Name of the MemQL prompt invoked when the call went through InvokeSI (e.g. agentReply, cognitionRouting).")
+  promptName          string  @description("Name of the MemQL prompt invoked when the call went through InvokeAI (e.g. agentReply, cognitionRouting).")
   policyName          string  @description("Routing policy that picked the provider. Reserved for Phase 2+ when policies land; Phase 1 leaves this empty.")
 
   vendor              string  @required  @description("Vendor family: openai or anthropic. Derived from provider .memql @type.")

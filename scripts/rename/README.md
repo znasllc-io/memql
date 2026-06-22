@@ -1,7 +1,7 @@
 # SI → AI rename tooling (epic memql#1889)
 
 A curated, identifier-boundary, allowlist/denylist renamer for the
-"SI / synthetic intelligence" → **AI** sweep. Dry-run by default; emits a
+"SI / AI" → **AI** sweep. Dry-run by default; emits a
 unified diff. Re-runnable and idempotent.
 
 ## Why a tool (not `sed`)

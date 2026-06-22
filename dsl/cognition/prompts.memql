@@ -159,7 +159,7 @@ prompt conductorTurn {
 // carriesAction / answersPriorAgentPrompt / addressedAgentName /
 // confidence / reasoning) and explicitly low-complexity, so it does
 // not need the Mini tier it previously rode. Must stay on an OpenAI
-// provider: only openSIProvider implements CallChatStructured
+// provider: only openAIProvider implements CallChatStructured
 // (json_schema constrained decoding); an Anthropic-class name would
 // silently fall back to the default structured provider.
 @defaultProvider("chat54Nano")

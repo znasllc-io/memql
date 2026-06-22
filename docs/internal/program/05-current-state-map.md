@@ -1,12 +1,3 @@
----
-title: Platformization — Current-state map
-audience: internal
-status: draft
-area: internal
-sinceVersion: "0.9.87"
-owner: znas
----
-
 # MemQL ↔ CoPresent — Current-State Architecture Map
 
 Snapshot of where every concept, integration, tool, and service **currently

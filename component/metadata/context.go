@@ -68,7 +68,7 @@ func SourceMetaFromContext(ctx context.Context) *SourceMeta {
 
 type aiMetaKey struct{}
 
-// AIMeta carries synthetic intelligence execution context.
+// AIMeta carries AI execution context.
 type AIMeta struct {
 	AgentId   string // Agent node ID
 	AgentName string // Agent display name

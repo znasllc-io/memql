@@ -12194,7 +12194,7 @@ func (x *VoiceAgentRealtimeOutputAck) GetErrorMessage() string {
 // emitter: speaking=true on the FIRST output audio frame of a response,
 // speaking=false on response.done. The presence WRITE stays server-side
 // (handleVoiceAgentRealtimeSpeaking): the server resolves the GA's
-// v1:cognition:participant row (resolveSIParticipantId) and upserts presence
+// v1:cognition:participant row (resolveAIParticipantId) and upserts presence
 // state=responding / idle through the engine -- the same writer-of-record and
 // the same graph.node.created.v1:cognition:* mesh routing rule every other
 // presence write uses, so the row reaches the frontend presence stream in

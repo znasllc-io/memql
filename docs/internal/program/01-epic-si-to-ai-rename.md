@@ -1,15 +1,6 @@
----
-title: Epic 1 — SI → AI rename
-audience: internal
-status: draft
-area: internal
-sinceVersion: "0.9.87"
-owner: znas
----
-
 # Epic 1 — SI → AI rename
 
-Rename "SI / synthetic intelligence" to "AI" across DSL, Go, wire/proto, and
+Rename "SI / AI" to "AI" across DSL, Go, wire/proto, and
 frontend, in one coordinated sweep. **Runs first** (before decoupling).
 **Session: S1. Gate produced: G1.**
 
@@ -77,7 +68,7 @@ identifiers (`isSITyping`, etc.). **Do not touch `SIP*` or `TS*` AST names.**
 **Acceptance:** Frontend type-checks + builds against the regenerated gRPC TS.
 
 ## Issue 1.7 — Docs, comments, descriptions + Epic verification [G:1.2,1.3,1.4,1.5,1.6]
-**Scope:** Prose "SI"/"synthetic intelligence" in `@description(...)`, comments,
+**Scope:** Prose "SI"/"AI" in `@description(...)`, comments,
 `*.md`. Then full verification.
 **Acceptance (G1):** All four repos build + test green; a repo-wide scan shows
 zero SI-as-synthetic-intelligence identifiers outside the denylist. Run the

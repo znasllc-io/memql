@@ -1,12 +1,3 @@
----
-title: Platformization — Session handoff prompts
-audience: internal
-status: draft
-area: internal
-sinceVersion: "0.9.87"
-owner: znas
----
-
 # Session Handoff Prompts
 
 Copy-paste prompts to run the four epics as separate sessions with explicit
@@ -54,7 +45,7 @@ order: memql/docs/internal/program/00-master-plan.md and 01-epic-si-to-ai-
 rename.md. Work the repos: znasllc-io/memql, memql-bff-copresent, memql-cockpit,
 and the copresent frontend.
 
-Goal: rename "SI / synthetic intelligence" → "AI" across DSL, Go, wire/proto,
+Goal: rename "SI / AI" → "AI" across DSL, Go, wire/proto,
 and frontend in ONE coordinated sweep, including the breaking proto names.
 Centerpiece: the DSL construct si("prompt", args) → ai(...), and SIExpression →
 AIExpression.

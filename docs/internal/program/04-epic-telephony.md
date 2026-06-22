@@ -1,12 +1,3 @@
----
-title: Epic 4 — Telephony into core
-audience: internal
-status: draft
-area: internal
-sinceVersion: "0.9.87"
-owner: znas
----
-
 # Epic 4 — Telephony into core
 
 Inbound + outbound PSTN calling for MemQL voice agents, via self-hosted
