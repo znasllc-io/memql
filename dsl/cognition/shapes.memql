@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.concepts.{ audioOverride, context, greetSuppression, micState, misrouteFeedback, participant, presence, privateUtterance, session, space, utterance, videoOverride }
+use cognition.concepts.{ audioOverride, participant, presence, session, space, utterance, videoOverride }
 
 @row
 @description("Per-(space, agent) audio override projection")
@@ -14,27 +14,6 @@ shape audioOverride audioOverrideFull {
   payload.setBy
   payload.mode
   payload.active
-  row.createdAt
-}
-
-@row
-@description("Greet-on-join suppression projection (copresent#252)")
-shape greetSuppression greetSuppressionFull {
-  row.id
-  payload.spaceId
-  payload.expiresAt
-  payload.active
-  row.createdAt
-}
-
-@row
-@description("Per-(space, user) mic state projection")
-shape micState micStateFull {
-  row.id
-  payload.spaceId
-  payload.userId
-  payload.muted
-  payload.updatedAt
   row.createdAt
 }
 
@@ -64,23 +43,6 @@ shape session sessionFull {
   payload.streams
   payload.startedAt
   payload.lastActivityAt
-}
-
-@row
-@description("Comprehensive space context snapshot projection")
-shape context spaceContextFull {
-  row.id
-  payload.spaceId
-  payload.snapshot
-  payload.computedAt
-  payload.lastUpdatedAt
-  row.createdAt
-}
-
-@row
-@description("Snapshot-only projection of v1:cognition:space:context rows. Backs the deterministic-comparison path in getLatestSpaceContextSnapshot (memql#290) -- minimises payload size when the consumer only needs payload.snapshot. The previous handwritten runtime query used an inline `{\"snapshot\": node(\"payload.snapshot\")}` template; this shape is its DSL-defined equivalent.")
-shape context spaceContextSnapshotOnly {
-  payload.snapshot
 }
 
 @row
@@ -148,45 +110,9 @@ shape videoOverride videoOverrideFull {
   row.createdAt
 }
 
-// ---- shapes/v1/cognition/privateUtteranceFull.memql ----
-
-@row
-@description("Full projection of a v1:cognition:privateUtterance row. Mirrors v1:cognition:utteranceFull's payload coverage so the SPA's Team-tab renderer can reuse the same UI components -- only the source concept differs. forUserId is included so the frontend can sanity-check the row belongs to the active viewer (defense in depth; the query already filters on it).")
-shape privateUtterance privateUtteranceFull {
-  row.id
-  payload.forUserId
-  payload.spaceId
-  payload.participantId
-  payload.participantType
-  payload.text
-  payload.utteranceType
-  payload.replyToId
-  payload.source
-  payload.active
-  payload.deleted
-  row.createdAt
-  row.createdBy
-}
-
-// ---- shapes/v1/cognition/misrouteFeedbackFull.memql ----
-
-@row
-@description("Full projection of a v1:cognition:misrouteFeedback row. Carries every field on the concept since the tuning corpus is the consumer (read by classifier-eval jobs); the SPA itself doesn't render these rows.")
-shape misrouteFeedback misrouteFeedbackFull {
-  row.id
-  payload.forUserId
-  payload.spaceId
-  payload.originalThread
-  payload.intendedThread
-  payload.confidence
-  payload.why
-  payload.message
-  payload.utteranceId
-  payload.movedToId
-  payload.userAction
-  row.createdAt
-  row.createdBy
-}
+// privateUtteranceFull + misrouteFeedbackFull were extracted to the
+// CoPresent pack (memql-bff-copresent/dsl/copresent/shapes.memql) by
+// Epic 3 (3.3b-i, memql#1991) along with their concepts (ids preserved).
 
 @row
 @description("UI-friendly presence snapshot for a participant. Carries the high-level state (thinking / responding / waiting / ...) plus the short UI label + timing fields. The SPA keys these latest-wins by participantId to drive the presence panel + chat activity indicator.")

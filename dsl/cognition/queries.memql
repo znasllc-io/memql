@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.concepts.{ audioOverride, context, greetSuppression, micState, participant, presence, privateUtterance, session, space, utterance, videoOverride }
+use cognition.concepts.{ audioOverride, participant, presence, session, space, utterance, videoOverride }
 
 @enabled
 @description("Get active human participants in a space")
@@ -43,29 +43,11 @@ query space queryActiveSpaceIds {
   shape   spaceIdOnly
 }
 
-@enabled
-@description("Returns the latest v1:cognition:space:context row for a given spaceId, shaped via spaceContextFull. memql#294 in-tree exerciser for the wired sort + paginate struct-query directives; also directly unblocks memql#288's Go-side migration of getSpaceContextForPrompt away from a handwritten paginate(sort(filter, ...)) runtime query. Returns at most 1 row.")
-query context queryLatestSpaceContextForSpace {
-  args {
-    spaceId  string  @required
-  }
-  filter  payload.spaceId==args.spaceId
-  sort    "createdAt", "desc"
-  paginate 1
-  shape   spaceContextFull
-}
-
-@enabled
-@description("Returns just payload.snapshot from the most-recent v1:cognition:space:context row for a given spaceId. Backs the deterministic-comparison path in getLatestSpaceContextSnapshot (memql#290) -- shape projects only payload.snapshot to minimise wire payload vs. the full spaceContextFull projection (which carries computedAt / lastUpdatedAt / spaceId / id / createdAt the comparison doesn't need). Returns at most 1 row.")
-query context queryLatestSpaceContextSnapshot {
-  args {
-    spaceId  string  @required
-  }
-  filter  payload.spaceId==args.spaceId
-  sort    "createdAt", "desc"
-  paginate 1
-  shape   spaceContextSnapshotOnly
-}
+// queryLatestSpaceContextForSpace + queryLatestSpaceContextSnapshot
+// were extracted to the CoPresent pack
+// (memql-bff-copresent/dsl/copresent/queries.memql) by Epic 3
+// (3.3b-i, memql#1991) along with the v1:cognition:space:context
+// concept (ids preserved).
 
 // ---- queries/v1/cognition/agentInteractionCount.memql ----
 
@@ -216,19 +198,10 @@ query audioOverride queryAudioOverridesForSpace {
   shape   audioOverrideFull
 }
 
-// ---- queries/v1/cognition/activeGreetSuppression.memql ----
-
-@enabled
-@description("Active (non-expired) greet-on-join suppression for a space (copresent#252). greet-on-join reads this before firing the opening greeting and skips when a row is returned. Callers pass `now` (RFC3339); the filter keeps only suppressions whose expiresAt is still in the future.")
-@unbounded("active greet suppressions for a space -- a small bounded set consumed whole")
-query greetSuppression queryActiveGreetSuppression {
-  args {
-    spaceId  string  @required
-    now      string  @required
-  }
-  filter  payload.spaceId==canonicalId(args.spaceId, space) && payload.expiresAt>args.now && traitIsActiveRecord
-  shape   greetSuppressionFull
-}
+// queryActiveGreetSuppression was extracted to the CoPresent pack
+// (memql-bff-copresent/dsl/copresent/queries.memql) by Epic 3
+// (3.3b-i, memql#1991) along with the v1:cognition:greetSuppression
+// concept (ids preserved).
 
 // ---- queries/v1/cognition/expiredArchivedSpaces.memql ----
 
@@ -533,28 +506,10 @@ query participant querySiParticipantForSpace {
   shape   participantFull
 }
 
-// ---- queries/v1/cognition/spaceContext.memql ----
-
-// spaceContext - Query Space Runtime Context Snapshots
-// ===================================================
-//
-// Returns computed runtime context snapshots for spaces.
-// This is designed for AI turn-taking and optional UI awareness (counts, active media).
-//
-// Arguments:
-//   spaceId (string, optional) - Filter by space ID.
-//
-
-@enabled
-@description("Returns runtime context snapshots for spaces. Optional filter: spaceId")
-@unbounded("the space context row -- bounded to a single row per space")
-query context querySpaceContext {
-  args {
-    spaceId  string
-  }
-  filter  when(args.spaceId) { payload.spaceId==args.spaceId }
-  shape   spaceContextFull
-}
+// querySpaceContext was extracted to the CoPresent pack
+// (memql-bff-copresent/dsl/copresent/queries.memql) by Epic 3
+// (3.3b-i, memql#1991) along with the v1:cognition:space:context
+// concept (ids preserved).
 
 // ---- queries/v1/cognition/spaceMeta.memql ----
 
@@ -628,27 +583,10 @@ query utterance querySpaceUtterances {
   shape    utteranceFull
 }
 
-// ---- queries/v1/cognition/userMicStatesForSpace.memql ----
-
-// userMicStatesForSpace
-// =====================
-//
-// Returns the latest per-user mic state rows scoped to one space.
-// The cognition handler queries this when resolving mirror_user
-// agents: it locates the row matching the space's owner (or, more
-// generally, any human currently in the space) and skips TTS
-// publish if that user is muted.
-
-@enabled
-@description("Latest mic state rows per user for a space.")
-@unbounded("mic states for a space -- bounded by space participants, consumed whole")
-query micState queryUserMicStatesForSpace {
-  args {
-    spaceId  string  @required
-  }
-  filter  when(args.spaceId) { payload.spaceId==args.spaceId }
-  shape   micStateFull
-}
+// queryUserMicStatesForSpace was extracted to the CoPresent pack
+// (memql-bff-copresent/dsl/copresent/queries.memql) by Epic 3
+// (3.3b-i, memql#1991) along with the v1:cognition:micState concept
+// (ids preserved).
 
 // The row's `spaceId` is auto-canonicalized to
 // `<partition>:v1:cognition:space:<slug>` on insert (concept's
@@ -667,42 +605,10 @@ query videoOverride queryVideoOverridesForSpace {
   shape   videoOverrideFull
 }
 
-// ---- queries/v1/cognition/spacePrivateUtterances.memql ----
-
-// querySpacePrivateUtterancesForViewer
-// =====================================
-//
-// Returns the caller's Team-tab utterances in a space -- the private
-// thread sister of querySpaceUtterances. Filter MUST gate on
-// forUserId==actor.userId so a caller can NEVER read another user's
-// private thread.
-//
-// No viewerUserId arg: the row set is gated solely by actor.userId
-// server-side. A viewerUserId param was previously accepted for SPA
-// hook-shape parity but ignored by the filter; it was removed under
-// the no-unused-args conformance rule (memql#214). Do NOT re-add it
-// as a `?.payload.forUserId==args.viewerUserId` arg-conditional --
-// that would let a caller dodge the actor.userId gate.
-//
-// Authz tier: owned. The forUserId==actor.userId predicate is the
-// load-bearing guard.
-//
-// memql#190 / memql-bff-copresent#44.
-
-@enabled
-@description("Returns the caller's Team-tab privateUtterance rows in a space. The forUserId predicate binds to actor.userId server-side so cross-user reads are impossible.")
-query privateUtterance querySpacePrivateUtterancesForViewer {
-  args {
-    spaceId  string  @required @pattern("^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]{1,128}$")
-  }
-  filter  payload.spaceId==args.spaceId && payload.forUserId==actor.userId
-  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
-  // (createdAt, id) instead of a full-table pull. Literal page size -- the
-  // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
-  paginate 50
-  shape   privateUtteranceFull
-}
+// querySpacePrivateUtterancesForViewer was extracted to the CoPresent
+// pack (memql-bff-copresent/dsl/copresent/queries.memql) by Epic 3
+// (3.3b-i, memql#1991) along with the v1:cognition:privateUtterance
+// concept (ids preserved).
 
 // ---- queries/v1/cognition/spaceParticipantPresence.memql ----
 
