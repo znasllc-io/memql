@@ -89,6 +89,17 @@ startup -- fatal, with a descriptive error -- on any incompatibility.
 `memql.CheckPluginContractCompat(version)` is the pure, unit-testable form of
 that check.
 
+> **Order gotcha (custom harnesses / tests).** A pack's builtin resolves its
+> Go capability by FQN (`integration.<name>.<capability>`) at **dispatch
+> time**, against the integration capabilities registered on the engine.
+> Register the provider **after** `engine.Init` -- registering before Init,
+> then calling Init, leaves the capability out of the dispatch map and the
+> builtin fails with `unknown builtin executor "integration.<name>.<cap>"`.
+> The normal app path is automatic: `app.materializePlugins` registers every
+> pack provider *after* the engine is initialized. You only have to think
+> about this when wiring an engine by hand (e.g. an integration test). See
+> `examples/referencepack/live_e2e_test.go`.
+
 ### 2. Register your embedded DSL tree (namespace-owned)
 
 Embed your `.memql` files and mount them under your domain:
