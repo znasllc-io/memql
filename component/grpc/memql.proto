@@ -596,14 +596,14 @@ message ListToolsMsg {
   string cursor = 2;
   // Voice-agent tool-scope context, threaded across the proxy hop (#1448).
   // ListTools is proxied from the bff to the agent node (nodeTargetForListTools
-  // -> NodeTypeAgent), and the agent-node session has no local voiceAgentSpaceId
+  // -> NodeTypeAgent), and the agent-node session has no local voiceAgentScopeId
   // / voiceAgentGaAgentId -- those are bound only on the bff session that
   // received VoiceAgentSessionStart. The bff stamps the bound scope here before
   // proxying so the receiving node can scope the realtime tool surface to the
   // GA's tool list instead of failing open to the full registry. Empty for
   // non-voice callers (text loop, direct browser), which keeps the local
   // session-state path unchanged.
-  string voice_agent_space_id = 3;
+  string voice_agent_scope_id = 3;
   string voice_agent_ga_agent_id = 4;
 }
 
@@ -647,14 +647,14 @@ message CallToolMsg {
   // Voice-agent execution context, threaded across the proxy hop (mirror of
   // ListToolsMsg #1448). CallTool is proxied from the bff to the agent node
   // (nodeTargetForCallTool -> NodeTypeAgent), and the agent-node session has no
-  // local voiceAgentSpaceId / voiceAgentGaRole -- those bind only on the bff
+  // local voiceAgentScopeId / voiceAgentGaRole -- those bind only on the bff
   // session that received VoiceAgentSessionStart. The bff stamps them here
   // before proxying so the agent node can (a) gate tool EXECUTION on the GA's
   // role (assistant), not the empty caller role -- unblocking GA-only tools like
   // the operator/uiClick Takeover surface + produceArtifact -- and (b) route a
   // client-executed tool through the cross-node relay scoped to the voice space.
   // Empty for non-voice callers, which keeps the local session-state path.
-  string voice_agent_space_id = 4;
+  string voice_agent_scope_id = 4;
   string voice_agent_ga_role = 5;
 }
 
@@ -1052,7 +1052,7 @@ message SenseParameter {
 // PolyphonRoomTokenMsg requests a LiveKit room token for voice participation.
 message PolyphonRoomTokenMsg {
   string request_id = 1;
-  string space_id = 2;
+  string scope_id = 2;
   string participant_id = 3;
   string display_name = 4;
 }
@@ -1080,7 +1080,7 @@ message PolyphonStatusResult {
 // PolyphonUtteranceMsg inserts a human utterance from the voice pipeline.
 message PolyphonUtteranceMsg {
   string request_id = 1;
-  string space_id = 2;
+  string scope_id = 2;
   string participant_id = 3;
   string text = 4;
 }
@@ -1189,7 +1189,7 @@ message AgentGenerateTurnMsg {
 
   // Who is speaking.
   string agent_id = 2;              // v1:agents:agent ID
-  string space_id = 3;
+  string scope_id = 3;
   string participant_id = 4;        // agent's participant record in this space
 
   // Conversation history (system / user / assistant / tool messages).

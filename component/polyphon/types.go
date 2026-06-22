@@ -30,7 +30,7 @@ const MaxHumansPerSpace = 5
 // Utterance represents a transcribed speech segment from a human participant.
 type Utterance struct {
 	ID            string            `json:"id"`
-	SpaceId       string            `json:"spaceId"`
+	ScopeId       string            `json:"scopeId"`
 	ParticipantId string            `json:"participantId"`
 	SpeakerName   string            `json:"speakerName,omitempty"`
 	Text          string            `json:"text"`
@@ -100,7 +100,7 @@ type AgentScore struct {
 
 // ScoreDecision is the output of the score engine for a given utterance.
 type ScoreDecision struct {
-	SpaceId           string            `json:"spaceId"`
+	ScopeId           string            `json:"scopeId"`
 	UtteranceId       string            `json:"utteranceId"`
 	Winner            *AgentScore       `json:"winner,omitempty"`
 	Scores            []AgentScore      `json:"scores"`
@@ -195,7 +195,7 @@ func DefaultScoringWeights() ScoringWeights {
 // TranscriptEntry is a single entry in the shared conversation transcript.
 type TranscriptEntry struct {
 	ID          string    `json:"id"`
-	SpaceId     string    `json:"spaceId"`
+	ScopeId     string    `json:"scopeId"`
 	SpeakerId   string    `json:"speakerId"`
 	SpeakerName string    `json:"speakerName"`
 	SpeakerType string    `json:"speakerType"` // "human" or "agent"
@@ -208,7 +208,7 @@ type TranscriptEntry struct {
 type PolyphonSession struct {
 	mu sync.RWMutex
 
-	SpaceId               string                    `json:"spaceId"`
+	ScopeId               string                    `json:"scopeId"`
 	Platform              VoicePlatform             `json:"platform"`
 	Humans                []SessionParticipant      `json:"humans"`
 	Agents                []SessionAgent            `json:"agents"`
@@ -247,10 +247,10 @@ type SessionAgent struct {
 }
 
 // NewSession creates a new PolyphonSession for the given space.
-func NewSession(spaceId string) *PolyphonSession {
+func NewSession(scopeId string) *PolyphonSession {
 	now := time.Now().UTC()
 	return &PolyphonSession{
-		SpaceId:         spaceId,
+		ScopeId:         scopeId,
 		Platform:        PlatformOpenAI,
 		Humans:          make([]SessionParticipant, 0),
 		Agents:          make([]SessionAgent, 0),

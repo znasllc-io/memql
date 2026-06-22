@@ -37,9 +37,9 @@ func NewLocalRoomProvider(cfg Config) *LocalRoomProvider {
 }
 
 // GenerateToken creates a LiveKit JWT for a participant to join a room.
-// Room name follows the convention polyphon-{spaceId}.
-func (p *LocalRoomProvider) GenerateToken(_ context.Context, spaceId, participantId, displayName string) (*RoomToken, error) {
-	roomName := "polyphon-" + spaceId
+// Room name follows the convention polyphon-{scopeId}.
+func (p *LocalRoomProvider) GenerateToken(_ context.Context, scopeId, participantId, displayName string) (*RoomToken, error) {
+	roomName := "polyphon-" + scopeId
 
 	at := auth.NewAccessToken(p.cfg.LiveKitAPIKey, p.cfg.LiveKitAPISecret)
 	grant := &auth.VideoGrant{
@@ -79,7 +79,7 @@ func (p *LocalRoomProvider) CreateRoom(_ context.Context, _ string, _ []AgentRoo
 
 // DestroyRoom deletes the LiveKit room backing the given space via the
 // RoomService Twirp HTTP API (POST /twirp/livekit.RoomService/DeleteRoom).
-// Room name follows the same polyphon-{spaceId} convention GenerateToken
+// Room name follows the same polyphon-{scopeId} convention GenerateToken
 // uses, so callers pass the space id, not the room name.
 //
 // Idempotent by contract: a room that does not exist (already deleted,
@@ -87,8 +87,8 @@ func (p *LocalRoomProvider) CreateRoom(_ context.Context, _ string, _ []AgentRoo
 // returns nil. This is what the daily-space rollover sweep (memql#1384)
 // relies on -- multiple replicas can race the same deletion and every
 // one of them succeeds.
-func (p *LocalRoomProvider) DestroyRoom(ctx context.Context, spaceId string) error {
-	roomName := "polyphon-" + spaceId
+func (p *LocalRoomProvider) DestroyRoom(ctx context.Context, scopeId string) error {
+	roomName := "polyphon-" + scopeId
 
 	base, err := livekitHTTPBaseURL(p.cfg.LiveKitURL)
 	if err != nil {

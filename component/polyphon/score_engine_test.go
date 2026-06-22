@@ -36,7 +36,7 @@ func TestScoreEngineProcessUtterance(t *testing.T) {
 	t.Run("directly addressed agent wins", func(t *testing.T) {
 		utterance := Utterance{
 			ID:            "utt-1",
-			SpaceId:       "space-test-1",
+			ScopeId:       "space-test-1",
 			ParticipantId: "human-1",
 			SpeakerName:   "Alice",
 			Text:          "Hey Sofia, what do you think about this interface design?",
@@ -60,7 +60,7 @@ func TestScoreEngineProcessUtterance(t *testing.T) {
 	t.Run("domain relevance selects best agent", func(t *testing.T) {
 		utterance := Utterance{
 			ID:            "utt-2",
-			SpaceId:       "space-test-2",
+			ScopeId:       "space-test-2",
 			ParticipantId: "human-1",
 			SpeakerName:   "Alice",
 			Text:          "Can you help me refactor the database API and improve code performance?",
@@ -81,7 +81,7 @@ func TestScoreEngineProcessUtterance(t *testing.T) {
 	t.Run("silence when no agent matches", func(t *testing.T) {
 		utterance := Utterance{
 			ID:            "utt-3",
-			SpaceId:       "space-test-3",
+			ScopeId:       "space-test-3",
 			ParticipantId: "human-1",
 			SpeakerName:   "Alice",
 			Text:          "ok",
@@ -101,10 +101,10 @@ func TestScoreEngineProcessUtterance(t *testing.T) {
 	})
 
 	t.Run("transcript is recorded", func(t *testing.T) {
-		spaceId := "space-test-4"
+		scopeId := "space-test-4"
 		utterance := Utterance{
 			ID:            "utt-4",
-			SpaceId:       spaceId,
+			ScopeId:       scopeId,
 			ParticipantId: "human-1",
 			SpeakerName:   "Alice",
 			Text:          "Hello everyone",
@@ -114,7 +114,7 @@ func TestScoreEngineProcessUtterance(t *testing.T) {
 
 		scoreEngine.ProcessUtterance(context.Background(), utterance, testCandidates)
 
-		session := scoreEngine.Sessions().Get(spaceId)
+		session := scoreEngine.Sessions().Get(scopeId)
 		if session == nil {
 			t.Fatal("expected session to be created")
 		}
@@ -134,12 +134,12 @@ func TestScoreEngineProcessUtterance(t *testing.T) {
 
 func TestScoreEngineRecordAgentResponse(t *testing.T) {
 	scoreEngine := NewScoreEngine(nil)
-	spaceId := "space-cont-1"
+	scopeId := "space-cont-1"
 
 	// First, process a human utterance.
 	utterance := Utterance{
 		ID:            "utt-1",
-		SpaceId:       spaceId,
+		ScopeId:       scopeId,
 		ParticipantId: "human-1",
 		SpeakerName:   "Alice",
 		Text:          "Hey Sofia, can you explain the design approach for the interface?",
@@ -150,14 +150,14 @@ func TestScoreEngineRecordAgentResponse(t *testing.T) {
 
 	t.Run("agent response is recorded", func(t *testing.T) {
 		shouldContinue, _ := scoreEngine.RecordAgentResponse(
-			spaceId,
+			scopeId,
 			"agent-sofia",
 			"Sofia",
 			"The interface design follows a card-based layout with responsive grid.",
 			testCandidates,
 		)
 
-		session := scoreEngine.Sessions().Get(spaceId)
+		session := scoreEngine.Sessions().Get(scopeId)
 		if session == nil {
 			t.Fatal("expected session to exist")
 		}
@@ -176,7 +176,7 @@ func TestScoreEngineRecordAgentResponse(t *testing.T) {
 	})
 
 	t.Run("consecutive agent turns are tracked", func(t *testing.T) {
-		session := scoreEngine.Sessions().Get(spaceId)
+		session := scoreEngine.Sessions().Get(scopeId)
 		if session == nil {
 			t.Fatal("expected session to exist")
 		}
@@ -188,7 +188,7 @@ func TestScoreEngineRecordAgentResponse(t *testing.T) {
 
 		// Record another agent response.
 		scoreEngine.RecordAgentResponse(
-			spaceId,
+			scopeId,
 			"agent-rex",
 			"Rex",
 			"From an engineering perspective, we should also consider the API structure.",
@@ -204,7 +204,7 @@ func TestScoreEngineRecordAgentResponse(t *testing.T) {
 	t.Run("human utterance resets agent turn counter", func(t *testing.T) {
 		humanUtterance := Utterance{
 			ID:            "utt-2",
-			SpaceId:       spaceId,
+			ScopeId:       scopeId,
 			ParticipantId: "human-1",
 			SpeakerName:   "Alice",
 			Text:          "Great points, both of you",
@@ -213,7 +213,7 @@ func TestScoreEngineRecordAgentResponse(t *testing.T) {
 		}
 		scoreEngine.ProcessUtterance(context.Background(), humanUtterance, testCandidates)
 
-		session := scoreEngine.Sessions().Get(spaceId)
+		session := scoreEngine.Sessions().Get(scopeId)
 		turns := session.AgentTurnsSinceHuman()
 		if turns != 0 {
 			t.Errorf("expected 0 consecutive agent turns after human spoke, got %d", turns)
@@ -225,12 +225,12 @@ func TestTurnPolicyContinuationLimit(t *testing.T) {
 	cfg := DefaultTurnPolicy()
 	cfg.MaxConsecutiveAgentTurns = 2
 	scoreEngine := NewScoreEngineWithConfig(DefaultScoringWeights(), cfg, nil)
-	spaceId := "space-limit-1"
+	scopeId := "space-limit-1"
 
 	// Process initial human utterance.
 	utterance := Utterance{
 		ID:            "utt-1",
-		SpaceId:       spaceId,
+		ScopeId:       scopeId,
 		ParticipantId: "human-1",
 		SpeakerName:   "Alice",
 		Text:          "Hey Sofia, what about the design and code architecture?",
@@ -240,13 +240,13 @@ func TestTurnPolicyContinuationLimit(t *testing.T) {
 	scoreEngine.ProcessUtterance(context.Background(), utterance, testCandidates)
 
 	// Agent 1 responds.
-	scoreEngine.RecordAgentResponse(spaceId, "agent-sofia", "Sofia", "The design uses a modular approach.", testCandidates)
+	scoreEngine.RecordAgentResponse(scopeId, "agent-sofia", "Sofia", "The design uses a modular approach.", testCandidates)
 
 	// Agent 2 responds.
-	scoreEngine.RecordAgentResponse(spaceId, "agent-rex", "Rex", "The architecture supports that modular design.", testCandidates)
+	scoreEngine.RecordAgentResponse(scopeId, "agent-rex", "Rex", "The architecture supports that modular design.", testCandidates)
 
 	// At this point, we've hit MaxConsecutiveAgentTurns=2.
-	session := scoreEngine.Sessions().Get(spaceId)
+	session := scoreEngine.Sessions().Get(scopeId)
 	if session == nil {
 		t.Fatal("expected session to exist")
 	}
@@ -270,108 +270,108 @@ func TestSessionManagement(t *testing.T) {
 	scoreEngine := NewScoreEngine(nil)
 
 	t.Run("add and remove humans", func(t *testing.T) {
-		spaceId := "space-sm-1"
-		err := scoreEngine.Sessions().AddHuman(spaceId, "human-1", "Alice")
+		scopeId := "space-sm-1"
+		err := scoreEngine.Sessions().AddHuman(scopeId, "human-1", "Alice")
 		if err != nil {
 			t.Fatalf("unexpected error adding human: %v", err)
 		}
 
-		err = scoreEngine.Sessions().AddHuman(spaceId, "human-2", "Bob")
+		err = scoreEngine.Sessions().AddHuman(scopeId, "human-2", "Bob")
 		if err != nil {
 			t.Fatalf("unexpected error adding human: %v", err)
 		}
 
-		if !scoreEngine.Sessions().HasHumans(spaceId) {
+		if !scoreEngine.Sessions().HasHumans(scopeId) {
 			t.Error("expected HasHumans to return true")
 		}
 
-		scoreEngine.Sessions().RemoveHuman(spaceId, "human-1")
-		scoreEngine.Sessions().RemoveHuman(spaceId, "human-2")
+		scoreEngine.Sessions().RemoveHuman(scopeId, "human-1")
+		scoreEngine.Sessions().RemoveHuman(scopeId, "human-2")
 
-		session := scoreEngine.Sessions().Get(spaceId)
+		session := scoreEngine.Sessions().Get(scopeId)
 		if len(session.Humans) != 0 {
 			t.Errorf("expected 0 humans after removal, got %d", len(session.Humans))
 		}
 	})
 
 	t.Run("add and remove agents", func(t *testing.T) {
-		spaceId := "space-sm-2"
-		err := scoreEngine.Sessions().AddAgent(spaceId, "agent-1", "part-1", "Sofia")
+		scopeId := "space-sm-2"
+		err := scoreEngine.Sessions().AddAgent(scopeId, "agent-1", "part-1", "Sofia")
 		if err != nil {
 			t.Fatalf("unexpected error adding agent: %v", err)
 		}
 
-		err = scoreEngine.Sessions().AddAgent(spaceId, "agent-2", "part-2", "Rex")
+		err = scoreEngine.Sessions().AddAgent(scopeId, "agent-2", "part-2", "Rex")
 		if err != nil {
 			t.Fatalf("unexpected error adding agent: %v", err)
 		}
 
-		session := scoreEngine.Sessions().Get(spaceId)
+		session := scoreEngine.Sessions().Get(scopeId)
 		if len(session.Agents) != 2 {
 			t.Errorf("expected 2 agents, got %d", len(session.Agents))
 		}
 
-		scoreEngine.Sessions().RemoveAgent(spaceId, "agent-1")
-		session = scoreEngine.Sessions().Get(spaceId)
+		scoreEngine.Sessions().RemoveAgent(scopeId, "agent-1")
+		session = scoreEngine.Sessions().Get(scopeId)
 		if len(session.Agents) != 1 {
 			t.Errorf("expected 1 agent after removal, got %d", len(session.Agents))
 		}
 	})
 
 	t.Run("max humans limit", func(t *testing.T) {
-		spaceId := "space-sm-3"
+		scopeId := "space-sm-3"
 		for i := 0; i < MaxHumansPerSpace; i++ {
-			err := scoreEngine.Sessions().AddHuman(spaceId, "human-"+string(rune('A'+i)), "Human "+string(rune('A'+i)))
+			err := scoreEngine.Sessions().AddHuman(scopeId, "human-"+string(rune('A'+i)), "Human "+string(rune('A'+i)))
 			if err != nil {
 				t.Fatalf("unexpected error adding human %d: %v", i, err)
 			}
 		}
 
-		err := scoreEngine.Sessions().AddHuman(spaceId, "human-overflow", "Overflow")
+		err := scoreEngine.Sessions().AddHuman(scopeId, "human-overflow", "Overflow")
 		if err == nil {
 			t.Error("expected error when exceeding max humans")
 		}
 	})
 
 	t.Run("max agents limit", func(t *testing.T) {
-		spaceId := "space-sm-4"
+		scopeId := "space-sm-4"
 		for i := 0; i < MaxAgentsPerSpace; i++ {
-			err := scoreEngine.Sessions().AddAgent(spaceId, "agent-"+string(rune('A'+i)), "part-"+string(rune('A'+i)), "Agent "+string(rune('A'+i)))
+			err := scoreEngine.Sessions().AddAgent(scopeId, "agent-"+string(rune('A'+i)), "part-"+string(rune('A'+i)), "Agent "+string(rune('A'+i)))
 			if err != nil {
 				t.Fatalf("unexpected error adding agent %d: %v", i, err)
 			}
 		}
 
-		err := scoreEngine.Sessions().AddAgent(spaceId, "agent-overflow", "part-overflow", "Overflow")
+		err := scoreEngine.Sessions().AddAgent(scopeId, "agent-overflow", "part-overflow", "Overflow")
 		if err == nil {
 			t.Error("expected error when exceeding max agents")
 		}
 	})
 
 	t.Run("duplicate add is idempotent", func(t *testing.T) {
-		spaceId := "space-sm-5"
-		_ = scoreEngine.Sessions().AddHuman(spaceId, "human-1", "Alice")
-		_ = scoreEngine.Sessions().AddHuman(spaceId, "human-1", "Alice")
+		scopeId := "space-sm-5"
+		_ = scoreEngine.Sessions().AddHuman(scopeId, "human-1", "Alice")
+		_ = scoreEngine.Sessions().AddHuman(scopeId, "human-1", "Alice")
 
-		session := scoreEngine.Sessions().Get(spaceId)
+		session := scoreEngine.Sessions().Get(scopeId)
 		if len(session.Humans) != 1 {
 			t.Errorf("expected 1 human after duplicate add, got %d", len(session.Humans))
 		}
 	})
 
 	t.Run("session cleanup", func(t *testing.T) {
-		spaceId := "space-sm-6"
-		scoreEngine.Sessions().GetOrCreate(spaceId)
+		scopeId := "space-sm-6"
+		scoreEngine.Sessions().GetOrCreate(scopeId)
 
 		if scoreEngine.Sessions().ActiveSessions() == 0 {
 			t.Error("expected at least 1 active session")
 		}
 
-		removed := scoreEngine.Sessions().Remove(spaceId)
+		removed := scoreEngine.Sessions().Remove(scopeId)
 		if removed == nil {
 			t.Error("expected removed session to be returned")
 		}
-		if scoreEngine.Sessions().Get(spaceId) != nil {
+		if scoreEngine.Sessions().Get(scopeId) != nil {
 			t.Error("expected session to be nil after removal")
 		}
 	})
@@ -379,12 +379,12 @@ func TestSessionManagement(t *testing.T) {
 
 func TestTranscriptManagement(t *testing.T) {
 	scoreEngine := NewScoreEngine(nil)
-	spaceId := "space-transcript-1"
+	scopeId := "space-transcript-1"
 
 	t.Run("recent transcript returns correct entries", func(t *testing.T) {
 		for i := 0; i < 10; i++ {
-			scoreEngine.Sessions().RecordUtterance(spaceId, TranscriptEntry{
-				SpaceId:     spaceId,
+			scoreEngine.Sessions().RecordUtterance(scopeId, TranscriptEntry{
+				ScopeId:     scopeId,
 				SpeakerId:   "human-1",
 				SpeakerType: "human",
 				Text:        "Message " + string(rune('0'+i)),
@@ -392,7 +392,7 @@ func TestTranscriptManagement(t *testing.T) {
 			})
 		}
 
-		session := scoreEngine.Sessions().Get(spaceId)
+		session := scoreEngine.Sessions().Get(scopeId)
 		recent := session.RecentTranscript(3)
 		if len(recent) != 3 {
 			t.Errorf("expected 3 recent entries, got %d", len(recent))
@@ -400,12 +400,12 @@ func TestTranscriptManagement(t *testing.T) {
 	})
 
 	t.Run("agent turn count tracking", func(t *testing.T) {
-		session := scoreEngine.Sessions().Get(spaceId)
+		session := scoreEngine.Sessions().Get(scopeId)
 		if session.AgentTurnsSinceHuman() != 0 {
 			t.Errorf("expected 0 agent turns, got %d", session.AgentTurnsSinceHuman())
 		}
 
-		scoreEngine.Sessions().RecordUtterance(spaceId, TranscriptEntry{
+		scoreEngine.Sessions().RecordUtterance(scopeId, TranscriptEntry{
 			SpeakerId:   "agent-1",
 			SpeakerType: "agent",
 			Timestamp:   time.Now().UTC(),
@@ -414,7 +414,7 @@ func TestTranscriptManagement(t *testing.T) {
 			t.Errorf("expected 1 agent turn, got %d", session.AgentTurnsSinceHuman())
 		}
 
-		scoreEngine.Sessions().RecordUtterance(spaceId, TranscriptEntry{
+		scoreEngine.Sessions().RecordUtterance(scopeId, TranscriptEntry{
 			SpeakerId:   "human-1",
 			SpeakerType: "human",
 			Timestamp:   time.Now().UTC(),
@@ -465,7 +465,7 @@ func TestClarifyingQuestionContinuation(t *testing.T) {
 		})
 
 		// Human gives a short reply.
-		utterance := Utterance{Text: "in this space", SpaceId: "space-cqc-1", Timestamp: time.Now().UTC()}
+		utterance := Utterance{Text: "in this space", ScopeId: "space-cqc-1", Timestamp: time.Now().UTC()}
 		scores := scorer.ScoreAll(candidates, utterance, session)
 
 		var ariaScore float64
@@ -506,7 +506,7 @@ func TestShortReplyContinuation(t *testing.T) {
 			Timestamp:   time.Now().UTC(),
 		})
 
-		utterance := Utterance{Text: "yes", SpaceId: "space-src-1", Timestamp: time.Now().UTC()}
+		utterance := Utterance{Text: "yes", ScopeId: "space-src-1", Timestamp: time.Now().UTC()}
 		scores := scorer.ScoreAll(candidates, utterance, session)
 
 		var ariaScore float64
@@ -572,7 +572,7 @@ func TestScoreEngine1to1SoloAgentResponds(t *testing.T) {
 	t.Run("solo agent responds to unaddressed speech", func(t *testing.T) {
 		utterance := Utterance{
 			ID:            "utt-solo-1",
-			SpaceId:       "space-solo-1",
+			ScopeId:       "space-solo-1",
 			ParticipantId: "human-1",
 			SpeakerName:   "Alice",
 			Text:          "I think we should change the approach",
@@ -596,7 +596,7 @@ func TestScoreEngine1to1SoloAgentResponds(t *testing.T) {
 	t.Run("solo agent responds to question without direct address", func(t *testing.T) {
 		utterance := Utterance{
 			ID:            "utt-solo-2",
-			SpaceId:       "space-solo-2",
+			ScopeId:       "space-solo-2",
 			ParticipantId: "human-1",
 			SpeakerName:   "Alice",
 			Text:          "What do you think about this?",

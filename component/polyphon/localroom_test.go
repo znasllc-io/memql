@@ -22,7 +22,7 @@ func destroyTestProvider(serverURL string) *LocalRoomProvider {
 
 // TestDestroyRoom_DeletesViaTwirp pins the wire contract: POST to the
 // RoomService DeleteRoom Twirp endpoint with a bearer admin token and
-// the polyphon-{spaceId} room name in the JSON body.
+// the polyphon-{scopeId} room name in the JSON body.
 func TestDestroyRoom_DeletesViaTwirp(t *testing.T) {
 	var gotPath, gotAuth, gotRoom string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

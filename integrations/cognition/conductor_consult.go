@@ -484,7 +484,7 @@ func (c *CognitionIntegration) consultConductor(
 
 	// Build space context. buildSpaceData already produces a
 	// prompt-ready map.
-	spaceMap := buildSpaceData(strings.TrimSpace(utterance.SpaceId), sInfo)
+	spaceMap := buildSpaceData(strings.TrimSpace(utterance.ScopeId), sInfo)
 
 	// Humans in the room (display names + currentSpeaker flag).
 	humans := buildHumansBlock(participants, utterance.ParticipantId)
@@ -510,7 +510,7 @@ func (c *CognitionIntegration) consultConductor(
 	// is in onboarding flow", etc. Feeds continuity beyond the
 	// transcript window.
 	sessionSummary := ""
-	if state := conductorStateOrNil(c, utterance.SpaceId); state != nil {
+	if state := conductorStateOrNil(c, utterance.ScopeId); state != nil {
 		sessionSummary = state.GetSessionSummary()
 	}
 
@@ -546,7 +546,7 @@ func (c *CognitionIntegration) consultConductor(
 		if c.Logger != nil {
 			c.Logger.Warn("conductor: consult failed",
 				"error", err, "elapsed_ms", elapsed.Milliseconds(),
-				"spaceId", utterance.SpaceId)
+				"spaceId", utterance.ScopeId)
 		}
 		return nil, fmt.Errorf("conductorTurn invoke: %w", err)
 	}
@@ -611,7 +611,7 @@ func (c *CognitionIntegration) consultConductor(
 	// Update per-space session memory + iteration counter. The
 	// counter is bumped here (not when consult is called) so the
 	// branch-point loop can't escape the cap by failing fast.
-	if state := conductorStateOrNil(c, utterance.SpaceId); state != nil {
+	if state := conductorStateOrNil(c, utterance.ScopeId); state != nil {
 		if summary := strings.TrimSpace(plan.SessionSummary); summary != "" {
 			state.SetSessionSummary(summary)
 		}
@@ -619,7 +619,7 @@ func (c *CognitionIntegration) consultConductor(
 	}
 
 	c.logPlanTrace(planTrace{
-		SpaceId:       utterance.SpaceId,
+		SpaceId:       utterance.ScopeId,
 		UtteranceId:   utterance.ID,
 		UtteranceText: utterance.Text,
 		Plan:          plan,

@@ -263,7 +263,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	ctx = contextWithCurrentUserDisplayName(ctx, speakerName)
 	scoringUtterance := polyphon.Utterance{
 		ID:            utterance.ID,
-		SpaceId:       spaceId,
+		ScopeId:       spaceId,
 		ParticipantId: utterance.ParticipantId,
 		SpeakerName:   speakerName,
 		Text:          text,
@@ -3640,7 +3640,7 @@ func (c *CognitionIntegration) continueIfBranchPointsDeclared(
 		for _, u := range recentUtterances {
 			if id, _ := u["id"].(string); id == originatingUtteranceId {
 				synthetic.ID = id
-				synthetic.SpaceId = spaceId
+				synthetic.ScopeId = spaceId
 				if t, _ := u["text"].(string); t != "" {
 					synthetic.Text = t
 				}

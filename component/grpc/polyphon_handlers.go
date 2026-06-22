@@ -32,9 +32,9 @@ func (s *streamSession) handlePolyphonRoomToken(envelope *memqlv1.MemqlClientMes
 		return nil
 	}
 
-	spaceId := strings.TrimSpace(msg.GetSpaceId())
+	scopeId := strings.TrimSpace(msg.GetScopeId())
 	participantId := strings.TrimSpace(msg.GetParticipantId())
-	if spaceId == "" || participantId == "" {
+	if scopeId == "" || participantId == "" {
 		s.sendQueryError(requestId, correlate, codes.InvalidArgument, "spaceId and participantId are required")
 		return nil
 	}
@@ -45,7 +45,7 @@ func (s *streamSession) handlePolyphonRoomToken(envelope *memqlv1.MemqlClientMes
 	}
 
 	go func() {
-		token, err := s.service.roomProvider.GenerateToken(context.Background(), spaceId, participantId, displayName)
+		token, err := s.service.roomProvider.GenerateToken(context.Background(), scopeId, participantId, displayName)
 		if err != nil {
 			s.sendPolyphonError(requestId, correlate, "failed to generate room token", err)
 			return
@@ -111,11 +111,11 @@ func (s *streamSession) handlePolyphonUtterance(envelope *memqlv1.MemqlClientMes
 		return nil
 	}
 
-	spaceId := strings.TrimSpace(msg.GetSpaceId())
+	scopeId := strings.TrimSpace(msg.GetScopeId())
 	participantId := strings.TrimSpace(msg.GetParticipantId())
 	text := strings.TrimSpace(msg.GetText())
 
-	if spaceId == "" || participantId == "" || text == "" {
+	if scopeId == "" || participantId == "" || text == "" {
 		s.sendQueryError(requestId, correlate, codes.InvalidArgument, "spaceId, participantId, and text are required")
 		return nil
 	}
@@ -125,7 +125,7 @@ func (s *streamSession) handlePolyphonUtterance(envelope *memqlv1.MemqlClientMes
 		utteranceId := fmt.Sprintf("utt-%s-%d", participantId, time.Now().UnixNano())
 		textJSON, _ := json.Marshal(text)
 		query := fmt.Sprintf(`mutationSendTextUtterance({utteranceId: "%s", spaceId: "%s", participantId: "%s", text: %s, source: {inputMethod: "stt", pipeline: "polyphon"}})`,
-			utteranceId, spaceId, participantId, string(textJSON))
+			utteranceId, scopeId, participantId, string(textJSON))
 
 		ctx := contextWithSystemActor(context.Background())
 		if _, err := s.service.engine.Execute(ctx, query); err != nil {

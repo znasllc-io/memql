@@ -163,16 +163,16 @@ type VoiceInfo struct {
 // The Bridge Agent implements this interface to manage multi-party audio rooms.
 type RoomProvider interface {
 	// CreateRoom creates a new audio room for a space.
-	CreateRoom(ctx context.Context, spaceId string, agents []AgentRoomConfig) (*RoomInfo, error)
+	CreateRoom(ctx context.Context, scopeId string, agents []AgentRoomConfig) (*RoomInfo, error)
 
 	// DestroyRoom tears down a room and all its participants.
-	DestroyRoom(ctx context.Context, spaceId string) error
+	DestroyRoom(ctx context.Context, scopeId string) error
 
 	// GenerateToken creates an access token for a participant to join a room.
-	GenerateToken(ctx context.Context, spaceId, participantId, displayName string) (*RoomToken, error)
+	GenerateToken(ctx context.Context, scopeId, participantId, displayName string) (*RoomToken, error)
 
 	// GetRoomInfo returns the current state of a room.
-	GetRoomInfo(ctx context.Context, spaceId string) (*RoomInfo, error)
+	GetRoomInfo(ctx context.Context, scopeId string) (*RoomInfo, error)
 }
 
 // AgentRoomConfig describes an AI agent to be added to a room.
@@ -186,7 +186,7 @@ type AgentRoomConfig struct {
 type RoomInfo struct {
 	RoomName string            `json:"roomName"`
 	RoomSID  string            `json:"roomSID"`
-	SpaceId  string            `json:"spaceId"`
+	ScopeId  string            `json:"scopeId"`
 	Active   bool              `json:"active"`
 	Humans   []RoomParticipant `json:"humans"`
 	Agents   []RoomParticipant `json:"agents"`

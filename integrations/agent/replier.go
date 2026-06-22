@@ -462,7 +462,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// participant, so the two-thread chat contract applies. 1-on-1 /
 	// direct interactions (no spaceId) skip the domain so we don't pay
 	// retrieval cost when chat-thread context is irrelevant.
-	if strings.TrimSpace(msg.SpaceId) != "" {
+	if strings.TrimSpace(msg.ScopeId) != "" {
 		domains = ensureDomain(domains, "recent-chat")
 	}
 	if len(domains) > 0 {
@@ -556,7 +556,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// doesn't write to chat history) and would conflate the new ask
 	// with the old one. Bounded to recent + succeeded so the prompt
 	// stays small.
-	if outcomes := r.recentPlanOutcomesForSpace(ctx, msg.SpaceId); len(outcomes) > 0 {
+	if outcomes := r.recentPlanOutcomesForSpace(ctx, msg.ScopeId); len(outcomes) > 0 {
 		data["recentPlanOutcomes"] = outcomes
 	}
 
@@ -676,7 +676,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	turnCtx := turnContext{
 		AgentId:     msg.AgentId,
 		OwnerUserId: resolvedOwner,
-		SpaceId:     msg.SpaceId,
+		SpaceId:     msg.ScopeId,
 		// memql#1133: a produceArtifact executor turn (deliverable_surface=
 		// workbench) is already running inside a kind=produceArtifact plan; the
 		// tool loop REFUSES a produceArtifact re-delegation on this turn so the
@@ -701,7 +701,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 		"stage", "turnContext",
 		"agent_id", msg.AgentId,
 		"owner_user_id", resolvedOwner,
-		"space_id", msg.SpaceId,
+		"space_id", msg.ScopeId,
 		"requestId", msg.RequestId,
 	)
 

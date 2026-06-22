@@ -466,7 +466,7 @@ func (c *CognitionIntegration) routeWithAI(
 	// agent preferred over generic responder). Uses the cached
 	// lookup so the router hot-path doesn't wait on DB for every
 	// turn; cache invalidation already fires on space updates.
-	spaceData := buildSpaceData(strings.TrimSpace(utterance.SpaceId), c.getSpaceInfoCached(ctx, utterance.SpaceId))
+	spaceData := buildSpaceData(strings.TrimSpace(utterance.ScopeId), c.getSpaceInfoCached(ctx, utterance.ScopeId))
 
 	data := map[string]any{
 		"agents":            agentList,
@@ -847,7 +847,7 @@ func (c *CognitionIntegration) emitUnmetCapability(
 	}
 
 	payload := map[string]any{
-		"spaceId":         strings.TrimSpace(utterance.SpaceId),
+		"spaceId":         strings.TrimSpace(utterance.ScopeId),
 		"utteranceId":     strings.TrimSpace(utterance.ID),
 		"utterance":       strings.TrimSpace(utterance.Text),
 		"speakerName":     strings.TrimSpace(utterance.SpeakerName),
@@ -892,7 +892,7 @@ func (c *CognitionIntegration) emitUnmetCapability(
 	// Best-effort: failures here log but don't abort the routing
 	// path. The unmet event above is the canonical signal; the user-
 	// facing notice is a UX courtesy on top.
-	spaceIdStr := strings.TrimSpace(utterance.SpaceId)
+	spaceIdStr := strings.TrimSpace(utterance.ScopeId)
 	if spaceIdStr != "" {
 		var notice string
 		switch trigger {

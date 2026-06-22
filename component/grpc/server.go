@@ -808,7 +808,7 @@ type streamSession struct {
 	// TurnRequests.
 	voiceAgentSpeakSubMu sync.Mutex
 	voiceAgentSpeakStop  func()
-	voiceAgentSpaceId    string
+	voiceAgentScopeId    string
 	voiceAgentGaAgentId  string
 	// voiceAgentGaRole is the scoped GA agent's role (e.g. "assistant"),
 	// resolved at SessionStart. handleCallTool gates tool execution on it for
@@ -1419,7 +1419,7 @@ func (s *streamSession) handleListTools(envelope *memqlv1.MemqlClientMessage, ms
 	if s.shouldProxyAI(nodeTargetForListTools()) {
 		// Thread the voice session's tool-scope context across the proxy hop
 		// (#1448). ListTools is forwarded to the agent node, whose session has
-		// no local voiceAgentSpaceId / voiceAgentGaAgentId (those bind only on
+		// no local voiceAgentScopeId / voiceAgentGaAgentId (those bind only on
 		// the bff session that received VoiceAgentSessionStart). Without this
 		// the receiving node resolves no scope and fails open to the full
 		// 517-tool registry. Stamp the bound scope onto the message (which is
@@ -1451,7 +1451,7 @@ func (s *streamSession) handleListTools(envelope *memqlv1.MemqlClientMessage, ms
 		// Resolve scope from the threaded request context first (the proxied
 		// agent-node receiver path -- #1448), falling back to local session
 		// state for non-proxied callers.
-		agentScope, scopedRole, scoped := s.voiceAgentScopedToolNamesForRequest(msg.GetVoiceAgentSpaceId(), msg.GetVoiceAgentGaAgentId())
+		agentScope, scopedRole, scoped := s.voiceAgentScopedToolNamesForRequest(msg.GetVoiceAgentScopeId(), msg.GetVoiceAgentGaAgentId())
 		// When the surface is scoped to a specific GA agent, gate tools against
 		// THAT agent's role, not the voice-agent caller's role. The voice-agent
 		// service presents no role (empty -> "specialist" default), but the tools
@@ -1512,7 +1512,7 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 	if s.shouldProxyAI(nodeTargetForCallTool()) {
 		// Thread the voice-agent execution context across the proxy hop (mirror
 		// of stampVoiceAgentScopeOnListTools #1448). CallTool runs on the agent
-		// node, whose session has no local voiceAgentSpaceId / voiceAgentGaRole;
+		// node, whose session has no local voiceAgentScopeId / voiceAgentGaRole;
 		// without this the agent-node role gate sees the empty caller role and
 		// rejects GA-only tools (uiClick/operator, produceArtifact), and the
 		// client-tool relay has no space to scope to.
@@ -1599,12 +1599,12 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 	if tool.ClientExecution {
 		// Voice space for the relay: local session (in-process) first, else the
 		// value threaded on the CallToolMsg (the agent-node proxied receiver, whose
-		// local voiceAgentSpaceId is empty).
-		voiceSpaceId := strings.TrimSpace(s.voiceAgentSpaceId)
-		if voiceSpaceId == "" {
-			voiceSpaceId = strings.TrimSpace(msg.GetVoiceAgentSpaceId())
+		// local voiceAgentScopeId is empty).
+		voiceScopeId := strings.TrimSpace(s.voiceAgentScopeId)
+		if voiceScopeId == "" {
+			voiceScopeId = strings.TrimSpace(msg.GetVoiceAgentScopeId())
 		}
-		if spaceId := voiceSpaceId; spaceId != "" {
+		if spaceId := voiceScopeId; spaceId != "" {
 			argsJSON := "{}"
 			if args != nil {
 				if b, err := json.Marshal(args.AsMap()); err == nil {

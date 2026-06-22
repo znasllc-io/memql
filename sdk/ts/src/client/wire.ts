@@ -131,7 +131,7 @@ export interface RevokeWorkerTokenPayload {
 // LiveKit client SDK without a separate config call.
 export interface PolyphonRoomTokenPayload {
   requestId: string;
-  spaceId: string;
+  scopeId: string;
   participantId: string;
   displayName: string;
 }

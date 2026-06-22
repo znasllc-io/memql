@@ -63,7 +63,7 @@ func (c *CognitionIntegration) handleScoreUtterance(ctx context.Context, args ma
 
 	utterance := polyphon.Utterance{
 		ID:            utteranceId,
-		SpaceId:       spaceId,
+		ScopeId:       spaceId,
 		ParticipantId: speakerId,
 		SpeakerName:   speakerName,
 		Text:          text,
@@ -86,7 +86,7 @@ func (c *CognitionIntegration) handleScoreUtterance(ctx context.Context, args ma
 
 	// Convert decision to MemoryNode payload.
 	decisionPayload := map[string]any{
-		"spaceId":     decision.SpaceId,
+		"spaceId":     decision.ScopeId,
 		"utteranceId": decision.UtteranceId,
 		"action":      decision.Action,
 		"confidence":  decision.Confidence,

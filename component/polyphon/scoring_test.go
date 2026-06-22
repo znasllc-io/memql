@@ -263,7 +263,7 @@ func TestScoreAll(t *testing.T) {
 	t.Run("directly addressed agent wins", func(t *testing.T) {
 		utterance := Utterance{
 			ID:      "utt-1",
-			SpaceId: "space-1",
+			ScopeId: "space-1",
 			Text:    "Hey Sofia, what do you think about this design?",
 		}
 
@@ -283,7 +283,7 @@ func TestScoreAll(t *testing.T) {
 	t.Run("domain relevance wins when no direct address", func(t *testing.T) {
 		utterance := Utterance{
 			ID:      "utt-2",
-			SpaceId: "space-1",
+			ScopeId: "space-1",
 			Text:    "We need to refactor the database and improve code performance",
 		}
 
@@ -299,7 +299,7 @@ func TestScoreAll(t *testing.T) {
 	t.Run("scores sorted descending", func(t *testing.T) {
 		utterance := Utterance{
 			ID:      "utt-3",
-			SpaceId: "space-1",
+			ScopeId: "space-1",
 			Text:    "Hello everyone",
 		}
 
@@ -616,7 +616,7 @@ func TestConversationalThread(t *testing.T) {
 		candidates := []AgentCandidate{aria, lyra}
 
 		// Step 1: User addresses Aria -> sets thread
-		utt1 := Utterance{Text: "Aria, hello!", Timestamp: time.Now().UTC(), SpaceId: "space-thread-1"}
+		utt1 := Utterance{Text: "Aria, hello!", Timestamp: time.Now().UTC(), ScopeId: "space-thread-1"}
 		scores1 := scorer.ScoreAll(candidates, utt1, session)
 		// Simulate cognition updating thread
 		for _, s := range scores1 {
@@ -628,7 +628,7 @@ func TestConversationalThread(t *testing.T) {
 		}
 
 		// Step 2: User asks follow-up without naming anyone
-		utt2 := Utterance{Text: "what do you think about the project?", Timestamp: time.Now().UTC(), SpaceId: "space-thread-1"}
+		utt2 := Utterance{Text: "what do you think about the project?", Timestamp: time.Now().UTC(), ScopeId: "space-thread-1"}
 		scores2 := scorer.ScoreAll(candidates, utt2, session)
 
 		var ariaScore, lyraScore float64
@@ -651,7 +651,7 @@ func TestConversationalThread(t *testing.T) {
 
 		candidates := []AgentCandidate{aria, lyra}
 		// User now addresses Lyra by name at start
-		utt := Utterance{Text: "Lyra, can you check the support tickets?", Timestamp: time.Now().UTC(), SpaceId: "space-thread-2"}
+		utt := Utterance{Text: "Lyra, can you check the support tickets?", Timestamp: time.Now().UTC(), ScopeId: "space-thread-2"}
 		scores := scorer.ScoreAll(candidates, utt, session)
 
 		var lyraScore float64
@@ -672,7 +672,7 @@ func TestConversationalThread(t *testing.T) {
 
 		candidates := []AgentCandidate{aria, lyra}
 		// User asks Aria to say hi to Lyra -- Lyra is mentioned, not addressed
-		utt := Utterance{Text: "can you say hi to Lyra?", Timestamp: time.Now().UTC(), SpaceId: "space-thread-3"}
+		utt := Utterance{Text: "can you say hi to Lyra?", Timestamp: time.Now().UTC(), ScopeId: "space-thread-3"}
 		scores := scorer.ScoreAll(candidates, utt, session)
 
 		var ariaScore, lyraScore float64

@@ -983,7 +983,7 @@ func (s *streamSession) voiceAgentScopedToolNames() (map[string]struct{}, bool) 
 
 // stampVoiceAgentScopeOnListTools copies the bound voice-session scope
 // (spaceId + GA agent id) onto a ListToolsMsg before it is proxied to the agent
-// node (#1448). The agent-node receiver has no local voiceAgentSpaceId of its
+// node (#1448). The agent-node receiver has no local voiceAgentScopeId of its
 // own, so without this the scope context is lost across the hop and the surface
 // fails open to the full registry. No-op when this session isn't a voice-agent
 // session (both fields empty), so non-voice callers proxy unchanged.
@@ -992,11 +992,11 @@ func (s *streamSession) stampVoiceAgentScopeOnListTools(msg *memqlv1.ListToolsMs
 		return
 	}
 	s.voiceAgentSpeakSubMu.Lock()
-	spaceId := s.voiceAgentSpaceId
+	spaceId := s.voiceAgentScopeId
 	agentId := s.voiceAgentGaAgentId
 	s.voiceAgentSpeakSubMu.Unlock()
 	if spaceId != "" {
-		msg.VoiceAgentSpaceId = spaceId
+		msg.VoiceAgentScopeId = spaceId
 	}
 	if agentId != "" {
 		msg.VoiceAgentGaAgentId = agentId
@@ -1006,7 +1006,7 @@ func (s *streamSession) stampVoiceAgentScopeOnListTools(msg *memqlv1.ListToolsMs
 // stampVoiceAgentScopeOnCallTool copies the bound voice-session execution
 // context (spaceId + the resolved GA role) onto a CallToolMsg before it is
 // proxied to the agent node. The agent-node receiver has no local
-// voiceAgentSpaceId / voiceAgentGaRole (those bind only on the bff session that
+// voiceAgentScopeId / voiceAgentGaRole (those bind only on the bff session that
 // received VoiceAgentSessionStart), so without this the agent-node role gate
 // rejects GA-only tools against the empty caller role and the client-tool relay
 // has no voice space to scope to. No-op for non-voice callers. Mirror of
@@ -1016,11 +1016,11 @@ func (s *streamSession) stampVoiceAgentScopeOnCallTool(msg *memqlv1.CallToolMsg)
 		return
 	}
 	s.voiceAgentSpeakSubMu.Lock()
-	spaceId := s.voiceAgentSpaceId
+	spaceId := s.voiceAgentScopeId
 	gaRole := s.voiceAgentGaRole
 	s.voiceAgentSpeakSubMu.Unlock()
 	if spaceId != "" {
-		msg.VoiceAgentSpaceId = spaceId
+		msg.VoiceAgentScopeId = spaceId
 	}
 	if gaRole != "" {
 		msg.VoiceAgentGaRole = gaRole
@@ -1035,10 +1035,10 @@ func (s *streamSession) stampVoiceAgentScopeOnCallTool(msg *memqlv1.CallToolMsg)
 // This is the agent-node (proxied receiver) counterpart to the chat path's
 // turn-context stamping (integrations/agent/streaming.go). The voice CallTool
 // arrives over the bff->agent proxy hop carrying the bound voice scope on the
-// CallToolMsg (VoiceAgentSpaceId / VoiceAgentGaAgentId, stamped by
+// CallToolMsg (VoiceAgentScopeId / VoiceAgentGaAgentId, stamped by
 // stampVoiceAgentScopeOnCallTool); the local agent-node session has none of it.
 //
-//   - spaceId  <- the threaded VoiceAgentSpaceId.
+//   - spaceId  <- the threaded VoiceAgentScopeId.
 //   - agentId  <- the space's group-GA agent (resolveGroupGAAgentId), the same
 //     resolution the ListTools scope gate uses. Becomes the produced plan's
 //     ownerAgentId so the production turn dispatches straight to the assistant.
@@ -1051,7 +1051,7 @@ func (s *streamSession) stampVoiceAgentScopeOnCallTool(msg *memqlv1.CallToolMsg)
 // produceArtifact (only those two are @required on the builtin).
 //
 // No-op (returns ctx unchanged) for non-voice callers -- a plain browser
-// CallTool carries no VoiceAgentSpaceId, and the chat path already stamps its
+// CallTool carries no VoiceAgentScopeId, and the chat path already stamps its
 // own defaults upstream. Setting it for those callers would be inert anyway
 // (applyToolDefaults only touches a tool's declared @autoInjected fields), but
 // gating on the voice marker keeps the extra space lookups off the hot browser
@@ -1067,13 +1067,13 @@ func (s *streamSession) contextWithVoiceCallToolDefaults(ctx context.Context, ms
 // contextWithVoiceCallToolDefaults (mirrors voiceAgentScopedToolNamesVia): it
 // reads the threaded voice scope off the CallToolMsg and resolves the
 // auto-injection defaults through the narrow voiceParticipantResolver, so the
-// cross-node proxy hop (read CallToolMsg.VoiceAgentSpaceId -> resolve space
+// cross-node proxy hop (read CallToolMsg.VoiceAgentScopeId -> resolve space
 // owner -> stamp ToolDefaults) is unit-testable without a live engine + DB.
 func voiceCallToolDefaultsVia(ctx context.Context, engine voiceParticipantResolver, msg *memqlv1.CallToolMsg, logger *slog.Logger) context.Context {
 	if engine == nil || msg == nil {
 		return ctx
 	}
-	spaceId := strings.TrimSpace(msg.GetVoiceAgentSpaceId())
+	spaceId := strings.TrimSpace(msg.GetVoiceAgentScopeId())
 	if spaceId == "" {
 		// Not a proxied voice CallTool (or pre-#1503 bff that doesn't thread
 		// the scope) -- leave the context untouched.
@@ -1105,7 +1105,7 @@ func (s *streamSession) voiceAgentScopedToolNamesForRequest(reqSpaceId, reqAgent
 		return nil, "", false
 	}
 	s.voiceAgentSpeakSubMu.Lock()
-	localSpaceId := s.voiceAgentSpaceId
+	localSpaceId := s.voiceAgentScopeId
 	localAgentId := s.voiceAgentGaAgentId
 	s.voiceAgentSpeakSubMu.Unlock()
 
@@ -1621,7 +1621,7 @@ func (s *streamSession) startVoiceAgentSpeakSubscriber(spaceId, gaAgentId, initi
 		s.voiceAgentSpeakStop()
 		s.voiceAgentSpeakStop = nil
 	}
-	s.voiceAgentSpaceId = spaceId
+	s.voiceAgentScopeId = spaceId
 	s.voiceAgentGaAgentId = gaAgentId
 	s.voiceAgentSpeakSubMu.Unlock()
 
@@ -1757,7 +1757,7 @@ func (s *streamSession) stopVoiceAgentSpeakSubscriber() {
 	s.voiceAgentSpeakSubMu.Lock()
 	stop := s.voiceAgentSpeakStop
 	s.voiceAgentSpeakStop = nil
-	s.voiceAgentSpaceId = ""
+	s.voiceAgentScopeId = ""
 	s.voiceAgentGaAgentId = ""
 	s.voiceAgentSpeakSubMu.Unlock()
 	if stop != nil {

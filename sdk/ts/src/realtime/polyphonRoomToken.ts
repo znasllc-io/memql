@@ -10,7 +10,7 @@ import { newShortId } from "../client/id.js";
 import { readServerPayload } from "../client/wire.js";
 
 export interface PolyphonRoomTokenArgs {
-  spaceId: string;
+  scopeId: string;
   participantId: string;
   displayName: string;
   signal?: AbortSignal;
@@ -31,7 +31,7 @@ export async function polyphonRoomToken(
   args: PolyphonRoomTokenArgs,
 ): Promise<PolyphonRoomTokenResult> {
   if (!dispatcher) throw new Error("polyphonRoomToken: dispatcher is required");
-  if (!args.spaceId) throw new Error("polyphonRoomToken: spaceId is required");
+  if (!args.scopeId) throw new Error("polyphonRoomToken: scopeId is required");
   if (!args.participantId) throw new Error("polyphonRoomToken: participantId is required");
   if (!args.displayName) throw new Error("polyphonRoomToken: displayName is required");
 
@@ -40,7 +40,7 @@ export async function polyphonRoomToken(
     {
       polyphonRoomToken: {
         requestId,
-        spaceId: args.spaceId,
+        scopeId: args.scopeId,
         participantId: args.participantId,
         displayName: args.displayName,
       },

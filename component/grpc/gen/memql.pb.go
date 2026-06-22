@@ -3640,14 +3640,14 @@ type ListToolsMsg struct {
 	Cursor string `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
 	// Voice-agent tool-scope context, threaded across the proxy hop (#1448).
 	// ListTools is proxied from the bff to the agent node (nodeTargetForListTools
-	// -> NodeTypeAgent), and the agent-node session has no local voiceAgentSpaceId
+	// -> NodeTypeAgent), and the agent-node session has no local voiceAgentScopeId
 	// / voiceAgentGaAgentId -- those are bound only on the bff session that
 	// received VoiceAgentSessionStart. The bff stamps the bound scope here before
 	// proxying so the receiving node can scope the realtime tool surface to the
 	// GA's tool list instead of failing open to the full registry. Empty for
 	// non-voice callers (text loop, direct browser), which keeps the local
 	// session-state path unchanged.
-	VoiceAgentSpaceId   string `protobuf:"bytes,3,opt,name=voice_agent_space_id,json=voiceAgentSpaceId,proto3" json:"voice_agent_space_id,omitempty"`
+	VoiceAgentScopeId   string `protobuf:"bytes,3,opt,name=voice_agent_scope_id,json=voiceAgentScopeId,proto3" json:"voice_agent_scope_id,omitempty"`
 	VoiceAgentGaAgentId string `protobuf:"bytes,4,opt,name=voice_agent_ga_agent_id,json=voiceAgentGaAgentId,proto3" json:"voice_agent_ga_agent_id,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
@@ -3697,9 +3697,9 @@ func (x *ListToolsMsg) GetCursor() string {
 	return ""
 }
 
-func (x *ListToolsMsg) GetVoiceAgentSpaceId() string {
+func (x *ListToolsMsg) GetVoiceAgentScopeId() string {
 	if x != nil {
-		return x.VoiceAgentSpaceId
+		return x.VoiceAgentScopeId
 	}
 	return ""
 }
@@ -3874,14 +3874,14 @@ type CallToolMsg struct {
 	// Voice-agent execution context, threaded across the proxy hop (mirror of
 	// ListToolsMsg #1448). CallTool is proxied from the bff to the agent node
 	// (nodeTargetForCallTool -> NodeTypeAgent), and the agent-node session has no
-	// local voiceAgentSpaceId / voiceAgentGaRole -- those bind only on the bff
+	// local voiceAgentScopeId / voiceAgentGaRole -- those bind only on the bff
 	// session that received VoiceAgentSessionStart. The bff stamps them here
 	// before proxying so the agent node can (a) gate tool EXECUTION on the GA's
 	// role (assistant), not the empty caller role -- unblocking GA-only tools like
 	// the operator/uiClick Takeover surface + produceArtifact -- and (b) route a
 	// client-executed tool through the cross-node relay scoped to the voice space.
 	// Empty for non-voice callers, which keeps the local session-state path.
-	VoiceAgentSpaceId string `protobuf:"bytes,4,opt,name=voice_agent_space_id,json=voiceAgentSpaceId,proto3" json:"voice_agent_space_id,omitempty"`
+	VoiceAgentScopeId string `protobuf:"bytes,4,opt,name=voice_agent_scope_id,json=voiceAgentScopeId,proto3" json:"voice_agent_scope_id,omitempty"`
 	VoiceAgentGaRole  string `protobuf:"bytes,5,opt,name=voice_agent_ga_role,json=voiceAgentGaRole,proto3" json:"voice_agent_ga_role,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
@@ -3938,9 +3938,9 @@ func (x *CallToolMsg) GetArguments() *structpb.Struct {
 	return nil
 }
 
-func (x *CallToolMsg) GetVoiceAgentSpaceId() string {
+func (x *CallToolMsg) GetVoiceAgentScopeId() string {
 	if x != nil {
-		return x.VoiceAgentSpaceId
+		return x.VoiceAgentScopeId
 	}
 	return ""
 }
@@ -7103,7 +7103,7 @@ func (x *SenseParameter) GetDocumentation() string {
 type PolyphonRoomTokenMsg struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	SpaceId       string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
+	ScopeId       string                 `protobuf:"bytes,2,opt,name=scope_id,json=scopeId,proto3" json:"scope_id,omitempty"`
 	ParticipantId string                 `protobuf:"bytes,3,opt,name=participant_id,json=participantId,proto3" json:"participant_id,omitempty"`
 	DisplayName   string                 `protobuf:"bytes,4,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -7147,9 +7147,9 @@ func (x *PolyphonRoomTokenMsg) GetRequestId() string {
 	return ""
 }
 
-func (x *PolyphonRoomTokenMsg) GetSpaceId() string {
+func (x *PolyphonRoomTokenMsg) GetScopeId() string {
 	if x != nil {
-		return x.SpaceId
+		return x.ScopeId
 	}
 	return ""
 }
@@ -7361,7 +7361,7 @@ func (x *PolyphonStatusResult) GetPlatform() string {
 type PolyphonUtteranceMsg struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	SpaceId       string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
+	ScopeId       string                 `protobuf:"bytes,2,opt,name=scope_id,json=scopeId,proto3" json:"scope_id,omitempty"`
 	ParticipantId string                 `protobuf:"bytes,3,opt,name=participant_id,json=participantId,proto3" json:"participant_id,omitempty"`
 	Text          string                 `protobuf:"bytes,4,opt,name=text,proto3" json:"text,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -7405,9 +7405,9 @@ func (x *PolyphonUtteranceMsg) GetRequestId() string {
 	return ""
 }
 
-func (x *PolyphonUtteranceMsg) GetSpaceId() string {
+func (x *PolyphonUtteranceMsg) GetScopeId() string {
 	if x != nil {
-		return x.SpaceId
+		return x.ScopeId
 	}
 	return ""
 }
@@ -8039,7 +8039,7 @@ type AgentGenerateTurnMsg struct {
 	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// Who is speaking.
 	AgentId       string `protobuf:"bytes,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"` // v1:agents:agent ID
-	SpaceId       string `protobuf:"bytes,3,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
+	ScopeId       string `protobuf:"bytes,3,opt,name=scope_id,json=scopeId,proto3" json:"scope_id,omitempty"`
 	ParticipantId string `protobuf:"bytes,4,opt,name=participant_id,json=participantId,proto3" json:"participant_id,omitempty"` // agent's participant record in this space
 	// Conversation history (system / user / assistant / tool messages).
 	History []*AgentTurnMessage `protobuf:"bytes,10,rep,name=history,proto3" json:"history,omitempty"`
@@ -8106,9 +8106,9 @@ func (x *AgentGenerateTurnMsg) GetAgentId() string {
 	return ""
 }
 
-func (x *AgentGenerateTurnMsg) GetSpaceId() string {
+func (x *AgentGenerateTurnMsg) GetScopeId() string {
 	if x != nil {
-		return x.SpaceId
+		return x.ScopeId
 	}
 	return ""
 }
@@ -12852,7 +12852,7 @@ const file_memql_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
 	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12/\n" +
-	"\x14voice_agent_space_id\x18\x03 \x01(\tR\x11voiceAgentSpaceId\x124\n" +
+	"\x14voice_agent_scope_id\x18\x03 \x01(\tR\x11voiceAgentScopeId\x124\n" +
 	"\x17voice_agent_ga_agent_id\x18\x04 \x01(\tR\x13voiceAgentGaAgentId\"\x89\x01\n" +
 	"\x0fListToolsResult\x12\x1d\n" +
 	"\n" +
@@ -12871,7 +12871,7 @@ const file_memql_proto_rawDesc = "" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x125\n" +
 	"\targuments\x18\x03 \x01(\v2\x17.google.protobuf.StructR\targuments\x12/\n" +
-	"\x14voice_agent_space_id\x18\x04 \x01(\tR\x11voiceAgentSpaceId\x12-\n" +
+	"\x14voice_agent_scope_id\x18\x04 \x01(\tR\x11voiceAgentScopeId\x12-\n" +
 	"\x13voice_agent_ga_role\x18\x05 \x01(\tR\x10voiceAgentGaRole\"\x89\x01\n" +
 	"\x0eCallToolResult\x12\x1d\n" +
 	"\n" +
@@ -13170,7 +13170,7 @@ const file_memql_proto_rawDesc = "" +
 	"\x14PolyphonRoomTokenMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
-	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12%\n" +
+	"\bscope_id\x18\x02 \x01(\tR\ascopeId\x12%\n" +
 	"\x0eparticipant_id\x18\x03 \x01(\tR\rparticipantId\x12!\n" +
 	"\fdisplay_name\x18\x04 \x01(\tR\vdisplayName\"\xab\x01\n" +
 	"\x17PolyphonRoomTokenResult\x12\x1d\n" +
@@ -13194,7 +13194,7 @@ const file_memql_proto_rawDesc = "" +
 	"\x14PolyphonUtteranceMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
-	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12%\n" +
+	"\bscope_id\x18\x02 \x01(\tR\ascopeId\x12%\n" +
 	"\x0eparticipant_id\x18\x03 \x01(\tR\rparticipantId\x12\x12\n" +
 	"\x04text\x18\x04 \x01(\tR\x04text\"[\n" +
 	"\x17PolyphonUtteranceResult\x12\x1d\n" +
@@ -13249,7 +13249,7 @@ const file_memql_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
 	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12\x19\n" +
-	"\bspace_id\x18\x03 \x01(\tR\aspaceId\x12%\n" +
+	"\bscope_id\x18\x03 \x01(\tR\ascopeId\x12%\n" +
 	"\x0eparticipant_id\x18\x04 \x01(\tR\rparticipantId\x12<\n" +
 	"\ahistory\x18\n" +
 	" \x03(\v2\".znasllc.memql.v1.AgentTurnMessageR\ahistory\x12C\n" +
