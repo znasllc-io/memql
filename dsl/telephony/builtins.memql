@@ -36,3 +36,38 @@ builtin telephonySendDtmf {
   identity  string  @required
   digits    string  @required @description("DTMF digits to send")
 }
+
+// --- Provisioning (owner/admin gated in Go; backend functions only) --------
+
+@enabled
+@description("Search the carrier for purchasable DIDs. Owner/admin only.")
+@executor("integration.telephony.searchNumbers")
+builtin telephonySearchNumbers {
+  areaCode  string  @description("Area / national destination code")
+  type      string  @description("local | tollfree | mobile")
+  limit     integer @description("Max results")
+}
+
+@enabled
+@description("Purchase a DID, bind it to a partition, point it at the SIP edge, and provision inbound routing. Owner/admin only.")
+@executor("integration.telephony.buyNumber")
+builtin telephonyBuyNumber {
+  providerId   string  @required @description("Id from telephonySearchNumbers")
+  partitionId  string  @required @description("Partition to assign the DID to")
+  purpose      string  @description("inbound | outbound | both")
+}
+
+@enabled
+@description("Point an owned DID at the SIP edge and (re)provision inbound routing. Owner/admin only.")
+@executor("integration.telephony.configureInboundNumber")
+builtin telephonyConfigureInboundNumber {
+  e164         string  @required
+  partitionId  string  @required
+}
+
+@enabled
+@description("Release an owned DID back to the carrier. Owner/admin only.")
+@executor("integration.telephony.releaseNumber")
+builtin telephonyReleaseNumber {
+  e164  string  @required
+}

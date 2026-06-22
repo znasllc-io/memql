@@ -135,6 +135,7 @@ var _ memql.IntegrationProvider = (*Integration)(nil)
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	caps := i.inboundCapabilities()
 	caps = append(caps, i.outboundCapabilities()...)
+	caps = append(caps, i.provisioningCapabilities()...)
 	return caps
 }
 
