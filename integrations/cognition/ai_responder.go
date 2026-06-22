@@ -1119,22 +1119,24 @@ func (c *CognitionIntegration) insertAIResponse(ctx context.Context, spaceId str
 		}
 	}
 
-	// Build the insert mutation
-	query := fmt.Sprintf(`insert("%s", id="%s", payload={
-		"spaceId": "%s",
-		"participantId": "%s",
+	// Build the insert mutation. Every interpolated string value is routed
+	// through escapeJSONString (json.Marshal -> quoted) so a stray double
+	// quote in an id cannot break out of the enclosing quotes (go/unsafe-quoting).
+	query := fmt.Sprintf(`insert("%s", id=%s, payload={
+		"spaceId": %s,
+		"participantId": %s,
 		"participantType": "si",
 		"utteranceType": "text",
 		"text": %s,
-		"replyToId": "%s",
+		"replyToId": %s,
 		"source": %s%s%s
 	})`,
 		memoryNodes.ConceptCognitionUtterance,
-		utteranceId,
-		spaceId,
-		participantId, // SI participant node ID, resolved upstream via aiParticipantForSpace
+		escapeJSONString(utteranceId),
+		escapeJSONString(spaceId),
+		escapeJSONString(participantId), // AI participant node ID, resolved upstream via aiParticipantForSpace
 		escapeJSONString(response),
-		replyToId,
+		escapeJSONString(replyToId),
 		string(sourceJSON),
 		citationsClause,
 		retrievedClause,
