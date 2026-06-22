@@ -22,6 +22,14 @@ export interface ExecuteQueryPayload {
   requestId: string;
   query: string;
   clientId?: string;
+  // Opaque keyset continuation cursor (memql#1985 / 5.12). When set, the
+  // engine continues the query from the encoded position via a SQL keyset
+  // predicate. Obtained from a prior response's ResultMeta.cursor; opaque
+  // to clients and bound to the query's sort ordering. Empty/unset for a
+  // first page or offset/unpaginated queries. Rides ExecuteQueryMsg.cursor
+  // (proto field 5); the JSON field name matches in both camel/snake form,
+  // so protojson unmarshals it on the server without a rename.
+  cursor?: string;
 }
 
 export interface CancelRequestPayload {
