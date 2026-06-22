@@ -100,6 +100,16 @@ type ActionResult struct {
 	Details       map[string]string
 }
 
+// NextVersionSuggestion carries the current version plus the three
+// next-version proposals from SuggestNextVersion (#1877).
+type NextVersionSuggestion struct {
+	CurrentVersion string
+	NextMajor      string
+	NextMinor      string
+	NextPatch      string
+	Source         string // "deployment" | "overlay" | "none"
+}
+
 // -----------------------------------------------------------------------------
 // Methods (mirror the 5 RPCs)
 // -----------------------------------------------------------------------------
@@ -137,6 +147,47 @@ func (c *DeployControlClient) Rollback(ctx context.Context, env, commitSha strin
 func (c *DeployControlClient) RolloutAction(ctx context.Context, env, rollout, action string) (ActionResult, error) {
 	resp, err := c.grpc.RolloutAction(ctx, &memqlv1.RolloutActionRequest{Env: env, Rollout: rollout, Action: action})
 	return actionResultFromProto(resp), wrapActionErr("rollout_action", err)
+}
+
+// SuggestNextVersion reads the latest succeeded deployment's version for
+// env ("staging" | "prod") and proposes the next major / minor / patch
+// semver (#1877). Read-only; developer/admin/owner gated server-side.
+func (c *DeployControlClient) SuggestNextVersion(ctx context.Context, env string) (NextVersionSuggestion, error) {
+	resp, err := c.grpc.SuggestNextVersion(ctx, &memqlv1.SuggestNextVersionRequest{Env: env})
+	if err != nil {
+		return NextVersionSuggestion{}, fmt.Errorf("deploy console: suggest next version %s: %w", env, err)
+	}
+	return nextVersionSuggestionFromProto(resp), nil
+}
+
+// CutVersion creates a new pending v1:cluster:deployment record (#1877)
+// at the chosen next version for env, with the resolved image digest --
+// ready for Deploy to ship. bump ∈ {"major","minor","patch"} selects the
+// semver part to increment off the current version (empty defaults to
+// patch); version is an optional explicit override (when set, bump is
+// ignored). Developer/admin/owner gated server-side.
+func (c *DeployControlClient) CutVersion(ctx context.Context, env, bump, version string) (ActionResult, error) {
+	resp, err := c.grpc.CutVersion(ctx, &memqlv1.CutVersionRequest{Env: env, Bump: bump, Version: version})
+	return actionResultFromProto(resp), wrapActionErr("cut_version", err)
+}
+
+// Deploy ships a cut (pending) v1:cluster:deployment record to its target
+// (#1878), selecting the driver by the record's stored provider
+// (docker-local | azure) and transitioning the record in_progress ->
+// succeeded | failed. Developer/admin/owner gated server-side.
+func (c *DeployControlClient) Deploy(ctx context.Context, deploymentId string) (ActionResult, error) {
+	resp, err := c.grpc.Deploy(ctx, &memqlv1.DeployRequest{DeploymentId: deploymentId})
+	return actionResultFromProto(resp), wrapActionErr("deploy", err)
+}
+
+// RollbackDeployment redeploys a prior SUCCEEDED deployment's stored image
+// digest through the same driver (#1878) -- NOT a blue-green color flip. A
+// new deployment record is created pointing at the historical digest and
+// run through the driver, landing in rolled_back on success. Owner-only
+// server-side (#1876).
+func (c *DeployControlClient) RollbackDeployment(ctx context.Context, toDeploymentId string) (ActionResult, error) {
+	resp, err := c.grpc.RollbackDeployment(ctx, &memqlv1.RollbackDeploymentRequest{ToDeploymentId: toDeploymentId})
+	return actionResultFromProto(resp), wrapActionErr("rollback_deployment", err)
 }
 
 // -----------------------------------------------------------------------------
@@ -201,6 +252,19 @@ func deploymentStatusFromProto(p *memqlv1.DeploymentStatus) DeploymentStatus {
 		out.GateResult = gr
 	}
 	return out
+}
+
+func nextVersionSuggestionFromProto(p *memqlv1.SuggestNextVersionResult) NextVersionSuggestion {
+	if p == nil {
+		return NextVersionSuggestion{}
+	}
+	return NextVersionSuggestion{
+		CurrentVersion: p.GetCurrentVersion(),
+		NextMajor:      p.GetNextMajor(),
+		NextMinor:      p.GetNextMinor(),
+		NextPatch:      p.GetNextPatch(),
+		Source:         p.GetSource(),
+	}
 }
 
 func actionResultFromProto(p *memqlv1.ActionResult) ActionResult {

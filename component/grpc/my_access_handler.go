@@ -48,6 +48,8 @@ func roleToProto(r auth.Role) memqlv1.UserRole {
 		return memqlv1.UserRole_USER_ROLE_OWNER
 	case auth.RoleAdmin:
 		return memqlv1.UserRole_USER_ROLE_ADMIN
+	case auth.RoleDeveloper:
+		return memqlv1.UserRole_USER_ROLE_DEVELOPER
 	case auth.RoleWriter:
 		return memqlv1.UserRole_USER_ROLE_WRITER
 	case auth.RoleReader:
