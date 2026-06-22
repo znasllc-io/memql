@@ -38,6 +38,18 @@ DEFAULT_RESERVED="${RESERVED_CONNECTIONS:-17}"      # superuser(12) + Tiger ops(
 DEFAULT_MAX_OPEN="${MAX_OPEN_CONNS:-10}"            # per-pod pool default (database.go)
 DEFAULT_MANIFESTS="${MANIFESTS_DIR:-$REPO_ROOT/deploy/k8s/base}"
 
+# --live (memql#1958): the projected math can't see what is ALREADY on the
+# instance -- a non-fleet leak (e.g. the `deployer` Tiger control-plane pool,
+# #1822). With --live the gate reads the REAL max_connections and subtracts
+# live FOREIGN (non-memql) backends from the budget, so a deploy into an
+# already-near-full instance FAILS FAST instead of cold-starting into a storm
+# (the 0.9.88 failure mode). No-op without --live (pure manifest projection).
+LIVE=false
+DSN=""
+TIGER_SVC="${TIGER_SVC:-xahn9ru4v6}"
+PGCONNECT_TIMEOUT_S="${PGCONNECT_TIMEOUT_S:-8}"
+LIVE_FOREIGN=0
+
 #=============================================================================
 # FUNCTIONS
 #=============================================================================
@@ -54,6 +66,12 @@ Options:
   --reserved=N          Reserved slots (default $DEFAULT_RESERVED / env RESERVED_CONNECTIONS)
   --default-max-open=N  Per-pod pool when the container sets no MAX_OPEN_CONNS (default $DEFAULT_MAX_OPEN)
   --manifests-dir=DIR   Where the node Deployment YAMLs live (default deploy/k8s/base)
+  --live                ALSO subtract LIVE non-fleet backends from the budget +
+                        read the real max_connections (needs a DSN). Catches a
+                        deploy into an already-near-full instance (memql#1958).
+  --dsn=DSN             DB DSN for --live (default: DIRECT_DSN /
+                        MEMORY_NODES_DATABASE_DIRECT_DSN / MEMORY_NODES_DATABASE_DSN
+                        / tiger CLI for \$TIGER_SVC)
   --help
 
 Exit: 0 = within budget, 1 = PEAK or steady exceeds budget (gate FAIL).
@@ -71,11 +89,41 @@ function parse_arguments() {
             --reserved=*)        RESERVED="${1#*=}";;
             --default-max-open=*) DEF_MAX_OPEN="${1#*=}";;
             --manifests-dir=*)   MANIFESTS="${1#*=}";;
+            --live)              LIVE=true;;
+            --dsn=*)             DSN="${1#*=}";;
             --help) show_help; exit 0;;
             *) echo "ERROR: unknown option: $1"; show_help; exit 2;;
         esac
         shift
     done
+}
+
+# resolve_live (only with --live): read the instance's REAL max_connections and
+# the count of FOREIGN (non-memql) live backends, so the budget reflects reality
+# (incl. the deployer leak) rather than the static default.
+function resolve_live() {
+    [[ "$LIVE" == true ]] || return 0
+    if ! command -v psql >/dev/null 2>&1; then
+        echo "CONN-HEADROOM-WARN: --live needs psql; skipping live adjustment"; return 0
+    fi
+    if [[ -z "$DSN" ]]; then
+        DSN="${DIRECT_DSN:-${MEMORY_NODES_DATABASE_DIRECT_DSN:-${MEMORY_NODES_DATABASE_DSN:-}}}"
+        if [[ -z "$DSN" ]] && command -v tiger >/dev/null 2>&1; then
+            DSN="$(tiger db connection-string "$TIGER_SVC" --with-password 2>/dev/null)"
+        fi
+    fi
+    if [[ -z "$DSN" ]]; then
+        echo "CONN-HEADROOM-WARN: --live found no DSN; skipping live adjustment"; return 0
+    fi
+    local livemax foreign
+    livemax="$(PGCONNECT_TIMEOUT="$PGCONNECT_TIMEOUT_S" psql "$DSN" -At -c "SHOW max_connections;" 2>/dev/null)"
+    [[ "$livemax" =~ ^[0-9]+$ ]] && MAX_CONNECTIONS="$livemax"
+    # FOREIGN = backends NOT opened by the mesh (application_name not LIKE memql%)
+    # and not our own probe -- i.e. the deployer leak, exporters, etc.
+    foreign="$(PGCONNECT_TIMEOUT="$PGCONNECT_TIMEOUT_S" psql "$DSN" -At -c \
+      "SELECT count(*) FROM pg_stat_activity WHERE datname IS NOT NULL AND coalesce(application_name,'') NOT LIKE 'memql%' AND pid <> pg_backend_pid();" 2>/dev/null)"
+    [[ "$foreign" =~ ^[0-9]+$ ]] && LIVE_FOREIGN="$foreign"
+    echo "INFO: --live: max_connections=$MAX_CONNECTIONS, foreign(non-mesh) live backends=$LIVE_FOREIGN (subtracted from budget)"
 }
 
 # compute_and_check delegates the YAML walk + arithmetic to python3 (already a
@@ -84,6 +132,7 @@ function parse_arguments() {
 function compute_and_check() {
     MAX_CONNECTIONS="$MAX_CONNECTIONS" RESERVED="$RESERVED" \
     DEF_MAX_OPEN="$DEF_MAX_OPEN" MANIFESTS="$MANIFESTS" \
+    LIVE_FOREIGN="$LIVE_FOREIGN" \
     python3 - <<'PY'
 import os, sys, glob
 try:
@@ -95,7 +144,8 @@ maxc = int(os.environ["MAX_CONNECTIONS"])
 reserved = int(os.environ["RESERVED"])
 def_open = int(os.environ["DEF_MAX_OPEN"])
 mdir = os.environ["MANIFESTS"]
-budget = maxc - reserved
+foreign = int(os.environ.get("LIVE_FOREIGN", "0") or 0)
+budget = maxc - reserved - foreign
 
 rows = []
 for path in sorted(glob.glob(os.path.join(mdir, "*.yaml"))):
@@ -166,7 +216,10 @@ for r in rows:
     peak += p
     print(f"{n:<14}{rep:>9}{mo:>9}{sg:>7}{s:>9}{p:>7}")
 
-print(f"\nmax_connections={maxc}  reserved={reserved}  budget(usable)={budget}")
+if foreign:
+    print(f"\nmax_connections={maxc}  reserved={reserved}  foreign(live non-mesh)={foreign}  budget(usable)={budget}")
+else:
+    print(f"\nmax_connections={maxc}  reserved={reserved}  budget(usable)={budget}")
 print(f"steady total={steady}  peak total(surge+blue-green)={peak}")
 
 fail = False
@@ -190,6 +243,7 @@ PY
 function main() {
     parse_arguments "$@"
     echo "INFO: connection-headroom gate (manifests: $MANIFESTS)"
+    resolve_live
     compute_and_check
 }
 
