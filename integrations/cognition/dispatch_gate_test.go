@@ -78,6 +78,49 @@ func TestDispatchGate_ErroredConnProceeds(t *testing.T) {
 	release() // no-op on the error path
 }
 
+// TestDispatchGate_UsesDirectGetter pins the epic memql#1925 contract: the
+// WithDirectDBGetter option must thread the DIRECT (non-pooled) getter all the
+// way into the gate, so the gate's session-scoped advisory lock runs on a
+// connection the transaction pooler can't recycle. It builds the cognition
+// config the way NewCognitionIntegration does (defaultCognitionConfig +
+// applying the arg), constructs the gate from cfg.directDBGetter exactly as the
+// constructor does, and asserts the gate resolves the SAME *bun.DB the option
+// was given -- not some other (pooled) handle.
+func TestDispatchGate_UsesDirectGetter(t *testing.T) {
+	// A sentinel direct handle. We only compare its identity; it is never used
+	// for a query here.
+	connector := pgdriver.NewConnector(pgdriver.WithDSN("postgres://nobody:nobody@127.0.0.1:1/none?sslmode=disable"))
+	directDB := bun.NewDB(sql.OpenDB(connector), pgdialect.New())
+	defer directDB.Close()
+
+	var resolved int32
+	directGetter := func() *bun.DB {
+		atomic.AddInt32(&resolved, 1)
+		return directDB
+	}
+
+	// Build the config the same way NewCognitionIntegration does and apply the
+	// public option under test.
+	cfg := defaultCognitionConfig()
+	WithDirectDBGetter(directGetter).Apply(cfg)
+
+	if cfg.directDBGetter == nil {
+		t.Fatal("WithDirectDBGetter must set cfg.directDBGetter")
+	}
+
+	// Construct the gate exactly as NewCognitionIntegration does.
+	g := newDispatchGate(cfg.directDBGetter, dispatchGateTestLogger())
+	if g.directDBGetter == nil {
+		t.Fatal("the gate must carry the direct getter threaded from the config")
+	}
+	if got := g.directDBGetter(); got != directDB {
+		t.Fatalf("the gate must resolve the DIRECT handle threaded through WithDirectDBGetter; got %p want %p", got, directDB)
+	}
+	if atomic.LoadInt32(&resolved) == 0 {
+		t.Fatal("the gate must resolve its DB via the direct getter")
+	}
+}
+
 func TestDispatchGateLockKey_StableAndDistinct(t *testing.T) {
 	if dispatchGateLockKey("v1:cognition:utterance:a") != dispatchGateLockKey("v1:cognition:utterance:a") {
 		t.Fatal("lock key must be stable for the same utterance id")

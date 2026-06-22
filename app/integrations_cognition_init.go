@@ -25,10 +25,14 @@ func (a *App) setupCognitionIntegration() {
 		cognition.WithProviderRegistry(&CognitionProviderAdapter{Engine: a.engine}),
 		cognition.WithEventBus(a.eventBus),
 		cognition.WithScoreEngine(polyphonScoreEng),
-		// Lazy *bun.DB getter for the dispatch gate's Postgres advisory lock
-		// (znasllc-io/memql#1217) -- the same getter the cron leader uses;
-		// nil-safe (the gate fails safe / no-ops when the DB isn't ready).
-		cognition.WithDBGetter(a.db.BunDB),
+		// Lazy DIRECT (non-pooled) *bun.DB getter for the dispatch gate's
+		// Postgres advisory lock (znasllc-io/memql#1217). The gate holds a
+		// session-scoped lock across a whole turn, so it MUST bypass the
+		// transaction pooler -- DirectBunDB() returns the direct pool when
+		// DIRECT_DSN is set, else falls back to the main pool, so behavior is
+		// unchanged when unset (epic memql#1925). nil-safe (the gate fails safe
+		// / no-ops when the DB isn't ready).
+		cognition.WithDirectDBGetter(a.db.DirectBunDB),
 		cognition.WithVariableResolver(func(ctx context.Context, name string) (string, error) {
 			return a.engine.ResolveVariable(ctx, name)
 		}),

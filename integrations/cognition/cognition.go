@@ -282,11 +282,14 @@ type (
 		providerRegistry SIProviderRegistry
 		eventBus         *events.Bus
 		scoreEngine      *polyphon.ScoreEngine
-		// dbGetter is a lazy *bun.DB accessor used by the dispatch gate's
-		// Postgres advisory lock (znasllc-io/memql#1217). Optional: when nil
-		// the gate fails safe (always proceeds), so single-binary / no-DB
-		// builds are unaffected.
-		dbGetter func() *bun.DB
+		// directDBGetter is a lazy accessor for the DIRECT (non-pooled) *bun.DB,
+		// used by the dispatch gate's Postgres advisory lock
+		// (znasllc-io/memql#1217). It MUST resolve the direct endpoint: the gate
+		// holds a session-scoped lock across a whole turn, which a
+		// transaction-mode pooler would drop between statements (epic
+		// memql#1925). Optional: when nil the gate fails safe (always proceeds),
+		// so single-binary / no-DB builds are unaffected.
+		directDBGetter func() *bun.DB
 	}
 )
 
@@ -369,13 +372,17 @@ func WithScoreEngine(scoreEngine *polyphon.ScoreEngine) CognitionArg {
 	})
 }
 
-// WithDBGetter sets the lazy *bun.DB accessor used by the dispatch gate's
-// Postgres advisory lock (znasllc-io/memql#1217). Optional -- the same lazy
-// getter the cron leader uses (a.db.BunDB); nil-safe (a nil getter or nil DB
-// makes the gate fail safe / no-op).
-func WithDBGetter(dbGetter func() *bun.DB) CognitionArg {
-	return OptionalCognitionArg("db_getter", func(c *cognitionConfig) {
-		c.dbGetter = dbGetter
+// WithDirectDBGetter sets the lazy accessor for the DIRECT (non-pooled) *bun.DB
+// used by the dispatch gate's Postgres advisory lock (znasllc-io/memql#1217).
+// The getter MUST resolve the direct endpoint (a.db.DirectBunDB): the gate
+// holds a session-scoped lock across a whole turn, and a transaction-mode
+// pooler would recycle the backend out from under it (epic memql#1925).
+// Optional -- nil-safe (a nil getter or nil DB makes the gate fail safe /
+// no-op). When DIRECT_DSN is unset, DirectBunDB() falls back to the main pool,
+// so behavior is unchanged.
+func WithDirectDBGetter(directDBGetter func() *bun.DB) CognitionArg {
+	return OptionalCognitionArg("direct_db_getter", func(c *cognitionConfig) {
+		c.directDBGetter = directDBGetter
 	})
 }
 
@@ -505,10 +512,13 @@ func NewCognitionIntegration(baseIntegration *integrations.Integration, args ...
 	c.Logger = logger.New(ComponentName, os.Stdout, resolveLoggerLevel())
 
 	// Dispatch gate: exactly-one-replica turn dispatch via a Postgres advisory
-	// lock keyed by utterance id (znasllc-io/memql#1217). dbGetter is optional
-	// -- a nil getter makes the gate fail safe (always proceeds), so
-	// single-binary / no-DB builds are unaffected. See dispatch_gate.go.
-	c.dispatchGate = newDispatchGate(cfg.dbGetter, c.Logger)
+	// lock keyed by utterance id (znasllc-io/memql#1217). It runs on the DIRECT
+	// (non-pooled) endpoint -- the session-scoped lock is held across the whole
+	// turn and a transaction-mode pooler would drop it (epic memql#1925).
+	// directDBGetter is optional -- a nil getter makes the gate fail safe
+	// (always proceeds), so single-binary / no-DB builds are unaffected. See
+	// dispatch_gate.go.
+	c.dispatchGate = newDispatchGate(cfg.directDBGetter, c.Logger)
 
 	// Phase 2 of llm-driven-decisions: spin up the message
 	// classifier so the affirmation/follow-up suppression guard
