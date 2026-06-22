@@ -30,6 +30,7 @@ use identity.concepts.{ accessRequest, accountEntitlement, auditEvent, authCode,
 
 @enabled
 @description("The account's task-concurrency entitlement row (zero or one current row). Backs the admission controller (#904) and Tasks UX (#909). Filters on accountId only; classifies as 'other' in the per-row-authz audit. No-row => unlimited is enforced in the Go resolver.")
+@unbounded("entitlements for an account -- a small bounded set per account consumed whole")
 query accountEntitlement queryAccountEntitlement {
   args {
     accountId  string  @required
@@ -57,6 +58,7 @@ query accountEntitlement queryAccountEntitlement {
 
 @enabled
 @description("Returns the access request with the given id. Zero or one result.")
+@unbounded("access request by id (guarded) -- bounded to a single row")
 query accessRequest queryAccessRequestById {
   args {
     requestId  string  @required
@@ -85,6 +87,7 @@ query accessRequest queryAccessRequestById {
 
 @enabled
 @description("Get all active delegations for a given agent ID")
+@unbounded("active delegations for an agent -- a small bounded set consumed whole for authz")
 query delegation queryActiveDelegationsForAgent {
   args {
     agentId  string  @required
@@ -119,6 +122,7 @@ query delegation queryActiveDelegationsForAgent {
 
 @enabled
 @description("Get all active delegations whose identitySubject matches the argument. Used by the per-request DelegationResolver on the auth hot path. See memql#112.")
+@unbounded("active delegations for an identity subject -- a small bounded set consumed whole for authz")
 query delegation queryActiveDelegationsByIdentitySubject {
   args {
     identitySubject  string  @required
@@ -135,6 +139,11 @@ query user queryActiveUsers {
     groupId  string
   }
   filter  traitIsActiveRecord && when(args.role) { payload.role==args.role } && when(args.groupId) { args.groupId in payload.groupIds }
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   userFull
 }
 
@@ -153,6 +162,11 @@ query user querySearchUsers {
     active  boolean
   }
   filter  when(args.active) { payload.active==args.active }
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   userFull
 }
 
@@ -196,6 +210,11 @@ query auditEvent queryAuditEventsByActor {
     userId  string  @required
   }
   filter  payload.actorUserId==args.userId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   auditEventFull
 }
 
@@ -233,6 +252,11 @@ query auditEvent queryAuditEventsByTarget {
     targetId  string  @required
   }
   filter  payload.targetId==args.targetId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   auditEventFull
 }
 
@@ -261,6 +285,7 @@ query auditEvent queryAuditEventsByTarget {
 
 @enabled
 @description("Returns the auth code whose codeHash matches the argument. Zero or one result.")
+@unbounded("auth code by unique codeHash -- a credential lookup bounded to a single row")
 query authCode queryAuthCodeByCodeHash {
   args {
     codeHash  string  @required
@@ -293,6 +318,7 @@ query authCode queryAuthCodeByCodeHash {
 
 @enabled
 @description("Returns the dynamically-registered OAuth client whose clientId matches the argument. Zero or one result.")
+@unbounded("oauth client by unique clientId -- bounded to a single row")
 query oauthClient queryOAuthClientByClientId {
   args {
     clientId  string  @required
@@ -330,6 +356,7 @@ query oauthClient queryOAuthClientByClientId {
 
 @enabled
 @description("Returns the auth session whose previousRefreshTokenHash matches the argument. Used by the rotator's grace-window fallback. Zero or one result.")
+@unbounded("auth session by unique previousRefreshTokenHash -- a credential lookup bounded to a single row")
 query authSession queryAuthSessionByPreviousRefreshTokenHash {
   args {
     previousRefreshTokenHash  string  @required
@@ -368,6 +395,7 @@ query authSession queryAuthSessionByPreviousRefreshTokenHash {
 
 @enabled
 @description("Returns the auth session whose refreshTokenHash matches the argument. Zero or one result.")
+@unbounded("auth session by unique refreshTokenHash -- a credential lookup bounded to a single row")
 query authSession queryAuthSessionByRefreshTokenHash {
   args {
     refreshTokenHash  string  @required
@@ -400,6 +428,7 @@ query authSession queryAuthSessionByRefreshTokenHash {
 
 @enabled
 @description("Returns the auth session whose tokenHash matches the argument. Zero or one result.")
+@unbounded("auth session by unique tokenHash -- a credential lookup bounded to a single row")
 query authSession queryAuthSessionByTokenHash {
   args {
     tokenHash  string  @required
@@ -439,6 +468,11 @@ query authSession queryAuthSessionsForSubject {
     subject  string  @required
   }
   filter  payload.subject==args.subject
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   authSessionFull
 }
 
@@ -502,6 +536,7 @@ query clusterSettings queryClusterSettingsCurrent {
 
 @enabled
 @description("Get all delegations (active and revoked) for a given identity ID")
+@unbounded("delegations for an identity -- a small bounded set consumed whole for authz")
 query delegation queryDelegationsByIdentity {
   args {
     identityId  string  @required
@@ -535,6 +570,7 @@ query delegation queryDelegationsByIdentity {
 
 @enabled
 @description("Active delegations whose expiresAt is before the supplied cutoff.")
+@unbounded("expired-delegation reaper sweep -- an internal sweep that must see all")
 query delegation queryExpiredActiveDelegations {
   args {
     now  string  @required
@@ -571,6 +607,7 @@ query delegation queryExpiredActiveDelegations {
 
 @enabled
 @description("All audit events; the retention sweep iterates and per-row checks occurredAt + retention-days < now.")
+@unbounded("expired audit-event retention purge sweep -- an internal sweep that must see all")
 query auditEvent queryExpiredAuditEvents {
   filter  payload.action!=""
   shape   auditEventFull
@@ -604,6 +641,7 @@ query auditEvent queryExpiredAuditEvents {
 
 @enabled
 @description("CONSUMED auth codes whose expiresAt is before the supplied cutoff. Both predicates are load-bearing: the name says `Consumed`, so the consumedAt gate (memql#1714) keeps the result set to spent-then-expired codes and never sweeps an unspent-but-expired code that a redemption is still racing against.")
+@unbounded("expired consumed auth-code GC sweep -- an internal sweep that must see all")
 query authCode queryExpiredConsumedAuthCodes {
   args {
     now  string  @required
@@ -637,6 +675,7 @@ query authCode queryExpiredConsumedAuthCodes {
 
 @enabled
 @description("Magic-link requests whose expiresAt is before the supplied cutoff.")
+@unbounded("expired magic-link GC sweep -- an internal sweep that must see all")
 query magicLinkRequest queryExpiredMagicLinkRequests {
   args {
     now  string  @required
@@ -674,6 +713,7 @@ query magicLinkRequest queryExpiredMagicLinkRequests {
 
 @enabled
 @description("Pending access requests; the expiry sweep iterates these and per-row checks createdAt + expiry-days < now.")
+@unbounded("expired pending access-request sweep -- an internal sweep that must see all")
 query accessRequest queryExpiredPendingAccessRequests {
   filter  traitStatusIsPending
   shape   accessRequestFull
@@ -696,6 +736,7 @@ query accessRequest queryExpiredPendingAccessRequests {
 
 @enabled
 @description("Returns the invitation with the given id. Zero or one result.")
+@unbounded("invitation by id (guarded) -- bounded to a single row")
 query invitation queryInvitationById {
   args {
     invitationId  string  @required
@@ -730,6 +771,7 @@ query invitation queryInvitationById {
 
 @enabled
 @description("Returns the invitation whose tokenHash matches the argument. Zero or one result.")
+@unbounded("invitation by unique tokenHash -- a credential lookup bounded to a single row")
 query invitation queryInvitationByTokenHash {
   args {
     tokenHash  string  @required
@@ -768,6 +810,7 @@ query invitation queryInvitationByTokenHash {
 
 @enabled
 @description("Returns the invitation whose previousTokenHash matches the argument. Used by the resolve handler to label rotated-out links as `superseded` rather than `invalid`. See memql#108.")
+@unbounded("invitation by unique previousTokenHash -- a credential lookup bounded to a single row")
 query invitation queryInvitationByPreviousTokenHash {
   args {
     tokenHash  string  @required
@@ -802,6 +845,7 @@ query invitation queryInvitationByPreviousTokenHash {
 
 @enabled
 @description("Returns the magic-link request whose tokenHash matches the argument. Zero or one result.")
+@unbounded("magic-link request by unique tokenHash -- a credential lookup bounded to a single row")
 query magicLinkRequest queryMagicLinkRequestByTokenHash {
   args {
     tokenHash  string  @required
@@ -847,6 +891,11 @@ query identity queryPatIdentitiesForUser {
     userId  string  @required
   }
   filter  payload.userId==args.userId && traitIdentityIsApiKey
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   patSummary
 }
 
@@ -909,6 +958,7 @@ query identity queryPatIdentityById {
 
 @enabled
 @description("Hot-path PAT lookup by keyHash for the gRPC interceptor. Returns active + inactive rows.")
+@unbounded("PAT identity by unique credential keyHash -- bounded to a single row")
 query identity queryPatIdentityByKeyHash {
   args {
     keyHash  string  @required
@@ -935,6 +985,11 @@ query identity queryPatIdentityByKeyHash {
 @description("Access requests with status=pending; backs the admin review queue.")
 query accessRequest queryPendingAccessRequests {
   filter  traitStatusIsPending
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   accessRequestFull
 }
 
@@ -945,6 +1000,11 @@ query auditEvent queryRecentAuditEvents {
     category  string
   }
   filter  when(args.category) { payload.category==args.category }
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   auditEventFull
 }
 
@@ -967,6 +1027,7 @@ query auditEvent queryRecentAuditEvents {
 
 @enabled
 @description("Returns a user's current activeSpaceId. Empty when the user is not focused on any space.")
+@unbounded("the user's active-space projection by id (guarded) -- bounded to a single row")
 query user queryUserActiveSpace {
   args {
     userId  string  @required
@@ -995,6 +1056,7 @@ query user queryUserActiveSpace {
 
 @enabled
 @description("Look up a user by primary email (the dedup key during bootstrap).")
+@unbounded("user by unique primaryEmail -- bounded to a single row")
 query user queryUserByEmail {
   args {
     primaryEmail  string  @required
@@ -1096,6 +1158,7 @@ query user queryUserCount {
 
 @enabled
 @description("Returns users whose activeSpaceId == arg(spaceId). Active-human roster per the activity model (Phase 4).")
+@unbounded("users whose activeSpaceId matches a space -- bounded by space membership, presence resolution consumed whole")
 query user queryUsersActiveInSpace {
   args {
     spaceId  string  @required
@@ -1132,6 +1195,7 @@ query user queryUsersActiveInSpace {
 
 @enabled
 @description("Active users with a pending deletionScheduledAt; consumers per-row check cooldown windows via addDuration.")
+@unbounded("deletion-cooldown sweep -- an internal sweep that must see all")
 query user queryUsersInDeletionCooldown {
   filter  traitIsActiveRecord && traitIsDeletionScheduled
   shape   userFull
@@ -1167,6 +1231,7 @@ query user queryUsersInDeletionCooldown {
 
 @enabled
 @description("Active users whose deletionScheduledAt is set; cooldown enforcement happens in the automation per-row.")
+@unbounded("scheduled-deletion sweep -- an internal sweep that must see all")
 query user queryUsersScheduledForDeletion {
   filter  traitIsActiveRecord && traitIsDeletionScheduled
   shape   userFull
@@ -1190,6 +1255,7 @@ query user queryUsersScheduledForDeletion {
 
 @enabled
 @description("Hot-path pairing-code lookup by codeHash for the Pair-aware gRPC interceptor.")
+@unbounded("worker pairing code by unique codeHash -- a credential lookup bounded to a single row")
 query workerPairingCode queryWorkerPairingCodeByHash {
   args {
     codeHash  string  @required
@@ -1219,6 +1285,7 @@ query workerPairingCode queryWorkerPairingCodeByHash {
 
 @enabled
 @description("Hot-path worker-token lookup by keyHash. Returns active + inactive rows.")
+@unbounded("worker token identity by unique credential keyHash -- bounded to a single row")
 query identity queryWorkerTokenByKeyHash {
   args {
     keyHash  string  @required
@@ -1288,6 +1355,7 @@ query identity queryWorkerTokensForUser {
 @enabled
 @public
 @description("Lookup a node_token identity by its (nodeType, nodeId) binding. memql#343.")
+@unbounded("node-token identity by unique (nodeType,nodeId) binding -- bounded to a single row")
 query identity queryNodeTokenIdentityByBinding {
   args {
     nodeType  string  @required
@@ -1313,6 +1381,7 @@ query identity queryNodeTokenIdentityByBinding {
 @enabled
 @public
 @description("List every node_token identity across the cluster (active + inactive). memql#343.")
+@unbounded("all node-token identities -- a bounded cluster-node credential set consumed whole for verification")
 query identity queryNodeTokenIdentities {
   filter  traitIdentityIsNodeToken
   shape   identityFull

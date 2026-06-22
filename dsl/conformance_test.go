@@ -1000,23 +1000,22 @@ func TestQueryConceptMatchesShapeConcept(t *testing.T) {
 // how it is bounded -- `paginate` / `sort`, a `count` aggregate, or an
 // explicit `@unbounded("reason")` opt-out.
 //
-// SEQUENCING (owner decision, 2026-06-22): the repo-wide HARD-FAIL is
-// COUPLED to the issue 5.3 backfill. There are ~187 unmarked list queries
-// in the tree today; asserting on them now would make main red. So this
-// test is REPORT-ONLY here: it scans the tree, logs the classification
-// breakdown + every unmarked-list offender (the 5.3 work item), and
-// asserts only the two things that are safe to enforce immediately:
+// SEQUENCING (owner decision, 2026-06-22): the repo-wide HARD-FAIL was
+// COUPLED to the issue 5.3 backfill. 5.3 (memql#1967) marked every list
+// query in the tree (`paginate`/`sort` or `@unbounded("reason")`) and, in
+// the same merge, flipped this gate from report-only to ENFORCING. So the
+// test now HARD-FAILS on any unmarked-list finding -- a freshly-authored
+// list query that declares no bound trips it. It asserts three things:
 //
-//  1. the classifier DETECTS a freshly-authored unmarked list query
-//     (proves the gate works -- the enforcement mechanism is present and
-//     correct, ready for 5.3 to flip from report-only to hard-fail), and
-//  2. the @unbounded-marked set is internally consistent (every mark
+//  1. every list-returning query in the tree declares its bound (the
+//     repo-wide hard-fail; zero unmarked-list findings allowed),
+//  2. the classifier DETECTS a freshly-authored unmarked list query
+//     (proves the enforcement mechanism is present and correct), and
+//  3. the @unbounded-marked set is internally consistent (every mark
 //     carries a non-empty reason).
 //
-// Issue 5.3 backfills the offenders and, in the same merge, replaces the
-// report-only block below with `t.Errorf` on any unmarked-list finding,
-// so main is never red. The audit report (scripts/audit-pagination) reads
-// the SAME classifier, so its UNMARKED list IS this test's 5.3 work item.
+// The audit report (scripts/audit-pagination) reads the SAME classifier,
+// so its UNMARKED list and this gate can never drift.
 func TestPaginationAuthoringRule(t *testing.T) {
 	tree := Tree()
 	paths, err := dslfs.WalkMemqlFiles(tree)
@@ -1049,7 +1048,7 @@ func TestPaginationAuthoringRule(t *testing.T) {
 		if f.Class == pagination.UnmarkedList {
 			unmarked = append(unmarked, f)
 		}
-		// (2) consistency: an @unbounded mark must carry a reason. The
+		// (3) consistency: an @unbounded mark must carry a reason. The
 		// rewriter rejects a reason-less @unbounded at load time, so this
 		// is a belt-and-suspenders check on the classifier's capture path.
 		if f.Class == pagination.UnboundedMarked && f.UnboundedReason == "" {
@@ -1057,26 +1056,28 @@ func TestPaginationAuthoringRule(t *testing.T) {
 		}
 	}
 
-	// Report-only breakdown (the hard-fail flip is coupled to 5.3).
-	t.Logf("\n=== Pagination audit (memql#1965; report-only until the 5.3 backfill) ===")
+	// Classification breakdown (for the test log).
+	t.Logf("\n=== Pagination audit (memql#1965; ENFORCING since the 5.3 backfill) ===")
 	t.Logf("%-16s %d", "single-row", byClass[pagination.SingleRow])
 	t.Logf("%-16s %d", "aggregate", byClass[pagination.Aggregate])
 	t.Logf("%-16s %d", "bounded-list", byClass[pagination.BoundedList])
 	t.Logf("%-16s %d", "unbounded-marked", byClass[pagination.UnboundedMarked])
-	t.Logf("%-16s %d  <- issue 5.3 backfill set", "unmarked-list", byClass[pagination.UnmarkedList])
-	if len(unmarked) > 0 {
-		t.Logf("\nUnmarked list queries (run `go run ./scripts/audit-pagination` for the live report):")
-		for _, f := range unmarked {
-			t.Logf("  %s:%d  %s", f.File, f.Line, f.Name)
-		}
-		t.Logf("\nThese are NOT failures yet -- issue 5.3 backfills `paginate`/`sort` or\n" +
-			"`@unbounded(\"reason\")` and flips this gate to hard-fail in the same merge.")
+	t.Logf("%-16s %d", "unmarked-list", byClass[pagination.UnmarkedList])
+
+	// (1) Repo-wide HARD-FAIL: every list-returning query must declare its
+	// bound. A new unmarked list query (no `paginate`/`sort`, no
+	// `@unbounded("reason")`) fails here. Backfilled to zero by issue 5.3.
+	for _, f := range unmarked {
+		t.Errorf("%s:%d query %q is an unmarked list query -- declare a bound: add `sort`/`paginate` "+
+			"(a consumer-facing or growable list) or `@unbounded(\"reason\")` (a legitimate full-set read). "+
+			"See authoring-rules.md #23; run `go run ./scripts/audit-pagination --unmarked` for the live list.",
+			f.File, f.Line, f.Name)
 	}
 
-	// (1) Prove the gate's enforcement mechanism: a freshly-authored
-	// unmarked list query MUST be detected. This is what 5.3 will assert
-	// against the whole tree; here we assert it against a synthetic query
-	// so the checker's correctness is locked in without making main red.
+	// (2) Prove the gate's enforcement mechanism: a freshly-authored
+	// unmarked list query MUST be detected. The repo-wide assertion above
+	// relies on this classifier; the synthetic query locks its correctness
+	// in even if the tree ever reached zero list queries.
 	newQuery := `query widget queryEveryWidget {
   filter  payload.kind=="gizmo"
   shape   widgetFull

@@ -21,6 +21,11 @@ use knowledge.concepts.{ liveSnapshot }
 @description("List the caller's entire Library (artifacts + records). Owned: the row set is gated by ownerUserId==actor.userId server-side. The default Library read; the panel filters by lens / kind and searches client-side over this set, or calls the narrower facet queries below when a single facet dominates.")
 query artifact queryLibraryArtifacts {
   filter  payload.ownerUserId==actor.userId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   artifactFull
 }
 
@@ -31,6 +36,11 @@ query artifact queryLibraryArtifactsByLens {
     lens  string  @required
   }
   filter  payload.ownerUserId==actor.userId && payload.lens==args.lens
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   artifactFull
 }
 
@@ -41,6 +51,11 @@ query artifact queryLibraryArtifactsByKind {
     kind  string  @required
   }
   filter  payload.ownerUserId==actor.userId && payload.kind==args.kind
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   artifactFull
 }
 
@@ -54,6 +69,7 @@ query artifact queryLibraryArtifactsByKind {
 @enabled
 @description("Fetch a single Library artifact index row by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content.")
 @mcp
+@unbounded("library artifact by id (guarded), gated to the owner -- bounded to a single row")
 query artifact queryLibraryArtifactById {
   args {
     artifactId  string  @required
@@ -64,6 +80,7 @@ query artifact queryLibraryArtifactById {
 
 @enabled
 @description("Drill-in read: fetch a generated-output's full content (inline body or attachment ref) by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library viewer when opening a generated_output artifact resolved from its sourceConceptRef.")
+@unbounded("generated output by id (guarded), gated to the owner -- bounded to a single row")
 query generatedOutput queryGeneratedOutputById {
   args {
     outputId  string  @required
@@ -79,11 +96,17 @@ query generatedOutput queryGeneratedOutputsForPlan {
     planId  string  @required
   }
   filter  payload.ownerUserId==actor.userId && payload.producedByPlanId==args.planId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   generatedOutputFull
 }
 
 @enabled
 @description("Drill-in read: fetch a memory's full content by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library Records lens when opening a memory artifact resolved from its sourceConceptRef.")
+@unbounded("memory by id (guarded), gated to the owner -- bounded to a single row")
 query memory queryMemoryById {
   args {
     memoryId  string  @required
@@ -108,6 +131,11 @@ query memory queryMemoryById {
 @description("List the partition's workspace-scoped live sources for the Library Records lens. Non-owned by design: workspace liveSources have no single owner (empty ownerUserId), so this reads kind=live_source AND scope=workspace with no caller gate and the frontend merges it into the owned Records results. Private live sources are excluded here -- they surface through the owner-gated queries. See the @public justification above (#723).")
 query artifact queryLibraryWorkspaceLiveSources {
   filter  payload.kind=="live_source" && payload.scope=="workspace"
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   artifactFull
 }
 
@@ -118,6 +146,11 @@ query liveSnapshot queryLatestLiveSnapshotForSource {
     liveSourceId  string  @required
   }
   filter  payload.liveSourceId==args.liveSourceId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   liveSnapshotFreshness
 }
 
@@ -137,11 +170,17 @@ query documentVersion queryDocumentVersions {
     documentId  string  @required
   }
   filter  payload.ownerUserId==actor.userId && payload.documentId==args.documentId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   documentVersionSummary
 }
 
 @enabled
 @description("Fetch a single document version's FULL content (immutable body / attachment + provenance) by its version row id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard. Backs the 'open this version' viewer and the restore-source read (memql#1230).")
+@unbounded("document version by id (guarded), gated to the owner -- bounded to a single row")
 query documentVersion queryDocumentVersionById {
   args {
     versionId  string  @required
@@ -166,5 +205,10 @@ query documentVersion queryDocumentVersionsForOwner {
     documentId  string  @required
   }
   filter  payload.ownerUserId==actor.userId && payload.documentId==args.documentId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   documentVersionFull
 }

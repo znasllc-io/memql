@@ -7,6 +7,7 @@ use planner.concepts.{ plan }
 use worker.concepts.{ invocation, registration }
 
 @enabled
+@unbounded("expired worker-invocation retention sweep -- an internal sweep that must see all")
 @description("List worker invocation rows for retention pruning. Caller filters by age.")
 query invocation queryExpiredWorkerInvocations {
   filter  payload.action!="" && traitIsNotDeleted
@@ -32,6 +33,11 @@ query invocation queryInvocationsForPlan {
     planId  string  @required
   }
   filter  payload.planId==args.planId && traitIsNotDeleted
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   workerInvocationFull
 }
 
@@ -59,6 +65,11 @@ query invocation queryInvocationsForUser {
     ownerUserId  string  @required
   }
   filter  payload.ownerUserId==args.ownerUserId && traitIsNotDeleted
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   workerInvocationFull
 }
 
@@ -69,6 +80,11 @@ query plan queryRunningPlansForUser {
     userId  string  @required
   }
   filter  payload.requestedBy==args.userId && traitStatusIsRunning
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   planFull
 }
 
@@ -88,6 +104,7 @@ query plan queryRunningPlansForUser {
 //   identityId (string, required) - v1:identity:identity.id
 
 @enabled
+@unbounded("worker by identityId -- bounded to a single row")
 @description("Look up the worker registration owned by an identity row.")
 query registration queryWorkerByIdentityId {
   args {
@@ -129,5 +146,10 @@ query registration queryWorkersForUser {
     ownerUserId  string  @required
   }
   filter  payload.ownerUserId==args.ownerUserId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   workerRegistrationFull
 }

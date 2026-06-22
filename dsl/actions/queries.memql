@@ -18,6 +18,11 @@ query candidate queryActionCandidatesForPlan {
     planId  string  @required
   }
   filter  payload.planId == args.planId && payload.ownerUserId == actor.userId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   candidateFull
 }
 
@@ -27,6 +32,7 @@ query candidate queryActionCandidatesForPlan {
 // token-free, a miss falls through to the LLM. Owned tier.
 @enabled
 @description("Resolve an active v1:actions:action by inputFingerprint for the calling owner -- the literal-replay lookup (Phase 1 #1736).")
+@unbounded("unique inputFingerprint dedupe probe scoped to the owner -- must see all matches")
 query action queryActionByInputFingerprint {
   args {
     inputFingerprint  string  @required
@@ -43,6 +49,11 @@ query action queryActionByInputFingerprint {
 @description("List the calling owner's active v1:actions:surface registry entries for the capability->surface resolver (Phase 2 #1737). Owned tier.")
 query surface querySurfacesForOwner {
   filter  payload.ownerUserId == actor.userId && traitStatusIsActive
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   surfaceFull
 }
 
@@ -53,6 +64,7 @@ query surface querySurfacesForOwner {
 // semantic search once wired.
 @enabled
 @description("Resolve an active v1:actions:action by templateFingerprint (input structure) for the calling owner -- the parameterized-replay lookup (Phase 3 #1738). Owned tier.")
+@unbounded("unique templateFingerprint dedupe probe scoped to the owner -- must see all matches")
 query action queryActionByTemplateFingerprint {
   args {
     templateFingerprint  string  @required
@@ -67,6 +79,11 @@ query action queryActionByTemplateFingerprint {
 @description("List the calling owner's candidate v1:actions:action rows awaiting confirmation (real-machine side effects gate on a human, Phase 4 #1739). Owned tier.")
 query action queryActionsPendingConfirm {
   filter  payload.status == "candidate" && payload.ownerUserId == actor.userId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   actionFull
 }
 
@@ -77,6 +94,11 @@ query action queryActionsPendingConfirm {
 @description("List the calling owner's active v1:actions:action rows for the consolidation decay/deprecate sweep (Phase 4 #1739). Owned tier.")
 query action queryActiveActionsForOwner {
   filter  payload.ownerUserId == actor.userId && traitStatusIsActive
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   actionFull
 }
 

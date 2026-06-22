@@ -1069,10 +1069,9 @@ the change. The gates, with their test names:
 - **Pagination authoring rule** (`TestPaginationAuthoringRule`,
   memql#1965 — see [#23](#23-list-returning-queries-must-declare-their-bound)).
   Every list-returning query declares `paginate` / `sort` or
-  `@unbounded("reason")`. **Currently report-only:** the tree-wide
-  hard-fail is coupled to the issue 5.3 backfill and flips on in that
-  PR; today the gate logs offenders and only asserts that a brand-new
-  unmarked list query is detected.
+  `@unbounded("reason")`. **Enforcing** (since the issue 5.3 backfill,
+  memql#1967): the tree-wide hard-fail trips on any unmarked list query,
+  so a freshly-authored list read with no bound fails CI.
 
 Companion gates in sibling files lock in the operator and binding
 grammar:
@@ -1180,10 +1179,11 @@ the rule. Two consumers derive from it:
   query with its reason. `--json` / `--unmarked` / `--unbounded` /
   `--strict` / `--domain=<x>`.
 - `TestPaginationAuthoringRule` in `dsl/conformance_test.go` — the gate.
-  **Report-only today** (the tree has ~187 unmarked list queries; the
-  hard-fail flip is coupled to the issue 5.3 backfill so `main` is never
-  red). It asserts the classifier detects a brand-new unmarked list
-  query, proving the enforcement mechanism is in place and correct.
+  **Enforcing** (the issue 5.3 backfill, memql#1967, marked every list
+  query in the tree and flipped this gate on in the same merge, so `main`
+  stayed green). It hard-fails on any unmarked list query, asserts the
+  classifier detects a brand-new unmarked list query, and checks every
+  `@unbounded` mark carries a non-empty reason.
 
 **Why it bites you.** Without a bound, a query against a growing concept
 (participants, events, plans) starts cheap and silently degrades into a

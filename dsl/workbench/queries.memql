@@ -7,6 +7,7 @@
 use workbench.concepts.{ workspace }
 
 @enabled
+@unbounded("the workspace for a plan -- a per-plan singleton bounded to a single row")
 @description("Look up the workbench workspace row for a Plan. Returns empty when no workspace has been provisioned yet -- the integration uses this to decide whether to call mutationProvisionWorkspace on the first workbenchHost dispatch.")
 query workspace queryWorkspaceForPlan {
   args {
@@ -17,6 +18,7 @@ query workspace queryWorkspaceForPlan {
 }
 
 @enabled
+@unbounded("provisioned workspaces -- an internal lifecycle sweep that must see all")
 @description("List provisioned workspaces for inventory / debugging. Filtered to status=provisioned so released rows don't clutter the view.")
 query workspace queryProvisionedWorkspaces {
   filter  payload.status=="provisioned"

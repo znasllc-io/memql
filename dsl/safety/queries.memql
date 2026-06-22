@@ -4,6 +4,7 @@ use safety.concepts.{ classification, approvalRequest, outputScreening }
 use safety.shapes.{ classificationFull, approvalRequestFull, outputScreeningFull }
 
 @enabled
+@unbounded("safety classification catalog -- a bounded config set consumed whole")
 @description("Returns every v1:safety:classification row. Used by the retention sweep (mirrors queryAllPolicyTraces); future cockpit Command Safety view will layer more targeted queries on top.")
 query classification queryAllSafetyClassifications {
   filter  payload.surface!=""
@@ -11,6 +12,7 @@ query classification queryAllSafetyClassifications {
 }
 
 @enabled
+@unbounded("active approvals for a correlation key -- a bounded in-flight set consumed whole")
 @description("Returns active (pending OR approved) v1:safety:approvalRequest rows for a given correlationKey. The DSL-backed ApprovalSink calls this BEFORE creating a new pending row -- if an `approved` non-expired row exists, the Gate bypasses with proceed=true; if a `pending` row exists, the sink reuses its id rather than creating a duplicate (idempotency). `expired` and `denied` rows are excluded -- the bypass check should treat them as nonexistent so a subsequent retry creates a fresh pending row.")
 query approvalRequest queryActiveApprovalsByCorrelationKey {
   args {
@@ -31,6 +33,7 @@ query approvalRequest queryApprovalRequestById {
 }
 
 @enabled
+@unbounded("output screening catalog -- a bounded config set consumed whole")
 @description("Returns every v1:safety:outputScreening row. Used by the retention sweep (mirrors queryAllSafetyClassifications); future cockpit prompt-injection dashboard will layer more targeted queries on top.")
 query outputScreening queryAllOutputScreenings {
   filter  payload.contentType!=""

@@ -19,6 +19,7 @@ use common.shapes.{ attachmentDownload }
 // stops cross-space id probing. Mirrors querySpaceMedia's space-scoped pattern.
 
 @enabled
+@unbounded("attachment by id (guarded) within a space -- bounded to a single row")
 @description("Fetch a single v1:common:attachment row by id within a space. Backs the attachment download endpoint (GET /spaces/{spaceId}/attachments/{attachmentId}); the handler gates on space ownership first.")
 query attachment queryAttachmentById {
   args {
@@ -54,5 +55,10 @@ query media querySpaceMedia {
     mediaType  string
   }
   filter  payload.spaceId==args.spaceId && when(args.mediaType) { payload.mediaType==args.mediaType }
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   mediaFull
 }

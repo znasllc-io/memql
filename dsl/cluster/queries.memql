@@ -8,6 +8,7 @@ use cluster.shapes.{ deploymentFull }
 
 @enabled
 @description("Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...)")
+@unbounded("node-type registry -- a tiny bounded topology set consumed whole")
 query nodeType queryClusterNodeTypes {
 }
 
@@ -22,6 +23,7 @@ query nodeType queryClusterNodeTypes {
 
 @enabled
 @description("Returns all cluster node rows (CLI dedupes to latest per id)")
+@unbounded("registered cluster nodes -- a bounded topology set consumed whole")
 query node queryClusterNodes {
 }
 
@@ -41,6 +43,7 @@ query node queryClusterNodes {
 
 @enabled
 @description("Latest-per-id cluster node rows for one deploymentId -- the live topology of that deployment (#1873). asOf latest collapses the append-only node stream to current state per node.")
+@unbounded("nodes in one deployment -- a bounded topology set consumed whole")
 query node queryNodesForDeployment {
   args {
     deploymentId  string  @required
@@ -65,6 +68,7 @@ query node queryNodesForDeployment {
 
 @enabled
 @description("Latest-per-id cluster nodes whose deploymentId != the supplied current deployment -- orphans from a previous deploy (feeds the reaper #1874 + cockpit orphan highlight). #1873.")
+@unbounded("nodes outside a deployment -- a bounded topology set for drain/cutover, consumed whole")
 query node queryNodesNotInDeployment {
   args {
     deploymentId  string  @required
@@ -81,6 +85,11 @@ query node queryNodesNotInDeployment {
 @enabled
 @description("Returns all cluster spawn events")
 query spawnEvent queryClusterSpawnEvents {
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
 }
 
 // ---- queries/v1/cluster/existingCluster.memql ----
@@ -90,6 +99,7 @@ query spawnEvent queryClusterSpawnEvents {
 
 @enabled
 @description("Returns the existing cluster record, if any")
+@unbounded("the cluster singleton row -- bounded to a single row")
 query cluster queryExistingCluster {
 }
 
@@ -123,6 +133,7 @@ query cluster queryExistingCluster {
 
 @enabled
 @description("Latest-per-id cluster node rows whose health is not already 'stopped'. When olderThan is supplied, restricts to rows whose lastSeen is strictly before it (RFC3339 cutoff). Drives the stale-node prune cron.")
+@unbounded("stale-node reaper sweep -- an internal sweep that must see all stale nodes")
 query node queryStaleClusterNodes {
   args {
     olderThan  string  @description("Optional RFC3339 cutoff; when set, only rows whose lastSeen is strictly before it are returned.")
@@ -146,6 +157,7 @@ query node queryStaleClusterNodes {
 
 @enabled
 @description("Deployment history for a cluster: latest-per-deploymentId rows (asOf latest -> current status per deployment) filtered to a clusterId. Backs the cockpit Deployments history list (consumer sorts newest-first by createdAt). #1872.")
+@unbounded("deployments for a cluster -- a bounded topology set consumed whole")
 query deployment queryDeploymentsForCluster {
   args {
     clusterId  string  @required
@@ -167,6 +179,7 @@ query deployment queryDeploymentsForCluster {
 
 @enabled
 @description("All status-transition rows for one deployment, by deploymentId, oldest-to-newest (full lifecycle history; reconstructable asOf any time). #1872.")
+@unbounded("deployment by unique deploymentId -- bounded to a single row")
 query deployment queryDeploymentById {
   args {
     deploymentId  string  @required
@@ -203,6 +216,7 @@ query deployment queryDeploymentById {
 
 @enabled
 @description("Latest-per-deploymentId deployment rows whose status is terminal-not-active (superseded / failed / rolled_back) -- the deployments whose still-registered nodes are orphans. Feeds the active-topology reaper (#1874). asOf latest -> current status per deployment.")
+@unbounded("superseded/failed/rolled-back deployments GC sweep -- an internal sweep that must see all")
 query deployment querySupersededDeployments {
   filter  payload.status in ["superseded", "failed", "rolled_back"]
   shape   deploymentFull

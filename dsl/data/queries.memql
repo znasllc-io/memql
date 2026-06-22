@@ -6,6 +6,7 @@
 use data.concepts.{ log, policy, record }
 
 @enabled
+@unbounded("conflict probe by natural key -- a dedupe set the caller must see whole to detect conflicts")
 @description("Find confirmed records that may conflict with a new record by natural key + record type")
 query record queryDetectConflicts {
   args {
@@ -39,6 +40,7 @@ query record queryDetectConflicts {
 //
 
 @enabled
+@unbounded("the active policy for a record type -- bounded to a single row")
 @description("Returns the validation policy for a record type. Space-specific policies take precedence over global.")
 query policy queryPolicy {
   args {
@@ -83,6 +85,11 @@ query record queryRecordsByState {
     importSource  string
   }
   filter  traitIsActiveRecord && when(args.spaceId) { payload.spaceId==args.spaceId } && when(args.recordType) { payload.recordType==args.recordType } && when(args.validationState) { payload.validationState==args.validationState } && when(args.importSource) { payload.importSource==args.importSource }
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   recordFull
 }
 
@@ -125,6 +132,11 @@ query record queryUsableRecords {
     recordType  string
   }
   filter  traitIsUsable && when(args.spaceId) { payload.spaceId==args.spaceId } && when(args.recordType) { payload.recordType==args.recordType }
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   recordFull
 }
 
@@ -159,5 +171,10 @@ query log queryValidationLog {
     action  string
   }
   filter  traitIsActiveRecord && when(args.recordId) { payload.recordId==args.recordId } && when(args.spaceId) { payload.spaceId==args.spaceId } && when(args.action) { payload.action==args.action }
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   logFull
 }
