@@ -97,6 +97,10 @@ func (i *Integration) handleProvisionInbound(ctx context.Context, args map[strin
 	if e164 == "" || partitionID == "" {
 		return nil, fmt.Errorf("telephony.provisionInbound: e164 and partitionId are required")
 	}
+	carrier, err := i.requireCarrier()
+	if err != nil {
+		return nil, err
+	}
 	trunkID, err := i.EnsureInboundTrunk(ctx)
 	if err != nil {
 		return nil, err
@@ -108,7 +112,7 @@ func (i *Integration) handleProvisionInbound(ctx context.Context, args map[strin
 	if eng, err := i.requireEngine(); err == nil {
 		q := fmt.Sprintf(
 			`mutationRecordTrunk({carrier: %q, direction: "inbound", name: %q, livekitTrunkId: %q, sipEdgeUri: %q, secretRef: "telephony-secrets"})`,
-			i.carrier.Name(), inboundTrunkName, trunkID, i.sipEdgeURI,
+			carrier.Name(), inboundTrunkName, trunkID, i.sipEdgeURI,
 		)
 		if _, err := eng.Execute(ctx, q); err != nil && i.logger != nil {
 			i.logger.Warn("telephony: record trunk row failed", "err", err)

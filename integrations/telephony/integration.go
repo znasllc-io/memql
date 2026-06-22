@@ -21,6 +21,9 @@ type Integration struct {
 	logger  *slog.Logger
 	engine  memql.IntegrationEngineAccess
 	carrier CarrierProvider
+	// carrierName is the selected carrier (MEMQL_TELEPHONY_CARRIER), kept so
+	// requireCarrier can lazily (re)resolve when creds arrive after startup.
+	carrierName string
 
 	// LiveKit edge clients. Nil when LiveKit creds are absent (telephony not
 	// configured) -- capabilities then return a clear "not configured" error
@@ -70,18 +73,24 @@ type Config struct {
 	ModelCostPerMinute float64
 }
 
-// New builds a telephony Integration. The carrier is resolved eagerly (its
-// own credential errors surface here); the LiveKit SIP/Room clients are built
-// only when creds are present, so a cluster without telephony configured still
-// loads the plug-in.
+// New builds a telephony Integration. The carrier is resolved best-effort: a
+// missing carrier key does NOT fail construction (the plug-in loads on every
+// node, telephony-configured or not) -- the error surfaces from requireCarrier()
+// only when a telephony capability is actually invoked. The LiveKit SIP/Room
+// clients are likewise built only when creds are present, so a cluster without
+// telephony configured still loads the plug-in cleanly.
 func New(cfg Config, logger *slog.Logger) (*Integration, error) {
 	carrier, err := SelectCarrier(cfg.CarrierName)
 	if err != nil {
-		return nil, err
+		if logger != nil {
+			logger.Warn("telephony: carrier unavailable; provisioning/inbound capabilities disabled until configured", "carrier", cfg.CarrierName, "error", err)
+		}
+		carrier = nil
 	}
 	i := &Integration{
 		logger:           logger,
 		carrier:          carrier,
+		carrierName:      cfg.CarrierName,
 		sipEdgeURI:       cfg.SIPEdgeURI,
 		outboundAddress:  cfg.OutboundSIPAddress,
 		outboundAuthUser: cfg.OutboundAuthUsername,
@@ -106,6 +115,22 @@ func (i *Integration) IntegrationName() string { return "telephony" }
 
 // Carrier exposes the active carrier (used by the provisioning surface).
 func (i *Integration) Carrier() CarrierProvider { return i.carrier }
+
+// requireCarrier returns the active carrier or a clear configuration error.
+// The carrier is resolved lazily so a missing carrier key disables telephony
+// capabilities cleanly instead of failing plug-in load (mirrors requireSIP).
+func (i *Integration) requireCarrier() (CarrierProvider, error) {
+	if i.carrier != nil {
+		return i.carrier, nil
+	}
+	// Credentials may have arrived after process start; try once more.
+	carrier, err := SelectCarrier(i.carrierName)
+	if err != nil {
+		return nil, fmt.Errorf("telephony: carrier not configured: %w", err)
+	}
+	i.carrier = carrier
+	return carrier, nil
+}
 
 // requireSIP returns the SIP client or a clear configuration error.
 func (i *Integration) requireSIP() (*lksdk.SIPClient, error) {
