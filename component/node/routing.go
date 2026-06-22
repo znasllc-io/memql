@@ -59,6 +59,30 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.deleted.v1:cluster:*", TargetType: ""},
 		{Pattern: "graph.node.created.v1:cognition:*", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:cognition:*", TargetType: ""},
+		// Result-cache invalidation (epic 5, issue 5.5 / memql#1969): a
+		// cached cognition read must be evicted on EVERY replica when a
+		// dependent row is written anywhere in the mesh. created+updated
+		// are already forwarded above; cognition `deleted` was not, so a
+		// cross-node hard-delete of a cached concept (e.g. a purged
+		// utterance/space) would leave a stale cached page on the sibling
+		// replicas. Forward deletes too so the invalidation subscriber
+		// fires on every node regardless of write kind.
+		{Pattern: "graph.node.deleted.v1:cognition:*", TargetType: ""},
+		// Cached bounded catalogs/registries (epic 5, issue 5.5 / memql#1969).
+		// These namespaces were NOT forwarded cross-node by default, so the
+		// moment a query against them carries @cache(ttl=N) a write on one
+		// replica would evict only that replica's Ristretto and go stale on
+		// its siblings. Forward all three write kinds so the result-cache
+		// invalidation subscriber (graph.node.*.#) fires on every node.
+		//   v1:agents:agentRole + v1:agents:skill -- admin-defined role/skill
+		//     catalogs read on every agent detail render / routing decision.
+		//   v1:router:budget -- the router budget config consulted on routing.
+		{Pattern: "graph.node.created.v1:agents:*", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:agents:*", TargetType: ""},
+		{Pattern: "graph.node.deleted.v1:agents:*", TargetType: ""},
+		{Pattern: "graph.node.created.v1:router:*", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:router:*", TargetType: ""},
+		{Pattern: "graph.node.deleted.v1:router:*", TargetType: ""},
 		// Planner graph events: BFF owns the writes (mutationCreatePlan
 		// fires on BFF), the planner-tagged binary subscribes
 		// graph.node.created.v1:planner:plan in its

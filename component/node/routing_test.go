@@ -79,6 +79,38 @@ func TestRegisterRoutingRule_PluginAdds(t *testing.T) {
 	}
 }
 
+// TestEvaluateRouting_CachedConceptForwarding pins the cross-node
+// correctness guarantee for result-cache adoption (epic 5, issue 5.5 /
+// memql#1969): every concept namespace a query @cache's must have ALL
+// THREE graph write kinds (created / updated / deleted) forwarded to peers,
+// or its 5.4 invalidation subscriber never fires on sibling replicas and the
+// cached read goes stale cross-node. A single-node green test would not catch
+// this -- the eviction is per-Ristretto-per-node.
+func TestEvaluateRouting_CachedConceptForwarding(t *testing.T) {
+	rules := defaultRoutingRules()
+
+	// Concepts cached in 5.5. Each must forward create+update+delete.
+	cachedNamespaces := []string{
+		"v1:agents:agentRole",    // queryActiveAgentRoles / queryAgentRoleBySlug
+		"v1:agents:skill",        // queryActiveSkills / queryActiveSkillsFull / querySkillBySlug
+		"v1:router:budget",       // queryRouterBudgets
+		"v1:cognition:utterance", // querySpaceUtterances
+	}
+
+	for _, concept := range cachedNamespaces {
+		for _, action := range []string{"created", "updated", "deleted"} {
+			topic := "graph.node." + action + "." + concept
+			d := evaluateRouting(rules, topic)
+			if !d.Forward {
+				t.Errorf("cached concept %q write %q must forward cross-node (else 5.4 eviction goes stale on siblings), but it does not", concept, action)
+			}
+			if !d.Broadcast {
+				t.Errorf("cached concept %q write %q must broadcast to all replicas, got targeted %q", concept, action, d.TargetType)
+			}
+		}
+	}
+}
+
 func TestEvaluateRouting_DefaultDeny(t *testing.T) {
 	rules := defaultRoutingRules()
 

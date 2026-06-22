@@ -8,6 +8,12 @@ use router.concepts.{ budget }
 @enabled
 @unbounded("router budgets (optionally by scope) -- a small bounded config set consumed whole")
 @description("Returns all active budget rows for the current partition.")
+// Caching (5.5 / memql#1969): the router budget config is a small bounded set
+// consulted on routing decisions and changes rarely. 5.4 invalidation evicts
+// on any v1:router:budget write; the v1:router:* created/updated/deleted
+// forward rules in component/node/routing.go guarantee the eviction fires on
+// every replica (this namespace is not in the default forward set).
+@cache(ttl="120")
 query budget queryRouterBudgets {
   args {
     scope  string
