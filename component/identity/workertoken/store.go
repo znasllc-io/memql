@@ -10,6 +10,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -125,20 +126,36 @@ func (s *Store) ListForUser(ctx context.Context, userId string) ([]Row, error) {
 		return nil, errors.New("workertoken.Store: engine not wired")
 	}
 	q := fmt.Sprintf(`queryWorkerTokensForUser({userId:%q})`, userId)
-	rows, err := s.executeAndExtract(ctx, q)
-	if err != nil {
-		return nil, fmt.Errorf("workertoken.Store.ListForUser: %w", err)
-	}
-	out := make([]Row, 0, len(rows))
-	for _, n := range rows {
-		r := rowFromNode(n)
-		if r == nil {
-			continue
+	out := []Row{}
+	cursor := ""
+	// queryWorkerTokensForUser is `paginate 50` (5.2 / epic #1964), so a
+	// single Execute returns only the first page. The callers of this
+	// method (the per-user revoke ownership check) need the COMPLETE set
+	// -- a token beyond the first page must still be found-as-owned --
+	// so walk the keyset cursor to assemble the full list. maxPageWalk
+	// is a runaway backstop.
+	for i := 0; i < maxPageWalk; i++ {
+		nodes, next, err := s.executeAndExtractPage(ctx, q, cursor)
+		if err != nil {
+			return nil, fmt.Errorf("workertoken.Store.ListForUser: %w", err)
 		}
-		out = append(out, *r)
+		for _, n := range nodes {
+			if r := rowFromNode(n); r != nil {
+				out = append(out, *r)
+			}
+		}
+		if next == "" {
+			break
+		}
+		cursor = next
 	}
 	return out, nil
 }
+
+// maxPageWalk bounds the keyset walk so a mis-paginated query can never
+// spin forever. queryWorkerTokensForUser pages 50 at a time, capping the
+// complete-set walk at 50k rows -- far beyond any real holder count.
+const maxPageWalk = 1000
 
 func bareSlug(id string) string {
 	if strings.HasPrefix(id, canonicalIdentityIdPrefix) {
@@ -167,22 +184,36 @@ func bareSlug(id string) string {
 // header pill clearly contradicting it. Mirrors the same fix
 // already applied to component/identity/store.go.
 func (s *Store) executeAndExtract(ctx context.Context, query string) ([]*memqlv1.MemoryNode, error) {
-	res, err := s.Engine.Execute(ctx, query)
+	nodes, _, err := s.executeAndExtractPage(ctx, query, "")
+	return nodes, err
+}
+
+// executeAndExtractPage is the keyset-aware sibling of executeAndExtract:
+// it threads an inbound continuation cursor onto the context (5.12 /
+// epic #1964 -- queryWorkerTokensForUser is `paginate 50` now) and hands
+// back the engine's nextCursor. Empty inbound cursor = first page; empty
+// returned cursor = set exhausted.
+func (s *Store) executeAndExtractPage(ctx context.Context, query, cursor string) ([]*memqlv1.MemoryNode, string, error) {
+	res, err := s.Engine.Execute(memqlengine.ContextWithCursor(ctx, cursor), query)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if res == nil {
-		return nil, nil
+		return nil, "", nil
+	}
+	next := ""
+	if res.Meta != nil {
+		next = res.Meta.Cursor
 	}
 	if res.Bundle != nil && len(res.Bundle.Nodes) > 0 {
-		return res.Bundle.Nodes, nil
+		return res.Bundle.Nodes, next, nil
 	}
 	_, data, err := res.ToAPIResult()
 	if err != nil {
-		return nil, fmt.Errorf("workertoken.Store: extract shape result: %w", err)
+		return nil, "", fmt.Errorf("workertoken.Store: extract shape result: %w", err)
 	}
 	if len(data) == 0 {
-		return nil, nil
+		return nil, next, nil
 	}
 	out := make([]*memqlv1.MemoryNode, 0, len(data))
 	for _, v := range data {
@@ -204,7 +235,7 @@ func (s *Store) executeAndExtract(ctx context.Context, query string) ([]*memqlv1
 		}
 		out = append(out, node)
 	}
-	return out, nil
+	return out, next, nil
 }
 
 func rowFromNode(n *memqlv1.MemoryNode) *Row {

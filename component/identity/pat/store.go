@@ -11,6 +11,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -178,27 +179,69 @@ func (s *Store) BumpLastUsed(ctx context.Context, identityId string) error {
 	return nil
 }
 
+// maxPATPageWalk bounds the keyset walk in ListForUser so a runaway
+// (mis-paginated) query can never spin forever. queryPatIdentitiesForUser
+// pages 50 at a time, so this caps the complete-set walk at 50k rows --
+// far more PATs than any real user holds, but a hard stop nonetheless.
+const maxPATPageWalk = 1000
+
 // ListForUser returns every PAT identity (active + inactive) owned by
 // the given user, in a UI-safe projection (no keyHash). Used by the
-// /me/tokens listing.
+// admin /admin/tokens roll-up (via ListAll) and by the per-user revoke
+// ownership check, both of which need the COMPLETE set.
+//
+// queryPatIdentitiesForUser is `paginate 50` (5.2 / epic #1964), so a
+// single Execute returns only the first page. This method walks the
+// keyset cursor to assemble the full list; the bounded, user-facing
+// /me/tokens listing uses ListForUserPage instead.
 func (s *Store) ListForUser(ctx context.Context, userId string) ([]PATRow, error) {
 	if s == nil || s.Engine == nil {
 		return nil, errors.New("pat.Store: engine not wired")
 	}
 	q := fmt.Sprintf(`queryPatIdentitiesForUser({userId:%q})`, userId)
-	rows, err := s.executeAndExtract(ctx, q)
-	if err != nil {
-		return nil, fmt.Errorf("pat.Store.ListForUser: %w", err)
-	}
-	out := make([]PATRow, 0, len(rows))
-	for _, n := range rows {
-		r := rowFromNode(n)
-		if r == nil {
-			continue
+	out := []PATRow{}
+	cursor := ""
+	for i := 0; i < maxPATPageWalk; i++ {
+		nodes, next, err := s.executeAndExtractPage(ctx, q, cursor)
+		if err != nil {
+			return nil, fmt.Errorf("pat.Store.ListForUser: %w", err)
 		}
-		out = append(out, *r)
+		for _, n := range nodes {
+			if r := rowFromNode(n); r != nil {
+				out = append(out, *r)
+			}
+		}
+		if next == "" {
+			break
+		}
+		cursor = next
 	}
 	return out, nil
+}
+
+// ListForUserPage returns ONE keyset page of the user's PAT identities
+// plus the cursor to continue. Pass an empty cursor for the first page;
+// thread the returned nextCursor back in for "load more". An empty
+// returned cursor means the set is exhausted. Backs the bounded
+// /me/tokens listing (5.10b / epic #1964) so a user with many tokens
+// gets a bounded first page + a continuation affordance instead of a
+// silent 50-row truncation.
+func (s *Store) ListForUserPage(ctx context.Context, userId, cursor string) ([]PATRow, string, error) {
+	if s == nil || s.Engine == nil {
+		return nil, "", errors.New("pat.Store: engine not wired")
+	}
+	q := fmt.Sprintf(`queryPatIdentitiesForUser({userId:%q})`, userId)
+	nodes, next, err := s.executeAndExtractPage(ctx, q, cursor)
+	if err != nil {
+		return nil, "", fmt.Errorf("pat.Store.ListForUserPage: %w", err)
+	}
+	out := make([]PATRow, 0, len(nodes))
+	for _, n := range nodes {
+		if r := rowFromNode(n); r != nil {
+			out = append(out, *r)
+		}
+	}
+	return out, next, nil
 }
 
 // ListAll returns every PAT identity (active + inactive) in the
@@ -228,20 +271,35 @@ func (s *Store) ListAll(ctx context.Context) ([]PATRow, error) {
 
 // queryActiveUsers returns the set of v1:identity:user ids known to
 // the cluster. Driven by the Phase-3 queryActiveUsers function.
+//
+// queryActiveUsers is `paginate 50` now (5.3 / epic #1964), so a single
+// Execute returns only the first 50 user ids. ListAll fans out over this
+// set to assemble the cluster-wide PAT roll-up, so a truncated user list
+// would silently drop every PAT owned by a user past the first page.
+// Walk the keyset cursor to assemble the COMPLETE set.
 func (s *Store) queryActiveUsers(ctx context.Context) ([]string, error) {
-	res, err := s.Engine.Execute(ctx, `queryActiveUsers({})`)
-	if err != nil {
-		return nil, err
-	}
 	out := []string{}
-	if res == nil || res.Bundle == nil {
-		return out, nil
-	}
-	for _, n := range res.Bundle.Nodes {
-		if n == nil {
-			continue
+	cursor := ""
+	for i := 0; i < maxPATPageWalk; i++ {
+		res, err := s.Engine.Execute(memqlengine.ContextWithCursor(ctx, cursor), `queryActiveUsers({})`)
+		if err != nil {
+			return nil, err
 		}
-		out = append(out, n.GetId())
+		if res == nil {
+			break
+		}
+		if res.Bundle != nil {
+			for _, n := range res.Bundle.Nodes {
+				if n == nil {
+					continue
+				}
+				out = append(out, n.GetId())
+			}
+		}
+		if res.Meta == nil || res.Meta.Cursor == "" {
+			break
+		}
+		cursor = res.Meta.Cursor
 	}
 	return out, nil
 }
@@ -341,22 +399,38 @@ func bareSlug(id string) string {
 // page), with no log -- "PAT not found" was indistinguishable from
 // "PAT actually missing." Mirroring the workertoken fix here.
 func (s *Store) executeAndExtract(ctx context.Context, query string) ([]*memqlv1.MemoryNode, error) {
-	res, err := s.Engine.Execute(ctx, query)
+	nodes, _, err := s.executeAndExtractPage(ctx, query, "")
+	return nodes, err
+}
+
+// executeAndExtractPage is the keyset-aware sibling of executeAndExtract:
+// it threads an inbound continuation cursor onto the context (5.12 /
+// epic #1964 -- queryPatIdentitiesForUser is `paginate 50` now, so a
+// single Execute returns at most one page) and hands back the engine's
+// nextCursor so the caller can fetch the next page. An empty inbound
+// cursor is the first page; an empty returned cursor means the set is
+// exhausted.
+func (s *Store) executeAndExtractPage(ctx context.Context, query, cursor string) ([]*memqlv1.MemoryNode, string, error) {
+	res, err := s.Engine.Execute(memqlengine.ContextWithCursor(ctx, cursor), query)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if res == nil {
-		return nil, nil
+		return nil, "", nil
+	}
+	next := ""
+	if res.Meta != nil {
+		next = res.Meta.Cursor
 	}
 	if res.Bundle != nil && len(res.Bundle.Nodes) > 0 {
-		return res.Bundle.Nodes, nil
+		return res.Bundle.Nodes, next, nil
 	}
 	_, data, err := res.ToAPIResult()
 	if err != nil {
-		return nil, fmt.Errorf("pat.Store: extract shape result: %w", err)
+		return nil, "", fmt.Errorf("pat.Store: extract shape result: %w", err)
 	}
 	if len(data) == 0 {
-		return nil, nil
+		return nil, next, nil
 	}
 	out := make([]*memqlv1.MemoryNode, 0, len(data))
 	for _, v := range data {
@@ -378,7 +452,7 @@ func (s *Store) executeAndExtract(ctx context.Context, query string) ([]*memqlv1
 		}
 		out = append(out, node)
 	}
-	return out, nil
+	return out, next, nil
 }
 
 func (s *Store) warn(msg string, args ...any) {

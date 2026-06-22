@@ -19,6 +19,12 @@ import (
 // layer satisfies this with a closure around the live *pat.Store.
 type PATAdapter interface {
 	ListForUser(ctx context.Context, userId string) ([]pat.PATRow, error)
+	// ListForUserPage returns one bounded keyset page plus the cursor to
+	// continue (empty when the set is exhausted). Backs the /me/tokens
+	// listing so a user with many tokens gets a bounded first page + a
+	// "load more" affordance instead of a silent 50-row truncation
+	// (5.10b / epic #1964).
+	ListForUserPage(ctx context.Context, userId, cursor string) ([]pat.PATRow, string, error)
 	Create(ctx context.Context, identityId, userId, label, keyHash string) error
 	Revoke(ctx context.Context, identityId string) error
 	LookupById(ctx context.Context, identityId string) (*pat.PATRow, error)
@@ -57,19 +63,26 @@ func meTokensNavLinks() []webtempl.NavLink {
 	}
 }
 
-// handleMeTokensGet renders the /me/tokens page.
+// handleMeTokensGet renders the /me/tokens page. The listing is keyset-
+// paginated (5.10b / epic #1964): a bounded first page is rendered, and
+// when more tokens remain a "Show more" link carries the opaque cursor
+// to GET the next page (`/me/tokens?cursor=<token>`). The cursor is read
+// back from the engine via ListForUserPage; an empty next cursor means
+// the set is exhausted.
 func (s *Server) handleMeTokensGet(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.requireUser(w, r)
 	if err != nil {
 		return
 	}
-	rows, err := s.meTokens.Adapter.ListForUser(r.Context(), claims.Subject)
+	cursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
+	rows, next, err := s.meTokens.Adapter.ListForUserPage(r.Context(), claims.Subject, cursor)
 	if err != nil {
 		s.Logger.Warn("me-tokens: list failed", "error", err, "userId", claims.Subject)
 	}
 	data := webtempl.MeTokensData{
-		Layout: s.LayoutData(r, "API tokens", true, meTokensNavLinks(), nil),
-		Tokens: projectTokens(rows),
+		Layout:     s.LayoutData(r, "API tokens", true, meTokensNavLinks(), nil),
+		Tokens:     projectTokens(rows),
+		NextCursor: next,
 	}
 	s.render(w, r, "me/tokens", webtempl.MeTokens(data))
 }
@@ -123,14 +136,17 @@ func (s *Server) handleMeTokensPost(w http.ResponseWriter, r *http.Request) {
 		Outcome:     identity.AuditOutcomeSuccess,
 	})
 
-	rows, _ := s.meTokens.Adapter.ListForUser(r.Context(), claims.Subject)
+	// Re-render the bounded first page (the freshly-minted token sorts
+	// to the top under the createdAt-desc ordering, so it's always on it).
+	rows, next, _ := s.meTokens.Adapter.ListForUserPage(r.Context(), claims.Subject, "")
 
 	data := webtempl.MeTokensData{
-		Layout:   s.LayoutData(r, "API tokens", true, meTokensNavLinks(), nil),
-		Flash:    &webtempl.Flash{Kind: "success", Message: "Token generated. Copy it now — it won't be shown again."},
-		NewToken: plain,
-		NewLabel: label,
-		Tokens:   projectTokens(rows),
+		Layout:     s.LayoutData(r, "API tokens", true, meTokensNavLinks(), nil),
+		Flash:      &webtempl.Flash{Kind: "success", Message: "Token generated. Copy it now — it won't be shown again."},
+		NewToken:   plain,
+		NewLabel:   label,
+		Tokens:     projectTokens(rows),
+		NextCursor: next,
 	}
 	s.render(w, r, "me/tokens", webtempl.MeTokens(data))
 }
