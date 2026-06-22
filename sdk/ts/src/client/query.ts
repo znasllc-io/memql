@@ -23,6 +23,20 @@ import { readServerPayload } from "./wire.js";
 
 export interface QueryCallOptions {
   signal?: AbortSignal;
+  /**
+   * Opaque keyset continuation cursor (memql#1985 / 5.12). When set, the
+   * engine continues the query from the encoded position instead of an
+   * offset scan. Obtain it from a prior response's `Result.meta()?.cursor`
+   * (minted on a full page; empty when the set is exhausted) and pass it
+   * back to walk the set with no dup / no gap. The cursor is opaque +
+   * bound to the query's `sort` ordering, and carries no server session
+   * state, so the SAME cursor resolves on ANY replica it is replayed
+   * against. Empty / unset is a first page (the existing behaviour).
+   *
+   * Rides `ExecuteQueryMsg.cursor` (proto field 5); the read-back side is
+   * already exposed via `Result.meta()?.cursor`.
+   */
+  cursor?: string;
 }
 
 export class QueryClient {
@@ -37,7 +51,11 @@ export class QueryClient {
     const reqId = newShortId();
     const resp = await this.dispatcher.sendAndWait(
       {
-        executeQuery: { requestId: reqId, query: call },
+        executeQuery: {
+          requestId: reqId,
+          query: call,
+          ...(opts.cursor ? { cursor: opts.cursor } : {}),
+        },
       },
       opts.signal,
     );
@@ -60,7 +78,11 @@ export class QueryClient {
     const reqId = newShortId();
     const resp = await this.dispatcher.sendAndWait(
       {
-        executeQuery: { requestId: reqId, query: call },
+        executeQuery: {
+          requestId: reqId,
+          query: call,
+          ...(opts.cursor ? { cursor: opts.cursor } : {}),
+        },
       },
       opts.signal,
     );
