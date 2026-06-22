@@ -16,7 +16,7 @@ import (
 // drives score-based agent routing from Go with dynamic per-utterance
 // context (participants, recent turns, scoring signals). Expressing that in
 // the DSL would require building a query string every turn; calling
-// InvokeSI directly is cleaner. The DSL `si()` form is still the right
+// InvokeSI directly is cleaner. The DSL `ai()` form is still the right
 // choice inside shape() projection contexts.
 type IntegrationEngineAccess interface {
 	// RegisterIntegration registers an IntegrationProvider, making its
@@ -31,7 +31,7 @@ type IntegrationEngineAccess interface {
 
 	// InvokeSI runs a prompt template by ID with the given data map,
 	// routing through the engine's SI provider registry (including cache
-	// and provider-override plumbing). Equivalent to `si("<id>", {...data})`
+	// and provider-override plumbing). Equivalent to `ai("<id>", {...data})`
 	// in the DSL, but callable from Go without having to build and parse
 	// a query string. The DSL form is only valid inside shape() projection
 	// contexts; InvokeSI is the top-level equivalent for integration code.

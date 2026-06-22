@@ -47,7 +47,7 @@ type shapeRelationFunc struct {
 func (*shapeRelationFunc) isShapeTemplate() {}
 
 type shapeSIValue struct {
-	Invocation *SIInvocation
+	Invocation *AIInvocation
 	Data       shapeTemplate
 }
 
@@ -276,10 +276,10 @@ func (g *shapeGraph) renderRelation(ctx context.Context, nodeId string, rel *sha
 
 func (g *shapeGraph) renderSIValue(ctx context.Context, nodeId string, value *shapeSIValue, runtime *siRuntime, visited map[string]struct{}) (any, error) {
 	if value == nil || value.Invocation == nil {
-		return nil, fmt.Errorf("si() invocation is not defined")
+		return nil, fmt.Errorf("ai() invocation is not defined")
 	}
 	if runtime == nil {
-		return nil, fmt.Errorf("si() runtime is not configured")
+		return nil, fmt.Errorf("ai() runtime is not configured")
 	}
 
 	var data any
@@ -874,7 +874,7 @@ func writeShapeSignature(builder *strings.Builder, tmpl shapeTemplate) {
 		writeShapeSignature(builder, typed.Template)
 		builder.WriteString(")")
 	case *shapeSIValue:
-		builder.WriteString("si(")
+		builder.WriteString("ai(")
 		if typed.Invocation != nil {
 			builder.WriteString(typed.Invocation.TemplateId)
 			if typed.Invocation.ProviderOverride != nil {

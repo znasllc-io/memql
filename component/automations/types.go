@@ -396,7 +396,7 @@ type ShapeStepConfig struct {
 	Source string `json:"source"`
 
 	// Template is the shape template as a JSON object.
-	// Values can use shape helpers: node(), si(), children(), etc.
+	// Values can use shape helpers: node(), ai(), children(), etc.
 	Template json.RawMessage `json:"template"`
 
 	// RequireNotEmpty fails the step if source resolves to an empty array.

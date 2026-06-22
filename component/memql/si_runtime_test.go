@@ -44,7 +44,7 @@ func TestSIRuntimeCacheDefaultEnabled(t *testing.T) {
 	})
 	require.NotNil(t, runtime)
 
-	invocation := &SIInvocation{TemplateId: "testPrompt"}
+	invocation := &AIInvocation{TemplateId: "testPrompt"}
 	data := map[string]any{"name": "Ada"}
 
 	result, err := runtime.Invoke(context.Background(), invocation, data)
@@ -103,7 +103,7 @@ func TestSIRuntimeCacheOverrideWhenDisabled(t *testing.T) {
 	})
 	require.NotNil(t, runtime)
 
-	invocation := &SIInvocation{
+	invocation := &AIInvocation{
 		TemplateId:   "ttlPrompt",
 		CacheSeconds: optionalInt(30),
 	}

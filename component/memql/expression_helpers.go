@@ -48,7 +48,7 @@ func ensureBooleanExpression(expr ExpressionNode) error {
 		return ensureBooleanExpression(node.Target)
 	case *SpecReferenceExpression:
 		return nil
-	case *SIExpression:
+	case *AIExpression:
 		return nil
 	default:
 		return fmt.Errorf("expression node %T is not allowed inside a spec", expr)
@@ -103,9 +103,9 @@ func cloneExpressionNode(expr ExpressionNode) ExpressionNode {
 			}
 		}
 		return clone
-	case *SIExpression:
-		return &SIExpression{
-			Invocation: cloneSIInvocation(node.Invocation),
+	case *AIExpression:
+		return &AIExpression{
+			Invocation: cloneAIInvocation(node.Invocation),
 		}
 	case *FunctionCallExpression:
 		argsCopy := make(map[string]any)

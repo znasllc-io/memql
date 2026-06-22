@@ -795,7 +795,7 @@ func (c *CognitionIntegration) generateSIResponse(ctx context.Context, agent *ag
 		}
 	}
 
-	// Invoke the cognitionReply prompt directly. Can't use the DSL `si()`
+	// Invoke the cognitionReply prompt directly. Can't use the DSL `ai()`
 	// form here because it's parser-restricted to shape() projection
 	// contexts; we need a top-level one-shot call with the full assembled
 	// data map. Provider selection, caching, and tool-calling plumbing all

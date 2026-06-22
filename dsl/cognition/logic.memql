@@ -253,7 +253,7 @@ logic logicGenerateResponse {
 
   // Generate SI response via the prompt template
   siResponse := if existingResponse.Empty() {
-    si(args.event.payload.promptTemplateId, args.event.payload.promptData)
+    ai(args.event.payload.promptTemplateId, args.event.payload.promptData)
   }
 
   // Insert the SI response as a new utterance

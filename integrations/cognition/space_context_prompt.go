@@ -7,7 +7,7 @@ import (
 )
 
 // getSpaceContextForPrompt returns the latest space context object for prompt inputs.
-// The returned object is JSON-friendly and safe to pass into si() prompt templates.
+// The returned object is JSON-friendly and safe to pass into ai() prompt templates.
 func (c *CognitionIntegration) getSpaceContextForPrompt(ctx context.Context, spaceId string) map[string]any {
 	if c == nil || c.engine == nil {
 		return nil

@@ -169,7 +169,7 @@ func (e *ShapeExecutor) evaluateTemplateValue(ctx context.Context, value any, ev
 		if len(v) > 0 && v[0] == '$' {
 			return eval.EvaluateValue(v)
 		}
-		// String-form shape functions like node("..."), si("...", {...})
+		// String-form shape functions like node("..."), ai("...", {...})
 		if isShapeFunction(v) {
 			return e.evaluateShapeFunction(ctx, v, eval, stepCtx)
 		}
@@ -270,11 +270,11 @@ func (e *ShapeExecutor) evaluateFunctionObject(ctx context.Context, name string,
 			return nil, fmt.Errorf("AI function requires MemQL engine")
 		}
 		if len(args) < 1 {
-			return nil, fmt.Errorf("si() requires a template id as first argument")
+			return nil, fmt.Errorf("ai() requires a template id as first argument")
 		}
 		templateId, ok := args[0].(string)
 		if !ok || templateId == "" {
-			return nil, fmt.Errorf("si() template id must be a non-empty string")
+			return nil, fmt.Errorf("ai() template id must be a non-empty string")
 		}
 
 		var resolvedData map[string]any
@@ -288,7 +288,7 @@ func (e *ShapeExecutor) evaluateFunctionObject(ctx context.Context, name string,
 			if m, ok := resolvedAny.(map[string]any); ok {
 				resolvedData = m
 			} else {
-				return nil, fmt.Errorf("si() data argument must be an object, got %T", resolvedAny)
+				return nil, fmt.Errorf("ai() data argument must be an object, got %T", resolvedAny)
 			}
 		}
 
@@ -301,7 +301,7 @@ func (e *ShapeExecutor) evaluateFunctionObject(ctx context.Context, name string,
 
 // isShapeFunction checks if a string looks like a shape function call.
 func isShapeFunction(s string) bool {
-	funcs := []string{"node(", "si(", "children(", "parent(", "payload("}
+	funcs := []string{"node(", "ai(", "children(", "parent(", "payload("}
 	for _, f := range funcs {
 		if len(s) >= len(f) && s[:len(f)] == f {
 			return true
@@ -325,16 +325,16 @@ func (e *ShapeExecutor) evaluateShapeFunction(ctx context.Context, funcCall stri
 		return eval.EvaluateValue("$node." + path)
 	}
 
-	if len(funcCall) >= 3 && funcCall[:3] == "si(" {
+	if len(funcCall) >= 3 && funcCall[:3] == "ai(" {
 		// AI function call - invoke the engine's AI runtime
 		if stepCtx.Engine == nil {
 			return nil, fmt.Errorf("AI function requires MemQL engine")
 		}
 
-		// Parse the si() call: si("templateId", { data })
-		templateId, dataStr, err := parseSIFunctionCall(funcCall)
+		// Parse the ai() call: ai("templateId", { data })
+		templateId, dataStr, err := parseAIFunctionCall(funcCall)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse si()call: %w", err)
+			return nil, fmt.Errorf("failed to parse ai()call: %w", err)
 		}
 
 		// Parse and resolve the data object (handles node() and $ expressions)
@@ -342,7 +342,7 @@ func (e *ShapeExecutor) evaluateShapeFunction(ctx context.Context, funcCall stri
 		if dataStr != "" {
 			resolvedData, err = parseShapeDataObject(dataStr, eval)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse si()data: %w", err)
+				return nil, fmt.Errorf("failed to parse ai()data: %w", err)
 			}
 		}
 
@@ -384,13 +384,13 @@ func extractQuotedArg(s string) string {
 	return ""
 }
 
-// parseSIFunctionCall parses an si()function call and extracts template ID and raw data string.
-// Expected format: si("templateId", { "key": "value", ... }) or si("templateId")
+// parseAIFunctionCall parses an ai()function call and extracts template ID and raw data string.
+// Expected format: ai("templateId", { "key": "value", ... }) or ai("templateId")
 // The data object may contain shape function calls like node("field") which are not valid JSON.
-func parseSIFunctionCall(funcCall string) (string, string, error) {
-	// Remove "si(" prefix and ")" suffix
-	if len(funcCall) < 4 || funcCall[:3] != "si(" || funcCall[len(funcCall)-1] != ')' {
-		return "", "", fmt.Errorf("invalid si()function call format")
+func parseAIFunctionCall(funcCall string) (string, string, error) {
+	// Remove "ai(" prefix and ")" suffix
+	if len(funcCall) < 4 || funcCall[:3] != "ai(" || funcCall[len(funcCall)-1] != ')' {
+		return "", "", fmt.Errorf("invalid ai()function call format")
 	}
 
 	inner := funcCall[3 : len(funcCall)-1]
@@ -398,7 +398,7 @@ func parseSIFunctionCall(funcCall string) (string, string, error) {
 	// Extract template ID (first quoted string argument)
 	templateId := extractQuotedArg(inner)
 	if templateId == "" {
-		return "", "", fmt.Errorf("si() requires a template ID as first argument")
+		return "", "", fmt.Errorf("ai() requires a template ID as first argument")
 	}
 
 	// Find the data object (everything after the first comma)
@@ -626,7 +626,7 @@ func parseShapeValue(s string, eval *automations.Evaluator) (any, string, error)
 			return resolved, remaining[end:], nil
 		}
 
-		return nil, "", fmt.Errorf("unsupported function in si()data: %s", funcName)
+		return nil, "", fmt.Errorf("unsupported function in ai()data: %s", funcName)
 	}
 
 	// Nested object

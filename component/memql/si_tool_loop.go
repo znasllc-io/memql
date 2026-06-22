@@ -24,7 +24,7 @@ func (e *MemQLEngine) InvokeSIChatWithTools(ctx context.Context, templateId stri
 	}
 
 	// Render the prompt template into a system message.
-	invocation := &SIInvocation{TemplateId: templateId}
+	invocation := &AIInvocation{TemplateId: templateId}
 	if override := ProviderOverrideFromContext(ctx); override != "" {
 		invocation.ProviderOverride = &override
 	}
@@ -231,7 +231,7 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredToolsOpts(ctx context.Context, tem
 	}
 
 	// Render the prompt template into a system message.
-	invocation := &SIInvocation{TemplateId: templateId}
+	invocation := &AIInvocation{TemplateId: templateId}
 	if override := ProviderOverrideFromContext(ctx); override != "" {
 		invocation.ProviderOverride = &override
 	}

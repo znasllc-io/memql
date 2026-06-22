@@ -27,7 +27,7 @@
 //                   MEMQL_HARNESS_CONSOLIDATION_BATCH_MAX (bounded cost)
 //     3. clusters := group batch by embedding similarity
 //     4. for each cluster:
-//          belief := si("consolidateMemory", {episodes: cluster, ...})
+//          belief := ai("consolidateMemory", {episodes: cluster, ...})
 //          if belief.distilled == false: continue   // nothing stable
 //          match := similarTo({ text: belief.content,
 //                               concept: "v1:harness:semanticMemory",

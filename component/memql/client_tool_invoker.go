@@ -167,7 +167,7 @@ func mcpToolExecution(ctx context.Context) bool {
 
 // providerOverrideKey carries an optional LLM provider name that
 // si_tool_loop's InvokeSIChatWithFilteredTools should pass as the
-// SIInvocation.ProviderOverride. Lets callers (e.g. delegate_takeover)
+// AIInvocation.ProviderOverride. Lets callers (e.g. delegate_takeover)
 // route specific turns to a registered provider other than the
 // template default -- for instance a stronger reasoning tier without
 // changing the global default.

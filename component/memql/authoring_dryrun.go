@@ -9,7 +9,7 @@ package memql
 // an EPHEMERAL SANDBOX PARTITION that isolates graph writes, with a tiered
 // side-effect interception layer:
 //
-//   - reads execute REAL + METERED: si(), similarTo, webSearch, fetchUrl
+//   - reads execute REAL + METERED: ai(), similarTo, webSearch, fetchUrl
 //   - writes are ISOLATED: mutations land in the sandbox partition; webhooks /
 //     external POSTs are RECORDED-AND-BLOCKED.
 //
@@ -133,7 +133,7 @@ type RecordedMutation struct {
 	Partition string         `json:"partition"`
 }
 
-// RecordedAiCall is one metered SI read (si()) the automation made. Reads run
+// RecordedAiCall is one metered SI read (ai()) the automation made. Reads run
 // for REAL against the live providers; the manifest records the cost so the
 // approver sees what the automation will spend in production.
 type RecordedAiCall struct {
@@ -252,7 +252,7 @@ func sandboxDryRunner() SandboxDryRunner {
 
 // RunBundleDryRun is the Gate-2 entry point: it executes the requested
 // automation behaviorally through the registered dry-run runner and returns the
-// approval-artifact report. The engine is used for real reads (si() + web reads
+// approval-artifact report. The engine is used for real reads (ai() + web reads
 // run against its live providers) but graph writes are isolated to the run's
 // ephemeral sandbox partition by the interception layer -- so it is safe to call
 // against a running engine. When no runner is linked, it returns an error rather

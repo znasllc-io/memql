@@ -52,7 +52,7 @@ func eventDryRunBindingCheck() check {
 // @required argument these five logics feed from event.* is present, so any of
 // these signatures appearing is a #1727 regression. Environmental failures that
 // are NOT binding failures (an SI provider / integration the lightweight
-// conformance engine does not register, the pre-existing si() positional-arg
+// conformance engine does not register, the pre-existing ai() positional-arg
 // render quirk) are explicitly tolerated -- they occur identically on the live
 // path and land PAST the event-binding point.
 var bindingErrorSignatures = []string{
@@ -69,7 +69,7 @@ var bindingErrorSignatures = []string{
 // PAST event binding, so they prove the binding resolved.
 var allowedNonBindingFailures = []string{
 	"unknown builtin executor", // integration.dailyspace.ensureForUser not registered here
-	`function "si"`,            // si() positional-arg render quirk (pre-existing, live-path-identical)
+	`function "ai"`,            // ai() positional-arg render quirk (pre-existing, live-path-identical)
 	// logicGenerateResponse validates its (correctly-bound) siParticipantId
 	// against a cognition participant row + actor write-authz the lightweight
 	// conformance engine does not seed. Whether part-1727 happens to exist in

@@ -118,8 +118,8 @@ func (c *ASTConverter) ConvertExpression(expr languageParser.ExpressionNode) (Ex
 		return c.convertArgRefExpr(node)
 	case *languageParser.CallerRefExpr:
 		return &CallerRefExpression{}, nil
-	case *languageParser.SIExpr:
-		return c.convertSIExpr(node)
+	case *languageParser.AIExpr:
+		return c.convertAIExpr(node)
 	case *languageParser.LiteralExpr:
 		return c.convertLiteralExpr(node)
 	case *languageParser.ErrorRefExpr:
@@ -660,13 +660,13 @@ func (c *ASTConverter) convertArgRefExpr(expr *languageParser.ArgRefExpr) (*ArgR
 	}, nil
 }
 
-// convertSIExpr converts languageParser.SIExpr to memql.SIExpression.
-func (c *ASTConverter) convertSIExpr(expr *languageParser.SIExpr) (*SIExpression, error) {
+// convertAIExpr converts languageParser.AIExpr to memql.AIExpression.
+func (c *ASTConverter) convertAIExpr(expr *languageParser.AIExpr) (*AIExpression, error) {
 	if expr == nil {
 		return nil, nil
 	}
 
-	invocation := &SIInvocation{
+	invocation := &AIInvocation{
 		TemplateId: expr.TemplateId,
 	}
 
@@ -680,7 +680,7 @@ func (c *ASTConverter) convertSIExpr(expr *languageParser.SIExpr) (*SIExpression
 		invocation.CacheSeconds = &seconds
 	}
 
-	return &SIExpression{
+	return &AIExpression{
 		Invocation: invocation,
 	}, nil
 }

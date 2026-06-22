@@ -34,7 +34,7 @@ func parseStandaloneExpression(input string) (ExpressionNode, error) {
 }
 
 // detectSIUsage walks an ExpressionNode tree and reports whether
-// any node in the tree is an *SIExpression. Used by spec_parser.go
+// any node in the tree is an *AIExpression. Used by spec_parser.go
 // (still alive pending #329's Stage 1C migration) at registration
 // time to populate `Spec.UsesSI`, which downstream callers (the
 // planner's SI budget gate, observability) read to decide whether
@@ -44,7 +44,7 @@ func detectSIUsage(expr ExpressionNode) bool {
 		return false
 	}
 	switch node := expr.(type) {
-	case *SIExpression:
+	case *AIExpression:
 		return true
 	case *LogicalExpression:
 		return detectSIUsage(node.Left) || detectSIUsage(node.Right)

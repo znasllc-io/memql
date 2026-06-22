@@ -138,7 +138,7 @@ func (v *specValidator) expandExpression(expr ExpressionNode, allowInline bool) 
 			return nil, err
 		}
 		if spec != nil && spec.UsesSI {
-			return nil, fmt.Errorf("spec %q uses si() and cannot be used in filter expressions", spec.Name)
+			return nil, fmt.Errorf("spec %q uses ai() and cannot be used in filter expressions", spec.Name)
 		}
 		resolved, err := v.resolveSpec(scope, node.Name)
 		if err != nil {
