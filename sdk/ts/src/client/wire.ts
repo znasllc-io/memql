@@ -225,13 +225,13 @@ type ClientPayload =
   | { rotateAuth: RotateAuthPayload }
   | { conceptsList: ConceptsListPayload }
   | { myAccess: MyAccessPayload }
-  | { siChat: AiChatPayload }
-  | { siSpeech: AiSpeechPayload }
-  | { siTranscribe: AiTranscribePayload }
-  | { siSuggest: AiSuggestPayload }
-  | { siTranscribeStreamStart: AiTranscribeStreamStartPayload }
-  | { siTranscribeStreamChunk: AiTranscribeStreamChunkPayload }
-  | { siTranscribeStreamEnd: AiTranscribeStreamEndPayload }
+  | { aiChat: AiChatPayload }
+  | { aiSpeech: AiSpeechPayload }
+  | { aiTranscribe: AiTranscribePayload }
+  | { aiSuggest: AiSuggestPayload }
+  | { aiTranscribeStreamStart: AiTranscribeStreamStartPayload }
+  | { aiTranscribeStreamChunk: AiTranscribeStreamChunkPayload }
+  | { aiTranscribeStreamEnd: AiTranscribeStreamEndPayload }
   | { sendGuestInvite: SendGuestInvitePayload }
   | { resolveGuestInvite: ResolveGuestInvitePayload }
   | { joinSpaceAsGuest: JoinSpaceAsGuestPayload }
@@ -560,13 +560,13 @@ type ServerPayload =
   | { conceptsListResult: ConceptsListResultPayload }
   | { myAccessResult: MyAccessResultPayload }
   | { rotateAuthResult: RotateAuthResultPayload }
-  | { siChatResult: AiChatResultPayload }
-  | { siSpeechResult: AiSpeechResultPayload }
-  | { siTranscribeResult: AiTranscribeResultPayload }
-  | { siSuggestResult: AiSuggestResultPayload }
-  | { siChunk: AiStreamChunkPayload }
-  | { siTranscribeStreamDelta: AiTranscribeStreamDeltaPayload }
-  | { siTranscribeStreamComplete: AiTranscribeStreamCompletePayload }
+  | { aiChatResult: AiChatResultPayload }
+  | { aiSpeechResult: AiSpeechResultPayload }
+  | { aiTranscribeResult: AiTranscribeResultPayload }
+  | { aiSuggestResult: AiSuggestResultPayload }
+  | { aiChunk: AiStreamChunkPayload }
+  | { aiTranscribeStreamDelta: AiTranscribeStreamDeltaPayload }
+  | { aiTranscribeStreamComplete: AiTranscribeStreamCompletePayload }
   | { sendGuestInviteResult: SendGuestInviteResultPayload }
   | { resolveGuestInviteResult: ResolveGuestInviteResultPayload }
   | { joinSpaceAsGuestResult: JoinSpaceAsGuestResultPayload }
@@ -593,13 +593,13 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "conceptsListResult"; value: ConceptsListResultPayload }
   | { kind: "myAccessResult"; value: MyAccessResultPayload }
   | { kind: "rotateAuthResult"; value: RotateAuthResultPayload }
-  | { kind: "siChatResult"; value: AiChatResultPayload }
-  | { kind: "siSpeechResult"; value: AiSpeechResultPayload }
-  | { kind: "siTranscribeResult"; value: AiTranscribeResultPayload }
-  | { kind: "siSuggestResult"; value: AiSuggestResultPayload }
-  | { kind: "siChunk"; value: AiStreamChunkPayload }
-  | { kind: "siTranscribeStreamDelta"; value: AiTranscribeStreamDeltaPayload }
-  | { kind: "siTranscribeStreamComplete"; value: AiTranscribeStreamCompletePayload }
+  | { kind: "aiChatResult"; value: AiChatResultPayload }
+  | { kind: "aiSpeechResult"; value: AiSpeechResultPayload }
+  | { kind: "aiTranscribeResult"; value: AiTranscribeResultPayload }
+  | { kind: "aiSuggestResult"; value: AiSuggestResultPayload }
+  | { kind: "aiChunk"; value: AiStreamChunkPayload }
+  | { kind: "aiTranscribeStreamDelta"; value: AiTranscribeStreamDeltaPayload }
+  | { kind: "aiTranscribeStreamComplete"; value: AiTranscribeStreamCompletePayload }
   | { kind: "sendGuestInviteResult"; value: SendGuestInviteResultPayload }
   | { kind: "resolveGuestInviteResult"; value: ResolveGuestInviteResultPayload }
   | { kind: "joinSpaceAsGuestResult"; value: JoinSpaceAsGuestResultPayload }
@@ -626,25 +626,25 @@ export function readServerPayload(msg: ServerMessage):
     return { kind: "myAccessResult", value: m.myAccessResult as MyAccessResultPayload };
   if (m.rotateAuthResult)
     return { kind: "rotateAuthResult", value: m.rotateAuthResult as RotateAuthResultPayload };
-  if (m.siChatResult)
-    return { kind: "siChatResult", value: m.siChatResult as AiChatResultPayload };
-  if (m.siSpeechResult)
-    return { kind: "siSpeechResult", value: m.siSpeechResult as AiSpeechResultPayload };
-  if (m.siTranscribeResult)
-    return { kind: "siTranscribeResult", value: m.siTranscribeResult as AiTranscribeResultPayload };
-  if (m.siSuggestResult)
-    return { kind: "siSuggestResult", value: m.siSuggestResult as AiSuggestResultPayload };
-  if (m.siChunk)
-    return { kind: "siChunk", value: m.siChunk as AiStreamChunkPayload };
-  if (m.siTranscribeStreamDelta)
+  if (m.aiChatResult)
+    return { kind: "aiChatResult", value: m.aiChatResult as AiChatResultPayload };
+  if (m.aiSpeechResult)
+    return { kind: "aiSpeechResult", value: m.aiSpeechResult as AiSpeechResultPayload };
+  if (m.aiTranscribeResult)
+    return { kind: "aiTranscribeResult", value: m.aiTranscribeResult as AiTranscribeResultPayload };
+  if (m.aiSuggestResult)
+    return { kind: "aiSuggestResult", value: m.aiSuggestResult as AiSuggestResultPayload };
+  if (m.aiChunk)
+    return { kind: "aiChunk", value: m.aiChunk as AiStreamChunkPayload };
+  if (m.aiTranscribeStreamDelta)
     return {
-      kind: "siTranscribeStreamDelta",
-      value: m.siTranscribeStreamDelta as AiTranscribeStreamDeltaPayload,
+      kind: "aiTranscribeStreamDelta",
+      value: m.aiTranscribeStreamDelta as AiTranscribeStreamDeltaPayload,
     };
-  if (m.siTranscribeStreamComplete)
+  if (m.aiTranscribeStreamComplete)
     return {
-      kind: "siTranscribeStreamComplete",
-      value: m.siTranscribeStreamComplete as AiTranscribeStreamCompletePayload,
+      kind: "aiTranscribeStreamComplete",
+      value: m.aiTranscribeStreamComplete as AiTranscribeStreamCompletePayload,
     };
   if (m.sendGuestInviteResult)
     return { kind: "sendGuestInviteResult", value: m.sendGuestInviteResult as SendGuestInviteResultPayload };
@@ -690,15 +690,15 @@ export function readServerPayload(msg: ServerMessage):
 // known streaming family.
 //
 // AiChatResult appears here so the terminal frame in a streaming chat
-// session (siChatStream, which uses dispatcher.send without
+// session (aiChatStream, which uses dispatcher.send without
 // registering in `pending`) routes to the per-requestId stream
-// listener. The non-streaming siChat path uses sendAndWait, which
+// listener. The non-streaming aiChat path uses sendAndWait, which
 // resolves on correlateTo before streamRequestId is consulted.
 export function streamRequestId(msg: ServerMessage): string {
   const m = msg as unknown as Record<string, { requestId?: string } | undefined>;
-  if (m.siTranscribeStreamDelta?.requestId) return m.siTranscribeStreamDelta.requestId;
-  if (m.siTranscribeStreamComplete?.requestId) return m.siTranscribeStreamComplete.requestId;
-  if (m.siChunk?.requestId) return m.siChunk.requestId;
-  if (m.siChatResult?.requestId) return m.siChatResult.requestId;
+  if (m.aiTranscribeStreamDelta?.requestId) return m.aiTranscribeStreamDelta.requestId;
+  if (m.aiTranscribeStreamComplete?.requestId) return m.aiTranscribeStreamComplete.requestId;
+  if (m.aiChunk?.requestId) return m.aiChunk.requestId;
+  if (m.aiChatResult?.requestId) return m.aiChatResult.requestId;
   return "";
 }

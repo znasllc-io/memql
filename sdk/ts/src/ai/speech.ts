@@ -1,4 +1,4 @@
-// siSpeech wraps MemqlClientMessage.si_speech (text-to-speech).
+// aiSpeech wraps MemqlClientMessage.ai_speech (text-to-speech).
 // One-shot request/reply: AiSpeechMsg -> AiSpeechResult carrying
 // the synthesized audio bytes (decoded from protojson base64).
 
@@ -6,34 +6,34 @@ import type { Dispatcher } from "../client/dispatcher.js";
 import { newShortId } from "../client/id.js";
 import { readServerPayload } from "../client/wire.js";
 
-export interface SiSpeechOptions {
+export interface AiSpeechOptions {
   voice?: string;
   format?: string; // "wav" | "mp3" | "ogg" | ...
   provider?: string;
   signal?: AbortSignal;
 }
 
-export interface SiSpeechResult {
+export interface AiSpeechResult {
   audio: Uint8Array;
   format: string;
 }
 
-// siSpeech synthesizes audio for the given input string. Throws on
+// aiSpeech synthesizes audio for the given input string. Throws on
 // QueryError, transport failure, or abort.
-export async function siSpeech(
+export async function aiSpeech(
   dispatcher: Dispatcher,
   input: string,
-  opts: SiSpeechOptions = {},
-): Promise<SiSpeechResult> {
-  if (!dispatcher) throw new Error("siSpeech: dispatcher is required");
+  opts: AiSpeechOptions = {},
+): Promise<AiSpeechResult> {
+  if (!dispatcher) throw new Error("aiSpeech: dispatcher is required");
   if (typeof input !== "string" || input.length === 0) {
-    throw new Error("siSpeech: input string must be non-empty");
+    throw new Error("aiSpeech: input string must be non-empty");
   }
 
   const requestId = newShortId();
   const reply = await dispatcher.sendAndWait(
     {
-      siSpeech: {
+      aiSpeech: {
         requestId,
         input,
         ...(opts.voice ? { voice: opts.voice } : {}),
@@ -46,10 +46,10 @@ export async function siSpeech(
 
   const payload = readServerPayload(reply);
   if (payload?.kind === "queryError") {
-    throw new Error(`siSpeech: ${payload.value.error?.message ?? "(no message)"}`);
+    throw new Error(`aiSpeech: ${payload.value.error?.message ?? "(no message)"}`);
   }
-  if (payload?.kind !== "siSpeechResult") {
-    throw new Error("siSpeech: unexpected reply envelope");
+  if (payload?.kind !== "aiSpeechResult") {
+    throw new Error("aiSpeech: unexpected reply envelope");
   }
 
   return {
@@ -74,5 +74,5 @@ function base64ToBytes(b64: string): Uint8Array {
     for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
     return out;
   }
-  throw new Error("siSpeech: no base64 decoder available (need Buffer or atob)");
+  throw new Error("aiSpeech: no base64 decoder available (need Buffer or atob)");
 }
