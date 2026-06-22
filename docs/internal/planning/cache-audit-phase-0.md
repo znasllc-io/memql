@@ -9,15 +9,30 @@ owner: znas
 
 # Cache audit — Phase 0 of the LLM-driven decisions plan
 
-**Status:** Audit complete; instrumentation shipped. Baseline numbers TBD (need a week of dev usage).
+**Status:** Audit complete; instrumentation shipped. Exact-hash AI cache
+verified live + synthetically baselined (5.8, #1972). The real live-traffic
+hit ratio lands in Epic-5 verification (5.11, #1975) once the emitter has
+soaked over real dev usage.
 **Related:** [llm-driven-decisions.md](./llm-driven-decisions.md) — this is the unblocking prerequisite.
+
+> **Naming note (2026-06-22, #1972).** Epic 1's AI rename has since landed in
+> this area: `si_cache.go` → `component/memql/ai_cache.go`, `siResponseCache`
+> → `aiResponseCache`, `siCacheConfig` → `aiCacheConfig`, `SICacheStats` →
+> `AICacheStats`, and the runtime moved to `ai_runtime.go` (`aiRuntime.Invoke`).
+> The stats **log line is now `aiCache: stats`** (key/value slog, not the
+> `{"component":"siCache"...}` JSON shown in the older example below). Two
+> residual `SI`-isms are intentionally deferred per #1917/#1918 and are NOT in
+> scope for 5.8: the env knobs `MEMQL_SI_CACHE_DEFAULT_ENABLED` /
+> `MEMQL_SI_CACHE_MAX_SECONDS`. Aligning those to `MEMQL_AI_*` is a small,
+> low-value follow-up (it churns Epic-1's deferred env-rename work) — track it
+> with #1917/#1918, do not fold it into the caching epic.
 
 ## TL;DR
 
 Two active caches in the system (a third one exists as dead code — `component/cache/cache.go` has no consumers in the build). **Both had metrics disabled.** That's now fixed (Ristretto metrics on for the result cache; manual counters on the AI cache). What you'll see going forward in BFF logs:
 
 ```
-{"component":"siCache","msg":"cache stats","hits":42,"misses":17,"hitRatio":0.71,"size":59}
+aiCache: stats  hits=42 misses=17 hitRatio=0.71 expiredOnRead=3 sets=58 skippedSetsZero=0 size=59
 {"component":"resultCache","msg":"cache stats","hitRatio":0.93,"hits":...,"misses":...,"keysEvicted":...}
 ```
 
@@ -25,15 +40,33 @@ Numbers are written periodically (every 5 minutes when the cache is non-empty) a
 
 ## The three caches
 
-### 1. AI response cache (`component/memql/si_cache.go`)
+### 1. AI response cache (`component/memql/ai_cache.go`)
 
-**What it caches:** LLM call results — chat completions, structured outputs, anything returned by `siRuntime.Invoke`.
+**What it caches:** LLM call results — chat completions, structured outputs, anything returned by `aiRuntime.Invoke` (`component/memql/ai_runtime.go`).
 
-**Key:** `sha256(templateId + "|" + provider + "|" + fully-rendered-prompt)`.
+**Confirmed live on the invocation path (5.8, #1972).** The cache is read +
+written inside the real `aiRuntime.Invoke`: `engine_bootstrap.go` constructs the
+runtime (`newAIRuntime(..., e.aiCacheConfig)`), `Invoke` derives the key, does a
+`r.cache.get(key)` before the provider call and `r.cache.set(key, result, ttl)`
+after a miss. A cache hit short-circuits the provider entirely and emits
+`events.TopicAICompletionFinished` with `cached: true`. The hit/miss/expired/set
+counters increment on exactly those paths.
 
-**TTL:** Per-call configurable via `@cache(seconds)` annotation in `.memql` files; defaults via `siCacheConfig` (env-driven); hard cap at 300 seconds.
+**Key:** `buildAICacheKey(templateId, provider, renderedPrompt)` =
+`cacheId(trim(templateId) + "|" + trim(provider) + "|" + renderedPrompt)`, where
+`cacheId` is the engine's content-hash (`cacheIdEngine.FromString`, SHA-256-based
+— `cache_id.go`). Same three-part identity as the original `sha256(templateId|provider|prompt)`
+design; near-duplicate prompts ("thanks!" vs "thanks") still produce distinct keys.
 
-**Storage:** In-memory `map[string]siCacheEntry`. No size limit. Per-process (restart wipes).
+**TTL:** Per-call configurable via `@cache(seconds)` (carried as
+`AIInvocation.CacheSeconds`); defaults via `aiCacheConfig` (env-driven —
+`MEMQL_SI_CACHE_DEFAULT_ENABLED` / `MEMQL_SI_CACHE_MAX_SECONDS`, default
+enabled, default 60s); hard cap at 300 seconds (`clampAICacheSeconds`,
+`maxAICacheSeconds`). `cacheTTL`: an explicit per-call `0` disables caching for
+that call; otherwise the per-call value (clamped) wins, else the default max if
+`DefaultEnabled`, else off.
+
+**Storage:** In-memory `map[string]aiCacheEntry`. No size limit. Per-process (restart wipes).
 
 **Eviction:** Lazy only — expired entries deleted when read. Cold entries (never read after expiry) accumulate forever in memory.
 
@@ -76,7 +109,7 @@ It looks like an older caching layer that got designed but never wired up, or on
 
 ## What changes in this commit
 
-1. **`siResponseCache`** gets atomic hit/miss/expired-on-read/set counters + a `Stats()` method returning a `SICacheStats` snapshot + a `startStatsEmitter(ctx, logger, interval)` goroutine that logs stats every 5 minutes when the cache has been touched.
+1. **`aiResponseCache`** gets atomic hit/miss/expired-on-read/set counters + a `Stats()` method returning an `AICacheStats` snapshot + a `startStatsEmitter(ctx, logger, interval)` goroutine that logs stats every 5 minutes when the cache has been touched. (Originally shipped as `siResponseCache`/`SICacheStats`; renamed by Epic 1 — see the naming note above.)
 2. **`resultCache`** flips Ristretto metrics on (was `false` by default in the `ristretto.Config`); gets a `Stats()` method returning a `ResultCacheStats` snapshot from the underlying `*ristretto.Metrics`; same 5-minute log emitter.
 3. **Engine bootstrap** spawns the stats emitters once each at startup, scoped to the engine's lifecycle context.
 4. **No public API changes.** Existing callers continue to work.
@@ -86,6 +119,54 @@ It looks like an older caching layer that got designed but never wired up, or on
 - No new debug HTTP endpoint for stats. The 5-minute log emission is enough for Phase 0 baselining; a real `/debug/cache-stats` endpoint is a Phase 4 task once we know what dashboards we want.
 - No alerting on low hit rates. Same reason — we need a baseline first to know what "low" means.
 - No fix for the unbounded AI cache or the unbounded fallback map. Those are real bugs but addressing them requires picking eviction policies, which is its own design decision and shouldn't block the Phase 1+2 reference migration.
+
+## Baseline (5.8, #1972)
+
+The exact-hash AI cache is confirmed **live and self-consistent**. Two parts:
+
+### Synthetic baseline (committed, deterministic)
+
+`TestAIRuntimeCacheStatsBaseline` (`component/memql/ai_runtime_test.go`) drives
+the real `aiRuntime.Invoke` path against a mock provider and asserts that the
+Phase-0 `Stats()` counters move correctly:
+
+| Step | Lookup | `Stats()` result | Provider calls |
+|------|--------|------------------|----------------|
+| 1. first call ("Ada"), cold cache | miss | hits=0, misses=1, sets=1, size=1 | 1 |
+| 2. identical call ("Ada") | **hit** | hits=1, misses=1 | 1 (unchanged — short-circuited) |
+| 3. different prompt ("Bea") | miss | hits=1, misses=2 | 2 |
+
+Result: **hitRatio = 1/3 ≈ 0.333** over the three lookups; an identical AI call
+hits and never reaches the provider, a different rendered prompt misses. This
+proves the cache actually caches and that the telemetry the live baseline will
+read is wired correctly. If this test ever regresses, any hit-ratio reported from
+BFF logs is meaningless.
+
+### Reading the real live-traffic baseline (procedure — number lands in 5.11)
+
+A representative production hit ratio needs a real usage soak, which is Epic-5
+verification's job (5.11, #1975). To read it:
+
+1. Let the cache take real traffic (dev cluster or staging) for a meaningful
+   window — the `startStatsEmitter` goroutine logs every 5 minutes, but only
+   once the cache has been touched (silent on a quiet system).
+2. Grep the BFF/agent/cognition logs for the emitter line:
+   ```
+   make dev-cluster-logs | grep 'aiCache: stats'
+   ```
+   (staging: the equivalent `kubectl logs` across the AI-invoking nodes).
+   Each line carries `hits`, `misses`, `hitRatio`, `expiredOnRead`, `sets`,
+   `size`. `hitRatio` is cumulative since process start, so take the **last**
+   line per process for the soak total, or subtract two snapshots for a windowed
+   rate.
+3. Record the observed `hitRatio` (and `size`) on #1975. A near-0 ratio
+   confirms the hash-keyed shape is the bottleneck and makes the 5.9 semantic
+   cache the priority; a non-trivial ratio sets the bar 5.9 must beat.
+
+> The live number is intentionally **not** filled here — it is 5.11's
+> deliverable (this issue, 5.8, delivers the verification + synthetic baseline +
+> the procedure). 5.9 (semantic cache) builds on the measured exact-hash
+> baseline.
 
 ## What we'll know after a week of dev usage
 
