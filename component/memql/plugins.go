@@ -2,12 +2,34 @@ package memql
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 
 	"github.com/uptrace/bun"
 	"github.com/znasllc-io/memql/core/common"
 )
+
+// PluginContractVersion is the major version of the Plugin SDK -- the stable
+// extension surface a pack compiles against: the PluginContext fields, the
+// PluginFactory signature, and the registration primitives (RegisterPlugin
+// here, dsl.RegisterTree, node.RegisterRoutingRule,
+// server.RegisterReadinessCheck).
+//
+// Bump this ONLY on a BREAKING change to that surface (a removed/renamed
+// PluginContext field, a changed PluginFactory signature, a changed
+// registration primitive). Additive, backward-compatible changes (a new
+// PluginContext field, a new optional primitive) do NOT bump it -- existing
+// packs keep compiling and loading unchanged.
+//
+// A pack records the version it was built against via
+// RegisterPluginForContract (or implicitly, the current version, via
+// RegisterPlugin). The loader rejects a pack whose declared version is
+// incompatible with this constant (see CheckPluginContractCompat) so a stale
+// pack fails loudly at startup instead of silently mis-binding against a
+// contract it was not built for. The canonical reference for the surface is
+// docs/public/build/plugin-sdk.md.
+const PluginContractVersion = 1
 
 // PluginContext is the narrow Go surface that self-registering integration
 // plug-ins receive at startup. It is the stable extension contract: a plug-in
@@ -102,6 +124,46 @@ type PluginFactory func(pctx PluginContext) (IntegrationProvider, error)
 type PluginRegistration struct {
 	Name    string
 	Factory PluginFactory
+
+	// RequiresContractVersion is the PluginContractVersion the pack was built
+	// against. RegisterPlugin stamps the current version; a pack that pins an
+	// explicit version uses RegisterPluginForContract. The loader validates it
+	// against the core's PluginContractVersion before materializing the pack
+	// (see ValidateContract / CheckPluginContractCompat).
+	RequiresContractVersion int
+}
+
+// ValidateContract checks this registration's declared contract version
+// against the core's PluginContractVersion. Returns a descriptive error,
+// naming the plug-in, when the versions are incompatible.
+func (r PluginRegistration) ValidateContract() error {
+	if err := CheckPluginContractCompat(r.RequiresContractVersion); err != nil {
+		return fmt.Errorf("plugin %q: %w", r.Name, err)
+	}
+	return nil
+}
+
+// CheckPluginContractCompat reports whether a pack declaring
+// requiresContractVersion is compatible with the core's PluginContractVersion.
+//
+// Compatibility is exact-major equality: the SDK surface carries a single major
+// version, additive changes keep it, and any mismatch is incompatible -- a pack
+// built against a retired older contract (the core may have removed surface it
+// relies on) OR one that needs a newer core than this binary provides (the core
+// lacks surface it relies on). Returns a descriptive error on mismatch (or on a
+// missing/undeclared version), nil when compatible.
+func CheckPluginContractCompat(requiresContractVersion int) error {
+	if requiresContractVersion <= 0 {
+		return fmt.Errorf(
+			"plug-in declares no contract version (got %d); register it via RegisterPlugin or RegisterPluginForContract so it is stamped against memql.PluginContractVersion=%d",
+			requiresContractVersion, PluginContractVersion)
+	}
+	if requiresContractVersion != PluginContractVersion {
+		return fmt.Errorf(
+			"plug-in contract version mismatch: pack built against contract v%d, this core provides v%d -- rebuild the pack against this core",
+			requiresContractVersion, PluginContractVersion)
+	}
+	return nil
 }
 
 var (
@@ -109,13 +171,25 @@ var (
 	pluginRegistry []PluginRegistration
 )
 
-// RegisterPlugin registers an integration plug-in factory. Called from an
-// init() function in each plug-in package; build tags on the enclosing .go
-// file control which node-type binaries include the registration.
+// RegisterPlugin registers an integration plug-in factory against the CURRENT
+// PluginContractVersion. Called from an init() function in each plug-in
+// package; build tags on the enclosing .go file control which node-type
+// binaries include the registration.
 //
 // Panics on empty name, nil factory, or duplicate name -- these are
 // programmer errors and should surface loudly at startup.
 func RegisterPlugin(name string, factory PluginFactory) {
+	RegisterPluginForContract(name, PluginContractVersion, factory)
+}
+
+// RegisterPluginForContract is RegisterPlugin with an explicit declared
+// contract version -- the PluginContractVersion the pack was built against.
+// Third-party packs SHOULD use this so their contract expectation is recorded
+// explicitly; the loader rejects the pack at startup if that version is
+// incompatible with the core's PluginContractVersion (see ValidateContract).
+//
+// Panics on empty name, nil factory, or duplicate name.
+func RegisterPluginForContract(name string, requiresContractVersion int, factory PluginFactory) {
 	if name == "" {
 		panic("memql.RegisterPlugin: empty plugin name")
 	}
@@ -131,7 +205,11 @@ func RegisterPlugin(name string, factory PluginFactory) {
 			panic("memql.RegisterPlugin: plugin " + name + " already registered")
 		}
 	}
-	pluginRegistry = append(pluginRegistry, PluginRegistration{Name: name, Factory: factory})
+	pluginRegistry = append(pluginRegistry, PluginRegistration{
+		Name:                    name,
+		Factory:                 factory,
+		RequiresContractVersion: requiresContractVersion,
+	})
 }
 
 // RegisteredPlugins returns all plug-ins registered at init time, in
