@@ -118,7 +118,12 @@ func (a *App) engineAndBus() {
 	// sweep run once across the whole cluster instead of once per node-type
 	// (and once per replica once the node-types scale). Started BEFORE the
 	// scheduler so the lock is held by the time the first cron can fire.
-	cronLeader := automations.NewCronLeader(a.db.BunDB, a.Logger)
+	//
+	// memql#1930: the lock is session-scoped and held for the leader's
+	// LIFETIME, so it resolves its connection via the DIRECT (non-pooled)
+	// endpoint -- a transaction-mode pooler would recycle the backend out
+	// from under the held lock. Unchanged when DIRECT_DSN is unset.
+	cronLeader := automations.NewCronLeader(a.directDBGetter(), a.Logger)
 	a.Dependencies = append(a.Dependencies, cronLeader)
 
 	// #561: cross-replica idempotency for EVENT-triggered automations. When a

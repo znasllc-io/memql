@@ -228,6 +228,23 @@ func (a *App) fatal(msg string, args ...any) {
 	a.overrides.FatalWithLogger(a.Logger, msg, args...)
 }
 
+// directDBGetter returns the *bun.DB resolver that session-scoped,
+// lifetime-held coordination locks (cron leader election, topology
+// reconciler leader) must use: the DIRECT (non-pooled) endpoint
+// (epic memql#1925). These locks live on one held connection for the
+// leader's lifetime, so they CANNOT ride a transaction-mode PgBouncer
+// pooler -- it recycles the server backend between statements and would
+// silently drop the advisory lock. DirectBunDB() falls back to the main
+// (pooled) pool when DIRECT_DSN is unset, so local/dev is unchanged.
+func (a *App) directDBGetter() func() *bun.DB {
+	return func() *bun.DB {
+		if a.db == nil {
+			return nil
+		}
+		return a.db.DirectBunDB()
+	}
+}
+
 // Engine exposes the MemQL engine wired during the engine-and-bus phase.
 // Used by operator subcommands (mint, etc.) that bootstrap the App but
 // don't bring up transport. Nil until engineAndBus() has run.

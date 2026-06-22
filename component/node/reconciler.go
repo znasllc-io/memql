@@ -79,7 +79,10 @@ type TopologyReconciler struct {
 	absentSince map[string]time.Time
 
 	// Advisory-lock lease (mirrors CronLeader). Held for the loop's lifetime;
-	// only the leader reconciles.
+	// only the leader reconciles. The dbGetter is wired to the DIRECT,
+	// non-pooled endpoint in app/ (memql#1930) -- a lifetime-held session lock
+	// cannot ride a transaction-mode pooler that recycles the backend between
+	// statements.
 	mu     sync.Mutex
 	conn   *sql.Conn
 	leader bool
