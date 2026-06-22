@@ -86,14 +86,14 @@ class MockDispatcher {
 test("polyphonRoomToken -- happy path", async () => {
   const mock = new MockDispatcher();
   const promise = polyphonRoomToken(mock.asDispatcher(), {
-    spaceId: "spc-1",
+    scopeId: "spc-1",
     participantId: "ptp-1",
     displayName: "Alice",
   });
   const sent = mock.lastSent() as unknown as {
-    polyphonRoomToken?: { spaceId?: string; displayName?: string };
+    polyphonRoomToken?: { scopeId?: string; displayName?: string };
   };
-  assert.equal(sent.polyphonRoomToken?.spaceId, "spc-1");
+  assert.equal(sent.polyphonRoomToken?.scopeId, "spc-1");
   assert.equal(sent.polyphonRoomToken?.displayName, "Alice");
 
   mock.reply({
@@ -115,7 +115,7 @@ test("polyphonRoomToken -- happy path", async () => {
 test("polyphonRoomToken -- expiresAt as string decoded to number", async () => {
   const mock = new MockDispatcher();
   const promise = polyphonRoomToken(mock.asDispatcher(), {
-    spaceId: "spc",
+    scopeId: "spc",
     participantId: "ptp",
     displayName: "x",
   });
@@ -137,18 +137,18 @@ test("polyphonRoomToken -- rejects missing required args", async () => {
   await assert.rejects(
     () =>
       polyphonRoomToken(mock.asDispatcher(), {
-        spaceId: "",
+        scopeId: "",
         participantId: "ptp",
         displayName: "x",
       }),
-    /spaceId is required/,
+    /scopeId is required/,
   );
 });
 
 test("polyphonRoomToken -- throws on QueryError", async () => {
   const mock = new MockDispatcher();
   const promise = polyphonRoomToken(mock.asDispatcher(), {
-    spaceId: "spc",
+    scopeId: "spc",
     participantId: "ptp",
     displayName: "x",
   });
