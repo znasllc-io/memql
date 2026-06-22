@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,9 +15,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/component/server/sihttp"
 	"github.com/znasllc-io/memql/core/common"
-	"github.com/znasllc-io/memql/integrations/agent"
 	"github.com/znasllc-io/memql/integrations/stt"
 )
 
@@ -378,6 +377,19 @@ func (s *streamSession) handleAiSuggest(envelope *memqlv1.MemqlClientMessage, ms
 
 	correlate := envelope.GetMessageId()
 
+	// Look up the registered handler for this domain BEFORE spawning the
+	// goroutine so an unsupported domain returns the same typed
+	// InvalidArgument error synchronously. The suggest-domain surface is
+	// extension-point driven (memql#1959): the 9 CoPresent product domains
+	// register from the pack under the `copresent` build tag, `knowledge`
+	// registers from core. Engine-only core builds carry only the core
+	// domains -- which is exactly the zero-CoPresent-refs G3 goal.
+	handler := memqlengine.LookupSuggestDomain(domain)
+	if handler == nil {
+		return s.sendQueryError(requestId, correlate, codes.InvalidArgument,
+			fmt.Sprintf("unsupported suggest domain: %q (registered: %v)", domain, memqlengine.RegisteredSuggestDomains()))
+	}
+
 	go func() {
 		suggestStart := time.Now()
 
@@ -390,250 +402,25 @@ func (s *streamSession) handleAiSuggest(envelope *memqlv1.MemqlClientMessage, ms
 			payload = make(map[string]any)
 		}
 
-		// Each domain pulls its own required fields out of the
-		// payload -- `description` is a legacy legacy-core input for
-		// the three suggest-from-description flows, but newer flows
-		// (e.g. spaceTitle) take a different seed key. Moving the
-		// required-check into the switch keeps "what's required" a
-		// property of the domain and not the handler.
-		description, _ := payload["description"].(string)
-
-		var messages []common.ChatMessage
-		var postProcess func(map[string]any)
-		var schema json.RawMessage
-		var schemaName string
-
-		switch domain {
-		case "spaces":
-			// Title-only suggestion for the CreateSpaceModal AI-describe
-			// path. Under the one-assistant space model (copresent #124)
-			// a space has 1+ humans plus EXACTLY ONE assistant
-			// (auto-joined by the backend autoJoinAI automation); there
-			// is no agent picker and no architecture choice. The client
-			// sends an empty `agents` array and consumes only `title`,
-			// so we neither require nor read agents here. No postProcess
-			// -- there are no agentIds / architecture fields to validate.
-			if strings.TrimSpace(description) == "" {
-				s.sendQueryError(requestId, correlate, codes.InvalidArgument, "description is required in payload")
+		// The domain handler pulls its own required fields out of the
+		// payload, builds the rendered prompt + schema, and returns an
+		// optional post-process pass. A *SuggestValidationError maps to the
+		// same codes.InvalidArgument "X is required in payload" error the old
+		// per-domain checks emitted; any other error is an internal failure.
+		plan, err := handler(memqlengine.SuggestContext{Payload: payload})
+		if err != nil {
+			var ve *memqlengine.SuggestValidationError
+			if errors.As(err, &ve) {
+				s.sendQueryError(requestId, correlate, codes.InvalidArgument, ve.Message)
 				return
 			}
-			messages = sihttp.BuildSpaceSuggestMessages(description)
-			schema = sihttp.SpaceSuggestSchemaJSON
-			schemaName = "spaceConfigSuggest"
-
-		case "spaceTitle":
-			// Lightweight title-from-purpose path used by the
-			// CreateSpaceModal Configure-manually flow. The user
-			// types a short "Purpose" sentence; we turn it into a
-			// compact title they can override. No agents / no
-			// architecture -- just `{title}`.
-			purpose, _ := payload["purpose"].(string)
-			if strings.TrimSpace(purpose) == "" {
-				s.sendQueryError(requestId, correlate, codes.InvalidArgument, "purpose is required in payload for spaceTitle suggestions")
-				return
-			}
-			messages = sihttp.BuildSpaceTitleSuggestMessages(purpose)
-			schema = sihttp.SpaceTitleSuggestSchemaJSON
-			schemaName = "spaceTitleSuggest"
-			postProcess = func(suggestion map[string]any) {
-				sihttp.PostProcessSpaceTitleSuggestion(suggestion)
-			}
-
-		case "agents":
-			if strings.TrimSpace(description) == "" {
-				s.sendQueryError(requestId, correlate, codes.InvalidArgument, "description is required in payload")
-				return
-			}
-			existingAgents := extractExistingAgents(payload)
-			messages = agent.BuildAgentSuggestMessages(description, existingAgents)
-			schema = agent.AgentSuggestSchemaJSON
-			schemaName = "agentConfigSuggest"
-			postProcess = func(suggestion map[string]any) {
-				agent.PostProcessAgentSuggestion(suggestion, existingAgents)
-			}
-
-		case "groups":
-			if strings.TrimSpace(description) == "" {
-				s.sendQueryError(requestId, correlate, codes.InvalidArgument, "description is required in payload")
-				return
-			}
-			users := extractGroupUsers(payload)
-			messages = sihttp.BuildGroupSuggestMessages(description, users)
-			schema = sihttp.GroupSuggestSchemaJSON
-			schemaName = "groupConfigSuggest"
-			postProcess = func(suggestion map[string]any) {
-				sihttp.PostProcessGroupSuggestion(suggestion, users)
-			}
-
-		case "groupDescription":
-			// Lightweight description-from-name path used by the
-			// GroupModal Configure-manually flow. The user types a
-			// Group name; we derive a one-line description they can
-			// override. Mirrors the spaceTitle domain (purpose -> title)
-			// but in the opposite direction (name -> description).
-			// No member roster, no name suggestion -- just `{description}`.
-			name, _ := payload["name"].(string)
-			if strings.TrimSpace(name) == "" {
-				s.sendQueryError(requestId, correlate, codes.InvalidArgument, "name is required in payload for groupDescription suggestions")
-				return
-			}
-			messages = sihttp.BuildGroupDescriptionSuggestMessages(name)
-			schema = sihttp.GroupDescriptionSuggestSchemaJSON
-			schemaName = "groupDescriptionSuggest"
-			postProcess = func(suggestion map[string]any) {
-				sihttp.PostProcessGroupDescriptionSuggestion(suggestion)
-			}
-
-		case "agentCardSummary":
-			// Body for the agent.created canvas card. Distinct from
-			// the existing `agents` domain (which proposes a NAME +
-			// personality for a new agent from a free-text
-			// description); here the agent already exists and we just
-			// need a tagline / blurb / use-cases trio for the
-			// presentation card. Frontend caches the result keyed by
-			// agent id so a single agent only triggers this call once
-			// per browser.
-			name, _ := payload["name"].(string)
-			if strings.TrimSpace(name) == "" {
-				s.sendQueryError(requestId, correlate, codes.InvalidArgument, "name is required in payload for agentCardSummary suggestions")
-				return
-			}
-			input := sihttp.AgentCardSummaryInput{
-				Name:        name,
-				Role:        stringFromMap(payload, "role"),
-				RoleSlug:    stringFromMap(payload, "roleSlug"),
-				Description: stringFromMap(payload, "description"),
-				Personality: stringFromMap(payload, "personality"),
-				Domains:     stringSliceFromMap(payload, "domains"),
-				Keywords:    stringSliceFromMap(payload, "keywords"),
-				Tools:       stringSliceFromMap(payload, "tools"),
-			}
-			messages = sihttp.BuildAgentCardSummarySuggestMessages(input)
-			schema = sihttp.AgentCardSummarySchemaJSON
-			schemaName = "agentCardSummarySuggest"
-			postProcess = func(suggestion map[string]any) {
-				sihttp.PostProcessAgentCardSummarySuggestion(suggestion)
-			}
-
-		case "spaceCardSummary":
-			// Body for the space.created canvas card. Mirrors the
-			// agent.created and group.created card surfaces (tagline /
-			// blurb / use cases) so the welcome moment for a new
-			// space looks and feels the same as for new agents and
-			// groups. Distinct from the existing `spaces` (proposes
-			// a NEW space) and `spaceTitle` (purpose -> title)
-			// domains; this one runs in the inverse direction --
-			// space already exists and we just want a friendly blurb
-			// for the canvas.
-			name, _ := payload["name"].(string)
-			if strings.TrimSpace(name) == "" {
-				s.sendQueryError(requestId, correlate, codes.InvalidArgument, "name is required in payload for spaceCardSummary suggestions")
-				return
-			}
-			privateFlag := false
-			if v, ok := payload["private"].(bool); ok {
-				privateFlag = v
-			}
-			input := sihttp.SpaceCardSummaryInput{
-				Name:        name,
-				Description: stringFromMap(payload, "description"),
-				Kind:        stringFromMap(payload, "kind"),
-				Private:     privateFlag,
-				AgentRoles:  stringSliceFromMap(payload, "agentRoles"),
-			}
-			messages = sihttp.BuildSpaceCardSummarySuggestMessages(input)
-			schema = sihttp.SpaceCardSummarySchemaJSON
-			schemaName = "spaceCardSummarySuggest"
-			postProcess = func(suggestion map[string]any) {
-				sihttp.PostProcessSpaceCardSummarySuggestion(suggestion)
-			}
-
-		case "groupCardSummary":
-			// Body for the group.created canvas card. Mirrors the
-			// agent.created surface (tagline / blurb / use cases) so
-			// the welcome moment for a new group looks and feels the
-			// same as the welcome moment for a new agent. Distinct
-			// from the existing `groups` domain (which proposes a NEW
-			// group from a free-text description); here the group
-			// already exists with a stable name + description and we
-			// just want a friendly blurb for the canvas.
-			name, _ := payload["name"].(string)
-			if strings.TrimSpace(name) == "" {
-				s.sendQueryError(requestId, correlate, codes.InvalidArgument, "name is required in payload for groupCardSummary suggestions")
-				return
-			}
-			memberCount := 0
-			if v, ok := payload["memberCount"].(float64); ok {
-				memberCount = int(v)
-			}
-			agentCount := 0
-			if v, ok := payload["agentCount"].(float64); ok {
-				agentCount = int(v)
-			}
-			input := sihttp.GroupCardSummaryInput{
-				Name:        name,
-				Description: stringFromMap(payload, "description"),
-				MemberCount: memberCount,
-				AgentCount:  agentCount,
-				AgentRoles:  stringSliceFromMap(payload, "agentRoles"),
-			}
-			messages = sihttp.BuildGroupCardSummarySuggestMessages(input)
-			schema = sihttp.GroupCardSummarySchemaJSON
-			schemaName = "groupCardSummarySuggest"
-			postProcess = func(suggestion map[string]any) {
-				sihttp.PostProcessGroupCardSummarySuggestion(suggestion)
-			}
-
-		case "knowledge":
-			// Describe-phase + AI-suggest path on the CoPresent
-			// KnowledgeModal. The user types (or speaks) a free-text
-			// description of what content the domain should cover; we
-			// turn that into {name, description, category}. The model
-			// is shown the existing-domain list so its proposed name
-			// doesn't collide and so the category lines up with how
-			// related domains have been categorised. Scope
-			// (workspace / private) is collected by the modal itself
-			// -- it's an authorization decision, not a generative one.
-			if strings.TrimSpace(description) == "" {
-				s.sendQueryError(requestId, correlate, codes.InvalidArgument, "description is required in payload")
-				return
-			}
-			existingDomains := extractKnowledgeExistingDomains(payload)
-			messages = sihttp.BuildKnowledgeSuggestMessages(description, existingDomains)
-			schema = sihttp.KnowledgeSuggestSchemaJSON
-			schemaName = "knowledgeConfigSuggest"
-			postProcess = func(suggestion map[string]any) {
-				sihttp.PostProcessKnowledgeSuggestion(suggestion)
-			}
-
-		case "guide":
-			// Author an immersive voice-driven Guide (ordered Scenes) from
-			// the summary of a voice intake (copresent#194). The structured
-			// result is returned to copresent, which persists it via the
-			// v1:guide mutations (copresent#556) and runs it via the client
-			// Guide runtime (copresent#190). `intake` is the gathered
-			// conversation summary (industry / role / interests / goals);
-			// falls back to `description` for callers that reuse that key.
-			intake := stringFromMap(payload, "intake")
-			if strings.TrimSpace(intake) == "" {
-				intake = description
-			}
-			input := sihttp.GuideSuggestInput{
-				Intake:   intake,
-				Kind:     stringFromMap(payload, "kind"),
-				UserName: stringFromMap(payload, "userName"),
-			}
-			messages = sihttp.BuildGuideSuggestMessages(input)
-			schema = sihttp.GuideSuggestSchemaJSON
-			schemaName = "guideSuggest"
-			postProcess = func(suggestion map[string]any) {
-				sihttp.PostProcessGuideSuggestion(suggestion)
-			}
-
-		default:
-			s.sendQueryError(requestId, correlate, codes.InvalidArgument, fmt.Sprintf("unsupported suggest domain: %q", domain))
+			s.sendAiError(requestId, correlate, fmt.Sprintf("%s suggestion failed", domain), err)
 			return
 		}
+		messages := plan.Messages
+		schema := plan.Schema
+		schemaName := plan.SchemaName
+		postProcess := plan.PostProcess
 
 		ctx := s.stream.Context()
 		// Prefer structured output: the provider enforces the JSON
@@ -723,100 +510,4 @@ func callSuggestWithSchema(
 		return "", fmt.Errorf("no non-streaming chat provider available")
 	}
 	return provider.CallChat(ctx, messages)
-}
-
-// extractExistingAgents extracts existingAgent structs from a suggest payload map.
-func extractExistingAgents(payload map[string]any) []agent.ExistingAgent {
-	agentsRaw, ok := payload["existingAgents"].([]any)
-	if !ok {
-		return nil
-	}
-	var agents []agent.ExistingAgent
-	for _, a := range agentsRaw {
-		m, ok := a.(map[string]any)
-		if !ok {
-			continue
-		}
-		existing := agent.ExistingAgent{
-			ID:          stringFromMap(m, "id"),
-			Name:        stringFromMap(m, "name"),
-			Description: stringFromMap(m, "description"),
-		}
-		if caps, ok := m["capabilities"].(map[string]any); ok {
-			existing.Capabilities = &agent.AgentCapabilities{
-				Domains: stringSliceFromMap(caps, "domains"),
-				Tools:   stringSliceFromMap(caps, "tools"),
-			}
-		}
-		agents = append(agents, existing)
-	}
-	return agents
-}
-
-// extractKnowledgeExistingDomains extracts existing knowledge domain
-// descriptors from a suggest payload map. The CoPresent
-// KnowledgeModal passes the workspace's existing domains under
-// "existingDomains" so the model can avoid name collisions and pick
-// a category consistent with how related domains are categorised.
-func extractKnowledgeExistingDomains(payload map[string]any) []sihttp.KnowledgeExistingDomain {
-	domainsRaw, ok := payload["existingDomains"].([]any)
-	if !ok {
-		return nil
-	}
-	var domains []sihttp.KnowledgeExistingDomain
-	for _, d := range domainsRaw {
-		m, ok := d.(map[string]any)
-		if !ok {
-			continue
-		}
-		domains = append(domains, sihttp.KnowledgeExistingDomain{
-			Name:        stringFromMap(m, "name"),
-			Description: stringFromMap(m, "description"),
-			Category:    stringFromMap(m, "category"),
-		})
-	}
-	return domains
-}
-
-// extractGroupUsers extracts groupUser structs from a suggest payload map.
-func extractGroupUsers(payload map[string]any) []sihttp.GroupUser {
-	usersRaw, ok := payload["users"].([]any)
-	if !ok {
-		return nil
-	}
-	var users []sihttp.GroupUser
-	for _, u := range usersRaw {
-		m, ok := u.(map[string]any)
-		if !ok {
-			continue
-		}
-		users = append(users, sihttp.GroupUser{
-			ID:          stringFromMap(m, "id"),
-			DisplayName: stringFromMap(m, "displayName"),
-			Email:       stringFromMap(m, "email"),
-			Role:        stringFromMap(m, "role"),
-		})
-	}
-	return users
-}
-
-func stringFromMap(m map[string]any, key string) string {
-	if v, ok := m[key].(string); ok {
-		return v
-	}
-	return ""
-}
-
-func stringSliceFromMap(m map[string]any, key string) []string {
-	arr, ok := m[key].([]any)
-	if !ok {
-		return nil
-	}
-	var result []string
-	for _, v := range arr {
-		if s, ok := v.(string); ok {
-			result = append(result, s)
-		}
-	}
-	return result
 }
