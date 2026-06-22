@@ -153,9 +153,13 @@ query agent queryAssistantAgentForUser {
   shape   agentMinimalForDedupe
 }
 
+// Caching (5.5 / memql#1969): single-row role lookup off the rarely-
+// changing role catalog; same cross-node eviction guarantee as
+// queryActiveAgentRoles (v1:agents:* forwarded in component/node/routing.go).
 @enabled
 @description("Resolve a single agentRole row by its slug. Used by the role catalog seeder (idempotency check) and by the agent-creation path (look up the locked + default sets when materializing a new agent for the slug).")
 @unbounded("agent role by unique slug -- bounded to a single row")
+@cache(ttl="300")
 query agentRole queryAgentRoleBySlug {
   args {
     slug  string  @required
@@ -164,17 +168,32 @@ query agentRole queryAgentRoleBySlug {
   shape   agentRoleFull
 }
 
+// Caching (5.5 / memql#1969): the agentRole catalog is a small,
+// admin-defined registry read on every agent detail render and routing
+// decision, and it changes rarely -- an ideal long-TTL cache. 5.4
+// invalidation evicts on any v1:agents:agentRole write; the deleted +
+// updated + created forward rules in component/node/routing.go guarantee
+// that eviction fires on every replica (this namespace is not in the
+// default forward set). NOTE: the @cache annotation is kept contiguous
+// with the @-annotation block below -- the SDK generator's description
+// preamble walker stops at the first non-@ line, so a comment between the
+// annotations and the `query` header would drop the SDK doc string.
 @enabled
 @description("List every active agentRole row. Backs the role picker on the cockpit's agent-creation surface and on the role-management view. predefined rows render with a lock icon; user-created rows are fully editable.")
 @unbounded("agent role catalog -- a small admin-defined bounded set consumed whole")
+@cache(ttl="300")
 query agentRole queryActiveAgentRoles {
   filter  traitIsActiveRecord
   shape   agentRoleFull
 }
 
+// Caching (5.5 / memql#1969): single-row lookup off the small admin-defined
+// skill catalog; v1:agents:* writes are forwarded cross-node (routing.go) so
+// 5.4 invalidation evicts on every replica.
 @enabled
 @description("Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it.")
 @unbounded("skill by unique slug -- bounded to a single row")
+@cache(ttl="300")
 query skill querySkillBySlug {
   args {
     slug  string  @required
@@ -183,17 +202,26 @@ query skill querySkillBySlug {
   shape   skillFull
 }
 
+// Caching (5.5 / memql#1969): bounded admin-defined skill catalog read on the
+// Skills picker; rarely changes. Cross-node eviction guaranteed by the
+// v1:agents:* forward rules in component/node/routing.go.
 @enabled
 @description("List every active skill catalog row -- summary projection. Backs the Skills picker on the role-edit surface (cockpit#124) and the Planner Agent's candidate scan when deciding which skill bundle to attach in extendSpecialist. Predefined rows render with a lock icon; user-created rows are fully editable.")
 @unbounded("skill catalog (summary) -- a small admin-defined bounded registry consumed whole")
+@cache(ttl="300")
 query skill queryActiveSkills {
   filter  traitIsActiveRecord
   shape   skillSummary
 }
 
+// Caching (5.5 / memql#1969): the heavier full-bundle skill catalog read on
+// every agent detail render (cockpit#124); bounded + rarely changing -- the
+// highest-value catalog cache. Cross-node eviction via v1:agents:* forwarding
+// (component/node/routing.go).
 @enabled
 @description("List every active skill catalog row with its full bundle composition (domainIds + toolSlugs + liveSourceIds). Heavier projection than queryActiveSkills; use this when a caller needs to resolve agent capabilities by unioning skill bundles in-process (cockpit#124's Agents view does this on every detail render). The catalog is small (25 rows in Phase 2; growth tracked via the Phase 3 mintSkill roadmap) so the single-shot full-list query is cheaper than N querySkillBySlug round-trips.")
 @unbounded("skill catalog (full) -- a small admin-defined bounded registry consumed whole")
+@cache(ttl="300")
 query skill queryActiveSkillsFull {
   filter  traitIsActiveRecord
   shape   skillFull

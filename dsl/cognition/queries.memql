@@ -600,8 +600,18 @@ query participant querySpaceParticipants {
   shape   participantFull
 }
 
+// Caching (5.5 / memql#1969): the per-space message stream is the hottest
+// read in the product (every chat render) and append-only, so a short TTL
+// pays off without much staleness risk -- a new utterance evicts the cached
+// page immediately via 5.4. SHORT TTL (30s) because the stream appends
+// constantly. This query is keyset-paginated (sort+paginate below), so the
+// result-cache key MUST include the cursor (engine.go cacheKey) -- without
+// that fix page 2 would collide with the cached page 1. v1:cognition:* writes
+// (created/updated/deleted) are forwarded cross-node in
+// component/node/routing.go so eviction fires on every replica.
 @enabled
 @description("Returns utterances for the given space. Optional participantId / utteranceType args narrow the result further. Used by the cockpit Chat tab to populate the utterance pane and by the BFF for downstream consumers.")
+@cache(ttl="30")
 query utterance querySpaceUtterances {
   args {
     spaceId          string  @required

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -588,6 +589,20 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				if boundConcept != "" && funcDef.Type == languageParser.FunctionTypeQuery {
 					engineExpr = ensureBoundConceptFilter(engineExpr, boundConcept)
 				}
+				// 5.5: turn the struct-form `@cache(ttl=N)` annotation
+				// (parsed into fn.CacheTTL) into the per-plan cache hint the
+				// engine already consumes. The result-cache hint mechanism is
+				// keyed off `CacheHintSeconds` on the `concept==X` comparison
+				// node (collectCacheHints), so we stamp the TTL there. Without
+				// this, `@cache(ttl=N)` on a struct query is parsed but
+				// silently dropped -- exactly the dormant-cache state 5.5
+				// turns on. `@cache(ttl=0)` stamps 0, which cacheTTLForBundle
+				// reads as the explicit "never cache" escape.
+				if funcDef.Type == languageParser.FunctionTypeQuery && strings.TrimSpace(fn.CacheTTL) != "" {
+					if err := applyQueryCacheTTL(engineExpr, fn.CacheTTL); err != nil {
+						return nil, fmt.Errorf("function %q cache ttl: %w", expectedName, err)
+					}
+				}
 				fn.Expr = engineExpr
 				fn.ExprSource = extractExpressionFromContent(content)
 			} else {
@@ -662,6 +677,72 @@ func translateSignatureConceptPathsToPayload(source, bareName string) string {
 // parser.go's planQuery enforces this. Descending into the
 // wrapper's Target keeps the directive on the outside and lands
 // the AND on the inner filter where it belongs.
+// applyQueryCacheTTL stamps the query function's `@cache(ttl=N)` TTL
+// (N seconds) onto the `concept==X` comparison node(s) of its compiled
+// expression. The engine's result-cache adoption (5.5) reads the TTL
+// back out via collectCacheHints, which only inspects CacheHintSeconds
+// on concept-equality comparisons -- so stamping it here is the single
+// wiring point that makes `@cache(ttl=N)` on a struct query take effect.
+//
+// ttlRaw is the raw annotation string (`@cache(ttl=30)` -> "30",
+// `@cache(0)` -> "0"); it must be a non-negative integer count of
+// seconds. A value of 0 is preserved verbatim (the explicit "never
+// cache" escape cacheTTLForBundle recognises).
+func applyQueryCacheTTL(expr ExpressionNode, ttlRaw string) error {
+	seconds, err := strconv.Atoi(strings.TrimSpace(ttlRaw))
+	if err != nil {
+		return fmt.Errorf("invalid @cache(ttl=%q): expected a whole number of seconds", ttlRaw)
+	}
+	if seconds < 0 {
+		return fmt.Errorf("invalid @cache(ttl=%d): seconds must be >= 0", seconds)
+	}
+	if !stampConceptCacheHint(expr, seconds) {
+		return fmt.Errorf("@cache requires a `concept==...` filter to attach to; none found")
+	}
+	return nil
+}
+
+// stampConceptCacheHint walks expr and sets CacheHintSeconds on every
+// `concept==X` equality comparison it finds, returning whether at least
+// one was stamped. It descends through the directive wrappers and AND/OR
+// chains the same way collectCacheHints reads them, so the hint lands on
+// the node the engine later inspects.
+func stampConceptCacheHint(expr ExpressionNode, seconds int) bool {
+	switch n := expr.(type) {
+	case nil:
+		return false
+	case *ComparisonExpression:
+		if n.Operator == OpEq && n.Field.Raw == "concept" {
+			s := seconds
+			n.CacheHintSeconds = &s
+			return true
+		}
+		return false
+	case *LogicalExpression:
+		left := stampConceptCacheHint(n.Left, seconds)
+		right := stampConceptCacheHint(n.Right, seconds)
+		return left || right
+	case *RelationshipExpression:
+		return stampConceptCacheHint(n.Target, seconds)
+	case *SortExpression:
+		return stampConceptCacheHint(n.Target, seconds)
+	case *PaginateExpression:
+		return stampConceptCacheHint(n.Target, seconds)
+	case *SelectExpression:
+		return stampConceptCacheHint(n.Target, seconds)
+	case *TimestampExpression:
+		return stampConceptCacheHint(n.Target, seconds)
+	case *DepthExpression:
+		return stampConceptCacheHint(n.Target, seconds)
+	case *CountExpression:
+		return stampConceptCacheHint(n.Target, seconds)
+	case *ShapeExpression:
+		return stampConceptCacheHint(n.Target, seconds)
+	default:
+		return false
+	}
+}
+
 func ensureBoundConceptFilter(expr ExpressionNode, boundConcept string) ExpressionNode {
 	switch n := expr.(type) {
 	case *ShapeExpression:

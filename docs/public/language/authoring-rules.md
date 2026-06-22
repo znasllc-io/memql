@@ -1193,6 +1193,53 @@ the author think about the bound up front.
 
 ---
 
+## Result caching: `@cache(ttl="N")` on hot reads
+
+A query can opt into the engine's result cache with `@cache(ttl="N")` on
+the query declaration. `N` is a **whole number of SECONDS, string-valued**
+(`@cache(ttl="300")`, not `@cache(ttl=300)` and not `@cache(ttl="5m")` —
+the bare-number and duration forms do not parse). `@cache(ttl="0")` is the
+explicit "never cache" escape.
+
+```memql
+@cache(ttl="300")
+query agentRole queryActiveAgentRoles {
+  filter  traitIsActiveRecord
+  shape   agentRoleFull
+}
+```
+
+**When to reach for it.** Read-heavy queries whose underlying rows change
+rarely: bounded catalogs / registries (role / skill catalogs, router
+budgets) get long TTLs; hot append-only streams (the per-space utterance
+list) get short ones and lean on invalidation.
+
+**Correctness — invalidation (5.4).** A write to a cached query's read
+concept evicts the dependent cached results, so a cached read never
+outlives a row it depends on. You do not annotate the eviction; it is
+keyed off the concept the query reads.
+
+**Correctness — cross-node (REQUIRED).** Each node runs its OWN result
+cache. The invalidation subscriber only fires on a node when the graph
+write reaches it, and the default routing rules forward only a fixed set
+of namespaces (`v1:cluster:*`, `v1:cognition:*`, `v1:planner:*`). For
+**every** concept you `@cache`, its `graph.node.created/updated/deleted`
+writes MUST be forwarded to peers by a `node.RegisterRoutingRule`
+(`component/node/routing.go`) — otherwise the write evicts the cache on
+the writing node but the cached read goes **stale on its siblings**, a
+silent cross-node stale read. A single-node green test will not catch
+this. The cached-concept forward rules are pinned by
+`TestEvaluateRouting_CachedConceptForwarding` in `component/node`.
+
+**Keyset cursors.** The cache key includes the paginated query's cursor
+(`engine.go` `cacheKey`), so distinct continuation pages of a `@cache`'d
+query key independently — page 2 never collides with the cached page 1.
+
+See `docs/internal/planning/cache-audit-phase-0.md` for the cache's shape
+and instrumentation.
+
+---
+
 ## How to add a new entry
 
 When you discover a new gotcha:

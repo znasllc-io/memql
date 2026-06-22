@@ -571,7 +571,18 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		shapeSignature = shapeTemplateSignature(plan.ShapeTemplate)
 	}
 	if useCache {
-		cacheKey = e.cacheKey(signature, effectiveTimestamp, limit, offset, depth, sorter.signatureValue(), fieldSignature, shapeSignature)
+		// Keyset cursor (5.12 / 5.5): the cursor identifies which page of a
+		// paginated query this call wants. Two different pages of the same
+		// `@cache`'d query share every other key field (query / sort / limit
+		// / shape / ...), so without the cursor they collide on a single
+		// cache entry and page 2 would be served the cached page-1 rows. Fold
+		// the resolved cursor token into the cache key so each page is keyed
+		// independently. Non-paginated reads carry an empty token.
+		cursorKey := ""
+		if plan.After != nil {
+			cursorKey = strings.TrimSpace(*plan.After)
+		}
+		cacheKey = e.cacheKey(signature, effectiveTimestamp, limit, offset, depth, sorter.signatureValue(), fieldSignature, shapeSignature, cursorKey)
 		if cached, ok := e.cache.get(cacheKey); ok {
 			e.emitQueryExecutedEvent(startTime, cached, true)
 			return cached, nil
@@ -1309,7 +1320,7 @@ func (e *MemQLEngine) fetchTarget(limit, offset int) int {
 	return target
 }
 
-func (e *MemQLEngine) cacheKey(query string, timestamp *time.Time, limit, offset, depth int, sortSignature, selectSignature, shapeSignature string) string {
+func (e *MemQLEngine) cacheKey(query string, timestamp *time.Time, limit, offset, depth int, sortSignature, selectSignature, shapeSignature, cursor string) string {
 	tsKey := "latest"
 	if timestamp != nil {
 		tsKey = timestamp.UTC().Format(time.RFC3339Nano)
@@ -1332,6 +1343,9 @@ func (e *MemQLEngine) cacheKey(query string, timestamp *time.Time, limit, offset
 		"sort":      sortSignature,
 		"select":    selectSignature,
 		"shape":     shapeSignature,
+		// Keyset cursor (5.12 / 5.5): distinct continuation pages must not
+		// collide on one key. Empty for non-paginated reads.
+		"cursor": cursor,
 	}))
 }
 
