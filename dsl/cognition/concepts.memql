@@ -71,61 +71,6 @@ concept response {
   spaceId  string  @description("ID of the space the tool ran against. Propagated from the request for traceability.")
 }
 
-// ---- concepts/v1/cognition/space/context/concept.memql ----
-
-@version("1.0.0")
-@namespace("cognition:space")
-@description("Queryable runtime context snapshot for a space (participants, sessions, media activity). Intended to improve AI turn-taking and provide UI context.")
-concept context {
-  computedAt  datetime  @required  @description("When this snapshot was computed.")
-  lastUpdatedAt  datetime  @required  @description("When this snapshot was last written (same as computedAt for now).")
-  snapshot {
-    participants {
-      active  int
-      ais  int
-      humans  int
-      idle  int
-      left  int
-      total  int
-    }
-    sessions {
-      ai {
-        avatarActive  int
-        avatarEnabled  int
-        visionEnabled  int
-        voiceEnabled  int
-      }
-      human {
-        audioActive  int
-        cameraEnabled  int
-        isSpeaking  int
-        microphoneEnabled  int
-        videoActive  int
-      }
-      tiers  object  @description("Counts of activeTier values.")
-      total  int
-    }
-  }
-  spaceId  string  @required  @description("ID of the space this context snapshot belongs to.")
-
-  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
-}
-
-// ---- concepts/v1/cognition/micState/concept.memql ----
-
-@version("1.0.0")
-@namespace("cognition")
-@description("Per-(spaceId, userId) mic state record. The CoPresent MediaControls footer writes this on every mic toggle so the cognition handler can resolve mirror_user audio control: when the user mutes, mirror_user agents skip TTS publish on their next turn; when the user unmutes, they speak. id is the deterministic micState:<spaceId>:<userId> so the latest toggle wins at read time without growing a per-click history. Distinct from v1:cognition:participant.presence -- that record carries AI-side state (thinking / responding / etc) and we don't want mic toggles in the same versioned chain.")
-concept micState {
-  spaceId    string  @required @description("v1:cognition:space.id this state is scoped to.")
-  userId     string  @required @description("v1:identity:user.id whose mic state this is.")
-  muted      bool    @required @description("True when the user's LiveKit mic is muted (track.enabled=false). False when actively publishing audio.")
-  updatedAt  datetime @required @description("Wall-clock time the toggle landed -- used for staleness checks (e.g. ignore rows older than 30s when picking the effective state).")
-
-  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
-  @relationship(type="parent", field="userId", target=user, direction="outgoing")
-}
-
 @version("1.0.0")
 @namespace("cognition")
 @description("A human or AI participant instance within a space.")
@@ -338,6 +283,14 @@ concept videoOverride {
   @relationship(type="interactsWith", field="agentId", target=agent, direction="outgoing")
 }
 
+// videoOverride concept above. The product-specific cognition concepts
+// (space:context, micState, privateUtterance, misrouteFeedback,
+// greetSuppression) were extracted to the CoPresent pack
+// (memql-bff-copresent/dsl/copresent/concepts.memql) by Epic 3
+// (3.3b-i, memql#1991). Ids are preserved (v1:cognition:*) -- the
+// pack keeps @namespace("cognition") on the moved concepts; only the
+// file location changed.
+
 @version("1.0.0")
 @namespace("cognition")
 @description("Rolled-up guardrail health metrics for a time window. Written by the rollupGuardrailHealth automation from v1:cognition:unmetCapability rows; advisory-only signal for tuning the fit-score threshold and identifying missing specialist domains. One row per rollup run.")
@@ -384,61 +337,6 @@ concept unmetCapability {
 
   rosterSnapshot   string  @description("JSON-serialized snapshot of the space's agent roster at decision time (id/name/role/domains/keywords). Used by the rollup to cluster missing domains.")
   reason           string  @description("Router's short explanation of why no agent fit.")
-
-  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
-}
-
-// ---- concepts/v1/cognition/privateUtterance/concept.memql ----
-
-@version("1.0.0")
-@namespace("cognition")
-@description("Per-user 'Team-tab' utterance -- the private thread sister of v1:cognition:utterance. Each row lives in exactly one user's Team thread inside a space (the row's forUserId names the owner); the group thread reads NEVER surface it. forUserId is SERVER-STAMPED from actor.userId on insert -- callers cannot land a privateUtterance in someone else's thread regardless of what they pass. Authz tier: owned. Driven by the SPA's Team-tab + misroute Move flows (visionarys-io/copresent#44, Phase 8). Spec ref: memql#190.")
-concept privateUtterance {
-  forUserId        string  @required @description("The user whose Team-tab thread owns this row. Server-stamped from actor.userId pre-insert by every mutation in this concept.")
-  spaceId          string  @required @description("Owning space.")
-  participantId    string  @required @description("v1:cognition:participant.id of the speaker. May be a human (the owner) OR an AI (an agent reply in the Team thread).")
-  participantType  enum("human", "si", "system") @description("Denormalized from participant for filtering. Mirrors v1:cognition:utterance.participantType.")
-  text             string  @description("Text content -- typed or transcribed.")
-  utteranceType    enum("speech", "text", "action", "system")  @required @description("Same enum as v1:cognition:utterance.utteranceType; carried so the renderer doesn't have to branch on concept.")
-  replyToId        string  @description("Optional reply-to utterance id. Cross-thread allowed for misroute Move (a reply in the private thread to a group-thread utterance).")
-  source           object  @description("Same shape as v1:cognition:utterance.source -- inputMethod / pipeline / sttProvider / etc.")
-  active           bool    @default("true") @description("Soft-deactivate flag.")
-  deleted          bool    @default("false") @description("Soft-delete flag.")
-
-  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
-  @relationship(type="interactsWith", field="participantId", target=participant, direction="outgoing")
-}
-
-// ---- concepts/v1/cognition/misrouteFeedback/concept.memql ----
-
-@version("1.0.0")
-@namespace("cognition")
-@description("Append-only audit row capturing the misroute classifier's prediction and the user's response. Phase 8 feedback corpus -- drives tuning of the wrong-tab gating classifier whose toggle is exposed in CoPresent's Conversation Preferences (misrouteSafetyEnabled). forUserId is SERVER-STAMPED from actor.userId pre-insert. One row per classifier-gated send: when the user moves the message, dismisses the warning, the timeout fires, or the classifier blocks outright. Authz tier: owned. Spec ref: memql#190.")
-concept misrouteFeedback {
-  forUserId        string  @required @description("User whose send action triggered the classifier. Server-stamped from actor.userId pre-insert.")
-  spaceId          string  @required @description("Space the send was scoped to.")
-  originalThread   enum("group", "private")  @required @description("Tab the user was typing into when the classifier fired.")
-  intendedThread   enum("group", "private")  @required @description("Tab the classifier predicted as the better fit.")
-  confidence       float   @required @description("Classifier confidence 0.0-1.0.")
-  why              string  @description("Classifier rationale -- free text the model emits alongside its decision.")
-  message          string  @required @description("The original message text the classifier scored.")
-  utteranceId      string  @description("Source utterance id when the row was persisted (the user wasn't blocked at send time).")
-  movedToId        string  @description("Destination utterance id when userAction='moved'. Empty otherwise.")
-  userAction       enum("moved", "dismissed", "timeout", "blocked") @required @description("How the user responded. 'moved' = clicked Move, classifier won; 'dismissed' = clicked Send anyway; 'timeout' = warning auto-collapsed; 'blocked' = hard-block prevented send entirely.")
-
-  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
-}
-
-// ---- concepts/v1/cognition/greetSuppression/concept.memql ----
-
-@version("1.0.0")
-@namespace("cognition")
-@description("Short-lived marker that suppresses the greet-on-join LLM greeting for a space while a first-run walkthrough / guide is starting (copresent#252). The frontend arms it (deterministic id per space) when a brand-new user's first-run flow begins; greet-on-join reads it (queryActiveGreetSuppression) and SKIPS the greeting + LLM call when a non-expired one exists -- so the wasteful opening greeting doesn't fire while the guided intake is taking over the conversation. TTL-bounded via expiresAt so it never permanently mutes greetings. id is the deterministic greetSuppression-<hash(canonical spaceId)> so re-arming the same space upserts the latest row instead of growing history. Space-scoped (read by the cognition handler), mirroring v1:cognition:audioOverride.")
-concept greetSuppression {
-  spaceId    string  @required @description("Canonical v1:cognition:space.id whose greet-on-join to suppress.")
-  armedBy    string  @description("v1:identity:user.id of the actor who armed it (the space owner under v1 permission rules). Audit only.")
-  expiresAt  string  @required @description("RFC3339; the suppression is ignored once now > expiresAt.")
-  active     bool    @default("true") @description("Soft-revoke flag (mirrors the override concepts).")
 
   @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
 }

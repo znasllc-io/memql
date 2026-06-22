@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.concepts.{ audioOverride, chunk, request, response, greetSuppression, micState, misrouteFeedback, participant, presence, privateUtterance, session, space, utterance, videoOverride }
+use cognition.concepts.{ audioOverride, chunk, request, response, participant, presence, session, space, utterance, videoOverride }
 use agents.concepts.{ agent }
 use identity.concepts.{ user, authSession }
 
@@ -946,23 +946,10 @@ mutation audioOverride mutationSetAgentAudioOverride {
   }
 }
 
-// ---- mutations/v1/cognition/suppressGreetOnJoin.memql ----
-
-@enabled
-@description("Arm greet-on-join suppression for a space while a first-run walkthrough / guide starts (copresent#252). TTL-bounded via expiresAt; deterministic id per space (hash of the canonical spaceId) so re-arming upserts the latest row instead of growing history. greet-on-join reads it via queryActiveGreetSuppression and skips the opening greeting.")
-mutation greetSuppression mutationSuppressGreetOnJoin {
-  args {
-    spaceId    string  @required
-    expiresAt  string  @required
-  }
-  insert {
-    id: concat("greetSuppression-", hash(canonicalId(args.spaceId, space)))
-    spaceId: canonicalId(args.spaceId, space)
-    armedBy: actor.userId
-    args.expiresAt
-    active: true
-  }
-}
+// mutationSuppressGreetOnJoin was extracted to the CoPresent pack
+// (memql-bff-copresent/dsl/copresent/mutations.memql) by Epic 3
+// (3.3b-i, memql#1991) along with the v1:cognition:greetSuppression
+// concept (ids preserved).
 
 // ---- mutations/v1/cognition/setAgentVideoOverride.memql ----
 
@@ -1015,40 +1002,10 @@ mutation videoOverride mutationSetAgentVideoOverride {
   }
 }
 
-// ---- mutations/v1/cognition/setUserMicState.memql ----
-
-// setUserMicState
-// ===============
-//
-// Writes the per-(spaceId, userId) mic state. The CoPresent
-// MediaControls footer fires this on every LiveKit mic toggle so
-// the cognition handler can resolve mirror_user agents'
-// publication on the very next agent turn.
-//
-// IDEMPOTENCY:
-// id is deterministic on (spaceId, userId) so re-toggling lands on
-// the SAME row -- memQL stores the versions as a time-series and
-// the latest payload wins at read time. No per-click row growth.
-
-@enabled
-@description("Set the per-user mic state for a space (LiveKit mic muted / unmuted).")
-mutation micState mutationSetUserMicState {
-  args {
-    spaceId  string  @required
-    userId   string  @required
-    muted    bool    @required
-  }
-  insert {
-    id: concat("micState-", hash(concat(
-      canonicalId(args.spaceId, space), ":",
-      canonicalId(args.userId, user)
-    )))
-    args.spaceId
-    args.userId
-    args.muted
-    updatedAt: timestamp()
-  }
-}
+// mutationSetUserMicState was extracted to the CoPresent pack
+// (memql-bff-copresent/dsl/copresent/mutations.memql) by Epic 3
+// (3.3b-i, memql#1991) along with the v1:cognition:micState concept
+// (ids preserved).
 
 // ---- mutations/v1/cognition/touchSession.memql ----
 
@@ -1185,117 +1142,15 @@ mutation session mutationUpdateSessionStreams {
   }
 }
 
-// ---- mutations/v1/cognition/sendPrivateUtterance.memql ----
-
-@enabled
-@description("Insert a v1:cognition:privateUtterance into the caller's Team-tab thread. forUserId is server-stamped from actor.userId -- the caller cannot land a private utterance in another user's thread regardless of what they pass. Mirrors mutationSendTextUtterance but writes to the privateUtterance concept. memql#190 / memql-bff-copresent#44.")
-mutation privateUtterance mutationSendPrivateUtterance {
-  args {
-    utteranceId      string
-    spaceId          string  @required
-    participantId    string  @required
-    participantType  string
-    text             string  @required
-    replyToId        string
-    source           object
-  }
-  insert {
-    id: args.utteranceId
-    forUserId:       actor.userId
-    args.spaceId
-    args.participantId
-    participantType: coalesce(args.participantType, "human")
-    utteranceType:   "text"
-    args.text
-    args.replyToId
-    args.source
-    active:          true
-    deleted:         false
-  }
-}
-
-// ---- mutations/v1/cognition/movePrivateToGroup.memql ----
-
-@enabled
-@description("Misroute Move action (group half): copy a Team-tab privateUtterance into the group thread as a new v1:cognition:utterance row. The caller passes the original text + speaker; this mutation does NOT read the source row (the BFF/SPA composes the move pair). The companion mutationMoveGroupToPrivate handles the reverse direction. The source private row is left untouched; the calling layer soft-deletes it (or leaves it as audit trail) separately. memql#190 / memql-bff-copresent#44 Phase 8.")
-mutation utterance mutationMovePrivateToGroup {
-  args {
-    newUtteranceId     string
-    spaceId            string  @required
-    participantId      string  @required
-    participantType    string
-    text               string  @required
-    source             object
-  }
-  insert {
-    id: args.newUtteranceId
-    args.spaceId
-    args.participantId
-    participantType: coalesce(args.participantType, "human")
-    utteranceType:   "text"
-    args.text
-    args.source
-  }
-}
-
-// ---- mutations/v1/cognition/moveGroupToPrivate.memql ----
-
-@enabled
-@description("Misroute Move action (private half): copy a group-thread v1:cognition:utterance into the caller's Team-tab thread as a new v1:cognition:privateUtterance row. forUserId is server-stamped from actor.userId so the caller cannot move into another user's Team thread. Same shape as mutationMovePrivateToGroup; only the destination concept differs. memql#190 / memql-bff-copresent#44 Phase 8.")
-mutation privateUtterance mutationMoveGroupToPrivate {
-  args {
-    newUtteranceId     string
-    spaceId            string  @required
-    participantId      string  @required
-    participantType    string
-    text               string  @required
-    source             object
-  }
-  insert {
-    id: args.newUtteranceId
-    forUserId:       actor.userId
-    args.spaceId
-    args.participantId
-    participantType: coalesce(args.participantType, "human")
-    utteranceType:   "text"
-    args.text
-    args.source
-    active:          true
-    deleted:         false
-  }
-}
-
-// ---- mutations/v1/cognition/recordMisrouteFeedback.memql ----
-
-@enabled
-@description("Append a v1:cognition:misrouteFeedback audit row capturing the classifier call + the user's response. Phase 8 tuning corpus -- driven by the wrong-tab classifier whose enable toggle is on User.preferences.misrouteSafetyEnabled. forUserId is server-stamped from actor.userId. memql#190 / memql-bff-copresent#44.")
-mutation misrouteFeedback mutationRecordMisrouteFeedback {
-  args {
-    feedbackId       string
-    spaceId          string  @required
-    originalThread   string  @required
-    intendedThread   string  @required
-    confidence       float   @required
-    why              string
-    message          string  @required
-    utteranceId      string
-    movedToId        string
-    userAction       string  @required
-  }
-  insert {
-    id: args.feedbackId
-    forUserId:       actor.userId
-    args.spaceId
-    args.originalThread
-    args.intendedThread
-    args.confidence
-    args.why
-    args.message
-    args.utteranceId
-    args.movedToId
-    args.userAction
-  }
-}
+// mutationSendPrivateUtterance, mutationMovePrivateToGroup,
+// mutationMoveGroupToPrivate, and mutationRecordMisrouteFeedback were
+// extracted to the CoPresent pack
+// (memql-bff-copresent/dsl/copresent/mutations.memql) by Epic 3
+// (3.3b-i, memql#1991) along with the v1:cognition:privateUtterance +
+// v1:cognition:misrouteFeedback concepts (ids preserved). The two
+// "move" mutations touch BOTH privateUtterance (moving) AND utterance
+// (staying core) -- in the pack they import utterance via
+// `use cognition.concepts.{ utterance }` and the moved concepts locally.
 
 // ---- mutations/v1/cognition/rolloverDailySpace.memql ----
 

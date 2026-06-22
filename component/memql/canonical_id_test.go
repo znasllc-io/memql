@@ -261,7 +261,6 @@ func TestCanonicalIdArgBinding_RealLoadedQueries(t *testing.T) {
 	}{
 		{"queryAudioOverridesForSpace", `queryAudioOverridesForSpace({spaceId: "demo-space"})`},
 		{"queryVideoOverridesForSpace", `queryVideoOverridesForSpace({spaceId: "demo-space"})`},
-		{"queryActiveGreetSuppression", `queryActiveGreetSuppression({spaceId: "demo-space", now: "2026-06-11T00:00:00Z"})`},
 	}
 
 	for _, tc := range cases {
