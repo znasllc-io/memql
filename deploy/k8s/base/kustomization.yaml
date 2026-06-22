@@ -56,6 +56,8 @@ resources:
   - externalsecret-livekit.yaml
   # Go voice-agent -- assistant's voice participant in LiveKit rooms (memql#1049).
   - voice-agent.yaml
+  # Connection-budget monitor: */5 leak/storm early-warning (memql#1958).
+  - conn-monitor-cronjob.yaml
 
 labels:
   - pairs:

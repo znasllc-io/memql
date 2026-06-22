@@ -212,6 +212,42 @@ FROM pg_stat_activity WHERE datname IS NOT NULL
 GROUP BY 1 ORDER BY total DESC;
 ```
 
+## Continuous monitoring + live deploy gate (memql#1958)
+
+The 0.9.88 cutover stormed because nothing watched the *live* direct budget: an
+external `deployer` leak (Tiger control plane, #1822) had silently consumed most
+of the slots and the deploy cold-started into the remainder. Two layers now
+guard against that:
+
+**1. Continuous monitor** — `deploy/k8s/base/conn-monitor-cronjob.yaml` runs
+every 5 min (read-only `postgres:16-alpine`, `DIRECT_DSN` from `memql-secrets`).
+It logs total backends vs budget + the per-`application_name` breakdown and
+emits greppable lines a log-based alert can key on:
+- `CONN-MONITOR WARN: backends N/B (P%) >= 70% ...`
+- `CONN-MONITOR CRIT: backends N/B (P%) >= 90% ...`
+- `CONN-MONITOR WARN: foreign app 'deployer' holds N conns ... possible leak`
+The operator-facing richer version is `scripts/ops/conn-monitor.sh` (same
+thresholds; runnable ad-hoc with `DIRECT_DSN=... scripts/ops/conn-monitor.sh`).
+A leak — *any* non-mesh `application_name` (not `memql%`) growing past the
+threshold — is surfaced with its `client_addr` while it is still small.
+
+**2. Live pre-deploy gate** — `scripts/deploy/conn-headroom-check.sh --live`
+extends the projected-demand gate (#1820) to ALSO read the instance's real
+`max_connections` and subtract the **live foreign (non-mesh) backends** from the
+budget before the peak check. So a deploy into an already-near-full instance
+fails fast (`CONN-HEADROOM-FAIL`) instead of cold-starting into a storm:
+
+```bash
+# in CI / pre-deploy, with a DSN available:
+DIRECT_DSN="$(tiger db connection-string xahn9ru4v6 --with-password)" \
+  scripts/deploy/conn-headroom-check.sh --live
+# budget = live max_connections - reserved - live foreign backends
+```
+
+Without `--live` the gate is the pure manifest projection (unchanged). With it,
+the gate would have BLOCKED the 0.9.88 deploy (budget `105-17-63=25` < projected
+peak), preventing the storm.
+
 ## Future levers (tracked, not yet needed)
 
 - **Connection pooler** — **SHIPPED** (epic memql#1925). Tiger Cloud

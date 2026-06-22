@@ -1,0 +1,79 @@
+# Connection-budget monitor (memql#1958). Every 5 min, read pg_stat_activity on
+# the DIRECT endpoint and log total backends vs budget + the per-application_name
+# breakdown, emitting greppable WARN/CRIT lines a log-based alert can key on.
+#
+# WHY: the 0.9.88 deploy stormed because nothing watched the direct budget while
+# an external `deployer` leak (#1822) silently consumed it. This is the
+# early-warning layer: a leak (ours or Tiger's) is SEEN while small, before it
+# can set up the next storm.
+#
+# Read-only. Uses stock postgres:16-alpine for psql; DIRECT_DSN comes from
+# memql-secrets (envFrom). Mirrors the thresholds in scripts/ops/conn-monitor.sh
+# (the operator-facing richer version); kept inline here so no ConfigMap / load
+# restrictor is needed.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: conn-monitor
+  labels:
+    app.kubernetes.io/name: conn-monitor
+    app.kubernetes.io/part-of: memql
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      # Don't pile up if the DB is unreachable; one shot per tick.
+      backoffLimit: 0
+      activeDeadlineSeconds: 60
+      ttlSecondsAfterFinished: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: conn-monitor
+            app.kubernetes.io/part-of: memql
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: conn-monitor
+              # postgres:16-alpine (stock, for psql) -- digest-pinned inline so
+              # the overlay digest-pin gate passes without a release-lockfile
+              # entry (this is an ops image, not a deployable memql artifact).
+              image: postgres@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
+              envFrom:
+                - secretRef:
+                    name: memql-secrets   # carries MEMORY_NODES_DATABASE_DIRECT_DSN
+              env:
+                - { name: RESERVED, value: "17" }   # superuser(12) + Tiger ops(5)
+                - { name: WARN_PCT, value: "70" }
+                - { name: CRIT_PCT, value: "90" }
+                - { name: LEAK_MIN, value: "40" }   # a non-mesh app over this = leak WARN
+                - { name: PGCONNECT_TIMEOUT, value: "8" }
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  DSN="${MEMORY_NODES_DATABASE_DIRECT_DSN:-$MEMORY_NODES_DATABASE_DSN}"
+                  if [ -z "$DSN" ]; then echo "CONN-MONITOR CRIT: no DSN in memql-secrets"; exit 2; fi
+                  MAXC=$(psql "$DSN" -At -c "SHOW max_connections;" 2>/dev/null)
+                  case "$MAXC" in ''|*[!0-9]*) echo "CONN-MONITOR CRIT: instance unreachable (or at max_connections)"; exit 2;; esac
+                  BUDGET=$((MAXC - RESERVED))
+                  TOTAL=$(psql "$DSN" -At -c "SELECT count(*) FROM pg_stat_activity WHERE datname IS NOT NULL;" 2>/dev/null)
+                  case "$TOTAL" in ''|*[!0-9]*) echo "CONN-MONITOR CRIT: count query failed"; exit 2;; esac
+                  PCT=$(( BUDGET > 0 ? TOTAL * 100 / BUDGET : 0 ))
+                  RC=0
+                  if [ "$PCT" -ge "$CRIT_PCT" ]; then
+                    echo "CONN-MONITOR CRIT: backends ${TOTAL}/${BUDGET} (${PCT}%) >= ${CRIT_PCT}% of budget (max_connections=${MAXC})"; RC=2
+                  elif [ "$PCT" -ge "$WARN_PCT" ]; then
+                    echo "CONN-MONITOR WARN: backends ${TOTAL}/${BUDGET} (${PCT}%) >= ${WARN_PCT}% of budget (max_connections=${MAXC})"; RC=1
+                  fi
+                  # Foreign-leak detector: any non-mesh application_name over LEAK_MIN.
+                  psql "$DSN" -At -F '|' -c "SELECT coalesce(nullif(application_name,''),'(none)'), count(*), coalesce(host(min(client_addr))::text,'-') FROM pg_stat_activity WHERE datname IS NOT NULL AND coalesce(application_name,'') NOT LIKE 'memql%' GROUP BY 1 HAVING count(*) > ${LEAK_MIN} ORDER BY 2 DESC;" 2>/dev/null \
+                    | while IFS='|' read -r APP N ADDR; do
+                        [ -n "$APP" ] && echo "CONN-MONITOR WARN: foreign app '${APP}' holds ${N} conns from ${ADDR} -- possible leak (> ${LEAK_MIN}); see memql#1822/#1958"
+                      done
+                  TOP=$(psql "$DSN" -At -F '=' -c "SELECT coalesce(nullif(application_name,''),'(none)'), count(*) FROM pg_stat_activity WHERE datname IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 5;" 2>/dev/null | tr '\n' ' ')
+                  echo "CONN-MONITOR OK status: backends=${TOTAL}/${BUDGET} (${PCT}%) max_connections=${MAXC} top: ${TOP}"
+                  exit $RC
