@@ -751,6 +751,23 @@ func QueryAllDocumentChunkDomainsBuild(args QueryAllDocumentChunkDomainsArgs) st
 	return "queryAllDocumentChunkDomains({})"
 }
 
+// QueryAllNumbers -- ADMIN: every provisioned DID across all partitions, newest first. Cluster-owner gated. Backs the cockpit numbers view.
+//
+// Bound concept: number.
+type QueryAllNumbersArgs struct {
+}
+
+// QueryAllNumbers calls the engine query queryAllNumbers.
+func (qc *QueryClient) QueryAllNumbers(ctx context.Context, args QueryAllNumbersArgs) (*Result, error) {
+	call := QueryAllNumbersBuild(args)
+	return qc.executeNamed(ctx, "queryAllNumbers", call)
+}
+
+func QueryAllNumbersBuild(args QueryAllNumbersArgs) string {
+	_ = args
+	return "queryAllNumbers({})"
+}
+
 // QueryAllOutputScreenings -- Returns every v1:safety:outputScreening row. Used by the retention sweep (mirrors queryAllSafetyClassifications); future cockpit prompt-injection dashboard will layer more targeted queries on top.
 //
 // Bound concept: outputScreening.
@@ -1296,6 +1313,50 @@ func QueryCalendarEventByIdBuild(args QueryCalendarEventByIdArgs) string {
 	b.WriteString("queryCalendarEventById({")
 	b.WriteString("eventId: ")
 	b.WriteString(fmt.Sprintf("%q", args.EventId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryCallsByNumber -- ADMIN: call records that touched a specific DID (as caller or callee), newest first. Cluster-owner gated.
+//
+// Bound concept: call.
+type QueryCallsByNumberArgs struct {
+	E164 string
+}
+
+// QueryCallsByNumber calls the engine query queryCallsByNumber.
+func (qc *QueryClient) QueryCallsByNumber(ctx context.Context, args QueryCallsByNumberArgs) (*Result, error) {
+	call := QueryCallsByNumberBuild(args)
+	return qc.executeNamed(ctx, "queryCallsByNumber", call)
+}
+
+func QueryCallsByNumberBuild(args QueryCallsByNumberArgs) string {
+	var b strings.Builder
+	b.WriteString("queryCallsByNumber({")
+	b.WriteString("e164: ")
+	b.WriteString(fmt.Sprintf("%q", args.E164))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryCallsByPartition -- ADMIN: call records for a partition, newest first. Cluster-owner gated. Powers billing + observability.
+//
+// Bound concept: call.
+type QueryCallsByPartitionArgs struct {
+	PartitionId string
+}
+
+// QueryCallsByPartition calls the engine query queryCallsByPartition.
+func (qc *QueryClient) QueryCallsByPartition(ctx context.Context, args QueryCallsByPartitionArgs) (*Result, error) {
+	call := QueryCallsByPartitionBuild(args)
+	return qc.executeNamed(ctx, "queryCallsByPartition", call)
+}
+
+func QueryCallsByPartitionBuild(args QueryCallsByPartitionArgs) string {
+	var b strings.Builder
+	b.WriteString("queryCallsByPartition({")
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -2849,6 +2910,28 @@ func QueryNotesByTagBuild(args QueryNotesByTagArgs) string {
 	b.WriteString("queryNotesByTag({")
 	b.WriteString("tag: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tag))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryNumbersByPartition -- ADMIN: DIDs provisioned to a partition, newest first. Cluster-owner gated -- numbers are cluster infrastructure.
+//
+// Bound concept: number.
+type QueryNumbersByPartitionArgs struct {
+	PartitionId string
+}
+
+// QueryNumbersByPartition calls the engine query queryNumbersByPartition.
+func (qc *QueryClient) QueryNumbersByPartition(ctx context.Context, args QueryNumbersByPartitionArgs) (*Result, error) {
+	call := QueryNumbersByPartitionBuild(args)
+	return qc.executeNamed(ctx, "queryNumbersByPartition", call)
+}
+
+func QueryNumbersByPartitionBuild(args QueryNumbersByPartitionArgs) string {
+	var b strings.Builder
+	b.WriteString("queryNumbersByPartition({")
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }

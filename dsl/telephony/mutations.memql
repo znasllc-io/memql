@@ -1,0 +1,113 @@
+// Telephony writes -- persist provisioned numbers, SIP trunks, and call
+// records. Invoked by the telephony integration (provisioning, inbound
+// dispatch, outbound place_call) and the call lifecycle. Records bind to a
+// partition, never a space (Amendment A).
+
+use telephony.concepts.{ number, trunk, call }
+
+@enabled
+@description("Persist a provisioned DID. Called after a carrier BuyNumber succeeds.")
+mutation number mutationRecordNumber {
+  args {
+    e164         string  @required
+    carrier      string  @required
+    partitionId  string  @required
+    purpose      string  @enum("inbound", "outbound", "both")
+    providerId   string
+    numberType   string  @enum("local", "tollfree", "mobile")
+    monthlyCost  float
+  }
+  insert {
+    args.e164
+    args.carrier
+    args.partitionId
+    purpose:     coalesce(args.purpose, "both")
+    status:      "active"
+    args.providerId
+    numberType:  coalesce(args.numberType, "local")
+    monthlyCost: coalesce(args.monthlyCost, 0)
+    purchasedAt: now
+  }
+}
+
+@enabled
+@description("Update a DID's lifecycle status (e.g. on release).")
+mutation number mutationUpdateNumberStatus {
+  args {
+    id      string  @required
+    status  string  @required @enum("active", "releasing", "released")
+  }
+  update {
+    id:     args.id
+    status: args.status
+  }
+}
+
+@enabled
+@description("Persist a LiveKit SIP trunk configuration. secretRef points at external-secrets, never a secret value.")
+mutation trunk mutationRecordTrunk {
+  args {
+    carrier        string  @required
+    direction      string  @required @enum("inbound", "outbound", "both")
+    name           string
+    livekitTrunkId string
+    sipEdgeUri     string
+    secretRef      string
+  }
+  insert {
+    args.carrier
+    args.direction
+    args.name
+    args.livekitTrunkId
+    args.sipEdgeUri
+    args.secretRef
+    status: "active"
+  }
+}
+
+@enabled
+@description("Open an append-only call record on connect. Returns the new row whose id the caller updates on disconnect.")
+mutation call mutationRecordCall {
+  args {
+    direction       string  @required @enum("inbound", "outbound")
+    fromE164        string  @required
+    toE164          string  @required
+    partitionId     string  @required
+    room            string  @required
+    carrier         string
+    providerCallId  string
+    agentId         string
+  }
+  insert {
+    args.direction
+    args.fromE164
+    args.toE164
+    args.partitionId
+    args.room
+    args.carrier
+    args.providerCallId
+    args.agentId
+    startedAt:       now
+    durationSeconds: 0
+    disposition:     "in_progress"
+    costEstimate:    0
+  }
+}
+
+@enabled
+@description("Close a call record on disconnect: stamp end time, duration, disposition, and cost estimate.")
+mutation call mutationCloseCall {
+  args {
+    id              string  @required
+    durationSeconds int     @required
+    disposition     string  @required @enum("completed", "no_answer", "busy", "failed", "canceled")
+    costEstimate    float
+  }
+  update {
+    id:              args.id
+    endedAt:         now
+    durationSeconds: args.durationSeconds
+    disposition:     args.disposition
+    costEstimate:    coalesce(args.costEstimate, 0)
+  }
+}
