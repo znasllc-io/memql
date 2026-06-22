@@ -402,6 +402,12 @@ message ExecuteQueryMsg {
   // Client-provided ID for optimistic update reconciliation.
   // Echoed back in ResultMeta.client_id along with the server-generated ID.
   string client_id = 4;
+  // Opaque keyset continuation cursor (5.12). When set, the engine continues
+  // the query from the encoded position via a SQL keyset predicate instead of
+  // an offset scan. Obtained from a prior response's ResultMeta.cursor; opaque
+  // to clients and bound to the query's sort ordering (a mismatch is rejected).
+  // Empty for a first page or offset/unpaginated queries.
+  string cursor = 5;
 }
 
 message CancelRequestMsg {

@@ -2620,7 +2620,13 @@ type ExecuteQueryMsg struct {
 	Variables *structpb.Struct       `protobuf:"bytes,3,opt,name=variables,proto3" json:"variables,omitempty"`
 	// Client-provided ID for optimistic update reconciliation.
 	// Echoed back in ResultMeta.client_id along with the server-generated ID.
-	ClientId      string `protobuf:"bytes,4,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	ClientId string `protobuf:"bytes,4,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	// Opaque keyset continuation cursor (5.12). When set, the engine continues
+	// the query from the encoded position via a SQL keyset predicate instead of
+	// an offset scan. Obtained from a prior response's ResultMeta.cursor; opaque
+	// to clients and bound to the query's sort ordering (a mismatch is rejected).
+	// Empty for a first page or offset/unpaginated queries.
+	Cursor        string `protobuf:"bytes,5,opt,name=cursor,proto3" json:"cursor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2679,6 +2685,13 @@ func (x *ExecuteQueryMsg) GetVariables() *structpb.Struct {
 func (x *ExecuteQueryMsg) GetClientId() string {
 	if x != nil {
 		return x.ClientId
+	}
+	return ""
+}
+
+func (x *ExecuteQueryMsg) GetCursor() string {
+	if x != nil {
+		return x.Cursor
 	}
 	return ""
 }
@@ -12742,13 +12755,14 @@ const file_memql_proto_rawDesc = "" +
 	"\fHeartbeatMsg\x12*\n" +
 	"\x02ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"2\n" +
 	"\x06AckMsg\x12(\n" +
-	"\x10acked_message_id\x18\x01 \x01(\tR\x0eackedMessageId\"\x9a\x01\n" +
+	"\x10acked_message_id\x18\x01 \x01(\tR\x0eackedMessageId\"\xb2\x01\n" +
 	"\x0fExecuteQueryMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x125\n" +
 	"\tvariables\x18\x03 \x01(\v2\x17.google.protobuf.StructR\tvariables\x12\x1b\n" +
-	"\tclient_id\x18\x04 \x01(\tR\bclientId\"1\n" +
+	"\tclient_id\x18\x04 \x01(\tR\bclientId\x12\x16\n" +
+	"\x06cursor\x18\x05 \x01(\tR\x06cursor\"1\n" +
 	"\x10CancelRequestMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\"w\n" +

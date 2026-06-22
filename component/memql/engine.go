@@ -513,6 +513,32 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		return nil, err
 	}
 
+	// Keyset cursor (5.12): lift an opaque inbound cursor from the request
+	// context onto the plan, decode it against the query's sort signature, and
+	// stash the resolved keyset position so the executor pushes a
+	// `WHERE (createdAt, id) <keyset> (?, ?)` predicate into SQL. A cursor
+	// minted under a different ordering is rejected with a typed error rather
+	// than silently returning a wrong page. The cursor and offset are mutually
+	// exclusive: a continuation supersedes any offset window.
+	if plan.After == nil {
+		if c := cursorFromContext(ctx); c != "" {
+			plan.After = &c
+		}
+	}
+	keysetActive := false
+	if plan.After != nil && strings.TrimSpace(*plan.After) != "" {
+		pos, decErr := decodeCursor(*plan.After, sorter.signatureValue())
+		if decErr != nil {
+			return nil, decErr
+		}
+		eligible, _ := keysetEligibleSort(sorter)
+		if eligible {
+			ctx = contextWithKeyset(ctx, pos)
+			keysetActive = true
+			offset = 0
+		}
+	}
+
 	// #1730: aggregate count directive. The query was authored with a
 	// `count` clause (no shape), so return a self-describing {count: N}
 	// envelope computed server-side instead of materializing rows. The
@@ -563,6 +589,21 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	}
 
 	result := newExecuteResult(bundle)
+
+	// Keyset cursor (5.12): when paginating and the page came back full, mint a
+	// nextCursor from the last row's keyset position so the caller can continue.
+	// An exhausted set (a short page) leaves the cursor empty. Only emit for
+	// keyset-eligible orderings; payload-sorted full-scan queries fall back to
+	// the in-memory path and carry no SQL keyset cursor.
+	if limit > 0 && len(nodes) >= limit {
+		if eligible, _ := keysetEligibleSort(sorter); eligible && (keysetActive || plan.After != nil || len(plan.Sort) > 0 || plan.Limit != nil) {
+			if next, encErr := encodeCursor(nodes[len(nodes)-1], sorter.signatureValue()); encErr == nil {
+				result.SetCursor(next)
+				result.SetHasMore(true)
+			}
+		}
+	}
+
 	applyPlanProjection(result.Bundle, plan)
 	if plan.ShapeTemplate != nil {
 		var specs map[string]*Spec

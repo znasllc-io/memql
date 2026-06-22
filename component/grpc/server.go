@@ -669,10 +669,15 @@ func (e *structuredQueryError) GRPCStatus() *status.Status {
 
 // executeQuery executes a query and returns the result with metadata.
 // The clientId parameter is used for optimistic update reconciliation.
-func (s *service) executeQuery(ctx context.Context, query string, clientId string) (*memqlv1.Result, error) {
+func (s *service) executeQuery(ctx context.Context, query string, clientId string, cursor string) (*memqlv1.Result, error) {
 	if s.engine == nil {
 		return nil, status.Error(codes.Unavailable, "MemQL engine unavailable")
 	}
+
+	// Keyset cursor (5.12): thread an opaque inbound continuation cursor onto
+	// the context so the engine lifts it onto plan.After and continues via a
+	// SQL keyset predicate. Empty cursor is a no-op (offset / first-page path).
+	ctx = memqlengine.ContextWithCursor(ctx, cursor)
 
 	execResult, err := s.engine.Execute(ctx, query)
 	if err != nil {
@@ -1265,7 +1270,7 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 		defer cancel()
 		defer s.activeRequests.Delete(requestId)
 
-		result, err := s.service.executeQuery(ctx, query, clientId)
+		result, err := s.service.executeQuery(ctx, query, clientId, msg.GetCursor())
 		if err != nil {
 			// Extract structured metadata if available
 			var metadata map[string]string

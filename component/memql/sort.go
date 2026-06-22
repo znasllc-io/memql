@@ -206,21 +206,34 @@ func (c *compiledSort) sortNodes(nodes []memorynodes.MemoryNode) error {
 		return nil
 	}
 
-	keys := make([][]sortComparable, len(nodes))
+	// Pre-compute each node's sort key and pair it WITH the node, then sort the
+	// pairs. Sorting the nodes slice alone against a separate keys slice is a
+	// correctness bug: sort.SliceStable permutes only the slice it is given
+	// (nodes), so a parallel keys[] goes stale on the first swap and the
+	// comparator starts reading the wrong key -> scrambled order. Pairing keeps
+	// key and node moving together. (This ordering is load-bearing for keyset
+	// cursor pagination, which assumes rows arrive in the declared order.)
+	type keyedNode struct {
+		key  []sortComparable
+		node memorynodes.MemoryNode
+	}
+	keyed := make([]keyedNode, len(nodes))
 	for i := range nodes {
 		key, err := c.buildKey(nodes[i])
 		if err != nil {
 			return err
 		}
-		keys[i] = key
-	}
-
-	sortFunc := func(i, j int) bool {
-		return compareSortKeys(keys[i], keys[j]) < 0
+		keyed[i] = keyedNode{key: key, node: nodes[i]}
 	}
 
 	// Stable sort so secondary keys remain predictable.
-	sort.SliceStable(nodes, sortFunc)
+	sort.SliceStable(keyed, func(i, j int) bool {
+		return compareSortKeys(keyed[i].key, keyed[j].key) < 0
+	})
+
+	for i := range keyed {
+		nodes[i] = keyed[i].node
+	}
 	return nil
 }
 
