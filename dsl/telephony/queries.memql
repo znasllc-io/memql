@@ -1,0 +1,51 @@
+// Telephony reads -- numbers by partition and call records by partition /
+// number / time. Phone numbers and call logs are sensitive cluster
+// infrastructure, so reads are cluster-owner gated (Amendment A scoping is by
+// partition, not space).
+
+use telephony.concepts.{ number, call }
+use telephony.shapes.{ numberFull, callFull }
+
+@enabled
+@description("ADMIN: DIDs provisioned to a partition, newest first. Cluster-owner gated -- numbers are cluster infrastructure.")
+query number numbersByPartition {
+  args {
+    partitionId  string  @required
+  }
+  filter  payload.partitionId==args.partitionId && actor.isClusterOwner==true
+  sort    "createdAt", "desc"
+  shape   numberFull
+}
+
+@enabled
+@description("ADMIN: every provisioned DID across all partitions, newest first. Cluster-owner gated. Backs the cockpit numbers view.")
+query number allNumbers {
+  filter  actor.isClusterOwner==true
+  sort    "createdAt", "desc"
+  paginate 100
+  shape   numberFull
+}
+
+@enabled
+@description("ADMIN: call records for a partition, newest first. Cluster-owner gated. Powers billing + observability.")
+query call callsByPartition {
+  args {
+    partitionId  string  @required
+  }
+  filter  payload.partitionId==args.partitionId && actor.isClusterOwner==true
+  sort    "createdAt", "desc"
+  paginate 100
+  shape   callFull
+}
+
+@enabled
+@description("ADMIN: call records that touched a specific DID (as caller or callee), newest first. Cluster-owner gated.")
+query call callsByNumber {
+  args {
+    e164  string  @required
+  }
+  filter  (payload.fromE164==args.e164 || payload.toE164==args.e164) && actor.isClusterOwner==true
+  sort    "createdAt", "desc"
+  paginate 100
+  shape   callFull
+}
