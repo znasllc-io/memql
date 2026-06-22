@@ -16,10 +16,12 @@ package app
 import (
 	_ "github.com/znasllc-io/memql/integrations/agents"
 	_ "github.com/znasllc-io/memql/integrations/auth"
-	_ "github.com/znasllc-io/memql/integrations/avatardirect"
 	_ "github.com/znasllc-io/memql/integrations/azureblob"
-	_ "github.com/znasllc-io/memql/integrations/chat"
-	_ "github.com/znasllc-io/memql/integrations/dailyspace"
+	// Epic 3 (memql#1902): avatardirect, chat, dailyspace are CoPresent
+	// product integrations -- moved to the pack (memql-bff-copresent), which
+	// blank-imports them so carrier nodes register them. Engine-only core
+	// builds (mcp/identity/voice) no longer compile them. avatarvendor STAYS
+	// here (shared vendor-REST core the voice-agent imports).
 	_ "github.com/znasllc-io/memql/integrations/database"
 	_ "github.com/znasllc-io/memql/integrations/actionsearch"
 	_ "github.com/znasllc-io/memql/integrations/email"
