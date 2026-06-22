@@ -150,19 +150,20 @@ func (i *Integration) writeCallRecord(ctx context.Context, c openCall, dispositi
 	if dur < 0 {
 		dur = 0
 	}
-	q := callRecordMutation(c, dur, disposition)
+	cost := EstimateCallCost(dur, c.direction, NumberTypeLocal, i.modelCostPerMinute)
+	q := callRecordMutation(c, dur, disposition, cost)
 	if _, err := eng.Execute(ctx, q); err != nil {
 		return fmt.Errorf("telephony: write call record: %w", err)
 	}
 	return nil
 }
 
-// callRecordMutation builds the mutationRecordCall query for a completed call.
-// Pure + unit-testable.
-func callRecordMutation(c openCall, durationSeconds int, disposition string) string {
+// callRecordMutation builds the mutationRecordCall query for a completed call,
+// including the per-call cost estimate. Pure + unit-testable.
+func callRecordMutation(c openCall, durationSeconds int, disposition string, costEstimate float64) string {
 	return fmt.Sprintf(
-		`mutationRecordCall({direction: %q, fromE164: %q, toE164: %q, partitionId: %q, room: %q, carrier: %q, agentId: %q, durationSeconds: %d, disposition: %q})`,
-		c.direction, c.fromE164, c.toE164, c.partitionID, c.room, "", c.agentID, durationSeconds, disposition,
+		`mutationRecordCall({direction: %q, fromE164: %q, toE164: %q, partitionId: %q, room: %q, carrier: %q, agentId: %q, durationSeconds: %d, disposition: %q, costEstimate: %g})`,
+		c.direction, c.fromE164, c.toE164, c.partitionID, c.room, "", c.agentID, durationSeconds, disposition, costEstimate,
 	)
 }
 

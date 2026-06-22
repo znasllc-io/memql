@@ -38,6 +38,10 @@ type Integration struct {
 	outboundAuthUser string
 	outboundAuthPass string
 
+	// modelCostPerMinute overrides the OpenAI Realtime audio per-minute rate
+	// used for the per-call cost estimate (0 = built-in default).
+	modelCostPerMinute float64
+
 	// calls tracks connected telephony legs between webhook join/leave so a
 	// single append-only call row carries the real duration.
 	calls *callTracker
@@ -61,6 +65,9 @@ type Config struct {
 	OutboundSIPAddress   string
 	OutboundAuthUsername string
 	OutboundAuthPassword string
+	// ModelCostPerMinute overrides the per-minute model audio rate used for
+	// call cost estimates (0 = default).
+	ModelCostPerMinute float64
 }
 
 // New builds a telephony Integration. The carrier is resolved eagerly (its
@@ -79,6 +86,7 @@ func New(cfg Config, logger *slog.Logger) (*Integration, error) {
 		outboundAddress:  cfg.OutboundSIPAddress,
 		outboundAuthUser: cfg.OutboundAuthUsername,
 		outboundAuthPass: cfg.OutboundAuthPassword,
+		modelCostPerMinute: cfg.ModelCostPerMinute,
 	}
 	if cfg.LiveKitURL != "" && cfg.LiveKitAPIKey != "" && cfg.LiveKitAPISecret != "" {
 		httpURL := httpLiveKitURL(cfg.LiveKitURL)

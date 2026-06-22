@@ -2,6 +2,7 @@ package telephony
 
 import (
 	"os"
+	"strconv"
 
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -25,6 +26,7 @@ func init() {
 			OutboundSIPAddress:   os.Getenv("MEMQL_TELEPHONY_OUTBOUND_SIP_ADDRESS"),
 			OutboundAuthUsername: os.Getenv("MEMQL_TELEPHONY_OUTBOUND_AUTH_USERNAME"),
 			OutboundAuthPassword: os.Getenv("MEMQL_TELEPHONY_OUTBOUND_AUTH_PASSWORD"),
+			ModelCostPerMinute:   parseFloatEnv("MEMQL_TELEPHONY_MODEL_COST_PER_MINUTE"),
 		}, pctx.Logger)
 		if err != nil {
 			return nil, err
@@ -41,4 +43,16 @@ func firstEnv(keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func parseFloatEnv(key string) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return 0
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return 0
+	}
+	return f
 }

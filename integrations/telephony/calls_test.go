@@ -61,7 +61,7 @@ func TestPartitionFromMetadata(t *testing.T) {
 
 func TestCallRecordMutation(t *testing.T) {
 	c := openCall{direction: "inbound", fromE164: "+14155550100", toE164: "+18005550111", partitionID: "acme", room: "tel-acme-x"}
-	q := callRecordMutation(c, 42, "completed")
+	q := callRecordMutation(c, 42, "completed", 0.07)
 	for _, want := range []string{
 		`mutationRecordCall(`, `direction: "inbound"`, `fromE164: "+14155550100"`,
 		`toE164: "+18005550111"`, `partitionId: "acme"`, `room: "tel-acme-x"`,
