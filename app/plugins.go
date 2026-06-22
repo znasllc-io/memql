@@ -30,6 +30,12 @@ func (a *App) materializePlugins() {
 
 	pctx := a.pluginContext()
 	for _, p := range plugins {
+		// Reject a pack built against an incompatible Plugin SDK contract
+		// version before materializing it -- a stale pack fails loudly here
+		// instead of mis-binding against a contract it was not built for.
+		if err := p.ValidateContract(); err != nil {
+			a.fatal("plug-in contract incompatible", "plugin", p.Name, "error", err)
+		}
 		prov, err := p.Factory(pctx)
 		if err != nil {
 			a.fatal("plug-in factory failed", "plugin", p.Name, "error", err)
