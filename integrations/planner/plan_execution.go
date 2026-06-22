@@ -576,7 +576,7 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId, re
 	turnMsg := &memqlv1.AgentGenerateTurnMsg{
 		RequestId: requestId,
 		AgentId:   plan.OwnerAgentId,
-		SpaceId:   plan.SpaceId,
+		ScopeId:   plan.SpaceId,
 		// participantId left empty: the planner doesn't look up the
 		// AI participant (cross-domain concept leak). The agent's
 		// reply lives on Plan.output.reply and the canvas card; no

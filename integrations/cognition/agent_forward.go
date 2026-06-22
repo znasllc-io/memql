@@ -117,7 +117,7 @@ func (c *CognitionIntegration) forwardTurnToAgent(
 	msg := &memqlv1.AgentGenerateTurnMsg{
 		RequestId:     requestId,
 		AgentId:       agentIdentityId,
-		SpaceId:       strings.TrimSpace(spaceId),
+		ScopeId:       strings.TrimSpace(spaceId),
 		ParticipantId: strings.TrimSpace(participantId),
 		History:       convertHistoryToProto(history),
 		Routing:       buildRoutingContext(ctx, trigger, spaceId, si, peerAgents, humanParticipants, currentSpeakerParticipantId),

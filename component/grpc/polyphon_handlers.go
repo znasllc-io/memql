@@ -32,7 +32,7 @@ func (s *streamSession) handlePolyphonRoomToken(envelope *memqlv1.MemqlClientMes
 		return nil
 	}
 
-	spaceId := strings.TrimSpace(msg.GetSpaceId())
+	spaceId := strings.TrimSpace(msg.GetScopeId())
 	participantId := strings.TrimSpace(msg.GetParticipantId())
 	if spaceId == "" || participantId == "" {
 		s.sendQueryError(requestId, correlate, codes.InvalidArgument, "spaceId and participantId are required")
@@ -111,7 +111,7 @@ func (s *streamSession) handlePolyphonUtterance(envelope *memqlv1.MemqlClientMes
 		return nil
 	}
 
-	spaceId := strings.TrimSpace(msg.GetSpaceId())
+	spaceId := strings.TrimSpace(msg.GetScopeId())
 	participantId := strings.TrimSpace(msg.GetParticipantId())
 	text := strings.TrimSpace(msg.GetText())
 

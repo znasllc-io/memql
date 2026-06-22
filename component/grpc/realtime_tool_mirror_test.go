@@ -47,14 +47,14 @@ func TestFlattenToolResultContent(t *testing.T) {
 	}
 }
 
-func newCapturingSession(t *testing.T, voiceAgentSpaceId string) (*streamSession, *bytes.Buffer) {
+func newCapturingSession(t *testing.T, voiceAgentScopeId string) (*streamSession, *bytes.Buffer) {
 	t.Helper()
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	return &streamSession{
 		logger:            logger,
 		identity:          auth.UserIdentity{Subject: "user-123"},
-		voiceAgentSpaceId: voiceAgentSpaceId,
+		voiceAgentScopeId: voiceAgentScopeId,
 	}, &buf
 }
 

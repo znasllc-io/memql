@@ -71,7 +71,7 @@ func (s *streamSession) mirrorRealtimeToolCall(
 	if s == nil || s.logger == nil {
 		return
 	}
-	if s.voiceAgentSpaceId != "" {
+	if s.voiceAgentScopeId != "" {
 		return
 	}
 	if !isRealtimeMirroredTool(toolName) {

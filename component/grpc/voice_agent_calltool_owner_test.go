@@ -70,7 +70,7 @@ func (e *simpleErr) Error() string { return e.s }
 // proxy-path regression guard for #1503. The realtime voice CallTool is proxied
 // bff->agent; the agent-node session has NO local voice scope, so the human
 // owner can only come from the scope threaded on the CallToolMsg
-// (VoiceAgentSpaceId). This test exercises that hop: given ONLY the threaded
+// (VoiceAgentScopeId). This test exercises that hop: given ONLY the threaded
 // space id (the exact shape stampVoiceAgentScopeOnCallTool produces), the
 // resolved ToolDefaults must carry a non-empty ownerUserId (= the space owner)
 // + spaceId so produceArtifact's @autoInjected fields can be stamped and the
@@ -91,7 +91,7 @@ func TestVoiceCallToolDefaultsVia_StampsOwnerAcrossProxyHop(t *testing.T) {
 	// agent id is NOT threaded on CallToolMsg -- the agent node resolves it).
 	msg := &memqlv1.CallToolMsg{
 		Name:              "produceArtifact",
-		VoiceAgentSpaceId: "demo",
+		VoiceAgentScopeId: "demo",
 	}
 
 	ctx := voiceCallToolDefaultsVia(context.Background(), fake, msg, nil)
@@ -104,7 +104,7 @@ func TestVoiceCallToolDefaultsVia_StampsOwnerAcrossProxyHop(t *testing.T) {
 }
 
 // TestVoiceCallToolDefaultsVia_NoOpForBrowserCall asserts the no-op guard: a
-// plain (non-voice) CallTool carries no VoiceAgentSpaceId, so the ctx is left
+// plain (non-voice) CallTool carries no VoiceAgentScopeId, so the ctx is left
 // untouched and the hot browser path pays no space lookup.
 func TestVoiceCallToolDefaultsVia_NoOpForBrowserCall(t *testing.T) {
 	fake := &queryRoutingResolver{}
