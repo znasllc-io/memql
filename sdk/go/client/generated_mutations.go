@@ -8410,19 +8410,23 @@ func MutationRecordBundleValidationBuild(args MutationRecordBundleValidationArgs
 	return b.String()
 }
 
-// MutationRecordCall -- Open an append-only call record on connect. Returns the new row whose id the caller updates on disconnect.
+// MutationRecordCall -- Write an append-only call record. A completed leg writes one row with the real duration + disposition; durationSeconds/disposition default to an in-progress row when omitted (Amendment A: bound to partition + partition-scoped room).
 //
 // Bound concept: call.
 type MutationRecordCallArgs struct {
 	// Enum: inbound | outbound
-	Direction      string
-	FromE164       string
-	ToE164         string
-	PartitionId    string
-	Room           string
-	Carrier        string
-	ProviderCallId string
-	AgentId        string
+	Direction       string
+	FromE164        string
+	ToE164          string
+	PartitionId     string
+	Room            string
+	Carrier         string
+	ProviderCallId  string
+	AgentId         string
+	DurationSeconds int
+	// Enum: in_progress | completed | no_answer | busy | failed | canceled
+	Disposition  string
+	CostEstimate any
 }
 
 // MutationRecordCall calls the engine mutation mutationRecordCall.
@@ -8477,6 +8481,25 @@ func MutationRecordCallBuild(args MutationRecordCallArgs) string {
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
+	if args.DurationSeconds != 0 {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("durationSeconds: ")
+		b.WriteString(fmt.Sprintf("%v", args.DurationSeconds))
+	}
+	if args.Disposition != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("disposition: ")
+		b.WriteString(fmt.Sprintf("%q", args.Disposition))
+	}
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("costEstimate: ")
+	b.WriteString(fmt.Sprintf("%q", args.CostEstimate))
 	b.WriteString("})")
 	return b.String()
 }

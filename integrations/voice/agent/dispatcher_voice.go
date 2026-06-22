@@ -196,7 +196,12 @@ func discoverActiveRooms(ctx context.Context, roomClient *lksdk.RoomServiceClien
 	var rooms []string
 	for _, r := range resp.GetRooms() {
 		name := r.GetName()
-		if !strings.HasPrefix(name, "polyphon-") {
+		// Serve product voice rooms (polyphon-<spaceId>) AND telephony rooms
+		// (tel-<partitionId>-<auto>, Epic 4 / memql#1911): a PSTN caller bridged
+		// in by livekit/sip is a human room participant, so the existing realtime
+		// agent answers the phone with no further change. Telephony is core and
+		// partition-scoped -- never keyed on a CoPresent space (Amendment A).
+		if !strings.HasPrefix(name, "polyphon-") && !strings.HasPrefix(name, "tel-") {
 			continue
 		}
 		if r.GetNumParticipants() == 0 {

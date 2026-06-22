@@ -66,7 +66,7 @@ mutation trunk mutationRecordTrunk {
 }
 
 @enabled
-@description("Open an append-only call record on connect. Returns the new row whose id the caller updates on disconnect.")
+@description("Write an append-only call record. A completed leg writes one row with the real duration + disposition; durationSeconds/disposition default to an in-progress row when omitted (Amendment A: bound to partition + partition-scoped room).")
 mutation call mutationRecordCall {
   args {
     direction       string  @required @enum("inbound", "outbound")
@@ -77,6 +77,9 @@ mutation call mutationRecordCall {
     carrier         string
     providerCallId  string
     agentId         string
+    durationSeconds int
+    disposition     string  @enum("in_progress", "completed", "no_answer", "busy", "failed", "canceled")
+    costEstimate    float
   }
   insert {
     args.direction
@@ -88,9 +91,9 @@ mutation call mutationRecordCall {
     args.providerCallId
     args.agentId
     startedAt:       now
-    durationSeconds: 0
-    disposition:     "in_progress"
-    costEstimate:    0
+    durationSeconds: coalesce(args.durationSeconds, 0)
+    disposition:     coalesce(args.disposition, "in_progress")
+    costEstimate:    coalesce(args.costEstimate, 0)
   }
 }
 
