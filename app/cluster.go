@@ -505,14 +505,13 @@ func (a *App) cluster() {
 		// lock) all resolved -- exactly the cluster-phase neighborhood the
 		// WorkerDialer is wired in.
 		if a.engine != nil {
-			dbGetter := func() *bun.DB {
-				if a.db == nil {
-					return nil
-				}
-				return a.db.BunDB()
-			}
+			// memql#1930: the reconciler's leader-election advisory lock is
+			// session-scoped and held for the loop's LIFETIME, so it rides the
+			// DIRECT (non-pooled) endpoint -- a transaction-mode pooler would
+			// recycle the backend out from under the held lock. Falls back to
+			// the main pool when DIRECT_DSN is unset.
 			a.Dependencies = append(a.Dependencies, node.NewTopologyReconciler(
-				nodeIdentity, peerMgr, a.engine, dbGetter, a.Logger,
+				nodeIdentity, peerMgr, a.engine, a.directDBGetter(), a.Logger,
 			))
 		}
 	}

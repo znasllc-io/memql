@@ -23,7 +23,10 @@ import (
 // REPLICA too. Event-triggered automations are unaffected (the mesh routes
 // each event to one pod), so only the schedule path needs gating.
 //
-// Mechanism: each node holds one dedicated DB connection and calls
+// Mechanism: each node holds one dedicated DB connection (resolved via the
+// injected dbGetter -- wired to the DIRECT, non-pooled endpoint in app/, since
+// the lock is held for the leader's lifetime and a transaction-mode pooler
+// would recycle the backend out from under it, memql#1930) and calls
 // pg_try_advisory_lock(key) on it. Exactly one node acquires the lock and
 // becomes the leader; the scheduler only executes cron firings on the
 // leader (see Scheduler.LeaderGate). The lock is session-scoped, so if the
