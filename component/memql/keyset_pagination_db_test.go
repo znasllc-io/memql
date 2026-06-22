@@ -244,6 +244,85 @@ func TestKeysetPagination_SortMismatchRejected(t *testing.T) {
 		"a cursor replayed under a different sort must be rejected, not silently wrong")
 }
 
+// TestKeysetPagination_EqualCreatedAtTieBreak is the airtight-boundary proof:
+// several rows share the EXACT same createdAt (same nanosecond), and the page
+// size splits that equal-timestamp group across a page boundary. The keyset
+// predicate's `id > ?` tie-breaker is only correct if the SQL ORDER BY ends
+// with `id ASC`; if the ORDER BY were `createdAt`-only, two rows in the equal
+// group straddling the boundary would be skipped or duplicated. We walk the
+// cursor and assert the full set returns with NO skip and NO duplicate, in the
+// exact (createdAt DESC, id ASC) order. The concurrent-insert test uses DISTINCT
+// timestamps, so it cannot catch a missing id tie-breaker — this one does.
+func TestKeysetPagination_EqualCreatedAtTieBreak(t *testing.T) {
+	eng, db, _ := readMergeTestEngine(t)
+	ctx := clusterOwnerCtx("u-keyset-tie")
+	sfx := uniqueSuffix("keyset-tie")
+	owner := "kb:" + sfx
+
+	// Layout (newest-first, which is the expected page order):
+	//   2 rows at t=high   (ids hi-0, hi-1)
+	//   4 rows at t=mid    (ids mid-0..mid-3)  <- the equal-timestamp group
+	//   2 rows at t=low    (ids lo-0, lo-1)
+	// Within an equal-createdAt group the order is id ASC.
+	high := time.Date(2026, 6, 22, 18, 0, 2, 0, time.UTC)
+	mid := time.Date(2026, 6, 22, 18, 0, 1, 0, time.UTC) // identical for all 4
+	low := time.Date(2026, 6, 22, 18, 0, 0, 0, time.UTC)
+
+	mk := func(tag string, n int) string {
+		return fmt.Sprintf("v1:cognition:utterance:%s-%s-%d", sfx, tag, n)
+	}
+
+	// Seed (insertion order deliberately scrambled to prove ORDER BY, not
+	// insert order, drives the result).
+	seedKeysetRow(t, ctx, db, mk("mid", 2), mid, owner)
+	seedKeysetRow(t, ctx, db, mk("hi", 1), high, owner)
+	seedKeysetRow(t, ctx, db, mk("lo", 0), low, owner)
+	seedKeysetRow(t, ctx, db, mk("mid", 0), mid, owner)
+	seedKeysetRow(t, ctx, db, mk("mid", 3), mid, owner)
+	seedKeysetRow(t, ctx, db, mk("hi", 0), high, owner)
+	seedKeysetRow(t, ctx, db, mk("lo", 1), low, owner)
+	seedKeysetRow(t, ctx, db, mk("mid", 1), mid, owner)
+
+	// Expected full order: high (id ASC), then mid (id ASC), then low (id ASC).
+	want := []string{
+		mk("hi", 0), mk("hi", 1),
+		mk("mid", 0), mk("mid", 1), mk("mid", 2), mk("mid", 3),
+		mk("lo", 0), mk("lo", 1),
+	}
+
+	// pageSize 3 puts the page-1 boundary INSIDE the mid group:
+	//   page 1: hi-0, hi-1, mid-0   (cursor at mid-0)
+	//   page 2: mid-1, mid-2, mid-3 (cursor at mid-3)  <- continues mid group
+	//   page 3: lo-0, lo-1          (short -> exhausted)
+	const pageSize = 3
+	got := walkAllPages(t, ctx, eng, owner, pageSize, "")
+
+	require.Equal(t, want, got,
+		"equal-createdAt rows split across a page boundary must walk in (createdAt DESC, id ASC) order with no skip / no dup")
+	require.Len(t, dedupe(got), len(want), "no id may appear twice across the equal-timestamp boundary")
+}
+
+// TestKeysetPagination_FallbackOrderByEndsWithIdAsc guards the defense-in-depth
+// invariant directly (no DB): the ORDER BY fallback used by the combined-filter
+// keyset path must end with `id ASC`, matching the keyset predicate's `id > ?`
+// tie-breaker. `combinedFilterOrderExprs(nil)` is the exact list
+// executeCombinedFilterQuery applies when no sorter is threaded; if a future
+// edit reverts it to a createdAt-only ORDER BY, this fails.
+func TestKeysetPagination_FallbackOrderByEndsWithIdAsc(t *testing.T) {
+	exprs := combinedFilterOrderExprs(nil)
+	require.NotEmpty(t, exprs)
+	require.Equal(t, "id ASC", exprs[len(exprs)-1],
+		"nil-sorter keyset ORDER BY must end with id ASC to agree with the keyset predicate")
+
+	// A compiled sorter (the production cursor path) is airtight already: it
+	// appends createdAt DESC, id ASC. Confirm the contract holds there too.
+	s, err := compileSortFields([]SortField{{Field: "createdAt", Direction: SortDirectionDesc}})
+	require.NoError(t, err)
+	withSorter := combinedFilterOrderExprs(s)
+	require.Equal(t, "id ASC", withSorter[len(withSorter)-1],
+		"compiled-sorter keyset ORDER BY must also end with id ASC")
+}
+
 func dedupe(in []string) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(in))

@@ -213,6 +213,22 @@ func resolveActorComparisonsToConstants(ctx context.Context, expr ExpressionNode
 	}
 }
 
+// combinedFilterOrderExprs returns the SQL ORDER BY expressions for the
+// combined-filter scan. The result MUST end with `id ASC`: the keyset cursor
+// predicate's tie-breaker is `id > ?`, which is only correct when rows sharing
+// an identical createdAt are ordered by `id ASC` — otherwise two equal-timestamp
+// rows straddling a page boundary can be skipped or duplicated. A compiled
+// sorter always appends the `createdAt DESC, id ASC` fallback (compileSortFields),
+// so its orderExpressions() are airtight; the nil-sorter fallback below must
+// match that same contract, not just `createdAt DESC`. Centralizing the order
+// list here keeps the keyset predicate and the SQL row order from drifting apart.
+func combinedFilterOrderExprs(sorter *compiledSort) []string {
+	if sorter != nil {
+		return sorter.orderExpressions()
+	}
+	return []string{`"createdAt" DESC`, `id ASC`}
+}
+
 // executeCombinedFilterQuery executes a query using a combined SQL filter.
 // This is similar to executeFilterQuery but doesn't require a ComparisonExpression node.
 func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr ExpressionNode, filter compiledExpression, timestamp *time.Time, target int, sorter *compiledSort) ([]memorynodes.MemoryNode, error) {
@@ -255,11 +271,7 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 		}
 	}
 
-	orderExprs := []string{`"createdAt" DESC`}
-	if sorter != nil {
-		orderExprs = sorter.orderExpressions()
-	}
-	for _, expr := range orderExprs {
+	for _, expr := range combinedFilterOrderExprs(sorter) {
 		if strings.TrimSpace(expr) == "" {
 			continue
 		}
