@@ -7,8 +7,20 @@ import (
 )
 
 const (
-	defaultMaxResults         = 500
-	defaultMaxWindow          = 5000
+	defaultMaxResults = 500
+	defaultMaxWindow  = 5000
+	// defaultListCap is the implicit row cap the engine applies to a
+	// list-returning query that arrives WITHOUT an explicit window --
+	// no `paginate` and no `sort` directive (epic 5, memql#1965). It is
+	// the runtime backstop for the pagination authoring rule: even if an
+	// unmarked list query slips past authoring, it can never pull more
+	// than this many rows. A query that paginates / sorts states its own
+	// window and is unaffected; a query marked `@unbounded("reason")` is
+	// rewritten to an explicit paginate and likewise bypasses the cap.
+	// Override via MEMORY_ENGINE_DEFAULT_LIST_CAP. Tunable but always
+	// clamped to <= MaxResults (it is a tighter default, never a wider
+	// one).
+	defaultListCap            = 50
 	defaultCacheSize          = int64(1024)
 	defaultCacheMaxTTLSeconds = int64(0)
 
@@ -51,6 +63,7 @@ const (
 
 	envMaxResults           = "MEMORY_ENGINE_MAX_RESULTS"
 	envMaxWindow            = "MEMORY_ENGINE_MAX_WINDOW"
+	envDefaultListCap       = "MEMORY_ENGINE_DEFAULT_LIST_CAP"
 	envCacheSize            = "MEMORY_ENGINE_CACHE_MAX_ITEMS"
 	envCacheMaxTTL          = "CACHE_MAX_TTL"
 	envAICacheDefaultEnable = "MEMQL_SI_CACHE_DEFAULT_ENABLED"
@@ -68,6 +81,7 @@ const (
 type engineConfig struct {
 	MaxResults                  int
 	MaxWindow                   int
+	DefaultListCap              int
 	CacheSize                   int64
 	CacheMaxTTLSeconds          int64
 	AIToolLoopMaxIterations     int
@@ -85,6 +99,7 @@ func loadEngineConfigFromEnv() engineConfig {
 	cfg := engineConfig{
 		MaxResults:                  defaultMaxResults,
 		MaxWindow:                   defaultMaxWindow,
+		DefaultListCap:              defaultListCap,
 		CacheSize:                   defaultCacheSize,
 		CacheMaxTTLSeconds:          defaultCacheMaxTTLSeconds,
 		AIToolLoopMaxIterations:     defaultAIToolLoopMaxIterations,
@@ -102,6 +117,18 @@ func loadEngineConfigFromEnv() engineConfig {
 		if parsed, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && parsed > cfg.MaxResults {
 			cfg.MaxWindow = parsed
 		}
+	}
+
+	if value, ok := os.LookupEnv(envDefaultListCap); ok {
+		if parsed, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && parsed > 0 {
+			cfg.DefaultListCap = parsed
+		}
+	}
+	// The implicit list cap is a TIGHTER default than MaxResults, never a
+	// wider one -- clamp it so a misconfigured override can't quietly
+	// widen the backstop above the page-size ceiling.
+	if cfg.DefaultListCap <= 0 || cfg.DefaultListCap > cfg.MaxResults {
+		cfg.DefaultListCap = cfg.MaxResults
 	}
 
 	if value, ok := os.LookupEnv(envCacheSize); ok {

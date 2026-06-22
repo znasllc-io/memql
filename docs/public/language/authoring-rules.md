@@ -1066,6 +1066,13 @@ the change. The gates, with their test names:
   acknowledging the intent. Anything else hard-fails.
 - **Actor vocabulary** (`TestNoCallerVocabulary`, #221). `caller.X`
   and `@caller` are retired; write `actor.X` and `@actor`.
+- **Pagination authoring rule** (`TestPaginationAuthoringRule`,
+  memql#1965 — see [#23](#23-list-returning-queries-must-declare-their-bound)).
+  Every list-returning query declares `paginate` / `sort` or
+  `@unbounded("reason")`. **Currently report-only:** the tree-wide
+  hard-fail is coupled to the issue 5.3 backfill and flips on in that
+  PR; today the gate logs offenders and only asserts that a brand-new
+  unmarked list query is detected.
 
 Companion gates in sibling files lock in the operator and binding
 grammar:
@@ -1086,6 +1093,103 @@ grammar:
   `insert {` / `update {`. `canonicalId(x, "v1:ns:name")` string
   literals and `concat("v1:ns:concept:", id)` are rejected — pass
   the imported concept short-name.
+
+---
+
+## 23. List-returning queries must declare their bound
+
+**Rule.** A **list-returning** query must declare how it is bounded:
+either a `paginate` / `sort` directive, or an explicit
+`@unbounded("reason")` annotation. A query that pulls a row set with
+no bound silently fetches the whole table — the trap this rule exists
+to stop (epic 5, memql#1965).
+
+**What counts as "list-returning" (the exact, deterministic rule).**
+A query is list-returning when its `shape` projects a row set
+**without a unique-key equality filter**. Concretely:
+
+- **Single-row read — EXEMPT.** The filter contains a bare `id == <expr>`
+  equality on the row's primary intrinsic. It reads at most one row, so
+  it is not a list. A *guarded* `when(args.x) { id == ... }` does **not**
+  count — the id filter is conditional, so the query can still return
+  the full set when the arg is omitted.
+- **Aggregate — EXEMPT.** The query carries a `count` clause. It returns
+  a `{count: N}` number, not rows.
+- **Bounded list — COMPLIANT.** The query declares `paginate` (an
+  explicit window) or `sort` (an explicit ordering — "give me the
+  latest N").
+- **Unbounded-marked — COMPLIANT (and auditable).** The query carries
+  `@unbounded("reason")`. The reason is **required**; it documents why
+  the full set is a legitimate read (small bounded catalog, sweep job,
+  etc.) and is enumerated by the audit report.
+- **Unmarked list — VIOLATION.** None of the above. This is the set the
+  rule targets.
+
+```memql
+// Single-row read — exempt (id == equality).
+query space querySpaceMeta {
+  args { spaceId string @required }
+  filter  id==args.spaceId
+  shape   spaceFull
+}
+
+// Bounded list — compliant (paginate window).
+query space queryFirstTenSpaces {
+  filter  payload.active==true
+  paginate 10
+  shape   spaceFull
+}
+
+// Legitimate full-set read — compliant, marked + auditable.
+@unbounded("provider catalog is a small bounded set — never more than a handful of rows")
+query provider queryAllProviders {
+  filter  traitIsActiveRecord
+  shape   providerFull
+}
+
+// VIOLATION — list read with no bound. Pulls the whole table.
+query widget queryAllWidgets {
+  filter  payload.ownerUserId==args.ownerUserId
+  shape   widgetFull
+}
+```
+
+**Runtime backstop (always on, ships independently).** Even if an
+unmarked list query slips past authoring, the engine applies an implicit
+**`LIMIT 50`** to any query that arrives with no explicit window — no
+`paginate` and no `sort` — so nothing pulls unbounded. A query that
+paginates / sorts states its own window and is unaffected; an
+`@unbounded("reason")` query is rewritten to an explicit large paginate
+and bypasses the 50-cap (still clamped to `MEMORY_ENGINE_MAX_WINDOW`).
+The cap is tunable via `MEMORY_ENGINE_DEFAULT_LIST_CAP` (clamped to
+`<= MEMORY_ENGINE_MAX_RESULTS`). Lives in
+`component/memql/engine.go` (`defaultListLimit`) +
+`component/memql/config.go`.
+
+**`@unbounded` is mutually exclusive** with `paginate`, `sort`, and
+`count` — a query that already paginates / sorts is bounded, and a
+`count` returns an aggregate. The rewriter rejects the combination at
+load time.
+
+**Audit + enforcement.** The classifier lives in
+`component/language/pagination` and is the single source of truth for
+the rule. Two consumers derive from it:
+
+- `go run ./scripts/audit-pagination` — the live report. Lists every
+  unmarked-list query (the backfill work item) and every `@unbounded`
+  query with its reason. `--json` / `--unmarked` / `--unbounded` /
+  `--strict` / `--domain=<x>`.
+- `TestPaginationAuthoringRule` in `dsl/conformance_test.go` — the gate.
+  **Report-only today** (the tree has ~187 unmarked list queries; the
+  hard-fail flip is coupled to the issue 5.3 backfill so `main` is never
+  red). It asserts the classifier detects a brand-new unmarked list
+  query, proving the enforcement mechanism is in place and correct.
+
+**Why it bites you.** Without a bound, a query against a growing concept
+(participants, events, plans) starts cheap and silently degrades into a
+full-table scan as the data grows — no error, just creeping latency and
+memory. The runtime cap bounds the blast radius; the authoring rule makes
+the author think about the bound up front.
 
 ---
 
