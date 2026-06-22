@@ -39,6 +39,7 @@ The complete map of memQL documentation. Layout + rules:
 - Generated reference (DSL constructs + concept catalog) lands in `docs/public/reference/_generated/` at release time (docs-gen).
 
 ### Operate (`operate/`)
+- **[Minimum Requirements (running beyond local)](docs/public/operate/minimum-requirements.md)** — what you need to run memQL outside the local dev cluster: Tiger Cloud (the only supported DB provider), the pooler/connection model, k8s, secrets, images, GitOps. Start here.
 - [Deployment Strategy](docs/public/operate/deployment-strategy.md) · [Deployment Console](docs/public/operate/deployment-console.md) · [Infrastructure](docs/public/operate/infrastructure.md) · [Database Setup](docs/public/operate/database-setup.md) · [DB Connection Budget & Graceful Deploy](docs/public/operate/db-connection-budget.md)
 - [Environment Variables](docs/public/operate/env-vars.md) · [LiveKit Provisioning](docs/public/operate/livekit-provision.md) · [Connect to the MCP server](docs/public/operate/mcp-connect.md)
 - [Forge — Company Operating System](docs/public/operate/forge.md) — the role-gated request pipeline, MCP tool surface, and end-to-end employee flow.
