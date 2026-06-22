@@ -21,16 +21,15 @@ func TestCacheKey_CursorIsolatesPages(t *testing.T) {
 		selSig   = "none"
 		shapeSig = "graph-bundle"
 		limit    = 50
-		offset   = 0
 		depth    = 0
 	)
 
 	// Page 1 of a keyset-paginated query: no inbound cursor (empty token).
-	page1 := e.cacheKey(query, nil, limit, offset, depth, sortSig, selSig, shapeSig, "")
+	page1 := e.cacheKey(query, nil, limit, depth, sortSig, selSig, shapeSig, "")
 	// Page 2: the continuation cursor minted from page 1's last row.
-	page2 := e.cacheKey(query, nil, limit, offset, depth, sortSig, selSig, shapeSig, "cursor-token-page-2")
+	page2 := e.cacheKey(query, nil, limit, depth, sortSig, selSig, shapeSig, "cursor-token-page-2")
 	// Page 3: a different continuation cursor again.
-	page3 := e.cacheKey(query, nil, limit, offset, depth, sortSig, selSig, shapeSig, "cursor-token-page-3")
+	page3 := e.cacheKey(query, nil, limit, depth, sortSig, selSig, shapeSig, "cursor-token-page-3")
 
 	if page1 == page2 {
 		t.Fatalf("page 1 and page 2 collide on the same cache key %q -- a cached page 1 would be served as page 2 (stale-page bug)", page1)
@@ -45,15 +44,15 @@ func TestCacheKey_CursorIsolatesPages(t *testing.T) {
 
 func TestCacheKey_SameCursorIsStable(t *testing.T) {
 	e := &MemQLEngine{}
-	a := e.cacheKey("concept==v1:x:y", nil, 50, 0, 0, "createdAt:desc", "none", "graph-bundle", "tok-1")
-	b := e.cacheKey("concept==v1:x:y", nil, 50, 0, 0, "createdAt:desc", "none", "graph-bundle", "tok-1")
+	a := e.cacheKey("concept==v1:x:y", nil, 50, 0, "createdAt:desc", "none", "graph-bundle", "tok-1")
+	b := e.cacheKey("concept==v1:x:y", nil, 50, 0, "createdAt:desc", "none", "graph-bundle", "tok-1")
 	if a != b {
 		t.Fatalf("identical inputs must produce a stable cache key: %q != %q", a, b)
 	}
 	// And the empty-cursor (non-paginated) key is itself stable and distinct
 	// from any populated-cursor key.
-	empty1 := e.cacheKey("concept==v1:x:y", nil, 50, 0, 0, "createdAt:desc", "none", "graph-bundle", "")
-	empty2 := e.cacheKey("concept==v1:x:y", nil, 50, 0, 0, "createdAt:desc", "none", "graph-bundle", "")
+	empty1 := e.cacheKey("concept==v1:x:y", nil, 50, 0, "createdAt:desc", "none", "graph-bundle", "")
+	empty2 := e.cacheKey("concept==v1:x:y", nil, 50, 0, "createdAt:desc", "none", "graph-bundle", "")
 	if empty1 != empty2 {
 		t.Fatalf("empty-cursor key must be stable: %q != %q", empty1, empty2)
 	}

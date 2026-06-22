@@ -20,7 +20,7 @@ import (
 // targets (#216 / #221 / #239 all required matching fixes in both
 // helpers). Consolidated in #265.
 //
-// Downstream directive-arg consumers (paginate limit/offset,
+// Downstream directive-arg consumers (paginate limit,
 // withDepth, etc.) that need an int should pass the returned `any`
 // through the langparser-side `numericAsInt` helper rather than
 // asserting `.(float64)` directly -- the assertion fails for integer

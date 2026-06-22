@@ -213,11 +213,10 @@ func applyDirectiveWrappers(plan *QueryPlan) (ExpressionNode, error) {
 			plan.PayloadSelect = true
 			expr = node.Target
 		case *PaginateExpression:
-			if plan.Limit != nil || plan.Offset != nil {
+			if plan.Limit != nil {
 				return nil, fmt.Errorf("multiple paginate() directives are not supported")
 			}
 			plan.Limit = node.Limit
-			plan.Offset = node.Offset
 			expr = node.Target
 		case *TimestampExpression:
 			if plan.Timestamp != nil || plan.UseLatest {

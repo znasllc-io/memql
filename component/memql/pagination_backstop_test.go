@@ -50,12 +50,9 @@ func TestDefaultListLimit_SortedKeepsWideDefault(t *testing.T) {
 func TestEffectiveWindow_UnmarkedListBackstop(t *testing.T) {
 	e := backstopEngine()
 	plan := &QueryPlan{}
-	limit, offset := e.effectiveWindow(plan.Limit, plan.Offset, e.defaultListLimit(plan))
+	limit := e.effectiveWindow(plan.Limit, e.defaultListLimit(plan))
 	if limit != 50 {
 		t.Errorf("effectiveWindow limit = %d, want 50", limit)
-	}
-	if offset != 0 {
-		t.Errorf("effectiveWindow offset = %d, want 0", offset)
 	}
 }
 
@@ -65,7 +62,7 @@ func TestEffectiveWindow_UnmarkedListBackstop(t *testing.T) {
 func TestEffectiveWindow_ExplicitLimitWins(t *testing.T) {
 	e := backstopEngine()
 	plan := &QueryPlan{Limit: intptr(7)}
-	limit, _ := e.effectiveWindow(plan.Limit, plan.Offset, e.defaultListLimit(plan))
+	limit := e.effectiveWindow(plan.Limit, e.defaultListLimit(plan))
 	if limit != 7 {
 		t.Errorf("effectiveWindow limit = %d, want 7 (explicit paginate window)", limit)
 	}

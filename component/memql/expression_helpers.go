@@ -145,10 +145,6 @@ func cloneExpressionNode(expr ExpressionNode) ExpressionNode {
 			limit := *node.Limit
 			clone.Limit = &limit
 		}
-		if node.Offset != nil {
-			offset := *node.Offset
-			clone.Offset = &offset
-		}
 		return clone
 	case *SelectExpression:
 		return &SelectExpression{

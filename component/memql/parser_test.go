@@ -101,11 +101,13 @@ func TestParsePaginateDirective(t *testing.T) {
 	plan := mustParse(t, "paginate(concept==v1:conversation, 50)")
 	require.NotNil(t, plan.Limit)
 	require.Equal(t, 50, *plan.Limit)
-	require.Nil(t, plan.Offset)
 
-	plan = mustParse(t, "paginate(concept==v1:conversation, 25, 10)")
-	require.NotNil(t, plan.Offset)
-	require.Equal(t, 10, *plan.Offset)
+	// Offset pagination was removed (epic 5, 5.13 / memql#1993): keyset
+	// cursors are the continuation primitive, so paginate() takes a single
+	// LIMIT (page size) only. The legacy 3-arg `paginate(target, LIMIT,
+	// OFFSET)` form is rejected.
+	_, err := newParserTestEngine(t).Parse("paginate(concept==v1:conversation, 25, 10)")
+	require.Error(t, err, "3-arg paginate (offset) should no longer parse")
 }
 
 func TestParseAsOfDirective(t *testing.T) {

@@ -14,7 +14,7 @@ func (e *MemQLEngine) evaluateRelationshipExpression(ctx context.Context, expr *
 		return nil, fmt.Errorf("relationship expression is nil")
 	}
 
-	innerNodes, err := e.evaluateExpression(ctx, expr.Target, timestamp, limit, 0, nil)
+	innerNodes, err := e.evaluateExpression(ctx, expr.Target, timestamp, limit, nil)
 	if err != nil {
 		return nil, err
 	}

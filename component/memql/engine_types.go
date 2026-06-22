@@ -28,13 +28,11 @@ type QueryPlan struct {
 	Timestamp     *time.Time
 	UseLatest     bool
 	Limit         *int
-	Offset        *int
 	// After carries an opaque inbound keyset cursor (see cursor.go). When set,
 	// the executor pushes a `WHERE (createdAt, id) <keyset> (?, ?)` predicate
-	// into SQL and continues from the encoded position instead of scanning and
-	// discarding an offset window. Threaded onto the plan from the request
-	// context (ContextWithCursor) by the engine; nil for offset / unpaginated
-	// queries.
+	// into SQL and continues from the encoded position. Threaded onto the plan
+	// from the request context (ContextWithCursor) by the engine; nil for the
+	// first page and unpaginated queries.
 	After             *string
 	Depth             *int
 	Sort              []SortField
@@ -341,11 +339,10 @@ type SortExpression struct {
 
 func (*SortExpression) isExpressionNode() {}
 
-// PaginateExpression limits and offsets results produced by its target expression.
+// PaginateExpression limits the results produced by its target expression.
 type PaginateExpression struct {
 	Target ExpressionNode
 	Limit  *int
-	Offset *int
 }
 
 func (*PaginateExpression) isExpressionNode() {}

@@ -848,7 +848,6 @@ func resolveBareConcept(expr ExpressionNode, boundConcept string) ExpressionNode
 	case *PaginateExpression:
 		return &PaginateExpression{
 			Limit:  n.Limit,
-			Offset: n.Offset,
 			Target: resolveBareConcept(n.Target, boundConcept),
 		}
 	case *ShapeExpression:

@@ -4928,11 +4928,11 @@ func (p *Parser) parseDirectiveTarget() (ExpressionNode, error) {
 }
 
 // parsePaginateFunction parses the modern single-paren form
-// `paginate(target, LIMIT [, OFFSET])` and produces a *PaginateExpr
-// matching what the memql runtime parser (parsePaginate, parser.go
-// ~line 1223) emits. Limit must be a positive integer; offset, when
-// present, must be a non-negative integer. The opening `(` is already
-// consumed by the caller (parseFunctionCall).
+// `paginate(target, LIMIT)` and produces a *PaginateExpr matching what
+// the memql runtime parser emits. Limit must be a positive integer
+// (the page size). The opening `(` is already consumed by the caller
+// (parseFunctionCall). Offset pagination was removed (epic 5, 5.13 /
+// memql#1993) -- keyset cursors are the continuation primitive.
 func (p *Parser) parsePaginateFunction() (ExpressionNode, error) {
 	if p.check(TokenParenClose) {
 		return nil, newParseErrorf(&p.current, "paginate() requires an expression argument")
@@ -4951,16 +4951,6 @@ func (p *Parser) parsePaginateFunction() (ExpressionNode, error) {
 		return nil, err
 	}
 
-	var offsetPtr *int
-	if p.check(TokenComma) {
-		p.advance()
-		offset, err := p.expectNonNegativeIntegerLiteral("paginate offset")
-		if err != nil {
-			return nil, err
-		}
-		offsetPtr = &offset
-	}
-
 	if err := p.expect(TokenParenClose); err != nil {
 		return nil, err
 	}
@@ -4968,7 +4958,6 @@ func (p *Parser) parsePaginateFunction() (ExpressionNode, error) {
 	return &PaginateExpr{
 		Target: target,
 		Limit:  &limit,
-		Offset: offsetPtr,
 	}, nil
 }
 
@@ -5204,23 +5193,6 @@ func (p *Parser) expectPositiveIntegerLiteral(field string) (int, error) {
 	return value, nil
 }
 
-// expectNonNegativeIntegerLiteral is the offset-style counterpart to
-// expectPositiveIntegerLiteral (zero is allowed).
-func (p *Parser) expectNonNegativeIntegerLiteral(field string) (int, error) {
-	if !p.check(TokenNumber) {
-		return 0, newParseErrorf(&p.current, "%s must be an integer literal", field)
-	}
-	value, err := strconv.Atoi(strings.TrimSpace(p.current.Literal))
-	if err != nil {
-		return 0, newParseErrorf(&p.current, "%s must be an integer", field)
-	}
-	if value < 0 {
-		return 0, newParseErrorf(&p.current, "%s must be zero or greater", field)
-	}
-	p.advance()
-	return value, nil
-}
-
 // isSortDirectionLiteral returns true if value (case-insensitive)
 // names a sort direction (asc / desc). Mirrors the memql parser
 // helper of the same name -- the langparser cannot import that one
@@ -5320,9 +5292,6 @@ func (p *Parser) wrapDirective(name string, args map[string]any, target Expressi
 		if limit, ok := numericAsInt(args["limit"]); ok {
 			expr.Limit = &limit
 		}
-		if offset, ok := numericAsInt(args["offset"]); ok {
-			expr.Offset = &offset
-		}
 		return expr, nil
 
 	case "depth":
@@ -5378,8 +5347,8 @@ func (p *Parser) parseValue() (any, error) {
 		// Bare integers store as int64; decimals / scientific store as
 		// float64. Same int-first dance as parsePrimary above and
 		// parseAttribute's bare-numeric path; see issues #255 / #265
-		// for the equivalence rationale. The four directive-arg call
-		// sites (paginate limit/offset, withDepth,
+		// for the equivalence rationale. The directive-arg call
+		// sites (paginate limit, withDepth,
 		// concurrent.concurrency) that read these values use
 		// numericAsInt to accept both int64 and float64.
 		val, err := baseparser.ParseNumericLiteral(p.current.Literal)

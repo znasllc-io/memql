@@ -691,7 +691,6 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		return &PaginateExpression{
 			Target: target,
 			Limit:  node.Limit,
-			Offset: node.Offset,
 		}, nil
 
 	case *SelectExpression:

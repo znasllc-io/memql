@@ -63,7 +63,12 @@ func TestQueryStructFormPaginateDirective(t *testing.T) {
 	}
 }
 
-func TestQueryStructFormPaginateDirectiveWithOffset(t *testing.T) {
+// Offset pagination was removed (epic 5, 5.13 / memql#1993): keyset
+// cursors are the continuation primitive, so the runtime paginate()
+// form is `paginate(target, LIMIT)` only -- no third OFFSET arg. A
+// struct-form `paginate 10, 20` stitches a third arg that the runtime
+// parser rejects.
+func TestQueryStructFormPaginateDirectiveOffsetRejected(t *testing.T) {
 	source := `query space querySpacesPage {
   filter  payload.active==true
   paginate 10, 20
@@ -73,9 +78,10 @@ func TestQueryStructFormPaginateDirectiveWithOffset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormaliseQuerySource: %v", err)
 	}
-	want := `paginate(concept==space;payload.active==true, 10, 20)`
-	if !strings.Contains(out, want) {
-		t.Errorf("expected paginate-with-offset wrap, got:\n%s", out)
+	// The two-arg paginate form no longer exists -- a stitched third arg
+	// is no longer the supported offset window.
+	if _, perr := ParseExpression(out); perr == nil {
+		t.Errorf("expected the runtime parser to reject a 3-arg paginate (offset removed), got a successful parse of:\n%s", out)
 	}
 }
 

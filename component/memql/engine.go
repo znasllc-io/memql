@@ -422,7 +422,7 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// Top-level mutation function call: evaluate template and execute one insert.
 	if plan.MutationCall != nil {
 		// Disallow any query directives or modifiers around mutation calls.
-		if plan.Timestamp != nil || plan.UseLatest || plan.Limit != nil || plan.Offset != nil || plan.Depth != nil || len(plan.Sort) > 0 ||
+		if plan.Timestamp != nil || plan.UseLatest || plan.Limit != nil || plan.Depth != nil || len(plan.Sort) > 0 ||
 			len(plan.Fields) > 0 || plan.ShapeTemplate != nil || plan.PayloadSelect || (len(plan.Metadata.Fields) > 0 && !plan.Metadata.IncludeAll) {
 			return nil, fmt.Errorf("mutation functions cannot be combined with query directives (sort/paginate/select/shape/asOf/withDepth)")
 		}
@@ -505,7 +505,7 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 
 	effectiveTimestamp := plan.Timestamp
 
-	limit, offset := e.effectiveWindow(plan.Limit, plan.Offset, e.defaultListLimit(plan))
+	limit := e.effectiveWindow(plan.Limit, e.defaultListLimit(plan))
 	depth := e.effectiveDepth(plan.Depth)
 
 	sorter, err := compileSortFields(plan.Sort)
@@ -518,8 +518,8 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// stash the resolved keyset position so the executor pushes a
 	// `WHERE (createdAt, id) <keyset> (?, ?)` predicate into SQL. A cursor
 	// minted under a different ordering is rejected with a typed error rather
-	// than silently returning a wrong page. The cursor and offset are mutually
-	// exclusive: a continuation supersedes any offset window.
+	// than silently returning a wrong page. A continuation supersedes the
+	// first-page LIMIT window.
 	if plan.After == nil {
 		if c := cursorFromContext(ctx); c != "" {
 			plan.After = &c
@@ -535,7 +535,6 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		if eligible {
 			ctx = contextWithKeyset(ctx, pos)
 			keysetActive = true
-			offset = 0
 		}
 	}
 
@@ -582,14 +581,14 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		if plan.After != nil {
 			cursorKey = strings.TrimSpace(*plan.After)
 		}
-		cacheKey = e.cacheKey(signature, effectiveTimestamp, limit, offset, depth, sorter.signatureValue(), fieldSignature, shapeSignature, cursorKey)
+		cacheKey = e.cacheKey(signature, effectiveTimestamp, limit, depth, sorter.signatureValue(), fieldSignature, shapeSignature, cursorKey)
 		if cached, ok := e.cache.get(cacheKey); ok {
 			e.emitQueryExecutedEvent(startTime, cached, true)
 			return cached, nil
 		}
 	}
 
-	nodes, err := e.evaluateExpression(ctx, plan.Root, effectiveTimestamp, limit, offset, sorter)
+	nodes, err := e.evaluateExpression(ctx, plan.Root, effectiveTimestamp, limit, sorter)
 	if err != nil {
 		return nil, err
 	}
@@ -1263,7 +1262,7 @@ func (e *MemQLEngine) defaultListLimit(plan *QueryPlan) int {
 	return e.config.MaxResults
 }
 
-func (e *MemQLEngine) effectiveWindow(limitPtr, offsetPtr *int, defaultLimit int) (int, int) {
+func (e *MemQLEngine) effectiveWindow(limitPtr *int, defaultLimit int) int {
 	limit := defaultLimit
 	if limit <= 0 {
 		limit = e.config.MaxResults
@@ -1272,28 +1271,15 @@ func (e *MemQLEngine) effectiveWindow(limitPtr, offsetPtr *int, defaultLimit int
 		limit = *limitPtr
 	}
 
-	offset := 0
-	if offsetPtr != nil && *offsetPtr > 0 {
-		offset = *offsetPtr
-	}
-
-	if offset > e.config.MaxWindow {
-		offset = e.config.MaxWindow
-	}
-
-	if offset+limit > e.config.MaxWindow {
-		if e.config.MaxWindow > offset {
-			limit = e.config.MaxWindow - offset
-		} else {
-			limit = 0
-		}
+	if limit > e.config.MaxWindow {
+		limit = e.config.MaxWindow
 	}
 
 	if limit < 0 {
 		limit = 0
 	}
 
-	return limit, offset
+	return limit
 }
 
 func (e *MemQLEngine) effectiveDepth(depthPtr *int) int {
@@ -1303,13 +1289,10 @@ func (e *MemQLEngine) effectiveDepth(depthPtr *int) int {
 	return *depthPtr
 }
 
-func (e *MemQLEngine) fetchTarget(limit, offset int) int {
+func (e *MemQLEngine) fetchTarget(limit int) int {
 	target := limit
 	if target <= 0 {
 		target = e.config.MaxResults
-	}
-	if offset > 0 {
-		target += offset
 	}
 	if target > e.config.MaxWindow {
 		target = e.config.MaxWindow
@@ -1320,7 +1303,7 @@ func (e *MemQLEngine) fetchTarget(limit, offset int) int {
 	return target
 }
 
-func (e *MemQLEngine) cacheKey(query string, timestamp *time.Time, limit, offset, depth int, sortSignature, selectSignature, shapeSignature, cursor string) string {
+func (e *MemQLEngine) cacheKey(query string, timestamp *time.Time, limit, depth int, sortSignature, selectSignature, shapeSignature, cursor string) string {
 	tsKey := "latest"
 	if timestamp != nil {
 		tsKey = timestamp.UTC().Format(time.RFC3339Nano)
@@ -1338,7 +1321,6 @@ func (e *MemQLEngine) cacheKey(query string, timestamp *time.Time, limit, offset
 		"query":     query,
 		"timestamp": tsKey,
 		"limit":     limit,
-		"offset":    offset,
 		"depth":     depth,
 		"sort":      sortSignature,
 		"select":    selectSignature,

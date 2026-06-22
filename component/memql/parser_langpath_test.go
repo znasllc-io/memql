@@ -47,7 +47,6 @@ var representativeRuntimeQueries = []struct {
 	// emits the specialised AST nodes directly (#254). reflect.DeepEqual
 	// holds against the memql parser for every shape below.
 	{"paginate limit only", `paginate(concept==v1:cluster:node, 10)`},
-	{"paginate limit + offset", `paginate(concept==v1:cluster:node, 10, 5)`},
 	{"sort single field default desc", `sort(concept==v1:cluster:node, "createdAt")`},
 	{"sort field + explicit desc", `sort(concept==v1:cluster:node, "createdAt", "desc")`},
 	{"sort field + explicit asc", `sort(concept==v1:cluster:node, "createdAt", "asc")`},

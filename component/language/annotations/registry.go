@@ -121,7 +121,7 @@ var Docs = map[string]string{
 	"namespace":    "Concept namespace. Colon-separated lowercase identifiers (e.g., \"cognition\" or \"cognition:client:tool\").",
 	"scope":        "Partition scope. @scope(\"global\") places rows in the reserved _system partition; default is partition-scoped.",
 	"visibility":   "Which node types load this concept. @visibility(\"*\"), @visibility(\"cognition\", \"bff\"), or @visibility(!\"planner\").",
-	"cache":        "Result-cache the query's results for the given TTL. Format: @cache(ttl=\"300\") -- a whole number of SECONDS (string-valued). @cache(ttl=\"0\") is the explicit \"never cache\" escape. The engine keys the cache on the plan signature (query/sort/limit/offset/depth/shape + the keyset cursor) and evicts on any write to the read concept (5.4 invalidation). Cross-node: a cached concept's graph writes must be forwarded to peers by a node.RegisterRoutingRule, or the cached read goes stale on sibling replicas. See docs/internal/planning/cache-audit-phase-0.md.",
+	"cache":        "Result-cache the query's results for the given TTL. Format: @cache(ttl=\"300\") -- a whole number of SECONDS (string-valued). @cache(ttl=\"0\") is the explicit \"never cache\" escape. The engine keys the cache on the plan signature (query/sort/limit/depth/shape + the keyset cursor) and evicts on any write to the read concept (5.4 invalidation). Cross-node: a cached concept's graph writes must be forwarded to peers by a node.RegisterRoutingRule, or the cached read goes stale on sibling replicas. See docs/internal/planning/cache-audit-phase-0.md.",
 	"relationship": "Foreign-key relationship metadata. Format: @relationship(type=\"parent\", field=\"x\", target=\"v1:ns:concept\", direction=\"outgoing\").",
 }
 
