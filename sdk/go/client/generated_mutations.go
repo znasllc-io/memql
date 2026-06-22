@@ -898,6 +898,47 @@ func MutationCheckRecordBuild(args MutationCheckRecordArgs) string {
 	return b.String()
 }
 
+// MutationCloseCall -- Close a call record on disconnect: stamp end time, duration, disposition, and cost estimate.
+//
+// Bound concept: call.
+type MutationCloseCallArgs struct {
+	Id              string
+	DurationSeconds int
+	// Enum: completed | no_answer | busy | failed | canceled
+	Disposition  string
+	CostEstimate any
+}
+
+// MutationCloseCall calls the engine mutation mutationCloseCall.
+func (qc *QueryClient) MutationCloseCall(ctx context.Context, args MutationCloseCallArgs) (*Result, error) {
+	call := MutationCloseCallBuild(args)
+	return qc.executeNamed(ctx, "mutationCloseCall", call)
+}
+
+func MutationCloseCallBuild(args MutationCloseCallArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCloseCall({")
+	b.WriteString("id: ")
+	b.WriteString(fmt.Sprintf("%q", args.Id))
+	if b.Len() > 19 {
+		b.WriteString(", ")
+	}
+	b.WriteString("durationSeconds: ")
+	b.WriteString(fmt.Sprintf("%v", args.DurationSeconds))
+	if b.Len() > 19 {
+		b.WriteString(", ")
+	}
+	b.WriteString("disposition: ")
+	b.WriteString(fmt.Sprintf("%q", args.Disposition))
+	if b.Len() > 19 {
+		b.WriteString(", ")
+	}
+	b.WriteString("costEstimate: ")
+	b.WriteString(fmt.Sprintf("%q", args.CostEstimate))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationCompleteHarnessStep -- Record a running step's result (running -> done). done is terminal. The engine step guard rejects the transition when the prior status is not 'running'.
 //
 // Bound concept: step.
@@ -8369,6 +8410,77 @@ func MutationRecordBundleValidationBuild(args MutationRecordBundleValidationArgs
 	return b.String()
 }
 
+// MutationRecordCall -- Open an append-only call record on connect. Returns the new row whose id the caller updates on disconnect.
+//
+// Bound concept: call.
+type MutationRecordCallArgs struct {
+	// Enum: inbound | outbound
+	Direction      string
+	FromE164       string
+	ToE164         string
+	PartitionId    string
+	Room           string
+	Carrier        string
+	ProviderCallId string
+	AgentId        string
+}
+
+// MutationRecordCall calls the engine mutation mutationRecordCall.
+func (qc *QueryClient) MutationRecordCall(ctx context.Context, args MutationRecordCallArgs) (*Result, error) {
+	call := MutationRecordCallBuild(args)
+	return qc.executeNamed(ctx, "mutationRecordCall", call)
+}
+
+func MutationRecordCallBuild(args MutationRecordCallArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRecordCall({")
+	b.WriteString("direction: ")
+	b.WriteString(fmt.Sprintf("%q", args.Direction))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("fromE164: ")
+	b.WriteString(fmt.Sprintf("%q", args.FromE164))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("toE164: ")
+	b.WriteString(fmt.Sprintf("%q", args.ToE164))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("room: ")
+	b.WriteString(fmt.Sprintf("%q", args.Room))
+	if args.Carrier != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("carrier: ")
+		b.WriteString(fmt.Sprintf("%q", args.Carrier))
+	}
+	if args.ProviderCallId != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("providerCallId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ProviderCallId))
+	}
+	if args.AgentId != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("agentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationRecordDependencyEdge -- Record one dependency edge for a bundle's construct (#957). Written by the compile/bind pass once it resolves a construct's references. ownerUserId stamped from actor.userId.
 //
 // Bound concept: dependencyEdge.
@@ -8513,6 +8625,72 @@ func MutationRecordLegalAcceptanceBuild(args MutationRecordLegalAcceptanceArgs) 
 	}
 	b.WriteString("legalAcceptance: ")
 	b.WriteString(renderMemQLValue(args.LegalAcceptance))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationRecordNumber -- Persist a provisioned DID. Called after a carrier BuyNumber succeeds.
+//
+// Bound concept: number.
+type MutationRecordNumberArgs struct {
+	E164        string
+	Carrier     string
+	PartitionId string
+	// Enum: inbound | outbound | both
+	Purpose    string
+	ProviderId string
+	// Enum: local | tollfree | mobile
+	NumberType  string
+	MonthlyCost any
+}
+
+// MutationRecordNumber calls the engine mutation mutationRecordNumber.
+func (qc *QueryClient) MutationRecordNumber(ctx context.Context, args MutationRecordNumberArgs) (*Result, error) {
+	call := MutationRecordNumberBuild(args)
+	return qc.executeNamed(ctx, "mutationRecordNumber", call)
+}
+
+func MutationRecordNumberBuild(args MutationRecordNumberArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRecordNumber({")
+	b.WriteString("e164: ")
+	b.WriteString(fmt.Sprintf("%q", args.E164))
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
+	b.WriteString("carrier: ")
+	b.WriteString(fmt.Sprintf("%q", args.Carrier))
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	if args.Purpose != "" {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("purpose: ")
+		b.WriteString(fmt.Sprintf("%q", args.Purpose))
+	}
+	if args.ProviderId != "" {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("providerId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ProviderId))
+	}
+	if args.NumberType != "" {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("numberType: ")
+		b.WriteString(fmt.Sprintf("%q", args.NumberType))
+	}
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
+	b.WriteString("monthlyCost: ")
+	b.WriteString(fmt.Sprintf("%q", args.MonthlyCost))
 	b.WriteString("})")
 	return b.String()
 }
@@ -8841,6 +9019,67 @@ func MutationRecordRouterCallBuild(args MutationRecordRouterCallArgs) string {
 		}
 		b.WriteString("fallbackFromModel: ")
 		b.WriteString(fmt.Sprintf("%q", args.FallbackFromModel))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationRecordTrunk -- Persist a LiveKit SIP trunk configuration. secretRef points at external-secrets, never a secret value.
+//
+// Bound concept: trunk.
+type MutationRecordTrunkArgs struct {
+	Carrier string
+	// Enum: inbound | outbound | both
+	Direction      string
+	Name           string
+	LivekitTrunkId string
+	SipEdgeUri     string
+	SecretRef      string
+}
+
+// MutationRecordTrunk calls the engine mutation mutationRecordTrunk.
+func (qc *QueryClient) MutationRecordTrunk(ctx context.Context, args MutationRecordTrunkArgs) (*Result, error) {
+	call := MutationRecordTrunkBuild(args)
+	return qc.executeNamed(ctx, "mutationRecordTrunk", call)
+}
+
+func MutationRecordTrunkBuild(args MutationRecordTrunkArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRecordTrunk({")
+	b.WriteString("carrier: ")
+	b.WriteString(fmt.Sprintf("%q", args.Carrier))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("direction: ")
+	b.WriteString(fmt.Sprintf("%q", args.Direction))
+	if args.Name != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("name: ")
+		b.WriteString(fmt.Sprintf("%q", args.Name))
+	}
+	if args.LivekitTrunkId != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("livekitTrunkId: ")
+		b.WriteString(fmt.Sprintf("%q", args.LivekitTrunkId))
+	}
+	if args.SipEdgeUri != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sipEdgeUri: ")
+		b.WriteString(fmt.Sprintf("%q", args.SipEdgeUri))
+	}
+	if args.SecretRef != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("secretRef: ")
+		b.WriteString(fmt.Sprintf("%q", args.SecretRef))
 	}
 	b.WriteString("})")
 	return b.String()
@@ -11773,6 +12012,35 @@ func MutationUpdateNoteBuild(args MutationUpdateNoteArgs) string {
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationUpdateNumberStatus -- Update a DID's lifecycle status (e.g. on release).
+//
+// Bound concept: number.
+type MutationUpdateNumberStatusArgs struct {
+	Id string
+	// Enum: active | releasing | released
+	Status string
+}
+
+// MutationUpdateNumberStatus calls the engine mutation mutationUpdateNumberStatus.
+func (qc *QueryClient) MutationUpdateNumberStatus(ctx context.Context, args MutationUpdateNumberStatusArgs) (*Result, error) {
+	call := MutationUpdateNumberStatusBuild(args)
+	return qc.executeNamed(ctx, "mutationUpdateNumberStatus", call)
+}
+
+func MutationUpdateNumberStatusBuild(args MutationUpdateNumberStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationUpdateNumberStatus({")
+	b.WriteString("id: ")
+	b.WriteString(fmt.Sprintf("%q", args.Id))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(fmt.Sprintf("%q", args.Status))
 	b.WriteString("})")
 	return b.String()
 }
