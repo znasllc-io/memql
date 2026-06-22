@@ -20,6 +20,9 @@ concept number {
   numberType    enum("local", "tollfree", "mobile")  @default("local") @description("Origination class; drives per-minute inbound cost.")
   monthlyCost   float   @description("Recurring per-number cost in USD, when the carrier reports it.")
   purchasedAt   datetime  @description("When the DID was purchased.")
+  e911Registered  bool  @default("false") @description("Whether an E911 emergency address is registered for this DID. Compliance gate before the DID goes live (memql#1915).")
+  e911AddressId   string  @description("Carrier reference for the registered E911 address.")
+  callerIdVerified bool @default("false") @description("Whether this DID is verified for outbound caller-ID presentation (STIR/SHAKEN attestation is carrier-side; this flags our own verified ownership).")
 }
 
 @version("1.0.0")
@@ -52,4 +55,15 @@ concept call {
   durationSeconds int     @default("0") @description("Billable duration in seconds.")
   disposition     enum("in_progress", "completed", "no_answer", "busy", "failed", "canceled")  @default("in_progress") @description("Call outcome.")
   costEstimate    float   @default("0") @description("Estimated total cost in USD (carrier + model audio), for per-call attribution.")
+}
+
+@version("1.0.0")
+@namespace("telephony")
+@description("TCPA consent / opt-out state for an external phone number. Outbound calls to an opted-out number are blocked with an auditable reason (memql#1915). Append-only: the newest row per phoneNumber is authoritative.")
+concept consent {
+  phoneNumber  string  @required @description("The external party's E.164 number this consent record governs.")
+  partitionId  string  @required @description("Tenant partition the consent was recorded under (Amendment A).")
+  status       enum("opted_in", "opted_out")  @required @description("Consent state. opted_out blocks outbound calls.")
+  reason       string  @description("Why the state was set (e.g. 'user requested removal', 'written consent on file').")
+  source       string  @description("Where the consent came from (e.g. 'ivr_optout', 'admin', 'import').")
 }

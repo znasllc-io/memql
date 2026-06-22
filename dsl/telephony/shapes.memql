@@ -1,7 +1,7 @@
 // Row-projection shapes for the telephony concepts. Used by the telephony
 // queries and by the cockpit number/call views.
 
-use telephony.concepts.{ number, trunk, call }
+use telephony.concepts.{ number, trunk, call, consent }
 
 @row
 @description("Full DID projection: address, carrier, the bound partition (Amendment A), purpose/status, origination class, and cost/lifecycle.")
@@ -50,5 +50,17 @@ shape call callFull {
   payload.durationSeconds
   payload.disposition
   payload.costEstimate
+  row.createdAt
+}
+
+@row
+@description("Consent / opt-out projection for an external number.")
+shape consent consentFull {
+  row.id
+  payload.phoneNumber
+  payload.partitionId
+  payload.status
+  payload.reason
+  payload.source
   row.createdAt
 }

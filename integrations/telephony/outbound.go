@@ -106,6 +106,11 @@ func (i *Integration) PlaceCall(ctx context.Context, to, from, partitionID, dtmf
 	if err != nil {
 		return CallHandle{}, err
 	}
+	// Compliance gate (memql#1915): block opted-out callees + require a
+	// caller-ID before any carrier dial.
+	if err := i.CheckOutboundAllowed(ctx, to, from); err != nil {
+		return CallHandle{}, err
+	}
 	trunkID, err := i.EnsureOutboundTrunk(ctx)
 	if err != nil {
 		return CallHandle{}, err

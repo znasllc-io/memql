@@ -10676,6 +10676,57 @@ func MutationSetBudgetBuild(args MutationSetBudgetArgs) string {
 	return b.String()
 }
 
+// MutationSetConsent -- Record TCPA consent / opt-out for an external number (append-only; newest wins).
+//
+// Bound concept: consent.
+type MutationSetConsentArgs struct {
+	PhoneNumber string
+	PartitionId string
+	// Enum: opted_in | opted_out
+	Status string
+	Reason string
+	Source string
+}
+
+// MutationSetConsent calls the engine mutation mutationSetConsent.
+func (qc *QueryClient) MutationSetConsent(ctx context.Context, args MutationSetConsentArgs) (*Result, error) {
+	call := MutationSetConsentBuild(args)
+	return qc.executeNamed(ctx, "mutationSetConsent", call)
+}
+
+func MutationSetConsentBuild(args MutationSetConsentArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationSetConsent({")
+	b.WriteString("phoneNumber: ")
+	b.WriteString(fmt.Sprintf("%q", args.PhoneNumber))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(fmt.Sprintf("%q", args.Status))
+	if args.Reason != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reason: ")
+		b.WriteString(fmt.Sprintf("%q", args.Reason))
+	}
+	if args.Source != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("source: ")
+		b.WriteString(fmt.Sprintf("%q", args.Source))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationSetConstructCompiledForm -- Store the cached compiled form for a construct, produced by the Gate 1 compile+bind harness (#956), so activation doesn't re-parse.
 //
 // Bound concept: construct.
@@ -10852,6 +10903,51 @@ func MutationSetGlobalVariableBuild(args MutationSetGlobalVariableArgs) string {
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationSetNumberE911 -- Set E911 / caller-ID verification state on an owned DID (by row id).
+//
+// Bound concept: number.
+type MutationSetNumberE911Args struct {
+	Id                  string
+	E911Registered      bool
+	E911AddressId       string
+	CallerIdVerified    bool
+	CallerIdVerifiedSet bool // set true to send callerIdVerified; required because zero-value bool is ambiguous
+}
+
+// MutationSetNumberE911 calls the engine mutation mutationSetNumberE911.
+func (qc *QueryClient) MutationSetNumberE911(ctx context.Context, args MutationSetNumberE911Args) (*Result, error) {
+	call := MutationSetNumberE911Build(args)
+	return qc.executeNamed(ctx, "mutationSetNumberE911", call)
+}
+
+func MutationSetNumberE911Build(args MutationSetNumberE911Args) string {
+	var b strings.Builder
+	b.WriteString("mutationSetNumberE911({")
+	b.WriteString("id: ")
+	b.WriteString(fmt.Sprintf("%q", args.Id))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("e911Registered: ")
+	b.WriteString(fmt.Sprintf("%v", args.E911Registered))
+	if args.E911AddressId != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("e911AddressId: ")
+		b.WriteString(fmt.Sprintf("%q", args.E911AddressId))
+	}
+	if args.CallerIdVerifiedSet {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("callerIdVerified: ")
+		b.WriteString(fmt.Sprintf("%v", args.CallerIdVerified))
 	}
 	b.WriteString("})")
 	return b.String()
