@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/uptrace/bun"
 
@@ -53,6 +54,30 @@ func (a *App) materializePlugins() {
 			a.fatal("plug-in registration failed", "plugin", p.Name, "error", err)
 		}
 		a.Logger.Info("plug-in registered", "name", p.Name)
+	}
+
+	// Wire the semantic (vector) AI-call cache (5.9) now that the engine,
+	// provider registry, and database handle are all live. The embedding
+	// provider + node_vectors-class store sit behind the primitive's narrow
+	// interfaces. This is a no-op for every namespace by default (the
+	// enablement registry ships empty), so it changes no AI behaviour until
+	// a vetted classification namespace is enabled.
+	a.engine.WireSemanticCache("", a.semanticCacheDBGetter())
+}
+
+// semanticCacheDBGetter resolves the underlying *sql.DB the semantic cache's
+// pgvector store reads/writes. Lazy so it observes the live handle. Returns nil
+// until the database component is up, which the store treats as fail-open.
+func (a *App) semanticCacheDBGetter() func() *sql.DB {
+	return func() *sql.DB {
+		if a.db == nil {
+			return nil
+		}
+		bdb := a.db.BunDB()
+		if bdb == nil {
+			return nil
+		}
+		return bdb.DB
 	}
 }
 

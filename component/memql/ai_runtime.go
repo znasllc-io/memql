@@ -18,6 +18,14 @@ type aiRuntime struct {
 	cache     *aiResponseCache
 	cacheCfg  aiCacheConfig
 	eventBus  *events.Bus
+
+	// semantic is the optional vector (similarity) cache layer (5.9). It
+	// sits AFTER the exact-hash cache: exact-hash check first (cheap),
+	// then a semantic nearest-neighbour lookup on exact-miss for ENABLED
+	// namespaces only. nil until SetSemanticCache wires an embedder + store;
+	// when nil (or for a disabled/unset namespace) the AI path is exactly
+	// the pre-5.9 exact-hash/fresh behaviour.
+	semantic *semanticAICache
 }
 
 func newAIRuntime(logger *slog.Logger, prompts *PromptRegistry, providers *ProviderRegistry, cfg aiCacheConfig) *aiRuntime {
@@ -39,6 +47,16 @@ func (r *aiRuntime) SetEventBus(bus *events.Bus) {
 		return
 	}
 	r.eventBus = bus
+}
+
+// SetSemanticCache wires the optional semantic (vector) cache layer. Safe to
+// pass nil (leaves the runtime exact-hash-only). Called from engine bootstrap
+// once the embedding provider + DB getter are available.
+func (r *aiRuntime) SetSemanticCache(s *semanticAICache) {
+	if r == nil {
+		return
+	}
+	r.semantic = s
 }
 
 // publishEvent emits an event to the event bus if configured.
@@ -110,6 +128,27 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 		}
 	}
 
+	// Semantic (vector) cache lookup -- AFTER the exact-hash miss above, and
+	// only for an invocation that opted into an ENABLED classification
+	// namespace. A near-duplicate prompt ("thanks!" vs "thanks") that the
+	// exact-hash cache missed can still hit here, gated by the namespace's
+	// similarity threshold (the wrong-answer guard). Disabled/unset
+	// namespaces skip this entirely (no embed call, no behaviour change).
+	namespace := strings.TrimSpace(invocation.SemanticNamespace)
+	semanticEnabled := namespace != "" && r.semantic.Enabled(namespace)
+	if semanticEnabled {
+		if cached, ok := r.semantic.Lookup(ctx, namespace, text); ok {
+			r.publishEvent(events.TopicAICompletionFinished, events.KindAICompletionFinished, map[string]any{
+				"templateId": invocation.TemplateId,
+				"provider":   providerName,
+				"durationMs": time.Since(startTime).Milliseconds(),
+				"cached":     true,
+				"cacheKind":  "semantic",
+			})
+			return cached, nil
+		}
+	}
+
 	// Emit completion started event
 	r.publishEvent(events.TopicAICompletionStarted, events.KindAICompletionStarted, map[string]any{
 		"templateId": invocation.TemplateId,
@@ -138,6 +177,11 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 
 	if ttl > 0 && r.cache != nil {
 		r.cache.set(cacheKey, result, ttl)
+	}
+	// Store the fresh result back into the semantic cache so the next
+	// near-duplicate prompt hits. No-op for disabled/unset namespaces.
+	if semanticEnabled {
+		r.semantic.Store(ctx, namespace, text, result)
 	}
 	return result, nil
 }
