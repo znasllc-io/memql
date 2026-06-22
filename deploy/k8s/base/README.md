@@ -115,12 +115,40 @@ releases: (1) add the new shape + write both, (2) backfill + switch reads,
 
 ## Secrets (genesis A2)
 
-Three keys in `memql-secrets`: `MEMQL_MASTER_KEY`, `MEMQL_GENESIS_B64`,
-`MEMORY_NODES_DATABASE_DSN`. With `MEMQL_GENESIS_AUTOLOAD=true`, each pod
-decrypts the sealed envelope in-process at boot and applies ~150 vars
-set-if-absent; the per-pod overrides (node type, mesh addresses, DSN) win.
-See `secret.example.yaml` for the imperative `kubectl create secret`
-recipe and the Azure Key Vault CSI alternative.
+Four keys in `memql-secrets`: `MEMQL_MASTER_KEY`, `MEMQL_GENESIS_B64`,
+`MEMORY_NODES_DATABASE_DSN`, `MEMORY_NODES_DATABASE_DIRECT_DSN`. With
+`MEMQL_GENESIS_AUTOLOAD=true`, each pod decrypts the sealed envelope in-process
+at boot and applies ~150 vars set-if-absent; the per-pod overrides (node type,
+mesh addresses, the DSNs) win. Every DB-connecting node mounts the Secret via
+`envFrom: secretRef: memql-secrets`, so a key added here reaches all pods (no
+manifest change). See `secret.example.yaml` for the imperative
+`kubectl create secret` recipe and the Azure Key Vault CSI alternative.
+
+### Hybrid connection-pool endpoint split (epic [#1925](https://github.com/znasllc-io/memql/issues/1925))
+
+To kill the deploy-time connection storm (SQLSTATE 53300), bulk traffic rides
+the Tiger **transaction pooler** (PgBouncer) and only session-stateful work
+takes a direct backend:
+
+- `MEMORY_NODES_DATABASE_DSN` -> the **transaction pooler** (db
+  `tsdb_transaction`, pooler port `39578`). All queries + mutations. The
+  pooler decouples client connections from Postgres backends, so a blue-green
+  + rolling deploy surge no longer maps 1:1 to direct slots.
+- `MEMORY_NODES_DATABASE_DIRECT_DSN` -> the **direct** (non-pooled) endpoint
+  (db `tsdb`). Session-scoped advisory locks (cognition dispatch/greet/feedback
+  gates, cron leader, topology reconciler, planner admission) + the bun
+  migrator resolve their handle here (`Database.DirectBunDB()`), so a
+  transaction-mode pooler can't recycle a held session out from under them.
+  **Optional** — when unset, `DirectBunDB()` falls back to the main pool
+  (single-pool behavior), so dev/local without a pooler is unaffected.
+
+The split is env-agnostic: only the two DSN values differ per environment,
+never the code path. The local parity cluster mirrors it with an in-compose
+PgBouncer (`docker/docker-compose.cluster.yml`, #1932). bun's `pgdriver` speaks
+the simple query protocol (no server-side prepared statements), so it is
+transaction-pool safe. Migrations stay correct because they run on the direct
+endpoint; pods reading bulk through the pooler see the same schema (the pooler
+fronts the same database).
 
 ## Identity HA — env-provided signing key ([#550](https://github.com/znasllc-io/memql/issues/550))
 
@@ -145,10 +173,12 @@ deployment (automatic rotation is disabled in this mode). Without
 kubectl apply -f deploy/k8s/namespace.yaml
 
 # 2. Secret (real values -- created out-of-band, NOT in kustomize)
+#    DSN = transaction pooler (tsdb_transaction:39578); DIRECT_DSN = direct (tsdb).
 kubectl create secret generic memql-secrets -n memql \
   --from-literal=MEMQL_MASTER_KEY="$MEMQL_MASTER_KEY" \
   --from-literal=MEMQL_GENESIS_B64="$(base64 < ~/.memql/genesis.znas)" \
-  --from-literal=MEMORY_NODES_DATABASE_DSN="$(tiger db connection-string xahn9ru4v6 --with-password)"
+  --from-literal=MEMORY_NODES_DATABASE_DSN="$POOLER_DSN" \
+  --from-literal=MEMORY_NODES_DATABASE_DIRECT_DSN="$(tiger db connection-string xahn9ru4v6 --with-password)"
 
 # 3. All node Deployments + Services (digest-pinned overlay, #699)
 kubectl apply -k deploy/k8s/overlays/staging
