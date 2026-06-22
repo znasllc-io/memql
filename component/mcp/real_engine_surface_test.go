@@ -119,10 +119,14 @@ func TestRealEngineExposesResourcesAndPrompts(t *testing.T) {
 // TestRealEngineCuratedToolSurface pins the curated tool-surface decision
 // over a real, fully-loaded engine: describeFunction (function/arg
 // introspection) is in the curated @mcp allowlist because it materially
-// improves MCP-client usability; recentChat is restored (#1684) because the
-// autoInjected-spaceId blocker is fixed via WithMCPToolExecution in
-// applyToolDefaults -- MCP callers now supply spaceId directly. searchUsers
-// (already @mcp) stays in. This is the #1596/#1646/#1684 gate.
+// improves MCP-client usability; searchUsers (already @mcp) stays in. This
+// is the #1596/#1646 gate.
+//
+// recentChat (the space-chat lens, #1684) was in this surface until #1976
+// moved it to the CoPresent pack (dsl/copresent/tools.memql) -- it binds the
+// chat integration's recentChat builtin, a CoPresent product capability, so
+// it is no longer in the engine-only core surface loadedEngine builds. The
+// carrier build (pack registered) re-adds it; the pack covers its @mcp tag.
 func TestRealEngineCuratedToolSurface(t *testing.T) {
 	eng := loadedEngine(t)
 
@@ -138,11 +142,6 @@ func TestRealEngineCuratedToolSurface(t *testing.T) {
 	}
 	if !names["searchUsers"] {
 		t.Errorf("searchUsers (already @mcp) must remain in the curated MCP surface; got tools %v", names)
-	}
-	// recentChat restored: autoInjected spaceId is now preserved for MCP callers
-	// (caller supplies spaceId directly; server still stamps it in agent context).
-	if !names["recentChat"] {
-		t.Errorf("recentChat must be in the curated MCP surface (#1684); got tools %v", names)
 	}
 }
 

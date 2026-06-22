@@ -260,41 +260,6 @@ func LogicDeregisterNodeBuild(args LogicDeregisterNodeArgs) string {
 	return b.String()
 }
 
-// LogicEnsureDailySpaceForCaller -- Ensure today's daily space exists for the authenticated caller. Top-level Execute entry point for interactive clients; resolves userId from the request's auth context inside the dailyspace integration.
-type LogicEnsureDailySpaceForCallerArgs struct {
-}
-
-// LogicEnsureDailySpaceForCaller calls the engine logic logicEnsureDailySpaceForCaller.
-func (qc *QueryClient) LogicEnsureDailySpaceForCaller(ctx context.Context, args LogicEnsureDailySpaceForCallerArgs) (*Result, error) {
-	call := LogicEnsureDailySpaceForCallerBuild(args)
-	return qc.executeNamed(ctx, "logicEnsureDailySpaceForCaller", call)
-}
-
-func LogicEnsureDailySpaceForCallerBuild(args LogicEnsureDailySpaceForCallerArgs) string {
-	_ = args
-	return "logicEnsureDailySpaceForCaller({})"
-}
-
-// LogicEnsureDailySpaceOnAuthSession -- Fires on every v1:identity:authSession create (one per login). Calls dailyspace.ensureForUser for the authenticating user; the idempotent insert collapses to a no-op when today's daily already exists. This is the path that makes the cron-frequency concern moot -- every login guarantees today's daily exists before the SPA reads.
-type LogicEnsureDailySpaceOnAuthSessionArgs struct {
-	Event map[string]any
-}
-
-// LogicEnsureDailySpaceOnAuthSession calls the engine logic logicEnsureDailySpaceOnAuthSession.
-func (qc *QueryClient) LogicEnsureDailySpaceOnAuthSession(ctx context.Context, args LogicEnsureDailySpaceOnAuthSessionArgs) (*Result, error) {
-	call := LogicEnsureDailySpaceOnAuthSessionBuild(args)
-	return qc.executeNamed(ctx, "logicEnsureDailySpaceOnAuthSession", call)
-}
-
-func LogicEnsureDailySpaceOnAuthSessionBuild(args LogicEnsureDailySpaceOnAuthSessionArgs) string {
-	var b strings.Builder
-	b.WriteString("logicEnsureDailySpaceOnAuthSession({")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
-	return b.String()
-}
-
 // LogicGenerateResponse -- Generates and inserts an AI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via mutationSendTextUtterance, and bumps participant presence to idle. Idempotent via queryHasAIResponseForReply.
 type LogicGenerateResponseArgs struct {
 	Event map[string]any
@@ -509,26 +474,6 @@ func (qc *QueryClient) LogicOnDelegationCreated(ctx context.Context, args LogicO
 func LogicOnDelegationCreatedBuild(args LogicOnDelegationCreatedArgs) string {
 	var b strings.Builder
 	b.WriteString("logicOnDelegationCreated({")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
-	return b.String()
-}
-
-// LogicProvisionDailySpaceOnUserCreate -- Fires when a new v1:identity:user row lands. Delegates to the dailyspace.ensureForUser capability which owns the timezone math + idempotent insert of today's daily space for that user. dailySpaceEnabled gating lives inside the Go capability since the value sits under preferences and filter syntax doesn't navigate nested payload paths reliably.
-type LogicProvisionDailySpaceOnUserCreateArgs struct {
-	Event map[string]any
-}
-
-// LogicProvisionDailySpaceOnUserCreate calls the engine logic logicProvisionDailySpaceOnUserCreate.
-func (qc *QueryClient) LogicProvisionDailySpaceOnUserCreate(ctx context.Context, args LogicProvisionDailySpaceOnUserCreateArgs) (*Result, error) {
-	call := LogicProvisionDailySpaceOnUserCreateBuild(args)
-	return qc.executeNamed(ctx, "logicProvisionDailySpaceOnUserCreate", call)
-}
-
-func LogicProvisionDailySpaceOnUserCreateBuild(args LogicProvisionDailySpaceOnUserCreateArgs) string {
-	var b strings.Builder
-	b.WriteString("logicProvisionDailySpaceOnUserCreate({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
@@ -769,28 +714,6 @@ func LogicRevokeExpiredDelegationsBuild(args LogicRevokeExpiredDelegationsArgs) 
 	return b.String()
 }
 
-// LogicRolloverDailySpace -- Hourly cron tick. Delegates the entire per-user sweep to the dailyspace.rolloverAllUsers capability, which walks queryActiveUsers and calls ensureForUser per row. Returns a one-row summary the automation logs.
-type LogicRolloverDailySpaceArgs struct {
-	Event map[string]any
-}
-
-// LogicRolloverDailySpace calls the engine logic logicRolloverDailySpace.
-func (qc *QueryClient) LogicRolloverDailySpace(ctx context.Context, args LogicRolloverDailySpaceArgs) (*Result, error) {
-	call := LogicRolloverDailySpaceBuild(args)
-	return qc.executeNamed(ctx, "logicRolloverDailySpace", call)
-}
-
-func LogicRolloverDailySpaceBuild(args LogicRolloverDailySpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("logicRolloverDailySpace({")
-	if args.Event != nil {
-		b.WriteString("event: ")
-		b.WriteString(renderMemQLValue(args.Event))
-	}
-	b.WriteString("})")
-	return b.String()
-}
-
 // LogicRouteRequest -- Route a newly-submitted v1:forge:request to its next pipeline state by submitter role (owner -> queued; developer -> needs_approval; non-developer -> needs_validation). Records a 'routed' audit event.
 type LogicRouteRequestArgs struct {
 	Event map[string]any
@@ -809,6 +732,21 @@ func LogicRouteRequestBuild(args LogicRouteRequestArgs) string {
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
+}
+
+// LogicServiceVersionProbe -- Engine-only @entrypoint probe (memql#1707). Returns the current memQL service version via the serviceVersion builtin. Invokable directly via run_automation with no triggering event; carries no product coupling.
+type LogicServiceVersionProbeArgs struct {
+}
+
+// LogicServiceVersionProbe calls the engine logic logicServiceVersionProbe.
+func (qc *QueryClient) LogicServiceVersionProbe(ctx context.Context, args LogicServiceVersionProbeArgs) (*Result, error) {
+	call := LogicServiceVersionProbeBuild(args)
+	return qc.executeNamed(ctx, "logicServiceVersionProbe", call)
+}
+
+func LogicServiceVersionProbeBuild(args LogicServiceVersionProbeArgs) string {
+	_ = args
+	return "logicServiceVersionProbe({})"
 }
 
 // LogicVoiceMigrationOnSecondHuman -- Phase 7 of chat-architecture. Triggered when a user's activeSpaceId pointer changes. When exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team to Group thread. Idempotent via content-addressed stateIds.

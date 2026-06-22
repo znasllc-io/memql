@@ -42,7 +42,6 @@
 //   participants.
 // - Emits "si.auto-joined" event for observability.
 use agents.queries.{ queryAgentById, queryAssistantAgentForUser }
-use cognition.builtins.{ ensureDailySpaceForCaller, ensureDailySpaceForUser, rolloverDailySpacesAllUsers }
 use cognition.mutations.{ mutationCreateSessionForParticipant, mutationDeleteSpaceNow, mutationJoinSpaceAsAI, mutationSendTextUtterance }
 use cognition.queries.{ queryExpiredArchivedSpaces, queryHasAIResponseForReply, queryParticipantByAgentSpace, queryParticipantSession }
 use identity.queries.{ queryUserById, queryUsersActiveInSpace }
@@ -414,109 +413,5 @@ logic logicVoiceMigrationOnSecondHuman {
   }
 
   return publishPrivateCard
-  }
-}
-
-// ---- logicProvisionDailySpaceOnUserCreate -----------------------
-//
-// Fires when a new v1:identity:user row lands. The event payload
-// carries the user's full row at args.event.payload, so the userId
-// reads directly off args.event.payload.id without a follow-up
-// query. We pass that through to the dailyspace.ensureForUser
-// capability which owns the timezone math + idempotent insert.
-//
-// dailySpaceEnabled gating lives inside the Go capability (not in
-// an automation @filter) because the value is nested under
-// preferences and the filter expression syntax doesn't navigate
-// nested payload paths reliably. The capability short-circuits +
-// reports skip-reason in its result, which is sufficient for the
-// observability story.
-@description("Fires when a new v1:identity:user row lands. Delegates to the dailyspace.ensureForUser capability which owns the timezone math + idempotent insert of today's daily space for that user. dailySpaceEnabled gating lives inside the Go capability since the value sits under preferences and filter syntax doesn't navigate nested payload paths reliably.")
-logic logicProvisionDailySpaceOnUserCreate {
-  args {
-    event object @required
-  }
-  body {
-    return ensureDailySpaceForUser({ userId: args.event.payload.id })
-  }
-}
-
-// ---- logicEnsureDailySpaceForCaller -----------------------------
-//
-// Top-level entry point for interactive clients (the cockpit Chat
-// tab today) that want today's daily provisioned for whoever is
-// authenticated on the current request. Wraps
-// integration.dailyspace.ensureForCaller (via the
-// `ensureDailySpaceForCaller` builtin), which reads the calling
-// user's id off the request's auth context, then runs the same
-// ensureForUser orchestration the cron + automation paths use.
-//
-// Why a Logic wrapper: the engine's top-level Execute path
-// dispatches Logic and Mutation function calls but not bare
-// builtin calls. Wrapping the builtin in a Logic gives callers
-// an Execute-able entry (`logicEnsureDailySpaceForCaller({})`)
-// without forcing them to also know how to build a triggering
-// event.
-@enabled
-@entrypoint
-@description("Ensure today's daily space exists for the authenticated caller. Top-level Execute entry point for interactive clients; resolves userId from the request's auth context inside the dailyspace integration.")
-logic logicEnsureDailySpaceForCaller {
-  body {
-    return ensureDailySpaceForCaller({})
-  }
-}
-
-// ---- logicEnsureDailySpaceOnAuthSession -------------------------
-//
-// Fires on every v1:identity:authSession create -- one per login.
-// The session payload carries userId (the v1:identity:user.id the
-// session authenticates as). We dispatch ensureForUser the same
-// way as the user-create automation; the idempotent insert
-// collapses to a no-op when today's daily already exists.
-//
-// This is the path that makes the cron-frequency concern moot:
-// every time the user re-auths, today's daily is guaranteed to
-// exist before any read query the SPA might issue.
-@description("Fires on every v1:identity:authSession create (one per login). Calls dailyspace.ensureForUser for the authenticating user; the idempotent insert collapses to a no-op when today's daily already exists. This is the path that makes the cron-frequency concern moot -- every login guarantees today's daily exists before the SPA reads.")
-@eventField("subject", "userId")
-logic logicEnsureDailySpaceOnAuthSession {
-  args {
-    event object @required
-  }
-  body {
-    // authSession.userId is OPTIONAL (token issuance can race ahead of the
-    // user-row insert; see the concept). subject -- the JWT sub claim
-    // (v1:identity:user:<uuid>) -- is the canonical, always-present key, so
-    // fall back to it; otherwise login provisions no daily space and the SPA
-    // lands the user in an empty app.
-    //
-    // The coalesce MUST be evaluated inside an intermediate function STEP
-    // (not as the bare `return <call>(...)` expression). A function step's
-    // args are resolved against the logic's local evaluator BEFORE the
-    // engine query is built -- so `coalesce($args.event.payload.userId,
-    // $args.event.payload.subject)` resolves to the subject (empty userId
-    // skipped) and the builtin receives the real id. A bare `return
-    // <call>(...)` instead serializes the body to a `_return` string that
-    // the engine re-parses with no caller-args bound, so the arg refs
-    // resolve to empty and ensureForUser errors with "userId is required"
-    // on every login (memql#1065).
-    ensured := ensureDailySpaceForUser({ userId: coalesce(args.event.payload.userId, args.event.payload.subject) })
-    return ensured
-  }
-}
-
-// ---- logicRolloverDailySpace -----------------------------------
-//
-// Hourly cron tick. Delegates the entire per-user sweep to the
-// dailyspace.rolloverAllUsers capability, which walks queryActiveUsers
-// and calls ensureForUser per row. Returns a one-row summary the
-// automation logs.
-@description("Hourly cron tick. Delegates the entire per-user sweep to the dailyspace.rolloverAllUsers capability, which walks queryActiveUsers and calls ensureForUser per row. Returns a one-row summary the automation logs.")
-logic logicRolloverDailySpace {
-  args {
-    event object
-  }
-  body {
-    return rolloverDailySpacesAllUsers({})
   }
 }

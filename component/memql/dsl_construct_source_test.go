@@ -58,8 +58,8 @@ func TestDSLConstructSource_NonAutomationLogicKind(t *testing.T) {
 
 	// An internal-only logic construct (no wrapping automation) is still
 	// source-resolvable by kind.
-	if _, ok := memql.DSLConstructSource(logger, "logic", "logicEnsureDailySpaceForCaller"); !ok {
-		t.Fatalf("DSLConstructSource(logic, logicEnsureDailySpaceForCaller): not found")
+	if _, ok := memql.DSLConstructSource(logger, "logic", "logicBootstrapCluster"); !ok {
+		t.Fatalf("DSLConstructSource(logic, logicBootstrapCluster): not found")
 	}
 
 	// A bogus name resolves to nothing.

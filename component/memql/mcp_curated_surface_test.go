@@ -28,12 +28,12 @@ func TestMCPCuratedToolSurface(t *testing.T) {
 		// #1597 decision to exclude it. Function/arg introspection materially
 		// improves MCP-client usability, so it is intentionally @mcp-tagged.
 		"describeFunction",
-		// recentChat restored to the MCP surface (#1684): the run-2 exclusion
-		// rationale (autoInjected spaceId has no value over MCP) is fixed by
-		// WithMCPToolExecution in applyToolDefaults -- a caller-supplied spaceId
-		// is now preserved when no server default is available. MCP callers MUST
-		// supply spaceId; in-agent execution still stamps it server-side.
-		"recentChat",
+		// recentChat (the space-chat lens, #1684) moved to the CoPresent pack
+		// (dsl/copresent/tools.memql) in #1976 -- it binds the chat integration's
+		// recentChat builtin, a CoPresent product capability. It is no longer in
+		// the engine-only core surface this test loads; the carrier build (pack
+		// registered) re-adds it to the curated MCP surface. The pack's own
+		// operator_tools_load_test covers its @mcp tag.
 		// Forge company-operating-system surface (#1786): the full development +
 		// people-ops workflow (submit, browse, validate, approve, send back).
 		// Role-gated in the engine via the pre-insert guard (#1787).

@@ -131,13 +131,10 @@ func TestEventContextThreadsIntoNestedSteps(t *testing.T) {
 			}},
 			wantValues: []string{"owner@x.io"},
 		},
-		{
-			logic: "logicEnsureDailySpaceOnAuthSession",
-			event: map[string]any{"topic": "node.created", "kind": "node.created", "payload": map[string]any{
-				"userId": "", "subject": "v1:identity:user:abc",
-			}},
-			wantValues: []string{"v1:identity:user:abc"},
-		},
+		// (logicEnsureDailySpaceOnAuthSession -- the coalesce-in-step-body
+		// event-threading fixture, memql#1065 -- moved to the CoPresent pack in
+		// #1976; the remaining four core logics keep this coverage. The pack's
+		// own load tests cover the moved logic.)
 	}
 
 	for _, tc := range cases {

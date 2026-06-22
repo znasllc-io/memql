@@ -73,8 +73,9 @@ mutation space mutationArchiveSpace {
 // node id collides, so it's effectively a no-op upsert.
 //
 // LIFECYCLE OWNER -- server-driven (rewritten 2026-05-18):
-// The dailyspace integration (integrations/dailyspace/) owns
-// provisioning + rollover. Three automations call its
+// The dailyspace integration (CoPresent pack: integrations/dailyspace/
+// in memql-bff-copresent) owns provisioning + rollover. Three pack
+// automations (dsl/copresent/automations.memql) call its
 // ensureDailySpaceForUser capability:
 //
 //   provisionDailySpaceOnUserCreate -- fires on every new
