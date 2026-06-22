@@ -32,6 +32,12 @@ type Integration struct {
 	// points DIDs at (e.g. "sip:edge.example.com:5061;transport=tls").
 	sipEdgeURI string
 
+	// outbound trunk dial settings: the carrier SIP gateway + trunk auth used
+	// to place outbound calls (CreateSIPOutboundTrunk).
+	outboundAddress  string
+	outboundAuthUser string
+	outboundAuthPass string
+
 	// calls tracks connected telephony legs between webhook join/leave so a
 	// single append-only call row carries the real duration.
 	calls *callTracker
@@ -49,6 +55,12 @@ type Config struct {
 	LiveKitAPISecret string
 	// SIPEdgeURI is the carrier-reachable SIP signaling target.
 	SIPEdgeURI string
+	// OutboundSIPAddress is the carrier SIP gateway for outbound calls
+	// (e.g. "sip.telnyx.com"); OutboundAuthUsername/Password are its trunk
+	// credentials.
+	OutboundSIPAddress   string
+	OutboundAuthUsername string
+	OutboundAuthPassword string
 }
 
 // New builds a telephony Integration. The carrier is resolved eagerly (its
@@ -61,9 +73,12 @@ func New(cfg Config, logger *slog.Logger) (*Integration, error) {
 		return nil, err
 	}
 	i := &Integration{
-		logger:     logger,
-		carrier:    carrier,
-		sipEdgeURI: cfg.SIPEdgeURI,
+		logger:           logger,
+		carrier:          carrier,
+		sipEdgeURI:       cfg.SIPEdgeURI,
+		outboundAddress:  cfg.OutboundSIPAddress,
+		outboundAuthUser: cfg.OutboundAuthUsername,
+		outboundAuthPass: cfg.OutboundAuthPassword,
 	}
 	if cfg.LiveKitURL != "" && cfg.LiveKitAPIKey != "" && cfg.LiveKitAPISecret != "" {
 		httpURL := httpLiveKitURL(cfg.LiveKitURL)
@@ -115,11 +130,12 @@ func httpLiveKitURL(u string) string {
 
 var _ memql.IntegrationProvider = (*Integration)(nil)
 
-// Capabilities implements memql.IntegrationProvider. The inbound slice (4.4)
-// registers trunk/dispatch provisioning + call-record writers; later slices
-// extend this list (outbound tools 4.5, provisioning 4.6).
+// Capabilities implements memql.IntegrationProvider, aggregating the per-slice
+// capability sets (inbound 4.4, outbound 4.5, provisioning 4.6).
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
-	return i.inboundCapabilities()
+	caps := i.inboundCapabilities()
+	caps = append(caps, i.outboundCapabilities()...)
+	return caps
 }
 
 // asString coerces a tool/builtin arg to a trimmed string.

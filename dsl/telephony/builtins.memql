@@ -1,0 +1,38 @@
+// Go-backed telephony operations, exposed to the DSL (and via tools to agents).
+// Implemented by the telephony integration over the LiveKit SIP edge.
+
+@enabled
+@description("Place an outbound PSTN call and bridge the callee into a partition-scoped room the agent talks in.")
+@executor("integration.telephony.placeCall")
+builtin telephonyPlaceCall {
+  to           string  @required @description("Callee E.164 number")
+  from         string  @required @description("Caller-ID DID (E.164) to present")
+  partitionId  string  @required @description("Tenant partition the call belongs to")
+  dtmf         string  @description("Optional digits to dial after connect (IVR)")
+}
+
+@enabled
+@description("Hang up an outbound call.")
+@executor("integration.telephony.endCall")
+builtin telephonyEndCall {
+  room      string  @required @description("Call room")
+  identity  string  @required @description("SIP participant identity")
+}
+
+@enabled
+@description("Transfer a live call to another E.164.")
+@executor("integration.telephony.transferCall")
+builtin telephonyTransferCall {
+  room      string  @required
+  identity  string  @required
+  to        string  @required @description("Transfer target E.164")
+}
+
+@enabled
+@description("Send DTMF digits to a live call (IVR navigation).")
+@executor("integration.telephony.sendDtmf")
+builtin telephonySendDtmf {
+  room      string  @required
+  identity  string  @required
+  digits    string  @required @description("DTMF digits to send")
+}
