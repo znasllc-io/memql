@@ -22,6 +22,9 @@ func init() {
 			LiveKitAPIKey:    os.Getenv("POLYPHON_LIVEKIT_API_KEY"),
 			LiveKitAPISecret: os.Getenv("POLYPHON_LIVEKIT_API_SECRET"),
 			SIPEdgeURI:       os.Getenv("MEMQL_TELEPHONY_SIP_EDGE_URI"),
+			OutboundSIPAddress:   os.Getenv("MEMQL_TELEPHONY_OUTBOUND_SIP_ADDRESS"),
+			OutboundAuthUsername: os.Getenv("MEMQL_TELEPHONY_OUTBOUND_AUTH_USERNAME"),
+			OutboundAuthPassword: os.Getenv("MEMQL_TELEPHONY_OUTBOUND_AUTH_PASSWORD"),
 		}, pctx.Logger)
 		if err != nil {
 			return nil, err

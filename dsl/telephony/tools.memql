@@ -1,0 +1,48 @@
+// Agent-facing telephony tools. Exposed to the realtime voice agent through
+// the existing tool bridge; assigning them to an agent is owner config (the
+// agent needs the telephony skill). Calls attach to a partition-scoped room,
+// never a CoPresent space (Amendment A).
+
+@enabled
+@description("Place an outbound phone call to a number. The callee is bridged into the room so you can talk to them. Optionally dial DTMF digits after connect for IVR menus.")
+@handler(type="function", name="telephonyPlaceCall")
+@executionTime("slow")
+@mcp
+tool place_call {
+  to           string  @required @description("The phone number to call, in E.164 (e.g. +14155550100)")
+  from         string  @required @description("The caller-ID phone number to present, in E.164")
+  partitionId  string  @required @description("The tenant partition the call belongs to")
+  dtmf         string  @description("Optional digits to dial after the call connects")
+}
+
+@enabled
+@description("Hang up / end an active phone call.")
+@handler(type="function", name="telephonyEndCall")
+@executionTime("fast")
+@mcp
+tool end_call {
+  room      string  @required @description("The call's room")
+  identity  string  @required @description("The call's SIP participant identity")
+}
+
+@enabled
+@description("Transfer an active phone call to another phone number.")
+@handler(type="function", name="telephonyTransferCall")
+@executionTime("fast")
+@mcp
+tool transfer_call {
+  room      string  @required
+  identity  string  @required
+  to        string  @required @description("The phone number to transfer to, in E.164")
+}
+
+@enabled
+@description("Send DTMF tones (digits) to an active call to navigate phone menus / IVRs.")
+@handler(type="function", name="telephonySendDtmf")
+@executionTime("fast")
+@mcp
+tool send_dtmf {
+  room      string  @required
+  identity  string  @required
+  digits    string  @required @description("The digits to send, e.g. '1' or '0#'")
+}

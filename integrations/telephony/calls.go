@@ -60,9 +60,9 @@ func (i *Integration) HandleWebhookEvent(ctx context.Context, event *livekit.Web
 		}
 		i.tracker().remember(callIDOf(p), openCall{
 			startedAt:   time.Now().UTC(),
-			direction:   "inbound",
-			fromE164:    sipAttr(p, "sip.phoneNumber"),
-			toE164:      sipAttr(p, "sip.trunkPhoneNumber"),
+			direction:   directionOf(p),
+			fromE164:    fromOf(p),
+			toE164:      toOf(p),
 			partitionID: partitionFromEvent(event),
 			room:        room.GetName(),
 		})
@@ -185,6 +185,33 @@ func sipAttr(p *livekit.ParticipantInfo, key string) string {
 		return ""
 	}
 	return p.GetAttributes()[key]
+}
+
+// directionOf reports the call direction. An outbound leg (placed via
+// PlaceCall) is tagged telephony.direction=outbound on the SIP participant;
+// everything else is an inbound call.
+func directionOf(p *livekit.ParticipantInfo) string {
+	if sipAttr(p, "telephony.direction") == "outbound" {
+		return "outbound"
+	}
+	return "inbound"
+}
+
+// fromOf / toOf normalize caller/callee per direction. For an inbound call the
+// external party (sip.phoneNumber) is the caller; for an outbound call it is
+// the callee, and our caller-ID (sip.trunkPhoneNumber) is the from.
+func fromOf(p *livekit.ParticipantInfo) string {
+	if directionOf(p) == "outbound" {
+		return sipAttr(p, "sip.trunkPhoneNumber")
+	}
+	return sipAttr(p, "sip.phoneNumber")
+}
+
+func toOf(p *livekit.ParticipantInfo) string {
+	if directionOf(p) == "outbound" {
+		return sipAttr(p, "sip.phoneNumber")
+	}
+	return sipAttr(p, "sip.trunkPhoneNumber")
 }
 
 // callIDOf returns the SIP call id (stable across join/leave), falling back to
