@@ -36,17 +36,27 @@ type (
 		Logger        *slog.Logger
 		DB            *sql.DB
 		Bun           *bun.DB
-		ticker        *time.Ticker
-		firstPing     bool
-		isRunning     bool
-		config        *config
-		lifecycle     common.Lifecycle
-		readyCh       chan struct{}
-		migrationErr  error
+		// DirectDB / DirectBun are the optional second, NON-pooled endpoint
+		// (DIRECT_DSN). Session-stateful work -- session-scoped advisory
+		// locks, leader election, migrations -- rides this so it bypasses the
+		// transaction pooler that recycles a server backend out from under a
+		// held session (epic memql#1925). nil when DIRECT_DSN is unset, in
+		// which case DirectBunDB() falls back to the main (pooled) Bun -- so
+		// local/dev without a pooler is unaffected (env-agnostic).
+		DirectDB     *sql.DB
+		DirectBun    *bun.DB
+		ticker       *time.Ticker
+		firstPing    bool
+		isRunning    bool
+		config       *config
+		lifecycle    common.Lifecycle
+		readyCh      chan struct{}
+		migrationErr error
 	}
 
 	DatabaseEnvOptions struct {
 		DSN                      string
+		DirectDSN                string
 		MigrateOnStart           *bool
 		MaxConnRetries           *int
 		MaxConnRetriesIntervalMs *int
@@ -63,6 +73,7 @@ type (
 
 	DatabaseEnvKeys struct {
 		DSN                      string
+		DirectDSN                string
 		MigrateOnStart           string
 		MaxConnRetries           string
 		MaxConnRetriesIntervalMs string
@@ -84,6 +95,7 @@ type (
 
 	config struct {
 		dsn                      *string
+		directDSN                *string
 		driverName               string
 		writer                   io.Writer
 		level                    slog.Level
@@ -122,6 +134,7 @@ const (
 var (
 	defaultDatabaseEnvKeys = DatabaseEnvKeys{
 		DSN:                      "DSN",
+		DirectDSN:                "DIRECT_DSN",
 		MigrateOnStart:           "MIGRATE_ON_START",
 		MaxConnRetries:           "MAX_CONN_RETRIES",
 		MaxConnRetriesIntervalMs: "MAX_CONN_RETRIES_INTERVAL_MS",
@@ -150,6 +163,23 @@ func WithDSN(dsn string) DatabaseArg {
 	return RequiredCtorArg("dsn", func(c *config) {
 		value := trimmed
 		c.dsn = &value
+	})
+}
+
+// WithDirectDSN configures the optional second, NON-pooled DB endpoint
+// (DIRECT_DSN). Session-stateful work (advisory locks, leader election,
+// migrations) resolves its *bun.DB via DirectBunDB() so it bypasses the
+// transaction pooler the main pool rides (epic memql#1925). An empty/blank
+// value is a no-op: DirectBunDB() then falls back to the main pool, keeping
+// behavior identical to today for local/dev without a pooler.
+func WithDirectDSN(dsn string) DatabaseArg {
+	trimmed := strings.TrimSpace(dsn)
+	return OptionalCtorArg("direct_dsn", func(c *config) {
+		if trimmed == "" {
+			return
+		}
+		value := trimmed
+		c.directDSN = &value
 	})
 }
 
@@ -356,6 +386,10 @@ func LoadDatabaseEnvOptions(loader DatabaseEnvLoader) (DatabaseEnvOptions, error
 		opts.DSN = value
 	}
 
+	if value, ok := reader.String(keys.DirectDSN); ok {
+		opts.DirectDSN = value
+	}
+
 	migrateOnStart, err := reader.OptionalBool(keys.MigrateOnStart)
 
 	if err != nil {
@@ -470,6 +504,10 @@ func EnvOptionsToArgs(opts DatabaseEnvOptions) ([]DatabaseArg, error) {
 
 	args := []DatabaseArg{WithDSN(trimmedDSN)}
 	var base Database
+
+	if trimmedDirectDSN := strings.TrimSpace(opts.DirectDSN); trimmedDirectDSN != "" {
+		args = append(args, WithDirectDSN(trimmedDirectDSN))
+	}
 
 	if levelName := strings.TrimSpace(opts.LoggerLevel); levelName != "" {
 		var level slog.Level
@@ -751,6 +789,23 @@ func (d *Database) BunDB() *bun.DB {
 	return d.Bun
 }
 
+// DirectBunDB returns the Bun handle for the direct (non-pooled) endpoint when
+// DIRECT_DSN is configured, else falls back to the main (pooled) Bun handle.
+// Session-stateful work -- session-scoped advisory locks, leader election,
+// migrations -- must resolve its *bun.DB through this getter so it bypasses
+// the transaction pooler the bulk pool rides; transaction-mode PgBouncer
+// recycles a server backend between statements and would drop a held
+// session-scoped lock (epic memql#1925). When DIRECT_DSN is unset the fallback
+// keeps behavior identical to today (single pool), so local/dev is unaffected.
+func (d *Database) DirectBunDB() *bun.DB {
+	d.Lock()
+	defer d.Unlock()
+	if d.DirectBun != nil {
+		return d.DirectBun
+	}
+	return d.Bun
+}
+
 func (d *Database) Order() int {
 	return 50
 }
@@ -818,8 +873,12 @@ func (d *Database) ClosePool(ctx context.Context) sql.DBStats {
 	d.Lock()
 	db := d.DB
 	bunDB := d.Bun
+	directDB := d.DirectDB
+	directBun := d.DirectBun
 	d.DB = nil
 	d.Bun = nil
+	d.DirectDB = nil
+	d.DirectBun = nil
 	d.isRunning = false
 	d.Unlock()
 
@@ -829,6 +888,14 @@ func (d *Database) ClosePool(ctx context.Context) sql.DBStats {
 
 	if db != nil {
 		_ = db.Close()
+	}
+
+	if directBun != nil {
+		_ = directBun.Close()
+	}
+
+	if directDB != nil {
+		_ = directDB.Close()
 	}
 
 	return stats
@@ -945,10 +1012,49 @@ func (d *Database) prepareForRun(ctx context.Context) (context.Context, context.
 	d.firstPing = true
 	d.Unlock()
 
-	d.runMigrations(ctx, bunDB)
+	// Open the optional direct (non-pooled) endpoint. Best-effort: a failure
+	// leaves DirectBun nil so DirectBunDB() falls back to the main pool rather
+	// than blocking startup (epic memql#1925).
+	d.openDirectPool()
+
+	// Migrations run on the DIRECT endpoint when configured: the bun migrator
+	// takes a session-scoped pg_advisory_lock held across the whole migration,
+	// which a transaction pooler would recycle out from under it (epic
+	// memql#1925). Falls back to the main bun when DIRECT_DSN is unset.
+	d.runMigrations(ctx, d.DirectBunDB())
 
 	runCtx, cancel := context.WithCancel(ctx)
 	return runCtx, cancel, nil
+}
+
+// openDirectPool opens the second, non-pooled DB endpoint from DIRECT_DSN and
+// stores its *sql.DB + *bun.DB on the Database. A no-op when DIRECT_DSN is
+// unset. Best-effort on error (logs + leaves the handles nil) so a bad direct
+// DSN degrades to the main pool instead of failing the whole node.
+func (d *Database) openDirectPool() {
+	if d.config.directDSN == nil {
+		return
+	}
+
+	directDB, err := d.openDirectSQL()
+	if err != nil {
+		d.Logger.Error("failed to open direct SQL connection; falling back to main pool", "error", err)
+		return
+	}
+
+	directBun, err := d.openBun(directDB)
+	if err != nil {
+		d.Logger.Error("failed to open direct Bun; falling back to main pool", "error", err)
+		_ = directDB.Close()
+		return
+	}
+
+	d.Lock()
+	d.DirectDB = directDB
+	d.DirectBun = directBun
+	d.Unlock()
+
+	d.Logger.Info("direct (non-pooled) DB endpoint opened", "dsn", d.safeDirectDSN())
 }
 
 func (d *Database) cleanupAfterRun() {
@@ -956,9 +1062,13 @@ func (d *Database) cleanupAfterRun() {
 	ticker := d.ticker
 	db := d.DB
 	bunDB := d.Bun
+	directDB := d.DirectDB
+	directBun := d.DirectBun
 	d.ticker = nil
 	d.DB = nil
 	d.Bun = nil
+	d.DirectDB = nil
+	d.DirectBun = nil
 	d.isRunning = false
 	d.Unlock()
 
@@ -972,6 +1082,14 @@ func (d *Database) cleanupAfterRun() {
 
 	if db != nil {
 		_ = db.Close()
+	}
+
+	if directBun != nil {
+		_ = directBun.Close()
+	}
+
+	if directDB != nil {
+		_ = directDB.Close()
 	}
 }
 
@@ -1046,7 +1164,17 @@ func (d *Database) tryPing(ctx context.Context) bool {
 				continue
 			}
 
-			d.runMigrations(ctx, bunDB)
+			// Run migrations on the DIRECT endpoint when configured (it
+			// persists across a main-pool reconnect), else on the freshly
+			// reconnected main bun -- the migrator's session-scoped advisory
+			// lock must not ride the transaction pooler (epic memql#1925).
+			migrationBun := bunDB
+			d.Lock()
+			if d.DirectBun != nil {
+				migrationBun = d.DirectBun
+			}
+			d.Unlock()
+			d.runMigrations(ctx, migrationBun)
 
 			d.Lock()
 			oldDB := d.DB
@@ -1103,6 +1231,39 @@ func (d *Database) openSQL() (*sql.DB, error) {
 	if d.config.connMaxIdleTimeMs > 0 {
 		db.SetConnMaxIdleTime(time.Duration(d.config.connMaxIdleTimeMs) * time.Millisecond)
 	}
+
+	return db, nil
+}
+
+// directMaxOpenConns / directMaxIdleConns bound the direct (non-pooled) pool.
+// Coordination traffic is FEW and bounded -- a handful of leader-lock holders
+// + migrations -- so the pool stays tiny to fit the limited direct Tiger
+// budget (the whole point of the hybrid split: bulk traffic rides the pooler,
+// only session-stateful work takes a direct slot). It deliberately ignores the
+// MAX_OPEN_CONNS / MAX_IDLE_CONNS knobs, which govern only the main pool
+// (epic memql#1925).
+const (
+	directMaxOpenConns = 4
+	directMaxIdleConns = 1
+)
+
+// openDirectSQL opens the direct (non-pooled) *sql.DB from DIRECT_DSN using the
+// same configured opener as the main pool (so a test-injected opener applies
+// to both), then clamps it to a small fixed pool. Caller guarantees
+// d.config.directDSN is non-nil.
+func (d *Database) openDirectSQL() (*sql.DB, error) {
+	dsn := ""
+	if d.config.directDSN != nil {
+		dsn = *d.config.directDSN
+	}
+
+	db, err := d.config.sqlOpener(d.config.driverName, dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	db.SetMaxOpenConns(directMaxOpenConns)
+	db.SetMaxIdleConns(directMaxIdleConns)
 
 	return db, nil
 }
@@ -1269,9 +1430,21 @@ func (d *Database) safeDSN() string {
 	if d.config.dsn == nil {
 		return ""
 	}
+	return sanitizeDSN(*d.config.dsn)
+}
 
-	raw := *d.config.dsn
+// safeDirectDSN is the password-masked rendering of the direct (non-pooled)
+// DSN for logs, or "" when DIRECT_DSN is unset.
+func (d *Database) safeDirectDSN() string {
+	if d.config.directDSN == nil {
+		return ""
+	}
+	return sanitizeDSN(*d.config.directDSN)
+}
 
+// sanitizeDSN masks the password in a DSN so it is safe to log: it handles both
+// the `password=...` keyword form and the `scheme://user:pass@host` URL form.
+func sanitizeDSN(raw string) string {
 	if raw == "" {
 		return ""
 	}

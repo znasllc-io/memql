@@ -282,6 +282,27 @@ All optional. Defaults baked into `component/database/database.go`:
 | `MEMORY_NODES_DATABASE_CONN_MAX_LIFETIME_MS`          | `3600000`   |
 | `MEMORY_NODES_DATABASE_CONN_MAX_IDLE_TIME_MS`         | `600000`    |
 
+#### Connection pooling: hybrid endpoint split (`DIRECT_DSN`)
+
+Tiger Cloud PgBouncer transaction-mode pooling decouples client
+connections from server backends, so a deploy surge no longer maps 1:1
+to Postgres slots (epic memql#1925). Transaction-mode poolers recycle a
+server backend *between statements*, which would drop a held
+**session-scoped** resource -- session advisory locks (cognition
+dispatch gate, cron leader, reconciler, planner admission) and the
+migrator's lock. memQL therefore runs a **hybrid endpoint split**:
+
+| Variable                              | Default        | Purpose                                                                                                                                                                                                 |
+|---------------------------------------|----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `MEMORY_NODES_DATABASE_DSN`           | required       | Main pool. Point this at the **transaction pooler** in pooled environments -- it carries all bulk queries + mutations (the surge-killing multiplier).                                                   |
+| `MEMORY_NODES_DATABASE_DIRECT_DSN`    | unset          | Optional second, **non-pooled** endpoint. Session-stateful work (advisory locks, leader election, migrations) resolves its handle via `DirectBunDB()` so it bypasses the pooler. Small fixed pool (max 4 open / 1 idle). |
+
+When `DIRECT_DSN` is **unset**, `DirectBunDB()` falls back to the main
+pool, so behaviour is identical to a single-pool deployment -- local /
+dev without a pooler is unaffected (env-agnostic). `MAX_OPEN_CONNS` /
+`MAX_IDLE_CONNS` govern only the main pool; the direct pool is bounded
+to a small fixed size by design.
+
 #### Auth (Identity service + per-node verifier)
 
 For the identity binary (`-tags identity`):

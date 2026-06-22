@@ -62,6 +62,12 @@ func (a *App) pluginContext() memql.PluginContext {
 			}
 			return a.db.BunDB()
 		},
+		DirectBunDB: func() *bun.DB {
+			if a.db == nil {
+				return nil
+			}
+			return a.db.DirectBunDB()
+		},
 		VisionProvider: func() common.VisionSIProvider {
 			if a.engine == nil {
 				return nil
