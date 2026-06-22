@@ -1,7 +1,7 @@
 // agent_loop_ratelimit.go
 //
 // Provider rate-limit (429) detection for the Planner Agent loop
-// (memql#821). When a plannerAgent InvokeSI call comes back rate-limited,
+// (memql#821). When a plannerAgent InvokeAI call comes back rate-limited,
 // the loop must treat it as RETRYABLE-LATER -- park the plan and stop --
 // rather than as a hard failure OR an immediate re-attempt. Re-attempting
 // is a retry storm, the exact behavior that blew Anthropic's rate limit.

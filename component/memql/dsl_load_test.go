@@ -117,9 +117,9 @@ func TestEmbeddedDSLLoadsCleanly(t *testing.T) {
 	}
 
 	// Providers + Seeds + Policies + PolicyFunctions.
-	providerRegistry, err := loadSIProviders(logger)
+	providerRegistry, err := loadAIProviders(logger)
 	if err != nil {
-		t.Fatalf("loadSIProviders: %v", err)
+		t.Fatalf("loadAIProviders: %v", err)
 	}
 	if _, err := LoadUnifiedProviders(logger, providerRegistry); err != nil {
 		t.Fatalf("LoadUnifiedProviders: %v", err)
@@ -130,9 +130,9 @@ func TestEmbeddedDSLLoadsCleanly(t *testing.T) {
 		t.Fatalf("LoadUnifiedSeeds: %v", err)
 	}
 
-	policyRegistry, err := loadSIPolicies(logger)
+	policyRegistry, err := loadAIPolicies(logger)
 	if err != nil {
-		t.Fatalf("loadSIPolicies: %v", err)
+		t.Fatalf("loadAIPolicies: %v", err)
 	}
 	if _, err := LoadUnifiedPolicies(logger, policyRegistry); err != nil {
 		t.Fatalf("LoadUnifiedPolicies: %v", err)

@@ -186,7 +186,7 @@ func (l *PlannerAgentLoop) emitBundle(ctx context.Context, statement string, pla
 		edges = append(edges, reuseEdge{Name: dep.ReuseName, Kind: dep.ReuseKind, Namespace: dep.ReuseNamespace})
 	}
 
-	resp, err := l.engine.InvokeSI(systemActorContext(ctx), "authoringEmit", map[string]any{
+	resp, err := l.engine.InvokeAI(systemActorContext(ctx), "authoringEmit", map[string]any{
 		"responsibility":    statement,
 		"automationName":    plan.AutomationName,
 		"automationPurpose": plan.AutomationPurpose,
@@ -213,7 +213,7 @@ func (l *PlannerAgentLoop) emitBundle(ctx context.Context, statement string, pla
 // prompt is asked to return corrected (kind, name, source) for ONLY the failing
 // constructs, keyed by name so mergeRepaired can splice them in.
 func (l *PlannerAgentLoop) repairConstructs(ctx context.Context, statement string, bundle authoringBundle, failing []memql.SandboxConstruct, report memql.SandboxReport) ([]memql.SandboxConstruct, error) {
-	resp, err := l.engine.InvokeSI(systemActorContext(ctx), "authoringRepair", map[string]any{
+	resp, err := l.engine.InvokeAI(systemActorContext(ctx), "authoringRepair", map[string]any{
 		"responsibility": statement,
 		"automationName": bundle.AutomationName,
 		"failing":        sandboxConstructsToMaps(failing),

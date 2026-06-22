@@ -12,8 +12,8 @@ const (
 	maxImageBytes = 20 * 1024 * 1024 // 20 MB
 )
 
-// describeImage uses a VisionSIProvider to describe the image content as text.
-func describeImage(ctx context.Context, visionProvider common.VisionSIProvider, mimeType string, data []byte) (string, error) {
+// describeImage uses a VisionAIProvider to describe the image content as text.
+func describeImage(ctx context.Context, visionProvider common.VisionAIProvider, mimeType string, data []byte) (string, error) {
 	if len(data) == 0 {
 		return "", nil
 	}

@@ -29,7 +29,7 @@ func toolCallStep(name string) scriptStep {
 	}}
 }
 
-// scriptedToolProvider is a fake common.ToolCallingChatSIProvider that
+// scriptedToolProvider is a fake common.ToolCallingChatAIProvider that
 // replays a programmed sequence of (result, err) steps -- one per
 // CallChatWithTools invocation. It records how many times it was called so
 // tests can assert retry / iteration behavior.

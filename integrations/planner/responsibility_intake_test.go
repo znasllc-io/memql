@@ -46,7 +46,7 @@ func TestResponsibilityIntake_AssignDoesNotReTriggerFirstPass(t *testing.T) {
 				"intakeStatus": "",
 			}, nil
 		},
-		siResponder: func(_ string, _ map[string]any) (any, error) {
+		aiResponder: func(_ string, _ map[string]any) (any, error) {
 			// The model "re-infers" a DIFFERENT cadence -- this is exactly the
 			// clobber #1645 reports. A clear result (no questions) flips the
 			// row to active via mutationApplyResponsibilityIntake.
@@ -107,7 +107,7 @@ func TestResponsibilityIntake_FoldAnswersStillFiresOnUpdate(t *testing.T) {
 				},
 			}, nil
 		},
-		siResponder: func(_ string, _ map[string]any) (any, error) {
+		aiResponder: func(_ string, _ map[string]any) (any, error) {
 			return map[string]any{"trigger": "recurring", "schedule": "0 9 * * 1", "targetKind": "assistant"}, nil
 		},
 	}

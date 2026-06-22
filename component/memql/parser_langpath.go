@@ -272,7 +272,7 @@ func buildInlineSpec(name, bodyExpr string) (*Spec, error) {
 		ExprSource: canonicalExpression(expr),
 		Expr:       expr,
 		Kind:       kind,
-		UsesSI:     detectSIUsage(expr),
+		UsesAI:     detectAIUsage(expr),
 		Origin:     "inline",
 	}, nil
 }

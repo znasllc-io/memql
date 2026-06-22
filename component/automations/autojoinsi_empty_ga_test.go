@@ -10,10 +10,10 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// Regression for memql#1044 (autoJoinSI errors when the space owner has no
+// Regression for memql#1044 (autoJoinAI errors when the space owner has no
 // assistant agent).
 //
-// In logicAutoJoinSI the GA is resolved with
+// In logicAutoJoinAI the GA is resolved with
 //
 //	getGA := coalesce(getActiveGA, getFallbackGA)
 //
@@ -49,9 +49,9 @@ func autoJoinResult(ids ...string) *memqlengine.ExecuteResult {
 // path-resolvable form) must be FALSE when the owner has no assistant
 // (empty getGA) so the join branch cleanly no-ops, and TRUE when the
 // owner has an assistant so the GA joins.
-func TestAutoJoinSI_JoinGuard_NoOpsWithoutAssistant(t *testing.T) {
+func TestAutoJoinAI_JoinGuard_NoOpsWithoutAssistant(t *testing.T) {
 	// The guard as the compiler emits it (see
-	// TestAutoJoinSI_JoinGuardCompilesToResolvablePath).
+	// TestAutoJoinAI_JoinGuardCompilesToResolvablePath).
 	const guard = `$steps.getGA.result.Bundle.nodes.0.id != ""`
 
 	cases := []struct {
@@ -99,9 +99,9 @@ func TestAutoJoinSI_JoinGuard_NoOpsWithoutAssistant(t *testing.T) {
 // and TRUE on a non-empty one. The #1044 DSL guard was rewritten to the
 // positive `first(getGA).id != ""` form before the evaluator was fixed; that
 // form stays as belt-and-suspenders (see
-// TestAutoJoinSI_JoinGuard_NoOpsWithoutAssistant), but the `!`-negation form
+// TestAutoJoinAI_JoinGuard_NoOpsWithoutAssistant), but the `!`-negation form
 // it replaced is no longer broken -- this test pins that fix.
-func TestAutoJoinSI_BangEmptyGuard_NowHonoursNegation(t *testing.T) {
+func TestAutoJoinAI_BangEmptyGuard_NowHonoursNegation(t *testing.T) {
 	// `! ...` is the form the compiler emits for `!getGA.Empty()`.
 	const guard = "! $steps.getGA.Empty"
 
@@ -146,9 +146,9 @@ func TestAutoJoinSI_BangEmptyGuard_NowHonoursNegation(t *testing.T) {
 // resolvable `$steps`-path comparison (not a raw `*.Empty()` method-call
 // or `!`-negation, neither of which the condition evaluator resolves at
 // runtime).
-func TestAutoJoinSI_JoinGuardCompilesToResolvablePath(t *testing.T) {
+func TestAutoJoinAI_JoinGuardCompilesToResolvablePath(t *testing.T) {
 	src := `use cognition.queries.{ queryParticipantByAgentSpace }
-@description("autoJoinSI guard shape")
+@description("autoJoinAI guard shape")
 logic logicAutoJoinGuardShape {
   args { event object @required }
   body {

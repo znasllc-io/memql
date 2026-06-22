@@ -8,16 +8,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type mockSIProvider struct {
+type mockAIProvider struct {
 	calls int
 }
 
-func (m *mockSIProvider) Call(_ context.Context, prompt string) (any, error) {
+func (m *mockAIProvider) Call(_ context.Context, prompt string) (any, error) {
 	m.calls++
 	return prompt, nil
 }
 
-func TestSIRuntimeCacheDefaultEnabled(t *testing.T) {
+func TestAIRuntimeCacheDefaultEnabled(t *testing.T) {
 	prompts := newPromptRegistry()
 	tmpl := template.Must(template.New("test").Parse("hello {{.name}}"))
 	prompts.set(&PromptTemplate{
@@ -28,7 +28,7 @@ func TestSIRuntimeCacheDefaultEnabled(t *testing.T) {
 	})
 
 	providers := newProviderRegistry("")
-	mock := &mockSIProvider{}
+	mock := &mockAIProvider{}
 	providers.setEntry(&ProviderConfigEntry{
 		Config: ProviderConfig{
 			Name: "mock",
@@ -38,7 +38,7 @@ func TestSIRuntimeCacheDefaultEnabled(t *testing.T) {
 		Available: true,
 	})
 
-	runtime := newSIRuntime(nil, prompts, providers, siCacheConfig{
+	runtime := newAIRuntime(nil, prompts, providers, aiCacheConfig{
 		DefaultEnabled: true,
 		MaxTTLSeconds:  120,
 	})
@@ -76,7 +76,7 @@ func TestSIRuntimeCacheDefaultEnabled(t *testing.T) {
 	require.Equal(t, 3, mock.calls)
 }
 
-func TestSIRuntimeCacheOverrideWhenDisabled(t *testing.T) {
+func TestAIRuntimeCacheOverrideWhenDisabled(t *testing.T) {
 	prompts := newPromptRegistry()
 	tmpl := template.Must(template.New("test2").Parse("ping {{.value}}"))
 	prompts.set(&PromptTemplate{
@@ -87,7 +87,7 @@ func TestSIRuntimeCacheOverrideWhenDisabled(t *testing.T) {
 	})
 
 	providers := newProviderRegistry("")
-	mock := &mockSIProvider{}
+	mock := &mockAIProvider{}
 	providers.setEntry(&ProviderConfigEntry{
 		Config: ProviderConfig{
 			Name: "mock",
@@ -97,7 +97,7 @@ func TestSIRuntimeCacheOverrideWhenDisabled(t *testing.T) {
 		Available: true,
 	})
 
-	runtime := newSIRuntime(nil, prompts, providers, siCacheConfig{
+	runtime := newAIRuntime(nil, prompts, providers, aiCacheConfig{
 		DefaultEnabled: false,
 		MaxTTLSeconds:  120,
 	})

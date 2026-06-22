@@ -262,7 +262,7 @@ func (p *specMemQLParser) buildSpec(decl *specDecl, origin string) (*Spec, error
 		ExprSource:  bodySource,
 		Expr:        expr,
 		Kind:        kind,
-		UsesSI:      detectSIUsage(expr),
+		UsesAI:      detectAIUsage(expr),
 		Origin:      origin,
 		IsTrait:     decl.isTrait,
 	}, nil

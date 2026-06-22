@@ -44,11 +44,11 @@ type PluginContext struct {
 	DirectBunDB func() *bun.DB
 
 	// VisionProvider returns the default vision-capable SI provider, or nil.
-	VisionProvider func() common.VisionSIProvider
+	VisionProvider func() common.VisionAIProvider
 
 	// EmbeddingProviderByName returns a named embedding provider, or an
 	// error if no provider by that name is registered.
-	EmbeddingProviderByName func(name string) (EmbeddingSIProvider, error)
+	EmbeddingProviderByName func(name string) (EmbeddingAIProvider, error)
 
 	// ResolvePartitionFromContext returns the active partition for the
 	// given request context; "default" if none is set.

@@ -194,6 +194,7 @@ def rule_target(data, old):
 
 # Compound identifier carrying an uppercase 'SI' acronym (camel/Pascal/snake/const).
 SCAN_COMPOUND = re.compile(LEFT + r"[A-Za-z_]*SI[A-Za-z0-9_]*" + RIGHT)
+SCAN_CAMEL = re.compile(LEFT + r"si[A-Z][A-Za-z0-9_]*" + RIGHT)  # camelCase siFoo
 SCAN_KEYWORD = re.compile(LEFT + r"si\(")            # .memql DSL keyword
 SCAN_PROTO_SNAKE = re.compile(LEFT + r"si_[a-z0-9_]*" + RIGHT)  # .proto field
 
@@ -224,6 +225,12 @@ def cmd_scan(args, data):
                 if any(s in tok for s in substr_deny):
                     continue  # contains an uppercase English root (VERSIONING, etc.)
                 hits.add(tok)
+            if ext in (".go", ".memql", ".ts", ".tsx"):
+                for m in SCAN_CAMEL.finditer(line):
+                    tok = m.group(0)
+                    if any(p.fullmatch(tok) for p in deny_pat):
+                        continue  # deferred lowercase keys (siParticipantId, ...)
+                    hits.add(tok)
             if ext == ".memql":
                 if SCAN_KEYWORD.search(line):
                     hits.add("si(")

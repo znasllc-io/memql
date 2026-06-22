@@ -23,9 +23,9 @@ func (n *NoOpPredictiveAnalyzer) Analyze(_ context.Context, _ *PolyphonSession, 
 // ModelPredictiveAnalyzer uses a fast SI model to predict conversation trajectory.
 // Runs asynchronously via the prediction goroutine (every 30s per active space).
 type ModelPredictiveAnalyzer struct {
-	// invokeSI is a function that calls the SI engine to run a prediction prompt.
+	// invokeAI is a function that calls the SI engine to run a prediction prompt.
 	// Injected to avoid direct engine dependency in the polyphon package.
-	invokeSI func(ctx context.Context, templateId string, data map[string]any) (any, error)
+	invokeAI func(ctx context.Context, templateId string, data map[string]any) (any, error)
 
 	// embedFunc is an optional function that computes a vector embedding for text.
 	// When set, enables vector-based phase detection for faster classification.
@@ -38,19 +38,19 @@ type ModelPredictiveAnalyzer struct {
 // NewModelPredictiveAnalyzer creates an analyzer that uses SI for prediction.
 // The embedFunc parameter is optional (pass nil to disable vector-based phase detection).
 func NewModelPredictiveAnalyzer(
-	invokeSI func(ctx context.Context, templateId string, data map[string]any) (any, error),
+	invokeAI func(ctx context.Context, templateId string, data map[string]any) (any, error),
 	embedFunc func(ctx context.Context, text string) ([]float32, error),
 ) *ModelPredictiveAnalyzer {
 	lib := NewPhasePatternLibrary()
 	return &ModelPredictiveAnalyzer{
-		invokeSI:     invokeSI,
+		invokeAI:     invokeAI,
 		embedFunc:    embedFunc,
 		phaseLibrary: lib,
 	}
 }
 
 func (a *ModelPredictiveAnalyzer) Analyze(ctx context.Context, session *PolyphonSession, candidates []AgentCandidate) (*PredictiveState, error) {
-	if a.invokeSI == nil {
+	if a.invokeAI == nil {
 		return nil, nil
 	}
 	if session == nil {
@@ -142,7 +142,7 @@ func (a *ModelPredictiveAnalyzer) Analyze(ctx context.Context, session *Polyphon
 		}
 	}
 
-	result, err := a.invokeSI(ctx, "cognitionPrediction", data)
+	result, err := a.invokeAI(ctx, "cognitionPrediction", data)
 	if err != nil {
 		// Fallback: pattern-based prediction.
 		return patternBasedPrediction(session, candidates), nil

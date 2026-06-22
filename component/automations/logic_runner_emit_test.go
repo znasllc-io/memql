@@ -55,7 +55,7 @@ func parseEmitLogicBody(t *testing.T, src string) *languageParser.AutomationDef 
 // to the engine's event bus.
 //
 // Before the fix, RunLogic built its StepContext with a nil EventBus, so any
-// logic that emits (logicAutoJoinSI's emitAutoJoinComplete,
+// logic that emits (logicAutoJoinAI's emitAutoJoinComplete,
 // logicBootstrapSession's session.created) failed its emit step with "event
 // bus not configured". Because the compiler topologically orders steps with
 // no inter-dependency arbitrarily, that abort could land BEFORE the

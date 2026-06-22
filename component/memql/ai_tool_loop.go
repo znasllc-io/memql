@@ -10,16 +10,16 @@ import (
 	"github.com/znasllc-io/memql/core/common"
 )
 
-// InvokeSIChatWithTools renders the prompt template and runs a bounded tool-calling loop
+// InvokeAIChatWithTools renders the prompt template and runs a bounded tool-calling loop
 // using the resolved provider for the prompt. This is intended for interactive agents
 // (e.g., cognition) where the model may need to call MCP tools/functions on demand.
 //
-// If the resolved provider does not support tool calling, this falls back to InvokeSI().
-func (e *MemQLEngine) InvokeSIChatWithTools(ctx context.Context, templateId string, data map[string]any) (string, error) {
+// If the resolved provider does not support tool calling, this falls back to InvokeAI().
+func (e *MemQLEngine) InvokeAIChatWithTools(ctx context.Context, templateId string, data map[string]any) (string, error) {
 	if e == nil {
 		return "", fmt.Errorf("engine is nil")
 	}
-	if e.siRuntime == nil || e.prompts == nil || e.providers == nil {
+	if e.aiRuntime == nil || e.prompts == nil || e.providers == nil {
 		return "", fmt.Errorf("SI runtime is not configured")
 	}
 
@@ -28,12 +28,12 @@ func (e *MemQLEngine) InvokeSIChatWithTools(ctx context.Context, templateId stri
 	if override := ProviderOverrideFromContext(ctx); override != "" {
 		invocation.ProviderOverride = &override
 	}
-	prompt, err := e.siRuntime.resolvePrompt(templateId)
+	prompt, err := e.aiRuntime.resolvePrompt(templateId)
 	if err != nil {
 		return "", err
 	}
 
-	payload, err := normalizeSIData(data)
+	payload, err := normalizeAIData(data)
 	if err != nil {
 		return "", fmt.Errorf("data for prompt %q invalid: %w", prompt.Name, err)
 	}
@@ -45,7 +45,7 @@ func (e *MemQLEngine) InvokeSIChatWithTools(ctx context.Context, templateId stri
 		return "", fmt.Errorf("executing prompt template %q: %w", prompt.Name, err)
 	}
 
-	providerName, err := e.siRuntime.resolveProviderName(prompt, invocation)
+	providerName, err := e.aiRuntime.resolveProviderName(prompt, invocation)
 	if err != nil {
 		return "", err
 	}
@@ -54,10 +54,10 @@ func (e *MemQLEngine) InvokeSIChatWithTools(ctx context.Context, templateId stri
 		return "", fmt.Errorf("provider %q not available", providerName)
 	}
 
-	toolCaller, ok := entry.Client.(common.ToolCallingChatSIProvider)
+	toolCaller, ok := entry.Client.(common.ToolCallingChatAIProvider)
 	if !ok || toolCaller == nil {
 		// Fallback: no tool calling supported.
-		result, err := e.siRuntime.Invoke(ctx, invocation, data)
+		result, err := e.aiRuntime.Invoke(ctx, invocation, data)
 		if err != nil {
 			return "", err
 		}
@@ -73,13 +73,13 @@ func (e *MemQLEngine) InvokeSIChatWithTools(ctx context.Context, templateId stri
 		{Role: "system", Content: systemText},
 	}
 
-	maxIterations := defaultSIToolLoopMaxIterations
-	maxToolCallsPerIt := defaultSIToolLoopMaxToolCallsPerIt
-	if e.config.SIToolLoopMaxIterations > 0 {
-		maxIterations = clampSIToolLoopMaxIterations(e.config.SIToolLoopMaxIterations)
+	maxIterations := defaultAIToolLoopMaxIterations
+	maxToolCallsPerIt := defaultAIToolLoopMaxToolCallsPerIt
+	if e.config.AIToolLoopMaxIterations > 0 {
+		maxIterations = clampAIToolLoopMaxIterations(e.config.AIToolLoopMaxIterations)
 	}
-	if e.config.SIToolLoopMaxToolCallsPerIt > 0 {
-		maxToolCallsPerIt = clampSIToolLoopMaxToolCallsPerIt(e.config.SIToolLoopMaxToolCallsPerIt)
+	if e.config.AIToolLoopMaxToolCallsPerIt > 0 {
+		maxToolCallsPerIt = clampAIToolLoopMaxToolCallsPerIt(e.config.AIToolLoopMaxToolCallsPerIt)
 	}
 
 	// Cache tool results within the loop to avoid burning iterations on repeated
@@ -171,18 +171,18 @@ func (e *MemQLEngine) InvokeSIChatWithTools(ctx context.Context, templateId stri
 	return "", fmt.Errorf("tool-calling exceeded max iterations (%d)", maxIterations)
 }
 
-// InvokeSIChatWithFilteredTools is like InvokeSIChatWithTools but only includes
+// InvokeAIChatWithFilteredTools is like InvokeAIChatWithTools but only includes
 // the named tools. If toolNames is nil/empty, includes no tools (text-only).
 //
 // This is the back-compat entry point; it delegates to
-// InvokeSIChatWithFilteredToolsOpts with the loop's default hardening
+// InvokeAIChatWithFilteredToolsOpts with the loop's default hardening
 // options (issue #584). Existing callers are unaffected: nil options yields
 // built-in defaults so single-turn latency is unchanged.
-func (e *MemQLEngine) InvokeSIChatWithFilteredTools(ctx context.Context, templateId string, data map[string]any, toolNames []string) (string, error) {
-	return e.InvokeSIChatWithFilteredToolsOpts(ctx, templateId, data, toolNames, nil)
+func (e *MemQLEngine) InvokeAIChatWithFilteredTools(ctx context.Context, templateId string, data map[string]any, toolNames []string) (string, error) {
+	return e.InvokeAIChatWithFilteredToolsOpts(ctx, templateId, data, toolNames, nil)
 }
 
-// InvokeSIChatWithFilteredToolsOpts runs the hardened bounded tool loop
+// InvokeAIChatWithFilteredToolsOpts runs the hardened bounded tool loop
 // (issue #584). Beyond the filtered-tools behavior it adds:
 //   - structured, typed tool errors fed back to the model;
 //   - tool-set scoping (opts.ScopedTools -- the #588 hook);
@@ -192,11 +192,11 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredTools(ctx context.Context, templat
 //   - step-level idempotency (opts.IdempotencyKey -- the #582/#583 hook).
 //
 // opts may be nil for built-in defaults.
-func (e *MemQLEngine) InvokeSIChatWithFilteredToolsOpts(ctx context.Context, templateId string, data map[string]any, toolNames []string, opts *ToolLoopOptions) (string, error) {
+func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, templateId string, data map[string]any, toolNames []string, opts *ToolLoopOptions) (string, error) {
 	if e == nil {
 		return "", fmt.Errorf("engine is nil")
 	}
-	if e.siRuntime == nil || e.prompts == nil || e.providers == nil {
+	if e.aiRuntime == nil || e.prompts == nil || e.providers == nil {
 		return "", fmt.Errorf("SI runtime is not configured")
 	}
 
@@ -235,12 +235,12 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredToolsOpts(ctx context.Context, tem
 	if override := ProviderOverrideFromContext(ctx); override != "" {
 		invocation.ProviderOverride = &override
 	}
-	prompt, err := e.siRuntime.resolvePrompt(templateId)
+	prompt, err := e.aiRuntime.resolvePrompt(templateId)
 	if err != nil {
 		return "", err
 	}
 
-	payload, err := normalizeSIData(renderData)
+	payload, err := normalizeAIData(renderData)
 	if err != nil {
 		return "", fmt.Errorf("data for prompt %q invalid: %w", prompt.Name, err)
 	}
@@ -252,7 +252,7 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredToolsOpts(ctx context.Context, tem
 		return "", fmt.Errorf("executing prompt template %q: %w", prompt.Name, err)
 	}
 
-	providerName, err := e.siRuntime.resolveProviderName(prompt, invocation)
+	providerName, err := e.aiRuntime.resolveProviderName(prompt, invocation)
 	if err != nil {
 		return "", err
 	}
@@ -261,7 +261,7 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredToolsOpts(ctx context.Context, tem
 		return "", fmt.Errorf("provider %q not available", providerName)
 	}
 
-	toolCaller, ok := entry.Client.(common.ToolCallingChatSIProvider)
+	toolCaller, ok := entry.Client.(common.ToolCallingChatAIProvider)
 	if !ok || toolCaller == nil {
 		// DIAGNOSTIC: Log the provider type so we can see why tool calling is unavailable.
 		if e.Logger != nil {
@@ -273,7 +273,7 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredToolsOpts(ctx context.Context, tem
 			)
 		}
 		// Fallback: no tool calling supported -- use original data (with history).
-		result, err := e.siRuntime.Invoke(ctx, invocation, data)
+		result, err := e.aiRuntime.Invoke(ctx, invocation, data)
 		if err != nil {
 			return "", err
 		}
@@ -300,13 +300,13 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredToolsOpts(ctx context.Context, tem
 		}
 	}
 
-	maxIterations := defaultSIToolLoopMaxIterations
-	maxToolCallsPerIt := defaultSIToolLoopMaxToolCallsPerIt
-	if e.config.SIToolLoopMaxIterations > 0 {
-		maxIterations = clampSIToolLoopMaxIterations(e.config.SIToolLoopMaxIterations)
+	maxIterations := defaultAIToolLoopMaxIterations
+	maxToolCallsPerIt := defaultAIToolLoopMaxToolCallsPerIt
+	if e.config.AIToolLoopMaxIterations > 0 {
+		maxIterations = clampAIToolLoopMaxIterations(e.config.AIToolLoopMaxIterations)
 	}
-	if e.config.SIToolLoopMaxToolCallsPerIt > 0 {
-		maxToolCallsPerIt = clampSIToolLoopMaxToolCallsPerIt(e.config.SIToolLoopMaxToolCallsPerIt)
+	if e.config.AIToolLoopMaxToolCallsPerIt > 0 {
+		maxToolCallsPerIt = clampAIToolLoopMaxToolCallsPerIt(e.config.AIToolLoopMaxToolCallsPerIt)
 	}
 
 	// Cache tool results within the loop to avoid burning iterations on repeated

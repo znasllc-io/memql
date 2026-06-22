@@ -181,7 +181,7 @@ func (r *Replier) handleBackground(ctx context.Context, msg *memqlv1.AgentGenera
 // would resolve to the same provider as the cheap tier (no point swapping).
 // cheapProviderName is the already-resolved cheap-tier provider name, used
 // to skip a no-op escalation.
-func (r *Replier) resolveBackgroundEscalation(baseReq router.ResolveRequest, cheapProviderName string) common.ToolCallingChatSIProvider {
+func (r *Replier) resolveBackgroundEscalation(baseReq router.ResolveRequest, cheapProviderName string) common.ToolCallingChatAIProvider {
 	escReq := baseReq
 	escReq.ExplicitProvider = "" // escalation always uses the strong policy chain
 	escReq.PolicyName = backgroundEscalationPolicy
@@ -223,8 +223,8 @@ func (r *Replier) resolveBackgroundEscalation(baseReq router.ResolveRequest, che
 // timeout is the only no-progress guard needed.
 func (r *Replier) runNonStreamingToolLoop(
 	ctx context.Context,
-	provider common.ToolCallingChatSIProvider,
-	escalationProvider common.ToolCallingChatSIProvider,
+	provider common.ToolCallingChatAIProvider,
+	escalationProvider common.ToolCallingChatAIProvider,
 	messages []common.ChatMessage,
 	tools []common.ToolDefinition,
 	sink DeltaSink,

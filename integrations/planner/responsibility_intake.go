@@ -297,7 +297,7 @@ func (d *ResponsibilityIntakeDispatcher) invokeIntake(ctx context.Context, state
 	if len(answers) > 0 {
 		data["answers"] = answers
 	}
-	resp, err := d.engine.InvokeSI(systemActorContext(ctx), "responsibilityIntake", data)
+	resp, err := d.engine.InvokeAI(systemActorContext(ctx), "responsibilityIntake", data)
 	if err != nil {
 		return intakeResult{}, err
 	}

@@ -109,7 +109,7 @@ func TestRunCapture_FlattensMultiPhaseDesign(t *testing.T) {
       ]
     }`
 	fe := &fakeEngine{
-		siResponder: func(templateId string, data map[string]any) (any, error) {
+		aiResponder: func(templateId string, data map[string]any) (any, error) {
 			switch templateId {
 			case "authoringDesign":
 				return designOut, nil

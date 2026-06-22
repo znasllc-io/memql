@@ -203,7 +203,7 @@ func (l *PlannerAgentLoop) runDesignPass(ctx context.Context, statement, ownerUs
 		catalog = nil
 	}
 
-	resp, err := l.engine.InvokeSI(systemActorContext(ctx), "authoringDesign", map[string]any{
+	resp, err := l.engine.InvokeAI(systemActorContext(ctx), "authoringDesign", map[string]any{
 		"responsibility": statement,
 		"catalog":        catalogSummary(catalog),
 		"now":            time.Now().UTC().Format(time.RFC3339),

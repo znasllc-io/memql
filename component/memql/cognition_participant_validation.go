@@ -15,7 +15,7 @@ import (
 // participantPerUserAgentCap is the per-(user, space) maximum number of
 // active SI participants. Under the one-assistant space model
 // (copresent #124) a space carries EXACTLY ONE assistant -- the owner's
-// active one, auto-joined by autoJoinSI. Specialists and system agents
+// active one, auto-joined by autoJoinAI. Specialists and system agents
 // never participate in spaces, so the per-user SI cap is 1. This is the
 // Go-side enforcement of the declarative space.maxAgents=1 default.
 const participantPerUserAgentCap = 1
@@ -40,7 +40,7 @@ const defaultMaxHumansPerSpace = 5
 //     overriding would mask a buggy / malicious client.
 //
 //  2. Elevated actors (system / owner / developer / admin / writer)
-//     may supply any forUserId. The autoJoinSI automation relies on
+//     may supply any forUserId. The autoJoinAI automation relies on
 //     this to land the owner GA with forUserId = space-creator.
 //
 //  3. Per-user-per-space 3-cap. Counts current-active SI participants
@@ -127,7 +127,7 @@ func (e *MemQLEngine) validateAndStampParticipantPayload(ctx context.Context, pa
 				return fmt.Errorf("v1:cognition:participant: spaceId required")
 			}
 
-			activeCount, err := e.countActiveSIParticipantsForUser(
+			activeCount, err := e.countActiveAIParticipantsForUser(
 				ctx, spaceId, resolvedForUser, strings.TrimSpace(mutationId))
 			if err != nil {
 				return fmt.Errorf("v1:cognition:participant: cap check failed: %w", err)
@@ -146,7 +146,7 @@ func (e *MemQLEngine) validateAndStampParticipantPayload(ctx context.Context, pa
 	return nil
 }
 
-// countActiveSIParticipantsForUser counts distinct SI participant ids in
+// countActiveAIParticipantsForUser counts distinct SI participant ids in
 // the given space whose latest version is status='active' and whose
 // forUserId matches the supplied user. Excludes the supplied excludeId
 // (the participant id about to be inserted) so a re-version of the same
@@ -156,7 +156,7 @@ func (e *MemQLEngine) validateAndStampParticipantPayload(ctx context.Context, pa
 // id in Go. Spaces typically carry fewer than 50 participants over their
 // lifetime, so a full scan + Go-side fold is acceptable -- and it avoids
 // dialect-specific DISTINCT ON wiring through bun.
-func (e *MemQLEngine) countActiveSIParticipantsForUser(ctx context.Context, spaceId, forUserId, excludeId string) (int, error) {
+func (e *MemQLEngine) countActiveAIParticipantsForUser(ctx context.Context, spaceId, forUserId, excludeId string) (int, error) {
 	if e == nil {
 		return 0, fmt.Errorf("engine is nil")
 	}
@@ -303,7 +303,7 @@ func (e *MemQLEngine) spaceMaxHumans(ctx context.Context, spaceId string) (int, 
 // the given space whose latest version is status='active'. Excludes
 // excludeId (the participant id about to be inserted) so an idempotent
 // re-join of the same member is not counted twice. Mirrors the scan +
-// Go-side dedup approach of countActiveSIParticipantsForUser.
+// Go-side dedup approach of countActiveAIParticipantsForUser.
 func (e *MemQLEngine) countActiveHumanParticipants(ctx context.Context, spaceId, excludeId string) (int, error) {
 	if e == nil {
 		return 0, fmt.Errorf("engine is nil")

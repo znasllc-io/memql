@@ -3,15 +3,15 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.logic.{ logicAutoJoinSI, logicBootstrapSession, logicEnsureDailySpaceOnAuthSession, logicGenerateResponse, logicProvisionDailySpaceOnUserCreate, logicPurgeExpiredArchivedSpaces, logicRolloverDailySpace, logicVoiceMigrationOnSecondHuman }
+use cognition.logic.{ logicAutoJoinAI, logicBootstrapSession, logicEnsureDailySpaceOnAuthSession, logicGenerateResponse, logicProvisionDailySpaceOnUserCreate, logicPurgeExpiredArchivedSpaces, logicRolloverDailySpace, logicVoiceMigrationOnSecondHuman }
 
 @enabled
 @trigger(event="node.created", concept="v1:cognition:space", partition="*")
 @filter(payload.active==true)
 @description("On space creation, joins the creator's assistant plus any specialist agents picked at creation time. Joiners' GAs are never auto-joined.")
-automation autoJoinSI {
+automation autoJoinAI {
   step run {
-    logic autoJoinSI { event: event }
+    logic autoJoinAI { event: event }
   }
 }
 

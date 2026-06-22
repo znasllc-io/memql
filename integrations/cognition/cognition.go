@@ -32,7 +32,7 @@ const ComponentName = common.ComponentName("cognitionIntegration")
 
 // MemQL variable names for Cognition configuration.
 const (
-	VarCognitionSIEnabled           = "MEMQL_COGNITION_SI_ENABLED"
+	VarCognitionAIEnabled           = "MEMQL_COGNITION_SI_ENABLED"
 	VarCognitionDefaultProvider     = "MEMQL_COGNITION_DEFAULT_PROVIDER"
 	VarCognitionConversationHistory = "MEMQL_COGNITION_CONVERSATION_HISTORY_LIMIT"
 )
@@ -57,16 +57,16 @@ type MemQLEngine interface {
 	// Execute runs a MemQL query or function call and returns the result.
 	// Used for calling registered MemQL functions and insert mutations.
 	Execute(ctx context.Context, query string) (any, error)
-	// InvokeSI runs a prompt template by ID with the given data map.
+	// InvokeAI runs a prompt template by ID with the given data map.
 	// Used by the SI router and fallback responder for top-level SI
 	// invocations that can't sit inside a shape() projection.
-	InvokeSI(ctx context.Context, templateId string, data map[string]any) (any, error)
-	// InvokeSIStructured renders a prompt template and invokes its
+	InvokeAI(ctx context.Context, templateId string, data map[string]any) (any, error)
+	// InvokeAIStructured renders a prompt template and invokes its
 	// default chat provider with a JSON schema the model must match.
 	// Returns the raw JSON string. Used for routing, classification,
 	// suggestion -- any "logic" prompt where shape correctness matters
 	// more than prose quality.
-	InvokeSIStructured(
+	InvokeAIStructured(
 		ctx context.Context,
 		templateId string,
 		data map[string]any,
@@ -97,8 +97,8 @@ type MemQLEngine interface {
 	ResolveSkills(ctx context.Context, skillIds []string) (memql.SkillBundle, error)
 }
 
-// SIProviderRegistry provides access to SI providers.
-type SIProviderRegistry interface {
+// AIProviderRegistry provides access to SI providers.
+type AIProviderRegistry interface {
 	// GetProvider returns an SI provider by name.
 	GetProvider(name string) (any, bool)
 	// DefaultProvider returns the default SI provider.
@@ -115,7 +115,7 @@ type (
 
 		variableResolver VariableResolver
 		engine           MemQLEngine
-		providerRegistry SIProviderRegistry
+		providerRegistry AIProviderRegistry
 		eventBus         *events.Bus
 		config           *cognitionConfig
 
@@ -129,14 +129,14 @@ type (
 		promptCacheMu      sync.Mutex
 		participantsCache  map[string]cachedParticipants
 		spaceContextCache  map[string]cachedSpaceContext
-		siParticipantCache map[string]cachedSIParticipant
+		aiParticipantCache map[string]cachedAIParticipant
 		agentCache         map[string]cachedAgent
 		spaceInfoCache     map[string]cachedSpaceInfo
 
 		// singleflight groups to prevent cache-miss thundering herd.
 		participantsSF  singleflight.Group
 		spaceContextSF  singleflight.Group
-		siParticipantSF singleflight.Group
+		aiParticipantSF singleflight.Group
 		agentSF         singleflight.Group
 		recentUtterSF   singleflight.Group
 		spaceInfoSF     singleflight.Group
@@ -279,7 +279,7 @@ type (
 	cognitionConfig struct {
 		variableResolver VariableResolver
 		engine           MemQLEngine
-		providerRegistry SIProviderRegistry
+		providerRegistry AIProviderRegistry
 		eventBus         *events.Bus
 		scoreEngine      *polyphon.ScoreEngine
 		// dbGetter is a lazy *bun.DB accessor used by the dispatch gate's
@@ -349,7 +349,7 @@ func WithEngine(engine MemQLEngine) CognitionArg {
 }
 
 // WithProviderRegistry sets the SI provider registry.
-func WithProviderRegistry(registry SIProviderRegistry) CognitionArg {
+func WithProviderRegistry(registry AIProviderRegistry) CognitionArg {
 	return RequiredCognitionArg("provider_registry", func(c *cognitionConfig) {
 		c.providerRegistry = registry
 	})
@@ -489,7 +489,7 @@ func NewCognitionIntegration(baseIntegration *integrations.Integration, args ...
 		scoreEngine:          cfg.scoreEngine,
 		participantsCache:    make(map[string]cachedParticipants),
 		spaceContextCache:    make(map[string]cachedSpaceContext),
-		siParticipantCache:   make(map[string]cachedSIParticipant),
+		aiParticipantCache:   make(map[string]cachedAIParticipant),
 		agentCache:           make(map[string]cachedAgent),
 		spaceInfoCache:       make(map[string]cachedSpaceInfo),
 		recentUtterCache:     make(map[string][]map[string]any),
@@ -560,7 +560,7 @@ func (c *CognitionIntegration) Start(ctx context.Context) {
 	// can never starve the context recompute.
 	c.unsubscribes = append(c.unsubscribes, c.eventBus.Subscribe(
 		eventPatternParticipantAdded,
-		c.handleSIParticipantGreeting,
+		c.handleAIParticipantGreeting,
 		events.WithSubscriberName("cognition:greet-on-join"),
 	))
 
@@ -717,14 +717,14 @@ func (c *CognitionIntegration) DefaultProvider(ctx context.Context) string {
 	return strings.TrimSpace(value)
 }
 
-// IsSIEnabled checks if SI responses are enabled.
+// IsAIEnabled checks if SI responses are enabled.
 // Fetched from v1:platform:partitionVariable at runtime.
-func (c *CognitionIntegration) IsSIEnabled(ctx context.Context) bool {
+func (c *CognitionIntegration) IsAIEnabled(ctx context.Context) bool {
 	if c == nil || c.variableResolver == nil {
 		return true // Default to enabled if no resolver
 	}
 
-	value, err := c.variableResolver(ctx, VarCognitionSIEnabled)
+	value, err := c.variableResolver(ctx, VarCognitionAIEnabled)
 	if err != nil {
 		return true // Default to enabled on error
 	}

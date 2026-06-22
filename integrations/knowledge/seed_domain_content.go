@@ -314,7 +314,7 @@ func (i *Integration) writeTierABChunks(ctx context.Context, d StandardDomain, t
 		"tier":              tier,
 		"broadSurvey":       d.BroadSurvey,
 	}
-	raw, err := i.engine.InvokeSIStructured(
+	raw, err := i.engine.InvokeAIStructured(
 		ctx,
 		"seedDomainContent",
 		data,

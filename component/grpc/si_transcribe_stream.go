@@ -79,7 +79,7 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 	// BFF short-circuit: open a forwarded stream to a Voice worker.
 	// The Chunk/End envelopes will land on BFF later and flow through
 	// ForwardContinuation on the same inflight entry.
-	if s.shouldProxySI(nodeTargetForTranscribe()) {
+	if s.shouldProxyAI(nodeTargetForTranscribe()) {
 		// Audio streaming over the substrate (memql#1266): forward the Start
 		// trigger (opening the forward inflight the later Chunk/End continuations
 		// reuse) and consume the transcript Delta/Complete frames from the durable
@@ -88,9 +88,9 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 		// worker's pumpDeltas produces to the substrate under the same gate (no
 		// double delivery). Non-substrate binaries keep the plain relay.
 		if s.service.streamingOverSubstrate() {
-			return s.proxySIStream(envelope, requestId, nodeTargetForTranscribe(), s.consumeTranscriptStream)
+			return s.proxyAIStream(envelope, requestId, nodeTargetForTranscribe(), s.consumeTranscriptStream)
 		}
-		return s.proxySI(envelope, requestId, nodeTargetForTranscribe())
+		return s.proxyAI(envelope, requestId, nodeTargetForTranscribe())
 	}
 
 	// Local path: open the STT session here.
@@ -147,7 +147,7 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 	if s.streamProducerOverSubstrate() {
 		// The substrate carries the transcript content; rawSend still gets the
 		// terminal so the bff's forward inflight is cleaned up (the bff discards
-		// forward responses under proxySIStream, so no double delivery).
+		// forward responses under proxyAIStream, so no double delivery).
 		send = s.service.newTranscriptStreamSink(sessCtx, requestId, rawSend)
 	}
 
@@ -195,7 +195,7 @@ func (s *streamSession) handleAiTranscribeStreamChunk(
 	// BFF proxy: forward the chunk to the same worker Start opened a
 	// stream on. If no inflight exists, the start never went through
 	// (or already closed) -- surface that as InvalidArgument.
-	if s.shouldProxySI(nodeTargetForTranscribe()) {
+	if s.shouldProxyAI(nodeTargetForTranscribe()) {
 		if !s.service.aiForwarder.HasInflight(requestId) {
 			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.FailedPrecondition,
 				"no open transcribe stream for request_id (call Start first)")
@@ -249,7 +249,7 @@ func (s *streamSession) handleAiTranscribeStreamEnd(
 	// BFF proxy: forward End to the same worker; the worker will emit
 	// SITranscribeStreamComplete (or close silently on cancel) and the
 	// BFF's inflight entry closes on the terminal response.
-	if s.shouldProxySI(nodeTargetForTranscribe()) {
+	if s.shouldProxyAI(nodeTargetForTranscribe()) {
 		if !s.service.aiForwarder.HasInflight(requestId) {
 			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.FailedPrecondition,
 				"no open transcribe stream for request_id (call Start first)")

@@ -9,104 +9,867 @@
     "Stored data value participantType:\"si\" -- DB row data; identifiers that READ it are renamed, the value string stays \"si\".",
     "SCREAMING telemetry/enum strings (SI_COMPLETION_*, SUBSCRIPTION_KIND_SI_STREAM) -- wire/observability data contracts; reviewed per-issue (1.3/1.4), not auto-renamed here."
   ],
-
   "groups": {
-
     "go-grammar": [
-      { "old": "SIExpr", "new": "AIExpr", "mode": "infix", "exts": [".go"] },
-      { "old": "SIInvocation", "new": "AIInvocation", "mode": "infix", "exts": [".go"] },
-      { "old": "SIFunctionCall", "new": "AIFunctionCall", "mode": "infix", "exts": [".go"] }
+      {
+        "old": "SIExpr",
+        "new": "AIExpr",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SIInvocation",
+        "new": "AIInvocation",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SIFunctionCall",
+        "new": "AIFunctionCall",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      }
     ],
-
     "go-internal": [
-      { "old": "InvokeSI", "new": "InvokeAI", "mode": "prefix", "exts": [".go"] },
-      { "old": "invokeSI", "new": "invokeAI", "mode": "prefix", "exts": [".go"] },
-      { "old": "VarCognitionSIEnabled", "new": "VarCognitionAIEnabled", "mode": "token", "exts": [".go"] },
-      { "old": "SIProvider", "new": "AIProvider", "mode": "infix", "exts": [".go"] },
-      { "old": "SIToolLoop", "new": "AIToolLoop", "mode": "infix", "exts": [".go"] },
-      { "old": "SIResponder", "new": "AIResponder", "mode": "infix", "exts": [".go"] },
-      { "old": "SIResponse", "new": "AIResponse", "mode": "infix", "exts": [".go", ".memql"] },
-      { "old": "SIPolicies", "new": "AIPolicies", "mode": "infix", "exts": [".go"] },
-      { "old": "SIRuntime", "new": "AIRuntime", "mode": "infix", "exts": [".go"] },
-      { "old": "SIContext", "new": "AIContext", "mode": "infix", "exts": [".go"] },
-      { "old": "SICache", "new": "AICache", "mode": "infix", "exts": [".go"] },
-      { "old": "SIUsage", "new": "AIUsage", "mode": "infix", "exts": [".go"] },
-      { "old": "SIValue", "new": "AIValue", "mode": "infix", "exts": [".go"] },
-      { "old": "SIMeta", "new": "AIMeta", "mode": "infix", "exts": [".go"] },
-      { "old": "SIData", "new": "AIData", "mode": "infix", "exts": [".go"] },
-      { "old": "SIRespond", "new": "AIRespond", "mode": "infix", "exts": [".go"] },
-      { "old": "proxySI", "new": "proxyAI", "mode": "prefix", "exts": [".go"] },
-      { "old": "shouldProxySI", "new": "shouldProxyAI", "mode": "token", "exts": [".go"] },
-      { "old": "UsesSI", "new": "UsesAI", "mode": "token", "exts": [".go"] },
-      { "old": "IsSIEnabled", "new": "IsAIEnabled", "mode": "token", "exts": [".go"] },
-      { "old": "routeWithSI", "new": "routeWithAI", "mode": "token", "exts": [".go"] },
-      { "old": "collectSI", "new": "collectAI", "mode": "token", "exts": [".go"] }
+      {
+        "old": "InvokeSI",
+        "new": "InvokeAI",
+        "mode": "prefix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "invokeSI",
+        "new": "invokeAI",
+        "mode": "prefix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "VarCognitionSIEnabled",
+        "new": "VarCognitionAIEnabled",
+        "mode": "token",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SIProvider",
+        "new": "AIProvider",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SIToolLoop",
+        "new": "AIToolLoop",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SIResponder",
+        "new": "AIResponder",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SIResponse",
+        "new": "AIResponse",
+        "mode": "infix",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "SIPolicies",
+        "new": "AIPolicies",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SIRuntime",
+        "new": "AIRuntime",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SIContext",
+        "new": "AIContext",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SICache",
+        "new": "AICache",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SIUsage",
+        "new": "AIUsage",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SIValue",
+        "new": "AIValue",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SIMeta",
+        "new": "AIMeta",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SIData",
+        "new": "AIData",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SIRespond",
+        "new": "AIRespond",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "proxySI",
+        "new": "proxyAI",
+        "mode": "prefix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "shouldProxySI",
+        "new": "shouldProxyAI",
+        "mode": "token",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "UsesSI",
+        "new": "UsesAI",
+        "mode": "token",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "IsSIEnabled",
+        "new": "IsAIEnabled",
+        "mode": "token",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "routeWithSI",
+        "new": "routeWithAI",
+        "mode": "token",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "collectSI",
+        "new": "collectAI",
+        "mode": "token",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "defaultSiOutputTokens",
+        "new": "defaultAiOutputTokens",
+        "mode": "token",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "estimateSiCostUsd",
+        "new": "estimateAiCostUsd",
+        "mode": "token",
+        "exts": [
+          ".go"
+        ]
+      }
     ],
-
+    "go-internal-lower": [
+      {
+        "old": "siAfterFirst",
+        "new": "aiAfterFirst",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siAgg",
+        "new": "aiAgg",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siCache",
+        "new": "aiCache",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siCacheConfig",
+        "new": "aiCacheConfig",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siCacheEntry",
+        "new": "aiCacheEntry",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siCallCount",
+        "new": "aiCallCount",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siCalls",
+        "new": "aiCalls",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siCtx",
+        "new": "aiCtx",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siErr",
+        "new": "aiErr",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siInputUsdPerMillion",
+        "new": "aiInputUsdPerMillion",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siMetaKey",
+        "new": "aiMetaKey",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siMs",
+        "new": "aiMs",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siOutputUsdPerMillion",
+        "new": "aiOutputUsdPerMillion",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siParticipant",
+        "new": "aiParticipant",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siParticipantCache",
+        "new": "aiParticipantCache",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siParticipantForSpace",
+        "new": "aiParticipantForSpace",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siParticipants",
+        "new": "aiParticipants",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siParticipantSF",
+        "new": "aiParticipantSF",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siPeers",
+        "new": "aiPeers",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siReason",
+        "new": "aiReason",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siResponder",
+        "new": "aiResponder",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siResponse",
+        "new": "aiResponse",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siResponseCache",
+        "new": "aiResponseCache",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siRouterChose",
+        "new": "aiRouterChose",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siRouterReason",
+        "new": "aiRouterReason",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siRuntime",
+        "new": "aiRuntime",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      },
+      {
+        "old": "siWinner",
+        "new": "aiWinner",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      }
+    ],
     "shared": [
-      { "old": "SIParticipant", "new": "AIParticipant", "mode": "infix", "exts": [".go", ".ts", ".tsx", ".memql"] },
-      { "old": "AutoJoinSI", "new": "AutoJoinAI", "mode": "infix", "exts": [".go", ".ts", ".tsx", ".memql"] },
-      { "old": "autoJoinSI", "new": "autoJoinAI", "mode": "infix", "exts": [".go", ".ts", ".tsx", ".memql"] },
-      { "old": "JoinSpaceAsSI", "new": "JoinSpaceAsAI", "mode": "infix", "exts": [".go", ".ts", ".tsx", ".memql"] },
-      { "old": "greetOnJoinSI", "new": "greetOnJoinAI", "mode": "token", "exts": [".go", ".memql"] }
+      {
+        "old": "SIParticipant",
+        "new": "AIParticipant",
+        "mode": "infix",
+        "exts": [
+          ".go",
+          ".ts",
+          ".tsx",
+          ".memql"
+        ]
+      },
+      {
+        "old": "AutoJoinSI",
+        "new": "AutoJoinAI",
+        "mode": "infix",
+        "exts": [
+          ".go",
+          ".ts",
+          ".tsx",
+          ".memql"
+        ]
+      },
+      {
+        "old": "autoJoinSI",
+        "new": "autoJoinAI",
+        "mode": "infix",
+        "exts": [
+          ".go",
+          ".ts",
+          ".tsx",
+          ".memql"
+        ]
+      },
+      {
+        "old": "JoinSpaceAsSI",
+        "new": "JoinSpaceAsAI",
+        "mode": "infix",
+        "exts": [
+          ".go",
+          ".ts",
+          ".tsx",
+          ".memql"
+        ]
+      },
+      {
+        "old": "greetOnJoinSI",
+        "new": "greetOnJoinAI",
+        "mode": "token",
+        "exts": [
+          ".go",
+          ".memql"
+        ]
+      }
     ],
-
     "proto": [
-      { "old": "SIForward", "new": "AiForward", "mode": "infix", "exts": [".go", ".proto", ".ts", ".tsx"] },
-      { "old": "SITranscribe", "new": "AiTranscribe", "mode": "infix", "exts": [".go", ".proto", ".ts", ".tsx"] },
-      { "old": "SISpeech", "new": "AiSpeech", "mode": "infix", "exts": [".go", ".proto", ".ts", ".tsx"] },
-      { "old": "SISuggest", "new": "AiSuggest", "mode": "infix", "exts": [".go", ".proto", ".ts", ".tsx"] },
-      { "old": "SIStream", "new": "AiStream", "mode": "infix", "exts": [".go", ".proto", ".ts", ".tsx"] },
-      { "old": "SIChat", "new": "AiChat", "mode": "infix", "exts": [".go", ".proto", ".ts", ".tsx"] },
-      { "old": "SIChunk", "new": "AiChunk", "mode": "infix", "exts": [".go", ".proto", ".ts", ".tsx"] },
-
-      { "old": "si_chat_result", "new": "ai_chat_result", "mode": "token", "exts": [".proto"] },
-      { "old": "si_chat", "new": "ai_chat", "mode": "token", "exts": [".proto"] },
-      { "old": "si_chunk", "new": "ai_chunk", "mode": "token", "exts": [".proto"] },
-      { "old": "si_speech_result", "new": "ai_speech_result", "mode": "token", "exts": [".proto"] },
-      { "old": "si_speech", "new": "ai_speech", "mode": "token", "exts": [".proto"] },
-      { "old": "si_transcribe_stream_chunk", "new": "ai_transcribe_stream_chunk", "mode": "token", "exts": [".proto"] },
-      { "old": "si_transcribe_stream_complete", "new": "ai_transcribe_stream_complete", "mode": "token", "exts": [".proto"] },
-      { "old": "si_transcribe_stream_delta", "new": "ai_transcribe_stream_delta", "mode": "token", "exts": [".proto"] },
-      { "old": "si_transcribe_stream_end", "new": "ai_transcribe_stream_end", "mode": "token", "exts": [".proto"] },
-      { "old": "si_transcribe_stream_start", "new": "ai_transcribe_stream_start", "mode": "token", "exts": [".proto"] },
-      { "old": "si_transcribe_result", "new": "ai_transcribe_result", "mode": "token", "exts": [".proto"] },
-      { "old": "si_transcribe", "new": "ai_transcribe", "mode": "token", "exts": [".proto"] },
-      { "old": "si_suggest_result", "new": "ai_suggest_result", "mode": "token", "exts": [".proto"] },
-      { "old": "si_suggest", "new": "ai_suggest", "mode": "token", "exts": [".proto"] },
-      { "old": "si_forward_cancel", "new": "ai_forward_cancel", "mode": "token", "exts": [".proto"] },
-      { "old": "si_forward_request", "new": "ai_forward_request", "mode": "token", "exts": [".proto"] },
-      { "old": "si_forward_response", "new": "ai_forward_response", "mode": "token", "exts": [".proto"] }
+      {
+        "old": "SIForward",
+        "new": "AiForward",
+        "mode": "infix",
+        "exts": [
+          ".go",
+          ".proto",
+          ".ts",
+          ".tsx"
+        ]
+      },
+      {
+        "old": "SITranscribe",
+        "new": "AiTranscribe",
+        "mode": "infix",
+        "exts": [
+          ".go",
+          ".proto",
+          ".ts",
+          ".tsx"
+        ]
+      },
+      {
+        "old": "SISpeech",
+        "new": "AiSpeech",
+        "mode": "infix",
+        "exts": [
+          ".go",
+          ".proto",
+          ".ts",
+          ".tsx"
+        ]
+      },
+      {
+        "old": "SISuggest",
+        "new": "AiSuggest",
+        "mode": "infix",
+        "exts": [
+          ".go",
+          ".proto",
+          ".ts",
+          ".tsx"
+        ]
+      },
+      {
+        "old": "SIStream",
+        "new": "AiStream",
+        "mode": "infix",
+        "exts": [
+          ".go",
+          ".proto",
+          ".ts",
+          ".tsx"
+        ]
+      },
+      {
+        "old": "SIChat",
+        "new": "AiChat",
+        "mode": "infix",
+        "exts": [
+          ".go",
+          ".proto",
+          ".ts",
+          ".tsx"
+        ]
+      },
+      {
+        "old": "SIChunk",
+        "new": "AiChunk",
+        "mode": "infix",
+        "exts": [
+          ".go",
+          ".proto",
+          ".ts",
+          ".tsx"
+        ]
+      },
+      {
+        "old": "si_chat_result",
+        "new": "ai_chat_result",
+        "mode": "token",
+        "exts": [
+          ".proto"
+        ]
+      },
+      {
+        "old": "si_chat",
+        "new": "ai_chat",
+        "mode": "token",
+        "exts": [
+          ".proto"
+        ]
+      },
+      {
+        "old": "si_chunk",
+        "new": "ai_chunk",
+        "mode": "token",
+        "exts": [
+          ".proto"
+        ]
+      },
+      {
+        "old": "si_speech_result",
+        "new": "ai_speech_result",
+        "mode": "token",
+        "exts": [
+          ".proto"
+        ]
+      },
+      {
+        "old": "si_speech",
+        "new": "ai_speech",
+        "mode": "token",
+        "exts": [
+          ".proto"
+        ]
+      },
+      {
+        "old": "si_transcribe_stream_chunk",
+        "new": "ai_transcribe_stream_chunk",
+        "mode": "token",
+        "exts": [
+          ".proto"
+        ]
+      },
+      {
+        "old": "si_transcribe_stream_complete",
+        "new": "ai_transcribe_stream_complete",
+        "mode": "token",
+        "exts": [
+          ".proto"
+        ]
+      },
+      {
+        "old": "si_transcribe_stream_delta",
+        "new": "ai_transcribe_stream_delta",
+        "mode": "token",
+        "exts": [
+          ".proto"
+        ]
+      },
+      {
+        "old": "si_transcribe_stream_end",
+        "new": "ai_transcribe_stream_end",
+        "mode": "token",
+        "exts": [
+          ".proto"
+        ]
+      },
+      {
+        "old": "si_transcribe_stream_start",
+        "new": "ai_transcribe_stream_start",
+        "mode": "token",
+        "exts": [
+          ".proto"
+        ]
+      },
+      {
+        "old": "si_transcribe_result",
+        "new": "ai_transcribe_result",
+        "mode": "token",
+        "exts": [
+          ".proto"
+        ]
+      },
+      {
+        "old": "si_transcribe",
+        "new": "ai_transcribe",
+        "mode": "token",
+        "exts": [
+          ".proto"
+        ]
+      },
+      {
+        "old": "si_suggest_result",
+        "new": "ai_suggest_result",
+        "mode": "token",
+        "exts": [
+          ".proto"
+        ]
+      },
+      {
+        "old": "si_suggest",
+        "new": "ai_suggest",
+        "mode": "token",
+        "exts": [
+          ".proto"
+        ]
+      },
+      {
+        "old": "si_forward_cancel",
+        "new": "ai_forward_cancel",
+        "mode": "token",
+        "exts": [
+          ".proto"
+        ]
+      },
+      {
+        "old": "si_forward_request",
+        "new": "ai_forward_request",
+        "mode": "token",
+        "exts": [
+          ".proto"
+        ]
+      },
+      {
+        "old": "si_forward_response",
+        "new": "ai_forward_response",
+        "mode": "token",
+        "exts": [
+          ".proto"
+        ]
+      }
     ],
-
     "dsl-keyword": [
-      { "old": "si\\(", "new": "ai(", "mode": "regex", "exts": [".memql"],
-        "_note": "The si(\"promptName\", args) construct keyword. Scoped to .memql only." }
+      {
+        "old": "si\\(",
+        "new": "ai(",
+        "mode": "regex",
+        "exts": [
+          ".memql"
+        ],
+        "_note": "The si(\"promptName\", args) construct keyword. Scoped to .memql only."
+      }
     ],
-
     "go-keyword-literals": [
-      { "old": "si\\(", "new": "ai(", "mode": "regex", "exts": [".go"],
-        "_note": "Hardcoded `si(` string literals in Go that PARSE/SERIALIZE the keyword (shape.go funcCall[:3]==\"si(\", canonical.go, shape_template.go WriteString) + the si()-keyword error messages/comments. The participant data value \"si\" has no paren and is untouched (deferred #1918)." }
+      {
+        "old": "si\\(",
+        "new": "ai(",
+        "mode": "regex",
+        "exts": [
+          ".go"
+        ],
+        "_note": "Hardcoded `si(` string literals in Go that PARSE/SERIALIZE the keyword (shape.go funcCall[:3]==\"si(\", canonical.go, shape_template.go WriteString) + the si()-keyword error messages/comments. The participant data value \"si\" has no paren and is untouched (deferred #1918)."
+      }
     ],
-
     "dsl-identifiers": [
-      { "old": "queryHasSIResponseForReply", "new": "queryHasAIResponseForReply", "mode": "token", "exts": [".memql"] },
-      { "old": "mutationJoinSpaceAsSI", "new": "mutationJoinSpaceAsAI", "mode": "token", "exts": [".memql"] }
+      {
+        "old": "queryHasSIResponseForReply",
+        "new": "queryHasAIResponseForReply",
+        "mode": "token",
+        "exts": [
+          ".memql"
+        ]
+      },
+      {
+        "old": "mutationJoinSpaceAsSI",
+        "new": "mutationJoinSpaceAsAI",
+        "mode": "token",
+        "exts": [
+          ".memql"
+        ]
+      }
     ],
-
     "frontend": [
-      { "old": "SITyping", "new": "AITyping", "mode": "infix", "exts": [".ts", ".tsx"] },
-      { "old": "SIMessage", "new": "AIMessage", "mode": "infix", "exts": [".ts", ".tsx"] },
-      { "old": "SIVideo", "new": "AIVideo", "mode": "infix", "exts": [".ts", ".tsx"] },
-      { "old": "SIAgent", "new": "AIAgent", "mode": "infix", "exts": [".ts", ".tsx"] },
-      { "old": "SI_PARTICIPANT_ID", "new": "AI_PARTICIPANT_ID", "mode": "token", "exts": [".ts", ".tsx"] },
-      { "old": "startWaitingForSI", "new": "startWaitingForAI", "mode": "token", "exts": [".ts", ".tsx"] },
-      { "old": "joinSIArgs", "new": "joinAIArgs", "mode": "token", "exts": [".ts", ".tsx"] },
-      { "old": "joinAsSI", "new": "joinAsAI", "mode": "token", "exts": [".ts", ".tsx"] },
-      { "old": "isSI", "new": "isAI", "mode": "token", "exts": [".ts", ".tsx"] }
+      {
+        "old": "SITyping",
+        "new": "AITyping",
+        "mode": "infix",
+        "exts": [
+          ".ts",
+          ".tsx"
+        ]
+      },
+      {
+        "old": "SIMessage",
+        "new": "AIMessage",
+        "mode": "infix",
+        "exts": [
+          ".ts",
+          ".tsx"
+        ]
+      },
+      {
+        "old": "SIVideo",
+        "new": "AIVideo",
+        "mode": "infix",
+        "exts": [
+          ".ts",
+          ".tsx"
+        ]
+      },
+      {
+        "old": "SIAgent",
+        "new": "AIAgent",
+        "mode": "infix",
+        "exts": [
+          ".ts",
+          ".tsx"
+        ]
+      },
+      {
+        "old": "SI_PARTICIPANT_ID",
+        "new": "AI_PARTICIPANT_ID",
+        "mode": "token",
+        "exts": [
+          ".ts",
+          ".tsx"
+        ]
+      },
+      {
+        "old": "startWaitingForSI",
+        "new": "startWaitingForAI",
+        "mode": "token",
+        "exts": [
+          ".ts",
+          ".tsx"
+        ]
+      },
+      {
+        "old": "joinSIArgs",
+        "new": "joinAIArgs",
+        "mode": "token",
+        "exts": [
+          ".ts",
+          ".tsx"
+        ]
+      },
+      {
+        "old": "joinAsSI",
+        "new": "joinAsAI",
+        "mode": "token",
+        "exts": [
+          ".ts",
+          ".tsx"
+        ]
+      },
+      {
+        "old": "isSI",
+        "new": "isAI",
+        "mode": "token",
+        "exts": [
+          ".ts",
+          ".tsx"
+        ]
+      }
     ]
   },
-
   "denylist": [
     "SIP(?![a-z])[A-Za-z0-9_]*",
     "TSInterface[A-Za-z0-9_]*",
@@ -114,46 +877,147 @@
     "CSS[A-Za-z0-9_]*",
     "CJS[A-Za-z0-9_]*",
     "[A-Za-z0-9_]*CSSItems",
-    "POSIX", "OSI", "CSI",
-    "VERSION", "MEMQL_VERSION", "MIN_IOS_VERSION",
-    "MISSING", "INSIDE", "OUTSIDE", "ANALYSIS", "DECISIONS", "SILENTLY",
-    "PERSISTS", "PERSIST", "EPSILON", "UNSIGNALED", "SID",
-    "SIGTERM", "SIGINT", "SIGHUP", "SIGKILL", "SIGQUIT", "SIGNAL", "RAISE_HAND_SIGNAL_TEXT",
-    "SINGLE", "EXTENSION", "IMAGE_EXTENSIONS", "CSV_EXTENSIONS",
-    "SIMLI", "SIMLI_API_KEY", "VITE_SIMLI_API_KEY", "VITE_SIMLI_FACE_ID",
-    "MEMQL_SI_[A-Z0-9_]*", "MEMQL_COGNITION_SI_[A-Z0-9_]*",
+    "POSIX",
+    "OSI",
+    "CSI",
+    "VERSION",
+    "MEMQL_VERSION",
+    "MIN_IOS_VERSION",
+    "MISSING",
+    "INSIDE",
+    "OUTSIDE",
+    "ANALYSIS",
+    "DECISIONS",
+    "SILENTLY",
+    "PERSISTS",
+    "PERSIST",
+    "EPSILON",
+    "UNSIGNALED",
+    "SID",
+    "SIGTERM",
+    "SIGINT",
+    "SIGHUP",
+    "SIGKILL",
+    "SIGQUIT",
+    "SIGNAL",
+    "RAISE_HAND_SIGNAL_TEXT",
+    "SINGLE",
+    "EXTENSION",
+    "IMAGE_EXTENSIONS",
+    "CSV_EXTENSIONS",
+    "SIMLI",
+    "SIMLI_API_KEY",
+    "VITE_SIMLI_API_KEY",
+    "VITE_SIMLI_FACE_ID",
+    "MEMQL_SI_[A-Z0-9_]*",
+    "MEMQL_COGNITION_SI_[A-Z0-9_]*",
     "MEMORY_ENGINE_SI_[A-Z0-9_]*",
-    "si_openai_api_key", "si_openai_project_id", "si_default_provider",
+    "si_openai_api_key",
+    "si_openai_project_id",
+    "si_default_provider",
     "IDENTITY_SIGNING_KEY_B64",
     "MEMQL_GENESIS_[A-Z0-9_]*",
     "MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS",
     "MEMQL_PLANNER_MAX_IDENTICAL_DECISIONS",
-    "MEMQL_ASSISTANT_ETIQUETTE", "ASSISTANT_NAME_POOL",
+    "MEMQL_ASSISTANT_ETIQUETTE",
+    "ASSISTANT_NAME_POOL",
     "[A-Za-z0-9_]*SESSION[A-Za-z0-9_]*",
     "[A-Za-z0-9_]*SIZE[A-Za-z0-9_]*",
     "[A-Za-z0-9_]*SIMILAR[A-Za-z0-9_]*",
     "[A-Za-z0-9_]*TRANSITION[A-Za-z0-9_]*",
     "[A-Za-z0-9_]*PROGRESSIVE[A-Za-z0-9_]*",
     "[A-Za-z0-9_]*SILENCE[A-Za-z0-9_]*",
-    "AutoTTSIndicator", "PROGRESSIVE_ID",
-    "__VAP_SESSION__"
+    "AutoTTSIndicator",
+    "PROGRESSIVE_ID",
+    "__VAP_SESSION__",
+    "siParticipantId",
+    "siOpenaiApiKey",
+    "siOpenaiProjectId",
+    "siDefaultProvider"
   ],
-
   "_scan_only": "denylist_substrings suppress G1-scan noise: any token CONTAINING one of these uppercase English roots is not an AI identifier. Scan-only -- never used by the rename pass (no allowlisted AI token contains any of these).",
   "denylist_substrings": [
-    "VERSION", "SESSION", "SIZE", "SIGNAL", "SILENC", "SILENT",
-    "TRANSITION", "TRANSIENT", "CLASSIFI", "DECISION", "SINGLE", "INSIDE",
-    "OUTSIDE", "MISSING", "EXTENSION", "POSIX", "PERSIST", "SIGNING",
-    "SIGNATURE", "SIG", "PROGRESSIV", "ANALYSIS", "ASSISTANT", "SIMILAR",
-    "GENESIS", "SIMLI", "IDENTICAL", "EPSILON", "UNSIGNALED", "PROVISION",
-    "REVISION", "PRECISION", "EMISSION", "OMISSION", "ADMISSION",
-    "DIMENSION", "EXPRESSION", "IMPRESSION", "SUPERVISION", "DIVISION",
-    "COLLISION", "DERISION", "ANSI", "SITE", "SINK", "VISIBLE", "SIBLING",
-    "SIDE", "SIX", "BASIC", "CLOSING", "COMPOSITION", "CONSISTEN",
-    "PERMISSION", "DESIGN", "EXCLUSI", "EXPANSION", "INCLUSI", "INCONCLUSI",
-    "INVISIBLE", "VISIBIL", "POSITION", "POSITIVE", "PROCESSING", "REFUSING",
-    "REGRESSION", "SENSITIV", "ALONGSIDE", "ASSIGNMENT", "TLSInsecure",
-    "Incoherent", "SID", "OSI", "CSI", "eyJ", "PASSIVE", "MASSIVE",
-    "RESIDUAL", "SUBSIDI", "SUPERSIS", "SUPERSESSION", "ELISION"
+    "VERSION",
+    "SESSION",
+    "SIZE",
+    "SIGNAL",
+    "SILENC",
+    "SILENT",
+    "TRANSITION",
+    "TRANSIENT",
+    "CLASSIFI",
+    "DECISION",
+    "SINGLE",
+    "INSIDE",
+    "OUTSIDE",
+    "MISSING",
+    "EXTENSION",
+    "POSIX",
+    "PERSIST",
+    "SIGNING",
+    "SIGNATURE",
+    "SIG",
+    "PROGRESSIV",
+    "ANALYSIS",
+    "ASSISTANT",
+    "SIMILAR",
+    "GENESIS",
+    "SIMLI",
+    "IDENTICAL",
+    "EPSILON",
+    "UNSIGNALED",
+    "PROVISION",
+    "REVISION",
+    "PRECISION",
+    "EMISSION",
+    "OMISSION",
+    "ADMISSION",
+    "DIMENSION",
+    "EXPRESSION",
+    "IMPRESSION",
+    "SUPERVISION",
+    "DIVISION",
+    "COLLISION",
+    "DERISION",
+    "ANSI",
+    "SITE",
+    "SINK",
+    "VISIBLE",
+    "SIBLING",
+    "SIDE",
+    "SIX",
+    "BASIC",
+    "CLOSING",
+    "COMPOSITION",
+    "CONSISTEN",
+    "PERMISSION",
+    "DESIGN",
+    "EXCLUSI",
+    "EXPANSION",
+    "INCLUSI",
+    "INCONCLUSI",
+    "INVISIBLE",
+    "VISIBIL",
+    "POSITION",
+    "POSITIVE",
+    "PROCESSING",
+    "REFUSING",
+    "REGRESSION",
+    "SENSITIV",
+    "ALONGSIDE",
+    "ASSIGNMENT",
+    "TLSInsecure",
+    "Incoherent",
+    "SID",
+    "OSI",
+    "CSI",
+    "eyJ",
+    "PASSIVE",
+    "MASSIVE",
+    "RESIDUAL",
+    "SUBSIDI",
+    "SUPERSIS",
+    "SUPERSESSION",
+    "ELISION"
   ]
 }

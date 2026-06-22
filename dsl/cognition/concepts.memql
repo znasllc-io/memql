@@ -139,7 +139,7 @@ concept participant {
   }
   displayName  string  @required  @description("Display name shown in the UI.")
   forUserId  string  @description("v1:identity:user.id this SI participant belongs to (which human's team is this agent on?). Required on every SI participant inserted by the agent-roster mutations -- humans bring their own agents into their own private team chat, never each other's. Empty for human participants. The engine pre-insert guard enforces non-empty forUserId on SI participants and validates it matches the authenticated caller (non-elevated callers cannot land an agent on someone else's team). Used by the per-user-per-space 3-cap and by Phase 6's discussion-mode dispatch loop to find the per-user agent set.")
-  isGroupGA  bool  @default(false)  @description("True only on the owner's Assistant when it sits in the space's group context. The owner's GA is the only AI in group chat; specialists stay in per-user team chats. The participant guard rejects status='left' inserts on isGroupGA=true rows from non-elevated callers, so the GA cannot be removed from the group via the Roster tab. Set by the autoJoinSI automation on space creation (Phase 1.5) and never via the agent-roster mutations.")
+  isGroupGA  bool  @default(false)  @description("True only on the owner's Assistant when it sits in the space's group context. The owner's GA is the only AI in group chat; specialists stay in per-user team chats. The participant guard rejects status='left' inserts on isGroupGA=true rows from non-elevated callers, so the GA cannot be removed from the group via the Roster tab. Set by the autoJoinAI automation on space creation (Phase 1.5) and never via the agent-roster mutations.")
   isGuest  bool  @default(false)  @description("Whether this participant joined via a guest invite (external, no CoPresent account).")
   joinedAt  datetime  @description("When the participant joined the space.")
   leftAt  datetime  @description("When the participant left the space.")
@@ -225,7 +225,7 @@ concept space {
   name  string  @required  @description("Display name of the space.")
   participantIds  []string  @description("IDs of participants in this space.")
   maxHumans  int  @default("5")  @description("Maximum number of human participants allowed in this space (default 5). Enforced at join time by the participant pre-insert guard.")
-  maxAgents  int  @default("1")  @description("Maximum number of AI assistant participants allowed in this space. Always 1 under the one-assistant model (copresent #124): a space carries EXACTLY ONE assistant -- the owner's currently-active one, auto-joined by the autoJoinSI automation. Specialists and system agents never participate in spaces.")
+  maxAgents  int  @default("1")  @description("Maximum number of AI assistant participants allowed in this space. Always 1 under the one-assistant model (copresent #124): a space carries EXACTLY ONE assistant -- the owner's currently-active one, auto-joined by the autoJoinAI automation. Specialists and system agents never participate in spaces.")
   scheduledAt  datetime  @description("When the space is scheduled to start (if status is 'scheduled').")
   settings {
     autoTranscribe  bool  @default("true")  @description("Whether to automatically transcribe audio.")
@@ -292,7 +292,7 @@ concept utterance {
     intent  string  @description("Detected intent or action.")
     mentionedParticipants  []string  @description("IDs of participants mentioned.")
     sentiment  string  @description("Detected sentiment.")
-    shouldSIRespond  bool  @description("Hint for turn-taking: should SI respond?")
+    shouldAIRespond  bool  @description("Hint for turn-taking: should AI respond?")
   }
   audioId  string  @description("ID of associated audio media asset.")
   citations  []object  @description("Source citations for the utterance text. Each item has shape {domainId: string, matchedPhrase: string} -- the frontend wraps each matchedPhrase in the rendered text with a clickable chip linking to the named knowledge domain. Populated by cognition from the agent's respondToUser envelope.")

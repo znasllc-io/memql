@@ -18,8 +18,8 @@ import (
 	"github.com/znasllc-io/memql/core/id"
 )
 
-// EmbeddingProviderFunc resolves an EmbeddingSIProvider by name from the engine.
-type EmbeddingProviderFunc func(name string) (memql.EmbeddingSIProvider, error)
+// EmbeddingProviderFunc resolves an EmbeddingAIProvider by name from the engine.
+type EmbeddingProviderFunc func(name string) (memql.EmbeddingAIProvider, error)
 
 // PartitionFunc returns the active partition for the current request context.
 type PartitionFunc func(ctx context.Context) string

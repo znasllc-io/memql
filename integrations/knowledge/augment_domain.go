@@ -144,7 +144,7 @@ func (i *Integration) augmentDomainAnalyzeHandler(ctx context.Context, args map[
 		"retrieved":     retrieved,
 	}
 
-	raw, err := i.engine.InvokeSIStructured(
+	raw, err := i.engine.InvokeAIStructured(
 		ctx,
 		"augmentDomainAnalyze",
 		data,
@@ -265,7 +265,7 @@ func (i *Integration) augmentDomainGenerateHandler(ctx context.Context, args map
 		"topic":             topic,
 		"targetCount":       10,
 	}
-	rawChunks, err := i.engine.InvokeSIStructured(
+	rawChunks, err := i.engine.InvokeAIStructured(
 		ctx,
 		"augmentDomainContent",
 		promptData,

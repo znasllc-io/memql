@@ -107,7 +107,7 @@ func NewReplier(engine MemQLEngine, rtr *router.Router, log *slog.Logger) (*Repl
 //
 // Dispatch:
 //   - hints["tools_disabled"] == "true": non-streaming generation via
-//     InvokeSI("agentReply", data). Emits a single TextDelta with the
+//     InvokeAI("agentReply", data). Emits a single TextDelta with the
 //     full reply and returns. Used for voice and polyphon-text paths.
 //   - otherwise: streaming tool-calling loop via the named ChatStream
 //     provider. Emits TextDelta per chunk and ToolCall/ToolResult per
@@ -140,11 +140,11 @@ func (r *Replier) Handle(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg,
 }
 
 // handleNonStreaming covers the voice / polyphon-text paths. Single prompt
-// invocation via InvokeSI; emits the full reply as one TextDelta.
+// invocation via InvokeAI; emits the full reply as one TextDelta.
 func (r *Replier) handleNonStreaming(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg, sink DeltaSink) (*TurnResult, error) {
 	data := buildPromptData(msg)
 
-	result, err := r.engine.InvokeSI(ctx, "agentReply", data)
+	result, err := r.engine.InvokeAI(ctx, "agentReply", data)
 	if err != nil {
 		return nil, fmt.Errorf("invoke agentReply prompt: %w", err)
 	}
@@ -1725,7 +1725,7 @@ func truncateForLog(s string, max int) string {
 	return s[:max] + "…"
 }
 
-// extractReplyText pulls the reply text out of an InvokeSI result. The SI
+// extractReplyText pulls the reply text out of an InvokeAI result. The SI
 // runtime may return a string, a map with "text"/"content" keys, or an
 // arbitrary JSON-serialisable value; we normalise to string.
 func extractReplyText(result any) string {

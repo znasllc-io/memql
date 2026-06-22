@@ -81,7 +81,7 @@ func (o *observedStreamWithTools) CallChatStreamWithTools(
 	return observedCh, nil
 }
 
-// observedWithTools wraps a common.ToolCallingChatSIProvider -- the
+// observedWithTools wraps a common.ToolCallingChatAIProvider -- the
 // non-streaming request/response tool-calling surface used by the
 // background execution lane (memql#896). One call == one model step; the
 // observer records a single non-streaming CallRecord (no time-to-first-
@@ -89,7 +89,7 @@ func (o *observedStreamWithTools) CallChatStreamWithTools(
 // both the assistant text and the requested tool-call argument bytes so
 // the ledger's token estimate reflects a tool-heavy step, not just prose.
 type observedWithTools struct {
-	inner    common.ToolCallingChatSIProvider
+	inner    common.ToolCallingChatAIProvider
 	router   *Router
 	resolved Resolved
 	req      ResolveRequest
@@ -119,11 +119,11 @@ func (o *observedWithTools) CallChatWithTools(
 	return result, err
 }
 
-// observedChat wraps a common.ChatSIProvider -- the non-streaming
+// observedChat wraps a common.ChatAIProvider -- the non-streaming
 // synchronous chat surface used by suggest endpoints and the voice
-// (non-tool-calling) InvokeSI path.
+// (non-tool-calling) InvokeAI path.
 type observedChat struct {
-	inner    common.ChatSIProvider
+	inner    common.ChatAIProvider
 	router   *Router
 	resolved Resolved
 	req      ResolveRequest

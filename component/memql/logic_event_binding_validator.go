@@ -23,7 +23,7 @@ import (
 // `args.event.*` reference resolves to empty/undefined inside the nested
 // steps, and the first step that feeds one of those references to a
 // @required argument fails at RUNTIME with "required argument <x> is
-// missing" (the memql#1706 failure shape across logicAutoJoinSI,
+// missing" (the memql#1706 failure shape across logicAutoJoinAI,
 // logicConflictDetection, logicGenerateResponse,
 // logicEnsureDailySpaceOnAuthSession, logicVoiceMigrationOnSecondHuman).
 //

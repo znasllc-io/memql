@@ -88,13 +88,13 @@ var specCon = memql.SandboxConstruct{
 }
 
 // emitFakeEngine returns a fakeEngine whose authoringEmit / authoringRepair
-// InvokeSI calls yield the scripted JSON (by template id), and whose
+// InvokeAI calls yield the scripted JSON (by template id), and whose
 // queryPlanById Execute yields a plan row carrying the given metrics (for the
 // budget-gate path).
 func emitFakeEngine(emitOut string, repairOuts []string, planRow map[string]any) *fakeEngine {
 	repairIdx := 0
 	return &fakeEngine{
-		siResponder: func(templateId string, _ map[string]any) (any, error) {
+		aiResponder: func(templateId string, _ map[string]any) (any, error) {
 			switch templateId {
 			case "authoringEmit":
 				return emitOut, nil

@@ -31,7 +31,7 @@ func TestProduceArtifact_ThroughLoop_NoPlannerCalls(t *testing.T) {
 			}
 			return nil, nil
 		},
-		siResponder: func(templateId string, _ map[string]any) (any, error) {
+		aiResponder: func(templateId string, _ map[string]any) (any, error) {
 			if templateId == "goalComplexityTriage" {
 				return map[string]any{"complexity": "trivial", "reasoning": "one list"}, nil
 			}

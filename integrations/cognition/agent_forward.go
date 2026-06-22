@@ -267,7 +267,7 @@ type agentReplyResult struct {
 // structured citations from AgentGenerateTurnComplete.
 //
 // requestId doubles as the replyId stamped on every emitted text-chunk
-// and is reused as the committed utterance.id by insertSIResponse so the
+// and is reused as the committed utterance.id by insertAIResponse so the
 // streaming bubble and the committed bubble share one stable React key.
 func (c *CognitionIntegration) consumeAgentTurnStream(
 	ctx context.Context,

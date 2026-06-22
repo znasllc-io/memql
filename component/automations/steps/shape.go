@@ -292,7 +292,7 @@ func (e *ShapeExecutor) evaluateFunctionObject(ctx context.Context, name string,
 			}
 		}
 
-		return stepCtx.Engine.InvokeSI(ctx, templateId, resolvedData)
+		return stepCtx.Engine.InvokeAI(ctx, templateId, resolvedData)
 	}
 
 	// Unknown function object: return as-is (debuggable)
@@ -347,7 +347,7 @@ func (e *ShapeExecutor) evaluateShapeFunction(ctx context.Context, funcCall stri
 		}
 
 		// Invoke the AI runtime via the engine
-		result, err := stepCtx.Engine.InvokeSI(ctx, templateId, resolvedData)
+		result, err := stepCtx.Engine.InvokeAI(ctx, templateId, resolvedData)
 		if err != nil {
 			return nil, fmt.Errorf("AI function execution failed: %w", err)
 		}

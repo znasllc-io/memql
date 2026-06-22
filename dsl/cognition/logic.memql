@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-// automations/v1/cognition/autoJoinSI/automation.memql
+// automations/v1/cognition/autoJoinAI/automation.memql
 //
 // PURPOSE:
 // On space creation, auto-join the CREATOR's currently-active
@@ -43,13 +43,13 @@
 // - Emits "si.auto-joined" event for observability.
 use agents.queries.{ queryAgentById, queryAssistantAgentForUser }
 use cognition.builtins.{ ensureDailySpaceForCaller, ensureDailySpaceForUser, rolloverDailySpacesAllUsers }
-use cognition.mutations.{ mutationCreateSessionForParticipant, mutationDeleteSpaceNow, mutationJoinSpaceAsSI, mutationSendTextUtterance }
-use cognition.queries.{ queryExpiredArchivedSpaces, queryHasSIResponseForReply, queryParticipantByAgentSpace, queryParticipantSession }
+use cognition.mutations.{ mutationCreateSessionForParticipant, mutationDeleteSpaceNow, mutationJoinSpaceAsAI, mutationSendTextUtterance }
+use cognition.queries.{ queryExpiredArchivedSpaces, queryHasAIResponseForReply, queryParticipantByAgentSpace, queryParticipantSession }
 use identity.queries.{ queryUserById, queryUsersActiveInSpace }
 
 @description("Triggered when a v1:cognition:space is created with status='active'. Auto-joins the creator's currently-active assistant as a v1:cognition:participant on the new space, with forUserId=creator and isGroupGA=true (so the participant guard prevents non-elevated callers from removing it via the Roster tab). This is the ONLY AI participant a space carries (maxAgents=1, one-assistant model copresent #124). Idempotent. Emits 'si.auto-joined' for observability.")
 @eventField("id", "ownerUserId")
-logic logicAutoJoinSI {
+logic logicAutoJoinAI {
   args {
     event object @required
   }
@@ -151,17 +151,17 @@ logic logicAutoJoinSI {
   //     non-elevated callers, so the GA cannot be removed via the
   //     "Remove agent" affordance in the Roster tab. Only system
   //     actors (e.g., space-deletion cleanup) may demote it.
-  // Both fields ride through unchanged because autoJoinSI runs as a
-  // system actor (system:automation:autoJoinSI), which the participant
+  // Both fields ride through unchanged because autoJoinAI runs as a
+  // system actor (system:automation:autoJoinAI), which the participant
   // guard treats as elevated and trusts the explicit forUserId on.
   // Same positive-presence guard as checkExistingGA above (memql#1044).
-  // Dedupe on re-fire is carried by mutationJoinSpaceAsSI's
+  // Dedupe on re-fire is carried by mutationJoinSpaceAsAI's
   // content-addressed id (one row per (space, agentId)); the prior
   // `checkExistingGA.Empty()` clause was a no-op in practice because the
   // raw `.Empty()` method-call form never resolved in the condition
   // evaluator, so dropping it changes nothing about idempotency.
   insertGA := if first(getGA).id != "" {
-    mutationJoinSpaceAsSI({
+    mutationJoinSpaceAsAI({
       spaceId: args.event.payload.id,
       agentId: coalesce(getGA.First().id, ""),
       displayName: coalesce(getGA.First().payload.name, "Assistant"),
@@ -228,7 +228,7 @@ logic logicBootstrapSession {
 // reception, concurrent context loading, Polyphon scoring, and streaming
 // dispatch, then emits this event with pre-loaded context when a
 // non-streaming SI response is needed.
-@description("Generates and inserts an SI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via mutationSendTextUtterance, and bumps participant presence to idle. Idempotent via queryHasSIResponseForReply.")
+@description("Generates and inserts an SI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via mutationSendTextUtterance, and bumps participant presence to idle. Idempotent via queryHasAIResponseForReply.")
 @eventField("agentId", "promptData", "promptTemplateId", "siParticipantId", "spaceId", "utteranceId")
 logic logicGenerateResponse {
   args {
@@ -246,13 +246,13 @@ logic logicGenerateResponse {
   //   toolNames         - Tool whitelist for the SI response
 
   // Check idempotency -- skip if we already responded to this utterance
-  existingResponse := queryHasSIResponseForReply({
+  existingResponse := queryHasAIResponseForReply({
     replyToId: args.event.payload.utteranceId,
     participantId: args.event.payload.siParticipantId
   })
 
   // Generate SI response via the prompt template
-  siResponse := if existingResponse.Empty() {
+  aiResponse := if existingResponse.Empty() {
     ai(args.event.payload.promptTemplateId, args.event.payload.promptData)
   }
 
@@ -261,7 +261,7 @@ logic logicGenerateResponse {
     mutationSendTextUtterance({
       args.event.payload.spaceId,
       participantId: args.event.payload.siParticipantId,
-      text: siResponse,
+      text: aiResponse,
       replyToId: args.event.payload.utteranceId,
       source: { inputMethod: "si", agentId: args.event.payload.agentId }
     })

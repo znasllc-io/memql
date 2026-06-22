@@ -64,7 +64,7 @@ func TestInvokeAndDispatch_OscillatingPlanner_Parks(t *testing.T) {
 		"requestedBy": "v1:identity:user:u1",
 		"metrics":     map[string]any{"llmCallCount": float64(0)},
 	}
-	siCalls := 0
+	aiCalls := 0
 	fe := &fakeEngine{
 		execResponder: func(query string) (any, error) {
 			switch {
@@ -78,8 +78,8 @@ func TestInvokeAndDispatch_OscillatingPlanner_Parks(t *testing.T) {
 			return nil, nil
 		},
 		// Always emit the IDENTICAL decompose decision -> oscillation.
-		siResponder: func(_ string, _ map[string]any) (any, error) {
-			siCalls++
+		aiResponder: func(_ string, _ map[string]any) (any, error) {
+			aiCalls++
 			return `{"action":"decompose","plan_outline":[{"kind":"produce","label":"Produce"}]}`, nil
 		},
 	}
@@ -91,8 +91,8 @@ func TestInvokeAndDispatch_OscillatingPlanner_Parks(t *testing.T) {
 	// maxIdentical=2 -> parks on the 3rd identical decision => 3 LLM
 	// calls, which is BELOW the per-cycle iteration cap (5). The
 	// convergence guard, not the raw cap, is what stopped it.
-	if siCalls != 3 {
-		t.Fatalf("oscillating planner should park after 3 identical decisions, got %d InvokeSI calls", siCalls)
+	if aiCalls != 3 {
+		t.Fatalf("oscillating planner should park after 3 identical decisions, got %d InvokeAI calls", aiCalls)
 	}
 	exec, _, _ := fe.snapshot()
 	if countContains(exec, "awaitingFeedback") == 0 {

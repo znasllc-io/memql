@@ -143,10 +143,10 @@ func asStr(v any) string {
 // --- unused IntegrationEngineAccess methods (stubbed to satisfy the interface) ---
 
 func (s *stubEngine) RegisterIntegration(memql.IntegrationProvider) error { return nil }
-func (s *stubEngine) InvokeSI(context.Context, string, map[string]any) (any, error) {
+func (s *stubEngine) InvokeAI(context.Context, string, map[string]any) (any, error) {
 	return nil, nil
 }
-func (s *stubEngine) InvokeSIStructured(context.Context, string, map[string]any, string, json.RawMessage, bool) (string, error) {
+func (s *stubEngine) InvokeAIStructured(context.Context, string, map[string]any, string, json.RawMessage, bool) (string, error) {
 	return "", nil
 }
 func (s *stubEngine) RenderPrompt(string, map[string]any) (string, error) { return "", nil }

@@ -90,10 +90,10 @@ func (e *fakeEngine) ExecuteToolByName(ctx context.Context, name string, args ma
 	return "", fmt.Errorf("fakeEngine: no fixture for tool %q", name)
 }
 
-func (e *fakeEngine) InvokeSI(ctx context.Context, templateId string, data map[string]any) (any, error) {
+func (e *fakeEngine) InvokeAI(ctx context.Context, templateId string, data map[string]any) (any, error) {
 	return nil, nil
 }
-func (e *fakeEngine) InvokeSIStructured(
+func (e *fakeEngine) InvokeAIStructured(
 	ctx context.Context,
 	templateId string,
 	data map[string]any,

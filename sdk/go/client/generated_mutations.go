@@ -7691,68 +7691,10 @@ func MutationInsertSafetyClassificationBuild(args MutationInsertSafetyClassifica
 	return b.String()
 }
 
-// MutationJoinSpaceAsHuman -- Join a space as a human participant.
+// MutationJoinSpaceAsAI -- Join a space as an SI participant. Uses canonicalized deterministic ID.
 //
 // Bound concept: participant.
-type MutationJoinSpaceAsHumanArgs struct {
-	SpaceId             string
-	UserId              string
-	DisplayName         string
-	Status              string
-	JoinedAt            string
-	CapabilityOverrides map[string]any
-}
-
-// MutationJoinSpaceAsHuman calls the engine mutation mutationJoinSpaceAsHuman.
-func (qc *QueryClient) MutationJoinSpaceAsHuman(ctx context.Context, args MutationJoinSpaceAsHumanArgs) (*Result, error) {
-	call := MutationJoinSpaceAsHumanBuild(args)
-	return qc.executeNamed(ctx, "mutationJoinSpaceAsHuman", call)
-}
-
-func MutationJoinSpaceAsHumanBuild(args MutationJoinSpaceAsHumanArgs) string {
-	var b strings.Builder
-	b.WriteString("mutationJoinSpaceAsHuman({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 26 {
-		b.WriteString(", ")
-	}
-	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 26 {
-		b.WriteString(", ")
-	}
-	b.WriteString("displayName: ")
-	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
-	if args.Status != "" {
-		if b.Len() > 26 {
-			b.WriteString(", ")
-		}
-		b.WriteString("status: ")
-		b.WriteString(fmt.Sprintf("%q", args.Status))
-	}
-	if args.JoinedAt != "" {
-		if b.Len() > 26 {
-			b.WriteString(", ")
-		}
-		b.WriteString("joinedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.JoinedAt))
-	}
-	if args.CapabilityOverrides != nil {
-		if b.Len() > 26 {
-			b.WriteString(", ")
-		}
-		b.WriteString("capabilityOverrides: ")
-		b.WriteString(renderMemQLValue(args.CapabilityOverrides))
-	}
-	b.WriteString("})")
-	return b.String()
-}
-
-// MutationJoinSpaceAsSI -- Join a space as an SI participant. Uses canonicalized deterministic ID.
-//
-// Bound concept: participant.
-type MutationJoinSpaceAsSIArgs struct {
+type MutationJoinSpaceAsAIArgs struct {
 	SpaceId             string
 	AgentId             string
 	DisplayName         string
@@ -7766,15 +7708,15 @@ type MutationJoinSpaceAsSIArgs struct {
 	IsGroupGASet        bool // set true to send isGroupGA; required because zero-value bool is ambiguous
 }
 
-// MutationJoinSpaceAsSI calls the engine mutation mutationJoinSpaceAsSI.
-func (qc *QueryClient) MutationJoinSpaceAsSI(ctx context.Context, args MutationJoinSpaceAsSIArgs) (*Result, error) {
-	call := MutationJoinSpaceAsSIBuild(args)
-	return qc.executeNamed(ctx, "mutationJoinSpaceAsSI", call)
+// MutationJoinSpaceAsAI calls the engine mutation mutationJoinSpaceAsAI.
+func (qc *QueryClient) MutationJoinSpaceAsAI(ctx context.Context, args MutationJoinSpaceAsAIArgs) (*Result, error) {
+	call := MutationJoinSpaceAsAIBuild(args)
+	return qc.executeNamed(ctx, "mutationJoinSpaceAsAI", call)
 }
 
-func MutationJoinSpaceAsSIBuild(args MutationJoinSpaceAsSIArgs) string {
+func MutationJoinSpaceAsAIBuild(args MutationJoinSpaceAsAIArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationJoinSpaceAsSI({")
+	b.WriteString("mutationJoinSpaceAsAI({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	if b.Len() > 23 {
@@ -7828,6 +7770,64 @@ func MutationJoinSpaceAsSIBuild(args MutationJoinSpaceAsSIArgs) string {
 		}
 		b.WriteString("isGroupGA: ")
 		b.WriteString(fmt.Sprintf("%v", args.IsGroupGA))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationJoinSpaceAsHuman -- Join a space as a human participant.
+//
+// Bound concept: participant.
+type MutationJoinSpaceAsHumanArgs struct {
+	SpaceId             string
+	UserId              string
+	DisplayName         string
+	Status              string
+	JoinedAt            string
+	CapabilityOverrides map[string]any
+}
+
+// MutationJoinSpaceAsHuman calls the engine mutation mutationJoinSpaceAsHuman.
+func (qc *QueryClient) MutationJoinSpaceAsHuman(ctx context.Context, args MutationJoinSpaceAsHumanArgs) (*Result, error) {
+	call := MutationJoinSpaceAsHumanBuild(args)
+	return qc.executeNamed(ctx, "mutationJoinSpaceAsHuman", call)
+}
+
+func MutationJoinSpaceAsHumanBuild(args MutationJoinSpaceAsHumanArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationJoinSpaceAsHuman({")
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("userId: ")
+	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("displayName: ")
+	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
+	if args.Status != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(fmt.Sprintf("%q", args.Status))
+	}
+	if args.JoinedAt != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("joinedAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.JoinedAt))
+	}
+	if args.CapabilityOverrides != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("capabilityOverrides: ")
+		b.WriteString(renderMemQLValue(args.CapabilityOverrides))
 	}
 	b.WriteString("})")
 	return b.String()

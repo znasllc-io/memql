@@ -62,7 +62,7 @@ import "log/slog"
 // agent's prompt lists the tool (so it tries to call it) but the
 // filtered-tools loop rejects it. Extra entries here that don't
 // exist in the registry are silently ignored downstream by
-// InvokeSIChatWithFilteredTools.
+// InvokeAIChatWithFilteredTools.
 var OperatorPrimitiveNames = []string{
 	"uiRequestControl",
 	"uiReleaseControl",

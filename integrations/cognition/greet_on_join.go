@@ -77,7 +77,7 @@ func (c *CognitionIntegration) acquireGreetingPacingState(spaceId string) *greet
 	return state
 }
 
-// handleSIParticipantGreeting fires when a v1:cognition:participant row
+// handleAIParticipantGreeting fires when a v1:cognition:participant row
 // is created. If the participant is an SI AND the backing agent's
 // triggerBehavior.greetOnJoin is true AND no greeting utterance for
 // this (space, agent) exists yet, it generates a brief greeting via
@@ -88,12 +88,12 @@ func (c *CognitionIntegration) acquireGreetingPacingState(spaceId string) *greet
 // content has to come from the LLM so it reflects the agent's
 // persona, knowledge domains, and the space context it's joining.
 // An automation could only insert canned text -- the previous
-// greetOnJoinSI automation did exactly that and produced a uniform
+// greetOnJoinAI automation did exactly that and produced a uniform
 // "Hi everyone - I am X. What is the goal for this space today?"
 // regardless of which agent was joining. That made every Sofia,
 // every IT-support specialist, every HR partner sound identical
 // on join. Moving the trigger into cognition lets us route through
-// generateSIResponse with a synthesized AgentParticipationDirective
+// generateAIResponse with a synthesized AgentParticipationDirective
 // so the reply is authored by the model, in the agent's own voice.
 //
 // Idempotency: keyed off the existing queryGreetingUtterance check
@@ -107,7 +107,7 @@ func (c *CognitionIntegration) acquireGreetingPacingState(spaceId string) *greet
 // path issues an LLM call -- multi-second latency in the worst case --
 // so it MUST run on its own goroutine to avoid back-pressuring the
 // event bus and stalling other subscribers.
-func (c *CognitionIntegration) handleSIParticipantGreeting(event events.Event) {
+func (c *CognitionIntegration) handleAIParticipantGreeting(event events.Event) {
 	if c == nil || c.engine == nil {
 		return
 	}
@@ -312,7 +312,7 @@ func (c *CognitionIntegration) runGreetingTurn(spaceId, participantId, agentId, 
 	}
 	ctx = contextWithDirective(ctx, greetDirective)
 
-	response, err := c.generateSIResponse(ctx, agent, "join_greeting", spaceId, participants, nil, history, si, nil)
+	response, err := c.generateAIResponse(ctx, agent, "join_greeting", spaceId, participants, nil, history, si, nil)
 	if err != nil {
 		c.Logger.Warn("greet_on_join: generate greeting failed",
 			"agentId", agentId, "spaceId", spaceId, "error", err)
@@ -374,7 +374,7 @@ func agentWantsGreeting(agent *agentPayload) bool {
 
 // greetingExists is the dedup probe -- true when an utterance with
 // payload.source.kind=="agentGreeting" already exists for the given
-// (space, agent). Mirrors the queryHasSIResponseForReply traversal
+// (space, agent). Mirrors the queryHasAIResponseForReply traversal
 // pattern: the engine returns an opaque map with `bundle.nodes`
 // at varying capitalisations, so we sniff both.
 func (c *CognitionIntegration) greetingExists(ctx context.Context, spaceId, agentId string) bool {

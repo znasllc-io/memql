@@ -11,30 +11,30 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 )
 
-type siRuntime struct {
+type aiRuntime struct {
 	logger    *slog.Logger
 	prompts   *PromptRegistry
 	providers *ProviderRegistry
-	cache     *siResponseCache
-	cacheCfg  siCacheConfig
+	cache     *aiResponseCache
+	cacheCfg  aiCacheConfig
 	eventBus  *events.Bus
 }
 
-func newSIRuntime(logger *slog.Logger, prompts *PromptRegistry, providers *ProviderRegistry, cfg siCacheConfig) *siRuntime {
+func newAIRuntime(logger *slog.Logger, prompts *PromptRegistry, providers *ProviderRegistry, cfg aiCacheConfig) *aiRuntime {
 	if prompts == nil && providers == nil {
 		return nil
 	}
-	return &siRuntime{
+	return &aiRuntime{
 		logger:    logger,
 		prompts:   prompts,
 		providers: providers,
-		cache:     newSIResponseCache(),
+		cache:     newAIResponseCache(),
 		cacheCfg:  cfg,
 	}
 }
 
 // SetEventBus wires the event bus for SI completion events.
-func (r *siRuntime) SetEventBus(bus *events.Bus) {
+func (r *aiRuntime) SetEventBus(bus *events.Bus) {
 	if r == nil {
 		return
 	}
@@ -42,7 +42,7 @@ func (r *siRuntime) SetEventBus(bus *events.Bus) {
 }
 
 // publishEvent emits an event to the event bus if configured.
-func (r *siRuntime) publishEvent(topic string, kind events.Kind, payload map[string]any) {
+func (r *aiRuntime) publishEvent(topic string, kind events.Kind, payload map[string]any) {
 	if r == nil || r.eventBus == nil {
 		return
 	}
@@ -50,7 +50,7 @@ func (r *siRuntime) publishEvent(topic string, kind events.Kind, payload map[str
 	r.eventBus.Publish(event)
 }
 
-func (r *siRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data any) (any, error) {
+func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data any) (any, error) {
 	startTime := time.Now()
 
 	if invocation == nil {
@@ -65,7 +65,7 @@ func (r *siRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 		return nil, err
 	}
 
-	payload, err := normalizeSIData(data)
+	payload, err := normalizeAIData(data)
 	if err != nil {
 		return nil, fmt.Errorf("data for prompt %q invalid: %w", prompt.Name, err)
 	}
@@ -97,7 +97,7 @@ func (r *siRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 	ttl := r.cacheTTL(invocation)
 	var cacheKey string
 	if ttl > 0 && r.cache != nil {
-		cacheKey = buildSICacheKey(invocation.TemplateId, providerName, text)
+		cacheKey = buildAICacheKey(invocation.TemplateId, providerName, text)
 		if cached, ok := r.cache.get(cacheKey); ok {
 			// Emit completion finished event for cached result
 			r.publishEvent(events.TopicAICompletionFinished, events.KindAICompletionFinished, map[string]any{
@@ -142,16 +142,16 @@ func (r *siRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 	return result, nil
 }
 
-func (r *siRuntime) cacheTTL(invocation *AIInvocation) time.Duration {
+func (r *aiRuntime) cacheTTL(invocation *AIInvocation) time.Duration {
 	if r == nil {
 		return 0
 	}
-	maxSeconds := clampSICacheSeconds(r.cacheCfg.MaxTTLSeconds)
+	maxSeconds := clampAICacheSeconds(r.cacheCfg.MaxTTLSeconds)
 	if maxSeconds <= 0 {
 		return 0
 	}
 	if invocation != nil && invocation.CacheSeconds != nil {
-		requested := clampSICacheSeconds(*invocation.CacheSeconds)
+		requested := clampAICacheSeconds(*invocation.CacheSeconds)
 		if requested <= 0 {
 			return 0
 		}
@@ -163,7 +163,7 @@ func (r *siRuntime) cacheTTL(invocation *AIInvocation) time.Duration {
 	return time.Duration(maxSeconds) * time.Second
 }
 
-func (r *siRuntime) resolveProviderName(prompt *PromptTemplate, invocation *AIInvocation) (string, error) {
+func (r *aiRuntime) resolveProviderName(prompt *PromptTemplate, invocation *AIInvocation) (string, error) {
 	if r == nil || r.providers == nil {
 		return "", fmt.Errorf("provider registry is not configured")
 	}
@@ -181,7 +181,7 @@ func (r *siRuntime) resolveProviderName(prompt *PromptTemplate, invocation *AIIn
 	return "", fmt.Errorf("provider %q not available", "(default)")
 }
 
-func (r *siRuntime) resolvePrompt(id string) (*PromptTemplate, error) {
+func (r *aiRuntime) resolvePrompt(id string) (*PromptTemplate, error) {
 	if r == nil || r.prompts == nil {
 		return nil, fmt.Errorf("prompt registry is not initialized")
 	}
@@ -195,7 +195,7 @@ func (r *siRuntime) resolvePrompt(id string) (*PromptTemplate, error) {
 	return nil, fmt.Errorf("unknown prompt template %q", name)
 }
 
-func normalizeSIData(data any) (map[string]any, error) {
+func normalizeAIData(data any) (map[string]any, error) {
 	if data == nil {
 		return map[string]any{}, nil
 	}

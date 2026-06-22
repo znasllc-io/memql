@@ -125,7 +125,7 @@ func TestEventContextThreadsIntoNestedSteps(t *testing.T) {
 			wantValues: []string{"utt-1", "p-1"},
 		},
 		{
-			logic: "logicAutoJoinSI",
+			logic: "logicAutoJoinAI",
 			event: map[string]any{"topic": "node.created", "kind": "node.created", "payload": map[string]any{
 				"id": "space-1", "ownerUserId": "owner@x.io", "active": true,
 			}},

@@ -357,7 +357,7 @@ func withSectionableLogic(bundle authoringBundle) authoringBundle {
 // non-sectionable zero decision + unknown complexity so the caller routes
 // normally.
 func (l *PlannerAgentLoop) classifySectionable(ctx context.Context, goal, nowRFC3339 string) (goalComplexity, string, sectionableDecision, error) {
-	resp, err := l.engine.InvokeSI(systemActorContext(ctx), "goalComplexityTriage", map[string]any{
+	resp, err := l.engine.InvokeAI(systemActorContext(ctx), "goalComplexityTriage", map[string]any{
 		"goal": truncate(goal, maxGoalChars),
 		"now":  nowRFC3339,
 	})

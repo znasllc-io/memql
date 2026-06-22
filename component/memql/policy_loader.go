@@ -81,7 +81,7 @@ func (r *PolicyRegistry) Count() int {
 	return len(r.byName)
 }
 
-// loadSIPolicies returns an empty registry. Pass 3 of the DSL
+// loadAIPolicies returns an empty registry. Pass 3 of the DSL
 // restructure migration retired the legacy walk over
 // dsl/v1/policies/. SI Router policies now live in
 // dsl/policies/routing.memql and load via a unified loader
@@ -91,7 +91,7 @@ func (r *PolicyRegistry) Count() int {
 //
 // TODO: wire LoadUnifiedRoutingPolicies as the actual loader and
 // delete this stub.
-func loadSIPolicies(logger *slog.Logger) (*PolicyRegistry, error) {
+func loadAIPolicies(logger *slog.Logger) (*PolicyRegistry, error) {
 	_ = logger
 	_ = strings.TrimSpace("") // keep import alive until decommissioned
 	return newPolicyRegistry(), nil

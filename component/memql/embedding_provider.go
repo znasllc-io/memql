@@ -2,9 +2,9 @@ package memql
 
 import "context"
 
-// EmbeddingSIProvider generates vector embeddings from text.
+// EmbeddingAIProvider generates vector embeddings from text.
 // Implementations: OpenAI text-embedding-3-small, text-embedding-3-large.
-type EmbeddingSIProvider interface {
+type EmbeddingAIProvider interface {
 	// Embed returns a vector embedding for the given text.
 	Embed(ctx context.Context, text string) ([]float32, error)
 

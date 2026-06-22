@@ -63,10 +63,10 @@ func (e *MemQLEngine) RegisterIntegration(provider IntegrationProvider) error {
 	return nil
 }
 
-// InvokeSI invokes an SI prompt template with the provided data.
+// InvokeAI invokes an SI prompt template with the provided data.
 // This is the public interface for automation steps to execute SI functions.
-func (e *MemQLEngine) InvokeSI(ctx context.Context, templateId string, data map[string]any) (any, error) {
-	if e.siRuntime == nil {
+func (e *MemQLEngine) InvokeAI(ctx context.Context, templateId string, data map[string]any) (any, error) {
+	if e.aiRuntime == nil {
 		return nil, fmt.Errorf("SI runtime is not configured")
 	}
 
@@ -77,16 +77,16 @@ func (e *MemQLEngine) InvokeSI(ctx context.Context, templateId string, data map[
 	// tiering): callers that want to escalate / downshift the model for
 	// THIS invocation wrap the ctx with WithProviderOverride(ctx, name).
 	// Mirrors the tool-loop paths (si_tool_loop.go) which already do
-	// this; without it, InvokeSI was the one SI entry point that ignored
+	// this; without it, InvokeAI was the one SI entry point that ignored
 	// the override and always used the prompt's @defaultProvider.
 	if override := ProviderOverrideFromContext(ctx); override != "" {
 		invocation.ProviderOverride = &override
 	}
 
-	return e.siRuntime.Invoke(ctx, invocation, data)
+	return e.aiRuntime.Invoke(ctx, invocation, data)
 }
 
-// InvokeSIStructured renders the named prompt with the given data and
+// InvokeAIStructured renders the named prompt with the given data and
 // invokes the prompt's default chat provider with provider-enforced
 // structured output. Returns the raw JSON response as a string -- the
 // caller parses it into its typed result struct.
@@ -94,7 +94,7 @@ func (e *MemQLEngine) InvokeSI(ctx context.Context, templateId string, data map[
 // Use this for "logic" prompts (routing, classification, prediction,
 // suggestion) where the output is parsed as JSON and the caller wants
 // provider-level guarantees that the shape is valid. For prose-reply
-// prompts (agentReply), use InvokeSI instead.
+// prompts (agentReply), use InvokeAI instead.
 //
 // schemaName is a short identifier the provider may surface in errors
 // and traces (e.g. "cognitionRouting"). schema must be a valid JSON
@@ -116,7 +116,7 @@ func (e *MemQLEngine) InvokeSI(ctx context.Context, templateId string, data map[
 // re-train invalidates within a minute, long enough to swallow
 // click-dismiss-click-again sequences). Frontend callers that
 // want longer-lived caching keep their own per-utterance memo.
-func (e *MemQLEngine) InvokeSIStructured(
+func (e *MemQLEngine) InvokeAIStructured(
 	ctx context.Context,
 	templateId string,
 	data map[string]any,
@@ -124,7 +124,7 @@ func (e *MemQLEngine) InvokeSIStructured(
 	schema json.RawMessage,
 	strict bool,
 ) (string, error) {
-	if e.siRuntime == nil {
+	if e.aiRuntime == nil {
 		return "", fmt.Errorf("SI runtime is not configured")
 	}
 	rendered, err := e.RenderPrompt(templateId, data)
@@ -154,12 +154,12 @@ func (e *MemQLEngine) InvokeSIStructured(
 	providerName := e.promptDefaultProvider(templateId)
 	var cacheKey string
 	var cacheTTL time.Duration
-	if e.siRuntime.cache != nil {
-		cacheTTL = e.siRuntime.cacheTTL(nil)
+	if e.aiRuntime.cache != nil {
+		cacheTTL = e.aiRuntime.cacheTTL(nil)
 		if cacheTTL > 0 {
 			cacheInput := strings.TrimSpace(schemaName) + "|" + string(schema) + "|" + rendered
-			cacheKey = buildSICacheKey(templateId, providerName, cacheInput)
-			if cached, ok := e.siRuntime.cache.get(cacheKey); ok {
+			cacheKey = buildAICacheKey(templateId, providerName, cacheInput)
+			if cached, ok := e.aiRuntime.cache.get(cacheKey); ok {
 				if s, isString := cached.(string); isString {
 					return s, nil
 				}
@@ -206,7 +206,7 @@ func (e *MemQLEngine) InvokeSIStructured(
 	}
 
 	if cacheKey != "" {
-		e.siRuntime.cache.set(cacheKey, result, cacheTTL)
+		e.aiRuntime.cache.set(cacheKey, result, cacheTTL)
 	}
 	return result, nil
 }
@@ -234,17 +234,17 @@ func (e *MemQLEngine) promptDefaultProvider(templateId string) string {
 //
 // Used by functions and automations to resolve var("NAME") expressions.
 
-func (e *MemQLEngine) ReloadSIProviders(ctx context.Context) (int, error) {
+func (e *MemQLEngine) ReloadAIProviders(ctx context.Context) (int, error) {
 	if e == nil {
 		return 0, fmt.Errorf("engine is nil")
 	}
-	registry, err := loadSIProviders(e.Logger)
+	registry, err := loadAIProviders(e.Logger)
 	if err != nil {
 		return 0, fmt.Errorf("reload SI providers: %w", err)
 	}
 	e.providers = registry
-	if e.siRuntime != nil {
-		e.siRuntime = newSIRuntime(e.Logger, e.prompts, registry, e.siCacheConfig)
+	if e.aiRuntime != nil {
+		e.aiRuntime = newAIRuntime(e.Logger, e.prompts, registry, e.aiCacheConfig)
 	}
 	if e.Logger != nil {
 		e.Logger.Info("SI providers reloaded after seed",
@@ -257,7 +257,7 @@ func (e *MemQLEngine) ReloadSIProviders(ctx context.Context) (int, error) {
 // Resolves MEMQL_DEFAULT_TTS_PROVIDER from v1:platform:globalVariable (the
 // global instance default), then falls back to the first available
 // TTS provider.
-func (e *MemQLEngine) TTSProvider() TTSSIProvider {
+func (e *MemQLEngine) TTSProvider() TTSAIProvider {
 	if e.providers == nil {
 		return nil
 	}
@@ -266,7 +266,7 @@ func (e *MemQLEngine) TTSProvider() TTSSIProvider {
 }
 
 // TTSProviderByName returns a specific TTS provider by name.
-func (e *MemQLEngine) TTSProviderByName(name string) (TTSSIProvider, bool) {
+func (e *MemQLEngine) TTSProviderByName(name string) (TTSAIProvider, bool) {
 	if e.providers == nil {
 		return nil, false
 	}
@@ -274,7 +274,7 @@ func (e *MemQLEngine) TTSProviderByName(name string) (TTSSIProvider, bool) {
 }
 
 // VisionProvider returns the first available vision-capable provider from the registry.
-func (e *MemQLEngine) VisionProvider() common.VisionSIProvider {
+func (e *MemQLEngine) VisionProvider() common.VisionAIProvider {
 	if e.providers == nil {
 		return nil
 	}
@@ -285,7 +285,7 @@ func (e *MemQLEngine) VisionProvider() common.VisionSIProvider {
 // Resolves MEMQL_DEFAULT_STREAM_PROVIDER from v1:platform:globalVariable (the
 // global instance default), then falls back to the first available
 // Streaming provider.
-func (e *MemQLEngine) StreamProvider() StreamingSIProvider {
+func (e *MemQLEngine) StreamProvider() StreamingAIProvider {
 	if e.providers == nil {
 		return nil
 	}
@@ -311,7 +311,7 @@ func (e *MemQLEngine) ChatStreamProvider() common.ChatStreamProvider {
 // from v1:platform:globalVariable (instance default), then falls back to the first
 // available non-streaming chat provider. Returns nil if no suitable provider
 // is available.
-func (e *MemQLEngine) DefaultChatProvider() common.ChatSIProvider {
+func (e *MemQLEngine) DefaultChatProvider() common.ChatAIProvider {
 	if e.providers == nil {
 		return nil
 	}
@@ -347,7 +347,7 @@ func (e *MemQLEngine) StructuredChatProviderByName(name string) common.ChatStruc
 // suggestion endpoints (spaces, agents, groups). Prefers smaller models that
 // generate structured JSON quickly. Falls back to DefaultChatProvider if no
 // fast model is available.
-func (e *MemQLEngine) SuggestChatProvider() common.ChatSIProvider {
+func (e *MemQLEngine) SuggestChatProvider() common.ChatAIProvider {
 	if e.providers == nil {
 		return nil
 	}
@@ -399,16 +399,16 @@ func (e *MemQLEngine) ExecuteToolByName(ctx context.Context, name string, args m
 
 // RenderPrompt renders a prompt template with the given data and returns the
 // rendered text. Used by integrations that need to construct prompts for
-// streaming calls where the standard InvokeSI path isn't used.
+// streaming calls where the standard InvokeAI path isn't used.
 func (e *MemQLEngine) RenderPrompt(templateId string, data map[string]any) (string, error) {
-	if e == nil || e.siRuntime == nil {
+	if e == nil || e.aiRuntime == nil {
 		return "", fmt.Errorf("SI runtime is not configured")
 	}
-	prompt, err := e.siRuntime.resolvePrompt(templateId)
+	prompt, err := e.aiRuntime.resolvePrompt(templateId)
 	if err != nil {
 		return "", err
 	}
-	payload, err := normalizeSIData(data)
+	payload, err := normalizeAIData(data)
 	if err != nil {
 		return "", fmt.Errorf("data for prompt %q invalid: %w", prompt.Name, err)
 	}

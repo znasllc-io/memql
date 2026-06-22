@@ -51,16 +51,16 @@ const ComponentName common.ComponentName = "plannerIntegration"
 // so the integration doesn't import the full engine package.
 type Engine interface {
 	Execute(ctx context.Context, query string) (any, error)
-	// InvokeSI runs a named prompt against its default provider and
+	// InvokeAI runs a named prompt against its default provider and
 	// returns the assistant response. Used by the Phase 4 Planner
 	// Agent loop to drive structured-output decisions.
-	InvokeSI(ctx context.Context, templateId string, data map[string]any) (any, error)
-	// InvokeSIChatWithFilteredTools renders a prompt and runs a bounded
+	InvokeAI(ctx context.Context, templateId string, data map[string]any) (any, error)
+	// InvokeAIChatWithFilteredTools renders a prompt and runs a bounded
 	// tool-calling loop restricted to the named tool set, returning the
 	// model's final assistant text. Used by the trainSpecialist
 	// dispatcher to drive the Trainer Agent (webSearch / fetchUrl /
 	// writeKnowledgeChunk / markChunkSuperseded / embedChunk).
-	InvokeSIChatWithFilteredTools(ctx context.Context, templateId string, data map[string]any, toolNames []string) (string, error)
+	InvokeAIChatWithFilteredTools(ctx context.Context, templateId string, data map[string]any, toolNames []string) (string, error)
 }
 
 // AgentForwarder is the wire-level interface the planner uses to

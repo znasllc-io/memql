@@ -58,7 +58,7 @@ func (c *Collector) Collect(ctx context.Context) map[string]string {
 	c.collectSource(ctx, m)
 
 	// 6. SI context
-	c.collectSI(ctx, m)
+	c.collectAI(ctx, m)
 
 	// 7. Lineage context
 	c.collectLineage(ctx, m)
@@ -147,9 +147,9 @@ func (c *Collector) collectSource(ctx context.Context, m map[string]string) {
 	set(m, "source.trigger", sm.Trigger)
 }
 
-// collectSI extracts synthetic intelligence execution metadata.
-func (c *Collector) collectSI(ctx context.Context, m map[string]string) {
-	si := SIMetaFromContext(ctx)
+// collectAI extracts synthetic intelligence execution metadata.
+func (c *Collector) collectAI(ctx context.Context, m map[string]string) {
+	si := AIMetaFromContext(ctx)
 	if si == nil {
 		return
 	}

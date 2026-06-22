@@ -53,7 +53,7 @@ spec specIsHumanParticipant {
 }
 
 @description("Matches participants with SI participantType")
-spec specIsSIParticipant {
+spec specIsAIParticipant {
   payload.participantType == "si"
 }
 

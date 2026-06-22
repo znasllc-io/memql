@@ -40,7 +40,7 @@ import (
 const defaultMaxStreamingToolLoopIterations = 120
 
 // envAgentToolLoopMaxIterations is the SAME env var the engine SI
-// tool loop reads (component/memql/config.go:envSIToolLoopMaxIterations).
+// tool loop reads (component/memql/config.go:envAIToolLoopMaxIterations).
 // Both loops sharing one knob is the whole point of the unification
 // -- change it in one place, both loops respect it.
 const envAgentToolLoopMaxIterations = "MEMQL_TOOL_LOOP_MAX_ITERATIONS"

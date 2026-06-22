@@ -858,7 +858,7 @@ func (p *Parser) parseGoStyleFunction() (*FunctionDef, error) {
 		// Pre-#360 the default was false, which silently disabled
 		// every logic function in the tree that authors had written
 		// without @enabled -- including chat-reply (logicGenerateResponse),
-		// greet-on-join's auto-join (logicAutoJoinSI), and the
+		// greet-on-join's auto-join (logicAutoJoinAI), and the
 		// retention sweeps. Queries / mutations / automations all
 		// carried @enabled explicitly so the flip changes behaviour
 		// only for the under-annotated logic surface.

@@ -32,7 +32,7 @@ import (
 //     stream:<requestId> and emits Start -> Delta* -> Complete/Fail. The durable
 //     outbox row is the cross-replica guarantee; the mesh fast-path (memql#1289)
 //     wakes the consumer instantly.
-//   - Consumer (the bff replica that owns the client WebSocket): proxySI, after
+//   - Consumer (the bff replica that owns the client WebSocket): proxyAI, after
 //     forwarding the trigger, SubscribeStreamFrames(stream:<requestId>) and
 //     renders each ordered/replayed/deduped frame back to the client on the
 //     stream it already holds. A bff replica that dies mid-stream is taken over
@@ -105,7 +105,7 @@ func (s *service) newTranscriptStreamSession(requestId string) *node.StreamSessi
 	return node.NewStreamSession(s.deliverySubstrate, requestId, "transcript", s.selfNodeID())
 }
 
-// proxySIStream is the bff-side entry for a streamed SI op migrated onto the
+// proxyAIStream is the bff-side entry for a streamed SI op migrated onto the
 // substrate. It forwards the trigger envelope to the worker (so the worker runs
 // its handler and produces frames to stream:<requestId>) and starts the given
 // consumer, which subscribes stream:<requestId> and renders frames to the
@@ -113,7 +113,7 @@ func (s *service) newTranscriptStreamSession(requestId string) *node.StreamSessi
 // terminal SIForwardResponse{Done} (the worker no longer sends streamed payloads
 // over it), so it is drained-and-discarded to clean up the inflight entry; the
 // substrate is the single delivery path for the streamed content.
-func (s *streamSession) proxySIStream(
+func (s *streamSession) proxyAIStream(
 	envelope *memqlv1.MemqlClientMessage,
 	requestId string,
 	target node.NodeType,
@@ -156,7 +156,7 @@ func (s *streamSession) produceTokenStreamToSubstrate(ctx context.Context, reque
 	// The streamed content rides the substrate, but the forward inflight on the
 	// bff still needs a terminal SIForwardResponse{Done} to be cleaned up (the
 	// content no longer flows over forwardedStream). Emit one bare terminal over
-	// the forwardedStream on EVERY exit path. The bff's proxySIStream drains and
+	// the forwardedStream on EVERY exit path. The bff's proxyAIStream drains and
 	// DISCARDS forward responses, so this terminal closes the inflight without
 	// being rendered to the client (no double delivery).
 	defer s.closeForwardInflight(requestId)
@@ -205,7 +205,7 @@ func (s *streamSession) produceTokenStreamToSubstrate(ctx context.Context, reque
 // type (SIChatResult). It is a no-op when s.stream is not a forwardedStream
 // (single-binary), which never reaches the substrate producer anyway. The
 // payload here is intentionally empty: it exists only to close the inflight and
-// is discarded by the bff (proxySIStream drains forward responses).
+// is discarded by the bff (proxyAIStream drains forward responses).
 func (s *streamSession) closeForwardInflight(requestId string) {
 	if _, ok := s.stream.(*forwardedStream); !ok {
 		return
@@ -238,7 +238,7 @@ func (s *service) newTranscriptStreamSink(ctx context.Context, requestId string,
 	}
 	// closeInflight sends a bare terminal over the raw forwardedStream so the
 	// bff's Forward() inflight is cleaned up once the transcript terminal has gone
-	// to the substrate. The bff discards forward responses under proxySIStream, so
+	// to the substrate. The bff discards forward responses under proxyAIStream, so
 	// this never reaches the client.
 	closeInflight := func() {
 		if rawSend == nil {

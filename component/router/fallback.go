@@ -91,7 +91,7 @@ func (f *fallbackWithTools) CallChatWithTools(
 		if !ok {
 			continue
 		}
-		inner := client.(common.ToolCallingChatSIProvider)
+		inner := client.(common.ToolCallingChatAIProvider)
 
 		if lastErr != nil {
 			f.router.recordCall(fallbackRecord(f.req, lastFailedResolved, lastErr))
@@ -118,7 +118,7 @@ func (f *fallbackWithTools) CallChatWithTools(
 }
 
 // fallbackChat mirrors fallbackStreamWithTools for the non-streaming
-// synchronous ChatSIProvider path.
+// synchronous ChatAIProvider path.
 type fallbackChat struct {
 	router *Router
 	chain  []string
@@ -134,7 +134,7 @@ func (f *fallbackChat) CallChat(ctx context.Context, messages []common.ChatMessa
 		if !ok {
 			continue
 		}
-		inner := client.(common.ChatSIProvider)
+		inner := client.(common.ChatAIProvider)
 
 		if lastErr != nil {
 			f.router.recordCall(fallbackRecord(f.req, lastFailedResolved, lastErr))

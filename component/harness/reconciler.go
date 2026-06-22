@@ -84,7 +84,7 @@ type StepClaimer interface {
 }
 
 // Dispatcher runs a claimed step through the inner loop. The prod
-// implementation wraps engine.InvokeSIChatWithFilteredToolsOpts with a
+// implementation wraps engine.InvokeAIChatWithFilteredToolsOpts with a
 // scoped context + the step's idempotencyKey + an observation sink. It
 // returns the result payload, the number of tool calls made, and an
 // error (nil on success).

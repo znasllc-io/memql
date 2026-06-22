@@ -334,7 +334,7 @@ func (i *Integration) generateBridgeContent(
 		"domains":     domainEntries,
 		"targetCount": 10,
 	}
-	raw, err := i.engine.InvokeSIStructured(
+	raw, err := i.engine.InvokeAIStructured(
 		ctx,
 		"seedDomainBridge",
 		data,

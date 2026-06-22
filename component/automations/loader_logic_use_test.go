@@ -58,7 +58,7 @@ func TestDryRunCompileResolvesLogicConstructUseImports(t *testing.T) {
 		"indexCalendarEventOnCreate": false, "indexMemoryOnCreate": false,
 		"indexLiveSourceOnCreate": false,
 		// v1:cognition:logic family (daily-space / session)
-		"autoJoinSI": false, "bootstrapSession": false,
+		"autoJoinAI": false, "bootstrapSession": false,
 		"ensureDailySpaceOnAuthSession": false, "generateResponse": false,
 		"provisionDailySpaceOnUserCreate": false, "rolloverDailySpace": false,
 		"voiceMigrationOnSecondHuman": false,

@@ -123,7 +123,7 @@ func Load(root fs.FS) (*Tree, error) {
 			// the prior unconditional swallow let three hours of
 			// real bugs through this session (orphan logic-line
 			// fragments in memql-bff-copresent#55, broken
-			// autoJoinSI hash lookup that became memql#276 / #273
+			// autoJoinAI hash lookup that became memql#276 / #273
 			// Layer 1).
 			//
 			// We still produce the imports-only projection in both

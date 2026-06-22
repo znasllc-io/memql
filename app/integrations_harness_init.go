@@ -57,7 +57,7 @@ func (h *harnessReconcilerComponent) Stop(ctx context.Context) {
 //   - a bun-backed StepReader (graph reads in Go, per the #583/#585 split);
 //   - an Execute-backed Writer + atomic StepClaimer (#582 mutations);
 //   - a Dispatcher that runs each step through the hardened inner loop
-//     (#584) via engine.InvokeSIChatWithFilteredToolsOpts, threading the
+//     (#584) via engine.InvokeAIChatWithFilteredToolsOpts, threading the
 //     step's idempotencyKey and a concrete observation sink (closing the
 //     ToolLoopObservationSink TODO #584 left);
 //   - the event-bus subscriber (graph.node.created for plan + observation).
@@ -182,7 +182,7 @@ func (a *App) harnessInnerLoop() harness.InnerLoop {
 			Observations:   sink,
 			TraceSink:      traceSink,
 		}
-		out, err := a.engine.InvokeSIChatWithFilteredToolsOpts(ctx, template, data, nil, opts)
+		out, err := a.engine.InvokeAIChatWithFilteredToolsOpts(ctx, template, data, nil, opts)
 		// Action-library trace capture (#1735): persist the captured
 		// capability sequence as a v1:actions:candidate. Best-effort and
 		// non-fatal -- a trace-write error never fails the step, and a

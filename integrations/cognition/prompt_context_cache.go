@@ -10,7 +10,7 @@ import (
 const (
 	defaultParticipantsCacheTTL  = 5 * time.Second
 	defaultSpaceContextCacheTTL  = 5 * time.Second
-	defaultSIParticipantCacheTTL = 5 * time.Second
+	defaultAIParticipantCacheTTL = 5 * time.Second
 	defaultAgentCacheTTL         = 60 * time.Second
 	defaultSpaceInfoCacheTTL     = 60 * time.Second
 	defaultAttachmentsCacheTTL   = 30 * time.Second
@@ -27,7 +27,7 @@ type cachedSpaceContext struct {
 	value     map[string]any
 }
 
-type cachedSIParticipant struct {
+type cachedAIParticipant struct {
 	expiresAt time.Time
 	value     *participantPayload
 }
@@ -117,7 +117,7 @@ func (c *CognitionIntegration) invalidatePromptCachesForSpace(spaceId string) {
 	c.promptCacheMu.Lock()
 	delete(c.participantsCache, spaceId)
 	delete(c.spaceContextCache, spaceId)
-	delete(c.siParticipantCache, spaceId)
+	delete(c.aiParticipantCache, spaceId)
 	delete(c.spaceInfoCache, spaceId)
 	delete(c.attachmentsCache, spaceId)
 	c.promptCacheMu.Unlock()
@@ -196,7 +196,7 @@ func (c *CognitionIntegration) getSpaceContextForPromptCached(ctx context.Contex
 	return val
 }
 
-func (c *CognitionIntegration) findSIParticipantCached(ctx context.Context, spaceId string) (*participantPayload, error) {
+func (c *CognitionIntegration) findAIParticipantCached(ctx context.Context, spaceId string) (*participantPayload, error) {
 	if c == nil {
 		return nil, fmt.Errorf("cognition integration not configured")
 	}
@@ -207,7 +207,7 @@ func (c *CognitionIntegration) findSIParticipantCached(ctx context.Context, spac
 
 	now := time.Now()
 	c.promptCacheMu.Lock()
-	if entry, ok := c.siParticipantCache[spaceId]; ok && entry.value != nil && !entry.expiresAt.IsZero() && now.Before(entry.expiresAt) {
+	if entry, ok := c.aiParticipantCache[spaceId]; ok && entry.value != nil && !entry.expiresAt.IsZero() && now.Before(entry.expiresAt) {
 		val := entry.value
 		c.promptCacheMu.Unlock()
 		return val, nil
@@ -215,13 +215,13 @@ func (c *CognitionIntegration) findSIParticipantCached(ctx context.Context, spac
 	c.promptCacheMu.Unlock()
 
 	key := "siparticipant:" + spaceId
-	anyVal, err, _ := c.siParticipantSF.Do(key, func() (any, error) {
-		val, err := c.findSIParticipant(ctx, spaceId)
+	anyVal, err, _ := c.aiParticipantSF.Do(key, func() (any, error) {
+		val, err := c.findAIParticipant(ctx, spaceId)
 		if err != nil {
 			return nil, err
 		}
 		c.promptCacheMu.Lock()
-		c.siParticipantCache[spaceId] = cachedSIParticipant{expiresAt: time.Now().Add(defaultSIParticipantCacheTTL), value: val}
+		c.aiParticipantCache[spaceId] = cachedAIParticipant{expiresAt: time.Now().Add(defaultAIParticipantCacheTTL), value: val}
 		c.promptCacheMu.Unlock()
 		return val, nil
 	})

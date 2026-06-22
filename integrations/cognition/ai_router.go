@@ -278,7 +278,7 @@ func handoffFromSession(session *polyphon.PolyphonSession, winnerId string) (boo
 	return false, ""
 }
 
-// routeWithSI runs the cognitionRouting prompt. It is the primary turn-taking
+// routeWithAI runs the cognitionRouting prompt. It is the primary turn-taking
 // decision for conversational / polyphon spaces: domain fit, address detection,
 // continuity, and "nobody should respond" all flow through one prompt rather
 // than being composed from heuristic factor weights.
@@ -315,7 +315,7 @@ func (c *CognitionIntegration) tryFastPathDispatch(
 	return nil
 }
 
-func (c *CognitionIntegration) routeWithSI(
+func (c *CognitionIntegration) routeWithAI(
 	ctx context.Context,
 	utterance polyphon.Utterance,
 	candidates []polyphon.AgentCandidate,
@@ -521,7 +521,7 @@ func (c *CognitionIntegration) routeWithSI(
 	// a mismatched name there -- that's what reconcileRoutingWithReason
 	// below catches.
 	schemaJSON := buildRoutingSchema(candidates)
-	raw, err := c.engine.InvokeSIStructured(ctx, "cognitionRouting", data, "cognitionRouting", schemaJSON, true)
+	raw, err := c.engine.InvokeAIStructured(ctx, "cognitionRouting", data, "cognitionRouting", schemaJSON, true)
 	if err != nil {
 		return nil, fmt.Errorf("invoke routing SI: %w", err)
 	}
@@ -1025,7 +1025,7 @@ func buildRoutingSchema(candidates []polyphon.AgentCandidate) json.RawMessage {
 	return b
 }
 
-// parseRoutingResult normalises the result of InvokeSI into a
+// parseRoutingResult normalises the result of InvokeAI into a
 // routingResult struct. Providers may return the LLM output as a raw
 // JSON string (optionally wrapped in ```json fences) or as an already-
 // parsed map[string]any; a few providers round-trip through proto and

@@ -105,7 +105,7 @@ func runEventDryRunBinding(t *testing.T, e *Env) {
 		logic string
 		event map[string]any
 	}{
-		{"logicAutoJoinSI", map[string]any{
+		{"logicAutoJoinAI", map[string]any{
 			"id": "space-1727", "ownerUserId": "user-1727", "status": "active",
 		}},
 		{"logicVoiceMigrationOnSecondHuman", map[string]any{

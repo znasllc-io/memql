@@ -104,7 +104,7 @@ type Spec struct {
 	ExprSource  string
 	Expr        ExpressionNode
 	Kind        SpecKind
-	UsesSI      bool
+	UsesAI      bool
 	Origin      string
 
 	// IsTrait flags this entry as a trait rather than a spec.
@@ -123,7 +123,7 @@ func (s *Spec) clone() *Spec {
 		ExprSource:  s.ExprSource,
 		Expr:        cloneExpressionNode(s.Expr),
 		Kind:        s.Kind,
-		UsesSI:      s.UsesSI,
+		UsesAI:      s.UsesAI,
 		Origin:      s.Origin,
 		IsTrait:     s.IsTrait,
 	}

@@ -175,7 +175,7 @@ func (e *MemQLEngine) parseWithFunctions(query string, fns *FunctionRegistry, sp
 	}
 	populateCacheHints(plan)
 	populateConceptFields(plan)
-	if err := validateSIContext(plan.Root); err != nil {
+	if err := validateAIContext(plan.Root); err != nil {
 		return nil, err
 	}
 

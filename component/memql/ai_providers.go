@@ -43,7 +43,7 @@ const (
 	ModalitySTT       ProviderModality = "stt"       // Audio input → text output (speech-to-text)
 	ModalityEmbedding ProviderModality = "embedding" // Text input → vector output (embeddings)
 	// The following modalities are declared so provider .memql files can
-	// register intent; their handlers are placeholders today (newSIProvider
+	// register intent; their handlers are placeholders today (newAIProvider
 	// routes them through newOpenAIPlaceholderProvider, which validates
 	// auth and returns codes.Unimplemented on invocation). Add real
 	// client implementations as capabilities come online; the .memql
@@ -189,20 +189,20 @@ func floatParam(params map[string]any, key string) float64 {
 	return 0
 }
 
-// SIProvider executes prompts against a backing model.
-type SIProvider interface {
+// AIProvider executes prompts against a backing model.
+type AIProvider interface {
 	Call(ctx context.Context, prompt string) (any, error)
 }
 
-// StreamingSIProvider extends SIProvider with streaming support.
-type StreamingSIProvider interface {
-	SIProvider
+// StreamingAIProvider extends AIProvider with streaming support.
+type StreamingAIProvider interface {
+	AIProvider
 	CallStream(ctx context.Context, prompt string) (<-chan StreamChunk, error)
 }
 
-// RealtimeSIProvider extends SIProvider for WebSocket-based realtime interactions.
-type RealtimeSIProvider interface {
-	SIProvider
+// RealtimeAIProvider extends AIProvider for WebSocket-based realtime interactions.
+type RealtimeAIProvider interface {
+	AIProvider
 	// Connect establishes a WebSocket connection to the Realtime API
 	Connect(ctx context.Context) (RealtimeSession, error)
 	// CreateClientSecret creates an ephemeral client secret for browser-based WebRTC.
@@ -227,9 +227,9 @@ type RealtimeSessionConfig struct {
 	TranscriptionModel string         `json:"transcriptionModel,omitempty"`
 }
 
-// TTSSIProvider provides text-to-speech synthesis capabilities.
-type TTSSIProvider interface {
-	SIProvider
+// TTSAIProvider provides text-to-speech synthesis capabilities.
+type TTSAIProvider interface {
+	AIProvider
 	// Synthesize converts text to audio and returns the raw audio bytes.
 	Synthesize(ctx context.Context, text string, voice string) ([]byte, error)
 	// SynthesizeStream converts text to audio and streams chunks via channel.
@@ -298,7 +298,7 @@ type ProviderRegistry struct {
 // ProviderConfigEntry stores metadata + instantiated client for a provider.
 type ProviderConfigEntry struct {
 	Config    ProviderConfig
-	Client    SIProvider
+	Client    AIProvider
 	Available bool
 	err       error
 }
@@ -447,7 +447,7 @@ func providerScan[T any](r *ProviderRegistry, modality ProviderModality, extra f
 
 // TTSProvider returns a TTS provider. If defaultName is provided and exists, returns that;
 // otherwise returns the first available TTS provider, or nil if none configured.
-func (r *ProviderRegistry) TTSProvider(defaultName string) TTSSIProvider {
+func (r *ProviderRegistry) TTSProvider(defaultName string) TTSAIProvider {
 	if r == nil {
 		return nil
 	}
@@ -456,12 +456,12 @@ func (r *ProviderRegistry) TTSProvider(defaultName string) TTSSIProvider {
 			return tts
 		}
 	}
-	return providerScan[TTSSIProvider](r, ModalityTTS, nil)
+	return providerScan[TTSAIProvider](r, ModalityTTS, nil)
 }
 
 // TTSProviderByName returns a specific TTS provider by name.
-func (r *ProviderRegistry) TTSProviderByName(name string) (TTSSIProvider, bool) {
-	return providerByName[TTSSIProvider](r, name, func(e *ProviderConfigEntry) bool {
+func (r *ProviderRegistry) TTSProviderByName(name string) (TTSAIProvider, bool) {
+	return providerByName[TTSAIProvider](r, name, func(e *ProviderConfigEntry) bool {
 		return e.Config.ResolvedModality() == ModalityTTS
 	})
 }
@@ -473,7 +473,7 @@ func (r *ProviderRegistry) TTSProviderByName(name string) (TTSSIProvider, bool) 
 // This method explicitly excludes streaming providers (OpenAIStream, AnthropicStream)
 // because their CallChat() implementation may target model endpoints that reject
 // synchronous chat completions requests. Use StreamProvider() for streaming use cases.
-func (r *ProviderRegistry) ChatProvider(defaultName string) common.ChatSIProvider {
+func (r *ProviderRegistry) ChatProvider(defaultName string) common.ChatAIProvider {
 	if r == nil {
 		return nil
 	}
@@ -481,7 +481,7 @@ func (r *ProviderRegistry) ChatProvider(defaultName string) common.ChatSIProvide
 	// Try the specified default first
 	if defaultName != "" {
 		if entry, ok := r.Entry(defaultName); ok && entry.Available {
-			if cp, ok := entry.Client.(common.ChatSIProvider); ok && isNonStreamingType(entry.Config.Type) {
+			if cp, ok := entry.Client.(common.ChatAIProvider); ok && isNonStreamingType(entry.Config.Type) {
 				return cp
 			}
 		}
@@ -496,7 +496,7 @@ func (r *ProviderRegistry) ChatProvider(defaultName string) common.ChatSIProvide
 	preferredNames := []string{"chat54", "chat54Mini", "chat54Nano", "chat54Pro", "chat53Latest"}
 	for _, name := range preferredNames {
 		if entry, ok := r.Entry(name); ok && entry.Available {
-			if cp, ok := entry.Client.(common.ChatSIProvider); ok && isNonStreamingType(entry.Config.Type) {
+			if cp, ok := entry.Client.(common.ChatAIProvider); ok && isNonStreamingType(entry.Config.Type) {
 				return cp
 			}
 		}
@@ -507,7 +507,7 @@ func (r *ProviderRegistry) ChatProvider(defaultName string) common.ChatSIProvide
 	defer r.mu.RUnlock()
 	for _, entry := range r.byName {
 		if entry != nil && entry.Available && entry.Config.ResolvedModality() == ModalityText && isNonStreamingType(entry.Config.Type) && isChatCompatibleModel(entry.Config.Model) {
-			if cp, ok := entry.Client.(common.ChatSIProvider); ok {
+			if cp, ok := entry.Client.(common.ChatAIProvider); ok {
 				return cp
 			}
 		}
@@ -574,7 +574,7 @@ func (r *ProviderRegistry) ChatStructuredProviderByName(name string) common.Chat
 // SuggestChatProvider returns a fast, lightweight non-streaming chat provider
 // optimized for suggestion endpoints. Prefers smaller/faster models over larger ones.
 // Falls back to ChatProvider if no fast model is available.
-func (r *ProviderRegistry) SuggestChatProvider() common.ChatSIProvider {
+func (r *ProviderRegistry) SuggestChatProvider() common.ChatAIProvider {
 	if r == nil {
 		return nil
 	}
@@ -584,7 +584,7 @@ func (r *ProviderRegistry) SuggestChatProvider() common.ChatSIProvider {
 	fastNames := []string{"chat54Nano", "chat54Mini", "chat54"}
 	for _, name := range fastNames {
 		if entry, ok := r.Entry(name); ok && entry.Available {
-			if cp, ok := entry.Client.(common.ChatSIProvider); ok && isNonStreamingType(entry.Config.Type) {
+			if cp, ok := entry.Client.(common.ChatAIProvider); ok && isNonStreamingType(entry.Config.Type) {
 				return cp
 			}
 		}
@@ -623,37 +623,37 @@ func isChatCompatibleModel(model string) bool {
 
 // StreamProvider returns a Streaming provider. If defaultName is provided and exists, returns that;
 // otherwise returns the first available Streaming provider, or nil if none configured.
-func (r *ProviderRegistry) StreamProvider(defaultName string) StreamingSIProvider {
+func (r *ProviderRegistry) StreamProvider(defaultName string) StreamingAIProvider {
 	if r == nil {
 		return nil
 	}
 	if defaultName != "" {
-		if sp, ok := providerByName[StreamingSIProvider](r, defaultName, nil); ok {
+		if sp, ok := providerByName[StreamingAIProvider](r, defaultName, nil); ok {
 			return sp
 		}
 	}
-	return providerScan[StreamingSIProvider](r, ModalityText, nil)
+	return providerScan[StreamingAIProvider](r, ModalityText, nil)
 }
 
-// VisionProvider returns the first available provider that implements VisionSIProvider.
+// VisionProvider returns the first available provider that implements VisionAIProvider.
 // If providerName is provided and exists, returns that; otherwise scans all text providers.
-func (r *ProviderRegistry) VisionProvider(providerName string) common.VisionSIProvider {
+func (r *ProviderRegistry) VisionProvider(providerName string) common.VisionAIProvider {
 	if r == nil {
 		return nil
 	}
 	if providerName != "" {
-		if vp, ok := providerByName[common.VisionSIProvider](r, providerName, nil); ok {
+		if vp, ok := providerByName[common.VisionAIProvider](r, providerName, nil); ok {
 			return vp
 		}
 	}
-	return providerScan[common.VisionSIProvider](r, ModalityText, nil)
+	return providerScan[common.VisionAIProvider](r, ModalityText, nil)
 }
 
 // EmbeddingProvider returns a named embedding provider, or the first
 // available one if name is empty. The named-lookup path preserves the
 // legacy distinction between "not found" and "found but wrong type"
 // errors -- callers grep on the error message in a few places.
-func (r *ProviderRegistry) EmbeddingProvider(name string) (EmbeddingSIProvider, error) {
+func (r *ProviderRegistry) EmbeddingProvider(name string) (EmbeddingAIProvider, error) {
 	if r == nil {
 		return nil, fmt.Errorf("provider registry is nil")
 	}
@@ -665,14 +665,14 @@ func (r *ProviderRegistry) EmbeddingProvider(name string) (EmbeddingSIProvider, 
 		if !ok {
 			return nil, fmt.Errorf("embedding provider %q not found", name)
 		}
-		ep, ok := entry.Client.(EmbeddingSIProvider)
+		ep, ok := entry.Client.(EmbeddingAIProvider)
 		if !ok {
 			return nil, fmt.Errorf("provider %q is not an embedding provider (type: %s)", name, entry.Config.Type)
 		}
 		return ep, nil
 	}
 
-	if ep := providerScan[EmbeddingSIProvider](r, ModalityEmbedding, nil); ep != nil {
+	if ep := providerScan[EmbeddingAIProvider](r, ModalityEmbedding, nil); ep != nil {
 		return ep, nil
 	}
 	return nil, fmt.Errorf("no embedding provider available")
@@ -694,12 +694,12 @@ func (r *ProviderRegistry) ProvidersByModality(modality ProviderModality) []*Pro
 	return result
 }
 
-// loadSIProviders returns an empty registry. Pass 3 of the DSL
+// loadAIProviders returns an empty registry. Pass 3 of the DSL
 // restructure migration retired the legacy walk over
 // dsl/v1/providers/. Providers now load via LoadUnifiedProviders
 // (component/memql/unified_kinds_loader.go) which walks
 // dsl/providers/<vendor>.memql.
-func loadSIProviders(logger *slog.Logger) (*ProviderRegistry, error) {
+func loadAIProviders(logger *slog.Logger) (*ProviderRegistry, error) {
 	defaultName := strings.TrimSpace(os.Getenv(envDefaultProvider))
 	registry := newProviderRegistry(defaultName)
 	registry.finalizeDefault(logger)
@@ -927,10 +927,10 @@ func streamingHTTPClient() *http.Client {
 	return guardedHTTPClient(&http.Client{Transport: base})
 }
 
-func newSIProvider(cfg ProviderConfig) (SIProvider, error) {
+func newAIProvider(cfg ProviderConfig) (AIProvider, error) {
 	switch strings.ToLower(cfg.Type) {
 	case "openai", "openaichat":
-		return newOpenSIProvider(cfg)
+		return newOpenAIProvider(cfg)
 	case "openaistream":
 		return newOpenAIStreamProvider(cfg)
 	case "openaitts":
@@ -973,7 +973,7 @@ func newSIProvider(cfg ProviderConfig) (SIProvider, error) {
 // validates auth at registration time so misconfigurations surface
 // early, and returns codes.Unimplemented when someone actually calls
 // it so the failure mode is obvious. When a real client is added,
-// swap the dispatch case in newSIProvider and delete this provider's
+// swap the dispatch case in newAIProvider and delete this provider's
 // use for that type.
 type openAIPlaceholderProvider struct {
 	name       string
@@ -981,7 +981,7 @@ type openAIPlaceholderProvider struct {
 	capability string // human-readable capability tag for error messages
 }
 
-func newOpenAIPlaceholderProvider(cfg ProviderConfig, capability string) (SIProvider, error) {
+func newOpenAIPlaceholderProvider(cfg ProviderConfig, capability string) (AIProvider, error) {
 	if strings.TrimSpace(cfg.Auth["apiKey"]) == "" {
 		return nil, fmt.Errorf("provider %q (%s): missing auth.apiKey", cfg.Name, capability)
 	}
@@ -992,13 +992,13 @@ func newOpenAIPlaceholderProvider(cfg ProviderConfig, capability string) (SIProv
 	}, nil
 }
 
-// Call satisfies SIProvider. Returns an informative error rather than
+// Call satisfies AIProvider. Returns an informative error rather than
 // pretending to succeed -- we never want a placeholder to silently
 // absorb a real request.
 func (p *openAIPlaceholderProvider) Call(_ context.Context, _ string) (any, error) {
 	return nil, fmt.Errorf(
 		"provider %q (%s / model=%s) is declared but the Go client is not wired yet; "+
-			"add a dispatch case in component/memql/si_providers.go:newSIProvider",
+			"add a dispatch case in component/memql/si_providers.go:newAIProvider",
 		p.name, p.capability, p.model,
 	)
 }
@@ -1007,7 +1007,7 @@ func (p *openAIPlaceholderProvider) Call(_ context.Context, _ string) (any, erro
 // OpenAI Embedding Provider
 // ============================================================================
 
-func newOpenAIEmbeddingProvider(cfg ProviderConfig) (SIProvider, error) {
+func newOpenAIEmbeddingProvider(cfg ProviderConfig) (AIProvider, error) {
 	apiKey := strings.TrimSpace(cfg.Auth["apiKey"])
 	if apiKey == "" {
 		return nil, fmt.Errorf("provider %q missing auth.apiKey", cfg.Name)
@@ -1053,20 +1053,20 @@ func resolveOpenAIProjectId(cfg ProviderConfig) string {
 	return strings.TrimSpace(os.Getenv("MEMQL_SI_OPENAI_PROJECT_ID"))
 }
 
-type openSIProvider struct {
+type openAIProvider struct {
 	client *openai.Client
 	model  string
 	params map[string]any
 }
 
 // Compile-time interface assertions
-var _ SIProvider = (*openSIProvider)(nil)
-var _ common.ChatSIProvider = (*openSIProvider)(nil)
-var _ common.ToolCallingChatSIProvider = (*openSIProvider)(nil)
-var _ common.ChatStructuredProvider = (*openSIProvider)(nil)
-var _ common.VisionSIProvider = (*openSIProvider)(nil)
+var _ AIProvider = (*openAIProvider)(nil)
+var _ common.ChatAIProvider = (*openAIProvider)(nil)
+var _ common.ToolCallingChatAIProvider = (*openAIProvider)(nil)
+var _ common.ChatStructuredProvider = (*openAIProvider)(nil)
+var _ common.VisionAIProvider = (*openAIProvider)(nil)
 
-func newOpenSIProvider(cfg ProviderConfig) (SIProvider, error) {
+func newOpenAIProvider(cfg ProviderConfig) (AIProvider, error) {
 	apiKey := strings.TrimSpace(cfg.Auth["apiKey"])
 	if apiKey == "" {
 		return nil, fmt.Errorf("provider %q missing auth.apiKey", cfg.Name)
@@ -1082,14 +1082,14 @@ func newOpenSIProvider(cfg ProviderConfig) (SIProvider, error) {
 		config.HTTPClient = &openAIProjectHeaderClient{inner: config.HTTPClient, projectId: projectId}
 	}
 	client := openai.NewClientWithConfig(config)
-	return &openSIProvider{
+	return &openAIProvider{
 		client: client,
 		model:  cfg.Model,
 		params: cfg.Params,
 	}, nil
 }
 
-func (p *openSIProvider) Call(ctx context.Context, prompt string) (any, error) {
+func (p *openAIProvider) Call(ctx context.Context, prompt string) (any, error) {
 	if p == nil || p.client == nil {
 		return nil, fmt.Errorf("openai provider is not configured")
 	}
@@ -1140,10 +1140,10 @@ func (p *openSIProvider) Call(ctx context.Context, prompt string) (any, error) {
 	return text, nil
 }
 
-// CallChat implements ChatSIProvider for proper multi-turn conversations.
+// CallChat implements ChatAIProvider for proper multi-turn conversations.
 // This sends messages with correct roles (system/user/assistant) to OpenAI,
 // which is critical for the model to understand conversation context.
-func (p *openSIProvider) CallChat(ctx context.Context, messages []common.ChatMessage) (string, error) {
+func (p *openAIProvider) CallChat(ctx context.Context, messages []common.ChatMessage) (string, error) {
 	if p == nil || p.client == nil {
 		return "", fmt.Errorf("openai provider is not configured")
 	}
@@ -1187,7 +1187,7 @@ func (p *openSIProvider) CallChat(ctx context.Context, messages []common.ChatMes
 // OpenAI's constrained-decoding path guarantees the returned string
 // parses against the schema -- no markdown fences, no missing fields,
 // no enum leaks.
-func (p *openSIProvider) CallChatStructured(ctx context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, error) {
+func (p *openAIProvider) CallChatStructured(ctx context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, error) {
 	if p == nil || p.client == nil {
 		return "", fmt.Errorf("openai provider is not configured")
 	}
@@ -1274,7 +1274,7 @@ func (p *openSIProvider) CallChatStructured(ctx context.Context, messages []comm
 }
 
 // CallChatWithTools implements tool-calling chat completion using OpenAI tools.
-func (p *openSIProvider) CallChatWithTools(ctx context.Context, messages []common.ChatMessage, tools []common.ToolDefinition) (*common.ToolCallingChatResult, error) {
+func (p *openAIProvider) CallChatWithTools(ctx context.Context, messages []common.ChatMessage, tools []common.ToolDefinition) (*common.ToolCallingChatResult, error) {
 	if p == nil || p.client == nil {
 		return nil, fmt.Errorf("openai provider is not configured")
 	}
@@ -1334,8 +1334,8 @@ func (p *openSIProvider) CallChatWithTools(ctx context.Context, messages []commo
 	return result, nil
 }
 
-// CallVision implements common.VisionSIProvider for the OpenAI provider.
-func (p *openSIProvider) CallVision(ctx context.Context, prompt string, images []common.VisionContent) (string, error) {
+// CallVision implements common.VisionAIProvider for the OpenAI provider.
+func (p *openAIProvider) CallVision(ctx context.Context, prompt string, images []common.VisionContent) (string, error) {
 	if p == nil || p.client == nil {
 		return "", fmt.Errorf("openai provider is not configured")
 	}
@@ -1394,7 +1394,7 @@ type openAIStreamProvider struct {
 	params map[string]any
 }
 
-func newOpenAIStreamProvider(cfg ProviderConfig) (SIProvider, error) {
+func newOpenAIStreamProvider(cfg ProviderConfig) (AIProvider, error) {
 	apiKey := strings.TrimSpace(cfg.Auth["apiKey"])
 	if apiKey == "" {
 		return nil, fmt.Errorf("provider %q missing auth.apiKey", cfg.Name)
@@ -1417,7 +1417,7 @@ func newOpenAIStreamProvider(cfg ProviderConfig) (SIProvider, error) {
 	}, nil
 }
 
-// Call implements SIProvider with non-streaming fallback for compatibility.
+// Call implements AIProvider with non-streaming fallback for compatibility.
 func (p *openAIStreamProvider) Call(ctx context.Context, prompt string) (any, error) {
 	if p == nil || p.client == nil {
 		return nil, fmt.Errorf("openai stream provider is not configured")
@@ -1452,7 +1452,7 @@ func (p *openAIStreamProvider) Call(ctx context.Context, prompt string) (any, er
 	return text, nil
 }
 
-// CallChat implements ChatSIProvider for proper multi-turn conversations.
+// CallChat implements ChatAIProvider for proper multi-turn conversations.
 func (p *openAIStreamProvider) CallChat(ctx context.Context, messages []common.ChatMessage) (string, error) {
 	if p == nil || p.client == nil {
 		return "", fmt.Errorf("openai stream provider is not configured")
@@ -1627,7 +1627,7 @@ func toOpenAIChatMessages(messages []common.ChatMessage) []openai.ChatCompletion
 	return out
 }
 
-// CallStream implements StreamingSIProvider for streaming responses.
+// CallStream implements StreamingAIProvider for streaming responses.
 func (p *openAIStreamProvider) CallStream(ctx context.Context, prompt string) (<-chan StreamChunk, error) {
 	if p == nil || p.client == nil {
 		return nil, fmt.Errorf("openai stream provider is not configured")
@@ -1846,8 +1846,8 @@ func (p *openAIStreamProvider) CallChatStreamWithTools(ctx context.Context, mess
 	return chunks, nil
 }
 
-// Ensure openAIStreamProvider implements StreamingSIProvider, ChatStreamProvider, and ChatStreamWithToolsProvider
-var _ StreamingSIProvider = (*openAIStreamProvider)(nil)
+// Ensure openAIStreamProvider implements StreamingAIProvider, ChatStreamProvider, and ChatStreamWithToolsProvider
+var _ StreamingAIProvider = (*openAIStreamProvider)(nil)
 var _ common.ChatStreamProvider = (*openAIStreamProvider)(nil)
 var _ common.ChatStreamWithToolsProvider = (*openAIStreamProvider)(nil)
 
@@ -1862,12 +1862,12 @@ type anthropicProvider struct {
 }
 
 // Compile-time interface assertions
-var _ SIProvider = (*anthropicProvider)(nil)
-var _ common.ChatSIProvider = (*anthropicProvider)(nil)
-var _ common.ToolCallingChatSIProvider = (*anthropicProvider)(nil)
-var _ common.VisionSIProvider = (*anthropicProvider)(nil)
+var _ AIProvider = (*anthropicProvider)(nil)
+var _ common.ChatAIProvider = (*anthropicProvider)(nil)
+var _ common.ToolCallingChatAIProvider = (*anthropicProvider)(nil)
+var _ common.VisionAIProvider = (*anthropicProvider)(nil)
 
-func newAnthropicProvider(cfg ProviderConfig) (SIProvider, error) {
+func newAnthropicProvider(cfg ProviderConfig) (AIProvider, error) {
 	apiKey := strings.TrimSpace(cfg.Auth["apiKey"])
 	if apiKey == "" {
 		return nil, fmt.Errorf("provider %q missing auth.apiKey", cfg.Name)
@@ -2037,7 +2037,7 @@ func (p *anthropicProvider) CallChatWithTools(ctx context.Context, messages []co
 	return result, nil
 }
 
-// CallVision implements common.VisionSIProvider for the Anthropic provider.
+// CallVision implements common.VisionAIProvider for the Anthropic provider.
 func (p *anthropicProvider) CallVision(ctx context.Context, prompt string, images []common.VisionContent) (string, error) {
 	if len(images) == 0 {
 		return "", fmt.Errorf("at least one image is required")
@@ -2083,13 +2083,13 @@ type anthropicStreamProvider struct {
 }
 
 // Compile-time interface assertions
-var _ StreamingSIProvider = (*anthropicStreamProvider)(nil)
+var _ StreamingAIProvider = (*anthropicStreamProvider)(nil)
 var _ common.ChatStreamProvider = (*anthropicStreamProvider)(nil)
 var _ common.ChatStreamWithToolsProvider = (*anthropicStreamProvider)(nil)
-var _ common.ChatSIProvider = (*anthropicStreamProvider)(nil)
-var _ common.ToolCallingChatSIProvider = (*anthropicStreamProvider)(nil)
+var _ common.ChatAIProvider = (*anthropicStreamProvider)(nil)
+var _ common.ToolCallingChatAIProvider = (*anthropicStreamProvider)(nil)
 
-func newAnthropicStreamProvider(cfg ProviderConfig) (SIProvider, error) {
+func newAnthropicStreamProvider(cfg ProviderConfig) (AIProvider, error) {
 	apiKey := strings.TrimSpace(cfg.Auth["apiKey"])
 	if apiKey == "" {
 		return nil, fmt.Errorf("provider %q missing auth.apiKey", cfg.Name)
@@ -2191,7 +2191,7 @@ func (p *anthropicStreamProvider) Call(ctx context.Context, prompt string) (any,
 	return text, nil
 }
 
-// CallChat implements ChatSIProvider (non-streaming fallback).
+// CallChat implements ChatAIProvider (non-streaming fallback).
 func (p *anthropicStreamProvider) CallChat(ctx context.Context, messages []common.ChatMessage) (string, error) {
 	if len(messages) == 0 {
 		return "", fmt.Errorf("at least one message is required")
@@ -2216,7 +2216,7 @@ func (p *anthropicStreamProvider) CallChat(ctx context.Context, messages []commo
 	return extractAnthropicText(resp), nil
 }
 
-// CallChatWithTools implements ToolCallingChatSIProvider (non-streaming fallback).
+// CallChatWithTools implements ToolCallingChatAIProvider (non-streaming fallback).
 func (p *anthropicStreamProvider) CallChatWithTools(ctx context.Context, messages []common.ChatMessage, tools []common.ToolDefinition) (*common.ToolCallingChatResult, error) {
 	if len(messages) == 0 {
 		return nil, fmt.Errorf("at least one message is required")
@@ -2262,7 +2262,7 @@ func (p *anthropicStreamProvider) CallChatWithTools(ctx context.Context, message
 	return result, nil
 }
 
-// CallStream implements StreamingSIProvider for single-prompt streaming.
+// CallStream implements StreamingAIProvider for single-prompt streaming.
 func (p *anthropicStreamProvider) CallStream(ctx context.Context, prompt string) (<-chan StreamChunk, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return nil, fmt.Errorf("prompt is required")
@@ -2283,7 +2283,7 @@ func (p *anthropicStreamProvider) CallStream(ctx context.Context, prompt string)
 		// Track usage so we can log a single per-call summary line
 		// with token + cost numbers. Same pattern as
 		// CallChatStreamWithTools; surfacing the same data on the
-		// simpler InvokeSI path so callers like the planner (which
+		// simpler InvokeAI path so callers like the planner (which
 		// goes through Call -> CallStream, not the tools variant)
 		// also produce a grep-able cost line per LLM round trip.
 		var (
@@ -2756,7 +2756,7 @@ type openAITTSProvider struct {
 	params map[string]any
 }
 
-func newOpenAITTSProvider(cfg ProviderConfig) (SIProvider, error) {
+func newOpenAITTSProvider(cfg ProviderConfig) (AIProvider, error) {
 	apiKey := strings.TrimSpace(cfg.Auth["apiKey"])
 	if apiKey == "" {
 		return nil, fmt.Errorf("provider %q missing auth.apiKey", cfg.Name)
@@ -2943,8 +2943,8 @@ func (p *openAITTSProvider) streamWAVChunks(ctx context.Context, pcmData []byte,
 	}
 }
 
-// Ensure openAITTSProvider implements TTSSIProvider
-var _ TTSSIProvider = (*openAITTSProvider)(nil)
+// Ensure openAITTSProvider implements TTSAIProvider
+var _ TTSAIProvider = (*openAITTSProvider)(nil)
 
 // ============================================================================
 // Helper functions

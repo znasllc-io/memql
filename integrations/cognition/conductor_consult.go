@@ -524,7 +524,7 @@ func (c *CognitionIntegration) consultConductor(
 	// the GA. The transcript already carries the speaker breakdown,
 	// but surfacing this separately puts the lookup at the top of
 	// the prompt where the LLM weights it.
-	lastResponder := lastSIResponderFromTranscript(transcript)
+	lastResponder := lastAIResponderFromTranscript(transcript)
 
 	data := map[string]any{
 		"agents":         agents,
@@ -540,7 +540,7 @@ func (c *CognitionIntegration) consultConductor(
 	}
 
 	start := time.Now()
-	raw, err := c.engine.InvokeSIStructured(ctx, "conductorTurn", data, "conductorTurn", json.RawMessage(conductorPlanSchemaJSON), true)
+	raw, err := c.engine.InvokeAIStructured(ctx, "conductorTurn", data, "conductorTurn", json.RawMessage(conductorPlanSchemaJSON), true)
 	elapsed := time.Since(start)
 	if err != nil {
 		if c.Logger != nil {
@@ -1140,7 +1140,7 @@ func buildConductorTranscript(recent []map[string]any, participants []map[string
 	return out
 }
 
-// lastSIResponderFromTranscript walks the conductor transcript
+// lastAIResponderFromTranscript walks the conductor transcript
 // backwards (it's stored oldest-first) and returns the display name
 // of the most-recent SI participant to speak. Empty string when the
 // transcript has no SI utterances yet (e.g. cold open). The returned
@@ -1154,7 +1154,7 @@ func buildConductorTranscript(recent []map[string]any, participants []map[string
 // past that human entry into the agent turn before it. The "human
 // just spoke before this consult" pattern means the most recent SI
 // in the transcript IS the agent the user's follow-up is addressing.
-func lastSIResponderFromTranscript(transcript []map[string]any) string {
+func lastAIResponderFromTranscript(transcript []map[string]any) string {
 	for i := len(transcript) - 1; i >= 0; i-- {
 		entry := transcript[i]
 		if entry == nil {

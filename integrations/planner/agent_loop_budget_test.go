@@ -142,7 +142,7 @@ func planRowEnvelope(row map[string]any) any { return rowsEnvelope(row) }
 // TestInvokeAndDispatch_AtCap_ParksWithoutLLMCall is the acceptance
 // test for memql#819: a plan whose persisted cumulative invocation
 // count is at the ceiling must park (awaitingFeedback) and must NOT
-// issue a plannerAgent InvokeSI call.
+// issue a plannerAgent InvokeAI call.
 func TestInvokeAndDispatch_AtCap_ParksWithoutLLMCall(t *testing.T) {
 	t.Setenv("MEMQL_PLANNER_MAX_INVOCATIONS_PER_PLAN", "2")
 	t.Setenv("MEMQL_PLANNER_DEFAULT_TOKEN_BUDGET", "0")
@@ -175,7 +175,7 @@ func TestInvokeAndDispatch_AtCap_ParksWithoutLLMCall(t *testing.T) {
 
 	exec, si, _ := fe.snapshot()
 	if len(si) != 0 {
-		t.Fatalf("at the LLM ceiling the loop must NOT call InvokeSI, got %v", si)
+		t.Fatalf("at the LLM ceiling the loop must NOT call InvokeAI, got %v", si)
 	}
 	if countContains(exec, "awaitingFeedback") == 0 {
 		t.Fatalf("at the LLM ceiling the loop must park to awaitingFeedback; exec=%v", exec)
@@ -215,7 +215,7 @@ func TestInvokeAndDispatch_UnderCap_CallsLLMAndRecords(t *testing.T) {
 		},
 		// Return an escalate decision so the loop terminates cleanly
 		// after one call instead of recursing.
-		siResponder: func(_ string, _ map[string]any) (any, error) {
+		aiResponder: func(_ string, _ map[string]any) (any, error) {
 			return `{"action":"escalate","feedbackReason":"feedback_required","question":"need input"}`, nil
 		},
 	}
@@ -226,7 +226,7 @@ func TestInvokeAndDispatch_UnderCap_CallsLLMAndRecords(t *testing.T) {
 
 	exec, si, _ := fe.snapshot()
 	if len(si) != 1 {
-		t.Fatalf("under the ceiling the loop must call InvokeSI exactly once, got %v", si)
+		t.Fatalf("under the ceiling the loop must call InvokeAI exactly once, got %v", si)
 	}
 	if countContains(exec, "mutationRecordPlannerInvocation") != 1 {
 		t.Fatalf("a successful call must record exactly one invocation; exec=%v", exec)

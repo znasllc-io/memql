@@ -688,7 +688,7 @@ func directiveAsMap(d *AgentParticipationDirective) map[string]any {
 }
 
 // directiveContextKey carries an AgentParticipationDirective through
-// the local-generation path (generateSIResponse). The forwarder path
+// the local-generation path (generateAIResponse). The forwarder path
 // uses Hints; the local path uses context. Same shape on the other
 // side: si_responder reads it and stamps `directive` into prompt data.
 type directiveContextKey struct{}
