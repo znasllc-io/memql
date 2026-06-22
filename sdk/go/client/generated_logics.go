@@ -260,41 +260,6 @@ func LogicDeregisterNodeBuild(args LogicDeregisterNodeArgs) string {
 	return b.String()
 }
 
-// LogicEnsureDailySpaceForCaller -- Ensure today's daily space exists for the authenticated caller. Top-level Execute entry point for interactive clients; resolves userId from the request's auth context inside the dailyspace integration.
-type LogicEnsureDailySpaceForCallerArgs struct {
-}
-
-// LogicEnsureDailySpaceForCaller calls the engine logic logicEnsureDailySpaceForCaller.
-func (qc *QueryClient) LogicEnsureDailySpaceForCaller(ctx context.Context, args LogicEnsureDailySpaceForCallerArgs) (*Result, error) {
-	call := LogicEnsureDailySpaceForCallerBuild(args)
-	return qc.executeNamed(ctx, "logicEnsureDailySpaceForCaller", call)
-}
-
-func LogicEnsureDailySpaceForCallerBuild(args LogicEnsureDailySpaceForCallerArgs) string {
-	_ = args
-	return "logicEnsureDailySpaceForCaller({})"
-}
-
-// LogicEnsureDailySpaceOnAuthSession -- Fires on every v1:identity:authSession create (one per login). Calls dailyspace.ensureForUser for the authenticating user; the idempotent insert collapses to a no-op when today's daily already exists. This is the path that makes the cron-frequency concern moot -- every login guarantees today's daily exists before the SPA reads.
-type LogicEnsureDailySpaceOnAuthSessionArgs struct {
-	Event map[string]any
-}
-
-// LogicEnsureDailySpaceOnAuthSession calls the engine logic logicEnsureDailySpaceOnAuthSession.
-func (qc *QueryClient) LogicEnsureDailySpaceOnAuthSession(ctx context.Context, args LogicEnsureDailySpaceOnAuthSessionArgs) (*Result, error) {
-	call := LogicEnsureDailySpaceOnAuthSessionBuild(args)
-	return qc.executeNamed(ctx, "logicEnsureDailySpaceOnAuthSession", call)
-}
-
-func LogicEnsureDailySpaceOnAuthSessionBuild(args LogicEnsureDailySpaceOnAuthSessionArgs) string {
-	var b strings.Builder
-	b.WriteString("logicEnsureDailySpaceOnAuthSession({")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
-	return b.String()
-}
-
 // LogicGenerateResponse -- Generates and inserts an AI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via mutationSendTextUtterance, and bumps participant presence to idle. Idempotent via queryHasAIResponseForReply.
 type LogicGenerateResponseArgs struct {
 	Event map[string]any
@@ -509,26 +474,6 @@ func (qc *QueryClient) LogicOnDelegationCreated(ctx context.Context, args LogicO
 func LogicOnDelegationCreatedBuild(args LogicOnDelegationCreatedArgs) string {
 	var b strings.Builder
 	b.WriteString("logicOnDelegationCreated({")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
-	return b.String()
-}
-
-// LogicProvisionDailySpaceOnUserCreate -- Fires when a new v1:identity:user row lands. Delegates to the dailyspace.ensureForUser capability which owns the timezone math + idempotent insert of today's daily space for that user. dailySpaceEnabled gating lives inside the Go capability since the value sits under preferences and filter syntax doesn't navigate nested payload paths reliably.
-type LogicProvisionDailySpaceOnUserCreateArgs struct {
-	Event map[string]any
-}
-
-// LogicProvisionDailySpaceOnUserCreate calls the engine logic logicProvisionDailySpaceOnUserCreate.
-func (qc *QueryClient) LogicProvisionDailySpaceOnUserCreate(ctx context.Context, args LogicProvisionDailySpaceOnUserCreateArgs) (*Result, error) {
-	call := LogicProvisionDailySpaceOnUserCreateBuild(args)
-	return qc.executeNamed(ctx, "logicProvisionDailySpaceOnUserCreate", call)
-}
-
-func LogicProvisionDailySpaceOnUserCreateBuild(args LogicProvisionDailySpaceOnUserCreateArgs) string {
-	var b strings.Builder
-	b.WriteString("logicProvisionDailySpaceOnUserCreate({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
@@ -765,28 +710,6 @@ func LogicRevokeExpiredDelegationsBuild(args LogicRevokeExpiredDelegationsArgs) 
 	b.WriteString("logicRevokeExpiredDelegations({")
 	b.WriteString("now: ")
 	b.WriteString(fmt.Sprintf("%q", args.Now))
-	b.WriteString("})")
-	return b.String()
-}
-
-// LogicRolloverDailySpace -- Hourly cron tick. Delegates the entire per-user sweep to the dailyspace.rolloverAllUsers capability, which walks queryActiveUsers and calls ensureForUser per row. Returns a one-row summary the automation logs.
-type LogicRolloverDailySpaceArgs struct {
-	Event map[string]any
-}
-
-// LogicRolloverDailySpace calls the engine logic logicRolloverDailySpace.
-func (qc *QueryClient) LogicRolloverDailySpace(ctx context.Context, args LogicRolloverDailySpaceArgs) (*Result, error) {
-	call := LogicRolloverDailySpaceBuild(args)
-	return qc.executeNamed(ctx, "logicRolloverDailySpace", call)
-}
-
-func LogicRolloverDailySpaceBuild(args LogicRolloverDailySpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("logicRolloverDailySpace({")
-	if args.Event != nil {
-		b.WriteString("event: ")
-		b.WriteString(renderMemQLValue(args.Event))
-	}
 	b.WriteString("})")
 	return b.String()
 }
