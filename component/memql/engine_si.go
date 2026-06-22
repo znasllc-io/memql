@@ -70,7 +70,7 @@ func (e *MemQLEngine) InvokeSI(ctx context.Context, templateId string, data map[
 		return nil, fmt.Errorf("SI runtime is not configured")
 	}
 
-	invocation := &SIInvocation{
+	invocation := &AIInvocation{
 		TemplateId: templateId,
 	}
 	// Honor a context-attached provider override (memql#838 model
@@ -107,7 +107,7 @@ func (e *MemQLEngine) InvokeSI(ctx context.Context, templateId string, data map[
 // which providers lack native support.
 //
 // Caches the structured result through the same SI cache used by
-// si() invocations. Cache key includes templateId + schema name +
+// ai() invocations. Cache key includes templateId + schema name +
 // schema body + rendered prompt text + provider name, so callers
 // with identical inputs collapse to a single LLM round-trip across
 // the entire memQL instance (multiple frontends, multiple users,

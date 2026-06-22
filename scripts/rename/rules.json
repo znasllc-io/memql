@@ -12,11 +12,16 @@
 
   "groups": {
 
+    "go-grammar": [
+      { "old": "SIExpr", "new": "AIExpr", "mode": "infix", "exts": [".go"] },
+      { "old": "SIInvocation", "new": "AIInvocation", "mode": "infix", "exts": [".go"] },
+      { "old": "SIFunctionCall", "new": "AIFunctionCall", "mode": "infix", "exts": [".go"] }
+    ],
+
     "go-internal": [
       { "old": "InvokeSI", "new": "InvokeAI", "mode": "prefix", "exts": [".go"] },
       { "old": "invokeSI", "new": "invokeAI", "mode": "prefix", "exts": [".go"] },
-      { "old": "SIFunctionCall", "new": "AIFunctionCall", "mode": "infix", "exts": [".go"] },
-      { "old": "SIInvocation", "new": "AIInvocation", "mode": "infix", "exts": [".go"] },
+      { "old": "VarCognitionSIEnabled", "new": "VarCognitionAIEnabled", "mode": "token", "exts": [".go"] },
       { "old": "SIProvider", "new": "AIProvider", "mode": "infix", "exts": [".go"] },
       { "old": "SIToolLoop", "new": "AIToolLoop", "mode": "infix", "exts": [".go"] },
       { "old": "SIResponder", "new": "AIResponder", "mode": "infix", "exts": [".go"] },
@@ -24,7 +29,6 @@
       { "old": "SIPolicies", "new": "AIPolicies", "mode": "infix", "exts": [".go"] },
       { "old": "SIRuntime", "new": "AIRuntime", "mode": "infix", "exts": [".go"] },
       { "old": "SIContext", "new": "AIContext", "mode": "infix", "exts": [".go"] },
-      { "old": "SIExpr", "new": "AIExpr", "mode": "infix", "exts": [".go"] },
       { "old": "SICache", "new": "AICache", "mode": "infix", "exts": [".go"] },
       { "old": "SIUsage", "new": "AIUsage", "mode": "infix", "exts": [".go"] },
       { "old": "SIValue", "new": "AIValue", "mode": "infix", "exts": [".go"] },
@@ -78,6 +82,11 @@
     "dsl-keyword": [
       { "old": "si\\(", "new": "ai(", "mode": "regex", "exts": [".memql"],
         "_note": "The si(\"promptName\", args) construct keyword. Scoped to .memql only." }
+    ],
+
+    "go-keyword-literals": [
+      { "old": "si\\(", "new": "ai(", "mode": "regex", "exts": [".go"],
+        "_note": "Hardcoded `si(` string literals in Go that PARSE/SERIALIZE the keyword (shape.go funcCall[:3]==\"si(\", canonical.go, shape_template.go WriteString) + the si()-keyword error messages/comments. The participant data value \"si\" has no paren and is untouched (deferred #1918)." }
     ],
 
     "dsl-identifiers": [

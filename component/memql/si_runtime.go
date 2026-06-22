@@ -50,14 +50,14 @@ func (r *siRuntime) publishEvent(topic string, kind events.Kind, payload map[str
 	r.eventBus.Publish(event)
 }
 
-func (r *siRuntime) Invoke(ctx context.Context, invocation *SIInvocation, data any) (any, error) {
+func (r *siRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data any) (any, error) {
 	startTime := time.Now()
 
 	if invocation == nil {
 		return nil, fmt.Errorf("ai invocation is not defined")
 	}
 	if r == nil || r.prompts == nil {
-		return nil, fmt.Errorf("si() runtime is not configured")
+		return nil, fmt.Errorf("ai() runtime is not configured")
 	}
 
 	prompt, err := r.resolvePrompt(invocation.TemplateId)
@@ -88,9 +88,9 @@ func (r *siRuntime) Invoke(ctx context.Context, invocation *SIInvocation, data a
 		return nil, fmt.Errorf("provider %q not available", providerName)
 	}
 
-	// Validate provider supports text modality for si() expressions
+	// Validate provider supports text modality for ai() expressions
 	if !entry.Config.SupportsText() {
-		return nil, fmt.Errorf("provider %q (modality: %s) cannot be used in si() expressions; only text-based providers are supported",
+		return nil, fmt.Errorf("provider %q (modality: %s) cannot be used in ai() expressions; only text-based providers are supported",
 			providerName, entry.Config.ResolvedModality())
 	}
 
@@ -142,7 +142,7 @@ func (r *siRuntime) Invoke(ctx context.Context, invocation *SIInvocation, data a
 	return result, nil
 }
 
-func (r *siRuntime) cacheTTL(invocation *SIInvocation) time.Duration {
+func (r *siRuntime) cacheTTL(invocation *AIInvocation) time.Duration {
 	if r == nil {
 		return 0
 	}
@@ -163,7 +163,7 @@ func (r *siRuntime) cacheTTL(invocation *SIInvocation) time.Duration {
 	return time.Duration(maxSeconds) * time.Second
 }
 
-func (r *siRuntime) resolveProviderName(prompt *PromptTemplate, invocation *SIInvocation) (string, error) {
+func (r *siRuntime) resolveProviderName(prompt *PromptTemplate, invocation *AIInvocation) (string, error) {
 	if r == nil || r.providers == nil {
 		return "", fmt.Errorf("provider registry is not configured")
 	}
@@ -187,7 +187,7 @@ func (r *siRuntime) resolvePrompt(id string) (*PromptTemplate, error) {
 	}
 	name := strings.TrimSpace(id)
 	if name == "" {
-		return nil, fmt.Errorf("si() requires a prompt template ID")
+		return nil, fmt.Errorf("ai() requires a prompt template ID")
 	}
 	if prompt, ok := r.prompts.Get(name); ok && prompt != nil {
 		return prompt, nil
@@ -208,16 +208,16 @@ func normalizeSIData(data any) (map[string]any, error) {
 		// but not recognized by the validator as "jsonType: array". Normalize by round-tripping.
 		b, err := json.Marshal(payload)
 		if err != nil {
-			return nil, fmt.Errorf("si() data json encode: %w", err)
+			return nil, fmt.Errorf("ai() data json encode: %w", err)
 		}
 		var normalized map[string]any
 		if err := json.Unmarshal(b, &normalized); err != nil {
-			return nil, fmt.Errorf("si() data json decode: %w", err)
+			return nil, fmt.Errorf("ai() data json decode: %w", err)
 		}
 		if normalized == nil {
 			return map[string]any{}, nil
 		}
 		return normalized, nil
 	}
-	return nil, fmt.Errorf("si() data object must be a JSON object, got %T", data)
+	return nil, fmt.Errorf("ai() data object must be a JSON object, got %T", data)
 }

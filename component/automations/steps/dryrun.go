@@ -17,7 +17,7 @@ package steps
 // core uses -- but with the side-effect interception layer wired in via a
 // SANDBOX STEP REGISTRY (sandbox_registry.go) that wraps the real registry:
 //
-//   - reads (queries, si(), similarTo, webSearch, fetchUrl) DELEGATE to the
+//   - reads (queries, ai(), similarTo, webSearch, fetchUrl) DELEGATE to the
 //     real executors -> real engine.Execute -> real + metered.
 //   - mutations (a direct mutation step, or a function step whose function is a
 //     mutation) are ISOLATED: the would-be write is evaluated + recorded into

@@ -269,8 +269,8 @@ func (e *MemQLEngine) evaluateExpressionSetWithContext(ctx context.Context, expr
 		}
 		// Evaluate the spec's expression inline
 		return e.evaluateExpressionSetWithContext(ctx, spec.Expr, timestamp, target, sorter, conceptContext)
-	case *SIExpression:
-		return nil, fmt.Errorf("si() cannot be evaluated in this context; use it only in projection expressions")
+	case *AIExpression:
+		return nil, fmt.Errorf("ai() cannot be evaluated in this context; use it only in projection expressions")
 	case *FunctionCallExpression:
 		// Functions should be expanded during parsing; if we reach here, something went wrong
 		return nil, fmt.Errorf("function %q was not expanded during parsing; this is a bug", node.Name)

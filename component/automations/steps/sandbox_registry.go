@@ -16,8 +16,8 @@ package steps
 //   - WEBHOOK / external POST: the request is evaluated + recorded as a blocked
 //     webhook and a synthetic success result is returned. Nothing is dispatched
 //     under the isolated tier.
-//   - READ / pure compute (queries, si(), similarTo, webSearch, fetchUrl, logic,
-//     shape, switch, ...): the read is METERED into the manifest (an si() call
+//   - READ / pure compute (queries, ai(), similarTo, webSearch, fetchUrl, logic,
+//     shape, switch, ...): the read is METERED into the manifest (an ai() call
 //     -> aiCalls + a cost estimate; a similarTo / webSearch / fetchUrl call ->
 //     webCalls) and then DELEGATED to the real executor -> real engine.Execute
 //     -> real read.
@@ -86,7 +86,7 @@ func (s *sandboxStepRegistry) Execute(ctx context.Context, step *automations.Ste
 			// are intercepted too, instead of escaping to engine.Execute.
 			return s.interceptLogicFunction(ctx, step, stepCtx)
 		default:
-			// A read (si() / similarTo / webSearch / fetchUrl) or a plain
+			// A read (ai() / similarTo / webSearch / fetchUrl) or a plain
 			// query: meter the read into the manifest (real + metered), then
 			// delegate to the real executor so it runs for real.
 			s.meterRead(step, stepCtx)
@@ -364,7 +364,7 @@ var webReadFunctions = map[string]bool{
 }
 
 // meterRead records a read step into the manifest before it is delegated to the
-// real executor. An si() call (the SI read) lands in aiCalls with a heuristic
+// real executor. An ai() call (the AI read) lands in aiCalls with a heuristic
 // token + cost estimate; a similarTo / webSearch / fetchUrl call lands in
 // webCalls with the resolved target. Plain query reads carry no external cost
 // and are not metered. Recording happens up-front so the manifest reflects the
@@ -375,14 +375,14 @@ func (s *sandboxStepRegistry) meterRead(step *automations.Step, stepCtx *automat
 	}
 	name := strings.TrimSpace(step.Function.Name)
 	switch {
-	case name == "si":
+	case name == "ai":
 		s.meterAiCall(step, stepCtx)
 	case webReadFunctions[name]:
 		s.meterWebCall(step, name, stepCtx)
 	}
 }
 
-// meterAiCall records an si() read with a heuristic prompt-token estimate (from
+// meterAiCall records an ai() read with a heuristic prompt-token estimate (from
 // the resolved-arg size) and the corresponding USD cost. Exact provider token
 // usage is not surfaced through the step boundary, so the estimate is a
 // documented heuristic the approver reads as an upper-bound order of magnitude,
@@ -395,13 +395,13 @@ func (s *sandboxStepRegistry) meterAiCall(step *automations.Step, stepCtx *autom
 	s.mu.Lock()
 	s.aiCalls = append(s.aiCalls, memql.RecordedAiCall{
 		StepId:        step.ID,
-		Function:      "si",
+		Function:      "ai",
 		PromptTokens:  promptTokens,
 		OutputTokens:  outputTokens,
 		EstimatedCost: cost,
 	})
 	s.mu.Unlock()
-	s.note(step.ID, "si() metered (real read)")
+	s.note(step.ID, "ai() metered (real read)")
 }
 
 // meterWebCall records a web read (similarTo / webSearch / fetchUrl) with the
@@ -447,19 +447,19 @@ const (
 	// charsPerToken is the rough chars-per-token ratio used to estimate prompt
 	// size from the resolved-arg JSON length (~4 chars/token for English).
 	charsPerToken = 4
-	// defaultSiOutputTokens is the assumed completion size for one si() call
+	// defaultSiOutputTokens is the assumed completion size for one ai() call
 	// when actual usage is unknown.
 	defaultSiOutputTokens = 512
 	// siInputUsdPerMillion / siOutputUsdPerMillion are conservative default
 	// rates (a mid-tier chat model) for the estimate. They are intentionally a
 	// fixed heuristic, not a per-provider lookup -- the dry-run cannot know
-	// which provider a given si() template will resolve to at run time.
+	// which provider a given ai() template will resolve to at run time.
 	siInputUsdPerMillion  = 0.50
 	siOutputUsdPerMillion = 1.50
 )
 
 // estimateTokens estimates the prompt-token count for a resolved arg map from
-// its JSON-serialized length. Returns a small floor so an empty-arg si() call
+// its JSON-serialized length. Returns a small floor so an empty-arg ai() call
 // still reports a non-zero estimate.
 func estimateTokens(resolved map[string]any) int {
 	if len(resolved) == 0 {

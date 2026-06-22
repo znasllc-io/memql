@@ -94,7 +94,7 @@ func TestCloneExpressionNode_LiteralValueNode(t *testing.T) {
 func allExpressionNodeImplementers() map[string]ExpressionNode {
 	return map[string]ExpressionNode{
 		"FunctionCallExpression":      &FunctionCallExpression{Name: "f"},
-		"SIExpression":                &SIExpression{},
+		"AIExpression":                &AIExpression{},
 		"LogicalExpression":           &LogicalExpression{Op: LogicalAnd, Left: &LiteralValueNode{Value: true}, Right: &LiteralValueNode{Value: true}},
 		"SpecReferenceExpression":     &SpecReferenceExpression{Name: "s"},
 		"RelationshipExpression":      &RelationshipExpression{},

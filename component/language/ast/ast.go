@@ -259,15 +259,15 @@ type LiteralExpr struct {
 func (*LiteralExpr) node()           {}
 func (*LiteralExpr) expressionNode() {}
 
-// SIExpr captures si() invocation nodes parsed inside MemQL expressions.
-type SIExpr struct {
+// AIExpr captures ai() invocation nodes parsed inside MemQL expressions.
+type AIExpr struct {
 	TemplateId       string
 	ProviderOverride *string
 	CacheSeconds     *int
 }
 
-func (*SIExpr) node()           {}
-func (*SIExpr) expressionNode() {}
+func (*AIExpr) node()           {}
+func (*AIExpr) expressionNode() {}
 
 // ----------------------------------------------------------------------------
 // Accessor Function Nodes (NEW - for automation/mutation expressions)

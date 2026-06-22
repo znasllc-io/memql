@@ -44,7 +44,7 @@ const factoryResultConcept = "integration:agents:factory-result"
 //
 //  1. Load the user's existing agents via queryActiveAgentsForUser.
 //  2. Load the role catalog via queryActiveAgentRoles.
-//  3. Call si("agentFactoryAnalyze", {...}) for the structured
+//  3. Call ai("agentFactoryAnalyze", {...}) for the structured
 //     decision -- {action, targetAgentId, roleSlug, domainIds,
 //     liveSourceIds, toolSlugs, reasoning}.
 //  4. Dispatch on action:

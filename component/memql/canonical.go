@@ -32,8 +32,8 @@ func canonicalExpression(expr ExpressionNode) string {
 		return fmt.Sprintf("count(%s)", canonicalExpression(node.Target))
 	case *SpecReferenceExpression:
 		return fmt.Sprintf("spec(%s)", strings.ToLower(strings.TrimSpace(node.Name)))
-	case *SIExpression:
-		return canonicalSIExpression(node)
+	case *AIExpression:
+		return canonicalAIExpression(node)
 	case *FunctionCallExpression:
 		return fmt.Sprintf("fn(%s)", strings.ToLower(strings.TrimSpace(node.Name)))
 	case *BuiltinFunctionExpression:
@@ -80,9 +80,9 @@ func canonicalComparisonExpression(expr *ComparisonExpression) string {
 	return fmt.Sprintf("%s%s%s", field, string(expr.Operator), value)
 }
 
-func canonicalSIExpression(expr *SIExpression) string {
+func canonicalAIExpression(expr *AIExpression) string {
 	if expr == nil || expr.Invocation == nil {
-		return "si()"
+		return "ai()"
 	}
 	args := []string{strconv.Quote(strings.TrimSpace(expr.Invocation.TemplateId))}
 	if expr.Invocation.ProviderOverride != nil {
@@ -93,7 +93,7 @@ func canonicalSIExpression(expr *SIExpression) string {
 	if expr.Invocation.CacheSeconds != nil {
 		args = append(args, fmt.Sprintf("%d", *expr.Invocation.CacheSeconds))
 	}
-	return fmt.Sprintf("si(%s)", strings.Join(args, ","))
+	return fmt.Sprintf("ai(%s)", strings.Join(args, ","))
 }
 
 func canonicalField(field FieldReference) string {

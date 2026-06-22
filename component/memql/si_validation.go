@@ -7,8 +7,8 @@ func validateSIContext(expr ExpressionNode) error {
 		return nil
 	}
 	switch node := expr.(type) {
-	case *SIExpression:
-		return fmt.Errorf("si() cannot be used in filter, join, sort, or group expressions; use it only in projection")
+	case *AIExpression:
+		return fmt.Errorf("ai() cannot be used in filter, join, sort, or group expressions; use it only in projection")
 	case *LogicalExpression:
 		if err := validateSIContext(node.Left); err != nil {
 			return err

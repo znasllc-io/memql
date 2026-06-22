@@ -2,7 +2,7 @@ package steps
 
 // sandbox_registry_test.go -- white-box unit coverage for the Gate-2 dry-run
 // metering helpers that the engine-backed integration tests can't reach without
-// a live provider: si() AI-call metering + the cost estimate. si() is an
+// a live provider: ai() AI-call metering + the cost estimate. ai() is an
 // in-logic projection expression (not a registry function), so it surfaces as a
 // function step only inside a logic body; this test drives meterRead on a
 // synthetic si step directly.
@@ -20,16 +20,16 @@ func newMeterRegistry() *sandboxStepRegistry {
 	return newSandboxStepRegistry(NewRegistry(), nil, "sandbox:dryrun:test", memql.DryRunModeIsolated, "")
 }
 
-// TestMeterRead_SiCallRecordsAiCallAndCost: a function step named "si" records
+// TestMeterRead_AiCallRecordsAiCallAndCost: a function step named "ai" records
 // an aiCalls entry with a positive token + cost estimate, and the aggregate
 // costEstimate reflects it.
-func TestMeterRead_SiCallRecordsAiCallAndCost(t *testing.T) {
+func TestMeterRead_AiCallRecordsAiCallAndCost(t *testing.T) {
 	reg := newMeterRegistry()
 	step := &automations.Step{
-		ID:   "askSi",
+		ID:   "askAi",
 		Type: automations.StepTypeFunction,
 		Function: &automations.FunctionStepConfig{
-			Name: "si",
+			Name: "ai",
 			Args: map[string]any{
 				"0": "someTemplate",
 				"1": map[string]any{"question": "what is the capital of france"},
@@ -45,8 +45,8 @@ func TestMeterRead_SiCallRecordsAiCallAndCost(t *testing.T) {
 		t.Fatalf("expected 1 metered AI call, got %d: %+v", len(mani.AiCalls), mani.AiCalls)
 	}
 	ai := mani.AiCalls[0]
-	if ai.Function != "si" {
-		t.Errorf("expected function si, got %q", ai.Function)
+	if ai.Function != "ai" {
+		t.Errorf("expected function ai, got %q", ai.Function)
 	}
 	if ai.PromptTokens <= 0 {
 		t.Errorf("expected a positive prompt-token estimate, got %d", ai.PromptTokens)

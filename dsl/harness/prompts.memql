@@ -4,7 +4,7 @@
 // grouped cluster of episodic nodes (observations / steps / plans),
 // extract at most one stable, durable belief -- a fact, preference, or
 // learned outcome worth keeping across plans. Structured-output path
-// (the consolidation handler calls si("consolidateMemory", ...) and
+// (the consolidation handler calls ai("consolidateMemory", ...) and
 // parses the JSON), so the prompt instructs JSON-only output.
 //
 // The distilled belief feeds the dedup step: its `content` is run
@@ -29,7 +29,7 @@ prompt consolidateMemory {
 // an ordered set of steps with dependsOn edges (the DAG) and an optional
 // roleHint per step naming the seed role the planner should provision /
 // match against (researcher / builder / operator). Structured-output:
-// the planner integration calls si("decomposeGoal", ...) and parses the
+// the planner integration calls ai("decomposeGoal", ...) and parses the
 // JSON via DecodeDecomposeJSON, then ValidateDecompose checks the DAG is
 // well-formed (unique keys, no dangling edges, acyclic) before persisting
 // the plan + steps via the #582 mutations. On any LLM / parse / validation

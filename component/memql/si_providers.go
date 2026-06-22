@@ -124,7 +124,7 @@ func (c ProviderConfig) ResolvedModality() ProviderModality {
 	}
 }
 
-// SupportsText returns true if this provider can be used for text-based si() calls.
+// SupportsText returns true if this provider can be used for text-based ai() calls.
 func (c ProviderConfig) SupportsText() bool {
 	return c.ResolvedModality() == ModalityText
 }

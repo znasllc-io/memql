@@ -15,9 +15,9 @@
 // Callable from any DSL context that supports builtin calls --
 // automations, logic functions, policies. NEVER blocks.
 //
-// For blocking AI work from DSL, use `si("promptName", args)` --
+// For blocking AI work from DSL, use `ai("promptName", args)` --
 // that's the synchronous structured-output path. `agent()` is for
-// agent-orchestrated, tool-using, planner-tracked work; `si()` is
+// agent-orchestrated, tool-using, planner-tracked work; `ai()` is
 // for one-shot LLM calls with no tools.
 //
 // Args:
@@ -43,7 +43,7 @@
 @enabled
 @executor("integration.agents.invoke")
 @args(profile="object")
-@description("Async-invoke a DSL-registered agent by name. Creates a queued v1:planner:plan (kind=agentInvocation) and returns its id. Use si() for blocking LLM calls; agent() is for agent-orchestrated work that runs through the planner.")
+@description("Async-invoke a DSL-registered agent by name. Creates a queued v1:planner:plan (kind=agentInvocation) and returns its id. Use ai() for blocking LLM calls; agent() is for agent-orchestrated work that runs through the planner.")
 builtin agent {
   name     string    @required
   prompt   string    @required

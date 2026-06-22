@@ -26,9 +26,9 @@
 //     id==<planId> for lifecycle progression.
 //   - Direct query via queryPlanById to read current state + output.
 //
-// For blocking AI work from DSL, use `si("promptName", args)` -- the
+// For blocking AI work from DSL, use `ai("promptName", args)` -- the
 // synchronous structured-output path. `agent()` is for agent-
-// orchestrated, planner-tracked work; `si()` is for one-shot LLM calls.
+// orchestrated, planner-tracked work; `ai()` is for one-shot LLM calls.
 package agents
 
 import (

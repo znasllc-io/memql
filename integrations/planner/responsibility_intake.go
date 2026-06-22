@@ -16,7 +16,7 @@
 //   1. Claim the row (CAS guard so a created+updated double-fire, or a
 //      multi-node race, runs the intake prompt once). intakeStatus '' ->
 //      'pending' (mutationMarkResponsibilityIntakePending).
-//   2. Invoke si("responsibilityIntake", {statement, roleCatalog, now}).
+//   2. Invoke ai("responsibilityIntake", {statement, roleCatalog, now}).
 //   3. Parse the JSON result.
 //   4a. ZERO questions -> apply the inferred fields with status='active' +
 //       intakeStatus='clear'. The responsibility goes straight live

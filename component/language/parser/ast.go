@@ -43,7 +43,7 @@ type (
 	ConditionalFilterExpr   = ast.ConditionalFilterExpr
 	ArgRefExpr              = ast.ArgRefExpr
 	LiteralExpr             = ast.LiteralExpr
-	SIExpr                  = ast.SIExpr
+	AIExpr                  = ast.AIExpr
 	VarRefExpr              = ast.VarRefExpr
 	StepRefExpr             = ast.StepRefExpr
 	InputRefExpr            = ast.InputRefExpr

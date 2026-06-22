@@ -23,9 +23,9 @@ var Keywords = []string{
 
 // BuiltinFunctions maps builtin function names to their signatures and documentation.
 var BuiltinFunctions = map[string]BuiltinDef{
-	"si": {
-		Signature: `si(templateId string, data object, provider? string)`,
-		Doc:       "Invoke a synthetic intelligence prompt template with the given data.",
+	"ai": {
+		Signature: `ai(templateId string, data object, provider? string)`,
+		Doc:       "Invoke an AI prompt template with the given data.",
 		Parameters: []Parameter{
 			{Label: "templateId", Documentation: "Name of the prompt template to invoke."},
 			{Label: "data", Documentation: "Data object passed to the template."},

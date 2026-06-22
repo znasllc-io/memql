@@ -167,8 +167,8 @@ type ExpressionNode interface {
 	isExpressionNode()
 }
 
-// SIInvocation describes an si() call.
-type SIInvocation struct {
+// AIInvocation describes an ai() call.
+type AIInvocation struct {
 	TemplateId       string
 	ProviderOverride *string
 	// ModelOverride picks the concrete model name within the selected
@@ -191,12 +191,12 @@ type SIInvocation struct {
 	CacheSeconds      *int
 }
 
-// SIExpression captures si() invocation nodes parsed inside MemQL expressions.
-type SIExpression struct {
-	Invocation *SIInvocation
+// AIExpression captures ai() invocation nodes parsed inside MemQL expressions.
+type AIExpression struct {
+	Invocation *AIInvocation
 }
 
-func (*SIExpression) isExpressionNode() {}
+func (*AIExpression) isExpressionNode() {}
 
 // LogicalOp identifies logical operators applied between expressions.
 type LogicalOp string
@@ -437,11 +437,11 @@ type MutationNode struct {
 	ScrubPii bool
 }
 
-func cloneSIInvocation(src *SIInvocation) *SIInvocation {
+func cloneAIInvocation(src *AIInvocation) *AIInvocation {
 	if src == nil {
 		return nil
 	}
-	clone := &SIInvocation{
+	clone := &AIInvocation{
 		TemplateId: src.TemplateId,
 	}
 	if src.ProviderOverride != nil {
