@@ -3,7 +3,7 @@
 // dispatch, outbound place_call) and the call lifecycle. Records bind to a
 // partition, never a space (Amendment A).
 
-use telephony.concepts.{ number, trunk, call }
+use telephony.concepts.{ number, trunk, call, consent }
 
 @enabled
 @description("Persist a provisioned DID. Called after a carrier BuyNumber succeeds.")
@@ -112,5 +112,41 @@ mutation call mutationCloseCall {
     durationSeconds: args.durationSeconds
     disposition:     args.disposition
     costEstimate:    coalesce(args.costEstimate, 0)
+  }
+}
+
+@enabled
+@description("Record TCPA consent / opt-out for an external number (append-only; newest wins).")
+mutation consent mutationSetConsent {
+  args {
+    phoneNumber  string  @required
+    partitionId  string  @required
+    status       string  @required @enum("opted_in", "opted_out")
+    reason       string
+    source       string
+  }
+  insert {
+    args.phoneNumber
+    args.partitionId
+    args.status
+    args.reason
+    args.source
+  }
+}
+
+@enabled
+@description("Set E911 / caller-ID verification state on an owned DID (by row id).")
+mutation number mutationSetNumberE911 {
+  args {
+    id               string  @required
+    e911Registered   bool @required
+    e911AddressId    string
+    callerIdVerified bool
+  }
+  update {
+    id:               args.id
+    e911Registered:   args.e911Registered
+    e911AddressId:    args.e911AddressId
+    callerIdVerified: coalesce(args.callerIdVerified, false)
   }
 }

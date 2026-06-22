@@ -1446,6 +1446,28 @@ func QueryClusterSpawnEventsBuild(args QueryClusterSpawnEventsArgs) string {
 	return "queryClusterSpawnEvents({})"
 }
 
+// QueryConsentOptOut -- Opt-out rows for an external number (newest first). Read in the outbound call path to block calls to opted-out numbers (TCPA). Not owner-gated: the enforcement check runs in the agent/call context, not an admin one.
+//
+// Bound concept: consent.
+type QueryConsentOptOutArgs struct {
+	PhoneNumber string
+}
+
+// QueryConsentOptOut calls the engine query queryConsentOptOut.
+func (qc *QueryClient) QueryConsentOptOut(ctx context.Context, args QueryConsentOptOutArgs) (*Result, error) {
+	call := QueryConsentOptOutBuild(args)
+	return qc.executeNamed(ctx, "queryConsentOptOut", call)
+}
+
+func QueryConsentOptOutBuild(args QueryConsentOptOutArgs) string {
+	var b strings.Builder
+	b.WriteString("queryConsentOptOut({")
+	b.WriteString("phoneNumber: ")
+	b.WriteString(fmt.Sprintf("%q", args.PhoneNumber))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryCurrentUser -- Get the authenticated caller's own user record. Self-scoped via actor.userId (no args) -- the caller cannot read another user's row.
 //
 // Bound concept: user.
@@ -2910,6 +2932,28 @@ func QueryNotesByTagBuild(args QueryNotesByTagArgs) string {
 	b.WriteString("queryNotesByTag({")
 	b.WriteString("tag: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tag))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryNumberByE164 -- Resolve an owned DID row by its E.164 (newest first). Used to set E911 / compliance state by number.
+//
+// Bound concept: number.
+type QueryNumberByE164Args struct {
+	E164 string
+}
+
+// QueryNumberByE164 calls the engine query queryNumberByE164.
+func (qc *QueryClient) QueryNumberByE164(ctx context.Context, args QueryNumberByE164Args) (*Result, error) {
+	call := QueryNumberByE164Build(args)
+	return qc.executeNamed(ctx, "queryNumberByE164", call)
+}
+
+func QueryNumberByE164Build(args QueryNumberByE164Args) string {
+	var b strings.Builder
+	b.WriteString("queryNumberByE164({")
+	b.WriteString("e164: ")
+	b.WriteString(fmt.Sprintf("%q", args.E164))
 	b.WriteString("})")
 	return b.String()
 }
