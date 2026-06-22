@@ -579,7 +579,15 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 
 	if useCache && result.Bundle != nil {
 		if ttl := e.cacheTTLForBundle(result.Bundle, plan.CacheHints); ttl > 0 {
-			e.cache.set(cacheKey, result, ttl)
+			// Record the concept(s) this result depends on so a graph
+			// write to any of them evicts the key (5.4). Only cache when
+			// we can name at least one dependency concept -- an
+			// un-invalidatable cached result would go stale on the next
+			// write with no way to drop it.
+			deps := dependencyConceptsForResult(plan, result.Bundle)
+			if len(deps) > 0 {
+				e.cache.set(cacheKey, result, ttl, deps)
+			}
 		}
 	}
 
@@ -1102,6 +1110,12 @@ func (e *MemQLEngine) run(ctx context.Context, markStarted func()) error {
 		e.aiRuntime.cache.startStatsEmitter(ctx, e.Logger, statsInterval)
 	}
 
+	// 5.4: wire result-cache invalidation to the graph event bus. A
+	// write to a concept evicts the dependent cached query results so a
+	// cached read can never go stale. Scoped to the engine lifecycle
+	// context (the subscription is torn down when ctx is cancelled).
+	e.StartCacheInvalidationSubscriber(ctx)
+
 	markStarted()
 
 	<-common.EnsureContext(ctx).Done()
@@ -1126,9 +1140,13 @@ func (e *MemQLEngine) invalidateCache() {
 	}
 
 	e.cache.mu.Lock()
-	defer e.cache.mu.Unlock()
-
 	e.cache.cache.Clear()
+	e.cache.mu.Unlock()
+
+	// Drop the dependency index too -- the keys it points at are gone.
+	e.cache.depMu.Lock()
+	e.cache.depIndex = make(map[string]map[string]struct{})
+	e.cache.depMu.Unlock()
 }
 
 // SetDatabaseGetter configures a function that returns the current DB handle.
