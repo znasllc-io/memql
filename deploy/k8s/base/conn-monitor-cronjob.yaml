@@ -38,7 +38,10 @@ spec:
           restartPolicy: Never
           containers:
             - name: conn-monitor
-              image: postgres:16-alpine
+              # postgres:16-alpine (stock, for psql) -- digest-pinned inline so
+              # the overlay digest-pin gate passes without a release-lockfile
+              # entry (this is an ops image, not a deployable memql artifact).
+              image: postgres@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
               envFrom:
                 - secretRef:
                     name: memql-secrets   # carries MEMORY_NODES_DATABASE_DIRECT_DSN
