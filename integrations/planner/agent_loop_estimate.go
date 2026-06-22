@@ -70,7 +70,7 @@ func planApprovalTokenThreshold() int {
 // estimatePlanCostTokens computes a deterministic up-front token estimate
 // for a Plan from the fields available at first entry: the goal length
 // and the phase outline (when the planner has already stamped one). It is
-// intentionally a heuristic -- InvokeSI returns no usage stats and the
+// intentionally a heuristic -- InvokeAI returns no usage stats and the
 // exact path isn't known up front -- but it is monotone: a longer goal or
 // more phases always estimates higher, which is what the approval
 // threshold keys on.

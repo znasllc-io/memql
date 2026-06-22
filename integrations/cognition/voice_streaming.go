@@ -16,7 +16,7 @@ import (
 // insert it as the committed utterance and the chat UI can render the
 // canonical reply alongside the audio).
 //
-// Compared to the batch generateSIResponse path the voice utterance
+// Compared to the batch generateAIResponse path the voice utterance
 // flow used before, time-to-first-audio drops from "wait for full
 // agent reply + one TTS call" (~3-4s) to "first sentence boundary +
 // streaming-TTS first chunk" (~1-1.5s). The bridge serializes audio

@@ -273,7 +273,7 @@ func TestReadMerge_LeaveSpace_PreservesParticipantFields(t *testing.T) {
 	// Seed an SI participant under the elevated system actor. The id is
 	// content-addressed on (agentId, spaceId), so capture the stored id the
 	// create returns and target the leave at exactly that row.
-	storedId := runMutation(t, ctx, eng, "mutationJoinSpaceAsSI", map[string]any{
+	storedId := runMutation(t, ctx, eng, "mutationJoinSpaceAsAI", map[string]any{
 		"spaceId":     "space-" + uniqueSuffix("leave"),
 		"agentId":     "agent-" + uniqueSuffix("leave"),
 		"displayName": "Faye",

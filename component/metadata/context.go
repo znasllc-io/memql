@@ -66,10 +66,10 @@ func SourceMetaFromContext(ctx context.Context) *SourceMeta {
 
 // --- SI metadata ---
 
-type siMetaKey struct{}
+type aiMetaKey struct{}
 
-// SIMeta carries synthetic intelligence execution context.
-type SIMeta struct {
+// AIMeta carries synthetic intelligence execution context.
+type AIMeta struct {
 	AgentId   string // Agent node ID
 	AgentName string // Agent display name
 	Provider  string // SI provider name (e.g., "claudeSonnet")
@@ -80,17 +80,17 @@ type SIMeta struct {
 	ToolCalls int    // Number of tool calls made
 }
 
-// ContextWithSIMeta injects SIMeta into the context.
-func ContextWithSIMeta(ctx context.Context, si *SIMeta) context.Context {
+// ContextWithAIMeta injects AIMeta into the context.
+func ContextWithAIMeta(ctx context.Context, si *AIMeta) context.Context {
 	if si == nil {
 		return ctx
 	}
-	return context.WithValue(ctx, siMetaKey{}, si)
+	return context.WithValue(ctx, aiMetaKey{}, si)
 }
 
-// SIMetaFromContext extracts SIMeta from the context.
-func SIMetaFromContext(ctx context.Context) *SIMeta {
-	si, _ := ctx.Value(siMetaKey{}).(*SIMeta)
+// AIMetaFromContext extracts AIMeta from the context.
+func AIMetaFromContext(ctx context.Context) *AIMeta {
+	si, _ := ctx.Value(aiMetaKey{}).(*AIMeta)
 	return si
 }
 

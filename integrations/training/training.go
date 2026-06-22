@@ -53,7 +53,7 @@
 // the embedding provider for vector compute, the same node_vectors
 // table + ON CONFLICT pattern for vector storage, the engine's
 // Execute() for reading the agent / writing the updated capabilities,
-// and engine.InvokeSI() for the distillation prompt.
+// and engine.InvokeAI() for the distillation prompt.
 package training
 
 import (
@@ -74,7 +74,7 @@ type Integration struct {
 	Logger            *slog.Logger
 	engine            memql.IntegrationEngineAccess
 	dbGetter          func() *sql.DB
-	embeddingProvider func(name string) (memql.EmbeddingSIProvider, error)
+	embeddingProvider func(name string) (memql.EmbeddingAIProvider, error)
 	partitionFunc     func(ctx context.Context) string
 }
 
@@ -89,7 +89,7 @@ func New(logger *slog.Logger) *Integration {
 func (i *Integration) SetEngine(e memql.IntegrationEngineAccess) { i.engine = e }
 func (i *Integration) SetDBGetter(fn func() *sql.DB)             { i.dbGetter = fn }
 func (i *Integration) SetEmbeddingProvider(
-	fn func(name string) (memql.EmbeddingSIProvider, error),
+	fn func(name string) (memql.EmbeddingAIProvider, error),
 ) {
 	i.embeddingProvider = fn
 }
@@ -804,7 +804,7 @@ func (i *Integration) embedDomainContent(
 	ctx context.Context,
 	partition string,
 	domainId string,
-	provider memql.EmbeddingSIProvider,
+	provider memql.EmbeddingAIProvider,
 ) (embedStats, error) {
 	stats := embedStats{}
 
@@ -1019,11 +1019,11 @@ func (i *Integration) distillSystemPrompt(
 		"skills":           skillsInput,
 	}
 
-	raw, err := i.engine.InvokeSI(ctx, "agentSystemPromptDistill", data)
+	raw, err := i.engine.InvokeAI(ctx, "agentSystemPromptDistill", data)
 	if err != nil {
 		return "", err
 	}
-	// InvokeSI typically returns the model's text response as a
+	// InvokeAI typically returns the model's text response as a
 	// string. Handle both the bare-string and map-wrapped shapes
 	// defensively (different providers + structured-output paths
 	// have surfaced both).

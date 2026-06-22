@@ -244,7 +244,7 @@ func (s *sandboxStepRegistry) resolveFunctionArgs(fn *automations.FunctionStepCo
 //
 // Why this differs from resolveFunctionArgs (memql#1727): an authored wrapper
 // step forwards the event as the BARE runtime-reference token `event`
-// (`logic autoJoinSI { event: event }`, the #418-pinned spelling). The live
+// (`logic autoJoinAI { event: event }`, the #418-pinned spelling). The live
 // FunctionExecutor's resolveArgsRefs special-cases that token (isRuntimeReference
 // recognises a bare `event`) and resolves it to the seeded event envelope
 // object. The mutation-style evaluateValue resolveFunctionArgs uses does NOT --
@@ -390,8 +390,8 @@ func (s *sandboxStepRegistry) meterRead(step *automations.Step, stepCtx *automat
 func (s *sandboxStepRegistry) meterAiCall(step *automations.Step, stepCtx *automations.StepContext) {
 	resolved := s.resolveFunctionArgs(step.Function, stepCtx)
 	promptTokens := estimateTokens(resolved)
-	outputTokens := defaultSiOutputTokens
-	cost := estimateSiCostUsd(promptTokens, outputTokens)
+	outputTokens := defaultAiOutputTokens
+	cost := estimateAiCostUsd(promptTokens, outputTokens)
 	s.mu.Lock()
 	s.aiCalls = append(s.aiCalls, memql.RecordedAiCall{
 		StepId:        step.ID,
@@ -447,15 +447,15 @@ const (
 	// charsPerToken is the rough chars-per-token ratio used to estimate prompt
 	// size from the resolved-arg JSON length (~4 chars/token for English).
 	charsPerToken = 4
-	// defaultSiOutputTokens is the assumed completion size for one ai() call
+	// defaultAiOutputTokens is the assumed completion size for one ai() call
 	// when actual usage is unknown.
-	defaultSiOutputTokens = 512
-	// siInputUsdPerMillion / siOutputUsdPerMillion are conservative default
+	defaultAiOutputTokens = 512
+	// aiInputUsdPerMillion / aiOutputUsdPerMillion are conservative default
 	// rates (a mid-tier chat model) for the estimate. They are intentionally a
 	// fixed heuristic, not a per-provider lookup -- the dry-run cannot know
 	// which provider a given ai() template will resolve to at run time.
-	siInputUsdPerMillion  = 0.50
-	siOutputUsdPerMillion = 1.50
+	aiInputUsdPerMillion  = 0.50
+	aiOutputUsdPerMillion = 1.50
 )
 
 // estimateTokens estimates the prompt-token count for a resolved arg map from
@@ -476,11 +476,11 @@ func estimateTokens(resolved map[string]any) int {
 	return n
 }
 
-// estimateSiCostUsd applies the default per-million rates to an estimated
+// estimateAiCostUsd applies the default per-million rates to an estimated
 // prompt/output token split.
-func estimateSiCostUsd(promptTokens, outputTokens int) float64 {
-	return siInputUsdPerMillion*float64(promptTokens)/1_000_000 +
-		siOutputUsdPerMillion*float64(outputTokens)/1_000_000
+func estimateAiCostUsd(promptTokens, outputTokens int) float64 {
+	return aiInputUsdPerMillion*float64(promptTokens)/1_000_000 +
+		aiOutputUsdPerMillion*float64(outputTokens)/1_000_000
 }
 
 // costEstimate aggregates the metered AI calls into the report's cost estimate

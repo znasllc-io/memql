@@ -19,9 +19,9 @@ type ChatMessage struct {
 	ToolCalls []ToolCall
 }
 
-// ChatSIProvider provides chat-based SI completion with proper message roles.
+// ChatAIProvider provides chat-based SI completion with proper message roles.
 // Providers that support multi-turn conversations should implement this interface.
-type ChatSIProvider interface {
+type ChatAIProvider interface {
 	// CallChat sends a conversation with proper message roles to the model.
 	// This is the preferred method for conversations as it preserves turn-taking context.
 	CallChat(ctx context.Context, messages []ChatMessage) (string, error)
@@ -84,8 +84,8 @@ type ToolCallingChatResult struct {
 	ToolCalls     []ToolCall
 }
 
-// ToolCallingChatSIProvider provides chat completion with tool calling support.
-type ToolCallingChatSIProvider interface {
+// ToolCallingChatAIProvider provides chat completion with tool calling support.
+type ToolCallingChatAIProvider interface {
 	CallChatWithTools(ctx context.Context, messages []ChatMessage, tools []ToolDefinition) (*ToolCallingChatResult, error)
 }
 
@@ -129,8 +129,8 @@ type VisionContent struct {
 	Data     []byte // Raw image bytes
 }
 
-// VisionSIProvider provides image understanding capabilities for SI models.
-type VisionSIProvider interface {
+// VisionAIProvider provides image understanding capabilities for SI models.
+type VisionAIProvider interface {
 	CallVision(ctx context.Context, prompt string, images []VisionContent) (string, error)
 }
 

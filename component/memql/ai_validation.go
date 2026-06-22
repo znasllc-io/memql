@@ -2,7 +2,7 @@ package memql
 
 import "fmt"
 
-func validateSIContext(expr ExpressionNode) error {
+func validateAIContext(expr ExpressionNode) error {
 	if expr == nil {
 		return nil
 	}
@@ -10,12 +10,12 @@ func validateSIContext(expr ExpressionNode) error {
 	case *AIExpression:
 		return fmt.Errorf("ai() cannot be used in filter, join, sort, or group expressions; use it only in projection")
 	case *LogicalExpression:
-		if err := validateSIContext(node.Left); err != nil {
+		if err := validateAIContext(node.Left); err != nil {
 			return err
 		}
-		return validateSIContext(node.Right)
+		return validateAIContext(node.Right)
 	case *RelationshipExpression:
-		return validateSIContext(node.Target)
+		return validateAIContext(node.Target)
 	default:
 		return nil
 	}

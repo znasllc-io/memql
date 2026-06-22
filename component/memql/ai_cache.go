@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// siResponseCache memoises LLM call results so repeated invocations
+// aiResponseCache memoises LLM call results so repeated invocations
 // of the same template + provider + fully-rendered prompt return
 // instantly. Hash-keyed (so "thanks!" vs "thanks" miss each other --
 // the new vector-classification cache primitive in Phase 1 of the
@@ -19,9 +19,9 @@ import (
 // Phase-0 instrumentation: atomic counters + a Stats() snapshot + a
 // background log emitter so we can baseline hit rates over a week
 // of dev usage. See docs/internal/planning/cache-audit-phase-0.md.
-type siResponseCache struct {
+type aiResponseCache struct {
 	mu      sync.RWMutex
-	entries map[string]siCacheEntry
+	entries map[string]aiCacheEntry
 
 	// Telemetry counters. Atomic so the Stats() snapshot doesn't
 	// need to grab the entries mutex (it just reads counters + a
@@ -33,12 +33,12 @@ type siResponseCache struct {
 	skippedSetsZero atomic.Int64 // set() called with ttl<=0
 }
 
-type siCacheEntry struct {
+type aiCacheEntry struct {
 	value     any
 	expiresAt time.Time
 }
 
-// SICacheStats is the Phase-0 telemetry snapshot. Fields are
+// AICacheStats is the Phase-0 telemetry snapshot. Fields are
 // counters since process start; subtract two snapshots to get a
 // rate over an interval. `Size` is the live entry count at the
 // moment Stats() ran.
@@ -46,7 +46,7 @@ type siCacheEntry struct {
 // Stats are expected to be written periodically to logs (every 5
 // minutes when the cache is non-empty) AND callable on-demand.
 // A future debug HTTP endpoint surfaces them for live inspection.
-type SICacheStats struct {
+type AICacheStats struct {
 	Hits            int64   `json:"hits"`
 	Misses          int64   `json:"misses"`
 	ExpiredOnRead   int64   `json:"expiredOnRead"`
@@ -56,13 +56,13 @@ type SICacheStats struct {
 	HitRatio        float64 `json:"hitRatio"`
 }
 
-func newSIResponseCache() *siResponseCache {
-	return &siResponseCache{
-		entries: make(map[string]siCacheEntry),
+func newAIResponseCache() *aiResponseCache {
+	return &aiResponseCache{
+		entries: make(map[string]aiCacheEntry),
 	}
 }
 
-func (c *siResponseCache) get(key string) (any, bool) {
+func (c *aiResponseCache) get(key string) (any, bool) {
 	if c == nil {
 		return nil, false
 	}
@@ -87,7 +87,7 @@ func (c *siResponseCache) get(key string) (any, bool) {
 	return cloneInterface(entry.value), true
 }
 
-func (c *siResponseCache) set(key string, value any, ttl time.Duration) {
+func (c *aiResponseCache) set(key string, value any, ttl time.Duration) {
 	if c == nil || ttl <= 0 {
 		if c != nil {
 			c.skippedSetsZero.Add(1)
@@ -95,7 +95,7 @@ func (c *siResponseCache) set(key string, value any, ttl time.Duration) {
 		return
 	}
 	c.mu.Lock()
-	c.entries[key] = siCacheEntry{
+	c.entries[key] = aiCacheEntry{
 		value:     cloneInterface(value),
 		expiresAt: time.Now().Add(ttl),
 	}
@@ -105,9 +105,9 @@ func (c *siResponseCache) set(key string, value any, ttl time.Duration) {
 
 // Stats returns a point-in-time snapshot of the cache's counters
 // and live size. Cheap (counter loads + one short RLock for size).
-func (c *siResponseCache) Stats() SICacheStats {
+func (c *aiResponseCache) Stats() AICacheStats {
 	if c == nil {
-		return SICacheStats{}
+		return AICacheStats{}
 	}
 	c.mu.RLock()
 	size := len(c.entries)
@@ -121,7 +121,7 @@ func (c *siResponseCache) Stats() SICacheStats {
 		ratio = float64(hits) / float64(total)
 	}
 
-	return SICacheStats{
+	return AICacheStats{
 		Hits:            hits,
 		Misses:          misses,
 		ExpiredOnRead:   c.expiredOnRead.Load(),
@@ -137,7 +137,7 @@ func (c *siResponseCache) Stats() SICacheStats {
 // non-zero) -- silent caches stay silent in the log. Cancellable
 // via the supplied context. Spawned by the engine bootstrap; one
 // goroutine per process.
-func (c *siResponseCache) startStatsEmitter(ctx context.Context, logger *slog.Logger, interval time.Duration) {
+func (c *aiResponseCache) startStatsEmitter(ctx context.Context, logger *slog.Logger, interval time.Duration) {
 	if c == nil || logger == nil {
 		return
 	}
@@ -156,7 +156,7 @@ func (c *siResponseCache) startStatsEmitter(ctx context.Context, logger *slog.Lo
 				if stats.Size == 0 && stats.Hits == 0 && stats.Misses == 0 {
 					continue
 				}
-				logger.Info("siCache: stats",
+				logger.Info("aiCache: stats",
 					"hits", stats.Hits,
 					"misses", stats.Misses,
 					"hitRatio", stats.HitRatio,
@@ -170,7 +170,7 @@ func (c *siResponseCache) startStatsEmitter(ctx context.Context, logger *slog.Lo
 	}()
 }
 
-func buildSICacheKey(templateId, provider, prompt string) string {
+func buildAICacheKey(templateId, provider, prompt string) string {
 	input := strings.TrimSpace(templateId) + "|" + strings.TrimSpace(provider) + "|" + prompt
 	return string(cacheIdEngine.FromString(input))
 }

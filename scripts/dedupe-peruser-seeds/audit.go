@@ -76,7 +76,7 @@ type agentRefConcept struct {
 //
 //   - Participants are reconciled by the main script's hard-delete
 //     pass (the doomed-participant set is then re-created by the
-//     autoJoinSI automation on next cluster boot at the canonical
+//     autoJoinAI automation on next cluster boot at the canonical
 //     agent id, per memql#273 / PR #274).
 //   - Utterances are historical chat content; rewriting / deleting
 //     them would lose user data. The audit surfaces the count so

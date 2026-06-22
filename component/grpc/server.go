@@ -69,7 +69,7 @@ func contextWithEnvelopeProvenance(ctx context.Context, envelope *memqlv1.MemqlC
 
 // stampEnvelopeProvenance copies the caller-ctx provenance into the
 // envelope before it's serialized + shipped to another node. Called
-// by cross-node forwarders (proxySI). No-op if ctx carries no
+// by cross-node forwarders (proxyAI). No-op if ctx carries no
 // provenance.
 func stampEnvelopeProvenance(ctx context.Context, envelope *memqlv1.MemqlClientMessage) {
 	if envelope == nil {
@@ -1233,7 +1233,7 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 	ctx = s.enrichContextWithMetadata(ctx, envelope)
 
 	// Re-hydrate cross-node provenance: when this envelope arrived via
-	// proxySI / SIForward (BFF -> worker), stampEnvelopeProvenance put
+	// proxyAI / SIForward (BFF -> worker), stampEnvelopeProvenance put
 	// the caller's provenance on envelope.Metadata. We attach it to ctx
 	// so engine.Execute uses it instead of stamping a fresh default.
 	ctx = contextWithEnvelopeProvenance(ctx, envelope)
@@ -1411,7 +1411,7 @@ func (s *streamSession) handleListTools(envelope *memqlv1.MemqlClientMessage, ms
 
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
 
-	if s.shouldProxySI(nodeTargetForListTools()) {
+	if s.shouldProxyAI(nodeTargetForListTools()) {
 		// Thread the voice session's tool-scope context across the proxy hop
 		// (#1448). ListTools is forwarded to the agent node, whose session has
 		// no local voiceAgentSpaceId / voiceAgentGaAgentId (those bind only on
@@ -1422,7 +1422,7 @@ func (s *streamSession) handleListTools(envelope *memqlv1.MemqlClientMessage, ms
 		// surface to the GA's tool list. No-op for non-voice callers (both
 		// fields empty), preserving their unscoped behaviour.
 		s.stampVoiceAgentScopeOnListTools(msg)
-		return s.proxySI(envelope, requestId, nodeTargetForListTools())
+		return s.proxyAI(envelope, requestId, nodeTargetForListTools())
 	}
 
 	if s.service.engine == nil {
@@ -1504,7 +1504,7 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 		return s.sendToolError(envelope.GetMessageId(), requestId, "tool name is required")
 	}
 
-	if s.shouldProxySI(nodeTargetForCallTool()) {
+	if s.shouldProxyAI(nodeTargetForCallTool()) {
 		// Thread the voice-agent execution context across the proxy hop (mirror
 		// of stampVoiceAgentScopeOnListTools #1448). CallTool runs on the agent
 		// node, whose session has no local voiceAgentSpaceId / voiceAgentGaRole;
@@ -1512,7 +1512,7 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 		// rejects GA-only tools (uiClick/operator, produceArtifact), and the
 		// client-tool relay has no space to scope to.
 		s.stampVoiceAgentScopeOnCallTool(msg)
-		return s.proxySI(envelope, requestId, nodeTargetForCallTool())
+		return s.proxyAI(envelope, requestId, nodeTargetForCallTool())
 	}
 
 	// Allow any authenticated user to call tools (user, manager, admin, owner)
@@ -1561,7 +1561,7 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 
 	ctx := s.stream.Context()
 	// Re-hydrate cross-node provenance for tool calls that arrived via
-	// proxySI / SIForward. Any row this tool writes via the engine will
+	// proxyAI / SIForward. Any row this tool writes via the engine will
 	// stamp the originating caller's provenance instead of a fresh
 	// per-tool default.
 	ctx = contextWithEnvelopeProvenance(ctx, envelope)

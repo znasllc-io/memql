@@ -75,7 +75,7 @@ func TestParseGoalComplexity(t *testing.T) {
 // --- loop routing (acceptance: trivial never reaches the decompose path) ---
 
 // triageFakeEngine extends the shared fakeEngine pattern: it answers the
-// goalComplexityTriage InvokeSI with a canned complexity and the
+// goalComplexityTriage InvokeAI with a canned complexity and the
 // queryPlanById Execute with a canned plan row, so we can assert which
 // prompts the loop calls.
 func newTriageLoop(t *testing.T, complexity, ownerAgentId string) (*PlannerAgentLoop, *fakeEngine) {
@@ -99,7 +99,7 @@ func newTriageLoop(t *testing.T, complexity, ownerAgentId string) (*PlannerAgent
 			}
 			return nil, nil
 		},
-		siResponder: func(templateId string, _ map[string]any) (any, error) {
+		aiResponder: func(templateId string, _ map[string]any) (any, error) {
 			if templateId == "goalComplexityTriage" {
 				return map[string]any{"complexity": complexity, "reasoning": "test"}, nil
 			}
@@ -218,7 +218,7 @@ func newProduceArtifactTriageLoop(t *testing.T, complexity, ownerAgentId string)
 			}
 			return nil, nil
 		},
-		siResponder: func(templateId string, _ map[string]any) (any, error) {
+		aiResponder: func(templateId string, _ map[string]any) (any, error) {
 			if templateId == "goalComplexityTriage" {
 				return map[string]any{"complexity": complexity, "reasoning": "test"}, nil
 			}

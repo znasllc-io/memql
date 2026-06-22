@@ -140,20 +140,20 @@ func LogicAuditEventRetentionSweepBuild(args LogicAuditEventRetentionSweepArgs) 
 	return b.String()
 }
 
-// LogicAutoJoinSI -- Triggered when a v1:cognition:space is created with status='active'. Auto-joins the creator's currently-active assistant as a v1:cognition:participant on the new space, with forUserId=creator and isGroupGA=true (so the participant guard prevents non-elevated callers from removing it via the Roster tab). This is the ONLY AI participant a space carries (maxAgents=1, one-assistant model copresent #124). Idempotent. Emits 'si.auto-joined' for observability.
-type LogicAutoJoinSIArgs struct {
+// LogicAutoJoinAI -- Triggered when a v1:cognition:space is created with status='active'. Auto-joins the creator's currently-active assistant as a v1:cognition:participant on the new space, with forUserId=creator and isGroupGA=true (so the participant guard prevents non-elevated callers from removing it via the Roster tab). This is the ONLY AI participant a space carries (maxAgents=1, one-assistant model copresent #124). Idempotent. Emits 'si.auto-joined' for observability.
+type LogicAutoJoinAIArgs struct {
 	Event map[string]any
 }
 
-// LogicAutoJoinSI calls the engine logic logicAutoJoinSI.
-func (qc *QueryClient) LogicAutoJoinSI(ctx context.Context, args LogicAutoJoinSIArgs) (*Result, error) {
-	call := LogicAutoJoinSIBuild(args)
-	return qc.executeNamed(ctx, "logicAutoJoinSI", call)
+// LogicAutoJoinAI calls the engine logic logicAutoJoinAI.
+func (qc *QueryClient) LogicAutoJoinAI(ctx context.Context, args LogicAutoJoinAIArgs) (*Result, error) {
+	call := LogicAutoJoinAIBuild(args)
+	return qc.executeNamed(ctx, "logicAutoJoinAI", call)
 }
 
-func LogicAutoJoinSIBuild(args LogicAutoJoinSIArgs) string {
+func LogicAutoJoinAIBuild(args LogicAutoJoinAIArgs) string {
 	var b strings.Builder
-	b.WriteString("logicAutoJoinSI({")
+	b.WriteString("logicAutoJoinAI({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
@@ -295,7 +295,7 @@ func LogicEnsureDailySpaceOnAuthSessionBuild(args LogicEnsureDailySpaceOnAuthSes
 	return b.String()
 }
 
-// LogicGenerateResponse -- Generates and inserts an SI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via mutationSendTextUtterance, and bumps participant presence to idle. Idempotent via queryHasSIResponseForReply.
+// LogicGenerateResponse -- Generates and inserts an SI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via mutationSendTextUtterance, and bumps participant presence to idle. Idempotent via queryHasAIResponseForReply.
 type LogicGenerateResponseArgs struct {
 	Event map[string]any
 }

@@ -12,9 +12,9 @@ const (
 	defaultCacheSize          = int64(1024)
 	defaultCacheMaxTTLSeconds = int64(0)
 
-	defaultSICacheEnabled    = true
-	defaultSICacheMaxSeconds = 60
-	maxSICacheSeconds        = 300
+	defaultAICacheEnabled    = true
+	defaultAICacheMaxSeconds = 60
+	maxAICacheSeconds        = 300
 
 	// Agent tool loop: one iteration = one LLM round, during which the
 	// model may emit up to maxToolCallsPerIt tool calls. A UI-driving
@@ -37,14 +37,14 @@ const (
 	// measured at 54 iterations in practice. 120 gives ~2x headroom
 	// for longer multi-step chains and future teaching sessions with
 	// explanatory pauses. Override via MEMQL_TOOL_LOOP_MAX_ITERATIONS.
-	defaultSIToolLoopMaxIterations     = 120
-	defaultSIToolLoopMaxToolCallsPerIt = 8
+	defaultAIToolLoopMaxIterations     = 120
+	defaultAIToolLoopMaxToolCallsPerIt = 8
 	// Upper bound sanity-checker. Teaching sessions may plausibly
 	// climb past 100 iterations when chaining many narrate-ask-click
 	// cycles; 200 is the ceiling before we assume the agent is stuck
 	// in a loop and bail.
-	maxSIToolLoopMaxIterations     = 200
-	maxSIToolLoopMaxToolCallsPerIt = 12
+	maxAIToolLoopMaxIterations     = 200
+	maxAIToolLoopMaxToolCallsPerIt = 12
 
 	defaultWebhookTimeoutSeconds = 30
 	maxWebhookTimeoutSeconds     = 600
@@ -53,14 +53,14 @@ const (
 	envMaxWindow            = "MEMORY_ENGINE_MAX_WINDOW"
 	envCacheSize            = "MEMORY_ENGINE_CACHE_MAX_ITEMS"
 	envCacheMaxTTL          = "CACHE_MAX_TTL"
-	envSICacheDefaultEnable = "MEMQL_SI_CACHE_DEFAULT_ENABLED"
-	envSICacheMaxSeconds    = "MEMQL_SI_CACHE_MAX_SECONDS"
+	envAICacheDefaultEnable = "MEMQL_SI_CACHE_DEFAULT_ENABLED"
+	envAICacheMaxSeconds    = "MEMQL_SI_CACHE_MAX_SECONDS"
 	// Canonical names for the unified tool-loop knobs. The agent
 	// streaming loop in integrations/agent/streaming.go reads the same
 	// two env vars so there's exactly one place to tune walkthrough
 	// length + per-iteration call fanout.
-	envSIToolLoopMaxIterations     = "MEMQL_TOOL_LOOP_MAX_ITERATIONS"
-	envSIToolLoopMaxToolCallsPerIt = "MEMQL_TOOL_LOOP_MAX_TOOL_CALLS_PER_ITERATION"
+	envAIToolLoopMaxIterations     = "MEMQL_TOOL_LOOP_MAX_ITERATIONS"
+	envAIToolLoopMaxToolCallsPerIt = "MEMQL_TOOL_LOOP_MAX_TOOL_CALLS_PER_ITERATION"
 	envWebhookTimeoutSeconds       = "MEMQL_WEBHOOK_TIMEOUT_SECONDS"
 	envWebhookAllowedHosts         = "MEMQL_WEBHOOK_ALLOWED_HOSTS"
 )
@@ -70,13 +70,13 @@ type engineConfig struct {
 	MaxWindow                   int
 	CacheSize                   int64
 	CacheMaxTTLSeconds          int64
-	SIToolLoopMaxIterations     int
-	SIToolLoopMaxToolCallsPerIt int
+	AIToolLoopMaxIterations     int
+	AIToolLoopMaxToolCallsPerIt int
 	WebhookTimeoutSeconds       int
 	WebhookAllowedHosts         []string
 }
 
-type siCacheConfig struct {
+type aiCacheConfig struct {
 	DefaultEnabled bool
 	MaxTTLSeconds  int
 }
@@ -87,8 +87,8 @@ func loadEngineConfigFromEnv() engineConfig {
 		MaxWindow:                   defaultMaxWindow,
 		CacheSize:                   defaultCacheSize,
 		CacheMaxTTLSeconds:          defaultCacheMaxTTLSeconds,
-		SIToolLoopMaxIterations:     defaultSIToolLoopMaxIterations,
-		SIToolLoopMaxToolCallsPerIt: defaultSIToolLoopMaxToolCallsPerIt,
+		AIToolLoopMaxIterations:     defaultAIToolLoopMaxIterations,
+		AIToolLoopMaxToolCallsPerIt: defaultAIToolLoopMaxToolCallsPerIt,
 		WebhookTimeoutSeconds:       defaultWebhookTimeoutSeconds,
 	}
 
@@ -116,20 +116,20 @@ func loadEngineConfigFromEnv() engineConfig {
 		}
 	}
 
-	if value, ok := os.LookupEnv(envSIToolLoopMaxIterations); ok {
+	if value, ok := os.LookupEnv(envAIToolLoopMaxIterations); ok {
 		if parsed, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
-			cfg.SIToolLoopMaxIterations = clampSIToolLoopMaxIterations(parsed)
+			cfg.AIToolLoopMaxIterations = clampAIToolLoopMaxIterations(parsed)
 		}
 	}
 
-	if value, ok := os.LookupEnv(envSIToolLoopMaxToolCallsPerIt); ok {
+	if value, ok := os.LookupEnv(envAIToolLoopMaxToolCallsPerIt); ok {
 		if parsed, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
-			cfg.SIToolLoopMaxToolCallsPerIt = clampSIToolLoopMaxToolCallsPerIt(parsed)
+			cfg.AIToolLoopMaxToolCallsPerIt = clampAIToolLoopMaxToolCallsPerIt(parsed)
 		}
 	}
 
-	cfg.SIToolLoopMaxIterations = clampSIToolLoopMaxIterations(cfg.SIToolLoopMaxIterations)
-	cfg.SIToolLoopMaxToolCallsPerIt = clampSIToolLoopMaxToolCallsPerIt(cfg.SIToolLoopMaxToolCallsPerIt)
+	cfg.AIToolLoopMaxIterations = clampAIToolLoopMaxIterations(cfg.AIToolLoopMaxIterations)
+	cfg.AIToolLoopMaxToolCallsPerIt = clampAIToolLoopMaxToolCallsPerIt(cfg.AIToolLoopMaxToolCallsPerIt)
 
 	if value, ok := os.LookupEnv(envWebhookTimeoutSeconds); ok {
 		if parsed, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
@@ -151,13 +151,13 @@ func loadEngineConfigFromEnv() engineConfig {
 	return cfg
 }
 
-func loadSICacheConfigFromEnv() siCacheConfig {
-	cfg := siCacheConfig{
-		DefaultEnabled: defaultSICacheEnabled,
-		MaxTTLSeconds:  defaultSICacheMaxSeconds,
+func loadAICacheConfigFromEnv() aiCacheConfig {
+	cfg := aiCacheConfig{
+		DefaultEnabled: defaultAICacheEnabled,
+		MaxTTLSeconds:  defaultAICacheMaxSeconds,
 	}
 
-	if value, ok := os.LookupEnv(envSICacheDefaultEnable); ok {
+	if value, ok := os.LookupEnv(envAICacheDefaultEnable); ok {
 		switch strings.ToLower(strings.TrimSpace(value)) {
 		case "1", "true", "yes", "on":
 			cfg.DefaultEnabled = true
@@ -166,42 +166,42 @@ func loadSICacheConfigFromEnv() siCacheConfig {
 		}
 	}
 
-	if value, ok := os.LookupEnv(envSICacheMaxSeconds); ok {
+	if value, ok := os.LookupEnv(envAICacheMaxSeconds); ok {
 		if parsed, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
 			cfg.MaxTTLSeconds = parsed
 		}
 	}
 
-	cfg.MaxTTLSeconds = clampSICacheSeconds(cfg.MaxTTLSeconds)
+	cfg.MaxTTLSeconds = clampAICacheSeconds(cfg.MaxTTLSeconds)
 	return cfg
 }
 
-func clampSICacheSeconds(value int) int {
+func clampAICacheSeconds(value int) int {
 	if value <= 0 {
 		return 0
 	}
-	if value > maxSICacheSeconds {
-		return maxSICacheSeconds
+	if value > maxAICacheSeconds {
+		return maxAICacheSeconds
 	}
 	return value
 }
 
-func clampSIToolLoopMaxIterations(value int) int {
+func clampAIToolLoopMaxIterations(value int) int {
 	if value <= 0 {
-		return defaultSIToolLoopMaxIterations
+		return defaultAIToolLoopMaxIterations
 	}
-	if value > maxSIToolLoopMaxIterations {
-		return maxSIToolLoopMaxIterations
+	if value > maxAIToolLoopMaxIterations {
+		return maxAIToolLoopMaxIterations
 	}
 	return value
 }
 
-func clampSIToolLoopMaxToolCallsPerIt(value int) int {
+func clampAIToolLoopMaxToolCallsPerIt(value int) int {
 	if value <= 0 {
-		return defaultSIToolLoopMaxToolCallsPerIt
+		return defaultAIToolLoopMaxToolCallsPerIt
 	}
-	if value > maxSIToolLoopMaxToolCallsPerIt {
-		return maxSIToolLoopMaxToolCallsPerIt
+	if value > maxAIToolLoopMaxToolCallsPerIt {
+		return maxAIToolLoopMaxToolCallsPerIt
 	}
 	return value
 }

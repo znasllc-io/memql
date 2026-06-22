@@ -47,9 +47,9 @@ type MemQLEngine struct {
 	dbMu                    sync.RWMutex
 	initialized             bool
 	config                  engineConfig
-	siCacheConfig           siCacheConfig
+	aiCacheConfig           aiCacheConfig
 	cache                   *resultCache
-	siRuntime               *siRuntime
+	aiRuntime               *aiRuntime
 	eventBus                *events.Bus
 	serviceVersion          string
 	builtinExecutorHandlers map[string]builtinExecutorHandler
@@ -104,7 +104,7 @@ const ComponentName = common.ComponentName("memQLEngine")
 // New constructs a MemQLEngine instance backed by the default implementation.
 func New(db *bun.DB, args ...component.Arg) (*MemQLEngine, error) {
 	cfg := loadEngineConfigFromEnv()
-	aiCacheCfg := loadSICacheConfigFromEnv()
+	aiCacheCfg := loadAICacheConfigFromEnv()
 	cache, err := newResultCache(cfg.CacheSize)
 	if err != nil {
 		return nil, fmt.Errorf("memory engine cache initialization failed: %w", err)
@@ -124,7 +124,7 @@ func New(db *bun.DB, args ...component.Arg) (*MemQLEngine, error) {
 		db:            db,
 		initialized:   false,
 		config:        cfg,
-		siCacheConfig: aiCacheCfg,
+		aiCacheConfig: aiCacheCfg,
 		cache:         cache,
 		integrations:  newIntegrationRegistry(),
 	}
@@ -156,8 +156,8 @@ func (e *MemQLEngine) LogicRunner() LogicRunner {
 // SetEventBus wires the event bus used for publishing events.
 func (e *MemQLEngine) SetEventBus(bus *events.Bus) {
 	e.eventBus = bus
-	if e.siRuntime != nil {
-		e.siRuntime.SetEventBus(bus)
+	if e.aiRuntime != nil {
+		e.aiRuntime.SetEventBus(bus)
 	}
 }
 
@@ -569,7 +569,7 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		if e.specs != nil {
 			specs = e.specs.Snapshot()
 		}
-		shaped, err := applyShapeTemplate(ctx, result.Bundle, plan.ShapeTemplate, e.siRuntime, specs)
+		shaped, err := applyShapeTemplate(ctx, result.Bundle, plan.ShapeTemplate, e.aiRuntime, specs)
 		if err != nil {
 			return nil, err
 		}
@@ -1098,8 +1098,8 @@ func (e *MemQLEngine) run(ctx context.Context, markStarted func()) error {
 	if e.cache != nil {
 		e.cache.startStatsEmitter(ctx, e.Logger, statsInterval)
 	}
-	if e.siRuntime != nil && e.siRuntime.cache != nil {
-		e.siRuntime.cache.startStatsEmitter(ctx, e.Logger, statsInterval)
+	if e.aiRuntime != nil && e.aiRuntime.cache != nil {
+		e.aiRuntime.cache.startStatsEmitter(ctx, e.Logger, statsInterval)
 	}
 
 	markStarted()

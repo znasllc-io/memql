@@ -94,7 +94,7 @@ func strandedRow(planId, kind, createdAt string) map[string]any {
 }
 
 // watchdogEngine answers the candidate query with the given rows and routes
-// every other query (queryPlanById during recovery, the InvokeSI gate, the
+// every other query (queryPlanById during recovery, the InvokeAI gate, the
 // mutations) through the shared fakeEngine so recovery runs without panicking.
 func newWatchdogEngine(candidate any) *fakeEngine {
 	return &fakeEngine{
@@ -105,7 +105,7 @@ func newWatchdogEngine(candidate any) *fakeEngine {
 			case strings.Contains(q, "queryPlanById"):
 				// Recovery re-loads the plan; hand back a queued userGoal so
 				// invokeAndDispatch proceeds into triage/gate (which, with a
-				// nil siResponder, parks/fails harmlessly -- we only assert
+				// nil aiResponder, parks/fails harmlessly -- we only assert
 				// that recovery was ATTEMPTED, i.e. the plan was re-loaded).
 				return candidatePlanRows(map[string]any{
 					"id": "v1:planner:plan:p1", "kind": "userGoal", "status": "queued",

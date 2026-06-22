@@ -43,7 +43,7 @@ type Integration struct {
 	Logger            *slog.Logger
 	engine            memql.IntegrationEngineAccess
 	dbGetter          func() *sql.DB
-	embeddingProvider func(name string) (memql.EmbeddingSIProvider, error)
+	embeddingProvider func(name string) (memql.EmbeddingAIProvider, error)
 	partitionFunc     func(ctx context.Context) string
 }
 
@@ -66,7 +66,7 @@ func (i *Integration) SetDBGetter(fn func() *sql.DB) { i.dbGetter = fn }
 // SetEmbeddingProvider wires the embedding provider resolver. The knowledge
 // integration embeds chunks at ingest time and the query at lookup time;
 // both go through the caller-named provider (default: embedding3Small).
-func (i *Integration) SetEmbeddingProvider(fn func(name string) (memql.EmbeddingSIProvider, error)) {
+func (i *Integration) SetEmbeddingProvider(fn func(name string) (memql.EmbeddingAIProvider, error)) {
 	i.embeddingProvider = fn
 }
 

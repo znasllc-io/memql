@@ -34,11 +34,11 @@ func IsSupportedMIMEType(mimeType string) bool {
 
 // DefaultProcessor dispatches extraction to type-specific handlers.
 type DefaultProcessor struct {
-	visionProvider common.VisionSIProvider
+	visionProvider common.VisionAIProvider
 }
 
-// NewDefaultProcessor creates a Processor that uses the provided VisionSIProvider for image description.
-func NewDefaultProcessor(visionProvider common.VisionSIProvider) *DefaultProcessor {
+// NewDefaultProcessor creates a Processor that uses the provided VisionAIProvider for image description.
+func NewDefaultProcessor(visionProvider common.VisionAIProvider) *DefaultProcessor {
 	return &DefaultProcessor{visionProvider: visionProvider}
 }
 

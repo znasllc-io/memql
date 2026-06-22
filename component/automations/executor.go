@@ -987,7 +987,7 @@ func (e *Executor) createSystemSecretResolver() VariableResolver {
 // concept's @scope to pick the right partition prefix.
 //
 // Required wiring: without this, automation-derived ids (like
-// autoJoinSI's `concat("ga-", hash(canonicalId(ctx.actor,
+// autoJoinAI's `concat("ga-", hash(canonicalId(ctx.actor,
 // "v1:identity:user")))`) would fall back to identity-mapping the
 // value, producing different hashes than the mutation-side path
 // when the input is a bare slug -- defeating the whole point of

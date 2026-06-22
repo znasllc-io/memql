@@ -98,7 +98,7 @@ type MessageClassification struct {
 }
 
 // messageClassificationSchemaJSON is the JSON Schema the LLM is
-// constrained to. strict=true is enforced at the InvokeSIStructured
+// constrained to. strict=true is enforced at the InvokeAIStructured
 // call site.
 //
 // Schema version embedded in description so cache invalidation can
@@ -219,7 +219,7 @@ func (mc *messageClassifier) Classify(
 		"agentRoster":   string(rosterJSON),
 	}
 
-	raw, err := mc.engine.InvokeSIStructured(
+	raw, err := mc.engine.InvokeAIStructured(
 		ctx,
 		"messageClassification",
 		data,

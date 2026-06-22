@@ -16,7 +16,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	e.providers = nil
 	e.functions = nil
 	e.tools = nil
-	e.siRuntime = nil
+	e.aiRuntime = nil
 
 	if concepts == nil {
 		return fmt.Errorf("concept registry is required")
@@ -277,7 +277,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 		return e.ResolveSystemVariable(ctx, name)
 	})
 
-	providerRegistry, err := loadSIProviders(e.Logger)
+	providerRegistry, err := loadAIProviders(e.Logger)
 	if err != nil {
 		return err
 	}
@@ -290,7 +290,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 		e.Logger.Warn("unified provider loader returned an error; legacy covers gap",
 			"component", "memql.engine", "error", ulErr)
 	}
-	policyRegistry, err := loadSIPolicies(e.Logger)
+	policyRegistry, err := loadAIPolicies(e.Logger)
 	if err != nil {
 		return err
 	}
@@ -301,9 +301,9 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	e.prompts = promptRegistry
 	e.providers = providerRegistry
 	e.policies = policyRegistry
-	e.siRuntime = newSIRuntime(e.Logger, promptRegistry, providerRegistry, e.siCacheConfig)
+	e.aiRuntime = newAIRuntime(e.Logger, promptRegistry, providerRegistry, e.aiCacheConfig)
 
-	// ReloadSIProviders is exposed below so dev workflows that wipe
+	// ReloadAIProviders is exposed below so dev workflows that wipe
 	// the database before re-seeding (make dev-refresh) can refresh
 	// provider auth resolution AFTER seeding completes -- without
 	// this hook, providers eager-load before secrets exist in
@@ -329,7 +329,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	return nil
 }
 
-// ReloadSIProviders re-loads the SI provider registry from .memql
+// ReloadAIProviders re-loads the SI provider registry from .memql
 // files and re-resolves auth placeholders. Intended for the dev-
 // refresh workflow: after wiping the database and re-seeding
 // secrets, providers that eager-loaded against an empty concept

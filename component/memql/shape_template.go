@@ -46,12 +46,12 @@ type shapeRelationFunc struct {
 
 func (*shapeRelationFunc) isShapeTemplate() {}
 
-type shapeSIValue struct {
+type shapeAIValue struct {
 	Invocation *AIInvocation
 	Data       shapeTemplate
 }
 
-func (*shapeSIValue) isShapeTemplate() {}
+func (*shapeAIValue) isShapeTemplate() {}
 
 // shapeMatchExpr represents a match() conditional expression with case branches and optional default.
 type shapeMatchExpr struct {
@@ -95,7 +95,7 @@ type shapeJSONFunc struct {
 
 func (*shapeJSONFunc) isShapeTemplate() {}
 
-func applyShapeTemplate(ctx context.Context, bundle *memqlv1.GraphBundle, tmpl shapeTemplate, runtime *siRuntime, specs map[string]*Spec) (any, error) {
+func applyShapeTemplate(ctx context.Context, bundle *memqlv1.GraphBundle, tmpl shapeTemplate, runtime *aiRuntime, specs map[string]*Spec) (any, error) {
 	if tmpl == nil || bundle == nil {
 		return bundle, nil
 	}
@@ -198,7 +198,7 @@ func (g *shapeGraph) node(id string) *memqlv1.MemoryNode {
 	return g.nodes[strings.TrimSpace(id)]
 }
 
-func (g *shapeGraph) renderTemplate(ctx context.Context, nodeId string, tmpl shapeTemplate, runtime *siRuntime, visited map[string]struct{}) (any, error) {
+func (g *shapeGraph) renderTemplate(ctx context.Context, nodeId string, tmpl shapeTemplate, runtime *aiRuntime, visited map[string]struct{}) (any, error) {
 	switch typed := tmpl.(type) {
 	case *shapeObject:
 		result := make(map[string]any, len(typed.Fields))
@@ -230,8 +230,8 @@ func (g *shapeGraph) renderTemplate(ctx context.Context, nodeId string, tmpl sha
 		return buildNodeProjection(g.node(nodeId), typed.Fields), nil
 	case *shapeRelationFunc:
 		return g.renderRelation(ctx, nodeId, typed, runtime, visited)
-	case *shapeSIValue:
-		return g.renderSIValue(ctx, nodeId, typed, runtime, visited)
+	case *shapeAIValue:
+		return g.renderAIValue(ctx, nodeId, typed, runtime, visited)
 	case *shapeMatchExpr:
 		return g.renderMatchExpr(ctx, nodeId, typed, runtime, visited)
 	case *shapeJSONFunc:
@@ -241,7 +241,7 @@ func (g *shapeGraph) renderTemplate(ctx context.Context, nodeId string, tmpl sha
 	}
 }
 
-func (g *shapeGraph) renderRelation(ctx context.Context, nodeId string, rel *shapeRelationFunc, runtime *siRuntime, visited map[string]struct{}) ([]any, error) {
+func (g *shapeGraph) renderRelation(ctx context.Context, nodeId string, rel *shapeRelationFunc, runtime *aiRuntime, visited map[string]struct{}) ([]any, error) {
 	edgeTypes := relationEdgeTypes(rel.Relation)
 	targets := make([]string, 0)
 	for _, edgeType := range edgeTypes {
@@ -274,7 +274,7 @@ func (g *shapeGraph) renderRelation(ctx context.Context, nodeId string, rel *sha
 	return results, nil
 }
 
-func (g *shapeGraph) renderSIValue(ctx context.Context, nodeId string, value *shapeSIValue, runtime *siRuntime, visited map[string]struct{}) (any, error) {
+func (g *shapeGraph) renderAIValue(ctx context.Context, nodeId string, value *shapeAIValue, runtime *aiRuntime, visited map[string]struct{}) (any, error) {
 	if value == nil || value.Invocation == nil {
 		return nil, fmt.Errorf("ai() invocation is not defined")
 	}
@@ -296,7 +296,7 @@ func (g *shapeGraph) renderSIValue(ctx context.Context, nodeId string, value *sh
 
 // renderJSONFunc renders the inner template and serializes the result to a JSON string.
 // This is useful for embedding structured data as JSON strings in AI prompt templates.
-func (g *shapeGraph) renderJSONFunc(ctx context.Context, nodeId string, fn *shapeJSONFunc, runtime *siRuntime, visited map[string]struct{}) (string, error) {
+func (g *shapeGraph) renderJSONFunc(ctx context.Context, nodeId string, fn *shapeJSONFunc, runtime *aiRuntime, visited map[string]struct{}) (string, error) {
 	if fn == nil || fn.Inner == nil {
 		return "null", nil
 	}
@@ -317,7 +317,7 @@ func (g *shapeGraph) renderJSONFunc(ctx context.Context, nodeId string, fn *shap
 // renderMatchExpr evaluates a match() expression with short-circuit evaluation.
 // It iterates through case branches in order, returning the value of the first matching condition.
 // Falls back to default if no case matches, or returns nil if no default is provided.
-func (g *shapeGraph) renderMatchExpr(ctx context.Context, nodeId string, match *shapeMatchExpr, runtime *siRuntime, visited map[string]struct{}) (any, error) {
+func (g *shapeGraph) renderMatchExpr(ctx context.Context, nodeId string, match *shapeMatchExpr, runtime *aiRuntime, visited map[string]struct{}) (any, error) {
 	if match == nil {
 		return nil, nil
 	}
@@ -356,7 +356,7 @@ func (g *shapeGraph) renderMatchExpr(ctx context.Context, nodeId string, match *
 }
 
 // evaluateCondition evaluates a match case condition against the current node.
-func (g *shapeGraph) evaluateCondition(ctx context.Context, nodeId string, cond shapeCondition, runtime *siRuntime, visited map[string]struct{}) (bool, error) {
+func (g *shapeGraph) evaluateCondition(ctx context.Context, nodeId string, cond shapeCondition, runtime *aiRuntime, visited map[string]struct{}) (bool, error) {
 	switch typed := cond.(type) {
 	case *shapeSpecCondition:
 		return g.evaluateSpecCondition(nodeId, typed)
@@ -389,7 +389,7 @@ func (g *shapeGraph) evaluateSpecCondition(nodeId string, cond *shapeSpecConditi
 }
 
 // evaluateComparisonCondition evaluates an inline comparison like node("field") == "value".
-func (g *shapeGraph) evaluateComparisonCondition(ctx context.Context, nodeId string, cond *shapeComparisonCondition, runtime *siRuntime, visited map[string]struct{}) (bool, error) {
+func (g *shapeGraph) evaluateComparisonCondition(ctx context.Context, nodeId string, cond *shapeComparisonCondition, runtime *aiRuntime, visited map[string]struct{}) (bool, error) {
 	if cond == nil {
 		return false, nil
 	}
@@ -873,7 +873,7 @@ func writeShapeSignature(builder *strings.Builder, tmpl shapeTemplate) {
 		builder.WriteString("|")
 		writeShapeSignature(builder, typed.Template)
 		builder.WriteString(")")
-	case *shapeSIValue:
+	case *shapeAIValue:
 		builder.WriteString("ai(")
 		if typed.Invocation != nil {
 			builder.WriteString(typed.Invocation.TemplateId)

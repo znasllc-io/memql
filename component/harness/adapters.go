@@ -35,7 +35,7 @@ type Executor interface {
 }
 
 // InnerLoop is the inner-loop dispatch surface (#584). The prod
-// implementation wraps engine.InvokeSIChatWithFilteredToolsOpts; we keep
+// implementation wraps engine.InvokeAIChatWithFilteredToolsOpts; we keep
 // it behind a func type so the harness package does not import the heavy
 // engine package and so tests can substitute a stub.
 type InnerLoop func(ctx context.Context, step StepView) (result map[string]any, toolCalls int, err error)

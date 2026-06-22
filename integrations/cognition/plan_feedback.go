@@ -75,7 +75,7 @@ type feedbackRouteResult struct {
 }
 
 // cognitionFeedbackRouteSchemaJSON constrains the classifier output. strict=true
-// is enforced at the InvokeSIStructured boundary.
+// is enforced at the InvokeAIStructured boundary.
 const cognitionFeedbackRouteSchemaJSON = `{
   "type": "object",
   "additionalProperties": false,
@@ -165,8 +165,8 @@ func (c *CognitionIntegration) announceFeedbackRequest(ctx context.Context, plan
 		return
 	}
 
-	siParticipant, err := c.findSIParticipant(ctx, plan.SpaceId)
-	if err != nil || siParticipant == nil || strings.TrimSpace(siParticipant.ID) == "" {
+	aiParticipant, err := c.findAIParticipant(ctx, plan.SpaceId)
+	if err != nil || aiParticipant == nil || strings.TrimSpace(aiParticipant.ID) == "" {
 		c.Logger.Warn("cognition: no SI participant to announce plan feedback; skipping",
 			"error", err, "spaceId", plan.SpaceId, "planId", plan.ID)
 		return
@@ -182,7 +182,7 @@ func (c *CognitionIntegration) announceFeedbackRequest(ctx context.Context, plan
 		"feedbackAnnouncePlanId": plan.ID,
 		"feedbackReason":         plan.FeedbackReason,
 	}
-	if err := c.insertSIResponse(ctx, plan.SpaceId, siParticipant, "", "", message, source, nil, nil); err != nil {
+	if err := c.insertAIResponse(ctx, plan.SpaceId, aiParticipant, "", "", message, source, nil, nil); err != nil {
 		c.Logger.Warn("cognition: failed to post plan-feedback announcement",
 			"error", err, "spaceId", plan.SpaceId, "planId", plan.ID)
 		return
@@ -308,7 +308,7 @@ func (c *CognitionIntegration) classifyFeedbackRoute(ctx context.Context, plan *
 		"options":        optionsJSON,
 		"lastAgentText":  lastAgentText,
 	}
-	raw, err := c.engine.InvokeSIStructured(
+	raw, err := c.engine.InvokeAIStructured(
 		ctx,
 		"cognitionFeedbackRoute",
 		data,
@@ -348,15 +348,15 @@ func (c *CognitionIntegration) attachPlanFeedback(ctx context.Context, planId, f
 // confirmPlanFeedbackRouted posts a brief assistant confirmation that the
 // feedback was received and the work is resuming. Best-effort.
 func (c *CognitionIntegration) confirmPlanFeedbackRouted(ctx context.Context, spaceId string) {
-	siParticipant, err := c.findSIParticipant(ctx, spaceId)
-	if err != nil || siParticipant == nil || strings.TrimSpace(siParticipant.ID) == "" {
+	aiParticipant, err := c.findAIParticipant(ctx, spaceId)
+	if err != nil || aiParticipant == nil || strings.TrimSpace(aiParticipant.ID) == "" {
 		return
 	}
 	source := map[string]string{
 		"outputMethod": "text",
 		"kind":         "planFeedbackAck",
 	}
-	if err := c.insertSIResponse(ctx, spaceId, siParticipant, "", "",
+	if err := c.insertAIResponse(ctx, spaceId, aiParticipant, "", "",
 		"Got it -- I've passed that along and the task is picking back up.", source, nil, nil); err != nil {
 		c.Logger.Debug("cognition: failed to post plan-feedback confirmation", "error", err, "spaceId", spaceId)
 	}

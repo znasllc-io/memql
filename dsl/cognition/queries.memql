@@ -73,7 +73,7 @@ query context queryLatestSpaceContextSnapshot {
 // "Hi everyone, I am X" introduction. Zero means it really is a
 // first meeting and a brief warm intro is appropriate.
 //
-// Why this query exists: greetOnJoinSI's "have we already greeted?"
+// Why this query exists: greetOnJoinAI's "have we already greeted?"
 // check is space-scoped (queryGreetingUtterance filters by spaceId).
 // The over-introduction symptom -- agent re-introduces in every new
 // space even though the user has talked to them many times -- is
@@ -325,7 +325,7 @@ query participant queryGroupGAForSpace {
   shape   participantFull
 }
 
-// ---- queries/v1/cognition/hasSIResponseForReply.memql ----
+// ---- queries/v1/cognition/hasAIResponseForReply.memql ----
 
 // queryHasAIResponseForReply - Idempotency Check for SI Response
 // ================================================================
@@ -343,7 +343,7 @@ query participant queryGroupGAForSpace {
 
 @enabled
 @description("Check if an SI response already exists for a given utterance (idempotency check).")
-query utterance queryHasSIResponseForReply {
+query utterance queryHasAIResponseForReply {
   args {
     replyToId  string  @required
     participantId  string  @required
@@ -474,9 +474,9 @@ query space querySavedSpaces {
   shape   spaceFull
 }
 
-// ---- queries/v1/cognition/siParticipantForSpace.memql ----
+// ---- queries/v1/cognition/aiParticipantForSpace.memql ----
 
-// querySIParticipantForSpace - Find Active SI Participant in Space
+// queryAIParticipantForSpace - Find Active SI Participant in Space
 // =================================================================
 //
 // Finds the active SI participant in a given space. Returns the first

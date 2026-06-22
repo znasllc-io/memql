@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// classifierProbeEngine wraps fakeEngine with an InvokeSIStructured
+// classifierProbeEngine wraps fakeEngine with an InvokeAIStructured
 // override that counts calls and returns a canned classification, so
 // tests can assert whether the LLM boundary was crossed.
 type classifierProbeEngine struct {
@@ -19,7 +19,7 @@ type classifierProbeEngine struct {
 	response        string
 }
 
-func (e *classifierProbeEngine) InvokeSIStructured(
+func (e *classifierProbeEngine) InvokeAIStructured(
 	ctx context.Context,
 	templateId string,
 	data map[string]any,

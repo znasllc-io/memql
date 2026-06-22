@@ -62,7 +62,7 @@ func TestMaybeResumeFromFeedback_Resumes_AndDedups(t *testing.T) {
 		"respondedBy": "v1:identity:user:u1",
 		"respondedAt": "2026-06-14T00:00:00Z",
 	}
-	siCalls := 0
+	aiCalls := 0
 	fe := &fakeEngine{
 		execResponder: func(query string) (any, error) {
 			switch {
@@ -74,8 +74,8 @@ func TestMaybeResumeFromFeedback_Resumes_AndDedups(t *testing.T) {
 			}
 			return nil, nil
 		},
-		siResponder: func(_ string, _ map[string]any) (any, error) {
-			siCalls++
+		aiResponder: func(_ string, _ map[string]any) (any, error) {
+			aiCalls++
 			// A terminal decision so invokeAndDispatch settles in one pass.
 			return `{"action":"markPlanSucceeded","reply":"done"}`, nil
 		},
@@ -91,11 +91,11 @@ func TestMaybeResumeFromFeedback_Resumes_AndDedups(t *testing.T) {
 	// Second delivery of the SAME resume (same planId@startedAt): deduped on
 	// this replica -- still returns true (handled) but does NOT re-drive the
 	// loop a second time.
-	siAfterFirst := siCalls
+	aiAfterFirst := aiCalls
 	if !l.maybeResumeFromFeedback(context.Background(), "v1:planner:plan:p1") {
 		t.Fatalf("a re-delivered resume must still report handled=true")
 	}
-	if siCalls != siAfterFirst {
-		t.Fatalf("a re-delivered resume must NOT re-drive the loop; SI calls went %d -> %d", siAfterFirst, siCalls)
+	if aiCalls != aiAfterFirst {
+		t.Fatalf("a re-delivered resume must NOT re-drive the loop; SI calls went %d -> %d", aiAfterFirst, aiCalls)
 	}
 }

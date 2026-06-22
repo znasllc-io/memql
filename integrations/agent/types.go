@@ -19,9 +19,9 @@ const ComponentName = common.ComponentName("agentReplier")
 // intentionally a subset of memql.IntegrationEngineAccess + the SI invocation
 // surface; the concrete adapter in app/ supplies all methods.
 type MemQLEngine interface {
-	// InvokeSI runs a prompt template by ID and returns the assistant's reply.
+	// InvokeAI runs a prompt template by ID and returns the assistant's reply.
 	// Used by the non-streaming path (voice / polyphon-text turns).
-	InvokeSI(ctx context.Context, templateId string, data map[string]any) (any, error)
+	InvokeAI(ctx context.Context, templateId string, data map[string]any) (any, error)
 	// RenderPrompt renders a prompt template with the given data and returns
 	// the rendered text. Used to build the system prompt for the streaming
 	// tool loop.

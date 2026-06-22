@@ -10,19 +10,19 @@ spec specIsHumanParticipant {
   payload.participantType == "human"
 }
 
-// ---- specs/v1/cognition/isSIParticipant.memql ----
+// ---- specs/v1/cognition/isAIParticipant.memql ----
 
-// specIsSIParticipant - SI Participant Type Spec
+// specIsAIParticipant - SI Participant Type Spec
 // ===============================================
 //
 // Reusable filter that matches participants with SI type.
 // SI participants are automated agents in spaces.
 //
 // Usage in queries:
-//   concept==v1:cognition:participant;specIsSIParticipant()
+//   concept==v1:cognition:participant;specIsAIParticipant()
 //
 
 @description("Matches participants with SI participantType")
-spec specIsSIParticipant {
+spec specIsAIParticipant {
   payload.participantType=="si"
 }

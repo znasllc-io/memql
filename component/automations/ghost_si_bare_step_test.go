@@ -11,7 +11,7 @@ import (
 
 // Regression for memql#580 (the ghost SI / "two assistants" bug).
 //
-// The autoJoinSI logic body derives the GA participant id with:
+// The autoJoinAI logic body derives the GA participant id with:
 //
 //	getGA := coalesce(getActiveGA, getFallbackGA)   // logic-runner path
 //	... agentId: coalesce(getGA.First().id, "")     // arg-time path (memql#575)

@@ -223,7 +223,7 @@ func (c *CognitionIntegration) computeSpaceContextSnapshot(ctx context.Context, 
 		"audioActive":       0,
 		"videoActive":       0,
 	}
-	siAgg := map[string]any{
+	aiAgg := map[string]any{
 		"voiceEnabled":  0,
 		"avatarEnabled": 0,
 		"visionEnabled": 0,
@@ -271,17 +271,17 @@ func (c *CognitionIntegration) computeSpaceContextSnapshot(ctx context.Context, 
 
 		if ao, ok := s["aiOutput"].(map[string]any); ok {
 			if b, _ := ao["voiceEnabled"].(bool); b {
-				siAgg["voiceEnabled"] = siAgg["voiceEnabled"].(int) + 1
+				aiAgg["voiceEnabled"] = aiAgg["voiceEnabled"].(int) + 1
 			}
 			if b, _ := ao["avatarEnabled"].(bool); b {
-				siAgg["avatarEnabled"] = siAgg["avatarEnabled"].(int) + 1
+				aiAgg["avatarEnabled"] = aiAgg["avatarEnabled"].(int) + 1
 			}
 			if b, _ := ao["visionEnabled"].(bool); b {
-				siAgg["visionEnabled"] = siAgg["visionEnabled"].(int) + 1
+				aiAgg["visionEnabled"] = aiAgg["visionEnabled"].(int) + 1
 			}
 			if streams, ok := s["streams"].(map[string]any); ok && isRecent {
 				if strings.TrimSpace(asString(streams["avatarStreamId"])) != "" {
-					siAgg["avatarActive"] = siAgg["avatarActive"].(int) + 1
+					aiAgg["avatarActive"] = aiAgg["avatarActive"].(int) + 1
 				}
 			}
 		}
@@ -291,7 +291,7 @@ func (c *CognitionIntegration) computeSpaceContextSnapshot(ctx context.Context, 
 		"total": len(sessions),
 		"tiers": tierCounts,
 		"human": humanAgg,
-		"si":    siAgg,
+		"si":    aiAgg,
 	}
 
 	return map[string]any{

@@ -760,7 +760,7 @@ func (r *ReactiveLoop) maybeConverge(ctx context.Context, userId string, respons
 		return
 	}
 
-	resp, err := r.engine.InvokeSI(ctx, "reactiveConductor", map[string]any{
+	resp, err := r.engine.InvokeAI(ctx, "reactiveConductor", map[string]any{
 		"user":             map[string]any{"userId": userId},
 		"spaceGoals":       goals,
 		"responsibilities": compactResponsibilities(responsibilities),

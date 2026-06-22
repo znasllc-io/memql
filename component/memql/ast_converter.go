@@ -503,7 +503,7 @@ func (c *ASTConverter) convertShapeTemplate(template any) (shapeTemplate, error)
 		// Already converted
 		return t, nil
 
-	case *shapeSIValue:
+	case *shapeAIValue:
 		// Already converted
 		return t, nil
 

@@ -223,7 +223,7 @@ func newSectionableLoop(t *testing.T, triageOut string, planRow map[string]any) 
 			}
 			return nil, nil
 		},
-		siResponder: func(templateId string, _ map[string]any) (any, error) {
+		aiResponder: func(templateId string, _ map[string]any) (any, error) {
 			if templateId == "goalComplexityTriage" {
 				return triageOut, nil
 			}

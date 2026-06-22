@@ -83,7 +83,7 @@ func (r *Router) ResolveStreamWithTools(req ResolveRequest) (common.ChatStreamWi
 // Fallback chain semantics mirror ResolveStreamWithTools: a pre-flight
 // error advances down the chain, recording each failed attempt as
 // outcome="fallback_used".
-func (r *Router) ResolveWithTools(req ResolveRequest) (common.ToolCallingChatSIProvider, Resolved, error) {
+func (r *Router) ResolveWithTools(req ResolveRequest) (common.ToolCallingChatAIProvider, Resolved, error) {
 	chain, resolved, err := r.resolveChain(req, modalityTools)
 	if err != nil {
 		return nil, Resolved{}, err
@@ -98,9 +98,9 @@ func (r *Router) ResolveWithTools(req ResolveRequest) (common.ToolCallingChatSIP
 }
 
 // ResolveChat picks a provider for a non-streaming synchronous chat call
-// (suggest endpoints, voice-path InvokeSI turns) and returns the wrapped
+// (suggest endpoints, voice-path InvokeAI turns) and returns the wrapped
 // provider. Fallback chain semantics mirror ResolveStreamWithTools.
-func (r *Router) ResolveChat(req ResolveRequest) (common.ChatSIProvider, Resolved, error) {
+func (r *Router) ResolveChat(req ResolveRequest) (common.ChatAIProvider, Resolved, error) {
 	chain, resolved, err := r.resolveChain(req, modalityChat)
 	if err != nil {
 		return nil, Resolved{}, err
@@ -120,7 +120,7 @@ const (
 	modalityStreamTools providerModality = iota
 	modalityChat
 	// modalityTools is the non-streaming request/response tool-calling
-	// surface (common.ToolCallingChatSIProvider) used by the background
+	// surface (common.ToolCallingChatAIProvider) used by the background
 	// execution lane (memql#896). Both the streaming providers
 	// (anthropicStreamProvider / openAIStreamProvider) and the plain
 	// non-streaming providers implement CallChatWithTools, so any chain
@@ -177,11 +177,11 @@ func (r *Router) resolveChain(req ResolveRequest, mod providerModality) ([]strin
 				continue
 			}
 		case modalityTools:
-			if _, ok := entry.Client.(common.ToolCallingChatSIProvider); !ok {
+			if _, ok := entry.Client.(common.ToolCallingChatAIProvider); !ok {
 				continue
 			}
 		default:
-			if _, ok := entry.Client.(common.ChatSIProvider); !ok {
+			if _, ok := entry.Client.(common.ChatAIProvider); !ok {
 				continue
 			}
 		}
@@ -226,11 +226,11 @@ func (r *Router) providerLookup(name string, mod providerModality) (any, Resolve
 			return c, resolved, true
 		}
 	case modalityTools:
-		if c, ok := entry.Client.(common.ToolCallingChatSIProvider); ok {
+		if c, ok := entry.Client.(common.ToolCallingChatAIProvider); ok {
 			return c, resolved, true
 		}
 	case modalityChat:
-		if c, ok := entry.Client.(common.ChatSIProvider); ok {
+		if c, ok := entry.Client.(common.ChatAIProvider); ok {
 			return c, resolved, true
 		}
 	}

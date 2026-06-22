@@ -108,7 +108,7 @@ mutation space mutationArchiveSpace {
 // the v1:cognition:space concept's defaults (maxHumans=5, maxAgents=3
 // per the per-user-per-space cap), so the user can invite collaborators
 // and add specialists from their roster. Auto-provisioning at this
-// mutation level still seeds nothing -- the autoJoinSI automation on
+// mutation level still seeds nothing -- the autoJoinAI automation on
 // space-created handles the owner assistant, same path the regular
 // space flow uses.
 
@@ -509,13 +509,13 @@ mutation participant mutationJoinSpaceAsHuman {
 // (space, agent) pair.
 //
 // The id pattern stays human-readable -- "si-{canonicalAgentId}-
-// {canonicalSpaceId}" -- so the legacy autoJoinSI automation that
+// {canonicalSpaceId}" -- so the legacy autoJoinAI automation that
 // computes the same string can keep using checkExistingGA's lookup
 // without re-encoding via hash().
 
 @enabled
 @description("Join a space as an SI participant. Uses canonicalized deterministic ID.")
-mutation participant mutationJoinSpaceAsSI {
+mutation participant mutationJoinSpaceAsAI {
   args {
     spaceId              string  @required
     agentId              string  @required

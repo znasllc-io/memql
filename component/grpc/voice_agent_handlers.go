@@ -2326,11 +2326,11 @@ func trailingSlug(id string) string {
 //
 // The cascade routes assistant replies through VoiceAgentTurnRequest --
 // cognition runs the agent loop and inserts the SI utterance itself
-// (insertSIResponse in integrations/cognition/si_responder.go), stamping
+// (insertAIResponse in integrations/cognition/si_responder.go), stamping
 // participantType="si" + citations off the respondToUser envelope. The
 // realtime executor (gpt-realtime) speaks directly and never enters that
 // path, so this handler is the sole writer of realtime SI utterances.
-// It mirrors insertSIResponse's wire shape exactly:
+// It mirrors insertAIResponse's wire shape exactly:
 //
 //   - participantType="si"  (the value the frontend keys sender lookup on)
 //   - participantId         = the GA's v1:cognition:participant row id,
@@ -2400,7 +2400,7 @@ func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlCl
 		// participant; voice rooms have a single GA, so the first active
 		// SI participant is the speaker.
 		participantResolveStart := time.Now()
-		participantId := s.resolveSIParticipantId(ctx, spaceId)
+		participantId := s.resolveAIParticipantId(ctx, spaceId)
 		logVoiceTiming(s.logger, "server.realtime_output.resolve_participant", participantResolveStart,
 			"space_id", spaceId, "ok", participantId != "")
 		if participantId == "" {
@@ -2416,7 +2416,7 @@ func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlCl
 		// concept's enum value for the gpt-realtime speech-to-speech
 		// path (v1:cognition:utterance.source.outputMethod). pipeline
 		// tags the wire path so cognition's voice-vs-text routing keys
-		// on it; sttProvider/agentId mirror what insertSIResponse stamps.
+		// on it; sttProvider/agentId mirror what insertAIResponse stamps.
 		source := map[string]string{
 			"outputMethod": "realtimeVoice",
 			"pipeline":     "voice-agent-realtime",
@@ -2477,11 +2477,11 @@ func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlCl
 	return nil
 }
 
-// resolveSIParticipantId returns the active SI participant row id for a
-// space, or "" if none. Read-only; mirrors the resolution insertSIResponse
+// resolveAIParticipantId returns the active SI participant row id for a
+// space, or "" if none. Read-only; mirrors the resolution insertAIResponse
 // relies on (participantId must be the v1:cognition:participant id, not
 // the agent template id) so realtime utterances attribute identically.
-func (s *streamSession) resolveSIParticipantId(ctx context.Context, spaceId string) string {
+func (s *streamSession) resolveAIParticipantId(ctx context.Context, spaceId string) string {
 	if s == nil || s.service == nil || s.service.engine == nil {
 		return ""
 	}
@@ -2490,7 +2490,7 @@ func (s *streamSession) resolveSIParticipantId(ctx context.Context, spaceId stri
 	result, err := s.service.engine.Execute(ctx, query)
 	if err != nil {
 		if s.logger != nil {
-			s.logger.Debug("resolveSIParticipantId query failed",
+			s.logger.Debug("resolveAIParticipantId query failed",
 				"space_id", spaceId, "error", err)
 		}
 		return ""
@@ -2564,7 +2564,7 @@ func (s *streamSession) handleVoiceAgentRealtimeSpeaking(envelope *memqlv1.Memql
 		// template id) -- the presence row the frontend keys the orb on is
 		// keyed by participantId, the same id handleVoiceAgentRealtimeOutput
 		// attributes the SI utterance to.
-		participantId := s.resolveSIParticipantId(ctx, spaceId)
+		participantId := s.resolveAIParticipantId(ctx, spaceId)
 		if participantId == "" {
 			if s.logger != nil {
 				s.logger.Debug("voice-agent realtime speaking: no SI participant resolved",
@@ -2658,7 +2658,7 @@ func mustJSONString(s string) string {
 // clause from the proto citations, or "" when there are none worth
 // emitting. Each entry is validated (both fields non-empty) so a partial
 // citation never lands a malformed chip. Mirrors the citations clause in
-// integrations/cognition/si_responder.go insertSIResponse for byte-for-
+// integrations/cognition/si_responder.go insertAIResponse for byte-for-
 // byte chat-render parity.
 func buildRealtimeCitationsClause(citations []*memqlv1.AgentTurnCitation) string {
 	if len(citations) == 0 {

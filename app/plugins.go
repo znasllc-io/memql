@@ -68,13 +68,13 @@ func (a *App) pluginContext() memql.PluginContext {
 			}
 			return a.db.DirectBunDB()
 		},
-		VisionProvider: func() common.VisionSIProvider {
+		VisionProvider: func() common.VisionAIProvider {
 			if a.engine == nil {
 				return nil
 			}
 			return a.engine.VisionProvider()
 		},
-		EmbeddingProviderByName: func(name string) (memql.EmbeddingSIProvider, error) {
+		EmbeddingProviderByName: func(name string) (memql.EmbeddingAIProvider, error) {
 			return a.engine.Providers().EmbeddingProvider(name)
 		},
 		ResolvePartitionFromContext: func(ctx context.Context) string {

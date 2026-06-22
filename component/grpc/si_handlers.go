@@ -50,9 +50,9 @@ func (s *streamSession) handleAiChat(envelope *memqlv1.MemqlClientMessage, msg *
 	// worker peer of the configured target type (Agent by default).
 	// The wire protocol back to the client is unchanged -- responses
 	// arrive as standard MemqlServerMessage payloads on the same
-	// bidirectional stream. shouldProxySI short-circuits to false on
+	// bidirectional stream. shouldProxyAI short-circuits to false on
 	// worker binaries so they execute locally.
-	if s.shouldProxySI(nodeTargetForChat()) {
+	if s.shouldProxyAI(nodeTargetForChat()) {
 		// Streaming chat over the substrate (memql#1266): forward the trigger to
 		// the worker as usual, but consume the streamed token deltas from the
 		// durable substrate (stream:<requestId>) rather than relaying the
@@ -62,9 +62,9 @@ func (s *streamSession) handleAiChat(envelope *memqlv1.MemqlClientMessage, msg *
 		// under the same gate, so there is no double delivery. Non-streaming chat
 		// and the non-substrate path keep the plain relay.
 		if msg.GetStream() && s.service.streamingOverSubstrate() {
-			return s.proxySIStream(envelope, requestId, nodeTargetForChat(), s.consumeTokenStream)
+			return s.proxyAIStream(envelope, requestId, nodeTargetForChat(), s.consumeTokenStream)
 		}
-		return s.proxySI(envelope, requestId, nodeTargetForChat())
+		return s.proxyAI(envelope, requestId, nodeTargetForChat())
 	}
 
 	if s.service.engine == nil {
@@ -97,7 +97,7 @@ func (s *streamSession) handleAiChat(envelope *memqlv1.MemqlClientMessage, msg *
 }
 
 func (s *streamSession) handleAiChatNonStream(requestId, correlate string, messages []common.ChatMessage, providerName string) {
-	var chatProvider common.ChatSIProvider
+	var chatProvider common.ChatAIProvider
 
 	if providerName != "" {
 		entry, ok := s.service.engine.ProviderEntry(providerName)
@@ -105,7 +105,7 @@ func (s *streamSession) handleAiChatNonStream(requestId, correlate string, messa
 			s.sendQueryError(requestId, correlate, codes.InvalidArgument, fmt.Sprintf("provider %q not found", providerName))
 			return
 		}
-		cp, ok := entry.Client.(common.ChatSIProvider)
+		cp, ok := entry.Client.(common.ChatAIProvider)
 		if !ok {
 			s.sendQueryError(requestId, correlate, codes.InvalidArgument, fmt.Sprintf("provider %q does not support chat", providerName))
 			return
@@ -223,8 +223,8 @@ func (s *streamSession) handleAiSpeech(envelope *memqlv1.MemqlClientMessage, msg
 
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
 
-	if s.shouldProxySI(nodeTargetForSpeech()) {
-		return s.proxySI(envelope, requestId, nodeTargetForSpeech())
+	if s.shouldProxyAI(nodeTargetForSpeech()) {
+		return s.proxyAI(envelope, requestId, nodeTargetForSpeech())
 	}
 
 	if s.service.engine == nil {
@@ -238,7 +238,7 @@ func (s *streamSession) handleAiSpeech(envelope *memqlv1.MemqlClientMessage, msg
 	correlate := envelope.GetMessageId()
 
 	go func() {
-		var ttsProvider memqlengine.TTSSIProvider
+		var ttsProvider memqlengine.TTSAIProvider
 		if prov := msg.GetProvider(); prov != "" {
 			var ok bool
 			ttsProvider, ok = s.service.engine.TTSProviderByName(prov)
@@ -288,8 +288,8 @@ func (s *streamSession) handleAiTranscribe(envelope *memqlv1.MemqlClientMessage,
 
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
 
-	if s.shouldProxySI(nodeTargetForTranscribe()) {
-		return s.proxySI(envelope, requestId, nodeTargetForTranscribe())
+	if s.shouldProxyAI(nodeTargetForTranscribe()) {
+		return s.proxyAI(envelope, requestId, nodeTargetForTranscribe())
 	}
 
 	if s.service.sttProvider == nil {
@@ -368,8 +368,8 @@ func (s *streamSession) handleAiSuggest(envelope *memqlv1.MemqlClientMessage, ms
 		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.InvalidArgument, "domain is required")
 	}
 
-	if s.shouldProxySI(nodeTargetForSuggest()) {
-		return s.proxySI(envelope, requestId, nodeTargetForSuggest())
+	if s.shouldProxyAI(nodeTargetForSuggest()) {
+		return s.proxyAI(envelope, requestId, nodeTargetForSuggest())
 	}
 
 	if s.service.engine == nil {
@@ -408,7 +408,7 @@ func (s *streamSession) handleAiSuggest(envelope *memqlv1.MemqlClientMessage, ms
 			// Title-only suggestion for the CreateSpaceModal AI-describe
 			// path. Under the one-assistant space model (copresent #124)
 			// a space has 1+ humans plus EXACTLY ONE assistant
-			// (auto-joined by the backend autoJoinSI automation); there
+			// (auto-joined by the backend autoJoinAI automation); there
 			// is no agent picker and no architecture choice. The client
 			// sends an empty `agents` array and consumes only `title`,
 			// so we neither require nor read agents here. No postProcess

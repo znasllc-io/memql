@@ -244,7 +244,7 @@ func (d *TrainSpecialistDispatcher) runTrainer(ctx context.Context, planId strin
 	// writes itself (writeKnowledgeChunk / markChunkSuperseded route to
 	// their mutations); the returned text is the Trainer's respondToUser
 	// summary.
-	summary, err := d.engine.InvokeSIChatWithFilteredTools(
+	summary, err := d.engine.InvokeAIChatWithFilteredTools(
 		ctx,
 		"trainerAgent",
 		map[string]any{

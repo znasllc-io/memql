@@ -31,11 +31,11 @@ func TestResolveLogicCallArgs_BindsBareEventAndUnwrapsPositional(t *testing.T) {
 	reg := newSandboxStepRegistry(NewRegistry(), nil, "sandbox:dryrun:test", "", "")
 	stepCtx := &automations.StepContext{Evaluator: evaluator}
 
-	// The compiled shape of `logic autoJoinSI { event: event }`: a single
+	// The compiled shape of `logic autoJoinAI { event: event }`: a single
 	// positional object arg whose `event` value is the bare runtime-reference
 	// token "event".
 	fn := &automations.FunctionStepConfig{
-		Name: "logicAutoJoinSI",
+		Name: "logicAutoJoinAI",
 		Args: map[string]any{"0": map[string]any{"event": "event"}},
 	}
 

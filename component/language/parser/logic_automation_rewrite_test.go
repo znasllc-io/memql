@@ -58,7 +58,7 @@ func TestNormaliseAutomationSource_StepRewrite(t *testing.T) {
 @trigger(event="graph.node.created.v1:cognition:space")
 @useLogic(joinAgents)
 @description("Demo automation.")
-automation autoJoinSI {
+automation autoJoinAI {
   step joinAgents {
     logicJoinAgents { spaceId: event.node.id }
   }
@@ -67,7 +67,7 @@ automation autoJoinSI {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out, "func (Automation) autoJoinSI(_ any)") {
+	if !strings.Contains(out, "func (Automation) autoJoinAI(_ any)") {
 		t.Fatalf("expected procedural rewrite with `_` placeholder param; got %q", out)
 	}
 	if strings.Contains(out, "(ctx any)") {

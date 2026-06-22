@@ -110,7 +110,7 @@ func run(ctx context.Context, dsn string, execute bool) error {
 	}
 	fmt.Printf("loaded %d distinct seed-materialized perUser rows\n", len(agents))
 
-	participants, err := loadSIParticipantRows(ctx, db, agents)
+	participants, err := loadAIParticipantRows(ctx, db, agents)
 	if err != nil {
 		return fmt.Errorf("load SI participant rows: %w", err)
 	}
@@ -194,13 +194,13 @@ ORDER BY id, "createdAt" DESC`
 	return out, rows.Err()
 }
 
-// loadSIParticipantRows pulls the latest non-left SI participant
+// loadAIParticipantRows pulls the latest non-left SI participant
 // row per id whose agentId points at any of the seed-materialized
 // agents from loadSeedAgentRows. Scoping the lookup to known seed
 // agents keeps the result small even on large clusters and means
 // we don't accidentally touch participants tied to user-created
 // agents.
-func loadSIParticipantRows(ctx context.Context, db *sql.DB, agents []AgentRow) ([]ParticipantRow, error) {
+func loadAIParticipantRows(ctx context.Context, db *sql.DB, agents []AgentRow) ([]ParticipantRow, error) {
 	if len(agents) == 0 {
 		return nil, nil
 	}

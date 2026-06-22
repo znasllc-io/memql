@@ -643,7 +643,7 @@ func nodeTargetForCallTool() node.NodeType   { return node.NodeTypeAgent }
 func nodeTargetForSpeech() node.NodeType     { return node.NodeTypeVoice }
 func nodeTargetForTranscribe() node.NodeType { return node.NodeTypeVoice }
 
-// shouldProxySI reports whether an AI handler should short-circuit
+// shouldProxyAI reports whether an AI handler should short-circuit
 // to the forwarder rather than executing locally. True when:
 //   - an SIForwardRouter is installed (BFF binary with at least one
 //     worker peer),
@@ -651,7 +651,7 @@ func nodeTargetForTranscribe() node.NodeType { return node.NodeTypeVoice }
 //   - this binary is compiled as a BFF (the compile-time node type
 //     short-circuit keeps workers from accidentally forwarding to
 //     themselves).
-func (s *streamSession) shouldProxySI(target node.NodeType) bool {
+func (s *streamSession) shouldProxyAI(target node.NodeType) bool {
 	if s == nil || s.service == nil || s.service.aiForwarder == nil {
 		return false
 	}
@@ -665,11 +665,11 @@ func (s *streamSession) shouldProxySI(target node.NodeType) bool {
 	return len(s.service.aiForwarder.peerMgr.ByType(target)) > 0
 }
 
-// proxySI forwards the original envelope to a worker peer and streams
+// proxyAI forwards the original envelope to a worker peer and streams
 // the worker's responses back to the client on the same stream the
 // client is already reading from. Returns nil so the dispatcher moves
 // on; any errors are delivered inline as QueryError responses.
-func (s *streamSession) proxySI(envelope *memqlv1.MemqlClientMessage, requestId string, target node.NodeType) error {
+func (s *streamSession) proxyAI(envelope *memqlv1.MemqlClientMessage, requestId string, target node.NodeType) error {
 	ctx := s.stream.Context()
 	correlate := envelope.GetMessageId()
 

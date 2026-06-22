@@ -116,8 +116,8 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	}
 	if participantType == "si" {
 		// Update SI presence to idle after speaking (fixes stuck "Replying..." status).
-		if siParticipant, err := c.findSIParticipant(ctx, spaceId); err == nil && siParticipant != nil && strings.TrimSpace(siParticipant.ID) != "" {
-			_ = c.upsertParticipantPresence(ctx, spaceId, siParticipant.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
+		if aiParticipant, err := c.findAIParticipant(ctx, spaceId); err == nil && aiParticipant != nil && strings.TrimSpace(aiParticipant.ID) != "" {
+			_ = c.upsertParticipantPresence(ctx, spaceId, aiParticipant.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
 		}
 		return
 	}
@@ -128,7 +128,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	}
 
 	// Global SI kill switch.
-	if !c.IsSIEnabled(ctx) {
+	if !c.IsAIEnabled(ctx) {
 		c.Logger.Debug("cognition: SI responses disabled, skipping")
 		return
 	}
@@ -189,9 +189,9 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// blip means the user types and gets nothing back at all. One retry
 	// with a small backoff covers most transient failures (connection
 	// pool blip, brief network glitch) without delaying the happy path.
-	var siParticipants []*participantPayload
+	var aiParticipants []*participantPayload
 	for attempt := 0; attempt < 2; attempt++ {
-		siParticipants, err = c.findAllSIParticipants(ctx, spaceId)
+		aiParticipants, err = c.findAllAIParticipants(ctx, spaceId)
 		if err == nil {
 			break
 		}
@@ -210,11 +210,11 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			"error", err, "spaceId", spaceId, "utteranceId", utterance.ID)
 		return
 	}
-	if len(siParticipants) == 0 {
+	if len(aiParticipants) == 0 {
 		return
 	}
 
-	candidates := c.buildAgentCandidates(ctx, siParticipants)
+	candidates := c.buildAgentCandidates(ctx, aiParticipants)
 	if len(candidates) == 0 {
 		return
 	}
@@ -226,14 +226,14 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		evaluator := polyphon.NewDefaultHeartbeatEvaluator()
 		c.scoreEngine.Sessions().StartHeartbeat(spaceId, 10*time.Second, evaluator, candidates,
 			func(action polyphon.HeartbeatAction) {
-				c.handleHeartbeatAction(ctx, spaceId, action, siParticipants)
+				c.handleHeartbeatAction(ctx, spaceId, action, aiParticipants)
 			},
 		)
 	}
 
 	// Start prediction goroutine if not already running (every 30s, only when active).
 	if !c.scoreEngine.Sessions().HasPrediction(spaceId) && len(candidates) > 1 {
-		invokeSIFunc := c.engine.InvokeSI
+		invokeAIFunc := c.engine.InvokeAI
 
 		// Adapt embedFunc signature: cognition uses (ctx, text, provider) but
 		// the predictive analyzer uses (ctx, text) with default provider.
@@ -246,7 +246,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 
 		// Resolve prediction analyzer: external if configured, model-based otherwise.
 		var analyzer polyphon.PredictiveAnalyzer
-		modelAnalyzer := polyphon.NewModelPredictiveAnalyzer(invokeSIFunc, embedFn)
+		modelAnalyzer := polyphon.NewModelPredictiveAnalyzer(invokeAIFunc, embedFn)
 		if externalURL := os.Getenv("POLYPHON_PREDICTION_ENGINE_URL"); externalURL != "" {
 			analyzer = polyphon.NewExternalPredictiveAnalyzer(externalURL, modelAnalyzer)
 		} else {
@@ -447,7 +447,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	if isVoiceUtteranceEarly && routeOutcome == nil {
 		g.Go(func() error {
 			routeStart := time.Now()
-			routeOutcome, routeErr = c.routeWithSI(gCtx, scoringUtterance, candidates, session)
+			routeOutcome, routeErr = c.routeWithAI(gCtx, scoringUtterance, candidates, session)
 			routeMs = time.Since(routeStart).Milliseconds()
 			return nil // never fail the group; errors handled below
 		})
@@ -524,7 +524,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	})
 
 	// Goroutines F..H: Pre-load all candidate agent configs so we don't block on winner.
-	for _, ap := range siParticipants {
+	for _, ap := range aiParticipants {
 		pId := ap.ID
 		aId := ap.AgentId
 		g.Go(func() error {
@@ -616,7 +616,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 				"intent", classification.Intent,
 				"reason", suppressReason,
 				"text", scoringUtterance.Text)
-			for _, ap := range siParticipants {
+			for _, ap := range aiParticipants {
 				_ = c.upsertParticipantPresence(ctx, spaceId, ap.ID,
 					presenceStateIdle, "Idle", "", utterance.ID, "", nil)
 			}
@@ -679,7 +679,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			// since no one is working), and we exit without inserting a
 			// response utterance. Never emit error-state presence here --
 			// silence is the correct answer, not a failure.
-			for _, ap := range siParticipants {
+			for _, ap := range aiParticipants {
 				_ = c.upsertParticipantPresence(ctx, spaceId, ap.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
 			}
 			reason := ""
@@ -693,7 +693,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			return
 		}
 
-		siWinner := routeOutcome.Winner
+		aiWinner := routeOutcome.Winner
 
 		// Deterministic override: when Polyphon's scorer detected a
 		// primary direct-address (value==1.0 on the direct_address
@@ -705,23 +705,23 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		// happens the deterministic vocative detector has already
 		// picked the right agent. No reason to second-guess it.
 		if addressed := polyphonDirectAddressWinner(decision, candidates); addressed != nil &&
-			siWinner != nil && !strings.EqualFold(addressed.AgentId, siWinner.AgentId) {
+			aiWinner != nil && !strings.EqualFold(addressed.AgentId, aiWinner.AgentId) {
 			c.Logger.Warn("cognition: SI router contradicted direct-address, overriding",
 				"spaceId", spaceId,
-				"siRouterChose", siWinner.AgentName,
-				"siRouterReason", siWinner.Reason,
+				"aiRouterChose", aiWinner.AgentName,
+				"aiRouterReason", aiWinner.Reason,
 				"polyphonDirectAddress", addressed.AgentName)
-			siWinner = addressed
+			aiWinner = addressed
 			routeOutcome.Handoff = false
 			routeOutcome.HandoffFrom = ""
 		}
 
 		c.Logger.Info("cognition: SI router selected agent",
-			"spaceId", spaceId, "siWinner", siWinner.AgentName,
-			"siReason", siWinner.Reason, "toolsNeeded", siWinner.ToolsNeeded,
+			"spaceId", spaceId, "aiWinner", aiWinner.AgentName,
+			"aiReason", aiWinner.Reason, "toolsNeeded", aiWinner.ToolsNeeded,
 			"handoff", routeOutcome.Handoff, "handoffFrom", routeOutcome.HandoffFrom,
 			"routeMs", routeMs)
-		decision.Winner = siWinner
+		decision.Winner = aiWinner
 		decision.Action = "respond"
 		decision.Confidence = "high"
 		// Record the router's explicit decision (true OR false) so the
@@ -730,9 +730,9 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		// "router said no tools needed" indistinguishable from "router
 		// didn't have an opinion" -- and we leaked the full tool list
 		// either way.
-		ctx = contextWithToolsNeeded(ctx, siWinner.ToolsNeeded)
+		ctx = contextWithToolsNeeded(ctx, aiWinner.ToolsNeeded)
 		if session := c.scoreEngine.Sessions().Get(spaceId); session != nil {
-			session.SetAddressedAgent(siWinner.AgentId)
+			session.SetAddressedAgent(aiWinner.AgentId)
 		}
 		if routeOutcome.Handoff {
 			handoffFrom = routeOutcome.HandoffFrom
@@ -747,7 +747,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		// reads to the user as "the system is still thinking" and
 		// leaves them staring at a typing indicator forever. Idle is
 		// honest -- nobody picked this up.
-		for _, ap := range siParticipants {
+		for _, ap := range aiParticipants {
 			_ = c.upsertParticipantPresence(ctx, spaceId, ap.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
 		}
 		// Promote the no-winner trace to INFO so it's visible without
@@ -766,7 +766,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 
 	// Find the participant record for the winning agent.
 	var winnerParticipant *participantPayload
-	for _, ap := range siParticipants {
+	for _, ap := range aiParticipants {
 		if ap.ID == winnerParticipantId {
 			winnerParticipant = ap
 			break
@@ -784,7 +784,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// proceeds, the loser bails immediately without dispatching (no second LLM
 	// turn, no duplicate row). The winner holds the lock until the handler
 	// returns (release deferred below), which spans the multi-second turn
-	// through insertSIResponse.
+	// through insertAIResponse.
 	//
 	// This is now the GENUINE exactly-once boundary: the single reply it admits
 	// is delivered reliably because #1264 routes the chat-reply path through the
@@ -810,7 +810,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	defer releaseGate()
 
 	// Idempotency: skip if we've already responded to this utterance.
-	if c.queryHasSIResponseForReply(ctx, spaceId, winnerParticipant.ID, utterance.ID) {
+	if c.queryHasAIResponseForReply(ctx, spaceId, winnerParticipant.ID, utterance.ID) {
 		c.Logger.Debug("cognition: SI response already exists, skipping",
 			"spaceId", spaceId, "replyToId", utterance.ID)
 		_ = c.upsertParticipantPresence(ctx, spaceId, winnerParticipant.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
@@ -818,7 +818,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	}
 
 	// Set non-winning agents to waiting, winner to thinking.
-	for _, ap := range siParticipants {
+	for _, ap := range aiParticipants {
 		if ap.ID != winnerParticipantId {
 			_ = c.upsertParticipantPresence(ctx, spaceId, ap.ID, presenceStateWaiting, "Waiting", "Another agent is responding", utterance.ID, "", nil)
 		}
@@ -846,7 +846,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// Build peer agent roster for multi-agent awareness in the prompt.
 	// Load all agent payloads for agents in this space (best-effort).
 	var allAgentPayloads []*agentPayload
-	for _, ap := range siParticipants {
+	for _, ap := range aiParticipants {
 		if peerAgent, err := c.getAgentCached(ctx, ap.AgentId); err == nil && peerAgent != nil {
 			allAgentPayloads = append(allAgentPayloads, peerAgent)
 		}
@@ -990,7 +990,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		earlyTextInserted = true
 		// Early ack is its own (short, non-streaming) utterance, so it
 		// gets a freshly-minted id rather than sharing replyId.
-		if insertErr := c.insertSIResponse(ctx, spaceId, winnerParticipant, "", utterance.ID, text, nil, nil, nil); insertErr != nil {
+		if insertErr := c.insertAIResponse(ctx, spaceId, winnerParticipant, "", utterance.ID, text, nil, nil, nil); insertErr != nil {
 			c.Logger.Warn("cognition: failed to insert early acknowledgment", "error", insertErr)
 		} else {
 			c.Logger.Info("cognition: early acknowledgment emitted",
@@ -1042,7 +1042,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// lives entirely on the utterance source metadata.
 	//
 	// Single-binary (no cluster) builds have no forwarder -- they
-	// fall back to local generation via generateSIResponse /
+	// fall back to local generation via generateAIResponse /
 	// generateStreaming.
 	var response string
 	// Citations from the respondToUser envelope (cluster forwarder
@@ -1318,17 +1318,17 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 				c.Logger.Warn("cognition: voice streaming failed; falling back to batch",
 					"error", err, "spaceId", spaceId)
 				voiceStreamed = false
-				response, err = c.generateSIResponse(ctx, agent, "utterance", spaceId, participants, recentUtterances, history, sInfo, attachmentSummaries, allAgentPayloads...)
+				response, err = c.generateAIResponse(ctx, agent, "utterance", spaceId, participants, recentUtterances, history, sInfo, attachmentSummaries, allAgentPayloads...)
 			}
 		} else {
 			// always_off -- chat-only, skip bridge dispatch.
-			response, err = c.generateSIResponse(ctx, agent, "utterance", spaceId, participants, recentUtterances, history, sInfo, attachmentSummaries, allAgentPayloads...)
+			response, err = c.generateAIResponse(ctx, agent, "utterance", spaceId, participants, recentUtterances, history, sInfo, attachmentSummaries, allAgentPayloads...)
 		}
 	} else {
 		result, streamErr := c.generateStreaming(ctx, agent, "utterance", spaceId, winnerParticipant.ID, replyId, participants, history, sInfo, attachmentSummaries)
 		if streamErr != nil {
 			c.Logger.Warn("cognition: streaming failed, falling back to sync", "error", streamErr)
-			response, err = c.generateSIResponse(ctx, agent, "utterance", spaceId, participants, recentUtterances, history, sInfo, attachmentSummaries, allAgentPayloads...)
+			response, err = c.generateAIResponse(ctx, agent, "utterance", spaceId, participants, recentUtterances, history, sInfo, attachmentSummaries, allAgentPayloads...)
 		} else {
 			response = result.Text
 		}
@@ -1338,14 +1338,14 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		// If we already emitted an early acknowledgment, send an error follow-up.
 		// Pass "" for replyId -- this is its own (non-streaming) utterance.
 		if earlyTextInserted {
-			_ = c.insertSIResponse(ctx, spaceId, winnerParticipant, "", utterance.ID,
+			_ = c.insertAIResponse(ctx, spaceId, winnerParticipant, "", utterance.ID,
 				"Sorry, I ran into an issue while working on that. Let me know if you'd like me to try again.", nil, nil, nil)
 		}
 		_ = c.upsertParticipantPresence(ctx, spaceId, winnerParticipant.ID, presenceStateError, "Error", "Having trouble generating a reply.", utterance.ID, err.Error(), nil)
 		c.Logger.Error("cognition: failed to generate SI response", "error", err)
 		return
 	}
-	siMs := time.Since(t0).Milliseconds()
+	aiMs := time.Since(t0).Milliseconds()
 
 	if isVoice {
 		c.Logger.Info("voice trace: agent llm complete",
@@ -1380,7 +1380,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		// If streaming already dispatched sentences to the bridge,
 		// the audio is in flight. Don't fire the legacy single-shot
 		// TTS path -- that would re-synthesize the entire response
-		// and double-publish. The chat insertSIResponse below still
+		// and double-publish. The chat insertAIResponse below still
 		// runs so the canonical text reply commits to the chat
 		// transcript.
 		if voiceStreamed {
@@ -1423,7 +1423,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			// deleted here. The Go voice-agent owns voice synthesis
 			// now via the VoiceAgent* gRPC contract; cognition's job on
 			// the voice path stops at landing the GA's reply utterance
-			// in chat (which insertSIResponse does below). The voice-agent
+			// in chat (which insertAIResponse does below). The voice-agent
 			// subscribes to those rows + streams the prose to Aura-2.
 			_ = resolvedVoiceModel
 			_ = winnerParticipant
@@ -1437,7 +1437,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		"winner", winner.AgentName,
 		"score", winner.TotalScore,
 		"confidence", decision.Confidence,
-		"siMs", siMs,
+		"aiMs", aiMs,
 		"tookMs", time.Since(start).Milliseconds(),
 	)
 
@@ -1450,7 +1450,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		// Use the replyId minted upstream so the committed utterance.id
 		// matches the chunks' replyId -- the frontend keys one bubble
 		// across the streaming/commit transition.
-		if err := c.insertSIResponse(bgCtx, spaceId, winnerParticipant, replyId, utterance.ID, response, responseSource, responseCitations, responseRetrieved); err != nil {
+		if err := c.insertAIResponse(bgCtx, spaceId, winnerParticipant, replyId, utterance.ID, response, responseSource, responseCitations, responseRetrieved); err != nil {
 			c.Logger.Error("cognition: failed to insert SI response (async)", "error", err, "spaceId", spaceId)
 		}
 	}()
@@ -1528,10 +1528,10 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	switch {
 	case conductorPlan != nil && conductorPlan.HasSequence():
 		go c.runConductorSequence(bgCtx, spaceId, utterance.ID,
-			winnerParticipant.ID, conductorPlan, siParticipants, agentConfigs, sInfo)
+			winnerParticipant.ID, conductorPlan, aiParticipants, agentConfigs, sInfo)
 	case conductorPlan != nil && len(conductorPlan.ChimeIns) > 0:
 		go c.runConductorChimeInChain(bgCtx, spaceId, utterance.ID,
-			winnerParticipant.ID, conductorPlan, siParticipants, agentConfigs, sInfo)
+			winnerParticipant.ID, conductorPlan, aiParticipants, agentConfigs, sInfo)
 	case conductorPlan == nil:
 		if fire, maxN, minScore := shouldFireChimeIns(scoringUtterance, candidates); fire {
 			// Pass decision.Scores so the chain can apply the
@@ -1539,16 +1539,16 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			// (name, role, tools, etc.); scores carry the polyphon
 			// scorer's verdict on each one.
 			go c.runChimeInChain(bgCtx, spaceId, utterance.ID,
-				winnerParticipant.ID, decision.Scores, siParticipants,
+				winnerParticipant.ID, decision.Scores, aiParticipants,
 				agentConfigs, sInfo, maxN, minScore)
 		} else {
-			c.resetWaitingPresence(bgCtx, spaceId, utterance.ID, winnerParticipant.ID, siParticipants)
+			c.resetWaitingPresence(bgCtx, spaceId, utterance.ID, winnerParticipant.ID, aiParticipants)
 		}
 	default:
 		// No post-primary dispatch (conductor present but produced no
 		// sequence and no chime-ins). Reset Waiting peers to Idle so
 		// the UI doesn't stick.
-		c.resetWaitingPresence(bgCtx, spaceId, utterance.ID, winnerParticipant.ID, siParticipants)
+		c.resetWaitingPresence(bgCtx, spaceId, utterance.ID, winnerParticipant.ID, aiParticipants)
 	}
 
 	go func() {
@@ -1598,7 +1598,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 
 		// Find continuation agent's participant record.
 		var contParticipant *participantPayload
-		for _, ap := range siParticipants {
+		for _, ap := range aiParticipants {
 			if ap.ID == nextAgent.AgentId {
 				contParticipant = ap
 				break
@@ -1622,7 +1622,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			presenceStateThinking, "Thinking...", "", utterance.ID, "", nil)
 
 		// Generate continuation response.
-		contResponse, contErr := c.generateSIResponse(bgCtx, contAgent, "continuation",
+		contResponse, contErr := c.generateAIResponse(bgCtx, contAgent, "continuation",
 			spaceId, participants, recentUtterances, history, sInfo, attachmentSummaries, allAgentPayloads...)
 		if contErr != nil {
 			c.Logger.Warn("cognition: continuation response failed", "error", contErr, "spaceId", spaceId)
@@ -1632,8 +1632,8 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		}
 
 		// Insert continuation response. Non-streaming path -> pass "" so
-		// insertSIResponse mints a fresh utterance id.
-		if err := c.insertSIResponse(bgCtx, spaceId, contParticipant, "", utterance.ID, contResponse, nil, nil, nil); err != nil {
+		// insertAIResponse mints a fresh utterance id.
+		if err := c.insertAIResponse(bgCtx, spaceId, contParticipant, "", utterance.ID, contResponse, nil, nil, nil); err != nil {
 			c.Logger.Error("cognition: failed to insert continuation response", "error", err, "spaceId", spaceId)
 		}
 
@@ -1657,7 +1657,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 				return
 			}
 			// Store the embedding for this response utterance.
-			// The utterance ID for the response will be generated by insertSIResponse.
+			// The utterance ID for the response will be generated by insertAIResponse.
 			// For now, just log success -- full storage requires the response utterance ID.
 			_ = embedding
 			c.Logger.Debug("cognition: response embedded for semantic context", "spaceId", spaceId, "embeddingDims", len(embedding))
@@ -1683,14 +1683,14 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			return
 		}
 		cb := polyphon.NewContextBuilder()
-		cb.TriggerCompaction(bgCtx, session, c.engine.InvokeSI)
+		cb.TriggerCompaction(bgCtx, session, c.engine.InvokeAI)
 	}()
 }
 
 // buildAgentCandidates converts cognition SI participants to Polyphon AgentCandidates.
-func (c *CognitionIntegration) buildAgentCandidates(ctx context.Context, siParticipants []*participantPayload) []polyphon.AgentCandidate {
-	candidates := make([]polyphon.AgentCandidate, 0, len(siParticipants))
-	for _, ap := range siParticipants {
+func (c *CognitionIntegration) buildAgentCandidates(ctx context.Context, aiParticipants []*participantPayload) []polyphon.AgentCandidate {
+	candidates := make([]polyphon.AgentCandidate, 0, len(aiParticipants))
+	for _, ap := range aiParticipants {
 		agent, err := c.getAgentCached(ctx, ap.AgentId)
 		if err != nil || agent == nil {
 			c.Logger.Warn("cognition: agent lookup failed",
@@ -1820,12 +1820,12 @@ func deriveSelectionReason(winner *polyphon.AgentScore) string {
 // handleHeartbeatAction dispatches proactive actions from the heartbeat evaluator.
 // Currently handles re-engagement after extended silence. Other action types
 // (notify, proactive) are logged as foundations for follow-up implementation.
-func (c *CognitionIntegration) handleHeartbeatAction(ctx context.Context, spaceId string, action polyphon.HeartbeatAction, siParticipants []*participantPayload) {
+func (c *CognitionIntegration) handleHeartbeatAction(ctx context.Context, spaceId string, action polyphon.HeartbeatAction, aiParticipants []*participantPayload) {
 	switch action.Type {
 	case "re-engage":
 		// Find the agent participant record.
 		var agentParticipant *participantPayload
-		for _, ap := range siParticipants {
+		for _, ap := range aiParticipants {
 			if ap.ID == action.AgentId {
 				agentParticipant = ap
 				break
@@ -1842,7 +1842,7 @@ func (c *CognitionIntegration) handleHeartbeatAction(ctx context.Context, spaceI
 			"reason", action.Reason,
 		)
 
-		// FUTURE: Call generateSIResponse with trigger="silence_followup" to
+		// FUTURE: Call generateAIResponse with trigger="silence_followup" to
 		// produce a contextual re-engagement message. For now, log the intent.
 		// The actual generation will be wired when the re-engagement prompt
 		// template is created.
@@ -1866,7 +1866,7 @@ func (c *CognitionIntegration) handleHeartbeatAction(ctx context.Context, spaceI
 		// turn whose result posts back as a follow-up action
 		// utterance. The chat thread continues unaffected -- this is
 		// the "agents do background work while chatting" model.
-		c.dispatchReactiveTopic(ctx, spaceId, action, siParticipants)
+		c.dispatchReactiveTopic(ctx, spaceId, action, aiParticipants)
 	}
 }
 
@@ -1880,7 +1880,7 @@ func (c *CognitionIntegration) handleHeartbeatAction(ctx context.Context, spaceI
 // (spaceId, agentId, topic) so the same heartbeat tick doesn't fire
 // the same investigation twice in a row, and so two consecutive
 // ticks with the same prediction don't pile on.
-func (c *CognitionIntegration) dispatchReactiveTopic(ctx context.Context, spaceId string, action polyphon.HeartbeatAction, siParticipants []*participantPayload) {
+func (c *CognitionIntegration) dispatchReactiveTopic(ctx context.Context, spaceId string, action polyphon.HeartbeatAction, aiParticipants []*participantPayload) {
 	if c == nil || strings.TrimSpace(action.AgentId) == "" {
 		return
 	}
@@ -1891,7 +1891,7 @@ func (c *CognitionIntegration) dispatchReactiveTopic(ctx context.Context, spaceI
 
 	// Locate the matched agent's participant record.
 	var agentParticipant *participantPayload
-	for _, ap := range siParticipants {
+	for _, ap := range aiParticipants {
 		if ap.ID == action.AgentId {
 			agentParticipant = ap
 			break
@@ -1980,7 +1980,7 @@ func (c *CognitionIntegration) dispatchReactiveTopic(ctx context.Context, spaceI
 			"turnMode":        "answer",
 		}
 
-		result, invokeErr := c.engine.InvokeSI(bgCtx, "agentReply", data)
+		result, invokeErr := c.engine.InvokeAI(bgCtx, "agentReply", data)
 		_ = c.upsertParticipantPresence(bgCtx, spaceId, agentParticipant.ID,
 			presenceStateIdle, "Idle", "", "", "", nil)
 
@@ -2127,9 +2127,9 @@ func isTranscriptOnlyRealtimeUtterance(source map[string]string) bool {
 	return strings.EqualFold(strings.TrimSpace(source["transcriptOnly"]), "true")
 }
 
-// findAllSIParticipants returns all active SI participants in a space.
+// findAllAIParticipants returns all active SI participants in a space.
 // Delegates to the spaceParticipants MemQL query function.
-func (c *CognitionIntegration) findAllSIParticipants(ctx context.Context, spaceId string) ([]*participantPayload, error) {
+func (c *CognitionIntegration) findAllAIParticipants(ctx context.Context, spaceId string) ([]*participantPayload, error) {
 	return c.findParticipantsByType(ctx, spaceId, "si")
 }
 
@@ -2659,7 +2659,7 @@ func (c *CognitionIntegration) runChimeInChain(
 	originatingUtteranceId string,
 	primaryWinnerParticipantId string,
 	scores []polyphon.AgentScore,
-	siParticipants []*participantPayload,
+	aiParticipants []*participantPayload,
 	agentConfigs map[string]*agentPayload,
 	sInfo spaceInfo,
 	maxN int,
@@ -2697,7 +2697,7 @@ func (c *CognitionIntegration) runChimeInChain(
 			continue
 		}
 		var participant *participantPayload
-		for _, ap := range siParticipants {
+		for _, ap := range aiParticipants {
 			if ap.ID == sc.AgentId {
 				participant = ap
 				break
@@ -2816,7 +2816,7 @@ func (c *CognitionIntegration) runChimeInChain(
 		recentUtterances, _ := c.getRecentUtterancesForPromptCached(bgCtx, spaceId, 20)
 		history := buildHistoryFromRecentUtterances(recentUtterances, ci.participantId, participants)
 		var allAgentPayloads []*agentPayload
-		for _, ap := range siParticipants {
+		for _, ap := range aiParticipants {
 			if ag, ok := agentConfigs[ap.ID]; ok && ag != nil {
 				allAgentPayloads = append(allAgentPayloads, ag)
 			}
@@ -2830,7 +2830,7 @@ func (c *CognitionIntegration) runChimeInChain(
 		//     this turn -- chiming in with another self-intro is
 		//     noise),
 		// (e) skip room-announce (always; user has the panel).
-		// generateSIResponse uses context to receive it.
+		// generateAIResponse uses context to receive it.
 		chimeInDirective := BuildDirective(
 			conductorStateOrNil(c, spaceId),
 			ci.agent.ID,
@@ -2850,7 +2850,7 @@ func (c *CognitionIntegration) runChimeInChain(
 		chimeInDirective.ContentHint = chimeInContentAngle(ci.agent)
 		chimeInCtx := contextWithDirective(bgCtx, chimeInDirective)
 
-		response, err := c.generateSIResponse(chimeInCtx, ci.agent, "chimein",
+		response, err := c.generateAIResponse(chimeInCtx, ci.agent, "chimein",
 			spaceId, participants, recentUtterances, history, sInfo, nil, allAgentPayloads...)
 		if err != nil {
 			c.Logger.Warn("cognition: chime-in generation FAILED -- this is why peers don't appear in chat despite firing",
@@ -2873,7 +2873,7 @@ func (c *CognitionIntegration) runChimeInChain(
 			ID:      ci.participantId,
 			AgentId: ci.agent.ID,
 		}
-		if insertErr := c.insertSIResponse(bgCtx, spaceId, participantPayloadForCi, "", originatingUtteranceId, response, nil, nil, nil); insertErr != nil {
+		if insertErr := c.insertAIResponse(bgCtx, spaceId, participantPayloadForCi, "", originatingUtteranceId, response, nil, nil, nil); insertErr != nil {
 			c.Logger.Warn("cognition: chime-in insert failed",
 				"error", insertErr, "agent", ci.name, "spaceId", spaceId)
 		} else {
@@ -2968,7 +2968,7 @@ func (c *CognitionIntegration) runConductorChimeInChain(
 	originatingUtteranceId string,
 	primaryWinnerParticipantId string,
 	plan *ConductorPlan,
-	siParticipants []*participantPayload,
+	aiParticipants []*participantPayload,
 	agentConfigs map[string]*agentPayload,
 	sInfo spaceInfo,
 ) {
@@ -2990,7 +2990,7 @@ func (c *CognitionIntegration) runConductorChimeInChain(
 		case <-bgCtx.Done():
 			return
 		}
-		for _, ap := range siParticipants {
+		for _, ap := range aiParticipants {
 			if ap.ID == primaryWinnerParticipantId {
 				continue
 			}
@@ -3053,7 +3053,7 @@ func (c *CognitionIntegration) runConductorChimeInChain(
 
 		// Find the participant + agent config.
 		var participant *participantPayload
-		for _, ap := range siParticipants {
+		for _, ap := range aiParticipants {
 			if ap.ID == participantId {
 				participant = ap
 				break
@@ -3062,7 +3062,7 @@ func (c *CognitionIntegration) runConductorChimeInChain(
 		if participant == nil {
 			c.Logger.Warn("conductor: chime-in agent not found in space (orphan presence reset)",
 				"spaceId", spaceId, "agentId", participantId)
-			// participantId didn't match any siParticipant -- can't
+			// participantId didn't match any aiParticipant -- can't
 			// meaningfully reset its presence (we don't know which
 			// participant it refers to). The defer-style sweep at the
 			// end handles this case; nothing to do here.
@@ -3105,13 +3105,13 @@ func (c *CognitionIntegration) runConductorChimeInChain(
 		recentUtterances, _ := c.getRecentUtterancesForPromptCached(bgCtx, spaceId, 20)
 		history := buildHistoryFromRecentUtterances(recentUtterances, participant.ID, participants)
 		var allAgentPayloads []*agentPayload
-		for _, ap := range siParticipants {
+		for _, ap := range aiParticipants {
 			if ag, ok := agentConfigs[ap.ID]; ok && ag != nil {
 				allAgentPayloads = append(allAgentPayloads, ag)
 			}
 		}
 
-		response, err := c.generateSIResponse(chimeInCtx, agent, "chimein",
+		response, err := c.generateAIResponse(chimeInCtx, agent, "chimein",
 			spaceId, participants, recentUtterances, history, sInfo, nil, allAgentPayloads...)
 		if err != nil {
 			c.Logger.Warn("conductor: chime-in generation failed",
@@ -3132,7 +3132,7 @@ func (c *CognitionIntegration) runConductorChimeInChain(
 			ID:      participant.ID,
 			AgentId: agent.ID,
 		}
-		if insertErr := c.insertSIResponse(bgCtx, spaceId, participantPayloadForCi,
+		if insertErr := c.insertAIResponse(bgCtx, spaceId, participantPayloadForCi,
 			"", originatingUtteranceId, response, nil, nil, nil); insertErr != nil {
 			c.Logger.Warn("conductor: chime-in insert failed",
 				"error", insertErr, "agent", agent.Name, "spaceId", spaceId)
@@ -3153,7 +3153,7 @@ func (c *CognitionIntegration) runConductorChimeInChain(
 		"successfulFires", successfulFires)
 
 	c.continueIfBranchPointsDeclared(bgCtx, spaceId, originatingUtteranceId,
-		primaryWinnerParticipantId, plan, siParticipants, agentConfigs, sInfo)
+		primaryWinnerParticipantId, plan, aiParticipants, agentConfigs, sInfo)
 }
 
 // mostRecentAgentText returns the text of the most recent agent
@@ -3348,7 +3348,7 @@ func (c *CognitionIntegration) resetWaitingPresence(
 	spaceId string,
 	originatingUtteranceId string,
 	excludeParticipantId string,
-	siParticipants []*participantPayload,
+	aiParticipants []*participantPayload,
 ) {
 	go func() {
 		select {
@@ -3356,7 +3356,7 @@ func (c *CognitionIntegration) resetWaitingPresence(
 		case <-bgCtx.Done():
 			return
 		}
-		for _, ap := range siParticipants {
+		for _, ap := range aiParticipants {
 			if ap == nil || ap.ID == excludeParticipantId {
 				continue
 			}
@@ -3384,7 +3384,7 @@ func (c *CognitionIntegration) runConductorSequence(
 	originatingUtteranceId string,
 	primaryWinnerParticipantId string,
 	plan *ConductorPlan,
-	siParticipants []*participantPayload,
+	aiParticipants []*participantPayload,
 	agentConfigs map[string]*agentPayload,
 	sInfo spaceInfo,
 ) {
@@ -3404,7 +3404,7 @@ func (c *CognitionIntegration) runConductorSequence(
 		case <-bgCtx.Done():
 			return
 		}
-		for _, ap := range siParticipants {
+		for _, ap := range aiParticipants {
 			if ap == nil {
 				continue
 			}
@@ -3456,7 +3456,7 @@ func (c *CognitionIntegration) runConductorSequence(
 		}
 
 		var participant *participantPayload
-		for _, ap := range siParticipants {
+		for _, ap := range aiParticipants {
 			if ap.ID == participantId {
 				participant = ap
 				break
@@ -3497,13 +3497,13 @@ func (c *CognitionIntegration) runConductorSequence(
 		recentUtterances, _ := c.getRecentUtterancesForPromptCached(bgCtx, spaceId, 20)
 		history := buildHistoryFromRecentUtterances(recentUtterances, participant.ID, participants)
 		var allAgentPayloads []*agentPayload
-		for _, ap := range siParticipants {
+		for _, ap := range aiParticipants {
 			if ag, ok := agentConfigs[ap.ID]; ok && ag != nil {
 				allAgentPayloads = append(allAgentPayloads, ag)
 			}
 		}
 
-		response, err := c.generateSIResponse(seqCtx, agent, "utterance",
+		response, err := c.generateAIResponse(seqCtx, agent, "utterance",
 			spaceId, participants, recentUtterances, history, sInfo, nil, allAgentPayloads...)
 		if err != nil {
 			c.Logger.Warn("conductor: sequence generation failed",
@@ -3524,7 +3524,7 @@ func (c *CognitionIntegration) runConductorSequence(
 			ID:      participant.ID,
 			AgentId: agent.ID,
 		}
-		if insertErr := c.insertSIResponse(bgCtx, spaceId, participantPayloadForSp,
+		if insertErr := c.insertAIResponse(bgCtx, spaceId, participantPayloadForSp,
 			"", originatingUtteranceId, response, nil, nil, nil); insertErr != nil {
 			c.Logger.Warn("conductor: sequence insert failed",
 				"error", insertErr, "agent", agent.Name, "spaceId", spaceId)
@@ -3545,7 +3545,7 @@ func (c *CognitionIntegration) runConductorSequence(
 		"successfulFires", successfulFires)
 
 	c.continueIfBranchPointsDeclared(bgCtx, spaceId, originatingUtteranceId,
-		primaryWinnerParticipantId, plan, siParticipants, agentConfigs, sInfo)
+		primaryWinnerParticipantId, plan, aiParticipants, agentConfigs, sInfo)
 }
 
 // continueIfBranchPointsDeclared optionally re-invokes the conductor
@@ -3577,7 +3577,7 @@ func (c *CognitionIntegration) continueIfBranchPointsDeclared(
 	originatingUtteranceId string,
 	primaryWinnerParticipantId string,
 	plan *ConductorPlan,
-	siParticipants []*participantPayload,
+	aiParticipants []*participantPayload,
 	agentConfigs map[string]*agentPayload,
 	sInfo spaceInfo,
 ) {
@@ -3658,8 +3658,8 @@ func (c *CognitionIntegration) continueIfBranchPointsDeclared(
 
 		// Build candidates from the participants list (subset that's
 		// SI participants).
-		candidates := make([]polyphon.AgentCandidate, 0, len(siParticipants))
-		for _, ap := range siParticipants {
+		candidates := make([]polyphon.AgentCandidate, 0, len(aiParticipants))
+		for _, ap := range aiParticipants {
 			if ap == nil {
 				continue
 			}
@@ -3695,7 +3695,7 @@ func (c *CognitionIntegration) continueIfBranchPointsDeclared(
 		}
 
 		c.dispatchContinuationPlan(bgCtx, spaceId, originatingUtteranceId,
-			nextPlan, siParticipants, agentConfigs, sInfo)
+			nextPlan, aiParticipants, agentConfigs, sInfo)
 	}()
 }
 
@@ -3711,7 +3711,7 @@ func (c *CognitionIntegration) dispatchContinuationPlan(
 	spaceId string,
 	originatingUtteranceId string,
 	plan *ConductorPlan,
-	siParticipants []*participantPayload,
+	aiParticipants []*participantPayload,
 	agentConfigs map[string]*agentPayload,
 	sInfo spaceInfo,
 ) {
@@ -3735,11 +3735,11 @@ func (c *CognitionIntegration) dispatchContinuationPlan(
 		// accidentally skip the first agent.
 		primaryParticipantId = "__no_primary__"
 	} else {
-		// Find + dispatch the primary. We use generateSIResponse +
-		// insertSIResponse directly (no streaming) because this is a
+		// Find + dispatch the primary. We use generateAIResponse +
+		// insertAIResponse directly (no streaming) because this is a
 		// continuation, not a fresh user turn -- shorter, contextual.
 		var participant *participantPayload
-		for _, ap := range siParticipants {
+		for _, ap := range aiParticipants {
 			if ap.ID == primaryParticipantId {
 				participant = ap
 				break
@@ -3756,10 +3756,10 @@ func (c *CognitionIntegration) dispatchContinuationPlan(
 				participants, _ := c.getParticipantsForPromptCached(bgCtx, spaceId)
 				recentUtterances, _ := c.getRecentUtterancesForPromptCached(bgCtx, spaceId, 20)
 				history := buildHistoryFromRecentUtterances(recentUtterances, participant.ID, participants)
-				response, err := c.generateSIResponse(ctxWithDirective, agent, "utterance",
+				response, err := c.generateAIResponse(ctxWithDirective, agent, "utterance",
 					spaceId, participants, recentUtterances, history, sInfo, nil)
 				if err == nil && strings.TrimSpace(response) != "" {
-					_ = c.insertSIResponse(bgCtx, spaceId, &participantPayload{
+					_ = c.insertAIResponse(bgCtx, spaceId, &participantPayload{
 						ID:      participant.ID,
 						AgentId: agent.ID,
 					}, "", originatingUtteranceId, response, nil, nil, nil)
@@ -3774,11 +3774,11 @@ func (c *CognitionIntegration) dispatchContinuationPlan(
 	// Run sequence + chime-ins through the existing chain helpers.
 	if plan.HasSequence() {
 		c.runConductorSequence(bgCtx, spaceId, originatingUtteranceId,
-			primaryParticipantId, plan, siParticipants, agentConfigs, sInfo)
+			primaryParticipantId, plan, aiParticipants, agentConfigs, sInfo)
 	}
 	if len(plan.ChimeIns) > 0 {
 		c.runConductorChimeInChain(bgCtx, spaceId, originatingUtteranceId,
-			primaryParticipantId, plan, siParticipants, agentConfigs, sInfo)
+			primaryParticipantId, plan, aiParticipants, agentConfigs, sInfo)
 	}
 }
 

@@ -608,7 +608,7 @@ func TestLogicRunner_TryEvaluateBuiltinLocally_Coalesce(t *testing.T) {
 }
 
 // TestReconstructPositionalBuiltinCall pins the fix for the
-// `getGA := coalesce(a, b)` step-ASSIGNMENT bug (#362 / autoJoinSI
+// `getGA := coalesce(a, b)` step-ASSIGNMENT bug (#362 / autoJoinAI
 // missing greeting). Positional-builtin assignments compile to
 // StepTypeFunction; without reconstruction they fall to
 // FunctionExecutor's named-arg serialization (`coalesce(0="a", 1="b")`)

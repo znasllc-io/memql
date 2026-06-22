@@ -261,7 +261,7 @@ func (i *Integration) loadRoleCatalog(ctx context.Context) []roleSnapshot {
 }
 
 // analyzeGoal invokes the agentFactoryAnalyze prompt via
-// InvokeSIStructured. Returns the parsed decision struct.
+// InvokeAIStructured. Returns the parsed decision struct.
 func (i *Integration) analyzeGoal(ctx context.Context, goal string, existing []agentSnapshot, roles []roleSnapshot) (factoryDecision, error) {
 	data := map[string]any{
 		"goal":              goal,
@@ -272,7 +272,7 @@ func (i *Integration) analyzeGoal(ctx context.Context, goal string, existing []a
 		"toolCatalog":       []any{},
 		"now":               time.Now().UTC().Format(time.RFC3339),
 	}
-	rawJSON, err := i.engine.InvokeSIStructured(
+	rawJSON, err := i.engine.InvokeAIStructured(
 		ctx,
 		"agentFactoryAnalyze",
 		data,

@@ -51,8 +51,8 @@ func TestMeterRead_AiCallRecordsAiCallAndCost(t *testing.T) {
 	if ai.PromptTokens <= 0 {
 		t.Errorf("expected a positive prompt-token estimate, got %d", ai.PromptTokens)
 	}
-	if ai.OutputTokens != defaultSiOutputTokens {
-		t.Errorf("expected output tokens %d, got %d", defaultSiOutputTokens, ai.OutputTokens)
+	if ai.OutputTokens != defaultAiOutputTokens {
+		t.Errorf("expected output tokens %d, got %d", defaultAiOutputTokens, ai.OutputTokens)
 	}
 	if ai.EstimatedCost <= 0 {
 		t.Errorf("expected a positive cost estimate, got %v", ai.EstimatedCost)
@@ -83,9 +83,9 @@ func TestEstimateTokens_FloorAndScaling(t *testing.T) {
 // TestEstimateSiCostUsd_AppliesRates verifies the cost math applies the default
 // per-million input/output rates.
 func TestEstimateSiCostUsd_AppliesRates(t *testing.T) {
-	got := estimateSiCostUsd(1_000_000, 1_000_000)
-	want := siInputUsdPerMillion + siOutputUsdPerMillion
+	got := estimateAiCostUsd(1_000_000, 1_000_000)
+	want := aiInputUsdPerMillion + aiOutputUsdPerMillion
 	if got != want {
-		t.Errorf("estimateSiCostUsd(1M,1M) = %v, want %v", got, want)
+		t.Errorf("estimateAiCostUsd(1M,1M) = %v, want %v", got, want)
 	}
 }

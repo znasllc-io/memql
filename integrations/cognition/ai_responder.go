@@ -417,7 +417,7 @@ func buildPeerActivitySummary(recentUtterances []map[string]any, currentAgentPar
 		Name string
 		Role string
 	}
-	siPeers := make(map[string]peerInfo) // participantId -> peerInfo
+	aiPeers := make(map[string]peerInfo) // participantId -> peerInfo
 	for _, p := range participants {
 		if p == nil {
 			continue
@@ -433,13 +433,13 @@ func buildPeerActivitySummary(recentUtterances []map[string]any, currentAgentPar
 		}
 		name, _ := p["displayName"].(string)
 		role, _ := p["description"].(string)
-		siPeers[id] = peerInfo{
+		aiPeers[id] = peerInfo{
 			Name: strings.TrimSpace(name),
 			Role: strings.TrimSpace(role),
 		}
 	}
 
-	if len(siPeers) == 0 {
+	if len(aiPeers) == 0 {
 		return nil
 	}
 
@@ -458,7 +458,7 @@ func buildPeerActivitySummary(recentUtterances []map[string]any, currentAgentPar
 		if found[pid] {
 			continue
 		}
-		peer, ok := siPeers[pid]
+		peer, ok := aiPeers[pid]
 		if !ok {
 			continue
 		}
@@ -487,7 +487,7 @@ func buildPeerActivitySummary(recentUtterances []map[string]any, currentAgentPar
 		result = append(result, entry)
 
 		// Stop once we've found all peers.
-		if len(found) == len(siPeers) {
+		if len(found) == len(aiPeers) {
 			break
 		}
 	}
@@ -525,22 +525,22 @@ func contextWithSystemActor(ctx context.Context) context.Context {
 	return auth.ContextWithToken(ctx, token)
 }
 
-// findSIParticipant finds an active SI participant in a space.
+// findAIParticipant finds an active SI participant in a space.
 // Returns the participant with its node ID populated (needed for creating utterances).
-// Delegates to the siParticipantForSpace MemQL query function.
-func (c *CognitionIntegration) findSIParticipant(ctx context.Context, spaceId string) (*participantPayload, error) {
+// Delegates to the aiParticipantForSpace MemQL query function.
+func (c *CognitionIntegration) findAIParticipant(ctx context.Context, spaceId string) (*participantPayload, error) {
 	query := fmt.Sprintf(`querySiParticipantForSpace({spaceId: "%s"})`, spaceId)
 
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
-		c.Logger.Error("findSIParticipant execute failed", "error", err)
+		c.Logger.Error("findAIParticipant execute failed", "error", err)
 		return nil, fmt.Errorf("execute query: %w", err)
 	}
 
 	// The MemQL function returns shaped data with id at top level.
 	nodeId, payload, err := extractNodeIdAndPayload(result, "SI participant")
 	if err != nil {
-		c.Logger.Debug("findSIParticipant extraction failed", "error", err)
+		c.Logger.Debug("findAIParticipant extraction failed", "error", err)
 		return nil, err
 	}
 
@@ -657,9 +657,9 @@ func (c *CognitionIntegration) toolsForContext(spaceType string, noTools bool, a
 	return tools
 }
 
-// generateSIResponse calls the SI provider to generate a response.
+// generateAIResponse calls the SI provider to generate a response.
 // The spaceId parameter identifies the space; prompt context is loaded via caches.
-func (c *CognitionIntegration) generateSIResponse(ctx context.Context, agent *agentPayload, trigger string, spaceId string, participants []map[string]any, recentUtterances []map[string]any, history []conversationMessage, si spaceInfo, attachmentSummaries []map[string]any, peerAgents ...*agentPayload) (string, error) {
+func (c *CognitionIntegration) generateAIResponse(ctx context.Context, agent *agentPayload, trigger string, spaceId string, participants []map[string]any, recentUtterances []map[string]any, history []conversationMessage, si spaceInfo, attachmentSummaries []map[string]any, peerAgents ...*agentPayload) (string, error) {
 	if c == nil || c.engine == nil {
 		return "", fmt.Errorf("engine not configured")
 	}
@@ -800,10 +800,10 @@ func (c *CognitionIntegration) generateSIResponse(ctx context.Context, agent *ag
 	// contexts; we need a top-level one-shot call with the full assembled
 	// data map. Provider selection, caching, and tool-calling plumbing all
 	// still happen inside the engine's SI runtime.
-	result, siErr := c.engine.InvokeSI(ctx, "cognitionReply", data)
+	result, aiErr := c.engine.InvokeAI(ctx, "cognitionReply", data)
 
 	var text string
-	if siErr == nil {
+	if aiErr == nil {
 		switch v := result.(type) {
 		case string:
 			text = v
@@ -821,8 +821,8 @@ func (c *CognitionIntegration) generateSIResponse(ctx context.Context, agent *ag
 			text = string(b)
 		}
 	}
-	if siErr != nil {
-		return "", fmt.Errorf("si invocation: %w", siErr)
+	if aiErr != nil {
+		return "", fmt.Errorf("si invocation: %w", aiErr)
 	}
 	return strings.TrimSpace(text), nil
 }
@@ -977,7 +977,7 @@ func (c *CognitionIntegration) insertSystemActionUtterance(ctx context.Context, 
 	return nil
 }
 
-// insertSIResponse inserts the SI response as a new utterance.
+// insertAIResponse inserts the SI response as a new utterance.
 // The source parameter controls the output metadata (outputMethod, tier, pipeline).
 // When source is nil, defaults to text/text.
 //
@@ -991,9 +991,9 @@ func (c *CognitionIntegration) insertSystemActionUtterance(ctx context.Context, 
 //
 // Pass "" for non-streaming inserts (early acknowledgments, chime-ins,
 // sequence members, continuations, error follow-ups) -- they have no
-// streaming bubble to merge with, so insertSIResponse mints its own
+// streaming bubble to merge with, so insertAIResponse mints its own
 // `utt-si-<nano>` short id and the engine prefixes it at write time.
-func (c *CognitionIntegration) insertSIResponse(ctx context.Context, spaceId string, siParticipant *participantPayload, replyId, replyToId, response string, source map[string]string, citations []*memqlv1.AgentTurnCitation, retrieved []*memqlv1.AgentRetrievedChunk) error {
+func (c *CognitionIntegration) insertAIResponse(ctx context.Context, spaceId string, aiParticipant *participantPayload, replyId, replyToId, response string, source map[string]string, citations []*memqlv1.AgentTurnCitation, retrieved []*memqlv1.AgentRetrievedChunk) error {
 	// Use the caller-supplied replyId when provided (so the committed
 	// utterance.id matches the chunks' replyId), else mint a fresh one.
 	// When replyId is fully qualified ({partition}:concept:uuid), the
@@ -1009,9 +1009,9 @@ func (c *CognitionIntegration) insertSIResponse(ctx context.Context, spaceId str
 	// CRITICAL: Use the SI participant's node ID, NOT the agent ID.
 	// The frontend looks up the sender using: participantMap.get(utterance.participantId)
 	// This must match the SI participant's ID in v1:cognition:participant, not the agent template ID.
-	participantId := siParticipant.ID
+	participantId := aiParticipant.ID
 	if participantId == "" {
-		// Fallback: should not happen if findSIParticipant works correctly
+		// Fallback: should not happen if findAIParticipant works correctly
 		return fmt.Errorf("SI participant has no ID (this is a bug)")
 	}
 
@@ -1031,7 +1031,7 @@ func (c *CognitionIntegration) insertSIResponse(ctx context.Context, spaceId str
 	// to filter on. Without this stamp, agentIsKnownToUser
 	// permanently returns false and agents re-introduce themselves
 	// in every new space.
-	if agentId := strings.TrimSpace(siParticipant.AgentId); agentId != "" {
+	if agentId := strings.TrimSpace(aiParticipant.AgentId); agentId != "" {
 		if _, already := source["agentId"]; !already {
 			source["agentId"] = agentId
 		}
@@ -1045,7 +1045,7 @@ func (c *CognitionIntegration) insertSIResponse(ctx context.Context, spaceId str
 		"utteranceId", utteranceId,
 		"spaceId", spaceId,
 		"participantId", participantId,
-		"agentId", siParticipant.AgentId,
+		"agentId", aiParticipant.AgentId,
 		"replyToId", replyToId,
 		"source", source,
 	)
@@ -1132,7 +1132,7 @@ func (c *CognitionIntegration) insertSIResponse(ctx context.Context, spaceId str
 		memoryNodes.ConceptCognitionUtterance,
 		utteranceId,
 		spaceId,
-		participantId, // SI participant node ID, resolved upstream via siParticipantForSpace
+		participantId, // SI participant node ID, resolved upstream via aiParticipantForSpace
 		escapeJSONString(response),
 		replyToId,
 		string(sourceJSON),
@@ -1250,16 +1250,16 @@ func sourceMapFromAny(v any) map[string]string {
 	return nil
 }
 
-// hasSIResponseForReply checks whether an SI response already exists for a given utterance.
-// Delegates to the hasSIResponseForReply MemQL query function.
-func (c *CognitionIntegration) queryHasSIResponseForReply(ctx context.Context, spaceId, siParticipantId, replyToId string) bool {
+// hasAIResponseForReply checks whether an SI response already exists for a given utterance.
+// Delegates to the hasAIResponseForReply MemQL query function.
+func (c *CognitionIntegration) queryHasAIResponseForReply(ctx context.Context, spaceId, siParticipantId, replyToId string) bool {
 	if c == nil || c.engine == nil {
 		return false
 	}
 	if strings.TrimSpace(spaceId) == "" || strings.TrimSpace(siParticipantId) == "" || strings.TrimSpace(replyToId) == "" {
 		return false
 	}
-	query := fmt.Sprintf(`queryHasSIResponseForReply({replyToId: "%s", participantId: "%s"})`,
+	query := fmt.Sprintf(`queryHasAIResponseForReply({replyToId: "%s", participantId: "%s"})`,
 		replyToId, siParticipantId,
 	)
 	result, err := c.engine.Execute(ctx, query)

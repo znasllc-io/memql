@@ -45,17 +45,17 @@ func (a *CognitionEngineAdapter) RegisterIntegration(provider memql.IntegrationP
 	return a.Engine.RegisterIntegration(provider)
 }
 
-func (a *CognitionEngineAdapter) InvokeSI(ctx context.Context, templateId string, data map[string]any) (any, error) {
+func (a *CognitionEngineAdapter) InvokeAI(ctx context.Context, templateId string, data map[string]any) (any, error) {
 	if a == nil || a.Engine == nil {
 		return nil, fmt.Errorf("memql engine not configured")
 	}
-	return a.Engine.InvokeSI(ctx, templateId, data)
+	return a.Engine.InvokeAI(ctx, templateId, data)
 }
 
-// InvokeSIStructured delegates to the engine's structured-output path.
+// InvokeAIStructured delegates to the engine's structured-output path.
 // Used by the cognition SI router, prediction analyzer, and any other
 // "logic" prompt that wants provider-enforced JSON shape.
-func (a *CognitionEngineAdapter) InvokeSIStructured(
+func (a *CognitionEngineAdapter) InvokeAIStructured(
 	ctx context.Context,
 	templateId string,
 	data map[string]any,
@@ -66,14 +66,14 @@ func (a *CognitionEngineAdapter) InvokeSIStructured(
 	if a == nil || a.Engine == nil {
 		return "", fmt.Errorf("memql engine not configured")
 	}
-	return a.Engine.InvokeSIStructured(ctx, templateId, data, schemaName, schema, strict)
+	return a.Engine.InvokeAIStructured(ctx, templateId, data, schemaName, schema, strict)
 }
 
-// InvokeSIChatWithFilteredTools delegates to the engine's bounded
+// InvokeAIChatWithFilteredTools delegates to the engine's bounded
 // tool-calling loop, restricted to the named tool set. Used by the
 // planner integration's trainSpecialist dispatcher to drive the
 // Trainer Agent's web-search + chunk-write tool loop.
-func (a *CognitionEngineAdapter) InvokeSIChatWithFilteredTools(
+func (a *CognitionEngineAdapter) InvokeAIChatWithFilteredTools(
 	ctx context.Context,
 	templateId string,
 	data map[string]any,
@@ -82,7 +82,7 @@ func (a *CognitionEngineAdapter) InvokeSIChatWithFilteredTools(
 	if a == nil || a.Engine == nil {
 		return "", fmt.Errorf("memql engine not configured")
 	}
-	return a.Engine.InvokeSIChatWithFilteredTools(ctx, templateId, data, toolNames)
+	return a.Engine.InvokeAIChatWithFilteredTools(ctx, templateId, data, toolNames)
 }
 
 // RunBundleDryRun delegates to the engine's Gate-2 behavioral dry-run entry
@@ -176,7 +176,7 @@ func (a *CognitionEngineAdapter) ResolveSkills(ctx context.Context, skillIds []s
 	return a.Engine.ResolveSkills(ctx, skillIds)
 }
 
-// CognitionProviderAdapter wraps MemQLEngine.s provider registry to satisfy cognition.SIProviderRegistry.
+// CognitionProviderAdapter wraps MemQLEngine.s provider registry to satisfy cognition.AIProviderRegistry.
 type CognitionProviderAdapter struct {
 	Engine *memql.MemQLEngine
 }

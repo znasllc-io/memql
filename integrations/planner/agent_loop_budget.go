@@ -15,7 +15,7 @@
 //  2. token budget      -- component/planner.budget.go's CheckCall,
 //     keyed on Plan.tokenBudget / tokenSpent (or a workspace default).
 //
-// Before every plannerAgent InvokeSI call the loop evaluates the gate;
+// Before every plannerAgent InvokeAI call the loop evaluates the gate;
 // on exceed it parks the Plan (awaitingFeedback) and NEVER makes
 // another LLM call. After every successful call it records the
 // invocation (count++ and tokenSpent += estimate) so the ceilings
@@ -124,7 +124,7 @@ func tokenStateFromPlan(plan map[string]any) compplanner.TokenState {
 // estimatePlannerCallTokens approximates the input-token cost of one
 // plannerAgent call from the marshaled inputs plus the fixed system
 // prompt overhead. Deliberately conservative -- the goal is a budget
-// guardrail, not exact accounting (InvokeSI returns no usage stats).
+// guardrail, not exact accounting (InvokeAI returns no usage stats).
 func estimatePlannerCallTokens(data map[string]any) int {
 	b, err := json.Marshal(data)
 	if err != nil {

@@ -804,8 +804,8 @@ func TestNoCallerVocabulary(t *testing.T) {
 	}
 }
 
-// TestAutoJoinSILocksInOwnerUserIdResolution is the structural
-// regression guard for memql#273: the autoJoinSI automation MUST
+// TestAutoJoinAILocksInOwnerUserIdResolution is the structural
+// regression guard for memql#273: the autoJoinAI automation MUST
 // resolve the General Assistant via ownerUserId (consistent across
 // every caller of mutationCreateDailySpace -- signup automation,
 // login automation, frontend hook) rather than via
@@ -818,7 +818,7 @@ func TestNoCallerVocabulary(t *testing.T) {
 // test locks in the source-level structure that makes the runtime
 // behaviour correct so a future edit that re-introduces the broken
 // pattern fails CI immediately.
-func TestAutoJoinSILocksInOwnerUserIdResolution(t *testing.T) {
+func TestAutoJoinAILocksInOwnerUserIdResolution(t *testing.T) {
 	tree := Tree()
 	file, err := tree.Open("cognition/logic.memql")
 	if err != nil {
@@ -831,16 +831,16 @@ func TestAutoJoinSILocksInOwnerUserIdResolution(t *testing.T) {
 	}
 	src := string(raw)
 
-	// Anchor on the logicAutoJoinSI body. The structural rules are
+	// Anchor on the logicAutoJoinAI body. The structural rules are
 	// about THIS automation only -- other automations are free to
 	// hash actors / build canonical ids however they need.
-	startIdx := strings.Index(src, "logic logicAutoJoinSI")
+	startIdx := strings.Index(src, "logic logicAutoJoinAI")
 	if startIdx < 0 {
-		t.Fatal("logicAutoJoinSI not found in cognition/logic.memql")
+		t.Fatal("logicAutoJoinAI not found in cognition/logic.memql")
 	}
 	endIdx := strings.Index(src[startIdx:], "\n}\n")
 	if endIdx < 0 {
-		t.Fatal("logicAutoJoinSI body terminator not found")
+		t.Fatal("logicAutoJoinAI body terminator not found")
 	}
 	body := src[startIdx : startIdx+endIdx]
 
@@ -855,13 +855,13 @@ func TestAutoJoinSILocksInOwnerUserIdResolution(t *testing.T) {
 	executable := strings.Join(stripped, "\n")
 
 	if !strings.Contains(executable, "queryAssistantAgentForUser") {
-		t.Error("logicAutoJoinSI must call queryAssistantAgentForUser(...) to resolve the GA by ownerUserId -- the pre-#273 hash(actor) pattern produced one extra participant per caller")
+		t.Error("logicAutoJoinAI must call queryAssistantAgentForUser(...) to resolve the GA by ownerUserId -- the pre-#273 hash(actor) pattern produced one extra participant per caller")
 	}
 	if !strings.Contains(executable, "args.event.payload.ownerUserId") {
-		t.Error("logicAutoJoinSI must read args.event.payload.ownerUserId (the space row's owner, set by mutationCreateDailySpace) -- args.event.payload.actor varies per caller and was the #273 root cause")
+		t.Error("logicAutoJoinAI must read args.event.payload.ownerUserId (the space row's owner, set by mutationCreateDailySpace) -- args.event.payload.actor varies per caller and was the #273 root cause")
 	}
 	if strings.Contains(executable, "hash(args.event.payload.actor)") {
-		t.Error("logicAutoJoinSI must NOT derive the agent id from hash(args.event.payload.actor) -- the actor stamp varies per caller of mutationCreateDailySpace (signup automation, login automation, frontend hook), so the participant content-address key was different each fire and idempotency collapsed nothing (memql#273)")
+		t.Error("logicAutoJoinAI must NOT derive the agent id from hash(args.event.payload.actor) -- the actor stamp varies per caller of mutationCreateDailySpace (signup automation, login automation, frontend hook), so the participant content-address key was different each fire and idempotency collapsed nothing (memql#273)")
 	}
 }
 

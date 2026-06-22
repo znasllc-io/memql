@@ -50,7 +50,7 @@ func TestTranscriptAutomationName_ValidCamelCase(t *testing.T) {
 
 // TestRunCaptureTranscript_PersistsLiteralCalls: the orchestration reads a
 // plan's toolInvocation rows and persists a bundle + one automation construct
-// whose source is the verbatim transcript -- no LLM (no InvokeSI).
+// whose source is the verbatim transcript -- no LLM (no InvokeAI).
 func TestRunCaptureTranscript_PersistsLiteralCalls(t *testing.T) {
 	plan := capturePlanRow("p-tr", "user-9", "Make a list of birds")
 	tasks := []any{
@@ -58,9 +58,9 @@ func TestRunCaptureTranscript_PersistsLiteralCalls(t *testing.T) {
 		map[string]any{"id": "t0", "category": "semantic", "status": "succeeded", "kind": "callTool", "seq": float64(0)},             // not a tool call -> excluded
 		map[string]any{"id": "tfail", "category": "toolInvocation", "status": "failed", "toolName": "brokenTool", "seq": float64(2)}, // failed -> excluded
 	}
-	var siCalls int
+	var aiCalls int
 	fe := &fakeEngine{
-		siResponder: func(string, map[string]any) (any, error) { siCalls++; return nil, nil },
+		aiResponder: func(string, map[string]any) (any, error) { aiCalls++; return nil, nil },
 		execResponder: func(query string) (any, error) {
 			switch {
 			case strings.Contains(query, "queryAuthoringBundleForPlan"):
@@ -78,8 +78,8 @@ func TestRunCaptureTranscript_PersistsLiteralCalls(t *testing.T) {
 	if err := d.runCaptureTranscript(context.Background(), "p-tr", "produceArtifact"); err != nil {
 		t.Fatalf("runCaptureTranscript: %v", err)
 	}
-	if siCalls != 0 {
-		t.Fatalf("transcription must make ZERO LLM calls, got %d", siCalls)
+	if aiCalls != 0 {
+		t.Fatalf("transcription must make ZERO LLM calls, got %d", aiCalls)
 	}
 
 	_, _, _ = fe.snapshot()

@@ -93,7 +93,7 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 		Evaluator: evaluator,
 		// Wire the engine's event bus so `emit` / publishEvent steps INSIDE a
 		// logic body can publish. Without this the StepContext.EventBus is nil
-		// and any logic that emits (e.g. logicAutoJoinSI's emitAutoJoinComplete,
+		// and any logic that emits (e.g. logicAutoJoinAI's emitAutoJoinComplete,
 		// logicBootstrapSession's session.created) fails its emit step with
 		// "event bus not configured" -- and because the compiler topologically
 		// orders steps with no inter-dependency arbitrarily, that abort can land
@@ -150,7 +150,7 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 		// form (`coalesce(0="a", 1="b")`), a string the MemQL parser
 		// rejects with `parse error ... expected ')', got "="`. Route
 		// them through the same local Evaluator by reconstructing the
-		// positional call string. See #362 (autoJoinSI getGA / worker /
+		// positional call string. See #362 (autoJoinAI getGA / worker /
 		// workbench all use standalone `name := coalesce(...)` steps).
 		if step.Type == StepTypeFunction && step.Function != nil {
 			if callStr, ok := reconstructPositionalBuiltinCall(step.Function); ok {

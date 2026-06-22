@@ -9,7 +9,7 @@ import (
 	"net/http"
 )
 
-// OpenAIEmbeddingClient implements EmbeddingSIProvider using the OpenAI embeddings API.
+// OpenAIEmbeddingClient implements EmbeddingAIProvider using the OpenAI embeddings API.
 type OpenAIEmbeddingClient struct {
 	apiKey     string
 	model      string
@@ -18,8 +18,8 @@ type OpenAIEmbeddingClient struct {
 }
 
 // Compile-time interface assertions.
-var _ SIProvider = (*OpenAIEmbeddingClient)(nil)
-var _ EmbeddingSIProvider = (*OpenAIEmbeddingClient)(nil)
+var _ AIProvider = (*OpenAIEmbeddingClient)(nil)
+var _ EmbeddingAIProvider = (*OpenAIEmbeddingClient)(nil)
 
 // NewOpenAIEmbeddingClient creates an OpenAI embedding client.
 func NewOpenAIEmbeddingClient(apiKey, model string, dimensions int) *OpenAIEmbeddingClient {
@@ -31,7 +31,7 @@ func NewOpenAIEmbeddingClient(apiKey, model string, dimensions int) *OpenAIEmbed
 	}
 }
 
-// Call satisfies the SIProvider interface. It returns the embedding as a JSON string.
+// Call satisfies the AIProvider interface. It returns the embedding as a JSON string.
 func (c *OpenAIEmbeddingClient) Call(ctx context.Context, prompt string) (any, error) {
 	vec, err := c.Embed(ctx, prompt)
 	if err != nil {

@@ -7,7 +7,7 @@ import (
 )
 
 // mkProviderCfg builds a parsedProviderConfig for the lifecycle
-// dependency tests. A literal apiKey keeps newSIProvider off the env.
+// dependency tests. A literal apiKey keeps newAIProvider off the env.
 func mkProviderCfg(name, typ, model, extends string, base, disabled bool) parsedProviderConfig {
 	return parsedProviderConfig{
 		cfg: &ProviderConfig{

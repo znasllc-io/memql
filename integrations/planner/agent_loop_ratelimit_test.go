@@ -48,7 +48,7 @@ func TestInvokeAndDispatch_RateLimited_ParksNotFails(t *testing.T) {
 		"requestedBy": "v1:identity:user:u1",
 		"metrics":     map[string]any{"llmCallCount": float64(0)},
 	}
-	siCallCount := 0
+	aiCallCount := 0
 	fe := &fakeEngine{
 		execResponder: func(query string) (any, error) {
 			switch {
@@ -61,8 +61,8 @@ func TestInvokeAndDispatch_RateLimited_ParksNotFails(t *testing.T) {
 			}
 			return nil, nil
 		},
-		siResponder: func(_ string, _ map[string]any) (any, error) {
-			siCallCount++
+		aiResponder: func(_ string, _ map[string]any) (any, error) {
+			aiCallCount++
 			return nil, errors.New("anthropic: 429 Too Many Requests (rate_limit_error)")
 		},
 	}
@@ -71,8 +71,8 @@ func TestInvokeAndDispatch_RateLimited_ParksNotFails(t *testing.T) {
 		t.Fatalf("invokeAndDispatchIter returned error: %v", err)
 	}
 
-	if siCallCount != 1 {
-		t.Fatalf("a 429 must NOT trigger an immediate re-attempt; InvokeSI called %d times", siCallCount)
+	if aiCallCount != 1 {
+		t.Fatalf("a 429 must NOT trigger an immediate re-attempt; InvokeAI called %d times", aiCallCount)
 	}
 	exec, _, _ := fe.snapshot()
 	if countContains(exec, "awaitingFeedback") == 0 {

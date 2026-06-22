@@ -86,12 +86,12 @@ func LoadUnifiedShapes(logger *slog.Logger, registry *ShapeRegistry) (int, error
 // parseProviderMemQL is unreferenced from this loader path and will
 // be deleted in sub-epic #306 child #310.
 //
-// Each parsed config gets a CLIENT instantiated via newSIProvider
+// Each parsed config gets a CLIENT instantiated via newAIProvider
 // before the registry entry is written. Without that step the
 // registry holds the Config but Available stays false and the SI
 // runtime rejects every lookup with "provider <name> not available"
 // (see si_runtime.go's entry.Available check). The legacy
-// loadSIProviders walked the providers and called newSIProvider;
+// loadAIProviders walked the providers and called newAIProvider;
 // that step was lost when Pass 3 of the DSL restructure retired the
 // legacy walk. Re-attaching it here keeps the unified-loader path
 // self-contained.
@@ -108,7 +108,7 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 	// inheritance lookup in pass 2 can find them regardless of file
 	// order. Pass 2 walks every non-base provider, fills in fields
 	// the child left empty (Type / Auth) from its @extends parent,
-	// then instantiates the SDK client via newSIProvider. The single-
+	// then instantiates the SDK client via newAIProvider. The single-
 	// pass loader fails when the file places bases after their
 	// children (which dsl/providers/providers.memql does today --
 	// `openai` is at line 379 but children like audio15 / chat54
@@ -249,7 +249,7 @@ func registerParsedProviders(logger *slog.Logger, registry *ProviderRegistry, al
 			continue
 		}
 		entry.Config.Auth = resolvedAuth
-		client, clientErr := newSIProvider(entry.Config)
+		client, clientErr := newAIProvider(entry.Config)
 		if clientErr != nil {
 			entry.err = clientErr
 			if logger != nil {
@@ -690,7 +690,7 @@ func providerDeclToProviderConfig(decl *ast.ProviderDecl) (*ProviderConfig, erro
 // convention is "base carries vendor-wide auth + the canonical
 // @type; children pin a model and override params." Without this
 // step, children that omit @type (most of them) boot with Type=""
-// and newSIProvider rejects with "unsupported provider type" --
+// and newAIProvider rejects with "unsupported provider type" --
 // and children that omit auth (every one of them) fail with
 // "missing auth.apiKey".
 //

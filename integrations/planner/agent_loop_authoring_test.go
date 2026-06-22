@@ -63,12 +63,12 @@ query space queryOwnerActiveSpaces {
   shape   spaceCard
 }`
 
-// designEngine returns a fakeEngine whose authoringDesign InvokeSI yields the
+// designEngine returns a fakeEngine whose authoringDesign InvokeAI yields the
 // supplied JSON and whose queryCataloguedConstructsForOwner Execute yields the
 // supplied catalog rows (shape-projected: a flat `output` envelope).
 func designEngine(designOut string, catalogRows []map[string]any) *fakeEngine {
 	return &fakeEngine{
-		siResponder: func(templateId string, _ map[string]any) (any, error) {
+		aiResponder: func(templateId string, _ map[string]any) (any, error) {
 			if templateId == "authoringDesign" {
 				return designOut, nil
 			}
@@ -281,7 +281,7 @@ func TestRunDesignPass_CatalogLoadFailureDegradesToAuthor(t *testing.T) {
 		{Kind: "spec", Name: "specDigestItemActive", Purpose: "active", CandidateSource: specCandidateSource},
 	}
 	fe := &fakeEngine{
-		siResponder: func(templateId string, _ map[string]any) (any, error) {
+		aiResponder: func(templateId string, _ map[string]any) (any, error) {
 			if templateId == "authoringDesign" {
 				return designJSON(t, deps), nil
 			}

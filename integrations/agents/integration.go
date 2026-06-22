@@ -299,7 +299,7 @@ func (i *Integration) handleAskSpecialist(ctx context.Context, args map[string]a
 		data["context"] = contextArg
 	}
 
-	raw, err := i.engine.InvokeSIStructured(
+	raw, err := i.engine.InvokeAIStructured(
 		ctx,
 		"askSpecialist",
 		data,

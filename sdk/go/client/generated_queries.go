@@ -910,7 +910,7 @@ func QueryArchivedSpacesBuild(args QueryArchivedSpacesArgs) string {
 	return b.String()
 }
 
-// QueryAssistantAgentForUser -- Resolve the active General Assistant agent owned by a user. Returns 0 or 1 rows. Used by autoJoinSI to derive a canonical agent id consistent across all callers of mutationCreateDailySpace -- the space row's ownerUserId is the same regardless of who triggered the mutation, while args.event.payload.actor (createdBy) varies. memql#273.
+// QueryAssistantAgentForUser -- Resolve the active General Assistant agent owned by a user. Returns 0 or 1 rows. Used by autoJoinAI to derive a canonical agent id consistent across all callers of mutationCreateDailySpace -- the space row's ownerUserId is the same regardless of who triggered the mutation, while args.event.payload.actor (createdBy) varies. memql#273.
 //
 // Bound concept: agent.
 type QueryAssistantAgentForUserArgs struct {
@@ -2316,23 +2316,23 @@ func QueryGuidesForUserBuild(args QueryGuidesForUserArgs) string {
 	return "queryGuidesForUser({})"
 }
 
-// QueryHasSIResponseForReply -- Check if an SI response already exists for a given utterance (idempotency check).
+// QueryHasAIResponseForReply -- Check if an SI response already exists for a given utterance (idempotency check).
 //
 // Bound concept: utterance.
-type QueryHasSIResponseForReplyArgs struct {
+type QueryHasAIResponseForReplyArgs struct {
 	ReplyToId     string
 	ParticipantId string
 }
 
-// QueryHasSIResponseForReply calls the engine query queryHasSIResponseForReply.
-func (qc *QueryClient) QueryHasSIResponseForReply(ctx context.Context, args QueryHasSIResponseForReplyArgs) (*Result, error) {
-	call := QueryHasSIResponseForReplyBuild(args)
-	return qc.executeNamed(ctx, "queryHasSIResponseForReply", call)
+// QueryHasAIResponseForReply calls the engine query queryHasAIResponseForReply.
+func (qc *QueryClient) QueryHasAIResponseForReply(ctx context.Context, args QueryHasAIResponseForReplyArgs) (*Result, error) {
+	call := QueryHasAIResponseForReplyBuild(args)
+	return qc.executeNamed(ctx, "queryHasAIResponseForReply", call)
 }
 
-func QueryHasSIResponseForReplyBuild(args QueryHasSIResponseForReplyArgs) string {
+func QueryHasAIResponseForReplyBuild(args QueryHasAIResponseForReplyArgs) string {
 	var b strings.Builder
-	b.WriteString("queryHasSIResponseForReply({")
+	b.WriteString("queryHasAIResponseForReply({")
 	b.WriteString("replyToId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ReplyToId))
 	if b.Len() > 28 {

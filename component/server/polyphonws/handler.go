@@ -293,7 +293,7 @@ func (h *Handler) ServeUtterance(w http.ResponseWriter, r *http.Request) {
 	// downstream queries resolve ids -- the row lands in the DB and
 	// fires graph events (so cognition reacts) but the same-context
 	// querySpaceUtterances() cannot find it. The greeting works because
-	// autoJoinSI's mutation hashes the inputs into a bare slug; the
+	// autoJoinAI's mutation hashes the inputs into a bare slug; the
 	// polyphon HTTP path bypasses that mutation and built the id by
 	// raw concatenation.
 	//

@@ -43,7 +43,7 @@ const feedbackAnnounceGateLockClass int32 = 0x464E4452
 // The bug: the utterance-created event is broadcast to BOTH cognition replicas
 // (the graph.node.created.v1:cognition:* bridge rule fans out to all peers), so
 // both run handleUtteranceForCognition. The only cross-replica guard was the
-// read-before-write queryHasSIResponseForReply SELECT, which BOTH replicas pass
+// read-before-write queryHasAIResponseForReply SELECT, which BOTH replicas pass
 // because neither inserts its SI response until the multi-second LLM turn ends.
 // Each then mints its own replyId and inserts a row -> two identical replies.
 //
@@ -55,7 +55,7 @@ const feedbackAnnounceGateLockClass int32 = 0x464E4452
 // leave an utterance owned by ZERO replicas -> a dropped reply).
 //
 // Lock lifetime -- option (a), held across the turn. The winner holds the lock
-// from the gate until its handler returns (after insertSIResponse lands), then
+// from the gate until its handler returns (after insertAIResponse lands), then
 // releases via the returned release func. We deliberately do NOT release early
 // and write a separate "claim" row (option (b)), because:
 //
@@ -101,7 +101,7 @@ const feedbackAnnounceGateLockClass int32 = 0x464E4452
 // never DROP a reply. So on ANY infrastructure failure (nil getter, DB not
 // ready, connection error, lock-query error) tryDispatch returns
 // (proceed=true, release=noop): the replica falls through to the existing
-// queryHasSIResponseForReply read-before-write check downstream. The fail-safe
+// queryHasAIResponseForReply read-before-write check downstream. The fail-safe
 // fires ONLY when the gate cannot make a trustworthy lock decision (the DB is
 // the gate's source of truth); a clean "another replica owns this" answer is
 // honored strictly. A duplicate is recoverable; a dropped reply is not.
@@ -200,7 +200,7 @@ func dispatchGateLockKey(utteranceId string) int32 {
 // greet-on-join greeting for a given (spaceId, agentId) (znasllc-io/memql#1386).
 //
 // The bug it fixes: the v1:cognition:participant.created event is broadcast to
-// BOTH cognition replicas, so both run handleSIParticipantGreeting and both
+// BOTH cognition replicas, so both run handleAIParticipantGreeting and both
 // call runGreetingTurn. The only cross-replica guard was the read-before-write
 // greetingExists SELECT, which BOTH replicas pass because neither inserts its
 // greeting utterance until after the multi-second initial-delay sleep + LLM

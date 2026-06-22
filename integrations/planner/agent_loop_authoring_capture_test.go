@@ -70,7 +70,7 @@ func newCaptureFixture(t *testing.T, plan map[string]any, existingBundle []any, 
 	designOut := designJSON(t, deps)
 
 	fe := &fakeEngine{
-		siResponder: func(templateId string, _ map[string]any) (any, error) {
+		aiResponder: func(templateId string, _ map[string]any) (any, error) {
 			switch templateId {
 			case "authoringDesign":
 				return designOut, nil

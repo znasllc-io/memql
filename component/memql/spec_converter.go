@@ -123,7 +123,7 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 		ExprSource:  canonicalExpression(expr),
 		Expr:        expr,
 		Kind:        kind,
-		UsesSI:      detectSIUsage(expr),
+		UsesAI:      detectAIUsage(expr),
 		Origin:      origin,
 		IsTrait:     decl.IsTrait,
 	}, nil

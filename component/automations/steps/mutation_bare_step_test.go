@@ -9,7 +9,7 @@ import (
 
 // These tests pin the memql#574 fix: a BARE step identifier passed to a
 // selector builtin (e.g. `coalesce(getActiveGA, getFallbackGA)`) must resolve
-// to the step's result, not render as its own name. The autoJoinSI logic
+// to the step's result, not render as its own name. The autoJoinAI logic
 // builds the GA participant id via
 //
 //	getGA := coalesce(getActiveGA, getFallbackGA)
@@ -29,7 +29,7 @@ func agentRow(id, name string) any {
 	return map[string]any{"id": id, "payload": map[string]any{"name": name}}
 }
 
-// resolveAutoJoinGAId reproduces the autoJoinSI two-step id derivation against a
+// resolveAutoJoinGAId reproduces the autoJoinAI two-step id derivation against a
 // seeded evaluator and returns whatever agentId the mutation would receive.
 func resolveAutoJoinGAId(t *testing.T, active, fallback *automations.StepResult) any {
 	t.Helper()
@@ -51,7 +51,7 @@ func resolveAutoJoinGAId(t *testing.T, active, fallback *automations.StepResult)
 	return id
 }
 
-func TestBareStepIdentifier_AutoJoinSI_ActiveAgent(t *testing.T) {
+func TestBareStepIdentifier_AutoJoinAI_ActiveAgent(t *testing.T) {
 	active := &automations.StepResult{StepId: "getActiveGA", Status: "success", Result: bundleResult(agentRow("v1:agents:agent:A", "Sofia"))}
 	fallback := &automations.StepResult{StepId: "getFallbackGA", Status: "skipped"} // not fired, Result nil
 
@@ -61,7 +61,7 @@ func TestBareStepIdentifier_AutoJoinSI_ActiveAgent(t *testing.T) {
 	}
 }
 
-func TestBareStepIdentifier_AutoJoinSI_FallbackAgent(t *testing.T) {
+func TestBareStepIdentifier_AutoJoinAI_FallbackAgent(t *testing.T) {
 	// activeAssistantId empty -> getActiveGA skipped, getFallbackGA fires.
 	active := &automations.StepResult{StepId: "getActiveGA", Status: "skipped"} // Result nil
 	fallback := &automations.StepResult{StepId: "getFallbackGA", Status: "success", Result: bundleResult(agentRow("v1:agents:agent:B", "Sofia"))}
@@ -72,7 +72,7 @@ func TestBareStepIdentifier_AutoJoinSI_FallbackAgent(t *testing.T) {
 	}
 }
 
-func TestBareStepIdentifier_AutoJoinSI_NoAgent(t *testing.T) {
+func TestBareStepIdentifier_AutoJoinAI_NoAgent(t *testing.T) {
 	// The fired query returned zero rows and the other branch was skipped: there
 	// is genuinely no GA. The id must resolve to nil/"" so the `!getGA.Empty()`
 	// guard suppresses the join -- NOT to a literal expression.

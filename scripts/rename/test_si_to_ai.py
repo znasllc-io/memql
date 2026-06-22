@@ -95,14 +95,17 @@ check("findSIParticipant go", transform("findSIParticipant", ".go"), "findAIPart
 check("autoJoinSI memql", transform("autoJoinSI", ".memql"), "autoJoinAI")
 check("LogicAutoJoinSIArgs go", transform("LogicAutoJoinSIArgs", ".go"), "LogicAutoJoinAIArgs")
 
-# --- DSL keyword, scoped to .memql ---
+# --- DSL keyword: si( -> ai( in BOTH .memql (dsl-keyword) and .go literals (go-keyword-literals) ---
 check("si() in memql", transform('x := si("p", a)', ".memql"), 'x := ai("p", a)')
-check("si() NOT touched in .go",
-      transform('foo.si("p")', ".go"), 'foo.si("p")')  # no dsl-keyword rule for .go
+check("si( literal renamed in .go (parse/serialize sites)",
+      transform('WriteString("si(")', ".go"), 'WriteString("ai(")')
 
-# --- "si" data value (string literal) is left alone: no bare-si identifier rule ---
-check("participantType si value kept",
+# --- "si" data value (NO paren) is left alone everywhere: no bare-si rule ---
+check("participantType si value kept (.go)",
       transform('participantType == "si"', ".go"), 'participantType == "si"')
+check("participantType si value kept (.memql)",
+      transform('payload.participantType == "si"', ".memql"),
+      'payload.participantType == "si"')
 
 # --- idempotency: apply twice == once, across a mixed blob ---
 blob = ('InvokeSI(); SIProvider{}; SIPInboundTrunkInfo; isSITyping; '

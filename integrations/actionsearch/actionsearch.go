@@ -47,7 +47,7 @@ const (
 type Integration struct {
 	Logger            *slog.Logger
 	dbGetter          func() *sql.DB
-	embeddingProvider func(name string) (memql.EmbeddingSIProvider, error)
+	embeddingProvider func(name string) (memql.EmbeddingAIProvider, error)
 }
 
 // New constructs an actionsearch integration.
@@ -62,7 +62,7 @@ func New(logger *slog.Logger) *Integration {
 func (i *Integration) SetDBGetter(f func() *sql.DB) { i.dbGetter = f }
 
 // SetEmbeddingProvider injects the provider registry lookup.
-func (i *Integration) SetEmbeddingProvider(f func(name string) (memql.EmbeddingSIProvider, error)) {
+func (i *Integration) SetEmbeddingProvider(f func(name string) (memql.EmbeddingAIProvider, error)) {
 	i.embeddingProvider = f
 }
 

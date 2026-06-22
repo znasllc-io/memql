@@ -71,7 +71,7 @@ type MemQLExecutor interface {
 type Options struct {
 	Logger          *slog.Logger
 	STTProvider     stt.StreamingProvider
-	TTSProvider     memql.TTSSIProvider
+	TTSProvider     memql.TTSAIProvider
 	Engine          MemQLExecutor
 	WriteTimeout    time.Duration
 	MaxMessageBytes int64
@@ -82,7 +82,7 @@ type Options struct {
 type Handler struct {
 	logger          *slog.Logger
 	sttProvider     stt.StreamingProvider
-	ttsProvider     memql.TTSSIProvider
+	ttsProvider     memql.TTSAIProvider
 	engine          MemQLExecutor
 	writeTimeout    time.Duration
 	maxMessageBytes int64

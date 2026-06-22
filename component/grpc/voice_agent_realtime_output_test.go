@@ -11,7 +11,7 @@ import (
 
 // TestBuildRealtimeCitationsClause covers the citations-clause builder
 // the realtime output handler (#437) uses to reach byte-for-byte chat-
-// render parity with the cascade's insertSIResponse. The clause is the
+// render parity with the cascade's insertAIResponse. The clause is the
 // exact serialized form that lands on v1:cognition:utterance.citations,
 // which the frontend's splitTextAtCitations wraps in chips.
 func TestBuildRealtimeCitationsClause(t *testing.T) {
@@ -39,7 +39,7 @@ func TestBuildRealtimeCitationsClause(t *testing.T) {
 			{DomainId: "customer_relations", MatchedPhrase: "escalation policy"},
 		})
 		// Leading `, citations: ` then a JSON array of {domainId,
-		// matchedPhrase} -- the same shape insertSIResponse writes.
+		// matchedPhrase} -- the same shape insertAIResponse writes.
 		assert.True(t, strings.HasPrefix(clause, ", citations: "), "clause=%q", clause)
 		assert.Contains(t, clause, `"domainId":"customer_relations"`)
 		assert.Contains(t, clause, `"matchedPhrase":"escalation policy"`)

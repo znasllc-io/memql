@@ -342,7 +342,7 @@ func (e *MutationExecutor) evaluateValue(evaluator *automations.Evaluator, value
 		// through to EvaluateString below and render as their OWN NAME (a literal
 		// string), which is non-nil/non-empty -- so coalesce returns the string
 		// "getActiveGA" and the chained `getGA.First().id` read finds no nodes,
-		// silently defeating autoJoinSI -> ghost SI (memql#574). Guarded on a
+		// silently defeating autoJoinAI -> ghost SI (memql#574). Guarded on a
 		// real step id so non-step bare literals keep their prior behaviour.
 		if isBareStepIdentifier(v) {
 			if result, ok := evaluator.StepResultValue(v); ok {

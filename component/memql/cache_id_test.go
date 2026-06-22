@@ -40,18 +40,18 @@ func TestCacheKey_DifferentInputs(t *testing.T) {
 	}
 }
 
-func TestSICacheKey_Deterministic(t *testing.T) {
-	key1 := buildSICacheKey("template1", "openai", "prompt text")
-	key2 := buildSICacheKey("template1", "openai", "prompt text")
+func TestAICacheKey_Deterministic(t *testing.T) {
+	key1 := buildAICacheKey("template1", "openai", "prompt text")
+	key2 := buildAICacheKey("template1", "openai", "prompt text")
 
 	if key1 != key2 {
 		t.Error("SI cache key should be deterministic")
 	}
 }
 
-func TestSICacheKey_DifferentInputs(t *testing.T) {
-	key1 := buildSICacheKey("template1", "openai", "prompt text")
-	key2 := buildSICacheKey("template1", "anthropic", "prompt text")
+func TestAICacheKey_DifferentInputs(t *testing.T) {
+	key1 := buildAICacheKey("template1", "openai", "prompt text")
+	key2 := buildAICacheKey("template1", "anthropic", "prompt text")
 
 	if key1 == key2 {
 		t.Error("different providers should produce different keys")
@@ -96,7 +96,7 @@ func BenchmarkCacheKey_New(b *testing.B) {
 	}
 }
 
-func BenchmarkSICacheKey_Old(b *testing.B) {
+func BenchmarkAICacheKey_Old(b *testing.B) {
 	templateId := "template1"
 	provider := "openai"
 	prompt := "This is a test prompt with some content"
@@ -107,8 +107,8 @@ func BenchmarkSICacheKey_Old(b *testing.B) {
 	}
 }
 
-func BenchmarkSICacheKey_New(b *testing.B) {
+func BenchmarkAICacheKey_New(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_ = buildSICacheKey("template1", "openai", "This is a test prompt with some content")
+		_ = buildAICacheKey("template1", "openai", "This is a test prompt with some content")
 	}
 }

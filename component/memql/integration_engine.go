@@ -12,11 +12,11 @@ import (
 // streaming, MemQL function execution, SI prompt invocation, and prompt
 // rendering.
 //
-// SI invocation (InvokeSI) is exposed here because the cognition integration
+// SI invocation (InvokeAI) is exposed here because the cognition integration
 // drives score-based agent routing from Go with dynamic per-utterance
 // context (participants, recent turns, scoring signals). Expressing that in
 // the DSL would require building a query string every turn; calling
-// InvokeSI directly is cleaner. The DSL `ai()` form is still the right
+// InvokeAI directly is cleaner. The DSL `ai()` form is still the right
 // choice inside shape() projection contexts.
 type IntegrationEngineAccess interface {
 	// RegisterIntegration registers an IntegrationProvider, making its
@@ -29,15 +29,15 @@ type IntegrationEngineAccess interface {
 	// streaming completes.
 	Execute(ctx context.Context, query string) (*ExecuteResult, error)
 
-	// InvokeSI runs a prompt template by ID with the given data map,
+	// InvokeAI runs a prompt template by ID with the given data map,
 	// routing through the engine's SI provider registry (including cache
 	// and provider-override plumbing). Equivalent to `ai("<id>", {...data})`
 	// in the DSL, but callable from Go without having to build and parse
 	// a query string. The DSL form is only valid inside shape() projection
-	// contexts; InvokeSI is the top-level equivalent for integration code.
-	InvokeSI(ctx context.Context, templateId string, data map[string]any) (any, error)
+	// contexts; InvokeAI is the top-level equivalent for integration code.
+	InvokeAI(ctx context.Context, templateId string, data map[string]any) (any, error)
 
-	// InvokeSIStructured renders a prompt template and invokes its
+	// InvokeAIStructured renders a prompt template and invokes its
 	// default chat provider with a JSON schema the model must match.
 	// Returns the raw JSON string. Used for routing, classification,
 	// suggestion -- any "logic" prompt where shape correctness matters
@@ -45,7 +45,7 @@ type IntegrationEngineAccess interface {
 	// MemQLEngine interface (which historically had this method
 	// before it was promoted to the common surface) so integrations
 	// no longer have to declare a local engine-interface superset.
-	InvokeSIStructured(
+	InvokeAIStructured(
 		ctx context.Context,
 		templateId string,
 		data map[string]any,

@@ -10,23 +10,23 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 )
 
-// fakeEngine records every Execute / InvokeSI / tool-loop call so a
+// fakeEngine records every Execute / InvokeAI / tool-loop call so a
 // test can assert which DSL functions the dispatcher + cron invoked,
 // and feed canned responses keyed by a substring of the query.
 type fakeEngine struct {
 	mu sync.Mutex
 
 	execCalls []string
-	siCalls   []string
+	aiCalls   []string
 	toolCalls []string
 
 	// execResponder returns a canned result for a query. Matched by the
 	// test on a substring; nil result + nil error when unset.
 	execResponder func(query string) (any, error)
-	// siResponder returns a canned result for an InvokeSI call. When
-	// unset, InvokeSI returns (nil, nil) -- the legacy behavior.
-	siResponder func(templateId string, data map[string]any) (any, error)
-	// toolResult is returned from InvokeSIChatWithFilteredTools.
+	// aiResponder returns a canned result for an InvokeAI call. When
+	// unset, InvokeAI returns (nil, nil) -- the legacy behavior.
+	aiResponder func(templateId string, data map[string]any) (any, error)
+	// toolResult is returned from InvokeAIChatWithFilteredTools.
 	toolResult string
 	toolErr    error
 }
@@ -41,10 +41,10 @@ func (f *fakeEngine) Execute(_ context.Context, query string) (any, error) {
 	return nil, nil
 }
 
-func (f *fakeEngine) InvokeSI(_ context.Context, templateId string, data map[string]any) (any, error) {
+func (f *fakeEngine) InvokeAI(_ context.Context, templateId string, data map[string]any) (any, error) {
 	f.mu.Lock()
-	f.siCalls = append(f.siCalls, templateId)
-	responder := f.siResponder
+	f.aiCalls = append(f.aiCalls, templateId)
+	responder := f.aiResponder
 	f.mu.Unlock()
 	if responder != nil {
 		return responder(templateId, data)
@@ -52,7 +52,7 @@ func (f *fakeEngine) InvokeSI(_ context.Context, templateId string, data map[str
 	return nil, nil
 }
 
-func (f *fakeEngine) InvokeSIChatWithFilteredTools(_ context.Context, templateId string, _ map[string]any, toolNames []string) (string, error) {
+func (f *fakeEngine) InvokeAIChatWithFilteredTools(_ context.Context, templateId string, _ map[string]any, toolNames []string) (string, error) {
 	f.mu.Lock()
 	f.toolCalls = append(f.toolCalls, templateId+":"+strings.Join(toolNames, ","))
 	f.mu.Unlock()
@@ -63,7 +63,7 @@ func (f *fakeEngine) snapshot() ([]string, []string, []string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.execCalls...),
-		append([]string(nil), f.siCalls...),
+		append([]string(nil), f.aiCalls...),
 		append([]string(nil), f.toolCalls...)
 }
 
