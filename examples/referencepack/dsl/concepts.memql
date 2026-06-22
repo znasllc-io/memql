@@ -1,0 +1,21 @@
+// concepts.memql -- the referencepack reference pack (examples/referencepack).
+//
+// This file is the schema half of the minimal reference pack that
+// demonstrates the memQL pack model end-to-end (epic 2, issue 2.5). It
+// declares ONE concept so the pack contributes a real, queryable schema
+// to the engine's concept registry the same way a core domain does.
+//
+// Authorization (owned tier): ownerUserId is the per-row authz key, the
+// same pattern every owned core concept uses -- a read path filters on
+// payload.ownerUserId == actor.userId, a write path stamps it from
+// actor.userId. The field is here so the pack demonstrates an authz-sane
+// concept, not just an empty schema.
+
+@version("1.0.0")
+@namespace("referencepack")
+@description("A minimal greeting record contributed by the reference pack (examples/referencepack). Demonstrates that a pack's embedded .memql concept lands in the engine's concept registry alongside the core domains.")
+@displayCard(primary="message", secondary="ownerUserId", tertiary="createdAt")
+concept greeting {
+  ownerUserId  string  @required  @description("v1:identity:user.id of the owner. Per-row authz key (owned tier); stamped from actor.userId by the writing mutation.")
+  message      string  @required  @description("The greeting text, e.g. \"hello from the reference pack\".")
+}

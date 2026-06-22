@@ -1,0 +1,19 @@
+// builtins.memql -- the referencepack reference pack.
+//
+// A builtin bridges a MemQL tool/automation call to a Go integration
+// capability. This one is backed by the pack's IntegrationProvider
+// (see ../pack.go): its @executor names the capability FQN
+// "integration.referencepack.composeGreeting", which the engine
+// resolves to the Go handler registered by NewProvider().Capabilities().
+//
+// This is the "one integration capability (builtin)" half of the pack
+// acceptance: the DSL declaration here + the Go capability in pack.go
+// are the two ends of the same wire.
+
+@enabled
+@executor("integration.referencepack.composeGreeting")
+@args(profile="object")
+@description("Compose a greeting string for a user via the reference pack's Go integration capability. Demonstrates a pack contributing a DSL-callable builtin backed by Go.")
+builtin referencePackComposeGreeting {
+  userName  string  @required  @description("Name to greet.")
+}

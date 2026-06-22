@@ -1,0 +1,29 @@
+// automations.memql -- the referencepack reference pack.
+//
+// One automation that HOOKS A CORE SERVICE EVENT: it triggers on the
+// creation of a core `v1:cognition:space` row -- a node owned by a core
+// memQL domain, not by this pack. This is the "automation hooking a core
+// service" half of the pack acceptance: a pack reacts to a core concept's
+// lifecycle event without the core knowing the pack exists.
+//
+// The step calls the pack's own builtin (referencePackComposeGreeting),
+// so the automation also exercises the pack's Go capability. We greet the
+// new space's owner. `event` is the triggering node bound as the
+// automation arg; `event.payload.ownerUserId` is the space owner stamped
+// by the core create mutation.
+//
+// NOTE: this is a demonstration of the wiring, not a production behavior
+// -- the reference pack is never linked into a production binary (it has
+// no unconditional self-registering init(); see ../pack.go and
+// ../register_referencepack.go).
+
+use referencepack.builtins.{ referencePackComposeGreeting }
+
+@enabled
+@trigger(event="node.created", concept="v1:cognition:space", partition="*")
+@description("On creation of a core space, compose a greeting for the space owner via the pack's integration capability. Demonstrates a pack automation hooking a core service event.")
+automation referencePackGreetOnSpaceCreate {
+  step greet {
+    referencePackComposeGreeting { userName: event.payload.ownerUserId }
+  }
+}

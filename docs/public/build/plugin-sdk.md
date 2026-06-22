@@ -17,7 +17,8 @@ This page is the **contract reference** for the Go surface a pack targets -- the
 `PluginContext` it receives, the `PluginFactory` it implements, the
 registration primitives it calls, and the **contract version** the loader
 checks at startup. For an end-to-end "build your first pack" walkthrough, see
-the developer guide (issue 2.5).
+[Building a pack](building-a-pack.md) -- the developer guide, with the in-tree
+`examples/referencepack` reference pack as its worked example.
 
 > **Scope.** Packs are **compiled in via build tags** -- there is no runtime
 > (non-compiled) pack loading, by design. "Loading a pack" means linking its

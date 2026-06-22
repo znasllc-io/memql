@@ -1,0 +1,20 @@
+// tools.memql -- the referencepack reference pack.
+//
+// One SI-callable tool that surfaces the pack's integration capability
+// to an agent's tool loop. Its @handler points at the builtin in
+// builtins.memql by name; the builtin in turn forwards to the Go
+// capability "integration.referencepack.composeGreeting". So an agent
+// calling `referencePackGreet` ultimately runs the pack's Go handler.
+//
+// This is the "one tool that surfaces the builtin/capability" half of
+// the pack acceptance. The unified tool loader registers it into the
+// engine's ToolRegistry alongside every core tool (proven by the
+// load+extend test).
+
+@enabled
+@handler(type="function", name="referencePackComposeGreeting")
+@executionTime("fast")
+@description("Greet a user by name. Demonstrates a pack tool that surfaces a pack integration capability to the agent tool loop.")
+tool referencePackGreet {
+  userName  string  @required  @description("Name to greet.")
+}
