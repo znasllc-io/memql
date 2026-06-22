@@ -160,7 +160,7 @@ acceptance case from epic #475, decided with zero LLM cost.
 ### 3.2 Single-agent room (turn allocation) -- decisive, ~sub-1ms
 
 The handler already has a single-agent fast path
-(`cognition_handler.go:407-417`): "if exactly one SI candidate is in the room,
+(`cognition_handler.go:407-417`): "if exactly one AI candidate is in the room,
 the winner is obvious and the LLM router is pure overhead ... saves a measured
 ~1000ms of routeMs per voice turn." The canonical case is a daily space (one
 user + Sofia the GA) and every 1-on-1 standard space.
@@ -426,7 +426,7 @@ The gate adds essentially zero latency and zero decisions in 1-on-1: it is
 
 ### 6.2 Why the gate is a fast traffic-cop for multi-party
 
-A polyphon room is up to 5 humans + up to 3 SI agents (per copresent's space
+A polyphon room is up to 5 humans + up to 3 AI agents (per copresent's space
 architecture). Here the heuristic ladder *is* the traffic cop:
 
 - direct address routes to the named agent (section 3.1).

@@ -85,7 +85,7 @@ func TestHandleVoiceAgentRealtimeSpeaking_RoundTrip(t *testing.T) {
 	spaceId := "sp-1421-" + uniq
 	agentId := "v1:agents:agent:assistant-1421-" + uniq
 
-	// Seed an active SI participant via the production mutation so the row is
+	// Seed an active AI participant via the production mutation so the row is
 	// canonicalized + partitioned exactly as the autoJoinAI automation lands
 	// it -- a raw DB insert is not seen by querySiParticipantForSpace's
 	// partition-scoped read.
@@ -93,14 +93,14 @@ func TestHandleVoiceAgentRealtimeSpeaking_RoundTrip(t *testing.T) {
 		`mutationJoinSpaceAsAI({spaceId: %q, agentId: %q, displayName: "Sofia", forUserId: "v1:identity:user:owner-1421"})`,
 		spaceId, agentId)
 	_, err = eng.Execute(ctx, joinQ)
-	require.NoError(t, err, "seed SI participant via mutationJoinSpaceAsAI")
+	require.NoError(t, err, "seed AI participant via mutationJoinSpaceAsAI")
 
 	svc := &service{engine: eng}
 	sess := &streamSession{service: svc}
 
 	// Sanity: the handler resolves the seeded participant.
 	resolved := sess.resolveAIParticipantId(ctx, spaceId)
-	require.NotEmpty(t, resolved, "handler resolves the seeded SI participant")
+	require.NotEmpty(t, resolved, "handler resolves the seeded AI participant")
 	presenceId := realtimePresenceRecordId(resolved)
 	t.Cleanup(func() {
 		_, _ = db.NewDelete().Model((*concept.MemoryNode)(nil)).Where("id = ?", resolved).Exec(context.Background())

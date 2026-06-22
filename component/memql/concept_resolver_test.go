@@ -10,7 +10,7 @@ import (
 )
 
 // TestResolveAttribute_TriggerOnSugarEmits5SegmentPattern guards against the
-// same 4-segment topic regression that broke SI responses in the cognition
+// same 4-segment topic regression that broke AI responses in the cognition
 // integration. The @trigger(on=participant.created) sugar is not currently
 // used by any shipped .memql file, but the resolver still handles it, and
 // any pattern it emits must match the emitted-topic format

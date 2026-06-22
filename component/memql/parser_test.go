@@ -191,7 +191,7 @@ func TestParseValidateFunction(t *testing.T) {
 // argument syntax: identifier keys are bare (not quoted), nested objects
 // recurse with the same rule, and quoted string keys still parse so
 // JSON-serialized tool calls remain compatible. This is the regression
-// guard for "cognition integration silently silently never finds SI
+// guard for "cognition integration silently silently never finds AI
 // participants because querySpaceParticipants({spaceId: ...}) fails to
 // parse with 'function argument keys must be strings'."
 func TestParseFunctionArgs_UnquotedKeys(t *testing.T) {

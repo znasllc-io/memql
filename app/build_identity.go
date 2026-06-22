@@ -13,7 +13,7 @@ import "log/slog"
 // Identity nodes need: config, database (for v1:identity:auditEvent
 // rows + magic-link / access-request rows), engine, core
 // integrations, base transport, plus the identity-specific routes.
-// They don't need: SI providers, voice pipeline, agent reply
+// They don't need: AI providers, voice pipeline, agent reply
 // pipeline. Smaller binary, narrower attack surface.
 func Build(serviceLogger *slog.Logger, version string, overrides Overrides) *App {
 	a := newApp(serviceLogger, version, overrides)

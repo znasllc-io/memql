@@ -18,7 +18,7 @@ memQL uses Go build tags to compile separate binaries for each node type in the 
 | **bff** | (none, default) | Backend for frontend | ~25 MB |
 | **voice** | `voice` | Voice transport (audio WS, LiveKit) | ~30 MB |
 | **cognition** | `cognition` | Cognition pipeline, Polyphon | ~35 MB |
-| **agent** | `agent` | Task execution, SI work, tool calling | ~43 MB |
+| **agent** | `agent` | Task execution, AI work, tool calling | ~43 MB |
 | **planner** | `planner` | Task planning and orchestration | ~25 MB |
 | **workbench** | `workbench` | Sandboxed per-Plan Linux execution surface | ~25 MB |
 | **mcp** | `mcp` | MCP (Model Context Protocol) server -- engine tool surface to external MCP hosts (epic memql#1529) | ~70 MB |
@@ -103,7 +103,7 @@ app/
   transport.go                  # transportBase() + createHTTPServer() (all nodes)
   transport_bff.go              # BFF transport (base + HTTP)
   transport_cognition.go        # Polyphon endpoints
-  transport_agent.go            # SI HTTP + audio + attachments
+  transport_agent.go            # AI HTTP + audio + attachments
   transport_minimal.go          # Minimal (planner)
   transport_voice.go            # wirePolyphonEndpoints (cognition only)
   cluster.go                    # Phase 6: node bootstrap + DB-based peer discovery
@@ -127,7 +127,7 @@ app/
 | Attachment Upload (`/spaces/{id}/attachments`) | | | | x | |
 | STT Provider | | x | x | x | |
 | File / Storage / Email integrations | | | | x | |
-| Agent SI tool-loop + replier + suggest | | | | x | |
+| Agent AI tool-loop + replier + suggest | | | | x | |
 
 ### Compile-Time Node Type
 

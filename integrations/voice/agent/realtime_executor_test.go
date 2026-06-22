@@ -838,7 +838,7 @@ func TestRealtimeExecutor_OutputCapture_AppendOnly_NoCrossResponseLeak(t *testin
 // no-second-writer contract for the cognition/text leg: a speak directive
 // carrying authored Text (no directive mode) re-voices a reply that is ALREADY
 // a committed chat row, so the model's spoken paraphrase must NOT be captured
-// as a second SI utterance. The suppression is per-response: the next
+// as a second AI utterance. The suppression is per-response: the next
 // model-authored response is captured normally.
 func TestRealtimeExecutor_OutputCapture_ReVoiceNotCaptured(t *testing.T) {
 	fs := newFakeStream()

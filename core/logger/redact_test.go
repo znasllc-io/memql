@@ -34,8 +34,8 @@ func TestShouldRedact(t *testing.T) {
 		{"set-cookie", "set-cookie", true},
 		{"Set-Cookie", "Set-Cookie", true},
 		{"bearer", "bearer", true},
-		{"prompt (SI)", "prompt", true},
-		{"completion (SI)", "completion", true},
+		{"prompt (AI)", "prompt", true},
+		{"completion (AI)", "completion", true},
 		{"payload", "payload", true},
 		{"body", "body", true},
 		// Non-matches.

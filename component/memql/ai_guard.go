@@ -69,7 +69,7 @@ import (
 )
 
 // laneCtxKey tags a context as belonging to the background (batch)
-// execution lane (memql#897). The background SI executor stamps it via
+// execution lane (memql#897). The background AI executor stamps it via
 // ContextWithBackgroundLane before issuing model calls; because the
 // vendor SDKs thread the call context all the way to the HTTP request,
 // guardedTransport.RoundTrip can read it off req.Context() and count the

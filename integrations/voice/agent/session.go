@@ -217,7 +217,7 @@ func (s *Session) Run(ctx context.Context) error {
 	}
 
 	// Register the unsolicited VoiceAgentSpeak handler. memQL pushes one
-	// Speak per SI reply utterance that lands while audio output is enabled
+	// Speak per AI reply utterance that lands while audio output is enabled
 	// and no VoiceAgentTurnRequest is in flight; the audio loop (#455) drives
 	// TTS playout from it. For #454 we register the seam and log receipt so
 	// the wire path is provably reachable; the actual say() pipeline is #455.

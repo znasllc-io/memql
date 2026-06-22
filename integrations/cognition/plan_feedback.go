@@ -167,7 +167,7 @@ func (c *CognitionIntegration) announceFeedbackRequest(ctx context.Context, plan
 
 	aiParticipant, err := c.findAIParticipant(ctx, plan.SpaceId)
 	if err != nil || aiParticipant == nil || strings.TrimSpace(aiParticipant.ID) == "" {
-		c.Logger.Warn("cognition: no SI participant to announce plan feedback; skipping",
+		c.Logger.Warn("cognition: no AI participant to announce plan feedback; skipping",
 			"error", err, "spaceId", plan.SpaceId, "planId", plan.ID)
 		return
 	}

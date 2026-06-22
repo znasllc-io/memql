@@ -1,4 +1,4 @@
-// Package router is the memQL SI Router: the single entry point every SI
+// Package router is the memQL AI Router: the single entry point every AI
 // call flows through. It resolves a ResolveRequest to a concrete provider,
 // wraps the provider with an observer that records one v1:router:call row
 // per call (tokens, cost, latency, outcome), and hands the wrapped provider
@@ -12,9 +12,9 @@
 // Design notes
 //
 //   - The router is an in-process component, not a dedicated node. Every
-//     node that calls SI embeds it. Observability rides the shared
+//     node that calls AI embeds it. Observability rides the shared
 //     Postgres/TimescaleDB store via a MemQL mutation; no extra network
-//     hop on the SI call path.
+//     hop on the AI call path.
 //
 //   - Token counts in Phase 1 are heuristic (char-count / 4). The
 //     CallRecord carries tokensEstimated=true so downstream dashboards
@@ -22,8 +22,8 @@
 //     through the stream chunk types.
 //
 //   - Recording is fire-and-forget on a detached context. The router
-//     never blocks an SI reply on the ledger write. A dropped write is
-//     logged and the SI call continues.
+//     never blocks an AI reply on the ledger write. A dropped write is
+//     logged and the AI call continues.
 package router
 
 import (
@@ -51,7 +51,7 @@ type ResolveRequest struct {
 	// straight to the v1:router:call row. Leave empty when a given
 	// dimension doesn't apply (e.g. AgentId is empty for a suggest
 	// call). (Epic 3 3.2 #1899: the CoPresent space-attribution field
-	// was dropped -- the tenant scope is Partition; per-space SI-cost
+	// was dropped -- the tenant scope is Partition; per-space AI-cost
 	// attribution is a CoPresent-pack concern.)
 	AgentId    string
 	UserId     string

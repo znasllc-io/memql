@@ -153,7 +153,7 @@ func (i *Integration) augmentDomainAnalyzeHandler(ctx context.Context, args map[
 		true,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("augmentDomainAnalyze SI call: %w", err)
+		return nil, fmt.Errorf("augmentDomainAnalyze AI call: %w", err)
 	}
 
 	var payload augmentDomainAnalyzePayload
@@ -275,7 +275,7 @@ func (i *Integration) augmentDomainGenerateHandler(ctx context.Context, args map
 	)
 	if err != nil {
 		i.failAugmentPlan(ctx, planId, fmt.Sprintf("LLM generation failed: %v", err))
-		return nil, fmt.Errorf("augmentDomainGenerate SI call: %w", err)
+		return nil, fmt.Errorf("augmentDomainGenerate AI call: %w", err)
 	}
 
 	var chunkPayload seedChunkPayload

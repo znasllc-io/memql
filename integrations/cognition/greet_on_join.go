@@ -12,7 +12,7 @@ import (
 
 const (
 	// initialGreetingDelay is how long to wait after a greetOnJoin
-	// SI participant joins before firing the agent's opening
+	// AI participant joins before firing the agent's opening
 	// greeting. The previous behaviour fired the LLM call the
 	// instant the participant.created event arrived -- which beat
 	// the user's frontend to the punch: the create-agent / create-
@@ -45,7 +45,7 @@ const (
 )
 
 // greetingPacingState is the per-space serialization+pacing state
-// for greetOnJoin SI greetings. See the field-level comment on
+// for greetOnJoin AI greetings. See the field-level comment on
 // CognitionIntegration.greetingPacing for the rationale.
 type greetingPacingState struct {
 	// mu serializes greetings within this space so a second
@@ -78,7 +78,7 @@ func (c *CognitionIntegration) acquireGreetingPacingState(spaceId string) *greet
 }
 
 // handleAIParticipantGreeting fires when a v1:cognition:participant row
-// is created. If the participant is an SI AND the backing agent's
+// is created. If the participant is an AI AND the backing agent's
 // triggerBehavior.greetOnJoin is true AND no greeting utterance for
 // this (space, agent) exists yet, it generates a brief greeting via
 // the LLM-driven agent reply path and inserts it as the agent's
@@ -330,7 +330,7 @@ func (c *CognitionIntegration) runGreetingTurn(spaceId, participantId, agentId, 
 	// insert -- it is not a field on v1:cognition:utterance (the concept
 	// enforces additionalProperties:false), so including it rejected the
 	// insert and the join greeting silently never landed (memql#419).
-	// The SI display name is already carried by the participant row
+	// The AI display name is already carried by the participant row
 	// referenced via participantId; consumers derive it from there.
 	mutation := fmt.Sprintf(
 		`mutationCreateGreetingUtterance({spaceId: %s, participantId: %s, agentId: %s, text: %s, greetingKind: "agentGreeting"})`,

@@ -44,7 +44,7 @@ const feedbackAnnounceGateLockClass int32 = 0x464E4452
 // (the graph.node.created.v1:cognition:* bridge rule fans out to all peers), so
 // both run handleUtteranceForCognition. The only cross-replica guard was the
 // read-before-write queryHasAIResponseForReply SELECT, which BOTH replicas pass
-// because neither inserts its SI response until the multi-second LLM turn ends.
+// because neither inserts its AI response until the multi-second LLM turn ends.
 // Each then mints its own replyId and inserts a row -> two identical replies.
 //
 // The fix: a Postgres session-level advisory lock keyed by the utterance id.

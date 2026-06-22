@@ -23,11 +23,11 @@ type Engine interface {
 	Execute(ctx context.Context, query string) (*memql.ExecuteResult, error)
 }
 
-// Router is the memQL SI Router. It resolves a ResolveRequest to a
+// Router is the memQL AI Router. It resolves a ResolveRequest to a
 // provider (or a policy-driven fallback chain), wraps that provider
 // with observability, and writes one v1:router:call row per call.
 // Concurrent-safe; a single instance is shared across every node that
-// makes SI calls.
+// makes AI calls.
 type Router struct {
 	providers *memql.ProviderRegistry
 	policies  *memql.PolicyRegistry

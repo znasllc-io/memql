@@ -26,7 +26,7 @@ MemQL has two surfaces, and this guide covers both:
 1. **DSL constructs** — concepts, shapes, specs, traits, queries, mutations, logic, builtins, providers, prompts, tools, automations, and policies authored in `.memql` files under `dsl/<namespace>/`. These are loaded at engine startup and are the canonical way to define reusable behavior.
 2. **Runtime query strings** — expressions passed to `engine.Execute(ctx, query)` (or over gRPC / the WebSocket bridge / MCP). These are plain filter expressions, calls to DSL-defined functions, `insert(...)` literals, and introspection meta-commands.
 
-Anything that needs a projection (shape), a reusable predicate (spec), or SI involvement is defined in the DSL and *referenced* from runtime queries — the runtime string surface is intentionally small.
+Anything that needs a projection (shape), a reusable predicate (spec), or AI involvement is defined in the DSL and *referenced* from runtime queries — the runtime string surface is intentionally small.
 
 ## Quick Start
 
@@ -43,16 +43,16 @@ dsl/
 │   ├── shapes.memql        → projections
 │   ├── specs.memql         → boolean predicates
 │   ├── logic.memql         → imperative procedures
-│   ├── prompts.memql       → SI prompt templates
+│   ├── prompts.memql       → AI prompt templates
 │   └── automations.memql   → event/schedule-triggered workflows
 ├── common/
 │   ├── builtins.memql      → Go-backed builtin functions
 │   ├── traits.memql        → cross-concept predicate scaffolds
 │   └── shapes.memql
 ├── providers/
-│   └── providers.memql     → SI provider records
+│   └── providers.memql     → AI provider records
 └── policies/
-    └── policies.memql      → SI provider-selection policies
+    └── policies.memql      → AI provider-selection policies
 ```
 
 Authoring reference skeletons live under `dsl/_reference/` (`_concept`, `_shape`, `_spec`, `_trait`, `_agent`); files whose path starts with `_` are never loaded.
@@ -144,7 +144,7 @@ MemQL uses **omission semantics**—fields are only included when they contain d
 - `result.data` – Array of shaped payloads. Omitted when the query has no shape projection.
 - `errors` – Array of error objects when failures occur. Omitted on success.
 
-Consumers should check for the presence of `errors` before operating on the result. This keeps backend services, clients, and SI agents aligned on the same contract.
+Consumers should check for the presence of `errors` before operating on the result. This keeps backend services, clients, and AI agents aligned on the same contract.
 
 ## Concepts
 
@@ -168,7 +168,7 @@ concept audioOverride {
 }
 ```
 
-**Concept-level annotations:** `@version`, `@namespace`, `@description` (required so humans and SI systems can reason about the dataset).
+**Concept-level annotations:** `@version`, `@namespace`, `@description` (required so humans and AI systems can reason about the dataset).
 
 **Field annotations:** `@required`, `@default("...")` (honored on insert), `@description("...")`. Field types include `string`, `bool`, `int`, `float`, `object`, `datetime`, `[]object`, and inline `enum("a", "b", ...)` value sets.
 
@@ -526,13 +526,13 @@ shape space spaceCardAlias {
 
 To discover available shapes at runtime, use the `shapeTemplates()` and `shapeHelp("name")` introspection commands (see [Introspection](#introspection-functions)).
 
-## SI: Providers, Policies, Prompts, and `si()`
+## AI: Providers, Policies, Prompts, and `si()`
 
-MemQL's SI integration is intentionally scoped: language models can only influence the *output* of explicitly SI-aware constructs (prompt calls in logic bodies); filters, sorts, pagination, and mutations remain deterministic.
+MemQL's AI integration is intentionally scoped: language models can only influence the *output* of explicitly AI-aware constructs (prompt calls in logic bodies); filters, sorts, pagination, and mutations remain deterministic.
 
 ### Providers
 
-SI provider configurations (OpenAI and Anthropic — the only supported vendors) live in `dsl/providers/providers.memql`. Struct form, mirrors concepts / shapes / tools:
+AI provider configurations (OpenAI and Anthropic — the only supported vendors) live in `dsl/providers/providers.memql`. Struct form, mirrors concepts / shapes / tools:
 
 ```memql
 @extends("openai")
@@ -568,7 +568,7 @@ The legacy `func (Provider) name { ... }` form is retired; the parser rejects it
 
 ### Policies
 
-The live `policy` construct is an **SI provider-selection record**: empty-bodied, annotated with `@primary` / `@fallback` / `@maxLatencyMs` / `@preferredRole`, consolidated in `dsl/policies/policies.memql` and consumed by the SI Router to pick chat/voice/embedding providers:
+The live `policy` construct is an **AI provider-selection record**: empty-bodied, annotated with `@primary` / `@fallback` / `@maxLatencyMs` / `@preferredRole`, consolidated in `dsl/policies/policies.memql` and consumed by the AI Router to pick chat/voice/embedding providers:
 
 ```memql
 @primary("streamClaudeSonnet")
@@ -583,7 +583,7 @@ policy balancedChat { }
 
 ### Prompts
 
-SI prompt templates with input schemas and default providers live in `dsl/<namespace>/prompts.memql`. Struct form — the body is a bare input-schema field list:
+AI prompt templates with input schemas and default providers live in `dsl/<namespace>/prompts.memql`. Struct form — the body is a bare input-schema field list:
 
 ```memql
 @defaultProvider("chat54Mini")
@@ -619,12 +619,12 @@ If no provider override applies, the engine uses the prompt's `@defaultProvider`
 
 Prompt templates are rendered with Go's `text/template` package. When embedding structured data in a template that expects JSON, serialize it first (pass JSON-encoded strings in the data object) rather than passing raw maps, which would render in Go's internal map format.
 
-### SI Cache
+### AI Cache
 
 - `MEMQL_SI_CACHE_DEFAULT_ENABLED` (`true`/`false`) toggles whether `si()` calls cache results when no explicit TTL is provided.
-- `MEMQL_SI_CACHE_MAX_SECONDS` caps any SI cache entry (and doubles as the default TTL when caching is enabled). The engine clamps this to **≤ 300 seconds (5 minutes)**.
+- `MEMQL_SI_CACHE_MAX_SECONDS` caps any AI cache entry (and doubles as the default TTL when caching is enabled). The engine clamps this to **≤ 300 seconds (5 minutes)**.
 
-The SI cache hashes `{templateId, provider, renderedPrompt}` as the cache key. When caching is enabled, a successful provider response is reused until its TTL expires — preventing duplicate LLM calls for identical prompts.
+The AI cache hashes `{templateId, provider, renderedPrompt}` as the cache key. When caching is enabled, a successful provider response is reused until its TTL expires — preventing duplicate LLM calls for identical prompts.
 
 ## Mutations
 
@@ -996,7 +996,7 @@ The introspection commands (`concepts`, `memqlDocs`, `functions`, `help`, `conte
 
 ## Tools
 
-Tools are SI-callable tool definitions — the SI-facing surface of queries, mutations, and builtins. Struct form; the body is a list of input-schema fields with types and annotations (`@required`, `@default`, `@enum`, `@description`); `@handler` binds the tool to its backing operation and `@executionTime` hints latency:
+Tools are AI-callable tool definitions — the AI-facing surface of queries, mutations, and builtins. Struct form; the body is a list of input-schema fields with types and annotations (`@required`, `@default`, `@enum`, `@description`); `@handler` binds the tool to its backing operation and `@executionTime` hints latency:
 
 ```memql
 @enabled
@@ -1108,7 +1108,7 @@ Reserved reference names in condition strings (never step names): `event`, `item
 
 ## Introspection Functions
 
-MemQL exposes the documentation and concept catalog directly through the expression language so clients (human or SI) can bootstrap themselves dynamically.
+MemQL exposes the documentation and concept catalog directly through the expression language so clients (human or AI) can bootstrap themselves dynamically.
 
 These introspection calls are builtins declared in `dsl/common/builtins.memql`. Their names, aliases, and argument contracts are loaded into the function registry at startup; a meta-command dispatch shim recognizes them upfront (before either parser), so they work uniformly across all execution paths.
 
@@ -1222,7 +1222,7 @@ Each entry includes only `name`, `description`, and `kind`. Use `help(name)` to 
 
 ### `tools()`
 
-Returns MCP-compatible tool definitions for SI model integration. Each entry includes `name`, `description`, and `inputSchema`:
+Returns MCP-compatible tool definitions for AI model integration. Each entry includes `name`, `description`, and `inputSchema`:
 
 ```json
 {
@@ -1346,8 +1346,8 @@ Query-result caching is **opt-in per query**: a query with no cache hint is not 
 | Environment Variable | Description | Default |
 |---------------------|-------------|---------|
 | `CACHE_MAX_TTL` | Maximum cache TTL in seconds | `300` |
-| `MEMQL_SI_CACHE_DEFAULT_ENABLED` | Enable SI response caching | `false` |
-| `MEMQL_SI_CACHE_MAX_SECONDS` | Maximum SI cache TTL | `300` |
+| `MEMQL_SI_CACHE_DEFAULT_ENABLED` | Enable AI response caching | `false` |
+| `MEMQL_SI_CACHE_MAX_SECONDS` | Maximum AI cache TTL | `300` |
 
 Cache keys are computed from the normalized query expression (cache hints fold into the canonical form, so two queries that differ only by hint value never share or overwrite cache entries).
 
@@ -1451,7 +1451,7 @@ parentOf(
 
 ### Structured Error Format
 
-MemQL returns machine-actionable structured errors for SI agent consumption. Errors follow this JSON format:
+MemQL returns machine-actionable structured errors for AI agent consumption. Errors follow this JSON format:
 
 ```json
 {
@@ -1497,7 +1497,7 @@ This is a fixed, enumerated set. No dynamic error codes are generated.
 
 ### Suggestion Templates
 
-Suggestions are static templates to help agents recover from errors. They never involve SI generation:
+Suggestions are static templates to help agents recover from errors. They never involve AI generation:
 
 ```
 MISSING_REQUIRED_FIELDS → "Add the missing required fields: {fields}"
@@ -1531,7 +1531,7 @@ Queries can be executed via the gRPC `MemqlService.Stream` bidirectional RPC or 
 
 ## Subscriptions & Events
 
-MemQL provides a real-time event system that delivers notifications for graph mutations, query execution, SI completions, and session lifecycle events. Clients subscribe over the existing bidirectional gRPC stream (or WebSocket bridge) and receive `EventNotification` messages as changes occur.
+MemQL provides a real-time event system that delivers notifications for graph mutations, query execution, AI completions, and session lifecycle events. Clients subscribe over the existing bidirectional gRPC stream (or WebSocket bridge) and receive `EventNotification` messages as changes occur.
 
 ### Subscribing to Events
 
@@ -1571,9 +1571,9 @@ The `filter` field accepts glob patterns for finer control:
 | `graph.node.deleted.{partition}.{concept}` | `NODE_DELETED` | Graph node deleted |
 | `graph.node.updated.{partition}.{concept}` | `NODE_UPDATED` | Graph node updated |
 | `query.executed` | `QUERY_EXECUTED` | Query completed |
-| `si.completion.started` | `SI_COMPLETION_STARTED` | SI request began |
-| `si.completion.finished` | `SI_COMPLETION_FINISHED` | SI request succeeded |
-| `si.completion.error` | `SI_COMPLETION_ERROR` | SI request failed |
+| `si.completion.started` | `SI_COMPLETION_STARTED` | AI request began |
+| `si.completion.finished` | `SI_COMPLETION_FINISHED` | AI request succeeded |
+| `si.completion.error` | `SI_COMPLETION_ERROR` | AI request failed |
 | `session.opened` | `SESSION_OPENED` | gRPC session started |
 | `session.closed` | `SESSION_CLOSED` | gRPC session ended |
 
@@ -1616,7 +1616,7 @@ Subscriptions are automatically cleaned up when the session closes.
 
 > See [docs/public/concepts/events.md](../concepts/events.md) for the full architecture, payload schemas, and implementation details.
 
-## MemQL Language Reference for SI Agents
+## MemQL Language Reference for AI Agents
 
 This is a condensed syntax specification designed to fit within limited context windows. Use this for quick reference; for detailed explanations and examples, see the sections above.
 

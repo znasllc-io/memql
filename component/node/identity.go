@@ -19,7 +19,7 @@ const (
 	// NodeTypeCognition handles voice turn-taking and conversation management.
 	NodeTypeCognition NodeType = "cognition"
 
-	// NodeTypeAgent performs task execution and SI work.
+	// NodeTypeAgent performs task execution and AI work.
 	NodeTypeAgent NodeType = "agent"
 
 	// NodeTypePlanner handles task planning and orchestration.

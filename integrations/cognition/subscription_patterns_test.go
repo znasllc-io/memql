@@ -7,7 +7,7 @@ import (
 )
 
 // TestSubscriptionPatternsMatchEmittedTopics is the regression guard for
-// the historical "SI responses silently stop" bug. Now that #56 phase 8
+// the historical "AI responses silently stop" bug. Now that #56 phase 8
 // retired the partition segment, the topic shape is
 // `graph.node.{action}.{concept}` and patterns must match it exactly.
 func TestSubscriptionPatternsMatchEmittedTopics(t *testing.T) {

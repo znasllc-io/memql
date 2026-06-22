@@ -796,7 +796,7 @@ type streamSession struct {
 
 	// voiceAgentSpeakSubMu protects the session-long speak subscriber
 	// state. A voice-agent stream binds to one (space, ga_agent_id)
-	// via VoiceAgentSessionStart; the subscriber forwards SI reply
+	// via VoiceAgentSessionStart; the subscriber forwards AI reply
 	// utterances as VoiceAgentSpeak messages so chat-typed user
 	// messages produce audible replies via AgentSession.say(). See
 	// startVoiceAgentSpeakSubscriber for the dedup against in-flight

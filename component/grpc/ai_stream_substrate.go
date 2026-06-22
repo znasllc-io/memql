@@ -105,7 +105,7 @@ func (s *service) newTranscriptStreamSession(requestId string) *node.StreamSessi
 	return node.NewStreamSession(s.deliverySubstrate, requestId, "transcript", s.selfNodeID())
 }
 
-// proxyAIStream is the bff-side entry for a streamed SI op migrated onto the
+// proxyAIStream is the bff-side entry for a streamed AI op migrated onto the
 // substrate. It forwards the trigger envelope to the worker (so the worker runs
 // its handler and produces frames to stream:<requestId>) and starts the given
 // consumer, which subscribes stream:<requestId> and renders frames to the

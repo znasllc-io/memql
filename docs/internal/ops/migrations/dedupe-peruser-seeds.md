@@ -123,7 +123,7 @@ GROUP BY owner
 HAVING COUNT(*) > 1;
 -- Expect: zero rows returned.
 
--- One SI participant per daily space (run for a known affected user)
+-- One AI participant per daily space (run for a known affected user)
 SELECT id, payload->>'agentId' AS agent_id, payload->>'displayName' AS name
 FROM "MemoryNodes" mn
 WHERE concept = 'v1:cognition:participant'

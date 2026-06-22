@@ -525,7 +525,7 @@ func TestShortReplyContinuation(t *testing.T) {
 func TestClassifyConfidence_AmbiguousScores(t *testing.T) {
 	t.Run("continuation with close scores returns low", func(t *testing.T) {
 		// Two agents with continuation factor but close scores (spread < 15).
-		// SI Router should decide in ambiguous cases.
+		// AI Router should decide in ambiguous cases.
 		scores := []AgentScore{
 			{
 				AgentId: "a1", TotalScore: 38,

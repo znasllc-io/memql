@@ -66,7 +66,7 @@ Two facts up front, because they shape the conclusion:
 Cognition decides whether and which agent responds to an utterance and
 dispatches the turn. It is wired through the **explicit `app/` path**
 (its deps -- Polyphon score engine, embedding func, `AgentForwarder`,
-SI router -- exceed `PluginContext`), so cognition itself is core, not
+AI router -- exceed `PluginContext`), so cognition itself is core, not
 a pack. A pack extends cognition's *behavior* without editing it:
 
 | Extension point | Mechanism | Evidence | What a pack changes |

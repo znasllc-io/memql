@@ -20,11 +20,11 @@ codebase (plus memql-bff-copresent, memql-cockpit, and the copresent frontend).
 Authoritative plan: memql/docs/internal/program/00-master-plan.md, with one
 file per epic (01–04), the current-state map (05), and these prompts (06).
 
-Epics and order: (1) SI→AI rename → (2) platform/plugin → (3) decouple
+Epics and order: (1) AI→AI rename → (2) platform/plugin → (3) decouple
 CoPresent → (4) telephony. Gates: G1 = rename landed; G2 = partition foundation
 landed; G3 = core decoupled (engine-only build green).
 
-Locked decisions: SI→AI rename runs first and includes wire/proto names in one
+Locked decisions: AI→AI rename runs first and includes wire/proto names in one
 coordinated breaking sweep; `partition` is the canonical tenant scope (already
 exists — do NOT invent one); services stay core, packs are product; telephony
 attaches to a partition/room, never a CoPresent `space`.
@@ -37,15 +37,15 @@ work as specified.
 
 ---
 
-## SESSION S1 — Epic 1: SI → AI rename  (starts NOW · produces G1)
+## SESSION S1 — Epic 1: AI → AI rename  (starts NOW · produces G1)
 
 ```
-You own Epic 1 (SI→AI rename) of the memql platformization program. Read, in
+You own Epic 1 (AI→AI rename) of the memql platformization program. Read, in
 order: memql/docs/internal/program/00-master-plan.md and 01-epic-si-to-ai-
 rename.md. Work the repos: znasllc-io/memql, memql-bff-copresent, memql-cockpit,
 and the copresent frontend.
 
-Goal: rename "SI / AI" → "AI" across DSL, Go, wire/proto,
+Goal: rename "AI / AI" → "AI" across DSL, Go, wire/proto,
 and frontend in ONE coordinated sweep, including the breaking proto names.
 Centerpiece: the DSL construct si("prompt", args) → ai(...), and SIExpression →
 AIExpression.
@@ -61,7 +61,7 @@ regenerate (1.4) which gates BFF (1.5) and frontend (1.6); finish with docs +
 full verification (1.7). Open a PR per issue, keep builds green at each step.
 
 When 1.7 passes — all four repos build + test green and a repo-wide scan shows
-zero SI-as-synthetic-intelligence identifiers outside the denylist — announce
+zero AI-as-synthetic-intelligence identifiers outside the denylist — announce
 G1 OPEN. Sessions S2 and S3 are waiting on it.
 ```
 

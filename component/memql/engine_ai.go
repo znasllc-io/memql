@@ -63,11 +63,11 @@ func (e *MemQLEngine) RegisterIntegration(provider IntegrationProvider) error {
 	return nil
 }
 
-// InvokeAI invokes an SI prompt template with the provided data.
-// This is the public interface for automation steps to execute SI functions.
+// InvokeAI invokes an AI prompt template with the provided data.
+// This is the public interface for automation steps to execute AI functions.
 func (e *MemQLEngine) InvokeAI(ctx context.Context, templateId string, data map[string]any) (any, error) {
 	if e.aiRuntime == nil {
-		return nil, fmt.Errorf("SI runtime is not configured")
+		return nil, fmt.Errorf("AI runtime is not configured")
 	}
 
 	invocation := &AIInvocation{
@@ -77,7 +77,7 @@ func (e *MemQLEngine) InvokeAI(ctx context.Context, templateId string, data map[
 	// tiering): callers that want to escalate / downshift the model for
 	// THIS invocation wrap the ctx with WithProviderOverride(ctx, name).
 	// Mirrors the tool-loop paths (si_tool_loop.go) which already do
-	// this; without it, InvokeAI was the one SI entry point that ignored
+	// this; without it, InvokeAI was the one AI entry point that ignored
 	// the override and always used the prompt's @defaultProvider.
 	if override := ProviderOverrideFromContext(ctx); override != "" {
 		invocation.ProviderOverride = &override
@@ -106,12 +106,12 @@ func (e *MemQLEngine) InvokeAI(ctx context.Context, templateId string, data map[
 // The log line `structured chat fallback` fires so the caller can see
 // which providers lack native support.
 //
-// Caches the structured result through the same SI cache used by
+// Caches the structured result through the same AI cache used by
 // ai() invocations. Cache key includes templateId + schema name +
 // schema body + rendered prompt text + provider name, so callers
 // with identical inputs collapse to a single LLM round-trip across
 // the entire memQL instance (multiple frontends, multiple users,
-// any background work). TTL follows the SI cache config (default
+// any background work). TTL follows the AI cache config (default
 // 60s, ceiling 300s -- short enough that an agent or domain
 // re-train invalidates within a minute, long enough to swallow
 // click-dismiss-click-again sequences). Frontend callers that
@@ -125,7 +125,7 @@ func (e *MemQLEngine) InvokeAIStructured(
 	strict bool,
 ) (string, error) {
 	if e.aiRuntime == nil {
-		return "", fmt.Errorf("SI runtime is not configured")
+		return "", fmt.Errorf("AI runtime is not configured")
 	}
 	rendered, err := e.RenderPrompt(templateId, data)
 	if err != nil {
@@ -240,14 +240,14 @@ func (e *MemQLEngine) ReloadAIProviders(ctx context.Context) (int, error) {
 	}
 	registry, err := loadAIProviders(e.Logger)
 	if err != nil {
-		return 0, fmt.Errorf("reload SI providers: %w", err)
+		return 0, fmt.Errorf("reload AI providers: %w", err)
 	}
 	e.providers = registry
 	if e.aiRuntime != nil {
 		e.aiRuntime = newAIRuntime(e.Logger, e.prompts, registry, e.aiCacheConfig)
 	}
 	if e.Logger != nil {
-		e.Logger.Info("SI providers reloaded after seed",
+		e.Logger.Info("AI providers reloaded after seed",
 			"providerCount", registry.Count())
 	}
 	return registry.Count(), nil
@@ -307,7 +307,7 @@ func (e *MemQLEngine) ChatStreamProvider() common.ChatStreamProvider {
 }
 
 // DefaultChatProvider returns the default non-streaming chat provider for synchronous
-// SI calls (e.g., suggest endpoints). Resolves the optional MEMQL_DEFAULT_CHAT_PROVIDER
+// AI calls (e.g., suggest endpoints). Resolves the optional MEMQL_DEFAULT_CHAT_PROVIDER
 // from v1:platform:globalVariable (instance default), then falls back to the first
 // available non-streaming chat provider. Returns nil if no suitable provider
 // is available.
@@ -402,7 +402,7 @@ func (e *MemQLEngine) ExecuteToolByName(ctx context.Context, name string, args m
 // streaming calls where the standard InvokeAI path isn't used.
 func (e *MemQLEngine) RenderPrompt(templateId string, data map[string]any) (string, error) {
 	if e == nil || e.aiRuntime == nil {
-		return "", fmt.Errorf("SI runtime is not configured")
+		return "", fmt.Errorf("AI runtime is not configured")
 	}
 	prompt, err := e.aiRuntime.resolvePrompt(templateId)
 	if err != nil {
@@ -419,7 +419,7 @@ func (e *MemQLEngine) RenderPrompt(templateId string, data map[string]any) (stri
 }
 
 // ProviderEntry returns a provider entry by name from the registry.
-// Used by integrations that need access to SI providers.
+// Used by integrations that need access to AI providers.
 func (e *MemQLEngine) ProviderEntry(name string) (*ProviderConfigEntry, bool) {
 	if e.providers == nil {
 		return nil, false
@@ -427,7 +427,7 @@ func (e *MemQLEngine) ProviderEntry(name string) (*ProviderConfigEntry, bool) {
 	return e.providers.Entry(name)
 }
 
-// DefaultProviderName returns the name of the default SI provider.
+// DefaultProviderName returns the name of the default AI provider.
 func (e *MemQLEngine) DefaultProviderName() string {
 	if e.providers == nil {
 		return ""
@@ -441,7 +441,7 @@ func (e *MemQLEngine) Providers() *ProviderRegistry {
 	return e.providers
 }
 
-// Policies returns the SI Router policy registry loaded from
+// Policies returns the AI Router policy registry loaded from
 // policies/v1/*.memql. Used by the Router to resolve a policy name
 // to a primary provider + fallback chain, and by the /router/policies
 // admin page to list available policies.

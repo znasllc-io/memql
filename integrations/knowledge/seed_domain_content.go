@@ -39,7 +39,7 @@ import (
 // kind / title / body / keyTerms.
 //
 // Schema description embeds the version "v1" so a schema bump is a
-// natural cache-invalidation trigger via the SI cache (the cached LLM
+// natural cache-invalidation trigger via the AI cache (the cached LLM
 // response keys on the rendered prompt + provider; the prompt embeds
 // the schema description which embeds the version).
 const seedDomainContentSchemaJSON = `{
@@ -294,7 +294,7 @@ func (i *Integration) stampDomainSeeded(ctx context.Context, domainId, recipeVer
 // Tier-A and Tier-B domains. Prepends the disclaimer chunk for B.
 func (i *Integration) writeTierABChunks(ctx context.Context, d StandardDomain, tier string, recipeVersion string) (int, error) {
 	// Render + invoke the prompt. cacheSeconds isn't meaningful here
-	// (each domain is a unique input) so we don't pass it; the SI
+	// (each domain is a unique input) so we don't pass it; the AI
 	// runtime's default kicks in.
 	//
 	// BroadSurvey domains (multi-millennium history, world civs, etc.)
@@ -323,7 +323,7 @@ func (i *Integration) writeTierABChunks(ctx context.Context, d StandardDomain, t
 		true,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("seedDomainContent SI call: %w", err)
+		return 0, fmt.Errorf("seedDomainContent AI call: %w", err)
 	}
 	var payload seedChunkPayload
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {

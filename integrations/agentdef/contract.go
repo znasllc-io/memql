@@ -28,7 +28,7 @@ import "strings"
 //
 // Field groups:
 //   - Identity / persona: AgentID..SystemPrompt -- read by both modalities.
-//   - Model selection: Provider..MaxTokens -- the resolved SI Router pick; for
+//   - Model selection: Provider..MaxTokens -- the resolved AI Router pick; for
 //     voice this resolves to gpt-realtime. Recorded so the choice is explicit
 //     and auditable rather than implicit-by-runtime.
 //   - Grounding selectors: Domains / ToolSlugs / Keywords -- the union the

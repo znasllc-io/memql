@@ -11,7 +11,7 @@ package automations
 // (owner, automation): consecutive failures trip it; on trip it auto-pauses
 // THAT automation and surfaces the event, leaving everything else untouched.
 //
-// This is the per-automation analogue of the process-wide SI guard
+// This is the per-automation analogue of the process-wide AI guard
 // (component/memql/si_guard.go) -- same fail-isolate intent, but keyed per
 // authored automation so one bad automation's runs can't starve the others.
 //

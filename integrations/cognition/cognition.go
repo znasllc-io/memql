@@ -1,6 +1,6 @@
 // Package cognition provides the cognition integration for MemQL.
-// It handles SI response generation for the cognition module by subscribing
-// to utterance events and generating responses using configured SI providers.
+// It handles AI response generation for the cognition module by subscribing
+// to utterance events and generating responses using configured AI providers.
 package cognition
 
 import (
@@ -58,7 +58,7 @@ type MemQLEngine interface {
 	// Used for calling registered MemQL functions and insert mutations.
 	Execute(ctx context.Context, query string) (any, error)
 	// InvokeAI runs a prompt template by ID with the given data map.
-	// Used by the SI router and fallback responder for top-level SI
+	// Used by the AI router and fallback responder for top-level AI
 	// invocations that can't sit inside a shape() projection.
 	InvokeAI(ctx context.Context, templateId string, data map[string]any) (any, error)
 	// InvokeAIStructured renders a prompt template and invokes its
@@ -97,11 +97,11 @@ type MemQLEngine interface {
 	ResolveSkills(ctx context.Context, skillIds []string) (memql.SkillBundle, error)
 }
 
-// AIProviderRegistry provides access to SI providers.
+// AIProviderRegistry provides access to AI providers.
 type AIProviderRegistry interface {
-	// GetProvider returns an SI provider by name.
+	// GetProvider returns an AI provider by name.
 	GetProvider(name string) (any, bool)
-	// DefaultProvider returns the default SI provider.
+	// DefaultProvider returns the default AI provider.
 	DefaultProvider() (any, bool)
 }
 
@@ -109,7 +109,7 @@ type (
 	// CognitionArg is a constructor argument for CognitionIntegration.
 	CognitionArg common.CtorArg[cognitionConfig]
 
-	// CognitionIntegration provides SI response generation for cognition spaces.
+	// CognitionIntegration provides AI response generation for cognition spaces.
 	CognitionIntegration struct {
 		*integrations.Integration // Embed base integration
 
@@ -142,7 +142,7 @@ type (
 		spaceInfoSF     singleflight.Group
 		attachmentsSF   singleflight.Group
 
-		// Attachment summaries cache (per space), included in SI prompt context.
+		// Attachment summaries cache (per space), included in AI prompt context.
 		attachmentsCache map[string]cachedAttachments
 
 		// Best-effort recent utterance buffer (per space) to avoid DB reads on hot path.
@@ -180,7 +180,7 @@ type (
 		reactiveDispatchAt map[string]time.Time
 		reactiveDispatchMu sync.Mutex
 
-		// greetingPacing serializes greetOnJoin SI greetings per
+		// greetingPacing serializes greetOnJoin AI greetings per
 		// space so they don't all fire at the instant their
 		// participant.created events arrive. Two pacing rules:
 		//
@@ -274,7 +274,7 @@ type (
 	}
 
 	// cognitionConfig holds Cognition-specific configuration.
-	// Note: Runtime configuration (SI enabled, provider, history limit) is fetched
+	// Note: Runtime configuration (AI enabled, provider, history limit) is fetched
 	// from v1:platform:partitionVariable concept records via VariableResolver.
 	cognitionConfig struct {
 		variableResolver VariableResolver
@@ -351,7 +351,7 @@ func WithEngine(engine MemQLEngine) CognitionArg {
 	})
 }
 
-// WithProviderRegistry sets the SI provider registry.
+// WithProviderRegistry sets the AI provider registry.
 func WithProviderRegistry(registry AIProviderRegistry) CognitionArg {
 	return RequiredCognitionArg("provider_registry", func(c *cognitionConfig) {
 		c.providerRegistry = registry
@@ -560,7 +560,7 @@ func (c *CognitionIntegration) Start(ctx context.Context) {
 	))
 
 	// Subscribe a SECOND handler on the same event for the
-	// greet-on-join path. Lives in greet_on_join.go: when an SI
+	// greet-on-join path. Lives in greet_on_join.go: when an AI
 	// participant joins and its agent template carries
 	// triggerBehavior.greetOnJoin == true (and no greeting has been
 	// posted for this (space, agent) yet), the handler fires off an
@@ -582,7 +582,7 @@ func (c *CognitionIntegration) Start(ctx context.Context) {
 	))
 
 	// Subscribe to utterance creation events — Cognition handles turn-taking decisions
-	// and SI response generation in a single pipeline (no intermediate turn:state record).
+	// and AI response generation in a single pipeline (no intermediate turn:state record).
 	c.unsubscribes = append(c.unsubscribes, c.eventBus.Subscribe(
 		eventPatternUtteranceCreated,
 		c.handleUtteranceForCognition,
@@ -710,7 +710,7 @@ func (c *CognitionIntegration) ConversationHistoryLimit(ctx context.Context) int
 	return limit
 }
 
-// DefaultProvider returns the configured default SI provider name.
+// DefaultProvider returns the configured default AI provider name.
 // Fetched from v1:platform:partitionVariable at runtime.
 func (c *CognitionIntegration) DefaultProvider(ctx context.Context) string {
 	const defaultProvider = "chat54Mini"
@@ -727,7 +727,7 @@ func (c *CognitionIntegration) DefaultProvider(ctx context.Context) string {
 	return strings.TrimSpace(value)
 }
 
-// IsAIEnabled checks if SI responses are enabled.
+// IsAIEnabled checks if AI responses are enabled.
 // Fetched from v1:platform:partitionVariable at runtime.
 func (c *CognitionIntegration) IsAIEnabled(ctx context.Context) bool {
 	if c == nil || c.variableResolver == nil {

@@ -87,7 +87,7 @@ residual gap is *cross-turn* cumulative spend, which Layers 0 and 4 close.
 | Loop | File | Per-turn cap | Cross-turn / lineage cap | Convergence guards |
 |---|---|---|---|---|
 | Agent tool loop | `integrations/agent/streaming.go`, `nonstreaming.go` | 120 iters (`MEMQL_TOOL_LOOP_MAX_ITERATIONS`), 180s wallclock (`MEMQL_TURN_WALLCLOCK_TIMEOUT_SECONDS`) | none → **Layer 0 / 4** | 3 repeat-failures (`MEMQL_TOOL_LOOP_MAX_REPEAT_FAILURES`), 3 all-errored rounds, 2 produceArtifact re-delegations |
-| Engine SI tool loop | `component/memql/si_tool_loop.go` | 120 iters (`MEMQL_TOOL_LOOP_MAX_ITERATIONS`), 8 tool-calls/iter | none → **Layer 0 / 4** | all-errored guard, identical-call breaker |
+| Engine AI tool loop | `component/memql/si_tool_loop.go` | 120 iters (`MEMQL_TOOL_LOOP_MAX_ITERATIONS`), 8 tool-calls/iter | none → **Layer 0 / 4** | all-errored guard, identical-call breaker |
 | Planner decompose loop | `integrations/planner/agent_loop.go` | 5 iters/cycle (`MEMQL_PLANNER_MAX_ITERATIONS_PER_CYCLE`) | 8 calls + 2M tokens/plan (`MEMQL_PLANNER_MAX_INVOCATIONS_PER_PLAN`, `MEMQL_PLANNER_DEFAULT_TOKEN_BUDGET`) | 2 identical decisions (`MEMQL_PLANNER_MAX_IDENTICAL_DECISIONS`) |
 | Cognition conductor | `integrations/cognition/conductor_consult.go` | single structured call (≤3 branch re-invokes) | n/a | n/a |
 | Suggest | `component/grpc/` AiSuggest | single call | n/a | n/a |

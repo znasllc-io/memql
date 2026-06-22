@@ -18,7 +18,7 @@ import (
 // Before the fix, `getActiveGA` fell through to EvaluateString and resolved to
 // the literal string "getActiveGA", so coalesce returned that string, getGA had
 // no navigable nodes, and the unevaluated `coalesce(getGA.First().id, "")`
-// literal flowed into the mutation as the agentId -- a ghost SI on every fresh
+// literal flowed into the mutation as the agentId -- a ghost AI on every fresh
 // daily space.
 
 func bundleResult(nodes ...any) any {
@@ -120,7 +120,7 @@ func TestBareIdentifier_NonStep_StaysLiteral(t *testing.T) {
 // resolve must NOT pass its raw source text through into the mutation arg.
 // Previously `coalesce(getGA.First().id, "")` over a missing/garbage getGA
 // returned the literal string `coalesce(getGA.First().id, "")`, which became
-// the ghost SI agentId. resolveArgValueRef must now return nil instead.
+// the ghost AI agentId. resolveArgValueRef must now return nil instead.
 func TestResolveArgValueRef_UnresolvedBuiltin_DropsToNil(t *testing.T) {
 	eval := automations.NewEvaluator()
 	// Reproduce the exact production pre-fix state: getGA is PRESENT but holds a

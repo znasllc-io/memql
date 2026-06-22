@@ -13,17 +13,17 @@ import (
 )
 
 // NoOpPredictiveAnalyzer is a placeholder that returns no prediction.
-// Used when no SI engine is available (tests, standalone mode).
+// Used when no AI engine is available (tests, standalone mode).
 type NoOpPredictiveAnalyzer struct{}
 
 func (n *NoOpPredictiveAnalyzer) Analyze(_ context.Context, _ *PolyphonSession, _ []AgentCandidate) (*PredictiveState, error) {
 	return nil, nil
 }
 
-// ModelPredictiveAnalyzer uses a fast SI model to predict conversation trajectory.
+// ModelPredictiveAnalyzer uses a fast AI model to predict conversation trajectory.
 // Runs asynchronously via the prediction goroutine (every 30s per active space).
 type ModelPredictiveAnalyzer struct {
-	// invokeAI is a function that calls the SI engine to run a prediction prompt.
+	// invokeAI is a function that calls the AI engine to run a prediction prompt.
 	// Injected to avoid direct engine dependency in the polyphon package.
 	invokeAI func(ctx context.Context, templateId string, data map[string]any) (any, error)
 
@@ -35,7 +35,7 @@ type ModelPredictiveAnalyzer struct {
 	phaseLibrary *PhasePatternLibrary
 }
 
-// NewModelPredictiveAnalyzer creates an analyzer that uses SI for prediction.
+// NewModelPredictiveAnalyzer creates an analyzer that uses AI for prediction.
 // The embedFunc parameter is optional (pass nil to disable vector-based phase detection).
 func NewModelPredictiveAnalyzer(
 	invokeAI func(ctx context.Context, templateId string, data map[string]any) (any, error),
@@ -135,7 +135,7 @@ func (a *ModelPredictiveAnalyzer) Analyze(ctx context.Context, session *Polyphon
 			detectedPhase, confidence := a.phaseLibrary.DetectPhase(embedding)
 			if confidence > 0.8 && detectedPhase != "" {
 				// High-confidence vector detection -- use it for phase.
-				// Still call SI for topic anticipation and agent prediction.
+				// Still call AI for topic anticipation and agent prediction.
 				data["detectedPhase"] = string(detectedPhase)
 				data["phaseConfidence"] = confidence
 			}
@@ -151,7 +151,7 @@ func (a *ModelPredictiveAnalyzer) Analyze(ctx context.Context, session *Polyphon
 	return parsePredictionResult(result)
 }
 
-// patternBasedPrediction provides a simple rule-based fallback when the SI model
+// patternBasedPrediction provides a simple rule-based fallback when the AI model
 // is unavailable. Uses conversation phase and turn counts to produce a basic prediction.
 func patternBasedPrediction(session *PolyphonSession, candidates []AgentCandidate) *PredictiveState {
 	state := &PredictiveState{

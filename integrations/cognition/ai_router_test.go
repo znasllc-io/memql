@@ -11,7 +11,7 @@ import (
 // TestBuildRoutingSchema verifies the schema produced for structured
 // routing is shaped correctly and, crucially, constrains `agentId` to
 // the current candidate set -- this is the guarantee that eliminates
-// the "SI router returned unknown agent" failure mode entirely.
+// the "AI router returned unknown agent" failure mode entirely.
 func TestBuildRoutingSchema(t *testing.T) {
 	t.Run("agentId is enum-constrained when candidates exist", func(t *testing.T) {
 		cands := []polyphon.AgentCandidate{

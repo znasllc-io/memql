@@ -3511,7 +3511,7 @@ func MutationCreateGeneratedOutputBuild(args MutationCreateGeneratedOutputArgs) 
 	return b.String()
 }
 
-// MutationCreateGreetingUtterance -- Create a greeting utterance for an SI participant joining a space
+// MutationCreateGreetingUtterance -- Create a greeting utterance for an AI participant joining a space
 //
 // Bound concept: utterance.
 type MutationCreateGreetingUtteranceArgs struct {
@@ -7458,7 +7458,7 @@ func MutationInsertSafetyClassificationBuild(args MutationInsertSafetyClassifica
 	return b.String()
 }
 
-// MutationJoinSpaceAsAI -- Join a space as an SI participant. Uses canonicalized deterministic ID.
+// MutationJoinSpaceAsAI -- Join a space as an AI participant. Uses canonicalized deterministic ID.
 //
 // Bound concept: participant.
 type MutationJoinSpaceAsAIArgs struct {
@@ -8843,7 +8843,7 @@ func MutationRecordResponsibilityEvaluationBuild(args MutationRecordResponsibili
 	return b.String()
 }
 
-// MutationRecordRouterCall -- Record a single SI call through the memQL SI Router. Writes one v1:router:call row per call for observability, usage reporting, and cost attribution.
+// MutationRecordRouterCall -- Record a single AI call through the memQL AI Router. Writes one v1:router:call row per call for observability, usage reporting, and cost attribution.
 //
 // Bound concept: call.
 type MutationRecordRouterCallArgs struct {

@@ -110,7 +110,7 @@ Why this split, precisely:
    lifecycle/cost trade: the realtime session is a warm, stateful, per-space
    socket with a token meter and idle/duration guardrails
    (`integrations/voice/agent/realtime_budget.go:66`), whereas the text path is
-   a stateless, fan-in, fallback-chained request the SI Router load-balances
+   a stateless, fan-in, fallback-chained request the AI Router load-balances
    across providers (`integrations/agent/replier.go:270-292`). Text-only and
    voice-less spaces -- the common case -- would pay a standing-socket cost for
    a request/response workload. **Same *definition*, not same *runtime*, is the
@@ -175,7 +175,7 @@ The realtime executor was built behind the SAME gRPC seam as the cascade and
   paraphrasing TTS.
 - The voice-agent handler comment seals it: "the cascade routes assistant
   replies through VoiceAgentTurnRequest -- cognition runs the agent loop and
-  inserts the SI utterance itself (insertSIResponse)"
+  inserts the AI utterance itself (insertSIResponse)"
   (`component/grpc/voice_agent_handlers.go:928-930`).
 
 So **cognition is the author for voice and text alike, today.** The model does
@@ -252,7 +252,7 @@ the same fields off this one.**
   `keywords`, `tools`. The `cognitionReply.tmpl` renders identity + personality
   + tools from it (`dsl/cognition/prompts/cognitionReply.tmpl`, the
   `## YOUR IDENTITY` / `### Personality & Instructions` / `## YOUR TOOLS`
-  blocks). Model selection runs the SI Router off
+  blocks). Model selection runs the AI Router off
   `providerConfig.llm.*` with documented precedence
   (`replier.go:196-255`).
 
@@ -321,7 +321,7 @@ type AgentGenerationContract struct {
     Personality string   // the system-prompt prose
     SystemPrompt string  // extra instructions
 
-    // Model selection -- resolved through the SAME SI Router policy chain
+    // Model selection -- resolved through the SAME AI Router policy chain
     // both paths already use (replier.go:196-255). For voice this resolves to
     // gpt-realtime; the contract still records the policy so the choice is
     // explicit and auditable, not implicit-by-runtime.
@@ -416,7 +416,7 @@ the runtime that fits the modality:
   the #432 gate.
 - **Text runtime:** cognition's `agentReply` streaming loop
   (`integrations/agent/replier.go:161` `handleStreaming`), authoring natively
-  through the SI Router-picked provider, with the full tool loop, RAG, and
+  through the AI Router-picked provider, with the full tool loop, RAG, and
   citations it already has.
 
 **Pros:** each runtime is already built and load-tested for its modality. The
@@ -426,7 +426,7 @@ The voice runtime is a warm, stateful, single-socket, prosody-aware
 speech-to-speech engine -- exactly right for a live call. Convergence is the
 *input* (the contract), which is cheap and testable to share.
 
-**Cons:** two model families author (gpt-realtime for voice; whatever the SI
+**Cons:** two model families author (gpt-realtime for voice; whatever the AI
 Router policy picks for text -- Sonnet-class `balancedChat`, `replier.go:253`).
 Tone *could* differ if persona is under-specified. Mitigated because: (a) the
 shared `RenderIdentityBlock` forces identical persona instructions; (b) the
@@ -462,7 +462,7 @@ Reasons, each grounded:
    text-only space to author one typed message is pure standing cost for a
    request/response workload -- and ties directly into the #459 guardrails the
    issue flags.
-2. **No fan-in / no fallback chain.** The text path's resilience is the SI
+2. **No fan-in / no fallback chain.** The text path's resilience is the AI
    Router's primary+fallback chain across providers
    (`replier.go:270`, `resolved.Chain`). A single realtime socket has no
    equivalent cascade; a provider blip drops the turn. The text path is
@@ -548,7 +548,7 @@ Under the contract, cognition's responsibilities split cleanly into "stays" and
   `RealtimeInstructionsForReply` "convey the following"
   (`instructions.go:114`) are **deleted** -- that is the v1 prosody-aware-TTS
   posture #475 is correcting.
-- On text, authorship was already the model's (the SI Router-picked provider in
+- On text, authorship was already the model's (the AI Router-picked provider in
   `handleStreaming`, `replier.go:161`) -- but it now authors from the *contract*
   identity block, not an ad-hoc `assistant` map, so it cannot drift from voice.
 

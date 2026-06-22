@@ -29,7 +29,7 @@ func literalTruthy(v any) bool {
 // ensureBooleanExpression walks an expression tree and rejects nodes
 // that cannot evaluate to a boolean -- the contract every spec body
 // must satisfy. Allowed leaves are comparison expressions, spec
-// references, and SI expressions; logical (and/or) and relationship
+// references, and AI expressions; logical (and/or) and relationship
 // expressions are allowed structurally as long as their sub-trees
 // are boolean.
 func ensureBooleanExpression(expr ExpressionNode) error {

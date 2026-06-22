@@ -106,7 +106,7 @@ flowchart TB
   shapes["<b>Shapes</b><br/>@row / @actor projections<br/>(reusable field templates)"]
   mutations["<b>Mutations</b><br/>insert / update on rows"]
   builtins["<b>Builtins</b><br/>Go-backed executors"]
-  providers["<b>Providers</b><br/>SI vendor + model + auth"]
+  providers["<b>Providers</b><br/>AI vendor + model + auth"]
   seeds["<b>Seeds</b><br/>agent templates;<br/>materialized to rows"]
 
   specs["<b>Specs</b><br/>@shape → boolean predicate<br/>(row-spec or context-spec)"]
@@ -115,7 +115,7 @@ flowchart TB
 
   queries["<b>Queries</b><br/>concept + filter (specs/traits) +<br/>projection (shape) + args"]
 
-  tools["<b>Tools</b><br/>SI-callable wrapping of<br/>query / mutation / builtin"]
+  tools["<b>Tools</b><br/>AI-callable wrapping of<br/>query / mutation / builtin"]
   logic["<b>Logic</b><br/>imperative orchestration<br/>(calls queries, mutations,<br/>builtins, si())"]
   automations["<b>Automations</b><br/>event-triggered side-effect<br/>(@trigger → logic step)"]
   policies["<b>Policies</b><br/>cross-cutting decisions<br/>(authn / vendor / UI gating)"]
@@ -177,9 +177,9 @@ types.
 | 6 | `mutation` | Typed write (one insert/update) | `mutation N { args; insert { ... } }` | Mature |
 | 7 | `logic` | Imperative orchestration | `logic N { args; body { return <expr> } }` | **In-flight** (multi-step landed F.5; not fully integration-tested) |
 | 8 | `automation` | Event-triggered workflow | `@trigger(...) automation N { step run { logic ... } }` | Mature for single-step; multi-step recipes in flight |
-| 9 | `tool` | SI-callable surface | `@handler(...) tool N { fields }` | Mature |
-| 10 | `prompt` | SI template + schema | `@templateFile @defaultProvider prompt N { fields }` | Mature |
-| 11 | `provider` | SI vendor config | `@extends @model provider N { params }` | Mature |
+| 9 | `tool` | AI-callable surface | `@handler(...) tool N { fields }` | Mature |
+| 10 | `prompt` | AI template + schema | `@templateFile @defaultProvider prompt N { fields }` | Mature |
+| 11 | `provider` | AI vendor config | `@extends @model provider N { params }` | Mature |
 | 12 | `builtin` | Go integration wrapped as DSL call | `@executor("integration.X.Y") builtin N { fields }` | Mature |
 | 13 | `seed` | Declarative agent template | `@scope("perUser") seed N { fields }` | Mature |
 | 14 | `policy` | Cross-cutting decision | `@tier func (Policy) N(ctx any) <T> { ... }` | Mature; **legacy `func (Policy)` form still present** alongside struct form |
@@ -248,7 +248,7 @@ flowchart LR
     e5["spec_evaluator.go<br/>(context-spec in-process)"]
     e6["policy_evaluator.go<br/>(policy graph + cache)"]
     e7["runtime_evaluator.go<br/>(expression eval)"]
-    e8["si_runtime / si_tool_loop<br/>(SI calls)"]
+    e8["si_runtime / si_tool_loop<br/>(AI calls)"]
   end
 
   embed --> overlay

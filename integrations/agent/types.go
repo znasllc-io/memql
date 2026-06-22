@@ -16,7 +16,7 @@ import (
 const ComponentName = common.ComponentName("agentReplier")
 
 // MemQLEngine is the narrow engine interface the agent replier needs. It is
-// intentionally a subset of memql.IntegrationEngineAccess + the SI invocation
+// intentionally a subset of memql.IntegrationEngineAccess + the AI invocation
 // surface; the concrete adapter in app/ supplies all methods.
 type MemQLEngine interface {
 	// InvokeAI runs a prompt template by ID and returns the assistant's reply.

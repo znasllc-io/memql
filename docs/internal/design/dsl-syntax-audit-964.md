@@ -532,7 +532,7 @@ builtin crmScoreLead {
 }
 ```
 
-### 13. tool (SI-callable)
+### 13. tool (AI-callable)
 
 Options. `tool <name> { <schema fields> }`. Annotations: `@enabled`/`@disabled`,
 `@handler(...)`, `@executionTime("fast"|"medium")`, `@allowedRoles`, `@scopes`,

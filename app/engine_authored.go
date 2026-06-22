@@ -42,7 +42,7 @@ func (a *App) wireAuthoredRuntime() {
 
 	// A dedicated Executor for authored runs: same engine + step registry +
 	// event bus the core scheduler uses, so authored automations get the same
-	// step executors, integrations, and SI providers. It is NOT the core
+	// step executors, integrations, and AI providers. It is NOT the core
 	// scheduler's executor -- authored runs are driven by the authored
 	// scheduler under the author's envelope, kept separate from core.
 	authoredExecutor := automations.NewExecutor(automations.ExecutorOptions{

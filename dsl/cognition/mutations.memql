@@ -135,15 +135,15 @@ mutation space mutationCreateDailySpace {
 
 // ---- mutations/v1/cognition/createGreetingUtterance.memql ----
 
-// mutationCreateGreetingUtterance - Create SI Greeting Utterance
+// mutationCreateGreetingUtterance - Create AI Greeting Utterance
 // ===============================================================
 //
-// Creates a greeting utterance when an SI participant joins a space.
+// Creates a greeting utterance when an AI participant joins a space.
 // Uses a deterministic ID to prevent duplicate greetings.
 //
 // Arguments:
 //   spaceId (string, required)       - Space ID
-//   participantId (string, required) - SI participant ID
+//   participantId (string, required) - AI participant ID
 //   agentId (string, required)       - Agent template ID
 //   text (string, required)          - Greeting text
 //   greetingKind (string, required)  - "agentGreeting"
@@ -159,7 +159,7 @@ mutation space mutationCreateDailySpace {
 //     greetingKind: "agentGreeting"
 //   })
 //
-// Note: the SI display name is NOT written onto the utterance row --
+// Note: the AI display name is NOT written onto the utterance row --
 // `displayName` is not a field on v1:cognition:utterance (the concept
 // enforces additionalProperties:false), so writing it rejected the
 // insert and the join greeting never landed (memql#419). The name is
@@ -169,7 +169,7 @@ mutation space mutationCreateDailySpace {
 //
 
 @enabled
-@description("Create a greeting utterance for an SI participant joining a space")
+@description("Create a greeting utterance for an AI participant joining a space")
 mutation utterance mutationCreateGreetingUtterance {
   args {
     spaceId        string  @required
@@ -494,7 +494,7 @@ mutation participant mutationJoinSpaceAsHuman {
 // joinSpaceAsAI
 // ============
 //
-// Creates (or re-creates) an SI participant record for a space.
+// Creates (or re-creates) an AI participant record for a space.
 //
 // IDEMPOTENCY:
 // The id is content-addressed on (canonical agentId, canonical
@@ -514,7 +514,7 @@ mutation participant mutationJoinSpaceAsHuman {
 // without re-encoding via hash().
 
 @enabled
-@description("Join a space as an SI participant. Uses canonicalized deterministic ID.")
+@description("Join a space as an AI participant. Uses canonicalized deterministic ID.")
 mutation participant mutationJoinSpaceAsAI {
   args {
     spaceId              string  @required
@@ -529,7 +529,7 @@ mutation participant mutationJoinSpaceAsAI {
   }
   insert {
     // Idempotent: content-addressed on (agent, space), matching the
-    // other SI-join mutations. The caller does not supply the id
+    // other AI-join mutations. The caller does not supply the id
     // (memql#213 dropped the ignored participantId arg).
     id: concat("si-", hash(concat(
       canonicalId(args.agentId, agent), ":",

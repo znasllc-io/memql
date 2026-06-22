@@ -21,11 +21,11 @@ var secretNamePattern = regexp.MustCompile(`(?i)(pass|token|secret|key|auth|cred
 
 // explicitDenylist is the case-insensitive set of attribute keys
 // that are ALWAYS redacted, even when secretNamePattern doesn't
-// match. Covers wire-protocol / SI fields whose names don't carry
+// match. Covers wire-protocol / AI fields whose names don't carry
 // one of the usual secret-marker roots:
 //
 //   - authorization / bearer / cookie / set-cookie -- HTTP credential headers
-//   - prompt / completion / payload / body         -- SI / wire content that
+//   - prompt / completion / payload / body         -- AI / wire content that
 //                                                     can contain sensitive
 //                                                     text the caller shouldn't
 //                                                     leak via a debug log.

@@ -65,7 +65,7 @@ const (
 // turn EXPLICITLY declares itself a specialist.
 const HarnessRoleHintKey = "harness_role"
 
-// ExecutionLaneHintKey is the hint that selects the SI execution lane for a
+// ExecutionLaneHintKey is the hint that selects the AI execution lane for a
 // turn (msg.Hints[ExecutionLaneHintKey]). It is orthogonal to the harness
 // role: the role decides WHAT the turn may do (emit a human-facing reply or
 // not), the lane decides HOW the model is driven (interactive streaming vs
@@ -85,7 +85,7 @@ const ExecutionLaneHintKey = "execution_lane"
 // turn onto the non-streaming background executor.
 const ExecutionLaneBackground = "background"
 
-// backgroundExecutionPolicy is the SI Router policy the background lane
+// backgroundExecutionPolicy is the AI Router policy the background lane
 // resolves against (memql#897). It gives batch/plan execution its own
 // provider chain, tuned independently of the interactive chat policies, so
 // background model selection (and, per memql#898, its model tier) can
@@ -93,7 +93,7 @@ const ExecutionLaneBackground = "background"
 // memql#898 retuned it to a CHEAP default tier.
 const backgroundExecutionPolicy = "backgroundExecution"
 
-// backgroundEscalationPolicy is the strong/expensive SI Router policy the
+// backgroundEscalationPolicy is the strong/expensive AI Router policy the
 // background executor swaps to mid-turn when the cheap backgroundExecution
 // tier gets stuck (memql#898). Cheap-by-default, strong-on-demand: most
 // routine deliverables finish on the cheap tier; only a turn that trips the

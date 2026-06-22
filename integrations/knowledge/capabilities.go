@@ -166,7 +166,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			// the augmentDomainContent prompt to produce ~10 dense
 			// chunks targeted at one topic, embeds + writes them, and
 			// inserts a Plan row for audit + Tasks-panel visibility.
-			// Synchronous in v1 (~30s for the full SI + embed + write
+			// Synchronous in v1 (~30s for the full AI + embed + write
 			// path); the frontend shows a "training queued" state
 			// until it returns. Pulls in a follow-up Plan-completed
 			// canvas card via the existing Plan transition flow.

@@ -18,7 +18,7 @@ import (
 // Concept-visibility note: v1:cognition:participant is annotated
 // `@visibility("cognition", "bff")` and is intentionally NOT loaded
 // on the planner binary. The planner deliberately does not look up
-// the SI participant id when dispatching a Plan -- it would be a
+// the AI participant id when dispatching a Plan -- it would be a
 // cross-domain leak (planner reaching into cognition's data axis to
 // learn which Participant row Sofia is in this space). Instead the
 // planner stamps the agent's reply onto the Plan via
@@ -462,7 +462,7 @@ func planExecutionClaimKey(planId, startedAt string) string {
 }
 
 // executeApprovedPlan does the actual dispatch. Reads the Plan,
-// resolves Sofia's SI participant, forwards the agent turn,
+// resolves Sofia's AI participant, forwards the agent turn,
 // consumes the response, posts the reply, and stamps the Plan
 // terminal status.
 func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId, requestId string) {
@@ -578,7 +578,7 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId, re
 		AgentId:   plan.OwnerAgentId,
 		SpaceId:   plan.SpaceId,
 		// participantId left empty: the planner doesn't look up the
-		// SI participant (cross-domain concept leak). The agent's
+		// AI participant (cross-domain concept leak). The agent's
 		// reply lives on Plan.output.reply and the canvas card; no
 		// chat utterance is written from this dispatch.
 		History: history,
@@ -709,7 +709,7 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId, re
 		}
 	}
 	// A produceArtifact turn that comes back EMPTY produced nothing. The
-	// classic signature is the agent's SI stream stalling and the idle
+	// classic signature is the agent's AI stream stalling and the idle
 	// watchdog killing it after exhausting retries -- the failure is swallowed
 	// upstream and surfaces here as a graceful-but-empty turn (no reply text,
 	// no tool output). Stamping that "succeeded" lies to the user: the

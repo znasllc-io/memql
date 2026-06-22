@@ -144,7 +144,7 @@ func (s *Scorer) applyContextualBoosts(scores []AgentScore, candidates []AgentCa
 	// assistant when nothing else fits") implemented as a silent +N score
 	// boost, which hid the preference inside a number and caused the
 	// assistant to dominate anytime specialists had mild keyword
-	// matches. The cognitionRouting SI prompt now owns that fallback
+	// matches. The cognitionRouting AI prompt now owns that fallback
 	// decision and states it explicitly as a principle ("general
 	// assistant is a last resort"); the score engine should not override
 	// what the router sees.

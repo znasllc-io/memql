@@ -32,7 +32,7 @@ Namespace `memql` runs **8 Deployments** (engine mesh + carrier + SPA):
 | `bff` | `memql-bff-copresent` (carrier) | 2 | backend-for-frontend; mesh hub; `/memql/ws`. |
 | `cognition` | `memql-cognition` | 2 | routing + conductor + Polyphon. |
 | `voice` | `memql-voice` | 2 | voice transport; `/memql/audio`. |
-| `agent` | `memql-agent` | 2 | task execution, SI work, tool calling. |
+| `agent` | `memql-agent` | 2 | task execution, AI work, tool calling. |
 | `planner` | `memql-planner` | 2 | plan orchestration. |
 | `workbench` | `memql-workbench` | 2 | sandboxed headless work surface. |
 | `copresent` | `copresent` (SPA) | 2 | the web app (static SPA served by nginx). |

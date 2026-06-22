@@ -115,7 +115,7 @@ concept context {
 
 @version("1.0.0")
 @namespace("cognition")
-@description("Per-(spaceId, userId) mic state record. The CoPresent MediaControls footer writes this on every mic toggle so the cognition handler can resolve mirror_user audio control: when the user mutes, mirror_user agents skip TTS publish on their next turn; when the user unmutes, they speak. id is the deterministic micState:<spaceId>:<userId> so the latest toggle wins at read time without growing a per-click history. Distinct from v1:cognition:participant.presence -- that record carries SI-side state (thinking / responding / etc) and we don't want mic toggles in the same versioned chain.")
+@description("Per-(spaceId, userId) mic state record. The CoPresent MediaControls footer writes this on every mic toggle so the cognition handler can resolve mirror_user audio control: when the user mutes, mirror_user agents skip TTS publish on their next turn; when the user unmutes, they speak. id is the deterministic micState:<spaceId>:<userId> so the latest toggle wins at read time without growing a per-click history. Distinct from v1:cognition:participant.presence -- that record carries AI-side state (thinking / responding / etc) and we don't want mic toggles in the same versioned chain.")
 concept micState {
   spaceId    string  @required @description("v1:cognition:space.id this state is scoped to.")
   userId     string  @required @description("v1:identity:user.id whose mic state this is.")
@@ -128,9 +128,9 @@ concept micState {
 
 @version("1.0.0")
 @namespace("cognition")
-@description("A human or SI participant instance within a space.")
+@description("A human or AI participant instance within a space.")
 concept participant {
-  agentId  string  @description("ID of the agent template (for SI participants).")
+  agentId  string  @description("ID of the agent template (for AI participants).")
   capabilityOverrides {
     avatar  bool
     lipSync  bool
@@ -138,12 +138,12 @@ concept participant {
     voiceToVoice  bool
   }
   displayName  string  @required  @description("Display name shown in the UI.")
-  forUserId  string  @description("v1:identity:user.id this SI participant belongs to (which human's team is this agent on?). Required on every SI participant inserted by the agent-roster mutations -- humans bring their own agents into their own private team chat, never each other's. Empty for human participants. The engine pre-insert guard enforces non-empty forUserId on SI participants and validates it matches the authenticated caller (non-elevated callers cannot land an agent on someone else's team). Used by the per-user-per-space 3-cap and by Phase 6's discussion-mode dispatch loop to find the per-user agent set.")
+  forUserId  string  @description("v1:identity:user.id this AI participant belongs to (which human's team is this agent on?). Required on every AI participant inserted by the agent-roster mutations -- humans bring their own agents into their own private team chat, never each other's. Empty for human participants. The engine pre-insert guard enforces non-empty forUserId on AI participants and validates it matches the authenticated caller (non-elevated callers cannot land an agent on someone else's team). Used by the per-user-per-space 3-cap and by Phase 6's discussion-mode dispatch loop to find the per-user agent set.")
   isGroupGA  bool  @default(false)  @description("True only on the owner's Assistant when it sits in the space's group context. The owner's GA is the only AI in group chat; specialists stay in per-user team chats. The participant guard rejects status='left' inserts on isGroupGA=true rows from non-elevated callers, so the GA cannot be removed from the group via the Roster tab. Set by the autoJoinAI automation on space creation (Phase 1.5) and never via the agent-roster mutations.")
   isGuest  bool  @default(false)  @description("Whether this participant joined via a guest invite (external, no CoPresent account).")
   joinedAt  datetime  @description("When the participant joined the space.")
   leftAt  datetime  @description("When the participant left the space.")
-  participantType  enum("human", "si")  @required  @description("Whether this is a human or SI participant. Guests use \"human\" with isGuest=true and userId empty.")
+  participantType  enum("human", "si")  @required  @description("Whether this is a human or AI participant. Guests use \"human\" with isGuest=true and userId empty.")
   spaceId  string  @required  @description("ID of the space this participant belongs to.")
   status  enum("active", "idle", "left")  @default("active")  @description("Participant lifecycle status. Real-time speaking state is tracked in v1:cognition:session.")
   userId  string  @description("External user ID (for human participants).")
@@ -304,7 +304,7 @@ concept utterance {
   source {
     avatarProvider  string  @description("Avatar video provider used (e.g., heygen, simli).")
     inputMethod  enum("typed", "stt", "realtimeVoice")  @description("How the human created this utterance.")
-    outputMethod  enum("text", "tts", "realtimeVoice", "avatarVideo")  @description("How the SI delivered this utterance.")
+    outputMethod  enum("text", "tts", "realtimeVoice", "avatarVideo")  @description("How the AI delivered this utterance.")
     pipeline  string  @description("Source pipeline label, e.g. \"polyphon\" for utterances created by the bridge agent's STT path. Replaces the retired tier field; the cognition handler keys voice-vs-text routing on this when present.")
     sttProvider  string  @description("Speech-to-text provider used (e.g., openai-realtime, openai-whisper).")
     ttsProvider  string  @description("Text-to-speech provider used (e.g., elevenlabs, openai).")
@@ -396,7 +396,7 @@ concept unmetCapability {
 concept privateUtterance {
   forUserId        string  @required @description("The user whose Team-tab thread owns this row. Server-stamped from actor.userId pre-insert by every mutation in this concept.")
   spaceId          string  @required @description("Owning space.")
-  participantId    string  @required @description("v1:cognition:participant.id of the speaker. May be a human (the owner) OR an SI (an agent reply in the Team thread).")
+  participantId    string  @required @description("v1:cognition:participant.id of the speaker. May be a human (the owner) OR an AI (an agent reply in the Team thread).")
   participantType  enum("human", "si", "system") @description("Denormalized from participant for filtering. Mirrors v1:cognition:utterance.participantType.")
   text             string  @description("Text content -- typed or transcribed.")
   utteranceType    enum("speech", "text", "action", "system")  @required @description("Same enum as v1:cognition:utterance.utteranceType; carried so the renderer doesn't have to branch on concept.")

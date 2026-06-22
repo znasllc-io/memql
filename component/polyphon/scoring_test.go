@@ -517,7 +517,7 @@ func TestSpeakWhenAlwaysFloor(t *testing.T) {
 // whenever no specialist cleared it, which caused the assistant
 // to dominate in multi-agent spaces even when specialists were a mild
 // match. That decision ("fall back to assistant when nothing
-// else fits") is now owned by the cognitionRouting SI prompt, which can
+// else fits") is now owned by the cognitionRouting AI prompt, which can
 // reason about it explicitly with full context, not a silent number.
 func TestAssistantNoSilentFloor(t *testing.T) {
 	scorer := NewScorer(DefaultScoringWeights(), DefaultTurnPolicy())
@@ -597,7 +597,7 @@ func TestAssistantNoSilentFloor(t *testing.T) {
 // TestConversationalThread_WhenEnabled verifies the thread-continuity
 // factor's computation when callers explicitly enable it via a non-zero
 // weight. The shipped DefaultScoringWeights zeroes this factor because
-// the cognitionRouting SI prompt reasons about previous-responder
+// the cognitionRouting AI prompt reasons about previous-responder
 // continuity directly from the transcript; an implicit +N boost on the
 // heuristic side caused runaway agent momentum in production. These
 // tests preserve coverage of the factor's detection logic for any
@@ -793,14 +793,14 @@ func TestClassifyConfidence(t *testing.T) {
 		}
 	})
 
-	t.Run("low on strong winner without direct address (SI router decides)", func(t *testing.T) {
+	t.Run("low on strong winner without direct address (AI router decides)", func(t *testing.T) {
 		scores := []AgentScore{
 			{AgentId: "a1", TotalScore: 60},
 			{AgentId: "a2", TotalScore: 20},
 		}
 		got := classifyConfidence(scores, []AgentCandidate{{ID: "a1"}, {ID: "a2"}}, Utterance{})
 		if got != "low" {
-			t.Errorf("expected low (SI router decides), got %s", got)
+			t.Errorf("expected low (AI router decides), got %s", got)
 		}
 	})
 

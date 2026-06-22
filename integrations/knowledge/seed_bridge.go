@@ -343,7 +343,7 @@ func (i *Integration) generateBridgeContent(
 		true,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("seedDomainBridge SI call: %w", err)
+		return 0, fmt.Errorf("seedDomainBridge AI call: %w", err)
 	}
 	var payload seedChunkPayload
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {

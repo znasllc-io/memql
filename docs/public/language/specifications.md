@@ -132,10 +132,10 @@ decision-policy bodies.
 
 What remains:
 
-- The live `policy` construct is an **empty-bodied SI
+- The live `policy` construct is an **empty-bodied AI
   provider-selection record** (`@primary` / `@fallback` /
   `@maxLatencyMs` / `@preferredRole`), consolidated in
-  `dsl/policies/policies.memql` and consumed by the SI Router. It is
+  `dsl/policies/policies.memql` and consumed by the AI Router. It is
   not a predicate surface.
 - Caller-context boolean checks (is admin, owns partition,
   permission gates) are authored as **context-specs** in

@@ -118,7 +118,7 @@ func TestGreetOnJoinUtterancePayloadValidates(t *testing.T) {
 	_, hasDisplayName := payload["displayName"]
 	require.False(t, hasDisplayName,
 		"greet-on-join must not write `displayName` onto the utterance (memql#419); "+
-			"the SI name is carried by the participant referenced via participantId")
+			"the AI name is carried by the participant referenced via participantId")
 
 	// The rendered payload validates -- no additionalProperties rejection.
 	require.NoError(t, schema.Validate(payload),

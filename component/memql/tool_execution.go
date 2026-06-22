@@ -147,7 +147,7 @@ func (e *MemQLEngine) validateToolArgs(tool *Tool, args map[string]any) error {
 //
 // Schema is the json.RawMessage form (uncompiled, since we just
 // need to read property types); we re-decode on every call which
-// is cheap relative to the SI dispatch happening downstream.
+// is cheap relative to the AI dispatch happening downstream.
 // Falls through silently when the schema doesn't carry usable
 // `properties`.
 func coerceArgsToSchema(schemaJSON []byte, args map[string]any) {

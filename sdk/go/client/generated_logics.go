@@ -295,7 +295,7 @@ func LogicEnsureDailySpaceOnAuthSessionBuild(args LogicEnsureDailySpaceOnAuthSes
 	return b.String()
 }
 
-// LogicGenerateResponse -- Generates and inserts an SI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via mutationSendTextUtterance, and bumps participant presence to idle. Idempotent via queryHasAIResponseForReply.
+// LogicGenerateResponse -- Generates and inserts an AI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via mutationSendTextUtterance, and bumps participant presence to idle. Idempotent via queryHasAIResponseForReply.
 type LogicGenerateResponseArgs struct {
 	Event map[string]any
 }

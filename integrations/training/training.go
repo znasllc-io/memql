@@ -314,7 +314,7 @@ func (i *Integration) trainAgentHandler(
 		//     refresh-on-retrain behaviour.
 		//
 		// Either way, the seeder is idempotent at the chunk-id level
-		// (deterministic ids) and the SI cache layer means re-runs of
+		// (deterministic ids) and the AI cache layer means re-runs of
 		// the SAME (recipe, domain) pair are storage no-ops + LLM
 		// cache hits. So calling the seeder when not strictly needed
 		// is cheap.

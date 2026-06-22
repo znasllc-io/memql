@@ -63,7 +63,7 @@ rest of this document covers what's still missing.
 
 ## What we still owe
 
-### 1. Surface per-call usage through the SI provider interface
+### 1. Surface per-call usage through the AI provider interface
 
 Today `SIProvider.Call(ctx, prompt) (any, error)` and the streaming
 variants give the caller the model output and nothing else. The

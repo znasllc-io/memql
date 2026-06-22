@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// TestParsePolicyDecl_GoldenPath locks the canonical SI-router
+// TestParsePolicyDecl_GoldenPath locks the canonical AI-router
 // policy shape: @primary + @fallback + tuning knobs + empty
 // `policy NAME { }` declaration. Mirrors
 // dsl/v1/policies/v1/balancedChat-style files.

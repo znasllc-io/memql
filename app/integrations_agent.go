@@ -37,7 +37,7 @@ func (a *App) setupAgentReplier() {
 	engineAdapter := &CognitionEngineAdapter{Engine: a.engine}
 
 	if a.router == nil {
-		a.fatal("agent replier setup: SI router not initialized (engineAndBus must run first)")
+		a.fatal("agent replier setup: AI router not initialized (engineAndBus must run first)")
 	}
 
 	replier, err := agent.NewReplier(engineAdapter, a.router, a.Logger)

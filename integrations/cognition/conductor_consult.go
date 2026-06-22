@@ -514,7 +514,7 @@ func (c *CognitionIntegration) consultConductor(
 		sessionSummary = state.GetSessionSummary()
 	}
 
-	// Last-responder anchor. The most-recent SI agent to speak BEFORE
+	// Last-responder anchor. The most-recent AI agent to speak BEFORE
 	// this human utterance is the implicit addressee of follow-up
 	// turns ("ok cool", "how", "what about", "btw"). Surfacing it as
 	// its own input field gives the conductor a strong continuity
@@ -1142,17 +1142,17 @@ func buildConductorTranscript(recent []map[string]any, participants []map[string
 
 // lastAIResponderFromTranscript walks the conductor transcript
 // backwards (it's stored oldest-first) and returns the display name
-// of the most-recent SI participant to speak. Empty string when the
-// transcript has no SI utterances yet (e.g. cold open). The returned
+// of the most-recent AI participant to speak. Empty string when the
+// transcript has no AI utterances yet (e.g. cold open). The returned
 // name is what the conductor template surfaces in its `lastResponder`
 // section so the LLM can default implicit follow-ups to that agent.
 //
 // We deliberately do NOT skip past human utterances when looking for
-// the last SI. Example walked: [Faye, Sofia, Jose (human), Faye] ->
-// last SI is Faye. If a human spoke last (which is always the case
+// the last AI. Example walked: [Faye, Sofia, Jose (human), Faye] ->
+// last AI is Faye. If a human spoke last (which is always the case
 // when the conductor fires -- the human just spoke), the loop walks
 // past that human entry into the agent turn before it. The "human
-// just spoke before this consult" pattern means the most recent SI
+// just spoke before this consult" pattern means the most recent AI
 // in the transcript IS the agent the user's follow-up is addressing.
 func lastAIResponderFromTranscript(transcript []map[string]any) string {
 	for i := len(transcript) - 1; i >= 0; i-- {

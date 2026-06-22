@@ -59,7 +59,7 @@ func parseEmitLogicBody(t *testing.T, src string) *languageParser.AutomationDef 
 // logicBootstrapSession's session.created) failed its emit step with "event
 // bus not configured". Because the compiler topologically orders steps with
 // no inter-dependency arbitrarily, that abort could land BEFORE the
-// load-bearing mutation step (the SI join / session insert), so the side
+// load-bearing mutation step (the AI join / session insert), so the side
 // effect never ran -- the assistant never auto-joined the space and voice
 // could never engage.
 func TestLogicRunner_EmitStepPublishesToEngineBus(t *testing.T) {

@@ -3,7 +3,7 @@
 package app
 
 // integrationsBFF registers integration providers for a BFF node.
-// BFF nodes provide core integrations only (database, auth). SI,
+// BFF nodes provide core integrations only (database, auth). AI,
 // voice, and file processing are not registered locally -- the gRPC
 // AI/voice handlers on a BFF forward those requests to the matching
 // worker node (agent / voice / cognition) via AiForwardRouter. See

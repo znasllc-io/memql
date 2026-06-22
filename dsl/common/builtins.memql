@@ -268,7 +268,7 @@ builtin knowledgeAugmentDomainAnalyze {
 // the work shows up in the Tasks panel + the canvas plan-completed
 // card lifecycle.
 //
-// Synchronous in v1 (~30s for the full SI + embed + write path);
+// Synchronous in v1 (~30s for the full AI + embed + write path);
 // the frontend shows a "training queued" state until it returns.
 
 @enabled
@@ -421,7 +421,7 @@ builtin previewInsert {
 // ---- queries/v1/common/builtin/builtinRouterListModels.memql ----
 
 @executor("integration.router.listModels")
-@description("List every SI provider registered at engine startup with its vendor, model id, pricing, and availability. Feeds the CoPresent /router/catalog page.")
+@description("List every AI provider registered at engine startup with its vendor, model id, pricing, and availability. Feeds the CoPresent /router/catalog page.")
 builtin routerListModels { }
 
 // ---- queries/v1/common/builtin/builtinRouterListPolicies.memql ----

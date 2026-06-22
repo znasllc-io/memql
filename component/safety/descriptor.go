@@ -73,7 +73,7 @@ type Payload struct {
 	// before recording). Kept as a string to stay surface-agnostic;
 	// JSON callers stringify before constructing the descriptor.
 	Body string
-	// ToolName names the SI/integration tool being called for
+	// ToolName names the AI/integration tool being called for
 	// ActionToolCall / ActionWebhook -- used by the rule engine to
 	// scope tool-specific allow/deny rules.
 	ToolName string
@@ -129,7 +129,7 @@ func NewFSAction(surface Surface, action Action, paths []string, caller CallerCo
 	}
 }
 
-// NewToolAction builds a descriptor for a generic SI/integration
+// NewToolAction builds a descriptor for a generic AI/integration
 // tool call (webhook or integration capability). The free-form `args`
 // is treated as untrusted and redacted before any recording.
 func NewToolAction(surface Surface, toolName string, args map[string]any, caller CallerContext) ActionDescriptor {

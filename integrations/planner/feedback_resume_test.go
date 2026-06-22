@@ -33,7 +33,7 @@ func feedbackResumePlanRow(status, startedAt string, feedbackResp map[string]any
 func TestMaybeResumeFromFeedback_NoFeedbackResponse_NoOp(t *testing.T) {
 	// A normal task-driven running transition carries no feedbackResponse;
 	// maybeResumeFromFeedback must return false (NOT a resume) and never enter
-	// invokeAndDispatch (no plannerAgent SI call).
+	// invokeAndDispatch (no plannerAgent AI call).
 	fe := &fakeEngine{
 		execResponder: func(query string) (any, error) {
 			if strings.Contains(query, "queryPlanById") {
@@ -48,7 +48,7 @@ func TestMaybeResumeFromFeedback_NoFeedbackResponse_NoOp(t *testing.T) {
 	}
 	_, si, _ := fe.snapshot()
 	if len(si) != 0 {
-		t.Fatalf("no-op resume must make no plannerAgent SI call, got %v", si)
+		t.Fatalf("no-op resume must make no plannerAgent AI call, got %v", si)
 	}
 }
 
@@ -83,7 +83,7 @@ func TestMaybeResumeFromFeedback_Resumes_AndDedups(t *testing.T) {
 	l := NewPlannerAgentLoop(fe, testLogger())
 
 	// First resume: must be claimed + handled (returns true) and must drive
-	// the loop (at least one plannerAgent SI call once the gate/triage pass).
+	// the loop (at least one plannerAgent AI call once the gate/triage pass).
 	if !l.maybeResumeFromFeedback(context.Background(), "v1:planner:plan:p1") {
 		t.Fatalf("a running transition carrying a feedbackResponse must be handled as a resume")
 	}
@@ -96,6 +96,6 @@ func TestMaybeResumeFromFeedback_Resumes_AndDedups(t *testing.T) {
 		t.Fatalf("a re-delivered resume must still report handled=true")
 	}
 	if aiCalls != aiAfterFirst {
-		t.Fatalf("a re-delivered resume must NOT re-drive the loop; SI calls went %d -> %d", aiAfterFirst, aiCalls)
+		t.Fatalf("a re-delivered resume must NOT re-drive the loop; AI calls went %d -> %d", aiAfterFirst, aiCalls)
 	}
 }

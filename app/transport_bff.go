@@ -5,7 +5,7 @@ package app
 // transportBFF sets up transport for a BFF node: gRPC (MemqlService.Stream),
 // the HTTP server (for ws upgrade + the auth / attachment exceptions),
 // and any BFF-specific domain endpoints added by product branches.
-// SI operations (chat, speech, transcribe, agent/space/group suggest)
+// AI operations (chat, speech, transcribe, agent/space/group suggest)
 // live on MemqlService.Stream via AiChatMsg / AiSpeechMsg / AiTranscribeMsg /
 // AiSuggestMsg and are proxied across nodes by AiForwardRouter.
 //

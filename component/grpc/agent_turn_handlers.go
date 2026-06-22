@@ -361,7 +361,7 @@ func (s *grpcAgentTurnSink) ToolResult(id, resultJSON, errMsg string) {
 }
 
 // newAgentTurnErrorId returns an ERR-XXXXXX identifier consistent with
-// the SI HTTP error ID format (component/server/sihttp/errorid.go).
+// the AI HTTP error ID format (component/server/sihttp/errorid.go).
 func newAgentTurnErrorId() string {
 	return generateErrorId()
 }

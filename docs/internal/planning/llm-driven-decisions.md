@@ -58,7 +58,7 @@ Migrate decision-making from hardcoded heuristics to LLM-driven structured outpu
 
 3. **Vector-keyed caches for high-redundancy classifications.** "thanks!" / "thx" / "thank you so much" should hit the same cache row. Hash-keyed caches miss every time on near-duplicates.
 
-4. **Cache infrastructure verified before migration.** The SI cache and DSL cache are referenced in code but their actual hit / miss / eviction behaviour in production isn't measured. If caches silently don't hit, this whole strategy ships LLM-everywhere with no cost containment.
+4. **Cache infrastructure verified before migration.** The AI cache and DSL cache are referenced in code but their actual hit / miss / eviction behaviour in production isn't measured. If caches silently don't hit, this whole strategy ships LLM-everywhere with no cost containment.
 
 5. **Hardcoded heuristics retained ONLY for truly mechanical things** (slash commands, exact `@mention` parsing, structural shape checks). Everything inferential goes LLM + cache.
 
@@ -69,7 +69,7 @@ Migrate decision-making from hardcoded heuristics to LLM-driven structured outpu
 **Goal:** know what the existing caches actually do before migrating decisions onto them. Without this every later phase is built on sand.
 
 **Tasks:**
-- Read both cache implementations (SI cache in `component/memql/si_*.go`, DSL cache via `@cache(ttl=...)` annotations) end-to-end. Document key derivation, eviction policy, TTL handling.
+- Read both cache implementations (AI cache in `component/memql/si_*.go`, DSL cache via `@cache(ttl=...)` annotations) end-to-end. Document key derivation, eviction policy, TTL handling.
 - Add metrics: hit count, miss count, eviction count, age-at-hit per cache. Wire to a debug endpoint or per-component counters that show up in `make dev-status` / BFF logs.
 - Run the dev stack for a week of normal usage. Capture baseline numbers.
 - Audit: are there callers whose keys include high-cardinality data (timestamps, request ids) that prevent hits? Are there obvious double-calls inside a single request that should hit cache the second time?

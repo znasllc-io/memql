@@ -41,7 +41,7 @@ func looksLikeCanonicalUserId(s string) bool {
 // non-streaming one-shot generation (voice / polyphon-text path), controlled
 // by hints["tools_disabled"].
 //
-// Provider selection for the streaming path runs through the memQL SI Router
+// Provider selection for the streaming path runs through the memQL AI Router
 // (component/router), which wraps the chosen provider with observability and
 // writes a v1:router:call ledger row per call.
 type Replier struct {
@@ -245,7 +245,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// hiccups. Ordinary turns are untouched (the hint is absent).
 	toolNames = ScopeToolsForDeliverableSurface(msg.Hints, toolNames)
 
-	// Provider selection runs through the memQL SI Router. The replier
+	// Provider selection runs through the memQL AI Router. The replier
 	// still owns the default policy (operator-capable agents get
 	// strongReasoning because the prompt is long and tool-calling
 	// choreography punishes instruction-following lapses); resolution,
@@ -1724,7 +1724,7 @@ func truncateForLog(s string, max int) string {
 	return s[:max] + "…"
 }
 
-// extractReplyText pulls the reply text out of an InvokeAI result. The SI
+// extractReplyText pulls the reply text out of an InvokeAI result. The AI
 // runtime may return a string, a map with "text"/"content" keys, or an
 // arbitrary JSON-serialisable value; we normalise to string.
 func extractReplyText(result any) string {

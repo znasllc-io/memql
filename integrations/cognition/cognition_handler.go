@@ -92,12 +92,12 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	c.recordRecentUtteranceForPrompt(spaceId, utterance.ID, utterance.ParticipantId, utterance.UtteranceType, utterance.Text)
 
 	// Skip non-conversational utterance types -- these are system-generated
-	// tags that should never trigger an SI response.
+	// tags that should never trigger an AI response.
 	//
 	// 'system' utterances are pure tags (e.g. join/leave events).
 	// 'action' utterances are reactive-agent activity surfaces ("Marketing is
 	//   investigating cost savings...") -- they're rendered in the chat
-	//   for the user to see but should never trigger another SI response
+	//   for the user to see but should never trigger another AI response
 	//   loop. Letting them through here would cause the cognition pipeline
 	//   to react to its own background work, which leads to feedback loops
 	//   and pile-on. Phase 3 of the multi-agent rework will write into the
@@ -108,14 +108,14 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		return
 	}
 
-	// Skip if SI utterance — prevents response loops.
+	// Skip if AI utterance — prevents response loops.
 	participantType, err := c.getParticipantType(ctx, utterance.ParticipantId)
 	if err != nil {
 		c.Logger.Warn("cognition: failed to resolve participant type", "error", err, "participantId", utterance.ParticipantId)
 		participantType = ""
 	}
 	if participantType == "si" {
-		// Update SI presence to idle after speaking (fixes stuck "Replying..." status).
+		// Update AI presence to idle after speaking (fixes stuck "Replying..." status).
 		if aiParticipant, err := c.findAIParticipant(ctx, spaceId); err == nil && aiParticipant != nil && strings.TrimSpace(aiParticipant.ID) != "" {
 			_ = c.upsertParticipantPresence(ctx, spaceId, aiParticipant.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
 		}
@@ -127,9 +127,9 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		return
 	}
 
-	// Global SI kill switch.
+	// Global AI kill switch.
 	if !c.IsAIEnabled(ctx) {
-		c.Logger.Debug("cognition: SI responses disabled, skipping")
+		c.Logger.Debug("cognition: AI responses disabled, skipping")
 		return
 	}
 
@@ -183,7 +183,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		return
 	}
 
-	// Find all SI participants in the space and build AgentCandidates.
+	// Find all AI participants in the space and build AgentCandidates.
 	// Retry once on transient errors -- the cognition handler is the
 	// only thing that runs per-utterance, so giving up on a single DB
 	// blip means the user types and gets nothing back at all. One retry
@@ -195,7 +195,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		if err == nil {
 			break
 		}
-		c.Logger.Warn("cognition: failed to load SI participants",
+		c.Logger.Warn("cognition: failed to load AI participants",
 			"error", err, "spaceId", spaceId, "attempt", attempt+1)
 		if attempt == 0 {
 			select {
@@ -329,7 +329,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	//
 	// The heuristic score engine runs every turn and produces signals
 	// (per-agent domain match, intent, mentions, session state). Those
-	// signals feed into the SI router, which makes the actual decision.
+	// signals feed into the AI router, which makes the actual decision.
 	// The router can choose "nobody responds" as a first-class outcome --
 	// that's what lets the system stay silent on utterances that don't
 	// need a reply (acknowledgments, reflective statements, humans mid-
@@ -415,7 +415,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		routeOutcome = fp
 	}
 
-	// Single-agent fast path: if exactly one SI candidate is in the
+	// Single-agent fast path: if exactly one AI candidate is in the
 	// room, the "winner" is obvious and the LLM router is pure
 	// overhead. Daily spaces (one user + Sofia the GA) are the
 	// canonical case -- saves a measured ~1000ms of routeMs per
@@ -427,8 +427,8 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		only := candidates[0]
 		handoff, handoffFrom := handoffFromSession(session, only.ID)
 		routeOutcome = buildFastPathOutcome(&only, handoff, handoffFrom,
-			"Single SI agent in room (deterministic winner; router skipped)",
-			"Deterministic routing: only one SI candidate available")
+			"Single AI agent in room (deterministic winner; router skipped)",
+			"Deterministic routing: only one AI candidate available")
 	}
 
 	historyLimit := c.ConversationHistoryLimit(ctx)
@@ -669,13 +669,13 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		if decision.Winner != nil {
 			heuristicWinner = decision.Winner.AgentName
 		}
-		c.Logger.Warn("cognition: SI router failed, falling back to heuristic",
+		c.Logger.Warn("cognition: AI router failed, falling back to heuristic",
 			"error", routeErr, "heuristicWinner", heuristicWinner,
 			"spaceId", spaceId, "routeMs", routeMs)
 	} else if routeOutcome != nil {
 		if !routeOutcome.Respond {
 			// First-class "silence" outcome: presence returns to idle for
-			// every SI agent in the space (no one should show 'thinking'
+			// every AI agent in the space (no one should show 'thinking'
 			// since no one is working), and we exit without inserting a
 			// response utterance. Never emit error-state presence here --
 			// silence is the correct answer, not a failure.
@@ -698,7 +698,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		// Deterministic override: when Polyphon's scorer detected a
 		// primary direct-address (value==1.0 on the direct_address
 		// factor) for an agent that's still a valid candidate, trust
-		// that over the SI router's choice. The small chat model
+		// that over the AI router's choice. The small chat model
 		// occasionally returns an agentName that contradicts its own
 		// reasoning text ("The user greeted Pearl directly, so Pearl
 		// should respond" -> agentName:"Zara"), and every time that
@@ -706,7 +706,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		// picked the right agent. No reason to second-guess it.
 		if addressed := polyphonDirectAddressWinner(decision, candidates); addressed != nil &&
 			aiWinner != nil && !strings.EqualFold(addressed.AgentId, aiWinner.AgentId) {
-			c.Logger.Warn("cognition: SI router contradicted direct-address, overriding",
+			c.Logger.Warn("cognition: AI router contradicted direct-address, overriding",
 				"spaceId", spaceId,
 				"aiRouterChose", aiWinner.AgentName,
 				"aiRouterReason", aiWinner.Reason,
@@ -716,7 +716,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			routeOutcome.HandoffFrom = ""
 		}
 
-		c.Logger.Info("cognition: SI router selected agent",
+		c.Logger.Info("cognition: AI router selected agent",
 			"spaceId", spaceId, "aiWinner", aiWinner.AgentName,
 			"aiReason", aiWinner.Reason, "toolsNeeded", aiWinner.ToolsNeeded,
 			"handoff", routeOutcome.Handoff, "handoffFrom", routeOutcome.HandoffFrom,
@@ -742,7 +742,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	if !decision.HasWinner() {
 		// Reset every agent's presence to Idle (NOT Waiting) so the UI
 		// stops indicating "an agent is about to respond" when, in
-		// fact, neither the heuristic nor the SI router produced a
+		// fact, neither the heuristic nor the AI router produced a
 		// winner. Previously this set every agent to "Waiting" which
 		// reads to the user as "the system is still thinking" and
 		// leaves them staring at a typing indicator forever. Idle is
@@ -753,7 +753,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		// Promote the no-winner trace to INFO so it's visible without
 		// flipping log level. Operators investigating "why didn't
 		// anybody respond?" need this in default logs, not debug.
-		c.Logger.Info("cognition: no winner produced by heuristic or SI router; staying silent",
+		c.Logger.Info("cognition: no winner produced by heuristic or AI router; staying silent",
 			"spaceId", spaceId, "utteranceId", utterance.ID,
 			"confidence", decision.Confidence, "tookMs", time.Since(start).Milliseconds(),
 			"hint", "consider adding a general-assistant to the space, or lowering the fit threshold via MEMQL_COGNITION_FIT_THRESHOLD")
@@ -811,7 +811,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 
 	// Idempotency: skip if we've already responded to this utterance.
 	if c.queryHasAIResponseForReply(ctx, spaceId, winnerParticipant.ID, utterance.ID) {
-		c.Logger.Debug("cognition: SI response already exists, skipping",
+		c.Logger.Debug("cognition: AI response already exists, skipping",
 			"spaceId", spaceId, "replyToId", utterance.ID)
 		_ = c.upsertParticipantPresence(ctx, spaceId, winnerParticipant.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
 		return
@@ -853,7 +853,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	}
 
 	// Inject tool defaults so that tool calls receive spaceId and
-	// participantId even if the SI model omits them.
+	// participantId even if the AI model omits them.
 	defaults := map[string]any{
 		"spaceId":       spaceId,
 		"participantId": winnerParticipant.ID,
@@ -1008,7 +1008,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	selectionReason := deriveSelectionReason(winner)
 	ctx = contextWithSelectionReason(ctx, selectionReason)
 
-	// Pass utterance intent to SI responder for dynamic tool gating.
+	// Pass utterance intent to AI responder for dynamic tool gating.
 	ctx = contextWithIntent(ctx, scoringUtterance.Intent)
 
 	// When the router signaled a handoff (winner differs from previous
@@ -1030,7 +1030,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		ctx = contextWithHandoffChainDepth(ctx, session.GetHandoffChainDepth())
 	}
 
-	// Generate SI reply.
+	// Generate AI reply.
 	//
 	// The voice path (utterance originated in the Polyphon voice
 	// pipeline) runs the non-streaming one-shot generator so we avoid
@@ -1204,7 +1204,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			// director + scribe. It no longer AUTHORS the voice reply: publish the
 			// gate directive (mode + brevity) and stop here. The relay forwards it on
 			// VoiceAgentTurnComplete, the realtime model generates the words natively,
-			// and its spoken output is captured as the SI utterance
+			// and its spoken output is captured as the AI utterance
 			// (handleVoiceAgentRealtimeOutput). This removes the ~1-1.5s authoring
 			// LLM call from the voice critical path (#475/#477). Voice is GA-only, so
 			// there is exactly one agent to gate here.
@@ -1342,7 +1342,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 				"Sorry, I ran into an issue while working on that. Let me know if you'd like me to try again.", nil, nil, nil)
 		}
 		_ = c.upsertParticipantPresence(ctx, spaceId, winnerParticipant.ID, presenceStateError, "Error", "Having trouble generating a reply.", utterance.ID, err.Error(), nil)
-		c.Logger.Error("cognition: failed to generate SI response", "error", err)
+		c.Logger.Error("cognition: failed to generate AI response", "error", err)
 		return
 	}
 	aiMs := time.Since(t0).Milliseconds()
@@ -1431,7 +1431,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		} // end !voiceStreamed
 	}
 
-	c.Logger.Info("cognition: SI response generated",
+	c.Logger.Info("cognition: AI response generated",
 		"spaceId", spaceId,
 		"replyToId", utterance.ID,
 		"winner", winner.AgentName,
@@ -1451,7 +1451,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		// matches the chunks' replyId -- the frontend keys one bubble
 		// across the streaming/commit transition.
 		if err := c.insertAIResponse(bgCtx, spaceId, winnerParticipant, replyId, utterance.ID, response, responseSource, responseCitations, responseRetrieved); err != nil {
-			c.Logger.Error("cognition: failed to insert SI response (async)", "error", err, "spaceId", spaceId)
+			c.Logger.Error("cognition: failed to insert AI response (async)", "error", err, "spaceId", spaceId)
 		}
 	}()
 
@@ -1646,7 +1646,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			"responseLen", len(contResponse))
 	}()
 
-	// Auto-embed SI response for future semantic context retrieval.
+	// Auto-embed AI response for future semantic context retrieval.
 	if c.embedFunc != nil {
 		go func() {
 			embedCtx, embedCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1687,7 +1687,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	}()
 }
 
-// buildAgentCandidates converts cognition SI participants to Polyphon AgentCandidates.
+// buildAgentCandidates converts cognition AI participants to Polyphon AgentCandidates.
 func (c *CognitionIntegration) buildAgentCandidates(ctx context.Context, aiParticipants []*participantPayload) []polyphon.AgentCandidate {
 	candidates := make([]polyphon.AgentCandidate, 0, len(aiParticipants))
 	for _, ap := range aiParticipants {
@@ -1811,7 +1811,7 @@ func deriveSelectionReason(winner *polyphon.AgentScore) string {
 	case "solo_agent_boost":
 		return "You are the only agent in this space."
 	case "si_router":
-		return best.Detail // Already contains the SI's reasoning.
+		return best.Detail // Already contains the AI's reasoning.
 	default:
 		return ""
 	}
@@ -2116,7 +2116,7 @@ func (c *CognitionIntegration) getParticipantType(ctx context.Context, participa
 }
 
 // isTranscriptOnlyRealtimeUtterance returns true when the utterance source indicates
-// it was transcribed from a realtime voice channel and should NOT trigger a text-based SI response.
+// it was transcribed from a realtime voice channel and should NOT trigger a text-based AI response.
 func isTranscriptOnlyRealtimeUtterance(source map[string]string) bool {
 	if len(source) == 0 {
 		return false
@@ -2127,7 +2127,7 @@ func isTranscriptOnlyRealtimeUtterance(source map[string]string) bool {
 	return strings.EqualFold(strings.TrimSpace(source["transcriptOnly"]), "true")
 }
 
-// findAllAIParticipants returns all active SI participants in a space.
+// findAllAIParticipants returns all active AI participants in a space.
 // Delegates to the spaceParticipants MemQL query function.
 func (c *CognitionIntegration) findAllAIParticipants(ctx context.Context, spaceId string) ([]*participantPayload, error) {
 	return c.findParticipantsByType(ctx, spaceId, "si")
@@ -2140,7 +2140,7 @@ func (c *CognitionIntegration) findActiveHumanParticipants(ctx context.Context, 
 	return c.findParticipantsByType(ctx, spaceId, "human")
 }
 
-// findParticipantsByType is the shared implementation behind the SI / human
+// findParticipantsByType is the shared implementation behind the AI / human
 // participant lookups. participantType should be "si" or "human".
 func (c *CognitionIntegration) findParticipantsByType(ctx context.Context, spaceId, participantType string) ([]*participantPayload, error) {
 	query := fmt.Sprintf(`querySpaceParticipants({spaceId: "%s", participantType: "%s", status: "active"})`, spaceId, participantType)
@@ -2175,7 +2175,7 @@ func (c *CognitionIntegration) findParticipantsByType(ctx context.Context, space
 		// declared @concepts("v1:cognition:participant") so in principle
 		// this is redundant, but in practice the shape runtime has been
 		// observed returning agent and human-participant nodes from a
-		// filtered SI query -- stripping them here prevents phantom
+		// filtered AI query -- stripping them here prevents phantom
 		// "agentId is empty" lookup warnings and wrong router decisions.
 		if concept, _ := node["concept"].(string); concept != "" && concept != "v1:cognition:participant" {
 			continue
@@ -3657,7 +3657,7 @@ func (c *CognitionIntegration) continueIfBranchPointsDeclared(
 		}
 
 		// Build candidates from the participants list (subset that's
-		// SI participants).
+		// AI participants).
 		candidates := make([]polyphon.AgentCandidate, 0, len(aiParticipants))
 		for _, ap := range aiParticipants {
 			if ap == nil {

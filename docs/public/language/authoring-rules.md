@@ -974,7 +974,7 @@ spec specIsHumanParticipant {
 ```
 
 **Policies take no args at all.** The live `policy` construct is an
-empty-bodied SI provider-selection record (the decision-policy tier
+empty-bodied AI provider-selection record (the decision-policy tier
 that once carried `func (Policy)` bodies with `@tier` / `@audited`
 is retired, #984 — caller-context boolean checks belong in
 context-specs called via `spec("name")`):

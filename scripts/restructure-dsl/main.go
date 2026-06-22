@@ -17,7 +17,7 @@
 //	│   ├── ... (one file per entity or entity-cluster)
 //	│   ├── automations.memql      # all cognition automations + their logic
 //	│   ├── builtins.memql         # @executor wrappers
-//	│   ├── tools.memql            # SI-callable tool defs
+//	│   ├── tools.memql            # AI-callable tool defs
 //	│   └── prompts/<name>.{memql,tmpl}
 //	├── copresent/ identity/ cluster/ platform/ knowledge/ data/ worker/ router/ memql/
 //	├── common/

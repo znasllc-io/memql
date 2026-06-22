@@ -19,7 +19,7 @@ docs/
 │   ├── overview/             # what it is, quickstart, install
 │   ├── concepts/             # data model, events, identifiers, mental models
 │   ├── language/             # MemQL DSL: constructs, authoring, reference
-│   ├── ai/                   # SI providers, policies, integrations & tools
+│   ├── ai/                   # AI providers, policies, integrations & tools
 │   ├── operate/              # deploy, auth, env, runbooks that are public
 │   ├── build/                # gRPC API, SDKs, building against memQL
 │   ├── cockpit/              # the terminal IDE / ops console

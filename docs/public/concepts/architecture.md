@@ -49,7 +49,7 @@ The MemQL system follows a classic compiler architecture with distinct phases fo
 │   ┌──────────────────────────────────────────────────────────────────────────────┐  │
 │   │                           SUPPORTING SERVICES                                │  │
 │   │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐              │  │
-│   │  │ SI Runtime │  │   Event    │  │   Result   │  │   Schema   │              │  │
+│   │  │ AI Runtime │  │   Event    │  │   Result   │  │   Schema   │              │  │
 │   │  │            │  │    Bus     │  │   Cache    │  │  Registry  │              │  │
 │   │  └────────────┘  └────────────┘  └────────────┘  └────────────┘              │  │
 │   │  ┌────────────┐  ┌────────────┐  ┌────────────┐                              │  │
@@ -125,7 +125,7 @@ component/
 | **Parser** | Token stream | AST | Syntax analysis, tree construction |
 | **Compiler** | AST | JSON/MemQL | Code generation, format conversion |
 | **Executor** | AST/Query | Results | Database operations, filtering |
-| **SI Runtime** | Prompts | SI responses | LLM invocations |
+| **AI Runtime** | Prompts | AI responses | LLM invocations |
 | **Event Bus** | Events | Subscribers | Inter-component communication |
 
 ---
@@ -582,9 +582,9 @@ The Executor Engine (in `component/memql/`) executes parsed queries against the 
 │  │  │                                                                           │  │ │
 │  │  │  Raw Results ──▶ Traverse Relations ──▶ Apply Shape ──▶ Format Output    │  │ │
 │  │  │                                                                           │  │ │
-│  │  │               Optional: SI Shape Functions                                │  │ │
+│  │  │               Optional: AI Shape Functions                                │  │ │
 │  │  │               ┌────────────────┐                                         │  │ │
-│  │  │               │   SI Runtime   │                                         │  │ │
+│  │  │               │   AI Runtime   │                                         │  │ │
 │  │  │               │ (LLM invocation│                                         │  │ │
 │  │  │               │  for si() fn)  │                                         │  │ │
 │  │  │               └────────────────┘                                         │  │ │

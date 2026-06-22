@@ -460,7 +460,7 @@ func (p *Parser) parseDefinition() (Node, error) {
 		}
 	case p.check(TokenIdentifier) && p.current.Literal == "provider":
 		// Contextual keyword: `provider` at top-of-file introduces an
-		// SI provider declaration. Same rationale as `concept` /
+		// AI provider declaration. Same rationale as `concept` /
 		// `shape` -- kept as a plain identifier so the lexer doesn't
 		// disturb other uses, and the symmetry matches every other
 		// struct-form construct. memql#316 (sub-epic #309 sibling of
@@ -479,7 +479,7 @@ func (p *Parser) parseDefinition() (Node, error) {
 		}
 	case p.check(TokenIdentifier) && p.current.Literal == "tool":
 		// Contextual keyword: `tool` at top-of-file introduces a
-		// struct-form SI tool declaration. memql#317 (sub-epic #309
+		// struct-form AI tool declaration. memql#317 (sub-epic #309
 		// sibling of #315 / #316 / #318).
 		def, err = p.parseToolDecl(attributes)
 		if err == nil {
@@ -495,7 +495,7 @@ func (p *Parser) parseDefinition() (Node, error) {
 		}
 	case p.check(TokenIdentifier) && p.current.Literal == "policy":
 		// Contextual keyword: `policy` at top-of-file introduces an
-		// SI Router routing-policy declaration. memql#333 (sub-epic
+		// AI Router routing-policy declaration. memql#333 (sub-epic
 		// #329 / Stage 1C of #310).
 		def, err = p.parsePolicyDecl(attributes)
 		if err == nil {

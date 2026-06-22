@@ -130,7 +130,7 @@ Every DB-connecting pod mounts the `memql-secrets` Secret via `envFrom`. The
   shared `IDENTITY_SIGNING_KEY_B64` (Ed25519 seed) in the envelope — every
   replica derives the same key/JWKS. See [Identity Service](auth/identity-service.md)
   and the [Access Model](auth/access-model.md).
-- **SI providers:** an `OPENAI_API_KEY` is required (cascade voice = OpenAI
+- **AI providers:** an `OPENAI_API_KEY` is required (cascade voice = OpenAI
   ASR/TTS); Anthropic optional. See [Environment Variables](env-vars.md) for the
   full env surface and the bootstrap-envelope vs concept-stored split.
 

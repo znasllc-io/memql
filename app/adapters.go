@@ -53,7 +53,7 @@ func (a *CognitionEngineAdapter) InvokeAI(ctx context.Context, templateId string
 }
 
 // InvokeAIStructured delegates to the engine's structured-output path.
-// Used by the cognition SI router, prediction analyzer, and any other
+// Used by the cognition AI router, prediction analyzer, and any other
 // "logic" prompt that wants provider-enforced JSON shape.
 func (a *CognitionEngineAdapter) InvokeAIStructured(
 	ctx context.Context,

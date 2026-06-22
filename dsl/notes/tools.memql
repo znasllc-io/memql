@@ -1,4 +1,4 @@
-// notes domain -- the SI-facing `notes` tool surface.
+// notes domain -- the AI-facing `notes` tool surface.
 //
 // Four operations -- list / create / update / search -- each wired to
 // a named owned query or mutation. The assistant invokes these to

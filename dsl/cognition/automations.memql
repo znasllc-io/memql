@@ -28,14 +28,14 @@ automation bootstrapSession {
 }
 
 // automations/v1/cognition/generateResponse/automation.memql
-// Generates and inserts an SI response when the cognition integration
+// Generates and inserts an AI response when the cognition integration
 // determines that a response is needed. The Go handler performs event
 // reception, concurrent context loading, Polyphon scoring, and streaming
 // dispatch, then emits this event with pre-loaded context when a
-// non-streaming SI response is needed.
+// non-streaming AI response is needed.
 @enabled
 @trigger(event="cognition.response.requested")
-@description("Generate and insert SI response for an utterance")
+@description("Generate and insert AI response for an utterance")
 automation generateResponse {
   step run {
     logic generateResponse { event: event }

@@ -263,7 +263,7 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 	}
 
 	// Bind the stream to this (space, ga_agent_id) and kick off the
-	// session-long SI-reply subscriber. The subscriber forwards SI
+	// session-long AI-reply subscriber. The subscriber forwards AI
 	// reply utterances as VoiceAgentSpeak so chat-typed user
 	// messages produce audible replies via AgentSession.say(). The
 	// existing TurnRequest path still handles STT-initiated turns;
@@ -1160,7 +1160,7 @@ func voiceAgentScopedToolNamesVia(
 		agentId = resolveGroupGAAgentIdVia(ctx, engine, spaceId, logger)
 	}
 	if agentId == "" {
-		// The space resolve failed (no active SI participant, or query error)
+		// The space resolve failed (no active AI participant, or query error)
 		// -- fall back to the bound id. This may be the placeholder, in which
 		// case resolveAgentToolSlugs reports found=false and we fail open.
 		agentId = boundAgentId
@@ -1520,7 +1520,7 @@ func (s *streamSession) handleVoiceAgentSessionEnd(envelope *memqlv1.MemqlClient
 
 // voiceSpeakQueueDepth bounds the speak-forward queue between the event-bus
 // callback (producer) and the per-session worker (consumer). Speak-eligible
-// replies are rare (chat-typed SI replies under always_on); 32 is generous.
+// replies are rare (chat-typed AI replies under always_on); 32 is generous.
 // On overflow the callback DROPS the reply with a warn instead of blocking
 // the bus dispatch.
 const voiceSpeakQueueDepth = 32
@@ -1584,7 +1584,7 @@ func runVoiceSpeakWorker(queue <-chan voiceAgentReply, done <-chan struct{}, res
 }
 
 // startVoiceAgentSpeakSubscriber binds a session-long subscriber for
-// the (space, ga_agent_id) pair. The subscriber forwards SI reply
+// the (space, ga_agent_id) pair. The subscriber forwards AI reply
 // utterances as VoiceAgentSpeak messages so the voice-agent
 // synthesizes them via AgentSession.say(), enabling chat-typed user
 // messages to produce audible replies.
@@ -1598,7 +1598,7 @@ func runVoiceSpeakWorker(queue <-chan voiceAgentReply, done <-chan struct{}, res
 //
 // Dedup against STT-initiated turns: when a VoiceAgentTurnRequest is
 // in flight for the same (space, agent), the TurnDelta path already
-// drives the TTS pipeline -- the subscriber skips the matching SI
+// drives the TTS pipeline -- the subscriber skips the matching AI
 // reply so we don't double-speak.
 //
 // Mode gating: only `always_on` triggers Speak. The `mirror_user`
@@ -1846,7 +1846,7 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 	// (`<partition>:v1:cognition:participant:<slug>`) and embedding
 	// it would inject `:v1:cognition:participant:` into the
 	// utterance id, which memql's canonicalizer then parses out as
-	// the type tag, rejecting the SI response's `replyToId` insert
+	// the type tag, rejecting the AI response's `replyToId` insert
 	// with "is under concept v1:cognition:participant, expected
 	// v1:cognition:utterance". The 8-hex suffix collapses 1e-15
 	// nanosecond-collision risk further; nanos alone are unique in
@@ -2058,7 +2058,7 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 	// returns immediately instead of accumulating as an orphan
 	// subscriber. Multiple orphans on the same v1:cognition:utterance
 	// pattern caused the "agent reply lands in chat but no audio
-	// played" symptom: every orphan matched the same SI reply row,
+	// played" symptom: every orphan matched the same AI reply row,
 	// each sent its own TurnDelta back to voice-agent, and
 	// LK Agents 1.5's AgentSession had multiple LLMStreams racing --
 	// only one's TTS reached Aura-2.
@@ -2227,12 +2227,12 @@ func extractGAReplyFromEvent(e events.Event, spaceId, gaAgentId string) (voiceAg
 	if !spaceIdMatches(nodeSpaceId, spaceId) {
 		return voiceAgentReply{}, false
 	}
-	// Match any SI-participant reply in the target space. Backend
+	// Match any AI-participant reply in the target space. Backend
 	// convention stamps `participantType="si"` on every system-
 	// intelligence utterance (the wire-format value memql actually
 	// writes; the earlier "agent" check here was aspirational and
 	// never matched a row). Cognition only dispatches one winner
-	// per turn, so the first SI reply that lands in the space after
+	// per turn, so the first AI reply that lands in the space after
 	// the turn-request subscription opened IS the reply to the
 	// active voice turn -- there is no fan-out worth disambiguating
 	// here, and the previous gaAgentId match was checking against a
@@ -2321,15 +2321,15 @@ func trailingSlug(id string) string {
 // voice-agent inserts from the legacy bridge-agent inserts during the
 // cutover window.
 // handleVoiceAgentRealtimeOutput captures the assistant's spoken output
-// for one realtime turn and inserts it as an SI utterance with full
+// for one realtime turn and inserts it as an AI utterance with full
 // chat/canvas/audit parity (#437).
 //
 // The cascade routes assistant replies through VoiceAgentTurnRequest --
-// cognition runs the agent loop and inserts the SI utterance itself
+// cognition runs the agent loop and inserts the AI utterance itself
 // (insertAIResponse in integrations/cognition/si_responder.go), stamping
 // participantType="si" + citations off the respondToUser envelope. The
 // realtime executor (gpt-realtime) speaks directly and never enters that
-// path, so this handler is the sole writer of realtime SI utterances.
+// path, so this handler is the sole writer of realtime AI utterances.
 // It mirrors insertAIResponse's wire shape exactly:
 //
 //   - participantType="si"  (the value the frontend keys sender lookup on)
@@ -2393,22 +2393,22 @@ func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlCl
 	go func() {
 		ctx := contextWithVoiceAgentActor(context.Background())
 
-		// Resolve the GA's SI participant row in the space. The frontend
+		// Resolve the GA's AI participant row in the space. The frontend
 		// resolves a sender via participantMap.get(utterance.participantId),
 		// which is the v1:cognition:participant id -- NOT the agent
-		// template id. querySiParticipantForSpace returns the active SI
+		// template id. querySiParticipantForSpace returns the active AI
 		// participant; voice rooms have a single GA, so the first active
-		// SI participant is the speaker.
+		// AI participant is the speaker.
 		participantResolveStart := time.Now()
 		participantId := s.resolveAIParticipantId(ctx, spaceId)
 		logVoiceTiming(s.logger, "server.realtime_output.resolve_participant", participantResolveStart,
 			"space_id", spaceId, "ok", participantId != "")
 		if participantId == "" {
 			if s.logger != nil {
-				s.logger.Error("voice-agent realtime output: no SI participant resolved",
+				s.logger.Error("voice-agent realtime output: no AI participant resolved",
 					"request_id", requestId, "space_id", spaceId, "ga_agent_id", gaAgentId)
 			}
-			_ = ack(false, "", "participant_not_found", "no active SI participant in space")
+			_ = ack(false, "", "participant_not_found", "no active AI participant in space")
 			return
 		}
 
@@ -2477,7 +2477,7 @@ func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlCl
 	return nil
 }
 
-// resolveAIParticipantId returns the active SI participant row id for a
+// resolveAIParticipantId returns the active AI participant row id for a
 // space, or "" if none. Read-only; mirrors the resolution insertAIResponse
 // relies on (participantId must be the v1:cognition:participant id, not
 // the agent template id) so realtime utterances attribute identically.
@@ -2563,11 +2563,11 @@ func (s *streamSession) handleVoiceAgentRealtimeSpeaking(envelope *memqlv1.Memql
 		// Resolve the GA's v1:cognition:participant row id (NOT the agent
 		// template id) -- the presence row the frontend keys the orb on is
 		// keyed by participantId, the same id handleVoiceAgentRealtimeOutput
-		// attributes the SI utterance to.
+		// attributes the AI utterance to.
 		participantId := s.resolveAIParticipantId(ctx, spaceId)
 		if participantId == "" {
 			if s.logger != nil {
-				s.logger.Debug("voice-agent realtime speaking: no SI participant resolved",
+				s.logger.Debug("voice-agent realtime speaking: no AI participant resolved",
 					"space_id", spaceId, "ga_agent_id", gaAgentId)
 			}
 			return
