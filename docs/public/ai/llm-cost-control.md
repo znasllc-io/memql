@@ -166,3 +166,71 @@ MEMQL_MAX_AUTOMATION_EXECUTIONS_PER_WINDOW=20
 
 The kill-switch alert `LLM KILL-SWITCH LATCHED` is the terminal signal; after
 it, every LLM call returns a 402 and no vendor request is made.
+
+## AI-call caching (cost *reduction*, not just bounding)
+
+The layers above stop a runaway. Caching is the orthogonal lever: it stops
+re-paying the LLM for an answer we already have. Two cache layers sit on the
+`ai()` / `InvokeAI` path, checked in order:
+
+1. **Exact-hash cache** (`component/memql/ai_cache.go`,
+   [5.8](https://github.com/znasllc-io/memql/issues/1972)). Keys on
+   `sha256(templateId|provider|rendered-prompt)`. Cheap, byte-exact — so
+   `"thanks!"` and `"thanks"` miss each other. On by default
+   (`MEMQL_SI_CACHE_DEFAULT_ENABLED`, ceiling `MEMQL_SI_CACHE_MAX_SECONDS`).
+
+2. **Semantic (vector) cache** (`component/memql/ai_semantic_cache.go`,
+   [5.9](https://github.com/znasllc-io/memql/issues/1973)). On an exact-hash
+   *miss*, for an **enabled classification namespace only**, embeds the rendered
+   prompt and looks up the nearest neighbour in the `semantic_ai_cache`
+   pgvector table scoped to that namespace. Returns the cached result **only**
+   when cosine similarity is at or above the namespace's threshold; otherwise it
+   falls through to a fresh LLM call and stores the result back. This is what
+   collapses `"thanks"` / `"thx"` / `"thank you"` onto one cache row.
+
+```
+ai() call
+  └─ exact-hash cache  (byte-exact)            → hit? return
+       └─ semantic cache (enabled namespace)    → similarity ≥ threshold? return
+            └─ fresh LLM call → store into BOTH caches
+```
+
+### The wrong-answer guard (read before enabling a namespace)
+
+A near-duplicate prompt does **not** in general imply an identical correct
+answer: *"cancel the meeting"* and *"confirm the meeting"* are lexically and
+semantically close yet demand opposite answers. So the semantic cache is:
+
+- **opt-in per namespace.** A *classification namespace* is a stable
+  input→label call type (message intent, affirmation, domain-shape). The
+  enablement registry (`ai_semantic_cache_registry.go`) is **empty by
+  default** — shipping the layer changes no AI behaviour. NEVER enable it for
+  free-form generation (agent prose replies): two prompts that "look similar"
+  there can demand entirely different correct outputs.
+- **threshold-gated.** Per-namespace cosine floor, conservative default
+  **0.95**. A neighbour below the floor is rejected and counted
+  (`SemanticCacheStats.BelowThreshold` — the guard firing).
+
+### Enabling a namespace (the path)
+
+1. Confirm the call is a classification / structured-output call with a stable
+   input→label mapping.
+2. Run the false-positive eval (`ai_semantic_cache_eval_test.go`) over that
+   namespace's near-duplicate pairs (should hit) and lexically-close-but-opposite
+   pairs (must not hit). Pick the lowest threshold whose false-positive rate
+   stays under the agreed bound (0% over the curated opposite corpus at 0.95).
+3. Register it in `defaultSemanticNamespaces()` **or** set
+   `MEMQL_SI_SEMANTIC_CACHE_NAMESPACES=<ns>:<threshold>[:<ttlSeconds>]` (comma-
+   separated). Start above the eval-chosen threshold and tune down only with
+   telemetry.
+
+The strongest first-enablement candidate is cognition's message-intent
+classification (`cognition.message_intent`, the `messageClassification` prompt)
+— structured output, stable input→label, high redundancy. It ships **not**
+enabled: turning it on changes a live cognition decision path and is a
+deliberate, eval-gated, owner-signed-off follow-up, not a risk taken to satisfy
+acceptance criteria.
+
+| Env var | Default | Meaning |
+| --- | --- | --- |
+| `MEMQL_SI_SEMANTIC_CACHE_NAMESPACES` | *(empty)* | enable namespaces: `ns:threshold[:ttlSeconds]`, comma-separated |

@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -61,6 +62,72 @@ func (e *MemQLEngine) RegisterIntegration(provider IntegrationProvider) error {
 	}
 
 	return nil
+}
+
+// WireSemanticCache constructs and attaches the semantic (vector) AI-call
+// cache (5.9) to the AI runtime. It is wired from app bootstrap once the
+// embedding provider and database handle are live (both arrive after the
+// engine is constructed). Passing a nil embedding provider or dbGetter leaves
+// the runtime exact-hash-only (a clean degrade -- the primitive becomes a
+// no-op and every AI call behaves exactly as pre-5.9).
+//
+// embeddingProviderName selects the embedding model (empty => "embedding3Small",
+// the instance default that matches node_vectors' 1536-dim schema). The
+// namespace enablement registry is loaded from defaults + env here, so an
+// operator can enable a vetted namespace without a rebuild.
+func (e *MemQLEngine) WireSemanticCache(embeddingProviderName string, dbGetter func() *sql.DB) {
+	if e == nil || e.aiRuntime == nil {
+		return
+	}
+	if strings.TrimSpace(embeddingProviderName) == "" {
+		embeddingProviderName = "embedding3Small"
+	}
+	if e.providers == nil {
+		return
+	}
+	provider, err := e.providers.EmbeddingProvider(embeddingProviderName)
+	if err != nil || provider == nil {
+		if e.Logger != nil {
+			e.Logger.Info("semantic AI cache not wired: embedding provider unavailable",
+				"provider", embeddingProviderName, "err", err)
+		}
+		return
+	}
+
+	embedder := newProviderEmbedder(provider)
+	store := newPGSemanticStore(dbGetter)
+	if embedder == nil || store == nil {
+		return
+	}
+
+	namespaces := loadSemanticNamespacesFromEnv()
+	ttl := e.aiRuntime.cacheTTL(nil)
+	if ttl <= 0 {
+		ttl = 24 * time.Hour
+	}
+	cache := newSemanticAICache(embedder, store, e.Logger, ttl, namespaces)
+	e.aiRuntime.SetSemanticCache(cache)
+
+	enabledCount := 0
+	for _, cfg := range namespaces {
+		if cfg.Enabled {
+			enabledCount++
+		}
+	}
+	if e.Logger != nil {
+		e.Logger.Info("semantic AI cache wired",
+			"embeddingProvider", embeddingProviderName,
+			"enabledNamespaces", enabledCount)
+	}
+}
+
+// SemanticCacheStats returns the semantic cache telemetry snapshot, or the
+// zero value when the semantic cache isn't wired.
+func (e *MemQLEngine) SemanticCacheStats() SemanticCacheStats {
+	if e == nil || e.aiRuntime == nil || e.aiRuntime.semantic == nil {
+		return SemanticCacheStats{}
+	}
+	return e.aiRuntime.semantic.Stats()
 }
 
 // InvokeAI invokes an AI prompt template with the provided data.

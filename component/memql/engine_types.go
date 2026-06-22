@@ -194,6 +194,17 @@ type AIInvocation struct {
 	// cut input cost by ~90% and drop first-token latency.
 	EnablePromptCache bool
 	CacheSeconds      *int
+
+	// SemanticNamespace opts THIS invocation into the semantic (vector)
+	// AI-call cache under the named classification namespace (5.9). Empty
+	// (the default) means the invocation uses only the exact-hash cache --
+	// no semantic lookup. A namespace is consulted only when it is BOTH
+	// set here AND enabled in the per-namespace registry
+	// (ai_semantic_cache_registry.go). Set this only for classification /
+	// structured-output calls with a stable input->label mapping; never for
+	// free-form generation, where a near-duplicate prompt does not imply the
+	// same correct answer.
+	SemanticNamespace string
 }
 
 // AIExpression captures ai() invocation nodes parsed inside MemQL expressions.
