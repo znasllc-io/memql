@@ -102,39 +102,48 @@ func TestRegisterTree_OverlayReadDir(t *testing.T) {
 	assert.Equal(t, []string{"prompts", "queries.memql", "shapes.memql"}, names)
 }
 
-// TestRegisterTree_EmbeddedWinsOnConflict asserts that a plugin
-// trying to mount a domain name that an embedded domain already
-// occupies silently loses -- the embedded tree's contents stay
-// canonical. Documents the conflict-resolution rule (base wins) so a
-// future audit-time warning has a pinned expectation.
-func TestRegisterTree_EmbeddedWinsOnConflict(t *testing.T) {
-	// agents/ is a load-bearing embedded domain; if we mount a plugin
-	// under that name, lookups inside agents/ MUST still resolve
-	// against the embedded tree.
+// TestRegisterTree_PanicsOnCoreDomainCollision asserts that a pack
+// trying to mount a domain name that a core embedded domain already
+// owns FAILS LOUDLY (panics) rather than silently shadowing it. This
+// is the load-time namespace-ownership guard from issue 2.4: core
+// domains are canonical and a pack cannot shadow or extend one.
+func TestRegisterTree_PanicsOnCoreDomainCollision(t *testing.T) {
+	// agents/ is a load-bearing embedded (core) domain. A pack must not
+	// be able to claim it; the registration must panic.
 	overlay := fstest.MapFS{
 		"FAKE-MARKER-FILE.txt": {Data: []byte("plugin")},
 	}
-	dsl.RegisterTree("agents", overlay)
-	defer dsl.RegisterTree("agents", embedAgentsShim{}) // best-effort restore
+	assert.Panics(t, func() { dsl.RegisterTree("agents", overlay) },
+		"registering a pack under a core embedded domain must fail loudly")
 
-	// The plugin's FAKE-MARKER-FILE.txt must NOT be reachable under
-	// agents/ -- the embedded agents/ wins.
-	_, err := fs.ReadFile(dsl.Tree(), "agents/FAKE-MARKER-FILE.txt")
-	assert.Error(t, err, "embedded agents/ must win on conflict")
-
-	// Real embedded files under agents/ should still resolve.
-	_, err = fs.Stat(dsl.Tree(), "agents")
+	// The embedded agents/ tree stays canonical and reachable.
+	_, err := fs.Stat(dsl.Tree(), "agents")
 	assert.NoError(t, err, "embedded agents/ directory must still be reachable")
+
+	// The pack's marker file must never have been mounted.
+	_, err = fs.ReadFile(dsl.Tree(), "agents/FAKE-MARKER-FILE.txt")
+	assert.Error(t, err, "rejected pack overlay must not be reachable under agents/")
 }
 
-// embedAgentsShim is a placeholder to "unregister" the test overlay
-// at TestRegisterTree_EmbeddedWinsOnConflict cleanup. Since
-// RegisterTree's "register same domain replaces" semantics is the
-// only knob today, we just overwrite with an empty FS. Real init()
-// flows wouldn't unregister.
-type embedAgentsShim struct{}
+// TestRegisterTree_PanicsOnDuplicatePluginDomain asserts that two packs
+// claiming the same (non-core) namespace is rejected loudly -- the
+// second RegisterTree for a domain already held by another pack panics
+// instead of silently replacing it.
+func TestRegisterTree_PanicsOnDuplicatePluginDomain(t *testing.T) {
+	domain := uniqueDomain(t)
+	first := fstest.MapFS{"queries.memql": {Data: []byte("a")}}
+	second := fstest.MapFS{"queries.memql": {Data: []byte("b")}}
 
-func (embedAgentsShim) Open(name string) (fs.File, error) { return nil, fs.ErrNotExist }
+	dsl.RegisterTree(domain, first) // first claim succeeds
+	assert.Panics(t, func() { dsl.RegisterTree(domain, second) },
+		"a second pack claiming an already-registered domain must fail loudly")
+
+	// The first pack's content stays canonical -- the rejected second
+	// registration left the registry untouched.
+	data, err := fs.ReadFile(dsl.Tree(), domain+"/queries.memql")
+	require.NoError(t, err)
+	assert.Equal(t, "a", string(data))
+}
 
 // TestRegisterTree_PanicsOnBadInput pins the input validation. The
 // init() path is the only caller; panicking is the right response to

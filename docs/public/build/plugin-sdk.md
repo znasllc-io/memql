@@ -148,6 +148,46 @@ func newProvider(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
 
 ---
 
+## Pack model + load-time validation
+
+A **pack** is exactly these three registration primitives, called together from
+a pack's build-tag-gated `init()`:
+
+1. `RegisterPluginForContract(name, version, factory)` -- the Go
+   `IntegrationProvider`, **contract-version-checked** by the loader.
+2. `RegisterTree(domain, fs.FS)` -- the embedded `.memql` subtree, mounted
+   under `domain/` and **namespace-validated**.
+3. `RegisterRoutingRule(rule)` -- cross-node event routing (required for any
+   event that must cross a node boundary).
+
+memQL validates both halves at load time and **fails loudly on a violation** --
+a broken pack aborts startup rather than silently mis-binding:
+
+- **Contract version** -- `app.materializePlugins` calls
+  `PluginRegistration.ValidateContract` for every registered pack and rejects
+  (fatal) any pack whose declared `PluginContractVersion` is incompatible with
+  the core's (exact-major equality; see "Contract version" above).
+- **Namespace ownership** -- `RegisterTree` validates the pack's DSL domain via
+  `dsl.ValidatePackDomain(domain, coreDomains, existing)` before mounting it. A
+  domain must be non-empty, contain no `/`, and **collide with neither a core
+  embedded domain nor another pack's already-registered domain**. A core domain
+  is canonical and owned by memQL -- a pack cannot shadow or extend one. Two
+  packs claiming the same namespace is ambiguous. Either collision **panics**
+  at `init()` time (the only caller), consistent with `RegisterTree`'s other
+  input guards, so the conflict surfaces at startup with an actionable message.
+
+`dsl.ValidatePackDomain` is the pure, unit-testable form of the
+namespace-ownership check (the analogue of `CheckPluginContractCompat` for the
+DSL tree). The core domain set is read from the embedded tree's top-level
+directories, so it stays in lockstep with the `//go:embed` directive.
+
+> **Out of scope by design.** Runtime (non-compiled) pack loading is not
+> supported -- packs stay embedded via build tags, like `memql-bff-copresent`
+> today. Validation runs at startup against the compiled-in set; there is no
+> dynamic-load path to validate.
+
+---
+
 ## Stability promise
 
 Within a major `PluginContractVersion`, the surface above is **append-only**:

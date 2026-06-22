@@ -68,22 +68,27 @@ var (
 // against the live engine the same way agents/, cluster/, cognition/
 // do today.
 //
-// Panics on empty domain or nil tree -- both are programming errors
-// in the init() path.
+// Namespace ownership is validated at registration time: the domain
+// must not be empty, must not contain a '/', must not collide with a
+// core embedded domain, and must not collide with another pack's
+// already-registered domain (see ValidatePackDomain). A collision is a
+// FATAL programming error in the init() path -- RegisterTree panics
+// (consistent with its other guards) so a pack that would shadow a core
+// namespace or fight another pack for one fails loudly at startup
+// instead of silently mis-binding.
+//
+// Panics on empty/slash/colliding domain or nil tree.
 func RegisterTree(domain string, tree fs.FS) {
-	domain = strings.TrimSpace(domain)
-	if domain == "" {
-		panic("dsl.RegisterTree: domain must be non-empty")
-	}
-	if strings.Contains(domain, "/") {
-		panic("dsl.RegisterTree: domain must not contain '/' (got: " + domain + ")")
-	}
 	if tree == nil {
 		panic("dsl.RegisterTree: tree must not be nil")
 	}
+	trimmed := strings.TrimSpace(domain)
 	pluginTreesMu.Lock()
 	defer pluginTreesMu.Unlock()
-	pluginTrees[domain] = tree
+	if err := ValidatePackDomain(trimmed, coreDomains(), registeredPluginDomainsLocked()); err != nil {
+		panic("dsl.RegisterTree: " + err.Error())
+	}
+	pluginTrees[trimmed] = tree
 }
 
 // Tree returns an fs.FS rooted at the unified DSL tree. Each top-
