@@ -131,6 +131,13 @@ clusters — only the pack differs.
 
 ## G. Open classification questions (for your "different idea")
 
+> **RESOLVED (3.1 sign-off, 2026-06-22)** in the authoritative move-list
+> [`07-copresent-move-list.md`](07-copresent-move-list.md): library = SPLIT
+> (spine core / space-facet pack); calendar/notes/todos = CORE; liveknowledge =
+> CORE; forge = CORE (+ actions = CORE); unmetCapability/guardrailHealth = CORE
+> telemetry. Knowledge and the whole agents framework are also CORE. The
+> questions below are retained as the original first-pass framing.
+
 1. **library** — are artifacts/generated-outputs a shared core capability, or
    a CoPresent product surface? (30 spaceId refs.)
 2. **calendar / notes / todos** — keep as a shared core "assistant features"
