@@ -44,3 +44,11 @@ images:
   - name: livekit/livekit-server
     newName: livekit/livekit-server
     digest: sha256:9e34703b97ceb9f622bcbb533107e4786c7aa65966f0494966a452ad41a0c0d4
+  # Telephony (memql#1910): livekit/sip PSTN edge + its Redis, upstream OSS,
+  # digest-pinned. livekit/sip:v1.5.0, redis:7.4-alpine.
+  - name: livekit/sip
+    newName: livekit/sip
+    digest: sha256:f8621da1f203ba46e567f08311771ee5f77b0f93aad3eb7f24aaf93067f253cc
+  - name: redis
+    newName: redis
+    digest: sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99

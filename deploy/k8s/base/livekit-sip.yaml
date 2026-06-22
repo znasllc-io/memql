@@ -83,7 +83,7 @@ spec:
             name: livekit-sip-config
       containers:
         - name: livekit-sip
-          image: livekit/sip:v1.4.1
+          image: livekit/sip:v1.5.0
           args: ["--config", "/etc/livekit-sip/config.yaml"]
           ports:
             - { name: sip-udp, containerPort: 5060, protocol: UDP }
