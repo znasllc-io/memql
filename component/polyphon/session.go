@@ -14,7 +14,7 @@ import (
 // sessions are recreated when participants rejoin.
 type SessionManager struct {
 	mu       sync.RWMutex
-	sessions map[string]*PolyphonSession // keyed by spaceId
+	sessions map[string]*PolyphonSession // keyed by scopeId
 	logger   *slog.Logger
 
 	// maxTranscriptEntries limits the in-memory transcript per session.
@@ -22,11 +22,11 @@ type SessionManager struct {
 
 	// Heartbeat management: one goroutine per active space.
 	heartbeatMu    sync.Mutex
-	heartbeatStops map[string]chan struct{} // stop channels keyed by spaceId
+	heartbeatStops map[string]chan struct{} // stop channels keyed by scopeId
 
 	// Prediction management: one goroutine per active space.
 	predictionMu    sync.Mutex
-	predictionStops map[string]chan struct{} // stop channels keyed by spaceId
+	predictionStops map[string]chan struct{} // stop channels keyed by scopeId
 }
 
 // NewSessionManager creates a new SessionManager.
@@ -41,50 +41,50 @@ func NewSessionManager(logger *slog.Logger) *SessionManager {
 }
 
 // GetOrCreate returns the session for the given space, creating one if needed.
-func (m *SessionManager) GetOrCreate(spaceId string) *PolyphonSession {
+func (m *SessionManager) GetOrCreate(scopeId string) *PolyphonSession {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if s, ok := m.sessions[spaceId]; ok {
+	if s, ok := m.sessions[scopeId]; ok {
 		return s
 	}
 
-	s := NewSession(spaceId)
-	m.sessions[spaceId] = s
+	s := NewSession(scopeId)
+	m.sessions[scopeId] = s
 
 	if m.logger != nil {
-		m.logger.Debug("polyphon: session created", "spaceId", spaceId)
+		m.logger.Debug("polyphon: session created", "scopeId", scopeId)
 	}
 
 	return s
 }
 
 // Get returns the session for the given space, or nil if not found.
-func (m *SessionManager) Get(spaceId string) *PolyphonSession {
+func (m *SessionManager) Get(scopeId string) *PolyphonSession {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.sessions[spaceId]
+	return m.sessions[scopeId]
 }
 
 // Remove removes and returns the session for the given space.
 // Also stops the heartbeat goroutine if running.
-func (m *SessionManager) Remove(spaceId string) *PolyphonSession {
+func (m *SessionManager) Remove(scopeId string) *PolyphonSession {
 	// Stop heartbeat and prediction first (separate locks).
-	m.StopHeartbeat(spaceId)
-	m.StopPrediction(spaceId)
+	m.StopHeartbeat(scopeId)
+	m.StopPrediction(scopeId)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	s, ok := m.sessions[spaceId]
+	s, ok := m.sessions[scopeId]
 	if !ok {
 		return nil
 	}
-	delete(m.sessions, spaceId)
+	delete(m.sessions, scopeId)
 
 	if m.logger != nil {
 		m.logger.Debug("polyphon: session removed",
-			"spaceId", spaceId,
+			"scopeId", scopeId,
 			"transcriptEntries", len(s.Transcript),
 			"duration", time.Since(s.CreatedAt).String(),
 		)
@@ -94,15 +94,15 @@ func (m *SessionManager) Remove(spaceId string) *PolyphonSession {
 }
 
 // AddHuman registers a human participant in the session.
-func (m *SessionManager) AddHuman(spaceId string, participantId, displayName string) error {
-	session := m.GetOrCreate(spaceId)
+func (m *SessionManager) AddHuman(scopeId string, participantId, displayName string) error {
+	session := m.GetOrCreate(scopeId)
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
 
 	// Check limit.
 	if len(session.Humans) >= MaxHumansPerSpace {
-		return fmt.Errorf("maximum humans (%d) reached for space %s", MaxHumansPerSpace, spaceId)
+		return fmt.Errorf("maximum humans (%d) reached for space %s", MaxHumansPerSpace, scopeId)
 	}
 
 	// Check for duplicates.
@@ -122,8 +122,8 @@ func (m *SessionManager) AddHuman(spaceId string, participantId, displayName str
 }
 
 // RemoveHuman removes a human participant from the session.
-func (m *SessionManager) RemoveHuman(spaceId, participantId string) {
-	session := m.Get(spaceId)
+func (m *SessionManager) RemoveHuman(scopeId, participantId string) {
+	session := m.Get(scopeId)
 	if session == nil {
 		return
 	}
@@ -142,15 +142,15 @@ func (m *SessionManager) RemoveHuman(spaceId, participantId string) {
 }
 
 // AddAgent registers an AI agent in the session.
-func (m *SessionManager) AddAgent(spaceId string, agentId, participantId, name string) error {
-	session := m.GetOrCreate(spaceId)
+func (m *SessionManager) AddAgent(scopeId string, agentId, participantId, name string) error {
+	session := m.GetOrCreate(scopeId)
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
 
 	// Check limit.
 	if len(session.Agents) >= MaxAgentsPerSpace {
-		return fmt.Errorf("maximum agents (%d) reached for space %s", MaxAgentsPerSpace, spaceId)
+		return fmt.Errorf("maximum agents (%d) reached for space %s", MaxAgentsPerSpace, scopeId)
 	}
 
 	// Check for duplicates.
@@ -171,8 +171,8 @@ func (m *SessionManager) AddAgent(spaceId string, agentId, participantId, name s
 }
 
 // RemoveAgent removes an AI agent from the session.
-func (m *SessionManager) RemoveAgent(spaceId, agentId string) {
-	session := m.Get(spaceId)
+func (m *SessionManager) RemoveAgent(scopeId, agentId string) {
+	session := m.Get(scopeId)
 	if session == nil {
 		return
 	}
@@ -190,8 +190,8 @@ func (m *SessionManager) RemoveAgent(spaceId, agentId string) {
 
 // RecordUtterance adds a transcript entry to the session and trims old entries
 // if the transcript exceeds the maximum length.
-func (m *SessionManager) RecordUtterance(spaceId string, entry TranscriptEntry) {
-	session := m.GetOrCreate(spaceId)
+func (m *SessionManager) RecordUtterance(scopeId string, entry TranscriptEntry) {
+	session := m.GetOrCreate(scopeId)
 	session.AddTranscript(entry)
 
 	// Trim transcript if it exceeds max length.
@@ -218,7 +218,7 @@ func (m *SessionManager) ActiveSessions() int {
 // Calling StartHeartbeat on a space that already has a heartbeat is a no-op.
 // Call StopHeartbeat to stop the goroutine.
 func (m *SessionManager) StartHeartbeat(
-	spaceId string,
+	scopeId string,
 	interval time.Duration,
 	evaluator HeartbeatEvaluator,
 	candidates []AgentCandidate,
@@ -228,30 +228,30 @@ func (m *SessionManager) StartHeartbeat(
 	defer m.heartbeatMu.Unlock()
 
 	// Already running for this space.
-	if _, exists := m.heartbeatStops[spaceId]; exists {
+	if _, exists := m.heartbeatStops[scopeId]; exists {
 		return
 	}
 
 	stop := make(chan struct{})
-	m.heartbeatStops[spaceId] = stop
+	m.heartbeatStops[scopeId] = stop
 
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
 		if m.logger != nil {
-			m.logger.Debug("polyphon: heartbeat started", "spaceId", spaceId, "interval", interval.String())
+			m.logger.Debug("polyphon: heartbeat started", "scopeId", scopeId, "interval", interval.String())
 		}
 
 		for {
 			select {
 			case <-stop:
 				if m.logger != nil {
-					m.logger.Debug("polyphon: heartbeat stopped", "spaceId", spaceId)
+					m.logger.Debug("polyphon: heartbeat stopped", "scopeId", scopeId)
 				}
 				return
 			case <-ticker.C:
-				session := m.Get(spaceId)
+				session := m.Get(scopeId)
 				if session == nil {
 					// Session removed -- stop heartbeat.
 					return
@@ -261,7 +261,7 @@ func (m *SessionManager) StartHeartbeat(
 				if action != nil && action.Type != "idle" {
 					if m.logger != nil {
 						m.logger.Debug("polyphon: heartbeat action",
-							"spaceId", spaceId,
+							"scopeId", scopeId,
 							"actionType", action.Type,
 							"agentName", action.AgentName,
 							"reason", action.Reason,
@@ -275,49 +275,49 @@ func (m *SessionManager) StartHeartbeat(
 }
 
 // StopHeartbeat stops the heartbeat goroutine for the given space.
-func (m *SessionManager) StopHeartbeat(spaceId string) {
+func (m *SessionManager) StopHeartbeat(scopeId string) {
 	m.heartbeatMu.Lock()
 	defer m.heartbeatMu.Unlock()
 
-	if stop, exists := m.heartbeatStops[spaceId]; exists {
+	if stop, exists := m.heartbeatStops[scopeId]; exists {
 		close(stop)
-		delete(m.heartbeatStops, spaceId)
+		delete(m.heartbeatStops, scopeId)
 	}
 }
 
 // HasHeartbeat returns true if a heartbeat is running for the given space.
-func (m *SessionManager) HasHeartbeat(spaceId string) bool {
+func (m *SessionManager) HasHeartbeat(scopeId string) bool {
 	m.heartbeatMu.Lock()
 	defer m.heartbeatMu.Unlock()
-	_, exists := m.heartbeatStops[spaceId]
+	_, exists := m.heartbeatStops[scopeId]
 	return exists
 }
 
 // StartPrediction launches a background goroutine that runs the predictive analyzer
 // at the given interval for the specified space. Only runs when conversation is active.
-func (m *SessionManager) StartPrediction(spaceId string, interval time.Duration, analyzer PredictiveAnalyzer, candidates []AgentCandidate) {
+func (m *SessionManager) StartPrediction(scopeId string, interval time.Duration, analyzer PredictiveAnalyzer, candidates []AgentCandidate) {
 	m.predictionMu.Lock()
 	defer m.predictionMu.Unlock()
 
-	if _, exists := m.predictionStops[spaceId]; exists {
+	if _, exists := m.predictionStops[scopeId]; exists {
 		return // Already running
 	}
 
 	stop := make(chan struct{})
-	m.predictionStops[spaceId] = stop
+	m.predictionStops[scopeId] = stop
 
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
 		if m.logger != nil {
-			m.logger.Debug("polyphon: prediction started", "spaceId", spaceId, "interval", interval.String())
+			m.logger.Debug("polyphon: prediction started", "scopeId", scopeId, "interval", interval.String())
 		}
 
 		for {
 			select {
 			case <-ticker.C:
-				session := m.Get(spaceId)
+				session := m.Get(scopeId)
 				if session == nil {
 					return
 				}
@@ -326,7 +326,7 @@ func (m *SessionManager) StartPrediction(spaceId string, interval time.Duration,
 				cancel()
 				if err != nil {
 					if m.logger != nil {
-						m.logger.Warn("prediction analysis failed", "spaceId", spaceId, "error", err)
+						m.logger.Warn("prediction analysis failed", "scopeId", scopeId, "error", err)
 					}
 					continue
 				}
@@ -335,7 +335,7 @@ func (m *SessionManager) StartPrediction(spaceId string, interval time.Duration,
 				}
 			case <-stop:
 				if m.logger != nil {
-					m.logger.Debug("polyphon: prediction stopped", "spaceId", spaceId)
+					m.logger.Debug("polyphon: prediction stopped", "scopeId", scopeId)
 				}
 				return
 			}
@@ -344,27 +344,27 @@ func (m *SessionManager) StartPrediction(spaceId string, interval time.Duration,
 }
 
 // StopPrediction stops the prediction goroutine for a space.
-func (m *SessionManager) StopPrediction(spaceId string) {
+func (m *SessionManager) StopPrediction(scopeId string) {
 	m.predictionMu.Lock()
 	defer m.predictionMu.Unlock()
 
-	if stop, exists := m.predictionStops[spaceId]; exists {
+	if stop, exists := m.predictionStops[scopeId]; exists {
 		close(stop)
-		delete(m.predictionStops, spaceId)
+		delete(m.predictionStops, scopeId)
 	}
 }
 
 // HasPrediction returns true if a prediction goroutine is running for the given space.
-func (m *SessionManager) HasPrediction(spaceId string) bool {
+func (m *SessionManager) HasPrediction(scopeId string) bool {
 	m.predictionMu.Lock()
 	defer m.predictionMu.Unlock()
-	_, exists := m.predictionStops[spaceId]
+	_, exists := m.predictionStops[scopeId]
 	return exists
 }
 
 // HasHumans returns true if the session for the given space has at least one human.
-func (m *SessionManager) HasHumans(spaceId string) bool {
-	session := m.Get(spaceId)
+func (m *SessionManager) HasHumans(scopeId string) bool {
+	session := m.Get(scopeId)
 	if session == nil {
 		return false
 	}

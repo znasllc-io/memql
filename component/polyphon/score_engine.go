@@ -40,12 +40,12 @@ func NewScoreEngineWithConfig(weights ScoringWeights, policyConfig TurnPolicyCon
 // ProcessUtterance evaluates a human utterance and decides which agent (if any)
 // should respond. This is the main entry point for the ScoreEngine.
 func (c *ScoreEngine) ProcessUtterance(_ context.Context, utterance Utterance, candidates []AgentCandidate) *ScoreDecision {
-	session := c.sessions.GetOrCreate(utterance.SpaceId)
+	session := c.sessions.GetOrCreate(utterance.ScopeId)
 
 	// Record the human utterance in the session transcript.
-	c.sessions.RecordUtterance(utterance.SpaceId, TranscriptEntry{
+	c.sessions.RecordUtterance(utterance.ScopeId, TranscriptEntry{
 		ID:          utterance.ID,
-		SpaceId:     utterance.SpaceId,
+		ScopeId:     utterance.ScopeId,
 		SpeakerId:   utterance.ParticipantId,
 		SpeakerName: utterance.SpeakerName,
 		SpeakerType: "human",
@@ -73,7 +73,7 @@ func (c *ScoreEngine) ProcessUtterance(_ context.Context, utterance Utterance, c
 	scores = c.policy.EvaluateScores(scores, session)
 
 	decision := &ScoreDecision{
-		SpaceId:     utterance.SpaceId,
+		ScopeId:     utterance.ScopeId,
 		UtteranceId: utterance.ID,
 		Scores:      scores,
 		Action:      "silence",
@@ -109,7 +109,7 @@ func (c *ScoreEngine) ProcessUtterance(_ context.Context, utterance Utterance, c
 	if c.logger != nil {
 		if decision.HasWinner() {
 			c.logger.Debug("polyphon: score engine decision",
-				"spaceId", utterance.SpaceId,
+				"scopeId", utterance.ScopeId,
 				"utteranceId", utterance.ID,
 				"winner", decision.Winner.AgentName,
 				"score", decision.Winner.TotalScore,
@@ -125,7 +125,7 @@ func (c *ScoreEngine) ProcessUtterance(_ context.Context, utterance Utterance, c
 				topAgent = scores[0].AgentName
 			}
 			c.logger.Debug("polyphon: score engine decision (silence)",
-				"spaceId", utterance.SpaceId,
+				"scopeId", utterance.ScopeId,
 				"utteranceId", utterance.ID,
 				"confidence", decision.Confidence,
 				"topAgent", topAgent,
@@ -140,10 +140,10 @@ func (c *ScoreEngine) ProcessUtterance(_ context.Context, utterance Utterance, c
 // RecordAgentResponse records that an agent produced a response. Call this after
 // the agent's response has been generated and is being delivered.
 // Returns a continuation decision: should another agent follow up?
-func (c *ScoreEngine) RecordAgentResponse(spaceId string, agentId, agentName, responseText string, candidates []AgentCandidate) (bool, *AgentScore) {
+func (c *ScoreEngine) RecordAgentResponse(scopeId string, agentId, agentName, responseText string, candidates []AgentCandidate) (bool, *AgentScore) {
 	// Record the agent's response in the transcript.
-	c.sessions.RecordUtterance(spaceId, TranscriptEntry{
-		SpaceId:     spaceId,
+	c.sessions.RecordUtterance(scopeId, TranscriptEntry{
+		ScopeId:     scopeId,
 		SpeakerId:   agentId,
 		SpeakerName: agentName,
 		SpeakerType: "agent",
@@ -151,14 +151,14 @@ func (c *ScoreEngine) RecordAgentResponse(spaceId string, agentId, agentName, re
 		Timestamp:   time.Now().UTC(),
 	})
 
-	session := c.sessions.Get(spaceId)
+	session := c.sessions.Get(scopeId)
 	if session == nil {
 		return false, nil
 	}
 
 	// Build a synthetic utterance from the agent's response to score continuation.
 	syntheticUtterance := Utterance{
-		SpaceId:   spaceId,
+		ScopeId:   scopeId,
 		Text:      responseText,
 		Timestamp: time.Now().UTC(),
 	}
@@ -171,7 +171,7 @@ func (c *ScoreEngine) RecordAgentResponse(spaceId string, agentId, agentName, re
 
 	if shouldContinue && c.logger != nil {
 		c.logger.Debug("polyphon: continuation triggered",
-			"spaceId", spaceId,
+			"scopeId", scopeId,
 			"previousAgent", agentName,
 			"nextAgent", nextAgent.AgentName,
 			"nextScore", nextAgent.TotalScore,
