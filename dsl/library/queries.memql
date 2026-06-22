@@ -44,15 +44,12 @@ query artifact queryLibraryArtifactsByKind {
   shape   artifactFull
 }
 
-@enabled
-@description("List the caller's Library rows scoped to one space -- backs the per-space facet filter. Owned: ownerUserId==actor.userId gates the row set; payload.spaceId narrows to the given space.")
-query artifact queryLibraryArtifactsBySpace {
-  args {
-    spaceId  string  @required
-  }
-  filter  payload.ownerUserId==actor.userId && payload.spaceId==args.spaceId
-  shape   artifactFull
-}
+// queryLibraryArtifactsBySpace (the per-space Library facet) moved to the
+// CoPresent pack (memql-bff-copresent/dsl/copresent/queries.memql) in Epic 3
+// 3.6 (memql#1903): the per-space filter is a CoPresent-product surface. The
+// artifact concept + its optional spaceId facet field stay here (the
+// provenance/version spine); the broader spaceId-facet-field decoupling rides
+// with the space concept split (3.3, #1900).
 
 @enabled
 @description("Fetch a single Library artifact index row by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content.")
