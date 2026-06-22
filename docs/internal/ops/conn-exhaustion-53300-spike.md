@@ -188,22 +188,50 @@ per-session `idle_session_timeout` stamped in `component/database/database.go`,
 **Reclaim (owner-run, needs SUPERUSER).** The leaked sessions are owned by
 `postgres`, and *only a superuser may terminate a superuser's sessions* — so
 `tsdbadmin` (the recovery DSN) CANNOT kill them. Reclaim with the
-postgres-superuser DSN (the same credential the leaking tool uses):
+postgres-superuser DSN (the same credential the leaking tool uses).
+
+### Runbook: detect + reap the leaked `deployer` pool (memql#1933)
+
+`scripts/deploy/deployer-pool-reap.sh` is the SAFE, guarded version of the
+incident's ad-hoc `/tmp` reaper. It is read-only by default and terminates
+nothing without an explicit `--confirm`; the terminate set is bounded to idle,
+`deployer`-stamped, past-threshold backends only — it can never touch an active
+or non-deployer backend, or a live deploy/migrate run.
 
 ```bash
+# 1. Detect — read-only snapshot (works with the tsdbadmin recovery DSN):
+MEMORY_NODES_DATABASE_DSN='…tsdbadmin…' scripts/deploy/deployer-pool-reap.sh inspect
+
+# 2. Plan — read-only; print the EXACT pids a reap would terminate:
 SUPERUSER_DSN='postgresql://postgres:…@<host>:<port>/tsdb?sslmode=require' \
-  scripts/ops/conn-recover.sh ... # or the staged /tmp reclaim helper
-# terminates idle sessions WHERE application_name='deployer'
+  scripts/deploy/deployer-pool-reap.sh plan
+
+# 3. Reap — terminates ONLY after --confirm (needs the superuser DSN to kill
+#    postgres-owned sessions). Default idle threshold is 5 minutes:
+SUPERUSER_DSN='postgresql://postgres:…@<host>:<port>/tsdb?sslmode=require' \
+  scripts/deploy/deployer-pool-reap.sh reap --confirm
 ```
 
-`conn-recover.sh deployer-inspect` (read-only, runs as `tsdbadmin`) still finds
-the leak and prints the source `client_addr`. `deployer-reclaim` attempts the
-terminate but needs a superuser DSN to succeed against `postgres`-owned sessions.
+The legacy `scripts/ops/conn-recover.sh deployer-inspect` / `deployer-reclaim`
+verbs remain for the fleet-wide recovery flow; the new script is the focused,
+runbook-grade detect+reap step.
+
+**The in-cluster deploy + migration cycle does NOT leak.** The mesh pods connect
+as `tsdbadmin` and reap their own idle connections client-side
+(`CONN_MAX_IDLE_TIME_MS` + the per-session `idle_session_timeout`), and the
+one-shot `memql migrate` Job (`deploy/k8s/base/migrate-job.yaml`) closes its pool
+on exit (`Database.Stop` → `db.Close`), keeps only one short-lived idle conn, and
+is TTL-reaped. The Job now also stamps `application_name=memql-migrate` so a
+triage can never confuse the migration cycle with the `deployer` leak. So a
+deploy + migration cycle adds no growing idle `deployer` backlog; the residual
+leak is the out-of-cluster `deployer`-stamped client below.
 
 **Durable fix = stop the source.** There is no role to put a server-side reaper
 on, so terminating only reclaims the *current* leak — the source process keeps
 re-leaking until it is stopped or made to close its pool / set an idle timeout.
-Identify it by the `client_addr` from `deployer-inspect`.
+Identify it by the `client_addr` from `deployer-pool-reap.sh inspect`, then make
+that client `defer db.Close()` + `SetMaxIdleConns(1)` + a short
+`SetConnMaxIdleTime` (or scope it onto the transaction pooler).
 
 After the reclaim sticks, the ~28 slots are back and the per-pod
 `MAX_OPEN_CONNS` (cut to 4 under #1858) can be raised back toward the default 10
