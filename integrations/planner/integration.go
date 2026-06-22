@@ -114,13 +114,23 @@ type PlannerIntegration struct {
 	engine         Engine
 	eventBus       *events.Bus
 	agentForwarder AgentForwarder
-	// dbGetter is the lazy *bun.DB accessor used by the admission
-	// controller for per-account advisory locks + running-Plan counts
-	// (epic memql#902 / #904). Optional: when nil, admission fails open
-	// (no concurrency cap is enforced).
-	dbGetter         func() *bun.DB
-	entitlements     *EntitlementResolver
-	admission        *AdmissionController
+	// dbGetter is the lazy *bun.DB accessor used by the across-account
+	// fairness sweep (memql#908) for its bulk pooled read SQL. Optional:
+	// when nil, the fairness cron is a no-op.
+	dbGetter func() *bun.DB
+	// directDBGetter is the lazy *bun.DB accessor for the DIRECT
+	// (non-pooled) endpoint, used ONLY by the admission controller for its
+	// per-account SESSION-SCOPED advisory locks + running-Plan counts (epic
+	// memql#902 / #904, pooling epic memql#1925). TryAdmit / AdmitNext hold
+	// pg_advisory_lock across statements (lock -> count -> demote/promote ->
+	// unlock), so they must NOT ride the transaction pooler, which recycles
+	// the server backend between statements and would drop a held
+	// session-scoped lock. Optional: when nil, admission falls back to
+	// dbGetter (and DirectBunDB itself falls back to the main pool when
+	// DIRECT_DSN is unset), so behavior is unchanged locally / in dev.
+	directDBGetter func() *bun.DB
+	entitlements   *EntitlementResolver
+	admission      *AdmissionController
 	agentLoop        *PlannerAgentLoop
 	trainDispatch    *TrainSpecialistDispatcher
 	embedDispatch    *EmbedDomainItemsDispatcher
@@ -180,6 +190,21 @@ func WithDBGetter(getter func() *bun.DB) PlannerArg {
 	return func(p *PlannerIntegration) { p.dbGetter = getter }
 }
 
+// WithDirectDBGetter wires the lazy *bun.DB accessor for the DIRECT
+// (non-pooled) endpoint that the admission controller uses for its
+// session-scoped per-account advisory locks (epic memql#902 / #904, pooling
+// epic memql#1925). Pass a.db.DirectBunDB from app wiring: the admission gate
+// holds pg_advisory_lock across statements, so it must bypass the transaction
+// pooler the bulk pool rides (which would recycle the backend out from under
+// the held lock). Optional -- when omitted, the admission controller falls
+// back to the WithDBGetter pooled getter; DirectBunDB itself falls back to the
+// main pool when DIRECT_DSN is unset, so local / dev behavior is unchanged.
+// Only the admission controller uses this; the fairness cron stays on the
+// pooled WithDBGetter getter (it does bulk reads, holds no session locks).
+func WithDirectDBGetter(getter func() *bun.DB) PlannerArg {
+	return func(p *PlannerIntegration) { p.directDBGetter = getter }
+}
+
 // WithClusterClaimer wires the cross-replica plan-execution claim
 // (memql#1363). Pass the app's ClusterExecutionGuard so the planner's
 // plan-execution dispatch shares the automation guard's DB-PK claim table,
@@ -216,7 +241,18 @@ func NewPlannerIntegration(_ context.Context, opts ...PlannerArg) (*PlannerInteg
 	// built; the controller fails open when no dbGetter was wired, so an
 	// unconfigured cap is a true no-op.
 	p.entitlements = NewEntitlementResolver(p.engine, p.logger)
-	p.admission = NewAdmissionController(p.dbGetter, p.logger)
+	// The admission controller holds session-scoped advisory locks across
+	// statements, so it resolves its *bun.DB through the DIRECT (non-pooled)
+	// getter -- transaction-mode PgBouncer would recycle the backend out from
+	// under a held lock (pooling epic memql#1925). Fall back to the pooled
+	// getter when no direct getter was wired (tests / older callers);
+	// DirectBunDB itself falls back to the main pool when DIRECT_DSN is unset,
+	// so behavior is unchanged locally / in dev.
+	admissionGetter := p.directDBGetter
+	if admissionGetter == nil {
+		admissionGetter = p.dbGetter
+	}
+	p.admission = NewAdmissionController(admissionGetter, p.logger)
 	p.agentLoop = NewPlannerAgentLoop(p.engine, p.logger)
 	p.trainDispatch = NewTrainSpecialistDispatcher(p.engine, p.logger)
 	p.embedDispatch = NewEmbedDomainItemsDispatcher(p.engine, p.logger)
