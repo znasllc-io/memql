@@ -7,6 +7,7 @@ use cognition.concepts.{ audioOverride, context, greetSuppression, micState, par
 
 @enabled
 @description("Get active human participants in a space")
+@unbounded("human participants in a space -- a bounded membership set consumed whole for routing")
 query participant queryActiveHumanParticipants {
   args {
     spaceId  string  @required
@@ -36,6 +37,7 @@ query space queryActiveSpaces {
 
 @enabled
 @description("Returns id-only projections of every active v1:cognition:space row (no status / archived filtering -- mirrors the pre-existing recomputeAllSpacesContext semantics that just need non-deleted rows). Backs the cognition heartbeat path that iterates spaces to recompute per-space context (memql#287; replaces a handwritten shape() runtime query under sub-epic #286).")
+@unbounded("active space ids -- internal enumeration for dispatch/sweeps, consumed whole")
 query space queryActiveSpaceIds {
   filter  traitIsActiveRecord
   shape   spaceIdOnly
@@ -105,6 +107,11 @@ query utterance queryAgentInteractionCount {
     agentId  string  @required
   }
   filter  payload.source.agentId==args.agentId && payload.utteranceType in ["speech", "agentGreeting"] && traitIsActiveRecord
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   utteranceFull
 }
 
@@ -128,6 +135,7 @@ query utterance queryAgentInteractionCount {
 
 @enabled
 @description("Returns every archived space in the partition, for the purge cron's per-row retention check.")
+@unbounded("cross-user archived spaces -- an internal admin purge sweep that must see all")
 query space queryAllArchivedSpacesAcrossUsers {
   filter  traitStatusIsArchived && traitIsNotDeleted
   shape   spaceFull
@@ -182,6 +190,7 @@ query space queryArchivedSpaces {
 
 @enabled
 @description("Return the space with the given id ONLY IF the caller is the space owner. Defense-in-depth gate for HTTP handlers (e.g. /spaces/{id}/attachments) that need to reject cross-tenant access before doing expensive side effects like blob uploads. The DSL mutation that follows the upload re-enforces ownership, but this query lets the handler short-circuit early.")
+@unbounded("owned space by id (guarded), gated to the owner -- bounded to a single row")
 query space queryOwnedSpaceById {
   args {
     spaceId  string  @required
@@ -198,6 +207,7 @@ query space queryOwnedSpaceById {
 // same value and the comparison matches.
 @enabled
 @description("Active audio overrides for every agent in a space. Read by the cognition handler before TTS forwarding.")
+@unbounded("audio overrides for a space -- bounded by space participants, consumed whole")
 query audioOverride queryAudioOverridesForSpace {
   args {
     spaceId  string  @required
@@ -210,6 +220,7 @@ query audioOverride queryAudioOverridesForSpace {
 
 @enabled
 @description("Active (non-expired) greet-on-join suppression for a space (copresent#252). greet-on-join reads this before firing the opening greeting and skips when a row is returned. Callers pass `now` (RFC3339); the filter keeps only suppressions whose expiresAt is still in the future.")
+@unbounded("active greet suppressions for a space -- a small bounded set consumed whole")
 query greetSuppression queryActiveGreetSuppression {
   args {
     spaceId  string  @required
@@ -242,6 +253,7 @@ query greetSuppression queryActiveGreetSuppression {
 
 @enabled
 @description("Archived spaces whose space.expiresAt is before the supplied cutoff.")
+@unbounded("expired archived spaces purge cron -- an internal sweep that must see all")
 query space queryExpiredArchivedSpaces {
   args {
     now  string  @required
@@ -274,6 +286,7 @@ query space queryExpiredArchivedSpaces {
 
 @enabled
 @description("Check if a greeting utterance already exists for an agent in a space")
+@unbounded("the greeting utterance for (space,agent) -- bounded to a single row")
 query utterance queryGreetingUtterance {
   args {
     spaceId  string  @required
@@ -300,6 +313,7 @@ query utterance queryGreetingUtterance {
 //   announcement was already posted.
 @enabled
 @description("Check if the assistant already posted the awaitingFeedback announcement for a Plan (dedup behind the cross-replica announce gate, #1406).")
+@unbounded("the feedback-announcement utterance for a plan -- bounded to a single row")
 query utterance queryFeedbackAnnouncementForPlan {
   args {
     planId  string  @required
@@ -327,6 +341,7 @@ query utterance queryFeedbackAnnouncementForPlan {
 // active AI participant per space; that's their GA).
 @enabled
 @description("Active AI (group GA) participant for a space. Callers must pass the canonical spaceId.")
+@unbounded("the GA/assistant participant for a space -- bounded to a single row")
 query participant queryGroupGAForSpace {
   args {
     spaceId  string  @required
@@ -353,6 +368,7 @@ query participant queryGroupGAForSpace {
 
 @enabled
 @description("Check if an AI response already exists for a given utterance (idempotency check).")
+@unbounded("existence probe for an AI response to a reply -- a dedupe gate bounded to a single row")
 query utterance queryHasAIResponseForReply {
   args {
     replyToId  string  @required
@@ -394,6 +410,7 @@ query utterance queryHasAIResponseForReply {
 
 @enabled
 @description("Check if an AI agent is already a participant in a space (excludes left status)")
+@unbounded("the participant for (space,agent) -- bounded to a single row")
 query participant queryParticipantByAgentSpace {
   args {
     spaceId  string  @required
@@ -441,6 +458,7 @@ query participant queryParticipantByAgentSpace {
 
 @enabled
 @description("Returns session state for participants in spaces. Optional filters: spaceId, participantId")
+@unbounded("the participant session for (space,participant) -- bounded to a single row")
 query session queryParticipantSession {
   args {
     spaceId  string
@@ -506,6 +524,7 @@ query space querySavedSpaces {
 
 @enabled
 @description("Find the active AI participant in a space.")
+@unbounded("the assistant participant for a space -- bounded to a single row")
 query participant querySiParticipantForSpace {
   args {
     spaceId  string  @required
@@ -528,6 +547,7 @@ query participant querySiParticipantForSpace {
 
 @enabled
 @description("Returns runtime context snapshots for spaces. Optional filter: spaceId")
+@unbounded("the space context row -- bounded to a single row per space")
 query context querySpaceContext {
   args {
     spaceId  string
@@ -569,6 +589,7 @@ query space querySpaceMeta {
 
 @enabled
 @description("Participants for a space, optionally narrowed by status or participantType. Used by the cognition handler + space-context engine.")
+@unbounded("participants in a space -- a bounded membership roster consumed whole")
 query participant querySpaceParticipants {
   args {
     spaceId          string  @required
@@ -610,6 +631,7 @@ query utterance querySpaceUtterances {
 
 @enabled
 @description("Latest mic state rows per user for a space.")
+@unbounded("mic states for a space -- bounded by space participants, consumed whole")
 query micState queryUserMicStatesForSpace {
   args {
     spaceId  string  @required
@@ -626,6 +648,7 @@ query micState queryUserMicStatesForSpace {
 // same value and the comparison matches.
 @enabled
 @description("Active video overrides for every agent in a space. Read by the voice-agent process at session start.")
+@unbounded("video overrides for a space -- bounded by space participants, consumed whole")
 query videoOverride queryVideoOverridesForSpace {
   args {
     spaceId  string  @required
@@ -663,6 +686,11 @@ query privateUtterance querySpacePrivateUtterancesForViewer {
     spaceId  string  @required @pattern("^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]{1,128}$")
   }
   filter  payload.spaceId==args.spaceId && payload.forUserId==actor.userId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   privateUtteranceFull
 }
 
@@ -680,6 +708,7 @@ query privateUtterance querySpacePrivateUtterancesForViewer {
 
 @enabled
 @description("Presence snapshots for every participant in a space (UI state: thinking / responding / waiting / ...). Space-scoped; the SPA dedupes latest-wins by participantId.")
+@unbounded("presence rows for a space -- bounded by space participants, consumed whole")
 query presence querySpaceParticipantPresence {
   args {
     spaceId  string  @required
@@ -714,6 +743,7 @@ query presence querySpaceParticipantPresence {
 @public
 @enabled
 @description("Active daily spaces owned by the given user. Sweep helper for the dailyspace rollover capability (system actor only).")
+@unbounded("active daily spaces for a user -- a per-user singleton bounded to a single row")
 query space queryActiveDailySpacesForUser {
   args {
     userId  string  @required

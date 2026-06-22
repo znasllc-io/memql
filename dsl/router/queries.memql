@@ -6,6 +6,7 @@
 use router.concepts.{ budget }
 
 @enabled
+@unbounded("router budgets (optionally by scope) -- a small bounded config set consumed whole")
 @description("Returns all active budget rows for the current partition.")
 query budget queryRouterBudgets {
   args {

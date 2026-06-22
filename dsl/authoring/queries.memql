@@ -15,6 +15,11 @@ use common.traits.{ traitStatusIsActive }
 @description("All authoring bundles owned by the caller, newest first. Backs the 'my authored capabilities' management list.")
 query bundle queryAuthoringBundlesForOwner {
   filter  payload.ownerUserId==actor.userId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   bundleFull
 }
 
@@ -32,6 +37,11 @@ query bundle queryAuthoringBundleById {
 @description("The caller's currently-active bundles. Backs the authored-construct runtime loader (#959) -- the set of authored automations to register on boot / on change.")
 query bundle queryActiveAuthoringBundles {
   filter  payload.ownerUserId==actor.userId && traitStatusIsActive
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   bundleFull
 }
 
@@ -55,11 +65,17 @@ query bundle queryActiveAuthoringBundles {
 @description("ADMIN/SYSTEM: every active authoring bundle across ALL owners (NOT owner-scoped). Cluster-owner gated. Backs the boot-time authored-runtime re-arm (#1039) that re-registers active bundles' automations after a restart.")
 query bundle querySystemActiveAuthoringBundles {
   filter  actor.isClusterOwner==true && traitStatusIsActive
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   bundleFull
 }
 
 @enabled
 @description("The bundle compiled from a given Responsibility, scoped to the caller. Lets the planner find the existing artifact when a Responsibility is edited (to supersede rather than duplicate).")
+@unbounded("the authoring bundle for one responsibility -- bounded to a single row")
 query bundle queryAuthoringBundleForResponsibility {
   args {
     responsibilityId  string  @required
@@ -70,6 +86,7 @@ query bundle queryAuthoringBundleForResponsibility {
 
 @enabled
 @description("The bundle post-hoc captured from a given Plan (everyday-task capture path, #1161), scoped to the caller. Lets the capture orchestrator skip re-authoring a task it already captured (idempotency on a re-delivered terminal Plan event) and backs the per-task view/edit/export surface (#1162).")
+@unbounded("the authoring bundle for one source plan -- bounded to a single row")
 query bundle queryAuthoringBundleForPlan {
   args {
     sourcePlanId  string  @required
@@ -80,6 +97,7 @@ query bundle queryAuthoringBundleForPlan {
 
 @enabled
 @description("All authored constructs belonging to a bundle, scoped to the caller. Backs the gate runners (compile/bind the whole closure) + the runtime register/unregister path.")
+@unbounded("constructs within one bundle -- bounded by the bundle; the caller compiles the whole bundle")
 query construct queryAuthoringConstructsForBundle {
   args {
     bundleId  string  @required
@@ -92,11 +110,17 @@ query construct queryAuthoringConstructsForBundle {
 @description("The caller's cataloged (reusable) constructs. Backs the compose-first matcher (#957): the planner searches these before authoring a net-new dependency.")
 query construct queryCataloguedConstructsForOwner {
   filter  payload.ownerUserId==actor.userId && payload.catalogued==true
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   constructFull
 }
 
 @enabled
 @description("All dependency edges declared by a bundle (what it depends on), scoped to the caller. Backs dependency-closure inspection for a bundle.")
+@unbounded("dependency edges within one bundle -- the full edge set is needed to compile the bundle")
 query dependencyEdge queryDependencyEdgesForBundle {
   args {
     bundleId  string  @required
@@ -107,6 +131,7 @@ query dependencyEdge queryDependencyEdgesForBundle {
 
 @enabled
 @description("IMPACT ANALYSIS (#957): every edge that depends ON a given construct, scoped to the caller. The dependents to re-validate before changing a shared / cataloged construct. The caller joins bundleId -> v1:authoring:bundle to filter to ACTIVE dependents.")
+@unbounded("dependents of a construct -- the full dependent set is needed for impact analysis")
 query dependencyEdge queryDependentsOfConstruct {
   args {
     toName  string  @required
@@ -120,5 +145,10 @@ query dependencyEdge queryDependentsOfConstruct {
 @description("Every dependency edge owned by the caller. Backs a full dependency-graph view.")
 query dependencyEdge queryDependencyEdgesForOwner {
   filter  payload.ownerUserId==actor.userId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   dependencyEdgeFull
 }

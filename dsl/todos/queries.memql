@@ -14,10 +14,16 @@ query todo queryTodos {
     done  bool
   }
   filter  payload.ownerUserId==actor.userId && when(args.done) { payload.done==args.done }
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   todoFull
 }
 
 @enabled
+@unbounded("todo by id (guarded), gated to the owner -- bounded to a single row")
 @description("Fetch a single to-do by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's to-do even with its id. Used by the complete / update tools to confirm the row exists before re-inserting a new version.")
 @mcp
 query todo queryTodoById {

@@ -31,6 +31,11 @@ query calendarEvent queryUpcomingEvents {
     windowEnd    datetime  @required @description("Inclusive upper bound on payload.startsAt (e.g. now + 48h for a day-before reminder sweep).")
   }
   filter  payload.ownerUserId==actor.userId && payload.startsAt>=args.windowStart && payload.startsAt<=args.windowEnd && traitIsNotDeleted
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   calendarEventFull
 }
 
@@ -42,6 +47,11 @@ query calendarEvent queryEventsByDay {
     dayEnd    datetime  @required @description("Exclusive end-of-day instant (next midnight) in the user's timezone.")
   }
   filter  payload.ownerUserId==actor.userId && payload.startsAt>=args.dayStart && payload.startsAt<args.dayEnd && traitIsNotDeleted
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   calendarEventFull
 }
 
@@ -52,5 +62,10 @@ query calendarEvent queryFindEvents {
     title  string  @required @description("Exact event title to match against payload.title.")
   }
   filter  payload.ownerUserId==actor.userId && payload.title==args.title && traitIsNotDeleted
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   calendarEventFull
 }

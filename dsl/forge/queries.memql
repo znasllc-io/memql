@@ -71,6 +71,7 @@ query project queryProjectById {
 }
 
 @enabled
+@unbounded("active forge projects -- a small bounded catalog consumed whole")
 @description("List active v1:forge:project rows.")
 query project queryActiveProjects {
   filter  traitStatusIsActive
@@ -78,6 +79,7 @@ query project queryActiveProjects {
 }
 
 @enabled
+@unbounded("forge project by unique slug -- bounded to a single row")
 @description("Resolve a v1:forge:project by its stable slug (e.g. 'memql', 'copresent-acme'). Claude uses this to go from a human-supplied name to a projectId before submitting a request or filtering requests. Returns at most one row because slugs are unique within a partition.")
 query project queryProjectBySlug {
   args {
@@ -91,6 +93,11 @@ query project queryProjectBySlug {
 @description("List the caller's own submitted requests, newest-first. Open to any team member.")
 query request queryMyRequests {
   filter  payload.submitterUserId == actor.userId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   requestFull
 }
 
@@ -111,6 +118,11 @@ query request queryProjectRequests {
     projectId  string  @required
   }
   filter  payload.projectId == args.projectId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   requestFull
 }
 
@@ -120,6 +132,11 @@ query request queryProjectRequests {
 @description("The validation queue: requests awaiting first-line developer validation. Developer/owner only (traitForgeDeveloper).")
 query request queryValidationQueue {
   filter  payload.status == "needs_validation" && traitForgeDeveloper
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   requestFull
 }
 
@@ -127,6 +144,11 @@ query request queryValidationQueue {
 @description("The approval queue: validated requests awaiting owner approval. Owner only (traitForgeApprover).")
 query request queryApprovalQueue {
   filter  payload.status == "needs_approval" && traitForgeApprover
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   requestFull
 }
 
@@ -137,5 +159,10 @@ query requestEvent queryRequestEvents {
     requestId  string  @required
   }
   filter  payload.requestId == args.requestId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   requestEventFull
 }

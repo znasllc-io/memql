@@ -10,12 +10,18 @@ use notes.concepts.{ note }
 @description("List the caller's notes. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible.")
 query note queryNotes {
   filter  payload.ownerUserId==actor.userId
-  shape   noteFull
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full notes-list pull. Literal page size --
+  // the struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
+  shape    noteFull
 }
 
 @enabled
 @description("Fetch a single note by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's note even with its id. Used by the update tool to confirm the row exists before re-inserting a new version.")
 @mcp
+@unbounded("note by id (guarded) gated to the caller -- bounded to a single row")
 query note queryNoteById {
   args {
     noteId  string  @required
@@ -31,5 +37,10 @@ query note queryNotesByTag {
     tag  string  @required
   }
   filter  payload.ownerUserId==actor.userId && when(args.tag) { args.tag in payload.tags }
-  shape   noteFull
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full tag-filtered notes pull. Literal page
+  // size -- the struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
+  shape    noteFull
 }

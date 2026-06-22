@@ -37,11 +37,17 @@ use planner.concepts.{ plan, task, taskState, responsibility }
 @description("Every Plan. Backs the global Tasks panel; the frontend pins current-space rows to the top of each lifecycle group.")
 query plan queryAllPlans {
   filter  payload.spaceId!=""
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   planFull
 }
 
 @enabled
 @description("Plans in awaitingFeedback whose feedbackRequest.timeoutAt is in the past. Backs feedbackTimeoutAutoPause.")
+@unbounded("feedback-timeout auto-pause cron sweep -- an internal sweep that must see all")
 query plan queryAwaitingFeedbackPlansPastTimeout {
   filter  payload.status=="awaitingFeedback" && payload.feedbackRequest.timeoutAt < now()
   shape   planFull
@@ -71,6 +77,7 @@ query plan queryAwaitingFeedbackPlansPastTimeout {
 // single `in` operator since MemQL has no OR.
 @enabled
 @description("Plans still in a pre-dispatch status (planning / queued). Backs the stranded-plan watchdog (memql#1389); the age + dedup check runs Go-side.")
+@unbounded("stranded-plan recovery sweep -- an internal sweep that must see all")
 query plan queryStrandedCandidatePlans {
   filter  payload.status in ["planning", "queued"]
   shape   planFull
@@ -97,6 +104,7 @@ query plan queryStrandedCandidatePlans {
 
 @enabled
 @description("All queued trainAgentRetryStep Plans. The training poll loop filters by input.nextAttemptAt in Go.")
+@unbounded("due train-agent-retry cron sweep -- an internal sweep that must see all")
 query plan queryDueTrainAgentRetryPlans {
   filter  payload.kind=="trainAgentRetryStep" && payload.status=="queued"
   shape   planFull
@@ -123,6 +131,11 @@ query plan queryHistoricalPlanMetrics {
     planKind  string  @required
   }
   filter  payload.kind==args.planKind && payload.status=="succeeded"
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   planFull
 }
 
@@ -170,6 +183,11 @@ query plan queryPlansForSpace {
     spaceId  string  @required
   }
   filter  payload.spaceId==args.spaceId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   planFull
 }
 
@@ -197,6 +215,7 @@ query plan queryPlansForSpace {
 
 @enabled
 @description("All currently-running trainAgent Plans across the tenant. Backs the Training Studio's per-agent in-flight lock; frontend filters by plan.input.agentId.")
+@unbounded("running train-agent plans -- a small bounded in-flight set consumed whole by the dispatch sweep")
 query plan queryRunningTrainAgentPlans {
   filter  payload.kind=="trainAgent" && traitStatusIsRunning
   shape   planFull
@@ -216,6 +235,11 @@ query plan queryRunningTrainAgentPlans {
 @description("The caller's currently-RUNNING Plans -- the account's active tasks occupying concurrency slots (epic memql#902 / #909). Owned tier: payload.requestedBy==actor.userId binds server-side so a caller only sees their own. The active count is the result length; pair with queryAccountEntitlement for the cap and queryWaitingPlansForUser for the queue.")
 query plan queryActivePlansForUser {
   filter  payload.requestedBy==actor.userId && traitStatusIsRunning
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   planFull
 }
 
@@ -223,11 +247,17 @@ query plan queryActivePlansForUser {
 @description("The caller's Plans parked in the per-account waiting queue (status=waitingForSlot) because the account is at its concurrency cap (epic memql#902 / #909). Owned tier (payload.requestedBy==actor.userId). FIFO order is by row.createdAt of the waitingForSlot version (carried in planFull); the frontend derives each Plan's queue position from that ascending order -- MemQL has no in-query window/rank function.")
 query plan queryWaitingPlansForUser {
   filter  payload.requestedBy==actor.userId && payload.status=="waitingForSlot"
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   planFull
 }
 
 @enabled
 @description("Latest persisted state for a Task (planner reads this on resume).")
+@unbounded("task state by taskId -- bounded to a single row")
 query taskState queryTaskStateById {
   args {
     taskId  string  @required
@@ -253,6 +283,7 @@ query taskState queryTaskStateById {
 
 @enabled
 @description("All Tasks for a Plan, in seq order.")
+@unbounded("tasks within one plan -- bounded by the plan; the caller runs the whole plan")
 query task queryTasksForPlan {
   args {
     planId  string  @required
@@ -282,6 +313,11 @@ query task queryTasksForPlan {
 @description("Every responsibility owned by the caller (all statuses + triggers). Backs the management surface. The ownerUserId predicate binds to actor.userId server-side so cross-user reads are impossible.")
 query responsibility queryResponsibilitiesForUser {
   filter  payload.ownerUserId==actor.userId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   responsibilityFull
 }
 
@@ -297,6 +333,11 @@ query responsibility queryResponsibilitiesForUser {
 @description("The caller's active + enabled responsibilities -- the live working set. Owned tier (ownerUserId == actor.userId). status filtered via traitStatusIsActive; enabled==true drops soft-disabled rows.")
 query responsibility queryActiveResponsibilities {
   filter  payload.ownerUserId==actor.userId && traitStatusIsActive && payload.enabled==true
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   responsibilityFull
 }
 
@@ -323,6 +364,7 @@ query responsibility queryActiveResponsibilities {
 // archetype; the recurring + reactive results are merged Go-side.
 @enabled
 @description("The caller's active + enabled responsibilities of a given trigger archetype (recurring or reactive) -- the candidate set the reactive-loop evaluator (epic #632) checks for due-ness. Owned tier (ownerUserId == actor.userId). Cron-due / condition-match filtering happens Go-side (no OR operator + no cron arithmetic in the filter), mirroring queryDueTrainAgentRetryPlans.")
+@unbounded("responsibilities due for a trigger -- an internal scheduler sweep that must see all due")
 query responsibility queryDueResponsibilities {
   args {
     trigger  string  @required  @enum("reactive", "recurring")
@@ -356,6 +398,7 @@ query responsibility queryDueResponsibilities {
 // owned-tier mutations gated on actor.userId.
 @enabled
 @description("Every active + enabled responsibility in the partition, regardless of owner -- the cross-user sweep the reactive-loop heartbeat (epic #632) walks each tick. Cron-sweep-helper shape (no owner filter; classifies as 'other' like queryAllArchivedSpacesAcrossUsers). The planner poller reads this under the system actor, then impersonates each row's ownerUserId for the owned-tier per-user writes.")
+@unbounded("cross-user active responsibilities -- an internal scheduler sweep that must see all")
 query responsibility queryActiveResponsibilitiesAcrossUsers {
   filter  traitStatusIsActive && payload.enabled==true
   shape   responsibilityFull
@@ -384,6 +427,11 @@ query plan queryPlansForResponsibility {
     responsibilityId  string  @required
   }
   filter  payload.input.responsibilityId==args.responsibilityId
+  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
+  // (createdAt, id) instead of a full-table pull. Literal page size -- the
+  // struct-query paginate directive only accepts an integer literal.
+  sort     "createdAt", "desc"
+  paginate 50
   shape   planFull
 }
 
