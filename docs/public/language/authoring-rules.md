@@ -125,7 +125,7 @@ creation flow in `dsl/cognition/automations.memql` and
 `dsl/identity/automations.memql` for live examples of this pattern.
 
 **Sense diagnostics for these gotchas** land at edit time in Cockpit
-(Phase 5 Step 34). The rules live in
+(see [MemQL Sense & the DSL Spec](sense.md)). The rules live in
 `component/memql/sense/authoring_rules.go` and cover the most
 frequently hit traps:
 

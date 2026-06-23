@@ -29,6 +29,7 @@ The complete map of memQL documentation. Layout + rules:
 ### The Language (`language/`)
 - [MemQL Language](docs/public/language/memql.md) — the DSL reference (also embedded in the binary; see `docs/embed.go`).
 - [Functions](docs/public/language/functions.md) · [Authoring Rules](docs/public/language/authoring-rules.md) — read before writing `.memql`.
+- [MemQL Sense & the DSL Spec](docs/public/language/sense.md) — language intelligence (tokenize/complete/diagnose/hover) + the `dslspec` source of truth, drift guard, and portable JSON export.
 - [Naming Conventions](docs/public/language/naming-conventions.md) · [Reserved Identifiers](docs/public/language/reserved.md) · [Specifications](docs/public/language/specifications.md) · [Attribute Matrix](docs/public/language/attribute-matrix.md)
 
 ### AI (`ai/`)
@@ -47,8 +48,9 @@ The complete map of memQL documentation. Layout + rules:
 - **Auth** (`operate/auth/`): [Access Model](docs/public/operate/auth/access-model.md) · [Identity Service](docs/public/operate/auth/identity-service.md) · [User Provisioning](docs/public/operate/auth/user-provisioning.md) · [Actor Envelope](docs/public/operate/auth/actor-envelope.md) · [Per-row Authz](docs/public/operate/auth/per-row-authz-audit.md) · machine creds: [node](docs/public/operate/auth/node-jwt.md) / [voice-agent](docs/public/operate/auth/voice-agent-jwt.md) / [service-account](docs/public/operate/auth/service-account-jwt.md)
 
 ### Cockpit (`cockpit/`)
-The Cockpit (terminal IDE + ops console) ships from its own repo,
-`github.com/znasllc-io/memql-cockpit`; its product docs live there.
+- [Cockpit Editor](docs/public/cockpit/editor.md) — the read-only DSL pack browser (domains/files/Sense-colored source + hover), pack-vs-bundle terminology, and the validate/inject authoring engine contract (in-Editor authoring UI lands with #230/#231).
+- The Cockpit (terminal IDE + ops console) ships from its own repo,
+  `github.com/znasllc-io/memql-cockpit`; the rest of its product docs live there.
 
 ---
 
