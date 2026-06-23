@@ -286,34 +286,61 @@ func (s *Service) completeConstructConcept(ctx CursorContext) []CompletionItem {
 	inScope := importedConceptsInScope(ctx.Source)
 
 	var items []CompletionItem
-	for _, name := range s.registries.ConceptNames() {
-		if !strings.HasPrefix(name, ctx.Prefix) {
+	for _, canonical := range s.registries.ConceptNames() {
+		// ConceptNames() returns canonical ids (e.g. v1:cognition:space).
+		// The construct signature binds the SHORT name (`space`, resolved
+		// through the file-top `use` import), and a well-formed import needs
+		// the owning domain -- both derived from the canonical id.
+		domain, short := splitConceptID(canonical)
+		if !strings.HasPrefix(short, ctx.Prefix) {
 			continue
 		}
 		doc := ""
-		if c, ok := s.registries.ConceptGet(name); ok {
+		if c, ok := s.registries.ConceptGet(canonical); ok {
 			doc = c.Description
 		}
-		// Primary: the bare concept name (highest priority).
+		detail := "concept"
+		if canonical != short {
+			detail = canonical
+		}
+		// Primary: the short name the signature binds (highest priority).
 		items = append(items, CompletionItem{
-			Label: name, Kind: "concept", Detail: "concept",
-			Documentation: doc, InsertText: name,
+			Label: short, Kind: "concept", Detail: detail,
+			Documentation: doc, InsertText: short,
 			SortPriority: 1,
 		})
-		// Secondary: an import suggestion when the concept isn't in file scope
-		// and the spec rule asks for it.
-		if suggestImport && !inScope[name] {
+		// Secondary: a fully-formed `use <domain>.concepts.{ short }` import
+		// when the concept isn't already in file scope, the domain is known,
+		// and the spec rule asks for it -- the owner's "no concept in scope ->
+		// suggest importing one" behaviour.
+		if suggestImport && domain != "" && !inScope[short] {
+			useLine := "use " + domain + ".concepts.{ " + short + " }"
 			items = append(items, CompletionItem{
-				Label:         "use ...concepts.{ " + name + " }",
+				Label:         useLine,
 				Kind:          "snippet",
 				Detail:        "import concept",
-				Documentation: "Import `" + name + "` into file scope, then bind it.",
-				InsertText:    "use concepts.{ " + name + " }\n" + name,
+				Documentation: "Import `" + short + "` from `" + domain + "` into file scope, then bind it.",
+				InsertText:    useLine + "\n" + short,
 				SortPriority:  2,
 			})
 		}
 	}
 	return items
+}
+
+// splitConceptID splits a canonical concept id (v1:<domain>:<...>:<leaf>) into
+// its owning top-level domain and short leaf name -- the forms an author
+// actually writes (the construct signature binds the leaf; the `use` import
+// path keys on the domain and resolves the brace-list name by trailing-segment
+// match). A value that is not canonical (no version:domain:leaf shape) is
+// returned as-is with an empty domain, so a bare name still completes -- just
+// without an accompanying import.
+func splitConceptID(canonical string) (domain, leaf string) {
+	parts := strings.Split(canonical, ":")
+	if len(parts) < 3 {
+		return "", canonical
+	}
+	return parts[1], parts[len(parts)-1]
 }
 
 // importedConceptsInScope scans the source for file-top `use

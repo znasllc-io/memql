@@ -69,15 +69,26 @@ func hasLabel(items []CompletionItem, label string) bool {
 	return false
 }
 
+// The real RegistryProvider.ConceptNames() returns CANONICAL ids
+// (v1:<domain>:<leaf>), so these tests model that; completion derives the
+// short signature name (`space`) and the import domain (`cognition`) from it.
+const (
+	cidSpace = "v1:cognition:space"
+	cidAgent = "v1:agents:agent"
+)
+
 // TestConstructConceptAfterMutationOffersConcept verifies the headline path:
-// after `mutation ` the bound concept `space` is offered.
+// after `mutation ` the bound concept's SHORT name `space` is offered (not the
+// canonical id the registry stores).
 func TestConstructConceptAfterMutationOffersConcept(t *testing.T) {
-	rp := &fakeRegistry{concepts: []string{"space"}}
+	rp := &fakeRegistry{concepts: []string{cidSpace}}
 	items := completionLabels(t, rp, "mutation ")
 	if !hasLabel(items, "space") {
-		t.Fatalf("after `mutation ` expected concept `space` offered; got %v", labelsOf(items))
+		t.Fatalf("after `mutation ` expected short concept `space` offered; got %v", labelsOf(items))
 	}
-	// The concept suggestion is the highest-priority item.
+	if hasLabel(items, cidSpace) {
+		t.Errorf("should offer the SHORT name `space`, not the canonical id %q", cidSpace)
+	}
 	for _, it := range items {
 		if it.Label == "space" && it.Kind != "concept" {
 			t.Errorf("`space` should be a concept completion, got kind %q", it.Kind)
@@ -87,16 +98,16 @@ func TestConstructConceptAfterMutationOffersConcept(t *testing.T) {
 
 // TestConstructConceptAfterQueryOffersConcept verifies the same for `query `.
 func TestConstructConceptAfterQueryOffersConcept(t *testing.T) {
-	rp := &fakeRegistry{concepts: []string{"space"}}
+	rp := &fakeRegistry{concepts: []string{cidSpace}}
 	items := completionLabels(t, rp, "query ")
 	if !hasLabel(items, "space") {
-		t.Fatalf("after `query ` expected concept `space` offered; got %v", labelsOf(items))
+		t.Fatalf("after `query ` expected short concept `space` offered; got %v", labelsOf(items))
 	}
 }
 
-// TestConstructConceptPrefixFilter confirms the partial concept name filters.
+// TestConstructConceptPrefixFilter confirms the partial SHORT name filters.
 func TestConstructConceptPrefixFilter(t *testing.T) {
-	rp := &fakeRegistry{concepts: []string{"space", "agent"}}
+	rp := &fakeRegistry{concepts: []string{cidSpace, cidAgent}}
 	items := completionLabels(t, rp, "mutation sp")
 	if !hasLabel(items, "space") {
 		t.Fatalf("prefix `sp` should offer `space`; got %v", labelsOf(items))
@@ -107,40 +118,40 @@ func TestConstructConceptPrefixFilter(t *testing.T) {
 }
 
 // TestConstructConceptImportSuggestedWhenMissing verifies the import-suggestion
-// fires when the concept is NOT imported in the source.
+// fires with the DOMAIN-qualified path when the concept is NOT imported.
 func TestConstructConceptImportSuggestedWhenMissing(t *testing.T) {
-	rp := &fakeRegistry{concepts: []string{"space"}}
+	rp := &fakeRegistry{concepts: []string{cidSpace}}
 	items := completionLabels(t, rp, "mutation ")
-	if !hasLabel(items, "use ...concepts.{ space }") {
-		t.Fatalf("expected an import suggestion for un-imported concept `space`; got %v", labelsOf(items))
+	if !hasLabel(items, "use cognition.concepts.{ space }") {
+		t.Fatalf("expected a domain-qualified import suggestion for un-imported `space`; got %v", labelsOf(items))
 	}
 }
 
 // TestConstructConceptImportSuppressedWhenImported verifies the import
-// suggestion is suppressed when the concept IS already in file scope.
+// suggestion is suppressed when the concept's SHORT name is already in scope.
 func TestConstructConceptImportSuppressedWhenImported(t *testing.T) {
-	rp := &fakeRegistry{concepts: []string{"space"}}
+	rp := &fakeRegistry{concepts: []string{cidSpace}}
 	src := "use cognition.concepts.{ space }\nmutation "
 	items := completionLabels(t, rp, src)
 	if !hasLabel(items, "space") {
 		t.Fatalf("concept `space` should still be offered; got %v", labelsOf(items))
 	}
-	if hasLabel(items, "use ...concepts.{ space }") {
+	if hasLabel(items, "use cognition.concepts.{ space }") {
 		t.Errorf("import suggestion should be suppressed when `space` is already imported; got %v", labelsOf(items))
 	}
 }
 
 // TestConstructConceptQueryImportToggle exercises the query path both ways.
 func TestConstructConceptQueryImportToggle(t *testing.T) {
-	rp := &fakeRegistry{concepts: []string{"space"}}
+	rp := &fakeRegistry{concepts: []string{cidSpace}}
 
 	missing := completionLabels(t, rp, "query ")
-	if !hasLabel(missing, "use ...concepts.{ space }") {
+	if !hasLabel(missing, "use cognition.concepts.{ space }") {
 		t.Errorf("query: expected import suggestion when not imported; got %v", labelsOf(missing))
 	}
 
 	imported := completionLabels(t, rp, "use cognition.concepts.{ space }\nquery ")
-	if hasLabel(imported, "use ...concepts.{ space }") {
+	if hasLabel(imported, "use cognition.concepts.{ space }") {
 		t.Errorf("query: import suggestion should be suppressed when imported; got %v", labelsOf(imported))
 	}
 }
