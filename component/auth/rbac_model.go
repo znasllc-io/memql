@@ -126,3 +126,52 @@ func roleHasCapability(r Role, verb, resource string) bool {
 	}
 	return set[verbResource{verb: verb, resource: resource}]
 }
+
+// Resource types + verbs -- the canonical RBAC vocabulary, mirroring the DSL
+// v1:rbac:capability enum / resourceType values. Exported so the request-path
+// enforcement (E1.6, memql#2074) names them without inlining string literals.
+const (
+	VerbRead    = "read"
+	VerbCreate  = "create"
+	VerbUpdate  = "update"
+	VerbDelete  = "delete"
+	VerbExecute = "execute"
+
+	ResourcePrincipal  = "principal"
+	ResourceConstruct  = "construct"
+	ResourceData       = "data"
+	ResourceDeployment = "deployment"
+	ResourceAgent      = "agent"
+	ResourceGroup      = "group"
+	ResourceRole       = "role"
+)
+
+// Capable is the canonical, single server-side authorization primitive: does
+// the given role hold the (verb x resourceType) capability in the consolidated
+// RBAC model (epic memql#2062)? Every enforcement decision on the request path
+// -- handlers, executor guards, the migrated Can* adapters -- resolves through
+// THIS function, so there is exactly one definition of "may role R do verb V on
+// resource T", and it agrees with the load-tested DSL capability catalog
+// (dsl/rbac/seeds.memql).
+//
+// The decision is pure: a lookup against the static capability sets, with no DB
+// access and no per-node state. That is what makes authorization decisions
+// CONSISTENT across nodes (E1.6 multi-node acceptance) -- the same role resolves
+// to the same decision on every replica, because the model carries no
+// node-local state to diverge.
+//
+// Relational governance (who-can-manage-whom over (actor, target)) is a
+// separate, complementary primitive: GovernPrincipal / CanCreatePrincipal
+// (rbac_governance.go). Capable answers "does this role hold the grant at all";
+// GovernPrincipal narrows the principal-resource verbs by rank + self.
+func Capable(role Role, verb, resourceType string) bool {
+	return roleHasCapability(role, verb, resourceType)
+}
+
+// RoleRank exposes a role's numeric rank (HIGHER == more privileged) from the
+// consolidated model -- the value the relational governance predicates compare.
+// Exported so enforcement call sites can resolve a rank without re-deriving the
+// mapping. Unknown slugs return the least-privileged rank.
+func RoleRank(role Role) int {
+	return roleRank(role)
+}
