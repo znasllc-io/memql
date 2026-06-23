@@ -24,7 +24,7 @@
 # (xahn9ru4v6) via the MEMQL_DATABASE_DSN key in memql-secrets.
 #
 # Migrations run ONCE: only the identity Deployment carries
-# MIGRATE_ON_START/AUTO_MIGRATE=true; the other six are false (no 7-way
+# MIGRATE_ON_START=true; the other six are false (no 7-way
 # race against the shared Tiger DB).
 #
 # Per the repo + global Skills+Scripts convention (CLAUDE.md): pure

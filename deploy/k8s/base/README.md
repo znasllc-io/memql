@@ -91,9 +91,8 @@ reconnect.
 ## Migrations run once
 
 The shared Tiger DB must not be migrated by 7 racing nodes. Only the
-**identity** node sets `MEMORY_NODES_DATABASE_MIGRATE_ON_START=true` +
-`MEMORY_NODES_DATABASE_AUTO_MIGRATE=true`; every other node has both
-`false`.
+**identity** node sets `MEMORY_NODES_DATABASE_MIGRATE_ON_START=true`;
+every other node has it `false`.
 
 ### Gated pre-deploy migration ([#553](https://github.com/znasllc-io/memql/issues/553))
 

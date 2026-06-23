@@ -115,7 +115,6 @@ spec:
             - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
             # Shared Tiger DB -- migrations run ONCE on the identity node.
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
-            - { name: MEMORY_NODES_DATABASE_AUTO_MIGRATE, value: "false" }
           volumeMounts:
             - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }
           # Slow boot (DSL load + mesh connect) must not trip liveness/readiness (#1117).

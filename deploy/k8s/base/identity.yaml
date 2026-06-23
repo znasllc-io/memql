@@ -2,7 +2,7 @@
 # Every other node's verifier points at https://identity:8085 (internal
 # TLS, self-signed cluster CA -- see deploy/k8s/tls/). This is the ONLY
 # node that runs DB migrations against the shared Tiger Cloud instance --
-# all others set MIGRATE/AUTO_MIGRATE=false to avoid a 7-way migration race.
+# all others set MIGRATE_ON_START=false to avoid a 7-way migration race.
 #
 # TLS: identity serves its HTTP surface (/.well-known/jwks.json,
 # /node/bootstrap, /healthz) over TLS so the node-bootstrap handler's
@@ -119,9 +119,8 @@ spec:
             - { name: MEMQL_IDENTITY_REGISTERED_CLIENTS, value: '[{"clientId":"app","redirectURIs":["https://app.staging.copresent.ai/auth/callback"]},{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]}]' }
             - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
             - { name: MEMQL_IDENTITY_ENABLED, value: "true" }
-            # Migrations run ONCE, here. Every other node has these false.
+            # Migrations run ONCE, here. Every other node has this false.
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "true" }
-            - { name: MEMORY_NODES_DATABASE_AUTO_MIGRATE, value: "true" }
           volumeMounts:
             - { name: identity-tls, mountPath: /etc/memql/tls, readOnly: true }
             - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }

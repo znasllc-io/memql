@@ -115,7 +115,6 @@ spec:
             - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
             - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
-            - { name: MEMORY_NODES_DATABASE_AUTO_MIGRATE, value: "false" }
           volumeMounts:
             - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }
           readinessProbe:
@@ -195,7 +194,6 @@ spec:
             - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
             - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
-            - { name: MEMORY_NODES_DATABASE_AUTO_MIGRATE, value: "false" }
           volumeMounts:
             - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }
           readinessProbe:
