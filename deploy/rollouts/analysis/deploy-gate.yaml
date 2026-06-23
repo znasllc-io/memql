@@ -34,9 +34,22 @@ spec:
   metrics:
     # ---- 1 + 2: readiness + authenticated query, in one Job ------------------
     - name: readyz-and-auth-query
-      # One shot; the Job either exits 0 (pass) or non-zero (fail -> abort).
-      count: 1
-      failureLimit: 0
+      # Tolerate a TRANSIENT not-ready preview color so the gate doesn't
+      # false-abort the promotion under brief capacity pressure (#2044). The
+      # earlier `count: 1, failureLimit: 0` aborted on the very first probe, so
+      # if the preview ReplicaSet's pods were still scheduling (or its Service
+      # endpoints still propagating) the gate dialed bff-preview, got connection
+      # refused, and killed the cutover -- observed across rev 73->76 on the
+      # 0.9.89/0.9.90 staging cuts. Now:
+      #   * initialDelay -- wait for the preview pods to register endpoints
+      #     before the first probe;
+      #   * count > 1 + interval -- re-probe a few times;
+      #   * failureLimit: 1 -- tolerate ONE transient failure, but still abort a
+      #     genuinely broken release (>=2 failures), so the gate stays strict.
+      initialDelay: 30s
+      count: 3
+      interval: 20s
+      failureLimit: 1
       provider:
         job:
           spec:

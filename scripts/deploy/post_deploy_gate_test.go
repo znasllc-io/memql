@@ -203,6 +203,68 @@ func TestPostDeployGatePromoteRefusesOnFailedAnalysis(t *testing.T) {
 	}
 }
 
+// readRepoFile reads a file by path relative to the repo root (this test lives
+// in scripts/deploy, so the root is two levels up).
+func readRepoFile(t *testing.T, rel string) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	root := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	b, err := os.ReadFile(filepath.Join(root, rel))
+	if err != nil {
+		t.Fatalf("read %s: %v", rel, err)
+	}
+	return string(b)
+}
+
+// STATIC: the deploy-gate's readyz-and-auth-query metric tolerates a TRANSIENT
+// not-ready preview color (#2044). The old `count: 1, failureLimit: 0` aborted
+// the bff promotion on the very first probe -- so a preview ReplicaSet that was
+// merely slow to schedule (capacity pressure during a full-stack cut) got the
+// cutover killed (connection-refused on bff-preview). The gate must wait
+// (initialDelay), re-probe (count > 1 + interval), and tolerate one transient
+// failure (failureLimit >= 1) -- while still aborting a genuinely broken release.
+func TestDeployGateToleratesTransientPreview(t *testing.T) {
+	src := readRepoFile(t, "deploy/rollouts/analysis/deploy-gate.yaml")
+	// Isolate the readyz-and-auth-query metric block (up to the next metric/SLO
+	// template) so the assertions can't accidentally match the SLO metrics.
+	start := strings.Index(src, "name: readyz-and-auth-query")
+	if start < 0 {
+		t.Fatal("deploy-gate.yaml has no readyz-and-auth-query metric")
+	}
+	end := strings.Index(src[start:], "kind: AnalysisTemplate")
+	raw := src[start:]
+	if end > 0 {
+		raw = src[start : start+end]
+	}
+	// Strip comment lines so assertions match real YAML, not the explanatory
+	// comment (which legitimately mentions the old `failureLimit: 0`).
+	var b strings.Builder
+	for _, ln := range strings.Split(raw, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(ln), "#") {
+			continue
+		}
+		b.WriteString(ln)
+		b.WriteString("\n")
+	}
+	block := b.String()
+	if strings.Contains(block, "failureLimit: 0") {
+		t.Error("readyz-and-auth-query still has failureLimit: 0 -- aborts on the first transient probe (#2044)")
+	}
+	for _, want := range []string{"initialDelay:", "interval:", "failureLimit: 1"} {
+		if !strings.Contains(block, want) {
+			t.Errorf("readyz-and-auth-query metric missing %q (transient-tolerance hardening, #2044)", want)
+		}
+	}
+	// count must be > 1 (re-probe). Accept any single digit >= 2.
+	if !strings.Contains(block, "count: 2") && !strings.Contains(block, "count: 3") &&
+		!strings.Contains(block, "count: 4") && !strings.Contains(block, "count: 5") {
+		t.Error("readyz-and-auth-query must re-probe (count > 1) so a transient not-ready preview is retried (#2044)")
+	}
+}
+
 // STATIC: aks-deploy.sh wires BOTH the bff promote (#1520) and the functional
 // gate (#1519) into the deploy flow's health_gate -- the deploy is not green
 // until both run.
