@@ -240,6 +240,20 @@ message MemqlClientMessage {
     ListPackDomainsMsg list_pack_domains = 75;
     ListPackFilesMsg list_pack_files = 76;
     ReadPackFileMsg read_pack_file = 77;
+    // Authoring -- validate + session-define a user "bundle" (a set of
+    // .memql sources) over gRPC, the cockpit-facing counterpart to the
+    // MCP `define` tool (epic memql#1529 / issue #2128 / C1). Reuses the
+    // engine's Gate-1 authoring sandbox + session-scoped authored runtime.
+    //
+    // AuthoringValidateBundle runs the isolated compile-and-bind sandbox
+    // and returns per-construct diagnostics + an overall ok; it NEVER
+    // mutates engine state. AuthoringSessionDefineBundle validates, then
+    // registers the bundle into the caller's owner-scoped, stream-scoped
+    // authored registry so the constructs are callable BY NAME for the
+    // session (never shadowing core), dropped when the stream ends. Owner-
+    // gated DURABLE activation is out of scope here (issue #232).
+    AuthoringValidateBundleMsg authoring_validate_bundle = 78;
+    AuthoringSessionDefineBundleMsg authoring_session_define_bundle = 79;
   }
 }
 
@@ -359,6 +373,11 @@ message MemqlServerMessage {
     // lifecycle state AFTER the trigger so the ordered-rollout driver can
     // confirm which node it drained.
     NodeMaintenanceResult node_maintenance_result = 102;
+    // Authoring replies (see AuthoringValidateBundleMsg /
+    // AuthoringSessionDefineBundleMsg, issue #2128 / C1). Tags 112-114 are
+    // taken by the B1 pack-browser replies above, so these start at 115.
+    AuthoringValidateBundleResult authoring_validate_bundle_result = 115;
+    AuthoringSessionDefineBundleResult authoring_session_define_bundle_result = 116;
   }
 }
 
@@ -1113,6 +1132,64 @@ message ReadPackFileResult {
   string source = 4;   // file source (UTF-8)
   string origin = 5;   // "embedded" | "pack:<domain>" | "disk:<path>"
   bool found = 6;      // false when the file does not exist
+}
+
+// -----------------------------------------------------------------------------
+// Authoring -- validate + session-define a user bundle (issue #2128 / C1)
+// -----------------------------------------------------------------------------
+//
+// The cockpit-facing gRPC surface over the engine's existing authoring
+// machinery (component/memql/authoring_sandbox.go + authoring_session.go),
+// mirroring the MCP `define` tool's wiring (component/mcp/tool_surface.go).
+// `sources` is a .memql bundle string (one or more constructs concatenated);
+// the engine slices it into (kind, name, source) constructs internally.
+
+// AuthoringDiagnostic is the per-construct compile-and-bind result, the wire
+// form of memql.SandboxDiagnostic. `skipped` constructs (a kind this pass does
+// not yet compile) report ok=false, skipped=true and do NOT fail the bundle.
+message AuthoringDiagnostic {
+  string name = 1;
+  string kind = 2;
+  bool ok = 3;
+  bool skipped = 4;
+  string error = 5;  // compile/bind failure or skip reason; empty on success
+}
+
+// AuthoringConstruct names one construct that a session-define registered.
+message AuthoringConstruct {
+  string kind = 1;
+  string name = 2;
+}
+
+// AuthoringValidateBundleMsg requests a Gate-1 sandbox compile + bind of the
+// bundle. NO engine mutation -- pure validation against a read-only clone of
+// the live registry.
+message AuthoringValidateBundleMsg {
+  string request_id = 1;
+  string sources = 2;  // .memql bundle source
+}
+
+message AuthoringValidateBundleResult {
+  string request_id = 1;
+  bool ok = 2;  // true only when every non-skipped construct compiled cleanly
+  repeated AuthoringDiagnostic diagnostics = 3;
+}
+
+// AuthoringSessionDefineBundleMsg validates the bundle, then session-defines it
+// into the caller's owner-scoped authored registry (stream-scoped, non-durable).
+// Defined function-family constructs become callable by name within the session,
+// never shadowing core, dropped when the stream ends.
+message AuthoringSessionDefineBundleMsg {
+  string request_id = 1;
+  string sources = 2;  // .memql bundle source
+}
+
+message AuthoringSessionDefineBundleResult {
+  string request_id = 1;
+  bool ok = 2;
+  repeated AuthoringConstruct defined = 3;     // constructs that became callable
+  repeated AuthoringDiagnostic diagnostics = 4;
+  string error = 5;  // non-empty when the bundle was rejected (validation or register)
 }
 
 // -----------------------------------------------------------------------------

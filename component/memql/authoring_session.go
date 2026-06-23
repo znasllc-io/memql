@@ -97,6 +97,28 @@ func SplitBundleSource(source string) []SandboxConstruct {
 	return out
 }
 
+// ValidateBundle runs the Gate-1 sandbox over a `.memql` bundle: it slices the
+// source into (kind, name, source) constructs and compiles + binds each in
+// ISOLATION against a read-only clone of the live concept registry. It NEVER
+// mutates engine state and registers nothing -- it is the read-only validation
+// half of the authoring surface (the cockpit's ValidateBundle op, issue #2128).
+// A bundle with no recognizable constructs reports OK=false with a single
+// diagnostic explaining the empty parse, so the caller always gets a typed
+// answer rather than a bare error.
+func ValidateBundle(bundleSource string) SandboxReport {
+	constructs := SplitBundleSource(bundleSource)
+	if len(constructs) == 0 {
+		return SandboxReport{
+			OK: false,
+			Diagnostics: []SandboxDiagnostic{{
+				OK:    false,
+				Error: "authoring: no recognizable constructs found in bundle source",
+			}},
+		}
+	}
+	return SandboxCompileBundle(constructs)
+}
+
 // AuthorSessionBundle validates a `.memql` bundle and registers its constructs
 // into the caller-supplied, owner-scoped session registry, NON-DURABLY. It is
 // the engine-free core of the MCP `define` op: split -> Gate-1 validate ->
