@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"net/http"
+	"os"
 
+	"github.com/znasllc-io/memql/component/genesis"
 	"github.com/znasllc-io/memql/component/identity/verifier"
 	"github.com/znasllc-io/memql/component/metrics"
 	"github.com/znasllc-io/memql/component/server"
@@ -31,6 +33,17 @@ func (a *App) configAndAuth() {
 	if err != nil {
 		a.fatal("failed to load service environment options", "error", err)
 	}
+
+	// Fail-fast required-var validation (#2108). Each node validates only
+	// the vars its own MEMQL_NODE_TYPE requires (the multi-node default:
+	// a voice pod must fail if the LiveKit vars are missing; a bff pod
+	// must not). This runs FIRST so a misconfigured node exits with one
+	// clear, actionable error instead of panicking deep in init. The
+	// genesis envelope + local-env override have already been applied to
+	// the process environment by main.go, so os.LookupEnv is the source
+	// of truth here. The verifier's IDENTITY_VERIFIER_BASE_URL check
+	// below is a separate, node-shape-specific gate and complements this.
+	a.validateRequiredEnv()
 
 	// Note: the engine's partition defaults to "default" via
 	// MemQLEngine.Partition() and PartitionFromContext returns "" for
@@ -122,4 +135,25 @@ func (a *App) configAndAuth() {
 	})
 	a.middlewares = append(a.middlewares, authMiddleware)
 	a.Logger.Info("identity verifier HTTP middleware configured")
+}
+
+// validateRequiredEnv loads the secrets/variable registry and exits the
+// process via a.fatal with ONE actionable error if any var this node
+// type requires at boot is missing. Keyed on MEMQL_NODE_TYPE so each
+// node in the mesh validates only its own required set (#2108). A
+// manifest that cannot be loaded is treated as non-fatal here -- the
+// embedded snapshot always loads, so a load error means a caller-
+// supplied override path is broken, which is logged and skipped rather
+// than blocking boot on the validator itself.
+func (a *App) validateRequiredEnv() {
+	manifest, err := genesis.LoadManifest("")
+	if err != nil {
+		a.Logger.Warn("boot var validation skipped: could not load secrets registry", "error", err)
+		return
+	}
+	nodeType := genesis.ResolveNodeType()
+	missing := genesis.MissingRequired(nodeType, manifest, os.LookupEnv)
+	if msg := genesis.MissingRequiredError(nodeType, missing); msg != "" {
+		a.fatal(msg, "node_type", nodeType, "missing", missing)
+	}
 }
