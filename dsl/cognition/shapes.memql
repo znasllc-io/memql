@@ -9,7 +9,7 @@ use cognition.concepts.{ audioOverride, participant, presence, session, space, u
 @description("Per-(space, agent) audio override projection")
 shape audioOverride audioOverrideFull {
   row.id
-  payload.spaceId
+  payload.partitionId
   payload.agentId
   payload.setBy
   payload.mode
@@ -21,7 +21,7 @@ shape audioOverride audioOverrideFull {
 @description("Comprehensive participant projection with all fields")
 shape participant participantFull {
   row.id
-  payload.spaceId
+  payload.partitionId
   payload.userId
   payload.agentId
   payload.participantType
@@ -73,7 +73,7 @@ shape space spaceFull {
 
 @row
 @description("Id-only projection of v1:cognition:space rows. Backs the heartbeat path (memql#287) that just needs to iterate active spaces -- avoids paying the spaceFull projection cost when only the id is consumed.")
-shape space spaceIdOnly {
+shape space partitionIdOnly {
   row.id
 }
 
@@ -81,7 +81,7 @@ shape space spaceIdOnly {
 @description("Comprehensive utterance projection with all fields")
 shape utterance utteranceFull {
   row.id
-  payload.spaceId
+  payload.partitionId
   payload.participantId
   payload.utteranceType
   payload.text
@@ -102,7 +102,7 @@ shape utterance utteranceFull {
 @description("Per-(space, agent) video override projection")
 shape videoOverride videoOverrideFull {
   row.id
-  payload.spaceId
+  payload.partitionId
   payload.agentId
   payload.setBy
   payload.mode
@@ -118,7 +118,7 @@ shape videoOverride videoOverrideFull {
 @description("UI-friendly presence snapshot for a participant. Carries the high-level state (thinking / responding / waiting / ...) plus the short UI label + timing fields. The SPA keys these latest-wins by participantId to drive the presence panel + chat activity indicator.")
 shape presence presenceFull {
   row.id
-  payload.spaceId
+  payload.partitionId
   payload.participantId
   payload.state
   payload.label

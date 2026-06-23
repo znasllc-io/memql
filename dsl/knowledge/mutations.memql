@@ -31,7 +31,7 @@ mutation document mutationCreateDocument {
     documentId    string
     attachmentId  string  @required
     planId        string  @required
-    spaceId       string  @required
+    partitionId       string  @required
     fileName      string  @required
     mimeType      string  @required
     format        string  @required
@@ -45,7 +45,7 @@ mutation document mutationCreateDocument {
     id: args.documentId
     args.attachmentId
     args.planId
-    args.spaceId
+    args.partitionId
     args.fileName
     args.mimeType
     args.format

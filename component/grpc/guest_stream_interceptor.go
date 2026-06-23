@@ -19,7 +19,7 @@ import (
 // to mark a stream as guest-authenticated. Handlers + middleware read
 // this to branch guest behavior. The key lives under "identity.*"
 // because the guest-auth primitive is owned by the identity layer;
-// the specific claim payload (spaceId, etc.) is product-flavored and
+// the specific claim payload (partitionId, etc.) is product-flavored and
 // gets populated by whoever created the v1:identity:invitation record.
 const GuestAuthClaimKey = "identity.guest"
 
@@ -108,7 +108,7 @@ func validateGuestAndDispatch(
 	// Build claims. The guest's subject is derived from the invitation
 	// (not the participantId, which doesn't exist pre-join). Space-
 	// scoped partition ACL is computed by downstream middleware using
-	// the spaceId we stuff into claims.
+	// the partitionId we stuff into claims.
 	guestClaims := map[string]any{
 		"sub":   "guest:" + summary.ID,
 		"email": summary.InviteeEmail,
@@ -116,7 +116,7 @@ func validateGuestAndDispatch(
 		"name":  summary.InviteeName,
 		GuestAuthClaimKey: map[string]any{
 			"invitationId": summary.ID,
-			"spaceId":      summary.SpaceId,
+			"partitionId":      summary.PartitionId,
 			"tokenHash":    hashGuestToken(plainToken), // hash only -- plain token must not enter the claims map (log-leak surface)
 			"status":       strings.ToLower(summary.Status),
 		},
@@ -129,7 +129,7 @@ func validateGuestAndDispatch(
 	if logger != nil {
 		logger.Debug("guest auth success",
 			"invitationId", summary.ID,
-			"spaceId", summary.SpaceId,
+			"partitionId", summary.PartitionId,
 			"status", summary.Status,
 		)
 	}

@@ -89,7 +89,7 @@ type ToolCallTransport func(ctx context.Context, name string, arguments map[stri
 // a plain value so it is trivially serializable and inspectable in tests.
 // Mirrors the dict mcp_tool_bridge.py::CognitionMirror.record_call emits.
 type MirrorRecord struct {
-	SpaceID       string
+	PartitionID       string
 	AgentID       string
 	ToolName      string
 	ArgumentsJSON string
@@ -244,7 +244,7 @@ func (b *McpToolBridge) Dispatch(ctx context.Context, name, argumentsJSON string
 	transportStart := time.Now()
 	resultText, isError, err := b.transport(ctx, name, args)
 	logVoiceTiming(b.logger, "tool.transport", transportStart,
-		"space_id", b.spaceID, "tool", name, "is_error", isError || err != nil)
+		"partition_id", b.spaceID, "tool", name, "is_error", isError || err != nil)
 	if err != nil {
 		resultText = err.Error()
 		isError = true
@@ -273,7 +273,7 @@ func (b *McpToolBridge) recordMirror(ctx context.Context, name string, args map[
 		argsJSON = "{}"
 	}
 	record := MirrorRecord{
-		SpaceID:       b.spaceID,
+		PartitionID:       b.spaceID,
 		AgentID:       b.agentID,
 		ToolName:      name,
 		ArgumentsJSON: argsJSON,
@@ -283,7 +283,7 @@ func (b *McpToolBridge) recordMirror(ctx context.Context, name string, args map[
 	if err := b.mirror(ctx, record); err != nil && b.logger != nil {
 		b.logger.Warn("voice-agent realtime mcp bridge: cognition mirror failed "+
 			"(tool result still delivered to the model)",
-			"tool", name, "space_id", b.spaceID, "err", err)
+			"tool", name, "partition_id", b.spaceID, "err", err)
 	}
 }
 
@@ -444,7 +444,7 @@ func NewLogMirrorSink(logger *slog.Logger) MirrorSink {
 		}
 		logger.Info("voice trace: realtime mcp tool call",
 			"stage", "realtime.mcp.tool.call",
-			"space_id", record.SpaceID,
+			"partition_id", record.PartitionID,
 			"agent_id", record.AgentID,
 			"tool", record.ToolName,
 			"is_error", record.IsError,

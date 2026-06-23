@@ -88,7 +88,7 @@ func retryBackoff(attempt int) time.Duration {
 func (i *Integration) enqueueRetryPlan(
 	ctx context.Context,
 	originalPlanId string,
-	spaceId string,
+	partitionId string,
 	requestedBy string,
 	agentId string,
 	step string,
@@ -97,9 +97,9 @@ func (i *Integration) enqueueRetryPlan(
 	if i.engine == nil {
 		return ""
 	}
-	if strings.TrimSpace(spaceId) == "" || strings.TrimSpace(requestedBy) == "" {
+	if strings.TrimSpace(partitionId) == "" || strings.TrimSpace(requestedBy) == "" {
 		// No bookkeeping context -- caller opted out (or never
-		// passed spaceId / requestedBy). Skip.
+		// passed partitionId / requestedBy). Skip.
 		return ""
 	}
 
@@ -119,9 +119,9 @@ func (i *Integration) enqueueRetryPlan(
 	})
 
 	createQ := fmt.Sprintf(
-		`mutationCreatePlan({"planId": %s, "spaceId": %s, "kind": "trainAgentRetryStep", "goal": %s, "requestedBy": %s, "triggerSource": "system", "input": %s})`,
+		`mutationCreatePlan({"planId": %s, "partitionId": %s, "kind": "trainAgentRetryStep", "goal": %s, "requestedBy": %s, "triggerSource": "system", "input": %s})`,
 		quoteString(planId),
-		quoteString(spaceId),
+		quoteString(partitionId),
 		quoteString(goal),
 		quoteString(requestedBy),
 		inputJSON,
@@ -360,7 +360,7 @@ func (i *Integration) processRetryPlan(ctx context.Context, planId string, paylo
 	step, _ := input["step"].(string)
 	originalPlanId, _ := input["originalPlanId"].(string)
 	attempt := int(intFromAny(input["attempt"]))
-	spaceId, _ := plan["spaceId"].(string)
+	partitionId, _ := plan["partitionId"].(string)
 	requestedBy, _ := plan["requestedBy"].(string)
 
 	if agentId == "" || step == "" {
@@ -401,7 +401,7 @@ func (i *Integration) processRetryPlan(ctx context.Context, planId string, paylo
 			`mutationUpdatePlanStatus({"planId": %s, "status": "succeeded", "output": %s, "completedAt": %s})`,
 			quoteString(planId), successOutput, quoteString(completedAt),
 		))
-		i.emitRetryCompletedCard(ctx, planId, originalPlanId, spaceId, requestedBy, agentId, step, attempt)
+		i.emitRetryCompletedCard(ctx, planId, originalPlanId, partitionId, requestedBy, agentId, step, attempt)
 		i.Logger.Info("training.processRetryPlan: succeeded",
 			"planId", planId, "agentId", agentId, "step", step, "attempt", attempt)
 		return
@@ -418,7 +418,7 @@ func (i *Integration) processRetryPlan(ctx context.Context, planId string, paylo
 			`mutationUpdatePlanStatus({"planId": %s, "status": "failed", "errorMessage": %s, "completedAt": %s})`,
 			quoteString(planId), quoteString(errMsg), quoteString(failedAt),
 		))
-		i.emitRetryFailedCard(ctx, planId, originalPlanId, spaceId, requestedBy, agentId, step, retryMaxAttempts, errMsg)
+		i.emitRetryFailedCard(ctx, planId, originalPlanId, partitionId, requestedBy, agentId, step, retryMaxAttempts, errMsg)
 		i.Logger.Warn("training.processRetryPlan: exhausted attempts; failing",
 			"planId", planId, "agentId", agentId, "step", step, "attempts", retryMaxAttempts, "err", runErr)
 		return
@@ -443,9 +443,9 @@ func (i *Integration) processRetryPlan(ctx context.Context, planId string, paylo
 	// status-update mutation above set it to running; this brings
 	// it back to queued for the next poll window.
 	_, _ = i.engine.Execute(ctx, fmt.Sprintf(
-		`mutationCreatePlan({"planId": %s, "spaceId": %s, "kind": "trainAgentRetryStep", "goal": %s, "requestedBy": %s, "triggerSource": "system", "input": %s})`,
+		`mutationCreatePlan({"planId": %s, "partitionId": %s, "kind": "trainAgentRetryStep", "goal": %s, "requestedBy": %s, "triggerSource": "system", "input": %s})`,
 		quoteString(planId),
-		quoteString(spaceId),
+		quoteString(partitionId),
 		quoteString(fmt.Sprintf("Retry training step (%s) -- attempt %d/%d", humanStep(step), nextAttempt+1, retryMaxAttempts)),
 		quoteString(requestedBy),
 		mustJSON(updatedInput),
@@ -462,13 +462,13 @@ func (i *Integration) emitRetryCompletedCard(
 	ctx context.Context,
 	retryPlanId string,
 	originalPlanId string,
-	spaceId string,
+	partitionId string,
 	requestedBy string,
 	agentId string,
 	step string,
 	attempt int,
 ) {
-	if strings.TrimSpace(spaceId) == "" || strings.TrimSpace(requestedBy) == "" {
+	if strings.TrimSpace(partitionId) == "" || strings.TrimSpace(requestedBy) == "" {
 		return
 	}
 	cardData := mustJSON(map[string]any{
@@ -484,7 +484,7 @@ func (i *Integration) emitRetryCompletedCard(
 	if _, err := i.engine.Execute(ctx, fmt.Sprintf(
 		`mutationCreateCanvasState({"stateId": %s, "space": %s, "kind": "card", "data": %s, "visibility": "private", "forUserId": %s, "actor": %s, "importance": "ambient"})`,
 		quoteString(stateId),
-		quoteString(spaceId),
+		quoteString(partitionId),
 		cardData,
 		quoteString(requestedBy),
 		actorJSON,
@@ -500,14 +500,14 @@ func (i *Integration) emitRetryFailedCard(
 	ctx context.Context,
 	retryPlanId string,
 	originalPlanId string,
-	spaceId string,
+	partitionId string,
 	requestedBy string,
 	agentId string,
 	step string,
 	totalAttempts int,
 	finalError string,
 ) {
-	if strings.TrimSpace(spaceId) == "" || strings.TrimSpace(requestedBy) == "" {
+	if strings.TrimSpace(partitionId) == "" || strings.TrimSpace(requestedBy) == "" {
 		return
 	}
 	cardData := mustJSON(map[string]any{
@@ -524,7 +524,7 @@ func (i *Integration) emitRetryFailedCard(
 	if _, err := i.engine.Execute(ctx, fmt.Sprintf(
 		`mutationCreateCanvasState({"stateId": %s, "space": %s, "kind": "card", "data": %s, "visibility": "private", "forUserId": %s, "actor": %s, "importance": "notify"})`,
 		quoteString(stateId),
-		quoteString(spaceId),
+		quoteString(partitionId),
 		cardData,
 		quoteString(requestedBy),
 		actorJSON,

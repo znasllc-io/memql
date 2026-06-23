@@ -506,7 +506,7 @@ func TestParser_AutomationStep_ConditionalFunctionCall(t *testing.T) {
 @enabled
 func (Automation) testAuto(_ any) {
   createSession := if first(checkExisting).id==nil {
-    mutationCreateSession(spaceId=event.payload.spaceId, participantId=event.payload.id)
+    mutationCreateSession(partitionId=event.payload.partitionId, participantId=event.payload.id)
   }
   return createSession
 }`
@@ -1793,12 +1793,12 @@ func TestParser_ConditionalFilterWithArgsFieldName(t *testing.T) {
 	input := `
 @enabled
 args {
-  spaceId  string
+  partitionId  string
   status   string
 }
 func (Query) querySpaceParticipants(args any) (any, error) {
   return concept==v1:cognition:participant;
-  ?.payload.spaceId==args.spaceId;
+  ?.payload.partitionId==args.partitionId;
   ?.payload.status==args.status, nil
 }
 `
@@ -1831,7 +1831,7 @@ func (Query) querySpaceParticipants(args any) (any, error) {
 	}
 
 	// Traverse the logical expression tree to find conditional filters
-	// The structure is: (concept==... AND (?.payload.spaceId==args.spaceId AND ?.payload.status==args.status))
+	// The structure is: (concept==... AND (?.payload.partitionId==args.partitionId AND ?.payload.status==args.status))
 	var conditionalFilters []*ConditionalFilterExpr
 	collectConditionalFilters(logicalExpr, &conditionalFilters)
 
@@ -1839,18 +1839,18 @@ func (Query) querySpaceParticipants(args any) (any, error) {
 		t.Fatalf("Expected 2 conditional filters, got %d", len(conditionalFilters))
 	}
 
-	// Check first conditional filter: ?.payload.spaceId==args.spaceId
+	// Check first conditional filter: ?.payload.partitionId==args.partitionId
 	filter1 := conditionalFilters[0]
-	if filter1.ArgPath != "spaceId" {
-		t.Errorf("Expected ArgPath 'spaceId', got %q", filter1.ArgPath)
+	if filter1.ArgPath != "partitionId" {
+		t.Errorf("Expected ArgPath 'partitionId', got %q", filter1.ArgPath)
 	}
 
 	comp1, ok := filter1.Filter.(*ComparisonExpr)
 	if !ok {
 		t.Fatalf("Expected ComparisonExpr in filter, got %T", filter1.Filter)
 	}
-	if comp1.Field.Raw != "payload.spaceId" {
-		t.Errorf("Expected field 'payload.spaceId', got %q", comp1.Field.Raw)
+	if comp1.Field.Raw != "payload.partitionId" {
+		t.Errorf("Expected field 'payload.partitionId', got %q", comp1.Field.Raw)
 	}
 
 	// Value should be ArgRefExpr, not a string
@@ -1858,8 +1858,8 @@ func (Query) querySpaceParticipants(args any) (any, error) {
 	if !ok {
 		t.Fatalf("Expected ArgRefExpr, got %T (value: %v)", comp1.Value, comp1.Value)
 	}
-	if argRef1.Path != "spaceId" {
-		t.Errorf("Expected ArgRefExpr.Path 'spaceId', got %q", argRef1.Path)
+	if argRef1.Path != "partitionId" {
+		t.Errorf("Expected ArgRefExpr.Path 'partitionId', got %q", argRef1.Path)
 	}
 
 	// Check second conditional filter: ?.payload.status==args.status
@@ -1901,7 +1901,7 @@ func TestParser_MutationBody_PreservesIdTemplate_ArgAccessor(t *testing.T) {
 @enabled
 func (Mutation) createThing(args any) error {
   return insert("v1:thing",
-    id=args.spaceId,
+    id=args.partitionId,
     payload={ name: "X" }
   )
 }`
@@ -1935,8 +1935,8 @@ func (Mutation) createThing(args any) error {
 	if !ok {
 		t.Fatalf("Expected IDTemplate ArgRefExpr, got %T", m.IDTemplate)
 	}
-	if argRef.Path != "spaceId" {
-		t.Fatalf("Expected ArgRefExpr.Path 'spaceId', got %q", argRef.Path)
+	if argRef.Path != "partitionId" {
+		t.Fatalf("Expected ArgRefExpr.Path 'partitionId', got %q", argRef.Path)
 	}
 }
 
@@ -1945,7 +1945,7 @@ func TestParser_MutationBody_PreservesIdTemplate_Concat(t *testing.T) {
 @enabled
 func (Mutation) createThing(args any) error {
   return insert("v1:thing",
-    id=concat("thing-", hash(concat(args.spaceId, ":", args.userId))),
+    id=concat("thing-", hash(concat(args.partitionId, ":", args.userId))),
     payload={ name: "X" }
   )
 }`

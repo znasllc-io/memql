@@ -1,0 +1,32 @@
+{
+  "_about": "Curated allowlist/denylist for the spaceId -> partitionId core re-point (epic memql#2031, issue #2033 / B1). Reuses the si_to_ai.py engine via --rules.",
+  "_modes": "token = full identifier boundary both sides; infix = appears anywhere inside an identifier (for the camelCase suffix forms like voiceAgentSpaceId / GetSpaceId / activeSpaceId). The denylist + overlap-refusal protect namespace/workspace compounds that happen to contain the substring 'spaceId'.",
+  "_scope": "CORE memql repo only. Do NOT run against the memql-bff-copresent pack or copresent frontend with the same rules blindly -- the frontend/pack runs are coordinated separately in B1's wire-sweep siblings.",
+  "_caveat": "This is an IDENTIFIER rename. Where a core row models CoPresent room-membership (participant.spaceId, utterance.spaceId, audioOverride...), the field NAME becomes partitionId while the VALUE is still a v1:cognition:space id until the scoping value is re-pointed / the concept moves to the pack (B2). Flagged for owner review on the PR.",
+  "denylist": [
+    "namespaceId",
+    "NamespaceId",
+    "namespaceID",
+    "workspaceId",
+    "WorkspaceId",
+    "workspaceID",
+    "namespace_id",
+    "workspace_id"
+  ],
+  "groups": {
+    "proto": [
+      { "old": "space_id", "new": "partition_id", "mode": "token", "exts": [".proto"] }
+    ],
+    "go-internal": [
+      { "old": "SpaceID", "new": "PartitionID", "mode": "infix", "exts": [".go"] },
+      { "old": "SpaceId", "new": "PartitionId", "mode": "infix", "exts": [".go"] },
+      { "old": "spaceId", "new": "partitionId", "mode": "infix", "exts": [".go"] },
+      { "old": "space_id", "new": "partition_id", "mode": "token", "exts": [".go"] }
+    ],
+    "dsl": [
+      { "old": "SpaceId", "new": "PartitionId", "mode": "infix", "exts": [".memql"] },
+      { "old": "spaceId", "new": "partitionId", "mode": "infix", "exts": [".memql"] },
+      { "old": "space_id", "new": "partition_id", "mode": "token", "exts": [".memql"] }
+    ]
+  }
+}

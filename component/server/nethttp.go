@@ -843,7 +843,7 @@ func AIHTTPPaths() []string {
 }
 
 // SpaceAttachmentPaths returns the path prefix used to register the space
-// attachment upload handler (POST /spaces/{spaceId}/attachments).
+// attachment upload handler (POST /spaces/{partitionId}/attachments).
 func SpaceAttachmentPaths() []string {
 	return pathsWithBase("/spaces/")
 }

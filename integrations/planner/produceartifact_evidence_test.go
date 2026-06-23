@@ -25,7 +25,7 @@ func TestBuildExecutionTurn_TrustedScaffoldingNotInUntrustedHistory(t *testing.T
 			ID:           planId,
 			Kind:         produceArtifactPlanKind,
 			Goal:         goal,
-			SpaceId:      "v1:cognition:space:s1",
+			PartitionId:      "v1:cognition:space:s1",
 			OwnerAgentId: "v1:agents:agent:a1",
 			RequestedBy:  owner,
 		}
@@ -77,7 +77,7 @@ func TestBuildExecutionTurn_TrustedScaffoldingNotInUntrustedHistory(t *testing.T
 			ID:           planId,
 			Kind:         "scopeElevation",
 			Goal:         goal,
-			SpaceId:      "v1:cognition:space:s1",
+			PartitionId:      "v1:cognition:space:s1",
 			OwnerAgentId: "v1:agents:agent:a1",
 			RequestedBy:  owner,
 		}
@@ -96,7 +96,7 @@ func TestBuildExecutionTurn_TrustedScaffoldingNotInUntrustedHistory(t *testing.T
 	t.Run("watchExecution flips the lane", func(t *testing.T) {
 		plan := planExecutionRow{
 			ID: planId, Kind: produceArtifactPlanKind, Goal: goal,
-			SpaceId: "s", OwnerAgentId: "a", RequestedBy: owner, WatchExecution: true,
+			PartitionId: "s", OwnerAgentId: "a", RequestedBy: owner, WatchExecution: true,
 		}
 		_, hints := buildExecutionTurn(planId, plan)
 		if hints["execution_lane"] != "interactive" {
@@ -115,7 +115,7 @@ func TestBuildExecutionTurn_TrustedScaffoldingNotInUntrustedHistory(t *testing.T
 			ID:               planId,
 			Kind:             produceArtifactPlanKind,
 			Goal:             goal,
-			SpaceId:          "v1:cognition:space:s1",
+			PartitionId:          "v1:cognition:space:s1",
 			OwnerAgentId:     "v1:agents:agent:a1",
 			RequestedBy:      owner,
 			FeedbackResponse: feedback,
@@ -143,7 +143,7 @@ func TestBuildExecutionTurn_TrustedScaffoldingNotInUntrustedHistory(t *testing.T
 	t.Run("no feedback: single goal history message (first-run dispatch)", func(t *testing.T) {
 		plan := planExecutionRow{
 			ID: planId, Kind: produceArtifactPlanKind, Goal: goal,
-			SpaceId: "s", OwnerAgentId: "a", RequestedBy: owner,
+			PartitionId: "s", OwnerAgentId: "a", RequestedBy: owner,
 		}
 		history, _ := buildExecutionTurn(planId, plan)
 		if len(history) != 1 {

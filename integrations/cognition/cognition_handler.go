@@ -53,19 +53,19 @@ func composeReplyId(ctx context.Context) string {
 // recordLatestHumanUtterance stores this utterance ID as the space's most
 // recent. Later calls to isLatestHumanUtterance use it to detect whether a
 // newer one has arrived during the debounce window.
-func (c *CognitionIntegration) recordLatestHumanUtterance(spaceId, utteranceId string) {
+func (c *CognitionIntegration) recordLatestHumanUtterance(partitionId, utteranceId string) {
 	c.latestHumanUtteranceMu.Lock()
 	defer c.latestHumanUtteranceMu.Unlock()
-	c.latestHumanUtterance[spaceId] = utteranceId
+	c.latestHumanUtterance[partitionId] = utteranceId
 }
 
 // isLatestHumanUtterance reports whether the given utterance is still the
 // most recent human utterance for the space. Returns false when a newer
 // one has arrived in the meantime (the newer handler will carry the load).
-func (c *CognitionIntegration) isLatestHumanUtterance(spaceId, utteranceId string) bool {
+func (c *CognitionIntegration) isLatestHumanUtterance(partitionId, utteranceId string) bool {
 	c.latestHumanUtteranceMu.Lock()
 	defer c.latestHumanUtteranceMu.Unlock()
-	return c.latestHumanUtterance[spaceId] == utteranceId
+	return c.latestHumanUtterance[partitionId] == utteranceId
 }
 
 // handleUtteranceForCognition is the unified handler for utterance events.
@@ -83,13 +83,13 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		return
 	}
 
-	spaceId := strings.TrimSpace(utterance.SpaceId)
-	if spaceId == "" {
+	partitionId := strings.TrimSpace(utterance.PartitionId)
+	if partitionId == "" {
 		return
 	}
 
 	// Best-effort: record utterance for prompt context so we can avoid DB reads.
-	c.recordRecentUtteranceForPrompt(spaceId, utterance.ID, utterance.ParticipantId, utterance.UtteranceType, utterance.Text)
+	c.recordRecentUtteranceForPrompt(partitionId, utterance.ID, utterance.ParticipantId, utterance.UtteranceType, utterance.Text)
 
 	// Skip non-conversational utterance types -- these are system-generated
 	// tags that should never trigger an AI response.
@@ -116,8 +116,8 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	}
 	if participantType == "si" {
 		// Update AI presence to idle after speaking (fixes stuck "Replying..." status).
-		if aiParticipant, err := c.findAIParticipant(ctx, spaceId); err == nil && aiParticipant != nil && strings.TrimSpace(aiParticipant.ID) != "" {
-			_ = c.upsertParticipantPresence(ctx, spaceId, aiParticipant.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
+		if aiParticipant, err := c.findAIParticipant(ctx, partitionId); err == nil && aiParticipant != nil && strings.TrimSpace(aiParticipant.ID) != "" {
+			_ = c.upsertParticipantPresence(ctx, partitionId, aiParticipant.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
 		}
 		return
 	}
@@ -152,7 +152,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// bridge, so two utterances close enough to interfere don't
 	// happen in practice. Saves the full 400ms on every voice turn
 	// per the voice-trace waterfall.
-	c.recordLatestHumanUtterance(spaceId, utterance.ID)
+	c.recordLatestHumanUtterance(partitionId, utterance.ID)
 	isVoiceEarly := isVoiceUtterance(utterance.Source)
 	if !isVoiceEarly {
 		select {
@@ -160,9 +160,9 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		case <-ctx.Done():
 			return
 		}
-		if !c.isLatestHumanUtterance(spaceId, utterance.ID) {
+		if !c.isLatestHumanUtterance(partitionId, utterance.ID) {
 			c.Logger.Debug("cognition: utterance superseded during debounce, skipping",
-				"spaceId", spaceId, "utteranceId", utterance.ID)
+				"partitionId", partitionId, "utteranceId", utterance.ID)
 			return
 		}
 	}
@@ -176,10 +176,10 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// message was the answer to a question, not a fresh turn for an agent to
 	// respond to. On any miss / error this falls through to normal dispatch,
 	// so the cost of a false negative is just "answer via the card instead."
-	lastAgentText := mostRecentAgentText(c.scoreEngine, spaceId)
-	if c.tryRouteUtteranceAsPlanFeedback(ctx, spaceId, text, lastAgentText) {
+	lastAgentText := mostRecentAgentText(c.scoreEngine, partitionId)
+	if c.tryRouteUtteranceAsPlanFeedback(ctx, partitionId, text, lastAgentText) {
 		c.Logger.Info("cognition: utterance routed as plan feedback; skipping normal dispatch",
-			"spaceId", spaceId, "utteranceId", utterance.ID)
+			"partitionId", partitionId, "utteranceId", utterance.ID)
 		return
 	}
 
@@ -191,12 +191,12 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// pool blip, brief network glitch) without delaying the happy path.
 	var aiParticipants []*participantPayload
 	for attempt := 0; attempt < 2; attempt++ {
-		aiParticipants, err = c.findAllAIParticipants(ctx, spaceId)
+		aiParticipants, err = c.findAllAIParticipants(ctx, partitionId)
 		if err == nil {
 			break
 		}
 		c.Logger.Warn("cognition: failed to load AI participants",
-			"error", err, "spaceId", spaceId, "attempt", attempt+1)
+			"error", err, "partitionId", partitionId, "attempt", attempt+1)
 		if attempt == 0 {
 			select {
 			case <-time.After(100 * time.Millisecond):
@@ -207,7 +207,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	}
 	if err != nil {
 		c.Logger.Error("cognition: giving up after retry; no response generated",
-			"error", err, "spaceId", spaceId, "utteranceId", utterance.ID)
+			"error", err, "partitionId", partitionId, "utteranceId", utterance.ID)
 		return
 	}
 	if len(aiParticipants) == 0 {
@@ -222,17 +222,17 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// Start heartbeat for this space if not already running.
 	// The heartbeat runs a background goroutine that ticks every 10 seconds,
 	// checking for silence, pending events, and predictive state.
-	if !c.scoreEngine.Sessions().HasHeartbeat(spaceId) && len(candidates) > 1 {
+	if !c.scoreEngine.Sessions().HasHeartbeat(partitionId) && len(candidates) > 1 {
 		evaluator := polyphon.NewDefaultHeartbeatEvaluator()
-		c.scoreEngine.Sessions().StartHeartbeat(spaceId, 10*time.Second, evaluator, candidates,
+		c.scoreEngine.Sessions().StartHeartbeat(partitionId, 10*time.Second, evaluator, candidates,
 			func(action polyphon.HeartbeatAction) {
-				c.handleHeartbeatAction(ctx, spaceId, action, aiParticipants)
+				c.handleHeartbeatAction(ctx, partitionId, action, aiParticipants)
 			},
 		)
 	}
 
 	// Start prediction goroutine if not already running (every 30s, only when active).
-	if !c.scoreEngine.Sessions().HasPrediction(spaceId) && len(candidates) > 1 {
+	if !c.scoreEngine.Sessions().HasPrediction(partitionId) && len(candidates) > 1 {
 		invokeAIFunc := c.engine.InvokeAI
 
 		// Adapt embedFunc signature: cognition uses (ctx, text, provider) but
@@ -252,7 +252,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		} else {
 			analyzer = modelAnalyzer
 		}
-		c.scoreEngine.Sessions().StartPrediction(spaceId, 30*time.Second, analyzer, candidates)
+		c.scoreEngine.Sessions().StartPrediction(partitionId, 30*time.Second, analyzer, candidates)
 	}
 
 	// Build the Polyphon utterance.
@@ -263,7 +263,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	ctx = contextWithCurrentUserDisplayName(ctx, speakerName)
 	scoringUtterance := polyphon.Utterance{
 		ID:            utterance.ID,
-		ScopeId:       spaceId,
+		ScopeId:       partitionId,
 		ParticipantId: utterance.ParticipantId,
 		SpeakerName:   speakerName,
 		Text:          text,
@@ -276,7 +276,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// loaded here so "@Alice" on a human resolves to a human-addressee
 	// mention, which the router treats as "AI stays silent -- they're
 	// calling out another person, not us".
-	humanParticipants, _ := c.findActiveHumanParticipants(ctx, spaceId)
+	humanParticipants, _ := c.findActiveHumanParticipants(ctx, partitionId)
 	mentionRefs := make([]polyphon.ParticipantRef, 0, len(candidates)+len(humanParticipants))
 	for _, cand := range candidates {
 		mentionRefs = append(mentionRefs, polyphon.ParticipantRef{
@@ -304,7 +304,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 
 	// Classify utterance intent.
 	var prevEntry *polyphon.TranscriptEntry
-	if session := c.scoreEngine.Sessions().Get(spaceId); session != nil {
+	if session := c.scoreEngine.Sessions().Get(partitionId); session != nil {
 		recent := session.RecentTranscript(1)
 		if len(recent) > 0 {
 			prevEntry = &recent[len(recent)-1]
@@ -410,7 +410,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// transcript window plus session memory, so its routing call
 	// is more contextually grounded than the router's narrower view.
 	isVoiceUtteranceEarly := isVoiceUtterance(scoringUtterance.Source)
-	session := c.scoreEngine.Sessions().Get(spaceId)
+	session := c.scoreEngine.Sessions().Get(partitionId)
 	if fp := c.tryFastPathDispatch(scoringUtterance, candidates, session); fp != nil {
 		routeOutcome = fp
 	}
@@ -486,7 +486,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			}
 		}
 		g.Go(func() error {
-			lastAgentText := mostRecentAgentText(c.scoreEngine, spaceId)
+			lastAgentText := mostRecentAgentText(c.scoreEngine, partitionId)
 			roster := agentRosterFromCandidates(candidates)
 			var shortCircuited bool
 			classification, shortCircuited = c.classifier.ClassifyWithShortCircuit(
@@ -495,7 +495,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			classificationOK = true
 			if shortCircuited {
 				c.Logger.Info("cognition: messageClassification short-circuit",
-					"spaceId", spaceId,
+					"partitionId", partitionId,
 					"utteranceId", utterance.ID,
 					"addressedAgentName", classification.AddressedAgentName,
 					"reason", classification.Reasoning,
@@ -507,19 +507,19 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 
 	// Goroutines B-E: Context loading (parallel with router).
 	g.Go(func() error {
-		participants, participantsErr = c.getParticipantsForPromptCached(gCtx, spaceId)
+		participants, participantsErr = c.getParticipantsForPromptCached(gCtx, partitionId)
 		return nil
 	})
 	g.Go(func() error {
-		recentUtterances, utterancesErr = c.getRecentUtterancesForPromptCached(gCtx, spaceId, clampInt(historyLimit, 10, 30))
+		recentUtterances, utterancesErr = c.getRecentUtterancesForPromptCached(gCtx, partitionId, clampInt(historyLimit, 10, 30))
 		return nil
 	})
 	g.Go(func() error {
-		sInfo = c.getSpaceInfoCached(gCtx, spaceId)
+		sInfo = c.getSpaceInfoCached(gCtx, partitionId)
 		return nil
 	})
 	g.Go(func() error {
-		attachmentSummaries = c.getAttachmentsForPromptCached(gCtx, spaceId)
+		attachmentSummaries = c.getAttachmentsForPromptCached(gCtx, partitionId)
 		return nil
 	})
 
@@ -549,7 +549,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// the time and they shouldn't trip an agent reply.
 	if runClassifier && classificationOK {
 		c.Logger.Info("cognition: messageClassification",
-			"spaceId", spaceId,
+			"partitionId", partitionId,
 			"utteranceId", utterance.ID,
 			"intent", classification.Intent,
 			"carriesAction", classification.CarriesAction,
@@ -611,13 +611,13 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 
 		if shouldSuppress {
 			c.Logger.Info("cognition: suppressing dispatch (classifier ack)",
-				"spaceId", spaceId,
+				"partitionId", partitionId,
 				"utteranceId", utterance.ID,
 				"intent", classification.Intent,
 				"reason", suppressReason,
 				"text", scoringUtterance.Text)
 			for _, ap := range aiParticipants {
-				_ = c.upsertParticipantPresence(ctx, spaceId, ap.ID,
+				_ = c.upsertParticipantPresence(ctx, partitionId, ap.ID,
 					presenceStateIdle, "Idle", "", utterance.ID, "", nil)
 			}
 			return
@@ -671,7 +671,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		}
 		c.Logger.Warn("cognition: AI router failed, falling back to heuristic",
 			"error", routeErr, "heuristicWinner", heuristicWinner,
-			"spaceId", spaceId, "routeMs", routeMs)
+			"partitionId", partitionId, "routeMs", routeMs)
 	} else if routeOutcome != nil {
 		if !routeOutcome.Respond {
 			// First-class "silence" outcome: presence returns to idle for
@@ -680,14 +680,14 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			// response utterance. Never emit error-state presence here --
 			// silence is the correct answer, not a failure.
 			for _, ap := range aiParticipants {
-				_ = c.upsertParticipantPresence(ctx, spaceId, ap.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
+				_ = c.upsertParticipantPresence(ctx, partitionId, ap.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
 			}
 			reason := ""
 			if routeOutcome.Winner != nil {
 				reason = routeOutcome.Winner.Reason
 			}
 			c.Logger.Info("cognition: router chose silence",
-				"spaceId", spaceId, "utteranceId", utterance.ID,
+				"partitionId", partitionId, "utteranceId", utterance.ID,
 				"reason", reason, "routeMs", routeMs,
 				"tookMs", time.Since(start).Milliseconds())
 			return
@@ -707,7 +707,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		if addressed := polyphonDirectAddressWinner(decision, candidates); addressed != nil &&
 			aiWinner != nil && !strings.EqualFold(addressed.AgentId, aiWinner.AgentId) {
 			c.Logger.Warn("cognition: AI router contradicted direct-address, overriding",
-				"spaceId", spaceId,
+				"partitionId", partitionId,
 				"aiRouterChose", aiWinner.AgentName,
 				"aiRouterReason", aiWinner.Reason,
 				"polyphonDirectAddress", addressed.AgentName)
@@ -717,7 +717,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		}
 
 		c.Logger.Info("cognition: AI router selected agent",
-			"spaceId", spaceId, "aiWinner", aiWinner.AgentName,
+			"partitionId", partitionId, "aiWinner", aiWinner.AgentName,
 			"aiReason", aiWinner.Reason, "toolsNeeded", aiWinner.ToolsNeeded,
 			"handoff", routeOutcome.Handoff, "handoffFrom", routeOutcome.HandoffFrom,
 			"routeMs", routeMs)
@@ -731,7 +731,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		// didn't have an opinion" -- and we leaked the full tool list
 		// either way.
 		ctx = contextWithToolsNeeded(ctx, aiWinner.ToolsNeeded)
-		if session := c.scoreEngine.Sessions().Get(spaceId); session != nil {
+		if session := c.scoreEngine.Sessions().Get(partitionId); session != nil {
 			session.SetAddressedAgent(aiWinner.AgentId)
 		}
 		if routeOutcome.Handoff {
@@ -748,13 +748,13 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		// leaves them staring at a typing indicator forever. Idle is
 		// honest -- nobody picked this up.
 		for _, ap := range aiParticipants {
-			_ = c.upsertParticipantPresence(ctx, spaceId, ap.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
+			_ = c.upsertParticipantPresence(ctx, partitionId, ap.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
 		}
 		// Promote the no-winner trace to INFO so it's visible without
 		// flipping log level. Operators investigating "why didn't
 		// anybody respond?" need this in default logs, not debug.
 		c.Logger.Info("cognition: no winner produced by heuristic or AI router; staying silent",
-			"spaceId", spaceId, "utteranceId", utterance.ID,
+			"partitionId", partitionId, "utteranceId", utterance.ID,
 			"confidence", decision.Confidence, "tookMs", time.Since(start).Milliseconds(),
 			"hint", "consider adding a general-assistant to the space, or lowering the fit threshold via MEMQL_COGNITION_FIT_THRESHOLD")
 		return
@@ -773,7 +773,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		}
 	}
 	if winnerParticipant == nil {
-		c.Logger.Warn("cognition: winner participant not found", "winnerId", winnerParticipantId, "spaceId", spaceId)
+		c.Logger.Warn("cognition: winner participant not found", "winnerId", winnerParticipantId, "partitionId", partitionId)
 		return
 	}
 
@@ -796,7 +796,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	proceed, releaseGate, gateErr := c.dispatchGate.tryDispatch(ctx, utterance.ID)
 	if gateErr != nil {
 		c.Logger.Warn("cognition: dispatch gate errored; failing safe and proceeding",
-			"error", gateErr, "spaceId", spaceId, "utteranceId", utterance.ID)
+			"error", gateErr, "partitionId", partitionId, "utteranceId", utterance.ID)
 	}
 	if !proceed {
 		// Another cognition replica owns this utterance's turn. Bail without
@@ -804,32 +804,32 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		// the winner's thinking/idle transitions; the loser staying silent
 		// avoids presence flicker from two writers.
 		c.Logger.Debug("cognition: another replica owns this utterance's dispatch, skipping",
-			"spaceId", spaceId, "utteranceId", utterance.ID)
+			"partitionId", partitionId, "utteranceId", utterance.ID)
 		return
 	}
 	defer releaseGate()
 
 	// Idempotency: skip if we've already responded to this utterance.
-	if c.queryHasAIResponseForReply(ctx, spaceId, winnerParticipant.ID, utterance.ID) {
+	if c.queryHasAIResponseForReply(ctx, partitionId, winnerParticipant.ID, utterance.ID) {
 		c.Logger.Debug("cognition: AI response already exists, skipping",
-			"spaceId", spaceId, "replyToId", utterance.ID)
-		_ = c.upsertParticipantPresence(ctx, spaceId, winnerParticipant.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
+			"partitionId", partitionId, "replyToId", utterance.ID)
+		_ = c.upsertParticipantPresence(ctx, partitionId, winnerParticipant.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
 		return
 	}
 
 	// Set non-winning agents to waiting, winner to thinking.
 	for _, ap := range aiParticipants {
 		if ap.ID != winnerParticipantId {
-			_ = c.upsertParticipantPresence(ctx, spaceId, ap.ID, presenceStateWaiting, "Waiting", "Another agent is responding", utterance.ID, "", nil)
+			_ = c.upsertParticipantPresence(ctx, partitionId, ap.ID, presenceStateWaiting, "Waiting", "Another agent is responding", utterance.ID, "", nil)
 		}
 	}
-	_ = c.upsertParticipantPresence(ctx, spaceId, winnerParticipant.ID, presenceStateThinking, "Thinking…", "", utterance.ID, "", nil)
+	_ = c.upsertParticipantPresence(ctx, partitionId, winnerParticipant.ID, presenceStateThinking, "Thinking…", "", utterance.ID, "", nil)
 
 	// Resolve agent config from pre-loaded map.
 	agent := agentConfigs[winnerParticipant.ID]
 	if agent == nil {
-		c.Logger.Error("cognition: failed to get agent config", "agentId", winnerParticipant.AgentId, "spaceId", spaceId)
-		_ = c.upsertParticipantPresence(ctx, spaceId, winnerParticipant.ID, presenceStateError, "Error", "Failed to load agent configuration.", utterance.ID, "", nil)
+		c.Logger.Error("cognition: failed to get agent config", "agentId", winnerParticipant.AgentId, "partitionId", partitionId)
+		_ = c.upsertParticipantPresence(ctx, partitionId, winnerParticipant.ID, presenceStateError, "Error", "Failed to load agent configuration.", utterance.ID, "", nil)
 		return
 	}
 	if participantsErr != nil {
@@ -852,10 +852,10 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		}
 	}
 
-	// Inject tool defaults so that tool calls receive spaceId and
+	// Inject tool defaults so that tool calls receive partitionId and
 	// participantId even if the AI model omits them.
 	defaults := map[string]any{
-		"spaceId":       spaceId,
+		"partitionId":       partitionId,
 		"participantId": winnerParticipant.ID,
 	}
 	// Inject workspace for claw-capable agents.
@@ -890,7 +890,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 				if count > 1 {
 					displayLabel = fmt.Sprintf("Working on %d tasks", count)
 				}
-				_ = c.upsertParticipantPresence(ctx, spaceId, winnerParticipant.ID,
+				_ = c.upsertParticipantPresence(ctx, partitionId, winnerParticipant.ID,
 					presenceStateWorking, displayLabel, event.ToolName, utterance.ID, "", meta)
 
 				// Start heartbeat goroutine for long-running claw tools (Step 4).
@@ -914,7 +914,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 							"activeTaskCount": cnt,
 							"activeTaskLabel": tLabel,
 						}
-						_ = c.upsertParticipantPresence(hCtx, spaceId, winnerParticipant.ID,
+						_ = c.upsertParticipantPresence(hCtx, partitionId, winnerParticipant.ID,
 							presenceStateWorking, heartbeatLabel, "", utterance.ID, "", hMeta)
 					case <-hCtx.Done():
 						return
@@ -936,7 +936,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 								"activeTaskCount": cnt,
 								"activeTaskLabel": tLabel,
 							}
-							_ = c.upsertParticipantPresence(hCtx, spaceId, winnerParticipant.ID,
+							_ = c.upsertParticipantPresence(hCtx, partitionId, winnerParticipant.ID,
 								presenceStateWorking, heartbeatLabel, "", utterance.ID, "", hMeta)
 						case <-hCtx.Done():
 							return
@@ -948,7 +948,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 				if count > 1 {
 					displayLabel = fmt.Sprintf("Working on %d tasks", count)
 				}
-				_ = c.upsertParticipantPresence(ctx, spaceId, winnerParticipant.ID,
+				_ = c.upsertParticipantPresence(ctx, partitionId, winnerParticipant.ID,
 					presenceStateUsingTool, displayLabel, "", utterance.ID, "", meta)
 			}
 
@@ -968,14 +968,14 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 				if count > 1 {
 					displayLabel = fmt.Sprintf("Working on %d tasks", count)
 				}
-				_ = c.upsertParticipantPresence(ctx, spaceId, winnerParticipant.ID,
+				_ = c.upsertParticipantPresence(ctx, partitionId, winnerParticipant.ID,
 					presenceStateWorking, displayLabel, "", utterance.ID, "", meta)
 			} else {
 				meta := map[string]any{
 					"activeTaskCount": 0,
 					"activeTaskLabel": "",
 				}
-				_ = c.upsertParticipantPresence(ctx, spaceId, winnerParticipant.ID,
+				_ = c.upsertParticipantPresence(ctx, partitionId, winnerParticipant.ID,
 					presenceStateTyping, "Typing...", "", utterance.ID, "", meta)
 			}
 		}
@@ -990,15 +990,15 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		earlyTextInserted = true
 		// Early ack is its own (short, non-streaming) utterance, so it
 		// gets a freshly-minted id rather than sharing replyId.
-		if insertErr := c.insertAIResponse(ctx, spaceId, winnerParticipant, "", utterance.ID, text, nil, nil, nil); insertErr != nil {
+		if insertErr := c.insertAIResponse(ctx, partitionId, winnerParticipant, "", utterance.ID, text, nil, nil, nil); insertErr != nil {
 			c.Logger.Warn("cognition: failed to insert early acknowledgment", "error", insertErr)
 		} else {
 			c.Logger.Info("cognition: early acknowledgment emitted",
-				"spaceId", spaceId,
+				"partitionId", partitionId,
 				"textLen", len(text),
 			)
 		}
-		_ = c.upsertParticipantPresence(ctx, spaceId, winnerParticipant.ID,
+		_ = c.upsertParticipantPresence(ctx, partitionId, winnerParticipant.ID,
 			presenceStateWorking, "Working...", "", utterance.ID, "", nil)
 	})
 
@@ -1026,7 +1026,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		ctx = contextWithTurnMode(ctx, routeOutcome.TurnMode)
 		ctx = contextWithFitScore(ctx, routeOutcome.FitScore)
 	}
-	if session := c.scoreEngine.Sessions().Get(spaceId); session != nil {
+	if session := c.scoreEngine.Sessions().Get(partitionId); session != nil {
 		ctx = contextWithHandoffChainDepth(ctx, session.GetHandoffChainDepth())
 	}
 
@@ -1099,7 +1099,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// is this a real takeover or a parallel response?) and routes
 	// them through to the prompt as structured flags so the agent
 	// doesn't have to re-derive them from prompt context.
-	conductorState := c.conductors.GetOrCreate(spaceId)
+	conductorState := c.conductors.GetOrCreate(partitionId)
 	conductorState.RecordHumanSpoke()
 	primaryDirective := BuildDirective(
 		conductorState,
@@ -1137,7 +1137,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			// unified flow.
 			primaryInstruction = strings.TrimSpace(winnerPlan.Instruction)
 			c.Logger.Info("conductor: primary mismatch (post-unification fallback)",
-				"spaceId", spaceId,
+				"partitionId", partitionId,
 				"dispatchedWinner", winnerParticipant.ID,
 				"conductorPrimary", plan.PrimaryAgentId())
 		}
@@ -1225,14 +1225,14 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			if voiceGroundingEnabled() {
 				grounding = c.retrieveVoiceGroundingBlock(ctx, scoringUtterance.Text, agent.domains())
 			}
-			c.publishVoiceGateDirective(ctx, spaceId, utterance.ID, VoiceGateDecision{
+			c.publishVoiceGateDirective(ctx, partitionId, utterance.ID, VoiceGateDecision{
 				Engage: true, Mode: gateMode, Brevity: gateBrevity, Reason: "voice_engage",
 			}, grounding)
 			if c.Logger != nil {
 				c.Logger.Info("voice trace: gate directive published",
 					"voiceTrace", utterance.ID,
 					"stage", "cognition.gate.engage",
-					"spaceId", spaceId,
+					"partitionId", partitionId,
 					"agentName", winner.AgentName,
 					"mode", gateMode,
 					"brevity", gateBrevity)
@@ -1240,14 +1240,14 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			// Reset the winner's presence so it does not stick in a thinking state
 			// now that cognition no longer authors the voice reply (the model speaks,
 			// and the realtime output capture lands the utterance row).
-			_ = c.upsertParticipantPresence(ctx, spaceId, winnerParticipant.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
+			_ = c.upsertParticipantPresence(ctx, partitionId, winnerParticipant.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
 			return
 		}
 		if c.Logger != nil {
 			c.Logger.Info("voice trace: agent tool loop engaged (A2)",
 				"voiceTrace", utterance.ID,
 				"stage", "cognition.toolloop.engage",
-				"spaceId", spaceId,
+				"partitionId", partitionId,
 				"agentName", winner.AgentName)
 		}
 	}
@@ -1270,7 +1270,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		c.Logger.Info("voice trace: agent llm start",
 			"voiceTrace", utterance.ID,
 			"stage", "cognition.agent.start",
-			"spaceId", spaceId,
+			"partitionId", partitionId,
 			"agentName", winner.AgentName,
 			"routeMs", routeMs,
 			"handlerOffsetMs", time.Since(start).Milliseconds(),
@@ -1279,7 +1279,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	if c.agentForwarder != nil {
 		var fwd agentReplyResult
 		fwd, err = c.forwardTurnToAgent(ctx, agent, "utterance",
-			spaceId, winnerParticipant.ID, replyId, history, sInfo, attachmentSummaries,
+			partitionId, winnerParticipant.ID, replyId, history, sInfo, attachmentSummaries,
 			disableTools, allAgentPayloads, humanParticipants, utterance.ParticipantId,
 			primaryDirective, isVoice)
 		response = fwd.text
@@ -1296,9 +1296,9 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		// generated. Time-to-first-audio drops from "wait for full
 		// reply + one TTS round-trip" (~3-4s) to "first sentence
 		// boundary + streaming-TTS first chunk" (~1-1.5s).
-		voiceMode := resolveAgentAudioMode(ctx, c, spaceId, winnerParticipant.AgentId, agent)
+		voiceMode := resolveAgentAudioMode(ctx, c, partitionId, winnerParticipant.AgentId, agent)
 		if voiceMode == "mirror_user" {
-			if c.allHumansMuted(ctx, spaceId) {
+			if c.allHumansMuted(ctx, partitionId) {
 				voiceMode = "always_off"
 			} else {
 				voiceMode = "always_on"
@@ -1312,23 +1312,23 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		voiceStreamed = voiceMode != "always_off" && !voiceAgentToolLoopEnabled()
 		if voiceStreamed {
 			voiceModelResolved := resolveAgentVoice(agent)
-			response, err = c.generateVoiceStreaming(ctx, agent, "utterance", spaceId,
+			response, err = c.generateVoiceStreaming(ctx, agent, "utterance", partitionId,
 				winner.AgentName, voiceModelResolved, participants, history, sInfo, attachmentSummaries)
 			if err != nil {
 				c.Logger.Warn("cognition: voice streaming failed; falling back to batch",
-					"error", err, "spaceId", spaceId)
+					"error", err, "partitionId", partitionId)
 				voiceStreamed = false
-				response, err = c.generateAIResponse(ctx, agent, "utterance", spaceId, participants, recentUtterances, history, sInfo, attachmentSummaries, allAgentPayloads...)
+				response, err = c.generateAIResponse(ctx, agent, "utterance", partitionId, participants, recentUtterances, history, sInfo, attachmentSummaries, allAgentPayloads...)
 			}
 		} else {
 			// always_off -- chat-only, skip bridge dispatch.
-			response, err = c.generateAIResponse(ctx, agent, "utterance", spaceId, participants, recentUtterances, history, sInfo, attachmentSummaries, allAgentPayloads...)
+			response, err = c.generateAIResponse(ctx, agent, "utterance", partitionId, participants, recentUtterances, history, sInfo, attachmentSummaries, allAgentPayloads...)
 		}
 	} else {
-		result, streamErr := c.generateStreaming(ctx, agent, "utterance", spaceId, winnerParticipant.ID, replyId, participants, history, sInfo, attachmentSummaries)
+		result, streamErr := c.generateStreaming(ctx, agent, "utterance", partitionId, winnerParticipant.ID, replyId, participants, history, sInfo, attachmentSummaries)
 		if streamErr != nil {
 			c.Logger.Warn("cognition: streaming failed, falling back to sync", "error", streamErr)
-			response, err = c.generateAIResponse(ctx, agent, "utterance", spaceId, participants, recentUtterances, history, sInfo, attachmentSummaries, allAgentPayloads...)
+			response, err = c.generateAIResponse(ctx, agent, "utterance", partitionId, participants, recentUtterances, history, sInfo, attachmentSummaries, allAgentPayloads...)
 		} else {
 			response = result.Text
 		}
@@ -1338,10 +1338,10 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		// If we already emitted an early acknowledgment, send an error follow-up.
 		// Pass "" for replyId -- this is its own (non-streaming) utterance.
 		if earlyTextInserted {
-			_ = c.insertAIResponse(ctx, spaceId, winnerParticipant, "", utterance.ID,
+			_ = c.insertAIResponse(ctx, partitionId, winnerParticipant, "", utterance.ID,
 				"Sorry, I ran into an issue while working on that. Let me know if you'd like me to try again.", nil, nil, nil)
 		}
-		_ = c.upsertParticipantPresence(ctx, spaceId, winnerParticipant.ID, presenceStateError, "Error", "Having trouble generating a reply.", utterance.ID, err.Error(), nil)
+		_ = c.upsertParticipantPresence(ctx, partitionId, winnerParticipant.ID, presenceStateError, "Error", "Having trouble generating a reply.", utterance.ID, err.Error(), nil)
 		c.Logger.Error("cognition: failed to generate AI response", "error", err)
 		return
 	}
@@ -1351,7 +1351,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		c.Logger.Info("voice trace: agent llm complete",
 			"voiceTrace", utterance.ID,
 			"stage", "cognition.agent.complete",
-			"spaceId", spaceId,
+			"partitionId", partitionId,
 			"agentName", winner.AgentName,
 			"agentLlmMs", time.Since(llmStart).Milliseconds(),
 			"responseChars", len(response),
@@ -1367,7 +1367,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	if isVoice {
 		respondingLabel = "Speaking…"
 	}
-	_ = c.upsertParticipantPresence(ctx, spaceId, winnerParticipant.ID, presenceStateResponding, respondingLabel, "", utterance.ID, "", nil)
+	_ = c.upsertParticipantPresence(ctx, partitionId, winnerParticipant.ID, presenceStateResponding, respondingLabel, "", utterance.ID, "", nil)
 
 	// Build response source metadata.
 	var responseSource map[string]string
@@ -1386,7 +1386,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		if voiceStreamed {
 			c.Logger.Info("voice trace: streaming dispatched -- skipping single-shot TTS",
 				"voiceTrace", utterance.ID,
-				"spaceId", spaceId,
+				"partitionId", partitionId,
 				"agentName", winner.AgentName,
 			)
 		} else {
@@ -1432,7 +1432,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	}
 
 	c.Logger.Info("cognition: AI response generated",
-		"spaceId", spaceId,
+		"partitionId", partitionId,
 		"replyToId", utterance.ID,
 		"winner", winner.AgentName,
 		"score", winner.TotalScore,
@@ -1450,8 +1450,8 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		// Use the replyId minted upstream so the committed utterance.id
 		// matches the chunks' replyId -- the frontend keys one bubble
 		// across the streaming/commit transition.
-		if err := c.insertAIResponse(bgCtx, spaceId, winnerParticipant, replyId, utterance.ID, response, responseSource, responseCitations, responseRetrieved); err != nil {
-			c.Logger.Error("cognition: failed to insert AI response (async)", "error", err, "spaceId", spaceId)
+		if err := c.insertAIResponse(bgCtx, partitionId, winnerParticipant, replyId, utterance.ID, response, responseSource, responseCitations, responseRetrieved); err != nil {
+			c.Logger.Error("cognition: failed to insert AI response (async)", "error", err, "partitionId", partitionId)
 		}
 	}()
 
@@ -1462,7 +1462,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// "Nova told a joke twice" failure mode. The chime-in + sequence
 	// chains already call RecordAgentSpoke at their end-of-iteration;
 	// the primary path was the only gap.
-	if conductorState := c.conductors.Get(spaceId); conductorState != nil && agent != nil {
+	if conductorState := c.conductors.Get(partitionId); conductorState != nil && agent != nil {
 		conductorState.RecordAgentSpoke(agent.ID)
 	}
 
@@ -1490,7 +1490,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			case <-time.After(time.Duration(holdMs) * time.Millisecond):
 			}
 		}
-		_ = c.upsertParticipantPresence(bgCtx, spaceId, winnerParticipant.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
+		_ = c.upsertParticipantPresence(bgCtx, partitionId, winnerParticipant.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
 	}()
 
 	// Broadcast chime-in chain: when the user opens with a greeting
@@ -1527,10 +1527,10 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// continuation after the chain finishes.
 	switch {
 	case conductorPlan != nil && conductorPlan.HasSequence():
-		go c.runConductorSequence(bgCtx, spaceId, utterance.ID,
+		go c.runConductorSequence(bgCtx, partitionId, utterance.ID,
 			winnerParticipant.ID, conductorPlan, aiParticipants, agentConfigs, sInfo)
 	case conductorPlan != nil && len(conductorPlan.ChimeIns) > 0:
-		go c.runConductorChimeInChain(bgCtx, spaceId, utterance.ID,
+		go c.runConductorChimeInChain(bgCtx, partitionId, utterance.ID,
 			winnerParticipant.ID, conductorPlan, aiParticipants, agentConfigs, sInfo)
 	case conductorPlan == nil:
 		if fire, maxN, minScore := shouldFireChimeIns(scoringUtterance, candidates); fire {
@@ -1538,21 +1538,21 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			// per-agent score gate. candidates carry agent metadata
 			// (name, role, tools, etc.); scores carry the polyphon
 			// scorer's verdict on each one.
-			go c.runChimeInChain(bgCtx, spaceId, utterance.ID,
+			go c.runChimeInChain(bgCtx, partitionId, utterance.ID,
 				winnerParticipant.ID, decision.Scores, aiParticipants,
 				agentConfigs, sInfo, maxN, minScore)
 		} else {
-			c.resetWaitingPresence(bgCtx, spaceId, utterance.ID, winnerParticipant.ID, aiParticipants)
+			c.resetWaitingPresence(bgCtx, partitionId, utterance.ID, winnerParticipant.ID, aiParticipants)
 		}
 	default:
 		// No post-primary dispatch (conductor present but produced no
 		// sequence and no chime-ins). Reset Waiting peers to Idle so
 		// the UI doesn't stick.
-		c.resetWaitingPresence(bgCtx, spaceId, utterance.ID, winnerParticipant.ID, aiParticipants)
+		c.resetWaitingPresence(bgCtx, partitionId, utterance.ID, winnerParticipant.ID, aiParticipants)
 	}
 
 	go func() {
-		shouldContinue, nextAgent := c.scoreEngine.RecordAgentResponse(spaceId, winnerParticipant.ID, agent.Name, response, candidates)
+		shouldContinue, nextAgent := c.scoreEngine.RecordAgentResponse(partitionId, winnerParticipant.ID, agent.Name, response, candidates)
 		if !shouldContinue || nextAgent == nil {
 			return
 		}
@@ -1563,10 +1563,10 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		}
 
 		// Guard: respect MaxConsecutiveAgentTurns.
-		session := c.scoreEngine.Sessions().Get(spaceId)
+		session := c.scoreEngine.Sessions().Get(partitionId)
 		if session != nil && session.AgentTurnsSinceHuman() >= 2 {
 			c.Logger.Debug("cognition: continuation suppressed (max agent turns)",
-				"spaceId", spaceId, "turns", session.AgentTurnsSinceHuman())
+				"partitionId", partitionId, "turns", session.AgentTurnsSinceHuman())
 			return
 		}
 
@@ -1584,15 +1584,15 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		// supersede us during the delay? recordLatestHumanUtterance
 		// updates per-space; if we're no longer the latest, the new
 		// handler will route the continuation if appropriate.
-		if !c.isLatestHumanUtterance(spaceId, utterance.ID) {
+		if !c.isLatestHumanUtterance(partitionId, utterance.ID) {
 			c.Logger.Debug("cognition: continuation cancelled (new utterance arrived)",
-				"spaceId", spaceId, "utteranceId", utterance.ID,
+				"partitionId", partitionId, "utteranceId", utterance.ID,
 				"continuationAgent", nextAgent.AgentName)
 			return
 		}
 
 		c.Logger.Info("cognition: triggering continuation",
-			"spaceId", spaceId,
+			"partitionId", partitionId,
 			"continuationAgent", nextAgent.AgentName,
 			"primaryAgent", winner.AgentName)
 
@@ -1618,30 +1618,30 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		}
 
 		// Set presence: continuation agent is thinking.
-		_ = c.upsertParticipantPresence(bgCtx, spaceId, contParticipant.ID,
+		_ = c.upsertParticipantPresence(bgCtx, partitionId, contParticipant.ID,
 			presenceStateThinking, "Thinking...", "", utterance.ID, "", nil)
 
 		// Generate continuation response.
 		contResponse, contErr := c.generateAIResponse(bgCtx, contAgent, "continuation",
-			spaceId, participants, recentUtterances, history, sInfo, attachmentSummaries, allAgentPayloads...)
+			partitionId, participants, recentUtterances, history, sInfo, attachmentSummaries, allAgentPayloads...)
 		if contErr != nil {
-			c.Logger.Warn("cognition: continuation response failed", "error", contErr, "spaceId", spaceId)
-			_ = c.upsertParticipantPresence(bgCtx, spaceId, contParticipant.ID,
+			c.Logger.Warn("cognition: continuation response failed", "error", contErr, "partitionId", partitionId)
+			_ = c.upsertParticipantPresence(bgCtx, partitionId, contParticipant.ID,
 				presenceStateIdle, "Idle", "", utterance.ID, "", nil)
 			return
 		}
 
 		// Insert continuation response. Non-streaming path -> pass "" so
 		// insertAIResponse mints a fresh utterance id.
-		if err := c.insertAIResponse(bgCtx, spaceId, contParticipant, "", utterance.ID, contResponse, nil, nil, nil); err != nil {
-			c.Logger.Error("cognition: failed to insert continuation response", "error", err, "spaceId", spaceId)
+		if err := c.insertAIResponse(bgCtx, partitionId, contParticipant, "", utterance.ID, contResponse, nil, nil, nil); err != nil {
+			c.Logger.Error("cognition: failed to insert continuation response", "error", err, "partitionId", partitionId)
 		}
 
-		_ = c.upsertParticipantPresence(bgCtx, spaceId, contParticipant.ID,
+		_ = c.upsertParticipantPresence(bgCtx, partitionId, contParticipant.ID,
 			presenceStateIdle, "Idle", "", utterance.ID, "", nil)
 
 		c.Logger.Info("cognition: continuation response generated",
-			"spaceId", spaceId,
+			"partitionId", partitionId,
 			"continuationAgent", nextAgent.AgentName,
 			"responseLen", len(contResponse))
 	}()
@@ -1660,7 +1660,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			// The utterance ID for the response will be generated by insertAIResponse.
 			// For now, just log success -- full storage requires the response utterance ID.
 			_ = embedding
-			c.Logger.Debug("cognition: response embedded for semantic context", "spaceId", spaceId, "embeddingDims", len(embedding))
+			c.Logger.Debug("cognition: response embedded for semantic context", "partitionId", partitionId, "embeddingDims", len(embedding))
 		}()
 	}
 
@@ -1678,7 +1678,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 
 	// Trigger context compaction in background (debounced, max every 30s).
 	go func() {
-		session := c.scoreEngine.Sessions().Get(spaceId)
+		session := c.scoreEngine.Sessions().Get(partitionId)
 		if session == nil {
 			return
 		}
@@ -1820,7 +1820,7 @@ func deriveSelectionReason(winner *polyphon.AgentScore) string {
 // handleHeartbeatAction dispatches proactive actions from the heartbeat evaluator.
 // Currently handles re-engagement after extended silence. Other action types
 // (notify, proactive) are logged as foundations for follow-up implementation.
-func (c *CognitionIntegration) handleHeartbeatAction(ctx context.Context, spaceId string, action polyphon.HeartbeatAction, aiParticipants []*participantPayload) {
+func (c *CognitionIntegration) handleHeartbeatAction(ctx context.Context, partitionId string, action polyphon.HeartbeatAction, aiParticipants []*participantPayload) {
 	switch action.Type {
 	case "re-engage":
 		// Find the agent participant record.
@@ -1837,7 +1837,7 @@ func (c *CognitionIntegration) handleHeartbeatAction(ctx context.Context, spaceI
 
 		// Generate a gentle re-engagement message.
 		c.Logger.Info("cognition: heartbeat re-engagement",
-			"spaceId", spaceId,
+			"partitionId", partitionId,
 			"agent", action.AgentName,
 			"reason", action.Reason,
 		)
@@ -1850,7 +1850,7 @@ func (c *CognitionIntegration) handleHeartbeatAction(ctx context.Context, spaceI
 	case "notify":
 		// FUTURE: Surface pending notifications via the appropriate agent.
 		c.Logger.Debug("cognition: heartbeat notification (not yet implemented)",
-			"spaceId", spaceId,
+			"partitionId", partitionId,
 			"agent", action.AgentName,
 			"reason", action.Reason,
 		)
@@ -1866,7 +1866,7 @@ func (c *CognitionIntegration) handleHeartbeatAction(ctx context.Context, spaceI
 		// turn whose result posts back as a follow-up action
 		// utterance. The chat thread continues unaffected -- this is
 		// the "agents do background work while chatting" model.
-		c.dispatchReactiveTopic(ctx, spaceId, action, aiParticipants)
+		c.dispatchReactiveTopic(ctx, partitionId, action, aiParticipants)
 	}
 }
 
@@ -1877,10 +1877,10 @@ func (c *CognitionIntegration) handleHeartbeatAction(ctx context.Context, spaceI
 // best-effort: failures log but do not affect the primary chat flow.
 //
 // The dispatch is gated by an in-memory de-dup map keyed on
-// (spaceId, agentId, topic) so the same heartbeat tick doesn't fire
+// (partitionId, agentId, topic) so the same heartbeat tick doesn't fire
 // the same investigation twice in a row, and so two consecutive
 // ticks with the same prediction don't pile on.
-func (c *CognitionIntegration) dispatchReactiveTopic(ctx context.Context, spaceId string, action polyphon.HeartbeatAction, aiParticipants []*participantPayload) {
+func (c *CognitionIntegration) dispatchReactiveTopic(ctx context.Context, partitionId string, action polyphon.HeartbeatAction, aiParticipants []*participantPayload) {
 	if c == nil || strings.TrimSpace(action.AgentId) == "" {
 		return
 	}
@@ -1899,13 +1899,13 @@ func (c *CognitionIntegration) dispatchReactiveTopic(ctx context.Context, spaceI
 	}
 	if agentParticipant == nil {
 		c.Logger.Debug("cognition: reactive dispatch skipped (agent not in space)",
-			"spaceId", spaceId, "agentId", action.AgentId)
+			"partitionId", partitionId, "agentId", action.AgentId)
 		return
 	}
 
 	// De-dup: avoid stacking the same investigation if the heartbeat
 	// fires the same prediction multiple ticks in a row.
-	dedupKey := fmt.Sprintf("%s|%s|%s", spaceId, action.AgentId, topic)
+	dedupKey := fmt.Sprintf("%s|%s|%s", partitionId, action.AgentId, topic)
 	c.reactiveDispatchMu.Lock()
 	if last, ok := c.reactiveDispatchAt[dedupKey]; ok && time.Since(last) < reactiveDispatchCooldown {
 		c.reactiveDispatchMu.Unlock()
@@ -1915,7 +1915,7 @@ func (c *CognitionIntegration) dispatchReactiveTopic(ctx context.Context, spaceI
 	c.reactiveDispatchMu.Unlock()
 
 	c.Logger.Info("cognition: reactive dispatch firing",
-		"spaceId", spaceId,
+		"partitionId", partitionId,
 		"agent", action.AgentName,
 		"topic", topic,
 	)
@@ -1926,19 +1926,19 @@ func (c *CognitionIntegration) dispatchReactiveTopic(ctx context.Context, spaceI
 		// Set presence to `researching` so the UI can show a quiet
 		// background-activity indicator distinct from the typing
 		// indicator. The chat lane stays available.
-		_ = c.upsertParticipantPresence(bgCtx, spaceId, agentParticipant.ID,
+		_ = c.upsertParticipantPresence(bgCtx, partitionId, agentParticipant.ID,
 			presenceStateResearching, "Researching…",
 			fmt.Sprintf("Looking into %s", topic), "", "", nil)
 
 		// Action utterance #1: in-flight ("X is investigating Y").
 		notice := fmt.Sprintf("%s is looking into %s in the background.", action.AgentName, topic)
-		if err := c.insertSystemActionUtterance(bgCtx, spaceId, agentParticipant.ID,
+		if err := c.insertSystemActionUtterance(bgCtx, partitionId, agentParticipant.ID,
 			"reactive_dispatch_start", notice, map[string]string{
 				"agentName": action.AgentName,
 				"topic":     topic,
 			}); err != nil {
 			c.Logger.Debug("cognition: reactive in-flight notice failed",
-				"error", err, "spaceId", spaceId)
+				"error", err, "partitionId", partitionId)
 		}
 
 		// Run a topic-investigation generation. We don't load the
@@ -1951,8 +1951,8 @@ func (c *CognitionIntegration) dispatchReactiveTopic(ctx context.Context, spaceI
 		agent, err := c.getAgentCached(bgCtx, agentParticipant.AgentId)
 		if err != nil || agent == nil {
 			c.Logger.Warn("cognition: reactive dispatch agent load failed",
-				"error", err, "spaceId", spaceId, "agentId", agentParticipant.AgentId)
-			_ = c.upsertParticipantPresence(bgCtx, spaceId, agentParticipant.ID,
+				"error", err, "partitionId", partitionId, "agentId", agentParticipant.AgentId)
+			_ = c.upsertParticipantPresence(bgCtx, partitionId, agentParticipant.ID,
 				presenceStateIdle, "Idle", "", "", "", nil)
 			return
 		}
@@ -1973,7 +1973,7 @@ func (c *CognitionIntegration) dispatchReactiveTopic(ctx context.Context, spaceI
 				"systemPrompt": "",
 			},
 			"space": map[string]any{
-				"id": spaceId,
+				"id": partitionId,
 			},
 			"history":         []map[string]any{},
 			"selectionReason": fmt.Sprintf("background investigation of: %s", topic),
@@ -1981,12 +1981,12 @@ func (c *CognitionIntegration) dispatchReactiveTopic(ctx context.Context, spaceI
 		}
 
 		result, invokeErr := c.engine.InvokeAI(bgCtx, "agentReply", data)
-		_ = c.upsertParticipantPresence(bgCtx, spaceId, agentParticipant.ID,
+		_ = c.upsertParticipantPresence(bgCtx, partitionId, agentParticipant.ID,
 			presenceStateIdle, "Idle", "", "", "", nil)
 
 		if invokeErr != nil {
 			c.Logger.Warn("cognition: reactive investigation failed",
-				"error", invokeErr, "spaceId", spaceId, "agent", action.AgentName)
+				"error", invokeErr, "partitionId", partitionId, "agent", action.AgentName)
 			return
 		}
 
@@ -2005,7 +2005,7 @@ func (c *CognitionIntegration) dispatchReactiveTopic(ctx context.Context, spaceI
 		reply = strings.TrimSpace(reply)
 		if reply == "" {
 			c.Logger.Debug("cognition: reactive investigation produced no text",
-				"spaceId", spaceId, "agent", action.AgentName)
+				"partitionId", partitionId, "agent", action.AgentName)
 			return
 		}
 
@@ -2018,18 +2018,18 @@ func (c *CognitionIntegration) dispatchReactiveTopic(ctx context.Context, spaceI
 		}
 
 		finding := fmt.Sprintf("%s — %s", action.AgentName, reply)
-		if err := c.insertSystemActionUtterance(bgCtx, spaceId, agentParticipant.ID,
+		if err := c.insertSystemActionUtterance(bgCtx, partitionId, agentParticipant.ID,
 			"reactive_dispatch_result", finding, map[string]string{
 				"agentName": action.AgentName,
 				"topic":     topic,
 			}); err != nil {
 			c.Logger.Warn("cognition: reactive result notice failed",
-				"error", err, "spaceId", spaceId)
+				"error", err, "partitionId", partitionId)
 			return
 		}
 
 		c.Logger.Info("cognition: reactive dispatch complete",
-			"spaceId", spaceId, "agent", action.AgentName,
+			"partitionId", partitionId, "agent", action.AgentName,
 			"topic", topic, "replyLen", len(reply))
 	}()
 }
@@ -2129,21 +2129,21 @@ func isTranscriptOnlyRealtimeUtterance(source map[string]string) bool {
 
 // findAllAIParticipants returns all active AI participants in a space.
 // Delegates to the spaceParticipants MemQL query function.
-func (c *CognitionIntegration) findAllAIParticipants(ctx context.Context, spaceId string) ([]*participantPayload, error) {
-	return c.findParticipantsByType(ctx, spaceId, "si")
+func (c *CognitionIntegration) findAllAIParticipants(ctx context.Context, partitionId string) ([]*participantPayload, error) {
+	return c.findParticipantsByType(ctx, partitionId, "si")
 }
 
 // findActiveHumanParticipants returns all active human participants in a space.
 // Used for @mention resolution so the router can distinguish "@Stella" (agent
 // addressee -> agent responds) from "@Alice" (human addressee -> AI silent).
-func (c *CognitionIntegration) findActiveHumanParticipants(ctx context.Context, spaceId string) ([]*participantPayload, error) {
-	return c.findParticipantsByType(ctx, spaceId, "human")
+func (c *CognitionIntegration) findActiveHumanParticipants(ctx context.Context, partitionId string) ([]*participantPayload, error) {
+	return c.findParticipantsByType(ctx, partitionId, "human")
 }
 
 // findParticipantsByType is the shared implementation behind the AI / human
 // participant lookups. participantType should be "si" or "human".
-func (c *CognitionIntegration) findParticipantsByType(ctx context.Context, spaceId, participantType string) ([]*participantPayload, error) {
-	query := fmt.Sprintf(`querySpaceParticipants({spaceId: "%s", participantType: "%s", status: "active"})`, spaceId, participantType)
+func (c *CognitionIntegration) findParticipantsByType(ctx context.Context, partitionId, participantType string) ([]*participantPayload, error) {
+	query := fmt.Sprintf(`querySpaceParticipants({partitionId: "%s", participantType: "%s", status: "active"})`, partitionId, participantType)
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("execute query: %w", err)
@@ -2240,8 +2240,8 @@ func isVoiceUtterance(source map[string]string) bool {
 // caller treats "always_off" as the suppression signal; the other
 // two fall through to publication today (mirror_user becomes
 // mic-state-aware in a follow-up).
-func resolveAgentAudioMode(ctx context.Context, c *CognitionIntegration, spaceId, agentId string, agent *agentPayload) string {
-	override := c.lookupAudioOverride(ctx, spaceId, agentId)
+func resolveAgentAudioMode(ctx context.Context, c *CognitionIntegration, partitionId, agentId string, agent *agentPayload) string {
+	override := c.lookupAudioOverride(ctx, partitionId, agentId)
 	if override != "" {
 		return override
 	}
@@ -2263,14 +2263,14 @@ func resolveAgentAudioMode(ctx context.Context, c *CognitionIntegration, spaceId
 // Stale rows older than micStateStaleAfter are ignored -- a user
 // who closed the tab without untoggling shouldn't pin every agent
 // silent forever. The next user mic event will write a fresh row.
-func (c *CognitionIntegration) allHumansMuted(ctx context.Context, spaceId string) bool {
-	if c == nil || c.engine == nil || strings.TrimSpace(spaceId) == "" {
+func (c *CognitionIntegration) allHumansMuted(ctx context.Context, partitionId string) bool {
+	if c == nil || c.engine == nil || strings.TrimSpace(partitionId) == "" {
 		return false
 	}
-	q := fmt.Sprintf(`queryUserMicStatesForSpace({spaceId: %q})`, spaceId)
+	q := fmt.Sprintf(`queryUserMicStatesForSpace({partitionId: %q})`, partitionId)
 	res, err := c.engine.Execute(ctx, q)
 	if err != nil {
-		c.Logger.Debug("cognition: mic state lookup failed (non-fatal)", "error", err, "spaceId", spaceId)
+		c.Logger.Debug("cognition: mic state lookup failed (non-fatal)", "error", err, "partitionId", partitionId)
 		// On query failure default to NOT-all-muted so we don't
 		// accidentally silence the agent. The user reading the
 		// response in chat is the safety net either way.
@@ -2340,14 +2340,14 @@ func parseMicStateUpdatedAt(v any) time.Time {
 // errors so the agent default still applies -- the gating layer
 // must never silently default to a strict-suppress on transient
 // query failures.
-func (c *CognitionIntegration) lookupAudioOverride(ctx context.Context, spaceId, agentId string) string {
-	if c == nil || c.engine == nil || strings.TrimSpace(spaceId) == "" || strings.TrimSpace(agentId) == "" {
+func (c *CognitionIntegration) lookupAudioOverride(ctx context.Context, partitionId, agentId string) string {
+	if c == nil || c.engine == nil || strings.TrimSpace(partitionId) == "" || strings.TrimSpace(agentId) == "" {
 		return ""
 	}
-	q := fmt.Sprintf(`queryAudioOverridesForSpace({spaceId: %q})`, spaceId)
+	q := fmt.Sprintf(`queryAudioOverridesForSpace({partitionId: %q})`, partitionId)
 	res, err := c.engine.Execute(ctx, q)
 	if err != nil {
-		c.Logger.Debug("cognition: audio override lookup failed (non-fatal)", "error", err, "spaceId", spaceId)
+		c.Logger.Debug("cognition: audio override lookup failed (non-fatal)", "error", err, "partitionId", partitionId)
 		return ""
 	}
 	rows, ok := res.([]any)
@@ -2655,7 +2655,7 @@ func shouldFireChimeIns(utterance polyphon.Utterance, candidates []polyphon.Agen
 // order is "next-best fit first."
 func (c *CognitionIntegration) runChimeInChain(
 	bgCtx context.Context,
-	spaceId string,
+	partitionId string,
 	originatingUtteranceId string,
 	primaryWinnerParticipantId string,
 	scores []polyphon.AgentScore,
@@ -2683,7 +2683,7 @@ func (c *CognitionIntegration) runChimeInChain(
 	}
 
 	// Pull conductor state once for the quiet-agent bias check below.
-	conductorState := c.conductors.Get(spaceId)
+	conductorState := c.conductors.Get(partitionId)
 
 	// First pass: collect every eligible candidate (excluding the
 	// primary winner + agents below the score gate). Tag each with
@@ -2753,7 +2753,7 @@ func (c *CognitionIntegration) runChimeInChain(
 	}
 
 	c.Logger.Info("cognition: chime-in chain starting",
-		"spaceId", spaceId,
+		"partitionId", partitionId,
 		"chimeInCount", len(chimeIns),
 		"maxN", maxN,
 		"minScore", minScore,
@@ -2785,21 +2785,21 @@ func (c *CognitionIntegration) runChimeInChain(
 		// worst failure mode here -- the chime-ins would be
 		// reacting to stale context the user has already moved
 		// past.
-		if !c.isLatestHumanUtterance(spaceId, originatingUtteranceId) {
+		if !c.isLatestHumanUtterance(partitionId, originatingUtteranceId) {
 			c.Logger.Debug("cognition: chime-in chain aborted (new utterance)",
-				"spaceId", spaceId, "remainingChimeIns", len(chimeIns)-i)
+				"partitionId", partitionId, "remainingChimeIns", len(chimeIns)-i)
 			return
 		}
 
 		c.Logger.Info("cognition: chime-in firing",
-			"spaceId", spaceId,
+			"partitionId", partitionId,
 			"chimeInIdx", i,
 			"agent", ci.name,
 			"score", ci.score,
 			"delay", delay.String())
 
 		// Set presence: the chime-in agent is thinking briefly.
-		_ = c.upsertParticipantPresence(bgCtx, spaceId, ci.participantId,
+		_ = c.upsertParticipantPresence(bgCtx, partitionId, ci.participantId,
 			presenceStateThinking, "Thinking…", "", originatingUtteranceId, "", nil)
 
 		// Generate the chime-in. Trigger="chimein" tells the prompt
@@ -2812,8 +2812,8 @@ func (c *CognitionIntegration) runChimeInChain(
 		// Reuse the standard prompt context build via the same
 		// caches the primary turn used. Latency is hidden by the
 		// staggered delay anyway.
-		participants, _ := c.getParticipantsForPromptCached(bgCtx, spaceId)
-		recentUtterances, _ := c.getRecentUtterancesForPromptCached(bgCtx, spaceId, 20)
+		participants, _ := c.getParticipantsForPromptCached(bgCtx, partitionId)
+		recentUtterances, _ := c.getRecentUtterancesForPromptCached(bgCtx, partitionId, 20)
 		history := buildHistoryFromRecentUtterances(recentUtterances, ci.participantId, participants)
 		var allAgentPayloads []*agentPayload
 		for _, ap := range aiParticipants {
@@ -2832,7 +2832,7 @@ func (c *CognitionIntegration) runChimeInChain(
 		// (e) skip room-announce (always; user has the panel).
 		// generateAIResponse uses context to receive it.
 		chimeInDirective := BuildDirective(
-			conductorStateOrNil(c, spaceId),
+			conductorStateOrNil(c, partitionId),
 			ci.agent.ID,
 			false, // isPrimaryWinner
 			true,  // isChimeIn
@@ -2851,19 +2851,19 @@ func (c *CognitionIntegration) runChimeInChain(
 		chimeInCtx := contextWithDirective(bgCtx, chimeInDirective)
 
 		response, err := c.generateAIResponse(chimeInCtx, ci.agent, "chimein",
-			spaceId, participants, recentUtterances, history, sInfo, nil, allAgentPayloads...)
+			partitionId, participants, recentUtterances, history, sInfo, nil, allAgentPayloads...)
 		if err != nil {
 			c.Logger.Warn("cognition: chime-in generation FAILED -- this is why peers don't appear in chat despite firing",
-				"error", err, "agent", ci.name, "spaceId", spaceId)
-			_ = c.upsertParticipantPresence(bgCtx, spaceId, ci.participantId,
+				"error", err, "agent", ci.name, "partitionId", partitionId)
+			_ = c.upsertParticipantPresence(bgCtx, partitionId, ci.participantId,
 				presenceStateIdle, "Idle", "", originatingUtteranceId, "", nil)
 			continue
 		}
 		if strings.TrimSpace(response) == "" {
 			c.Logger.Warn("cognition: chime-in generation returned EMPTY -- prompt rendered but produced no text",
-				"agent", ci.name, "spaceId", spaceId,
+				"agent", ci.name, "partitionId", partitionId,
 				"reason", "model returned empty completion or prompt was empty")
-			_ = c.upsertParticipantPresence(bgCtx, spaceId, ci.participantId,
+			_ = c.upsertParticipantPresence(bgCtx, partitionId, ci.participantId,
 				presenceStateIdle, "Idle", "", originatingUtteranceId, "", nil)
 			continue
 		}
@@ -2873,26 +2873,26 @@ func (c *CognitionIntegration) runChimeInChain(
 			ID:      ci.participantId,
 			AgentId: ci.agent.ID,
 		}
-		if insertErr := c.insertAIResponse(bgCtx, spaceId, participantPayloadForCi, "", originatingUtteranceId, response, nil, nil, nil); insertErr != nil {
+		if insertErr := c.insertAIResponse(bgCtx, partitionId, participantPayloadForCi, "", originatingUtteranceId, response, nil, nil, nil); insertErr != nil {
 			c.Logger.Warn("cognition: chime-in insert failed",
-				"error", insertErr, "agent", ci.name, "spaceId", spaceId)
+				"error", insertErr, "agent", ci.name, "partitionId", partitionId)
 		} else {
 			successfulFires++
 		}
-		_ = c.upsertParticipantPresence(bgCtx, spaceId, ci.participantId,
+		_ = c.upsertParticipantPresence(bgCtx, partitionId, ci.participantId,
 			presenceStateIdle, "Idle", "", originatingUtteranceId, "", nil)
 
 		// Record this agent's contribution in the conductor state so
 		// the next dispatch (this turn or next cycle) can see who's
 		// already participated. Phase 2 uses this to skip agents
 		// who've already chimed in.
-		if conductorState := c.conductors.Get(spaceId); conductorState != nil {
+		if conductorState := c.conductors.Get(partitionId); conductorState != nil {
 			conductorState.RecordAgentSpoke(ci.agent.ID)
 		}
 	}
 
 	c.Logger.Info("cognition: chime-in chain complete",
-		"spaceId", spaceId,
+		"partitionId", partitionId,
 		"rosterSize", len(chimeIns),
 		"successfulFires", successfulFires)
 }
@@ -2964,7 +2964,7 @@ func chimeInContentAngle(agent *agentPayload) string {
 // chain so the user experience is consistent.
 func (c *CognitionIntegration) runConductorChimeInChain(
 	bgCtx context.Context,
-	spaceId string,
+	partitionId string,
 	originatingUtteranceId string,
 	primaryWinnerParticipantId string,
 	plan *ConductorPlan,
@@ -2997,7 +2997,7 @@ func (c *CognitionIntegration) runConductorChimeInChain(
 			if chimeInIds[ap.ID] {
 				continue
 			}
-			_ = c.upsertParticipantPresence(bgCtx, spaceId, ap.ID,
+			_ = c.upsertParticipantPresence(bgCtx, partitionId, ap.ID,
 				presenceStateIdle, "Idle", "", originatingUtteranceId, "", nil)
 		}
 	}()
@@ -3015,13 +3015,13 @@ func (c *CognitionIntegration) runConductorChimeInChain(
 			if participantId == "" || participantId == primaryWinnerParticipantId {
 				continue
 			}
-			_ = c.upsertParticipantPresence(bgCtx, spaceId, participantId,
+			_ = c.upsertParticipantPresence(bgCtx, partitionId, participantId,
 				presenceStateIdle, "Idle", "", originatingUtteranceId, "", nil)
 		}
 	}()
 
 	c.Logger.Info("conductor: chime-in chain starting",
-		"spaceId", spaceId,
+		"partitionId", partitionId,
 		"chimeInCount", len(plan.ChimeIns),
 		"phase", plan.Phase,
 		"temperature", plan.Temperature)
@@ -3045,9 +3045,9 @@ func (c *CognitionIntegration) runConductorChimeInChain(
 		// Abort the chain if a new human utterance arrived during the
 		// delay -- continuing on stale context would be the worst
 		// failure mode.
-		if !c.isLatestHumanUtterance(spaceId, originatingUtteranceId) {
+		if !c.isLatestHumanUtterance(partitionId, originatingUtteranceId) {
 			c.Logger.Debug("conductor: chime-in chain aborted (new utterance)",
-				"spaceId", spaceId, "remaining", len(plan.ChimeIns)-i)
+				"partitionId", partitionId, "remaining", len(plan.ChimeIns)-i)
 			return
 		}
 
@@ -3061,7 +3061,7 @@ func (c *CognitionIntegration) runConductorChimeInChain(
 		}
 		if participant == nil {
 			c.Logger.Warn("conductor: chime-in agent not found in space (orphan presence reset)",
-				"spaceId", spaceId, "agentId", participantId)
+				"partitionId", partitionId, "agentId", participantId)
 			// participantId didn't match any aiParticipant -- can't
 			// meaningfully reset its presence (we don't know which
 			// participant it refers to). The defer-style sweep at the
@@ -3074,21 +3074,21 @@ func (c *CognitionIntegration) runConductorChimeInChain(
 		}
 		if agent == nil {
 			c.Logger.Warn("conductor: chime-in agent payload not loaded",
-				"spaceId", spaceId, "agentId", participantId)
+				"partitionId", partitionId, "agentId", participantId)
 			// Reset Waiting -> Idle so the UI doesn't stick. The defer
 			// sweep would also catch this, but resetting eagerly keeps
 			// the UI accurate during the rest of the chain.
-			_ = c.upsertParticipantPresence(bgCtx, spaceId, participant.ID,
+			_ = c.upsertParticipantPresence(bgCtx, partitionId, participant.ID,
 				presenceStateIdle, "Idle", "", originatingUtteranceId, "", nil)
 			continue
 		}
 
 		c.Logger.Info("conductor: chime-in firing",
-			"spaceId", spaceId, "idx", i, "agent", agent.Name,
+			"partitionId", partitionId, "idx", i, "agent", agent.Name,
 			"instruction", conductorTruncate(ci.Instruction, 80),
 			"delay", delay.String())
 
-		_ = c.upsertParticipantPresence(bgCtx, spaceId, participant.ID,
+		_ = c.upsertParticipantPresence(bgCtx, partitionId, participant.ID,
 			presenceStateThinking, "Thinking…", "", originatingUtteranceId, "", nil)
 
 		// Build a chime-in directive carrying the conductor's
@@ -3101,8 +3101,8 @@ func (c *CognitionIntegration) runConductorChimeInChain(
 
 		// Build context (participants/recent utterances/history) for
 		// the chime-in's prompt the same way the primary path does.
-		participants, _ := c.getParticipantsForPromptCached(bgCtx, spaceId)
-		recentUtterances, _ := c.getRecentUtterancesForPromptCached(bgCtx, spaceId, 20)
+		participants, _ := c.getParticipantsForPromptCached(bgCtx, partitionId)
+		recentUtterances, _ := c.getRecentUtterancesForPromptCached(bgCtx, partitionId, 20)
 		history := buildHistoryFromRecentUtterances(recentUtterances, participant.ID, participants)
 		var allAgentPayloads []*agentPayload
 		for _, ap := range aiParticipants {
@@ -3112,18 +3112,18 @@ func (c *CognitionIntegration) runConductorChimeInChain(
 		}
 
 		response, err := c.generateAIResponse(chimeInCtx, agent, "chimein",
-			spaceId, participants, recentUtterances, history, sInfo, nil, allAgentPayloads...)
+			partitionId, participants, recentUtterances, history, sInfo, nil, allAgentPayloads...)
 		if err != nil {
 			c.Logger.Warn("conductor: chime-in generation failed",
-				"error", err, "agent", agent.Name, "spaceId", spaceId)
-			_ = c.upsertParticipantPresence(bgCtx, spaceId, participant.ID,
+				"error", err, "agent", agent.Name, "partitionId", partitionId)
+			_ = c.upsertParticipantPresence(bgCtx, partitionId, participant.ID,
 				presenceStateIdle, "Idle", "", originatingUtteranceId, "", nil)
 			continue
 		}
 		if strings.TrimSpace(response) == "" {
 			c.Logger.Warn("conductor: chime-in generation returned empty",
-				"agent", agent.Name, "spaceId", spaceId)
-			_ = c.upsertParticipantPresence(bgCtx, spaceId, participant.ID,
+				"agent", agent.Name, "partitionId", partitionId)
+			_ = c.upsertParticipantPresence(bgCtx, partitionId, participant.ID,
 				presenceStateIdle, "Idle", "", originatingUtteranceId, "", nil)
 			continue
 		}
@@ -3132,27 +3132,27 @@ func (c *CognitionIntegration) runConductorChimeInChain(
 			ID:      participant.ID,
 			AgentId: agent.ID,
 		}
-		if insertErr := c.insertAIResponse(bgCtx, spaceId, participantPayloadForCi,
+		if insertErr := c.insertAIResponse(bgCtx, partitionId, participantPayloadForCi,
 			"", originatingUtteranceId, response, nil, nil, nil); insertErr != nil {
 			c.Logger.Warn("conductor: chime-in insert failed",
-				"error", insertErr, "agent", agent.Name, "spaceId", spaceId)
+				"error", insertErr, "agent", agent.Name, "partitionId", partitionId)
 		} else {
 			successfulFires++
 		}
-		_ = c.upsertParticipantPresence(bgCtx, spaceId, participant.ID,
+		_ = c.upsertParticipantPresence(bgCtx, partitionId, participant.ID,
 			presenceStateIdle, "Idle", "", originatingUtteranceId, "", nil)
 
-		if conductorState := c.conductors.Get(spaceId); conductorState != nil {
+		if conductorState := c.conductors.Get(partitionId); conductorState != nil {
 			conductorState.RecordAgentSpoke(agent.ID)
 		}
 	}
 
 	c.Logger.Info("conductor: chime-in chain complete",
-		"spaceId", spaceId,
+		"partitionId", partitionId,
 		"plannedCount", len(plan.ChimeIns),
 		"successfulFires", successfulFires)
 
-	c.continueIfBranchPointsDeclared(bgCtx, spaceId, originatingUtteranceId,
+	c.continueIfBranchPointsDeclared(bgCtx, partitionId, originatingUtteranceId,
 		primaryWinnerParticipantId, plan, aiParticipants, agentConfigs, sInfo)
 }
 
@@ -3165,11 +3165,11 @@ func (c *CognitionIntegration) runConductorChimeInChain(
 // Replaces previousAgentAskedQuestion -- the classifier no longer
 // needs a yes/no signal about whether the prior agent ended with
 // "?", it just gets the prior text and reasons about it.
-func mostRecentAgentText(scoreEngine *polyphon.ScoreEngine, spaceId string) string {
+func mostRecentAgentText(scoreEngine *polyphon.ScoreEngine, partitionId string) string {
 	if scoreEngine == nil {
 		return ""
 	}
-	session := scoreEngine.Sessions().Get(spaceId)
+	session := scoreEngine.Sessions().Get(partitionId)
 	if session == nil {
 		return ""
 	}
@@ -3345,7 +3345,7 @@ var voiceFillerWords = map[string]bool{
 // primary's response renders before the UI transitions back.
 func (c *CognitionIntegration) resetWaitingPresence(
 	bgCtx context.Context,
-	spaceId string,
+	partitionId string,
 	originatingUtteranceId string,
 	excludeParticipantId string,
 	aiParticipants []*participantPayload,
@@ -3360,7 +3360,7 @@ func (c *CognitionIntegration) resetWaitingPresence(
 			if ap == nil || ap.ID == excludeParticipantId {
 				continue
 			}
-			_ = c.upsertParticipantPresence(bgCtx, spaceId, ap.ID,
+			_ = c.upsertParticipantPresence(bgCtx, partitionId, ap.ID,
 				presenceStateIdle, "Idle", "", originatingUtteranceId, "", nil)
 		}
 	}()
@@ -3380,7 +3380,7 @@ func (c *CognitionIntegration) resetWaitingPresence(
 // presence sweep as runConductorChimeInChain.
 func (c *CognitionIntegration) runConductorSequence(
 	bgCtx context.Context,
-	spaceId string,
+	partitionId string,
 	originatingUtteranceId string,
 	primaryWinnerParticipantId string,
 	plan *ConductorPlan,
@@ -3411,7 +3411,7 @@ func (c *CognitionIntegration) runConductorSequence(
 			if ap.ID == primaryWinnerParticipantId || sequenceIds[ap.ID] {
 				continue
 			}
-			_ = c.upsertParticipantPresence(bgCtx, spaceId, ap.ID,
+			_ = c.upsertParticipantPresence(bgCtx, partitionId, ap.ID,
 				presenceStateIdle, "Idle", "", originatingUtteranceId, "", nil)
 		}
 	}()
@@ -3423,13 +3423,13 @@ func (c *CognitionIntegration) runConductorSequence(
 			if participantId == "" || participantId == primaryWinnerParticipantId {
 				continue
 			}
-			_ = c.upsertParticipantPresence(bgCtx, spaceId, participantId,
+			_ = c.upsertParticipantPresence(bgCtx, partitionId, participantId,
 				presenceStateIdle, "Idle", "", originatingUtteranceId, "", nil)
 		}
 	}()
 
 	c.Logger.Info("conductor: sequence chain starting",
-		"spaceId", spaceId,
+		"partitionId", partitionId,
 		"sequenceCount", len(plan.Sequence),
 		"phase", plan.Phase,
 		"temperature", plan.Temperature)
@@ -3449,9 +3449,9 @@ func (c *CognitionIntegration) runConductorSequence(
 			return
 		}
 
-		if !c.isLatestHumanUtterance(spaceId, originatingUtteranceId) {
+		if !c.isLatestHumanUtterance(partitionId, originatingUtteranceId) {
 			c.Logger.Debug("conductor: sequence aborted (new utterance)",
-				"spaceId", spaceId, "remaining", len(plan.Sequence)-i)
+				"partitionId", partitionId, "remaining", len(plan.Sequence)-i)
 			return
 		}
 
@@ -3464,7 +3464,7 @@ func (c *CognitionIntegration) runConductorSequence(
 		}
 		if participant == nil {
 			c.Logger.Warn("conductor: sequence agent not found in space",
-				"spaceId", spaceId, "agentId", participantId)
+				"partitionId", partitionId, "agentId", participantId)
 			continue
 		}
 		agent := agentConfigs[participant.ID]
@@ -3473,19 +3473,19 @@ func (c *CognitionIntegration) runConductorSequence(
 		}
 		if agent == nil {
 			c.Logger.Warn("conductor: sequence agent payload not loaded",
-				"spaceId", spaceId, "agentId", participantId)
-			_ = c.upsertParticipantPresence(bgCtx, spaceId, participant.ID,
+				"partitionId", partitionId, "agentId", participantId)
+			_ = c.upsertParticipantPresence(bgCtx, partitionId, participant.ID,
 				presenceStateIdle, "Idle", "", originatingUtteranceId, "", nil)
 			continue
 		}
 
 		c.Logger.Info("conductor: sequence firing",
-			"spaceId", spaceId, "idx", i, "agent", agent.Name,
+			"partitionId", partitionId, "idx", i, "agent", agent.Name,
 			"instruction", conductorTruncate(sp.Instruction, 80),
 			"acknowledgePrior", sp.AcknowledgePrior,
 			"delay", delay.String())
 
-		_ = c.upsertParticipantPresence(bgCtx, spaceId, participant.ID,
+		_ = c.upsertParticipantPresence(bgCtx, partitionId, participant.ID,
 			presenceStateThinking, "Thinking…", "", originatingUtteranceId, "", nil)
 
 		// Sequence agents get Mode=DirectivePrimary -- they're each
@@ -3493,8 +3493,8 @@ func (c *CognitionIntegration) runConductorSequence(
 		seqDirective := directiveFromConductorAgentPlan(plan, &sp, "sequence")
 		seqCtx := contextWithDirective(bgCtx, seqDirective)
 
-		participants, _ := c.getParticipantsForPromptCached(bgCtx, spaceId)
-		recentUtterances, _ := c.getRecentUtterancesForPromptCached(bgCtx, spaceId, 20)
+		participants, _ := c.getParticipantsForPromptCached(bgCtx, partitionId)
+		recentUtterances, _ := c.getRecentUtterancesForPromptCached(bgCtx, partitionId, 20)
 		history := buildHistoryFromRecentUtterances(recentUtterances, participant.ID, participants)
 		var allAgentPayloads []*agentPayload
 		for _, ap := range aiParticipants {
@@ -3504,18 +3504,18 @@ func (c *CognitionIntegration) runConductorSequence(
 		}
 
 		response, err := c.generateAIResponse(seqCtx, agent, "utterance",
-			spaceId, participants, recentUtterances, history, sInfo, nil, allAgentPayloads...)
+			partitionId, participants, recentUtterances, history, sInfo, nil, allAgentPayloads...)
 		if err != nil {
 			c.Logger.Warn("conductor: sequence generation failed",
-				"error", err, "agent", agent.Name, "spaceId", spaceId)
-			_ = c.upsertParticipantPresence(bgCtx, spaceId, participant.ID,
+				"error", err, "agent", agent.Name, "partitionId", partitionId)
+			_ = c.upsertParticipantPresence(bgCtx, partitionId, participant.ID,
 				presenceStateIdle, "Idle", "", originatingUtteranceId, "", nil)
 			continue
 		}
 		if strings.TrimSpace(response) == "" {
 			c.Logger.Warn("conductor: sequence generation returned empty",
-				"agent", agent.Name, "spaceId", spaceId)
-			_ = c.upsertParticipantPresence(bgCtx, spaceId, participant.ID,
+				"agent", agent.Name, "partitionId", partitionId)
+			_ = c.upsertParticipantPresence(bgCtx, partitionId, participant.ID,
 				presenceStateIdle, "Idle", "", originatingUtteranceId, "", nil)
 			continue
 		}
@@ -3524,27 +3524,27 @@ func (c *CognitionIntegration) runConductorSequence(
 			ID:      participant.ID,
 			AgentId: agent.ID,
 		}
-		if insertErr := c.insertAIResponse(bgCtx, spaceId, participantPayloadForSp,
+		if insertErr := c.insertAIResponse(bgCtx, partitionId, participantPayloadForSp,
 			"", originatingUtteranceId, response, nil, nil, nil); insertErr != nil {
 			c.Logger.Warn("conductor: sequence insert failed",
-				"error", insertErr, "agent", agent.Name, "spaceId", spaceId)
+				"error", insertErr, "agent", agent.Name, "partitionId", partitionId)
 		} else {
 			successfulFires++
 		}
-		_ = c.upsertParticipantPresence(bgCtx, spaceId, participant.ID,
+		_ = c.upsertParticipantPresence(bgCtx, partitionId, participant.ID,
 			presenceStateIdle, "Idle", "", originatingUtteranceId, "", nil)
 
-		if conductorState := c.conductors.Get(spaceId); conductorState != nil {
+		if conductorState := c.conductors.Get(partitionId); conductorState != nil {
 			conductorState.RecordAgentSpoke(agent.ID)
 		}
 	}
 
 	c.Logger.Info("conductor: sequence chain complete",
-		"spaceId", spaceId,
+		"partitionId", partitionId,
 		"plannedCount", len(plan.Sequence),
 		"successfulFires", successfulFires)
 
-	c.continueIfBranchPointsDeclared(bgCtx, spaceId, originatingUtteranceId,
+	c.continueIfBranchPointsDeclared(bgCtx, partitionId, originatingUtteranceId,
 		primaryWinnerParticipantId, plan, aiParticipants, agentConfigs, sInfo)
 }
 
@@ -3573,7 +3573,7 @@ func (c *CognitionIntegration) runConductorSequence(
 // sequence + chime-ins). Recursion is bounded by the iteration cap.
 func (c *CognitionIntegration) continueIfBranchPointsDeclared(
 	bgCtx context.Context,
-	spaceId string,
+	partitionId string,
 	originatingUtteranceId string,
 	primaryWinnerParticipantId string,
 	plan *ConductorPlan,
@@ -3588,25 +3588,25 @@ func (c *CognitionIntegration) continueIfBranchPointsDeclared(
 	if !hasCompletionCheck {
 		return
 	}
-	state := conductorStateOrNil(c, spaceId)
+	state := conductorStateOrNil(c, partitionId)
 	if state == nil {
 		return
 	}
 	if state.CurrentIteration() >= maxConductorIterations {
 		c.Logger.Info("conductor: completion-check re-invoke skipped (iteration cap)",
-			"spaceId", spaceId, "iterations", state.CurrentIteration(),
+			"partitionId", partitionId, "iterations", state.CurrentIteration(),
 			"cap", maxConductorIterations)
 		return
 	}
 	// Don't re-invoke if a new human utterance arrived during the
 	// chain. The fresh utterance kicks its own conductor consult on
 	// the normal path, so re-invoking here would race with that.
-	if !c.isLatestHumanUtterance(spaceId, originatingUtteranceId) {
+	if !c.isLatestHumanUtterance(partitionId, originatingUtteranceId) {
 		return
 	}
 
 	c.Logger.Info("conductor: completion-check re-invoke",
-		"spaceId", spaceId,
+		"partitionId", partitionId,
 		"branchCount", len(plan.BranchPoints),
 		"completionCriteria", conductorTruncate(plan.CompletionCriteria, 80),
 		"iteration", state.CurrentIteration())
@@ -3624,14 +3624,14 @@ func (c *CognitionIntegration) continueIfBranchPointsDeclared(
 
 		// One more abort check: the user might have spoken during the
 		// settle delay. Bail if so.
-		if !c.isLatestHumanUtterance(spaceId, originatingUtteranceId) {
+		if !c.isLatestHumanUtterance(partitionId, originatingUtteranceId) {
 			return
 		}
 
 		// Reload context. Transcript now includes the agents' chain
 		// responses, so the conductor sees what was just said.
-		participants, _ := c.getParticipantsForPromptCached(bgCtx, spaceId)
-		recentUtterances, _ := c.getRecentUtterancesForPromptCached(bgCtx, spaceId, 20)
+		participants, _ := c.getParticipantsForPromptCached(bgCtx, partitionId)
+		recentUtterances, _ := c.getRecentUtterancesForPromptCached(bgCtx, partitionId, 20)
 
 		// Build a synthetic Utterance for the consult. Reuse the
 		// originating utterance's metadata; the transcript carries
@@ -3640,7 +3640,7 @@ func (c *CognitionIntegration) continueIfBranchPointsDeclared(
 		for _, u := range recentUtterances {
 			if id, _ := u["id"].(string); id == originatingUtteranceId {
 				synthetic.ID = id
-				synthetic.ScopeId = spaceId
+				synthetic.ScopeId = partitionId
 				if t, _ := u["text"].(string); t != "" {
 					synthetic.Text = t
 				}
@@ -3683,18 +3683,18 @@ func (c *CognitionIntegration) continueIfBranchPointsDeclared(
 			agentConfigs, recentUtterances, sInfo, participants)
 		if err != nil || nextPlan == nil {
 			c.Logger.Info("conductor: branch-point re-invoke produced no plan",
-				"error", err, "spaceId", spaceId)
+				"error", err, "partitionId", partitionId)
 			return
 		}
 
 		// Empty plan -> conductor decided we're done. No dispatch.
 		if nextPlan.PrimaryAgentId() == "" && !nextPlan.HasSequence() && len(nextPlan.ChimeIns) == 0 {
 			c.Logger.Info("conductor: branch-point re-invoke -> plan complete",
-				"spaceId", spaceId)
+				"partitionId", partitionId)
 			return
 		}
 
-		c.dispatchContinuationPlan(bgCtx, spaceId, originatingUtteranceId,
+		c.dispatchContinuationPlan(bgCtx, partitionId, originatingUtteranceId,
 			nextPlan, aiParticipants, agentConfigs, sInfo)
 	}()
 }
@@ -3708,7 +3708,7 @@ func (c *CognitionIntegration) continueIfBranchPointsDeclared(
 // conductor's plan IS the routing).
 func (c *CognitionIntegration) dispatchContinuationPlan(
 	bgCtx context.Context,
-	spaceId string,
+	partitionId string,
 	originatingUtteranceId string,
 	plan *ConductorPlan,
 	aiParticipants []*participantPayload,
@@ -3723,7 +3723,7 @@ func (c *CognitionIntegration) dispatchContinuationPlan(
 	// dispatched Briar AGAIN to tell joke #2"). The conductor SHOULD
 	// produce plans that only target missing agents, but the LLM
 	// doesn't always honor that -- so we enforce it Go-side.
-	plan = c.filterAlreadySpokenFromContinuation(spaceId, plan, agentConfigs)
+	plan = c.filterAlreadySpokenFromContinuation(partitionId, plan, agentConfigs)
 	if plan == nil {
 		return
 	}
@@ -3753,17 +3753,17 @@ func (c *CognitionIntegration) dispatchContinuationPlan(
 			if agent != nil {
 				directive := directiveFromConductorAgentPlan(plan, &plan.Primary, "primary")
 				ctxWithDirective := contextWithDirective(bgCtx, directive)
-				participants, _ := c.getParticipantsForPromptCached(bgCtx, spaceId)
-				recentUtterances, _ := c.getRecentUtterancesForPromptCached(bgCtx, spaceId, 20)
+				participants, _ := c.getParticipantsForPromptCached(bgCtx, partitionId)
+				recentUtterances, _ := c.getRecentUtterancesForPromptCached(bgCtx, partitionId, 20)
 				history := buildHistoryFromRecentUtterances(recentUtterances, participant.ID, participants)
 				response, err := c.generateAIResponse(ctxWithDirective, agent, "utterance",
-					spaceId, participants, recentUtterances, history, sInfo, nil)
+					partitionId, participants, recentUtterances, history, sInfo, nil)
 				if err == nil && strings.TrimSpace(response) != "" {
-					_ = c.insertAIResponse(bgCtx, spaceId, &participantPayload{
+					_ = c.insertAIResponse(bgCtx, partitionId, &participantPayload{
 						ID:      participant.ID,
 						AgentId: agent.ID,
 					}, "", originatingUtteranceId, response, nil, nil, nil)
-					if state := conductorStateOrNil(c, spaceId); state != nil {
+					if state := conductorStateOrNil(c, partitionId); state != nil {
 						state.RecordAgentSpoke(agent.ID)
 					}
 				}
@@ -3773,11 +3773,11 @@ func (c *CognitionIntegration) dispatchContinuationPlan(
 
 	// Run sequence + chime-ins through the existing chain helpers.
 	if plan.HasSequence() {
-		c.runConductorSequence(bgCtx, spaceId, originatingUtteranceId,
+		c.runConductorSequence(bgCtx, partitionId, originatingUtteranceId,
 			primaryParticipantId, plan, aiParticipants, agentConfigs, sInfo)
 	}
 	if len(plan.ChimeIns) > 0 {
-		c.runConductorChimeInChain(bgCtx, spaceId, originatingUtteranceId,
+		c.runConductorChimeInChain(bgCtx, partitionId, originatingUtteranceId,
 			primaryParticipantId, plan, aiParticipants, agentConfigs, sInfo)
 	}
 }
@@ -3793,14 +3793,14 @@ func (c *CognitionIntegration) dispatchContinuationPlan(
 // so this filter applies ONLY within the lifetime of a single user
 // turn -- exactly the scope where re-dispatch produces duplicates.
 func (c *CognitionIntegration) filterAlreadySpokenFromContinuation(
-	spaceId string,
+	partitionId string,
 	plan *ConductorPlan,
 	agentConfigs map[string]*agentPayload,
 ) *ConductorPlan {
 	if plan == nil {
 		return nil
 	}
-	state := conductorStateOrNil(c, spaceId)
+	state := conductorStateOrNil(c, partitionId)
 	if state == nil {
 		return plan
 	}
@@ -3861,7 +3861,7 @@ func (c *CognitionIntegration) filterAlreadySpokenFromContinuation(
 	if plan.PrimaryAgentId() == "" && !plan.HasSequence() && len(plan.ChimeIns) == 0 {
 		if logger != nil {
 			logger.Info("conductor: continuation plan empty after filtering already-spoken agents",
-				"spaceId", spaceId)
+				"partitionId", partitionId)
 		}
 		return nil
 	}

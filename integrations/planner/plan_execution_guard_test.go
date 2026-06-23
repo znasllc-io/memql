@@ -145,7 +145,7 @@ func guardTestPlanResponder(planId, status string) func(query string) (any, erro
 				"kind":         "scopeElevation",
 				"status":       status,
 				"goal":         "install the tool on my machine",
-				"spaceId":      "v1:cognition:space:s1",
+				"partitionId":      "v1:cognition:space:s1",
 				"ownerAgentId": "v1:agents:agent:a1",
 				"requestedBy":  "v1:identity:user:u1",
 				"startedAt":    "2026-06-12T00:11:49Z",

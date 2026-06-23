@@ -73,7 +73,7 @@ builtin agentworkerRequestScope {
   summary         string  @required
   agentId         string  @required
   ownerUserId     string  @required
-  spaceId         string
+  partitionId         string
 }
 
 // ---- queries/v1/worker/builtin/builtinAgentworkerStatus.memql ----

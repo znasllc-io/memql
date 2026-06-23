@@ -115,8 +115,8 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"domains":     "array of string (required) -- the FULL new domain set; not a delta. Replaces the agent's current capabilities.domains.",
 				"tools":       "array of string (required) -- the FULL new tool set; replaces the agent's current capabilities.tools.",
 				"provider":    "string (optional) -- embedding provider name (default embedding3Small)",
-				"spaceId":     "string (optional) -- space to scope the Plan + cards to. When omitted, no Plan / Task records are created (useful for automation / DSL callers).",
-				"requestedBy": "string (optional) -- user id for actor + ownership on the Plan + cards. Required alongside spaceId for the bookkeeping path.",
+				"partitionId":     "string (optional) -- space to scope the Plan + cards to. When omitted, no Plan / Task records are created (useful for automation / DSL callers).",
+				"requestedBy": "string (optional) -- user id for actor + ownership on the Plan + cards. Required alongside partitionId for the bookkeeping path.",
 			},
 		},
 		{
@@ -165,14 +165,14 @@ func (i *Integration) trainAgentHandler(
 	if providerName == "" {
 		providerName = defaultEmbeddingProviderName
 	}
-	// Plan-lifecycle context: spaceId + requestedBy. Optional --
+	// Plan-lifecycle context: partitionId + requestedBy. Optional --
 	// when both are present the handler brackets the pipeline with
 	// a Plan + 3 Tasks + canvas cards (the CoPresent Training studio
 	// always passes them); when missing, the pipeline still runs and
 	// returns a summary, but no bookkeeping rows are created. This
 	// keeps automation / test callers from being forced to invent a
 	// space scope.
-	spaceId, _ := args["spaceId"].(string)
+	partitionId, _ := args["partitionId"].(string)
 	requestedBy, _ := args["requestedBy"].(string)
 
 	if i.engine == nil {
@@ -190,7 +190,7 @@ func (i *Integration) trainAgentHandler(
 		"domains", newDomains,
 		"tools", newTools,
 		"provider", providerName,
-		"spaceId", spaceId,
+		"partitionId", partitionId,
 		"requestedBy", requestedBy,
 	)
 
@@ -223,7 +223,7 @@ func (i *Integration) trainAgentHandler(
 	}
 
 	// 3. Open the Plan + 3 Tasks + plan.created card. lifecycle is
-	//    nil if spaceId / requestedBy were absent (graceful degrade);
+	//    nil if partitionId / requestedBy were absent (graceful degrade);
 	//    every lifecycle method is nil-safe so the pipeline below
 	//    doesn't have to fork.
 	// Compute removedDomains list now (we already have removedCount
@@ -235,7 +235,7 @@ func (i *Integration) trainAgentHandler(
 			removedDomainsList = append(removedDomainsList, d)
 		}
 	}
-	lifecycle := i.beginPlan(ctx, spaceId, requestedBy, agentId, agentName, addedDomains, removedDomainsList, newTools)
+	lifecycle := i.beginPlan(ctx, partitionId, requestedBy, agentId, agentName, addedDomains, removedDomainsList, newTools)
 
 	// 4. Step A (Task 0): eager-embed any chunks attached to NEW
 	//    domains, run the just-in-time seeder when a domain shell
@@ -447,7 +447,7 @@ func (i *Integration) trainAgentHandler(
 			identityRetryPlanId = i.enqueueRetryPlan(
 				ctx,
 				lifecycle.planId,
-				lifecycle.spaceId,
+				lifecycle.partitionId,
 				lifecycle.requestedBy,
 				agentId,
 				retryStepIdentityVector,
@@ -497,7 +497,7 @@ func (i *Integration) trainAgentHandler(
 			distillRetryPlanId = i.enqueueRetryPlan(
 				ctx,
 				lifecycle.planId,
-				lifecycle.spaceId,
+				lifecycle.partitionId,
 				lifecycle.requestedBy,
 				agentId,
 				retryStepDistillPrompt,

@@ -144,7 +144,7 @@ func newRealtimeExecutorForTest(t *testing.T, fs *fakeStream, rt *fakeRealtimeSe
 	c := newTestClient(t, fs)
 	sink := &recordingSink{}
 	e := NewRealtimeExecutor(context.Background(), CascadeConfig{
-		SpaceID:   "s1",
+		PartitionID:   "s1",
 		GaAgentID: "s1-ga",
 		Thread:    memqlv1.VoiceAgentTurnRequest_THREAD_CONTEXT_TEAM,
 	}, c, rt, sink, SessionPersona{Instructions: "be helpful", Voice: "marin"}, nil)
@@ -292,7 +292,7 @@ func TestRealtimeExecutor_OutputAudio_PublishedToSink(t *testing.T) {
 	rt := newFakeRealtimeSession()
 	sink := &recordingSink{}
 	c := newTestClient(t, fs)
-	e := NewRealtimeExecutor(context.Background(), CascadeConfig{SpaceID: "s1", GaAgentID: "s1-ga"},
+	e := NewRealtimeExecutor(context.Background(), CascadeConfig{PartitionID: "s1", GaAgentID: "s1-ga"},
 		c, rt, sink, SessionPersona{}, nil)
 	t.Cleanup(e.Close)
 	e.Start()
@@ -333,7 +333,7 @@ func TestRealtimeExecutor_OutputCapture_ForwardsTranscript(t *testing.T) {
 	}
 	c := newTestClient(t, fs)
 	rt := newFakeRealtimeSession()
-	e := NewRealtimeExecutor(context.Background(), CascadeConfig{SpaceID: "s1", GaAgentID: "s1-ga"},
+	e := NewRealtimeExecutor(context.Background(), CascadeConfig{PartitionID: "s1", GaAgentID: "s1-ga"},
 		c, rt, &recordingSink{}, SessionPersona{}, nil)
 	e.SetOutputForwarder(NewRealtimeOutputForwarder(c, "s1", "s1-ga", NewCitationResolver(GroundingContext{})))
 	t.Cleanup(e.Close)
@@ -361,7 +361,7 @@ func TestRealtimeExecutor_ToolBridge_DispatchesAndContinues(t *testing.T) {
 	fs := newFakeStream()
 	c := newTestClient(t, fs)
 	rt := newFakeRealtimeSession()
-	e := NewRealtimeExecutor(context.Background(), CascadeConfig{SpaceID: "s1", GaAgentID: "s1-ga"},
+	e := NewRealtimeExecutor(context.Background(), CascadeConfig{PartitionID: "s1", GaAgentID: "s1-ga"},
 		c, rt, &recordingSink{}, SessionPersona{}, nil)
 
 	transport := func(_ context.Context, _ string, _ map[string]any) (string, bool, error) {
@@ -461,7 +461,7 @@ func newRealtimeExecutorNoStart(t *testing.T, fs *fakeStream, rt *fakeRealtimeSe
 	c := newTestClient(t, fs)
 	sink := &recordingSink{}
 	e := NewRealtimeExecutor(context.Background(), CascadeConfig{
-		SpaceID:   "s1",
+		PartitionID:   "s1",
 		GaAgentID: "s1-ga",
 		Thread:    memqlv1.VoiceAgentTurnRequest_THREAD_CONTEXT_TEAM,
 	}, c, rt, sink, SessionPersona{Instructions: "be helpful", Voice: "marin"}, nil)

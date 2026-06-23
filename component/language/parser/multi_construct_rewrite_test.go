@@ -27,7 +27,7 @@ import (
 func TestRewriter_MultipleQueriesDifferentConcepts(t *testing.T) {
 	source := `@description("Active participants in a space.")
 query participant queryActiveParticipants {
-  filter participant.spaceId == args.spaceId
+  filter participant.partitionId == args.partitionId
   shape  participantFull
 }
 
@@ -75,9 +75,9 @@ mutation space mutationCreateSpace {
 
 @description("Add a participant to a space.")
 mutation participant mutationAddParticipant {
-  args { spaceId string @required; userId string @required }
+  args { partitionId string @required; userId string @required }
   insert {
-    spaceId: args.spaceId
+    partitionId: args.partitionId
     userId:  args.userId
   }
 }`

@@ -40,11 +40,11 @@ import (
 
 // keysetSpaceQuery pages a space's utterances newest-first. The space id is
 // already canonical (minted by mutationCreateSpace), so the FK comparison on
-// payload.spaceId matches the stored canonical value. The cursor rides the
+// payload.partitionId matches the stored canonical value. The cursor rides the
 // request via ExecutePaginated, not the query string.
 func keysetSpaceQuery(spaceID string, pageSize int) string {
 	return fmt.Sprintf(
-		`sort(paginate(concept==v1:cognition:utterance;payload.spaceId==%q, %d), "createdAt", "desc")`,
+		`sort(paginate(concept==v1:cognition:utterance;payload.partitionId==%q, %d), "createdAt", "desc")`,
 		spaceID, pageSize)
 }
 
@@ -91,7 +91,7 @@ func TestKeysetCursorCrossNode(t *testing.T) {
 		uid := "v1:cognition:utterance:" + id.NewShortId()
 		if _, err := qcA.MutationSendTextUtterance(ctx, memqlclient.MutationSendTextUtteranceArgs{
 			UtteranceId:     uid,
-			SpaceId:         spaceID,
+			PartitionId:         spaceID,
 			ParticipantId:   participantID,
 			ParticipantType: "human",
 			Text:            fmt.Sprintf("keyset cross-node probe %02d", i),

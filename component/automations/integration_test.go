@@ -456,7 +456,7 @@ func TestEvaluatorCompoundConditions(t *testing.T) {
 			"concept":         "v1:cognition:participant",
 			"participantType": "human",
 			"status":          "active",
-			"spaceId":         "space-456",
+			"partitionId":         "space-456",
 		},
 	})
 

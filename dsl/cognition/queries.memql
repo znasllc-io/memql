@@ -10,9 +10,9 @@ use cognition.concepts.{ audioOverride, participant, presence, session, space, u
 @unbounded("human participants in a space -- a bounded membership set consumed whole for routing")
 query participant queryActiveHumanParticipants {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
   }
-  filter  payload.spaceId==args.spaceId && payload.participantType=="human" && traitStatusIsActive
+  filter  payload.partitionId==args.partitionId && payload.participantType=="human" && traitStatusIsActive
   shape   participantFull
 }
 
@@ -38,9 +38,9 @@ query space queryActiveSpaces {
 @enabled
 @description("Returns id-only projections of every active v1:cognition:space row (no status / archived filtering -- mirrors the pre-existing recomputeAllSpacesContext semantics that just need non-deleted rows). Backs the cognition heartbeat path that iterates spaces to recompute per-space context (memql#287; replaces a handwritten shape() runtime query under sub-epic #286).")
 @unbounded("active space ids -- internal enumeration for dispatch/sweeps, consumed whole")
-query space queryActiveSpaceIds {
+query space queryActivePartitionIds {
   filter  traitIsActiveRecord
-  shape   spaceIdOnly
+  shape   partitionIdOnly
 }
 
 // queryLatestSpaceContextForSpace + queryLatestSpaceContextSnapshot
@@ -63,7 +63,7 @@ query space queryActiveSpaceIds {
 // first meeting and a brief warm intro is appropriate.
 //
 // Why this query exists: greetOnJoinAI's "have we already greeted?"
-// check is space-scoped (queryGreetingUtterance filters by spaceId).
+// check is space-scoped (queryGreetingUtterance filters by partitionId).
 // The over-introduction symptom -- agent re-introduces in every new
 // space even though the user has talked to them many times -- is
 // exactly that gap. This query is the partition-scoped counterpart
@@ -175,13 +175,13 @@ query space queryArchivedSpaces {
 @unbounded("owned space by id (guarded), gated to the owner -- bounded to a single row")
 query space queryOwnedSpaceById {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
   }
-  filter  when(args.spaceId) { id==args.spaceId } && payload.ownerUserId==actor.userId && traitIsActiveRecord
+  filter  when(args.partitionId) { id==args.partitionId } && payload.ownerUserId==actor.userId && traitIsActiveRecord
   shape   spaceFull
 }
 
-// The row's `spaceId` is auto-canonicalized to
+// The row's `partitionId` is auto-canonicalized to
 // `<partition>:v1:cognition:space:<slug>` on insert (concept's
 // @relationship annotation drives this). The frontend passes
 // whatever it has -- usually the bare slug. Canonicalize the
@@ -192,9 +192,9 @@ query space queryOwnedSpaceById {
 @unbounded("audio overrides for a space -- bounded by space participants, consumed whole")
 query audioOverride queryAudioOverridesForSpace {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
   }
-  filter  payload.spaceId==canonicalId(args.spaceId, space) && traitIsActiveRecord
+  filter  payload.partitionId==canonicalId(args.partitionId, space) && traitIsActiveRecord
   shape   audioOverrideFull
 }
 
@@ -244,17 +244,17 @@ query space queryExpiredArchivedSpaces {
 // in a specific space. Prevents duplicate greetings.
 //
 // Arguments:
-//   spaceId (string, required) - The space ID to check
+//   partitionId (string, required) - The space ID to check
 //   agentId (string, required) - The agent ID to check
 //
 // Returns:
 //   Array of utterance records (0 or more):
 //   - id: Utterance identifier
-//   - spaceId: Space identifier
+//   - partitionId: Space identifier
 //   - source: Object containing kind and agentId
 //
 // Usage:
-//   queryGreetingUtterance({spaceId: "space-123", agentId: "sofia"})
+//   queryGreetingUtterance({partitionId: "space-123", agentId: "sofia"})
 //
 
 @enabled
@@ -262,10 +262,10 @@ query space queryExpiredArchivedSpaces {
 @unbounded("the greeting utterance for (space,agent) -- bounded to a single row")
 query utterance queryGreetingUtterance {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
     agentId  string  @required
   }
-  filter  payload.spaceId==args.spaceId && payload.source.agentId==args.agentId && payload.source.kind in ["agentGreeting"] && traitIsActiveRecord
+  filter  payload.partitionId==args.partitionId && payload.source.agentId==args.agentId && payload.source.kind in ["agentGreeting"] && traitIsActiveRecord
   shape   utteranceFull
 }
 
@@ -295,7 +295,7 @@ query utterance queryFeedbackAnnouncementForPlan {
   shape   utteranceFull
 }
 
-// Callers MUST pass the canonical spaceId
+// Callers MUST pass the canonical partitionId
 // (`<partition>:v1:cognition:space:<slug>`). Using `canonicalId()`
 // inside this predicate triggers the executor's "unsupported
 // literal type *ast.CanonicalIdExpr" error path -- the SQL fast-
@@ -313,13 +313,13 @@ query utterance queryFeedbackAnnouncementForPlan {
 // + status is sufficient under v1 (each user has at most one
 // active AI participant per space; that's their GA).
 @enabled
-@description("Active AI (group GA) participant for a space. Callers must pass the canonical spaceId.")
+@description("Active AI (group GA) participant for a space. Callers must pass the canonical partitionId.")
 @unbounded("the GA/assistant participant for a space -- bounded to a single row")
 query participant queryGroupGAForSpace {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
   }
-  filter  payload.spaceId==args.spaceId && payload.participantType=="si" && traitStatusIsActive
+  filter  payload.partitionId==args.partitionId && payload.participantType=="si" && traitStatusIsActive
   shape   participantFull
 }
 
@@ -367,18 +367,18 @@ query utterance queryHasAIResponseForReply {
 // not silently excluded.
 //
 // Arguments:
-//   spaceId (string, required)  - The space ID to check
+//   partitionId (string, required)  - The space ID to check
 //   agentId (string, required)  - The agent ID to check
 //
 // Returns:
 //   Array of participant records (should be 0 or 1 record)
 //   - id: Participant identifier
-//   - spaceId: Space identifier
+//   - partitionId: Space identifier
 //   - agentId: Agent identifier
 //   - status: Participant status (excludes "left")
 //
 // Usage:
-//   queryParticipantByAgentSpace({spaceId: "space-123", agentId: "sofia"})
+//   queryParticipantByAgentSpace({partitionId: "space-123", agentId: "sofia"})
 //
 
 @enabled
@@ -386,10 +386,10 @@ query utterance queryHasAIResponseForReply {
 @unbounded("the participant for (space,agent) -- bounded to a single row")
 query participant queryParticipantByAgentSpace {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
     agentId  string  @required
   }
-  filter  payload.spaceId==args.spaceId && payload.agentId==args.agentId && payload.status!="left"
+  filter  payload.partitionId==args.partitionId && payload.agentId==args.agentId && payload.status!="left"
   shape   participantFull
 }
 
@@ -407,13 +407,13 @@ query participant queryParticipantByAgentSpace {
 // which tracks authorization and lifecycle.
 //
 // Arguments:
-//   spaceId (string, optional)       - Filter by space ID to get all sessions in a space.
+//   partitionId (string, optional)       - Filter by space ID to get all sessions in a space.
 //   participantId (string, optional) - Filter by specific participant ID.
 //
 // Returns:
 //   Array of session records with fields like:
 //   - id: Unique session identifier
-//   - session.spaceId: ID of the space this session belongs to
+//   - session.partitionId: ID of the space this session belongs to
 //   - session.participantId: ID of the participant this session tracks
 //   - session.activeTier: Current interaction tier (text, speechToText, voiceToVoice, voiceAvatar, voiceVision)
 //   - session.humanInput: Device states (microphoneEnabled, cameraEnabled)
@@ -424,20 +424,20 @@ query participant queryParticipantByAgentSpace {
 //
 // Usage:
 //   participantSession()                                      // Returns all sessions
-//   participantSession({"spaceId": "space-123"})              // Get all sessions in a space
+//   participantSession({"partitionId": "space-123"})              // Get all sessions in a space
 //   participantSession({"participantId": "participant-456"})  // Get session for specific participant
-//   participantSession({"spaceId": "space-123", "participantId": "participant-456"})  // Specific session
+//   participantSession({"partitionId": "space-123", "participantId": "participant-456"})  // Specific session
 //
 
 @enabled
-@description("Returns session state for participants in spaces. Optional filters: spaceId, participantId")
+@description("Returns session state for participants in spaces. Optional filters: partitionId, participantId")
 @unbounded("the participant session for (space,participant) -- bounded to a single row")
 query session queryParticipantSession {
   args {
-    spaceId  string
+    partitionId  string
     participantId  string
   }
-  filter  when(args.spaceId) { payload.spaceId==args.spaceId } && when(args.participantId) { payload.participantId==args.participantId }
+  filter  when(args.partitionId) { payload.partitionId==args.partitionId } && when(args.participantId) { payload.participantId==args.participantId }
   shape   sessionFull
 }
 
@@ -490,7 +490,7 @@ query space querySavedSpaces {
 // to identify which AI agent is responding in a space.
 //
 // Arguments:
-//   spaceId (string, required) - The space to search in
+//   partitionId (string, required) - The space to search in
 //
 // Returns:
 //   Array of AI participant records (typically 0 or 1)
@@ -500,9 +500,9 @@ query space querySavedSpaces {
 @unbounded("the assistant participant for a space -- bounded to a single row")
 query participant querySiParticipantForSpace {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
   }
-  filter  payload.spaceId==args.spaceId && payload.participantType=="si" && traitStatusIsActive
+  filter  payload.partitionId==args.partitionId && payload.participantType=="si" && traitStatusIsActive
   shape   participantFull
 }
 
@@ -525,7 +525,7 @@ query participant querySiParticipantForSpace {
 // resolve the now-retired `architecture` field.
 //
 // Arguments:
-//   spaceId (string, required) - The space ID to look up
+//   partitionId (string, required) - The space ID to look up
 //
 // Returns:
 //   Single shaped record (or empty) with name, description, status,
@@ -536,9 +536,9 @@ query participant querySiParticipantForSpace {
 @description("Returns the full space record by id.")
 query space querySpaceMeta {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
   }
-  filter  id==args.spaceId
+  filter  id==args.partitionId
   shape   spaceFull
 }
 
@@ -547,11 +547,11 @@ query space querySpaceMeta {
 @unbounded("participants in a space -- a bounded membership roster consumed whole")
 query participant querySpaceParticipants {
   args {
-    spaceId          string  @required
+    partitionId          string  @required
     status           string
     participantType  string
   }
-  filter  payload.spaceId==args.spaceId && when(args.status) { payload.status==args.status } && when(args.participantType) { payload.participantType==args.participantType }
+  filter  payload.partitionId==args.partitionId && when(args.status) { payload.status==args.status } && when(args.participantType) { payload.participantType==args.participantType }
   shape   participantFull
 }
 
@@ -569,11 +569,11 @@ query participant querySpaceParticipants {
 @cache(ttl="30")
 query utterance querySpaceUtterances {
   args {
-    spaceId          string  @required
+    partitionId          string  @required
     participantId    string
     utteranceType    string
   }
-  filter  payload.spaceId==args.spaceId && when(args.participantId) { payload.participantId==args.participantId } && when(args.utteranceType) { payload.utteranceType==args.utteranceType }
+  filter  payload.partitionId==args.partitionId && when(args.participantId) { payload.participantId==args.participantId } && when(args.utteranceType) { payload.utteranceType==args.utteranceType }
   // Pagination (5.2 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of the full message-history pull. The append-only
   // utterance stream is the canonical keyset-eligible shape. Literal page size
@@ -588,7 +588,7 @@ query utterance querySpaceUtterances {
 // (3.3b-i, memql#1991) along with the v1:cognition:micState concept
 // (ids preserved).
 
-// The row's `spaceId` is auto-canonicalized to
+// The row's `partitionId` is auto-canonicalized to
 // `<partition>:v1:cognition:space:<slug>` on insert (concept's
 // @relationship annotation drives this). The frontend passes
 // whatever it has -- usually the bare slug. Canonicalize the
@@ -599,9 +599,9 @@ query utterance querySpaceUtterances {
 @unbounded("video overrides for a space -- bounded by space participants, consumed whole")
 query videoOverride queryVideoOverridesForSpace {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
   }
-  filter  payload.spaceId==canonicalId(args.spaceId, space) && traitIsActiveRecord
+  filter  payload.partitionId==canonicalId(args.partitionId, space) && traitIsActiveRecord
   shape   videoOverrideFull
 }
 
@@ -627,9 +627,9 @@ query videoOverride queryVideoOverridesForSpace {
 @unbounded("presence rows for a space -- bounded by space participants, consumed whole")
 query presence querySpaceParticipantPresence {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
   }
-  filter  payload.spaceId==args.spaceId
+  filter  payload.partitionId==args.partitionId
   shape   presenceFull
 }
 

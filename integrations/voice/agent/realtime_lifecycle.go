@@ -139,8 +139,8 @@ func withWatchdogInterval(d time.Duration) realtimeLifecycleOption {
 	}
 }
 
-// withLifecycleSpaceID stamps the space id on the lifecycle's log lines.
-func withLifecycleSpaceID(spaceID string) realtimeLifecycleOption {
+// withLifecyclePartitionID stamps the space id on the lifecycle's log lines.
+func withLifecyclePartitionID(spaceID string) realtimeLifecycleOption {
 	return func(l *RealtimeSessionLifecycle) { l.spaceID = spaceID }
 }
 

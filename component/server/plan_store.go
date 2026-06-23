@@ -39,7 +39,7 @@ type PlanStore interface {
 // canvas card need to record the analysis lifecycle.
 type CreatePlanForAttachmentParams struct {
 	AttachmentId  string
-	SpaceId       string
+	PartitionId       string
 	FileName      string
 	RequestedBy   string
 	Transcription string // extracted text (populated by analyzer / handler)
@@ -80,8 +80,8 @@ func (s *EnginePlanStore) CreateQueuedAnalyzePlan(ctx context.Context, p CreateP
 	if strings.TrimSpace(p.AttachmentId) == "" {
 		return "", fmt.Errorf("attachmentId required")
 	}
-	if strings.TrimSpace(p.SpaceId) == "" {
-		return "", fmt.Errorf("spaceId required")
+	if strings.TrimSpace(p.PartitionId) == "" {
+		return "", fmt.Errorf("partitionId required")
 	}
 	if strings.TrimSpace(p.RequestedBy) == "" {
 		return "", fmt.Errorf("requestedBy required")
@@ -108,9 +108,9 @@ func (s *EnginePlanStore) CreateQueuedAnalyzePlan(ctx context.Context, p CreateP
 
 	// 1. Create the Plan in 'queued'.
 	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`mutationCreatePlan({"planId": %s, "spaceId": %s, "kind": "analyzeFile", "goal": %s, "requestedBy": %s, "triggerSource": "user.explicit", "input": {"attachmentId": %s, "fileName": %s}})`,
+		`mutationCreatePlan({"planId": %s, "partitionId": %s, "kind": "analyzeFile", "goal": %s, "requestedBy": %s, "triggerSource": "user.explicit", "input": {"attachmentId": %s, "fileName": %s}})`,
 		jsonString(planId),
-		jsonString(p.SpaceId),
+		jsonString(p.PartitionId),
 		jsonString(goal),
 		jsonString(p.RequestedBy),
 		jsonString(p.AttachmentId),
@@ -143,7 +143,7 @@ func (s *EnginePlanStore) CreateQueuedAnalyzePlan(ctx context.Context, p CreateP
 	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
 		`mutationCreateCanvasState({"stateId": %s, "space": %s, "kind": "card", "data": %s, "visibility": "private", "forUserId": %s, "actor": %s, "importance": "ambient"})`,
 		jsonString(createdStateId),
-		jsonString(p.SpaceId),
+		jsonString(p.PartitionId),
 		createdCardData,
 		jsonString(p.RequestedBy),
 		createdActor,
@@ -210,11 +210,11 @@ func (s *EnginePlanStore) CompleteAnalyzePlan(ctx context.Context, planId string
 	documentId := planId + ":document"
 	docFormat := pickDocumentFormat(p.MimeType)
 	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`mutationCreateDocument({"documentId": %s, "attachmentId": %s, "planId": %s, "spaceId": %s, "fileName": %s, "mimeType": %s, "format": %s, "summary": %s, "uploadedBy": %s})`,
+		`mutationCreateDocument({"documentId": %s, "attachmentId": %s, "planId": %s, "partitionId": %s, "fileName": %s, "mimeType": %s, "format": %s, "summary": %s, "uploadedBy": %s})`,
 		jsonString(documentId),
 		jsonString(p.AttachmentId),
 		jsonString(planId),
-		jsonString(p.SpaceId),
+		jsonString(p.PartitionId),
 		jsonString(p.FileName),
 		jsonString(p.MimeType),
 		jsonString(docFormat),
@@ -261,7 +261,7 @@ func (s *EnginePlanStore) CompleteAnalyzePlan(ctx context.Context, planId string
 	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
 		`mutationCreateCanvasState({"stateId": %s, "space": %s, "kind": "card", "data": %s, "visibility": "private", "forUserId": %s, "actor": %s, "importance": "ambient"})`,
 		jsonString(stateId),
-		jsonString(p.SpaceId),
+		jsonString(p.PartitionId),
 		cardData,
 		jsonString(p.RequestedBy),
 		actor,

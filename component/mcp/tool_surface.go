@@ -288,9 +288,9 @@ func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, name s
 	ctx = memql.WithStrictUnknownArgs(ctx)
 	// Flag this as an MCP-originated tool execution so applyToolDefaults
 	// preserves caller-supplied values for @autoInjected fields that have
-	// no server default (e.g. spaceId on recentChat -- no agent runtime is
+	// no server default (e.g. partitionId on recentChat -- no agent runtime is
 	// present on the MCP path to stamp the space). Over MCP the caller IS
-	// the authenticated user, so their spaceId is a legitimate input
+	// the authenticated user, so their partitionId is a legitimate input
 	// (memql#1684).
 	ctx = memql.WithMCPToolExecution(ctx)
 

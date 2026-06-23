@@ -239,7 +239,7 @@ func (r *Replier) runNonStreamingToolLoop(
 		PlanId:      turnCtx.PlanId,
 		AgentId:     turnCtx.AgentId,
 		OwnerUserId: turnCtx.OwnerUserId,
-		SpaceId:     turnCtx.SpaceId,
+		PartitionId:     turnCtx.PartitionId,
 	})
 
 	// Tag the lane so every model HTTP call this loop makes counts against
@@ -253,7 +253,7 @@ func (r *Replier) runNonStreamingToolLoop(
 	// cumulative budgets (memql#1144) so a single space or plan-lineage that
 	// loops is latched on its own, without touching other conversations.
 	ctx = memql.ContextWithBudgetScope(ctx,
-		memql.BudgetScopeId("space", turnCtx.SpaceId),
+		memql.BudgetScopeId("space", turnCtx.PartitionId),
 		memql.BudgetScopeId("plan", turnCtx.PlanId))
 
 	// Cooperative preemption (memql#906): clear any pause flag for this

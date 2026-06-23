@@ -291,7 +291,7 @@ func (r *spaceContextParseResolver) ResolveSkills(_ context.Context, _ []string)
 // ride the ack proto, never implicit session state. This test exercises the
 // server side of that hop (the resolution that fills the ack fields).
 func TestVoiceSpaceContextRealEngine_ParsesAndResolves(t *testing.T) {
-	const spaceId = "v1:cognition:space:demo-1c65cb0c"
+	const partitionId = "v1:cognition:space:demo-1c65cb0c"
 	eng := newRealDSLEngine(t)
 	ctx := context.Background()
 
@@ -311,7 +311,7 @@ func TestVoiceSpaceContextRealEngine_ParsesAndResolves(t *testing.T) {
 	resolver := &spaceContextParseResolver{
 		engine: eng,
 		spaceBundle: &memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{
-			{Id: spaceId, Concept: "v1:cognition:space", Payload: spacePayload},
+			{Id: partitionId, Concept: "v1:cognition:space", Payload: spacePayload},
 		}},
 		participantsB: &memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{
 			{Id: "v1:cognition:participant:a", Concept: "v1:cognition:participant", Payload: p1},
@@ -319,7 +319,7 @@ func TestVoiceSpaceContextRealEngine_ParsesAndResolves(t *testing.T) {
 		}},
 	}
 
-	out := resolveVoiceSpaceContextVia(ctx, resolver, spaceId)
+	out := resolveVoiceSpaceContextVia(ctx, resolver, partitionId)
 
 	require.Empty(t, resolver.parseFailed,
 		"querySpaceMeta + querySpaceParticipants must parse cleanly through the real engine (#1470)")

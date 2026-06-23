@@ -155,7 +155,7 @@ func TestDispatch_ExecutesAndMirrors(t *testing.T) {
 	require.Len(t, transportCalls, 1)
 	require.Len(t, mirrored, 1, "every model-driven call is mirrored into cognition")
 	assert.Equal(t, "webSearch", mirrored[0].ToolName)
-	assert.Equal(t, "s1", mirrored[0].SpaceID)
+	assert.Equal(t, "s1", mirrored[0].PartitionID)
 	assert.Equal(t, "ga1", mirrored[0].AgentID)
 	assert.False(t, mirrored[0].IsError)
 	assert.JSONEq(t, `{"q":"memql"}`, mirrored[0].ArgumentsJSON)

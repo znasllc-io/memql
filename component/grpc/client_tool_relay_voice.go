@@ -139,7 +139,7 @@ func decodeClientToolResponsePayload(payload map[string]any) (callId, contentJSO
 // relayClientToolToBrowser runs a ClientExecution tool for a caller with no
 // browser on its own stream (the voice agent, #1420) by routing it through the
 // cross-node relay: it registers the service waiter by call_id, emits a
-// v1:cognition:client:tool:request graph node scoped to spaceId so the
+// v1:cognition:client:tool:request graph node scoped to partitionId so the
 // browser's space subscription dispatches it, and blocks until the matching
 // client:tool:response lands (fired by handleClientToolResponseEvent) or the
 // timeout expires. Returns the tool result content, or an error (timeout /
@@ -149,12 +149,12 @@ func (s *streamSession) relayClientToolToBrowser(
 	ctx context.Context,
 	toolName string,
 	argsJSON string,
-	spaceId string,
+	partitionId string,
 ) ([]*memqlv1.ToolResultContent, error) {
 	if s == nil || s.service == nil || s.service.engine == nil {
 		return nil, fmt.Errorf("client-tool relay unavailable")
 	}
-	if strings.TrimSpace(spaceId) == "" {
+	if strings.TrimSpace(partitionId) == "" {
 		// No space to scope the request to -- the browser would never see it.
 		return nil, fmt.Errorf("client tool %q has no space to relay to", toolName)
 	}
@@ -201,7 +201,7 @@ func (s *streamSession) relayClientToolToBrowser(
 	if s.logger != nil {
 		s.logger.Info("client-tool waiter registered",
 			"component", ComponentName, "path", "voice",
-			"call_id", callId, "tool", toolName, "space_id", spaceId,
+			"call_id", callId, "tool", toolName, "partition_id", partitionId,
 			"timeout_ms", timeout.Milliseconds())
 	}
 
@@ -215,7 +215,7 @@ func (s *streamSession) relayClientToolToBrowser(
 		"callId": %s,
 		"toolName": %s,
 		"argumentsJSON": %s,
-		"spaceId": %s,
+		"partitionId": %s,
 		"participantId": %s,
 		"agentId": %s,
 		"expiresAt": %s
@@ -224,7 +224,7 @@ func (s *streamSession) relayClientToolToBrowser(
 		escapeGraphJSONString(callId),
 		escapeGraphJSONString(toolName),
 		escapeGraphJSONString(argsJSON),
-		escapeGraphJSONString(spaceId),
+		escapeGraphJSONString(partitionId),
 		escapeGraphJSONString(""),
 		escapeGraphJSONString(agentId),
 		escapeGraphJSONString(expiresAt.Format(time.RFC3339Nano)),
@@ -234,7 +234,7 @@ func (s *streamSession) relayClientToolToBrowser(
 	}
 	if s.logger != nil {
 		s.logger.Info("voice client-tool relay: emitted request",
-			"component", ComponentName, "call_id", callId, "tool", toolName, "space_id", spaceId)
+			"component", ComponentName, "call_id", callId, "tool", toolName, "partition_id", partitionId)
 	}
 
 	result, outcome, elapsed := awaitClientToolResult(ctx, ch, toolName)

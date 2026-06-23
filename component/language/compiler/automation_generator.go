@@ -1444,7 +1444,7 @@ func (c *Compiler) parseObjectLiteral(s string) map[string]any {
 			break
 		}
 
-		// Shorthand: a bare dotted path like `event.payload.spaceId` or
+		// Shorthand: a bare dotted path like `event.payload.partitionId` or
 		// `registerNode.result.node.id` with no `key:` prefix infers
 		// the key from the path's terminal segment. Only multi-segment
 		// paths whose segments are all simple identifiers are eligible;
@@ -1496,7 +1496,7 @@ func (c *Compiler) parseObjectLiteral(s string) map[string]any {
 }
 
 // tryParseBarePathShorthand parses a bare dotted path like
-// `event.payload.spaceId` or `registerNode.result.node.id` that appears
+// `event.payload.partitionId` or `registerNode.result.node.id` that appears
 // inside an object literal without a `key:` prefix. On match it returns
 // the inferred key (terminal path segment), the raw path string to stash
 // as the value, and the new position past the path.

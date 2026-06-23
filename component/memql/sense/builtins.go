@@ -141,7 +141,7 @@ var BuiltinFunctions = map[string]BuiltinDef{
 		Signature: `canonicalId(value, concept)`,
 		Doc: "Normalize an id-shaped value to canonical form (`<partition>:<concept>:<bareSlug>`).\n\n" +
 			"Use in mutation id derivations that hash foreign-key args, so the derived id stays stable whether the caller passes a bare slug or an already-canonical id.\n\n" +
-			"Example: `id = concat(\"participant-\", hash(concat(canonicalId(args.spaceId, space), \":\", canonicalId(args.userId, user))))`\n\n" +
+			"Example: `id = concat(\"participant-\", hash(concat(canonicalId(args.partitionId, space), \":\", canonicalId(args.userId, user))))`\n\n" +
 			"The second argument is an imported concept short-name (resolved against the file-top `use ...concepts.{ ... }` imports); the stringly-typed `\"v1:ns:name\"` literal is retired. The engine reads the named concept's @scope to pick the right partition prefix (`_system` for global, otherwise the request envelope's partition). Errors when the concept name isn't imported / registered or when the value is already canonical for a different concept (catches type-tag typos).",
 		Parameters: []Parameter{
 			{Label: "value", Documentation: "Id-shaped value (bare slug or canonical). Empty input returns empty."},

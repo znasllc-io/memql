@@ -76,7 +76,7 @@ mutation record mutationConfirmRecord {
 //
 // Arguments:
 //   recordId (string, required)           - Unique record ID (UUID)
-//   spaceId (string, required)            - Space this record belongs to
+//   partitionId (string, required)            - Space this record belongs to
 //   recordType (string, required)         - Domain-specific type (e.g., 'vehicle', 'bird')
 //   label (string, required)              - Display label
 //   data (object, required)               - The actual data payload
@@ -90,7 +90,7 @@ mutation record mutationConfirmRecord {
 // Usage:
 //   createRecord({
 //     recordId: "uuid-123",
-//     spaceId: "space-456",
+//     partitionId: "space-456",
 //     recordType: "vehicle",
 //     label: "2024 Toyota Camry",
 //     data: { make: "Toyota", model: "Camry", year: 2024, vin: "1HGBH41JXMN109186" },
@@ -106,7 +106,7 @@ mutation record mutationConfirmRecord {
 mutation record mutationCreateRecord {
   args {
     recordId            string  @required
-    spaceId             string  @required
+    partitionId             string  @required
     recordType          string  @required
     label               string  @required
     data                object  @required
@@ -121,7 +121,7 @@ mutation record mutationCreateRecord {
   insert {
     id: args.recordId
     createdAt: coalesce(args.createdAt, timestamp())
-    args.spaceId
+    args.partitionId
     args.recordType
     args.label
     args.data
@@ -152,7 +152,7 @@ mutation record mutationCreateRecord {
 //
 // Arguments:
 //   recordId (string, required)           - Unique ID for this record
-//   spaceId (string, required)            - Space this record belongs to
+//   partitionId (string, required)            - Space this record belongs to
 //   recordType (string, required)         - Domain-specific type
 //   label (string, required)              - Display label
 //   data (object, required)               - The data payload
@@ -166,7 +166,7 @@ mutation record mutationCreateRecord {
 // Usage:
 //   createRecordBatch({
 //     recordId: "uuid-1",
-//     spaceId: "space-456",
+//     partitionId: "space-456",
 //     recordType: "vehicle",
 //     label: "2024 Camry",
 //     data: { make: "Toyota", model: "Camry" },
@@ -180,7 +180,7 @@ mutation record mutationCreateRecord {
 mutation record mutationCreateRecordBatch {
   args {
     recordId            string  @required
-    spaceId             string  @required
+    partitionId             string  @required
     recordType          string  @required
     label               string  @required
     data                object  @required
@@ -193,7 +193,7 @@ mutation record mutationCreateRecordBatch {
   }
   insert {
     id: args.recordId
-    args.spaceId
+    args.partitionId
     args.recordType
     args.label
     args.data
@@ -221,10 +221,10 @@ mutation record mutationCreateRecordBatch {
 //
 // Arguments:
 //   recordId (string, required) - ID of the record to delete
-//   spaceId (string, required)  - Space ID for validation
+//   partitionId (string, required)  - Space ID for validation
 //
 // Usage:
-//   deleteRecord({ recordId: "record-uuid", spaceId: "space-456" })
+//   deleteRecord({ recordId: "record-uuid", partitionId: "space-456" })
 //
 
 @enabled
@@ -297,7 +297,7 @@ mutation record mutationRevertRecord {
 // Arguments:
 //   policyId (string, required)              - Unique policy ID
 //   targetRecordType (string, required)      - Record type this policy applies to
-//   spaceId (string, optional)               - Space scope (null = global for this record type)
+//   partitionId (string, optional)               - Space scope (null = global for this record type)
 //   requiredChecks (number, optional)        - Synthetic checks needed (default: 1)
 //   requiredConfirmations (number, optional) - Human confirmations needed (default: 1)
 //   checkedDataUsable (bool, optional)       - Whether checked data is usable live (default: false)
@@ -319,7 +319,7 @@ mutation policy mutationSetPolicy {
   args {
     policyId               string  @required
     targetRecordType       string  @required
-    spaceId                string
+    partitionId                string
     requiredChecks         number
     requiredConfirmations  number
     checkedDataUsable      bool
@@ -328,7 +328,7 @@ mutation policy mutationSetPolicy {
   insert {
     id: args.policyId
     args.targetRecordType
-    args.spaceId
+    args.partitionId
     requiredChecks: coalesce(args.requiredChecks, 1)
     requiredConfirmations: coalesce(args.requiredConfirmations, 1)
     checkedDataUsable: coalesce(args.checkedDataUsable, false)

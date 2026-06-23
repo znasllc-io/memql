@@ -76,7 +76,7 @@ type inlineSpecDefinition struct {
 // shape. The legacy `ctx.input.<path>` longhand was retired in
 // memql#302.
 type ArgReference struct {
-	Path string // e.g., "spaceId" or "options.limit"
+	Path string // e.g., "partitionId" or "options.limit"
 }
 
 // ActorReference represents a reference to a field on the authenticated

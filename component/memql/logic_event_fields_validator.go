@@ -32,10 +32,10 @@ import (
 // Example:
 //
 //	@enabled
-//	@eventField("spaceId", "siParticipantId", "promptTemplateId", "promptData", "utteranceId", "agentId")
+//	@eventField("partitionId", "siParticipantId", "promptTemplateId", "promptData", "utteranceId", "agentId")
 //	logic logicGenerateResponse {
 //	  args { event object @required }
-//	  body { ... args.event.payload.spaceId ... }   // every payload.<field> must be declared
+//	  body { ... args.event.payload.partitionId ... }   // every payload.<field> must be declared
 //	}
 //
 // Scope: Logic functions only. Runs on the RAW source (pre-path-translation) so
@@ -97,8 +97,8 @@ var eventPayloadRefPattern = regexp.MustCompile(`\bevent\.payload\.([A-Za-z_][A-
 
 // declaredEventFields returns the set of allowed top-level payload field names
 // declared via `@eventField(...)`, and whether the annotation is present at all.
-// A declared entry may be a bare name (`spaceId`) or a `payload.`-prefixed path
-// (`payload.spaceId`); both normalize to the head segment `spaceId`.
+// A declared entry may be a bare name (`partitionId`) or a `payload.`-prefixed path
+// (`payload.partitionId`); both normalize to the head segment `partitionId`.
 func declaredEventFields(funcDef *languageParser.FunctionDef) (map[string]bool, bool) {
 	for _, attr := range funcDef.Attributes {
 		if attr == nil || attr.Name != "eventField" {

@@ -31,7 +31,7 @@ func newToolTestExecutor(
 	fs := newFakeStream()
 	c := newTestClient(t, fs)
 	rt := newFakeRealtimeSession()
-	e := NewRealtimeExecutor(context.Background(), CascadeConfig{SpaceID: "s1", GaAgentID: "s1-ga"},
+	e := NewRealtimeExecutor(context.Background(), CascadeConfig{PartitionID: "s1", GaAgentID: "s1-ga"},
 		c, rt, &recordingSink{}, SessionPersona{}, nil)
 	bridge := NewMcpToolBridge(transport, nil,
 		[]*memqlv1.ToolDefinition{td("toolA", false, "read"), td("toolB", false, "read")},

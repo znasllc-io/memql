@@ -15,7 +15,7 @@ func TestResolveSymbol_CrossFileConcept(t *testing.T) {
 @namespace("cognition")
 @description("a participant")
 concept participant {
-  spaceId string
+  partitionId string
 }`)},
 		"queries/foo.memql": {Data: []byte(`import (
 	"../cognition/participant" as cog

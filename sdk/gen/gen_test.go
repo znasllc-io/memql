@@ -539,7 +539,7 @@ func TestEmitGoMethods_SeparatorGuardUsesRealPrefixLength(t *testing.T) {
 		Args: []ArgField{
 			{Name: "presenceId", Type: "string"}, // leading OPTIONAL field
 			{Name: "participantId", Type: "string", Required: true},
-			{Name: "spaceId", Type: "string", Required: true},
+			{Name: "partitionId", Type: "string", Required: true},
 		},
 	}
 
@@ -567,7 +567,7 @@ func TestEmitGoMethods_OptionalObjectAndArrayArgsAreNilGuarded(t *testing.T) {
 		Name:    "mutationCreateSessionForParticipant",
 		Concept: "session",
 		Args: []ArgField{
-			{Name: "spaceId", Type: "string", Required: true},
+			{Name: "partitionId", Type: "string", Required: true},
 			{Name: "humanInput", Type: "object"},
 			{Name: "streams", Type: "object"},
 			{Name: "participantIds", Type: "array"},

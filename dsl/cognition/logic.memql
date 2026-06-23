@@ -136,7 +136,7 @@ logic logicAutoJoinAI {
   // this check ever misses.
   checkExistingGA := if first(getGA).id != "" {
     queryParticipantByAgentSpace({
-      spaceId: args.event.payload.id,
+      partitionId: args.event.payload.id,
       agentId: coalesce(getGA.First().id, "")
     })
   }
@@ -161,7 +161,7 @@ logic logicAutoJoinAI {
   // evaluator, so dropping it changes nothing about idempotency.
   insertGA := if first(getGA).id != "" {
     mutationJoinSpaceAsAI({
-      spaceId: args.event.payload.id,
+      partitionId: args.event.payload.id,
       agentId: coalesce(getGA.First().id, ""),
       displayName: coalesce(getGA.First().payload.name, "Assistant"),
       forUserId: args.event.payload.ownerUserId,
@@ -180,7 +180,7 @@ logic logicAutoJoinAI {
   emitAutoJoinComplete := publishEvent({
     topic: "si.auto-joined",
     payload: {
-      spaceId: args.event.payload.id,
+      partitionId: args.event.payload.id,
       ownerUserId: args.event.payload.ownerUserId,
       timestamp: timestamp()
     }
@@ -201,7 +201,7 @@ logic logicBootstrapSession {
   body {
   // The event payload contains the newly created participant node with flattened fields:
   // args.event.payload.id = participant ID
-  // args.event.payload.spaceId = space ID (flattened from node payload)
+  // args.event.payload.partitionId = space ID (flattened from node payload)
   // args.event.payload.participantType = "human" or "si" (flattened from node payload)
   // args.event.payload.payload = full node payload for backwards compatibility
 
@@ -212,10 +212,10 @@ logic logicBootstrapSession {
   // Voice / video flow is no longer gated by a tier ceiling -- the
   // user's mic toggle (humanInput.microphoneEnabled) plus each
   // agent's audioControl mode decide who publishes audio in the room.
-  createSession := if checkExistingSession.Empty() { mutationCreateSessionForParticipant({ participantId: args.event.payload.id, spaceId: args.event.payload.spaceId }) }
+  createSession := if checkExistingSession.Empty() { mutationCreateSessionForParticipant({ participantId: args.event.payload.id, partitionId: args.event.payload.partitionId }) }
 
   // Emit session created event for downstream consumers
-  emitSessionCreated := if checkExistingSession.Empty() { publishEvent({ topic: "session.created", payload: { sessionId: args.event.payload.id, participantId: args.event.payload.id, spaceId: args.event.payload.spaceId, timestamp: timestamp() } }) }
+  emitSessionCreated := if checkExistingSession.Empty() { publishEvent({ topic: "session.created", payload: { sessionId: args.event.payload.id, participantId: args.event.payload.id, partitionId: args.event.payload.partitionId, timestamp: timestamp() } }) }
 
   return coalesce(createSession, checkExistingSession.First())
   }
@@ -228,14 +228,14 @@ logic logicBootstrapSession {
 // dispatch, then emits this event with pre-loaded context when a
 // non-streaming AI response is needed.
 @description("Generates and inserts an AI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via mutationSendTextUtterance, and bumps participant presence to idle. Idempotent via queryHasAIResponseForReply.")
-@eventField("agentId", "promptData", "promptTemplateId", "siParticipantId", "spaceId", "utteranceId")
+@eventField("agentId", "promptData", "promptTemplateId", "siParticipantId", "partitionId", "utteranceId")
 logic logicGenerateResponse {
   args {
     event object @required
   }
   body {
   // The event payload is assembled by the Go cognition handler with:
-  //   spaceId           - Space where the utterance was sent
+  //   partitionId           - Space where the utterance was sent
   //   utteranceId       - The triggering utterance node ID
   //   triggerText       - The utterance text that triggered the response
   //   siParticipantId   - The AI participant that should respond
@@ -258,7 +258,7 @@ logic logicGenerateResponse {
   // Insert the AI response as a new utterance
   insertResponse := if existingResponse.Empty() {
     mutationSendTextUtterance({
-      args.event.payload.spaceId,
+      args.event.payload.partitionId,
       participantId: args.event.payload.siParticipantId,
       text: aiResponse,
       replyToId: args.event.payload.utteranceId,
@@ -270,7 +270,7 @@ logic logicGenerateResponse {
   presenceUpdate := if existingResponse.Empty() {
     cognitionTrackPresence({
       participantId: args.event.payload.siParticipantId,
-      args.event.payload.spaceId,
+      args.event.payload.partitionId,
       state: "idle"
     })
   }
@@ -311,7 +311,7 @@ logic logicPurgeExpiredArchivedSpaces {
 
   for item := range expired.Nodes() {
     deleteStep := mutationDeleteSpaceNow({
-      spaceId: item.id,
+      partitionId: item.id,
       payload: {
         item.payload.name,
         status: "archived",
@@ -344,7 +344,7 @@ logic logicPurgeExpiredArchivedSpaces {
 // TRIGGER:
 // graph.node.created.v1:identity:user fires on every user-row write
 // (primary path: mutationSetUserActiveSpace shipping a new version).
-// We filter to rows whose payload.activeSpaceId is non-empty -- a user
+// We filter to rows whose payload.activePartitionId is non-empty -- a user
 // whose pointer is set has just become active in some space.
 //
 // FIRE CONDITION:
@@ -365,24 +365,24 @@ logic logicPurgeExpiredArchivedSpaces {
 // "voice moved back to your Team chat" card lands -- handled by a
 // sibling automation when needed (deferred until the frontend wiring
 // shows the need).
-@description("Phase 7 of chat-architecture. Triggered when a user's activeSpaceId pointer changes. When exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team to Group thread. Idempotent via content-addressed stateIds.")
-@eventField("activeSpaceId", "id")
+@description("Phase 7 of chat-architecture. Triggered when a user's activePartitionId pointer changes. When exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team to Group thread. Idempotent via content-addressed stateIds.")
+@eventField("activePartitionId", "id")
 logic logicVoiceMigrationOnSecondHuman {
   args {
     event object @required
   }
   body {
-  active := queryUsersActiveInSpace({ spaceId: args.event.payload.activeSpaceId })
+  active := queryUsersActiveInSpace({ partitionId: args.event.payload.activePartitionId })
 
   // The plan calls for exactly the 1-to-2 transition. The query returns
   // all currently-active users in the space; act when there are exactly
   // 2. ANY OTHER count is a no-op (single user = first to focus the
   // space; 3+ = already migrated; 0 wouldn't appear here because the
-  // event filter required a non-empty activeSpaceId on the writer).
+  // event filter required a non-empty activePartitionId on the writer).
   publishGroupCard := if active.Count() == 2 {
     mutationCreateCanvasState({
-      stateId: concat("voice-migrated-public-", hash(args.event.payload.activeSpaceId)),
-      space: args.event.payload.activeSpaceId,
+      stateId: concat("voice-migrated-public-", hash(args.event.payload.activePartitionId)),
+      space: args.event.payload.activePartitionId,
       kind: "card",
       data: {
         variant: "voice.migrated.group",
@@ -397,9 +397,9 @@ logic logicVoiceMigrationOnSecondHuman {
   publishPrivateCard := if active.Count() == 2 {
     mutationCreateCanvasState({
       stateId: concat("voice-migrated-private-", hash(concat(
-        args.event.payload.activeSpaceId, ":", args.event.payload.id
+        args.event.payload.activePartitionId, ":", args.event.payload.id
       ))),
-      space: args.event.payload.activeSpaceId,
+      space: args.event.payload.activePartitionId,
       kind: "card",
       data: {
         variant: "voice.migrated.private",

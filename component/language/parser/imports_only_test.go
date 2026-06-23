@@ -17,7 +17,7 @@ func TestExtractImports_ShapeFile(t *testing.T) {
 @description("Participant projection")
 shape participant participantFull {
   row.id
-  participant.spaceId
+  participant.partitionId
   participant.status
 }`
 	file, err := ExtractImports(source)

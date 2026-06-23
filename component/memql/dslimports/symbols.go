@@ -148,7 +148,7 @@ func (t *Tree) ResolveSymbol(importingFile, ref string) (*Resolution, error) {
 	}
 
 	// Cross-file resolution may chain through dotted suffixes
-	// (e.g. `cog.participant.spaceId` could refer to a field on
+	// (e.g. `cog.participant.partitionId` could refer to a field on
 	// the concept), but for now we only resolve the first two
 	// segments. Deeper dots are returned as Name suffix so the
 	// caller can handle field-level access separately.

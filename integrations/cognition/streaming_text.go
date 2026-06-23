@@ -22,7 +22,7 @@ func (c *CognitionIntegration) generateTextStreaming(
 	ctx context.Context,
 	agent *agentPayload,
 	trigger string,
-	spaceId string,
+	partitionId string,
 	participantId string,
 	replyId string,
 	participants []map[string]any,
@@ -48,7 +48,7 @@ func (c *CognitionIntegration) generateTextStreaming(
 		personality = "You are a helpful, professional assistant that supports users in their sessions. You respond when asked questions or when you can provide relevant insights."
 	}
 
-	spaceContext := c.getSpaceContextForPromptCached(ctx, strings.TrimSpace(spaceId))
+	spaceContext := c.getSpaceContextForPromptCached(ctx, strings.TrimSpace(partitionId))
 
 	historyForPrompt := make([]map[string]any, 0, len(history))
 	for _, msg := range history {
@@ -69,7 +69,7 @@ func (c *CognitionIntegration) generateTextStreaming(
 			"name":        strings.TrimSpace(agent.Name),
 			"personality": personality,
 		},
-		"space":        buildSpaceData(strings.TrimSpace(spaceId), si),
+		"space":        buildSpaceData(strings.TrimSpace(partitionId), si),
 		"participants": participants,
 		"history":      historyForPrompt,
 	}
@@ -124,7 +124,7 @@ func (c *CognitionIntegration) generateTextStreaming(
 
 		// Emit when buffer reaches a sentence boundary or ~80 chars.
 		if shouldFlushTextBuffer(chunkBuffer.String()) {
-			c.mutationEmitTextChunk(ctx, spaceId, participantId, replyId, chunkBuffer.String(), chunkIndex, false)
+			c.mutationEmitTextChunk(ctx, partitionId, participantId, replyId, chunkBuffer.String(), chunkIndex, false)
 			chunkBuffer.Reset()
 			chunkIndex++
 		}
@@ -133,17 +133,17 @@ func (c *CognitionIntegration) generateTextStreaming(
 	// Flush remaining buffer.
 	remaining := chunkBuffer.String()
 	if remaining != "" {
-		c.mutationEmitTextChunk(ctx, spaceId, participantId, replyId, remaining, chunkIndex, false)
+		c.mutationEmitTextChunk(ctx, partitionId, participantId, replyId, remaining, chunkIndex, false)
 		chunkIndex++
 	}
 
 	assembled := stripRawToolCalls(strings.TrimSpace(fullText.String()))
 
 	// Send final done signal.
-	c.mutationEmitTextChunk(ctx, spaceId, participantId, replyId, "", chunkIndex, true)
+	c.mutationEmitTextChunk(ctx, partitionId, participantId, replyId, "", chunkIndex, true)
 
 	c.Logger.Info("streaming-text: complete",
-		"spaceId", spaceId,
+		"partitionId", partitionId,
 		"chunks", chunkIndex,
 		"totalChars", len(assembled),
 		"totalMs", time.Since(start).Milliseconds(),
@@ -177,16 +177,16 @@ func shouldFlushTextBuffer(buf string) bool {
 // uses it to key the rendered bubble so the streaming-then-committed
 // transition is in-place -- no React remount, no avatar flicker. Every
 // caller MUST supply a non-empty replyId; passing "" is a bug.
-func (c *CognitionIntegration) mutationEmitTextChunk(ctx context.Context, spaceId, participantId, replyId, text string, index int, done bool) {
+func (c *CognitionIntegration) mutationEmitTextChunk(ctx context.Context, partitionId, participantId, replyId, text string, index int, done bool) {
 	// Colon-free chunkId. The dsl mutation's id template is
 	// `concat("text-chunk-", args.chunkId)`, so anything we pass becomes
 	// the persisted row's shortId after the prefix. Canonical-id
 	// validation requires shortIds to be a bare slug / UUID with no
-	// colons -- so we MUST NOT splice the full spaceId (which is
+	// colons -- so we MUST NOT splice the full partitionId (which is
 	// `v1:cognition:space:...`) into chunkId. (memql#372.)
 	//
 	// Per-chunk uniqueness comes from the (UnixNano, index) pair --
-	// per-turn correlation is already carried via replyId. spaceId
+	// per-turn correlation is already carried via replyId. partitionId
 	// previously appeared here only to namespace IDs across spaces,
 	// which the canonical concept-id system handles for us.
 	chunkId := fmt.Sprintf("%d-%d", time.Now().UnixNano(), index)
@@ -198,7 +198,7 @@ func (c *CognitionIntegration) mutationEmitTextChunk(ctx context.Context, spaceI
 
 	query := fmt.Sprintf(`mutationEmitTextChunk({
 		"chunkId": %s,
-		"spaceId": %s,
+		"partitionId": %s,
 		"participantId": %s,
 		"replyId": %s,
 		"text": %s,
@@ -206,7 +206,7 @@ func (c *CognitionIntegration) mutationEmitTextChunk(ctx context.Context, spaceI
 		"done": %s
 	})`,
 		escapeJSONString(chunkId),
-		escapeJSONString(spaceId),
+		escapeJSONString(partitionId),
 		escapeJSONString(participantId),
 		escapeJSONString(replyId),
 		escapeJSONString(text),
@@ -215,6 +215,6 @@ func (c *CognitionIntegration) mutationEmitTextChunk(ctx context.Context, spaceI
 	)
 
 	if _, err := c.engine.Execute(ctx, query); err != nil {
-		c.Logger.Warn("text-chunk: failed to execute", "error", err, "spaceId", spaceId, "replyId", replyId, "index", index)
+		c.Logger.Warn("text-chunk: failed to execute", "error", err, "partitionId", partitionId, "replyId", replyId, "index", index)
 	}
 }

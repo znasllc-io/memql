@@ -97,7 +97,7 @@ func newRoomAudioBridge(ctx context.Context, cfg Config, req RoomRequest, client
 	// voice). This replaces the standalone canonical-voice default the
 	// cascade ships for tests.
 	cascade := NewCascade(ctx, CascadeConfig{
-		SpaceID:   req.SpaceID,
+		PartitionID:   req.PartitionID,
 		GaAgentID: req.GaAgentID,
 		Thread:    threadContextFor(req),
 	}, client, newPCMTTSAdapter(tts, logger), sink, ResolveTTSVoice(req.Persona), logger)

@@ -20,7 +20,7 @@
 //      kicked this off and walked away).
 //
 // The lifecycle is graceful-degradation: if the caller didn't pass
-// spaceId / requestedBy (e.g. an automation or test), the helpers
+// partitionId / requestedBy (e.g. an automation or test), the helpers
 // no-op and the pipeline runs without bookkeeping. The CoPresent
 // Training studio always passes both.
 
@@ -43,20 +43,20 @@ type planLifecycle struct {
 	integ       *Integration
 	planId      string
 	taskIds     [3]string // [capabilities, identityVector, distillPrompt]
-	spaceId     string
+	partitionId     string
 	requestedBy string
 	startedAt   time.Time
 }
 
 // beginPlan creates the Plan + 3 Task rows + emits the plan.created
 // canvas card. Returns a lifecycle handle the handler walks through
-// each pipeline step, OR nil + nil when spaceId / requestedBy are
+// each pipeline step, OR nil + nil when partitionId / requestedBy are
 // absent (DSL caller chose to skip the bookkeeping). A failure to
 // create the Plan / Tasks / card is logged but doesn't abort the
 // caller -- the pipeline still runs; only the visibility is lost.
 func (i *Integration) beginPlan(
 	ctx context.Context,
-	spaceId string,
+	partitionId string,
 	requestedBy string,
 	agentId string,
 	agentName string,
@@ -64,9 +64,9 @@ func (i *Integration) beginPlan(
 	removedDomainIds []string,
 	tools []string,
 ) *planLifecycle {
-	spaceId = strings.TrimSpace(spaceId)
+	partitionId = strings.TrimSpace(partitionId)
 	requestedBy = strings.TrimSpace(requestedBy)
-	if spaceId == "" || requestedBy == "" {
+	if partitionId == "" || requestedBy == "" {
 		// Graceful degrade: caller opted out of the bookkeeping.
 		return nil
 	}
@@ -126,9 +126,9 @@ func (i *Integration) beginPlan(
 
 	// 1. Create Plan(queued).
 	createPlanQ := fmt.Sprintf(
-		`mutationCreatePlan({"planId": %s, "spaceId": %s, "kind": "trainAgent", "goal": %s, "requestedBy": %s, "triggerSource": "user.explicit", "input": %s})`,
+		`mutationCreatePlan({"planId": %s, "partitionId": %s, "kind": "trainAgent", "goal": %s, "requestedBy": %s, "triggerSource": "user.explicit", "input": %s})`,
 		quoteString(planId),
-		quoteString(spaceId),
+		quoteString(partitionId),
 		quoteString(goal),
 		quoteString(requestedBy),
 		inputJSON,
@@ -164,7 +164,7 @@ func (i *Integration) beginPlan(
 	if _, err := i.engine.Execute(ctx, fmt.Sprintf(
 		`mutationCreateCanvasState({"stateId": %s, "space": %s, "kind": "card", "data": %s, "visibility": "private", "forUserId": %s, "actor": %s, "importance": "ambient"})`,
 		quoteString(createdStateId),
-		quoteString(spaceId),
+		quoteString(partitionId),
 		createdCardData,
 		quoteString(requestedBy),
 		createdActor,
@@ -206,7 +206,7 @@ func (i *Integration) beginPlan(
 		integ:       i,
 		planId:      planId,
 		taskIds:     taskIds,
-		spaceId:     spaceId,
+		partitionId:     partitionId,
 		requestedBy: requestedBy,
 		startedAt:   now,
 	}
@@ -346,7 +346,7 @@ func (l *planLifecycle) completePlan(
 	if _, err := l.integ.engine.Execute(ctx, fmt.Sprintf(
 		`mutationCreateCanvasState({"stateId": %s, "space": %s, "kind": "card", "data": %s, "visibility": "private", "forUserId": %s, "actor": %s, "importance": "notify"})`,
 		quoteString(stateId),
-		quoteString(l.spaceId),
+		quoteString(l.partitionId),
 		cardJSON,
 		quoteString(l.requestedBy),
 		actorJSON,

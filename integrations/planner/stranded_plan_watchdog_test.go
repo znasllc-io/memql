@@ -86,7 +86,7 @@ func strandedRow(planId, kind, createdAt string) map[string]any {
 		"kind":         kind,
 		"status":       "queued",
 		"goal":         "make me a list of 10 birds",
-		"spaceId":      "v1:cognition:space:s1",
+		"partitionId":      "v1:cognition:space:s1",
 		"ownerAgentId": "v1:agents:agent:a1",
 		"requestedBy":  "v1:identity:user:u1",
 		"createdAt":    createdAt,
@@ -109,7 +109,7 @@ func newWatchdogEngine(candidate any) *fakeEngine {
 				// that recovery was ATTEMPTED, i.e. the plan was re-loaded).
 				return candidatePlanRows(map[string]any{
 					"id": "v1:planner:plan:p1", "kind": "userGoal", "status": "queued",
-					"goal": "g", "spaceId": "s1", "requestedBy": "u1",
+					"goal": "g", "partitionId": "s1", "requestedBy": "u1",
 				}), nil
 			default:
 				return nil, nil

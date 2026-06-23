@@ -98,7 +98,7 @@ const voicePartialEventTopic = "voice.partial.utterance"
 // (#477/#479) publishes its per-turn decision on: engage(mode, brevity) or
 // defer, INSTEAD of authoring a reply. The voice turn relay subscribes to it
 // and forwards the directive on VoiceAgentTurnComplete so the realtime model
-// authors the words itself. Payload keys: spaceId, gaAgentId, engage (bool),
+// authors the words itself. Payload keys: partitionId, gaAgentId, engage (bool),
 // mode, brevity, utteranceId. When no directive is published the relay falls
 // back to the legacy authored-utterance path (extractGAReplyFromEvent).
 const voiceGateDirectiveTopic = "voice.gate.directive"
@@ -116,11 +116,11 @@ type voiceGateDirective struct {
 // extractVoiceGateDirective decodes a voiceGateDirectiveTopic event for the
 // target (space, agent), or returns ok=false when it is for a different
 // space/agent or malformed.
-func extractVoiceGateDirective(e events.Event, spaceId, gaAgentId string) (voiceGateDirective, bool) {
+func extractVoiceGateDirective(e events.Event, partitionId, gaAgentId string) (voiceGateDirective, bool) {
 	if e.Payload == nil {
 		return voiceGateDirective{}, false
 	}
-	if !spaceIdMatches(asString(e.Payload, "spaceId"), spaceId) {
+	if !partitionIdMatches(asString(e.Payload, "partitionId"), partitionId) {
 		return voiceGateDirective{}, false
 	}
 	// gaAgentId match tolerant of canonical-vs-slug, same shape as the channel
@@ -152,10 +152,10 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
 	correlate := envelope.GetMessageId()
 
-	spaceId := strings.TrimSpace(msg.GetSpaceId())
+	partitionId := strings.TrimSpace(msg.GetPartitionId())
 	gaAgentId := strings.TrimSpace(msg.GetGaAgentId())
-	if spaceId == "" || gaAgentId == "" {
-		return s.sendQueryError(requestId, correlate, codes.InvalidArgument, "spaceId and gaAgentId are required")
+	if partitionId == "" || gaAgentId == "" {
+		return s.sendQueryError(requestId, correlate, codes.InvalidArgument, "partitionId and gaAgentId are required")
 	}
 
 	// Session-setup timing (#1426): every engine call below runs before the
@@ -178,10 +178,10 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 	// to the wire value when the lookup fails so we don't regress
 	// existing callers that DO send a real id.
 	gaResolveStart := time.Now()
-	if resolved := resolveGroupGAAgentId(s, spaceId); resolved != "" {
+	if resolved := resolveGroupGAAgentId(s, partitionId); resolved != "" {
 		gaAgentId = resolved
 	}
-	logVoiceTiming(s.logger, "server.session_start.resolve_ga_id", gaResolveStart, "space_id", spaceId)
+	logVoiceTiming(s.logger, "server.session_start.resolve_ga_id", gaResolveStart, "partition_id", partitionId)
 
 	// Concurrent stage. The override resolves carry the orb-corner toggle
 	// state (without them the voice-agent always saw "mirror_user", so
@@ -193,20 +193,20 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 	state := loadVoiceSessionStartState(voiceSessionStartLoads{
 		audioOverride: func() (string, bool) {
 			legStart := time.Now()
-			mode, ok := resolveChannelOverrideMode(s, spaceId, gaAgentId, "audio")
-			logVoiceTiming(s.logger, "server.session_start.audio_mode", legStart, "space_id", spaceId)
+			mode, ok := resolveChannelOverrideMode(s, partitionId, gaAgentId, "audio")
+			logVoiceTiming(s.logger, "server.session_start.audio_mode", legStart, "partition_id", partitionId)
 			return mode, ok
 		},
 		videoOverride: func() (string, bool) {
 			legStart := time.Now()
-			mode, ok := resolveChannelOverrideMode(s, spaceId, gaAgentId, "video")
-			logVoiceTiming(s.logger, "server.session_start.video_mode", legStart, "space_id", spaceId)
+			mode, ok := resolveChannelOverrideMode(s, partitionId, gaAgentId, "video")
+			logVoiceTiming(s.logger, "server.session_start.video_mode", legStart, "partition_id", partitionId)
 			return mode, ok
 		},
 		agentRecord: func() agentRecordFields {
 			legStart := time.Now()
 			record := resolveAgentSessionRecord(s, gaAgentId)
-			logVoiceTiming(s.logger, "server.session_start.persona", legStart, "space_id", spaceId)
+			logVoiceTiming(s.logger, "server.session_start.persona", legStart, "partition_id", partitionId)
 			return record
 		},
 		// The vendor-issued avatar persona id (Simli faceId / Anam persona id)
@@ -221,7 +221,7 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 		avatarPersona: func() string {
 			legStart := time.Now()
 			id := resolveAgentAvatarPersona(s, gaAgentId, msg.GetAvatarVendor())
-			logVoiceTiming(s.logger, "server.session_start.avatar_persona", legStart, "space_id", spaceId)
+			logVoiceTiming(s.logger, "server.session_start.avatar_persona", legStart, "partition_id", partitionId)
 			return id
 		},
 		// #1470 Option C: the bound space's name + goal statement and the human
@@ -233,8 +233,8 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 		// yields the zero value and the ack fields stay empty.
 		spaceContext: func() spaceContextFields {
 			legStart := time.Now()
-			ctxFields := resolveVoiceSpaceContext(s, spaceId)
-			logVoiceTiming(s.logger, "server.session_start.space_context", legStart, "space_id", spaceId)
+			ctxFields := resolveVoiceSpaceContext(s, partitionId)
+			logVoiceTiming(s.logger, "server.session_start.space_context", legStart, "partition_id", partitionId)
 			return ctxFields
 		},
 	})
@@ -243,12 +243,12 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 	persona := state.persona
 	avatarPersonaId := state.avatarPersonaId
 	spaceCtx := state.spaceContext
-	logVoiceTiming(s.logger, "server.session_start.total", setupStart, "space_id", spaceId)
+	logVoiceTiming(s.logger, "server.session_start.total", setupStart, "partition_id", partitionId)
 
 	if s.logger != nil {
 		s.logger.Info("voice-agent session start",
 			"request_id", requestId,
-			"space_id", spaceId,
+			"partition_id", partitionId,
 			"ga_agent_id", gaAgentId,
 			"room_name", msg.GetRoomName(),
 			"avatar_vendor", msg.GetAvatarVendor(),
@@ -269,7 +269,7 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 	// existing TurnRequest path still handles STT-initiated turns;
 	// the subscriber dedups against in-flight TurnRequests via the
 	// voiceTurns map.
-	s.startVoiceAgentSpeakSubscriber(spaceId, gaAgentId, audioMode)
+	s.startVoiceAgentSpeakSubscriber(partitionId, gaAgentId, audioMode)
 
 	// Stash the GA's role on the session so handleCallTool can gate tool
 	// EXECUTION against the GA's role (assistant), not the voice-agent caller's
@@ -303,12 +303,12 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 }
 
 // resolveGroupGAAgentId returns the canonical agent id of the group-
-// GA participant in `spaceId`. Returns "" when no GA participant is
+// GA participant in `partitionId`. Returns "" when no GA participant is
 // active in the space, or on any query error -- callers fall back to
 // their wire-supplied id.
 //
 // Read-only; the engine is the source of truth so we don't cache.
-func resolveGroupGAAgentId(s *streamSession, spaceId string) string {
+func resolveGroupGAAgentId(s *streamSession, partitionId string) string {
 	if s == nil || s.service == nil || s.service.engine == nil {
 		return ""
 	}
@@ -317,39 +317,39 @@ func resolveGroupGAAgentId(s *streamSession, spaceId string) string {
 		logger = s.logger
 	}
 	ctx := contextWithVoiceAgentActor(context.Background())
-	return resolveGroupGAAgentIdVia(ctx, s.service.engine, spaceId, logger)
+	return resolveGroupGAAgentIdVia(ctx, s.service.engine, partitionId, logger)
 }
 
 // resolveGroupGAAgentIdVia is the seam-based core of resolveGroupGAAgentId:
 // it resolves the canonical GA agent id of the group-GA participant in
-// `spaceId` through the narrow voiceParticipantResolver interface so the
+// `partitionId` through the narrow voiceParticipantResolver interface so the
 // resolution (canonicalize -> queryGroupGAForSpace -> first participant
 // agentId) is unit-testable without a live engine. Returns "" when no GA
 // participant is active or on any query/canonicalize error -- callers fall
 // back to their wire-supplied id.
-func resolveGroupGAAgentIdVia(ctx context.Context, engine voiceParticipantResolver, spaceId string, logger *slog.Logger) string {
-	if engine == nil || strings.TrimSpace(spaceId) == "" {
+func resolveGroupGAAgentIdVia(ctx context.Context, engine voiceParticipantResolver, partitionId string, logger *slog.Logger) string {
+	if engine == nil || strings.TrimSpace(partitionId) == "" {
 		return ""
 	}
-	// Canonicalize the spaceId on the Go side. Inlining canonicalId()
+	// Canonicalize the partitionId on the Go side. Inlining canonicalId()
 	// in the query predicate triggers "unsupported literal type
 	// *ast.CanonicalIdExpr" once the WHERE chain includes a bool
 	// comparison (see queryGroupGAForSpace.memql).
-	canonicalSpace, err := engine.CanonicalizeIdValue(ctx, spaceId, "v1:cognition:space")
+	canonicalSpace, err := engine.CanonicalizeIdValue(ctx, partitionId, "v1:cognition:space")
 	if err != nil || canonicalSpace == "" {
 		if logger != nil {
 			logger.Debug("resolveGroupGAAgentId canonicalize failed",
-				"space_id", spaceId, "error", err)
+				"partition_id", partitionId, "error", err)
 		}
 		return ""
 	}
 	canonicalSpaceJSON, _ := json.Marshal(canonicalSpace)
-	query := fmt.Sprintf(`queryGroupGAForSpace({spaceId: %s})`, string(canonicalSpaceJSON))
+	query := fmt.Sprintf(`queryGroupGAForSpace({partitionId: %s})`, string(canonicalSpaceJSON))
 	result, err := engine.Execute(ctx, query)
 	if err != nil || result == nil {
 		if logger != nil {
 			logger.Debug("resolveGroupGAAgentId query failed",
-				"space_id", spaceId, "error", err)
+				"partition_id", partitionId, "error", err)
 		}
 		return ""
 	}
@@ -399,14 +399,14 @@ func extractFirstAgentIdFromParticipants(payload any) string {
 //
 // Read-only; failures fall through to "mirror_user" silently so a
 // transient query error doesn't break session-start.
-func resolveInitialChannelMode(s *streamSession, spaceId, agentId, channel string) string {
+func resolveInitialChannelMode(s *streamSession, partitionId, agentId, channel string) string {
 	const fallback = "mirror_user"
 	if s == nil || s.service == nil || s.service.engine == nil {
 		return fallback
 	}
 
 	// 1) Active per-(space, agent) override.
-	if mode, ok := resolveChannelOverrideMode(s, spaceId, agentId, channel); ok {
+	if mode, ok := resolveChannelOverrideMode(s, partitionId, agentId, channel); ok {
 		return mode
 	}
 
@@ -435,7 +435,7 @@ func resolveInitialChannelMode(s *streamSession, spaceId, agentId, channel strin
 // default / "mirror_user". Split out of resolveInitialChannelMode (#1429) so
 // session-start can run it concurrently with the single combined agent-record
 // read instead of paying two sequential queries per channel.
-func resolveChannelOverrideMode(s *streamSession, spaceId, agentId, channel string) (string, bool) {
+func resolveChannelOverrideMode(s *streamSession, partitionId, agentId, channel string) (string, bool) {
 	if s == nil || s.service == nil || s.service.engine == nil {
 		return "", false
 	}
@@ -444,10 +444,10 @@ func resolveChannelOverrideMode(s *streamSession, spaceId, agentId, channel stri
 		queryName = "queryVideoOverridesForSpace"
 	}
 	ctx := contextWithVoiceAgentActor(context.Background())
-	// Marshal spaceId so an embedded double quote cannot break out of the DSL
+	// Marshal partitionId so an embedded double quote cannot break out of the DSL
 	// string literal.
-	spaceIdJSON, _ := json.Marshal(spaceId)
-	overrideQuery := fmt.Sprintf(`%s({spaceId: %s})`, queryName, string(spaceIdJSON))
+	partitionIdJSON, _ := json.Marshal(partitionId)
+	overrideQuery := fmt.Sprintf(`%s({partitionId: %s})`, queryName, string(partitionIdJSON))
 	result, err := s.service.engine.Execute(ctx, overrideQuery)
 	if err != nil {
 		return "", false
@@ -557,12 +557,12 @@ type spaceContextFields struct {
 // instructions (#1470). Best-effort throughout: a nil engine, a query error, or
 // a missing row degrades that piece to empty rather than failing session
 // bring-up (the voice session still comes up, just without that context line).
-func resolveVoiceSpaceContext(s *streamSession, spaceId string) spaceContextFields {
+func resolveVoiceSpaceContext(s *streamSession, partitionId string) spaceContextFields {
 	if s == nil || s.service == nil || s.service.engine == nil {
 		return spaceContextFields{}
 	}
 	ctx := contextWithVoiceAgentActor(context.Background())
-	return resolveVoiceSpaceContextVia(ctx, s.service.engine, spaceId)
+	return resolveVoiceSpaceContextVia(ctx, s.service.engine, partitionId)
 }
 
 // resolveVoiceSpaceContextVia is the seam-based core of resolveVoiceSpaceContext
@@ -570,9 +570,9 @@ func resolveVoiceSpaceContext(s *streamSession, spaceId string) spaceContextFiel
 // the space name + goal statement + human-participant display names through the
 // narrow voiceParticipantResolver so the resolution is unit-testable without a
 // live engine. Each leg is independent and best-effort.
-func resolveVoiceSpaceContextVia(ctx context.Context, engine voiceParticipantResolver, spaceId string) spaceContextFields {
+func resolveVoiceSpaceContextVia(ctx context.Context, engine voiceParticipantResolver, partitionId string) spaceContextFields {
 	var out spaceContextFields
-	if engine == nil || strings.TrimSpace(spaceId) == "" {
+	if engine == nil || strings.TrimSpace(partitionId) == "" {
 		return out
 	}
 
@@ -580,15 +580,15 @@ func resolveVoiceSpaceContextVia(ctx context.Context, engine voiceParticipantRes
 	// `<partition>:v1:cognition:space:<slug>` form the rows are keyed by, mirroring
 	// resolveSingleActiveHumanParticipantId. On failure fall back to the wire
 	// value so an already-canonical id still resolves.
-	canonicalSpace, err := engine.CanonicalizeIdValue(ctx, spaceId, "v1:cognition:space")
+	canonicalSpace, err := engine.CanonicalizeIdValue(ctx, partitionId, "v1:cognition:space")
 	if err != nil || canonicalSpace == "" {
-		canonicalSpace = spaceId
+		canonicalSpace = partitionId
 	}
 	spaceJSON, _ := json.Marshal(canonicalSpace)
 
 	// Space name + goal statement off the space row (spaceFull projects name +
 	// goal).
-	if result, err := engine.Execute(ctx, fmt.Sprintf(`querySpaceMeta({spaceId: %s})`, string(spaceJSON))); err == nil && result != nil {
+	if result, err := engine.Execute(ctx, fmt.Sprintf(`querySpaceMeta({partitionId: %s})`, string(spaceJSON))); err == nil && result != nil {
 		payload := result.OutputPayload()
 		out.name, _ = extractFirstAgentField(payload, "name")
 		out.purpose = extractSpaceGoalStatement(payload)
@@ -596,7 +596,7 @@ func resolveVoiceSpaceContextVia(ctx context.Context, engine voiceParticipantRes
 
 	// Human participant display names. Reuse the existing querySpaceParticipants
 	// path the speaker-attribution fallback uses.
-	if result, err := engine.Execute(ctx, fmt.Sprintf(`querySpaceParticipants({spaceId: %s, participantType: "human", status: "active"})`, string(spaceJSON))); err == nil && result != nil {
+	if result, err := engine.Execute(ctx, fmt.Sprintf(`querySpaceParticipants({partitionId: %s, participantType: "human", status: "active"})`, string(spaceJSON))); err == nil && result != nil {
 		out.participantNames = extractParticipantNames(result.OutputPayload())
 	}
 
@@ -613,20 +613,20 @@ func resolveVoiceSpaceContextVia(ctx context.Context, engine voiceParticipantRes
 // space belongs to the space owner; the daily space owner IS the user). Returns
 // "" on any lookup miss so the caller leaves the default unset rather than
 // stamping a wrong owner.
-func resolveVoiceSpaceOwnerVia(ctx context.Context, engine voiceParticipantResolver, spaceId string) string {
-	if engine == nil || strings.TrimSpace(spaceId) == "" {
+func resolveVoiceSpaceOwnerVia(ctx context.Context, engine voiceParticipantResolver, partitionId string) string {
+	if engine == nil || strings.TrimSpace(partitionId) == "" {
 		return ""
 	}
 	// Canonicalize the bare space slug to the stored
 	// `<partition>:v1:cognition:space:<slug>` form (mirrors
 	// resolveVoiceSpaceContextVia); fall back to the wire value so an
 	// already-canonical id still resolves.
-	canonicalSpace, err := engine.CanonicalizeIdValue(ctx, spaceId, "v1:cognition:space")
+	canonicalSpace, err := engine.CanonicalizeIdValue(ctx, partitionId, "v1:cognition:space")
 	if err != nil || canonicalSpace == "" {
-		canonicalSpace = spaceId
+		canonicalSpace = partitionId
 	}
 	spaceJSON, _ := json.Marshal(canonicalSpace)
-	result, err := engine.Execute(ctx, fmt.Sprintf(`querySpaceMeta({spaceId: %s})`, string(spaceJSON)))
+	result, err := engine.Execute(ctx, fmt.Sprintf(`querySpaceMeta({partitionId: %s})`, string(spaceJSON)))
 	if err != nil || result == nil {
 		return ""
 	}
@@ -982,7 +982,7 @@ func (s *streamSession) voiceAgentScopedToolNames() (map[string]struct{}, bool) 
 }
 
 // stampVoiceAgentScopeOnListTools copies the bound voice-session scope
-// (spaceId + GA agent id) onto a ListToolsMsg before it is proxied to the agent
+// (partitionId + GA agent id) onto a ListToolsMsg before it is proxied to the agent
 // node (#1448). The agent-node receiver has no local voiceAgentScopeId of its
 // own, so without this the scope context is lost across the hop and the surface
 // fails open to the full registry. No-op when this session isn't a voice-agent
@@ -992,11 +992,11 @@ func (s *streamSession) stampVoiceAgentScopeOnListTools(msg *memqlv1.ListToolsMs
 		return
 	}
 	s.voiceAgentSpeakSubMu.Lock()
-	spaceId := s.voiceAgentScopeId
+	partitionId := s.voiceAgentScopeId
 	agentId := s.voiceAgentGaAgentId
 	s.voiceAgentSpeakSubMu.Unlock()
-	if spaceId != "" {
-		msg.VoiceAgentScopeId = spaceId
+	if partitionId != "" {
+		msg.VoiceAgentScopeId = partitionId
 	}
 	if agentId != "" {
 		msg.VoiceAgentGaAgentId = agentId
@@ -1004,7 +1004,7 @@ func (s *streamSession) stampVoiceAgentScopeOnListTools(msg *memqlv1.ListToolsMs
 }
 
 // stampVoiceAgentScopeOnCallTool copies the bound voice-session execution
-// context (spaceId + the resolved GA role) onto a CallToolMsg before it is
+// context (partitionId + the resolved GA role) onto a CallToolMsg before it is
 // proxied to the agent node. The agent-node receiver has no local
 // voiceAgentScopeId / voiceAgentGaRole (those bind only on the bff session that
 // received VoiceAgentSessionStart), so without this the agent-node role gate
@@ -1016,11 +1016,11 @@ func (s *streamSession) stampVoiceAgentScopeOnCallTool(msg *memqlv1.CallToolMsg)
 		return
 	}
 	s.voiceAgentSpeakSubMu.Lock()
-	spaceId := s.voiceAgentScopeId
+	partitionId := s.voiceAgentScopeId
 	gaRole := s.voiceAgentGaRole
 	s.voiceAgentSpeakSubMu.Unlock()
-	if spaceId != "" {
-		msg.VoiceAgentScopeId = spaceId
+	if partitionId != "" {
+		msg.VoiceAgentScopeId = partitionId
 	}
 	if gaRole != "" {
 		msg.VoiceAgentGaRole = gaRole
@@ -1029,7 +1029,7 @@ func (s *streamSession) stampVoiceAgentScopeOnCallTool(msg *memqlv1.CallToolMsg)
 
 // contextWithVoiceCallToolDefaults attaches the realtime-voice CallTool
 // auto-injection defaults to ctx so the engine's central applyToolDefaults
-// (in ExecuteTool) can stamp the `@autoInjected` spaceId / agentId /
+// (in ExecuteTool) can stamp the `@autoInjected` partitionId / agentId /
 // ownerUserId fields the voice model is forbidden from supplying (#1503).
 //
 // This is the agent-node (proxied receiver) counterpart to the chat path's
@@ -1038,7 +1038,7 @@ func (s *streamSession) stampVoiceAgentScopeOnCallTool(msg *memqlv1.CallToolMsg)
 // CallToolMsg (VoiceAgentScopeId / VoiceAgentGaAgentId, stamped by
 // stampVoiceAgentScopeOnCallTool); the local agent-node session has none of it.
 //
-//   - spaceId  <- the threaded VoiceAgentScopeId.
+//   - partitionId  <- the threaded VoiceAgentScopeId.
 //   - agentId  <- the space's group-GA agent (resolveGroupGAAgentId), the same
 //     resolution the ListTools scope gate uses. Becomes the produced plan's
 //     ownerAgentId so the production turn dispatches straight to the assistant.
@@ -1047,7 +1047,7 @@ func (s *streamSession) stampVoiceAgentScopeOnCallTool(msg *memqlv1.CallToolMsg)
 //     the human; the space owner is the correct artifact attribution.
 //
 // agentId is resolved server-side (not threaded on the CallToolMsg) so no proto
-// change is needed; ownerUserId/spaceId are the load-bearing defaults for
+// change is needed; ownerUserId/partitionId are the load-bearing defaults for
 // produceArtifact (only those two are @required on the builtin).
 //
 // No-op (returns ctx unchanged) for non-voice callers -- a plain browser
@@ -1073,8 +1073,8 @@ func voiceCallToolDefaultsVia(ctx context.Context, engine voiceParticipantResolv
 	if engine == nil || msg == nil {
 		return ctx
 	}
-	spaceId := strings.TrimSpace(msg.GetVoiceAgentScopeId())
-	if spaceId == "" {
+	partitionId := strings.TrimSpace(msg.GetVoiceAgentScopeId())
+	if partitionId == "" {
 		// Not a proxied voice CallTool (or pre-#1503 bff that doesn't thread
 		// the scope) -- leave the context untouched.
 		return ctx
@@ -1084,37 +1084,37 @@ func voiceCallToolDefaultsVia(ctx context.Context, engine voiceParticipantResolv
 	// ctx's provenance. querySpaceMeta is @public; queryGroupGAForSpace reads
 	// the space's GA participant.
 	resolveCtx := contextWithVoiceAgentActor(ctx)
-	defaults := map[string]any{"spaceId": spaceId}
-	if agentId := resolveGroupGAAgentIdVia(resolveCtx, engine, spaceId, logger); agentId != "" {
+	defaults := map[string]any{"partitionId": partitionId}
+	if agentId := resolveGroupGAAgentIdVia(resolveCtx, engine, partitionId, logger); agentId != "" {
 		defaults["agentId"] = agentId
 	}
-	if owner := resolveVoiceSpaceOwnerVia(resolveCtx, engine, spaceId); owner != "" {
+	if owner := resolveVoiceSpaceOwnerVia(resolveCtx, engine, partitionId); owner != "" {
 		defaults["ownerUserId"] = owner
 	}
 	return common.ContextWithToolDefaults(ctx, defaults)
 }
 
 // voiceAgentScopedToolNamesForRequest resolves the GA tool-scope using the
-// scope threaded through the ListTools request first (reqSpaceId / reqAgentId,
+// scope threaded through the ListTools request first (reqPartitionId / reqAgentId,
 // stamped by the bff before proxying -- #1448), falling back to this session's
 // locally bound scope for non-proxied callers. Everything else is identical to
 // the single-node #1442 resolution: resolve the GA's real id, read its tool
 // surface, fail open ONLY on a genuine lookup error.
-func (s *streamSession) voiceAgentScopedToolNamesForRequest(reqSpaceId, reqAgentId string) (map[string]struct{}, string, bool) {
+func (s *streamSession) voiceAgentScopedToolNamesForRequest(reqPartitionId, reqAgentId string) (map[string]struct{}, string, bool) {
 	if s == nil {
 		return nil, "", false
 	}
 	s.voiceAgentSpeakSubMu.Lock()
-	localSpaceId := s.voiceAgentScopeId
+	localPartitionId := s.voiceAgentScopeId
 	localAgentId := s.voiceAgentGaAgentId
 	s.voiceAgentSpeakSubMu.Unlock()
 
 	// The threaded request scope wins (the proxied agent-node receiver path,
 	// where the local session has no bound scope); local session state is the
 	// fallback for in-process / non-proxied callers.
-	spaceId := strings.TrimSpace(reqSpaceId)
-	if spaceId == "" {
-		spaceId = localSpaceId
+	partitionId := strings.TrimSpace(reqPartitionId)
+	if partitionId == "" {
+		partitionId = localPartitionId
 	}
 	boundAgentId := strings.TrimSpace(reqAgentId)
 	if boundAgentId == "" {
@@ -1125,11 +1125,11 @@ func (s *streamSession) voiceAgentScopedToolNamesForRequest(reqSpaceId, reqAgent
 	}
 	return voiceAgentScopedToolNamesVia(
 		contextWithVoiceAgentActor(context.Background()),
-		s.service.engine, spaceId, boundAgentId, s.logger)
+		s.service.engine, partitionId, boundAgentId, s.logger)
 }
 
 // voiceAgentScopedToolNamesVia is the seam-based core of the GA tool-scope
-// resolution (#1442/#1448): given the effective (spaceId, boundAgentId) -- after
+// resolution (#1442/#1448): given the effective (partitionId, boundAgentId) -- after
 // the threaded-request-vs-local-session selection -- it resolves the GA's real
 // id and reads its tool surface through the narrow voiceParticipantResolver, so
 // the cross-node threaded path is unit-testable without a live engine. Returns
@@ -1139,12 +1139,12 @@ func (s *streamSession) voiceAgentScopedToolNamesForRequest(reqSpaceId, reqAgent
 func voiceAgentScopedToolNamesVia(
 	ctx context.Context,
 	engine voiceParticipantResolver,
-	spaceId, boundAgentId string,
+	partitionId, boundAgentId string,
 	logger *slog.Logger,
 ) (scope map[string]struct{}, role string, scoped bool) {
 	// Not a voice-agent session: no space bound and no agent bound -> no
 	// scoping applies, every other caller keeps the unscoped registry.
-	if spaceId == "" && boundAgentId == "" {
+	if partitionId == "" && boundAgentId == "" {
 		return nil, "", false
 	}
 	if engine == nil {
@@ -1156,8 +1156,8 @@ func voiceAgentScopedToolNamesVia(
 	// only when we have no space to resolve from (defensive -- in practice a
 	// voice session always binds a space).
 	agentId := ""
-	if spaceId != "" {
-		agentId = resolveGroupGAAgentIdVia(ctx, engine, spaceId, logger)
+	if partitionId != "" {
+		agentId = resolveGroupGAAgentIdVia(ctx, engine, partitionId, logger)
 	}
 	if agentId == "" {
 		// The space resolve failed (no active AI participant, or query error)
@@ -1170,7 +1170,7 @@ func voiceAgentScopedToolNamesVia(
 		// so this is visible if it ever happens on a real voice session.
 		if logger != nil {
 			logger.Warn("voice-agent tool scope: no GA id resolvable -- serving unscoped registry",
-				"space_id", spaceId)
+				"partition_id", partitionId)
 		}
 		return nil, "", false
 	}
@@ -1183,13 +1183,13 @@ func voiceAgentScopedToolNamesVia(
 		// error; log here for the row-not-found case so both are visible.
 		if logger != nil {
 			logger.Warn("voice-agent tool scope: agent row not resolved -- serving unscoped registry",
-				"space_id", spaceId, "agent_id", agentId)
+				"partition_id", partitionId, "agent_id", agentId)
 		}
 		return nil, "", false
 	}
 	if logger != nil {
 		logger.Debug("voice-agent tool scope resolved",
-			"space_id", spaceId, "agent_id", agentId, "scoped_count", len(set), "agent_role", agentRole)
+			"partition_id", partitionId, "agent_id", agentId, "scoped_count", len(set), "agent_role", agentRole)
 	}
 	return set, agentRole, true
 }
@@ -1501,7 +1501,7 @@ func (s *streamSession) handleVoiceAgentSessionEnd(envelope *memqlv1.MemqlClient
 	if s.logger != nil {
 		s.logger.Info("voice-agent session end",
 			"request_id", requestId,
-			"space_id", msg.GetSpaceId(),
+			"partition_id", msg.GetPartitionId(),
 			"room_name", msg.GetRoomName(),
 			"reason", msg.GetReason())
 	}
@@ -1608,11 +1608,11 @@ func runVoiceSpeakWorker(queue <-chan voiceAgentReply, done <-chan struct{}, res
 //
 // Idempotent: replacing an active subscriber on a re-issued
 // SessionStart cancels the previous one (subscription AND worker) first.
-func (s *streamSession) startVoiceAgentSpeakSubscriber(spaceId, gaAgentId, initialAudioMode string) {
+func (s *streamSession) startVoiceAgentSpeakSubscriber(partitionId, gaAgentId, initialAudioMode string) {
 	if s == nil || s.service == nil || s.service.eventBus == nil {
 		return
 	}
-	if spaceId == "" || gaAgentId == "" {
+	if partitionId == "" || gaAgentId == "" {
 		return
 	}
 
@@ -1621,7 +1621,7 @@ func (s *streamSession) startVoiceAgentSpeakSubscriber(spaceId, gaAgentId, initi
 		s.voiceAgentSpeakStop()
 		s.voiceAgentSpeakStop = nil
 	}
-	s.voiceAgentScopeId = spaceId
+	s.voiceAgentScopeId = partitionId
 	s.voiceAgentGaAgentId = gaAgentId
 	s.voiceAgentSpeakSubMu.Unlock()
 
@@ -1646,9 +1646,9 @@ func (s *streamSession) startVoiceAgentSpeakSubscriber(spaceId, gaAgentId, initi
 	}
 
 	pattern := "graph.node.created.v1:cognition:utterance"
-	subName := fmt.Sprintf("voice-agent-speak-%s-%s", spaceId, gaAgentId)
+	subName := fmt.Sprintf("voice-agent-speak-%s-%s", partitionId, gaAgentId)
 	unsubscribe := s.service.eventBus.Subscribe(pattern, func(e events.Event) {
-		reply, ok := extractGAReplyFromEvent(e, spaceId, gaAgentId)
+		reply, ok := extractGAReplyFromEvent(e, partitionId, gaAgentId)
 		if !ok {
 			return
 		}
@@ -1665,14 +1665,14 @@ func (s *streamSession) startVoiceAgentSpeakSubscriber(spaceId, gaAgentId, initi
 		}
 		// Skip if a VoiceAgentTurnRequest is in flight -- that path
 		// will deliver this same reply via TurnDelta.
-		turnKey := spaceId + "|" + gaAgentId
+		turnKey := partitionId + "|" + gaAgentId
 		s.voiceTurnsMu.Lock()
 		_, turnInFlight := s.voiceTurns[turnKey]
 		s.voiceTurnsMu.Unlock()
 		if turnInFlight {
 			if s.logger != nil {
 				s.logger.Debug("voice-agent speak skip: turn in flight",
-					"space_id", spaceId,
+					"partition_id", partitionId,
 					"ga_agent_id", gaAgentId,
 					"utterance_id", reply.utteranceId)
 			}
@@ -1685,7 +1685,7 @@ func (s *streamSession) startVoiceAgentSpeakSubscriber(spaceId, gaAgentId, initi
 		default:
 			if s.logger != nil {
 				s.logger.Warn("voice-agent speak queue full: dropping reply",
-					"space_id", spaceId,
+					"partition_id", partitionId,
 					"ga_agent_id", gaAgentId,
 					"utterance_id", reply.utteranceId)
 			}
@@ -1699,14 +1699,14 @@ func (s *streamSession) startVoiceAgentSpeakSubscriber(spaceId, gaAgentId, initi
 			// measures -- a hit costs nothing and logs nothing).
 			mode := modeCache.get(func() string {
 				modeStart := time.Now()
-				resolved := resolveInitialChannelMode(s, spaceId, gaAgentId, "audio")
+				resolved := resolveInitialChannelMode(s, partitionId, gaAgentId, "audio")
 				logVoiceTiming(s.logger, "server.speak.audio_mode_lookup", modeStart,
-					"space_id", spaceId, "utterance_id", reply.utteranceId)
+					"partition_id", partitionId, "utterance_id", reply.utteranceId)
 				return resolved
 			})
 			if mode != "always_on" && s.logger != nil {
 				s.logger.Info("voice-agent speak skip: audio mode not always_on",
-					"space_id", spaceId,
+					"partition_id", partitionId,
 					"ga_agent_id", gaAgentId,
 					"utterance_id", reply.utteranceId,
 					"audio_mode", mode)
@@ -1718,7 +1718,7 @@ func (s *streamSession) startVoiceAgentSpeakSubscriber(spaceId, gaAgentId, initi
 			if s.logger != nil {
 				s.logger.Info("voice-agent speak emit",
 					"request_id", requestId,
-					"space_id", spaceId,
+					"partition_id", partitionId,
 					"ga_agent_id", gaAgentId,
 					"utterance_id", reply.utteranceId,
 					"text_len", len(reply.text))
@@ -1730,7 +1730,7 @@ func (s *streamSession) startVoiceAgentSpeakSubscriber(spaceId, gaAgentId, initi
 				Payload: &memqlv1.MemqlServerMessage_VoiceAgentSpeak{
 					VoiceAgentSpeak: &memqlv1.VoiceAgentSpeak{
 						RequestId:   requestId,
-						SpaceId:     spaceId,
+						PartitionId:     partitionId,
 						GaAgentId:   gaAgentId,
 						UtteranceId: reply.utteranceId,
 						Text:        reply.text,
@@ -1776,10 +1776,10 @@ func (s *streamSession) handleVoiceAgentPartialTranscript(envelope *memqlv1.Memq
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
 	correlate := envelope.GetMessageId()
 
-	spaceId := strings.TrimSpace(msg.GetSpaceId())
+	partitionId := strings.TrimSpace(msg.GetPartitionId())
 	speakerId := strings.TrimSpace(msg.GetSpeakerUserId())
-	if spaceId == "" || speakerId == "" {
-		return s.sendQueryError(requestId, correlate, codes.InvalidArgument, "spaceId and speakerUserId are required")
+	if partitionId == "" || speakerId == "" {
+		return s.sendQueryError(requestId, correlate, codes.InvalidArgument, "partitionId and speakerUserId are required")
 	}
 
 	if s.service.eventBus != nil {
@@ -1787,7 +1787,7 @@ func (s *streamSession) handleVoiceAgentPartialTranscript(envelope *memqlv1.Memq
 			voicePartialEventTopic,
 			events.KindMessage,
 			map[string]any{
-				"spaceId":       spaceId,
+				"partitionId":       partitionId,
 				"speakerUserId": speakerId,
 				"text":          msg.GetPartialText(),
 				"sequence":      msg.GetSequence(),
@@ -1825,21 +1825,21 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 		return s.sendQueryError(requestId, correlate, codes.Unavailable, "engine not configured")
 	}
 
-	spaceId := strings.TrimSpace(msg.GetSpaceId())
+	partitionId := strings.TrimSpace(msg.GetPartitionId())
 	speakerId := strings.TrimSpace(msg.GetSpeakerUserId())
 	text := strings.TrimSpace(msg.GetFinalText())
-	if spaceId == "" || text == "" {
+	if partitionId == "" || text == "" {
 		// WARN on rejection: a rejected final transcript means the user's
 		// voice utterance never reaches chat or cognition -- the silent
 		// failure #1403 made invisible.
 		if s.logger != nil {
 			s.logger.Warn("voice-agent final transcript rejected: missing required fields",
 				"request_id", requestId,
-				"space_id", spaceId,
-				"missing_space_id", spaceId == "",
+				"partition_id", partitionId,
+				"missing_partition_id", partitionId == "",
 				"missing_final_text", text == "")
 		}
-		return s.sendQueryError(requestId, correlate, codes.InvalidArgument, "spaceId and finalText are required")
+		return s.sendQueryError(requestId, correlate, codes.InvalidArgument, "partitionId and finalText are required")
 	}
 
 	// Mint a flat slug -- speakerId is the canonical participant id
@@ -1870,14 +1870,14 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 		if speakerId == "" {
 			speakerResolveStart := time.Now()
 			resolved, rerr := resolveSingleActiveHumanParticipantId(
-				contextWithVoiceAgentActor(context.Background()), s.service.engine, spaceId)
+				contextWithVoiceAgentActor(context.Background()), s.service.engine, partitionId)
 			logVoiceTiming(s.logger, "server.final_transcript.resolve_speaker", speakerResolveStart,
-				"space_id", spaceId, "ok", rerr == nil)
+				"partition_id", partitionId, "ok", rerr == nil)
 			if rerr != nil {
 				if s.logger != nil {
 					s.logger.Warn("voice-agent final transcript rejected: speakerUserId empty and active speaker unresolvable",
 						"request_id", requestId,
-						"space_id", spaceId,
+						"partition_id", partitionId,
 						"error", rerr)
 				}
 				s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
@@ -1896,7 +1896,7 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 			if s.logger != nil {
 				s.logger.Info("voice-agent final transcript: resolved fallback speaker",
 					"request_id", requestId,
-					"space_id", spaceId,
+					"partition_id", partitionId,
 					"speaker_user_id", speakerId)
 			}
 		}
@@ -1907,11 +1907,11 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 		// the source enum.
 		textJSON, _ := json.Marshal(text)
 		utteranceIdJSON, _ := json.Marshal(utteranceId)
-		spaceIdJSON, _ := json.Marshal(spaceId)
+		partitionIdJSON, _ := json.Marshal(partitionId)
 		speakerIdJSON, _ := json.Marshal(speakerId)
 		inputMethodJSON, _ := json.Marshal(inputMethod)
-		query := fmt.Sprintf(`mutationSendTextUtterance({utteranceId: %s, spaceId: %s, participantId: %s, text: %s, source: {inputMethod: %s, pipeline: "voice-agent"}})`,
-			string(utteranceIdJSON), string(spaceIdJSON), string(speakerIdJSON), string(textJSON), string(inputMethodJSON))
+		query := fmt.Sprintf(`mutationSendTextUtterance({utteranceId: %s, partitionId: %s, participantId: %s, text: %s, source: {inputMethod: %s, pipeline: "voice-agent"}})`,
+			string(utteranceIdJSON), string(partitionIdJSON), string(speakerIdJSON), string(textJSON), string(inputMethodJSON))
 
 		ctx := contextWithVoiceAgentActor(context.Background())
 		// #1426: the user-utterance insert (engine mutation -> DB) that also
@@ -1919,12 +1919,12 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 		insertStart := time.Now()
 		_, err := s.service.engine.Execute(ctx, query)
 		logVoiceTiming(s.logger, "server.final_transcript.insert", insertStart,
-			"space_id", spaceId, "input_method", inputMethod, "ok", err == nil)
+			"partition_id", partitionId, "input_method", inputMethod, "ok", err == nil)
 		if err != nil {
 			if s.logger != nil {
 				s.logger.Error("voice-agent final transcript insert failed",
 					"request_id", requestId,
-					"space_id", spaceId,
+					"partition_id", partitionId,
 					"error", err)
 			}
 			s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
@@ -1979,11 +1979,11 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
 	correlate := envelope.GetMessageId()
 
-	spaceId := strings.TrimSpace(msg.GetSpaceId())
+	partitionId := strings.TrimSpace(msg.GetPartitionId())
 	gaAgentId := strings.TrimSpace(msg.GetGaAgentId())
 	utterance := strings.TrimSpace(msg.GetUtteranceText())
-	if spaceId == "" || gaAgentId == "" || utterance == "" {
-		return s.sendQueryError(requestId, correlate, codes.InvalidArgument, "spaceId, gaAgentId, utteranceText are required")
+	if partitionId == "" || gaAgentId == "" || utterance == "" {
+		return s.sendQueryError(requestId, correlate, codes.InvalidArgument, "partitionId, gaAgentId, utteranceText are required")
 	}
 
 	if s.service.eventBus == nil {
@@ -2006,7 +2006,7 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 	if s.logger != nil {
 		s.logger.Info("voice-agent turn request",
 			"request_id", requestId,
-			"space_id", spaceId,
+			"partition_id", partitionId,
 			"ga_agent_id", gaAgentId,
 			"thread", msg.GetThread().String(),
 			"utterance_len", len(utterance))
@@ -2021,7 +2021,7 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 
 	replyCh := make(chan voiceAgentReply, 4)
 	unsubscribe := s.service.eventBus.Subscribe(pattern, func(e events.Event) {
-		reply, ok := extractGAReplyFromEvent(e, spaceId, gaAgentId)
+		reply, ok := extractGAReplyFromEvent(e, partitionId, gaAgentId)
 		if !ok {
 			return
 		}
@@ -2041,7 +2041,7 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 	// above still drives the turn.
 	directiveCh := make(chan voiceGateDirective, 4)
 	unsubscribeDirective := s.service.eventBus.Subscribe(voiceGateDirectiveTopic, func(e events.Event) {
-		dir, ok := extractVoiceGateDirective(e, spaceId, gaAgentId)
+		dir, ok := extractVoiceGateDirective(e, partitionId, gaAgentId)
 		if !ok {
 			return
 		}
@@ -2062,7 +2062,7 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 	// each sent its own TurnDelta back to voice-agent, and
 	// LK Agents 1.5's AgentSession had multiple LLMStreams racing --
 	// only one's TTS reached Aura-2.
-	turnKey := spaceId + "|" + gaAgentId
+	turnKey := partitionId + "|" + gaAgentId
 	// turnStart anchors the server-side share of the per-turn window (#1426):
 	// turn request received -> gate directive / authored reply / timeout.
 	turnStart := time.Now()
@@ -2117,11 +2117,11 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 			}
 			if s.logger != nil {
 				s.logger.Info("voice-agent turn: gate directive",
-					"request_id", requestId, "space_id", spaceId,
+					"request_id", requestId, "partition_id", partitionId,
 					"engage", complete.DirectiveMode != "", "mode", dir.mode, "brevity", dir.brevity)
 			}
 			logVoiceTiming(s.logger, "server.turn.gate_directive", turnStart,
-				"space_id", spaceId, "request_id", requestId,
+				"partition_id", partitionId, "request_id", requestId,
 				"engage", complete.DirectiveMode != "", "mode", dir.mode)
 			s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
 				Payload: &memqlv1.MemqlServerMessage_VoiceAgentTurnComplete{
@@ -2130,7 +2130,7 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 			})
 		case reply := <-replyCh:
 			logVoiceTiming(s.logger, "server.turn.authored_reply", turnStart,
-				"space_id", spaceId, "request_id", requestId, "chars", len(reply.text))
+				"partition_id", partitionId, "request_id", requestId, "chars", len(reply.text))
 			s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
 				Payload: &memqlv1.MemqlServerMessage_VoiceAgentTurnDelta{
 					VoiceAgentTurnDelta: &memqlv1.VoiceAgentTurnDelta{
@@ -2166,12 +2166,12 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 			if s.logger != nil {
 				s.logger.Warn("voice-agent turn ended without reply",
 					"request_id", requestId,
-					"space_id", spaceId,
+					"partition_id", partitionId,
 					"ga_agent_id", gaAgentId,
 					"reason", reason)
 			}
 			logVoiceTiming(s.logger, "server.turn.no_reply", turnStart,
-				"space_id", spaceId, "request_id", requestId, "reason", reason)
+				"partition_id", partitionId, "request_id", requestId, "reason", reason)
 			s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
 				Payload: &memqlv1.MemqlServerMessage_VoiceAgentTurnComplete{
 					VoiceAgentTurnComplete: &memqlv1.VoiceAgentTurnComplete{
@@ -2199,7 +2199,7 @@ type voiceAgentReply struct {
 // extractGAReplyFromEvent pulls the (text, id) tuple out of a
 // graph.node.created event payload and filters for "is this the
 // GA's reply in the target space."
-func extractGAReplyFromEvent(e events.Event, spaceId, gaAgentId string) (voiceAgentReply, bool) {
+func extractGAReplyFromEvent(e events.Event, partitionId, gaAgentId string) (voiceAgentReply, bool) {
 	if e.Payload == nil {
 		return voiceAgentReply{}, false
 	}
@@ -2216,15 +2216,15 @@ func extractGAReplyFromEvent(e events.Event, spaceId, gaAgentId string) (voiceAg
 	}
 
 	// memql auto-canonicalizes relationship fields on insert, so the
-	// reply utterance's spaceId lands as
+	// reply utterance's partitionId lands as
 	// `<partition>:v1:cognition:space:<slug>` while the voice-agent
 	// passes the bare slug. Compare on the trailing slug so either
 	// form matches.
-	nodeSpaceId := asString(nodeFields, "spaceId")
-	if nodeSpaceId == "" {
-		nodeSpaceId = asString(nodeFields, "spaceId")
+	nodePartitionId := asString(nodeFields, "partitionId")
+	if nodePartitionId == "" {
+		nodePartitionId = asString(nodeFields, "partitionId")
 	}
-	if !spaceIdMatches(nodeSpaceId, spaceId) {
+	if !partitionIdMatches(nodePartitionId, partitionId) {
 		return voiceAgentReply{}, false
 	}
 	// Match any AI-participant reply in the target space. Backend
@@ -2236,7 +2236,7 @@ func extractGAReplyFromEvent(e events.Event, spaceId, gaAgentId string) (voiceAg
 	// the turn-request subscription opened IS the reply to the
 	// active voice turn -- there is no fan-out worth disambiguating
 	// here, and the previous gaAgentId match was checking against a
-	// voice-agent-side placeholder (`<space_id>-ga`) that has
+	// voice-agent-side placeholder (`<partition_id>-ga`) that has
 	// nothing to do with the real `v1:cognition:participant` row id
 	// the agent path inserts.
 	pt := asString(nodeFields, "participantType")
@@ -2291,14 +2291,14 @@ func asString(src map[string]any, key string) string {
 	return ""
 }
 
-// spaceIdMatches returns true when `nodeId` (read off a graph row) and
+// partitionIdMatches returns true when `nodeId` (read off a graph row) and
 // `wantId` (passed in by the voice-agent on the wire) point at the
 // same v1:cognition:space row, regardless of whether either side is
 // canonical (`<partition>:v1:cognition:space:<slug>`) or bare slug.
 // memql auto-canonicalizes relationship fields at insert time, but
 // the voice-agent passes the bare slug it parsed off the LiveKit
 // room name -- strict-string equality across the two forms misses.
-func spaceIdMatches(nodeId, wantId string) bool {
+func partitionIdMatches(nodeId, wantId string) bool {
 	if nodeId == "" || wantId == "" {
 		return false
 	}
@@ -2358,11 +2358,11 @@ func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlCl
 		return s.sendQueryError(requestId, correlate, codes.Unavailable, "engine not configured")
 	}
 
-	spaceId := strings.TrimSpace(msg.GetSpaceId())
+	partitionId := strings.TrimSpace(msg.GetPartitionId())
 	gaAgentId := strings.TrimSpace(msg.GetGaAgentId())
 	text := strings.TrimSpace(msg.GetText())
-	if spaceId == "" || gaAgentId == "" || text == "" {
-		return s.sendQueryError(requestId, correlate, codes.InvalidArgument, "spaceId, gaAgentId, text are required")
+	if partitionId == "" || gaAgentId == "" || text == "" {
+		return s.sendQueryError(requestId, correlate, codes.InvalidArgument, "partitionId, gaAgentId, text are required")
 	}
 
 	// The committed utterance id IS the reply_id when provided so it
@@ -2400,13 +2400,13 @@ func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlCl
 		// participant; voice rooms have a single GA, so the first active
 		// AI participant is the speaker.
 		participantResolveStart := time.Now()
-		participantId := s.resolveAIParticipantId(ctx, spaceId)
+		participantId := s.resolveAIParticipantId(ctx, partitionId)
 		logVoiceTiming(s.logger, "server.realtime_output.resolve_participant", participantResolveStart,
-			"space_id", spaceId, "ok", participantId != "")
+			"partition_id", partitionId, "ok", participantId != "")
 		if participantId == "" {
 			if s.logger != nil {
 				s.logger.Error("voice-agent realtime output: no AI participant resolved",
-					"request_id", requestId, "space_id", spaceId, "ga_agent_id", gaAgentId)
+					"request_id", requestId, "partition_id", partitionId, "ga_agent_id", gaAgentId)
 			}
 			_ = ack(false, "", "participant_not_found", "no active AI participant in space")
 			return
@@ -2442,11 +2442,11 @@ func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlCl
 		// cannot break out of its DSL string literal (CodeQL unsafe-quoting,
 		// alert #188). text / source / replyTo already use this escaping.
 		utteranceIdJSON, _ := json.Marshal(utteranceId)
-		spaceIdJSON, _ := json.Marshal(spaceId)
+		partitionIdJSON, _ := json.Marshal(partitionId)
 		participantIdJSON, _ := json.Marshal(participantId)
 		query := fmt.Sprintf(
-			`mutationSendTextUtterance({utteranceId: %s, spaceId: %s, participantId: %s, participantType: "si", text: %s%s, source: %s%s})`,
-			string(utteranceIdJSON), string(spaceIdJSON), string(participantIdJSON),
+			`mutationSendTextUtterance({utteranceId: %s, partitionId: %s, participantId: %s, participantType: "si", text: %s%s, source: %s%s})`,
+			string(utteranceIdJSON), string(partitionIdJSON), string(participantIdJSON),
 			string(textJSON), replyToClause, string(sourceJSON), citationsClause,
 		)
 
@@ -2454,11 +2454,11 @@ func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlCl
 		insertStart := time.Now()
 		_, err := s.service.engine.Execute(ctx, query)
 		logVoiceTiming(s.logger, "server.realtime_output.insert", insertStart,
-			"space_id", spaceId, "ok", err == nil)
+			"partition_id", partitionId, "ok", err == nil)
 		if err != nil {
 			if s.logger != nil {
 				s.logger.Error("voice-agent realtime output insert failed",
-					"request_id", requestId, "space_id", spaceId,
+					"request_id", requestId, "partition_id", partitionId,
 					"utterance_id", utteranceId, "error", err)
 			}
 			_ = ack(false, "", "insert_failed", err.Error())
@@ -2467,7 +2467,7 @@ func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlCl
 
 		if s.logger != nil {
 			s.logger.Info("voice-agent realtime output inserted",
-				"request_id", requestId, "space_id", spaceId,
+				"request_id", requestId, "partition_id", partitionId,
 				"utterance_id", utteranceId, "participant_id", participantId,
 				"text_len", len(text), "citations", len(msg.GetCitations()))
 		}
@@ -2481,17 +2481,17 @@ func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlCl
 // space, or "" if none. Read-only; mirrors the resolution insertAIResponse
 // relies on (participantId must be the v1:cognition:participant id, not
 // the agent template id) so realtime utterances attribute identically.
-func (s *streamSession) resolveAIParticipantId(ctx context.Context, spaceId string) string {
+func (s *streamSession) resolveAIParticipantId(ctx context.Context, partitionId string) string {
 	if s == nil || s.service == nil || s.service.engine == nil {
 		return ""
 	}
-	spaceJSON, _ := json.Marshal(spaceId)
-	query := fmt.Sprintf(`querySiParticipantForSpace({spaceId: %s})`, string(spaceJSON))
+	spaceJSON, _ := json.Marshal(partitionId)
+	query := fmt.Sprintf(`querySiParticipantForSpace({partitionId: %s})`, string(spaceJSON))
 	result, err := s.service.engine.Execute(ctx, query)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Debug("resolveAIParticipantId query failed",
-				"space_id", spaceId, "error", err)
+				"partition_id", partitionId, "error", err)
 		}
 		return ""
 	}
@@ -2542,12 +2542,12 @@ func (s *streamSession) handleVoiceAgentRealtimeSpeaking(envelope *memqlv1.Memql
 		return nil
 	}
 
-	spaceId := strings.TrimSpace(msg.GetSpaceId())
+	partitionId := strings.TrimSpace(msg.GetPartitionId())
 	gaAgentId := strings.TrimSpace(msg.GetGaAgentId())
-	if spaceId == "" || gaAgentId == "" {
+	if partitionId == "" || gaAgentId == "" {
 		if s.logger != nil {
-			s.logger.Warn("voice-agent realtime speaking: spaceId and gaAgentId required",
-				"space_id", spaceId, "ga_agent_id", gaAgentId)
+			s.logger.Warn("voice-agent realtime speaking: partitionId and gaAgentId required",
+				"partition_id", partitionId, "ga_agent_id", gaAgentId)
 		}
 		return nil
 	}
@@ -2564,11 +2564,11 @@ func (s *streamSession) handleVoiceAgentRealtimeSpeaking(envelope *memqlv1.Memql
 		// template id) -- the presence row the frontend keys the orb on is
 		// keyed by participantId, the same id handleVoiceAgentRealtimeOutput
 		// attributes the AI utterance to.
-		participantId := s.resolveAIParticipantId(ctx, spaceId)
+		participantId := s.resolveAIParticipantId(ctx, partitionId)
 		if participantId == "" {
 			if s.logger != nil {
 				s.logger.Debug("voice-agent realtime speaking: no AI participant resolved",
-					"space_id", spaceId, "ga_agent_id", gaAgentId)
+					"partition_id", partitionId, "ga_agent_id", gaAgentId)
 			}
 			return
 		}
@@ -2580,17 +2580,17 @@ func (s *streamSession) handleVoiceAgentRealtimeSpeaking(envelope *memqlv1.Memql
 			label = "Speaking…"
 		}
 
-		if err := s.writeRealtimeSpeakingPresence(ctx, spaceId, participantId, state, label); err != nil {
+		if err := s.writeRealtimeSpeakingPresence(ctx, partitionId, participantId, state, label); err != nil {
 			if s.logger != nil {
 				s.logger.Warn("voice-agent realtime speaking: presence write failed",
-					"space_id", spaceId, "participant_id", participantId,
+					"partition_id", partitionId, "participant_id", participantId,
 					"state", state, "error", err)
 			}
 			return
 		}
 		if s.logger != nil {
 			s.logger.Debug("voice-agent realtime speaking: presence written",
-				"space_id", spaceId, "participant_id", participantId, "state", state)
+				"partition_id", partitionId, "participant_id", participantId, "state", state)
 		}
 	}()
 
@@ -2603,14 +2603,14 @@ func (s *streamSession) handleVoiceAgentRealtimeSpeaking(envelope *memqlv1.Memql
 // signal lands the SAME row shape the cascade/text path writes. Deterministic
 // id (one presence record per participant) and the same field set keep the
 // frontend's useParticipantPresence read unchanged.
-func (s *streamSession) writeRealtimeSpeakingPresence(ctx context.Context, spaceId, participantId, state, label string) error {
+func (s *streamSession) writeRealtimeSpeakingPresence(ctx context.Context, partitionId, participantId, state, label string) error {
 	id := realtimePresenceRecordId(participantId)
 	if id == "" {
 		return fmt.Errorf("invalid presence record id")
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	payload := map[string]any{
-		"spaceId":       spaceId,
+		"partitionId":       partitionId,
 		"participantId": participantId,
 		"state":         state,
 		"label":         label,
@@ -2713,7 +2713,7 @@ type voiceParticipantResolver interface {
 // human participant. Conservative rule: exactly one active human resolves;
 // zero or multiple return an error so the caller rejects rather than
 // guessing attribution.
-func resolveSingleActiveHumanParticipantId(ctx context.Context, engine voiceParticipantResolver, spaceId string) (string, error) {
+func resolveSingleActiveHumanParticipantId(ctx context.Context, engine voiceParticipantResolver, partitionId string) (string, error) {
 	if engine == nil {
 		return "", fmt.Errorf("engine not configured")
 	}
@@ -2722,14 +2722,14 @@ func resolveSingleActiveHumanParticipantId(ctx context.Context, engine voicePart
 	// the bare slug; canonicalize before filtering (mirrors
 	// resolveGroupGAAgentId). On canonicalize failure fall back to the wire
 	// value so an already-canonical id still resolves.
-	canonicalSpace, err := engine.CanonicalizeIdValue(ctx, spaceId, "v1:cognition:space")
+	canonicalSpace, err := engine.CanonicalizeIdValue(ctx, partitionId, "v1:cognition:space")
 	if err != nil || canonicalSpace == "" {
-		canonicalSpace = spaceId
+		canonicalSpace = partitionId
 	}
 	// JSON-marshal the interpolated id so an embedded double quote cannot
 	// break out of the DSL string literal.
 	spaceJSON, _ := json.Marshal(canonicalSpace)
-	query := fmt.Sprintf(`querySpaceParticipants({spaceId: %s, participantType: "human", status: "active"})`, string(spaceJSON))
+	query := fmt.Sprintf(`querySpaceParticipants({partitionId: %s, participantType: "human", status: "active"})`, string(spaceJSON))
 	result, err := engine.Execute(ctx, query)
 	if err != nil {
 		return "", fmt.Errorf("query active human participants: %w", err)

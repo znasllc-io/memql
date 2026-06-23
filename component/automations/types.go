@@ -565,9 +565,9 @@ type EmitConceptCardStepConfig struct {
 	// CardType identifies the kind of card (e.g., "lead_captured", "lead_updated").
 	CardType string `json:"cardType"`
 
-	// SpaceId is the space to emit the card to.
+	// PartitionId is the space to emit the card to.
 	// Supports $ expressions.
-	SpaceId string `json:"spaceId"`
+	PartitionId string `json:"partitionId"`
 
 	// ConceptRef is a reference to the created concept (e.g., the lead ID).
 	// Supports $ expressions.

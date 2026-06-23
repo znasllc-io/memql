@@ -442,7 +442,7 @@ func (e *MemQLEngine) compileComparisonExpressionWithContext(expr *ComparisonExp
 // Symmetric counterpart to canonicalizeRelationshipFields (which
 // runs on insert): inserts store canonical, queries should compare
 // canonical. Without this pass, a bare-slug RHS like
-// `payload.spaceId == "daily-..."` misses canonical-stored rows.
+// `payload.partitionId == "daily-..."` misses canonical-stored rows.
 //
 // The pre-walk runs once before SQL compile + post-filter, so both
 // paths see the same canonical RHS -- avoids a class of "SQL returns

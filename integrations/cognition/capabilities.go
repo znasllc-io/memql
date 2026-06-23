@@ -25,7 +25,7 @@ func (c *CognitionIntegration) Capabilities() []memql.IntegrationCapability {
 			Description: "Score utterance against agent candidates using Polyphon score engine 5-factor scoring algorithm",
 			Handler:     c.handleScoreUtterance,
 			ArgsSchema: map[string]string{
-				"spaceId":     "string",
+				"partitionId":     "string",
 				"utteranceId": "string",
 				"text":        "string",
 				"speakerId":   "string",
@@ -39,7 +39,7 @@ func (c *CognitionIntegration) Capabilities() []memql.IntegrationCapability {
 			Handler:     c.handleTrackPresence,
 			ArgsSchema: map[string]string{
 				"participantId": "string",
-				"spaceId":       "string",
+				"partitionId":       "string",
 				"state":         "string",
 				"metadata":      "object",
 			},
@@ -51,19 +51,19 @@ func (c *CognitionIntegration) Capabilities() []memql.IntegrationCapability {
 // It converts the DSL args into the Polyphon types, runs the scoring, and
 // returns the decision as a MemoryNode.
 func (c *CognitionIntegration) handleScoreUtterance(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	spaceId, _ := args["spaceId"].(string)
+	partitionId, _ := args["partitionId"].(string)
 	utteranceId, _ := args["utteranceId"].(string)
 	text, _ := args["text"].(string)
 	speakerId, _ := args["speakerId"].(string)
 	speakerName, _ := args["speakerName"].(string)
 
-	if spaceId == "" || utteranceId == "" || text == "" || speakerId == "" {
-		return nil, fmt.Errorf("scoreUtterance requires spaceId, utteranceId, text, speakerId")
+	if partitionId == "" || utteranceId == "" || text == "" || speakerId == "" {
+		return nil, fmt.Errorf("scoreUtterance requires partitionId, utteranceId, text, speakerId")
 	}
 
 	utterance := polyphon.Utterance{
 		ID:            utteranceId,
-		ScopeId:       spaceId,
+		ScopeId:       partitionId,
 		ParticipantId: speakerId,
 		SpeakerName:   speakerName,
 		Text:          text,
@@ -86,7 +86,7 @@ func (c *CognitionIntegration) handleScoreUtterance(ctx context.Context, args ma
 
 	// Convert decision to MemoryNode payload.
 	decisionPayload := map[string]any{
-		"spaceId":     decision.ScopeId,
+		"partitionId":     decision.ScopeId,
 		"utteranceId": decision.UtteranceId,
 		"action":      decision.Action,
 		"confidence":  decision.Confidence,
@@ -119,11 +119,11 @@ func (c *CognitionIntegration) handleScoreUtterance(ctx context.Context, args ma
 // handleTrackPresence wraps upsertParticipantPresence for DSL access.
 func (c *CognitionIntegration) handleTrackPresence(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	participantId, _ := args["participantId"].(string)
-	spaceId, _ := args["spaceId"].(string)
+	partitionId, _ := args["partitionId"].(string)
 	state, _ := args["state"].(string)
 
-	if participantId == "" || spaceId == "" || state == "" {
-		return nil, fmt.Errorf("trackPresence requires participantId, spaceId, state")
+	if participantId == "" || partitionId == "" || state == "" {
+		return nil, fmt.Errorf("trackPresence requires participantId, partitionId, state")
 	}
 
 	var metadata map[string]any
@@ -132,7 +132,7 @@ func (c *CognitionIntegration) handleTrackPresence(ctx context.Context, args map
 	}
 
 	// Use the existing presence upsert logic.
-	err := c.upsertParticipantPresence(ctx, spaceId, participantId, state, "", "", "", "", metadata)
+	err := c.upsertParticipantPresence(ctx, partitionId, participantId, state, "", "", "", "", metadata)
 	if err != nil {
 		return nil, fmt.Errorf("trackPresence: %w", err)
 	}
@@ -140,7 +140,7 @@ func (c *CognitionIntegration) handleTrackPresence(ctx context.Context, args map
 	// Return a confirmation node.
 	payloadBytes, _ := json.Marshal(map[string]any{
 		"participantId": participantId,
-		"spaceId":       spaceId,
+		"partitionId":       partitionId,
 		"state":         state,
 		"updatedAt":     time.Now().UTC().Format(time.RFC3339),
 	})

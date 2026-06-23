@@ -76,7 +76,7 @@ func (c *CognitionIntegration) forwardTurnToAgent(
 	ctx context.Context,
 	agent *agentPayload,
 	trigger string,
-	spaceId string,
+	partitionId string,
 	participantId string,
 	replyId string,
 	history []conversationMessage,
@@ -117,10 +117,10 @@ func (c *CognitionIntegration) forwardTurnToAgent(
 	msg := &memqlv1.AgentGenerateTurnMsg{
 		RequestId:     requestId,
 		AgentId:       agentIdentityId,
-		ScopeId:       strings.TrimSpace(spaceId),
+		ScopeId:       strings.TrimSpace(partitionId),
 		ParticipantId: strings.TrimSpace(participantId),
 		History:       convertHistoryToProto(history),
-		Routing:       buildRoutingContext(ctx, trigger, spaceId, si, peerAgents, humanParticipants, currentSpeakerParticipantId),
+		Routing:       buildRoutingContext(ctx, trigger, partitionId, si, peerAgents, humanParticipants, currentSpeakerParticipantId),
 		ActingAgent:   c.buildActingAgentIdentity(ctx, agent),
 		Attachments:   convertAttachmentsToProto(attachmentSummaries),
 		Hints:         map[string]string{},
@@ -157,7 +157,7 @@ func (c *CognitionIntegration) forwardTurnToAgent(
 		EncodeDirectiveIntoHints(directive, msg.Hints)
 		if c.Logger != nil {
 			c.Logger.Info("cognition: dispatch directive",
-				"spaceId", spaceId,
+				"partitionId", partitionId,
 				"agent", agent.Name,
 				"directive", directive.String(),
 			)
@@ -216,7 +216,7 @@ func (c *CognitionIntegration) forwardTurnToAgent(
 	if relayAgentId == "" {
 		relayAgentId = strings.TrimSpace(agent.Name)
 	}
-	return c.consumeAgentTurnStream(ctx, requestId, spaceId, participantId, relayAgentId, respCh)
+	return c.consumeAgentTurnStream(ctx, requestId, partitionId, participantId, relayAgentId, respCh)
 }
 
 // forwardedAuthClaimsForTurn builds the auth-claims map forwarded
@@ -272,7 +272,7 @@ type agentReplyResult struct {
 func (c *CognitionIntegration) consumeAgentTurnStream(
 	ctx context.Context,
 	requestId string,
-	spaceId, participantId, agentId string,
+	partitionId, participantId, agentId string,
 	respCh <-chan *memqlv1.MemqlServerMessage,
 ) (agentReplyResult, error) {
 	var fullText strings.Builder
@@ -285,7 +285,7 @@ func (c *CognitionIntegration) consumeAgentTurnStream(
 		case serverMsg, ok := <-respCh:
 			if !ok {
 				// Channel closed without a Complete message.
-				c.mutationEmitTextChunk(ctx, spaceId, participantId, requestId, "", textChunkIdx, true)
+				c.mutationEmitTextChunk(ctx, partitionId, participantId, requestId, "", textChunkIdx, true)
 				return agentReplyResult{text: strings.TrimSpace(fullText.String())}, nil
 			}
 			switch payload := serverMsg.GetPayload().(type) {
@@ -294,7 +294,7 @@ func (c *CognitionIntegration) consumeAgentTurnStream(
 				if text := delta.GetText(); text != nil && text.GetText() != "" {
 					chunk := text.GetText()
 					fullText.WriteString(chunk)
-					c.mutationEmitTextChunk(ctx, spaceId, participantId, requestId, chunk, textChunkIdx, false)
+					c.mutationEmitTextChunk(ctx, partitionId, participantId, requestId, chunk, textChunkIdx, false)
 					textChunkIdx++
 				}
 				// ToolCall / ToolResult events are audit-only for
@@ -307,12 +307,12 @@ func (c *CognitionIntegration) consumeAgentTurnStream(
 				// (on BFF) picks it up, dispatches via the Operator
 				// bridge, and replies with a clientToolResponse that
 				// we ForwardContinuation back to the agent.
-				c.relayClientToolCall(ctx, requestId, spaceId, participantId, agentId, payload.ClientToolCall)
+				c.relayClientToolCall(ctx, requestId, partitionId, participantId, agentId, payload.ClientToolCall)
 			case *memqlv1.MemqlServerMessage_AgentGenerateTurnComplete:
 				complete := payload.AgentGenerateTurnComplete
 				// Terminal chunk with done=true so the frontend knows
 				// the reply stream is over.
-				c.mutationEmitTextChunk(ctx, spaceId, participantId, requestId, "", textChunkIdx, true)
+				c.mutationEmitTextChunk(ctx, partitionId, participantId, requestId, "", textChunkIdx, true)
 				if complete.GetError() != nil {
 					return agentReplyResult{}, fmt.Errorf("agent turn error: %s (%s)",
 						complete.GetError().GetMessage(),
@@ -386,13 +386,13 @@ func buildSpaceGoalProto(si spaceInfo) *memqlv1.AgentTurnSpaceGoal {
 	}
 }
 
-func buildRoutingContext(ctx context.Context, trigger, spaceId string, si spaceInfo, peerAgents []*agentPayload, humans []*participantPayload, currentSpeakerParticipantId string) *memqlv1.AgentTurnRoutingContext {
+func buildRoutingContext(ctx context.Context, trigger, partitionId string, si spaceInfo, peerAgents []*agentPayload, humans []*participantPayload, currentSpeakerParticipantId string) *memqlv1.AgentTurnRoutingContext {
 	routing := &memqlv1.AgentTurnRoutingContext{
 		Trigger:         strings.TrimSpace(trigger),
 		SelectionReason: selectionReasonFromContext(ctx),
 		HandoffFrom:     handoffFromContext(ctx),
 		Space: &memqlv1.AgentTurnSpaceContext{
-			Id:                     strings.TrimSpace(spaceId),
+			Id:                     strings.TrimSpace(partitionId),
 			Type:                   strings.TrimSpace(si.spaceType),
 			Description:            strings.TrimSpace(si.description),
 			Goal:                   buildSpaceGoalProto(si),

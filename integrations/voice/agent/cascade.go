@@ -70,7 +70,7 @@ func (d defaultPersonaVoice) VoiceID() string { return strings.TrimSpace(d.canon
 
 // CascadeConfig parameterizes the cascade orchestrator.
 type CascadeConfig struct {
-	SpaceID   string
+	PartitionID   string
 	GaAgentID string
 	// SpeakerUserID is the fallback/default speaker attribution for the
 	// human transcript (the 1:1 standard-space wiring). The per-track
@@ -266,7 +266,7 @@ func (c *Cascade) forwardPartial(speakerIdentity, text string) {
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentPartialTranscript{
 			VoiceAgentPartialTranscript: &memqlv1.VoiceAgentPartialTranscript{
-				SpaceId:       c.cfg.SpaceID,
+				PartitionId:       c.cfg.PartitionID,
 				SpeakerUserId: c.resolveSpeaker(speakerIdentity),
 				PartialText:   text,
 				Sequence:      seq,
@@ -304,7 +304,7 @@ func (c *Cascade) onCommittedTurn(text string) {
 // silent-failure core of #1403.
 func (c *Cascade) forwardFinal(speakerID, text string) {
 	sendFinalTranscript(c.ctx, c.client, c.logger, "cascade", &memqlv1.VoiceAgentFinalTranscript{
-		SpaceId:       c.cfg.SpaceID,
+		PartitionId:       c.cfg.PartitionID,
 		SpeakerUserId: speakerID,
 		FinalText:     text,
 	})
@@ -326,7 +326,7 @@ func (c *Cascade) runTurn(speakerID, utterance string) {
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentTurnRequest{
 			VoiceAgentTurnRequest: &memqlv1.VoiceAgentTurnRequest{
-				SpaceId:       c.cfg.SpaceID,
+				PartitionId:       c.cfg.PartitionID,
 				SpeakerUserId: speakerID,
 				UtteranceText: utterance,
 				GaAgentId:     c.cfg.GaAgentID,

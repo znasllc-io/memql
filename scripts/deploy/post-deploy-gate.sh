@@ -472,7 +472,7 @@ spec:
           image: $image
           args:
             - "--addr=${ACTIVE_SERVICE}:50051"
-            - "--query=queryActiveSpaceIds({})"
+            - "--query=queryActivePartitionIds({})"
           env:
             - name: MEMQL_SVC_JWT
               valueFrom:
@@ -511,7 +511,7 @@ function check_functional_auth() {
     section "Gate 3/3: functional auth round-trip (BFF -> agent forward)"
 
     if [ "$DRY_RUN" = true ]; then
-        plan "run the deploy-gate-check (service_account JWT) as a Job against ${ACTIVE_SERVICE}:50051, query queryActiveSpaceIds({}) -- proves BFF accepted the token AND the engine answered (BFF->agent fan)"
+        plan "run the deploy-gate-check (service_account JWT) as a Job against ${ACTIVE_SERVICE}:50051, query queryActivePartitionIds({}) -- proves BFF accepted the token AND the engine answered (BFF->agent fan)"
         plan "fallback: authed query via MEMQL_SMOKE_TOKEN through the deep smoke profile"
         return 0
     fi

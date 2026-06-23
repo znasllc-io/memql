@@ -12,21 +12,21 @@ use common.shapes.{ attachmentDownload }
 // space, for the download endpoint (memql#804).
 //
 // Authz tier: granted. The attachment concept is space-scoped (no
-// ownerUserId), so the row set is gated by the spaceId arg + partition
-// isolation -- and the download HTTP handler enforces CallerOwnsSpace(spaceId)
+// ownerUserId), so the row set is gated by the partitionId arg + partition
+// isolation -- and the download HTTP handler enforces CallerOwnsSpace(partitionId)
 // (the same space-ownership gate the upload path uses) BEFORE calling this,
-// then re-checks the returned row's spaceId. The spaceId predicate here also
+// then re-checks the returned row's partitionId. The partitionId predicate here also
 // stops cross-space id probing. Mirrors querySpaceMedia's space-scoped pattern.
 
 @enabled
 @unbounded("attachment by id (guarded) within a space -- bounded to a single row")
-@description("Fetch a single v1:common:attachment row by id within a space. Backs the attachment download endpoint (GET /spaces/{spaceId}/attachments/{attachmentId}); the handler gates on space ownership first.")
+@description("Fetch a single v1:common:attachment row by id within a space. Backs the attachment download endpoint (GET /spaces/{partitionId}/attachments/{attachmentId}); the handler gates on space ownership first.")
 query attachment queryAttachmentById {
   args {
     attachmentId  string  @required
-    spaceId       string  @required
+    partitionId       string  @required
   }
-  filter  when(args.attachmentId) { id==args.attachmentId } && payload.spaceId==args.spaceId
+  filter  when(args.attachmentId) { id==args.attachmentId } && payload.partitionId==args.partitionId
   shape   attachmentDownload
 }
 
@@ -34,14 +34,14 @@ query attachment queryAttachmentById {
 
 // querySpaceMedia -- list v1:common:media rows attached to a space.
 //
-// Surfaced for the CoPresent SPA's `useMedia(spaceId, filters)` hook
+// Surfaced for the CoPresent SPA's `useMedia(partitionId, filters)` hook
 // (visionarys-io/copresent src/hooks/useCopresent.ts:1359). The hook
 // returns Media[] for the space's audio / video / image / document
 // attachments. SPA callers may pass an optional mediaType filter --
 // the arg-conditional `?.payload.mediaType` predicate fires only
 // when the caller supplies it; an absent filter returns every type.
 //
-// Authz tier: granted. The spaceId arg gates the row set; partition
+// Authz tier: granted. The partitionId arg gates the row set; partition
 // isolation prevents cross-tenant leakage. Matches the pattern of
 // the sibling `querySpaceUtterances` in dsl/cognition/queries.memql.
 //
@@ -51,10 +51,10 @@ query attachment queryAttachmentById {
 @description("Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view (visionarys-io/copresent src/hooks/useCopresent.ts).")
 query media querySpaceMedia {
   args {
-    spaceId    string  @required @pattern("^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]{1,128}$")
+    partitionId    string  @required @pattern("^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]{1,128}$")
     mediaType  string
   }
-  filter  payload.spaceId==args.spaceId && when(args.mediaType) { payload.mediaType==args.mediaType }
+  filter  payload.partitionId==args.partitionId && when(args.mediaType) { payload.mediaType==args.mediaType }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.

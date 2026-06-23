@@ -152,9 +152,9 @@ func TestAutoJoinAI_JoinGuardCompilesToResolvablePath(t *testing.T) {
 logic logicAutoJoinGuardShape {
   args { event object @required }
   body {
-    getGA := queryParticipantByAgentSpace({ spaceId: args.event.payload.id, agentId: "seed" })
+    getGA := queryParticipantByAgentSpace({ partitionId: args.event.payload.id, agentId: "seed" })
     joinGA := if first(getGA).id != "" {
-      queryParticipantByAgentSpace({ spaceId: args.event.payload.id, agentId: "join" })
+      queryParticipantByAgentSpace({ partitionId: args.event.payload.id, agentId: "join" })
     }
     return joinGA
   }

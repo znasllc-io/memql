@@ -547,10 +547,10 @@ func (r *ReactiveLoop) mintOrExtendSpecialist(ctx context.Context, userId string
 	if goal == "" {
 		return "", fmt.Errorf("responsibility has no statement to route on")
 	}
-	spaceId := getString(row, "scopeSpaceId")
+	partitionId := getString(row, "scopePartitionId")
 	call := fmt.Sprintf(
-		`ensureAgentForGoal({goal:%q, ownerUserId:%q, spaceId:%q})`,
-		goal, userId, spaceId,
+		`ensureAgentForGoal({goal:%q, ownerUserId:%q, partitionId:%q})`,
+		goal, userId, partitionId,
 	)
 	res, err := r.engine.Execute(ctx, call)
 	if err != nil {
@@ -627,13 +627,13 @@ func (r *ReactiveLoop) honorResponsibility(ctx context.Context, userId string, r
 func (r *ReactiveLoop) createResponsibilityPlan(ctx context.Context, userId string, row map[string]any, agentId string) (string, error) {
 	respId := getString(row, "id")
 	statement := getString(row, "statement")
-	spaceId := getString(row, "scopeSpaceId")
-	if spaceId == "" {
+	partitionId := getString(row, "scopePartitionId")
+	if partitionId == "" {
 		// A responsibility without a pinned space still needs a Plan
-		// spaceId (Plan concept @required). Use the synthetic reactive
+		// partitionId (Plan concept @required). Use the synthetic reactive
 		// space sentinel -- the assistant relays into the user's surfaces
 		// regardless of this bookkeeping space.
-		spaceId = "system:reactive-loop"
+		partitionId = "system:reactive-loop"
 	}
 	planId := id.NewSystemNodeShortId("proactive", respId)
 	goal := statement
@@ -647,8 +647,8 @@ func (r *ReactiveLoop) createResponsibilityPlan(ctx context.Context, userId stri
 		"successCriteria":  getString(row, "successCriteria"),
 	}
 	call := fmt.Sprintf(
-		`mutationCreatePlan({planId:%q, spaceId:%q, kind:%q, goal:%q, requestedBy:%q, authorizedBy:%q, triggerSource:"system", input:%s})`,
-		planId, spaceId, reactiveProactivePlanKind, goal, userId, userId, mustJSONObject(input),
+		`mutationCreatePlan({planId:%q, partitionId:%q, kind:%q, goal:%q, requestedBy:%q, authorizedBy:%q, triggerSource:"system", input:%s})`,
+		planId, partitionId, reactiveProactivePlanKind, goal, userId, userId, mustJSONObject(input),
 	)
 	if _, err := r.engine.Execute(ctx, call); err != nil {
 		return "", fmt.Errorf("mutationCreatePlan: %w", err)
@@ -812,7 +812,7 @@ func (r *ReactiveLoop) dispatchConvergenceAction(ctx context.Context, userId str
 			"id":           a.ResponsibilityId,
 			"statement":    a.Statement,
 			"trigger":      "reactive",
-			"scopeSpaceId": "",
+			"scopePartitionId": "",
 		}
 		// Route through the same Plan path; resolve the agent loosely (GA
 		// or the responsibility's agent). For a goal-driven plan with no
@@ -882,7 +882,7 @@ func (r *ReactiveLoop) loadSpaceGoals(ctx context.Context, userId string) []map[
 			continue
 		}
 		out = append(out, map[string]any{
-			"spaceId":   getString(sp, "id"),
+			"partitionId":   getString(sp, "id"),
 			"name":      getString(sp, "name"),
 			"statement": statement,
 			"timeframe": getString(goal, "timeframe"),

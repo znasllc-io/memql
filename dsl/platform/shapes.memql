@@ -41,7 +41,7 @@ shape missingCapability missingCapabilityFull {
   payload.description
   payload.requestedFromPlanId
   payload.requestedByAgentId
-  payload.spaceId
+  payload.partitionId
   payload.partitionScope
   payload.sightingCount
   payload.firstSeenAt

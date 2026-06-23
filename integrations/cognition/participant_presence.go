@@ -72,14 +72,14 @@ func presenceRecordId(participantId string) string {
 	return pid
 }
 
-func (c *CognitionIntegration) upsertParticipantPresence(ctx context.Context, spaceId, participantId, state, label, reason, lastUtteranceId, lastError string, metadata map[string]any) error {
+func (c *CognitionIntegration) upsertParticipantPresence(ctx context.Context, partitionId, participantId, state, label, reason, lastUtteranceId, lastError string, metadata map[string]any) error {
 	if c == nil || c.engine == nil {
 		return fmt.Errorf("engine not configured")
 	}
-	spaceId = strings.TrimSpace(spaceId)
+	partitionId = strings.TrimSpace(partitionId)
 	participantId = strings.TrimSpace(participantId)
-	if spaceId == "" || participantId == "" {
-		return fmt.Errorf("spaceId and participantId are required")
+	if partitionId == "" || participantId == "" {
+		return fmt.Errorf("partitionId and participantId are required")
 	}
 
 	id := presenceRecordId(participantId)
@@ -89,7 +89,7 @@ func (c *CognitionIntegration) upsertParticipantPresence(ctx context.Context, sp
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	payload := map[string]any{
-		"spaceId":       spaceId,
+		"partitionId":       partitionId,
 		"participantId": participantId,
 		"state":         strings.TrimSpace(state),
 		"label":         strings.TrimSpace(label),

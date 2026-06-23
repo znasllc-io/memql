@@ -155,7 +155,7 @@ const dlPath = "/spaces/v1:cognition:space:s1/attachments/v1:cognition:space:s1:
 
 // Cross-tenant download is 404 (same opacity as upload) and never reaches the row.
 func TestAttachmentDownload_RejectsCrossTenant(t *testing.T) {
-	store := &stubAttachmentStore{owns: false, attachment: &AttachmentRow{ID: "att1", SpaceId: "v1:cognition:space:s1"}}
+	store := &stubAttachmentStore{owns: false, attachment: &AttachmentRow{ID: "att1", PartitionId: "v1:cognition:space:s1"}}
 	handler := NewAttachmentHandler(AttachmentHandlerOptions{
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Store:      store,
@@ -191,7 +191,7 @@ func TestAttachmentDownload_ServesBytes(t *testing.T) {
 		attachment: &AttachmentRow{
 			ID: "att1", FileName: "birds.md", MimeType: "text/markdown",
 			BlobUrl: "https://acct.blob.core.windows.net/c/spaces/s1/attachments/x/birds.md",
-			SpaceId: "v1:cognition:space:s1",
+			PartitionId: "v1:cognition:space:s1",
 		},
 	}
 	handler := NewAttachmentHandler(AttachmentHandlerOptions{
@@ -215,11 +215,11 @@ func TestAttachmentDownload_ServesBytes(t *testing.T) {
 	}
 }
 
-// A row whose spaceId doesn't match the path is 404 (no cross-space probing).
+// A row whose partitionId doesn't match the path is 404 (no cross-space probing).
 func TestAttachmentDownload_SpaceMismatchIs404(t *testing.T) {
 	store := &stubAttachmentStore{
 		owns:       true,
-		attachment: &AttachmentRow{ID: "att1", SpaceId: "v1:cognition:space:OTHER"},
+		attachment: &AttachmentRow{ID: "att1", PartitionId: "v1:cognition:space:OTHER"},
 	}
 	handler := NewAttachmentHandler(AttachmentHandlerOptions{
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),

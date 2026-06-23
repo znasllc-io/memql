@@ -37,7 +37,7 @@ const keysetConcept = "v1:cognition:utterance"
 // validators (we only need rows the query path can scan + order). Rows are
 // scoped by the createdBy intrinsic (a plain, non-relationship field) so each
 // run queries only its own rows without tripping the FK auto-canonicalization
-// that payload relationship fields like spaceId carry.
+// that payload relationship fields like partitionId carry.
 func seedKeysetRow(t *testing.T, ctx context.Context, db *bun.DB, id string, createdAt time.Time, owner string) {
 	t.Helper()
 	payload, err := json.Marshal(map[string]any{"seq": id})

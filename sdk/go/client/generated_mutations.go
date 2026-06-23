@@ -40,7 +40,7 @@ func MutationActivateAuthoringBundleBuild(args MutationActivateAuthoringBundleAr
 //
 // Bound concept: participant.
 type MutationAddAgentToSpaceArgs struct {
-	SpaceId             string
+	PartitionId             string
 	AgentId             string
 	DisplayName         string
 	CapabilityOverrides map[string]any
@@ -55,8 +55,8 @@ func (qc *QueryClient) MutationAddAgentToSpace(ctx context.Context, args Mutatio
 func MutationAddAgentToSpaceBuild(args MutationAddAgentToSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationAddAgentToSpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
@@ -242,7 +242,7 @@ type MutationAppendDocumentVersionArgs struct {
 	Note             string
 	ParentVersionId  string
 	ProducedByPlanId string
-	SpaceId          string
+	PartitionId          string
 }
 
 // MutationAppendDocumentVersion calls the engine mutation mutationAppendDocumentVersion.
@@ -318,12 +318,12 @@ func MutationAppendDocumentVersionBuild(args MutationAppendDocumentVersionArgs) 
 		b.WriteString("producedByPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
 	}
-	if args.SpaceId != "" {
+	if args.PartitionId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	b.WriteString("})")
 	return b.String()
@@ -503,7 +503,7 @@ func MutationApproveRequestBuild(args MutationApproveRequestArgs) string {
 //
 // Bound concept: space.
 type MutationArchiveSpaceArgs struct {
-	SpaceId string
+	PartitionId string
 	Payload map[string]any
 }
 
@@ -516,8 +516,8 @@ func (qc *QueryClient) MutationArchiveSpace(ctx context.Context, args MutationAr
 func MutationArchiveSpaceBuild(args MutationArchiveSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationArchiveSpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
@@ -1252,7 +1252,7 @@ func MutationCreateAccessRequestBuild(args MutationCreateAccessRequestArgs) stri
 // Bound concept: plan.
 type MutationCreateAdHocPlanArgs struct {
 	PlanId      string
-	SpaceId     string
+	PartitionId     string
 	AgentId     string
 	OwnerUserId string
 	Goal        string
@@ -1272,8 +1272,8 @@ func MutationCreateAdHocPlanBuild(args MutationCreateAdHocPlanArgs) string {
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
@@ -1792,7 +1792,7 @@ type MutationCreateArtifactArgs struct {
 	LiveSet  bool // set true to send live; required because zero-value bool is ambiguous
 	// Enum: workspace | private
 	Scope                string
-	SpaceId              string
+	PartitionId              string
 	AgentId              string
 	ProducedByPlanId     string
 	ProducedByWorkerId   string
@@ -1872,12 +1872,12 @@ func MutationCreateArtifactBuild(args MutationCreateArtifactArgs) string {
 		b.WriteString("scope: ")
 		b.WriteString(fmt.Sprintf("%q", args.Scope))
 	}
-	if args.SpaceId != "" {
+	if args.PartitionId != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.AgentId != "" {
 		if b.Len() > 24 {
@@ -2817,7 +2817,7 @@ func MutationCreateClusterSettingsBuild(args MutationCreateClusterSettingsArgs) 
 //
 // Bound concept: space.
 type MutationCreateDailySpaceArgs struct {
-	SpaceId      string
+	PartitionId      string
 	Name         string
 	DailyDateKey string
 	OwnerUserId  string
@@ -2832,8 +2832,8 @@ func (qc *QueryClient) MutationCreateDailySpace(ctx context.Context, args Mutati
 func MutationCreateDailySpaceBuild(args MutationCreateDailySpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationCreateDailySpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
@@ -3092,7 +3092,7 @@ type MutationCreateDocumentArgs struct {
 	DocumentId   string
 	AttachmentId string
 	PlanId       string
-	SpaceId      string
+	PartitionId      string
 	FileName     string
 	MimeType     string
 	Format       string
@@ -3129,8 +3129,8 @@ func MutationCreateDocumentBuild(args MutationCreateDocumentArgs) string {
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
@@ -3445,7 +3445,7 @@ type MutationCreateGeneratedOutputArgs struct {
 	MimeType string
 	// Enum: workbench_generated | computer_use | agent_generated | derived
 	Source               string
-	SpaceId              string
+	PartitionId              string
 	ProducedByPlanId     string
 	ProducedByAgentId    string
 	ProducedByWorkerId   string
@@ -3513,12 +3513,12 @@ func MutationCreateGeneratedOutputBuild(args MutationCreateGeneratedOutputArgs) 
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
-	if args.SpaceId != "" {
+	if args.PartitionId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.ProducedByPlanId != "" {
 		if b.Len() > 31 {
@@ -3556,7 +3556,7 @@ func MutationCreateGeneratedOutputBuild(args MutationCreateGeneratedOutputArgs) 
 //
 // Bound concept: utterance.
 type MutationCreateGreetingUtteranceArgs struct {
-	SpaceId       string
+	PartitionId       string
 	ParticipantId string
 	AgentId       string
 	Text          string
@@ -3572,8 +3572,8 @@ func (qc *QueryClient) MutationCreateGreetingUtterance(ctx context.Context, args
 func MutationCreateGreetingUtteranceBuild(args MutationCreateGreetingUtteranceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationCreateGreetingUtterance({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
@@ -4138,7 +4138,7 @@ type MutationCreateMemoryArgs struct {
 	// Enum: fact | preference | instruction | episodic | other
 	Kind              string
 	AgentId           string
-	SpaceId           string
+	PartitionId           string
 	SourceUtteranceId string
 }
 
@@ -4184,12 +4184,12 @@ func MutationCreateMemoryBuild(args MutationCreateMemoryArgs) string {
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
-	if args.SpaceId != "" {
+	if args.PartitionId != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.SourceUtteranceId != "" {
 		if b.Len() > 22 {
@@ -4544,7 +4544,7 @@ func MutationCreatePATIdentityBuild(args MutationCreatePATIdentityArgs) string {
 // Bound concept: plan.
 type MutationCreatePlanArgs struct {
 	PlanId                  string
-	SpaceId                 string
+	PartitionId                 string
 	ParentPlanId            string
 	Kind                    string
 	Goal                    string
@@ -4576,8 +4576,8 @@ func MutationCreatePlanBuild(args MutationCreatePlanArgs) string {
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if args.ParentPlanId != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
@@ -4723,7 +4723,7 @@ func MutationCreateProjectBuild(args MutationCreateProjectArgs) string {
 // Bound concept: record.
 type MutationCreateRecordArgs struct {
 	RecordId           string
-	SpaceId            string
+	PartitionId            string
 	RecordType         string
 	Label              string
 	Data               map[string]any
@@ -4750,8 +4750,8 @@ func MutationCreateRecordBuild(args MutationCreateRecordArgs) string {
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
@@ -4821,7 +4821,7 @@ func MutationCreateRecordBuild(args MutationCreateRecordArgs) string {
 // Bound concept: record.
 type MutationCreateRecordBatchArgs struct {
 	RecordId           string
-	SpaceId            string
+	PartitionId            string
 	RecordType         string
 	Label              string
 	Data               map[string]any
@@ -4847,8 +4847,8 @@ func MutationCreateRecordBatchBuild(args MutationCreateRecordBatchArgs) string {
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
@@ -4988,7 +4988,7 @@ type MutationCreateResponsibilityArgs struct {
 	AssignedRoleSlug string
 	SuccessCriteria  string
 	NotifyHow        string
-	ScopeSpaceId     string
+	ScopePartitionId     string
 	Enabled          bool
 	EnabledSet       bool // set true to send enabled; required because zero-value bool is ambiguous
 }
@@ -5065,12 +5065,12 @@ func MutationCreateResponsibilityBuild(args MutationCreateResponsibilityArgs) st
 		b.WriteString("notifyHow: ")
 		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
 	}
-	if args.ScopeSpaceId != "" {
+	if args.ScopePartitionId != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
-		b.WriteString("scopeSpaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ScopeSpaceId))
+		b.WriteString("scopePartitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ScopePartitionId))
 	}
 	if args.EnabledSet {
 		if b.Len() > 30 {
@@ -5090,7 +5090,7 @@ type MutationCreateScopeElevationPlanArgs struct {
 	PlanId         string
 	AgentId        string
 	OwnerUserId    string
-	SpaceId        string
+	PartitionId        string
 	Intent         string
 	Summary        string
 	RequestedScope string
@@ -5117,12 +5117,12 @@ func MutationCreateScopeElevationPlanBuild(args MutationCreateScopeElevationPlan
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if args.SpaceId != "" {
+	if args.PartitionId != "" {
 		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if b.Len() > 34 {
 		b.WriteString(", ")
@@ -5226,7 +5226,7 @@ func MutationCreateSemanticTaskBuild(args MutationCreateSemanticTaskArgs) string
 // Bound concept: session.
 type MutationCreateSessionForParticipantArgs struct {
 	SessionId     string
-	SpaceId       string
+	PartitionId       string
 	ParticipantId string
 	HumanInput    map[string]any
 	AiOutput      map[string]any
@@ -5249,8 +5249,8 @@ func MutationCreateSessionForParticipantBuild(args MutationCreateSessionForParti
 	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
@@ -5475,7 +5475,7 @@ func MutationCreateSkillChangeEventBuild(args MutationCreateSkillChangeEventArgs
 //
 // Bound concept: space.
 type MutationCreateSpaceArgs struct {
-	SpaceId        string
+	PartitionId        string
 	Name           string
 	Description    string
 	Goal           map[string]any
@@ -5501,9 +5501,9 @@ func (qc *QueryClient) MutationCreateSpace(ctx context.Context, args MutationCre
 func MutationCreateSpaceBuild(args MutationCreateSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationCreateSpace({")
-	if args.SpaceId != "" {
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	if args.PartitionId != "" {
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if b.Len() > 21 {
 		b.WriteString(", ")
@@ -6760,7 +6760,7 @@ func MutationDeleteRecordBuild(args MutationDeleteRecordArgs) string {
 //
 // Bound concept: space.
 type MutationDeleteSpaceNowArgs struct {
-	SpaceId string
+	PartitionId string
 	Payload map[string]any
 }
 
@@ -6773,8 +6773,8 @@ func (qc *QueryClient) MutationDeleteSpaceNow(ctx context.Context, args Mutation
 func MutationDeleteSpaceNowBuild(args MutationDeleteSpaceNowArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationDeleteSpaceNow({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
@@ -6836,7 +6836,7 @@ type MutationEmitClientToolRequestArgs struct {
 	CallId        string
 	ToolName      string
 	ArgumentsJSON string
-	SpaceId       string
+	PartitionId       string
 	ParticipantId string
 	AgentId       string
 	ExpiresAt     string
@@ -6870,12 +6870,12 @@ func MutationEmitClientToolRequestBuild(args MutationEmitClientToolRequestArgs) 
 		b.WriteString("argumentsJSON: ")
 		b.WriteString(fmt.Sprintf("%q", args.ArgumentsJSON))
 	}
-	if args.SpaceId != "" {
+	if args.PartitionId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.ParticipantId != "" {
 		if b.Len() > 31 {
@@ -6912,7 +6912,7 @@ type MutationEmitClientToolResponseArgs struct {
 	IsError      bool
 	IsErrorSet   bool // set true to send isError; required because zero-value bool is ambiguous
 	ErrorMessage string
-	SpaceId      string
+	PartitionId      string
 }
 
 // MutationEmitClientToolResponse calls the engine mutation mutationEmitClientToolResponse.
@@ -6952,12 +6952,12 @@ func MutationEmitClientToolResponseBuild(args MutationEmitClientToolResponseArgs
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
-	if args.SpaceId != "" {
+	if args.PartitionId != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	b.WriteString("})")
 	return b.String()
@@ -6968,7 +6968,7 @@ func MutationEmitClientToolResponseBuild(args MutationEmitClientToolResponseArgs
 // Bound concept: chunk.
 type MutationEmitTextChunkArgs struct {
 	ChunkId       string
-	SpaceId       string
+	PartitionId       string
 	ParticipantId string
 	ReplyId       string
 	Text          string
@@ -6990,8 +6990,8 @@ func MutationEmitTextChunkBuild(args MutationEmitTextChunkArgs) string {
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
@@ -7503,7 +7503,7 @@ func MutationInsertSafetyClassificationBuild(args MutationInsertSafetyClassifica
 //
 // Bound concept: participant.
 type MutationJoinSpaceAsAIArgs struct {
-	SpaceId             string
+	PartitionId             string
 	AgentId             string
 	DisplayName         string
 	Status              string
@@ -7525,8 +7525,8 @@ func (qc *QueryClient) MutationJoinSpaceAsAI(ctx context.Context, args MutationJ
 func MutationJoinSpaceAsAIBuild(args MutationJoinSpaceAsAIArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationJoinSpaceAsAI({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
@@ -7587,7 +7587,7 @@ func MutationJoinSpaceAsAIBuild(args MutationJoinSpaceAsAIArgs) string {
 //
 // Bound concept: participant.
 type MutationJoinSpaceAsHumanArgs struct {
-	SpaceId             string
+	PartitionId             string
 	UserId              string
 	DisplayName         string
 	Status              string
@@ -7604,8 +7604,8 @@ func (qc *QueryClient) MutationJoinSpaceAsHuman(ctx context.Context, args Mutati
 func MutationJoinSpaceAsHumanBuild(args MutationJoinSpaceAsHumanArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationJoinSpaceAsHuman({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
@@ -7679,7 +7679,7 @@ type MutationLogMissingCapabilityArgs struct {
 	Description         string
 	RequestedFromPlanId string
 	RequestedByAgentId  string
-	SpaceId             string
+	PartitionId             string
 	PartitionScope      string
 	FirstSeenAt         string
 	ExampleGoal         string
@@ -7725,12 +7725,12 @@ func MutationLogMissingCapabilityBuild(args MutationLogMissingCapabilityArgs) st
 		b.WriteString("requestedByAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RequestedByAgentId))
 	}
-	if args.SpaceId != "" {
+	if args.PartitionId != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.PartitionScope != "" {
 		if b.Len() > 30 {
@@ -8192,7 +8192,7 @@ func MutationPersistTaskStateBuild(args MutationPersistTaskStateArgs) string {
 // Bound concept: workspace.
 type MutationProvisionWorkspaceArgs struct {
 	// Synthesized id, typically `{planId}` since one workspace per Plan.
-	WorkspaceId string
+	WorkpartitionId string
 	PlanId      string
 	StorageRoot string
 }
@@ -8206,8 +8206,8 @@ func (qc *QueryClient) MutationProvisionWorkspace(ctx context.Context, args Muta
 func MutationProvisionWorkspaceBuild(args MutationProvisionWorkspaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationProvisionWorkspace({")
-	b.WriteString("workspaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
+	b.WriteString("workpartitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.WorkpartitionId))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
@@ -9424,7 +9424,7 @@ func MutationRejectAccessRequestBuild(args MutationRejectAccessRequestArgs) stri
 //
 // Bound concept: workspace.
 type MutationReleaseWorkspaceArgs struct {
-	WorkspaceId string
+	WorkpartitionId string
 	// Why the workspace was released. Drives the released-row audit trail.
 	// Enum: plan_terminal | explicit | ttl_expired
 	Reason string
@@ -9439,8 +9439,8 @@ func (qc *QueryClient) MutationReleaseWorkspace(ctx context.Context, args Mutati
 func MutationReleaseWorkspaceBuild(args MutationReleaseWorkspaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationReleaseWorkspace({")
-	b.WriteString("workspaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
+	b.WriteString("workpartitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.WorkpartitionId))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
@@ -9454,7 +9454,7 @@ func MutationReleaseWorkspaceBuild(args MutationReleaseWorkspaceArgs) string {
 //
 // Bound concept: participant.
 type MutationRemoveAgentFromSpaceArgs struct {
-	SpaceId string
+	PartitionId string
 	AgentId string
 }
 
@@ -9467,8 +9467,8 @@ func (qc *QueryClient) MutationRemoveAgentFromSpace(ctx context.Context, args Mu
 func MutationRemoveAgentFromSpaceBuild(args MutationRemoveAgentFromSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationRemoveAgentFromSpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
@@ -9482,7 +9482,7 @@ func MutationRemoveAgentFromSpaceBuild(args MutationRemoveAgentFromSpaceArgs) st
 //
 // Bound concept: space.
 type MutationRenameSpaceArgs struct {
-	SpaceId string
+	PartitionId string
 	Payload map[string]any
 }
 
@@ -9495,8 +9495,8 @@ func (qc *QueryClient) MutationRenameSpace(ctx context.Context, args MutationRen
 func MutationRenameSpaceBuild(args MutationRenameSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationRenameSpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
@@ -9636,7 +9636,7 @@ func MutationResolveApprovalRequestBuild(args MutationResolveApprovalRequestArgs
 //
 // Bound concept: space.
 type MutationRestoreSpaceArgs struct {
-	SpaceId string
+	PartitionId string
 	Payload map[string]any
 }
 
@@ -9649,8 +9649,8 @@ func (qc *QueryClient) MutationRestoreSpace(ctx context.Context, args MutationRe
 func MutationRestoreSpaceBuild(args MutationRestoreSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationRestoreSpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
@@ -9925,7 +9925,7 @@ func MutationRevokeWorkerTokenIdentityBuild(args MutationRevokeWorkerTokenIdenti
 //
 // Bound concept: space.
 type MutationRolloverDailySpaceArgs struct {
-	SpaceId string
+	PartitionId string
 	Payload map[string]any
 }
 
@@ -9938,8 +9938,8 @@ func (qc *QueryClient) MutationRolloverDailySpace(ctx context.Context, args Muta
 func MutationRolloverDailySpaceBuild(args MutationRolloverDailySpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationRolloverDailySpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
@@ -9993,7 +9993,7 @@ func MutationRotateAuthSessionBuild(args MutationRotateAuthSessionArgs) string {
 //
 // Bound concept: space.
 type MutationSaveSpaceArgs struct {
-	SpaceId string
+	PartitionId string
 	Payload map[string]any
 }
 
@@ -10006,8 +10006,8 @@ func (qc *QueryClient) MutationSaveSpace(ctx context.Context, args MutationSaveS
 func MutationSaveSpaceBuild(args MutationSaveSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationSaveSpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
@@ -10044,7 +10044,7 @@ func MutationScheduleAccountDeletionBuild(args MutationScheduleAccountDeletionAr
 // Bound concept: utterance.
 type MutationSendActionUtteranceArgs struct {
 	UtteranceId     string
-	SpaceId         string
+	PartitionId         string
 	ParticipantId   string
 	ParticipantType string
 	ReplyToId       string
@@ -10069,8 +10069,8 @@ func MutationSendActionUtteranceBuild(args MutationSendActionUtteranceArgs) stri
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
@@ -10120,7 +10120,7 @@ type MutationSendRealtimeTranscriptUtteranceArgs struct {
 	UtteranceId    string
 	IdempotencyKey string
 	CreatedAt      string
-	SpaceId        string
+	PartitionId        string
 	ParticipantId  string
 	// Enum: human | si | system
 	ParticipantType string
@@ -10162,8 +10162,8 @@ func MutationSendRealtimeTranscriptUtteranceBuild(args MutationSendRealtimeTrans
 	if b.Len() > 41 {
 		b.WriteString(", ")
 	}
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 41 {
 		b.WriteString(", ")
 	}
@@ -10227,7 +10227,7 @@ func MutationSendRealtimeTranscriptUtteranceBuild(args MutationSendRealtimeTrans
 // Bound concept: utterance.
 type MutationSendSpeechUtteranceArgs struct {
 	UtteranceId     string
-	SpaceId         string
+	PartitionId         string
 	ParticipantId   string
 	ParticipantType string
 	Text            string
@@ -10254,8 +10254,8 @@ func MutationSendSpeechUtteranceBuild(args MutationSendSpeechUtteranceArgs) stri
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
@@ -10319,7 +10319,7 @@ func MutationSendSpeechUtteranceBuild(args MutationSendSpeechUtteranceArgs) stri
 // Bound concept: utterance.
 type MutationSendTextUtteranceArgs struct {
 	UtteranceId     string
-	SpaceId         string
+	PartitionId         string
 	ParticipantId   string
 	ParticipantType string
 	Text            string
@@ -10344,8 +10344,8 @@ func MutationSendTextUtteranceBuild(args MutationSendTextUtteranceArgs) string {
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
@@ -10446,7 +10446,7 @@ func MutationSetAccountEntitlementBuild(args MutationSetAccountEntitlementArgs) 
 //
 // Bound concept: audioOverride.
 type MutationSetAgentAudioOverrideArgs struct {
-	SpaceId   string
+	PartitionId   string
 	AgentId   string
 	Mode      string
 	SetBy     string
@@ -10463,8 +10463,8 @@ func (qc *QueryClient) MutationSetAgentAudioOverride(ctx context.Context, args M
 func MutationSetAgentAudioOverrideBuild(args MutationSetAgentAudioOverrideArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationSetAgentAudioOverride({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
@@ -10497,7 +10497,7 @@ func MutationSetAgentAudioOverrideBuild(args MutationSetAgentAudioOverrideArgs) 
 //
 // Bound concept: videoOverride.
 type MutationSetAgentVideoOverrideArgs struct {
-	SpaceId   string
+	PartitionId   string
 	AgentId   string
 	Mode      string
 	SetBy     string
@@ -10514,8 +10514,8 @@ func (qc *QueryClient) MutationSetAgentVideoOverride(ctx context.Context, args M
 func MutationSetAgentVideoOverrideBuild(args MutationSetAgentVideoOverrideArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationSetAgentVideoOverride({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
@@ -11083,7 +11083,7 @@ func MutationSetPartitionVariableBuild(args MutationSetPartitionVariableArgs) st
 type MutationSetPolicyArgs struct {
 	PolicyId              string
 	TargetRecordType      string
-	SpaceId               string
+	PartitionId               string
 	RequiredChecks        float64
 	RequiredConfirmations float64
 	CheckedDataUsable     bool
@@ -11107,12 +11107,12 @@ func MutationSetPolicyBuild(args MutationSetPolicyArgs) string {
 	}
 	b.WriteString("targetRecordType: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetRecordType))
-	if args.SpaceId != "" {
+	if args.PartitionId != "" {
 		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.RequiredChecks != 0 {
 		if b.Len() > 19 {
@@ -11179,7 +11179,7 @@ func MutationSetResponsibilityStatusBuild(args MutationSetResponsibilityStatusAr
 //
 // Bound concept: space.
 type MutationSetSpaceGoalArgs struct {
-	SpaceId string
+	PartitionId string
 	Goal    map[string]any
 }
 
@@ -11192,8 +11192,8 @@ func (qc *QueryClient) MutationSetSpaceGoal(ctx context.Context, args MutationSe
 func MutationSetSpaceGoalBuild(args MutationSetSpaceGoalArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationSetSpaceGoal({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
@@ -11231,13 +11231,13 @@ func MutationSetSurfaceAvailabilityBuild(args MutationSetSurfaceAvailabilityArgs
 	return b.String()
 }
 
-// MutationSetUserActiveSpace -- Set or clear the caller's activeSpaceId. Empty spaceId clears the pointer.
+// MutationSetUserActiveSpace -- Set or clear the caller's activePartitionId. Empty partitionId clears the pointer.
 //
 // Bound concept: user.
 type MutationSetUserActiveSpaceArgs struct {
 	UserId        string
-	SpaceId       string
-	ActiveSpaceId string
+	PartitionId       string
+	ActivePartitionId string
 }
 
 // MutationSetUserActiveSpace calls the engine mutation mutationSetUserActiveSpace.
@@ -11251,19 +11251,19 @@ func MutationSetUserActiveSpaceBuild(args MutationSetUserActiveSpaceArgs) string
 	b.WriteString("mutationSetUserActiveSpace({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if args.SpaceId != "" {
+	if args.PartitionId != "" {
 		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
-	if args.ActiveSpaceId != "" {
+	if args.ActivePartitionId != "" {
 		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
-		b.WriteString("activeSpaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ActiveSpaceId))
+		b.WriteString("activePartitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ActivePartitionId))
 	}
 	b.WriteString("})")
 	return b.String()
@@ -11443,7 +11443,7 @@ func MutationTouchSessionBuild(args MutationTouchSessionArgs) string {
 //
 // Bound concept: workspace.
 type MutationTouchWorkspaceArgs struct {
-	WorkspaceId string
+	WorkpartitionId string
 }
 
 // MutationTouchWorkspace calls the engine mutation mutationTouchWorkspace.
@@ -11455,8 +11455,8 @@ func (qc *QueryClient) MutationTouchWorkspace(ctx context.Context, args Mutation
 func MutationTouchWorkspaceBuild(args MutationTouchWorkspaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationTouchWorkspace({")
-	b.WriteString("workspaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
+	b.WriteString("workpartitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.WorkpartitionId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -11918,7 +11918,7 @@ type MutationUpdateGeneratedOutputContentArgs struct {
 	MimeType string
 	// Enum: workbench_generated | computer_use | agent_generated | derived
 	Source            string
-	SpaceId           string
+	PartitionId           string
 	ProducedByPlanId  string
 	ProducedByAgentId string
 }
@@ -11984,12 +11984,12 @@ func MutationUpdateGeneratedOutputContentBuild(args MutationUpdateGeneratedOutpu
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
-	if args.SpaceId != "" {
+	if args.PartitionId != "" {
 		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.ProducedByPlanId != "" {
 		if b.Len() > 38 {
@@ -12170,7 +12170,7 @@ func MutationUpdateNumberStatusBuild(args MutationUpdateNumberStatusArgs) string
 type MutationUpdateParticipantPresenceArgs struct {
 	PresenceId    string
 	ParticipantId string
-	SpaceId       string
+	PartitionId       string
 	// Enum: idle | listening | thinking | typing | responding | working | waiting | needs_human | needs_clarification | paused | error | using_tool | researching | investigating
 	State           string
 	Label           string
@@ -12203,8 +12203,8 @@ func MutationUpdateParticipantPresenceBuild(args MutationUpdateParticipantPresen
 	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
@@ -12547,7 +12547,7 @@ type MutationUpdateResponsibilityArgs struct {
 	AssignedRoleSlug string
 	SuccessCriteria  string
 	NotifyHow        string
-	ScopeSpaceId     string
+	ScopePartitionId     string
 	Enabled          bool
 	EnabledSet       bool // set true to send enabled; required because zero-value bool is ambiguous
 }
@@ -12626,12 +12626,12 @@ func MutationUpdateResponsibilityBuild(args MutationUpdateResponsibilityArgs) st
 		b.WriteString("notifyHow: ")
 		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
 	}
-	if args.ScopeSpaceId != "" {
+	if args.ScopePartitionId != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
-		b.WriteString("scopeSpaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ScopeSpaceId))
+		b.WriteString("scopePartitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ScopePartitionId))
 	}
 	if args.EnabledSet {
 		if b.Len() > 30 {
@@ -12644,7 +12644,7 @@ func MutationUpdateResponsibilityBuild(args MutationUpdateResponsibilityArgs) st
 	return b.String()
 }
 
-// MutationUpdateSessionDevices -- Update a session record's device state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, spaceId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.
+// MutationUpdateSessionDevices -- Update a session record's device state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.
 //
 // Bound concept: session.
 type MutationUpdateSessionDevicesArgs struct {
@@ -12672,7 +12672,7 @@ func MutationUpdateSessionDevicesBuild(args MutationUpdateSessionDevicesArgs) st
 	return b.String()
 }
 
-// MutationUpdateSessionStreams -- Update a session record's stream state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, spaceId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.
+// MutationUpdateSessionStreams -- Update a session record's stream state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.
 //
 // Bound concept: session.
 type MutationUpdateSessionStreamsArgs struct {

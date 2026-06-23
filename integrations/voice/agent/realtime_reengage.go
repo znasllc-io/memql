@@ -73,12 +73,12 @@ func (r *sessionReengager) ensureLiveSession() bool {
 	}
 	if r.logger != nil {
 		r.logger.Info("voice-agent realtime room: re-engage on a closed session -- rebuilding (#1449)",
-			"space_id", r.spaceID)
+			"partition_id", r.spaceID)
 	}
 	if err := r.rebuild(); err != nil {
 		if r.logger != nil {
 			r.logger.Warn("voice-agent realtime room: re-engage rebuild failed -- leaving session down",
-				"space_id", r.spaceID, "err", err)
+				"partition_id", r.spaceID, "err", err)
 		}
 		return false
 	}

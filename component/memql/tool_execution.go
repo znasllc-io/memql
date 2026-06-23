@@ -301,7 +301,7 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 	// every dispatch path -- the streaming/non-streaming tool loops AND the
 	// realtime-voice CallTool proxy hop (component/grpc handleCallTool, which
 	// does NOT pre-merge) -- stamps the tool's @autoInjected fields
-	// (ownerUserId / spaceId / agentId / ...). For @autoInjected fields the
+	// (ownerUserId / partitionId / agentId / ...). For @autoInjected fields the
 	// server default ALWAYS wins (forged LLM values dropped); other defaults
 	// are fill-if-missing. Idempotent for callers that already pre-merged
 	// (ai_tool_loop.go), so it is safe defense-in-depth there too.

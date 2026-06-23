@@ -76,7 +76,7 @@ func newTestLifecycle(t *testing.T, budget RealtimeBudget, humanCount int) (*Rea
 	l := NewRealtimeLifecycle(budget, stop.fn, nil,
 		withLifecycleClock(clock.Now),
 		withWatchdogInterval(time.Hour), // inert; tests call checkExpiry directly
-		withLifecycleSpaceID("space-test"),
+		withLifecyclePartitionID("space-test"),
 		withEmptyRoomTeardown(true),
 	)
 	l.Start(humanCount)
@@ -113,7 +113,7 @@ func TestLifecycleZeroHumansStaysWarmByDefault(t *testing.T) {
 	l := NewRealtimeLifecycle(defaultTestBudget(), stop.fn, nil,
 		withLifecycleClock(clock.Now),
 		withWatchdogInterval(time.Hour),
-		withLifecycleSpaceID("space-test"),
+		withLifecyclePartitionID("space-test"),
 		// no withEmptyRoomTeardown -> default OFF
 	)
 	l.Start(1)

@@ -20,9 +20,9 @@ func (e *MemQLEngine) validateCognitionUtteranceWriteAuthorization(ctx context.C
 	}
 
 	participantId := strings.TrimSpace(stringFromAny(payload["participantId"]))
-	spaceId := strings.TrimSpace(stringFromAny(payload["spaceId"]))
-	if participantId == "" || spaceId == "" {
-		return fmt.Errorf("cognition utterance requires participantId and spaceId")
+	partitionId := strings.TrimSpace(stringFromAny(payload["partitionId"]))
+	if participantId == "" || partitionId == "" {
+		return fmt.Errorf("cognition utterance requires participantId and partitionId")
 	}
 
 	participantPayload, err := e.getLatestParticipantPayload(ctx, participantId)
@@ -31,28 +31,28 @@ func (e *MemQLEngine) validateCognitionUtteranceWriteAuthorization(ctx context.C
 	}
 
 	// Compare canonicalized space ids on both sides. The participant
-	// row's spaceId gets auto-canonicalized at insert time (see
+	// row's partitionId gets auto-canonicalized at insert time (see
 	// canonicalizeRelationshipFields) so it always reads as a full
 	// `<partition>:v1:cognition:space:<slug>`. The incoming
-	// `spaceId` from the utterance payload may be either canonical
+	// `partitionId` from the utterance payload may be either canonical
 	// or a bare slug -- the polyphon bridge agent in particular
 	// passes the bare slug. Strict string equality used to reject
 	// the bridge with "participant does not belong to space" even
 	// though they referenced the same row.
-	participantSpaceId := strings.TrimSpace(stringFromAny(participantPayload["spaceId"]))
-	if participantSpaceId == "" {
-		return fmt.Errorf("participant %q does not belong to space %q", participantId, spaceId)
+	participantPartitionId := strings.TrimSpace(stringFromAny(participantPayload["partitionId"]))
+	if participantPartitionId == "" {
+		return fmt.Errorf("participant %q does not belong to space %q", participantId, partitionId)
 	}
-	canonicalParticipantSpaceId, perr := e.canonicalizeIdValue(ctx, participantSpaceId, "v1:cognition:space")
+	canonicalParticipantPartitionId, perr := e.canonicalizeIdValue(ctx, participantPartitionId, "v1:cognition:space")
 	if perr != nil {
-		return fmt.Errorf("participant %q does not belong to space %q: %w", participantId, spaceId, perr)
+		return fmt.Errorf("participant %q does not belong to space %q: %w", participantId, partitionId, perr)
 	}
-	canonicalRequestSpaceId, rerr := e.canonicalizeIdValue(ctx, spaceId, "v1:cognition:space")
+	canonicalRequestPartitionId, rerr := e.canonicalizeIdValue(ctx, partitionId, "v1:cognition:space")
 	if rerr != nil {
-		return fmt.Errorf("participant %q does not belong to space %q: %w", participantId, spaceId, rerr)
+		return fmt.Errorf("participant %q does not belong to space %q: %w", participantId, partitionId, rerr)
 	}
-	if canonicalParticipantSpaceId != canonicalRequestSpaceId {
-		return fmt.Errorf("participant %q does not belong to space %q", participantId, spaceId)
+	if canonicalParticipantPartitionId != canonicalRequestPartitionId {
+		return fmt.Errorf("participant %q does not belong to space %q", participantId, partitionId)
 	}
 
 	// Use the participant node's participantType as the source of truth

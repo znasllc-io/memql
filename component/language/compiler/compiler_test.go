@@ -751,12 +751,12 @@ func TestCompiler_ExpressionToJSONExpr_FieldAccess(t *testing.T) {
 }
 
 // TestParseObjectLiteral_BarePathShorthand covers the automation
-// step-arg shorthand: a dotted path like `event.payload.spaceId` with no
+// step-arg shorthand: a dotted path like `event.payload.partitionId` with no
 // `key:` prefix infers the terminal segment as the key.
 func TestParseObjectLiteral_BarePathShorthand(t *testing.T) {
 	c := New(Config{})
 	obj := c.parseObjectLiteral(`{
-		event.payload.spaceId,
+		event.payload.partitionId,
 		event.payload.email,
 		registerNode.result.node.id,
 		name: "explicit",
@@ -766,7 +766,7 @@ func TestParseObjectLiteral_BarePathShorthand(t *testing.T) {
 		t.Fatal("expected parsed object, got nil")
 	}
 	checks := map[string]string{
-		"spaceId": "event.payload.spaceId",
+		"partitionId": "event.payload.partitionId",
 		"id":      "registerNode.result.node.id",
 		"name":    "explicit",
 	}

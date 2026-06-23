@@ -79,7 +79,7 @@ type Config struct {
 	VoiceGrounding bool
 	// VoiceAutoJoin enables the dev auto-join dispatcher: when the voice-agent
 	// is launched with no --room / MEMQL_VOICE_ROOM_NAME, it watches LiveKit for
-	// active polyphon-<spaceId> rooms and joins one, so voice "just works" in
+	// active polyphon-<partitionId> rooms and joins one, so voice "just works" in
 	// dev without launching a per-room process by hand. Default true; production
 	// launches the agent per-room (--room), so it never hits this path. Set
 	// MEMQL_VOICE_AUTOJOIN=false to force the plain idle behaviour instead.

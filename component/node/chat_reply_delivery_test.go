@@ -101,7 +101,7 @@ func TestChatReplyCrossReplicaDelivery(t *testing.T) {
 		Key:        key,
 		Topic:      replyTopic,
 		Kind:       events.KindNodeCreated,
-		Payload:    map[string]any{"id": "utterance:reply-1", "spaceId": spaceID, "text": "Hi from Sofia"},
+		Payload:    map[string]any{"id": "utterance:reply-1", "partitionId": spaceID, "text": "Hi from Sofia"},
 		OriginNode: "cognition-1",
 	})
 
@@ -173,7 +173,7 @@ func TestPresenceTransitionsAllDeliverDespiteStableRowID(t *testing.T) {
 			Timestamp: base.Add(time.Duration(i) * time.Millisecond),
 			Payload: map[string]any{
 				"id":      presenceRowID,
-				"spaceId": spaceID,
+				"partitionId": spaceID,
 				"state":   state,
 			},
 		})
@@ -228,7 +228,7 @@ func TestTextChunksStreamToWSOwningReplica(t *testing.T) {
 			Timestamp: base.Add(time.Duration(i) * time.Millisecond),
 			Payload: map[string]any{
 				"id":      fmt.Sprintf("v1:cognition:text:chunk:text-chunk-%d", i),
-				"spaceId": spaceID,
+				"partitionId": spaceID,
 				"replyId": "utterance:reply-7",
 				"text":    text,
 				"index":   i,
@@ -241,7 +241,7 @@ func TestTextChunksStreamToWSOwningReplica(t *testing.T) {
 		Timestamp: base.Add(5 * time.Millisecond),
 		Payload: map[string]any{
 			"id":      "utterance:reply-7",
-			"spaceId": spaceID,
+			"partitionId": spaceID,
 			"text":    "Hello there",
 		},
 	})
@@ -317,7 +317,7 @@ func TestClientToolRequestSurvivesDepeeredFastPath(t *testing.T) {
 			"id":       callID, // request row id is the callId
 			"callId":   callID,
 			"toolName": "uiRequestControl",
-			"spaceId":  spaceID,
+			"partitionId":  spaceID,
 		},
 	})
 
@@ -362,7 +362,7 @@ func TestClientToolRequestExactlyOnceAcrossPaths(t *testing.T) {
 		Key:        key,
 		Topic:      events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptClientToolRequest),
 		Kind:       events.KindNodeCreated,
-		Payload:    map[string]any{"id": "call-dup", "callId": "call-dup", "spaceId": spaceID},
+		Payload:    map[string]any{"id": "call-dup", "callId": "call-dup", "partitionId": spaceID},
 		OriginNode: "cognition-1",
 	}
 	sub := NewSubstrate(store, time.Minute, nil, nil)
@@ -419,7 +419,7 @@ func TestChatReplyExactlyOnceAcrossPaths(t *testing.T) {
 		Key:        key,
 		Topic:      events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptUtterance),
 		Kind:       events.KindNodeCreated,
-		Payload:    map[string]any{"id": "utterance:once", "spaceId": "space:dup"},
+		Payload:    map[string]any{"id": "utterance:once", "partitionId": "space:dup"},
 		OriginNode: "agent-9",
 	}
 	sub := NewSubstrate(store, time.Minute, nil, nil)
@@ -462,7 +462,7 @@ func TestChatReplyPerSpaceOrdering(t *testing.T) {
 			Key:     key,
 			Topic:   events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptUtterance),
 			Kind:    events.KindNodeCreated,
-			Payload: map[string]any{"id": id, "spaceId": "space:order"},
+			Payload: map[string]any{"id": id, "partitionId": "space:order"},
 		}); err != nil {
 			t.Fatalf("publish %s: %v", id, err)
 		}
@@ -498,7 +498,7 @@ func TestChatReplySelfEchoSuppressed(t *testing.T) {
 		EventID: "u-self", Key: key,
 		Topic:      events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptUtterance),
 		Kind:       events.KindNodeCreated,
-		Payload:    map[string]any{"id": "u-self", "spaceId": "space:self"},
+		Payload:    map[string]any{"id": "u-self", "partitionId": "space:self"},
 		OriginNode: "bff-self",
 	}); err != nil {
 		t.Fatalf("publish self: %v", err)
@@ -507,7 +507,7 @@ func TestChatReplySelfEchoSuppressed(t *testing.T) {
 		EventID: "u-remote", Key: key,
 		Topic:      events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptUtterance),
 		Kind:       events.KindNodeCreated,
-		Payload:    map[string]any{"id": "u-remote", "spaceId": "space:self"},
+		Payload:    map[string]any{"id": "u-remote", "partitionId": "space:self"},
 		OriginNode: "cognition-7",
 	}); err != nil {
 		t.Fatalf("publish remote: %v", err)
@@ -638,7 +638,7 @@ func TestSpaceInterestSubscribesWithoutPublishing(t *testing.T) {
 	consumer.onLocalEvent(ctx, events.Event{
 		Topic:   sessionTopic,
 		Kind:    events.KindNodeCreated,
-		Payload: map[string]any{"id": "session:abc", "spaceId": spaceID},
+		Payload: map[string]any{"id": "session:abc", "partitionId": spaceID},
 	})
 
 	// Interest events are consumer-side only: nothing was published durably.
@@ -653,7 +653,7 @@ func TestSpaceInterestSubscribesWithoutPublishing(t *testing.T) {
 		EventID: "utterance:reply-9", Key: key,
 		Topic:      replyTopic,
 		Kind:       events.KindNodeCreated,
-		Payload:    map[string]any{"id": "utterance:reply-9", "spaceId": spaceID},
+		Payload:    map[string]any{"id": "utterance:reply-9", "partitionId": spaceID},
 		OriginNode: "cognition-1",
 	}); err != nil {
 		t.Fatalf("publish reply: %v", err)
@@ -679,7 +679,7 @@ func TestSpaceInterestIgnoresRemoteEvents(t *testing.T) {
 	consumer.onLocalEvent(ctx, events.Event{
 		Topic:        events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptSession),
 		Kind:         events.KindNodeCreated,
-		Payload:      map[string]any{"id": "session:remote", "spaceId": "v1:cognition:space:elsewhere"},
+		Payload:      map[string]any{"id": "session:remote", "partitionId": "v1:cognition:space:elsewhere"},
 		OriginNodeId: "bff-1", // remote: produced on a different replica
 	})
 
@@ -692,7 +692,7 @@ func TestSpaceInterestIgnoresRemoteEvents(t *testing.T) {
 }
 
 // TestResolveSpaceKey covers the payload shapes the three chat-reply concepts
-// carry: utterance/presence flatten spaceId; canvasState flattens space; both
+// carry: utterance/presence flatten partitionId; canvasState flattens space; both
 // also work from the nested payload map.
 func TestResolveSpaceKey(t *testing.T) {
 	cases := []struct {
@@ -701,11 +701,11 @@ func TestResolveSpaceKey(t *testing.T) {
 		want    string
 		ok      bool
 	}{
-		{"utterance spaceId", map[string]any{"spaceId": "s1"}, "space:s1", true},
+		{"utterance partitionId", map[string]any{"partitionId": "s1"}, "space:s1", true},
 		{"canvas space", map[string]any{"space": "s2"}, "space:s2", true},
-		{"nested payload", map[string]any{"payload": map[string]any{"spaceId": "s3"}}, "space:s3", true},
+		{"nested payload", map[string]any{"payload": map[string]any{"partitionId": "s3"}}, "space:s3", true},
 		{"no space", map[string]any{"foo": "bar"}, "", false},
-		{"empty string", map[string]any{"spaceId": ""}, "", false},
+		{"empty string", map[string]any{"partitionId": ""}, "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

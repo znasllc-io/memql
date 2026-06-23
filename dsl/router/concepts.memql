@@ -24,7 +24,7 @@ concept call {
   requestId           string  @required  @description("Correlates this AI call to an upstream request -- cognition turn, suggest envelope, prompt invocation. Free-form string; uniqueness is not enforced across partitions.")
   agentId             string  @description("Agent whose reply this call was generating; empty for non-agent AI calls (suggest, render, TTS, etc).")
   userId              string  @description("Identity subject of the end-user driving this call, when resolvable. Empty for system-triggered calls.")
-  // Epic 3 3.2 (#1899): spaceId (a CoPresent product notion) dropped from the
+  // Epic 3 3.2 (#1899): partitionId (a CoPresent product notion) dropped from the
   // core AI call ledger. The tenant scope is `partition` (already recorded on
   // this row); per-space AI-cost attribution is a product concern for the
   // CoPresent pack, not core.

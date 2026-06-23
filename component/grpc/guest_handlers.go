@@ -61,7 +61,7 @@ type invitationSummary struct {
 	ID                string
 	Kind              string
 	Status            string
-	SpaceId           string
+	PartitionId           string
 	SpaceName         string
 	InviterId         string
 	InviterName       string
@@ -165,7 +165,7 @@ func lookupInvitationByTokenHash(ctx context.Context, engine *memqlengine.MemQLE
 		ID:                getStr("id"),
 		Kind:              getStr("kind"),
 		Status:            getStr("status"),
-		SpaceId:           getStr("spaceId"),
+		PartitionId:           getStr("partitionId"),
 		SpaceName:         getStr("spaceName"),
 		InviterId:         getStr("inviterId"),
 		InviterName:       getStr("inviterName"),
@@ -185,15 +185,15 @@ func lookupInvitationByTokenHash(ctx context.Context, engine *memqlengine.MemQLE
 }
 
 // listPendingGuestInvitationsForEmail returns every pending guest
-// invitation in `spaceId` whose inviteeEmail matches `email`
+// invitation in `partitionId` whose inviteeEmail matches `email`
 // (case-insensitive). Used by handleSendGuestInvite to clean up stale
 // rows before creating a fresh invitation for the same recipient.
-func listPendingGuestInvitationsForEmail(ctx context.Context, engine *memqlengine.MemQLEngine, spaceId, email string) ([]*invitationSummary, error) {
+func listPendingGuestInvitationsForEmail(ctx context.Context, engine *memqlengine.MemQLEngine, partitionId, email string) ([]*invitationSummary, error) {
 	if engine == nil {
 		return nil, fmt.Errorf("engine not configured")
 	}
-	if strings.TrimSpace(spaceId) == "" {
-		return nil, fmt.Errorf("spaceId required")
+	if strings.TrimSpace(partitionId) == "" {
+		return nil, fmt.Errorf("partitionId required")
 	}
 	needle := strings.ToLower(strings.TrimSpace(email))
 	if needle == "" {
@@ -202,7 +202,7 @@ func listPendingGuestInvitationsForEmail(ctx context.Context, engine *memqlengin
 	// spaceInvitations is shape-projected via invitationFull, which
 	// exposes the fields we need to re-kick the record preserving its
 	// guest context.
-	query := fmt.Sprintf(`querySpaceInvitations({spaceId: %q})`, spaceId)
+	query := fmt.Sprintf(`querySpaceInvitations({partitionId: %q})`, partitionId)
 	result, err := engine.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query space invitations: %w", err)
@@ -256,7 +256,7 @@ func listPendingGuestInvitationsForEmail(ctx context.Context, engine *memqlengin
 			ID:                id,
 			Kind:              "guest",
 			Status:            "pending",
-			SpaceId:           getStr("spaceId"),
+			PartitionId:           getStr("partitionId"),
 			SpaceName:         getStr("spaceName"),
 			InviterId:         getStr("inviterId"),
 			InviterName:       getStr("inviterName"),
@@ -279,7 +279,7 @@ func kickGuestInvitation(ctx context.Context, engine *memqlengine.MemQLEngine, i
 	}
 	args := map[string]any{
 		"invitationId": inv.ID,
-		"spaceId":      inv.SpaceId,
+		"partitionId":      inv.PartitionId,
 		"spaceName":    inv.SpaceName,
 		"inviterId":    inv.InviterId,
 		"inviterName":  inv.InviterName,
@@ -299,7 +299,7 @@ func kickGuestInvitation(ctx context.Context, engine *memqlengine.MemQLEngine, i
 // delivery. Caller must be an authenticated user (the stream
 // interceptor has run); space-membership enforcement is left to the
 // partition check on envelope.partition, which the caller populates
-// with space_id.
+// with partition_id.
 func (s *streamSession) handleSendGuestInvite(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.SendGuestInviteMsg) error {
 	if msg == nil {
 		return nil
@@ -316,12 +316,12 @@ func (s *streamSession) handleSendGuestInvite(envelope *memqlv1.MemqlClientMessa
 		})
 	}
 
-	spaceId := strings.TrimSpace(msg.GetSpaceId())
+	partitionId := strings.TrimSpace(msg.GetPartitionId())
 	emailAddr := strings.ToLower(strings.TrimSpace(msg.GetEmail()))
 	joinURLBase := strings.TrimRight(strings.TrimSpace(msg.GetJoinUrlBase()), "/")
 
-	if spaceId == "" {
-		return sendResult(&memqlv1.SendGuestInviteResult{ErrorCode: "invalid_space", ErrorMessage: "space_id is required"})
+	if partitionId == "" {
+		return sendResult(&memqlv1.SendGuestInviteResult{ErrorCode: "invalid_space", ErrorMessage: "partition_id is required"})
 	}
 	if _, err := mail.ParseAddress(emailAddr); err != nil {
 		return sendResult(&memqlv1.SendGuestInviteResult{ErrorCode: "invalid_email", ErrorMessage: fmt.Sprintf("invalid email: %v", err)})
@@ -351,7 +351,7 @@ func (s *streamSession) handleSendGuestInvite(envelope *memqlv1.MemqlClientMessa
 	// revoke buttons) instead of piling up duplicates. Expired
 	// pendings are ignored -- they'll be reaped by the expiry sweep
 	// and the caller can create a fresh one.
-	existing, err := listPendingGuestInvitationsForEmail(ctx, s.service.engine, spaceId, emailAddr)
+	existing, err := listPendingGuestInvitationsForEmail(ctx, s.service.engine, partitionId, emailAddr)
 	if err != nil && s.logger != nil {
 		s.logger.Warn("guest_invite: failed to list existing pendings", "error", err, "email", emailAddr)
 	}
@@ -395,7 +395,7 @@ func (s *streamSession) handleSendGuestInvite(envelope *memqlv1.MemqlClientMessa
 	// rides in the email below and never lands in the database.
 	args := map[string]any{
 		"invitationId": invitationId,
-		"spaceId":      spaceId,
+		"partitionId":      partitionId,
 		"spaceName":    strings.TrimSpace(msg.GetSpaceName()),
 		"inviterId":    inviterId,
 		"inviterName":  strings.TrimSpace(msg.GetInviterName()),
@@ -488,7 +488,7 @@ func (s *streamSession) handleResolveGuestInvite(envelope *memqlv1.MemqlClientMe
 		if previous != nil {
 			result := &memqlv1.ResolveGuestInviteResult{
 				InvitationId: previous.ID,
-				SpaceId:      previous.SpaceId,
+				PartitionId:      previous.PartitionId,
 				SpaceName:    previous.SpaceName,
 				InviterName:  previous.InviterName,
 				InviteeEmail: previous.InviteeEmail,
@@ -507,7 +507,7 @@ func (s *streamSession) handleResolveGuestInvite(envelope *memqlv1.MemqlClientMe
 	// Derive status from the record.
 	result := &memqlv1.ResolveGuestInviteResult{
 		InvitationId: summary.ID,
-		SpaceId:      summary.SpaceId,
+		PartitionId:      summary.PartitionId,
 		SpaceName:    summary.SpaceName,
 		InviterName:  summary.InviterName,
 		InviteeEmail: summary.InviteeEmail,
@@ -587,7 +587,7 @@ func lookupInvitationByPreviousTokenHash(ctx context.Context, engine *memqlengin
 		ID:                getStr("id"),
 		Kind:              getStr("kind"),
 		Status:            getStr("status"),
-		SpaceId:           getStr("spaceId"),
+		PartitionId:           getStr("partitionId"),
 		SpaceName:         getStr("spaceName"),
 		InviterId:         getStr("inviterId"),
 		InviterName:       getStr("inviterName"),
@@ -605,7 +605,7 @@ func lookupInvitationByPreviousTokenHash(ctx context.Context, engine *memqlengin
 
 // handleJoinSpaceAsGuest atomically marks a guest invitation accepted
 // and creates the Participant record. The stream interceptor already
-// validated the guest token and stashed the invitation + spaceId in
+// validated the guest token and stashed the invitation + partitionId in
 // the claims map (see guest_stream_interceptor.go); this handler
 // reads them back out, runs the two DSL mutations via engine.Execute,
 // and replies.
@@ -658,9 +658,9 @@ func (s *streamSession) handleJoinSpaceAsGuest(envelope *memqlv1.MemqlClientMess
 		})
 	}
 	invitationId, _ := guest["invitationId"].(string)
-	spaceId, _ := guest["spaceId"].(string)
+	partitionId, _ := guest["partitionId"].(string)
 	tokenHash, _ := guest["tokenHash"].(string)
-	if invitationId == "" || spaceId == "" || tokenHash == "" {
+	if invitationId == "" || partitionId == "" || tokenHash == "" {
 		return send(&memqlv1.JoinSpaceAsGuestResult{
 			ErrorCode:    "unauthenticated",
 			ErrorMessage: "guest claims missing invitation/space",
@@ -696,7 +696,7 @@ func (s *streamSession) handleJoinSpaceAsGuest(envelope *memqlv1.MemqlClientMess
 	// Mutation 1: stamp the invitation as accepted.
 	markArgs := map[string]any{
 		"invitationId": invitationId,
-		"spaceId":      spaceId,
+		"partitionId":      partitionId,
 		"spaceName":    invite.SpaceName,
 		"inviterId":    invite.InviterId,
 		"inviterName":  invite.InviterName,
@@ -713,7 +713,7 @@ func (s *streamSession) handleJoinSpaceAsGuest(envelope *memqlv1.MemqlClientMess
 	// Mutation 2: create the guest's Participant record.
 	pArgs := map[string]any{
 		"participantId": participantId,
-		"spaceId":       spaceId,
+		"partitionId":       partitionId,
 		"displayName":   displayName,
 	}
 	pJSON, _ := json.Marshal(pArgs)
@@ -725,7 +725,7 @@ func (s *streamSession) handleJoinSpaceAsGuest(envelope *memqlv1.MemqlClientMess
 	return send(&memqlv1.JoinSpaceAsGuestResult{
 		Success:       true,
 		ParticipantId: participantId,
-		SpaceId:       spaceId,
+		PartitionId:       partitionId,
 	})
 }
 
@@ -783,7 +783,7 @@ func lookupInvitationById(ctx context.Context, engine *memqlengine.MemQLEngine, 
 		ID:                id,
 		Kind:              getStr("kind"),
 		Status:            getStr("status"),
-		SpaceId:           getStr("spaceId"),
+		PartitionId:           getStr("partitionId"),
 		SpaceName:         getStr("spaceName"),
 		InviterId:         getStr("inviterId"),
 		InviterName:       getStr("inviterName"),

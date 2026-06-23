@@ -182,7 +182,7 @@ func TestLiveE2E_ReferencePackAutomationFiresOnSpaceCreate(t *testing.T) {
 	// Create a REAL v1:cognition:space via the actual mutation. The insert
 	// stamps ownerUserId: actor.userId, which the automation greets.
 	spaceID := fmt.Sprintf("v1:cognition:space:refpack-e2e-%d", time.Now().UnixNano())
-	body, _ := json.Marshal(map[string]any{"spaceId": spaceID, "name": "RefPack E2E Space"})
+	body, _ := json.Marshal(map[string]any{"partitionId": spaceID, "name": "RefPack E2E Space"})
 	if _, err := eng.Execute(ctx, "mutationCreateSpace("+string(body)+")"); err != nil {
 		t.Fatalf("createSpace mutation failed: %v", err)
 	}

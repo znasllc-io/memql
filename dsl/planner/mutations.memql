@@ -22,14 +22,14 @@ use planner.concepts.{ plan, task, taskState, responsibility }
 mutation plan mutationCreateAdHocPlan {
   args {
     planId        string  @required
-    spaceId       string  @required
+    partitionId       string  @required
     agentId       string  @required
     ownerUserId   string  @required
     goal          string  @required
   }
   insert {
     id: args.planId
-    args.spaceId
+    args.partitionId
     kind: "adHocAction"
     status: "running"
     args.goal
@@ -152,7 +152,7 @@ mutation task mutationCompleteToolInvocation {
 mutation plan mutationCreatePlan {
   args {
     planId                string
-    spaceId               string  @required
+    partitionId               string  @required
     parentPlanId          string
     kind                  string  @required
     goal                  string  @required
@@ -168,7 +168,7 @@ mutation plan mutationCreatePlan {
   }
   insert {
     id: args.planId
-    args.spaceId
+    args.partitionId
     args.parentPlanId
     args.kind
     status: "planning"
@@ -247,7 +247,7 @@ mutation plan mutationCreateScopeElevationPlan {
     planId          string  @required
     agentId         string  @required
     ownerUserId     string  @required
-    spaceId         string
+    partitionId         string
     intent          string  @required
     summary         string  @required
     requestedScope  string  @required
@@ -262,7 +262,7 @@ mutation plan mutationCreateScopeElevationPlan {
     ownerAgentId: args.agentId
     requestedBy: args.ownerUserId
     triggerSource: "agent.proactive"
-    args.spaceId
+    args.partitionId
     input: {
         intent: args.intent,
         summary: args.summary,
@@ -458,7 +458,7 @@ mutation taskState mutationPersistTaskState {
 //
 // Uses update() (read-merge-validate-write) instead of insert() so
 // the caller doesn't have to re-pass every @required field on the
-// Plan concept (spaceId, kind, goal, requestedBy, triggerSource,
+// Plan concept (partitionId, kind, goal, requestedBy, triggerSource,
 // input). The engine reads the latest existing row, splats the
 // supplied fields on top, validates the merged payload against the
 // concept schema, and appends the merged row -- queries keep
@@ -599,7 +599,7 @@ mutation responsibility mutationCreateResponsibility {
     assignedRoleSlug  string
     successCriteria   string
     notifyHow         string
-    scopeSpaceId      string
+    scopePartitionId      string
     enabled           bool
   }
   insert {
@@ -614,7 +614,7 @@ mutation responsibility mutationCreateResponsibility {
     args.assignedRoleSlug
     args.successCriteria
     args.notifyHow
-    args.scopeSpaceId
+    args.scopePartitionId
     enabled: coalesce(args.enabled, true)
     status: "draft"
   }
@@ -634,7 +634,7 @@ mutation responsibility mutationUpdateResponsibility {
     assignedRoleSlug  string
     successCriteria   string
     notifyHow         string
-    scopeSpaceId      string
+    scopePartitionId      string
     enabled           bool
   }
   update {
@@ -649,7 +649,7 @@ mutation responsibility mutationUpdateResponsibility {
     args.assignedRoleSlug
     args.successCriteria
     args.notifyHow
-    args.scopeSpaceId
+    args.scopePartitionId
     args.enabled
   }
 }

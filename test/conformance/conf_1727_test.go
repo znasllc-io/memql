@@ -109,16 +109,16 @@ func runEventDryRunBinding(t *testing.T, e *Env) {
 			"id": "space-1727", "ownerUserId": "user-1727", "status": "active",
 		}},
 		{"logicVoiceMigrationOnSecondHuman", map[string]any{
-			"id": "user-1727", "activeSpaceId": "space-1727",
+			"id": "user-1727", "activePartitionId": "space-1727",
 		}},
 		{"logicGenerateResponse", map[string]any{
-			"spaceId": "space-1727", "utteranceId": "utt-1727", "siParticipantId": "part-1727",
+			"partitionId": "space-1727", "utteranceId": "utt-1727", "siParticipantId": "part-1727",
 			"agentId": "agent-1727", "promptTemplateId": "cognitionReply", "promptData": map[string]any{},
 		}},
 		// (logicEnsureDailySpaceOnAuthSession moved to the CoPresent pack in
 		// #1976; the remaining cognition/data logics keep this coverage.)
 		{"logicConflictDetection", map[string]any{
-			"id": "rec-1727", "spaceId": "space-1727", "recordType": "contact",
+			"id": "rec-1727", "partitionId": "space-1727", "recordType": "contact",
 			"naturalKeyField": "email", "naturalKeyValue": "a@example.com",
 		}},
 	}

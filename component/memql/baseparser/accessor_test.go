@@ -21,11 +21,11 @@ func TestClassifyAccessor(t *testing.T) {
 		{"actor.config.foo", KindActor, "config.foo", nil},
 		// args
 		{"args", KindArgs, "", nil},
-		{"args.spaceId", KindArgs, "spaceId", nil},
+		{"args.partitionId", KindArgs, "partitionId", nil},
 		{"args.input.deeply.nested", KindArgs, "input.deeply.nested", nil},
 		// ctx
 		{"ctx", KindCtx, "", nil},
-		{"ctx.spaceId", KindCtx, "spaceId", nil},
+		{"ctx.partitionId", KindCtx, "partitionId", nil},
 		// payload
 		{"payload", KindPayload, "", nil},
 		{"payload.userId", KindPayload, "userId", nil},

@@ -125,11 +125,11 @@ func (i *Integration) SetAttachmentUploader(u attachmentUploader, bucket string)
 	i.bucket = bucket
 }
 
-// planSpaceId resolves a Plan's spaceId from its id (memql#794). The worker
+// planPartitionId resolves a Plan's partitionId from its id (memql#794). The worker
 // Request carries no space, but the attachment needs one for the GCS object
-// path + the /api/spaces/{spaceId}/attachments download route. Mirrors the
+// path + the /api/spaces/{partitionId}/attachments download route. Mirrors the
 // store's PlanScope lookup. Empty on any miss.
-func (i *Integration) planSpaceId(ctx context.Context, planId string) string {
+func (i *Integration) planPartitionId(ctx context.Context, planId string) string {
 	if i.engine == nil || strings.TrimSpace(planId) == "" {
 		return ""
 	}
@@ -137,7 +137,7 @@ func (i *Integration) planSpaceId(ctx context.Context, planId string) string {
 	if err != nil || res == nil || res.Bundle == nil || len(res.Bundle.Nodes) == 0 {
 		return ""
 	}
-	return strings.TrimSpace(stringField(res.Bundle.Nodes[0], "spaceId"))
+	return strings.TrimSpace(stringField(res.Bundle.Nodes[0], "partitionId"))
 }
 
 // workerMimeType maps a filename to a MIME type for a computer-use upload.
@@ -161,13 +161,13 @@ func workerMimeType(fileName string) string {
 // worker, so no worker->agent round-trip and no binary-unsafe fs_read is
 // needed (the memql#742 insight, applied to the computer-use path). Returns ""
 // on any failure so the caller falls back to a worker-local pointer row.
-func (i *Integration) uploadWorkerAttachment(ctx context.Context, planId, filePath, fileName, spaceId, ownerUserId string, data []byte) string {
-	if i.uploader == nil || i.bucket == "" || spaceId == "" || len(data) == 0 {
+func (i *Integration) uploadWorkerAttachment(ctx context.Context, planId, filePath, fileName, partitionId, ownerUserId string, data []byte) string {
+	if i.uploader == nil || i.bucket == "" || partitionId == "" || len(data) == 0 {
 		return ""
 	}
 	mimeType := workerMimeType(fileName)
 	det := string(genOutputIdEngine.MustFromMap(map[string]any{"planId": planId, "path": filePath}))[:16]
-	objectName := fmt.Sprintf("spaces/%s/attachments/%s/%s", spaceId, det, fileName)
+	objectName := fmt.Sprintf("spaces/%s/attachments/%s/%s", partitionId, det, fileName)
 
 	blobUrl, err := i.uploader.Upload(ctx, i.bucket, objectName, data, mimeType)
 	if err != nil {
@@ -178,10 +178,10 @@ func (i *Integration) uploadWorkerAttachment(ctx context.Context, planId, filePa
 		return ""
 	}
 
-	attachmentId := spaceId + ":" + det
+	attachmentId := partitionId + ":" + det
 	call := fmt.Sprintf(
-		`mutationCreateAttachment({attachmentId:%q, spaceId:%q, fileName:%q, mimeType:%q, fileSize:%d, blobUrl:%q, status:%q, uploadedBy:%q})`,
-		attachmentId, spaceId, fileName, mimeType, len(data), blobUrl, "ready", ownerUserId)
+		`mutationCreateAttachment({attachmentId:%q, partitionId:%q, fileName:%q, mimeType:%q, fileSize:%d, blobUrl:%q, status:%q, uploadedBy:%q})`,
+		attachmentId, partitionId, fileName, mimeType, len(data), blobUrl, "ready", ownerUserId)
 	if _, err := i.engine.Execute(ctx, call); err != nil {
 		if i.logger != nil {
 			i.logger.Warn("worker integration: attachment row create failed -- using pointer row",
@@ -265,7 +265,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"summary":        "string (required) -- one-paragraph card body",
 				"agentId":        "string (required)",
 				"ownerUserId":    "string (required)",
-				"spaceId":        "string (optional) -- target space for the canvas card",
+				"partitionId":        "string (optional) -- target space for the canvas card",
 			},
 		},
 	}
@@ -395,10 +395,10 @@ func (i *Integration) promoteWorkerOutput(ctx context.Context, req Request) {
 	// uploader is configured -- in that case the Library still names the origin
 	// machine (memql#789) and the copresent UI shows "lives on <machine>".
 	content := asString(req.Args["content"])
-	spaceId := i.planSpaceId(mutationCtx, req.PlanId)
+	partitionId := i.planPartitionId(mutationCtx, req.PlanId)
 	var attachmentId string
 	if content != "" {
-		attachmentId = i.uploadWorkerAttachment(mutationCtx, req.PlanId, path, title, spaceId, ownerUserId, []byte(content))
+		attachmentId = i.uploadWorkerAttachment(mutationCtx, req.PlanId, path, title, partitionId, ownerUserId, []byte(content))
 	}
 
 	var body string
@@ -423,8 +423,8 @@ func (i *Integration) promoteWorkerOutput(ctx context.Context, req Request) {
 	if workerName != "" {
 		fmt.Fprintf(&b, `, producedByWorkerName:%q`, workerName)
 	}
-	if spaceId != "" {
-		fmt.Fprintf(&b, `, spaceId:%q`, spaceId)
+	if partitionId != "" {
+		fmt.Fprintf(&b, `, partitionId:%q`, partitionId)
 	}
 	if attachmentId != "" {
 		fmt.Fprintf(&b, `, attachmentId:%q, mimeType:%q`, attachmentId, workerMimeType(title))
@@ -584,7 +584,7 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 	summary := strings.TrimSpace(asString(args["summary"]))
 	agentId := strings.TrimSpace(asString(args["agentId"]))
 	ownerUserId := strings.TrimSpace(asString(args["ownerUserId"]))
-	spaceId := strings.TrimSpace(asString(args["spaceId"]))
+	partitionId := strings.TrimSpace(asString(args["partitionId"]))
 	if intent == "" || scope == "" || summary == "" {
 		return nil, fmt.Errorf("worker integration: intent, requestedScope, and summary are all required")
 	}
@@ -617,8 +617,8 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 
 	planId := fmt.Sprintf("scope-elevation-%d", time.Now().UnixNano())
 	q := fmt.Sprintf(
-		`mutationCreateScopeElevationPlan({planId:%q, agentId:%q, ownerUserId:%q, spaceId:%q, intent:%q, summary:%q, requestedScope:%q})`,
-		planId, agentId, ownerUserId, spaceId, intent, summary, scope,
+		`mutationCreateScopeElevationPlan({planId:%q, agentId:%q, ownerUserId:%q, partitionId:%q, intent:%q, summary:%q, requestedScope:%q})`,
+		planId, agentId, ownerUserId, partitionId, intent, summary, scope,
 	)
 	if _, err := i.engine.Execute(mutationCtx, q); err != nil {
 		return nil, fmt.Errorf("worker integration: createScopeElevationPlan failed: %w", err)

@@ -86,10 +86,10 @@ spec:
                       - "--addr={{args.service}}:50051"
                       # Must be a well-formed MemQL query: a parse error makes the
                       # engine log a `memql query execution failed` ERROR on the node
-                      # on every gate run (znasllc-io/memql#1130). queryActiveSpaceIds
+                      # on every gate run (znasllc-io/memql#1130). queryActivePartitionIds
                       # is the id-only projection of active v1:cognition:space rows
                       # -- a real cognition-concept read that exercises BFF->cognition.
-                      - "--query=queryActiveSpaceIds({})"
+                      - "--query=queryActivePartitionIds({})"
 ---
 # ---- 3: optional SLO gate (Prometheus) --------------------------------------
 # Enabled by referencing this template too in the Rollout's analysis block and

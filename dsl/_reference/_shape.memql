@@ -52,7 +52,7 @@
 @description("Comprehensive participant projection.")
 shape participant participantFull {
   row.id
-  payload.spaceId
+  payload.partitionId
   payload.userId
   payload.displayName
   payload.status
@@ -156,7 +156,7 @@ shape participant participantWithCallerContext {
 shape participant pathSyntaxExample {
   row.id                            // intrinsic
   row.createdAt                     // intrinsic
-  payload.spaceId                   // payload field
+  payload.partitionId                   // payload field
   payload.displayName               // payload field
   payload.status                    // payload field
 }
@@ -204,8 +204,8 @@ shape participant pathSyntaxExample {
 //
 //         @description("Get space participants")
 //         query participant querySpaceParticipants {
-//           args   { spaceId string @required }
-//           filter payload.spaceId == args.spaceId
+//           args   { partitionId string @required }
+//           filter payload.partitionId == args.partitionId
 //           shape  participantFull
 //         }
 //

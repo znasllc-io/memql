@@ -21,7 +21,7 @@ func TestValidateFunctionArgs_RichSchemas(t *testing.T) {
 		ArgsSchema: &ArgsSchemaConfig{
 			AdditionalProperties: &noExtra,
 			Fields: []*FunctionArgsField{
-				{Name: "spaceId", Type: "string"},
+				{Name: "partitionId", Type: "string"},
 				{Name: "questionNumber", Type: "number", Minimum: &min, Maximum: &max},
 				{Name: "status", Type: "string", Optional: true, Enum: []any{"active", "closed"}},
 				{Name: "scheduledAt", Type: "string", Optional: true, Format: "date-time"},
@@ -45,7 +45,7 @@ func TestValidateFunctionArgs_RichSchemas(t *testing.T) {
 	}
 
 	valid := map[string]any{
-		"spaceId":        "space-1",
+		"partitionId":        "space-1",
 		"questionNumber": 4,
 		"status":         "active",
 		"scheduledAt":    "2026-01-01T12:00:00Z",
@@ -59,12 +59,12 @@ func TestValidateFunctionArgs_RichSchemas(t *testing.T) {
 	}
 
 	invalidCases := []map[string]any{
-		{"spaceId": "space-1", "questionNumber": 2, "unknown": true},                                      // top-level extra
-		{"spaceId": "space-1", "questionNumber": 9},                                                       // max
-		{"spaceId": "space-1", "questionNumber": 2, "status": "paused"},                                   // enum
-		{"spaceId": "space-1", "questionNumber": 2, "scheduledAt": "not-a-date"},                          // format
-		{"spaceId": "space-1", "questionNumber": 2, "payload": map[string]any{"tenantId": "t", "x": "y"}}, // nested extra
-		{"spaceId": "space-1", "questionNumber": 2, "tags": []any{"ok", 123}},                             // array item type
+		{"partitionId": "space-1", "questionNumber": 2, "unknown": true},                                      // top-level extra
+		{"partitionId": "space-1", "questionNumber": 9},                                                       // max
+		{"partitionId": "space-1", "questionNumber": 2, "status": "paused"},                                   // enum
+		{"partitionId": "space-1", "questionNumber": 2, "scheduledAt": "not-a-date"},                          // format
+		{"partitionId": "space-1", "questionNumber": 2, "payload": map[string]any{"tenantId": "t", "x": "y"}}, // nested extra
+		{"partitionId": "space-1", "questionNumber": 2, "tags": []any{"ok", 123}},                             // array item type
 	}
 	for idx, tc := range invalidCases {
 		if err := v.validateFunctionArgs(fn, tc); err == nil {

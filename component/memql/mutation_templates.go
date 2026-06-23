@@ -532,7 +532,7 @@ func (e *mutationTemplateEvaluator) evalString(ctx context.Context, s string) (a
 	// Use this in mutation id derivations that hash foreign-key args:
 	//
 	//   id = concat("participant-", hash(concat(
-	//     canonicalId(ctx.spaceId, "v1:cognition:space"), ":",
+	//     canonicalId(ctx.partitionId, "v1:cognition:space"), ":",
 	//     canonicalId(ctx.userId,  "v1:identity:user")
 	//   )))
 	//

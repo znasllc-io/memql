@@ -1608,17 +1608,17 @@ mutation user mutationScheduleAccountDeletion {
 // setUserActiveSpace
 // ==================
 //
-// Switches the caller's activeSpaceId pointer. Phase 4 of the chat-
+// Switches the caller's activePartitionId pointer. Phase 4 of the chat-
 // architecture plan -- the activity model's only mutation: each human
 // is active in at most one space at a time. Camera, mic, voice
 // transport, video presence are all bound to this pointer.
 //
-// Caller passes spaceId="" (empty) to clear the pointer (closing the
-// app, leaving every space). Otherwise spaceId is the canonical id of
+// Caller passes partitionId="" (empty) to clear the pointer (closing the
+// app, leaving every space). Otherwise partitionId is the canonical id of
 // the space being activated.
 //
 // Server-stamping: the underlying engine update() reads the existing
-// user row by id and shallow-merges {activeSpaceId: <new>} on top.
+// user row by id and shallow-merges {activePartitionId: <new>} on top.
 // The frontend computes the user id from the JWT subject and passes it
 // here; abuse mitigation rests on the partition-ACL middleware
 // (cluster-wide owner check) and the engine's standard write
@@ -1627,24 +1627,24 @@ mutation user mutationScheduleAccountDeletion {
 // access control would catch a cross-user write).
 //
 // Discussion mode (Phase 6) and voice migration (Phase 7) read
-// activeSpaceId on every iteration, so a switch fires their state
+// activePartitionId on every iteration, so a switch fires their state
 // transitions implicitly -- no separate notification needed.
 
 @enabled
-@description("Set or clear the caller's activeSpaceId. Empty spaceId clears the pointer.")
+@description("Set or clear the caller's activePartitionId. Empty partitionId clears the pointer.")
 mutation user mutationSetUserActiveSpace {
   args {
     userId         string  @required
-    spaceId        string
-    activeSpaceId  string
+    partitionId        string
+    activePartitionId  string
   }
   update {
     id: args.userId
-    // Accept either `spaceId` (the param-style name; what the SPA and the
-    // 2-Spaces QA suite pass) or `activeSpaceId` (the concept-field name; what
+    // Accept either `partitionId` (the param-style name; what the SPA and the
+    // 2-Spaces QA suite pass) or `activePartitionId` (the concept-field name; what
     // the 1-Identity QA suite passed and silently lost). Both land on the
-    // concept's activeSpaceId field; empty/missing clears the pointer. (#1633)
-    activeSpaceId: coalesce(args.spaceId, args.activeSpaceId, "")
+    // concept's activePartitionId field; empty/missing clears the pointer. (#1633)
+    activePartitionId: coalesce(args.partitionId, args.activePartitionId, "")
   }
 }
 

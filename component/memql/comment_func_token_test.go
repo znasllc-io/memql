@@ -66,11 +66,11 @@ func TestLoader_MutationWithFuncTokenInLineComment(t *testing.T) {
 		"@description(\"create a space\")\n" +
 		"mutation space mutationCreateSpaceLineComment {\n" +
 		"  args {\n" +
-		"    spaceId  string  @required\n" +
+		"    partitionId  string  @required\n" +
 		"    name     string  @required\n" +
 		"  }\n" +
 		"  insert {\n" +
-		"    id:        args.spaceId\n" +
+		"    id:        args.partitionId\n" +
 		"    name:      args.name\n" +
 		"    status:    \"active\"\n" +
 		"    createdAt: now\n" +
@@ -90,11 +90,11 @@ func TestLoader_MutationWithFuncTokenInBlockComment(t *testing.T) {
 		"/* legacy: func (Mutation) mutationCreateSpace(ctx any) error { ... } */\n" +
 		"mutation space mutationCreateSpaceBlockComment {\n" +
 		"  args {\n" +
-		"    spaceId  string  @required\n" +
+		"    partitionId  string  @required\n" +
 		"    name     string  @required\n" +
 		"  }\n" +
 		"  insert {\n" +
-		"    id:        args.spaceId\n" +
+		"    id:        args.partitionId\n" +
 		"    name:      args.name\n" +
 		"    status:    \"active\"\n" +
 		"    createdAt: now\n" +
@@ -119,8 +119,8 @@ func TestExtractFunctionSlices_IgnoresFuncTokenInComment(t *testing.T) {
 		"}\n\n" +
 		"/* func (Mutation) legacyWrite(ctx any) error */\n" +
 		"mutation space mutationWriteSpaceSlice {\n" +
-		"  args { spaceId string @required }\n" +
-		"  insert { id: args.spaceId status: \"active\" createdAt: now createdBy: actor.userId }\n" +
+		"  args { partitionId string @required }\n" +
+		"  insert { id: args.partitionId status: \"active\" createdAt: now createdBy: actor.userId }\n" +
 		"}"
 
 	slices := ExtractFunctionSlices(src)

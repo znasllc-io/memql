@@ -103,7 +103,7 @@ func TestNamedQueryPaginationCrossNode(t *testing.T) {
 			uid := "v1:cognition:utterance:" + id.NewShortId()
 			if _, err := qcA.MutationSendTextUtterance(ctx, memqlclient.MutationSendTextUtteranceArgs{
 				UtteranceId:     uid,
-				SpaceId:         spaceID,
+				PartitionId:         spaceID,
 				ParticipantId:   participantID,
 				ParticipantType: "human",
 				Text:            fmt.Sprintf("named-query pagination probe %03d", i),
@@ -118,7 +118,7 @@ func TestNamedQueryPaginationCrossNode(t *testing.T) {
 		// the sort+paginate directives are baked into the query DEFINITION, so the
 		// cursor rides ExecuteQueryMsg.cursor and we never pass a page size.
 		query := memqlclient.QuerySpaceUtterancesBuild(memqlclient.QuerySpaceUtterancesArgs{
-			SpaceId: spaceID,
+			PartitionId: spaceID,
 		})
 
 		// PAGE 1 on connA (replica X mints the cursor from the named query).
@@ -162,7 +162,7 @@ func TestNamedQueryPaginationCrossNode(t *testing.T) {
 		for i := 0; i < total; i++ {
 			sid := "v1:cognition:space:" + id.NewShortId()
 			if _, err := qcA.MutationCreateSpace(ctx, memqlclient.MutationCreateSpaceArgs{
-				SpaceId: sid,
+				PartitionId: sid,
 				Name:    fmt.Sprintf("named-query space probe %03d", i),
 				Status:  "active",
 			}); err != nil {

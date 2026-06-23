@@ -13,7 +13,7 @@ use planner.concepts.{ plan, task, taskState, responsibility }
 @description("Comprehensive plan projection for the Tasks page row, the plan.created / plan.completed canvas cards, and the planner's own routing decisions. Carries every Plan field including lifecycle timestamps, the per-kind input/output blobs, and the token + estimate accounting the Tasks page progress strips read.")
 shape plan planFull {
   row.id
-  payload.spaceId
+  payload.partitionId
   payload.kind
   payload.status
   payload.goal
@@ -99,7 +99,7 @@ shape responsibility responsibilityFull {
   payload.assignedRoleSlug
   payload.successCriteria
   payload.notifyHow
-  payload.scopeSpaceId
+  payload.scopePartitionId
   payload.enabled
   payload.status
   payload.intakeStatus

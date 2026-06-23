@@ -170,5 +170,5 @@ tool forgeRecordMentoring {
 @mcp
 tool forgeAttachToRequest {
   requestId     string  @required @description("Id of the v1:forge:request to attach to.")
-  attachmentId  string  @required @description("Id of the v1:common:attachment to link. The attachment must already be uploaded (POST /spaces/{spaceId}/attachments). Call this tool once per file; each call appends without clobbering.")
+  attachmentId  string  @required @description("Id of the v1:common:attachment to link. The attachment must already be uploaded (POST /spaces/{partitionId}/attachments). Call this tool once per file; each call appends without clobbering.")
 }

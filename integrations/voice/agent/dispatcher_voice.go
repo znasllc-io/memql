@@ -19,7 +19,7 @@ import (
 // pulls the LiveKit server SDK). The voice-agent is a per-room participant, but
 // there is no per-session launcher in dev -- so a long-running `voice-agent`
 // service with no --room used to sit idle (or, before #511, crash-loop). This
-// makes it useful instead: it watches LiveKit for active polyphon-<spaceId>
+// makes it useful instead: it watches LiveKit for active polyphon-<partitionId>
 // rooms and serves EACH of them concurrently, so opening a space brings the GA
 // into voice without any manual room wiring, and two humans in two different
 // spaces both get the GA at the same time (#1395) rather than the second
@@ -177,7 +177,7 @@ func dispatchLoop(ctx context.Context, cfg Config, dial Dialer, logger *slog.Log
 }
 
 // discoverActiveRooms lists LiveKit rooms and returns the names of every
-// polyphon-<spaceId> room eligible to serve: at least one HUMAN participant
+// polyphon-<partitionId> room eligible to serve: at least one HUMAN participant
 // present (so the agent never wedges on a room with only its own ghost or an
 // avatar vendor participant, #1378) AND no voice-agent (`-ga`) participant
 // already present (so a second replica does not double-serve a room another
@@ -196,7 +196,7 @@ func discoverActiveRooms(ctx context.Context, roomClient *lksdk.RoomServiceClien
 	var rooms []string
 	for _, r := range resp.GetRooms() {
 		name := r.GetName()
-		// Serve product voice rooms (polyphon-<spaceId>) AND telephony rooms
+		// Serve product voice rooms (polyphon-<partitionId>) AND telephony rooms
 		// (tel-<partitionId>-<auto>, Epic 4 / memql#1911): a PSTN caller bridged
 		// in by livekit/sip is a human room participant, so the existing realtime
 		// agent answers the phone with no further change. Telephony is core and
@@ -229,7 +229,7 @@ func discoverActiveRooms(ctx context.Context, roomClient *lksdk.RoomServiceClien
 
 // classifyRoomParticipants lists a room's participants once and reports whether
 // it contains at least one human (per isHumanParticipantIdentity) and whether
-// it contains a voice-agent participant (the `<spaceId>-ga` / agent-row
+// it contains a voice-agent participant (the `<partitionId>-ga` / agent-row
 // identity the joiner mints). Best-effort: a list error logs at debug and
 // reports (false, false), so a transient API failure skips the room for one
 // poll cycle instead of risking a wedge on machinery or a double-serve.

@@ -22,7 +22,7 @@ builtin editDocument {
   authorId         string
   expectedVersion  int
   producedByPlanId string
-  spaceId          string
+  partitionId          string
 }
 
 @enabled
@@ -36,7 +36,7 @@ builtin assistantEditDocument {
   note             string
   agentId          string
   producedByPlanId string
-  spaceId          string
+  partitionId          string
   expectedVersion  int
 }
 

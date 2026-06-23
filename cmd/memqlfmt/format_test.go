@@ -23,9 +23,9 @@ func TestFmtRewriterParity_QueryStructForm(t *testing.T) {
 	source := `@description("Active participants in a space.")
 query participant queryActiveParticipantsForSpace {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
   }
-  filter participant.spaceId == args.spaceId
+  filter participant.partitionId == args.partitionId
   shape  participantFull
 }`
 
@@ -36,11 +36,11 @@ func TestFmtRewriterParity_MutationStructForm(t *testing.T) {
 	source := `@description("Create a cognition space.")
 mutation space mutationCreateSpace {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
     name     string  @required
   }
   insert {
-    id:        args.spaceId
+    id:        args.partitionId
     name:      args.name
     status:    "active"
     createdAt: now

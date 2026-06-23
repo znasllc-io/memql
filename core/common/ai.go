@@ -141,7 +141,7 @@ type VisionAIProvider interface {
 // toolDefaultsCtxKey is the context key for injecting default argument values
 // into tool calls. When set, these defaults are merged into every tool call's
 // arguments UNLESS the AI model already provided a value for that key.
-// This allows callers (e.g., cognition) to inject spaceId, participantId,
+// This allows callers (e.g., cognition) to inject partitionId, participantId,
 // etc. without relying on the AI model to include them.
 type toolDefaultsCtxKey struct{}
 

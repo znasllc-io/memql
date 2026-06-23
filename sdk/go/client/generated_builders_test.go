@@ -27,7 +27,7 @@ func TestGeneratedBuilder_OmittedLeadingOptionalHasNoDanglingComma(t *testing.T)
 	got := MutationUpdateParticipantPresenceBuild(MutationUpdateParticipantPresenceArgs{
 		// PresenceId intentionally omitted -- the leading optional field.
 		ParticipantId: "v1:cognition:participant:p1",
-		SpaceId:       "v1:cognition:space:s1",
+		PartitionId:       "v1:cognition:space:s1",
 		State:         "idle",
 		Label:         "probe",
 	})
@@ -52,7 +52,7 @@ func TestGeneratedBuilder_OmittedLeadingOptionalHasNoDanglingComma(t *testing.T)
 func TestGeneratedBuilder_NilObjectArgsAreOmitted(t *testing.T) {
 	// All optional objects nil -> none of them appear.
 	got := MutationCreateSessionForParticipantBuild(MutationCreateSessionForParticipantArgs{
-		SpaceId:       "v1:cognition:space:s1",
+		PartitionId:       "v1:cognition:space:s1",
 		ParticipantId: "v1:cognition:participant:p1",
 	})
 	for _, absent := range []string{"streams", "humanInput", "aiOutput"} {
@@ -67,7 +67,7 @@ func TestGeneratedBuilder_NilObjectArgsAreOmitted(t *testing.T) {
 
 	// Real object -> the field renders with its content.
 	got = MutationCreateSessionForParticipantBuild(MutationCreateSessionForParticipantArgs{
-		SpaceId:       "v1:cognition:space:s1",
+		PartitionId:       "v1:cognition:space:s1",
 		ParticipantId: "v1:cognition:participant:p1",
 		Streams:       map[string]any{"realtimeSessionId": "rt-1"},
 	})

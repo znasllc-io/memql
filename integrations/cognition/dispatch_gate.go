@@ -22,7 +22,7 @@ const dispatchGateLockClass int32 = 0x434F474E
 // greetGateLockClass namespaces the greet-on-join advisory locks. A DISTINCT
 // class from dispatchGateLockClass keeps the greeting gate's key space wholly
 // separate from the utterance-dispatch gate -- a greeting keyed on
-// (spaceId, agentId) and an utterance keyed on its id can never alias onto the
+// (partitionId, agentId) and an utterance keyed on its id can never alias onto the
 // same lock even if their FNV hashes collide. 0x47524554 spells "GRET".
 const greetGateLockClass int32 = 0x47524554
 
@@ -32,7 +32,7 @@ const greetGateLockClass int32 = 0x47524554
 // graph.node.updated.v1:planner:plan event is broadcast to BOTH cognition
 // replicas, so both would post the "I need your input on X" chat message
 // without a cross-replica guard -- the same double-post hazard #1386 fixed
-// for greetings. This gate is keyed on (spaceId, planId) under a distinct
+// for greetings. This gate is keyed on (partitionId, planId) under a distinct
 // class so it never aliases an utterance-dispatch or greeting lock even on an
 // FNV collision. 0x464E4452 spells "FNDR" (FeedbackANnounceR).
 const feedbackAnnounceGateLockClass int32 = 0x464E4452
@@ -197,7 +197,7 @@ func dispatchGateLockKey(utteranceId string) int32 {
 }
 
 // tryGreet gives exactly one cognition replica the right to fire the
-// greet-on-join greeting for a given (spaceId, agentId) (znasllc-io/memql#1386).
+// greet-on-join greeting for a given (partitionId, agentId) (znasllc-io/memql#1386).
 //
 // The bug it fixes: the v1:cognition:participant.created event is broadcast to
 // BOTH cognition replicas, so both run handleAIParticipantGreeting and both
@@ -209,7 +209,7 @@ func dispatchGateLockKey(utteranceId string) int32 {
 // process; it does nothing across replicas.)
 //
 // The fix mirrors tryDispatch exactly: a Postgres session-level advisory lock,
-// here keyed by (spaceId, agentId) instead of utterance id and namespaced under
+// here keyed by (partitionId, agentId) instead of utterance id and namespaced under
 // greetGateLockClass so it never aliases an utterance-dispatch lock. Exactly
 // one replica wins pg_try_advisory_lock (non-blocking); the loser bails without
 // greeting. The winner holds the lock from the gate across the initial-delay
@@ -226,7 +226,7 @@ func dispatchGateLockKey(utteranceId string) int32 {
 //
 // NO-OP on single replica. The lone replica always wins, so single-node dev is
 // unaffected.
-func (g *dispatchGate) tryGreet(ctx context.Context, spaceId, agentId string) (proceed bool, release func(), err error) {
+func (g *dispatchGate) tryGreet(ctx context.Context, partitionId, agentId string) (proceed bool, release func(), err error) {
 	if g == nil || g.directDBGetter == nil {
 		return true, dispatchGateNoop, nil // fail safe: no DB accounting available
 	}
@@ -240,7 +240,7 @@ func (g *dispatchGate) tryGreet(ctx context.Context, spaceId, agentId string) (p
 		return true, dispatchGateNoop, cerr // fail safe
 	}
 
-	objid := greetGateLockKey(spaceId, agentId)
+	objid := greetGateLockKey(partitionId, agentId)
 	var acquired bool
 	if qerr := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1, $2)", greetGateLockClass, objid).Scan(&acquired); qerr != nil {
 		_ = conn.Close()
@@ -264,14 +264,14 @@ func (g *dispatchGate) tryGreet(ctx context.Context, spaceId, agentId string) (p
 	return true, release, nil
 }
 
-// greetGateLockKey hashes (spaceId, agentId) to the 32-bit object key of the
+// greetGateLockKey hashes (partitionId, agentId) to the 32-bit object key of the
 // greet-on-join advisory lock. FNV-1a over a delimiter-joined key is stable
 // across processes so every replica derives the same key for the same greeting.
 // The NUL delimiter cannot appear in an id, so distinct (space, agent) pairs
 // never collide via concatenation ambiguity.
-func greetGateLockKey(spaceId, agentId string) int32 {
+func greetGateLockKey(partitionId, agentId string) int32 {
 	h := fnv.New32a()
-	_, _ = h.Write([]byte(spaceId))
+	_, _ = h.Write([]byte(partitionId))
 	_, _ = h.Write([]byte{0})
 	_, _ = h.Write([]byte(agentId))
 	return int32(h.Sum32())
@@ -279,7 +279,7 @@ func greetGateLockKey(spaceId, agentId string) int32 {
 
 // tryAnnounceFeedback gives exactly one cognition replica the right to post
 // the assistant's "Plan X needs your input" chat message for a given
-// (spaceId, planId) (epic memql#1404 / child #1406).
+// (partitionId, planId) (epic memql#1404 / child #1406).
 //
 // The bug it fixes mirrors #1386 exactly: the
 // graph.node.updated.v1:planner:plan event for a Plan entering
@@ -292,7 +292,7 @@ func greetGateLockKey(spaceId, agentId string) int32 {
 // needed to make the announcement exactly-once.
 //
 // The fix is the proven tryGreet/tryDispatch primitive: a Postgres
-// session-level advisory lock keyed by (spaceId, planId), namespaced under
+// session-level advisory lock keyed by (partitionId, planId), namespaced under
 // feedbackAnnounceGateLockClass so it never aliases an utterance-dispatch or
 // greeting lock. Exactly one replica wins pg_try_advisory_lock (non-blocking);
 // the loser bails without announcing. The winner holds the lock from the gate
@@ -307,7 +307,7 @@ func greetGateLockKey(spaceId, agentId string) int32 {
 //
 // NO-OP on single replica. The lone replica always wins, so single-node dev is
 // unaffected.
-func (g *dispatchGate) tryAnnounceFeedback(ctx context.Context, spaceId, planId string) (proceed bool, release func(), err error) {
+func (g *dispatchGate) tryAnnounceFeedback(ctx context.Context, partitionId, planId string) (proceed bool, release func(), err error) {
 	if g == nil || g.directDBGetter == nil {
 		return true, dispatchGateNoop, nil // fail safe: no DB accounting available
 	}
@@ -321,7 +321,7 @@ func (g *dispatchGate) tryAnnounceFeedback(ctx context.Context, spaceId, planId 
 		return true, dispatchGateNoop, cerr // fail safe
 	}
 
-	objid := feedbackAnnounceGateLockKey(spaceId, planId)
+	objid := feedbackAnnounceGateLockKey(partitionId, planId)
 	var acquired bool
 	if qerr := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1, $2)", feedbackAnnounceGateLockClass, objid).Scan(&acquired); qerr != nil {
 		_ = conn.Close()
@@ -342,14 +342,14 @@ func (g *dispatchGate) tryAnnounceFeedback(ctx context.Context, spaceId, planId 
 	return true, release, nil
 }
 
-// feedbackAnnounceGateLockKey hashes (spaceId, planId) to the 32-bit object key
+// feedbackAnnounceGateLockKey hashes (partitionId, planId) to the 32-bit object key
 // of the plan-feedback announcement advisory lock. FNV-1a over a
 // NUL-delimiter-joined key is stable across processes so every replica derives
 // the same key for the same (space, plan). The NUL delimiter cannot appear in
 // an id, so distinct pairs never collide via concatenation ambiguity.
-func feedbackAnnounceGateLockKey(spaceId, planId string) int32 {
+func feedbackAnnounceGateLockKey(partitionId, planId string) int32 {
 	h := fnv.New32a()
-	_, _ = h.Write([]byte(spaceId))
+	_, _ = h.Write([]byte(partitionId))
 	_, _ = h.Write([]byte{0})
 	_, _ = h.Write([]byte(planId))
 	return int32(h.Sum32())

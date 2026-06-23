@@ -299,7 +299,7 @@ func validateFunctionName(name string) error {
 // ArgRefExpression references a value from the function arguments.
 // Used in function expressions as $args.fieldName syntax.
 type ArgRefExpression struct {
-	// Path is the dot-separated path to the argument field (e.g., "spaceId", "options.limit").
+	// Path is the dot-separated path to the argument field (e.g., "partitionId", "options.limit").
 	Path string
 }
 

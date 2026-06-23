@@ -64,7 +64,7 @@ func TestStamper_AdHoc_FinalizesWrapper(t *testing.T) {
 	s := New(fe, nil)
 
 	ctx := WithPlanContext(context.Background(), PlanContext{
-		AgentId: "v1:agents:agent:a", OwnerUserId: "u", SpaceId: "v1:cognition:space:s",
+		AgentId: "v1:agents:agent:a", OwnerUserId: "u", PartitionId: "v1:cognition:space:s",
 	})
 	// A normal (non-self-planning) ad-hoc tool: it IS wrapped + finalized.
 	out, err := s.ExecuteToolByName(ctx, "webSearch", map[string]any{"x": 1})
@@ -90,7 +90,7 @@ func TestStamper_AdHoc_FinalizesWrapper(t *testing.T) {
 func TestStamper_AdHoc_ToolError_FinalizesFailed(t *testing.T) {
 	fe := &fakeExec{toolErr: errors.New("boom")}
 	s := New(fe, nil)
-	ctx := WithPlanContext(context.Background(), PlanContext{AgentId: "a", OwnerUserId: "u", SpaceId: "s"})
+	ctx := WithPlanContext(context.Background(), PlanContext{AgentId: "a", OwnerUserId: "u", PartitionId: "s"})
 
 	_, err := s.ExecuteToolByName(ctx, "someTool", nil)
 	if err == nil {
@@ -108,7 +108,7 @@ func TestStamper_RealPlan_NotFinalized(t *testing.T) {
 	s := New(fe, nil)
 	ctx := WithPlanContext(context.Background(), PlanContext{
 		PlanId: "v1:planner:plan:real", SemanticTaskId: "v1:planner:task:real",
-		AgentId: "a", OwnerUserId: "u", SpaceId: "s",
+		AgentId: "a", OwnerUserId: "u", PartitionId: "s",
 	})
 
 	if _, err := s.ExecuteToolByName(ctx, "someTool", nil); err != nil {
@@ -133,7 +133,7 @@ func TestStamper_RealPlan_NotFinalized(t *testing.T) {
 func TestStamper_AdHoc_SelfPlanningTool_NotWrapped(t *testing.T) {
 	fe := &fakeExec{}
 	s := New(fe, nil)
-	ctx := WithPlanContext(context.Background(), PlanContext{AgentId: "a", OwnerUserId: "u", SpaceId: "s"})
+	ctx := WithPlanContext(context.Background(), PlanContext{AgentId: "a", OwnerUserId: "u", PartitionId: "s"})
 
 	out, err := s.ExecuteToolByName(ctx, "produceArtifact", map[string]any{"goal": "x"})
 	if err != nil || out != "ran produceArtifact" {
@@ -152,7 +152,7 @@ func TestStamper_RealPlan_SelfPlanningTool_StillStamped(t *testing.T) {
 	s := New(fe, nil)
 	ctx := WithPlanContext(context.Background(), PlanContext{
 		PlanId: "v1:planner:plan:real", SemanticTaskId: "v1:planner:task:real",
-		AgentId: "a", OwnerUserId: "u", SpaceId: "s",
+		AgentId: "a", OwnerUserId: "u", PartitionId: "s",
 	})
 	if _, err := s.ExecuteToolByName(ctx, "produceArtifact", nil); err != nil {
 		t.Fatalf("unexpected: %v", err)

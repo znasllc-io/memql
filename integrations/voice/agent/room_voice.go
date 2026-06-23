@@ -153,7 +153,7 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 	}
 	// Setup phase (#1426): LiveKit connect + connection confirmation.
 	logVoiceTiming(j.logger, "setup.room_join", roomConnectStart,
-		"room", req.RoomName, "space_id", req.SpaceID)
+		"room", req.RoomName, "partition_id", req.PartitionID)
 	if j.logger != nil {
 		j.logger.Info("voice-agent joined LiveKit room",
 			"room", room.Name(), "state", string(room.ConnectionState()))
@@ -178,7 +178,7 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 	// tool-registry fetch, the gpt-realtime websocket connect, and the local
 	// track publish (each timed individually inside newRealtimeRoomBridge).
 	logVoiceTiming(j.logger, "setup.media_bridge", bridgeStart,
-		"room", req.RoomName, "space_id", req.SpaceID, "executor", string(req.Executor.Kind))
+		"room", req.RoomName, "partition_id", req.PartitionID, "executor", string(req.Executor.Kind))
 	bridgeMu.Lock()
 	bridge = b
 	bridgeMu.Unlock()
@@ -204,7 +204,7 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 	// dispatch-accept -> JoinAndServe gap is the session handshake, timed
 	// separately as setup.grpc_connect + setup.session_ack).
 	logVoiceTiming(j.logger, "setup.agent_ready", joinStart,
-		"room", req.RoomName, "space_id", req.SpaceID, "executor", string(req.Executor.Kind))
+		"room", req.RoomName, "partition_id", req.PartitionID, "executor", string(req.Executor.Kind))
 
 	// Idle watchdog (#1378): the agent is itself a room participant, so
 	// LiveKit never closes a room the agent is sitting in -- without this,
@@ -331,7 +331,7 @@ func (j *liveKitRoomJoiner) confirmConnected(ctx context.Context, room *lksdk.Ro
 
 // mintToken builds a LiveKit join JWT for the agent's identity, reusing the
 // exact auth path component/polyphon/localroom.go uses. The agent joins under
-// the GA identity (the room name is already "polyphon-<spaceId>").
+// the GA identity (the room name is already "polyphon-<partitionId>").
 func (j *liveKitRoomJoiner) mintToken(req RoomRequest) (string, error) {
 	at := auth.NewAccessToken(j.cfg.LiveKitAPIKey, j.cfg.LiveKitAPISecret)
 	grant := &auth.VideoGrant{RoomJoin: true, Room: req.RoomName}

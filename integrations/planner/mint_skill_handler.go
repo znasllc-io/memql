@@ -257,13 +257,13 @@ func (l *PlannerAgentLoop) executeMintSkill(ctx context.Context, d plannerDecisi
 // buttons. We attach the card to the Plan's space so the user sees
 // it inline with the conversation that triggered the mint request.
 func (l *PlannerAgentLoop) writeMintApprovalCard(ctx context.Context, plan map[string]any, d plannerDecision) error {
-	spaceId := getString(plan, "spaceId")
-	if spaceId == "" {
+	partitionId := getString(plan, "partitionId")
+	if partitionId == "" {
 		// No space binding; nothing to render against. The
 		// awaitingFeedback escalation still parks the Plan -- the
 		// missing card just means the operator gets the bare
 		// feedbackReason instead of the rich approval surface.
-		return fmt.Errorf("plan has no spaceId; skipping mintSkillApprovalRequested card")
+		return fmt.Errorf("plan has no partitionId; skipping mintSkillApprovalRequested card")
 	}
 	planId := getString(plan, "id")
 	ownerAgentId := getString(plan, "ownerAgentId")
@@ -288,7 +288,7 @@ func (l *PlannerAgentLoop) writeMintApprovalCard(ctx context.Context, plan map[s
 
 	args := map[string]any{
 		"canvasStateId": fmt.Sprintf("mint-skill-approval-%s-%s", planId, d.Slug),
-		"space":         spaceId,
+		"space":         partitionId,
 		"kind":          "card",
 		"data":          cardData,
 		"visibility":    "private",

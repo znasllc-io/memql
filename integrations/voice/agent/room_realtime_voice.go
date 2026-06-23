@@ -181,7 +181,7 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 		// Setup phase (#1426): memQL round-trip (ListTools -> agent tool-scope
 		// engine queries server-side), now overlapped with the realtime dial.
 		logVoiceTiming(logger, "setup.fetch_tools", toolFetchStart,
-			"space_id", req.SpaceID, "tool_count", len(defs))
+			"partition_id", req.PartitionID, "tool_count", len(defs))
 		toolDefsCh <- defs
 	}()
 
@@ -210,7 +210,7 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 	}
 	// Setup phase (#1426): gpt-realtime websocket dial + session.update -- the
 	// "realtime session established" milestone.
-	logVoiceTiming(logger, "setup.realtime_connect", realtimeConnectStart, "space_id", req.SpaceID)
+	logVoiceTiming(logger, "setup.realtime_connect", realtimeConnectStart, "partition_id", req.PartitionID)
 
 	// Join the concurrent tool fetch and apply the tool set. sessionBase
 	// carries the tools from here on, so every later gate-mode UpdateSession
@@ -223,7 +223,7 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 		NewGrpcToolCallTransport(client),
 		NewLogMirrorSink(logger),
 		toolDefs,
-		req.SpaceID,
+		req.PartitionID,
 		req.GaAgentID,
 		logger,
 	)
@@ -231,7 +231,7 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 	if len(sessionBase.Tools) > 0 {
 		if err := session.UpdateSession(sessionBase); err != nil && logger != nil {
 			logger.Warn("voice-agent realtime room: tool session update failed (re-asserted on next gate-mode update)",
-				"space_id", req.SpaceID, "tool_count", len(sessionBase.Tools), "err", err)
+				"partition_id", req.PartitionID, "tool_count", len(sessionBase.Tools), "err", err)
 		}
 	}
 
@@ -252,7 +252,7 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 		return nil, fmt.Errorf("voice-agent realtime room: publish track: %w", err)
 	}
 	// Setup phase (#1426): local output-track build + publish.
-	logVoiceTiming(logger, "setup.publish_track", publishStart, "space_id", req.SpaceID)
+	logVoiceTiming(logger, "setup.publish_track", publishStart, "partition_id", req.PartitionID)
 
 	// Avatar wrap (#460/#1428): like the cascade bridge, wrap the room-publish
 	// sink through maybeStartAvatar so the model's output PCM is ALSO forwarded
@@ -313,7 +313,7 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 		},
 		rebuild: b.rebuildSessionLocked,
 		logger:  logger,
-		spaceID: req.SpaceID,
+		spaceID: req.PartitionID,
 	}
 
 	// Wire the executor + cost-guardrail lifecycle onto the freshly-connected
@@ -337,7 +337,7 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 func (b *realtimeRoomBridge) rebuildSessionLocked() error {
 	if b.logger != nil {
 		b.logger.Info("voice-agent realtime room: rebuilding torn-down realtime session (#1449)",
-			"space_id", b.roomReq.SpaceID)
+			"partition_id", b.roomReq.PartitionID)
 	}
 	// Close the old executor (idempotent; also closes the dead session) before
 	// standing up the replacement so the old drain goroutines unwind.
@@ -354,7 +354,7 @@ func (b *realtimeRoomBridge) rebuildSessionLocked() error {
 	if err != nil {
 		return fmt.Errorf("voice-agent realtime room: re-engage reconnect: %w", err)
 	}
-	logVoiceTiming(b.logger, "reengage.realtime_connect", rebuildStart, "space_id", b.roomReq.SpaceID)
+	logVoiceTiming(b.logger, "reengage.realtime_connect", rebuildStart, "partition_id", b.roomReq.PartitionID)
 	b.wireExecutor(session)
 	return nil
 }
@@ -366,7 +366,7 @@ func (b *realtimeRoomBridge) rebuildSessionLocked() error {
 // the rebuild path holds gateMu via rebuildSessionLocked).
 func (b *realtimeRoomBridge) wireExecutor(session *openai.RealtimeSession) {
 	executor := NewRealtimeExecutor(b.ctx, CascadeConfig{
-		SpaceID:   b.roomReq.SpaceID,
+		PartitionID:   b.roomReq.PartitionID,
 		GaAgentID: b.roomReq.GaAgentID,
 		Thread:    threadContextFor(b.roomReq),
 	}, b.client, session, b.sink, b.roomReq.Executor.SessionPersona, b.logger)
@@ -377,7 +377,7 @@ func (b *realtimeRoomBridge) wireExecutor(session *openai.RealtimeSession) {
 	// per-session grounding plumbed yet it is the strict no-op resolver, so an
 	// ungrounded realtime reply lands byte-identical to an ungrounded text reply.
 	executor.SetOutputForwarder(NewRealtimeOutputForwarder(
-		b.client, b.roomReq.SpaceID, b.roomReq.GaAgentID, NewCitationResolver(GroundingContext{}),
+		b.client, b.roomReq.PartitionID, b.roomReq.GaAgentID, NewCitationResolver(GroundingContext{}),
 	))
 	executor.SetToolBridge(b.toolBridge)
 	// #1430 async tool-call bounds: per-call execution timeout + concurrent
@@ -403,7 +403,7 @@ func (b *realtimeRoomBridge) wireExecutor(session *openai.RealtimeSession) {
 		RealtimeBudgetFromConfig(b.cfg),
 		func(reason TeardownReason) error { return session.Close() },
 		b.logger,
-		withLifecycleSpaceID(b.roomReq.SpaceID),
+		withLifecyclePartitionID(b.roomReq.PartitionID),
 	)
 	executor.AttachLifecycle(lifecycle)
 	executor.Start()
@@ -559,7 +559,7 @@ func (b *realtimeRoomBridge) applyGateMode() {
 	if b.session == nil || b.session.IsClosed() {
 		if b.logger != nil {
 			b.logger.Debug("voice-agent realtime room: skipping gate-mode update on a closed session (rebuild on next re-engage)",
-				"want_mode", mode, "space_id", b.roomReq.SpaceID)
+				"want_mode", mode, "partition_id", b.roomReq.PartitionID)
 		}
 		return
 	}
@@ -574,7 +574,7 @@ func (b *realtimeRoomBridge) applyGateMode() {
 	// Setup phase (#1426): gate-mode session.update -- fires on the first
 	// human's track (part of bring-up) and on later human-count transitions.
 	logVoiceTiming(b.logger, "setup.gate_mode_update", updateStart,
-		"space_id", b.roomReq.SpaceID, "mode", mode, "human_count", humanCount)
+		"partition_id", b.roomReq.PartitionID, "mode", mode, "human_count", humanCount)
 	b.executor.SetTurnMode(mode)
 	b.gateTurnMode = mode
 	if b.logger != nil {
@@ -633,7 +633,7 @@ func (b *realtimeRoomBridge) onTrackSubscribed(track *webrtc.TrackRemote, pub *l
 		sttStart := time.Now()
 		s, err := b.asr.StartStream(context.Background(), asrConfigFor(b.cfg))
 		logVoiceTiming(b.logger, "setup.stt_stream", sttStart,
-			"space_id", b.roomReq.SpaceID, "identity", identity, "ok", err == nil)
+			"partition_id", b.roomReq.PartitionID, "identity", identity, "ok", err == nil)
 		if err != nil {
 			// Release the reservation so a later track for this identity can retry.
 			b.mu.Lock()

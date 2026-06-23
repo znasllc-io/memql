@@ -13,7 +13,7 @@
 concept number {
   e164          string  @required @description("Canonical +<countrycode><number> address, e.g. '+14155550100'.")
   carrier       string  @required @description("Owning carrier name ('telnyx', ...).")
-  partitionId   string  @required @description("Canonical tenant scope this DID belongs to. Inbound calls route to a room scoped by this partition. NEVER a CoPresent spaceId (Amendment A).")
+  partitionId   string  @required @description("Canonical tenant scope this DID belongs to. Inbound calls route to a room scoped by this partition. NEVER a CoPresent partitionId (Amendment A).")
   purpose       enum("inbound", "outbound", "both")  @default("both") @description("How the DID is used.")
   status        enum("active", "releasing", "released")  @default("active") @description("Lifecycle state.")
   providerId    string  @description("Carrier's opaque identifier for the number (the value BuyNumber consumes / ReleaseNumber resolves).")
@@ -45,7 +45,7 @@ concept call {
   direction       enum("inbound", "outbound")  @required @description("Call direction.")
   fromE164        string  @required @description("Calling party E.164.")
   toE164          string  @required @description("Called party E.164.")
-  partitionId     string  @required @description("Canonical tenant scope for the call. NEVER a CoPresent spaceId (Amendment A).")
+  partitionId     string  @required @description("Canonical tenant scope for the call. NEVER a CoPresent partitionId (Amendment A).")
   room            string  @required @description("Partition-scoped LiveKit room the call is bridged into.")
   carrier         string  @description("Carrier that carried the call.")
   providerCallId  string  @description("Carrier / LiveKit SIP participant or call id, for cross-referencing carrier CDRs.")

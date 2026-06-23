@@ -14,7 +14,7 @@ import (
 // subscriber, otherwise the model would re-voice its own reply.
 func TestExtractGAReplyFromEvent_SkipsRealtimeVoiceOutput(t *testing.T) {
 	e := events.Event{Payload: map[string]any{
-		"spaceId":         "space-1",
+		"partitionId":         "space-1",
 		"participantType": "si",
 		"text":            "Here is the answer.",
 		"id":              "utt-1",
@@ -29,7 +29,7 @@ func TestExtractGAReplyFromEvent_SkipsRealtimeVoiceOutput(t *testing.T) {
 // guard is scoped to the native-spoken case only.
 func TestExtractGAReplyFromEvent_AcceptsTextReply(t *testing.T) {
 	e := events.Event{Payload: map[string]any{
-		"spaceId":         "space-1",
+		"partitionId":         "space-1",
 		"participantType": "si",
 		"text":            "Let me help with that.",
 		"id":              "utt-2",
@@ -46,7 +46,7 @@ func TestExtractGAReplyFromEvent_AcceptsTextReply(t *testing.T) {
 // source map at all (the cascade still produces these).
 func TestExtractGAReplyFromEvent_AcceptsReplyWithoutSource(t *testing.T) {
 	e := events.Event{Payload: map[string]any{
-		"spaceId":         "space-1",
+		"partitionId":         "space-1",
 		"participantType": "si",
 		"text":            "No source here.",
 		"id":              "utt-3",
@@ -61,7 +61,7 @@ func TestExtractGAReplyFromEvent_AcceptsReplyWithoutSource(t *testing.T) {
 // decodes engage=false; a different space is rejected.
 func TestExtractVoiceGateDirective_EngageAndDefer(t *testing.T) {
 	engage := events.Event{Payload: map[string]any{
-		"spaceId": "space-1", "engage": true, "mode": "primary", "brevity": "short", "utteranceId": "u1",
+		"partitionId": "space-1", "engage": true, "mode": "primary", "brevity": "short", "utteranceId": "u1",
 	}}
 	d, ok := extractVoiceGateDirective(engage, "space-1", "ga-1")
 	assert.True(t, ok)
@@ -70,7 +70,7 @@ func TestExtractVoiceGateDirective_EngageAndDefer(t *testing.T) {
 	assert.Equal(t, "short", d.brevity)
 	assert.Equal(t, "u1", d.utteranceId)
 
-	deferred := events.Event{Payload: map[string]any{"spaceId": "space-1", "engage": false}}
+	deferred := events.Event{Payload: map[string]any{"partitionId": "space-1", "engage": false}}
 	d, ok = extractVoiceGateDirective(deferred, "space-1", "ga-1")
 	assert.True(t, ok)
 	assert.False(t, d.engage)

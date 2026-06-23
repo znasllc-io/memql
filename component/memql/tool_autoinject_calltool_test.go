@@ -41,7 +41,7 @@ func TestExecuteToolAppliesContextToolDefaults(t *testing.T) {
 		Name: "produceArtifactLike",
 		// ownerUserId is server-stamped (@autoInjected) -- the model must not
 		// supply it, the engine must.
-		AutoInjectedFields: []string{"ownerUserId", "spaceId"},
+		AutoInjectedFields: []string{"ownerUserId", "partitionId"},
 		Handler: &ToolHandler{
 			Type:   "webhook",
 			URL:    srv.URL + "/produce",
@@ -50,11 +50,11 @@ func TestExecuteToolAppliesContextToolDefaults(t *testing.T) {
 	}
 
 	// The model supplied ONLY goal (exactly the #1503 repro: arguments={"goal":...}).
-	// The voice CallTool default-resolution layer puts ownerUserId + spaceId on
+	// The voice CallTool default-resolution layer puts ownerUserId + partitionId on
 	// ctx; ExecuteTool must merge them in before dispatch.
 	ctx := common.ContextWithToolDefaults(agentCtxForTest(), map[string]any{
 		"ownerUserId": "user-jose",
-		"spaceId":     "standard:v1:cognition:space:demo",
+		"partitionId":     "standard:v1:cognition:space:demo",
 	})
 	result, err := e.ExecuteTool(ctx, tool, map[string]any{"goal": "a markdown file of birds"})
 	if err != nil {
@@ -66,8 +66,8 @@ func TestExecuteToolAppliesContextToolDefaults(t *testing.T) {
 	if !strings.Contains(gotBody, `"ownerUserId":"user-jose"`) {
 		t.Fatalf("ExecuteTool did not auto-inject ownerUserId from ctx ToolDefaults; body=%s", gotBody)
 	}
-	if !strings.Contains(gotBody, `"spaceId":"standard:v1:cognition:space:demo"`) {
-		t.Fatalf("ExecuteTool did not auto-inject spaceId from ctx ToolDefaults; body=%s", gotBody)
+	if !strings.Contains(gotBody, `"partitionId":"standard:v1:cognition:space:demo"`) {
+		t.Fatalf("ExecuteTool did not auto-inject partitionId from ctx ToolDefaults; body=%s", gotBody)
 	}
 	// goal (the LLM-supplied arg) must survive the merge.
 	if !strings.Contains(gotBody, "a markdown file of birds") {

@@ -26,17 +26,17 @@
 use data.queries.{ queryDetectConflicts }
 
 @description("Triggered on new v1:data:record creation with a non-empty naturalKeyValue. Queries confirmed records for matching natural key + record type; if any exist, emits 'data.conflicts.detected' event for the UI's ConflictResolutionPanel. Never auto-resolves -- always requires human approval.")
-@eventField("id", "naturalKeyField", "naturalKeyValue", "recordType", "spaceId")
+@eventField("id", "naturalKeyField", "naturalKeyValue", "recordType", "partitionId")
 logic logicConflictDetection {
   args {
     event object @required
   }
   body {
   // Query confirmed records with matching natural key + record type
-  matchingConfirmed := queryDetectConflicts({ spaceId: args.event.payload.spaceId, recordType: args.event.payload.recordType, naturalKeyValue: args.event.payload.naturalKeyValue })
+  matchingConfirmed := queryDetectConflicts({ partitionId: args.event.payload.partitionId, recordType: args.event.payload.recordType, naturalKeyValue: args.event.payload.naturalKeyValue })
 
   // If conflicts exist, emit detection event for the UI
-  emitConflicts := if !matchingConfirmed.Empty() { publishEvent({ topic: "data.conflicts.detected", payload: { spaceId: args.event.payload.spaceId, recordId: args.event.payload.id, recordType: args.event.payload.recordType, naturalKeyField: args.event.payload.naturalKeyField, naturalKeyValue: args.event.payload.naturalKeyValue, matchCount: matchingConfirmed.Len(), matches: matchingConfirmed.Nodes(), requiresHumanApproval: true, timestamp: timestamp() } }) }
+  emitConflicts := if !matchingConfirmed.Empty() { publishEvent({ topic: "data.conflicts.detected", payload: { partitionId: args.event.payload.partitionId, recordId: args.event.payload.id, recordType: args.event.payload.recordType, naturalKeyField: args.event.payload.naturalKeyField, naturalKeyValue: args.event.payload.naturalKeyValue, matchCount: matchingConfirmed.Len(), matches: matchingConfirmed.Nodes(), requiresHumanApproval: true, timestamp: timestamp() } }) }
 
   return emitConflicts
   }

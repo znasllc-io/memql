@@ -64,7 +64,7 @@ func TestParseArgsBlockField_Pattern(t *testing.T) {
 // annotations on the same field compose -- @required + @maxLength +
 // @pattern all parse cleanly.
 func TestParseArgsBlockField_CombinedAnnotations(t *testing.T) {
-	schema := parseArgsForTest(t, `args { spaceId string @required @maxLength(128) @pattern("^v1:") }`)
+	schema := parseArgsForTest(t, `args { partitionId string @required @maxLength(128) @pattern("^v1:") }`)
 	f := schema.Fields[0]
 	if f.Optional {
 		t.Errorf("@required not applied (Optional still true)")

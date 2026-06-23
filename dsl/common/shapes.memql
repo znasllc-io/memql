@@ -13,7 +13,7 @@ shape attachment attachmentDownload {
   payload.fileName
   payload.mimeType
   payload.blobUrl
-  payload.spaceId
+  payload.partitionId
   payload.status
 }
 
@@ -142,7 +142,7 @@ shape actorEnvelope {
 
 // ---- shapes/v1/common/mediaFull.memql ----
 
-// Full projection of v1:common:media for the SPA's `useMedia(spaceId,
+// Full projection of v1:common:media for the SPA's `useMedia(partitionId,
 // filters)` hook (visionarys-io/copresent src/hooks/useCopresent.ts).
 // Surface mirrors the SPA's Media interface so the generated SDK
 // hands back rows with no client-side shape adapters needed.
@@ -153,7 +153,7 @@ shape actorEnvelope {
 @description("Full projection of a v1:common:media row -- every payload field used by the CoPresent SPA's Media interface, plus the row intrinsics the frontend reads for ordering and ids.")
 shape media mediaFull {
   row.id
-  payload.spaceId
+  payload.partitionId
   payload.mediaType
   payload.mimeType
   payload.url

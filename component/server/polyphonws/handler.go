@@ -41,14 +41,14 @@ type Handler struct {
 	// called by ServePreload to warm per-space caches the moment
 	// the bridge sees the user start speaking. Skipped on binaries
 	// without cognition -- they 204 the endpoint.
-	prewarmFunc func(spaceId string)
+	prewarmFunc func(partitionId string)
 }
 
 // SetPrewarmFunc wires a callback that the bridge agent triggers via
 // POST /polyphon/preload when the user starts speaking. Implemented
 // on cognition-bearing binaries; nil-set on the rest. Lets the
 // handler stay decoupled from the cognition package.
-func (h *Handler) SetPrewarmFunc(fn func(spaceId string)) {
+func (h *Handler) SetPrewarmFunc(fn func(partitionId string)) {
 	if h == nil {
 		return
 	}
@@ -72,7 +72,7 @@ func NewHandler(scoreEngine *polyphon.ScoreEngine, room polyphon.RoomProvider, b
 
 // roomTokenRequest is the JSON body for POST /polyphon/room-token.
 type roomTokenRequest struct {
-	SpaceId       string `json:"spaceId"`
+	PartitionId       string `json:"partitionId"`
 	ParticipantId string `json:"participantId"`
 	DisplayName   string `json:"displayName"`
 }
@@ -111,8 +111,8 @@ func (h *Handler) ServeRoomToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.TrimSpace(req.SpaceId) == "" || strings.TrimSpace(req.ParticipantId) == "" {
-		http.Error(w, "spaceId and participantId are required", http.StatusBadRequest)
+	if strings.TrimSpace(req.PartitionId) == "" || strings.TrimSpace(req.ParticipantId) == "" {
+		http.Error(w, "partitionId and participantId are required", http.StatusBadRequest)
 		return
 	}
 
@@ -122,10 +122,10 @@ func (h *Handler) ServeRoomToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate a room token via the room provider.
-	token, err := h.room.GenerateToken(r.Context(), req.SpaceId, req.ParticipantId, displayName)
+	token, err := h.room.GenerateToken(r.Context(), req.PartitionId, req.ParticipantId, displayName)
 	if err != nil {
 		h.logger.Error("failed to generate room token",
-			"spaceId", req.SpaceId,
+			"partitionId", req.PartitionId,
 			"participantId", req.ParticipantId,
 			"error", err,
 		)
@@ -141,14 +141,14 @@ func (h *Handler) ServeRoomToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.logger.Debug("polyphon room token generated",
-		"spaceId", req.SpaceId,
+		"partitionId", req.PartitionId,
 		"participantId", req.ParticipantId,
 		"roomName", token.RoomName,
 	)
 
 	// Best-effort: notify Bridge Agent to join the room.
 	if h.bridgeAgentURL != "" {
-		go h.notifyBridgeAgent(req.SpaceId, token.RoomName)
+		go h.notifyBridgeAgent(req.PartitionId, token.RoomName)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -160,9 +160,9 @@ func (h *Handler) ServeRoomToken(w http.ResponseWriter, r *http.Request) {
 // notifyBridgeAgent sends a best-effort POST to the Bridge Agent so it joins
 // the LiveKit room. If the Bridge Agent is unreachable, the error is logged
 // and the token is still returned to the browser.
-func (h *Handler) notifyBridgeAgent(spaceId, roomName string) {
+func (h *Handler) notifyBridgeAgent(partitionId, roomName string) {
 	body, _ := json.Marshal(map[string]string{
-		"spaceId":  spaceId,
+		"partitionId":  partitionId,
 		"roomName": roomName,
 	})
 
@@ -180,13 +180,13 @@ func (h *Handler) notifyBridgeAgent(spaceId, roomName string) {
 	if resp.StatusCode >= 300 {
 		h.logger.Warn("polyphon: bridge agent returned error",
 			"status", resp.StatusCode,
-			"spaceId", spaceId,
+			"partitionId", partitionId,
 		)
 		return
 	}
 
 	h.logger.Info("polyphon: bridge agent notified to join room",
-		"spaceId", spaceId,
+		"partitionId", partitionId,
 		"roomName", roomName,
 	)
 }
@@ -217,7 +217,7 @@ func (h *Handler) ServeStatus(w http.ResponseWriter, r *http.Request) {
 
 // preloadRequest is the JSON body for POST /polyphon/preload.
 type preloadRequest struct {
-	SpaceId string `json:"spaceId"`
+	PartitionId string `json:"partitionId"`
 }
 
 // ServePreload handles POST /polyphon/preload from the bridge agent.
@@ -243,17 +243,17 @@ func (h *Handler) ServePreload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(req.SpaceId) == "" {
-		http.Error(w, "spaceId is required", http.StatusBadRequest)
+	if strings.TrimSpace(req.PartitionId) == "" {
+		http.Error(w, "partitionId is required", http.StatusBadRequest)
 		return
 	}
-	h.prewarmFunc(req.SpaceId)
+	h.prewarmFunc(req.PartitionId)
 	w.WriteHeader(http.StatusAccepted)
 }
 
 // utteranceRequest is the JSON body for POST /polyphon/utterance.
 type utteranceRequest struct {
-	SpaceId       string `json:"spaceId"`
+	PartitionId       string `json:"partitionId"`
 	ParticipantId string `json:"participantId"`
 	Text          string `json:"text"`
 }
@@ -280,8 +280,8 @@ func (h *Handler) ServeUtterance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.TrimSpace(req.SpaceId) == "" || strings.TrimSpace(req.ParticipantId) == "" || strings.TrimSpace(req.Text) == "" {
-		http.Error(w, "spaceId, participantId, and text are required", http.StatusBadRequest)
+	if strings.TrimSpace(req.PartitionId) == "" || strings.TrimSpace(req.ParticipantId) == "" || strings.TrimSpace(req.Text) == "" {
+		http.Error(w, "partitionId, participantId, and text are required", http.StatusBadRequest)
 		return
 	}
 
@@ -308,7 +308,7 @@ func (h *Handler) ServeUtterance(w http.ResponseWriter, r *http.Request) {
 	textJSON, _ := json.Marshal(req.Text)
 
 	query := fmt.Sprintf(`insert("%s", id="%s", payload={
-		"spaceId": "%s",
+		"partitionId": "%s",
 		"participantId": "%s",
 		"participantType": "human",
 		"utteranceType": "text",
@@ -317,21 +317,21 @@ func (h *Handler) ServeUtterance(w http.ResponseWriter, r *http.Request) {
 			"inputMethod": "stt",
 			"pipeline": "polyphon"
 		}
-	})`, memoryNodes.ConceptCognitionUtterance, utteranceId, req.SpaceId, req.ParticipantId, string(textJSON))
+	})`, memoryNodes.ConceptCognitionUtterance, utteranceId, req.PartitionId, req.ParticipantId, string(textJSON))
 
 	ctx := contextWithSystemActor(context.Background())
 
 	if _, err := h.engine.Execute(ctx, query); err != nil {
 		h.logger.Error("polyphon utterance insert failed",
 			"error", err,
-			"spaceId", req.SpaceId,
+			"partitionId", req.PartitionId,
 		)
 		http.Error(w, "failed to insert utterance", http.StatusInternalServerError)
 		return
 	}
 
 	h.logger.Info("polyphon utterance inserted",
-		"spaceId", req.SpaceId,
+		"partitionId", req.PartitionId,
 		"participantId", req.ParticipantId,
 		"utteranceId", utteranceId,
 	)

@@ -47,7 +47,7 @@ func TestWriteRealtimeSpeakingPresence_QueryParses(t *testing.T) {
 		require.Equal(t, "ga-xyz", id, "deterministic id is the trailing participant segment")
 		now := time.Now().UTC().Format(time.RFC3339)
 		payload := map[string]any{
-			"spaceId": "sp1", "participantId": pid, "state": tc.state,
+			"partitionId": "sp1", "participantId": pid, "state": tc.state,
 			"label": tc.label, "reason": "", "sinceAt": now, "lastUpdatedAt": now,
 		}
 		payloadJSON, _ := json.Marshal(payload)
@@ -82,7 +82,7 @@ func TestHandleVoiceAgentRealtimeSpeaking_RoundTrip(t *testing.T) {
 	require.NoError(t, eng.Init(concept.DefaultRegistry()))
 
 	uniq := fmt.Sprint(time.Now().UnixNano())
-	spaceId := "sp-1421-" + uniq
+	partitionId := "sp-1421-" + uniq
 	agentId := "v1:agents:agent:assistant-1421-" + uniq
 
 	// Seed an active AI participant via the production mutation so the row is
@@ -90,8 +90,8 @@ func TestHandleVoiceAgentRealtimeSpeaking_RoundTrip(t *testing.T) {
 	// it -- a raw DB insert is not seen by querySiParticipantForSpace's
 	// partition-scoped read.
 	joinQ := fmt.Sprintf(
-		`mutationJoinSpaceAsAI({spaceId: %q, agentId: %q, displayName: "Sofia", forUserId: "v1:identity:user:owner-1421"})`,
-		spaceId, agentId)
+		`mutationJoinSpaceAsAI({partitionId: %q, agentId: %q, displayName: "Sofia", forUserId: "v1:identity:user:owner-1421"})`,
+		partitionId, agentId)
 	_, err = eng.Execute(ctx, joinQ)
 	require.NoError(t, err, "seed AI participant via mutationJoinSpaceAsAI")
 
@@ -99,7 +99,7 @@ func TestHandleVoiceAgentRealtimeSpeaking_RoundTrip(t *testing.T) {
 	sess := &streamSession{service: svc}
 
 	// Sanity: the handler resolves the seeded participant.
-	resolved := sess.resolveAIParticipantId(ctx, spaceId)
+	resolved := sess.resolveAIParticipantId(ctx, partitionId)
 	require.NotEmpty(t, resolved, "handler resolves the seeded AI participant")
 	presenceId := realtimePresenceRecordId(resolved)
 	t.Cleanup(func() {
@@ -113,7 +113,7 @@ func TestHandleVoiceAgentRealtimeSpeaking_RoundTrip(t *testing.T) {
 	// Read the GA's presence state via the same space-scoped query the
 	// frontend's useParticipantPresence uses (latest-wins by participantId).
 	readPresenceState := func() string {
-		q := fmt.Sprintf(`querySpaceParticipantPresence({spaceId: %q})`, spaceId)
+		q := fmt.Sprintf(`querySpaceParticipantPresence({partitionId: %q})`, partitionId)
 		res, qerr := eng.Execute(ctx, q)
 		if qerr != nil {
 			return ""
@@ -136,7 +136,7 @@ func TestHandleVoiceAgentRealtimeSpeaking_RoundTrip(t *testing.T) {
 	// speaking=true -> responding (the orb animates).
 	require.NoError(t, sess.handleVoiceAgentRealtimeSpeaking(
 		&memqlv1.MemqlClientMessage{MessageId: "m1"},
-		&memqlv1.VoiceAgentRealtimeSpeaking{SpaceId: spaceId, GaAgentId: "v1:agents:agent:assistant-1421", Speaking: true},
+		&memqlv1.VoiceAgentRealtimeSpeaking{PartitionId: partitionId, GaAgentId: "v1:agents:agent:assistant-1421", Speaking: true},
 	))
 	require.Eventually(t, func() bool { return readPresenceState() == "responding" },
 		3*time.Second, 25*time.Millisecond, "first output audio writes presence state=responding")
@@ -144,7 +144,7 @@ func TestHandleVoiceAgentRealtimeSpeaking_RoundTrip(t *testing.T) {
 	// speaking=false -> idle (the orb stops).
 	require.NoError(t, sess.handleVoiceAgentRealtimeSpeaking(
 		&memqlv1.MemqlClientMessage{MessageId: "m2"},
-		&memqlv1.VoiceAgentRealtimeSpeaking{SpaceId: spaceId, GaAgentId: "v1:agents:agent:assistant-1421", Speaking: false},
+		&memqlv1.VoiceAgentRealtimeSpeaking{PartitionId: partitionId, GaAgentId: "v1:agents:agent:assistant-1421", Speaking: false},
 	))
 	require.Eventually(t, func() bool { return readPresenceState() == "idle" },
 		3*time.Second, 25*time.Millisecond, "response.done writes presence state=idle")
@@ -159,7 +159,7 @@ func TestHandleVoiceAgentRealtimeSpeaking_MissingFields(t *testing.T) {
 
 	require.NoError(t, sess.handleVoiceAgentRealtimeSpeaking(
 		&memqlv1.MemqlClientMessage{MessageId: "m1"},
-		&memqlv1.VoiceAgentRealtimeSpeaking{SpaceId: "", GaAgentId: "", Speaking: true},
+		&memqlv1.VoiceAgentRealtimeSpeaking{PartitionId: "", GaAgentId: "", Speaking: true},
 	))
 	require.NoError(t, sess.handleVoiceAgentRealtimeSpeaking(
 		&memqlv1.MemqlClientMessage{MessageId: "m2"}, nil,

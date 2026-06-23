@@ -187,7 +187,7 @@ type audioSession struct {
 // streamContext represents an active audio stream within a session.
 type streamContext struct {
 	streamId      string
-	spaceId       string
+	partitionId       string
 	participantId string
 	sttSession    stt.StreamingSession
 	startTime     time.Time
@@ -299,8 +299,8 @@ func (s *audioSession) handleStart(msg *AudioMessage) error {
 	s.streamsMu.Unlock()
 
 	// Validate required fields
-	if msg.SpaceId == "" {
-		return fmt.Errorf("spaceId is required")
+	if msg.PartitionId == "" {
+		return fmt.Errorf("partitionId is required")
 	}
 	if msg.ParticipantId == "" {
 		return fmt.Errorf("participantId is required")
@@ -321,7 +321,7 @@ func (s *audioSession) handleStart(msg *AudioMessage) error {
 
 	sc := &streamContext{
 		streamId:      streamId,
-		spaceId:       msg.SpaceId,
+		partitionId:       msg.PartitionId,
 		participantId: msg.ParticipantId,
 		sttSession:    sttSession,
 		startTime:     time.Now(),
@@ -336,7 +336,7 @@ func (s *audioSession) handleStart(msg *AudioMessage) error {
 
 	s.handler.logger.Info("audio stream started",
 		"streamId", streamId,
-		"spaceId", msg.SpaceId,
+		"partitionId", msg.PartitionId,
 		"participantId", msg.ParticipantId,
 		"format", config.Format,
 		"sampleRate", config.SampleRate,
@@ -497,20 +497,20 @@ func (s *audioSession) handleSynthesize(data []byte) error {
 	)
 
 	// Start streaming synthesis in background
-	go s.streamTTS(msg.RequestId, msg.SpaceId, msg.ParticipantId, msg.Text, voice, format, sampleRate)
+	go s.streamTTS(msg.RequestId, msg.PartitionId, msg.ParticipantId, msg.Text, voice, format, sampleRate)
 
 	return nil
 }
 
 // streamTTS performs TTS synthesis and streams audio chunks to the client.
-func (s *audioSession) streamTTS(requestId, spaceId, participantId, text, voice, format string, sampleRate int) {
+func (s *audioSession) streamTTS(requestId, partitionId, participantId, text, voice, format string, sampleRate int) {
 	// Send tts_started message
 	if err := s.sendTTSStarted(&TTSStartedMessage{
 		Type:          "tts_started",
 		RequestId:     requestId,
 		Format:        format,
 		SampleRate:    sampleRate,
-		SpaceId:       spaceId,
+		PartitionId:       partitionId,
 		ParticipantId: participantId,
 		Text:          text,
 	}); err != nil {
@@ -530,7 +530,7 @@ func (s *audioSession) streamTTS(requestId, spaceId, participantId, text, voice,
 		s.sendTTSEnded(&TTSEndedMessage{
 			Type:          "tts_ended",
 			RequestId:     requestId,
-			SpaceId:       spaceId,
+			PartitionId:       partitionId,
 			ParticipantId: participantId,
 			Error:         err.Error(),
 		})
@@ -546,7 +546,7 @@ func (s *audioSession) streamTTS(requestId, spaceId, participantId, text, voice,
 			s.sendTTSEnded(&TTSEndedMessage{
 				Type:          "tts_ended",
 				RequestId:     requestId,
-				SpaceId:       spaceId,
+				PartitionId:       partitionId,
 				ParticipantId: participantId,
 				Error:         chunk.Error.Error(),
 			})
@@ -562,7 +562,7 @@ func (s *audioSession) streamTTS(requestId, spaceId, participantId, text, voice,
 			SampleRate:    sampleRate,
 			Sequence:      chunk.Sequence,
 			Done:          chunk.Done,
-			SpaceId:       spaceId,
+			PartitionId:       partitionId,
 			ParticipantId: participantId,
 			Text:          text,
 		}); err != nil {
@@ -574,7 +574,7 @@ func (s *audioSession) streamTTS(requestId, spaceId, participantId, text, voice,
 			s.sendTTSEnded(&TTSEndedMessage{
 				Type:          "tts_ended",
 				RequestId:     requestId,
-				SpaceId:       spaceId,
+				PartitionId:       partitionId,
 				ParticipantId: participantId,
 				Error:         err.Error(),
 			})
@@ -586,7 +586,7 @@ func (s *audioSession) streamTTS(requestId, spaceId, participantId, text, voice,
 	s.sendTTSEnded(&TTSEndedMessage{
 		Type:          "tts_ended",
 		RequestId:     requestId,
-		SpaceId:       spaceId,
+		PartitionId:       partitionId,
 		ParticipantId: participantId,
 	})
 
@@ -634,7 +634,7 @@ func (s *audioSession) sendTTSEnded(msg *TTSEndedMessage) error {
 
 // SynthesizeAuto generates and streams TTS audio for server-initiated responses.
 // This is called by the Turn State engine or AI responder when auto-TTS is needed.
-func (s *audioSession) SynthesizeAuto(spaceId, participantId, text, voice string) error {
+func (s *audioSession) SynthesizeAuto(partitionId, participantId, text, voice string) error {
 	if s.handler.ttsProvider == nil {
 		return fmt.Errorf("TTS not available: provider not configured")
 	}
@@ -648,14 +648,14 @@ func (s *audioSession) SynthesizeAuto(spaceId, participantId, text, voice string
 
 	s.handler.logger.Info("Auto-TTS synthesis initiated",
 		"requestId", requestId,
-		"spaceId", spaceId,
+		"partitionId", partitionId,
 		"participantId", participantId,
 		"voice", voice,
 		"textLen", len(text),
 	)
 
 	// Stream in background
-	go s.streamTTS(requestId, spaceId, participantId, text, voice, defaultTTSFormat, defaultTTSSampleRate)
+	go s.streamTTS(requestId, partitionId, participantId, text, voice, defaultTTSFormat, defaultTTSSampleRate)
 
 	return nil
 }
@@ -682,7 +682,7 @@ func (s *audioSession) insertUtterance(sc *streamContext, final *stt.FinalTransc
 	}
 
 	query := fmt.Sprintf(`insert("%s", id="%s", payload={
-		"spaceId": "%s",
+		"partitionId": "%s",
 		"participantId": "%s",
 		"participantType": "human",
 		"utteranceType": "speech",
@@ -697,7 +697,7 @@ func (s *audioSession) insertUtterance(sc *streamContext, final *stt.FinalTransc
 	})`,
 		memoryNodes.ConceptCognitionUtterance,
 		utteranceId,
-		sc.spaceId,
+		sc.partitionId,
 		sc.participantId,
 		string(textJSON),
 		final.DurationMS,

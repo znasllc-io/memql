@@ -86,7 +86,7 @@ func TestMutationFunctionTemplate_LoadAndRender_CreateSpace(t *testing.T) {
 
 	engine := &MemQLEngine{}
 	mutation, err := engine.renderMutationTemplate(context.Background(), fn.MutationTemplate, map[string]any{
-		"spaceId": "space-123",
+		"partitionId": "space-123",
 		"name":    "My Space",
 	})
 	require.NoError(t, err)
@@ -115,12 +115,12 @@ func TestMutationInsertShorthand_ArgsRefInfersKey(t *testing.T) {
 	})
 	src := `mutation space mutationCreateSpaceShorthand {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
     name     string  @required
     status   string
   }
   insert {
-    id: args.spaceId
+    id: args.partitionId
     args.name
     args.status
     active: true
@@ -132,7 +132,7 @@ func TestMutationInsertShorthand_ArgsRefInfersKey(t *testing.T) {
 
 	engine := &MemQLEngine{}
 	mutation, err := engine.renderMutationTemplate(context.Background(), fn.MutationTemplate, map[string]any{
-		"spaceId": "space-7",
+		"partitionId": "space-7",
 		"name":    "Space Seven",
 		"status":  "active",
 	})
@@ -168,12 +168,12 @@ use identity.concepts.{ request }
 
 mutation space mutationCreateDailySpace {
   args {
-    spaceId       string  @required
+    partitionId       string  @required
     name          string  @required
     dailyDateKey  string  @required
   }
   insert {
-    id: args.spaceId
+    id: args.partitionId
     args.name
     args.dailyDateKey
     kind: "daily"
@@ -215,7 +215,7 @@ func TestResolvePlanFunctions_TopLevelMutationCall(t *testing.T) {
 		Enabled:      true,
 		MutationTemplate: &FunctionMutationTemplate{
 			Concept:         "v1:cognition:space",
-			IDTemplate:      &languageParser.ArgRefExpr{Path: "spaceId"},
+			IDTemplate:      &languageParser.ArgRefExpr{Path: "partitionId"},
 			PayloadTemplate: map[string]any{"name": &languageParser.ArgRefExpr{Path: "name"}},
 		},
 	}))

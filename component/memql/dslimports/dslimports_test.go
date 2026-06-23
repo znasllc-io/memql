@@ -26,7 +26,7 @@ import (
 	"../common/space"
 )
 @description("a participant")
-concept participant { spaceId string }
+concept participant { partitionId string }
 `)},
 		"cognition/queries/listParticipants.memql": {Data: []byte(`
 import (

@@ -749,7 +749,7 @@ func LogicServiceVersionProbeBuild(args LogicServiceVersionProbeArgs) string {
 	return "logicServiceVersionProbe({})"
 }
 
-// LogicVoiceMigrationOnSecondHuman -- Phase 7 of chat-architecture. Triggered when a user's activeSpaceId pointer changes. When exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team to Group thread. Idempotent via content-addressed stateIds.
+// LogicVoiceMigrationOnSecondHuman -- Phase 7 of chat-architecture. Triggered when a user's activePartitionId pointer changes. When exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team to Group thread. Idempotent via content-addressed stateIds.
 type LogicVoiceMigrationOnSecondHumanArgs struct {
 	Event map[string]any
 }

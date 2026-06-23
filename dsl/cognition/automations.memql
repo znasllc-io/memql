@@ -92,7 +92,7 @@ automation purgeExpiredArchivedSpaces {
 // TRIGGER:
 // graph.node.created.v1:identity:user fires on every user-row write
 // (primary path: mutationSetUserActiveSpace shipping a new version).
-// We filter to rows whose payload.activeSpaceId is non-empty -- a user
+// We filter to rows whose payload.activePartitionId is non-empty -- a user
 // whose pointer is set has just become active in some space.
 //
 // FIRE CONDITION:
@@ -115,7 +115,7 @@ automation purgeExpiredArchivedSpaces {
 // shows the need).
 @enabled
 @trigger(event="node.created", concept="v1:identity:user", partition="*")
-@filter(payload.activeSpaceId!="")
+@filter(payload.activePartitionId!="")
 @description("On second-active-human-in-space, emit the Phase 7 voice-migration canvas-card pair (public group card + private operator card per existing user).")
 automation voiceMigrationOnSecondHuman {
   step run {

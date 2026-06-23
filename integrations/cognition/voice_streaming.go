@@ -34,7 +34,7 @@ func (c *CognitionIntegration) generateVoiceStreaming(
 	ctx context.Context,
 	agent *agentPayload,
 	trigger string,
-	spaceId string,
+	partitionId string,
 	winnerAgentName string,
 	winnerVoiceModel string,
 	participants []map[string]any,
@@ -56,7 +56,7 @@ func (c *CognitionIntegration) generateVoiceStreaming(
 		personality = "You are a helpful, professional assistant that supports users in their sessions. You respond when asked questions or when you can provide relevant insights."
 	}
 
-	spaceContext := c.getSpaceContextForPromptCached(ctx, strings.TrimSpace(spaceId))
+	spaceContext := c.getSpaceContextForPromptCached(ctx, strings.TrimSpace(partitionId))
 
 	assistantData := map[string]any{
 		"name":        strings.TrimSpace(agent.Name),
@@ -79,7 +79,7 @@ func (c *CognitionIntegration) generateVoiceStreaming(
 	data := map[string]any{
 		"trigger":           strings.TrimSpace(trigger),
 		"assistant":         assistantData,
-		"space":             buildSpaceData(strings.TrimSpace(spaceId), si),
+		"space":             buildSpaceData(strings.TrimSpace(partitionId), si),
 		"participants":      participants,
 		"history":           []map[string]any{},
 		"historyInMessages": true,
@@ -126,9 +126,9 @@ func (c *CognitionIntegration) generateVoiceStreaming(
 		}
 		if !firstSentenceLogged {
 			c.Logger.Info("voice trace: first sentence dispatched",
-				"voiceTrace", "voice:"+spaceId,
+				"voiceTrace", "voice:"+partitionId,
 				"stage", "cognition.sentence.first",
-				"spaceId", spaceId,
+				"partitionId", partitionId,
 				"chars", len(text),
 				"firstSentenceMs", time.Since(streamStart).Milliseconds(),
 			)
@@ -248,16 +248,16 @@ func nextSentenceEnd(text string) (int, bool) {
 // registry is keyed on whatever was passed to /join-room when the
 // room was created -- in practice, the bare slug (`daily-XXX-DATE`)
 // the frontend submitted. After 439ed91 every utterance row's
-// payload.spaceId is canonical (`default:v1:cognition:space:daily-...`),
+// payload.partitionId is canonical (`default:v1:cognition:space:daily-...`),
 // so cognition reads canonical and would otherwise send canonical
 // to the bridge, missing the registry key. Strip here right before
 // every outbound bridge POST.
 //
 // Tolerant of inputs that are already bare slugs -- if there's no
 // colon, returns the input unchanged.
-func bareSpaceSlug(spaceId string) string {
-	if idx := strings.LastIndex(spaceId, ":"); idx >= 0 {
-		return spaceId[idx+1:]
+func bareSpaceSlug(partitionId string) string {
+	if idx := strings.LastIndex(partitionId, ":"); idx >= 0 {
+		return partitionId[idx+1:]
 	}
-	return spaceId
+	return partitionId
 }

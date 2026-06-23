@@ -13,7 +13,7 @@ func TestAutomationWithinAutomation_StepKind(t *testing.T) {
 	source := `@trigger(event="graph.node.created.v1:cognition:space")
 automation onSpaceCreated {
   step welcome {
-    automation seedWelcomeCurriculum { spaceId: event.payload.id, userId: event.payload.actor }
+    automation seedWelcomeCurriculum { partitionId: event.payload.id, userId: event.payload.actor }
   }
 }`
 

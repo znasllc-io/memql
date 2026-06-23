@@ -17,7 +17,7 @@ package knowledge
 //     to surface a Confirm step, an "alreadyCovered" terminal, or an
 //     "outOfScope" terminal.
 //
-//   augmentDomainGenerate({domainId, topic, sourceUtteranceId, sourceAgentId, spaceId, requestedBy})
+//   augmentDomainGenerate({domainId, topic, sourceUtteranceId, sourceAgentId, partitionId, requestedBy})
 //     Synchronous in v1 (~30s). Inserts a Plan row for audit, runs
 //     the augmentDomainContent prompt, embeds + writes each chunk
 //     with source="augment" + provenance back-pointers, then updates
@@ -187,14 +187,14 @@ func (i *Integration) augmentDomainGenerateHandler(ctx context.Context, args map
 	topic, _ := args["topic"].(string)
 	sourceUtteranceId, _ := args["sourceUtteranceId"].(string)
 	sourceAgentId, _ := args["sourceAgentId"].(string)
-	spaceId, _ := args["spaceId"].(string)
+	partitionId, _ := args["partitionId"].(string)
 	requestedBy, _ := args["requestedBy"].(string)
 
 	if strings.TrimSpace(domainId) == "" || strings.TrimSpace(topic) == "" {
 		return nil, fmt.Errorf("augmentDomainGenerate: domainId and topic are required")
 	}
-	if strings.TrimSpace(spaceId) == "" {
-		return nil, fmt.Errorf("augmentDomainGenerate: spaceId is required (Plan row scopes to a space)")
+	if strings.TrimSpace(partitionId) == "" {
+		return nil, fmt.Errorf("augmentDomainGenerate: partitionId is required (Plan row scopes to a space)")
 	}
 	if strings.TrimSpace(requestedBy) == "" {
 		return nil, fmt.Errorf("augmentDomainGenerate: requestedBy is required (audit + Plan ownership)")
@@ -231,9 +231,9 @@ func (i *Integration) augmentDomainGenerateHandler(ctx context.Context, args map
 	})
 
 	createPlanQuery := fmt.Sprintf(
-		`mutationCreatePlan({planId: %s, spaceId: %s, kind: %s, goal: %s, requestedBy: %s, triggerSource: %s, input: %s})`,
+		`mutationCreatePlan({planId: %s, partitionId: %s, kind: %s, goal: %s, requestedBy: %s, triggerSource: %s, input: %s})`,
 		quoteString(planId),
-		quoteString(spaceId),
+		quoteString(partitionId),
 		quoteString("augmentDomain"),
 		quoteString(planGoal),
 		quoteString(requestedBy),

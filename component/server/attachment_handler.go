@@ -73,11 +73,11 @@ type AttachmentStore interface {
 	// an explicit pre-upload ownership gate so cross-tenant uploads are
 	// rejected before any blob bytes are written. The DSL mutation
 	// re-enforces ownership; this is defense in depth.
-	CallerOwnsSpace(ctx context.Context, spaceId string) (bool, error)
+	CallerOwnsSpace(ctx context.Context, partitionId string) (bool, error)
 	// GetAttachment reads one v1:common:attachment row by id within a space
 	// (queryAttachmentById). Returns nil (no error) when not found. Backs the
 	// download endpoint (memql#804); callers gate on CallerOwnsSpace first.
-	GetAttachment(ctx context.Context, attachmentId, spaceId string) (*AttachmentRow, error)
+	GetAttachment(ctx context.Context, attachmentId, partitionId string) (*AttachmentRow, error)
 }
 
 // AttachmentRow is the projected v1:common:attachment row the download path
@@ -87,7 +87,7 @@ type AttachmentRow struct {
 	FileName string
 	MimeType string
 	BlobUrl  string
-	SpaceId  string
+	PartitionId  string
 	Status   string
 }
 
@@ -106,7 +106,7 @@ type AISummarizer interface {
 
 // AttachmentCreateParams describes the data needed to persist an attachment node.
 type AttachmentCreateParams struct {
-	SpaceId       string
+	PartitionId       string
 	FileName      string
 	MimeType      string
 	FileSize      int
@@ -120,7 +120,7 @@ type AttachmentCreateParams struct {
 // AttachmentResponse is the JSON body returned on successful upload.
 type AttachmentResponse struct {
 	ID            string `json:"id"`
-	SpaceId       string `json:"spaceId"`
+	PartitionId       string `json:"partitionId"`
 	FileName      string `json:"fileName"`
 	MimeType      string `json:"mimeType"`
 	FileSize      int    `json:"fileSize"`
@@ -132,7 +132,7 @@ type AttachmentResponse struct {
 	CreatedAt     string `json:"createdAt"`
 }
 
-// AttachmentHandler handles POST /spaces/{spaceId}/attachments.
+// AttachmentHandler handles POST /spaces/{partitionId}/attachments.
 type AttachmentHandler struct {
 	logger     *slog.Logger
 	bucket     string
@@ -175,10 +175,10 @@ func NewAttachmentHandler(opts AttachmentHandlerOptions) *AttachmentHandler {
 }
 
 // ServeHTTP dispatches:
-//   - POST /spaces/{spaceId}/attachments                 -> upload
-//   - GET  /spaces/{spaceId}/attachments/{attachmentId}  -> download (memql#804)
+//   - POST /spaces/{partitionId}/attachments                 -> upload
+//   - GET  /spaces/{partitionId}/attachments/{attachmentId}  -> download (memql#804)
 //
-// Route must be registered on a ServeMux with a prefix that captures {spaceId}.
+// Route must be registered on a ServeMux with a prefix that captures {partitionId}.
 func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		h.handleDownload(w, r)
@@ -189,9 +189,9 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract spaceId from path: /spaces/{spaceId}/attachments
-	spaceId := extractSpaceIdFromAttachmentPath(r.URL.Path)
-	if spaceId == "" {
+	// Extract partitionId from path: /spaces/{partitionId}/attachments
+	partitionId := extractPartitionIdFromAttachmentPath(r.URL.Path)
+	if partitionId == "" {
 		http.Error(w, "space ID is required", http.StatusBadRequest)
 		return
 	}
@@ -208,9 +208,9 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// blob upload). The DSL mutation re-enforces ownership too; this
 	// short-circuits before bytes hit storage.
 	if h.store != nil {
-		owns, err := h.store.CallerOwnsSpace(r.Context(), spaceId)
+		owns, err := h.store.CallerOwnsSpace(r.Context(), partitionId)
 		if err != nil {
-			h.logger.Error("attachment ownership check failed", "error", err, "spaceId", spaceId, "actor", actor)
+			h.logger.Error("attachment ownership check failed", "error", err, "partitionId", partitionId, "actor", actor)
 			http.Error(w, "ownership check failed", http.StatusInternalServerError)
 			return
 		}
@@ -276,12 +276,12 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Upload to object storage (Azure Blob, memql#801).
-	objectName := fmt.Sprintf("spaces/%s/attachments/%s/%s", spaceId, id.NewShortId(), fileName)
+	objectName := fmt.Sprintf("spaces/%s/attachments/%s/%s", partitionId, id.NewShortId(), fileName)
 	blobUrl := ""
 	if h.uploader != nil && h.bucket != "" {
 		blobUrl, err = h.uploader.Upload(ctx, h.bucket, objectName, data, mimeType)
 		if err != nil {
-			h.logger.Error("upload attachment to blob storage", "error", err, "spaceId", spaceId)
+			h.logger.Error("upload attachment to blob storage", "error", err, "partitionId", partitionId)
 			http.Error(w, "failed to upload file", http.StatusInternalServerError)
 			return
 		}
@@ -314,7 +314,7 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// for now the Attachment record exists immediately and the
 	// canvas card carries the analysis result).
 	params := AttachmentCreateParams{
-		SpaceId:       spaceId,
+		PartitionId:       partitionId,
 		FileName:      fileName,
 		MimeType:      mimeType,
 		FileSize:      len(data),
@@ -332,7 +332,7 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	nodeJSON, err := h.store.CreateAttachment(ctx, params)
 	if err != nil {
-		h.logger.Error("create attachment node", "error", err, "spaceId", spaceId)
+		h.logger.Error("create attachment node", "error", err, "partitionId", partitionId)
 		http.Error(w, fmt.Sprintf("failed to create attachment: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -342,11 +342,11 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		attachmentId := extractAttachmentId(nodeJSON)
 		if attachmentId == "" {
 			h.logger.Warn("could not extract attachment id from create response; skipping Plan creation",
-				"spaceId", spaceId, "fileName", fileName)
+				"partitionId", partitionId, "fileName", fileName)
 		} else {
 			analyzeParams := CreatePlanForAttachmentParams{
 				AttachmentId: attachmentId,
-				SpaceId:      spaceId,
+				PartitionId:      partitionId,
 				FileName:     fileName,
 				RequestedBy:  actor,
 				MimeType:     mimeType,
@@ -355,7 +355,7 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			planId, queueErr := h.planStore.CreateQueuedAnalyzePlan(ctx, analyzeParams)
 			if queueErr != nil {
 				h.logger.Warn("queue analyzeFile Plan", "error", queueErr,
-					"spaceId", spaceId, "attachmentId", attachmentId)
+					"partitionId", partitionId, "attachmentId", attachmentId)
 			} else {
 				// Step 3: launch the async analysis goroutine. Detached
 				// background context so HTTP request cancellation
@@ -382,7 +382,7 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// fallback returns empty values for them.
 		resp := AttachmentResponse{
 			ID:            objectName,
-			SpaceId:       spaceId,
+			PartitionId:       partitionId,
 			FileName:      fileName,
 			MimeType:      mimeType,
 			FileSize:      len(data),
@@ -470,9 +470,9 @@ func extractAttachmentId(nodeJSON json.RawMessage) string {
 	return ""
 }
 
-// extractSpaceIdFromAttachmentPath parses /spaces/{spaceId}/attachments.
+// extractPartitionIdFromAttachmentPath parses /spaces/{partitionId}/attachments.
 // Returns empty string if the path doesn't match.
-func extractSpaceIdFromAttachmentPath(path string) string {
+func extractPartitionIdFromAttachmentPath(path string) string {
 	const prefix = "/spaces/"
 	const suffix = "/attachments"
 
@@ -491,11 +491,11 @@ func extractSpaceIdFromAttachmentPath(path string) string {
 	return middle
 }
 
-// parseAttachmentDownloadPath parses /spaces/{spaceId}/attachments/{attachmentId}
-// (tolerating a leading base prefix like /api). spaceId is the segment before
+// parseAttachmentDownloadPath parses /spaces/{partitionId}/attachments/{attachmentId}
+// (tolerating a leading base prefix like /api). partitionId is the segment before
 // "attachments"; attachmentId the segment after. Both ids contain colons but no
 // slashes, so they survive single-segment splitting. (memql#804)
-func parseAttachmentDownloadPath(path string) (spaceId, attachmentId string, ok bool) {
+func parseAttachmentDownloadPath(path string) (partitionId, attachmentId string, ok bool) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	for i, p := range parts {
 		if p != "attachments" {
@@ -513,13 +513,13 @@ func parseAttachmentDownloadPath(path string) (spaceId, attachmentId string, ok 
 	return "", "", false
 }
 
-// handleDownload serves GET /spaces/{spaceId}/attachments/{attachmentId}: it
+// handleDownload serves GET /spaces/{partitionId}/attachments/{attachmentId}: it
 // streams the stored file bytes back (memql#804). Authz mirrors the upload
 // path -- the caller must own the space (404 otherwise, so id probing can't
-// tell "not mine" from "absent"); the attachment's spaceId is re-checked
+// tell "not mine" from "absent"); the attachment's partitionId is re-checked
 // against the path to block cross-space id probing.
 func (h *AttachmentHandler) handleDownload(w http.ResponseWriter, r *http.Request) {
-	spaceId, attachmentId, ok := parseAttachmentDownloadPath(r.URL.Path)
+	partitionId, attachmentId, ok := parseAttachmentDownloadPath(r.URL.Path)
 	if !ok {
 		http.Error(w, "attachment id required", http.StatusBadRequest)
 		return
@@ -534,9 +534,9 @@ func (h *AttachmentHandler) handleDownload(w http.ResponseWriter, r *http.Reques
 	}
 	ctx := r.Context()
 
-	owns, err := h.store.CallerOwnsSpace(ctx, spaceId)
+	owns, err := h.store.CallerOwnsSpace(ctx, partitionId)
 	if err != nil {
-		h.logger.Error("attachment download ownership check failed", "error", err, "spaceId", spaceId)
+		h.logger.Error("attachment download ownership check failed", "error", err, "partitionId", partitionId)
 		http.Error(w, "ownership check failed", http.StatusInternalServerError)
 		return
 	}
@@ -545,13 +545,13 @@ func (h *AttachmentHandler) handleDownload(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	row, err := h.store.GetAttachment(ctx, attachmentId, spaceId)
+	row, err := h.store.GetAttachment(ctx, attachmentId, partitionId)
 	if err != nil {
-		h.logger.Error("attachment lookup failed", "error", err, "attachmentId", attachmentId, "spaceId", spaceId)
+		h.logger.Error("attachment lookup failed", "error", err, "attachmentId", attachmentId, "partitionId", partitionId)
 		http.Error(w, "lookup failed", http.StatusInternalServerError)
 		return
 	}
-	if row == nil || row.SpaceId != spaceId {
+	if row == nil || row.PartitionId != partitionId {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}

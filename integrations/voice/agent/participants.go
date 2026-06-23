@@ -22,7 +22,7 @@ const defaultIdleTeardown = 60 * time.Second
 
 // agentIdentitySuffix matches the voice-agent's own room identity: the join
 // token is minted with req.GaAgentID (room_voice.go), which the session
-// composes as `<spaceId>-ga` (session.go, gaAgentID := spaceID + "-ga") --
+// composes as `<partitionId>-ga` (session.go, gaAgentID := spaceID + "-ga") --
 // e.g. `v1:cognition:space:<uuid>-ga`. Human identities are cognition
 // participant ids (hex shortIds), so a `-ga` suffix cannot collide ('g' is
 // not a hex digit).
@@ -34,7 +34,7 @@ const agentIdentityPrefix = "v1:agents:agent:"
 
 // isHumanParticipantIdentity reports whether a room participant identity
 // belongs to a human (the SPA / a guest) rather than to system machinery the
-// stack itself placed in the room: the voice-agent (the `<spaceId>-ga`
+// stack itself placed in the room: the voice-agent (the `<partitionId>-ga`
 // placeholder identity, including a terminating predecessor pod's ghost
 // during a rollout) or an avatar vendor participant (the fixed "avatar-agent"
 // identity).
@@ -53,7 +53,7 @@ func isHumanParticipantIdentity(identity string) bool {
 }
 
 // isVoiceAgentParticipantIdentity reports whether a room participant identity
-// belongs to a voice-agent (the GA's voice participant) -- the `<spaceId>-ga`
+// belongs to a voice-agent (the GA's voice participant) -- the `<partitionId>-ga`
 // placeholder or a real agent-row identity the joiner might mint. This is the
 // cross-replica claim signal for concurrent multi-room serving (#1395): a room
 // that already has a voice-agent present is being served (by this replica's own

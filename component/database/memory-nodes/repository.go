@@ -61,7 +61,7 @@ var (
 	ErrStoreUnavailable = ErrBunNotConfigured
 
 	// ErrDuplicateNode is returned when an insert violates a unique constraint.
-	// For example, inserting a second active AI participant for the same (spaceId, agentId).
+	// For example, inserting a second active AI participant for the same (partitionId, agentId).
 	ErrDuplicateNode = errors.New("duplicate node: record already exists")
 )
 

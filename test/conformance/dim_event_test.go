@@ -28,13 +28,13 @@ func runEventTrigger(t *testing.T, e *Env) {
 	sid := "space-evt-" + uniqueSuffix("evt")
 
 	// A representative participant.created event. The logic reads
-	// args.event.payload.id and args.event.payload.spaceId.
+	// args.event.payload.id and args.event.payload.partitionId.
 	event := map[string]any{
 		"event": map[string]any{
 			"topic": "node.created",
 			"payload": map[string]any{
 				"id":              pid,
-				"spaceId":         sid,
+				"partitionId":         sid,
 				"participantType": "human",
 			},
 		},

@@ -59,9 +59,9 @@ var ErrCallerRetired = errors.New("caller.X is retired (#221) -- use actor.X (th
 //	"actor.userId"     -> KindActor,   "userId",   nil
 //	"actor.config.k"   -> KindActor,   "config.k", nil
 //	"args"             -> KindArgs,    "",         nil
-//	"args.spaceId"     -> KindArgs,    "spaceId",  nil
+//	"args.partitionId"     -> KindArgs,    "partitionId",  nil
 //	"ctx"              -> KindCtx,     "",         nil
-//	"ctx.spaceId"      -> KindCtx,     "spaceId",  nil
+//	"ctx.partitionId"      -> KindCtx,     "partitionId",  nil
 //	"payload"          -> KindPayload, "",         nil
 //	"payload.userId"   -> KindPayload, "userId",   nil
 //	"caller"           -> KindNone,    "",         ErrCallerRetired

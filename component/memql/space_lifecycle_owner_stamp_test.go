@@ -45,11 +45,11 @@ func TestSpaceLifecycleMutations_StampOwnerUserId(t *testing.T) {
 			"mutationArchiveSpace",
 			`mutation space mutationArchiveSpace {
 				args {
-					spaceId  string  @required
+					partitionId  string  @required
 					payload  object  @required
 				}
 				insert {
-					id: args.spaceId
+					id: args.partitionId
 					ownerUserId: actor.userId
 					args.payload
 				}
@@ -59,11 +59,11 @@ func TestSpaceLifecycleMutations_StampOwnerUserId(t *testing.T) {
 			"mutationSaveSpace",
 			`mutation space mutationSaveSpace {
 				args {
-					spaceId  string  @required
+					partitionId  string  @required
 					payload  object  @required
 				}
 				insert {
-					id: args.spaceId
+					id: args.partitionId
 					ownerUserId: actor.userId
 					args.payload
 				}
@@ -73,11 +73,11 @@ func TestSpaceLifecycleMutations_StampOwnerUserId(t *testing.T) {
 			"mutationRestoreSpace",
 			`mutation space mutationRestoreSpace {
 				args {
-					spaceId  string  @required
+					partitionId  string  @required
 					payload  object  @required
 				}
 				insert {
-					id: args.spaceId
+					id: args.partitionId
 					ownerUserId: actor.userId
 					args.payload
 				}
@@ -87,11 +87,11 @@ func TestSpaceLifecycleMutations_StampOwnerUserId(t *testing.T) {
 			"mutationDeleteSpaceNow",
 			`mutation space mutationDeleteSpaceNow {
 				args {
-					spaceId  string  @required
+					partitionId  string  @required
 					payload  object  @required
 				}
 				insert {
-					id: args.spaceId
+					id: args.partitionId
 					ownerUserId: actor.userId
 					args.payload
 				}
@@ -101,11 +101,11 @@ func TestSpaceLifecycleMutations_StampOwnerUserId(t *testing.T) {
 			"mutationRenameSpace",
 			`mutation space mutationRenameSpace {
 				args {
-					spaceId  string  @required
+					partitionId  string  @required
 					payload  object  @required
 				}
 				insert {
-					id: args.spaceId
+					id: args.partitionId
 					ownerUserId: actor.userId
 					args.payload
 				}
@@ -131,7 +131,7 @@ func TestSpaceLifecycleMutations_StampOwnerUserId(t *testing.T) {
 			// pre-#401 SPA caller shape, and the case the issue calls
 			// out as silently failing under the @required check.
 			mutation, err := engine.renderMutationTemplate(ctx, fn.MutationTemplate, map[string]any{
-				"spaceId": "space-001",
+				"partitionId": "space-001",
 				"payload": map[string]any{
 					"name":   "Quarterly Review",
 					"status": "archived",
@@ -173,11 +173,11 @@ func TestSpaceLifecycleMutations_ActorStampOverridesCallerPayload(t *testing.T) 
 
 	src := `mutation space mutationArchiveSpace {
 		args {
-			spaceId  string  @required
+			partitionId  string  @required
 			payload  object  @required
 		}
 		insert {
-			id: args.spaceId
+			id: args.partitionId
 			ownerUserId: actor.userId
 			args.payload
 		}
@@ -192,7 +192,7 @@ func TestSpaceLifecycleMutations_ActorStampOverridesCallerPayload(t *testing.T) 
 
 	engine := &MemQLEngine{}
 	mutation, err := engine.renderMutationTemplate(ctx, fn.MutationTemplate, map[string]any{
-		"spaceId": "space-001",
+		"partitionId": "space-001",
 		"payload": map[string]any{
 			"ownerUserId": "user-impostor", // legacy / hostile caller
 			"name":        "Quarterly Review",

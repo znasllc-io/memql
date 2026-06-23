@@ -183,7 +183,7 @@ shape identity identitySummary {
 shape invitation invitationFull {
   row.id
   payload.kind
-  payload.spaceId
+  payload.partitionId
   payload.spaceName
   payload.inviterId
   payload.inviterName
@@ -227,10 +227,10 @@ shape identity patSummary {
 }
 
 @row
-@description("Lightweight projection: just the user's id and activeSpaceId pointer. Phase 4 of the chat-architecture plan.")
+@description("Lightweight projection: just the user's id and activePartitionId pointer. Phase 4 of the chat-architecture plan.")
 shape user userActiveSpaceProjection {
   row.id
-  payload.activeSpaceId
+  payload.activePartitionId
 }
 
 @row
@@ -252,7 +252,7 @@ shape user userFull {
   payload.suspendedAt
   payload.suspendedReason
   payload.lastSeenAt
-  payload.activeSpaceId
+  payload.activePartitionId
   payload.revocationEpoch
   row.createdAt
 }

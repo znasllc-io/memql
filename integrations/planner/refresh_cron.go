@@ -71,13 +71,13 @@ const (
 	// signals accumulate we refresh proactively.
 	staleSignalRefreshThreshold = 3
 
-	// refreshSystemSpaceId / refreshSystemRequester are the synthetic
+	// refreshSystemPartitionId / refreshSystemRequester are the synthetic
 	// space + requester stamped on a system-spawned refresh Plan. The
-	// Plan concept requires spaceId + requestedBy; a cron refresh has no
+	// Plan concept requires partitionId + requestedBy; a cron refresh has no
 	// real user/space, so these sentinels keep the row well-formed
 	// without pretending a person asked for it (triggerSource='system'
 	// is the authoritative provenance marker).
-	refreshSystemSpaceId    = "system:knowledge-refresh"
+	refreshSystemPartitionId    = "system:knowledge-refresh"
 	refreshSystemRequester  = "system"
 )
 
@@ -330,8 +330,8 @@ func (c *RefreshCron) spawnRefreshPlan(ctx context.Context, row map[string]any) 
 	// when wired -- mutationCreatePlan's arg surface doesn't carry mode,
 	// so we don't pass it. The dispatcher branches on input.mode.
 	call := fmt.Sprintf(
-		`mutationCreatePlan({"planId": %q, "spaceId": %q, "kind": "trainSpecialist", "goal": %q, "requestedBy": %q, "triggerSource": "system", "input": %s})`,
-		planId, refreshSystemSpaceId, goal, requestedBy, inputJSON,
+		`mutationCreatePlan({"planId": %q, "partitionId": %q, "kind": "trainSpecialist", "goal": %q, "requestedBy": %q, "triggerSource": "system", "input": %s})`,
+		planId, refreshSystemPartitionId, goal, requestedBy, inputJSON,
 	)
 	_, err := c.engine.Execute(systemActorContext(ctx), call)
 	if err != nil {
