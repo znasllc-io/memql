@@ -90,3 +90,34 @@ replica. The resolver holds no cross-node state.
   repair loop (E4.4) proposes; human validation (E4.5) flips `valid=true`
   and makes it resolution-eligible. An unvalidated heal can never silently
   take effect.
+
+## E4.3 — Typed-patch model
+
+`component/healing/patch.go`. A `Patch` is a TYPED transform from a base
+construct (the automation/precondition JSON) to the healed overlay
+`overrideData` (E4.2). Four kinds — the locked vocabulary of how the
+repair loop heals a construct:
+
+| Kind | Required fields | Effect |
+|------|-----------------|--------|
+| `add-precondition` | `precondition{id,check}` | append a deterministic guard to `preconditions[]` (dup id rejected) |
+| `insert-guard` | `target`, `guard` | set / AND a boolean `condition` onto a step (strengthens, never silently replaces) |
+| `relativize-literal` | `target`, `replacement` (+ optional `literal` safety check) | replace a machine-specific literal with a relative ref (`$config.X` / `$event.payload.X`) — the **portability heal** |
+| `rebind-param` | `target`, `replacement` | rebind a param/arg ref (`$steps.a.result` → `$steps.b.result`) — the data-flow heal |
+
+API:
+
+- `Validate()` — kind is one of the four + per-kind required fields present.
+- `Apply(base)` — deep-COPIES base (the base tier is never mutated), applies
+  the kind-specific transform, then runs the **result-loads gate**
+  (`validateConstructLoads`: preconditions have id+check, no dup ids; steps
+  have ids). A patch whose target is absent, or that produces an unloadable
+  construct (blank check, dup guard), is **rejected** — a heal can never
+  blank or corrupt a construct.
+
+`Target` is a dot-path into the construct; `steps.<id>` selects the step by
+id, then descends (`steps.run.input.path`). The patch model is pure data
+(no engine/LLM/DB) so the repair loop (E4.4) can produce `Patch` values via
+a stub model and this package applies + validates them deterministically.
+A patch's `Apply` output, stored as a `healedOverride` overrideData,
+resolves through the two-tier resolver and shadows base (tested end-to-end).
