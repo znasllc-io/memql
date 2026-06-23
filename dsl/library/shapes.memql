@@ -1,7 +1,6 @@
 // library domain -- row projections.
 
 use library.concepts.{ artifact, generatedOutput, memory, documentVersion }
-use knowledge.concepts.{ liveSnapshot }
 
 @row
 @description("Comprehensive Library index projection: every payload field plus row id and timestamps. The default shape for the Library list / search / filter reads (memql#695) and the per-item detail view.")
@@ -94,14 +93,3 @@ shape documentVersion documentVersionFull {
   row.createdAt
 }
 
-@row
-@description("Freshness projection of a live-source snapshot: the materialized result plus the timestamps + citation label the Library uses to render the LIVE badge and 'fetched X ago' indicator. Bound to v1:knowledge:liveSnapshot.")
-shape liveSnapshot liveSnapshotFreshness {
-  row.id
-  payload.liveSourceId
-  payload.result
-  payload.materializedAt
-  payload.expiresAt
-  payload.citationLabel
-  row.createdAt
-}

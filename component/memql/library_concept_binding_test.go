@@ -40,7 +40,6 @@ func TestLibraryQueriesRegister(t *testing.T) {
 		{"queryGeneratedOutputById", "v1:library:generatedOutput"},
 		{"queryMemoryById", "v1:library:memory"},
 		{"queryLibraryWorkspaceLiveSources", "v1:library:artifact"},
-		{"queryLatestLiveSnapshotForSource", "v1:knowledge:liveSnapshot"},
 	}
 	for _, tc := range cases {
 		fn, err := registry.Get(tc.name)

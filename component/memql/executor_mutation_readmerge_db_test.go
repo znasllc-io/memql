@@ -142,47 +142,6 @@ func TestReadMerge_DeleteRecord_PreservesOmittedFields(t *testing.T) {
 	require.Equal(t, before["data"], p["data"], "data object preserved")
 }
 
-// TestReadMerge_UpdateDocumentValidation_PreservesOmittedFields covers the
-// knowledge family (v1:knowledge:document). A minimal validation transition
-// (documentId + validationStatus) must preserve fileName / planId / partitionId /
-// mimeType / format / uploadedBy.
-func TestReadMerge_UpdateDocumentValidation_PreservesOmittedFields(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
-	const conceptName = "v1:knowledge:document"
-	docId := "doc-" + uniqueSuffix("validate")
-
-	storedId := runMutation(t, ctx, eng, "mutationCreateDocument", map[string]any{
-		"documentId":   docId,
-		"attachmentId": "att-1628",
-		"planId":       "plan-1628",
-		"partitionId":      "space-1628",
-		"fileName":     "fleet.csv",
-		"mimeType":     "text/csv",
-		"format":       "spreadsheet",
-		"uploadedBy":   "identity-1628",
-	})
-
-	before := latestPayload(t, ctx, db, conceptName, storedId)
-	require.Equal(t, "unvalidated", before["validationStatus"])
-
-	// The fix: MINIMAL validation transition -- id + status only.
-	runMutation(t, ctx, eng, "mutationUpdateDocumentValidation", map[string]any{
-		"documentId":       docId,
-		"validationStatus": "validated",
-	})
-
-	p := latestPayload(t, ctx, db, conceptName, storedId)
-	require.Equal(t, "validated", p["validationStatus"], "status must update")
-	// Omitted fields inherited from the prior row (compare to the before-
-	// snapshot so FK canonicalization, e.g. planId, doesn't trip the test).
-	require.Equal(t, before["fileName"], p["fileName"])
-	require.Equal(t, before["planId"], p["planId"])
-	require.Equal(t, before["partitionId"], p["partitionId"])
-	require.Equal(t, before["mimeType"], p["mimeType"])
-	require.Equal(t, before["format"], p["format"])
-	require.Equal(t, before["uploadedBy"], p["uploadedBy"])
-}
-
 // TestReadMerge_RevokePATIdentity_PreservesOmittedFields covers the
 // identity/token family (v1:identity:identity). A minimal revoke (id only)
 // must flip active=false while the discriminator (identityType=api_key),

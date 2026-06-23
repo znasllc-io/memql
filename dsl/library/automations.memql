@@ -5,16 +5,7 @@
 // matching promotion logic. Records (notes / todos / calendar events /
 // memory) and live sources are wired the same way on #696.
 
-use library.logic.{ logicIndexDocument, logicIndexGeneratedOutput, logicIndexNote, logicIndexTodo, logicIndexCalendarEvent, logicIndexMemory, logicIndexLiveSource }
-
-@enabled
-@trigger(event="node.created", concept="v1:knowledge:document", partition="*")
-@description("On document upload, promote the new v1:knowledge:document into the Library as an artifact index row.")
-automation indexDocumentOnCreate {
-  step run {
-    logic indexDocument { event: event }
-  }
-}
+use library.logic.{ logicIndexGeneratedOutput, logicIndexNote, logicIndexTodo, logicIndexCalendarEvent, logicIndexMemory }
 
 @enabled
 @trigger(event="node.created", concept="v1:library:generatedOutput", partition="*")
@@ -61,11 +52,3 @@ automation indexMemoryOnCreate {
   }
 }
 
-@enabled
-@trigger(event="node.created", concept="v1:knowledge:liveSource", partition="*")
-@description("On live-source creation, promote it into the Library Records lens as a LIVE-flagged record.")
-automation indexLiveSourceOnCreate {
-  step run {
-    logic indexLiveSource { event: event }
-  }
-}

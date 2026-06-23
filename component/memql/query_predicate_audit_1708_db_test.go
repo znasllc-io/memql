@@ -37,66 +37,6 @@ import (
 
 // --- #1708: queryDocumentsForDomain joins on attachedDomains membership ------
 
-func TestQueryDocumentsForDomain_MembershipJoin(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
-	ctx := clusterOwnerCtx("u-docdom-1708")
-	sfx := uniqueSuffix("docdom")
-
-	domain := fmt.Sprintf("v1:knowledge:knowledgeDomain:dom-%s", sfx)
-	otherDomain := fmt.Sprintf("v1:knowledge:knowledgeDomain:other-%s", sfx)
-
-	// Match: validated AND attached to `domain`.
-	matchID := fmt.Sprintf("v1:knowledge:document:match-%s", sfx)
-	// Non-match A: attached to `domain` but NOT validated.
-	unvalidatedID := fmt.Sprintf("v1:knowledge:document:unval-%s", sfx)
-	// Non-match B: validated but attached to a DIFFERENT domain.
-	otherID := fmt.Sprintf("v1:knowledge:document:other-%s", sfx)
-
-	seedDoc := func(id string) {
-		runMutation(t, ctx, eng, "mutationCreateDocument", map[string]any{
-			"documentId":   id,
-			"attachmentId": "att-" + id,
-			"planId":       "v1:planner:plan:p-" + sfx,
-			"partitionId":      "v1:cognition:space:s-" + sfx,
-			"fileName":     "f.csv",
-			"mimeType":     "text/csv",
-			"format":       "spreadsheet",
-			"uploadedBy":   "u-docdom-1708",
-		})
-	}
-	seedDoc(matchID)
-	seedDoc(unvalidatedID)
-	seedDoc(otherID)
-
-	// Attach + validate per the matrix.
-	runMutation(t, ctx, eng, "mutationAttachDocumentToDomain", map[string]any{
-		"documentId": matchID, "attachedDomains": []string{domain},
-	})
-	runMutation(t, ctx, eng, "mutationUpdateDocumentValidation", map[string]any{
-		"documentId": matchID, "validationStatus": "validated",
-	})
-
-	runMutation(t, ctx, eng, "mutationAttachDocumentToDomain", map[string]any{
-		"documentId": unvalidatedID, "attachedDomains": []string{domain},
-	})
-	// left unvalidated on purpose.
-
-	runMutation(t, ctx, eng, "mutationAttachDocumentToDomain", map[string]any{
-		"documentId": otherID, "attachedDomains": []string{otherDomain},
-	})
-	runMutation(t, ctx, eng, "mutationUpdateDocumentValidation", map[string]any{
-		"documentId": otherID, "validationStatus": "validated",
-	})
-
-	got := queryIds(t, ctx, eng, fmt.Sprintf(`queryDocumentsForDomain({"domainId":%q})`, domain))
-	require.True(t, contains(got, matchID),
-		"validated Document attached to the domain MUST be returned (membership join, #1708), got %v", got)
-	require.False(t, contains(got, unvalidatedID),
-		"unvalidated Document MUST be excluded (#1708), got %v", got)
-	require.False(t, contains(got, otherID),
-		"Document attached to a DIFFERENT domain MUST be excluded (#1708), got %v", got)
-}
-
 // --- #1708: queryAvatarPersonas no longer hardcodes vendor==simli ------------
 
 func TestQueryAvatarPersonas_VendorOptionalNotHardcoded(t *testing.T) {

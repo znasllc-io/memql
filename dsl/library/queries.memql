@@ -14,8 +14,7 @@
 // matters; search is the cheap client-side refinement on top.
 
 use library.concepts.{ artifact, generatedOutput, memory, documentVersion }
-use library.shapes.{ artifactFull, generatedOutputFull, memoryFull, liveSnapshotFreshness, documentVersionSummary, documentVersionFull }
-use knowledge.concepts.{ liveSnapshot }
+use library.shapes.{ artifactFull, generatedOutputFull, memoryFull, documentVersionSummary, documentVersionFull }
 
 @enabled
 @description("List the caller's entire Library (artifacts + records). Owned: the row set is gated by ownerUserId==actor.userId server-side. The default Library read; the panel filters by lens / kind and searches client-side over this set, or calls the narrower facet queries below when a single facet dominates.")
@@ -137,21 +136,6 @@ query artifact queryLibraryWorkspaceLiveSources {
   sort     "createdAt", "desc"
   paginate 50
   shape   artifactFull
-}
-
-@enabled
-@description("Live-data freshness drill-in: fetch the cached snapshots for a live source so the Library can render the LIVE badge + 'fetched X ago' indicator (and the latest result on open). Returns every snapshot for the source; the panel picks the most recent by materializedAt. Reads are by liveSourceId -- the live source itself carries the ownership / scope decision (#696).")
-query liveSnapshot queryLatestLiveSnapshotForSource {
-  args {
-    liveSourceId  string  @required
-  }
-  filter  payload.liveSourceId==args.liveSourceId
-  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
-  // (createdAt, id) instead of a full-table pull. Literal page size -- the
-  // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
-  paginate 50
-  shape   liveSnapshotFreshness
 }
 
 // ---- documentVersion: version-history reads (memql#1230) ----

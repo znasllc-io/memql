@@ -170,11 +170,6 @@ func TestLibraryIndexersCoalesceNullableOptionalFields(t *testing.T) {
 		want   string
 		rawBad string
 	}{
-		// logicIndexDocument
-		{"logicIndexDocument", "summary", `summary: coalesce(args.event.payload.summary`, `summary: args.event.payload.summary`},
-		{"logicIndexDocument", "mimeType", `mimeType: coalesce(args.event.payload.mimeType`, `mimeType: args.event.payload.mimeType`},
-		{"logicIndexDocument", "partitionId", `partitionId: coalesce(args.event.payload.partitionId`, `partitionId: args.event.payload.partitionId`},
-		{"logicIndexDocument", "producedByPlanId", `producedByPlanId: coalesce(args.event.payload.planId`, `producedByPlanId: args.event.payload.planId`},
 		// logicIndexNote
 		{"logicIndexNote", "summary", `summary: coalesce(args.event.payload.body`, `summary: args.event.payload.body`},
 		// logicIndexTodo
@@ -185,9 +180,6 @@ func TestLibraryIndexersCoalesceNullableOptionalFields(t *testing.T) {
 		{"logicIndexMemory", "summary", `summary: coalesce(args.event.payload.summary`, `summary: args.event.payload.summary`},
 		{"logicIndexMemory", "agentId", `agentId: coalesce(args.event.payload.agentId`, `agentId: args.event.payload.agentId`},
 		{"logicIndexMemory", "partitionId", `partitionId: coalesce(args.event.payload.partitionId`, `partitionId: args.event.payload.partitionId`},
-		// logicIndexLiveSource (ownerId is genuinely optional -> ownerUserId)
-		{"logicIndexLiveSource", "ownerUserId", `ownerUserId: coalesce(args.event.payload.ownerId`, `ownerUserId: args.event.payload.ownerId`},
-		{"logicIndexLiveSource", "summary", `summary: coalesce(args.event.payload.description`, `summary: args.event.payload.description`},
 	}
 
 	for _, tc := range cases {

@@ -1548,28 +1548,6 @@ func QueryDetectConflictsBuild(args QueryDetectConflictsArgs) string {
 	return b.String()
 }
 
-// QueryDocumentById -- Single Document by id.
-//
-// Bound concept: document.
-type QueryDocumentByIdArgs struct {
-	DocumentId string
-}
-
-// QueryDocumentById calls the engine query queryDocumentById.
-func (qc *QueryClient) QueryDocumentById(ctx context.Context, args QueryDocumentByIdArgs) (*Result, error) {
-	call := QueryDocumentByIdBuild(args)
-	return qc.executeNamed(ctx, "queryDocumentById", call)
-}
-
-func QueryDocumentByIdBuild(args QueryDocumentByIdArgs) string {
-	var b strings.Builder
-	b.WriteString("queryDocumentById({")
-	b.WriteString("documentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
-	b.WriteString("})")
-	return b.String()
-}
-
 // QueryDocumentChunksForDomain -- Every documentChunk attached to a knowledge domain, full shape. Consumed by the trainSpecialist dispatcher for the Trainer Agent's mode='refresh' existingCorpus (read-what's-there-now-to-decide-what-to-supersede).
 //
 // Bound concept: documentChunk.
@@ -1658,67 +1636,6 @@ func QueryDocumentVersionsForOwnerBuild(args QueryDocumentVersionsForOwnerArgs) 
 	return b.String()
 }
 
-// QueryDocumentsForDomain -- Validated Documents attached to a knowledge domain. attachedDomains is a []string, so membership (`in`) is the correct join -- memql#1708: the old `payload.attachedDomains==args.domainId` compared the whole list against a scalar and never matched, so the detail view came back empty even for a validated, correctly-attached Document.
-//
-// Bound concept: document.
-type QueryDocumentsForDomainArgs struct {
-	DomainId string
-}
-
-// QueryDocumentsForDomain calls the engine query queryDocumentsForDomain.
-func (qc *QueryClient) QueryDocumentsForDomain(ctx context.Context, args QueryDocumentsForDomainArgs) (*Result, error) {
-	call := QueryDocumentsForDomainBuild(args)
-	return qc.executeNamed(ctx, "queryDocumentsForDomain", call)
-}
-
-func QueryDocumentsForDomainBuild(args QueryDocumentsForDomainArgs) string {
-	var b strings.Builder
-	b.WriteString("queryDocumentsForDomain({")
-	b.WriteString("domainId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	b.WriteString("})")
-	return b.String()
-}
-
-// QueryDocumentsForSpace -- All Documents in a space, regardless of validation status.
-//
-// Bound concept: document.
-type QueryDocumentsForSpaceArgs struct {
-	PartitionId string
-}
-
-// QueryDocumentsForSpace calls the engine query queryDocumentsForSpace.
-func (qc *QueryClient) QueryDocumentsForSpace(ctx context.Context, args QueryDocumentsForSpaceArgs) (*Result, error) {
-	call := QueryDocumentsForSpaceBuild(args)
-	return qc.executeNamed(ctx, "queryDocumentsForSpace", call)
-}
-
-func QueryDocumentsForSpaceBuild(args QueryDocumentsForSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("queryDocumentsForSpace({")
-	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	b.WriteString("})")
-	return b.String()
-}
-
-// QueryDueRefreshDomains -- Per Q9 scheduled fallback: list active knowledge domains whose lastSeededAt + refreshCadenceDays * 86400 < now (the cadence backstop fires). The refreshDueKnowledgeDomains cron consumes this nightly + spawns trainSpecialist Plans (mode='refresh') for each row returned. Predefined domains AND user-created domains are both eligible -- the picker constraint sits on the domain row's refreshCadenceDays (null = disabled).
-//
-// Bound concept: knowledgeDomain.
-type QueryDueRefreshDomainsArgs struct {
-}
-
-// QueryDueRefreshDomains calls the engine query queryDueRefreshDomains.
-func (qc *QueryClient) QueryDueRefreshDomains(ctx context.Context, args QueryDueRefreshDomainsArgs) (*Result, error) {
-	call := QueryDueRefreshDomainsBuild(args)
-	return qc.executeNamed(ctx, "queryDueRefreshDomains", call)
-}
-
-func QueryDueRefreshDomainsBuild(args QueryDueRefreshDomainsArgs) string {
-	_ = args
-	return "queryDueRefreshDomains({})"
-}
-
 // QueryDueResponsibilities -- The caller's active + enabled responsibilities of a given trigger archetype (recurring or reactive) -- the candidate set the reactive-loop evaluator (epic #632) checks for due-ness. Owned tier (ownerUserId == actor.userId). Cron-due / condition-match filtering happens Go-side (no OR operator + no cron arithmetic in the filter), mirroring queryDueTrainAgentRetryPlans.
 //
 // Bound concept: responsibility.
@@ -1757,62 +1674,6 @@ func (qc *QueryClient) QueryDueTrainAgentRetryPlans(ctx context.Context, args Qu
 func QueryDueTrainAgentRetryPlansBuild(args QueryDueTrainAgentRetryPlansArgs) string {
 	_ = args
 	return "queryDueTrainAgentRetryPlans({})"
-}
-
-// QueryEntityIndexLookup -- Look up entity-index entries by (domainId, entityKind, keyHash) for cross-file dedup.
-//
-// Bound concept: entityIndex.
-type QueryEntityIndexLookupArgs struct {
-	DomainId   string
-	EntityKind string
-	KeyHash    string
-}
-
-// QueryEntityIndexLookup calls the engine query queryEntityIndexLookup.
-func (qc *QueryClient) QueryEntityIndexLookup(ctx context.Context, args QueryEntityIndexLookupArgs) (*Result, error) {
-	call := QueryEntityIndexLookupBuild(args)
-	return qc.executeNamed(ctx, "queryEntityIndexLookup", call)
-}
-
-func QueryEntityIndexLookupBuild(args QueryEntityIndexLookupArgs) string {
-	var b strings.Builder
-	b.WriteString("queryEntityIndexLookup({")
-	b.WriteString("domainId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	if b.Len() > 24 {
-		b.WriteString(", ")
-	}
-	b.WriteString("entityKind: ")
-	b.WriteString(fmt.Sprintf("%q", args.EntityKind))
-	if b.Len() > 24 {
-		b.WriteString(", ")
-	}
-	b.WriteString("keyHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	b.WriteString("})")
-	return b.String()
-}
-
-// QueryEntitySchemaForDomain -- Active entity schemas for a knowledge domain (a domain may declare multiple entity kinds).
-//
-// Bound concept: domainEntitySchema.
-type QueryEntitySchemaForDomainArgs struct {
-	DomainId string
-}
-
-// QueryEntitySchemaForDomain calls the engine query queryEntitySchemaForDomain.
-func (qc *QueryClient) QueryEntitySchemaForDomain(ctx context.Context, args QueryEntitySchemaForDomainArgs) (*Result, error) {
-	call := QueryEntitySchemaForDomainBuild(args)
-	return qc.executeNamed(ctx, "queryEntitySchemaForDomain", call)
-}
-
-func QueryEntitySchemaForDomainBuild(args QueryEntitySchemaForDomainArgs) string {
-	var b strings.Builder
-	b.WriteString("queryEntitySchemaForDomain({")
-	b.WriteString("domainId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	b.WriteString("})")
-	return b.String()
 }
 
 // QueryEventsByDay -- List the authenticated caller's events that start on a given day, bounded by the caller-supplied [dayStart, dayEnd] instants (computed in the user's timezone client-side). Self-scoped via actor.userId. Backs the calendar tool's day view and 'what's on my schedule today' agent queries.
@@ -2212,28 +2073,6 @@ func QueryHistoricalPlanMetricsBuild(args QueryHistoricalPlanMetricsArgs) string
 	return b.String()
 }
 
-// QueryImageRegionsForDocument -- All ImageRegions for an image Document, in region-seq order.
-//
-// Bound concept: imageRegion.
-type QueryImageRegionsForDocumentArgs struct {
-	DocumentId string
-}
-
-// QueryImageRegionsForDocument calls the engine query queryImageRegionsForDocument.
-func (qc *QueryClient) QueryImageRegionsForDocument(ctx context.Context, args QueryImageRegionsForDocumentArgs) (*Result, error) {
-	call := QueryImageRegionsForDocumentBuild(args)
-	return qc.executeNamed(ctx, "queryImageRegionsForDocument", call)
-}
-
-func QueryImageRegionsForDocumentBuild(args QueryImageRegionsForDocumentArgs) string {
-	var b strings.Builder
-	b.WriteString("queryImageRegionsForDocument({")
-	b.WriteString("documentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
-	b.WriteString("})")
-	return b.String()
-}
-
 // QueryInvitationById -- Returns the invitation with the given id. Zero or one result.
 //
 // Bound concept: invitation.
@@ -2344,72 +2183,6 @@ func QueryInvocationsForUserBuild(args QueryInvocationsForUserArgs) string {
 	return b.String()
 }
 
-// QueryKnowledgeBridgeById -- Look up a single knowledge-bridge row by its deterministic id. Used by the bridge generator to detect 'this combination has already been seeded; reuse instead of regenerating'.
-//
-// Bound concept: knowledgeBridge.
-type QueryKnowledgeBridgeByIdArgs struct {
-	BridgeId string
-}
-
-// QueryKnowledgeBridgeById calls the engine query queryKnowledgeBridgeById.
-func (qc *QueryClient) QueryKnowledgeBridgeById(ctx context.Context, args QueryKnowledgeBridgeByIdArgs) (*Result, error) {
-	call := QueryKnowledgeBridgeByIdBuild(args)
-	return qc.executeNamed(ctx, "queryKnowledgeBridgeById", call)
-}
-
-func QueryKnowledgeBridgeByIdBuild(args QueryKnowledgeBridgeByIdArgs) string {
-	var b strings.Builder
-	b.WriteString("queryKnowledgeBridgeById({")
-	b.WriteString("bridgeId: ")
-	b.WriteString(fmt.Sprintf("%q", args.BridgeId))
-	b.WriteString("})")
-	return b.String()
-}
-
-// QueryKnowledgeDomainById -- Look up a single knowledge domain by id.
-//
-// Bound concept: knowledgeDomain.
-type QueryKnowledgeDomainByIdArgs struct {
-	DomainId string
-}
-
-// QueryKnowledgeDomainById calls the engine query queryKnowledgeDomainById.
-func (qc *QueryClient) QueryKnowledgeDomainById(ctx context.Context, args QueryKnowledgeDomainByIdArgs) (*Result, error) {
-	call := QueryKnowledgeDomainByIdBuild(args)
-	return qc.executeNamed(ctx, "queryKnowledgeDomainById", call)
-}
-
-func QueryKnowledgeDomainByIdBuild(args QueryKnowledgeDomainByIdArgs) string {
-	var b strings.Builder
-	b.WriteString("queryKnowledgeDomainById({")
-	b.WriteString("domainId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	b.WriteString("})")
-	return b.String()
-}
-
-// QueryLatestLiveSnapshotForSource -- Live-data freshness drill-in: fetch the cached snapshots for a live source so the Library can render the LIVE badge + 'fetched X ago' indicator (and the latest result on open). Returns every snapshot for the source; the panel picks the most recent by materializedAt. Reads are by liveSourceId -- the live source itself carries the ownership / scope decision (#696).
-//
-// Bound concept: liveSnapshot.
-type QueryLatestLiveSnapshotForSourceArgs struct {
-	LiveSourceId string
-}
-
-// QueryLatestLiveSnapshotForSource calls the engine query queryLatestLiveSnapshotForSource.
-func (qc *QueryClient) QueryLatestLiveSnapshotForSource(ctx context.Context, args QueryLatestLiveSnapshotForSourceArgs) (*Result, error) {
-	call := QueryLatestLiveSnapshotForSourceBuild(args)
-	return qc.executeNamed(ctx, "queryLatestLiveSnapshotForSource", call)
-}
-
-func QueryLatestLiveSnapshotForSourceBuild(args QueryLatestLiveSnapshotForSourceArgs) string {
-	var b strings.Builder
-	b.WriteString("queryLatestLiveSnapshotForSource({")
-	b.WriteString("liveSourceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.LiveSourceId))
-	b.WriteString("})")
-	return b.String()
-}
-
 // QueryLibraryArtifactById -- Fetch a single Library artifact index row by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content.
 //
 // Bound concept: artifact.
@@ -2508,23 +2281,6 @@ func (qc *QueryClient) QueryLibraryWorkspaceLiveSources(ctx context.Context, arg
 func QueryLibraryWorkspaceLiveSourcesBuild(args QueryLibraryWorkspaceLiveSourcesArgs) string {
 	_ = args
 	return "queryLibraryWorkspaceLiveSources({})"
-}
-
-// QueryListKnowledgeDomains -- List all active knowledge domains. Used by the agent builder's knowledge picker and by operator-turn retrieval to resolve domain metadata.
-//
-// Bound concept: knowledgeDomain.
-type QueryListKnowledgeDomainsArgs struct {
-}
-
-// QueryListKnowledgeDomains calls the engine query queryListKnowledgeDomains.
-func (qc *QueryClient) QueryListKnowledgeDomains(ctx context.Context, args QueryListKnowledgeDomainsArgs) (*Result, error) {
-	call := QueryListKnowledgeDomainsBuild(args)
-	return qc.executeNamed(ctx, "queryListKnowledgeDomains", call)
-}
-
-func QueryListKnowledgeDomainsBuild(args QueryListKnowledgeDomainsArgs) string {
-	_ = args
-	return "queryListKnowledgeDomains({})"
 }
 
 // QueryMagicLinkRequestByTokenHash -- Returns the magic-link request whose tokenHash matches the argument. Zero or one result.
@@ -3679,28 +3435,6 @@ func QuerySpaceUtterancesBuild(args QuerySpaceUtterancesArgs) string {
 	return b.String()
 }
 
-// QuerySpreadsheetRowsForDocument -- All SpreadsheetRows for a Document, in row-seq order.
-//
-// Bound concept: spreadsheetRow.
-type QuerySpreadsheetRowsForDocumentArgs struct {
-	DocumentId string
-}
-
-// QuerySpreadsheetRowsForDocument calls the engine query querySpreadsheetRowsForDocument.
-func (qc *QueryClient) QuerySpreadsheetRowsForDocument(ctx context.Context, args QuerySpreadsheetRowsForDocumentArgs) (*Result, error) {
-	call := QuerySpreadsheetRowsForDocumentBuild(args)
-	return qc.executeNamed(ctx, "querySpreadsheetRowsForDocument", call)
-}
-
-func QuerySpreadsheetRowsForDocumentBuild(args QuerySpreadsheetRowsForDocumentArgs) string {
-	var b strings.Builder
-	b.WriteString("querySpreadsheetRowsForDocument({")
-	b.WriteString("documentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
-	b.WriteString("})")
-	return b.String()
-}
-
 // QueryStaleClusterNodes -- Latest-per-id cluster node rows whose health is not already 'stopped'. When olderThan is supplied, restricts to rows whose lastSeen is strictly before it (RFC3339 cutoff). Drives the stale-node prune cron.
 //
 // Bound concept: node.
@@ -4101,28 +3835,6 @@ func (qc *QueryClient) QueryUsersScheduledForDeletion(ctx context.Context, args 
 func QueryUsersScheduledForDeletionBuild(args QueryUsersScheduledForDeletionArgs) string {
 	_ = args
 	return "queryUsersScheduledForDeletion({})"
-}
-
-// QueryValidationEventsForTarget -- Audit history of validation transitions for a specific target row.
-//
-// Bound concept: validationEvent.
-type QueryValidationEventsForTargetArgs struct {
-	TargetId string
-}
-
-// QueryValidationEventsForTarget calls the engine query queryValidationEventsForTarget.
-func (qc *QueryClient) QueryValidationEventsForTarget(ctx context.Context, args QueryValidationEventsForTargetArgs) (*Result, error) {
-	call := QueryValidationEventsForTargetBuild(args)
-	return qc.executeNamed(ctx, "queryValidationEventsForTarget", call)
-}
-
-func QueryValidationEventsForTargetBuild(args QueryValidationEventsForTargetArgs) string {
-	var b strings.Builder
-	b.WriteString("queryValidationEventsForTarget({")
-	b.WriteString("targetId: ")
-	b.WriteString(fmt.Sprintf("%q", args.TargetId))
-	b.WriteString("})")
-	return b.String()
 }
 
 // QueryValidationLog -- Returns validation state change history. Optional filters: recordId, partitionId, action

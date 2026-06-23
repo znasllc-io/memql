@@ -175,35 +175,6 @@ func TestRun3_TouchSession_ReadMerge(t *testing.T) {
 	require.Equal(t, before["expiresAt"], after["expiresAt"], "expiresAt preserved (#1678)")
 }
 
-// TestRun3_DeleteKnowledgeDomain_ReadMerge covers #1678: a minimal
-// deleteKnowledgeDomain (id only) must flip active=false while preserving every
-// other field (name / description / category / source / scope / tier / ...).
-func TestRun3_DeleteKnowledgeDomain_ReadMerge(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
-	const conceptName = "v1:knowledge:knowledgeDomain"
-
-	domainId := "kd-" + uniqueSuffix("del")
-	// Seed via the create mutation (full row). Reuse the canonical stored id.
-	storedId := runMutation(t, ctx, eng, "mutationCreateKnowledgeDomain", map[string]any{
-		"domainId":    domainId,
-		"name":        "Tax Law",
-		"description": "US federal tax statutes",
-		"category":    "business",
-	})
-	before := latestPayload(t, ctx, db, conceptName, storedId)
-
-	// MINIMAL delete: id only.
-	runMutation(t, ctx, eng, "mutationDeleteKnowledgeDomain", map[string]any{
-		"domainId": storedId,
-	})
-	after := latestPayload(t, ctx, db, conceptName, storedId)
-
-	require.Equal(t, false, after["active"], "delete must flip active=false")
-	require.Equal(t, before["name"], after["name"], "name preserved (#1678)")
-	require.Equal(t, before["description"], after["description"], "description preserved (#1678)")
-	require.Equal(t, before["category"], after["category"], "category preserved (#1678)")
-}
-
 // TestRun3_UpdateClusterSettings_PreservesInternalDomains covers #1686: a
 // partial update that omits internalDomains must NOT wipe it.
 func TestRun3_UpdateClusterSettings_PreservesInternalDomains(t *testing.T) {
@@ -232,37 +203,4 @@ func TestRun3_UpdateClusterSettings_PreservesInternalDomains(t *testing.T) {
 	require.Equal(t, "Acme", after["brandName"], "brandName must update")
 	require.Equal(t, "znas.io,example.com", after["internalDomains"],
 		"omitted internalDomains must be preserved, not wiped (#1686)")
-}
-
-// TestRun3_AttachDocumentToDomain_ArrayArg covers #1677: the attachedDomains
-// arg now matches the concept's array type, so an array value validates.
-func TestRun3_AttachDocumentToDomain_ArrayArg(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
-	const conceptName = "v1:knowledge:document"
-
-	docId := "doc-" + uniqueSuffix("attach")
-	// Seed a document. Reuse the canonical stored id for the attach + read-back.
-	storedId := runMutation(t, ctx, eng, "mutationCreateDocument", map[string]any{
-		"documentId":   docId,
-		"attachmentId": "att-1",
-		"planId":       "plan-1",
-		"partitionId":      "space-1",
-		"fileName":     "data.csv",
-		"mimeType":     "text/csv",
-		"format":       "spreadsheet",
-		"uploadedBy":   "user:attach-test",
-	})
-
-	// Array form must now validate (previously: object arg vs array concept field).
-	got, err := runMutationRaw(t, ctx, eng, "mutationAttachDocumentToDomain", map[string]any{
-		"documentId":      storedId,
-		"attachedDomains": []string{"kd-finance", "kd-legal"},
-	})
-	require.NoError(t, err, "array attachedDomains must validate against the array concept field (#1677)")
-	require.NotEmpty(t, got)
-
-	p := latestPayload(t, ctx, db, conceptName, storedId)
-	domains, ok := p["attachedDomains"].([]any)
-	require.True(t, ok, "attachedDomains must persist as an array")
-	require.Len(t, domains, 2)
 }
