@@ -534,6 +534,15 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		if err := e.validateRbacBaseRoleImmutable(ctx, payload, meta.priorPredefined, actor); err != nil {
 			return nil, meta, err
 		}
+		// RBAC custom-role rank-bound guard (memql#2072): a non-system actor
+		// creating/editing a DATA-defined custom role (predefined=false) may
+		// only set a rank STRICTLY BELOW their own -- a creator can't mint a
+		// peer/superior role (escalation). Lets custom roles slot BETWEEN
+		// existing ranks while bounding them by the creator's rank. See
+		// rbac_custom_role_rankbound.go.
+		if err := e.validateRbacCustomRoleRankBound(ctx, payload, meta.priorPredefined, actor); err != nil {
+			return nil, meta, err
+		}
 	}
 	// Harness step guard: enforces the v1:harness:step status state
 	// machine (pending -> ready -> running -> done/failed/blocked,
