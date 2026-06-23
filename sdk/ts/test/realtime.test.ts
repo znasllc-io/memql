@@ -271,7 +271,7 @@ test("AudioClient.dial -- stamps auth on URL", async () => {
 test("AudioClient.transcribe -- start + chunk + final transcription + ended", async () => {
   const { client, socket } = await dialTestAudio();
   const stream = client.transcribe({
-    spaceId: "spc-1",
+    partitionId: "spc-1",
     participantId: "ptp-1",
     format: "opus",
     sampleRate: 48000,
@@ -327,7 +327,7 @@ test("AudioClient.transcribe -- start + chunk + final transcription + ended", as
 test("AudioClient.transcribe -- error frame surfaces as iterator throw", async () => {
   const { client, socket } = await dialTestAudio();
   const stream = client.transcribe({
-    spaceId: "spc",
+    partitionId: "spc",
     participantId: "ptp",
     format: "pcm16",
     sampleRate: 16000,
@@ -402,7 +402,7 @@ test("AudioClient.synthesize -- tts_started + tts_chunk + tts_ended", async () =
 test("AudioClient.transcribe -- end() sends end frame", async () => {
   const { client, socket } = await dialTestAudio();
   const stream = client.transcribe({
-    spaceId: "spc",
+    partitionId: "spc",
     participantId: "ptp",
     format: "pcm16",
     sampleRate: 16000,
@@ -419,7 +419,7 @@ test("AudioClient.transcribe -- end() sends end frame", async () => {
 test("AudioClient.transcribe -- cancel() sends end frame with cancelled=true", async () => {
   const { client, socket } = await dialTestAudio();
   const stream = client.transcribe({
-    spaceId: "spc",
+    partitionId: "spc",
     participantId: "ptp",
     format: "pcm16",
     sampleRate: 16000,
@@ -435,7 +435,7 @@ test("AudioClient.transcribe -- cancel() sends end frame with cancelled=true", a
 test("AudioClient -- socket close fails in-flight iterators", async () => {
   const { client, socket } = await dialTestAudio();
   const stream = client.transcribe({
-    spaceId: "spc",
+    partitionId: "spc",
     participantId: "ptp",
     format: "pcm16",
     sampleRate: 16000,
@@ -464,14 +464,14 @@ test("AudioClient -- untargeted error frame fails all in-flight handlers", async
 
   // Two transcribe streams + one synthesize stream in flight.
   const t1 = client.transcribe({
-    spaceId: "spc",
+    partitionId: "spc",
     participantId: "ptp",
     format: "pcm16",
     sampleRate: 16000,
     channels: 1,
   });
   const t2 = client.transcribe({
-    spaceId: "spc",
+    partitionId: "spc",
     participantId: "ptp",
     format: "pcm16",
     sampleRate: 16000,
