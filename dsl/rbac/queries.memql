@@ -1,6 +1,6 @@
-// rbac domain -- capability catalog reads.
+// rbac domain -- role + capability catalog reads.
 //
-// Authz tier: PUBLIC reference data. The capability catalog is global,
+// Authz tier: PUBLIC reference data. The role + capability catalog is global,
 // immutable, deployment-wide configuration -- it carries no per-user
 // ownership, so every authenticated principal may read it. That is what
 // lets ANY node resolve "does role R hold capability (verb,resourceType)?"
@@ -16,8 +16,31 @@
 // invalidation needs lands alongside the custom-role mutations in E1.4 /
 // the enforcement wiring in E1.6.
 
-use rbac.concepts.{ capability }
+use rbac.concepts.{ capability, role }
 use common.traits.{ isActiveRecord }
+
+@enabled
+@public
+@description("List every active role in the catalog -- the base roles plus any custom roles. Backs the cockpit RBAC view's role list and the rank picker the E1.4 custom-role creation flow uses to choose a slot. Higher rank == more privileged. Small registry consumed whole.")
+@unbounded("rbac role catalog -- a small bounded registry consumed whole")
+@cache(ttl="300")
+query role activeRoles {
+  filter  isActiveRecord
+  shape   roleFull
+}
+
+@enabled
+@public
+@description("Resolve a single role by its stable slug. Used to look up a principal's role row (rank + grants) on the auth/enforcement path and by the E1.4 rank-bound check (a creator's own rank). roleSlug matches role.slug, not the node id.")
+@unbounded("role by unique slug -- bounded to a single row")
+@cache(ttl="300")
+query role roleBySlug {
+  args {
+    slug  string  @required
+  }
+  filter  payload.slug==args.slug && isActiveRecord
+  shape   roleFull
+}
 
 @enabled
 @public

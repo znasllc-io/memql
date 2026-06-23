@@ -1,13 +1,16 @@
-// rbac/seeds.memql -- the base-role capability grant catalog.
+// rbac/seeds.memql -- the base ROLE catalog + the base-role capability
+// grant catalog.
 //
-// E1.1 (memql#2069) lands the primitive verbs + capability MODEL and a
-// representative, coherent grant set proving the model is EXPRESSIBLE and
-// QUERYABLE. Each `seed capability ...` materializes one immutable
-// v1:rbac:capability row into _system. The role ROWS (owner > developer >
-// admin > user, with explicit ranks + immutability) land in E1.2
-// (memql#2070); here the grants reference a role only by its stable
-// `roleSlug` string, so this file carries no forward dependency on a
-// concept that doesn't exist yet.
+// E1.1 (memql#2069) landed the primitive verbs + capability MODEL and the
+// grant set. E1.2 (memql#2070) adds the four base ROLES they attach to,
+// authored as immutable seed rows: owner (400) > developer (300) >
+// admin (200) > user (100). Each `seed role ...` materializes one
+// v1:rbac:role row and each `seed capability ...` one v1:rbac:capability
+// row into _system. predefined=true on every base row marks it IMMUTABLE
+// at runtime -- the validateRbacRoleImmutable Go guard rejects any
+// non-system-actor write to a predefined role, blocking
+// escalation-by-redefinition. The SeedMaterializer (a system:* actor)
+// still re-materializes these rows on every boot.
 //
 // THE GRANT MATRIX preserves the behavior currently hardcoded in
 // component/auth/rbac.go (the source of truth E1.5 migrates away from):
@@ -41,7 +44,48 @@
 // key on. The same split on `role` (admin/owner create/update/delete vs
 // read-only for others) is what bounds custom-role authoring in E1.4.
 
-use rbac.concepts.{ capability }
+use rbac.concepts.{ capability, role }
+
+// =============================================================================
+//   Base roles -- the four ranked, immutable role rows. Higher rank ==
+//   more privileged. Spaced by 100 so E1.4 custom roles slot between.
+// =============================================================================
+
+@description("owner: the cluster owner -- full authority over every resource including principals (owner-only-by-owner self-management). Self-managed only; highest rank.")
+seed role owner {
+  slug:        "owner"
+  name:        "Owner"
+  rank:        400
+  description: "Full authority over every resource, including user management. Owner-principals are editable only by an owner."
+  predefined:  true
+}
+
+@description("developer: ENGINEERING power -- authors constructs, runs inline DSL, drives the data plane, forward-deploys. OUTRANKS admin (different power axis); does NOT manage principals.")
+seed role developer {
+  slug:        "developer"
+  name:        "Developer"
+  rank:        300
+  description: "Engineering authority: author DSL constructs, run inline DSL, full data plane, forward deploy. Cannot manage users."
+  predefined:  true
+}
+
+@description("admin: USER-MANAGEMENT power -- creates/edits/removes lower-ranked principals, creates agents/groups, drives the data plane, forward-deploys. Does NOT author constructs.")
+seed role admin {
+  slug:        "admin"
+  name:        "Admin"
+  rank:        200
+  description: "User-management authority: manage lower-ranked users, create agents/groups, data plane, forward deploy. Cannot author constructs."
+  predefined:  true
+}
+
+@description("user: the member tier -- read/write data plane plus read on the catalogs. No user management, authoring, or deploy. The locked base model collapses the legacy writer rank here; E1.5 maps a viewer profile on top.")
+seed role user {
+  slug:        "user"
+  name:        "Member"
+  rank:        100
+  description: "Member tier: read/write the data plane, read the catalogs. No user management, authoring, or deploy."
+  predefined:  true
+}
 
 // =============================================================================
 //   owner -- full authority over every resource type, every verb.
