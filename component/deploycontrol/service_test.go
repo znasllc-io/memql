@@ -368,3 +368,66 @@ func TestGetDeploymentStatusInvalidEnv(t *testing.T) {
 		t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
 	}
 }
+
+// --- Epic 2 (E2.6 / #2099): azure-path regression after the pack ----------
+
+// TestEpic2AzurePathRegression is the Epic 2 acceptance guard that the deploy
+// PACK (examples/deploypack) and the E2.5 effect-seam consolidation
+// (promoteRelease) left the live azure deploy path byte-for-byte intact: the
+// two legacy console promote actions still shell out to promote.sh with the
+// correct (version, env) via the SAME Executor.RunPromote, persist the
+// deployment record, and emit one audit event under the right verb. If the
+// promoteRelease consolidation ever drifts a call, env, or audit verb, this
+// fails -- the pack must stay ADDITIVE, never a behavioral change to the
+// authoritative Go path.
+func TestEpic2AzurePathRegression(t *testing.T) {
+	cases := []struct {
+		name    string
+		env     string
+		version string
+		run     func(svc *Service) (*memqlv1.ActionResult, error)
+	}{
+		{
+			name:    "DeployStaging",
+			env:     "staging",
+			version: "0.9.9",
+			run: func(svc *Service) (*memqlv1.ActionResult, error) {
+				return svc.DeployStaging(ctxWithRole(auth.RoleOwner), &memqlv1.DeployStagingRequest{Version: "0.9.9"})
+			},
+		},
+		{
+			name:    "Promote",
+			env:     "prod",
+			version: "0.9.9",
+			run: func(svc *Service) (*memqlv1.ActionResult, error) {
+				return svc.Promote(ctxWithRole(auth.RoleOwner), &memqlv1.PromoteRequest{Version: "0.9.9"})
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			exec := &fakeExecutor{promoteOut: "SUCCESS: promoted"}
+			audit := &fakeAudit{}
+			svc := newTestService(t, exec, audit)
+
+			res, err := tc.run(svc)
+			if err != nil {
+				t.Fatalf("%s: err = %v", tc.name, err)
+			}
+			if !res.GetOk() {
+				t.Fatalf("%s: ok = false: %q", tc.name, res.GetMessage())
+			}
+			// promote.sh invoked exactly once with the right (version, env).
+			if len(exec.promoteCalls) != 1 || exec.promoteCalls[0] != [2]string{tc.version, tc.env} {
+				t.Fatalf("%s: promote calls = %v, want [[%s %s]]", tc.name, exec.promoteCalls, tc.version, tc.env)
+			}
+			// exactly one audit event, success outcome.
+			if len(audit.events) != 1 {
+				t.Fatalf("%s: audit events = %d, want 1", tc.name, len(audit.events))
+			}
+			if audit.events[0].Outcome != identity.AuditOutcomeSuccess {
+				t.Errorf("%s: audit outcome = %q, want success", tc.name, audit.events[0].Outcome)
+			}
+		})
+	}
+}
