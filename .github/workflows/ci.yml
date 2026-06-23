@@ -161,6 +161,15 @@ jobs:
       - name: harness eval (regression gate)
         if: ${{ env.RUN_GO == 'true' }}
         run: go run ./cmd/harness-eval
+      # Env-var registry drift gate (7.2 / memql#2105). Fails on drift in
+      # either direction: a var read in code but not registered in
+      # scripts/secrets/manifest.yaml, or a registry entry that appears
+      # nowhere in the repo. The TestNoEnvRegistryDrift Go test in the
+      # `go test` step above is the same check; this step is the explicit,
+      # named signal.
+      - name: env-registry-check (registry drift gate)
+        if: ${{ env.RUN_GO == 'true' }}
+        run: make env-registry-check
 
       # --- DSL lanes (go OR dsl bucket) ---
       # DSL-lint: runs `memqllint` over the embedded DSL tree, catching the
