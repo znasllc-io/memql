@@ -9,6 +9,7 @@ import (
 	automationSteps "github.com/znasllc-io/memql/component/automations/steps"
 	"github.com/znasllc-io/memql/component/bus"
 	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/genesis"
 	"github.com/znasllc-io/memql/component/memql"
 	nodeMetadata "github.com/znasllc-io/memql/component/metadata"
 	"github.com/znasllc-io/memql/component/observe"
@@ -190,6 +191,31 @@ func (a *App) engineAndBus() {
 			if err := sm.Start(context.Background()); err != nil {
 				a.Logger.Warn("seed materializer failed to start",
 					"component", "memql.seedMaterializer", "error", err)
+			}
+		}()
+	}
+
+	// First-deploy default injection (Epic 7 / memql#2109): seed the
+	// registry's DEFAULTED platform-scoped vars/secrets as cluster
+	// variable/secret rows, but ONLY IF ABSENT -- a re-deploy where an
+	// operator already set a value is a strict NO-OP. Loads the same
+	// manifest genesis seals + boot-validates against, so all three
+	// consumers read one source of truth. Runs in the background after
+	// the engine's Ready channel closes (same gate as the seed
+	// materializer: the DB getter is wired during startDependencies, not
+	// Init). Safe to run on every node concurrently -- the only-if-absent
+	// check + deterministic-id upserts make racing replicas converge on
+	// one row without clobbering an operator edit. Failures stay logged
+	// and never crash boot.
+	if manifest, mErr := genesis.LoadManifest(""); mErr != nil {
+		a.Logger.Warn("default injection skipped: could not load env-var registry manifest",
+			"component", "memql.defaultInjector", "error", mErr)
+	} else if di := memql.NewDefaultInjector(a.engine, manifest); di != nil {
+		go func() {
+			<-a.engine.Ready()
+			if _, err := di.InjectDefaults(context.Background()); err != nil {
+				a.Logger.Warn("default injection sweep failed",
+					"component", "memql.defaultInjector", "error", err)
 			}
 		}()
 	}
