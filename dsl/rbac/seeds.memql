@@ -78,12 +78,21 @@ seed role admin {
   predefined:  true
 }
 
-@description("user: the member tier -- read/write data plane plus read on the catalogs. No user management, authoring, or deploy. The locked base model collapses the legacy writer rank here; E1.5 maps a viewer profile on top.")
+@description("user: the member tier -- read/write data plane plus read on the catalogs. No user management, authoring, or deploy. The locked base model collapses the legacy writer rank here (E1.5: the writer slug resolves to this member capability profile).")
 seed role user {
   slug:        "user"
   name:        "Member"
   rank:        100
   description: "Member tier: read/write the data plane, read the catalogs. No user management, authoring, or deploy."
+  predefined:  true
+}
+
+@description("viewer: the read-only tier. The E1.5 (memql#2073) reconciliation target for the legacy reader slug -- reads the data plane + catalogs, writes nothing. Ranked below user (member) so a member out-ranks a viewer. Mirrors component/auth/rbac_model.go's reader/viewer capability profile.")
+seed role viewer {
+  slug:        "viewer"
+  name:        "Viewer"
+  rank:        50
+  description: "Read-only tier: reads the data plane and the catalogs; no writes, no management. The reader slug maps here."
   predefined:  true
 }
 
@@ -213,3 +222,15 @@ seed capability cap-user-delete-data { roleSlug: "user"  verb: "delete"  resourc
 seed capability cap-user-read-agent { roleSlug: "user"  verb: "read"    resourceType: "agent"  predefined: true }
 @description("user: read groups.")
 seed capability cap-user-read-group { roleSlug: "user"  verb: "read"    resourceType: "group"  predefined: true }
+
+// =============================================================================
+//   viewer -- read-only tier (the reader-slug reconciliation target, E1.5).
+//   Reads the data plane + catalogs; writes nothing.
+// =============================================================================
+
+@description("viewer: read the data plane (read-only tier).")
+seed capability cap-viewer-read-data { roleSlug: "viewer"  verb: "read"  resourceType: "data"  predefined: true }
+@description("viewer: read agents.")
+seed capability cap-viewer-read-agent { roleSlug: "viewer"  verb: "read"  resourceType: "agent"  predefined: true }
+@description("viewer: read groups.")
+seed capability cap-viewer-read-group { roleSlug: "viewer"  verb: "read"  resourceType: "group"  predefined: true }
