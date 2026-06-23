@@ -43,6 +43,12 @@ type writeMeta struct {
 	finalPayloadJSON string
 	// conceptName is the canonical concept the row was written under.
 	conceptName string
+	// priorPredefined is the prior row's `predefined` flag (false when
+	// absent), captured before the delta overwrites it so the RBAC
+	// base-role immutability guard can reject a write that targets an
+	// already-predefined role even if the caller tries to flip the flag
+	// to false in the same delta (memql#2070).
+	priorPredefined bool
 }
 
 // executeUpdate runs the update() form: read the latest existing row by
@@ -374,6 +380,11 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			// Capture the PRIOR status before the delta overwrites it
 			// (#1158) so executeUpdate can surface it as oldStatus.
 			meta.priorStatus, _ = priorPayload["status"].(string)
+			// Capture the PRIOR predefined flag before the delta
+			// overwrites it (memql#2070) so the RBAC base-role
+			// immutability guard can reject an edit that targets an
+			// already-predefined role even if the delta flips the flag.
+			meta.priorPredefined = boolFromAny(priorPayload["predefined"])
 			mergePayloadFields(priorPayload, payload, mutation.MergeFields)
 			payload = priorPayload
 		}
@@ -508,6 +519,19 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 		if err := e.validateAgentKindActorScope(ctx, payload, actor); err != nil {
+			return nil, meta, err
+		}
+	}
+	// RBAC base-role immutability guard (memql#2070): a predefined
+	// v1:rbac:role is authored in the DSL (dsl/rbac/seeds.memql) and may
+	// only be (re)materialized by a system actor. Any non-system-actor
+	// write to a predefined role -- redefine, re-rank, rename, deactivate
+	// -- is rejected, blocking escalation-by-redefinition. The prior-row
+	// predefined flag (captured in the read-merge above) gates the case
+	// where the delta tries to flip predefined to false. See
+	// rbac_role_immutable_validation.go.
+	if conceptMeta.Name == conceptRbacRole {
+		if err := e.validateRbacBaseRoleImmutable(ctx, payload, meta.priorPredefined, actor); err != nil {
 			return nil, meta, err
 		}
 	}

@@ -461,6 +461,23 @@ func ActiveResponsibilitiesAcrossUsersBuild(args ActiveResponsibilitiesAcrossUse
 	return "activeResponsibilitiesAcrossUsers({})"
 }
 
+// ActiveRoles -- List every active role in the catalog -- the base roles plus any custom roles. Backs the cockpit RBAC view's role list and the rank picker the E1.4 custom-role creation flow uses to choose a slot. Higher rank == more privileged. Small registry consumed whole.
+//
+// Bound concept: role.
+type ActiveRolesArgs struct {
+}
+
+// ActiveRoles calls the engine query activeRoles.
+func (qc *QueryClient) ActiveRoles(ctx context.Context, args ActiveRolesArgs) (*Result, error) {
+	call := ActiveRolesBuild(args)
+	return qc.executeNamed(ctx, "activeRoles", call)
+}
+
+func ActiveRolesBuild(args ActiveRolesArgs) string {
+	_ = args
+	return "activeRoles({})"
+}
+
 // ActiveSkills -- List every active skill catalog row -- summary projection. Backs the Skills picker on the role-edit surface (cockpit#124) and the Planner Agent's candidate scan when deciding which skill bundle to attach in extendSpecialist. Predefined rows render with a lock icon; user-created rows are fully editable.
 //
 // Bound concept: skill.
@@ -3222,6 +3239,28 @@ func ResponsibilityByIdBuild(args ResponsibilityByIdArgs) string {
 	b.WriteString("responsibilityById({")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// RoleBySlug -- Resolve a single role by its stable slug. Used to look up a principal's role row (rank + grants) on the auth/enforcement path and by the E1.4 rank-bound check (a creator's own rank). roleSlug matches role.slug, not the node id.
+//
+// Bound concept: role.
+type RoleBySlugArgs struct {
+	Slug string
+}
+
+// RoleBySlug calls the engine query roleBySlug.
+func (qc *QueryClient) RoleBySlug(ctx context.Context, args RoleBySlugArgs) (*Result, error) {
+	call := RoleBySlugBuild(args)
+	return qc.executeNamed(ctx, "roleBySlug", call)
+}
+
+func RoleBySlugBuild(args RoleBySlugArgs) string {
+	var b strings.Builder
+	b.WriteString("roleBySlug({")
+	b.WriteString("slug: ")
+	b.WriteString(fmt.Sprintf("%q", args.Slug))
 	b.WriteString("})")
 	return b.String()
 }

@@ -4546,6 +4546,74 @@ func CreateResponsibilityBuild(args CreateResponsibilityArgs) string {
 	return b.String()
 }
 
+// CreateRole -- Insert a v1:rbac:role catalog row -- a named, ranked capability bundle. Called by the SeedMaterializer when it walks the base-role seed declarations under dsl/rbac/seeds.memql (the materializer stamps the seed body's `id` into `roleId`). Also the write surface the E1.4 (memql#2072) rank-bounded custom-role authoring path layers on top of -- predefined defaults false there so the role stays editable within the creator's rank bound, and the creator's own rank caps the `rank` arg. Base-role seeds pass predefined=true to mark the row IMMUTABLE at runtime: the validateRbacRoleImmutable Go guard (E1.2) rejects any non-system-actor write to a predefined role, so a base role can never be redefined / re-ranked as data to escalate privilege. Partition-agnostic: the engine stamps every v1:rbac:role insert into the _system slot regardless of the envelope, exactly like createAgentRole / createCapability.
+//
+// Bound concept: role.
+type CreateRoleArgs struct {
+	RoleId        string
+	Slug          string
+	Name          string
+	Rank          int
+	Description   string
+	Predefined    bool
+	PredefinedSet bool // set true to send predefined; required because zero-value bool is ambiguous
+	Active        bool
+	ActiveSet     bool // set true to send active; required because zero-value bool is ambiguous
+}
+
+// CreateRole calls the engine mutation createRole.
+func (qc *QueryClient) CreateRole(ctx context.Context, args CreateRoleArgs) (*Result, error) {
+	call := CreateRoleBuild(args)
+	return qc.executeNamed(ctx, "createRole", call)
+}
+
+func CreateRoleBuild(args CreateRoleArgs) string {
+	var b strings.Builder
+	b.WriteString("createRole({")
+	if args.RoleId != "" {
+		b.WriteString("roleId: ")
+		b.WriteString(fmt.Sprintf("%q", args.RoleId))
+	}
+	if b.Len() > 12 {
+		b.WriteString(", ")
+	}
+	b.WriteString("slug: ")
+	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	if b.Len() > 12 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(fmt.Sprintf("%q", args.Name))
+	if b.Len() > 12 {
+		b.WriteString(", ")
+	}
+	b.WriteString("rank: ")
+	b.WriteString(fmt.Sprintf("%v", args.Rank))
+	if args.Description != "" {
+		if b.Len() > 12 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(fmt.Sprintf("%q", args.Description))
+	}
+	if args.PredefinedSet {
+		if b.Len() > 12 {
+			b.WriteString(", ")
+		}
+		b.WriteString("predefined: ")
+		b.WriteString(fmt.Sprintf("%v", args.Predefined))
+	}
+	if args.ActiveSet {
+		if b.Len() > 12 {
+			b.WriteString(", ")
+		}
+		b.WriteString("active: ")
+		b.WriteString(fmt.Sprintf("%v", args.Active))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // CreateScopeElevationPlan -- Insert a Plan in awaitingFeedback / scope_elevation_required for a pending computer_use task. The emitScopeElevationCanvasCard automation lands the canvas card; the user approves or denies via the card's buttons.
 //
 // Bound concept: plan.
