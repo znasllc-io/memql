@@ -23,7 +23,7 @@ import (
 // checks whether the operator has opted in to self-bootstrap by
 // setting the matching shared secret
 // (`MEMQL_NODE_BOOTSTRAP_TOKEN`) plus the identity-service base URL
-// (`IDENTITY_VERIFIER_BASE_URL`); if so, it hits `/node/bootstrap`
+// (`MEMQL_IDENTITY_VERIFIER_BASE_URL`); if so, it hits `/node/bootstrap`
 // with the secret and uses the minted JWT for outbound
 // NodeService.Stream calls.
 //
@@ -73,7 +73,7 @@ const (
 // hatch (component/identity/http/node_bootstrap.go). The bootstrap
 // POST must be https end-to-end (memql#626): the identity handler
 // rejects plaintext with `403 insecure_transport`, so a node pointed
-// at an http:// IDENTITY_VERIFIER_BASE_URL would fire a doomed request
+// at an http:// MEMQL_IDENTITY_VERIFIER_BASE_URL would fire a doomed request
 // the server bounces. We enforce the same invariant client-side so the
 // misconfig fails fast and loud at the node instead. Set to "1" to
 // allow plaintext in dev (a local cluster that talks plain-HTTP
@@ -118,7 +118,7 @@ type bootstrapTokenResponse struct {
 //     never override).
 //  2. MEMQL_NODE_BOOTSTRAP_TOKEN is set (the shared secret the
 //     identity service validates against).
-//  3. IDENTITY_VERIFIER_BASE_URL is set + reachable (we need
+//  3. MEMQL_IDENTITY_VERIFIER_BASE_URL is set + reachable (we need
 //     somewhere to POST).
 //
 // When any precondition is missing, returns ("", false, nil) and
@@ -141,9 +141,9 @@ func maybeBootstrapNodeToken(ctx context.Context, logger *slog.Logger, nodeId, n
 		// Bootstrap not opted into.
 		return "", false, nil
 	}
-	identityBase := strings.TrimRight(strings.TrimSpace(os.Getenv("IDENTITY_VERIFIER_BASE_URL")), "/")
+	identityBase := strings.TrimRight(strings.TrimSpace(os.Getenv("MEMQL_IDENTITY_VERIFIER_BASE_URL")), "/")
 	if identityBase == "" {
-		return "", false, fmt.Errorf("node bootstrap requested (MEMQL_NODE_BOOTSTRAP_TOKEN set) but IDENTITY_VERIFIER_BASE_URL is empty -- cannot reach identity service")
+		return "", false, fmt.Errorf("node bootstrap requested (MEMQL_NODE_BOOTSTRAP_TOKEN set) but MEMQL_IDENTITY_VERIFIER_BASE_URL is empty -- cannot reach identity service")
 	}
 
 	token, err := bootstrapWithRetry(ctx, logger, identityBase, secret, nodeId, nodeType,
@@ -164,7 +164,7 @@ func bootstrapMintConfigured() bool {
 	if strings.TrimSpace(os.Getenv("MEMQL_NODE_BOOTSTRAP_TOKEN")) == "" {
 		return false
 	}
-	if strings.TrimSpace(os.Getenv("IDENTITY_VERIFIER_BASE_URL")) == "" {
+	if strings.TrimSpace(os.Getenv("MEMQL_IDENTITY_VERIFIER_BASE_URL")) == "" {
 		return false
 	}
 	return true
@@ -182,7 +182,7 @@ func bootstrapMintConfigured() bool {
 // rejection the connection calls this to re-acquire a token signed by the
 // CURRENT key (identity now serves the rotated key) and retries.
 //
-// Preconditions: MEMQL_NODE_BOOTSTRAP_TOKEN + IDENTITY_VERIFIER_BASE_URL must
+// Preconditions: MEMQL_NODE_BOOTSTRAP_TOKEN + MEMQL_IDENTITY_VERIFIER_BASE_URL must
 // be set (bootstrapMintConfigured). Callers gate on that before wiring the
 // reauth hook, so an operator-provisioned (out-of-band) token -- which cannot
 // be re-minted -- never reaches here. A short, bounded retry budget keeps a
@@ -190,9 +190,9 @@ func bootstrapMintConfigured() bool {
 // overall re-mint cadence across reconnect attempts.
 func remintNodeToken(ctx context.Context, logger *slog.Logger, nodeId, nodeType string) (string, error) {
 	secret := strings.TrimSpace(os.Getenv("MEMQL_NODE_BOOTSTRAP_TOKEN"))
-	identityBase := strings.TrimRight(strings.TrimSpace(os.Getenv("IDENTITY_VERIFIER_BASE_URL")), "/")
+	identityBase := strings.TrimRight(strings.TrimSpace(os.Getenv("MEMQL_IDENTITY_VERIFIER_BASE_URL")), "/")
 	if secret == "" || identityBase == "" {
-		return "", fmt.Errorf("node remint: bootstrap not configured (MEMQL_NODE_BOOTSTRAP_TOKEN + IDENTITY_VERIFIER_BASE_URL required)")
+		return "", fmt.Errorf("node remint: bootstrap not configured (MEMQL_NODE_BOOTSTRAP_TOKEN + MEMQL_IDENTITY_VERIFIER_BASE_URL required)")
 	}
 	// A short budget: the re-mint runs INSIDE the reconnect loop, so the loop's
 	// own backoff already bounds how often we retry across attempts. We only
@@ -273,7 +273,7 @@ func attemptBootstrapMint(ctx context.Context, logger *slog.Logger, identityBase
 	}
 
 	// HTTPS-only by default (memql#626). Refuse a plaintext
-	// IDENTITY_VERIFIER_BASE_URL unless the operator opts into the dev
+	// MEMQL_IDENTITY_VERIFIER_BASE_URL unless the operator opts into the dev
 	// escape hatch, mirroring the identity service's own `403
 	// insecure_transport` guard. This is a permanent (non-retryable)
 	// failure -- a retry won't turn http into https, and we'd rather
@@ -282,7 +282,7 @@ func attemptBootstrapMint(ctx context.Context, logger *slog.Logger, identityBase
 	if !strings.EqualFold(endpoint.Scheme, "https") &&
 		strings.TrimSpace(os.Getenv(envAllowInsecureNodeBootstrap)) != "1" {
 		return "", false, fmt.Errorf(
-			"node bootstrap: refusing insecure %q scheme for IDENTITY_VERIFIER_BASE_URL %q -- "+
+			"node bootstrap: refusing insecure %q scheme for MEMQL_IDENTITY_VERIFIER_BASE_URL %q -- "+
 				"the bootstrap call must be https end-to-end (set %s=1 to allow plaintext in dev)",
 			endpoint.Scheme, identityBase, envAllowInsecureNodeBootstrap)
 	}

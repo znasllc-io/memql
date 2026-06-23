@@ -9,7 +9,7 @@ import (
 //
 // The identity service admits OAuth clients from two sources:
 //
-//  1. The static IDENTITY_REGISTERED_CLIENTS slice (Config.RegisteredClients) --
+//  1. The static MEMQL_IDENTITY_REGISTERED_CLIENTS slice (Config.RegisteredClients) --
 //     operator-pinned relying parties (e.g. CoPresent).
 //  2. DB-backed v1:identity:oauthClient rows minted at POST /register
 //     (RFC 7591 dynamic client registration) -- claude.ai / Claude Desktop's

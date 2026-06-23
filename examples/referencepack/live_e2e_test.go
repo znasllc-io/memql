@@ -34,10 +34,10 @@ import (
 	"testing"
 	"time"
 
+	"database/sql"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
-	"database/sql"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
@@ -87,7 +87,7 @@ func (s *spyProvider) Capabilities() []memql.IntegrationCapability {
 }
 
 func TestLiveE2E_ReferencePackAutomationFiresOnSpaceCreate(t *testing.T) {
-	dsn := os.Getenv("MEMORY_NODES_DATABASE_DSN")
+	dsn := os.Getenv("MEMQL_DATABASE_DSN")
 	if dsn == "" {
 		dsn = e2eDSN
 	}
@@ -99,7 +99,7 @@ func TestLiveE2E_ReferencePackAutomationFiresOnSpaceCreate(t *testing.T) {
 	_ = probe.Close()
 
 	// Migrate a blank DB via the production lifecycle.
-	_ = os.Setenv("MEMORY_NODES_DATABASE_DSN", dsn)
+	_ = os.Setenv("MEMQL_DATABASE_DSN", dsn)
 	mnd, err := memoryNodes.NewMemoryNodesDatabase()
 	if err != nil {
 		t.Fatalf("NewMemoryNodesDatabase: %v", err)

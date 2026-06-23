@@ -210,9 +210,9 @@ func DefaultEnvKeys() EnvKeys {
 // NewSenderFromEnv picks a Sender based on environment variables, in
 // priority order:
 //
-//  1. Microsoft Graph (recommended): EMAIL_AZURE_TENANT_ID +
-//     EMAIL_AZURE_CLIENT_ID + EMAIL_AZURE_CLIENT_SECRET +
-//     EMAIL_SENDER all set → GraphSender. Legacy names
+//  1. Microsoft Graph (recommended): MEMQL_EMAIL_AZURE_TENANT_ID +
+//     MEMQL_EMAIL_AZURE_CLIENT_ID + MEMQL_EMAIL_AZURE_CLIENT_SECRET +
+//     MEMQL_EMAIL_SENDER all set → GraphSender. Legacy names
 //     (`AZURE_*` / `MAIL_*`) are still accepted as a fallback.
 //  2. SMTP (fallback): SMTP_HOST + SMTP_FROM_ADDR set → SMTPSender.
 //  3. Neither set → LogSender (dev / no-delivery mode).
@@ -263,7 +263,7 @@ func NewSenderFromEnv(prefix string, logger *slog.Logger) Sender {
 	if host == "" {
 		if logger != nil {
 			logger.Info("email: no sender configured, using LogSender",
-				"hint", "set EMAIL_AZURE_TENANT_ID / EMAIL_AZURE_CLIENT_ID / EMAIL_AZURE_CLIENT_SECRET / EMAIL_SENDER for Microsoft Graph, or SMTP_HOST / SMTP_PORT / SMTP_USERNAME / SMTP_PASSWORD / SMTP_FROM_ADDR for SMTP")
+				"hint", "set MEMQL_EMAIL_AZURE_TENANT_ID / MEMQL_EMAIL_AZURE_CLIENT_ID / MEMQL_EMAIL_AZURE_CLIENT_SECRET / MEMQL_EMAIL_SENDER for Microsoft Graph, or SMTP_HOST / SMTP_PORT / SMTP_USERNAME / SMTP_PASSWORD / SMTP_FROM_ADDR for SMTP")
 		}
 		return NewLogSender(logger)
 	}

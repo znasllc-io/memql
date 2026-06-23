@@ -7,14 +7,14 @@
 @type("Anthropic")
 provider anthropic {
   auth {
-    apiKey  env("MEMQL_SI_ANTHROPIC_API_KEY")
+    apiKey  env("MEMQL_AI_ANTHROPIC_API_KEY")
   }
 }
 
-// MEMQL_SI_OPENAI_PROJECT_ID is intentionally NOT listed here because
+// MEMQL_AI_OPENAI_PROJECT_ID is intentionally NOT listed here because
 // env() placeholders fail registration when the variable is unset,
 // and service-account keys (sk-svcacct-*) do not carry a project id.
-// Provider clients read MEMQL_SI_OPENAI_PROJECT_ID directly via
+// Provider clients read MEMQL_AI_OPENAI_PROJECT_ID directly via
 // os.Getenv and attach the OpenAI-Project header only when present.
 
 // ---- providers/v1/openai/audio15.memql ----
@@ -261,7 +261,7 @@ provider moderationOmni {
 @type("OpenAI")
 provider openai {
   auth {
-    apiKey     env("MEMQL_SI_OPENAI_API_KEY")
+    apiKey     env("MEMQL_AI_OPENAI_API_KEY")
   }
 }
 

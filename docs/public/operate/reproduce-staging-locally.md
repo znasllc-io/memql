@@ -187,11 +187,11 @@ with its justification.
 
 ### Config-only -- EXPECTED to differ
 
-- `MEMORY_NODES_DATABASE_DSN` (local Postgres vs Tiger Cloud).
+- `MEMQL_DATABASE_DSN` (local Postgres vs Tiger Cloud).
 - Blob backend (Azurite connection string vs Azure Blob).
 - LiveKit keys (dev `devkey`/`secret` vs ESO-synced Key Vault secret).
 - Bootstrap/dev escape hatches (`MEMQL_IDENTITY_ALLOW_INSECURE_*`).
-- `IDENTITY_BASE_URL` / `IDENTITY_VERIFIER_EXPECTED_ISSUER` (local port-forward
+- `MEMQL_IDENTITY_BASE_URL` / `MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER` (local port-forward
   vs AKS ingress hostname).
 
 ## Worked example: reproduce a cross-node mesh bug

@@ -50,13 +50,13 @@ func TestLazySender_FallsThroughToMemqlGraph(t *testing.T) {
 	envSender := NewLogSender(nil)
 
 	vars := map[string]string{
-		"EMAIL_AZURE_TENANT_ID": "tenant-1",
-		"EMAIL_AZURE_CLIENT_ID": "client-1",
-		"EMAIL_SENDER":          "noreply@dev.local",
-		"EMAIL_FROM_NAME":       "memQL Dev",
+		"MEMQL_EMAIL_AZURE_TENANT_ID": "tenant-1",
+		"MEMQL_EMAIL_AZURE_CLIENT_ID": "client-1",
+		"MEMQL_EMAIL_SENDER":          "noreply@dev.local",
+		"MEMQL_EMAIL_FROM_NAME":       "memQL Dev",
 	}
 	secrets := map[string]string{
-		"EMAIL_AZURE_CLIENT_SECRET": "sekret",
+		"MEMQL_EMAIL_AZURE_CLIENT_SECRET": "sekret",
 	}
 
 	lazy := NewLazySender(
@@ -97,8 +97,8 @@ func TestLazySender_FallsThroughToMemqlSMTPWhenGraphIncomplete(t *testing.T) {
 	envSender := NewLogSender(nil)
 
 	vars := map[string]string{
-		// Graph deliberately incomplete (missing EMAIL_SENDER).
-		"EMAIL_AZURE_TENANT_ID": "tenant-1",
+		// Graph deliberately incomplete (missing MEMQL_EMAIL_SENDER).
+		"MEMQL_EMAIL_AZURE_TENANT_ID": "tenant-1",
 		// SMTP path fully set.
 		"SMTP_HOST":      "smtp.example.com",
 		"SMTP_PORT":      "2525",

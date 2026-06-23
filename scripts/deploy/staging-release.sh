@@ -62,8 +62,8 @@ EXPECTED_CONTEXT_SUBSTR="staging"   # wrong-cluster guard (mirrors staging-db-re
 SECRET_NAME="memql-secrets"
 IDENTITY_DEPLOY="identity"
 GENESIS_KEY="MEMQL_GENESIS_B64"           # sealed envelope carrying the signing seed (#1515/#550)
-SIGNING_KEY="IDENTITY_SIGNING_KEY_B64"    # the shared signing seed, if surfaced directly
-EPHEMERAL_OPT_IN="IDENTITY_ALLOW_EPHEMERAL_KEY"  # per-pod ephemeral-key opt-in (divergent at >=2 replicas, #1515)
+SIGNING_KEY="MEMQL_IDENTITY_SIGNING_KEY_B64"    # the shared signing seed, if surfaced directly
+EPHEMERAL_OPT_IN="MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY"  # per-pod ephemeral-key opt-in (divergent at >=2 replicas, #1515)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_SCRIPT="$SCRIPT_DIR/aks-deploy.sh"

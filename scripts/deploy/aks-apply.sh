@@ -21,7 +21,7 @@
 #      (identity / bff / cognition / voice / agent / planner / workbench).
 #
 # NO database is deployed: staging/prod use the managed Tiger Cloud DB
-# (xahn9ru4v6) via the MEMORY_NODES_DATABASE_DSN key in memql-secrets.
+# (xahn9ru4v6) via the MEMQL_DATABASE_DSN key in memql-secrets.
 #
 # Migrations run ONCE: only the identity Deployment carries
 # MIGRATE_ON_START/AUTO_MIGRATE=true; the other six are false (no 7-way
@@ -69,7 +69,7 @@ Prerequisite (one-time, out-of-band -- REAL values, never committed):
     kubectl create secret generic $SECRET_NAME -n $NAMESPACE \\
       --from-literal=MEMQL_MASTER_KEY="\$MEMQL_MASTER_KEY" \\
       --from-literal=MEMQL_GENESIS_B64="\$(base64 < ~/.memql/genesis.znas)" \\
-      --from-literal=MEMORY_NODES_DATABASE_DSN="\$(tiger db connection-string xahn9ru4v6 --with-password)"
+      --from-literal=MEMQL_DATABASE_DSN="\$(tiger db connection-string xahn9ru4v6 --with-password)"
 
 Examples:
     $0 --env=staging

@@ -272,7 +272,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	e.seedMaterializer = NewSeedMaterializer(e, e.seeds)
 
 	// Wire concept-storage resolvers BEFORE loading providers so a
-	// provider's auth.apiKey="${MEMQL_SI_OPENAI_API_KEY}" picks up the
+	// provider's auth.apiKey="${MEMQL_AI_OPENAI_API_KEY}" picks up the
 	// value from v1:platform:globalSecret if a developer has run
 	// `make secrets-seed`. OS env stays as a legacy fallback per the
 	// Phase 4b transition. Calling these is idempotent; they overwrite

@@ -16,7 +16,7 @@ import (
 // ApplyLocalOverride never decrypted the genesis envelope. On an envelope-based
 // deployment (staging/prod: MEMQL_GENESIS_AUTOLOAD=true, the signing key + other
 // secrets sealed in MEMQL_GENESIS_B64) the credential-minting subcommands could
-// not reach sealed values like IDENTITY_SIGNING_KEY_B64 -- the #691
+// not reach sealed values like MEMQL_IDENTITY_SIGNING_KEY_B64 -- the #691
 // service_account mint failed for exactly this reason.
 //
 // AutoloadFromEnv is a no-op when MEMQL_GENESIS_AUTOLOAD is unset and applies

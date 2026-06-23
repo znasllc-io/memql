@@ -86,7 +86,7 @@ func TestMaybeBootstrapNodeToken_OperatorTokenWins(t *testing.T) {
 	srv := fakeBootstrapServer(t, "secret")
 	t.Setenv("MEMQL_NODE_TOKEN", "operator-provisioned-jwt")
 	t.Setenv("MEMQL_NODE_BOOTSTRAP_TOKEN", "secret")
-	t.Setenv("IDENTITY_VERIFIER_BASE_URL", srv.URL)
+	t.Setenv("MEMQL_IDENTITY_VERIFIER_BASE_URL", srv.URL)
 
 	tok, ok, err := maybeBootstrapNodeToken(context.Background(), nil, "v1:cluster:node:x", "bff")
 	require.NoError(t, err)
@@ -102,7 +102,7 @@ func TestMaybeBootstrapNodeToken_NotOptedIn(t *testing.T) {
 	srv := fakeBootstrapServer(t, "secret")
 	t.Setenv("MEMQL_NODE_TOKEN", "")
 	t.Setenv("MEMQL_NODE_BOOTSTRAP_TOKEN", "")
-	t.Setenv("IDENTITY_VERIFIER_BASE_URL", srv.URL)
+	t.Setenv("MEMQL_IDENTITY_VERIFIER_BASE_URL", srv.URL)
 
 	tok, ok, err := maybeBootstrapNodeToken(context.Background(), nil, "x", "bff")
 	require.NoError(t, err)
@@ -120,7 +120,7 @@ func TestMaybeBootstrapNodeToken_GoldenPath(t *testing.T) {
 
 	t.Setenv("MEMQL_NODE_TOKEN", "")
 	t.Setenv("MEMQL_NODE_BOOTSTRAP_TOKEN", secret)
-	t.Setenv("IDENTITY_VERIFIER_BASE_URL", srv.URL)
+	t.Setenv("MEMQL_IDENTITY_VERIFIER_BASE_URL", srv.URL)
 
 	tok, ok, err := maybeBootstrapNodeToken(context.Background(), nil, "v1:cluster:node:bff-local", "bff")
 	require.NoError(t, err)
@@ -137,7 +137,7 @@ func TestMaybeBootstrapNodeToken_WrongSecret(t *testing.T) {
 
 	t.Setenv("MEMQL_NODE_TOKEN", "")
 	t.Setenv("MEMQL_NODE_BOOTSTRAP_TOKEN", "the-wrong-secret")
-	t.Setenv("IDENTITY_VERIFIER_BASE_URL", srv.URL)
+	t.Setenv("MEMQL_IDENTITY_VERIFIER_BASE_URL", srv.URL)
 
 	tok, ok, err := maybeBootstrapNodeToken(context.Background(), nil, "x", "bff")
 	require.Error(t, err)
@@ -149,18 +149,18 @@ func TestMaybeBootstrapNodeToken_WrongSecret(t *testing.T) {
 
 // TestMaybeBootstrapNodeToken_NoIdentityURL asserts that opting
 // in via MEMQL_NODE_BOOTSTRAP_TOKEN but forgetting
-// IDENTITY_VERIFIER_BASE_URL surfaces a clear error rather than
+// MEMQL_IDENTITY_VERIFIER_BASE_URL surfaces a clear error rather than
 // a nil-deref / silent skip.
 func TestMaybeBootstrapNodeToken_NoIdentityURL(t *testing.T) {
 	t.Setenv("MEMQL_NODE_TOKEN", "")
 	t.Setenv("MEMQL_NODE_BOOTSTRAP_TOKEN", "secret")
-	t.Setenv("IDENTITY_VERIFIER_BASE_URL", "")
+	t.Setenv("MEMQL_IDENTITY_VERIFIER_BASE_URL", "")
 
 	tok, ok, err := maybeBootstrapNodeToken(context.Background(), nil, "x", "bff")
 	require.Error(t, err)
 	assert.False(t, ok)
 	assert.Empty(t, tok)
-	assert.Contains(t, err.Error(), "IDENTITY_VERIFIER_BASE_URL is empty")
+	assert.Contains(t, err.Error(), "MEMQL_IDENTITY_VERIFIER_BASE_URL is empty")
 }
 
 // TestMaybeBootstrapNodeToken_UnreachableIdentity asserts that a
@@ -179,7 +179,7 @@ func TestMaybeBootstrapNodeToken_UnreachableIdentity(t *testing.T) {
 	t.Setenv("MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP", "1")
 	// 127.0.0.1:1 is a port no server listens on; connection
 	// refused expected.
-	t.Setenv("IDENTITY_VERIFIER_BASE_URL", "http://127.0.0.1:1")
+	t.Setenv("MEMQL_IDENTITY_VERIFIER_BASE_URL", "http://127.0.0.1:1")
 
 	tok, ok, err := maybeBootstrapNodeToken(context.Background(), nil, "x", "bff")
 	require.Error(t, err)
@@ -194,7 +194,7 @@ func TestMaybeBootstrapNodeToken_UnreachableIdentity(t *testing.T) {
 
 // TestMaybeBootstrapNodeToken_RefusesInsecureHTTP is the memql#626
 // regression guard: with the dev escape hatch UNSET (the staging/prod
-// state), a plaintext http:// IDENTITY_VERIFIER_BASE_URL must be
+// state), a plaintext http:// MEMQL_IDENTITY_VERIFIER_BASE_URL must be
 // refused before any request is dialed, so an accidental
 // http://identity:8085 in a deploy manifest fails fast and loud at the
 // node instead of firing a POST identity bounces with `403
@@ -207,7 +207,7 @@ func TestMaybeBootstrapNodeToken_RefusesInsecureHTTP(t *testing.T) {
 	// A reachable plaintext host -- the point is that the scheme guard
 	// fires BEFORE any dial, so the token is never minted even though the
 	// host would answer.
-	t.Setenv("IDENTITY_VERIFIER_BASE_URL", "http://identity:8085")
+	t.Setenv("MEMQL_IDENTITY_VERIFIER_BASE_URL", "http://identity:8085")
 
 	tok, ok, err := maybeBootstrapNodeToken(context.Background(), nil, "v1:cluster:node:bff-x", "bff")
 	require.Error(t, err)
@@ -230,7 +230,7 @@ func TestMaybeBootstrapNodeToken_AcceptsInsecureHTTPWithEscapeHatch(t *testing.T
 	t.Setenv("MEMQL_NODE_BOOTSTRAP_TOKEN", "secret")
 	t.Setenv(envAllowInsecureNodeBootstrap, "1")
 	t.Setenv("MEMQL_NODE_BOOTSTRAP_RETRY_BUDGET", "0")
-	t.Setenv("IDENTITY_VERIFIER_BASE_URL", "http://127.0.0.1:1")
+	t.Setenv("MEMQL_IDENTITY_VERIFIER_BASE_URL", "http://127.0.0.1:1")
 
 	tok, ok, err := maybeBootstrapNodeToken(context.Background(), nil, "x", "bff")
 	require.Error(t, err)
@@ -360,7 +360,7 @@ func TestIdentity_EnsureBearerToken_DoesNothingWhenTokenPresent(t *testing.T) {
 	srv := fakeBootstrapServer(t, "secret")
 	t.Setenv("MEMQL_NODE_TOKEN", "preexisting-operator-token")
 	t.Setenv("MEMQL_NODE_BOOTSTRAP_TOKEN", "secret")
-	t.Setenv("IDENTITY_VERIFIER_BASE_URL", srv.URL)
+	t.Setenv("MEMQL_IDENTITY_VERIFIER_BASE_URL", srv.URL)
 
 	require.NoError(t, id.EnsureBearerToken(context.Background(), nil))
 	assert.Equal(t, "preexisting-operator-token", id.BearerToken)
@@ -375,7 +375,7 @@ func TestIdentity_EnsureBearerToken_PopulatesViaBootstrap(t *testing.T) {
 
 	t.Setenv("MEMQL_NODE_TOKEN", "")
 	t.Setenv("MEMQL_NODE_BOOTSTRAP_TOKEN", secret)
-	t.Setenv("IDENTITY_VERIFIER_BASE_URL", srv.URL)
+	t.Setenv("MEMQL_IDENTITY_VERIFIER_BASE_URL", srv.URL)
 
 	id := &Identity{
 		ID:   "v1:cluster:node:cognition-test",

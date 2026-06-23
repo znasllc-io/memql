@@ -116,7 +116,7 @@ The local overlay defaults all three knobs to dev sentinels:
 | Env var | Local default | Production posture |
 | --- | --- | --- |
 | `MEMQL_NODE_BOOTSTRAP_TOKEN` | `dev-bootstrap-do-not-use-in-production-memql338` | Leave unset on identity side -- endpoint stays dark |
-| `IDENTITY_VERIFIER_BASE_URL` | `http://identity:8081` (cluster DNS) | Set to the deployed identity URL (HTTPS) |
+| `MEMQL_IDENTITY_VERIFIER_BASE_URL` | `http://identity:8081` (cluster DNS) | Set to the deployed identity URL (HTTPS) |
 | `MEMQL_VOICE_AGENT_INSTANCE_ID` | `voice-agent-local` | Set to the deployed instance label (e.g. `voice-agent-prod-us-east-1`) |
 
 The endpoint reuses the same secret + same bootstrap surface as
@@ -154,7 +154,7 @@ so each remint produces a fresh JWT against a freshly inserted
 `load_config` checks env vars in this order:
 
 1. `VOICE_AGENT_TOKEN` non-empty -> use it directly (operator path).
-2. `MEMQL_NODE_BOOTSTRAP_TOKEN` non-empty + `IDENTITY_VERIFIER_BASE_URL`
+2. `MEMQL_NODE_BOOTSTRAP_TOKEN` non-empty + `MEMQL_IDENTITY_VERIFIER_BASE_URL`
    + `MEMQL_VOICE_AGENT_INSTANCE_ID` -> self-bootstrap (dev path).
 3. Otherwise -> raise `RuntimeError` with the canonical
    "VOICE_AGENT_TOKEN unset" message + provisioning pointers.

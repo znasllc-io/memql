@@ -91,6 +91,6 @@ const migrateUsage = `usage: memql migrate
 
 Apply pending memQL DB migrations and exit (gated pre-deploy step, memql#553).
 
-Requires the database environment (MEMORY_NODES_DATABASE_DSN and
+Requires the database environment (MEMQL_DATABASE_DSN and
 MEMORY_NODES_DATABASE_MIGRATE_ON_START=true). Idempotent: a no-op when the
 schema is already current. Run as a k8s Job BEFORE rolling the node mesh.`

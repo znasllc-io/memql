@@ -3,7 +3,7 @@
 // tokens minted by the identity service.
 //
 // The verifier fetches the identity service's JWKS document
-// (`${IDENTITY_VERIFIER_BASE_URL}/.well-known/jwks.json`), caches the
+// (`${MEMQL_IDENTITY_VERIFIER_BASE_URL}/.well-known/jwks.json`), caches the
 // public keys by `kid`, and validates incoming bearer tokens against
 // the cached set. PAT tokens (mql_pat_*) are routed through the
 // optional pat.Verifier; JWTs are validated with the EdDSA public
@@ -53,33 +53,33 @@ type Config struct {
 	// BaseURL is the public origin of the identity service. The
 	// verifier fetches `${BaseURL}/.well-known/jwks.json` and (unless
 	// ExpectedIssuer is overridden) treats BaseURL as the JWT `iss`.
-	// Env: IDENTITY_VERIFIER_BASE_URL
+	// Env: MEMQL_IDENTITY_VERIFIER_BASE_URL
 	BaseURL string
 
 	// ExpectedIssuer is the value the verifier compares against the
 	// JWT `iss` claim. Defaults to BaseURL when empty. Override only
 	// when the public-facing identity URL differs from the URL placed
 	// in tokens (e.g. internal-mesh routing via a different hostname).
-	// Env: IDENTITY_VERIFIER_EXPECTED_ISSUER
+	// Env: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
 	ExpectedIssuer string
 
 	// ExpectedAudience is the value the verifier compares against the
 	// JWT `aud` claim. Defaults to "memql".
-	// Env: IDENTITY_VERIFIER_AUDIENCE
+	// Env: MEMQL_IDENTITY_VERIFIER_AUDIENCE
 	ExpectedAudience string
 
 	// JWKSRefreshInterval drives the background refresh cadence.
-	// Env: IDENTITY_VERIFIER_JWKS_REFRESH_SECONDS (default 300)
+	// Env: MEMQL_IDENTITY_VERIFIER_JWKS_REFRESH_SECONDS (default 300)
 	JWKSRefreshInterval time.Duration
 
 	// JWKSFetchTimeout caps a single JWKS HTTP fetch.
-	// Env: IDENTITY_VERIFIER_JWKS_FETCH_TIMEOUT_SECONDS (default 10)
+	// Env: MEMQL_IDENTITY_VERIFIER_JWKS_FETCH_TIMEOUT_SECONDS (default 10)
 	JWKSFetchTimeout time.Duration
 
 	// JWKSURL overrides the auto-derived JWKS endpoint. Optional;
 	// useful when the verifier should hit an internal-mesh URL
 	// rather than the public BaseURL.
-	// Env: IDENTITY_VERIFIER_JWKS_URL
+	// Env: MEMQL_IDENTITY_VERIFIER_JWKS_URL
 	JWKSURL string
 }
 
@@ -130,13 +130,13 @@ func (c Config) Validate() error {
 	}
 	parsed, err := url.Parse(c.BaseURL)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return fmt.Errorf("IDENTITY_VERIFIER_BASE_URL must be an absolute URL (got %q)", c.BaseURL)
+		return fmt.Errorf("MEMQL_IDENTITY_VERIFIER_BASE_URL must be an absolute URL (got %q)", c.BaseURL)
 	}
 	if c.JWKSRefreshInterval <= 0 {
-		return errors.New("IDENTITY_VERIFIER_JWKS_REFRESH_SECONDS must be > 0")
+		return errors.New("MEMQL_IDENTITY_VERIFIER_JWKS_REFRESH_SECONDS must be > 0")
 	}
 	if c.JWKSFetchTimeout <= 0 {
-		return errors.New("IDENTITY_VERIFIER_JWKS_FETCH_TIMEOUT_SECONDS must be > 0")
+		return errors.New("MEMQL_IDENTITY_VERIFIER_JWKS_FETCH_TIMEOUT_SECONDS must be > 0")
 	}
 	return nil
 }
@@ -146,13 +146,13 @@ func (c Config) Validate() error {
 // this file. Returns an error only for malformed values.
 func LoadConfigFromEnv() (Config, error) {
 	cfg := Config{
-		BaseURL:          strings.TrimRight(os.Getenv("IDENTITY_VERIFIER_BASE_URL"), "/"),
-		ExpectedIssuer:   strings.TrimRight(os.Getenv("IDENTITY_VERIFIER_EXPECTED_ISSUER"), "/"),
-		ExpectedAudience: os.Getenv("IDENTITY_VERIFIER_AUDIENCE"),
-		JWKSURL:          os.Getenv("IDENTITY_VERIFIER_JWKS_URL"),
+		BaseURL:          strings.TrimRight(os.Getenv("MEMQL_IDENTITY_VERIFIER_BASE_URL"), "/"),
+		ExpectedIssuer:   strings.TrimRight(os.Getenv("MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER"), "/"),
+		ExpectedAudience: os.Getenv("MEMQL_IDENTITY_VERIFIER_AUDIENCE"),
+		JWKSURL:          os.Getenv("MEMQL_IDENTITY_VERIFIER_JWKS_URL"),
 	}
-	cfg.JWKSRefreshInterval = envDurationSeconds("IDENTITY_VERIFIER_JWKS_REFRESH_SECONDS", DefaultJWKSRefreshSeconds)
-	cfg.JWKSFetchTimeout = envDurationSeconds("IDENTITY_VERIFIER_JWKS_FETCH_TIMEOUT_SECONDS", DefaultJWKSFetchTimeoutSeconds)
+	cfg.JWKSRefreshInterval = envDurationSeconds("MEMQL_IDENTITY_VERIFIER_JWKS_REFRESH_SECONDS", DefaultJWKSRefreshSeconds)
+	cfg.JWKSFetchTimeout = envDurationSeconds("MEMQL_IDENTITY_VERIFIER_JWKS_FETCH_TIMEOUT_SECONDS", DefaultJWKSFetchTimeoutSeconds)
 	return cfg, nil
 }
 

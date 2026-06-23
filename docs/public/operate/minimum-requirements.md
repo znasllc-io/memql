@@ -46,7 +46,7 @@ target yet.
       **1 CPU / 4 GB** and **`max_connections` = 500** for a small staging mesh.
 - [ ] The **transaction pooler enabled** (PgBouncer, transaction mode).
 - [ ] **Two** connection strings wired into `memql-secrets`:
-      `MEMORY_NODES_DATABASE_DSN` → the **pooler**, and
+      `MEMQL_DATABASE_DSN` → the **pooler**, and
       `MEMORY_NODES_DATABASE_DIRECT_DSN` → the **direct** endpoint.
 
 ### Why two endpoints? — the connection model (epic [#1925](https://github.com/znasllc-io/memql/issues/1925))
@@ -62,7 +62,7 @@ pooler**, not a bigger `max_connections`.
 So memQL runs a **hybrid endpoint split**:
 
 - **Bulk traffic** (all queries + mutations, every pod) rides
-  `MEMORY_NODES_DATABASE_DSN` → the **transaction pooler**. Client connections
+  `MEMQL_DATABASE_DSN` → the **transaction pooler**. Client connections
   decouple from Postgres backends, so a deploy surge no longer maps 1:1 to
   slots (transaction-pool ceiling ≈ `(max_connections − 17) × 20`).
 - **Session-stateful work** — session-scoped advisory locks (cognition
@@ -123,14 +123,14 @@ Every DB-connecting pod mounts the `memql-secrets` Secret via `envFrom`. The
 |-----|------|
 | `MEMQL_MASTER_KEY` | 32-byte key that decrypts the genesis envelope. |
 | `MEMQL_GENESIS_B64` | base64 of the **sealed env envelope** (~150 config vars, decrypted in-process at boot; `MEMQL_GENESIS_AUTOLOAD=true`). |
-| `MEMORY_NODES_DATABASE_DSN` | DB — the **transaction pooler** endpoint. |
+| `MEMQL_DATABASE_DSN` | DB — the **transaction pooler** endpoint. |
 | `MEMORY_NODES_DATABASE_DIRECT_DSN` | DB — the **direct** endpoint. |
 
 - **Identity** is the in-house auth service; for multi-replica HA it needs a
-  shared `IDENTITY_SIGNING_KEY_B64` (Ed25519 seed) in the envelope — every
+  shared `MEMQL_IDENTITY_SIGNING_KEY_B64` (Ed25519 seed) in the envelope — every
   replica derives the same key/JWKS. See [Identity Service](auth/identity-service.md)
   and the [Access Model](auth/access-model.md).
-- **AI providers:** an `OPENAI_API_KEY` is required (cascade voice = OpenAI
+- **AI providers:** an `MEMQL_OPENAI_API_KEY` is required (cascade voice = OpenAI
   ASR/TTS); Anthropic optional. See [Environment Variables](env-vars.md) for the
   full env surface and the bootstrap-envelope vs concept-stored split.
 

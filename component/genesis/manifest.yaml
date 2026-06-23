@@ -53,44 +53,44 @@ secrets:
 
   # --- seal floor (a developer .env MUST cover these to seal) ---
 
-  - name: OPENAI_API_KEY
+  - name: MEMQL_OPENAI_API_KEY
     component: ai
     scope: global
     kind: vendor_api_key
     description: "Instance-wide OpenAI API key. Used for chat, TTS, STT, and Realtime providers unless a tenant has their own partition-scoped key."
 
-  - name: ANTHROPIC_API_KEY
+  - name: MEMQL_ANTHROPIC_API_KEY
     component: ai
     scope: global
     kind: vendor_api_key
     description: "Instance-wide Anthropic API key. Used for Claude chat / vision providers unless overridden per tenant."
 
-  - name: IDENTITY_KEY_ENCRYPTION_KEY
+  - name: MEMQL_IDENTITY_KEY_ENCRYPTION_KEY
     component: identity
     scope: global
     kind: integration
-    description: "Master secret (>=16 bytes) wrapping the identity service's on-disk Ed25519 signing keypair (disk-key mode). Required in production only when IDENTITY_SIGNING_KEY_B64 is NOT set (i.e. the legacy on-disk KeyDir path)."
+    description: "Master secret (>=16 bytes) wrapping the identity service's on-disk Ed25519 signing keypair (disk-key mode). Required in production only when MEMQL_IDENTITY_SIGNING_KEY_B64 is NOT set (i.e. the legacy on-disk KeyDir path)."
 
-  - name: IDENTITY_SIGNING_KEY_B64
+  - name: MEMQL_IDENTITY_SIGNING_KEY_B64
     component: identity
     scope: global
     kind: integration
     optional: true
     description: "Base64 (std) 32-byte Ed25519 signing seed (#550/#619). When set, identity runs in envMode -- every replica derives the SAME key + kid + JWKS from this seed, so identity needs NO single-writer RWO key PVC and runs >=2 replicas (HA). REQUIRED for the HA deploy/k8s/identity.yaml manifest; absent only in local-dev disk-key mode. Optional here so local seals don't fail; staging/prod envelopes MUST carry it. Rotate by re-sealing a new seed + rolling identity."
 
-  - name: EMAIL_AZURE_CLIENT_SECRET
+  - name: MEMQL_EMAIL_AZURE_CLIENT_SECRET
     component: email
     scope: global
     kind: oauth_secret
     description: "Azure Graph API client secret used by the email integration. (Legacy name `AZURE_CLIENT_SECRET` is still accepted as a fallback by integrations/email; remove the old row from the running memQL once everyone has re-seeded.)"
 
-  - name: ANAM_API_KEY
+  - name: MEMQL_ANAM_API_KEY
     component: avatar
     scope: global
     kind: integration
     description: "Anam avatar API key (server-side). Used by the voice-agent and the direct/Guide avatar path to mint/resolve Anam personas."
 
-  - name: SIMLI_API_KEY
+  - name: MEMQL_SIMLI_API_KEY
     component: avatar
     scope: global
     kind: integration
@@ -121,7 +121,7 @@ secrets:
 
   # --- database ---
 
-  - name: MEMORY_NODES_DATABASE_DSN
+  - name: MEMQL_DATABASE_DSN
     component: database
     scope: global
     kind: integration
@@ -131,14 +131,14 @@ secrets:
 
   # --- ai ---
 
-  - name: MEMQL_SI_ANTHROPIC_API_KEY
+  - name: MEMQL_AI_ANTHROPIC_API_KEY
     component: ai
     scope: global
     kind: vendor_api_key
     optional: true
     description: "Instance-wide Anthropic API key for Claude chat and vision providers."
 
-  - name: MEMQL_SI_OPENAI_API_KEY
+  - name: MEMQL_AI_OPENAI_API_KEY
     component: ai
     scope: global
     kind: vendor_api_key
@@ -147,7 +147,7 @@ secrets:
 
   # --- voice ---
 
-  - name: POLYPHON_LIVEKIT_API_KEY
+  - name: MEMQL_POLYPHON_LIVEKIT_API_KEY
     component: voice
     scope: global
     kind: integration
@@ -155,7 +155,7 @@ secrets:
     optional: true
     description: "LiveKit API key the Polyphon voice transport uses to mint room join tokens."
 
-  - name: POLYPHON_LIVEKIT_API_SECRET
+  - name: MEMQL_POLYPHON_LIVEKIT_API_SECRET
     component: voice
     scope: global
     kind: integration
@@ -181,7 +181,7 @@ secrets:
 
   # --- identity ---
 
-  - name: IDENTITY_TURNSTILE_SECRET
+  - name: MEMQL_IDENTITY_TURNSTILE_SECRET
     component: identity
     scope: global
     kind: integration
@@ -197,37 +197,134 @@ secrets:
     optional: true
     description: "Azure Storage connection string used by the azure-blob uploader; the uploader returns an error when it is not set."
 
+  # --- legacy aliases (deprecated; resolved via ApplyLegacyEnvAliases) ---
+  # Epic 7.3 / memql#2106. Registered so reverse-drift passes and the old
+  # names are documented as deprecated. The boot-time shim in
+  # component/genesis/legacyalias.go copies a legacy value onto its new
+  # MEMQL_ name (set-if-absent). Remove once operators have migrated.
+
+  - name: MEMQL_SI_ANTHROPIC_API_KEY
+    component: ai
+    scope: global
+    kind: vendor_api_key
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_AI_ANTHROPIC_API_KEY; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: MEMQL_SI_OPENAI_API_KEY
+    component: ai
+    scope: global
+    kind: vendor_api_key
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_AI_OPENAI_API_KEY; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: ANAM_API_KEY
+    component: avatar
+    scope: global
+    kind: integration
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_ANAM_API_KEY; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: ANTHROPIC_API_KEY
+    component: ai
+    scope: global
+    kind: vendor_api_key
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_ANTHROPIC_API_KEY; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: MEMORY_NODES_DATABASE_DSN
+    component: database
+    scope: global
+    kind: integration
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_DATABASE_DSN; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: EMAIL_AZURE_CLIENT_SECRET
+    component: email
+    scope: global
+    kind: oauth_secret
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_EMAIL_AZURE_CLIENT_SECRET; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_KEY_ENCRYPTION_KEY
+    component: identity
+    scope: global
+    kind: integration
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_KEY_ENCRYPTION_KEY; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_SIGNING_KEY_B64
+    component: identity
+    scope: global
+    kind: integration
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_SIGNING_KEY_B64; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_TURNSTILE_SECRET
+    component: identity
+    scope: global
+    kind: integration
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_TURNSTILE_SECRET; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: OPENAI_API_KEY
+    component: ai
+    scope: global
+    kind: vendor_api_key
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_OPENAI_API_KEY; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: POLYPHON_LIVEKIT_API_KEY
+    component: voice
+    scope: global
+    kind: integration
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_LIVEKIT_API_KEY; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: POLYPHON_LIVEKIT_API_SECRET
+    component: voice
+    scope: global
+    kind: integration
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_LIVEKIT_API_SECRET; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: SIMLI_API_KEY
+    component: avatar
+    scope: global
+    kind: integration
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_SIMLI_API_KEY; resolved via the boot-time alias shim. Remove after operators migrate."
+
 variables:
 
   # --- seal floor (a developer .env MUST cover these to seal) ---
 
-  - name: IDENTITY_BASE_URL
+  - name: MEMQL_IDENTITY_BASE_URL
     component: identity
     scope: global
     required: ["identity"]
     description: "Public origin of the identity service (e.g. https://auth.example.com). Used as JWT `iss` and in outbound email links."
 
-  - name: IDENTITY_VERIFIER_BASE_URL
+  - name: MEMQL_IDENTITY_VERIFIER_BASE_URL
     component: identity
     scope: global
-    description: "URL non-identity binaries fetch JWKS from. Typically equals IDENTITY_BASE_URL; override only when internal-mesh routing differs from the public origin."
+    description: "URL non-identity binaries fetch JWKS from. Typically equals MEMQL_IDENTITY_BASE_URL; override only when internal-mesh routing differs from the public origin."
 
-  - name: EMAIL_AZURE_TENANT_ID
+  - name: MEMQL_EMAIL_AZURE_TENANT_ID
     component: email
     scope: global
     description: "Azure AD tenant ID for the email integration's Microsoft Graph sender. (Legacy name `AZURE_TENANT_ID` still accepted by integrations/email as a fallback.)"
 
-  - name: EMAIL_AZURE_CLIENT_ID
+  - name: MEMQL_EMAIL_AZURE_CLIENT_ID
     component: email
     scope: global
     description: "Azure AD application ID for the email integration's Microsoft Graph sender. (Legacy name `AZURE_CLIENT_ID` still accepted.)"
 
-  - name: EMAIL_SENDER
+  - name: MEMQL_EMAIL_SENDER
     component: email
     scope: global
     description: "Email address used as the sender for transactional mail (e.g. no-reply@znas.io). (Legacy name `MAIL_SENDER` still accepted.)"
 
-  - name: EMAIL_FROM_NAME
+  - name: MEMQL_EMAIL_FROM_NAME
     component: email
     scope: global
     default: "memQL"
@@ -427,7 +524,7 @@ variables:
 
   # --- ai ---
 
-  - name: DEFAULT_AGENT_PROVIDER
+  - name: MEMQL_DEFAULT_AGENT_PROVIDER
     component: ai
     scope: node
     optional: true
@@ -579,7 +676,7 @@ variables:
     optional: true
     description: "Cumulative estimated-cost cap in USD per scope that latches the per-scope budget breaker."
 
-  - name: MEMQL_SI_OPENAI_PROJECT_ID
+  - name: MEMQL_AI_OPENAI_PROJECT_ID
     component: ai
     scope: node
     optional: true
@@ -599,13 +696,13 @@ variables:
     optional: true
     description: "OpenAI Whisper model id used when MEMQL_STT_PROVIDER is openai-whisper."
 
-  - name: OPERATOR_AGENT_PROVIDER
+  - name: MEMQL_OPERATOR_AGENT_PROVIDER
     component: ai
     scope: node
     optional: true
     description: "Deploy-time default model-provider hint for the operator agent, used by the router when no explicit provider or policy applies."
 
-  - name: OPERATOR_APP_PROFILES_DIR
+  - name: MEMQL_OPERATOR_APP_PROFILES_DIR
     component: ai
     scope: node
     optional: true
@@ -617,7 +714,7 @@ variables:
     component: voice
     scope: node
     optional: true
-    description: "OpenAI realtime model id for the voice path; falls back to POLYPHON_OPENAI_ASR_MODEL when empty."
+    description: "OpenAI realtime model id for the voice path; falls back to MEMQL_POLYPHON_OPENAI_ASR_MODEL when empty."
 
   - name: MEMQL_VOICE_AGENT_TOOL_LOOP
     component: voice
@@ -639,13 +736,13 @@ variables:
     optional: true
     description: "LiveKit room the Go voice-agent joins when no --room flag is passed (convention polyphon-<spaceId>)."
 
-  - name: POLYPHON_LIVEKIT_PUBLIC_URL
+  - name: MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL
     component: voice
     scope: node
     optional: true
     description: "Publicly reachable LiveKit URL advertised to clients for the Polyphon voice path."
 
-  - name: POLYPHON_LIVEKIT_URL
+  - name: MEMQL_POLYPHON_LIVEKIT_URL
     component: voice
     scope: node
     required: ["voice"]
@@ -683,47 +780,47 @@ variables:
 
   # --- polyphon ---
 
-  - name: POLYPHON_BRIDGE_AGENT_URL
+  - name: MEMQL_POLYPHON_BRIDGE_AGENT_URL
     component: polyphon
     scope: node
     optional: true
     description: "URL of the external Polyphon bridge agent service."
 
-  - name: POLYPHON_OPENAI_ASR_MODEL
+  - name: MEMQL_POLYPHON_OPENAI_ASR_MODEL
     component: polyphon
     scope: node
     default: "gpt-4o-transcribe"
     optional: true
     description: "OpenAI ASR model for the Polyphon /memql/audio path."
 
-  - name: POLYPHON_OPENAI_TTS_MODEL
+  - name: MEMQL_POLYPHON_OPENAI_TTS_MODEL
     component: polyphon
     scope: node
     default: "gpt-4o-mini-tts"
     optional: true
     description: "OpenAI TTS model for the Polyphon /memql/audio path."
 
-  - name: POLYPHON_OPENAI_TTS_VOICE
+  - name: MEMQL_POLYPHON_OPENAI_TTS_VOICE
     component: polyphon
     scope: node
     default: "alloy"
     optional: true
     description: "OpenAI TTS voice for the Polyphon /memql/audio path."
 
-  - name: POLYPHON_OPENAI_VAD_SILENCE_MS
+  - name: MEMQL_POLYPHON_OPENAI_VAD_SILENCE_MS
     component: polyphon
     scope: node
     default: "600"
     optional: true
     description: "Trailing-silence window in milliseconds the OpenAI server VAD requires before declaring end-of-utterance."
 
-  - name: POLYPHON_PREDICTION_ENGINE_URL
+  - name: MEMQL_POLYPHON_PREDICTION_ENGINE_URL
     component: polyphon
     scope: node
     optional: true
     description: "URL of an external Polyphon prediction engine; absent uses the embedded engine."
 
-  - name: POLYPHON_VOICE_PROVIDER
+  - name: MEMQL_POLYPHON_VOICE_PROVIDER
     component: polyphon
     scope: node
     default: "openai"
@@ -772,371 +869,371 @@ variables:
 
   # --- identity ---
 
-  - name: IDENTITY_ACCESS_REQUEST_NOTIFY_EMAILS
+  - name: MEMQL_IDENTITY_ACCESS_REQUEST_NOTIFY_EMAILS
     component: identity
     scope: node
     optional: true
     description: "Comma-separated admin recipients for waitlist access-request notification emails; empty falls back to all owner and admin users."
 
-  - name: IDENTITY_ACCESS_REQUEST_NOTIFY_THROTTLE_MINUTES
+  - name: MEMQL_IDENTITY_ACCESS_REQUEST_NOTIFY_THROTTLE_MINUTES
     component: identity
     scope: node
     default: "5"
     optional: true
     description: "Batches waitlist notification emails so a burst of access requests does not spam the admin inbox."
 
-  - name: IDENTITY_ACCESS_TOKEN_TTL_SECONDS
+  - name: MEMQL_IDENTITY_ACCESS_TOKEN_TTL_SECONDS
     component: identity
     scope: node
     default: "900"
     optional: true
     description: "Lifetime in seconds of issued access tokens."
 
-  - name: IDENTITY_ALLOW_EPHEMERAL_KEY
+  - name: MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY
     component: identity
     scope: node
     default: "false"
     optional: true
     description: "Opts a non-localhost deployment into per-pod ephemeral file-backed signing keys instead of a shared seed; single-node or dev only."
 
-  - name: IDENTITY_AUDIT_LOG_RETENTION_DAYS
+  - name: MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS
     component: identity
     scope: node
     default: "365"
     optional: true
     description: "In-database retention window in days for identity audit-event rows."
 
-  - name: IDENTITY_BOOTSTRAP_DOMAIN
+  - name: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN
     component: identity
     scope: node
     optional: true
     description: "Cluster deployment domain used as the suffix for public hostnames during unattended first-run bootstrap."
 
-  - name: IDENTITY_BOOTSTRAP_INTERNAL_DEFAULT_ROLE
+  - name: MEMQL_IDENTITY_BOOTSTRAP_INTERNAL_DEFAULT_ROLE
     component: identity
     scope: node
     optional: true
     description: "Cluster-wide default role for internal users preselected by the first-run bootstrap wizard."
 
-  - name: IDENTITY_BOOTSTRAP_INTERNAL_DOMAINS
+  - name: MEMQL_IDENTITY_BOOTSTRAP_INTERNAL_DOMAINS
     component: identity
     scope: node
     optional: true
     description: "Comma-separated allowlist of email domains that flag users as internal, preselected during bootstrap."
 
-  - name: IDENTITY_BOOTSTRAP_NOTIFY_EMAILS
+  - name: MEMQL_IDENTITY_BOOTSTRAP_NOTIFY_EMAILS
     component: identity
     scope: node
     optional: true
     description: "Comma-separated waitlist notification recipients preselected by the bootstrap wizard."
 
-  - name: IDENTITY_BOOTSTRAP_ORG_NAME
+  - name: MEMQL_IDENTITY_BOOTSTRAP_ORG_NAME
     component: identity
     scope: node
     optional: true
     description: "Organization label captured by the first-run bootstrap wizard."
 
-  - name: IDENTITY_BOOTSTRAP_OWNER_BIRTHDATE
+  - name: MEMQL_IDENTITY_BOOTSTRAP_OWNER_BIRTHDATE
     component: identity
     scope: node
     optional: true
     description: "Optional owner birthdate prefilled into the bootstrap wizard owner profile."
 
-  - name: IDENTITY_BOOTSTRAP_OWNER_EMAIL
+  - name: MEMQL_IDENTITY_BOOTSTRAP_OWNER_EMAIL
     component: identity
     scope: node
     optional: true
     description: "Email the cluster owner receives the first sign-in magic link at during unattended bootstrap."
 
-  - name: IDENTITY_BOOTSTRAP_OWNER_FIRST_NAME
+  - name: MEMQL_IDENTITY_BOOTSTRAP_OWNER_FIRST_NAME
     component: identity
     scope: node
     optional: true
     description: "Owner first name seeded into the profile and JWT given_name claim during bootstrap."
 
-  - name: IDENTITY_BOOTSTRAP_OWNER_GENDER
+  - name: MEMQL_IDENTITY_BOOTSTRAP_OWNER_GENDER
     component: identity
     scope: node
     optional: true
     description: "Optional owner gender prefilled into the bootstrap wizard owner profile."
 
-  - name: IDENTITY_BOOTSTRAP_OWNER_LAST_NAME
+  - name: MEMQL_IDENTITY_BOOTSTRAP_OWNER_LAST_NAME
     component: identity
     scope: node
     optional: true
     description: "Owner last name seeded into the profile and JWT family_name claim during bootstrap."
 
-  - name: IDENTITY_BOOTSTRAP_OWNER_PHONE
+  - name: MEMQL_IDENTITY_BOOTSTRAP_OWNER_PHONE
     component: identity
     scope: node
     optional: true
     description: "Optional owner phone number prefilled into the bootstrap wizard owner profile."
 
-  - name: IDENTITY_BOOTSTRAP_OWNER_PRIMARY_ROLE
+  - name: MEMQL_IDENTITY_BOOTSTRAP_OWNER_PRIMARY_ROLE
     component: identity
     scope: node
     optional: true
     description: "Optional owner primary role prefilled into the bootstrap wizard owner profile."
 
-  - name: IDENTITY_BOOTSTRAP_REGISTRATION_DOMAINS
+  - name: MEMQL_IDENTITY_BOOTSTRAP_REGISTRATION_DOMAINS
     component: identity
     scope: node
     optional: true
     description: "Comma-separated registration allowlist preselected for domain-restricted mode during bootstrap."
 
-  - name: IDENTITY_BOOTSTRAP_REGISTRATION_MODE
+  - name: MEMQL_IDENTITY_BOOTSTRAP_REGISTRATION_MODE
     component: identity
     scope: node
     optional: true
     description: "Registration mode preselected at bootstrap time, overriding the runtime default."
 
-  - name: IDENTITY_BRAND_ICON_DATA_URI
+  - name: MEMQL_IDENTITY_BRAND_ICON_DATA_URI
     component: identity
     scope: node
     optional: true
     description: "Embedded square brand icon as a base64 data URI used in compact contexts like favicon and share previews."
 
-  - name: IDENTITY_BRAND_LOGO_DATA_URI
+  - name: MEMQL_IDENTITY_BRAND_LOGO_DATA_URI
     component: identity
     scope: node
     optional: true
     description: "Embedded horizontal brand logo wordmark as a base64 data URI used in emails and the web UI."
 
-  - name: IDENTITY_BRAND_NAME
+  - name: MEMQL_IDENTITY_BRAND_NAME
     component: identity
     scope: node
     optional: true
     description: "Display name used in email subject prefixes and templates, editable in the admin UI after bootstrap."
 
-  - name: IDENTITY_BRAND_PRIMARY_COLOR
+  - name: MEMQL_IDENTITY_BRAND_PRIMARY_COLOR
     component: identity
     scope: node
     default: "#0433ff"
     optional: true
     description: "Hex accent color used for HTML emails and the web UI primary button."
 
-  - name: IDENTITY_CORS_ALLOWED_ORIGINS
+  - name: MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS
     component: identity
     scope: node
     optional: true
     description: "Comma-separated Origin values identity allows on credentialed cross-origin refresh-token requests."
 
-  - name: IDENTITY_DATA_EXPORT_RATE_LIMIT_HOURS
+  - name: MEMQL_IDENTITY_DATA_EXPORT_RATE_LIMIT_HOURS
     component: identity
     scope: node
     default: "24"
     optional: true
     description: "Minimum interval in hours between a single user's own data exports, limiting compromised-account exfiltration."
 
-  - name: IDENTITY_DELETION_COOLDOWN_DAYS
+  - name: MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS
     component: identity
     scope: node
     default: "30"
     optional: true
     description: "Soft-delete grace period in days before account deletion becomes irreversible."
 
-  - name: IDENTITY_DISPOSABLE_EMAIL_BLOCKLIST_ENABLED
+  - name: MEMQL_IDENTITY_DISPOSABLE_EMAIL_BLOCKLIST_ENABLED
     component: identity
     scope: node
     default: "true"
     optional: true
     description: "Toggles the embedded disposable-email-domain blocklist on registration."
 
-  - name: IDENTITY_EMAIL_VALIDATION_PROVIDER
+  - name: MEMQL_IDENTITY_EMAIL_VALIDATION_PROVIDER
     component: identity
     scope: node
     default: "none"
     optional: true
     description: "Selects the third-party email-deliverability validation provider plug-in."
 
-  - name: IDENTITY_ENABLED
+  - name: MEMQL_IDENTITY_ENABLED
     component: identity
     scope: node
     default: "false"
     optional: true
     description: "Master toggle that gates whether the identity service HTTP and gRPC handlers are wired in."
 
-  - name: IDENTITY_INTERNAL_DEFAULT_ROLE
+  - name: MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE
     component: identity
     scope: node
     default: "writer"
     optional: true
     description: "Cluster-wide role assigned to internal users on registration."
 
-  - name: IDENTITY_INTERNAL_DOMAINS
+  - name: MEMQL_IDENTITY_INTERNAL_DOMAINS
     component: identity
     scope: node
     optional: true
     description: "Comma-separated allowlist of email domains whose users are flagged internal at first login."
 
-  - name: IDENTITY_INVITATION_TTL_DAYS
+  - name: MEMQL_IDENTITY_INVITATION_TTL_DAYS
     component: identity
     scope: node
     default: "7"
     optional: true
     description: "Lifetime in days of an admin-issued user invitation before it expires."
 
-  - name: IDENTITY_JWKS_OVERLAP_HOURS
+  - name: MEMQL_IDENTITY_JWKS_OVERLAP_HOURS
     component: identity
     scope: node
     default: "24"
     optional: true
     description: "How long in hours a retired signing key stays published in JWKS so in-flight tokens still verify during rotation."
 
-  - name: IDENTITY_JWKS_URL
+  - name: MEMQL_IDENTITY_JWKS_URL
     component: identity
     scope: node
     optional: true
     description: "URL other nodes fetch public keys from; defaults to the base URL plus the JWKS path, overridden only when the public URL differs from the internal-mesh URL."
 
-  - name: IDENTITY_JWT_AUDIENCE
+  - name: MEMQL_IDENTITY_JWT_AUDIENCE
     component: identity
     scope: node
     default: "memql"
     optional: true
     description: "Value placed in the JWT audience claim that other nodes verify against their configured audience."
 
-  - name: IDENTITY_KEY_DIR
+  - name: MEMQL_IDENTITY_KEY_DIR
     component: identity
     scope: node
     default: "var/identity/keys"
     optional: true
     description: "Filesystem directory holding the on-disk Ed25519 signing keypair files in file-key mode."
 
-  - name: IDENTITY_KEY_ROTATION_DAYS
+  - name: MEMQL_IDENTITY_KEY_ROTATION_DAYS
     component: identity
     scope: node
     default: "90"
     optional: true
     description: "Auto-rotation cadence in days for the JWT signing keypair."
 
-  - name: IDENTITY_MAGIC_LINK_TTL_SECONDS
+  - name: MEMQL_IDENTITY_MAGIC_LINK_TTL_SECONDS
     component: identity
     scope: node
     default: "600"
     optional: true
     description: "Lifetime in seconds that a freshly issued magic link remains valid."
 
-  - name: IDENTITY_MX_VALIDATION_ENABLED
+  - name: MEMQL_IDENTITY_MX_VALIDATION_ENABLED
     component: identity
     scope: node
     default: "true"
     optional: true
     description: "Toggles the per-domain MX-record DNS check on registration emails."
 
-  - name: IDENTITY_OAUTH_DCR_ENABLED
+  - name: MEMQL_IDENTITY_OAUTH_DCR_ENABLED
     component: identity
     scope: node
     default: "true"
     optional: true
     description: "Gates the RFC 7591 dynamic client registration endpoint that lets unknown OAuth clients self-register."
 
-  - name: IDENTITY_PRIVACY_OVERRIDE_PATH
+  - name: MEMQL_IDENTITY_PRIVACY_OVERRIDE_PATH
     component: identity
     scope: node
     optional: true
     description: "Filesystem path to an operator-supplied Privacy markdown file replacing the embedded default."
 
-  - name: IDENTITY_RATE_LIMIT_PER_IP_PER_HOUR
+  - name: MEMQL_IDENTITY_RATE_LIMIT_PER_IP_PER_HOUR
     component: identity
     scope: node
     default: "10"
     optional: true
     description: "Caps magic-link and access-request submissions from a single source IP per hour."
 
-  - name: IDENTITY_REFRESH_COOKIE_SAMESITE
+  - name: MEMQL_IDENTITY_REFRESH_COOKIE_SAMESITE
     component: identity
     scope: node
     optional: true
     description: "Operator override for the refresh-token cookie SameSite attribute, lax or none, for the deployment topology."
 
-  - name: IDENTITY_REFRESH_TOKEN_TTL_SECONDS
+  - name: MEMQL_IDENTITY_REFRESH_TOKEN_TTL_SECONDS
     component: identity
     scope: node
     default: "2592000"
     optional: true
     description: "Absolute lifetime in seconds of issued refresh tokens."
 
-  - name: IDENTITY_REGISTERED_CLIENTS
+  - name: MEMQL_IDENTITY_REGISTERED_CLIENTS
     component: identity
     scope: node
     optional: true
     description: "JSON array of relying-party applications allowed to initiate auth flows, each with a clientId and explicit redirect-URI list."
 
-  - name: IDENTITY_REGISTRATION_DOMAINS
+  - name: MEMQL_IDENTITY_REGISTRATION_DOMAINS
     component: identity
     scope: node
     optional: true
     description: "Comma-separated allowlist consulted when registration mode is domain_restricted."
 
-  - name: IDENTITY_REGISTRATION_MODE
+  - name: MEMQL_IDENTITY_REGISTRATION_MODE
     component: identity
     scope: node
     default: "open"
     optional: true
     description: "Controls who can self-register; one of open, domain_restricted, invite_only, or waitlist."
 
-  - name: IDENTITY_RISK_THRESHOLD
+  - name: MEMQL_IDENTITY_RISK_THRESHOLD
     component: identity
     scope: node
     default: "50"
     optional: true
     description: "Score from zero to one hundred at or above which registration is blocked; lower is stricter."
 
-  - name: IDENTITY_SESSION_IDLE_DAYS
+  - name: MEMQL_IDENTITY_SESSION_IDLE_DAYS
     component: identity
     scope: node
     default: "14"
     optional: true
     description: "Inactivity timeout in days after which token refresh fails."
 
-  - name: IDENTITY_SESSION_MAX_DAYS
+  - name: MEMQL_IDENTITY_SESSION_MAX_DAYS
     component: identity
     scope: node
     default: "90"
     optional: true
     description: "Absolute session lifetime in days after which re-authentication is required regardless of activity."
 
-  - name: IDENTITY_TOS_OVERRIDE_PATH
+  - name: MEMQL_IDENTITY_TOS_OVERRIDE_PATH
     component: identity
     scope: node
     optional: true
     description: "Filesystem path to an operator-supplied Terms of Service markdown file replacing the embedded default."
 
-  - name: IDENTITY_TURNSTILE_SITE_KEY
+  - name: MEMQL_IDENTITY_TURNSTILE_SITE_KEY
     component: identity
     scope: node
     optional: true
     description: "Cloudflare Turnstile public site key embedded in registration and login forms."
 
-  - name: IDENTITY_VERIFIER_AUDIENCE
+  - name: MEMQL_IDENTITY_VERIFIER_AUDIENCE
     component: identity
     scope: node
     default: "memql"
     optional: true
     description: "Value the per-node verifier compares against the JWT audience claim."
 
-  - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
     component: identity
     scope: node
     optional: true
     description: "Override for the JWT issuer the verifier expects; defaults to the verifier base URL."
 
-  - name: IDENTITY_VERIFIER_JWKS_FETCH_TIMEOUT_SECONDS
+  - name: MEMQL_IDENTITY_VERIFIER_JWKS_FETCH_TIMEOUT_SECONDS
     component: identity
     scope: node
     default: "10"
     optional: true
     description: "Per-fetch HTTP timeout in seconds for the verifier's JWKS document retrieval."
 
-  - name: IDENTITY_VERIFIER_JWKS_REFRESH_SECONDS
+  - name: MEMQL_IDENTITY_VERIFIER_JWKS_REFRESH_SECONDS
     component: identity
     scope: node
     default: "300"
     optional: true
     description: "Background cadence in seconds at which the verifier refreshes the cached JWKS keyset."
 
-  - name: IDENTITY_VERIFIER_JWKS_URL
+  - name: MEMQL_IDENTITY_VERIFIER_JWKS_URL
     component: identity
     scope: node
     optional: true
@@ -1144,7 +1241,7 @@ variables:
 
   # --- email ---
 
-  - name: MAIL_SUPPRESS_OWNER_BOOTSTRAP
+  - name: MEMQL_EMAIL_SUPPRESS_OWNER_BOOTSTRAP
     component: email
     scope: node
     default: "false"
@@ -1358,7 +1455,7 @@ variables:
     component: mcp
     scope: node
     optional: true
-    description: "Public OAuth authorization-server issuer advertised by the MCP HTTP head's Protected Resource Metadata; falls back to IDENTITY_VERIFIER_EXPECTED_ISSUER when unset."
+    description: "Public OAuth authorization-server issuer advertised by the MCP HTTP head's Protected Resource Metadata; falls back to MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER when unset."
 
   - name: MEMQL_MCP_HTTP_ADDR
     component: mcp
@@ -1413,3 +1510,471 @@ variables:
     scope: node
     optional: true
     description: "Path to a GeoIP database; absent disables GeoIP enrichment."
+
+  # --- legacy aliases (deprecated; resolved via ApplyLegacyEnvAliases) ---
+  # Epic 7.3 / memql#2106. Registered so reverse-drift passes and the old
+  # names are documented as deprecated. The boot-time shim in
+  # component/genesis/legacyalias.go copies a legacy value onto its new
+  # MEMQL_ name (set-if-absent). Remove once operators have migrated.
+
+  - name: MEMQL_SI_OPENAI_PROJECT_ID
+    component: ai
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_AI_OPENAI_PROJECT_ID; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: DEFAULT_AGENT_PROVIDER
+    component: ai
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_DEFAULT_AGENT_PROVIDER; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: EMAIL_AZURE_CLIENT_ID
+    component: email
+    scope: global
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_EMAIL_AZURE_CLIENT_ID; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: EMAIL_AZURE_TENANT_ID
+    component: email
+    scope: global
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_EMAIL_AZURE_TENANT_ID; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: EMAIL_FROM_NAME
+    component: email
+    scope: global
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_EMAIL_FROM_NAME; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: EMAIL_SENDER
+    component: email
+    scope: global
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_EMAIL_SENDER; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: MAIL_SUPPRESS_OWNER_BOOTSTRAP
+    component: email
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_EMAIL_SUPPRESS_OWNER_BOOTSTRAP; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_ACCESS_REQUEST_NOTIFY_EMAILS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_ACCESS_REQUEST_NOTIFY_EMAILS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_ACCESS_REQUEST_NOTIFY_THROTTLE_MINUTES
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_ACCESS_REQUEST_NOTIFY_THROTTLE_MINUTES; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_ACCESS_TOKEN_TTL_SECONDS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_ACCESS_TOKEN_TTL_SECONDS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_ALLOW_EPHEMERAL_KEY
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_AUDIT_LOG_RETENTION_DAYS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BASE_URL
+    component: identity
+    scope: global
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BASE_URL; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BOOTSTRAP_DOMAIN
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BOOTSTRAP_DOMAIN; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BOOTSTRAP_INTERNAL_DEFAULT_ROLE
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BOOTSTRAP_INTERNAL_DEFAULT_ROLE; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BOOTSTRAP_INTERNAL_DOMAINS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BOOTSTRAP_INTERNAL_DOMAINS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BOOTSTRAP_NOTIFY_EMAILS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BOOTSTRAP_NOTIFY_EMAILS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BOOTSTRAP_ORG_NAME
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BOOTSTRAP_ORG_NAME; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BOOTSTRAP_OWNER_BIRTHDATE
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BOOTSTRAP_OWNER_BIRTHDATE; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BOOTSTRAP_OWNER_EMAIL
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BOOTSTRAP_OWNER_EMAIL; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BOOTSTRAP_OWNER_FIRST_NAME
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BOOTSTRAP_OWNER_FIRST_NAME; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BOOTSTRAP_OWNER_GENDER
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BOOTSTRAP_OWNER_GENDER; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BOOTSTRAP_OWNER_LAST_NAME
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BOOTSTRAP_OWNER_LAST_NAME; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BOOTSTRAP_OWNER_PHONE
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BOOTSTRAP_OWNER_PHONE; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BOOTSTRAP_OWNER_PRIMARY_ROLE
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BOOTSTRAP_OWNER_PRIMARY_ROLE; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BOOTSTRAP_REGISTRATION_DOMAINS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BOOTSTRAP_REGISTRATION_DOMAINS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BOOTSTRAP_REGISTRATION_MODE
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BOOTSTRAP_REGISTRATION_MODE; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BRAND_ICON_DATA_URI
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BRAND_ICON_DATA_URI; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BRAND_LOGO_DATA_URI
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BRAND_LOGO_DATA_URI; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BRAND_NAME
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BRAND_NAME; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_BRAND_PRIMARY_COLOR
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_BRAND_PRIMARY_COLOR; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_CORS_ALLOWED_ORIGINS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_DATA_EXPORT_RATE_LIMIT_HOURS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_DATA_EXPORT_RATE_LIMIT_HOURS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_DELETION_COOLDOWN_DAYS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_DISPOSABLE_EMAIL_BLOCKLIST_ENABLED
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_DISPOSABLE_EMAIL_BLOCKLIST_ENABLED; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_EMAIL_VALIDATION_PROVIDER
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_EMAIL_VALIDATION_PROVIDER; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_ENABLED
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_ENABLED; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_INTERNAL_DEFAULT_ROLE
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_INTERNAL_DOMAINS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_INTERNAL_DOMAINS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_INVITATION_TTL_DAYS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_INVITATION_TTL_DAYS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_JWKS_OVERLAP_HOURS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_JWKS_OVERLAP_HOURS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_JWKS_URL
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_JWKS_URL; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_JWT_AUDIENCE
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_JWT_AUDIENCE; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_KEY_DIR
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_KEY_DIR; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_KEY_ROTATION_DAYS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_KEY_ROTATION_DAYS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_MAGIC_LINK_TTL_SECONDS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_MAGIC_LINK_TTL_SECONDS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_MX_VALIDATION_ENABLED
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_MX_VALIDATION_ENABLED; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_OAUTH_DCR_ENABLED
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_OAUTH_DCR_ENABLED; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_PRIVACY_OVERRIDE_PATH
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_PRIVACY_OVERRIDE_PATH; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_RATE_LIMIT_PER_IP_PER_HOUR
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_RATE_LIMIT_PER_IP_PER_HOUR; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_REFRESH_COOKIE_SAMESITE
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_REFRESH_COOKIE_SAMESITE; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_REFRESH_TOKEN_TTL_SECONDS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_REFRESH_TOKEN_TTL_SECONDS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_REGISTERED_CLIENTS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_REGISTERED_CLIENTS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_REGISTRATION_DOMAINS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_REGISTRATION_DOMAINS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_REGISTRATION_MODE
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_REGISTRATION_MODE; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_RISK_THRESHOLD
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_RISK_THRESHOLD; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_SESSION_IDLE_DAYS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_SESSION_IDLE_DAYS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_SESSION_MAX_DAYS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_SESSION_MAX_DAYS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_TOS_OVERRIDE_PATH
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_TOS_OVERRIDE_PATH; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_TURNSTILE_SITE_KEY
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_TURNSTILE_SITE_KEY; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_VERIFIER_AUDIENCE
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_VERIFIER_AUDIENCE; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_VERIFIER_BASE_URL
+    component: identity
+    scope: global
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_VERIFIER_BASE_URL; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_VERIFIER_JWKS_FETCH_TIMEOUT_SECONDS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_VERIFIER_JWKS_FETCH_TIMEOUT_SECONDS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_VERIFIER_JWKS_REFRESH_SECONDS
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_VERIFIER_JWKS_REFRESH_SECONDS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: IDENTITY_VERIFIER_JWKS_URL
+    component: identity
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_IDENTITY_VERIFIER_JWKS_URL; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: OPERATOR_AGENT_PROVIDER
+    component: ai
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_OPERATOR_AGENT_PROVIDER; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: OPERATOR_APP_PROFILES_DIR
+    component: ai
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_OPERATOR_APP_PROFILES_DIR; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: POLYPHON_BRIDGE_AGENT_URL
+    component: polyphon
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_BRIDGE_AGENT_URL; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: POLYPHON_LIVEKIT_PUBLIC_URL
+    component: voice
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: POLYPHON_LIVEKIT_URL
+    component: voice
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_LIVEKIT_URL; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: POLYPHON_OPENAI_ASR_MODEL
+    component: polyphon
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_OPENAI_ASR_MODEL; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: POLYPHON_OPENAI_TTS_MODEL
+    component: polyphon
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_OPENAI_TTS_MODEL; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: POLYPHON_OPENAI_TTS_VOICE
+    component: polyphon
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_OPENAI_TTS_VOICE; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: POLYPHON_OPENAI_VAD_SILENCE_MS
+    component: polyphon
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_OPENAI_VAD_SILENCE_MS; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: POLYPHON_PREDICTION_ENGINE_URL
+    component: polyphon
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_PREDICTION_ENGINE_URL; resolved via the boot-time alias shim. Remove after operators migrate."
+
+  - name: POLYPHON_VOICE_PROVIDER
+    component: polyphon
+    scope: node
+    optional: true
+    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_VOICE_PROVIDER; resolved via the boot-time alias shim. Remove after operators migrate."

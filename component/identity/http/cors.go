@@ -7,7 +7,7 @@ import (
 
 // cors wraps a handler with CORS headers. The auth endpoints all
 // receive requests from registered SPA origins (CoPresent, admin UI),
-// so we honor IDENTITY_CORS_ALLOWED_ORIGINS. Wildcard "*" is honored
+// so we honor MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS. Wildcard "*" is honored
 // only when the request does NOT carry credentials -- credentialed
 // requests need an exact-match origin so the browser will accept the
 // response.

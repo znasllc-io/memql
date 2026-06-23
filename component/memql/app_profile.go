@@ -30,12 +30,12 @@ var (
 )
 
 // appProfilesDir points at the directory holding app-profile markdown
-// files when `OPERATOR_APP_PROFILES_DIR` is set. Left in place for
+// files when `MEMQL_OPERATOR_APP_PROFILES_DIR` is set. Left in place for
 // deployment setups that want to override the embedded profiles from
 // a mounted volume (ops push / per-customer branding / etc.). In the
 // default path we load from the embedded FS (see app-profiles/embed.go).
 func appProfilesDir() string {
-	return strings.TrimSpace(os.Getenv("OPERATOR_APP_PROFILES_DIR"))
+	return strings.TrimSpace(os.Getenv("MEMQL_OPERATOR_APP_PROFILES_DIR"))
 }
 
 // LoadAppProfileByName is the exported form of loadAppProfile.
@@ -47,7 +47,7 @@ func LoadAppProfileByName(name string) string {
 }
 
 // loadAppProfile returns the named app profile, preferring the
-// filesystem override (OPERATOR_APP_PROFILES_DIR) when set and
+// filesystem override (MEMQL_OPERATOR_APP_PROFILES_DIR) when set and
 // falling back to the embedded profiles baked into the binary.
 // Returns "" on any error (missing file, read failure, invalid name)
 // so the caller can proceed without the block -- an app without a

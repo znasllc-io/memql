@@ -31,7 +31,7 @@ Both voice paths run on OpenAI server-side VAD, with one knob each:
   Realtime API transcription-only mode) -- the server VAD waits
   `silence_duration_ms` of trailing silence before declaring
   end-of-utterance and committing the transcript. Tuned via
-  `POLYPHON_OPENAI_VAD_SILENCE_MS` (default `600`).
+  `MEMQL_POLYPHON_OPENAI_VAD_SILENCE_MS` (default `600`).
 - **Realtime executor** (gpt-realtime speech-to-speech, native 1-on-1
   path) -- the session's `server_vad` turn detection uses
   `MEMQL_REALTIME_VAD_SILENCE_DURATION_MS` (default `500`), plus the
@@ -44,7 +44,7 @@ Both voice paths run on OpenAI server-side VAD, with one knob each:
 
 | Env var                                  | Default | Effect                                          |
 | ---------------------------------------- | ------- | ----------------------------------------------- |
-| `POLYPHON_OPENAI_VAD_SILENCE_MS`         | `600`   | Cascade/chat-mic trailing-silence window         |
+| `MEMQL_POLYPHON_OPENAI_VAD_SILENCE_MS`         | `600`   | Cascade/chat-mic trailing-silence window         |
 | `MEMQL_REALTIME_VAD_SILENCE_DURATION_MS` | `500`   | Realtime executor trailing-silence window        |
 | `MEMQL_REALTIME_VAD_THRESHOLD`           | `0.6`   | Realtime speech-energy gate (0..1)               |
 | `MEMQL_REALTIME_VAD_PREFIX_PADDING_MS`   | `300`   | Audio kept before the detected onset             |

@@ -70,7 +70,7 @@ const (
 )
 
 // newDCRTestServer builds a *Server whose OAuth client lives only in the
-// DB store (no static IDENTITY_REGISTERED_CLIENTS), mirroring the claude.ai
+// DB store (no static MEMQL_IDENTITY_REGISTERED_CLIENTS), mirroring the claude.ai
 // connector registration path.
 func newDCRTestServer(t *testing.T) *Server {
 	t.Helper()

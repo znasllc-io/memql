@@ -90,7 +90,7 @@ func NewService(cfg Config, logger *slog.Logger, audit AuditLogger) (*Service, e
 	}
 
 	// #550: when a signing key is provided via the sealed envelope
-	// (IDENTITY_SIGNING_KEY_B64), every replica derives the same key from
+	// (MEMQL_IDENTITY_SIGNING_KEY_B64), every replica derives the same key from
 	// it -- no ReadWriteOnce key PVC, so identity can run >=2 replicas on
 	// RollingUpdate. Otherwise fall back to the on-disk KeyDir (dev).
 	var (

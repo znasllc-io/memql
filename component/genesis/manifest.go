@@ -47,7 +47,7 @@ type ManifestEntry struct {
 	// Optional entries are documented + sealed-when-present, but are NOT
 	// part of the strict-superset seal floor: a .env that omits them still
 	// seals. Use for secrets/vars that only some deployments carry (e.g.
-	// the identity envMode signing seed IDENTITY_SIGNING_KEY_B64, which
+	// the identity envMode signing seed MEMQL_IDENTITY_SIGNING_KEY_B64, which
 	// staging/prod need for HA but local-dev disk-key mode does not), or
 	// any var outside the curated dev-seal floor. memql#619 / #2104.
 	Optional bool `yaml:"optional,omitempty"`
@@ -245,6 +245,26 @@ func FindMissing(entries []EnvEntry, required []string) []string {
 	var missing []string
 	for _, name := range required {
 		if !have[name] {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
+// FindMissingWithLegacy is the legacy-tolerant variant of FindMissing
+// used by Seal (Epic 7.3 / memql#2106). A floor name counts as present
+// if the .env carries either the new name OR its legacy alias, so an
+// operator's pre-7.3 .env (still using the old IDENTITY_* / POLYPHON_* /
+// ... names) seals without forcing an immediate rename. The boot-time
+// shim ApplyLegacyEnvAliases bridges the value at runtime.
+func FindMissingWithLegacy(entries []EnvEntry, required []string) []string {
+	have := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		have[e.Name] = true
+	}
+	var missing []string
+	for _, name := range required {
+		if !PresentWithLegacy(have, name) {
 			missing = append(missing, name)
 		}
 	}

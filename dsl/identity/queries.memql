@@ -306,7 +306,7 @@ query authCode authCodeByCodeHash {
 // ======================================================================
 //
 // Hot path on the /authorize + /oauth/token endpoints: when a client_id
-// is not present in the static IDENTITY_REGISTERED_CLIENTS slice, the
+// is not present in the static MEMQL_IDENTITY_REGISTERED_CLIENTS slice, the
 // resolver falls back to this query to find the DB-backed row minted at
 // POST /register (RFC 7591 dynamic client registration). Returns the row
 // regardless of state so the handler can apply the redirect-URI matcher.
@@ -594,7 +594,7 @@ query delegation expiredActiveDelegations {
 // iterates the result and per-row tests
 // `addDuration(item.auditEvent.occurredAt, "P{N}D") < timestamp()` to
 // decide whether the row is past
-// IDENTITY_AUDIT_LOG_RETENTION_DAYS. Same MemQL-parser limitation
+// MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. Same MemQL-parser limitation
 // as expiredPendingAccessRequests: filter expressions can't
 // inline addDuration() and addDuration accepts only positive
 // durations, so per-row windowing in the automation is the only
@@ -1215,7 +1215,7 @@ query user usersInDeletionCooldown {
 // Returns active users whose deletionScheduledAt is non-empty. The
 // accountDeletionSweep cron iterates the result and per-row checks
 // whether the cooldown has elapsed
-// (deletionScheduledAt + IDENTITY_DELETION_COOLDOWN_DAYS < now())
+// (deletionScheduledAt + MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS < now())
 // before calling deleteUserHard.
 //
 // Active-only: a user already hard-deleted (active=false, PII

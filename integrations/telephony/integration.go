@@ -88,13 +88,13 @@ func New(cfg Config, logger *slog.Logger) (*Integration, error) {
 		carrier = nil
 	}
 	i := &Integration{
-		logger:           logger,
-		carrier:          carrier,
-		carrierName:      cfg.CarrierName,
-		sipEdgeURI:       cfg.SIPEdgeURI,
-		outboundAddress:  cfg.OutboundSIPAddress,
-		outboundAuthUser: cfg.OutboundAuthUsername,
-		outboundAuthPass: cfg.OutboundAuthPassword,
+		logger:             logger,
+		carrier:            carrier,
+		carrierName:        cfg.CarrierName,
+		sipEdgeURI:         cfg.SIPEdgeURI,
+		outboundAddress:    cfg.OutboundSIPAddress,
+		outboundAuthUser:   cfg.OutboundAuthUsername,
+		outboundAuthPass:   cfg.OutboundAuthPassword,
 		modelCostPerMinute: cfg.ModelCostPerMinute,
 	}
 	if cfg.LiveKitURL != "" && cfg.LiveKitAPIKey != "" && cfg.LiveKitAPISecret != "" {
@@ -135,7 +135,7 @@ func (i *Integration) requireCarrier() (CarrierProvider, error) {
 // requireSIP returns the SIP client or a clear configuration error.
 func (i *Integration) requireSIP() (*lksdk.SIPClient, error) {
 	if i.sip == nil {
-		return nil, fmt.Errorf("telephony: LiveKit SIP not configured (set LIVEKIT_URL + POLYPHON_LIVEKIT_API_KEY/SECRET)")
+		return nil, fmt.Errorf("telephony: LiveKit SIP not configured (set LIVEKIT_URL + MEMQL_POLYPHON_LIVEKIT_API_KEY/SECRET)")
 	}
 	return i.sip, nil
 }

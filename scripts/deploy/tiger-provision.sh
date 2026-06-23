@@ -71,9 +71,9 @@ readonly REQUIRED_EXTENSIONS=(
 
 # The DSN is stored under the SAME Key Vault secret name deploy-setup.sh
 # uses for it, so the two scripts converge on one secret. deploy-setup
-# maps MEMORY_NODES_DATABASE_DSN -> kebab-case; we mirror that here
+# maps MEMQL_DATABASE_DSN -> kebab-case; we mirror that here
 # rather than re-deriving so the names can never drift.
-readonly DSN_ENV_VAR="MEMORY_NODES_DATABASE_DSN"
+readonly DSN_ENV_VAR="MEMQL_DATABASE_DSN"
 readonly DSN_KV_SECRET="memory-nodes-database-dsn"
 
 # Default environment. Overridable via --env / ENV / first positional.
@@ -441,7 +441,7 @@ function resolve_service_id() {
 
 # Read the connection DSN for the service from the tiger CLI. Printed to
 # stdout; empty + non-zero if it can't be resolved. An exported
-# MEMORY_NODES_DATABASE_DSN overrides (lets an operator wire a manually-
+# MEMQL_DATABASE_DSN overrides (lets an operator wire a manually-
 # rotated DSN without re-reading from tiger).
 function resolve_dsn() {
     local override="${!DSN_ENV_VAR:-}"

@@ -132,11 +132,11 @@ func TestDispatchGateLockKey_StableAndDistinct(t *testing.T) {
 
 // openDispatchGateTestDB connects to Postgres for the contention integration
 // test, skipping when none is reachable so it never blocks CI. DSN comes from
-// MEMORY_NODES_DATABASE_DSN, else the dev-compose default. Mirrors
+// MEMQL_DATABASE_DSN, else the dev-compose default. Mirrors
 // integrations/planner/admission_test.go's harness.
 func openDispatchGateTestDB(t *testing.T) *bun.DB {
 	t.Helper()
-	dsn := os.Getenv("MEMORY_NODES_DATABASE_DSN")
+	dsn := os.Getenv("MEMQL_DATABASE_DSN")
 	if dsn == "" {
 		dsn = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"
 	}

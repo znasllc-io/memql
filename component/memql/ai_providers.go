@@ -785,16 +785,16 @@ func SetSystemVariableResolver(r SystemVariableResolverFunc) { systemVariableRes
 
 // authConceptLookupNames returns the names to try in concept storage
 // for a given placeholder name, in priority order. Providers historically
-// reference `MEMQL_SI_<VENDOR>_API_KEY` (e.g. `MEMQL_SI_OPENAI_API_KEY`)
+// reference `MEMQL_SI_<VENDOR>_API_KEY` (e.g. `MEMQL_AI_OPENAI_API_KEY`)
 // because that's the OS env var the bridge-agent / STT bootstrap also
-// reads. The dev workflow seeds the bare form (`OPENAI_API_KEY`,
-// `ANTHROPIC_API_KEY`, ...) because that's what engineers know.
+// reads. The dev workflow seeds the bare form (`MEMQL_OPENAI_API_KEY`,
+// `MEMQL_ANTHROPIC_API_KEY`, ...) because that's what engineers know.
 //
 // Rather than rename one side or the other -- which would force every
 // install to re-seed -- the resolver tries both:
 //
-//	MEMQL_SI_OPENAI_API_KEY  (exact match for what the provider asked)
-//	OPENAI_API_KEY           (the dev-manifest seeded form)
+//	MEMQL_AI_OPENAI_API_KEY  (exact match for what the provider asked)
+//	MEMQL_OPENAI_API_KEY           (the dev-manifest seeded form)
 //
 // First non-empty match wins. Names that don't carry the prefix are
 // looked up verbatim (no synthesized fallback).
@@ -878,7 +878,7 @@ func resolveAuthPlaceholders(values map[string]string) (map[string]string, error
 				continue
 			}
 			// 3: OS env fallback. Same prefix-elision as concept storage so
-			// `OPENAI_API_KEY` in env wins for `MEMQL_SI_OPENAI_API_KEY`-
+			// `MEMQL_OPENAI_API_KEY` in env wins for `MEMQL_AI_OPENAI_API_KEY`-
 			// referencing providers, matching the dev-manifest naming.
 			envHit := ""
 			for _, name := range candidates {
@@ -1041,7 +1041,7 @@ func (c *openAIProjectHeaderClient) Do(req *http.Request) (*http.Response, error
 
 // resolveOpenAIProjectId returns the OpenAI-Project header value for a
 // provider config, preferring auth.projectId when the caller set it in
-// a .memql override, and falling back to MEMQL_SI_OPENAI_PROJECT_ID
+// a .memql override, and falling back to MEMQL_AI_OPENAI_PROJECT_ID
 // from the environment. Returns "" when neither is set -- which is the
 // steady state for service-account keys (sk-svcacct-*), which do not
 // carry a project id. The openai-go client handles the empty case
@@ -1050,7 +1050,7 @@ func resolveOpenAIProjectId(cfg ProviderConfig) string {
 	if pid := strings.TrimSpace(cfg.Auth["projectId"]); pid != "" {
 		return pid
 	}
-	return strings.TrimSpace(os.Getenv("MEMQL_SI_OPENAI_PROJECT_ID"))
+	return strings.TrimSpace(os.Getenv("MEMQL_AI_OPENAI_PROJECT_ID"))
 }
 
 type openAIProvider struct {

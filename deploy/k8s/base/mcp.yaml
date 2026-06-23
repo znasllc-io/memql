@@ -118,7 +118,7 @@ spec:
             # OAuth discovery (RFC 9728): this resource's public base URL,
             # advertised in /.well-known/oauth-protected-resource + the 401
             # WWW-Authenticate resource_metadata hint. AuthServerURL falls back
-            # to IDENTITY_VERIFIER_EXPECTED_ISSUER set below.
+            # to MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER set below.
             - { name: MEMQL_MCP_PUBLIC_URL, value: "https://mcp.staging.copresent.ai" }
             # Capability tier (Gate A). authoring = named tools + session-scoped
             # define; role gate (Gate B) still applies on top. Owner-confirmed.
@@ -127,10 +127,10 @@ spec:
             # identity is taken from the caller's verified token claims, so every
             # caller acts as themselves rather than a shared pinned identity.
             # --- identity verifier (bearer-JWT auth for /mcp) ---
-            - { name: IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
-            - { name: IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
-            - { name: IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.copresent.ai" }
-            - { name: IDENTITY_ENABLED, value: "false" }
+            - { name: MEMQL_IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
+            - { name: MEMQL_IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
+            - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.copresent.ai" }
+            - { name: MEMQL_IDENTITY_ENABLED, value: "false" }
             # Internal TLS: trust the cluster CA when calling https://identity:8085.
             - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }
             - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }

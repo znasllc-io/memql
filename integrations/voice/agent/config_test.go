@@ -15,11 +15,11 @@ func envMap(m map[string]string) Getenv {
 
 func baseEnv() map[string]string {
 	return map[string]string{
-		"LIVEKIT_URL":            "ws://livekit:7880",
-		"LIVEKIT_API_KEY":        "key",
-		"LIVEKIT_API_SECRET":     "secret",
-		"OPENAI_API_KEY":         "sk-test",
-		"MEMQL_GRPC_ADDR":        "memql:50051",
+		"LIVEKIT_URL":          "ws://livekit:7880",
+		"LIVEKIT_API_KEY":      "key",
+		"LIVEKIT_API_SECRET":   "secret",
+		"MEMQL_OPENAI_API_KEY": "sk-test",
+		"MEMQL_GRPC_ADDR":      "memql:50051",
 	}
 }
 
@@ -60,7 +60,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 func TestLoadConfig_MissingRequired(t *testing.T) {
 	for _, key := range []string{
 		"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET",
-		"OPENAI_API_KEY", "MEMQL_GRPC_ADDR",
+		"MEMQL_OPENAI_API_KEY", "MEMQL_GRPC_ADDR",
 	} {
 		env := baseEnv()
 		delete(env, key)
@@ -90,8 +90,8 @@ func TestLoadConfig_RealtimeAndOverrides(t *testing.T) {
 	env := baseEnv()
 	env["MEMQL_VOICE_EXECUTOR"] = "realtime"
 	env["MEMQL_VOICE_AGENT_INSTANCE_ID"] = "va-1"
-	env["POLYPHON_OPENAI_ASR_MODEL"] = "gpt-4o-mini-transcribe"
-	env["POLYPHON_OPENAI_TTS_MODEL"] = "gpt-4o-tts"
+	env["MEMQL_POLYPHON_OPENAI_ASR_MODEL"] = "gpt-4o-mini-transcribe"
+	env["MEMQL_POLYPHON_OPENAI_TTS_MODEL"] = "gpt-4o-tts"
 	env["MEMQL_AVATAR_VENDOR"] = "none"
 	env["VOICE_AGENT_LOG_LEVEL"] = "debug"
 	cfg, err := LoadConfig(envMap(env))

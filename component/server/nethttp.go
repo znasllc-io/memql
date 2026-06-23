@@ -690,7 +690,7 @@ func LivezPaths() []string {
 // landing/login redirect surface that some browsers still hit.
 //
 // Note: the identity service itself owns the canonical auth pages
-// at the IDENTITY_BASE_URL. These entries are kept for backward
+// at the MEMQL_IDENTITY_BASE_URL. These entries are kept for backward
 // compatibility and the dev-mode landing/logout shim in
 // app/config.go.
 func AuthPaths() []string {

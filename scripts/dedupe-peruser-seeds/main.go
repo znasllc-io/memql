@@ -14,11 +14,11 @@
 //
 // CONNECTION:
 //
-// Reads $MEMORY_NODES_DATABASE_DSN. The local k3d postgres is reachable
+// Reads $MEMQL_DATABASE_DSN. The local k3d postgres is reachable
 // in-cluster at
 // `postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable`;
 // running this script from the host (via the postgres port-forward) is
-// `MEMORY_NODES_DATABASE_DSN=postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable go run ./scripts/dedupe-peruser-seeds --dry-run`.
+// `MEMQL_DATABASE_DSN=postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable go run ./scripts/dedupe-peruser-seeds --dry-run`.
 //
 // POST-RUN:
 //
@@ -71,7 +71,7 @@ func main() {
 	var (
 		dryRun  = flag.Bool("dry-run", false, "Print the plan without writing")
 		execute = flag.Bool("execute", false, "Actually run the DELETEs (mutually exclusive with --dry-run)")
-		dsn     = flag.String("dsn", "", "Postgres DSN; defaults to $MEMORY_NODES_DATABASE_DSN")
+		dsn     = flag.String("dsn", "", "Postgres DSN; defaults to $MEMQL_DATABASE_DSN")
 	)
 	flag.Parse()
 
@@ -82,10 +82,10 @@ func main() {
 
 	resolvedDSN := *dsn
 	if resolvedDSN == "" {
-		resolvedDSN = os.Getenv("MEMORY_NODES_DATABASE_DSN")
+		resolvedDSN = os.Getenv("MEMQL_DATABASE_DSN")
 	}
 	if resolvedDSN == "" {
-		fmt.Fprintln(os.Stderr, "ERROR: --dsn or $MEMORY_NODES_DATABASE_DSN required")
+		fmt.Fprintln(os.Stderr, "ERROR: --dsn or $MEMQL_DATABASE_DSN required")
 		os.Exit(2)
 	}
 
@@ -327,9 +327,9 @@ func printPlan(plan Plan) {
 
 	// One-line JSON for easy machine consumption when piped.
 	summary := map[string]int{
-		"groups":              len(plan.Groups),
-		"doomedAgents":        len(plan.DoomedAgentIDs),
-		"doomedParticipants":  len(plan.DoomedParticipantIDs),
+		"groups":             len(plan.Groups),
+		"doomedAgents":       len(plan.DoomedAgentIDs),
+		"doomedParticipants": len(plan.DoomedParticipantIDs),
 	}
 	if b, err := json.Marshal(summary); err == nil {
 		fmt.Printf("summary-json: %s\n", string(b))

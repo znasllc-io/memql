@@ -172,7 +172,7 @@ func TestCreateClientSecret_APIErrorSurfaces(t *testing.T) {
 }
 
 func TestCreateClientSecret_MissingKey(t *testing.T) {
-	// Ensure the env fallback can't find a key either (a real OPENAI_API_KEY
+	// Ensure the env fallback can't find a key either (a real MEMQL_OPENAI_API_KEY
 	// in the test env would otherwise satisfy apiKey()).
 	t.Setenv(secretAPIKeyPrimary, "")
 	t.Setenv(secretAPIKeyFallback, "")

@@ -70,14 +70,14 @@ func (c *Component) Ready() <-chan struct{} { return c.readyCh }
 func loadFromEnv() *busv1.ConfigSnapshot {
 	return &busv1.ConfigSnapshot{
 		// Database
-		DbDsn: envStr("MEMORY_NODES_DATABASE_DSN"),
+		DbDsn: envStr("MEMQL_DATABASE_DSN"),
 
 		// Engine
 		EngineStepCacheEnabled: envBool("MEMQL_STEP_CACHE_ENABLED"),
 
 		// AI
-		SiOpenaiApiKey:    envStr("MEMQL_SI_OPENAI_API_KEY"),
-		SiOpenaiProjectId: envStr("MEMQL_SI_OPENAI_PROJECT_ID"),
+		SiOpenaiApiKey:    envStr("MEMQL_AI_OPENAI_API_KEY"),
+		SiOpenaiProjectId: envStr("MEMQL_AI_OPENAI_PROJECT_ID"),
 		SiDefaultProvider: envStr("MEMQL_DEFAULT_PROVIDER"),
 
 		// Server
@@ -87,20 +87,20 @@ func loadFromEnv() *busv1.ConfigSnapshot {
 		// STT
 		SttProvider: envStr("MEMQL_STT_PROVIDER"),
 
-		// Auth — IDENTITY_VERIFIER_BASE_URL gates whether bff/voice/etc.
+		// Auth — MEMQL_IDENTITY_VERIFIER_BASE_URL gates whether bff/voice/etc.
 		// run with auth or fall through to the dev no-auth identity.
 		// The Jumpcloud* fields on ConfigSnapshot are inert; they
 		// remain in the generated proto for backwards-compat with old
 		// snapshots and are not populated.
-		AuthEnabled:       envStr("IDENTITY_VERIFIER_BASE_URL") != "",
+		AuthEnabled:       envStr("MEMQL_IDENTITY_VERIFIER_BASE_URL") != "",
 		DelegationEnabled: envBool("MEMQL_DELEGATION_ENABLED"),
 
 		// Polyphon
-		PolyphonBridgeAgentUrl: envStr("POLYPHON_BRIDGE_AGENT_URL"),
-		PolyphonVoiceProvider:  envStr("POLYPHON_VOICE_PROVIDER"),
-		PolyphonOpenaiAsrModel: envStr("POLYPHON_OPENAI_ASR_MODEL"),
-		PolyphonOpenaiTtsModel: envStr("POLYPHON_OPENAI_TTS_MODEL"),
-		PolyphonOpenaiTtsVoice: envStr("POLYPHON_OPENAI_TTS_VOICE"),
+		PolyphonBridgeAgentUrl: envStr("MEMQL_POLYPHON_BRIDGE_AGENT_URL"),
+		PolyphonVoiceProvider:  envStr("MEMQL_POLYPHON_VOICE_PROVIDER"),
+		PolyphonOpenaiAsrModel: envStr("MEMQL_POLYPHON_OPENAI_ASR_MODEL"),
+		PolyphonOpenaiTtsModel: envStr("MEMQL_POLYPHON_OPENAI_TTS_MODEL"),
+		PolyphonOpenaiTtsVoice: envStr("MEMQL_POLYPHON_OPENAI_TTS_VOICE"),
 
 		// Node
 		NodeType:           envStr("MEMQL_NODE_TYPE"),

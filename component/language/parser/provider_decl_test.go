@@ -12,8 +12,8 @@ func TestParseProviderDecl_GoldenPath_OpenAIChild(t *testing.T) {
 @modality("text")
 provider chat5Mini {
   auth {
-    apiKey     env("MEMQL_SI_OPENAI_API_KEY")
-    projectId  env("MEMQL_SI_OPENAI_PROJECT_ID")
+    apiKey     env("MEMQL_AI_OPENAI_API_KEY")
+    projectId  env("MEMQL_AI_OPENAI_PROJECT_ID")
   }
   params {
     maxTokens            4096
@@ -48,11 +48,11 @@ provider chat5Mini {
 	if got.IsDefault {
 		t.Error("IsDefault = true, want false (no @default)")
 	}
-	if got.Auth["apiKey"] != "${MEMQL_SI_OPENAI_API_KEY}" {
-		t.Errorf("Auth[apiKey] = %q, want ${MEMQL_SI_OPENAI_API_KEY}", got.Auth["apiKey"])
+	if got.Auth["apiKey"] != "${MEMQL_AI_OPENAI_API_KEY}" {
+		t.Errorf("Auth[apiKey] = %q, want ${MEMQL_AI_OPENAI_API_KEY}", got.Auth["apiKey"])
 	}
-	if got.Auth["projectId"] != "${MEMQL_SI_OPENAI_PROJECT_ID}" {
-		t.Errorf("Auth[projectId] = %q, want ${MEMQL_SI_OPENAI_PROJECT_ID}", got.Auth["projectId"])
+	if got.Auth["projectId"] != "${MEMQL_AI_OPENAI_PROJECT_ID}" {
+		t.Errorf("Auth[projectId] = %q, want ${MEMQL_AI_OPENAI_PROJECT_ID}", got.Auth["projectId"])
 	}
 	if got.Params["maxTokens"] != 4096 {
 		t.Errorf("Params[maxTokens] = %v (%T), want 4096 int", got.Params["maxTokens"], got.Params["maxTokens"])
@@ -74,7 +74,7 @@ func TestParseProviderDecl_BaseProvider(t *testing.T) {
 @type("OpenAI")
 provider openai {
   auth {
-    apiKey  env("MEMQL_SI_OPENAI_API_KEY")
+    apiKey  env("MEMQL_AI_OPENAI_API_KEY")
   }
 }`
 
@@ -91,8 +91,8 @@ provider openai {
 	if got.Model != "" {
 		t.Errorf("Model = %q, want empty (base providers have no model)", got.Model)
 	}
-	if got.Auth["apiKey"] != "${MEMQL_SI_OPENAI_API_KEY}" {
-		t.Errorf("Auth[apiKey] = %q, want ${MEMQL_SI_OPENAI_API_KEY}", got.Auth["apiKey"])
+	if got.Auth["apiKey"] != "${MEMQL_AI_OPENAI_API_KEY}" {
+		t.Errorf("Auth[apiKey] = %q, want ${MEMQL_AI_OPENAI_API_KEY}", got.Auth["apiKey"])
 	}
 }
 
@@ -174,7 +174,7 @@ func TestParseProviderDecl_Enabled(t *testing.T) {
 @model("gpt-5-mini")
 provider chat5Mini {
   auth {
-    apiKey  env("MEMQL_SI_OPENAI_API_KEY")
+    apiKey  env("MEMQL_AI_OPENAI_API_KEY")
   }
 }`
 

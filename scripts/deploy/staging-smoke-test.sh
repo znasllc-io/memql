@@ -343,7 +343,7 @@ function deep_authenticated_query() {
 # mint a token -- it gets `403 insecure_transport` (or is redirected to
 # https by the edge), never a 200 success. This asserts the server end
 # of that invariant from the front door so an http regression (a deploy
-# manifest reverting IDENTITY_VERIFIER_BASE_URL to http://, or the edge
+# manifest reverting MEMQL_IDENTITY_VERIFIER_BASE_URL to http://, or the edge
 # dropping TLS enforcement) is caught in the promotion gate. The node
 # (client) end is covered by the Go regression test
 # TestMaybeBootstrapNodeToken_RefusesInsecureHTTP.

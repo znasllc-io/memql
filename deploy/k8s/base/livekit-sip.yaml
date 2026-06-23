@@ -95,12 +95,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: livekit-secrets
-                  key: POLYPHON_LIVEKIT_API_KEY
+                  key: MEMQL_POLYPHON_LIVEKIT_API_KEY
             - name: SIP_LK_API_SECRET
               valueFrom:
                 secretKeyRef:
                   name: livekit-secrets
-                  key: POLYPHON_LIVEKIT_API_SECRET
+                  key: MEMQL_POLYPHON_LIVEKIT_API_SECRET
           volumeMounts:
             - { name: config, mountPath: /etc/livekit-sip, readOnly: true }
           readinessProbe:

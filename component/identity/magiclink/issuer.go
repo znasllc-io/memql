@@ -98,16 +98,16 @@ type Issuer struct {
 
 // IssueInput is the per-request payload the HTTP handler passes in.
 type IssueInput struct {
-	Email         string
-	ClientId      string
-	RedirectURI   string
-	State         string
+	Email               string
+	ClientId            string
+	RedirectURI         string
+	State               string
 	CodeChallenge       string
 	CodeChallengeMethod string
-	SourceIP      string
-	UserAgent     string
-	InvitationId  string
-	CorrelationId string
+	SourceIP            string
+	UserAgent           string
+	InvitationId        string
+	CorrelationId       string
 
 	// Bootstrap=true marks the call as the /setup wizard's owner-mint
 	// path. Skips the bootstrap-state gate (chicken-and-egg: the
@@ -196,7 +196,7 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 		}
 		// Resolve through the unified resolver so dynamically-registered
 		// (RFC 7591) clients in the store work exactly like static
-		// IDENTITY_REGISTERED_CLIENTS.
+		// MEMQL_IDENTITY_REGISTERED_CLIENTS.
 		if identity.ResolveClient(ctx, i.Cfg, i.Store, in.ClientId) == nil {
 			return ErrUnknownClient
 		}

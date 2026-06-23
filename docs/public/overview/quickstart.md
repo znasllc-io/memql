@@ -175,11 +175,11 @@ bootstrapped yet, identity stamps `clusterSettings` and emails
 the owner magic link automatically -- no `/setup` visit needed.
 
 ```bash
-export IDENTITY_BOOTSTRAP_DOMAIN=staging.example.com
-export IDENTITY_BOOTSTRAP_OWNER_EMAIL=alex@example.com
-export IDENTITY_BOOTSTRAP_OWNER_FIRST_NAME=Alex
-export IDENTITY_BOOTSTRAP_OWNER_LAST_NAME=Stone
-export IDENTITY_BOOTSTRAP_REGISTRATION_MODE=waitlist
+export MEMQL_IDENTITY_BOOTSTRAP_DOMAIN=staging.example.com
+export MEMQL_IDENTITY_BOOTSTRAP_OWNER_EMAIL=alex@example.com
+export MEMQL_IDENTITY_BOOTSTRAP_OWNER_FIRST_NAME=Alex
+export MEMQL_IDENTITY_BOOTSTRAP_OWNER_LAST_NAME=Stone
+export MEMQL_IDENTITY_BOOTSTRAP_REGISTRATION_MODE=waitlist
 # optional: phone, primary_role, gender, birthdate, org_name,
 # registration_domains, internal_domains, internal_default_role,
 # notify_emails -- all envs at IDENTITY_BOOTSTRAP_<NAME>
@@ -188,7 +188,7 @@ make up
 
 Operators who set SOME but not all of the required envs go
 through the interactive wizard; their pre-set values prefill the
-form. This means a placeholder `IDENTITY_BOOTSTRAP_DOMAIN` in the
+form. This means a placeholder `MEMQL_IDENTITY_BOOTSTRAP_DOMAIN` in the
 local overlay default is fine -- the rest of the wizard fields
 remain blank and the operator fills them in interactively the
 first time.

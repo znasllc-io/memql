@@ -87,10 +87,10 @@ spec:
             - { name: MEMQL_WORKBENCH_ROOT, value: "/var/lib/memql/workbenches" }
             - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
             - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }
-            - { name: IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
-            - { name: IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
-            - { name: IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.copresent.ai" }
-            - { name: IDENTITY_ENABLED, value: "false" }
+            - { name: MEMQL_IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
+            - { name: MEMQL_IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
+            - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.copresent.ai" }
+            - { name: MEMQL_IDENTITY_ENABLED, value: "false" }
             # Internal TLS: trust the cluster CA when calling https://identity:8085.
             # SSL_CERT_DIR covers 0.9.0 images; MEMQL_HTTP_TLS_CA_FILE the explicit path at 0.9.1+.
             - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }

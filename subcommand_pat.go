@@ -51,7 +51,7 @@ Subcommands:
   list    List PAT identity rows (no key material) for a user or the whole cluster.
   revoke  Revoke a PAT identity row by id (flips active=false).
 
-Requires the database environment (MEMORY_NODES_DATABASE_DSN). Typically run via
+Requires the database environment (MEMQL_DATABASE_DSN). Typically run via
   kubectl exec -n memql deploy/memql-identity -- /app/memql pat mint --user-id <id>
 against a cluster whose schema is already migrated.
 
@@ -215,7 +215,7 @@ func runPATRevoke(args []string) int {
 // Stopping after the engine (#686, mirroring the migrate subcommand's
 // stop-after-database) matters because `pat mint` only needs the engine +
 // database; starting the identity service would fatal-validate
-// (IDENTITY_KEY_ENCRYPTION_KEY required ...) and abort the mint on the identity
+// (MEMQL_IDENTITY_KEY_ENCRYPTION_KEY required ...) and abort the mint on the identity
 // binary -- the only binary the `pat` subcommand is dispatched on.
 func bootstrapPATEngine(prefix string) ([]common.Dependency, *memql.MemQLEngine, *slog.Logger, int) {
 	// Mirror the server bootstrap: decrypt the genesis envelope (sealed DSN /

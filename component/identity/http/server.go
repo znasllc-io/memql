@@ -146,7 +146,7 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// UNAUTHENTICATED (public clients self-register) and NOT behind any
 	// auth middleware -- the SystemActor wrap only stamps a system actor
 	// when no upstream auth attached one, same as /oauth/token. Gated at
-	// the handler on Cfg.OAuthDCREnabled (env IDENTITY_OAUTH_DCR_ENABLED,
+	// the handler on Cfg.OAuthDCREnabled (env MEMQL_IDENTITY_OAUTH_DCR_ENABLED,
 	// default true). Bounded body + JSON-only + POST-only at the handler.
 	mux.HandleFunc("POST /register", wrap(s.cors(s.handleRegister)))
 	mux.HandleFunc("OPTIONS /register", wrap(s.cors(s.handleOptions)))

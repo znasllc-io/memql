@@ -19,7 +19,7 @@ import (
 )
 
 // ResolveTTSVoice maps the persona's canonical voice to the provider voice id
-// for the active TTS provider (openai, per POLYPHON_VOICE_PROVIDER --
+// for the active TTS provider (openai, per MEMQL_POLYPHON_VOICE_PROVIDER --
 // voice.ActiveProvider). This is the cascade path's
 // voice (#455 consumes it at TTS synthesis time).
 //

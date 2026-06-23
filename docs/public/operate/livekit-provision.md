@@ -26,7 +26,7 @@ Tracking issue: znasllc-io/memql#1043.
 - `deploy/k8s/base/externalsecret-livekit.yaml` — ESO reconciles the
   `livekit-secrets` k8s Secret from Key Vault (declarative; mirrors
   `memql-secrets`).
-- `bff.yaml` / `voice.yaml` — `POLYPHON_LIVEKIT_URL` + `_PUBLIC_URL` (non-secret)
+- `bff.yaml` / `voice.yaml` — `MEMQL_POLYPHON_LIVEKIT_URL` + `_PUBLIC_URL` (non-secret)
   and `_API_KEY` / `_API_SECRET` (from `livekit-secrets`).
 - The staging overlay digest-pins `livekit/livekit-server`.
 
@@ -97,4 +97,4 @@ networks.
 - Mic toggle in CoPresent mints a room token (no "provider not configured").
 - Browser joins the LiveKit room; the General Assistant participates once the
   voice-agent is wired with `LIVEKIT_URL` / `_API_KEY` / `_API_SECRET` +
-  `OPENAI_API_KEY`.
+  `MEMQL_OPENAI_API_KEY`.

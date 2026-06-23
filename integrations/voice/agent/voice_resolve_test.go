@@ -13,7 +13,7 @@ import (
 // does NOT fork the mapping. We pin the provider via env so the assertion is
 // deterministic regardless of the CI host's provider configuration.
 func TestResolveTTSVoice_ConsumesCatalog(t *testing.T) {
-	t.Setenv("POLYPHON_VOICE_PROVIDER", "openai")
+	t.Setenv("MEMQL_POLYPHON_VOICE_PROVIDER", "openai")
 
 	p := ResolvePersona(SessionAck{CanonicalVoice: "alto"}, Config{})
 	got := ResolveTTSVoice(p)
@@ -25,7 +25,7 @@ func TestResolveTTSVoice_ConsumesCatalog(t *testing.T) {
 }
 
 func TestResolveTTSVoice_ExplicitProviderOverride(t *testing.T) {
-	t.Setenv("POLYPHON_VOICE_PROVIDER", "openai")
+	t.Setenv("MEMQL_POLYPHON_VOICE_PROVIDER", "openai")
 
 	p := ResolvePersona(SessionAck{CanonicalVoice: "tenor"}, Config{})
 	assert.Equal(t, voice.ResolveVoice("tenor", "openai"), ResolveTTSVoice(p))
@@ -47,7 +47,7 @@ func TestResolveRealtimeVoice_ConsumesCatalog(t *testing.T) {
 // (which ResolvePersona keeps verbatim when non-empty) still resolves to a
 // non-empty provider default, so the audio path never goes silent.
 func TestResolveVoice_UnknownCanonicalNeverSilent(t *testing.T) {
-	t.Setenv("POLYPHON_VOICE_PROVIDER", "openai")
+	t.Setenv("MEMQL_POLYPHON_VOICE_PROVIDER", "openai")
 	p := ResolvePersona(SessionAck{CanonicalVoice: "does-not-exist"}, Config{})
 	assert.NotEmpty(t, ResolveTTSVoice(p))
 	assert.NotEmpty(t, ResolveRealtimeVoice(p))
@@ -56,7 +56,7 @@ func TestResolveVoice_UnknownCanonicalNeverSilent(t *testing.T) {
 // TestResolveVoice_DefaultCanonicalForEmptyAck: an empty canonical falls back
 // to "alto" in ResolvePersona, which resolves to the catalog's alto voice.
 func TestResolveVoice_DefaultCanonicalForEmptyAck(t *testing.T) {
-	t.Setenv("POLYPHON_VOICE_PROVIDER", "openai")
+	t.Setenv("MEMQL_POLYPHON_VOICE_PROVIDER", "openai")
 	p := ResolvePersona(SessionAck{}, Config{})
 	assert.Equal(t, "alto", p.CanonicalVoice)
 	assert.Equal(t, voice.ResolveVoice("alto", "openai"), ResolveTTSVoice(p))

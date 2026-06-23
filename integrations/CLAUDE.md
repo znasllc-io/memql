@@ -208,10 +208,10 @@ Key files:
 - `tts.go` - TTSClient using /v1/audio/speech HTTP API
 
 **Environment Variables:**
-- `POLYPHON_VOICE_PROVIDER=openai` (default) to select this provider
-- `POLYPHON_OPENAI_ASR_MODEL` (default: gpt-4o-transcribe)
-- `POLYPHON_OPENAI_TTS_MODEL` (default: gpt-4o-mini-tts)
-- `POLYPHON_OPENAI_TTS_VOICE` (default: alloy)
+- `MEMQL_POLYPHON_VOICE_PROVIDER=openai` (default) to select this provider
+- `MEMQL_POLYPHON_OPENAI_ASR_MODEL` (default: gpt-4o-transcribe)
+- `MEMQL_POLYPHON_OPENAI_TTS_MODEL` (default: gpt-4o-mini-tts)
+- `MEMQL_POLYPHON_OPENAI_TTS_VOICE` (default: alloy)
 
 ### stt/ - Speech-to-Text
 **Purpose:** Convert audio to text transcriptions
@@ -439,8 +439,8 @@ kubectl logs -n memql deploy/cognition -f | grep "ai.*response"
 
 ### AI Providers (Cognition Integration)
 ```bash
-MEMQL_SI_OPENAI_API_KEY=sk-...         # OpenAI provider
-MEMQL_SI_ANTHROPIC_API_KEY=sk-ant-...  # Anthropic provider
+MEMQL_AI_OPENAI_API_KEY=sk-...         # OpenAI provider
+MEMQL_AI_ANTHROPIC_API_KEY=sk-ant-...  # Anthropic provider
 MEMQL_SI_CACHE_DEFAULT_ENABLED=true
 MEMQL_SI_CACHE_MAX_SECONDS=120
 ```

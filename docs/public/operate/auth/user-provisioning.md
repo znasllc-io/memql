@@ -17,13 +17,13 @@ underlying mutations on `v1:identity:user` / `v1:identity:identity`
 
 ## Registration modes
 
-Set via `IDENTITY_REGISTRATION_MODE`. Captured by the first-run
+Set via `MEMQL_IDENTITY_REGISTRATION_MODE`. Captured by the first-run
 wizard if the env var is unset.
 
 | Mode                 | Who can register                                                        |
 |----------------------|-------------------------------------------------------------------------|
 | `open`               | Anyone with any email. Default for new clusters.                        |
-| `domain_restricted`  | Email must match `IDENTITY_REGISTRATION_DOMAINS`.                       |
+| `domain_restricted`  | Email must match `MEMQL_IDENTITY_REGISTRATION_DOMAINS`.                       |
 | `invite_only`        | No self-registration. Users only enter via admin invitations.           |
 | `waitlist`           | Users submit access requests; admins approve into invitations.          |
 
@@ -53,7 +53,7 @@ them).
    - **New user**: provisions `v1:identity:user` and
      `v1:identity:identity` (`identityType="magic_link"`), then
      issues tokens. Internal-domain users get
-     `IDENTITY_INTERNAL_DEFAULT_ROLE`; external users start with
+     `MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE`; external users start with
      no cluster role and an owner grant on a fresh personal
      partition.
 6. Browser receives the access JWT and starts using it as
@@ -85,7 +85,7 @@ plaintext is shown only once at issuance.
 
 ## Personal partitions for external users
 
-External users (email did not match `IDENTITY_INTERNAL_DOMAINS`)
+External users (email did not match `MEMQL_IDENTITY_INTERNAL_DOMAINS`)
 do not get a cluster-wide role. Instead the
 `provisionPersonalPartitionOnFirstLogin` automation creates a
 personal partition for them on the first session and stamps a
@@ -95,9 +95,9 @@ cluster's perspective they have no global visibility.
 
 ## Internal users
 
-When `IDENTITY_INTERNAL_DOMAINS` matches the registering email's
+When `MEMQL_IDENTITY_INTERNAL_DOMAINS` matches the registering email's
 domain, the user is flagged `internal=true` and assigned the
-cluster-wide `IDENTITY_INTERNAL_DEFAULT_ROLE` (default `writer`).
+cluster-wide `MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE` (default `writer`).
 This is captured at registration so policy decisions stay stable
 even if the configuration drifts later.
 
@@ -129,7 +129,7 @@ to.
 Users request deletion via `/me/delete` in the identity web app.
 The mutation stamps `deletionScheduledAt` on the user row but
 does not hard-delete; an `accountDeletionSweep` cron runs after
-`IDENTITY_DELETION_COOLDOWN_DAYS` and performs the cascade:
+`MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS` and performs the cascade:
 
 - User row hard-deleted
 - All `v1:identity:identity` / `v1:identity:partitionAccess` /

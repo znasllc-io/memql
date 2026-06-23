@@ -4,7 +4,7 @@
 #
 # Measure how fast the Anthropic API responds with the configured key
 # under conditions that approximate what the agent node sees during a
-# takeover turn. Reads MEMQL_SI_ANTHROPIC_API_KEY from .env.local
+# takeover turn. Reads MEMQL_AI_ANTHROPIC_API_KEY from .env.local
 # (no other side effects -- the key is never echoed).
 #
 # Three scenarios:
@@ -78,13 +78,13 @@ function load_key() {
         echo "ERROR: $ENV_FILE not found"
         exit 1
     fi
-    KEY=$(grep "^MEMQL_SI_ANTHROPIC_API_KEY=" "$ENV_FILE" | head -1 | cut -d"'" -f2)
+    KEY=$(grep "^MEMQL_AI_ANTHROPIC_API_KEY=" "$ENV_FILE" | head -1 | cut -d"'" -f2)
     if [[ -z "$KEY" ]]; then
         # tolerate unquoted form
-        KEY=$(grep "^MEMQL_SI_ANTHROPIC_API_KEY=" "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+        KEY=$(grep "^MEMQL_AI_ANTHROPIC_API_KEY=" "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
     fi
     if [[ -z "$KEY" ]]; then
-        echo "ERROR: MEMQL_SI_ANTHROPIC_API_KEY not found in $ENV_FILE"
+        echo "ERROR: MEMQL_AI_ANTHROPIC_API_KEY not found in $ENV_FILE"
         exit 1
     fi
     echo "INFO: key loaded (suffix ...${KEY: -10}, len ${#KEY})"

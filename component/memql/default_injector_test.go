@@ -198,9 +198,9 @@ func TestInjectConceptName(t *testing.T) {
 // TestInjectMutationIds confirms the injected row id matches the
 // operator seed tool's id formula so the two paths converge on one row.
 func TestInjectMutationIds(t *testing.T) {
-	gv := genesis.InjectableDefault{Entry: genesis.ManifestEntry{Name: "EMAIL_FROM_NAME", Scope: "global"}}
-	if mut, id := variableMutationFor(gv); mut != "setGlobalVariable" || id != "var-global-email-from-name" {
-		t.Errorf("global var: got (%q,%q), want (setGlobalVariable, var-global-email-from-name)", mut, id)
+	gv := genesis.InjectableDefault{Entry: genesis.ManifestEntry{Name: "MEMQL_EMAIL_FROM_NAME", Scope: "global"}}
+	if mut, id := variableMutationFor(gv); mut != "setGlobalVariable" || id != "var-global-memql-email-from-name" {
+		t.Errorf("global var: got (%q,%q), want (setGlobalVariable, var-global-memql-email-from-name)", mut, id)
 	}
 	pv := genesis.InjectableDefault{Entry: genesis.ManifestEntry{Name: "FOO_BAR", Scope: "partition"}}
 	if mut, id := variableMutationFor(pv); mut != "setPartitionVariable" || id != "var-foo-bar" {

@@ -68,10 +68,10 @@ func TestAccountLockKey_StableAndDistinct(t *testing.T) {
 
 // openAdmissionTestDB connects to Postgres for the atomic-admission integration
 // test, skipping when none is reachable so it never blocks CI. DSN comes from
-// MEMORY_NODES_DATABASE_DSN, else the dev-compose default.
+// MEMQL_DATABASE_DSN, else the dev-compose default.
 func openAdmissionTestDB(t *testing.T) *bun.DB {
 	t.Helper()
-	dsn := os.Getenv("MEMORY_NODES_DATABASE_DSN")
+	dsn := os.Getenv("MEMQL_DATABASE_DSN")
 	if dsn == "" {
 		dsn = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"
 	}

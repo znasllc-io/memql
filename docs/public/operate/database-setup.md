@@ -35,7 +35,7 @@ memQL uses **separate databases** for each environment to ensure complete isolat
 
 | Secret Name | Environment | Database | Used By |
 |-------------|-------------|----------|---------|
-| `MEMORY_NODES_DATABASE_DSN` | WARNING: Legacy | Staging (original) | Legacy/backup |
+| `MEMQL_DATABASE_DSN` | WARNING: Legacy | Staging (original) | Legacy/backup |
 | `MEMORY_NODES_DATABASE_DSN_LAB` | Staging | `db-99414` | Staging deployment |
 | `MEMORY_NODES_DATABASE_DSN_PROD` | [PENDING] **Not created** | TBD | Production (when ready) |
 
@@ -43,24 +43,24 @@ memQL uses **separate databases** for each environment to ensure complete isolat
 
 Both deployments use the **same environment variable name** in the container:
 ```bash
-MEMORY_NODES_DATABASE_DSN
+MEMQL_DATABASE_DSN
 ```
 
 But they reference **different secrets**:
 
 **Staging deployment:**
 ```bash
---set-secrets "MEMORY_NODES_DATABASE_DSN=MEMORY_NODES_DATABASE_DSN_LAB:latest"
+--set-secrets "MEMQL_DATABASE_DSN=MEMORY_NODES_DATABASE_DSN_LAB:latest"
 #              ↑ Container env var         ↑ Secret in Secret Manager
 ```
 
 **Production deployment:**
 ```bash
---set-secrets "MEMORY_NODES_DATABASE_DSN=MEMORY_NODES_DATABASE_DSN_PROD:latest"
+--set-secrets "MEMQL_DATABASE_DSN=MEMORY_NODES_DATABASE_DSN_PROD:latest"
 #              ↑ Container env var         ↑ Secret in Secret Manager
 ```
 
-**Result**: Your code always reads `MEMORY_NODES_DATABASE_DSN`, but each environment connects to its own database.
+**Result**: Your code always reads `MEMQL_DATABASE_DSN`, but each environment connects to its own database.
 
 ---
 

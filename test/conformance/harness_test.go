@@ -114,7 +114,7 @@ func newEnv(t *testing.T) *Env {
 // not reachable it returns (nil,false) and the DB-backed dimensions are skipped.
 func tryDB(t *testing.T) (*bun.DB, bool) {
 	t.Helper()
-	dsn := os.Getenv("MEMORY_NODES_DATABASE_DSN")
+	dsn := os.Getenv("MEMQL_DATABASE_DSN")
 	if dsn == "" {
 		dsn = defaultDSN
 	}
@@ -131,7 +131,7 @@ func tryDB(t *testing.T) (*bun.DB, bool) {
 
 	// Make sure NewMemoryNodesDatabase (which reads the env) sees the DSN we
 	// just proved reachable, then migrate via the production lifecycle.
-	_ = os.Setenv("MEMORY_NODES_DATABASE_DSN", dsn)
+	_ = os.Setenv("MEMQL_DATABASE_DSN", dsn)
 	mnd, err := memoryNodes.NewMemoryNodesDatabase()
 	if err != nil {
 		t.Fatalf("conformance: NewMemoryNodesDatabase: %v", err)

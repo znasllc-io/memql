@@ -10,22 +10,22 @@ import (
 // the LiveKit transport layer for multi-agent voice rooms.
 type Config struct {
 	// LiveKitURL is the LiveKit server WebSocket URL (used for server-side connections).
-	// Set via POLYPHON_LIVEKIT_URL environment variable.
+	// Set via MEMQL_POLYPHON_LIVEKIT_URL environment variable.
 	LiveKitURL string
 
 	// LiveKitPublicURL is the browser-reachable LiveKit WebSocket URL.
 	// In Docker, the internal hostname (e.g. ws://livekit:7880) is not reachable
 	// from the browser, so this provides the external URL (e.g. ws://localhost:7880).
 	// Falls back to LiveKitURL if not set.
-	// Set via POLYPHON_LIVEKIT_PUBLIC_URL environment variable.
+	// Set via MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL environment variable.
 	LiveKitPublicURL string
 
 	// LiveKitAPIKey is the LiveKit API key.
-	// Set via POLYPHON_LIVEKIT_API_KEY environment variable.
+	// Set via MEMQL_POLYPHON_LIVEKIT_API_KEY environment variable.
 	LiveKitAPIKey string
 
 	// LiveKitAPISecret is the LiveKit API secret.
-	// Set via POLYPHON_LIVEKIT_API_SECRET environment variable.
+	// Set via MEMQL_POLYPHON_LIVEKIT_API_SECRET environment variable.
 	LiveKitAPISecret string
 
 	// Scoring weights override (optional).
@@ -38,10 +38,10 @@ type Config struct {
 // ConfigFromEnv loads Polyphon configuration from environment variables.
 func ConfigFromEnv() Config {
 	return Config{
-		LiveKitURL:       envString("POLYPHON_LIVEKIT_URL", ""),
-		LiveKitPublicURL: envString("POLYPHON_LIVEKIT_PUBLIC_URL", ""),
-		LiveKitAPIKey:    envString("POLYPHON_LIVEKIT_API_KEY", ""),
-		LiveKitAPISecret: envString("POLYPHON_LIVEKIT_API_SECRET", ""),
+		LiveKitURL:       envString("MEMQL_POLYPHON_LIVEKIT_URL", ""),
+		LiveKitPublicURL: envString("MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL", ""),
+		LiveKitAPIKey:    envString("MEMQL_POLYPHON_LIVEKIT_API_KEY", ""),
+		LiveKitAPISecret: envString("MEMQL_POLYPHON_LIVEKIT_API_SECRET", ""),
 	}
 }
 

@@ -42,7 +42,7 @@ A migration is a Go program under `scripts/<migration-name>/` with:
   operator can land on a discoverable doc when triaging a
   symptom.
 
-`MEMORY_NODES_DATABASE_DSN` is the canonical environment variable
+`MEMQL_DATABASE_DSN` is the canonical environment variable
 every migration script reads; `--dsn=...` is the explicit override.
 
 ## Why hard delete?
@@ -80,7 +80,7 @@ order:
    "any cluster booted before PR #N", "any environment whose
    first user signup predates 2026-04-20", etc.
 3. **Dry-run command** the operator runs first, with the exact
-   `MEMORY_NODES_DATABASE_DSN` shape for each environment
+   `MEMQL_DATABASE_DSN` shape for each environment
    (compose, staging, prod).
 4. **What to verify** in the dry-run output before approving the
    execute pass.

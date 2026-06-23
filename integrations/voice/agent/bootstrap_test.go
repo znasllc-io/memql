@@ -42,9 +42,9 @@ func TestResolveVoiceAgentToken_BootstrapSuccess(t *testing.T) {
 	defer srv.Close()
 
 	env := envMap(map[string]string{
-		"MEMQL_NODE_BOOTSTRAP_TOKEN":    "shared-secret",
-		"IDENTITY_VERIFIER_BASE_URL":    srv.URL,
-		"MEMQL_VOICE_AGENT_INSTANCE_ID": "va-local",
+		"MEMQL_NODE_BOOTSTRAP_TOKEN":       "shared-secret",
+		"MEMQL_IDENTITY_VERIFIER_BASE_URL": srv.URL,
+		"MEMQL_VOICE_AGENT_INSTANCE_ID":    "va-local",
 	})
 	tok, err := ResolveVoiceAgentToken(context.Background(), env, srv.Client(), nil)
 	require.NoError(t, err)
@@ -66,9 +66,9 @@ func TestResolveVoiceAgentToken_BootstrapRejected(t *testing.T) {
 	defer srv.Close()
 
 	env := envMap(map[string]string{
-		"MEMQL_NODE_BOOTSTRAP_TOKEN":    "bad",
-		"IDENTITY_VERIFIER_BASE_URL":    srv.URL,
-		"MEMQL_VOICE_AGENT_INSTANCE_ID": "va-local",
+		"MEMQL_NODE_BOOTSTRAP_TOKEN":       "bad",
+		"MEMQL_IDENTITY_VERIFIER_BASE_URL": srv.URL,
+		"MEMQL_VOICE_AGENT_INSTANCE_ID":    "va-local",
 	})
 	_, err := ResolveVoiceAgentToken(context.Background(), env, srv.Client(), nil)
 	require.Error(t, err)
@@ -77,8 +77,8 @@ func TestResolveVoiceAgentToken_BootstrapRejected(t *testing.T) {
 
 func TestResolveVoiceAgentToken_BootstrapMissingInstanceID(t *testing.T) {
 	env := envMap(map[string]string{
-		"MEMQL_NODE_BOOTSTRAP_TOKEN": "secret",
-		"IDENTITY_VERIFIER_BASE_URL": "http://identity:8081",
+		"MEMQL_NODE_BOOTSTRAP_TOKEN":       "secret",
+		"MEMQL_IDENTITY_VERIFIER_BASE_URL": "http://identity:8081",
 		// MEMQL_VOICE_AGENT_INSTANCE_ID intentionally absent.
 	})
 	_, err := ResolveVoiceAgentToken(context.Background(), env, nil, nil)
@@ -90,9 +90,9 @@ func TestResolveVoiceAgentToken_BootstrapMissingBaseURL(t *testing.T) {
 	env := envMap(map[string]string{
 		"MEMQL_NODE_BOOTSTRAP_TOKEN":    "secret",
 		"MEMQL_VOICE_AGENT_INSTANCE_ID": "va-local",
-		// IDENTITY_VERIFIER_BASE_URL intentionally absent.
+		// MEMQL_IDENTITY_VERIFIER_BASE_URL intentionally absent.
 	})
 	_, err := ResolveVoiceAgentToken(context.Background(), env, nil, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "IDENTITY_VERIFIER_BASE_URL")
+	assert.Contains(t, err.Error(), "MEMQL_IDENTITY_VERIFIER_BASE_URL")
 }

@@ -70,7 +70,7 @@ Options:
                         read the real max_connections (needs a DSN). Catches a
                         deploy into an already-near-full instance (memql#1958).
   --dsn=DSN             DB DSN for --live (default: DIRECT_DSN /
-                        MEMORY_NODES_DATABASE_DIRECT_DSN / MEMORY_NODES_DATABASE_DSN
+                        MEMORY_NODES_DATABASE_DIRECT_DSN / MEMQL_DATABASE_DSN
                         / tiger CLI for \$TIGER_SVC)
   --help
 
@@ -107,7 +107,7 @@ function resolve_live() {
         echo "CONN-HEADROOM-WARN: --live needs psql; skipping live adjustment"; return 0
     fi
     if [[ -z "$DSN" ]]; then
-        DSN="${DIRECT_DSN:-${MEMORY_NODES_DATABASE_DIRECT_DSN:-${MEMORY_NODES_DATABASE_DSN:-}}}"
+        DSN="${DIRECT_DSN:-${MEMORY_NODES_DATABASE_DIRECT_DSN:-${MEMQL_DATABASE_DSN:-}}}"
         if [[ -z "$DSN" ]] && command -v tiger >/dev/null 2>&1; then
             DSN="$(tiger db connection-string "$TIGER_SVC" --with-password 2>/dev/null)"
         fi

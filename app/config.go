@@ -41,7 +41,7 @@ func (a *App) configAndAuth() {
 	// clear, actionable error instead of panicking deep in init. The
 	// genesis envelope + local-env override have already been applied to
 	// the process environment by main.go, so os.LookupEnv is the source
-	// of truth here. The verifier's IDENTITY_VERIFIER_BASE_URL check
+	// of truth here. The verifier's MEMQL_IDENTITY_VERIFIER_BASE_URL check
 	// below is a separate, node-shape-specific gate and complements this.
 	a.validateRequiredEnv()
 
@@ -83,7 +83,7 @@ func (a *App) configAndAuth() {
 		// the JWKS authority and authenticates HTTP requests via
 		// its own magic-link / OAuth / admin-session middleware
 		// (wired in transportIdentity). Setting
-		// IDENTITY_VERIFIER_BASE_URL on the identity binary is a
+		// MEMQL_IDENTITY_VERIFIER_BASE_URL on the identity binary is a
 		// no-op -- short-circuit before the verifier-construction
 		// path so identity does not try to fetch its own JWKS.
 		a.Logger.Info("identity binary: per-node verifier intentionally disabled (identity is the JWKS authority)")
@@ -97,7 +97,7 @@ func (a *App) configAndAuth() {
 		a.fatal("invalid identity verifier configuration", "error", err)
 	}
 	if !verifierCfg.Enabled() {
-		a.fatal("identity verifier not configured: set IDENTITY_VERIFIER_BASE_URL to the identity service base URL")
+		a.fatal("identity verifier not configured: set MEMQL_IDENTITY_VERIFIER_BASE_URL to the identity service base URL")
 	}
 
 	cache, err := verifier.NewJWKSCache(verifierCfg, a.Logger)

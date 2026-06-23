@@ -34,8 +34,8 @@ type SecretResolver func(ctx context.Context, name string) (string, error)
 //     it's a real GraphSender / SMTPSender, use that. Production
 //     path: env is always set at startup.
 //  2. memQL globalVariable / globalSecret rows -- dev path. The
-//     resolver pulls EMAIL_AZURE_* + EMAIL_SENDER + (optionally)
-//     EMAIL_FROM_NAME for Graph; falls back to SMTP_HOST + sibling
+//     resolver pulls EMAIL_AZURE_* + MEMQL_EMAIL_SENDER + (optionally)
+//     MEMQL_EMAIL_FROM_NAME for Graph; falls back to SMTP_HOST + sibling
 //     vars + SMTP_PASSWORD if Graph isn't fully configured.
 //  3. LogSender fallback -- everything's empty.
 //

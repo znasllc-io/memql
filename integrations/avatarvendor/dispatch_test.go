@@ -111,7 +111,7 @@ func TestResolveAvatarPlan_AnamMissingKeyIsError(t *testing.T) {
 	ac := AvatarConfig{Vendor: "anam"}
 	_, err := ResolveAvatarPlan(ac, videoOnPersona("anam", "persona-5"))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "ANAM_API_KEY")
+	assert.Contains(t, err.Error(), "MEMQL_ANAM_API_KEY")
 }
 
 func TestResolveAvatarPlan_SimliFaceIdAndKey(t *testing.T) {
@@ -136,7 +136,7 @@ func TestResolveAvatarPlan_SimliMissingKeyIsError(t *testing.T) {
 	ac := AvatarConfig{Vendor: "simli"}
 	_, err := ResolveAvatarPlan(ac, videoOnPersona("simli", "face-9"))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "SIMLI_API_KEY")
+	assert.Contains(t, err.Error(), "MEMQL_SIMLI_API_KEY")
 }
 
 func TestVendorForPersona(t *testing.T) {

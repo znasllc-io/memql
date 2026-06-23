@@ -14,7 +14,7 @@ import (
 // The default is the realtime path (MEMQL_VOICE_EXECUTOR unset or "realtime")
 // since #483 -- a fresh run uses gpt-realtime. The cascade stays available as
 // an explicit opt-out (MEMQL_VOICE_EXECUTOR=cascade) and as the safe fallback:
-// when realtime is requested but cannot be stood up (missing OPENAI_API_KEY,
+// when realtime is requested but cannot be stood up (missing MEMQL_OPENAI_API_KEY,
 // client build error, session config error), the plan falls back to the
 // cascade with a recorded reason -- the voice path therefore always comes up.
 //
@@ -79,7 +79,7 @@ func newRealtimeExecutorError(format string, args ...any) *RealtimeExecutorError
 func validateRealtimeBuildable(cfg Config, persona Persona) (SessionPersona, error) {
 	if strings.TrimSpace(cfg.OpenAIAPIKey) == "" {
 		return SessionPersona{}, newRealtimeExecutorError(
-			"OPENAI_API_KEY is unset -- cannot build the realtime executor")
+			"MEMQL_OPENAI_API_KEY is unset -- cannot build the realtime executor")
 	}
 	// BuildSessionPersona (#456) is pure and always returns a non-empty
 	// instruction block + a catalog-resolved voice, so this never fails today;
