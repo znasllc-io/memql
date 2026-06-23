@@ -32,6 +32,7 @@ mutate healedOverride proposeOverride {
     baseConstructId       string  @required
     overrideData          object  @required
     version               int     @required
+    blastRadius           string  @enum("personal", "shared", "spine_adjacent")
     reason                string
     sourcePreconditionId  string
   }
@@ -44,7 +45,43 @@ mutate healedOverride proposeOverride {
     valid: false
     args.version
     active: true
+    blastRadius: coalesce(args.blastRadius, "personal")
+    validationStatus: "proposed"
     args.reason
     args.sourcePreconditionId
+  }
+}
+
+@enabled
+@description("Validate (ACCEPT) a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and flips valid=false->true + validationStatus=proposed->validated, stamping validatedBy=actor.userId + validatedAt, and bumps version (capture-as-version). Blast-radius-scaled by role: the validateHealingValidationRankBound Go guard rejects the write unless the actor's role rank meets the override's blastRadius-required rank (personal->user, shared->admin, spine_adjacent->developer; owner always allowed). Once validated the override becomes resolution-eligible -- the two-tier resolver prefers it over base. Owned: gated by ownerUserId==actor.userId in the update read-merge.")
+mutate healedOverride validateOverride {
+  args {
+    overrideId  string  @required
+    version     int     @required
+  }
+  update {
+    id: args.overrideId
+    valid: true
+    validationStatus: "validated"
+    validatedBy: actor.userId
+    validatedAt: now
+    args.version
+  }
+}
+
+@enabled
+@description("Reject a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and sets validationStatus=rejected (valid stays false, so the override is never resolution-eligible), stamping validatedBy=actor.userId + validatedAt + the rejectionReason. A rejected proposal is RECORDED for audit, not silently dropped. Owned: gated by ownerUserId==actor.userId in the update read-merge.")
+mutate healedOverride rejectOverride {
+  args {
+    overrideId       string  @required
+    rejectionReason  string
+  }
+  update {
+    id: args.overrideId
+    validationStatus: "rejected"
+    valid: false
+    validatedBy: actor.userId
+    validatedAt: now
+    args.rejectionReason
   }
 }

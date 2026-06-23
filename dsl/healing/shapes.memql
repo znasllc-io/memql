@@ -15,5 +15,10 @@ shape healedOverride healedOverrideFull {
   payload.active
   payload.reason
   payload.sourcePreconditionId
+  payload.blastRadius
+  payload.validationStatus
+  payload.validatedBy
+  payload.validatedAt
+  payload.rejectionReason
   row.createdAt
 }

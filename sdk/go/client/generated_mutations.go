@@ -7413,10 +7413,12 @@ func PersistTaskStateBuild(args PersistTaskStateArgs) string {
 //
 // Bound concept: healedOverride.
 type ProposeOverrideArgs struct {
-	OverrideId           string
-	BaseConstructId      string
-	OverrideData         map[string]any
-	Version              int
+	OverrideId      string
+	BaseConstructId string
+	OverrideData    map[string]any
+	Version         int
+	// Enum: personal | shared | spine_adjacent
+	BlastRadius          string
 	Reason               string
 	SourcePreconditionId string
 }
@@ -7447,6 +7449,13 @@ func ProposeOverrideBuild(args ProposeOverrideArgs) string {
 	}
 	b.WriteString("version: ")
 	b.WriteString(fmt.Sprintf("%v", args.Version))
+	if args.BlastRadius != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("blastRadius: ")
+		b.WriteString(fmt.Sprintf("%q", args.BlastRadius))
+	}
 	if args.Reason != "" {
 		if b.Len() > 17 {
 			b.WriteString(", ")
@@ -8693,6 +8702,36 @@ func RejectAccessRequestBuild(args RejectAccessRequestArgs) string {
 		}
 		b.WriteString("reviewerNote: ")
 		b.WriteString(fmt.Sprintf("%q", args.ReviewerNote))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// RejectOverride -- Reject a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and sets validationStatus=rejected (valid stays false, so the override is never resolution-eligible), stamping validatedBy=actor.userId + validatedAt + the rejectionReason. A rejected proposal is RECORDED for audit, not silently dropped. Owned: gated by ownerUserId==actor.userId in the update read-merge.
+//
+// Bound concept: healedOverride.
+type RejectOverrideArgs struct {
+	OverrideId      string
+	RejectionReason string
+}
+
+// RejectOverride calls the engine mutation rejectOverride.
+func (qc *QueryClient) RejectOverride(ctx context.Context, args RejectOverrideArgs) (*Result, error) {
+	call := RejectOverrideBuild(args)
+	return qc.executeNamed(ctx, "rejectOverride", call)
+}
+
+func RejectOverrideBuild(args RejectOverrideArgs) string {
+	var b strings.Builder
+	b.WriteString("rejectOverride({")
+	b.WriteString("overrideId: ")
+	b.WriteString(fmt.Sprintf("%q", args.OverrideId))
+	if args.RejectionReason != "" {
+		if b.Len() > 16 {
+			b.WriteString(", ")
+		}
+		b.WriteString("rejectionReason: ")
+		b.WriteString(fmt.Sprintf("%q", args.RejectionReason))
 	}
 	b.WriteString("})")
 	return b.String()
@@ -11954,6 +11993,34 @@ func UpdateWorkerLastSeenBuild(args UpdateWorkerLastSeenArgs) string {
 		b.WriteString("lastConnectedFromIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastConnectedFromIP))
 	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// ValidateOverride -- Validate (ACCEPT) a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and flips valid=false->true + validationStatus=proposed->validated, stamping validatedBy=actor.userId + validatedAt, and bumps version (capture-as-version). Blast-radius-scaled by role: the validateHealingValidationRankBound Go guard rejects the write unless the actor's role rank meets the override's blastRadius-required rank (personal->user, shared->admin, spine_adjacent->developer; owner always allowed). Once validated the override becomes resolution-eligible -- the two-tier resolver prefers it over base. Owned: gated by ownerUserId==actor.userId in the update read-merge.
+//
+// Bound concept: healedOverride.
+type ValidateOverrideArgs struct {
+	OverrideId string
+	Version    int
+}
+
+// ValidateOverride calls the engine mutation validateOverride.
+func (qc *QueryClient) ValidateOverride(ctx context.Context, args ValidateOverrideArgs) (*Result, error) {
+	call := ValidateOverrideBuild(args)
+	return qc.executeNamed(ctx, "validateOverride", call)
+}
+
+func ValidateOverrideBuild(args ValidateOverrideArgs) string {
+	var b strings.Builder
+	b.WriteString("validateOverride({")
+	b.WriteString("overrideId: ")
+	b.WriteString(fmt.Sprintf("%q", args.OverrideId))
+	if b.Len() > 18 {
+		b.WriteString(", ")
+	}
+	b.WriteString("version: ")
+	b.WriteString(fmt.Sprintf("%v", args.Version))
 	b.WriteString("})")
 	return b.String()
 }
