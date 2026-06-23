@@ -46,16 +46,12 @@ func (s *Service) completeTopLevel(prefix string) []CompletionItem {
 		SortPriority: 1,
 	})
 
-	// Keywords
-	for _, kw := range []string{"func", "use", "concept"} {
-		if strings.HasPrefix(kw, prefix) {
-			items = append(items, CompletionItem{
-				Label: kw, Kind: "keyword", Detail: "keyword",
-				Documentation: KeywordDocs[kw], InsertText: kw,
-				SortPriority: 2,
-			})
-		}
-	}
+	// Top-level construct keywords, projected from the DSL spec: concept,
+	// query, mutation, logic, automation, spec, trait, shape, tool, prompt,
+	// provider, builtin, policy, seed, use. This replaces the stale
+	// hand-coded `func / use / concept` set -- so typing `mut` now offers
+	// `mutation`, etc. (#2122 / #2123).
+	items = append(items, specConstructItems(prefix)...)
 
 	return items
 }
