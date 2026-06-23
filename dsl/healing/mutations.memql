@@ -1,0 +1,50 @@
+// healing domain -- caller-scoped writes to the two-tier base/overlay
+// store (E4.2 / memql#2140).
+//
+// Authz tier: owned. Every mutation stamps ownerUserId from
+// actor.userId server-side (never from a caller-supplied arg) so a
+// caller can neither create an override owned by someone else nor
+// reassign an existing override's owner.
+//
+// THE TIER CONTRACT. These mutations only ever write tier=overlay rows
+// (the concept default). A tier=base row is NEVER written through this
+// caller-facing path -- the base tier is the immutable embedded .memql,
+// materialized only by the SeedMaterializer (a system actor). The
+// validateHealingBaseImmutable Go guard
+// (component/memql/healing_base_immutable_validation.go) enforces this:
+// any non-system-actor write resolving to tier=base is rejected, so an
+// override can never be forged as base to escape the override-is-data
+// contract.
+//
+// proposeOverride writes a NOT-yet-valid override (valid=false): the
+// repair loop (E4.4) proposes the heal but human validation (E4.5) is
+// what flips valid=true and makes it eligible for resolution. This is
+// the core safety property -- an unvalidated heal is invisible to
+// resolveValidOverride and can never silently take effect.
+
+use healing.concepts.{ healedOverride }
+
+@enabled
+@description("Propose a healed OVERLAY override for a base construct (E4.2 / memql#2140). Writes a tier=overlay row with valid=false -- the repair loop proposes the heal, but it is INVISIBLE to resolution until human validation (E4.5) flips valid=true. Owned: ownerUserId is stamped from actor.userId so a caller can only propose overrides for their own constructs. tier is fixed to overlay (a base row can only be materialized by a system actor); the validateHealingBaseImmutable guard rejects any attempt to write tier=base here.")
+mutate healedOverride proposeOverride {
+  args {
+    overrideId            string  @required
+    baseConstructId       string  @required
+    overrideData          object  @required
+    version               int     @required
+    reason                string
+    sourcePreconditionId  string
+  }
+  insert {
+    id: args.overrideId
+    ownerUserId: actor.userId
+    args.baseConstructId
+    tier: "overlay"
+    args.overrideData
+    valid: false
+    args.version
+    active: true
+    args.reason
+    args.sourcePreconditionId
+  }
+}

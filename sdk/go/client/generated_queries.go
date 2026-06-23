@@ -2766,6 +2766,50 @@ func OAuthClientByClientIdBuild(args OAuthClientByClientIdArgs) string {
 	return b.String()
 }
 
+// OverrideById -- Fetch a single healed override by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's override even with its id. Used by the validation flow (E4.5) to confirm the row before capturing the next version.
+//
+// Bound concept: healedOverride.
+type OverrideByIdArgs struct {
+	OverrideId string
+}
+
+// OverrideById calls the engine query overrideById.
+func (qc *QueryClient) OverrideById(ctx context.Context, args OverrideByIdArgs) (*Result, error) {
+	call := OverrideByIdBuild(args)
+	return qc.executeNamed(ctx, "overrideById", call)
+}
+
+func OverrideByIdBuild(args OverrideByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("overrideById({")
+	b.WriteString("overrideId: ")
+	b.WriteString(fmt.Sprintf("%q", args.OverrideId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// OverridesForConstruct -- List the caller's healed overrides for a base construct -- the full override history (every tier, valid + invalid, active + retired) for audit + the cockpit healed-pack view (E4.6). Owned: gated by ownerUserId==actor.userId. Newest version first.
+//
+// Bound concept: healedOverride.
+type OverridesForConstructArgs struct {
+	BaseConstructId string
+}
+
+// OverridesForConstruct calls the engine query overridesForConstruct.
+func (qc *QueryClient) OverridesForConstruct(ctx context.Context, args OverridesForConstructArgs) (*Result, error) {
+	call := OverridesForConstructBuild(args)
+	return qc.executeNamed(ctx, "overridesForConstruct", call)
+}
+
+func OverridesForConstructBuild(args OverridesForConstructArgs) string {
+	var b strings.Builder
+	b.WriteString("overridesForConstruct({")
+	b.WriteString("baseConstructId: ")
+	b.WriteString(fmt.Sprintf("%q", args.BaseConstructId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // ParticipantByAgentSpace -- Check if an AI agent is already a participant in a space (excludes left status)
 //
 // Bound concept: participant.
@@ -3222,6 +3266,28 @@ func RequestEventsBuild(args RequestEventsArgs) string {
 	b.WriteString("requestEvents({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// ResolveValidOverride -- Resolve the winning VALID overlay override for a base construct -- the read half of the two-tier resolution (E4.2 / memql#2140). Returns the caller's newest valid, active overlay override for the given baseConstructId (highest version first, newest createdAt on a tie). An empty result means no valid override exists and the Go resolver falls back to the embedded base. Owned: gated by ownerUserId==actor.userId, and tier=overlay + valid + active so a base-tier or unvalidated or retired row can never win resolution.
+//
+// Bound concept: healedOverride.
+type ResolveValidOverrideArgs struct {
+	BaseConstructId string
+}
+
+// ResolveValidOverride calls the engine query resolveValidOverride.
+func (qc *QueryClient) ResolveValidOverride(ctx context.Context, args ResolveValidOverrideArgs) (*Result, error) {
+	call := ResolveValidOverrideBuild(args)
+	return qc.executeNamed(ctx, "resolveValidOverride", call)
+}
+
+func ResolveValidOverrideBuild(args ResolveValidOverrideArgs) string {
+	var b strings.Builder
+	b.WriteString("resolveValidOverride({")
+	b.WriteString("baseConstructId: ")
+	b.WriteString(fmt.Sprintf("%q", args.BaseConstructId))
 	b.WriteString("})")
 	return b.String()
 }

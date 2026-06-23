@@ -7409,6 +7409,62 @@ func PersistTaskStateBuild(args PersistTaskStateArgs) string {
 	return b.String()
 }
 
+// ProposeOverride -- Propose a healed OVERLAY override for a base construct (E4.2 / memql#2140). Writes a tier=overlay row with valid=false -- the repair loop proposes the heal, but it is INVISIBLE to resolution until human validation (E4.5) flips valid=true. Owned: ownerUserId is stamped from actor.userId so a caller can only propose overrides for their own constructs. tier is fixed to overlay (a base row can only be materialized by a system actor); the validateHealingBaseImmutable guard rejects any attempt to write tier=base here.
+//
+// Bound concept: healedOverride.
+type ProposeOverrideArgs struct {
+	OverrideId           string
+	BaseConstructId      string
+	OverrideData         map[string]any
+	Version              int
+	Reason               string
+	SourcePreconditionId string
+}
+
+// ProposeOverride calls the engine mutation proposeOverride.
+func (qc *QueryClient) ProposeOverride(ctx context.Context, args ProposeOverrideArgs) (*Result, error) {
+	call := ProposeOverrideBuild(args)
+	return qc.executeNamed(ctx, "proposeOverride", call)
+}
+
+func ProposeOverrideBuild(args ProposeOverrideArgs) string {
+	var b strings.Builder
+	b.WriteString("proposeOverride({")
+	b.WriteString("overrideId: ")
+	b.WriteString(fmt.Sprintf("%q", args.OverrideId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("baseConstructId: ")
+	b.WriteString(fmt.Sprintf("%q", args.BaseConstructId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("overrideData: ")
+	b.WriteString(renderMemQLValue(args.OverrideData))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("version: ")
+	b.WriteString(fmt.Sprintf("%v", args.Version))
+	if args.Reason != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reason: ")
+		b.WriteString(fmt.Sprintf("%q", args.Reason))
+	}
+	if args.SourcePreconditionId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourcePreconditionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.SourcePreconditionId))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // ProvisionWorkspace -- Create the v1:workbench:workspace row for a Plan on first workbenchHost call. Storage root is supplied by the workbench integration which has already created the directory on disk.
 //
 // Bound concept: workspace.
