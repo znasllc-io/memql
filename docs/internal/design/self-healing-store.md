@@ -202,3 +202,42 @@ resolves correctly. Fails **closed**: an unresolved rank is 0, below every
 floor, so the validation is denied. This is the role-gating Epic 4 ties to
 Epic 1's RBAC ranks — the wider a heal's reach, the more trust required to
 accept it. Mirrors `validateRbacCustomRoleRankBound`.
+
+## E4.6 — Cockpit healed packs + end-to-end
+
+The self-healing loop, exercisable **end to end**, plus the Cockpit surface.
+
+### End-to-end (`component/healing/end_to_end_test.go`)
+
+`TestSelfHealing_EndToEnd` wires all five pieces in one flow, engine/DB-free
+(the store + role gate modeled by the injected `OverlayLookup` the production
+resolver consumes):
+
+```
+precondition-miss (E4.1) → MissFromEventPayload
+  → repair-loop proposal via a STUB model (E4.4)
+    → typed-patch Apply (E4.3)
+      → proposed overlay override, valid=false (E4.2): resolution falls back to BASE
+        → role-gated human validation flips valid=true + new version (E4.5)
+          → the two-tier resolver PREFERS the validated overlay over base,
+            carrying the healed (relativized) literal; base stays untouched
+```
+
+`TestPatchPreconditionShapeParity` is the E4.3 follow-up: it asserts
+`healing.PatchPrecondition` and `automations.Precondition` have identical
+exported-field sets (name + order), so the shape-mirror (kept to avoid the
+`automations → memql` import cycle) can't drift silently.
+
+### Cockpit surface (`memql-cockpit/cli/healing/`)
+
+A UI-agnostic `Controller` over the active cluster's `QueryClient` (the same
+provider pattern the Concepts tab uses): `ListOverrides` (the override
+history for a construct, newest version first), `Validate` (accept → a
+validated, versioned overlay), `Reject` (record a rejection). The blast-radius
+role gate is enforced server-side; the Cockpit surfaces the rejection error
+verbatim. Tested against a fake client (no gRPC stream), driven by the SDK's
+`client.ResultFromRows` test-support constructor.
+
+Multi-node aware: every read/write goes through the engine's named
+query/mutation surface, which resolves against the shared store, so the
+Cockpit sees the same overrides + resolution outcome on any replica.
