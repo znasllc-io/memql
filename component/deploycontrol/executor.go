@@ -49,6 +49,17 @@ func newExecExecutor(repoRoot string) *execExecutor {
 	return &execExecutor{repoRoot: repoRoot}
 }
 
+// NewExecutor returns the real os/exec-backed Executor anchored at
+// repoRoot -- the SAME side-effect boundary the deploy-control Service
+// uses (promote.sh / git / kubectl argo rollouts), exported so the
+// deploy PACK (examples/deploypack, Epic 2 / #2095) can drive the same
+// effects through the IntegrationProvider boundary without duplicating
+// the shell-out wiring. An empty repoRoot anchors at the process
+// working directory, matching NewService's RepoRoot default.
+func NewExecutor(repoRoot string) Executor {
+	return newExecExecutor(repoRoot)
+}
+
 func (e *execExecutor) RunPromote(ctx context.Context, version, env string) (string, error) {
 	script := filepath.Join(e.repoRoot, "scripts", "release", "promote.sh")
 	return e.run(ctx, e.repoRoot, script,

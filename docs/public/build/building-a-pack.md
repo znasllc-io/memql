@@ -313,6 +313,47 @@ core, and extends both the concept and tool surfaces -- with no database.
 
 ---
 
+## Production dogfood example: the deploy pack
+
+The reference pack is the minimal teaching example. The **deploy pack** at
+[`examples/deploypack/`](../../../examples/deploypack) (Epic 2 / #2095) is the
+production-shaped sibling: it packages memQL's OWN deployment workflow as a pack,
+dogfooding the model. Same primitives, but its capabilities are the REAL deploy
+effects.
+
+```
+examples/deploypack/
+├── pack.go                   Go: Provider holding a deploycontrol.Executor + engine; 4 effect capabilities
+├── register_deploypack.go    Go: //go:build deploypack -> init() { Register(Domain) }
+├── deploy_pack_test.go        test: capability exposure + per-effect routing (exported API)
+└── dsl/
+    └── builtins.memql         4 builtins -> @executor("integration.deploypack.{commitOverlay,argoSync,runPromote,recordBack}")
+```
+
+The key difference from the reference pack: the deploy pack's `Provider` holds a
+**`deploycontrol.Executor`** (the SAME side-effect boundary the Deploy Console
+uses -- `promote.sh` / `git` / `kubectl argo rollouts`) plus an engine handle.
+Its `NewProvider(pctx)` builds the Executor anchored at `MEMQL_DEPLOY_REPO_ROOT`
+(mirroring `app/integrations_deploy_control.go`) and takes the engine from
+`pctx.Engine`. The four capabilities are the deploy effects:
+
+- `commitOverlay` / `argoSync` -> `Executor.Git` (Model A: author + commit the
+  overlay, push so ArgoCD reconciles -- never a direct cluster apply).
+- `runPromote` -> `Executor.RunPromote` -- THE live azure deploy effect
+  (`scripts/release/promote.sh` via the Argo Rollout), invoked through the same
+  method the Deploy Console uses. Exposing it through the pack is **additive**;
+  the imperative path is untouched until E2.5 thins it.
+- `recordBack` -> engine mutations (`updateDeploymentStatus` +
+  `createDeploymentNodeSpec`) -- Model A record-back: mirror the
+  GitOps-reconciled state into the deployment concept.
+
+This is the canonical example of a pack contributing **effects backed by an
+existing Go side-effect boundary** rather than a fresh capability. The E2.3
+chained automations fire these effects on deployment status transitions; the
+pack is the substrate they call into.
+
+---
+
 ## See also
 
 - [Plugin SDK](plugin-sdk.md) -- the contract reference (PluginContext,
