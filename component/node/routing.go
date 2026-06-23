@@ -88,6 +88,16 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.created.v1:planner:*", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:planner:*", TargetType: ""},
 		{Pattern: "graph.node.deleted.v1:planner:*", TargetType: ""},
+		// Self-healing precondition-miss signal (Epic 4 / memql#2139). A
+		// first-class automation precondition that evaluates false emits
+		// healing.precondition.missed; the LLM repair loop (E4.4) subscribes.
+		// The producer (the automation harness) and the consumer (the repair
+		// loop) may live on different replicas -- and automation.# is mesh-
+		// BLOCKED above -- so the miss signal needs its OWN forward rule or it
+		// silently dies in cluster mode. Broadcast so any repair-loop-bearing
+		// peer hears it. Healing is low-volume (a miss is an exception path),
+		// so broadcasting the whole healing.# tree carries negligible cost.
+		{Pattern: "healing.#", TargetType: ""},
 		{Pattern: "cognition.response.audio", TargetType: NodeTypeVoice},
 		// Voice gate directive (#479 gate path): cognition publishes the
 		// per-turn gate decision, the BFF's voice-turn waiter subscribes

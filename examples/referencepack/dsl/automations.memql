@@ -23,6 +23,21 @@ use referencepack.builtins.{ referencePackComposeGreeting }
 @trigger(event="node.created", concept="v1:cognition:space", partition="*")
 @description("On creation of a core space, compose a greeting for the space owner via the pack's integration capability. Demonstrates a pack automation hooking a core service event.")
 automation referencePackGreetOnSpaceCreate {
+  // FIRST-CLASS PRECONDITION (Epic 4 / memql#2139). A deterministic check
+  // that must hold before the steps run. On a miss the harness aborts the
+  // run cleanly and emits healing.precondition.missed -- the clean self-
+  // healing repair trigger AND the cross-machine portability signal. Here
+  // the asserted literal is the owner id stamped by the core create
+  // mutation: a space created without an ownerUserId (a portability /
+  // wiring drift on some other machine) MISSES this precondition, and the
+  // repair loop is handed a structured signal naming the construct, the
+  // failed check, and the asserted literal -- rather than the step
+  // silently greeting a blank user.
+  precondition ownerPresent {
+    check: exists(event.payload.ownerUserId)
+    literal: ownerUserId
+    description: "The created space must carry the owner id the greeting targets."
+  }
   step greet {
     referencePackComposeGreeting { userName: event.payload.ownerUserId }
   }

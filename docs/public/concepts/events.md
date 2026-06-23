@@ -147,6 +147,37 @@ user-chosen partition name.
 | `automation.step.completed` | `AUTOMATION_STEP_COMPLETED` | Emitted when an automation step completes |
 | `automation.step.failed` | `AUTOMATION_STEP_FAILED` | Emitted when an automation step fails |
 
+> Note: `automation.#` events stay **node-local** — they are blocked from
+> cross-node forwarding (see the mesh routing rules). A consumer that must
+> see automation activity on a different replica needs a dedicated topic
+> with its own forward rule. The self-healing precondition-miss signal below
+> is exactly such a topic.
+
+### Self-Healing Events
+
+| Topic | Kind | Description |
+|-------|------|-------------|
+| `healing.precondition.missed` | `PRECONDITION_MISSED` | Emitted when a first-class automation precondition evaluates false at the start of a run. The clean self-healing repair trigger AND the cross-machine portability signal. Unlike `automation.#`, this topic **forwards across the mesh** (a `healing.#` broadcast routing rule) so a repair loop on any replica hears it. |
+
+**Payload for a precondition miss:**
+```json
+{
+  "automationName": "deployStaging",
+  "automationOrigin": "unified:deploypack/automations.memql:deployStaging",
+  "executionId": "exec-abc123",
+  "preconditionId": "digestPinned",
+  "check": "exists(event.payload.imageDigest)",
+  "literal": "imageDigest",
+  "preconditionDescription": "the deploy needs a pinned image digest",
+  "triggerTopic": "graph.node.updated.v1:cluster:deployment",
+  "triggerPayload": { "imageDigest": "" }
+}
+```
+
+The `literal` + `triggerPayload` together name the machine-specific value
+that did not hold on this machine — the input the repair loop relativizes or
+rebinds when it proposes a typed patch (Epic 4).
+
 **Payload for automation started:**
 ```json
 {

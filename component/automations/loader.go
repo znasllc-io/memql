@@ -440,6 +440,16 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 			"  Use: mutationCreateSpace({ name: \"My Space\", ... })")
 	}
 
+	// Extract + strip first-class precondition blocks (Epic 4 / memql#2139)
+	// BEFORE the struct-form rewriter runs -- the rewriter only understands
+	// `step` blocks, so a `precondition NAME { ... }` left in the body would
+	// fail to parse. We re-attach the parsed preconditions to the compiled
+	// Automation below.
+	preconditions, source, err := extractPreconditions(source)
+	if err != nil {
+		return nil, fmt.Errorf("parsing automation preconditions: %w", err)
+	}
+
 	// Parse, resolve concept references, then compile
 	result, err := l.parseResolveCompile(source, path)
 	if err != nil {
@@ -478,6 +488,17 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 	// Ensure name is set
 	if automation.Name == "" {
 		automation.Name = automationOutput.Name
+	}
+
+	// Re-attach the first-class preconditions extracted before the rewrite
+	// (Epic 4 / memql#2139). The executor evaluates them deterministically
+	// at the start of the run; a miss emits the healing.precondition.missed
+	// repair-trigger signal and aborts before any step fires.
+	if len(preconditions) > 0 {
+		if err := validatePreconditions(preconditions); err != nil {
+			return nil, fmt.Errorf("invalid preconditions: %w", err)
+		}
+		automation.Preconditions = preconditions
 	}
 
 	// Validate steps

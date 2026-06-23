@@ -88,6 +88,15 @@ const (
 	// write, carrying the written row's concept so the result-cache
 	// evictor can drop dependent cached results on every replica.
 	KindCacheInvalidate
+
+	// KindPreconditionMissed is emitted when a first-class automation
+	// precondition (Epic 4 / memql#2139) evaluates false at the start of
+	// an automation run. A miss is the clean self-healing repair trigger
+	// AND the cross-machine portability signal: a literal that does not
+	// hold on this machine is a precondition that misses here. The repair
+	// loop (E4.4 / memql#2142) subscribes to the dedicated
+	// healing.precondition.missed topic.
+	KindPreconditionMissed
 )
 
 // String returns a human-readable name for the event kind.
@@ -151,6 +160,8 @@ func (k Kind) String() string {
 		return "spawn_failed"
 	case KindCacheInvalidate:
 		return "cache_invalidate"
+	case KindPreconditionMissed:
+		return "precondition_missed"
 	default:
 		return "unspecified"
 	}
@@ -191,6 +202,18 @@ const (
 	TopicAutomationStepStarted   = "automation.step.started"
 	TopicAutomationStepCompleted = "automation.step.completed"
 	TopicAutomationStepFailed    = "automation.step.failed"
+
+	// Self-healing precondition events (Epic 4 / memql#2139). When a
+	// first-class automation precondition evaluates false at the start
+	// of a run, the harness emits TopicPreconditionMissed -- the clean
+	// repair trigger the LLM repair loop (E4.4) subscribes to AND the
+	// cross-machine portability signal. This is its OWN topic, NOT under
+	// automation.# -- the mesh blocks automation.# from cross-node
+	// forwarding (component/node/routing.go), so a precondition miss on
+	// one replica would be invisible to a repair loop on another. A
+	// dedicated topic + a healing.* forward routing rule makes the miss
+	// signal mesh-consistent (multi-node is the default).
+	TopicPreconditionMissed = "healing.precondition.missed"
 
 	// MCP Tool events
 	TopicToolCalled    = "tool.called"

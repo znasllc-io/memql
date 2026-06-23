@@ -100,8 +100,8 @@ func TestEvaluateRouting_CacheInvalidateBroadcast(t *testing.T) {
 		"v1:agents:skill",
 		"v1:router:budget",
 		"v1:cognition:utterance",
-		"v1:cognition:space",       // default-cached, never had a per-concept cache rule
-		"v1:knowledge:document",    // arbitrary concept -- broadcast covers it
+		"v1:cognition:space",        // default-cached, never had a per-concept cache rule
+		"v1:knowledge:document",     // arbitrary concept -- broadcast covers it
 		"v1:somenamespace:whatever", // even a concept the engine has never seen
 	}
 
@@ -114,6 +114,31 @@ func TestEvaluateRouting_CacheInvalidateBroadcast(t *testing.T) {
 		if !d.Broadcast {
 			t.Errorf("cache.invalidate for concept %q must broadcast to all replicas, got targeted %q", concept, d.TargetType)
 		}
+	}
+}
+
+// TestEvaluateRouting_PreconditionMissBroadcast locks in the cross-node
+// guarantee for the self-healing repair-trigger signal (Epic 4 / memql#2139).
+// The automation harness (producer) and the LLM repair loop (consumer) may
+// live on different replicas, and automation.# is mesh-BLOCKED -- so the
+// dedicated healing.precondition.missed topic MUST forward (broadcast) or the
+// miss signal silently dies in cluster mode and self-healing never triggers.
+func TestEvaluateRouting_PreconditionMissBroadcast(t *testing.T) {
+	rules := defaultRoutingRules()
+
+	// The miss topic must forward to all replicas.
+	d := evaluateRouting(rules, "healing.precondition.missed")
+	if !d.Forward {
+		t.Fatalf("healing.precondition.missed must forward cross-node, but it does not")
+	}
+	if !d.Broadcast {
+		t.Errorf("healing.precondition.missed must broadcast to all replicas, got targeted %q", d.TargetType)
+	}
+
+	// Sanity: the sibling automation.* lifecycle events stay LOCAL (blocked),
+	// proving the miss signal needed its own non-automation topic.
+	if a := evaluateRouting(rules, "automation.completed"); a.Forward {
+		t.Errorf("automation.completed must stay local (blocked), but it forwards -- the miss signal cannot ride automation.*")
 	}
 }
 
