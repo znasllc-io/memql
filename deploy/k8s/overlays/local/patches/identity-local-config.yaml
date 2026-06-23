@@ -1,0 +1,33 @@
+# Strategic merge patch: override staging-specific URLs on the identity Deployment
+# for local k3d development (#2065).
+#
+# Identity serves its web UI and JWKS at localhost:8085 (via k3d port-forward).
+# The CORS + OAuth redirect rules must match the local copresent URL.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: identity
+  namespace: memql
+spec:
+  template:
+    spec:
+      containers:
+        - name: identity
+          env:
+            # Local identity URL: http (no TLS) via localhost port-forward.
+            - name: IDENTITY_BASE_URL
+              value: "http://localhost:8085"
+            - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+              value: "http://localhost:8085"
+            - name: IDENTITY_BOOTSTRAP_DOMAIN
+              value: "localhost"
+            # Allow both the copresent SPA (port 8080) and direct localhost.
+            - name: IDENTITY_CORS_ALLOWED_ORIGINS
+              value: "http://localhost:8080,http://localhost:3000"
+            # OAuth redirect: localhost SPA + cockpit (unchanged).
+            - name: IDENTITY_REGISTERED_CLIENTS
+              value: '[{"clientId":"app","redirectURIs":["http://localhost:8080/auth/callback","http://localhost:3000/auth/callback"]},{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]}]'
+            # Run migrations on identity startup -- local Postgres starts empty
+            # (Tiger Cloud staging has a pre-existing schema; local does not).
+            - name: MEMORY_NODES_DATABASE_MIGRATE_ON_START
+              value: "true"

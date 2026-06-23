@@ -1,0 +1,19 @@
+# Strategic merge patch: override staging-specific URLs on the bff Deployment
+# for local k3d development (#2065).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bff
+  namespace: memql
+spec:
+  template:
+    spec:
+      containers:
+        - name: bff
+          env:
+            # Identity issuer: localhost port-forward.
+            - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+              value: "http://localhost:8085"
+            # LiveKit: local server's public WebSocket URL (via k3d port-forward).
+            - name: POLYPHON_LIVEKIT_PUBLIC_URL
+              value: "ws://localhost:7880"
