@@ -134,3 +134,15 @@ concept deployment {
   changelog            string  @description("Optional changelog / release-notes summary for this version.")
   previousDeploymentId string  @description("Optional deploymentId of the deploy this one supersedes. Plain string FK (not a @relationship).")
 }
+
+@version("1.0.0")
+@namespace("cluster")
+@description("Per-node-type spec for a deployment (Epic 2 / #2094). One row per (deploymentId, nodeType): the version + replica count + resolved image digest a given node type runs under a deployment. Engine-as-spine: an empty `version` means this node type resolves against the parent deployment's engine version (the release lockfile's engineVersion); a non-empty `version` pins this node type to a specific version that overrides the spine. Append-only + time-series like the parent deployment: the row is written when the spec is first set and every re-pin (version/replicas/imageDigest change) appends a new payload version under the SAME concept id -- `concat(deploymentId, ':', nodeType)` -- so the per-node-type spec history is reconstructable asOf any time, and `asOf latest` collapses to the node type's current spec. The CDC path emits graph.node.created/updated.<partition>.v1:cluster:deploymentNodeSpec on every write. deploymentId is a plain string FK to v1:cluster:deployment.deploymentId (cross-concept references use FK fields, not @relationship). A deployment's full per-node spec set = every deploymentNodeSpec with the same deploymentId.")
+concept deploymentNodeSpec {
+  deploymentId  string  @required @description("FK to v1:cluster:deployment.deploymentId this spec belongs to. Plain string FK (not a @relationship -- cross-concept references use FK fields). Part of the composite concept id concat(deploymentId, ':', nodeType).")
+  nodeType      string  @required @description("Node role this spec targets: bff, voice, cognition, agent, planner, identity, mcp, workbench. Part of the composite concept id concat(deploymentId, ':', nodeType) so each (deployment, nodeType) pin appends to one timeline.")
+  version       string  @description("memQL version this node type is pinned to (e.g. '2026.6.21'). Empty means engine-as-spine: resolve against the parent deployment's engine version (the release lockfile's engineVersion) rather than a per-node pin. A non-empty value overrides the spine for this node type only.")
+  replicas      int     @default("1") @description("Desired replica count for this node type under this deployment. Staging/prod parity defaults to 2 via the overlay; the concept default is 1 for a single-node baseline.")
+  imageDigest   string  @description("Resolved container image digest for this node type (sha256:...). Empty until the build/lockfile resolves it. Mirrors the per-component digest in releases/<version>.yaml.")
+  updatedAt     datetime  @description("Timestamp of the most recent spec transition. The row intrinsic createdAt carries the first-set time.")
+}

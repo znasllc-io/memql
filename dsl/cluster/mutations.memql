@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cluster.concepts.{ cluster, database, deployment, identityProvider, node, spawnEvent }
+use cluster.concepts.{ cluster, database, deployment, deploymentNodeSpec, identityProvider, node, spawnEvent }
 
 @enabled
 @description("Create the cluster record")
@@ -246,6 +246,75 @@ mutate deployment updateDeploymentStatus {
   update {
     id: args.deploymentId
     args.status
+    updatedAt: now
+  }
+}
+
+// ---- mutations/v1/cluster/createDeploymentNodeSpec.memql ----
+
+// Write a per-node-type spec for a deployment (Epic 2 / #2094). The
+// concept id is the composite concat(deploymentId, ":", nodeType) so
+// every later re-pin (updateDeploymentNodeSpec) appends a new payload
+// version under the SAME time-series timeline -- one record per
+// (deployment, nodeType), reconstructable asOf any time. deploymentId
+// + nodeType are ALSO stamped as payload fields so nodeSpecsForDeployment
+// can filter on the bare deploymentId without canonical-id prefixing.
+//
+// Engine-as-spine: version coalesces to "" -- an empty version means
+// "resolve against the deployment's engine version", a non-empty value
+// pins this node type. replicas defaults to the concept @default(1).
+//
+// Admin action: the deploy pack gates the write path; the DSL mirror
+// is spec("requiresOwnerOrAdmin") on the cut-version/rollback effects
+// (Epic 2.6). Additive: no existing overlay or query is affected.
+@enabled
+@description("Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. Uses concat(deploymentId, ':', nodeType) as the concept id so re-pins append to one timeline. Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.")
+mutate deploymentNodeSpec createDeploymentNodeSpec {
+  args {
+    deploymentId  string  @required
+    nodeType      string  @required
+    version       string
+    replicas      int
+    imageDigest   string
+  }
+  insert {
+    id: concat(args.deploymentId, ":", args.nodeType)
+    deploymentId: args.deploymentId
+    nodeType: args.nodeType
+    version: coalesce(args.version, "")
+    replicas: coalesce(args.replicas, 1)
+    imageDigest: coalesce(args.imageDigest, "")
+    updatedAt: now
+  }
+}
+
+// ---- mutations/v1/cluster/updateDeploymentNodeSpec.memql ----
+
+// Re-pin an existing per-node-type deployment spec (Epic 2 / #2094).
+// Read-merge update form (mirrors updateDeploymentStatus): only
+// version + replicas + imageDigest + updatedAt change; deploymentId +
+// nodeType inherit from the persisted row, so a re-pin never re-keys
+// the spec. The append writes a new row under the same concept id
+// (concat(deploymentId, ":", nodeType)), and the CDC path emits
+// graph.node.updated.<partition>.v1:cluster:deploymentNodeSpec.
+//
+// The caller passes deploymentId + nodeType (NOT the composite id) so
+// the mutation re-derives the same concept id the create used.
+@enabled
+@description("Re-pin a v1:cluster:deploymentNodeSpec's version / replicas / imageDigest by (deploymentId, nodeType). Read-merge update: deploymentId + nodeType inherit, only the spec fields + updatedAt change. Append under the same composite concept id. Epic 2 / #2094.")
+mutate deploymentNodeSpec updateDeploymentNodeSpec {
+  args {
+    deploymentId  string  @required
+    nodeType      string  @required
+    version       string
+    replicas      int
+    imageDigest   string
+  }
+  update {
+    id: concat(args.deploymentId, ":", args.nodeType)
+    version: coalesce(args.version, "")
+    replicas: coalesce(args.replicas, 1)
+    imageDigest: coalesce(args.imageDigest, "")
     updatedAt: now
   }
 }

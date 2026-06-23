@@ -1712,6 +1712,8 @@ Distributed node system metadata (dsl/cluster/concepts.memql)
 - `v1:cluster:node` -- Registered node in the cluster
 - `v1:cluster:nodeType` -- Node type definition (bff, voice, cognition, agent, planner). Optional `codeReference` field links this row to its architecture-model service id (consumed by the cockpit's Topology drill-down).
 - `v1:cluster:spawnEvent` -- Lifecycle event for node state transitions (legacy name)
+- `v1:cluster:deployment` -- Append-only deployment record (one timeline per deploymentId; status pending -> in_progress -> succeeded|failed; superseded/rolled_back). The deploy-as-a-pack source of truth for a deploy (#1872)
+- `v1:cluster:deploymentNodeSpec` -- Per-node-type spec child of a deployment (Epic 2 / #2094): one append-only timeline per (deploymentId, nodeType) carrying version + replicas + imageDigest. Engine-as-spine: empty `version` resolves against the deployment's engine version; non-empty pins the node type. Read a deployment's full per-node set via `nodeSpecsForDeployment`
 - `v1:cluster:cluster`, `v1:cluster:database`, `v1:cluster:identityProvider` -- topology bookkeeping
 
 ### Observability Concepts

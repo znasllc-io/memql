@@ -3067,6 +3067,58 @@ func CreateDeploymentBuild(args CreateDeploymentArgs) string {
 	return b.String()
 }
 
+// CreateDeploymentNodeSpec -- Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. Uses concat(deploymentId, ':', nodeType) as the concept id so re-pins append to one timeline. Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.
+//
+// Bound concept: deploymentNodeSpec.
+type CreateDeploymentNodeSpecArgs struct {
+	DeploymentId string
+	NodeType     string
+	Version      string
+	Replicas     int
+	ImageDigest  string
+}
+
+// CreateDeploymentNodeSpec calls the engine mutation createDeploymentNodeSpec.
+func (qc *QueryClient) CreateDeploymentNodeSpec(ctx context.Context, args CreateDeploymentNodeSpecArgs) (*Result, error) {
+	call := CreateDeploymentNodeSpecBuild(args)
+	return qc.executeNamed(ctx, "createDeploymentNodeSpec", call)
+}
+
+func CreateDeploymentNodeSpecBuild(args CreateDeploymentNodeSpecArgs) string {
+	var b strings.Builder
+	b.WriteString("createDeploymentNodeSpec({")
+	b.WriteString("deploymentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("nodeType: ")
+	b.WriteString(fmt.Sprintf("%q", args.NodeType))
+	if args.Version != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("version: ")
+		b.WriteString(fmt.Sprintf("%q", args.Version))
+	}
+	if args.Replicas != 0 {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("replicas: ")
+		b.WriteString(fmt.Sprintf("%v", args.Replicas))
+	}
+	if args.ImageDigest != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("imageDigest: ")
+		b.WriteString(fmt.Sprintf("%q", args.ImageDigest))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // CreateDocumentChunk -- Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the CoPresent UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceUtteranceId / sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.
 //
 // Bound concept: documentChunk.
@@ -10791,6 +10843,58 @@ func UpdateClusterSettingsBuild(args UpdateClusterSettingsArgs) string {
 		}
 		b.WriteString("authoredAutomationsEnabled: ")
 		b.WriteString(fmt.Sprintf("%v", args.AuthoredAutomationsEnabled))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// UpdateDeploymentNodeSpec -- Re-pin a v1:cluster:deploymentNodeSpec's version / replicas / imageDigest by (deploymentId, nodeType). Read-merge update: deploymentId + nodeType inherit, only the spec fields + updatedAt change. Append under the same composite concept id. Epic 2 / #2094.
+//
+// Bound concept: deploymentNodeSpec.
+type UpdateDeploymentNodeSpecArgs struct {
+	DeploymentId string
+	NodeType     string
+	Version      string
+	Replicas     int
+	ImageDigest  string
+}
+
+// UpdateDeploymentNodeSpec calls the engine mutation updateDeploymentNodeSpec.
+func (qc *QueryClient) UpdateDeploymentNodeSpec(ctx context.Context, args UpdateDeploymentNodeSpecArgs) (*Result, error) {
+	call := UpdateDeploymentNodeSpecBuild(args)
+	return qc.executeNamed(ctx, "updateDeploymentNodeSpec", call)
+}
+
+func UpdateDeploymentNodeSpecBuild(args UpdateDeploymentNodeSpecArgs) string {
+	var b strings.Builder
+	b.WriteString("updateDeploymentNodeSpec({")
+	b.WriteString("deploymentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("nodeType: ")
+	b.WriteString(fmt.Sprintf("%q", args.NodeType))
+	if args.Version != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("version: ")
+		b.WriteString(fmt.Sprintf("%q", args.Version))
+	}
+	if args.Replicas != 0 {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("replicas: ")
+		b.WriteString(fmt.Sprintf("%v", args.Replicas))
+	}
+	if args.ImageDigest != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("imageDigest: ")
+		b.WriteString(fmt.Sprintf("%q", args.ImageDigest))
 	}
 	b.WriteString("})")
 	return b.String()

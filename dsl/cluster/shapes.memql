@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cluster.concepts.{ deployment }
+use cluster.concepts.{ deployment, deploymentNodeSpec }
 
 @row
 @description("Deployment record projection (#1872). Carries the full lifecycle row: stable deploymentId, current status, the version + image digest being shipped, the deploy target (provider/environment/region), the target clusterId, the operator (triggeredBy), the supersession back-pointer, and both timestamps (row.createdAt = deploy start, payload.updatedAt = last transition). Backs the cockpit Deployments history + asOf reconstruction.")
@@ -21,6 +21,19 @@ shape deployment deploymentFull {
   payload.previousDeploymentId
   payload.notes
   payload.changelog
+  payload.updatedAt
+  row.createdAt
+}
+
+@row
+@description("Per-node-type deployment spec projection (Epic 2 / #2094). Carries the (deploymentId, nodeType) key plus the version (empty = engine-as-spine), replica count, resolved image digest, and both timestamps (row.createdAt = first set, payload.updatedAt = last transition). Backs nodeSpecsForDeployment + asOf reconstruction of a deployment's per-node spec set.")
+shape deploymentNodeSpec deploymentNodeSpecFull {
+  row.id
+  payload.deploymentId
+  payload.nodeType
+  payload.version
+  payload.replicas
+  payload.imageDigest
   payload.updatedAt
   row.createdAt
 }

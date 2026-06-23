@@ -2506,6 +2506,28 @@ func MyRequestsBuild(args MyRequestsArgs) string {
 	return "myRequests({})"
 }
 
+// NodeSpecsForDeployment -- Latest-per-(deploymentId, nodeType) deploymentNodeSpec rows for one deploymentId -- the deployment's current per-node-type spec set (version / replicas / imageDigest). asOf latest collapses the append-only spec stream to current state per node type. Engine-as-spine resolution of an empty version is the consumer's job. Epic 2 / #2094.
+//
+// Bound concept: deploymentNodeSpec.
+type NodeSpecsForDeploymentArgs struct {
+	DeploymentId string
+}
+
+// NodeSpecsForDeployment calls the engine query nodeSpecsForDeployment.
+func (qc *QueryClient) NodeSpecsForDeployment(ctx context.Context, args NodeSpecsForDeploymentArgs) (*Result, error) {
+	call := NodeSpecsForDeploymentBuild(args)
+	return qc.executeNamed(ctx, "nodeSpecsForDeployment", call)
+}
+
+func NodeSpecsForDeploymentBuild(args NodeSpecsForDeploymentArgs) string {
+	var b strings.Builder
+	b.WriteString("nodeSpecsForDeployment({")
+	b.WriteString("deploymentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // NodeTokenIdentities -- List every node_token identity across the cluster (active + inactive). memql#343.
 //
 // Bound concept: identity.
