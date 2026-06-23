@@ -209,6 +209,98 @@ func extractArgsBlock(body string) (string, error) {
 	return body[open+1 : close], nil
 }
 
+// acceptBlockHeader matches the C5 (memql#2035) `accept { ... }` block
+// -- a comma/newline-separated list of public concept field NAMES a
+// mutation accepts from its caller. Each name auto-binds to the
+// same-named arg (`name` -> `name: args.name`), dropping the
+// `insert { id: args.id, name: args.name, ... }` boilerplate.
+var acceptBlockHeader = regexp.MustCompile(`(^|[\n\r])[ \t]*accept[ \t]*\{`)
+
+// stampBlockHeader matches the C5 `stamp { ... }` block -- the
+// server-set fields (key: value lines, same syntax as insert) the
+// mutation writes from server context (now / actor.X / literals),
+// NOT from caller args. Typically the concept's @serverSet fields
+// (createdAt / createdBy / status).
+var stampBlockHeader = regexp.MustCompile(`(^|[\n\r])[ \t]*stamp[ \t]*\{`)
+
+// extractBraceBlock pulls the inner text of the first `<header> { ... }`
+// block matched by re. Returns ("", false, nil) when absent.
+func extractBraceBlock(body string, re *regexp.Regexp, keyword string) (string, bool, error) {
+	loc := re.FindStringIndex(body)
+	if loc == nil {
+		return "", false, nil
+	}
+	open := loc[0] + strings.Index(body[loc[0]:loc[1]], "{")
+	close := findMatchingCloseBrace(body, open)
+	if close < 0 {
+		return "", false, fmt.Errorf("`%s { ... }` block missing closing brace", keyword)
+	}
+	return body[open+1 : close], true, nil
+}
+
+// acceptFieldName matches a single bare identifier (a field name) in an
+// `accept { ... }` list.
+var acceptFieldName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// parseAcceptNames splits an `accept { ... }` block body into field
+// names. Entries are separated by commas and/or newlines; `//` line
+// comments and blank entries are ignored. Every entry must be a bare
+// identifier -- an `accept` list carries field NAMES, never `key:
+// value` pairs (those belong in `stamp`).
+func parseAcceptNames(raw string) ([]string, error) {
+	var names []string
+	for _, line := range strings.Split(raw, "\n") {
+		// Strip line comments.
+		if idx := strings.Index(line, "//"); idx >= 0 {
+			line = line[:idx]
+		}
+		for _, tok := range strings.Split(line, ",") {
+			tok = strings.TrimSpace(tok)
+			if tok == "" {
+				continue
+			}
+			if strings.Contains(tok, ":") {
+				return nil, fmt.Errorf("accept block entry %q looks like a `key: value` pair -- the `accept { ... }` list carries public field NAMES only (auto-bound from same-named args); put server-set `key: value` fields in `stamp { ... }`", tok)
+			}
+			if !acceptFieldName.MatchString(tok) {
+				return nil, fmt.Errorf("accept block entry %q is not a valid field name", tok)
+			}
+			names = append(names, tok)
+		}
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("`accept { ... }` block is empty -- list at least one public field name, or drop the block")
+	}
+	return names, nil
+}
+
+// argsFieldName matches the leading identifier of an args-block field
+// declaration line (e.g. `name` in `name string @required`).
+var argsFieldName = regexp.MustCompile(`^[ \t]*([A-Za-z_][A-Za-z0-9_]*)\b`)
+
+// argNamesFromArgsText returns the set of top-level field names
+// declared in an args block's inner text. Used to validate that every
+// `accept` name has a same-named arg to auto-bind to.
+func argNamesFromArgsText(argsText string) map[string]bool {
+	out := map[string]bool{}
+	depth := 0
+	for _, line := range strings.Split(argsText, "\n") {
+		trimmed := strings.TrimSpace(line)
+		// Track brace depth so nested object fields don't register as
+		// top-level args.
+		if depth == 0 && trimmed != "" && !strings.HasPrefix(trimmed, "//") {
+			if m := argsFieldName.FindStringSubmatch(line); m != nil {
+				out[m[1]] = true
+			}
+		}
+		depth += strings.Count(line, "{") - strings.Count(line, "}")
+		if depth < 0 {
+			depth = 0
+		}
+	}
+	return out
+}
+
 // =============================================================================
 // Public chain: NormaliseAll
 // =============================================================================
@@ -621,6 +713,53 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// C5 (memql#2035): the accept/stamp form. `accept { f1, f2 }` lists
+	// the public concept fields the mutation accepts from its caller;
+	// each auto-binds to its same-named arg (`f1` -> `f1: args.f1`).
+	// `stamp { k: v, ... }` carries the server-set fields. The two
+	// desugar into a synthetic `insert { ... }` body, so everything
+	// downstream (id hoist, payload translation, the load-time concept
+	// gate) is unchanged. The whether-a-field-is-actually-public check
+	// is concept-aware and happens at load time (function_loader);
+	// here we only desugar + validate the auto-bind has a matching arg.
+	acceptRaw, hasAccept, err := extractBraceBlock(body, acceptBlockHeader, "accept")
+	if err != nil {
+		return nil, err
+	}
+	stampRaw, hasStamp, err := extractBraceBlock(body, stampBlockHeader, "stamp")
+	if err != nil {
+		return nil, err
+	}
+
+	if hasAccept || hasStamp {
+		if hasInsert || hasUpdate {
+			return nil, fmt.Errorf("mutation body cannot mix the accept/stamp form with an explicit `insert { ... }` / `update { ... }` block -- pick one")
+		}
+		argNames := argNamesFromArgsText(out.argsText)
+		var lines []string
+		if hasAccept {
+			names, perr := parseAcceptNames(acceptRaw)
+			if perr != nil {
+				return nil, perr
+			}
+			for _, n := range names {
+				if !argNames[n] {
+					return nil, fmt.Errorf("accept field %q has no matching arg -- declare `%s <type>` in the `args { ... }` block so it can auto-bind to `args.%s`", n, n, n)
+				}
+				lines = append(lines, n+": args."+n)
+			}
+		}
+		if hasStamp {
+			if strings.TrimSpace(stampRaw) != "" {
+				lines = append(lines, stampRaw)
+			}
+		}
+		out.writeKind = "insert"
+		out.writeBody = strings.Join(lines, "\n")
+		return out, nil
+	}
+
 	switch {
 	case hasInsert && hasUpdate:
 		return nil, fmt.Errorf("mutation body cannot mix an `insert { ... }` and an `update { ... }` block")
@@ -633,7 +772,7 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 		out.writeBody = updateRaw
 		out.writeTarget = updateName
 	default:
-		return nil, fmt.Errorf("mutation body must contain exactly one `insert { ... }` or `update { ... }` block")
+		return nil, fmt.Errorf("mutation body must contain exactly one `insert { ... }` or `update { ... }` block (or the `accept { ... }` / `stamp { ... }` form)")
 	}
 	return out, nil
 }

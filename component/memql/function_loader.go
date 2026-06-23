@@ -440,6 +440,25 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				return nil, fmt.Errorf("function %q: parse payload: %w", expectedName, err)
 			}
 
+			// C5 (memql#2035): a caller-supplied arg can never write a
+			// field the concept marks @internal or @serverSet -- those
+			// are server-only / server-stamped. This gate makes the
+			// accept/stamp sugar safe (an `accept { internalField }`
+			// desugars to `internalField: args.internalField`, which is
+			// rejected here) AND catches a hand-written `insert` that
+			// binds a sensitive field straight from caller args. The
+			// concept is resolved from the signature/use binding; an
+			// unannotated concept (today's whole tree) has no sensitive
+			// fields, so this is a no-op until concepts adopt the
+			// annotations.
+			sensitiveConcept := stmt.Concept
+			if sensitiveConcept == "" {
+				sensitiveConcept = boundConcept
+			}
+			if err := validateMutationCallerArgs(registry, sensitiveConcept, expectedName, payloadObj); err != nil {
+				return nil, err
+			}
+
 			mergeFields, err := mutationMergeFields(funcDef, stmt.Kind)
 			if err != nil {
 				return nil, fmt.Errorf("function %q: %w", expectedName, err)
@@ -1258,4 +1277,53 @@ func convertArgsField(field *languageParser.ArgsField) (*FunctionArgsField, erro
 	}
 
 	return result, nil
+}
+
+// valueReferencesCallerArg reports whether a parsed payload-template
+// value is bound to caller-supplied input. The struct-form rewriter
+// passes `args.X` references through verbatim; the object-literal
+// parser also recognises the legacy `ctx.X` shorthand for the same
+// thing. Non-string values (literals, nested objects) are never
+// caller-args. Backs the C5 (memql#2035) sensitive-field gate.
+func valueReferencesCallerArg(v any) bool {
+	s, ok := v.(string)
+	if !ok {
+		return false
+	}
+	s = strings.TrimSpace(s)
+	return strings.HasPrefix(s, "args.") || strings.HasPrefix(s, "ctx.")
+}
+
+// validateMutationCallerArgs enforces the C5 (memql#2035) invariant
+// that a mutation may not write a concept field marked @internal or
+// @serverSet from caller args -- those fields are server-only
+// (@internal) or server-stamped (@serverSet) and must come from
+// `now`/`actor.X`/a literal, never the caller. This makes the
+// accept/stamp sugar safe (an `accept { f }` desugars to
+// `f: args.f`, rejected here when f is sensitive) and also catches a
+// hand-written `insert` that binds a sensitive field from args.
+//
+// No-op when the concept can't be resolved, declares no sensitive
+// fields, or the payload binds none of them from args -- so the whole
+// pre-C6 tree (no concept carries the annotations yet) passes
+// untouched.
+func validateMutationCallerArgs(registry memoryNodes.Registry, conceptName, mutationName string, payload map[string]any) error {
+	if registry == nil || len(payload) == 0 {
+		return nil
+	}
+	conceptName = strings.TrimSpace(conceptName)
+	if conceptName == "" {
+		return nil
+	}
+	concept, err := registry.Get(conceptName)
+	if err != nil || concept == nil {
+		return nil
+	}
+	sensitive := append(concept.InternalFields(), concept.ServerSetFields()...)
+	for _, field := range sensitive {
+		if valueReferencesCallerArg(payload[field]) {
+			return fmt.Errorf("mutation %q writes field %q from caller args, but concept %q marks it @internal or @serverSet (server-only / server-stamped) -- stamp it in `stamp { ... }` from now/actor.X/a literal instead of accepting it from the caller", mutationName, field, conceptName)
+		}
+	}
+	return nil
 }

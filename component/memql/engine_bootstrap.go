@@ -181,6 +181,13 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 			"component", "memql.engine", "error", ulErr)
 	}
 
+	// C5 (memql#2035): expand empty-body, signature-bound shapes into a
+	// projection over every projectable (non-@internal) field of their
+	// concept. Runs after both concepts and shapes are loaded so the
+	// concept field list is available. Additive -- shapes with an
+	// explicit body are untouched.
+	expandDefaultShapeProjections(e.Logger, shapeRegistry, e.concepts)
+
 	// Load specs + traits from the new tree via the dedicated parser.
 	// Specs / traits use the SpecRegistry; the unified function
 	// loader does NOT handle them. Without this call the registry
