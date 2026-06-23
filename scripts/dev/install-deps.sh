@@ -5,7 +5,7 @@
 #
 # Verifies + installs every build-time tool the memQL dev workflow
 # expects. Idempotent: skips anything already present. Safe to run
-# before every `dev-refresh`.
+# before `make generate` or `make up`.
 #
 # Installed (or verified):
 #   - protoc                (Protocol Buffer compiler -- regen .pb.go)
@@ -16,17 +16,13 @@
 # install platform tools like Docker or sudo-requiring packages from
 # inside a make target):
 #   - Go                    (>= 1.26.1; the repo's pinned version)
-#   - Docker + docker compose
-#   - mkcert                (local TLS; see setup-tls.sh for actual use)
+#   - Docker                (k3d runs the cluster inside Docker)
+#   - k3d + kubectl         (the local k3d + ArgoCD cluster; `make up`)
 #
 # Per repo convention (CLAUDE.md): function-based structure. main()
 # at the bottom calls them in order.
 
 set -euo pipefail
-
-readonly SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-# shellcheck disable=SC1091
-source "${SCRIPT_DIR}/lib.sh"
 
 readonly REQUIRED_GO_VERSION="1.26.1"
 # Pinning protoc-plugin versions keeps the generated *.pb.go stable
@@ -77,135 +73,30 @@ function check_docker() {
         echo "         Install from https://docs.docker.com/get-docker/ and re-run."
         return 1
     fi
-    if ! docker compose version >/dev/null 2>&1; then
-        echo "  ERROR: docker compose v2 plugin missing."
-        echo "         Install via 'docker plugin install' or upgrade Docker Desktop."
-        return 1
-    fi
-    echo "  [ok] docker + compose"
+    echo "  [ok] docker (k3d runs the cluster inside Docker)"
 }
 
-function check_mkcert() {
-    if ! command -v mkcert >/dev/null 2>&1; then
-        echo "  HINT: mkcert is not installed -- local TLS won't work until you install it."
-        echo "        macOS:  brew install mkcert nss"
-        echo "        Linux:  https://github.com/FiloSottile/mkcert#linux"
-        echo "        (Not blocking; run 'make setup-tls' after installing.)"
+# check_k3d + check_kubectl verify the local-cluster toolchain (Argo
+# parity, #2061). Non-blocking hints: a fresh clone that only needs to
+# build/generate doesn't strictly require them, but `make up` does.
+function check_k3d() {
+    if ! command -v k3d >/dev/null 2>&1; then
+        echo "  HINT: k3d is not installed -- 'make up' (local k3d + ArgoCD cluster) needs it."
+        echo "        macOS:  brew install k3d"
+        echo "        Linux:  https://k3d.io/#installation"
         return 0
     fi
-    echo "  [ok] mkcert"
+    echo "  [ok] k3d ($(k3d version 2>/dev/null | head -1))"
 }
 
-# install_ngrok auto-installs the ngrok CLI (macOS + Linux) and, when an
-# authtoken is available in the environment, configures it -- so a fresh
-# `make dev-refresh` brings up the public LIVEKIT_PUBLIC_URL the Anam avatar
-# cloud engine dials into without any manual steps. The avatar (direct/Guide
-# AND voice-agent) needs Anam's cloud to reach the local LiveKit; on a dev box
-# that means a public tunnel, which dev-refresh's lib_refresh_ngrok stands up
-# from this binary. Without ngrok the voice loop still works in audio-only.
-#
-# Non-blocking throughout (matches mkcert): a failed install / missing
-# authtoken prints a clear hint but never aborts the dev stack bring-up.
-function install_ngrok() {
-    if command -v ngrok >/dev/null 2>&1; then
-        echo "  [ok] ngrok present ($(ngrok version 2>/dev/null | head -1))"
-        ngrok_ensure_authed
+function check_kubectl() {
+    if ! command -v kubectl >/dev/null 2>&1; then
+        echo "  HINT: kubectl is not installed -- 'make up' / 'make dev' / 'make k3d-status' need it."
+        echo "        macOS:  brew install kubectl"
+        echo "        Linux:  https://kubernetes.io/docs/tasks/tools/#kubectl"
         return 0
     fi
-
-    local os
-    os=$(detect_os)
-    echo "  ngrok not found -- installing (needed for the public LIVEKIT_PUBLIC_URL the Anam avatar dials in on)..."
-    case "${os}" in
-        darwin)
-            if command -v brew >/dev/null 2>&1; then
-                brew install ngrok || { echo "  WARNING: 'brew install ngrok' failed; install manually from https://ngrok.com/download"; return 0; }
-            else
-                echo "  HINT: Homebrew not found -- install ngrok from https://ngrok.com/download, then re-run."
-                return 0
-            fi
-            ;;
-        linux)
-            install_ngrok_linux || return 0
-            ;;
-        *)
-            echo "  HINT: ngrok auto-install unsupported on this OS -- see https://ngrok.com/download"
-            return 0
-            ;;
-    esac
-
-    if ! command -v ngrok >/dev/null 2>&1; then
-        echo "  WARNING: ngrok install reported success but the binary isn't on PATH."
-        return 0
-    fi
-    echo "  [ok] ngrok installed ($(ngrok version 2>/dev/null | head -1))"
-    ngrok_ensure_authed
-}
-
-# install_ngrok_linux downloads ngrok's official static binary for the host
-# arch and drops it on PATH -- no sudo, works across distros (snap/apt aren't
-# always present). Installs into the Go bin dir (already PATH-ensured for the
-# protoc plugins) so refresh.sh's later lib_refresh_ngrok finds it.
-function install_ngrok_linux() {
-    local arch tgz_arch url dest tmp
-    arch=$(uname -m)
-    case "${arch}" in
-        x86_64|amd64)  tgz_arch="amd64" ;;
-        aarch64|arm64) tgz_arch="arm64" ;;
-        *) echo "  HINT: unknown arch '${arch}' -- install ngrok from https://ngrok.com/download"; return 1 ;;
-    esac
-    url="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-${tgz_arch}.tgz"
-
-    dest=$(go env GOBIN 2>/dev/null)
-    if [ -z "${dest}" ]; then dest="$(go env GOPATH 2>/dev/null)/bin"; fi
-    if [ -z "${dest}" ] || [ "${dest}" = "/bin" ]; then dest="${HOME}/.local/bin"; fi
-    mkdir -p "${dest}"
-
-    tmp=$(mktemp -d)
-    echo "  downloading ngrok (linux-${tgz_arch}) -> ${dest}/ngrok ..."
-    if ! curl -fsSL "${url}" -o "${tmp}/ngrok.tgz"; then
-        echo "  WARNING: ngrok download failed (${url}); install manually from https://ngrok.com/download"
-        rm -rf "${tmp}"; return 1
-    fi
-    if ! tar -xzf "${tmp}/ngrok.tgz" -C "${tmp}"; then
-        echo "  WARNING: ngrok archive extract failed."
-        rm -rf "${tmp}"; return 1
-    fi
-    mv "${tmp}/ngrok" "${dest}/ngrok" && chmod +x "${dest}/ngrok"
-    rm -rf "${tmp}"
-
-    case ":${PATH}:" in
-        *":${dest}:"*) ;;
-        *) export PATH="${PATH}:${dest}"
-           echo "  HINT: add ${dest} to your shell PATH so ngrok persists across sessions." ;;
-    esac
-}
-
-# ngrok_ensure_authed configures the authtoken from $NGROK_AUTHTOKEN (or
-# $MEMQL_NGROK_AUTHTOKEN) when ngrok isn't already authed -- so the operator
-# sets the token once in their environment and `make dev-refresh` is turnkey.
-function ngrok_ensure_authed() {
-    if ngrok config check >/dev/null 2>&1; then
-        echo "  [ok] ngrok (authed)"
-        return 0
-    fi
-    local token="${NGROK_AUTHTOKEN:-${MEMQL_NGROK_AUTHTOKEN:-}}"
-    if [ -n "${token}" ]; then
-        echo "  ngrok: configuring authtoken from \$NGROK_AUTHTOKEN ..."
-        if ngrok config add-authtoken "${token}" >/dev/null 2>&1; then
-            echo "  [ok] ngrok authed"
-            return 0
-        fi
-        echo "  WARNING: 'ngrok config add-authtoken' failed -- check the token value."
-        return 0
-    fi
-    cat <<'EOF'
-  HINT: ngrok is installed but not authenticated. Do ONE of:
-    - export NGROK_AUTHTOKEN=<your token>   (then `make dev-refresh` auto-configures it), or
-    - run once:  ngrok config add-authtoken <your token>
-  Without it the Anam avatar can't get a public LIVEKIT_PUBLIC_URL (the
-  voice + avatar loop stays audio-only / orb-only on a local box).
-EOF
+    echo "  [ok] kubectl"
 }
 
 function install_protoc() {
@@ -222,8 +113,8 @@ function install_protoc() {
     echo "  protoc not found -- attempting install..."
 
     # Refuse non-interactive sudo upfront so we give a clear hint
-    # instead of silently failing during 'make dev-refresh' run from
-    # a non-tty context (CI, background process, IDE task runner).
+    # instead of silently failing during a non-tty run (CI, background
+    # process, IDE task runner).
     if [ "$(id -u)" -ne 0 ] && [[ "${os}" == "linux" ]] && ! sudo -n true 2>/dev/null; then
         cat <<EOF
   ERROR: protoc install needs sudo, but sudo would prompt for a password
@@ -236,7 +127,7 @@ function install_protoc() {
            sudo dnf install -y protobuf-compiler        # Fedora
            sudo pacman -S protobuf                      # Arch
 
-         (You only have to do this once. Subsequent 'make dev-refresh'
+         (You only have to do this once. Subsequent 'make install-deps'
          runs will see protoc and skip the install.)
 EOF
         return 1
@@ -328,6 +219,7 @@ function summary() {
 
   Dev dependencies verified.
   Run 'make generate' to regenerate *.pb.go from edited .proto files.
+  Run 'make up' to bootstrap the local k3d + ArgoCD cluster.
 
 EOF
 }
@@ -340,10 +232,10 @@ function main() {
     echo "[deps] Verifying memQL dev dependencies..."
     check_go
     check_docker
-    check_mkcert
+    check_k3d
+    check_kubectl
     install_protoc
     install_protoc_go_plugins
-    install_ngrok
     summary
 }
 

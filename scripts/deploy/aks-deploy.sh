@@ -78,7 +78,8 @@ ACR_LOGIN_SERVER="${ACR_LOGIN_SERVER:-${ACR_NAME}.azurecr.io}"
 # Architecture (#1053): nodes that execute CoPresent DSL (agentReply etc.) MUST
 # be CARRIER-built (memql-bff-copresent/Dockerfile + BUILD_TAGS=<type>, context =
 # workspace parent) so they carry the CoPresent DSL -- same as the bff carrier
-# and the local cluster (docker-compose.cluster.yml). voice (CGO voice-runtime,
+# and the local k3d cluster (scripts/k3d/dev.sh builds the carrier set the same
+# way). voice (CGO voice-runtime,
 # transport-only), identity (auth), and mcp (remote MCP head, memql#1550) have
 # no CoPresent refs and stay engine-built.
 readonly ENGINE_NODE_TYPES=(identity cognition voice agent planner workbench mcp)
