@@ -344,13 +344,12 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		return nil, err
 	}
 
-	// Naming-prefix enforcement (Decision 3 of the MVP-foundation
-	// rule lock). Query / mutation / spec functions must use their
-	// kind's prefix. Hard error -- no escape valve, since the project
-	// starts fresh under the new rule.
-	if err := validateNamingPrefix(funcDef); err != nil {
-		return nil, err
-	}
+	// Naming-prefix enforcement is RETIRED (DSL grammar redesign epic
+	// #2031, C2/#2042). Construct names are now free (a query can be
+	// `byId`, a mutation `create`); references resolve structurally by
+	// slot keyword + enclosing concept. Correctness is enforced by the
+	// dependency-tree validator (ValidateDependencyTree, C3/#2043) at
+	// engine load time instead of by a name prefix.
 
 	// Declared-must-be-used enforcement (Phase G.3.g pt 4). Every
 	// `@use*(target)` annotation and every declared args field must be
