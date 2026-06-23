@@ -355,7 +355,7 @@ db:
 #   MEMQL_K3D_SERVERS          k3d server count (default: 1)
 #   MEMQL_K3D_AGENTS           k3d agent count (default: 0)
 
-.PHONY: k3d-up k3d-down k3d-secrets
+.PHONY: k3d-up k3d-down k3d-secrets k3d-dev
 
 ## Bootstrap the local k3d cluster: create cluster, install ArgoCD
 ## (pinned v2.13.3, same as staging), apply the memql-local Application,
@@ -383,6 +383,20 @@ k3d-down:
 k3d-secrets:
 	@bash scripts/k3d/seed-secrets.sh \
 		$${CLUSTER:+--namespace=$${NAMESPACE:-memql}}
+
+## Inner-loop dev: rebuild image(s), import into k3d, restart Deployment(s).
+## No direct-apply bypass -- ArgoCD owns the manifests; only pods restart.
+##   make k3d-dev                    # rebuild + restart all app node types
+##   make k3d-dev NODE=bff           # one node type
+##   make k3d-dev NODE=bff,cognition # comma-separated list
+##   make k3d-dev PULL_INFRA=1      # pull + re-import infra images
+k3d-dev:
+	@bash scripts/k3d/dev.sh \
+		$${NODE:+--node=$${NODE}} \
+		$${PULL_INFRA:+--pull-infra} \
+		$${CLUSTER:+--cluster=$${CLUSTER}} \
+		$${NAMESPACE:+--namespace=$${NAMESPACE}} \
+		$${NO_WAIT:+--no-wait}
 
 # ---------------------------------------------------------------------------
 # Test targets
