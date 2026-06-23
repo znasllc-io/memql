@@ -8,14 +8,30 @@ import (
 	"path/filepath"
 )
 
-// Executor is the side-effect boundary for the deploy-control service.
-// All cluster reads, git operations, and action-script invocations go
-// through it so the Service logic is testable with a fake.
+// Executor is THE single side-effect boundary for memQL deployments
+// (Epic 2 / #2098). Every cluster read, git operation, and action-script
+// invocation goes through it, so the Service logic is testable with a
+// fake AND -- crucially -- so the deploy PACK (examples/deploypack) drives
+// the EXACT same effects through the IntegrationProvider layer instead of
+// re-implementing the shell-outs. The pack acquires this boundary via the
+// exported NewExecutor(repoRoot); its capabilities (runPromote / commit /
+// argoSync / observeReconciledState) call the same methods the gRPC
+// Service does. Keeping the effects here -- one place -- is what makes the
+// DSL automation layer ADDITIVE rather than a parallel, drifting copy.
 //
 // Read paths use KubectlJSON and never mutate. Action paths go through
 // the sanctioned scripts (scripts/release/promote.sh), `git revert`,
 // and `kubectl argo rollouts promote|abort` -- NEVER ad-hoc
 // `kubectl set image`.
+//
+// Scope note (E2.5 / #2098): this PR consolidates the effect SEAM (the
+// gRPC Service's legacy promote actions now share promoteRelease, and the
+// pack reuses this Executor + ConsoleEnvFor). The Go deploy LIFECYCLE
+// (deploy.go's Deploy/RollbackDeployment apply+transition) remains the
+// AUTHORITATIVE path for the live azure deploy and is NOT removed here.
+// Retiring it in favour of the pack automations requires anchoring the
+// pack on the identity node and an async gRPC contract change -- an
+// owner-gated, staging-validated cutover tracked separately (E2.5a).
 type Executor interface {
 	// RunPromote invokes scripts/release/promote.sh --version=<version>
 	// --env=<env>. Used by both DeployStaging (env=staging) and Promote
