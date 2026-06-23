@@ -25,7 +25,7 @@ type EditDocumentArgs struct {
 	AuthorId         string
 	ExpectedVersion  int
 	ProducedByPlanId string
-	PartitionId          string
+	PartitionId      string
 }
 
 // EditDocument calls the engine builtin editDocument.
@@ -165,7 +165,7 @@ type KnowledgeAugmentDomainGenerateArgs struct {
 	Topic             string
 	SourceUtteranceId string
 	SourceAgentId     string
-	PartitionId           string
+	PartitionId       string
 	RequestedBy       string
 }
 
@@ -333,7 +333,7 @@ type TrainAgentArgs struct {
 	Domains     []any
 	Tools       []any
 	Provider    string
-	PartitionId     string
+	PartitionId string
 	RequestedBy string
 }
 

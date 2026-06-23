@@ -398,6 +398,23 @@ func QueryActiveHumanParticipantsBuild(args QueryActiveHumanParticipantsArgs) st
 	return b.String()
 }
 
+// QueryActivePartitionIds -- Returns id-only projections of every active v1:cognition:space row (no status / archived filtering -- mirrors the pre-existing recomputeAllSpacesContext semantics that just need non-deleted rows). Backs the cognition heartbeat path that iterates spaces to recompute per-space context (memql#287; replaces a handwritten shape() runtime query under sub-epic #286).
+//
+// Bound concept: space.
+type QueryActivePartitionIdsArgs struct {
+}
+
+// QueryActivePartitionIds calls the engine query queryActivePartitionIds.
+func (qc *QueryClient) QueryActivePartitionIds(ctx context.Context, args QueryActivePartitionIdsArgs) (*Result, error) {
+	call := QueryActivePartitionIdsBuild(args)
+	return qc.executeNamed(ctx, "queryActivePartitionIds", call)
+}
+
+func QueryActivePartitionIdsBuild(args QueryActivePartitionIdsArgs) string {
+	_ = args
+	return "queryActivePartitionIds({})"
+}
+
 // QueryActivePlansForUser -- The caller's currently-RUNNING Plans -- the account's active tasks occupying concurrency slots (epic memql#902 / #909). Owned tier: payload.requestedBy==actor.userId binds server-side so a caller only sees their own. The active count is the result length; pair with queryAccountEntitlement for the cap and queryWaitingPlansForUser for the queue.
 //
 // Bound concept: plan.
@@ -498,23 +515,6 @@ func (qc *QueryClient) QueryActiveSkillsFull(ctx context.Context, args QueryActi
 func QueryActiveSkillsFullBuild(args QueryActiveSkillsFullArgs) string {
 	_ = args
 	return "queryActiveSkillsFull({})"
-}
-
-// QueryActivePartitionIds -- Returns id-only projections of every active v1:cognition:space row (no status / archived filtering -- mirrors the pre-existing recomputeAllSpacesContext semantics that just need non-deleted rows). Backs the cognition heartbeat path that iterates spaces to recompute per-space context (memql#287; replaces a handwritten shape() runtime query under sub-epic #286).
-//
-// Bound concept: space.
-type QueryActivePartitionIdsArgs struct {
-}
-
-// QueryActivePartitionIds calls the engine query queryActivePartitionIds.
-func (qc *QueryClient) QueryActivePartitionIds(ctx context.Context, args QueryActivePartitionIdsArgs) (*Result, error) {
-	call := QueryActivePartitionIdsBuild(args)
-	return qc.executeNamed(ctx, "queryActivePartitionIds", call)
-}
-
-func QueryActivePartitionIdsBuild(args QueryActivePartitionIdsArgs) string {
-	_ = args
-	return "queryActivePartitionIds({})"
 }
 
 // QueryActiveSpaces -- Returns spaces with status='active' (the default), scoped to the caller's per-row authz reach. Optional userId arg narrows to a specific owner (matches payload.ownerUserId, a v1:identity:user id -- NOT the createdBy email). Used by the cockpit Chat tab to populate the space list.
@@ -926,7 +926,7 @@ func QueryAssistantAgentForUserBuild(args QueryAssistantAgentForUserArgs) string
 // Bound concept: attachment.
 type QueryAttachmentByIdArgs struct {
 	AttachmentId string
-	PartitionId      string
+	PartitionId  string
 }
 
 // QueryAttachmentById calls the engine query queryAttachmentById.
@@ -1622,7 +1622,7 @@ func QueryDeploymentsForClusterBuild(args QueryDeploymentsForClusterArgs) string
 //
 // Bound concept: record.
 type QueryDetectConflictsArgs struct {
-	PartitionId         string
+	PartitionId     string
 	NaturalKeyValue string
 	RecordType      string
 }
@@ -2243,7 +2243,7 @@ func QueryGlobalVariablesBuild(args QueryGlobalVariablesArgs) string {
 // Bound concept: utterance.
 type QueryGreetingUtteranceArgs struct {
 	PartitionId string
-	AgentId string
+	AgentId     string
 }
 
 // QueryGreetingUtterance calls the engine query queryGreetingUtterance.
@@ -3029,7 +3029,7 @@ func QueryOwnedSpaceByIdBuild(args QueryOwnedSpaceByIdArgs) string {
 // Bound concept: participant.
 type QueryParticipantByAgentSpaceArgs struct {
 	PartitionId string
-	AgentId string
+	AgentId     string
 }
 
 // QueryParticipantByAgentSpace calls the engine query queryParticipantByAgentSpace.
@@ -3056,7 +3056,7 @@ func QueryParticipantByAgentSpaceBuild(args QueryParticipantByAgentSpaceArgs) st
 //
 // Bound concept: session.
 type QueryParticipantSessionArgs struct {
-	PartitionId       string
+	PartitionId   string
 	ParticipantId string
 }
 
@@ -3238,7 +3238,7 @@ func QueryPlansForSpaceBuild(args QueryPlansForSpaceArgs) string {
 // Bound concept: policy.
 type QueryPolicyArgs struct {
 	TargetRecordType string
-	PartitionId          string
+	PartitionId      string
 }
 
 // QueryPolicy calls the engine query queryPolicy.
@@ -3396,7 +3396,7 @@ func QueryRecentAuditEventsBuild(args QueryRecentAuditEventsArgs) string {
 //
 // Bound concept: record.
 type QueryRecordsByStateArgs struct {
-	PartitionId         string
+	PartitionId     string
 	RecordType      string
 	ValidationState string
 	ImportSource    string
@@ -3727,8 +3727,8 @@ func QuerySkillNeedsRefreshBuild(args QuerySkillNeedsRefreshArgs) string {
 //
 // Bound concept: media.
 type QuerySpaceMediaArgs struct {
-	PartitionId   string
-	MediaType string
+	PartitionId string
+	MediaType   string
 }
 
 // QuerySpaceMedia calls the engine query querySpaceMedia.
@@ -3801,7 +3801,7 @@ func QuerySpaceParticipantPresenceBuild(args QuerySpaceParticipantPresenceArgs) 
 //
 // Bound concept: participant.
 type QuerySpaceParticipantsArgs struct {
-	PartitionId         string
+	PartitionId     string
 	Status          string
 	ParticipantType string
 }
@@ -3839,7 +3839,7 @@ func QuerySpaceParticipantsBuild(args QuerySpaceParticipantsArgs) string {
 //
 // Bound concept: utterance.
 type QuerySpaceUtterancesArgs struct {
-	PartitionId       string
+	PartitionId   string
 	ParticipantId string
 	UtteranceType string
 }
@@ -4113,8 +4113,8 @@ func QueryUpcomingEventsBuild(args QueryUpcomingEventsArgs) string {
 //
 // Bound concept: record.
 type QueryUsableRecordsArgs struct {
-	PartitionId    string
-	RecordType string
+	PartitionId string
+	RecordType  string
 }
 
 // QueryUsableRecords calls the engine query queryUsableRecords.
@@ -4323,9 +4323,9 @@ func QueryValidationEventsForTargetBuild(args QueryValidationEventsForTargetArgs
 //
 // Bound concept: log.
 type QueryValidationLogArgs struct {
-	RecordId string
-	PartitionId  string
-	Action   string
+	RecordId    string
+	PartitionId string
+	Action      string
 }
 
 // QueryValidationLog calls the engine query queryValidationLog.

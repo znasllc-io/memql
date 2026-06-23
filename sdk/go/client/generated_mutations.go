@@ -40,7 +40,7 @@ func MutationActivateAuthoringBundleBuild(args MutationActivateAuthoringBundleAr
 //
 // Bound concept: participant.
 type MutationAddAgentToSpaceArgs struct {
-	PartitionId             string
+	PartitionId         string
 	AgentId             string
 	DisplayName         string
 	CapabilityOverrides map[string]any
@@ -242,7 +242,7 @@ type MutationAppendDocumentVersionArgs struct {
 	Note             string
 	ParentVersionId  string
 	ProducedByPlanId string
-	PartitionId          string
+	PartitionId      string
 }
 
 // MutationAppendDocumentVersion calls the engine mutation mutationAppendDocumentVersion.
@@ -504,7 +504,7 @@ func MutationApproveRequestBuild(args MutationApproveRequestArgs) string {
 // Bound concept: space.
 type MutationArchiveSpaceArgs struct {
 	PartitionId string
-	Payload map[string]any
+	Payload     map[string]any
 }
 
 // MutationArchiveSpace calls the engine mutation mutationArchiveSpace.
@@ -1252,7 +1252,7 @@ func MutationCreateAccessRequestBuild(args MutationCreateAccessRequestArgs) stri
 // Bound concept: plan.
 type MutationCreateAdHocPlanArgs struct {
 	PlanId      string
-	PartitionId     string
+	PartitionId string
 	AgentId     string
 	OwnerUserId string
 	Goal        string
@@ -1792,7 +1792,7 @@ type MutationCreateArtifactArgs struct {
 	LiveSet  bool // set true to send live; required because zero-value bool is ambiguous
 	// Enum: workspace | private
 	Scope                string
-	PartitionId              string
+	PartitionId          string
 	AgentId              string
 	ProducedByPlanId     string
 	ProducedByWorkerId   string
@@ -2817,7 +2817,7 @@ func MutationCreateClusterSettingsBuild(args MutationCreateClusterSettingsArgs) 
 //
 // Bound concept: space.
 type MutationCreateDailySpaceArgs struct {
-	PartitionId      string
+	PartitionId  string
 	Name         string
 	DailyDateKey string
 	OwnerUserId  string
@@ -3092,7 +3092,7 @@ type MutationCreateDocumentArgs struct {
 	DocumentId   string
 	AttachmentId string
 	PlanId       string
-	PartitionId      string
+	PartitionId  string
 	FileName     string
 	MimeType     string
 	Format       string
@@ -3445,7 +3445,7 @@ type MutationCreateGeneratedOutputArgs struct {
 	MimeType string
 	// Enum: workbench_generated | computer_use | agent_generated | derived
 	Source               string
-	PartitionId              string
+	PartitionId          string
 	ProducedByPlanId     string
 	ProducedByAgentId    string
 	ProducedByWorkerId   string
@@ -3556,7 +3556,7 @@ func MutationCreateGeneratedOutputBuild(args MutationCreateGeneratedOutputArgs) 
 //
 // Bound concept: utterance.
 type MutationCreateGreetingUtteranceArgs struct {
-	PartitionId       string
+	PartitionId   string
 	ParticipantId string
 	AgentId       string
 	Text          string
@@ -4138,7 +4138,7 @@ type MutationCreateMemoryArgs struct {
 	// Enum: fact | preference | instruction | episodic | other
 	Kind              string
 	AgentId           string
-	PartitionId           string
+	PartitionId       string
 	SourceUtteranceId string
 }
 
@@ -4544,7 +4544,7 @@ func MutationCreatePATIdentityBuild(args MutationCreatePATIdentityArgs) string {
 // Bound concept: plan.
 type MutationCreatePlanArgs struct {
 	PlanId                  string
-	PartitionId                 string
+	PartitionId             string
 	ParentPlanId            string
 	Kind                    string
 	Goal                    string
@@ -4723,7 +4723,7 @@ func MutationCreateProjectBuild(args MutationCreateProjectArgs) string {
 // Bound concept: record.
 type MutationCreateRecordArgs struct {
 	RecordId           string
-	PartitionId            string
+	PartitionId        string
 	RecordType         string
 	Label              string
 	Data               map[string]any
@@ -4821,7 +4821,7 @@ func MutationCreateRecordBuild(args MutationCreateRecordArgs) string {
 // Bound concept: record.
 type MutationCreateRecordBatchArgs struct {
 	RecordId           string
-	PartitionId            string
+	PartitionId        string
 	RecordType         string
 	Label              string
 	Data               map[string]any
@@ -4988,7 +4988,7 @@ type MutationCreateResponsibilityArgs struct {
 	AssignedRoleSlug string
 	SuccessCriteria  string
 	NotifyHow        string
-	ScopePartitionId     string
+	ScopePartitionId string
 	Enabled          bool
 	EnabledSet       bool // set true to send enabled; required because zero-value bool is ambiguous
 }
@@ -5090,7 +5090,7 @@ type MutationCreateScopeElevationPlanArgs struct {
 	PlanId         string
 	AgentId        string
 	OwnerUserId    string
-	PartitionId        string
+	PartitionId    string
 	Intent         string
 	Summary        string
 	RequestedScope string
@@ -5226,7 +5226,7 @@ func MutationCreateSemanticTaskBuild(args MutationCreateSemanticTaskArgs) string
 // Bound concept: session.
 type MutationCreateSessionForParticipantArgs struct {
 	SessionId     string
-	PartitionId       string
+	PartitionId   string
 	ParticipantId string
 	HumanInput    map[string]any
 	AiOutput      map[string]any
@@ -5475,7 +5475,7 @@ func MutationCreateSkillChangeEventBuild(args MutationCreateSkillChangeEventArgs
 //
 // Bound concept: space.
 type MutationCreateSpaceArgs struct {
-	PartitionId        string
+	PartitionId    string
 	Name           string
 	Description    string
 	Goal           map[string]any
@@ -6761,7 +6761,7 @@ func MutationDeleteRecordBuild(args MutationDeleteRecordArgs) string {
 // Bound concept: space.
 type MutationDeleteSpaceNowArgs struct {
 	PartitionId string
-	Payload map[string]any
+	Payload     map[string]any
 }
 
 // MutationDeleteSpaceNow calls the engine mutation mutationDeleteSpaceNow.
@@ -6836,7 +6836,7 @@ type MutationEmitClientToolRequestArgs struct {
 	CallId        string
 	ToolName      string
 	ArgumentsJSON string
-	PartitionId       string
+	PartitionId   string
 	ParticipantId string
 	AgentId       string
 	ExpiresAt     string
@@ -6912,7 +6912,7 @@ type MutationEmitClientToolResponseArgs struct {
 	IsError      bool
 	IsErrorSet   bool // set true to send isError; required because zero-value bool is ambiguous
 	ErrorMessage string
-	PartitionId      string
+	PartitionId  string
 }
 
 // MutationEmitClientToolResponse calls the engine mutation mutationEmitClientToolResponse.
@@ -6968,7 +6968,7 @@ func MutationEmitClientToolResponseBuild(args MutationEmitClientToolResponseArgs
 // Bound concept: chunk.
 type MutationEmitTextChunkArgs struct {
 	ChunkId       string
-	PartitionId       string
+	PartitionId   string
 	ParticipantId string
 	ReplyId       string
 	Text          string
@@ -7503,7 +7503,7 @@ func MutationInsertSafetyClassificationBuild(args MutationInsertSafetyClassifica
 //
 // Bound concept: participant.
 type MutationJoinSpaceAsAIArgs struct {
-	PartitionId             string
+	PartitionId         string
 	AgentId             string
 	DisplayName         string
 	Status              string
@@ -7587,7 +7587,7 @@ func MutationJoinSpaceAsAIBuild(args MutationJoinSpaceAsAIArgs) string {
 //
 // Bound concept: participant.
 type MutationJoinSpaceAsHumanArgs struct {
-	PartitionId             string
+	PartitionId         string
 	UserId              string
 	DisplayName         string
 	Status              string
@@ -7679,7 +7679,7 @@ type MutationLogMissingCapabilityArgs struct {
 	Description         string
 	RequestedFromPlanId string
 	RequestedByAgentId  string
-	PartitionId             string
+	PartitionId         string
 	PartitionScope      string
 	FirstSeenAt         string
 	ExampleGoal         string
@@ -8192,7 +8192,7 @@ func MutationPersistTaskStateBuild(args MutationPersistTaskStateArgs) string {
 // Bound concept: workspace.
 type MutationProvisionWorkspaceArgs struct {
 	// Synthesized id, typically `{planId}` since one workspace per Plan.
-	WorkpartitionId string
+	WorkspaceId string
 	PlanId      string
 	StorageRoot string
 }
@@ -8206,8 +8206,8 @@ func (qc *QueryClient) MutationProvisionWorkspace(ctx context.Context, args Muta
 func MutationProvisionWorkspaceBuild(args MutationProvisionWorkspaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationProvisionWorkspace({")
-	b.WriteString("workpartitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.WorkpartitionId))
+	b.WriteString("workspaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
@@ -9424,7 +9424,7 @@ func MutationRejectAccessRequestBuild(args MutationRejectAccessRequestArgs) stri
 //
 // Bound concept: workspace.
 type MutationReleaseWorkspaceArgs struct {
-	WorkpartitionId string
+	WorkspaceId string
 	// Why the workspace was released. Drives the released-row audit trail.
 	// Enum: plan_terminal | explicit | ttl_expired
 	Reason string
@@ -9439,8 +9439,8 @@ func (qc *QueryClient) MutationReleaseWorkspace(ctx context.Context, args Mutati
 func MutationReleaseWorkspaceBuild(args MutationReleaseWorkspaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationReleaseWorkspace({")
-	b.WriteString("workpartitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.WorkpartitionId))
+	b.WriteString("workspaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
@@ -9455,7 +9455,7 @@ func MutationReleaseWorkspaceBuild(args MutationReleaseWorkspaceArgs) string {
 // Bound concept: participant.
 type MutationRemoveAgentFromSpaceArgs struct {
 	PartitionId string
-	AgentId string
+	AgentId     string
 }
 
 // MutationRemoveAgentFromSpace calls the engine mutation mutationRemoveAgentFromSpace.
@@ -9483,7 +9483,7 @@ func MutationRemoveAgentFromSpaceBuild(args MutationRemoveAgentFromSpaceArgs) st
 // Bound concept: space.
 type MutationRenameSpaceArgs struct {
 	PartitionId string
-	Payload map[string]any
+	Payload     map[string]any
 }
 
 // MutationRenameSpace calls the engine mutation mutationRenameSpace.
@@ -9637,7 +9637,7 @@ func MutationResolveApprovalRequestBuild(args MutationResolveApprovalRequestArgs
 // Bound concept: space.
 type MutationRestoreSpaceArgs struct {
 	PartitionId string
-	Payload map[string]any
+	Payload     map[string]any
 }
 
 // MutationRestoreSpace calls the engine mutation mutationRestoreSpace.
@@ -9926,7 +9926,7 @@ func MutationRevokeWorkerTokenIdentityBuild(args MutationRevokeWorkerTokenIdenti
 // Bound concept: space.
 type MutationRolloverDailySpaceArgs struct {
 	PartitionId string
-	Payload map[string]any
+	Payload     map[string]any
 }
 
 // MutationRolloverDailySpace calls the engine mutation mutationRolloverDailySpace.
@@ -9994,7 +9994,7 @@ func MutationRotateAuthSessionBuild(args MutationRotateAuthSessionArgs) string {
 // Bound concept: space.
 type MutationSaveSpaceArgs struct {
 	PartitionId string
-	Payload map[string]any
+	Payload     map[string]any
 }
 
 // MutationSaveSpace calls the engine mutation mutationSaveSpace.
@@ -10044,7 +10044,7 @@ func MutationScheduleAccountDeletionBuild(args MutationScheduleAccountDeletionAr
 // Bound concept: utterance.
 type MutationSendActionUtteranceArgs struct {
 	UtteranceId     string
-	PartitionId         string
+	PartitionId     string
 	ParticipantId   string
 	ParticipantType string
 	ReplyToId       string
@@ -10120,7 +10120,7 @@ type MutationSendRealtimeTranscriptUtteranceArgs struct {
 	UtteranceId    string
 	IdempotencyKey string
 	CreatedAt      string
-	PartitionId        string
+	PartitionId    string
 	ParticipantId  string
 	// Enum: human | si | system
 	ParticipantType string
@@ -10227,7 +10227,7 @@ func MutationSendRealtimeTranscriptUtteranceBuild(args MutationSendRealtimeTrans
 // Bound concept: utterance.
 type MutationSendSpeechUtteranceArgs struct {
 	UtteranceId     string
-	PartitionId         string
+	PartitionId     string
 	ParticipantId   string
 	ParticipantType string
 	Text            string
@@ -10319,7 +10319,7 @@ func MutationSendSpeechUtteranceBuild(args MutationSendSpeechUtteranceArgs) stri
 // Bound concept: utterance.
 type MutationSendTextUtteranceArgs struct {
 	UtteranceId     string
-	PartitionId         string
+	PartitionId     string
 	ParticipantId   string
 	ParticipantType string
 	Text            string
@@ -10446,12 +10446,12 @@ func MutationSetAccountEntitlementBuild(args MutationSetAccountEntitlementArgs) 
 //
 // Bound concept: audioOverride.
 type MutationSetAgentAudioOverrideArgs struct {
-	PartitionId   string
-	AgentId   string
-	Mode      string
-	SetBy     string
-	Active    bool
-	ActiveSet bool // set true to send active; required because zero-value bool is ambiguous
+	PartitionId string
+	AgentId     string
+	Mode        string
+	SetBy       string
+	Active      bool
+	ActiveSet   bool // set true to send active; required because zero-value bool is ambiguous
 }
 
 // MutationSetAgentAudioOverride calls the engine mutation mutationSetAgentAudioOverride.
@@ -10497,12 +10497,12 @@ func MutationSetAgentAudioOverrideBuild(args MutationSetAgentAudioOverrideArgs) 
 //
 // Bound concept: videoOverride.
 type MutationSetAgentVideoOverrideArgs struct {
-	PartitionId   string
-	AgentId   string
-	Mode      string
-	SetBy     string
-	Active    bool
-	ActiveSet bool // set true to send active; required because zero-value bool is ambiguous
+	PartitionId string
+	AgentId     string
+	Mode        string
+	SetBy       string
+	Active      bool
+	ActiveSet   bool // set true to send active; required because zero-value bool is ambiguous
 }
 
 // MutationSetAgentVideoOverride calls the engine mutation mutationSetAgentVideoOverride.
@@ -11083,7 +11083,7 @@ func MutationSetPartitionVariableBuild(args MutationSetPartitionVariableArgs) st
 type MutationSetPolicyArgs struct {
 	PolicyId              string
 	TargetRecordType      string
-	PartitionId               string
+	PartitionId           string
 	RequiredChecks        float64
 	RequiredConfirmations float64
 	CheckedDataUsable     bool
@@ -11180,7 +11180,7 @@ func MutationSetResponsibilityStatusBuild(args MutationSetResponsibilityStatusAr
 // Bound concept: space.
 type MutationSetSpaceGoalArgs struct {
 	PartitionId string
-	Goal    map[string]any
+	Goal        map[string]any
 }
 
 // MutationSetSpaceGoal calls the engine mutation mutationSetSpaceGoal.
@@ -11235,7 +11235,7 @@ func MutationSetSurfaceAvailabilityBuild(args MutationSetSurfaceAvailabilityArgs
 //
 // Bound concept: user.
 type MutationSetUserActiveSpaceArgs struct {
-	UserId        string
+	UserId            string
 	PartitionId       string
 	ActivePartitionId string
 }
@@ -11443,7 +11443,7 @@ func MutationTouchSessionBuild(args MutationTouchSessionArgs) string {
 //
 // Bound concept: workspace.
 type MutationTouchWorkspaceArgs struct {
-	WorkpartitionId string
+	WorkspaceId string
 }
 
 // MutationTouchWorkspace calls the engine mutation mutationTouchWorkspace.
@@ -11455,8 +11455,8 @@ func (qc *QueryClient) MutationTouchWorkspace(ctx context.Context, args Mutation
 func MutationTouchWorkspaceBuild(args MutationTouchWorkspaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationTouchWorkspace({")
-	b.WriteString("workpartitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.WorkpartitionId))
+	b.WriteString("workspaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -11918,7 +11918,7 @@ type MutationUpdateGeneratedOutputContentArgs struct {
 	MimeType string
 	// Enum: workbench_generated | computer_use | agent_generated | derived
 	Source            string
-	PartitionId           string
+	PartitionId       string
 	ProducedByPlanId  string
 	ProducedByAgentId string
 }
@@ -12170,7 +12170,7 @@ func MutationUpdateNumberStatusBuild(args MutationUpdateNumberStatusArgs) string
 type MutationUpdateParticipantPresenceArgs struct {
 	PresenceId    string
 	ParticipantId string
-	PartitionId       string
+	PartitionId   string
 	// Enum: idle | listening | thinking | typing | responding | working | waiting | needs_human | needs_clarification | paused | error | using_tool | researching | investigating
 	State           string
 	Label           string
@@ -12547,7 +12547,7 @@ type MutationUpdateResponsibilityArgs struct {
 	AssignedRoleSlug string
 	SuccessCriteria  string
 	NotifyHow        string
-	ScopePartitionId     string
+	ScopePartitionId string
 	Enabled          bool
 	EnabledSet       bool // set true to send enabled; required because zero-value bool is ambiguous
 }
