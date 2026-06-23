@@ -61,9 +61,6 @@ func (fakeDeployExecutor) RunRollback(context.Context, string, string) (string, 
 func (fakeDeployExecutor) RunRolloutAction(context.Context, string, string, string) (string, error) {
 	return "", nil
 }
-func (fakeDeployExecutor) RunDockerComposeDeploy(context.Context, string) (string, error) {
-	return "", nil
-}
 func (fakeDeployExecutor) KubectlJSON(context.Context, ...string) ([]byte, error) {
 	// Read paths are best-effort; returning an error leaves the
 	// Argo/rollout/gate sections empty without failing the read.

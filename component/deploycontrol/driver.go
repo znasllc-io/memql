@@ -3,8 +3,9 @@
 // and one driver implementation per provider knows how to apply that
 // record to its concrete target. The Deploy / RollbackDeployment
 // operations (deploy.go) resolve a record's provider to a driver via
-// selectDriver and call apply(), so the SAME deploy action drives both a
-// local Docker cluster and the Argo/Azure (AKS) path.
+// selectDriver and call apply(). The only live deploy target is the
+// Argo/Azure (AKS) path; local clusters are operated via `make up`
+// (k3d + ArgoCD), not the deploy console.
 //
 // Drivers route every side effect through the Executor boundary, so the
 // operations stay unit-testable with a fake executor (no real deploy).
@@ -66,39 +67,27 @@ func (d azureDriver) apply(ctx context.Context, spec deploymentSpec) (string, er
 	return d.exec.RunPromote(ctx, spec.version, spec.consoleEnv)
 }
 
-// dockerLocalDriver wraps the local staging-parity Docker cluster flow
-// (docker/docker-compose.cluster.yml): it brings the 2-replica mesh up
-// with freshly-built images. Local images are built from the working
-// tree rather than a pinned ACR digest, so spec.imageDigest is carried
-// for record provenance but not consulted by the apply itself.
-type dockerLocalDriver struct{ exec Executor }
-
-func (dockerLocalDriver) provider() string { return "docker-local" }
-
-func (d dockerLocalDriver) apply(ctx context.Context, spec deploymentSpec) (string, error) {
-	return d.exec.RunDockerComposeDeploy(ctx, spec.version)
-}
-
 // selectDriver returns the deploy driver for a record's provider value.
 // An empty provider is treated as "azure" (the deploymentProviderFor
-// default), so legacy records with no stamped provider still ship. An
-// unknown provider is a hard error -- a misconfigured record must not
-// silently fall through to the wrong target.
+// default), so legacy records with no stamped provider still ship. Any
+// other provider is a hard error -- a misconfigured record must not
+// silently fall through to the wrong target. The retired "docker-local"
+// provider in particular is rejected here: local clusters are operated
+// via `make up` (k3d + ArgoCD), not the deploy console.
 func selectDriver(exec Executor, provider string) (deployDriver, error) {
 	switch provider {
 	case "azure", "":
 		return azureDriver{exec: exec}, nil
 	case "docker-local":
-		return dockerLocalDriver{exec: exec}, nil
+		return nil, fmt.Errorf("provider %q is no longer supported: local clusters are operated via `make up` (k3d + ArgoCD), not the deploy console", provider)
 	default:
-		return nil, fmt.Errorf("no deploy driver for provider %q (want azure|docker-local)", provider)
+		return nil, fmt.Errorf("no deploy driver for provider %q (want azure)", provider)
 	}
 }
 
 // consoleEnvFor maps a deployment record's environment enum onto the
 // promote.sh console env ("staging" | "prod"). development / unknown
-// envs map to "" -- they are not served by the azure driver (and the
-// docker-local driver ignores the console env entirely).
+// envs map to "" -- they are not served by the azure driver.
 func consoleEnvFor(deploymentEnv string) string {
 	switch deploymentEnv {
 	case "production":
