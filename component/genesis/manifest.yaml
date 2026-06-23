@@ -1,86 +1,1408 @@
-# memQL dev-secrets manifest -- embedded snapshot
-# ================================================
+# memQL env-var registry -- EMBEDDED SNAPSHOT (generated, do not edit)
+# ============================================================================
+# This is a //go:embed snapshot of scripts/secrets/manifest.yaml baked into
+# the binary as the last-resort fallback (loader priority 4), so `genesis
+# init` works on operator machines without a memql checkout.
 #
-# This file is a SNAPSHOT of memql's scripts/secrets/manifest.yaml
-# baked into the memql-cockpit binary so `genesis init` works on
-# operator machines that don't have a local memql checkout.
-#
-# The hybrid loader prefers a fresh manifest in this order:
-#   1. --manifest <path>
-#   2. MEMQL_MANIFEST_PATH env var
-#   3. $MEMQL_REPO/scripts/secrets/manifest.yaml (when MEMQL_REPO set)
-#   4. THIS embedded snapshot
-#
-# Refresh this snapshot when memql's manifest changes; the embedded
-# copy is best-effort and acceptable to drift between cockpit releases.
+# DO NOT EDIT BY HAND. Regenerate with:
+#     bash scripts/secrets/sync-embedded-manifest.sh
+# TestEmbeddedManifestInSync fails CI if this drifts from the authored file.
+# ============================================================================
 
-# ---------------------------------------------------------------------
-# Secrets (encrypted, sealed under MEMQL_MASTER_KEY)
-# ---------------------------------------------------------------------
+# memQL env-var & configuration registry
+# ============================================================================
+# THE source of truth for every environment variable memQL reads (Epic 7 /
+# memql#2103). One file drives THREE consumers, so they can never drift:
+#   1. genesis sealing  -- the `secrets:` + `variables:` lists, validated as a
+#      strict superset of the operator .env (the SEAL FLOOR, see below).
+#   2. the cockpit Configuration screen (memql#2110) -- view/edit registry vars.
+#   3. boot-time fail-fast validation (memql#2108) -- per MEMQL_NODE_TYPE.
+# CI enforces drift both ways via `go run ./cmd/envscan -check` (memql#2105):
+# a var read by code that is not registered here, OR a registry entry that
+# appears nowhere in the repo, fails the build.
+#
+# Values are NOT in this file -- developers keep them in
+# ~/.memql/dev-secrets.yaml (gitignored) or .env. `make secrets-init` walks
+# this manifest and prompts; `make secrets-seal` seals them under
+# MEMQL_MASTER_KEY.
+#
+# Entry fields (component/genesis/manifest.go ManifestEntry):
+#   name        -- the env var name.
+#   component   -- owning subsystem (engine, identity, ai, voice, ...).
+#   scope       -- node:      per-pod/process env from k8s/shell, NOT sealed
+#                             into the genesis envelope (node id/type, grpc
+#                             addr, mesh, feature toggles, deploy ids).
+#                  global:    instance-wide sealed secret/config.
+#                  partition: per-tenant concept-stored config.
+#   kind        -- secret sub-kind (vendor_api_key | oauth_secret | integration).
+#   required    -- node types that MUST have this var at boot ("all" = every
+#                  node). Empty = optional/defaulted. Drives #2108.
+#   default     -- default value when unset.
+#   optional    -- true => NOT part of the seal floor (a .env that omits it
+#                  still seals). Every var beyond the curated floor is optional;
+#                  it may still be `required` at boot for a given node type.
+#                  The two axes are independent.
+#
+# THE SEAL FLOOR: the non-optional entries (the small curated set at the top of
+# each section) are the strict-superset floor `genesis-seal` enforces against a
+# dev .env. The full ~200-var universe below is registered with optional: true
+# so cataloguing every var does NOT break local sealing.
+# ============================================================================
 
 secrets:
+
+  # --- seal floor (a developer .env MUST cover these to seal) ---
+
   - name: OPENAI_API_KEY
+    component: ai
     scope: global
     kind: vendor_api_key
-    description: Instance-wide OpenAI API key. Used for chat, TTS, STT, and Realtime providers unless a tenant has their own partition-scoped key.
+    description: "Instance-wide OpenAI API key. Used for chat, TTS, STT, and Realtime providers unless a tenant has their own partition-scoped key."
 
   - name: ANTHROPIC_API_KEY
+    component: ai
     scope: global
     kind: vendor_api_key
-    description: Instance-wide Anthropic API key. Used for Claude chat / vision providers unless overridden per tenant.
+    description: "Instance-wide Anthropic API key. Used for Claude chat / vision providers unless overridden per tenant."
 
   - name: IDENTITY_KEY_ENCRYPTION_KEY
+    component: identity
     scope: global
     kind: integration
-    description: Master secret (>=16 bytes) wrapping the identity service's on-disk Ed25519 signing keypair (disk-key mode). Required in production only when IDENTITY_SIGNING_KEY_B64 is NOT set (i.e. the legacy on-disk KeyDir path).
+    description: "Master secret (>=16 bytes) wrapping the identity service's on-disk Ed25519 signing keypair (disk-key mode). Required in production only when IDENTITY_SIGNING_KEY_B64 is NOT set (i.e. the legacy on-disk KeyDir path)."
 
   - name: IDENTITY_SIGNING_KEY_B64
+    component: identity
     scope: global
     kind: integration
     optional: true
-    description: Base64 (std) 32-byte Ed25519 signing seed (#550/#619). When set, identity runs in envMode -- every replica derives the SAME key + kid + JWKS from this seed, so identity needs NO single-writer RWO key PVC and runs >=2 replicas (HA). REQUIRED for the HA deploy/k8s/identity.yaml manifest; absent only in local-dev disk-key mode. Optional here so local seals don't fail; staging/prod envelopes MUST carry it. Rotate by re-sealing a new seed + rolling identity.
+    description: "Base64 (std) 32-byte Ed25519 signing seed (#550/#619). When set, identity runs in envMode -- every replica derives the SAME key + kid + JWKS from this seed, so identity needs NO single-writer RWO key PVC and runs >=2 replicas (HA). REQUIRED for the HA deploy/k8s/identity.yaml manifest; absent only in local-dev disk-key mode. Optional here so local seals don't fail; staging/prod envelopes MUST carry it. Rotate by re-sealing a new seed + rolling identity."
 
   - name: EMAIL_AZURE_CLIENT_SECRET
+    component: email
     scope: global
     kind: oauth_secret
-    description: Azure Graph API client secret used by the email integration. (Legacy name `AZURE_CLIENT_SECRET` is still accepted as a fallback by integrations/email; remove the old row from the running memQL once everyone has re-seeded.)
+    description: "Azure Graph API client secret used by the email integration. (Legacy name `AZURE_CLIENT_SECRET` is still accepted as a fallback by integrations/email; remove the old row from the running memQL once everyone has re-seeded.)"
 
   - name: ANAM_API_KEY
+    component: avatar
     scope: global
     kind: integration
-    description: Anam avatar API key (server-side). Used by the voice-agent and the direct/Guide avatar path to mint/resolve Anam personas.
+    description: "Anam avatar API key (server-side). Used by the voice-agent and the direct/Guide avatar path to mint/resolve Anam personas."
 
   - name: SIMLI_API_KEY
+    component: avatar
     scope: global
     kind: integration
-    description: Simli avatar API key (server-side). Used by the voice-agent and the direct/Guide avatar path to mint/resolve Simli faces.
+    description: "Simli avatar API key (server-side). Used by the voice-agent and the direct/Guide avatar path to mint/resolve Simli faces."
 
-# ---------------------------------------------------------------------
-# Plaintext variables (non-sensitive config)
-# ---------------------------------------------------------------------
+  # --- cluster ---
+
+  - name: MEMQL_NODE_BOOTSTRAP_TOKEN
+    component: cluster
+    scope: node
+    kind: integration
+    optional: true
+    description: "Shared bootstrap secret a node presents to the identity service to self-mint its node token when no MEMQL_NODE_TOKEN is provisioned."
+
+  - name: MEMQL_NODE_TOKEN
+    component: cluster
+    scope: node
+    kind: integration
+    optional: true
+    description: "Operator-provisioned bearer token this node presents on its outbound NodeService stream; empty when no auth is required or when self-bootstrapping."
+
+  - name: MEMQL_SVC_JWT
+    component: cluster
+    scope: node
+    kind: integration
+    optional: true
+    description: "class=service_account JWT bearer the deploy-gate-check CLI presents to run its authenticated query against the BFF."
+
+  # --- database ---
+
+  - name: MEMORY_NODES_DATABASE_DSN
+    component: database
+    scope: global
+    kind: integration
+    required: ["all"]
+    optional: true
+    description: "Postgres+TimescaleDB connection string for the row store; every node needs it and the process exits at boot if it is missing."
+
+  # --- ai ---
+
+  - name: MEMQL_SI_ANTHROPIC_API_KEY
+    component: ai
+    scope: global
+    kind: vendor_api_key
+    optional: true
+    description: "Instance-wide Anthropic API key for Claude chat and vision providers."
+
+  - name: MEMQL_SI_OPENAI_API_KEY
+    component: ai
+    scope: global
+    kind: vendor_api_key
+    optional: true
+    description: "Instance-wide OpenAI API key for chat, TTS, STT, and Realtime providers."
+
+  # --- voice ---
+
+  - name: POLYPHON_LIVEKIT_API_KEY
+    component: voice
+    scope: global
+    kind: integration
+    required: ["voice"]
+    optional: true
+    description: "LiveKit API key the Polyphon voice transport uses to mint room join tokens."
+
+  - name: POLYPHON_LIVEKIT_API_SECRET
+    component: voice
+    scope: global
+    kind: integration
+    required: ["voice"]
+    optional: true
+    description: "LiveKit API secret the Polyphon voice transport uses to sign room join tokens."
+
+  # --- telephony ---
+
+  - name: MEMQL_TELEPHONY_OUTBOUND_AUTH_PASSWORD
+    component: telephony
+    scope: node
+    kind: integration
+    optional: true
+    description: "Password for SIP-trunk authentication on outbound telephony calls."
+
+  - name: MEMQL_TELEPHONY_TELNYX_API_KEY
+    component: telephony
+    scope: global
+    kind: vendor_api_key
+    optional: true
+    description: "Telnyx v2 API key used to authenticate telephony carrier requests."
+
+  # --- identity ---
+
+  - name: IDENTITY_TURNSTILE_SECRET
+    component: identity
+    scope: global
+    kind: integration
+    optional: true
+    description: "Cloudflare Turnstile secret key used to verify CAPTCHA tokens on registration and login forms."
+
+  # --- storage ---
+
+  - name: MEMQL_AZURE_STORAGE_CONNECTION_STRING
+    component: storage
+    scope: global
+    kind: integration
+    optional: true
+    description: "Azure Storage connection string used by the azure-blob uploader; the uploader returns an error when it is not set."
 
 variables:
+
+  # --- seal floor (a developer .env MUST cover these to seal) ---
+
   - name: IDENTITY_BASE_URL
+    component: identity
     scope: global
-    description: Public origin of the identity service (e.g. https://auth.example.com). Used as JWT `iss` and in outbound email links.
+    required: ["identity"]
+    description: "Public origin of the identity service (e.g. https://auth.example.com). Used as JWT `iss` and in outbound email links."
 
   - name: IDENTITY_VERIFIER_BASE_URL
+    component: identity
     scope: global
-    description: URL non-identity binaries fetch JWKS from. Typically equals IDENTITY_BASE_URL; override only when internal-mesh routing differs from the public origin.
+    description: "URL non-identity binaries fetch JWKS from. Typically equals IDENTITY_BASE_URL; override only when internal-mesh routing differs from the public origin."
 
   - name: EMAIL_AZURE_TENANT_ID
+    component: email
     scope: global
-    description: Azure AD tenant ID for the email integration's Microsoft Graph sender. (Legacy name `AZURE_TENANT_ID` still accepted by integrations/email as a fallback.)
+    description: "Azure AD tenant ID for the email integration's Microsoft Graph sender. (Legacy name `AZURE_TENANT_ID` still accepted by integrations/email as a fallback.)"
 
   - name: EMAIL_AZURE_CLIENT_ID
+    component: email
     scope: global
-    description: Azure AD application ID for the email integration's Microsoft Graph sender. (Legacy name `AZURE_CLIENT_ID` still accepted.)
+    description: "Azure AD application ID for the email integration's Microsoft Graph sender. (Legacy name `AZURE_CLIENT_ID` still accepted.)"
 
   - name: EMAIL_SENDER
+    component: email
     scope: global
-    description: Email address used as the sender for transactional mail (e.g. no-reply@znas.io). (Legacy name `MAIL_SENDER` still accepted.)
+    description: "Email address used as the sender for transactional mail (e.g. no-reply@znas.io). (Legacy name `MAIL_SENDER` still accepted.)"
 
   - name: EMAIL_FROM_NAME
+    component: email
     scope: global
-    default: memQL
-    description: Display name shown in the From header of transactional mail. (Legacy name `MAIL_FROM_NAME` still accepted.)
+    default: "memQL"
+    description: "Display name shown in the From header of transactional mail. (Legacy name `MAIL_FROM_NAME` still accepted.)"
+
+  # --- engine ---
+
+  - name: MEMQL_AUTHORING_CAPTURE_ENABLED
+    component: engine
+    scope: node
+    default: "true"
+    optional: true
+    description: "Master kill-switch for the planner authoring-capture path; set to a falsy value to disable capture cluster-wide for cost or incident control."
+
+  - name: MEMQL_AUTHORING_CAPTURE_MODE
+    component: engine
+    scope: node
+    default: "transcript"
+    optional: true
+    description: "Selects the authoring-capture mode, transcript (faithful record of literal calls) or author (the legacy LLM re-authoring path)."
+
+  - name: MEMQL_AUTHORING_MAX_REPAIRS
+    component: engine
+    scope: node
+    default: "4"
+    optional: true
+    description: "Per-bundle cap on authoring repair attempts before a broken bundle surfaces to the user rather than being retried."
+
+  - name: MEMQL_DEMO_MODE
+    component: engine
+    scope: node
+    default: "false"
+    optional: true
+    description: "Toggles demo-deployment behavior, notably for the webhook automation step."
+
+  - name: MEMQL_DEPLOYMENT_ID
+    component: engine
+    scope: node
+    default: "local"
+    optional: true
+    description: "Per-deploy identifier injected by the rollout and stamped on node and deployment records."
+
+  - name: MEMQL_DEPLOY_PROVIDER
+    component: engine
+    scope: node
+    optional: true
+    description: "Explicit deploy-provider override; otherwise derived from the environment."
+
+  - name: MEMQL_DEPLOY_REPO_ROOT
+    component: engine
+    scope: node
+    optional: true
+    description: "Repository root the deploy-control executor is anchored at; defaults to the process working directory."
+
+  - name: MEMQL_ENVIRONMENT
+    component: engine
+    scope: node
+    default: "development"
+    optional: true
+    description: "Environment label stamped on system.startup events and metadata enrichment."
+
+  - name: MEMQL_GENESIS_PATH
+    component: engine
+    scope: node
+    default: "~/.memql/genesis.znas"
+    optional: true
+    description: "Path to the sealed genesis envelope that the engine decrypts at bootstrap."
+
+  - name: MEMQL_MANIFEST_PATH
+    component: engine
+    scope: node
+    optional: true
+    description: "Explicit path to the secrets manifest.yaml, taking precedence over MEMQL_REPO and the embedded copy."
+
+  - name: MEMQL_PUBLIC_PATH
+    component: engine
+    scope: node
+    default: "/"
+    optional: true
+    description: "Base path prefix for the engine's HTTP handlers."
+
+  - name: MEMQL_REGION
+    component: engine
+    scope: node
+    default: "local"
+    optional: true
+    description: "Region label applied to events, deployment records, and metadata enrichment."
+
+  - name: MEMQL_REPO
+    component: engine
+    scope: node
+    optional: true
+    description: "Repository root used to locate scripts/secrets/manifest.yaml when MEMQL_MANIFEST_PATH is unset."
+
+  - name: MEMQL_STEP_CACHE_ENABLED
+    component: engine
+    scope: node
+    default: "false"
+    optional: true
+    description: "Enables caching of automation step results."
+
+  - name: MEMQL_TASKSTAMP_SELF_PLANNING_TOOLS
+    component: engine
+    scope: node
+    optional: true
+    description: "Comma-separated tool names added to the default self-planning set so ad-hoc calls to them are not wrapped in a synthetic adHocAction Plan."
+
+  # --- transport ---
+
+  - name: MEMQL_GRPC_ADDRESS
+    component: transport
+    scope: node
+    required: ["all"]
+    default: ":50051"
+    optional: true
+    description: "MemqlService gRPC listen address for this node."
+
+  - name: MEMQL_GRPC_ENDPOINT
+    component: transport
+    scope: node
+    optional: true
+    description: "Target gRPC endpoint the secrets-seed and rolling-drain CLIs dial when no explicit flag is passed."
+
+  # --- cluster ---
+
+  - name: MEMQL_CLUSTER_ID
+    component: cluster
+    scope: node
+    optional: true
+    description: "Identifier stamped on deployment and cut-version records to attribute them to a cluster."
+
+  - name: MEMQL_NODE_ADDRESS
+    component: cluster
+    scope: node
+    optional: true
+    description: "Address peers dial back to reach this node; required in cluster mode."
+
+  - name: MEMQL_NODE_FLAVOR
+    component: cluster
+    scope: node
+    optional: true
+    description: "Optional node sub-type metadata reserved for future use."
+
+  - name: MEMQL_NODE_ID
+    component: cluster
+    scope: node
+    default: "auto-generated UUID"
+    optional: true
+    description: "Stable identifier for this node instance, injected per pod via the k8s downward API."
+
+  - name: MEMQL_NODE_LABELS
+    component: cluster
+    scope: node
+    optional: true
+    description: "Comma-separated key=value metadata labels attached to this node."
+
+  - name: MEMQL_NODE_SERVICE_ADDRESS
+    component: cluster
+    scope: node
+    default: ":50052"
+    optional: true
+    description: "NodeService gRPC listen address used for inter-node mesh communication."
+
+  - name: MEMQL_NODE_TYPE
+    component: cluster
+    scope: node
+    default: "bff"
+    optional: true
+    description: "Node role for untagged binaries; a compiled build tag takes precedence over this value."
+
+  - name: MEMQL_PARENT_ADDRESS
+    component: cluster
+    scope: node
+    optional: true
+    description: "Address of the BFF a worker node dials so its outbound stream reaches BFF for event forwarding; required for every non-BFF node in cluster mode."
+
+  - name: MEMQL_SHUTDOWN_DRAIN_DELAY
+    component: cluster
+    scope: node
+    default: "5s"
+    optional: true
+    description: "Go duration to wait after de-routing before draining in-flight streams during graceful shutdown."
+
+  - name: MEMQL_SHUTDOWN_GRACE_PERIOD
+    component: cluster
+    scope: node
+    default: "25s"
+    optional: true
+    description: "Go duration bounding how long graceful shutdown waits for in-flight user streams to finish after the node is de-routed."
+
+  # --- ai ---
+
+  - name: DEFAULT_AGENT_PROVIDER
+    component: ai
+    scope: node
+    optional: true
+    description: "Overrides the AI router's default provider for agent replies when set."
+
+  - name: MEMQL_COGNITION_FIT_THRESHOLD
+    component: ai
+    scope: node
+    default: "0.4"
+    optional: true
+    description: "Float in [0,1] cognition turn-fit cutoff; higher is a stricter should-I-respond gate."
+
+  - name: MEMQL_DEFAULT_PROVIDER
+    component: ai
+    scope: node
+    optional: true
+    description: "Default AI provider id used for chat completions when no per-request provider is given."
+
+  - name: MEMQL_LLM_BG_MAX_CALLS_PER_WINDOW
+    component: ai
+    scope: node
+    default: "40"
+    optional: true
+    description: "Background-lane rate ceiling; max LLM calls admitted per rate window before a synthetic 429."
+
+  - name: MEMQL_LLM_BG_RATE_GUARD_ENABLED
+    component: ai
+    scope: node
+    default: "true"
+    optional: true
+    description: "Enables the background-lane rate ceiling guard on the LLM provider chokepoint."
+
+  - name: MEMQL_LLM_BG_RATE_WINDOW_SECONDS
+    component: ai
+    scope: node
+    default: "10"
+    optional: true
+    description: "Sliding window in seconds over which the background-lane rate ceiling counts LLM calls."
+
+  - name: MEMQL_LLM_COST_INPUT_PER_MILLION
+    component: ai
+    scope: node
+    default: "15.0"
+    optional: true
+    description: "Estimated input-token price per million used by the kill-switch cost accounting."
+
+  - name: MEMQL_LLM_COST_OUTPUT_PER_MILLION
+    component: ai
+    scope: node
+    default: "75.0"
+    optional: true
+    description: "Estimated output-token price per million used by the kill-switch cost accounting."
+
+  - name: MEMQL_LLM_KILL_SWITCH_ENABLED
+    component: ai
+    scope: node
+    default: "true"
+    optional: true
+    description: "Master switch for the cumulative LLM kill-switch latch at the provider chokepoint."
+
+  - name: MEMQL_LLM_LOOP_COOLDOWN_SECONDS
+    component: ai
+    scope: node
+    default: "30"
+    optional: true
+    description: "Cooldown in seconds before the identical-request loop breaker re-admits a fingerprint."
+
+  - name: MEMQL_LLM_LOOP_GUARD_ENABLED
+    component: ai
+    scope: node
+    default: "true"
+    optional: true
+    description: "Enables the identical-request loop breaker on the LLM provider chokepoint."
+
+  - name: MEMQL_LLM_LOOP_MAX_REPEAT
+    component: ai
+    scope: node
+    default: "8"
+    optional: true
+    description: "Number of identical LLM requests within the loop window before the breaker fires."
+
+  - name: MEMQL_LLM_LOOP_WINDOW_SECONDS
+    component: ai
+    scope: node
+    default: "60"
+    optional: true
+    description: "Sliding window in seconds over which the loop breaker counts identical LLM requests."
+
+  - name: MEMQL_LLM_MAX_CALLS_PER_WINDOW
+    component: ai
+    scope: node
+    default: "20"
+    optional: true
+    description: "Foreground-lane rate ceiling; max LLM calls admitted per rate window before a synthetic 429."
+
+  - name: MEMQL_LLM_MAX_TOTAL_CALLS
+    component: ai
+    scope: node
+    default: "0"
+    optional: true
+    description: "Cumulative process LLM call cap that latches the kill-switch; 0 means unlimited."
+
+  - name: MEMQL_LLM_MAX_TOTAL_COST_USD
+    component: ai
+    scope: node
+    default: "0"
+    optional: true
+    description: "Cumulative process estimated-cost cap in USD that latches the kill-switch; 0 means unlimited."
+
+  - name: MEMQL_LLM_RATE_GUARD_ENABLED
+    component: ai
+    scope: node
+    default: "true"
+    optional: true
+    description: "Enables the foreground-lane rate ceiling guard on the LLM provider chokepoint."
+
+  - name: MEMQL_LLM_RATE_WINDOW_SECONDS
+    component: ai
+    scope: node
+    default: "10"
+    optional: true
+    description: "Sliding window in seconds over which the foreground-lane rate ceiling counts LLM calls."
+
+  - name: MEMQL_LLM_SCOPE_GUARD_ENABLED
+    component: ai
+    scope: node
+    default: "true"
+    optional: true
+    description: "Enables the per-scope cumulative budget latch keyed on space or plan-lineage."
+
+  - name: MEMQL_LLM_SCOPE_IDLE_TTL_SECONDS
+    component: ai
+    scope: node
+    default: "3600"
+    optional: true
+    description: "Idle time in seconds after which a tracked per-scope budget entry is pruned."
+
+  - name: MEMQL_LLM_SCOPE_MAX_CALLS
+    component: ai
+    scope: node
+    default: "600"
+    optional: true
+    description: "Cumulative LLM call cap per scope that latches the per-scope budget breaker."
+
+  - name: MEMQL_LLM_SCOPE_MAX_COST_USD
+    component: ai
+    scope: node
+    default: "20.0"
+    optional: true
+    description: "Cumulative estimated-cost cap in USD per scope that latches the per-scope budget breaker."
+
+  - name: MEMQL_SI_OPENAI_PROJECT_ID
+    component: ai
+    scope: node
+    optional: true
+    description: "OpenAI organization or billing project id sent alongside OpenAI API requests."
+
+  - name: MEMQL_STT_PROVIDER
+    component: ai
+    scope: node
+    default: "openai-realtime"
+    optional: true
+    description: "Speech-to-text provider selector; openai-realtime or openai-whisper."
+
+  - name: MEMQL_WHISPER_MODEL
+    component: ai
+    scope: node
+    default: "whisper-1"
+    optional: true
+    description: "OpenAI Whisper model id used when MEMQL_STT_PROVIDER is openai-whisper."
+
+  - name: OPERATOR_AGENT_PROVIDER
+    component: ai
+    scope: node
+    optional: true
+    description: "Deploy-time default model-provider hint for the operator agent, used by the router when no explicit provider or policy applies."
+
+  - name: OPERATOR_APP_PROFILES_DIR
+    component: ai
+    scope: node
+    optional: true
+    description: "Filesystem directory of app-profile markdown files that overrides the embedded profiles baked into the binary when set."
+
+  # --- voice ---
+
+  - name: MEMQL_OPENAI_REALTIME_MODEL
+    component: voice
+    scope: node
+    optional: true
+    description: "OpenAI realtime model id for the voice path; falls back to POLYPHON_OPENAI_ASR_MODEL when empty."
+
+  - name: MEMQL_VOICE_AGENT_TOOL_LOOP
+    component: voice
+    scope: node
+    default: "false"
+    optional: true
+    description: "Opt-in toggle enabling the agent tool loop for voice replies."
+
+  - name: MEMQL_VOICE_GROUNDING
+    component: voice
+    scope: node
+    default: "false"
+    optional: true
+    description: "Opt-in toggle enabling knowledge grounding for voice replies."
+
+  - name: MEMQL_VOICE_ROOM_NAME
+    component: voice
+    scope: node
+    optional: true
+    description: "LiveKit room the Go voice-agent joins when no --room flag is passed (convention polyphon-<spaceId>)."
+
+  - name: POLYPHON_LIVEKIT_PUBLIC_URL
+    component: voice
+    scope: node
+    optional: true
+    description: "Publicly reachable LiveKit URL advertised to clients for the Polyphon voice path."
+
+  - name: POLYPHON_LIVEKIT_URL
+    component: voice
+    scope: node
+    required: ["voice"]
+    optional: true
+    description: "LiveKit server URL the Polyphon voice transport connects to."
+
+  # --- avatar ---
+
+  - name: MEMQL_ANAM_AVATAR_MODEL
+    component: avatar
+    scope: node
+    optional: true
+    description: "Overrides the Anam avatar face model id; unset lets the engine pick the persona's default."
+
+  - name: MEMQL_ANAM_MAX_SESSION_SECONDS
+    component: avatar
+    scope: node
+    default: "3600"
+    optional: true
+    description: "Maximum Anam avatar engine session length in seconds before the session self-terminates."
+
+  - name: MEMQL_ANAM_SILENCE_END_SECONDS
+    component: avatar
+    scope: node
+    default: "3600"
+    optional: true
+    description: "Trailing-silence window in seconds before Anam ends a session on conversational silence."
+
+  - name: MEMQL_AVATAR_REQUEST_TIMEOUT_SECONDS
+    component: avatar
+    scope: node
+    default: "30"
+    optional: true
+    description: "Per-call REST timeout in seconds for avatar-vendor bring-up requests (clamped 1..300)."
+
+  # --- polyphon ---
+
+  - name: POLYPHON_BRIDGE_AGENT_URL
+    component: polyphon
+    scope: node
+    optional: true
+    description: "URL of the external Polyphon bridge agent service."
+
+  - name: POLYPHON_OPENAI_ASR_MODEL
+    component: polyphon
+    scope: node
+    default: "gpt-4o-transcribe"
+    optional: true
+    description: "OpenAI ASR model for the Polyphon /memql/audio path."
+
+  - name: POLYPHON_OPENAI_TTS_MODEL
+    component: polyphon
+    scope: node
+    default: "gpt-4o-mini-tts"
+    optional: true
+    description: "OpenAI TTS model for the Polyphon /memql/audio path."
+
+  - name: POLYPHON_OPENAI_TTS_VOICE
+    component: polyphon
+    scope: node
+    default: "alloy"
+    optional: true
+    description: "OpenAI TTS voice for the Polyphon /memql/audio path."
+
+  - name: POLYPHON_OPENAI_VAD_SILENCE_MS
+    component: polyphon
+    scope: node
+    default: "600"
+    optional: true
+    description: "Trailing-silence window in milliseconds the OpenAI server VAD requires before declaring end-of-utterance."
+
+  - name: POLYPHON_PREDICTION_ENGINE_URL
+    component: polyphon
+    scope: node
+    optional: true
+    description: "URL of an external Polyphon prediction engine; absent uses the embedded engine."
+
+  - name: POLYPHON_VOICE_PROVIDER
+    component: polyphon
+    scope: node
+    default: "openai"
+    optional: true
+    description: "Voice provider for the Polyphon /memql/audio WebSocket path."
+
+  # --- telephony ---
+
+  - name: MEMQL_TELEPHONY_CARRIER
+    component: telephony
+    scope: node
+    default: "telnyx"
+    optional: true
+    description: "Selects the telephony carrier provider; empty falls back to the default carrier."
+
+  - name: MEMQL_TELEPHONY_OUTBOUND_AUTH_USERNAME
+    component: telephony
+    scope: node
+    optional: true
+    description: "Username for SIP-trunk authentication on outbound telephony calls."
+
+  - name: MEMQL_TELEPHONY_OUTBOUND_SIP_ADDRESS
+    component: telephony
+    scope: node
+    optional: true
+    description: "Destination SIP address used when placing outbound telephony calls."
+
+  - name: MEMQL_TELEPHONY_SIP_EDGE_URI
+    component: telephony
+    scope: node
+    optional: true
+    description: "LiveKit SIP edge URI used to bridge telephony calls into rooms."
+
+  - name: MEMQL_TELEPHONY_TELNYX_BASE_URL
+    component: telephony
+    scope: node
+    default: "https://api.telnyx.com/v2"
+    optional: true
+    description: "Overrides the Telnyx v2 API root URL; defaults to the live Telnyx API."
+
+  - name: MEMQL_TELEPHONY_TELNYX_CONNECTION_ID
+    component: telephony
+    scope: node
+    optional: true
+    description: "Telnyx connection (SIP edge) identifier fronting outbound telephony calls."
+
+  # --- identity ---
+
+  - name: IDENTITY_ACCESS_REQUEST_NOTIFY_EMAILS
+    component: identity
+    scope: node
+    optional: true
+    description: "Comma-separated admin recipients for waitlist access-request notification emails; empty falls back to all owner and admin users."
+
+  - name: IDENTITY_ACCESS_REQUEST_NOTIFY_THROTTLE_MINUTES
+    component: identity
+    scope: node
+    default: "5"
+    optional: true
+    description: "Batches waitlist notification emails so a burst of access requests does not spam the admin inbox."
+
+  - name: IDENTITY_ACCESS_TOKEN_TTL_SECONDS
+    component: identity
+    scope: node
+    default: "900"
+    optional: true
+    description: "Lifetime in seconds of issued access tokens."
+
+  - name: IDENTITY_ALLOW_EPHEMERAL_KEY
+    component: identity
+    scope: node
+    default: "false"
+    optional: true
+    description: "Opts a non-localhost deployment into per-pod ephemeral file-backed signing keys instead of a shared seed; single-node or dev only."
+
+  - name: IDENTITY_AUDIT_LOG_RETENTION_DAYS
+    component: identity
+    scope: node
+    default: "365"
+    optional: true
+    description: "In-database retention window in days for identity audit-event rows."
+
+  - name: IDENTITY_BOOTSTRAP_DOMAIN
+    component: identity
+    scope: node
+    optional: true
+    description: "Cluster deployment domain used as the suffix for public hostnames during unattended first-run bootstrap."
+
+  - name: IDENTITY_BOOTSTRAP_INTERNAL_DEFAULT_ROLE
+    component: identity
+    scope: node
+    optional: true
+    description: "Cluster-wide default role for internal users preselected by the first-run bootstrap wizard."
+
+  - name: IDENTITY_BOOTSTRAP_INTERNAL_DOMAINS
+    component: identity
+    scope: node
+    optional: true
+    description: "Comma-separated allowlist of email domains that flag users as internal, preselected during bootstrap."
+
+  - name: IDENTITY_BOOTSTRAP_NOTIFY_EMAILS
+    component: identity
+    scope: node
+    optional: true
+    description: "Comma-separated waitlist notification recipients preselected by the bootstrap wizard."
+
+  - name: IDENTITY_BOOTSTRAP_ORG_NAME
+    component: identity
+    scope: node
+    optional: true
+    description: "Organization label captured by the first-run bootstrap wizard."
+
+  - name: IDENTITY_BOOTSTRAP_OWNER_BIRTHDATE
+    component: identity
+    scope: node
+    optional: true
+    description: "Optional owner birthdate prefilled into the bootstrap wizard owner profile."
+
+  - name: IDENTITY_BOOTSTRAP_OWNER_EMAIL
+    component: identity
+    scope: node
+    optional: true
+    description: "Email the cluster owner receives the first sign-in magic link at during unattended bootstrap."
+
+  - name: IDENTITY_BOOTSTRAP_OWNER_FIRST_NAME
+    component: identity
+    scope: node
+    optional: true
+    description: "Owner first name seeded into the profile and JWT given_name claim during bootstrap."
+
+  - name: IDENTITY_BOOTSTRAP_OWNER_GENDER
+    component: identity
+    scope: node
+    optional: true
+    description: "Optional owner gender prefilled into the bootstrap wizard owner profile."
+
+  - name: IDENTITY_BOOTSTRAP_OWNER_LAST_NAME
+    component: identity
+    scope: node
+    optional: true
+    description: "Owner last name seeded into the profile and JWT family_name claim during bootstrap."
+
+  - name: IDENTITY_BOOTSTRAP_OWNER_PHONE
+    component: identity
+    scope: node
+    optional: true
+    description: "Optional owner phone number prefilled into the bootstrap wizard owner profile."
+
+  - name: IDENTITY_BOOTSTRAP_OWNER_PRIMARY_ROLE
+    component: identity
+    scope: node
+    optional: true
+    description: "Optional owner primary role prefilled into the bootstrap wizard owner profile."
+
+  - name: IDENTITY_BOOTSTRAP_REGISTRATION_DOMAINS
+    component: identity
+    scope: node
+    optional: true
+    description: "Comma-separated registration allowlist preselected for domain-restricted mode during bootstrap."
+
+  - name: IDENTITY_BOOTSTRAP_REGISTRATION_MODE
+    component: identity
+    scope: node
+    optional: true
+    description: "Registration mode preselected at bootstrap time, overriding the runtime default."
+
+  - name: IDENTITY_BRAND_ICON_DATA_URI
+    component: identity
+    scope: node
+    optional: true
+    description: "Embedded square brand icon as a base64 data URI used in compact contexts like favicon and share previews."
+
+  - name: IDENTITY_BRAND_LOGO_DATA_URI
+    component: identity
+    scope: node
+    optional: true
+    description: "Embedded horizontal brand logo wordmark as a base64 data URI used in emails and the web UI."
+
+  - name: IDENTITY_BRAND_NAME
+    component: identity
+    scope: node
+    optional: true
+    description: "Display name used in email subject prefixes and templates, editable in the admin UI after bootstrap."
+
+  - name: IDENTITY_BRAND_PRIMARY_COLOR
+    component: identity
+    scope: node
+    default: "#0433ff"
+    optional: true
+    description: "Hex accent color used for HTML emails and the web UI primary button."
+
+  - name: IDENTITY_CORS_ALLOWED_ORIGINS
+    component: identity
+    scope: node
+    optional: true
+    description: "Comma-separated Origin values identity allows on credentialed cross-origin refresh-token requests."
+
+  - name: IDENTITY_DATA_EXPORT_RATE_LIMIT_HOURS
+    component: identity
+    scope: node
+    default: "24"
+    optional: true
+    description: "Minimum interval in hours between a single user's own data exports, limiting compromised-account exfiltration."
+
+  - name: IDENTITY_DELETION_COOLDOWN_DAYS
+    component: identity
+    scope: node
+    default: "30"
+    optional: true
+    description: "Soft-delete grace period in days before account deletion becomes irreversible."
+
+  - name: IDENTITY_DISPOSABLE_EMAIL_BLOCKLIST_ENABLED
+    component: identity
+    scope: node
+    default: "true"
+    optional: true
+    description: "Toggles the embedded disposable-email-domain blocklist on registration."
+
+  - name: IDENTITY_EMAIL_VALIDATION_PROVIDER
+    component: identity
+    scope: node
+    default: "none"
+    optional: true
+    description: "Selects the third-party email-deliverability validation provider plug-in."
+
+  - name: IDENTITY_ENABLED
+    component: identity
+    scope: node
+    default: "false"
+    optional: true
+    description: "Master toggle that gates whether the identity service HTTP and gRPC handlers are wired in."
+
+  - name: IDENTITY_INTERNAL_DEFAULT_ROLE
+    component: identity
+    scope: node
+    default: "writer"
+    optional: true
+    description: "Cluster-wide role assigned to internal users on registration."
+
+  - name: IDENTITY_INTERNAL_DOMAINS
+    component: identity
+    scope: node
+    optional: true
+    description: "Comma-separated allowlist of email domains whose users are flagged internal at first login."
+
+  - name: IDENTITY_INVITATION_TTL_DAYS
+    component: identity
+    scope: node
+    default: "7"
+    optional: true
+    description: "Lifetime in days of an admin-issued user invitation before it expires."
+
+  - name: IDENTITY_JWKS_OVERLAP_HOURS
+    component: identity
+    scope: node
+    default: "24"
+    optional: true
+    description: "How long in hours a retired signing key stays published in JWKS so in-flight tokens still verify during rotation."
+
+  - name: IDENTITY_JWKS_URL
+    component: identity
+    scope: node
+    optional: true
+    description: "URL other nodes fetch public keys from; defaults to the base URL plus the JWKS path, overridden only when the public URL differs from the internal-mesh URL."
+
+  - name: IDENTITY_JWT_AUDIENCE
+    component: identity
+    scope: node
+    default: "memql"
+    optional: true
+    description: "Value placed in the JWT audience claim that other nodes verify against their configured audience."
+
+  - name: IDENTITY_KEY_DIR
+    component: identity
+    scope: node
+    default: "var/identity/keys"
+    optional: true
+    description: "Filesystem directory holding the on-disk Ed25519 signing keypair files in file-key mode."
+
+  - name: IDENTITY_KEY_ROTATION_DAYS
+    component: identity
+    scope: node
+    default: "90"
+    optional: true
+    description: "Auto-rotation cadence in days for the JWT signing keypair."
+
+  - name: IDENTITY_MAGIC_LINK_TTL_SECONDS
+    component: identity
+    scope: node
+    default: "600"
+    optional: true
+    description: "Lifetime in seconds that a freshly issued magic link remains valid."
+
+  - name: IDENTITY_MX_VALIDATION_ENABLED
+    component: identity
+    scope: node
+    default: "true"
+    optional: true
+    description: "Toggles the per-domain MX-record DNS check on registration emails."
+
+  - name: IDENTITY_OAUTH_DCR_ENABLED
+    component: identity
+    scope: node
+    default: "true"
+    optional: true
+    description: "Gates the RFC 7591 dynamic client registration endpoint that lets unknown OAuth clients self-register."
+
+  - name: IDENTITY_PRIVACY_OVERRIDE_PATH
+    component: identity
+    scope: node
+    optional: true
+    description: "Filesystem path to an operator-supplied Privacy markdown file replacing the embedded default."
+
+  - name: IDENTITY_RATE_LIMIT_PER_IP_PER_HOUR
+    component: identity
+    scope: node
+    default: "10"
+    optional: true
+    description: "Caps magic-link and access-request submissions from a single source IP per hour."
+
+  - name: IDENTITY_REFRESH_COOKIE_SAMESITE
+    component: identity
+    scope: node
+    optional: true
+    description: "Operator override for the refresh-token cookie SameSite attribute, lax or none, for the deployment topology."
+
+  - name: IDENTITY_REFRESH_TOKEN_TTL_SECONDS
+    component: identity
+    scope: node
+    default: "2592000"
+    optional: true
+    description: "Absolute lifetime in seconds of issued refresh tokens."
+
+  - name: IDENTITY_REGISTERED_CLIENTS
+    component: identity
+    scope: node
+    optional: true
+    description: "JSON array of relying-party applications allowed to initiate auth flows, each with a clientId and explicit redirect-URI list."
+
+  - name: IDENTITY_REGISTRATION_DOMAINS
+    component: identity
+    scope: node
+    optional: true
+    description: "Comma-separated allowlist consulted when registration mode is domain_restricted."
+
+  - name: IDENTITY_REGISTRATION_MODE
+    component: identity
+    scope: node
+    default: "open"
+    optional: true
+    description: "Controls who can self-register; one of open, domain_restricted, invite_only, or waitlist."
+
+  - name: IDENTITY_RISK_THRESHOLD
+    component: identity
+    scope: node
+    default: "50"
+    optional: true
+    description: "Score from zero to one hundred at or above which registration is blocked; lower is stricter."
+
+  - name: IDENTITY_SESSION_IDLE_DAYS
+    component: identity
+    scope: node
+    default: "14"
+    optional: true
+    description: "Inactivity timeout in days after which token refresh fails."
+
+  - name: IDENTITY_SESSION_MAX_DAYS
+    component: identity
+    scope: node
+    default: "90"
+    optional: true
+    description: "Absolute session lifetime in days after which re-authentication is required regardless of activity."
+
+  - name: IDENTITY_TOS_OVERRIDE_PATH
+    component: identity
+    scope: node
+    optional: true
+    description: "Filesystem path to an operator-supplied Terms of Service markdown file replacing the embedded default."
+
+  - name: IDENTITY_TURNSTILE_SITE_KEY
+    component: identity
+    scope: node
+    optional: true
+    description: "Cloudflare Turnstile public site key embedded in registration and login forms."
+
+  - name: IDENTITY_VERIFIER_AUDIENCE
+    component: identity
+    scope: node
+    default: "memql"
+    optional: true
+    description: "Value the per-node verifier compares against the JWT audience claim."
+
+  - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+    component: identity
+    scope: node
+    optional: true
+    description: "Override for the JWT issuer the verifier expects; defaults to the verifier base URL."
+
+  - name: IDENTITY_VERIFIER_JWKS_FETCH_TIMEOUT_SECONDS
+    component: identity
+    scope: node
+    default: "10"
+    optional: true
+    description: "Per-fetch HTTP timeout in seconds for the verifier's JWKS document retrieval."
+
+  - name: IDENTITY_VERIFIER_JWKS_REFRESH_SECONDS
+    component: identity
+    scope: node
+    default: "300"
+    optional: true
+    description: "Background cadence in seconds at which the verifier refreshes the cached JWKS keyset."
+
+  - name: IDENTITY_VERIFIER_JWKS_URL
+    component: identity
+    scope: node
+    optional: true
+    description: "Override for the verifier's JWKS endpoint, useful when internal-mesh routing differs from the public base URL."
+
+  # --- email ---
+
+  - name: MAIL_SUPPRESS_OWNER_BOOTSTRAP
+    component: email
+    scope: node
+    default: "false"
+    optional: true
+    description: "When set to any non-empty value, suppresses the owner magic-link bootstrap email so iterative dev DB wipes do not produce an inbox storm; unset in staging and production."
+
+  # --- storage ---
+
+  - name: MEMQL_AZURE_BLOB_AUTOCREATE
+    component: storage
+    scope: node
+    default: "false"
+    optional: true
+    description: "When truthy (1/true/yes/on), creates the configured blob container on startup if it is missing; used for local Azurite dev where the container is not pre-provisioned."
+
+  - name: MEMQL_AZURE_BLOB_CONTAINER
+    component: storage
+    scope: node
+    optional: true
+    description: "Name of the Azure blob container the uploader writes objects into."
+
+  # --- planner ---
+
+  - name: MEMQL_PLANNER_APPROVAL_TOKEN_THRESHOLD
+    component: planner
+    scope: node
+    default: "250000"
+    optional: true
+    description: "Up-front estimated token cost at or below which a plan auto-runs; above it the plan parks for user approval, and 0 disables the gate."
+
+  - name: MEMQL_PLANNER_DEFAULT_TOKEN_BUDGET
+    component: planner
+    scope: node
+    default: "2000000"
+    optional: true
+    description: "Fallback per-plan token ceiling enforced when a plan carries no explicit token budget; 0 disables the fallback."
+
+  - name: MEMQL_PLANNER_GOAL_TRIAGE_ENABLED
+    component: planner
+    scope: node
+    default: "true"
+    optional: true
+    description: "Enables the goal triage step that routes trivial deliverables direct; setting it off falls every goal back to the decompose loop."
+
+  - name: MEMQL_PLANNER_MAX_IDENTICAL_DECISIONS
+    component: planner
+    scope: node
+    default: "2"
+    optional: true
+    description: "Number of times the same non-terminal decision may repeat within one planner cycle before the loop parks."
+
+  - name: MEMQL_PLANNER_MAX_INVOCATIONS_PER_PLAN
+    component: planner
+    scope: node
+    default: "8"
+    optional: true
+    description: "Cumulative cap on plannerAgent invocations per plan before it parks, bounding runaway spend."
+
+  - name: MEMQL_PLANNER_MAX_ITERATIONS_PER_CYCLE
+    component: planner
+    scope: node
+    default: "5"
+    optional: true
+    description: "Per-cycle cap on planner loop iterations that stops a misbehaving model from spinning forever."
+
+  - name: MEMQL_PLANNER_PHASE_CHECKPOINTS_ENABLED
+    component: planner
+    scope: node
+    default: "true"
+    optional: true
+    description: "Enables phase-boundary checkpoints that pause a plan for user continuation between non-trivial phases."
+
+  - name: MEMQL_PLANNER_PHASE_CHECKPOINT_MIN_TASKS
+    component: planner
+    scope: node
+    default: "2"
+    optional: true
+    description: "Expected task count at or above which the next phase triggers a checkpoint; 0 checkpoints at every boundary."
+
+  - name: MEMQL_PLANNER_REASONING_ESCALATION_ITER
+    component: planner
+    scope: node
+    default: "3"
+    optional: true
+    description: "Per-cycle iteration at which the loop escalates from the cheap tier to the reasoning tier; a value of 0 or less disables escalation."
+
+  - name: MEMQL_PLANNER_REASONING_PROVIDER
+    component: planner
+    scope: node
+    default: "reasoningClaudeOpus"
+    optional: true
+    description: "Provider the planner loop escalates to for hard plans; an empty or whitespace override is ignored."
+
+  - name: MEMQL_PLANNER_SECTIONABLE_ENABLED
+    component: planner
+    scope: node
+    default: "true"
+    optional: true
+    description: "Enables the generated parallel sectionable-plan path; setting it off falls back to the serial decompose loop."
+
+  - name: MEMQL_PLANNER_SPECIALIST_GATE_ENABLED
+    component: planner
+    scope: node
+    default: "true"
+    optional: true
+    description: "Enables the gate guarding specialist creation and training; setting it off restores the always-allow behavior."
+
+  # --- safety ---
+
+  - name: MEMQL_ACTION_REPLAY_ENABLED
+    component: safety
+    scope: node
+    default: "false"
+    optional: true
+    description: "Enables action-library literal replay so fingerprinted steps replay recorded capability calls token-free instead of re-invoking the LLM."
+
+  - name: MEMQL_ACTION_UTTERANCE_ALLOWLIST_ENFORCE
+    component: safety
+    scope: node
+    default: "false"
+    optional: true
+    description: "When true, action utterances must match one of the configured allowlist prefixes or they are rejected."
+
+  - name: MEMQL_ACTION_UTTERANCE_ALLOWLIST_PREFIXES
+    component: safety
+    scope: node
+    optional: true
+    description: "Comma-separated list of allowed action-utterance prefixes; empty means no allowlist is applied."
+
+  - name: MEMQL_ACTION_UTTERANCE_MAX_BYTES
+    component: safety
+    scope: node
+    default: "65536"
+    optional: true
+    description: "Maximum byte size of an action-utterance payload, with a hard 1024-byte safety floor against misconfiguration."
+
+  - name: MEMQL_AUTOMATION_BUDGET_ENABLED
+    component: safety
+    scope: node
+    default: "true"
+    optional: true
+    description: "Enables the cross-executor automation execution budget that skips executions once a storm exceeds the configured caps."
+
+  - name: MEMQL_AUTOMATION_BUDGET_WINDOW_SECONDS
+    component: safety
+    scope: node
+    default: "60"
+    optional: true
+    description: "Rolling window in seconds over which automation execution counts are accumulated for the budget caps."
+
+  - name: MEMQL_DELEGATION_ENABLED
+    component: safety
+    scope: node
+    default: "false"
+    optional: true
+    description: "Enables agent delegation, allowing an agent to act through a user's identity under a bounded role, scope, and lifetime."
+
+  - name: MEMQL_MAX_AUTOMATION_EXECUTIONS_PER_AUTOMATION
+    component: safety
+    scope: node
+    default: "120"
+    optional: true
+    description: "Per-automation execution ceiling within the budget window before further executions of that automation are skipped."
+
+  - name: MEMQL_MAX_AUTOMATION_EXECUTIONS_PER_WINDOW
+    component: safety
+    scope: node
+    default: "600"
+    optional: true
+    description: "Global cross-executor execution ceiling within the budget window before further automation executions are skipped."
+
+  - name: MEMQL_MAX_UNGUARDED_AUTOMATION_EXECUTIONS_PER_WINDOW
+    component: safety
+    scope: node
+    default: "50"
+    optional: true
+    description: "Cap on unguarded automation executions admitted per window during a database outage fail-open before the cluster guard fails closed."
+
+  - name: MEMQL_UNGUARDED_AUTOMATION_WINDOW_SECONDS
+    component: safety
+    scope: node
+    default: "60"
+    optional: true
+    description: "Rolling window in seconds over which the cluster guard counts unguarded automation executions during a database outage."
+
+  # --- workbench ---
+
+  - name: MEMQL_WORKBENCH_REMOTE
+    component: workbench
+    scope: node
+    optional: true
+    description: "When truthy, agent nodes route workbench dispatch to a dedicated remote workbench node via NodeService.Stream instead of running the integration in-process."
+
+  # --- worker ---
+
+  - name: MEMQL_WORKER_DIAL_ENDPOINT
+    component: worker
+    scope: node
+    optional: true
+    description: "Explicit operator override for the gRPC address the cockpit-worker dials for WorkerService.Stream on the agent node; falls back to derivation from the stored pairing URL when empty."
+
+  - name: MEMQL_WORKER_PEERS
+    component: worker
+    scope: node
+    optional: true
+    description: "Comma-separated type=host:port seed list of worker nodes for cluster bootstrap; DB-based discovery via v1:cluster:node takes over once peers register."
+
+  # --- mcp ---
+
+  - name: MEMQL_MCP_AUTH_SERVER_URL
+    component: mcp
+    scope: node
+    optional: true
+    description: "Public OAuth authorization-server issuer advertised by the MCP HTTP head's Protected Resource Metadata; falls back to IDENTITY_VERIFIER_EXPECTED_ISSUER when unset."
+
+  - name: MEMQL_MCP_HTTP_ADDR
+    component: mcp
+    scope: node
+    default: ":8090"
+    optional: true
+    description: "Bind address for the MCP Streamable HTTP transport listener."
+
+  - name: MEMQL_MCP_MODE
+    component: mcp
+    scope: node
+    default: "authoring"
+    optional: true
+    description: "MCP capability tier (Gate A), one of sealed, authoring, or inline."
+
+  - name: MEMQL_MCP_PUBLIC_URL
+    component: mcp
+    scope: node
+    optional: true
+    description: "Public URL of the MCP resource advertised in OAuth discovery metadata and the 401 WWW-Authenticate hint."
+
+  - name: MEMQL_MCP_ROLE
+    component: mcp
+    scope: node
+    optional: true
+    description: "Acting role for the per-construct gate (Gate B); empty pins the role to the caller's verified token claim on HTTP."
+
+  - name: MEMQL_MCP_TOOL_TIMEOUT
+    component: mcp
+    scope: node
+    default: "30s"
+    optional: true
+    description: "Per-tools/call engine execution deadline as a Go duration; unset or invalid falls back to the default."
+
+  - name: MEMQL_MCP_TRANSPORT
+    component: mcp
+    scope: node
+    default: "stdio"
+    optional: true
+    description: "MCP transport selector, stdio for a local subprocess or http for the network listener."
+
+  - name: MEMQL_MCP_USER
+    component: mcp
+    scope: node
+    optional: true
+    description: "Acting user that session-authored constructs are owner-scoped to; empty takes the user from the caller's token on HTTP."
+
+  # --- observability ---
+
+  - name: MEMQL_GEOIP_DB_PATH
+    component: observability
+    scope: node
+    optional: true
+    description: "Path to a GeoIP database; absent disables GeoIP enrichment."

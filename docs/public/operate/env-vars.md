@@ -15,6 +15,24 @@ owner: znas
 
 ---
 
+## The registry (source of truth)
+
+`scripts/secrets/manifest.yaml` is the authoritative registry of **every**
+environment variable memQL reads (Epic 7 / memql#2104). One file drives three
+consumers so they can never drift: genesis sealing, the cockpit Configuration
+screen, and boot-time fail-fast validation. Each entry carries `component`,
+`scope` (`node` / `global` / `partition`), `kind`, `required` (node types that
+need it at boot, `"all"` = every node), `default`, and `description`. The small
+non-`optional` set at the top of each section is the **seal floor** — the
+strict superset a developer `.env` must cover to seal; the full universe is
+registered `optional: true` so cataloguing every var never breaks local
+sealing.
+
+A var read in code but absent from the registry — or a registry entry that
+appears nowhere in the repo — fails CI via `make env-registry-check`
+(`go run ./cmd/envscan -check`). After editing the registry, regenerate the
+embedded snapshot with `make env-registry-sync`.
+
 ## TL;DR
 
 memQL splits configuration into two tiers:
