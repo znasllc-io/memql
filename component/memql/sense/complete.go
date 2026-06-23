@@ -30,6 +30,8 @@ func (s *Service) Complete(source string, line, col int, filePath string) []Comp
 		items = s.completeFuncCallArgs(ctx)
 	case ContextConceptDef:
 		items = s.completeConceptDef(ctx.Prefix)
+	case ContextConstructConcept:
+		items = s.completeConstructConcept(ctx)
 	}
 
 	return items
@@ -249,6 +251,135 @@ func (s *Service) completeUseDeclaration(prefix string) []CompletionItem {
 		}
 	}
 	return items
+}
+
+// completeConstructConcept returns concept completions where a concept-binding
+// construct's signature expects one (`mutation <Concept> <name>`, `query ...`,
+// `seed ...`, `shape ...`). It is the headline IntelliSense path (#2126):
+//
+//   - Concepts the registry knows about are offered first (highest priority),
+//     filtered by the partial prefix.
+//   - When the spec's legal-next rule for this construct sets
+//     SuggestImportWhenMissing, any matching concept that is NOT already in
+//     file scope (no `use <domain>.concepts.{ Concept }` import in the source)
+//     ALSO gets an "import" completion whose InsertText prepends the missing
+//     `use ...concepts.{ Concept }` line -- so authoring a fresh file can pull
+//     the concept into scope in one keystroke. Concepts already imported are
+//     suppressed from the import set (the bare concept suggestion stands).
+//
+// The keyword set and the import behaviour are both read from dslSpec, never
+// hardcoded, so the #2124 drift test keeps them honest.
+func (s *Service) completeConstructConcept(ctx CursorContext) []CompletionItem {
+	if s.registries == nil {
+		return nil
+	}
+
+	// Resolve the legal-next rule for this construct from the spec; the
+	// import behaviour is gated on its SuggestImportWhenMissing flag.
+	suggestImport := false
+	if label := specConstructConceptContextLabel(ctx.ConstructKey); label != "" {
+		if rule := specNextRule(label); rule != nil {
+			suggestImport = rule.SuggestImportWhenMissing
+		}
+	}
+
+	inScope := importedConceptsInScope(ctx.Source)
+
+	var items []CompletionItem
+	for _, canonical := range s.registries.ConceptNames() {
+		// ConceptNames() returns canonical ids (e.g. v1:cognition:space).
+		// The construct signature binds the SHORT name (`space`, resolved
+		// through the file-top `use` import), and a well-formed import needs
+		// the owning domain -- both derived from the canonical id.
+		domain, short := splitConceptID(canonical)
+		if !strings.HasPrefix(short, ctx.Prefix) {
+			continue
+		}
+		doc := ""
+		if c, ok := s.registries.ConceptGet(canonical); ok {
+			doc = c.Description
+		}
+		detail := "concept"
+		if canonical != short {
+			detail = canonical
+		}
+		// Primary: the short name the signature binds (highest priority).
+		items = append(items, CompletionItem{
+			Label: short, Kind: "concept", Detail: detail,
+			Documentation: doc, InsertText: short,
+			SortPriority: 1,
+		})
+		// Secondary: a fully-formed `use <domain>.concepts.{ short }` import
+		// when the concept isn't already in file scope, the domain is known,
+		// and the spec rule asks for it -- the owner's "no concept in scope ->
+		// suggest importing one" behaviour.
+		if suggestImport && domain != "" && !inScope[short] {
+			useLine := "use " + domain + ".concepts.{ " + short + " }"
+			items = append(items, CompletionItem{
+				Label:         useLine,
+				Kind:          "snippet",
+				Detail:        "import concept",
+				Documentation: "Import `" + short + "` from `" + domain + "` into file scope, then bind it.",
+				InsertText:    useLine + "\n" + short,
+				SortPriority:  2,
+			})
+		}
+	}
+	return items
+}
+
+// splitConceptID splits a canonical concept id (v1:<domain>:<...>:<leaf>) into
+// its owning top-level domain and short leaf name -- the forms an author
+// actually writes (the construct signature binds the leaf; the `use` import
+// path keys on the domain and resolves the brace-list name by trailing-segment
+// match). A value that is not canonical (no version:domain:leaf shape) is
+// returned as-is with an empty domain, so a bare name still completes -- just
+// without an accompanying import.
+func splitConceptID(canonical string) (domain, leaf string) {
+	parts := strings.Split(canonical, ":")
+	if len(parts) < 3 {
+		return "", canonical
+	}
+	return parts[1], parts[len(parts)-1]
+}
+
+// importedConceptsInScope scans the source for file-top `use
+// <domain>.concepts.{ A, B }` imports and returns the set of concept short-names
+// brought into scope. Parsing the source string (which Sense already has) keeps
+// the RegistryProvider interface untouched. Only `*.concepts` imports are
+// considered -- other construct imports (shapes/specs/...) don't bind a concept.
+func importedConceptsInScope(source string) map[string]bool {
+	out := map[string]bool{}
+	if source == "" {
+		return out
+	}
+	for _, line := range strings.Split(source, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "use ") {
+			continue
+		}
+		// Expect `use <dotted-path> { a, b }`. Require the path to end in
+		// `.concepts` (the construct segment that binds concepts).
+		openIdx := strings.IndexByte(line, '{')
+		closeIdx := strings.IndexByte(line, '}')
+		if openIdx < 0 || closeIdx < 0 || closeIdx < openIdx {
+			continue
+		}
+		// Path is `<domain>.concepts.` (trailing `.` before the brace list).
+		path := strings.TrimSpace(line[len("use "):openIdx])
+		path = strings.TrimSuffix(path, ".")
+		if !strings.HasSuffix(path, ".concepts") {
+			continue
+		}
+		names := line[openIdx+1 : closeIdx]
+		for _, n := range strings.Split(names, ",") {
+			n = strings.TrimSpace(n)
+			if n != "" {
+				out[n] = true
+			}
+		}
+	}
+	return out
 }
 
 // completeFuncCallArgs returns completions inside function call arguments.
