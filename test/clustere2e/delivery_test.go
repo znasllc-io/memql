@@ -2,8 +2,10 @@
 
 // Package clustere2e is the Phase-0 cluster-parity gate for the
 // resilient-mesh epic (memql#1259). It boots against the local
-// 2-replica cluster (docker/docker-compose.cluster.yml, the topology
-// adopted as first-class in memql#1260) and asserts the delivery
+// 2-replica k3d + ArgoCD cluster (deploy/k8s/overlays/local, scaled to
+// 2 replicas per Deployment via `make k3d-scale N=2` -- the topology
+// adopted as first-class in memql#1260, migrated off Docker Compose in
+// memql#2068/#2088) and asserts the delivery
 // invariant that staging kept breaking: an event produced anywhere in
 // the mesh reaches the specific bff replica that owns a subscriber's
 // stream -- exactly once, no dup, no drop.
@@ -61,8 +63,9 @@ func endpoint() string {
 	if v := os.Getenv("MEMQL_E2E_ENDPOINT"); v != "" {
 		return v
 	}
-	// nginx front door gRPC, load-balanced across bff replicas (memql#1260).
-	return "localhost:50050"
+	// bff gRPC, exposed via the k3d port-forward and load-balanced by the
+	// k8s Service across bff replicas (memql#1260; k3d migration #2088).
+	return "localhost:50051"
 }
 
 func token(t *testing.T) string {

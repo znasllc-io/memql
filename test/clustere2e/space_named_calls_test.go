@@ -7,9 +7,9 @@
 // ...) moved OUT of the memql engine core into the CoPresent carrier pack in
 // memql#2038 (epic #2031), so the engine's generated Go SDK no longer emits
 // MutationCreateSpaceBuild / QueryActiveSpacesBuild. The cluster-e2e suite runs
-// against the CARRIER cluster (docker-compose.cluster.yml), which DOES load the
-// pack, so the named constructs still resolve at runtime -- we just build the
-// call string locally and dispatch it via QueryClient.ExecuteNamed.
+// against the CARRIER cluster (the k3d local overlay, deploy/k8s/overlays/local),
+// which DOES load the pack, so the named constructs still resolve at runtime --
+// we just build the call string locally and dispatch it via QueryClient.ExecuteNamed.
 package clustere2e
 
 import "fmt"
