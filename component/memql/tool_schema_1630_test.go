@@ -79,19 +79,6 @@ func TestToolSchema1630_ArgConceptTypesReconciled(t *testing.T) {
 		}
 	})
 
-	t.Run("createDomainEntitySchema accepts keyFields + displayFields string arrays", func(t *testing.T) {
-		s := schemaFor(t, "mutationCreateDomainEntitySchema")
-		args := map[string]any{
-			"domainId":      "v1:knowledge:knowledgeDomain:hr",
-			"entityKind":    "Employee",
-			"keyFields":     []any{"email", "employee_id"},
-			"displayFields": []any{"name", "title"},
-		}
-		if err := s.Validate(args); err != nil {
-			t.Fatalf("concept-valid keyFields/displayFields arrays rejected: %v", err)
-		}
-	})
-
 	t.Run("createDelegation typed-create is self-consistent", func(t *testing.T) {
 		s := schemaFor(t, "mutationCreateDelegation")
 		// scopes is an array (concept []string), roleCeiling is a

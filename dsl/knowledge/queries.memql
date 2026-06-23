@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use knowledge.concepts.{ document, documentChunk, domainEntitySchema, entityIndex, imageRegion, knowledgeBridge, knowledgeDomain, spreadsheetRow, validationEvent }
+use knowledge.concepts.{ documentChunk }
 
 @enabled
 @description("Returns the parent domainId for every chunk in the active partition. Frontend groups + counts to render per-domain chunk counts in the Knowledge panel.")
@@ -35,55 +35,15 @@ query documentChunk queryDocumentChunksForDomain {
   shape   documentChunkFull
 }
 
-@enabled
-@description("Single Document by id.")
-query document queryDocumentById {
-  args {
-    documentId  string  @required
-  }
-  filter  id==args.documentId
-  shape   documentFull
-}
-
 // ---- queries/v1/knowledge/documentsForDomain.memql ----
 
 // queryDocumentsForDomain -- all validated Documents attached to a knowledge domain.
 // Backs the Knowledge page detail view ("what's in this domain").
 
-@enabled
-@description("Validated Documents attached to a knowledge domain. attachedDomains is a []string, so membership (`in`) is the correct join -- memql#1708: the old `payload.attachedDomains==args.domainId` compared the whole list against a scalar and never matched, so the detail view came back empty even for a validated, correctly-attached Document.")
-query document queryDocumentsForDomain {
-  args {
-    domainId  string  @required
-  }
-  filter  args.domainId in payload.attachedDomains && payload.validationStatus=="validated"
-  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
-  // (createdAt, id) instead of a full-table pull. Literal page size -- the
-  // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
-  paginate 50
-  shape   documentFull
-}
-
 // ---- queries/v1/knowledge/documentsForSpace.memql ----
 
 // queryDocumentsForSpace -- list every Document in a space.
 // Backs the Knowledge page's "all uploads in this space" view.
-
-@enabled
-@description("All Documents in a space, regardless of validation status.")
-query document queryDocumentsForSpace {
-  args {
-    partitionId  string  @required
-  }
-  filter  payload.partitionId==args.partitionId
-  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
-  // (createdAt, id) instead of a full-table pull. Literal page size -- the
-  // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
-  paginate 50
-  shape   documentFull
-}
 
 // ---- queries/v1/knowledge/entityIndexLookup.memql ----
 
@@ -91,120 +51,3 @@ query document queryDocumentsForSpace {
 // entityKind, keyHash) triple, return any matching index entries.
 // Multiple matches happen when force-added overrides exist.
 
-@enabled
-@description("Look up entity-index entries by (domainId, entityKind, keyHash) for cross-file dedup.")
-@unbounded("entity-index lookup by (domain,kind,keyHash) -- a dedupe probe bounded to a single row")
-query entityIndex queryEntityIndexLookup {
-  args {
-    domainId  string  @required
-    entityKind  string  @required
-    keyHash  string  @required
-  }
-  filter  payload.domainId==args.domainId && payload.entityKind==args.entityKind && payload.keyHash==args.keyHash
-  shape   entityIndexFull
-}
-
-@enabled
-@description("Active entity schemas for a knowledge domain (a domain may declare multiple entity kinds).")
-@unbounded("the active entity schema for a domain -- bounded to a single row")
-query domainEntitySchema queryEntitySchemaForDomain {
-  args {
-    domainId  string  @required
-  }
-  filter  payload.domainId==args.domainId && traitIsActiveRecord
-  shape   domainEntitySchemaFull
-}
-
-@enabled
-@description("All ImageRegions for an image Document, in region-seq order.")
-query imageRegion queryImageRegionsForDocument {
-  args {
-    documentId  string  @required
-  }
-  filter  payload.documentId==args.documentId
-  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
-  // (createdAt, id) instead of a full-table pull. Literal page size -- the
-  // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
-  paginate 50
-  shape   imageRegionFull
-}
-
-@enabled
-@description("Look up a single knowledge-bridge row by its deterministic id. Used by the bridge generator to detect 'this combination has already been seeded; reuse instead of regenerating'.")
-@unbounded("knowledge bridge by id (guarded) -- bounded to a single row")
-query knowledgeBridge queryKnowledgeBridgeById {
-  args {
-    bridgeId  string  @required
-  }
-  filter  when(args.bridgeId) { id==args.bridgeId }
-  shape   knowledgeBridgeFull
-}
-
-@enabled
-@description("Look up a single knowledge domain by id.")
-@unbounded("knowledge domain by id (guarded) -- bounded to a single row")
-query knowledgeDomain queryKnowledgeDomainById {
-  args {
-    domainId  string  @required
-  }
-  filter  when(args.domainId) { id==args.domainId }
-  shape   knowledgeDomainFull
-}
-
-@enabled
-@description("List all active knowledge domains. Used by the agent builder's knowledge picker and by operator-turn retrieval to resolve domain metadata.")
-query knowledgeDomain queryListKnowledgeDomains {
-  filter  traitIsActiveRecord
-  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
-  // (createdAt, id) instead of a full-table pull. Literal page size -- the
-  // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
-  paginate 50
-  shape   knowledgeDomainFull
-}
-
-@enabled
-@description("All SpreadsheetRows for a Document, in row-seq order.")
-query spreadsheetRow querySpreadsheetRowsForDocument {
-  args {
-    documentId  string  @required
-  }
-  filter  payload.documentId==args.documentId
-  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
-  // (createdAt, id) instead of a full-table pull. Literal page size -- the
-  // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
-  paginate 50
-  shape   spreadsheetRowFull
-}
-
-// `@public` marks this query as intentionally not caller-scoped.
-// Audit history of validation transitions on a target row;
-// visibility follows the target's own scope (whoever can read the
-// target can read its validation history). If we ever want per-row
-// gating on audit reads, file under #54.
-@enabled
-@public
-@description("Audit history of validation transitions for a specific target row.")
-query validationEvent queryValidationEventsForTarget {
-  args {
-    targetId  string  @required
-  }
-  filter  payload.targetId==args.targetId
-  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
-  // (createdAt, id) instead of a full-table pull. Literal page size -- the
-  // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
-  paginate 50
-  shape   validationEventFull
-}
-
-@enabled
-@description("Per Q9 scheduled fallback: list active knowledge domains whose lastSeededAt + refreshCadenceDays * 86400 < now (the cadence backstop fires). The refreshDueKnowledgeDomains cron consumes this nightly + spawns trainSpecialist Plans (mode='refresh') for each row returned. Predefined domains AND user-created domains are both eligible -- the picker constraint sits on the domain row's refreshCadenceDays (null = disabled).")
-@unbounded("domains due for refresh -- an internal refresh sweep that must see all")
-query knowledgeDomain queryDueRefreshDomains {
-  args {}
-  filter  traitIsActiveRecord && payload.refreshCadenceDays!=null
-  shape   knowledgeDomainFull
-}

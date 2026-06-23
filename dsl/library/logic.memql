@@ -9,7 +9,6 @@
 // integration step on #694.
 
 use library.mutations.{ mutationCreateArtifact }
-use knowledge.concepts.{ document, liveSource }
 use notes.concepts.{ note }
 use todos.concepts.{ todo }
 use library.concepts.{ memory, generatedOutput }
@@ -29,27 +28,6 @@ use calendar.concepts.{ calendarEvent }
 // can't fan them out per-user -- they instead surface through the
 // non-owned queryLibraryWorkspaceLiveSources path (filter scope=workspace,
 // no owner gate), which every partition member can read (#723).
-
-@enabled
-@description("On v1:knowledge:document creation, promote the uploaded document into a Library artifact index row (lens=artifact, kind=document, source=uploaded). ownerUserId is threaded from the document's uploadedBy. Idempotent via the deterministic artifact id derived from the document's concept ref.")
-logic logicIndexDocument {
-  args {
-    event  object  @required
-  }
-  body {
-    // coalesce(..., "") on the OPTIONAL string fields, mirroring the #1605
-    // fix on the generatedOutput path below. document.summary is optional and
-    // resolves to an explicit null when absent, which the v1:library:artifact
-    // string fields reject ("expected string, but got null"). mimeType /
-    // partitionId / planId are @required on document today but are coalesced
-    // defensively so an upstream contract change can't reopen this. format is
-    // an @enum field ("" is not a member), so it stays raw -- it is @required
-    // on document and never null; validationStatus is coalesced to "none"
-    // inside mutationCreateArtifact.
-    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, document), ownerUserId: args.event.payload.uploadedBy, lens: "artifact", kind: "document", source: "uploaded", title: args.event.payload.fileName, summary: coalesce(args.event.payload.summary, ""), format: args.event.payload.format, mimeType: coalesce(args.event.payload.mimeType, ""), live: false, partitionId: coalesce(args.event.payload.partitionId, ""), producedByPlanId: coalesce(args.event.payload.planId, ""), validationStatus: args.event.payload.validationStatus })
-    return indexed
-  }
-}
 
 @enabled
 @description("On v1:library:generatedOutput creation, promote the produced deliverable into a Library artifact index row (lens=artifact, kind=generated_output). source + agent / plan provenance are carried from the generatedOutput row. ownerUserId is the producing user. Idempotent via the deterministic artifact id.")
@@ -135,21 +113,3 @@ logic logicIndexMemory {
   }
 }
 
-@enabled
-@description("On v1:knowledge:liveSource creation, promote it into the Library Records lens as a LIVE-flagged record (lens=record, kind=live_source, source=live, live=true). ownerUserId is the source's ownerId (empty for workspace-scoped sources); scope is threaded from liveSource.scope so workspace sources surface through the non-owned queryLibraryWorkspaceLiveSources path while private sources stay owner-gated (#723).")
-logic logicIndexLiveSource {
-  args {
-    event  object  @required
-  }
-  body {
-    // coalesce(..., "") on ownerUserId + summary. liveSource.ownerId is
-    // OPTIONAL -- workspace-scoped sources carry no owner, so it resolves to
-    // null; the artifact's @required ownerUserId is satisfied by "" (the
-    // empty-owner value the workspace-source path expects), but rejects null.
-    // description is @required upstream but coalesced defensively. scope
-    // carries a @default("workspace") so it is always present; it is an @enum
-    // ("" is not a member) and stays raw.
-    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, liveSource), ownerUserId: coalesce(args.event.payload.ownerId, ""), lens: "record", kind: "live_source", source: "live", title: args.event.payload.name, summary: coalesce(args.event.payload.description, ""), live: true, scope: args.event.payload.scope })
-    return indexed
-  }
-}

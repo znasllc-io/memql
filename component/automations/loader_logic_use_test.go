@@ -52,11 +52,13 @@ func TestDryRunCompileResolvesLogicConstructUseImports(t *testing.T) {
 	// Compiling the wrapping automation slice exercises the use-resolution
 	// branch the bug lived in.
 	wantAutomations := map[string]bool{
-		// v1:library:logic family (Index*)
-		"indexDocumentOnCreate": false, "indexGeneratedOutputOnCreate": false,
+		// v1:library:logic family (Index*). indexDocumentOnCreate +
+		// indexLiveSourceOnCreate moved to the CoPresent pack in B3 (#2039) with
+		// the knowledge document/liveSource concepts; the remaining library
+		// `.logic.{ }` importers still exercise the branch.
+		"indexGeneratedOutputOnCreate": false,
 		"indexNoteOnCreate": false, "indexTodoOnCreate": false,
 		"indexCalendarEventOnCreate": false, "indexMemoryOnCreate": false,
-		"indexLiveSourceOnCreate": false,
 		// v1:cognition:logic family (session). The daily-space automations
 		// (ensureDailySpaceOnAuthSession / provisionDailySpaceOnUserCreate /
 		// rolloverDailySpace) moved to the CoPresent pack in #1976, and

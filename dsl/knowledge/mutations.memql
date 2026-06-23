@@ -3,61 +3,13 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use knowledge.concepts.{ document, documentChunk, domainEntitySchema, entityIndex, imageRegion, knowledgeBridge, knowledgeDomain, spreadsheetRow, validationEvent }
-
-@enabled
-@description("Attach a validated Document to a knowledge domain. Triggers lazy embedding of typed items into documentChunk for that domain.")
-mutation document mutationAttachDocumentToDomain {
-  args {
-    documentId       string  @required
-    attachedDomains  array   @required
-  }
-  update {
-    id: args.documentId
-    args.attachedDomains
-  }
-}
+use knowledge.concepts.{ documentChunk }
 
 // ---- mutations/v1/knowledge/createDocument.memql ----
 
 // mutationCreateDocument -- single write path for v1:knowledge:document.
 // Called by the analyzer after a Plan's Tasks have produced a structured
 // breakdown of an attachment.
-
-@enabled
-@description("Insert a v1:knowledge:document row. Lands as unvalidated; user validates from the plan.completed card.")
-mutation document mutationCreateDocument {
-  args {
-    documentId    string
-    attachmentId  string  @required
-    planId        string  @required
-    partitionId       string  @required
-    fileName      string  @required
-    mimeType      string  @required
-    format        string  @required
-    itemKind      string
-    itemCount     int
-    summary       string
-    domainHints   object
-    uploadedBy    string  @required
-  }
-  insert {
-    id: args.documentId
-    args.attachmentId
-    args.planId
-    args.partitionId
-    args.fileName
-    args.mimeType
-    args.format
-    args.itemKind
-    args.itemCount
-    args.summary
-    args.domainHints
-    validationStatus: "unvalidated"
-    embeddingStatus: "none"
-    args.uploadedBy
-  }
-}
 
 @enabled
 @description("Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the CoPresent UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceUtteranceId / sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.")
@@ -88,208 +40,6 @@ mutation documentChunk mutationCreateDocumentChunk {
   }
 }
 
-@enabled
-@description("Insert a per-domain entity schema. Called by the entity-inference Plan after the user confirms the proposed schema on the domain-setup card.")
-mutation domainEntitySchema mutationCreateDomainEntitySchema {
-  args {
-    schemaId                string
-    domainId                string    @required
-    entityKind              string    @required
-    keyFields               []string  @required
-    displayFields           []string
-    inferredFromDocumentId  string
-    inferredFromTaskId      string
-    confirmedBy             string
-    confirmedAt             string
-  }
-  insert {
-    id: args.schemaId
-    args.domainId
-    args.entityKind
-    args.keyFields
-    args.displayFields
-    args.inferredFromDocumentId
-    args.inferredFromTaskId
-    args.confirmedBy
-    args.confirmedAt
-    active: true
-  }
-}
-
-@enabled
-@description("Insert a v1:knowledge:entityIndex row when an item is validated as 'new' against a domain. Future dedup checks against the same keyHash will surface this row.")
-mutation entityIndex mutationCreateEntityIndexEntry {
-  args {
-    entryId            string
-    domainId           string  @required
-    entityKind         string  @required
-    keyHash            string  @required
-    sourceDocumentId   string  @required
-    sourceItemId       string  @required
-    validatedAt        string  @required
-    forceAdded         bool
-    dedupOverrideNote  string
-  }
-  insert {
-    id: args.entryId
-    args.domainId
-    args.entityKind
-    args.keyHash
-    args.sourceDocumentId
-    args.sourceItemId
-    args.validatedAt
-    forceAdded: coalesce(args.forceAdded, false)
-    args.dedupOverrideNote
-  }
-}
-
-@enabled
-@description("Insert a v1:knowledge:imageRegion. Called per-region by the image analyzer.")
-mutation imageRegion mutationCreateImageRegion {
-  args {
-    regionId     string
-    documentId   string  @required
-    regionSeq    int     @required
-    bbox         object  @required
-    caption      string  @required
-    domainHints  object
-  }
-  insert {
-    id: args.regionId
-    args.documentId
-    args.regionSeq
-    args.bbox
-    args.caption
-    args.domainHints
-    validationStatus: "unvalidated"
-    dedupStatus: "na"
-  }
-}
-
-@enabled
-@description("Insert a v1:knowledge:knowledgeBridge row. Caller is the knowledge integration's bridge generator -- one bridge per unique (roleSlug, sortedDomainIds) pair across the whole tenant.")
-mutation knowledgeBridge mutationCreateKnowledgeBridge {
-  args {
-    bridgeId        string  @required
-    roleSlug        string  @required
-    domainIds       array   @required
-    combinationKey  string  @required
-    chunkCount      int
-    recipeVersion   string
-    generatedAt     string
-  }
-  insert {
-    id: args.bridgeId
-    args.bridgeId
-    args.roleSlug
-    args.domainIds
-    args.combinationKey
-    chunkCount: coalesce(args.chunkCount, 0)
-    recipeVersion: coalesce(args.recipeVersion, "v1")
-    args.generatedAt
-    active: true
-  }
-}
-
-@enabled
-@description("Create or replace a knowledge domain. Use the slug as domainId (e.g. 'business_administration', 'copresent_ui') so agents can reference domains by a stable human-readable id. v1: optional scope + ownerId support workspace + private domains (Q21). v2: source + refreshCadenceDays support the citation registry + per-domain freshness cadence picker.")
-mutation knowledgeDomain mutationCreateKnowledgeDomain {
-  args {
-    domainId             string  @required
-    name                 string  @required
-    description          string
-    category             string
-    relevantForRoles     array
-    lockedForRoles       array
-    requiredByToolSlugs  array
-    active               bool
-    scope                string
-    ownerId              string
-    tier                 string
-    lastSeededAt         string
-    seederRecipeVersion  string
-    source               string
-    refreshCadenceDays   int
-    predefined           bool
-  }
-  insert {
-    id: args.domainId
-    args.name
-    args.description
-    category: coalesce(args.category, "business")
-    relevantForRoles: coalesce(args.relevantForRoles, [])
-    lockedForRoles: coalesce(args.lockedForRoles, [])
-    requiredByToolSlugs: coalesce(args.requiredByToolSlugs, [])
-    active: coalesce(args.active, true)
-    scope: coalesce(args.scope, "workspace")
-    args.ownerId
-    tier: coalesce(args.tier, "A")
-    args.lastSeededAt
-    args.seederRecipeVersion
-    source: coalesce(args.source, "llmSeeded")
-    refreshCadenceDays: coalesce(args.refreshCadenceDays, 90)
-    predefined: coalesce(args.predefined, false)
-  }
-}
-
-@enabled
-@description("Insert a v1:knowledge:spreadsheetRow. Called per-row by the analyzer during a Document's structured breakdown.")
-mutation spreadsheetRow mutationCreateSpreadsheetRow {
-  args {
-    rowId        string
-    documentId   string  @required
-    rowSeq       int     @required
-    data         object  @required
-    domainHints  object
-  }
-  insert {
-    id: args.rowId
-    args.documentId
-    args.rowSeq
-    args.data
-    args.domainHints
-    validationStatus: "unvalidated"
-    dedupStatus: "na"
-  }
-}
-
-@enabled
-@description("Append-only audit log entry for a validation status transition.")
-mutation validationEvent mutationCreateValidationEvent {
-  args {
-    eventId            string
-    targetConceptType  string  @required
-    targetId           string  @required
-    fromStatus         string  @required
-    toStatus           string  @required
-    actorUserId        string
-    reason             string
-    note               string
-  }
-  insert {
-    id: args.eventId
-    args.targetConceptType
-    args.targetId
-    args.fromStatus
-    args.toStatus
-    args.actorUserId
-    reason: coalesce(args.reason, "user")
-    args.note
-  }
-}
-
-@enabled
-@description("Soft-delete a knowledge domain by flipping active=false. Read-merges the existing row (update()): only `active` changes; name/description/category/relevantForRoles/requiredByToolSlugs/refreshCadenceDays/source/scope/tier/predefined and every other field inherit from the persisted row instead of being wiped to their create-time defaults (memql#1628 -- the old full-replacement insert nulled them). Agents that reference the domain keep working; it just stops appearing in the builder picker.")
-mutation knowledgeDomain mutationDeleteKnowledgeDomain {
-  args {
-    domainId  string  @required
-  }
-  update {
-    id: args.domainId
-    active: false
-  }
-}
-
 // ---- mutations/v1/common/markKnowledgeDomainSeeded.memql ----
 
 // mutationMarkKnowledgeDomainSeeded -- partial update that stamps
@@ -303,44 +53,12 @@ mutation knowledgeDomain mutationDeleteKnowledgeDomain {
 // lastSeededAt + seederRecipeVersion to decide whether to re-seed
 // on retrain.
 
-@enabled
-@description("Stamp lastSeededAt + seederRecipeVersion on a knowledge domain after a successful seeder run. Partial update via update() -- only the freshness fields change; everything else inherits from the prior row.")
-mutation knowledgeDomain mutationMarkKnowledgeDomainSeeded {
-  args {
-    domainId             string  @required
-    lastSeededAt         string  @required
-    seederRecipeVersion  string  @required
-  }
-  update {
-    id: args.domainId
-    args.lastSeededAt
-    args.seederRecipeVersion
-  }
-}
-
 // ---- mutations/v1/knowledge/updateDocumentValidation.memql ----
 
 // mutationUpdateDocumentValidation -- transition a Document's
 // validationStatus. Stamps validatedBy / validatedAt; the audit
 // log entry is written separately via mutationCreateValidationEvent
 // so callers can compose without coupling.
-
-@enabled
-@description("Update a Document's validationStatus + validatedBy/validatedAt. Append-only; new version with the new status wins.")
-mutation document mutationUpdateDocumentValidation {
-  args {
-    documentId        string  @required
-    validationStatus  string  @required
-    validatedBy       string
-    validatedAt       string
-  }
-  update {
-    id: args.documentId
-    args.validationStatus
-    args.validatedBy
-    args.validatedAt
-  }
-}
 
 // ---- mutations/v1/knowledge/updateDocumentEmbeddingStatus.memql ----
 
@@ -351,73 +69,6 @@ mutation document mutationUpdateDocumentValidation {
 // vector coverage of the Document's chunks. Partial update: only the
 // embedding bookkeeping fields change; validation + content fields are
 // untouched.
-
-@enabled
-@description("Update a Document's embeddingStatus (none / partial / complete) + embeddedItemCount as its items get embedded into documentChunk. Driven by the embedDomainItems Plan; partial update preserves every other field.")
-mutation document mutationUpdateDocumentEmbeddingStatus {
-  args {
-    documentId         string  @required
-    embeddingStatus    string  @required
-    embeddedItemCount  int
-  }
-  update {
-    id: args.documentId
-    args.embeddingStatus
-    embeddedItemCount: coalesce(args.embeddedItemCount, 0)
-  }
-}
-
-@enabled
-@description("Update a SpreadsheetRow's validation / dedup state. Append-only; new version with new fields wins.")
-mutation spreadsheetRow mutationUpdateSpreadsheetRow {
-  args {
-    rowId                 string  @required
-    validationStatus      string
-    validatedBy           string
-    validatedAt           string
-    dedupStatus           string
-    matchesEntityIndexId  string
-    diffFromMatched       object
-    embeddedAsChunkId     string
-  }
-  update {
-    id: args.rowId
-    args.validationStatus
-    args.validatedBy
-    args.validatedAt
-    args.dedupStatus
-    args.matchesEntityIndexId
-    args.diffFromMatched
-    args.embeddedAsChunkId
-  }
-}
-
-@enabled
-@description("Per Q9 event-driven refresh: increment a knowledge domain's staleSignalCount. The Planner Agent calls this when it detects degraded responses citing the domain (low-confidence citations, contradicted-by-fresh-source results, etc.). When staleSignalCount crosses a threshold (the Planner Agent's own policy; default 3), the Planner may spawn a trainSpecialist Plan with mode='refresh' rather than waiting for the cadence backstop.")
-mutation knowledgeDomain mutationMarkKnowledgeDomainStale {
-  args {
-    domainId           string  @required
-    staleSignalCount   int     @required
-  }
-  update {
-    id: args.domainId
-    args.staleSignalCount
-  }
-}
-
-@enabled
-@description("Per Q9 refresh path: zero out the staleSignalCount and stamp lastSeededAt to now() after a trainSpecialist Plan with mode='refresh' completes. Idempotent; safe to re-run.")
-mutation knowledgeDomain mutationResetStaleAfterRefresh {
-  args {
-    domainId       string  @required
-    lastSeededAt   string  @required
-  }
-  update {
-    id: args.domainId
-    args.lastSeededAt
-    staleSignalCount: 0
-  }
-}
 
 // ---- mutations/v1/knowledge/writeKnowledgeChunk.memql ----
 

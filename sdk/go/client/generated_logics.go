@@ -280,26 +280,6 @@ func LogicIndexCalendarEventBuild(args LogicIndexCalendarEventArgs) string {
 	return b.String()
 }
 
-// LogicIndexDocument -- On v1:knowledge:document creation, promote the uploaded document into a Library artifact index row (lens=artifact, kind=document, source=uploaded). ownerUserId is threaded from the document's uploadedBy. Idempotent via the deterministic artifact id derived from the document's concept ref.
-type LogicIndexDocumentArgs struct {
-	Event map[string]any
-}
-
-// LogicIndexDocument calls the engine logic logicIndexDocument.
-func (qc *QueryClient) LogicIndexDocument(ctx context.Context, args LogicIndexDocumentArgs) (*Result, error) {
-	call := LogicIndexDocumentBuild(args)
-	return qc.executeNamed(ctx, "logicIndexDocument", call)
-}
-
-func LogicIndexDocumentBuild(args LogicIndexDocumentArgs) string {
-	var b strings.Builder
-	b.WriteString("logicIndexDocument({")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
-	return b.String()
-}
-
 // LogicIndexGeneratedOutput -- On v1:library:generatedOutput creation, promote the produced deliverable into a Library artifact index row (lens=artifact, kind=generated_output). source + agent / plan provenance are carried from the generatedOutput row. ownerUserId is the producing user. Idempotent via the deterministic artifact id.
 type LogicIndexGeneratedOutputArgs struct {
 	Event map[string]any
@@ -314,26 +294,6 @@ func (qc *QueryClient) LogicIndexGeneratedOutput(ctx context.Context, args Logic
 func LogicIndexGeneratedOutputBuild(args LogicIndexGeneratedOutputArgs) string {
 	var b strings.Builder
 	b.WriteString("logicIndexGeneratedOutput({")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
-	return b.String()
-}
-
-// LogicIndexLiveSource -- On v1:knowledge:liveSource creation, promote it into the Library Records lens as a LIVE-flagged record (lens=record, kind=live_source, source=live, live=true). ownerUserId is the source's ownerId (empty for workspace-scoped sources); scope is threaded from liveSource.scope so workspace sources surface through the non-owned queryLibraryWorkspaceLiveSources path while private sources stay owner-gated (#723).
-type LogicIndexLiveSourceArgs struct {
-	Event map[string]any
-}
-
-// LogicIndexLiveSource calls the engine logic logicIndexLiveSource.
-func (qc *QueryClient) LogicIndexLiveSource(ctx context.Context, args LogicIndexLiveSourceArgs) (*Result, error) {
-	call := LogicIndexLiveSourceBuild(args)
-	return qc.executeNamed(ctx, "logicIndexLiveSource", call)
-}
-
-func LogicIndexLiveSourceBuild(args LogicIndexLiveSourceArgs) string {
-	var b strings.Builder
-	b.WriteString("logicIndexLiveSource({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
@@ -588,26 +548,6 @@ func (qc *QueryClient) LogicRecordTransition(ctx context.Context, args LogicReco
 func LogicRecordTransitionBuild(args LogicRecordTransitionArgs) string {
 	var b strings.Builder
 	b.WriteString("logicRecordTransition({")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
-	return b.String()
-}
-
-// LogicRefreshDueKnowledgeDomains -- Reads candidate knowledge-domain rows via queryDueRefreshDomains; for each, the Go-side cron handler (registered by the planner-service init path) evaluates the elapsed-since-lastSeededAt check and spawns a trainSpecialist Plan per matching row. Per Q9 the schema-side cadence + runtime-side spawn are deliberately split -- the DSL filter is broad (active + non-null refreshCadenceDays), the precise elapsed-time math runs in Go where arithmetic on datetime fields is cheap.
-type LogicRefreshDueKnowledgeDomainsArgs struct {
-	Event map[string]any
-}
-
-// LogicRefreshDueKnowledgeDomains calls the engine logic logicRefreshDueKnowledgeDomains.
-func (qc *QueryClient) LogicRefreshDueKnowledgeDomains(ctx context.Context, args LogicRefreshDueKnowledgeDomainsArgs) (*Result, error) {
-	call := LogicRefreshDueKnowledgeDomainsBuild(args)
-	return qc.executeNamed(ctx, "logicRefreshDueKnowledgeDomains", call)
-}
-
-func LogicRefreshDueKnowledgeDomainsBuild(args LogicRefreshDueKnowledgeDomainsArgs) string {
-	var b strings.Builder
-	b.WriteString("logicRefreshDueKnowledgeDomains({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
