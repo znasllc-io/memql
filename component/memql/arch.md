@@ -334,7 +334,7 @@ Executes queries against TimescaleDB and orchestrates supporting services.
 │  │  Methods:                                                 │  │
 │  │  ├── Execute()           (Run queries)                    │  │
 │  │  ├── ResolveVariable()   (Fetch from v1:platform:partitionVariable)   │  │
-│  │  └── InvokeSI()          (Execute AI prompts)             │  │
+│  │  └── InvokeAI()          (Execute AI prompts)             │  │
 │  │                                                           │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │                                                                 │
@@ -377,7 +377,7 @@ Executes queries against TimescaleDB and orchestrates supporting services.
 | `runtime_evaluator.go` | Accessor expression evaluation at runtime |
 | `relations.go` | Relationship traversal |
 | `shape_template.go` | Result shaping |
-| `si_runtime.go` | AI provider invocation |
+| `ai_runtime.go` | AI provider invocation |
 | `result_cache.go` | Query result caching |
 | `function_loader.go` | Load .memql functions |
 | `spec_loader.go` | Load specifications |

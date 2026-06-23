@@ -1221,7 +1221,7 @@ func scopeSetFromSlugs(raw []string, found bool) (map[string]struct{}, bool) {
 // unit-testable. It runs the tested queryAgentById named query, reads the
 // agent's capabilities.skillIds[], and resolves those skill ids into concrete
 // tool slugs via engine.ResolveSkills -- the SAME path the cognition local
-// generation uses (integrations/cognition/si_responder.go's getAgent, #158).
+// generation uses (integrations/cognition/ai_responder.go's getAgent, #158).
 //
 // This REPLACES the retired `from(v1:agents:agent) ?.id==%s select id,
 // payload.tools` raw query, which (a) used the `?.` optional-chain syntax the
@@ -2326,7 +2326,7 @@ func trailingSlug(id string) string {
 //
 // The cascade routes assistant replies through VoiceAgentTurnRequest --
 // cognition runs the agent loop and inserts the AI utterance itself
-// (insertAIResponse in integrations/cognition/si_responder.go), stamping
+// (insertAIResponse in integrations/cognition/ai_responder.go), stamping
 // participantType="si" + citations off the respondToUser envelope. The
 // realtime executor (gpt-realtime) speaks directly and never enters that
 // path, so this handler is the sole writer of realtime AI utterances.
@@ -2658,7 +2658,7 @@ func mustJSONString(s string) string {
 // clause from the proto citations, or "" when there are none worth
 // emitting. Each entry is validated (both fields non-empty) so a partial
 // citation never lands a malformed chip. Mirrors the citations clause in
-// integrations/cognition/si_responder.go insertAIResponse for byte-for-
+// integrations/cognition/ai_responder.go insertAIResponse for byte-for-
 // byte chat-render parity.
 func buildRealtimeCitationsClause(citations []*memqlv1.AgentTurnCitation) string {
 	if len(citations) == 0 {
@@ -2697,7 +2697,7 @@ func buildRealtimeCitationsClause(citations []*memqlv1.AgentTurnCitation) string
 // ResolveSkills is part of the surface because the post-skills-migration (#158)
 // tool-scope path resolves the agent's capabilities.skillIds[] into concrete
 // tool slugs through the engine's skill catalog (mirrors
-// integrations/cognition/si_responder.go's getAgent). The flat tools[] list is
+// integrations/cognition/ai_responder.go's getAgent). The flat tools[] list is
 // empty on every assistant materialized after #158, so reading it directly --
 // as the retired `?.`-syntax query did -- always scoped to nothing and fell
 // open to the 517-tool registry (#1454).

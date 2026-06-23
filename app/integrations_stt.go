@@ -50,7 +50,7 @@ func (a *App) selectSTTProvider() {
 // openAIKeyFromEnv resolves the OpenAI API key for the STT bootstrap,
 // trying MEMQL_SI_OPENAI_API_KEY first and falling back to the bare
 // OPENAI_API_KEY -- the same prefix-elision chain the provider auth
-// resolver (component/memql/si_providers.go, authConceptLookupNames)
+// resolver (component/memql/ai_providers.go, authConceptLookupNames)
 // and integrations/openairealtime use. The genesis envelope seeds the
 // bare form, so without the fallback the voice node boots with the
 // audio websocket silently disabled (#1371).

@@ -58,7 +58,7 @@ This is where libraries leave you exposed and memQL does the unglamorous
 work:
 
 - **A process-wide LLM rate ceiling** at the provider chokepoint —
-  `component/memql/si_guard.go` — so no code path, buggy or malicious,
+  `component/memql/ai_guard.go` — so no code path, buggy or malicious,
   can stampede a provider.
 - **Per-plan token budgets** enforced *before* each call
   (`component/planner/budget.go`, wired in

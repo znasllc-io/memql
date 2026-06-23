@@ -50,7 +50,7 @@ Integrations should receive `IntegrationEngineAccess` (narrow interface) instead
 - Streaming provider access (for protocol-level streaming)
 - Tool definitions and execution (for tool-calling streams)
 
-It explicitly does NOT provide `Execute()`, `InvokeSI()`, or `RenderPrompt()` -- those belong in MemQL automations and functions.
+It explicitly does NOT provide `Execute()`, `InvokeAI()`, or `RenderPrompt()` -- those belong in MemQL automations and functions.
 
 ### Pattern: Events Inward, Capabilities Outward
 
@@ -81,7 +81,7 @@ integrations/
 ├── database/         # healthCheck, stats
 ├── email/            # Microsoft Graph / SMTP / Log senders -- sendEmail
 ├── embedding/        # Vendor-neutral text-embedding capability
-├── fileprocessor/    # extractText (PDF / DOCX / images via VisionSIProvider)
+├── fileprocessor/    # extractText (PDF / DOCX / images via VisionAIProvider)
 ├── gcs/              # storage.upload
 ├── identity/         # Identity-side helpers
 ├── knowledge/        # Corpus seed + lookup helpers (concept:* surfaces for agents)
@@ -112,7 +112,7 @@ registered: `cognitionScore`, `cognitionTrackPresence`,
 decision (`fitScore`, `turnMode`, `handoff`, `severity`) and the
 per-agent plan (primary, sequence, chime-ins, instructions) in one
 structured-output call. The standalone router LLM call in
-`si_router.go` only fires for voice utterances now (latency-
+`ai_router.go` only fires for voice utterances now (latency-
 sensitive). Fast-path mention dispatch
 (`tryFastPathDispatch`) bypasses both. Many older docs describing a
 two-brain (router + conductor) architecture for the text path are
@@ -173,7 +173,7 @@ Key files:
 - `greet_on_join.go` -- greetOnJoin handler with per-space
   serialization + initial / inter-greeting delays + the
   cross-replica greet gate (`dispatchGate.tryGreet`, #1386)
-- `si_router.go` -- voice-path router + fast-path dispatch + tool list
+- `ai_router.go` -- voice-path router + fast-path dispatch + tool list
 - `client_tool_relay.go` -- cross-node browser tool round-trip
 - `agent_forward.go` -- BFF/cognition -> agent gRPC forwarding
 - `space_context_engine.go`, `prompt_context_cache.go`,
@@ -237,7 +237,7 @@ Key files:
 **Environment Variables:**
 - `MEMQL_STT_PROVIDER` -- `openai-realtime` (default) or `openai-whisper`
 - `MEMQL_STT_LANGUAGE` -- hard-pinned streaming transcription language (default `en`); drives the OpenAI Realtime session config and overrides the client `language_hint`. Prevents wrong/mixed-language drift + short-word hallucination on noisy/short audio.
-- `MEMQL_STT_MIN_CONFIDENCE` -- low-confidence FINAL cutoff (default `0.6`). Gates a no-speech silence-hallucination denylist; `0` disables both gates. Filtering runs at the provider-agnostic `pumpDeltas` chokepoint in `component/grpc/si_transcribe_stream.go`.
+- `MEMQL_STT_MIN_CONFIDENCE` -- low-confidence FINAL cutoff (default `0.6`). Gates a no-speech silence-hallucination denylist; `0` disables both gates. Filtering runs at the provider-agnostic `pumpDeltas` chokepoint in `component/grpc/ai_transcribe_stream.go`.
 - `MEMQL_WHISPER_MODEL` -- OpenAI model name; defaults to `whisper-1`
 
 ### auth/ - Authentication Capabilities
@@ -264,7 +264,7 @@ The database connection itself remains a core component. This integration expose
 **DSL Capabilities:**
 - `integration.files.extractText` -- Extract text from PDF, DOCX, images, text files
 
-Uses VisionSIProvider for image descriptions.
+Uses VisionAIProvider for image descriptions.
 
 ### gcs/ - Google Cloud Storage
 **Purpose:** Cloud storage file operations

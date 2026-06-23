@@ -1,4 +1,4 @@
-// si_guard.go
+// ai_guard.go
 //
 // Global LLM circuit breaker (memql#825). The single point every LLM
 // HTTP call leaves the process is the provider SDKs' *http.Client. We

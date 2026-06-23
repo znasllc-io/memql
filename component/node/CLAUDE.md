@@ -234,10 +234,10 @@ the common frame stays a string concat). Cross-replica + backpressure + lifecycl
 durable-store-only, mirroring the #1264 cross-replica style). This is the
 node-library realization of "migrate token + audio onto the streaming contract",
 at the same altitude as the sibling RPC migration (`substrate_rpc.go`, memql#1265).
-The live grpc-handler cutover landed in memql#1266 (`component/grpc/si_stream_substrate.go`):
-the worker's `handleAiChatStream` (token deltas) + `si_transcribe_stream.go` (audio
+The live grpc-handler cutover landed in memql#1266 (`component/grpc/ai_stream_substrate.go`):
+the worker's `handleAiChatStream` (token deltas) + `ai_transcribe_stream.go` (audio
 deltas) produce frames to `stream:<requestId>` via `StreamSession` instead of the
-ad-hoc `SIForwardResponse` mesh push, and the WS-owning bff (`proxySIStream`)
+ad-hoc `AiForwardResponse` mesh push, and the WS-owning bff (`proxyAIStream`)
 consumes them via `SubscribeStreamFrames` and renders the SAME wire messages back
 to the browser. The trigger still rides the mesh forward (the bff Forward()s the
 request; a bare terminal closes the inflight); only the streamed RESPONSE delivery

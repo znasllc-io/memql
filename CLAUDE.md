@@ -128,7 +128,7 @@ memQL/
 - [Events](docs/public/concepts/events.md)
 - [Node Identifier Conventions](docs/public/concepts/identifiers.md) -- canonical id format, who composes it, anti-patterns
 - [MemQL Authoring Rules & Gotchas](docs/public/language/authoring-rules.md) -- read before writing `.memql` files
-- [LLM cost control (defense in depth)](docs/public/ai/llm-cost-control.md) -- the layered guardrails (kill-switch, rate ceiling, automation budget, loop caps) that make a runaway spend loop structurally impossible; every `MEMQL_LLM_*` / budget env var + how to repro safely. Read before touching `si_guard.go`, an LLM loop, or an automation that drives model calls.
+- [LLM cost control (defense in depth)](docs/public/ai/llm-cost-control.md) -- the layered guardrails (kill-switch, rate ceiling, automation budget, loop caps) that make a runaway spend loop structurally impossible; every `MEMQL_LLM_*` / budget env var + how to repro safely. Read before touching `ai_guard.go`, an LLM loop, or an automation that drives model calls.
 - [Tool ↔ Knowledge Domain Pattern](docs/public/concepts/tool-knowledge-domain-pattern.md) -- when a capability has operational knowledge (CoPresent Control, Computer Use, etc.), put it in a knowledge domain that the tool requires, not in the agent prompt template. Read before adding capability-bundled documentation.
 
 **Tooling:**
@@ -394,7 +394,7 @@ cross-node behaviour. Tests MUST exercise the hop -- a handler running on
 a session WITHOUT the originating node's local state, context surviving a
 proxy/forward, an event consumed on a different replica. Add coverage to
 the cluster-e2e harness (`test/clustere2e/`) and/or the proxy-path tests
-(`component/grpc/si_forward_test.go`); the test should FAIL against
+(`component/grpc/ai_forward_test.go`); the test should FAIL against
 single-node-assuming code and PASS with the cross-node fix. The blessed
 local repro is the 2-replica parity cluster (`make dev-cluster-up`) --
 the only topology that reproduces this bug class. See
@@ -540,7 +540,7 @@ When implementing new functionality in memQL:
 memQL centralizes all AI operations through a pluggable provider system:
 
 ### Provider System
-- **Multi-provider architecture** - Unified interfaces (`ChatSIProvider`, `VisionSIProvider`, `TTSSIProvider`, `ChatStreamProvider`) with pluggable backends
+- **Multi-provider architecture** - Unified interfaces (`ChatAIProvider`, `VisionAIProvider`, `TTSAIProvider`, `ChatStreamProvider`) with pluggable backends
 - **OpenAI providers** - GPT-4, GPT-5-mini for chat, vision, TTS, and STT
 - **Anthropic providers** - Claude Opus, Sonnet, Haiku for chat and vision
 - **Provider configuration** - MemQL provider records in `dsl/providers/providers.memql`
@@ -714,7 +714,7 @@ per-agent plan (primary / sequence / chime-ins / instructions) in one
 structured-output call. The standalone router LLM call only fires for
 voice utterances now (latency-sensitive); fast-path mention dispatch
 bypasses both. Lives in `integrations/cognition/cognition_handler.go`,
-`conductor_consult.go`, `si_router.go`.
+`conductor_consult.go`, `ai_router.go`.
 
 **Capability-aware routing.** Both the conductor (and the voice-path
 router) see each candidate agent's tool list, so a specialist whose
@@ -2037,11 +2037,11 @@ Safety guards are wired (memql#818): a cumulative per-plan LLM budget
 (#819), a lean prompt projection (#820, strips role embeddings), 429
 backoff (#821), a convergence/no-progress guard (#822), and a global
 identical-request circuit breaker at the provider HTTP chokepoint
-(#825, `component/memql/si_guard.go`).
+(#825, `component/memql/ai_guard.go`).
 
 Goal-resolution restructure (epic memql#836) -- SHIPPED. The cost-safety
 structure is now in place: a hard process-wide LLM rate ceiling at the
-provider HTTP chokepoint (#834, `si_guard.go`), complexity triage that
+provider HTTP chokepoint (#834, `ai_guard.go`), complexity triage that
 routes a trivial deliverable to ONE cheap path instead of the decompose
 loop (#837), model tiering that defaults the planner to a cheap tier and
 escalates to Opus+thinking only on an explicit stuck signal (#838), an

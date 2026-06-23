@@ -11,7 +11,7 @@ import (
 )
 
 // inner_loop.go holds the hardening primitives for the bounded single-turn
-// tool loop (si_tool_loop.go) and the streaming replier
+// tool loop (ai_tool_loop.go) and the streaming replier
 // (integrations/agent/streaming.go). Everything here is deliberately pure
 // and table-testable -- no DB, no live LLM, no engine receiver -- so the
 // loop's stopping logic, budget accounting, error classification, retry

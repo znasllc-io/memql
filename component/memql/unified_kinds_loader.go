@@ -90,7 +90,7 @@ func LoadUnifiedShapes(logger *slog.Logger, registry *ShapeRegistry) (int, error
 // before the registry entry is written. Without that step the
 // registry holds the Config but Available stays false and the AI
 // runtime rejects every lookup with "provider <name> not available"
-// (see si_runtime.go's entry.Available check). The legacy
+// (see ai_runtime.go's entry.Available check). The legacy
 // loadAIProviders walked the providers and called newAIProvider;
 // that step was lost when Pass 3 of the DSL restructure retired the
 // legacy walk. Re-attaching it here keeps the unified-loader path

@@ -16,7 +16,7 @@ import (
 // Streaming cutover onto the durable delivery substrate (memql#1266, Phase 2 of
 // epic memql#1259). This file is the gRPC-handler seam that points the two live
 // streaming paths -- token streaming (handleAiChatStream) and audio streaming
-// (si_transcribe_stream.go) -- at the node-library StreamSession /
+// (ai_transcribe_stream.go) -- at the node-library StreamSession /
 // SubscribeStreamFrames primitives (component/node/stream_lifecycle.go).
 //
 // Topology, mirroring the chat-reply migration (memql#1264) and the client-tool

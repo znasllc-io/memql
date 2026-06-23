@@ -38,7 +38,7 @@ const (
 	// a conversation-wide one. Cost / latency scale with actual use,
 	// not the ceiling.
 	// Tool-loop caps apply to BOTH the engine-level AI tool loop
-	// (component/memql/si_tool_loop.go) AND the agent-node streaming
+	// (component/memql/ai_tool_loop.go) AND the agent-node streaming
 	// loop (integrations/agent/streaming.go). Both read the same env
 	// var so there is exactly one knob to turn for walkthrough
 	// length. Defaults sized for multi-field walkthroughs + upcoming

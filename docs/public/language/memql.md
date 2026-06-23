@@ -565,7 +565,7 @@ provider anthropic {
 
 The legacy `func (Provider) name { ... }` form is retired; the parser rejects it with a migration hint.
 
-**Provider types** (registered in `component/memql/si_providers.go`) include `OpenAI` / `OpenAIChat` (chat completions), `OpenAIStream` (streaming chat), `OpenAITTS` (text-to-speech), and `Anthropic` (Claude chat / vision).
+**Provider types** (registered in `component/memql/ai_providers.go`) include `OpenAI` / `OpenAIChat` (chat completions), `OpenAIStream` (streaming chat), `OpenAITTS` (text-to-speech), and `Anthropic` (Claude chat / vision).
 
 **Lifecycle annotations (`@enabled` / `@disabled`).** Providers accept the same lifecycle flags as functions / builtins / prompts / specs / seeds. `@enabled` is the explicit-on default (a no-op). `@disabled` skips the provider at load — it is **not registered and no auth resolution is attempted** — while staying in the tree for a future re-enable. `@disabled` on a `@base` **propagates**: every child that `@extends` it is skipped too. Dependents degrade gracefully — a policy whose `@primary` is disabled routes via its `@fallback`; a prompt whose `@defaultProvider` is disabled falls back to the default.
 

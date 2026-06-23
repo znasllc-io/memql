@@ -617,7 +617,7 @@ func (pm *PeerManager) checkLiveness() {
 		// and removed. This is a pure table reap, NOT a health transition:
 		// we do not emit a status change (no spurious "offline" DB health
 		// row for a pod this node never monitored). selectPeer
-		// (component/grpc/si_forward.go) already requires Connection != nil,
+		// (component/grpc/ai_forward.go) already requires Connection != nil,
 		// so these Connection==nil entries are already unroutable -- removing
 		// them cannot change routing results, it only frees memory and keeps
 		// the gossip/topology view accurate.

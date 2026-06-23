@@ -67,8 +67,8 @@ component/
 - `executor.go` - Query execution logic
 - `parser.go` - MemQL query parsing
 - `function_loader.go` - Function loading and registration
-- `si_tool_loop.go` - AI tool calling loop (MCP integration)
-- `si_providers.go` - AI provider registry (OpenAI, Anthropic) with ChatSIProvider, VisionSIProvider, TTSSIProvider, ChatStreamProvider interfaces
+- `ai_tool_loop.go` - AI tool calling loop (MCP integration)
+- `ai_providers.go` - AI provider registry (OpenAI, Anthropic) with ChatAIProvider, VisionAIProvider, TTSAIProvider, ChatStreamProvider interfaces
 - `integration_provider.go` - IntegrationProvider interface and IntegrationCapability struct
 - `integration_registry.go` - Thread-safe registry for integration providers and capabilities
 - `integration_engine.go` - IntegrationEngineAccess narrow interface for integrations
@@ -131,7 +131,7 @@ suggest helpers (memql#1959)
 **What It Does:**
 - PDF text extraction
 - DOCX text extraction
-- Image description via VisionSIProvider interface (OpenAI/Anthropic)
+- Image description via VisionAIProvider interface (OpenAI/Anthropic)
 - Plain text handling
 
 ### auth/ & identity/ - **Authentication**
@@ -266,8 +266,8 @@ Components with SetWiring: Engine, gRPC Server, HTTP Server, Automations Schedul
 ```go
 type MemQLEngine interface {
     Execute(ctx context.Context, query string) (any, error)
-    InvokeSI(ctx context.Context, templateId string, data map[string]any) (any, error)
-    InvokeSIChatWithTools(ctx context.Context, templateId string, data map[string]any) (string, error)
+    InvokeAI(ctx context.Context, templateId string, data map[string]any) (any, error)
+    InvokeAIChatWithTools(ctx context.Context, templateId string, data map[string]any) (string, error)
     RegisterIntegration(provider IntegrationProvider) error
     SetWiring(w *bus.Wiring) // Channel-based communication
 }
@@ -275,8 +275,8 @@ type MemQLEngine interface {
 
 ### IntegrationEngineAccess Interface
 
-Narrow interface for integrations -- excludes AI orchestration methods (InvokeSI,
-InvokeSIChatWithTools). Integrations receive this instead of the full engine.
+Narrow interface for integrations -- excludes AI orchestration methods (InvokeAI,
+InvokeAIChatWithTools). Integrations receive this instead of the full engine.
 
 ```go
 type IntegrationEngineAccess interface {
@@ -407,7 +407,7 @@ docker-compose logs memql | grep "query.*ms"
 
 | Component | Purpose | Key Files |
 |-----------|---------|-----------|
-| **memql/** | Query engine | `engine.go`, `executor.go`, `parser.go`, `function_loader.go`, `si_tool_loop.go` (AI tool loop), `si_providers.go` (AI providers), `prompt_loader.go`, `provider_loader.go`, `shape_loader.go` |
+| **memql/** | Query engine | `engine.go`, `executor.go`, `parser.go`, `function_loader.go`, `ai_tool_loop.go` (AI tool loop), `ai_providers.go` (AI providers), `prompt_loader.go`, `provider_loader.go`, `shape_loader.go` |
 | **database/** | Database layer | `memory-nodes/database.go` |
 | **server/** | HTTP/WS servers | `server.go`, `memqlws/`, `audiows/`, `polyphonws/` |
 | **auth/** | Auth context helpers + RBAC + delegation + identity resolver | `context.go`, `identity.go`, `rbac.go`, `security.go`, `identity_resolver.go` |
