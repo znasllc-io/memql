@@ -1129,6 +1129,13 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 		return s.handleSenseHover(envelope, payload.SenseHover)
 	case *memqlv1.MemqlClientMessage_SenseSignatureHelp:
 		return s.handleSenseSignatureHelp(envelope, payload.SenseSignatureHelp)
+	// Pack browser -- read-only DSL pack enumeration (memql#2127 / B1)
+	case *memqlv1.MemqlClientMessage_ListPackDomains:
+		return s.handleListPackDomains(envelope, payload.ListPackDomains)
+	case *memqlv1.MemqlClientMessage_ListPackFiles:
+		return s.handleListPackFiles(envelope, payload.ListPackFiles)
+	case *memqlv1.MemqlClientMessage_ReadPackFile:
+		return s.handleReadPackFile(envelope, payload.ReadPackFile)
 	// Polyphon -- multi-agent voice (Phase 3)
 	case *memqlv1.MemqlClientMessage_PolyphonRoomToken:
 		return s.handlePolyphonRoomToken(envelope, payload.PolyphonRoomToken)

@@ -233,6 +233,13 @@ message MemqlClientMessage {
     // same engine + mesh routing rule every other presence write uses. See
     // handleVoiceAgentRealtimeSpeaking.
     VoiceAgentRealtimeSpeaking voice_agent_realtime_speaking = 74;
+    // Pack browser -- read-only enumeration of the embedded + plugin-
+    // registered .memql tree (memql#2127 / B1). The cockpit consumes
+    // these to browse domains, list a domain's .memql files, and fetch
+    // a single file's source. No write path.
+    ListPackDomainsMsg list_pack_domains = 75;
+    ListPackFilesMsg list_pack_files = 76;
+    ReadPackFileMsg read_pack_file = 77;
   }
 }
 
@@ -326,6 +333,11 @@ message MemqlServerMessage {
     // insert for a realtime assistant turn and returns the canonical
     // utterance id so the voice-agent can correlate + audit.
     VoiceAgentRealtimeOutputAck voice_agent_realtime_output_ack = 101;
+    // Pack browser replies (see ListPackDomainsMsg / ListPackFilesMsg /
+    // ReadPackFileMsg -- memql#2127 / B1).
+    ListPackDomainsResult list_pack_domains_result = 112;
+    ListPackFilesResult list_pack_files_result = 113;
+    ReadPackFileResult read_pack_file_result = 114;
     // 110 (evaluate_policy_result) retired with the decision-policy
     // tier, #984; the number is reserved at the message level below.
     // RotateAuth reply (see RotateAuthMsg). `ok=true` means the new
@@ -1043,6 +1055,64 @@ message SenseSignature {
 message SenseParameter {
   string label = 1;          // parameter name
   string documentation = 2;  // parameter description
+}
+
+// -----------------------------------------------------------------------------
+// Pack Browser -- read-only DSL pack enumeration (memql#2127 / B1)
+// -----------------------------------------------------------------------------
+//
+// Surfaces the embedded + RegisterTree'd .memql tree (and the
+// MEMQL_DSL_PATH overlay) to the cockpit so an operator can browse the
+// packs a node carries. Read-only: there is no mutation message here.
+
+// ListPackDomainsMsg requests the set of browsable DSL domains a node
+// carries (embedded core domains + plugin-registered pack domains).
+message ListPackDomainsMsg {
+  string request_id = 1;
+}
+
+message ListPackDomainsResult {
+  string request_id = 1;
+  repeated PackDomain domains = 2;
+}
+
+message PackDomain {
+  string name = 1;        // top-level namespace (e.g. "cognition", "copresent")
+  string origin = 2;      // "embedded" | "pack:<domain>"
+  int32 file_count = 3;   // recursive count of browsable files under the domain
+}
+
+// ListPackFilesMsg requests the browsable files under a single domain.
+message ListPackFilesMsg {
+  string request_id = 1;
+  string domain = 2;
+}
+
+message ListPackFilesResult {
+  string request_id = 1;
+  string domain = 2;
+  repeated PackFile files = 3;
+}
+
+message PackFile {
+  string path = 1;  // relative to the domain root (e.g. "queries.memql", "prompts/x.tmpl")
+  int64 size = 2;   // byte length
+}
+
+// ReadPackFileMsg fetches a single file's source.
+message ReadPackFileMsg {
+  string request_id = 1;
+  string domain = 2;
+  string path = 3;  // relative to the domain root (as returned by ListPackFiles)
+}
+
+message ReadPackFileResult {
+  string request_id = 1;
+  string domain = 2;
+  string path = 3;
+  string source = 4;   // file source (UTF-8)
+  string origin = 5;   // "embedded" | "pack:<domain>" | "disk:<path>"
+  bool found = 6;      // false when the file does not exist
 }
 
 // -----------------------------------------------------------------------------
