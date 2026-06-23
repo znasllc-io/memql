@@ -18,7 +18,7 @@ There are two run modes:
 
 | Mode | What it is | How |
 |------|-----------|-----|
-| **Local dev** | Everything in Docker on one machine — Postgres, the mesh, the SPA, LiveKit. Throwaway. | `make dev-cluster-up` (the only supported local path). See [Reproduce staging locally](reproduce-staging-locally.md). |
+| **Local dev** | k3d + ArgoCD cluster on one machine — Postgres, the mesh, LiveKit. Throwaway. | `make k3d-up` (primary local path, memql#2061). See [Reproduce staging locally](reproduce-staging-locally.md). |
 | **Real deployment** (staging / prod / self-host) | A Kubernetes mesh against a **managed** TimescaleDB. | The rest of this page. |
 
 Everything below is **environment-agnostic by design**: the architecture is
