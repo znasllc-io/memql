@@ -270,6 +270,13 @@ variables:
     optional: true
     description: "Per-deploy identifier injected by the rollout and stamped on node and deployment records."
 
+  - name: MEMQL_DEPLOY_ARGO_APP
+    component: engine
+    scope: node
+    default: "memql"
+    optional: true
+    description: "ArgoCD Application name the deploy-pack executor targets; defaults to memql."
+
   - name: MEMQL_DEPLOY_PROVIDER
     component: engine
     scope: node
