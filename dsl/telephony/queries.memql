@@ -8,7 +8,7 @@ use telephony.shapes.{ numberFull, callFull, consentFull }
 
 @enabled
 @description("ADMIN: DIDs provisioned to a partition, newest first. Cluster-owner gated -- numbers are cluster infrastructure.")
-query number queryNumbersByPartition {
+query number numbersByPartition {
   args {
     partitionId  string  @required
   }
@@ -19,7 +19,7 @@ query number queryNumbersByPartition {
 
 @enabled
 @description("ADMIN: every provisioned DID across all partitions, newest first. Cluster-owner gated. Backs the cockpit numbers view.")
-query number queryAllNumbers {
+query number allNumbers {
   filter  actor.isClusterOwner==true
   sort    "createdAt", "desc"
   paginate 100
@@ -28,7 +28,7 @@ query number queryAllNumbers {
 
 @enabled
 @description("ADMIN: call records for a partition, newest first. Cluster-owner gated. Powers billing + observability.")
-query call queryCallsByPartition {
+query call callsByPartition {
   args {
     partitionId  string  @required
   }
@@ -40,7 +40,7 @@ query call queryCallsByPartition {
 
 @enabled
 @description("ADMIN: call records that touched a specific DID (as caller or callee), newest first. Cluster-owner gated.")
-query call queryCallsByNumber {
+query call callsByNumber {
   args {
     e164  string  @required
   }
@@ -52,7 +52,7 @@ query call queryCallsByNumber {
 
 @enabled
 @description("Opt-out rows for an external number (newest first). Read in the outbound call path to block calls to opted-out numbers (TCPA). Not owner-gated: the enforcement check runs in the agent/call context, not an admin one.")
-query consent queryConsentOptOut {
+query consent consentOptOut {
   args {
     phoneNumber  string  @required
   }
@@ -63,7 +63,7 @@ query consent queryConsentOptOut {
 
 @enabled
 @description("Resolve an owned DID row by its E.164 (newest first). Used to set E911 / compliance state by number.")
-query number queryNumberByE164 {
+query number numberByE164 {
   args {
     e164  string  @required
   }

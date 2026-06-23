@@ -2017,7 +2017,7 @@ func (i *Integration) purgeChunksForSource(ctx context.Context, domainId, source
 // the text in copresentUISeedCorpus changes, chunkIdFor produces a
 // different hash that won't match, and the chunk is ingested fresh.
 // Chunk ids are stored raw (NOT partition-prefixed) because the
-// mutationCreateDocumentChunk mutation uses `id = args.chunkId`
+// createDocumentChunk mutation uses `id = args.chunkId`
 // directly -- see capabilities.go. So we match on exact equality.
 func (i *Integration) chunkExistsById(ctx context.Context, chunkId string) bool {
 	if i.db() == nil {

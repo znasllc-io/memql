@@ -330,16 +330,16 @@ func cmdSeed(logger *slog.Logger, args []string) error {
 
 func secretMutationFor(e manifestEntry) (mutation string, id string) {
 	if e.Scope == "global" {
-		return "mutationSetGlobalSecret", "secret-global-" + slugify(e.Name)
+		return "setGlobalSecret", "secret-global-" + slugify(e.Name)
 	}
-	return "mutationSetPartitionSecret", "secret-" + slugify(e.Name)
+	return "setPartitionSecret", "secret-" + slugify(e.Name)
 }
 
 func variableMutationFor(e manifestEntry) (mutation string, id string) {
 	if e.Scope == "global" {
-		return "mutationSetGlobalVariable", "var-global-" + slugify(e.Name)
+		return "setGlobalVariable", "var-global-" + slugify(e.Name)
 	}
-	return "mutationSetPartitionVariable", "var-" + slugify(e.Name)
+	return "setPartitionVariable", "var-" + slugify(e.Name)
 }
 
 func slugify(name string) string {

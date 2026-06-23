@@ -45,21 +45,16 @@ func TestLoadByName_CanonicalResolution(t *testing.T) {
 		{name: "pruneStaleClusterNodes", wantAuto: "pruneStaleClusterNodes"},
 		{name: "expireDelegations", wantAuto: "expireDelegations"},
 
-		// Full `logicXxx` construct name -> wrapping automation. Previously
-		// failed with "automation not found".
-		{name: "logicRegisterNode", wantAuto: "registerNode"},
-		{name: "logicRevokeExpiredDelegations", wantAuto: "expireDelegations"},
-
-		// Bare invocation form -> wrapping automation. This is the
-		// non-mechanical case called out in #1663: the bare name
-		// `revokeExpiredDelegations` does NOT match the automation name
-		// `expireDelegations`, yet it must resolve.
+		// Bare logic construct name -> wrapping automation. The non-mechanical
+		// case called out in #1663: the bare name `revokeExpiredDelegations`
+		// does NOT match the automation name `expireDelegations`, yet the logic
+		// it invokes must resolve. Post-C6 (memql#2036) the construct name is
+		// bare, so this is the only invocation form.
 		{name: "revokeExpiredDelegations", wantAuto: "expireDelegations"},
 
 		// An @entrypoint logic with no authored wrapper resolves to its
-		// auto-generated wrapping automation (memql#1707) -- it is now a
-		// runnable entry point in both the full `logicXxx` and bare forms.
-		{name: "logicServiceVersionProbe", wantAuto: "serviceVersionProbeEntrypoint"},
+		// auto-generated wrapping automation (memql#1707) -- a runnable entry
+		// point reachable by its bare construct name.
 		{name: "serviceVersionProbe", wantAuto: "serviceVersionProbeEntrypoint"},
 
 		// Genuinely unknown name -> plain "not found" (and NOT the
@@ -111,7 +106,7 @@ func TestLoadByName_LiveAndDryRunResolveSameConstruct(t *testing.T) {
 
 	// Resolve by a wrapped logic name -- the form that previously broke -- on
 	// both paths and assert they converge on the same automation + a real source.
-	for _, input := range []string{"logicRevokeExpiredDelegations", "revokeExpiredDelegations", "expireDelegations"} {
+	for _, input := range []string{"revokeExpiredDelegations", "expireDelegations"} {
 		t.Run(input, func(t *testing.T) {
 			// Live resolution.
 			auto, err := loader.LoadByName(input)
@@ -135,29 +130,7 @@ func TestLoadByName_LiveAndDryRunResolveSameConstruct(t *testing.T) {
 	}
 }
 
-func TestLogicNameHelpers(t *testing.T) {
-	cases := []struct {
-		in          string
-		isConstruct bool
-		full        string
-		bare        string
-	}{
-		{in: "logicRegisterNode", isConstruct: true, full: "logicRegisterNode", bare: "registerNode"},
-		{in: "registerNode", isConstruct: false, full: "logicRegisterNode", bare: "registerNode"},
-		{in: "logicRevokeExpiredDelegations", isConstruct: true, full: "logicRevokeExpiredDelegations", bare: "revokeExpiredDelegations"},
-		// "logical" is an ordinary identifier, not a `logicXxx` construct (the
-		// char after the prefix is lowercase), so the helpers leave it alone.
-		{in: "logical", isConstruct: false, full: "logicLogical", bare: "logical"},
-	}
-	for _, tc := range cases {
-		if got := isLogicConstructName(tc.in); got != tc.isConstruct {
-			t.Errorf("isLogicConstructName(%q) = %v, want %v", tc.in, got, tc.isConstruct)
-		}
-		if got := fullLogicName(tc.in); got != tc.full {
-			t.Errorf("fullLogicName(%q) = %q, want %q", tc.in, got, tc.full)
-		}
-		if got := bareLogicName(tc.in); got != tc.bare {
-			t.Errorf("bareLogicName(%q) = %q, want %q", tc.in, got, tc.bare)
-		}
-	}
-}
+// TestLogicNameHelpers was removed by C6 (memql#2036): the logic name prefix
+// bridge (isLogicConstructName / fullLogicName / bareLogicName) it exercised is
+// gone now that construct names are bare. Logic resolution is a direct bare-name
+// comparison, covered by TestLoadByName_CanonicalResolution above.

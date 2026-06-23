@@ -12,11 +12,11 @@ import (
 func trainingFakeEngine(parent, agent map[string]any, skills []map[string]any) *fakeEngine {
 	return &fakeEngine{execResponder: func(query string) (any, error) {
 		switch {
-		case containsAll(query, "queryAgentById"):
+		case containsAll(query, "agentById"):
 			return rowsEnvelope(agent), nil
-		case containsAll(query, "queryActiveSkillsFull"):
+		case containsAll(query, "activeSkillsFull"):
 			return rowsEnvelope(skills...), nil
-		case containsAll(query, "queryPlanById"):
+		case containsAll(query, "planById"):
 			return rowsEnvelope(parent), nil
 		default:
 			return nil, nil
@@ -35,7 +35,7 @@ func newTestLoop(fe *fakeEngine) *PlannerAgentLoop {
 func TestMintApprovedTrainingPlan_MintsAndSucceeds(t *testing.T) {
 	parent := map[string]any{
 		"id": "plan-1", "kind": "userGoal", "status": "running",
-		"goal": "become an expert on French employment law",
+		"goal":        "become an expert on French employment law",
 		"partitionId": "v1:cognition:space:s1", "requestedBy": "v1:identity:user:u1",
 	}
 	agent := map[string]any{
@@ -56,8 +56,8 @@ func TestMintApprovedTrainingPlan_MintsAndSucceeds(t *testing.T) {
 	}
 	exec, _, _ := fe.snapshot()
 
-	if countContains(exec, "mutationCreatePlan") != 1 {
-		t.Fatalf("must mint exactly one Plan, got %d mutationCreatePlan calls", countContains(exec, "mutationCreatePlan"))
+	if countContains(exec, "createPlan") != 1 {
+		t.Fatalf("must mint exactly one Plan, got %d createPlan calls", countContains(exec, "createPlan"))
 	}
 	if countContains(exec, "trainSpecialist") < 1 {
 		t.Fatalf("minted Plan must be kind=trainSpecialist")
@@ -94,8 +94,8 @@ func TestMintApprovedTrainingPlan_NoDomainEscalates(t *testing.T) {
 		t.Fatalf("mintApprovedTrainingPlan: %v", err)
 	}
 	exec, _, _ := fe.snapshot()
-	if countContains(exec, "mutationCreatePlan") != 0 {
-		t.Fatalf("must NOT mint a training Plan when no domain resolves, got %d", countContains(exec, "mutationCreatePlan"))
+	if countContains(exec, "createPlan") != 0 {
+		t.Fatalf("must NOT mint a training Plan when no domain resolves, got %d", countContains(exec, "createPlan"))
 	}
 	if countContains(exec, "awaitingFeedback") != 1 {
 		t.Fatalf("must escalate awaitingFeedback when no domain resolves, got %d", countContains(exec, "awaitingFeedback"))
@@ -114,10 +114,10 @@ func TestMintApprovedTrainingPlan_NoSpecialistEscalates(t *testing.T) {
 		t.Fatalf("mintApprovedTrainingPlan: %v", err)
 	}
 	exec, _, _ := fe.snapshot()
-	if countContains(exec, "queryAgentById") != 0 {
+	if countContains(exec, "agentById") != 0 {
 		t.Fatalf("must not look up a specialist when none was named")
 	}
-	if countContains(exec, "mutationCreatePlan") != 0 || countContains(exec, "awaitingFeedback") != 1 {
+	if countContains(exec, "createPlan") != 0 || countContains(exec, "awaitingFeedback") != 1 {
 		t.Fatalf("no specialist -> escalate, no mint")
 	}
 }

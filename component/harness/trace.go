@@ -55,7 +55,7 @@ type TraceEvent struct {
 	// decision). Empty for plan/step transitions.
 	ObservationKind string
 	// Mutation is the provenanceMutation that named this transition (e.g.
-	// "mutationStartHarnessStep"). The audit trail's verb.
+	// "startHarnessStep"). The audit trail's verb.
 	Mutation string
 	// Actor is createdBy -- who produced this version.
 	Actor string

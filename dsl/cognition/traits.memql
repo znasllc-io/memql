@@ -10,20 +10,20 @@
 // read actor.*.
 
 @description("Matches participants with human participantType")
-trait traitIsHumanParticipant {
+trait isHumanParticipant {
   payload.participantType == "human"
 }
 
-// traitIsAIParticipant - AI Participant Type Trait
+// isAIParticipant - AI Participant Type Trait
 // ================================================
 //
 // Reusable filter that matches participants with AI type.
 // AI participants are automated agents in spaces.
 //
 // Usage in queries:
-//   filter concept==v1:cognition:participant && traitIsAIParticipant
+//   filter concept==v1:cognition:participant && isAIParticipant
 //
 @description("Matches participants with AI participantType")
-trait traitIsAIParticipant {
+trait isAIParticipant {
   payload.participantType=="si"
 }

@@ -59,7 +59,7 @@ shape memory memoryFull {
 }
 
 @row
-@description("History-list projection of a document version: the metadata a user scans the edit history with (version number, who, when, what-changed note) WITHOUT the full content body. Backs queryDocumentVersions. The full content is fetched on demand per-version via documentVersionFull (queryDocumentVersionById).")
+@description("History-list projection of a document version: the metadata a user scans the edit history with (version number, who, when, what-changed note) WITHOUT the full content body. Backs documentVersions. The full content is fetched on demand per-version via documentVersionFull (documentVersionById).")
 shape documentVersion documentVersionSummary {
   row.id
   payload.ownerUserId
@@ -76,7 +76,7 @@ shape documentVersion documentVersionSummary {
 }
 
 @row
-@description("Full document-version projection including the immutable content body. Backs queryDocumentVersionById (the 'open this version' / restore-source read) and the edit/restore handlers that read the latest version to compute the next versionNumber.")
+@description("Full document-version projection including the immutable content body. Backs documentVersionById (the 'open this version' / restore-source read) and the edit/restore handlers that read the latest version to compute the next versionNumber.")
 shape documentVersion documentVersionFull {
   row.id
   payload.ownerUserId

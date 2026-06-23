@@ -246,7 +246,7 @@ func (e *MemQLEngine) validateHumanParticipantCap(ctx context.Context, payload m
 
 // humanInsertIsActive reports whether an insert with the given status
 // grows the active human count. An empty status defaults to active
-// (mirrors mutationJoinSpaceAsHuman's coalesce(status, "active")).
+// (mirrors joinSpaceAsHuman's coalesce(status, "active")).
 func humanInsertIsActive(status string) bool {
 	return status == "" || strings.EqualFold(status, "active")
 }

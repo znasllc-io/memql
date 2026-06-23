@@ -166,7 +166,7 @@ func (a *App) authoredAutomationsEnabledFlag() bool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	res, err := a.engine.Execute(ctx, "queryClusterSettingsCurrent()")
+	res, err := a.engine.Execute(ctx, "clusterSettingsCurrent()")
 	if err != nil || res == nil || res.Bundle == nil || len(res.Bundle.Nodes) == 0 {
 		return true
 	}

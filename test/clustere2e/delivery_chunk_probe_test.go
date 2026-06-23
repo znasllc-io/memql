@@ -86,7 +86,7 @@ func TestTextChunkCrossReplicaDelivery(t *testing.T) {
 		qc := memqlclient.NewQueryClient(c.Dispatcher())
 		if _, err := qc.MutationUpdateParticipantPresence(ctx, memqlclient.MutationUpdateParticipantPresenceArgs{
 			PresenceId:    "presence-" + id.NewShortId(),
-			PartitionId:       spaceID,
+			PartitionId:   spaceID,
 			ParticipantId: participantID,
 			State:         "idle",
 			Label:         "probe",
@@ -104,14 +104,14 @@ func TestTextChunkCrossReplicaDelivery(t *testing.T) {
 	// Generous settle: presence event -> ensureSubscribed -> durable subscription live.
 	time.Sleep(3 * time.Second)
 
-	// Produce one streamed chunk the way cognition's mutationEmitTextChunk
+	// Produce one streamed chunk the way cognition's emitTextChunk
 	// does (colon-free chunkId; replyId = the eventual committed utterance id).
 	chunkShort := fmt.Sprintf("%s-0", id.NewShortId())
 	wantChunkID := "v1:cognition:text:chunk:text-chunk-" + chunkShort
 	qc := memqlclient.NewQueryClient(producer.Dispatcher())
 	if _, err := qc.MutationEmitTextChunk(ctx, memqlclient.MutationEmitTextChunkArgs{
 		ChunkId:       chunkShort,
-		PartitionId:       spaceID,
+		PartitionId:   spaceID,
 		ParticipantId: participantID,
 		ReplyId:       "v1:cognition:utterance:" + id.NewShortId(),
 		Text:          "streamed-chunk cross-replica probe",

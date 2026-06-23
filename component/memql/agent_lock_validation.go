@@ -43,7 +43,7 @@ const (
 //     gets enough context to fix the payload.
 //
 // The guard runs on every agents:agent write -- inserts AND updates --
-// because mutationUpdateAgent's `update agent` shape lands in the
+// because updateAgent's `update agent` shape lands in the
 // same pre-insert path with the fully-merged payload. The role catalog
 // is the single source of truth: bumping a role's lockedDomainIds at
 // seed time means every existing agent of that role gets the new lock

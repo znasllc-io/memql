@@ -8,23 +8,23 @@
 // Bootstrap the cluster's self-representation in the database on first startup.
 // Creates records for the cluster, its database, and its identity provider.
 // Only BFF nodes run this. Idempotent: skips if cluster already exists.
-use cluster.mutations.{ mutationCreateCluster, mutationCreateDatabase, mutationCreateIdentityProvider, mutationCreateNode, mutationCreateSpawnEvent, mutationUpdateNodeHealth }
-use cluster.queries.{ queryExistingCluster, queryStaleClusterNodes }
+use cluster.mutations.{ createCluster, createDatabase, createIdentityProvider, createNode, createSpawnEvent, updateNodeHealth }
+use cluster.queries.{ existingCluster, staleClusterNodes }
 use common.builtins.{ serviceVersion }
-use platform.queries.{ queryGlobalVariable }
+use platform.queries.{ globalVariable }
 
 @description("Bootstraps the cluster's self-representation on first startup. Creates v1:cluster:cluster + v1:cluster:database + v1:cluster:identityProvider rows when no cluster row exists. Only BFF nodes run the create path. Idempotent: skips entirely if a cluster row already exists.")
-logic logicBootstrapCluster {
+logic bootstrapCluster {
   args {
     event object @required
   }
   body {
   // Check if cluster already exists.
-  existing := queryExistingCluster()
+  existing := existingCluster()
 
   // Create the database record (only if cluster doesn't exist and this is the BFF node).
   dbRecord := if existing.Empty() && args.event.payload.node.type == "bff" {
-    mutationCreateDatabase({
+    createDatabase({
       host:    coalesce(args.event.payload.database.host, "localhost"),
       dbName:  coalesce(args.event.payload.database.dbName, "memql"),
       sslMode: coalesce(args.event.payload.database.sslMode, "disable")
@@ -33,7 +33,7 @@ logic logicBootstrapCluster {
 
   // Create the identity provider record (only if cluster doesn't exist and provider configured).
   idpRecord := if existing.Empty() && args.event.payload.node.type == "bff" && args.event.payload.identityProvider != nil {
-    mutationCreateIdentityProvider({
+    createIdentityProvider({
       name:           coalesce(args.event.payload.identityProvider.name, "memql-identity"),
       issuerUrl:      coalesce(args.event.payload.identityProvider.issuerUrl, ""),
       clientIdPrefix: coalesce(args.event.payload.identityProvider.clientIdPrefix, ""),
@@ -43,7 +43,7 @@ logic logicBootstrapCluster {
 
   // Create the cluster record.
   clusterRecord := if existing.Empty() && args.event.payload.node.type == "bff" {
-    mutationCreateCluster({
+    createCluster({
       name:               "development",
       environment:        "development",
       region:             "local",
@@ -61,12 +61,12 @@ logic logicBootstrapCluster {
 // Record node shutdown in the database.
 // Creates a spawn event with action="stopped".
 @description("Records node shutdown by creating a v1:cluster:spawnEvent with action='stopped' and reason='system.shutdown'. Fires when the node is going down.")
-logic logicDeregisterNode {
+logic deregisterNode {
   args {
     event object @required
   }
   body {
-  spawnEvent := mutationCreateSpawnEvent({
+  spawnEvent := createSpawnEvent({
     nodeId:   coalesce(args.event.payload.node.id, ""),
     nodeType: coalesce(args.event.payload.node.type, ""),
     action:   "stopped",
@@ -87,7 +87,7 @@ logic logicDeregisterNode {
 // written by NodeStatusWriter (via updateNodeHealth) share the same
 // time-series timeline -- one concept row per real node.
 @description("Registers this node on startup. Creates a v1:cluster:node record (using the peer's NodeId as the explicit concept id so later NodeStatusWriter rows share the same time-series timeline) and a v1:cluster:spawnEvent with action='spawned' and reason='system.startup'. Runs on every node type; safe to re-run on every restart.")
-logic logicRegisterNode {
+logic registerNode {
   args {
     event object @required
   }
@@ -98,22 +98,22 @@ logic logicRegisterNode {
   // node.id -- a generated UUID when MEMQL_NODE_ID is unset).
   //
   // Every field is bound with an EXPLICIT key + coalesce, mirroring
-  // logicDeregisterNode (#1643): a multi-segment path like
+  // deregisterNode (#1643): a multi-segment path like
   // `args.event.payload.node.id` is NOT eligible for the bare `args.X`
   // object-literal shorthand (only simple identifiers are), so the old
   // shorthand form corrupted the arg map -- nodeType never reached
-  // mutationCreateNode ("required argument nodeType is missing"). `flavor`
-  // was also dropped: it is not a mutationCreateNode arg (the insert body
+  // createNode ("required argument nodeType is missing"). `flavor`
+  // was also dropped: it is not a createNode arg (the insert body
   // never reads it).
   // deploymentId + provider/environment/region tie this node row to the
   // deployment that created it (#1873). deploymentId arrives on the
   // top-level startup payload (EmitSystemStartup reads MEMQL_DEPLOYMENT_ID,
   // injected per-deploy by the rollout via downward API; "local" in dev).
   // provider/environment/region already ride the top-level payload (the
-  // same fields logicBootstrapCluster stamps on the cluster row). All are
+  // same fields bootstrapCluster stamps on the cluster row). All are
   // multi-segment paths, so they need an EXPLICIT key + coalesce (see the
   // #1643/#1671 note above) -- the bare `args.X` shorthand is identifier-only.
-  nodeRecord := mutationCreateNode({
+  nodeRecord := createNode({
     id:           coalesce(args.event.payload.node.id, ""),
     nodeType:     coalesce(args.event.payload.node.type, ""),
     address:      coalesce(args.event.payload.node.address, ""),
@@ -125,14 +125,14 @@ logic logicRegisterNode {
 
   // Record the spawn event. The mutation schema only accepts the flat
   // fields below; version/address aren't persisted on the event (they
-  // already live on the node record from mutationCreateNode above).
+  // already live on the node record from createNode above).
   // Every field is bound with an EXPLICIT key + coalesce, mirroring
   // the nodeRecord step above (#1671): a multi-segment path like
   // args.event.payload.node.type evaluates to nil when the field is
   // absent; passing nil for a @required arg triggers "required
   // argument missing" at validation time. coalesce(...,"") ensures a
-  // non-nil string reaches mutationCreateSpawnEvent.
-  spawnEvent := mutationCreateSpawnEvent({
+  // non-nil string reaches createSpawnEvent.
+  spawnEvent := createSpawnEvent({
     nodeId:   coalesce(args.event.payload.node.id, ""),
     nodeType: coalesce(args.event.payload.node.type, ""),
     action:   "spawned",
@@ -157,16 +157,16 @@ logic logicRegisterNode {
 //
 // BACKSTOP to the fast reaper (#1874). The active reconciliation loop
 // (TopologyReconciler, component/node/reconciler.go) is the primary path now
-// -- it retires superseded-deployment orphans (querySupersededDeployments)
+// -- it retires superseded-deployment orphans (supersededDeployments)
 // immediately and mesh-absent nodes within a short grace window, in seconds.
 // This 30-min prune stays only as the lazy safety net for whatever the fast
 // path missed. Both append the SAME idempotent terminal health="stopped" and
-// queryStaleClusterNodes excludes already-stopped rows, so they can never
+// staleClusterNodes excludes already-stopped rows, so they can never
 // write conflicting statuses for the same node.
 //
 // Mechanism (mirrors logicPurgeExpiredArchivedSpaces /
-// logicAccessRequestExpirySweep):
-//   1. queryStaleClusterNodes returns the LATEST row per id whose health
+// accessRequestExpirySweep):
+//   1. staleClusterNodes returns the LATEST row per id whose health
 //      is not already "stopped" (asOf latest -> idempotent + reflects
 //      current state).
 //   2. The stale window is read from the global variable registry
@@ -192,18 +192,18 @@ logic logicRegisterNode {
 // Runs every 10 minutes. The cluster node table is small (one row-stream
 // per pod ever seen), so a frequent walk is cheap and keeps topology
 // fresh shortly after a rollover.
-@description("Every 10 min: mark departed cluster nodes terminal. Reads the LATEST non-stopped row per id (queryStaleClusterNodes, asOf latest -> idempotent), and for each whose lastSeen + MEMQL_NODE_STALE_PRUNE_MINUTES (default 30) has passed, appends a health='stopped' row via mutationUpdateNodeHealth. Append-only prune (cluster:node has no deleted field); consumers treat stopped as gone (WorkerDialer skips it, CLI/topology dedupe latest-per-id). Per-row windowing in the if guard since MemQL filters can't push the duration math down.")
-logic logicPruneStaleClusterNodes {
+@description("Every 10 min: mark departed cluster nodes terminal. Reads the LATEST non-stopped row per id (staleClusterNodes, asOf latest -> idempotent), and for each whose lastSeen + MEMQL_NODE_STALE_PRUNE_MINUTES (default 30) has passed, appends a health='stopped' row via updateNodeHealth. Append-only prune (cluster:node has no deleted field); consumers treat stopped as gone (WorkerDialer skips it, CLI/topology dedupe latest-per-id). Per-row windowing in the if guard since MemQL filters can't push the duration math down.")
+logic pruneStaleClusterNodes {
   args {
     event object @required
   }
   body {
-  stale := queryStaleClusterNodes({})
-  windowMinutes := queryGlobalVariable({ name: "MEMQL_NODE_STALE_PRUNE_MINUTES" })
+  stale := staleClusterNodes({})
+  windowMinutes := globalVariable({ name: "MEMQL_NODE_STALE_PRUNE_MINUTES" })
 
   for item := range stale.Nodes() {
     pruneStep := if addDuration(item.payload.lastSeen, concat("PT", coalesce(windowMinutes.First().payload.value, "30"), "M")) < timestamp() {
-      mutationUpdateNodeHealth({
+      updateNodeHealth({
         id:       item.id,
         nodeType: item.payload.nodeType,
         address:  coalesce(item.payload.address, ""),
@@ -217,7 +217,7 @@ logic logicPruneStaleClusterNodes {
   }
 }
 
-// ---- logicServiceVersionProbe -----------------------------------
+// ---- serviceVersionProbe -----------------------------------
 //
 // The canonical engine-only @entrypoint logic (memql#1707). An
 // @entrypoint logic is invokable directly via run_automation (no
@@ -236,7 +236,7 @@ logic logicPruneStaleClusterNodes {
 @enabled
 @entrypoint
 @description("Engine-only @entrypoint probe (memql#1707). Returns the current memQL service version via the serviceVersion builtin. Invokable directly via run_automation with no triggering event; carries no product coupling.")
-logic logicServiceVersionProbe {
+logic serviceVersionProbe {
   body {
     return serviceVersion({})
   }

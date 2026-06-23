@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/stretchr/testify/require"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 func TestCompilePayloadComparisonInOperatorString(t *testing.T) {
@@ -628,7 +628,7 @@ func TestNodeMatchesComparison_ProvenanceName(t *testing.T) {
 		},
 		{
 			name:      "provenance.kind does not match",
-			nodeJSON:  `{"kind":"mutation","name":"mutationCreateAgent"}`,
+			nodeJSON:  `{"kind":"mutation","name":"createAgent"}`,
 			leaf:      "kind",
 			op:        OpEq,
 			value:     "seed",
@@ -644,10 +644,10 @@ func TestNodeMatchesComparison_ProvenanceName(t *testing.T) {
 		},
 		{
 			name:      "provenance.via matches",
-			nodeJSON:  `{"kind":"seed","name":"assistant","via":"mutationCreateAgent"}`,
+			nodeJSON:  `{"kind":"seed","name":"assistant","via":"createAgent"}`,
 			leaf:      "via",
 			op:        OpEq,
-			value:     "mutationCreateAgent",
+			value:     "createAgent",
 			wantMatch: true,
 		},
 		{
@@ -667,12 +667,12 @@ func TestNodeMatchesComparison_ProvenanceName(t *testing.T) {
 			wantMatch: false,
 		},
 		{
-			name:    "unsupported leaf returns error",
+			name:     "unsupported leaf returns error",
 			nodeJSON: `{"kind":"seed","name":"assistant"}`,
-			leaf:    "unknown",
-			op:      OpEq,
-			value:   "x",
-			wantErr: true,
+			leaf:     "unknown",
+			op:       OpEq,
+			value:    "x",
+			wantErr:  true,
 		},
 	}
 
@@ -705,8 +705,8 @@ func TestProvenanceLeafFromJSON(t *testing.T) {
 		want string
 	}{
 		{"present leaf", `{"kind":"seed","name":"assistant"}`, "name", "assistant"},
-		{"present kind", `{"kind":"mutation","name":"mutationCreateAgent"}`, "kind", "mutation"},
-		{"present via", `{"kind":"seed","name":"assistant","via":"mutationCreateAgent"}`, "via", "mutationCreateAgent"},
+		{"present kind", `{"kind":"mutation","name":"createAgent"}`, "kind", "mutation"},
+		{"present via", `{"kind":"seed","name":"assistant","via":"createAgent"}`, "via", "createAgent"},
 		{"absent leaf returns empty", `{"kind":"seed","name":"assistant"}`, "trigger", ""},
 		{"empty JSON returns empty", ``, "name", ""},
 		{"malformed JSON returns empty", `{bad}`, "name", ""},

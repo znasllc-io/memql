@@ -191,12 +191,12 @@ func stubCore(names map[string]bool) memql.CoreHasFunc {
 // name. This is the one-way precedence guarantee.
 func TestResolveConstruct_CoreShadowsAuthored(t *testing.T) {
 	authored := memql.NewAuthoredRuntimeRegistry()
-	if err := authored.Register(newAuthored("user-a", "query", "querySpaceParticipants", 1)); err != nil {
+	if err := authored.Register(newAuthored("user-a", "query", "spaceParticipants", 1)); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	core := stubCore(map[string]bool{"query/querySpaceParticipants": true})
+	core := stubCore(map[string]bool{"query/spaceParticipants": true})
 
-	res := memql.ResolveConstruct(core, authored, "user-a", "query", "querySpaceParticipants")
+	res := memql.ResolveConstruct(core, authored, "user-a", "query", "spaceParticipants")
 	if res.Source != "core" {
 		t.Fatalf("core must win over an authored construct of the same name, got %q", res.Source)
 	}
@@ -248,7 +248,7 @@ func TestResolveConstruct_EngineCoreHas(t *testing.T) {
 	}
 
 	core := memql.EngineCoreHas(eng)
-	if !core("query", "querySpaceParticipants") {
+	if !core("query", "spaceParticipants") {
 		t.Fatal("EngineCoreHas should report a real core query")
 	}
 	if core("automation", "definitelyNotACoreConstructXyz") {
@@ -258,10 +258,10 @@ func TestResolveConstruct_EngineCoreHas(t *testing.T) {
 	authored := memql.NewAuthoredRuntimeRegistry()
 	// Owner authors a construct colliding with a core query name + an
 	// owner-only automation name.
-	_ = authored.Register(newAuthored("user-a", "query", "querySpaceParticipants", 1))
+	_ = authored.Register(newAuthored("user-a", "query", "spaceParticipants", 1))
 	_ = authored.Register(newAuthored("user-a", "automation", "myCustomSweep", 1))
 
-	if res := memql.ResolveConstruct(core, authored, "user-a", "query", "querySpaceParticipants"); res.Source != "core" {
+	if res := memql.ResolveConstruct(core, authored, "user-a", "query", "spaceParticipants"); res.Source != "core" {
 		t.Errorf("core query must shadow the authored collision, got %q", res.Source)
 	}
 	if res := memql.ResolveConstruct(core, authored, "user-a", "automation", "myCustomSweep"); res.Source != "authored" {

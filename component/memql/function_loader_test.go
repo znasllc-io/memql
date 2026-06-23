@@ -96,7 +96,7 @@ func TestEnsureBoundConceptFilter_AddsWhenConceptEqualityIsForDifferentId(t *tes
 }
 
 func TestEnsureBoundConceptFilter_DescendsIntoShapeWrapper(t *testing.T) {
-	// Mirrors the AST shape of `queryMagicLinkRequestByTokenHash`:
+	// Mirrors the AST shape of `magicLinkRequestByTokenHash`:
 	//   shape("...") wrapping a filter Comparison.
 	innerFilter := &ComparisonExpression{
 		Field:    FieldReference{Raw: "payload.tokenHash", Parts: []string{"payload", "tokenHash"}},

@@ -24,12 +24,12 @@ type bootstrapFakeEngine struct {
 
 func (f *bootstrapFakeEngine) Execute(_ context.Context, q string) (*memqlengine.ExecuteResult, error) {
 	switch {
-	case strings.HasPrefix(q, "queryActiveUsers("):
+	case strings.HasPrefix(q, "activeUsers("):
 		if f.ownerErr != nil {
 			return nil, f.ownerErr
 		}
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: f.ownerNodes}}, nil
-	case strings.HasPrefix(q, "queryClusterSettingsCurrent("):
+	case strings.HasPrefix(q, "clusterSettingsCurrent("):
 		if f.settingsErr != nil {
 			return nil, f.settingsErr
 		}

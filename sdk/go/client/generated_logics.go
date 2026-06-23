@@ -14,104 +14,104 @@ var (
 	_ = strings.Builder{}
 )
 
-// LogicAccessRequestExpirySweep -- Daily 04:00 UTC sweep that ages out pending access requests older than IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS (default 30) by stamping status='expired'. Per-row windowing via addDuration(createdAt, P{N}D) since MemQL filters can't push the duration math down. Pending queue is small (admin), so daily walk is cheap.
-type LogicAccessRequestExpirySweepArgs struct {
+// AccessRequestExpirySweep -- Daily 04:00 UTC sweep that ages out pending access requests older than IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS (default 30) by stamping status='expired'. Per-row windowing via addDuration(createdAt, P{N}D) since MemQL filters can't push the duration math down. Pending queue is small (admin), so daily walk is cheap.
+type AccessRequestExpirySweepArgs struct {
 	Event map[string]any
 }
 
-// LogicAccessRequestExpirySweep calls the engine logic logicAccessRequestExpirySweep.
-func (qc *QueryClient) LogicAccessRequestExpirySweep(ctx context.Context, args LogicAccessRequestExpirySweepArgs) (*Result, error) {
-	call := LogicAccessRequestExpirySweepBuild(args)
-	return qc.executeNamed(ctx, "logicAccessRequestExpirySweep", call)
+// AccessRequestExpirySweep calls the engine logic accessRequestExpirySweep.
+func (qc *QueryClient) AccessRequestExpirySweep(ctx context.Context, args AccessRequestExpirySweepArgs) (*Result, error) {
+	call := AccessRequestExpirySweepBuild(args)
+	return qc.executeNamed(ctx, "accessRequestExpirySweep", call)
 }
 
-func LogicAccessRequestExpirySweepBuild(args LogicAccessRequestExpirySweepArgs) string {
+func AccessRequestExpirySweepBuild(args AccessRequestExpirySweepArgs) string {
 	var b strings.Builder
-	b.WriteString("logicAccessRequestExpirySweep({")
+	b.WriteString("accessRequestExpirySweep({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicAccountDeletionReminder25Days -- Daily 09:05 UTC sweep that emits an 'identity.deletion.reminder' event for each user 25-26 days into their deletion cooldown -- final notice before accountDeletionSweep performs the hard delete at 30 days. Bracket [P25D, P26D) on deletionScheduledAt fired daily means each user gets exactly one reminder at this milestone.
-type LogicAccountDeletionReminder25DaysArgs struct {
+// AccountDeletionReminder25Days -- Daily 09:05 UTC sweep that emits an 'identity.deletion.reminder' event for each user 25-26 days into their deletion cooldown -- final notice before accountDeletionSweep performs the hard delete at 30 days. Bracket [P25D, P26D) on deletionScheduledAt fired daily means each user gets exactly one reminder at this milestone.
+type AccountDeletionReminder25DaysArgs struct {
 	Event map[string]any
 }
 
-// LogicAccountDeletionReminder25Days calls the engine logic logicAccountDeletionReminder25Days.
-func (qc *QueryClient) LogicAccountDeletionReminder25Days(ctx context.Context, args LogicAccountDeletionReminder25DaysArgs) (*Result, error) {
-	call := LogicAccountDeletionReminder25DaysBuild(args)
-	return qc.executeNamed(ctx, "logicAccountDeletionReminder25Days", call)
+// AccountDeletionReminder25Days calls the engine logic accountDeletionReminder25Days.
+func (qc *QueryClient) AccountDeletionReminder25Days(ctx context.Context, args AccountDeletionReminder25DaysArgs) (*Result, error) {
+	call := AccountDeletionReminder25DaysBuild(args)
+	return qc.executeNamed(ctx, "accountDeletionReminder25Days", call)
 }
 
-func LogicAccountDeletionReminder25DaysBuild(args LogicAccountDeletionReminder25DaysArgs) string {
+func AccountDeletionReminder25DaysBuild(args AccountDeletionReminder25DaysArgs) string {
 	var b strings.Builder
-	b.WriteString("logicAccountDeletionReminder25Days({")
+	b.WriteString("accountDeletionReminder25Days({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicAccountDeletionReminder7Days -- Daily 09:00 UTC sweep that emits an 'identity.deletion.reminder' event for each user 7-8 days into their deletion cooldown so they can cancel before the cooldown elapses. Bracket [P7D, P8D) on deletionScheduledAt fired daily means exactly one reminder per user at this milestone. Email delivery is consumed by the component/server subscriber.
-type LogicAccountDeletionReminder7DaysArgs struct {
+// AccountDeletionReminder7Days -- Daily 09:00 UTC sweep that emits an 'identity.deletion.reminder' event for each user 7-8 days into their deletion cooldown so they can cancel before the cooldown elapses. Bracket [P7D, P8D) on deletionScheduledAt fired daily means exactly one reminder per user at this milestone. Email delivery is consumed by the component/server subscriber.
+type AccountDeletionReminder7DaysArgs struct {
 	Event map[string]any
 }
 
-// LogicAccountDeletionReminder7Days calls the engine logic logicAccountDeletionReminder7Days.
-func (qc *QueryClient) LogicAccountDeletionReminder7Days(ctx context.Context, args LogicAccountDeletionReminder7DaysArgs) (*Result, error) {
-	call := LogicAccountDeletionReminder7DaysBuild(args)
-	return qc.executeNamed(ctx, "logicAccountDeletionReminder7Days", call)
+// AccountDeletionReminder7Days calls the engine logic accountDeletionReminder7Days.
+func (qc *QueryClient) AccountDeletionReminder7Days(ctx context.Context, args AccountDeletionReminder7DaysArgs) (*Result, error) {
+	call := AccountDeletionReminder7DaysBuild(args)
+	return qc.executeNamed(ctx, "accountDeletionReminder7Days", call)
 }
 
-func LogicAccountDeletionReminder7DaysBuild(args LogicAccountDeletionReminder7DaysArgs) string {
+func AccountDeletionReminder7DaysBuild(args AccountDeletionReminder7DaysArgs) string {
 	var b strings.Builder
-	b.WriteString("logicAccountDeletionReminder7Days({")
+	b.WriteString("accountDeletionReminder7Days({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicAccountDeletionSweep -- Daily 03:00 UTC sweep that hard-deletes users whose deletionScheduledAt + IDENTITY_DELETION_COOLDOWN_DAYS (default 30) has elapsed, via mutationDeleteUserHard. Audit-event rows, invitations the user issued, and access-request rows are intentionally retained for the trail.
-type LogicAccountDeletionSweepArgs struct {
+// AccountDeletionSweep -- Daily 03:00 UTC sweep that hard-deletes users whose deletionScheduledAt + IDENTITY_DELETION_COOLDOWN_DAYS (default 30) has elapsed, via deleteUserHard. Audit-event rows, invitations the user issued, and access-request rows are intentionally retained for the trail.
+type AccountDeletionSweepArgs struct {
 	Event map[string]any
 }
 
-// LogicAccountDeletionSweep calls the engine logic logicAccountDeletionSweep.
-func (qc *QueryClient) LogicAccountDeletionSweep(ctx context.Context, args LogicAccountDeletionSweepArgs) (*Result, error) {
-	call := LogicAccountDeletionSweepBuild(args)
-	return qc.executeNamed(ctx, "logicAccountDeletionSweep", call)
+// AccountDeletionSweep calls the engine logic accountDeletionSweep.
+func (qc *QueryClient) AccountDeletionSweep(ctx context.Context, args AccountDeletionSweepArgs) (*Result, error) {
+	call := AccountDeletionSweepBuild(args)
+	return qc.executeNamed(ctx, "accountDeletionSweep", call)
 }
 
-func LogicAccountDeletionSweepBuild(args LogicAccountDeletionSweepArgs) string {
+func AccountDeletionSweepBuild(args AccountDeletionSweepArgs) string {
 	var b strings.Builder
-	b.WriteString("logicAccountDeletionSweep({")
+	b.WriteString("accountDeletionSweep({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicAttachToRequest -- Append one v1:common:attachment id to a v1:forge:request's attachmentIds array. Fetches the current row, appends the new id, writes the full updated array via mutationAttachToRequest. Backed by the step evaluator's append() -- the closest native append the DSL supports without a Go builtin.
-type LogicAttachToRequestArgs struct {
+// AppendAttachmentToRequest -- Append one v1:common:attachment id to a v1:forge:request's attachmentIds array. Fetches the current row, appends the new id, writes the full updated array via the attachToRequest mutation. Backed by the step evaluator's append() -- the closest native append the DSL supports without a Go builtin.
+type AppendAttachmentToRequestArgs struct {
 	RequestId    string
 	AttachmentId string
 }
 
-// LogicAttachToRequest calls the engine logic logicAttachToRequest.
-func (qc *QueryClient) LogicAttachToRequest(ctx context.Context, args LogicAttachToRequestArgs) (*Result, error) {
-	call := LogicAttachToRequestBuild(args)
-	return qc.executeNamed(ctx, "logicAttachToRequest", call)
+// AppendAttachmentToRequest calls the engine logic appendAttachmentToRequest.
+func (qc *QueryClient) AppendAttachmentToRequest(ctx context.Context, args AppendAttachmentToRequestArgs) (*Result, error) {
+	call := AppendAttachmentToRequestBuild(args)
+	return qc.executeNamed(ctx, "appendAttachmentToRequest", call)
 }
 
-func LogicAttachToRequestBuild(args LogicAttachToRequestArgs) string {
+func AppendAttachmentToRequestBuild(args AppendAttachmentToRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("logicAttachToRequest({")
+	b.WriteString("appendAttachmentToRequest({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 22 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("attachmentId: ")
@@ -120,412 +120,412 @@ func LogicAttachToRequestBuild(args LogicAttachToRequestArgs) string {
 	return b.String()
 }
 
-// LogicAuditEventRetentionSweep -- Daily 02:00 UTC sweep over v1:identity:auditEvent rows older than IDENTITY_AUDIT_LOG_RETENTION_DAYS. Observation-only today: emits an 'identity.audit.retention.observed' event with the candidate count -- MemQL has no delete() mutation and AuditEvent's append-only semantics forbid soft-delete via active=false. Per-row delete lands when one of those gaps closes.
-type LogicAuditEventRetentionSweepArgs struct {
+// AuditEventRetentionSweep -- Daily 02:00 UTC sweep over v1:identity:auditEvent rows older than IDENTITY_AUDIT_LOG_RETENTION_DAYS. Observation-only today: emits an 'identity.audit.retention.observed' event with the candidate count -- MemQL has no delete() mutation and AuditEvent's append-only semantics forbid soft-delete via active=false. Per-row delete lands when one of those gaps closes.
+type AuditEventRetentionSweepArgs struct {
 	Event map[string]any
 }
 
-// LogicAuditEventRetentionSweep calls the engine logic logicAuditEventRetentionSweep.
-func (qc *QueryClient) LogicAuditEventRetentionSweep(ctx context.Context, args LogicAuditEventRetentionSweepArgs) (*Result, error) {
-	call := LogicAuditEventRetentionSweepBuild(args)
-	return qc.executeNamed(ctx, "logicAuditEventRetentionSweep", call)
+// AuditEventRetentionSweep calls the engine logic auditEventRetentionSweep.
+func (qc *QueryClient) AuditEventRetentionSweep(ctx context.Context, args AuditEventRetentionSweepArgs) (*Result, error) {
+	call := AuditEventRetentionSweepBuild(args)
+	return qc.executeNamed(ctx, "auditEventRetentionSweep", call)
 }
 
-func LogicAuditEventRetentionSweepBuild(args LogicAuditEventRetentionSweepArgs) string {
+func AuditEventRetentionSweepBuild(args AuditEventRetentionSweepArgs) string {
 	var b strings.Builder
-	b.WriteString("logicAuditEventRetentionSweep({")
+	b.WriteString("auditEventRetentionSweep({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicBootstrapCluster -- Bootstraps the cluster's self-representation on first startup. Creates v1:cluster:cluster + v1:cluster:database + v1:cluster:identityProvider rows when no cluster row exists. Only BFF nodes run the create path. Idempotent: skips entirely if a cluster row already exists.
-type LogicBootstrapClusterArgs struct {
+// BootstrapCluster -- Bootstraps the cluster's self-representation on first startup. Creates v1:cluster:cluster + v1:cluster:database + v1:cluster:identityProvider rows when no cluster row exists. Only BFF nodes run the create path. Idempotent: skips entirely if a cluster row already exists.
+type BootstrapClusterArgs struct {
 	Event map[string]any
 }
 
-// LogicBootstrapCluster calls the engine logic logicBootstrapCluster.
-func (qc *QueryClient) LogicBootstrapCluster(ctx context.Context, args LogicBootstrapClusterArgs) (*Result, error) {
-	call := LogicBootstrapClusterBuild(args)
-	return qc.executeNamed(ctx, "logicBootstrapCluster", call)
+// BootstrapCluster calls the engine logic bootstrapCluster.
+func (qc *QueryClient) BootstrapCluster(ctx context.Context, args BootstrapClusterArgs) (*Result, error) {
+	call := BootstrapClusterBuild(args)
+	return qc.executeNamed(ctx, "bootstrapCluster", call)
 }
 
-func LogicBootstrapClusterBuild(args LogicBootstrapClusterArgs) string {
+func BootstrapClusterBuild(args BootstrapClusterArgs) string {
 	var b strings.Builder
-	b.WriteString("logicBootstrapCluster({")
+	b.WriteString("bootstrapCluster({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicBootstrapSession -- Auto-creates a v1:cognition:session record when a v1:cognition:participant is created, with default device + stream state. Ensures every participant has a session tracking their real-time interaction state. Idempotent via queryParticipantSession existence check. Emits 'session.created' for downstream consumers.
-type LogicBootstrapSessionArgs struct {
+// BootstrapSession -- Auto-creates a v1:cognition:session record when a v1:cognition:participant is created, with default device + stream state. Ensures every participant has a session tracking their real-time interaction state. Idempotent via participantSession existence check. Emits 'session.created' for downstream consumers.
+type BootstrapSessionArgs struct {
 	Event map[string]any
 }
 
-// LogicBootstrapSession calls the engine logic logicBootstrapSession.
-func (qc *QueryClient) LogicBootstrapSession(ctx context.Context, args LogicBootstrapSessionArgs) (*Result, error) {
-	call := LogicBootstrapSessionBuild(args)
-	return qc.executeNamed(ctx, "logicBootstrapSession", call)
+// BootstrapSession calls the engine logic bootstrapSession.
+func (qc *QueryClient) BootstrapSession(ctx context.Context, args BootstrapSessionArgs) (*Result, error) {
+	call := BootstrapSessionBuild(args)
+	return qc.executeNamed(ctx, "bootstrapSession", call)
 }
 
-func LogicBootstrapSessionBuild(args LogicBootstrapSessionArgs) string {
+func BootstrapSessionBuild(args BootstrapSessionArgs) string {
 	var b strings.Builder
-	b.WriteString("logicBootstrapSession({")
+	b.WriteString("bootstrapSession({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicConflictDetection -- Triggered on new v1:data:record creation with a non-empty naturalKeyValue. Queries confirmed records for matching natural key + record type; if any exist, emits 'data.conflicts.detected' event for the UI's ConflictResolutionPanel. Never auto-resolves -- always requires human approval.
-type LogicConflictDetectionArgs struct {
+// ConflictDetection -- Triggered on new v1:data:record creation with a non-empty naturalKeyValue. Queries confirmed records for matching natural key + record type; if any exist, emits 'data.conflicts.detected' event for the UI's ConflictResolutionPanel. Never auto-resolves -- always requires human approval.
+type ConflictDetectionArgs struct {
 	Event map[string]any
 }
 
-// LogicConflictDetection calls the engine logic logicConflictDetection.
-func (qc *QueryClient) LogicConflictDetection(ctx context.Context, args LogicConflictDetectionArgs) (*Result, error) {
-	call := LogicConflictDetectionBuild(args)
-	return qc.executeNamed(ctx, "logicConflictDetection", call)
+// ConflictDetection calls the engine logic conflictDetection.
+func (qc *QueryClient) ConflictDetection(ctx context.Context, args ConflictDetectionArgs) (*Result, error) {
+	call := ConflictDetectionBuild(args)
+	return qc.executeNamed(ctx, "conflictDetection", call)
 }
 
-func LogicConflictDetectionBuild(args LogicConflictDetectionArgs) string {
+func ConflictDetectionBuild(args ConflictDetectionArgs) string {
 	var b strings.Builder
-	b.WriteString("logicConflictDetection({")
+	b.WriteString("conflictDetection({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicConsolidateMemory -- Entry point for the daily memory-consolidation automation (#586). Per #586 the precise per-owner loop -- similarity clustering of the since-watermark episode batch, the blocking LLM distill per cluster, similarTo dedup, the confidence bump / decay arithmetic, and the max(createdAt) watermark advance -- runs in the Go harness consolidation handler (the same DSL-entry / Go-loop split the knowledge refresh-cron made), because the MemQL parser has neither arithmetic on number/datetime fields nor an in-DSL clustering primitive. This body is the scheduled trigger surface; the file header documents the full Go-handler contract it drives. Returns a sentinel until the handler is wired (mirrors logicRefreshDueKnowledgeDomains).
-type LogicConsolidateMemoryArgs struct {
+// ConsolidateMemory -- Entry point for the daily memory-consolidation automation (#586). Per #586 the precise per-owner loop -- similarity clustering of the since-watermark episode batch, the blocking LLM distill per cluster, similarTo dedup, the confidence bump / decay arithmetic, and the max(createdAt) watermark advance -- runs in the Go harness consolidation handler (the same DSL-entry / Go-loop split the knowledge refresh-cron made), because the MemQL parser has neither arithmetic on number/datetime fields nor an in-DSL clustering primitive. This body is the scheduled trigger surface; the file header documents the full Go-handler contract it drives. Returns a sentinel until the handler is wired (mirrors logicRefreshDueKnowledgeDomains).
+type ConsolidateMemoryArgs struct {
 	Event map[string]any
 }
 
-// LogicConsolidateMemory calls the engine logic logicConsolidateMemory.
-func (qc *QueryClient) LogicConsolidateMemory(ctx context.Context, args LogicConsolidateMemoryArgs) (*Result, error) {
-	call := LogicConsolidateMemoryBuild(args)
-	return qc.executeNamed(ctx, "logicConsolidateMemory", call)
+// ConsolidateMemory calls the engine logic consolidateMemory.
+func (qc *QueryClient) ConsolidateMemory(ctx context.Context, args ConsolidateMemoryArgs) (*Result, error) {
+	call := ConsolidateMemoryBuild(args)
+	return qc.executeNamed(ctx, "consolidateMemory", call)
 }
 
-func LogicConsolidateMemoryBuild(args LogicConsolidateMemoryArgs) string {
+func ConsolidateMemoryBuild(args ConsolidateMemoryArgs) string {
 	var b strings.Builder
-	b.WriteString("logicConsolidateMemory({")
+	b.WriteString("consolidateMemory({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicDeregisterNode -- Records node shutdown by creating a v1:cluster:spawnEvent with action='stopped' and reason='system.shutdown'. Fires when the node is going down.
-type LogicDeregisterNodeArgs struct {
+// DeregisterNode -- Records node shutdown by creating a v1:cluster:spawnEvent with action='stopped' and reason='system.shutdown'. Fires when the node is going down.
+type DeregisterNodeArgs struct {
 	Event map[string]any
 }
 
-// LogicDeregisterNode calls the engine logic logicDeregisterNode.
-func (qc *QueryClient) LogicDeregisterNode(ctx context.Context, args LogicDeregisterNodeArgs) (*Result, error) {
-	call := LogicDeregisterNodeBuild(args)
-	return qc.executeNamed(ctx, "logicDeregisterNode", call)
+// DeregisterNode calls the engine logic deregisterNode.
+func (qc *QueryClient) DeregisterNode(ctx context.Context, args DeregisterNodeArgs) (*Result, error) {
+	call := DeregisterNodeBuild(args)
+	return qc.executeNamed(ctx, "deregisterNode", call)
 }
 
-func LogicDeregisterNodeBuild(args LogicDeregisterNodeArgs) string {
+func DeregisterNodeBuild(args DeregisterNodeArgs) string {
 	var b strings.Builder
-	b.WriteString("logicDeregisterNode({")
+	b.WriteString("deregisterNode({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicGenerateResponse -- Generates and inserts an AI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via mutationSendTextUtterance, and bumps participant presence to idle. Idempotent via queryHasAIResponseForReply.
-type LogicGenerateResponseArgs struct {
+// GenerateResponse -- Generates and inserts an AI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via sendTextUtterance, and bumps participant presence to idle. Idempotent via hasAIResponseForReply.
+type GenerateResponseArgs struct {
 	Event map[string]any
 }
 
-// LogicGenerateResponse calls the engine logic logicGenerateResponse.
-func (qc *QueryClient) LogicGenerateResponse(ctx context.Context, args LogicGenerateResponseArgs) (*Result, error) {
-	call := LogicGenerateResponseBuild(args)
-	return qc.executeNamed(ctx, "logicGenerateResponse", call)
+// GenerateResponse calls the engine logic generateResponse.
+func (qc *QueryClient) GenerateResponse(ctx context.Context, args GenerateResponseArgs) (*Result, error) {
+	call := GenerateResponseBuild(args)
+	return qc.executeNamed(ctx, "generateResponse", call)
 }
 
-func LogicGenerateResponseBuild(args LogicGenerateResponseArgs) string {
+func GenerateResponseBuild(args GenerateResponseArgs) string {
 	var b strings.Builder
-	b.WriteString("logicGenerateResponse({")
+	b.WriteString("generateResponse({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicIndexCalendarEvent -- On v1:calendar:calendarEvent creation, promote it into the Library Records lens (lens=record, kind=calendar_event, source=agent_generated).
-type LogicIndexCalendarEventArgs struct {
+// IndexCalendarEvent -- On v1:calendar:calendarEvent creation, promote it into the Library Records lens (lens=record, kind=calendar_event, source=agent_generated).
+type IndexCalendarEventArgs struct {
 	Event map[string]any
 }
 
-// LogicIndexCalendarEvent calls the engine logic logicIndexCalendarEvent.
-func (qc *QueryClient) LogicIndexCalendarEvent(ctx context.Context, args LogicIndexCalendarEventArgs) (*Result, error) {
-	call := LogicIndexCalendarEventBuild(args)
-	return qc.executeNamed(ctx, "logicIndexCalendarEvent", call)
+// IndexCalendarEvent calls the engine logic indexCalendarEvent.
+func (qc *QueryClient) IndexCalendarEvent(ctx context.Context, args IndexCalendarEventArgs) (*Result, error) {
+	call := IndexCalendarEventBuild(args)
+	return qc.executeNamed(ctx, "indexCalendarEvent", call)
 }
 
-func LogicIndexCalendarEventBuild(args LogicIndexCalendarEventArgs) string {
+func IndexCalendarEventBuild(args IndexCalendarEventArgs) string {
 	var b strings.Builder
-	b.WriteString("logicIndexCalendarEvent({")
+	b.WriteString("indexCalendarEvent({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicIndexGeneratedOutput -- On v1:library:generatedOutput creation, promote the produced deliverable into a Library artifact index row (lens=artifact, kind=generated_output). source + agent / plan provenance are carried from the generatedOutput row. ownerUserId is the producing user. Idempotent via the deterministic artifact id.
-type LogicIndexGeneratedOutputArgs struct {
+// IndexGeneratedOutput -- On v1:library:generatedOutput creation, promote the produced deliverable into a Library artifact index row (lens=artifact, kind=generated_output). source + agent / plan provenance are carried from the generatedOutput row. ownerUserId is the producing user. Idempotent via the deterministic artifact id.
+type IndexGeneratedOutputArgs struct {
 	Event map[string]any
 }
 
-// LogicIndexGeneratedOutput calls the engine logic logicIndexGeneratedOutput.
-func (qc *QueryClient) LogicIndexGeneratedOutput(ctx context.Context, args LogicIndexGeneratedOutputArgs) (*Result, error) {
-	call := LogicIndexGeneratedOutputBuild(args)
-	return qc.executeNamed(ctx, "logicIndexGeneratedOutput", call)
+// IndexGeneratedOutput calls the engine logic indexGeneratedOutput.
+func (qc *QueryClient) IndexGeneratedOutput(ctx context.Context, args IndexGeneratedOutputArgs) (*Result, error) {
+	call := IndexGeneratedOutputBuild(args)
+	return qc.executeNamed(ctx, "indexGeneratedOutput", call)
 }
 
-func LogicIndexGeneratedOutputBuild(args LogicIndexGeneratedOutputArgs) string {
+func IndexGeneratedOutputBuild(args IndexGeneratedOutputArgs) string {
 	var b strings.Builder
-	b.WriteString("logicIndexGeneratedOutput({")
+	b.WriteString("indexGeneratedOutput({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicIndexMemory -- On v1:library:memory creation, promote it into the Library Records lens (lens=record, kind=memory, source=agent_generated).
-type LogicIndexMemoryArgs struct {
+// IndexMemory -- On v1:library:memory creation, promote it into the Library Records lens (lens=record, kind=memory, source=agent_generated).
+type IndexMemoryArgs struct {
 	Event map[string]any
 }
 
-// LogicIndexMemory calls the engine logic logicIndexMemory.
-func (qc *QueryClient) LogicIndexMemory(ctx context.Context, args LogicIndexMemoryArgs) (*Result, error) {
-	call := LogicIndexMemoryBuild(args)
-	return qc.executeNamed(ctx, "logicIndexMemory", call)
+// IndexMemory calls the engine logic indexMemory.
+func (qc *QueryClient) IndexMemory(ctx context.Context, args IndexMemoryArgs) (*Result, error) {
+	call := IndexMemoryBuild(args)
+	return qc.executeNamed(ctx, "indexMemory", call)
 }
 
-func LogicIndexMemoryBuild(args LogicIndexMemoryArgs) string {
+func IndexMemoryBuild(args IndexMemoryArgs) string {
 	var b strings.Builder
-	b.WriteString("logicIndexMemory({")
+	b.WriteString("indexMemory({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicIndexNote -- On v1:notes:note creation, promote it into the Library Records lens (lens=record, kind=note, source=agent_generated).
-type LogicIndexNoteArgs struct {
+// IndexNote -- On v1:notes:note creation, promote it into the Library Records lens (lens=record, kind=note, source=agent_generated).
+type IndexNoteArgs struct {
 	Event map[string]any
 }
 
-// LogicIndexNote calls the engine logic logicIndexNote.
-func (qc *QueryClient) LogicIndexNote(ctx context.Context, args LogicIndexNoteArgs) (*Result, error) {
-	call := LogicIndexNoteBuild(args)
-	return qc.executeNamed(ctx, "logicIndexNote", call)
+// IndexNote calls the engine logic indexNote.
+func (qc *QueryClient) IndexNote(ctx context.Context, args IndexNoteArgs) (*Result, error) {
+	call := IndexNoteBuild(args)
+	return qc.executeNamed(ctx, "indexNote", call)
 }
 
-func LogicIndexNoteBuild(args LogicIndexNoteArgs) string {
+func IndexNoteBuild(args IndexNoteArgs) string {
 	var b strings.Builder
-	b.WriteString("logicIndexNote({")
+	b.WriteString("indexNote({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicIndexTodo -- On v1:todos:todo creation, promote it into the Library Records lens (lens=record, kind=todo, source=agent_generated).
-type LogicIndexTodoArgs struct {
+// IndexTodo -- On v1:todos:todo creation, promote it into the Library Records lens (lens=record, kind=todo, source=agent_generated).
+type IndexTodoArgs struct {
 	Event map[string]any
 }
 
-// LogicIndexTodo calls the engine logic logicIndexTodo.
-func (qc *QueryClient) LogicIndexTodo(ctx context.Context, args LogicIndexTodoArgs) (*Result, error) {
-	call := LogicIndexTodoBuild(args)
-	return qc.executeNamed(ctx, "logicIndexTodo", call)
+// IndexTodo calls the engine logic indexTodo.
+func (qc *QueryClient) IndexTodo(ctx context.Context, args IndexTodoArgs) (*Result, error) {
+	call := IndexTodoBuild(args)
+	return qc.executeNamed(ctx, "indexTodo", call)
 }
 
-func LogicIndexTodoBuild(args LogicIndexTodoArgs) string {
+func IndexTodoBuild(args IndexTodoArgs) string {
 	var b strings.Builder
-	b.WriteString("logicIndexTodo({")
+	b.WriteString("indexTodo({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicKillSwitchSuspendsRunningPlans -- Triggered on v1:identity:user update. When preferences.computerUseEnabled flips true->false, transitions every running plan owned by that user (with computerUseScope set) to awaitingFeedback with feedbackReason='kill_switch_engaged'. Re-enable flips the flag back; resume is per-plan-explicit (no auto-resume on flag flip).
-type LogicKillSwitchSuspendsRunningPlansArgs struct {
+// KillSwitchSuspendsRunningPlans -- Triggered on v1:identity:user update. When preferences.computerUseEnabled flips true->false, transitions every running plan owned by that user (with computerUseScope set) to awaitingFeedback with feedbackReason='kill_switch_engaged'. Re-enable flips the flag back; resume is per-plan-explicit (no auto-resume on flag flip).
+type KillSwitchSuspendsRunningPlansArgs struct {
 	Event map[string]any
 }
 
-// LogicKillSwitchSuspendsRunningPlans calls the engine logic logicKillSwitchSuspendsRunningPlans.
-func (qc *QueryClient) LogicKillSwitchSuspendsRunningPlans(ctx context.Context, args LogicKillSwitchSuspendsRunningPlansArgs) (*Result, error) {
-	call := LogicKillSwitchSuspendsRunningPlansBuild(args)
-	return qc.executeNamed(ctx, "logicKillSwitchSuspendsRunningPlans", call)
+// KillSwitchSuspendsRunningPlans calls the engine logic killSwitchSuspendsRunningPlans.
+func (qc *QueryClient) KillSwitchSuspendsRunningPlans(ctx context.Context, args KillSwitchSuspendsRunningPlansArgs) (*Result, error) {
+	call := KillSwitchSuspendsRunningPlansBuild(args)
+	return qc.executeNamed(ctx, "killSwitchSuspendsRunningPlans", call)
 }
 
-func LogicKillSwitchSuspendsRunningPlansBuild(args LogicKillSwitchSuspendsRunningPlansArgs) string {
+func KillSwitchSuspendsRunningPlansBuild(args KillSwitchSuspendsRunningPlansArgs) string {
 	var b strings.Builder
-	b.WriteString("logicKillSwitchSuspendsRunningPlans({")
+	b.WriteString("killSwitchSuspendsRunningPlans({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicMagicLinkExpirySweep -- Hourly sweep that stamps consumedAt + consumedFromIP='system:expiry' on v1:identity:magiclink rows whose expiresAt is in the past, so the row reads as 'spent' in audit queries and any subsequent click is idempotently rejected by the consume handler's own expiresAt guard.
-type LogicMagicLinkExpirySweepArgs struct {
+// MagicLinkExpirySweep -- Hourly sweep that stamps consumedAt + consumedFromIP='system:expiry' on v1:identity:magiclink rows whose expiresAt is in the past, so the row reads as 'spent' in audit queries and any subsequent click is idempotently rejected by the consume handler's own expiresAt guard.
+type MagicLinkExpirySweepArgs struct {
 	Event map[string]any
 }
 
-// LogicMagicLinkExpirySweep calls the engine logic logicMagicLinkExpirySweep.
-func (qc *QueryClient) LogicMagicLinkExpirySweep(ctx context.Context, args LogicMagicLinkExpirySweepArgs) (*Result, error) {
-	call := LogicMagicLinkExpirySweepBuild(args)
-	return qc.executeNamed(ctx, "logicMagicLinkExpirySweep", call)
+// MagicLinkExpirySweep calls the engine logic magicLinkExpirySweep.
+func (qc *QueryClient) MagicLinkExpirySweep(ctx context.Context, args MagicLinkExpirySweepArgs) (*Result, error) {
+	call := MagicLinkExpirySweepBuild(args)
+	return qc.executeNamed(ctx, "magicLinkExpirySweep", call)
 }
 
-func LogicMagicLinkExpirySweepBuild(args LogicMagicLinkExpirySweepArgs) string {
+func MagicLinkExpirySweepBuild(args MagicLinkExpirySweepArgs) string {
 	var b strings.Builder
-	b.WriteString("logicMagicLinkExpirySweep({")
+	b.WriteString("magicLinkExpirySweep({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicOnDelegationCreated -- Emits a 'delegation.created' event when a new v1:identity:delegation row lands. Carries the delegation id + identity / agent / role / scope fields for audit logging and downstream event processing.
-type LogicOnDelegationCreatedArgs struct {
+// OnDelegationCreated -- Emits a 'delegation.created' event when a new v1:identity:delegation row lands. Carries the delegation id + identity / agent / role / scope fields for audit logging and downstream event processing.
+type OnDelegationCreatedArgs struct {
 	Event map[string]any
 }
 
-// LogicOnDelegationCreated calls the engine logic logicOnDelegationCreated.
-func (qc *QueryClient) LogicOnDelegationCreated(ctx context.Context, args LogicOnDelegationCreatedArgs) (*Result, error) {
-	call := LogicOnDelegationCreatedBuild(args)
-	return qc.executeNamed(ctx, "logicOnDelegationCreated", call)
+// OnDelegationCreated calls the engine logic onDelegationCreated.
+func (qc *QueryClient) OnDelegationCreated(ctx context.Context, args OnDelegationCreatedArgs) (*Result, error) {
+	call := OnDelegationCreatedBuild(args)
+	return qc.executeNamed(ctx, "onDelegationCreated", call)
 }
 
-func LogicOnDelegationCreatedBuild(args LogicOnDelegationCreatedArgs) string {
+func OnDelegationCreatedBuild(args OnDelegationCreatedArgs) string {
 	var b strings.Builder
-	b.WriteString("logicOnDelegationCreated({")
+	b.WriteString("onDelegationCreated({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicPruneStaleClusterNodes -- Every 10 min: mark departed cluster nodes terminal. Reads the LATEST non-stopped row per id (queryStaleClusterNodes, asOf latest -> idempotent), and for each whose lastSeen + MEMQL_NODE_STALE_PRUNE_MINUTES (default 30) has passed, appends a health='stopped' row via mutationUpdateNodeHealth. Append-only prune (cluster:node has no deleted field); consumers treat stopped as gone (WorkerDialer skips it, CLI/topology dedupe latest-per-id). Per-row windowing in the if guard since MemQL filters can't push the duration math down.
-type LogicPruneStaleClusterNodesArgs struct {
+// PruneStaleClusterNodes -- Every 10 min: mark departed cluster nodes terminal. Reads the LATEST non-stopped row per id (staleClusterNodes, asOf latest -> idempotent), and for each whose lastSeen + MEMQL_NODE_STALE_PRUNE_MINUTES (default 30) has passed, appends a health='stopped' row via updateNodeHealth. Append-only prune (cluster:node has no deleted field); consumers treat stopped as gone (WorkerDialer skips it, CLI/topology dedupe latest-per-id). Per-row windowing in the if guard since MemQL filters can't push the duration math down.
+type PruneStaleClusterNodesArgs struct {
 	Event map[string]any
 }
 
-// LogicPruneStaleClusterNodes calls the engine logic logicPruneStaleClusterNodes.
-func (qc *QueryClient) LogicPruneStaleClusterNodes(ctx context.Context, args LogicPruneStaleClusterNodesArgs) (*Result, error) {
-	call := LogicPruneStaleClusterNodesBuild(args)
-	return qc.executeNamed(ctx, "logicPruneStaleClusterNodes", call)
+// PruneStaleClusterNodes calls the engine logic pruneStaleClusterNodes.
+func (qc *QueryClient) PruneStaleClusterNodes(ctx context.Context, args PruneStaleClusterNodesArgs) (*Result, error) {
+	call := PruneStaleClusterNodesBuild(args)
+	return qc.executeNamed(ctx, "pruneStaleClusterNodes", call)
 }
 
-func LogicPruneStaleClusterNodesBuild(args LogicPruneStaleClusterNodesArgs) string {
+func PruneStaleClusterNodesBuild(args PruneStaleClusterNodesArgs) string {
 	var b strings.Builder
-	b.WriteString("logicPruneStaleClusterNodes({")
+	b.WriteString("pruneStaleClusterNodes({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicPurgeExpiredOutputScreenings -- Daily sweep over v1:safety:outputScreening rows past MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90). Currently observation-only: emits a 'safety.outputScreening.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation -- mirrors logicPurgeExpiredSafetyClassifications.
-type LogicPurgeExpiredOutputScreeningsArgs struct {
+// PurgeExpiredOutputScreenings -- Daily sweep over v1:safety:outputScreening rows past MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90). Currently observation-only: emits a 'safety.outputScreening.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation -- mirrors purgeExpiredSafetyClassifications.
+type PurgeExpiredOutputScreeningsArgs struct {
 	Event map[string]any
 }
 
-// LogicPurgeExpiredOutputScreenings calls the engine logic logicPurgeExpiredOutputScreenings.
-func (qc *QueryClient) LogicPurgeExpiredOutputScreenings(ctx context.Context, args LogicPurgeExpiredOutputScreeningsArgs) (*Result, error) {
-	call := LogicPurgeExpiredOutputScreeningsBuild(args)
-	return qc.executeNamed(ctx, "logicPurgeExpiredOutputScreenings", call)
+// PurgeExpiredOutputScreenings calls the engine logic purgeExpiredOutputScreenings.
+func (qc *QueryClient) PurgeExpiredOutputScreenings(ctx context.Context, args PurgeExpiredOutputScreeningsArgs) (*Result, error) {
+	call := PurgeExpiredOutputScreeningsBuild(args)
+	return qc.executeNamed(ctx, "purgeExpiredOutputScreenings", call)
 }
 
-func LogicPurgeExpiredOutputScreeningsBuild(args LogicPurgeExpiredOutputScreeningsArgs) string {
+func PurgeExpiredOutputScreeningsBuild(args PurgeExpiredOutputScreeningsArgs) string {
 	var b strings.Builder
-	b.WriteString("logicPurgeExpiredOutputScreenings({")
+	b.WriteString("purgeExpiredOutputScreenings({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicPurgeExpiredPolicyTraces -- Daily 02:30 UTC sweep over v1:platform:policyTrace rows older than MEMQL_POLICYTRACE_RETENTION_DAYS (default 90). Currently observation-only: emits a 'platform.policyTrace.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation.
-type LogicPurgeExpiredPolicyTracesArgs struct {
+// PurgeExpiredPolicyTraces -- Daily 02:30 UTC sweep over v1:platform:policyTrace rows older than MEMQL_POLICYTRACE_RETENTION_DAYS (default 90). Currently observation-only: emits a 'platform.policyTrace.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation.
+type PurgeExpiredPolicyTracesArgs struct {
 	Event map[string]any
 }
 
-// LogicPurgeExpiredPolicyTraces calls the engine logic logicPurgeExpiredPolicyTraces.
-func (qc *QueryClient) LogicPurgeExpiredPolicyTraces(ctx context.Context, args LogicPurgeExpiredPolicyTracesArgs) (*Result, error) {
-	call := LogicPurgeExpiredPolicyTracesBuild(args)
-	return qc.executeNamed(ctx, "logicPurgeExpiredPolicyTraces", call)
+// PurgeExpiredPolicyTraces calls the engine logic purgeExpiredPolicyTraces.
+func (qc *QueryClient) PurgeExpiredPolicyTraces(ctx context.Context, args PurgeExpiredPolicyTracesArgs) (*Result, error) {
+	call := PurgeExpiredPolicyTracesBuild(args)
+	return qc.executeNamed(ctx, "purgeExpiredPolicyTraces", call)
 }
 
-func LogicPurgeExpiredPolicyTracesBuild(args LogicPurgeExpiredPolicyTracesArgs) string {
+func PurgeExpiredPolicyTracesBuild(args PurgeExpiredPolicyTracesArgs) string {
 	var b strings.Builder
-	b.WriteString("logicPurgeExpiredPolicyTraces({")
+	b.WriteString("purgeExpiredPolicyTraces({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicPurgeExpiredSafetyClassifications -- Daily sweep over v1:safety:classification rows past MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS (default 90). Currently observation-only: emits a 'safety.classification.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation -- mirrors the same gap purgeExpiredPolicyTraces + auditEventRetentionSweep document.
-type LogicPurgeExpiredSafetyClassificationsArgs struct {
+// PurgeExpiredSafetyClassifications -- Daily sweep over v1:safety:classification rows past MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS (default 90). Currently observation-only: emits a 'safety.classification.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation -- mirrors the same gap purgeExpiredPolicyTraces + auditEventRetentionSweep document.
+type PurgeExpiredSafetyClassificationsArgs struct {
 	Event map[string]any
 }
 
-// LogicPurgeExpiredSafetyClassifications calls the engine logic logicPurgeExpiredSafetyClassifications.
-func (qc *QueryClient) LogicPurgeExpiredSafetyClassifications(ctx context.Context, args LogicPurgeExpiredSafetyClassificationsArgs) (*Result, error) {
-	call := LogicPurgeExpiredSafetyClassificationsBuild(args)
-	return qc.executeNamed(ctx, "logicPurgeExpiredSafetyClassifications", call)
+// PurgeExpiredSafetyClassifications calls the engine logic purgeExpiredSafetyClassifications.
+func (qc *QueryClient) PurgeExpiredSafetyClassifications(ctx context.Context, args PurgeExpiredSafetyClassificationsArgs) (*Result, error) {
+	call := PurgeExpiredSafetyClassificationsBuild(args)
+	return qc.executeNamed(ctx, "purgeExpiredSafetyClassifications", call)
 }
 
-func LogicPurgeExpiredSafetyClassificationsBuild(args LogicPurgeExpiredSafetyClassificationsArgs) string {
+func PurgeExpiredSafetyClassificationsBuild(args PurgeExpiredSafetyClassificationsArgs) string {
 	var b strings.Builder
-	b.WriteString("logicPurgeExpiredSafetyClassifications({")
+	b.WriteString("purgeExpiredSafetyClassifications({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicRecordMentoring -- Record a 'mentored' v1:forge:requestEvent after a non-owner submitter was taught about the area they touched. Injects kind='mentored' and forwards the note verbatim.
-type LogicRecordMentoringArgs struct {
+// RecordMentoring -- Record a 'mentored' v1:forge:requestEvent after a non-owner submitter was taught about the area they touched. Injects kind='mentored' and forwards the note verbatim.
+type RecordMentoringArgs struct {
 	EventId   string
 	RequestId string
 	Note      string
 }
 
-// LogicRecordMentoring calls the engine logic logicRecordMentoring.
-func (qc *QueryClient) LogicRecordMentoring(ctx context.Context, args LogicRecordMentoringArgs) (*Result, error) {
-	call := LogicRecordMentoringBuild(args)
-	return qc.executeNamed(ctx, "logicRecordMentoring", call)
+// RecordMentoring calls the engine logic recordMentoring.
+func (qc *QueryClient) RecordMentoring(ctx context.Context, args RecordMentoringArgs) (*Result, error) {
+	call := RecordMentoringBuild(args)
+	return qc.executeNamed(ctx, "recordMentoring", call)
 }
 
-func LogicRecordMentoringBuild(args LogicRecordMentoringArgs) string {
+func RecordMentoringBuild(args RecordMentoringArgs) string {
 	var b strings.Builder
-	b.WriteString("logicRecordMentoring({")
+	b.WriteString("recordMentoring({")
 	if args.EventId != "" {
 		b.WriteString("eventId: ")
 		b.WriteString(fmt.Sprintf("%q", args.EventId))
 	}
-	if b.Len() > 22 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 22 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("note: ")
@@ -534,155 +534,155 @@ func LogicRecordMentoringBuild(args LogicRecordMentoringArgs) string {
 	return b.String()
 }
 
-// LogicRecordTransition -- On v1:forge:request node.updated: append exactly one v1:forge:requestEvent for the four post-creation pipeline transitions (validated / approved / changes_requested / rejected). Each guard is mutually exclusive; at most one fires per invocation. Returns early (no write) for unrecognised statuses.
-type LogicRecordTransitionArgs struct {
+// RecordTransition -- On v1:forge:request node.updated: append exactly one v1:forge:requestEvent for the four post-creation pipeline transitions (validated / approved / changes_requested / rejected). Each guard is mutually exclusive; at most one fires per invocation. Returns early (no write) for unrecognised statuses.
+type RecordTransitionArgs struct {
 	Event map[string]any
 }
 
-// LogicRecordTransition calls the engine logic logicRecordTransition.
-func (qc *QueryClient) LogicRecordTransition(ctx context.Context, args LogicRecordTransitionArgs) (*Result, error) {
-	call := LogicRecordTransitionBuild(args)
-	return qc.executeNamed(ctx, "logicRecordTransition", call)
+// RecordTransition calls the engine logic recordTransition.
+func (qc *QueryClient) RecordTransition(ctx context.Context, args RecordTransitionArgs) (*Result, error) {
+	call := RecordTransitionBuild(args)
+	return qc.executeNamed(ctx, "recordTransition", call)
 }
 
-func LogicRecordTransitionBuild(args LogicRecordTransitionArgs) string {
+func RecordTransitionBuild(args RecordTransitionArgs) string {
 	var b strings.Builder
-	b.WriteString("logicRecordTransition({")
+	b.WriteString("recordTransition({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicRegisterNode -- Registers this node on startup. Creates a v1:cluster:node record (using the peer's NodeId as the explicit concept id so later NodeStatusWriter rows share the same time-series timeline) and a v1:cluster:spawnEvent with action='spawned' and reason='system.startup'. Runs on every node type; safe to re-run on every restart.
-type LogicRegisterNodeArgs struct {
+// RegisterNode -- Registers this node on startup. Creates a v1:cluster:node record (using the peer's NodeId as the explicit concept id so later NodeStatusWriter rows share the same time-series timeline) and a v1:cluster:spawnEvent with action='spawned' and reason='system.startup'. Runs on every node type; safe to re-run on every restart.
+type RegisterNodeArgs struct {
 	Event map[string]any
 }
 
-// LogicRegisterNode calls the engine logic logicRegisterNode.
-func (qc *QueryClient) LogicRegisterNode(ctx context.Context, args LogicRegisterNodeArgs) (*Result, error) {
-	call := LogicRegisterNodeBuild(args)
-	return qc.executeNamed(ctx, "logicRegisterNode", call)
+// RegisterNode calls the engine logic registerNode.
+func (qc *QueryClient) RegisterNode(ctx context.Context, args RegisterNodeArgs) (*Result, error) {
+	call := RegisterNodeBuild(args)
+	return qc.executeNamed(ctx, "registerNode", call)
 }
 
-func LogicRegisterNodeBuild(args LogicRegisterNodeArgs) string {
+func RegisterNodeBuild(args RegisterNodeArgs) string {
 	var b strings.Builder
-	b.WriteString("logicRegisterNode({")
+	b.WriteString("registerNode({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicReleaseWorkspaceOnPlanTerminal -- On every v1:planner:plan update, checks the new status; if terminal (succeeded/failed/cancelled) AND a v1:workbench:workspace exists for the planId AND it is still provisioned, flips the concept row to released AND calls the workbench integration to remove the on-disk directory tree. Also fires the teardown unconditionally on terminal status even when no concept row exists -- the MVP Go integration provisions workspaces in-memory + on-disk without writing the concept row, so the teardown call cleans those up too. Idempotent on both paths.
-type LogicReleaseWorkspaceOnPlanTerminalArgs struct {
+// ReleaseWorkspaceOnPlanTerminal -- On every v1:planner:plan update, checks the new status; if terminal (succeeded/failed/cancelled) AND a v1:workbench:workspace exists for the planId AND it is still provisioned, flips the concept row to released AND calls the workbench integration to remove the on-disk directory tree. Also fires the teardown unconditionally on terminal status even when no concept row exists -- the MVP Go integration provisions workspaces in-memory + on-disk without writing the concept row, so the teardown call cleans those up too. Idempotent on both paths.
+type ReleaseWorkspaceOnPlanTerminalArgs struct {
 	Event map[string]any
 }
 
-// LogicReleaseWorkspaceOnPlanTerminal calls the engine logic logicReleaseWorkspaceOnPlanTerminal.
-func (qc *QueryClient) LogicReleaseWorkspaceOnPlanTerminal(ctx context.Context, args LogicReleaseWorkspaceOnPlanTerminalArgs) (*Result, error) {
-	call := LogicReleaseWorkspaceOnPlanTerminalBuild(args)
-	return qc.executeNamed(ctx, "logicReleaseWorkspaceOnPlanTerminal", call)
+// ReleaseWorkspaceOnPlanTerminal calls the engine logic releaseWorkspaceOnPlanTerminal.
+func (qc *QueryClient) ReleaseWorkspaceOnPlanTerminal(ctx context.Context, args ReleaseWorkspaceOnPlanTerminalArgs) (*Result, error) {
+	call := ReleaseWorkspaceOnPlanTerminalBuild(args)
+	return qc.executeNamed(ctx, "releaseWorkspaceOnPlanTerminal", call)
 }
 
-func LogicReleaseWorkspaceOnPlanTerminalBuild(args LogicReleaseWorkspaceOnPlanTerminalArgs) string {
+func ReleaseWorkspaceOnPlanTerminalBuild(args ReleaseWorkspaceOnPlanTerminalArgs) string {
 	var b strings.Builder
-	b.WriteString("logicReleaseWorkspaceOnPlanTerminal({")
+	b.WriteString("releaseWorkspaceOnPlanTerminal({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicRevokeExpiredDelegations -- Find every expired active delegation and soft-revoke it with `system:expiry` as the revoker. Returns the count processed.
-type LogicRevokeExpiredDelegationsArgs struct {
+// RevokeExpiredDelegations -- Find every expired active delegation and soft-revoke it with `system:expiry` as the revoker. Returns the count processed.
+type RevokeExpiredDelegationsArgs struct {
 	Now string
 }
 
-// LogicRevokeExpiredDelegations calls the engine logic logicRevokeExpiredDelegations.
-func (qc *QueryClient) LogicRevokeExpiredDelegations(ctx context.Context, args LogicRevokeExpiredDelegationsArgs) (*Result, error) {
-	call := LogicRevokeExpiredDelegationsBuild(args)
-	return qc.executeNamed(ctx, "logicRevokeExpiredDelegations", call)
+// RevokeExpiredDelegations calls the engine logic revokeExpiredDelegations.
+func (qc *QueryClient) RevokeExpiredDelegations(ctx context.Context, args RevokeExpiredDelegationsArgs) (*Result, error) {
+	call := RevokeExpiredDelegationsBuild(args)
+	return qc.executeNamed(ctx, "revokeExpiredDelegations", call)
 }
 
-func LogicRevokeExpiredDelegationsBuild(args LogicRevokeExpiredDelegationsArgs) string {
+func RevokeExpiredDelegationsBuild(args RevokeExpiredDelegationsArgs) string {
 	var b strings.Builder
-	b.WriteString("logicRevokeExpiredDelegations({")
+	b.WriteString("revokeExpiredDelegations({")
 	b.WriteString("now: ")
 	b.WriteString(fmt.Sprintf("%q", args.Now))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicRouteRequest -- Route a newly-submitted v1:forge:request to its next pipeline state by submitter role (owner -> queued; developer -> needs_approval; non-developer -> needs_validation). Records a 'routed' audit event.
-type LogicRouteRequestArgs struct {
+// RouteRequest -- Route a newly-submitted v1:forge:request to its next pipeline state by submitter role (owner -> queued; developer -> needs_approval; non-developer -> needs_validation). Records a 'routed' audit event.
+type RouteRequestArgs struct {
 	Event map[string]any
 }
 
-// LogicRouteRequest calls the engine logic logicRouteRequest.
-func (qc *QueryClient) LogicRouteRequest(ctx context.Context, args LogicRouteRequestArgs) (*Result, error) {
-	call := LogicRouteRequestBuild(args)
-	return qc.executeNamed(ctx, "logicRouteRequest", call)
+// RouteRequest calls the engine logic routeRequest.
+func (qc *QueryClient) RouteRequest(ctx context.Context, args RouteRequestArgs) (*Result, error) {
+	call := RouteRequestBuild(args)
+	return qc.executeNamed(ctx, "routeRequest", call)
 }
 
-func LogicRouteRequestBuild(args LogicRouteRequestArgs) string {
+func RouteRequestBuild(args RouteRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("logicRouteRequest({")
+	b.WriteString("routeRequest({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicServiceVersionProbe -- Engine-only @entrypoint probe (memql#1707). Returns the current memQL service version via the serviceVersion builtin. Invokable directly via run_automation with no triggering event; carries no product coupling.
-type LogicServiceVersionProbeArgs struct {
+// ServiceVersionProbe -- Engine-only @entrypoint probe (memql#1707). Returns the current memQL service version via the serviceVersion builtin. Invokable directly via run_automation with no triggering event; carries no product coupling.
+type ServiceVersionProbeArgs struct {
 }
 
-// LogicServiceVersionProbe calls the engine logic logicServiceVersionProbe.
-func (qc *QueryClient) LogicServiceVersionProbe(ctx context.Context, args LogicServiceVersionProbeArgs) (*Result, error) {
-	call := LogicServiceVersionProbeBuild(args)
-	return qc.executeNamed(ctx, "logicServiceVersionProbe", call)
+// ServiceVersionProbe calls the engine logic serviceVersionProbe.
+func (qc *QueryClient) ServiceVersionProbe(ctx context.Context, args ServiceVersionProbeArgs) (*Result, error) {
+	call := ServiceVersionProbeBuild(args)
+	return qc.executeNamed(ctx, "serviceVersionProbe", call)
 }
 
-func LogicServiceVersionProbeBuild(args LogicServiceVersionProbeArgs) string {
+func ServiceVersionProbeBuild(args ServiceVersionProbeArgs) string {
 	_ = args
-	return "logicServiceVersionProbe({})"
+	return "serviceVersionProbe({})"
 }
 
-// LogicVoiceMigrationOnSecondHuman -- Phase 7 of chat-architecture. Triggered when a user's activePartitionId pointer changes. When exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team to Group thread. Idempotent via content-addressed stateIds.
-type LogicVoiceMigrationOnSecondHumanArgs struct {
+// VoiceMigrationOnSecondHuman -- Phase 7 of chat-architecture. Triggered when a user's activePartitionId pointer changes. When exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team to Group thread. Idempotent via content-addressed stateIds.
+type VoiceMigrationOnSecondHumanArgs struct {
 	Event map[string]any
 }
 
-// LogicVoiceMigrationOnSecondHuman calls the engine logic logicVoiceMigrationOnSecondHuman.
-func (qc *QueryClient) LogicVoiceMigrationOnSecondHuman(ctx context.Context, args LogicVoiceMigrationOnSecondHumanArgs) (*Result, error) {
-	call := LogicVoiceMigrationOnSecondHumanBuild(args)
-	return qc.executeNamed(ctx, "logicVoiceMigrationOnSecondHuman", call)
+// VoiceMigrationOnSecondHuman calls the engine logic voiceMigrationOnSecondHuman.
+func (qc *QueryClient) VoiceMigrationOnSecondHuman(ctx context.Context, args VoiceMigrationOnSecondHumanArgs) (*Result, error) {
+	call := VoiceMigrationOnSecondHumanBuild(args)
+	return qc.executeNamed(ctx, "voiceMigrationOnSecondHuman", call)
 }
 
-func LogicVoiceMigrationOnSecondHumanBuild(args LogicVoiceMigrationOnSecondHumanArgs) string {
+func VoiceMigrationOnSecondHumanBuild(args VoiceMigrationOnSecondHumanArgs) string {
 	var b strings.Builder
-	b.WriteString("logicVoiceMigrationOnSecondHuman({")
+	b.WriteString("voiceMigrationOnSecondHuman({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
 
-// LogicWorkerInvocationRetentionSweep -- Daily 02:30 UTC sweep that soft-deletes v1:worker:invocation rows older than WORKER_INVOCATION_RETENTION_DAYS (default 90). Per-row windowing via addDuration since MemQL filters can't push duration math down. Per-user invocation queries filter on @skipDeleted so rows disappear from UIs the moment the soft-delete lands.
-type LogicWorkerInvocationRetentionSweepArgs struct {
+// WorkerInvocationRetentionSweep -- Daily 02:30 UTC sweep that soft-deletes v1:worker:invocation rows older than WORKER_INVOCATION_RETENTION_DAYS (default 90). Per-row windowing via addDuration since MemQL filters can't push duration math down. Per-user invocation queries filter on @skipDeleted so rows disappear from UIs the moment the soft-delete lands.
+type WorkerInvocationRetentionSweepArgs struct {
 	Event map[string]any
 }
 
-// LogicWorkerInvocationRetentionSweep calls the engine logic logicWorkerInvocationRetentionSweep.
-func (qc *QueryClient) LogicWorkerInvocationRetentionSweep(ctx context.Context, args LogicWorkerInvocationRetentionSweepArgs) (*Result, error) {
-	call := LogicWorkerInvocationRetentionSweepBuild(args)
-	return qc.executeNamed(ctx, "logicWorkerInvocationRetentionSweep", call)
+// WorkerInvocationRetentionSweep calls the engine logic workerInvocationRetentionSweep.
+func (qc *QueryClient) WorkerInvocationRetentionSweep(ctx context.Context, args WorkerInvocationRetentionSweepArgs) (*Result, error) {
+	call := WorkerInvocationRetentionSweepBuild(args)
+	return qc.executeNamed(ctx, "workerInvocationRetentionSweep", call)
 }
 
-func LogicWorkerInvocationRetentionSweepBuild(args LogicWorkerInvocationRetentionSweepArgs) string {
+func WorkerInvocationRetentionSweepBuild(args WorkerInvocationRetentionSweepArgs) string {
 	var b strings.Builder
-	b.WriteString("logicWorkerInvocationRetentionSweep({")
+	b.WriteString("workerInvocationRetentionSweep({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")

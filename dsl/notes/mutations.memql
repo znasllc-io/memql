@@ -13,7 +13,7 @@ use notes.concepts.{ note }
 
 @enabled
 @description("Create a note for the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own notes. title and tags are optional; body is required. updatedAt is stamped to now.")
-mutation note mutationCreateNote {
+mutate note createNote {
   args {
     noteId  string    @required
     title   string
@@ -32,7 +32,7 @@ mutation note mutationCreateNote {
 
 @enabled
 @description("Update a note (title / body / tags) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so a caller can never reassign ownership; updatedAt is re-stamped to now. The caller threads the full merged payload built from the current row plus the changed fields.")
-mutation note mutationUpdateNote {
+mutate note updateNote {
   args {
     noteId   string  @required
     payload  object  @required

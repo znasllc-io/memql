@@ -50,14 +50,14 @@ func newDryRunEngine(t *testing.T) *memql.MemQLEngine {
 }
 
 // dryRunMutationAutomation is a candidate automation that calls a REAL mutation
-// function (mutationCreateAuthoringConstruct) -- exactly the authored-automation
+// function (createAuthoringConstruct) -- exactly the authored-automation
 // write shape Gate 2 must isolate. Driven by a synthetic trigger event.
 const dryRunMutationAutomation = `@enabled
 @trigger(event="node.created", concept="v1:authoring:bundle")
 @description("Sandbox: record a construct when a bundle is created")
 automation sandboxRecordConstruct {
   step record {
-    mutationCreateAuthoringConstruct({
+    createAuthoringConstruct({
       constructId: "c-dryrun-1",
       bundleId: "b-dryrun-1",
       kind: "automation",

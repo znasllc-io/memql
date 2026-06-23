@@ -2,7 +2,7 @@ package conformance
 
 // dim_event_test.go -- the event-trigger logic dimension (#1706). A multi-step
 // event logic must bind the triggering event into nested step-arg scope, so
-// args.event.payload.<field> resolves inside the logic body. logicBootstrapSession
+// args.event.payload.<field> resolves inside the logic body. bootstrapSession
 // is the vehicle: given a participant.created-shaped event it threads
 // args.event.payload.id into both the existence query AND the session-create
 // mutation. Before #1706 args.event was unresolved, so the created session
@@ -34,7 +34,7 @@ func runEventTrigger(t *testing.T, e *Env) {
 			"topic": "node.created",
 			"payload": map[string]any{
 				"id":              pid,
-				"partitionId":         sid,
+				"partitionId":     sid,
 				"participantType": "human",
 			},
 		},
@@ -44,17 +44,17 @@ func runEventTrigger(t *testing.T, e *Env) {
 		t.Fatalf("#1706: marshal event: %v", err)
 	}
 
-	_, execErr := e.Eng.Execute(e.Ctx, "logicBootstrapSession("+string(body)+")")
+	_, execErr := e.Eng.Execute(e.Ctx, "bootstrapSession("+string(body)+")")
 	if execErr != nil {
 		if strings.Contains(execErr.Error(), "unresolved") || strings.Contains(execErr.Error(), "args.event") {
 			t.Fatalf("#1706 regression: event reference did not bind into logic scope: %v", execErr)
 		}
-		t.Fatalf("#1706: logicBootstrapSession execution failed: %v", execErr)
+		t.Fatalf("#1706: bootstrapSession execution failed: %v", execErr)
 	}
 
 	// Read back by the event's participant id. A non-empty result proves
 	// args.event.payload.id threaded through both the query and the create.
-	rows := asArray(t, e.runQuery(t, "queryParticipantSession", map[string]any{"participantId": pid}))
+	rows := asArray(t, e.runQuery(t, "participantSession", map[string]any{"participantId": pid}))
 	if len(rows) == 0 {
 		t.Fatalf("#1706: no session bound to event participant %q -- event payload did not thread into the create", pid)
 	}

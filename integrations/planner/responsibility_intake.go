@@ -3,7 +3,7 @@
 // Responsibility intake dispatcher (issue #637 -- epic #631 / program
 // #629).
 //
-// When a user authors a v1:planner:responsibility, mutationCreateResponsibility
+// When a user authors a v1:planner:responsibility, createResponsibility
 // lands it in status='draft' with intakeStatus=''. This dispatcher runs a
 // LIGHTWEIGHT reasoning pass over the freeform statement -- the
 // responsibilityIntake prompt -- to (a) infer the structured field set the
@@ -15,12 +15,12 @@
 //
 //   1. Claim the row (CAS guard so a created+updated double-fire, or a
 //      multi-node race, runs the intake prompt once). intakeStatus '' ->
-//      'pending' (mutationMarkResponsibilityIntakePending).
+//      'pending' (markResponsibilityIntakePending).
 //   2. Invoke ai("responsibilityIntake", {statement, roleCatalog, now}).
 //   3. Parse the JSON result.
 //   4a. ZERO questions -> apply the inferred fields with status='active' +
 //       intakeStatus='clear'. The responsibility goes straight live
-//       (mutationApplyResponsibilityIntake).
+//       (applyResponsibilityIntake).
 //   4b. 1-2 questions -> apply the inferred fields with status='draft' +
 //       intakeStatus='awaitingAnswers' + intakeRequest carrying the
 //       questions. The row parks for the user; the intakeRequest shape
@@ -28,7 +28,7 @@
 //       surfacing renders it.
 //
 // Folding answers back: once the user answers the parked questions
-// (the CoPresent intake card calls mutationFoldResponsibilityIntakeAnswers
+// (the CoPresent intake card calls foldResponsibilityIntakeAnswers
 // directly, OR a follow-up updated-event arrives with intakeResponse set
 // and intakeStatus still 'awaitingAnswers'), the dispatcher re-runs the
 // prompt with the answers folded in and writes the final field set + flips
@@ -82,7 +82,7 @@ type ResponsibilityIntakeDispatcher struct {
 	// `claimed`, which releases after the run so the row can be re-evaluated.
 	//
 	// memQL is append-only: every successful update() (including the
-	// routing-only mutationAssignResponsibility) materialises as a new row
+	// routing-only assignResponsibility) materialises as a new row
 	// that re-fires graph.node.created. Without a permanent guard, assigning
 	// an agent to a still-draft responsibility (intakeStatus=='') re-enters
 	// first-pass intake, which re-infers trigger/schedule from the bare
@@ -131,10 +131,10 @@ func (d *ResponsibilityIntakeDispatcher) HandleResponsibilityCreated(ev events.E
 //     intakeResponse (the user answered) -> fold the answers back.
 //
 // First-pass intake is NOT (re-)triggered from the updated path. It belongs
-// to the create path (HandleResponsibilityCreated): mutationCreateResponsibility
-// always inserts in status='draft' intakeStatus='', so the created event fully
+// to the create path (HandleResponsibilityCreated): createResponsibility
+// always inserts in status='draft' intakeStatus=”, so the created event fully
 // covers genuine first authoring. Re-triggering first-pass on an arbitrary
-// update is the memql#1645 footgun -- a routing-only mutationAssignResponsibility
+// update is the memql#1645 footgun -- a routing-only assignResponsibility
 // materialises a fresh row version and would otherwise re-run the inference
 // cascade, clobbering the user's explicit trigger/schedule.
 func (d *ResponsibilityIntakeDispatcher) HandleResponsibilityUpdated(ev events.Event) {
@@ -155,7 +155,7 @@ func (d *ResponsibilityIntakeDispatcher) HandleResponsibilityUpdated(ev events.E
 func (d *ResponsibilityIntakeDispatcher) dispatchFirstPass(id string) {
 	// Permanent once-per-row guard (memql#1645): first-pass intake is an
 	// authoring step that must run at most once per responsibility. An
-	// update() such as the routing-only mutationAssignResponsibility re-fires
+	// update() such as the routing-only assignResponsibility re-fires
 	// graph.node.created (append-only materialisation), which would otherwise
 	// re-enter first-pass on a still-draft row and clobber the user's explicit
 	// trigger/schedule. Skip if we've already dispatched first-pass for this id.
@@ -307,7 +307,7 @@ func (d *ResponsibilityIntakeDispatcher) invokeIntake(ctx context.Context, state
 // --- loaders --------------------------------------------------------------
 
 func (d *ResponsibilityIntakeDispatcher) loadResponsibility(ctx context.Context, id string) (map[string]any, error) {
-	q := fmt.Sprintf(`queryResponsibilityById({responsibilityId:%q})`, id)
+	q := fmt.Sprintf(`responsibilityById({responsibilityId:%q})`, id)
 	res, err := d.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
@@ -322,7 +322,7 @@ func (d *ResponsibilityIntakeDispatcher) loadResponsibility(ctx context.Context,
 // --- mutations ------------------------------------------------------------
 
 func (d *ResponsibilityIntakeDispatcher) markPending(ctx context.Context, id string) error {
-	q := fmt.Sprintf(`mutationMarkResponsibilityIntakePending({responsibilityId:%q})`, id)
+	q := fmt.Sprintf(`markResponsibilityIntakePending({responsibilityId:%q})`, id)
 	_, err := d.engine.Execute(systemActorContext(ctx), q)
 	return err
 }
@@ -349,7 +349,7 @@ func (d *ResponsibilityIntakeDispatcher) applyIntake(ctx context.Context, id str
 	if intakeRequest != nil {
 		args["intakeRequest"] = intakeRequest
 	}
-	q := fmt.Sprintf(`mutationApplyResponsibilityIntake(%s)`, encodeArgs(args))
+	q := fmt.Sprintf(`applyResponsibilityIntake(%s)`, encodeArgs(args))
 	_, err := d.engine.Execute(systemActorContext(ctx), q)
 	return err
 }
@@ -371,7 +371,7 @@ func (d *ResponsibilityIntakeDispatcher) foldAnswers(ctx context.Context, id str
 	if r.Condition != nil {
 		args["condition"] = r.Condition
 	}
-	q := fmt.Sprintf(`mutationFoldResponsibilityIntakeAnswers(%s)`, encodeArgs(args))
+	q := fmt.Sprintf(`foldResponsibilityIntakeAnswers(%s)`, encodeArgs(args))
 	_, err := d.engine.Execute(systemActorContext(ctx), q)
 	return err
 }

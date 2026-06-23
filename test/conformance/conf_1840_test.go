@@ -3,10 +3,10 @@ package conformance
 // conf_1840_test.go -- the forge logic-layer arg-resolution dimension (#1840).
 //
 // The forge approval pipeline routes every non-direct-mutation action through a
-// `logic` function: forgeRecordMentoring -> logicRecordMentoring, the routeRequest
-// automation -> logicRouteRequest, forgeAttachToRequest -> logicAttachToRequest.
+// `logic` function: forgeRecordMentoring -> recordMentoring, the routeRequest
+// automation -> routeRequest, forgeAttachToRequest -> attachToRequest.
 // Each logic body forwards the caller's args into a NESTED mutation/query call
-// (e.g. `mutationRecordRequestEvent({ note: args.note })`). On staging 0.9.79
+// (e.g. `recordRequestEvent({ note: args.note })`). On staging 0.9.79
 // every one of these failed with `argument "<x>": expected string, got
 // *ast.ArgRefExpr` (the routing + audit + mentoring + attach outage tracked by
 // #1840), while the direct-mutation tools (validate / approve / changes) all
@@ -22,15 +22,15 @@ package conformance
 //     them), so they reached the mutation validator unresolved -> "got
 //     *ast.ArgRefExpr". Fix: substituteArgRefValue threads the parser node too.
 //
-//  2. MULTI-STEP logic return (logicAttachToRequest `return args.requestId`,
-//     logicRouteRequest `return args.event.payload.id`). The compiler emitted the
+//  2. MULTI-STEP logic return (attachToRequest `return args.requestId`,
+//     routeRequest `return args.event.payload.id`). The compiler emitted the
 //     `_return` expression WITHOUT convertArgReferences, so `args.X` stringified
 //     to the raw `arg("X")` shape and hit engine.Execute as a bare query ->
 //     `function "arg" not found`. Fix: run `_return` through the same
 //     convertArgReferences/convertEventReferences rewrites as every other step.
 //
 //  3. POSITIONAL builtin in a step (`append(arr, item)` inside
-//     logicAttachToRequest). expressionToString rendered a FunctionCallExpr's
+//     attachToRequest). expressionToString rendered a FunctionCallExpr's
 //     positional args as `name(0=v0, 1=v1)` (and in random map order), which is
 //     invalid source and landed verbatim as the corrupted
 //     `attachmentIds: [0="...", 1="..."]`. Fix: render contiguous 0-based args
@@ -84,14 +84,14 @@ func runForgeLogicArgResolution(t *testing.T, e *Env) {
 	// Seed a request the attach + route flows can target. submitterRole is
 	// stamped from the owner actor; no automation scheduler is wired in the rig,
 	// so the request stays 'submitted' until we drive the router logic directly.
-	e.runMutation(t, "mutationCreateRequest", map[string]any{
+	e.runMutation(t, "createRequest", map[string]any{
 		"requestId": requestId,
 		"projectId": projectId,
 		"title":     "conf-1840 forge logic arg resolution",
 		"body":      "Reproduce the *ast.ArgRefExpr leak across the forge logic layer.",
 	})
 
-	// --- A. forgeRecordMentoring -> logicRecordMentoring (single-return F.6) ---
+	// --- A. forgeRecordMentoring -> recordMentoring (single-return F.6) ---
 	eventId := "evt-" + suffix
 	note := "Here is what the approval pipeline does and why it matters."
 	outA, isErrA := e.toolCall(t, "forgeRecordMentoring", map[string]any{
@@ -105,12 +105,12 @@ func runForgeLogicArgResolution(t *testing.T, e *Env) {
 	}
 	// The 'mentored' event must be in the audit trail with the note threaded
 	// through the logic into the nested mutation.
-	events := asArray(t, e.runQuery(t, "queryRequestEvents", map[string]any{"requestId": requestId}))
+	events := asArray(t, e.runQuery(t, "requestEvents", map[string]any{"requestId": requestId}))
 	if !hasEventWithNote(events, "mentored", note) {
 		t.Fatalf("#1840: forgeRecordMentoring did not record a 'mentored' event carrying the note; events=%v", events)
 	}
 
-	// --- B. forgeAttachToRequest -> logicAttachToRequest (append + nested args) ---
+	// --- B. forgeAttachToRequest -> attachToRequest (append + nested args) ---
 	attachmentId := "att-" + suffix
 	outB, isErrB := e.toolCall(t, "forgeAttachToRequest", map[string]any{
 		"requestId":    requestId,
@@ -120,7 +120,7 @@ func runForgeLogicArgResolution(t *testing.T, e *Env) {
 	if isErrB {
 		t.Fatalf("#1840: forgeAttachToRequest returned an error result: %v", outB)
 	}
-	reqRows := asArray(t, e.runQuery(t, "queryRequestById", map[string]any{"requestId": requestId}))
+	reqRows := asArray(t, e.runQuery(t, "requestById", map[string]any{"requestId": requestId}))
 	if !attachmentPresent(reqRows, attachmentId) {
 		t.Fatalf("#1840: forgeAttachToRequest did not append %q to attachmentIds; rows=%v", attachmentId, reqRows)
 	}
@@ -135,7 +135,7 @@ func runForgeLogicArgResolution(t *testing.T, e *Env) {
 	//      with NO partial / corrupting write to attachmentIds.
 	runForgeAttachHardening(t, e, requestId, attachmentId)
 
-	// --- C. logicRouteRequest (multi-step LogicRunner; the routeRequest spine) ---
+	// --- C. routeRequest (multi-step LogicRunner; the routeRequest spine) ---
 	// Drive the router logic exactly as the node.created automation does -- a
 	// single `event` object whose payload carries the submitter role + id. Owner
 	// fast-tracks to 'queued' and records a 'routed' audit event; every nested
@@ -149,13 +149,13 @@ func runForgeLogicArgResolution(t *testing.T, e *Env) {
 			},
 		},
 	})
-	if _, err := e.Eng.Execute(e.Ctx, "logicRouteRequest("+string(routeArgs)+")"); err != nil {
-		assertNoArgRefLeak(t, "logicRouteRequest", err.Error())
-		t.Fatalf("#1840: logicRouteRequest (multi-step) failed: %v", err)
+	if _, err := e.Eng.Execute(e.Ctx, "routeRequest("+string(routeArgs)+")"); err != nil {
+		assertNoArgRefLeak(t, "routeRequest", err.Error())
+		t.Fatalf("#1840: routeRequest (multi-step) failed: %v", err)
 	}
-	routedEvents := asArray(t, e.runQuery(t, "queryRequestEvents", map[string]any{"requestId": requestId}))
+	routedEvents := asArray(t, e.runQuery(t, "requestEvents", map[string]any{"requestId": requestId}))
 	if !hasEventKind(routedEvents, "routed") {
-		t.Fatalf("#1840: logicRouteRequest did not record a 'routed' audit event; events=%v", routedEvents)
+		t.Fatalf("#1840: routeRequest did not record a 'routed' audit event; events=%v", routedEvents)
 	}
 
 	t.Logf("#1840: forge logic layer resolved caller args across mentoring, attach, and the multi-step router")
@@ -163,8 +163,8 @@ func runForgeLogicArgResolution(t *testing.T, e *Env) {
 
 // runForgeAttachHardening drives the #1848 acceptance criteria against the SAME
 // seeded request the #1840 dimension already attached one id to. It runs the
-// real forgeAttachToRequest MCP tool (-> logicAttachToRequest -> append +
-// mutationAttachToRequest), keyed on the SHORT request id the caller passes,
+// real forgeAttachToRequest MCP tool (-> attachToRequest -> append +
+// attachToRequest), keyed on the SHORT request id the caller passes,
 // and asserts the canonical-id read-merge-append behaves:
 //
 //   - a second sequential attach appends without clobbering the first;
@@ -186,7 +186,7 @@ func runForgeAttachHardening(t *testing.T, e *Env, requestId, firstAttachmentId 
 		t.Fatalf("#1848: second forgeAttachToRequest returned an error result: %v", out2)
 	}
 
-	rows := asArray(t, e.runQuery(t, "queryRequestById", map[string]any{"requestId": requestId}))
+	rows := asArray(t, e.runQuery(t, "requestById", map[string]any{"requestId": requestId}))
 	ids := attachmentIdsOf(t, rows, requestId)
 	assertCleanAttachmentIds(t, "after two sequential attaches", ids)
 	if len(ids) != 2 || ids[0] != firstAttachmentId || ids[1] != secondAttachmentId {
@@ -212,7 +212,7 @@ func runForgeAttachHardening(t *testing.T, e *Env, requestId, firstAttachmentId 
 		t.Fatalf("#1848: forgeAttachToRequest against a nonexistent request %q should fail, got success: %v", badReqId, outBadReq)
 	}
 	// The bad request id must not have been conjured into existence.
-	if badRows, _ := e.runQuery(t, "queryRequestById", map[string]any{"requestId": badReqId}).([]any); len(badRows) != 0 {
+	if badRows, _ := e.runQuery(t, "requestById", map[string]any{"requestId": badReqId}).([]any); len(badRows) != 0 {
 		t.Fatalf("#1848: a failed attach against nonexistent request %q wrote a phantom row: %#v", badReqId, badRows)
 	}
 
@@ -228,7 +228,7 @@ func runForgeAttachHardening(t *testing.T, e *Env, requestId, firstAttachmentId 
 	// Re-read the good request: its array must be uncorrupted. If the bad-att
 	// path succeeded it may have appended cleanly (an extra clean id is fine);
 	// what it must NEVER do is clobber the prior ids or write index/literal junk.
-	afterRows := asArray(t, e.runQuery(t, "queryRequestById", map[string]any{"requestId": requestId}))
+	afterRows := asArray(t, e.runQuery(t, "requestById", map[string]any{"requestId": requestId}))
 	afterIds := attachmentIdsOf(t, afterRows, requestId)
 	assertCleanAttachmentIds(t, "after bad-input attaches", afterIds)
 	for i, want := range before {
@@ -241,7 +241,7 @@ func runForgeAttachHardening(t *testing.T, e *Env, requestId, firstAttachmentId 
 }
 
 // attachmentIdsOf extracts the attachmentIds array for the request row with the
-// given short id from a decoded queryRequestById result, as an ordered []string.
+// given short id from a decoded requestById result, as an ordered []string.
 func attachmentIdsOf(t *testing.T, rows []any, requestId string) []string {
 	t.Helper()
 	for _, r := range rows {
@@ -249,7 +249,7 @@ func attachmentIdsOf(t *testing.T, rows []any, requestId string) []string {
 		if m == nil {
 			continue
 		}
-		// queryRequestById is keyed on the request, so a single row comes back;
+		// requestById is keyed on the request, so a single row comes back;
 		// match defensively on the short id stored in payload.id when present.
 		out := make([]string, 0, 4)
 		ids, _ := m["attachmentIds"].([]any)
@@ -258,7 +258,7 @@ func attachmentIdsOf(t *testing.T, rows []any, requestId string) []string {
 		}
 		return out
 	}
-	t.Fatalf("#1848: queryRequestById returned no row for %q; rows=%#v", requestId, rows)
+	t.Fatalf("#1848: requestById returned no row for %q; rows=%#v", requestId, rows)
 	return nil
 }
 

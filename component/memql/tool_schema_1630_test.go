@@ -15,11 +15,11 @@ import (
 //
 // Affected (all array concept fields mis-declared as `object` in the
 // mutation args block, plus the delegation payload/field mismatches):
-//   - mutationRecordLegalAcceptance.legalAcceptance  (user.legalAcceptance []object)
-//   - mutationPersistTaskState.toolCallHistory       (taskState.toolCallHistory []object)
-//   - mutationPersistTaskState.pendingSubPlanIds     (taskState.pendingSubPlanIds []string)
+//   - recordLegalAcceptance.legalAcceptance  (user.legalAcceptance []object)
+//   - persistTaskState.toolCallHistory       (taskState.toolCallHistory []object)
+//   - persistTaskState.pendingSubPlanIds     (taskState.pendingSubPlanIds []string)
 //   - mutationCreateDomainEntitySchema.keyFields/displayFields (domainEntitySchema []string)
-//   - mutationCreateDelegation.scopes (delegation.scopes []string),
+//   - createDelegation.scopes (delegation.scopes []string),
 //     roleCeiling enum, missing createdBySubject, spurious agentSubject.
 //
 // This loads the real DSL, reflects each mutation's tool InputSchema the
@@ -54,7 +54,7 @@ func TestToolSchema1630_ArgConceptTypesReconciled(t *testing.T) {
 	}
 
 	t.Run("recordLegalAcceptance accepts legalAcceptance array", func(t *testing.T) {
-		s := schemaFor(t, "mutationRecordLegalAcceptance")
+		s := schemaFor(t, "recordLegalAcceptance")
 		args := map[string]any{
 			"userId": "v1:identity:user:abc",
 			"legalAcceptance": []any{
@@ -67,7 +67,7 @@ func TestToolSchema1630_ArgConceptTypesReconciled(t *testing.T) {
 	})
 
 	t.Run("persistTaskState accepts toolCallHistory + pendingSubPlanIds arrays", func(t *testing.T) {
-		s := schemaFor(t, "mutationPersistTaskState")
+		s := schemaFor(t, "persistTaskState")
 		args := map[string]any{
 			"taskId":            "v1:planner:task:abc",
 			"workingMemory":     map[string]any{"step": 1},
@@ -80,7 +80,7 @@ func TestToolSchema1630_ArgConceptTypesReconciled(t *testing.T) {
 	})
 
 	t.Run("createDelegation typed-create is self-consistent", func(t *testing.T) {
-		s := schemaFor(t, "mutationCreateDelegation")
+		s := schemaFor(t, "createDelegation")
 		// scopes is an array (concept []string), roleCeiling is a
 		// concept-enum value, createdBySubject is present, and
 		// agentSubject is NOT a field (it is not on the concept and was

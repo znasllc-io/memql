@@ -20,7 +20,7 @@ import (
 
 // TopologyReconciler is the active topology reconciliation loop / fast reaper
 // (epic #1871, issue #1874). It closes the gap left by the lazy heartbeat
-// prune (logicPruneStaleClusterNodes, 10-min cron / 30-min window): a pod that
+// prune (pruneStaleClusterNodes, 10-min cron / 30-min window): a pod that
 // crashes, is OOM-killed, or is forcibly replaced is never deregistered and
 // lingers in v1:cluster:node for up to 30+ minutes. This loop drives topology
 // freshness to SECONDS by comparing the DB node set against two live signals
@@ -41,7 +41,7 @@ import (
 //
 //  2. Deployment status (orphan reap). Nodes whose deploymentId belongs to a
 //     deployment the deploy driver has marked superseded / failed /
-//     rolled_back (querySupersededDeployments, #1872/#1873) are retired
+//     rolled_back (supersededDeployments, #1872/#1873) are retired
 //     IMMEDIATELY -- no grace -- so a superseded deployment's pods clear from
 //     topology within seconds of promotion completing.
 //
@@ -53,9 +53,9 @@ import (
 // poll on a surviving replica re-acquires it.
 //
 // Relationship to the 30-min prune: this loop OWNS the fast path (offline/
-// stopped within seconds). logicPruneStaleClusterNodes stays as the lazy
+// stopped within seconds). pruneStaleClusterNodes stays as the lazy
 // backstop -- it only ever marks nodes the fast path missed, and both write
-// the same idempotent terminal health="stopped" (queryStaleClusterNodes
+// the same idempotent terminal health="stopped" (staleClusterNodes
 // excludes already-stopped rows), so they can never write conflicting
 // statuses for the same node.
 type TopologyReconciler struct {
@@ -290,7 +290,7 @@ func (r *TopologyReconciler) cleanup() {
 // reconcileNode is the minimal projection of a v1:cluster:node row the
 // reconciler reasons about.
 type reconcileNode struct {
-	id           string // bare node id (the concept id mutationUpdateNodeHealth resolves)
+	id           string // bare node id (the concept id updateNodeHealth resolves)
 	nodeType     string
 	address      string
 	health       string
@@ -302,7 +302,7 @@ type reconcileNode struct {
 // reconcile runs one leader pass: read the current non-stopped node set + the
 // superseded-deployment set, then retire orphans (immediately) and liveness-
 // lapsed nodes (after grace). All writes are the idempotent terminal
-// health="stopped" transition via mutationUpdateNodeHealth.
+// health="stopped" transition via updateNodeHealth.
 func (r *TopologyReconciler) reconcile(ctx context.Context) {
 	nodes, err := r.loadNonStoppedNodes(ctx)
 	if err != nil {
@@ -404,11 +404,11 @@ func (r *TopologyReconciler) retire(ctx context.Context, n reconcileNode, reason
 }
 
 // loadNonStoppedNodes reads the latest-per-id non-stopped v1:cluster:node set
-// via queryStaleClusterNodes (asOf latest, health != "stopped") -- the same
+// via staleClusterNodes (asOf latest, health != "stopped") -- the same
 // candidate set the prune walks. One query serves both the orphan + liveness
 // passes.
 func (r *TopologyReconciler) loadNonStoppedNodes(ctx context.Context) ([]reconcileNode, error) {
-	result, err := r.engine.Execute(ctx, "queryStaleClusterNodes({})")
+	result, err := r.engine.Execute(ctx, "staleClusterNodes({})")
 	if err != nil {
 		return nil, err
 	}
@@ -441,12 +441,12 @@ func (r *TopologyReconciler) loadNonStoppedNodes(ctx context.Context) ([]reconci
 }
 
 // loadSupersededDeploymentIds reads the set of deploymentIds whose deployment
-// is terminal-not-active (querySupersededDeployments). A read failure returns
+// is terminal-not-active (supersededDeployments). A read failure returns
 // an empty set -- the orphan pass simply does nothing this tick (the liveness
 // pass + the prune still run), never a wrong retirement.
 func (r *TopologyReconciler) loadSupersededDeploymentIds(ctx context.Context) map[string]struct{} {
 	ids := map[string]struct{}{}
-	result, err := r.engine.Execute(ctx, "querySupersededDeployments({})")
+	result, err := r.engine.Execute(ctx, "supersededDeployments({})")
 	if err != nil {
 		r.warn("topology reconciler: superseded-deployment load failed; skipping orphan pass this tick", "error", err)
 		return ids
@@ -510,7 +510,7 @@ func (r *TopologyReconciler) warn(msg string, args ...any) {
 	}
 }
 
-// bareNodeID extracts the concept id mutationUpdateNodeHealth resolves from a
+// bareNodeID extracts the concept id updateNodeHealth resolves from a
 // query-result row id ("_system:v1:cluster:node:<id>" -> "<id>"). Mirrors the
 // worker dialer's extraction; matches the bare NodeId the status writer +
 // PeerManager use, so compare + write keys agree.

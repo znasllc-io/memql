@@ -304,7 +304,7 @@ func TestEngineStoreRefreshRegistration_WireShape(t *testing.T) {
 	}
 	q := eng.queries[0]
 	for _, want := range []string{
-		"mutationRefreshWorkerRegistration(",
+		"refreshWorkerRegistration(",
 		`"registrationId":"reg-1"`,
 		`"displayServer":"quartz"`,
 		`"version":"0.9.0"`,

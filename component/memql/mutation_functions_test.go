@@ -87,7 +87,7 @@ func TestMutationFunctionTemplate_LoadAndRender_CreateSpace(t *testing.T) {
 	engine := &MemQLEngine{}
 	mutation, err := engine.renderMutationTemplate(context.Background(), fn.MutationTemplate, map[string]any{
 		"partitionId": "space-123",
-		"name":    "My Space",
+		"name":        "My Space",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "v1:cognition:space", mutation.Concept)
@@ -113,7 +113,7 @@ func TestMutationInsertShorthand_ArgsRefInfersKey(t *testing.T) {
 	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{
 		"v1:cognition:space": {Name: "v1:cognition:space"},
 	})
-	src := `mutation space mutationCreateSpaceShorthand {
+	src := `mutate space mutationCreateSpaceShorthand {
   args {
     partitionId  string  @required
     name     string  @required
@@ -133,8 +133,8 @@ func TestMutationInsertShorthand_ArgsRefInfersKey(t *testing.T) {
 	engine := &MemQLEngine{}
 	mutation, err := engine.renderMutationTemplate(context.Background(), fn.MutationTemplate, map[string]any{
 		"partitionId": "space-7",
-		"name":    "Space Seven",
-		"status":  "active",
+		"name":        "Space Seven",
+		"status":      "active",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "space-7", mutation.ID)
@@ -166,7 +166,7 @@ func TestSignatureBoundMutationAcceptsMultipleFileTopUses(t *testing.T) {
 	src := `use cognition.concepts.{ space }
 use identity.concepts.{ request }
 
-mutation space mutationCreateDailySpace {
+mutate space mutationCreateDailySpace {
   args {
     partitionId       string  @required
     name          string  @required

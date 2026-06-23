@@ -36,7 +36,7 @@ func TestMaybeResumeFromFeedback_NoFeedbackResponse_NoOp(t *testing.T) {
 	// invokeAndDispatch (no plannerAgent AI call).
 	fe := &fakeEngine{
 		execResponder: func(query string) (any, error) {
-			if strings.Contains(query, "queryPlanById") {
+			if strings.Contains(query, "planById") {
 				return rowsEnvelope(feedbackResumePlanRow("running", "2026-06-14T00:00:00Z", nil)), nil
 			}
 			return nil, nil
@@ -66,10 +66,10 @@ func TestMaybeResumeFromFeedback_Resumes_AndDedups(t *testing.T) {
 	fe := &fakeEngine{
 		execResponder: func(query string) (any, error) {
 			switch {
-			case strings.Contains(query, "queryPlanById"):
+			case strings.Contains(query, "planById"):
 				return rowsEnvelope(feedbackResumePlanRow("running", "2026-06-14T00:00:01Z", fb)), nil
-			case strings.Contains(query, "queryTasksForPlan"),
-				strings.Contains(query, "queryActiveAgentsForUser"):
+			case strings.Contains(query, "tasksForPlan"),
+				strings.Contains(query, "activeAgentsForUser"):
 				return rowsEnvelope(), nil
 			}
 			return nil, nil

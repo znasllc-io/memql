@@ -12,7 +12,7 @@ import (
 
 // literal_value_node_test.go is the reproduction + fix guard for memql#1705:
 // a Logic body whose return resolves to a scalar/arg value (the dry-run
-// failure was `logicConsolidateMemory` -> `return args.event.topic`) failed
+// failure was `consolidateMemory` -> `return args.event.topic`) failed
 // at runtime with `unsupported expression node *memql.LiteralValueNode`.
 //
 // Root cause: after function-call arg substitution folds the ArgRefExpression
@@ -147,7 +147,7 @@ func TestEvaluateExpressionSet_LiteralIsDescriptiveError(t *testing.T) {
 
 // TestExecute_LogicConsolidateMemoryShape_RunsToCompletion is the
 // Postgres-gated end-to-end reproduction + fix guard. It registers the
-// memql#1705 logic shape (`logic logicConsolidateMemory { body { return
+// memql#1705 logic shape (`logic consolidateMemory { body { return
 // args.event.topic } }`), invokes it through engine.Execute exactly as an
 // automation function step would, and asserts the call runs to completion
 // returning the bound topic value.
@@ -163,8 +163,8 @@ func TestExecute_LogicConsolidateMemoryShape_RunsToCompletion(t *testing.T) {
 	eng, _, ctx := readMergeTestEngine(t)
 
 	const src = `@enabled
-@description("repro of the memql#1705 logicConsolidateMemory return shape")
-logic logicConsolidateMemory {
+@description("repro of the memql#1705 consolidateMemory return shape")
+logic consolidateMemory {
   args {
     event object @required
   }
@@ -173,15 +173,15 @@ logic logicConsolidateMemory {
   }
 }
 `
-	fn, err := tryParseNewFunctionSyntax("logicConsolidateMemory", "logic", src, "memql#1705-test", memorynodes.DefaultRegistry())
+	fn, err := tryParseNewFunctionSyntax("consolidateMemory", "logic", src, "memql#1705-test", memorynodes.DefaultRegistry())
 	require.NoError(t, err, "the logic shape must parse")
 	require.NoError(t, eng.Functions().Upsert(fn))
 
 	args, err := json.Marshal(map[string]any{"event": map[string]any{"topic": "node.created"}})
 	require.NoError(t, err)
 
-	res, err := eng.Execute(ctx, "logicConsolidateMemory("+string(args)+")")
-	require.NoError(t, err, "logicConsolidateMemory must run to completion (memql#1705 regression -- was 'unsupported expression node *memql.LiteralValueNode')")
+	res, err := eng.Execute(ctx, "consolidateMemory("+string(args)+")")
+	require.NoError(t, err, "consolidateMemory must run to completion (memql#1705 regression -- was 'unsupported expression node *memql.LiteralValueNode')")
 	require.NotNil(t, res)
 	require.Equal(t, "node.created", res.OutputPayload(), "the logic must return the bound args.event.topic value")
 }

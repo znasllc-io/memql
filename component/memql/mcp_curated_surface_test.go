@@ -16,7 +16,7 @@ import (
 // the connector surface.
 func TestMCPCuratedToolSurface(t *testing.T) {
 	// The intentional curated `tool {}` surface (#1596). Queries promoted
-	// with @mcp (queryCurrentUser, query*ById, ...) ride the separate
+	// with @mcp (currentUser, query*ById, ...) ride the separate
 	// MCPPromotedFunctionTools path and are not in this registry, so they
 	// are out of scope here.
 	curated := []string{

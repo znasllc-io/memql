@@ -24,8 +24,8 @@ import (
 // steps, and the first step that feeds one of those references to a
 // @required argument fails at RUNTIME with "required argument <x> is
 // missing" (the memql#1706 failure shape across logicAutoJoinAI,
-// logicConflictDetection, logicGenerateResponse,
-// logicEnsureDailySpaceOnAuthSession, logicVoiceMigrationOnSecondHuman).
+// conflictDetection, generateResponse,
+// logicEnsureDailySpaceOnAuthSession, voiceMigrationOnSecondHuman).
 //
 // This validator turns that latent runtime failure into a COMPILE-TIME
 // rejection: a Logic whose body references the triggering event MUST declare

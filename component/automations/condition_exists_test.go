@@ -11,7 +11,7 @@ import "testing"
 // string is always truthy, so `@filter(exists(payload.X))` ALWAYS passed
 // regardless of the field. That silently disabled the gate on
 // reRouteNeedsAgentOnAgentCreate (it fired on every signup's plan-less agent
-// create, then called mutationUpdatePlanStatus with an empty planId -> the
+// create, then called updatePlanStatus with an empty planId -> the
 // per-signup "missing planId" failure) and on cascadeSupersession.
 //
 // Multi-node note: this is the engine's pure-Go condition evaluator -- it runs
@@ -33,7 +33,7 @@ func evalWithEventPayload(t *testing.T, payload map[string]any, cond string) boo
 
 // The plan-less agent create (the signup case) must NOT pass the gate: the
 // field is absent from the event payload, so exists(...) is false and the
-// reroute automation no-ops instead of calling mutationUpdatePlanStatus with
+// reroute automation no-ops instead of calling updatePlanStatus with
 // an empty planId.
 func TestEvaluateCondition_ExistsAbsentField(t *testing.T) {
 	// Mirrors a seed-materialized per-user agent: originatingPlanId lives under

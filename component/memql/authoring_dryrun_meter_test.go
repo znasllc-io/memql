@@ -1,7 +1,7 @@
 package memql_test
 
 // authoring_dryrun_meter_test.go -- Gate-2 increment 2 coverage: read metering
-// (si / web reads) + cost estimate + the mutationRecordBundleDryRun persist
+// (si / web reads) + cost estimate + the recordBundleDryRun persist
 // path.
 //
 // External test package; links component/automations/steps (the dry-run bridge)
@@ -79,7 +79,7 @@ func TestDryRun_MetersWebReads(t *testing.T) {
 }
 
 // TestBuildDryRunMutationCall_Passed: the persist-call builder renders a
-// mutationRecordBundleDryRun(...) call carrying the bundle id, dryRunPassed
+// recordBundleDryRun(...) call carrying the bundle id, dryRunPassed
 // status, and the report on the dryRunReport object arg. Pure -- no DB.
 func TestBuildDryRunMutationCall_Passed(t *testing.T) {
 	report := memql.BundleDryRunReport{
@@ -101,7 +101,7 @@ func TestBuildDryRunMutationCall_Passed(t *testing.T) {
 		t.Fatalf("BuildDryRunMutationCall: %v", err)
 	}
 	for _, want := range []string{
-		"mutationRecordBundleDryRun(",
+		"recordBundleDryRun(",
 		`"bundleId": "b-1"`,
 		`"status": "dryRunPassed"`,
 		`"dryRunReport":`,

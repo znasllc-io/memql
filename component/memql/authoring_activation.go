@@ -11,8 +11,8 @@ package memql
 // user approves (optionally after a full-sandbox-live staging pass), and the
 // bundle ACTIVATES:
 //
-//   1. status dryRunPassed -> active (mutationActivateAuthoringBundle), member
-//      constructs draft -> active (mutationSetConstructStatus).
+//   1. status dryRunPassed -> active (activateAuthoringBundle), member
+//      constructs draft -> active (setConstructStatus).
 //   2. its constructs register into the owner-scoped authored runtime
 //      (AuthoredRuntimeRegistry, #959) so they resolve + fire live; the
 //      automation construct is handed to the authored scheduler via an

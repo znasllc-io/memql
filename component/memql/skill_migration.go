@@ -185,7 +185,7 @@ func (e *MemQLEngine) deriveSkillIdsForLegacyAgent(ctx context.Context, roleSlug
 	return out, nil
 }
 
-// writeMigratedAgent issues mutationUpdateAgent with the rewritten
+// writeMigratedAgent issues updateAgent with the rewritten
 // payload. The lock validator runs server-side; a malformed rewrite
 // rejects with the same lock messages a runtime caller would see.
 func (e *MemQLEngine) writeMigratedAgent(ctx context.Context, agentId string, payload map[string]any) error {
@@ -197,7 +197,7 @@ func (e *MemQLEngine) writeMigratedAgent(ctx context.Context, agentId string, pa
 	if err != nil {
 		return fmt.Errorf("marshal args: %w", err)
 	}
-	call := fmt.Sprintf(`mutationUpdateAgent(%s)`, string(payloadJSON))
+	call := fmt.Sprintf(`updateAgent(%s)`, string(payloadJSON))
 	ctx = provenance.ContextWithProvenance(systemActorContext(ctx), provenance.System("migration:phase2:skill-cut"))
 	_, err = e.Execute(ctx, call)
 	return err
@@ -220,9 +220,8 @@ func (e *MemQLEngine) writeSkillChangeEvent(ctx context.Context, agentId, skillI
 	if err != nil {
 		return fmt.Errorf("marshal event args: %w", err)
 	}
-	call := fmt.Sprintf(`mutationCreateSkillChangeEvent(%s)`, string(payloadJSON))
+	call := fmt.Sprintf(`createSkillChangeEvent(%s)`, string(payloadJSON))
 	ctx = provenance.ContextWithProvenance(systemActorContext(ctx), provenance.System("migration:phase2:skill-cut"))
 	_, err = e.Execute(ctx, call)
 	return err
 }
-

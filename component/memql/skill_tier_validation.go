@@ -15,7 +15,7 @@ import (
 // runs before SeedMaterializer.Start materializes any rows, so the
 // referenced knowledgeDomain seeds are guaranteed to be registered
 // alongside the skill seeds. User-created domains added later live on
-// the runtime side and are validated by mutationCreateSkill at write
+// the runtime side and are validated by createSkill at write
 // time (Phase 2 wiring); Phase 1 only catches the catalog-level
 // inconsistencies that would otherwise corrupt the seed surface.
 //
@@ -33,7 +33,7 @@ import (
 // follow-up: Phase 1 ships catalog rows whose domain prerequisites
 // some namespaces don't yet seed, and hard-failing on those would
 // block this PR from landing additively. Phase 2 closes the gap by
-// running the same check at mutationCreateSkill time, where the
+// running the same check at createSkill time, where the
 // universe of valid ids includes user-created domains.
 func validateSkillTiers(reg *SeedRegistry) (warnings []string, err error) {
 	if reg == nil {

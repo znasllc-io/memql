@@ -9,7 +9,7 @@
 // stream -- exactly once, no dup, no drop.
 //
 // It is a SYNTHETIC-EVENT test (memql#1261, owner decision): it injects
-// a v1:cognition:utterance row via mutationSendTextUtterance and counts
+// a v1:cognition:utterance row via sendTextUtterance and counts
 // cross-replica delivery, rather than driving a real LLM reply. That
 // exercises the same component/node EventBridge.forwardToPeers path as
 // the live chat reply, deterministically and without AI provider keys.
@@ -35,8 +35,10 @@
 // cross-replica subscribers miss it, so the count is short.
 //
 // RUN
-//   MEMQL_E2E_TOKEN=<user JWT> go test -tags clustere2e -count=1 \
-//     -timeout=300s ./test/clustere2e/...
+//
+//	MEMQL_E2E_TOKEN=<user JWT> go test -tags clustere2e -count=1 \
+//	  -timeout=300s ./test/clustere2e/...
+//
 // or `make cluster-e2e`, which boots the cluster + seeds a token first.
 package clustere2e
 
@@ -49,8 +51,8 @@ import (
 	"testing"
 	"time"
 
-	memqlclient "github.com/znasllc-io/memql/sdk/go/client"
 	"github.com/znasllc-io/memql/core/id"
+	memqlclient "github.com/znasllc-io/memql/sdk/go/client"
 )
 
 // --- environment knobs -------------------------------------------------------
@@ -149,7 +151,7 @@ func newSpaceWithHuman(ctx context.Context, t *testing.T, conn *memqlclient.Conn
 		t.Fatalf("create space: %v", err)
 	}
 	if _, err := qc.MutationJoinSpaceAsHuman(ctx, memqlclient.MutationJoinSpaceAsHumanArgs{
-		PartitionId:     spaceID,
+		PartitionId: spaceID,
 		UserId:      userID,
 		DisplayName: "clustere2e probe",
 		Status:      "active",
@@ -158,7 +160,7 @@ func newSpaceWithHuman(ctx context.Context, t *testing.T, conn *memqlclient.Conn
 	}
 	// Read back the server-assigned participant id.
 	res, err := qc.QuerySpaceParticipants(ctx, memqlclient.QuerySpaceParticipantsArgs{
-		PartitionId:         spaceID,
+		PartitionId:     spaceID,
 		ParticipantType: "human",
 	})
 	if err != nil {
@@ -201,14 +203,14 @@ func rowID(row memqlclient.Row) string {
 // the space, which is not a supported delivery contract (SubscribeMsg carries
 // a topic pattern, not a space id).
 //
-// The SPA's every-open write is actually mutationCreateSessionForParticipant
+// The SPA's every-open write is actually createSessionForParticipant
 // (callable from the Go SDK since memql#1319/#1321 were fixed); the join write
 // exercises the same participant-interest trigger.
 func openSpaceOnConn(ctx context.Context, t *testing.T, conn *memqlclient.Connection, spaceID, userID string) {
 	t.Helper()
 	qc := memqlclient.NewQueryClient(conn.Dispatcher())
 	if _, err := qc.MutationJoinSpaceAsHuman(ctx, memqlclient.MutationJoinSpaceAsHumanArgs{
-		PartitionId:     spaceID,
+		PartitionId: spaceID,
 		UserId:      userID,
 		DisplayName: "clustere2e probe",
 		Status:      "active",
@@ -299,7 +301,7 @@ func TestClusterCrossReplicaDelivery(t *testing.T) {
 	qc := memqlclient.NewQueryClient(producer.Dispatcher())
 	if _, err := qc.MutationSendTextUtterance(ctx, memqlclient.MutationSendTextUtteranceArgs{
 		UtteranceId:     utteranceID,
-		PartitionId:         spaceID,
+		PartitionId:     spaceID,
 		ParticipantId:   participantID,
 		ParticipantType: "human",
 		Text:            "clustere2e cross-replica delivery probe",

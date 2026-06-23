@@ -218,7 +218,7 @@ func newSectionableLoop(t *testing.T, triageOut string, planRow map[string]any) 
 	t.Helper()
 	fe := &fakeEngine{
 		execResponder: func(query string) (any, error) {
-			if strings.Contains(query, "queryPlanById") {
+			if strings.Contains(query, "planById") {
 				return map[string]any{"output": []any{planRow}}, nil
 			}
 			return nil, nil
@@ -256,15 +256,15 @@ func TestMaybeGenerateSectionable_PersistsParallelAutomation(t *testing.T) {
 		t.Fatalf("sectionable deliverable must generate + persist: handled=%v err=%v", handled, err)
 	}
 	exec, _, _ := ce.snapshot()
-	if countContains(exec, "mutationCreateAuthoringBundle") != 1 {
-		t.Fatalf("expected 1 mutationCreateAuthoringBundle, got %d", countContains(exec, "mutationCreateAuthoringBundle"))
+	if countContains(exec, "createAuthoringBundle") != 1 {
+		t.Fatalf("expected 1 createAuthoringBundle, got %d", countContains(exec, "createAuthoringBundle"))
 	}
 	// 4 sections + assemble + headline = 6 automations + 5 logic = 11 constructs.
-	if got := countContains(exec, "mutationCreateAuthoringConstruct"); got != 11 {
-		t.Fatalf("expected 11 mutationCreateAuthoringConstruct, got %d", got)
+	if got := countContains(exec, "createAuthoringConstruct"); got != 11 {
+		t.Fatalf("expected 11 createAuthoringConstruct, got %d", got)
 	}
-	if countContains(exec, "mutationRecordBundleValidation") != 1 {
-		t.Fatalf("expected 1 mutationRecordBundleValidation, got %d", countContains(exec, "mutationRecordBundleValidation"))
+	if countContains(exec, "recordBundleValidation") != 1 {
+		t.Fatalf("expected 1 recordBundleValidation, got %d", countContains(exec, "recordBundleValidation"))
 	}
 }
 
@@ -297,7 +297,7 @@ func TestMaybeGenerateSectionable_Gate1FailureFallsThrough(t *testing.T) {
 	if err != nil || handled {
 		t.Fatalf("Gate-1 failure must fall through, not persist: handled=%v err=%v", handled, err)
 	}
-	if exec, _, _ := ce.snapshot(); countContains(exec, "mutationCreateAuthoringBundle") != 0 {
+	if exec, _, _ := ce.snapshot(); countContains(exec, "createAuthoringBundle") != 0 {
 		t.Fatalf("a Gate-1 failure must NOT persist a bundle")
 	}
 }
@@ -344,11 +344,11 @@ func TestTriage_SectionableModerate_GeneratesParallel(t *testing.T) {
 	if countContains(si, "goalComplexityTriage") != 1 {
 		t.Fatalf("expected exactly 1 cheap triage call, got %d", countContains(si, "goalComplexityTriage"))
 	}
-	if countContains(exec, "mutationCreateAuthoringBundle") != 1 {
-		t.Fatalf("expected the generated parallel automation to be persisted once, got %d", countContains(exec, "mutationCreateAuthoringBundle"))
+	if countContains(exec, "createAuthoringBundle") != 1 {
+		t.Fatalf("expected the generated parallel automation to be persisted once, got %d", countContains(exec, "createAuthoringBundle"))
 	}
 	// Not a single direct turn -- the parallel automation IS the execution.
-	if countContains(exec, "mutationStartPlan") != 0 {
+	if countContains(exec, "startPlan") != 0 {
 		t.Fatalf("sectionable generation must not shortcut to a single direct turn")
 	}
 }
@@ -374,7 +374,7 @@ func TestTriage_NonSectionableModerate_FallsThroughToDecompose(t *testing.T) {
 	if err != nil || handled {
 		t.Fatalf("non-sectionable moderate must fall through to decompose: handled=%v err=%v", handled, err)
 	}
-	if exec, _, _ := ce.snapshot(); countContains(exec, "mutationCreateAuthoringBundle") != 0 {
+	if exec, _, _ := ce.snapshot(); countContains(exec, "createAuthoringBundle") != 0 {
 		t.Fatalf("non-sectionable goal must NOT generate a parallel automation")
 	}
 }

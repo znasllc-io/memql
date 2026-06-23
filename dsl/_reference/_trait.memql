@@ -55,25 +55,25 @@
 
 @enabled
 @description("Matches records with active==true field.")
-trait traitIsActiveRecord {
+trait isActiveRecord {
   payload.active == true
 }
 
 @enabled
 @description("Matches records with status=='cancelled'.")
-trait traitIsCancelled {
+trait isCancelled {
   payload.status == "cancelled"
 }
 
 @enabled
 @description("Matches records that are not soft-deleted (deleted!=true).")
-trait traitIsNotDeleted {
+trait isNotDeleted {
   payload.deleted != true
 }
 
 @enabled
 @description("Matches records whose status sits in the live set.")
-trait traitIsLive {
+trait isLive {
   payload.status == "active" || payload.status == "saved"
 }
 
@@ -95,13 +95,13 @@ trait traitIsLive {
 
 @enabled
 @description("Matches rows from the cognition:participant concept.")
-trait traitIsParticipantRow {
+trait isParticipantRow {
   concept == "v1:cognition:participant"
 }
 
 @enabled
 @description("Matches rows authored by a specific known identity (placeholder for tests).")
-trait traitIsSeedRow {
+trait isSeedRow {
   createdBy == "seed"
 }
 
@@ -123,13 +123,13 @@ trait traitIsSeedRow {
 
 @enabled
 @description("Caller must hold an identity-issued JWT with admin or owner role.")
-trait traitRequiresAdmin {
+trait requiresAdmin {
   actor.role == "admin" || actor.role == "owner"
 }
 
 @enabled
 @description("Caller is the cluster owner (top-most privilege tier).")
-trait traitIsClusterOwner {
+trait isClusterOwner {
   actor.isClusterOwner == true
 }
 
@@ -212,7 +212,7 @@ trait traitIsClusterOwner {
 //     rejected tree-wide -- #977).
 //
 //         query foo {
-//           filter payload.partitionId==args.partitionId && traitIsActiveRecord
+//           filter payload.partitionId==args.partitionId && isActiveRecord
 //           shape  fooFull
 //         }
 //
@@ -246,12 +246,12 @@ trait traitIsClusterOwner {
 
 @enabled
 @description("Live, registered.")
-trait traitLiveExample {
+trait liveExample {
   payload.active == true
 }
 
 @disabled
 @description("Parsed but skipped at registration. Flip to @enabled to activate.")
-trait traitParkedExample {
+trait parkedExample {
   payload.active == true
 }

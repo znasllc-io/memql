@@ -519,7 +519,7 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// the literal falls through to the node-set evaluator
 	// (evaluateExpressionSetWithContext), which has no LiteralValueNode case
 	// and fails the whole call with "unsupported expression node
-	// *memql.LiteralValueNode" -- the memql#1705 logicConsolidateMemory
+	// *memql.LiteralValueNode" -- the memql#1705 consolidateMemory
 	// dry-run failure. (#1090 short-circuits the bare-literal case earlier in
 	// the LogicRunner; this is the engine-level backstop that also covers the
 	// single-return logic path, which never routes through the LogicRunner.)

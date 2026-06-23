@@ -348,7 +348,7 @@ Use only the tools you have been granted. Be conservative with irreversible acti
 
 // ComposedAgent is the concrete agent spec the planner provisions. It is
 // assembled by ComposeAgent from a seed role + the step's specifics; the
-// caller persists it via mutationCreateAgent (or merges it into an
+// caller persists it via createAgent (or merges it into an
 // existing agent on a dedup hit).
 type ComposedAgent struct {
 	Name             string

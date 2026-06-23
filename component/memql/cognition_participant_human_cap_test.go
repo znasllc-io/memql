@@ -4,7 +4,7 @@ import "testing"
 
 // TestHumanInsertIsActive covers the status-to-active mapping used by
 // the human-cap guard: empty status defaults to active (mirrors
-// mutationJoinSpaceAsHuman's coalesce(status, "active")); only "left"
+// joinSpaceAsHuman's coalesce(status, "active")); only "left"
 // / "idle" and friends are inactive.
 func TestHumanInsertIsActive(t *testing.T) {
 	cases := []struct {

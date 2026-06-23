@@ -26,7 +26,7 @@ func TestResolveCanonicalIdConceptRefs_Typed(t *testing.T) {
 	src := `use cognition.concepts.{ space }
 use identity.concepts.{ user }
 
-mutation participant joinSpace {
+mutate participant joinSpace {
   insert {
     id: concat("participant-", hash(concat(canonicalId(args.partitionId, space), ":", canonicalId(args.userId, user))))
     partitionId: canonicalId(args.partitionId, space)
@@ -51,7 +51,7 @@ mutation participant joinSpace {
 // TestResolveCanonicalIdConceptRefs_StringFormUntouched proves the change is
 // additive: the existing quoted string form passes through unchanged.
 func TestResolveCanonicalIdConceptRefs_StringFormUntouched(t *testing.T) {
-	src := `filter  payload.partitionId==canonicalId(args.partitionId, "v1:cognition:space") && traitIsActiveRecord`
+	src := `filter  payload.partitionId==canonicalId(args.partitionId, "v1:cognition:space") && isActiveRecord`
 	got, err := cidResolver(t).ResolveCanonicalIdConceptRefs(src)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -65,7 +65,7 @@ func TestResolveCanonicalIdConceptRefs_StringFormUntouched(t *testing.T) {
 // not imported (type-check at load).
 func TestResolveCanonicalIdConceptRefs_Unimported(t *testing.T) {
 	src := `use cognition.concepts.{ space }
-mutation x y { insert { id: canonicalId(args.id, widget) } }`
+mutate x y { insert { id: canonicalId(args.id, widget) } }`
 	_, err := cidResolver(t).ResolveCanonicalIdConceptRefs(src)
 	if err == nil {
 		t.Fatalf("expected an error for the unimported concept %q", "widget")

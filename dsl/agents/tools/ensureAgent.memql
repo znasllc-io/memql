@@ -10,7 +10,7 @@
 //   - match:  an existing agent already fits; return its id unchanged.
 //   - extend: an existing agent's roleSlug matches; the tool unions
 //             missing domains + tools onto it (locked items are
-//             preserved by the mutationUpdateAgent lock validator).
+//             preserved by the updateAgent lock validator).
 //   - create: no existing agent fits; the tool composes capabilities
 //             from the chosen role's locked + default sets plus
 //             analysis-supplied additions, and writes a new

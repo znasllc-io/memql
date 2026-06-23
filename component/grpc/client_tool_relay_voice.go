@@ -206,11 +206,11 @@ func (s *streamSession) relayClientToolToBrowser(
 	}
 
 	// Reuse the SAME request mutation + node shape the agent relay uses
-	// (mutationEmitClientToolRequest); the request node id is keyed by callId so
+	// (emitClientToolRequest); the request node id is keyed by callId so
 	// repeated emits upsert rather than stack. agentId is audit-only; the voice
 	// agent attributes via the acting agent on context.
 	agentId := memqlengine.ActingAgentIdFromContext(ctx)
-	mutation := fmt.Sprintf(`mutationEmitClientToolRequest({
+	mutation := fmt.Sprintf(`emitClientToolRequest({
 		"requestId": %s,
 		"callId": %s,
 		"toolName": %s,

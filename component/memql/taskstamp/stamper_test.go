@@ -73,14 +73,14 @@ func TestStamper_AdHoc_FinalizesWrapper(t *testing.T) {
 	}
 
 	// The synthetic wrapper was created...
-	if !fe.has("mutationCreateAdHocPlan") || !fe.has("mutationCreateSemanticTask") {
+	if !fe.has("createAdHocPlan") || !fe.has("createSemanticTask") {
 		t.Fatalf("ad-hoc path must create the synthetic Plan + semantic task; queries=%v", fe.queries)
 	}
 	// ...and FINALIZED (both to succeeded) so it can't sit running.
-	if !fe.has("mutationUpdatePlanStatus", `"status": "succeeded"`) {
+	if !fe.has("updatePlanStatus", `"status": "succeeded"`) {
 		t.Errorf("synthetic adHocAction Plan must be finalized succeeded; queries=%v", fe.queries)
 	}
-	if !fe.has("mutationUpdateTaskStatus", `"status": "succeeded"`) {
+	if !fe.has("updateTaskStatus", `"status": "succeeded"`) {
 		t.Errorf("synthetic callTool task must be finalized succeeded; queries=%v", fe.queries)
 	}
 }
@@ -96,7 +96,7 @@ func TestStamper_AdHoc_ToolError_FinalizesFailed(t *testing.T) {
 	if err == nil {
 		t.Fatal("tool error must propagate")
 	}
-	if !fe.has("mutationUpdatePlanStatus", `"status": "failed"`) {
+	if !fe.has("updatePlanStatus", `"status": "failed"`) {
 		t.Errorf("tool error must finalize the wrapper failed; queries=%v", fe.queries)
 	}
 }
@@ -114,14 +114,14 @@ func TestStamper_RealPlan_NotFinalized(t *testing.T) {
 	if _, err := s.ExecuteToolByName(ctx, "someTool", nil); err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
-	if fe.count("mutationUpdatePlanStatus") != 0 {
+	if fe.count("updatePlanStatus") != 0 {
 		t.Errorf("a real caller-supplied Plan must NOT be status-finalized by the stamper; queries=%v", fe.queries)
 	}
-	if fe.count("mutationUpdateTaskStatus") != 0 {
+	if fe.count("updateTaskStatus") != 0 {
 		t.Errorf("a real Plan's semantic task must NOT be finalized by the stamper; queries=%v", fe.queries)
 	}
 	// It still records the tool invocation.
-	if !fe.has("mutationCreateToolInvocationTask") {
+	if !fe.has("createToolInvocationTask") {
 		t.Errorf("real-plan path should still stamp the toolInvocation; queries=%v", fe.queries)
 	}
 }
@@ -157,7 +157,7 @@ func TestStamper_RealPlan_SelfPlanningTool_StillStamped(t *testing.T) {
 	if _, err := s.ExecuteToolByName(ctx, "produceArtifact", nil); err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
-	if !fe.has("mutationCreateToolInvocationTask") {
+	if !fe.has("createToolInvocationTask") {
 		t.Errorf("a self-planning tool under a real Plan should still stamp its toolInvocation; queries=%v", fe.queries)
 	}
 }

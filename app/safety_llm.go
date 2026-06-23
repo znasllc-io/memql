@@ -20,7 +20,7 @@ import (
 const EnvSafetyLLMProvider = "MEMQL_SAFETY_LLM_PROVIDER"
 
 // EnvPersistClassifications opts a node OUT of persisting
-// v1:safety:classification rows via mutationInsertSafetyClassification
+// v1:safety:classification rows via insertSafetyClassification
 // (memql#234). Default is on (persist whenever the engine is ready).
 // Recognised off values: "off" / "false" / "0" (case-insensitive,
 // trimmed).

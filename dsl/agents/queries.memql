@@ -4,18 +4,18 @@
 // reading v1:agents:agent + v1:agents:agentAuthorization rows. Every
 // BFF reads through these queries (Cockpit's Agents tab, CoPresent's
 // agent panel, the Planner's dedupe lookup) so adding a new BFF means
-// "wire it up to call queryAllAgents" -- not "re-implement the agent
+// "wire it up to call allAgents" -- not "re-implement the agent
 // list query."
 
 use agents.concepts.{ agent, agentAuthorization, agentRole, avatarPersona, skill, skillChangeEvent }
 
 @enabled
 @description("Returns available AI agent templates. Optional filter: groupId")
-query agent queryActiveAgents {
+query agent activeAgents {
   args {
     groupId  string
   }
-  filter  traitIsActiveRecord && traitIsNotDeleted && when(args.groupId) { args.groupId in payload.groupIds }
+  filter  isActiveRecord && isNotDeleted && when(args.groupId) { args.groupId in payload.groupIds }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -35,15 +35,15 @@ query agent queryActiveAgents {
 @public
 @description("All active standing authorizations granted by a user, across all agents and plan kinds.")
 @unbounded("per-user standing authorizations -- a small bounded set the caller evaluates whole for authz decisions")
-query agentAuthorization queryAgentAuthorizationsForUser {
+query agentAuthorization agentAuthorizationsForUser {
   args {
     userId  string  @required
   }
-  filter  payload.userId==args.userId && traitIsActiveRecord
+  filter  payload.userId==args.userId && isActiveRecord
   shape   agentAuthorizationFull
 }
 
-// queryAgentById - Get Agent by ID
+// agentById - Get Agent by ID
 // ==================================
 //
 // Retrieves an agent concept by its node ID. Returns the agent's
@@ -52,7 +52,7 @@ query agentAuthorization queryAgentAuthorizationsForUser {
 
 @enabled
 @description("Get an agent by ID with full configuration.")
-query agent queryAgentById {
+query agent agentById {
   args {
     agentId  string  @required
   }
@@ -60,7 +60,7 @@ query agent queryAgentById {
   shape   agentFull
 }
 
-// queryAgentOwner -- agent's owning-user lookup
+// agentOwner -- agent's owning-user lookup
 // ==============================================
 //
 // Returns the v1:agents:agent row projected through agentFull,
@@ -71,7 +71,7 @@ query agent queryAgentById {
 
 @enabled
 @description("Resolve an agent's owning-user (ownerUserId / createdBy) by id.")
-query agent queryAgentOwner {
+query agent agentOwner {
   args {
     agentId  string  @required
   }
@@ -89,8 +89,8 @@ query agent queryAgentOwner {
 @enabled
 @description("Returns the roleSlug values currently occupied by non-deleted agents in this partition. Used by the create-agent UI to filter out already-taken roles.")
 @unbounded("distinct role slugs in use -- a small bounded dedupe set consumed whole")
-query agent queryAgentRoleSlugsInUse {
-  filter  traitIsActiveRecord && traitIsNotDeleted
+query agent agentRoleSlugsInUse {
+  filter  isActiveRecord && isNotDeleted
   shape   agentRoleSlugLite
 }
 
@@ -103,8 +103,8 @@ query agent queryAgentRoleSlugsInUse {
 
 @enabled
 @description("Returns all AI agent templates regardless of active status.")
-query agent queryAllAgents {
-  filter  traitIsNotDeleted
+query agent allAgents {
+  filter  isNotDeleted
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -125,11 +125,11 @@ query agent queryAllAgents {
 @public
 @description("Per Q10 layered dedupe Layer 1: list every active agent owned by a user (any roleSlug, any space scope). The Planner Agent's createSpecialist decision feeds this list into the similarity check before proposing a new agent. Platform-infrastructure agents (payload.kind=='system' -- MemQL Planner, MemQL Trainer) are returned by this query and filtered out structurally by loadExistingAgents in integrations/agents/factory.go before they enter the dedupe candidate pool; the filter lives one layer up rather than in the query so the same query can serve other callers that legitimately need system rows.")
 @unbounded("per-user agents minimal projection for dedupe -- the caller must see all to dedupe")
-query agent queryActiveAgentsForUser {
+query agent activeAgentsForUser {
   args {
     ownerUserId  string  @required
   }
-  filter  payload.ownerUserId==args.ownerUserId && traitIsActiveRecord && traitIsNotDeleted
+  filter  payload.ownerUserId==args.ownerUserId && isActiveRecord && isNotDeleted
   shape   agentMinimalForDedupe
 }
 
@@ -145,26 +145,26 @@ query agent queryActiveAgentsForUser {
 @public
 @description("Resolve the active General Assistant agent owned by a user. Returns 0 or 1 rows. Used by autoJoinAI to derive a canonical agent id consistent across all callers of mutationCreateDailySpace -- the space row's ownerUserId is the same regardless of who triggered the mutation, while args.event.payload.actor (createdBy) varies. memql#273.")
 @unbounded("the per-user assistant agent (roleSlug==assistant singleton) -- bounded to a single row")
-query agent queryAssistantAgentForUser {
+query agent assistantAgentForUser {
   args {
     ownerUserId  string  @required
   }
-  filter  payload.ownerUserId==args.ownerUserId && payload.roleSlug=="assistant" && traitIsActiveRecord && traitIsNotDeleted
+  filter  payload.ownerUserId==args.ownerUserId && payload.roleSlug=="assistant" && isActiveRecord && isNotDeleted
   shape   agentMinimalForDedupe
 }
 
 // Caching (5.5 / memql#1969): single-row role lookup off the rarely-
 // changing role catalog; same cross-node eviction guarantee as
-// queryActiveAgentRoles (v1:agents:* forwarded in component/node/routing.go).
+// activeAgentRoles (v1:agents:* forwarded in component/node/routing.go).
 @enabled
 @description("Resolve a single agentRole row by its slug. Used by the role catalog seeder (idempotency check) and by the agent-creation path (look up the locked + default sets when materializing a new agent for the slug).")
 @unbounded("agent role by unique slug -- bounded to a single row")
 @cache(ttl="300")
-query agentRole queryAgentRoleBySlug {
+query agentRole agentRoleBySlug {
   args {
     slug  string  @required
   }
-  filter  payload.slug==args.slug && traitIsActiveRecord
+  filter  payload.slug==args.slug && isActiveRecord
   shape   agentRoleFull
 }
 
@@ -182,8 +182,8 @@ query agentRole queryAgentRoleBySlug {
 @description("List every active agentRole row. Backs the role picker on the cockpit's agent-creation surface and on the role-management view. predefined rows render with a lock icon; user-created rows are fully editable.")
 @unbounded("agent role catalog -- a small admin-defined bounded set consumed whole")
 @cache(ttl="300")
-query agentRole queryActiveAgentRoles {
-  filter  traitIsActiveRecord
+query agentRole activeAgentRoles {
+  filter  isActiveRecord
   shape   agentRoleFull
 }
 
@@ -194,11 +194,11 @@ query agentRole queryActiveAgentRoles {
 @description("Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it.")
 @unbounded("skill by unique slug -- bounded to a single row")
 @cache(ttl="300")
-query skill querySkillBySlug {
+query skill skillBySlug {
   args {
     slug  string  @required
   }
-  filter  payload.slug==args.slug && traitIsActiveRecord
+  filter  payload.slug==args.slug && isActiveRecord
   shape   skillFull
 }
 
@@ -209,8 +209,8 @@ query skill querySkillBySlug {
 @description("List every active skill catalog row -- summary projection. Backs the Skills picker on the role-edit surface (cockpit#124) and the Planner Agent's candidate scan when deciding which skill bundle to attach in extendSpecialist. Predefined rows render with a lock icon; user-created rows are fully editable.")
 @unbounded("skill catalog (summary) -- a small admin-defined bounded registry consumed whole")
 @cache(ttl="300")
-query skill queryActiveSkills {
-  filter  traitIsActiveRecord
+query skill activeSkills {
+  filter  isActiveRecord
   shape   skillSummary
 }
 
@@ -219,28 +219,28 @@ query skill queryActiveSkills {
 // highest-value catalog cache. Cross-node eviction via v1:agents:* forwarding
 // (component/node/routing.go).
 @enabled
-@description("List every active skill catalog row with its full bundle composition (domainIds + toolSlugs + liveSourceIds). Heavier projection than queryActiveSkills; use this when a caller needs to resolve agent capabilities by unioning skill bundles in-process (cockpit#124's Agents view does this on every detail render). The catalog is small (25 rows in Phase 2; growth tracked via the Phase 3 mintSkill roadmap) so the single-shot full-list query is cheaper than N querySkillBySlug round-trips.")
+@description("List every active skill catalog row with its full bundle composition (domainIds + toolSlugs + liveSourceIds). Heavier projection than activeSkills; use this when a caller needs to resolve agent capabilities by unioning skill bundles in-process (cockpit#124's Agents view does this on every detail render). The catalog is small (25 rows in Phase 2; growth tracked via the Phase 3 mintSkill roadmap) so the single-shot full-list query is cheaper than N skillBySlug round-trips.")
 @unbounded("skill catalog (full) -- a small admin-defined bounded registry consumed whole")
 @cache(ttl="300")
-query skill queryActiveSkillsFull {
-  filter  traitIsActiveRecord
+query skill activeSkillsFull {
+  filter  isActiveRecord
   shape   skillFull
 }
 
 @enabled
-@description("Per #157 (Phase 1 of the skills rollout): list active skills that bundle a caller-supplied knowledge domain id. The Planner Agent's Phase 2 refresh loop calls queryDueRefreshDomains first (already shipping), then fans out one call per stale domain id to discover 'which skills are downstream of this domain and want a re-attach run after the underlying knowledge refreshes complete'. Pure derivation -- no new state. Argument-as-scalar (rather than list intersection) mirrors queryActiveAgents's per-group fanout pattern so the existing DSL push-down operator surface stays sufficient.")
+@description("Per #157 (Phase 1 of the skills rollout): list active skills that bundle a caller-supplied knowledge domain id. The Planner Agent's Phase 2 refresh loop calls queryDueRefreshDomains first (already shipping), then fans out one call per stale domain id to discover 'which skills are downstream of this domain and want a re-attach run after the underlying knowledge refreshes complete'. Pure derivation -- no new state. Argument-as-scalar (rather than list intersection) mirrors activeAgents's per-group fanout pattern so the existing DSL push-down operator surface stays sufficient.")
 @unbounded("skills needing refresh on a stale domain -- an internal refresh sweep over the bounded skill catalog")
-query skill querySkillNeedsRefresh {
+query skill skillNeedsRefresh {
   args {
     staleDomainId  string  @required
   }
-  filter  traitIsActiveRecord && when(args.staleDomainId) { args.staleDomainId in payload.domainIds }
+  filter  isActiveRecord && when(args.staleDomainId) { args.staleDomainId in payload.domainIds }
   shape   skillSummary
 }
 
 @enabled
 @description("Phase 3 (memql#159 / cockpit#125): list v1:agents:skillChangeEvent rows for a target agent. Backs the cockpit planner trace viewer's per-agent skill-history surface -- the operator selects a Plan, sees its ownerAgentId, and this query feeds the timeline of every attach / reconfigure recorded against that agent (newest first). The skillChangeEvent rows are append-only, so this is just a filter + sort against the time-series.")
-query skillChangeEvent querySkillChangeEventsForAgent {
+query skillChangeEvent skillChangeEventsForAgent {
   args {
     targetAgentId  string  @required
   }
@@ -256,17 +256,17 @@ query skillChangeEvent querySkillChangeEventsForAgent {
 @enabled
 @description("List active avatar personas in the operator catalog (memql#609). Backs the Create-Assistant persona picker (copresent#239); the SPA filters to the user's selected gender client-side over this small catalog. `vendor` is an OPTIONAL filter -- omit it to list every active persona across vendors; pass vendor=\"simli\" to scope to custom Simli avatars (memql#1708: the predicate was a hardcoded vendor==simli that silently dropped every other vendor's personas from the list, even though by-id reads returned them). Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql.")
 @unbounded("avatar persona catalog -- a small bounded set consumed whole")
-query avatarPersona queryAvatarPersonas {
+query avatarPersona avatarPersonas {
   args {
     vendor  string  @enum("anam", "simli")  @description("Optional vendor filter. Omit to list every active persona; pass to scope to one vendor.")
   }
-  filter  traitIsActiveRecord && when(args.vendor) { payload.vendor==args.vendor }
+  filter  isActiveRecord && when(args.vendor) { payload.vendor==args.vendor }
   shape   avatarPersonaFull
 }
 
 @enabled
 @description("Resolve a single avatar persona by id. Hydrates an agent's stamped avatarPersonaId for display and resolves the vendor + vendor-issued personaId.")
-query avatarPersona queryAvatarPersonaById {
+query avatarPersona avatarPersonaById {
   args {
     avatarPersonaId  string  @required
   }

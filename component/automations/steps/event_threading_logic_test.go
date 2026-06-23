@@ -102,14 +102,14 @@ func TestEventContextThreadsIntoNestedSteps(t *testing.T) {
 		wantValues []string
 	}{
 		{
-			logic: "logicVoiceMigrationOnSecondHuman",
+			logic: "voiceMigrationOnSecondHuman",
 			event: map[string]any{"topic": "node.created", "kind": "node.created", "payload": map[string]any{
 				"id": "user-2", "activePartitionId": "space-xyz",
 			}},
 			wantValues: []string{"space-xyz"},
 		},
 		{
-			logic: "logicConflictDetection",
+			logic: "conflictDetection",
 			event: map[string]any{"topic": "node.created", "kind": "node.created", "payload": map[string]any{
 				"id": "rec-1", "partitionId": "space-1", "recordType": "contact",
 				"naturalKeyField": "email", "naturalKeyValue": "a@b.io",
@@ -117,7 +117,7 @@ func TestEventContextThreadsIntoNestedSteps(t *testing.T) {
 			wantValues: []string{"space-1", "contact", "a@b.io"},
 		},
 		{
-			logic: "logicGenerateResponse",
+			logic: "generateResponse",
 			event: map[string]any{"topic": "cognition.response.requested", "kind": "ai", "payload": map[string]any{
 				"utteranceId": "utt-1", "siParticipantId": "p-1", "partitionId": "space-1",
 				"agentId": "a-1", "promptTemplateId": "agentReply", "promptData": map[string]any{},

@@ -13,7 +13,7 @@ use workbench.concepts.{ workspace }
 
 @enabled
 @description("Create the v1:workbench:workspace row for a Plan on first workbenchHost call. Storage root is supplied by the workbench integration which has already created the directory on disk.")
-mutation workspace mutationProvisionWorkspace {
+mutate workspace provisionWorkspace {
   args {
     workspaceId  string  @required @description("Synthesized id, typically `{planId}` since one workspace per Plan.")
     planId       string  @required
@@ -33,7 +33,7 @@ mutation workspace mutationProvisionWorkspace {
 
 @enabled
 @description("Bump lastUsedAt on a workbench workspace after a successful dispatch. Cheap; called per successful workbenchHost call.")
-mutation workspace mutationTouchWorkspace {
+mutate workspace touchWorkspace {
   args {
     workspaceId  string  @required
   }
@@ -45,7 +45,7 @@ mutation workspace mutationTouchWorkspace {
 
 @enabled
 @description("Mark a workbench workspace as released. Called from releaseWorkspaceOnPlanTerminal when the parent Plan reaches a terminal status. The actual on-disk teardown is the workbench integration's responsibility -- this mutation only flips the lifecycle bit.")
-mutation workspace mutationReleaseWorkspace {
+mutate workspace releaseWorkspace {
   args {
     workspaceId  string  @required
     reason       string  @required @enum("plan_terminal", "explicit", "ttl_expired") @description("Why the workspace was released. Drives the released-row audit trail.")

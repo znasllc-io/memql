@@ -123,11 +123,11 @@ func TestRunCapture_FlattensMultiPhaseDesign(t *testing.T) {
 		},
 		execResponder: func(query string) (any, error) {
 			switch {
-			case strings.Contains(query, "queryAuthoringBundleForPlan"):
+			case strings.Contains(query, "authoringBundleForPlan"):
 				return map[string]any{"output": []any{}}, nil
-			case strings.Contains(query, "queryPlanById"):
+			case strings.Contains(query, "planById"):
 				return map[string]any{"output": []any{plan}}, nil
-			case strings.Contains(query, "queryCataloguedConstructsForOwner"):
+			case strings.Contains(query, "cataloguedConstructsForOwner"):
 				return map[string]any{"output": []any{}}, nil
 			}
 			return nil, nil
@@ -146,7 +146,7 @@ func TestRunCapture_FlattensMultiPhaseDesign(t *testing.T) {
 	exec, _, _ := ce.snapshot()
 	autos := 0
 	for _, q := range exec {
-		if strings.Contains(q, "mutationCreateAuthoringConstruct") && strings.Contains(q, `"kind":"automation"`) {
+		if strings.Contains(q, "createAuthoringConstruct") && strings.Contains(q, `"kind":"automation"`) {
 			autos++
 		}
 	}

@@ -6,20 +6,20 @@
 // resolve the full plan / task / taskState mutation API regardless of
 // which product layer (copresent or otherwise) is wired in on top.
 //
-// History: mutationCreatePlan / mutationCreateTask / mutationUpdatePlanStatus
-// / mutationUpdateTaskStatus / mutationPersistTaskState /
-// mutationCreateScopeElevationPlan were originally authored in
+// History: createPlan / createTask / updatePlanStatus
+// / updateTaskStatus / persistTaskState /
+// createScopeElevationPlan were originally authored in
 // memql-bff-copresent/dsl/copresent/mutations.memql. They moved
 // here on 2026-05-17 because the BFF binary the cockpit connects to
 // can't be guaranteed to have copresent in its DSL graph -- and the
-// Planner tab's queryAllPlans / mutationCreatePlan calls were
+// Planner tab's allPlans / createPlan calls were
 // failing with "function not found" as a result.
 
 use planner.concepts.{ plan, task, taskState, responsibility }
 
 @enabled
 @description("Create a synthetic Plan that wraps an ad-hoc tool call made outside any user-initiated planning context. Per Q5: every tool call must produce a Task; Tasks must have a parent Plan; chat-driven tool calls (no user-facing Plan) get a synthetic Plan with kind='adHocAction' so the invariant holds. Status is set to running and completes immediately when the synthetic semantic Task wrapping the tool call resolves.")
-mutation plan mutationCreateAdHocPlan {
+mutate plan createAdHocPlan {
   args {
     planId        string  @required
     partitionId       string  @required
@@ -46,8 +46,8 @@ mutation plan mutationCreateAdHocPlan {
 }
 
 @enabled
-@description("Create a semantic Task -- the Planner-decision unit. Differs from mutationCreateTask (in bff-copresent) by carrying the new category/logicalStepId/attemptNumber fields explicitly. Used by the Planner Agent at decomposition time and by the taskstamp Stamper to materialize the parent semantic Task for ad-hoc tool calls.")
-mutation task mutationCreateSemanticTask {
+@description("Create a semantic Task -- the Planner-decision unit. Differs from createTask (in bff-copresent) by carrying the new category/logicalStepId/attemptNumber fields explicitly. Used by the Planner Agent at decomposition time and by the taskstamp Stamper to materialize the parent semantic Task for ad-hoc tool calls.")
+mutate task createSemanticTask {
   args {
     taskId          string  @required
     planId          string  @required
@@ -76,8 +76,8 @@ mutation task mutationCreateSemanticTask {
 }
 
 @enabled
-@description("Create a toolInvocation Task -- the engine-auto-stamped record of an agent tool call. Per Q5+Q6: every tool call by an executing agent produces one of these, parented to the semantic Task that was executing when the tool fired. The engine's tool-dispatch wrapper inserts this row at dispatch time then calls mutationCompleteToolInvocation when the call returns. parentTaskId is required (a toolInvocation row must have a semantic parent); the engine enforces this invariant.")
-mutation task mutationCreateToolInvocationTask {
+@description("Create a toolInvocation Task -- the engine-auto-stamped record of an agent tool call. Per Q5+Q6: every tool call by an executing agent produces one of these, parented to the semantic Task that was executing when the tool fired. The engine's tool-dispatch wrapper inserts this row at dispatch time then calls completeToolInvocation when the call returns. parentTaskId is required (a toolInvocation row must have a semantic parent); the engine enforces this invariant.")
+mutate task createToolInvocationTask {
   args {
     taskId          string  @required
     planId          string  @required
@@ -101,7 +101,7 @@ mutation task mutationCreateToolInvocationTask {
     // @default isn't applied to this insert, so the pre-dispatch stamp failed
     // schema validation ("missing properties: 'executionSurface'") and every
     // tool call went un-stamped. A toolInvocation always runs inside the agent
-    // node's process, so it's always inProcess (mirrors mutationCreateSemanticTask). (memql#889)
+    // node's process, so it's always inProcess (mirrors createSemanticTask). (memql#889)
     executionSurface: "inProcess"
     input: coalesce(args.toolArgs, {})
     startedAt: now()
@@ -109,8 +109,8 @@ mutation task mutationCreateToolInvocationTask {
 }
 
 @enabled
-@description("Update a toolInvocation Task to a terminal state with its result or error. Companion to mutationCreateToolInvocationTask. Status MUST be 'succeeded' or 'failed' (the only terminal transitions a toolInvocation can take -- there is no 'paused' or 'cancelled' on a tool call). On succeeded: toolResult populated. On failed: errorMessage populated.")
-mutation task mutationCompleteToolInvocation {
+@description("Update a toolInvocation Task to a terminal state with its result or error. Companion to createToolInvocationTask. Status MUST be 'succeeded' or 'failed' (the only terminal transitions a toolInvocation can take -- there is no 'paused' or 'cancelled' on a tool call). On succeeded: toolResult populated. On failed: errorMessage populated.")
+mutate task completeToolInvocation {
   args {
     taskId        string  @required
     status        string  @required
@@ -140,7 +140,7 @@ mutation task mutationCompleteToolInvocation {
 // concrete symptom that surfaced the layering bug.
 // -----------------------------------------------------------------------------
 
-// mutationCreatePlan -- single write path for Plan creation.
+// createPlan -- single write path for Plan creation.
 // Status defaults to 'queued' so the routePlanOnQueue automation
 // fires immediately. Optional fields accept the full v1 surface
 // (parentPlanId for sub-plans, triggerSource for tiered trust,
@@ -149,7 +149,7 @@ mutation task mutationCompleteToolInvocation {
 
 @enabled
 @description("Insert a v1:planner:plan row in status='queued'. Single write path for Plan creation across all trigger sources.")
-mutation plan mutationCreatePlan {
+mutate plan createPlan {
   args {
     planId                string
     partitionId               string  @required
@@ -185,7 +185,7 @@ mutation plan mutationCreatePlan {
   }
 }
 
-// mutationStartPlan
+// startPlan
 // =================
 //
 // Flip a queued Plan to running. Called from the cockpit's Run
@@ -195,7 +195,7 @@ mutation plan mutationCreatePlan {
 // then drives the actual task execution.
 @enabled
 @description("Promote a Plan from queued (planning complete, tasks emitted) to running. Triggered by the user clicking Run in the cockpit Planner tab, or by an automation that auto-runs plans on the user's behalf.")
-mutation plan mutationStartPlan {
+mutate plan startPlan {
   args {
     planId  string  @required
   }
@@ -206,11 +206,11 @@ mutation plan mutationStartPlan {
   }
 }
 
-// mutationCreateScopeElevationPlan
+// createScopeElevationPlan
 // =================================
 //
 // Single write path for scope-elevation Plan creation. Distinct
-// from mutationCreatePlan (which writes status='queued' for the
+// from createPlan (which writes status='queued' for the
 // normal planner pickup path) -- this mutation lands the Plan
 // directly in awaitingFeedback / scope_elevation_required so the
 // emitScopeElevationCanvasCard automation fires and the card
@@ -232,17 +232,17 @@ mutation plan mutationStartPlan {
 //                         and options offer the requested scope down to "deny".
 //
 // On user approval (frontend):
-//   1. mutationUpdateAgentAuthScope on the GA's authorization row
+//   1. updateAgentAuthScope on the GA's authorization row
 //      with the chosen scope (full / interact / observe).
-//   2. mutationUpdatePlanStatus(planId, status='succeeded') so the
+//   2. updatePlanStatus(planId, status='succeeded') so the
 //      Plan terminates and the card converts to its post-approval
 //      shape.
 //
-// On deny: mutationUpdatePlanStatus(planId, status='cancelled').
+// On deny: updatePlanStatus(planId, status='cancelled').
 
 @enabled
 @description("Insert a Plan in awaitingFeedback / scope_elevation_required for a pending computer_use task. The emitScopeElevationCanvasCard automation lands the canvas card; the user approves or denies via the card's buttons.")
-mutation plan mutationCreateScopeElevationPlan {
+mutate plan createScopeElevationPlan {
   args {
     planId          string  @required
     agentId         string  @required
@@ -279,13 +279,13 @@ mutation plan mutationCreateScopeElevationPlan {
   }
 }
 
-// mutationRequestPlanFeedback
+// requestPlanFeedback
 // ===========================
 //
 // Transition an EXISTING, running Plan to awaitingFeedback /
 // feedback_required when the owning agent (via the requestUserFeedback
 // tool) needs the user to supply missing detail mid-task. The generic
-// counterpart to mutationCreateScopeElevationPlan: that one INSERTS a
+// counterpart to createScopeElevationPlan: that one INSERTS a
 // fresh scope-elevation Plan; this one UPDATEs the Plan the agent is
 // already running inside (so the chat anchor, goal, ownership, phases,
 // and accumulated metrics are all preserved).
@@ -318,7 +318,7 @@ mutation plan mutationCreateScopeElevationPlan {
 
 @enabled
 @description("Transition an existing running Plan to awaitingFeedback / feedback_required with a feedbackRequest{question, kind, options?, timeoutAt}. Backs the requestUserFeedback agent tool. Partial-update via update() -- only status / feedbackReason / feedbackRequest change; required fields inherit from the prior row. The user's answer (feedbackResponse + status->running) resumes the Plan via the existing planner re-invocation path.")
-mutation plan mutationRequestPlanFeedback {
+mutate plan requestPlanFeedback {
   args {
     planId           string  @required
     feedbackRequest  object  @required
@@ -331,7 +331,7 @@ mutation plan mutationRequestPlanFeedback {
   }
 }
 
-// mutationAttachPlanFeedback
+// attachPlanFeedback
 // ===========================
 //
 // Generic feedback intake (epic memql#1404 / child memql#1405). The
@@ -339,7 +339,7 @@ mutation plan mutationRequestPlanFeedback {
 // parked in awaitingFeedback, records it, and resumes the Plan with the
 // feedback folded into the owning agent's resume context. It is the
 // generic counterpart to the scope-elevation Allow/Deny path
-// (mutationUpdatePlanStatus): scope elevation is a binary
+// (updatePlanStatus): scope elevation is a binary
 // approve/deny via the card's buttons; THIS is the open-ended
 // "answer the question the agent asked" path.
 //
@@ -378,7 +378,7 @@ mutation plan mutationRequestPlanFeedback {
 
 @enabled
 @description("Attach a user's free-text feedback to a Plan parked in awaitingFeedback and resume it (epic memql#1404 / #1405). Stamps feedbackResponse{response, respondedBy, respondedAt}, transitions awaitingFeedback -> running (fresh startedAt for a clean cross-replica resume claim), and clears feedbackReason/feedbackRequest so the request is consumed. The engine guard (validateFeedbackIntakeTransition) rejects the write unless the prior status is awaitingFeedback and the actor owns the Plan. The owning agent is re-invoked with the feedback in its resume context. Callable by the needs-feedback card AND the assistant chat path (#1406).")
-mutation plan mutationAttachPlanFeedback {
+mutate plan attachPlanFeedback {
   args {
     planId    string  @required
     feedback  string  @required
@@ -399,7 +399,7 @@ mutation plan mutationAttachPlanFeedback {
 
 @enabled
 @description("Insert a v1:planner:task row in status='queued'. Single write path for Task creation, called by the planner during decomposition.")
-mutation task mutationCreateTask {
+mutate task createTask {
   args {
     taskId            string
     planId            string  @required
@@ -431,7 +431,7 @@ mutation task mutationCreateTask {
 
 @enabled
 @description("Persist a Task's working state for async parking + planner re-invocation. Called when a Task transitions to paused / awaitingFeedback.")
-mutation taskState mutationPersistTaskState {
+mutate taskState persistTaskState {
   args {
     stateId            string
     taskId             string    @required
@@ -450,7 +450,7 @@ mutation taskState mutationPersistTaskState {
   }
 }
 
-// mutationUpdatePlanStatus -- partial Plan status transition.
+// updatePlanStatus -- partial Plan status transition.
 // Bumps payload.status; optional args land any additional state the
 // transition produces (assigned agent, output, error, lifecycle
 // timestamps, pause/feedback bookkeeping, recommendationCardId,
@@ -466,7 +466,7 @@ mutation taskState mutationPersistTaskState {
 
 @enabled
 @description("Update a Plan's status with the full v1 lifecycle field set (paused/awaitingFeedback/needsAgent + metrics + estimate + token spend). Partial-update via update() -- only the fields you pass are changed; required fields inherit from the prior row.")
-mutation plan mutationUpdatePlanStatus {
+mutate plan updatePlanStatus {
   args {
     planId                    string  @required
     status                    string  @required
@@ -515,7 +515,7 @@ mutation plan mutationUpdatePlanStatus {
   }
 }
 
-// mutationRecordPlannerInvocation -- bump the cumulative per-plan LLM
+// recordPlannerInvocation -- bump the cumulative per-plan LLM
 // spend counters without touching status. Used by the Planner Agent
 // loop after every plannerAgent call to advance metrics.llmCallCount +
 // tokenSpent so the hard per-plan ceiling (memql#819) keeps climbing
@@ -524,7 +524,7 @@ mutation plan mutationUpdatePlanStatus {
 // row -- this is NOT a status transition.
 @enabled
 @description("Record a planner-agent LLM invocation against a Plan: advance metrics.llmCallCount + tokenSpent without changing status. Caller computes the new totals Go-side (the parser has no arithmetic).")
-mutation plan mutationRecordPlannerInvocation {
+mutate plan recordPlannerInvocation {
   args {
     planId      string  @required
     tokenSpent  int
@@ -537,7 +537,7 @@ mutation plan mutationRecordPlannerInvocation {
   }
 }
 
-// mutationUpdateTaskStatus -- partial Task status transition.
+// updateTaskStatus -- partial Task status transition.
 // Partial-update via update() so the caller doesn't have to re-pass
 // the Task concept's @required fields (planId, kind, seq,
 // executionSurface, input). The engine reads the latest existing
@@ -546,7 +546,7 @@ mutation plan mutationRecordPlannerInvocation {
 
 @enabled
 @description("Update a Task's status with optional output / error / lifecycle / metrics / parking fields. Partial-update via update() -- only the fields you pass change; required fields inherit from the prior row.")
-mutation task mutationUpdateTaskStatus {
+mutate task updateTaskStatus {
   args {
     taskId              string  @required
     status              string  @required
@@ -587,7 +587,7 @@ mutation task mutationUpdateTaskStatus {
 
 @enabled
 @description("Create a v1:planner:responsibility in status='draft'. ownerUserId is stamped from actor.userId (owned tier) so a caller cannot author a directive owned by someone else. trigger discriminates the archetype: recurring carries schedule, reactive carries condition, standing carries neither. Single write path for responsibility creation.")
-mutation responsibility mutationCreateResponsibility {
+mutate responsibility createResponsibility {
   args {
     responsibilityId  string
     statement         string  @required
@@ -622,7 +622,7 @@ mutation responsibility mutationCreateResponsibility {
 
 @enabled
 @description("Update an existing v1:planner:responsibility's editable fields (statement / schedule / condition / target binding / scope / enabled). Partial-update via update() -- only the fields you pass change; required fields inherit from the prior row. ownerUserId re-stamped from actor.userId (owned tier) so a caller can only rewrite their own rows.")
-mutation responsibility mutationUpdateResponsibility {
+mutate responsibility updateResponsibility {
   args {
     responsibilityId  string  @required
     statement         string
@@ -656,7 +656,7 @@ mutation responsibility mutationUpdateResponsibility {
 
 @enabled
 @description("Transition a v1:planner:responsibility's lifecycle status (draft / active / paused / archived). Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier).")
-mutation responsibility mutationSetResponsibilityStatus {
+mutate responsibility setResponsibilityStatus {
   args {
     responsibilityId  string  @required
     status            string  @required  @enum("draft", "active", "paused", "archived")
@@ -670,7 +670,7 @@ mutation responsibility mutationSetResponsibilityStatus {
 
 @enabled
 @description("Record the outcome of an evaluation/run on a v1:planner:responsibility: stamp lastEvaluatedAt to now() and lastResult to the run headline. Called by the reactive-loop evaluator (epic #632) after a reactive condition check, a recurring scheduled tick, or a standing review. ownerUserId re-stamped from actor.userId (owned tier).")
-mutation responsibility mutationRecordResponsibilityEvaluation {
+mutate responsibility recordResponsibilityEvaluation {
   args {
     responsibilityId  string  @required
     lastResult        string  @required
@@ -685,7 +685,7 @@ mutation responsibility mutationRecordResponsibilityEvaluation {
 
 @enabled
 @description("Persist a routing decision onto a v1:planner:responsibility (epic #632, C2): bind the resolved agent (assignedAgentId), optional role slug (assignedRoleSlug), and flip targetKind off 'unassigned' onto the concrete kind (assistant / specialist). Called by the reactive-loop router after agentFactoryAnalyze + createSpecialist/extendSpecialist mint or match an agent. Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier) so the router can only rewrite the row's own owner -- the poller impersonates the responsibility's owner in the AccessContext before calling, so this lands as an owned write.")
-mutation responsibility mutationAssignResponsibility {
+mutate responsibility assignResponsibility {
   args {
     responsibilityId  string  @required
     targetKind        string  @required  @enum("assistant", "specialist")
@@ -708,17 +708,17 @@ mutation responsibility mutationAssignResponsibility {
 // runs the responsibilityIntake prompt on a freshly-created draft and
 // writes the result through these three mutations. They are called by the
 // system:planner actor, NOT the owner, so -- exactly like
-// mutationUpdatePlanStatus -- they DO NOT re-stamp ownerUserId (the
+// updatePlanStatus -- they DO NOT re-stamp ownerUserId (the
 // partial update() inherits it from the prior row) and never reference a
 // user-scope field, so they classify as system writes rather than the
-// owned tier. Authoring the row stays owned (mutationCreateResponsibility
+// owned tier. Authoring the row stays owned (createResponsibility
 // stamps ownerUserId from the human caller); these intake transitions are
 // engine-internal bookkeeping on a row the human already owns.
 // -----------------------------------------------------------------------------
 
 @enabled
 @description("Mark a v1:planner:responsibility's intake as in-progress (issue #637). The intake dispatcher calls this when it claims a freshly-created draft so a created+updated double-fire (or a multi-node race) doesn't run the responsibilityIntake prompt twice -- intakeStatus flips '' -> 'pending'. System write (system:planner actor): no ownerUserId re-stamp, no user-scope reference, so it's engine-internal bookkeeping on a row the human already owns.")
-mutation responsibility mutationMarkResponsibilityIntakePending {
+mutate responsibility markResponsibilityIntakePending {
   args {
     responsibilityId  string  @required
   }
@@ -730,7 +730,7 @@ mutation responsibility mutationMarkResponsibilityIntakePending {
 
 @enabled
 @description("Apply the responsibilityIntake result to a draft v1:planner:responsibility (issue #637). The dispatcher stamps the inferred field set (trigger / schedule / condition / targetKind / assignedRoleSlug / successCriteria / notifyHow) plus the intake outcome. When intake was CLEAR (no questions) the dispatcher passes status='active' + intakeStatus='clear' so the row goes straight live; when intake produced 1-2 questions it passes status='draft' + intakeStatus='awaitingAnswers' + intakeRequest so the row parks for the user (mirrors the Plan awaitingFeedback surfacing). Partial-update: only the supplied fields change. System write -- no ownerUserId re-stamp.")
-mutation responsibility mutationApplyResponsibilityIntake {
+mutate responsibility applyResponsibilityIntake {
   args {
     responsibilityId  string  @required
     trigger           string  @enum("reactive", "standing", "recurring")
@@ -761,7 +761,7 @@ mutation responsibility mutationApplyResponsibilityIntake {
 
 @enabled
 @description("Fold the user's answers to the intake clarifying questions back into a v1:planner:responsibility and re-stamp the re-inferred field set (issue #637). Called after the user answers the intakeRequest questions: the dispatcher re-runs responsibilityIntake with the answers folded in, then writes the final trigger / schedule / condition / targetKind / assignedRoleSlug / successCriteria / notifyHow, records intakeResponse for audit, sets intakeStatus='applied', and flips status='active'. System write -- no ownerUserId re-stamp.")
-mutation responsibility mutationFoldResponsibilityIntakeAnswers {
+mutate responsibility foldResponsibilityIntakeAnswers {
   args {
     responsibilityId  string  @required
     intakeResponse    object  @required

@@ -35,7 +35,7 @@ func TestLoadFromUnifiedTree(t *testing.T) {
 
 	// #1061: the heartbeat-based cluster-node prune cron must load with
 	// its 10-minute six-field cron schedule. This proves the new
-	// automation + its logic + queryStaleClusterNodes parse and register
+	// automation + its logic + staleClusterNodes parse and register
 	// from the unified tree.
 	var prune *Automation
 	for _, a := range automations {

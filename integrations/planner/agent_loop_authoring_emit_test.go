@@ -89,7 +89,7 @@ var specCon = memql.SandboxConstruct{
 
 // emitFakeEngine returns a fakeEngine whose authoringEmit / authoringRepair
 // InvokeAI calls yield the scripted JSON (by template id), and whose
-// queryPlanById Execute yields a plan row carrying the given metrics (for the
+// planById Execute yields a plan row carrying the given metrics (for the
 // budget-gate path).
 func emitFakeEngine(emitOut string, repairOuts []string, planRow map[string]any) *fakeEngine {
 	repairIdx := 0
@@ -109,7 +109,7 @@ func emitFakeEngine(emitOut string, repairOuts []string, planRow map[string]any)
 			return nil, nil
 		},
 		execResponder: func(query string) (any, error) {
-			if strings.Contains(query, "queryPlanById") && planRow != nil {
+			if strings.Contains(query, "planById") && planRow != nil {
 				return map[string]any{"output": []any{planRow}}, nil
 			}
 			return nil, nil

@@ -23,7 +23,7 @@ import (
 
 // fakeEngine routes queries to a per-fixture map of query-text-prefix
 // -> nodes. The resolver only emits a handful of distinct query
-// shapes (queryActiveDelegationsByIdentitySubject + queryUserById +
+// shapes (activeDelegationsByIdentitySubject + userById +
 // queryIdentityById) so a prefix-match is enough to disambiguate.
 type fakeEngine struct {
 	mu    sync.Mutex
@@ -167,7 +167,7 @@ func fixtureEngine(delegationNodes []*memqlv1.MemoryNode, identity *memqlv1.Memo
 	return &fakeEngine{
 		matchers: []fakeMatcher{
 			{
-				prefix: "queryActiveDelegationsByIdentitySubject",
+				prefix: "activeDelegationsByIdentitySubject",
 				handler: func() (*memqlengine.ExecuteResult, error) {
 					return resultWith(delegationNodes), nil
 				},
@@ -182,7 +182,7 @@ func fixtureEngine(delegationNodes []*memqlv1.MemoryNode, identity *memqlv1.Memo
 				},
 			},
 			{
-				prefix: "queryUserById",
+				prefix: "userById",
 				handler: func() (*memqlengine.ExecuteResult, error) {
 					if user == nil {
 						return resultWith(nil), nil
@@ -392,7 +392,7 @@ func TestResolve_KeepsWildcardForPrivilegedDelegator(t *testing.T) {
 
 func TestResolve_RejectsRevokedDelegation(t *testing.T) {
 	// active=true but revokedAt set -- belt-and-suspenders skip
-	// even though the query's traitIsActiveRecord should have
+	// even though the query's isActiveRecord should have
 	// excluded it.
 	delegation := delegationNode(delegationNodeOpts{
 		ID:              "v1:identity:delegation:revoked",
@@ -492,7 +492,7 @@ func TestResolve_PropagatesEngineError(t *testing.T) {
 	eng := &fakeEngine{
 		matchers: []fakeMatcher{
 			{
-				prefix: "queryActiveDelegationsByIdentitySubject",
+				prefix: "activeDelegationsByIdentitySubject",
 				handler: func() (*memqlengine.ExecuteResult, error) {
 					return nil, errors.New("db down")
 				},

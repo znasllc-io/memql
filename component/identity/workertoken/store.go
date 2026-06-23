@@ -75,7 +75,7 @@ func (s *Store) Create(ctx context.Context, identityId, userId, name, keyHash, r
 		expires = expiresAt.UTC().Format(time.RFC3339Nano)
 	}
 	q := fmt.Sprintf(
-		`mutationCreateWorkerTokenIdentity({identityId:%q,userId:%q,name:%q,keyHash:%q,registeredBy:%q,expiresAt:%q})`,
+		`createWorkerTokenIdentity({identityId:%q,userId:%q,name:%q,keyHash:%q,registeredBy:%q,expiresAt:%q})`,
 		identityId, userId, name, keyHash, registeredBy, expires,
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
@@ -89,7 +89,7 @@ func (s *Store) Revoke(ctx context.Context, identityId string) error {
 	if s == nil || s.Engine == nil {
 		return errors.New("workertoken.Store: engine not wired")
 	}
-	q := fmt.Sprintf(`mutationRevokeWorkerTokenIdentity({identityId:%q})`, bareSlug(identityId))
+	q := fmt.Sprintf(`revokeWorkerTokenIdentity({identityId:%q})`, bareSlug(identityId))
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("workertoken.Store.Revoke: %w", err)
 	}
@@ -106,7 +106,7 @@ func (s *Store) LookupByKeyHash(ctx context.Context, keyHash string) (*Row, erro
 	if keyHash == "" {
 		return nil, nil
 	}
-	q := fmt.Sprintf(`queryWorkerTokenByKeyHash({keyHash:%q})`, keyHash)
+	q := fmt.Sprintf(`workerTokenByKeyHash({keyHash:%q})`, keyHash)
 	rows, err := s.executeAndExtract(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("workertoken.Store.LookupByKeyHash: %w", err)
@@ -125,10 +125,10 @@ func (s *Store) ListForUser(ctx context.Context, userId string) ([]Row, error) {
 	if s == nil || s.Engine == nil {
 		return nil, errors.New("workertoken.Store: engine not wired")
 	}
-	q := fmt.Sprintf(`queryWorkerTokensForUser({userId:%q})`, userId)
+	q := fmt.Sprintf(`workerTokensForUser({userId:%q})`, userId)
 	out := []Row{}
 	cursor := ""
-	// queryWorkerTokensForUser is `paginate 50` (5.2 / epic #1964), so a
+	// workerTokensForUser is `paginate 50` (5.2 / epic #1964), so a
 	// single Execute returns only the first page. The callers of this
 	// method (the per-user revoke ownership check) need the COMPLETE set
 	// -- a token beyond the first page must still be found-as-owned --
@@ -153,7 +153,7 @@ func (s *Store) ListForUser(ctx context.Context, userId string) ([]Row, error) {
 }
 
 // maxPageWalk bounds the keyset walk so a mis-paginated query can never
-// spin forever. queryWorkerTokensForUser pages 50 at a time, capping the
+// spin forever. workerTokensForUser pages 50 at a time, capping the
 // complete-set walk at 50k rows -- far beyond any real holder count.
 const maxPageWalk = 1000
 
@@ -176,7 +176,7 @@ func bareSlug(id string) string {
 //     from each Data entry.
 //
 // Without (2), the gRPC interceptor's hot-path
-// queryWorkerTokenByKeyHash silently returned zero matches even
+// workerTokenByKeyHash silently returned zero matches even
 // when the worker_token row existed -- the interceptor logged
 // "worker token not found", every cockpit reconnect was rejected,
 // the in-memory worker registry stayed empty, and Sofia's
@@ -190,7 +190,7 @@ func (s *Store) executeAndExtract(ctx context.Context, query string) ([]*memqlv1
 
 // executeAndExtractPage is the keyset-aware sibling of executeAndExtract:
 // it threads an inbound continuation cursor onto the context (5.12 /
-// epic #1964 -- queryWorkerTokensForUser is `paginate 50` now) and hands
+// epic #1964 -- workerTokensForUser is `paginate 50` now) and hands
 // back the engine's nextCursor. Empty inbound cursor = first page; empty
 // returned cursor = set exhausted.
 func (s *Store) executeAndExtractPage(ctx context.Context, query, cursor string) ([]*memqlv1.MemoryNode, string, error) {

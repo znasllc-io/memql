@@ -25,7 +25,7 @@ type EngineExecutor interface {
 }
 
 // EngineAuditSink writes AuditEvents into v1:identity:auditEvent via
-// mutationCreateAuditEvent. Replaces NoopAuditDBSink in any build that
+// createAuditEvent. Replaces NoopAuditDBSink in any build that
 // has an engine wired up.
 type EngineAuditSink struct {
 	Engine EngineExecutor
@@ -33,7 +33,7 @@ type EngineAuditSink struct {
 }
 
 // WriteAuditEvent implements AuditDBSink. Emits a single
-// mutationCreateAuditEvent call. Errors are returned to the caller
+// createAuditEvent call. Errors are returned to the caller
 // (SlogAuditLogger logs them at warn level so the slog stream stays
 // the canonical audit destination even when the DB write fails).
 func (s *EngineAuditSink) WriteAuditEvent(ctx context.Context, ev AuditEvent) error {
@@ -57,7 +57,7 @@ func (s *EngineAuditSink) WriteAuditEvent(ctx context.Context, ev AuditEvent) er
 	// the wire payload and avoid passing empty strings through the
 	// mutation's args block.
 	var b strings.Builder
-	b.WriteString(`mutationCreateAuditEvent({`)
+	b.WriteString(`createAuditEvent({`)
 	writeKVString(&b, "eventId", eventId, true)
 	writeKVString(&b, "occurredAt", ev.OccurredAt.UTC().Format(time.RFC3339Nano), false)
 	writeKVString(&b, "category", string(ev.Category), false)
@@ -84,7 +84,7 @@ func (s *EngineAuditSink) WriteAuditEvent(ctx context.Context, ev AuditEvent) er
 	b.WriteString(`})`)
 
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
-		return fmt.Errorf("identity.audit: execute mutationCreateAuditEvent: %w", err)
+		return fmt.Errorf("identity.audit: execute createAuditEvent: %w", err)
 	}
 	return nil
 }

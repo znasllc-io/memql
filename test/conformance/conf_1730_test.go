@@ -2,7 +2,7 @@ package conformance
 
 // conf_1730_test.go -- regression dimension for memql#1730.
 //
-// queryUserCount used to be a misnomer: it carried `shape userFull` and
+// userCount used to be a misnomer: it carried `shape userFull` and
 // returned a JSON ARRAY of active-user rows, leaving every caller to take
 // len() in Go. #1730 added real engine-level aggregate support (the `count`
 // query directive) so the query now computes the cardinality server-side and
@@ -14,28 +14,28 @@ package conformance
 //     the type assertion here).
 //   - VALUE: N is numeric and tracks the active-user total -- creating K active
 //     users bumps the count by exactly K, and (when not paged) it equals the
-//     length of the queryActiveUsers row set.
+//     length of the activeUsers row set.
 
 import (
 	"testing"
 )
 
 // userCount pulls the numeric count out of the {count: N} envelope returned by
-// queryUserCount, asserting the shape is an object (not the legacy row array).
+// userCount, asserting the shape is an object (not the legacy row array).
 func userCount(t *testing.T, e *Env) int {
 	t.Helper()
-	res := e.runQuery(t, "queryUserCount", map[string]any{})
+	res := e.runQuery(t, "userCount", map[string]any{})
 
 	if _, isArray := res.([]any); isArray {
-		t.Fatalf("#1730 REGRESSION: queryUserCount returned an array of rows -- it must return a {count: N} aggregate object, not the legacy `shape userFull` row set: %#v", res)
+		t.Fatalf("#1730 REGRESSION: userCount returned an array of rows -- it must return a {count: N} aggregate object, not the legacy `shape userFull` row set: %#v", res)
 	}
 	obj, ok := res.(map[string]any)
 	if !ok {
-		t.Fatalf("#1730: queryUserCount must return a {count: N} object, got %T: %#v", res, res)
+		t.Fatalf("#1730: userCount must return a {count: N} object, got %T: %#v", res, res)
 	}
 	raw, present := obj["count"]
 	if !present {
-		t.Fatalf("#1730: queryUserCount envelope is missing the `count` field: %#v", obj)
+		t.Fatalf("#1730: userCount envelope is missing the `count` field: %#v", obj)
 	}
 	n, ok := raw.(float64) // JSON numbers decode to float64
 	if !ok {
@@ -57,12 +57,12 @@ func TestConf1730UserCountReturnsNumericAggregate(t *testing.T) {
 	}
 
 	// Cross-check against the active-user row set when it is not paged: the
-	// aggregate must equal len(queryActiveUsers). (queryActiveUsers pages at
+	// aggregate must equal len(activeUsers). (activeUsers pages at
 	// MaxResults=500; only assert equality below that ceiling so the check
 	// stays correct on a large shared DB.)
-	activeRows := asArray(t, e.runQuery(t, "queryActiveUsers", map[string]any{}))
+	activeRows := asArray(t, e.runQuery(t, "activeUsers", map[string]any{}))
 	if len(activeRows) < 500 && before != len(activeRows) {
-		t.Fatalf("#1730: queryUserCount=%d must match the active-user total len(queryActiveUsers)=%d", before, len(activeRows))
+		t.Fatalf("#1730: userCount=%d must match the active-user total len(activeUsers)=%d", before, len(activeRows))
 	}
 
 	// Create K active users; the count must rise by exactly K.
@@ -70,7 +70,7 @@ func TestConf1730UserCountReturnsNumericAggregate(t *testing.T) {
 	sfx := uniqueSuffix("1730")
 	for i := 0; i < k; i++ {
 		uid := uniqueUserID(sfx, i)
-		e.runMutation(t, "mutationCreateUser", map[string]any{
+		e.runMutation(t, "createUser", map[string]any{
 			"userId":       uid,
 			"displayName":  "Conf 1730 " + uid,
 			"primaryEmail": uid + "@conf-1730.test",
@@ -83,7 +83,7 @@ func TestConf1730UserCountReturnsNumericAggregate(t *testing.T) {
 		t.Fatalf("#1730: creating %d active users must bump the count from %d to %d; got %d", k, before, before+k, after)
 	}
 
-	t.Logf("#1730: queryUserCount returns {count: N} -- %d -> %d after creating %d active users", before, after, k)
+	t.Logf("#1730: userCount returns {count: N} -- %d -> %d after creating %d active users", before, after, k)
 }
 
 func uniqueUserID(sfx string, i int) string {

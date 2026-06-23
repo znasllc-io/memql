@@ -352,7 +352,7 @@ func TestStreamingToolLoop_ToolErrorEndsCleanly(t *testing.T) {
 	}
 }
 
-// countDoneEmits counts the mutationEmitTextChunk calls with done=true.
+// countDoneEmits counts the emitTextChunk calls with done=true.
 func countDoneEmits(queries []string) int {
 	n := 0
 	for _, q := range queries {

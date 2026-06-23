@@ -106,7 +106,7 @@ func uniqueSuffix(name string) string {
 }
 
 // TestReadMerge_DeleteRecord_PreservesOmittedFields covers the record family
-// (v1:data:record). mutationDeleteRecord with ONLY the record id must flip
+// (v1:data:record). deleteRecord with ONLY the record id must flip
 // active=false while every required field (label, recordType, partitionId,
 // importSource, importedBy, data) is inherited from the persisted row.
 func TestReadMerge_DeleteRecord_PreservesOmittedFields(t *testing.T) {
@@ -114,9 +114,9 @@ func TestReadMerge_DeleteRecord_PreservesOmittedFields(t *testing.T) {
 	const conceptName = "v1:data:record"
 	recordId := "rec-" + uniqueSuffix("delete")
 
-	storedId := runMutation(t, ctx, eng, "mutationCreateRecord", map[string]any{
+	storedId := runMutation(t, ctx, eng, "createRecord", map[string]any{
 		"recordId":     recordId,
-		"partitionId":      "space-1628",
+		"partitionId":  "space-1628",
 		"recordType":   "vehicle",
 		"label":        "2024 Toyota Camry",
 		"data":         map[string]any{"make": "Toyota", "model": "Camry"},
@@ -126,7 +126,7 @@ func TestReadMerge_DeleteRecord_PreservesOmittedFields(t *testing.T) {
 	before := latestPayload(t, ctx, db, conceptName, storedId)
 
 	// The fix: MINIMAL delete -- id only, no required record fields.
-	runMutation(t, ctx, eng, "mutationDeleteRecord", map[string]any{
+	runMutation(t, ctx, eng, "deleteRecord", map[string]any{
 		"recordId": recordId,
 	})
 
@@ -151,7 +151,7 @@ func TestReadMerge_RevokePATIdentity_PreservesOmittedFields(t *testing.T) {
 	const conceptName = "v1:identity:identity"
 	identityId := "ident-" + uniqueSuffix("pat")
 
-	storedId := runMutation(t, ctx, eng, "mutationCreatePATIdentity", map[string]any{
+	storedId := runMutation(t, ctx, eng, "createPATIdentity", map[string]any{
 		"identityId": identityId,
 		"userId":     "user-1628",
 		"label":      "ci-token",
@@ -159,7 +159,7 @@ func TestReadMerge_RevokePATIdentity_PreservesOmittedFields(t *testing.T) {
 	})
 
 	// The fix: MINIMAL revoke -- id only, no identityType/credentials/label.
-	runMutation(t, ctx, eng, "mutationRevokePATIdentity", map[string]any{
+	runMutation(t, ctx, eng, "revokePATIdentity", map[string]any{
 		"identityId": identityId,
 	})
 
@@ -173,7 +173,7 @@ func TestReadMerge_RevokePATIdentity_PreservesOmittedFields(t *testing.T) {
 }
 
 // TestReadMerge_UpdateNodeHealth_PreservesAddress is the specific regression
-// the issue calls out: mutationUpdateNodeHealth used to wipe `address` (and
+// the issue calls out: updateNodeHealth used to wipe `address` (and
 // capabilities/labels) when omitted. A minimal health transition (id + health
 // + lastSeen) must update those two fields and PRESERVE address + nodeType.
 func TestReadMerge_UpdateNodeHealth_PreservesAddress(t *testing.T) {
@@ -181,7 +181,7 @@ func TestReadMerge_UpdateNodeHealth_PreservesAddress(t *testing.T) {
 	const conceptName = "v1:cluster:node"
 	nodeId := "node-" + uniqueSuffix("health")
 
-	storedId := runMutation(t, ctx, eng, "mutationCreateNode", map[string]any{
+	storedId := runMutation(t, ctx, eng, "createNode", map[string]any{
 		"id":       nodeId,
 		"nodeType": "bff",
 		"address":  "10.0.0.7:50051",
@@ -189,7 +189,7 @@ func TestReadMerge_UpdateNodeHealth_PreservesAddress(t *testing.T) {
 	})
 
 	// The fix: MINIMAL health transition -- id + health + lastSeen, NO address.
-	runMutation(t, ctx, eng, "mutationUpdateNodeHealth", map[string]any{
+	runMutation(t, ctx, eng, "updateNodeHealth", map[string]any{
 		"id":       nodeId,
 		"health":   "degraded",
 		"lastSeen": "2026-06-18T00:00:00Z",
@@ -211,14 +211,14 @@ func TestReadMerge_UpdateNodeHealth_PreservesAddress(t *testing.T) {
 // chokepoint (executeWrite, shared by executeInsert + executeUpdate) so a
 // write onto an existing id read-merges REGARDLESS of whether the mutation
 // was authored as insert{} or update{}. The two regressions the issue lists
-// (mutationLeaveSpace, mutationRevokeDelegation) are still authored as
+// (leaveSpace, revokeDelegation) are still authored as
 // insert{} with a partial payload -- they are NOT hand-converted; the engine
 // change is the canonical fix. Plus a concept-agnostic proof that a raw
 // insert() onto an existing id now read-merges.
 // ---------------------------------------------------------------------------
 
 // TestReadMerge_LeaveSpace_PreservesParticipantFields is the Run-4 regression
-// for mutationLeaveSpace (dsl/cognition/mutations.memql): authored as
+// for leaveSpace (dsl/cognition/mutations.memql): authored as
 // `insert { id: args.participantId; args.payload }`. A minimal leave payload
 // (status=left + leftAt) used to reject with
 // `” does not validate ... missing 'displayName','participantType','partitionId'`.
@@ -232,8 +232,8 @@ func TestReadMerge_LeaveSpace_PreservesParticipantFields(t *testing.T) {
 	// Seed an AI participant under the elevated system actor. The id is
 	// content-addressed on (agentId, partitionId), so capture the stored id the
 	// create returns and target the leave at exactly that row.
-	storedId := runMutation(t, ctx, eng, "mutationJoinSpaceAsAI", map[string]any{
-		"partitionId":     "space-" + uniqueSuffix("leave"),
+	storedId := runMutation(t, ctx, eng, "joinSpaceAsAI", map[string]any{
+		"partitionId": "space-" + uniqueSuffix("leave"),
 		"agentId":     "agent-" + uniqueSuffix("leave"),
 		"displayName": "Faye",
 		"forUserId":   "user-1709",
@@ -244,7 +244,7 @@ func TestReadMerge_LeaveSpace_PreservesParticipantFields(t *testing.T) {
 	// The fix: MINIMAL leave -- only status + leftAt, NO displayName /
 	// participantType / partitionId. Before #1709 this rejected as
 	// "missing properties"; now it read-merges.
-	runMutation(t, ctx, eng, "mutationLeaveSpace", map[string]any{
+	runMutation(t, ctx, eng, "leaveSpace", map[string]any{
 		"participantId": storedId,
 		"payload": map[string]any{
 			"status": "left",
@@ -264,7 +264,7 @@ func TestReadMerge_LeaveSpace_PreservesParticipantFields(t *testing.T) {
 }
 
 // TestReadMerge_RevokeDelegation_PreservesFields is the regression for
-// mutationRevokeDelegation (dsl/identity/mutations.memql). The mutation is
+// revokeDelegation (dsl/identity/mutations.memql). The mutation is
 // authored as an update{} (read-merge) that AUTHORITATIVELY forces
 // `active: false` and stamps revocation metadata regardless of caller input
 // (memql#1729): the caller supplies only delegationId (+ optional
@@ -275,7 +275,7 @@ func TestReadMerge_RevokeDelegation_PreservesFields(t *testing.T) {
 	eng, db, ctx := readMergeTestEngine(t)
 	const conceptName = "v1:identity:delegation"
 
-	storedId := runMutation(t, ctx, eng, "mutationCreateDelegation", map[string]any{
+	storedId := runMutation(t, ctx, eng, "createDelegation", map[string]any{
 		"delegationId":     "deleg-" + uniqueSuffix("revoke"),
 		"identityId":       "ident-1709",
 		"identitySubject":  "user:alice",
@@ -291,7 +291,7 @@ func TestReadMerge_RevokeDelegation_PreservesFields(t *testing.T) {
 	// The fix (memql#1729): the caller passes ONLY the revoker subject + time;
 	// it never supplies `active`. The mutation forces active=false itself, so
 	// the terminal state cannot depend on (or be subverted by) caller input.
-	runMutation(t, ctx, eng, "mutationRevokeDelegation", map[string]any{
+	runMutation(t, ctx, eng, "revokeDelegation", map[string]any{
 		"delegationId":     storedId,
 		"revokedAt":        "2026-06-18T02:00:00Z",
 		"revokedBySubject": "user:alice",
@@ -322,7 +322,7 @@ func TestReadMerge_RawInsertOntoExistingId_ReadMerges(t *testing.T) {
 	eng, db, ctx := readMergeTestEngine(t)
 	const conceptName = "v1:cluster:node"
 
-	storedId := runMutation(t, ctx, eng, "mutationCreateNode", map[string]any{
+	storedId := runMutation(t, ctx, eng, "createNode", map[string]any{
 		"id":       "node-" + uniqueSuffix("rawmerge"),
 		"nodeType": "cognition",
 		"address":  "10.0.0.9:50051",

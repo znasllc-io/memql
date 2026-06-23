@@ -50,8 +50,8 @@ nextkeyword`
 // TestSkipUseClauseBody_FormB_MultiLine locks the multi-line body case.
 func TestSkipUseClauseBody_FormB_MultiLine(t *testing.T) {
 	src := `use common.traits.{
-  traitIsActiveRecord,
-  traitIsNotDeleted,
+  isActiveRecord,
+  isNotDeleted,
 }
 nextkeyword`
 	var b Base

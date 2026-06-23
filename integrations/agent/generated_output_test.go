@@ -106,7 +106,7 @@ func TestPromoteCanvasOutput_PromotesRealCard(t *testing.T) {
 	}
 	q := ce.queries[0]
 	for _, want := range []string{
-		"mutationCreateGeneratedOutput(",
+		"createGeneratedOutput(",
 		`source:"agent_generated"`,
 		`ownerUserId:"user-1"`,
 		`title:"Report"`,

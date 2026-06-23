@@ -3,7 +3,7 @@ package memql
 import "testing"
 
 // TestIsFeedbackIntakeWrite covers the marker that distinguishes a generic
-// feedback-intake resume (mutationAttachPlanFeedback) from every other
+// feedback-intake resume (attachPlanFeedback) from every other
 // v1:planner:plan write. Only a payload that stamps a feedbackResponse object
 // carrying a non-empty respondedBy is an intake write.
 func TestIsFeedbackIntakeWrite(t *testing.T) {

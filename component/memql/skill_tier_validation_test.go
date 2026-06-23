@@ -65,7 +65,7 @@ func TestValidateSkillTiers_AcceptsTierMatchingOrAboveDomain(t *testing.T) {
 // TestValidateSkillTiers_UnknownDomainIsWarnNotError pins the Phase-1
 // scope decision documented in skill_tier_validation.go: unknown
 // domain ids return a warning string, not an error. Phase 2 closes
-// the gap at mutationCreateSkill time when the universe of valid ids
+// the gap at createSkill time when the universe of valid ids
 // includes user-created domains.
 func TestValidateSkillTiers_UnknownDomainIsWarnNotError(t *testing.T) {
 	reg := NewSeedRegistry()

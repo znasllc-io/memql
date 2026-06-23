@@ -31,7 +31,7 @@ const (
 //
 // User-actor callers -- the CoPresent CreateAgentModal flow in
 // particular -- may only land `kind="assistant"` (or omit the field;
-// mutationCreateAgent's default coalesces to "assistant"). Without
+// createAgent's default coalesces to "assistant"). Without
 // this gate, a user actor could craft a raw insert or pass
 // `kind: "system"` through the mutation arg and silently create a
 // row that downstream consumers (utterance routing, dedupe, the
@@ -87,7 +87,7 @@ func (e *MemQLEngine) validateAgentKindActorScope(ctx context.Context, payload m
 	}
 	return fmt.Errorf(
 		"v1:agents:agent: kind=%q requires a system actor (the SeedMaterializer or planner integration); "+
-			"user-actor mutationCreateAgent calls may only set kind to %q or omit the field. "+
+			"user-actor createAgent calls may only set kind to %q or omit the field. "+
 			"See dsl/agents/concepts.memql:agent.kind for the platform-identity contract.",
 		kind, agentKindAssistant,
 	)

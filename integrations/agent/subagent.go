@@ -28,7 +28,7 @@ import (
 //      (BuildScopedSpecialistContext).
 //
 //   3. Specialists return RESULTS as observations (recorded via
-//      mutationRecordHarnessObservation by the reconciler), not as messages to
+//      recordHarnessObservation by the reconciler), not as messages to
 //      the human. The assistant aggregates those observations into the single
 //      human-facing answer (AggregateSpecialistObservations).
 //
@@ -459,7 +459,7 @@ func renderSortedFields(m map[string]any) string {
 
 // SpecialistObservation is the minimal projection of a v1:harness:observation
 // the assistant reads to synthesize its human-facing answer. Specialists write
-// these (via the reconciler's mutationRecordHarnessObservation); the assistant
+// these (via the reconciler's recordHarnessObservation); the assistant
 // never reads a specialist's raw window -- only its recorded observations.
 type SpecialistObservation struct {
 	// StepID identifies which step produced the observation (provenance).

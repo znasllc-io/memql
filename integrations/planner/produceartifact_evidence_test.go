@@ -25,7 +25,7 @@ func TestBuildExecutionTurn_TrustedScaffoldingNotInUntrustedHistory(t *testing.T
 			ID:           planId,
 			Kind:         produceArtifactPlanKind,
 			Goal:         goal,
-			PartitionId:      "v1:cognition:space:s1",
+			PartitionId:  "v1:cognition:space:s1",
 			OwnerAgentId: "v1:agents:agent:a1",
 			RequestedBy:  owner,
 		}
@@ -77,7 +77,7 @@ func TestBuildExecutionTurn_TrustedScaffoldingNotInUntrustedHistory(t *testing.T
 			ID:           planId,
 			Kind:         "scopeElevation",
 			Goal:         goal,
-			PartitionId:      "v1:cognition:space:s1",
+			PartitionId:  "v1:cognition:space:s1",
 			OwnerAgentId: "v1:agents:agent:a1",
 			RequestedBy:  owner,
 		}
@@ -106,7 +106,7 @@ func TestBuildExecutionTurn_TrustedScaffoldingNotInUntrustedHistory(t *testing.T
 
 	// Resume-from-feedback (epic memql#1404 / memql#1405): when the Plan
 	// carries a FeedbackResponse (the user's free-text answer stamped by
-	// mutationAttachPlanFeedback) it is folded into the history as a SECOND
+	// attachPlanFeedback) it is folded into the history as a SECOND
 	// user-role message -- genuine user content, distinct from the system's
 	// trusted produce directive which still rides as a hint.
 	t.Run("feedback resume: user answer appended as a user-role history message", func(t *testing.T) {
@@ -115,7 +115,7 @@ func TestBuildExecutionTurn_TrustedScaffoldingNotInUntrustedHistory(t *testing.T
 			ID:               planId,
 			Kind:             produceArtifactPlanKind,
 			Goal:             goal,
-			PartitionId:          "v1:cognition:space:s1",
+			PartitionId:      "v1:cognition:space:s1",
 			OwnerAgentId:     "v1:agents:agent:a1",
 			RequestedBy:      owner,
 			FeedbackResponse: feedback,
@@ -153,7 +153,7 @@ func TestBuildExecutionTurn_TrustedScaffoldingNotInUntrustedHistory(t *testing.T
 }
 
 // TestGeneratedOutputCountFromExecuteResult covers the three shape() output
-// shapes the planner can get back from queryGeneratedOutputsForPlan:
+// shapes the planner can get back from generatedOutputsForPlan:
 // single-row -> bare map, multi-row -> []any, empty/absent -> 0.
 func TestGeneratedOutputCountFromExecuteResult(t *testing.T) {
 	row := map[string]any{"id": "v1:library:generatedOutput:x"}
@@ -241,7 +241,7 @@ func TestArtifactProducedForPlan(t *testing.T) {
 			}
 
 			exec, _, _ := fe.snapshot()
-			queried := countContains(exec, "queryGeneratedOutputsForPlan") > 0
+			queried := countContains(exec, "generatedOutputsForPlan") > 0
 			if queried != tc.wantQueried {
 				t.Fatalf("queried=%v, want %v (calls: %v)", queried, tc.wantQueried, exec)
 			}

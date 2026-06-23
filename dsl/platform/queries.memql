@@ -7,7 +7,7 @@ use platform.concepts.{ globalVariable, missingCapability }
 
 @enabled
 @description("Recent persisted policy traces for the named policy, most-recent first.")
-query policyTrace queryPolicyTracesForPolicy {
+query policyTrace policyTracesForPolicy {
   args {
     policyName  string  @required
   }
@@ -28,14 +28,14 @@ query policyTrace queryPolicyTracesForPolicy {
 // Returns every persisted PolicyTrace row. The
 // purgeExpiredPolicyTraces cron iterates the result and per-row
 // tests whether createdAt + MEMQL_POLICYTRACE_RETENTION_DAYS is
-// past `timestamp()` -- same shape as queryExpiredAuditEvents
+// past `timestamp()` -- same shape as expiredAuditEvents
 // in the identity tree (MemQL filter expressions can't inline
 // addDuration today).
 //
 
 @enabled
 @description("All persisted policy traces; the retention sweep iterates and per-row checks createdAt + retention-days < now.")
-query policyTrace queryAllPolicyTraces {
+query policyTrace allPolicyTraces {
   filter  payload.policyName!=""
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
@@ -47,7 +47,7 @@ query policyTrace queryAllPolicyTraces {
 
 // ---- queries/v1/platform/globalVariable.memql ----
 
-// queryGlobalVariable -- Get Single Instance-Wide Configuration Variable
+// globalVariable -- Get Single Instance-Wide Configuration Variable
 // ======================================================================
 //
 // Returns a single instance-wide (global) configuration variable by
@@ -64,23 +64,23 @@ query policyTrace queryAllPolicyTraces {
 //   - value: Variable value (typically string or boolean)
 //
 // Usage:
-//   queryGlobalVariable({name: "MEMQL_AUTO_PROVISION_USERS"})
+//   globalVariable({name: "MEMQL_AUTO_PROVISION_USERS"})
 //
 
 @enabled
 @description("Get a single instance-wide configuration variable by name (v1:platform:globalVariable)")
 @unbounded("global variable by unique name -- bounded to a single row")
-query globalVariable queryGlobalVariable {
+query globalVariable globalVariable {
   args {
     name  string  @required
   }
-  filter  payload.name==args.name && traitIsActiveRecord
+  filter  payload.name==args.name && isActiveRecord
   shape   variableFull
 }
 
 // ---- queries/v1/platform/globalVariables.memql ----
 
-// queryGlobalVariables -- Get Multiple Instance-Wide Configuration Variables
+// globalVariables -- Get Multiple Instance-Wide Configuration Variables
 // ==========================================================================
 //
 // Returns multiple instance-wide (global) configuration variables by
@@ -97,17 +97,17 @@ query globalVariable queryGlobalVariable {
 //   - value: Variable value
 //
 // Usage:
-//   queryGlobalVariables({names: ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME"]})
+//   globalVariables({names: ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME"]})
 //
 
 @enabled
 @description("Get multiple instance-wide configuration variables by name list (v1:platform:globalVariable)")
 @unbounded("global variables by the requested name set -- bounded by the caller's name list")
-query globalVariable queryGlobalVariables {
+query globalVariable globalVariables {
   args {
     names  array  @required
   }
-  filter  payload.name in args.names && traitIsActiveRecord
+  filter  payload.name in args.names && isActiveRecord
   shape   variableFull
 }
 
@@ -154,13 +154,13 @@ query globalVariable queryGlobalVariables {
 @internal
 @description("Returns default configuration variables for user provisioning. Used by bootstrapUser automation.")
 @unbounded("user-default variables -- a fixed bounded allow-list of names consumed whole")
-query globalVariable queryUserDefaults {
-  filter  traitIsActiveRecord && payload.name in ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME", "MEMQL_DEFAULT_USER_LANGUAGE", "MEMQL_AUTO_PROVISION_USERS", "MEMQL_UPDATE_LAST_SEEN"]
+query globalVariable userDefaults {
+  filter  isActiveRecord && payload.name in ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME", "MEMQL_DEFAULT_USER_LANGUAGE", "MEMQL_AUTO_PROVISION_USERS", "MEMQL_UPDATE_LAST_SEEN"]
 }
 
 @enabled
 @description("Per Q7: list missingCapability rows by status, sorted by sightingCount desc. Backs the platform-roadmap prioritization view -- 'most-requested capabilities that the platform doesn't yet support'. Status filter: 'open' for active backlog, 'in_progress' / 'resolved' / 'wontfix' for the audit view.")
-query missingCapability queryMissingCapabilitiesByStatus {
+query missingCapability missingCapabilitiesByStatus {
   args {
     status  string  @required
   }
@@ -174,9 +174,9 @@ query missingCapability queryMissingCapabilitiesByStatus {
 }
 
 @enabled
-@description("Per Q7: dedup lookup the Planner Agent runs before logging a new sighting. Returns the existing row (if any) for the (kind, capability) pair so the Planner can call mutationBumpMissingCapabilitySighting instead of creating a duplicate row.")
+@description("Per Q7: dedup lookup the Planner Agent runs before logging a new sighting. Returns the existing row (if any) for the (kind, capability) pair so the Planner can call bumpMissingCapabilitySighting instead of creating a duplicate row.")
 @unbounded("missing capability by (kind,name) -- bounded to a single row")
-query missingCapability queryMissingCapabilityByKindAndName {
+query missingCapability missingCapabilityByKindAndName {
   args {
     kind        string  @required
     capability  string  @required

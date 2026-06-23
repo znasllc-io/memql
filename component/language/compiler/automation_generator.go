@@ -425,7 +425,7 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	// `arg("X")` shape, which the runtime evaluator has no handler for -- it
 	// reaches engine.Execute as a bare query and fails with `function "arg"
 	// not found`. That is the multi-step half of the #1840 forge outage
-	// (logicAttachToRequest `return args.requestId`, logicRouteRequest
+	// (attachToRequest `return args.requestId`, routeRequest
 	// `return args.event.payload.id`); the single-return half is fixed in
 	// substituteArgRefValue. convertEventReferences is applied for symmetry
 	// (a `return event.X` body in an automation logic resolves the same way).

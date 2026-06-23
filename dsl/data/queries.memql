@@ -8,13 +8,13 @@ use data.concepts.{ log, policy, record }
 @enabled
 @unbounded("conflict probe by natural key -- a dedupe set the caller must see whole to detect conflicts")
 @description("Find confirmed records that may conflict with a new record by natural key + record type")
-query record queryDetectConflicts {
+query record detectConflicts {
   args {
     partitionId  string  @required
     naturalKeyValue  string  @required
     recordType  string  @required
   }
-  filter  traitIsConfirmed && payload.partitionId==args.partitionId && payload.recordType==args.recordType && payload.naturalKeyValue==args.naturalKeyValue
+  filter  isConfirmed && payload.partitionId==args.partitionId && payload.recordType==args.recordType && payload.naturalKeyValue==args.naturalKeyValue
   shape   recordFull
 }
 
@@ -42,12 +42,12 @@ query record queryDetectConflicts {
 @enabled
 @unbounded("the active policy for a record type -- bounded to a single row")
 @description("Returns the validation policy for a record type. Space-specific policies take precedence over global.")
-query policy queryPolicy {
+query policy policy {
   args {
     targetRecordType  string  @required
     partitionId  string
   }
-  filter  traitIsActiveRecord && payload.targetRecordType==args.targetRecordType && when(args.partitionId) { payload.partitionId==args.partitionId }
+  filter  isActiveRecord && payload.targetRecordType==args.targetRecordType && when(args.partitionId) { payload.partitionId==args.partitionId }
   shape   policyFull
 }
 
@@ -77,14 +77,14 @@ query policy queryPolicy {
 
 @enabled
 @description("Returns active data records. Optional filters: partitionId, recordType, validationState, importSource")
-query record queryRecordsByState {
+query record recordsByState {
   args {
     partitionId  string
     recordType  string
     validationState  string
     importSource  string
   }
-  filter  traitIsActiveRecord && when(args.partitionId) { payload.partitionId==args.partitionId } && when(args.recordType) { payload.recordType==args.recordType } && when(args.validationState) { payload.validationState==args.validationState } && when(args.importSource) { payload.importSource==args.importSource }
+  filter  isActiveRecord && when(args.partitionId) { payload.partitionId==args.partitionId } && when(args.recordType) { payload.recordType==args.recordType } && when(args.validationState) { payload.validationState==args.validationState } && when(args.importSource) { payload.importSource==args.importSource }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -119,19 +119,19 @@ query record queryRecordsByState {
 //
 // Implementation note: Because the MemQL parser does not yet support
 // if-expression assignment (:=), this function always queries using
-// traitIsUsable (which matches both checked and confirmed). When
-// includeChecked is false, the caller should use traitIsConfirmed
+// isUsable (which matches both checked and confirmed). When
+// includeChecked is false, the caller should use isConfirmed
 // directly in their query instead.
 //
 
 @enabled
 @description("Returns usable data records (confirmed, or checked if policy allows)")
-query record queryUsableRecords {
+query record usableRecords {
   args {
     partitionId  string
     recordType  string
   }
-  filter  traitIsUsable && when(args.partitionId) { payload.partitionId==args.partitionId } && when(args.recordType) { payload.recordType==args.recordType }
+  filter  isUsable && when(args.partitionId) { payload.partitionId==args.partitionId } && when(args.recordType) { payload.recordType==args.recordType }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -164,13 +164,13 @@ query record queryUsableRecords {
 
 @enabled
 @description("Returns validation state change history. Optional filters: recordId, partitionId, action")
-query log queryValidationLog {
+query log validationLog {
   args {
     recordId  string
     partitionId  string
     action  string
   }
-  filter  traitIsActiveRecord && when(args.recordId) { payload.recordId==args.recordId } && when(args.partitionId) { payload.partitionId==args.partitionId } && when(args.action) { payload.action==args.action }
+  filter  isActiveRecord && when(args.recordId) { payload.recordId==args.recordId } && when(args.partitionId) { payload.partitionId==args.partitionId } && when(args.action) { payload.action==args.action }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.

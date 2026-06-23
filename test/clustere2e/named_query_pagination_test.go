@@ -10,7 +10,7 @@
 // ----------------------------------------------
 // keyset_cursor_test.go proves the engine primitive against a handwritten
 // query string. THIS test proves the actual authored queries
-// (`querySpaceUtterances`, `queryActiveSpaces`) -- the strings the generated
+// (`spaceUtterances`, `queryActiveSpaces`) -- the strings the generated
 // SDK *Build helpers emit -- carry the sort+paginate directives end-to-end and
 // thread the opaque cursor through `ExecuteQueryMsg.cursor` / `ResultMeta.cursor`
 // on the generic executeNamed path. If a future edit drops the paginate
@@ -92,7 +92,7 @@ func TestNamedQueryPaginationCrossNode(t *testing.T) {
 	// page (rather than exhausting the set in one page).
 	const namedPageSize = 50
 
-	t.Run("querySpaceUtterances", func(t *testing.T) {
+	t.Run("spaceUtterances", func(t *testing.T) {
 		qcA := memqlclient.NewQueryClient(connA.Dispatcher())
 		spaceID, participantID := newSpaceWithHuman(ctx, t, connA, userID)
 
@@ -103,7 +103,7 @@ func TestNamedQueryPaginationCrossNode(t *testing.T) {
 			uid := "v1:cognition:utterance:" + id.NewShortId()
 			if _, err := qcA.MutationSendTextUtterance(ctx, memqlclient.MutationSendTextUtteranceArgs{
 				UtteranceId:     uid,
-				PartitionId:         spaceID,
+				PartitionId:     spaceID,
 				ParticipantId:   participantID,
 				ParticipantType: "human",
 				Text:            fmt.Sprintf("named-query pagination probe %03d", i),

@@ -13,7 +13,7 @@ import (
 
 // OutputPersistingRecorder writes one v1:safety:outputScreening
 // row per OutputGate.Screen verdict via the DSL mutation
-// `mutationInsertOutputScreening`. Mirrors PersistingRecorder
+// `insertOutputScreening`. Mirrors PersistingRecorder
 // (memql#234) but for the output-screening half of the system
 // (memql#233).
 //
@@ -77,7 +77,7 @@ func (p *OutputPersistingRecorder) Record(ctx context.Context, in safety.Screeni
 }
 
 // buildOutputArgs translates the screening inputs into the
-// mutationInsertOutputScreening args map. The redactedSample is
+// insertOutputScreening args map. The redactedSample is
 // truncated here (single source of truth for the cap policy).
 func buildOutputArgs(in safety.ScreeningInput, res safety.ScreeningResult, mode safety.OutputMode) map[string]any {
 	sample := truncateUTF8(in.Content, MaxRedactedSampleBytes)
@@ -138,7 +138,7 @@ func buildOutputMutationQuery(args map[string]any) string {
 	}
 	sort.Strings(keys)
 	var b strings.Builder
-	b.WriteString("mutationInsertOutputScreening({")
+	b.WriteString("insertOutputScreening({")
 	for i, k := range keys {
 		if i > 0 {
 			b.WriteString(", ")

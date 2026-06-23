@@ -16,7 +16,7 @@ func TestProvenance_Validate(t *testing.T) {
 		{"missing name", Provenance{Kind: KindSeed}, "name is required"},
 		{"unknown kind", Provenance{Kind: "weird", Name: "foo"}, "unknown kind"},
 		{"valid seed", Seed("assistant"), ""},
-		{"valid mutation", Mutation("mutationCreateAgent"), ""},
+		{"valid mutation", Mutation("createAgent"), ""},
 		{"valid automation", Automation("reRouteAgent", "graph.node.created.v1:agents:agent"), ""},
 		{"valid direct", Direct("bootstrap.insertDefaultPartition"), ""},
 		{"valid system", System("systemStartup"), ""},
@@ -45,11 +45,11 @@ func TestProvenance_String(t *testing.T) {
 	}{
 		{Provenance{}, "<none>"},
 		{Seed("assistant"), "seed:assistant"},
-		{Seed("assistant").WithVia("mutationCreateAgent"), "seed:assistant via=mutationCreateAgent"},
+		{Seed("assistant").WithVia("createAgent"), "seed:assistant via=createAgent"},
 		{Direct("frameworkInsert"), "direct:frameworkInsert"},
 		{
-			Automation("re", "graph.node.created.v1:agents:agent").WithVia("mutationUpdatePlanStatus"),
-			"automation:re trigger=graph.node.created.v1:agents:agent via=mutationUpdatePlanStatus",
+			Automation("re", "graph.node.created.v1:agents:agent").WithVia("updatePlanStatus"),
+			"automation:re trigger=graph.node.created.v1:agents:agent via=updatePlanStatus",
 		},
 	}
 	for _, tc := range cases {
@@ -85,11 +85,11 @@ func TestContextRoundtrip(t *testing.T) {
 	}
 
 	// WithVia returns a new value, original is untouched.
-	with := p.WithVia("mutationCreateAgent")
+	with := p.WithVia("createAgent")
 	if p.Via != "" {
 		t.Errorf("WithVia mutated receiver; p.Via = %q", p.Via)
 	}
-	if with.Via != "mutationCreateAgent" {
+	if with.Via != "createAgent" {
 		t.Errorf("WithVia didn't stamp Via on copy")
 	}
 }

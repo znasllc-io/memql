@@ -38,7 +38,7 @@ import (
 )
 
 // dcrFakeEngine is a minimal EngineExecutor that returns a single
-// oauthClient node for queryOAuthClientByClientId queries and an empty
+// oauthClient node for oAuthClientByClientId queries and an empty
 // bundle for everything else. It lives here (not in the identity package)
 // because the web-package tests need to wire it into web.Server.Store.
 type dcrFakeEngine struct {
@@ -47,7 +47,7 @@ type dcrFakeEngine struct {
 }
 
 func (f *dcrFakeEngine) Execute(_ context.Context, q string) (*memqlengine.ExecuteResult, error) {
-	if strings.HasPrefix(q, "queryOAuthClientByClientId(") {
+	if strings.HasPrefix(q, "oAuthClientByClientId(") {
 		node := &memqlv1.MemoryNode{
 			Id: f.clientId,
 			Payload: &structpb.Struct{Fields: map[string]*structpb.Value{
@@ -63,10 +63,10 @@ func (f *dcrFakeEngine) Execute(_ context.Context, q string) (*memqlengine.Execu
 }
 
 const (
-	dcrClientID     = "mcp_968c8934-abcd-4321-efgh-0123456789ab"
-	dcrRedirectURI  = "https://claude.ai/api/mcp/auth_callback"
+	dcrClientID      = "mcp_968c8934-abcd-4321-efgh-0123456789ab"
+	dcrRedirectURI   = "https://claude.ai/api/mcp/auth_callback"
 	dcrCodeChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
-	dcrOAuthState   = "test-state-xyz"
+	dcrOAuthState    = "test-state-xyz"
 )
 
 // newDCRTestServer builds a *Server whose OAuth client lives only in the
@@ -156,12 +156,12 @@ func TestDCROAuthFlow_LoginPostPreservesOAuthCtx(t *testing.T) {
 	s.CountUsers = func(_ context.Context) (int, error) { return 1, nil }
 
 	form := url.Values{
-		"form":                 {"email"},
-		"email":                {"user@example.com"},
-		"client_id":            {dcrClientID},
-		"redirect_uri":         {dcrRedirectURI},
-		"state":                {dcrOAuthState},
-		"code_challenge":       {dcrCodeChallenge},
+		"form":                  {"email"},
+		"email":                 {"user@example.com"},
+		"client_id":             {dcrClientID},
+		"redirect_uri":          {dcrRedirectURI},
+		"state":                 {dcrOAuthState},
+		"code_challenge":        {dcrCodeChallenge},
 		"code_challenge_method": {"S256"},
 	}
 	rec := httptest.NewRecorder()

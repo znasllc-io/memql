@@ -1,7 +1,7 @@
 // queries.memql
 //
 // Read paths in the `actions` namespace (epic #1734). Phase 0 (#1735)
-// ships queryActionCandidatesForPlan -- list the captured candidate traces
+// ships actionCandidatesForPlan -- list the captured candidate traces
 // for a plan, so the trace capture is inspectable end to end.
 //
 // Authorization (owned tier): the filter pins payload.ownerUserId ==
@@ -9,11 +9,11 @@
 
 use actions.concepts.{ candidate, action, surface }
 use actions.shapes.{ candidateFull, actionFull, surfaceFull }
-use common.traits.{ traitStatusIsActive }
+use common.traits.{ statusIsActive }
 
 @enabled
 @description("List v1:actions:candidate traces captured for a plan, newest-first by createdAt (owned tier). #1735.")
-query candidate queryActionCandidatesForPlan {
+query candidate actionCandidatesForPlan {
   args {
     planId  string  @required
   }
@@ -26,29 +26,29 @@ query candidate queryActionCandidatesForPlan {
   shape   candidateFull
 }
 
-// queryActionByInputFingerprint -- the literal-replay lookup (Phase 1 #1736).
+// actionByInputFingerprint -- the literal-replay lookup (Phase 1 #1736).
 // The harness computes a stable hash of the dispatched step input and asks
 // for an active action minted under the same fingerprint; a hit is replayed
 // token-free, a miss falls through to the LLM. Owned tier.
 @enabled
 @description("Resolve an active v1:actions:action by inputFingerprint for the calling owner -- the literal-replay lookup (Phase 1 #1736).")
 @unbounded("unique inputFingerprint dedupe probe scoped to the owner -- must see all matches")
-query action queryActionByInputFingerprint {
+query action actionByInputFingerprint {
   args {
     inputFingerprint  string  @required
   }
-  filter  payload.inputFingerprint == args.inputFingerprint && traitStatusIsActive && payload.ownerUserId == actor.userId
+  filter  payload.inputFingerprint == args.inputFingerprint && statusIsActive && payload.ownerUserId == actor.userId
   shape   actionFull
 }
 
-// querySurfacesForOwner -- the resolver's registry read (Phase 2 #1737).
+// surfacesForOwner -- the resolver's registry read (Phase 2 #1737).
 // Returns the owner's active execution surfaces; the surfaceresolver filters
 // by capability + availability in Go and applies the precedence/world-group
 // logic. Owned tier.
 @enabled
 @description("List the calling owner's active v1:actions:surface registry entries for the capability->surface resolver (Phase 2 #1737). Owned tier.")
-query surface querySurfacesForOwner {
-  filter  payload.ownerUserId == actor.userId && traitStatusIsActive
+query surface surfacesForOwner {
+  filter  payload.ownerUserId == actor.userId && statusIsActive
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -57,7 +57,7 @@ query surface querySurfacesForOwner {
   shape   surfaceFull
 }
 
-// queryActionByTemplateFingerprint -- Phase 3 (#1738) parameterized-replay
+// actionByTemplateFingerprint -- Phase 3 (#1738) parameterized-replay
 // lookup. Matches an action by the STRUCTURE of the step input (key set hash),
 // so an action minted for one input can replay on a different input with the
 // same shape via parameter re-binding. Owned tier; superseded by the planner's
@@ -65,19 +65,19 @@ query surface querySurfacesForOwner {
 @enabled
 @description("Resolve an active v1:actions:action by templateFingerprint (input structure) for the calling owner -- the parameterized-replay lookup (Phase 3 #1738). Owned tier.")
 @unbounded("unique templateFingerprint dedupe probe scoped to the owner -- must see all matches")
-query action queryActionByTemplateFingerprint {
+query action actionByTemplateFingerprint {
   args {
     templateFingerprint  string  @required
   }
-  filter  payload.templateFingerprint == args.templateFingerprint && traitStatusIsActive && payload.ownerUserId == actor.userId
+  filter  payload.templateFingerprint == args.templateFingerprint && statusIsActive && payload.ownerUserId == actor.userId
   shape   actionFull
 }
 
-// queryActionsPendingConfirm -- the confirm UI's worklist (Phase 4 #1739):
+// actionsPendingConfirm -- the confirm UI's worklist (Phase 4 #1739):
 // candidate actions awaiting a human confirm before they replay. Owned tier.
 @enabled
 @description("List the calling owner's candidate v1:actions:action rows awaiting confirmation (real-machine side effects gate on a human, Phase 4 #1739). Owned tier.")
-query action queryActionsPendingConfirm {
+query action actionsPendingConfirm {
   filter  payload.status == "candidate" && payload.ownerUserId == actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
@@ -87,13 +87,13 @@ query action queryActionsPendingConfirm {
   shape   actionFull
 }
 
-// queryActiveActionsForOwner -- the consolidation sweep's input (Phase 4
+// activeActionsForOwner -- the consolidation sweep's input (Phase 4
 // #1739): the owner's active actions, to decay unused ones + deprecate those
 // below the reliability floor. Owned tier.
 @enabled
 @description("List the calling owner's active v1:actions:action rows for the consolidation decay/deprecate sweep (Phase 4 #1739). Owned tier.")
-query action queryActiveActionsForOwner {
-  filter  payload.ownerUserId == actor.userId && traitStatusIsActive
+query action activeActionsForOwner {
+  filter  payload.ownerUserId == actor.userId && statusIsActive
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -102,12 +102,12 @@ query action queryActiveActionsForOwner {
   shape   actionFull
 }
 
-// queryActionByIdAndVersion -- pin resolution (Phase 5 #1740). Resolves a
+// actionByIdAndVersion -- pin resolution (Phase 5 #1740). Resolves a
 // pinned reference (id@version) to the exact action version, so a bundle that
 // pinned act_x@3 always replays version 3 regardless of later edits. Owned tier.
 @enabled
 @description("Resolve a pinned v1:actions:action reference (id + version) for the calling owner -- pin-by-default resolution (Phase 5 #1740). Owned tier.")
-query action queryActionByIdAndVersion {
+query action actionByIdAndVersion {
   args {
     actionId  string  @required
     version   int     @required
@@ -116,11 +116,11 @@ query action queryActionByIdAndVersion {
   shape   actionFull
 }
 
-// queryActionById -- floating-ref resolution (#1758). Resolves a bare action
+// actionById -- floating-ref resolution (#1758). Resolves a bare action
 // reference (no @version) to the latest version of that action. Owned tier.
 @enabled
 @description("Resolve a floating v1:actions:action reference by id (latest version) for the calling owner -- floating-ref resolution (#1758). Owned tier.")
-query action queryActionById {
+query action actionById {
   args {
     actionId  string  @required
   }

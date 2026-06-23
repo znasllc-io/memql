@@ -6,15 +6,15 @@ package conformance
 // The staging-confirmed root cause: when a `logic` function with a MULTI-STEP
 // body is invoked as an AUTOMATION STEP (`step run { logic routeRequest {
 // event: event } }`), only its `return` expression is evaluated -- the
-// intermediate side-effecting steps (the guarded `mutationAdvanceRequest`
-// transitions + the `mutationRecordRequestEvent` audit write) are SKIPPED. The
+// intermediate side-effecting steps (the guarded `advanceRequest`
+// transitions + the `recordRequestEvent` audit write) are SKIPPED. The
 // SAME logic invoked via the TOOL path (engine.Execute / RunLogic) runs every
 // step. On staging the routeRequest automation fired + "completed" but logged
 // only `step=_return`, so a fresh owner submission stayed `submitted` with an
 // empty history.
 //
-// The #1840 dimension (conf_1840_test.go) drove logicRouteRequest DIRECTLY via
-// `e.Eng.Execute("logicRouteRequest(...)")` -- the tool/engine path -- which is
+// The #1840 dimension (conf_1840_test.go) drove routeRequest DIRECTLY via
+// `e.Eng.Execute("routeRequest(...)")` -- the tool/engine path -- which is
 // exactly why the bug slipped through 3x: nothing exercised the node.created ->
 // automation -> multi-step-logic dispatch end to end. This dimension closes
 // that gap by running the REAL `routeRequest` automation (loaded from the
@@ -22,11 +22,11 @@ package conformance
 // triggering event, then asserting the side effects PERSISTED:
 //
 //   - the request advanced submitted -> queued (the owner fast-track
-//     mutationAdvanceRequest step), and
-//   - a `routed` v1:forge:requestEvent was written (the mutationRecordRequestEvent
+//     advanceRequest step), and
+//   - a `routed` v1:forge:requestEvent was written (the recordRequestEvent
 //     step).
 //
-// Neither side effect is referenced by logicRouteRequest's `return
+// Neither side effect is referenced by routeRequest's `return
 // args.event.payload.id`, so a dispatch that only evaluates the return drops
 // both. It FAILS on pre-fix main (the staging shape) and PASSES once the
 // automation-step logic invocation runs the full body.
@@ -51,9 +51,9 @@ func automationLogicFullBodyCheck() check {
 func runAutomationLogicFullBody(t *testing.T, e *Env) {
 	suffix := uniqueSuffix("1847")
 
-	// --- A. routeRequest (node.created -> logicRouteRequest, owner fast-track) ---
+	// --- A. routeRequest (node.created -> routeRequest, owner fast-track) ---
 	routeRequestId := "req-route-" + suffix
-	e.runMutation(t, "mutationCreateRequest", map[string]any{
+	e.runMutation(t, "createRequest", map[string]any{
 		"requestId": routeRequestId,
 		"projectId": "proj-" + suffix,
 		"title":     "conf-1847 automation-step multi-step-logic dispatch",
@@ -62,8 +62,8 @@ func runAutomationLogicFullBody(t *testing.T, e *Env) {
 
 	// Read the row back as the shaped request (carrying the canonical `id` the
 	// graph.node.created event payload would). The automation's
-	// `mutationAdvanceRequest({ requestId: args.event.payload.id })` targets that
-	// id, and `queryRequestById` filters on it.
+	// `advanceRequest({ requestId: args.event.payload.id })` targets that
+	// id, and `requestById` filters on it.
 	beforeRoute := requestRow(t, e, routeRequestId)
 	if got := asStr(beforeRoute["status"]); got != "submitted" {
 		t.Fatalf("#1847 precondition: new request should be 'submitted', got %v", beforeRoute["status"])
@@ -74,36 +74,36 @@ func runAutomationLogicFullBody(t *testing.T, e *Env) {
 	// exactly as the scheduler does on a v1:forge:request insert. The event
 	// payload IS the request row (the graph.node.created envelope carries the
 	// created node's payload + canonical id), so submitterRole == "owner" is what
-	// logicRouteRequest branches on.
+	// routeRequest branches on.
 	fireForgeAutomation(t, e, "routeRequest", "node.created", events.KindNodeCreated, cloneStringMap(beforeRoute))
 
-	// The owner fast-track transition (mutationAdvanceRequest -> "queued") is a
+	// The owner fast-track transition (advanceRequest -> "queued") is a
 	// step whose result the `return args.event.payload.id` never references. If
 	// the automation-step dispatch only evaluated the return, this stays
 	// "submitted" -- the staging failure.
 	afterRoute := requestRow(t, e, canonicalRouteId)
 	if got := asStr(afterRoute["status"]); got != "queued" {
 		t.Fatalf("#1847: routeRequest did not advance the owner request to 'queued' "+
-			"(multi-step logic body's mutationAdvanceRequest step was skipped); status=%v", afterRoute["status"])
+			"(multi-step logic body's advanceRequest step was skipped); status=%v", afterRoute["status"])
 	}
 
-	// The 'routed' audit event (mutationRecordRequestEvent) is the other
+	// The 'routed' audit event (recordRequestEvent) is the other
 	// unreferenced side-effecting step. The audit event is keyed by the SHORT
-	// request id (mutationRecordRequestEvent normalizes requestId via shortId(),
+	// request id (recordRequestEvent normalizes requestId via shortId(),
 	// #1859) -- read it back by the short id. (The dedicated short-vs-canonical
 	// audit-key contract lives in conf_1859_test.go.)
-	routedEvents := asArray(t, e.runQuery(t, "queryRequestEvents", map[string]any{"requestId": routeRequestId}))
+	routedEvents := asArray(t, e.runQuery(t, "requestEvents", map[string]any{"requestId": routeRequestId}))
 	if !hasEventKind(routedEvents, "routed") {
 		t.Fatalf("#1847: routeRequest did not write a 'routed' requestEvent "+
-			"(multi-step logic body's mutationRecordRequestEvent step was skipped); events=%v", routedEvents)
+			"(multi-step logic body's recordRequestEvent step was skipped); events=%v", routedEvents)
 	}
 
-	// --- B. recordTransition (node.updated -> logicRecordTransition) ----------
-	// logicRecordTransition has the same unreferenced-side-effect shape: its
-	// `return toStatus` references none of the guarded mutationRecordRequestEvent
+	// --- B. recordTransition (node.updated -> recordTransition) ----------
+	// recordTransition has the same unreferenced-side-effect shape: its
+	// `return toStatus` references none of the guarded recordRequestEvent
 	// steps. A status transition to "queued" must append an 'approved' event.
 	transitionRequestId := "req-transition-" + suffix
-	e.runMutation(t, "mutationCreateRequest", map[string]any{
+	e.runMutation(t, "createRequest", map[string]any{
 		"requestId": transitionRequestId,
 		"projectId": "proj-" + suffix,
 		"title":     "conf-1847 recordTransition side-effect step",
@@ -114,7 +114,7 @@ func runAutomationLogicFullBody(t *testing.T, e *Env) {
 	// Move it to "queued" (the row now carries status=queued) and fire the
 	// node.updated automation with oldStatus=submitted, exactly as the engine
 	// publishes graph.node.updated (#1158 stamps event.oldStatus).
-	e.runMutation(t, "mutationAdvanceRequest", map[string]any{
+	e.runMutation(t, "advanceRequest", map[string]any{
 		"requestId": transitionRequestId,
 		"status":    "queued",
 	})
@@ -122,12 +122,12 @@ func runAutomationLogicFullBody(t *testing.T, e *Env) {
 	updatedEvent["oldStatus"] = "submitted"
 	fireForgeAutomation(t, e, "recordTransition", "node.updated", events.KindNodeUpdated, updatedEvent)
 
-	// Read by the SHORT id -- mutationRecordRequestEvent keys the event under the
+	// Read by the SHORT id -- recordRequestEvent keys the event under the
 	// normalized short requestId (shortId(), #1859).
-	transitionEvents := asArray(t, e.runQuery(t, "queryRequestEvents", map[string]any{"requestId": transitionRequestId}))
+	transitionEvents := asArray(t, e.runQuery(t, "requestEvents", map[string]any{"requestId": transitionRequestId}))
 	if !hasEventKind(transitionEvents, "approved") {
 		t.Fatalf("#1847: recordTransition did not write an 'approved' requestEvent on the queued transition "+
-			"(multi-step logic body's guarded mutationRecordRequestEvent step was skipped); events=%v", transitionEvents)
+			"(multi-step logic body's guarded recordRequestEvent step was skipped); events=%v", transitionEvents)
 	}
 
 	t.Logf("#1847: automation-step multi-step-logic dispatch ran the FULL body (side-effecting steps persisted) for routeRequest + recordTransition")
@@ -167,17 +167,17 @@ func fireForgeAutomation(t *testing.T, e *Env, automationName, topic string, kin
 }
 
 // requestRow resolves a single v1:forge:request by id (short id at creation
-// time, canonical id thereafter) via queryRequestById and returns the shaped
+// time, canonical id thereafter) via requestById and returns the shaped
 // row. Fails if zero or multiple rows come back.
 func requestRow(t *testing.T, e *Env, requestId string) map[string]any {
 	t.Helper()
-	rows := asArray(t, e.runQuery(t, "queryRequestById", map[string]any{"requestId": requestId}))
+	rows := asArray(t, e.runQuery(t, "requestById", map[string]any{"requestId": requestId}))
 	if len(rows) != 1 {
-		t.Fatalf("#1847: queryRequestById(%q) returned %d rows, want 1; rows=%v", requestId, len(rows), rows)
+		t.Fatalf("#1847: requestById(%q) returned %d rows, want 1; rows=%v", requestId, len(rows), rows)
 	}
 	m, _ := rows[0].(map[string]any)
 	if m == nil {
-		t.Fatalf("#1847: queryRequestById(%q) row is not an object: %#v", requestId, rows[0])
+		t.Fatalf("#1847: requestById(%q) row is not an object: %#v", requestId, rows[0])
 	}
 	return m
 }

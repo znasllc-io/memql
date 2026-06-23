@@ -115,7 +115,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"domains":     "array of string (required) -- the FULL new domain set; not a delta. Replaces the agent's current capabilities.domains.",
 				"tools":       "array of string (required) -- the FULL new tool set; replaces the agent's current capabilities.tools.",
 				"provider":    "string (optional) -- embedding provider name (default embedding3Small)",
-				"partitionId":     "string (optional) -- space to scope the Plan + cards to. When omitted, no Plan / Task records are created (useful for automation / DSL callers).",
+				"partitionId": "string (optional) -- space to scope the Plan + cards to. When omitted, no Plan / Task records are created (useful for automation / DSL callers).",
 				"requestedBy": "string (optional) -- user id for actor + ownership on the Plan + cards. Required alongside partitionId for the bookkeeping path.",
 			},
 		},
@@ -195,7 +195,7 @@ func (i *Integration) trainAgentHandler(
 	)
 
 	// 1. Read the current agent. We need the existing payload to
-	//    preserve every other field (mutationUpdateAgent does a
+	//    preserve every other field (updateAgent does a
 	//    full-payload insert, not a partial merge).
 	agent, oldDomains, _, err := i.readAgent(ctx, agentId)
 	if err != nil {
@@ -246,7 +246,7 @@ func (i *Integration) trainAgentHandler(
 	//    visible agent state stays at its pre-training value
 	//    (capabilities, systemPrompt) until the final write at the
 	//    bottom of this handler lands all three (caps + systemPrompt
-	//    + bridgeId) in one mutationUpdateAgent call. That way chat
+	//    + bridgeId) in one updateAgent call. That way chat
 	//    consumers using the agent during the ~80s of training see
 	//    a consistent OLD state and switch to the NEW state only
 	//    when training is fully done.
@@ -549,7 +549,7 @@ func (i *Integration) trainAgentHandler(
 			}
 			// bridgeId gets folded into the final atomic apply
 			// below so the agent's capabilities.domains, tools,
-			// and systemPrompt all land in one mutationUpdateAgent
+			// and systemPrompt all land in one updateAgent
 			// call -- no inline writeAgent here.
 		}
 	}
@@ -565,7 +565,7 @@ func (i *Integration) trainAgentHandler(
 	// systemPrompt -- so any chat consumer sees the OLD agent state
 	// while training runs.
 	//
-	// One mutationUpdateAgent call here flips all three together:
+	// One updateAgent call here flips all three together:
 	//   - capabilities.domains = newDomains (+ bridgeId if any)
 	//   - capabilities.tools   = newTools
 	//   - systemPrompt         = distilled (only if Step C succeeded)
@@ -731,7 +731,7 @@ func (i *Integration) readAgent(
 ) (map[string]any, []string, []string, error) {
 	res, err := i.engine.Execute(
 		ctx,
-		fmt.Sprintf(`queryAgentById({agentId: %s})`, quoteString(agentId)),
+		fmt.Sprintf(`agentById({agentId: %s})`, quoteString(agentId)),
 	)
 	if err != nil {
 		return nil, nil, nil, err
@@ -758,7 +758,7 @@ func (i *Integration) readAgent(
 	return payload, oldDomains, oldTools, nil
 }
 
-// writeAgent calls mutationUpdateAgent with the full updated
+// writeAgent calls updateAgent with the full updated
 // payload. updateAgent does a full-payload insert (replacing the
 // row's payload), so the caller MUST splat in every existing field
 // alongside the changed capabilities.
@@ -768,7 +768,7 @@ func (i *Integration) writeAgent(ctx context.Context, agentId string, payload ma
 		return fmt.Errorf("marshal agent payload: %w", err)
 	}
 	query := fmt.Sprintf(
-		`mutationUpdateAgent({agentId: %s, payload: %s})`,
+		`updateAgent({agentId: %s, payload: %s})`,
 		quoteString(agentId),
 		string(payloadJSON),
 	)

@@ -309,7 +309,7 @@ type ConductorState struct {
 // NewConductorState creates an empty per-space conductor state.
 func NewConductorState(partitionId string) *ConductorState {
 	return &ConductorState{
-		PartitionId:               partitionId,
+		PartitionId:           partitionId,
 		AgentsSpokenThisCycle: make(map[string]int),
 	}
 }
@@ -741,7 +741,7 @@ func (c *CognitionIntegration) queryAgentIsKnownToUser(ctx context.Context, agen
 	if agentId == "" {
 		return false
 	}
-	query := fmt.Sprintf(`queryAgentInteractionCount({agentId: "%s"})`, agentId)
+	query := fmt.Sprintf(`agentInteractionCount({agentId: "%s"})`, agentId)
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		if c.Logger != nil {
@@ -750,7 +750,7 @@ func (c *CognitionIntegration) queryAgentIsKnownToUser(ctx context.Context, agen
 		}
 		return false
 	}
-	// queryAgentInteractionCount uses shape() so rows land in the
+	// agentInteractionCount uses shape() so rows land in the
 	// adapter's "data" axis, not the top-level []any. The previous
 	// implementation only checked the top-level shape and silently
 	// returned false for everyone -- which made every agent feel

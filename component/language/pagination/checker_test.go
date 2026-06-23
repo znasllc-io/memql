@@ -60,7 +60,7 @@ func TestSingleRowReadIsExempt(t *testing.T) {
 // whitespace also reads as single-row.
 func TestSingleRowReadWithSpacedEquality(t *testing.T) {
 	src := `query space querySpaceMetaSpaced {
-  filter  id == args.partitionId && traitIsActiveRecord
+  filter  id == args.partitionId && isActiveRecord
   shape   spaceFull
 }`
 	f := findingFor(t, ScanSource("f.memql", src), "querySpaceMetaSpaced")
@@ -113,11 +113,11 @@ func TestSortedListIsBounded(t *testing.T) {
 
 // TestCountIsAggregate: a count clause returns an aggregate, exempt.
 func TestCountIsAggregate(t *testing.T) {
-	src := `query user queryUserCount {
-  filter  traitIsActiveRecord
+	src := `query user userCount {
+  filter  isActiveRecord
   count
 }`
-	f := findingFor(t, ScanSource("f.memql", src), "queryUserCount")
+	f := findingFor(t, ScanSource("f.memql", src), "userCount")
 	if f.Class != Aggregate {
 		t.Fatalf("classified as %s, want aggregate", f.Class)
 	}
@@ -130,7 +130,7 @@ func TestUnboundedMarkedListCapturesReason(t *testing.T) {
 @unbounded("small bounded catalog -- providers never exceed a handful of rows")
 @description("All providers.")
 query provider queryAllProviders {
-  filter  traitIsActiveRecord
+  filter  isActiveRecord
   shape   providerFull
 }`
 	f := findingFor(t, ScanSource("f.memql", src), "queryAllProviders")

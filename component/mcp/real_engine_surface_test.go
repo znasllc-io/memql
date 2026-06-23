@@ -149,7 +149,7 @@ func TestRealEngineCuratedToolSurface(t *testing.T) {
 // add→ready→start→complete/fail mutation chain is promoted onto the MCP
 // surface via @mcp (memql#1679). These are the @mcp-promoted query/mutation
 // tools that expose the step state machine over the connector; without
-// mutationReadyHarnessStep the chain was stuck at 'pending' forever.
+// readyHarnessStep the chain was stuck at 'pending' forever.
 func TestHarnessStepChainReachableOverMCP(t *testing.T) {
 	eng := loadedEngine(t)
 
@@ -163,13 +163,13 @@ func TestHarnessStepChainReachableOverMCP(t *testing.T) {
 	}
 
 	chain := []string{
-		"mutationCreateHarnessPlan",
-		"mutationAddHarnessStep",
-		"mutationReadyHarnessStep", // the critical missing link (#1679)
-		"mutationStartHarnessStep",
-		"mutationCompleteHarnessStep",
-		"mutationFailHarnessStep",
-		"mutationRecordHarnessObservation",
+		"createHarnessPlan",
+		"addHarnessStep",
+		"readyHarnessStep", // the critical missing link (#1679)
+		"startHarnessStep",
+		"completeHarnessStep",
+		"failHarnessStep",
+		"recordHarnessObservation",
 	}
 	for _, name := range chain {
 		if !promoted[name] {

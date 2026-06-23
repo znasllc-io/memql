@@ -48,12 +48,12 @@
 // annotation is required to declare "this is a row spec."
 
 @description("Matches participants with human participantType")
-spec specIsHumanParticipant {
+spec isHumanParticipant {
   payload.participantType == "human"
 }
 
 @description("Matches participants with AI participantType")
-spec specIsAIParticipant {
+spec isAIParticipant {
   payload.participantType == "si"
 }
 
@@ -73,7 +73,7 @@ spec requiresAdmin {
 }
 
 @description("Caller is the cluster owner.")
-spec specIsClusterOwner {
+spec isClusterOwner {
   actor.isClusterOwner == true
 }
 
@@ -87,17 +87,17 @@ spec specIsClusterOwner {
 // trait library lives under `dsl/common/traits.memql`.
 
 @description("Matches records with payload.active == true.")
-trait traitIsActiveRecord {
+trait isActiveRecord {
   payload.active == true
 }
 
 @description("Matches records with payload.deleted != true.")
-trait traitIsNotDeleted {
+trait isNotDeleted {
   payload.deleted != true
 }
 
 @description("Matches records with payload.status == 'active'.")
-trait traitStatusIsActive {
+trait statusIsActive {
   payload.status == "active"
 }
 
@@ -169,7 +169,7 @@ spec contextSpecExample {
 // The same spec can mix payload fields AND intrinsics.
 
 @description("Row authored by a specific seed identity.")
-spec specIsSeedParticipant {
+spec isSeedParticipant {
   createdBy == "seed" && payload.participantType == "human"
 }
 
@@ -184,7 +184,7 @@ spec specIsSeedParticipant {
 // Parentheses:          (expr1) || (expr2 && expr3)
 
 @description("Rich predicate showing the operator surface.")
-spec specRichPredicate {
+spec richPredicate {
   payload.participantType == "human"
   && (payload.status == "active" || payload.status == "invited")
   && payload.tier != "banned"
@@ -203,11 +203,11 @@ spec specRichPredicate {
 //     rejected tree-wide -- #977):
 //
 //         use cognition.shapes.{ participantFull }
-//         use cognition.specs.{ specIsHumanParticipant }
+//         use cognition.specs.{ isHumanParticipant }
 //
-//         query participant queryActiveHumanParticipants {
+//         query participant activeHumanParticipants {
 //           args { partitionId string @required }
-//           filter payload.partitionId == args.partitionId && specIsHumanParticipant
+//           filter payload.partitionId == args.partitionId && isHumanParticipant
 //           shape  participantFull
 //         }
 //

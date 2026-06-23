@@ -2,7 +2,7 @@
 // classifier observability layer (memql#234). PersistingRecorder
 // implements safety.DecisionRecorder by writing each gated action to
 // the v1:safety:classification concept via the
-// mutationInsertSafetyClassification DSL mutation.
+// insertSafetyClassification DSL mutation.
 //
 // Architectural seam: this package imports `component/safety` (for
 // types) but NOT `component/memql` -- the engine is reached via the
@@ -31,7 +31,7 @@ type MutationRunner interface {
 }
 
 // PersistingRecorder writes one v1:safety:classification row per
-// Gate.Evaluate decision via the mutationInsertSafetyClassification
+// Gate.Evaluate decision via the insertSafetyClassification
 // DSL mutation.
 //
 // Errors from the runner are logged + swallowed -- a persistence
@@ -79,7 +79,7 @@ func (p *PersistingRecorder) Record(ctx context.Context, desc safety.ActionDescr
 }
 
 // buildArgs translates recorder inputs into the args map for the
-// mutationInsertSafetyClassification call. Categories collapse to a
+// insertSafetyClassification call. Categories collapse to a
 // comma-separated string (matches the concept schema -- the array
 // shape isn't worth the per-row overhead until the cockpit needs
 // it). All string-typed fields stay strings; numeric fields stay
@@ -153,7 +153,7 @@ func buildMutationQuery(args map[string]any) string {
 	}
 	sort.Strings(keys)
 	var b strings.Builder
-	b.WriteString("mutationInsertSafetyClassification({")
+	b.WriteString("insertSafetyClassification({")
 	for i, k := range keys {
 		if i > 0 {
 			b.WriteString(", ")

@@ -55,7 +55,7 @@ func TestRecordEmitsExpectedQueryShape(t *testing.T) {
 	}
 	q := qs[0]
 	// Header + tail.
-	if !strings.HasPrefix(q, "mutationInsertSafetyClassification({") || !strings.HasSuffix(q, "})") {
+	if !strings.HasPrefix(q, "insertSafetyClassification({") || !strings.HasSuffix(q, "})") {
 		t.Errorf("query wrapper malformed: %q", q)
 	}
 	// Required fields land in the query.

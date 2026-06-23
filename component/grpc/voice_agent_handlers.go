@@ -323,7 +323,7 @@ func resolveGroupGAAgentId(s *streamSession, partitionId string) string {
 // resolveGroupGAAgentIdVia is the seam-based core of resolveGroupGAAgentId:
 // it resolves the canonical GA agent id of the group-GA participant in
 // `partitionId` through the narrow voiceParticipantResolver interface so the
-// resolution (canonicalize -> queryGroupGAForSpace -> first participant
+// resolution (canonicalize -> groupGAForSpace -> first participant
 // agentId) is unit-testable without a live engine. Returns "" when no GA
 // participant is active or on any query/canonicalize error -- callers fall
 // back to their wire-supplied id.
@@ -334,7 +334,7 @@ func resolveGroupGAAgentIdVia(ctx context.Context, engine voiceParticipantResolv
 	// Canonicalize the partitionId on the Go side. Inlining canonicalId()
 	// in the query predicate triggers "unsupported literal type
 	// *ast.CanonicalIdExpr" once the WHERE chain includes a bool
-	// comparison (see queryGroupGAForSpace.memql).
+	// comparison (see groupGAForSpace.memql).
 	canonicalSpace, err := engine.CanonicalizeIdValue(ctx, partitionId, "v1:cognition:space")
 	if err != nil || canonicalSpace == "" {
 		if logger != nil {
@@ -344,7 +344,7 @@ func resolveGroupGAAgentIdVia(ctx context.Context, engine voiceParticipantResolv
 		return ""
 	}
 	canonicalSpaceJSON, _ := json.Marshal(canonicalSpace)
-	query := fmt.Sprintf(`queryGroupGAForSpace({partitionId: %s})`, string(canonicalSpaceJSON))
+	query := fmt.Sprintf(`groupGAForSpace({partitionId: %s})`, string(canonicalSpaceJSON))
 	result, err := engine.Execute(ctx, query)
 	if err != nil || result == nil {
 		if logger != nil {
@@ -411,7 +411,7 @@ func resolveInitialChannelMode(s *streamSession, partitionId, agentId, channel s
 	}
 
 	// 2) Agent record's default, read off the agent row via the tested
-	// queryAgentById named query (agentFull carries audioControl/videoControl).
+	// agentById named query (agentFull carries audioControl/videoControl).
 	// The retired `?.id==` raw query parsed-failed here, so this leg always fell
 	// through to "mirror_user" (#1454).
 	field := "audioControl"
@@ -439,9 +439,9 @@ func resolveChannelOverrideMode(s *streamSession, partitionId, agentId, channel 
 	if s == nil || s.service == nil || s.service.engine == nil {
 		return "", false
 	}
-	queryName := "queryAudioOverridesForSpace"
+	queryName := "audioOverridesForSpace"
 	if channel == "video" {
-		queryName = "queryVideoOverridesForSpace"
+		queryName = "videoOverridesForSpace"
 	}
 	ctx := contextWithVoiceAgentActor(context.Background())
 	// Marshal partitionId so an embedded double quote cannot break out of the DSL
@@ -480,7 +480,7 @@ type agentRecordFields struct {
 
 // queryAgentByIdQuery builds the canonical agent-row read every voice-session
 // leg (persona, channel-mode default, avatar persona, tool scope) issues: the
-// tested `queryAgentById({agentId: <id>})` named query, which filters
+// tested `agentById({agentId: <id>})` named query, which filters
 // `id==args.agentId` and projects the agentFull shape (name, role, description,
 // personality, audioControl, videoControl, avatarVendor, avatarPersonaId,
 // gender, capabilities). It REPLACES the four hand-written
@@ -493,7 +493,7 @@ type agentRecordFields struct {
 // escaped literal token, dropped straight into the named-query arg.
 func queryAgentByIdQuery(agentId string) string {
 	agentIdJSON, _ := json.Marshal(agentId)
-	return fmt.Sprintf(`queryAgentById({agentId: %s})`, string(agentIdJSON))
+	return fmt.Sprintf(`agentById({agentId: %s})`, string(agentIdJSON))
 }
 
 // resolveAgentSessionRecord loads the GA's persona identity + channel-control
@@ -521,7 +521,7 @@ func resolveAgentSessionRecordVia(ctx context.Context, engine voiceParticipantRe
 		return out
 	}
 	// Read the persona + channel-control defaults off the agent row via the
-	// tested queryAgentById named query (returns agentFull, which carries name /
+	// tested agentById named query (returns agentFull, which carries name /
 	// role / description / personality / audioControl / videoControl). The prior
 	// hand-written `from(...) ?.id==` raw query used the RETIRED optional-chain
 	// syntax, which the parser rejects ("unexpected token after expression:
@@ -594,9 +594,9 @@ func resolveVoiceSpaceContextVia(ctx context.Context, engine voiceParticipantRes
 		out.purpose = extractSpaceGoalStatement(payload)
 	}
 
-	// Human participant display names. Reuse the existing querySpaceParticipants
+	// Human participant display names. Reuse the existing spaceParticipants
 	// path the speaker-attribution fallback uses.
-	if result, err := engine.Execute(ctx, fmt.Sprintf(`querySpaceParticipants({partitionId: %s, participantType: "human", status: "active"})`, string(spaceJSON))); err == nil && result != nil {
+	if result, err := engine.Execute(ctx, fmt.Sprintf(`spaceParticipants({partitionId: %s, participantType: "human", status: "active"})`, string(spaceJSON))); err == nil && result != nil {
 		out.participantNames = extractParticipantNames(result.OutputPayload())
 	}
 
@@ -658,7 +658,7 @@ func extractSpaceGoalStatement(payload any) string {
 }
 
 // extractParticipantNames pulls the human participants' display names off a
-// querySpaceParticipants result. Falls back to the userId when a participant
+// spaceParticipants result. Falls back to the userId when a participant
 // carries no displayName so a present-but-unnamed human still surfaces. Order
 // follows the result rows; duplicates are de-duped. Returns nil when there are
 // no rows.
@@ -707,7 +707,7 @@ const voiceAvatarPersonaCatalogPrefix = "v1:agents:avatarPersona:"
 // (Simli faceId / Anam persona id) the voice session ack carries (#1428),
 // applying the avatardirect #1336/#1341 rules to the voice path:
 //
-//  1. Agent stamped with a catalog row id -> hydrate via queryAvatarPersonaById
+//  1. Agent stamped with a catalog row id -> hydrate via avatarPersonaById
 //     to the entry's vendor-issued personaId.
 //  2. Agent stamped with a raw vendor id (legacy direct stamping) -> verbatim,
 //     when the stamped vendor matches the requested one.
@@ -731,7 +731,7 @@ func resolveAgentAvatarPersona(s *streamSession, agentId, requestedVendor string
 	ctx := contextWithVoiceAgentActor(context.Background())
 
 	// Agent record: stamped vendor/persona id + gender (for the catalog
-	// default), read via the tested queryAgentById named query (agentFull
+	// default), read via the tested agentById named query (agentFull
 	// carries avatarVendor / avatarPersonaId / gender). The prior `?.id==` raw
 	// query used the retired optional-chain syntax the parser rejects, so this
 	// leg always errored -> audio-only (#1454).
@@ -753,7 +753,7 @@ func resolveAgentAvatarPersona(s *streamSession, agentId, requestedVendor string
 	if strings.HasPrefix(stampedId, voiceAvatarPersonaCatalogPrefix) {
 		catalogIdJSON, _ := json.Marshal(stampedId)
 		raw, err := s.service.engine.Execute(ctx,
-			fmt.Sprintf(`queryAvatarPersonaById({avatarPersonaId: %s})`, string(catalogIdJSON)))
+			fmt.Sprintf(`avatarPersonaById({avatarPersonaId: %s})`, string(catalogIdJSON)))
 		if err != nil {
 			if s.logger != nil {
 				s.logger.Warn("voice-agent avatar persona: catalog hydrate failed -- audio-only",
@@ -770,7 +770,7 @@ func resolveAgentAvatarPersona(s *streamSession, agentId, requestedVendor string
 	}
 
 	// 3. Catalog default for unstamped (or vendor-mismatched) agents.
-	raw, err := s.service.engine.Execute(ctx, `queryAvatarPersonas({})`)
+	raw, err := s.service.engine.Execute(ctx, `avatarPersonas({})`)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("voice-agent avatar persona: catalog default lookup failed -- audio-only",
@@ -1081,7 +1081,7 @@ func voiceCallToolDefaultsVia(ctx context.Context, engine voiceParticipantResolv
 	}
 	// Run the resolution reads as the voice-agent service actor (the same actor
 	// the other voice-path resolvers use), independent of the incoming stream
-	// ctx's provenance. querySpaceMeta is @public; queryGroupGAForSpace reads
+	// ctx's provenance. querySpaceMeta is @public; groupGAForSpace reads
 	// the space's GA participant.
 	resolveCtx := contextWithVoiceAgentActor(ctx)
 	defaults := map[string]any{"partitionId": partitionId}
@@ -1218,7 +1218,7 @@ func scopeSetFromSlugs(raw []string, found bool) (map[string]struct{}, bool) {
 
 // resolveAgentToolSlugsVia reads the agent's effective tool surface through the
 // narrow voiceParticipantResolver so the row-shape + fail-open distinction is
-// unit-testable. It runs the tested queryAgentById named query, reads the
+// unit-testable. It runs the tested agentById named query, reads the
 // agent's capabilities.skillIds[], and resolves those skill ids into concrete
 // tool slugs via engine.ResolveSkills -- the SAME path the cognition local
 // generation uses (integrations/cognition/ai_responder.go's getAgent, #158).
@@ -1285,7 +1285,7 @@ func resolveAgentToolSlugsVia(ctx context.Context, engine voiceParticipantResolv
 	return bundle.ToolSlugs, role, true
 }
 
-// roleFromAgentRows extracts the agent's role (payload.role) from a queryAgentById
+// roleFromAgentRows extracts the agent's role (payload.role) from a agentById
 // result row. Empty when absent -- callers fall back to the caller role.
 func roleFromAgentRows(rows []map[string]any) string {
 	for _, row := range rows {
@@ -1730,7 +1730,7 @@ func (s *streamSession) startVoiceAgentSpeakSubscriber(partitionId, gaAgentId, i
 				Payload: &memqlv1.MemqlServerMessage_VoiceAgentSpeak{
 					VoiceAgentSpeak: &memqlv1.VoiceAgentSpeak{
 						RequestId:   requestId,
-						PartitionId:     partitionId,
+						PartitionId: partitionId,
 						GaAgentId:   gaAgentId,
 						UtteranceId: reply.utteranceId,
 						Text:        reply.text,
@@ -1787,7 +1787,7 @@ func (s *streamSession) handleVoiceAgentPartialTranscript(envelope *memqlv1.Memq
 			voicePartialEventTopic,
 			events.KindMessage,
 			map[string]any{
-				"partitionId":       partitionId,
+				"partitionId":   partitionId,
 				"speakerUserId": speakerId,
 				"text":          msg.GetPartialText(),
 				"sequence":      msg.GetSequence(),
@@ -1806,7 +1806,7 @@ func (s *streamSession) handleVoiceAgentPartialTranscript(envelope *memqlv1.Memq
 }
 
 // handleVoiceAgentFinalTranscript inserts the user's utterance into
-// the single space chat via mutationSendTextUtterance.
+// the single space chat via sendTextUtterance.
 //
 // speakerUserId is OPTIONAL on the wire (#1403): the voice-agent's
 // CascadeConfig documents "empty is allowed (server resolves the active
@@ -1910,7 +1910,7 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 		partitionIdJSON, _ := json.Marshal(partitionId)
 		speakerIdJSON, _ := json.Marshal(speakerId)
 		inputMethodJSON, _ := json.Marshal(inputMethod)
-		query := fmt.Sprintf(`mutationSendTextUtterance({utteranceId: %s, partitionId: %s, participantId: %s, text: %s, source: {inputMethod: %s, pipeline: "voice-agent"}})`,
+		query := fmt.Sprintf(`sendTextUtterance({utteranceId: %s, partitionId: %s, participantId: %s, text: %s, source: {inputMethod: %s, pipeline: "voice-agent"}})`,
 			string(utteranceIdJSON), string(partitionIdJSON), string(speakerIdJSON), string(textJSON), string(inputMethodJSON))
 
 		ctx := contextWithVoiceAgentActor(context.Background())
@@ -2335,7 +2335,7 @@ func trailingSlug(id string) string {
 //   - participantType="si"  (the value the frontend keys sender lookup on)
 //   - participantId         = the GA's v1:cognition:participant row id,
 //     NOT the agent template id (resolved here via
-//     querySiParticipantForSpace)
+//     siParticipantForSpace)
 //   - utteranceType="text"  (transcript is text; audio rode LiveKit)
 //   - source                = {outputMethod:"voice", inputMethod:"realtime",
 //     pipeline:"voice-agent-realtime", agentId}
@@ -2396,7 +2396,7 @@ func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlCl
 		// Resolve the GA's AI participant row in the space. The frontend
 		// resolves a sender via participantMap.get(utterance.participantId),
 		// which is the v1:cognition:participant id -- NOT the agent
-		// template id. querySiParticipantForSpace returns the active AI
+		// template id. siParticipantForSpace returns the active AI
 		// participant; voice rooms have a single GA, so the first active
 		// AI participant is the speaker.
 		participantResolveStart := time.Now()
@@ -2445,7 +2445,7 @@ func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlCl
 		partitionIdJSON, _ := json.Marshal(partitionId)
 		participantIdJSON, _ := json.Marshal(participantId)
 		query := fmt.Sprintf(
-			`mutationSendTextUtterance({utteranceId: %s, partitionId: %s, participantId: %s, participantType: "si", text: %s%s, source: %s%s})`,
+			`sendTextUtterance({utteranceId: %s, partitionId: %s, participantId: %s, participantType: "si", text: %s%s, source: %s%s})`,
 			string(utteranceIdJSON), string(partitionIdJSON), string(participantIdJSON),
 			string(textJSON), replyToClause, string(sourceJSON), citationsClause,
 		)
@@ -2486,7 +2486,7 @@ func (s *streamSession) resolveAIParticipantId(ctx context.Context, partitionId 
 		return ""
 	}
 	spaceJSON, _ := json.Marshal(partitionId)
-	query := fmt.Sprintf(`querySiParticipantForSpace({partitionId: %s})`, string(spaceJSON))
+	query := fmt.Sprintf(`siParticipantForSpace({partitionId: %s})`, string(spaceJSON))
 	result, err := s.service.engine.Execute(ctx, query)
 	if err != nil {
 		if s.logger != nil {
@@ -2610,7 +2610,7 @@ func (s *streamSession) writeRealtimeSpeakingPresence(ctx context.Context, parti
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	payload := map[string]any{
-		"partitionId":       partitionId,
+		"partitionId":   partitionId,
 		"participantId": participantId,
 		"state":         state,
 		"label":         label,
@@ -2729,7 +2729,7 @@ func resolveSingleActiveHumanParticipantId(ctx context.Context, engine voicePart
 	// JSON-marshal the interpolated id so an embedded double quote cannot
 	// break out of the DSL string literal.
 	spaceJSON, _ := json.Marshal(canonicalSpace)
-	query := fmt.Sprintf(`querySpaceParticipants({partitionId: %s, participantType: "human", status: "active"})`, string(spaceJSON))
+	query := fmt.Sprintf(`spaceParticipants({partitionId: %s, participantType: "human", status: "active"})`, string(spaceJSON))
 	result, err := engine.Execute(ctx, query)
 	if err != nil {
 		return "", fmt.Errorf("query active human participants: %w", err)
@@ -2741,7 +2741,7 @@ func resolveSingleActiveHumanParticipantId(ctx context.Context, engine voicePart
 }
 
 // singleActiveHumanParticipantId applies the conservative fallback rule to a
-// querySpaceParticipants result payload: exactly one active human participant
+// spaceParticipants result payload: exactly one active human participant
 // row -> its canonical participant id; zero or multiple -> error. The
 // defensive concept / participantType re-checks mirror
 // integrations/cognition's findParticipantsByType (the shape runtime has been

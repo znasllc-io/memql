@@ -20,7 +20,7 @@ type consentEngine struct {
 func (e *consentEngine) Execute(_ context.Context, q string) (*memql.ExecuteResult, error) {
 	e.queries = append(e.queries, q)
 	res := &memql.ExecuteResult{}
-	if strings.Contains(q, "queryConsentOptOut") {
+	if strings.Contains(q, "consentOptOut") {
 		ids := make([]string, e.optOutRows)
 		for i := range ids {
 			ids[i] = "consent:row"

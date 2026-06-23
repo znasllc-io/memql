@@ -218,7 +218,7 @@ func TestCanonicalAssistantSkillIds_AbsentSeed(t *testing.T) {
 }
 
 // TestReconcileCapsTransform_PreservesSiblingFlags pins the
-// clobber-safety contract: mutationUpdateAgent does top-level replace
+// clobber-safety contract: updateAgent does top-level replace
 // (no @mergeFields), so the reconcile must send the FULL capabilities
 // object with only skillIds changed. This test mirrors the exact
 // copy-then-overwrite transform the reconcile loop performs and asserts

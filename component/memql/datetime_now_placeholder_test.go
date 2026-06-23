@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/stretchr/testify/require"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // classifyScalarOrExpr must map the bare reserved identifiers `now` and
@@ -30,7 +30,7 @@ func TestMutationTemplate_BareNowRendersTimestamp(t *testing.T) {
 	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{
 		"v1:notes:note": {Name: "v1:notes:note"},
 	})
-	src := `mutation note mutationCreateNoteProbe {
+	src := `mutate note mutationCreateNoteProbe {
   args {
     noteId  string  @required
     body    string  @required
@@ -76,7 +76,7 @@ func TestMutationTemplate_QuotedNowStaysLiteral(t *testing.T) {
 	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{
 		"v1:notes:note": {Name: "v1:notes:note"},
 	})
-	src := `mutation note mutationQuotedNowProbe {
+	src := `mutate note mutationQuotedNowProbe {
   args {
     noteId  string  @required
   }

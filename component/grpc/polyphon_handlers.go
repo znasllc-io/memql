@@ -124,7 +124,7 @@ func (s *streamSession) handlePolyphonUtterance(envelope *memqlv1.MemqlClientMes
 		// Use the sendTextUtterance mutation function instead of inline insert.
 		utteranceId := fmt.Sprintf("utt-%s-%d", participantId, time.Now().UnixNano())
 		textJSON, _ := json.Marshal(text)
-		query := fmt.Sprintf(`mutationSendTextUtterance({utteranceId: "%s", partitionId: "%s", participantId: "%s", text: %s, source: {inputMethod: "stt", pipeline: "polyphon"}})`,
+		query := fmt.Sprintf(`sendTextUtterance({utteranceId: "%s", partitionId: "%s", participantId: "%s", text: %s, source: {inputMethod: "stt", pipeline: "polyphon"}})`,
 			utteranceId, scopeId, participantId, string(textJSON))
 
 		ctx := contextWithSystemActor(context.Background())

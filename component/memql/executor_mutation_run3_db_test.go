@@ -14,10 +14,10 @@ import (
 //   - #1678  read-merge not applied to touchSession / updateSessionDevices /
 //            updateSessionStreams / deleteKnowledgeDomain (full-record
 //            replacement wiped omitted fields / required a full payload).
-//   - #1686  mutationUpdateClusterSettings wiped internalDomains when omitted.
+//   - #1686  updateClusterSettings wiped internalDomains when omitted.
 //   - #1673  calendar create blocked: reserved field createdBy/createdAt in the
 //            insert payload.
-//   - #1676  mutationCreateDelegation wrote the literal string 'nil' into the
+//   - #1676  createDelegation wrote the literal string 'nil' into the
 //            date-time revokedAt field.
 //   - #1683  notes/todos create stamped the literal string 'null' into omitted
 //            optional fields (now dispatched via typed function handler instead
@@ -53,7 +53,7 @@ func TestRun3_CalendarCreate_NoReservedFields(t *testing.T) {
 
 	// Timed event, allDay omitted entirely (mutation coalesces to false).
 	timedId := "cal-" + uniqueSuffix("timed")
-	gotTimed := runMutation(t, ctx, eng, "mutationCreateCalendarEvent", map[string]any{
+	gotTimed := runMutation(t, ctx, eng, "createCalendarEvent", map[string]any{
 		"eventId":  timedId,
 		"title":    "Dentist",
 		"startsAt": "2026-07-01T09:00:00Z",
@@ -69,7 +69,7 @@ func TestRun3_CalendarCreate_NoReservedFields(t *testing.T) {
 
 	// All-day event, allDay an explicit bool true.
 	allDayId := "cal-" + uniqueSuffix("allday")
-	gotAllDay := runMutation(t, ctx, eng, "mutationCreateCalendarEvent", map[string]any{
+	gotAllDay := runMutation(t, ctx, eng, "createCalendarEvent", map[string]any{
 		"eventId":  allDayId,
 		"title":    "Birthday",
 		"startsAt": "2026-07-02T00:00:00Z",
@@ -87,7 +87,7 @@ func TestRun3_CreateDelegation_NoLiteralNil(t *testing.T) {
 	const conceptName = "v1:identity:delegation"
 
 	delegationId := "deleg-" + uniqueSuffix("create")
-	got := runMutation(t, ctx, eng, "mutationCreateDelegation", map[string]any{
+	got := runMutation(t, ctx, eng, "createDelegation", map[string]any{
 		"delegationId":     delegationId,
 		"identityId":       "ident-" + uniqueSuffix("d"),
 		"identitySubject":  "user:deleg-test",
@@ -112,7 +112,7 @@ func TestRun3_NotesCreate_OmittedTitle(t *testing.T) {
 	const conceptName = "v1:notes:note"
 
 	noteId := "note-" + uniqueSuffix("notitle")
-	got := runMutation(t, ctx, eng, "mutationCreateNote", map[string]any{
+	got := runMutation(t, ctx, eng, "createNote", map[string]any{
 		"noteId": noteId,
 		"body":   "remember the milk",
 	})
@@ -131,7 +131,7 @@ func TestRun3_TodosCreate_OmittedDueAt(t *testing.T) {
 	const conceptName = "v1:todos:todo"
 
 	todoId := "todo-" + uniqueSuffix("nodue")
-	got := runMutation(t, ctx, eng, "mutationCreateTodo", map[string]any{
+	got := runMutation(t, ctx, eng, "createTodo", map[string]any{
 		"todoId": todoId,
 		"title":  "ship the fix",
 	})
@@ -152,7 +152,7 @@ func TestRun3_TouchSession_ReadMerge(t *testing.T) {
 	sessionId := "sess-" + uniqueSuffix("touch")
 	// Seed a full session row first. Reuse the canonical stored id the engine
 	// returns for both the touch arg and the read-back (ids may be canonicalized).
-	storedId := runMutation(t, ctx, eng, "mutationCreateAuthSession", map[string]any{
+	storedId := runMutation(t, ctx, eng, "createAuthSession", map[string]any{
 		"sessionId": sessionId,
 		"subject":   "user:touch-test",
 		"tokenHash": "hash-touch-1",
@@ -162,7 +162,7 @@ func TestRun3_TouchSession_ReadMerge(t *testing.T) {
 	before := latestPayload(t, ctx, db, conceptName, storedId)
 
 	// MINIMAL touch: only the changed field in payload.
-	runMutation(t, ctx, eng, "mutationTouchSession", map[string]any{
+	runMutation(t, ctx, eng, "touchSession", map[string]any{
 		"sessionId": storedId,
 		"payload":   map[string]any{"lastActivityAt": "2026-06-18T12:00:00Z"},
 	})
@@ -183,7 +183,7 @@ func TestRun3_UpdateClusterSettings_PreservesInternalDomains(t *testing.T) {
 	const settingsId = "cluster"
 
 	// Seed the singleton with a non-empty internalDomains.
-	storedId := runMutation(t, ctx, eng, "mutationCreateClusterSettings", map[string]any{
+	storedId := runMutation(t, ctx, eng, "createClusterSettings", map[string]any{
 		"id":                  settingsId,
 		"registrationMode":    "open",
 		"internalDefaultRole": "reader",
@@ -193,7 +193,7 @@ func TestRun3_UpdateClusterSettings_PreservesInternalDomains(t *testing.T) {
 	require.Equal(t, "znas.io,example.com", before["internalDomains"])
 
 	// Partial update: change brandName ONLY, omit internalDomains.
-	runMutation(t, ctx, eng, "mutationUpdateClusterSettings", map[string]any{
+	runMutation(t, ctx, eng, "updateClusterSettings", map[string]any{
 		"id":                  storedId,
 		"registrationMode":    "open",
 		"internalDefaultRole": "reader",

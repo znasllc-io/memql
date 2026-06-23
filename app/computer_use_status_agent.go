@@ -109,7 +109,7 @@ func (a *App) computerUseStatusFn() agent.ComputerUseStatusFn {
 }
 
 // standingComputerUseScope reads the agent's current standing
-// computer_use scope from queryAgentAuthorizationsForUser. Tolerates
+// computer_use scope from agentAuthorizationsForUser. Tolerates
 // both bare-slug and canonical-form agentIds on the stored row
 // because v1:agents:agentAuthorization has no @relationship on
 // agentId yet (auto-canon doesn't fire). Returns "" on lookup
@@ -121,11 +121,11 @@ func standingComputerUseScope(ctx context.Context, engine *memqlengine.MemQLEngi
 	if engine == nil || strings.TrimSpace(ownerUserId) == "" {
 		return ""
 	}
-	q := fmt.Sprintf(`queryAgentAuthorizationsForUser({userId:%q})`, ownerUserId)
+	q := fmt.Sprintf(`agentAuthorizationsForUser({userId:%q})`, ownerUserId)
 	res, err := engine.Execute(ctx, q)
 	if err != nil {
 		if logger != nil {
-			logger.Debug("computer_use scope: queryAgentAuthorizationsForUser failed",
+			logger.Debug("computer_use scope: agentAuthorizationsForUser failed",
 				"owner_user_id", ownerUserId,
 				"error", err,
 			)
@@ -172,7 +172,7 @@ func standingComputerUseScope(ctx context.Context, engine *memqlengine.MemQLEngi
 // auto-stamped createdBy IS the user (because the actor IS the
 // user on user-driven create paths).
 //
-// queryAgentOwner is a shape() query, so results land in
+// agentOwner is a shape() query, so results land in
 // r.OutputPayload (the Data axis). The older code read Bundle.Nodes
 // and silently returned empty -- that was the "agent owner
 // unresolved" log line that killed Computer Use prompt awareness.
@@ -188,7 +188,7 @@ func resolveAgentOwner(ctx context.Context, engine *memqlengine.MemQLEngine, age
 	if engine == nil || strings.TrimSpace(agentId) == "" {
 		return "", nil
 	}
-	q := fmt.Sprintf(`queryAgentOwner({agentId:%q})`, agentId)
+	q := fmt.Sprintf(`agentOwner({agentId:%q})`, agentId)
 	res, err := engine.Execute(ctx, q)
 	if err != nil {
 		return "", err
@@ -232,13 +232,13 @@ func resolveAgentOwner(ctx context.Context, engine *memqlengine.MemQLEngine, age
 // paired anything" so the agent's prompt-context message can
 // branch on it.
 //
-// queryWorkersForUser is a shape() query -- same Data-vs-Bundle
+// workersForUser is a shape() query -- same Data-vs-Bundle
 // caveat as resolveAgentOwner above. Read OutputPayload first.
 func userHasConfiguredWorker(ctx context.Context, engine *memqlengine.MemQLEngine, ownerUserId string) (bool, error) {
 	if engine == nil || strings.TrimSpace(ownerUserId) == "" {
 		return false, nil
 	}
-	q := fmt.Sprintf(`queryWorkersForUser({ownerUserId:%q})`, ownerUserId)
+	q := fmt.Sprintf(`workersForUser({ownerUserId:%q})`, ownerUserId)
 	res, err := engine.Execute(ctx, q)
 	if err != nil {
 		return false, err

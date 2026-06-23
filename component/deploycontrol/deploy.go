@@ -34,7 +34,7 @@ import (
 )
 
 // deploymentRecord is the folded current state of a v1:cluster:deployment
-// row, read from queryDeploymentById's append-only timeline.
+// row, read from deploymentById's append-only timeline.
 type deploymentRecord struct {
 	deploymentID string
 	status       string
@@ -179,9 +179,9 @@ func (s *Service) specFor(deploymentID string, rec deploymentRecord) deploymentS
 	}
 }
 
-// loadDeployment reads a deployment's current state via queryDeploymentById.
+// loadDeployment reads a deployment's current state via deploymentById.
 // The query returns the full append-only timeline oldest-to-newest; a
-// status-only transition (mutationUpdateDeploymentStatus) is a read-merge
+// status-only transition (updateDeploymentStatus) is a read-merge
 // update that re-stamps every field, so the latest row carries the
 // complete current state. We fold across the timeline (last non-empty
 // wins per field, last row's status wins) to be robust regardless.
@@ -189,7 +189,7 @@ func (s *Service) loadDeployment(ctx context.Context, deploymentID string) (depl
 	if s == nil || s.engine == nil {
 		return deploymentRecord{}, fmt.Errorf("no engine wired: cannot read deployment %s", deploymentID)
 	}
-	query := "queryDeploymentById(" + renderDeploymentArgs(map[string]any{"deploymentId": deploymentID}) + ")"
+	query := "deploymentById(" + renderDeploymentArgs(map[string]any{"deploymentId": deploymentID}) + ")"
 	res, err := s.engine.Execute(ctx, query)
 	if err != nil {
 		return deploymentRecord{}, fmt.Errorf("read deployment %s: %w", deploymentID, err)
@@ -247,7 +247,7 @@ func (s *Service) createRollbackDeployment(ctx context.Context, toID string, tar
 		"previousDeploymentId": toID,
 		"notes":                note,
 	}
-	query := "mutationCreateDeployment(" + renderDeploymentArgs(args) + ")"
+	query := "createDeployment(" + renderDeploymentArgs(args) + ")"
 	if _, err := s.engine.Execute(ctx, query); err != nil {
 		return "", fmt.Errorf("create rollback deployment record: %w", err)
 	}

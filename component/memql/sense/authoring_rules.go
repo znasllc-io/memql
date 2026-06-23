@@ -135,7 +135,7 @@ func reportDirectiveExpr(funcDef *parser.FunctionDef, name, source string, out *
 //
 // We deliberately do not enforce the strict DNS-label regex here
 // (`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$`) because Go-style camelCase
-// function names (listPartitions, queryUserById) are widely used in
+// function names (listPartitions, userById) are widely used in
 // the repo and not DNS-label-shaped. The CLI applies the strict regex
 // to keystroke-level inputs (partition names, cluster names) where
 // the constraint actually bites. Here we only surface the trivially

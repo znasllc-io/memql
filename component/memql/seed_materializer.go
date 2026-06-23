@@ -82,7 +82,7 @@ func systemActorContext(ctx context.Context) context.Context {
 //     user. Global seeds are skipped (they don't fan out per user).
 //
 // The materializer delegates row writes to existing concept mutations
-// (mutationCreateAgent for v1:agents:agent, etc.) so the platform
+// (createAgent for v1:agents:agent, etc.) so the platform
 // has a single canonical write path. The convention is:
 //
 //	use <namespace>.<conceptName>   ->  mutationCreate<ConceptName>
@@ -280,7 +280,7 @@ func (m *SeedMaterializer) Start(ctx context.Context) error {
 	// in the DB). The materialized rows are the canonical source of
 	// truth; the registry is the in-memory cache the agent("name")
 	// builtin reads from. Pass the system-actor ctx so the
-	// underlying queryAllAgents call doesn't fail on the empty
+	// underlying allAgents call doesn't fail on the empty
 	// actor.
 	if agentReg := m.engine.Agents(); agentReg != nil {
 		if _, err := agentReg.LoadFromRows(systemActorContext(ctx), m.engine, logger); err != nil && logger != nil {
@@ -359,7 +359,7 @@ func (m *SeedMaterializer) materializePerUser(ctx context.Context, def *SeedDefi
 // are resolved from the v1:agents:avatarPersona catalog at runtime so the value
 // stays deployment-agnostic (minted ids vary per vendor account).
 //
-// Because mutationCreateAgent is create-only (no-op on an existing row), this
+// Because createAgent is create-only (no-op on an existing row), this
 // only takes effect on the first create; a later user choice (the #239 picker)
 // is preserved across restarts. All cluster nodes read the same env value, so
 // concurrent materializer runs inject identical fields -- no last-writer race.
@@ -401,10 +401,10 @@ func (m *SeedMaterializer) resolveAvatarPersonaByName(ctx context.Context, name 
 	if m.engine == nil {
 		return "", "", false
 	}
-	result, err := m.engine.Execute(systemActorContext(ctx), `queryAvatarPersonas({})`)
+	result, err := m.engine.Execute(systemActorContext(ctx), `avatarPersonas({})`)
 	if err != nil {
 		if m.engine.Logger != nil {
-			m.engine.Logger.Warn("seed materializer: queryAvatarPersonas failed resolving dev default avatar",
+			m.engine.Logger.Warn("seed materializer: avatarPersonas failed resolving dev default avatar",
 				"error", err)
 		}
 		return "", "", false
@@ -427,7 +427,7 @@ func (m *SeedMaterializer) resolveAvatarPersonaByName(ctx context.Context, name 
 }
 
 // materializerResultRows normalizes an Execute result into row maps. Shape-
-// projected queries (queryAvatarPersonas uses avatarPersonaFull) surface flat
+// projected queries (avatarPersonas uses avatarPersonaFull) surface flat
 // rows via OutputPayload; a raw bundle is walked as a fallback.
 func materializerResultRows(result *ExecuteResult) []map[string]any {
 	if result == nil {
@@ -666,7 +666,7 @@ func deterministicPerUserSeedId(def *SeedDefinition, userId string) string {
 // system:seedMaterializer actor instead of failing with "no actor
 // found in context".
 func (m *SeedMaterializer) invokeCreateMutation(ctx context.Context, conceptName string, args map[string]any) error {
-	mutationName := "mutationCreate" + ucFirst(conceptName)
+	mutationName := "create" + ucFirst(conceptName)
 	rendered, err := renderArgsObject(args)
 	if err != nil {
 		return fmt.Errorf("render args: %w", err)
@@ -827,21 +827,21 @@ func seedNames(defs []*SeedDefinition) []string {
 }
 
 // listUserIds enumerates existing v1:identity:user rows via the
-// canonical `queryActiveUsers` query (dsl/identity/queries.memql).
+// canonical `activeUsers` query (dsl/identity/queries.memql).
 // Using the named query (instead of a raw `node(concept==...)` call)
 // goes through the same path every other reader uses, with proper
 // shape resolution, global-scope handling, and trait filtering --
 // we only materialize per-user agents for active users, not
 // soft-deleted ones.
 //
-// systemActorContext is required because queryActiveUsers's
+// systemActorContext is required because activeUsers's
 // underlying executor stamps an actor on the request envelope; an
 // empty actor produces a "no actor found in context" failure even
 // for read paths that touch global concepts.
 func (m *SeedMaterializer) listUserIds(ctx context.Context) ([]string, error) {
-	result, err := m.engine.Execute(systemActorContext(ctx), `queryActiveUsers({})`)
+	result, err := m.engine.Execute(systemActorContext(ctx), `activeUsers({})`)
 	if err != nil {
-		return nil, fmt.Errorf("queryActiveUsers: %w", err)
+		return nil, fmt.Errorf("activeUsers: %w", err)
 	}
 	return extractRowIds(result), nil
 }

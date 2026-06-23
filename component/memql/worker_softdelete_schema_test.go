@@ -15,7 +15,7 @@ import (
 )
 
 // softDeleteWorkerInvocationMutationSource mirrors the production
-// `mutationSoftDeleteWorkerInvocation` body in dsl/worker/mutations.memql.
+// `softDeleteWorkerInvocation` body in dsl/worker/mutations.memql.
 // Kept inline (rather than slicing the multi-construct file) so the exact
 // update shape under test is legible at a glance. The companion guard below
 // is the contract: the retention sweep stamps `deleted: true`, and that
@@ -23,14 +23,14 @@ import (
 //
 // memql#1644 regressed precisely because this update carries `deleted: true`
 // (the soft-delete flag the mutation's own doc-comment + the
-// workerInvocationRetentionSweep cron + the traitIsNotDeleted filter all
+// workerInvocationRetentionSweep cron + the isNotDeleted filter all
 // assume), yet the invocation concept -- additionalProperties:false -- did
 // not define the field, so the mutation failed:
 //
 //	additionalProperties 'deleted' not allowed
 const softDeleteWorkerInvocationMutationSource = `use worker.concepts.{ invocation }
 
-mutation invocation mutationSoftDeleteWorkerInvocation {
+mutate invocation softDeleteWorkerInvocation {
   args {
     invocationId  string  @required
   }
@@ -77,7 +77,7 @@ func renderSoftDeleteWorkerInvocationPayload(t *testing.T) map[string]any {
 		"v1:worker:invocation": {Name: "v1:worker:invocation"},
 	})
 	fn, err := tryParseNewFunctionSyntax(
-		"mutationSoftDeleteWorkerInvocation", "mutation",
+		"softDeleteWorkerInvocation", "mutation",
 		softDeleteWorkerInvocationMutationSource, "dsl/worker/mutations.memql", registry,
 	)
 	require.NoError(t, err)
@@ -102,7 +102,7 @@ func renderSoftDeleteWorkerInvocationPayload(t *testing.T) map[string]any {
 func TestSoftDeleteWorkerInvocationRendersDeletedField(t *testing.T) {
 	payload := renderSoftDeleteWorkerInvocationPayload(t)
 	require.Equal(t, true, payload["deleted"],
-		"mutationSoftDeleteWorkerInvocation must stamp deleted=true")
+		"softDeleteWorkerInvocation must stamp deleted=true")
 }
 
 // TestWorkerInvocationSchemaAllowsDeletedField pins the fix for memql#1644:

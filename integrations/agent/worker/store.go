@@ -32,7 +32,7 @@ func (s *EngineStore) UserPreferences(ctx context.Context, userId string) (Prefe
 	if strings.TrimSpace(userId) == "" {
 		return Preferences{ComputerUseEnabled: true}, nil
 	}
-	query := fmt.Sprintf(`queryUserById({"userId":%q})`, userId)
+	query := fmt.Sprintf(`userById({"userId":%q})`, userId)
 	res, err := s.Engine.Execute(ctx, query)
 	if err != nil {
 		return Preferences{ComputerUseEnabled: true}, fmt.Errorf("user lookup: %w", err)
@@ -55,7 +55,7 @@ func (s *EngineStore) UserPreferences(ctx context.Context, userId string) (Prefe
 // (agentId, userId). Returns nil + no error when none exists --
 // the dispatcher treats nil as "no scope" and rejects.
 //
-// Reads via queryAgentAuthorizationsForUser({userId}) -- a shape()
+// Reads via agentAuthorizationsForUser({userId}) -- a shape()
 // query, so results land on res.OutputPayload (the Data axis) not
 // res.Bundle.Nodes. Walks the projected rows and matches on
 // agentId tolerantly (bare-slug or canonical-form), because the
@@ -78,7 +78,7 @@ func (s *EngineStore) AgentAuthorization(ctx context.Context, agentId, ownerUser
 	if strings.TrimSpace(agentId) == "" || strings.TrimSpace(ownerUserId) == "" {
 		return nil, nil
 	}
-	query := fmt.Sprintf(`queryAgentAuthorizationsForUser({userId:%q})`, ownerUserId)
+	query := fmt.Sprintf(`agentAuthorizationsForUser({userId:%q})`, ownerUserId)
 	res, err := s.Engine.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("agent authorization lookup: %w", err)
@@ -134,7 +134,7 @@ func (s *EngineStore) PlanScope(ctx context.Context, planId string) (string, err
 		return "", nil
 	}
 	// Re-uses the existing planFull query.
-	query := fmt.Sprintf(`queryPlanById({"planId":%q})`, planId)
+	query := fmt.Sprintf(`planById({"planId":%q})`, planId)
 	res, err := s.Engine.Execute(ctx, query)
 	if err != nil {
 		return "", fmt.Errorf("plan lookup: %w", err)
@@ -179,7 +179,7 @@ func (s *EngineStore) WriteInvocation(ctx context.Context, row workerservice.Inv
 	if err != nil {
 		return fmt.Errorf("agent.worker store: marshal invocation: %w", err)
 	}
-	query := fmt.Sprintf("mutationCreateWorkerInvocation(%s)", string(body))
+	query := fmt.Sprintf("createWorkerInvocation(%s)", string(body))
 	_, err = s.Engine.Execute(ctx, query)
 	return err
 }

@@ -213,7 +213,7 @@ func jsonSchemaForArgsField(f *FunctionArgsField) map[string]any {
 		//   2. a free-form object (no declared sub-fields) defaults to
 		//      OPEN -- otherwise additionalProperties:false rejects
 		//      every key, making the whole partial-update family
-		//      (mutationUpdateTodo.payload, notesUpdate, ...) uncallable
+		//      (updateTodo.payload, notesUpdate, ...) uncallable
 		//      even though the payload is documented to carry the
 		//      changed fields (#1606).
 		//   3. an object WITH declared sub-fields stays CLOSED, so the

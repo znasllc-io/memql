@@ -31,7 +31,7 @@ type FunctionSlice struct {
 // functionDeclHeader matches every top-level function-style header
 // at column 0 we care about:
 //
-//   - struct-form: `query NAME {`, `mutation NAME {`, `logic NAME {`
+//   - struct-form: `query NAME {`, `mutate NAME {`, `logic NAME {`
 //   - procedural: `func (Query) NAME`, `func (Mutation) NAME`, ...
 //
 // Captures the (keyword, name) for the slice. We don't match
@@ -60,7 +60,7 @@ var functionDeclHeader = regexp.MustCompile(
 		// concept on queries / mutations / shapes / seeds (PR #48 / #49);
 		// logic never binds a concept in the signature, so for it the
 		// optional segment will always be absent in authored sources.
-		`(query|mutation|logic)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{` +
+		`(query|mutate|logic)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{` +
 		`|` +
 		// procedural: `func (Kind) NAME(`
 		`func[ \t]*\([ \t]*(Query|Mutation|Logic|Shape|Tool|Builtin|Prompt|Provider|Policy)[ \t]*\)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\(` +
@@ -71,7 +71,7 @@ var functionDeclHeader = regexp.MustCompile(
 // Spec / Trait / Automation omitted -- dedicated paths.
 var kindFromString = map[string]languageParser.FunctionType{
 	"query":    languageParser.FunctionTypeQuery,
-	"mutation": languageParser.FunctionTypeMutation,
+	"mutate":   languageParser.FunctionTypeMutation,
 	"logic":    languageParser.FunctionTypeLogic,
 	"Query":    languageParser.FunctionTypeQuery,
 	"Mutation": languageParser.FunctionTypeMutation,
@@ -168,7 +168,7 @@ func ExtractFunctionSlices(source string) []FunctionSlice {
 		// (offset-identical to `source`) so braces inside a comment in
 		// the body don't perturb the depth count (memql#1074).
 		openIdx := -1
-		if kindStr == "query" || kindStr == "mutation" || kindStr == "logic" {
+		if kindStr == "query" || kindStr == "mutate" || kindStr == "logic" {
 			openIdx = headerEnd - 1
 		} else {
 			// Procedural: scan from headerEnd for the first `{`.

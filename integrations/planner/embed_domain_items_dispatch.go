@@ -98,8 +98,8 @@ func (d *EmbedDomainItemsDispatcher) handle(ev events.Event) {
 	if !ok || kind != "embedDomainItems" {
 		return
 	}
-	// Only dispatch on a live / dispatchable status. mutationCreatePlan
-	// stamps 'planning'; mutationStartPlan flips to 'running'. Accept the
+	// Only dispatch on a live / dispatchable status. createPlan
+	// stamps 'planning'; startPlan flips to 'running'. Accept the
 	// statuses that mean "this Plan wants work done now"; ignore terminal
 	// / parked states.
 	switch status {
@@ -207,8 +207,8 @@ func (d *EmbedDomainItemsDispatcher) runEmbed(ctx context.Context, planId string
 	}
 
 	return d.markSucceeded(ctx, planId, map[string]any{
-		"domainIds":     domainIds,
-		"documentId":    documentId,
+		"domainIds":      domainIds,
+		"documentId":     documentId,
 		"chunksEmbedded": totalEmbedded,
 		"chunksAlready":  totalAlready,
 		"perDomain":      perDomain,
@@ -252,7 +252,7 @@ func (d *EmbedDomainItemsDispatcher) embedDomain(ctx context.Context, domainId, 
 // --- context loaders ------------------------------------------------------
 
 func (d *EmbedDomainItemsDispatcher) loadPlan(ctx context.Context, planId string) (map[string]any, error) {
-	q := fmt.Sprintf(`queryPlanById({planId:%q})`, planId)
+	q := fmt.Sprintf(`planById({planId:%q})`, planId)
 	res, err := d.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
@@ -268,7 +268,7 @@ func (d *EmbedDomainItemsDispatcher) loadPlan(ctx context.Context, planId string
 
 func (d *EmbedDomainItemsDispatcher) markRunning(ctx context.Context, planId string) error {
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"running", startedAt:%q})`,
+		`updatePlanStatus({planId:%q, status:"running", startedAt:%q})`,
 		planId, time.Now().UTC().Format(time.RFC3339),
 	)
 	_, err := d.engine.Execute(systemActorContext(ctx), q)
@@ -281,7 +281,7 @@ func (d *EmbedDomainItemsDispatcher) markSucceeded(ctx context.Context, planId s
 		outputJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"succeeded", output:%s, completedAt:%q})`,
+		`updatePlanStatus({planId:%q, status:"succeeded", output:%s, completedAt:%q})`,
 		planId, string(outputJSON), time.Now().UTC().Format(time.RFC3339),
 	)
 	_, err = d.engine.Execute(systemActorContext(ctx), q)
@@ -290,7 +290,7 @@ func (d *EmbedDomainItemsDispatcher) markSucceeded(ctx context.Context, planId s
 
 func (d *EmbedDomainItemsDispatcher) markFailed(ctx context.Context, planId, errorMessage string) error {
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"failed", errorMessage:%q, completedAt:%q})`,
+		`updatePlanStatus({planId:%q, status:"failed", errorMessage:%q, completedAt:%q})`,
 		planId, errorMessage, time.Now().UTC().Format(time.RFC3339),
 	)
 	_, err := d.engine.Execute(systemActorContext(ctx), q)

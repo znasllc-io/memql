@@ -15,7 +15,7 @@ import (
 )
 
 // greetingMutationSource mirrors the production
-// `mutationCreateGreetingUtterance` body in dsl/cognition/mutations.memql.
+// `createGreetingUtterance` body in dsl/cognition/mutations.memql.
 // Kept inline (rather than slicing the multi-construct file) so the test
 // is hermetic and the exact insert shape under test is legible at a
 // glance. The companion guard below is the contract: whatever the
@@ -25,7 +25,7 @@ import (
 // not allow, so the join greeting silently never landed.
 const greetingMutationSource = `use cognition.concepts.{ utterance }
 
-mutation utterance mutationCreateGreetingUtterance {
+mutate utterance createGreetingUtterance {
   args {
     partitionId        string  @required
     participantId  string  @required
@@ -84,7 +84,7 @@ func renderGreetingPayload(t *testing.T) map[string]any {
 		"v1:cognition:utterance": {Name: "v1:cognition:utterance"},
 	})
 	fn, err := tryParseNewFunctionSyntax(
-		"mutationCreateGreetingUtterance", "mutation",
+		"createGreetingUtterance", "mutation",
 		greetingMutationSource, "dsl/cognition/mutations.memql", registry,
 	)
 	require.NoError(t, err)
@@ -93,7 +93,7 @@ func renderGreetingPayload(t *testing.T) map[string]any {
 
 	engine := &MemQLEngine{}
 	mutation, err := engine.renderMutationTemplate(context.Background(), fn.MutationTemplate, map[string]any{
-		"partitionId":       "v1:cognition:space:daily-2026-05-29",
+		"partitionId":   "v1:cognition:space:daily-2026-05-29",
 		"participantId": "si-sofia-daily",
 		"agentId":       "v1:agents:agent:assistant-znas",
 		"text":          "Good to see you again -- jumping in.",

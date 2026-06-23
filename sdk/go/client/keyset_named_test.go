@@ -15,7 +15,7 @@ import (
 // (1) sends the named query string with the inbound continuation cursor
 // stamped on ExecuteQueryMsg.cursor, and (2) returns the engine's
 // nextCursor + the page rows. This is the contract the cockpit Planner
-// "load more" relies on; the plain generated QueryAllPlans can't carry a
+// "load more" relies on; the plain generated AllPlans can't carry a
 // cursor either way.
 func TestQueryAllPlansPage_RoundTrip(t *testing.T) {
 	stream := newMockStream()
@@ -30,7 +30,7 @@ func TestQueryAllPlansPage_RoundTrip(t *testing.T) {
 	}
 	done := make(chan out, 1)
 	go func() {
-		p, err := qc.QueryAllPlansPage(context.Background(), QueryAllPlansArgs{}, "cursor-from-page-1")
+		p, err := qc.AllPlansPage(context.Background(), AllPlansArgs{}, "cursor-from-page-1")
 		done <- out{page: p, err: err}
 	}()
 
@@ -39,8 +39,8 @@ func TestQueryAllPlansPage_RoundTrip(t *testing.T) {
 	if q == nil {
 		t.Fatalf("expected ExecuteQueryMsg payload, got %+v", sent.GetPayload())
 	}
-	if q.GetQuery() != "queryAllPlans({})" {
-		t.Errorf("query: want %q, got %q (must stay on the named-primitive surface)", "queryAllPlans({})", q.GetQuery())
+	if q.GetQuery() != "allPlans({})" {
+		t.Errorf("query: want %q, got %q (must stay on the named-primitive surface)", "allPlans({})", q.GetQuery())
 	}
 	if q.GetCursor() != "cursor-from-page-1" {
 		t.Errorf("cursor: want %q, got %q (inbound cursor must ride the request)", "cursor-from-page-1", q.GetCursor())
@@ -65,7 +65,7 @@ func TestQueryAllPlansPage_RoundTrip(t *testing.T) {
 	select {
 	case got := <-done:
 		if got.err != nil {
-			t.Fatalf("QueryAllPlansPage: %v", got.err)
+			t.Fatalf("AllPlansPage: %v", got.err)
 		}
 		if got.page.NextCursor != "cursor-to-page-2" {
 			t.Errorf("NextCursor: want cursor-to-page-2, got %q", got.page.NextCursor)
@@ -80,7 +80,7 @@ func TestQueryAllPlansPage_RoundTrip(t *testing.T) {
 			t.Errorf("row status not carried: %+v", got.page.Rows[0])
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for QueryAllPlansPage to return")
+		t.Fatal("timed out waiting for AllPlansPage to return")
 	}
 }
 
@@ -95,7 +95,7 @@ func TestQueryAllPlansPage_LastPageNoCursor(t *testing.T) {
 
 	done := make(chan *PageResult, 1)
 	go func() {
-		p, _ := qc.QueryAllPlansPage(context.Background(), QueryAllPlansArgs{}, "")
+		p, _ := qc.AllPlansPage(context.Background(), AllPlansArgs{}, "")
 		done <- p
 	}()
 

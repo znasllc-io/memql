@@ -791,11 +791,11 @@ func (e *Evaluator) EvaluateFilterValue(expr string) (any, error) {
 
 	// Bare step-variable reference: a single identifier (no dot) that names a
 	// recorded step result. A logic body's guard like `if toStatus == "queued"`
-	// (logicRecordTransition, where `toStatus := coalesce(...)` is a prior step)
+	// (recordTransition, where `toStatus := coalesce(...)` is a prior step)
 	// reaches here as the bare operand `toStatus`. Without this it fails
 	// looksLikePath (no dot), falls through to the literal-string fallback, and
 	// the comparison tests the path TEXT ("toStatus" != "queued") -- so every
-	// `toStatus`-guarded mutationRecordRequestEvent step was skipped (the other
+	// `toStatus`-guarded recordRequestEvent step was skipped (the other
 	// half of #1847). Scoped strictly to recorded step ids so a genuine string
 	// literal (`"owner"`, `submitted`) is never swallowed.
 	if isBareStepIdentifier(expr) {
@@ -834,8 +834,8 @@ func (e *Evaluator) EvaluateFilterValue(expr string) (any, error) {
 		// prefix turned it into `event.args.event....` which never resolves, so
 		// the guard fell through to a LITERAL string and evaluated false -- the
 		// #1847 outage: every guarded `name := if <args-cond> { mutation }` step
-		// in a logic body invoked as an automation step (logicRouteRequest's
-		// fast-track / approval / validation transitions, logicRecordTransition's
+		// in a logic body invoked as an automation step (routeRequest's
+		// fast-track / approval / validation transitions, recordTransition's
 		// whole body) was silently skipped while the UNGUARDED steps ran. Resolve
 		// these against resolvePath's root switch directly (the same path
 		// `$<root>.X` takes). `event.X` keeps its existing pass-through below.
@@ -1142,7 +1142,7 @@ func (e *Evaluator) evaluateAtomicCondition(condition string) (bool, error) {
 	// string is always truthy), and the filter ALWAYS passes regardless of
 	// the field. That silently disabled `@filter(exists(payload.X))` gates
 	// (memql#1396: reRouteNeedsAgentOnAgentCreate fired on every signup's
-	// plan-less agent create and then called mutationUpdatePlanStatus with
+	// plan-less agent create and then called updatePlanStatus with
 	// an empty planId; same latent bug on cascadeSupersession). Empty
 	// string is treated as "not exists" to match the coalesce
 	// empty-string-is-missing semantics used elsewhere in this evaluator.

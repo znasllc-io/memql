@@ -191,7 +191,7 @@ func (s *AdminServer) handleUsersDetail(w http.ResponseWriter, r *http.Request) 
 		http.Redirect(w, r, "/admin/users?flash=Missing+user+id&flash_kind=error", http.StatusSeeOther)
 		return
 	}
-	user, err := s.queryUserById(r.Context(), userId)
+	user, err := s.userById(r.Context(), userId)
 	if err != nil || user == nil {
 		http.Redirect(w, r, "/admin/users?flash=User+not+found&flash_kind=error", http.StatusSeeOther)
 		return
@@ -220,7 +220,7 @@ func (s *AdminServer) handleEditUserProfile(w http.ResponseWriter, r *http.Reque
 		http.Redirect(w, r, "/admin/users?flash=Missing+user+id&flash_kind=error", http.StatusSeeOther)
 		return
 	}
-	user, err := s.queryUserById(r.Context(), userId)
+	user, err := s.userById(r.Context(), userId)
 	if err != nil || user == nil {
 		http.Redirect(w, r, "/admin/users?flash=User+not+found&flash_kind=error", http.StatusSeeOther)
 		return
@@ -291,7 +291,7 @@ func (s *AdminServer) handleChangeUserRole(w http.ResponseWriter, r *http.Reques
 		http.Redirect(w, r, "/admin/users?flash=Invalid+role+or+user&flash_kind=error", http.StatusSeeOther)
 		return
 	}
-	user, err := s.queryUserById(r.Context(), userId)
+	user, err := s.userById(r.Context(), userId)
 	if err != nil || user == nil {
 		http.Redirect(w, r, "/admin/users?flash=User+not+found&flash_kind=error", http.StatusSeeOther)
 		return
@@ -331,7 +331,7 @@ func (s *AdminServer) handleSuspendUser(w http.ResponseWriter, r *http.Request) 
 		http.Redirect(w, r, "/admin/users?flash=Missing+user+id&flash_kind=error", http.StatusSeeOther)
 		return
 	}
-	user, err := s.queryUserById(r.Context(), userId)
+	user, err := s.userById(r.Context(), userId)
 	if err != nil || user == nil {
 		http.Redirect(w, r, "/admin/users?flash=User+not+found&flash_kind=error", http.StatusSeeOther)
 		return
@@ -370,7 +370,7 @@ func (s *AdminServer) handleUnsuspendUser(w http.ResponseWriter, r *http.Request
 		http.Redirect(w, r, "/admin/users?flash=Missing+user+id&flash_kind=error", http.StatusSeeOther)
 		return
 	}
-	user, err := s.queryUserById(r.Context(), userId)
+	user, err := s.userById(r.Context(), userId)
 	if err != nil || user == nil {
 		http.Redirect(w, r, "/admin/users?flash=User+not+found&flash_kind=error", http.StatusSeeOther)
 		return
@@ -763,8 +763,8 @@ func describeDuration(d time.Duration) string {
 }
 
 // persistSettings writes the new cluster-settings row via
-// mutationUpdateClusterSettings. Distinct from the wizard's
-// mutationCreateClusterSettings call so the audit event stream can
+// updateClusterSettings. Distinct from the wizard's
+// createClusterSettings call so the audit event stream can
 // tell first-run bootstrap writes from runtime admin edits — the
 // data layer treats both as append-only inserts (memQL has no
 // upsert primitive) but the event-stream distinction is useful.
@@ -790,7 +790,7 @@ func (s *AdminServer) persistSettings(ctx context.Context, in identity.ClusterSe
 			clusterDomain = row.ClusterDomain
 		}
 	}
-	q := fmt.Sprintf(`mutationUpdateClusterSettings({`+
+	q := fmt.Sprintf(`updateClusterSettings({`+
 		`"id":"cluster",`+
 		`"clusterDomain":%q,`+
 		`"brandName":%q,`+
@@ -879,7 +879,7 @@ type userView struct {
 // filter. The MemQL grammar doesn't support LIKE, so the filter is
 // applied in Go after the query.
 //
-// queryActiveUsers is `paginate 50` now (5.3 / epic #1964), so a single
+// activeUsers is `paginate 50` now (5.3 / epic #1964), so a single
 // Execute returns only the first 50 users. This admin list view needs
 // the COMPLETE set (the Go-side substring filter further narrows it), so
 // walk the keyset cursor across all pages instead of silently rendering
@@ -889,7 +889,7 @@ func (s *AdminServer) queryUsers(ctx context.Context, q string) ([]userView, err
 	needle := strings.ToLower(strings.TrimSpace(q))
 	cursor := ""
 	for i := 0; i < maxUserPageWalk; i++ {
-		res, err := s.Engine.Execute(memqlengine.ContextWithCursor(ctx, cursor), `queryActiveUsers({})`)
+		res, err := s.Engine.Execute(memqlengine.ContextWithCursor(ctx, cursor), `activeUsers({})`)
 		if err != nil {
 			return nil, err
 		}
@@ -917,13 +917,13 @@ func (s *AdminServer) queryUsers(ctx context.Context, q string) ([]userView, err
 	return out, nil
 }
 
-// maxUserPageWalk bounds the keyset walk over queryActiveUsers (50/page)
+// maxUserPageWalk bounds the keyset walk over activeUsers (50/page)
 // so a mis-paginated query can never spin forever -- 50k users is far
 // beyond any real cluster, but a hard stop nonetheless.
 const maxUserPageWalk = 1000
 
-func (s *AdminServer) queryUserById(ctx context.Context, userId string) (*userView, error) {
-	q := fmt.Sprintf(`queryUserById({userId: %q})`, userId)
+func (s *AdminServer) userById(ctx context.Context, userId string) (*userView, error) {
+	q := fmt.Sprintf(`userById({userId: %q})`, userId)
 	res, err := s.Engine.Execute(ctx, q)
 	if err != nil {
 		return nil, err
@@ -935,7 +935,7 @@ func (s *AdminServer) queryUserById(ctx context.Context, userId string) (*userVi
 	return uv, nil
 }
 
-// updateUser writes the user back via mutationUpdateUser. The mutation
+// updateUser writes the user back via updateUser. The mutation
 // expects the full payload object; we stitch one together from the
 // userView fields.
 func (s *AdminServer) updateUser(ctx context.Context, u *userView) error {
@@ -965,7 +965,7 @@ func (s *AdminServer) updateUser(ctx context.Context, u *userView) error {
 	if err != nil {
 		return err
 	}
-	q := fmt.Sprintf(`mutationUpdateUser({userId: %q, payload: %s})`, u.ID, string(payloadJSON))
+	q := fmt.Sprintf(`updateUser({userId: %q, payload: %s})`, u.ID, string(payloadJSON))
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("admin: update user: %w", err)
 	}
@@ -989,9 +989,9 @@ type auditView struct {
 }
 
 func (s *AdminServer) queryRecentAudit(ctx context.Context, category string, limit int) ([]auditView, error) {
-	q := `queryRecentAuditEvents({})`
+	q := `recentAuditEvents({})`
 	if category != "" {
-		q = fmt.Sprintf(`queryRecentAuditEvents({category: %q})`, category)
+		q = fmt.Sprintf(`recentAuditEvents({category: %q})`, category)
 	}
 	res, err := s.Engine.Execute(ctx, q)
 	if err != nil {

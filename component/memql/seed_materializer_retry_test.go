@@ -9,7 +9,7 @@ import (
 
 func TestIsTransientDBSurge(t *testing.T) {
 	transient := []string{
-		"mutationCreateSkill: ... FATAL: remaining connection slots are reserved for roles with the SUPERUSER attribute (SQLSTATE=53300)",
+		"createSkill: ... FATAL: remaining connection slots are reserved for roles with the SUPERUSER attribute (SQLSTATE=53300)",
 		"sorry, too many clients already",
 		"dial tcp: connection refused",
 		"read: connection reset by peer",

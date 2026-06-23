@@ -449,7 +449,7 @@ func TestParser_AutomationStep_FunctionCall(t *testing.T) {
 	input := `
 @enabled
 func (Automation) testAuto(_ any) {
-  checkUser := queryUserById(userId=event.payload.userId)
+  checkUser := userById(userId=event.payload.userId)
   return checkUser
 }`
 
@@ -493,8 +493,8 @@ func (Automation) testAuto(_ any) {
 	if !ok {
 		t.Fatalf("expected *FunctionStepConfig, got %T", step.Config)
 	}
-	if cfg.Name != "queryUserById" {
-		t.Fatalf("expected function name queryUserById, got %q", cfg.Name)
+	if cfg.Name != "userById" {
+		t.Fatalf("expected function name userById, got %q", cfg.Name)
 	}
 	if _, ok := cfg.Args["userId"]; !ok {
 		t.Fatalf("expected userId arg to be present")
@@ -598,7 +598,7 @@ func (Automation) testAutomation(_ any) {
 
 func TestParser_QueryFunction(t *testing.T) {
 	input := `
-func (Query) queryActiveUsers(args any) (any, error) {
+func (Query) activeUsers(args any) (any, error) {
 	return concept==v1:user;?.payload.role==args.role, nil
 }`
 
@@ -639,7 +639,7 @@ func (Query) queryActiveUsers(args any) (any, error) {
 
 func TestParser_MutationFunction(t *testing.T) {
 	input := `
-func (Mutation) mutationCreateUser(args any) error {
+func (Mutation) createUser(args any) error {
 	return insert("v1:user", id="test-user", payload={"name": "Test"})
 }`
 
@@ -1339,7 +1339,7 @@ func TestParser_GoStyleQuery(t *testing.T) {
 	input := `
 @enabled
 @description("Returns active users")
-func (Query) queryActiveUsers(args any) (any, error) {
+func (Query) activeUsers(args any) (any, error) {
   return concept==v1:user; payload.active==true, nil
 }
 `
@@ -1796,7 +1796,7 @@ args {
   partitionId  string
   status   string
 }
-func (Query) querySpaceParticipants(args any) (any, error) {
+func (Query) spaceParticipants(args any) (any, error) {
   return concept==v1:cognition:participant;
   ?.payload.partitionId==args.partitionId;
   ?.payload.status==args.status, nil

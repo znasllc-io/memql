@@ -9,8 +9,8 @@ import (
 )
 
 // TestPlannerPlanQueriesBindConcept guards memql#759: the planner
-// plan-queries (queryDueTrainAgentRetryPlans / queryRunningTrainAgentPlans /
-// queryPlansForSpace / queryAllPlans) are each declared `query plan <name>`
+// plan-queries (dueTrainAgentRetryPlans / runningTrainAgentPlans /
+// plansForSpace / allPlans) are each declared `query plan <name>`
 // and must bind to v1:planner:plan. The bare trailing segment "plan" is
 // ambiguous (v1:planner:plan AND v1:harness:plan both end ":plan"), so the
 // binding has to disambiguate via the file's `use planner.concepts.{ plan }`
@@ -29,10 +29,10 @@ func TestPlannerPlanQueriesBindConcept(t *testing.T) {
 	}
 
 	for _, name := range []string{
-		"queryDueTrainAgentRetryPlans",
-		"queryRunningTrainAgentPlans",
-		"queryPlansForSpace",
-		"queryAllPlans",
+		"dueTrainAgentRetryPlans",
+		"runningTrainAgentPlans",
+		"plansForSpace",
+		"allPlans",
 	} {
 		fn, err := registry.Get(name)
 		if err != nil {

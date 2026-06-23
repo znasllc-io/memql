@@ -3,11 +3,11 @@
 // Mutations in the harness namespace -- the write paths that
 // create and advance the harness working state (epic #590, #582).
 //
-// Plan lifecycle:   mutationCreateHarnessPlan
-// Step lifecycle:   mutationAddHarnessStep, mutationReadyHarnessStep,
-//                   mutationStartHarnessStep, mutationCompleteHarnessStep,
-//                   mutationFailHarnessStep
-// Observation:      mutationRecordHarnessObservation
+// Plan lifecycle:   createHarnessPlan
+// Step lifecycle:   addHarnessStep, readyHarnessStep,
+//                   startHarnessStep, completeHarnessStep,
+//                   failHarnessStep
+// Observation:      recordHarnessObservation
 //
 // State-machine enforcement: the step status transitions (pending ->
 // ready -> running -> done/failed/blocked, blocked -> ready, failed ->
@@ -29,7 +29,7 @@
 
 use harness.concepts.{ plan, step, observation, semanticMemory, consolidationCursor }
 
-// mutationCreateHarnessPlan
+// createHarnessPlan
 // ==========
 // Create a v1:harness:plan in status='open'. ownerUserId is
 // server-stamped from actor.userId so the caller cannot land a plan
@@ -37,7 +37,7 @@ use harness.concepts.{ plan, step, observation, semanticMemory, consolidationCur
 @enabled
 @mcp
 @description("Create a v1:harness:plan in status='open'. ownerUserId is stamped from actor.userId (owned tier). Single write path for plan creation.")
-mutation plan mutationCreateHarnessPlan {
+mutate plan createHarnessPlan {
   args {
     planId  string
     goal    string  @required
@@ -49,11 +49,11 @@ mutation plan mutationCreateHarnessPlan {
     args.goal
     status: "open"
     args.input
-    provenanceMutation: "mutationCreateHarnessPlan"
+    provenanceMutation: "createHarnessPlan"
   }
 }
 
-// mutationAddHarnessStep
+// addHarnessStep
 // =======
 // Add a v1:harness:step to a plan in status='pending'. The engine
 // emits graph.node.created.*.v1:harness:step on the insert (the
@@ -63,7 +63,7 @@ mutation plan mutationCreateHarnessPlan {
 @enabled
 @mcp
 @description("Add a v1:harness:step to a plan, status='pending', attempt=0. ownerUserId is stamped from actor.userId (owned tier). Creating the step emits graph.node.created.*.v1:harness:step automatically on insert.")
-mutation step mutationAddHarnessStep {
+mutate step addHarnessStep {
   args {
     stepId          string
     planId          string  @required
@@ -82,15 +82,15 @@ mutation step mutationAddHarnessStep {
     args.dependsOn
     args.input
     attempt: 0
-    provenanceMutation: "mutationAddHarnessStep"
+    provenanceMutation: "addHarnessStep"
   }
 }
 
-// mutationReadyHarnessStep
+// readyHarnessStep
 // =========
 // Promote a step to ready: pending -> ready (dependsOn satisfied) or
 // blocked -> ready (blocker finished). Without this write the step
-// state machine is unreachable past 'pending' -- mutationAddHarnessStep
+// state machine is unreachable past 'pending' -- addHarnessStep
 // lands the step in 'pending' and the engine guard only admits
 // 'ready' -> 'running', so start/complete/fail could never fire
 // (#1635). update() read-merges the prior row, so the owned-tier
@@ -101,18 +101,18 @@ mutation step mutationAddHarnessStep {
 @enabled
 @mcp
 @description("Promote a step to ready (pending -> ready when dependsOn is satisfied, or blocked -> ready when the blocker finishes). Read-merges the prior row so owned-tier fields are preserved. The engine step guard validates the transition and rejects an illegal source status. Without this mutation the state machine is stuck at 'pending' (#1635).")
-mutation step mutationReadyHarnessStep {
+mutate step readyHarnessStep {
   args {
     stepId  string  @required
   }
   update {
     id: args.stepId
     status: "ready"
-    provenanceMutation: "mutationReadyHarnessStep"
+    provenanceMutation: "readyHarnessStep"
   }
 }
 
-// mutationStartHarnessStep
+// startHarnessStep
 // =========
 // Claim a ready step: ready -> running. assignedAgent records which
 // agent claimed it; startedAt stamps the claim time. The engine
@@ -121,7 +121,7 @@ mutation step mutationReadyHarnessStep {
 @enabled
 @mcp
 @description("Claim a ready step (ready -> running). Stamps assignedAgent + startedAt. The engine step guard rejects the transition when the prior status is not 'ready'.")
-mutation step mutationStartHarnessStep {
+mutate step startHarnessStep {
   args {
     stepId         string  @required
     assignedAgent  string
@@ -131,18 +131,18 @@ mutation step mutationStartHarnessStep {
     status: "running"
     args.assignedAgent
     startedAt: now()
-    provenanceMutation: "mutationStartHarnessStep"
+    provenanceMutation: "startHarnessStep"
   }
 }
 
-// mutationCompleteHarnessStep
+// completeHarnessStep
 // ============
 // Record a running step's result: running -> done (terminal). The
 // engine guard rejects this when the prior status is not 'running'.
 @enabled
 @mcp
 @description("Record a running step's result (running -> done). done is terminal. The engine step guard rejects the transition when the prior status is not 'running'.")
-mutation step mutationCompleteHarnessStep {
+mutate step completeHarnessStep {
   args {
     stepId  string  @required
     result  object
@@ -152,11 +152,11 @@ mutation step mutationCompleteHarnessStep {
     status: "done"
     args.result
     completedAt: now()
-    provenanceMutation: "mutationCompleteHarnessStep"
+    provenanceMutation: "completeHarnessStep"
   }
 }
 
-// mutationFailHarnessStep
+// failHarnessStep
 // ========
 // Mark a running step failed: running -> failed. errorMessage
 // carries the reason. A subsequent retry (failed -> ready) is a
@@ -165,7 +165,7 @@ mutation step mutationCompleteHarnessStep {
 @enabled
 @mcp
 @description("Mark a running step failed (running -> failed). Stamps errorMessage + completedAt. The engine step guard rejects the transition when the prior status is not 'running'. Retry (failed -> ready, attempt++) is a separate write.")
-mutation step mutationFailHarnessStep {
+mutate step failHarnessStep {
   args {
     stepId        string  @required
     errorMessage  string
@@ -175,11 +175,11 @@ mutation step mutationFailHarnessStep {
     status: "failed"
     args.errorMessage
     completedAt: now()
-    provenanceMutation: "mutationFailHarnessStep"
+    provenanceMutation: "failHarnessStep"
   }
 }
 
-// mutationRecordHarnessObservation
+// recordHarnessObservation
 // =================
 // Append a v1:harness:observation for a step -- what actually
 // happened. ownerUserId is stamped from actor.userId. content is the
@@ -189,7 +189,7 @@ mutation step mutationFailHarnessStep {
 @enabled
 @mcp
 @description("Append a v1:harness:observation for a step (tool_result / error / note / decision). ownerUserId stamped from actor.userId (owned tier). content is the embedding source for semantic recall (#585).")
-mutation observation mutationRecordHarnessObservation {
+mutate observation recordHarnessObservation {
   args {
     observationId  string
     stepId         string  @required
@@ -229,8 +229,8 @@ mutation observation mutationRecordHarnessObservation {
 // in. The mutation stays declarative; the math lives where the engine
 // can do it.
 //
-// Authorization (owned tier): mutationCreateHarnessSemanticMemory +
-// mutationAdvanceHarnessConsolidationCursor stamp ownerUserId from
+// Authorization (owned tier): createHarnessSemanticMemory +
+// advanceHarnessConsolidationCursor stamp ownerUserId from
 // actor.userId, so the conformance classifier buckets them as owned.
 // The reinforce / decay / prune update paths also re-stamp
 // ownerUserId: actor.userId so they classify owned too -- consolidation
@@ -238,7 +238,7 @@ mutation observation mutationRecordHarnessObservation {
 // semanticMemory + consolidationCursor concepts are pulled into scope
 // by the file-top `use harness.concepts` import (extended for #586).
 
-// mutationCreateHarnessSemanticMemory
+// createHarnessSemanticMemory
 // ===========================
 // Write a brand-new distilled belief. confidence + reinforceCount +
 // lastReinforced seed the decay clock; sourceEpisodes carries the
@@ -252,7 +252,7 @@ mutation observation mutationRecordHarnessObservation {
 // next run's own dedup step).
 @enabled
 @description("Create a v1:harness:semanticMemory -- a new distilled belief. ownerUserId stamped from actor.userId (owned tier). sourceEpisodes records provenance back to the episodic nodes it was distilled from. confidence/reinforceCount/lastReinforced seed the decay clock. content is the embedding source for similarTo dedup + recall (#585).")
-mutation semanticMemory mutationCreateHarnessSemanticMemory {
+mutate semanticMemory createHarnessSemanticMemory {
   args {
     memoryId        string
     kind            string    @required  @enum("fact", "preference", "outcome")
@@ -271,11 +271,11 @@ mutation semanticMemory mutationCreateHarnessSemanticMemory {
     reinforceCount: 1
     lastReinforced: coalesce(args.lastReinforced, now())
     status: "active"
-    provenanceMutation: "mutationCreateHarnessSemanticMemory"
+    provenanceMutation: "createHarnessSemanticMemory"
   }
 }
 
-// mutationReinforceHarnessSemanticMemory
+// reinforceHarnessSemanticMemory
 // ==============================
 // Dedup path: a later run distilled a belief that similarTo matched an
 // existing one. Instead of writing a duplicate, bump confidence +
@@ -289,7 +289,7 @@ mutation semanticMemory mutationCreateHarnessSemanticMemory {
 // so the audit trail grows as evidence accumulates.
 @enabled
 @description("Reinforce an existing v1:harness:semanticMemory (dedup path): take the engine-computed bumped confidence + reinforceCount, reset lastReinforced to now(), and replace sourceEpisodes with the merged/deduped provenance. No new belief row -- this is why re-running over the same episodes does not duplicate. ownerUserId re-stamped from actor.userId (owned tier).")
-mutation semanticMemory mutationReinforceHarnessSemanticMemory {
+mutate semanticMemory reinforceHarnessSemanticMemory {
   args {
     memoryId        string    @required
     confidence      float     @required
@@ -303,11 +303,11 @@ mutation semanticMemory mutationReinforceHarnessSemanticMemory {
     args.reinforceCount
     args.sourceEpisodes
     lastReinforced: now()
-    provenanceMutation: "mutationReinforceHarnessSemanticMemory"
+    provenanceMutation: "reinforceHarnessSemanticMemory"
   }
 }
 
-// mutationDecayHarnessSemanticMemory
+// decayHarnessSemanticMemory
 // ==========================
 // Forgetting: a belief that has gone unreinforced past
 // MEMQL_HARNESS_CONSOLIDATION_DECAY_DAYS loses confidence. The decayed
@@ -316,8 +316,8 @@ mutation semanticMemory mutationReinforceHarnessSemanticMemory {
 // measuring age from the last real reinforcement, otherwise a belief
 // could never age out.
 @enabled
-@description("Decay an unreinforced v1:harness:semanticMemory: lower confidence to the engine-computed decayed value. lastReinforced is intentionally NOT reset (decay keeps measuring age from the last real reinforcement). ownerUserId re-stamped from actor.userId (owned tier). A belief that decays below the prune floor is then retired via mutationPruneHarnessSemanticMemory.")
-mutation semanticMemory mutationDecayHarnessSemanticMemory {
+@description("Decay an unreinforced v1:harness:semanticMemory: lower confidence to the engine-computed decayed value. lastReinforced is intentionally NOT reset (decay keeps measuring age from the last real reinforcement). ownerUserId re-stamped from actor.userId (owned tier). A belief that decays below the prune floor is then retired via pruneHarnessSemanticMemory.")
+mutate semanticMemory decayHarnessSemanticMemory {
   args {
     memoryId    string  @required
     confidence  float   @required
@@ -326,11 +326,11 @@ mutation semanticMemory mutationDecayHarnessSemanticMemory {
     id: args.memoryId
     ownerUserId: actor.userId
     args.confidence
-    provenanceMutation: "mutationDecayHarnessSemanticMemory"
+    provenanceMutation: "decayHarnessSemanticMemory"
   }
 }
 
-// mutationPruneHarnessSemanticMemory
+// pruneHarnessSemanticMemory
 // ==========================
 // A belief that decayed below MEMQL_HARNESS_CONSOLIDATION_PRUNE_CONFIDENCE
 // is retired: status -> pruned. Soft-delete (the row stays, append-only
@@ -340,7 +340,7 @@ mutation semanticMemory mutationDecayHarnessSemanticMemory {
 // retention crons' observation-only pattern.
 @enabled
 @description("Prune a decayed v1:harness:semanticMemory: status -> 'pruned' (soft-delete; the append-only model has no row removal). Recall (#585) + consolidation dedup filter status=='active', so a pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from actor.userId (owned tier).")
-mutation semanticMemory mutationPruneHarnessSemanticMemory {
+mutate semanticMemory pruneHarnessSemanticMemory {
   args {
     memoryId  string  @required
   }
@@ -348,11 +348,11 @@ mutation semanticMemory mutationPruneHarnessSemanticMemory {
     id: args.memoryId
     ownerUserId: actor.userId
     status: "pruned"
-    provenanceMutation: "mutationPruneHarnessSemanticMemory"
+    provenanceMutation: "pruneHarnessSemanticMemory"
   }
 }
 
-// mutationAdvanceHarnessConsolidationCursor
+// advanceHarnessConsolidationCursor
 // =================================
 // Move the per-owner watermark forward after a run. watermark is set to
 // the engine-computed max(createdAt) over the batch just processed, so
@@ -364,7 +364,7 @@ mutation semanticMemory mutationPruneHarnessSemanticMemory {
 // the cursor on first run and advances it on every later run.
 @enabled
 @description("Advance the per-owner v1:harness:consolidationCursor watermark to the engine-computed max(createdAt) of the batch just consolidated -- the incremental-cost mechanism (next run reads only episodes newer than this). Upserts on a stable per-owner id so it creates the cursor on first run and advances it thereafter. episodesSeen takes the engine-computed running total. ownerUserId stamped from actor.userId (owned tier).")
-mutation consolidationCursor mutationAdvanceHarnessConsolidationCursor {
+mutate consolidationCursor advanceHarnessConsolidationCursor {
   args {
     cursorId      string
     watermark     datetime  @required
@@ -376,6 +376,6 @@ mutation consolidationCursor mutationAdvanceHarnessConsolidationCursor {
     args.watermark
     lastRunAt: now()
     args.episodesSeen
-    provenanceMutation: "mutationAdvanceHarnessConsolidationCursor"
+    provenanceMutation: "advanceHarnessConsolidationCursor"
   }
 }

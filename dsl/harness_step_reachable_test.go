@@ -23,7 +23,7 @@ import (
 //
 // A fresh step is forced to land in 'pending'. The bug (#1635) was that
 // the exposed mutation surface in dsl/harness/mutations.memql emitted no
-// step row with status="ready": mutationAddHarnessStep hardcodes
+// step row with status="ready": addHarnessStep hardcodes
 // status="pending" and the only transition mutations were
 // start (->running), complete (->done) and fail (->failed). With no
 // mutation able to drive pending -> ready, the whole chain past
@@ -36,7 +36,7 @@ import (
 // whose target status some mutation emits. It asserts running / done /
 // failed are all reachable. Before the fix (no ready-producing mutation)
 // the walk is stuck at 'pending' and this fails; after the fix
-// (mutationReadyHarnessStep) the full chain is reachable and it passes.
+// (readyHarnessStep) the full chain is reachable and it passes.
 func TestHarnessStepStateMachineReachable(t *testing.T) {
 	// Engine state machine edges (mirror of stepTransitions in
 	// component/memql/harness_step_validation.go). Kept here as the
@@ -91,7 +91,7 @@ func stepStatusesProducedByMutations(t *testing.T) map[string]bool {
 
 	raw := readHarnessMutations(t)
 
-	mutationHeaderRe := regexp.MustCompile(`^\s*mutation\s+(\w+)\s+\w+\s*\{`)
+	mutationHeaderRe := regexp.MustCompile(`^\s*mutate\s+(\w+)\s+\w+\s*\{`)
 	statusRe := regexp.MustCompile(`^\s*status:\s*"(\w+)"`)
 
 	produced := map[string]bool{}

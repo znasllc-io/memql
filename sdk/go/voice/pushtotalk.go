@@ -12,7 +12,7 @@
 // The SDK does NOT itself write the resulting utterance row into the
 // space. The contract: the caller receives the final transcript via
 // FinalTranscript.Text, and is responsible for invoking
-// mutationSendTextUtterance (or any other downstream side-effect) on
+// sendTextUtterance (or any other downstream side-effect) on
 // the active space. This keeps PushToTalk a pure transcription
 // primitive that's reusable for non-chat callers (note-taking,
 // command-line dictation, etc.).

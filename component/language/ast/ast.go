@@ -799,7 +799,7 @@ const (
 	// object wholesale (the default top-level-replace contract every
 	// other mutation is written against -- see memql#350), the
 	// partial object's keys merge into the stored object so sibling
-	// keys survive. Added for mutationToggleComputerUseEnabled,
+	// keys survive. Added for toggleComputerUseEnabled,
 	// which writes a single key into User.preferences and would
 	// otherwise wipe every other preference (memql#1339).
 	AttrMergeFields = "mergeFields"
@@ -1241,7 +1241,7 @@ type SwitchCase struct {
 //
 //	Form B (canonical post-migration):
 //	  use cognition.concepts.{ participant, space }
-//	  use common.traits.{ traitIsActiveRecord, traitIsNotDeleted }
+//	  use common.traits.{ isActiveRecord, isNotDeleted }
 //
 // Form B names a module file (`cognition.concepts` -> `dsl/cognition/
 // concepts.memql`) and lists which exported constructs to pull into

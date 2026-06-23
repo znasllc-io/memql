@@ -1,17 +1,17 @@
 // logic.memql -- safety namespace.
 
-use safety.queries.{ queryAllSafetyClassifications, queryAllOutputScreenings }
-use platform.queries.{ queryGlobalVariable }
+use safety.queries.{ allSafetyClassifications, allOutputScreenings }
+use platform.queries.{ globalVariable }
 
 @enabled
 @description("Daily sweep over v1:safety:classification rows past MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS (default 90). Currently observation-only: emits a 'safety.classification.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation -- mirrors the same gap purgeExpiredPolicyTraces + auditEventRetentionSweep document.")
-logic logicPurgeExpiredSafetyClassifications {
+logic purgeExpiredSafetyClassifications {
   args {
     event object @required
   }
   body {
-    allRows := queryAllSafetyClassifications({})
-    retentionDays := queryGlobalVariable({ name: "MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS" })
+    allRows := allSafetyClassifications({})
+    retentionDays := globalVariable({ name: "MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS" })
 
     emitObservation := publishEvent({
       topic: "safety.classification.retention.observed",
@@ -27,14 +27,14 @@ logic logicPurgeExpiredSafetyClassifications {
 }
 
 @enabled
-@description("Daily sweep over v1:safety:outputScreening rows past MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90). Currently observation-only: emits a 'safety.outputScreening.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation -- mirrors logicPurgeExpiredSafetyClassifications.")
-logic logicPurgeExpiredOutputScreenings {
+@description("Daily sweep over v1:safety:outputScreening rows past MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90). Currently observation-only: emits a 'safety.outputScreening.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation -- mirrors purgeExpiredSafetyClassifications.")
+logic purgeExpiredOutputScreenings {
   args {
     event object @required
   }
   body {
-    allRows := queryAllOutputScreenings({})
-    retentionDays := queryGlobalVariable({ name: "MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS" })
+    allRows := allOutputScreenings({})
+    retentionDays := globalVariable({ name: "MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS" })
 
     emitObservation := publishEvent({
       topic: "safety.outputScreening.retention.observed",

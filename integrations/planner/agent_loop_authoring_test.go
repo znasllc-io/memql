@@ -64,7 +64,7 @@ query space queryOwnerActiveSpaces {
 }`
 
 // designEngine returns a fakeEngine whose authoringDesign InvokeAI yields the
-// supplied JSON and whose queryCataloguedConstructsForOwner Execute yields the
+// supplied JSON and whose cataloguedConstructsForOwner Execute yields the
 // supplied catalog rows (shape-projected: a flat `output` envelope).
 func designEngine(designOut string, catalogRows []map[string]any) *fakeEngine {
 	return &fakeEngine{
@@ -75,7 +75,7 @@ func designEngine(designOut string, catalogRows []map[string]any) *fakeEngine {
 			return nil, nil
 		},
 		execResponder: func(query string) (any, error) {
-			if strings.Contains(query, "queryCataloguedConstructsForOwner") {
+			if strings.Contains(query, "cataloguedConstructsForOwner") {
 				out := make([]any, 0, len(catalogRows))
 				for _, r := range catalogRows {
 					out = append(out, r)
@@ -288,7 +288,7 @@ func TestRunDesignPass_CatalogLoadFailureDegradesToAuthor(t *testing.T) {
 			return nil, nil
 		},
 		execResponder: func(query string) (any, error) {
-			if strings.Contains(query, "queryCataloguedConstructsForOwner") {
+			if strings.Contains(query, "cataloguedConstructsForOwner") {
 				return nil, fmt.Errorf("db down")
 			}
 			return nil, nil

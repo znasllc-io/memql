@@ -132,9 +132,9 @@ func TestResolveNamedShape_EndToEnd(t *testing.T) {
 	require.NoError(t, registry.add(&ShapeDefinition{
 		Name: "utteranceFull",
 		Template: map[string]any{
-			"id":      `node(\"id\")`,
+			"id":          `node(\"id\")`,
 			"partitionId": `node(\"payload.partitionId\")`,
-			"text":    `node(\"payload.text\")`,
+			"text":        `node(\"payload.text\")`,
 		},
 	}))
 
@@ -235,10 +235,10 @@ func TestAllEmbeddedFunctionsLoad(t *testing.T) {
 	// Spot-check a few well-known queries and mutations so a silent rename
 	// shows up as a test failure.
 	expected := []string{
-		"querySpaceUtterances",
-		"querySpaceParticipants",
+		"spaceUtterances",
+		"spaceParticipants",
 		"queryActiveSpaces",
-		"mutationSendSpeechUtterance",
+		"sendSpeechUtterance",
 	}
 	for _, name := range expected {
 		fn, err := reg.Get(name)

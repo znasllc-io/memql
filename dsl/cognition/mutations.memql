@@ -9,7 +9,7 @@ use identity.concepts.{ user, authSession }
 
 @enabled
 @description("Add the caller's agent to a space's roster. forUserId is server-stamped; per-user-per-space 3-cap and agent-ownership are enforced by the engine guard.")
-mutation participant mutationAddAgentToSpace {
+mutate participant addAgentToSpace {
   args {
     partitionId              string  @required
     agentId              string  @required
@@ -100,7 +100,7 @@ mutation participant mutationAddAgentToSpace {
 
 // ---- mutations/v1/cognition/createGreetingUtterance.memql ----
 
-// mutationCreateGreetingUtterance - Create AI Greeting Utterance
+// createGreetingUtterance - Create AI Greeting Utterance
 // ===============================================================
 //
 // Creates a greeting utterance when an AI participant joins a space.
@@ -116,7 +116,7 @@ mutation participant mutationAddAgentToSpace {
 // Returns: Inserted utterance node
 //
 // Usage:
-//   mutationCreateGreetingUtterance({
+//   createGreetingUtterance({
 //     partitionId: "space-123",
 //     participantId: "ai-sofia-space-123",
 //     agentId: "sofia",
@@ -135,7 +135,7 @@ mutation participant mutationAddAgentToSpace {
 
 @enabled
 @description("Create a greeting utterance for an AI participant joining a space")
-mutation utterance mutationCreateGreetingUtterance {
+mutate utterance createGreetingUtterance {
   args {
     partitionId        string  @required
     participantId  string  @required
@@ -165,7 +165,7 @@ mutation utterance mutationCreateGreetingUtterance {
 
 @enabled
 @description("Create a session record for a participant in a space.")
-mutation session mutationCreateSessionForParticipant {
+mutate session createSessionForParticipant {
   args {
     sessionId      string
     partitionId        string  @required
@@ -224,7 +224,7 @@ mutation session mutationCreateSessionForParticipant {
 // retention deadline.
 //
 // memQL is append-only -- the historical rows still exist in the
-// time-series table; downstream queries filter on traitIsNotDeleted
+// time-series table; downstream queries filter on isNotDeleted
 // so the row disappears from every list.
 //
 // Same generic-upsert shape as the other space-lifecycle mutations.
@@ -246,7 +246,7 @@ mutation session mutationCreateSessionForParticipant {
 
 @enabled
 @description("Emit a client-tool request envelope for cross-node relay to a browser stream.")
-mutation request mutationEmitClientToolRequest {
+mutate request emitClientToolRequest {
   args {
     requestId      string  @required
     callId         string  @required
@@ -283,7 +283,7 @@ mutation request mutationEmitClientToolRequest {
 
 @enabled
 @description("Emit a client-tool response envelope fulfilling a pending clientToolRequest.")
-mutation response mutationEmitClientToolResponse {
+mutate response emitClientToolResponse {
   args {
     responseId    string  @required
     callId        string  @required
@@ -313,7 +313,7 @@ mutation response mutationEmitClientToolResponse {
 
 @enabled
 @description("Emit a streaming text chunk during AI response generation.")
-mutation chunk mutationEmitTextChunk {
+mutate chunk emitTextChunk {
   args {
     chunkId        string   @required
     partitionId        string   @required
@@ -361,7 +361,7 @@ mutation chunk mutationEmitTextChunk {
 
 @enabled
 @description("Join a space as a human participant.")
-mutation participant mutationJoinSpaceAsHuman {
+mutate participant joinSpaceAsHuman {
   args {
     partitionId              string  @required
     userId               string  @required
@@ -414,7 +414,7 @@ mutation participant mutationJoinSpaceAsHuman {
 
 @enabled
 @description("Join a space as an AI participant. Uses canonicalized deterministic ID.")
-mutation participant mutationJoinSpaceAsAI {
+mutate participant joinSpaceAsAI {
   args {
     partitionId              string  @required
     agentId              string  @required
@@ -457,7 +457,7 @@ mutation participant mutationJoinSpaceAsAI {
 
 @enabled
 @description("Insert a new version of a participant record (typically used to mark the participant as left).")
-mutation participant mutationLeaveSpace {
+mutate participant leaveSpace {
   args {
     participantId  string  @required
     payload        object  @required
@@ -493,7 +493,7 @@ mutation participant mutationLeaveSpace {
 
 @enabled
 @description("Remove the caller's agent from a space (status='left'). The engine guard enforces caller-owns-agent and rejects removal of the pinned owner GA.")
-mutation participant mutationRemoveAgentFromSpace {
+mutate participant removeAgentFromSpace {
   args {
     partitionId  string  @required
     agentId  string  @required
@@ -519,7 +519,7 @@ mutation participant mutationRemoveAgentFromSpace {
 // status / active are preserved. Using `insert` here was a full-record-
 // replacement footgun -- a partial payload wiped every unstated field to
 // null (memql#1637). Mirrors the planner partial-update mutations
-// (mutationStartPlan, mutationCompleteToolInvocation) and the guide /
+// (startPlan, completeToolInvocation) and the guide /
 // calendar / identity `update { id, args.payload }` pattern.
 
 // ---- mutations/v1/cognition/restoreSpace.memql ----
@@ -570,7 +570,7 @@ mutation participant mutationRemoveAgentFromSpace {
 
 @enabled
 @description("Create an action utterance in a space.")
-mutation utterance mutationSendActionUtterance {
+mutate utterance sendActionUtterance {
   args {
     utteranceId      string
     partitionId          string  @required
@@ -624,7 +624,7 @@ mutation utterance mutationSendActionUtterance {
 
 @enabled
 @description("Create a transcript-only realtime voice utterance in a space.")
-mutation utterance mutationSendRealtimeTranscriptUtterance {
+mutate utterance sendRealtimeTranscriptUtterance {
   args {
     utteranceId      string
     idempotencyKey   string
@@ -688,7 +688,7 @@ mutation utterance mutationSendRealtimeTranscriptUtterance {
 
 @enabled
 @description("Create a speech utterance in a space.")
-mutation utterance mutationSendSpeechUtterance {
+mutate utterance sendSpeechUtterance {
   args {
     utteranceId      string
     partitionId          string  @required
@@ -732,7 +732,7 @@ mutation utterance mutationSendSpeechUtterance {
 
 @enabled
 @description("Create a text utterance in a space.")
-mutation utterance mutationSendTextUtterance {
+mutate utterance sendTextUtterance {
   args {
     utteranceId      string
     partitionId          string  @required
@@ -782,7 +782,7 @@ mutation utterance mutationSendTextUtterance {
 
 @enabled
 @description("Set the per-session audio control mode for an agent in a space.")
-mutation audioOverride mutationSetAgentAudioOverride {
+mutate audioOverride setAgentAudioOverride {
   args {
     partitionId  string  @required
     agentId  string  @required
@@ -819,7 +819,7 @@ mutation audioOverride mutationSetAgentAudioOverride {
 // PresencePanel orb-corner overlay calls this on every click cycle
 // (always_on -> always_off -> mirror_user -> always_on).
 //
-// Mirrors mutationSetAgentAudioOverride field-for-field; the only
+// Mirrors setAgentAudioOverride field-for-field; the only
 // difference is the target concept (v1:cognition:videoOverride)
 // versus v1:cognition:audioOverride, and the id prefix.
 //
@@ -838,7 +838,7 @@ mutation audioOverride mutationSetAgentAudioOverride {
 
 @enabled
 @description("Set the per-session video control mode for an agent in a space.")
-mutation videoOverride mutationSetAgentVideoOverride {
+mutate videoOverride setAgentVideoOverride {
   args {
     partitionId  string  @required
     agentId  string  @required
@@ -877,7 +877,7 @@ mutation videoOverride mutationSetAgentVideoOverride {
 
 @enabled
 @description("Update an auth-session record (typically a heartbeat to bump lastActivityAt). Read-merges the existing row (update()): only the fields in `payload` change; the @required discriminators (subject, tokenHash, source, expiresAt) and every other omitted field inherit from the persisted row instead of having to be re-supplied (memql#1628). The session row must already exist.")
-mutation authSession mutationTouchSession {
+mutate authSession touchSession {
   args {
     sessionId  string  @required
     payload    object  @required
@@ -898,7 +898,7 @@ mutation authSession mutationTouchSession {
 
 @enabled
 @description("Upsert a participant presence snapshot for multi-client status consistency.")
-mutation presence mutationUpdateParticipantPresence {
+mutate presence updateParticipantPresence {
   args {
     presenceId       string
     participantId    string  @required
@@ -946,7 +946,7 @@ mutation presence mutationUpdateParticipantPresence {
 
 @enabled
 @description("Update a participant record (typically status). Read-merges the existing row (update()): only the fields in `payload` change; every omitted field inherits from the persisted row instead of being wiped (memql#1628 class). The participant row must already exist (created on join).")
-mutation participant mutationUpdateParticipantStatus {
+mutate participant updateParticipantStatus {
   args {
     participantId  string  @required
     payload        object  @required
@@ -967,7 +967,7 @@ mutation participant mutationUpdateParticipantStatus {
 
 @enabled
 @description("Update a session record's device state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.")
-mutation session mutationUpdateSessionDevices {
+mutate session updateSessionDevices {
   args {
     sessionId  string  @required
     payload    object  @required
@@ -988,7 +988,7 @@ mutation session mutationUpdateSessionDevices {
 
 @enabled
 @description("Update a session record's stream state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.")
-mutation session mutationUpdateSessionStreams {
+mutate session updateSessionStreams {
   args {
     sessionId  string  @required
     payload    object  @required
@@ -1019,7 +1019,7 @@ mutation session mutationUpdateSessionStreams {
 // payload with status flipped to "archived" or "saved" (per the
 // owner's preferences.dailySpaceRolloverAction) and active=false.
 //
-// Mirrors the mutationLeaveSpace / mutationUpdateParticipantStatus
+// Mirrors the leaveSpace / updateParticipantStatus
 // "caller passes the full updated payload" pattern. A dedicated
 // mutation (instead of mutationArchiveSpace / mutationSaveSpace) is
 // required because those stamp ownerUserId from actor.userId -- the

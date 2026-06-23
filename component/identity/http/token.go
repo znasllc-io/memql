@@ -207,7 +207,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 
 	// The session row tracks the access-token hash for the auth
 	// middleware's revocation check; the refresh-token hash rolls
-	// forward via mutationRotateAuthSession on every /auth/refresh.
+	// forward via rotateAuthSession on every /auth/refresh.
 	accessHash := hashCode(access)
 	expiresAt := now.Add(live.RefreshTokenTTL).Format(time.RFC3339Nano)
 	if err := s.Store.CreateAuthSession(

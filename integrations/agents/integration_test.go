@@ -93,13 +93,13 @@ func TestCapabilities_InvokeEnsureForGoalAskSpecialist(t *testing.T) {
 // handleProduceArtifact's early validation paths are testable without a
 // wired engine: missing goal, ownerUserId, and partitionId all fail before the
 // engine.Execute call (the engine-nil check sits after arg validation, as in
-// requestUserFeedback). The success path (mints a Plan via mutationCreatePlan)
+// requestUserFeedback). The success path (mints a Plan via createPlan)
 // needs a wired engine + database and is exercised by the cluster, not here.
 
 // recordingEngine embeds IntegrationEngineAccess (so the few methods the
 // handler doesn't touch are nil and would panic on use, surfacing any
 // accidental new dependency) and records every Execute call. Used to assert
-// the produceArtifact mint path issues EXACTLY ONE mutationCreatePlan from a
+// the produceArtifact mint path issues EXACTLY ONE createPlan from a
 // normal (non-produceArtifact) context (memql#1133 FIX-2 contract).
 type recordingEngine struct {
 	memql.IntegrationEngineAccess
@@ -114,7 +114,7 @@ func (e *recordingEngine) Execute(_ context.Context, query string) (*memql.Execu
 // TestHandleProduceArtifact_NormalContextMintsExactlyOnePlan is the memql#1133
 // FIX-2 counterpart to the agent-side re-delegation guard: a produceArtifact
 // invocation from a NORMAL context still mints exactly one v1:planner:plan
-// (kind=produceArtifact) via the single mutationCreatePlan write path. The
+// (kind=produceArtifact) via the single createPlan write path. The
 // depth-1 cap lives on the agent turn loop (it refuses a SECOND produceArtifact
 // from within a produceArtifact executor turn), so the mint path itself is
 // unconditional -- this pins that the first delegation is unaffected.
@@ -124,16 +124,16 @@ func TestHandleProduceArtifact_NormalContextMintsExactlyOnePlan(t *testing.T) {
 	nodes, err := i.handleProduceArtifact(context.Background(), map[string]any{
 		"goal":        "A markdown file listing 10 beautiful birds",
 		"ownerUserId": "u1",
-		"partitionId":     "s1",
+		"partitionId": "s1",
 	}, 0)
 	if err != nil {
 		t.Fatalf("handleProduceArtifact (normal context): unexpected error: %v", err)
 	}
 	if len(eng.calls) != 1 {
-		t.Fatalf("expected EXACTLY ONE engine Execute (mutationCreatePlan), got %d: %v", len(eng.calls), eng.calls)
+		t.Fatalf("expected EXACTLY ONE engine Execute (createPlan), got %d: %v", len(eng.calls), eng.calls)
 	}
-	if !strings.HasPrefix(eng.calls[0], "mutationCreatePlan(") {
-		t.Fatalf("the single write must be mutationCreatePlan, got: %q", eng.calls[0])
+	if !strings.HasPrefix(eng.calls[0], "createPlan(") {
+		t.Fatalf("the single write must be createPlan, got: %q", eng.calls[0])
 	}
 	if !strings.Contains(eng.calls[0], `kind: "produceArtifact"`) {
 		t.Fatalf("minted plan must be kind=produceArtifact, got: %q", eng.calls[0])
@@ -148,7 +148,7 @@ func TestHandleProduceArtifact_RequiresGoal(t *testing.T) {
 	i := New(memql.NewAgentRegistry(), nil)
 	_, err := i.handleProduceArtifact(context.Background(), map[string]any{
 		"ownerUserId": "u1",
-		"partitionId":     "s1",
+		"partitionId": "s1",
 	}, 0)
 	if err == nil || !strings.Contains(err.Error(), "'goal' is required") {
 		t.Fatalf("expected 'goal' is required error, got: %v", err)
@@ -158,7 +158,7 @@ func TestHandleProduceArtifact_RequiresGoal(t *testing.T) {
 func TestHandleProduceArtifact_RequiresOwnerUserId(t *testing.T) {
 	i := New(memql.NewAgentRegistry(), nil)
 	_, err := i.handleProduceArtifact(context.Background(), map[string]any{
-		"goal":    "A markdown file listing 10 birds",
+		"goal":        "A markdown file listing 10 birds",
 		"partitionId": "s1",
 	}, 0)
 	if err == nil || !strings.Contains(err.Error(), "'ownerUserId' required") {
@@ -180,7 +180,7 @@ func TestHandleProduceArtifact_RequiresPartitionId(t *testing.T) {
 // handleRequestUserFeedback's early validation paths are testable
 // without a wired engine: missing question, missing/invalid kind, and
 // missing planId all fail before the engine.Execute call. The success
-// path (which transitions a Plan via mutationRequestPlanFeedback) needs
+// path (which transitions a Plan via requestPlanFeedback) needs
 // a wired engine + database and is exercised by the planner
 // integration tests, not here.
 
@@ -243,8 +243,8 @@ func TestHandleInvoke_RequiresName(t *testing.T) {
 func TestHandleInvoke_UnregisteredAgent(t *testing.T) {
 	i := New(memql.NewAgentRegistry(), nil)
 	_, err := i.handleInvoke(context.Background(), map[string]any{
-		"name":    "missing",
-		"prompt":  "hi",
+		"name":        "missing",
+		"prompt":      "hi",
 		"partitionId": "s1",
 	}, 0)
 	if err == nil {

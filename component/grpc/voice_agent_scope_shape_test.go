@@ -68,7 +68,7 @@ func TestNormalizeResultRowsGraphBundle(t *testing.T) {
 func TestResolveAgentSessionRecordViaBundleShape(t *testing.T) {
 	const realId = "v1:agents:agent:assistant-1c65cb0c"
 	fake := &queryRoutingResolver{bySubstr: map[string]*memqlv1.GraphBundle{
-		"queryAgentById": agentRowBundle(realId, map[string]any{
+		"agentById": agentRowBundle(realId, map[string]any{
 			"name":         "Assistant",
 			"role":         "assistant",
 			"description":  "Your general assistant.",
@@ -97,7 +97,7 @@ func TestResolveAgentToolSlugsViaBundleShape(t *testing.T) {
 	const realId = "v1:agents:agent:assistant-1c65cb0c"
 	fake := &queryRoutingResolver{
 		bySubstr: map[string]*memqlv1.GraphBundle{
-			"queryAgentById": agentRowBundle(realId, map[string]any{
+			"agentById": agentRowBundle(realId, map[string]any{
 				"capabilities": map[string]any{"skillIds": []any{"todos", "notes"}},
 			}),
 		},
@@ -126,13 +126,13 @@ func TestVoiceAgentScopedToolNamesProxiedReceiver(t *testing.T) {
 	const partitionId = "space-1"
 
 	// One fake backs both reads the receiver issues: the GA-id resolve off the
-	// threaded space, then the tool-surface read (queryAgentById -> skillIds ->
+	// threaded space, then the tool-surface read (agentById -> skillIds ->
 	// ResolveSkills) off the resolved real id.
 	newFake := func() *queryRoutingResolver {
 		return &queryRoutingResolver{
 			bySubstr: map[string]*memqlv1.GraphBundle{
-				"queryGroupGAForSpace": gaParticipantBundle(realId),
-				"queryAgentById": agentRowBundle(realId, map[string]any{
+				"groupGAForSpace": gaParticipantBundle(realId),
+				"agentById": agentRowBundle(realId, map[string]any{
 					"capabilities": map[string]any{"skillIds": []any{"todos", "notes"}},
 				}),
 			},

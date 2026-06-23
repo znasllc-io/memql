@@ -24,7 +24,7 @@ import (
 //     row, returns plain_token in the reply.
 //  4. Frontend pastes plain_token into the cockpit-worker config
 //     on the target machine. The next connect attempt resolves
-//     via queryWorkerTokenByKeyHash.
+//     via workerTokenByKeyHash.
 func (s *streamSession) handleCreateWorkerToken(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.CreateWorkerTokenMsg) error {
 	if msg == nil {
 		return nil

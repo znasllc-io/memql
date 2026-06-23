@@ -72,7 +72,7 @@ func NewHandler(scoreEngine *polyphon.ScoreEngine, room polyphon.RoomProvider, b
 
 // roomTokenRequest is the JSON body for POST /polyphon/room-token.
 type roomTokenRequest struct {
-	PartitionId       string `json:"partitionId"`
+	PartitionId   string `json:"partitionId"`
 	ParticipantId string `json:"participantId"`
 	DisplayName   string `json:"displayName"`
 }
@@ -162,8 +162,8 @@ func (h *Handler) ServeRoomToken(w http.ResponseWriter, r *http.Request) {
 // and the token is still returned to the browser.
 func (h *Handler) notifyBridgeAgent(partitionId, roomName string) {
 	body, _ := json.Marshal(map[string]string{
-		"partitionId":  partitionId,
-		"roomName": roomName,
+		"partitionId": partitionId,
+		"roomName":    roomName,
 	})
 
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -253,7 +253,7 @@ func (h *Handler) ServePreload(w http.ResponseWriter, r *http.Request) {
 
 // utteranceRequest is the JSON body for POST /polyphon/utterance.
 type utteranceRequest struct {
-	PartitionId       string `json:"partitionId"`
+	PartitionId   string `json:"partitionId"`
 	ParticipantId string `json:"participantId"`
 	Text          string `json:"text"`
 }
@@ -292,7 +292,7 @@ func (h *Handler) ServeUtterance(w http.ResponseWriter, r *http.Request) {
 	// segments, which the engine's ParseNodeId can't disambiguate when
 	// downstream queries resolve ids -- the row lands in the DB and
 	// fires graph events (so cognition reacts) but the same-context
-	// querySpaceUtterances() cannot find it. The greeting works because
+	// spaceUtterances() cannot find it. The greeting works because
 	// autoJoinAI's mutation hashes the inputs into a bare slug; the
 	// polyphon HTTP path bypasses that mutation and built the id by
 	// raw concatenation.

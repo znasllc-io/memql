@@ -78,7 +78,7 @@ func (s *Store) Create(ctx context.Context, identityId, userId, label, keyHash s
 		return errors.New("pat.Store.Create: identityId, userId, keyHash all required")
 	}
 	q := fmt.Sprintf(
-		`mutationCreatePATIdentity({identityId:%q,userId:%q,label:%q,keyHash:%q})`,
+		`createPATIdentity({identityId:%q,userId:%q,label:%q,keyHash:%q})`,
 		identityId, userId, label, keyHash,
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
@@ -102,7 +102,7 @@ func (s *Store) Revoke(ctx context.Context, identityId string) error {
 		return errors.New("pat.Store.Revoke: row not found")
 	}
 	q := fmt.Sprintf(
-		`mutationRevokePATIdentity({identityId:%q,userId:%q,label:%q,keyHash:%q,usableByAgents:%t})`,
+		`revokePATIdentity({identityId:%q,userId:%q,label:%q,keyHash:%q,usableByAgents:%t})`,
 		bareSlug(row.ID), row.UserId, row.Label, row.KeyHash, row.UsableByAgents,
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
@@ -121,7 +121,7 @@ func (s *Store) LookupByKeyHash(ctx context.Context, keyHash string) (*PATRow, e
 	if keyHash == "" {
 		return nil, nil
 	}
-	q := fmt.Sprintf(`queryPatIdentityByKeyHash({keyHash:%q})`, keyHash)
+	q := fmt.Sprintf(`patIdentityByKeyHash({keyHash:%q})`, keyHash)
 	rows, err := s.executeAndExtract(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("pat.Store.LookupByKeyHash: %w", err)
@@ -138,7 +138,7 @@ func (s *Store) LookupById(ctx context.Context, identityId string) (*PATRow, err
 	if s == nil || s.Engine == nil {
 		return nil, errors.New("pat.Store: engine not wired")
 	}
-	q := fmt.Sprintf(`queryPatIdentityById({identityId:%q})`, CanonicalId(identityId))
+	q := fmt.Sprintf(`patIdentityById({identityId:%q})`, CanonicalId(identityId))
 	rows, err := s.executeAndExtract(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("pat.Store.LookupById: %w", err)
@@ -170,7 +170,7 @@ func (s *Store) BumpLastUsed(ctx context.Context, identityId string) error {
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	q := fmt.Sprintf(
-		`mutationBumpPATLastUsedAt({identityId:%q,userId:%q,label:%q,keyHash:%q,active:%t,usableByAgents:%t,lastUsedAt:%q})`,
+		`bumpPATLastUsedAt({identityId:%q,userId:%q,label:%q,keyHash:%q,active:%t,usableByAgents:%t,lastUsedAt:%q})`,
 		bareSlug(row.ID), row.UserId, row.Label, row.KeyHash, row.Active, row.UsableByAgents, now,
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
@@ -180,7 +180,7 @@ func (s *Store) BumpLastUsed(ctx context.Context, identityId string) error {
 }
 
 // maxPATPageWalk bounds the keyset walk in ListForUser so a runaway
-// (mis-paginated) query can never spin forever. queryPatIdentitiesForUser
+// (mis-paginated) query can never spin forever. patIdentitiesForUser
 // pages 50 at a time, so this caps the complete-set walk at 50k rows --
 // far more PATs than any real user holds, but a hard stop nonetheless.
 const maxPATPageWalk = 1000
@@ -190,7 +190,7 @@ const maxPATPageWalk = 1000
 // admin /admin/tokens roll-up (via ListAll) and by the per-user revoke
 // ownership check, both of which need the COMPLETE set.
 //
-// queryPatIdentitiesForUser is `paginate 50` (5.2 / epic #1964), so a
+// patIdentitiesForUser is `paginate 50` (5.2 / epic #1964), so a
 // single Execute returns only the first page. This method walks the
 // keyset cursor to assemble the full list; the bounded, user-facing
 // /me/tokens listing uses ListForUserPage instead.
@@ -198,7 +198,7 @@ func (s *Store) ListForUser(ctx context.Context, userId string) ([]PATRow, error
 	if s == nil || s.Engine == nil {
 		return nil, errors.New("pat.Store: engine not wired")
 	}
-	q := fmt.Sprintf(`queryPatIdentitiesForUser({userId:%q})`, userId)
+	q := fmt.Sprintf(`patIdentitiesForUser({userId:%q})`, userId)
 	out := []PATRow{}
 	cursor := ""
 	for i := 0; i < maxPATPageWalk; i++ {
@@ -230,7 +230,7 @@ func (s *Store) ListForUserPage(ctx context.Context, userId, cursor string) ([]P
 	if s == nil || s.Engine == nil {
 		return nil, "", errors.New("pat.Store: engine not wired")
 	}
-	q := fmt.Sprintf(`queryPatIdentitiesForUser({userId:%q})`, userId)
+	q := fmt.Sprintf(`patIdentitiesForUser({userId:%q})`, userId)
 	nodes, next, err := s.executeAndExtractPage(ctx, q, cursor)
 	if err != nil {
 		return nil, "", fmt.Errorf("pat.Store.ListForUserPage: %w", err)
@@ -253,7 +253,7 @@ func (s *Store) ListAll(ctx context.Context) ([]PATRow, error) {
 	if s == nil || s.Engine == nil {
 		return nil, errors.New("pat.Store: engine not wired")
 	}
-	users, err := s.queryActiveUsers(ctx)
+	users, err := s.activeUsers(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("pat.Store.ListAll: list users: %w", err)
 	}
@@ -269,19 +269,19 @@ func (s *Store) ListAll(ctx context.Context) ([]PATRow, error) {
 	return out, nil
 }
 
-// queryActiveUsers returns the set of v1:identity:user ids known to
-// the cluster. Driven by the Phase-3 queryActiveUsers function.
+// activeUsers returns the set of v1:identity:user ids known to
+// the cluster. Driven by the Phase-3 activeUsers function.
 //
-// queryActiveUsers is `paginate 50` now (5.3 / epic #1964), so a single
+// activeUsers is `paginate 50` now (5.3 / epic #1964), so a single
 // Execute returns only the first 50 user ids. ListAll fans out over this
 // set to assemble the cluster-wide PAT roll-up, so a truncated user list
 // would silently drop every PAT owned by a user past the first page.
 // Walk the keyset cursor to assemble the COMPLETE set.
-func (s *Store) queryActiveUsers(ctx context.Context) ([]string, error) {
+func (s *Store) activeUsers(ctx context.Context) ([]string, error) {
 	out := []string{}
 	cursor := ""
 	for i := 0; i < maxPATPageWalk; i++ {
-		res, err := s.Engine.Execute(memqlengine.ContextWithCursor(ctx, cursor), `queryActiveUsers({})`)
+		res, err := s.Engine.Execute(memqlengine.ContextWithCursor(ctx, cursor), `activeUsers({})`)
 		if err != nil {
 			return nil, err
 		}
@@ -394,8 +394,8 @@ func bareSlug(id string) string {
 // -- shape() queries land in res.OutputPayload (Data axis), not
 // Bundle.Nodes, and the original implementation only read the latter.
 // That silently returned zero matches for every PAT lookup
-// (queryPatIdentityByKeyHash on the gRPC interceptor hot-path,
-// queryPatIdentityById, queryPatIdentitiesForUser for the /me/pats
+// (patIdentityByKeyHash on the gRPC interceptor hot-path,
+// patIdentityById, patIdentitiesForUser for the /me/pats
 // page), with no log -- "PAT not found" was indistinguishable from
 // "PAT actually missing." Mirroring the workertoken fix here.
 func (s *Store) executeAndExtract(ctx context.Context, query string) ([]*memqlv1.MemoryNode, error) {
@@ -405,7 +405,7 @@ func (s *Store) executeAndExtract(ctx context.Context, query string) ([]*memqlv1
 
 // executeAndExtractPage is the keyset-aware sibling of executeAndExtract:
 // it threads an inbound continuation cursor onto the context (5.12 /
-// epic #1964 -- queryPatIdentitiesForUser is `paginate 50` now, so a
+// epic #1964 -- patIdentitiesForUser is `paginate 50` now, so a
 // single Execute returns at most one page) and hands back the engine's
 // nextCursor so the caller can fetch the next page. An empty inbound
 // cursor is the first page; an empty returned cursor means the set is

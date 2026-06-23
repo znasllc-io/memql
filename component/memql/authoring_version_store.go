@@ -3,12 +3,12 @@ package memql
 // authoring_version_store.go -- the engine-backed ImpactStore (epic memql#954,
 // issue #961, increment 4).
 //
-// Drives the impact-analysis queries: queryDependentsOfConstruct (#957) for the
-// dependent edges, queryAuthoringBundleById to filter to ACTIVE dependents
-// (queryDependentsOfConstruct returns every edge regardless of bundle status,
+// Drives the impact-analysis queries: dependentsOfConstruct (#957) for the
+// dependent edges, authoringBundleById to filter to ACTIVE dependents
+// (dependentsOfConstruct returns every edge regardless of bundle status,
 // and the design doc only re-validates ACTIVE dependents -- a draft / retired
 // dependent will be re-validated on its own activation), and
-// queryAuthoringConstructsForBundle to load each dependent's closure for the
+// authoringConstructsForBundle to load each dependent's closure for the
 // Gate-1 re-compile.
 
 import (
@@ -31,7 +31,7 @@ func (s *engineImpactStore) ActiveDependentBundleIds(ctx context.Context, owner,
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.engine.Execute(ctx, "queryDependentsOfConstruct("+string(args)+")")
+	res, err := s.engine.Execute(ctx, "dependentsOfConstruct("+string(args)+")")
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (s *engineImpactStore) ActiveDependentBundleIds(ctx context.Context, owner,
 	// Filter to ACTIVE bundles.
 	active := make([]string, 0, len(ordered))
 	for _, id := range ordered {
-		bres, err := s.engine.Execute(ctx, fmt.Sprintf(`queryAuthoringBundleById({"bundleId":%q})`, id))
+		bres, err := s.engine.Execute(ctx, fmt.Sprintf(`authoringBundleById({"bundleId":%q})`, id))
 		if err != nil {
 			return nil, err
 		}
@@ -89,7 +89,7 @@ func (s *engineImpactStore) ActiveDependentBundleIds(ctx context.Context, owner,
 
 // ConstructsAsSandbox loads a bundle's member constructs as SandboxConstructs.
 func (s *engineImpactStore) ConstructsAsSandbox(ctx context.Context, bundleId string) ([]SandboxConstruct, error) {
-	res, err := s.engine.Execute(ctx, fmt.Sprintf(`queryAuthoringConstructsForBundle({"bundleId":%q})`, bundleId))
+	res, err := s.engine.Execute(ctx, fmt.Sprintf(`authoringConstructsForBundle({"bundleId":%q})`, bundleId))
 	if err != nil {
 		return nil, err
 	}

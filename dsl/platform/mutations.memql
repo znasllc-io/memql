@@ -32,7 +32,7 @@ use platform.concepts.{ globalSecret, globalVariable, missingCapability, partiti
 
 @enabled
 @description("Persist a single policy evaluation trace to v1:platform:policyTrace.")
-mutation policyTrace mutationInsertPolicyTrace {
+mutate policyTrace insertPolicyTrace {
   args {
     policyName       string  @required
     tier             string  @required
@@ -74,7 +74,7 @@ mutation policyTrace mutationInsertPolicyTrace {
 // ===============
 //
 // Upserts an instance-wide (global) encrypted secret row in
-// v1:platform:globalSecret. Companion to mutationSetPartitionSecret
+// v1:platform:globalSecret. Companion to setPartitionSecret
 // (partition-scoped). Used by `make secrets-seed`,
 // `make prod-seed-secrets`, and `make secret-set SCOPE=global` to
 // populate instance defaults.
@@ -84,7 +84,7 @@ mutation policyTrace mutationInsertPolicyTrace {
 
 @enabled
 @description("Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.")
-mutation globalSecret mutationSetGlobalSecret {
+mutate globalSecret setGlobalSecret {
   args {
     id              string  @required
     name            string  @required
@@ -118,7 +118,7 @@ mutation globalSecret mutationSetGlobalSecret {
 
 @enabled
 @description("Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable.")
-mutation globalVariable mutationSetGlobalVariable {
+mutate globalVariable setGlobalVariable {
   args {
     id           string  @required
     name         string  @required
@@ -151,7 +151,7 @@ mutation globalVariable mutationSetGlobalVariable {
 
 @enabled
 @description("Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.")
-mutation partitionSecret mutationSetPartitionSecret {
+mutate partitionSecret setPartitionSecret {
   args {
     id              string  @required
     name            string  @required
@@ -180,13 +180,13 @@ mutation partitionSecret mutationSetPartitionSecret {
 // ====================
 //
 // Upserts a partition-scoped plaintext configuration variable in
-// v1:platform:partitionVariable. Companion to mutationSetPartitionSecret
+// v1:platform:partitionVariable. Companion to setPartitionSecret
 // for non-sensitive values. Used by `make variable-set SCOPE=partition`
 // and by automations that write per-tenant config.
 
 @enabled
 @description("Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable.")
-mutation partitionVariable mutationSetPartitionVariable {
+mutate partitionVariable setPartitionVariable {
   args {
     id           string  @required
     name         string  @required
@@ -204,8 +204,8 @@ mutation partitionVariable mutationSetPartitionVariable {
 }
 
 @enabled
-@description("Per Q7 missing-capability surface: log a new gap the Planner Agent identified during a Plan. First sighting creates the row; repeat sightings (same (kind, capability)) call mutationBumpMissingCapabilitySighting instead so the row stays unique-by-capability and sightingCount climbs. Status defaults to 'open'.")
-mutation missingCapability mutationLogMissingCapability {
+@description("Per Q7 missing-capability surface: log a new gap the Planner Agent identified during a Plan. First sighting creates the row; repeat sightings (same (kind, capability)) call bumpMissingCapabilitySighting instead so the row stays unique-by-capability and sightingCount climbs. Status defaults to 'open'.")
+mutate missingCapability logMissingCapability {
   args {
     missingId       string  @required
     kind            string  @required
@@ -237,7 +237,7 @@ mutation missingCapability mutationLogMissingCapability {
 
 @enabled
 @description("Per Q7 missing-capability surface: a repeat sighting of an already-logged gap. Increments sightingCount and refreshes lastSeenAt. The Planner Agent calls this when it encounters a known gap; aggregated counts feed the platform-roadmap prioritization view.")
-mutation missingCapability mutationBumpMissingCapabilitySighting {
+mutate missingCapability bumpMissingCapabilitySighting {
   args {
     missingId       string  @required
     sightingCount   int     @required
@@ -252,7 +252,7 @@ mutation missingCapability mutationBumpMissingCapabilitySighting {
 
 @enabled
 @description("Operator-driven status transition on a missingCapability row. Used by the platform team's backlog tooling to mark a gap as in_progress, resolved (with a note on what shipped), or wontfix.")
-mutation missingCapability mutationUpdateMissingCapabilityStatus {
+mutate missingCapability updateMissingCapabilityStatus {
   args {
     missingId   string  @required
     status      string  @required

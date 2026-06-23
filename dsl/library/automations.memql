@@ -5,7 +5,7 @@
 // matching promotion logic. Records (notes / todos / calendar events /
 // memory) and live sources are wired the same way on #696.
 
-use library.logic.{ logicIndexGeneratedOutput, logicIndexNote, logicIndexTodo, logicIndexCalendarEvent, logicIndexMemory }
+use library.logic.{ indexGeneratedOutput, indexNote, indexTodo, indexCalendarEvent, indexMemory }
 
 @enabled
 @trigger(event="node.created", concept="v1:library:generatedOutput", partition="*")

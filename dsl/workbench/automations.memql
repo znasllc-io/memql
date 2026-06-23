@@ -7,7 +7,7 @@
 // automation flips the concept's lifecycle bit and emits the
 // event the integration listens for.
 
-use workbench.logic.{ logicReleaseWorkspaceOnPlanTerminal }
+use workbench.logic.{ releaseWorkspaceOnPlanTerminal }
 
 @enabled
 @trigger(event="graph.node.updated.v1:planner:plan")

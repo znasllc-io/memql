@@ -70,7 +70,7 @@ var bindingErrorSignatures = []string{
 var allowedNonBindingFailures = []string{
 	"unknown builtin executor", // integration.dailyspace.ensureForUser not registered here
 	`function "ai"`,            // ai() positional-arg render quirk (pre-existing, live-path-identical)
-	// logicGenerateResponse validates its (correctly-bound) siParticipantId
+	// generateResponse validates its (correctly-bound) siParticipantId
 	// against a cognition participant row + actor write-authz the lightweight
 	// conformance engine does not seed. Whether part-1727 happens to exist in
 	// the shared conformance DB depends on test ordering, so this validation
@@ -81,13 +81,13 @@ var allowedNonBindingFailures = []string{
 	// masked here.
 	// The id renders either bare ("part-1727") or fully-qualified
 	// ("v1:cognition:participant:part-1727") depending on which step surfaces the
-	// failure (mutationSendTextUtterance uses the canonical id) and on shared-DB
+	// failure (sendTextUtterance uses the canonical id) and on shared-DB
 	// test ordering -- hence both forms are tolerated. Both still anchor on the
 	// RESOLVED id, so a genuine null-bind regression (participant "" not found)
 	// is not masked. Without the fully-qualified variants this dimension flaked
 	// intermittently in the merge queue (memql#1821).
 	`participant "part-1727" not found`,                          // getLatestParticipantPayload: no seeded participant row (bare id)
-	`participant "v1:cognition:participant:part-1727" not found`, // mutationSendTextUtterance: no seeded row (fully-qualified id)
+	`participant "v1:cognition:participant:part-1727" not found`, // sendTextUtterance: no seeded row (fully-qualified id)
 	`as participant "part-1727"`,                                 // auth validation: no actor write-authz in conformance (bare id)
 	`as participant "v1:cognition:participant:part-1727"`,        // auth validation (fully-qualified id)
 }
@@ -107,16 +107,16 @@ func runEventDryRunBinding(t *testing.T, e *Env) {
 	}{
 		// (logicAutoJoinAI moved to the CoPresent pack with the space concept
 		// in #2038/B2; the remaining cognition/data logics keep this coverage.)
-		{"logicVoiceMigrationOnSecondHuman", map[string]any{
+		{"voiceMigrationOnSecondHuman", map[string]any{
 			"id": "user-1727", "activePartitionId": "space-1727",
 		}},
-		{"logicGenerateResponse", map[string]any{
+		{"generateResponse", map[string]any{
 			"partitionId": "space-1727", "utteranceId": "utt-1727", "siParticipantId": "part-1727",
 			"agentId": "agent-1727", "promptTemplateId": "cognitionReply", "promptData": map[string]any{},
 		}},
 		// (logicEnsureDailySpaceOnAuthSession moved to the CoPresent pack in
 		// #1976; the remaining cognition/data logics keep this coverage.)
-		{"logicConflictDetection", map[string]any{
+		{"conflictDetection", map[string]any{
 			"id": "rec-1727", "partitionId": "space-1727", "recordType": "contact",
 			"naturalKeyField": "email", "naturalKeyValue": "a@example.com",
 		}},

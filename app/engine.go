@@ -196,7 +196,7 @@ func (a *App) engineAndBus() {
 
 	// AI Router: embedded in every AI-calling node. Takes the provider
 	// registry (for lookup + pricing) and the engine (to write
-	// v1:router:call rows via mutationRecordRouterCall). The router is
+	// v1:router:call rows via recordRouterCall). The router is
 	// never a separate node; it's a library the agent replier, the
 	// gRPC AI handlers, and future policy-driven call sites all share.
 	a.router = router.New(a.engine.Providers(), a.engine.Policies(), a.engine, a.Logger)

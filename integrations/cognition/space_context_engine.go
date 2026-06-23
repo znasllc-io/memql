@@ -99,7 +99,7 @@ func (c *CognitionIntegration) recomputeAndUpsertSpaceContext(ctx context.Contex
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	payload := map[string]any{
-		"partitionId":       partitionId,
+		"partitionId":   partitionId,
 		"snapshot":      snap,
 		"computedAt":    now,
 		"lastUpdatedAt": now,
@@ -120,7 +120,7 @@ func (c *CognitionIntegration) recomputeAndUpsertSpaceContext(ctx context.Contex
 		c.spaceContextCache[partitionId] = cachedSpaceContext{
 			expiresAt: time.Now().Add(defaultSpaceContextCacheTTL),
 			value: map[string]any{
-				"partitionId":     partitionId,
+				"partitionId": partitionId,
 				"snapshot":    snap,
 				"computedAt":  now,
 				"lastUpdated": now,
@@ -303,7 +303,7 @@ func (c *CognitionIntegration) computeSpaceContextSnapshot(ctx context.Context, 
 // loadParticipantsForContext retrieves participants for space context computation.
 // Delegates to the spaceParticipants MemQL query function.
 func (c *CognitionIntegration) loadParticipantsForContext(ctx context.Context, partitionId string) ([]map[string]any, error) {
-	query := fmt.Sprintf(`querySpaceParticipants({partitionId: "%s"})`, partitionId)
+	query := fmt.Sprintf(`spaceParticipants({partitionId: "%s"})`, partitionId)
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		return nil, err

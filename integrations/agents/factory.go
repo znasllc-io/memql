@@ -42,8 +42,8 @@ const factoryResultConcept = "integration:agents:factory-result"
 //
 // Behavior:
 //
-//  1. Load the user's existing agents via queryActiveAgentsForUser.
-//  2. Load the role catalog via queryActiveAgentRoles.
+//  1. Load the user's existing agents via activeAgentsForUser.
+//  2. Load the role catalog via activeAgentRoles.
 //  3. Call ai("agentFactoryAnalyze", {...}) for the structured
 //     decision -- {action, targetAgentId, roleSlug, domainIds,
 //     liveSourceIds, toolSlugs, reasoning}.
@@ -51,11 +51,11 @@ const factoryResultConcept = "integration:agents:factory-result"
 //     - "match":   return the targetAgentId unchanged.
 //     - "extend":  union the proposed domains + tools onto the
 //     target's current capabilities and write via
-//     mutationUpdateAgent (the lock validator blocks
+//     updateAgent (the lock validator blocks
 //     any removal of locked items).
 //     - "create":  compose capabilities from the role's locked +
 //     default + proposed additions, then write a new
-//     agent via mutationCreateAgent.
+//     agent via createAgent.
 //  5. Return ONE MemoryNode whose payload JSON is
 //     {agentId, agentName, roleSlug, action, reasoning}.
 //
@@ -63,7 +63,7 @@ const factoryResultConcept = "integration:agents:factory-result"
 //   - Missing required arg              -> typed error.
 //   - Analysis returns invalid JSON     -> wrapping error with the raw text.
 //   - Analysis names a non-existent     -> error pointing the caller at
-//     role/agent                          queryActiveAgentRoles / queryActiveAgentsForUser.
+//     role/agent                          activeAgentRoles / activeAgentsForUser.
 //   - Lock violation on extend          -> propagated from the
 //     validator (the GA can retry
 //     with action="create").
@@ -220,7 +220,7 @@ type roleSnapshot struct {
 // match/extend dedupe targets for a user goal. The schema default
 // is "user" so legacy rows pre-dating the kind field are kept.
 func (i *Integration) loadExistingAgents(ctx context.Context, ownerUserId string) []agentSnapshot {
-	query := fmt.Sprintf(`queryActiveAgentsForUser({ownerUserId: %q})`, ownerUserId)
+	query := fmt.Sprintf(`activeAgentsForUser({ownerUserId: %q})`, ownerUserId)
 	raw, err := i.engine.Execute(ctx, query)
 	if err != nil || raw == nil {
 		return nil
@@ -244,7 +244,7 @@ func (i *Integration) loadExistingAgents(ctx context.Context, ownerUserId string
 // loadRoleCatalog walks the v1:agents:agentRole catalog. Same
 // best-effort tolerance as loadExistingAgents.
 func (i *Integration) loadRoleCatalog(ctx context.Context) []roleSnapshot {
-	raw, err := i.engine.Execute(ctx, `queryActiveAgentRoles()`)
+	raw, err := i.engine.Execute(ctx, `activeAgentRoles()`)
 	if err != nil || raw == nil {
 		return nil
 	}
@@ -291,7 +291,7 @@ func (i *Integration) analyzeGoal(ctx context.Context, goal string, existing []a
 }
 
 // extendAgent unions the decision's skillIds onto the target agent's
-// current capabilities.skillIds and writes via mutationUpdateAgent.
+// current capabilities.skillIds and writes via updateAgent.
 // Lock removal is rejected server-side by validateAgentLockedItems;
 // extensions only ADD ids, never remove, so the path is safe. The
 // effective max-skills cap is also enforced server-side -- a decision
@@ -349,9 +349,9 @@ func (i *Integration) extendAgent(ctx context.Context, ownerUserId string, exist
 	if err != nil {
 		return agentSnapshot{}, fmt.Errorf("marshal update payload: %w", err)
 	}
-	query := fmt.Sprintf(`mutationUpdateAgent({agentId: %q, payload: %s})`, target.Id, string(payloadJSON))
+	query := fmt.Sprintf(`updateAgent({agentId: %q, payload: %s})`, target.Id, string(payloadJSON))
 	if _, err := i.engine.Execute(ctx, query); err != nil {
-		return agentSnapshot{}, fmt.Errorf("execute mutationUpdateAgent: %w", err)
+		return agentSnapshot{}, fmt.Errorf("execute updateAgent: %w", err)
 	}
 
 	// Snapshot the resolved before/after capability shape for the audit
@@ -382,7 +382,7 @@ func (i *Integration) extendAgent(ctx context.Context, ownerUserId string, exist
 				"component", "agents-factory", "agentId", target.Id, "skillId", skillId, "error", merr)
 			continue
 		}
-		evQuery := fmt.Sprintf(`mutationCreateSkillChangeEvent(%s)`, string(evJSON))
+		evQuery := fmt.Sprintf(`createSkillChangeEvent(%s)`, string(evJSON))
 		if _, eerr := i.engine.Execute(ctx, evQuery); eerr != nil {
 			slog.Default().Warn("agents factory: write skillChangeEvent failed; agent update already committed",
 				"component", "agents-factory", "agentId", target.Id, "skillId", skillId, "error", eerr)
@@ -392,7 +392,7 @@ func (i *Integration) extendAgent(ctx context.Context, ownerUserId string, exist
 }
 
 // buildSkillChangeEventArgs composes the args map for
-// mutationCreateSkillChangeEvent recording one net-new skill landing on
+// createSkillChangeEvent recording one net-new skill landing on
 // an agent during an extend. Extracted (mirroring buildCreateAgentArgs,
 // memql#399) so a unit test can pin the attribution contract without an
 // engine handle (memql#405).
@@ -482,7 +482,7 @@ func diffStrings(a, b []string) []string {
 
 // createAgent composes the new agent's capabilities from the role
 // catalog row + the analysis-proposed additions and writes via
-// mutationCreateAgent. roleCatalog is the snapshot loaded above so
+// createAgent. roleCatalog is the snapshot loaded above so
 // we don't re-query. planId is the originating v1:planner:plan.id for
 // planner-driven calls; the empty string means GA-driven (no plan
 // back-pointer to stamp).
@@ -494,7 +494,7 @@ func diffStrings(a, b []string) []string {
 // non-empty; the lineage.createdBy bucket is "planner" for plan-driven
 // calls and "user" otherwise (the GA's ensureAgent tool is invoked
 // from a user turn).
-// buildCreateAgentArgs composes the args map for mutationCreateAgent
+// buildCreateAgentArgs composes the args map for createAgent
 // from a factory decision + role snapshot + optional planId. Extracted
 // from createAgent so tests can pin the contract (kind="specialist",
 // lineage stamping per planId presence) without needing an engine
@@ -561,9 +561,9 @@ func (i *Integration) createAgent(ctx context.Context, ownerUserId string, decis
 	if err != nil {
 		return agentSnapshot{}, fmt.Errorf("marshal create args: %w", err)
 	}
-	query := fmt.Sprintf(`mutationCreateAgent(%s)`, string(argsJSON))
+	query := fmt.Sprintf(`createAgent(%s)`, string(argsJSON))
 	if _, err := i.engine.Execute(ctx, query); err != nil {
-		return agentSnapshot{}, fmt.Errorf("execute mutationCreateAgent: %w", err)
+		return agentSnapshot{}, fmt.Errorf("execute createAgent: %w", err)
 	}
 	snap := agentSnapshot{
 		Id:       agentId,

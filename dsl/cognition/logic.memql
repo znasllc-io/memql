@@ -41,15 +41,15 @@
 // - bootstrapSession automation creates sessions for new AI
 //   participants.
 // - Emits "si.auto-joined" event for observability.
-use cognition.mutations.{ mutationCreateSessionForParticipant, mutationSendTextUtterance }
-use cognition.queries.{ queryHasAIResponseForReply, queryParticipantSession }
-use identity.queries.{ queryUsersActiveInSpace }
+use cognition.mutations.{ createSessionForParticipant, sendTextUtterance }
+use cognition.queries.{ hasAIResponseForReply, participantSession }
+use identity.queries.{ usersActiveInSpace }
 
 // automations/v1/cognition/bootstrapSession/automation.memql
 // Auto-creates a v1:cognition:session record when a participant is created.
 // Ensures every participant has a session tracking their real-time interaction state.
-@description("Auto-creates a v1:cognition:session record when a v1:cognition:participant is created, with default device + stream state. Ensures every participant has a session tracking their real-time interaction state. Idempotent via queryParticipantSession existence check. Emits 'session.created' for downstream consumers.")
-logic logicBootstrapSession {
+@description("Auto-creates a v1:cognition:session record when a v1:cognition:participant is created, with default device + stream state. Ensures every participant has a session tracking their real-time interaction state. Idempotent via participantSession existence check. Emits 'session.created' for downstream consumers.")
+logic bootstrapSession {
   args {
     event object @required
   }
@@ -61,13 +61,13 @@ logic logicBootstrapSession {
   // args.event.payload.payload = full node payload for backwards compatibility
 
   // Check if session already exists for this participant
-  checkExistingSession := queryParticipantSession({ participantId: args.event.payload.id })
+  checkExistingSession := participantSession({ participantId: args.event.payload.id })
 
   // Create the session record with default device + stream state.
   // Voice / video flow is no longer gated by a tier ceiling -- the
   // user's mic toggle (humanInput.microphoneEnabled) plus each
   // agent's audioControl mode decide who publishes audio in the room.
-  createSession := if checkExistingSession.Empty() { mutationCreateSessionForParticipant({ participantId: args.event.payload.id, partitionId: args.event.payload.partitionId }) }
+  createSession := if checkExistingSession.Empty() { createSessionForParticipant({ participantId: args.event.payload.id, partitionId: args.event.payload.partitionId }) }
 
   // Emit session created event for downstream consumers
   emitSessionCreated := if checkExistingSession.Empty() { publishEvent({ topic: "session.created", payload: { sessionId: args.event.payload.id, participantId: args.event.payload.id, partitionId: args.event.payload.partitionId, timestamp: timestamp() } }) }
@@ -82,9 +82,9 @@ logic logicBootstrapSession {
 // reception, concurrent context loading, Polyphon scoring, and streaming
 // dispatch, then emits this event with pre-loaded context when a
 // non-streaming AI response is needed.
-@description("Generates and inserts an AI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via mutationSendTextUtterance, and bumps participant presence to idle. Idempotent via queryHasAIResponseForReply.")
+@description("Generates and inserts an AI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via sendTextUtterance, and bumps participant presence to idle. Idempotent via hasAIResponseForReply.")
 @eventField("agentId", "promptData", "promptTemplateId", "siParticipantId", "partitionId", "utteranceId")
-logic logicGenerateResponse {
+logic generateResponse {
   args {
     event object @required
   }
@@ -100,7 +100,7 @@ logic logicGenerateResponse {
   //   toolNames         - Tool whitelist for the AI response
 
   // Check idempotency -- skip if we already responded to this utterance
-  existingResponse := queryHasAIResponseForReply({
+  existingResponse := hasAIResponseForReply({
     replyToId: args.event.payload.utteranceId,
     participantId: args.event.payload.siParticipantId
   })
@@ -112,7 +112,7 @@ logic logicGenerateResponse {
 
   // Insert the AI response as a new utterance
   insertResponse := if existingResponse.Empty() {
-    mutationSendTextUtterance({
+    sendTextUtterance({
       args.event.payload.partitionId,
       participantId: args.event.payload.siParticipantId,
       text: aiResponse,
@@ -154,12 +154,12 @@ logic logicGenerateResponse {
 //
 // TRIGGER:
 // graph.node.created.v1:identity:user fires on every user-row write
-// (primary path: mutationSetUserActiveSpace shipping a new version).
+// (primary path: setUserActiveSpace shipping a new version).
 // We filter to rows whose payload.activePartitionId is non-empty -- a user
 // whose pointer is set has just become active in some space.
 //
 // FIRE CONDITION:
-// queryUsersActiveInSpace returns the full set of users currently
+// usersActiveInSpace returns the full set of users currently
 // pointing at the same space. We act when the count is exactly 2 --
 // the just-joined user PLUS one prior active human. Counts of 1 (single
 // user) and 3+ (already migrated) are no-ops.
@@ -178,12 +178,12 @@ logic logicGenerateResponse {
 // shows the need).
 @description("Phase 7 of chat-architecture. Triggered when a user's activePartitionId pointer changes. When exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team to Group thread. Idempotent via content-addressed stateIds.")
 @eventField("activePartitionId", "id")
-logic logicVoiceMigrationOnSecondHuman {
+logic voiceMigrationOnSecondHuman {
   args {
     event object @required
   }
   body {
-  active := queryUsersActiveInSpace({ partitionId: args.event.payload.activePartitionId })
+  active := usersActiveInSpace({ partitionId: args.event.payload.activePartitionId })
 
   // The plan calls for exactly the 1-to-2 transition. The query returns
   // all currently-active users in the space; act when there are exactly

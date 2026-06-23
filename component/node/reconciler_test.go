@@ -15,7 +15,7 @@ import (
 )
 
 // fakeReconcileEngine is a scripted reconcileEngine: it answers the two reads
-// (queryStaleClusterNodes / querySupersededDeployments) from fixed bundles and
+// (staleClusterNodes / supersededDeployments) from fixed bundles and
 // records every retire mutation it is asked to run.
 type fakeReconcileEngine struct {
 	nodes     []*memqlv1.MemoryNode
@@ -26,14 +26,14 @@ type fakeReconcileEngine struct {
 
 func (f *fakeReconcileEngine) Execute(_ context.Context, q string) (*memqlengine.ExecuteResult, error) {
 	switch {
-	case strings.HasPrefix(q, "queryStaleClusterNodes"):
+	case strings.HasPrefix(q, "staleClusterNodes"):
 		if f.failNodes {
 			return nil, errors.New("node load boom")
 		}
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: f.nodes}}, nil
-	case strings.HasPrefix(q, "querySupersededDeployments"):
+	case strings.HasPrefix(q, "supersededDeployments"):
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: f.deps}}, nil
-	case strings.HasPrefix(q, "mutationUpdateNodeHealth"):
+	case strings.HasPrefix(q, "updateNodeHealth"):
 		f.mutations = append(f.mutations, q)
 		return &memqlengine.ExecuteResult{}, nil
 	}

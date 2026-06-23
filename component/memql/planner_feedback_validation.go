@@ -22,7 +22,7 @@ import (
 //
 // It is scoped to the INTAKE write only: a write to v1:planner:plan that
 // stamps a feedbackResponse carrying a respondedBy (the shape
-// mutationAttachPlanFeedback produces). Every other plan write -- the
+// attachPlanFeedback produces). Every other plan write -- the
 // planner agent loop's status transitions, the scope-elevation
 // Allow/Deny path (which sets status=succeeded/cancelled, not running, and
 // does not stamp respondedBy), the admission controller, etc. -- carries no
@@ -40,7 +40,7 @@ const conceptPlannerPlan = "v1:planner:plan"
 const planStatusAwaitingFeedback = "awaitingFeedback"
 
 // isFeedbackIntakeWrite reports whether a v1:planner:plan payload is the
-// product of mutationAttachPlanFeedback -- i.e. it stamps a feedbackResponse
+// product of attachPlanFeedback -- i.e. it stamps a feedbackResponse
 // object carrying a non-empty respondedBy. That marker distinguishes the
 // generic free-text intake resume from every other plan write (the scope-
 // elevation Allow/Deny path sets feedbackResponse.response without going
@@ -76,7 +76,7 @@ func feedbackIntakeAllowed(priorStatus string, ownerOrPrivileged bool) bool {
 }
 
 // validateFeedbackIntakeTransition runs the engine pre-insert guard for the
-// generic feedback-intake resume (mutationAttachPlanFeedback). It is a no-op
+// generic feedback-intake resume (attachPlanFeedback). It is a no-op
 // for any plan write that is not an intake write (no feedbackResponse with a
 // respondedBy). For an intake write it loads the prior plan row and enforces
 // feedbackIntakeAllowed.

@@ -43,7 +43,7 @@ type planLifecycle struct {
 	integ       *Integration
 	planId      string
 	taskIds     [3]string // [capabilities, identityVector, distillPrompt]
-	partitionId     string
+	partitionId string
 	requestedBy string
 	startedAt   time.Time
 }
@@ -126,7 +126,7 @@ func (i *Integration) beginPlan(
 
 	// 1. Create Plan(queued).
 	createPlanQ := fmt.Sprintf(
-		`mutationCreatePlan({"planId": %s, "partitionId": %s, "kind": "trainAgent", "goal": %s, "requestedBy": %s, "triggerSource": "user.explicit", "input": %s})`,
+		`createPlan({"planId": %s, "partitionId": %s, "kind": "trainAgent", "goal": %s, "requestedBy": %s, "triggerSource": "user.explicit", "input": %s})`,
 		quoteString(planId),
 		quoteString(partitionId),
 		quoteString(goal),
@@ -134,14 +134,14 @@ func (i *Integration) beginPlan(
 		inputJSON,
 	)
 	if _, err := i.engine.Execute(ctx, createPlanQ); err != nil {
-		i.Logger.Warn("training.beginPlan: mutationCreatePlan failed; running without lifecycle", "err", err)
+		i.Logger.Warn("training.beginPlan: createPlan failed; running without lifecycle", "err", err)
 		return nil
 	}
 
 	// 2. Stamp the heuristic estimate so the canvas card has it on
 	//    first render. Best-effort; the estimate is nice-to-have.
 	if _, err := i.engine.Execute(ctx, fmt.Sprintf(
-		`mutationUpdatePlanStatus({"planId": %s, "status": "queued", "estimate": %s, "estimatedAt": %s})`,
+		`updatePlanStatus({"planId": %s, "status": "queued", "estimate": %s, "estimatedAt": %s})`,
 		quoteString(planId),
 		estimateBlock,
 		quoteString(now.Format(time.RFC3339)),
@@ -181,7 +181,7 @@ func (i *Integration) beginPlan(
 	}
 	for idx := 0; idx < 3; idx++ {
 		if _, err := i.engine.Execute(ctx, fmt.Sprintf(
-			`mutationCreateTask({"taskId": %s, "planId": %s, "kind": %s, "seq": %d, "input": %s})`,
+			`createTask({"taskId": %s, "planId": %s, "kind": %s, "seq": %d, "input": %s})`,
 			quoteString(taskIds[idx]),
 			quoteString(planId),
 			quoteString(taskKinds[idx]),
@@ -195,7 +195,7 @@ func (i *Integration) beginPlan(
 	// 5. Plan -> running (with startedAt). The handler is about to
 	//    do the actual work; surface it on the Tasks page right away.
 	if _, err := i.engine.Execute(ctx, fmt.Sprintf(
-		`mutationUpdatePlanStatus({"planId": %s, "status": "running", "startedAt": %s})`,
+		`updatePlanStatus({"planId": %s, "status": "running", "startedAt": %s})`,
 		quoteString(planId),
 		quoteString(now.Format(time.RFC3339)),
 	)); err != nil {
@@ -206,7 +206,7 @@ func (i *Integration) beginPlan(
 		integ:       i,
 		planId:      planId,
 		taskIds:     taskIds,
-		partitionId:     partitionId,
+		partitionId: partitionId,
 		requestedBy: requestedBy,
 		startedAt:   now,
 	}
@@ -223,7 +223,7 @@ func (l *planLifecycle) markTaskRunning(ctx context.Context, idx int) {
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := l.integ.engine.Execute(ctx, fmt.Sprintf(
-		`mutationUpdateTaskStatus({"taskId": %s, "status": "running", "startedAt": %s})`,
+		`updateTaskStatus({"taskId": %s, "status": "running", "startedAt": %s})`,
 		quoteString(l.taskIds[idx]),
 		quoteString(now),
 	)); err != nil {
@@ -246,7 +246,7 @@ func (l *planLifecycle) markTaskSucceeded(ctx context.Context, idx int, output m
 		outputJSON = mustJSON(output)
 	}
 	if _, err := l.integ.engine.Execute(ctx, fmt.Sprintf(
-		`mutationUpdateTaskStatus({"taskId": %s, "status": "succeeded", "output": %s, "completedAt": %s})`,
+		`updateTaskStatus({"taskId": %s, "status": "succeeded", "output": %s, "completedAt": %s})`,
 		quoteString(l.taskIds[idx]),
 		outputJSON,
 		quoteString(now),
@@ -268,7 +268,7 @@ func (l *planLifecycle) markTaskFailed(ctx context.Context, idx int, errMsg stri
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := l.integ.engine.Execute(ctx, fmt.Sprintf(
-		`mutationUpdateTaskStatus({"taskId": %s, "status": "failed", "errorMessage": %s, "completedAt": %s})`,
+		`updateTaskStatus({"taskId": %s, "status": "failed", "errorMessage": %s, "completedAt": %s})`,
 		quoteString(l.taskIds[idx]),
 		quoteString(errMsg),
 		quoteString(now),
@@ -296,7 +296,7 @@ func (l *planLifecycle) completePlan(
 		outputJSON = mustJSON(summary)
 	}
 	if _, err := l.integ.engine.Execute(ctx, fmt.Sprintf(
-		`mutationUpdatePlanStatus({"planId": %s, "status": "succeeded", "output": %s, "completedAt": %s})`,
+		`updatePlanStatus({"planId": %s, "status": "succeeded", "output": %s, "completedAt": %s})`,
 		quoteString(l.planId),
 		outputJSON,
 		quoteString(now),
@@ -365,7 +365,7 @@ func (l *planLifecycle) failPlan(ctx context.Context, errMsg string) {
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := l.integ.engine.Execute(ctx, fmt.Sprintf(
-		`mutationUpdatePlanStatus({"planId": %s, "status": "failed", "errorMessage": %s, "completedAt": %s})`,
+		`updatePlanStatus({"planId": %s, "status": "failed", "errorMessage": %s, "completedAt": %s})`,
 		quoteString(l.planId),
 		quoteString(errMsg),
 		quoteString(now),

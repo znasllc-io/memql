@@ -47,7 +47,7 @@ func newTestWriter(exec EngineExecutor) *NodeStatusWriter {
 func TestPersist_UpsertsWhenRowMissing(t *testing.T) {
 	exec := &scriptedExecutor{
 		errAt: func(_ int, query string) error {
-			if strings.HasPrefix(query, "mutationUpdateNodeHealth") {
+			if strings.HasPrefix(query, "updateNodeHealth") {
 				return fmt.Errorf(`update(): no existing row for concept "v1:cluster:node" id "n1" (use insert() to create)`)
 			}
 			return nil // create succeeds
@@ -62,11 +62,11 @@ func TestPersist_UpsertsWhenRowMissing(t *testing.T) {
 	if len(calls) != 2 {
 		t.Fatalf("want update then create (2 calls), got %d: %v", len(calls), calls)
 	}
-	if !strings.HasPrefix(calls[0], "mutationUpdateNodeHealth") {
+	if !strings.HasPrefix(calls[0], "updateNodeHealth") {
 		t.Errorf("first call should be the update, got %q", calls[0])
 	}
-	if !strings.HasPrefix(calls[1], "mutationCreateNode") {
-		t.Errorf("fallback should be mutationCreateNode, got %q", calls[1])
+	if !strings.HasPrefix(calls[1], "createNode") {
+		t.Errorf("fallback should be createNode, got %q", calls[1])
 	}
 }
 
@@ -113,7 +113,7 @@ func TestBuildCreateNodeHealthCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.HasPrefix(got, "mutationCreateNode({") {
+	if !strings.HasPrefix(got, "createNode({") {
 		t.Errorf("expected createNode call, got %q", got)
 	}
 	for _, needle := range []string{`"id":"n4"`, `"nodeType":"planner"`, `"health":"offline"`} {

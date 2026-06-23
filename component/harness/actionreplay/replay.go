@@ -7,7 +7,7 @@
 // ToolInvoker (engine.ExecuteToolByName) and the recorded calls, and this
 // package re-executes them and reports whether the replay reproduced the
 // recorded result. Trust math (reinforce) lives here too so it is unit
-// testable; the harness hands the computed values to mutationReinforceAction.
+// testable; the harness hands the computed values to reinforceAction.
 package actionreplay
 
 import (
@@ -90,7 +90,7 @@ func Verify(recordedFingerprint, replayFingerprint string) bool {
 // Reinforce computes the next (reliability, reinforceCount) after a verified
 // successful replay: reliability rises toward 1.0 by a fixed fraction of the
 // remaining gap, reinforceCount increments. Pure; the harness persists the
-// result via mutationReinforceAction (the MemQL parser has no arithmetic).
+// result via reinforceAction (the MemQL parser has no arithmetic).
 func Reinforce(reliability float64, reinforceCount int) (float64, int) {
 	next := reliability + (1.0-reliability)*reinforceGain
 	if next > 1.0 {

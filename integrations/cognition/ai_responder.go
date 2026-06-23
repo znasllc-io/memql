@@ -183,7 +183,7 @@ func currentUserDisplayNameFromContext(ctx context.Context) string {
 // utterancePayload represents the payload of an utterance node.
 type utterancePayload struct {
 	ID            string            `json:"-"` // Node ID, populated separately
-	PartitionId       string            `json:"partitionId"`
+	PartitionId   string            `json:"partitionId"`
 	ParticipantId string            `json:"participantId"`
 	UtteranceType string            `json:"utteranceType"`
 	Text          string            `json:"text"`
@@ -196,7 +196,7 @@ type participantPayload struct {
 	// ID is the node ID of the participant record (not the payload field).
 	// This is populated separately from the node, not from payload.
 	ID              string `json:"-"` // Populated from node.id, not from JSON payload
-	PartitionId         string `json:"partitionId"`
+	PartitionId     string `json:"partitionId"`
 	ParticipantType string `json:"participantType"`
 	DisplayName     string `json:"displayName"`
 	UserId          string `json:"userId,omitempty"`
@@ -529,7 +529,7 @@ func contextWithSystemActor(ctx context.Context) context.Context {
 // Returns the participant with its node ID populated (needed for creating utterances).
 // Delegates to the aiParticipantForSpace MemQL query function.
 func (c *CognitionIntegration) findAIParticipant(ctx context.Context, partitionId string) (*participantPayload, error) {
-	query := fmt.Sprintf(`querySiParticipantForSpace({partitionId: "%s"})`, partitionId)
+	query := fmt.Sprintf(`siParticipantForSpace({partitionId: "%s"})`, partitionId)
 
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
@@ -579,7 +579,7 @@ func (c *CognitionIntegration) findParticipantById(ctx context.Context, partitio
 // getAgent retrieves an agent by ID.
 // Delegates to the agentById MemQL query function.
 func (c *CognitionIntegration) getAgent(ctx context.Context, id string) (*agentPayload, error) {
-	query := fmt.Sprintf(`queryAgentById({agentId: "%s"})`, id)
+	query := fmt.Sprintf(`agentById({agentId: "%s"})`, id)
 
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
@@ -1026,7 +1026,7 @@ func (c *CognitionIntegration) insertAIResponse(ctx context.Context, partitionId
 	// Always stamp the agent template's ID onto the source so
 	// cross-space queries can find utterances by agent. The
 	// participantId is per-(space, agent), so a query like
-	// queryAgentInteractionCount that wants "every utterance by
+	// agentInteractionCount that wants "every utterance by
 	// this agent across every space" needs a stable agent identity
 	// to filter on. Without this stamp, agentIsKnownToUser
 	// permanently returns false and agents re-introduce themselves
@@ -1172,7 +1172,7 @@ func extractUtteranceFromEvent(event events.Event) (*utterancePayload, error) {
 	// Extract utterance fields - they may be at top level (flattened) or in payload.
 	var (
 		partitionId, participantId, text, utteranceType string
-		source                                      map[string]string
+		source                                          map[string]string
 	)
 
 	// Try flattened fields first (how the event is emitted)
@@ -1210,7 +1210,7 @@ func extractUtteranceFromEvent(event events.Event) (*utterancePayload, error) {
 
 	return &utterancePayload{
 		ID:            nodeId,
-		PartitionId:       partitionId,
+		PartitionId:   partitionId,
 		ParticipantId: participantId,
 		Text:          text,
 		UtteranceType: utteranceType,
@@ -1254,14 +1254,14 @@ func sourceMapFromAny(v any) map[string]string {
 
 // hasAIResponseForReply checks whether an AI response already exists for a given utterance.
 // Delegates to the hasAIResponseForReply MemQL query function.
-func (c *CognitionIntegration) queryHasAIResponseForReply(ctx context.Context, partitionId, siParticipantId, replyToId string) bool {
+func (c *CognitionIntegration) hasAIResponseForReply(ctx context.Context, partitionId, siParticipantId, replyToId string) bool {
 	if c == nil || c.engine == nil {
 		return false
 	}
 	if strings.TrimSpace(partitionId) == "" || strings.TrimSpace(siParticipantId) == "" || strings.TrimSpace(replyToId) == "" {
 		return false
 	}
-	query := fmt.Sprintf(`queryHasAIResponseForReply({replyToId: "%s", participantId: "%s"})`,
+	query := fmt.Sprintf(`hasAIResponseForReply({replyToId: "%s", participantId: "%s"})`,
 		replyToId, siParticipantId,
 	)
 	result, err := c.engine.Execute(ctx, query)
@@ -1309,7 +1309,7 @@ func (c *CognitionIntegration) getParticipantsForPrompt(ctx context.Context, par
 		return nil, fmt.Errorf("partitionId is empty")
 	}
 
-	query := fmt.Sprintf(`querySpaceParticipants({partitionId: "%s"})`, partitionId)
+	query := fmt.Sprintf(`spaceParticipants({partitionId: "%s"})`, partitionId)
 
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {

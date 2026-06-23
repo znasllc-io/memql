@@ -9,7 +9,7 @@ import (
 // Acceptance for memql#835 as amended by memql#1393: a small
 // produceArtifact plan still resolves in a BOUNDED number of planner
 // calls through the unified loop -- ZERO plannerAgent decompose calls
-// and a single direct production turn (mutationStartPlan) -- but the
+// and a single direct production turn (startPlan) -- but the
 // known-trivial shortcut is gone: exactly ONE cheap classifier call
 // decides the route (so a LARGE deliverable can decompose instead of
 // timing out the 3m turn wallclock).
@@ -26,7 +26,7 @@ func TestProduceArtifact_ThroughLoop_NoPlannerCalls(t *testing.T) {
 	}
 	fe := &fakeEngine{
 		execResponder: func(query string) (any, error) {
-			if containsAll(query, "queryPlanById") {
+			if containsAll(query, "planById") {
 				return planRow, nil
 			}
 			return nil, nil
@@ -54,8 +54,8 @@ func TestProduceArtifact_ThroughLoop_NoPlannerCalls(t *testing.T) {
 		t.Fatalf("produceArtifact must make exactly 1 goalComplexityTriage call, got %d", n)
 	}
 	// Exactly one direct production turn kicked off.
-	if n := countContains(exec, "mutationStartPlan"); n != 1 {
-		t.Fatalf("produceArtifact must resolve to one direct production turn (mutationStartPlan), got %d", n)
+	if n := countContains(exec, "startPlan"); n != 1 {
+		t.Fatalf("produceArtifact must resolve to one direct production turn (startPlan), got %d", n)
 	}
 }
 
@@ -70,7 +70,7 @@ func TestProduceArtifact_NoOwner_DoesNotShortcut(t *testing.T) {
 		}},
 	}
 	fe := &fakeEngine{execResponder: func(query string) (any, error) {
-		if containsAll(query, "queryPlanById") {
+		if containsAll(query, "planById") {
 			return planRow, nil
 		}
 		return nil, nil
@@ -81,7 +81,7 @@ func TestProduceArtifact_NoOwner_DoesNotShortcut(t *testing.T) {
 		t.Fatalf("produceArtifact with no ownerAgentId must not shortcut: handled=%v err=%v", handled, err)
 	}
 	exec, _, _ := fe.snapshot()
-	if countContains(exec, "mutationStartPlan") != 0 {
-		t.Fatalf("no-owner produceArtifact must NOT start a direct turn, got %d mutationStartPlan", countContains(exec, "mutationStartPlan"))
+	if countContains(exec, "startPlan") != 0 {
+		t.Fatalf("no-owner produceArtifact must NOT start a direct turn, got %d startPlan", countContains(exec, "startPlan"))
 	}
 }

@@ -203,12 +203,12 @@ func (l *PlannerAgentLoop) parkForPhaseCheckpoint(ctx context.Context, plan map[
 	}
 
 	fbReq := map[string]any{
-		"question":      fmt.Sprintf("Phase %d of %d is complete. Review progress and spend, then approve continuing to the next phase.", nextIdx, phaseCount),
-		"kind":          "choice",
+		"question":       fmt.Sprintf("Phase %d of %d is complete. Review progress and spend, then approve continuing to the next phase.", nextIdx, phaseCount),
+		"kind":           "choice",
 		"completedPhase": nextIdx - 1,
-		"nextPhase":     nextIdx,
-		"phaseCount":    phaseCount,
-		"tokenSpent":    asInt(plan["tokenSpent"]),
+		"nextPhase":      nextIdx,
+		"phaseCount":     phaseCount,
+		"tokenSpent":     asInt(plan["tokenSpent"]),
 		"options": []map[string]any{
 			{"label": "Continue", "value": "continue"},
 			{"label": "Stop here", "value": "stop"},
@@ -220,7 +220,7 @@ func (l *PlannerAgentLoop) parkForPhaseCheckpoint(ctx context.Context, plan map[
 		fbReqJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"awaitingFeedback", feedbackReason:"phase_checkpoint", feedbackRequest:%s, metrics:%s})`,
+		`updatePlanStatus({planId:%q, status:"awaitingFeedback", feedbackReason:"phase_checkpoint", feedbackRequest:%s, metrics:%s})`,
 		planId, string(fbReqJSON), string(metricsJSON),
 	)
 	_, err = l.engine.Execute(systemActorContext(ctx), q)

@@ -34,7 +34,7 @@ import (
 // These tests boot the ACTUAL embedded-DSL engine (the same Init path
 // engine_load_smoke_test.go's TestEngineInitLoadsFullDSL exercises) and run the
 // query strings the handler builds through the real parser. They FAIL against
-// the pre-fix `?.` code and pass with the queryAgentById fix.
+// the pre-fix `?.` code and pass with the agentById fix.
 
 // newRealDSLEngine boots a real MemQLEngine with the full embedded DSL loaded
 // (no DB). The parser + named-query resolution are fully live; only DB-backed
@@ -156,7 +156,7 @@ func assistantAgentBundle(agentId string) *memqlv1.GraphBundle {
 //     \"?.\"", every read errors, tool scope fails OPEN (found=false -> the
 //     unscoped 517-tool registry) and persona comes back empty. The assertions
 //     below FAIL.
-//   - Post-fix (queryAgentById): the named query parses, the agent's
+//   - Post-fix (agentById): the named query parses, the agent's
 //     capabilities.skillIds resolve to a scoped tool surface that CONTAINS
 //     todosCreate/notesCreate/calendarList + the operator primitives, totalling
 //     ~30 tools (neither 517 nor 0), and persona name="Sofia"/role populate.
@@ -215,7 +215,7 @@ func TestVoiceAgentToolScopeRealEngine_ParsesAndResolves(t *testing.T) {
 // TestVoiceAgentRetiredSyntaxIsRejectedByRealParser is the focused
 // reproduction: the EXACT pre-fix query strings, run through the real parser,
 // must be rejected with the `?.` error from the live staging log -- while the
-// post-fix queryAgentById string parses. This is the assertion the prior
+// post-fix agentById string parses. This is the assertion the prior
 // mock-based tests could never make (they never invoked the parser).
 func TestVoiceAgentRetiredSyntaxIsRejectedByRealParser(t *testing.T) {
 	eng := newRealDSLEngine(t)
@@ -236,14 +236,14 @@ func TestVoiceAgentRetiredSyntaxIsRejectedByRealParser(t *testing.T) {
 
 	// The fix's query parses cleanly.
 	_, err := eng.Parse(queryAgentByIdQuery("v1:agents:agent:assistant-1c65cb0c"))
-	require.NoError(t, err, "queryAgentById -- the #1454 fix -- must parse through the real engine")
+	require.NoError(t, err, "agentById -- the #1454 fix -- must parse through the real engine")
 }
 
 // spaceContextParseResolver is a voiceParticipantResolver that runs each query
 // through the REAL parser (like realParseResolver) and returns a per-query
 // bundle keyed by which named query the handler issued. It lets the #1470
 // space-context resolution be exercised against the genuine querySpaceMeta /
-// querySpaceParticipants strings -- proving they parse cleanly AND that the
+// spaceParticipants strings -- proving they parse cleanly AND that the
 // space-name/goal + participant-name extraction wires through end-to-end.
 type spaceContextParseResolver struct {
 	engine          *memqlengine.MemQLEngine
@@ -266,7 +266,7 @@ func (r *spaceContextParseResolver) Execute(_ context.Context, query string) (*m
 	// (bff / cognition, both carrier-built) loads the pack and resolves it.
 	// Recognize the pack-owned query here and return the canned space row
 	// WITHOUT routing it through the core parser; the pack's own DSL load
-	// tests prove querySpaceMeta parses. The CORE querySpaceParticipants
+	// tests prove querySpaceMeta parses. The CORE spaceParticipants
 	// string is still validated through the real parser below (the live #1470
 	// retired-syntax guard).
 	if strings.Contains(query, "querySpaceMeta") {
@@ -278,7 +278,7 @@ func (r *spaceContextParseResolver) Execute(_ context.Context, query string) (*m
 		return nil, err
 	}
 	r.parsedOK = append(r.parsedOK, query)
-	if strings.Contains(query, "querySpaceParticipants") {
+	if strings.Contains(query, "spaceParticipants") {
 		r.sawParticipants = true
 		return &memqlengine.ExecuteResult{Bundle: r.participantsB}, nil
 	}
@@ -291,7 +291,7 @@ func (r *spaceContextParseResolver) ResolveSkills(_ context.Context, _ []string)
 
 // TestVoiceSpaceContextRealEngine_ParsesAndResolves is the #1470 real-engine
 // guard: it drives the actual resolveVoiceSpaceContextVia through the REAL
-// embedded-DSL parser, proving the querySpaceMeta + querySpaceParticipants
+// embedded-DSL parser, proving the querySpaceMeta + spaceParticipants
 // strings the handler builds parse cleanly (no retired syntax) and that the
 // space name + goal statement + human participant names extract end-to-end.
 //
@@ -331,10 +331,10 @@ func TestVoiceSpaceContextRealEngine_ParsesAndResolves(t *testing.T) {
 	out := resolveVoiceSpaceContextVia(ctx, resolver, partitionId)
 
 	require.Empty(t, resolver.parseFailed,
-		"querySpaceParticipants must parse cleanly through the real engine (#1470); "+
+		"spaceParticipants must parse cleanly through the real engine (#1470); "+
 			"querySpaceMeta is pack-owned after B2 (#2038) and validated by the pack's load tests")
 	require.True(t, resolver.sawSpaceMeta, "the resolver must issue querySpaceMeta for the space row")
-	require.True(t, resolver.sawParticipants, "the resolver must issue querySpaceParticipants for the humans")
+	require.True(t, resolver.sawParticipants, "the resolver must issue spaceParticipants for the humans")
 	assert.Equal(t, "Q3 Roadmap", out.name, "space name must resolve from the space row")
 	assert.Equal(t, "Plan the Q3 product roadmap", out.purpose, "space purpose must resolve from payload.goal.statement")
 	assert.Equal(t, []string{"Jose", "u-2"}, out.participantNames,
@@ -421,7 +421,7 @@ func TestVoiceAgentToolScopeRealEngine_FullPathWithDB(t *testing.T) {
 		_, _ = db.NewDelete().Model((*concept.MemoryNode)(nil)).Where("id = ?", agentId).Exec(context.Background())
 	})
 
-	// Drive the REAL handler path: queryAgentById -> capabilities.skillIds ->
+	// Drive the REAL handler path: agentById -> capabilities.skillIds ->
 	// ResolveSkills, through the live engine.
 	rawSlugs, _, found := resolveAgentToolSlugsVia(ctx, eng, agentId, eng.Logger)
 	require.True(t, found, "full-path agent read must resolve (no `?.` parse failure)")

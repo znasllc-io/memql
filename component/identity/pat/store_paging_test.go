@@ -49,7 +49,7 @@ func (f *pagedFakeEngine) Execute(_ context.Context, _ string) (*memqlengine.Exe
 
 // TestListForUserDrainsAllKeysetPages proves ListForUser walks the
 // keyset cursor across every page rather than stopping at the first 50
-// (queryPatIdentitiesForUser is `paginate 50`). A user with PATs spread
+// (patIdentitiesForUser is `paginate 50`). A user with PATs spread
 // across three pages must surface all of them -- the admin token roll-up
 // and the revoke ownership check both depend on the COMPLETE set.
 func TestListForUserDrainsAllKeysetPages(t *testing.T) {

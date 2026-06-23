@@ -121,11 +121,11 @@ func TestUnifiedLoadersCoverNewTree(t *testing.T) {
 	}
 	t.Logf("functions: total=%d counts=%v", total, counts)
 	for _, name := range []string{
-		"mutationSetGlobalSecret",
-		"mutationCreateAgentRole",
-		"mutationUpdateNodeHealth",
-		"queryActiveUsers",
-		"queryAllAgents",
+		"setGlobalSecret",
+		"createAgentRole",
+		"updateNodeHealth",
+		"activeUsers",
+		"allAgents",
 	} {
 		if fn, err := fnReg2.Get(name); err != nil || fn == nil {
 			t.Errorf("function registry missing %q (err=%v) -- the slice extractor probably dropped the function name (signature-bound concept regex regression)", name, err)
@@ -159,18 +159,18 @@ func TestUnifiedLoadersCoverNewTree(t *testing.T) {
 	// These two are populated by different code paths (BoundConcept
 	// fallback vs concept-resolver walking the FunctionDef); both
 	// must be green or the runtime breaks in different ways.
-	if fn, err := fnReg3.Get("mutationSetGlobalSecret"); err != nil || fn == nil {
-		t.Errorf("mutationSetGlobalSecret missing after full load: err=%v", err)
+	if fn, err := fnReg3.Get("setGlobalSecret"); err != nil || fn == nil {
+		t.Errorf("setGlobalSecret missing after full load: err=%v", err)
 	} else {
 		if fn.BoundConcept == "" {
-			t.Errorf("mutationSetGlobalSecret.BoundConcept empty -- signature-bound concept resolution regressed")
+			t.Errorf("setGlobalSecret.BoundConcept empty -- signature-bound concept resolution regressed")
 		} else if !strings.Contains(fn.BoundConcept, "globalSecret") {
-			t.Errorf("mutationSetGlobalSecret.BoundConcept = %q, expected to contain 'globalSecret'", fn.BoundConcept)
+			t.Errorf("setGlobalSecret.BoundConcept = %q, expected to contain 'globalSecret'", fn.BoundConcept)
 		}
 		if fn.MutationTemplate == nil {
-			t.Errorf("mutationSetGlobalSecret.MutationTemplate is nil")
+			t.Errorf("setGlobalSecret.MutationTemplate is nil")
 		} else if !strings.Contains(fn.MutationTemplate.Concept, ":") {
-			t.Errorf("mutationSetGlobalSecret.MutationTemplate.Concept = %q -- expected canonical id (containing ':'), the resolver didn't walk the FunctionDef", fn.MutationTemplate.Concept)
+			t.Errorf("setGlobalSecret.MutationTemplate.Concept = %q -- expected canonical id (containing ':'), the resolver didn't walk the FunctionDef", fn.MutationTemplate.Concept)
 		}
 	}
 }

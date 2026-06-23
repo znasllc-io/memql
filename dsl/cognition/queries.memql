@@ -8,11 +8,11 @@ use cognition.concepts.{ audioOverride, participant, presence, session, utteranc
 @enabled
 @description("Get active human participants in a space")
 @unbounded("human participants in a space -- a bounded membership set consumed whole for routing")
-query participant queryActiveHumanParticipants {
+query participant activeHumanParticipants {
   args {
     partitionId  string  @required
   }
-  filter  payload.partitionId==args.partitionId && payload.participantType=="human" && traitStatusIsActive
+  filter  payload.partitionId==args.partitionId && payload.participantType=="human" && statusIsActive
   shape   participantFull
 }
 
@@ -24,7 +24,7 @@ query participant queryActiveHumanParticipants {
 
 // ---- queries/v1/cognition/agentInteractionCount.memql ----
 
-// queryAgentInteractionCount - Cross-space agent interaction signal
+// agentInteractionCount - Cross-space agent interaction signal
 // =================================================================
 //
 // Returns the count of utterances posted by a given agent across
@@ -36,7 +36,7 @@ query participant queryActiveHumanParticipants {
 // first meeting and a brief warm intro is appropriate.
 //
 // Why this query exists: greetOnJoinAI's "have we already greeted?"
-// check is space-scoped (queryGreetingUtterance filters by partitionId).
+// check is space-scoped (greetingUtterance filters by partitionId).
 // The over-introduction symptom -- agent re-introduces in every new
 // space even though the user has talked to them many times -- is
 // exactly that gap. This query is the partition-scoped counterpart
@@ -52,16 +52,16 @@ query participant queryActiveHumanParticipants {
 //   minutes ago" framing).
 //
 // Usage:
-//   queryAgentInteractionCount({agentId: "<agent-id>"})
+//   agentInteractionCount({agentId: "<agent-id>"})
 //
 
 @enabled
 @description("Count utterances by an agent across ALL spaces in the current partition. Drives the agentIsKnownToUser signal.")
-query utterance queryAgentInteractionCount {
+query utterance agentInteractionCount {
   args {
     agentId  string  @required
   }
-  filter  payload.source.agentId==args.agentId && payload.utteranceType in ["speech", "agentGreeting"] && traitIsActiveRecord
+  filter  payload.source.agentId==args.agentId && payload.utteranceType in ["speech", "agentGreeting"] && isActiveRecord
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -114,9 +114,9 @@ query utterance queryAgentInteractionCount {
 //
 // NOTE: archived spaces carry active=false (mutationArchiveSpace /
 // copresentMutations.archiveSpace set it), so this query does NOT apply
-// traitIsActiveRecord -- that would exclude every archived row. It gates
+// isActiveRecord -- that would exclude every archived row. It gates
 // on status=='archived' and excludes hard-delete tombstones via
-// traitIsNotDeleted.
+// isNotDeleted.
 
 // ---- queries/v1/cognition/ownedSpaceById.memql ----
 
@@ -129,11 +129,11 @@ query utterance queryAgentInteractionCount {
 @enabled
 @description("Active audio overrides for every agent in a space. Read by the cognition handler before TTS forwarding.")
 @unbounded("audio overrides for a space -- bounded by space participants, consumed whole")
-query audioOverride queryAudioOverridesForSpace {
+query audioOverride audioOverridesForSpace {
   args {
     partitionId  string  @required
   }
-  filter  payload.partitionId==args.partitionId && traitIsActiveRecord
+  filter  payload.partitionId==args.partitionId && isActiveRecord
   shape   audioOverrideFull
 }
 
@@ -165,7 +165,7 @@ query audioOverride queryAudioOverridesForSpace {
 
 // ---- queries/v1/cognition/greetingUtterance.memql ----
 
-// queryGreetingUtterance - Check for Existing Greeting
+// greetingUtterance - Check for Existing Greeting
 // ====================================================
 //
 // Checks if a greeting utterance already exists for a specific agent
@@ -182,18 +182,18 @@ query audioOverride queryAudioOverridesForSpace {
 //   - source: Object containing kind and agentId
 //
 // Usage:
-//   queryGreetingUtterance({partitionId: "space-123", agentId: "sofia"})
+//   greetingUtterance({partitionId: "space-123", agentId: "sofia"})
 //
 
 @enabled
 @description("Check if a greeting utterance already exists for an agent in a space")
 @unbounded("the greeting utterance for (space,agent) -- bounded to a single row")
-query utterance queryGreetingUtterance {
+query utterance greetingUtterance {
   args {
     partitionId  string  @required
     agentId  string  @required
   }
-  filter  payload.partitionId==args.partitionId && payload.source.agentId==args.agentId && payload.source.kind in ["agentGreeting"] && traitIsActiveRecord
+  filter  payload.partitionId==args.partitionId && payload.source.agentId==args.agentId && payload.source.kind in ["agentGreeting"] && isActiveRecord
   shape   utteranceFull
 }
 
@@ -215,11 +215,11 @@ query utterance queryGreetingUtterance {
 @enabled
 @description("Check if the assistant already posted the awaitingFeedback announcement for a Plan (dedup behind the cross-replica announce gate, #1406).")
 @unbounded("the feedback-announcement utterance for a plan -- bounded to a single row")
-query utterance queryFeedbackAnnouncementForPlan {
+query utterance feedbackAnnouncementForPlan {
   args {
     planId  string  @required
   }
-  filter  payload.source.feedbackAnnouncePlanId==args.planId && traitIsActiveRecord
+  filter  payload.source.feedbackAnnouncePlanId==args.planId && isActiveRecord
   shape   utteranceFull
 }
 
@@ -243,17 +243,17 @@ query utterance queryFeedbackAnnouncementForPlan {
 @enabled
 @description("Active AI (group GA) participant for a space. Callers must pass the canonical partitionId.")
 @unbounded("the GA/assistant participant for a space -- bounded to a single row")
-query participant queryGroupGAForSpace {
+query participant groupGAForSpace {
   args {
     partitionId  string  @required
   }
-  filter  payload.partitionId==args.partitionId && payload.participantType=="si" && traitStatusIsActive
+  filter  payload.partitionId==args.partitionId && payload.participantType=="si" && statusIsActive
   shape   participantFull
 }
 
 // ---- queries/v1/cognition/hasAIResponseForReply.memql ----
 
-// queryHasAIResponseForReply - Idempotency Check for AI Response
+// hasAIResponseForReply - Idempotency Check for AI Response
 // ================================================================
 //
 // Checks whether an AI response already exists for a given utterance.
@@ -270,7 +270,7 @@ query participant queryGroupGAForSpace {
 @enabled
 @description("Check if an AI response already exists for a given utterance (idempotency check).")
 @unbounded("existence probe for an AI response to a reply -- a dedupe gate bounded to a single row")
-query utterance queryHasAIResponseForReply {
+query utterance hasAIResponseForReply {
   args {
     replyToId  string  @required
     participantId  string  @required
@@ -281,7 +281,7 @@ query utterance queryHasAIResponseForReply {
 
 // ---- queries/v1/cognition/participantByAgentSpace.memql ----
 
-// queryParticipantByAgentSpace - Check if Agent Already in Space
+// participantByAgentSpace - Check if Agent Already in Space
 // ===============================================================
 //
 // Checks if a specific AI agent is already participating in a space
@@ -291,7 +291,7 @@ query utterance queryHasAIResponseForReply {
 //
 // NOTE: participant has no `active` boolean field; liveness is
 // governed by `status`. This query intentionally uses
-// `payload.status!="left"` (not traitIsActiveRecord) so AI rows are
+// `payload.status!="left"` (not isActiveRecord) so AI rows are
 // not silently excluded.
 //
 // Arguments:
@@ -306,13 +306,13 @@ query utterance queryHasAIResponseForReply {
 //   - status: Participant status (excludes "left")
 //
 // Usage:
-//   queryParticipantByAgentSpace({partitionId: "space-123", agentId: "sofia"})
+//   participantByAgentSpace({partitionId: "space-123", agentId: "sofia"})
 //
 
 @enabled
 @description("Check if an AI agent is already a participant in a space (excludes left status)")
 @unbounded("the participant for (space,agent) -- bounded to a single row")
-query participant queryParticipantByAgentSpace {
+query participant participantByAgentSpace {
   args {
     partitionId  string  @required
     agentId  string  @required
@@ -360,7 +360,7 @@ query participant queryParticipantByAgentSpace {
 @enabled
 @description("Returns session state for participants in spaces. Optional filters: partitionId, participantId")
 @unbounded("the participant session for (space,participant) -- bounded to a single row")
-query session queryParticipantSession {
+query session participantSession {
   args {
     partitionId  string
     participantId  string
@@ -411,11 +411,11 @@ query session queryParticipantSession {
 @enabled
 @description("Find the active AI participant in a space.")
 @unbounded("the assistant participant for a space -- bounded to a single row")
-query participant querySiParticipantForSpace {
+query participant siParticipantForSpace {
   args {
     partitionId  string  @required
   }
-  filter  payload.partitionId==args.partitionId && payload.participantType=="si" && traitStatusIsActive
+  filter  payload.partitionId==args.partitionId && payload.participantType=="si" && statusIsActive
   shape   participantFull
 }
 
@@ -448,7 +448,7 @@ query participant querySiParticipantForSpace {
 @enabled
 @description("Participants for a space, optionally narrowed by status or participantType. Used by the cognition handler + space-context engine.")
 @unbounded("participants in a space -- a bounded membership roster consumed whole")
-query participant querySpaceParticipants {
+query participant spaceParticipants {
   args {
     partitionId          string  @required
     status           string
@@ -470,7 +470,7 @@ query participant querySpaceParticipants {
 @enabled
 @description("Returns utterances for the given space. Optional participantId / utteranceType args narrow the result further. Used by the cockpit Chat tab to populate the utterance pane and by the BFF for downstream consumers.")
 @cache(ttl="30")
-query utterance querySpaceUtterances {
+query utterance spaceUtterances {
   args {
     partitionId          string  @required
     participantId    string
@@ -500,11 +500,11 @@ query utterance querySpaceUtterances {
 @enabled
 @description("Active video overrides for every agent in a space. Read by the voice-agent process at session start.")
 @unbounded("video overrides for a space -- bounded by space participants, consumed whole")
-query videoOverride queryVideoOverridesForSpace {
+query videoOverride videoOverridesForSpace {
   args {
     partitionId  string  @required
   }
-  filter  payload.partitionId==args.partitionId && traitIsActiveRecord
+  filter  payload.partitionId==args.partitionId && isActiveRecord
   shape   videoOverrideFull
 }
 
@@ -522,13 +522,13 @@ query videoOverride queryVideoOverridesForSpace {
 // The SPA keys these latest-wins by participantId (useParticipantPresence
 // + SpaceSubscriptionContext) to drive the presence panel's per-agent
 // status pill + the chat activity indicator. Space-scoped, same gating
-// shape as querySpaceParticipants (the calling path verifies the caller
+// shape as spaceParticipants (the calling path verifies the caller
 // is a space participant).
 
 @enabled
 @description("Presence snapshots for every participant in a space (UI state: thinking / responding / waiting / ...). Space-scoped; the SPA dedupes latest-wins by participantId.")
 @unbounded("presence rows for a space -- bounded by space participants, consumed whole")
-query presence querySpaceParticipantPresence {
+query presence spaceParticipantPresence {
   args {
     partitionId  string  @required
   }
@@ -549,13 +549,13 @@ query presence querySpaceParticipantPresence {
 // ending participants, clearing presence, deleting the LiveKit room,
 // and archiving/saving the space per preferences.dailySpaceRolloverAction.
 //
-// traitStatusIsActive + traitIsActiveRecord are what make the sweep
+// statusIsActive + isActiveRecord are what make the sweep
 // idempotent at the query level: once a daily is rolled over (status
 // archived/saved, active=false) it drops out of this result set, so a
 // re-run -- on this replica or a concurrent one -- finds nothing to do.
 //
 // `@public` marks this query as intentionally not caller-scoped: it is
 // invoked exclusively under the system:dailyspaceAutomation actor with
-// a server-supplied userId from queryActiveUsers (never caller input),
+// a server-supplied userId from activeUsers (never caller input),
 // mirroring queryAllArchivedSpacesAcrossUsers' cron-sweep precedent.
 

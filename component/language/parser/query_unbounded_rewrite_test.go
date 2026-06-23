@@ -15,14 +15,14 @@ func TestQueryUnboundedInjectsExplicitPaginate(t *testing.T) {
 	source := `@unbounded("small bounded catalog -- never more than a handful of rows")
 @description("All providers.")
 query provider queryAllProviders {
-  filter  traitIsActiveRecord
+  filter  isActiveRecord
   shape   providerFull
 }`
 	out, err := NormaliseQuerySource(source)
 	if err != nil {
 		t.Fatalf("NormaliseQuerySource: %v", err)
 	}
-	want := "paginate(concept==provider;traitIsActiveRecord, " + strconv.Itoa(UnboundedPaginateWindow) + ")"
+	want := "paginate(concept==provider;isActiveRecord, " + strconv.Itoa(UnboundedPaginateWindow) + ")"
 	if !strings.Contains(out, want) {
 		t.Errorf("expected injected paginate %q, got:\n%s", want, out)
 	}
@@ -36,7 +36,7 @@ func TestQueryUnboundedRequiresReason(t *testing.T) {
 	source := `@unbounded
 @description("missing reason")
 query provider queryAllProviders {
-  filter  traitIsActiveRecord
+  filter  isActiveRecord
   shape   providerFull
 }`
 	if _, err := NormaliseQuerySource(source); err == nil {
@@ -47,7 +47,7 @@ query provider queryAllProviders {
 func TestQueryUnboundedEmptyReasonRejected(t *testing.T) {
 	source := `@unbounded("")
 query provider queryAllProviders {
-  filter  traitIsActiveRecord
+  filter  isActiveRecord
   shape   providerFull
 }`
 	if _, err := NormaliseQuerySource(source); err == nil {
@@ -58,7 +58,7 @@ query provider queryAllProviders {
 func TestQueryUnboundedRejectsPaginateCombo(t *testing.T) {
 	source := `@unbounded("conflicts with paginate")
 query provider queryAllProviders {
-  filter  traitIsActiveRecord
+  filter  isActiveRecord
   paginate 10
   shape   providerFull
 }`
@@ -70,7 +70,7 @@ query provider queryAllProviders {
 func TestQueryUnboundedRejectsSortCombo(t *testing.T) {
 	source := `@unbounded("conflicts with sort")
 query provider queryAllProviders {
-  filter  traitIsActiveRecord
+  filter  isActiveRecord
   sort    "createdAt", "desc"
   shape   providerFull
 }`

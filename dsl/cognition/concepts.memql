@@ -140,7 +140,7 @@ concept session {
   participantId  string  @required  @description("ID of the participant this session tracks.")
   partitionId  string  @required  @description("ID of the space this session belongs to.")
   startedAt  datetime  @description("When the session started.")
-  streams  object  @description("Active stream and session identifiers for external services: {realtimeSessionId?, avatarStreamId?, audioTrackId?, videoTrackId?}. Matches the mutationCreateSessionForParticipant `streams object` arg and the SPA's SessionStreams payload (memql#1321).")
+  streams  object  @description("Active stream and session identifiers for external services: {realtimeSessionId?, avatarStreamId?, audioTrackId?, videoTrackId?}. Matches the createSessionForParticipant `streams object` arg and the SPA's SessionStreams payload (memql#1321).")
 
   @relationship(type="parent", field="participantId", target=participant, direction="outgoing")
 }

@@ -124,7 +124,7 @@ func (c *CognitionIntegration) generateTextStreaming(
 
 		// Emit when buffer reaches a sentence boundary or ~80 chars.
 		if shouldFlushTextBuffer(chunkBuffer.String()) {
-			c.mutationEmitTextChunk(ctx, partitionId, participantId, replyId, chunkBuffer.String(), chunkIndex, false)
+			c.emitTextChunk(ctx, partitionId, participantId, replyId, chunkBuffer.String(), chunkIndex, false)
 			chunkBuffer.Reset()
 			chunkIndex++
 		}
@@ -133,14 +133,14 @@ func (c *CognitionIntegration) generateTextStreaming(
 	// Flush remaining buffer.
 	remaining := chunkBuffer.String()
 	if remaining != "" {
-		c.mutationEmitTextChunk(ctx, partitionId, participantId, replyId, remaining, chunkIndex, false)
+		c.emitTextChunk(ctx, partitionId, participantId, replyId, remaining, chunkIndex, false)
 		chunkIndex++
 	}
 
 	assembled := stripRawToolCalls(strings.TrimSpace(fullText.String()))
 
 	// Send final done signal.
-	c.mutationEmitTextChunk(ctx, partitionId, participantId, replyId, "", chunkIndex, true)
+	c.emitTextChunk(ctx, partitionId, participantId, replyId, "", chunkIndex, true)
 
 	c.Logger.Info("streaming-text: complete",
 		"partitionId", partitionId,
@@ -169,7 +169,7 @@ func shouldFlushTextBuffer(buf string) bool {
 	return last == '.' || last == '!' || last == '?' || last == '\n' || last == ':'
 }
 
-// mutationEmitTextChunk inserts a v1:cognition:text:chunk node via the
+// emitTextChunk inserts a v1:cognition:text:chunk node via the
 // emitTextChunk mutation.
 //
 // replyId is the stable per-turn id (same across every chunk in this agent
@@ -177,7 +177,7 @@ func shouldFlushTextBuffer(buf string) bool {
 // uses it to key the rendered bubble so the streaming-then-committed
 // transition is in-place -- no React remount, no avatar flicker. Every
 // caller MUST supply a non-empty replyId; passing "" is a bug.
-func (c *CognitionIntegration) mutationEmitTextChunk(ctx context.Context, partitionId, participantId, replyId, text string, index int, done bool) {
+func (c *CognitionIntegration) emitTextChunk(ctx context.Context, partitionId, participantId, replyId, text string, index int, done bool) {
 	// Colon-free chunkId. The dsl mutation's id template is
 	// `concat("text-chunk-", args.chunkId)`, so anything we pass becomes
 	// the persisted row's shortId after the prefix. Canonical-id
@@ -196,7 +196,7 @@ func (c *CognitionIntegration) mutationEmitTextChunk(ctx context.Context, partit
 		doneStr = "true"
 	}
 
-	query := fmt.Sprintf(`mutationEmitTextChunk({
+	query := fmt.Sprintf(`emitTextChunk({
 		"chunkId": %s,
 		"partitionId": %s,
 		"participantId": %s,

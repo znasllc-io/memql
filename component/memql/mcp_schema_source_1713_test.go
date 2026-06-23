@@ -47,7 +47,7 @@ func TestMCPSchemaSingleSourceOfTruth(t *testing.T) {
 
 	wrappers := eng.MCPPromotedFunctionTools()
 	if len(wrappers) == 0 {
-		t.Fatal("no @mcp-promoted functions found; expected queryLibraryArtifactById et al.")
+		t.Fatal("no @mcp-promoted functions found; expected libraryArtifactById et al.")
 	}
 
 	sawArtifact := false
@@ -81,13 +81,13 @@ func TestMCPSchemaSingleSourceOfTruth(t *testing.T) {
 			t.Errorf("wrapper schema for %q is not the FunctionInputJSONSchema output:\n  wrapper  =%#v\n  canonical=%#v", name, wrapSchema, canonical)
 		}
 
-		if name == "queryLibraryArtifactById" {
+		if name == "libraryArtifactById" {
 			sawArtifact = true
 			// The reported bug: artifactId silently dropped. The complete,
 			// correct schema must declare artifactId AND mark it required.
 			props, _ := wrapSchema["properties"].(map[string]any)
 			if _, ok := props["artifactId"]; !ok {
-				t.Errorf("queryLibraryArtifactById schema missing artifactId property: %#v", wrapSchema)
+				t.Errorf("libraryArtifactById schema missing artifactId property: %#v", wrapSchema)
 			}
 			required, _ := wrapSchema["required"].([]any)
 			found := false
@@ -97,13 +97,13 @@ func TestMCPSchemaSingleSourceOfTruth(t *testing.T) {
 				}
 			}
 			if !found {
-				t.Errorf("queryLibraryArtifactById must mark artifactId required: %#v", wrapSchema)
+				t.Errorf("libraryArtifactById must mark artifactId required: %#v", wrapSchema)
 			}
 		}
 	}
 
 	if !sawArtifact {
-		t.Error("queryLibraryArtifactById not present among @mcp-promoted functions (the reported buggy wrapper)")
+		t.Error("libraryArtifactById not present among @mcp-promoted functions (the reported buggy wrapper)")
 	}
 }
 

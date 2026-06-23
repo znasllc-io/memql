@@ -13,7 +13,6 @@ import (
 	"github.com/znasllc-io/memql/integrations"
 )
 
-
 // memql#1363 -- cross-replica plan-execution claim + terminal-status
 // protection. The plan-approved event reaches EVERY planner replica; without
 // the cluster claim each replica dispatches a full agent turn and the losing
@@ -139,18 +138,18 @@ func (f *fakeTurnForwarder) forwardCount() int {
 func guardTestPlanResponder(planId, status string) func(query string) (any, error) {
 	return func(query string) (any, error) {
 		switch {
-		case strings.Contains(query, "queryPlanById"):
+		case strings.Contains(query, "planById"):
 			return map[string]any{"data": map[string]any{
 				"id":           planId,
 				"kind":         "scopeElevation",
 				"status":       status,
 				"goal":         "install the tool on my machine",
-				"partitionId":      "v1:cognition:space:s1",
+				"partitionId":  "v1:cognition:space:s1",
 				"ownerAgentId": "v1:agents:agent:a1",
 				"requestedBy":  "v1:identity:user:u1",
 				"startedAt":    "2026-06-12T00:11:49Z",
 			}}, nil
-		case strings.Contains(query, "queryInvocationsForPlan"):
+		case strings.Contains(query, "invocationsForPlan"):
 			// One successful worker invocation -> the dispatch outcome gate
 			// reports succeeded.
 			return map[string]any{"data": map[string]any{"outcome": "success"}}, nil
@@ -205,7 +204,7 @@ func TestExecuteApprovedPlan_CrossReplicaClaim_ExactlyOneExecutes(t *testing.T) 
 		t.Fatalf("exactly one replica must dispatch the agent turn; got %d", got)
 	}
 	execCalls, _, _ := eng.snapshot()
-	if got := countContains(execCalls, "mutationUpdatePlanStatus"); got != 1 {
+	if got := countContains(execCalls, "updatePlanStatus"); got != 1 {
 		t.Fatalf("exactly one terminal stamp must be written; got %d: %v", got, execCalls)
 	}
 	if got := countContains(execCalls, `status:"succeeded"`); got != 1 {
@@ -233,7 +232,7 @@ func TestExecuteApprovedPlan_ClaimLoserSkipsEntirely(t *testing.T) {
 		t.Fatalf("the claim loser must not dispatch an agent turn")
 	}
 	execCalls, _, _ := eng.snapshot()
-	if got := countContains(execCalls, "mutationUpdatePlanStatus"); got != 0 {
+	if got := countContains(execCalls, "updatePlanStatus"); got != 0 {
 		t.Fatalf("the claim loser must not stamp any plan status; got %v", execCalls)
 	}
 	logged := logBuf.String()
@@ -276,7 +275,7 @@ func TestMarkPlanFailed_RefusesOverwriteSucceeded(t *testing.T) {
 	p.markPlanFailed(contextWithSystemActor(context.Background()), planId, "duplicate turn came back empty")
 
 	execCalls, _, _ := eng.snapshot()
-	if got := countContains(execCalls, "mutationUpdatePlanStatus"); got != 0 {
+	if got := countContains(execCalls, "updatePlanStatus"); got != 0 {
 		t.Fatalf("failed must NOT overwrite succeeded; got %v", execCalls)
 	}
 	logged := logBuf.String()
@@ -299,7 +298,7 @@ func TestMarkPlanSucceeded_RefusesOverwriteFailed(t *testing.T) {
 	p.markPlanSucceeded(contextWithSystemActor(context.Background()), planId, "Done.")
 
 	execCalls, _, _ := eng.snapshot()
-	if got := countContains(execCalls, "mutationUpdatePlanStatus"); got != 0 {
+	if got := countContains(execCalls, "updatePlanStatus"); got != 0 {
 		t.Fatalf("succeeded must NOT overwrite failed; got %v", execCalls)
 	}
 	if !strings.Contains(logBuf.String(), "REFUSING to overwrite a terminal plan status") {
@@ -318,7 +317,7 @@ func TestMarkPlanTerminal_RefusesOverwriteCancelled(t *testing.T) {
 	p.markPlanFailed(ctx, planId, "boom")
 
 	execCalls, _, _ := eng.snapshot()
-	if got := countContains(execCalls, "mutationUpdatePlanStatus"); got != 0 {
+	if got := countContains(execCalls, "updatePlanStatus"); got != 0 {
 		t.Fatalf("cancelled must never be overwritten; got %v", execCalls)
 	}
 }
@@ -348,7 +347,7 @@ func TestMarkPlanTerminal_SameStatusIsIdempotentNoOp(t *testing.T) {
 	p.markPlanSucceeded(contextWithSystemActor(context.Background()), planId, "Done.")
 
 	execCalls, _, _ := eng.snapshot()
-	if got := countContains(execCalls, "mutationUpdatePlanStatus"); got != 0 {
+	if got := countContains(execCalls, "updatePlanStatus"); got != 0 {
 		t.Fatalf("same-status re-stamp must be a no-op; got %v", execCalls)
 	}
 }
@@ -365,7 +364,7 @@ func TestMarkPlanTerminal_PausedStaysPaused(t *testing.T) {
 	p.markPlanFailed(ctx, planId, "boom")
 
 	execCalls, _, _ := eng.snapshot()
-	if got := countContains(execCalls, "mutationUpdatePlanStatus"); got != 0 {
+	if got := countContains(execCalls, "updatePlanStatus"); got != 0 {
 		t.Fatalf("a paused plan must not be stamped terminal; got %v", execCalls)
 	}
 }
@@ -375,7 +374,7 @@ func TestMarkPlanTerminal_PausedStaysPaused(t *testing.T) {
 func TestMarkPlanTerminal_LookupMissWritesThrough(t *testing.T) {
 	const planId = "v1:planner:plan:protect-7"
 	eng := &fakeEngine{execResponder: func(query string) (any, error) {
-		if strings.Contains(query, "queryPlanById") {
+		if strings.Contains(query, "planById") {
 			return nil, nil // "plan not found" -> lookup miss
 		}
 		return nil, nil

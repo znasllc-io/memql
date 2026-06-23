@@ -12,7 +12,7 @@ import (
 //   - Pure unit tests for scrubPIIFields / zeroValueFor: type-correct
 //     zeroing of an arbitrary field set, with no DB.
 //   - A Postgres-gated end-to-end compliance test reproducing the Run-4
-//     evidence: after mutationDeleteUserHard, NO @pii-annotated field
+//     evidence: after deleteUserHard, NO @pii-annotated field
 //     remains populated on the tombstoned user row.
 
 func TestScrubPIIFields_ZeroesByType(t *testing.T) {
@@ -80,7 +80,7 @@ func TestZeroValueFor_Types(t *testing.T) {
 // TestHardDelete_ScrubsAllPIIFields is the compliance contract: boot a
 // real engine, create a user with every PII field populated (the Run-4
 // fixture: Quinn Bee, phone, Tester role, gender), run
-// mutationDeleteUserHard, and assert NOT ONE @pii-annotated field
+// deleteUserHard, and assert NOT ONE @pii-annotated field
 // survives on the tombstoned row. Before the fix, firstName / lastName /
 // phone / primaryRole / gender were retained -- this test FAILS against
 // that code and PASSES with the @scrubPii annotation-driven scrub.
@@ -92,7 +92,7 @@ func TestHardDelete_ScrubsAllPIIFields(t *testing.T) {
 	const conceptName = "v1:identity:user"
 	userId := "user-" + uniqueSuffix("piihard")
 
-	storedId := runMutation(t, ctx, eng, "mutationCreateUserOnFirstLogin", map[string]any{
+	storedId := runMutation(t, ctx, eng, "createUserOnFirstLogin", map[string]any{
 		"userId":       userId,
 		"displayName":  "Quinn Bee",
 		"firstName":    "Quinn",
@@ -110,7 +110,7 @@ func TestHardDelete_ScrubsAllPIIFields(t *testing.T) {
 	require.Equal(t, "Tester", before["primaryRole"])
 
 	// The hard-delete: minimal call, only the userId.
-	runMutation(t, ctx, eng, "mutationDeleteUserHard", map[string]any{
+	runMutation(t, ctx, eng, "deleteUserHard", map[string]any{
 		"userId": userId,
 	})
 

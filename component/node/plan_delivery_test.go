@@ -76,7 +76,7 @@ func TestPlanCrossReplicaDeliveryViaRouteGap(t *testing.T) {
 	consumer := newPlannerConsumerDelivery(t, ctx, "planner-2", store, sink)
 	_ = consumer
 
-	// Producer: a brand-new Plan is created on the bff (mutationCreatePlan),
+	// Producer: a brand-new Plan is created on the bff (createPlan),
 	// which durably Publishes it via PlanDelivery while routeless to planner-2.
 	producer := newPlanProducer(t, "bff-1", NodeTypeBFF, store)
 	createdTopic := events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptPlan)

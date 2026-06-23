@@ -39,7 +39,7 @@ type PlanStore interface {
 // canvas card need to record the analysis lifecycle.
 type CreatePlanForAttachmentParams struct {
 	AttachmentId  string
-	PartitionId       string
+	PartitionId   string
 	FileName      string
 	RequestedBy   string
 	Transcription string // extracted text (populated by analyzer / handler)
@@ -108,7 +108,7 @@ func (s *EnginePlanStore) CreateQueuedAnalyzePlan(ctx context.Context, p CreateP
 
 	// 1. Create the Plan in 'queued'.
 	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`mutationCreatePlan({"planId": %s, "partitionId": %s, "kind": "analyzeFile", "goal": %s, "requestedBy": %s, "triggerSource": "user.explicit", "input": {"attachmentId": %s, "fileName": %s}})`,
+		`createPlan({"planId": %s, "partitionId": %s, "kind": "analyzeFile", "goal": %s, "requestedBy": %s, "triggerSource": "user.explicit", "input": {"attachmentId": %s, "fileName": %s}})`,
 		jsonString(planId),
 		jsonString(p.PartitionId),
 		jsonString(goal),
@@ -116,13 +116,13 @@ func (s *EnginePlanStore) CreateQueuedAnalyzePlan(ctx context.Context, p CreateP
 		jsonString(p.AttachmentId),
 		jsonString(p.FileName),
 	)); err != nil {
-		return "", fmt.Errorf("execute mutationCreatePlan: %w", err)
+		return "", fmt.Errorf("execute createPlan: %w", err)
 	}
 
 	// 1.5. Stamp the heuristic estimate on the Plan immediately
 	// after creation so the canvas card has it on first render.
 	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`mutationUpdatePlanStatus({"planId": %s, "status": "queued", "estimate": %s, "estimatedAt": %s})`,
+		`updatePlanStatus({"planId": %s, "status": "queued", "estimate": %s, "estimatedAt": %s})`,
 		jsonString(planId), estimateBlock, jsonString(time.Now().UTC().Format(time.RFC3339)),
 	)); err != nil {
 		// Non-fatal: estimate is nice-to-have on the card.
@@ -154,12 +154,12 @@ func (s *EnginePlanStore) CreateQueuedAnalyzePlan(ctx context.Context, p CreateP
 
 	// 2. Create the single Task in 'queued'.
 	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`mutationCreateTask({"taskId": %s, "planId": %s, "kind": "fileProcessor", "seq": 0, "input": {"attachmentId": %s}})`,
+		`createTask({"taskId": %s, "planId": %s, "kind": "fileProcessor", "seq": 0, "input": {"attachmentId": %s}})`,
 		jsonString(taskId),
 		jsonString(planId),
 		jsonString(p.AttachmentId),
 	)); err != nil {
-		return "", fmt.Errorf("execute mutationCreateTask: %w", err)
+		return "", fmt.Errorf("execute createTask: %w", err)
 	}
 
 	return planId, nil
@@ -179,16 +179,16 @@ func (s *EnginePlanStore) CompleteAnalyzePlan(ctx context.Context, planId string
 
 	// 3. Transition Plan + Task to 'running'.
 	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`mutationUpdatePlanStatus({"planId": %s, "status": "running", "startedAt": %s})`,
+		`updatePlanStatus({"planId": %s, "status": "running", "startedAt": %s})`,
 		jsonString(planId), jsonString(now),
 	)); err != nil {
-		return fmt.Errorf("execute mutationUpdatePlanStatus(running): %w", err)
+		return fmt.Errorf("execute updatePlanStatus(running): %w", err)
 	}
 	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`mutationUpdateTaskStatus({"taskId": %s, "status": "running", "startedAt": %s})`,
+		`updateTaskStatus({"taskId": %s, "status": "running", "startedAt": %s})`,
 		jsonString(taskId), jsonString(now),
 	)); err != nil {
-		return fmt.Errorf("execute mutationUpdateTaskStatus(running): %w", err)
+		return fmt.Errorf("execute updateTaskStatus(running): %w", err)
 	}
 
 	// 4. Transition Task to 'succeeded' with the analysis output.
@@ -200,10 +200,10 @@ func (s *EnginePlanStore) CompleteAnalyzePlan(ctx context.Context, planId string
 	)
 	taskCompletedAt := time.Now().UTC().Format(time.RFC3339)
 	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`mutationUpdateTaskStatus({"taskId": %s, "status": "succeeded", "output": %s, "completedAt": %s})`,
+		`updateTaskStatus({"taskId": %s, "status": "succeeded", "output": %s, "completedAt": %s})`,
 		jsonString(taskId), taskOutput, jsonString(taskCompletedAt),
 	)); err != nil {
-		return fmt.Errorf("execute mutationUpdateTaskStatus(succeeded): %w", err)
+		return fmt.Errorf("execute updateTaskStatus(succeeded): %w", err)
 	}
 
 	// 5. Create the v1:knowledge:document container row.
@@ -240,10 +240,10 @@ func (s *EnginePlanStore) CompleteAnalyzePlan(ctx context.Context, planId string
 		jsonString(documentId),
 	)
 	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`mutationUpdatePlanStatus({"planId": %s, "status": "succeeded", "output": %s, "completedAt": %s})`,
+		`updatePlanStatus({"planId": %s, "status": "succeeded", "output": %s, "completedAt": %s})`,
 		jsonString(planId), planOutput, jsonString(planCompletedAt),
 	)); err != nil {
-		return fmt.Errorf("execute mutationUpdatePlanStatus(succeeded): %w", err)
+		return fmt.Errorf("execute updatePlanStatus(succeeded): %w", err)
 	}
 
 	// 7. Publish the plan.completed canvas card. documentId carried

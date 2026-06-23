@@ -178,7 +178,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"topic":             "string (required) - narrow topic the chunks should focus on.",
 				"sourceUtteranceId": "string (optional) - bare id of the utterance that triggered the augment; persisted on each chunk for provenance.",
 				"sourceAgentId":     "string (optional) - bare id of the agent whose retrieval gap surfaced this; provenance.",
-				"partitionId":           "string (required) - space the Plan row scopes to.",
+				"partitionId":       "string (required) - space the Plan row scopes to.",
 				"requestedBy":       "string (required) - user id requesting the augment; Plan ownership + audit.",
 			},
 		},
@@ -362,7 +362,7 @@ func (i *Integration) ingestHandler(ctx context.Context, args map[string]any, _ 
 		}
 
 		insertQuery := fmt.Sprintf(
-			`mutationCreateDocumentChunk({chunkId: %s, domainId: %s, text: %s, source: %s, sourceRef: %s, seq: %d, tokenCount: %d})`,
+			`createDocumentChunk({chunkId: %s, domainId: %s, text: %s, source: %s, sourceRef: %s, seq: %d, tokenCount: %d})`,
 			quoteString(chunkId),
 			quoteString(domainId),
 			quoteString(chunkText),

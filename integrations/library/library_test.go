@@ -24,7 +24,7 @@ import (
 // version -> append) end to end without a database.
 type stubEngine struct {
 	// doc is the backing generatedOutput, keyed by id. Updated in place
-	// by mutationUpdateGeneratedOutputContent so the test can assert the
+	// by updateGeneratedOutputContent so the test can assert the
 	// latest-pointer reflects the newest content.
 	doc map[string]map[string]any
 	// versions is the append-only history: every appended documentVersion
@@ -76,13 +76,13 @@ func (s *stubEngine) Execute(ctx context.Context, query string) (*memql.ExecuteR
 	s.calls = append(s.calls, query)
 	name, args := parseCall(query)
 	switch name {
-	case "queryGeneratedOutputById":
+	case "generatedOutputById":
 		id := args["outputId"].(string)
 		if d, ok := s.doc[id]; ok {
 			return bundleOf([]map[string]any{d}), nil
 		}
 		return bundleOf(nil), nil
-	case "queryDocumentVersionsForOwner", "queryDocumentVersions":
+	case "documentVersionsForOwner", "documentVersions":
 		docId, _ := args["documentId"].(string)
 		out := []map[string]any{}
 		for _, v := range s.versions {
@@ -91,7 +91,7 @@ func (s *stubEngine) Execute(ctx context.Context, query string) (*memql.ExecuteR
 			}
 		}
 		return bundleOf(out), nil
-	case "mutationAppendDocumentVersion":
+	case "appendDocumentVersion":
 		row := map[string]any{}
 		for k, v := range args {
 			row[k] = v
@@ -99,7 +99,7 @@ func (s *stubEngine) Execute(ctx context.Context, query string) (*memql.ExecuteR
 		row["id"] = args["versionId"]
 		s.versions = append(s.versions, row)
 		return bundleOf(nil), nil
-	case "mutationUpdateGeneratedOutputContent":
+	case "updateGeneratedOutputContent":
 		id := args["outputId"].(string)
 		if d, ok := s.doc[id]; ok {
 			d["body"] = args["body"]
@@ -108,7 +108,7 @@ func (s *stubEngine) Execute(ctx context.Context, query string) (*memql.ExecuteR
 			}
 		}
 		return bundleOf(nil), nil
-	case "mutationCreateArtifact":
+	case "createArtifact":
 		return bundleOf(nil), nil
 	}
 	return bundleOf(nil), nil
@@ -176,7 +176,7 @@ func seededDoc() map[string]any {
 		"body":        "v1 body",
 		"format":      "markdown",
 		"source":      "agent_generated",
-		"partitionId":     "space-1",
+		"partitionId": "space-1",
 	}
 }
 

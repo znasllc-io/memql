@@ -14,92 +14,92 @@ var (
 	_ = strings.Builder{}
 )
 
-// QueryAccessRequestById -- Returns the access request with the given id. Zero or one result.
+// AccessRequestById -- Returns the access request with the given id. Zero or one result.
 //
 // Bound concept: accessRequest.
-type QueryAccessRequestByIdArgs struct {
+type AccessRequestByIdArgs struct {
 	RequestId string
 }
 
-// QueryAccessRequestById calls the engine query queryAccessRequestById.
-func (qc *QueryClient) QueryAccessRequestById(ctx context.Context, args QueryAccessRequestByIdArgs) (*Result, error) {
-	call := QueryAccessRequestByIdBuild(args)
-	return qc.executeNamed(ctx, "queryAccessRequestById", call)
+// AccessRequestById calls the engine query accessRequestById.
+func (qc *QueryClient) AccessRequestById(ctx context.Context, args AccessRequestByIdArgs) (*Result, error) {
+	call := AccessRequestByIdBuild(args)
+	return qc.executeNamed(ctx, "accessRequestById", call)
 }
 
-func QueryAccessRequestByIdBuild(args QueryAccessRequestByIdArgs) string {
+func AccessRequestByIdBuild(args AccessRequestByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAccessRequestById({")
+	b.WriteString("accessRequestById({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAccountEntitlement -- The account's task-concurrency entitlement row (zero or one current row). Backs the admission controller (#904) and Tasks UX (#909). Filters on accountId only; classifies as 'other' in the per-row-authz audit. No-row => unlimited is enforced in the Go resolver.
+// AccountEntitlement -- The account's task-concurrency entitlement row (zero or one current row). Backs the admission controller (#904) and Tasks UX (#909). Filters on accountId only; classifies as 'other' in the per-row-authz audit. No-row => unlimited is enforced in the Go resolver.
 //
 // Bound concept: accountEntitlement.
-type QueryAccountEntitlementArgs struct {
+type AccountEntitlementArgs struct {
 	AccountId string
 }
 
-// QueryAccountEntitlement calls the engine query queryAccountEntitlement.
-func (qc *QueryClient) QueryAccountEntitlement(ctx context.Context, args QueryAccountEntitlementArgs) (*Result, error) {
-	call := QueryAccountEntitlementBuild(args)
-	return qc.executeNamed(ctx, "queryAccountEntitlement", call)
+// AccountEntitlement calls the engine query accountEntitlement.
+func (qc *QueryClient) AccountEntitlement(ctx context.Context, args AccountEntitlementArgs) (*Result, error) {
+	call := AccountEntitlementBuild(args)
+	return qc.executeNamed(ctx, "accountEntitlement", call)
 }
 
-func QueryAccountEntitlementBuild(args QueryAccountEntitlementArgs) string {
+func AccountEntitlementBuild(args AccountEntitlementArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAccountEntitlement({")
+	b.WriteString("accountEntitlement({")
 	b.WriteString("accountId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AccountId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryActionById -- Resolve a floating v1:actions:action reference by id (latest version) for the calling owner -- floating-ref resolution (#1758). Owned tier.
+// ActionById -- Resolve a floating v1:actions:action reference by id (latest version) for the calling owner -- floating-ref resolution (#1758). Owned tier.
 //
 // Bound concept: action.
-type QueryActionByIdArgs struct {
+type ActionByIdArgs struct {
 	ActionId string
 }
 
-// QueryActionById calls the engine query queryActionById.
-func (qc *QueryClient) QueryActionById(ctx context.Context, args QueryActionByIdArgs) (*Result, error) {
-	call := QueryActionByIdBuild(args)
-	return qc.executeNamed(ctx, "queryActionById", call)
+// ActionById calls the engine query actionById.
+func (qc *QueryClient) ActionById(ctx context.Context, args ActionByIdArgs) (*Result, error) {
+	call := ActionByIdBuild(args)
+	return qc.executeNamed(ctx, "actionById", call)
 }
 
-func QueryActionByIdBuild(args QueryActionByIdArgs) string {
+func ActionByIdBuild(args ActionByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryActionById({")
+	b.WriteString("actionById({")
 	b.WriteString("actionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ActionId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryActionByIdAndVersion -- Resolve a pinned v1:actions:action reference (id + version) for the calling owner -- pin-by-default resolution (Phase 5 #1740). Owned tier.
+// ActionByIdAndVersion -- Resolve a pinned v1:actions:action reference (id + version) for the calling owner -- pin-by-default resolution (Phase 5 #1740). Owned tier.
 //
 // Bound concept: action.
-type QueryActionByIdAndVersionArgs struct {
+type ActionByIdAndVersionArgs struct {
 	ActionId string
 	Version  int
 }
 
-// QueryActionByIdAndVersion calls the engine query queryActionByIdAndVersion.
-func (qc *QueryClient) QueryActionByIdAndVersion(ctx context.Context, args QueryActionByIdAndVersionArgs) (*Result, error) {
-	call := QueryActionByIdAndVersionBuild(args)
-	return qc.executeNamed(ctx, "queryActionByIdAndVersion", call)
+// ActionByIdAndVersion calls the engine query actionByIdAndVersion.
+func (qc *QueryClient) ActionByIdAndVersion(ctx context.Context, args ActionByIdAndVersionArgs) (*Result, error) {
+	call := ActionByIdAndVersionBuild(args)
+	return qc.executeNamed(ctx, "actionByIdAndVersion", call)
 }
 
-func QueryActionByIdAndVersionBuild(args QueryActionByIdAndVersionArgs) string {
+func ActionByIdAndVersionBuild(args ActionByIdAndVersionArgs) string {
 	var b strings.Builder
-	b.WriteString("queryActionByIdAndVersion({")
+	b.WriteString("actionByIdAndVersion({")
 	b.WriteString("actionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ActionId))
-	if b.Len() > 27 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("version: ")
@@ -108,139 +108,139 @@ func QueryActionByIdAndVersionBuild(args QueryActionByIdAndVersionArgs) string {
 	return b.String()
 }
 
-// QueryActionByInputFingerprint -- Resolve an active v1:actions:action by inputFingerprint for the calling owner -- the literal-replay lookup (Phase 1 #1736).
+// ActionByInputFingerprint -- Resolve an active v1:actions:action by inputFingerprint for the calling owner -- the literal-replay lookup (Phase 1 #1736).
 //
 // Bound concept: action.
-type QueryActionByInputFingerprintArgs struct {
+type ActionByInputFingerprintArgs struct {
 	InputFingerprint string
 }
 
-// QueryActionByInputFingerprint calls the engine query queryActionByInputFingerprint.
-func (qc *QueryClient) QueryActionByInputFingerprint(ctx context.Context, args QueryActionByInputFingerprintArgs) (*Result, error) {
-	call := QueryActionByInputFingerprintBuild(args)
-	return qc.executeNamed(ctx, "queryActionByInputFingerprint", call)
+// ActionByInputFingerprint calls the engine query actionByInputFingerprint.
+func (qc *QueryClient) ActionByInputFingerprint(ctx context.Context, args ActionByInputFingerprintArgs) (*Result, error) {
+	call := ActionByInputFingerprintBuild(args)
+	return qc.executeNamed(ctx, "actionByInputFingerprint", call)
 }
 
-func QueryActionByInputFingerprintBuild(args QueryActionByInputFingerprintArgs) string {
+func ActionByInputFingerprintBuild(args ActionByInputFingerprintArgs) string {
 	var b strings.Builder
-	b.WriteString("queryActionByInputFingerprint({")
+	b.WriteString("actionByInputFingerprint({")
 	b.WriteString("inputFingerprint: ")
 	b.WriteString(fmt.Sprintf("%q", args.InputFingerprint))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryActionByTemplateFingerprint -- Resolve an active v1:actions:action by templateFingerprint (input structure) for the calling owner -- the parameterized-replay lookup (Phase 3 #1738). Owned tier.
+// ActionByTemplateFingerprint -- Resolve an active v1:actions:action by templateFingerprint (input structure) for the calling owner -- the parameterized-replay lookup (Phase 3 #1738). Owned tier.
 //
 // Bound concept: action.
-type QueryActionByTemplateFingerprintArgs struct {
+type ActionByTemplateFingerprintArgs struct {
 	TemplateFingerprint string
 }
 
-// QueryActionByTemplateFingerprint calls the engine query queryActionByTemplateFingerprint.
-func (qc *QueryClient) QueryActionByTemplateFingerprint(ctx context.Context, args QueryActionByTemplateFingerprintArgs) (*Result, error) {
-	call := QueryActionByTemplateFingerprintBuild(args)
-	return qc.executeNamed(ctx, "queryActionByTemplateFingerprint", call)
+// ActionByTemplateFingerprint calls the engine query actionByTemplateFingerprint.
+func (qc *QueryClient) ActionByTemplateFingerprint(ctx context.Context, args ActionByTemplateFingerprintArgs) (*Result, error) {
+	call := ActionByTemplateFingerprintBuild(args)
+	return qc.executeNamed(ctx, "actionByTemplateFingerprint", call)
 }
 
-func QueryActionByTemplateFingerprintBuild(args QueryActionByTemplateFingerprintArgs) string {
+func ActionByTemplateFingerprintBuild(args ActionByTemplateFingerprintArgs) string {
 	var b strings.Builder
-	b.WriteString("queryActionByTemplateFingerprint({")
+	b.WriteString("actionByTemplateFingerprint({")
 	b.WriteString("templateFingerprint: ")
 	b.WriteString(fmt.Sprintf("%q", args.TemplateFingerprint))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryActionCandidatesForPlan -- List v1:actions:candidate traces captured for a plan, newest-first by createdAt (owned tier). #1735.
+// ActionCandidatesForPlan -- List v1:actions:candidate traces captured for a plan, newest-first by createdAt (owned tier). #1735.
 //
 // Bound concept: candidate.
-type QueryActionCandidatesForPlanArgs struct {
+type ActionCandidatesForPlanArgs struct {
 	PlanId string
 }
 
-// QueryActionCandidatesForPlan calls the engine query queryActionCandidatesForPlan.
-func (qc *QueryClient) QueryActionCandidatesForPlan(ctx context.Context, args QueryActionCandidatesForPlanArgs) (*Result, error) {
-	call := QueryActionCandidatesForPlanBuild(args)
-	return qc.executeNamed(ctx, "queryActionCandidatesForPlan", call)
+// ActionCandidatesForPlan calls the engine query actionCandidatesForPlan.
+func (qc *QueryClient) ActionCandidatesForPlan(ctx context.Context, args ActionCandidatesForPlanArgs) (*Result, error) {
+	call := ActionCandidatesForPlanBuild(args)
+	return qc.executeNamed(ctx, "actionCandidatesForPlan", call)
 }
 
-func QueryActionCandidatesForPlanBuild(args QueryActionCandidatesForPlanArgs) string {
+func ActionCandidatesForPlanBuild(args ActionCandidatesForPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("queryActionCandidatesForPlan({")
+	b.WriteString("actionCandidatesForPlan({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryActionsPendingConfirm -- List the calling owner's candidate v1:actions:action rows awaiting confirmation (real-machine side effects gate on a human, Phase 4 #1739). Owned tier.
+// ActionsPendingConfirm -- List the calling owner's candidate v1:actions:action rows awaiting confirmation (real-machine side effects gate on a human, Phase 4 #1739). Owned tier.
 //
 // Bound concept: action.
-type QueryActionsPendingConfirmArgs struct {
+type ActionsPendingConfirmArgs struct {
 }
 
-// QueryActionsPendingConfirm calls the engine query queryActionsPendingConfirm.
-func (qc *QueryClient) QueryActionsPendingConfirm(ctx context.Context, args QueryActionsPendingConfirmArgs) (*Result, error) {
-	call := QueryActionsPendingConfirmBuild(args)
-	return qc.executeNamed(ctx, "queryActionsPendingConfirm", call)
+// ActionsPendingConfirm calls the engine query actionsPendingConfirm.
+func (qc *QueryClient) ActionsPendingConfirm(ctx context.Context, args ActionsPendingConfirmArgs) (*Result, error) {
+	call := ActionsPendingConfirmBuild(args)
+	return qc.executeNamed(ctx, "actionsPendingConfirm", call)
 }
 
-func QueryActionsPendingConfirmBuild(args QueryActionsPendingConfirmArgs) string {
+func ActionsPendingConfirmBuild(args ActionsPendingConfirmArgs) string {
 	_ = args
-	return "queryActionsPendingConfirm({})"
+	return "actionsPendingConfirm({})"
 }
 
-// QueryActiveActionsForOwner -- List the calling owner's active v1:actions:action rows for the consolidation decay/deprecate sweep (Phase 4 #1739). Owned tier.
+// ActiveActionsForOwner -- List the calling owner's active v1:actions:action rows for the consolidation decay/deprecate sweep (Phase 4 #1739). Owned tier.
 //
 // Bound concept: action.
-type QueryActiveActionsForOwnerArgs struct {
+type ActiveActionsForOwnerArgs struct {
 }
 
-// QueryActiveActionsForOwner calls the engine query queryActiveActionsForOwner.
-func (qc *QueryClient) QueryActiveActionsForOwner(ctx context.Context, args QueryActiveActionsForOwnerArgs) (*Result, error) {
-	call := QueryActiveActionsForOwnerBuild(args)
-	return qc.executeNamed(ctx, "queryActiveActionsForOwner", call)
+// ActiveActionsForOwner calls the engine query activeActionsForOwner.
+func (qc *QueryClient) ActiveActionsForOwner(ctx context.Context, args ActiveActionsForOwnerArgs) (*Result, error) {
+	call := ActiveActionsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "activeActionsForOwner", call)
 }
 
-func QueryActiveActionsForOwnerBuild(args QueryActiveActionsForOwnerArgs) string {
+func ActiveActionsForOwnerBuild(args ActiveActionsForOwnerArgs) string {
 	_ = args
-	return "queryActiveActionsForOwner({})"
+	return "activeActionsForOwner({})"
 }
 
-// QueryActiveAgentRoles -- List every active agentRole row. Backs the role picker on the cockpit's agent-creation surface and on the role-management view. predefined rows render with a lock icon; user-created rows are fully editable.
+// ActiveAgentRoles -- List every active agentRole row. Backs the role picker on the cockpit's agent-creation surface and on the role-management view. predefined rows render with a lock icon; user-created rows are fully editable.
 //
 // Bound concept: agentRole.
-type QueryActiveAgentRolesArgs struct {
+type ActiveAgentRolesArgs struct {
 }
 
-// QueryActiveAgentRoles calls the engine query queryActiveAgentRoles.
-func (qc *QueryClient) QueryActiveAgentRoles(ctx context.Context, args QueryActiveAgentRolesArgs) (*Result, error) {
-	call := QueryActiveAgentRolesBuild(args)
-	return qc.executeNamed(ctx, "queryActiveAgentRoles", call)
+// ActiveAgentRoles calls the engine query activeAgentRoles.
+func (qc *QueryClient) ActiveAgentRoles(ctx context.Context, args ActiveAgentRolesArgs) (*Result, error) {
+	call := ActiveAgentRolesBuild(args)
+	return qc.executeNamed(ctx, "activeAgentRoles", call)
 }
 
-func QueryActiveAgentRolesBuild(args QueryActiveAgentRolesArgs) string {
+func ActiveAgentRolesBuild(args ActiveAgentRolesArgs) string {
 	_ = args
-	return "queryActiveAgentRoles({})"
+	return "activeAgentRoles({})"
 }
 
-// QueryActiveAgents -- Returns available AI agent templates. Optional filter: groupId
+// ActiveAgents -- Returns available AI agent templates. Optional filter: groupId
 //
 // Bound concept: agent.
-type QueryActiveAgentsArgs struct {
+type ActiveAgentsArgs struct {
 	GroupId string
 }
 
-// QueryActiveAgents calls the engine query queryActiveAgents.
-func (qc *QueryClient) QueryActiveAgents(ctx context.Context, args QueryActiveAgentsArgs) (*Result, error) {
-	call := QueryActiveAgentsBuild(args)
-	return qc.executeNamed(ctx, "queryActiveAgents", call)
+// ActiveAgents calls the engine query activeAgents.
+func (qc *QueryClient) ActiveAgents(ctx context.Context, args ActiveAgentsArgs) (*Result, error) {
+	call := ActiveAgentsBuild(args)
+	return qc.executeNamed(ctx, "activeAgents", call)
 }
 
-func QueryActiveAgentsBuild(args QueryActiveAgentsArgs) string {
+func ActiveAgentsBuild(args ActiveAgentsArgs) string {
 	var b strings.Builder
-	b.WriteString("queryActiveAgents({")
+	b.WriteString("activeAgents({")
 	if args.GroupId != "" {
 		b.WriteString("groupId: ")
 		b.WriteString(fmt.Sprintf("%q", args.GroupId))
@@ -249,258 +249,258 @@ func QueryActiveAgentsBuild(args QueryActiveAgentsArgs) string {
 	return b.String()
 }
 
-// QueryActiveAgentsForUser -- Per Q10 layered dedupe Layer 1: list every active agent owned by a user (any roleSlug, any space scope). The Planner Agent's createSpecialist decision feeds this list into the similarity check before proposing a new agent. Platform-infrastructure agents (payload.kind=='system' -- MemQL Planner, MemQL Trainer) are returned by this query and filtered out structurally by loadExistingAgents in integrations/agents/factory.go before they enter the dedupe candidate pool; the filter lives one layer up rather than in the query so the same query can serve other callers that legitimately need system rows.
+// ActiveAgentsForUser -- Per Q10 layered dedupe Layer 1: list every active agent owned by a user (any roleSlug, any space scope). The Planner Agent's createSpecialist decision feeds this list into the similarity check before proposing a new agent. Platform-infrastructure agents (payload.kind=='system' -- MemQL Planner, MemQL Trainer) are returned by this query and filtered out structurally by loadExistingAgents in integrations/agents/factory.go before they enter the dedupe candidate pool; the filter lives one layer up rather than in the query so the same query can serve other callers that legitimately need system rows.
 //
 // Bound concept: agent.
-type QueryActiveAgentsForUserArgs struct {
+type ActiveAgentsForUserArgs struct {
 	OwnerUserId string
 }
 
-// QueryActiveAgentsForUser calls the engine query queryActiveAgentsForUser.
-func (qc *QueryClient) QueryActiveAgentsForUser(ctx context.Context, args QueryActiveAgentsForUserArgs) (*Result, error) {
-	call := QueryActiveAgentsForUserBuild(args)
-	return qc.executeNamed(ctx, "queryActiveAgentsForUser", call)
+// ActiveAgentsForUser calls the engine query activeAgentsForUser.
+func (qc *QueryClient) ActiveAgentsForUser(ctx context.Context, args ActiveAgentsForUserArgs) (*Result, error) {
+	call := ActiveAgentsForUserBuild(args)
+	return qc.executeNamed(ctx, "activeAgentsForUser", call)
 }
 
-func QueryActiveAgentsForUserBuild(args QueryActiveAgentsForUserArgs) string {
+func ActiveAgentsForUserBuild(args ActiveAgentsForUserArgs) string {
 	var b strings.Builder
-	b.WriteString("queryActiveAgentsForUser({")
+	b.WriteString("activeAgentsForUser({")
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryActiveApprovalsByCorrelationKey -- Returns active (pending OR approved) v1:safety:approvalRequest rows for a given correlationKey. The DSL-backed ApprovalSink calls this BEFORE creating a new pending row -- if an `approved` non-expired row exists, the Gate bypasses with proceed=true; if a `pending` row exists, the sink reuses its id rather than creating a duplicate (idempotency). `expired` and `denied` rows are excluded -- the bypass check should treat them as nonexistent so a subsequent retry creates a fresh pending row.
+// ActiveApprovalsByCorrelationKey -- Returns active (pending OR approved) v1:safety:approvalRequest rows for a given correlationKey. The DSL-backed ApprovalSink calls this BEFORE creating a new pending row -- if an `approved` non-expired row exists, the Gate bypasses with proceed=true; if a `pending` row exists, the sink reuses its id rather than creating a duplicate (idempotency). `expired` and `denied` rows are excluded -- the bypass check should treat them as nonexistent so a subsequent retry creates a fresh pending row.
 //
 // Bound concept: approvalRequest.
-type QueryActiveApprovalsByCorrelationKeyArgs struct {
+type ActiveApprovalsByCorrelationKeyArgs struct {
 	CorrelationKey string
 }
 
-// QueryActiveApprovalsByCorrelationKey calls the engine query queryActiveApprovalsByCorrelationKey.
-func (qc *QueryClient) QueryActiveApprovalsByCorrelationKey(ctx context.Context, args QueryActiveApprovalsByCorrelationKeyArgs) (*Result, error) {
-	call := QueryActiveApprovalsByCorrelationKeyBuild(args)
-	return qc.executeNamed(ctx, "queryActiveApprovalsByCorrelationKey", call)
+// ActiveApprovalsByCorrelationKey calls the engine query activeApprovalsByCorrelationKey.
+func (qc *QueryClient) ActiveApprovalsByCorrelationKey(ctx context.Context, args ActiveApprovalsByCorrelationKeyArgs) (*Result, error) {
+	call := ActiveApprovalsByCorrelationKeyBuild(args)
+	return qc.executeNamed(ctx, "activeApprovalsByCorrelationKey", call)
 }
 
-func QueryActiveApprovalsByCorrelationKeyBuild(args QueryActiveApprovalsByCorrelationKeyArgs) string {
+func ActiveApprovalsByCorrelationKeyBuild(args ActiveApprovalsByCorrelationKeyArgs) string {
 	var b strings.Builder
-	b.WriteString("queryActiveApprovalsByCorrelationKey({")
+	b.WriteString("activeApprovalsByCorrelationKey({")
 	b.WriteString("correlationKey: ")
 	b.WriteString(fmt.Sprintf("%q", args.CorrelationKey))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryActiveAuthoringBundles -- The caller's currently-active bundles. Backs the authored-construct runtime loader (#959) -- the set of authored automations to register on boot / on change.
+// ActiveAuthoringBundles -- The caller's currently-active bundles. Backs the authored-construct runtime loader (#959) -- the set of authored automations to register on boot / on change.
 //
 // Bound concept: bundle.
-type QueryActiveAuthoringBundlesArgs struct {
+type ActiveAuthoringBundlesArgs struct {
 }
 
-// QueryActiveAuthoringBundles calls the engine query queryActiveAuthoringBundles.
-func (qc *QueryClient) QueryActiveAuthoringBundles(ctx context.Context, args QueryActiveAuthoringBundlesArgs) (*Result, error) {
-	call := QueryActiveAuthoringBundlesBuild(args)
-	return qc.executeNamed(ctx, "queryActiveAuthoringBundles", call)
+// ActiveAuthoringBundles calls the engine query activeAuthoringBundles.
+func (qc *QueryClient) ActiveAuthoringBundles(ctx context.Context, args ActiveAuthoringBundlesArgs) (*Result, error) {
+	call := ActiveAuthoringBundlesBuild(args)
+	return qc.executeNamed(ctx, "activeAuthoringBundles", call)
 }
 
-func QueryActiveAuthoringBundlesBuild(args QueryActiveAuthoringBundlesArgs) string {
+func ActiveAuthoringBundlesBuild(args ActiveAuthoringBundlesArgs) string {
 	_ = args
-	return "queryActiveAuthoringBundles({})"
+	return "activeAuthoringBundles({})"
 }
 
-// QueryActiveDelegationsByIdentitySubject -- Get all active delegations whose identitySubject matches the argument. Used by the per-request DelegationResolver on the auth hot path. See memql#112.
+// ActiveDelegationsByIdentitySubject -- Get all active delegations whose identitySubject matches the argument. Used by the per-request DelegationResolver on the auth hot path. See memql#112.
 //
 // Bound concept: delegation.
-type QueryActiveDelegationsByIdentitySubjectArgs struct {
+type ActiveDelegationsByIdentitySubjectArgs struct {
 	IdentitySubject string
 }
 
-// QueryActiveDelegationsByIdentitySubject calls the engine query queryActiveDelegationsByIdentitySubject.
-func (qc *QueryClient) QueryActiveDelegationsByIdentitySubject(ctx context.Context, args QueryActiveDelegationsByIdentitySubjectArgs) (*Result, error) {
-	call := QueryActiveDelegationsByIdentitySubjectBuild(args)
-	return qc.executeNamed(ctx, "queryActiveDelegationsByIdentitySubject", call)
+// ActiveDelegationsByIdentitySubject calls the engine query activeDelegationsByIdentitySubject.
+func (qc *QueryClient) ActiveDelegationsByIdentitySubject(ctx context.Context, args ActiveDelegationsByIdentitySubjectArgs) (*Result, error) {
+	call := ActiveDelegationsByIdentitySubjectBuild(args)
+	return qc.executeNamed(ctx, "activeDelegationsByIdentitySubject", call)
 }
 
-func QueryActiveDelegationsByIdentitySubjectBuild(args QueryActiveDelegationsByIdentitySubjectArgs) string {
+func ActiveDelegationsByIdentitySubjectBuild(args ActiveDelegationsByIdentitySubjectArgs) string {
 	var b strings.Builder
-	b.WriteString("queryActiveDelegationsByIdentitySubject({")
+	b.WriteString("activeDelegationsByIdentitySubject({")
 	b.WriteString("identitySubject: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentitySubject))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryActiveDelegationsForAgent -- Get all active delegations for a given agent ID
+// ActiveDelegationsForAgent -- Get all active delegations for a given agent ID
 //
 // Bound concept: delegation.
-type QueryActiveDelegationsForAgentArgs struct {
+type ActiveDelegationsForAgentArgs struct {
 	AgentId string
 }
 
-// QueryActiveDelegationsForAgent calls the engine query queryActiveDelegationsForAgent.
-func (qc *QueryClient) QueryActiveDelegationsForAgent(ctx context.Context, args QueryActiveDelegationsForAgentArgs) (*Result, error) {
-	call := QueryActiveDelegationsForAgentBuild(args)
-	return qc.executeNamed(ctx, "queryActiveDelegationsForAgent", call)
+// ActiveDelegationsForAgent calls the engine query activeDelegationsForAgent.
+func (qc *QueryClient) ActiveDelegationsForAgent(ctx context.Context, args ActiveDelegationsForAgentArgs) (*Result, error) {
+	call := ActiveDelegationsForAgentBuild(args)
+	return qc.executeNamed(ctx, "activeDelegationsForAgent", call)
 }
 
-func QueryActiveDelegationsForAgentBuild(args QueryActiveDelegationsForAgentArgs) string {
+func ActiveDelegationsForAgentBuild(args ActiveDelegationsForAgentArgs) string {
 	var b strings.Builder
-	b.WriteString("queryActiveDelegationsForAgent({")
+	b.WriteString("activeDelegationsForAgent({")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryActiveHumanParticipants -- Get active human participants in a space
+// ActiveHumanParticipants -- Get active human participants in a space
 //
 // Bound concept: participant.
-type QueryActiveHumanParticipantsArgs struct {
+type ActiveHumanParticipantsArgs struct {
 	PartitionId string
 }
 
-// QueryActiveHumanParticipants calls the engine query queryActiveHumanParticipants.
-func (qc *QueryClient) QueryActiveHumanParticipants(ctx context.Context, args QueryActiveHumanParticipantsArgs) (*Result, error) {
-	call := QueryActiveHumanParticipantsBuild(args)
-	return qc.executeNamed(ctx, "queryActiveHumanParticipants", call)
+// ActiveHumanParticipants calls the engine query activeHumanParticipants.
+func (qc *QueryClient) ActiveHumanParticipants(ctx context.Context, args ActiveHumanParticipantsArgs) (*Result, error) {
+	call := ActiveHumanParticipantsBuild(args)
+	return qc.executeNamed(ctx, "activeHumanParticipants", call)
 }
 
-func QueryActiveHumanParticipantsBuild(args QueryActiveHumanParticipantsArgs) string {
+func ActiveHumanParticipantsBuild(args ActiveHumanParticipantsArgs) string {
 	var b strings.Builder
-	b.WriteString("queryActiveHumanParticipants({")
+	b.WriteString("activeHumanParticipants({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryActivePlansForUser -- The caller's currently-RUNNING Plans -- the account's active tasks occupying concurrency slots (epic memql#902 / #909). Owned tier: payload.requestedBy==actor.userId binds server-side so a caller only sees their own. The active count is the result length; pair with queryAccountEntitlement for the cap and queryWaitingPlansForUser for the queue.
+// ActivePlansForUser -- The caller's currently-RUNNING Plans -- the account's active tasks occupying concurrency slots (epic memql#902 / #909). Owned tier: payload.requestedBy==actor.userId binds server-side so a caller only sees their own. The active count is the result length; pair with accountEntitlement for the cap and waitingPlansForUser for the queue.
 //
 // Bound concept: plan.
-type QueryActivePlansForUserArgs struct {
+type ActivePlansForUserArgs struct {
 }
 
-// QueryActivePlansForUser calls the engine query queryActivePlansForUser.
-func (qc *QueryClient) QueryActivePlansForUser(ctx context.Context, args QueryActivePlansForUserArgs) (*Result, error) {
-	call := QueryActivePlansForUserBuild(args)
-	return qc.executeNamed(ctx, "queryActivePlansForUser", call)
+// ActivePlansForUser calls the engine query activePlansForUser.
+func (qc *QueryClient) ActivePlansForUser(ctx context.Context, args ActivePlansForUserArgs) (*Result, error) {
+	call := ActivePlansForUserBuild(args)
+	return qc.executeNamed(ctx, "activePlansForUser", call)
 }
 
-func QueryActivePlansForUserBuild(args QueryActivePlansForUserArgs) string {
+func ActivePlansForUserBuild(args ActivePlansForUserArgs) string {
 	_ = args
-	return "queryActivePlansForUser({})"
+	return "activePlansForUser({})"
 }
 
-// QueryActiveProjects -- List active v1:forge:project rows.
+// ActiveProjects -- List active v1:forge:project rows.
 //
 // Bound concept: project.
-type QueryActiveProjectsArgs struct {
+type ActiveProjectsArgs struct {
 }
 
-// QueryActiveProjects calls the engine query queryActiveProjects.
-func (qc *QueryClient) QueryActiveProjects(ctx context.Context, args QueryActiveProjectsArgs) (*Result, error) {
-	call := QueryActiveProjectsBuild(args)
-	return qc.executeNamed(ctx, "queryActiveProjects", call)
+// ActiveProjects calls the engine query activeProjects.
+func (qc *QueryClient) ActiveProjects(ctx context.Context, args ActiveProjectsArgs) (*Result, error) {
+	call := ActiveProjectsBuild(args)
+	return qc.executeNamed(ctx, "activeProjects", call)
 }
 
-func QueryActiveProjectsBuild(args QueryActiveProjectsArgs) string {
+func ActiveProjectsBuild(args ActiveProjectsArgs) string {
 	_ = args
-	return "queryActiveProjects({})"
+	return "activeProjects({})"
 }
 
-// QueryActiveResponsibilities -- The caller's active + enabled responsibilities -- the live working set. Owned tier (ownerUserId == actor.userId). status filtered via traitStatusIsActive; enabled==true drops soft-disabled rows.
+// ActiveResponsibilities -- The caller's active + enabled responsibilities -- the live working set. Owned tier (ownerUserId == actor.userId). status filtered via statusIsActive; enabled==true drops soft-disabled rows.
 //
 // Bound concept: responsibility.
-type QueryActiveResponsibilitiesArgs struct {
+type ActiveResponsibilitiesArgs struct {
 }
 
-// QueryActiveResponsibilities calls the engine query queryActiveResponsibilities.
-func (qc *QueryClient) QueryActiveResponsibilities(ctx context.Context, args QueryActiveResponsibilitiesArgs) (*Result, error) {
-	call := QueryActiveResponsibilitiesBuild(args)
-	return qc.executeNamed(ctx, "queryActiveResponsibilities", call)
+// ActiveResponsibilities calls the engine query activeResponsibilities.
+func (qc *QueryClient) ActiveResponsibilities(ctx context.Context, args ActiveResponsibilitiesArgs) (*Result, error) {
+	call := ActiveResponsibilitiesBuild(args)
+	return qc.executeNamed(ctx, "activeResponsibilities", call)
 }
 
-func QueryActiveResponsibilitiesBuild(args QueryActiveResponsibilitiesArgs) string {
+func ActiveResponsibilitiesBuild(args ActiveResponsibilitiesArgs) string {
 	_ = args
-	return "queryActiveResponsibilities({})"
+	return "activeResponsibilities({})"
 }
 
-// QueryActiveResponsibilitiesAcrossUsers -- Every active + enabled responsibility in the partition, regardless of owner -- the cross-user sweep the reactive-loop heartbeat (epic #632) walks each tick. Cron-sweep-helper shape (no owner filter; classifies as 'other' like queryAllArchivedSpacesAcrossUsers). The planner poller reads this under the system actor, then impersonates each row's ownerUserId for the owned-tier per-user writes.
+// ActiveResponsibilitiesAcrossUsers -- Every active + enabled responsibility in the partition, regardless of owner -- the cross-user sweep the reactive-loop heartbeat (epic #632) walks each tick. Cron-sweep-helper shape (no owner filter; classifies as 'other' like queryAllArchivedSpacesAcrossUsers). The planner poller reads this under the system actor, then impersonates each row's ownerUserId for the owned-tier per-user writes.
 //
 // Bound concept: responsibility.
-type QueryActiveResponsibilitiesAcrossUsersArgs struct {
+type ActiveResponsibilitiesAcrossUsersArgs struct {
 }
 
-// QueryActiveResponsibilitiesAcrossUsers calls the engine query queryActiveResponsibilitiesAcrossUsers.
-func (qc *QueryClient) QueryActiveResponsibilitiesAcrossUsers(ctx context.Context, args QueryActiveResponsibilitiesAcrossUsersArgs) (*Result, error) {
-	call := QueryActiveResponsibilitiesAcrossUsersBuild(args)
-	return qc.executeNamed(ctx, "queryActiveResponsibilitiesAcrossUsers", call)
+// ActiveResponsibilitiesAcrossUsers calls the engine query activeResponsibilitiesAcrossUsers.
+func (qc *QueryClient) ActiveResponsibilitiesAcrossUsers(ctx context.Context, args ActiveResponsibilitiesAcrossUsersArgs) (*Result, error) {
+	call := ActiveResponsibilitiesAcrossUsersBuild(args)
+	return qc.executeNamed(ctx, "activeResponsibilitiesAcrossUsers", call)
 }
 
-func QueryActiveResponsibilitiesAcrossUsersBuild(args QueryActiveResponsibilitiesAcrossUsersArgs) string {
+func ActiveResponsibilitiesAcrossUsersBuild(args ActiveResponsibilitiesAcrossUsersArgs) string {
 	_ = args
-	return "queryActiveResponsibilitiesAcrossUsers({})"
+	return "activeResponsibilitiesAcrossUsers({})"
 }
 
-// QueryActiveSkills -- List every active skill catalog row -- summary projection. Backs the Skills picker on the role-edit surface (cockpit#124) and the Planner Agent's candidate scan when deciding which skill bundle to attach in extendSpecialist. Predefined rows render with a lock icon; user-created rows are fully editable.
+// ActiveSkills -- List every active skill catalog row -- summary projection. Backs the Skills picker on the role-edit surface (cockpit#124) and the Planner Agent's candidate scan when deciding which skill bundle to attach in extendSpecialist. Predefined rows render with a lock icon; user-created rows are fully editable.
 //
 // Bound concept: skill.
-type QueryActiveSkillsArgs struct {
+type ActiveSkillsArgs struct {
 }
 
-// QueryActiveSkills calls the engine query queryActiveSkills.
-func (qc *QueryClient) QueryActiveSkills(ctx context.Context, args QueryActiveSkillsArgs) (*Result, error) {
-	call := QueryActiveSkillsBuild(args)
-	return qc.executeNamed(ctx, "queryActiveSkills", call)
+// ActiveSkills calls the engine query activeSkills.
+func (qc *QueryClient) ActiveSkills(ctx context.Context, args ActiveSkillsArgs) (*Result, error) {
+	call := ActiveSkillsBuild(args)
+	return qc.executeNamed(ctx, "activeSkills", call)
 }
 
-func QueryActiveSkillsBuild(args QueryActiveSkillsArgs) string {
+func ActiveSkillsBuild(args ActiveSkillsArgs) string {
 	_ = args
-	return "queryActiveSkills({})"
+	return "activeSkills({})"
 }
 
-// QueryActiveSkillsFull -- List every active skill catalog row with its full bundle composition (domainIds + toolSlugs + liveSourceIds). Heavier projection than queryActiveSkills; use this when a caller needs to resolve agent capabilities by unioning skill bundles in-process (cockpit#124's Agents view does this on every detail render). The catalog is small (25 rows in Phase 2; growth tracked via the Phase 3 mintSkill roadmap) so the single-shot full-list query is cheaper than N querySkillBySlug round-trips.
+// ActiveSkillsFull -- List every active skill catalog row with its full bundle composition (domainIds + toolSlugs + liveSourceIds). Heavier projection than activeSkills; use this when a caller needs to resolve agent capabilities by unioning skill bundles in-process (cockpit#124's Agents view does this on every detail render). The catalog is small (25 rows in Phase 2; growth tracked via the Phase 3 mintSkill roadmap) so the single-shot full-list query is cheaper than N skillBySlug round-trips.
 //
 // Bound concept: skill.
-type QueryActiveSkillsFullArgs struct {
+type ActiveSkillsFullArgs struct {
 }
 
-// QueryActiveSkillsFull calls the engine query queryActiveSkillsFull.
-func (qc *QueryClient) QueryActiveSkillsFull(ctx context.Context, args QueryActiveSkillsFullArgs) (*Result, error) {
-	call := QueryActiveSkillsFullBuild(args)
-	return qc.executeNamed(ctx, "queryActiveSkillsFull", call)
+// ActiveSkillsFull calls the engine query activeSkillsFull.
+func (qc *QueryClient) ActiveSkillsFull(ctx context.Context, args ActiveSkillsFullArgs) (*Result, error) {
+	call := ActiveSkillsFullBuild(args)
+	return qc.executeNamed(ctx, "activeSkillsFull", call)
 }
 
-func QueryActiveSkillsFullBuild(args QueryActiveSkillsFullArgs) string {
+func ActiveSkillsFullBuild(args ActiveSkillsFullArgs) string {
 	_ = args
-	return "queryActiveSkillsFull({})"
+	return "activeSkillsFull({})"
 }
 
-// QueryActiveUsers -- Active users in the cluster, optionally filtered by role or group membership. Both args are optional -- omit them to list all active users (the identity admin portal's user-list view).
+// ActiveUsers -- Active users in the cluster, optionally filtered by role or group membership. Both args are optional -- omit them to list all active users (the identity admin portal's user-list view).
 //
 // Bound concept: user.
-type QueryActiveUsersArgs struct {
+type ActiveUsersArgs struct {
 	Role    string
 	GroupId string
 }
 
-// QueryActiveUsers calls the engine query queryActiveUsers.
-func (qc *QueryClient) QueryActiveUsers(ctx context.Context, args QueryActiveUsersArgs) (*Result, error) {
-	call := QueryActiveUsersBuild(args)
-	return qc.executeNamed(ctx, "queryActiveUsers", call)
+// ActiveUsers calls the engine query activeUsers.
+func (qc *QueryClient) ActiveUsers(ctx context.Context, args ActiveUsersArgs) (*Result, error) {
+	call := ActiveUsersBuild(args)
+	return qc.executeNamed(ctx, "activeUsers", call)
 }
 
-func QueryActiveUsersBuild(args QueryActiveUsersArgs) string {
+func ActiveUsersBuild(args ActiveUsersArgs) string {
 	var b strings.Builder
-	b.WriteString("queryActiveUsers({")
+	b.WriteString("activeUsers({")
 	if args.Role != "" {
 		b.WriteString("role: ")
 		b.WriteString(fmt.Sprintf("%q", args.Role))
 	}
 	if args.GroupId != "" {
-		if b.Len() > 18 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("groupId: ")
@@ -510,333 +510,333 @@ func QueryActiveUsersBuild(args QueryActiveUsersArgs) string {
 	return b.String()
 }
 
-// QueryAgentAuthorizationsForUser -- All active standing authorizations granted by a user, across all agents and plan kinds.
+// AgentAuthorizationsForUser -- All active standing authorizations granted by a user, across all agents and plan kinds.
 //
 // Bound concept: agentAuthorization.
-type QueryAgentAuthorizationsForUserArgs struct {
+type AgentAuthorizationsForUserArgs struct {
 	UserId string
 }
 
-// QueryAgentAuthorizationsForUser calls the engine query queryAgentAuthorizationsForUser.
-func (qc *QueryClient) QueryAgentAuthorizationsForUser(ctx context.Context, args QueryAgentAuthorizationsForUserArgs) (*Result, error) {
-	call := QueryAgentAuthorizationsForUserBuild(args)
-	return qc.executeNamed(ctx, "queryAgentAuthorizationsForUser", call)
+// AgentAuthorizationsForUser calls the engine query agentAuthorizationsForUser.
+func (qc *QueryClient) AgentAuthorizationsForUser(ctx context.Context, args AgentAuthorizationsForUserArgs) (*Result, error) {
+	call := AgentAuthorizationsForUserBuild(args)
+	return qc.executeNamed(ctx, "agentAuthorizationsForUser", call)
 }
 
-func QueryAgentAuthorizationsForUserBuild(args QueryAgentAuthorizationsForUserArgs) string {
+func AgentAuthorizationsForUserBuild(args AgentAuthorizationsForUserArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAgentAuthorizationsForUser({")
+	b.WriteString("agentAuthorizationsForUser({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAgentById -- Get an agent by ID with full configuration.
+// AgentById -- Get an agent by ID with full configuration.
 //
 // Bound concept: agent.
-type QueryAgentByIdArgs struct {
+type AgentByIdArgs struct {
 	AgentId string
 }
 
-// QueryAgentById calls the engine query queryAgentById.
-func (qc *QueryClient) QueryAgentById(ctx context.Context, args QueryAgentByIdArgs) (*Result, error) {
-	call := QueryAgentByIdBuild(args)
-	return qc.executeNamed(ctx, "queryAgentById", call)
+// AgentById calls the engine query agentById.
+func (qc *QueryClient) AgentById(ctx context.Context, args AgentByIdArgs) (*Result, error) {
+	call := AgentByIdBuild(args)
+	return qc.executeNamed(ctx, "agentById", call)
 }
 
-func QueryAgentByIdBuild(args QueryAgentByIdArgs) string {
+func AgentByIdBuild(args AgentByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAgentById({")
+	b.WriteString("agentById({")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAgentInteractionCount -- Count utterances by an agent across ALL spaces in the current partition. Drives the agentIsKnownToUser signal.
+// AgentInteractionCount -- Count utterances by an agent across ALL spaces in the current partition. Drives the agentIsKnownToUser signal.
 //
 // Bound concept: utterance.
-type QueryAgentInteractionCountArgs struct {
+type AgentInteractionCountArgs struct {
 	AgentId string
 }
 
-// QueryAgentInteractionCount calls the engine query queryAgentInteractionCount.
-func (qc *QueryClient) QueryAgentInteractionCount(ctx context.Context, args QueryAgentInteractionCountArgs) (*Result, error) {
-	call := QueryAgentInteractionCountBuild(args)
-	return qc.executeNamed(ctx, "queryAgentInteractionCount", call)
+// AgentInteractionCount calls the engine query agentInteractionCount.
+func (qc *QueryClient) AgentInteractionCount(ctx context.Context, args AgentInteractionCountArgs) (*Result, error) {
+	call := AgentInteractionCountBuild(args)
+	return qc.executeNamed(ctx, "agentInteractionCount", call)
 }
 
-func QueryAgentInteractionCountBuild(args QueryAgentInteractionCountArgs) string {
+func AgentInteractionCountBuild(args AgentInteractionCountArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAgentInteractionCount({")
+	b.WriteString("agentInteractionCount({")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAgentOwner -- Resolve an agent's owning-user (ownerUserId / createdBy) by id.
+// AgentOwner -- Resolve an agent's owning-user (ownerUserId / createdBy) by id.
 //
 // Bound concept: agent.
-type QueryAgentOwnerArgs struct {
+type AgentOwnerArgs struct {
 	AgentId string
 }
 
-// QueryAgentOwner calls the engine query queryAgentOwner.
-func (qc *QueryClient) QueryAgentOwner(ctx context.Context, args QueryAgentOwnerArgs) (*Result, error) {
-	call := QueryAgentOwnerBuild(args)
-	return qc.executeNamed(ctx, "queryAgentOwner", call)
+// AgentOwner calls the engine query agentOwner.
+func (qc *QueryClient) AgentOwner(ctx context.Context, args AgentOwnerArgs) (*Result, error) {
+	call := AgentOwnerBuild(args)
+	return qc.executeNamed(ctx, "agentOwner", call)
 }
 
-func QueryAgentOwnerBuild(args QueryAgentOwnerArgs) string {
+func AgentOwnerBuild(args AgentOwnerArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAgentOwner({")
+	b.WriteString("agentOwner({")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAgentRoleBySlug -- Resolve a single agentRole row by its slug. Used by the role catalog seeder (idempotency check) and by the agent-creation path (look up the locked + default sets when materializing a new agent for the slug).
+// AgentRoleBySlug -- Resolve a single agentRole row by its slug. Used by the role catalog seeder (idempotency check) and by the agent-creation path (look up the locked + default sets when materializing a new agent for the slug).
 //
 // Bound concept: agentRole.
-type QueryAgentRoleBySlugArgs struct {
+type AgentRoleBySlugArgs struct {
 	Slug string
 }
 
-// QueryAgentRoleBySlug calls the engine query queryAgentRoleBySlug.
-func (qc *QueryClient) QueryAgentRoleBySlug(ctx context.Context, args QueryAgentRoleBySlugArgs) (*Result, error) {
-	call := QueryAgentRoleBySlugBuild(args)
-	return qc.executeNamed(ctx, "queryAgentRoleBySlug", call)
+// AgentRoleBySlug calls the engine query agentRoleBySlug.
+func (qc *QueryClient) AgentRoleBySlug(ctx context.Context, args AgentRoleBySlugArgs) (*Result, error) {
+	call := AgentRoleBySlugBuild(args)
+	return qc.executeNamed(ctx, "agentRoleBySlug", call)
 }
 
-func QueryAgentRoleBySlugBuild(args QueryAgentRoleBySlugArgs) string {
+func AgentRoleBySlugBuild(args AgentRoleBySlugArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAgentRoleBySlug({")
+	b.WriteString("agentRoleBySlug({")
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAgentRoleSlugsInUse -- Returns the roleSlug values currently occupied by non-deleted agents in this partition. Used by the create-agent UI to filter out already-taken roles.
+// AgentRoleSlugsInUse -- Returns the roleSlug values currently occupied by non-deleted agents in this partition. Used by the create-agent UI to filter out already-taken roles.
 //
 // Bound concept: agent.
-type QueryAgentRoleSlugsInUseArgs struct {
+type AgentRoleSlugsInUseArgs struct {
 }
 
-// QueryAgentRoleSlugsInUse calls the engine query queryAgentRoleSlugsInUse.
-func (qc *QueryClient) QueryAgentRoleSlugsInUse(ctx context.Context, args QueryAgentRoleSlugsInUseArgs) (*Result, error) {
-	call := QueryAgentRoleSlugsInUseBuild(args)
-	return qc.executeNamed(ctx, "queryAgentRoleSlugsInUse", call)
+// AgentRoleSlugsInUse calls the engine query agentRoleSlugsInUse.
+func (qc *QueryClient) AgentRoleSlugsInUse(ctx context.Context, args AgentRoleSlugsInUseArgs) (*Result, error) {
+	call := AgentRoleSlugsInUseBuild(args)
+	return qc.executeNamed(ctx, "agentRoleSlugsInUse", call)
 }
 
-func QueryAgentRoleSlugsInUseBuild(args QueryAgentRoleSlugsInUseArgs) string {
+func AgentRoleSlugsInUseBuild(args AgentRoleSlugsInUseArgs) string {
 	_ = args
-	return "queryAgentRoleSlugsInUse({})"
+	return "agentRoleSlugsInUse({})"
 }
 
-// QueryAllAgents -- Returns all AI agent templates regardless of active status.
+// AllAgents -- Returns all AI agent templates regardless of active status.
 //
 // Bound concept: agent.
-type QueryAllAgentsArgs struct {
+type AllAgentsArgs struct {
 }
 
-// QueryAllAgents calls the engine query queryAllAgents.
-func (qc *QueryClient) QueryAllAgents(ctx context.Context, args QueryAllAgentsArgs) (*Result, error) {
-	call := QueryAllAgentsBuild(args)
-	return qc.executeNamed(ctx, "queryAllAgents", call)
+// AllAgents calls the engine query allAgents.
+func (qc *QueryClient) AllAgents(ctx context.Context, args AllAgentsArgs) (*Result, error) {
+	call := AllAgentsBuild(args)
+	return qc.executeNamed(ctx, "allAgents", call)
 }
 
-func QueryAllAgentsBuild(args QueryAllAgentsArgs) string {
+func AllAgentsBuild(args AllAgentsArgs) string {
 	_ = args
-	return "queryAllAgents({})"
+	return "allAgents({})"
 }
 
-// QueryAllDocumentChunkDomains -- Returns the parent domainId for every chunk in the active partition. Frontend groups + counts to render per-domain chunk counts in the Knowledge panel.
+// AllDocumentChunkDomains -- Returns the parent domainId for every chunk in the active partition. Frontend groups + counts to render per-domain chunk counts in the Knowledge panel.
 //
 // Bound concept: documentChunk.
-type QueryAllDocumentChunkDomainsArgs struct {
+type AllDocumentChunkDomainsArgs struct {
 }
 
-// QueryAllDocumentChunkDomains calls the engine query queryAllDocumentChunkDomains.
-func (qc *QueryClient) QueryAllDocumentChunkDomains(ctx context.Context, args QueryAllDocumentChunkDomainsArgs) (*Result, error) {
-	call := QueryAllDocumentChunkDomainsBuild(args)
-	return qc.executeNamed(ctx, "queryAllDocumentChunkDomains", call)
+// AllDocumentChunkDomains calls the engine query allDocumentChunkDomains.
+func (qc *QueryClient) AllDocumentChunkDomains(ctx context.Context, args AllDocumentChunkDomainsArgs) (*Result, error) {
+	call := AllDocumentChunkDomainsBuild(args)
+	return qc.executeNamed(ctx, "allDocumentChunkDomains", call)
 }
 
-func QueryAllDocumentChunkDomainsBuild(args QueryAllDocumentChunkDomainsArgs) string {
+func AllDocumentChunkDomainsBuild(args AllDocumentChunkDomainsArgs) string {
 	_ = args
-	return "queryAllDocumentChunkDomains({})"
+	return "allDocumentChunkDomains({})"
 }
 
-// QueryAllNumbers -- ADMIN: every provisioned DID across all partitions, newest first. Cluster-owner gated. Backs the cockpit numbers view.
+// AllNumbers -- ADMIN: every provisioned DID across all partitions, newest first. Cluster-owner gated. Backs the cockpit numbers view.
 //
 // Bound concept: number.
-type QueryAllNumbersArgs struct {
+type AllNumbersArgs struct {
 }
 
-// QueryAllNumbers calls the engine query queryAllNumbers.
-func (qc *QueryClient) QueryAllNumbers(ctx context.Context, args QueryAllNumbersArgs) (*Result, error) {
-	call := QueryAllNumbersBuild(args)
-	return qc.executeNamed(ctx, "queryAllNumbers", call)
+// AllNumbers calls the engine query allNumbers.
+func (qc *QueryClient) AllNumbers(ctx context.Context, args AllNumbersArgs) (*Result, error) {
+	call := AllNumbersBuild(args)
+	return qc.executeNamed(ctx, "allNumbers", call)
 }
 
-func QueryAllNumbersBuild(args QueryAllNumbersArgs) string {
+func AllNumbersBuild(args AllNumbersArgs) string {
 	_ = args
-	return "queryAllNumbers({})"
+	return "allNumbers({})"
 }
 
-// QueryAllOutputScreenings -- Returns every v1:safety:outputScreening row. Used by the retention sweep (mirrors queryAllSafetyClassifications); future cockpit prompt-injection dashboard will layer more targeted queries on top.
+// AllOutputScreenings -- Returns every v1:safety:outputScreening row. Used by the retention sweep (mirrors allSafetyClassifications); future cockpit prompt-injection dashboard will layer more targeted queries on top.
 //
 // Bound concept: outputScreening.
-type QueryAllOutputScreeningsArgs struct {
+type AllOutputScreeningsArgs struct {
 }
 
-// QueryAllOutputScreenings calls the engine query queryAllOutputScreenings.
-func (qc *QueryClient) QueryAllOutputScreenings(ctx context.Context, args QueryAllOutputScreeningsArgs) (*Result, error) {
-	call := QueryAllOutputScreeningsBuild(args)
-	return qc.executeNamed(ctx, "queryAllOutputScreenings", call)
+// AllOutputScreenings calls the engine query allOutputScreenings.
+func (qc *QueryClient) AllOutputScreenings(ctx context.Context, args AllOutputScreeningsArgs) (*Result, error) {
+	call := AllOutputScreeningsBuild(args)
+	return qc.executeNamed(ctx, "allOutputScreenings", call)
 }
 
-func QueryAllOutputScreeningsBuild(args QueryAllOutputScreeningsArgs) string {
+func AllOutputScreeningsBuild(args AllOutputScreeningsArgs) string {
 	_ = args
-	return "queryAllOutputScreenings({})"
+	return "allOutputScreenings({})"
 }
 
-// QueryAllPlans -- Every Plan. Backs the global Tasks panel; the frontend pins current-space rows to the top of each lifecycle group.
+// AllPlans -- Every Plan. Backs the global Tasks panel; the frontend pins current-space rows to the top of each lifecycle group.
 //
 // Bound concept: plan.
-type QueryAllPlansArgs struct {
+type AllPlansArgs struct {
 }
 
-// QueryAllPlans calls the engine query queryAllPlans.
-func (qc *QueryClient) QueryAllPlans(ctx context.Context, args QueryAllPlansArgs) (*Result, error) {
-	call := QueryAllPlansBuild(args)
-	return qc.executeNamed(ctx, "queryAllPlans", call)
+// AllPlans calls the engine query allPlans.
+func (qc *QueryClient) AllPlans(ctx context.Context, args AllPlansArgs) (*Result, error) {
+	call := AllPlansBuild(args)
+	return qc.executeNamed(ctx, "allPlans", call)
 }
 
-func QueryAllPlansBuild(args QueryAllPlansArgs) string {
+func AllPlansBuild(args AllPlansArgs) string {
 	_ = args
-	return "queryAllPlans({})"
+	return "allPlans({})"
 }
 
-// QueryAllPolicyTraces -- All persisted policy traces; the retention sweep iterates and per-row checks createdAt + retention-days < now.
+// AllPolicyTraces -- All persisted policy traces; the retention sweep iterates and per-row checks createdAt + retention-days < now.
 //
 // Bound concept: policyTrace.
-type QueryAllPolicyTracesArgs struct {
+type AllPolicyTracesArgs struct {
 }
 
-// QueryAllPolicyTraces calls the engine query queryAllPolicyTraces.
-func (qc *QueryClient) QueryAllPolicyTraces(ctx context.Context, args QueryAllPolicyTracesArgs) (*Result, error) {
-	call := QueryAllPolicyTracesBuild(args)
-	return qc.executeNamed(ctx, "queryAllPolicyTraces", call)
+// AllPolicyTraces calls the engine query allPolicyTraces.
+func (qc *QueryClient) AllPolicyTraces(ctx context.Context, args AllPolicyTracesArgs) (*Result, error) {
+	call := AllPolicyTracesBuild(args)
+	return qc.executeNamed(ctx, "allPolicyTraces", call)
 }
 
-func QueryAllPolicyTracesBuild(args QueryAllPolicyTracesArgs) string {
+func AllPolicyTracesBuild(args AllPolicyTracesArgs) string {
 	_ = args
-	return "queryAllPolicyTraces({})"
+	return "allPolicyTraces({})"
 }
 
-// QueryAllSafetyClassifications -- Returns every v1:safety:classification row. Used by the retention sweep (mirrors queryAllPolicyTraces); future cockpit Command Safety view will layer more targeted queries on top.
+// AllSafetyClassifications -- Returns every v1:safety:classification row. Used by the retention sweep (mirrors allPolicyTraces); future cockpit Command Safety view will layer more targeted queries on top.
 //
 // Bound concept: classification.
-type QueryAllSafetyClassificationsArgs struct {
+type AllSafetyClassificationsArgs struct {
 }
 
-// QueryAllSafetyClassifications calls the engine query queryAllSafetyClassifications.
-func (qc *QueryClient) QueryAllSafetyClassifications(ctx context.Context, args QueryAllSafetyClassificationsArgs) (*Result, error) {
-	call := QueryAllSafetyClassificationsBuild(args)
-	return qc.executeNamed(ctx, "queryAllSafetyClassifications", call)
+// AllSafetyClassifications calls the engine query allSafetyClassifications.
+func (qc *QueryClient) AllSafetyClassifications(ctx context.Context, args AllSafetyClassificationsArgs) (*Result, error) {
+	call := AllSafetyClassificationsBuild(args)
+	return qc.executeNamed(ctx, "allSafetyClassifications", call)
 }
 
-func QueryAllSafetyClassificationsBuild(args QueryAllSafetyClassificationsArgs) string {
+func AllSafetyClassificationsBuild(args AllSafetyClassificationsArgs) string {
 	_ = args
-	return "queryAllSafetyClassifications({})"
+	return "allSafetyClassifications({})"
 }
 
-// QueryApprovalQueue -- The approval queue: validated requests awaiting owner approval. Owner only (traitForgeApprover).
+// ApprovalQueue -- The approval queue: validated requests awaiting owner approval. Owner only (forgeApprover).
 //
 // Bound concept: request.
-type QueryApprovalQueueArgs struct {
+type ApprovalQueueArgs struct {
 }
 
-// QueryApprovalQueue calls the engine query queryApprovalQueue.
-func (qc *QueryClient) QueryApprovalQueue(ctx context.Context, args QueryApprovalQueueArgs) (*Result, error) {
-	call := QueryApprovalQueueBuild(args)
-	return qc.executeNamed(ctx, "queryApprovalQueue", call)
+// ApprovalQueue calls the engine query approvalQueue.
+func (qc *QueryClient) ApprovalQueue(ctx context.Context, args ApprovalQueueArgs) (*Result, error) {
+	call := ApprovalQueueBuild(args)
+	return qc.executeNamed(ctx, "approvalQueue", call)
 }
 
-func QueryApprovalQueueBuild(args QueryApprovalQueueArgs) string {
+func ApprovalQueueBuild(args ApprovalQueueArgs) string {
 	_ = args
-	return "queryApprovalQueue({})"
+	return "approvalQueue({})"
 }
 
-// QueryApprovalRequestById -- Returns a single v1:safety:approvalRequest by id. Backs the cockpit drill-down view (follow-up in memql-cockpit) and the `mutationResolveApprovalRequest` read-modify-write path.
+// ApprovalRequestById -- Returns a single v1:safety:approvalRequest by id. Backs the cockpit drill-down view (follow-up in memql-cockpit) and the `resolveApprovalRequest` read-modify-write path.
 //
 // Bound concept: approvalRequest.
-type QueryApprovalRequestByIdArgs struct {
+type ApprovalRequestByIdArgs struct {
 	Id string
 }
 
-// QueryApprovalRequestById calls the engine query queryApprovalRequestById.
-func (qc *QueryClient) QueryApprovalRequestById(ctx context.Context, args QueryApprovalRequestByIdArgs) (*Result, error) {
-	call := QueryApprovalRequestByIdBuild(args)
-	return qc.executeNamed(ctx, "queryApprovalRequestById", call)
+// ApprovalRequestById calls the engine query approvalRequestById.
+func (qc *QueryClient) ApprovalRequestById(ctx context.Context, args ApprovalRequestByIdArgs) (*Result, error) {
+	call := ApprovalRequestByIdBuild(args)
+	return qc.executeNamed(ctx, "approvalRequestById", call)
 }
 
-func QueryApprovalRequestByIdBuild(args QueryApprovalRequestByIdArgs) string {
+func ApprovalRequestByIdBuild(args ApprovalRequestByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryApprovalRequestById({")
+	b.WriteString("approvalRequestById({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAssistantAgentForUser -- Resolve the active General Assistant agent owned by a user. Returns 0 or 1 rows. Used by autoJoinAI to derive a canonical agent id consistent across all callers of mutationCreateDailySpace -- the space row's ownerUserId is the same regardless of who triggered the mutation, while args.event.payload.actor (createdBy) varies. memql#273.
+// AssistantAgentForUser -- Resolve the active General Assistant agent owned by a user. Returns 0 or 1 rows. Used by autoJoinAI to derive a canonical agent id consistent across all callers of mutationCreateDailySpace -- the space row's ownerUserId is the same regardless of who triggered the mutation, while args.event.payload.actor (createdBy) varies. memql#273.
 //
 // Bound concept: agent.
-type QueryAssistantAgentForUserArgs struct {
+type AssistantAgentForUserArgs struct {
 	OwnerUserId string
 }
 
-// QueryAssistantAgentForUser calls the engine query queryAssistantAgentForUser.
-func (qc *QueryClient) QueryAssistantAgentForUser(ctx context.Context, args QueryAssistantAgentForUserArgs) (*Result, error) {
-	call := QueryAssistantAgentForUserBuild(args)
-	return qc.executeNamed(ctx, "queryAssistantAgentForUser", call)
+// AssistantAgentForUser calls the engine query assistantAgentForUser.
+func (qc *QueryClient) AssistantAgentForUser(ctx context.Context, args AssistantAgentForUserArgs) (*Result, error) {
+	call := AssistantAgentForUserBuild(args)
+	return qc.executeNamed(ctx, "assistantAgentForUser", call)
 }
 
-func QueryAssistantAgentForUserBuild(args QueryAssistantAgentForUserArgs) string {
+func AssistantAgentForUserBuild(args AssistantAgentForUserArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAssistantAgentForUser({")
+	b.WriteString("assistantAgentForUser({")
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAttachmentById -- Fetch a single v1:common:attachment row by id within a space. Backs the attachment download endpoint (GET /spaces/{partitionId}/attachments/{attachmentId}); the handler gates on space ownership first.
+// AttachmentById -- Fetch a single v1:common:attachment row by id within a space. Backs the attachment download endpoint (GET /spaces/{partitionId}/attachments/{attachmentId}); the handler gates on space ownership first.
 //
 // Bound concept: attachment.
-type QueryAttachmentByIdArgs struct {
+type AttachmentByIdArgs struct {
 	AttachmentId string
 	PartitionId  string
 }
 
-// QueryAttachmentById calls the engine query queryAttachmentById.
-func (qc *QueryClient) QueryAttachmentById(ctx context.Context, args QueryAttachmentByIdArgs) (*Result, error) {
-	call := QueryAttachmentByIdBuild(args)
-	return qc.executeNamed(ctx, "queryAttachmentById", call)
+// AttachmentById calls the engine query attachmentById.
+func (qc *QueryClient) AttachmentById(ctx context.Context, args AttachmentByIdArgs) (*Result, error) {
+	call := AttachmentByIdBuild(args)
+	return qc.executeNamed(ctx, "attachmentById", call)
 }
 
-func QueryAttachmentByIdBuild(args QueryAttachmentByIdArgs) string {
+func AttachmentByIdBuild(args AttachmentByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAttachmentById({")
+	b.WriteString("attachmentById({")
 	b.WriteString("attachmentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
-	if b.Len() > 21 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
@@ -845,327 +845,327 @@ func QueryAttachmentByIdBuild(args QueryAttachmentByIdArgs) string {
 	return b.String()
 }
 
-// QueryAudioOverridesForSpace -- Active audio overrides for every agent in a space. Read by the cognition handler before TTS forwarding.
+// AudioOverridesForSpace -- Active audio overrides for every agent in a space. Read by the cognition handler before TTS forwarding.
 //
 // Bound concept: audioOverride.
-type QueryAudioOverridesForSpaceArgs struct {
+type AudioOverridesForSpaceArgs struct {
 	PartitionId string
 }
 
-// QueryAudioOverridesForSpace calls the engine query queryAudioOverridesForSpace.
-func (qc *QueryClient) QueryAudioOverridesForSpace(ctx context.Context, args QueryAudioOverridesForSpaceArgs) (*Result, error) {
-	call := QueryAudioOverridesForSpaceBuild(args)
-	return qc.executeNamed(ctx, "queryAudioOverridesForSpace", call)
+// AudioOverridesForSpace calls the engine query audioOverridesForSpace.
+func (qc *QueryClient) AudioOverridesForSpace(ctx context.Context, args AudioOverridesForSpaceArgs) (*Result, error) {
+	call := AudioOverridesForSpaceBuild(args)
+	return qc.executeNamed(ctx, "audioOverridesForSpace", call)
 }
 
-func QueryAudioOverridesForSpaceBuild(args QueryAudioOverridesForSpaceArgs) string {
+func AudioOverridesForSpaceBuild(args AudioOverridesForSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAudioOverridesForSpace({")
+	b.WriteString("audioOverridesForSpace({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAuditEventsByActor -- Audit events where actorUserId equals the supplied userId. Pair with queryAuditEventsByTarget for full per-user history (no OR operator in the filter grammar yet).
+// AuditEventsByActor -- Audit events where actorUserId equals the supplied userId. Pair with auditEventsByTarget for full per-user history (no OR operator in the filter grammar yet).
 //
 // Bound concept: auditEvent.
-type QueryAuditEventsByActorArgs struct {
+type AuditEventsByActorArgs struct {
 	UserId string
 }
 
-// QueryAuditEventsByActor calls the engine query queryAuditEventsByActor.
-func (qc *QueryClient) QueryAuditEventsByActor(ctx context.Context, args QueryAuditEventsByActorArgs) (*Result, error) {
-	call := QueryAuditEventsByActorBuild(args)
-	return qc.executeNamed(ctx, "queryAuditEventsByActor", call)
+// AuditEventsByActor calls the engine query auditEventsByActor.
+func (qc *QueryClient) AuditEventsByActor(ctx context.Context, args AuditEventsByActorArgs) (*Result, error) {
+	call := AuditEventsByActorBuild(args)
+	return qc.executeNamed(ctx, "auditEventsByActor", call)
 }
 
-func QueryAuditEventsByActorBuild(args QueryAuditEventsByActorArgs) string {
+func AuditEventsByActorBuild(args AuditEventsByActorArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAuditEventsByActor({")
+	b.WriteString("auditEventsByActor({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAuditEventsByTarget -- Audit events where targetId equals the supplied targetId. Pair with queryAuditEventsByActor for full per-user history (no OR operator in the filter grammar yet).
+// AuditEventsByTarget -- Audit events where targetId equals the supplied targetId. Pair with auditEventsByActor for full per-user history (no OR operator in the filter grammar yet).
 //
 // Bound concept: auditEvent.
-type QueryAuditEventsByTargetArgs struct {
+type AuditEventsByTargetArgs struct {
 	TargetId string
 }
 
-// QueryAuditEventsByTarget calls the engine query queryAuditEventsByTarget.
-func (qc *QueryClient) QueryAuditEventsByTarget(ctx context.Context, args QueryAuditEventsByTargetArgs) (*Result, error) {
-	call := QueryAuditEventsByTargetBuild(args)
-	return qc.executeNamed(ctx, "queryAuditEventsByTarget", call)
+// AuditEventsByTarget calls the engine query auditEventsByTarget.
+func (qc *QueryClient) AuditEventsByTarget(ctx context.Context, args AuditEventsByTargetArgs) (*Result, error) {
+	call := AuditEventsByTargetBuild(args)
+	return qc.executeNamed(ctx, "auditEventsByTarget", call)
 }
 
-func QueryAuditEventsByTargetBuild(args QueryAuditEventsByTargetArgs) string {
+func AuditEventsByTargetBuild(args AuditEventsByTargetArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAuditEventsByTarget({")
+	b.WriteString("auditEventsByTarget({")
 	b.WriteString("targetId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAuthCodeByCodeHash -- Returns the auth code whose codeHash matches the argument. Zero or one result.
+// AuthCodeByCodeHash -- Returns the auth code whose codeHash matches the argument. Zero or one result.
 //
 // Bound concept: authCode.
-type QueryAuthCodeByCodeHashArgs struct {
+type AuthCodeByCodeHashArgs struct {
 	CodeHash string
 }
 
-// QueryAuthCodeByCodeHash calls the engine query queryAuthCodeByCodeHash.
-func (qc *QueryClient) QueryAuthCodeByCodeHash(ctx context.Context, args QueryAuthCodeByCodeHashArgs) (*Result, error) {
-	call := QueryAuthCodeByCodeHashBuild(args)
-	return qc.executeNamed(ctx, "queryAuthCodeByCodeHash", call)
+// AuthCodeByCodeHash calls the engine query authCodeByCodeHash.
+func (qc *QueryClient) AuthCodeByCodeHash(ctx context.Context, args AuthCodeByCodeHashArgs) (*Result, error) {
+	call := AuthCodeByCodeHashBuild(args)
+	return qc.executeNamed(ctx, "authCodeByCodeHash", call)
 }
 
-func QueryAuthCodeByCodeHashBuild(args QueryAuthCodeByCodeHashArgs) string {
+func AuthCodeByCodeHashBuild(args AuthCodeByCodeHashArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAuthCodeByCodeHash({")
+	b.WriteString("authCodeByCodeHash({")
 	b.WriteString("codeHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.CodeHash))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAuthSessionByPreviousRefreshTokenHash -- Returns the auth session whose previousRefreshTokenHash matches the argument. Used by the rotator's grace-window fallback. Zero or one result.
+// AuthSessionByPreviousRefreshTokenHash -- Returns the auth session whose previousRefreshTokenHash matches the argument. Used by the rotator's grace-window fallback. Zero or one result.
 //
 // Bound concept: authSession.
-type QueryAuthSessionByPreviousRefreshTokenHashArgs struct {
+type AuthSessionByPreviousRefreshTokenHashArgs struct {
 	PreviousRefreshTokenHash string
 }
 
-// QueryAuthSessionByPreviousRefreshTokenHash calls the engine query queryAuthSessionByPreviousRefreshTokenHash.
-func (qc *QueryClient) QueryAuthSessionByPreviousRefreshTokenHash(ctx context.Context, args QueryAuthSessionByPreviousRefreshTokenHashArgs) (*Result, error) {
-	call := QueryAuthSessionByPreviousRefreshTokenHashBuild(args)
-	return qc.executeNamed(ctx, "queryAuthSessionByPreviousRefreshTokenHash", call)
+// AuthSessionByPreviousRefreshTokenHash calls the engine query authSessionByPreviousRefreshTokenHash.
+func (qc *QueryClient) AuthSessionByPreviousRefreshTokenHash(ctx context.Context, args AuthSessionByPreviousRefreshTokenHashArgs) (*Result, error) {
+	call := AuthSessionByPreviousRefreshTokenHashBuild(args)
+	return qc.executeNamed(ctx, "authSessionByPreviousRefreshTokenHash", call)
 }
 
-func QueryAuthSessionByPreviousRefreshTokenHashBuild(args QueryAuthSessionByPreviousRefreshTokenHashArgs) string {
+func AuthSessionByPreviousRefreshTokenHashBuild(args AuthSessionByPreviousRefreshTokenHashArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAuthSessionByPreviousRefreshTokenHash({")
+	b.WriteString("authSessionByPreviousRefreshTokenHash({")
 	b.WriteString("previousRefreshTokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.PreviousRefreshTokenHash))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAuthSessionByRefreshTokenHash -- Returns the auth session whose refreshTokenHash matches the argument. Zero or one result.
+// AuthSessionByRefreshTokenHash -- Returns the auth session whose refreshTokenHash matches the argument. Zero or one result.
 //
 // Bound concept: authSession.
-type QueryAuthSessionByRefreshTokenHashArgs struct {
+type AuthSessionByRefreshTokenHashArgs struct {
 	RefreshTokenHash string
 }
 
-// QueryAuthSessionByRefreshTokenHash calls the engine query queryAuthSessionByRefreshTokenHash.
-func (qc *QueryClient) QueryAuthSessionByRefreshTokenHash(ctx context.Context, args QueryAuthSessionByRefreshTokenHashArgs) (*Result, error) {
-	call := QueryAuthSessionByRefreshTokenHashBuild(args)
-	return qc.executeNamed(ctx, "queryAuthSessionByRefreshTokenHash", call)
+// AuthSessionByRefreshTokenHash calls the engine query authSessionByRefreshTokenHash.
+func (qc *QueryClient) AuthSessionByRefreshTokenHash(ctx context.Context, args AuthSessionByRefreshTokenHashArgs) (*Result, error) {
+	call := AuthSessionByRefreshTokenHashBuild(args)
+	return qc.executeNamed(ctx, "authSessionByRefreshTokenHash", call)
 }
 
-func QueryAuthSessionByRefreshTokenHashBuild(args QueryAuthSessionByRefreshTokenHashArgs) string {
+func AuthSessionByRefreshTokenHashBuild(args AuthSessionByRefreshTokenHashArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAuthSessionByRefreshTokenHash({")
+	b.WriteString("authSessionByRefreshTokenHash({")
 	b.WriteString("refreshTokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.RefreshTokenHash))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAuthSessionByTokenHash -- Returns the auth session whose tokenHash matches the argument. Zero or one result.
+// AuthSessionByTokenHash -- Returns the auth session whose tokenHash matches the argument. Zero or one result.
 //
 // Bound concept: authSession.
-type QueryAuthSessionByTokenHashArgs struct {
+type AuthSessionByTokenHashArgs struct {
 	TokenHash string
 }
 
-// QueryAuthSessionByTokenHash calls the engine query queryAuthSessionByTokenHash.
-func (qc *QueryClient) QueryAuthSessionByTokenHash(ctx context.Context, args QueryAuthSessionByTokenHashArgs) (*Result, error) {
-	call := QueryAuthSessionByTokenHashBuild(args)
-	return qc.executeNamed(ctx, "queryAuthSessionByTokenHash", call)
+// AuthSessionByTokenHash calls the engine query authSessionByTokenHash.
+func (qc *QueryClient) AuthSessionByTokenHash(ctx context.Context, args AuthSessionByTokenHashArgs) (*Result, error) {
+	call := AuthSessionByTokenHashBuild(args)
+	return qc.executeNamed(ctx, "authSessionByTokenHash", call)
 }
 
-func QueryAuthSessionByTokenHashBuild(args QueryAuthSessionByTokenHashArgs) string {
+func AuthSessionByTokenHashBuild(args AuthSessionByTokenHashArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAuthSessionByTokenHash({")
+	b.WriteString("authSessionByTokenHash({")
 	b.WriteString("tokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAuthSessionsForSubject -- Returns every auth-session row owned by the given JWT subject. Latest version per row, including revoked rows.
+// AuthSessionsForSubject -- Returns every auth-session row owned by the given JWT subject. Latest version per row, including revoked rows.
 //
 // Bound concept: authSession.
-type QueryAuthSessionsForSubjectArgs struct {
+type AuthSessionsForSubjectArgs struct {
 	Subject string
 }
 
-// QueryAuthSessionsForSubject calls the engine query queryAuthSessionsForSubject.
-func (qc *QueryClient) QueryAuthSessionsForSubject(ctx context.Context, args QueryAuthSessionsForSubjectArgs) (*Result, error) {
-	call := QueryAuthSessionsForSubjectBuild(args)
-	return qc.executeNamed(ctx, "queryAuthSessionsForSubject", call)
+// AuthSessionsForSubject calls the engine query authSessionsForSubject.
+func (qc *QueryClient) AuthSessionsForSubject(ctx context.Context, args AuthSessionsForSubjectArgs) (*Result, error) {
+	call := AuthSessionsForSubjectBuild(args)
+	return qc.executeNamed(ctx, "authSessionsForSubject", call)
 }
 
-func QueryAuthSessionsForSubjectBuild(args QueryAuthSessionsForSubjectArgs) string {
+func AuthSessionsForSubjectBuild(args AuthSessionsForSubjectArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAuthSessionsForSubject({")
+	b.WriteString("authSessionsForSubject({")
 	b.WriteString("subject: ")
 	b.WriteString(fmt.Sprintf("%q", args.Subject))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAuthoringBundleById -- One authoring bundle by id, scoped to the caller. Backs the gate runners + the approval (Gate 3) artifact view.
+// AuthoringBundleById -- One authoring bundle by id, scoped to the caller. Backs the gate runners + the approval (Gate 3) artifact view.
 //
 // Bound concept: bundle.
-type QueryAuthoringBundleByIdArgs struct {
+type AuthoringBundleByIdArgs struct {
 	BundleId string
 }
 
-// QueryAuthoringBundleById calls the engine query queryAuthoringBundleById.
-func (qc *QueryClient) QueryAuthoringBundleById(ctx context.Context, args QueryAuthoringBundleByIdArgs) (*Result, error) {
-	call := QueryAuthoringBundleByIdBuild(args)
-	return qc.executeNamed(ctx, "queryAuthoringBundleById", call)
+// AuthoringBundleById calls the engine query authoringBundleById.
+func (qc *QueryClient) AuthoringBundleById(ctx context.Context, args AuthoringBundleByIdArgs) (*Result, error) {
+	call := AuthoringBundleByIdBuild(args)
+	return qc.executeNamed(ctx, "authoringBundleById", call)
 }
 
-func QueryAuthoringBundleByIdBuild(args QueryAuthoringBundleByIdArgs) string {
+func AuthoringBundleByIdBuild(args AuthoringBundleByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAuthoringBundleById({")
+	b.WriteString("authoringBundleById({")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAuthoringBundleForPlan -- The bundle post-hoc captured from a given Plan (everyday-task capture path, #1161), scoped to the caller. Lets the capture orchestrator skip re-authoring a task it already captured (idempotency on a re-delivered terminal Plan event) and backs the per-task view/edit/export surface (#1162).
+// AuthoringBundleForPlan -- The bundle post-hoc captured from a given Plan (everyday-task capture path, #1161), scoped to the caller. Lets the capture orchestrator skip re-authoring a task it already captured (idempotency on a re-delivered terminal Plan event) and backs the per-task view/edit/export surface (#1162).
 //
 // Bound concept: bundle.
-type QueryAuthoringBundleForPlanArgs struct {
+type AuthoringBundleForPlanArgs struct {
 	SourcePlanId string
 }
 
-// QueryAuthoringBundleForPlan calls the engine query queryAuthoringBundleForPlan.
-func (qc *QueryClient) QueryAuthoringBundleForPlan(ctx context.Context, args QueryAuthoringBundleForPlanArgs) (*Result, error) {
-	call := QueryAuthoringBundleForPlanBuild(args)
-	return qc.executeNamed(ctx, "queryAuthoringBundleForPlan", call)
+// AuthoringBundleForPlan calls the engine query authoringBundleForPlan.
+func (qc *QueryClient) AuthoringBundleForPlan(ctx context.Context, args AuthoringBundleForPlanArgs) (*Result, error) {
+	call := AuthoringBundleForPlanBuild(args)
+	return qc.executeNamed(ctx, "authoringBundleForPlan", call)
 }
 
-func QueryAuthoringBundleForPlanBuild(args QueryAuthoringBundleForPlanArgs) string {
+func AuthoringBundleForPlanBuild(args AuthoringBundleForPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAuthoringBundleForPlan({")
+	b.WriteString("authoringBundleForPlan({")
 	b.WriteString("sourcePlanId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SourcePlanId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAuthoringBundleForResponsibility -- The bundle compiled from a given Responsibility, scoped to the caller. Lets the planner find the existing artifact when a Responsibility is edited (to supersede rather than duplicate).
+// AuthoringBundleForResponsibility -- The bundle compiled from a given Responsibility, scoped to the caller. Lets the planner find the existing artifact when a Responsibility is edited (to supersede rather than duplicate).
 //
 // Bound concept: bundle.
-type QueryAuthoringBundleForResponsibilityArgs struct {
+type AuthoringBundleForResponsibilityArgs struct {
 	ResponsibilityId string
 }
 
-// QueryAuthoringBundleForResponsibility calls the engine query queryAuthoringBundleForResponsibility.
-func (qc *QueryClient) QueryAuthoringBundleForResponsibility(ctx context.Context, args QueryAuthoringBundleForResponsibilityArgs) (*Result, error) {
-	call := QueryAuthoringBundleForResponsibilityBuild(args)
-	return qc.executeNamed(ctx, "queryAuthoringBundleForResponsibility", call)
+// AuthoringBundleForResponsibility calls the engine query authoringBundleForResponsibility.
+func (qc *QueryClient) AuthoringBundleForResponsibility(ctx context.Context, args AuthoringBundleForResponsibilityArgs) (*Result, error) {
+	call := AuthoringBundleForResponsibilityBuild(args)
+	return qc.executeNamed(ctx, "authoringBundleForResponsibility", call)
 }
 
-func QueryAuthoringBundleForResponsibilityBuild(args QueryAuthoringBundleForResponsibilityArgs) string {
+func AuthoringBundleForResponsibilityBuild(args AuthoringBundleForResponsibilityArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAuthoringBundleForResponsibility({")
+	b.WriteString("authoringBundleForResponsibility({")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAuthoringBundlesForOwner -- All authoring bundles owned by the caller, newest first. Backs the 'my authored capabilities' management list.
+// AuthoringBundlesForOwner -- All authoring bundles owned by the caller, newest first. Backs the 'my authored capabilities' management list.
 //
 // Bound concept: bundle.
-type QueryAuthoringBundlesForOwnerArgs struct {
+type AuthoringBundlesForOwnerArgs struct {
 }
 
-// QueryAuthoringBundlesForOwner calls the engine query queryAuthoringBundlesForOwner.
-func (qc *QueryClient) QueryAuthoringBundlesForOwner(ctx context.Context, args QueryAuthoringBundlesForOwnerArgs) (*Result, error) {
-	call := QueryAuthoringBundlesForOwnerBuild(args)
-	return qc.executeNamed(ctx, "queryAuthoringBundlesForOwner", call)
+// AuthoringBundlesForOwner calls the engine query authoringBundlesForOwner.
+func (qc *QueryClient) AuthoringBundlesForOwner(ctx context.Context, args AuthoringBundlesForOwnerArgs) (*Result, error) {
+	call := AuthoringBundlesForOwnerBuild(args)
+	return qc.executeNamed(ctx, "authoringBundlesForOwner", call)
 }
 
-func QueryAuthoringBundlesForOwnerBuild(args QueryAuthoringBundlesForOwnerArgs) string {
+func AuthoringBundlesForOwnerBuild(args AuthoringBundlesForOwnerArgs) string {
 	_ = args
-	return "queryAuthoringBundlesForOwner({})"
+	return "authoringBundlesForOwner({})"
 }
 
-// QueryAuthoringConstructsForBundle -- All authored constructs belonging to a bundle, scoped to the caller. Backs the gate runners (compile/bind the whole closure) + the runtime register/unregister path.
+// AuthoringConstructsForBundle -- All authored constructs belonging to a bundle, scoped to the caller. Backs the gate runners (compile/bind the whole closure) + the runtime register/unregister path.
 //
 // Bound concept: construct.
-type QueryAuthoringConstructsForBundleArgs struct {
+type AuthoringConstructsForBundleArgs struct {
 	BundleId string
 }
 
-// QueryAuthoringConstructsForBundle calls the engine query queryAuthoringConstructsForBundle.
-func (qc *QueryClient) QueryAuthoringConstructsForBundle(ctx context.Context, args QueryAuthoringConstructsForBundleArgs) (*Result, error) {
-	call := QueryAuthoringConstructsForBundleBuild(args)
-	return qc.executeNamed(ctx, "queryAuthoringConstructsForBundle", call)
+// AuthoringConstructsForBundle calls the engine query authoringConstructsForBundle.
+func (qc *QueryClient) AuthoringConstructsForBundle(ctx context.Context, args AuthoringConstructsForBundleArgs) (*Result, error) {
+	call := AuthoringConstructsForBundleBuild(args)
+	return qc.executeNamed(ctx, "authoringConstructsForBundle", call)
 }
 
-func QueryAuthoringConstructsForBundleBuild(args QueryAuthoringConstructsForBundleArgs) string {
+func AuthoringConstructsForBundleBuild(args AuthoringConstructsForBundleArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAuthoringConstructsForBundle({")
+	b.WriteString("authoringConstructsForBundle({")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAvatarPersonaById -- Resolve a single avatar persona by id. Hydrates an agent's stamped avatarPersonaId for display and resolves the vendor + vendor-issued personaId.
+// AvatarPersonaById -- Resolve a single avatar persona by id. Hydrates an agent's stamped avatarPersonaId for display and resolves the vendor + vendor-issued personaId.
 //
 // Bound concept: avatarPersona.
-type QueryAvatarPersonaByIdArgs struct {
+type AvatarPersonaByIdArgs struct {
 	AvatarPersonaId string
 }
 
-// QueryAvatarPersonaById calls the engine query queryAvatarPersonaById.
-func (qc *QueryClient) QueryAvatarPersonaById(ctx context.Context, args QueryAvatarPersonaByIdArgs) (*Result, error) {
-	call := QueryAvatarPersonaByIdBuild(args)
-	return qc.executeNamed(ctx, "queryAvatarPersonaById", call)
+// AvatarPersonaById calls the engine query avatarPersonaById.
+func (qc *QueryClient) AvatarPersonaById(ctx context.Context, args AvatarPersonaByIdArgs) (*Result, error) {
+	call := AvatarPersonaByIdBuild(args)
+	return qc.executeNamed(ctx, "avatarPersonaById", call)
 }
 
-func QueryAvatarPersonaByIdBuild(args QueryAvatarPersonaByIdArgs) string {
+func AvatarPersonaByIdBuild(args AvatarPersonaByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAvatarPersonaById({")
+	b.WriteString("avatarPersonaById({")
 	b.WriteString("avatarPersonaId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AvatarPersonaId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryAvatarPersonas -- List active avatar personas in the operator catalog (memql#609). Backs the Create-Assistant persona picker (copresent#239); the SPA filters to the user's selected gender client-side over this small catalog. `vendor` is an OPTIONAL filter -- omit it to list every active persona across vendors; pass vendor=\"simli\" to scope to custom Simli avatars (memql#1708: the predicate was a hardcoded vendor==simli that silently dropped every other vendor's personas from the list, even though by-id reads returned them). Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql.
+// AvatarPersonas -- List active avatar personas in the operator catalog (memql#609). Backs the Create-Assistant persona picker (copresent#239); the SPA filters to the user's selected gender client-side over this small catalog. `vendor` is an OPTIONAL filter -- omit it to list every active persona across vendors; pass vendor=\"simli\" to scope to custom Simli avatars (memql#1708: the predicate was a hardcoded vendor==simli that silently dropped every other vendor's personas from the list, even though by-id reads returned them). Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql.
 //
 // Bound concept: avatarPersona.
-type QueryAvatarPersonasArgs struct {
+type AvatarPersonasArgs struct {
 	// Optional vendor filter. Omit to list every active persona; pass to scope to one vendor.
 	// Enum: anam | simli
 	Vendor string
 }
 
-// QueryAvatarPersonas calls the engine query queryAvatarPersonas.
-func (qc *QueryClient) QueryAvatarPersonas(ctx context.Context, args QueryAvatarPersonasArgs) (*Result, error) {
-	call := QueryAvatarPersonasBuild(args)
-	return qc.executeNamed(ctx, "queryAvatarPersonas", call)
+// AvatarPersonas calls the engine query avatarPersonas.
+func (qc *QueryClient) AvatarPersonas(ctx context.Context, args AvatarPersonasArgs) (*Result, error) {
+	call := AvatarPersonasBuild(args)
+	return qc.executeNamed(ctx, "avatarPersonas", call)
 }
 
-func QueryAvatarPersonasBuild(args QueryAvatarPersonasArgs) string {
+func AvatarPersonasBuild(args AvatarPersonasArgs) string {
 	var b strings.Builder
-	b.WriteString("queryAvatarPersonas({")
+	b.WriteString("avatarPersonas({")
 	if args.Vendor != "" {
 		b.WriteString("vendor: ")
 		b.WriteString(fmt.Sprintf("%q", args.Vendor))
@@ -1174,294 +1174,294 @@ func QueryAvatarPersonasBuild(args QueryAvatarPersonasArgs) string {
 	return b.String()
 }
 
-// QueryAwaitingFeedbackPlansPastTimeout -- Plans in awaitingFeedback whose feedbackRequest.timeoutAt is in the past. Backs feedbackTimeoutAutoPause.
+// AwaitingFeedbackPlansPastTimeout -- Plans in awaitingFeedback whose feedbackRequest.timeoutAt is in the past. Backs feedbackTimeoutAutoPause.
 //
 // Bound concept: plan.
-type QueryAwaitingFeedbackPlansPastTimeoutArgs struct {
+type AwaitingFeedbackPlansPastTimeoutArgs struct {
 }
 
-// QueryAwaitingFeedbackPlansPastTimeout calls the engine query queryAwaitingFeedbackPlansPastTimeout.
-func (qc *QueryClient) QueryAwaitingFeedbackPlansPastTimeout(ctx context.Context, args QueryAwaitingFeedbackPlansPastTimeoutArgs) (*Result, error) {
-	call := QueryAwaitingFeedbackPlansPastTimeoutBuild(args)
-	return qc.executeNamed(ctx, "queryAwaitingFeedbackPlansPastTimeout", call)
+// AwaitingFeedbackPlansPastTimeout calls the engine query awaitingFeedbackPlansPastTimeout.
+func (qc *QueryClient) AwaitingFeedbackPlansPastTimeout(ctx context.Context, args AwaitingFeedbackPlansPastTimeoutArgs) (*Result, error) {
+	call := AwaitingFeedbackPlansPastTimeoutBuild(args)
+	return qc.executeNamed(ctx, "awaitingFeedbackPlansPastTimeout", call)
 }
 
-func QueryAwaitingFeedbackPlansPastTimeoutBuild(args QueryAwaitingFeedbackPlansPastTimeoutArgs) string {
+func AwaitingFeedbackPlansPastTimeoutBuild(args AwaitingFeedbackPlansPastTimeoutArgs) string {
 	_ = args
-	return "queryAwaitingFeedbackPlansPastTimeout({})"
+	return "awaitingFeedbackPlansPastTimeout({})"
 }
 
-// QueryCalendarEventById -- Get a single calendar event by node id. Self-scoped: the ownerUserId==actor.userId predicate guarantees a caller can only fetch their own events. Backs the calendar tool's update/delete pre-read and the event detail view.
+// CalendarEventById -- Get a single calendar event by node id. Self-scoped: the ownerUserId==actor.userId predicate guarantees a caller can only fetch their own events. Backs the calendar tool's update/delete pre-read and the event detail view.
 //
 // Bound concept: calendarEvent.
-type QueryCalendarEventByIdArgs struct {
+type CalendarEventByIdArgs struct {
 	EventId string
 }
 
-// QueryCalendarEventById calls the engine query queryCalendarEventById.
-func (qc *QueryClient) QueryCalendarEventById(ctx context.Context, args QueryCalendarEventByIdArgs) (*Result, error) {
-	call := QueryCalendarEventByIdBuild(args)
-	return qc.executeNamed(ctx, "queryCalendarEventById", call)
+// CalendarEventById calls the engine query calendarEventById.
+func (qc *QueryClient) CalendarEventById(ctx context.Context, args CalendarEventByIdArgs) (*Result, error) {
+	call := CalendarEventByIdBuild(args)
+	return qc.executeNamed(ctx, "calendarEventById", call)
 }
 
-func QueryCalendarEventByIdBuild(args QueryCalendarEventByIdArgs) string {
+func CalendarEventByIdBuild(args CalendarEventByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryCalendarEventById({")
+	b.WriteString("calendarEventById({")
 	b.WriteString("eventId: ")
 	b.WriteString(fmt.Sprintf("%q", args.EventId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryCallsByNumber -- ADMIN: call records that touched a specific DID (as caller or callee), newest first. Cluster-owner gated.
+// CallsByNumber -- ADMIN: call records that touched a specific DID (as caller or callee), newest first. Cluster-owner gated.
 //
 // Bound concept: call.
-type QueryCallsByNumberArgs struct {
+type CallsByNumberArgs struct {
 	E164 string
 }
 
-// QueryCallsByNumber calls the engine query queryCallsByNumber.
-func (qc *QueryClient) QueryCallsByNumber(ctx context.Context, args QueryCallsByNumberArgs) (*Result, error) {
-	call := QueryCallsByNumberBuild(args)
-	return qc.executeNamed(ctx, "queryCallsByNumber", call)
+// CallsByNumber calls the engine query callsByNumber.
+func (qc *QueryClient) CallsByNumber(ctx context.Context, args CallsByNumberArgs) (*Result, error) {
+	call := CallsByNumberBuild(args)
+	return qc.executeNamed(ctx, "callsByNumber", call)
 }
 
-func QueryCallsByNumberBuild(args QueryCallsByNumberArgs) string {
+func CallsByNumberBuild(args CallsByNumberArgs) string {
 	var b strings.Builder
-	b.WriteString("queryCallsByNumber({")
+	b.WriteString("callsByNumber({")
 	b.WriteString("e164: ")
 	b.WriteString(fmt.Sprintf("%q", args.E164))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryCallsByPartition -- ADMIN: call records for a partition, newest first. Cluster-owner gated. Powers billing + observability.
+// CallsByPartition -- ADMIN: call records for a partition, newest first. Cluster-owner gated. Powers billing + observability.
 //
 // Bound concept: call.
-type QueryCallsByPartitionArgs struct {
+type CallsByPartitionArgs struct {
 	PartitionId string
 }
 
-// QueryCallsByPartition calls the engine query queryCallsByPartition.
-func (qc *QueryClient) QueryCallsByPartition(ctx context.Context, args QueryCallsByPartitionArgs) (*Result, error) {
-	call := QueryCallsByPartitionBuild(args)
-	return qc.executeNamed(ctx, "queryCallsByPartition", call)
+// CallsByPartition calls the engine query callsByPartition.
+func (qc *QueryClient) CallsByPartition(ctx context.Context, args CallsByPartitionArgs) (*Result, error) {
+	call := CallsByPartitionBuild(args)
+	return qc.executeNamed(ctx, "callsByPartition", call)
 }
 
-func QueryCallsByPartitionBuild(args QueryCallsByPartitionArgs) string {
+func CallsByPartitionBuild(args CallsByPartitionArgs) string {
 	var b strings.Builder
-	b.WriteString("queryCallsByPartition({")
+	b.WriteString("callsByPartition({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryCataloguedConstructsForOwner -- The caller's cataloged (reusable) constructs. Backs the compose-first matcher (#957): the planner searches these before authoring a net-new dependency.
+// CataloguedConstructsForOwner -- The caller's cataloged (reusable) constructs. Backs the compose-first matcher (#957): the planner searches these before authoring a net-new dependency.
 //
 // Bound concept: construct.
-type QueryCataloguedConstructsForOwnerArgs struct {
+type CataloguedConstructsForOwnerArgs struct {
 }
 
-// QueryCataloguedConstructsForOwner calls the engine query queryCataloguedConstructsForOwner.
-func (qc *QueryClient) QueryCataloguedConstructsForOwner(ctx context.Context, args QueryCataloguedConstructsForOwnerArgs) (*Result, error) {
-	call := QueryCataloguedConstructsForOwnerBuild(args)
-	return qc.executeNamed(ctx, "queryCataloguedConstructsForOwner", call)
+// CataloguedConstructsForOwner calls the engine query cataloguedConstructsForOwner.
+func (qc *QueryClient) CataloguedConstructsForOwner(ctx context.Context, args CataloguedConstructsForOwnerArgs) (*Result, error) {
+	call := CataloguedConstructsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "cataloguedConstructsForOwner", call)
 }
 
-func QueryCataloguedConstructsForOwnerBuild(args QueryCataloguedConstructsForOwnerArgs) string {
+func CataloguedConstructsForOwnerBuild(args CataloguedConstructsForOwnerArgs) string {
 	_ = args
-	return "queryCataloguedConstructsForOwner({})"
+	return "cataloguedConstructsForOwner({})"
 }
 
-// QueryClusterNodeTypes -- Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...)
+// ClusterNodeTypes -- Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...)
 //
 // Bound concept: nodeType.
-type QueryClusterNodeTypesArgs struct {
+type ClusterNodeTypesArgs struct {
 }
 
-// QueryClusterNodeTypes calls the engine query queryClusterNodeTypes.
-func (qc *QueryClient) QueryClusterNodeTypes(ctx context.Context, args QueryClusterNodeTypesArgs) (*Result, error) {
-	call := QueryClusterNodeTypesBuild(args)
-	return qc.executeNamed(ctx, "queryClusterNodeTypes", call)
+// ClusterNodeTypes calls the engine query clusterNodeTypes.
+func (qc *QueryClient) ClusterNodeTypes(ctx context.Context, args ClusterNodeTypesArgs) (*Result, error) {
+	call := ClusterNodeTypesBuild(args)
+	return qc.executeNamed(ctx, "clusterNodeTypes", call)
 }
 
-func QueryClusterNodeTypesBuild(args QueryClusterNodeTypesArgs) string {
+func ClusterNodeTypesBuild(args ClusterNodeTypesArgs) string {
 	_ = args
-	return "queryClusterNodeTypes({})"
+	return "clusterNodeTypes({})"
 }
 
-// QueryClusterNodes -- Returns all cluster node rows (CLI dedupes to latest per id)
+// ClusterNodes -- Returns all cluster node rows (CLI dedupes to latest per id)
 //
 // Bound concept: node.
-type QueryClusterNodesArgs struct {
+type ClusterNodesArgs struct {
 }
 
-// QueryClusterNodes calls the engine query queryClusterNodes.
-func (qc *QueryClient) QueryClusterNodes(ctx context.Context, args QueryClusterNodesArgs) (*Result, error) {
-	call := QueryClusterNodesBuild(args)
-	return qc.executeNamed(ctx, "queryClusterNodes", call)
+// ClusterNodes calls the engine query clusterNodes.
+func (qc *QueryClient) ClusterNodes(ctx context.Context, args ClusterNodesArgs) (*Result, error) {
+	call := ClusterNodesBuild(args)
+	return qc.executeNamed(ctx, "clusterNodes", call)
 }
 
-func QueryClusterNodesBuild(args QueryClusterNodesArgs) string {
+func ClusterNodesBuild(args ClusterNodesArgs) string {
 	_ = args
-	return "queryClusterNodes({})"
+	return "clusterNodes({})"
 }
 
-// QueryClusterSettingsCurrent -- Latest singleton cluster-settings row, pinned to id=cluster.
+// ClusterSettingsCurrent -- Latest singleton cluster-settings row, pinned to id=cluster.
 //
 // Bound concept: clusterSettings.
-type QueryClusterSettingsCurrentArgs struct {
+type ClusterSettingsCurrentArgs struct {
 }
 
-// QueryClusterSettingsCurrent calls the engine query queryClusterSettingsCurrent.
-func (qc *QueryClient) QueryClusterSettingsCurrent(ctx context.Context, args QueryClusterSettingsCurrentArgs) (*Result, error) {
-	call := QueryClusterSettingsCurrentBuild(args)
-	return qc.executeNamed(ctx, "queryClusterSettingsCurrent", call)
+// ClusterSettingsCurrent calls the engine query clusterSettingsCurrent.
+func (qc *QueryClient) ClusterSettingsCurrent(ctx context.Context, args ClusterSettingsCurrentArgs) (*Result, error) {
+	call := ClusterSettingsCurrentBuild(args)
+	return qc.executeNamed(ctx, "clusterSettingsCurrent", call)
 }
 
-func QueryClusterSettingsCurrentBuild(args QueryClusterSettingsCurrentArgs) string {
+func ClusterSettingsCurrentBuild(args ClusterSettingsCurrentArgs) string {
 	_ = args
-	return "queryClusterSettingsCurrent({})"
+	return "clusterSettingsCurrent({})"
 }
 
-// QueryClusterSpawnEvents -- Returns all cluster spawn events
+// ClusterSpawnEvents -- Returns all cluster spawn events
 //
 // Bound concept: spawnEvent.
-type QueryClusterSpawnEventsArgs struct {
+type ClusterSpawnEventsArgs struct {
 }
 
-// QueryClusterSpawnEvents calls the engine query queryClusterSpawnEvents.
-func (qc *QueryClient) QueryClusterSpawnEvents(ctx context.Context, args QueryClusterSpawnEventsArgs) (*Result, error) {
-	call := QueryClusterSpawnEventsBuild(args)
-	return qc.executeNamed(ctx, "queryClusterSpawnEvents", call)
+// ClusterSpawnEvents calls the engine query clusterSpawnEvents.
+func (qc *QueryClient) ClusterSpawnEvents(ctx context.Context, args ClusterSpawnEventsArgs) (*Result, error) {
+	call := ClusterSpawnEventsBuild(args)
+	return qc.executeNamed(ctx, "clusterSpawnEvents", call)
 }
 
-func QueryClusterSpawnEventsBuild(args QueryClusterSpawnEventsArgs) string {
+func ClusterSpawnEventsBuild(args ClusterSpawnEventsArgs) string {
 	_ = args
-	return "queryClusterSpawnEvents({})"
+	return "clusterSpawnEvents({})"
 }
 
-// QueryConsentOptOut -- Opt-out rows for an external number (newest first). Read in the outbound call path to block calls to opted-out numbers (TCPA). Not owner-gated: the enforcement check runs in the agent/call context, not an admin one.
+// ConsentOptOut -- Opt-out rows for an external number (newest first). Read in the outbound call path to block calls to opted-out numbers (TCPA). Not owner-gated: the enforcement check runs in the agent/call context, not an admin one.
 //
 // Bound concept: consent.
-type QueryConsentOptOutArgs struct {
+type ConsentOptOutArgs struct {
 	PhoneNumber string
 }
 
-// QueryConsentOptOut calls the engine query queryConsentOptOut.
-func (qc *QueryClient) QueryConsentOptOut(ctx context.Context, args QueryConsentOptOutArgs) (*Result, error) {
-	call := QueryConsentOptOutBuild(args)
-	return qc.executeNamed(ctx, "queryConsentOptOut", call)
+// ConsentOptOut calls the engine query consentOptOut.
+func (qc *QueryClient) ConsentOptOut(ctx context.Context, args ConsentOptOutArgs) (*Result, error) {
+	call := ConsentOptOutBuild(args)
+	return qc.executeNamed(ctx, "consentOptOut", call)
 }
 
-func QueryConsentOptOutBuild(args QueryConsentOptOutArgs) string {
+func ConsentOptOutBuild(args ConsentOptOutArgs) string {
 	var b strings.Builder
-	b.WriteString("queryConsentOptOut({")
+	b.WriteString("consentOptOut({")
 	b.WriteString("phoneNumber: ")
 	b.WriteString(fmt.Sprintf("%q", args.PhoneNumber))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryCurrentUser -- Get the authenticated caller's own user record. Self-scoped via actor.userId (no args) -- the caller cannot read another user's row.
+// CurrentUser -- Get the authenticated caller's own user record. Self-scoped via actor.userId (no args) -- the caller cannot read another user's row.
 //
 // Bound concept: user.
-type QueryCurrentUserArgs struct {
+type CurrentUserArgs struct {
 }
 
-// QueryCurrentUser calls the engine query queryCurrentUser.
-func (qc *QueryClient) QueryCurrentUser(ctx context.Context, args QueryCurrentUserArgs) (*Result, error) {
-	call := QueryCurrentUserBuild(args)
-	return qc.executeNamed(ctx, "queryCurrentUser", call)
+// CurrentUser calls the engine query currentUser.
+func (qc *QueryClient) CurrentUser(ctx context.Context, args CurrentUserArgs) (*Result, error) {
+	call := CurrentUserBuild(args)
+	return qc.executeNamed(ctx, "currentUser", call)
 }
 
-func QueryCurrentUserBuild(args QueryCurrentUserArgs) string {
+func CurrentUserBuild(args CurrentUserArgs) string {
 	_ = args
-	return "queryCurrentUser({})"
+	return "currentUser({})"
 }
 
-// QueryDelegationsByIdentity -- Get all delegations (active and revoked) for a given identity ID
+// DelegationsByIdentity -- Get all delegations (active and revoked) for a given identity ID
 //
 // Bound concept: delegation.
-type QueryDelegationsByIdentityArgs struct {
+type DelegationsByIdentityArgs struct {
 	IdentityId string
 }
 
-// QueryDelegationsByIdentity calls the engine query queryDelegationsByIdentity.
-func (qc *QueryClient) QueryDelegationsByIdentity(ctx context.Context, args QueryDelegationsByIdentityArgs) (*Result, error) {
-	call := QueryDelegationsByIdentityBuild(args)
-	return qc.executeNamed(ctx, "queryDelegationsByIdentity", call)
+// DelegationsByIdentity calls the engine query delegationsByIdentity.
+func (qc *QueryClient) DelegationsByIdentity(ctx context.Context, args DelegationsByIdentityArgs) (*Result, error) {
+	call := DelegationsByIdentityBuild(args)
+	return qc.executeNamed(ctx, "delegationsByIdentity", call)
 }
 
-func QueryDelegationsByIdentityBuild(args QueryDelegationsByIdentityArgs) string {
+func DelegationsByIdentityBuild(args DelegationsByIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("queryDelegationsByIdentity({")
+	b.WriteString("delegationsByIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryDependencyEdgesForBundle -- All dependency edges declared by a bundle (what it depends on), scoped to the caller. Backs dependency-closure inspection for a bundle.
+// DependencyEdgesForBundle -- All dependency edges declared by a bundle (what it depends on), scoped to the caller. Backs dependency-closure inspection for a bundle.
 //
 // Bound concept: dependencyEdge.
-type QueryDependencyEdgesForBundleArgs struct {
+type DependencyEdgesForBundleArgs struct {
 	BundleId string
 }
 
-// QueryDependencyEdgesForBundle calls the engine query queryDependencyEdgesForBundle.
-func (qc *QueryClient) QueryDependencyEdgesForBundle(ctx context.Context, args QueryDependencyEdgesForBundleArgs) (*Result, error) {
-	call := QueryDependencyEdgesForBundleBuild(args)
-	return qc.executeNamed(ctx, "queryDependencyEdgesForBundle", call)
+// DependencyEdgesForBundle calls the engine query dependencyEdgesForBundle.
+func (qc *QueryClient) DependencyEdgesForBundle(ctx context.Context, args DependencyEdgesForBundleArgs) (*Result, error) {
+	call := DependencyEdgesForBundleBuild(args)
+	return qc.executeNamed(ctx, "dependencyEdgesForBundle", call)
 }
 
-func QueryDependencyEdgesForBundleBuild(args QueryDependencyEdgesForBundleArgs) string {
+func DependencyEdgesForBundleBuild(args DependencyEdgesForBundleArgs) string {
 	var b strings.Builder
-	b.WriteString("queryDependencyEdgesForBundle({")
+	b.WriteString("dependencyEdgesForBundle({")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryDependencyEdgesForOwner -- Every dependency edge owned by the caller. Backs a full dependency-graph view.
+// DependencyEdgesForOwner -- Every dependency edge owned by the caller. Backs a full dependency-graph view.
 //
 // Bound concept: dependencyEdge.
-type QueryDependencyEdgesForOwnerArgs struct {
+type DependencyEdgesForOwnerArgs struct {
 }
 
-// QueryDependencyEdgesForOwner calls the engine query queryDependencyEdgesForOwner.
-func (qc *QueryClient) QueryDependencyEdgesForOwner(ctx context.Context, args QueryDependencyEdgesForOwnerArgs) (*Result, error) {
-	call := QueryDependencyEdgesForOwnerBuild(args)
-	return qc.executeNamed(ctx, "queryDependencyEdgesForOwner", call)
+// DependencyEdgesForOwner calls the engine query dependencyEdgesForOwner.
+func (qc *QueryClient) DependencyEdgesForOwner(ctx context.Context, args DependencyEdgesForOwnerArgs) (*Result, error) {
+	call := DependencyEdgesForOwnerBuild(args)
+	return qc.executeNamed(ctx, "dependencyEdgesForOwner", call)
 }
 
-func QueryDependencyEdgesForOwnerBuild(args QueryDependencyEdgesForOwnerArgs) string {
+func DependencyEdgesForOwnerBuild(args DependencyEdgesForOwnerArgs) string {
 	_ = args
-	return "queryDependencyEdgesForOwner({})"
+	return "dependencyEdgesForOwner({})"
 }
 
-// QueryDependentsOfConstruct -- IMPACT ANALYSIS (#957): every edge that depends ON a given construct, scoped to the caller. The dependents to re-validate before changing a shared / cataloged construct. The caller joins bundleId -> v1:authoring:bundle to filter to ACTIVE dependents.
+// DependentsOfConstruct -- IMPACT ANALYSIS (#957): every edge that depends ON a given construct, scoped to the caller. The dependents to re-validate before changing a shared / cataloged construct. The caller joins bundleId -> v1:authoring:bundle to filter to ACTIVE dependents.
 //
 // Bound concept: dependencyEdge.
-type QueryDependentsOfConstructArgs struct {
+type DependentsOfConstructArgs struct {
 	ToName string
 	ToKind string
 }
 
-// QueryDependentsOfConstruct calls the engine query queryDependentsOfConstruct.
-func (qc *QueryClient) QueryDependentsOfConstruct(ctx context.Context, args QueryDependentsOfConstructArgs) (*Result, error) {
-	call := QueryDependentsOfConstructBuild(args)
-	return qc.executeNamed(ctx, "queryDependentsOfConstruct", call)
+// DependentsOfConstruct calls the engine query dependentsOfConstruct.
+func (qc *QueryClient) DependentsOfConstruct(ctx context.Context, args DependentsOfConstructArgs) (*Result, error) {
+	call := DependentsOfConstructBuild(args)
+	return qc.executeNamed(ctx, "dependentsOfConstruct", call)
 }
 
-func QueryDependentsOfConstructBuild(args QueryDependentsOfConstructArgs) string {
+func DependentsOfConstructBuild(args DependentsOfConstructArgs) string {
 	var b strings.Builder
-	b.WriteString("queryDependentsOfConstruct({")
+	b.WriteString("dependentsOfConstruct({")
 	b.WriteString("toName: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToName))
-	if b.Len() > 28 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toKind: ")
@@ -1470,76 +1470,76 @@ func QueryDependentsOfConstructBuild(args QueryDependentsOfConstructArgs) string
 	return b.String()
 }
 
-// QueryDeploymentById -- All status-transition rows for one deployment, by deploymentId, oldest-to-newest (full lifecycle history; reconstructable asOf any time). #1872.
+// DeploymentById -- All status-transition rows for one deployment, by deploymentId, oldest-to-newest (full lifecycle history; reconstructable asOf any time). #1872.
 //
 // Bound concept: deployment.
-type QueryDeploymentByIdArgs struct {
+type DeploymentByIdArgs struct {
 	DeploymentId string
 }
 
-// QueryDeploymentById calls the engine query queryDeploymentById.
-func (qc *QueryClient) QueryDeploymentById(ctx context.Context, args QueryDeploymentByIdArgs) (*Result, error) {
-	call := QueryDeploymentByIdBuild(args)
-	return qc.executeNamed(ctx, "queryDeploymentById", call)
+// DeploymentById calls the engine query deploymentById.
+func (qc *QueryClient) DeploymentById(ctx context.Context, args DeploymentByIdArgs) (*Result, error) {
+	call := DeploymentByIdBuild(args)
+	return qc.executeNamed(ctx, "deploymentById", call)
 }
 
-func QueryDeploymentByIdBuild(args QueryDeploymentByIdArgs) string {
+func DeploymentByIdBuild(args DeploymentByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryDeploymentById({")
+	b.WriteString("deploymentById({")
 	b.WriteString("deploymentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryDeploymentsForCluster -- Deployment history for a cluster: latest-per-deploymentId rows (asOf latest -> current status per deployment) filtered to a clusterId. Backs the cockpit Deployments history list (consumer sorts newest-first by createdAt). #1872.
+// DeploymentsForCluster -- Deployment history for a cluster: latest-per-deploymentId rows (asOf latest -> current status per deployment) filtered to a clusterId. Backs the cockpit Deployments history list (consumer sorts newest-first by createdAt). #1872.
 //
 // Bound concept: deployment.
-type QueryDeploymentsForClusterArgs struct {
+type DeploymentsForClusterArgs struct {
 	ClusterId string
 }
 
-// QueryDeploymentsForCluster calls the engine query queryDeploymentsForCluster.
-func (qc *QueryClient) QueryDeploymentsForCluster(ctx context.Context, args QueryDeploymentsForClusterArgs) (*Result, error) {
-	call := QueryDeploymentsForClusterBuild(args)
-	return qc.executeNamed(ctx, "queryDeploymentsForCluster", call)
+// DeploymentsForCluster calls the engine query deploymentsForCluster.
+func (qc *QueryClient) DeploymentsForCluster(ctx context.Context, args DeploymentsForClusterArgs) (*Result, error) {
+	call := DeploymentsForClusterBuild(args)
+	return qc.executeNamed(ctx, "deploymentsForCluster", call)
 }
 
-func QueryDeploymentsForClusterBuild(args QueryDeploymentsForClusterArgs) string {
+func DeploymentsForClusterBuild(args DeploymentsForClusterArgs) string {
 	var b strings.Builder
-	b.WriteString("queryDeploymentsForCluster({")
+	b.WriteString("deploymentsForCluster({")
 	b.WriteString("clusterId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ClusterId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryDetectConflicts -- Find confirmed records that may conflict with a new record by natural key + record type
+// DetectConflicts -- Find confirmed records that may conflict with a new record by natural key + record type
 //
 // Bound concept: record.
-type QueryDetectConflictsArgs struct {
+type DetectConflictsArgs struct {
 	PartitionId     string
 	NaturalKeyValue string
 	RecordType      string
 }
 
-// QueryDetectConflicts calls the engine query queryDetectConflicts.
-func (qc *QueryClient) QueryDetectConflicts(ctx context.Context, args QueryDetectConflictsArgs) (*Result, error) {
-	call := QueryDetectConflictsBuild(args)
-	return qc.executeNamed(ctx, "queryDetectConflicts", call)
+// DetectConflicts calls the engine query detectConflicts.
+func (qc *QueryClient) DetectConflicts(ctx context.Context, args DetectConflictsArgs) (*Result, error) {
+	call := DetectConflictsBuild(args)
+	return qc.executeNamed(ctx, "detectConflicts", call)
 }
 
-func QueryDetectConflictsBuild(args QueryDetectConflictsArgs) string {
+func DetectConflictsBuild(args DetectConflictsArgs) string {
 	var b strings.Builder
-	b.WriteString("queryDetectConflicts({")
+	b.WriteString("detectConflicts({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 22 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("naturalKeyValue: ")
 	b.WriteString(fmt.Sprintf("%q", args.NaturalKeyValue))
-	if b.Len() > 22 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("recordType: ")
@@ -1548,156 +1548,156 @@ func QueryDetectConflictsBuild(args QueryDetectConflictsArgs) string {
 	return b.String()
 }
 
-// QueryDocumentChunksForDomain -- Every documentChunk attached to a knowledge domain, full shape. Consumed by the trainSpecialist dispatcher for the Trainer Agent's mode='refresh' existingCorpus (read-what's-there-now-to-decide-what-to-supersede).
+// DocumentChunksForDomain -- Every documentChunk attached to a knowledge domain, full shape. Consumed by the trainSpecialist dispatcher for the Trainer Agent's mode='refresh' existingCorpus (read-what's-there-now-to-decide-what-to-supersede).
 //
 // Bound concept: documentChunk.
-type QueryDocumentChunksForDomainArgs struct {
+type DocumentChunksForDomainArgs struct {
 	DomainId string
 }
 
-// QueryDocumentChunksForDomain calls the engine query queryDocumentChunksForDomain.
-func (qc *QueryClient) QueryDocumentChunksForDomain(ctx context.Context, args QueryDocumentChunksForDomainArgs) (*Result, error) {
-	call := QueryDocumentChunksForDomainBuild(args)
-	return qc.executeNamed(ctx, "queryDocumentChunksForDomain", call)
+// DocumentChunksForDomain calls the engine query documentChunksForDomain.
+func (qc *QueryClient) DocumentChunksForDomain(ctx context.Context, args DocumentChunksForDomainArgs) (*Result, error) {
+	call := DocumentChunksForDomainBuild(args)
+	return qc.executeNamed(ctx, "documentChunksForDomain", call)
 }
 
-func QueryDocumentChunksForDomainBuild(args QueryDocumentChunksForDomainArgs) string {
+func DocumentChunksForDomainBuild(args DocumentChunksForDomainArgs) string {
 	var b strings.Builder
-	b.WriteString("queryDocumentChunksForDomain({")
+	b.WriteString("documentChunksForDomain({")
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryDocumentVersionById -- Fetch a single document version's FULL content (immutable body / attachment + provenance) by its version row id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard. Backs the 'open this version' viewer and the restore-source read (memql#1230).
+// DocumentVersionById -- Fetch a single document version's FULL content (immutable body / attachment + provenance) by its version row id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard. Backs the 'open this version' viewer and the restore-source read (memql#1230).
 //
 // Bound concept: documentVersion.
-type QueryDocumentVersionByIdArgs struct {
+type DocumentVersionByIdArgs struct {
 	VersionId string
 }
 
-// QueryDocumentVersionById calls the engine query queryDocumentVersionById.
-func (qc *QueryClient) QueryDocumentVersionById(ctx context.Context, args QueryDocumentVersionByIdArgs) (*Result, error) {
-	call := QueryDocumentVersionByIdBuild(args)
-	return qc.executeNamed(ctx, "queryDocumentVersionById", call)
+// DocumentVersionById calls the engine query documentVersionById.
+func (qc *QueryClient) DocumentVersionById(ctx context.Context, args DocumentVersionByIdArgs) (*Result, error) {
+	call := DocumentVersionByIdBuild(args)
+	return qc.executeNamed(ctx, "documentVersionById", call)
 }
 
-func QueryDocumentVersionByIdBuild(args QueryDocumentVersionByIdArgs) string {
+func DocumentVersionByIdBuild(args DocumentVersionByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryDocumentVersionById({")
+	b.WriteString("documentVersionById({")
 	b.WriteString("versionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.VersionId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryDocumentVersions -- List the append-only version history of a logical document (every retained version, summary projection -- versionNumber, authorKind, author, note, createdAt -- WITHOUT the full body). Owned: ownerUserId==actor.userId gates the row set; payload.documentId narrows to the one document. Backs the Library history drawer (memql#1230); the frontend orders by versionNumber. Each version is a distinct retained row, so no version is ever lost.
+// DocumentVersions -- List the append-only version history of a logical document (every retained version, summary projection -- versionNumber, authorKind, author, note, createdAt -- WITHOUT the full body). Owned: ownerUserId==actor.userId gates the row set; payload.documentId narrows to the one document. Backs the Library history drawer (memql#1230); the frontend orders by versionNumber. Each version is a distinct retained row, so no version is ever lost.
 //
 // Bound concept: documentVersion.
-type QueryDocumentVersionsArgs struct {
+type DocumentVersionsArgs struct {
 	DocumentId string
 }
 
-// QueryDocumentVersions calls the engine query queryDocumentVersions.
-func (qc *QueryClient) QueryDocumentVersions(ctx context.Context, args QueryDocumentVersionsArgs) (*Result, error) {
-	call := QueryDocumentVersionsBuild(args)
-	return qc.executeNamed(ctx, "queryDocumentVersions", call)
+// DocumentVersions calls the engine query documentVersions.
+func (qc *QueryClient) DocumentVersions(ctx context.Context, args DocumentVersionsArgs) (*Result, error) {
+	call := DocumentVersionsBuild(args)
+	return qc.executeNamed(ctx, "documentVersions", call)
 }
 
-func QueryDocumentVersionsBuild(args QueryDocumentVersionsArgs) string {
+func DocumentVersionsBuild(args DocumentVersionsArgs) string {
 	var b strings.Builder
-	b.WriteString("queryDocumentVersions({")
+	b.WriteString("documentVersions({")
 	b.WriteString("documentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryDocumentVersionsForOwner -- Internal read for the edit/restore handlers: the full version history of a document (full projection) so the handler can compute the next versionNumber + the parentVersionId from the current latest. Owned: ownerUserId==actor.userId; the handler runs under a threaded owner actor. Mirrors queryDocumentVersions' filter with the full content shape.
+// DocumentVersionsForOwner -- Internal read for the edit/restore handlers: the full version history of a document (full projection) so the handler can compute the next versionNumber + the parentVersionId from the current latest. Owned: ownerUserId==actor.userId; the handler runs under a threaded owner actor. Mirrors documentVersions' filter with the full content shape.
 //
 // Bound concept: documentVersion.
-type QueryDocumentVersionsForOwnerArgs struct {
+type DocumentVersionsForOwnerArgs struct {
 	DocumentId string
 }
 
-// QueryDocumentVersionsForOwner calls the engine query queryDocumentVersionsForOwner.
-func (qc *QueryClient) QueryDocumentVersionsForOwner(ctx context.Context, args QueryDocumentVersionsForOwnerArgs) (*Result, error) {
-	call := QueryDocumentVersionsForOwnerBuild(args)
-	return qc.executeNamed(ctx, "queryDocumentVersionsForOwner", call)
+// DocumentVersionsForOwner calls the engine query documentVersionsForOwner.
+func (qc *QueryClient) DocumentVersionsForOwner(ctx context.Context, args DocumentVersionsForOwnerArgs) (*Result, error) {
+	call := DocumentVersionsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "documentVersionsForOwner", call)
 }
 
-func QueryDocumentVersionsForOwnerBuild(args QueryDocumentVersionsForOwnerArgs) string {
+func DocumentVersionsForOwnerBuild(args DocumentVersionsForOwnerArgs) string {
 	var b strings.Builder
-	b.WriteString("queryDocumentVersionsForOwner({")
+	b.WriteString("documentVersionsForOwner({")
 	b.WriteString("documentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryDueResponsibilities -- The caller's active + enabled responsibilities of a given trigger archetype (recurring or reactive) -- the candidate set the reactive-loop evaluator (epic #632) checks for due-ness. Owned tier (ownerUserId == actor.userId). Cron-due / condition-match filtering happens Go-side (no OR operator + no cron arithmetic in the filter), mirroring queryDueTrainAgentRetryPlans.
+// DueResponsibilities -- The caller's active + enabled responsibilities of a given trigger archetype (recurring or reactive) -- the candidate set the reactive-loop evaluator (epic #632) checks for due-ness. Owned tier (ownerUserId == actor.userId). Cron-due / condition-match filtering happens Go-side (no OR operator + no cron arithmetic in the filter), mirroring dueTrainAgentRetryPlans.
 //
 // Bound concept: responsibility.
-type QueryDueResponsibilitiesArgs struct {
+type DueResponsibilitiesArgs struct {
 	// Enum: reactive | recurring
 	Trigger string
 }
 
-// QueryDueResponsibilities calls the engine query queryDueResponsibilities.
-func (qc *QueryClient) QueryDueResponsibilities(ctx context.Context, args QueryDueResponsibilitiesArgs) (*Result, error) {
-	call := QueryDueResponsibilitiesBuild(args)
-	return qc.executeNamed(ctx, "queryDueResponsibilities", call)
+// DueResponsibilities calls the engine query dueResponsibilities.
+func (qc *QueryClient) DueResponsibilities(ctx context.Context, args DueResponsibilitiesArgs) (*Result, error) {
+	call := DueResponsibilitiesBuild(args)
+	return qc.executeNamed(ctx, "dueResponsibilities", call)
 }
 
-func QueryDueResponsibilitiesBuild(args QueryDueResponsibilitiesArgs) string {
+func DueResponsibilitiesBuild(args DueResponsibilitiesArgs) string {
 	var b strings.Builder
-	b.WriteString("queryDueResponsibilities({")
+	b.WriteString("dueResponsibilities({")
 	b.WriteString("trigger: ")
 	b.WriteString(fmt.Sprintf("%q", args.Trigger))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryDueTrainAgentRetryPlans -- All queued trainAgentRetryStep Plans. The training poll loop filters by input.nextAttemptAt in Go.
+// DueTrainAgentRetryPlans -- All queued trainAgentRetryStep Plans. The training poll loop filters by input.nextAttemptAt in Go.
 //
 // Bound concept: plan.
-type QueryDueTrainAgentRetryPlansArgs struct {
+type DueTrainAgentRetryPlansArgs struct {
 }
 
-// QueryDueTrainAgentRetryPlans calls the engine query queryDueTrainAgentRetryPlans.
-func (qc *QueryClient) QueryDueTrainAgentRetryPlans(ctx context.Context, args QueryDueTrainAgentRetryPlansArgs) (*Result, error) {
-	call := QueryDueTrainAgentRetryPlansBuild(args)
-	return qc.executeNamed(ctx, "queryDueTrainAgentRetryPlans", call)
+// DueTrainAgentRetryPlans calls the engine query dueTrainAgentRetryPlans.
+func (qc *QueryClient) DueTrainAgentRetryPlans(ctx context.Context, args DueTrainAgentRetryPlansArgs) (*Result, error) {
+	call := DueTrainAgentRetryPlansBuild(args)
+	return qc.executeNamed(ctx, "dueTrainAgentRetryPlans", call)
 }
 
-func QueryDueTrainAgentRetryPlansBuild(args QueryDueTrainAgentRetryPlansArgs) string {
+func DueTrainAgentRetryPlansBuild(args DueTrainAgentRetryPlansArgs) string {
 	_ = args
-	return "queryDueTrainAgentRetryPlans({})"
+	return "dueTrainAgentRetryPlans({})"
 }
 
-// QueryEventsByDay -- List the authenticated caller's events that start on a given day, bounded by the caller-supplied [dayStart, dayEnd] instants (computed in the user's timezone client-side). Self-scoped via actor.userId. Backs the calendar tool's day view and 'what's on my schedule today' agent queries.
+// EventsByDay -- List the authenticated caller's events that start on a given day, bounded by the caller-supplied [dayStart, dayEnd] instants (computed in the user's timezone client-side). Self-scoped via actor.userId. Backs the calendar tool's day view and 'what's on my schedule today' agent queries.
 //
 // Bound concept: calendarEvent.
-type QueryEventsByDayArgs struct {
+type EventsByDayArgs struct {
 	// Inclusive start-of-day instant in the user's timezone (e.g. 2026-06-01T00:00:00-07:00).
 	DayStart string
 	// Exclusive end-of-day instant (next midnight) in the user's timezone.
 	DayEnd string
 }
 
-// QueryEventsByDay calls the engine query queryEventsByDay.
-func (qc *QueryClient) QueryEventsByDay(ctx context.Context, args QueryEventsByDayArgs) (*Result, error) {
-	call := QueryEventsByDayBuild(args)
-	return qc.executeNamed(ctx, "queryEventsByDay", call)
+// EventsByDay calls the engine query eventsByDay.
+func (qc *QueryClient) EventsByDay(ctx context.Context, args EventsByDayArgs) (*Result, error) {
+	call := EventsByDayBuild(args)
+	return qc.executeNamed(ctx, "eventsByDay", call)
 }
 
-func QueryEventsByDayBuild(args QueryEventsByDayArgs) string {
+func EventsByDayBuild(args EventsByDayArgs) string {
 	var b strings.Builder
-	b.WriteString("queryEventsByDay({")
+	b.WriteString("eventsByDay({")
 	b.WriteString("dayStart: ")
 	b.WriteString(fmt.Sprintf("%q", args.DayStart))
-	if b.Len() > 18 {
+	if b.Len() > 13 {
 		b.WriteString(", ")
 	}
 	b.WriteString("dayEnd: ")
@@ -1706,293 +1706,293 @@ func QueryEventsByDayBuild(args QueryEventsByDayArgs) string {
 	return b.String()
 }
 
-// QueryExistingCluster -- Returns the existing cluster record, if any
+// ExistingCluster -- Returns the existing cluster record, if any
 //
 // Bound concept: cluster.
-type QueryExistingClusterArgs struct {
+type ExistingClusterArgs struct {
 }
 
-// QueryExistingCluster calls the engine query queryExistingCluster.
-func (qc *QueryClient) QueryExistingCluster(ctx context.Context, args QueryExistingClusterArgs) (*Result, error) {
-	call := QueryExistingClusterBuild(args)
-	return qc.executeNamed(ctx, "queryExistingCluster", call)
+// ExistingCluster calls the engine query existingCluster.
+func (qc *QueryClient) ExistingCluster(ctx context.Context, args ExistingClusterArgs) (*Result, error) {
+	call := ExistingClusterBuild(args)
+	return qc.executeNamed(ctx, "existingCluster", call)
 }
 
-func QueryExistingClusterBuild(args QueryExistingClusterArgs) string {
+func ExistingClusterBuild(args ExistingClusterArgs) string {
 	_ = args
-	return "queryExistingCluster({})"
+	return "existingCluster({})"
 }
 
-// QueryExpiredActiveDelegations -- Active delegations whose expiresAt is before the supplied cutoff.
+// ExpiredActiveDelegations -- Active delegations whose expiresAt is before the supplied cutoff.
 //
 // Bound concept: delegation.
-type QueryExpiredActiveDelegationsArgs struct {
+type ExpiredActiveDelegationsArgs struct {
 	Now string
 }
 
-// QueryExpiredActiveDelegations calls the engine query queryExpiredActiveDelegations.
-func (qc *QueryClient) QueryExpiredActiveDelegations(ctx context.Context, args QueryExpiredActiveDelegationsArgs) (*Result, error) {
-	call := QueryExpiredActiveDelegationsBuild(args)
-	return qc.executeNamed(ctx, "queryExpiredActiveDelegations", call)
+// ExpiredActiveDelegations calls the engine query expiredActiveDelegations.
+func (qc *QueryClient) ExpiredActiveDelegations(ctx context.Context, args ExpiredActiveDelegationsArgs) (*Result, error) {
+	call := ExpiredActiveDelegationsBuild(args)
+	return qc.executeNamed(ctx, "expiredActiveDelegations", call)
 }
 
-func QueryExpiredActiveDelegationsBuild(args QueryExpiredActiveDelegationsArgs) string {
+func ExpiredActiveDelegationsBuild(args ExpiredActiveDelegationsArgs) string {
 	var b strings.Builder
-	b.WriteString("queryExpiredActiveDelegations({")
+	b.WriteString("expiredActiveDelegations({")
 	b.WriteString("now: ")
 	b.WriteString(fmt.Sprintf("%q", args.Now))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryExpiredAuditEvents -- All audit events; the retention sweep iterates and per-row checks occurredAt + retention-days < now.
+// ExpiredAuditEvents -- All audit events; the retention sweep iterates and per-row checks occurredAt + retention-days < now.
 //
 // Bound concept: auditEvent.
-type QueryExpiredAuditEventsArgs struct {
+type ExpiredAuditEventsArgs struct {
 }
 
-// QueryExpiredAuditEvents calls the engine query queryExpiredAuditEvents.
-func (qc *QueryClient) QueryExpiredAuditEvents(ctx context.Context, args QueryExpiredAuditEventsArgs) (*Result, error) {
-	call := QueryExpiredAuditEventsBuild(args)
-	return qc.executeNamed(ctx, "queryExpiredAuditEvents", call)
+// ExpiredAuditEvents calls the engine query expiredAuditEvents.
+func (qc *QueryClient) ExpiredAuditEvents(ctx context.Context, args ExpiredAuditEventsArgs) (*Result, error) {
+	call := ExpiredAuditEventsBuild(args)
+	return qc.executeNamed(ctx, "expiredAuditEvents", call)
 }
 
-func QueryExpiredAuditEventsBuild(args QueryExpiredAuditEventsArgs) string {
+func ExpiredAuditEventsBuild(args ExpiredAuditEventsArgs) string {
 	_ = args
-	return "queryExpiredAuditEvents({})"
+	return "expiredAuditEvents({})"
 }
 
-// QueryExpiredConsumedAuthCodes -- CONSUMED auth codes whose expiresAt is before the supplied cutoff. Both predicates are load-bearing: the name says `Consumed`, so the consumedAt gate (memql#1714) keeps the result set to spent-then-expired codes and never sweeps an unspent-but-expired code that a redemption is still racing against.
+// ExpiredConsumedAuthCodes -- CONSUMED auth codes whose expiresAt is before the supplied cutoff. Both predicates are load-bearing: the name says `Consumed`, so the consumedAt gate (memql#1714) keeps the result set to spent-then-expired codes and never sweeps an unspent-but-expired code that a redemption is still racing against.
 //
 // Bound concept: authCode.
-type QueryExpiredConsumedAuthCodesArgs struct {
+type ExpiredConsumedAuthCodesArgs struct {
 	Now string
 }
 
-// QueryExpiredConsumedAuthCodes calls the engine query queryExpiredConsumedAuthCodes.
-func (qc *QueryClient) QueryExpiredConsumedAuthCodes(ctx context.Context, args QueryExpiredConsumedAuthCodesArgs) (*Result, error) {
-	call := QueryExpiredConsumedAuthCodesBuild(args)
-	return qc.executeNamed(ctx, "queryExpiredConsumedAuthCodes", call)
+// ExpiredConsumedAuthCodes calls the engine query expiredConsumedAuthCodes.
+func (qc *QueryClient) ExpiredConsumedAuthCodes(ctx context.Context, args ExpiredConsumedAuthCodesArgs) (*Result, error) {
+	call := ExpiredConsumedAuthCodesBuild(args)
+	return qc.executeNamed(ctx, "expiredConsumedAuthCodes", call)
 }
 
-func QueryExpiredConsumedAuthCodesBuild(args QueryExpiredConsumedAuthCodesArgs) string {
+func ExpiredConsumedAuthCodesBuild(args ExpiredConsumedAuthCodesArgs) string {
 	var b strings.Builder
-	b.WriteString("queryExpiredConsumedAuthCodes({")
+	b.WriteString("expiredConsumedAuthCodes({")
 	b.WriteString("now: ")
 	b.WriteString(fmt.Sprintf("%q", args.Now))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryExpiredMagicLinkRequests -- Magic-link requests whose expiresAt is before the supplied cutoff.
+// ExpiredMagicLinkRequests -- Magic-link requests whose expiresAt is before the supplied cutoff.
 //
 // Bound concept: magicLinkRequest.
-type QueryExpiredMagicLinkRequestsArgs struct {
+type ExpiredMagicLinkRequestsArgs struct {
 	Now string
 }
 
-// QueryExpiredMagicLinkRequests calls the engine query queryExpiredMagicLinkRequests.
-func (qc *QueryClient) QueryExpiredMagicLinkRequests(ctx context.Context, args QueryExpiredMagicLinkRequestsArgs) (*Result, error) {
-	call := QueryExpiredMagicLinkRequestsBuild(args)
-	return qc.executeNamed(ctx, "queryExpiredMagicLinkRequests", call)
+// ExpiredMagicLinkRequests calls the engine query expiredMagicLinkRequests.
+func (qc *QueryClient) ExpiredMagicLinkRequests(ctx context.Context, args ExpiredMagicLinkRequestsArgs) (*Result, error) {
+	call := ExpiredMagicLinkRequestsBuild(args)
+	return qc.executeNamed(ctx, "expiredMagicLinkRequests", call)
 }
 
-func QueryExpiredMagicLinkRequestsBuild(args QueryExpiredMagicLinkRequestsArgs) string {
+func ExpiredMagicLinkRequestsBuild(args ExpiredMagicLinkRequestsArgs) string {
 	var b strings.Builder
-	b.WriteString("queryExpiredMagicLinkRequests({")
+	b.WriteString("expiredMagicLinkRequests({")
 	b.WriteString("now: ")
 	b.WriteString(fmt.Sprintf("%q", args.Now))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryExpiredPendingAccessRequests -- Pending access requests; the expiry sweep iterates these and per-row checks createdAt + expiry-days < now.
+// ExpiredPendingAccessRequests -- Pending access requests; the expiry sweep iterates these and per-row checks createdAt + expiry-days < now.
 //
 // Bound concept: accessRequest.
-type QueryExpiredPendingAccessRequestsArgs struct {
+type ExpiredPendingAccessRequestsArgs struct {
 }
 
-// QueryExpiredPendingAccessRequests calls the engine query queryExpiredPendingAccessRequests.
-func (qc *QueryClient) QueryExpiredPendingAccessRequests(ctx context.Context, args QueryExpiredPendingAccessRequestsArgs) (*Result, error) {
-	call := QueryExpiredPendingAccessRequestsBuild(args)
-	return qc.executeNamed(ctx, "queryExpiredPendingAccessRequests", call)
+// ExpiredPendingAccessRequests calls the engine query expiredPendingAccessRequests.
+func (qc *QueryClient) ExpiredPendingAccessRequests(ctx context.Context, args ExpiredPendingAccessRequestsArgs) (*Result, error) {
+	call := ExpiredPendingAccessRequestsBuild(args)
+	return qc.executeNamed(ctx, "expiredPendingAccessRequests", call)
 }
 
-func QueryExpiredPendingAccessRequestsBuild(args QueryExpiredPendingAccessRequestsArgs) string {
+func ExpiredPendingAccessRequestsBuild(args ExpiredPendingAccessRequestsArgs) string {
 	_ = args
-	return "queryExpiredPendingAccessRequests({})"
+	return "expiredPendingAccessRequests({})"
 }
 
-// QueryExpiredWorkerInvocations -- List worker invocation rows for retention pruning. Caller filters by age.
+// ExpiredWorkerInvocations -- List worker invocation rows for retention pruning. Caller filters by age.
 //
 // Bound concept: invocation.
-type QueryExpiredWorkerInvocationsArgs struct {
+type ExpiredWorkerInvocationsArgs struct {
 }
 
-// QueryExpiredWorkerInvocations calls the engine query queryExpiredWorkerInvocations.
-func (qc *QueryClient) QueryExpiredWorkerInvocations(ctx context.Context, args QueryExpiredWorkerInvocationsArgs) (*Result, error) {
-	call := QueryExpiredWorkerInvocationsBuild(args)
-	return qc.executeNamed(ctx, "queryExpiredWorkerInvocations", call)
+// ExpiredWorkerInvocations calls the engine query expiredWorkerInvocations.
+func (qc *QueryClient) ExpiredWorkerInvocations(ctx context.Context, args ExpiredWorkerInvocationsArgs) (*Result, error) {
+	call := ExpiredWorkerInvocationsBuild(args)
+	return qc.executeNamed(ctx, "expiredWorkerInvocations", call)
 }
 
-func QueryExpiredWorkerInvocationsBuild(args QueryExpiredWorkerInvocationsArgs) string {
+func ExpiredWorkerInvocationsBuild(args ExpiredWorkerInvocationsArgs) string {
 	_ = args
-	return "queryExpiredWorkerInvocations({})"
+	return "expiredWorkerInvocations({})"
 }
 
-// QueryFeedbackAnnouncementForPlan -- Check if the assistant already posted the awaitingFeedback announcement for a Plan (dedup behind the cross-replica announce gate, #1406).
+// FeedbackAnnouncementForPlan -- Check if the assistant already posted the awaitingFeedback announcement for a Plan (dedup behind the cross-replica announce gate, #1406).
 //
 // Bound concept: utterance.
-type QueryFeedbackAnnouncementForPlanArgs struct {
+type FeedbackAnnouncementForPlanArgs struct {
 	PlanId string
 }
 
-// QueryFeedbackAnnouncementForPlan calls the engine query queryFeedbackAnnouncementForPlan.
-func (qc *QueryClient) QueryFeedbackAnnouncementForPlan(ctx context.Context, args QueryFeedbackAnnouncementForPlanArgs) (*Result, error) {
-	call := QueryFeedbackAnnouncementForPlanBuild(args)
-	return qc.executeNamed(ctx, "queryFeedbackAnnouncementForPlan", call)
+// FeedbackAnnouncementForPlan calls the engine query feedbackAnnouncementForPlan.
+func (qc *QueryClient) FeedbackAnnouncementForPlan(ctx context.Context, args FeedbackAnnouncementForPlanArgs) (*Result, error) {
+	call := FeedbackAnnouncementForPlanBuild(args)
+	return qc.executeNamed(ctx, "feedbackAnnouncementForPlan", call)
 }
 
-func QueryFeedbackAnnouncementForPlanBuild(args QueryFeedbackAnnouncementForPlanArgs) string {
+func FeedbackAnnouncementForPlanBuild(args FeedbackAnnouncementForPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("queryFeedbackAnnouncementForPlan({")
+	b.WriteString("feedbackAnnouncementForPlan({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryFindEvents -- Find the caller's own events by exact title. Self-scoped via actor.userId. Backs the calendar tool's `find` action ('find my dentist appointment'); the agent passes the title it captured. Exact match keeps the predicate SQL-pushdownable -- substring / semantic search is a downstream concern (the agent can list a window via queryUpcomingEvents and filter conversationally).
+// FindEvents -- Find the caller's own events by exact title. Self-scoped via actor.userId. Backs the calendar tool's `find` action ('find my dentist appointment'); the agent passes the title it captured. Exact match keeps the predicate SQL-pushdownable -- substring / semantic search is a downstream concern (the agent can list a window via upcomingEvents and filter conversationally).
 //
 // Bound concept: calendarEvent.
-type QueryFindEventsArgs struct {
+type FindEventsArgs struct {
 	// Exact event title to match against payload.title.
 	Title string
 }
 
-// QueryFindEvents calls the engine query queryFindEvents.
-func (qc *QueryClient) QueryFindEvents(ctx context.Context, args QueryFindEventsArgs) (*Result, error) {
-	call := QueryFindEventsBuild(args)
-	return qc.executeNamed(ctx, "queryFindEvents", call)
+// FindEvents calls the engine query findEvents.
+func (qc *QueryClient) FindEvents(ctx context.Context, args FindEventsArgs) (*Result, error) {
+	call := FindEventsBuild(args)
+	return qc.executeNamed(ctx, "findEvents", call)
 }
 
-func QueryFindEventsBuild(args QueryFindEventsArgs) string {
+func FindEventsBuild(args FindEventsArgs) string {
 	var b strings.Builder
-	b.WriteString("queryFindEvents({")
+	b.WriteString("findEvents({")
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryGeneratedOutputById -- Drill-in read: fetch a generated-output's full content (inline body or attachment ref) by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library viewer when opening a generated_output artifact resolved from its sourceConceptRef.
+// GeneratedOutputById -- Drill-in read: fetch a generated-output's full content (inline body or attachment ref) by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library viewer when opening a generated_output artifact resolved from its sourceConceptRef.
 //
 // Bound concept: generatedOutput.
-type QueryGeneratedOutputByIdArgs struct {
+type GeneratedOutputByIdArgs struct {
 	OutputId string
 }
 
-// QueryGeneratedOutputById calls the engine query queryGeneratedOutputById.
-func (qc *QueryClient) QueryGeneratedOutputById(ctx context.Context, args QueryGeneratedOutputByIdArgs) (*Result, error) {
-	call := QueryGeneratedOutputByIdBuild(args)
-	return qc.executeNamed(ctx, "queryGeneratedOutputById", call)
+// GeneratedOutputById calls the engine query generatedOutputById.
+func (qc *QueryClient) GeneratedOutputById(ctx context.Context, args GeneratedOutputByIdArgs) (*Result, error) {
+	call := GeneratedOutputByIdBuild(args)
+	return qc.executeNamed(ctx, "generatedOutputById", call)
 }
 
-func QueryGeneratedOutputByIdBuild(args QueryGeneratedOutputByIdArgs) string {
+func GeneratedOutputByIdBuild(args GeneratedOutputByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryGeneratedOutputById({")
+	b.WriteString("generatedOutputById({")
 	b.WriteString("outputId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OutputId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryGeneratedOutputsForPlan -- List the generated-output rows a Plan produced. Owned: ownerUserId==actor.userId. The planner reads this as the authoritative 'did the deliverable actually get written?' signal for a produceArtifact plan -- promoteWorkbenchOutput stamps producedByPlanId on the row when a workbench fs_write is promoted. The planner stamps the plan's owner as actor before calling, so the read stays inside the owned-row authz model. (memql#939)
+// GeneratedOutputsForPlan -- List the generated-output rows a Plan produced. Owned: ownerUserId==actor.userId. The planner reads this as the authoritative 'did the deliverable actually get written?' signal for a produceArtifact plan -- promoteWorkbenchOutput stamps producedByPlanId on the row when a workbench fs_write is promoted. The planner stamps the plan's owner as actor before calling, so the read stays inside the owned-row authz model. (memql#939)
 //
 // Bound concept: generatedOutput.
-type QueryGeneratedOutputsForPlanArgs struct {
+type GeneratedOutputsForPlanArgs struct {
 	PlanId string
 }
 
-// QueryGeneratedOutputsForPlan calls the engine query queryGeneratedOutputsForPlan.
-func (qc *QueryClient) QueryGeneratedOutputsForPlan(ctx context.Context, args QueryGeneratedOutputsForPlanArgs) (*Result, error) {
-	call := QueryGeneratedOutputsForPlanBuild(args)
-	return qc.executeNamed(ctx, "queryGeneratedOutputsForPlan", call)
+// GeneratedOutputsForPlan calls the engine query generatedOutputsForPlan.
+func (qc *QueryClient) GeneratedOutputsForPlan(ctx context.Context, args GeneratedOutputsForPlanArgs) (*Result, error) {
+	call := GeneratedOutputsForPlanBuild(args)
+	return qc.executeNamed(ctx, "generatedOutputsForPlan", call)
 }
 
-func QueryGeneratedOutputsForPlanBuild(args QueryGeneratedOutputsForPlanArgs) string {
+func GeneratedOutputsForPlanBuild(args GeneratedOutputsForPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("queryGeneratedOutputsForPlan({")
+	b.WriteString("generatedOutputsForPlan({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryGlobalVariable -- Get a single instance-wide configuration variable by name (v1:platform:globalVariable)
+// GlobalVariable -- Get a single instance-wide configuration variable by name (v1:platform:globalVariable)
 //
 // Bound concept: globalVariable.
-type QueryGlobalVariableArgs struct {
+type GlobalVariableArgs struct {
 	Name string
 }
 
-// QueryGlobalVariable calls the engine query queryGlobalVariable.
-func (qc *QueryClient) QueryGlobalVariable(ctx context.Context, args QueryGlobalVariableArgs) (*Result, error) {
-	call := QueryGlobalVariableBuild(args)
-	return qc.executeNamed(ctx, "queryGlobalVariable", call)
+// GlobalVariable calls the engine query globalVariable.
+func (qc *QueryClient) GlobalVariable(ctx context.Context, args GlobalVariableArgs) (*Result, error) {
+	call := GlobalVariableBuild(args)
+	return qc.executeNamed(ctx, "globalVariable", call)
 }
 
-func QueryGlobalVariableBuild(args QueryGlobalVariableArgs) string {
+func GlobalVariableBuild(args GlobalVariableArgs) string {
 	var b strings.Builder
-	b.WriteString("queryGlobalVariable({")
+	b.WriteString("globalVariable({")
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryGlobalVariables -- Get multiple instance-wide configuration variables by name list (v1:platform:globalVariable)
+// GlobalVariables -- Get multiple instance-wide configuration variables by name list (v1:platform:globalVariable)
 //
 // Bound concept: globalVariable.
-type QueryGlobalVariablesArgs struct {
+type GlobalVariablesArgs struct {
 	Names []any
 }
 
-// QueryGlobalVariables calls the engine query queryGlobalVariables.
-func (qc *QueryClient) QueryGlobalVariables(ctx context.Context, args QueryGlobalVariablesArgs) (*Result, error) {
-	call := QueryGlobalVariablesBuild(args)
-	return qc.executeNamed(ctx, "queryGlobalVariables", call)
+// GlobalVariables calls the engine query globalVariables.
+func (qc *QueryClient) GlobalVariables(ctx context.Context, args GlobalVariablesArgs) (*Result, error) {
+	call := GlobalVariablesBuild(args)
+	return qc.executeNamed(ctx, "globalVariables", call)
 }
 
-func QueryGlobalVariablesBuild(args QueryGlobalVariablesArgs) string {
+func GlobalVariablesBuild(args GlobalVariablesArgs) string {
 	var b strings.Builder
-	b.WriteString("queryGlobalVariables({")
+	b.WriteString("globalVariables({")
 	b.WriteString("names: ")
 	b.WriteString(renderMemQLValue(args.Names))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryGreetingUtterance -- Check if a greeting utterance already exists for an agent in a space
+// GreetingUtterance -- Check if a greeting utterance already exists for an agent in a space
 //
 // Bound concept: utterance.
-type QueryGreetingUtteranceArgs struct {
+type GreetingUtteranceArgs struct {
 	PartitionId string
 	AgentId     string
 }
 
-// QueryGreetingUtterance calls the engine query queryGreetingUtterance.
-func (qc *QueryClient) QueryGreetingUtterance(ctx context.Context, args QueryGreetingUtteranceArgs) (*Result, error) {
-	call := QueryGreetingUtteranceBuild(args)
-	return qc.executeNamed(ctx, "queryGreetingUtterance", call)
+// GreetingUtterance calls the engine query greetingUtterance.
+func (qc *QueryClient) GreetingUtterance(ctx context.Context, args GreetingUtteranceArgs) (*Result, error) {
+	call := GreetingUtteranceBuild(args)
+	return qc.executeNamed(ctx, "greetingUtterance", call)
 }
 
-func QueryGreetingUtteranceBuild(args QueryGreetingUtteranceArgs) string {
+func GreetingUtteranceBuild(args GreetingUtteranceArgs) string {
 	var b strings.Builder
-	b.WriteString("queryGreetingUtterance({")
+	b.WriteString("greetingUtterance({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 24 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
@@ -2001,48 +2001,48 @@ func QueryGreetingUtteranceBuild(args QueryGreetingUtteranceArgs) string {
 	return b.String()
 }
 
-// QueryGroupGAForSpace -- Active AI (group GA) participant for a space. Callers must pass the canonical partitionId.
+// GroupGAForSpace -- Active AI (group GA) participant for a space. Callers must pass the canonical partitionId.
 //
 // Bound concept: participant.
-type QueryGroupGAForSpaceArgs struct {
+type GroupGAForSpaceArgs struct {
 	PartitionId string
 }
 
-// QueryGroupGAForSpace calls the engine query queryGroupGAForSpace.
-func (qc *QueryClient) QueryGroupGAForSpace(ctx context.Context, args QueryGroupGAForSpaceArgs) (*Result, error) {
-	call := QueryGroupGAForSpaceBuild(args)
-	return qc.executeNamed(ctx, "queryGroupGAForSpace", call)
+// GroupGAForSpace calls the engine query groupGAForSpace.
+func (qc *QueryClient) GroupGAForSpace(ctx context.Context, args GroupGAForSpaceArgs) (*Result, error) {
+	call := GroupGAForSpaceBuild(args)
+	return qc.executeNamed(ctx, "groupGAForSpace", call)
 }
 
-func QueryGroupGAForSpaceBuild(args QueryGroupGAForSpaceArgs) string {
+func GroupGAForSpaceBuild(args GroupGAForSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("queryGroupGAForSpace({")
+	b.WriteString("groupGAForSpace({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryHasAIResponseForReply -- Check if an AI response already exists for a given utterance (idempotency check).
+// HasAIResponseForReply -- Check if an AI response already exists for a given utterance (idempotency check).
 //
 // Bound concept: utterance.
-type QueryHasAIResponseForReplyArgs struct {
+type HasAIResponseForReplyArgs struct {
 	ReplyToId     string
 	ParticipantId string
 }
 
-// QueryHasAIResponseForReply calls the engine query queryHasAIResponseForReply.
-func (qc *QueryClient) QueryHasAIResponseForReply(ctx context.Context, args QueryHasAIResponseForReplyArgs) (*Result, error) {
-	call := QueryHasAIResponseForReplyBuild(args)
-	return qc.executeNamed(ctx, "queryHasAIResponseForReply", call)
+// HasAIResponseForReply calls the engine query hasAIResponseForReply.
+func (qc *QueryClient) HasAIResponseForReply(ctx context.Context, args HasAIResponseForReplyArgs) (*Result, error) {
+	call := HasAIResponseForReplyBuild(args)
+	return qc.executeNamed(ctx, "hasAIResponseForReply", call)
 }
 
-func QueryHasAIResponseForReplyBuild(args QueryHasAIResponseForReplyArgs) string {
+func HasAIResponseForReplyBuild(args HasAIResponseForReplyArgs) string {
 	var b strings.Builder
-	b.WriteString("queryHasAIResponseForReply({")
+	b.WriteString("hasAIResponseForReply({")
 	b.WriteString("replyToId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ReplyToId))
-	if b.Len() > 28 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
@@ -2051,324 +2051,324 @@ func QueryHasAIResponseForReplyBuild(args QueryHasAIResponseForReplyArgs) string
 	return b.String()
 }
 
-// QueryHistoricalPlanMetrics -- Succeeded Plans of a kind, with metrics, for estimation bucket queries.
+// HistoricalPlanMetrics -- Succeeded Plans of a kind, with metrics, for estimation bucket queries.
 //
 // Bound concept: plan.
-type QueryHistoricalPlanMetricsArgs struct {
+type HistoricalPlanMetricsArgs struct {
 	PlanKind string
 }
 
-// QueryHistoricalPlanMetrics calls the engine query queryHistoricalPlanMetrics.
-func (qc *QueryClient) QueryHistoricalPlanMetrics(ctx context.Context, args QueryHistoricalPlanMetricsArgs) (*Result, error) {
-	call := QueryHistoricalPlanMetricsBuild(args)
-	return qc.executeNamed(ctx, "queryHistoricalPlanMetrics", call)
+// HistoricalPlanMetrics calls the engine query historicalPlanMetrics.
+func (qc *QueryClient) HistoricalPlanMetrics(ctx context.Context, args HistoricalPlanMetricsArgs) (*Result, error) {
+	call := HistoricalPlanMetricsBuild(args)
+	return qc.executeNamed(ctx, "historicalPlanMetrics", call)
 }
 
-func QueryHistoricalPlanMetricsBuild(args QueryHistoricalPlanMetricsArgs) string {
+func HistoricalPlanMetricsBuild(args HistoricalPlanMetricsArgs) string {
 	var b strings.Builder
-	b.WriteString("queryHistoricalPlanMetrics({")
+	b.WriteString("historicalPlanMetrics({")
 	b.WriteString("planKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanKind))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryInvitationById -- Returns the invitation with the given id. Zero or one result.
+// InvitationById -- Returns the invitation with the given id. Zero or one result.
 //
 // Bound concept: invitation.
-type QueryInvitationByIdArgs struct {
+type InvitationByIdArgs struct {
 	InvitationId string
 }
 
-// QueryInvitationById calls the engine query queryInvitationById.
-func (qc *QueryClient) QueryInvitationById(ctx context.Context, args QueryInvitationByIdArgs) (*Result, error) {
-	call := QueryInvitationByIdBuild(args)
-	return qc.executeNamed(ctx, "queryInvitationById", call)
+// InvitationById calls the engine query invitationById.
+func (qc *QueryClient) InvitationById(ctx context.Context, args InvitationByIdArgs) (*Result, error) {
+	call := InvitationByIdBuild(args)
+	return qc.executeNamed(ctx, "invitationById", call)
 }
 
-func QueryInvitationByIdBuild(args QueryInvitationByIdArgs) string {
+func InvitationByIdBuild(args InvitationByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryInvitationById({")
+	b.WriteString("invitationById({")
 	b.WriteString("invitationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.InvitationId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryInvitationByPreviousTokenHash -- Returns the invitation whose previousTokenHash matches the argument. Used by the resolve handler to label rotated-out links as `superseded` rather than `invalid`. See memql#108.
+// InvitationByPreviousTokenHash -- Returns the invitation whose previousTokenHash matches the argument. Used by the resolve handler to label rotated-out links as `superseded` rather than `invalid`. See memql#108.
 //
 // Bound concept: invitation.
-type QueryInvitationByPreviousTokenHashArgs struct {
+type InvitationByPreviousTokenHashArgs struct {
 	TokenHash string
 }
 
-// QueryInvitationByPreviousTokenHash calls the engine query queryInvitationByPreviousTokenHash.
-func (qc *QueryClient) QueryInvitationByPreviousTokenHash(ctx context.Context, args QueryInvitationByPreviousTokenHashArgs) (*Result, error) {
-	call := QueryInvitationByPreviousTokenHashBuild(args)
-	return qc.executeNamed(ctx, "queryInvitationByPreviousTokenHash", call)
+// InvitationByPreviousTokenHash calls the engine query invitationByPreviousTokenHash.
+func (qc *QueryClient) InvitationByPreviousTokenHash(ctx context.Context, args InvitationByPreviousTokenHashArgs) (*Result, error) {
+	call := InvitationByPreviousTokenHashBuild(args)
+	return qc.executeNamed(ctx, "invitationByPreviousTokenHash", call)
 }
 
-func QueryInvitationByPreviousTokenHashBuild(args QueryInvitationByPreviousTokenHashArgs) string {
+func InvitationByPreviousTokenHashBuild(args InvitationByPreviousTokenHashArgs) string {
 	var b strings.Builder
-	b.WriteString("queryInvitationByPreviousTokenHash({")
+	b.WriteString("invitationByPreviousTokenHash({")
 	b.WriteString("tokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryInvitationByTokenHash -- Returns the invitation whose tokenHash matches the argument. Zero or one result.
+// InvitationByTokenHash -- Returns the invitation whose tokenHash matches the argument. Zero or one result.
 //
 // Bound concept: invitation.
-type QueryInvitationByTokenHashArgs struct {
+type InvitationByTokenHashArgs struct {
 	TokenHash string
 }
 
-// QueryInvitationByTokenHash calls the engine query queryInvitationByTokenHash.
-func (qc *QueryClient) QueryInvitationByTokenHash(ctx context.Context, args QueryInvitationByTokenHashArgs) (*Result, error) {
-	call := QueryInvitationByTokenHashBuild(args)
-	return qc.executeNamed(ctx, "queryInvitationByTokenHash", call)
+// InvitationByTokenHash calls the engine query invitationByTokenHash.
+func (qc *QueryClient) InvitationByTokenHash(ctx context.Context, args InvitationByTokenHashArgs) (*Result, error) {
+	call := InvitationByTokenHashBuild(args)
+	return qc.executeNamed(ctx, "invitationByTokenHash", call)
 }
 
-func QueryInvitationByTokenHashBuild(args QueryInvitationByTokenHashArgs) string {
+func InvitationByTokenHashBuild(args InvitationByTokenHashArgs) string {
 	var b strings.Builder
-	b.WriteString("queryInvitationByTokenHash({")
+	b.WriteString("invitationByTokenHash({")
 	b.WriteString("tokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryInvocationsForPlan -- List all worker invocations belonging to a Plan.
+// InvocationsForPlan -- List all worker invocations belonging to a Plan.
 //
 // Bound concept: invocation.
-type QueryInvocationsForPlanArgs struct {
+type InvocationsForPlanArgs struct {
 	PlanId string
 }
 
-// QueryInvocationsForPlan calls the engine query queryInvocationsForPlan.
-func (qc *QueryClient) QueryInvocationsForPlan(ctx context.Context, args QueryInvocationsForPlanArgs) (*Result, error) {
-	call := QueryInvocationsForPlanBuild(args)
-	return qc.executeNamed(ctx, "queryInvocationsForPlan", call)
+// InvocationsForPlan calls the engine query invocationsForPlan.
+func (qc *QueryClient) InvocationsForPlan(ctx context.Context, args InvocationsForPlanArgs) (*Result, error) {
+	call := InvocationsForPlanBuild(args)
+	return qc.executeNamed(ctx, "invocationsForPlan", call)
 }
 
-func QueryInvocationsForPlanBuild(args QueryInvocationsForPlanArgs) string {
+func InvocationsForPlanBuild(args InvocationsForPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("queryInvocationsForPlan({")
+	b.WriteString("invocationsForPlan({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryInvocationsForUser -- List worker invocations belonging to a user.
+// InvocationsForUser -- List worker invocations belonging to a user.
 //
 // Bound concept: invocation.
-type QueryInvocationsForUserArgs struct {
+type InvocationsForUserArgs struct {
 	OwnerUserId string
 }
 
-// QueryInvocationsForUser calls the engine query queryInvocationsForUser.
-func (qc *QueryClient) QueryInvocationsForUser(ctx context.Context, args QueryInvocationsForUserArgs) (*Result, error) {
-	call := QueryInvocationsForUserBuild(args)
-	return qc.executeNamed(ctx, "queryInvocationsForUser", call)
+// InvocationsForUser calls the engine query invocationsForUser.
+func (qc *QueryClient) InvocationsForUser(ctx context.Context, args InvocationsForUserArgs) (*Result, error) {
+	call := InvocationsForUserBuild(args)
+	return qc.executeNamed(ctx, "invocationsForUser", call)
 }
 
-func QueryInvocationsForUserBuild(args QueryInvocationsForUserArgs) string {
+func InvocationsForUserBuild(args InvocationsForUserArgs) string {
 	var b strings.Builder
-	b.WriteString("queryInvocationsForUser({")
+	b.WriteString("invocationsForUser({")
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryLibraryArtifactById -- Fetch a single Library artifact index row by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content.
+// LibraryArtifactById -- Fetch a single Library artifact index row by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content.
 //
 // Bound concept: artifact.
-type QueryLibraryArtifactByIdArgs struct {
+type LibraryArtifactByIdArgs struct {
 	ArtifactId string
 }
 
-// QueryLibraryArtifactById calls the engine query queryLibraryArtifactById.
-func (qc *QueryClient) QueryLibraryArtifactById(ctx context.Context, args QueryLibraryArtifactByIdArgs) (*Result, error) {
-	call := QueryLibraryArtifactByIdBuild(args)
-	return qc.executeNamed(ctx, "queryLibraryArtifactById", call)
+// LibraryArtifactById calls the engine query libraryArtifactById.
+func (qc *QueryClient) LibraryArtifactById(ctx context.Context, args LibraryArtifactByIdArgs) (*Result, error) {
+	call := LibraryArtifactByIdBuild(args)
+	return qc.executeNamed(ctx, "libraryArtifactById", call)
 }
 
-func QueryLibraryArtifactByIdBuild(args QueryLibraryArtifactByIdArgs) string {
+func LibraryArtifactByIdBuild(args LibraryArtifactByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryLibraryArtifactById({")
+	b.WriteString("libraryArtifactById({")
 	b.WriteString("artifactId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ArtifactId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryLibraryArtifacts -- List the caller's entire Library (artifacts + records). Owned: the row set is gated by ownerUserId==actor.userId server-side. The default Library read; the panel filters by lens / kind and searches client-side over this set, or calls the narrower facet queries below when a single facet dominates.
+// LibraryArtifacts -- List the caller's entire Library (artifacts + records). Owned: the row set is gated by ownerUserId==actor.userId server-side. The default Library read; the panel filters by lens / kind and searches client-side over this set, or calls the narrower facet queries below when a single facet dominates.
 //
 // Bound concept: artifact.
-type QueryLibraryArtifactsArgs struct {
+type LibraryArtifactsArgs struct {
 }
 
-// QueryLibraryArtifacts calls the engine query queryLibraryArtifacts.
-func (qc *QueryClient) QueryLibraryArtifacts(ctx context.Context, args QueryLibraryArtifactsArgs) (*Result, error) {
-	call := QueryLibraryArtifactsBuild(args)
-	return qc.executeNamed(ctx, "queryLibraryArtifacts", call)
+// LibraryArtifacts calls the engine query libraryArtifacts.
+func (qc *QueryClient) LibraryArtifacts(ctx context.Context, args LibraryArtifactsArgs) (*Result, error) {
+	call := LibraryArtifactsBuild(args)
+	return qc.executeNamed(ctx, "libraryArtifacts", call)
 }
 
-func QueryLibraryArtifactsBuild(args QueryLibraryArtifactsArgs) string {
+func LibraryArtifactsBuild(args LibraryArtifactsArgs) string {
 	_ = args
-	return "queryLibraryArtifacts({})"
+	return "libraryArtifacts({})"
 }
 
-// QueryLibraryArtifactsByKind -- List the caller's Library rows of one kind (document / generated_output / note / todo / calendar_event / memory / live_source) -- backs the kind facet filter. Owned: ownerUserId==actor.userId gates the row set; payload.kind narrows to the selected kind.
+// LibraryArtifactsByKind -- List the caller's Library rows of one kind (document / generated_output / note / todo / calendar_event / memory / live_source) -- backs the kind facet filter. Owned: ownerUserId==actor.userId gates the row set; payload.kind narrows to the selected kind.
 //
 // Bound concept: artifact.
-type QueryLibraryArtifactsByKindArgs struct {
+type LibraryArtifactsByKindArgs struct {
 	Kind string
 }
 
-// QueryLibraryArtifactsByKind calls the engine query queryLibraryArtifactsByKind.
-func (qc *QueryClient) QueryLibraryArtifactsByKind(ctx context.Context, args QueryLibraryArtifactsByKindArgs) (*Result, error) {
-	call := QueryLibraryArtifactsByKindBuild(args)
-	return qc.executeNamed(ctx, "queryLibraryArtifactsByKind", call)
+// LibraryArtifactsByKind calls the engine query libraryArtifactsByKind.
+func (qc *QueryClient) LibraryArtifactsByKind(ctx context.Context, args LibraryArtifactsByKindArgs) (*Result, error) {
+	call := LibraryArtifactsByKindBuild(args)
+	return qc.executeNamed(ctx, "libraryArtifactsByKind", call)
 }
 
-func QueryLibraryArtifactsByKindBuild(args QueryLibraryArtifactsByKindArgs) string {
+func LibraryArtifactsByKindBuild(args LibraryArtifactsByKindArgs) string {
 	var b strings.Builder
-	b.WriteString("queryLibraryArtifactsByKind({")
+	b.WriteString("libraryArtifactsByKind({")
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryLibraryArtifactsByLens -- List the caller's Library rows for one lens (artifact | record) -- backs the Artifacts | Records toggle. Owned: ownerUserId==actor.userId gates the row set; payload.lens narrows to the selected lens.
+// LibraryArtifactsByLens -- List the caller's Library rows for one lens (artifact | record) -- backs the Artifacts | Records toggle. Owned: ownerUserId==actor.userId gates the row set; payload.lens narrows to the selected lens.
 //
 // Bound concept: artifact.
-type QueryLibraryArtifactsByLensArgs struct {
+type LibraryArtifactsByLensArgs struct {
 	Lens string
 }
 
-// QueryLibraryArtifactsByLens calls the engine query queryLibraryArtifactsByLens.
-func (qc *QueryClient) QueryLibraryArtifactsByLens(ctx context.Context, args QueryLibraryArtifactsByLensArgs) (*Result, error) {
-	call := QueryLibraryArtifactsByLensBuild(args)
-	return qc.executeNamed(ctx, "queryLibraryArtifactsByLens", call)
+// LibraryArtifactsByLens calls the engine query libraryArtifactsByLens.
+func (qc *QueryClient) LibraryArtifactsByLens(ctx context.Context, args LibraryArtifactsByLensArgs) (*Result, error) {
+	call := LibraryArtifactsByLensBuild(args)
+	return qc.executeNamed(ctx, "libraryArtifactsByLens", call)
 }
 
-func QueryLibraryArtifactsByLensBuild(args QueryLibraryArtifactsByLensArgs) string {
+func LibraryArtifactsByLensBuild(args LibraryArtifactsByLensArgs) string {
 	var b strings.Builder
-	b.WriteString("queryLibraryArtifactsByLens({")
+	b.WriteString("libraryArtifactsByLens({")
 	b.WriteString("lens: ")
 	b.WriteString(fmt.Sprintf("%q", args.Lens))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryLibraryWorkspaceLiveSources -- List the partition's workspace-scoped live sources for the Library Records lens. Non-owned by design: workspace liveSources have no single owner (empty ownerUserId), so this reads kind=live_source AND scope=workspace with no caller gate and the frontend merges it into the owned Records results. Private live sources are excluded here -- they surface through the owner-gated queries. See the @public justification above (#723).
+// LibraryWorkspaceLiveSources -- List the partition's workspace-scoped live sources for the Library Records lens. Non-owned by design: workspace liveSources have no single owner (empty ownerUserId), so this reads kind=live_source AND scope=workspace with no caller gate and the frontend merges it into the owned Records results. Private live sources are excluded here -- they surface through the owner-gated queries. See the @public justification above (#723).
 //
 // Bound concept: artifact.
-type QueryLibraryWorkspaceLiveSourcesArgs struct {
+type LibraryWorkspaceLiveSourcesArgs struct {
 }
 
-// QueryLibraryWorkspaceLiveSources calls the engine query queryLibraryWorkspaceLiveSources.
-func (qc *QueryClient) QueryLibraryWorkspaceLiveSources(ctx context.Context, args QueryLibraryWorkspaceLiveSourcesArgs) (*Result, error) {
-	call := QueryLibraryWorkspaceLiveSourcesBuild(args)
-	return qc.executeNamed(ctx, "queryLibraryWorkspaceLiveSources", call)
+// LibraryWorkspaceLiveSources calls the engine query libraryWorkspaceLiveSources.
+func (qc *QueryClient) LibraryWorkspaceLiveSources(ctx context.Context, args LibraryWorkspaceLiveSourcesArgs) (*Result, error) {
+	call := LibraryWorkspaceLiveSourcesBuild(args)
+	return qc.executeNamed(ctx, "libraryWorkspaceLiveSources", call)
 }
 
-func QueryLibraryWorkspaceLiveSourcesBuild(args QueryLibraryWorkspaceLiveSourcesArgs) string {
+func LibraryWorkspaceLiveSourcesBuild(args LibraryWorkspaceLiveSourcesArgs) string {
 	_ = args
-	return "queryLibraryWorkspaceLiveSources({})"
+	return "libraryWorkspaceLiveSources({})"
 }
 
-// QueryMagicLinkRequestByTokenHash -- Returns the magic-link request whose tokenHash matches the argument. Zero or one result.
+// MagicLinkRequestByTokenHash -- Returns the magic-link request whose tokenHash matches the argument. Zero or one result.
 //
 // Bound concept: magicLinkRequest.
-type QueryMagicLinkRequestByTokenHashArgs struct {
+type MagicLinkRequestByTokenHashArgs struct {
 	TokenHash string
 }
 
-// QueryMagicLinkRequestByTokenHash calls the engine query queryMagicLinkRequestByTokenHash.
-func (qc *QueryClient) QueryMagicLinkRequestByTokenHash(ctx context.Context, args QueryMagicLinkRequestByTokenHashArgs) (*Result, error) {
-	call := QueryMagicLinkRequestByTokenHashBuild(args)
-	return qc.executeNamed(ctx, "queryMagicLinkRequestByTokenHash", call)
+// MagicLinkRequestByTokenHash calls the engine query magicLinkRequestByTokenHash.
+func (qc *QueryClient) MagicLinkRequestByTokenHash(ctx context.Context, args MagicLinkRequestByTokenHashArgs) (*Result, error) {
+	call := MagicLinkRequestByTokenHashBuild(args)
+	return qc.executeNamed(ctx, "magicLinkRequestByTokenHash", call)
 }
 
-func QueryMagicLinkRequestByTokenHashBuild(args QueryMagicLinkRequestByTokenHashArgs) string {
+func MagicLinkRequestByTokenHashBuild(args MagicLinkRequestByTokenHashArgs) string {
 	var b strings.Builder
-	b.WriteString("queryMagicLinkRequestByTokenHash({")
+	b.WriteString("magicLinkRequestByTokenHash({")
 	b.WriteString("tokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryMemoryById -- Drill-in read: fetch a memory's full content by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library Records lens when opening a memory artifact resolved from its sourceConceptRef.
+// MemoryById -- Drill-in read: fetch a memory's full content by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library Records lens when opening a memory artifact resolved from its sourceConceptRef.
 //
 // Bound concept: memory.
-type QueryMemoryByIdArgs struct {
+type MemoryByIdArgs struct {
 	MemoryId string
 }
 
-// QueryMemoryById calls the engine query queryMemoryById.
-func (qc *QueryClient) QueryMemoryById(ctx context.Context, args QueryMemoryByIdArgs) (*Result, error) {
-	call := QueryMemoryByIdBuild(args)
-	return qc.executeNamed(ctx, "queryMemoryById", call)
+// MemoryById calls the engine query memoryById.
+func (qc *QueryClient) MemoryById(ctx context.Context, args MemoryByIdArgs) (*Result, error) {
+	call := MemoryByIdBuild(args)
+	return qc.executeNamed(ctx, "memoryById", call)
 }
 
-func QueryMemoryByIdBuild(args QueryMemoryByIdArgs) string {
+func MemoryByIdBuild(args MemoryByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryMemoryById({")
+	b.WriteString("memoryById({")
 	b.WriteString("memoryId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryMissingCapabilitiesByStatus -- Per Q7: list missingCapability rows by status, sorted by sightingCount desc. Backs the platform-roadmap prioritization view -- 'most-requested capabilities that the platform doesn't yet support'. Status filter: 'open' for active backlog, 'in_progress' / 'resolved' / 'wontfix' for the audit view.
+// MissingCapabilitiesByStatus -- Per Q7: list missingCapability rows by status, sorted by sightingCount desc. Backs the platform-roadmap prioritization view -- 'most-requested capabilities that the platform doesn't yet support'. Status filter: 'open' for active backlog, 'in_progress' / 'resolved' / 'wontfix' for the audit view.
 //
 // Bound concept: missingCapability.
-type QueryMissingCapabilitiesByStatusArgs struct {
+type MissingCapabilitiesByStatusArgs struct {
 	Status string
 }
 
-// QueryMissingCapabilitiesByStatus calls the engine query queryMissingCapabilitiesByStatus.
-func (qc *QueryClient) QueryMissingCapabilitiesByStatus(ctx context.Context, args QueryMissingCapabilitiesByStatusArgs) (*Result, error) {
-	call := QueryMissingCapabilitiesByStatusBuild(args)
-	return qc.executeNamed(ctx, "queryMissingCapabilitiesByStatus", call)
+// MissingCapabilitiesByStatus calls the engine query missingCapabilitiesByStatus.
+func (qc *QueryClient) MissingCapabilitiesByStatus(ctx context.Context, args MissingCapabilitiesByStatusArgs) (*Result, error) {
+	call := MissingCapabilitiesByStatusBuild(args)
+	return qc.executeNamed(ctx, "missingCapabilitiesByStatus", call)
 }
 
-func QueryMissingCapabilitiesByStatusBuild(args QueryMissingCapabilitiesByStatusArgs) string {
+func MissingCapabilitiesByStatusBuild(args MissingCapabilitiesByStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("queryMissingCapabilitiesByStatus({")
+	b.WriteString("missingCapabilitiesByStatus({")
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryMissingCapabilityByKindAndName -- Per Q7: dedup lookup the Planner Agent runs before logging a new sighting. Returns the existing row (if any) for the (kind, capability) pair so the Planner can call mutationBumpMissingCapabilitySighting instead of creating a duplicate row.
+// MissingCapabilityByKindAndName -- Per Q7: dedup lookup the Planner Agent runs before logging a new sighting. Returns the existing row (if any) for the (kind, capability) pair so the Planner can call bumpMissingCapabilitySighting instead of creating a duplicate row.
 //
 // Bound concept: missingCapability.
-type QueryMissingCapabilityByKindAndNameArgs struct {
+type MissingCapabilityByKindAndNameArgs struct {
 	Kind       string
 	Capability string
 }
 
-// QueryMissingCapabilityByKindAndName calls the engine query queryMissingCapabilityByKindAndName.
-func (qc *QueryClient) QueryMissingCapabilityByKindAndName(ctx context.Context, args QueryMissingCapabilityByKindAndNameArgs) (*Result, error) {
-	call := QueryMissingCapabilityByKindAndNameBuild(args)
-	return qc.executeNamed(ctx, "queryMissingCapabilityByKindAndName", call)
+// MissingCapabilityByKindAndName calls the engine query missingCapabilityByKindAndName.
+func (qc *QueryClient) MissingCapabilityByKindAndName(ctx context.Context, args MissingCapabilityByKindAndNameArgs) (*Result, error) {
+	call := MissingCapabilityByKindAndNameBuild(args)
+	return qc.executeNamed(ctx, "missingCapabilityByKindAndName", call)
 }
 
-func QueryMissingCapabilityByKindAndNameBuild(args QueryMissingCapabilityByKindAndNameArgs) string {
+func MissingCapabilityByKindAndNameBuild(args MissingCapabilityByKindAndNameArgs) string {
 	var b strings.Builder
-	b.WriteString("queryMissingCapabilityByKindAndName({")
+	b.WriteString("missingCapabilityByKindAndName({")
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 37 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("capability: ")
@@ -2377,60 +2377,60 @@ func QueryMissingCapabilityByKindAndNameBuild(args QueryMissingCapabilityByKindA
 	return b.String()
 }
 
-// QueryMyRequests -- List the caller's own submitted requests, newest-first. Open to any team member.
+// MyRequests -- List the caller's own submitted requests, newest-first. Open to any team member.
 //
 // Bound concept: request.
-type QueryMyRequestsArgs struct {
+type MyRequestsArgs struct {
 }
 
-// QueryMyRequests calls the engine query queryMyRequests.
-func (qc *QueryClient) QueryMyRequests(ctx context.Context, args QueryMyRequestsArgs) (*Result, error) {
-	call := QueryMyRequestsBuild(args)
-	return qc.executeNamed(ctx, "queryMyRequests", call)
+// MyRequests calls the engine query myRequests.
+func (qc *QueryClient) MyRequests(ctx context.Context, args MyRequestsArgs) (*Result, error) {
+	call := MyRequestsBuild(args)
+	return qc.executeNamed(ctx, "myRequests", call)
 }
 
-func QueryMyRequestsBuild(args QueryMyRequestsArgs) string {
+func MyRequestsBuild(args MyRequestsArgs) string {
 	_ = args
-	return "queryMyRequests({})"
+	return "myRequests({})"
 }
 
-// QueryNodeTokenIdentities -- List every node_token identity across the cluster (active + inactive). memql#343.
+// NodeTokenIdentities -- List every node_token identity across the cluster (active + inactive). memql#343.
 //
 // Bound concept: identity.
-type QueryNodeTokenIdentitiesArgs struct {
+type NodeTokenIdentitiesArgs struct {
 }
 
-// QueryNodeTokenIdentities calls the engine query queryNodeTokenIdentities.
-func (qc *QueryClient) QueryNodeTokenIdentities(ctx context.Context, args QueryNodeTokenIdentitiesArgs) (*Result, error) {
-	call := QueryNodeTokenIdentitiesBuild(args)
-	return qc.executeNamed(ctx, "queryNodeTokenIdentities", call)
+// NodeTokenIdentities calls the engine query nodeTokenIdentities.
+func (qc *QueryClient) NodeTokenIdentities(ctx context.Context, args NodeTokenIdentitiesArgs) (*Result, error) {
+	call := NodeTokenIdentitiesBuild(args)
+	return qc.executeNamed(ctx, "nodeTokenIdentities", call)
 }
 
-func QueryNodeTokenIdentitiesBuild(args QueryNodeTokenIdentitiesArgs) string {
+func NodeTokenIdentitiesBuild(args NodeTokenIdentitiesArgs) string {
 	_ = args
-	return "queryNodeTokenIdentities({})"
+	return "nodeTokenIdentities({})"
 }
 
-// QueryNodeTokenIdentityByBinding -- Lookup a node_token identity by its (nodeType, nodeId) binding. memql#343.
+// NodeTokenIdentityByBinding -- Lookup a node_token identity by its (nodeType, nodeId) binding. memql#343.
 //
 // Bound concept: identity.
-type QueryNodeTokenIdentityByBindingArgs struct {
+type NodeTokenIdentityByBindingArgs struct {
 	NodeType string
 	NodeId   string
 }
 
-// QueryNodeTokenIdentityByBinding calls the engine query queryNodeTokenIdentityByBinding.
-func (qc *QueryClient) QueryNodeTokenIdentityByBinding(ctx context.Context, args QueryNodeTokenIdentityByBindingArgs) (*Result, error) {
-	call := QueryNodeTokenIdentityByBindingBuild(args)
-	return qc.executeNamed(ctx, "queryNodeTokenIdentityByBinding", call)
+// NodeTokenIdentityByBinding calls the engine query nodeTokenIdentityByBinding.
+func (qc *QueryClient) NodeTokenIdentityByBinding(ctx context.Context, args NodeTokenIdentityByBindingArgs) (*Result, error) {
+	call := NodeTokenIdentityByBindingBuild(args)
+	return qc.executeNamed(ctx, "nodeTokenIdentityByBinding", call)
 }
 
-func QueryNodeTokenIdentityByBindingBuild(args QueryNodeTokenIdentityByBindingArgs) string {
+func NodeTokenIdentityByBindingBuild(args NodeTokenIdentityByBindingArgs) string {
 	var b strings.Builder
-	b.WriteString("queryNodeTokenIdentityByBinding({")
+	b.WriteString("nodeTokenIdentityByBinding({")
 	b.WriteString("nodeType: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeType))
-	if b.Len() > 33 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeId: ")
@@ -2439,219 +2439,219 @@ func QueryNodeTokenIdentityByBindingBuild(args QueryNodeTokenIdentityByBindingAr
 	return b.String()
 }
 
-// QueryNodeTokenIdentityById -- Lookup a single node_token identity row by canonical id. Drives the admin revoke path. memql#350.
+// NodeTokenIdentityById -- Lookup a single node_token identity row by canonical id. Drives the admin revoke path. memql#350.
 //
 // Bound concept: identity.
-type QueryNodeTokenIdentityByIdArgs struct {
+type NodeTokenIdentityByIdArgs struct {
 	IdentityId string
 }
 
-// QueryNodeTokenIdentityById calls the engine query queryNodeTokenIdentityById.
-func (qc *QueryClient) QueryNodeTokenIdentityById(ctx context.Context, args QueryNodeTokenIdentityByIdArgs) (*Result, error) {
-	call := QueryNodeTokenIdentityByIdBuild(args)
-	return qc.executeNamed(ctx, "queryNodeTokenIdentityById", call)
+// NodeTokenIdentityById calls the engine query nodeTokenIdentityById.
+func (qc *QueryClient) NodeTokenIdentityById(ctx context.Context, args NodeTokenIdentityByIdArgs) (*Result, error) {
+	call := NodeTokenIdentityByIdBuild(args)
+	return qc.executeNamed(ctx, "nodeTokenIdentityById", call)
 }
 
-func QueryNodeTokenIdentityByIdBuild(args QueryNodeTokenIdentityByIdArgs) string {
+func NodeTokenIdentityByIdBuild(args NodeTokenIdentityByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryNodeTokenIdentityById({")
+	b.WriteString("nodeTokenIdentityById({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryNodesForDeployment -- Latest-per-id cluster node rows for one deploymentId -- the live topology of that deployment (#1873). asOf latest collapses the append-only node stream to current state per node.
+// NodesForDeployment -- Latest-per-id cluster node rows for one deploymentId -- the live topology of that deployment (#1873). asOf latest collapses the append-only node stream to current state per node.
 //
 // Bound concept: node.
-type QueryNodesForDeploymentArgs struct {
+type NodesForDeploymentArgs struct {
 	DeploymentId string
 }
 
-// QueryNodesForDeployment calls the engine query queryNodesForDeployment.
-func (qc *QueryClient) QueryNodesForDeployment(ctx context.Context, args QueryNodesForDeploymentArgs) (*Result, error) {
-	call := QueryNodesForDeploymentBuild(args)
-	return qc.executeNamed(ctx, "queryNodesForDeployment", call)
+// NodesForDeployment calls the engine query nodesForDeployment.
+func (qc *QueryClient) NodesForDeployment(ctx context.Context, args NodesForDeploymentArgs) (*Result, error) {
+	call := NodesForDeploymentBuild(args)
+	return qc.executeNamed(ctx, "nodesForDeployment", call)
 }
 
-func QueryNodesForDeploymentBuild(args QueryNodesForDeploymentArgs) string {
+func NodesForDeploymentBuild(args NodesForDeploymentArgs) string {
 	var b strings.Builder
-	b.WriteString("queryNodesForDeployment({")
+	b.WriteString("nodesForDeployment({")
 	b.WriteString("deploymentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryNodesNotInDeployment -- Latest-per-id cluster nodes whose deploymentId != the supplied current deployment -- orphans from a previous deploy (feeds the reaper #1874 + cockpit orphan highlight). #1873.
+// NodesNotInDeployment -- Latest-per-id cluster nodes whose deploymentId != the supplied current deployment -- orphans from a previous deploy (feeds the reaper #1874 + cockpit orphan highlight). #1873.
 //
 // Bound concept: node.
-type QueryNodesNotInDeploymentArgs struct {
+type NodesNotInDeploymentArgs struct {
 	DeploymentId string
 }
 
-// QueryNodesNotInDeployment calls the engine query queryNodesNotInDeployment.
-func (qc *QueryClient) QueryNodesNotInDeployment(ctx context.Context, args QueryNodesNotInDeploymentArgs) (*Result, error) {
-	call := QueryNodesNotInDeploymentBuild(args)
-	return qc.executeNamed(ctx, "queryNodesNotInDeployment", call)
+// NodesNotInDeployment calls the engine query nodesNotInDeployment.
+func (qc *QueryClient) NodesNotInDeployment(ctx context.Context, args NodesNotInDeploymentArgs) (*Result, error) {
+	call := NodesNotInDeploymentBuild(args)
+	return qc.executeNamed(ctx, "nodesNotInDeployment", call)
 }
 
-func QueryNodesNotInDeploymentBuild(args QueryNodesNotInDeploymentArgs) string {
+func NodesNotInDeploymentBuild(args NodesNotInDeploymentArgs) string {
 	var b strings.Builder
-	b.WriteString("queryNodesNotInDeployment({")
+	b.WriteString("nodesNotInDeployment({")
 	b.WriteString("deploymentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryNoteById -- Fetch a single note by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's note even with its id. Used by the update tool to confirm the row exists before re-inserting a new version.
+// NoteById -- Fetch a single note by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's note even with its id. Used by the update tool to confirm the row exists before re-inserting a new version.
 //
 // Bound concept: note.
-type QueryNoteByIdArgs struct {
+type NoteByIdArgs struct {
 	NoteId string
 }
 
-// QueryNoteById calls the engine query queryNoteById.
-func (qc *QueryClient) QueryNoteById(ctx context.Context, args QueryNoteByIdArgs) (*Result, error) {
-	call := QueryNoteByIdBuild(args)
-	return qc.executeNamed(ctx, "queryNoteById", call)
+// NoteById calls the engine query noteById.
+func (qc *QueryClient) NoteById(ctx context.Context, args NoteByIdArgs) (*Result, error) {
+	call := NoteByIdBuild(args)
+	return qc.executeNamed(ctx, "noteById", call)
 }
 
-func QueryNoteByIdBuild(args QueryNoteByIdArgs) string {
+func NoteByIdBuild(args NoteByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryNoteById({")
+	b.WriteString("noteById({")
 	b.WriteString("noteId: ")
 	b.WriteString(fmt.Sprintf("%q", args.NoteId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryNotes -- List the caller's notes. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible.
+// Notes -- List the caller's notes. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible.
 //
 // Bound concept: note.
-type QueryNotesArgs struct {
+type NotesArgs struct {
 }
 
-// QueryNotes calls the engine query queryNotes.
-func (qc *QueryClient) QueryNotes(ctx context.Context, args QueryNotesArgs) (*Result, error) {
-	call := QueryNotesBuild(args)
-	return qc.executeNamed(ctx, "queryNotes", call)
+// Notes calls the engine query notes.
+func (qc *QueryClient) Notes(ctx context.Context, args NotesArgs) (*Result, error) {
+	call := NotesBuild(args)
+	return qc.executeNamed(ctx, "notes", call)
 }
 
-func QueryNotesBuild(args QueryNotesArgs) string {
+func NotesBuild(args NotesArgs) string {
 	_ = args
-	return "queryNotes({})"
+	return "notes({})"
 }
 
-// QueryNotesByTag -- Search the caller's notes by tag. Owned: ownerUserId==actor.userId gates the row set server-side; the tag predicate narrows to notes carrying the given tag. Body substring matching is done client-side over this caller-scoped result so the search never leaks across users.
+// NotesByTag -- Search the caller's notes by tag. Owned: ownerUserId==actor.userId gates the row set server-side; the tag predicate narrows to notes carrying the given tag. Body substring matching is done client-side over this caller-scoped result so the search never leaks across users.
 //
 // Bound concept: note.
-type QueryNotesByTagArgs struct {
+type NotesByTagArgs struct {
 	Tag string
 }
 
-// QueryNotesByTag calls the engine query queryNotesByTag.
-func (qc *QueryClient) QueryNotesByTag(ctx context.Context, args QueryNotesByTagArgs) (*Result, error) {
-	call := QueryNotesByTagBuild(args)
-	return qc.executeNamed(ctx, "queryNotesByTag", call)
+// NotesByTag calls the engine query notesByTag.
+func (qc *QueryClient) NotesByTag(ctx context.Context, args NotesByTagArgs) (*Result, error) {
+	call := NotesByTagBuild(args)
+	return qc.executeNamed(ctx, "notesByTag", call)
 }
 
-func QueryNotesByTagBuild(args QueryNotesByTagArgs) string {
+func NotesByTagBuild(args NotesByTagArgs) string {
 	var b strings.Builder
-	b.WriteString("queryNotesByTag({")
+	b.WriteString("notesByTag({")
 	b.WriteString("tag: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tag))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryNumberByE164 -- Resolve an owned DID row by its E.164 (newest first). Used to set E911 / compliance state by number.
+// NumberByE164 -- Resolve an owned DID row by its E.164 (newest first). Used to set E911 / compliance state by number.
 //
 // Bound concept: number.
-type QueryNumberByE164Args struct {
+type NumberByE164Args struct {
 	E164 string
 }
 
-// QueryNumberByE164 calls the engine query queryNumberByE164.
-func (qc *QueryClient) QueryNumberByE164(ctx context.Context, args QueryNumberByE164Args) (*Result, error) {
-	call := QueryNumberByE164Build(args)
-	return qc.executeNamed(ctx, "queryNumberByE164", call)
+// NumberByE164 calls the engine query numberByE164.
+func (qc *QueryClient) NumberByE164(ctx context.Context, args NumberByE164Args) (*Result, error) {
+	call := NumberByE164Build(args)
+	return qc.executeNamed(ctx, "numberByE164", call)
 }
 
-func QueryNumberByE164Build(args QueryNumberByE164Args) string {
+func NumberByE164Build(args NumberByE164Args) string {
 	var b strings.Builder
-	b.WriteString("queryNumberByE164({")
+	b.WriteString("numberByE164({")
 	b.WriteString("e164: ")
 	b.WriteString(fmt.Sprintf("%q", args.E164))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryNumbersByPartition -- ADMIN: DIDs provisioned to a partition, newest first. Cluster-owner gated -- numbers are cluster infrastructure.
+// NumbersByPartition -- ADMIN: DIDs provisioned to a partition, newest first. Cluster-owner gated -- numbers are cluster infrastructure.
 //
 // Bound concept: number.
-type QueryNumbersByPartitionArgs struct {
+type NumbersByPartitionArgs struct {
 	PartitionId string
 }
 
-// QueryNumbersByPartition calls the engine query queryNumbersByPartition.
-func (qc *QueryClient) QueryNumbersByPartition(ctx context.Context, args QueryNumbersByPartitionArgs) (*Result, error) {
-	call := QueryNumbersByPartitionBuild(args)
-	return qc.executeNamed(ctx, "queryNumbersByPartition", call)
+// NumbersByPartition calls the engine query numbersByPartition.
+func (qc *QueryClient) NumbersByPartition(ctx context.Context, args NumbersByPartitionArgs) (*Result, error) {
+	call := NumbersByPartitionBuild(args)
+	return qc.executeNamed(ctx, "numbersByPartition", call)
 }
 
-func QueryNumbersByPartitionBuild(args QueryNumbersByPartitionArgs) string {
+func NumbersByPartitionBuild(args NumbersByPartitionArgs) string {
 	var b strings.Builder
-	b.WriteString("queryNumbersByPartition({")
+	b.WriteString("numbersByPartition({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryOAuthClientByClientId -- Returns the dynamically-registered OAuth client whose clientId matches the argument. Zero or one result.
+// OAuthClientByClientId -- Returns the dynamically-registered OAuth client whose clientId matches the argument. Zero or one result.
 //
 // Bound concept: oauthClient.
-type QueryOAuthClientByClientIdArgs struct {
+type OAuthClientByClientIdArgs struct {
 	ClientId string
 }
 
-// QueryOAuthClientByClientId calls the engine query queryOAuthClientByClientId.
-func (qc *QueryClient) QueryOAuthClientByClientId(ctx context.Context, args QueryOAuthClientByClientIdArgs) (*Result, error) {
-	call := QueryOAuthClientByClientIdBuild(args)
-	return qc.executeNamed(ctx, "queryOAuthClientByClientId", call)
+// OAuthClientByClientId calls the engine query oAuthClientByClientId.
+func (qc *QueryClient) OAuthClientByClientId(ctx context.Context, args OAuthClientByClientIdArgs) (*Result, error) {
+	call := OAuthClientByClientIdBuild(args)
+	return qc.executeNamed(ctx, "oAuthClientByClientId", call)
 }
 
-func QueryOAuthClientByClientIdBuild(args QueryOAuthClientByClientIdArgs) string {
+func OAuthClientByClientIdBuild(args OAuthClientByClientIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryOAuthClientByClientId({")
+	b.WriteString("oAuthClientByClientId({")
 	b.WriteString("clientId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ClientId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryParticipantByAgentSpace -- Check if an AI agent is already a participant in a space (excludes left status)
+// ParticipantByAgentSpace -- Check if an AI agent is already a participant in a space (excludes left status)
 //
 // Bound concept: participant.
-type QueryParticipantByAgentSpaceArgs struct {
+type ParticipantByAgentSpaceArgs struct {
 	PartitionId string
 	AgentId     string
 }
 
-// QueryParticipantByAgentSpace calls the engine query queryParticipantByAgentSpace.
-func (qc *QueryClient) QueryParticipantByAgentSpace(ctx context.Context, args QueryParticipantByAgentSpaceArgs) (*Result, error) {
-	call := QueryParticipantByAgentSpaceBuild(args)
-	return qc.executeNamed(ctx, "queryParticipantByAgentSpace", call)
+// ParticipantByAgentSpace calls the engine query participantByAgentSpace.
+func (qc *QueryClient) ParticipantByAgentSpace(ctx context.Context, args ParticipantByAgentSpaceArgs) (*Result, error) {
+	call := ParticipantByAgentSpaceBuild(args)
+	return qc.executeNamed(ctx, "participantByAgentSpace", call)
 }
 
-func QueryParticipantByAgentSpaceBuild(args QueryParticipantByAgentSpaceArgs) string {
+func ParticipantByAgentSpaceBuild(args ParticipantByAgentSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("queryParticipantByAgentSpace({")
+	b.WriteString("participantByAgentSpace({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 30 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
@@ -2660,29 +2660,29 @@ func QueryParticipantByAgentSpaceBuild(args QueryParticipantByAgentSpaceArgs) st
 	return b.String()
 }
 
-// QueryParticipantSession -- Returns session state for participants in spaces. Optional filters: partitionId, participantId
+// ParticipantSession -- Returns session state for participants in spaces. Optional filters: partitionId, participantId
 //
 // Bound concept: session.
-type QueryParticipantSessionArgs struct {
+type ParticipantSessionArgs struct {
 	PartitionId   string
 	ParticipantId string
 }
 
-// QueryParticipantSession calls the engine query queryParticipantSession.
-func (qc *QueryClient) QueryParticipantSession(ctx context.Context, args QueryParticipantSessionArgs) (*Result, error) {
-	call := QueryParticipantSessionBuild(args)
-	return qc.executeNamed(ctx, "queryParticipantSession", call)
+// ParticipantSession calls the engine query participantSession.
+func (qc *QueryClient) ParticipantSession(ctx context.Context, args ParticipantSessionArgs) (*Result, error) {
+	call := ParticipantSessionBuild(args)
+	return qc.executeNamed(ctx, "participantSession", call)
 }
 
-func QueryParticipantSessionBuild(args QueryParticipantSessionArgs) string {
+func ParticipantSessionBuild(args ParticipantSessionArgs) string {
 	var b strings.Builder
-	b.WriteString("queryParticipantSession({")
+	b.WriteString("participantSession({")
 	if args.PartitionId != "" {
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.ParticipantId != "" {
-		if b.Len() > 25 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantId: ")
@@ -2692,176 +2692,176 @@ func QueryParticipantSessionBuild(args QueryParticipantSessionArgs) string {
 	return b.String()
 }
 
-// QueryPatIdentitiesForUser -- List PAT (api_key) identities owned by a user, in patSummary shape (no credentials).
+// PatIdentitiesForUser -- List PAT (api_key) identities owned by a user, in patSummary shape (no credentials).
 //
 // Bound concept: identity.
-type QueryPatIdentitiesForUserArgs struct {
+type PatIdentitiesForUserArgs struct {
 	UserId string
 }
 
-// QueryPatIdentitiesForUser calls the engine query queryPatIdentitiesForUser.
-func (qc *QueryClient) QueryPatIdentitiesForUser(ctx context.Context, args QueryPatIdentitiesForUserArgs) (*Result, error) {
-	call := QueryPatIdentitiesForUserBuild(args)
-	return qc.executeNamed(ctx, "queryPatIdentitiesForUser", call)
+// PatIdentitiesForUser calls the engine query patIdentitiesForUser.
+func (qc *QueryClient) PatIdentitiesForUser(ctx context.Context, args PatIdentitiesForUserArgs) (*Result, error) {
+	call := PatIdentitiesForUserBuild(args)
+	return qc.executeNamed(ctx, "patIdentitiesForUser", call)
 }
 
-func QueryPatIdentitiesForUserBuild(args QueryPatIdentitiesForUserArgs) string {
+func PatIdentitiesForUserBuild(args PatIdentitiesForUserArgs) string {
 	var b strings.Builder
-	b.WriteString("queryPatIdentitiesForUser({")
+	b.WriteString("patIdentitiesForUser({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryPatIdentityById -- Lookup a PAT identity by id (full shape, includes keyHash). Server-side only -- never feed to UI.
+// PatIdentityById -- Lookup a PAT identity by id (full shape, includes keyHash). Server-side only -- never feed to UI.
 //
 // Bound concept: identity.
-type QueryPatIdentityByIdArgs struct {
+type PatIdentityByIdArgs struct {
 	IdentityId string
 }
 
-// QueryPatIdentityById calls the engine query queryPatIdentityById.
-func (qc *QueryClient) QueryPatIdentityById(ctx context.Context, args QueryPatIdentityByIdArgs) (*Result, error) {
-	call := QueryPatIdentityByIdBuild(args)
-	return qc.executeNamed(ctx, "queryPatIdentityById", call)
+// PatIdentityById calls the engine query patIdentityById.
+func (qc *QueryClient) PatIdentityById(ctx context.Context, args PatIdentityByIdArgs) (*Result, error) {
+	call := PatIdentityByIdBuild(args)
+	return qc.executeNamed(ctx, "patIdentityById", call)
 }
 
-func QueryPatIdentityByIdBuild(args QueryPatIdentityByIdArgs) string {
+func PatIdentityByIdBuild(args PatIdentityByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryPatIdentityById({")
+	b.WriteString("patIdentityById({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryPatIdentityByKeyHash -- Hot-path PAT lookup by keyHash for the gRPC interceptor. Returns active + inactive rows.
+// PatIdentityByKeyHash -- Hot-path PAT lookup by keyHash for the gRPC interceptor. Returns active + inactive rows.
 //
 // Bound concept: identity.
-type QueryPatIdentityByKeyHashArgs struct {
+type PatIdentityByKeyHashArgs struct {
 	KeyHash string
 }
 
-// QueryPatIdentityByKeyHash calls the engine query queryPatIdentityByKeyHash.
-func (qc *QueryClient) QueryPatIdentityByKeyHash(ctx context.Context, args QueryPatIdentityByKeyHashArgs) (*Result, error) {
-	call := QueryPatIdentityByKeyHashBuild(args)
-	return qc.executeNamed(ctx, "queryPatIdentityByKeyHash", call)
+// PatIdentityByKeyHash calls the engine query patIdentityByKeyHash.
+func (qc *QueryClient) PatIdentityByKeyHash(ctx context.Context, args PatIdentityByKeyHashArgs) (*Result, error) {
+	call := PatIdentityByKeyHashBuild(args)
+	return qc.executeNamed(ctx, "patIdentityByKeyHash", call)
 }
 
-func QueryPatIdentityByKeyHashBuild(args QueryPatIdentityByKeyHashArgs) string {
+func PatIdentityByKeyHashBuild(args PatIdentityByKeyHashArgs) string {
 	var b strings.Builder
-	b.WriteString("queryPatIdentityByKeyHash({")
+	b.WriteString("patIdentityByKeyHash({")
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryPendingAccessRequests -- Access requests with status=pending; backs the admin review queue.
+// PendingAccessRequests -- Access requests with status=pending; backs the admin review queue.
 //
 // Bound concept: accessRequest.
-type QueryPendingAccessRequestsArgs struct {
+type PendingAccessRequestsArgs struct {
 }
 
-// QueryPendingAccessRequests calls the engine query queryPendingAccessRequests.
-func (qc *QueryClient) QueryPendingAccessRequests(ctx context.Context, args QueryPendingAccessRequestsArgs) (*Result, error) {
-	call := QueryPendingAccessRequestsBuild(args)
-	return qc.executeNamed(ctx, "queryPendingAccessRequests", call)
+// PendingAccessRequests calls the engine query pendingAccessRequests.
+func (qc *QueryClient) PendingAccessRequests(ctx context.Context, args PendingAccessRequestsArgs) (*Result, error) {
+	call := PendingAccessRequestsBuild(args)
+	return qc.executeNamed(ctx, "pendingAccessRequests", call)
 }
 
-func QueryPendingAccessRequestsBuild(args QueryPendingAccessRequestsArgs) string {
+func PendingAccessRequestsBuild(args PendingAccessRequestsArgs) string {
 	_ = args
-	return "queryPendingAccessRequests({})"
+	return "pendingAccessRequests({})"
 }
 
-// QueryPlanById -- Single Plan by id.
+// PlanById -- Single Plan by id.
 //
 // Bound concept: plan.
-type QueryPlanByIdArgs struct {
+type PlanByIdArgs struct {
 	PlanId string
 }
 
-// QueryPlanById calls the engine query queryPlanById.
-func (qc *QueryClient) QueryPlanById(ctx context.Context, args QueryPlanByIdArgs) (*Result, error) {
-	call := QueryPlanByIdBuild(args)
-	return qc.executeNamed(ctx, "queryPlanById", call)
+// PlanById calls the engine query planById.
+func (qc *QueryClient) PlanById(ctx context.Context, args PlanByIdArgs) (*Result, error) {
+	call := PlanByIdBuild(args)
+	return qc.executeNamed(ctx, "planById", call)
 }
 
-func QueryPlanByIdBuild(args QueryPlanByIdArgs) string {
+func PlanByIdBuild(args PlanByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryPlanById({")
+	b.WriteString("planById({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryPlansForResponsibility -- Every Plan the reactive loop spawned for a responsibility, matched on the input.responsibilityId back-pointer. Backs the C1 dedup guard (one live Plan per continuous responsibility). Terminal-vs-live filtering happens Go-side (no NOT/OR in MemQL filters).
+// PlansForResponsibility -- Every Plan the reactive loop spawned for a responsibility, matched on the input.responsibilityId back-pointer. Backs the C1 dedup guard (one live Plan per continuous responsibility). Terminal-vs-live filtering happens Go-side (no NOT/OR in MemQL filters).
 //
 // Bound concept: plan.
-type QueryPlansForResponsibilityArgs struct {
+type PlansForResponsibilityArgs struct {
 	ResponsibilityId string
 }
 
-// QueryPlansForResponsibility calls the engine query queryPlansForResponsibility.
-func (qc *QueryClient) QueryPlansForResponsibility(ctx context.Context, args QueryPlansForResponsibilityArgs) (*Result, error) {
-	call := QueryPlansForResponsibilityBuild(args)
-	return qc.executeNamed(ctx, "queryPlansForResponsibility", call)
+// PlansForResponsibility calls the engine query plansForResponsibility.
+func (qc *QueryClient) PlansForResponsibility(ctx context.Context, args PlansForResponsibilityArgs) (*Result, error) {
+	call := PlansForResponsibilityBuild(args)
+	return qc.executeNamed(ctx, "plansForResponsibility", call)
 }
 
-func QueryPlansForResponsibilityBuild(args QueryPlansForResponsibilityArgs) string {
+func PlansForResponsibilityBuild(args PlansForResponsibilityArgs) string {
 	var b strings.Builder
-	b.WriteString("queryPlansForResponsibility({")
+	b.WriteString("plansForResponsibility({")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryPlansForSpace -- All Plans in a space (Tasks page list). Frontend groups by status and applies the Done-window visual filter.
+// PlansForSpace -- All Plans in a space (Tasks page list). Frontend groups by status and applies the Done-window visual filter.
 //
 // Bound concept: plan.
-type QueryPlansForSpaceArgs struct {
+type PlansForSpaceArgs struct {
 	PartitionId string
 }
 
-// QueryPlansForSpace calls the engine query queryPlansForSpace.
-func (qc *QueryClient) QueryPlansForSpace(ctx context.Context, args QueryPlansForSpaceArgs) (*Result, error) {
-	call := QueryPlansForSpaceBuild(args)
-	return qc.executeNamed(ctx, "queryPlansForSpace", call)
+// PlansForSpace calls the engine query plansForSpace.
+func (qc *QueryClient) PlansForSpace(ctx context.Context, args PlansForSpaceArgs) (*Result, error) {
+	call := PlansForSpaceBuild(args)
+	return qc.executeNamed(ctx, "plansForSpace", call)
 }
 
-func QueryPlansForSpaceBuild(args QueryPlansForSpaceArgs) string {
+func PlansForSpaceBuild(args PlansForSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("queryPlansForSpace({")
+	b.WriteString("plansForSpace({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryPolicy -- Returns the validation policy for a record type. Space-specific policies take precedence over global.
+// Policy -- Returns the validation policy for a record type. Space-specific policies take precedence over global.
 //
 // Bound concept: policy.
-type QueryPolicyArgs struct {
+type PolicyArgs struct {
 	TargetRecordType string
 	PartitionId      string
 }
 
-// QueryPolicy calls the engine query queryPolicy.
-func (qc *QueryClient) QueryPolicy(ctx context.Context, args QueryPolicyArgs) (*Result, error) {
-	call := QueryPolicyBuild(args)
-	return qc.executeNamed(ctx, "queryPolicy", call)
+// Policy calls the engine query policy.
+func (qc *QueryClient) Policy(ctx context.Context, args PolicyArgs) (*Result, error) {
+	call := PolicyBuild(args)
+	return qc.executeNamed(ctx, "policy", call)
 }
 
-func QueryPolicyBuild(args QueryPolicyArgs) string {
+func PolicyBuild(args PolicyArgs) string {
 	var b strings.Builder
-	b.WriteString("queryPolicy({")
+	b.WriteString("policy({")
 	b.WriteString("targetRecordType: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetRecordType))
 	if args.PartitionId != "" {
-		if b.Len() > 13 {
+		if b.Len() > 8 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
@@ -2871,127 +2871,127 @@ func QueryPolicyBuild(args QueryPolicyArgs) string {
 	return b.String()
 }
 
-// QueryPolicyTracesForPolicy -- Recent persisted policy traces for the named policy, most-recent first.
+// PolicyTracesForPolicy -- Recent persisted policy traces for the named policy, most-recent first.
 //
 // Bound concept: policyTrace.
-type QueryPolicyTracesForPolicyArgs struct {
+type PolicyTracesForPolicyArgs struct {
 	PolicyName string
 }
 
-// QueryPolicyTracesForPolicy calls the engine query queryPolicyTracesForPolicy.
-func (qc *QueryClient) QueryPolicyTracesForPolicy(ctx context.Context, args QueryPolicyTracesForPolicyArgs) (*Result, error) {
-	call := QueryPolicyTracesForPolicyBuild(args)
-	return qc.executeNamed(ctx, "queryPolicyTracesForPolicy", call)
+// PolicyTracesForPolicy calls the engine query policyTracesForPolicy.
+func (qc *QueryClient) PolicyTracesForPolicy(ctx context.Context, args PolicyTracesForPolicyArgs) (*Result, error) {
+	call := PolicyTracesForPolicyBuild(args)
+	return qc.executeNamed(ctx, "policyTracesForPolicy", call)
 }
 
-func QueryPolicyTracesForPolicyBuild(args QueryPolicyTracesForPolicyArgs) string {
+func PolicyTracesForPolicyBuild(args PolicyTracesForPolicyArgs) string {
 	var b strings.Builder
-	b.WriteString("queryPolicyTracesForPolicy({")
+	b.WriteString("policyTracesForPolicy({")
 	b.WriteString("policyName: ")
 	b.WriteString(fmt.Sprintf("%q", args.PolicyName))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryProjectById -- Resolve a v1:forge:project by id.
+// ProjectById -- Resolve a v1:forge:project by id.
 //
 // Bound concept: project.
-type QueryProjectByIdArgs struct {
+type ProjectByIdArgs struct {
 	ProjectId string
 }
 
-// QueryProjectById calls the engine query queryProjectById.
-func (qc *QueryClient) QueryProjectById(ctx context.Context, args QueryProjectByIdArgs) (*Result, error) {
-	call := QueryProjectByIdBuild(args)
-	return qc.executeNamed(ctx, "queryProjectById", call)
+// ProjectById calls the engine query projectById.
+func (qc *QueryClient) ProjectById(ctx context.Context, args ProjectByIdArgs) (*Result, error) {
+	call := ProjectByIdBuild(args)
+	return qc.executeNamed(ctx, "projectById", call)
 }
 
-func QueryProjectByIdBuild(args QueryProjectByIdArgs) string {
+func ProjectByIdBuild(args ProjectByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryProjectById({")
+	b.WriteString("projectById({")
 	b.WriteString("projectId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ProjectId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryProjectBySlug -- Resolve a v1:forge:project by its stable slug (e.g. 'memql', 'copresent-acme'). Claude uses this to go from a human-supplied name to a projectId before submitting a request or filtering requests. Returns at most one row because slugs are unique within a partition.
+// ProjectBySlug -- Resolve a v1:forge:project by its stable slug (e.g. 'memql', 'copresent-acme'). Claude uses this to go from a human-supplied name to a projectId before submitting a request or filtering requests. Returns at most one row because slugs are unique within a partition.
 //
 // Bound concept: project.
-type QueryProjectBySlugArgs struct {
+type ProjectBySlugArgs struct {
 	Slug string
 }
 
-// QueryProjectBySlug calls the engine query queryProjectBySlug.
-func (qc *QueryClient) QueryProjectBySlug(ctx context.Context, args QueryProjectBySlugArgs) (*Result, error) {
-	call := QueryProjectBySlugBuild(args)
-	return qc.executeNamed(ctx, "queryProjectBySlug", call)
+// ProjectBySlug calls the engine query projectBySlug.
+func (qc *QueryClient) ProjectBySlug(ctx context.Context, args ProjectBySlugArgs) (*Result, error) {
+	call := ProjectBySlugBuild(args)
+	return qc.executeNamed(ctx, "projectBySlug", call)
 }
 
-func QueryProjectBySlugBuild(args QueryProjectBySlugArgs) string {
+func ProjectBySlugBuild(args ProjectBySlugArgs) string {
 	var b strings.Builder
-	b.WriteString("queryProjectBySlug({")
+	b.WriteString("projectBySlug({")
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryProjectRequests -- List requests by project, newest-first.
+// ProjectRequests -- List requests by project, newest-first.
 //
 // Bound concept: request.
-type QueryProjectRequestsArgs struct {
+type ProjectRequestsArgs struct {
 	ProjectId string
 }
 
-// QueryProjectRequests calls the engine query queryProjectRequests.
-func (qc *QueryClient) QueryProjectRequests(ctx context.Context, args QueryProjectRequestsArgs) (*Result, error) {
-	call := QueryProjectRequestsBuild(args)
-	return qc.executeNamed(ctx, "queryProjectRequests", call)
+// ProjectRequests calls the engine query projectRequests.
+func (qc *QueryClient) ProjectRequests(ctx context.Context, args ProjectRequestsArgs) (*Result, error) {
+	call := ProjectRequestsBuild(args)
+	return qc.executeNamed(ctx, "projectRequests", call)
 }
 
-func QueryProjectRequestsBuild(args QueryProjectRequestsArgs) string {
+func ProjectRequestsBuild(args ProjectRequestsArgs) string {
 	var b strings.Builder
-	b.WriteString("queryProjectRequests({")
+	b.WriteString("projectRequests({")
 	b.WriteString("projectId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ProjectId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryProvisionedWorkspaces -- List provisioned workspaces for inventory / debugging. Filtered to status=provisioned so released rows don't clutter the view.
+// ProvisionedWorkspaces -- List provisioned workspaces for inventory / debugging. Filtered to status=provisioned so released rows don't clutter the view.
 //
 // Bound concept: workspace.
-type QueryProvisionedWorkspacesArgs struct {
+type ProvisionedWorkspacesArgs struct {
 }
 
-// QueryProvisionedWorkspaces calls the engine query queryProvisionedWorkspaces.
-func (qc *QueryClient) QueryProvisionedWorkspaces(ctx context.Context, args QueryProvisionedWorkspacesArgs) (*Result, error) {
-	call := QueryProvisionedWorkspacesBuild(args)
-	return qc.executeNamed(ctx, "queryProvisionedWorkspaces", call)
+// ProvisionedWorkspaces calls the engine query provisionedWorkspaces.
+func (qc *QueryClient) ProvisionedWorkspaces(ctx context.Context, args ProvisionedWorkspacesArgs) (*Result, error) {
+	call := ProvisionedWorkspacesBuild(args)
+	return qc.executeNamed(ctx, "provisionedWorkspaces", call)
 }
 
-func QueryProvisionedWorkspacesBuild(args QueryProvisionedWorkspacesArgs) string {
+func ProvisionedWorkspacesBuild(args ProvisionedWorkspacesArgs) string {
 	_ = args
-	return "queryProvisionedWorkspaces({})"
+	return "provisionedWorkspaces({})"
 }
 
-// QueryRecentAuditEvents -- Recent audit events, optionally filtered by category. Powers the admin audit-log view.
+// RecentAuditEvents -- Recent audit events, optionally filtered by category. Powers the admin audit-log view.
 //
 // Bound concept: auditEvent.
-type QueryRecentAuditEventsArgs struct {
+type RecentAuditEventsArgs struct {
 	Category string
 }
 
-// QueryRecentAuditEvents calls the engine query queryRecentAuditEvents.
-func (qc *QueryClient) QueryRecentAuditEvents(ctx context.Context, args QueryRecentAuditEventsArgs) (*Result, error) {
-	call := QueryRecentAuditEventsBuild(args)
-	return qc.executeNamed(ctx, "queryRecentAuditEvents", call)
+// RecentAuditEvents calls the engine query recentAuditEvents.
+func (qc *QueryClient) RecentAuditEvents(ctx context.Context, args RecentAuditEventsArgs) (*Result, error) {
+	call := RecentAuditEventsBuild(args)
+	return qc.executeNamed(ctx, "recentAuditEvents", call)
 }
 
-func QueryRecentAuditEventsBuild(args QueryRecentAuditEventsArgs) string {
+func RecentAuditEventsBuild(args RecentAuditEventsArgs) string {
 	var b strings.Builder
-	b.WriteString("queryRecentAuditEvents({")
+	b.WriteString("recentAuditEvents({")
 	if args.Category != "" {
 		b.WriteString("category: ")
 		b.WriteString(fmt.Sprintf("%q", args.Category))
@@ -3000,45 +3000,45 @@ func QueryRecentAuditEventsBuild(args QueryRecentAuditEventsArgs) string {
 	return b.String()
 }
 
-// QueryRecordsByState -- Returns active data records. Optional filters: partitionId, recordType, validationState, importSource
+// RecordsByState -- Returns active data records. Optional filters: partitionId, recordType, validationState, importSource
 //
 // Bound concept: record.
-type QueryRecordsByStateArgs struct {
+type RecordsByStateArgs struct {
 	PartitionId     string
 	RecordType      string
 	ValidationState string
 	ImportSource    string
 }
 
-// QueryRecordsByState calls the engine query queryRecordsByState.
-func (qc *QueryClient) QueryRecordsByState(ctx context.Context, args QueryRecordsByStateArgs) (*Result, error) {
-	call := QueryRecordsByStateBuild(args)
-	return qc.executeNamed(ctx, "queryRecordsByState", call)
+// RecordsByState calls the engine query recordsByState.
+func (qc *QueryClient) RecordsByState(ctx context.Context, args RecordsByStateArgs) (*Result, error) {
+	call := RecordsByStateBuild(args)
+	return qc.executeNamed(ctx, "recordsByState", call)
 }
 
-func QueryRecordsByStateBuild(args QueryRecordsByStateArgs) string {
+func RecordsByStateBuild(args RecordsByStateArgs) string {
 	var b strings.Builder
-	b.WriteString("queryRecordsByState({")
+	b.WriteString("recordsByState({")
 	if args.PartitionId != "" {
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.RecordType != "" {
-		if b.Len() > 21 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recordType: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecordType))
 	}
 	if args.ValidationState != "" {
-		if b.Len() > 21 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("validationState: ")
 		b.WriteString(fmt.Sprintf("%q", args.ValidationState))
 	}
 	if args.ImportSource != "" {
-		if b.Len() > 21 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("importSource: ")
@@ -3048,105 +3048,105 @@ func QueryRecordsByStateBuild(args QueryRecordsByStateArgs) string {
 	return b.String()
 }
 
-// QueryRequestById -- Resolve a single v1:forge:request by id (detail view).
+// RequestById -- Resolve a single v1:forge:request by id (detail view).
 //
 // Bound concept: request.
-type QueryRequestByIdArgs struct {
+type RequestByIdArgs struct {
 	RequestId string
 }
 
-// QueryRequestById calls the engine query queryRequestById.
-func (qc *QueryClient) QueryRequestById(ctx context.Context, args QueryRequestByIdArgs) (*Result, error) {
-	call := QueryRequestByIdBuild(args)
-	return qc.executeNamed(ctx, "queryRequestById", call)
+// RequestById calls the engine query requestById.
+func (qc *QueryClient) RequestById(ctx context.Context, args RequestByIdArgs) (*Result, error) {
+	call := RequestByIdBuild(args)
+	return qc.executeNamed(ctx, "requestById", call)
 }
 
-func QueryRequestByIdBuild(args QueryRequestByIdArgs) string {
+func RequestByIdBuild(args RequestByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryRequestById({")
+	b.WriteString("requestById({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryRequestEvents -- The full audit trail for a request, newest-first.
+// RequestEvents -- The full audit trail for a request, newest-first.
 //
 // Bound concept: requestEvent.
-type QueryRequestEventsArgs struct {
+type RequestEventsArgs struct {
 	RequestId string
 }
 
-// QueryRequestEvents calls the engine query queryRequestEvents.
-func (qc *QueryClient) QueryRequestEvents(ctx context.Context, args QueryRequestEventsArgs) (*Result, error) {
-	call := QueryRequestEventsBuild(args)
-	return qc.executeNamed(ctx, "queryRequestEvents", call)
+// RequestEvents calls the engine query requestEvents.
+func (qc *QueryClient) RequestEvents(ctx context.Context, args RequestEventsArgs) (*Result, error) {
+	call := RequestEventsBuild(args)
+	return qc.executeNamed(ctx, "requestEvents", call)
 }
 
-func QueryRequestEventsBuild(args QueryRequestEventsArgs) string {
+func RequestEventsBuild(args RequestEventsArgs) string {
 	var b strings.Builder
-	b.WriteString("queryRequestEvents({")
+	b.WriteString("requestEvents({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryResponsibilitiesForUser -- Every responsibility owned by the caller (all statuses + triggers). Backs the management surface. The ownerUserId predicate binds to actor.userId server-side so cross-user reads are impossible.
+// ResponsibilitiesForUser -- Every responsibility owned by the caller (all statuses + triggers). Backs the management surface. The ownerUserId predicate binds to actor.userId server-side so cross-user reads are impossible.
 //
 // Bound concept: responsibility.
-type QueryResponsibilitiesForUserArgs struct {
+type ResponsibilitiesForUserArgs struct {
 }
 
-// QueryResponsibilitiesForUser calls the engine query queryResponsibilitiesForUser.
-func (qc *QueryClient) QueryResponsibilitiesForUser(ctx context.Context, args QueryResponsibilitiesForUserArgs) (*Result, error) {
-	call := QueryResponsibilitiesForUserBuild(args)
-	return qc.executeNamed(ctx, "queryResponsibilitiesForUser", call)
+// ResponsibilitiesForUser calls the engine query responsibilitiesForUser.
+func (qc *QueryClient) ResponsibilitiesForUser(ctx context.Context, args ResponsibilitiesForUserArgs) (*Result, error) {
+	call := ResponsibilitiesForUserBuild(args)
+	return qc.executeNamed(ctx, "responsibilitiesForUser", call)
 }
 
-func QueryResponsibilitiesForUserBuild(args QueryResponsibilitiesForUserArgs) string {
+func ResponsibilitiesForUserBuild(args ResponsibilitiesForUserArgs) string {
 	_ = args
-	return "queryResponsibilitiesForUser({})"
+	return "responsibilitiesForUser({})"
 }
 
-// QueryResponsibilityById -- Single v1:planner:responsibility by id. Used by the intake dispatcher (#637) and the management UI's single-row refresh. Filters on id only -- mirrors queryPlanById; the owner-scoped list reads stay on queryResponsibilitiesForUser.
+// ResponsibilityById -- Single v1:planner:responsibility by id. Used by the intake dispatcher (#637) and the management UI's single-row refresh. Filters on id only -- mirrors planById; the owner-scoped list reads stay on responsibilitiesForUser.
 //
 // Bound concept: responsibility.
-type QueryResponsibilityByIdArgs struct {
+type ResponsibilityByIdArgs struct {
 	ResponsibilityId string
 }
 
-// QueryResponsibilityById calls the engine query queryResponsibilityById.
-func (qc *QueryClient) QueryResponsibilityById(ctx context.Context, args QueryResponsibilityByIdArgs) (*Result, error) {
-	call := QueryResponsibilityByIdBuild(args)
-	return qc.executeNamed(ctx, "queryResponsibilityById", call)
+// ResponsibilityById calls the engine query responsibilityById.
+func (qc *QueryClient) ResponsibilityById(ctx context.Context, args ResponsibilityByIdArgs) (*Result, error) {
+	call := ResponsibilityByIdBuild(args)
+	return qc.executeNamed(ctx, "responsibilityById", call)
 }
 
-func QueryResponsibilityByIdBuild(args QueryResponsibilityByIdArgs) string {
+func ResponsibilityByIdBuild(args ResponsibilityByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryResponsibilityById({")
+	b.WriteString("responsibilityById({")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryRouterBudgets -- Returns all active budget rows for the current partition.
+// RouterBudgets -- Returns all active budget rows for the current partition.
 //
 // Bound concept: budget.
-type QueryRouterBudgetsArgs struct {
+type RouterBudgetsArgs struct {
 	Scope string
 }
 
-// QueryRouterBudgets calls the engine query queryRouterBudgets.
-func (qc *QueryClient) QueryRouterBudgets(ctx context.Context, args QueryRouterBudgetsArgs) (*Result, error) {
-	call := QueryRouterBudgetsBuild(args)
-	return qc.executeNamed(ctx, "queryRouterBudgets", call)
+// RouterBudgets calls the engine query routerBudgets.
+func (qc *QueryClient) RouterBudgets(ctx context.Context, args RouterBudgetsArgs) (*Result, error) {
+	call := RouterBudgetsBuild(args)
+	return qc.executeNamed(ctx, "routerBudgets", call)
 }
 
-func QueryRouterBudgetsBuild(args QueryRouterBudgetsArgs) string {
+func RouterBudgetsBuild(args RouterBudgetsArgs) string {
 	var b strings.Builder
-	b.WriteString("queryRouterBudgets({")
+	b.WriteString("routerBudgets({")
 	if args.Scope != "" {
 		b.WriteString("scope: ")
 		b.WriteString(fmt.Sprintf("%q", args.Scope))
@@ -3155,62 +3155,62 @@ func QueryRouterBudgetsBuild(args QueryRouterBudgetsArgs) string {
 	return b.String()
 }
 
-// QueryRunningPlansForUser -- List a user's running plans.
+// RunningPlansForUser -- List a user's running plans.
 //
 // Bound concept: plan.
-type QueryRunningPlansForUserArgs struct {
+type RunningPlansForUserArgs struct {
 	UserId string
 }
 
-// QueryRunningPlansForUser calls the engine query queryRunningPlansForUser.
-func (qc *QueryClient) QueryRunningPlansForUser(ctx context.Context, args QueryRunningPlansForUserArgs) (*Result, error) {
-	call := QueryRunningPlansForUserBuild(args)
-	return qc.executeNamed(ctx, "queryRunningPlansForUser", call)
+// RunningPlansForUser calls the engine query runningPlansForUser.
+func (qc *QueryClient) RunningPlansForUser(ctx context.Context, args RunningPlansForUserArgs) (*Result, error) {
+	call := RunningPlansForUserBuild(args)
+	return qc.executeNamed(ctx, "runningPlansForUser", call)
 }
 
-func QueryRunningPlansForUserBuild(args QueryRunningPlansForUserArgs) string {
+func RunningPlansForUserBuild(args RunningPlansForUserArgs) string {
 	var b strings.Builder
-	b.WriteString("queryRunningPlansForUser({")
+	b.WriteString("runningPlansForUser({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryRunningTrainAgentPlans -- All currently-running trainAgent Plans across the tenant. Backs the Training Studio's per-agent in-flight lock; frontend filters by plan.input.agentId.
+// RunningTrainAgentPlans -- All currently-running trainAgent Plans across the tenant. Backs the Training Studio's per-agent in-flight lock; frontend filters by plan.input.agentId.
 //
 // Bound concept: plan.
-type QueryRunningTrainAgentPlansArgs struct {
+type RunningTrainAgentPlansArgs struct {
 }
 
-// QueryRunningTrainAgentPlans calls the engine query queryRunningTrainAgentPlans.
-func (qc *QueryClient) QueryRunningTrainAgentPlans(ctx context.Context, args QueryRunningTrainAgentPlansArgs) (*Result, error) {
-	call := QueryRunningTrainAgentPlansBuild(args)
-	return qc.executeNamed(ctx, "queryRunningTrainAgentPlans", call)
+// RunningTrainAgentPlans calls the engine query runningTrainAgentPlans.
+func (qc *QueryClient) RunningTrainAgentPlans(ctx context.Context, args RunningTrainAgentPlansArgs) (*Result, error) {
+	call := RunningTrainAgentPlansBuild(args)
+	return qc.executeNamed(ctx, "runningTrainAgentPlans", call)
 }
 
-func QueryRunningTrainAgentPlansBuild(args QueryRunningTrainAgentPlansArgs) string {
+func RunningTrainAgentPlansBuild(args RunningTrainAgentPlansArgs) string {
 	_ = args
-	return "queryRunningTrainAgentPlans({})"
+	return "runningTrainAgentPlans({})"
 }
 
-// QuerySearchUsers -- Search users, optionally gated by active status. Omit `active` to list every user; pass true to return only active users or false for only deactivated ones. Backs the searchUsers tool.
+// SearchUsers -- Search users, optionally gated by active status. Omit `active` to list every user; pass true to return only active users or false for only deactivated ones. Backs the searchUsers tool.
 //
 // Bound concept: user.
-type QuerySearchUsersArgs struct {
+type SearchUsersArgs struct {
 	Active    bool
 	ActiveSet bool // set true to send active; required because zero-value bool is ambiguous
 }
 
-// QuerySearchUsers calls the engine query querySearchUsers.
-func (qc *QueryClient) QuerySearchUsers(ctx context.Context, args QuerySearchUsersArgs) (*Result, error) {
-	call := QuerySearchUsersBuild(args)
-	return qc.executeNamed(ctx, "querySearchUsers", call)
+// SearchUsers calls the engine query searchUsers.
+func (qc *QueryClient) SearchUsers(ctx context.Context, args SearchUsersArgs) (*Result, error) {
+	call := SearchUsersBuild(args)
+	return qc.executeNamed(ctx, "searchUsers", call)
 }
 
-func QuerySearchUsersBuild(args QuerySearchUsersArgs) string {
+func SearchUsersBuild(args SearchUsersArgs) string {
 	var b strings.Builder
-	b.WriteString("querySearchUsers({")
+	b.WriteString("searchUsers({")
 	if args.ActiveSet {
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
@@ -3219,115 +3219,115 @@ func QuerySearchUsersBuild(args QuerySearchUsersArgs) string {
 	return b.String()
 }
 
-// QuerySiParticipantForSpace -- Find the active AI participant in a space.
+// SiParticipantForSpace -- Find the active AI participant in a space.
 //
 // Bound concept: participant.
-type QuerySiParticipantForSpaceArgs struct {
+type SiParticipantForSpaceArgs struct {
 	PartitionId string
 }
 
-// QuerySiParticipantForSpace calls the engine query querySiParticipantForSpace.
-func (qc *QueryClient) QuerySiParticipantForSpace(ctx context.Context, args QuerySiParticipantForSpaceArgs) (*Result, error) {
-	call := QuerySiParticipantForSpaceBuild(args)
-	return qc.executeNamed(ctx, "querySiParticipantForSpace", call)
+// SiParticipantForSpace calls the engine query siParticipantForSpace.
+func (qc *QueryClient) SiParticipantForSpace(ctx context.Context, args SiParticipantForSpaceArgs) (*Result, error) {
+	call := SiParticipantForSpaceBuild(args)
+	return qc.executeNamed(ctx, "siParticipantForSpace", call)
 }
 
-func QuerySiParticipantForSpaceBuild(args QuerySiParticipantForSpaceArgs) string {
+func SiParticipantForSpaceBuild(args SiParticipantForSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("querySiParticipantForSpace({")
+	b.WriteString("siParticipantForSpace({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QuerySkillBySlug -- Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it.
+// SkillBySlug -- Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it.
 //
 // Bound concept: skill.
-type QuerySkillBySlugArgs struct {
+type SkillBySlugArgs struct {
 	Slug string
 }
 
-// QuerySkillBySlug calls the engine query querySkillBySlug.
-func (qc *QueryClient) QuerySkillBySlug(ctx context.Context, args QuerySkillBySlugArgs) (*Result, error) {
-	call := QuerySkillBySlugBuild(args)
-	return qc.executeNamed(ctx, "querySkillBySlug", call)
+// SkillBySlug calls the engine query skillBySlug.
+func (qc *QueryClient) SkillBySlug(ctx context.Context, args SkillBySlugArgs) (*Result, error) {
+	call := SkillBySlugBuild(args)
+	return qc.executeNamed(ctx, "skillBySlug", call)
 }
 
-func QuerySkillBySlugBuild(args QuerySkillBySlugArgs) string {
+func SkillBySlugBuild(args SkillBySlugArgs) string {
 	var b strings.Builder
-	b.WriteString("querySkillBySlug({")
+	b.WriteString("skillBySlug({")
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QuerySkillChangeEventsForAgent -- Phase 3 (memql#159 / cockpit#125): list v1:agents:skillChangeEvent rows for a target agent. Backs the cockpit planner trace viewer's per-agent skill-history surface -- the operator selects a Plan, sees its ownerAgentId, and this query feeds the timeline of every attach / reconfigure recorded against that agent (newest first). The skillChangeEvent rows are append-only, so this is just a filter + sort against the time-series.
+// SkillChangeEventsForAgent -- Phase 3 (memql#159 / cockpit#125): list v1:agents:skillChangeEvent rows for a target agent. Backs the cockpit planner trace viewer's per-agent skill-history surface -- the operator selects a Plan, sees its ownerAgentId, and this query feeds the timeline of every attach / reconfigure recorded against that agent (newest first). The skillChangeEvent rows are append-only, so this is just a filter + sort against the time-series.
 //
 // Bound concept: skillChangeEvent.
-type QuerySkillChangeEventsForAgentArgs struct {
+type SkillChangeEventsForAgentArgs struct {
 	TargetAgentId string
 }
 
-// QuerySkillChangeEventsForAgent calls the engine query querySkillChangeEventsForAgent.
-func (qc *QueryClient) QuerySkillChangeEventsForAgent(ctx context.Context, args QuerySkillChangeEventsForAgentArgs) (*Result, error) {
-	call := QuerySkillChangeEventsForAgentBuild(args)
-	return qc.executeNamed(ctx, "querySkillChangeEventsForAgent", call)
+// SkillChangeEventsForAgent calls the engine query skillChangeEventsForAgent.
+func (qc *QueryClient) SkillChangeEventsForAgent(ctx context.Context, args SkillChangeEventsForAgentArgs) (*Result, error) {
+	call := SkillChangeEventsForAgentBuild(args)
+	return qc.executeNamed(ctx, "skillChangeEventsForAgent", call)
 }
 
-func QuerySkillChangeEventsForAgentBuild(args QuerySkillChangeEventsForAgentArgs) string {
+func SkillChangeEventsForAgentBuild(args SkillChangeEventsForAgentArgs) string {
 	var b strings.Builder
-	b.WriteString("querySkillChangeEventsForAgent({")
+	b.WriteString("skillChangeEventsForAgent({")
 	b.WriteString("targetAgentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetAgentId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QuerySkillNeedsRefresh -- Per #157 (Phase 1 of the skills rollout): list active skills that bundle a caller-supplied knowledge domain id. The Planner Agent's Phase 2 refresh loop calls queryDueRefreshDomains first (already shipping), then fans out one call per stale domain id to discover 'which skills are downstream of this domain and want a re-attach run after the underlying knowledge refreshes complete'. Pure derivation -- no new state. Argument-as-scalar (rather than list intersection) mirrors queryActiveAgents's per-group fanout pattern so the existing DSL push-down operator surface stays sufficient.
+// SkillNeedsRefresh -- Per #157 (Phase 1 of the skills rollout): list active skills that bundle a caller-supplied knowledge domain id. The Planner Agent's Phase 2 refresh loop calls queryDueRefreshDomains first (already shipping), then fans out one call per stale domain id to discover 'which skills are downstream of this domain and want a re-attach run after the underlying knowledge refreshes complete'. Pure derivation -- no new state. Argument-as-scalar (rather than list intersection) mirrors activeAgents's per-group fanout pattern so the existing DSL push-down operator surface stays sufficient.
 //
 // Bound concept: skill.
-type QuerySkillNeedsRefreshArgs struct {
+type SkillNeedsRefreshArgs struct {
 	StaleDomainId string
 }
 
-// QuerySkillNeedsRefresh calls the engine query querySkillNeedsRefresh.
-func (qc *QueryClient) QuerySkillNeedsRefresh(ctx context.Context, args QuerySkillNeedsRefreshArgs) (*Result, error) {
-	call := QuerySkillNeedsRefreshBuild(args)
-	return qc.executeNamed(ctx, "querySkillNeedsRefresh", call)
+// SkillNeedsRefresh calls the engine query skillNeedsRefresh.
+func (qc *QueryClient) SkillNeedsRefresh(ctx context.Context, args SkillNeedsRefreshArgs) (*Result, error) {
+	call := SkillNeedsRefreshBuild(args)
+	return qc.executeNamed(ctx, "skillNeedsRefresh", call)
 }
 
-func QuerySkillNeedsRefreshBuild(args QuerySkillNeedsRefreshArgs) string {
+func SkillNeedsRefreshBuild(args SkillNeedsRefreshArgs) string {
 	var b strings.Builder
-	b.WriteString("querySkillNeedsRefresh({")
+	b.WriteString("skillNeedsRefresh({")
 	b.WriteString("staleDomainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.StaleDomainId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QuerySpaceMedia -- Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view (visionarys-io/copresent src/hooks/useCopresent.ts).
+// SpaceMedia -- Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view (visionarys-io/copresent src/hooks/useCopresent.ts).
 //
 // Bound concept: media.
-type QuerySpaceMediaArgs struct {
+type SpaceMediaArgs struct {
 	PartitionId string
 	MediaType   string
 }
 
-// QuerySpaceMedia calls the engine query querySpaceMedia.
-func (qc *QueryClient) QuerySpaceMedia(ctx context.Context, args QuerySpaceMediaArgs) (*Result, error) {
-	call := QuerySpaceMediaBuild(args)
-	return qc.executeNamed(ctx, "querySpaceMedia", call)
+// SpaceMedia calls the engine query spaceMedia.
+func (qc *QueryClient) SpaceMedia(ctx context.Context, args SpaceMediaArgs) (*Result, error) {
+	call := SpaceMediaBuild(args)
+	return qc.executeNamed(ctx, "spaceMedia", call)
 }
 
-func QuerySpaceMediaBuild(args QuerySpaceMediaArgs) string {
+func SpaceMediaBuild(args SpaceMediaArgs) string {
 	var b strings.Builder
-	b.WriteString("querySpaceMedia({")
+	b.WriteString("spaceMedia({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if args.MediaType != "" {
-		if b.Len() > 17 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mediaType: ")
@@ -3337,57 +3337,57 @@ func QuerySpaceMediaBuild(args QuerySpaceMediaArgs) string {
 	return b.String()
 }
 
-// QuerySpaceParticipantPresence -- Presence snapshots for every participant in a space (UI state: thinking / responding / waiting / ...). Space-scoped; the SPA dedupes latest-wins by participantId.
+// SpaceParticipantPresence -- Presence snapshots for every participant in a space (UI state: thinking / responding / waiting / ...). Space-scoped; the SPA dedupes latest-wins by participantId.
 //
 // Bound concept: presence.
-type QuerySpaceParticipantPresenceArgs struct {
+type SpaceParticipantPresenceArgs struct {
 	PartitionId string
 }
 
-// QuerySpaceParticipantPresence calls the engine query querySpaceParticipantPresence.
-func (qc *QueryClient) QuerySpaceParticipantPresence(ctx context.Context, args QuerySpaceParticipantPresenceArgs) (*Result, error) {
-	call := QuerySpaceParticipantPresenceBuild(args)
-	return qc.executeNamed(ctx, "querySpaceParticipantPresence", call)
+// SpaceParticipantPresence calls the engine query spaceParticipantPresence.
+func (qc *QueryClient) SpaceParticipantPresence(ctx context.Context, args SpaceParticipantPresenceArgs) (*Result, error) {
+	call := SpaceParticipantPresenceBuild(args)
+	return qc.executeNamed(ctx, "spaceParticipantPresence", call)
 }
 
-func QuerySpaceParticipantPresenceBuild(args QuerySpaceParticipantPresenceArgs) string {
+func SpaceParticipantPresenceBuild(args SpaceParticipantPresenceArgs) string {
 	var b strings.Builder
-	b.WriteString("querySpaceParticipantPresence({")
+	b.WriteString("spaceParticipantPresence({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QuerySpaceParticipants -- Participants for a space, optionally narrowed by status or participantType. Used by the cognition handler + space-context engine.
+// SpaceParticipants -- Participants for a space, optionally narrowed by status or participantType. Used by the cognition handler + space-context engine.
 //
 // Bound concept: participant.
-type QuerySpaceParticipantsArgs struct {
+type SpaceParticipantsArgs struct {
 	PartitionId     string
 	Status          string
 	ParticipantType string
 }
 
-// QuerySpaceParticipants calls the engine query querySpaceParticipants.
-func (qc *QueryClient) QuerySpaceParticipants(ctx context.Context, args QuerySpaceParticipantsArgs) (*Result, error) {
-	call := QuerySpaceParticipantsBuild(args)
-	return qc.executeNamed(ctx, "querySpaceParticipants", call)
+// SpaceParticipants calls the engine query spaceParticipants.
+func (qc *QueryClient) SpaceParticipants(ctx context.Context, args SpaceParticipantsArgs) (*Result, error) {
+	call := SpaceParticipantsBuild(args)
+	return qc.executeNamed(ctx, "spaceParticipants", call)
 }
 
-func QuerySpaceParticipantsBuild(args QuerySpaceParticipantsArgs) string {
+func SpaceParticipantsBuild(args SpaceParticipantsArgs) string {
 	var b strings.Builder
-	b.WriteString("querySpaceParticipants({")
+	b.WriteString("spaceParticipants({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if args.Status != "" {
-		if b.Len() > 24 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
 	if args.ParticipantType != "" {
-		if b.Len() > 24 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
@@ -3397,35 +3397,35 @@ func QuerySpaceParticipantsBuild(args QuerySpaceParticipantsArgs) string {
 	return b.String()
 }
 
-// QuerySpaceUtterances -- Returns utterances for the given space. Optional participantId / utteranceType args narrow the result further. Used by the cockpit Chat tab to populate the utterance pane and by the BFF for downstream consumers.
+// SpaceUtterances -- Returns utterances for the given space. Optional participantId / utteranceType args narrow the result further. Used by the cockpit Chat tab to populate the utterance pane and by the BFF for downstream consumers.
 //
 // Bound concept: utterance.
-type QuerySpaceUtterancesArgs struct {
+type SpaceUtterancesArgs struct {
 	PartitionId   string
 	ParticipantId string
 	UtteranceType string
 }
 
-// QuerySpaceUtterances calls the engine query querySpaceUtterances.
-func (qc *QueryClient) QuerySpaceUtterances(ctx context.Context, args QuerySpaceUtterancesArgs) (*Result, error) {
-	call := QuerySpaceUtterancesBuild(args)
-	return qc.executeNamed(ctx, "querySpaceUtterances", call)
+// SpaceUtterances calls the engine query spaceUtterances.
+func (qc *QueryClient) SpaceUtterances(ctx context.Context, args SpaceUtterancesArgs) (*Result, error) {
+	call := SpaceUtterancesBuild(args)
+	return qc.executeNamed(ctx, "spaceUtterances", call)
 }
 
-func QuerySpaceUtterancesBuild(args QuerySpaceUtterancesArgs) string {
+func SpaceUtterancesBuild(args SpaceUtterancesArgs) string {
 	var b strings.Builder
-	b.WriteString("querySpaceUtterances({")
+	b.WriteString("spaceUtterances({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if args.ParticipantId != "" {
-		if b.Len() > 22 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	}
 	if args.UtteranceType != "" {
-		if b.Len() > 22 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("utteranceType: ")
@@ -3435,23 +3435,23 @@ func QuerySpaceUtterancesBuild(args QuerySpaceUtterancesArgs) string {
 	return b.String()
 }
 
-// QueryStaleClusterNodes -- Latest-per-id cluster node rows whose health is not already 'stopped'. When olderThan is supplied, restricts to rows whose lastSeen is strictly before it (RFC3339 cutoff). Drives the stale-node prune cron.
+// StaleClusterNodes -- Latest-per-id cluster node rows whose health is not already 'stopped'. When olderThan is supplied, restricts to rows whose lastSeen is strictly before it (RFC3339 cutoff). Drives the stale-node prune cron.
 //
 // Bound concept: node.
-type QueryStaleClusterNodesArgs struct {
+type StaleClusterNodesArgs struct {
 	// Optional RFC3339 cutoff; when set, only rows whose lastSeen is strictly before it are returned.
 	OlderThan string
 }
 
-// QueryStaleClusterNodes calls the engine query queryStaleClusterNodes.
-func (qc *QueryClient) QueryStaleClusterNodes(ctx context.Context, args QueryStaleClusterNodesArgs) (*Result, error) {
-	call := QueryStaleClusterNodesBuild(args)
-	return qc.executeNamed(ctx, "queryStaleClusterNodes", call)
+// StaleClusterNodes calls the engine query staleClusterNodes.
+func (qc *QueryClient) StaleClusterNodes(ctx context.Context, args StaleClusterNodesArgs) (*Result, error) {
+	call := StaleClusterNodesBuild(args)
+	return qc.executeNamed(ctx, "staleClusterNodes", call)
 }
 
-func QueryStaleClusterNodesBuild(args QueryStaleClusterNodesArgs) string {
+func StaleClusterNodesBuild(args StaleClusterNodesArgs) string {
 	var b strings.Builder
-	b.WriteString("queryStaleClusterNodes({")
+	b.WriteString("staleClusterNodes({")
 	if args.OlderThan != "" {
 		b.WriteString("olderThan: ")
 		b.WriteString(fmt.Sprintf("%q", args.OlderThan))
@@ -3460,157 +3460,157 @@ func QueryStaleClusterNodesBuild(args QueryStaleClusterNodesArgs) string {
 	return b.String()
 }
 
-// QueryStrandedCandidatePlans -- Plans still in a pre-dispatch status (planning / queued). Backs the stranded-plan watchdog (memql#1389); the age + dedup check runs Go-side.
+// StrandedCandidatePlans -- Plans still in a pre-dispatch status (planning / queued). Backs the stranded-plan watchdog (memql#1389); the age + dedup check runs Go-side.
 //
 // Bound concept: plan.
-type QueryStrandedCandidatePlansArgs struct {
+type StrandedCandidatePlansArgs struct {
 }
 
-// QueryStrandedCandidatePlans calls the engine query queryStrandedCandidatePlans.
-func (qc *QueryClient) QueryStrandedCandidatePlans(ctx context.Context, args QueryStrandedCandidatePlansArgs) (*Result, error) {
-	call := QueryStrandedCandidatePlansBuild(args)
-	return qc.executeNamed(ctx, "queryStrandedCandidatePlans", call)
+// StrandedCandidatePlans calls the engine query strandedCandidatePlans.
+func (qc *QueryClient) StrandedCandidatePlans(ctx context.Context, args StrandedCandidatePlansArgs) (*Result, error) {
+	call := StrandedCandidatePlansBuild(args)
+	return qc.executeNamed(ctx, "strandedCandidatePlans", call)
 }
 
-func QueryStrandedCandidatePlansBuild(args QueryStrandedCandidatePlansArgs) string {
+func StrandedCandidatePlansBuild(args StrandedCandidatePlansArgs) string {
 	_ = args
-	return "queryStrandedCandidatePlans({})"
+	return "strandedCandidatePlans({})"
 }
 
-// QuerySupersededDeployments -- Latest-per-deploymentId deployment rows whose status is terminal-not-active (superseded / failed / rolled_back) -- the deployments whose still-registered nodes are orphans. Feeds the active-topology reaper (#1874). asOf latest -> current status per deployment.
+// SupersededDeployments -- Latest-per-deploymentId deployment rows whose status is terminal-not-active (superseded / failed / rolled_back) -- the deployments whose still-registered nodes are orphans. Feeds the active-topology reaper (#1874). asOf latest -> current status per deployment.
 //
 // Bound concept: deployment.
-type QuerySupersededDeploymentsArgs struct {
+type SupersededDeploymentsArgs struct {
 }
 
-// QuerySupersededDeployments calls the engine query querySupersededDeployments.
-func (qc *QueryClient) QuerySupersededDeployments(ctx context.Context, args QuerySupersededDeploymentsArgs) (*Result, error) {
-	call := QuerySupersededDeploymentsBuild(args)
-	return qc.executeNamed(ctx, "querySupersededDeployments", call)
+// SupersededDeployments calls the engine query supersededDeployments.
+func (qc *QueryClient) SupersededDeployments(ctx context.Context, args SupersededDeploymentsArgs) (*Result, error) {
+	call := SupersededDeploymentsBuild(args)
+	return qc.executeNamed(ctx, "supersededDeployments", call)
 }
 
-func QuerySupersededDeploymentsBuild(args QuerySupersededDeploymentsArgs) string {
+func SupersededDeploymentsBuild(args SupersededDeploymentsArgs) string {
 	_ = args
-	return "querySupersededDeployments({})"
+	return "supersededDeployments({})"
 }
 
-// QuerySurfacesForOwner -- List the calling owner's active v1:actions:surface registry entries for the capability->surface resolver (Phase 2 #1737). Owned tier.
+// SurfacesForOwner -- List the calling owner's active v1:actions:surface registry entries for the capability->surface resolver (Phase 2 #1737). Owned tier.
 //
 // Bound concept: surface.
-type QuerySurfacesForOwnerArgs struct {
+type SurfacesForOwnerArgs struct {
 }
 
-// QuerySurfacesForOwner calls the engine query querySurfacesForOwner.
-func (qc *QueryClient) QuerySurfacesForOwner(ctx context.Context, args QuerySurfacesForOwnerArgs) (*Result, error) {
-	call := QuerySurfacesForOwnerBuild(args)
-	return qc.executeNamed(ctx, "querySurfacesForOwner", call)
+// SurfacesForOwner calls the engine query surfacesForOwner.
+func (qc *QueryClient) SurfacesForOwner(ctx context.Context, args SurfacesForOwnerArgs) (*Result, error) {
+	call := SurfacesForOwnerBuild(args)
+	return qc.executeNamed(ctx, "surfacesForOwner", call)
 }
 
-func QuerySurfacesForOwnerBuild(args QuerySurfacesForOwnerArgs) string {
+func SurfacesForOwnerBuild(args SurfacesForOwnerArgs) string {
 	_ = args
-	return "querySurfacesForOwner({})"
+	return "surfacesForOwner({})"
 }
 
-// QuerySystemActiveAuthoringBundles -- ADMIN/SYSTEM: every active authoring bundle across ALL owners (NOT owner-scoped). Cluster-owner gated. Backs the boot-time authored-runtime re-arm (#1039) that re-registers active bundles' automations after a restart.
+// SystemActiveAuthoringBundles -- ADMIN/SYSTEM: every active authoring bundle across ALL owners (NOT owner-scoped). Cluster-owner gated. Backs the boot-time authored-runtime re-arm (#1039) that re-registers active bundles' automations after a restart.
 //
 // Bound concept: bundle.
-type QuerySystemActiveAuthoringBundlesArgs struct {
+type SystemActiveAuthoringBundlesArgs struct {
 }
 
-// QuerySystemActiveAuthoringBundles calls the engine query querySystemActiveAuthoringBundles.
-func (qc *QueryClient) QuerySystemActiveAuthoringBundles(ctx context.Context, args QuerySystemActiveAuthoringBundlesArgs) (*Result, error) {
-	call := QuerySystemActiveAuthoringBundlesBuild(args)
-	return qc.executeNamed(ctx, "querySystemActiveAuthoringBundles", call)
+// SystemActiveAuthoringBundles calls the engine query systemActiveAuthoringBundles.
+func (qc *QueryClient) SystemActiveAuthoringBundles(ctx context.Context, args SystemActiveAuthoringBundlesArgs) (*Result, error) {
+	call := SystemActiveAuthoringBundlesBuild(args)
+	return qc.executeNamed(ctx, "systemActiveAuthoringBundles", call)
 }
 
-func QuerySystemActiveAuthoringBundlesBuild(args QuerySystemActiveAuthoringBundlesArgs) string {
+func SystemActiveAuthoringBundlesBuild(args SystemActiveAuthoringBundlesArgs) string {
 	_ = args
-	return "querySystemActiveAuthoringBundles({})"
+	return "systemActiveAuthoringBundles({})"
 }
 
-// QueryTaskStateById -- Latest persisted state for a Task (planner reads this on resume).
+// TaskStateById -- Latest persisted state for a Task (planner reads this on resume).
 //
 // Bound concept: taskState.
-type QueryTaskStateByIdArgs struct {
+type TaskStateByIdArgs struct {
 	TaskId string
 }
 
-// QueryTaskStateById calls the engine query queryTaskStateById.
-func (qc *QueryClient) QueryTaskStateById(ctx context.Context, args QueryTaskStateByIdArgs) (*Result, error) {
-	call := QueryTaskStateByIdBuild(args)
-	return qc.executeNamed(ctx, "queryTaskStateById", call)
+// TaskStateById calls the engine query taskStateById.
+func (qc *QueryClient) TaskStateById(ctx context.Context, args TaskStateByIdArgs) (*Result, error) {
+	call := TaskStateByIdBuild(args)
+	return qc.executeNamed(ctx, "taskStateById", call)
 }
 
-func QueryTaskStateByIdBuild(args QueryTaskStateByIdArgs) string {
+func TaskStateByIdBuild(args TaskStateByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryTaskStateById({")
+	b.WriteString("taskStateById({")
 	b.WriteString("taskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TaskId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryTasksForPlan -- All Tasks for a Plan, in seq order.
+// TasksForPlan -- All Tasks for a Plan, in seq order.
 //
 // Bound concept: task.
-type QueryTasksForPlanArgs struct {
+type TasksForPlanArgs struct {
 	PlanId string
 }
 
-// QueryTasksForPlan calls the engine query queryTasksForPlan.
-func (qc *QueryClient) QueryTasksForPlan(ctx context.Context, args QueryTasksForPlanArgs) (*Result, error) {
-	call := QueryTasksForPlanBuild(args)
-	return qc.executeNamed(ctx, "queryTasksForPlan", call)
+// TasksForPlan calls the engine query tasksForPlan.
+func (qc *QueryClient) TasksForPlan(ctx context.Context, args TasksForPlanArgs) (*Result, error) {
+	call := TasksForPlanBuild(args)
+	return qc.executeNamed(ctx, "tasksForPlan", call)
 }
 
-func QueryTasksForPlanBuild(args QueryTasksForPlanArgs) string {
+func TasksForPlanBuild(args TasksForPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("queryTasksForPlan({")
+	b.WriteString("tasksForPlan({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryTodoById -- Fetch a single to-do by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's to-do even with its id. Used by the complete / update tools to confirm the row exists before re-inserting a new version.
+// TodoById -- Fetch a single to-do by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's to-do even with its id. Used by the complete / update tools to confirm the row exists before re-inserting a new version.
 //
 // Bound concept: todo.
-type QueryTodoByIdArgs struct {
+type TodoByIdArgs struct {
 	TodoId string
 }
 
-// QueryTodoById calls the engine query queryTodoById.
-func (qc *QueryClient) QueryTodoById(ctx context.Context, args QueryTodoByIdArgs) (*Result, error) {
-	call := QueryTodoByIdBuild(args)
-	return qc.executeNamed(ctx, "queryTodoById", call)
+// TodoById calls the engine query todoById.
+func (qc *QueryClient) TodoById(ctx context.Context, args TodoByIdArgs) (*Result, error) {
+	call := TodoByIdBuild(args)
+	return qc.executeNamed(ctx, "todoById", call)
 }
 
-func QueryTodoByIdBuild(args QueryTodoByIdArgs) string {
+func TodoByIdBuild(args TodoByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryTodoById({")
+	b.WriteString("todoById({")
 	b.WriteString("todoId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TodoId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryTodos -- List the caller's to-dos. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible. Optional done filter narrows to open (done=false) or completed (done=true) items; omit it to return everything.
+// Todos -- List the caller's to-dos. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible. Optional done filter narrows to open (done=false) or completed (done=true) items; omit it to return everything.
 //
 // Bound concept: todo.
-type QueryTodosArgs struct {
+type TodosArgs struct {
 	Done    bool
 	DoneSet bool // set true to send done; required because zero-value bool is ambiguous
 }
 
-// QueryTodos calls the engine query queryTodos.
-func (qc *QueryClient) QueryTodos(ctx context.Context, args QueryTodosArgs) (*Result, error) {
-	call := QueryTodosBuild(args)
-	return qc.executeNamed(ctx, "queryTodos", call)
+// Todos calls the engine query todos.
+func (qc *QueryClient) Todos(ctx context.Context, args TodosArgs) (*Result, error) {
+	call := TodosBuild(args)
+	return qc.executeNamed(ctx, "todos", call)
 }
 
-func QueryTodosBuild(args QueryTodosArgs) string {
+func TodosBuild(args TodosArgs) string {
 	var b strings.Builder
-	b.WriteString("queryTodos({")
+	b.WriteString("todos({")
 	if args.DoneSet {
 		b.WriteString("done: ")
 		b.WriteString(fmt.Sprintf("%v", args.Done))
@@ -3619,28 +3619,28 @@ func QueryTodosBuild(args QueryTodosArgs) string {
 	return b.String()
 }
 
-// QueryUpcomingEvents -- List the authenticated caller's events whose start falls within a [windowStart, windowEnd] instant range, in start order. The reactive harness's reminder responsibilities read this for the 'remind me the day before X' condition (pass windowStart=now, windowEnd=now+lookahead). Self-scoped via actor.userId -- another user's events are never returned.
+// UpcomingEvents -- List the authenticated caller's events whose start falls within a [windowStart, windowEnd] instant range, in start order. The reactive harness's reminder responsibilities read this for the 'remind me the day before X' condition (pass windowStart=now, windowEnd=now+lookahead). Self-scoped via actor.userId -- another user's events are never returned.
 //
 // Bound concept: calendarEvent.
-type QueryUpcomingEventsArgs struct {
+type UpcomingEventsArgs struct {
 	// Inclusive lower bound on payload.startsAt (typically `now`).
 	WindowStart string
 	// Inclusive upper bound on payload.startsAt (e.g. now + 48h for a day-before reminder sweep).
 	WindowEnd string
 }
 
-// QueryUpcomingEvents calls the engine query queryUpcomingEvents.
-func (qc *QueryClient) QueryUpcomingEvents(ctx context.Context, args QueryUpcomingEventsArgs) (*Result, error) {
-	call := QueryUpcomingEventsBuild(args)
-	return qc.executeNamed(ctx, "queryUpcomingEvents", call)
+// UpcomingEvents calls the engine query upcomingEvents.
+func (qc *QueryClient) UpcomingEvents(ctx context.Context, args UpcomingEventsArgs) (*Result, error) {
+	call := UpcomingEventsBuild(args)
+	return qc.executeNamed(ctx, "upcomingEvents", call)
 }
 
-func QueryUpcomingEventsBuild(args QueryUpcomingEventsArgs) string {
+func UpcomingEventsBuild(args UpcomingEventsArgs) string {
 	var b strings.Builder
-	b.WriteString("queryUpcomingEvents({")
+	b.WriteString("upcomingEvents({")
 	b.WriteString("windowStart: ")
 	b.WriteString(fmt.Sprintf("%q", args.WindowStart))
-	if b.Len() > 21 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("windowEnd: ")
@@ -3649,29 +3649,29 @@ func QueryUpcomingEventsBuild(args QueryUpcomingEventsArgs) string {
 	return b.String()
 }
 
-// QueryUsableRecords -- Returns usable data records (confirmed, or checked if policy allows)
+// UsableRecords -- Returns usable data records (confirmed, or checked if policy allows)
 //
 // Bound concept: record.
-type QueryUsableRecordsArgs struct {
+type UsableRecordsArgs struct {
 	PartitionId string
 	RecordType  string
 }
 
-// QueryUsableRecords calls the engine query queryUsableRecords.
-func (qc *QueryClient) QueryUsableRecords(ctx context.Context, args QueryUsableRecordsArgs) (*Result, error) {
-	call := QueryUsableRecordsBuild(args)
-	return qc.executeNamed(ctx, "queryUsableRecords", call)
+// UsableRecords calls the engine query usableRecords.
+func (qc *QueryClient) UsableRecords(ctx context.Context, args UsableRecordsArgs) (*Result, error) {
+	call := UsableRecordsBuild(args)
+	return qc.executeNamed(ctx, "usableRecords", call)
 }
 
-func QueryUsableRecordsBuild(args QueryUsableRecordsArgs) string {
+func UsableRecordsBuild(args UsableRecordsArgs) string {
 	var b strings.Builder
-	b.WriteString("queryUsableRecords({")
+	b.WriteString("usableRecords({")
 	if args.PartitionId != "" {
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.RecordType != "" {
-		if b.Len() > 20 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recordType: ")
@@ -3681,193 +3681,193 @@ func QueryUsableRecordsBuild(args QueryUsableRecordsArgs) string {
 	return b.String()
 }
 
-// QueryUserActiveSpace -- Returns a user's current activePartitionId. Empty when the user is not focused on any space.
+// UserActiveSpace -- Returns a user's current activePartitionId. Empty when the user is not focused on any space.
 //
 // Bound concept: user.
-type QueryUserActiveSpaceArgs struct {
+type UserActiveSpaceArgs struct {
 	UserId string
 }
 
-// QueryUserActiveSpace calls the engine query queryUserActiveSpace.
-func (qc *QueryClient) QueryUserActiveSpace(ctx context.Context, args QueryUserActiveSpaceArgs) (*Result, error) {
-	call := QueryUserActiveSpaceBuild(args)
-	return qc.executeNamed(ctx, "queryUserActiveSpace", call)
+// UserActiveSpace calls the engine query userActiveSpace.
+func (qc *QueryClient) UserActiveSpace(ctx context.Context, args UserActiveSpaceArgs) (*Result, error) {
+	call := UserActiveSpaceBuild(args)
+	return qc.executeNamed(ctx, "userActiveSpace", call)
 }
 
-func QueryUserActiveSpaceBuild(args QueryUserActiveSpaceArgs) string {
+func UserActiveSpaceBuild(args UserActiveSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("queryUserActiveSpace({")
+	b.WriteString("userActiveSpace({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryUserByEmail -- Look up a user by primary email (the dedup key during bootstrap).
+// UserByEmail -- Look up a user by primary email (the dedup key during bootstrap).
 //
 // Bound concept: user.
-type QueryUserByEmailArgs struct {
+type UserByEmailArgs struct {
 	PrimaryEmail string
 }
 
-// QueryUserByEmail calls the engine query queryUserByEmail.
-func (qc *QueryClient) QueryUserByEmail(ctx context.Context, args QueryUserByEmailArgs) (*Result, error) {
-	call := QueryUserByEmailBuild(args)
-	return qc.executeNamed(ctx, "queryUserByEmail", call)
+// UserByEmail calls the engine query userByEmail.
+func (qc *QueryClient) UserByEmail(ctx context.Context, args UserByEmailArgs) (*Result, error) {
+	call := UserByEmailBuild(args)
+	return qc.executeNamed(ctx, "userByEmail", call)
 }
 
-func QueryUserByEmailBuild(args QueryUserByEmailArgs) string {
+func UserByEmailBuild(args UserByEmailArgs) string {
 	var b strings.Builder
-	b.WriteString("queryUserByEmail({")
+	b.WriteString("userByEmail({")
 	b.WriteString("primaryEmail: ")
 	b.WriteString(fmt.Sprintf("%q", args.PrimaryEmail))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryUserById -- Get a user by id.
+// UserById -- Get a user by id.
 //
 // Bound concept: user.
-type QueryUserByIdArgs struct {
+type UserByIdArgs struct {
 	UserId string
 }
 
-// QueryUserById calls the engine query queryUserById.
-func (qc *QueryClient) QueryUserById(ctx context.Context, args QueryUserByIdArgs) (*Result, error) {
-	call := QueryUserByIdBuild(args)
-	return qc.executeNamed(ctx, "queryUserById", call)
+// UserById calls the engine query userById.
+func (qc *QueryClient) UserById(ctx context.Context, args UserByIdArgs) (*Result, error) {
+	call := UserByIdBuild(args)
+	return qc.executeNamed(ctx, "userById", call)
 }
 
-func QueryUserByIdBuild(args QueryUserByIdArgs) string {
+func UserByIdBuild(args UserByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryUserById({")
+	b.WriteString("userById({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryUserCount -- Count of active v1:identity:user rows. Returns a {count: N} aggregate.
+// UserCount -- Count of active v1:identity:user rows. Returns a {count: N} aggregate.
 //
 // Bound concept: user.
-type QueryUserCountArgs struct {
+type UserCountArgs struct {
 }
 
-// QueryUserCount calls the engine query queryUserCount.
-func (qc *QueryClient) QueryUserCount(ctx context.Context, args QueryUserCountArgs) (*Result, error) {
-	call := QueryUserCountBuild(args)
-	return qc.executeNamed(ctx, "queryUserCount", call)
+// UserCount calls the engine query userCount.
+func (qc *QueryClient) UserCount(ctx context.Context, args UserCountArgs) (*Result, error) {
+	call := UserCountBuild(args)
+	return qc.executeNamed(ctx, "userCount", call)
 }
 
-func QueryUserCountBuild(args QueryUserCountArgs) string {
+func UserCountBuild(args UserCountArgs) string {
 	_ = args
-	return "queryUserCount({})"
+	return "userCount({})"
 }
 
-// QueryUserDefaults -- Returns default configuration variables for user provisioning. Used by bootstrapUser automation.
+// UserDefaults -- Returns default configuration variables for user provisioning. Used by bootstrapUser automation.
 //
 // Bound concept: globalVariable.
-type QueryUserDefaultsArgs struct {
+type UserDefaultsArgs struct {
 }
 
-// QueryUserDefaults calls the engine query queryUserDefaults.
-func (qc *QueryClient) QueryUserDefaults(ctx context.Context, args QueryUserDefaultsArgs) (*Result, error) {
-	call := QueryUserDefaultsBuild(args)
-	return qc.executeNamed(ctx, "queryUserDefaults", call)
+// UserDefaults calls the engine query userDefaults.
+func (qc *QueryClient) UserDefaults(ctx context.Context, args UserDefaultsArgs) (*Result, error) {
+	call := UserDefaultsBuild(args)
+	return qc.executeNamed(ctx, "userDefaults", call)
 }
 
-func QueryUserDefaultsBuild(args QueryUserDefaultsArgs) string {
+func UserDefaultsBuild(args UserDefaultsArgs) string {
 	_ = args
-	return "queryUserDefaults({})"
+	return "userDefaults({})"
 }
 
-// QueryUsersActiveInSpace -- Returns users whose activePartitionId == arg(partitionId). Active-human roster per the activity model (Phase 4).
+// UsersActiveInSpace -- Returns users whose activePartitionId == arg(partitionId). Active-human roster per the activity model (Phase 4).
 //
 // Bound concept: user.
-type QueryUsersActiveInSpaceArgs struct {
+type UsersActiveInSpaceArgs struct {
 	PartitionId string
 }
 
-// QueryUsersActiveInSpace calls the engine query queryUsersActiveInSpace.
-func (qc *QueryClient) QueryUsersActiveInSpace(ctx context.Context, args QueryUsersActiveInSpaceArgs) (*Result, error) {
-	call := QueryUsersActiveInSpaceBuild(args)
-	return qc.executeNamed(ctx, "queryUsersActiveInSpace", call)
+// UsersActiveInSpace calls the engine query usersActiveInSpace.
+func (qc *QueryClient) UsersActiveInSpace(ctx context.Context, args UsersActiveInSpaceArgs) (*Result, error) {
+	call := UsersActiveInSpaceBuild(args)
+	return qc.executeNamed(ctx, "usersActiveInSpace", call)
 }
 
-func QueryUsersActiveInSpaceBuild(args QueryUsersActiveInSpaceArgs) string {
+func UsersActiveInSpaceBuild(args UsersActiveInSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("queryUsersActiveInSpace({")
+	b.WriteString("usersActiveInSpace({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryUsersInDeletionCooldown -- Active users with a pending deletionScheduledAt; consumers per-row check cooldown windows via addDuration.
+// UsersInDeletionCooldown -- Active users with a pending deletionScheduledAt; consumers per-row check cooldown windows via addDuration.
 //
 // Bound concept: user.
-type QueryUsersInDeletionCooldownArgs struct {
+type UsersInDeletionCooldownArgs struct {
 }
 
-// QueryUsersInDeletionCooldown calls the engine query queryUsersInDeletionCooldown.
-func (qc *QueryClient) QueryUsersInDeletionCooldown(ctx context.Context, args QueryUsersInDeletionCooldownArgs) (*Result, error) {
-	call := QueryUsersInDeletionCooldownBuild(args)
-	return qc.executeNamed(ctx, "queryUsersInDeletionCooldown", call)
+// UsersInDeletionCooldown calls the engine query usersInDeletionCooldown.
+func (qc *QueryClient) UsersInDeletionCooldown(ctx context.Context, args UsersInDeletionCooldownArgs) (*Result, error) {
+	call := UsersInDeletionCooldownBuild(args)
+	return qc.executeNamed(ctx, "usersInDeletionCooldown", call)
 }
 
-func QueryUsersInDeletionCooldownBuild(args QueryUsersInDeletionCooldownArgs) string {
+func UsersInDeletionCooldownBuild(args UsersInDeletionCooldownArgs) string {
 	_ = args
-	return "queryUsersInDeletionCooldown({})"
+	return "usersInDeletionCooldown({})"
 }
 
-// QueryUsersScheduledForDeletion -- Active users whose deletionScheduledAt is set; cooldown enforcement happens in the automation per-row.
+// UsersScheduledForDeletion -- Active users whose deletionScheduledAt is set; cooldown enforcement happens in the automation per-row.
 //
 // Bound concept: user.
-type QueryUsersScheduledForDeletionArgs struct {
+type UsersScheduledForDeletionArgs struct {
 }
 
-// QueryUsersScheduledForDeletion calls the engine query queryUsersScheduledForDeletion.
-func (qc *QueryClient) QueryUsersScheduledForDeletion(ctx context.Context, args QueryUsersScheduledForDeletionArgs) (*Result, error) {
-	call := QueryUsersScheduledForDeletionBuild(args)
-	return qc.executeNamed(ctx, "queryUsersScheduledForDeletion", call)
+// UsersScheduledForDeletion calls the engine query usersScheduledForDeletion.
+func (qc *QueryClient) UsersScheduledForDeletion(ctx context.Context, args UsersScheduledForDeletionArgs) (*Result, error) {
+	call := UsersScheduledForDeletionBuild(args)
+	return qc.executeNamed(ctx, "usersScheduledForDeletion", call)
 }
 
-func QueryUsersScheduledForDeletionBuild(args QueryUsersScheduledForDeletionArgs) string {
+func UsersScheduledForDeletionBuild(args UsersScheduledForDeletionArgs) string {
 	_ = args
-	return "queryUsersScheduledForDeletion({})"
+	return "usersScheduledForDeletion({})"
 }
 
-// QueryValidationLog -- Returns validation state change history. Optional filters: recordId, partitionId, action
+// ValidationLog -- Returns validation state change history. Optional filters: recordId, partitionId, action
 //
 // Bound concept: log.
-type QueryValidationLogArgs struct {
+type ValidationLogArgs struct {
 	RecordId    string
 	PartitionId string
 	Action      string
 }
 
-// QueryValidationLog calls the engine query queryValidationLog.
-func (qc *QueryClient) QueryValidationLog(ctx context.Context, args QueryValidationLogArgs) (*Result, error) {
-	call := QueryValidationLogBuild(args)
-	return qc.executeNamed(ctx, "queryValidationLog", call)
+// ValidationLog calls the engine query validationLog.
+func (qc *QueryClient) ValidationLog(ctx context.Context, args ValidationLogArgs) (*Result, error) {
+	call := ValidationLogBuild(args)
+	return qc.executeNamed(ctx, "validationLog", call)
 }
 
-func QueryValidationLogBuild(args QueryValidationLogArgs) string {
+func ValidationLogBuild(args ValidationLogArgs) string {
 	var b strings.Builder
-	b.WriteString("queryValidationLog({")
+	b.WriteString("validationLog({")
 	if args.RecordId != "" {
 		b.WriteString("recordId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecordId))
 	}
 	if args.PartitionId != "" {
-		if b.Len() > 20 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.Action != "" {
-		if b.Len() > 20 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("action: ")
@@ -3877,188 +3877,188 @@ func QueryValidationLogBuild(args QueryValidationLogArgs) string {
 	return b.String()
 }
 
-// QueryValidationQueue -- The validation queue: requests awaiting first-line developer validation. Developer/owner only (traitForgeDeveloper).
+// ValidationQueue -- The validation queue: requests awaiting first-line developer validation. Developer/owner only (forgeDeveloper).
 //
 // Bound concept: request.
-type QueryValidationQueueArgs struct {
+type ValidationQueueArgs struct {
 }
 
-// QueryValidationQueue calls the engine query queryValidationQueue.
-func (qc *QueryClient) QueryValidationQueue(ctx context.Context, args QueryValidationQueueArgs) (*Result, error) {
-	call := QueryValidationQueueBuild(args)
-	return qc.executeNamed(ctx, "queryValidationQueue", call)
+// ValidationQueue calls the engine query validationQueue.
+func (qc *QueryClient) ValidationQueue(ctx context.Context, args ValidationQueueArgs) (*Result, error) {
+	call := ValidationQueueBuild(args)
+	return qc.executeNamed(ctx, "validationQueue", call)
 }
 
-func QueryValidationQueueBuild(args QueryValidationQueueArgs) string {
+func ValidationQueueBuild(args ValidationQueueArgs) string {
 	_ = args
-	return "queryValidationQueue({})"
+	return "validationQueue({})"
 }
 
-// QueryVideoOverridesForSpace -- Active video overrides for every agent in a space. Read by the voice-agent process at session start.
+// VideoOverridesForSpace -- Active video overrides for every agent in a space. Read by the voice-agent process at session start.
 //
 // Bound concept: videoOverride.
-type QueryVideoOverridesForSpaceArgs struct {
+type VideoOverridesForSpaceArgs struct {
 	PartitionId string
 }
 
-// QueryVideoOverridesForSpace calls the engine query queryVideoOverridesForSpace.
-func (qc *QueryClient) QueryVideoOverridesForSpace(ctx context.Context, args QueryVideoOverridesForSpaceArgs) (*Result, error) {
-	call := QueryVideoOverridesForSpaceBuild(args)
-	return qc.executeNamed(ctx, "queryVideoOverridesForSpace", call)
+// VideoOverridesForSpace calls the engine query videoOverridesForSpace.
+func (qc *QueryClient) VideoOverridesForSpace(ctx context.Context, args VideoOverridesForSpaceArgs) (*Result, error) {
+	call := VideoOverridesForSpaceBuild(args)
+	return qc.executeNamed(ctx, "videoOverridesForSpace", call)
 }
 
-func QueryVideoOverridesForSpaceBuild(args QueryVideoOverridesForSpaceArgs) string {
+func VideoOverridesForSpaceBuild(args VideoOverridesForSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("queryVideoOverridesForSpace({")
+	b.WriteString("videoOverridesForSpace({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryWaitingPlansForUser -- The caller's Plans parked in the per-account waiting queue (status=waitingForSlot) because the account is at its concurrency cap (epic memql#902 / #909). Owned tier (payload.requestedBy==actor.userId). FIFO order is by row.createdAt of the waitingForSlot version (carried in planFull); the frontend derives each Plan's queue position from that ascending order -- MemQL has no in-query window/rank function.
+// WaitingPlansForUser -- The caller's Plans parked in the per-account waiting queue (status=waitingForSlot) because the account is at its concurrency cap (epic memql#902 / #909). Owned tier (payload.requestedBy==actor.userId). FIFO order is by row.createdAt of the waitingForSlot version (carried in planFull); the frontend derives each Plan's queue position from that ascending order -- MemQL has no in-query window/rank function.
 //
 // Bound concept: plan.
-type QueryWaitingPlansForUserArgs struct {
+type WaitingPlansForUserArgs struct {
 }
 
-// QueryWaitingPlansForUser calls the engine query queryWaitingPlansForUser.
-func (qc *QueryClient) QueryWaitingPlansForUser(ctx context.Context, args QueryWaitingPlansForUserArgs) (*Result, error) {
-	call := QueryWaitingPlansForUserBuild(args)
-	return qc.executeNamed(ctx, "queryWaitingPlansForUser", call)
+// WaitingPlansForUser calls the engine query waitingPlansForUser.
+func (qc *QueryClient) WaitingPlansForUser(ctx context.Context, args WaitingPlansForUserArgs) (*Result, error) {
+	call := WaitingPlansForUserBuild(args)
+	return qc.executeNamed(ctx, "waitingPlansForUser", call)
 }
 
-func QueryWaitingPlansForUserBuild(args QueryWaitingPlansForUserArgs) string {
+func WaitingPlansForUserBuild(args WaitingPlansForUserArgs) string {
 	_ = args
-	return "queryWaitingPlansForUser({})"
+	return "waitingPlansForUser({})"
 }
 
-// QueryWorkerByIdentityId -- Look up the worker registration owned by an identity row.
+// WorkerByIdentityId -- Look up the worker registration owned by an identity row.
 //
 // Bound concept: registration.
-type QueryWorkerByIdentityIdArgs struct {
+type WorkerByIdentityIdArgs struct {
 	IdentityId string
 }
 
-// QueryWorkerByIdentityId calls the engine query queryWorkerByIdentityId.
-func (qc *QueryClient) QueryWorkerByIdentityId(ctx context.Context, args QueryWorkerByIdentityIdArgs) (*Result, error) {
-	call := QueryWorkerByIdentityIdBuild(args)
-	return qc.executeNamed(ctx, "queryWorkerByIdentityId", call)
+// WorkerByIdentityId calls the engine query workerByIdentityId.
+func (qc *QueryClient) WorkerByIdentityId(ctx context.Context, args WorkerByIdentityIdArgs) (*Result, error) {
+	call := WorkerByIdentityIdBuild(args)
+	return qc.executeNamed(ctx, "workerByIdentityId", call)
 }
 
-func QueryWorkerByIdentityIdBuild(args QueryWorkerByIdentityIdArgs) string {
+func WorkerByIdentityIdBuild(args WorkerByIdentityIdArgs) string {
 	var b strings.Builder
-	b.WriteString("queryWorkerByIdentityId({")
+	b.WriteString("workerByIdentityId({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryWorkerPairingCodeByHash -- Hot-path pairing-code lookup by codeHash for the Pair-aware gRPC interceptor.
+// WorkerPairingCodeByHash -- Hot-path pairing-code lookup by codeHash for the Pair-aware gRPC interceptor.
 //
 // Bound concept: workerPairingCode.
-type QueryWorkerPairingCodeByHashArgs struct {
+type WorkerPairingCodeByHashArgs struct {
 	CodeHash string
 }
 
-// QueryWorkerPairingCodeByHash calls the engine query queryWorkerPairingCodeByHash.
-func (qc *QueryClient) QueryWorkerPairingCodeByHash(ctx context.Context, args QueryWorkerPairingCodeByHashArgs) (*Result, error) {
-	call := QueryWorkerPairingCodeByHashBuild(args)
-	return qc.executeNamed(ctx, "queryWorkerPairingCodeByHash", call)
+// WorkerPairingCodeByHash calls the engine query workerPairingCodeByHash.
+func (qc *QueryClient) WorkerPairingCodeByHash(ctx context.Context, args WorkerPairingCodeByHashArgs) (*Result, error) {
+	call := WorkerPairingCodeByHashBuild(args)
+	return qc.executeNamed(ctx, "workerPairingCodeByHash", call)
 }
 
-func QueryWorkerPairingCodeByHashBuild(args QueryWorkerPairingCodeByHashArgs) string {
+func WorkerPairingCodeByHashBuild(args WorkerPairingCodeByHashArgs) string {
 	var b strings.Builder
-	b.WriteString("queryWorkerPairingCodeByHash({")
+	b.WriteString("workerPairingCodeByHash({")
 	b.WriteString("codeHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.CodeHash))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryWorkerTokenByKeyHash -- Hot-path worker-token lookup by keyHash. Returns active + inactive rows.
+// WorkerTokenByKeyHash -- Hot-path worker-token lookup by keyHash. Returns active + inactive rows.
 //
 // Bound concept: identity.
-type QueryWorkerTokenByKeyHashArgs struct {
+type WorkerTokenByKeyHashArgs struct {
 	KeyHash string
 }
 
-// QueryWorkerTokenByKeyHash calls the engine query queryWorkerTokenByKeyHash.
-func (qc *QueryClient) QueryWorkerTokenByKeyHash(ctx context.Context, args QueryWorkerTokenByKeyHashArgs) (*Result, error) {
-	call := QueryWorkerTokenByKeyHashBuild(args)
-	return qc.executeNamed(ctx, "queryWorkerTokenByKeyHash", call)
+// WorkerTokenByKeyHash calls the engine query workerTokenByKeyHash.
+func (qc *QueryClient) WorkerTokenByKeyHash(ctx context.Context, args WorkerTokenByKeyHashArgs) (*Result, error) {
+	call := WorkerTokenByKeyHashBuild(args)
+	return qc.executeNamed(ctx, "workerTokenByKeyHash", call)
 }
 
-func QueryWorkerTokenByKeyHashBuild(args QueryWorkerTokenByKeyHashArgs) string {
+func WorkerTokenByKeyHashBuild(args WorkerTokenByKeyHashArgs) string {
 	var b strings.Builder
-	b.WriteString("queryWorkerTokenByKeyHash({")
+	b.WriteString("workerTokenByKeyHash({")
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryWorkerTokensForUser -- List worker-token identities owned by a user.
+// WorkerTokensForUser -- List worker-token identities owned by a user.
 //
 // Bound concept: identity.
-type QueryWorkerTokensForUserArgs struct {
+type WorkerTokensForUserArgs struct {
 	UserId string
 }
 
-// QueryWorkerTokensForUser calls the engine query queryWorkerTokensForUser.
-func (qc *QueryClient) QueryWorkerTokensForUser(ctx context.Context, args QueryWorkerTokensForUserArgs) (*Result, error) {
-	call := QueryWorkerTokensForUserBuild(args)
-	return qc.executeNamed(ctx, "queryWorkerTokensForUser", call)
+// WorkerTokensForUser calls the engine query workerTokensForUser.
+func (qc *QueryClient) WorkerTokensForUser(ctx context.Context, args WorkerTokensForUserArgs) (*Result, error) {
+	call := WorkerTokensForUserBuild(args)
+	return qc.executeNamed(ctx, "workerTokensForUser", call)
 }
 
-func QueryWorkerTokensForUserBuild(args QueryWorkerTokensForUserArgs) string {
+func WorkerTokensForUserBuild(args WorkerTokensForUserArgs) string {
 	var b strings.Builder
-	b.WriteString("queryWorkerTokensForUser({")
+	b.WriteString("workerTokensForUser({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryWorkersForUser -- List all workers owned by a user.
+// WorkersForUser -- List all workers owned by a user.
 //
 // Bound concept: registration.
-type QueryWorkersForUserArgs struct {
+type WorkersForUserArgs struct {
 	OwnerUserId string
 }
 
-// QueryWorkersForUser calls the engine query queryWorkersForUser.
-func (qc *QueryClient) QueryWorkersForUser(ctx context.Context, args QueryWorkersForUserArgs) (*Result, error) {
-	call := QueryWorkersForUserBuild(args)
-	return qc.executeNamed(ctx, "queryWorkersForUser", call)
+// WorkersForUser calls the engine query workersForUser.
+func (qc *QueryClient) WorkersForUser(ctx context.Context, args WorkersForUserArgs) (*Result, error) {
+	call := WorkersForUserBuild(args)
+	return qc.executeNamed(ctx, "workersForUser", call)
 }
 
-func QueryWorkersForUserBuild(args QueryWorkersForUserArgs) string {
+func WorkersForUserBuild(args WorkersForUserArgs) string {
 	var b strings.Builder
-	b.WriteString("queryWorkersForUser({")
+	b.WriteString("workersForUser({")
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// QueryWorkspaceForPlan -- Look up the workbench workspace row for a Plan. Returns empty when no workspace has been provisioned yet -- the integration uses this to decide whether to call mutationProvisionWorkspace on the first workbenchHost dispatch.
+// WorkspaceForPlan -- Look up the workbench workspace row for a Plan. Returns empty when no workspace has been provisioned yet -- the integration uses this to decide whether to call provisionWorkspace on the first workbenchHost dispatch.
 //
 // Bound concept: workspace.
-type QueryWorkspaceForPlanArgs struct {
+type WorkspaceForPlanArgs struct {
 	PlanId string
 }
 
-// QueryWorkspaceForPlan calls the engine query queryWorkspaceForPlan.
-func (qc *QueryClient) QueryWorkspaceForPlan(ctx context.Context, args QueryWorkspaceForPlanArgs) (*Result, error) {
-	call := QueryWorkspaceForPlanBuild(args)
-	return qc.executeNamed(ctx, "queryWorkspaceForPlan", call)
+// WorkspaceForPlan calls the engine query workspaceForPlan.
+func (qc *QueryClient) WorkspaceForPlan(ctx context.Context, args WorkspaceForPlanArgs) (*Result, error) {
+	call := WorkspaceForPlanBuild(args)
+	return qc.executeNamed(ctx, "workspaceForPlan", call)
 }
 
-func QueryWorkspaceForPlanBuild(args QueryWorkspaceForPlanArgs) string {
+func WorkspaceForPlanBuild(args WorkspaceForPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("queryWorkspaceForPlan({")
+	b.WriteString("workspaceForPlan({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	b.WriteString("})")

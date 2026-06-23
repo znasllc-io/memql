@@ -15,9 +15,9 @@ import (
 // them against the guard so the DSL and the engine can never silently
 // drift apart:
 //
-//  1. ROUTING (dsl/forge/logic.memql:logicRouteRequest) -- the submitter's
+//  1. ROUTING (dsl/forge/logic.memql:routeRequest) -- the submitter's
 //     role picks the next pipeline status on submission.
-//  2. EVENT TRAIL (dsl/forge/logic.memql:logicRecordTransition) -- each
+//  2. EVENT TRAIL (dsl/forge/logic.memql:recordTransition) -- each
 //     post-creation transition appends exactly one requestEvent whose kind
 //     is derived from the new status.
 //  3. QUERY GATING (dsl/forge/traits.memql) -- the developer/owner tiers
@@ -27,7 +27,7 @@ import (
 // TestStepTransitionAllowed.
 
 // forgeRoutingContract is the role -> next-status map that
-// logicRouteRequest implements on a freshly submitted request.
+// routeRequest implements on a freshly submitted request.
 var forgeRoutingContract = map[string]string{
 	"owner":  forgeStatusQueued,          // fast-track: self-approved
 	"admin":  forgeStatusNeedsApproval,   // senior dev: skips first-line validation
@@ -36,7 +36,7 @@ var forgeRoutingContract = map[string]string{
 }
 
 // forgeEventKindContract is the post-creation toStatus -> requestEvent.kind
-// map that logicRecordTransition implements.
+// map that recordTransition implements.
 var forgeEventKindContract = map[string]string{
 	forgeStatusNeedsApproval: "validated",
 	forgeStatusQueued:        "approved",
@@ -73,7 +73,7 @@ func TestForgeRoutingContractMatchesGuard(t *testing.T) {
 	}
 }
 
-// TestForgeRoutingContractMatchesDSL asserts the authored logicRouteRequest
+// TestForgeRoutingContractMatchesDSL asserts the authored routeRequest
 // actually encodes the role -> status map this test pins. Catches an edit to
 // the DSL that changes routing without updating the contract (and vice versa).
 func TestForgeRoutingContractMatchesDSL(t *testing.T) {
@@ -81,16 +81,16 @@ func TestForgeRoutingContractMatchesDSL(t *testing.T) {
 	for role, target := range forgeRoutingContract {
 		needRole := `submitterRole == "` + role + `"`
 		if !strings.Contains(src, needRole) {
-			t.Errorf("logicRouteRequest missing role guard %q", needRole)
+			t.Errorf("routeRequest missing role guard %q", needRole)
 		}
 		needStatus := `status: "` + target + `"`
 		if !strings.Contains(src, needStatus) {
-			t.Errorf("logicRouteRequest missing routed status %q (for role %s)", needStatus, role)
+			t.Errorf("routeRequest missing routed status %q (for role %s)", needStatus, role)
 		}
 	}
 }
 
-// TestForgeEventKindContractMatchesDSL asserts logicRecordTransition maps each
+// TestForgeEventKindContractMatchesDSL asserts recordTransition maps each
 // whitelisted toStatus to the expected requestEvent kind, so the audit trail
 // stays complete and correctly labelled.
 func TestForgeEventKindContractMatchesDSL(t *testing.T) {
@@ -99,10 +99,10 @@ func TestForgeEventKindContractMatchesDSL(t *testing.T) {
 		needStatus := `toStatus == "` + status + `"`
 		needKind := `kind: "` + kind + `"`
 		if !strings.Contains(src, needStatus) {
-			t.Errorf("logicRecordTransition missing guard %q", needStatus)
+			t.Errorf("recordTransition missing guard %q", needStatus)
 		}
 		if !strings.Contains(src, needKind) {
-			t.Errorf("logicRecordTransition missing event kind %q (for status %s)", needKind, status)
+			t.Errorf("recordTransition missing event kind %q (for status %s)", needKind, status)
 		}
 	}
 }
@@ -171,9 +171,9 @@ func TestForgeOwnerFastTrack(t *testing.T) {
 // traits.memql against the engine role-authority, so the surface a reader can
 // reach stays empty of other people's work:
 //
-//   - approver tier (traitForgeApprover) == owner only: only the owner may
+//   - approver tier (forgeApprover) == owner only: only the owner may
 //     reach the terminal approve/queue statuses.
-//   - developer tier (traitForgeDeveloper) == owner/admin/writer: developers
+//   - developer tier (forgeDeveloper) == owner/admin/writer: developers
 //     may reach needs_approval (the validation act); a reader may not.
 func TestForgeQueueGatingTiers(t *testing.T) {
 	developerTier := map[string]bool{
@@ -212,7 +212,7 @@ func TestForgeQueueGatingTiers(t *testing.T) {
 	}
 	ts := string(traits)
 	for _, must := range []string{
-		"traitForgeDeveloper", "traitForgeApprover",
+		"forgeDeveloper", "forgeApprover",
 		`actor.role == "owner"`, `actor.role == "admin"`, `actor.role == "writer"`,
 	} {
 		if !strings.Contains(ts, must) {

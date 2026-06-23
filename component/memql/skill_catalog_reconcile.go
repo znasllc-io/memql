@@ -186,7 +186,7 @@ func (m *SeedMaterializer) reconcileSkillCatalog(ctx context.Context) (SkillCata
 		switch {
 		case !ok:
 			// Row missing -- re-materialize it through the SAME global path
-			// the startup sweep uses (mutationCreateSkill via the seed body).
+			// the startup sweep uses (createSkill via the seed body).
 			// provenance.Seed mirrors the original materialization so the
 			// re-written row is indistinguishable from a first-sweep write.
 			if err := m.materializeGlobal(ctx, def); err != nil {

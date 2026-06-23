@@ -8,7 +8,7 @@ import "testing"
 // the in-memory comparison path (compareScalarValues), so any query that fell
 // back to post-filter / non-pushdown evaluation failed with
 // `operator "has" is not supported for payload comparisons`. This broke
-// notesSearch, queryNotesByTag, and querySkillNeedsRefresh whenever tagged /
+// notesSearch, notesByTag, and skillNeedsRefresh whenever tagged /
 // array data existed. These cases pin the in-memory OpHas semantics:
 // `actual` is the array field value, `expected` is the membership scalar.
 

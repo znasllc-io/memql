@@ -28,7 +28,9 @@ type fakeEngine struct {
 
 func (f *fakeEngine) Execute(_ context.Context, query string) (*memqlengine.ExecuteResult, error) {
 	f.queries = append(f.queries, query)
-	if strings.HasPrefix(query, "mutation") {
+	// Post-C6 (memql#2036) mutation construct names are bare (no `mutation`
+	// prefix); deploycontrol's writes are createDeployment / updateDeploymentStatus.
+	if strings.HasPrefix(query, "createDeployment(") || strings.HasPrefix(query, "updateDeploymentStatus(") {
 		if f.mutationErr != nil {
 			return nil, f.mutationErr
 		}
@@ -87,10 +89,10 @@ func TestDeployStagingPersistsDeploymentRecordOnSuccess(t *testing.T) {
 		t.Fatalf("ok = false, message = %q", res.GetMessage())
 	}
 
-	if got := countContaining(eng.queries, "mutationCreateDeployment(", `status: "in_progress"`, `environment: "staging"`); got != 1 {
+	if got := countContaining(eng.queries, "createDeployment(", `status: "in_progress"`, `environment: "staging"`); got != 1 {
 		t.Errorf("create-deployment(in_progress, staging) calls = %d, want 1; queries = %v", got, eng.queries)
 	}
-	if got := countContaining(eng.queries, "mutationUpdateDeploymentStatus(", `status: "succeeded"`); got != 1 {
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "succeeded"`); got != 1 {
 		t.Errorf("transition(succeeded) calls = %d, want 1; queries = %v", got, eng.queries)
 	}
 }
@@ -106,10 +108,10 @@ func TestDeployStagingTransitionsFailedOnPromoteError(t *testing.T) {
 	if res.GetOk() {
 		t.Fatalf("expected ok = false on promote error")
 	}
-	if got := countContaining(eng.queries, "mutationCreateDeployment("); got != 1 {
+	if got := countContaining(eng.queries, "createDeployment("); got != 1 {
 		t.Errorf("create-deployment calls = %d, want 1; queries = %v", got, eng.queries)
 	}
-	if got := countContaining(eng.queries, "mutationUpdateDeploymentStatus(", `status: "failed"`); got != 1 {
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 1 {
 		t.Errorf("transition(failed) calls = %d, want 1; queries = %v", got, eng.queries)
 	}
 }

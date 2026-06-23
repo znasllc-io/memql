@@ -18,7 +18,7 @@ use library.shapes.{ artifactFull, generatedOutputFull, memoryFull, documentVers
 
 @enabled
 @description("List the caller's entire Library (artifacts + records). Owned: the row set is gated by ownerUserId==actor.userId server-side. The default Library read; the panel filters by lens / kind and searches client-side over this set, or calls the narrower facet queries below when a single facet dominates.")
-query artifact queryLibraryArtifacts {
+query artifact libraryArtifacts {
   filter  payload.ownerUserId==actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
@@ -30,7 +30,7 @@ query artifact queryLibraryArtifacts {
 
 @enabled
 @description("List the caller's Library rows for one lens (artifact | record) -- backs the Artifacts | Records toggle. Owned: ownerUserId==actor.userId gates the row set; payload.lens narrows to the selected lens.")
-query artifact queryLibraryArtifactsByLens {
+query artifact libraryArtifactsByLens {
   args {
     lens  string  @required
   }
@@ -45,7 +45,7 @@ query artifact queryLibraryArtifactsByLens {
 
 @enabled
 @description("List the caller's Library rows of one kind (document / generated_output / note / todo / calendar_event / memory / live_source) -- backs the kind facet filter. Owned: ownerUserId==actor.userId gates the row set; payload.kind narrows to the selected kind.")
-query artifact queryLibraryArtifactsByKind {
+query artifact libraryArtifactsByKind {
   args {
     kind  string  @required
   }
@@ -69,7 +69,7 @@ query artifact queryLibraryArtifactsByKind {
 @description("Fetch a single Library artifact index row by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content.")
 @mcp
 @unbounded("library artifact by id (guarded), gated to the owner -- bounded to a single row")
-query artifact queryLibraryArtifactById {
+query artifact libraryArtifactById {
   args {
     artifactId  string  @required
   }
@@ -80,7 +80,7 @@ query artifact queryLibraryArtifactById {
 @enabled
 @description("Drill-in read: fetch a generated-output's full content (inline body or attachment ref) by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library viewer when opening a generated_output artifact resolved from its sourceConceptRef.")
 @unbounded("generated output by id (guarded), gated to the owner -- bounded to a single row")
-query generatedOutput queryGeneratedOutputById {
+query generatedOutput generatedOutputById {
   args {
     outputId  string  @required
   }
@@ -90,7 +90,7 @@ query generatedOutput queryGeneratedOutputById {
 
 @enabled
 @description("List the generated-output rows a Plan produced. Owned: ownerUserId==actor.userId. The planner reads this as the authoritative 'did the deliverable actually get written?' signal for a produceArtifact plan -- promoteWorkbenchOutput stamps producedByPlanId on the row when a workbench fs_write is promoted. The planner stamps the plan's owner as actor before calling, so the read stays inside the owned-row authz model. (memql#939)")
-query generatedOutput queryGeneratedOutputsForPlan {
+query generatedOutput generatedOutputsForPlan {
   args {
     planId  string  @required
   }
@@ -106,7 +106,7 @@ query generatedOutput queryGeneratedOutputsForPlan {
 @enabled
 @description("Drill-in read: fetch a memory's full content by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library Records lens when opening a memory artifact resolved from its sourceConceptRef.")
 @unbounded("memory by id (guarded), gated to the owner -- bounded to a single row")
-query memory queryMemoryById {
+query memory memoryById {
   args {
     memoryId  string  @required
   }
@@ -124,11 +124,11 @@ query memory queryMemoryById {
 // bounded to workspace-scoped live sources (private sources keep ownerUserId
 // and only ever surface through the owned queries), and partition isolation is
 // enforced upstream of the read. The frontend merges this into the Records lens
-// alongside the owned queryLibraryArtifactsByLens("record") results (#723).
+// alongside the owned libraryArtifactsByLens("record") results (#723).
 @enabled
 @public
 @description("List the partition's workspace-scoped live sources for the Library Records lens. Non-owned by design: workspace liveSources have no single owner (empty ownerUserId), so this reads kind=live_source AND scope=workspace with no caller gate and the frontend merges it into the owned Records results. Private live sources are excluded here -- they surface through the owner-gated queries. See the @public justification above (#723).")
-query artifact queryLibraryWorkspaceLiveSources {
+query artifact libraryWorkspaceLiveSources {
   filter  payload.kind=="live_source" && payload.scope=="workspace"
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
@@ -149,7 +149,7 @@ query artifact queryLibraryWorkspaceLiveSources {
 
 @enabled
 @description("List the append-only version history of a logical document (every retained version, summary projection -- versionNumber, authorKind, author, note, createdAt -- WITHOUT the full body). Owned: ownerUserId==actor.userId gates the row set; payload.documentId narrows to the one document. Backs the Library history drawer (memql#1230); the frontend orders by versionNumber. Each version is a distinct retained row, so no version is ever lost.")
-query documentVersion queryDocumentVersions {
+query documentVersion documentVersions {
   args {
     documentId  string  @required
   }
@@ -165,7 +165,7 @@ query documentVersion queryDocumentVersions {
 @enabled
 @description("Fetch a single document version's FULL content (immutable body / attachment + provenance) by its version row id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard. Backs the 'open this version' viewer and the restore-source read (memql#1230).")
 @unbounded("document version by id (guarded), gated to the owner -- bounded to a single row")
-query documentVersion queryDocumentVersionById {
+query documentVersion documentVersionById {
   args {
     versionId  string  @required
   }
@@ -173,18 +173,18 @@ query documentVersion queryDocumentVersionById {
   shape   documentVersionFull
 }
 
-// queryDocumentVersionsForOwner backs the Go edit/restore handlers'
+// documentVersionsForOwner backs the Go edit/restore handlers'
 // "read the current latest to compute the next versionNumber + set
 // parentVersionId" step (memql#1229 / #1231 / #1230). It returns the
 // full history for a document under a threaded owner actor (the handler
 // runs under withUserActor, not the user's JWT), and the handler picks
 // the max versionNumber in Go (MemQL has no ORDER BY / LIMIT / max()).
-// Identical filter to queryDocumentVersions; kept as a distinct named
+// Identical filter to documentVersions; kept as a distinct named
 // read so the handler dependency is explicit and the user-facing query
 // description stays accurate.
 @enabled
-@description("Internal read for the edit/restore handlers: the full version history of a document (full projection) so the handler can compute the next versionNumber + the parentVersionId from the current latest. Owned: ownerUserId==actor.userId; the handler runs under a threaded owner actor. Mirrors queryDocumentVersions' filter with the full content shape.")
-query documentVersion queryDocumentVersionsForOwner {
+@description("Internal read for the edit/restore handlers: the full version history of a document (full projection) so the handler can compute the next versionNumber + the parentVersionId from the current latest. Owned: ownerUserId==actor.userId; the handler runs under a threaded owner actor. Mirrors documentVersions' filter with the full content shape.")
+query documentVersion documentVersionsForOwner {
   args {
     documentId  string  @required
   }

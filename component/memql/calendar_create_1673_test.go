@@ -36,7 +36,7 @@ func dslCalendarMutationsSource(t *testing.T) string {
 // string "default" into the boolean field's JSON schema, so some LLM/MCP
 // clients called the tool with allDay="false" (string); and the handler
 // interpolated `"$args.allDay"` into a MemQL query string, so allDay arrived
-// as the string literal "false" -> mutationCreateCalendarEvent rejected it
+// as the string literal "false" -> createCalendarEvent rejected it
 // with "expected bool, got string". An interim fix kept the type="query"
 // handler with a bare `$args.allDay` token, but that still left the OTHER
 // optionals (endsAt/location/notes/recurrence) as quoted "$args.x" slots that
@@ -45,7 +45,7 @@ func dslCalendarMutationsSource(t *testing.T) string {
 //
 // Shipped fix (memql#1672): calendarCreate dispatches via a typed
 // type="function" handler -> the structural args map is passed straight to
-// mutationCreateCalendarEvent (no $args string interpolation at all), and the
+// createCalendarEvent (no $args string interpolation at all), and the
 // allDay tool field carries NO @default, so the schema advertises a clean
 // boolean with no string default. Omitted optionals simply stay absent.
 func TestCalendarCreate1673_AllDayBoolDefault(t *testing.T) {
@@ -97,8 +97,8 @@ func TestCalendarCreate1673_AllDayBoolDefault(t *testing.T) {
 	if tool.Handler.Type != "function" {
 		t.Errorf("calendarCreate handler type = %q, want \"function\" (typed dispatch, no $args string interpolation)", tool.Handler.Type)
 	}
-	if tool.Handler.FunctionName != "mutationCreateCalendarEvent" {
-		t.Errorf("calendarCreate handler function = %q, want \"mutationCreateCalendarEvent\"", tool.Handler.FunctionName)
+	if tool.Handler.FunctionName != "createCalendarEvent" {
+		t.Errorf("calendarCreate handler function = %q, want \"createCalendarEvent\"", tool.Handler.FunctionName)
 	}
 	// A function handler carries no query template -- there is no string slot
 	// for allDay (or any optional) to be coerced to a string / "null".
@@ -127,14 +127,14 @@ func TestCalendarCreate1673_HandlerIsTypedFunction(t *testing.T) {
 	if tool.Handler == nil {
 		t.Fatal("calendarCreate.Handler is nil")
 	}
-	if tool.Handler.Type != "function" || tool.Handler.FunctionName != "mutationCreateCalendarEvent" {
-		t.Fatalf("calendarCreate handler = {type:%q, fn:%q}; want a function handler targeting mutationCreateCalendarEvent",
+	if tool.Handler.Type != "function" || tool.Handler.FunctionName != "createCalendarEvent" {
+		t.Fatalf("calendarCreate handler = {type:%q, fn:%q}; want a function handler targeting createCalendarEvent",
 			tool.Handler.Type, tool.Handler.FunctionName)
 	}
 }
 
 // TestCalendarCreate1673_MutationNoReservedFields guards against #1673
-// blocker 2: the insert block of mutationCreateCalendarEvent must NOT declare
+// blocker 2: the insert block of createCalendarEvent must NOT declare
 // the engine-reserved fields "createdBy" OR "createdAt". Both are stamped by
 // the engine (createdBy from actor.userId, createdAt = now); declaring either
 // in the payload triggers "insert() payload declares reserved field" at
@@ -146,14 +146,14 @@ func TestCalendarCreate1673_MutationNoReservedFields(t *testing.T) {
 	for _, reserved := range []string{"createdBy: actor.userId", "createdAt: now"} {
 		if strings.Contains(content, reserved) {
 			excerpt := content
-			if idx := strings.Index(content, "mutation calendarEvent mutationCreateCalendarEvent"); idx >= 0 {
+			if idx := strings.Index(content, "mutation calendarEvent createCalendarEvent"); idx >= 0 {
 				end := idx + 600
 				if end > len(content) {
 					end = len(content)
 				}
 				excerpt = content[idx:end]
 			}
-			t.Errorf("mutationCreateCalendarEvent insert block declares reserved field %q -- remove it; the engine stamps createdAt/createdBy automatically\nexcerpt:\n%s", reserved, excerpt)
+			t.Errorf("createCalendarEvent insert block declares reserved field %q -- remove it; the engine stamps createdAt/createdBy automatically\nexcerpt:\n%s", reserved, excerpt)
 		}
 	}
 }

@@ -365,8 +365,8 @@ func resolveArgValueRef(v any, evaluator *automations.Evaluator) (any, error) {
 		// Bare step-variable reference: a single identifier (no dot / call /
 		// operator) that names a recorded step result. A logic body's later
 		// step passes a prior `name := <call>` result straight through as a
-		// mutation arg -- e.g. logicRecordTransition's
-		// `mutationRecordRequestEvent({ requestId: requestId, fromStatus:
+		// mutation arg -- e.g. recordTransition's
+		// `recordRequestEvent({ requestId: requestId, fromStatus:
 		// fromStatus, toStatus: toStatus })`, where requestId / fromStatus /
 		// toStatus are all earlier coalesce(...) steps. Without this the bare
 		// identifier renders as its own LITERAL NAME ("requestId") into the

@@ -20,8 +20,8 @@
 //      to the Trainer's five tools (webSearch / fetchUrl /
 //      writeKnowledgeChunk / markChunkSuperseded / embedChunk). The tool
 //      loop runs the writes itself -- writeKnowledgeChunk routes to
-//      mutationWriteKnowledgeChunk, markChunkSuperseded to
-//      mutationMarkChunkSuperseded.
+//      writeKnowledgeChunk, markChunkSuperseded to
+//      markChunkSuperseded.
 //   5. On a refresh run, reset the domain's staleSignalCount +
 //      lastSeededAt (mutationResetStaleAfterRefresh).
 //   6. Complete the Plan (succeeded with the Trainer's summary, or
@@ -118,7 +118,7 @@ func (d *TrainSpecialistDispatcher) HandlePlanCreated(ev events.Event) {
 // HandlePlanUpdated is the event-bus subscriber for
 // graph.node.updated.v1:planner:plan. Covers the case where a
 // trainSpecialist Plan is created in a non-live status and later
-// transitions (e.g. queued -> running via mutationStartPlan). The
+// transitions (e.g. queued -> running via startPlan). The
 // claim guard keeps this from re-running a Plan the created handler
 // already picked up.
 func (d *TrainSpecialistDispatcher) HandlePlanUpdated(ev events.Event) {
@@ -130,9 +130,9 @@ func (d *TrainSpecialistDispatcher) handle(ev events.Event) {
 	if !ok || kind != "trainSpecialist" {
 		return
 	}
-	// Only dispatch on a live / dispatchable status. mutationCreatePlan
+	// Only dispatch on a live / dispatchable status. createPlan
 	// stamps 'planning'; the cron + stale-signal spawns also land in
-	// 'planning'; mutationStartPlan flips to 'running'. Accept the
+	// 'planning'; startPlan flips to 'running'. Accept the
 	// statuses that mean "this Plan wants work done now"; ignore
 	// terminal / parked states.
 	switch status {
@@ -280,7 +280,7 @@ func (d *TrainSpecialistDispatcher) runTrainer(ctx context.Context, planId strin
 // --- context loaders ------------------------------------------------------
 
 func (d *TrainSpecialistDispatcher) loadPlan(ctx context.Context, planId string) (map[string]any, error) {
-	q := fmt.Sprintf(`queryPlanById({planId:%q})`, planId)
+	q := fmt.Sprintf(`planById({planId:%q})`, planId)
 	res, err := d.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
@@ -299,7 +299,7 @@ func (d *TrainSpecialistDispatcher) loadSpecialist(ctx context.Context, speciali
 	if specialistId == "" {
 		return map[string]any{}
 	}
-	q := fmt.Sprintf(`queryAgentById({agentId:%q})`, specialistId)
+	q := fmt.Sprintf(`agentById({agentId:%q})`, specialistId)
 	res, err := d.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		d.logger.Warn("trainSpecialist dispatcher: loadSpecialist failed",
@@ -317,7 +317,7 @@ func (d *TrainSpecialistDispatcher) loadSpecialist(ctx context.Context, speciali
 // text-truncated) for the Trainer's refresh decision. Best-effort: a
 // query failure yields an empty corpus, which the prompt tolerates.
 func (d *TrainSpecialistDispatcher) loadExistingCorpus(ctx context.Context, domainId string) []map[string]any {
-	q := fmt.Sprintf(`queryDocumentChunksForDomain({domainId:%q})`, domainId)
+	q := fmt.Sprintf(`documentChunksForDomain({domainId:%q})`, domainId)
 	res, err := d.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		d.logger.Warn("trainSpecialist dispatcher: loadExistingCorpus failed",
@@ -352,7 +352,7 @@ func (d *TrainSpecialistDispatcher) loadExistingCorpus(ctx context.Context, doma
 
 func (d *TrainSpecialistDispatcher) markRunning(ctx context.Context, planId string) error {
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"running", startedAt:%q})`,
+		`updatePlanStatus({planId:%q, status:"running", startedAt:%q})`,
 		planId, time.Now().UTC().Format(time.RFC3339),
 	)
 	_, err := d.engine.Execute(systemActorContext(ctx), q)
@@ -365,7 +365,7 @@ func (d *TrainSpecialistDispatcher) markSucceeded(ctx context.Context, planId st
 		outputJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"succeeded", output:%s, completedAt:%q})`,
+		`updatePlanStatus({planId:%q, status:"succeeded", output:%s, completedAt:%q})`,
 		planId, string(outputJSON), time.Now().UTC().Format(time.RFC3339),
 	)
 	_, err = d.engine.Execute(systemActorContext(ctx), q)
@@ -374,7 +374,7 @@ func (d *TrainSpecialistDispatcher) markSucceeded(ctx context.Context, planId st
 
 func (d *TrainSpecialistDispatcher) markFailed(ctx context.Context, planId, errorMessage string) error {
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"failed", errorMessage:%q, completedAt:%q})`,
+		`updatePlanStatus({planId:%q, status:"failed", errorMessage:%q, completedAt:%q})`,
 		planId, errorMessage, time.Now().UTC().Format(time.RFC3339),
 	)
 	_, err := d.engine.Execute(systemActorContext(ctx), q)

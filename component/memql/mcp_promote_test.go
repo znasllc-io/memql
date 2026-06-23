@@ -14,7 +14,7 @@ func TestAtMcpAnnotation_ParsedOntoFunction(t *testing.T) {
 
 @mcp
 @description("Create a session widget (MCP-promoted)")
-mutation mcpWidget mutationCreatePromotedWidget {
+mutate mcpWidget mutationCreatePromotedWidget {
   args {
     widgetId  string  @required
   }

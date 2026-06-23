@@ -66,7 +66,7 @@ func (c *CognitionIntegration) SetClientToolResultClient(client *node.ClientTool
 // forwardTurnToAgent builds an AgentGenerateTurnMsg from the current
 // turn state and ships it to an agent peer via the forwarder. Streams
 // AgentGenerateTurnDelta replies back, emitting each text chunk through
-// mutationEmitTextChunk (same path cognition used to use locally), and
+// emitTextChunk (same path cognition used to use locally), and
 // returns the full assembled reply text on completion.
 //
 // hints["tools_disabled"] = "true" on voice / polyphon-text paths so
@@ -285,7 +285,7 @@ func (c *CognitionIntegration) consumeAgentTurnStream(
 		case serverMsg, ok := <-respCh:
 			if !ok {
 				// Channel closed without a Complete message.
-				c.mutationEmitTextChunk(ctx, partitionId, participantId, requestId, "", textChunkIdx, true)
+				c.emitTextChunk(ctx, partitionId, participantId, requestId, "", textChunkIdx, true)
 				return agentReplyResult{text: strings.TrimSpace(fullText.String())}, nil
 			}
 			switch payload := serverMsg.GetPayload().(type) {
@@ -294,7 +294,7 @@ func (c *CognitionIntegration) consumeAgentTurnStream(
 				if text := delta.GetText(); text != nil && text.GetText() != "" {
 					chunk := text.GetText()
 					fullText.WriteString(chunk)
-					c.mutationEmitTextChunk(ctx, partitionId, participantId, requestId, chunk, textChunkIdx, false)
+					c.emitTextChunk(ctx, partitionId, participantId, requestId, chunk, textChunkIdx, false)
 					textChunkIdx++
 				}
 				// ToolCall / ToolResult events are audit-only for
@@ -312,7 +312,7 @@ func (c *CognitionIntegration) consumeAgentTurnStream(
 				complete := payload.AgentGenerateTurnComplete
 				// Terminal chunk with done=true so the frontend knows
 				// the reply stream is over.
-				c.mutationEmitTextChunk(ctx, partitionId, participantId, requestId, "", textChunkIdx, true)
+				c.emitTextChunk(ctx, partitionId, participantId, requestId, "", textChunkIdx, true)
 				if complete.GetError() != nil {
 					return agentReplyResult{}, fmt.Errorf("agent turn error: %s (%s)",
 						complete.GetError().GetMessage(),

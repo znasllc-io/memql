@@ -65,7 +65,7 @@ func TestFilterSyntaxCanonical(t *testing.T) {
 		if intrinsics[head] {
 			return
 		}
-		// Heads like "traitIsActiveRecord" (no `.` after) are spec
+		// Heads like "isActiveRecord" (no `.` after) are spec
 		// calls, not field refs. Only flag if the predicate has a
 		// `.` after the head (so it's <head>.<field>) or an operator
 		// that proves it's a comparison.
@@ -87,8 +87,8 @@ func TestFilterSyntaxCanonical(t *testing.T) {
 // inlines a payload comparison that an existing trait spec covers.
 // Today's traits in dsl/common/traits.memql:
 //
-//	traitIsActiveRecord  ⇔ payload.active == true
-//	traitIsNotDeleted    ⇔ payload.deleted != true / payload.deleted == false
+//	isActiveRecord  ⇔ payload.active == true
+//	isNotDeleted    ⇔ payload.deleted != true / payload.deleted == false
 //	traitIsArchived      ⇔ payload.archived == true / payload.archivedAt != null
 //	traitIsSaved         ⇔ payload.saved == true
 //
@@ -104,24 +104,24 @@ func TestNoInlineTraitablePredicates(t *testing.T) {
 		hint string
 	}
 	rules := []rule{
-		{regexp.MustCompile(`payload\.active\s*==\s*true\b`), "traitIsActiveRecord"},
-		{regexp.MustCompile(`payload\.active\s*!=\s*false\b`), "traitIsActiveRecord"},
-		{regexp.MustCompile(`payload\.deleted\s*==\s*false\b`), "traitIsNotDeleted"},
-		{regexp.MustCompile(`payload\.deleted\s*!=\s*true\b`), "traitIsNotDeleted"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"active"`), "traitStatusIsActive"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"archived"`), "traitStatusIsArchived"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"saved"`), "traitStatusIsSaved"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"pending"`), "traitStatusIsPending"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"running"`), "traitStatusIsRunning"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"cancelled"`), "traitIsCancelled"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"completed"`), "traitIsCompleted"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"inProgress"`), "traitIsInProgress"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"open"`), "traitIsOpen"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"scheduled"`), "traitIsScheduled"},
-		{regexp.MustCompile(`payload\.status\s*!=\s*"archived"`), "traitIsNotArchived"},
-		{regexp.MustCompile(`payload\.identityType\s*==\s*"api_key"`), "traitIdentityIsApiKey"},
-		{regexp.MustCompile(`payload\.identityType\s*==\s*"worker_token"`), "traitIdentityIsWorkerToken"},
-		{regexp.MustCompile(`payload\.deletionScheduledAt\s*!=\s*""`), "traitIsDeletionScheduled"},
+		{regexp.MustCompile(`payload\.active\s*==\s*true\b`), "isActiveRecord"},
+		{regexp.MustCompile(`payload\.active\s*!=\s*false\b`), "isActiveRecord"},
+		{regexp.MustCompile(`payload\.deleted\s*==\s*false\b`), "isNotDeleted"},
+		{regexp.MustCompile(`payload\.deleted\s*!=\s*true\b`), "isNotDeleted"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"active"`), "statusIsActive"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"archived"`), "statusIsArchived"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"saved"`), "statusIsSaved"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"pending"`), "statusIsPending"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"running"`), "statusIsRunning"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"cancelled"`), "isCancelled"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"completed"`), "isCompleted"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"inProgress"`), "isInProgress"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"open"`), "isOpen"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"scheduled"`), "isScheduled"},
+		{regexp.MustCompile(`payload\.status\s*!=\s*"archived"`), "isNotArchived"},
+		{regexp.MustCompile(`payload\.identityType\s*==\s*"api_key"`), "identityIsApiKey"},
+		{regexp.MustCompile(`payload\.identityType\s*==\s*"worker_token"`), "identityIsWorkerToken"},
+		{regexp.MustCompile(`payload\.deletionScheduledAt\s*!=\s*""`), "isDeletionScheduled"},
 	}
 
 	type violation struct {
@@ -696,7 +696,7 @@ func unwrapWhenPredicate(p string) string {
 // splitFilterRef peels the leading identifier (and optional `?.`
 // prefix) off a predicate. Returns (head, rest). For
 // `?.user.role==args.role` returns ("user", ".role==args.role").
-// For `traitIsActiveRecord` returns ("traitIsActiveRecord", "").
+// For `isActiveRecord` returns ("isActiveRecord", "").
 // For `id==args.userId` returns ("id", "==args.userId").
 func splitFilterRef(pred string) (string, string) {
 	s := pred
@@ -829,8 +829,8 @@ func stripLineComment(line string) string {
 // query scans the wrong concept and returns [] for rows that were written
 // under the other concept -- silently, with no load-time or parse-time error.
 // The 2026-05 signature-bound-concept migration (commit f7b6ab3) SWAPPED the
-// bindings for two planner queries: queryTaskStateById became `query plan`
-// (reads taskState via taskStateFull) and queryTasksForPlan became
+// bindings for two planner queries: taskStateById became `query plan`
+// (reads taskState via taskStateFull) and tasksForPlan became
 // `query taskState` (reads task via taskFull). Both returned [] right after
 // successful creates. This invariant catches that class at test time.
 //
@@ -872,8 +872,8 @@ func TestQueryConceptMatchesShapeConcept(t *testing.T) {
 	// #1634 wrong-scan bug. variableFull projects {key,value,...} shared by
 	// platform's globalVariable + partitionVariable.
 	sharedShapeExempt := map[string]string{
-		"queryGlobalVariable":  "variableFull",
-		"queryGlobalVariables": "variableFull",
+		"globalVariable":  "variableFull",
+		"globalVariables": "variableFull",
 	}
 
 	// Pass 1: global shapeName -> concept (concept-bound shapes only).

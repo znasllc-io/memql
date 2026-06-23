@@ -141,7 +141,7 @@ func (s *Sink) Check(ctx context.Context, desc safety.ActionDescriptor, cls safe
 	return safety.ApprovalVerdict{State: safety.ApprovalStatePending, ApprovalRequestID: id}
 }
 
-// classifyActive walks the rows returned by queryActiveApprovalsByCorrelationKey
+// classifyActive walks the rows returned by activeApprovalsByCorrelationKey
 // and returns (approvedId, pendingId, deniedId). Walks all rows so
 // the cockpit-side history that someone approved earlier wins over a
 // later pending row -- the bypass posture is "any approval suffices."
@@ -193,12 +193,12 @@ func (s *Sink) classifyActive(rows []map[string]any) (approvedId, pendingId, den
 	return
 }
 
-// queryActive runs queryActiveApprovalsByCorrelationKey and coerces
+// queryActive runs activeApprovalsByCorrelationKey and coerces
 // the result into a []map[string]any list of payload rows. The
 // engine's Execute returns []any of maps with a "payload" sub-map +
 // "id" top-level; we flatten into one map per row carrying both.
 func (s *Sink) queryActive(ctx context.Context, key string) ([]map[string]any, error) {
-	query := fmt.Sprintf(`queryActiveApprovalsByCorrelationKey({correlationKey: %q})`, key)
+	query := fmt.Sprintf(`activeApprovalsByCorrelationKey({correlationKey: %q})`, key)
 	res, err := s.engine.Execute(ctx, query)
 	if err != nil {
 		return nil, err
@@ -206,7 +206,7 @@ func (s *Sink) queryActive(ctx context.Context, key string) ([]map[string]any, e
 	return rowsFromResult(res), nil
 }
 
-// createPending runs mutationCreateApprovalRequest with TTL-derived
+// createPending runs createApprovalRequest with TTL-derived
 // expiresAt + the descriptor's redacted payload. Returns the
 // inserted row's id.
 func (s *Sink) createPending(ctx context.Context, key string, desc safety.ActionDescriptor, cls safety.Classification) (string, error) {
@@ -235,7 +235,7 @@ func (s *Sink) createPending(ctx context.Context, key string, desc safety.Action
 		"ownerUserId":    desc.Caller.OwnerUserID,
 		"planId":         desc.Caller.PlanID,
 	}
-	query := buildMutationCall("mutationCreateApprovalRequest", args)
+	query := buildMutationCall("createApprovalRequest", args)
 	res, err := s.engine.Execute(ctx, query)
 	if err != nil {
 		return "", err
@@ -318,7 +318,7 @@ func buildMutationCall(name string, args map[string]any) string {
 //
 //   - response["data"]: shaped rows from a query that used `shape()`.
 //     The shape can be []any of maps, []map[string]any, or a single map.
-//     For our queryActiveApprovalsByCorrelationKey (which uses
+//     For our activeApprovalsByCorrelationKey (which uses
 //     `shape approvalRequestFull`), this is where the rows land.
 //   - response["bundle"]["nodes"]: []any of {id, concept, type, payload}
 //     for the raw graph nodes. Used as a fallback when "data" is empty --

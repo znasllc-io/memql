@@ -40,7 +40,7 @@ import (
 //     substrate keyed by the fixed logical key plan:lifecycle. The durable
 //     outbox row is the guarantee; the EventBridge mesh broadcast stays as the
 //     deduped low-latency fast-path. The plan-write site is the BFF
-//     (mutationCreatePlan) and the planner itself (status transitions), so both
+//     (createPlan) and the planner itself (status transitions), so both
 //     run the producer side.
 //   - Consumer side (planner only): a planner Subscribes ONCE to plan:lifecycle
 //     on the substrate and re-publishes each deliverable onto its LOCAL bus --

@@ -203,7 +203,7 @@ shape participant pathSyntaxExample {
 //         use cognition.shapes.{ participantFull }
 //
 //         @description("Get space participants")
-//         query participant querySpaceParticipants {
+//         query participant spaceParticipants {
 //           args   { partitionId string @required }
 //           filter payload.partitionId == args.partitionId
 //           shape  participantFull

@@ -494,10 +494,10 @@ func (a *App) cluster() {
 		// lock elects ONE cluster-wide leader that reconciles, so two replicas
 		// never double-retire the same node. It drives topology freshness to
 		// seconds by retiring (a) nodes whose deployment is superseded/failed/
-		// rolled_back (querySupersededDeployments, immediate) and (b) nodes
+		// rolled_back (supersededDeployments, immediate) and (b) nodes
 		// continuously absent from the live mesh past a short grace window --
 		// the crash/OOM/forced-replace case the gossip status writer misses and
-		// the 30-min prune (logicPruneStaleClusterNodes) only mops up lazily.
+		// the 30-min prune (pruneStaleClusterNodes) only mops up lazily.
 		// The prune stays as the backstop; both write the same idempotent
 		// terminal health="stopped", so they never conflict. Wired here in app/
 		// because the reconciler needs the PeerManager (mesh view), the engine
@@ -743,14 +743,14 @@ func (a *App) EmitSystemStartup() {
 	// (local Docker for development, AKS/azure for staging + prod).
 	payload["provider"] = deployProvider(environment)
 
-	// Include the deployment id (#1873) so logicRegisterNode can stamp it
+	// Include the deployment id (#1873) so registerNode can stamp it
 	// (plus provider/environment/region, already on this payload) on the
 	// v1:cluster:node row -- tying every node to the deployment that created
 	// it. MEMQL_DEPLOYMENT_ID is injected per-deploy by the rollout (k8s
 	// downward API from the pod/rollout template hash). Falls back to
 	// "local" in dev so the node row always carries a non-empty deploymentId
 	// (a single logical local deployment), satisfying the #1873 acceptance
-	// criterion and the orphan-detection contract (queryNodesNotInDeployment).
+	// criterion and the orphan-detection contract (nodesNotInDeployment).
 	payload["deploymentId"] = firstNonEmptyStr(os.Getenv("MEMQL_DEPLOYMENT_ID"), "local")
 
 	a.eventBus.Publish(events.Event{

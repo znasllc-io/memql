@@ -104,7 +104,7 @@ func (s *Service) recordDeployment(ctx context.Context, consoleEnv, version, dig
 		"clusterId":    strings.TrimSpace(os.Getenv("MEMQL_CLUSTER_ID")),
 		"triggeredBy":  act.userID,
 	}
-	query := "mutationCreateDeployment(" + renderDeploymentArgs(args) + ")"
+	query := "createDeployment(" + renderDeploymentArgs(args) + ")"
 	if _, err := s.engine.Execute(ctx, query); err != nil {
 		if s.logger != nil {
 			s.logger.Warn("deploycontrol: persist deployment record failed (deploy continues)",
@@ -126,7 +126,7 @@ func (s *Service) transitionDeployment(ctx context.Context, deploymentID, status
 		"deploymentId": deploymentID,
 		"status":       status,
 	}
-	query := "mutationUpdateDeploymentStatus(" + renderDeploymentArgs(args) + ")"
+	query := "updateDeploymentStatus(" + renderDeploymentArgs(args) + ")"
 	if _, err := s.engine.Execute(ctx, query); err != nil && s.logger != nil {
 		s.logger.Warn("deploycontrol: persist deployment transition failed",
 			"error", err, "deployment_id", deploymentID, "status", status)

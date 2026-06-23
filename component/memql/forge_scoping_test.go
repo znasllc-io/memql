@@ -13,21 +13,21 @@ import (
 //
 // It verifies three properties without requiring a running database:
 //
-//  1. queryProjectBySlug exists in the function registry and is bound to the
+//  1. projectBySlug exists in the function registry and is bound to the
 //     right concept (v1:forge:project) -- the slug->id resolver Claude uses
 //     to go from a human project name to a projectId.
 //
 //  2. forgeResolveProject is present in the tool registry, is @mcp-tagged,
-//     and its handler references queryProjectBySlug (wired correctly).
+//     and its handler references projectBySlug (wired correctly).
 //
-//  3. queryProjectRequests is bound to v1:forge:request -- confirming the
+//  3. projectRequests is bound to v1:forge:request -- confirming the
 //     per-project filter chain (request.projectId -> project scoping) is
 //     intact. This, combined with the engine's automatic partition WHERE
 //     clause, implements the two-tier isolation model:
 //
-//       partition (engine-enforced, automatic)
-//         └── project (payload.projectId filter in queryProjectRequests)
-//               └── request rows
+//     partition (engine-enforced, automatic)
+//     └── project (payload.projectId filter in projectRequests)
+//     └── request rows
 //
 // The partition dimension is NOT a DSL filter -- the engine stamps
 // WHERE partition = $envelope unconditionally. This test therefore does NOT
@@ -54,20 +54,20 @@ func TestForgeProjectScopingAndPartitionIsolation(t *testing.T) {
 		t.Fatalf("LoadUnifiedTools: %v", err)
 	}
 
-	// --- 1. queryProjectBySlug -----------------------------------------------
+	// --- 1. projectBySlug -----------------------------------------------
 	//
 	// Must exist and be bound to the forge project concept. The slug field is
 	// the required arg that uniquely identifies a project within a partition.
-	qBySlug, err := fnReg.Get("queryProjectBySlug")
+	qBySlug, err := fnReg.Get("projectBySlug")
 	if err != nil || qBySlug == nil {
-		t.Fatalf("queryProjectBySlug missing from function registry (err=%v) -- the slug->id resolver is required for #1792", err)
+		t.Fatalf("projectBySlug missing from function registry (err=%v) -- the slug->id resolver is required for #1792", err)
 	}
 	if !strings.Contains(qBySlug.BoundConcept, "project") {
-		t.Errorf("queryProjectBySlug.BoundConcept = %q, expected to reference the forge project concept", qBySlug.BoundConcept)
+		t.Errorf("projectBySlug.BoundConcept = %q, expected to reference the forge project concept", qBySlug.BoundConcept)
 	}
 	// Confirm the slug arg is declared (it is @required).
 	if qBySlug.ArgsSchema == nil {
-		t.Fatal("queryProjectBySlug.ArgsSchema is nil -- no args block parsed")
+		t.Fatal("projectBySlug.ArgsSchema is nil -- no args block parsed")
 	}
 	slugFound := false
 	for _, f := range qBySlug.ArgsSchema.Fields {
@@ -77,23 +77,23 @@ func TestForgeProjectScopingAndPartitionIsolation(t *testing.T) {
 		}
 	}
 	if !slugFound {
-		t.Error("queryProjectBySlug.ArgsSchema missing 'slug' field -- the resolver arg is absent")
+		t.Error("projectBySlug.ArgsSchema missing 'slug' field -- the resolver arg is absent")
 	}
 
-	// --- 2. queryProjectRequests --------------------------------------------
+	// --- 2. projectRequests --------------------------------------------
 	//
 	// Must exist and be bound to the forge request concept. This is the
 	// application-layer project scoping query (filter on payload.projectId).
-	qProjReqs, err := fnReg.Get("queryProjectRequests")
+	qProjReqs, err := fnReg.Get("projectRequests")
 	if err != nil || qProjReqs == nil {
-		t.Fatalf("queryProjectRequests missing from function registry (err=%v)", err)
+		t.Fatalf("projectRequests missing from function registry (err=%v)", err)
 	}
 	if !strings.Contains(qProjReqs.BoundConcept, "request") {
-		t.Errorf("queryProjectRequests.BoundConcept = %q, expected to reference the forge request concept", qProjReqs.BoundConcept)
+		t.Errorf("projectRequests.BoundConcept = %q, expected to reference the forge request concept", qProjReqs.BoundConcept)
 	}
 	// Confirm projectId arg is declared.
 	if qProjReqs.ArgsSchema == nil {
-		t.Fatal("queryProjectRequests.ArgsSchema is nil")
+		t.Fatal("projectRequests.ArgsSchema is nil")
 	}
 	pidFound := false
 	for _, f := range qProjReqs.ArgsSchema.Fields {
@@ -103,12 +103,12 @@ func TestForgeProjectScopingAndPartitionIsolation(t *testing.T) {
 		}
 	}
 	if !pidFound {
-		t.Error("queryProjectRequests.ArgsSchema missing 'projectId' field -- project scoping arg is absent")
+		t.Error("projectRequests.ArgsSchema missing 'projectId' field -- project scoping arg is absent")
 	}
 
 	// --- 3. forgeResolveProject tool ----------------------------------------
 	//
-	// Must be present, @mcp-tagged, and wired to queryProjectBySlug.
+	// Must be present, @mcp-tagged, and wired to projectBySlug.
 	resolverTool, err := toolReg.Get("forgeResolveProject")
 	if err != nil || resolverTool == nil {
 		t.Fatalf("forgeResolveProject missing from tool registry (err=%v) -- the MCP slug resolver is required for #1792", err)
@@ -119,8 +119,8 @@ func TestForgeProjectScopingAndPartitionIsolation(t *testing.T) {
 	if resolverTool.Handler == nil {
 		t.Fatal("forgeResolveProject.Handler is nil -- no handler wired")
 	}
-	if !strings.Contains(resolverTool.Handler.Query, "queryProjectBySlug") {
-		t.Errorf("forgeResolveProject handler query = %q, expected to contain 'queryProjectBySlug' (the backing query)", resolverTool.Handler.Query)
+	if !strings.Contains(resolverTool.Handler.Query, "projectBySlug") {
+		t.Errorf("forgeResolveProject handler query = %q, expected to contain 'projectBySlug' (the backing query)", resolverTool.Handler.Query)
 	}
 	// slug must appear in the JSON input schema.
 	if !strings.Contains(string(resolverTool.InputSchema), "slug") {

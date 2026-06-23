@@ -59,7 +59,7 @@ func TestEvaluateSpecialistGate_DisabledNeverBlocks(t *testing.T) {
 
 // TestGateSpecialistAction_OneOffParks is the acceptance shape: a
 // produceArtifact plan that reaches createSpecialist parks for approval
-// (mutationUpdatePlanStatus -> awaitingFeedback) and does NOT run the
+// (updatePlanStatus -> awaitingFeedback) and does NOT run the
 // ensureAgentForGoal factory.
 func TestGateSpecialistAction_OneOffParks(t *testing.T) {
 	planRow := map[string]any{
@@ -69,7 +69,7 @@ func TestGateSpecialistAction_OneOffParks(t *testing.T) {
 	}
 	fe := &fakeEngine{
 		execResponder: func(query string) (any, error) {
-			if containsAll(query, "queryPlanById") {
+			if containsAll(query, "planById") {
 				return planRow, nil
 			}
 			return nil, nil
@@ -95,7 +95,7 @@ func TestGateSpecialistAction_MultiStepProceeds(t *testing.T) {
 		"output": []any{map[string]any{"id": "plan-2", "kind": "userGoal", "status": "planning"}},
 	}
 	fe := &fakeEngine{execResponder: func(query string) (any, error) {
-		if containsAll(query, "queryPlanById") {
+		if containsAll(query, "planById") {
 			return planRow, nil
 		}
 		return nil, nil
@@ -121,7 +121,7 @@ func TestGateSpecialistAction_PublishesApprovalCard(t *testing.T) {
 		}},
 	}
 	fe := &fakeEngine{execResponder: func(query string) (any, error) {
-		if containsAll(query, "queryPlanById") {
+		if containsAll(query, "planById") {
 			return planRow, nil
 		}
 		return nil, nil
@@ -157,7 +157,7 @@ func TestGateSpecialistAction_ParksWithoutCardWhenNoSpace(t *testing.T) {
 		}},
 	}
 	fe := &fakeEngine{execResponder: func(query string) (any, error) {
-		if containsAll(query, "queryPlanById") {
+		if containsAll(query, "planById") {
 			return planRow, nil
 		}
 		return nil, nil

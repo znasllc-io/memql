@@ -9,7 +9,7 @@ use worker.concepts.{ invocation, registration }
 
 @enabled
 @description("Insert a worker tool-invocation telemetry row.")
-mutation invocation mutationCreateWorkerInvocation {
+mutate invocation createWorkerInvocation {
   args {
     invocationId   string  @required
     ownerUserId    string  @required
@@ -69,7 +69,7 @@ mutation invocation mutationCreateWorkerInvocation {
 // auth path resolves the token to its v1:identity:identity row, and
 // that's a 1:1 mapping with the registration) and refresh the
 // registration-authoritative fields via
-// mutationRefreshWorkerRegistration instead of re-running this
+// refreshWorkerRegistration instead of re-running this
 // mutation.
 //
 // ownerUserId is taken from the identity's userId, NOT from the
@@ -78,7 +78,7 @@ mutation invocation mutationCreateWorkerInvocation {
 
 @enabled
 @description("Create a worker registration row on first connect.")
-mutation registration mutationCreateWorkerRegistration {
+mutate registration createWorkerRegistration {
   args {
     registrationId       string  @required
     ownerUserId          string  @required
@@ -138,7 +138,7 @@ mutation registration mutationCreateWorkerRegistration {
 
 @enabled
 @description("Refresh registration-authoritative fields on worker reconnect.")
-mutation registration mutationRefreshWorkerRegistration {
+mutate registration refreshWorkerRegistration {
   args {
     registrationId       string  @required
     name                 string  @required
@@ -181,7 +181,7 @@ mutation registration mutationRefreshWorkerRegistration {
 
 @enabled
 @description("Revoke a worker registration.")
-mutation registration mutationRevokeWorker {
+mutate registration revokeWorker {
   args {
     registrationId  string  @required
     revokedAt       string  @required
@@ -211,7 +211,7 @@ mutation registration mutationRevokeWorker {
 
 @enabled
 @description("Soft-delete a worker invocation row past retention.")
-mutation invocation mutationSoftDeleteWorkerInvocation {
+mutate invocation softDeleteWorkerInvocation {
   args {
     invocationId  string  @required
   }
@@ -231,7 +231,7 @@ mutation invocation mutationSoftDeleteWorkerInvocation {
 @enabled
 @mergeFields("preferences")
 @description("Set User.preferences.computerUseEnabled.")
-mutation user mutationToggleComputerUseEnabled {
+mutate user toggleComputerUseEnabled {
   args {
     userId   string  @required
     enabled  bool    @required
@@ -246,7 +246,7 @@ mutation user mutationToggleComputerUseEnabled {
 
 @enabled
 @description("Set computerUseScope on an agent authorization row.")
-mutation agentAuthorization mutationUpdateAgentAuthScope {
+mutate agentAuthorization updateAgentAuthScope {
   args {
     authorizationId   string  @required
     computerUseScope  string  @required
@@ -273,7 +273,7 @@ mutation agentAuthorization mutationUpdateAgentAuthScope {
 
 @enabled
 @description("Bump lastSeenAt + lastConnectedFromIP on a worker registration.")
-mutation registration mutationUpdateWorkerLastSeen {
+mutate registration updateWorkerLastSeen {
   args {
     registrationId       string  @required
     lastSeenAt           string  @required

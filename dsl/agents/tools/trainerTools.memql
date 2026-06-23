@@ -19,8 +19,8 @@
 //
 //   webSearch          -> builtin webSearch          (integration.knowledge.webSearch; STUB)
 //   fetchUrl           -> builtin fetchUrl           (integration.knowledge.fetchUrl; real http.Client)
-//   writeKnowledgeChunk-> mutationWriteKnowledgeChunk (source='trainerAgent')
-//   markChunkSuperseded-> mutationMarkChunkSuperseded (refresh-mode deprecation)
+//   writeKnowledgeChunk-> writeKnowledgeChunk (source='trainerAgent')
+//   markChunkSuperseded-> markChunkSuperseded (refresh-mode deprecation)
 //   embedChunk         -> builtin embedChunk         (integration.knowledge.embedChunk; real embed-and-store, #645)
 
 @enabled
@@ -43,7 +43,7 @@ tool fetchUrl {
 }
 
 @enabled
-@handler(type="function", name="mutationWriteKnowledgeChunk")
+@handler(type="function", name="writeKnowledgeChunk")
 @allowedRoles("specialist")
 @executionTime("fast")
 @description("Persist a distilled knowledge chunk into the target domain. source is hard-stamped 'trainerAgent' and the chunk lands validated (canonical). sourceRef is REQUIRED and MUST point at a real URL or named source you consulted -- no fabricated citations.")
@@ -58,7 +58,7 @@ tool writeKnowledgeChunk {
 }
 
 @enabled
-@handler(type="function", name="mutationMarkChunkSuperseded")
+@handler(type="function", name="markChunkSuperseded")
 @allowedRoles("specialist")
 @executionTime("fast")
 @description("Flag an existing chunk as outdated (mode='refresh' only). Sets superseded=true so retrieval stops surfacing it; the row is preserved for audit. Pair with a fresh writeKnowledgeChunk when you have replacement content.")

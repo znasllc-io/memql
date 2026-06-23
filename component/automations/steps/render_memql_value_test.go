@@ -7,7 +7,7 @@ import (
 
 // TestRenderMemQLValue_TypedSliceAndMap is the memql#344 Regression A
 // regression guard. The cluster `system.startup` automations
-// (logicBootstrapCluster / logicRegisterNode) fail at runtime with
+// (bootstrapCluster / registerNode) fail at runtime with
 // `parse error at line 1, column 394: expected '}', got "["` when
 // the event payload carries typed slices / maps that aren't `[]any`
 // or `map[string]any`. The Go fmt default-case rendering produces

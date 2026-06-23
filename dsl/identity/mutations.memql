@@ -7,7 +7,7 @@ use identity.concepts.{ accessRequest, accountEntitlement, auditEvent, authCode,
 
 @enabled
 @description("Approve an access request (status=approved, stamps reviewer + invitation).")
-mutation accessRequest mutationApproveAccessRequest {
+mutate accessRequest approveAccessRequest {
   args {
     requestId     string  @required
     reviewedBy    string  @required
@@ -39,7 +39,7 @@ mutation accessRequest mutationApproveAccessRequest {
 
 @enabled
 @description("Bump the lastUsedAt stamp on a PAT identity. Best-effort; callers must not fail the request on error. Read-merges the existing row so only lastUsedAt changes; identityType/credentials/label/active/usableByAgents inherit from the persisted row instead of being re-supplied (memql#1628).")
-mutation identity mutationBumpPATLastUsedAt {
+mutate identity bumpPATLastUsedAt {
   args {
     identityId      string  @required
     lastUsedAt      string  @required
@@ -70,7 +70,7 @@ mutation identity mutationBumpPATLastUsedAt {
 
 @enabled
 @description("Stamp dataExportLastAt = now after a successful /me/export download.")
-mutation user mutationBumpUserDataExport {
+mutate user bumpUserDataExport {
   args {
     userId  string  @required
   }
@@ -110,7 +110,7 @@ mutation user mutationBumpUserDataExport {
 
 @enabled
 @description("Stamp revocationEpoch on the user row. Bulk-revoke admin path for memql#106. Caller computes the +1 in Go.")
-mutation user mutationBumpUserRevocationEpoch {
+mutate user bumpUserRevocationEpoch {
   args {
     userId    string  @required
     newEpoch  int     @required
@@ -149,7 +149,7 @@ mutation user mutationBumpUserRevocationEpoch {
 
 @enabled
 @description("Cancel a scheduled account deletion (clears deletionScheduledAt).")
-mutation user mutationCancelScheduledDeletion {
+mutate user cancelScheduledDeletion {
   args {
     userId  string  @required
   }
@@ -184,7 +184,7 @@ mutation user mutationCancelScheduledDeletion {
 
 @enabled
 @description("Mark an auth code consumed (stamps consumedAt = now).")
-mutation authCode mutationConsumeAuthCode {
+mutate authCode consumeAuthCode {
   args {
     codeId          string  @required
     consumedFromIP  string
@@ -219,7 +219,7 @@ mutation authCode mutationConsumeAuthCode {
 
 @enabled
 @description("Mark a magic-link request consumed (stamps consumedAt = now).")
-mutation magicLinkRequest mutationConsumeMagicLinkRequest {
+mutate magicLinkRequest consumeMagicLinkRequest {
   args {
     requestId       string  @required
     consumedFromIP  string
@@ -244,7 +244,7 @@ mutation magicLinkRequest mutationConsumeMagicLinkRequest {
 //
 // reviewedBy / reviewedAt / reviewerNote / invitationId are
 // intentionally omitted; they get populated by
-// mutationApproveAccessRequest or mutationRejectAccessRequest.
+// approveAccessRequest or rejectAccessRequest.
 //
 // Arguments:
 //   requestId          (string)            - Access-request node ID (UUID-derived)
@@ -259,7 +259,7 @@ mutation magicLinkRequest mutationConsumeMagicLinkRequest {
 
 @enabled
 @description("Create a self-service access request (waitlist row, status=pending).")
-mutation accessRequest mutationCreateAccessRequest {
+mutate accessRequest createAccessRequest {
   args {
     requestId          string  @required
     email              string  @required
@@ -322,7 +322,7 @@ mutation accessRequest mutationCreateAccessRequest {
 
 @enabled
 @description("Append a row to the append-only security audit log.")
-mutation auditEvent mutationCreateAuditEvent {
+mutate auditEvent createAuditEvent {
   args {
     eventId          string  @required
     occurredAt       string  @required
@@ -377,7 +377,7 @@ mutation auditEvent mutationCreateAuditEvent {
 // three at redemption time.
 //
 // consumedAt / consumedFromIP are intentionally omitted; they get
-// stamped by mutationConsumeAuthCode at /oauth/token redemption.
+// stamped by consumeAuthCode at /oauth/token redemption.
 //
 // Arguments:
 //   codeId              (string)            - Auth-code node ID (UUID-derived)
@@ -394,7 +394,7 @@ mutation auditEvent mutationCreateAuditEvent {
 
 @enabled
 @description("Mint a one-time OAuth authorization code from a consumed magic link.")
-mutation authCode mutationCreateAuthCode {
+mutate authCode createAuthCode {
   args {
     codeId              string  @required
     code                string  @required
@@ -456,7 +456,7 @@ mutation authCode mutationCreateAuthCode {
 
 @enabled
 @description("Persist a dynamically-registered public OAuth client (RFC 7591).")
-mutation oauthClient mutationCreateOAuthClient {
+mutate oauthClient createOAuthClient {
   args {
     clientId                 string  @required
     clientName               string
@@ -507,7 +507,7 @@ mutation oauthClient mutationCreateOAuthClient {
 
 @enabled
 @description("Create a bearer-token session record at issuance time.")
-mutation authSession mutationCreateAuthSession {
+mutate authSession createAuthSession {
   args {
     sessionId    string  @required
     subject      string  @required
@@ -571,7 +571,7 @@ mutation authSession mutationCreateAuthSession {
 
 @enabled
 @description("Persist (or refresh) the singleton cluster-settings row.")
-mutation clusterSettings mutationCreateClusterSettings {
+mutate clusterSettings createClusterSettings {
   args {
     id                         string  @required
     clusterDomain              string
@@ -632,8 +632,8 @@ mutation clusterSettings mutationCreateClusterSettings {
 }
 
 @enabled
-@description("Flip the cluster-wide GLOBAL KILL SWITCH for planner-authored automations (epic memql#954, issue #961). Partial-update of the singleton cluster-settings row (id='cluster'): sets authoredAutomationsEnabled true (resume) or false (halt). false halts EVERY authored automation across the whole cluster -- the governance hard stop -- independent of any bundle status or per-user kill switch. Operator-only in practice (the admin settings surface calls it); the authored scheduler reads the flag through queryClusterSettingsCurrent on its global gate.")
-mutation clusterSettings mutationSetAuthoredAutomationsEnabled {
+@description("Flip the cluster-wide GLOBAL KILL SWITCH for planner-authored automations (epic memql#954, issue #961). Partial-update of the singleton cluster-settings row (id='cluster'): sets authoredAutomationsEnabled true (resume) or false (halt). false halts EVERY authored automation across the whole cluster -- the governance hard stop -- independent of any bundle status or per-user kill switch. Operator-only in practice (the admin settings surface calls it); the authored scheduler reads the flag through clusterSettingsCurrent on its global gate.")
+mutate clusterSettings setAuthoredAutomationsEnabled {
   args {
     enabled  bool  @required
   }
@@ -653,7 +653,7 @@ mutation clusterSettings mutationSetAuthoredAutomationsEnabled {
 
 @enabled
 @description("Create a new delegation granting an agent scoped authority on behalf of an identity.")
-mutation delegation mutationCreateDelegation {
+mutate delegation createDelegation {
   args {
     delegationId      string
     identityId        string    @required
@@ -708,7 +708,7 @@ mutation delegation mutationCreateDelegation {
 
 @enabled
 @description("Create a new identity (credential set owned by a user).")
-mutation identity mutationCreateIdentity {
+mutate identity createIdentity {
   args {
     identityId      string  @required
     userId          string  @required
@@ -738,7 +738,7 @@ mutation identity mutationCreateIdentity {
 // never stored server-side -- only its SHA-256 hash lands here, keyed
 // for lookup at /auth/magic-link/consume.
 //
-// Single-use semantics are enforced by mutationConsumeMagicLinkRequest
+// Single-use semantics are enforced by consumeMagicLinkRequest
 // stamping consumedAt on the row. consumedAt is intentionally omitted
 // here so the row is born "unspent."
 //
@@ -755,7 +755,7 @@ mutation identity mutationCreateIdentity {
 
 @enabled
 @description("Create a magic-link request row at issuance time.")
-mutation magicLinkRequest mutationCreateMagicLinkRequest {
+mutate magicLinkRequest createMagicLinkRequest {
   args {
     requestId     string  @required
     email         string  @required
@@ -798,7 +798,7 @@ mutation magicLinkRequest mutationCreateMagicLinkRequest {
 
 @enabled
 @description("Create a Personal Access Token identity (api_key) owned by a user. Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.")
-mutation identity mutationCreatePATIdentity {
+mutate identity createPATIdentity {
   args {
     identityId      string  @required
     userId          string  @required
@@ -839,7 +839,7 @@ mutation identity mutationCreatePATIdentity {
 
 @enabled
 @description("Create a new user (person / synthetic principal).")
-mutation user mutationCreateUser {
+mutate user createUser {
   args {
     userId        string  @required
     displayName   string  @required
@@ -866,10 +866,10 @@ mutation user mutationCreateUser {
 //
 // Provisions a v1:identity:user row at the moment a previously-
 // unknown email completes a magic-link consume. Distinct from
-// mutationCreateUser because it captures the new Phase-2 fields
+// createUser because it captures the new Phase-2 fields
 // `internal` (set by the consume handler from
 // IDENTITY_INTERNAL_DOMAINS match) and `legalAcceptance` (initialized
-// to []; mutationRecordLegalAcceptance appends entries later).
+// to []; recordLegalAcceptance appends entries later).
 //
 // Suspension fields and lastSeenAt are intentionally omitted: they
 // have format: "date-time" and JSON-Schema draft-07 rejects null on
@@ -895,7 +895,7 @@ mutation user mutationCreateUser {
 
 @enabled
 @description("Create a user record on first successful magic-link login.")
-mutation user mutationCreateUserOnFirstLogin {
+mutate user createUserOnFirstLogin {
   args {
     userId        string  @required
     displayName   string  @required
@@ -941,13 +941,13 @@ mutation user mutationCreateUserOnFirstLogin {
 // server-side -- only its SHA-256 hash lands here, keyed for
 // lookup at gRPC stream open time (Authorization: Pair <code>).
 //
-// Single-use semantics are enforced by mutationRedeemWorkerPairingCode
+// Single-use semantics are enforced by redeemWorkerPairingCode
 // stamping redeemedAt on the row. redeemedAt is intentionally
 // omitted here so the row is born "unspent."
 
 @enabled
 @description("Persist a worker-pairing-code row at creation time.")
-mutation workerPairingCode mutationCreateWorkerPairingCode {
+mutate workerPairingCode createWorkerPairingCode {
   args {
     pairingId    string  @required
     ownerUserId  string  @required
@@ -989,7 +989,7 @@ mutation workerPairingCode mutationCreateWorkerPairingCode {
 
 @enabled
 @description("Create a worker_token identity (machine credential for a memql-cockpit-worker). Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.")
-mutation identity mutationCreateWorkerTokenIdentity {
+mutate identity createWorkerTokenIdentity {
   args {
     identityId              string  @required
     userId                  string  @required
@@ -1036,16 +1036,16 @@ mutation identity mutationCreateWorkerTokenIdentity {
 //   2. Self-bootstrap via POST /node/bootstrap (memql#338) stamps
 //      mintedBy with `system:node-bootstrap` and additionally stamps
 //      bootstrappedAt / bootstrappedFrom via the companion
-//      mutationStampNodeTokenBootstrap below. memql#343.
+//      stampNodeTokenBootstrap below. memql#343.
 //
 // The row is keyed by (nodeType, nodeId); the lookup pattern in
-// queryNodeTokenIdentityByBinding lets the bootstrap handler reuse
+// nodeTokenIdentityByBinding lets the bootstrap handler reuse
 // an existing row on the second restart of a given node rather than
 // piling up stale rows.
 
 @enabled
 @description("Create a node_token identity (machine credential for a cluster-internal node binary). Stores only the SHA-256 hex hash; the actual credential is a class=node JWT.")
-mutation identity mutationCreateNodeTokenIdentity {
+mutate identity createNodeTokenIdentity {
   args {
     identityId        string  @required
     userId            string  @required
@@ -1094,7 +1094,7 @@ mutation identity mutationCreateNodeTokenIdentity {
 @enabled
 @mergeFields("credentials")
 @description("Update audit fields on a node_token identity row when the bootstrap handler issues a fresh JWT for it. memql#343. Read-merges the existing row and deep-merges credentials (@mergeFields) so only the rotating keyHash + bootstrappedAt/bootstrappedFrom change; nodeId/nodeType/mintedBy/expiresAt/lastConnectAt inherit from the persisted row instead of being re-supplied or wiped (memql#1628).")
-mutation identity mutationStampNodeTokenBootstrap {
+mutate identity stampNodeTokenBootstrap {
   args {
     identityId        string  @required
     keyHash           string  @required
@@ -1138,7 +1138,7 @@ mutation identity mutationStampNodeTokenBootstrap {
 
 @enabled
 @description("Revoke a node_token identity by flipping active=false on the row. Read-merges the existing row so only `active` changes; the credentials block + every other field inherit from the persisted row instead of being re-supplied (memql#1628 -- replaces the old whole-replace restate-every-credentials-field pattern). memql#350.")
-mutation identity mutationRevokeNodeTokenIdentity {
+mutate identity revokeNodeTokenIdentity {
   args {
     identityId  string  @required
   }
@@ -1172,7 +1172,7 @@ mutation identity mutationRevokeNodeTokenIdentity {
 
 @enabled
 @description("Create a voice_agent_token identity (credential row for the Go voice-agent process). Plain JWT is returned by JWTIssuer.IssueVoiceAgentAccessToken; this row stores only the SHA-256 of an auxiliary random bearer for schema completeness + audit fingerprinting.")
-mutation identity mutationCreateVoiceAgentTokenIdentity {
+mutate identity createVoiceAgentTokenIdentity {
   args {
     identityId  string  @required
     userId      string  @required
@@ -1244,7 +1244,7 @@ mutation identity mutationCreateVoiceAgentTokenIdentity {
 @enabled
 @scrubPii
 @description("Hard-delete (soft-delete + generic @pii scrub) a user after the deletion-cooldown sweep.")
-mutation user mutationDeleteUserHard {
+mutate user deleteUserHard {
   args {
     userId  string  @required
   }
@@ -1274,7 +1274,7 @@ mutation user mutationDeleteUserHard {
 
 @enabled
 @description("Expire a pending access request (status=expired).")
-mutation accessRequest mutationExpireAccessRequest {
+mutate accessRequest expireAccessRequest {
   args {
     requestId  string  @required
   }
@@ -1313,7 +1313,7 @@ mutation accessRequest mutationExpireAccessRequest {
 
 @enabled
 @description("Replace a user's legalAcceptance array (caller must read-modify-write to append).")
-mutation user mutationRecordLegalAcceptance {
+mutate user recordLegalAcceptance {
   args {
     userId           string    @required
     legalAcceptance  []object  @required
@@ -1336,14 +1336,14 @@ mutation user mutationRecordLegalAcceptance {
 // against this row, so calling this mutation twice doesn't open
 // a second-redeem window.
 //
-// The handler always pairs this with mutationCreateWorkerTokenIdentity
+// The handler always pairs this with createWorkerTokenIdentity
 // in the same RPC -- the redeem call returns the plain mql_wkr_<...>
 // token, and we want both rows to land before the response is sent
 // so the audit trail is complete.
 
 @enabled
 @description("Stamp a pairing-code row redeemed.")
-mutation workerPairingCode mutationRedeemWorkerPairingCode {
+mutate workerPairingCode redeemWorkerPairingCode {
   args {
     pairingId       string  @required
     redeemedAt      string  @required
@@ -1380,7 +1380,7 @@ mutation workerPairingCode mutationRedeemWorkerPairingCode {
 
 @enabled
 @description("Reject an access request (status=rejected, stamps reviewer + note).")
-mutation accessRequest mutationRejectAccessRequest {
+mutate accessRequest rejectAccessRequest {
   args {
     requestId     string  @required
     reviewedBy    string  @required
@@ -1424,7 +1424,7 @@ mutation accessRequest mutationRejectAccessRequest {
 
 @enabled
 @description("Mark a bearer-token session revoked. Read-merges the existing row so only revokedReason + revokedAt change; the discriminator fields (subject, tokenHash, source, expiresAt, userId) and the rotation bookkeeping inherit from the persisted row instead of being re-supplied (memql#1628).")
-mutation authSession mutationRevokeAuthSession {
+mutate authSession revokeAuthSession {
   args {
     sessionId      string  @required
     revokedReason  string  @required  @enum("user_action", "all_sessions", "admin")
@@ -1457,7 +1457,7 @@ mutation authSession mutationRevokeAuthSession {
 
 @enabled
 @description("Revoke a delegation: authoritatively flips active=false and stamps revokedAt/revokedBySubject regardless of caller input. Read-merges the persisted row so every other field is preserved (memql#1729).")
-mutation delegation mutationRevokeDelegation {
+mutate delegation revokeDelegation {
   args {
     delegationId      string  @required
     revokedBySubject  string
@@ -1488,7 +1488,7 @@ mutation delegation mutationRevokeDelegation {
 
 @enabled
 @description("Soft-revoke a PAT identity (api_key) by flipping active=false. Read-merges the existing row so only `active` changes; identityType/credentials/label/usableByAgents inherit from the persisted row instead of being re-supplied (memql#1628).")
-mutation identity mutationRevokePATIdentity {
+mutate identity revokePATIdentity {
   args {
     identityId  string  @required
   }
@@ -1507,14 +1507,14 @@ mutation identity mutationRevokePATIdentity {
 // "worker_token" by flipping active=false. The gRPC stream
 // interceptor consults the active flag on every connect attempt;
 // the agent node's worker registry separately handles the
-// v1:worker:registration revocation (mutationRevokeWorker) -- the
+// v1:worker:registration revocation (revokeWorker) -- the
 // two flips are independent so the operator can revoke the
 // token (this row) without affecting the operational record, or
 // vice versa.
 
 @enabled
 @description("Revoke (deactivate) a worker_token identity row.")
-mutation identity mutationRevokeWorkerTokenIdentity {
+mutate identity revokeWorkerTokenIdentity {
   args {
     identityId  string  @required
   }
@@ -1555,7 +1555,7 @@ mutation identity mutationRevokeWorkerTokenIdentity {
 
 @enabled
 @description("Rotate refresh-token bookkeeping on a session after a successful refresh. Stores the old hash as previousRefreshTokenHash with a fresh previousRotatedAt timestamp so the rotator can accept that hash inside its grace window.")
-mutation authSession mutationRotateAuthSession {
+mutate authSession rotateAuthSession {
   args {
     sessionId                 string  @required
     newRefreshTokenHash       string  @required
@@ -1581,7 +1581,7 @@ mutation authSession mutationRotateAuthSession {
 // accountDeletionSweep cron picks the row up later and hard-deletes
 // it once IDENTITY_DELETION_COOLDOWN_DAYS have elapsed. The user
 // can reverse the request during the cooldown via
-// mutationCancelScheduledDeletion.
+// cancelScheduledDeletion.
 //
 // Partial-update via update() so the caller doesn't have to re-pass
 // every @required field on the user. Only deletionScheduledAt
@@ -1593,7 +1593,7 @@ mutation authSession mutationRotateAuthSession {
 
 @enabled
 @description("Schedule the user for hard-deletion after the cooldown.")
-mutation user mutationScheduleAccountDeletion {
+mutate user scheduleAccountDeletion {
   args {
     userId  string  @required
   }
@@ -1632,7 +1632,7 @@ mutation user mutationScheduleAccountDeletion {
 
 @enabled
 @description("Set or clear the caller's activePartitionId. Empty partitionId clears the pointer.")
-mutation user mutationSetUserActiveSpace {
+mutate user setUserActiveSpace {
   args {
     userId         string  @required
     partitionId        string
@@ -1659,18 +1659,18 @@ mutation user mutationSetUserActiveSpace {
 // time (memQL is append-only, partial updates require a read-
 // modify-write cycle on the caller).
 //
-// Schema-equivalent to mutationCreateClusterSettings but kept as a
+// Schema-equivalent to createClusterSettings but kept as a
 // distinct mutation so the audit trail can distinguish first-run
 // wizard writes from admin edits, and so the args schema can be
 // tightened later (e.g. require non-empty registrationMode) without
 // disturbing the wizard path.
 //
-// Arguments mirror mutationCreateClusterSettings.
+// Arguments mirror createClusterSettings.
 //
 
 @enabled
 @description("Update the singleton cluster-settings row from the admin UI. Read-merges the existing row (update()): only the fields the caller actually passes change; every omitted field -- internalDomains, brand*, TTLs, bootstrap*, etc. -- inherits from the persisted row instead of being wiped to its empty default (memql#1686). registrationMode + internalDefaultRole stay @required because the admin form always submits them.")
-mutation clusterSettings mutationUpdateClusterSettings {
+mutate clusterSettings updateClusterSettings {
   args {
     id                         string  @required
     clusterDomain              string
@@ -1738,8 +1738,8 @@ mutation clusterSettings mutationUpdateClusterSettings {
 // The caller is responsible for passing the full updated payload.
 
 @enabled
-@description("Update an identity record. Read-merges the existing row (update()): only the fields in `payload` change; every omitted field (identityType discriminator, credentials, label, active, usableByAgents) inherits from the persisted row instead of being wiped (memql#1628 class). The row must already exist (use mutationCreateIdentity to create).")
-mutation identity mutationUpdateIdentity {
+@description("Update an identity record. Read-merges the existing row (update()): only the fields in `payload` change; every omitted field (identityType discriminator, credentials, label, active, usableByAgents) inherits from the persisted row instead of being wiped (memql#1628 class). The row must already exist (use createIdentity to create).")
+mutate identity updateIdentity {
   args {
     identityId  string  @required
     payload     object  @required
@@ -1785,7 +1785,7 @@ mutation identity mutationUpdateIdentity {
 
 @enabled
 @description("Partial update of a v1:identity:user row. Only the fields you pass are changed; other fields inherit from the prior row.")
-mutation user mutationUpdateUser {
+mutate user updateUser {
   args {
     userId   string  @required
     payload  object  @required
@@ -1796,7 +1796,7 @@ mutation user mutationUpdateUser {
   }
 }
 
-// mutationSetAccountEntitlement
+// setAccountEntitlement
 // =============================
 //
 // Set (upsert) an account's task-concurrency entitlement (epic
@@ -1810,7 +1810,7 @@ mutation user mutationUpdateUser {
 
 @enabled
 @description("Set (upsert) an account's task-concurrency entitlement (epic memql#902 / #903). Deterministic per-account id so each set appends a new version and the latest wins. Finite maxConcurrentTasks caps the account; <=0 or tier='enterprise' leaves it unlimited.")
-mutation accountEntitlement mutationSetAccountEntitlement {
+mutate accountEntitlement setAccountEntitlement {
   args {
     accountId          string  @required
     tier               string  @required @enum("free", "pro", "team", "enterprise")

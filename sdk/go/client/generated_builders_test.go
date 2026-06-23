@@ -22,12 +22,12 @@ func mustParseCall(t *testing.T, call string) {
 // optional arg (PresenceId) of a long-named mutation must not emit a
 // dangling comma after `({`. Pre-fix the separator guard was the
 // hardcoded `b.Len() > 17`, always true for this 33-char function
-// name, producing `mutationUpdateParticipantPresence({, ...})`.
+// name, producing `updateParticipantPresence({, ...})`.
 func TestGeneratedBuilder_OmittedLeadingOptionalHasNoDanglingComma(t *testing.T) {
-	got := MutationUpdateParticipantPresenceBuild(MutationUpdateParticipantPresenceArgs{
+	got := UpdateParticipantPresenceBuild(UpdateParticipantPresenceArgs{
 		// PresenceId intentionally omitted -- the leading optional field.
 		ParticipantId: "v1:cognition:participant:p1",
-		PartitionId:       "v1:cognition:space:s1",
+		PartitionId:   "v1:cognition:space:s1",
 		State:         "idle",
 		Label:         "probe",
 	})
@@ -35,7 +35,7 @@ func TestGeneratedBuilder_OmittedLeadingOptionalHasNoDanglingComma(t *testing.T)
 	if strings.Contains(got, "({,") {
 		t.Fatalf("dangling comma after prefix (memql#1319 regression): %s", got)
 	}
-	wantPrefix := `mutationUpdateParticipantPresence({participantId: `
+	wantPrefix := `updateParticipantPresence({participantId: `
 	if !strings.HasPrefix(got, wantPrefix) {
 		t.Fatalf("call = %q, want prefix %q", got, wantPrefix)
 	}
@@ -47,12 +47,12 @@ func TestGeneratedBuilder_OmittedLeadingOptionalHasNoDanglingComma(t *testing.T)
 // omitted entirely, not rendered as `{}` (which the engine treats as a
 // real empty value and runs through concept validation). With a real
 // map the field must render. This is what makes
-// mutationCreateSessionForParticipant callable from the Go SDK both
+// createSessionForParticipant callable from the Go SDK both
 // with streams omitted and with a real object.
 func TestGeneratedBuilder_NilObjectArgsAreOmitted(t *testing.T) {
 	// All optional objects nil -> none of them appear.
-	got := MutationCreateSessionForParticipantBuild(MutationCreateSessionForParticipantArgs{
-		PartitionId:       "v1:cognition:space:s1",
+	got := CreateSessionForParticipantBuild(CreateSessionForParticipantArgs{
+		PartitionId:   "v1:cognition:space:s1",
 		ParticipantId: "v1:cognition:participant:p1",
 	})
 	for _, absent := range []string{"streams", "humanInput", "aiOutput"} {
@@ -66,8 +66,8 @@ func TestGeneratedBuilder_NilObjectArgsAreOmitted(t *testing.T) {
 	mustParseCall(t, got)
 
 	// Real object -> the field renders with its content.
-	got = MutationCreateSessionForParticipantBuild(MutationCreateSessionForParticipantArgs{
-		PartitionId:       "v1:cognition:space:s1",
+	got = CreateSessionForParticipantBuild(CreateSessionForParticipantArgs{
+		PartitionId:   "v1:cognition:space:s1",
 		ParticipantId: "v1:cognition:participant:p1",
 		Streams:       map[string]any{"realtimeSessionId": "rt-1"},
 	})

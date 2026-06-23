@@ -5,30 +5,30 @@
 
 @enabled
 @description("Matches records with active==true field")
-trait traitIsActiveRecord {
+trait isActiveRecord {
   payload.active==true
 }
 
 // ---- specs/v1/common/isCancelled.memql ----
 
-// traitIsCancelled - Cancelled Status Spec
+// isCancelled - Cancelled Status Spec
 // ========================================
 //
 // Reusable filter that matches records with cancelled status.
 // Cancelled records were scheduled but did not complete.
 //
 // Usage in queries:
-//   concept==v1:hr:checkin;traitIsCancelled()
+//   concept==v1:hr:checkin;isCancelled()
 //
 @enabled
 @description("Matches records with cancelled status")
-trait traitIsCancelled {
+trait isCancelled {
   payload.status=="cancelled"
 }
 
 // ---- specs/v1/data/isChecked.memql ----
 
-// traitIsChecked - Checked Data Record Spec
+// isChecked - Checked Data Record Spec
 // ==========================================
 //
 // Reusable filter that matches data records in checked validation state.
@@ -36,17 +36,17 @@ trait traitIsCancelled {
 // by a human identity. May be usable if the concept's policy allows it.
 //
 // Usage in queries:
-//   concept==v1:data:record;traitIsChecked()
+//   concept==v1:data:record;isChecked()
 //
 @enabled
 @description("Matches active data records in checked validation state")
-trait traitIsChecked {
+trait isChecked {
   payload.active==true && payload.validationState=="checked"
 }
 
 // ---- specs/v1/common/isCompleted.memql ----
 
-// traitIsCompleted - Completed Status Spec
+// isCompleted - Completed Status Spec
 // =======================================
 //
 // Reusable filter that matches records with completed status.
@@ -54,18 +54,18 @@ trait traitIsChecked {
 // Completed flags/cases have been resolved.
 //
 // Usage in queries:
-//   concept==v1:hr:checkin;traitIsCompleted()
-//   concept==v1:hr:flag;traitIsCompleted()
+//   concept==v1:hr:checkin;isCompleted()
+//   concept==v1:hr:flag;isCompleted()
 //
 @enabled
 @description("Matches records with completed status")
-trait traitIsCompleted {
+trait isCompleted {
   payload.status=="completed"
 }
 
 // ---- specs/v1/data/isConfirmed.memql ----
 
-// traitIsConfirmed - Confirmed Data Record Spec
+// isConfirmed - Confirmed Data Record Spec
 // ==============================================
 //
 // Reusable filter that matches data records in confirmed validation state.
@@ -73,88 +73,88 @@ trait traitIsCompleted {
 // considered usable.
 //
 // Usage in queries:
-//   concept==v1:data:record;traitIsConfirmed()
+//   concept==v1:data:record;isConfirmed()
 //
 @enabled
 @description("Matches active data records in confirmed validation state")
-trait traitIsConfirmed {
+trait isConfirmed {
   payload.active==true && payload.validationState=="confirmed"
 }
 
 // ---- specs/v1/data/isDraft.memql ----
 
-// traitIsDraft - Draft Data Record Spec
+// isDraft - Draft Data Record Spec
 // =====================================
 //
 // Reusable filter that matches data records in draft validation state.
 // Draft records are being worked on and are not yet usable.
 //
 // Usage in queries:
-//   concept==v1:data:record;traitIsDraft()
+//   concept==v1:data:record;isDraft()
 //
 @enabled
 @description("Matches active data records in draft validation state")
-trait traitIsDraft {
+trait isDraft {
   payload.active==true && payload.validationState=="draft"
 }
 
 // ---- specs/v1/common/isInProgress.memql ----
 
-// traitIsInProgress - In Progress Status Spec
+// isInProgress - In Progress Status Spec
 // ===========================================
 //
 // Reusable filter that matches records with inProgress status.
 // InProgress records are actively being worked on or executed.
 //
 // Usage in queries:
-//   concept==v1:hr:checkin;traitIsInProgress()
+//   concept==v1:hr:checkin;isInProgress()
 //
 @enabled
 @description("Matches records with inProgress status")
-trait traitIsInProgress {
+trait isInProgress {
   payload.status=="inProgress"
 }
 
 // ---- specs/v1/common/isNotArchived.memql ----
 
-// traitIsNotArchived - Not Archived Status Spec
+// isNotArchived - Not Archived Status Spec
 // ==============================================
 //
 // Reusable filter that matches records that are NOT archived.
 // Used to exclude archived items from active queries.
 //
 // Usage in queries:
-//   concept==v1:cognition:space;traitIsNotArchived()
+//   concept==v1:cognition:space;isNotArchived()
 //
 @enabled
 @description("Matches records that are not archived")
-trait traitIsNotArchived {
+trait isNotArchived {
   payload.status!="archived"
 }
 
 // ---- specs/v1/common/isNotDeleted.memql ----
 
-// traitIsNotDeleted - Not Deleted Record Spec
+// isNotDeleted - Not Deleted Record Spec
 // ============================================
 //
 // Reusable filter that excludes records with deleted==true field.
 // Deleted records have been permanently removed by the user and
 // should not appear in any listing. This is distinct from
-// traitIsActiveRecord() which checks active status -- an agent can
+// isActiveRecord() which checks active status -- an agent can
 // be inactive (deactivated) but still visible in management views.
 //
 // Usage in queries:
-//   concept==v1:agents:agent;traitIsNotDeleted()
+//   concept==v1:agents:agent;isNotDeleted()
 //
 @enabled
 @description("Excludes records with deleted==true field")
-trait traitIsNotDeleted {
+trait isNotDeleted {
   payload.deleted!=true
 }
 
 // ---- specs/v1/common/isOpen.memql ----
 
-// traitIsOpen - Open Status Spec
+// isOpen - Open Status Spec
 // =============================
 //
 // Reusable filter that matches records with open status.
@@ -162,36 +162,36 @@ trait traitIsNotDeleted {
 // Applicable to flags, cases, and other actionable items.
 //
 // Usage in queries:
-//   concept==v1:hr:flag;traitIsOpen()
-//   concept==v1:hr:case;traitIsOpen()
+//   concept==v1:hr:flag;isOpen()
+//   concept==v1:hr:case;isOpen()
 //
 @enabled
 @description("Matches records with open status requiring action")
-trait traitIsOpen {
+trait isOpen {
   payload.status=="open"
 }
 
 // ---- specs/v1/common/isScheduled.memql ----
 
-// traitIsScheduled - Scheduled Status Spec
+// isScheduled - Scheduled Status Spec
 // ========================================
 //
 // Reusable filter that matches records with scheduled status.
 // Scheduled records are pending execution at a future time.
 //
 // Usage in queries:
-//   concept==v1:hr:checkin;traitIsScheduled()
-//   concept==v1:cognition:space;traitIsScheduled()
+//   concept==v1:hr:checkin;isScheduled()
+//   concept==v1:cognition:space;isScheduled()
 //
 @enabled
 @description("Matches records with scheduled status")
-trait traitIsScheduled {
+trait isScheduled {
   payload.status=="scheduled"
 }
 
 // ---- specs/v1/data/isUsable.memql ----
 
-// traitIsUsable - Usable Data Record Spec
+// isUsable - Usable Data Record Spec
 // ========================================
 //
 // Reusable filter that matches data records that may be usable.
@@ -205,23 +205,23 @@ trait traitIsScheduled {
 // This effectively matches "checked" and "confirmed" states.
 //
 // Usage in queries:
-//   concept==v1:data:record;traitIsUsable()
+//   concept==v1:data:record;isUsable()
 //
 @enabled
 @description("Matches active data records in checked or confirmed validation state")
-trait traitIsUsable {
+trait isUsable {
   payload.active==true && payload.validationState!="draft"
 }
 
 @enabled
 @description("Actor must hold an identity-issued JWT with admin or owner role.")
-trait traitRequiresAdmin {
+trait requiresAdmin {
   actor.role == "admin"
 }
 
 // ---- specs/v1/common/statusIsActive.memql ----
 
-// traitStatusIsActive - Active Status Spec
+// statusIsActive - Active Status Spec
 // ========================================
 //
 // Reusable filter that matches records with active status.
@@ -229,18 +229,18 @@ trait traitRequiresAdmin {
 // Active advocates are available for assignment.
 //
 // Usage in queries:
-//   concept==v1:hr:employee;traitStatusIsActive()
-//   concept==v1:hr:advocate;traitStatusIsActive()
+//   concept==v1:hr:employee;statusIsActive()
+//   concept==v1:hr:advocate;statusIsActive()
 //
 @enabled
 @description("Matches records with active status")
-trait traitStatusIsActive {
+trait statusIsActive {
   payload.status=="active"
 }
 
 // ---- specs/v1/common/statusIsArchived.memql ----
 
-// traitStatusIsArchived - Archived Status Spec
+// statusIsArchived - Archived Status Spec
 // ============================================
 //
 // Reusable filter that matches records whose payload.status == "archived".
@@ -248,22 +248,22 @@ trait traitStatusIsActive {
 // countdown to hard-delete (see purgeExpiredArchivedSpaces automation +
 // User.preferences.archiveRetentionDays).
 //
-// Counterpart to traitIsNotArchived (which excludes archived rows from
+// Counterpart to isNotArchived (which excludes archived rows from
 // active lists). Used by queryArchivedSpaces to populate the Archived
 // tab in the SpacesListPanel.
 //
 // Usage in queries:
-//   concept==v1:cognition:space;traitStatusIsArchived()
+//   concept==v1:cognition:space;statusIsArchived()
 //
 @enabled
 @description("Matches records with payload.status == 'archived'.")
-trait traitStatusIsArchived {
+trait statusIsArchived {
   payload.status=="archived"
 }
 
 // ---- specs/v1/common/statusIsSaved.memql ----
 
-// traitStatusIsSaved - Saved Status Spec
+// statusIsSaved - Saved Status Spec
 // ======================================
 //
 // Reusable filter that matches records whose payload.status == "saved".
@@ -272,15 +272,15 @@ trait traitStatusIsArchived {
 // the Saved tab in the SpacesListPanel.
 //
 // Usage in queries:
-//   concept==v1:cognition:space;traitStatusIsSaved()
+//   concept==v1:cognition:space;statusIsSaved()
 //
 @enabled
 @description("Matches records with payload.status == 'saved'.")
-trait traitStatusIsSaved {
+trait statusIsSaved {
   payload.status=="saved"
 }
 
-// ---- traitStatusIsPending ----
+// ---- statusIsPending ----
 //
 // Reusable filter that matches records with payload.status == 'pending'.
 // Used by identity flows (access requests, invitations) where pending
@@ -288,11 +288,11 @@ trait traitStatusIsSaved {
 
 @enabled
 @description("Matches records with payload.status == 'pending'.")
-trait traitStatusIsPending {
+trait statusIsPending {
   payload.status=="pending"
 }
 
-// ---- traitStatusIsRunning ----
+// ---- statusIsRunning ----
 //
 // Reusable filter that matches records with payload.status == 'running'.
 // Used by planner Plans / Tasks and by worker invocations that are
@@ -300,24 +300,24 @@ trait traitStatusIsPending {
 
 @enabled
 @description("Matches records with payload.status == 'running'.")
-trait traitStatusIsRunning {
+trait statusIsRunning {
   payload.status=="running"
 }
 
-// ---- traitIdentityIsApiKey ----
+// ---- identityIsApiKey ----
 //
 // Concept-targeted trait for v1:identity:identity rows whose
 // identityType field is "api_key". Distinct from worker tokens
-// (traitIdentityIsWorkerToken) so callers can scope per-credential-class
+// (identityIsWorkerToken) so callers can scope per-credential-class
 // queries explicitly.
 
 @enabled
 @description("Matches v1:identity:identity rows with identityType=='api_key'.")
-trait traitIdentityIsApiKey {
+trait identityIsApiKey {
   payload.identityType=="api_key"
 }
 
-// ---- traitIdentityIsWorkerToken ----
+// ---- identityIsWorkerToken ----
 //
 // Concept-targeted trait for v1:identity:identity rows whose
 // identityType field is "worker_token". Worker tokens are admitted
@@ -326,11 +326,11 @@ trait traitIdentityIsApiKey {
 
 @enabled
 @description("Matches v1:identity:identity rows with identityType=='worker_token'.")
-trait traitIdentityIsWorkerToken {
+trait identityIsWorkerToken {
   payload.identityType=="worker_token"
 }
 
-// ---- traitIdentityIsNodeToken ----
+// ---- identityIsNodeToken ----
 //
 // Concept-targeted trait for v1:identity:identity rows whose
 // identityType field is "node_token". Node tokens authenticate
@@ -340,11 +340,11 @@ trait traitIdentityIsWorkerToken {
 
 @enabled
 @description("Matches v1:identity:identity rows with identityType=='node_token'.")
-trait traitIdentityIsNodeToken {
+trait identityIsNodeToken {
   payload.identityType=="node_token"
 }
 
-// ---- traitIsDeletionScheduled ----
+// ---- isDeletionScheduled ----
 //
 // Matches records that carry a non-empty deletionScheduledAt field.
 // Used by the user-deletion cooldown sweep to enumerate identities
@@ -352,6 +352,6 @@ trait traitIdentityIsNodeToken {
 
 @enabled
 @description("Matches records that have a deletion scheduled (deletionScheduledAt is set).")
-trait traitIsDeletionScheduled {
+trait isDeletionScheduled {
   payload.deletionScheduledAt!=""
 }

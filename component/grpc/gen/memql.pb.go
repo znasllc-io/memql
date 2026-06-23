@@ -9938,8 +9938,8 @@ func (x *ResolveGuestInviteResult) GetErrorMessage() string {
 // fires once the guest confirms their display name. The stream
 // interceptor has already validated `Authorization: Guest <token>`
 // and stashed the resolved invitation + space in the request claims;
-// the handler runs mutationMarkGuestInvitationAccepted +
-// mutationCreateGuestParticipant back-to-back on the engine and
+// the handler runs markGuestInvitationAccepted +
+// createGuestParticipant back-to-back on the engine and
 // replies with the created participant ID on success.
 type JoinSpaceAsGuestMsg struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -10816,7 +10816,7 @@ func (x *CreateWorkerTokenResult) GetErrorMessage() string {
 // RevokeWorkerTokenMsg flips active=false on the worker_token
 // identity row. The interceptor refuses any future connect attempt
 // with this token; in-flight stream lifetimes are untouched (the
-// agent node's worker registry handles those via mutationRevokeWorker
+// agent node's worker registry handles those via revokeWorker
 // on v1:worker:registration).
 type RevokeWorkerTokenMsg struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`

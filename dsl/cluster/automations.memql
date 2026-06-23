@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cluster.logic.{ logicBootstrapCluster, logicDeregisterNode, logicPruneStaleClusterNodes, logicRegisterNode }
+use cluster.logic.{ bootstrapCluster, deregisterNode, pruneStaleClusterNodes, registerNode }
 
 @enabled
 @trigger(event="system.startup")
@@ -61,7 +61,7 @@ automation registerNode {
 // short grace window. This 30-min cron remains purely as the lazy safety net
 // for anything the fast path missed (the fast loop disabled, or no reconcile
 // leader). The two never write conflicting statuses: both append the same
-// idempotent terminal health="stopped", and queryStaleClusterNodes excludes
+// idempotent terminal health="stopped", and staleClusterNodes excludes
 // already-stopped rows, so once the fast path retires a node this cron skips it.
 //
 // Six-field cron (sec min hour dom mon dow): minute 0,10,20,30,40,50.

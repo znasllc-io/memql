@@ -22,7 +22,7 @@ import (
 // cross-domain leak (planner reaching into cognition's data axis to
 // learn which Participant row Sofia is in this space). Instead the
 // planner stamps the agent's reply onto the Plan via
-// mutationUpdatePlanStatus(output={reply:...}); the canvas card
+// updatePlanStatus(output={reply:...}); the canvas card
 // + Tasks panel both render that field directly. The chat
 // transcript stays cognition's responsibility; if a future flow
 // wants the planner-driven reply to ALSO show up as a chat
@@ -81,11 +81,11 @@ type planExecutionRow struct {
 	Kind         string
 	Status       string
 	Goal         string
-	PartitionId      string
+	PartitionId  string
 	OwnerAgentId string
 	RequestedBy  string
 	// StartedAt is the timestamp stamped on the most recent transition INTO
-	// running (mutationStartPlan / markPlanRunningFromQueue both stamp it).
+	// running (startPlan / markPlanRunningFromQueue both stamp it).
 	// It is the cross-replica execution-claim discriminator (memql#1363):
 	// every replica reads the SAME row, so planId+startedAt is identical
 	// across replicas for one running spell, and a legitimate later re-run
@@ -99,7 +99,7 @@ type planExecutionRow struct {
 	WatchExecution bool
 	// FeedbackResponse is the user's free-text answer when this dispatch is a
 	// resume from awaitingFeedback (epic memql#1404 / memql#1405). Read off
-	// Plan.feedbackResponse.response, stamped by mutationAttachPlanFeedback.
+	// Plan.feedbackResponse.response, stamped by attachPlanFeedback.
 	// When non-empty, buildExecutionTurn folds it into the resumed turn's
 	// history as a genuine user-role message so the owning agent incorporates
 	// the feedback. Empty for a first-run dispatch.
@@ -370,7 +370,7 @@ func buildExecutionTurn(planId string, plan planExecutionRow) ([]*memqlv1.AgentT
 
 	// Resume-from-feedback (epic memql#1404 / memql#1405). When the Plan was
 	// parked in awaitingFeedback and the user answered via
-	// mutationAttachPlanFeedback, the resume dispatch carries their free-text
+	// attachPlanFeedback, the resume dispatch carries their free-text
 	// answer here. Fold it into the history as a SECOND user-role message --
 	// it is GENUINE user content (the user's literal answer to the question
 	// the agent asked), so it belongs inside the untrusted-history block, not
@@ -436,7 +436,7 @@ const planExecutionClaimName = "plannerPlanExecution"
 // execution attempt of a Plan (memql#1363).
 //
 // Key design: planId + the row's startedAt. Every transition INTO running
-// stamps startedAt (mutationStartPlan stamps now(); markPlanRunningFromQueue
+// stamps startedAt (startPlan stamps now(); markPlanRunningFromQueue
 // stamps it explicitly), so:
 //   - both replicas read the SAME row for the same approval -> identical key
 //     -> the DB PK collapses the duplicate dispatch;
@@ -599,12 +599,12 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId, re
 	// Pass the planner's system-actor claims through the forwarder so
 	// they ride alongside the AgentGenerateTurnMsg into the agent
 	// node's gRPC context. The agent's downstream tool dispatch
-	// persists v1:worker:invocation rows via mutationCreateWorkerInvocation,
+	// persists v1:worker:invocation rows via createWorkerInvocation,
 	// and the engine's pre-insert path requires an actor in context to
 	// stamp createdBy. An earlier `nil` here ("system-initiated
 	// dispatch; no end-user principal") meant invocation persistence
 	// silently failed with "no actor found in context" -- the row
-	// never landed, so the planner's queryInvocationsForPlan came
+	// never landed, so the planner's invocationsForPlan came
 	// back empty, and the Plan was stamped failed even when the
 	// worker tool succeeded on the user's machine.
 	//
@@ -779,7 +779,7 @@ func (p *PlannerIntegration) workerInvocationOutcomeForPlan(ctx context.Context,
 		)
 		return false, 0, 0
 	}
-	q := fmt.Sprintf(`queryInvocationsForPlan({planId:%q})`, planId)
+	q := fmt.Sprintf(`invocationsForPlan({planId:%q})`, planId)
 	res, err := p.engine.Execute(ctx, q)
 	if err != nil {
 		p.logger.Warn("plan execution: invocation lookup failed; defaulting to failed",
@@ -825,7 +825,7 @@ func (p *PlannerIntegration) artifactProducedForPlan(ctx context.Context, planId
 		// No owner to impersonate -> the owned read can't run. Inconclusive.
 		return false, false
 	}
-	q := fmt.Sprintf(`queryGeneratedOutputsForPlan({planId:%q})`, planId)
+	q := fmt.Sprintf(`generatedOutputsForPlan({planId:%q})`, planId)
 	res, err := p.engine.Execute(ownerActorContext(ctx, owner), q)
 	if err != nil {
 		p.logger.Warn("plan execution: generatedOutput lookup failed; treating as inconclusive",
@@ -837,7 +837,7 @@ func (p *PlannerIntegration) artifactProducedForPlan(ctx context.Context, planId
 	return generatedOutputCountFromExecuteResult(res) > 0, true
 }
 
-// generatedOutputCountFromExecuteResult counts the rows queryGeneratedOutputsForPlan
+// generatedOutputCountFromExecuteResult counts the rows generatedOutputsForPlan
 // returned, unpacking shape() output the same way invocationRowsFromExecuteResult
 // does: single-row -> bare map, multi-row -> []any, empty -> []any{}.
 func generatedOutputCountFromExecuteResult(res any) int {
@@ -856,7 +856,7 @@ func generatedOutputCountFromExecuteResult(res any) int {
 }
 
 // invocationRow is the slim projection workerInvocationOutcomeForPlan
-// reads off queryInvocationsForPlan. We only need outcome for the
+// reads off invocationsForPlan. We only need outcome for the
 // success-count check; the rest of workerInvocationFull (tool,
 // action, durationMs, etc.) is irrelevant here.
 type invocationRow struct {
@@ -897,14 +897,14 @@ func invocationRowsFromExecuteResult(res any) []invocationRow {
 	return out
 }
 
-// fetchPlanForExecution reads the Plan via queryPlanById and
-// projects the fields executeApprovedPlan needs. queryPlanById is
+// fetchPlanForExecution reads the Plan via planById and
+// projects the fields executeApprovedPlan needs. planById is
 // shape()-based so the result lives on the data axis (not bundle).
 func (p *PlannerIntegration) fetchPlanForExecution(ctx context.Context, planId string) (planExecutionRow, error) {
 	if p.engine == nil {
 		return planExecutionRow{}, fmt.Errorf("engine not configured")
 	}
-	q := fmt.Sprintf(`queryPlanById({planId:%q})`, planId)
+	q := fmt.Sprintf(`planById({planId:%q})`, planId)
 	res, err := p.engine.Execute(ctx, q)
 	if err != nil {
 		return planExecutionRow{}, err
@@ -924,7 +924,7 @@ func (p *PlannerIntegration) fetchPlanForExecution(ctx context.Context, planId s
 // citations / retrieved chunks.
 //
 // Slimmer than cognition.consumeAgentTurnStream:
-//   - No mutationEmitTextChunk relay -- the planner-driven dispatch
+//   - No emitTextChunk relay -- the planner-driven dispatch
 //     doesn't have a paired chat-streaming bubble on the frontend
 //     (the plan is system-initiated, not user-initiated). The
 //     reply lands as a single committed utterance via
@@ -1046,7 +1046,7 @@ func (p *PlannerIntegration) markPlanSucceeded(ctx context.Context, planId, repl
 	}
 	outputJSON, _ := json.Marshal(output)
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"succeeded", completedAt:%q, output:%s})`,
+		`updatePlanStatus({planId:%q, status:"succeeded", completedAt:%q, output:%s})`,
 		planId, now, string(outputJSON),
 	)
 	if _, err := p.engine.Execute(ctx, q); err != nil {
@@ -1065,7 +1065,7 @@ func (p *PlannerIntegration) markPlanFailed(ctx context.Context, planId, errorMe
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"failed", completedAt:%q, errorMessage:%q})`,
+		`updatePlanStatus({planId:%q, status:"failed", completedAt:%q, errorMessage:%q})`,
 		planId, now, errorMessage,
 	)
 	if _, err := p.engine.Execute(ctx, q); err != nil {
@@ -1084,7 +1084,7 @@ func (p *PlannerIntegration) markPlanFailed(ctx context.Context, planId, errorMe
 // it): the system is throttling concurrency. Returns the engine error so the
 // admission demote callback can fail open on a write failure.
 func (p *PlannerIntegration) markPlanWaitingForSlot(ctx context.Context, planId string) error {
-	q := fmt.Sprintf(`mutationUpdatePlanStatus({planId:%q, status:"waitingForSlot"})`, planId)
+	q := fmt.Sprintf(`updatePlanStatus({planId:%q, status:"waitingForSlot"})`, planId)
 	if _, err := p.engine.Execute(ctx, q); err != nil {
 		p.logger.Warn("plan execution: markPlanWaitingForSlot failed",
 			"plan_id", planId,
@@ -1104,7 +1104,7 @@ func (p *PlannerIntegration) markPlanWaitingForSlot(ctx context.Context, planId 
 // Returns the engine error so the AdmitNext promote loop can stop on failure.
 func (p *PlannerIntegration) markPlanRunningFromQueue(ctx context.Context, planId string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	q := fmt.Sprintf(`mutationUpdatePlanStatus({planId:%q, status:"running", startedAt:%q})`, planId, now)
+	q := fmt.Sprintf(`updatePlanStatus({planId:%q, status:"running", startedAt:%q})`, planId, now)
 	if _, err := p.engine.Execute(ctx, q); err != nil {
 		p.logger.Warn("plan execution: markPlanRunningFromQueue failed",
 			"plan_id", planId,
@@ -1148,13 +1148,13 @@ func extractPlanRoutingFields(event events.Event) planRoutingFields {
 	return out
 }
 
-// planRowsFromExecuteResult unpacks queryPlanById's shape() result
+// planRowsFromExecuteResult unpacks planById's shape() result
 // into planExecutionRow values.
 //
 // shape() output is shape-shifted by applyShapeTemplate based on
 // match count: a multi-row match returns []any, a single-row match
 // returns the lone map[string]any UNWRAPPED, and an empty match
-// returns []any{}. queryPlanById is by-id (one match expected), so
+// returns []any{}. planById is by-id (one match expected), so
 // the single-object path is the hot path -- treat the array path as
 // a defensive fallback for callers that filter on something that
 // could legitimately produce >1 hit.
@@ -1218,7 +1218,7 @@ func planRowsFromExecuteResult(res any) []planExecutionRow {
 		}
 		// Resume-from-feedback (epic memql#1404 / memql#1405): the user's
 		// free-text answer lives on Plan.feedbackResponse.response (stamped by
-		// mutationAttachPlanFeedback). buildExecutionTurn folds it into the
+		// attachPlanFeedback). buildExecutionTurn folds it into the
 		// resumed turn's history. Tolerate the field being absent (the common
 		// first-run case).
 		if fr, ok := m["feedbackResponse"].(map[string]any); ok {

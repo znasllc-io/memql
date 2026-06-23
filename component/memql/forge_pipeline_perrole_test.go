@@ -15,11 +15,11 @@ import "testing"
 // guard's prior-version lookup depends on (#1826/#1830).
 func TestCanonicalForgeRequestID(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{"r-selftest-003", "v1:forge:request:r-selftest-003"},                              // bare -> canonical
-		{"v1:forge:request:r-selftest-003", "v1:forge:request:r-selftest-003"},             // already canonical -> unchanged
-		{"  r-selftest-003  ", "v1:forge:request:r-selftest-003"},                          // trimmed then canonicalized
-		{"", ""},                                                                            // empty stays empty
-		{"v1:forge:request:", "v1:forge:request:"},                                         // degenerate canonical prefix -> unchanged
+		{"r-selftest-003", "v1:forge:request:r-selftest-003"},                  // bare -> canonical
+		{"v1:forge:request:r-selftest-003", "v1:forge:request:r-selftest-003"}, // already canonical -> unchanged
+		{"  r-selftest-003  ", "v1:forge:request:r-selftest-003"},              // trimmed then canonicalized
+		{"", ""}, // empty stays empty
+		{"v1:forge:request:", "v1:forge:request:"}, // degenerate canonical prefix -> unchanged
 	}
 	for _, c := range cases {
 		if got := canonicalForgeRequestID(c.in); got != c.want {
@@ -31,9 +31,9 @@ func TestCanonicalForgeRequestID(t *testing.T) {
 // pipelineHop is one transition in a role's path: who acts, and the
 // from->to status edge they drive.
 type pipelineHop struct {
-	actorRole  string
-	from       string
-	to         string
+	actorRole string
+	from      string
+	to        string
 }
 
 // TestForgeFullPipelinePerRole walks each submitter role's full pipeline and
@@ -59,9 +59,9 @@ func TestForgeFullPipelinePerRole(t *testing.T) {
 		// Non-developer (reader): routed to validation; a developer validates
 		// (-> needs_approval), then the owner approves (-> queued).
 		"reader": {
-			{"reader", forgeStatusSubmitted, forgeStatusNeedsValidation}, // routeRequest
-			{"writer", forgeStatusNeedsValidation, forgeStatusNeedsApproval}, // mutationValidateRequest
-			{"owner", forgeStatusNeedsApproval, forgeStatusQueued},          // owner approves
+			{"reader", forgeStatusSubmitted, forgeStatusNeedsValidation},     // routeRequest
+			{"writer", forgeStatusNeedsValidation, forgeStatusNeedsApproval}, // validateRequest
+			{"owner", forgeStatusNeedsApproval, forgeStatusQueued},           // owner approves
 		},
 	}
 

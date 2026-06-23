@@ -82,7 +82,7 @@ func (l *PlannerAgentLoop) mintApprovedTrainingPlan(ctx context.Context, planId 
 	trainPlanId := id.SystemNodeShortId("train", planId)
 	goal := fmt.Sprintf("Train specialist on %q (user-approved)", topic)
 	call := fmt.Sprintf(
-		`mutationCreatePlan({"planId": %q, "partitionId": %q, "parentPlanId": %q, "kind": "trainSpecialist", "goal": %q, "requestedBy": %q, "triggerSource": "user.approved", "input": %s})`,
+		`createPlan({"planId": %q, "partitionId": %q, "parentPlanId": %q, "kind": "trainSpecialist", "goal": %q, "requestedBy": %q, "triggerSource": "user.approved", "input": %s})`,
 		trainPlanId, getString(plan, "partitionId"), planId, goal,
 		getString(plan, "requestedBy"), string(inputJSON),
 	)
@@ -111,7 +111,7 @@ func (l *PlannerAgentLoop) mintApprovedTrainingPlan(ctx context.Context, planId 
 // specialist's skillIds, then walk the active skill catalog and return the
 // first domain in skillIds order.
 func (l *PlannerAgentLoop) resolveSpecialistPrimaryDomain(ctx context.Context, specialistId string) string {
-	agentRows := l.execRows(ctx, fmt.Sprintf(`queryAgentById({agentId:%q})`, specialistId))
+	agentRows := l.execRows(ctx, fmt.Sprintf(`agentById({agentId:%q})`, specialistId))
 	if len(agentRows) == 0 {
 		return ""
 	}
@@ -125,7 +125,7 @@ func (l *PlannerAgentLoop) resolveSpecialistPrimaryDomain(ctx context.Context, s
 	}
 
 	domainsBySkill := make(map[string][]string)
-	for _, s := range l.execRows(ctx, `queryActiveSkillsFull({})`) {
+	for _, s := range l.execRows(ctx, `activeSkillsFull({})`) {
 		domainsBySkill[getString(s, "id")] = stringSliceFromAny(s["domainIds"])
 	}
 	for _, sid := range skillIds {

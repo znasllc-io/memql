@@ -8,7 +8,7 @@ use common.shapes.{ attachmentDownload }
 
 // ---- queries/v1/common/attachmentById.memql ----
 
-// queryAttachmentById -- fetch one v1:common:attachment row by id, scoped to a
+// attachmentById -- fetch one v1:common:attachment row by id, scoped to a
 // space, for the download endpoint (memql#804).
 //
 // Authz tier: granted. The attachment concept is space-scoped (no
@@ -16,12 +16,12 @@ use common.shapes.{ attachmentDownload }
 // isolation -- and the download HTTP handler enforces CallerOwnsSpace(partitionId)
 // (the same space-ownership gate the upload path uses) BEFORE calling this,
 // then re-checks the returned row's partitionId. The partitionId predicate here also
-// stops cross-space id probing. Mirrors querySpaceMedia's space-scoped pattern.
+// stops cross-space id probing. Mirrors spaceMedia's space-scoped pattern.
 
 @enabled
 @unbounded("attachment by id (guarded) within a space -- bounded to a single row")
 @description("Fetch a single v1:common:attachment row by id within a space. Backs the attachment download endpoint (GET /spaces/{partitionId}/attachments/{attachmentId}); the handler gates on space ownership first.")
-query attachment queryAttachmentById {
+query attachment attachmentById {
   args {
     attachmentId  string  @required
     partitionId       string  @required
@@ -32,7 +32,7 @@ query attachment queryAttachmentById {
 
 // ---- queries/v1/common/spaceMedia.memql ----
 
-// querySpaceMedia -- list v1:common:media rows attached to a space.
+// spaceMedia -- list v1:common:media rows attached to a space.
 //
 // Surfaced for the CoPresent SPA's `useMedia(partitionId, filters)` hook
 // (visionarys-io/copresent src/hooks/useCopresent.ts:1359). The hook
@@ -43,13 +43,13 @@ query attachment queryAttachmentById {
 //
 // Authz tier: granted. The partitionId arg gates the row set; partition
 // isolation prevents cross-tenant leakage. Matches the pattern of
-// the sibling `querySpaceUtterances` in dsl/cognition/queries.memql.
+// the sibling `spaceUtterances` in dsl/cognition/queries.memql.
 //
 // memql-bff-copresent#44 (audit) + memql#191.
 
 @enabled
 @description("Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view (visionarys-io/copresent src/hooks/useCopresent.ts).")
-query media querySpaceMedia {
+query media spaceMedia {
   args {
     partitionId    string  @required @pattern("^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]{1,128}$")
     mediaType  string

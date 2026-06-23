@@ -12,7 +12,7 @@ import (
 
 // plan_feedback.go is the cognition (assistant) side of the generic
 // plan-feedback loop (epic memql#1404 / child #1406). It complements the
-// planner-side intake foundation (#1405, mutationAttachPlanFeedback) with the
+// planner-side intake foundation (#1405, attachPlanFeedback) with the
 // conversational surface: when a Plan in a space enters awaitingFeedback, the
 // space assistant posts a chat message stating what feedback is needed; a user
 // chat reply answering it is classified and routed into the intake mutation so
@@ -27,13 +27,13 @@ import (
 //      is broadcast to BOTH cognition replicas, so a cross-replica advisory-
 //      lock gate (dispatchGate.tryAnnounceFeedback, mirroring the #1386 greet
 //      gate) plus a durable read-before-write dedup
-//      (queryFeedbackAnnouncementForPlan) make the post exactly-once.
+//      (feedbackAnnouncementForPlan) make the post exactly-once.
 //
 //   2. ROUTE (tryRouteUtteranceAsPlanFeedback): called from
 //      handleUtteranceForCognition BEFORE the normal dispatch. When the space
 //      has an awaitingFeedback Plan, an LLM classifier
 //      (cognitionFeedbackRoute) decides whether the user's message answers the
-//      pending question; on a confident hit it calls mutationAttachPlanFeedback
+//      pending question; on a confident hit it calls attachPlanFeedback
 //      under the cognition system actor (the #1405 guard permits cluster-owner
 //      / system actors acting on the user's behalf) and posts a brief
 //      confirmation. The Plan resumes via #1405's cross-replica exactly-once
@@ -57,7 +57,7 @@ const planStatusAwaitingFeedback = "awaitingFeedback"
 // and the pending question + options + reason to classify against / announce.
 type awaitingFeedbackPlan struct {
 	ID             string
-	PartitionId        string
+	PartitionId    string
 	Status         string
 	FeedbackReason string
 	Question       string
@@ -173,7 +173,7 @@ func (c *CognitionIntegration) announceFeedbackRequest(ctx context.Context, plan
 	}
 
 	message := buildFeedbackAnnouncement(plan)
-	// Stamp the plan id onto the source so queryFeedbackAnnouncementForPlan can
+	// Stamp the plan id onto the source so feedbackAnnouncementForPlan can
 	// dedup, and mark the utterance kind so the frontend can render an inline
 	// reply affordance alongside the conversational prompt.
 	source := map[string]string{
@@ -194,7 +194,7 @@ func (c *CognitionIntegration) announceFeedbackRequest(ctx context.Context, plan
 // tryRouteUtteranceAsPlanFeedback is the route-half entrypoint, called from
 // handleUtteranceForCognition before the normal turn dispatch. It returns
 // handled=true when the user's message was recognized as feedback for an
-// awaitingFeedback Plan in the space and routed into mutationAttachPlanFeedback
+// awaitingFeedback Plan in the space and routed into attachPlanFeedback
 // (so the caller must NOT run the normal agent turn for this utterance).
 //
 // Returns handled=false (and the caller proceeds normally) whenever there is no
@@ -255,16 +255,16 @@ func (c *CognitionIntegration) tryRouteUtteranceAsPlanFeedback(ctx context.Conte
 
 // findAwaitingFeedbackPlanForSpace returns the most relevant Plan parked in
 // awaitingFeedback (carrying a question) for the space, or nil when none. Reads
-// via the existing queryPlansForSpace + scans client-side for the status (the
+// via the existing plansForSpace + scans client-side for the status (the
 // query has no status arg; the per-space plan count is small).
 func (c *CognitionIntegration) findAwaitingFeedbackPlanForSpace(ctx context.Context, partitionId string) *awaitingFeedbackPlan {
 	if c == nil || c.engine == nil || strings.TrimSpace(partitionId) == "" {
 		return nil
 	}
-	query := fmt.Sprintf(`queryPlansForSpace({partitionId: "%s"})`, partitionId)
+	query := fmt.Sprintf(`plansForSpace({partitionId: "%s"})`, partitionId)
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
-		c.Logger.Debug("cognition: queryPlansForSpace failed for feedback routing",
+		c.Logger.Debug("cognition: plansForSpace failed for feedback routing",
 			"error", err, "partitionId", partitionId)
 		return nil
 	}
@@ -283,7 +283,7 @@ func (c *CognitionIntegration) findAwaitingFeedbackPlanForSpace(ctx context.Cont
 		if plan == nil || strings.TrimSpace(plan.Question) == "" {
 			continue
 		}
-		// queryPlansForSpace returns newest-first (concept default), so the
+		// plansForSpace returns newest-first (concept default), so the
 		// first awaitingFeedback row we hit is the most recent. Keep it.
 		best = plan
 		break
@@ -337,10 +337,10 @@ func (c *CognitionIntegration) attachPlanFeedback(ctx context.Context, planId, f
 	if strings.TrimSpace(planId) == "" {
 		return fmt.Errorf("planId is empty")
 	}
-	query := fmt.Sprintf(`mutationAttachPlanFeedback({planId: %s, feedback: %s})`,
+	query := fmt.Sprintf(`attachPlanFeedback({planId: %s, feedback: %s})`,
 		escapeJSONString(planId), escapeJSONString(feedback))
 	if _, err := c.engine.Execute(ctx, query); err != nil {
-		return fmt.Errorf("execute mutationAttachPlanFeedback: %w", err)
+		return fmt.Errorf("execute attachPlanFeedback: %w", err)
 	}
 	return nil
 }
@@ -369,7 +369,7 @@ func (c *CognitionIntegration) queryHasFeedbackAnnouncement(ctx context.Context,
 	if c == nil || c.engine == nil || strings.TrimSpace(planId) == "" {
 		return false
 	}
-	query := fmt.Sprintf(`queryFeedbackAnnouncementForPlan({planId: %s})`, escapeJSONString(planId))
+	query := fmt.Sprintf(`feedbackAnnouncementForPlan({planId: %s})`, escapeJSONString(planId))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		return false
@@ -425,7 +425,7 @@ func awaitingFeedbackPlanFromPayload(node, payload map[string]any) *awaitingFeed
 	}
 	plan := &awaitingFeedbackPlan{
 		ID:             id,
-		PartitionId:        strings.TrimSpace(stringFromAny(payload["partitionId"])),
+		PartitionId:    strings.TrimSpace(stringFromAny(payload["partitionId"])),
 		Status:         strings.TrimSpace(stringFromAny(payload["status"])),
 		FeedbackReason: strings.TrimSpace(stringFromAny(payload["feedbackReason"])),
 		RequestedBy:    strings.TrimSpace(stringFromAny(payload["requestedBy"])),

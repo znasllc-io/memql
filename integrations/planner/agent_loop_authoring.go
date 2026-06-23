@@ -12,7 +12,7 @@ package planner
 //
 // THIS FILE owns increment 1: the DESIGN PASS.
 //
-//   1. Load the caller's reusable catalog (queryCataloguedConstructsForOwner,
+//   1. Load the caller's reusable catalog (cataloguedConstructsForOwner,
 //      #957) once, up front -- the compose-first candidate set.
 //   2. Run the authoringDesign structured-output prompt: Responsibility (NL)
 //      + the catalog summary -> a list of the dependencies the bundle needs,
@@ -344,7 +344,7 @@ func (l *PlannerAgentLoop) resolveDependency(ctx context.Context, dep designDepe
 }
 
 // loadCatalog reads the caller's cataloged (reusable) constructs via
-// queryCataloguedConstructsForOwner (#957) and maps the rows to CatalogEntry.
+// cataloguedConstructsForOwner (#957) and maps the rows to CatalogEntry.
 // Rows missing a catalogKey are skipped -- an un-keyed row can't participate
 // in the deterministic match. Returns an empty slice (not an error) when the
 // owner has no catalog yet.
@@ -352,12 +352,12 @@ func (l *PlannerAgentLoop) loadCatalog(ctx context.Context, ownerUserId string) 
 	if strings.TrimSpace(ownerUserId) == "" {
 		return nil, fmt.Errorf("loadCatalog: empty ownerUserId")
 	}
-	// queryCataloguedConstructsForOwner filters on actor.userId; the planner's
+	// cataloguedConstructsForOwner filters on actor.userId; the planner's
 	// system actor is not the owner, so we read it through ownerActorContext
 	// (the same owner-impersonation context the reactive loop uses) which
 	// carries an AccessContext whose UserId is the owner -- so actor.userId in
 	// the query filter resolves to the owner. The query takes no args.
-	res, err := l.engine.Execute(ownerActorContext(ctx, ownerUserId), `queryCataloguedConstructsForOwner({})`)
+	res, err := l.engine.Execute(ownerActorContext(ctx, ownerUserId), `cataloguedConstructsForOwner({})`)
 	if err != nil {
 		return nil, err
 	}

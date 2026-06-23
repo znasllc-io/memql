@@ -64,19 +64,19 @@ var nonProceduralHeaders = []string{
 //   - bare form, used by provider / builtin / prompt / tool / policy
 //     / spec / trait and by concept-agnostic shape declarations:
 //
-//	      shape spaceCard {
-//	      provider chat54Mini {
-//	      spec specIsHumanParticipant {
-//	      trait traitIsActiveRecord {
+//     shape spaceCard {
+//     provider chat54Mini {
+//     spec isHumanParticipant {
+//     trait isActiveRecord {
 //
 //   - concept-bound form, used by shape + seed declarations that
 //     bind to a concept in their signature (mirrors the
 //     `query <Concept> <name>` / `mutation <Concept> <name>` patterns):
 //
-//	      shape workspace workspaceFull {
-//	      shape invocation workerInvocationFull {
-//	      seed agent assistant {
-//	      seed skill workbench-baseline {
+//     shape workspace workspaceFull {
+//     shape invocation workerInvocationFull {
+//     seed agent assistant {
+//     seed skill workbench-baseline {
 //
 // The optional `(?:[A-Za-z_][A-Za-z0-9_-]*[ \t]+)?` group consumes
 // the concept binding when present; the trailing identifier captures

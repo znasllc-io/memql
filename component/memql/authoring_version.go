@@ -13,7 +13,7 @@ package memql
 // BEFORE the new version is allowed to go live -- so an edit that would break a
 // dependent is caught up front instead of bricking it at runtime.
 //
-// Impact analysis uses queryDependentsOfConstruct (#957) to find the dependent
+// Impact analysis uses dependentsOfConstruct (#957) to find the dependent
 // edges, resolves each to its bundle, and re-runs SandboxCompileBundle (#956)
 // over the dependent's constructs with the EDITED construct's new source
 // overlaid. The pure decision (does every active dependent still compile?) is
@@ -137,7 +137,7 @@ func AnalyzeImpact(edited EditedConstruct, dependentConstructs map[string][]Sand
 }
 
 // ImpactStore is the narrow graph surface impact analysis needs: find the active
-// dependents of a construct (queryDependentsOfConstruct -> filtered to active
+// dependents of a construct (dependentsOfConstruct -> filtered to active
 // bundles) and load each dependent bundle's constructs. *MemQLEngine satisfies
 // it via engineImpactStore; tests fake it.
 type ImpactStore interface {

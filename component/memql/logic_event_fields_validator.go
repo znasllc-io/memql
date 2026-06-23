@@ -16,7 +16,7 @@ import (
 //
 // Why a declared schema (not the @trigger concept): several event-trigger logics
 // consume synthetic, handler-assembled events that are NOT a concept payload
-// (e.g. logicGenerateResponse reads event.payload.promptTemplateId / promptData
+// (e.g. generateResponse reads event.payload.promptTemplateId / promptData
 // / siParticipantId / toolNames / triggerText -- fields the Go cognition handler
 // assembles into a cognition.response.requested event; no concept owns them). A
 // concept-derived validator would false-reject those logics outright. So the
@@ -33,7 +33,7 @@ import (
 //
 //	@enabled
 //	@eventField("partitionId", "siParticipantId", "promptTemplateId", "promptData", "utteranceId", "agentId")
-//	logic logicGenerateResponse {
+//	logic generateResponse {
 //	  args { event object @required }
 //	  body { ... args.event.payload.partitionId ... }   // every payload.<field> must be declared
 //	}
