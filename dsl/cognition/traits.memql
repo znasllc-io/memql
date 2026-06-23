@@ -1,0 +1,29 @@
+// traits.memql
+//
+// Cognition-namespace traits -- data/state predicates over
+// v1:cognition:participant rows.
+//
+// Reclassified from `spec` to `trait` in C4 (#2034): these read only
+// payload.participantType (a data/state predicate), so under the
+// trait-vs-spec role split they are TRAITS -- usable in a query
+// `filter`. A `spec` is reserved for authorization predicates that
+// read actor.*.
+
+@description("Matches participants with human participantType")
+trait traitIsHumanParticipant {
+  payload.participantType == "human"
+}
+
+// traitIsAIParticipant - AI Participant Type Trait
+// ================================================
+//
+// Reusable filter that matches participants with AI type.
+// AI participants are automated agents in spaces.
+//
+// Usage in queries:
+//   filter concept==v1:cognition:participant && traitIsAIParticipant
+//
+@description("Matches participants with AI participantType")
+trait traitIsAIParticipant {
+  payload.participantType=="si"
+}

@@ -57,17 +57,17 @@ func TestPlanVersionSupersession_Rejects(t *testing.T) {
 // --- impact analysis ---
 
 // A shared spec the dependents bind against.
-const sharedSpecGood = `spec isRefund { payload.kind == "refund" }`
+const sharedSpecGood = `trait isRefund { payload.kind == "refund" }`
 
 // An edit that still compiles -- dependents must re-validate clean.
-const sharedSpecEditGood = `spec isRefund { payload.kind == "refundEscalation" }`
+const sharedSpecEditGood = `trait isRefund { payload.kind == "refundEscalation" }`
 
 // An edit that does NOT parse -- dependents must FAIL re-validation.
-const sharedSpecEditBroken = `spec isRefund { payload.kind == }`
+const sharedSpecEditBroken = `trait isRefund { payload.kind == }`
 
 func dependentConstructs() []memql.SandboxConstruct {
 	return []memql.SandboxConstruct{
-		{Kind: "spec", Name: "isRefund", Source: sharedSpecGood},
+		{Kind: "trait", Name: "isRefund", Source: sharedSpecGood},
 		{Kind: "query", Name: "queryRefundsForOwner", Source: `use authoring.concepts.{ bundle }
 query bundle queryRefundsForOwner {
   filter  payload.ownerUserId==actor.userId
@@ -79,7 +79,7 @@ query bundle queryRefundsForOwner {
 // TestAnalyzeImpact_GoodEditPasses: editing the shared spec to another valid
 // form re-validates every dependent clean -> AllPassed.
 func TestAnalyzeImpact_GoodEditPasses(t *testing.T) {
-	edited := memql.EditedConstruct{Kind: "spec", Name: "isRefund", NewSource: sharedSpecEditGood}
+	edited := memql.EditedConstruct{Kind: "trait", Name: "isRefund", NewSource: sharedSpecEditGood}
 	res := memql.AnalyzeImpact(edited, map[string][]memql.SandboxConstruct{
 		"dep-bundle-1": dependentConstructs(),
 	})
@@ -95,7 +95,7 @@ func TestAnalyzeImpact_GoodEditPasses(t *testing.T) {
 // form fails the dependent's Gate-1 re-validation -> AllPassed false, so the new
 // version must NOT go live.
 func TestAnalyzeImpact_BrokenEditFails(t *testing.T) {
-	edited := memql.EditedConstruct{Kind: "spec", Name: "isRefund", NewSource: sharedSpecEditBroken}
+	edited := memql.EditedConstruct{Kind: "trait", Name: "isRefund", NewSource: sharedSpecEditBroken}
 	res := memql.AnalyzeImpact(edited, map[string][]memql.SandboxConstruct{
 		"dep-bundle-1": dependentConstructs(),
 	})
@@ -110,7 +110,7 @@ func TestAnalyzeImpact_BrokenEditFails(t *testing.T) {
 // TestAnalyzeImpact_NoDependents: a construct nothing depends on trivially
 // passes (nothing to re-validate).
 func TestAnalyzeImpact_NoDependents(t *testing.T) {
-	edited := memql.EditedConstruct{Kind: "spec", Name: "isRefund", NewSource: sharedSpecEditGood}
+	edited := memql.EditedConstruct{Kind: "trait", Name: "isRefund", NewSource: sharedSpecEditGood}
 	res := memql.AnalyzeImpact(edited, nil)
 	if !res.AllPassed || len(res.Dependents) != 0 {
 		t.Errorf("no dependents should trivially pass: %+v", res)
@@ -139,7 +139,7 @@ func TestAnalyzeConstructEdit_StoreDriven(t *testing.T) {
 	store := fakeImpactStore{dependents: map[string][]memql.SandboxConstruct{
 		"dep-1": dependentConstructs(),
 	}}
-	edited := memql.EditedConstruct{Kind: "spec", Name: "isRefund", NewSource: sharedSpecEditBroken}
+	edited := memql.EditedConstruct{Kind: "trait", Name: "isRefund", NewSource: sharedSpecEditBroken}
 	res, err := memql.AnalyzeConstructEditWithStore(context.Background(), store, "user-a", edited)
 	if err != nil {
 		t.Fatalf("AnalyzeConstructEditWithStore: %v", err)

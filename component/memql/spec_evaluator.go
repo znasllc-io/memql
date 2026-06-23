@@ -40,7 +40,14 @@ func (e *MemQLEngine) EvaluateSpec(ctx context.Context, name string) (bool, erro
 		return false, err
 	}
 	if spec.Kind != SpecKindContext {
-		return false, fmt.Errorf("spec %q is a row-spec; call it from a query filter instead (concept==X;%s) — only context-specs are callable via EvaluateSpec", name, name)
+		// Role split (#2034 / C4): a data/state predicate (row-kind) is a
+		// `trait` and belongs in a query `filter`, not in the
+		// authorization / `requires` slot this entry point serves.
+		kindLabel := "row-spec"
+		if spec.IsTrait {
+			kindLabel = "trait"
+		}
+		return false, fmt.Errorf("%s %q is a data/state predicate and cannot be used as an authorization gate -- reference it in a query `filter` instead (e.g. `filter ... && %s`). Only an authorization `spec` (one that reads actor.*) is callable via a `requires` slot / EvaluateSpec", kindLabel, name, name)
 	}
 	if spec.Expr == nil {
 		return false, fmt.Errorf("spec %q has no compiled body", name)

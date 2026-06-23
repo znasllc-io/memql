@@ -99,7 +99,7 @@ func bundleConstructs(owner, bundleId string) []memql.AuthoringConstructRow {
 		{Id: "c-auto", OwnerUserId: owner, BundleId: bundleId, Kind: "automation", Name: "draftRefundReply", TargetNamespace: "authored", Source: `@enabled
 @trigger(event="graph.node.created.*.v1:cognition:utterance")
 automation draftRefundReply { step s { } }`},
-		{Id: "c-spec", OwnerUserId: owner, BundleId: bundleId, Kind: "spec", Name: "isRefundEscalation", TargetNamespace: "authored", Source: `spec isRefundEscalation { payload.kind == "refund" }`},
+		{Id: "c-spec", OwnerUserId: owner, BundleId: bundleId, Kind: "trait", Name: "isRefundEscalation", TargetNamespace: "authored", Source: `trait isRefundEscalation { payload.kind == "refund" }`},
 	}
 }
 
@@ -207,7 +207,7 @@ func TestActivateApprovedBundle_HappyPath(t *testing.T) {
 	if _, ok := registry.Resolve(owner, "automation", "draftRefundReply"); !ok {
 		t.Error("automation not resolvable after activation")
 	}
-	if _, ok := registry.Resolve(owner, "spec", "isRefundEscalation"); !ok {
+	if _, ok := registry.Resolve(owner, "trait", "isRefundEscalation"); !ok {
 		t.Error("spec not resolvable after activation")
 	}
 

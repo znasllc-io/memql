@@ -328,10 +328,13 @@ func (realSandbox) CompileBundle(constructs []memql.SandboxConstruct) memql.Sand
 func TestEmitAndRepair_RealGate1_RepairsToClean(t *testing.T) {
 	auto := memql.SandboxConstruct{Kind: "logic", Name: "logicDigest",
 		Source: "logic logicDigest {\n  args { userId string @required }\n  body { return args.userId }\n}"}
-	broken := memql.SandboxConstruct{Kind: "spec", Name: "specDigestActive",
-		Source: "@bogus(\"x\")\nspec specDigestActive {\n  payload.active == true\n}"}
-	fixed := memql.SandboxConstruct{Kind: "spec", Name: "specDigestActive",
-		Source: "spec specDigestActive {\n  payload.active == true\n}"}
+	// payload.active is a data/state predicate -> a `trait` under the
+	// trait-vs-spec role split (#2034). The unknown annotation @bogus is
+	// the genuine Gate-1 break the single repair clears.
+	broken := memql.SandboxConstruct{Kind: "trait", Name: "specDigestActive",
+		Source: "@bogus(\"x\")\ntrait specDigestActive {\n  payload.active == true\n}"}
+	fixed := memql.SandboxConstruct{Kind: "trait", Name: "specDigestActive",
+		Source: "trait specDigestActive {\n  payload.active == true\n}"}
 
 	fe := emitFakeEngine(
 		emitJSON(t, []memql.SandboxConstruct{auto, broken}),
@@ -341,7 +344,7 @@ func TestEmitAndRepair_RealGate1_RepairsToClean(t *testing.T) {
 	l := newDesignLoop(fe)
 
 	plan := designPlanWith(resolvedDependency{
-		designDependency: designDependency{Kind: "spec", Name: "specDigestActive", CandidateSource: broken.Source},
+		designDependency: designDependency{Kind: "trait", Name: "specDigestActive", CandidateSource: broken.Source},
 		Disposition:      dispAuthor,
 	})
 	bundle, report, clean, err := l.emitAndRepairBundle(context.Background(), "p1", "Send me a daily digest of active items.", plan, realSandbox{})
