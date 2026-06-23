@@ -1,0 +1,76 @@
+# Azurite -- Azure Blob Storage emulator for local k3d development (Epic 0, #2065).
+#
+# Replaces Azure Blob Storage (acrmemql storage account) for local dev. Azurite
+# exposes the Azure Blob Service Protocol on port 10000, so the same SDK +
+# connection string the production code uses works unchanged locally.
+#
+# CONNECTION STRING (stored in memql-secrets under AZURE_BLOB_CONNECTION_STRING):
+#   DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;
+#   AccountKey=<well-known Azurite dev key>;
+#   BlobEndpoint=http://azurite:10000/devstoreaccount1;
+# The memql genesis.znas sealed envelope must carry this value for the blob
+# integration to pick it up via the autoload path (MEMQL_GENESIS_AUTOLOAD=true).
+# See scripts/k3d/seed-secrets.sh for how `make k3d-secrets` populates it.
+#
+# IMAGE: mcr.microsoft.com/azure-storage/azurite:3.34.0 (Microsoft, MIT).
+# Pinned by tag (mutable); digest-pin gate skipped for the `local` overlay.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: azurite
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: azurite
+    app.kubernetes.io/part-of: memql
+    memql/role: local-infra
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: azurite
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: azurite
+        app.kubernetes.io/part-of: memql
+        memql/role: local-infra
+    spec:
+      containers:
+        - name: azurite
+          image: mcr.microsoft.com/azure-storage/azurite:3.34.0
+          imagePullPolicy: IfNotPresent
+          # Start only the blob service; queue/table services not needed.
+          command: ["azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000"]
+          ports:
+            - { name: blob, containerPort: 10000 }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+          livenessProbe:
+            tcpSocket:
+              port: 10000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 10000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: azurite
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: azurite
+    app.kubernetes.io/part-of: memql
+    memql/role: local-infra
+spec:
+  selector:
+    app.kubernetes.io/name: azurite
+  ports:
+    - { name: blob, port: 10000, targetPort: blob }

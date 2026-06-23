@@ -1,0 +1,101 @@
+# In-cluster Postgres + TimescaleDB for local k3d development (Epic 0, #2065).
+#
+# Replaces Tiger Cloud (Timescale Cloud) for local dev. Single replica, no HA,
+# no managed connection pooling -- this is a dev database only.
+#
+# IMAGE: timescale/timescaledb:2.19.1-pg16 (OSS, Apache 2.0). Matches the
+# TimescaleDB version used by Tiger Cloud staging (pg16 + TimescaleDB 2.x).
+# Pinned by tag only (not @sha256) -- the local overlay intentionally uses
+# mutable tags so developers pick up patches by re-pulling; the digest-pin
+# gate is skipped for `local` (see scripts/deploy/drift-check.sh).
+#
+# CREDENTIALS: loaded from the `memql-local-db-creds` Secret created by
+# `make k3d-secrets` during bootstrap (#2063). The Secret is not committed
+# (it carries a password); developers create it once per cluster.
+#
+# PERSISTENCE: a PVC backed by k3d's default local-path StorageClass.
+# The PVC survives `make dev-k3d-restart`; `make dev-k3d-reset` deletes it.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: memql
+    memql/role: local-infra
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: memql
+    memql/role: local-infra
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/part-of: memql
+        memql/role: local-infra
+    spec:
+      containers:
+        - name: postgres
+          image: timescale/timescaledb:2.19.1-pg16
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: pg, containerPort: 5432 }
+          env:
+            - { name: POSTGRES_DB, value: memql }
+            - { name: POSTGRES_USER, valueFrom: { secretKeyRef: { name: memql-local-db-creds, key: POSTGRES_USER } } }
+            - { name: POSTGRES_PASSWORD, valueFrom: { secretKeyRef: { name: memql-local-db-creds, key: POSTGRES_PASSWORD } } }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "memql"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "memql"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: memql
+    memql/role: local-infra
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - { name: pg, port: 5432, targetPort: pg }

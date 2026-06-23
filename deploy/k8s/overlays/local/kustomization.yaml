@@ -1,4 +1,4 @@
-# Local overlay -- k3d development (Epic 0, znasllc-io/memql#2064).
+# Local overlay -- k3d development (Epic 0, znasllc-io/memql#2064/#2065).
 #
 # PURPOSE
 # This overlay runs the full memQL stack on a local k3d cluster via ArgoCD.
@@ -8,9 +8,21 @@
 #      starved.
 #   3. Replicas -- 1 per node type (multi-node is exercised via #2067).
 #
+# LOCAL INFRASTRUCTURE (defined here, absent in base)
+#   - postgres.yaml      -- in-cluster Postgres+TimescaleDB (replaces Tiger Cloud)
+#   - azurite.yaml       -- Azure Blob emulator (replaces Azure Blob Storage)
+#   - db-pool-local.yaml -- looser pool bounds for local Postgres (not Tiger Cloud)
+#
+# SECRETS (created by `make k3d-secrets`, NOT committed)
+#   - memql-secrets         -- main app envelope (genesis, DB DSN, blob conn string)
+#   - livekit-secrets       -- LiveKit API key+secret for local livekit server
+#   - telephony-secrets     -- stub (telephony disabled locally)
+#   - memql-local-db-creds  -- Postgres credentials for the in-cluster DB
+# See scripts/k3d/seed-secrets.sh for the creation logic.
+#
 # IMAGE AUTHORITY
 # Unlike staging/prod, local images are NOT pinned by @sha256: digest.
-# They are built locally by `make dev-build` / the `make dev` inner loop
+# They are built locally by `make k3d-build` / the `make k3d-dev` inner loop
 # (#2066) and imported into k3d via `k3d image import`.  The tag `local`
 # is used; imagePullPolicy: IfNotPresent so the cluster never tries to pull
 # from ACR (the dev machine may not have ACR credentials).
@@ -21,7 +33,8 @@
 #   - ExternalSecret (livekit-secrets, telephony-secrets) -- needs ESO + Key Vault
 #   - CronJob (conn-monitor) -- Tiger Cloud connection monitor; irrelevant locally
 #   - public-entry.yaml resources (ClusterIssuer + Ingresses) -- cert-manager/
-#     ingress-nginx on AKS.  Local ingress is handled separately in #2065.
+#     ingress-nginx on AKS.  Local ingress is handled separately in this overlay.
+#   - livekit Ingress -- local livekit is accessed via k3d port-forward.
 #
 # DRIFT-CHECK
 # The CI drift-check (deploy-drift.yml) enforces @sha256 pinning for every
@@ -36,6 +49,9 @@ namespace: memql
 
 resources:
   - ../../base
+  # Local-only infrastructure (absent in base/staging/prod)
+  - postgres.yaml
+  - azurite.yaml
 
 # ---------------------------------------------------------------------------
 # Remove cloud-only resources
@@ -286,6 +302,154 @@ patches:
       - op: add
         path: /spec/template/spec/containers/0/imagePullPolicy
         value: IfNotPresent
+  # ---------------------------------------------------------------------------
+  # Local environment config (staging URLs -> localhost)
+  # All engine nodes carry IDENTITY_VERIFIER_EXPECTED_ISSUER pointing at the
+  # staging identity host (identity.staging.copresent.ai). This must match
+  # what identity ISSUES in JWTs (IDENTITY_BASE_URL). Locally we set
+  # IDENTITY_BASE_URL=http://localhost:8085, so all verifiers must also expect
+  # http://localhost:8085. Each node patched individually (strategic merge).
+  # ---------------------------------------------------------------------------
+  # identity-specific overrides: URL, CORS, OAuth clients, migrations, issuer.
+  - path: patches/identity-local-config.yaml
+    target:
+      kind: Deployment
+      name: identity
+  # bff-specific overrides: LiveKit public URL + issuer.
+  - path: patches/bff-local-config.yaml
+    target:
+      kind: Deployment
+      name: bff
+  # Worker nodes: override IDENTITY_VERIFIER_EXPECTED_ISSUER to localhost.
+  # Using JSON 6902 `add` (with merge semantics for existing keys in env) is
+  # not directly supported, so we use a strategic-merge patch as inline YAML.
+  # The env entries below use the strategic merge key (env.name) to replace
+  # the matching named entry without touching the rest of the env array.
+  - target:
+      kind: Deployment
+      name: cognition
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: cognition
+        namespace: memql
+      spec:
+        template:
+          spec:
+            containers:
+              - name: cognition
+                env:
+                  - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    value: "http://localhost:8085"
+  - target:
+      kind: Deployment
+      name: voice
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: voice
+        namespace: memql
+      spec:
+        template:
+          spec:
+            containers:
+              - name: voice
+                env:
+                  - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    value: "http://localhost:8085"
+  - target:
+      kind: Deployment
+      name: agent
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: agent
+        namespace: memql
+      spec:
+        template:
+          spec:
+            containers:
+              - name: agent
+                env:
+                  - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    value: "http://localhost:8085"
+  - target:
+      kind: Deployment
+      name: planner
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: planner
+        namespace: memql
+      spec:
+        template:
+          spec:
+            containers:
+              - name: planner
+                env:
+                  - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    value: "http://localhost:8085"
+  - target:
+      kind: Deployment
+      name: workbench
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: workbench
+        namespace: memql
+      spec:
+        template:
+          spec:
+            containers:
+              - name: workbench
+                env:
+                  - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    value: "http://localhost:8085"
+  - target:
+      kind: Deployment
+      name: mcp
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: mcp
+        namespace: memql
+      spec:
+        template:
+          spec:
+            containers:
+              - name: mcp
+                env:
+                  - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    value: "http://localhost:8085"
+  - target:
+      kind: Deployment
+      name: voice-agent
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: voice-agent
+        namespace: memql
+      spec:
+        template:
+          spec:
+            containers:
+              - name: voice-agent
+                env:
+                  - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    value: "http://localhost:8085"
+  # Override the Postgres pool bounds (base is tuned for Tiger Cloud limits;
+  # local in-cluster Postgres can handle larger pools).
+  - path: patches/db-pool-local.yaml
+    target:
+      kind: ConfigMap
+      name: memql-db-pool
 
 # ---------------------------------------------------------------------------
 # Image tags for local builds
