@@ -131,10 +131,16 @@ jobs:
       - name: install k3d + kubectl
         env:
           K3D_VERSION: v5.7.4
+          # Pin the installer script by commit SHA, not the mutable v5.7.4 tag
+          # (Scorecard pinned-dependencies: a tag in a raw.githubusercontent URL
+          # is "not pinned by hash"). This SHA is the commit the v5.7.4 tag points
+          # at; TAG=${K3D_VERSION} below still selects the v5.7.4 binary the script
+          # downloads, so the installed k3d version is unchanged.
+          K3D_INSTALL_SHA: fbb0526b7eecca880df234bac3dbea60adf8e32a
           KUBECTL_VERSION: v1.31.1
         run: |
           set -euo pipefail
-          curl -fsSL "https://raw.githubusercontent.com/k3d-io/k3d/${K3D_VERSION}/install.sh" \
+          curl -fsSL "https://raw.githubusercontent.com/k3d-io/k3d/${K3D_INSTALL_SHA}/install.sh" \
             | TAG="${K3D_VERSION}" bash
           curl -fsSLo /tmp/kubectl \
             "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
