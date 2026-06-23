@@ -1,7 +1,7 @@
 # Reproduce staging locally (k3d + ArgoCD)
 
 The k3d + ArgoCD cluster is the **blessed local dev topology** (memql#2061,
-Epic 0 -- Argo parity): boot it with `make k3d-up`. It mirrors staging
+Epic 0 -- Argo parity): boot it with `make up`. It mirrors staging
 (the `aks-memql-staging` AKS cluster, `deploy/k8s/`) end to end -- the
 same Kustomize overlays, the same ArgoCD-reconciled manifests, the same
 `ignoreDifferences`/selfHeal config -- so the full class of GitOps +
@@ -48,9 +48,9 @@ cross-node mesh bugs reproduces locally instead of only on staging.
 - **git** -- the cluster's ArgoCD Application points at the current git branch;
   you must push your branch before ArgoCD can sync it.
 - The `memql-bff-copresent` sibling repo checked out at `../memql-bff-copresent`
-  (for `make k3d-dev` carrier builds).
+  (for `make dev` carrier builds).
 
-No genesis env file is required for `make k3d-up`; dev secrets are hardcoded
+No genesis env file is required for `make up`; dev secrets are hardcoded
 in `scripts/k3d/seed-secrets.sh` (Azurite well-known key, `memql_dev` Postgres
 password).
 
@@ -58,14 +58,14 @@ password).
 
 ```bash
 # Single-node (fast, default):
-make k3d-up
+make up
 
 # Multi-node (2 servers + 1 agent, for cross-node mesh testing):
-make k3d-up SERVERS=2 AGENTS=1
+make up SERVERS=2 AGENTS=1
 make k3d-scale N=2
 ```
 
-`make k3d-up` does the following in order:
+`make up` does the following in order:
 
 1. Creates a k3d cluster (default name `memql`).
 2. Installs ArgoCD v2.13.3 (same version as staging) via
@@ -79,7 +79,7 @@ make k3d-scale N=2
 
 ## Port-forward reference
 
-After `make k3d-up`, these local ports are forwarded from the k3d cluster:
+After `make up`, these local ports are forwarded from the k3d cluster:
 
 | Port | Service |
 |------|---------|
@@ -98,18 +98,18 @@ The workflow after a code change:
 
 ```bash
 # Rebuild ALL nodes (engine + carrier) and restart pods:
-make k3d-dev
+make dev
 
 # Rebuild a single node type (faster):
-make k3d-dev NODE=bff
-make k3d-dev NODE=identity
-make k3d-dev NODE=cognition
+make dev NODE=bff
+make dev NODE=identity
+make dev NODE=cognition
 
 # Pull and import upstream infra images (postgres/azurite/livekit/redis):
-make k3d-dev PULL_INFRA=1
+make dev PULL_INFRA=1
 ```
 
-`make k3d-dev` does:
+`make dev` does:
 
 1. `docker build` the node image (engine or carrier Dockerfile as appropriate).
 2. `k3d image import` -- loads the image into the cluster's containerd.
@@ -152,8 +152,8 @@ torn down and recreated the cluster, or if you've rotated the dev secret values.
 ## Tear down
 
 ```bash
-make k3d-down           # delete cluster (keeps kubeconfig context)
-make k3d-down PURGE=1   # also remove the kubeconfig context
+make down           # delete cluster (keeps kubeconfig context)
+make down PURGE=1   # also remove the kubeconfig context
 ```
 
 ## Config-vs-topology audit
@@ -180,7 +180,7 @@ with its justification.
 |---|---|---|---|---|
 | 1 | **Replicas (default)** | 1 per Deployment | 2 per Deployment | Resource-constrained laptops. Multi-node is opt-in via `make k3d-scale N=2`. The fieldRef mechanism is identical to staging so the multi-node path fully reproduces. |
 | 2 | **Ingress** | k3d port-forwards (no ingress controller) | ingress-nginx on AKS | Port-forwards are sufficient for local dev; installing nginx in k3d adds significant startup time for no functional gain. |
-| 3 | **Digest-pinning gate** | skipped for `ENV=local` in `scripts/deploy/drift-check.sh` | enforced | Local images are built by `make k3d-dev` with a stable `:local` tag; they have no ACR digest. The gate exemption is tested by `TestDriftCheckRenderedLocalOverlaySkipsDigestGate`. |
+| 3 | **Digest-pinning gate** | skipped for `ENV=local` in `scripts/deploy/drift-check.sh` | enforced | Local images are built by `make dev` with a stable `:local` tag; they have no ACR digest. The gate exemption is tested by `TestDriftCheckRenderedLocalOverlaySkipsDigestGate`. |
 | 4 | **ExternalSecrets / Key Vault** | deleted by `$patch: delete` in local overlay | ESO syncs from Key Vault | Dev secrets are seeded directly by `make k3d-secrets`. |
 | 5 | **Connection pooler** | direct Postgres connection | Tiger Cloud managed PgBouncer | Single-node dev without a pool is safe; the hybrid-endpoint split used in staging can be reproduced by running PgBouncer as a separate pod if needed. |
 | 6 | **voice-agent** | opt-in (`deploy/k8s/overlays/local/` includes it) | in base | Needs live OpenAI + LiveKit creds. The local overlay includes the deployment; set real creds in `make k3d-secrets` to enable. |
@@ -196,7 +196,7 @@ with its justification.
 
 ## Worked example: reproduce a cross-node mesh bug
 
-1. `make k3d-up SERVERS=2 AGENTS=1 && make k3d-scale N=2`.
+1. `make up SERVERS=2 AGENTS=1 && make k3d-scale N=2`.
 2. `make k3d-status` -- verify all pods show distinct `MEMQL_NODE_ID` values.
    If any share an id, stop: the mesh cannot reproduce cross-node bugs.
 3. Reproduce the scenario (e.g. send a chat message that triggers an assistant
@@ -206,7 +206,7 @@ with its justification.
    ```
 4. Root-cause against the cross-node path (event routing rules, session state
    on the wrong node, missing proxy forward).
-5. Fix and `make k3d-dev` to rebuild + restart. ArgoCD reconciles; the pod roll
+5. Fix and `make dev` to rebuild + restart. ArgoCD reconciles; the pod roll
    picks up the new image.
 
 ## Relation to Docker Compose cluster

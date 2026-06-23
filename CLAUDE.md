@@ -12,13 +12,13 @@
 ```bash
 # --- k3d + ArgoCD (NEW primary local run path, E0 / #2061) ---
 # Prerequisites: docker, k3d, kubectl (brew install k3d kubectl)
-make k3d-up          # create cluster + install ArgoCD + seed secrets
-make k3d-dev         # inner-loop: rebuild images -> import -> restart pods
+make up          # create cluster + install ArgoCD + seed secrets
+make dev         # inner-loop: rebuild images -> import -> restart pods
 make k3d-status      # mesh litmus (unique MEMQL_NODE_ID per pod)
-make k3d-down        # tear down
+make down        # tear down
 
 # Multi-node mesh testing (2 replicas per Deployment -- staging parity):
-make k3d-up SERVERS=2 AGENTS=1
+make up SERVERS=2 AGENTS=1
 make k3d-scale N=2
 make k3d-status   # verify unique MEMQL_NODE_IDs
 
@@ -148,20 +148,20 @@ The k3d + ArgoCD cluster is the local dev topology (memql#2061 /
 E0 -- Argo parity). It mirrors staging (AKS + ArgoCD + the k8s
 overlays in `deploy/k8s/`) so the same manifests and reconciliation
 path run locally and in staging. Multi-node is the default (#2067):
-use `make k3d-up SERVERS=2 + make k3d-scale N=2` for full cross-node
+use `make up SERVERS=2 + make k3d-scale N=2` for full cross-node
 mesh testing.
 
 **Prerequisites:** docker, k3d, kubectl (`brew install k3d kubectl`).
 
 ```bash
 # Bootstrap (creates cluster + installs ArgoCD + seeds secrets):
-make k3d-up                       # single-node default
-make k3d-up SERVERS=2 AGENTS=1   # multi-node (for cross-node mesh testing)
+make up                       # single-node default
+make up SERVERS=2 AGENTS=1   # multi-node (for cross-node mesh testing)
 
 # Inner-loop dev (after code change):
-make k3d-dev                      # rebuild + import + restart ALL app nodes
-make k3d-dev NODE=bff             # single node (faster)
-make k3d-dev PULL_INFRA=1        # refresh infra images (postgres/azurite/livekit)
+make dev                      # rebuild + import + restart ALL app nodes
+make dev NODE=bff             # single node (faster)
+make dev PULL_INFRA=1        # refresh infra images (postgres/azurite/livekit)
 
 # Multi-node scaling:
 make k3d-scale N=2                # 2 replicas per Deployment
@@ -171,8 +171,8 @@ make k3d-status                   # litmus: verify unique MEMQL_NODE_ID per pod
 make k3d-secrets
 
 # Tear down:
-make k3d-down                     # keep kubeconfig
-make k3d-down PURGE=1             # also remove kubeconfig context
+make down                     # keep kubeconfig
+make down PURGE=1             # also remove kubeconfig context
 ```
 
 See [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md)
@@ -263,15 +263,15 @@ frontend coordination.
 
 | Task | Command | Description |
 |------|---------|-------------|
-| **Bootstrap k3d cluster** | `make k3d-up` | Create cluster + install ArgoCD + seed secrets (memql#2061 / Epic 0) |
-| **Inner-loop rebuild** | `make k3d-dev [NODE=<type>]` | Build image -> k3d import -> kubectl rollout restart |
+| **Bootstrap k3d cluster** | `make up` | Create cluster + install ArgoCD + seed secrets (memql#2061 / Epic 0) |
+| **Inner-loop rebuild** | `make dev [NODE=<type>]` | Build image -> k3d import -> kubectl rollout restart |
 | **Cluster litmus** | `make k3d-status` | Verify unique MEMQL_NODE_ID per pod (mesh parity check) |
 | **Multi-node scaling** | `make k3d-scale N=2` | 2 replicas per Deployment for cross-node mesh testing |
 | **Re-seed secrets** | `make k3d-secrets` | Idempotent; use after cluster recreate |
-| **Tear down cluster** | `make k3d-down` | Delete k3d cluster (PURGE=1 also removes kubeconfig) |
+| **Tear down cluster** | `make down` | Delete k3d cluster (PURGE=1 also removes kubeconfig) |
 | **Run tests** | `go test ./...` | Go tests |
 | **Build binary** | `go build -o bin/memql .` | Build BFF binary (default) |
-| **Connect DB** | `psql postgres://memql:memql_dev@localhost:5432/memql` | Database shell (after `make k3d-up`) |
+| **Connect DB** | `psql postgres://memql:memql_dev@localhost:5432/memql` | Database shell (after `make up`) |
 
 ---
 
