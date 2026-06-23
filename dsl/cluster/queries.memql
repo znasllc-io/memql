@@ -3,8 +3,8 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cluster.concepts.{ cluster, deployment, node, nodeType, spawnEvent }
-use cluster.shapes.{ deploymentFull }
+use cluster.concepts.{ cluster, deployment, deploymentNodeSpec, node, nodeType, spawnEvent }
+use cluster.shapes.{ deploymentFull, deploymentNodeSpecFull }
 
 @enabled
 @description("Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...)")
@@ -220,5 +220,37 @@ query deployment deploymentById {
 query deployment supersededDeployments {
   filter  payload.status in ["superseded", "failed", "rolled_back"]
   shape   deploymentFull
+  asOf    latest
+}
+
+// ---- queries/v1/cluster/nodeSpecsForDeployment.memql ----
+
+// A deployment's full per-node-type spec set (Epic 2 / #2094). Returns
+// ONE row per node type -- the LATEST payload version per
+// (deploymentId, nodeType) via `asOf latest`, so each entry reflects
+// the node type's CURRENT spec (version / replicas / imageDigest). The
+// deploymentNodeSpec store is append-only (one row appended per re-pin
+// under the same composite concept id), so a plain scan would return
+// every transition; asOf latest collapses to the current spec per node
+// type. The caller passes the bare deploymentId (filter is on
+// payload.deploymentId, NOT the canonical row id).
+//
+// Engine-as-spine resolution (empty version -> the deployment's engine
+// version) is the CONSUMER's job: this query returns the raw per-node
+// pins; the deploy pack resolves "" against the lockfile engineVersion.
+//
+// Authz: filters on payload.deploymentId only (infrastructure topology,
+// no user-scope field) -> conformance "other" bucket, same as
+// nodesForDeployment / deploymentsForCluster.
+
+@enabled
+@description("Latest-per-(deploymentId, nodeType) deploymentNodeSpec rows for one deploymentId -- the deployment's current per-node-type spec set (version / replicas / imageDigest). asOf latest collapses the append-only spec stream to current state per node type. Engine-as-spine resolution of an empty version is the consumer's job. Epic 2 / #2094.")
+@unbounded("per-node specs for one deployment -- a bounded topology set consumed whole")
+query deploymentNodeSpec nodeSpecsForDeployment {
+  args {
+    deploymentId  string  @required
+  }
+  filter  payload.deploymentId == args.deploymentId
+  shape   deploymentNodeSpecFull
   asOf    latest
 }
