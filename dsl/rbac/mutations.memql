@@ -1,0 +1,43 @@
+// rbac domain -- capability catalog writes.
+//
+// Authz tier: PRIVILEGED catalog write (not per-user-owned). Writing the
+// RBAC grant catalog is a cluster-administration action; the capability
+// rows are global (_system slot) reference data exactly like the
+// v1:agents:agentRole / v1:agents:skill catalogs. In E1.1 the only writer
+// is the SeedMaterializer (running as the `system:seedMaterializer`
+// actor), which walks the `seed capability ...` declarations under
+// dsl/rbac/*.memql and stamps each body's `id` (the seed name) into
+// `capabilityId`. The RANK-BOUNDED custom-role authoring path (a creator
+// may only mint grants at or below their own rank) lands in E1.4
+// (memql#2074) as logic that wraps this mutation; the base-role grants
+// this mutation seeds are marked predefined=true and frozen at runtime by
+// E1.2 (memql#2070). The args surface mirrors the v1:rbac:capability
+// concept field-for-field, matching the materializer's
+// mutationCreate<Concept> convention.
+
+use rbac.concepts.{ capability }
+
+@enabled
+@description("Insert a v1:rbac:capability catalog row -- one (verb x resourceType) grant for a role. Called by the SeedMaterializer when it walks the capability seed declarations under dsl/rbac/*.memql (the materializer stamps the seed body's `id` into `capabilityId`). Also the write surface the E1.4 (memql#2074) rank-bounded custom-role authoring path layers on top of -- predefined defaults false there so the grant stays editable within the creator's rank bound; base-role seeds pass predefined=true to mark the row immutable at runtime (enforced by E1.2). Partition-agnostic: the engine stamps every v1:rbac:capability insert into the _system slot regardless of the envelope, exactly like createAgentRole / createSkill.")
+mutate capability createCapability {
+  args {
+    capabilityId  string
+    roleSlug      string  @required
+    verb          string  @required  @enum("read", "create", "update", "delete", "execute")
+    resourceType  string  @required
+    effect        string  @enum("allow", "deny")
+    description   string
+    predefined    bool
+    active        bool
+  }
+  insert {
+    id: args.capabilityId
+    args.roleSlug
+    args.verb
+    args.resourceType
+    effect: coalesce(args.effect, "allow")
+    args.description
+    predefined: coalesce(args.predefined, false)
+    active: coalesce(args.active, true)
+  }
+}

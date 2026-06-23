@@ -2459,6 +2459,84 @@ func CreateCalendarEventBuild(args CreateCalendarEventArgs) string {
 	return b.String()
 }
 
+// CreateCapability -- Insert a v1:rbac:capability catalog row -- one (verb x resourceType) grant for a role. Called by the SeedMaterializer when it walks the capability seed declarations under dsl/rbac/*.memql (the materializer stamps the seed body's `id` into `capabilityId`). Also the write surface the E1.4 (memql#2074) rank-bounded custom-role authoring path layers on top of -- predefined defaults false there so the grant stays editable within the creator's rank bound; base-role seeds pass predefined=true to mark the row immutable at runtime (enforced by E1.2). Partition-agnostic: the engine stamps every v1:rbac:capability insert into the _system slot regardless of the envelope, exactly like createAgentRole / createSkill.
+//
+// Bound concept: capability.
+type CreateCapabilityArgs struct {
+	CapabilityId string
+	RoleSlug     string
+	// Enum: read | create | update | delete | execute
+	Verb         string
+	ResourceType string
+	// Enum: allow | deny
+	Effect        string
+	Description   string
+	Predefined    bool
+	PredefinedSet bool // set true to send predefined; required because zero-value bool is ambiguous
+	Active        bool
+	ActiveSet     bool // set true to send active; required because zero-value bool is ambiguous
+}
+
+// CreateCapability calls the engine mutation createCapability.
+func (qc *QueryClient) CreateCapability(ctx context.Context, args CreateCapabilityArgs) (*Result, error) {
+	call := CreateCapabilityBuild(args)
+	return qc.executeNamed(ctx, "createCapability", call)
+}
+
+func CreateCapabilityBuild(args CreateCapabilityArgs) string {
+	var b strings.Builder
+	b.WriteString("createCapability({")
+	if args.CapabilityId != "" {
+		b.WriteString("capabilityId: ")
+		b.WriteString(fmt.Sprintf("%q", args.CapabilityId))
+	}
+	if b.Len() > 18 {
+		b.WriteString(", ")
+	}
+	b.WriteString("roleSlug: ")
+	b.WriteString(fmt.Sprintf("%q", args.RoleSlug))
+	if b.Len() > 18 {
+		b.WriteString(", ")
+	}
+	b.WriteString("verb: ")
+	b.WriteString(fmt.Sprintf("%q", args.Verb))
+	if b.Len() > 18 {
+		b.WriteString(", ")
+	}
+	b.WriteString("resourceType: ")
+	b.WriteString(fmt.Sprintf("%q", args.ResourceType))
+	if args.Effect != "" {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("effect: ")
+		b.WriteString(fmt.Sprintf("%q", args.Effect))
+	}
+	if args.Description != "" {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(fmt.Sprintf("%q", args.Description))
+	}
+	if args.PredefinedSet {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("predefined: ")
+		b.WriteString(fmt.Sprintf("%v", args.Predefined))
+	}
+	if args.ActiveSet {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("active: ")
+		b.WriteString(fmt.Sprintf("%v", args.Active))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // CreateCluster -- Create the cluster record
 //
 // Bound concept: cluster.
