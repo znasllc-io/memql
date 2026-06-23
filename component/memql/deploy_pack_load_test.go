@@ -50,6 +50,7 @@ func TestDeployPackBuiltinsLoad(t *testing.T) {
 		"deployArgoSync",
 		"deployRunPromote",
 		"deployRecordBack",
+		"deployObserveReconciledState", // E2.4 Model A read leg
 	} {
 		if _, err := registry.Get(name); err != nil {
 			t.Errorf("deploy pack builtin %q MUST register (its @executor wiring must parse): %v", name, err)

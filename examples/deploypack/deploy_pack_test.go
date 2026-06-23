@@ -44,6 +44,9 @@ type fakeExecutor struct {
 	promoteEnv     string
 	promoteErr     error // when set, RunPromote returns it (simulates a promote failure)
 	gitCalls       [][]string
+	kubectlJSON    []byte   // fixture returned by KubectlJSON (observe read leg)
+	kubectlErr     error    // when set, KubectlJSON returns it
+	kubectlArgs    []string // args the last KubectlJSON call received
 }
 
 func (f *fakeExecutor) RunPromote(_ context.Context, version, env string) (string, error) {
@@ -58,7 +61,16 @@ func (f *fakeExecutor) RunRollback(_ context.Context, _, _ string) (string, erro
 func (f *fakeExecutor) RunRolloutAction(_ context.Context, _, _, _ string) (string, error) {
 	return "", nil
 }
-func (f *fakeExecutor) KubectlJSON(_ context.Context, _ ...string) ([]byte, error) { return nil, nil }
+
+// kubectlJSON, when set, is returned by KubectlJSON (fixture Argo app JSON for
+// the observe read leg). kubectlArgs records the args observe passed.
+func (f *fakeExecutor) KubectlJSON(_ context.Context, args ...string) ([]byte, error) {
+	f.kubectlArgs = args
+	if f.kubectlErr != nil {
+		return nil, f.kubectlErr
+	}
+	return f.kubectlJSON, nil
+}
 func (f *fakeExecutor) Git(_ context.Context, args ...string) (string, error) {
 	f.gitCalls = append(f.gitCalls, args)
 	return "git " + strings.Join(args, " "), nil
@@ -81,10 +93,11 @@ func TestDeployPackProviderExposesAllEffects(t *testing.T) {
 		t.Fatalf("IntegrationName() = %q, want deploypack", got)
 	}
 	want := map[string]bool{
-		"commitOverlay": false,
-		"argoSync":      false,
-		"runPromote":    false,
-		"recordBack":    false,
+		"commitOverlay":          false,
+		"argoSync":               false,
+		"runPromote":             false,
+		"recordBack":             false,
+		"observeReconciledState": false,
 	}
 	for _, c := range provider.Capabilities() {
 		if _, ok := want[c.Name]; ok {
@@ -218,6 +231,53 @@ func TestDeployPackRecordBackRunsMutations(t *testing.T) {
 	}
 	if !strings.Contains(joined, `nodeType: "bff"`) || !strings.Contains(joined, "replicas: 2") {
 		t.Errorf("recordBack nodeSpec call missing nodeType/replicas; queries=%v", eng.queries)
+	}
+}
+
+// TestDeployPackObserveReadsArgoStatus is the E2.4 (#2097) Model A read-leg
+// proof: observeReconciledState reads the ArgoCD app via the Executor's
+// KubectlJSON and maps the result with deploycontrol.MapArgoStatus, reporting
+// synced + healthy in-band so the record-back automation can branch on it.
+func TestDeployPackObserveReadsArgoStatus(t *testing.T) {
+	const syncedHealthy = `{"status":{"sync":{"status":"Synced","revision":"abc123"},"health":{"status":"Healthy"}}}`
+	exec := &fakeExecutor{kubectlJSON: []byte(syncedHealthy)}
+	provider := deploypack.NewProviderWithDeps(exec, &fakeEngine{})
+
+	nodes, err := callCapability(t, provider, "observeReconciledState", map[string]any{"app": "memql"})
+	if err != nil {
+		t.Fatalf("observeReconciledState handler: %v", err)
+	}
+	// It must have read the ArgoCD app through the sanctioned kubectl boundary.
+	if strings.Join(exec.kubectlArgs, " ") != "-n argocd get app memql -o json" {
+		t.Fatalf("observe read args = %v, want [-n argocd get app memql -o json]", exec.kubectlArgs)
+	}
+	var obs struct {
+		Synced  bool `json:"synced"`
+		Healthy bool `json:"healthy"`
+	}
+	if err := json.Unmarshal(nodes[0].Payload, &obs); err != nil {
+		t.Fatalf("unmarshal observation: %v", err)
+	}
+	if !obs.Synced || !obs.Healthy {
+		t.Fatalf("synced/healthy ArgoCD JSON -> synced=%v healthy=%v, want true/true", obs.Synced, obs.Healthy)
+	}
+
+	// A NOT-synced app reports synced=false (the automation appends a corrective
+	// transition instead of recording success).
+	const outOfSync = `{"status":{"sync":{"status":"OutOfSync"},"health":{"status":"Progressing"}}}`
+	exec2 := &fakeExecutor{kubectlJSON: []byte(outOfSync)}
+	provider2 := deploypack.NewProviderWithDeps(exec2, &fakeEngine{})
+	nodes2, err := callCapability(t, provider2, "observeReconciledState", map[string]any{})
+	if err != nil {
+		t.Fatalf("observeReconciledState (out-of-sync): %v", err)
+	}
+	var obs2 struct {
+		Synced  bool `json:"synced"`
+		Healthy bool `json:"healthy"`
+	}
+	_ = json.Unmarshal(nodes2[0].Payload, &obs2)
+	if obs2.Synced || obs2.Healthy {
+		t.Fatalf("out-of-sync ArgoCD JSON -> synced=%v healthy=%v, want false/false", obs2.Synced, obs2.Healthy)
 	}
 }
 
