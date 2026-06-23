@@ -101,7 +101,7 @@ class MockDispatcher {
 test("sendGuestInvite -- happy path returns invitationId + success", async () => {
   const mock = new MockDispatcher();
   const promise = sendGuestInvite(mock.asDispatcher(), {
-    spaceId: "spc-1",
+    partitionId: "spc-1",
     spaceName: "Brainstorm",
     inviterName: "Alice",
     email: "guest@example.com",
@@ -109,9 +109,9 @@ test("sendGuestInvite -- happy path returns invitationId + success", async () =>
     expiresInMinutes: 15,
   });
   const sent = mock.lastSent() as unknown as {
-    sendGuestInvite?: { spaceId?: string; expiresInMinutes?: number };
+    sendGuestInvite?: { partitionId?: string; expiresInMinutes?: number };
   };
-  assert.equal(sent.sendGuestInvite?.spaceId, "spc-1");
+  assert.equal(sent.sendGuestInvite?.partitionId, "spc-1");
   assert.equal(sent.sendGuestInvite?.expiresInMinutes, 15);
 
   mock.reply({
@@ -130,7 +130,7 @@ test("sendGuestInvite -- happy path returns invitationId + success", async () =>
 test("sendGuestInvite -- typed errorCode rides the result (no throw)", async () => {
   const mock = new MockDispatcher();
   const promise = sendGuestInvite(mock.asDispatcher(), {
-    spaceId: "spc-1",
+    partitionId: "spc-1",
     spaceName: "Brainstorm",
     inviterName: "Alice",
     email: "bad-email",
@@ -153,7 +153,7 @@ test("sendGuestInvite -- typed errorCode rides the result (no throw)", async () 
 test("sendGuestInvite -- throws on QueryError", async () => {
   const mock = new MockDispatcher();
   const promise = sendGuestInvite(mock.asDispatcher(), {
-    spaceId: "spc-1",
+    partitionId: "spc-1",
     spaceName: "x",
     inviterName: "x",
     email: "x@y.z",
@@ -168,13 +168,13 @@ test("sendGuestInvite -- rejects missing required args", async () => {
   await assert.rejects(
     () =>
       sendGuestInvite(mock.asDispatcher(), {
-        spaceId: "",
+        partitionId: "",
         spaceName: "",
         inviterName: "",
         email: "x@y.z",
         joinUrlBase: "https://x",
       }),
-    /spaceId is required/,
+    /partitionId is required/,
   );
 });
 
@@ -190,7 +190,7 @@ test("resolveGuestInvite -- ok status returns full guest-visible metadata", asyn
       requestId: mock.lastRequestId(),
       status: "ok",
       invitationId: "inv-x",
-      spaceId: "spc-1",
+      partitionId: "spc-1",
       spaceName: "Brainstorm",
       inviterName: "Alice",
       inviteeEmail: "g@x.com",
@@ -223,7 +223,7 @@ test("resolveGuestInvite -- non-ok status does not throw (renderer branches)", a
 // joinSpaceAsGuest
 // ---------------------------------------------------------------------
 
-test("joinSpaceAsGuest -- happy path echoes participantId + resolves spaceId", async () => {
+test("joinSpaceAsGuest -- happy path echoes participantId + resolves partitionId", async () => {
   const mock = new MockDispatcher();
   const promise = joinSpaceAsGuest(mock.asDispatcher(), {
     participantId: "ptp-1",
@@ -234,13 +234,13 @@ test("joinSpaceAsGuest -- happy path echoes participantId + resolves spaceId", a
       requestId: mock.lastRequestId(),
       success: true,
       participantId: "ptp-1",
-      spaceId: "spc-resolved",
+      partitionId: "spc-resolved",
     },
   });
   const r = await promise;
   assert.equal(r.success, true);
   assert.equal(r.participantId, "ptp-1");
-  assert.equal(r.spaceId, "spc-resolved");
+  assert.equal(r.partitionId, "spc-resolved");
 });
 
 test("joinSpaceAsGuest -- unauthenticated rides errorCode", async () => {

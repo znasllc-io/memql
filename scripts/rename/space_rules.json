@@ -15,18 +15,100 @@
   ],
   "groups": {
     "proto": [
-      { "old": "space_id", "new": "partition_id", "mode": "token", "exts": [".proto"] }
+      {
+        "old": "space_id",
+        "new": "partition_id",
+        "mode": "token",
+        "exts": [
+          ".proto"
+        ]
+      }
     ],
     "go-internal": [
-      { "old": "SpaceID", "new": "PartitionID", "mode": "infix", "exts": [".go"] },
-      { "old": "SpaceId", "new": "PartitionId", "mode": "infix", "exts": [".go"] },
-      { "old": "spaceId", "new": "partitionId", "mode": "infix", "exts": [".go"] },
-      { "old": "space_id", "new": "partition_id", "mode": "token", "exts": [".go"] }
+      {
+        "old": "SpaceID",
+        "new": "PartitionID",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "SpaceId",
+        "new": "PartitionId",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "spaceId",
+        "new": "partitionId",
+        "mode": "infix",
+        "exts": [
+          ".go"
+        ]
+      },
+      {
+        "old": "space_id",
+        "new": "partition_id",
+        "mode": "token",
+        "exts": [
+          ".go"
+        ]
+      }
     ],
     "dsl": [
-      { "old": "SpaceId", "new": "PartitionId", "mode": "infix", "exts": [".memql"] },
-      { "old": "spaceId", "new": "partitionId", "mode": "infix", "exts": [".memql"] },
-      { "old": "space_id", "new": "partition_id", "mode": "token", "exts": [".memql"] }
+      {
+        "old": "SpaceId",
+        "new": "PartitionId",
+        "mode": "infix",
+        "exts": [
+          ".memql"
+        ]
+      },
+      {
+        "old": "spaceId",
+        "new": "partitionId",
+        "mode": "infix",
+        "exts": [
+          ".memql"
+        ]
+      },
+      {
+        "old": "space_id",
+        "new": "partition_id",
+        "mode": "token",
+        "exts": [
+          ".memql"
+        ]
+      }
+    ],
+    "ts": [
+      {
+        "old": "SpaceId",
+        "new": "PartitionId",
+        "mode": "infix",
+        "exts": [
+          ".ts"
+        ]
+      },
+      {
+        "old": "spaceId",
+        "new": "partitionId",
+        "mode": "infix",
+        "exts": [
+          ".ts"
+        ]
+      },
+      {
+        "old": "space_id",
+        "new": "partition_id",
+        "mode": "token",
+        "exts": [
+          ".ts"
+        ]
+      }
     ]
   }
 }

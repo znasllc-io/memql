@@ -11,12 +11,12 @@
 // Wire shape (mirrors component/server/audiows/messages.go):
 //
 //   client -> server:
-//     { type: "start",      streamId, spaceId, participantId,
+//     { type: "start",      streamId, partitionId, participantId,
 //                            format, sampleRate, channels, languageHint? }
 //     { type: "chunk",      streamId, audio (base64), sequence }
 //     { type: "end",        streamId, cancelled? }
 //     { type: "synthesize", requestId, text, voice?, format?,
-//                            sampleRate?, spaceId?, participantId? }
+//                            sampleRate?, partitionId?, participantId? }
 //
 //   server -> client:
 //     { type: "started",       streamId }
@@ -25,11 +25,11 @@
 //     { type: "ended",         streamId, cancelled? }
 //     { type: "error",         streamId?, error: { code, message } }
 //     { type: "tts_started",   requestId, format, sampleRate,
-//                               spaceId?, participantId?, text }
+//                               partitionId?, participantId?, text }
 //     { type: "tts_chunk",     requestId, audio (base64), format,
 //                               sampleRate, sequence, done,
-//                               spaceId, participantId, text }
-//     { type: "tts_ended",     requestId, spaceId?, participantId?,
+//                               partitionId, participantId, text }
+//     { type: "tts_ended",     requestId, partitionId?, participantId?,
 //                               cancelled?, error? }
 
 import { newShortId } from "../client/id.js";
@@ -57,7 +57,7 @@ export interface DialAudioOptions {
 export type AudioFormat = "pcm16" | "opus" | "webm" | "wav" | (string & {});
 
 export interface TranscribeStreamOptions {
-  spaceId: string;
+  partitionId: string;
   participantId: string;
   format: AudioFormat;
   sampleRate: number;
@@ -117,7 +117,7 @@ export interface SynthesizeOptions {
   voice?: string;
   format?: AudioFormat;
   sampleRate?: number;
-  spaceId?: string;
+  partitionId?: string;
   participantId?: string;
   // Optional pre-seeded requestId. Auto-generated when absent.
   requestId?: string;
@@ -129,7 +129,7 @@ export interface SynthesizeStartedEvent {
   format: AudioFormat;
   sampleRate: number;
   text: string;
-  spaceId: string;
+  partitionId: string;
   participantId: string;
 }
 
@@ -181,7 +181,7 @@ interface ServerEnvelope {
   sampleRate?: number;
   sequence?: number;
   done?: boolean;
-  spaceId?: string;
+  partitionId?: string;
   participantId?: string;
 }
 
@@ -215,7 +215,7 @@ export class AudioClient {
 
   transcribe(opts: TranscribeStreamOptions): TranscribeStream {
     if (this.closed) throw new Error("AudioClient.transcribe: client is closed");
-    if (!opts.spaceId) throw new Error("AudioClient.transcribe: spaceId is required");
+    if (!opts.partitionId) throw new Error("AudioClient.transcribe: partitionId is required");
     if (!opts.participantId) throw new Error("AudioClient.transcribe: participantId is required");
     if (!opts.format) throw new Error("AudioClient.transcribe: format is required");
     if (!opts.sampleRate) throw new Error("AudioClient.transcribe: sampleRate is required");
@@ -280,7 +280,7 @@ export class AudioClient {
     this.rawSend({
       type: "start",
       streamId,
-      spaceId: opts.spaceId,
+      partitionId: opts.partitionId,
       participantId: opts.participantId,
       format: opts.format,
       sampleRate: opts.sampleRate,
@@ -366,7 +366,7 @@ export class AudioClient {
           format: (msg.format ?? "") as AudioFormat,
           sampleRate: typeof msg.sampleRate === "number" ? msg.sampleRate : 0,
           text: msg.text ?? "",
-          spaceId: msg.spaceId ?? "",
+          partitionId: msg.partitionId ?? "",
           participantId: msg.participantId ?? "",
         });
         notify();
@@ -406,7 +406,7 @@ export class AudioClient {
       ...(opts.voice ? { voice: opts.voice } : {}),
       ...(opts.format ? { format: opts.format } : {}),
       ...(opts.sampleRate ? { sampleRate: opts.sampleRate } : {}),
-      ...(opts.spaceId ? { spaceId: opts.spaceId } : {}),
+      ...(opts.partitionId ? { partitionId: opts.partitionId } : {}),
       ...(opts.participantId ? { participantId: opts.participantId } : {}),
     });
 
