@@ -116,9 +116,10 @@ func runNodeTokenMint(args []string) int {
 	}
 
 	// CLI subcommand: logs to stderr so stdout stays clean for the
-	// minted bearer (which scripts/dev/mint-node-tokens.sh captures
-	// via $(...)). See main.go::mustCreateCLILogger for the full
-	// rationale + memql#353 for what broke before the split.
+	// minted bearer (which a `bearer=$(kubectl exec deploy/identity --
+	// /app/memql node-token mint ...)` capture, e.g. via `make
+	// node-token`, pulls out). See main.go::mustCreateCLILogger for the
+	// full rationale + memql#353 for what broke before the split.
 	//
 	// 15+ component-internal loggers (memql, automations, events,
 	// memoryNodesDB, cache, language, etc.) are hardcoded to write

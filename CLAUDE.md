@@ -665,7 +665,8 @@ Make targets:
 - `make voice` -- build the `memql-voice` binary (carries the
   `voice-agent` subcommand).
 - `make voice-agent-token` -- mint a `class="voice_agent"` JWT for the
-  local cluster (used by `scripts/dev/refresh.sh`).
+  local k3d cluster (execs `/app/memql voice-agent-token mint` in the
+  identity pod via `kubectl exec`).
 
 Deployment: the `voice` Deployment runs the `memql-voice` image (the
 `voice-runtime` CGO stage) with the `voice-agent` subcommand; in the local
