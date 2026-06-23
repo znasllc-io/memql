@@ -12,7 +12,7 @@ package automations
 // THAT automation and surfaces the event, leaving everything else untouched.
 //
 // This is the per-automation analogue of the process-wide AI guard
-// (component/memql/si_guard.go) -- same fail-isolate intent, but keyed per
+// (component/memql/ai_guard.go) -- same fail-isolate intent, but keyed per
 // authored automation so one bad automation's runs can't starve the others.
 //
 // State machine (per (owner, name) key):

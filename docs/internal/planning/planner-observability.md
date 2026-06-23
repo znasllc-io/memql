@@ -42,7 +42,7 @@ spells out the work.
    flipped from `reasoningClaudeOpus` -> `streamClaudeSonnet`.
    Per-instance flip back to Opus + thinking is still one line if a
    workload proves too ambiguous for Sonnet.
-2. `component/memql/si_providers.go` --
+2. `component/memql/ai_providers.go` --
    `anthropicStreamProvider.CallStream` now matches the
    `CallChatStreamWithTools` pattern: tallies `input_tokens`,
    `output_tokens`, `cache_creation_tokens`, `cache_read_tokens` from
@@ -65,11 +65,11 @@ rest of this document covers what's still missing.
 
 ### 1. Surface per-call usage through the AI provider interface
 
-Today `SIProvider.Call(ctx, prompt) (any, error)` and the streaming
+Today `AIProvider.Call(ctx, prompt) (any, error)` and the streaming
 variants give the caller the model output and nothing else. The
 Anthropic provider tracks usage internally (the tally we just added)
 but discards it after the log line; OpenAI variants don't track usage
-at all yet. The planner agent loop calls `engine.InvokeSI` and gets
+at all yet. The planner agent loop calls `engine.InvokeAI` and gets
 back a string -- it has zero programmatic visibility into how many
 tokens that call consumed.
 
@@ -96,7 +96,7 @@ type CallUsage struct {
 Provider interface widens (one path):
 
 ```go
-type SIProvider interface {
+type AIProvider interface {
     Call(ctx context.Context, prompt string) (any, *CallUsage, error)
 }
 ```
@@ -118,7 +118,7 @@ providers (10+ surfaces) don't all track usage today.
 
 ### 2. Propagate `*CallUsage` through `siRuntime`
 
-`component/memql/si_runtime.go` -- after `entry.Client.Call(ctx, text)`
+`component/memql/ai_runtime.go` -- after `entry.Client.Call(ctx, text)`
 returns, the runtime knows the resolved provider entry and can pull
 `LastUsage()` off it. Two consumers:
 
@@ -139,14 +139,14 @@ r.publishEvent(events.TopicAICompletionFinished, ..., map[string]any{
 })
 ```
 
-b) **Direct return.** Add `InvokeSIWithUsage(ctx, templateId, data) (any, *CallUsage, error)`
+b) **Direct return.** Add `InvokeAIWithUsage(ctx, templateId, data) (any, *CallUsage, error)`
 to the engine surface for callers (like the planner) that prefer
-synchronous capture. The plain `InvokeSI` stays as-is for callers
+synchronous capture. The plain `InvokeAI` stays as-is for callers
 that don't care.
 
 ### 3. Planner attribution of usage to a Plan
 
-The planner agent loop calls `InvokeSI` and knows the active `planId`
+The planner agent loop calls `InvokeAI` and knows the active `planId`
 at the call site. After each invocation, it accumulates onto
 `Plan.tokenSpent` (already defined on `v1:planner:plan`) and
 `Plan.costSpentUSD` (new field, add to concept).
@@ -154,7 +154,7 @@ at the call site. After each invocation, it accumulates onto
 Sketch in `integrations/planner/agent_loop.go`:
 
 ```go
-resp, usage, err := l.engine.InvokeSIWithUsage(ctx, "plannerAgent", data)
+resp, usage, err := l.engine.InvokeAIWithUsage(ctx, "plannerAgent", data)
 if err != nil { ... }
 if usage != nil {
     l.recordPlanUsage(ctx, planId, usage)
@@ -243,9 +243,9 @@ pass; flag for the next conversation.
    can return nil.
 4. `siRuntime` reads `LastUsage()` after `Call`, stamps it onto the
    existing `ai.completion.finished` event, AND exposes
-   `InvokeSIWithUsage(ctx, ...) (any, *CallUsage, error)`.
+   `InvokeAIWithUsage(ctx, ...) (any, *CallUsage, error)`.
 5. Planner integration's agent loop captures usage from
-   `InvokeSIWithUsage` and writes to Plan.tokenSpent / costSpentUSD.
+   `InvokeAIWithUsage` and writes to Plan.tokenSpent / costSpentUSD.
 6. Cockpit row formatter: `formatTokens` + `formatCost`, append to
    the per-plan subtitle line.
 7. Per-phase timer: `phaseStartedAt` stamping in `stampPhases` +

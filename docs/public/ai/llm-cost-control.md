@@ -35,18 +35,18 @@ automatically.
 
 | Layer | Mechanism | Scope | Self-heals? | Where |
 |---|---|---|---|---|
-| **0. Kill-switch** | cumulative call + est-$ **latch** → terminal 402, never drains | process (per-scope: #1144) | **No (latches)** | `component/memql/si_guard.go` |
-| 1. Rate ceiling | calls/window → synthetic 429 | process, per-lane | yes (drains) | `si_guard.go` |
-| 1. Loop breaker | identical-request repeats → 429 | per-fingerprint | yes (cooldown) | `si_guard.go` |
+| **0. Kill-switch** | cumulative call + est-$ **latch** → terminal 402, never drains | process (per-scope: #1144) | **No (latches)** | `component/memql/ai_guard.go` |
+| 1. Rate ceiling | calls/window → synthetic 429 | process, per-lane | yes (drains) | `ai_guard.go` |
+| 1. Loop breaker | identical-request repeats → 429 | per-fingerprint | yes (cooldown) | `ai_guard.go` |
 | 2. Automation budget | executions/window → skip; bounded fail-open | process, per-automation | yes (window) | `component/automations/budget.go`, `cluster_guard.go` |
 | 3. Loop terminal conditions | per-turn iteration / convergence / wallclock caps | per invocation | n/a | agent + planner loops |
-| 4. Per-scope budget | cumulative latch per space / plan-lineage | per conversation/plan | **No (latches)** | `si_guard.go` via context (#1144) |
+| 4. Per-scope budget | cumulative latch per space / plan-lineage | per conversation/plan | **No (latches)** | `ai_guard.go` via context (#1144) |
 
 Layer 0 is the backstop **behind** every other layer: even when a higher
 layer is generous or a loop's terminal condition is loose, the cumulative
 kill-switch caps total spend.
 
-## Layer 0 — the kill-switch (`si_guard.go`)
+## Layer 0 — the kill-switch (`ai_guard.go`)
 
 `guardedHTTPClient` wraps the `*http.Client` of all four chat provider
 builds (OpenAI + Anthropic, stream + non-stream), so every chat/messages
@@ -87,7 +87,7 @@ residual gap is *cross-turn* cumulative spend, which Layers 0 and 4 close.
 | Loop | File | Per-turn cap | Cross-turn / lineage cap | Convergence guards |
 |---|---|---|---|---|
 | Agent tool loop | `integrations/agent/streaming.go`, `nonstreaming.go` | 120 iters (`MEMQL_TOOL_LOOP_MAX_ITERATIONS`), 180s wallclock (`MEMQL_TURN_WALLCLOCK_TIMEOUT_SECONDS`) | none → **Layer 0 / 4** | 3 repeat-failures (`MEMQL_TOOL_LOOP_MAX_REPEAT_FAILURES`), 3 all-errored rounds, 2 produceArtifact re-delegations |
-| Engine AI tool loop | `component/memql/si_tool_loop.go` | 120 iters (`MEMQL_TOOL_LOOP_MAX_ITERATIONS`), 8 tool-calls/iter | none → **Layer 0 / 4** | all-errored guard, identical-call breaker |
+| Engine AI tool loop | `component/memql/ai_tool_loop.go` | 120 iters (`MEMQL_TOOL_LOOP_MAX_ITERATIONS`), 8 tool-calls/iter | none → **Layer 0 / 4** | all-errored guard, identical-call breaker |
 | Planner decompose loop | `integrations/planner/agent_loop.go` | 5 iters/cycle (`MEMQL_PLANNER_MAX_ITERATIONS_PER_CYCLE`) | 8 calls + 2M tokens/plan (`MEMQL_PLANNER_MAX_INVOCATIONS_PER_PLAN`, `MEMQL_PLANNER_DEFAULT_TOKEN_BUDGET`) | 2 identical decisions (`MEMQL_PLANNER_MAX_IDENTICAL_DECISIONS`) |
 | Cognition conductor | `integrations/cognition/conductor_consult.go` | single structured call (≤3 branch re-invokes) | n/a | n/a |
 | Suggest | `component/grpc/` AiSuggest | single call | n/a | n/a |

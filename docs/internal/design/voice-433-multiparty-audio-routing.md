@@ -225,7 +225,7 @@ The data path that carries identity/role:
      flows into agent prompts today as `CurrentUserDisplayName`
      (`contextWithCurrentUserDisplayName` /
      `currentUserDisplayNameFromContext` in
-     `integrations/cognition/si_responder.go`, threaded in
+     `integrations/cognition/ai_responder.go`, threaded in
      `agent_forward.go`).
    - Role: the human's space role, or for the polyphon group the
      participant's labeled role; the assistant's own role label is the

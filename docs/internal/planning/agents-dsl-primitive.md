@@ -269,7 +269,7 @@ own focused work after Phases 0-5 landed:
   before the existing `provisionGeneralAssistantOnUserCreate`
   automation can be retired.
 - **Full streaming tool loop in `agents.invoke`.** Today the handler
-  does a one-shot `ChatSIProvider.CallChat` (system prompt + user
+  does a one-shot `ChatAIProvider.CallChat` (system prompt + user
   utterance → response text). Tomorrow it runs the same streaming
   tool loop the cognition `ForwardTurn` path uses, intercepting
   `respondToUser` for the envelope. Mirror
@@ -305,7 +305,7 @@ own focused work after Phases 0-5 landed:
    incremented from 45 to 46.
 6. **Phase 5** (shipped): GA agent count 0 → 1 in
    `TestUnifiedLoadersCoverNewTree`. `dispatch()` now calls
-   `ChatSIProvider.CallChat` against the resolved provider when one
+   `ChatAIProvider.CallChat` against the resolved provider when one
    is available, falls back to the deterministic stub when the
    provider registry is nil (tests stay fast + offline).
 7. **Phase 6**: deferred. See "Phase 6 — Tighten capabilities.tools[]"

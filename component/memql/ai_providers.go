@@ -998,7 +998,7 @@ func newOpenAIPlaceholderProvider(cfg ProviderConfig, capability string) (AIProv
 func (p *openAIPlaceholderProvider) Call(_ context.Context, _ string) (any, error) {
 	return nil, fmt.Errorf(
 		"provider %q (%s / model=%s) is declared but the Go client is not wired yet; "+
-			"add a dispatch case in component/memql/si_providers.go:newAIProvider",
+			"add a dispatch case in component/memql/ai_providers.go:newAIProvider",
 		p.name, p.capability, p.model,
 	)
 }

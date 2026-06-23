@@ -263,7 +263,7 @@ The MemQL parser (`component/language/parser/parser.go`) is strict: unknown rece
 
 ### 7.3 Prompt templates — low risk
 
-`component/memql/si_prompts.go` uses Go's `text/template` with an empty `FuncMap` — no custom functions, no dangerous primitives like `call`/`env`. Templates themselves are operator-controlled (in `dsl/**/prompts/`); user data is passed as values, not template syntax. A malicious `.tmpl` loaded via `MEMQL_DSL_PATH` could exfiltrate fields from the data object, but `MEMQL_DSL_PATH` is operator-controlled (see §7.2).
+`component/memql/ai_prompts.go` uses Go's `text/template` with an empty `FuncMap` — no custom functions, no dangerous primitives like `call`/`env`. Templates themselves are operator-controlled (in `dsl/**/prompts/`); user data is passed as values, not template syntax. A malicious `.tmpl` loaded via `MEMQL_DSL_PATH` could exfiltrate fields from the data object, but `MEMQL_DSL_PATH` is operator-controlled (see §7.2).
 
 The **BFF-side** prompt templates have their own injection surface (LLM data flowing into user-facing prompts); that's handled in `memql-bff-copresent` #15 and the `[[BEGIN UNTRUSTED * ]]` framing.
 
@@ -277,7 +277,7 @@ Templ auto-escapes `{ field }` interpolations. `templ.Raw(...)` is only used for
 
 ### 7.6 Tool-call argument validation — deferred (architectural)
 
-`component/memql/si_tool_loop.go:149-158` looks up the tool by name and rejects unknown names, but **does not validate args against the tool's declared schema** before invoking the handler. Each tool handler is expected to validate its own args.
+`component/memql/ai_tool_loop.go:149-158` looks up the tool by name and rejects unknown names, but **does not validate args against the tool's declared schema** before invoking the handler. Each tool handler is expected to validate its own args.
 
 This is by design — every tool defines its own contract — but it leaves a class of bug where a handler that forgets to check a sensitive arg (e.g. `forUserId` or `actor.userId`) can be exploited via LLM-supplied values.
 

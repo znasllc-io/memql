@@ -320,7 +320,7 @@ executor_filter.go    -- compile* + buildJSON* + sqlOperator*
 executor_query.go     -- evaluateExpression*
 executor_mutation.go  -- evaluateShape* + mutation eval
 executor_builtin.go   -- initBuiltinExecutorHandlers + dispatch
-executor_si.go        -- AI invocation paths
+executor_ai.go        -- AI invocation paths
 executor.go           -- shared helpers + receiver definitions
 ```
 
@@ -335,22 +335,22 @@ review surface tractable. **Estimated post-split: 6 files of
 - Registry accessors (Shapes, Specs, Providers, etc. -- thin
   getters)
 - Execute() + plan resolution + cache
-- AI integration entry points (`InvokeSI`,
-  `InvokeSIChatWithTools`)
+- AI integration entry points (`InvokeAI`,
+  `InvokeAIChatWithTools`)
 - Variable + secret resolution
 
 The Execute() path stays in engine.go. The other concerns split out:
 ```
 engine_bootstrap.go     -- New + LoadXXX wiring
 engine_accessors.go     -- thin Shapes()/Specs()/Providers() etc.
-engine_si.go            -- InvokeSI + InvokeSIChatWithTools
+engine_ai.go            -- InvokeAI + InvokeAIChatWithTools
 engine_variables.go     -- variable + secret resolution
 engine.go               -- Execute + plan cache + lifecycle
 ```
 
 #### 2.3 `ProviderRegistry` by-modality accessor consolidation
 
-**File:** [si_providers.go:319-700](component/memql/si_providers.go).
+**File:** [ai_providers.go:319-700](component/memql/ai_providers.go).
 
 The registry has 8 modality-specific accessors:
 `TTSProvider`, `TTSProviderByName`, `ChatProvider`,

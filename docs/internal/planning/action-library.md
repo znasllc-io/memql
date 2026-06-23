@@ -29,7 +29,7 @@ memory consolidation #586, planner #587).
 
 Today the harness spends LLM reasoning on *every* step of *every* plan. The
 planner (#587) decomposes a goal into a step DAG; a specialist executes each
-step by running `engine.InvokeSIChatWithFilteredToolsOpts` — a bounded
+step by running `engine.InvokeAIChatWithFilteredToolsOpts` — a bounded
 tool-calling loop where the model decides **which** tool calls to make with
 **which** arguments. The concrete sequence the model produces is then thrown
 away (kept only as `v1:harness:observation` embeddings for semantic recall).
@@ -70,7 +70,7 @@ build.
 | --- | --- | --- |
 | Plan / step DAG, lifecycle state machine | `v1:harness:plan`, `v1:harness:step` (with `idempotencyKey`, `result`, `attempt`) | `dsl/harness/concepts.memql`, `component/memql/harness_step_validation.go` |
 | Recording "what happened" | `v1:harness:observation` already captures `tool_result {toolName, args, result}` | `dsl/harness/concepts.memql`, `component/harness/reconciler.go` |
-| LLM step execution (the cost) | `Dispatcher` → `InvokeSIChatWithFilteredToolsOpts` | `component/harness/reconciler.go`, `component/memql/si_tool_loop.go` |
+| LLM step execution (the cost) | `Dispatcher` → `InvokeAIChatWithFilteredToolsOpts` | `component/harness/reconciler.go`, `component/memql/ai_tool_loop.go` |
 | Similarity-based reuse vs create | Planner agent route/upgrade/provision via cosine `fitScore` in pgvector; thresholds Route `0.82`, Upgrade `0.60`, Dedup `0.90` | `component/harness/planner.go`, `planner_logic.go`, `planner_adapters.go` |
 | Confidence that grows on reinforcement, decays unused | `v1:harness:semanticMemory` (`confidence`, `reinforceCount`, `lastReinforced`, decay/prune) | `dsl/harness/concepts.memql`, consolidation #586 |
 | Deterministic step executors (no LLM) | automation step types: `query`, `mutation`, `function`, `forEach`, `parallel`, `switch`, `automation`, `webhook` | `component/automations/`, `component/automations/steps/` |
@@ -282,7 +282,7 @@ the `StepExecutorRegistry`:
    downstream consumed was read-for-reasoning; it is dropped on replay.
 6. **Verify** the result fingerprint (§11). Match → reinforce `reliability`.
 7. **Escalate on failure** → hand control back to the LLM dispatcher
-   (`InvokeSIChatWithFilteredToolsOpts`) with context: the action, its bound
+   (`InvokeAIChatWithFilteredToolsOpts`) with context: the action, its bound
    args, the resolved surface, and the error. The model then either:
    - **adjusts arguments** (cheap) — re-bind and retry; or
    - **mints a replacement / new action** (expensive) — re-enters the record
@@ -300,7 +300,7 @@ flowchart TD
   D --> E{Result fingerprint verifies?}
   E -- yes --> F[Reinforce reliability, step done]
   E -- no --> G[Decay reliability, escalate]
-  B -- no --> H[LLM Dispatcher: InvokeSIChat tool loop]
+  B -- no --> H[LLM Dispatcher: InvokeAIChat tool loop]
   G --> H
   H --> I[Trace capability calls + arg + resource provenance]
   I --> J[Mint/refine action -> library candidate]
@@ -490,7 +490,7 @@ Sequenced so each phase ships standalone value and de-risks the next.
 ### Phase 0 — Trace capture (foundation)
 Persist the structured, ordered capability sequence + **value and resource**
 provenance per step as a first-class **candidate** record. No replay yet.
-*Touches:* `component/harness/reconciler.go`, `si_tool_loop.go` (the data-flow +
+*Touches:* `component/harness/reconciler.go`, `ai_tool_loop.go` (the data-flow +
 resource tracer), new `dsl/actions/` candidate concept.
 *Exit:* every LLM step emits a verifiable trace with arg + resource provenance.
 

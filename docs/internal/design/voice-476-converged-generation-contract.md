@@ -175,7 +175,7 @@ The realtime executor was built behind the SAME gRPC seam as the cascade and
   paraphrasing TTS.
 - The voice-agent handler comment seals it: "the cascade routes assistant
   replies through VoiceAgentTurnRequest -- cognition runs the agent loop and
-  inserts the AI utterance itself (insertSIResponse)"
+  inserts the AI utterance itself (insertAIResponse)"
   (`component/grpc/voice_agent_handlers.go:928-930`).
 
 So **cognition is the author for voice and text alike, today.** The model does
@@ -537,7 +537,7 @@ Under the contract, cognition's responsibilities split cleanly into "stays" and
   (#475, #482). Voice captures the model's final transcript via
   `RealtimeOutputForwarder` (`integrations/voice/agent/realtime_output.go`)
   into a `v1:cognition:utterance` byte-identical to a text reply; text captures
-  via `insertSIResponse` (`integrations/cognition/si_responder.go`,
+  via `insertAIResponse` (`integrations/cognition/ai_responder.go`,
   referenced `voice_agent_handlers.go:929-930`). Both land the same row shape.
 
 ### 5.2 What MOVES to the model (authorship)
@@ -662,7 +662,7 @@ tree (`instructions_test.go`, `grounding_test.go`, `persona_test.go`,
 #482's "utterance single-source-of-truth" is the runtime guarantee that what is
 *shown* equals what was *authored*. Both capture paths land the same
 `v1:cognition:utterance` shape (`realtime_output.go` for voice,
-`insertSIResponse` for text). A test asserts that a voice turn and a text turn
+`insertAIResponse` for text). A test asserts that a voice turn and a text turn
 for the same agent produce utterance rows whose `source` map records the SAME
 `agentId` and a resolved provider/model, so audit can prove which brain wrote
 each turn and that both read the same definition. The verbatim transcript is the

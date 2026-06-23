@@ -212,7 +212,7 @@ func coerceArgsToSchema(schemaJSON []byte, args map[string]any) {
 // compileToolSchema resolves (compile-once + cache) the JSON Schema
 // for a tool's @input block. Returns nil schema when the tool has
 // no InputSchema declared. Identical pattern to the prompt schema
-// compile in si_prompts.go, just keyed by tool name instead of
+// compile in ai_prompts.go, just keyed by tool name instead of
 // prompt name.
 func compileToolSchema(tool *Tool) (*jsonschema.Schema, error) {
 	if tool == nil || len(tool.InputSchema) == 0 {
@@ -304,7 +304,7 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 	// (ownerUserId / spaceId / agentId / ...). For @autoInjected fields the
 	// server default ALWAYS wins (forged LLM values dropped); other defaults
 	// are fill-if-missing. Idempotent for callers that already pre-merged
-	// (si_tool_loop.go), so it is safe defense-in-depth there too.
+	// (ai_tool_loop.go), so it is safe defense-in-depth there too.
 	args = applyToolDefaults(ctx, tool, args, common.ToolDefaultsFromContext(ctx))
 
 	// Universal agent-only enforcement. Without an acting-agent role

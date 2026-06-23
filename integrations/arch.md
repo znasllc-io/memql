@@ -72,7 +72,7 @@ type IntegrationProvider interface {
 
 Integrations receive `IntegrationEngineAccess` (a narrow interface)
 rather than the full `MemQLEngine` -- it deliberately excludes
-`InvokeSI` / `InvokeSIChatWithTools` so AI orchestration stays in MemQL
+`InvokeAI` / `InvokeAIChatWithTools` so AI orchestration stays in MemQL
 DSL functions or routed via the `si()` builtin. The `RegisterPlugin`
 surface enforces the same separation by the shape of `PluginContext`.
 
@@ -91,7 +91,7 @@ handler by FQN, executes it, and returns via `ReplyTo`.
   (primary / sequence / chime-ins / instructions). The standalone
   router LLM call only fires for voice utterances (latency-sensitive).
   Fast-path mention dispatch bypasses both. Files:
-  `cognition_handler.go`, `conductor_consult.go`, `si_router.go`.
+  `cognition_handler.go`, `conductor_consult.go`, `ai_router.go`.
 - **Capability-aware routing** -- the rendered agent block in both
   the conductor and the voice-path router includes a `Tools:` line
   with the agent's declared capability tools. Tool-fit mismatch drops
@@ -185,7 +185,7 @@ Self-registering plug-in. Capability:
 | `auth` | `resolveUser`, `checkPermission` |
 | `database` | `healthCheck`, `stats` |
 | `embedding` | text embedding (vendor-agnostic over `EmbeddingProviderByName`) |
-| `fileprocessor` | `extractText` (PDF, DOCX, images via VisionSIProvider, plain text) |
+| `fileprocessor` | `extractText` (PDF, DOCX, images via VisionAIProvider, plain text) |
 | `gcs` | `storage.upload` |
 | `identity` | identity-side helpers (resolve etc.) |
 | `knowledge` | corpus seed + lookup helpers |

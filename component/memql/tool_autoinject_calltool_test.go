@@ -14,7 +14,7 @@ import (
 // for memql#1503: the realtime-voice CallTool proxy hop dispatches straight
 // through engine.ExecuteTool (component/grpc handleCallTool -> executeTool ->
 // ExecuteTool) and does NOT pre-merge tool defaults the way the streaming tool
-// loop (si_tool_loop.go) does. produceArtifact's `@autoInjected` ownerUserId is
+// loop (ai_tool_loop.go) does. produceArtifact's `@autoInjected` ownerUserId is
 // therefore never stamped, and the central builtin validator rejects with
 // "requires 'ownerUserId' field in argument".
 //

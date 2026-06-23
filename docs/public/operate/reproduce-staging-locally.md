@@ -21,7 +21,7 @@ memql#1260 (adopt as first-class + close/justify divergences).
 > carry another node's session state; cross-node events need a routing
 > rule). Implement AND test for the hop: a green single-node unit test
 > is a false signal -- exercise the proxied/cross-node path
-> (`test/clustere2e/`, `component/grpc/si_forward_test.go`) and verify
+> (`test/clustere2e/`, `component/grpc/ai_forward_test.go`) and verify
 > on this cluster. See the "Multi-node is the DEFAULT" rule in the
 > root `CLAUDE.md`. (Bugs this would have caught: memql#1448, #1412,
 > #1388.)

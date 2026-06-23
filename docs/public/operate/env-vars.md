@@ -152,7 +152,7 @@ display. See `component/secret/encryption.go`.
 
 When a `.memql` provider file references a placeholder like
 `env("MEMQL_SI_OPENAI_API_KEY")`, the resolver in
-`component/memql/si_providers.go` (`resolveAuthPlaceholders`) walks:
+`component/memql/ai_providers.go` (`resolveAuthPlaceholders`) walks:
 
 1. `v1:platform:globalSecret`     -- `systemSecretResolver`
 2. `v1:platform:globalVariable`   -- `systemVariableResolver`
@@ -639,7 +639,7 @@ automatically.
 | `scripts/dev/cluster-refresh.sh`                                              | The wipe -> restart -> reseed orchestrator behind `make dev-cluster-refresh`.  |
 | `dsl/platform/concepts.memql`                                                 | Schemas for global + partition-scoped secrets and variables.                   |
 | `component/secret/encryption.go`                                              | NaCl secretbox + `MEMQL_MASTER_KEY` resolution.                                |
-| `component/memql/si_providers.go` (`resolveAuthPlaceholders`)                 | Provider-auth resolver (the env() / placeholder chain).                        |
+| `component/memql/ai_providers.go` (`resolveAuthPlaceholders`)                 | Provider-auth resolver (the env() / placeholder chain).                        |
 | `component/memql/sense/builtins.go`                                           | DSL surface (`resolveSecret`, `resolveVariable`).                              |
 | `component/config/config.go`                                                  | One-stop list of bootstrap env-var reads.                                      |
 | `component/database/database.go`                                              | Database-tier env reads (DSN + tuning).                                        |

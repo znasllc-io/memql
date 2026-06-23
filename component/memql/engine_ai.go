@@ -143,7 +143,7 @@ func (e *MemQLEngine) InvokeAI(ctx context.Context, templateId string, data map[
 	// Honor a context-attached provider override (memql#838 model
 	// tiering): callers that want to escalate / downshift the model for
 	// THIS invocation wrap the ctx with WithProviderOverride(ctx, name).
-	// Mirrors the tool-loop paths (si_tool_loop.go) which already do
+	// Mirrors the tool-loop paths (ai_tool_loop.go) which already do
 	// this; without it, InvokeAI was the one AI entry point that ignored
 	// the override and always used the prompt's @defaultProvider.
 	if override := ProviderOverrideFromContext(ctx); override != "" {
