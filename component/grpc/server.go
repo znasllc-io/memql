@@ -816,6 +816,28 @@ type streamSession struct {
 	// to SEE (#1467) are also allowed to RUN, instead of being rejected against
 	// the voice-agent caller's empty role.
 	voiceAgentGaRole string
+
+	// authoredSession is the owner-scoped authored-construct registry for this
+	// stream (issue #2128 / C1). It is the session-scoped, non-durable layer the
+	// AuthoringSessionDefineBundle op registers into: constructs defined here are
+	// callable by name within the session, never shadow core, and are dropped
+	// when the stream ends (the registry is GC'd with the session). Lazily
+	// created on first session-define via authoredSessionRegistry().
+	authoredSessionMu sync.Mutex
+	authoredSession   *memqlengine.AuthoredRuntimeRegistry
+}
+
+// authoredSessionRegistry returns this stream's owner-scoped authored registry,
+// lazily creating it on first use. The registry lives for the lifetime of the
+// stream and is dropped when the session ends, so session-authored constructs
+// never persist or leak across streams (issue #2128 / C1).
+func (s *streamSession) authoredSessionRegistry() *memqlengine.AuthoredRuntimeRegistry {
+	s.authoredSessionMu.Lock()
+	defer s.authoredSessionMu.Unlock()
+	if s.authoredSession == nil {
+		s.authoredSession = memqlengine.NewAuthoredRuntimeRegistry()
+	}
+	return s.authoredSession
 }
 
 func newStreamSession(svc *service, stream memqlv1.MemqlService_StreamServer, identity auth.UserIdentity) *streamSession {
@@ -1129,6 +1151,11 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 		return s.handleSenseHover(envelope, payload.SenseHover)
 	case *memqlv1.MemqlClientMessage_SenseSignatureHelp:
 		return s.handleSenseSignatureHelp(envelope, payload.SenseSignatureHelp)
+
+	case *memqlv1.MemqlClientMessage_AuthoringValidateBundle:
+		return s.handleAuthoringValidateBundle(envelope, payload.AuthoringValidateBundle)
+	case *memqlv1.MemqlClientMessage_AuthoringSessionDefineBundle:
+		return s.handleAuthoringSessionDefineBundle(envelope, payload.AuthoringSessionDefineBundle)
 	// Polyphon -- multi-agent voice (Phase 3)
 	case *memqlv1.MemqlClientMessage_PolyphonRoomToken:
 		return s.handlePolyphonRoomToken(envelope, payload.PolyphonRoomToken)
