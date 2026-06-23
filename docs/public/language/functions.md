@@ -402,6 +402,60 @@ automation pruneStaleClusterNodes {
 }
 ```
 
+### Preconditions (self-healing)
+
+An automation may declare one or more first-class `precondition` blocks
+alongside its `step` blocks. A precondition is a **deterministic boolean
+check** (no LLM) evaluated at the start of the run — after the trigger
+fires and the input query (if any) loads, but **before any step executes**.
+
+```memql
+automation deployStaging {
+  precondition envIsStaging {
+    check: $config.MEMQL_ENV == "staging"
+    literal: MEMQL_ENV
+    description: "Only drive the staging deploy spine in staging."
+  }
+  precondition digestPinned {
+    check: exists(event.payload.imageDigest)
+    literal: imageDigest
+  }
+  step run {
+    logic driveDeploy { event: event }
+  }
+}
+```
+
+The `check` expression uses the same grammar as `Step.Condition` and
+trigger `@filter` (`$event.*`, `$config.*`, `$var.*`, `exists(...)`,
+comparisons, `&&` / `||` / `!`). Prefer `exists(event.payload.X)` over
+`X != ""` — the condition evaluator treats a present-but-empty value as
+"not exists", so `exists(...)` is the reliable presence check.
+
+A precondition that evaluates false is a **miss**:
+
+1. The run aborts cleanly — **no step fires**, the execution is recorded
+   as `skipped`.
+2. The harness emits a structured `healing.precondition.missed` event
+   (see [events](../concepts/events.md#self-healing-events)) carrying the
+   automation + precondition identity, the failed `check`, the asserted
+   `literal`, and the triggering event payload.
+
+A miss is **both** the clean self-healing repair trigger and the
+cross-machine portability mechanism: a literal asserted by a precondition
+that does not hold on this machine is, by definition, a precondition that
+misses here. Fields:
+
+| Field | Required | Purpose |
+|-------|----------|---------|
+| `check` | yes | The deterministic boolean expression that must hold |
+| `literal` | no | Names the machine-specific literal asserted (path / id / endpoint) — the portability hint the repair loop relativizes |
+| `description` | no | Human-readable context surfaced in the miss signal |
+
+Preconditions are evaluated in declaration order; the first miss wins and
+aborts the run. They are deterministic by design — they guard the
+authored/deterministic deploy spine but are never themselves LLM-healed.
+
 ### Attribute Reference
 
 | Attribute | Arguments | Description |
@@ -411,6 +465,7 @@ automation pruneStaleClusterNodes {
 | `@trigger` | `schedule="..."` | Six-field cron schedule |
 | `@filter` | `(<predicate>)` | Event-payload predicate gating the trigger, e.g. `@filter(payload.active==true)` |
 | `@description` | `"..."` | Human-readable description |
+| `precondition NAME { ... }` | `check:` (req), `literal:`, `description:` | First-class deterministic check; a miss aborts the run + emits `healing.precondition.missed` (Epic 4 self-healing) |
 
 ---
 

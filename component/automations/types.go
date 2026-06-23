@@ -70,6 +70,20 @@ type Automation struct {
 	// The result is available as $input in step expressions.
 	Input *AutomationInput `json:"input,omitempty"`
 
+	// Preconditions are first-class deterministic checks (Epic 4 /
+	// memql#2139) evaluated -- in order -- at the START of the run, after
+	// the trigger fires and the input query (if any) loads, but BEFORE any
+	// step executes. Each precondition is a boolean expression over the
+	// same deterministic evaluator that powers Step.Condition + trigger
+	// filters (no LLM). A precondition that evaluates false is a MISS: it
+	// aborts the run cleanly (no steps fire) and emits the structured
+	// healing.precondition.missed signal the self-healing repair loop
+	// (E4.4) subscribes to. A miss is BOTH the clean repair trigger and
+	// the cross-machine portability mechanism -- a literal asserted by a
+	// precondition that does not hold on this machine is a precondition
+	// that misses here.
+	Preconditions []*Precondition `json:"preconditions,omitempty"`
+
 	// Steps are the ordered list of operations to execute.
 	Steps []*Step `json:"steps"`
 
@@ -172,6 +186,43 @@ func (a *Automation) DefinitionFingerprint(engine *id.Engine) string {
 	def["steps"] = stepDefs
 
 	return string(engine.MustFromMap(def))
+}
+
+// Precondition is a first-class deterministic check attached to an
+// automation (Epic 4 / memql#2139). It is the unit of self-healing
+// portability: a precondition asserts that some condition holds before
+// the automation's steps run, and a miss is the clean repair trigger.
+//
+// A precondition is intentionally minimal and DETERMINISTIC -- it never
+// calls an LLM. The harness evaluates Check via the same boolean
+// evaluator that powers Step.Condition + trigger filters, so the full
+// expression grammar ($event.*, $input.*, $config.*, $var.*, comparisons,
+// &&/||/!) is available. The deploy spine stays authored/deterministic:
+// preconditions guard it but are never themselves LLM-healed.
+type Precondition struct {
+	// ID is a stable identifier for this precondition within its
+	// automation (e.g. "engineImageDigestPinned"). It keys the miss
+	// signal so the repair loop (E4.4) and the typed-patch model (E4.3)
+	// can target the exact construct to heal. Required.
+	ID string `json:"id"`
+
+	// Check is the deterministic boolean expression that must hold for
+	// the automation to proceed. Evaluated false => the precondition
+	// MISSES. Required. Example: "$config.MEMQL_ENV == \"staging\"" or
+	// "$event.payload.imageDigest != \"\"".
+	Check string `json:"check"`
+
+	// Literal optionally names the machine-specific literal this
+	// precondition asserts (a path, an id, an endpoint). It is the
+	// portability hint the repair loop reads when proposing a
+	// relativize-literal / rebind-param patch (E4.3): the literal that
+	// does not hold here is what must be relativized to travel. Optional;
+	// when empty the repair loop infers the literal from Check.
+	Literal string `json:"literal,omitempty"`
+
+	// Description is human-readable context surfaced in the miss signal
+	// and in the cockpit healed-pack UI (E4.6). Optional.
+	Description string `json:"description,omitempty"`
 }
 
 // AutomationInput defines the initial data source for an automation.

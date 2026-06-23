@@ -397,6 +397,30 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 		evaluator.SetInput(inputResult)
 	}
 
+	// First-class precondition gate (Epic 4 / memql#2139). Evaluate every
+	// precondition deterministically (no LLM) BEFORE any step runs. A miss
+	// aborts the run cleanly -- no steps fire -- and emits the structured
+	// healing.precondition.missed signal the self-healing repair loop
+	// (E4.4) subscribes to. A miss is BOTH the clean repair trigger and the
+	// cross-machine portability signal: a literal asserted here that does
+	// not hold on this machine is a precondition that misses here.
+	if missed, isMiss := EvaluatePreconditions(automation.Preconditions, evaluator); isMiss {
+		e.emitPreconditionMiss(automation, exec, triggeringEvent, missed)
+		exec.Status = "skipped"
+		exec.Error = fmt.Sprintf("precondition %q missed", missed.ID)
+		exec.CompletedAt = time.Now()
+		exec.Duration = exec.CompletedAt.Sub(exec.StartedAt)
+		if e.logger != nil {
+			e.logger.Info("automation precondition missed -- run aborted (self-healing repair trigger emitted)",
+				"component", ComponentName,
+				"automation", automation.Name,
+				"precondition", missed.ID,
+				"check", missed.Check,
+			)
+		}
+		return exec, nil
+	}
+
 	// Chain tracking initialization (when enabled)
 	var chainHead string
 	if e.chainTrackingEnabled {
@@ -912,6 +936,41 @@ func (e *Executor) publishEvent(topic string, kind events.Kind, payload map[stri
 	}
 	event := events.NewEvent(topic, kind, payload)
 	e.eventBus.Publish(event)
+}
+
+// emitPreconditionMiss publishes the structured self-healing repair-
+// trigger signal (Epic 4 / memql#2139) when a first-class precondition
+// misses. It rides the dedicated healing.precondition.missed topic (NOT
+// automation.#, which the mesh blocks) so the repair loop (E4.4) hears it
+// even on a different replica -- a healing.# forward routing rule
+// (component/node/routing.go) carries it across the mesh.
+//
+// The payload carries everything the repair loop + typed-patch model
+// (E4.3) need to propose a heal: the automation + precondition identity,
+// the deterministic check that failed, the asserted machine-specific
+// literal, and the triggering event payload (the concrete value that did
+// not satisfy the check on THIS machine).
+func (e *Executor) emitPreconditionMiss(automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event, missed *Precondition) {
+	if missed == nil {
+		return
+	}
+	payload := map[string]any{
+		"automationName":          automation.Name,
+		"automationOrigin":        automation.Origin,
+		"executionId":             exec.ID,
+		"preconditionId":          missed.ID,
+		"check":                   missed.Check,
+		"literal":                 missed.Literal,
+		"preconditionDescription": missed.Description,
+	}
+	if triggeringEvent != nil {
+		payload["triggerTopic"] = triggeringEvent.Topic
+		payload["triggerPayload"] = triggeringEvent.Payload
+		if triggeringEvent.Partition != "" {
+			payload["partition"] = triggeringEvent.Partition
+		}
+	}
+	e.publishEvent(events.TopicPreconditionMissed, events.KindPreconditionMissed, payload)
 }
 
 // navigatePath navigates a dot-separated path in a value.
