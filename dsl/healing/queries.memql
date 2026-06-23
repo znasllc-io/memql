@@ -1,0 +1,54 @@
+// healing domain -- caller-scoped reads of the two-tier base/overlay
+// store (E4.2 / memql#2140).
+//
+// Authz tier: owned. Every filter gates on
+// payload.ownerUserId==actor.userId so a caller can only ever read
+// their own healed overrides; no arg widens the row set beyond the
+// caller's ownership.
+//
+// THE RESOLUTION CONTRACT. resolveValidOverride is the read half of
+// "resolution prefers a valid overlay override, falls back to base": it
+// returns the newest VALID, active overlay override for a baseConstructId.
+// The Go two-tier resolver (component/healing/resolver.go) calls it and,
+// on an empty result, falls back to the embedded base construct. Splitting
+// the "prefer overlay" SQL read from the "fall back to base" Go step keeps
+// the base tier (the immutable embedded .memql) out of the data plane
+// entirely -- exactly the RBAC pattern where base roles are seeded, not
+// queried as a separate store.
+
+use healing.concepts.{ healedOverride }
+
+@enabled
+@description("Resolve the winning VALID overlay override for a base construct -- the read half of the two-tier resolution (E4.2 / memql#2140). Returns the caller's newest valid, active overlay override for the given baseConstructId (highest version first, newest createdAt on a tie). An empty result means no valid override exists and the Go resolver falls back to the embedded base. Owned: gated by ownerUserId==actor.userId, and tier=overlay + valid + active so a base-tier or unvalidated or retired row can never win resolution.")
+query healedOverride resolveValidOverride {
+  args {
+    baseConstructId  string  @required
+  }
+  filter  payload.baseConstructId==args.baseConstructId && payload.ownerUserId==actor.userId && payload.tier=="overlay" && payload.valid==true && isActiveRecord
+  sort     "version", "desc"
+  paginate 1
+  shape   healedOverrideFull
+}
+
+@enabled
+@description("List the caller's healed overrides for a base construct -- the full override history (every tier, valid + invalid, active + retired) for audit + the cockpit healed-pack view (E4.6). Owned: gated by ownerUserId==actor.userId. Newest version first.")
+query healedOverride overridesForConstruct {
+  args {
+    baseConstructId  string  @required
+  }
+  filter  payload.baseConstructId==args.baseConstructId && payload.ownerUserId==actor.userId
+  sort     "version", "desc"
+  paginate 50
+  shape   healedOverrideFull
+}
+
+@enabled
+@unbounded("healed override by id (guarded), gated to the owner -- bounded to a single row")
+@description("Fetch a single healed override by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's override even with its id. Used by the validation flow (E4.5) to confirm the row before capturing the next version.")
+query healedOverride overrideById {
+  args {
+    overrideId  string  @required
+  }
+  filter  when(args.overrideId) { id==args.overrideId } && payload.ownerUserId==actor.userId
+  shape   healedOverrideFull
+}

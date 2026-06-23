@@ -1,0 +1,19 @@
+// healing domain -- row projections.
+
+use healing.concepts.{ healedOverride }
+
+@row
+@description("Comprehensive healed-override projection: every payload field plus row id and timestamps. The default shape for resolution + list + create reads of the two-tier base/overlay store (E4.2 / memql#2140).")
+shape healedOverride healedOverrideFull {
+  row.id
+  payload.ownerUserId
+  payload.baseConstructId
+  payload.tier
+  payload.overrideData
+  payload.valid
+  payload.version
+  payload.active
+  payload.reason
+  payload.sourcePreconditionId
+  row.createdAt
+}

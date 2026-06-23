@@ -49,6 +49,12 @@ type writeMeta struct {
 	// already-predefined role even if the caller tries to flip the flag
 	// to false in the same delta (memql#2070).
 	priorPredefined bool
+	// priorBaseTier is the prior row's healing `tier`==base flag (false
+	// when absent), captured before the delta overwrites it so the
+	// self-healing base-tier immutability guard can reject a write that
+	// targets an already-base-tier override even if the caller tries to
+	// flip tier to overlay in the same delta (memql#2140).
+	priorBaseTier bool
 }
 
 // executeUpdate runs the update() form: read the latest existing row by
@@ -385,6 +391,11 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			// immutability guard can reject an edit that targets an
 			// already-predefined role even if the delta flips the flag.
 			meta.priorPredefined = boolFromAny(priorPayload["predefined"])
+			// Capture the PRIOR healing tier before the delta overwrites
+			// it (memql#2140) so the self-healing base-tier immutability
+			// guard can reject an edit that targets an already-base-tier
+			// override even if the delta flips tier to overlay.
+			meta.priorBaseTier = isBaseTier(priorPayload["tier"])
 			mergePayloadFields(priorPayload, payload, mutation.MergeFields)
 			payload = priorPayload
 		}
@@ -541,6 +552,19 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		// existing ranks while bounding them by the creator's rank. See
 		// rbac_custom_role_rankbound.go.
 		if err := e.validateRbacCustomRoleRankBound(ctx, payload, meta.priorPredefined, actor); err != nil {
+			return nil, meta, err
+		}
+	}
+	// Self-healing base-tier immutability guard (memql#2140): a tier=base
+	// v1:healing:healedOverride is the authored/embedded deploy spine and may
+	// only be materialized by a system actor (the SeedMaterializer). Any
+	// non-system-actor write resolving to tier=base is rejected, so a healed
+	// override can never be forged as base to escape the override-is-data
+	// contract. The prior-row base-tier flag (captured in the read-merge
+	// above) gates the case where the delta tries to flip tier to overlay.
+	// See healing_base_immutable_validation.go.
+	if conceptMeta.Name == conceptHealingOverride {
+		if err := e.validateHealingBaseImmutable(ctx, payload, meta.priorBaseTier, actor); err != nil {
 			return nil, meta, err
 		}
 	}

@@ -1,0 +1,55 @@
+// healing domain -- the self-healing two-tier base/overlay store (Epic 4
+// #2077, E4.2 / memql#2140).
+//
+// THE TWO-TIER MODEL, in one paragraph. A construct that the self-healing
+// loop can repair (an automation, a precondition, a guard, a literal) has
+// TWO tiers of definition. The BASE tier is the immutable, authored,
+// embedded definition -- the .memql the engine ships and re-materializes on
+// every boot; it is the deploy spine's source of truth and is NEVER
+// LLM-healed. The OVERLAY tier is a healed OVERRIDE: a data row produced by
+// the repair loop (E4.4), human-validated (E4.5), that shadows its base
+// construct when -- and only when -- it is VALID. Resolution prefers the
+// most-recent VALID overlay override for a base construct and falls back to
+// the base otherwise. This mirrors the Epic 1 RBAC base/custom hybrid:
+// immutable `predefined` base roles authored in DSL + dynamic custom roles
+// added as data, resolved newest-wins (dsl/rbac/concepts.memql:role,
+// component/memql/rbac_role_immutable_validation.go).
+//
+// WHY a `tier` field, not just "base rows are embedded". The base tier IS
+// the embedded .memql construct -- there is normally no base-tier healing
+// ROW. But the immutability axis must still be representable + guarded so
+// that (a) a deploy-authored, never-heal override can be pinned as
+// tier=base data when a pack ships a canonical healed form, and (b) a
+// non-system actor can NEVER forge a tier=base row to bypass the override-
+// is-data contract. The validateHealingBaseImmutable Go guard
+// (component/memql/healing_base_immutable_validation.go) rejects any
+// non-system-actor write to a tier=base row, exactly as
+// validateRbacBaseRoleImmutable does for predefined roles.
+//
+// Per-row authz tier: owned. A healed override is owned by the user whose
+// construct was healed; every read gates on ownerUserId==actor.userId and
+// every write stamps ownerUserId from actor.userId server-side. The repair
+// loop + validation flow run as that user (or a system actor for embedded
+// base materialization). Multi-node consistent: overrides live in the
+// shared Postgres and any node resolves the same newest-valid override; a
+// graph write to the concept rides the cache.invalidate broadcast so a
+// cached resolution is dropped on every replica.
+
+use identity.concepts.{ user }
+
+@version("1.0.0")
+@namespace("healing")
+@description("A two-tier definition of a self-healable construct: the immutable BASE (authored/embedded, never LLM-healed -- the deploy spine's source of truth) and a healed OVERLAY override (data, produced by the repair loop, human-validated) that shadows its base when valid. Resolution prefers the most-recent VALID overlay override for a baseConstructId and falls back to the base. Mirrors the Epic 1 RBAC base/custom hybrid (immutable predefined base + dynamic custom data, newest-wins). The `tier` field is the immutability axis: a tier=base row is immutable at runtime (the validateHealingBaseImmutable Go guard rejects any non-system-actor write to it, so an override can never be forged as base to escape the override-is-data contract); a tier=overlay row is the healed data an actor may add. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write and every read gates on ownerUserId==actor.userId. Multi-node consistent via the shared Postgres + the cache.invalidate broadcast.")
+concept healedOverride {
+  ownerUserId      string  @required  @description("v1:identity:user.id that owns this override -- the user whose construct was healed. Stamped from actor.userId at create time and re-stamped on every update so ownership can never be reassigned by a caller. The load-bearing per-row authz key. For an embedded tier=base row materialized by the SeedMaterializer this is the system owner.")
+  baseConstructId  string  @required  @description("Stable id of the BASE construct this row defines or overrides -- the automation name, precondition id, guard id, or literal key the healing loop targets (e.g. 'deployStaging' or 'deployStaging.envIsStaging'). The resolution key: resolveConstruct(baseConstructId) prefers the newest VALID overlay override with this baseConstructId and falls back to the base. Mirrors how v1:rbac:capability.roleSlug + role.slug join a grant to its role by a stable string, not a node id.")
+  tier             enum("base", "overlay")  @required  @default("overlay")  @description("The immutability axis. base = the immutable, authored/embedded definition -- the deploy spine's source of truth, never LLM-healed; a tier=base row is materialized only by a system actor (the SeedMaterializer) and the validateHealingBaseImmutable Go guard rejects any non-system-actor write to it. overlay = a healed override produced by the repair loop (E4.4) + human-validated (E4.5); it is editable data an actor may add and is the default for any runtime write. Resolution prefers a VALID overlay over base.")
+  overrideData     object  @description("The healed construct body -- the typed-patch RESULT (E4.3): the construct definition (e.g. the rewritten automation / precondition / guard / literal) that this override resolves to. Empty for a placeholder/pending row. Named overrideData (not the reserved `payload` intrinsic). The two-tier resolver returns this verbatim when this override wins resolution.")
+  valid            bool    @default("false")  @description("Whether this override is a VALID, resolution-eligible definition. Only a valid override shadows its base -- the core of the two-tier contract: resolution prefers a VALID overlay override and otherwise falls back to base. A proposed-but-not-yet-validated override (E4.5 human validation pending) carries valid=false and is invisible to resolution, so an unvalidated heal can never silently take effect. Set true on human acceptance (E4.5).")
+  version          int     @default("1")  @description("Monotonic version of this override for a given baseConstructId -- each accepted heal captures a NEW version (E4.5 capture-as-version) rather than mutating the prior one, so the override history is an audit trail and a pin can resolve an exact version. Resolution prefers the highest-version VALID overlay; ties break on newest createdAt.")
+  active           bool    @default("true")  @description("Soft-deactivate flag. An inactive override is ignored at resolution time but kept for audit -- lets a healed override be retired (reverting resolution to base or an older valid override) without churning row history. Base rows are never deactivated (the immutability guard blocks it).")
+  reason           string  @description("Human-readable note explaining WHY this override exists -- the precondition-miss that triggered the heal, the patch kind applied, the validator's comment. Surfaced in the cockpit healed-pack view (E4.6) for auditability. Optional.")
+  sourcePreconditionId  string  @description("Optional back-pointer to the precondition (E4.1) whose miss triggered this heal -- the healing.precondition.missed signal's preconditionId. Empty for a manually-authored override. Lets the cockpit group healed overrides under the precondition-miss that produced them and lets the repair loop reconcile what it has already proposed for a given miss.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
