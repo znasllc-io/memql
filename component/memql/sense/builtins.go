@@ -14,12 +14,15 @@ var ReceiverTypes = []string{
 	"Query", "Mutation", "Automation", "Spec", "Tool", "Builtin", "Prompt", "Provider", "Shape",
 }
 
-// Keywords lists all MemQL keywords.
-var Keywords = []string{
-	"func", "for", "range", "if", "else", "switch", "case", "default",
-	"continue", "break", "return", "nil", "retry", "when", "as", "where",
-	"use", "concept", "in", "has", "not",
-}
+// Keywords lists the MemQL keywords the editor recognises, projected from the
+// DSL spec (component/language/dslspec) -- the author-facing construct keywords
+// plus the reserved control/clause/import words. Sourcing it from the spec
+// drops the stale entries the old literal carried (the retired `has` membership
+// operator; `func`, the internal rewriter target rather than an author word)
+// and picks up the struct-form constructs it omitted (logic / trait / policy /
+// seed). The lexer-driven highlighter in tokenize.go keys off parser token
+// types, not this list, so highlighting is unaffected.
+var Keywords = specKeywordNames()
 
 // BuiltinFunctions maps builtin function names to their signatures and documentation.
 var BuiltinFunctions = map[string]BuiltinDef{
@@ -287,7 +290,8 @@ var KeywordDocs = map[string]string{
 	"not":      "Negation: not in, not has",
 }
 
-// FieldTypes lists valid field types for concept definitions.
-var FieldTypes = []string{
-	"string", "int", "float", "bool", "datetime", "object", "array", "enum",
-}
+// FieldTypes lists the field types the editor offers in concept / args /
+// declarative bodies, projected from the DSL spec (deprecated spellings like
+// `array` are excluded so completion never suggests a form the authoring-rules
+// diagnostic immediately flags -- migrate to []T).
+var FieldTypes = specFieldTypeNames()
