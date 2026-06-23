@@ -1,11 +1,14 @@
-# Staging overlay -> 0.9.90: corrective re-cut of 0.9.89. 0.9.89 took staging
-# down because the new Epic 4 telephony plug-in was fatal-at-boot without a
-# Telnyx key (#2028); 0.9.90 (engine main 173f70a3) makes the plug-in load
-# inert until configured. All 9 engine+carrier+SPA digests rebuilt on the
-# GitHub BUILD SERVER (OIDC->ACR) at engineVersion 0.9.90 (SPA digest unchanged
-# -- deterministic rebuild). Digests from releases/0.9.90.yaml; livekit/sip/redis
-# pins + NODE_IP patch preserved (promote.sh clobbers the overlay, so digests
-# are updated in-place per the release runbook). Tracking: #2026, fixes #2028.
+# Staging overlay -> 0.10.0: FULL-STACK cut for Epic 6 (#2031) -- the DSL
+# grammar redesign (mutate verb, structural refs, dependency-tree validator,
+# trait/spec split, concept-SSoT, ~599-construct de-prefix), the CoPresent
+# decouple (spaceId->partitionId wire rename across 4 repos + SDK chain;
+# space + knowledge concepts moved to the pack), and the SI->AI cleanup.
+# All 9 engine+carrier+SPA images rebuilt on the GitHub BUILD SERVER
+# (OIDC->ACR) at engineVersion 0.10.0. Digests hand-applied in-place from
+# releases/0.10.0.yaml (not promote.sh, which clobbers the livekit/sip/redis
+# pins + NODE_IP patch). REQUIRES a staging DB reset: the partitionId wire
+# rename changes stored payload keys, so existing rows won't match the new
+# queries. Tracking: #2031, #2026 (release + DB reset).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -27,26 +30,26 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:cc2877503a180519ff83603ffbc857725045e40cd20a17a24acaf1369429a6ba
+    digest: sha256:e426a04b50fd2faa7b9a184de496e594f8bb457966d6bfb32d1ad5b50a00dd40
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:306d23fffb9b34e27e10ee1221bad8f063e0f6f687039b152478e9f4510d077d
+    digest: sha256:d626f13f01f445ac27f484cf26e8ab8c1d1e03cca8d57efafd0b410dec802838
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:03e3b3f55477887bcec00b449477c3a2d10baa3b94bd1a1f16261250f86772a6
+    digest: sha256:a1da24596ef4ce57c6a28e88ae589434d21b97208461d388459125ed2cae20ee
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:66cd03c33b5970c08db782d928e6449fe4d69643387b661ef86487f9e8c8e1cc
+    digest: sha256:a25cd97eecaf7ebb4c0b7b61d6d85930ec39a7ce5c97b42da6f8f9e45a4d21fe
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:58f9da8bee6520f03e5d23dc786d36e2d8e8ce24c0ca372d6c38496d79f3f424
+    digest: sha256:4c80685ebe77d6b31cde8bd033e12d937cf7cd7e6f1f25e36dbbf105bd1b23bf
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:e096c6cb2a8551f8ecbdf6767e138112d84c74a1d4fa35d4ffdf66ec698ba56e
+    digest: sha256:d3a719f77ae8325e7c989ea1064c6ac9ce8d25f3159fe844a945a2903a87827d
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:bda6b624fe43f1fc82c285731cc553f1077f4d97087595f820437b3f06c68a80
+    digest: sha256:b2ca9d635afd8aca7aeac8b85d838ec31d1e1e7c939f2990b808b1e42d46887f
   # memql-mcp (epic memql#1550): remote MCP node, engine-built on the GitHub
   # build server (#1581 wired it into build-engine-images + the release tooling).
   # 0.9.88: rebuilt from main 57c175a alongside the rest of the full-stack wave.
   - name: acrmemql.azurecr.io/memql-mcp
-    digest: sha256:ab01147dc3a7a693386a16f5d69398348f6467ef5e2dcc785867c56360dcb986
+    digest: sha256:87d011bec8f9b5086901d33d6579cceeae499acf806821bfaf28698b19d8e605
   - name: acrmemql.azurecr.io/copresent
-    digest: sha256:1c2f4c6aa54873d520a0de9985020d93469a9918c5b8c97422731171dea5ba75
+    digest: sha256:68c6c465472d15cb6cd55ecf2a68912adf51820ae995f3889d76d4f2573f9227
   - name: livekit/livekit-server
     newName: livekit/livekit-server
     digest: sha256:2c6869d2d5ff6c9c0166f47be1c92dad6928bfecfa5e4060a6ece48db8accfa3
