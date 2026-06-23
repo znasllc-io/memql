@@ -944,6 +944,13 @@ func (e *MemQLEngine) resolvePlanSpecs(plan *QueryPlan, inline map[string]*Spec)
 		}
 	}
 
+	// Role split (#2034 / C4): an authorization `spec` (IsTrait ==
+	// false) may not be referenced by bare name in a query filter --
+	// only a `trait` (data/state predicate) belongs in the filter slot.
+	if err := rejectAuthzSpecInFilter(plan.Root, e.specs); err != nil {
+		return err
+	}
+
 	var globalSpecs map[string]*Spec
 	if e.specs != nil {
 		globalSpecs = e.specs.Snapshot()

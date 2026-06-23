@@ -117,6 +117,10 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 		return nil, fmt.Errorf("%s: classify %s %q: %w", origin, kindLabel, decl.Name, classErr)
 	}
 
+	if err := validateSpecRole(decl.IsTrait, kind, decl.Name); err != nil {
+		return nil, fmt.Errorf("%s: %w", origin, err)
+	}
+
 	return &Spec{
 		Name:        decl.Name,
 		Description: description,
