@@ -89,8 +89,19 @@ func selectDriver(exec Executor, provider string) (deployDriver, error) {
 // promote.sh console env ("staging" | "prod"). development / unknown
 // envs map to "" -- they are not served by the azure driver.
 func consoleEnvFor(deploymentEnv string) string {
+	return ConsoleEnvFor(deploymentEnv)
+}
+
+// ConsoleEnvFor maps a deployment record's environment enum (or an
+// already-console env) onto the promote.sh console env ("staging" |
+// "prod"). development / unknown envs map to "" -- they are not served
+// by the azure driver. Exported (Epic 2 / #2096) so the deploy PACK's
+// runPromote effect normalizes the deployment.environment enum the same
+// way the Go driver does, keeping the env mapping in ONE place instead
+// of duplicating it in the DSL automation.
+func ConsoleEnvFor(deploymentEnv string) string {
 	switch deploymentEnv {
-	case "production":
+	case "production", "prod":
 		return "prod"
 	case "staging":
 		return "staging"

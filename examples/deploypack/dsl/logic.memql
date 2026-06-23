@@ -1,0 +1,46 @@
+// logic.memql -- the deploy pack (examples/deploypack), Epic 2 / #2096 (E2.3).
+//
+// Imperative body for the deploy-lifecycle automation. Mirrors deploy.go's
+// Deploy(): read the deployment's new state off the CDC event, and for the
+// azure provider in the in_progress state, fire the promote effect and
+// transition the record to its terminal status (succeeded | failed).
+//
+// Env mapping (production -> prod) is done inside the deployRunPromote Go
+// handler via deploycontrol.ConsoleEnvFor -- the SAME mapping the Go driver
+// uses -- so this logic passes the deployment.environment enum straight
+// through and the mapping lives in exactly one place.
+//
+// Outcome handling without `else` (the DSL if-expression has no else branch):
+// deployRunPromote returns success in-band (it does NOT error on a promote
+// failure, only on misconfiguration), so two guarded transitions cover the
+// branch -- one fires when success==true, the other when success!=true --
+// exactly deploy.go's runErr -> transitionStatusForErr(succeeded|failed).
+
+use deploypack.builtins.{ deployRunPromote }
+use cluster.mutations.{ updateDeploymentStatus }
+
+@description("On every v1:cluster:deployment update: when the new status is in_progress AND the provider is azure (or empty -> azure default) AND a version + deploymentId are present, fire deployRunPromote (passing the environment enum; the handler maps it to the promote.sh env) and transition the deployment to succeeded when the promote reports success or failed otherwise. Acts only on the in_progress edge; other status updates are ignored. The event-driven port of deploy.go's apply+transition. Epic 2 / #2096.")
+logic driveDeploymentInProgress {
+  args {
+    event object @required
+  }
+  body {
+    status := coalesce(args.event.node.payload.status, "")
+    provider := coalesce(args.event.node.payload.provider, "")
+    deploymentId := coalesce(args.event.node.payload.deploymentId, "")
+    version := coalesce(args.event.node.payload.version, "")
+    environment := coalesce(args.event.node.payload.environment, "")
+    isAzure := provider == "azure" || provider == ""
+
+    result := if status == "in_progress" && isAzure && version != "" && deploymentId != "" {
+      deployRunPromote({ version: version, env: environment })
+    }
+    succeeded := if !result.Empty() && result.First().payload.success == true {
+      updateDeploymentStatus({ deploymentId: deploymentId, status: "succeeded" })
+    }
+    failed := if !result.Empty() && result.First().payload.success != true {
+      updateDeploymentStatus({ deploymentId: deploymentId, status: "failed" })
+    }
+    return deploymentId
+  }
+}

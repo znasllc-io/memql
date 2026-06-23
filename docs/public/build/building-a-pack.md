@@ -327,8 +327,20 @@ examples/deploypack/
 ├── register_deploypack.go    Go: //go:build deploypack -> init() { Register(Domain) }
 ├── deploy_pack_test.go        test: capability exposure + per-effect routing (exported API)
 └── dsl/
-    └── builtins.memql         4 builtins -> @executor("integration.deploypack.{commitOverlay,argoSync,runPromote,recordBack}")
+    ├── builtins.memql         4 builtins -> @executor("integration.deploypack.{commitOverlay,argoSync,runPromote,recordBack}")
+    ├── automations.memql      the deploy-lifecycle automation (CDC on v1:cluster:deployment status)
+    └── logic.memql            driveDeploymentInProgress -- fires the promote effect + transitions the record
 ```
+
+The pack also shows a pack **hooking a core CDC event**: `dsl/automations.memql`
+triggers on `graph.node.updated.v1:cluster:deployment` and `dsl/logic.memql`
+ports `component/deploycontrol/deploy.go`'s imperative apply+transition into a
+declarative chain -- when a deployment enters `in_progress`, fire `runPromote`
+(the live azure effect) and transition the record to `succeeded`/`failed` on the
+in-band outcome. The logic imports the pack's own effect
+(`use deploypack.builtins.{ deployRunPromote }`) AND a core mutation
+(`use cluster.mutations.{ updateDeploymentStatus }`) -- the standard
+cross-namespace `use` mechanism.
 
 The key difference from the reference pack: the deploy pack's `Provider` holds a
 **`deploycontrol.Executor`** (the SAME side-effect boundary the Deploy Console
