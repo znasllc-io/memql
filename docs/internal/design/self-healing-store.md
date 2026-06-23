@@ -121,3 +121,39 @@ id, then descends (`steps.run.input.path`). The patch model is pure data
 a stub model and this package applies + validates them deterministically.
 A patch's `Apply` output, stored as a `healedOverride` overrideData,
 resolves through the two-tier resolver and shadows base (tested end-to-end).
+
+## E4.4 — LLM repair loop
+
+`component/healing/repair_loop.go`. On a precondition-miss (E4.1), the loop
+asks an LLM to **propose** one or more typed patches (E4.3) that would heal
+the construct so the precondition holds.
+
+Flow (`RepairLoop.Propose(ctx, miss, base)`):
+
+1. **Deploy-spine refusal** — if the injected `DeploySpineGuard` says the
+   construct is authored/deterministic spine, return no proposal and **do
+   not even call the model**. The spine is never LLM-healed.
+2. **Remediation grounding (optional)** — an injected `RemediationFeeder`
+   (built on the actions substrate / `searchActions`) surfaces prior
+   remediations for similar misses as additional grounding. A feeder error
+   is non-fatal.
+3. **Structured-output call** — `common.ChatStructuredProvider.CallChatStructured`
+   with a JSON schema that constrains the model to the four patch kinds
+   (`{patches: [...]}` — a top-level object, as OpenAI json_schema mode
+   requires).
+4. **Never trust the model** — every returned patch is `Patch.Validate()`'d,
+   and (when `base != nil`) dry-run `Apply`'d; a patch that fails either is
+   **dropped**. A response of only bad patches yields an empty proposal set,
+   not an error. `maxPatches` caps the count.
+5. **No write side effect** — proposals are **returned for human validation
+   (E4.5)**, never applied.
+
+Testability: the loop depends only on a `common.ChatStructuredProvider` and
+the injected feeder/guard, so a **stub provider** returning canned
+typed-patch JSON drives the whole loop deterministically — no real model, no
+engine, no DB. `MissFromEventPayload` maps the `healing.precondition.missed`
+event payload (E4.1) into the `PreconditionMiss` the loop consumes.
+
+The repair loop **proposes**; it does not decide. The decision — which
+proposal becomes a live overlay override, gated by role and captured as a
+version — is E4.5.
