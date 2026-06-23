@@ -144,7 +144,26 @@ function normalize_imageref_list() {
 #=============================================================================
 
 # CI gate: every rendered image MUST be pinned by @sha256: digest.
+#
+# Exception: the `local` overlay (deploy/k8s/overlays/local) uses locally-built
+# images tagged `local` and imported via `k3d image import`. They are never
+# pushed to a registry and intentionally carry a mutable tag, not a digest.
+# The digest-pin gate is skipped for local so CI stays green (znasllc-io/memql#2064).
 function check_rendered() {
+    if [ "$ENV" = "local" ]; then
+        info "skipping digest-pin gate for the 'local' overlay (uses dev-built images with mutable tags, not @sha256 digests)"
+        # Still verify the overlay renders without errors.
+        if [ ! -f "$OVERLAY_DIR/kustomization.yaml" ]; then
+            fail "no overlay at $OVERLAY_DIR"; return 1
+        fi
+        local imgs
+        imgs="$(rendered_images)"
+        if [ -z "$imgs" ]; then
+            fail "local overlay rendered no container images (render failure?)"; return 1
+        fi
+        info "local overlay renders successfully ($(echo "$imgs" | wc -l | tr -d ' ') images)."
+        return 0
+    fi
     info "rendering $OVERLAY_DIR and asserting every image is digest-pinned..."
     if [ ! -f "$OVERLAY_DIR/kustomization.yaml" ]; then
         fail "no overlay at $OVERLAY_DIR"; return 1
