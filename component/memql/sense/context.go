@@ -20,6 +20,7 @@ const (
 	ContextReceiver                          // Inside func (...) receiver declaration
 	ContextUseDeclaration                    // After "use "
 	ContextConceptDef                        // Inside concept { ... }
+	ContextConstructConcept                  // After a concept-binding construct keyword (mutation/query/seed/shape <Concept>)
 )
 
 // CursorContext describes the syntactic context at a cursor position.
@@ -31,10 +32,22 @@ type CursorContext struct {
 	ReceiverType   string // if inside a func definition with a known receiver
 	AnnotationName string // if inside annotation args
 	ConceptName    string // if in field access, the relevant concept
+	ConstructKey   string // if after a concept-binding construct keyword, the keyword (mutation/query/seed/shape)
+	Source         string // full source text (so completers can scan file-scope imports)
 }
 
 // analyzeCursorContext determines the syntactic context at a cursor position.
 func analyzeCursorContext(source string, line, col int) CursorContext {
+	ctx := analyzeCursorContextInner(source, line, col)
+	// Thread the full source through so completers can scan file-scope `use`
+	// imports (the construct-concept import-suggestion path needs it).
+	ctx.Source = source
+	return ctx
+}
+
+// analyzeCursorContextInner does the actual context classification; the public
+// wrapper stamps Source on whatever it returns.
+func analyzeCursorContextInner(source string, line, col int) CursorContext {
 	// Get text up to cursor position.
 	textBefore := textBeforeCursor(source, line, col)
 	if textBefore == "" {
@@ -76,6 +89,11 @@ func analyzeCursorContext(source string, line, col int) CursorContext {
 
 	// 4. After concept==: concept filter
 	if ctx, ok := checkConceptFilterContext(tokens, prefix); ok {
+		return ctx
+	}
+
+	// 4.5 After a concept-binding construct keyword: mutation/query/seed/shape <Concept>
+	if ctx, ok := checkConstructConceptContext(tokens, prefix); ok {
 		return ctx
 	}
 
@@ -226,6 +244,62 @@ func checkConceptFilterContext(tokens []parser.Token, prefix string) (CursorCont
 			return CursorContext{Kind: ContextConceptFilter, Prefix: ""}, true
 		}
 	}
+	return CursorContext{}, false
+}
+
+// checkConstructConceptContext checks if the cursor sits where a concept-binding
+// construct's signature expects a concept: the tokens before the cursor are
+// `<constructKeyword> [partialIdent]` where constructKeyword is a dslspec
+// construct with ConceptInSignature==true (mutation/query/seed/shape). The
+// keyword set is derived from the spec so it cannot drift from the grammar.
+//
+// Author-facing construct keywords (mutation/query/seed/shape) lex as plain
+// identifiers -- only the retired capitalized receiver forms (Query/Mutation)
+// are keyword tokens -- so detection matches on the identifier literal against
+// the spec's concept-signature keyword set.
+func checkConstructConceptContext(tokens []parser.Token, prefix string) (CursorContext, bool) {
+	n := len(tokens)
+	if n == 0 {
+		return CursorContext{}, false
+	}
+
+	// This is a top-level signature position; bail if we're inside any
+	// unmatched brace / paren / bracket (a body, args block, or call args),
+	// where these keywords mean something else (or nothing).
+	depth := 0
+	for _, t := range tokens {
+		switch t.Type {
+		case parser.TokenBraceOpen, parser.TokenParenOpen, parser.TokenBracketOpen:
+			depth++
+		case parser.TokenBraceClose, parser.TokenParenClose, parser.TokenBracketClose:
+			depth--
+		}
+	}
+	if depth > 0 {
+		return CursorContext{}, false
+	}
+
+	conceptKeywords := specConceptSignatureKeywords()
+
+	// Case A: `<keyword> ` with an empty partial -- the last token is the
+	// construct keyword identifier and the cursor is just past it.
+	if prefix == "" {
+		last := tokens[n-1]
+		if last.Type == parser.TokenIdentifier && conceptKeywords[last.Literal] {
+			return CursorContext{Kind: ContextConstructConcept, Prefix: "", ConstructKey: last.Literal}, true
+		}
+		return CursorContext{}, false
+	}
+
+	// Case B: `<keyword> <partialIdent>` -- the last token is the partial
+	// concept name; the token before it is the construct keyword.
+	if n >= 2 && tokens[n-1].Type == parser.TokenIdentifier && tokens[n-1].Literal == prefix {
+		kwTok := tokens[n-2]
+		if kwTok.Type == parser.TokenIdentifier && conceptKeywords[kwTok.Literal] {
+			return CursorContext{Kind: ContextConstructConcept, Prefix: prefix, ConstructKey: kwTok.Literal}, true
+		}
+	}
+
 	return CursorContext{}, false
 }
 

@@ -45,6 +45,53 @@ func specConstructItems(prefix string) []CompletionItem {
 	return items
 }
 
+// specConceptSignatureKeywords returns the set of construct keywords whose
+// signature binds a concept right after the keyword (`mutation <Concept>
+// <name>`, `query ...`, `seed ...`, `shape ...`). Derived from the spec's
+// ConceptInSignature flag so it can never drift from the grammar -- the #2124
+// drift test pins the spec to the parser/rewriter. Used by context.go to
+// detect "cursor sits where a concept is expected" and by complete.go to
+// suggest concepts (+ imports) there.
+func specConceptSignatureKeywords() map[string]bool {
+	out := make(map[string]bool)
+	for _, c := range dslSpec.Constructs {
+		if c.ConceptInSignature {
+			out[c.Keyword] = true
+		}
+	}
+	return out
+}
+
+// specNextRule returns the legal-next rule for a context label, or nil. Callers
+// read SuggestImportWhenMissing off it rather than hardcoding the behaviour.
+func specNextRule(context string) *dslspec.NextRule {
+	for i := range dslSpec.NextRules {
+		if dslSpec.NextRules[i].Context == context {
+			return &dslSpec.NextRules[i]
+		}
+	}
+	return nil
+}
+
+// specConstructConceptContextLabel maps a construct keyword to the legal-next
+// rule Context label the spec uses for "cursor after that keyword expecting a
+// concept" (afterMutationKeyword / afterQueryKeyword / afterSeedKeyword /
+// afterShapeKeyword). Returns "" for keywords with no such rule.
+func specConstructConceptContextLabel(keyword string) string {
+	switch keyword {
+	case "mutation":
+		return "afterMutationKeyword"
+	case "query":
+		return "afterQueryKeyword"
+	case "seed":
+		return "afterSeedKeyword"
+	case "shape":
+		return "afterShapeKeyword"
+	default:
+		return ""
+	}
+}
+
 // specFieldTypeNames returns the field-type names valid in a concept / args /
 // declarative body field, excluding deprecated spellings (e.g. `array`, which
 // the spec flags in favour of `[]T`) so completion never suggests a form the
