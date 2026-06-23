@@ -22,6 +22,8 @@ package deploypack_test
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -30,18 +32,26 @@ import (
 	deploypack "github.com/znasllc-io/memql/examples/deploypack"
 )
 
+// errBoom is a sentinel error a fake Executor returns to simulate a promote
+// failure the lifecycle automation must observe in-band.
+var errBoom = errors.New("boom")
+
 // fakeExecutor records the deploycontrol Executor calls a handler makes so a
 // test can assert the effect routed through the sanctioned boundary. Satisfies
 // deploycontrol.Executor.
 type fakeExecutor struct {
 	promoteVersion string
 	promoteEnv     string
+	promoteErr     error // when set, RunPromote returns it (simulates a promote failure)
 	gitCalls       [][]string
 }
 
 func (f *fakeExecutor) RunPromote(_ context.Context, version, env string) (string, error) {
 	f.promoteVersion = version
 	f.promoteEnv = env
+	if f.promoteErr != nil {
+		return "promote failed", f.promoteErr
+	}
 	return "promoted " + version + " to " + env, nil
 }
 func (f *fakeExecutor) RunRollback(_ context.Context, _, _ string) (string, error) { return "", nil }
@@ -105,6 +115,50 @@ func TestDeployPackRunPromoteUsesExecutor(t *testing.T) {
 	if exec.promoteVersion != "2026.6.21" || exec.promoteEnv != "staging" {
 		t.Fatalf("runPromote called RunPromote(version=%q, env=%q), want (2026.6.21, staging)",
 			exec.promoteVersion, exec.promoteEnv)
+	}
+}
+
+// TestDeployPackRunPromoteNormalizesEnv proves the runPromote effect maps the
+// deployment.environment enum to the promote.sh console env the same way the Go
+// driver does (production -> prod), so the E2.3 lifecycle automation can pass
+// the raw enum through. The env mapping lives in ONE place (ConsoleEnvFor).
+func TestDeployPackRunPromoteNormalizesEnv(t *testing.T) {
+	exec := &fakeExecutor{}
+	provider := deploypack.NewProviderWithDeps(exec, &fakeEngine{})
+
+	if _, err := callCapability(t, provider, "runPromote",
+		map[string]any{"version": "1.2.3", "env": "production"}); err != nil {
+		t.Fatalf("runPromote handler: %v", err)
+	}
+	if exec.promoteEnv != "prod" {
+		t.Fatalf("runPromote(env=production) -> RunPromote env=%q, want prod (ConsoleEnvFor mapping)", exec.promoteEnv)
+	}
+}
+
+// TestDeployPackRunPromoteReportsOutcomeInBand is the E2.3 (#2096) contract the
+// lifecycle automation relies on: a promote FAILURE is reported as success=false
+// in the result node (NOT a Go error), so the automation can branch to a failed
+// transition rather than aborting the step. A clean promote reports success=true.
+func TestDeployPackRunPromoteReportsOutcomeInBand(t *testing.T) {
+	// Clean promote -> success=true.
+	okProvider := deploypack.NewProviderWithDeps(&fakeExecutor{}, &fakeEngine{})
+	nodes, err := callCapability(t, okProvider, "runPromote", map[string]any{"version": "1.0.0", "env": "staging"})
+	if err != nil {
+		t.Fatalf("runPromote (clean) returned a Go error, want in-band success: %v", err)
+	}
+	if got := successOf(t, nodes); got != true {
+		t.Fatalf("clean promote success=%v, want true", got)
+	}
+
+	// Failed promote -> success=false, NO Go error (the lifecycle must see it).
+	failProvider := deploypack.NewProviderWithDeps(&fakeExecutor{promoteErr: errBoom}, &fakeEngine{})
+	nodes, err = callCapability(t, failProvider, "runPromote", map[string]any{"version": "1.0.0", "env": "staging"})
+	if err != nil {
+		t.Fatalf("runPromote (failed) MUST NOT return a Go error -- it would abort the "+
+			"lifecycle automation before the failed transition: %v", err)
+	}
+	if got := successOf(t, nodes); got != false {
+		t.Fatalf("failed promote success=%v, want false", got)
 	}
 }
 
@@ -195,4 +249,21 @@ func callCapability(t *testing.T, provider memqlengine.IntegrationProvider, name
 	}
 	t.Fatalf("capability %q not found", name)
 	return nil, nil
+}
+
+// successOf reads the `success` field off the single result node a deploy
+// effect returns -- the in-band outcome the E2.3 lifecycle automation branches
+// on (result.First().payload.success).
+func successOf(t *testing.T, nodes []memorynodes.MemoryNode) bool {
+	t.Helper()
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 result node, got %d", len(nodes))
+	}
+	var payload struct {
+		Success bool `json:"success"`
+	}
+	if err := json.Unmarshal(nodes[0].Payload, &payload); err != nil {
+		t.Fatalf("unmarshal result payload: %v", err)
+	}
+	return payload.Success
 }

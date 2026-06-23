@@ -137,13 +137,17 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 	}
 }
 
-// resultNode wraps a handler's effect output (combined script/command output or
-// a recorded-back marker) in a single object node so the engine dispatch path
-// has a uniform return shape.
-func resultNode(id, effect, output string) []memorynodes.MemoryNode {
+// resultNode wraps a handler's effect output in a single object node so the
+// engine dispatch path has a uniform return shape. The `success` field lets a
+// driving automation branch on the effect's outcome (e.g. promote succeeded ->
+// transition the deployment to succeeded, else failed) WITHOUT the handler
+// returning a Go error -- a Go error aborts the automation step, so a recoverable
+// effect failure that the lifecycle must react to is reported in-band instead.
+func resultNode(id, effect, output string, success bool) []memorynodes.MemoryNode {
 	payload, _ := json.Marshal(map[string]any{
 		"effect":      effect,
 		"output":      output,
+		"success":     success,
 		"recordedAt":  time.Now().UTC().Format(time.RFC3339),
 		"integration": integrationName,
 	})
@@ -183,7 +187,7 @@ func (p *Provider) commitOverlay(ctx context.Context, args map[string]any, _ int
 	if err != nil {
 		return nil, fmt.Errorf("deploypack.commitOverlay: git commit: %w (%s)", err, out)
 	}
-	return resultNode("deploypack-commit:"+env, "commitOverlay", out), nil
+	return resultNode("deploypack-commit:"+env, "commitOverlay", out, true), nil
 }
 
 // argoSync pushes the committed overlay so ArgoCD reconciles it. The pack never
@@ -200,25 +204,41 @@ func (p *Provider) argoSync(ctx context.Context, args map[string]any, _ int) ([]
 	if err != nil {
 		return nil, fmt.Errorf("deploypack.argoSync: git push: %w (%s)", err, out)
 	}
-	return resultNode("deploypack-sync:"+env, "argoSync", out), nil
+	return resultNode("deploypack-sync:"+env, "argoSync", out, true), nil
 }
 
 // runPromote runs the live azure deploy effect (promote.sh via the Argo
-// Rollout) through the SAME RunPromote the Deploy Console uses.
+// Rollout) through the SAME RunPromote the Deploy Console uses. The `env` arg
+// is normalized through deploycontrol.ConsoleEnvFor, so a caller may pass the
+// deployment.environment enum (production / staging) or the console env
+// (prod / staging) -- the SAME mapping the Go driver applies, kept in one place.
+//
+// A promote FAILURE is reported in-band (success=false in the result node), NOT
+// as a Go error: this effect drives a deployment LIFECYCLE automation (#2096),
+// and a Go error would abort the automation step before it could transition the
+// deployment to `failed`. A misconfiguration (missing version / unmapped env /
+// no Executor) is still a Go error -- that is a wiring fault, not a deploy
+// outcome the lifecycle reacts to.
 func (p *Provider) runPromote(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	version := argString(args, "version")
-	env := argString(args, "env")
-	if version == "" || env == "" {
-		return nil, fmt.Errorf("deploypack.runPromote requires version + env")
+	env := deploycontrol.ConsoleEnvFor(argString(args, "env"))
+	if version == "" {
+		return nil, fmt.Errorf("deploypack.runPromote requires version")
+	}
+	if env == "" {
+		return nil, fmt.Errorf("deploypack.runPromote: unsupported env (want staging|production|prod)")
 	}
 	if p.exec == nil {
 		return nil, fmt.Errorf("deploypack.runPromote: no Executor wired")
 	}
 	out, err := p.exec.RunPromote(ctx, version, env)
 	if err != nil {
-		return nil, fmt.Errorf("deploypack.runPromote: promote.sh: %w (%s)", err, out)
+		// In-band failure: the lifecycle automation reads success=false and
+		// transitions the deployment to failed. Carry the error in output.
+		return resultNode("deploypack-promote:"+env+":"+version, "runPromote",
+			fmt.Sprintf("%v: %s", err, out), false), nil
 	}
-	return resultNode("deploypack-promote:"+env+":"+version, "runPromote", out), nil
+	return resultNode("deploypack-promote:"+env+":"+version, "runPromote", out, true), nil
 }
 
 // recordBack appends the reconciled state into the deployment concept via the
@@ -267,7 +287,7 @@ func (p *Provider) recordBack(ctx context.Context, args map[string]any, _ int) (
 		effects = append(effects, "nodeSpec="+nodeType)
 	}
 
-	return resultNode("deploypack-recordback:"+deploymentID, "recordBack", strings.Join(effects, ",")), nil
+	return resultNode("deploypack-recordback:"+deploymentID, "recordBack", strings.Join(effects, ","), true), nil
 }
 
 // NewProvider builds the pack's IntegrationProvider from a PluginContext. The

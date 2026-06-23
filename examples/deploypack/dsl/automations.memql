@@ -1,0 +1,32 @@
+// automations.memql -- the deploy pack (examples/deploypack), Epic 2 / #2096 (E2.3).
+//
+// THE CORE PORT: the deploy lifecycle that component/deploycontrol/deploy.go +
+// driver.go drive imperatively (pending -> in_progress -> apply the azure
+// effect -> succeeded | failed) is modeled here as an event-driven DSL
+// automation, keyed off the deployment status transition the CDC path emits
+// (graph.node.updated.v1:cluster:deployment). The in_progress transition fires
+// the matching IntegrationProvider effect from E2.2 (#2095) and the outcome
+// drives the terminal status transition.
+//
+// SAFETY (live deploy path): this drives the SAME azure effect the Go
+// orchestrator drives -- deployRunPromote -> Executor.RunPromote ->
+// scripts/release/promote.sh via the Argo Rollout. No behavioral change vs
+// deploy.go for the azure provider: in_progress fires the promote and the
+// outcome transitions the record to succeeded (clean) or failed (promote
+// reported failure) -- exactly deploy.go's apply + transitionStatusForErr, now
+// declarative. The Go orchestrator is NOT removed here (that is E2.5); this
+// automation is ADDITIVE so the two paths can be compared before the cutover.
+//
+// This automation loads ONLY when the deploy pack is mounted (build-tag
+// `deploypack`), so it never fires in a default binary that lacks the pack.
+
+use deploypack.logic.{ driveDeploymentInProgress }
+
+@enabled
+@trigger(event="graph.node.updated.v1:cluster:deployment")
+@description("Event-driven port of deploy.go's apply+transition: when a v1:cluster:deployment enters in_progress for the azure provider, fire the deployRunPromote effect (the live azure deploy via promote.sh + Argo Rollout) and transition the record to succeeded on a clean promote or failed on a reported failure. Epic 2 / #2096.")
+automation driveDeploymentInProgress {
+  step run {
+    logic driveDeploymentInProgress { event: event }
+  }
+}
