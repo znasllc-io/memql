@@ -10,13 +10,17 @@
 ## Quick Start
 
 ```bash
-# Start the local development cluster (staging-parity, the blessed
-# local topology -- memql#1260). This is the ONLY supported local
-# run path; the single-node full.yml stack cannot reproduce the
-# mesh-delivery class of bugs (memql#1304).
-make dev-cluster-refresh   # decrypt genesis -> wipe -> rebuild -> seed
-# or, without the genesis/seed wipe:
-make dev-cluster-up        # boot the parity cluster in the background
+# --- k3d + ArgoCD (NEW primary local run path, E0 / #2061) ---
+# Prerequisites: docker, k3d, kubectl (brew install k3d kubectl)
+make k3d-up          # create cluster + install ArgoCD + seed secrets
+make k3d-dev         # inner-loop: rebuild images -> import -> restart pods
+make k3d-status      # mesh litmus (unique MEMQL_NODE_ID per pod)
+make k3d-down        # tear down
+
+# Multi-node mesh testing (2 replicas per Deployment -- staging parity):
+make k3d-up SERVERS=2 AGENTS=1
+make k3d-scale N=2
+make k3d-status   # verify unique MEMQL_NODE_IDs
 
 # Run tests
 go test ./...
@@ -138,42 +142,41 @@ memQL/
 
 ## Development Workflow
 
-### Development Environment (Docker)
+### Development Environment (k3d + ArgoCD)
 
-The staging-parity cluster is the ONLY supported local run path
-(memql#1304). The single-node `full.yml` stack structurally cannot
-reproduce the resilient-mesh class of bugs, so the `make dev*`
-single-node run/refresh targets were removed.
+The k3d + ArgoCD cluster is the local dev topology (memql#2061 /
+E0 -- Argo parity). It mirrors staging (AKS + ArgoCD + the k8s
+overlays in `deploy/k8s/`) so the same manifests and reconciliation
+path run locally and in staging. Multi-node is the default (#2067):
+use `make k3d-up SERVERS=2 + make k3d-scale N=2` for full cross-node
+mesh testing.
+
+**Prerequisites:** docker, k3d, kubectl (`brew install k3d kubectl`).
 
 ```bash
-# Start / refresh the local development cluster (staging parity).
-# decrypt genesis -> wipe -> rebuild -> seed:
-make dev-cluster-refresh
+# Bootstrap (creates cluster + installs ArgoCD + seeds secrets):
+make k3d-up                       # single-node default
+make k3d-up SERVERS=2 AGENTS=1   # multi-node (for cross-node mesh testing)
 
-# Boot the parity cluster in the background (no genesis wipe/seed):
-make dev-cluster-up
+# Inner-loop dev (after code change):
+make k3d-dev                      # rebuild + import + restart ALL app nodes
+make k3d-dev NODE=bff             # single node (faster)
+make k3d-dev PULL_INFRA=1        # refresh infra images (postgres/azurite/livekit)
 
-# Foreground (build + up):
-make dev-cluster
+# Multi-node scaling:
+make k3d-scale N=2                # 2 replicas per Deployment
+make k3d-status                   # litmus: verify unique MEMQL_NODE_ID per pod
 
-# Restart with fresh binaries (keep / wipe the DB):
-make dev-cluster-restart
-make dev-cluster-restart-purge
+# Secrets (re-seed if changed):
+make k3d-secrets
 
-# Stop (keeps volumes):
-make dev-cluster-down
-
-# View logs / parity litmus:
-make dev-cluster-logs
-make dev-cluster-status
+# Tear down:
+make k3d-down                     # keep kubeconfig
+make k3d-down PURGE=1             # also remove kubeconfig context
 ```
 
-The cluster uses `docker/docker-compose.cluster.yml`; the front door
-is the TLS `*.local.znas.io` subdomains (https://app.local.znas.io,
-https://identity.local.znas.io, https://bff.local.znas.io, ...) --
-memql#1313. See
-[docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md)
-for the full runbook + the documented divergences.
+See [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md)
+for the full k3d runbook and port-forward reference.
 
 ### Building
 ```bash
@@ -260,13 +263,15 @@ frontend coordination.
 
 | Task | Command | Description |
 |------|---------|-------------|
-| **Start development (refresh)** | `make dev-cluster-refresh` | The ONLY supported local run path: decrypt genesis -> wipe -> rebuild -> seed on the 2-replica staging-parity cluster (memql#1260 / #1304) |
-| **Start cluster (staging parity, blessed)** | `make dev-cluster-up` | 2-replica mesh matching staging; the default local topology (memql#1260). `make dev-cluster-down` to stop |
-| **Stop services** | `make dev-cluster-down` | Stop the cluster (keeps volumes) |
-| **View logs** | `make dev-cluster-logs` | Cluster logs |
+| **Bootstrap k3d cluster** | `make k3d-up` | Create cluster + install ArgoCD + seed secrets (memql#2061 / Epic 0) |
+| **Inner-loop rebuild** | `make k3d-dev [NODE=<type>]` | Build image -> k3d import -> kubectl rollout restart |
+| **Cluster litmus** | `make k3d-status` | Verify unique MEMQL_NODE_ID per pod (mesh parity check) |
+| **Multi-node scaling** | `make k3d-scale N=2` | 2 replicas per Deployment for cross-node mesh testing |
+| **Re-seed secrets** | `make k3d-secrets` | Idempotent; use after cluster recreate |
+| **Tear down cluster** | `make k3d-down` | Delete k3d cluster (PURGE=1 also removes kubeconfig) |
 | **Run tests** | `go test ./...` | Go tests |
 | **Build binary** | `go build -o bin/memql .` | Build BFF binary (default) |
-| **Connect DB** | `psql postgres://memql:memql_dev@localhost:5432/memql` | Database shell |
+| **Connect DB** | `psql postgres://memql:memql_dev@localhost:5432/memql` | Database shell (after `make k3d-up`) |
 
 ---
 
