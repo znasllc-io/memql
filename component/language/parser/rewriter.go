@@ -342,23 +342,53 @@ func RejectLegacyProceduralAuthorForm(source string) error {
 	return fmt.Errorf("legacy procedural form `func (%s) ...` is retired (memql#303) -- author every construct in struct form: `<kind> <Concept> <name> { args { ... } ... }`", m[1])
 }
 
+// structFormStep is one stage of the struct-form rewriter chain: a
+// keyword-named detector + applier pair.
+type structFormStep struct {
+	name   string
+	detect func(string) bool
+	apply  func(string) (string, error)
+}
+
+// structFormSteps is the authoritative ordered struct-form rewriter
+// chain. NormaliseAll iterates it, and StructFormKeywords is derived
+// from it, so the rewriter's recognised construct set has exactly one
+// definition. "file-top args" is intentionally present as a rewrite
+// stage but excluded from StructFormKeywords because it is not an
+// author-facing top-level construct keyword -- it is the bare
+// `args { ... }` block.
+var structFormSteps = []structFormStep{
+	{"query", LooksLikeStructQuery, NormaliseQuerySource},
+	{"mutation", LooksLikeStructMutation, NormaliseMutationSource},
+	{"logic", LooksLikeStructLogic, NormaliseLogicSource},
+	{"automation", LooksLikeStructAutomation, NormaliseAutomationSource},
+	{"file-top args", LooksLikeFileTopArgs, NormaliseFileTopArgs},
+}
+
+// StructFormKeywords is the set of author-facing construct keywords the
+// struct-form rewriter recognises and expands to the internal func
+// form, in declaration order: query / mutation / logic / automation.
+// It is the single source the #2124 drift test compares dslspec's
+// "function" category constructs against. Derived from structFormSteps
+// (excluding the non-construct "file-top args" stage) so the list
+// cannot drift from the actual rewriter chain.
+var StructFormKeywords = func() []string {
+	out := make([]string, 0, len(structFormSteps))
+	for _, s := range structFormSteps {
+		if s.name == "file-top args" {
+			continue
+		}
+		out = append(out, s.name)
+	}
+	return out
+}()
+
 // NormaliseAll runs every struct-form rewriter in sequence: query,
 // mutation, logic, automation, file-top args. Each stage is a no-op
 // when the source doesn't match its detector. Errors from any
 // stage are wrapped with the stage name and returned immediately.
 func NormaliseAll(source string) (string, error) {
-	steps := []struct {
-		name   string
-		detect func(string) bool
-		apply  func(string) (string, error)
-	}{
-		{"query", LooksLikeStructQuery, NormaliseQuerySource},
-		{"mutation", LooksLikeStructMutation, NormaliseMutationSource},
-		{"logic", LooksLikeStructLogic, NormaliseLogicSource},
-		{"automation", LooksLikeStructAutomation, NormaliseAutomationSource},
-		{"file-top args", LooksLikeFileTopArgs, NormaliseFileTopArgs},
-	}
-	for _, step := range steps {
+	for _, step := range structFormSteps {
 		if !step.detect(source) {
 			continue
 		}
