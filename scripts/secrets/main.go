@@ -19,10 +19,9 @@
 //	         entries into the running memQL as v1:platform:global*
 //	         rows. Entries in the .env that are NOT in the manifest
 //	         are ignored -- they're bootstrap-only env vars consumed
-//	         by docker-compose, not concept rows.
+//	         from the genesis envelope / k8s Secrets, not concept rows.
 //
 //	health   Quick gRPC handshake check against the running memQL.
-//	         Used by dev-refresh's wait_for_memql poll loop.
 //
 // All authoring previously done by `secrets init / set / delete /
 // edit / export / variable-set / variable-delete / list / master-key`

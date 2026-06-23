@@ -11,12 +11,12 @@
 #   livekit-secrets        -- LiveKit API key + secret for local livekit
 #   memql-local-db-creds   -- Postgres credentials for the in-cluster DB
 #
-# Called by `make k3d-secrets` and by `make k3d-up` on first boot.
+# Called by `make k3d-secrets` and by `make up` on first boot.
 # Safe to re-run: uses `kubectl apply` (idempotent, creates or updates).
 #
 # PREREQUISITES
 #   - kubectl context points at the k3d cluster (k3d-memql or equivalent).
-#   - The memql namespace already exists (created by ArgoCD / `make k3d-up`).
+#   - The memql namespace already exists (created by ArgoCD / `make up`).
 #   - ~/.memql/genesis.znas exists (the sealed genesis envelope) -- OR
 #     MEMQL_GENESIS_B64 is already in the environment.
 #   - MEMQL_MASTER_KEY is in the environment (or falls back to a dev default).
@@ -69,12 +69,12 @@ function check_prerequisites() {
         exit 1
     fi
     if ! kubectl cluster-info &> /dev/null; then
-        error "kubectl cannot reach the cluster. Run 'make k3d-up' first."
+        error "kubectl cannot reach the cluster. Run 'make up' first."
         exit 1
     fi
     # Ensure the namespace exists before creating secrets.
     if ! kubectl get namespace "$NAMESPACE" &> /dev/null; then
-        error "namespace $NAMESPACE does not exist. Run 'make k3d-up' first."
+        error "namespace $NAMESPACE does not exist. Run 'make up' first."
         exit 1
     fi
 }
@@ -247,7 +247,7 @@ function main() {
     seed_telephony_secrets
     echo ""
     info "All local secrets seeded. The k3d cluster can now start the memQL stack."
-    info "Next: 'make k3d-sync' to trigger ArgoCD reconciliation."
+    info "ArgoCD reconciles automatically; check: kubectl get app memql-local -n argocd -w"
 }
 
 main "$@"

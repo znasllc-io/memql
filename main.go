@@ -181,7 +181,7 @@ func mustCreateServiceLogger() *slog.Logger {
 // stdout = data (the bearer), stderr = diagnostics (slog JSON + the
 // "minted node=X type=Y" summary fmt.Fprintf already writes there).
 // The server boot path (main.go's serviceLogger) stays on stdout so
-// the docker compose log capture / Cloud Run log ingestion that
+// the container log capture (kubectl/ArgoCD, cloud log ingestion) that
 // already consume container stdout aren't affected.
 func mustCreateCLILogger() *slog.Logger {
 	return mustCreateLoggerWithWriter(os.Stderr)

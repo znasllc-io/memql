@@ -70,7 +70,7 @@ function check_prerequisites() {
         exit 1
     fi
     if ! kubectl get namespace "${NAMESPACE}" &>/dev/null; then
-        error "Namespace '${NAMESPACE}' not found. Run 'make k3d-up' first."
+        error "Namespace '${NAMESPACE}' not found. Run 'make up' first."
         exit 1
     fi
 }

@@ -71,8 +71,8 @@ func DiscoveryHandler(cfg Config, envLookup func(string) string) http.Handler {
 //     identity binary.
 //  2. Default: hostFromURL(identityURL) + a scheme-appropriate port.
 //     HTTPS deployments default to 443 (gRPC over TLS, single ALB
-//     entry point). HTTP localhost dev defaults to 50050 (the host
-//     port docker-compose maps to nginx -> bff:50051).
+//     entry point). HTTP localhost dev defaults to 50050 (the local
+//     bff gRPC dial port; the k3d cluster port-forwards bff:50051).
 //
 // Exported so the worker-pairing redeem handler can translate the
 // HTTP origin CoPresent passes (`window.location.origin`) into a

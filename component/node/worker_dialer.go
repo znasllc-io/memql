@@ -104,10 +104,10 @@ func ParseWorkerPeers(raw string) []WorkerTarget {
 // The dial set is reconciled from two sources:
 //
 //  1. Static seeds (from MEMQL_WORKER_PEERS). Used for deterministic
-//     first-boot when the DB has not yet been populated -- e.g. in
-//     docker-compose.cluster.yml where workers boot in parallel with
-//     the BFF and may not have written their v1:cluster:node row by
-//     the time the first frontend request arrives.
+//     first-boot when the DB has not yet been populated -- e.g. in a
+//     multi-node cluster where workers boot in parallel with the BFF
+//     and may not have written their v1:cluster:node row by the time
+//     the first frontend request arrives.
 //
 //  2. DB discovery: the dialer subscribes to cluster:node
 //     created/updated events AND polls every 30s, reconciling its

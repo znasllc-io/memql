@@ -7,8 +7,8 @@
 # removes the kubeconfig entry.
 #
 # Usage:
-#   make k3d-down           # delete cluster, keep kubeconfig context
-#   make k3d-down PURGE=1   # delete cluster + purge kubeconfig context
+#   make down           # delete cluster, keep kubeconfig context
+#   make down PURGE=1   # delete cluster + purge kubeconfig context
 #
 # Per the repo + global Skills+Scripts convention (CLAUDE.md): function-based,
 # one responsibility per function, main() at the bottom. set -euo pipefail.
@@ -116,7 +116,7 @@ function main() {
     delete_cluster
     remove_kubeconfig
 
-    info "Done. Run 'make k3d-up' to recreate the cluster."
+    info "Done. Run 'make up' to recreate the cluster."
 }
 
 main "$@"

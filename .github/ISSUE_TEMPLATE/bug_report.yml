@@ -19,8 +19,8 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: OS, Go version, and how memQL is running (local Docker, Cloud Run, etc.)
-      placeholder: "macOS 15.4, Go 1.26.1, local docker-compose"
+      description: OS, Go version, and how memQL is running (local k3d, staging/prod AKS, etc.)
+      placeholder: "macOS 15.4, Go 1.26.1, local k3d cluster"
     validations:
       required: true
   - type: textarea

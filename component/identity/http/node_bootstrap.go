@@ -21,8 +21,8 @@ import (
 // voice) mint itself a class="node" JWT at startup when its
 // MEMQL_NODE_TOKEN env var is empty. Addresses memql#338: every
 // peer-to-peer NodeService.Stream call was failing with
-// "authorization header missing" in the docker-compose dev stack
-// because the compose file never wired per-node tokens.
+// "authorization header missing" in a local multi-node cluster that
+// never wired per-node tokens.
 //
 // Security model:
 //
@@ -43,9 +43,9 @@ import (
 //   - The endpoint runs over the same require-secure transport gate
 //     as `/pair/redeem` -- the bootstrap secret is a long-lived
 //     plaintext credential. The dev escape hatch
-//     `MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP=1` lets the
-//     docker-compose dev stack (where identity:8081 is plain HTTP
-//     in-network) self-bootstrap without an HTTPS terminator.
+//     `MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP=1` lets a local dev
+//     cluster (where identity is reachable plain-HTTP in-network)
+//     self-bootstrap without an HTTPS terminator.
 //     Production deploys must leave this unset.
 //
 // The minted JWT is identical to what an out-of-band mint would
@@ -397,8 +397,8 @@ func (s *Server) mintNodeBootstrapToken(w http.ResponseWriter, r *http.Request, 
 // mintVoiceAgentBootstrapToken is the class="voice_agent" mint path
 // added by memql#342. Lets the Go voice-agent process self-
 // bootstrap its JWT through the same endpoint + bootstrap secret
-// the node binaries use, eliminating the docker-compose crash-loop
-// when `make dev-refresh`'s out-of-band mint step was skipped.
+// the node binaries use, eliminating the voice-agent crash-loop
+// when the out-of-band mint step was skipped.
 //
 // Verifier contract: the voice-agent gRPC interceptor reads the
 // JWT's class + identity_id + node_id (voice-agent reuses the

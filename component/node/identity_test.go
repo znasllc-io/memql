@@ -68,11 +68,11 @@ func TestNewIdentity_EnvVars(t *testing.T) {
 
 func TestNewIdentity_HostnameFallback(t *testing.T) {
 	// When MEMQL_NODE_ID is unset, the node id falls back to the
-	// container/host hostname (the Docker-Compose equivalent of the k8s
-	// `fieldRef: metadata.name` override). Under `deploy.replicas: N`
-	// each compose replica gets a unique hostname, so this yields a
-	// per-replica id with no static config -- the parity fix for
-	// memql#1212/#1217 (cross-node fan-out reproduction).
+	// container/host hostname. In k8s/k3d the manifests stamp
+	// MEMQL_NODE_ID from `fieldRef: metadata.name`, so each pod replica
+	// gets a unique id; this hostname fallback is the same per-replica
+	// guarantee for any runtime that leaves the env unset -- the parity
+	// fix for memql#1212/#1217 (cross-node fan-out reproduction).
 	os.Unsetenv("MEMQL_NODE_ID")
 
 	host, err := os.Hostname()
