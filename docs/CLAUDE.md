@@ -19,7 +19,7 @@ docs/
 │   ├── ai/            LLM cost control, operator capabilities
 │   ├── build/         gRPC/audio, build tags; reference/_generated/ at release
 │   ├── operate/       deploy, auth/, env, runbooks (public)
-│   └── cockpit/       (cockpit product docs live in the memql-cockpit repo)
+│   └── cockpit/       engine-backed Cockpit surfaces (Editor); the rest live in the memql-cockpit repo
 └── internal/          Never published
     ├── design/        ADRs / historical design rationale (status: historical)
     ├── planning/      active multi-phase plans (deleted when shipped)
