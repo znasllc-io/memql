@@ -260,6 +260,58 @@ func GenerateResponseBuild(args GenerateResponseArgs) string {
 	return b.String()
 }
 
+// GovernanceCanCreatePrincipal -- Relational governance entry point for the create != edit split: may the actor CREATE a principal carrying newRoleSlug? Resolves the actor + new-role ranks (roleBySlug) and hands them to the Go core (component/auth/rbac_governance.go:CanCreatePrincipal), which permits minting a principal STRICTLY BELOW the actor's own rank (an owner at any sub-owner rank). Independent of update -- a role can hold create-on-principal without update-on-principal.
+type GovernanceCanCreatePrincipalArgs struct {
+	NewRoleSlug string
+}
+
+// GovernanceCanCreatePrincipal calls the engine logic governanceCanCreatePrincipal.
+func (qc *QueryClient) GovernanceCanCreatePrincipal(ctx context.Context, args GovernanceCanCreatePrincipalArgs) (*Result, error) {
+	call := GovernanceCanCreatePrincipalBuild(args)
+	return qc.executeNamed(ctx, "governanceCanCreatePrincipal", call)
+}
+
+func GovernanceCanCreatePrincipalBuild(args GovernanceCanCreatePrincipalArgs) string {
+	var b strings.Builder
+	b.WriteString("governanceCanCreatePrincipal({")
+	b.WriteString("newRoleSlug: ")
+	b.WriteString(fmt.Sprintf("%q", args.NewRoleSlug))
+	b.WriteString("})")
+	return b.String()
+}
+
+// GovernanceCanManagePrincipal -- Relational governance entry point: may the actor apply `verb` (update/delete) to the target principal? Resolves the actor + target ranks from the role catalog (roleBySlug) and hands them with the ids + verb + owner flag to the Go core (component/auth/rbac_governance.go:GovernPrincipal), which applies actor.rank > target.rank OR actor==target with the owner-only carve-out. read passes through (capability gates it); create is gated by governanceCanCreatePrincipal (the create != edit split).
+type GovernanceCanManagePrincipalArgs struct {
+	TargetUserId   string
+	TargetRoleSlug string
+	Verb           string
+}
+
+// GovernanceCanManagePrincipal calls the engine logic governanceCanManagePrincipal.
+func (qc *QueryClient) GovernanceCanManagePrincipal(ctx context.Context, args GovernanceCanManagePrincipalArgs) (*Result, error) {
+	call := GovernanceCanManagePrincipalBuild(args)
+	return qc.executeNamed(ctx, "governanceCanManagePrincipal", call)
+}
+
+func GovernanceCanManagePrincipalBuild(args GovernanceCanManagePrincipalArgs) string {
+	var b strings.Builder
+	b.WriteString("governanceCanManagePrincipal({")
+	b.WriteString("targetUserId: ")
+	b.WriteString(fmt.Sprintf("%q", args.TargetUserId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("targetRoleSlug: ")
+	b.WriteString(fmt.Sprintf("%q", args.TargetRoleSlug))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("verb: ")
+	b.WriteString(fmt.Sprintf("%q", args.Verb))
+	b.WriteString("})")
+	return b.String()
+}
+
 // IndexCalendarEvent -- On v1:calendar:calendarEvent creation, promote it into the Library Records lens (lens=record, kind=calendar_event, source=agent_generated).
 type IndexCalendarEventArgs struct {
 	Event map[string]any
