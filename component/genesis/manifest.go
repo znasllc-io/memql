@@ -108,6 +108,56 @@ func (m *Manifest) AllEntries() []ManifestEntry {
 	return out
 }
 
+// InjectableDefault is one manifest entry selected for first-deploy
+// default injection (#2109), tagged with whether it came from the
+// `secrets:` or `variables:` list (a distinction AllEntries() flattens
+// away). The injector seeds the entry's Default as a cluster
+// variable/secret row ONLY IF the value is absent, so an operator edit
+// is never overwritten.
+type InjectableDefault struct {
+	Entry    ManifestEntry
+	IsSecret bool
+}
+
+// InjectableDefaults returns the manifest entries eligible for
+// first-deploy default injection (#2109): entries that carry a
+// non-empty Default AND a global/partition scope. Node-scoped entries
+// are per-pod process env (k8s/shell) and are NEVER concept-stored, so
+// they are skipped here. Secrets are listed before variables, each
+// tagged so the injector picks the right write path (global vs
+// partition secret/variable). The selection is pure and side-effect
+// free; the only-if-absent existence check happens at inject time.
+func (m *Manifest) InjectableDefaults() []InjectableDefault {
+	var out []InjectableDefault
+	for _, e := range m.Secrets {
+		if isInjectableEntry(e) {
+			out = append(out, InjectableDefault{Entry: e, IsSecret: true})
+		}
+	}
+	for _, e := range m.Variables {
+		if isInjectableEntry(e) {
+			out = append(out, InjectableDefault{Entry: e, IsSecret: false})
+		}
+	}
+	return out
+}
+
+// isInjectableEntry reports whether an entry is a first-deploy
+// injection candidate: it must carry a non-empty Default and a scope of
+// either "global" or "partition". Node-scoped entries are excluded --
+// they live in process env, not concept storage.
+func isInjectableEntry(e ManifestEntry) bool {
+	if e.Default == "" {
+		return false
+	}
+	switch e.Scope {
+	case "global", "partition":
+		return true
+	default:
+		return false
+	}
+}
+
 // Lookup returns the entry with the given name (searching secrets then
 // variables) and whether it was found.
 func (m *Manifest) Lookup(name string) (ManifestEntry, bool) {
