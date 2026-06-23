@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/secret"
@@ -440,5 +441,139 @@ func TestValidateMasterKeyHex_RejectsNonHex(t *testing.T) {
 	bad := "zaa756c6346279c7d766407e411676b0082d0ea2598be0f05683616c7644f09f"
 	if err := ValidateMasterKeyHex(bad); err == nil {
 		t.Fatal("expected error for non-hex input")
+	}
+}
+
+// --- Epic 7 (memql#2104): extended registry schema ---
+
+func TestManifestEntry_RequiredFor(t *testing.T) {
+	cases := []struct {
+		req      []string
+		nodeType string
+		want     bool
+	}{
+		{nil, "bff", false},
+		{[]string{}, "voice", false},
+		{[]string{"all"}, "anything", true},
+		{[]string{"voice"}, "voice", true},
+		{[]string{"voice"}, "bff", false},
+		{[]string{"identity", "bff"}, "bff", true},
+	}
+	for _, c := range cases {
+		got := ManifestEntry{Required: c.req}.RequiredFor(c.nodeType)
+		if got != c.want {
+			t.Errorf("RequiredFor(%v, %q) = %v, want %v", c.req, c.nodeType, got, c.want)
+		}
+	}
+}
+
+func TestManifest_AllEntries_AndLookup(t *testing.T) {
+	t.Setenv("MEMQL_MANIFEST_PATH", "")
+	t.Setenv("MEMQL_REPO", "")
+	m, err := LoadManifest("")
+	if err != nil {
+		t.Fatalf("LoadManifest: %v", err)
+	}
+	all := m.AllEntries()
+	if len(all) != len(m.Secrets)+len(m.Variables) {
+		t.Fatalf("AllEntries len = %d, want %d", len(all), len(m.Secrets)+len(m.Variables))
+	}
+	// The embedded registry must be the full Epic-7 universe, not the
+	// pre-Epic-7 13-entry floor.
+	if len(all) < 150 {
+		t.Fatalf("registry looks truncated: %d entries (expected the full ~200-var universe)", len(all))
+	}
+	if e, ok := m.Lookup("MEMORY_NODES_DATABASE_DSN"); !ok || e.Component != "database" {
+		t.Fatalf("Lookup(MEMORY_NODES_DATABASE_DSN) = %+v ok=%v", e, ok)
+	}
+	if _, ok := m.Lookup("NOPE_NOT_A_VAR"); ok {
+		t.Fatal("Lookup of missing name returned ok=true")
+	}
+}
+
+// TestRegistryIntegrity guards the authored manifest: every entry carries
+// a component + a valid scope, and every entry outside the seal floor is
+// marked optional (so registering the full universe cannot break sealing).
+func TestRegistryIntegrity(t *testing.T) {
+	t.Setenv("MEMQL_MANIFEST_PATH", "")
+	t.Setenv("MEMQL_REPO", "")
+	m, err := LoadManifest("")
+	if err != nil {
+		t.Fatalf("LoadManifest: %v", err)
+	}
+	validScope := map[string]bool{"node": true, "global": true, "partition": true}
+	floor := map[string]bool{}
+	for _, n := range m.Names() {
+		floor[n] = true
+	}
+	for _, e := range m.AllEntries() {
+		if e.Component == "" {
+			t.Errorf("%s: missing component", e.Name)
+		}
+		if !validScope[e.Scope] {
+			t.Errorf("%s: invalid scope %q", e.Name, e.Scope)
+		}
+		// Anything not in the seal floor must be optional.
+		if !floor[e.Name] && !e.Optional {
+			t.Errorf("%s: non-floor entry must be optional:true", e.Name)
+		}
+	}
+}
+
+func TestManifest_RequiredForNodeType(t *testing.T) {
+	t.Setenv("MEMQL_MANIFEST_PATH", "")
+	t.Setenv("MEMQL_REPO", "")
+	m, err := LoadManifest("")
+	if err != nil {
+		t.Fatalf("LoadManifest: %v", err)
+	}
+	// The DB DSN is required by every node.
+	req := m.RequiredForNodeType("bff")
+	found := false
+	for _, n := range req {
+		if n == "MEMORY_NODES_DATABASE_DSN" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("MEMORY_NODES_DATABASE_DSN not required for bff: %v", req)
+	}
+}
+
+// TestEmbeddedManifestInSync guards against the embedded snapshot
+// (component/genesis/manifest.yaml) drifting from the authored registry
+// (scripts/secrets/manifest.yaml). Regenerate with
+// scripts/secrets/sync-embedded-manifest.sh after editing the authored file.
+func TestEmbeddedManifestInSync(t *testing.T) {
+	authored, err := os.ReadFile(filepath.Join("..", "..", "scripts", "secrets", "manifest.yaml"))
+	if err != nil {
+		t.Fatalf("read authored manifest: %v", err)
+	}
+	src, err := LoadManifestFromBytes(authored, "authored")
+	if err != nil {
+		t.Fatalf("parse authored: %v", err)
+	}
+	t.Setenv("MEMQL_MANIFEST_PATH", "")
+	t.Setenv("MEMQL_REPO", "")
+	embedded, err := LoadManifest("")
+	if err != nil {
+		t.Fatalf("load embedded: %v", err)
+	}
+	names := func(m *Manifest) []string {
+		var out []string
+		for _, e := range m.AllEntries() {
+			out = append(out, e.Name)
+		}
+		sort.Strings(out)
+		return out
+	}
+	a, e := names(src), names(embedded)
+	if len(a) != len(e) {
+		t.Fatalf("embedded snapshot out of sync: authored=%d embedded=%d entries; run scripts/secrets/sync-embedded-manifest.sh", len(a), len(e))
+	}
+	for i := range a {
+		if a[i] != e[i] {
+			t.Fatalf("embedded snapshot diverges at %q vs %q; run scripts/secrets/sync-embedded-manifest.sh", a[i], e[i])
+		}
 	}
 }

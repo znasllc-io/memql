@@ -12,23 +12,57 @@ import (
 //go:embed manifest.yaml
 var embeddedManifest []byte
 
-// ManifestEntry mirrors one row in memql's secrets manifest. Callers
-// only need Name at validation time; the rest is preserved so
-// features that want to inspect entry metadata (decoded `genesis
-// show`, scope-aware seeding helpers, etc.) can read it without
-// re-parsing.
+// ManifestEntry mirrors one row in memql's secrets/variable registry.
+// Callers only need Name at seal-validation time; the rest is the
+// authoritative metadata that drives the cockpit Configuration screen
+// (Epic 7 / memql#2104), boot-time fail-fast validation (#2108), and
+// first-deploy injection (#2109) so all three read one source of truth.
+//
+// Two requiredness axes are deliberately separate:
+//
+//   - Optional drives the SEAL FLOOR (`Names()`): the strict-superset
+//     set a developer's .env must cover before `genesis-seal` will
+//     produce an envelope. It stays a small curated set so registering
+//     the full ~240-var universe here does not break local sealing --
+//     every newly-registered entry sets `optional: true`.
+//   - Required drives BOOT VALIDATION (#2108): the node types that must
+//     have this var present at startup. A var can be Optional for
+//     sealing (defaulted / node-conditional) yet Required by a specific
+//     node type at boot. The two axes never conflict.
 type ManifestEntry struct {
-	Name        string `yaml:"name"`
+	Name string `yaml:"name"`
+	// Component is the owning subsystem (engine, identity, email,
+	// polyphon, voice, database, ai, avatar, telephony, transport, ...).
+	// Groups entries in the Configuration screen and the audit table.
+	Component   string `yaml:"component,omitempty"`
 	Scope       string `yaml:"scope"`
 	Kind        string `yaml:"kind,omitempty"`
 	Default     string `yaml:"default,omitempty"`
 	Description string `yaml:"description,omitempty"`
+	// Required lists the node types that require this var at boot. The
+	// sentinel "all" means every node type. An empty list means no node
+	// strictly requires it (purely optional / defaulted). Consumed by
+	// the fail-fast boot validator (#2108) keyed on MEMQL_NODE_TYPE.
+	Required []string `yaml:"required,omitempty"`
 	// Optional entries are documented + sealed-when-present, but are NOT
-	// part of the strict-superset floor: a .env that omits them still seals.
-	// Use for secrets that only some deployments carry (e.g. the identity
-	// envMode signing seed IDENTITY_SIGNING_KEY_B64, which staging/prod need
-	// for HA but local-dev disk-key mode does not). memql#619.
+	// part of the strict-superset seal floor: a .env that omits them still
+	// seals. Use for secrets/vars that only some deployments carry (e.g.
+	// the identity envMode signing seed IDENTITY_SIGNING_KEY_B64, which
+	// staging/prod need for HA but local-dev disk-key mode does not), or
+	// any var outside the curated dev-seal floor. memql#619 / #2104.
 	Optional bool `yaml:"optional,omitempty"`
+}
+
+// RequiredFor reports whether this entry is required at boot for the
+// given node type. The "all" sentinel matches every node type. Drives
+// the fail-fast boot validator (#2108).
+func (e ManifestEntry) RequiredFor(nodeType string) bool {
+	for _, nt := range e.Required {
+		if nt == "all" || nt == nodeType {
+			return true
+		}
+	}
+	return false
 }
 
 // Manifest is the on-disk shape of memql's manifest.yaml. Source is
@@ -58,6 +92,47 @@ func (m *Manifest) Names() []string {
 			continue
 		}
 		out = append(out, e.Name)
+	}
+	return out
+}
+
+// AllEntries returns every registry entry (secrets followed by
+// variables) in manifest order. Consumed by the cockpit Configuration
+// screen (#2110), first-deploy injection (#2109), and the boot
+// validator (#2108), which all need the full set rather than just the
+// seal floor.
+func (m *Manifest) AllEntries() []ManifestEntry {
+	out := make([]ManifestEntry, 0, len(m.Secrets)+len(m.Variables))
+	out = append(out, m.Secrets...)
+	out = append(out, m.Variables...)
+	return out
+}
+
+// Lookup returns the entry with the given name (searching secrets then
+// variables) and whether it was found.
+func (m *Manifest) Lookup(name string) (ManifestEntry, bool) {
+	for _, e := range m.Secrets {
+		if e.Name == name {
+			return e, true
+		}
+	}
+	for _, e := range m.Variables {
+		if e.Name == name {
+			return e, true
+		}
+	}
+	return ManifestEntry{}, false
+}
+
+// RequiredForNodeType returns the entry names required at boot for the
+// given MEMQL_NODE_TYPE, in manifest order. Powers the fail-fast boot
+// validator (#2108).
+func (m *Manifest) RequiredForNodeType(nodeType string) []string {
+	var out []string
+	for _, e := range m.AllEntries() {
+		if e.RequiredFor(nodeType) {
+			out = append(out, e.Name)
+		}
 	}
 	return out
 }

@@ -435,7 +435,20 @@ docker-planner:
 # (writes ~/.memql/genesis.znas). `make up` seeds the decrypted envelope
 # into the k3d cluster's k8s Secrets via scripts/k3d/seed-secrets.sh.
 
-.PHONY: install-deps genesis-seal
+.PHONY: install-deps genesis-seal env-registry-sync env-registry-check
+
+## Regenerate the embedded genesis manifest snapshot
+## (component/genesis/manifest.yaml) from the authored registry
+## (scripts/secrets/manifest.yaml). Run after editing the authored file;
+## TestEmbeddedManifestInSync fails CI otherwise. (Epic 7 / memql#2104)
+env-registry-sync:
+	@bash scripts/secrets/sync-embedded-manifest.sh
+
+## Drift-check the env-var registry both ways: a var read in code but not
+## registered, or a registry entry that appears nowhere in the repo, fails.
+## The shared classifier behind the CI gate (memql#2105).
+env-registry-check:
+	$(GO) run ./cmd/envscan -check
 
 ## Seal a plaintext .env into ~/.memql/genesis.znas (the encrypted
 ## envelope scripts/k3d/seed-secrets.sh decrypts into k8s Secrets at
