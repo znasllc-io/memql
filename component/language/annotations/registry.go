@@ -61,6 +61,12 @@ var ByReceiver = map[string][]string{
 	"Shape": {
 		"description", "row", "actor",
 	},
+	"Policy": {
+		"description", "primary", "fallback", "maxLatencyMs", "maxTimeToFirstTokenMs", "preferredRole",
+	},
+	"Seed": {
+		"description", "version", "namespace", "scope", "templateFile", "enabled", "disabled",
+	},
 	"": { // top-level (concept definitions)
 		"description", "version", "namespace", "scope", "visibility", "type", "cache", "relationship",
 	},
@@ -116,6 +122,12 @@ var Docs = map[string]string{
 	"extends":  "Inherit configuration from a base provider.",
 	// Shape.
 	"row": "Shape kind: projects a concept's payload + row intrinsics (concept bound via the `shape <Concept> <name>` signature).",
+	// Policy (AI Router provider-selection records). @primary is required; @fallback / @preferredRole are repeatable.
+	"primary":               "Required on a policy: the primary provider name the AI Router resolves first.",
+	"fallback":              "On a policy: a fallback provider tried when the primary is unavailable. Repeatable (order preserved).",
+	"maxLatencyMs":          "On a policy: cap the acceptable provider latency in milliseconds for selection.",
+	"maxTimeToFirstTokenMs": "On a policy: cap the acceptable time-to-first-token (streaming) in milliseconds for selection.",
+	"preferredRole":         "On a policy: bias selection toward providers matching this agent role. Repeatable.",
 	// Concept.
 	"version":      "Version tag for a concept.",
 	"namespace":    "Concept namespace. Colon-separated lowercase identifiers (e.g., \"cognition\" or \"cognition:client:tool\").",

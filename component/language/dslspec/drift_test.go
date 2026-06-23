@@ -290,10 +290,11 @@ func TestRetiredFormsStayGone(t *testing.T) {
 //     {policy, seed, use} gap set (so closing OR widening the gap is
 //     forced through this test and the issue tracker).
 func TestRegistryBackedHonesty(t *testing.T) {
-	// The known, tracked RegistryBacked=false constructs. `use` is the
-	// import (no annotation receiver). policy + seed are the registry
-	// gaps A2/#2123 is expected to close.
-	knownUnbacked := map[string]bool{"use": true, "policy": true, "seed": true}
+	// The known, tracked RegistryBacked=false constructs. After #2151 added
+	// the Policy + Seed receivers to annotations.ByReceiver, the only
+	// remaining unbacked construct is `use` -- the file-top import statement,
+	// which carries no annotations at all.
+	knownUnbacked := map[string]bool{"use": true}
 
 	gotUnbacked := map[string]bool{}
 	for _, c := range constructs() {

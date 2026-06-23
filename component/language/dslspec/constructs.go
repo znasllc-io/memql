@@ -15,10 +15,10 @@ package dslspec
 //   - use is the file-top import statement.
 //
 // RegistryBacked reflects whether component/language/annotations.ByReceiver
-// enumerates the construct's annotations today. policy / seed / trait /
-// relationship-via-use are not yet in that registry (a tracked gap); their
-// entries here set RegistryBacked=false so the drift test reports them
-// instead of asserting against a missing key.
+// enumerates the construct's annotations today. Every annotation-bearing
+// construct is now registry-backed (policy + seed were added to the registry
+// in #2151); only `use` stays RegistryBacked=false, because it is the file-top
+// import statement and carries no annotations at all.
 func constructs() []Construct {
 	return []Construct{
 		{
@@ -127,7 +127,7 @@ func constructs() []Construct {
 			Category:           CategoryDeclarative,
 			Doc:                "AI provider-selection record (empty body): @primary / @fallback / @maxLatencyMs / @preferredRole, consumed by the AI Router. (Caller-context checks use specs, not policies.)",
 			AnnotationReceiver: "Policy",
-			RegistryBacked:     false,
+			RegistryBacked:     true,
 			ConceptInSignature: false,
 		},
 		{
@@ -135,7 +135,7 @@ func constructs() []Construct {
 			Category:           CategoryDeclarative,
 			Doc:                "Seed an initial row for a bound concept. Struct form `seed <Concept> <name>`.",
 			AnnotationReceiver: "Seed",
-			RegistryBacked:     false,
+			RegistryBacked:     true,
 			ConceptInSignature: true,
 		},
 		{
