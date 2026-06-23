@@ -76,6 +76,22 @@ func TestDriftCheckRenderedStagingPasses(t *testing.T) {
 	}
 }
 
+// The local overlay uses mutable dev-image tags (not @sha256 digests).
+// drift-check must SKIP the digest-pin enforcement and still succeed (#2064).
+func TestDriftCheckRenderedLocalOverlaySkipsDigestGate(t *testing.T) {
+	requireKubectl(t)
+	out, err := runAks(t, "drift-check.sh", "--rendered", "--env=local")
+	if err != nil {
+		t.Fatalf("drift-check --rendered local should pass (digest gate skipped for dev overlay):\n%s", out)
+	}
+	if !strings.Contains(out, "skipping digest-pin gate for the 'local' overlay") {
+		t.Errorf("expected the local-overlay skip message:\n%s", out)
+	}
+	if !strings.Contains(out, "renders successfully") {
+		t.Errorf("expected the render-success confirmation:\n%s", out)
+	}
+}
+
 // A floating :tag in an overlay must FAIL the rendered gate (the #684 root
 // cause). Build a throwaway overlay that re-introduces a tag and assert non-zero.
 func TestDriftCheckRenderedRejectsFloatingTag(t *testing.T) {

@@ -1,0 +1,323 @@
+# Local overlay -- k3d development (Epic 0, znasllc-io/memql#2064).
+#
+# PURPOSE
+# This overlay runs the full memQL stack on a local k3d cluster via ArgoCD.
+# It differs from staging/prod in three ways only:
+#   1. Config -- local DB (in-cluster postgres + azurite blob), no Tiger Cloud.
+#   2. Resources -- minimal requests; no limits set so developer laptops aren't
+#      starved.
+#   3. Replicas -- 1 per node type (multi-node is exercised via #2067).
+#
+# IMAGE AUTHORITY
+# Unlike staging/prod, local images are NOT pinned by @sha256: digest.
+# They are built locally by `make dev-build` / the `make dev` inner loop
+# (#2066) and imported into k3d via `k3d image import`.  The tag `local`
+# is used; imagePullPolicy: IfNotPresent so the cluster never tries to pull
+# from ACR (the dev machine may not have ACR credentials).
+#
+# CLOUD-ONLY RESOURCES EXCLUDED
+# The base includes resources that require cloud infrastructure not present
+# locally.  This overlay removes them with $patch: delete:
+#   - ExternalSecret (livekit-secrets, telephony-secrets) -- needs ESO + Key Vault
+#   - CronJob (conn-monitor) -- Tiger Cloud connection monitor; irrelevant locally
+#   - public-entry.yaml resources (ClusterIssuer + Ingresses) -- cert-manager/
+#     ingress-nginx on AKS.  Local ingress is handled separately in #2065.
+#
+# DRIFT-CHECK
+# The CI drift-check (deploy-drift.yml) enforces @sha256 pinning for every
+# overlay.  That gate is skipped for the `local` overlay by design -- local
+# images use mutable tags; see scripts/deploy/drift-check.sh.
+#
+# See deploy/k8s/README.md for the full overlay taxonomy.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: memql
+
+resources:
+  - ../../base
+
+# ---------------------------------------------------------------------------
+# Remove cloud-only resources
+# ---------------------------------------------------------------------------
+patches:
+  # ExternalSecret resources require External Secrets Operator + Azure Key Vault.
+  # Not available locally; the corresponding secrets are created directly via
+  # `make k3d-secrets` in the local bootstrap (#2065).
+  - target:
+      kind: ExternalSecret
+      name: livekit-secrets
+    patch: |
+      $patch: delete
+      apiVersion: external-secrets.io/v1beta1
+      kind: ExternalSecret
+      metadata:
+        name: livekit-secrets
+  - target:
+      kind: ExternalSecret
+      name: telephony-secrets
+    patch: |
+      $patch: delete
+      apiVersion: external-secrets.io/v1beta1
+      kind: ExternalSecret
+      metadata:
+        name: telephony-secrets
+  # Connection-budget CronJob monitors Tiger Cloud connection headroom.
+  # Locally we run a plain Postgres container; the monitor is irrelevant.
+  - target:
+      kind: CronJob
+      name: conn-monitor
+    patch: |
+      $patch: delete
+      apiVersion: batch/v1
+      kind: CronJob
+      metadata:
+        name: conn-monitor
+  # public-entry.yaml: Let's Encrypt ClusterIssuer + AKS Ingresses.
+  # Local traffic is served via k3d port-forward or a simple traefik
+  # ingress configured in the bootstrap (#2063/#2065).
+  - target:
+      kind: ClusterIssuer
+      name: letsencrypt-prod
+    patch: |
+      $patch: delete
+      apiVersion: cert-manager.io/v1
+      kind: ClusterIssuer
+      metadata:
+        name: letsencrypt-prod
+  - target:
+      kind: Ingress
+      name: staging-identity
+    patch: |
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: staging-identity
+  - target:
+      kind: Ingress
+      name: app-main
+    patch: |
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: app-main
+  - target:
+      kind: Ingress
+      name: app-identity-proxy
+    patch: |
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: app-identity-proxy
+  - target:
+      kind: Ingress
+      name: staging-mcp
+    patch: |
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: staging-mcp
+  - target:
+      kind: Ingress
+      name: staging-bff-grpc
+    patch: |
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: staging-bff-grpc
+  # livekit Ingress (in livekit.yaml) -- requires ingress-nginx + cert-manager
+  # on AKS.  Locally livekit is reached via k3d port-forward (#2065).
+  - target:
+      kind: Ingress
+      name: livekit
+    patch: |
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: livekit
+  # ---------------------------------------------------------------------------
+  # Replicas: 1 per app node (multi-node is a separate opt-in via #2067)
+  # ---------------------------------------------------------------------------
+  - target:
+      kind: Deployment
+      name: identity
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: Deployment
+      name: bff
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: Deployment
+      name: cognition
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: Deployment
+      name: voice
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: Deployment
+      name: agent
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: Deployment
+      name: planner
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: Deployment
+      name: workbench
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: Deployment
+      name: mcp
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: Deployment
+      name: copresent
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  # ---------------------------------------------------------------------------
+  # imagePullPolicy: IfNotPresent for all ACR images
+  # Locally-built images are imported via `k3d image import` -- they exist in
+  # the containerd store but are not in ACR.  Never, Always would cause a pull
+  # attempt that fails without ACR credentials.
+  # ---------------------------------------------------------------------------
+  - target:
+      kind: Deployment
+      name: identity
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Deployment
+      name: bff
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Deployment
+      name: cognition
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Deployment
+      name: voice
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Deployment
+      name: agent
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Deployment
+      name: planner
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Deployment
+      name: workbench
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Deployment
+      name: mcp
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Deployment
+      name: copresent
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Deployment
+      name: voice-agent
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+
+# ---------------------------------------------------------------------------
+# Image tags for local builds
+# Local images are built with `make dev-build` and imported into k3d.
+# The `local` tag is mutable and updated by `make dev` (#2066).
+# NO @sha256 digest here -- that is intentional and exempted from CI gate.
+# ---------------------------------------------------------------------------
+images:
+  - name: acrmemql.azurecr.io/memql-identity
+    newName: memql-identity
+    newTag: local
+  - name: acrmemql.azurecr.io/memql-bff-copresent
+    newName: memql-bff-copresent
+    newTag: local
+  - name: acrmemql.azurecr.io/memql-cognition
+    newName: memql-cognition
+    newTag: local
+  - name: acrmemql.azurecr.io/memql-voice
+    newName: memql-voice
+    newTag: local
+  - name: acrmemql.azurecr.io/memql-agent
+    newName: memql-agent
+    newTag: local
+  - name: acrmemql.azurecr.io/memql-planner
+    newName: memql-planner
+    newTag: local
+  - name: acrmemql.azurecr.io/memql-workbench
+    newName: memql-workbench
+    newTag: local
+  - name: acrmemql.azurecr.io/memql-mcp
+    newName: memql-mcp
+    newTag: local
+  - name: acrmemql.azurecr.io/copresent
+    newName: copresent
+    newTag: local
