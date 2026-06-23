@@ -368,28 +368,28 @@ and then starts/stops dependencies.
 
 ### Check Component Startup
 ```bash
-docker-compose logs memql | grep "component.*started"
+kubectl logs -n memql deploy/bff | grep "component.*started"
 ```
 
 ### Watch Component Activity
 ```bash
 # MemQL engine
-docker-compose logs -f memql | grep "memQLEngine"
+kubectl logs -n memql deploy/bff -f | grep "memQLEngine"
 
 # Database
-docker-compose logs -f memql | grep "memoryNodesDB"
+kubectl logs -n memql deploy/bff -f | grep "memoryNodesDB"
 
 # Events
-docker-compose logs -f memql | grep "eventBus"
+kubectl logs -n memql deploy/bff -f | grep "eventBus"
 ```
 
 ### Performance Monitoring
 ```bash
 # Cache hit rates
-docker-compose logs memql | grep "cache.*hit"
+kubectl logs -n memql deploy/bff | grep "cache.*hit"
 
 # Query performance
-docker-compose logs memql | grep "query.*ms"
+kubectl logs -n memql deploy/bff | grep "query.*ms"
 ```
 
 ---

@@ -47,7 +47,7 @@ type deploymentRecord struct {
 }
 
 // Deploy ships a cut `pending` deployment record (#1877) to its target,
-// selecting the driver by the record's provider (docker-local | azure)
+// selecting the driver by the record's provider (azure)
 // and transitioning the record in_progress -> succeeded | failed (#1878).
 // Owner/admin gated; emits exactly one audit event.
 func (s *Service) Deploy(ctx context.Context, req *memqlv1.DeployRequest) (*memqlv1.ActionResult, error) {

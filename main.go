@@ -164,10 +164,10 @@ func mustCreateServiceLogger() *slog.Logger {
 // builds but writes JSON to os.Stderr instead of os.Stdout.
 //
 // Why this exists (memql#353): CLI subcommands (node-token mint /
-// voice-agent-token mint) print the minted bearer to stdout so the
-// `bearer=$(docker exec memql ... mint)` shell capture in
-// scripts/dev/mint-node-tokens.sh + scripts/dev/lib.sh's
-// mint_voice_agent_token can pull it out. Under the previous
+// voice-agent-token mint) print the minted bearer to stdout so a
+// `bearer=$(kubectl exec deploy/identity -- /app/memql ... mint)`
+// shell capture (e.g. `make node-token` / `make voice-agent-token`)
+// can pull it out. Under the previous
 // stdout-bound service logger, every app.Build() + dep.Start()
 // startup INFO log landed on stdout BEFORE the bearer, so the shell
 // capture ended up with a multi-line "bearer" of JSON log lines +
@@ -181,7 +181,7 @@ func mustCreateServiceLogger() *slog.Logger {
 // stdout = data (the bearer), stderr = diagnostics (slog JSON + the
 // "minted node=X type=Y" summary fmt.Fprintf already writes there).
 // The server boot path (main.go's serviceLogger) stays on stdout so
-// the docker compose log capture / Cloud Run log ingestion that
+// the container log capture (kubectl/ArgoCD, cloud log ingestion) that
 // already consume container stdout aren't affected.
 func mustCreateCLILogger() *slog.Logger {
 	return mustCreateLoggerWithWriter(os.Stderr)

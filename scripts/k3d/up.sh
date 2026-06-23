@@ -16,8 +16,8 @@
 # The ArgoCD Application points to the GitHub repo at the current branch so
 # the pure-Argo inner loop is preserved (no direct-apply bypass).  For the
 # first cluster boot while a feature branch is being developed, push the branch
-# to GitHub first; then run `make k3d-up`.  Subsequent iteration uses
-# `make k3d-dev` (E0.4): rebuild → k3d image import → argo sync.
+# to GitHub first; then run `make up`.  Subsequent iteration uses
+# `make dev` (E0.4): rebuild → k3d image import → argo sync.
 #
 # Port-forwards exposed by the cluster:
 #   8080  -> copresent (SPA)
@@ -131,7 +131,7 @@ function create_cluster() {
 
     if k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}[[:space:]]"; then
         info "Cluster '${CLUSTER_NAME}' already exists -- skipping creation."
-        info "To recreate: make k3d-down && make k3d-up"
+        info "To recreate: make down && make up"
         return 0
     fi
 
@@ -285,9 +285,9 @@ function print_summary() {
     echo "  Next steps:"
     echo "    1. Watch ArgoCD sync:  kubectl get apps -n argocd -w"
     echo "    2. Check pod status:   kubectl get pods -n ${NAMESPACE}"
-    echo "    3. Inner-loop dev:     make k3d-dev (E0.4 -- build -> import -> sync)"
+    echo "    3. Inner-loop dev:     make dev (E0.4 -- build -> import -> sync)"
     echo ""
-    echo "  Tear down:  make k3d-down"
+    echo "  Tear down:  make down"
     echo ""
 }
 

@@ -16,8 +16,8 @@ import (
 	"github.com/znasllc-io/memql/component/identity"
 )
 
-// validNodeTokenTypes pins the node-type values the dev cluster's
-// docker-compose stack uses today. Adding a new node-type binary
+// validNodeTokenTypes pins the node-type values the local k3d cluster
+// (deploy/k8s/overlays/local) runs today. Adding a new node-type binary
 // also needs to extend this list so the operator CLI rejects
 // typos at mint time rather than letting them slip into a runtime
 // auth failure.
@@ -70,9 +70,8 @@ Run "memql node-token mint --help" for mint-specific flags.`)
 // who want a credential audit row for a node token should
 // additionally mint via the identity admin web app.
 //
-// memql#338 -- this subcommand is the missing piece the dev
-// docker-compose stack needs to wire MEMQL_NODE_TOKEN per
-// cluster-node service.
+// memql#338 -- this subcommand is the missing piece the local k3d
+// cluster needs to wire MEMQL_NODE_TOKEN per cluster-node service.
 func runNodeTokenMint(args []string) int {
 	fs := flag.NewFlagSet("node-token mint", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -117,9 +116,10 @@ func runNodeTokenMint(args []string) int {
 	}
 
 	// CLI subcommand: logs to stderr so stdout stays clean for the
-	// minted bearer (which scripts/dev/mint-node-tokens.sh captures
-	// via $(...)). See main.go::mustCreateCLILogger for the full
-	// rationale + memql#353 for what broke before the split.
+	// minted bearer (which a `bearer=$(kubectl exec deploy/identity --
+	// /app/memql node-token mint ...)` capture, e.g. via `make
+	// node-token`, pulls out). See main.go::mustCreateCLILogger for the
+	// full rationale + memql#353 for what broke before the split.
 	//
 	// 15+ component-internal loggers (memql, automations, events,
 	// memoryNodesDB, cache, language, etc.) are hardcoded to write

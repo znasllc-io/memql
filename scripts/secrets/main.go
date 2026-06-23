@@ -10,8 +10,9 @@
 //	decrypt --in <path>
 //	         Open a ZNAS envelope. Writes the plaintext to a fresh
 //	         O_EXCL temp file (mode 0600) and prints the path on
-//	         stdout. Requires MEMQL_MASTER_KEY in env. Used by
-//	         scripts/dev/lib.sh's require_genesis().
+//	         stdout. Requires MEMQL_MASTER_KEY in env. (The local k3d
+//	         flow seeds the envelope into k8s Secrets via
+//	         scripts/k3d/seed-secrets.sh instead.)
 //
 //	seed --env-file <path>
 //	         Read the (decrypted) .env file, walk memql's manifest at
@@ -19,10 +20,9 @@
 //	         entries into the running memQL as v1:platform:global*
 //	         rows. Entries in the .env that are NOT in the manifest
 //	         are ignored -- they're bootstrap-only env vars consumed
-//	         by docker-compose, not concept rows.
+//	         from the genesis envelope / k8s Secrets, not concept rows.
 //
 //	health   Quick gRPC handshake check against the running memQL.
-//	         Used by dev-refresh's wait_for_memql poll loop.
 //
 // All authoring previously done by `secrets init / set / delete /
 // edit / export / variable-set / variable-delete / list / master-key`
@@ -103,7 +103,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `memQL secrets seed/decrypt tool (internal -- called by scripts/dev/refresh.sh)
+	fmt.Fprint(os.Stderr, `memQL secrets seed/decrypt tool (internal)
 
 Subcommands:
   decrypt --in <path>

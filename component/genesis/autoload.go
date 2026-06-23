@@ -14,8 +14,8 @@ import (
 const (
 	// EnvAutoload, when "true", opts the boot sequence into decrypting
 	// and applying the genesis envelope in-process. Unset / any other
-	// value leaves boot behavior unchanged (local dev's docker-compose
-	// env_file path is untouched).
+	// value leaves boot behavior unchanged (the local dev path, where
+	// the envelope is seeded into k8s Secrets, is untouched).
 	EnvAutoload = "MEMQL_GENESIS_AUTOLOAD"
 
 	// EnvGenesisB64 carries the base64-encoded ENCRYPTED envelope

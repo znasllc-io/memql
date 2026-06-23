@@ -34,7 +34,7 @@ committed and exercised by tests, just not yet in active use:
 | Agent-side router | `workbench.ForwardRouter` -- finds healthy workbench peer, sends, awaits response, falls back to local on `ErrNoWorkbenchPeer` | `integrations/workbench/forward_router.go` |
 | Workbench-side handler | `workbench.ForwardHandler` -- unmarshals envelope, calls the local integration's dispatch, sends the response | `integrations/workbench/forward_handler.go` |
 | AKS manifest stub | `workbench` Deployment placeholder (AKS-native; Cloud Run manifest removed) | `deploy/k8s/` |
-| Docker compose | `workbench` service + agent flipped to remote mode | `docker/docker-compose.cluster.yml` |
+| Local cluster | `workbench` Deployment + agent flipped to remote mode | `deploy/k8s/overlays/local` |
 
 The toggle is one env var: `MEMQL_WORKBENCH_REMOTE=1` on the agent
 node + a workbench address in `MEMQL_WORKER_PEERS`. With both set,
@@ -113,11 +113,11 @@ The exact value is documented in the
 and the Microsoft Azure Storage SDK docs — it is public, hardcoded in
 Azurite itself, and safe to use locally.
 
-The in-cluster hostname is `azurite` (matching the Docker Compose
-service name). This value is stamped into `~/Downloads/local.genesis.env`
-so `make genesis-seal` bundles it into the sealed envelope and
-`make dev-refresh` decrypts it onto the agent node automatically. See
-#806 for the full `make dev-refresh` wiring.
+The in-cluster hostname is `azurite` (the k8s Service name). This value
+is stamped into `~/Downloads/local.genesis.env` so `make genesis-seal`
+bundles it into the sealed envelope and the seeded `memql-secrets` Secret
+(`make up` / `make k3d-secrets`) lands it onto the agent pod. See
+#806 for the full wiring.
 
 ### Staging
 
@@ -168,25 +168,26 @@ truth.
 
 ## 5. Cluster mode -- local validation
 
-Before the AKS cutover, exercise the cluster path locally:
+Before the AKS cutover, exercise the cluster path locally on k3d. Bring
+the cluster up (`make up`) with the `workbench` Deployment enabled and
+the agent flipped to remote mode in `deploy/k8s/overlays/local`
+(`MEMQL_WORKBENCH_REMOTE=1` + a `workbench=workbench:50060` seed in
+`MEMQL_WORKER_PEERS`), then roll the changed nodes:
 
 ```bash
-docker compose -f docker/docker-compose.cluster.yml up --build
+make dev NODE=agent
+make dev NODE=workbench
 ```
 
-This spins up bff + cognition + agent + planner + voice + identity +
-workbench. The agent service is pre-configured with
-`MEMQL_WORKBENCH_REMOTE=1` and a `workbench=workbench:50060` seed so
-dispatches route over `NodeService.Stream` to the dedicated binary.
-The workbench directory is local to the workbench container; durable
-output requires Azurite to be running and both vars set (see #806).
+With remote mode set, dispatches route over `NodeService.Stream` to the
+dedicated binary. The workbench directory is local to the workbench pod;
+durable output requires Azurite to be running and both vars set (see #806).
 
 Smoke test: ask an agent to write a file, then verify the workbench
-container received it:
+pod received it:
 
 ```bash
-docker compose -f docker/docker-compose.cluster.yml exec workbench \
-  ls /var/lib/memql/workbenches/
+kubectl exec -n memql deploy/workbench -- ls /var/lib/memql/workbenches/
 ```
 
 ## 6. AKS cutover

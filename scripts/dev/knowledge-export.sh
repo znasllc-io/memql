@@ -39,10 +39,6 @@
 
 set -euo pipefail
 
-readonly SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-# shellcheck disable=SC1091
-source "${SCRIPT_DIR}/lib.sh"
-
 readonly KNOWLEDGE_CACHE_DIR="${HOME}/.memql"
 readonly KNOWLEDGE_CACHE_FILE="${KNOWLEDGE_CACHE_DIR}/dev-knowledge.sql"
 readonly POSTGRES_CONTAINER="memql-db"

@@ -4,7 +4,7 @@
 # Usage:
 #   make                   Build all binaries
 #   make help              Show all available targets
-#   make dev-cluster-up    Start the staging-parity dev cluster (Docker)
+#   make up                Start the staging-parity dev cluster (k3d + ArgoCD)
 #   make test              Run all tests
 
 # ---------------------------------------------------------------------------
@@ -16,14 +16,6 @@ GOFLAGS     := -v
 CGO_ENABLED := 0
 BIN_DIR     := bin
 VERSION     := $(shell cat VERSION 2>/dev/null || echo "dev")
-
-# Docker
-COMPOSE      := docker compose
-COMPOSE_CLST := -f docker/docker-compose.cluster.yml
-# Cluster + opt-in voice/avatar overlay (memql#1310): the parity cluster PLUS
-# the voice-agent + avatar TURN-relay overlay. Base first, overlay second --
-# the overlay overrides livekit + adds voice-agent + coturn.
-COMPOSE_POLY := -f docker/docker-compose.cluster.yml -f docker/docker-compose.polyphon.yml
 
 # ---------------------------------------------------------------------------
 # Build targets
@@ -112,47 +104,31 @@ healthcheck:
 
 .PHONY: voice-agent-token
 
-## Mint a class="voice_agent" JWT for the running local cluster's
-## voice-agent process. Execs the identity binary inside the
-## memql-identity container so the mint runs against the same DB +
-## Ed25519 key the live service uses, then prints the bearer to
-## stdout. Used to inject VOICE_AGENT_TOKEN at bring-up. Override
-## INSTANCE / TTL / OUT as needed; defaults match the dev compose
-## setup. See
-## docs/auth/voice-agent-jwt.md.
+## Mint a class="voice_agent" JWT for the running local k3d cluster's
+## voice-agent process. Execs the identity binary inside the identity
+## pod so the mint runs against the same DB + Ed25519 key the live
+## service uses, then prints the bearer to stdout. Used to inject
+## VOICE_AGENT_TOKEN at bring-up. Override INSTANCE / TTL / OUT /
+## NAMESPACE as needed. See docs/auth/voice-agent-jwt.md.
 voice-agent-token:
-	@docker exec memql-identity /app/memql voice-agent-token mint \
+	@kubectl exec -n "$${NAMESPACE:-memql}" deploy/identity -- /app/memql voice-agent-token mint \
 		--instance-id="$${INSTANCE:-voice-agent-local}" \
 		$${TTL:+--ttl=$$TTL} \
 		$${OUT:+--out=$$OUT}
 
-## Mint a class="node" JWT for the given cluster node. Used by the
-## bootstrap-tokens target below to
-## seed MEMQL_NODE_TOKEN for every cluster-node binary in the dev
-## docker stack (without it the receiving NodeService interceptor
-## rejects with `authorization header missing` and inter-node
-## peer calls fail silently). memql#338.
+## Mint a class="node" JWT for the given cluster node. Seeds
+## MEMQL_NODE_TOKEN for a cluster-node binary (without it the receiving
+## NodeService interceptor rejects with `authorization header missing`
+## and inter-node peer calls fail silently). memql#338.
 ##
-## Override NODE / TYPE / TTL / OUT as needed; bff-local defaults
-## match the dev compose setup.
+## Execs the identity binary inside the identity pod of the running k3d
+## cluster. Override NODE / TYPE / TTL / OUT / NAMESPACE as needed.
 node-token:
-	@docker exec memql-identity /app/memql node-token mint \
+	@kubectl exec -n "$${NAMESPACE:-memql}" deploy/identity -- /app/memql node-token mint \
 		--node-id="$${NODE:-bff-local}" \
 		--node-type="$${TYPE:-bff}" \
 		$${TTL:+--ttl=$$TTL} \
 		$${OUT:+--out=$$OUT}
-
-## Mint a class="node" JWT for every node-type the dev docker-compose
-## stack runs (bff, voice, cognition, agent, planner) and write a
-## `.env.local.node-tokens` snippet the compose env_file consumes via
-## `${MEMQL_<TYPE>_NODE_TOKEN}` indirection. Idempotent -- each call
-## mints fresh tokens (existing rows are not revoked; just supersede).
-##
-## Run this after `docker compose up` brings the identity service
-## healthy, then `docker compose up -d --force-recreate` the cluster
-## nodes so they pick up the new env. memql#338.
-dev-node-tokens-bootstrap:
-	@bash scripts/dev/mint-node-tokens.sh
 
 .PHONY: identity-signing-key
 
@@ -169,170 +145,24 @@ identity-signing-key:
 # Run targets
 # ---------------------------------------------------------------------------
 
-.PHONY: run dev-cluster dev-cluster-up dev-cluster-voice dev-cluster-down dev-cluster-restart dev-cluster-restart-purge dev-cluster-stop dev-cluster-logs dev-cluster-status dev-cluster-scale cluster-e2e dev-nginx-reload voice-trace voice-trace-now db
+.PHONY: run cluster-e2e db
 
 ## Run the standalone server locally
 run: build
 	./$(BIN_DIR)/memql
 
-## Start cluster mode (bff + cognition + planner)
-dev-cluster:
-	$(COMPOSE) $(COMPOSE_CLST) up --build
-
-## Boot the staging-parity cluster in the BACKGROUND (build + up -d).
-## THIS IS THE BLESSED LOCAL TOPOLOGY (memql#1260): 2 replicas per mesh
-## node, matching staging, so cross-replica delivery bugs reproduce
-## locally instead of only in staging. `make dev-cluster` is the same
-## thing in the foreground; `make dev-cluster-restart[-purge]` force a
-## fresh --no-cache rebuild. Run `make dev-cluster-status` after to
-## confirm distinct per-replica node ids (the parity litmus).
-dev-cluster-up:
-	$(COMPOSE) $(COMPOSE_CLST) up --build -d
-	@echo ""
-	@echo "Cluster up (2 replicas/mesh node, staging parity). Front door: https://app.local.znas.io (TLS subdomains)"
-	@echo "Parity litmus (distinct per-replica node ids): make dev-cluster-status"
-
-## Boot the parity cluster WITH the opt-in voice/avatar overlay (memql#1310):
-## the cluster PLUS the voice-agent + avatar TURN-relay (coturn + the
-## livekit-dev.yaml config override). This is the opt-in voice/avatar path --
-## the plain `make dev-cluster-up` runs the cluster WITHOUT the voice-agent.
-##
-## CAVEAT (memql#1277): this restores the voice-agent + the avatar relay
-## PLUMBING. Local cloud-avatar VIDEO (Anam/Simli direct avatar) does NOT
-## render -- the cloud engine's WebRTC media leg can't reach the dockerized
-## LiveKit over the free ngrok TURN relay (host-candidate-only ICE). Voice
-## works; avatar video is validated on STAGING only. After bring-up, run
-## `bash scripts/dev/ngrok-up.sh` to stand up the avatar relay tunnel.
-dev-cluster-voice:
-	$(COMPOSE) $(COMPOSE_POLY) up --build -d
-	@echo ""
-	@echo "Cluster + voice/avatar overlay up. Front door: https://app.local.znas.io (TLS subdomains)"
-	@echo "Voice-agent joins LiveKit rooms; avatar relay plumbing is in place."
-	@echo "NOTE (memql#1277): local cloud-avatar VIDEO does NOT render (staging-only); voice works."
-	@echo "Next (avatar relay tunnel): bash scripts/dev/ngrok-up.sh"
-
-## Stop the staging-parity cluster (alias of dev-cluster-stop; keeps volumes).
-## Tears down the voice/avatar overlay services too (they share the project).
-dev-cluster-down:
-	$(COMPOSE) $(COMPOSE_POLY) down
-
-## Cross-replica delivery gate (memql#1261): boot the port-isolated 2-replica
-## cluster and run test/clustere2e. EXPECTED RED on current main (it reproduces
-## the memql#1259 delivery drop); green once the Phase-1 backbone lands. Pass a
-## token via MEMQL_E2E_TOKEN, or MEMQL_PACKAGES_TOKEN to build the SPA. Co-tenant
-## safe: drops the host ports that could collide with another local stack.
+## Cross-replica delivery gate (memql#1261): boot the 2-replica k3d +
+## ArgoCD cluster (deploy/k8s/overlays/local, scaled to 2 via scale.sh)
+## and run test/clustere2e. Green once the Phase-1 durable backbone
+## lands. Pass a known user JWT via MEMQL_E2E_TOKEN, or let the harness
+## seed one via the identity OAuth flow. See scripts/test/cluster-e2e.sh
+## (header) -- the k3d gate is correct-by-construction but unvalidated in
+## CI (#2088); it needs the owner secret + a real run.
 cluster-e2e:
 	bash scripts/test/cluster-e2e.sh
 
-## Restart the cluster with FRESH binaries: stop, force --no-cache
-## rebuild of every image (so every Go layer re-runs against the
-## current source), then bring up detached. Named volumes are
-## PRESERVED so postgres data survives the restart -- only code +
-## containers get replaced. Use this after editing Go / MemQL /
-## prompt template source: layered build-cache hits on the Go stage
-## are otherwise hard to diagnose when a node produces stale
-## behaviour despite looking "rebuilt".
-dev-cluster-restart:
-	@echo "[restart] Stopping cluster (volumes preserved)…"
-	$(COMPOSE) $(COMPOSE_CLST) down --remove-orphans
-	@echo "[restart] Pruning dangling images…"
-	-@docker image prune -f >/dev/null 2>&1
-	@echo "[restart] Rebuilding all images --no-cache (this takes a few minutes)…"
-	$(COMPOSE) $(COMPOSE_CLST) build --no-cache
-	@echo "[restart] Starting cluster…"
-	$(COMPOSE) $(COMPOSE_CLST) up -d
-	@echo ""
-	@echo "Cluster containers (data preserved):"
-	@docker ps --filter "name=memql-" --format "  {{.Names}}\t{{.Status}}"
-
-## Restart the cluster with FRESH binaries AND a FRESH database.
-## Same as dev-cluster-restart but also drops named volumes so
-## postgres starts empty and every seed (domains, chunks, agents,
-## identity) re-runs from scratch.
-dev-cluster-restart-purge:
-	@echo "[WARNING] Purging cluster volumes — all data will be lost."
-	@echo "[purge] Stopping cluster + dropping volumes…"
-	$(COMPOSE) $(COMPOSE_CLST) down -v --remove-orphans
-	@echo "[purge] Pruning dangling images…"
-	-@docker image prune -f >/dev/null 2>&1
-	@echo "[purge] Rebuilding all images --no-cache (this takes a few minutes)…"
-	$(COMPOSE) $(COMPOSE_CLST) build --no-cache
-	@echo "[purge] Starting cluster with fresh DB…"
-	$(COMPOSE) $(COMPOSE_CLST) up -d
-	@echo ""
-	@echo "Cluster containers (fresh DB):"
-	@docker ps --filter "name=memql-" --format "  {{.Names}}\t{{.Status}}"
-
-## Stop the cluster (keeps volumes)
-dev-cluster-stop:
-	$(COMPOSE) $(COMPOSE_CLST) down
-
-## Follow cluster logs (all nodes)
-dev-cluster-logs:
-	$(COMPOSE) $(COMPOSE_CLST) logs -f
-
-## Parity litmus check (memql#1212): show the running cluster's per-
-## REPLICA mesh node ids. Each mesh node runs `deploy.replicas: 2` with
-## NO static MEMQL_NODE_ID, so the id is derived from each replica's
-## container hostname (component/node/identity.go os.Hostname() fallback,
-## the compose equivalent of staging's fieldRef: metadata.name). If two
-## replicas of the same service show DISTINCT ids, per-replica identity is
-## working and the cross-replica fan-out path (which reproduces #1217) is
-## live. Identical ids = the static-id collision bug is back.
-dev-cluster-status:
-	@echo "[parity] container -> derived node id (one per replica):"
-	@for svc in bff cognition voice agent planner workbench; do \
-		ids=$$($(COMPOSE) $(COMPOSE_CLST) ps -q $$svc 2>/dev/null); \
-		for cid in $$ids; do \
-			name=$$(docker inspect --format '{{.Name}}' $$cid | sed 's:^/::'); \
-			host=$$(docker inspect --format '{{.Config.Hostname}}' $$cid); \
-			printf "  %-40s node_id=%s\n" "$$name" "$$host"; \
-		done; \
-	done
-	@echo ""
-	@echo "[parity] front door: https://app.local.znas.io   (SPA); https://bff.local.znas.io (BFF gRPC + /memql/ws + /memql/audio)"
-	@echo "[parity] identity:   https://identity.local.znas.io   agent: https://agent.local.znas.io"
-	@echo "[parity] LiveKit:    ws://localhost:7880      (dev key 'devkey' / secret 'secret')"
-
-## Scale a single mesh node to N replicas on the running parity cluster
-## without a full restart. Useful to dial replica count up/down while
-## chasing a fan-out bug:  make dev-cluster-scale NODE=cognition N=3
-dev-cluster-scale:
-	@if [ -z "$(NODE)" ]; then echo "ERROR: set NODE=<bff|cognition|voice|agent|planner|workbench>"; exit 1; fi
-	@if [ -z "$(N)" ]; then echo "ERROR: set N=<replica count>"; exit 1; fi
-	$(COMPOSE) $(COMPOSE_CLST) up -d --no-recreate --scale $(NODE)=$(N) $(NODE)
-	@echo "[scale] $(NODE) -> $(N) replicas"
-
-## Tail the end-to-end voice latency waterfall (each voice turn emits
-## "voice trace" log lines at every pipeline stage). Tails the cluster's
-## voice path PLUS the voice-agent from the voice/avatar overlay (memql#1310).
-## Run `make dev-cluster-voice` first so the voice-agent service exists.
-voice-trace:
-	@$(COMPOSE) $(COMPOSE_POLY) logs -f bff cognition voice voice-agent 2>&1 | grep --line-buffered "voice trace"
-
-## Same as voice-trace but pre-loads the last 5 minutes of history
-## so you don't have to re-utter to see a waterfall when you're
-## starting the tail mid-session.
-voice-trace-now:
-	@$(COMPOSE) $(COMPOSE_POLY) logs -f --since 5m bff cognition voice voice-agent 2>&1 | grep --line-buffered "voice trace"
-
-## Reload the nginx LB so its DNS cache picks up any cluster nodes
-## that got recreated since the last reload. Useful after a partial
-## rebuild like `docker compose up -d --build agent` -- without a
-## reload, nginx keeps trying to reach the old container's IP and
-## the cockpit-worker reconnect loop fails with
-## "Unimplemented: unknown service WorkerService". The fully-restarted
-## flows (dev-cluster-refresh, dev-cluster-restart[-purge]) recreate
-## nginx as part of `compose up` and don't need this.
-##
-## Defense in depth -- the live nginx config also runs Docker's
-## embedded resolver with a 10s TTL on every variable-based upstream,
-## so partial-rebuild staleness self-heals after 10 seconds even
-## without a reload. This target just makes it instant.
-dev-nginx-reload:
-	@docker exec memql-lb nginx -s reload && echo "[nginx] reloaded"
-
-## Connect to the development database
+## Connect to the development database (after `make up`, via the k3d
+## postgres port-forward on :5432).
 db:
 	psql postgres://memql:memql_dev@localhost:5432/memql
 
@@ -531,18 +361,6 @@ proto-gen-check:
 	@bash scripts/dev/proto-gen.sh --check
 
 # ---------------------------------------------------------------------------
-# Local dev TLS (mkcert)
-# ---------------------------------------------------------------------------
-
-.PHONY: setup-tls
-
-## Generate locally-trusted TLS certs for the dev cluster. Requires
-## mkcert (`brew install mkcert nss` on macOS). Idempotent --
-## re-run any time to refresh certs.
-setup-tls:
-	bash scripts/dev/setup-tls.sh
-
-# ---------------------------------------------------------------------------
 # Docker image targets
 # ---------------------------------------------------------------------------
 
@@ -611,20 +429,20 @@ docker-planner:
 	docker build -f docker/memql.Dockerfile --build-arg BUILD_TAGS=planner -t memql:planner .
 
 # ---------------------------------------------------------------------------
-# Database wipe / dev refresh
+# Genesis envelope / dev tooling
 # ---------------------------------------------------------------------------
 # Authoring of env vars / secrets lives in `memql-cockpit genesis init`
-# (writes ~/.memql/genesis.znas). dev-cluster-refresh decrypts that file,
-# brings up the cluster, and seeds manifest-listed entries into the running
-# memQL cluster as concept rows.
+# (writes ~/.memql/genesis.znas). `make up` seeds the decrypted envelope
+# into the k3d cluster's k8s Secrets via scripts/k3d/seed-secrets.sh.
 
-.PHONY: db-purge dev-cluster-refresh dev-status install-deps genesis-seal
+.PHONY: install-deps genesis-seal
 
 ## Seal a plaintext .env into ~/.memql/genesis.znas (the encrypted
-## envelope dev-cluster-refresh decrypts at cluster start). Headless equivalent
-## of the cockpit's first-launch genesis wizard: parse + manifest-validate
-## + encrypt under MEMQL_MASTER_KEY (reused from your environment when
-## present, generated + printed on first use).
+## envelope scripts/k3d/seed-secrets.sh decrypts into k8s Secrets at
+## `make up`). Headless equivalent of the cockpit's first-launch genesis
+## wizard: parse + manifest-validate + encrypt under MEMQL_MASTER_KEY
+## (reused from your environment when present, generated + printed on
+## first use).
 ##   make genesis-seal ENV_FILE=~/Downloads/local.genesis.env
 genesis-seal:
 	@test -n "$(ENV_FILE)" || { echo "usage: make genesis-seal ENV_FILE=/path/to/local.genesis.env"; exit 1; }
@@ -632,40 +450,11 @@ genesis-seal:
 
 ## Install + verify every build-time tool the dev workflow needs:
 ## protoc + protoc-gen-go + protoc-gen-go-grpc (auto-installed when
-## missing) plus go / docker / mkcert (verified only -- printed
+## missing) plus go / docker / k3d / kubectl (verified only -- printed
 ## install hint if missing). Idempotent. Run before 'make generate'
-## or after a fresh clone. Wired into 'make dev-cluster-refresh' so
-## first-time clones aren't surprised by a missing protoc.
+## or after a fresh clone so 'make up' isn't surprised by a missing tool.
 install-deps:
 	@bash scripts/dev/install-deps.sh
-
-## Wipe ALL local memQL data (docker compose down -v + up -d) on the
-## parity cluster. The next dev-cluster-refresh re-seeds from
-## ~/.memql/genesis.znas. (Alias-ish of dev-cluster-restart-purge, which
-## also forces a --no-cache rebuild.)
-db-purge:
-	$(COMPOSE) $(COMPOSE_CLST) down -v
-	$(COMPOSE) $(COMPOSE_CLST) up -d --build
-
-## Quick status snapshot: docker daemon? memQL gRPC reachable? what
-## containers are running? Useful when 'dev-cluster-refresh' didn't
-## behave as expected. Implementation lives in scripts/dev/status.sh
-## per the function-based-shell-script convention (CLAUDE.md).
-dev-status:
-	@bash scripts/dev/status.sh
-
-## Single-command "fresh testing stack" on the BLESSED 2-replica parity
-## cluster (memql#1283, epic memql#1259 / follows memql#1260): generate
-## the wildcard TLS cert (mkcert) -> decrypt genesis (needs
-## MEMQL_MASTER_KEY) -> wipe DB -> rebuild -> restart -> wait healthy ->
-## reseed -- on docker-compose.cluster.yml (2 replicas/mesh node +
-## copresent SPA + LiveKit). The cluster serves at the TLS
-## *.local.znas.io subdomains (memql#1313) -- parity with staging's
-## per-subdomain ingress; the seed + health-wait target
-## https://bff.local.znas.io. Implementation lives in
-## scripts/dev/cluster-refresh.sh.
-dev-cluster-refresh:
-	@bash scripts/dev/cluster-refresh.sh
 
 # ---------------------------------------------------------------------------
 # Azure deployment (staging foundation -- epic #491)
@@ -950,22 +739,16 @@ help:
 	@echo "  make agent        Build agent node binary"
 	@echo "  make planner      Build planner node binary"
 	@echo ""
-	@echo "RUN"
+	@echo "RUN (k3d + ArgoCD local cluster -- Argo parity, #2061)"
 	@echo "  make run          Run standalone server locally (single process, not a topology)"
-	@echo "  make dev-cluster-up            BLESSED local topology: boot staging-parity cluster (2 replicas/node) in background"
-	@echo "  make dev-cluster-voice         Cluster + OPT-IN voice/avatar overlay (voice-agent + TURN relay). Voice works; avatar VIDEO is staging-only (#1277)"
-	@echo "  make dev-cluster-down          Stop the staging-parity cluster (keeps volumes)"
-	@echo "  make dev-cluster               Same as dev-cluster-up but FOREGROUND (build + up)"
-	@echo "  make dev-cluster-restart       Restart cluster fresh (down + rebuild + up -d)"
-	@echo "  make dev-cluster-restart-purge Restart cluster AND wipe the database (down -v)"
-	@echo "  make dev-cluster-stop          Stop the cluster"
-	@echo "  make dev-cluster-logs          Follow cluster logs"
-	@echo "  make dev-cluster-status        Show per-replica node ids (parity litmus) + front-door URLs"
-	@echo "  make dev-cluster-scale NODE=x N=3  Scale one mesh node on the running cluster"
-	@echo "  make dev-nginx-reload    Reload nginx LB so its DNS cache picks up recreated nodes"
-	@echo "  make voice-trace         Tail end-to-end voice latency waterfall (per-stage ms)"
-	@echo "  make voice-trace-now     Same but pre-loads last 5m of voice trace history"
-	@echo "  make db           Connect to development database (psql)"
+	@echo "  make up                        BLESSED local topology: boot k3d + ArgoCD + the local overlay (single-node default)"
+	@echo "  make up SERVERS=2 AGENTS=1     Multi-node cluster (for cross-node mesh testing)"
+	@echo "  make dev [NODE=<type>]         Inner loop: rebuild image -> k3d import -> rollout restart"
+	@echo "  make k3d-scale N=2             Scale every app Deployment to N replicas (2 = staging parity)"
+	@echo "  make k3d-status                Show per-pod MEMQL_NODE_IDs (mesh parity litmus) + ArgoCD sync"
+	@echo "  make k3d-secrets               (Re-)seed the k8s Secrets in a running cluster"
+	@echo "  make down [PURGE=1]            Tear down the k3d cluster (PURGE=1 also drops the kubeconfig context)"
+	@echo "  make db           Connect to development database (psql, via the k3d postgres port-forward)"
 	@echo ""
 	@echo "TEST"
 	@echo "  make test         Run all tests"
@@ -992,14 +775,12 @@ help:
 	@echo "  make docker-agent      Build agent image"
 	@echo "  make docker-planner    Build planner image"
 	@echo ""
-	@echo "DEV REFRESH"
+	@echo "DEV TOOLING"
 	@echo "  Authoring of env vars / secrets is in memql-cockpit (see"
-	@echo "  'memql-cockpit genesis init'). The targets below operate on"
-	@echo "  the cluster + the decrypted genesis."
-	@echo "  make install-deps              Install + verify build tools (protoc, plugins, go, docker, mkcert)"
-	@echo "  make db-purge                  Wipe DB (no restore)"
-	@echo "  make dev-cluster-refresh       BLESSED local refresh: verify deps -> TLS cert -> decrypt genesis -> wipe -> restart -> seed on the 2-replica parity cluster (front door https://app.local.znas.io)"
-	@echo "  make dev-status                Quick snapshot: docker daemon, gRPC handshake, container list"
+	@echo "  'memql-cockpit genesis init'). 'make up' seeds the decrypted"
+	@echo "  genesis envelope into the k3d cluster's k8s Secrets."
+	@echo "  make install-deps              Install + verify build tools (protoc, plugins, go, docker, k3d, kubectl)"
+	@echo "  make genesis-seal ENV_FILE=... Seal a plaintext .env into ~/.memql/genesis.znas"
 	@echo ""
 	@echo "AZURE DEPLOY (epic #491)"
 	@echo "  make deploy-setup              Idempotent Azure + toolchain bootstrap (ENV=staging|production)"

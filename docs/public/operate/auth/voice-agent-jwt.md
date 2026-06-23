@@ -98,27 +98,25 @@ process environment of the voice-agent container -- the sealed
 genesis envelope (dev) and the deploy pipeline's secret store
 (prod) do NOT carry it.
 
-### Dev (`make dev-refresh`)
+### Local cluster: self-bootstrap (default, memql#342)
 
-### Dev: self-bootstrap (default, memql#342)
-
-`docker-compose.polyphon.yml` ships with the self-bootstrap path
-wired by default so a stock `docker compose up` brings the
-voice-agent up cleanly without `make dev-refresh` running first.
-On startup, when `VOICE_AGENT_TOKEN` is empty, the Go
-voice-agent's `ResolveVoiceAgentToken` posts to the identity service's
-`POST /node/bootstrap` endpoint with `tokenClass="voice_agent"` +
+The `voice` Deployment in the local k3d cluster ships the
+self-bootstrap path wired by default so the voice pod comes up cleanly
+without an out-of-band mint step. On startup, when `VOICE_AGENT_TOKEN`
+is empty, the Go voice-agent's `ResolveVoiceAgentToken` posts to the
+identity service's `POST /node/bootstrap` endpoint with
+`tokenClass="voice_agent"` +
 `instanceId="<MEMQL_VOICE_AGENT_INSTANCE_ID>"`, presenting the
 `MEMQL_NODE_BOOTSTRAP_TOKEN` bootstrap secret. Identity returns a
 minted `class="voice_agent"` JWT and the agent uses it for the
 rest of the process's lifetime.
 
-The compose file defaults all three knobs to dev sentinels:
+The local overlay defaults all three knobs to dev sentinels:
 
-| Env var | Dev default | Production posture |
+| Env var | Local default | Production posture |
 | --- | --- | --- |
 | `MEMQL_NODE_BOOTSTRAP_TOKEN` | `dev-bootstrap-do-not-use-in-production-memql338` | Leave unset on identity side -- endpoint stays dark |
-| `IDENTITY_VERIFIER_BASE_URL` | `http://identity:8081` | Set to the deployed identity URL (HTTPS) |
+| `IDENTITY_VERIFIER_BASE_URL` | `http://identity:8081` (cluster DNS) | Set to the deployed identity URL (HTTPS) |
 | `MEMQL_VOICE_AGENT_INSTANCE_ID` | `voice-agent-local` | Set to the deployed instance label (e.g. `voice-agent-prod-us-east-1`) |
 
 The endpoint reuses the same secret + same bootstrap surface as
@@ -128,29 +126,27 @@ and one endpoint to audit. The node-class companion lives in
 lives in `integrations/voice/agent/bootstrap.go`
 (`maybeBootstrapVoiceAgentToken`).
 
-### Dev: out-of-band mint (`make dev-refresh`)
+### Out-of-band mint (operator-provisioned)
 
-The pre-#342 out-of-band path still works and stays the
-production-grade flow. `scripts/dev/refresh.sh` mints and injects
-the token explicitly after the identity service is healthy:
+The out-of-band path stays the production-grade flow and also works
+locally. Mint the token explicitly after the identity service is
+healthy and inject it as the pod's `VOICE_AGENT_TOKEN`:
 
-1. Stack comes up via `docker compose up`. The voice-agent
-   self-bootstraps via the path above and starts cleanly.
-2. `wait_for_identity` polls `http://localhost:8081/healthz` until
-   the identity service reports `status=ok` with `memoryNodesDB`
-   running.
-3. `mint_voice_agent_token` execs the identity binary's
+1. The voice pod self-bootstraps via the path above and starts cleanly.
+2. Wait until the identity service reports `status=ok` with
+   `memoryNodesDB` running (`kubectl logs -n memql deploy/identity`).
+3. `make voice-agent-token INSTANCE=voice-agent-local` execs the
+   identity binary's
    `voice-agent-token mint --instance-id=voice-agent-local`
    subcommand and captures the JWT.
-4. The script exports `VOICE_AGENT_TOKEN` into its shell and runs
-   `docker compose up -d --no-deps --force-recreate voice-agent`
-   so compose re-evaluates `${VOICE_AGENT_TOKEN:-}` in
-   `docker-compose.polyphon.yml`'s voice-agent `environment:` block.
-   Once VOICE_AGENT_TOKEN is set, the explicit token wins over the
+4. Seed the JWT into the `memql-secrets` Secret (`make k3d-secrets`
+   after updating the genesis envelope) and roll the Deployment
+   (`kubectl rollout restart -n memql deploy/voice`). Once
+   `VOICE_AGENT_TOKEN` is set, the explicit token wins over the
    self-bootstrap path (operator-provisioned tokens always win).
 
-The instance id is stable across refreshes (`voice-agent-local`),
-so each refresh mints a fresh JWT against a freshly inserted
+The instance id is stable across remints (`voice-agent-local`),
+so each remint produces a fresh JWT against a freshly inserted
 `v1:identity:identity` row; old rows soft-expire via `expiresAt`.
 
 ### Which path runs?

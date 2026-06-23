@@ -220,7 +220,7 @@ func TestMaybeBootstrapNodeToken_RefusesInsecureHTTP(t *testing.T) {
 // TestMaybeBootstrapNodeToken_AcceptsInsecureHTTPWithEscapeHatch
 // confirms the dev escape hatch still works: with
 // MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP=1 the plaintext URL is
-// accepted (the docker-compose dev stack relies on this), so the guard
+// accepted (a local plain-HTTP dev cluster relies on this), so the guard
 // is opt-out-able for local development without weakening the secure
 // default. Uses an unreachable host + zero retry budget so the call
 // gets past the scheme guard and fails at the transport layer, proving

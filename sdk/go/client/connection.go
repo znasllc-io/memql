@@ -50,10 +50,10 @@ type ConnectConfig struct {
 // The endpoint may be a bare host:port (plaintext gRPC), or carry
 // an explicit scheme: http://, grpc:// (plaintext), https://,
 // grpcs:// (TLS). When TLS is selected the client uses the system
-// trust store -- mkcert-issued dev certs are trusted automatically
-// once `make setup-tls` has installed the local root CA, so
-// https://bff.local.znas.io Just Works against the canonical local
-// stack. See ParseClusterEndpoint for the full grammar.
+// trust store, so a publicly-trusted https://bff.<domain> endpoint
+// Just Works. The local k3d cluster is reached over plaintext gRPC
+// via the bff port-forward (localhost:50051). See
+// ParseClusterEndpoint for the full grammar.
 func Connect(ctx context.Context, cfg ConnectConfig) (*Connection, error) {
 	dial, useTLS, err := ParseClusterEndpoint(cfg.Endpoint)
 	if err != nil {

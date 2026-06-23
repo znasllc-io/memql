@@ -1,6 +1,6 @@
 // Command genesis-seal seals a plaintext .env into the encrypted
-// ~/.memql/genesis.znas envelope that the local cluster (make
-// dev-refresh / docker compose) decrypts at startup.
+// ~/.memql/genesis.znas envelope that the local k3d cluster decrypts
+// into k8s Secrets at `make up` (scripts/k3d/seed-secrets.sh).
 //
 // It is the headless equivalent of the cockpit's first-launch genesis
 // wizard: parse the .env, validate it against the secrets manifest, and

@@ -26,9 +26,8 @@ func fullDeploymentNode(fields map[string]any) *memqlv1.MemoryNode {
 func TestSelectDriver(t *testing.T) {
 	exec := &fakeExecutor{}
 	cases := map[string]string{
-		"azure":        "azure",
-		"":             "azure", // empty defaults to azure
-		"docker-local": "docker-local",
+		"azure": "azure",
+		"":      "azure", // empty defaults to azure
 	}
 	for provider, want := range cases {
 		d, err := selectDriver(exec, provider)
@@ -42,6 +41,11 @@ func TestSelectDriver(t *testing.T) {
 	}
 	if _, err := selectDriver(exec, "gcp"); err == nil {
 		t.Error("selectDriver(gcp) expected error for unknown provider")
+	}
+	// The retired docker-local provider is now a hard error: local
+	// clusters are operated via `make up` (k3d + ArgoCD), not the console.
+	if _, err := selectDriver(exec, "docker-local"); err == nil {
+		t.Error("selectDriver(docker-local) expected error for retired provider")
 	}
 }
 
@@ -80,12 +84,9 @@ func TestDeployAzureProviderUsesPromote(t *testing.T) {
 	if !res.GetOk() {
 		t.Fatalf("ok = false: %q", res.GetMessage())
 	}
-	// azure driver -> promote.sh (version, staging); docker compose NOT called.
+	// azure driver -> promote.sh (version, staging).
 	if len(exec.promoteCalls) != 1 || exec.promoteCalls[0] != [2]string{"1.2.3", "staging"} {
 		t.Errorf("promote calls = %v, want [[1.2.3 staging]]", exec.promoteCalls)
-	}
-	if len(exec.composeCalls) != 0 {
-		t.Errorf("azure deploy must NOT call docker compose, got %v", exec.composeCalls)
 	}
 	// in_progress then succeeded transitions.
 	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "in_progress"`); got != 1 {
@@ -96,29 +97,28 @@ func TestDeployAzureProviderUsesPromote(t *testing.T) {
 	}
 }
 
-// A docker-local record deploys via the compose flow, never promote.sh.
-func TestDeployDockerLocalProviderUsesCompose(t *testing.T) {
+// A docker-local record can no longer deploy: the provider is retired
+// and selectDriver rejects it, so the record transitions to failed and
+// no driver runs (local clusters use `make up`, not the deploy console).
+func TestDeployDockerLocalProviderRejected(t *testing.T) {
 	eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{
 		fullDeploymentNode(map[string]any{
 			"deploymentId": "d2", "status": "pending", "version": "9.9.9",
 			"provider": "docker-local", "environment": "development",
 		}),
 	}}
-	exec := &fakeExecutor{composeOut: "cluster up"}
+	exec := &fakeExecutor{}
 	svc := newTestServiceWithEngine(t, exec, &fakeAudit{}, eng)
 
-	res, err := svc.Deploy(ctxWithRole(auth.RoleAdmin), &memqlv1.DeployRequest{DeploymentId: "d2"})
-	if err != nil {
-		t.Fatalf("Deploy: %v", err)
-	}
-	if !res.GetOk() {
-		t.Fatalf("ok = false: %q", res.GetMessage())
-	}
-	if len(exec.composeCalls) != 1 || exec.composeCalls[0] != "9.9.9" {
-		t.Errorf("compose calls = %v, want [9.9.9]", exec.composeCalls)
+	res, _ := svc.Deploy(ctxWithRole(auth.RoleAdmin), &memqlv1.DeployRequest{DeploymentId: "d2"})
+	if res.GetOk() {
+		t.Error("ok = true, want false for retired docker-local provider")
 	}
 	if len(exec.promoteCalls) != 0 {
-		t.Errorf("docker-local deploy must NOT call promote.sh, got %v", exec.promoteCalls)
+		t.Errorf("retired docker-local deploy must NOT call promote.sh, got %v", exec.promoteCalls)
+	}
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 1 {
+		t.Errorf("failed transition = %d, want 1; queries = %v", got, eng.queries)
 	}
 }
 
@@ -167,7 +167,7 @@ func TestDeployUnknownProviderFails(t *testing.T) {
 	if res.GetOk() {
 		t.Error("ok = true, want false on unknown provider")
 	}
-	if len(exec.promoteCalls) != 0 || len(exec.composeCalls) != 0 {
+	if len(exec.promoteCalls) != 0 {
 		t.Error("no driver should run for an unknown provider")
 	}
 	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 1 {
@@ -188,7 +188,7 @@ func TestDeployNotFound(t *testing.T) {
 	if !strings.Contains(res.GetMessage(), "not found") {
 		t.Errorf("message = %q, want not-found notice", res.GetMessage())
 	}
-	if len(exec.promoteCalls) != 0 || len(exec.composeCalls) != 0 {
+	if len(exec.promoteCalls) != 0 {
 		t.Error("no driver should run for a missing deployment")
 	}
 }

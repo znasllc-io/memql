@@ -23,9 +23,9 @@ import (
 //
 // The canonical memql client endpoint behind NGINX is
 // https://bff.${DOMAIN}, which parses to ("bff.${DOMAIN}:443", true).
-// The cluster-mode plaintext path (docker-compose.cluster.yml exposes
-// 50050:50051) parses to ("localhost:50050", false) when the user
-// pastes "localhost:50050". Both round-trip cleanly.
+// The cluster-mode plaintext path (the local k3d cluster port-forwards
+// bff gRPC to localhost) parses to ("localhost:50050", false) when the
+// user pastes "localhost:50050". Both round-trip cleanly.
 //
 // Empty inputs and parse failures return a typed error -- the caller
 // can surface them through the cluster-add form's validation lane.

@@ -401,8 +401,8 @@ call `a.engine.RegisterIntegration(yourInstance)` directly.
 
 ### Test It
 ```bash
-make dev-cluster-up
-make dev-cluster-logs | grep -iE "plug-in|<name>"
+make dev NODE=bff
+kubectl logs -n memql deploy/bff -f | grep -iE "plug-in|<name>"
 ```
 
 ---
@@ -411,19 +411,19 @@ make dev-cluster-logs | grep -iE "plug-in|<name>"
 
 ### Check Integration Startup
 ```bash
-docker-compose logs memql | grep "integration.*started"
+kubectl logs -n memql deploy/bff | grep "integration.*started"
 ```
 
 ### Watch Integration Activity
 ```bash
 # Cognition integration
-docker-compose logs -f memql | grep "cognition"
+kubectl logs -n memql deploy/cognition -f | grep "cognition"
 
 # Turn state
-docker-compose logs -f memql | grep "turn state"
+kubectl logs -n memql deploy/cognition -f | grep "turn state"
 
 # AI responses
-docker-compose logs -f memql | grep "ai.*response"
+kubectl logs -n memql deploy/cognition -f | grep "ai.*response"
 ```
 
 ### Common Issues

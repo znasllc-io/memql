@@ -163,19 +163,18 @@ func NewIdentity(version string) *Identity {
 	nodeId := strings.TrimSpace(os.Getenv("MEMQL_NODE_ID"))
 	if nodeId == "" {
 		// Derive the node id from the container/host hostname when the
-		// operator left MEMQL_NODE_ID unset. This is the Docker-Compose
-		// equivalent of the k8s `fieldRef: metadata.name` override the
-		// staging manifests use (deploy/k8s/base/bff.yaml): under
-		// `deploy.replicas: N` every replica shares the same env, so a
-		// static MEMQL_NODE_ID would collide and PeerManager would key
-		// distinct replicas under one id -- the chat-outage shape from
-		// memql#1042 (shared MEMQL_NODE_ID=bff-local). Compose assigns
-		// each replica a unique container hostname
-		// (`<project>-<service>-<n>`), so os.Hostname() yields a stable,
-		// per-replica id with zero static config, letting the local
-		// multi-replica cluster reproduce cross-node fan-out bugs
-		// (memql#1212 / #1217). Falls back to a random short id only when
-		// the hostname is unavailable (it never is under Docker/k8s).
+		// operator left MEMQL_NODE_ID unset. This is the fallback for the
+		// k8s `fieldRef: metadata.name` override the manifests use
+		// (deploy/k8s/base/bff.yaml, local + staging + prod): under
+		// `replicas: N` every replica shares the same env, so a static
+		// MEMQL_NODE_ID would collide and PeerManager would key distinct
+		// replicas under one id -- the chat-outage shape from memql#1042
+		// (shared MEMQL_NODE_ID=bff-local). Every pod gets a unique
+		// hostname, so os.Hostname() yields a stable, per-replica id with
+		// zero static config, letting the local multi-replica cluster
+		// reproduce cross-node fan-out bugs (memql#1212 / #1217). Falls
+		// back to a random short id only when the hostname is unavailable
+		// (it never is under Docker/k8s).
 		if host, err := os.Hostname(); err == nil {
 			nodeId = strings.TrimSpace(host)
 		}

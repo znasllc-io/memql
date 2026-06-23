@@ -19,7 +19,7 @@
 //     not shared -- the two services have independent dispatch
 //     reasons and shouldn't share a single forwarder instance).
 //
-// The split mirrors the docker-compose.cluster.yml topology: the
+// The split mirrors the deployed cluster topology: the
 // planner runs as a separate node-type binary
 // (`make build-planner`) and only loads what's relevant to plan
 // execution. Putting plan-execution code in cognition means the

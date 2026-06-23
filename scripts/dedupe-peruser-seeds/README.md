@@ -28,9 +28,9 @@ MEMORY_NODES_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmo
   go run ./scripts/dedupe-peruser-seeds --execute
 ```
 
-For docker-compose environments, the host can reach the DB at
-`localhost:5432` (port mapped on `memql-db`). For Cloud Run / staging,
-substitute the appropriate DSN.
+For the local k3d cluster, the host can reach the DB at `localhost:5432`
+(the postgres port-forward). For staging / prod, substitute the
+appropriate DSN.
 
 The script accepts `--dsn=postgres://...` as an explicit alternative
 to the env var.
@@ -71,7 +71,10 @@ script prints a `NEXT STEP` message. **Restart the memql cluster** so
 the seed materializer's startup sweep re-writes the canonical row:
 
 ```bash
-docker compose -f docker/docker-compose.cluster.yml restart bff cognition agent planner voice
+# local k3d:
+make dev NODE=bff,cognition,agent,planner
+# or directly:
+kubectl rollout restart deploy/bff deploy/cognition deploy/agent deploy/planner deploy/voice -n memql
 ```
 
 Each restarted node's `SeedMaterializer.Start()` will re-iterate

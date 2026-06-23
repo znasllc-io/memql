@@ -47,10 +47,10 @@
 #
 # Usage
 # -----
-#   make k3d-dev                          # rebuild + restart all app nodes
-#   make k3d-dev NODE=bff                 # rebuild + restart one node
-#   make k3d-dev NODE=bff,cognition       # comma-separated list
-#   make k3d-dev PULL_INFRA=1            # pull + re-import infra images
+#   make dev                          # rebuild + restart all app nodes
+#   make dev NODE=bff                 # rebuild + restart one node
+#   make dev NODE=bff,cognition       # comma-separated list
+#   make dev PULL_INFRA=1            # pull + re-import infra images
 #
 # Per the repo + global Skills+Scripts convention (CLAUDE.md): function-based,
 # one responsibility per function, main() at the bottom. set -euo pipefail.
@@ -129,7 +129,7 @@ function check_prerequisites() {
     fi
 
     if ! k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}[[:space:]]"; then
-        error "Cluster '${CLUSTER_NAME}' is not running. Run 'make k3d-up' first."
+        error "Cluster '${CLUSTER_NAME}' is not running. Run 'make up' first."
         exit 1
     fi
 

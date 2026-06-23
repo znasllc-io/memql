@@ -125,7 +125,7 @@ goal text indicates they're needed -- see the
 ## 6. Testing the MVP locally
 
 ```bash
-make dev-cluster-up
+make up
 ```
 
 Then:
@@ -138,11 +138,12 @@ Then:
    ten most beautiful birds on earth and save it as `birds.md`."
 3. The agent calls `workbenchHost` with `action=fs_write` (and
    probably `action=exec` for any research it does).
-4. Verify the workspace inside the memql container:
+4. Verify the workspace inside the agent pod (the MVP workbench runs
+   in-process on the agent node):
 
    ```bash
-   docker compose exec memql ls /var/lib/memql/workbenches/
-   docker compose exec memql cat /var/lib/memql/workbenches/<planId>/birds.md
+   kubectl exec -n memql deploy/agent -- ls /var/lib/memql/workbenches/
+   kubectl exec -n memql deploy/agent -- cat /var/lib/memql/workbenches/<planId>/birds.md
    ```
 
 ## 7. Teardown

@@ -152,9 +152,9 @@ verification's job (5.11, #1975). To read it:
    once the cache has been touched (silent on a quiet system).
 2. Grep the BFF/agent/cognition logs for the emitter line:
    ```
-   make dev-cluster-logs | grep 'aiCache: stats'
+   kubectl logs -n memql deploy/bff --all-containers | grep 'aiCache: stats'
    ```
-   (staging: the equivalent `kubectl logs` across the AI-invoking nodes).
+   (run the same across the agent/cognition Deployments locally and on staging).
    Each line carries `hits`, `misses`, `hitRatio`, `expiredOnRead`, `sets`,
    `size`. `hitRatio` is cumulative since process start, so take the **last**
    line per process for the soak total, or subtract two snapshots for a windowed

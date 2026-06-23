@@ -275,15 +275,14 @@ front door). No manual reseal or mesh roll is required.
 
 ## Dev quick-start
 
-The local stack runs via `make dev-cluster-up` -- see
-[docs/public/overview/quickstart.md](../../overview/quickstart.md) for the prerequisite wildcard
-DNS record (`*.${IDENTITY_BOOTSTRAP_DOMAIN}` -> `127.0.0.1`,
-default `*.local.znas.io`) and the mkcert TLS setup
-(`make setup-tls`). The compose stack already wires identity at
-`https://identity.${IDENTITY_BOOTSTRAP_DOMAIN}` with every other
-node verifying against that issuer.
+The local cluster runs via `make up` -- see
+[docs/public/overview/quickstart.md](../../overview/quickstart.md) for the
+port-forward reference. The local overlay wires identity at
+`http://identity:8081` (cluster DNS) with every other node verifying
+against that issuer; reach it from the host via
+`kubectl port-forward -n memql svc/identity 8085:8085`.
 
-For running the binaries standalone (no docker), set the same URL:
+For running the binaries standalone (no cluster), set the same URL:
 
 ```bash
 # Identity binary

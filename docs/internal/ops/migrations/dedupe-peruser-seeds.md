@@ -41,7 +41,7 @@ remove the dupes already on disk; this migration does.
 Run from a host that can reach the target Postgres instance.
 
 ```bash
-# Local docker-compose stack:
+# Local k3d cluster (via the postgres port-forward, make db):
 MEMORY_NODES_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable' \
   go run ./scripts/dedupe-peruser-seeds --dry-run
 
@@ -97,12 +97,11 @@ cluster restart so the seed materializer's startup sweep writes
 the canonical row:
 
 ```bash
-# Single-binary compose:
-docker compose -f docker/docker-compose.cluster.yml restart
+# Local k3d cluster -- roll the seed-writing nodes:
+kubectl rollout restart -n memql \
+  deploy/bff deploy/cognition deploy/agent deploy/planner deploy/voice
 
-# Cluster compose:
-docker compose -f docker/docker-compose.cluster.yml restart \
-  memql-bff memql-cognition memql-agent memql-planner memql-voice
+# Staging / prod: the same kubectl rollout restart against the target cluster.
 ```
 
 Concurrent racers across the restarted nodes collapse to versions

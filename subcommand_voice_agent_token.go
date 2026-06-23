@@ -113,9 +113,10 @@ func runVoiceAgentTokenMint(args []string) int {
 	}
 
 	// CLI subcommand: logs to stderr so stdout stays clean for the
-	// minted bearer (which scripts/dev/lib.sh's mint_voice_agent_token
-	// captures via $(...)). See main.go::mustCreateCLILogger for the
-	// full rationale + memql#353 for what broke before the split.
+	// minted bearer (which a `bearer=$(kubectl exec deploy/identity --
+	// /app/memql voice-agent-token mint ...)` capture, e.g. via `make
+	// voice-agent-token`, pulls out). See main.go::mustCreateCLILogger
+	// for the full rationale + memql#353 for what broke before the split.
 	//
 	// Same os.Stdout-redirect pattern subcommand_node_token.go uses;
 	// component-internal loggers (15+ of them) hardcode os.Stdout, so

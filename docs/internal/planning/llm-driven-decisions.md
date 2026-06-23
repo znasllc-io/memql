@@ -70,7 +70,7 @@ Migrate decision-making from hardcoded heuristics to LLM-driven structured outpu
 
 **Tasks:**
 - Read both cache implementations (AI cache in `component/memql/si_*.go`, DSL cache via `@cache(ttl=...)` annotations) end-to-end. Document key derivation, eviction policy, TTL handling.
-- Add metrics: hit count, miss count, eviction count, age-at-hit per cache. Wire to a debug endpoint or per-component counters that show up in `make dev-status` / BFF logs.
+- Add metrics: hit count, miss count, eviction count, age-at-hit per cache. Wire to a debug endpoint or per-component counters that show up in `make k3d-status` / BFF logs.
 - Run the dev stack for a week of normal usage. Capture baseline numbers.
 - Audit: are there callers whose keys include high-cardinality data (timestamps, request ids) that prevent hits? Are there obvious double-calls inside a single request that should hit cache the second time?
 - Fix the bugs found.

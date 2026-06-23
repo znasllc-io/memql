@@ -6,9 +6,9 @@
 # Print a parity litmus for the local k3d cluster: pod status, per-replica
 # MEMQL_NODE_ID values (cross-node mesh test), and ArgoCD sync status.
 #
-# Mirrors 'make dev-cluster-status' for the Docker Compose cluster.
-# Primary use: verify the mesh formed across replicas and that each
-# pod has a UNIQUE node id (required for cross-node event routing).
+# Backs 'make k3d-status'. Primary use: verify the mesh formed across
+# replicas and that each pod has a UNIQUE node id (required for
+# cross-node event routing).
 #
 # Per the repo + global Skills+Scripts convention (CLAUDE.md): function-based,
 # one responsibility per function, main() at the bottom. set -euo pipefail.
@@ -47,7 +47,7 @@ function check_cluster() {
 
     if ! k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}[[:space:]]"; then
         echo "  STATUS: cluster '${CLUSTER_NAME}' is NOT running."
-        echo "  Run:    make k3d-up"
+        echo "  Run:    make up"
         return 1
     fi
 
@@ -63,7 +63,7 @@ function check_argocd() {
     section "ArgoCD Application"
 
     if ! kubectl get namespace argocd &>/dev/null; then
-        echo "  STATUS: ArgoCD namespace not found -- run 'make k3d-up' first."
+        echo "  STATUS: ArgoCD namespace not found -- run 'make up' first."
         return 0
     fi
 
@@ -77,7 +77,7 @@ REVISION:.status.sync.revision" 2>/dev/null || \
         kubectl get application memql-local -n argocd 2>/dev/null
     else
         echo "  STATUS: memql-local Application not found."
-        echo "  Run:    make k3d-up"
+        echo "  Run:    make up"
     fi
 }
 
@@ -206,8 +206,8 @@ function main() {
     check_node_ids
 
     echo ""
-    echo "  Tear down:  make k3d-down"
-    echo "  Inner loop: make k3d-dev [NODE=<type>]"
+    echo "  Tear down:  make down"
+    echo "  Inner loop: make dev [NODE=<type>]"
     echo ""
 }
 

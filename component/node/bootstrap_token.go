@@ -27,7 +27,7 @@ import (
 // with the secret and uses the minted JWT for outbound
 // NodeService.Stream calls.
 //
-// Why this exists: without it, the docker-compose dev stack came up
+// Why this exists: without it, a local multi-node cluster came up
 // with zero node tokens wired and every peer call failed with
 // "authorization header missing" -- bff <-> cognition / agent /
 // planner / voice all broken. See #338 for the full trace.
@@ -76,8 +76,9 @@ const (
 // at an http:// IDENTITY_VERIFIER_BASE_URL would fire a doomed request
 // the server bounces. We enforce the same invariant client-side so the
 // misconfig fails fast and loud at the node instead. Set to "1" to
-// allow plaintext in dev (the docker-compose stack already sets the
-// matching server-side hatch); staging/prod (k8s) leave both unset, so
+// allow plaintext in dev (a local cluster that talks plain-HTTP
+// in-network sets the matching server-side hatch); staging/prod leave
+// both unset, so
 // http there is a hard, non-retryable failure -- which is the
 // regression this guard exists to catch.
 const envAllowInsecureNodeBootstrap = "MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP"

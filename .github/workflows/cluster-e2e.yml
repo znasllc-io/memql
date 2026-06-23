@@ -2,41 +2,51 @@ name: cluster-e2e
 
 # Resilient-mesh parity gate (epic znasllc-io/memql#1259 Phase 4, #1273).
 #
-# Boots the 2-replica STAGING-PARITY cluster (the same topology staging runs:
-# bff/cognition/voice/agent/planner/workbench x2 + identity x2 + the copresent
-# SPA) and runs the cross-replica delivery gate (`make cluster-e2e` ->
-# scripts/test/cluster-e2e.sh -> test/clustere2e, build-tagged `clustere2e`,
-# from #1261). The gate asserts the #1259 delivery invariant: an utterance
-# produced on one bff replica reaches a subscriber anchored on EVERY bff
-# replica, exactly once. It went GREEN once #1264 migrated the chat-reply path
-# onto the durable backbone.
+# Boots the 2-replica STAGING-PARITY cluster on k3d + ArgoCD -- the SAME
+# deploy/k8s overlays + ArgoCD reconciliation path staging runs (Epic 0, Argo
+# parity #2061; migrated off Docker Compose in #2068/#2088) -- and runs the
+# cross-replica delivery gate (`make cluster-e2e` -> scripts/test/cluster-e2e.sh
+# -> test/clustere2e, build-tagged `clustere2e`, from #1261). The gate asserts
+# the #1259 delivery invariant: an utterance produced on one bff replica reaches
+# a subscriber anchored on EVERY bff replica, exactly once. It went GREEN once
+# #1264 migrated the chat-reply path onto the durable backbone.
+#
+# CORRECT-BY-CONSTRUCTION BUT UNVALIDATED IN CI (#2088)
+# ----------------------------------------------------
+# This k3d migration of the gate has NOT been run end-to-end in CI: the gate
+# SKIPS without the owner secret (see below), so a real run requires the owner
+# to (a) provision MEMQL_PACKAGES_TOKEN and (b) dispatch this workflow. The
+# harness mirrors the local `make cluster-e2e` flow exactly (make up -> build +
+# import the gate-subset images -> scale to 2 -> seed a JWT -> go test), but it
+# has only been validated by construction (shellcheck + actionlint + a local
+# kustomize render), not by a green CI run. Owner validation is the finalization
+# step (provision -> dispatch -> verify green -> flip to a required deploy gate).
 #
 # WHY THIS IS NOT ON THE PR MERGE QUEUE
 # -------------------------------------
-# A full-cluster boot (~16 containers, a cold-cache multi-image build, a 10m
-# health wait) is heavy and inherently flakier than a unit lane. Making it a
-# required check on `pull_request` would let one slow/flaky boot WEDGE the merge
-# queue. So this is a DEPLOY-PATH gate, not a merge-queue gate: it runs on the
-# deploy/promotion trigger (a release lockfile landing on main) + on manual
-# dispatch, and its result is the green-before-staging-deploy signal -- NOT a
-# branch-protection required check on PRs. (`ci-required` in ci.yml stays the
-# only required PR check.) See docs/public/operate/lifecycle-runbook.md.
+# A full-cluster boot (k3d + ArgoCD + a cold-cache carrier image build + a
+# multi-minute readiness wait) is heavy and inherently flakier than a unit lane.
+# Making it a required check on `pull_request` would let one slow/flaky boot
+# WEDGE the merge queue. So this is a DEPLOY-PATH gate, not a merge-queue gate:
+# it runs on the deploy/promotion trigger (a release lockfile landing on main) +
+# on manual dispatch, and its result is the green-before-staging-deploy signal
+# -- NOT a branch-protection required check on PRs. (`ci-required` in ci.yml
+# stays the only required PR check.) See docs/public/operate/lifecycle-runbook.md.
 #
 # OWNER PREREQUISITE -- SECRETS (the job SKIPS cleanly without them)
 # -----------------------------------------------------------------
-# The parity cluster builds the carrier (memql-bff-copresent) + the copresent
-# SPA from their PRIVATE sibling repos, so this needs two owner-provisioned
-# repo/org secrets:
-#   * MEMQL_PACKAGES_TOKEN -- a SINGLE token serving both needs (a classic PAT
-#     with `repo` + `read:packages`, SSO-authorized for both orgs covers it):
-#     it `actions/checkout`s the private copresent + memql-bff-copresent repos
-#     (needs `repo` / contents:read on both) AND provides read:packages for the
-#     SPA build (docker/docker-compose.cluster.yml sources the `node_auth_token`
-#     build secret from this env var).
+# The GATE subset is postgres + identity + bff. identity is an ENGINE image
+# (built from this repo) but bff is a CARRIER image built from the PRIVATE
+# memql-bff-copresent sibling, so this needs the owner-provisioned secret:
+#   * MEMQL_PACKAGES_TOKEN -- a classic PAT with `repo` + `read:packages`,
+#     SSO-authorized for the org: it `actions/checkout`s the private
+#     memql-bff-copresent repo (contents:read) and provides read:packages for
+#     the carrier build. The synthetic GATE subset does NOT build the copresent
+#     SPA, so the private copresent repo is no longer checked out.
 # The `gate` job is guarded on `secrets.MEMQL_PACKAGES_TOKEN != ''`, so until
 # the owner provisions it the gate NO-OPS (a visible skip) and never spuriously
-# blocks. The owner-finalization checklist (provision -> verify green -> flip to
-# a required deploy gate -> staging roll) is in the runbook.
+# blocks. The owner-finalization checklist (provision -> dispatch -> verify
+# green -> flip to a required deploy gate -> staging roll) is in the runbook.
 
 on:
   # DEPLOY trigger: a release lockfile landing on main is the staging-deploy
@@ -52,15 +62,15 @@ on:
 permissions:
   contents: read
 
-# One parity boot at a time -- the cluster binds fixed compose project
-# resources; serialize so two runs can't fight over them. Never cancel an
-# in-flight gate (a deploy decision rides on it).
+# One parity boot at a time -- the k3d cluster binds fixed host ports; serialize
+# so two runs can't fight over them. Never cancel an in-flight gate (a deploy
+# decision rides on it).
 concurrency:
   group: cluster-e2e
   cancel-in-progress: false
 
 jobs:
-  # Guard: surface whether the owner secrets exist (secrets can't be read in a
+  # Guard: surface whether the owner secret exists (secrets can't be read in a
   # job-level `if:` that gates the whole matrix cleanly without a step, so we
   # expose it as an output the gate job keys off).
   secrets-present:
@@ -88,25 +98,22 @@ jobs:
     needs: secrets-present
     if: ${{ needs.secrets-present.outputs.ready == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 50
     env:
       MEMQL_PACKAGES_TOKEN: ${{ secrets.MEMQL_PACKAGES_TOKEN }}
+      # The local overlay reconciles against this repo via ArgoCD. On the deploy
+      # trigger HEAD is main, which ArgoCD always has. Pin the Application to the
+      # exact ref this run checked out so a re-run validates the right tree.
+      MEMQL_K3D_TARGET_REVISION: ${{ github.sha }}
     steps:
-      # The parity cluster builds the carrier + SPA from sibling repos that
-      # must sit NEXT TO memql in the workspace (../copresent,
-      # ../memql-bff-copresent) -- mirroring the `replace ../memql` directive
-      # the compose contexts assume. Lay the workspace out the same way locally.
+      # The carrier (bff) image builds from the memql-bff-copresent sibling that
+      # must sit NEXT TO memql in the workspace (../memql-bff-copresent) --
+      # mirroring the `replace ../memql` directive the carrier Dockerfile
+      # assumes. Lay the workspace out the same way locally.
       - name: checkout memql
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           path: memql
-
-      - name: checkout copresent (private sibling)
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          repository: visionarys-io/copresent
-          token: ${{ secrets.MEMQL_PACKAGES_TOKEN }}
-          path: copresent
 
       - name: checkout memql-bff-copresent (private sibling)
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -121,33 +128,53 @@ jobs:
           go-version-file: memql/go.mod
           cache: false
 
-      - name: setup buildx
-        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v3
+      - name: install k3d + kubectl
+        env:
+          K3D_VERSION: v5.7.4
+          KUBECTL_VERSION: v1.31.1
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://raw.githubusercontent.com/k3d-io/k3d/${K3D_VERSION}/install.sh" \
+            | TAG="${K3D_VERSION}" bash
+          curl -fsSLo /tmp/kubectl \
+            "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          sudo install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+          k3d version
+          kubectl version --client
 
-      # Boot the full-parity cluster + run the gate. cluster-e2e.sh does the
-      # heavy lifting: `docker compose -f docker-compose.cluster.yml -f
-      # docker-compose.cluster.ci.yml up --build -d` (the CI override drops the
-      # host port publishes), waits for the front door, asserts >=2 bff
-      # replicas, OAuth-seeds a JWT, then runs
-      # `go test -tags clustere2e ./test/clustere2e/...`.
-      - name: parity cluster + cross-replica delivery gate
+      # Bootstrap the k3d cluster + ArgoCD + the local overlay (Application
+      # pinned to this run's SHA, which ArgoCD fetches from GitHub).
+      - name: bootstrap k3d + ArgoCD (make up)
         working-directory: memql
-        run: make cluster-e2e
+        run: make up
 
-      - name: cluster logs on failure
+      # Build the GATE-subset images (identity = engine, bff = carrier) and the
+      # infra images, then import them into k3d so the :local-tagged pods become
+      # Ready (the overlay references :local, IfNotPresent -- no registry pull).
+      - name: build + import gate-subset images (make dev)
+        working-directory: memql
+        run: make dev NODE=identity,bff PULL_INFRA=1 NO_WAIT=1
+
+      # Scale to 2 replicas, wait for ArgoCD sync + readiness, seed a user JWT,
+      # and run the cross-replica delivery gate. --no-build reuses the cluster
+      # this job already bootstrapped above.
+      - name: scale + seed + delivery gate
+        working-directory: memql
+        run: bash scripts/test/cluster-e2e.sh --no-build
+
+      - name: cluster diagnostics on failure
         if: ${{ failure() }}
         working-directory: memql
         run: |
-          docker compose \
-            -f docker/docker-compose.cluster.yml \
-            -f docker/docker-compose.cluster.ci.yml \
-            logs --no-color --tail=200 || true
+          kubectl get pods -n memql -o wide || true
+          kubectl get application memql-local -n argocd \
+            -o custom-columns=SYNC:.status.sync.status,HEALTH:.status.health.status || true
+          for d in identity bff postgres; do
+            echo "=== logs: $d ==="
+            kubectl logs -n memql "deploy/$d" --tail=200 --all-containers || true
+          done
 
       - name: tear down the cluster
         if: ${{ always() }}
         working-directory: memql
-        run: |
-          docker compose \
-            -f docker/docker-compose.cluster.yml \
-            -f docker/docker-compose.cluster.ci.yml \
-            down -v || true
+        run: make down || true

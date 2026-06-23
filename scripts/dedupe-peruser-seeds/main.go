@@ -14,10 +14,11 @@
 //
 // CONNECTION:
 //
-// Reads $MEMORY_NODES_DATABASE_DSN. The docker-compose stack stamps
-// `postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable`
-// on every memql container; running this script against a host's
-// docker desktop is `MEMORY_NODES_DATABASE_DSN=postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable go run ./scripts/dedupe-peruser-seeds --dry-run`.
+// Reads $MEMORY_NODES_DATABASE_DSN. The local k3d postgres is reachable
+// in-cluster at
+// `postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable`;
+// running this script from the host (via the postgres port-forward) is
+// `MEMORY_NODES_DATABASE_DSN=postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable go run ./scripts/dedupe-peruser-seeds --dry-run`.
 //
 // POST-RUN:
 //
@@ -26,7 +27,8 @@
 // `<seedName>-<bareUserId>` id, since the bug being cleaned up here
 // is that NO canonical row was ever written pre-#274). The
 // materializer's startup sweep is what writes the canonical row;
-// run a cluster restart (`docker compose -f docker/docker-compose.full.yml restart` or the cluster equivalent) and the bff / cognition / agent /
+// run a cluster restart (`make dev` or `kubectl rollout restart`) and
+// the bff / cognition / agent /
 // planner / voice nodes will each call SeedMaterializer.Start(),
 // which reads the now-empty (seed, owner) buckets and writes one
 // row per pair at the canonical id. Concurrent racers across the
