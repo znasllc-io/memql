@@ -2,13 +2,9 @@ package auth
 
 import "testing"
 
-// Base ranks from the E1.2 catalog (dsl/rbac/seeds.memql).
-const (
-	rankOwner     = 400
-	rankDeveloper = 300
-	rankAdmin     = 200
-	rankUser      = 100
-)
+// Base ranks (rankOwner / rankDeveloper / rankAdmin / rankUser) are the
+// package constants defined in rbac_model.go -- the single source of truth
+// shared by the governance core and these tests.
 
 func owner(id string) Principal     { return Principal{UserId: id, Rank: rankOwner, IsOwner: true} }
 func developer(id string) Principal { return Principal{UserId: id, Rank: rankDeveloper} }
