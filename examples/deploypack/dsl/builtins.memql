@@ -1,0 +1,59 @@
+// builtins.memql -- the deploy pack (examples/deploypack), Epic 2 / #2095.
+//
+// The deploy pack dogfoods memQL's OWN deployment workflow: it packages the
+// deploy EFFECTS that component/deploycontrol performs imperatively today as
+// DSL-callable builtins, each backed by the pack's IntegrationProvider
+// (see ../pack.go). Every @executor names a capability FQN
+// "integration.deploypack.<cap>", which the engine resolves to the Go handler
+// registered by NewProvider().Capabilities().
+//
+// All four effects route through the EXISTING component/deploycontrol Executor
+// boundary (promote.sh / git / kubectl argo rollouts) -- this is ADDITIVE, not
+// a rip-and-replace. The live azure deploy path (runPromote -> promote.sh via
+// the Argo Rollout) is the SAME effect the Deploy Console drives; the pack just
+// exposes it declaratively so the E2.3 chained automations can fire it on
+// deployment status transitions.
+//
+// Model A (GitOps-canonical) flow these effects compose:
+//   commitOverlay -> argoSync -> (Argo reconciles) -> recordBack
+// with runPromote as the staging/prod digest-pinning effect that authors the
+// overlay commit in the first place.
+
+@enabled
+@executor("integration.deploypack.commitOverlay")
+@args(profile="object")
+@description("Model A: stage + commit the kustomize overlay change for an environment via the deploycontrol Executor (git). The committed overlay is the GitOps source of truth ArgoCD reconciles. Epic 2 / #2095.")
+builtin deployCommitOverlay {
+  env      string  @required  @description("Target environment: staging | prod.")
+  message  string             @description("Commit message; a provenance default is used when empty.")
+}
+
+@enabled
+@executor("integration.deploypack.argoSync")
+@args(profile="object")
+@description("Model A: push the committed overlay so ArgoCD reconciles it onto the cluster (via the deploycontrol Executor git push). The pack never bypasses ArgoCD with a direct apply. Epic 2 / #2095.")
+builtin deployArgoSync {
+  env  string  @required  @description("Target environment: staging | prod.")
+}
+
+@enabled
+@executor("integration.deploypack.runPromote")
+@args(profile="object")
+@description("THE live azure deploy effect: run scripts/release/promote.sh --version=<version> --env=<env> via the deploycontrol Executor. Pins the digest-authority overlay for the env and lets ArgoCD + the blue/green Rollout deploy-gate reconcile + cut over. Unchanged from the Deploy Console path -- additive exposure only. Epic 2 / #2095.")
+builtin deployRunPromote {
+  version  string  @required  @description("memQL release version to promote (e.g. '2026.6.21').")
+  env      string  @required  @description("promote.sh environment: staging | prod.")
+}
+
+@enabled
+@executor("integration.deploypack.recordBack")
+@args(profile="object")
+@description("Model A record-back: append the reconciled deployment status (+ optional per-node spec) into the deployment concept via the E2.1 mutations, so the data layer mirrors the GitOps-observed state. The committed overlay stays the source of truth. Epic 2 / #2095.")
+builtin deployRecordBack {
+  deploymentId  string  @required  @description("v1:cluster:deployment.deploymentId to record against.")
+  status        string             @description("Reconciled lifecycle status (pending|in_progress|succeeded|failed|superseded|rolled_back). When set, appends a deployment status transition.")
+  nodeType      string             @description("When set with version/replicas/imageDigest, appends a per-node v1:cluster:deploymentNodeSpec for this node type.")
+  version       string             @description("Per-node version pin (empty = engine-as-spine). Used only when nodeType is set.")
+  replicas      int                @description("Per-node replica count. Used only when nodeType is set.")
+  imageDigest   string             @description("Resolved image digest for the node type / deployment. Used only when nodeType is set.")
+}
