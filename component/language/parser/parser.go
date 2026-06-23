@@ -4604,132 +4604,53 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 func (p *Parser) parseFunctionCall(name string) (ExpressionNode, error) {
 	p.advance() // consume '('
 
+	lname := strings.ToLower(name)
+
 	// index() with no args = forEach index accessor; index(arr, i) = array element (general parsing)
-	if strings.ToLower(name) == "index" && p.check(TokenParenClose) {
+	if lname == "index" && p.check(TokenParenClose) {
 		return p.parseIndexAccessor()
 	}
 
-	// Check for accessor functions first
-	switch strings.ToLower(name) {
-	case "var":
-		return p.parseVarAccessor()
-	case "step":
-		return p.parseStepAccessor()
-	case "field":
-		return p.parseFieldAccessor()
-	case "input":
-		return p.parseInputAccessor()
-	case "item":
-		return p.parseItemAccessor()
-	case "event":
-		return p.parseEventAccessor()
-	case "actor":
-		// Auth-context accessor; canonical name (#221). The
-		// underlying parser function keeps the historical name
-		// (parseActorAccessor) -- the produced AST node is a
-		// ActorReference -- both are internal-only and unrelated
-		// to the DSL author surface.
-		return p.parseActorAccessor()
-	case "caller":
-		// Retired in #221 in favour of actor. for one vocabulary
-		// across the DSL. baseparser.ErrCallerRetired is the single
-		// source of the migration-hint string; both parsers emit it
-		// identically so a cross-parser equivalence test can assert
-		// equality (#244 / epic #218).
-		return nil, newParseErrorf(&p.current, "%s", baseparser.ErrCallerRetired.Error())
-	case "error":
-		return p.parseErrorAccessor()
-	case "timestamp", "now":
-		return p.parseTimestampAccessor()
-	case "memqlversion":
-		return p.parseMemqlVersionFunction()
-	case "concat":
-		return p.parseConcatFunction()
-	case "coalesce":
-		return p.parseCoalesceFunction()
-	case "cond":
-		return p.parseCondFunction()
-	case "first":
-		return p.parseFirstFunction()
-	case "last":
-		return p.parseLastFunction()
-	case "lower":
-		return p.parseLowerFunction()
-	case "upper":
-		return p.parseUpperFunction()
-	case "trim":
-		return p.parseTrimFunction()
-	case "hash":
-		return p.parseHashFunction()
-	case "shortid":
-		// Lower-cased dispatch; the DSL spells it `shortId(...)`.
-		return p.parseShortIdFunction()
-	case "canonicalid":
-		// The dispatch above lower-cases the function name (`strings.ToLower(name)`)
-		// so the case label MUST be lowercase too. The DSL still spells the call
-		// `canonicalId(...)` in source -- this just normalises the lookup.
-		return p.parseCanonicalIdFunction()
-	case "tostring":
-		return p.parseToStringFunction()
-	case "addduration":
-		return p.parseAddDurationFunction()
-	case "daysbetween":
-		return p.parseDaysBetweenFunction()
-	case "subtracttimestamps":
-		return p.parseSubtractTimestampsFunction()
-	case "year":
-		return p.parseYearFunction()
-	case "quarter":
-		return p.parseQuarterFunction()
-	case "month":
-		return p.parseMonthFunction()
-	case "dayofmonth":
-		return p.parseDayOfMonthFunction()
-	case "isanniversary":
-		return p.parseIsAnniversaryFunction()
-	case "isfirstdayofquarter":
-		return p.parseIsFirstDayOfQuarterFunction()
-	case "contains":
-		return p.parseContainsFunction()
-	case "case":
-		return p.parseCaseFunction()
-	case "default":
-		return p.parseDefaultFunction()
-	case "paginate":
-		return p.parsePaginateFunction()
-	case "sort":
-		return p.parseSortFunction()
-	case "select":
-		return p.parseSelectFunction()
-	case "asof":
-		return p.parseAsOfFunction()
-	case "withdepth":
-		return p.parseWithDepthFunction()
-	case "count":
-		return p.parseCountFunction()
-	}
-
-	// Handle shape() specially - two forms: shape(expr, template) or shape({ source, template })
-	// When first token is '{', use object form (helper function-call style)
-	if strings.ToLower(name) == "shape" && !p.check(TokenBraceOpen) {
-		return p.parseShapeFunction()
+	// shape() has two forms: shape(expr, template) and shape({ source,
+	// template }). When the first token is '{' it is the object form, which
+	// falls through to the generic function-call path below. Otherwise it is
+	// the expression-first form parsed by parseShapeFunction. This fork is
+	// kept inline (rather than in the callableParsers dispatch) because the
+	// object form must NOT dispatch through the table.
+	if lname == "shape" {
+		if p.check(TokenBraceOpen) {
+			// Object form -- fall through to the generic arg parser below.
+		} else {
+			return p.parseShapeFunction()
+		}
+	} else if entry, ok := callableParsers()[lname]; ok {
+		// Table-driven dispatch (callable.go) is the single source for every
+		// recognised bare-function name: accessors (item / event / step /
+		// input / field / actor / timestamp / now / error / var), the retired
+		// caller(), the editor-callable expression builtins (concat / coalesce
+		// / hash / year / contains / ...), the keyword-functions (case /
+		// default), and the query directives (paginate / sort / select / asOf
+		// / withDepth / count). The exported parser.CallableBuiltins is derived
+		// from the CallableBuiltin-kind entries; dslspec models their metadata
+		// and a drift test pins the two together.
+		return entry.parse(p)
 	}
 
 	// Relationship wrapper functions take a single inner expression and
 	// produce a *RelationshipExpr (createWrapper dispatches by name).
 	// The dedicated directive parse functions (paginate / sort / select /
-	// asOf / withDepth / shape) live in the switch above and produce
-	// their specialised AST types directly; they are NOT in this map.
+	// asOf / withDepth / shape) live in callableParsers and produce their
+	// specialised AST types directly; they are NOT in this map.
 	// Modern single-paren `contains(filter)` is handled inside
 	// parseContainsFunction (arg-count discriminates relationship vs
-	// 2-arg string search).
+	// 2-arg string search), so contains is a callableParsers builtin.
 	wrapperFunctions := map[string]bool{
 		"parentof": true, "childof": true, "aliasof": true,
 		"equals": true, "interactswith": true,
 		"owns": true, "createdby": true, "ids": true,
 	}
 
-	if wrapperFunctions[strings.ToLower(name)] {
+	if wrapperFunctions[lname] {
 		// Parse inner expression
 		inner, err := p.parseExpression()
 		if err != nil {

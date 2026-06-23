@@ -14,12 +14,35 @@ import (
 // pins the spec to the parser + annotation registry, so a construct / keyword /
 // field-type added to the grammar flows here automatically.
 //
-// Scope: the spec covers constructs, keywords, operators, field-types, and the
-// legal-next rules. It does NOT (yet) model the expression-level builtins
-// (ai / coalesce / cond / now / ...), which remain in BuiltinFunctions, nor the
-// per-annotation docs, which are projected directly from the annotation
-// registry via AnnotationsByReceiver / AnnotationDocs.
+// Scope: the spec covers constructs, keywords, operators, field-types, the
+// legal-next rules, and -- since #2155 -- the expression-level builtins
+// (ai / coalesce / cond / now / year / contains / ...), which back
+// BuiltinFunctions via specBuiltinFunctions(). The per-annotation docs are
+// projected directly from the annotation registry via AnnotationsByReceiver /
+// AnnotationDocs.
 var dslSpec = dslspec.Build()
+
+// specBuiltinFunctions projects dslspec.Builtins into the map shape Sense's
+// completion / hover / signature surfaces consume (name -> BuiltinDef). It is
+// the spec-driven replacement for the hand-maintained BuiltinFunctions literal
+// that used to live in builtins.go and silently drifted from the grammar. The
+// #2155 drift test pins dslspec.Builtins' grammar-recognised subset to
+// parser.CallableBuiltins, so this map can no longer fall behind the parser.
+func specBuiltinFunctions() map[string]BuiltinDef {
+	out := make(map[string]BuiltinDef, len(dslSpec.Builtins))
+	for _, b := range dslSpec.Builtins {
+		params := make([]Parameter, 0, len(b.Params))
+		for _, p := range b.Params {
+			params = append(params, Parameter{Label: p.Name, Documentation: p.Doc})
+		}
+		out[b.Name] = BuiltinDef{
+			Signature:  b.Signature,
+			Doc:        b.Doc,
+			Parameters: params,
+		}
+	}
+	return out
+}
 
 // specConstructItems returns one completion item per author-facing top-level
 // construct keyword (concept / query / mutation / logic / automation / spec /

@@ -336,6 +336,214 @@ func TestRegistryBackedHonesty(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// #2155: expression-builtins drift pin.
+//
+// dslspec.Builtins is the SoT for builtin metadata; sense/builtins.go is driven
+// from it. These assertions pin the grammar-recognised builtin subset to the
+// parser's introspectable callable table (parser.CallableBuiltins, derived from
+// parser/callable.go's callableParsers), so the editor builtin surface can
+// never drift from the grammar again -- the same guarantee the #2124 test gives
+// the top-level construct surface.
+// ---------------------------------------------------------------------------
+
+// builtinAllowList documents every parser-recognised callable name that is
+// DELIBERATELY not a dslspec expression builtin (CategoryBuiltinExpr), with the
+// reason. The drift test asserts the parser's full recognised callable set,
+// MINUS this allow-list, equals dslspec's expression-builtin name-set. Adding a
+// new recognised name to the parser forces a decision here: model it as a
+// dslspec builtin, or add it to this allow-list with a reason.
+//
+// Categories (all keyed by the parser's LOWERCASED dispatch name):
+//
+//   - Accessors (parser.CallableAccessors): item / event / step / input /
+//     field / var / actor / now / timestamp / error. They are context
+//     accessors, not expression builtins. now / actor are also reserved
+//     keywords (keywords()). dslspec models them as CategoryBuiltinAccessor
+//     (asserted separately below), so they are NOT expression builtins.
+//   - Keyword-functions: case / default -- control-flow-shaped, modelled
+//     nowhere as a plain builtin.
+//   - Query directives: paginate / sort / select / asof / withdepth / count /
+//     shape -- they wrap an inner expression / produce specialised AST.
+//   - Relationship wrappers: parentof / childof / aliasof / equals /
+//     interactswith / owns / createdby / ids -- produce a RelationshipExpr.
+//   - Retired: caller -- recognised only to emit a migration hint (#221).
+func builtinAllowList() map[string]string {
+	allow := map[string]string{}
+	for _, n := range parser.CallableAccessors {
+		allow[n] = "accessor (parser.CallableAccessors) -- modelled as CategoryBuiltinAccessor, not an expression builtin"
+	}
+	for _, n := range parser.CallableKeywordFuncs {
+		allow[n] = "keyword-function (case/default) -- control-flow-shaped, not a plain builtin"
+	}
+	for _, n := range parser.CallableDirectives {
+		allow[n] = "query directive -- wraps an inner expression / specialised AST"
+	}
+	for _, n := range parser.CallableRelationshipWrappers {
+		allow[n] = "relationship wrapper -- produces a RelationshipExpr"
+	}
+	for _, n := range parser.CallableRetiredNames {
+		allow[n] = "retired -- recognised only to emit a migration hint"
+	}
+	return allow
+}
+
+// TestBuiltinsMatchParserCallables is the central #2155 drift pin. The
+// expression-builtin subset of dslspec.Builtins must EXACTLY equal
+// parser.CallableBuiltins (both directions), and the parser's full recognised
+// callable set minus the documented allow-list must be exactly that same set.
+func TestBuiltinsMatchParserCallables(t *testing.T) {
+	// dslspec's expression-builtin name-set, lower-cased to match the parser's
+	// lower-cased dispatch keys (dslspec carries the author spelling shortId /
+	// canonicalId; the parser dispatches on shortid / canonicalid).
+	specExpr := map[string]bool{}
+	for _, b := range builtins() {
+		if b.Category == CategoryBuiltinExpr {
+			specExpr[strings.ToLower(b.Name)] = true
+		}
+	}
+
+	parserExpr := map[string]bool{}
+	for _, n := range parser.CallableBuiltins {
+		parserExpr[n] = true
+	}
+
+	// Direction 1: every parser builtin is modelled in dslspec.
+	for n := range parserExpr {
+		if !specExpr[n] {
+			t.Errorf("DRIFT: parser.CallableBuiltins recognises %q but dslspec.Builtins has no "+
+				"CategoryBuiltinExpr entry for it -- add a Builtin{Name: %q, Category: CategoryBuiltinExpr, ...} "+
+				"in component/language/dslspec/builtins.go", n, n)
+		}
+	}
+	// Direction 2: dslspec invents no expression builtin the parser lacks.
+	for n := range specExpr {
+		if !parserExpr[n] {
+			t.Errorf("DRIFT: dslspec.Builtins marks %q CategoryBuiltinExpr but the parser does not "+
+				"special-case it (not in parser.CallableBuiltins) -- either wire it into "+
+				"component/language/parser/callable.go as a CallableBuiltin, re-categorise it "+
+				"(CategoryBuiltinAccessor / CategoryBuiltinRegistry), or remove it", n)
+		}
+	}
+
+	// Cross-check via the allow-list: the parser's FULL recognised callable set
+	// (builtins + accessors + keyword-funcs + directives + wrappers + retired)
+	// minus the documented allow-list must equal the expression-builtin set.
+	// This is what guarantees a NEW recognised parser name cannot silently slip
+	// past the spec -- it lands either in CallableBuiltins (caught above) or in
+	// one of the allow-listed kinds (which the allow-list enumerates from the
+	// same exported parser vars).
+	allow := builtinAllowList()
+	recognised := map[string]bool{}
+	for _, n := range parser.CallableBuiltins {
+		recognised[n] = true
+	}
+	for n := range allow {
+		recognised[n] = true
+	}
+	for n := range recognised {
+		if allow[n] != "" {
+			continue // allow-listed: not expected to be an expression builtin
+		}
+		if !specExpr[n] {
+			t.Errorf("DRIFT: parser recognises callable %q which is neither a dslspec expression "+
+				"builtin nor in builtinAllowList() -- decide its category and update "+
+				"dslspec.Builtins or the allow-list", n)
+		}
+	}
+}
+
+// TestBuiltinAccessorsAreParserAccessors asserts dslspec's
+// CategoryBuiltinAccessor entries are exactly the parser's recognised accessors
+// (parser.CallableAccessors) plus the documented `index` exception. `index` is
+// special-cased in parseFunctionCall (the no-arg form is the loop accessor,
+// index(arr,i) reads an array element) so it is NOT in callableParsers /
+// CallableAccessors, but Sense still offers it as a call -- hence the explicit
+// exception here.
+func TestBuiltinAccessorsAreParserAccessors(t *testing.T) {
+	const indexException = "index"
+
+	parserAcc := map[string]bool{indexException: true}
+	for _, n := range parser.CallableAccessors {
+		parserAcc[n] = true
+	}
+
+	specAcc := map[string]bool{}
+	for _, b := range builtins() {
+		if b.Category == CategoryBuiltinAccessor {
+			specAcc[strings.ToLower(b.Name)] = true
+		}
+	}
+
+	for n := range parserAcc {
+		if !specAcc[n] {
+			t.Errorf("DRIFT: parser recognises accessor %q (or the index exception) but dslspec.Builtins "+
+				"has no CategoryBuiltinAccessor entry for it -- add it in "+
+				"component/language/dslspec/builtins.go", n)
+		}
+	}
+	for n := range specAcc {
+		if !parserAcc[n] {
+			t.Errorf("DRIFT: dslspec.Builtins marks %q CategoryBuiltinAccessor but the parser does not "+
+				"recognise it as an accessor (not in parser.CallableAccessors, and not the index "+
+				"exception) -- re-check the category or wire callable.go", n)
+		}
+	}
+}
+
+// TestBuiltinRegistryNamesNotParserSpecialCased asserts dslspec's
+// CategoryBuiltinRegistry entries (ai / node / similar / ...) are NOT
+// special-cased by the parser -- they are resolved at runtime from the
+// integration / builtin registry and must fall through parseFunctionCall to a
+// generic FunctionCallExpr. If one ever gains a dedicated parser rule it should
+// be re-categorised, which this test forces.
+func TestBuiltinRegistryNamesNotParserSpecialCased(t *testing.T) {
+	parserNames := map[string]bool{}
+	for _, n := range parser.CallableBuiltins {
+		parserNames[n] = true
+	}
+	for _, n := range parser.CallableAccessors {
+		parserNames[n] = true
+	}
+	for _, n := range parser.CallableKeywordFuncs {
+		parserNames[n] = true
+	}
+	for _, n := range parser.CallableDirectives {
+		parserNames[n] = true
+	}
+
+	for _, b := range builtins() {
+		if b.Category != CategoryBuiltinRegistry {
+			continue
+		}
+		if parserNames[strings.ToLower(b.Name)] {
+			t.Errorf("DRIFT: dslspec.Builtins marks %q CategoryBuiltinRegistry but the parser DOES "+
+				"special-case it -- re-categorise it (CategoryBuiltinExpr / CategoryBuiltinAccessor)", b.Name)
+		}
+	}
+}
+
+// TestBuiltinsCoverGapFilledNames documents the specific staleness #2155
+// closed: the old hand-coded sense literal omitted these parser-known builtins.
+// This asserts dslspec now models every one (belt-and-suspenders over the
+// name-set equality test, with a self-explaining name list).
+func TestBuiltinsCoverGapFilledNames(t *testing.T) {
+	gapFilled := []string{
+		"year", "quarter", "month", "dayOfMonth", "subtractTimestamps",
+		"isAnniversary", "isFirstDayOfQuarter", "memqlVersion", "contains",
+	}
+	present := map[string]bool{}
+	for _, b := range builtins() {
+		present[b.Name] = true
+	}
+	for _, n := range gapFilled {
+		if !present[n] {
+			t.Errorf("DRIFT: gap-filled builtin %q (parser-known, omitted by the old sense literal) "+
+				"is missing from dslspec.Builtins", n)
+		}
+	}
+}
+
 func sameStringSet(a, b map[string]bool) bool {
 	if len(a) != len(b) {
 		return false
