@@ -1723,7 +1723,7 @@
       "name": "ChatMessage",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 10
       },
       "attrs": {
@@ -1791,7 +1791,7 @@
       "name": "ChatAIProvider",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 24
       },
       "attrs": {
@@ -1805,7 +1805,7 @@
       "name": "ChatStreamProvider",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 100
       },
       "attrs": {
@@ -1819,7 +1819,7 @@
       "name": "ChatStreamWithToolsProvider",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 122
       },
       "attrs": {
@@ -1833,7 +1833,7 @@
       "name": "ChatStructuredProvider",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 60
       },
       "attrs": {
@@ -2048,7 +2048,7 @@
       "name": "StreamChunk",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 93
       },
       "attrs": {
@@ -2094,7 +2094,7 @@
       "name": "StreamToolChunk",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 113
       },
       "attrs": {
@@ -2151,7 +2151,7 @@
       "name": "StructuredSchema",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 35
       },
       "attrs": {
@@ -2208,7 +2208,7 @@
       "name": "ToolActivityEvent",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 170
       },
       "attrs": {
@@ -2276,7 +2276,7 @@
       "name": "ToolCall",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 74
       },
       "attrs": {
@@ -2322,7 +2322,7 @@
       "name": "ToolCallDelta",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 105
       },
       "attrs": {
@@ -2379,7 +2379,7 @@
       "name": "ToolCallingChatResult",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 82
       },
       "attrs": {
@@ -2414,7 +2414,7 @@
       "name": "ToolCallingChatAIProvider",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 88
       },
       "attrs": {
@@ -2428,7 +2428,7 @@
       "name": "ToolDefinition",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 66
       },
       "attrs": {
@@ -2474,7 +2474,7 @@
       "name": "VisionContent",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 127
       },
       "attrs": {
@@ -2509,7 +2509,7 @@
       "name": "VisionAIProvider",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 133
       },
       "attrs": {
@@ -2537,7 +2537,7 @@
       "name": "ContextWithEarlyTextCallback",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 211
       },
       "attrs": {
@@ -2551,7 +2551,7 @@
       "name": "ContextWithToolActivityCallback",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 184
       },
       "attrs": {
@@ -2565,7 +2565,7 @@
       "name": "ContextWithToolDefaults",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 150
       },
       "attrs": {
@@ -2579,7 +2579,7 @@
       "name": "EarlyTextCallbackFromContext",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 219
       },
       "attrs": {
@@ -2635,7 +2635,7 @@
       "name": "ToolActivityCallbackFromContext",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 192
       },
       "attrs": {
@@ -2649,7 +2649,7 @@
       "name": "ToolDefaultsFromContext",
       "parent": "pkg:github.com/znasllc-io/memql/core/common",
       "source": {
-        "file": "core/common/si.go",
+        "file": "core/common/ai.go",
         "line": 158
       },
       "attrs": {
@@ -86069,7 +86069,7 @@
       "name": "ChatStreamProvider",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 298
       },
       "attrs": {
@@ -86083,7 +86083,7 @@
       "name": "ChatStreamProviderByName",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 359
       },
       "attrs": {
@@ -86097,7 +86097,7 @@
       "name": "ChatStreamWithToolsProviderByName",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 369
       },
       "attrs": {
@@ -86167,7 +86167,7 @@
       "name": "DefaultChatProvider",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 314
       },
       "attrs": {
@@ -86181,7 +86181,7 @@
       "name": "DefaultProviderName",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 431
       },
       "attrs": {
@@ -86251,7 +86251,7 @@
       "name": "ExecuteToolByName",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 384
       },
       "attrs": {
@@ -86293,7 +86293,7 @@
       "name": "IntegrationByName",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 22
       },
       "attrs": {
@@ -86307,7 +86307,7 @@
       "name": "Integrations",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 13
       },
       "attrs": {
@@ -86321,7 +86321,7 @@
       "name": "InvokeAI",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 68
       },
       "attrs": {
@@ -86377,7 +86377,7 @@
       "name": "InvokeAIStructured",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 119
       },
       "attrs": {
@@ -86475,7 +86475,7 @@
       "name": "Policies",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 448
       },
       "attrs": {
@@ -86517,7 +86517,7 @@
       "name": "ProviderEntry",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 423
       },
       "attrs": {
@@ -86531,7 +86531,7 @@
       "name": "Providers",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 440
       },
       "attrs": {
@@ -86573,7 +86573,7 @@
       "name": "RegisterIntegration",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 37
       },
       "attrs": {
@@ -86587,7 +86587,7 @@
       "name": "ReloadAIProviders",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 237
       },
       "attrs": {
@@ -86601,7 +86601,7 @@
       "name": "RenderPrompt",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 403
       },
       "attrs": {
@@ -86923,7 +86923,7 @@
       "name": "StreamProvider",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 288
       },
       "attrs": {
@@ -86937,7 +86937,7 @@
       "name": "StructuredChatProvider",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 327
       },
       "attrs": {
@@ -86951,7 +86951,7 @@
       "name": "StructuredChatProviderByName",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 339
       },
       "attrs": {
@@ -86965,7 +86965,7 @@
       "name": "SuggestChatProvider",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 350
       },
       "attrs": {
@@ -86979,7 +86979,7 @@
       "name": "TTSProvider",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 260
       },
       "attrs": {
@@ -86993,7 +86993,7 @@
       "name": "TTSProviderByName",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 269
       },
       "attrs": {
@@ -87007,7 +87007,7 @@
       "name": "ToolDefinitionsForNames",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 378
       },
       "attrs": {
@@ -87035,7 +87035,7 @@
       "name": "VisionProvider",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 277
       },
       "attrs": {
@@ -88127,7 +88127,7 @@
       "name": "promptDefaultProvider",
       "parent": "type:github.com/znasllc-io/memql/component/memql.MemQLEngine",
       "source": {
-        "file": "component/memql/engine_si.go",
+        "file": "component/memql/engine_ai.go",
         "line": 216
       },
       "attrs": {
