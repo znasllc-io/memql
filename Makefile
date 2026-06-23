@@ -355,7 +355,7 @@ db:
 #   MEMQL_K3D_SERVERS          k3d server count (default: 1)
 #   MEMQL_K3D_AGENTS           k3d agent count (default: 0)
 
-.PHONY: k3d-up k3d-down k3d-secrets k3d-dev
+.PHONY: k3d-up k3d-down k3d-secrets k3d-dev k3d-status k3d-scale
 
 ## Bootstrap the local k3d cluster: create cluster, install ArgoCD
 ## (pinned v2.13.3, same as staging), apply the memql-local Application,
@@ -397,6 +397,24 @@ k3d-dev:
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
 		$${NAMESPACE:+--namespace=$${NAMESPACE}} \
 		$${NO_WAIT:+--no-wait}
+
+## Print k3d cluster status + mesh litmus (unique MEMQL_NODE_ID per pod).
+## Use after scaling to verify cross-node mesh formation.
+k3d-status:
+	@bash scripts/k3d/status.sh \
+		$${CLUSTER:+--cluster=$${CLUSTER}} \
+		$${NAMESPACE:+--namespace=$${NAMESPACE}}
+
+## Scale all app Deployments to N replicas. Use N=2 for cross-node mesh
+## testing (E0.5); N=1 to reset to single-node default.
+## ArgoCD ignoreDifferences excludes /spec/replicas so selfHeal won't revert.
+##   make k3d-scale N=2   # multi-node (2 replicas per Deployment)
+##   make k3d-scale N=1   # single-node (default)
+k3d-scale:
+	@bash scripts/k3d/scale.sh \
+		$${N:?usage: make k3d-scale N=<replicas>} \
+		$${CLUSTER:+--cluster=$${CLUSTER}} \
+		$${NAMESPACE:+--namespace=$${NAMESPACE}}
 
 # ---------------------------------------------------------------------------
 # Test targets
