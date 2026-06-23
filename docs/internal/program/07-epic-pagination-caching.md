@@ -84,7 +84,7 @@ classifier (`component/language/pagination`), so they cannot drift.
 ### Task 2 — Whole-module + conformance green
 
 `GOWORK=off go test ./...`: **95 packages ok, 0 failures**. With a live Postgres
-(`MEMORY_NODES_DATABASE_DSN`) the DB-gated suites run too — still 95 ok / 0 fail
+(`MEMQL_DATABASE_DSN`) the DB-gated suites run too — still 95 ok / 0 fail
 **after** the regression fix below. Passing Epic-5 tests include
 `TestPaginationAuthoringRule`, the keyset/cursor suite, `TestResultCache_*`
 invalidation, `TestCacheTTLForBundle_DefaultOn*`, `TestActorCacheKeyComponent_*`,

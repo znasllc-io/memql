@@ -16,7 +16,7 @@ package avatarvendor
 //     would be a talking head no one sees), no avatar is built -- audio-only,
 //     saving the vendor cost.
 //   - vendor=none / no usable persona id: no avatar (audio-only).
-//   - vendor-config mismatch (e.g. anam selected but ANAM_API_KEY unset)
+//   - vendor-config mismatch (e.g. anam selected but MEMQL_ANAM_API_KEY unset)
 //     returns an error so we don't silently publish nothing.
 
 import (
@@ -72,10 +72,10 @@ func ResolveAvatarPlan(ac AvatarConfig, persona PersonaInput) (*AvatarPlan, erro
 
 // resolveAnamPlan resolves the Anam plan: per-agent stamped persona id wins;
 // then the platform default personaId; then the bare default avatarId; else no
-// avatar. ANAM_API_KEY is required whenever Anam is selected.
+// avatar. MEMQL_ANAM_API_KEY is required whenever Anam is selected.
 func resolveAnamPlan(ac AvatarConfig, persona PersonaInput) (*AvatarPlan, error) {
 	if strings.TrimSpace(ac.AnamAPIKey) == "" {
-		return nil, fmt.Errorf("avatar: ANAM_API_KEY required when avatarVendor=anam")
+		return nil, fmt.Errorf("avatar: MEMQL_ANAM_API_KEY required when avatarVendor=anam")
 	}
 	name := strings.TrimSpace(ac.AnamDefaultPersonaNam)
 	if name == "" {
@@ -114,11 +114,11 @@ func resolveAnamPlan(ac AvatarConfig, persona PersonaInput) (*AvatarPlan, error)
 }
 
 // resolveSimliPlan resolves the Simli plan: Simli needs an explicit face id
-// (the persona's AvatarPersonaID), and SIMLI_API_KEY when selected. No face id
+// (the persona's AvatarPersonaID), and MEMQL_SIMLI_API_KEY when selected. No face id
 // -> audio-only (not an error).
 func resolveSimliPlan(ac AvatarConfig, persona PersonaInput) (*AvatarPlan, error) {
 	if strings.TrimSpace(ac.SimliAPIKey) == "" {
-		return nil, fmt.Errorf("avatar: SIMLI_API_KEY required when avatarVendor=simli")
+		return nil, fmt.Errorf("avatar: MEMQL_SIMLI_API_KEY required when avatarVendor=simli")
 	}
 	faceID := strings.TrimSpace(persona.AvatarPersonaID)
 	if faceID == "" {

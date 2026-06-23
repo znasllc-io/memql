@@ -180,7 +180,10 @@ func Seal(opts SealOptions) (*SealResult, error) {
 	}
 
 	if opts.Manifest != nil {
-		if missing := FindMissing(opts.Entries, opts.Manifest.Names()); len(missing) > 0 {
+		// Legacy-tolerant (Epic 7.3 / memql#2106): a floor name counts as
+		// covered if the .env carries the new MEMQL_ name OR its pre-7.3
+		// legacy alias. ApplyLegacyEnvAliases bridges the value at boot.
+		if missing := FindMissingWithLegacy(opts.Entries, opts.Manifest.Names()); len(missing) > 0 {
 			return nil, fmt.Errorf("manifest violation: missing required entries: %s (manifest source: %s)", strings.Join(missing, ", "), opts.Manifest.Source)
 		}
 	}
@@ -382,7 +385,7 @@ func openBytes(data []byte, label string) ([]EnvEntry, error) {
 
 // LookupEnv returns the value of an entry by name, with ok=false
 // when the name isn't present. Convenience for callers that fetch
-// a single setting (typical pattern: get IDENTITY_BOOTSTRAP_DOMAIN
+// a single setting (typical pattern: get MEMQL_IDENTITY_BOOTSTRAP_DOMAIN
 // out of an opened envelope).
 func LookupEnv(entries []EnvEntry, name string) (string, bool) {
 	for _, e := range entries {

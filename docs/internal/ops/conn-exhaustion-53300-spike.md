@@ -200,7 +200,7 @@ or non-deployer backend, or a live deploy/migrate run.
 
 ```bash
 # 1. Detect — read-only snapshot (works with the tsdbadmin recovery DSN):
-MEMORY_NODES_DATABASE_DSN='…tsdbadmin…' scripts/deploy/deployer-pool-reap.sh inspect
+MEMQL_DATABASE_DSN='…tsdbadmin…' scripts/deploy/deployer-pool-reap.sh inspect
 
 # 2. Plan — read-only; print the EXACT pids a reap would terminate:
 SUPERUSER_DSN='postgresql://postgres:…@<host>:<port>/tsdb?sslmode=require' \

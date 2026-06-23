@@ -149,7 +149,7 @@ function seed_memql_secrets() {
         --namespace="$NAMESPACE" \
         --from-literal="MEMQL_MASTER_KEY=$master_key" \
         --from-literal="MEMQL_GENESIS_B64=$genesis_b64" \
-        --from-literal="MEMORY_NODES_DATABASE_DSN=$db_dsn" \
+        --from-literal="MEMQL_DATABASE_DSN=$db_dsn" \
         --from-literal="MEMORY_NODES_DATABASE_DIRECT_DSN=$db_direct_dsn" \
         --from-literal="AZURE_BLOB_CONNECTION_STRING=$AZURITE_CONN" \
         --dry-run=client -o yaml \
@@ -172,8 +172,8 @@ function seed_livekit_secrets() {
     info "seeding livekit-secrets (LiveKit API credentials for local livekit)..."
     kubectl create secret generic livekit-secrets \
         --namespace="$NAMESPACE" \
-        --from-literal="POLYPHON_LIVEKIT_API_KEY=$lk_key" \
-        --from-literal="POLYPHON_LIVEKIT_API_SECRET=$lk_secret" \
+        --from-literal="MEMQL_POLYPHON_LIVEKIT_API_KEY=$lk_key" \
+        --from-literal="MEMQL_POLYPHON_LIVEKIT_API_SECRET=$lk_secret" \
         --from-literal="LIVEKIT_API_KEY=$lk_key" \
         --from-literal="LIVEKIT_API_SECRET=$lk_secret" \
         --from-literal="LIVEKIT_KEYS=${lk_key}:${lk_secret}" \

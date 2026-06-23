@@ -98,7 +98,7 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 
 	// Roll the refresh-token cookie forward. SameSite override comes
 	// from the runtime clusterSettings row; empty falls through to
-	// IDENTITY_REFRESH_COOKIE_SAMESITE env (which itself defaults
+	// MEMQL_IDENTITY_REFRESH_COOKIE_SAMESITE env (which itself defaults
 	// to "lax").
 	live := s.effectiveTokenSettings(r.Context())
 	setRefreshCookie(w, res.RefreshToken, s.Cfg.BaseURL, live.RefreshCookieSameSite)
@@ -204,7 +204,7 @@ func clearRefreshCookie(w http.ResponseWriter, baseURL, sameSiteOverride string)
 //     (a) override -- the runtime clusterSettings value, when the
 //     admin has explicitly picked one. Empty string falls
 //     through to (b).
-//     (b) IDENTITY_REFRESH_COOKIE_SAMESITE env var. Operator-set
+//     (b) MEMQL_IDENTITY_REFRESH_COOKIE_SAMESITE env var. Operator-set
 //     on the identity binary's environment. Empty falls
 //     through to (c).
 //     (c) "lax" default.
@@ -231,7 +231,7 @@ func cookieAttrs(baseURL, override string) (bool, http.SameSite) {
 	secure := strings.HasPrefix(strings.ToLower(baseURL), "https://")
 	sameSiteName := strings.ToLower(strings.TrimSpace(override))
 	if sameSiteName == "" {
-		sameSiteName = strings.ToLower(strings.TrimSpace(os.Getenv("IDENTITY_REFRESH_COOKIE_SAMESITE")))
+		sameSiteName = strings.ToLower(strings.TrimSpace(os.Getenv("MEMQL_IDENTITY_REFRESH_COOKIE_SAMESITE")))
 	}
 	switch sameSiteName {
 	case "none":

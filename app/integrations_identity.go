@@ -49,7 +49,7 @@ func newSSOAuthCode() (plain, hash string, err error) {
 //
 // Identity binaries do not run the per-node verifier middleware in
 // app/config.go. configAndAuth's verifier setup short-circuits when
-// IDENTITY_VERIFIER_BASE_URL is empty (the documented production
+// MEMQL_IDENTITY_VERIFIER_BASE_URL is empty (the documented production
 // posture for identity-tagged deployments — they own the signing
 // keys themselves rather than verifying against a remote JWKS).
 func (a *App) integrationsIdentity() {
@@ -61,7 +61,7 @@ func (a *App) integrationsIdentity() {
 	}
 
 	if !cfg.Enabled {
-		a.Logger.Warn("identity service is disabled (IDENTITY_ENABLED=false); identity binary started but will not serve auth")
+		a.Logger.Warn("identity service is disabled (MEMQL_IDENTITY_ENABLED=false); identity binary started but will not serve auth")
 		return
 	}
 
@@ -508,14 +508,14 @@ func (a *App) attemptAutoBootstrap(
 		return
 	}
 
-	// MAIL_SUPPRESS_OWNER_BOOTSTRAP suppresses the owner magic-link email
+	// MEMQL_EMAIL_SUPPRESS_OWNER_BOOTSTRAP suppresses the owner magic-link email
 	// (memql#374). Set by `make dev-refresh` so iterative DB wipes don't
 	// produce an inbox storm; the operator is the same person across
 	// refreshes + the clusterSettings row is already persisted above, so
 	// the cluster is functionally bootstrapped without the email.
 	// Unset in staging / production deploys; behaviour there is unchanged.
-	if os.Getenv("MAIL_SUPPRESS_OWNER_BOOTSTRAP") != "" {
-		a.Logger.Info("identity auto-bootstrap: owner email suppressed by MAIL_SUPPRESS_OWNER_BOOTSTRAP",
+	if os.Getenv("MEMQL_EMAIL_SUPPRESS_OWNER_BOOTSTRAP") != "" {
+		a.Logger.Info("identity auto-bootstrap: owner email suppressed by MEMQL_EMAIL_SUPPRESS_OWNER_BOOTSTRAP",
 			"owner_email", cfg.Bootstrap.OwnerEmail,
 			"domain", cfg.Bootstrap.Domain,
 			"component", identity.ComponentName)

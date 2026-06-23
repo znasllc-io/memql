@@ -47,7 +47,7 @@ func userCount(t *testing.T, e *Env) int {
 func TestConf1730UserCountReturnsNumericAggregate(t *testing.T) {
 	e := newEnv(t)
 	if !e.HasDB {
-		t.Skip("requires Postgres (set MEMORY_NODES_DATABASE_DSN); validated in the CI conformance job")
+		t.Skip("requires Postgres (set MEMQL_DATABASE_DSN); validated in the CI conformance job")
 	}
 
 	// Baseline: the count is an object {count: N}, and N is non-negative.

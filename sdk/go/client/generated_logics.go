@@ -74,7 +74,7 @@ func AccountDeletionReminder7DaysBuild(args AccountDeletionReminder7DaysArgs) st
 	return b.String()
 }
 
-// AccountDeletionSweep -- Daily 03:00 UTC sweep that hard-deletes users whose deletionScheduledAt + IDENTITY_DELETION_COOLDOWN_DAYS (default 30) has elapsed, via deleteUserHard. Audit-event rows, invitations the user issued, and access-request rows are intentionally retained for the trail.
+// AccountDeletionSweep -- Daily 03:00 UTC sweep that hard-deletes users whose deletionScheduledAt + MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS (default 30) has elapsed, via deleteUserHard. Audit-event rows, invitations the user issued, and access-request rows are intentionally retained for the trail.
 type AccountDeletionSweepArgs struct {
 	Event map[string]any
 }
@@ -120,7 +120,7 @@ func AppendAttachmentToRequestBuild(args AppendAttachmentToRequestArgs) string {
 	return b.String()
 }
 
-// AuditEventRetentionSweep -- Daily 02:00 UTC sweep over v1:identity:auditEvent rows older than IDENTITY_AUDIT_LOG_RETENTION_DAYS. Observation-only today: emits an 'identity.audit.retention.observed' event with the candidate count -- MemQL has no delete() mutation and AuditEvent's append-only semantics forbid soft-delete via active=false. Per-row delete lands when one of those gaps closes.
+// AuditEventRetentionSweep -- Daily 02:00 UTC sweep over v1:identity:auditEvent rows older than MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. Observation-only today: emits an 'identity.audit.retention.observed' event with the candidate count -- MemQL has no delete() mutation and AuditEvent's append-only semantics forbid soft-delete via active=false. Per-row delete lands when one of those gaps closes.
 type AuditEventRetentionSweepArgs struct {
 	Event map[string]any
 }

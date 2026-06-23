@@ -40,8 +40,8 @@ func sealEnvelope(t *testing.T, masterKeyHex string, entries []EnvEntry) []byte 
 
 func sampleEntries() []EnvEntry {
 	return []EnvEntry{
-		{Name: "OPENAI_API_KEY", Value: "sk-from-envelope"},
-		{Name: "MEMORY_NODES_DATABASE_DSN", Value: "postgres://local-dev"},
+		{Name: "MEMQL_OPENAI_API_KEY", Value: "sk-from-envelope"},
+		{Name: "MEMQL_DATABASE_DSN", Value: "postgres://local-dev"},
 		{Name: "MEMQL_NODE_TYPE", Value: "bff"},
 	}
 }
@@ -50,8 +50,8 @@ func TestAutoloadFromEnv_DisabledIsNoop(t *testing.T) {
 	// Flag unset -> no-op, no error, nothing applied.
 	t.Setenv(EnvAutoload, "")
 	t.Setenv(EnvGenesisB64, "should-be-ignored")
-	t.Setenv("OPENAI_API_KEY", "")
-	_ = os.Unsetenv("OPENAI_API_KEY")
+	t.Setenv("MEMQL_OPENAI_API_KEY", "")
+	_ = os.Unsetenv("MEMQL_OPENAI_API_KEY")
 
 	res, err := AutoloadFromEnv()
 	if err != nil {
@@ -60,7 +60,7 @@ func TestAutoloadFromEnv_DisabledIsNoop(t *testing.T) {
 	if res.Enabled {
 		t.Fatal("expected Enabled=false when flag unset")
 	}
-	if _, present := os.LookupEnv("OPENAI_API_KEY"); present {
+	if _, present := os.LookupEnv("MEMQL_OPENAI_API_KEY"); present {
 		t.Fatal("disabled autoload must not set any env var")
 	}
 }
@@ -74,12 +74,12 @@ func TestAutoloadFromEnv_FromB64(t *testing.T) {
 	t.Setenv(secret.EnvMasterKey, key)
 	t.Setenv(EnvGenesisB64, b64)
 	// Ensure target vars are absent so they get applied.
-	_ = os.Unsetenv("OPENAI_API_KEY")
-	_ = os.Unsetenv("MEMORY_NODES_DATABASE_DSN")
+	_ = os.Unsetenv("MEMQL_OPENAI_API_KEY")
+	_ = os.Unsetenv("MEMQL_DATABASE_DSN")
 	_ = os.Unsetenv("MEMQL_NODE_TYPE")
 	t.Cleanup(func() {
-		_ = os.Unsetenv("OPENAI_API_KEY")
-		_ = os.Unsetenv("MEMORY_NODES_DATABASE_DSN")
+		_ = os.Unsetenv("MEMQL_OPENAI_API_KEY")
+		_ = os.Unsetenv("MEMQL_DATABASE_DSN")
 		_ = os.Unsetenv("MEMQL_NODE_TYPE")
 	})
 
@@ -90,8 +90,8 @@ func TestAutoloadFromEnv_FromB64(t *testing.T) {
 	if !res.Enabled || res.Source != "b64" {
 		t.Fatalf("unexpected result: %+v", res)
 	}
-	if got := os.Getenv("OPENAI_API_KEY"); got != "sk-from-envelope" {
-		t.Fatalf("OPENAI_API_KEY = %q, want sk-from-envelope", got)
+	if got := os.Getenv("MEMQL_OPENAI_API_KEY"); got != "sk-from-envelope" {
+		t.Fatalf("MEMQL_OPENAI_API_KEY = %q, want sk-from-envelope", got)
 	}
 	if len(res.Applied) != 3 {
 		t.Fatalf("expected 3 applied, got %d (%v)", len(res.Applied), res.Applied)
@@ -111,8 +111,8 @@ func TestAutoloadFromEnv_FromFile(t *testing.T) {
 	t.Setenv(secret.EnvMasterKey, key)
 	t.Setenv(EnvGenesisB64, "") // force the file path
 	t.Setenv(EnvGenesisPath, path)
-	_ = os.Unsetenv("OPENAI_API_KEY")
-	t.Cleanup(func() { _ = os.Unsetenv("OPENAI_API_KEY") })
+	_ = os.Unsetenv("MEMQL_OPENAI_API_KEY")
+	t.Cleanup(func() { _ = os.Unsetenv("MEMQL_OPENAI_API_KEY") })
 
 	res, err := AutoloadFromEnv()
 	if err != nil {
@@ -121,8 +121,8 @@ func TestAutoloadFromEnv_FromFile(t *testing.T) {
 	if !res.Enabled || res.Source != path {
 		t.Fatalf("unexpected result: %+v", res)
 	}
-	if got := os.Getenv("OPENAI_API_KEY"); got != "sk-from-envelope" {
-		t.Fatalf("OPENAI_API_KEY = %q, want sk-from-envelope", got)
+	if got := os.Getenv("MEMQL_OPENAI_API_KEY"); got != "sk-from-envelope" {
+		t.Fatalf("MEMQL_OPENAI_API_KEY = %q, want sk-from-envelope", got)
 	}
 }
 
@@ -136,24 +136,24 @@ func TestAutoloadFromEnv_SetIfAbsentPrecedence(t *testing.T) {
 	t.Setenv(secret.EnvMasterKey, key)
 	t.Setenv(EnvGenesisB64, b64)
 	// Container App override already in the environment.
-	t.Setenv("MEMORY_NODES_DATABASE_DSN", "postgres://tiger-cloud-prod")
+	t.Setenv("MEMQL_DATABASE_DSN", "postgres://tiger-cloud-prod")
 	t.Setenv("MEMQL_NODE_TYPE", "cognition")
-	_ = os.Unsetenv("OPENAI_API_KEY")
-	t.Cleanup(func() { _ = os.Unsetenv("OPENAI_API_KEY") })
+	_ = os.Unsetenv("MEMQL_OPENAI_API_KEY")
+	t.Cleanup(func() { _ = os.Unsetenv("MEMQL_OPENAI_API_KEY") })
 
 	res, err := AutoloadFromEnv()
 	if err != nil {
 		t.Fatalf("AutoloadFromEnv: %v", err)
 	}
-	if got := os.Getenv("MEMORY_NODES_DATABASE_DSN"); got != "postgres://tiger-cloud-prod" {
+	if got := os.Getenv("MEMQL_DATABASE_DSN"); got != "postgres://tiger-cloud-prod" {
 		t.Fatalf("pre-set DSN clobbered: got %q", got)
 	}
 	if got := os.Getenv("MEMQL_NODE_TYPE"); got != "cognition" {
 		t.Fatalf("pre-set node type clobbered: got %q", got)
 	}
 	// The absent one still gets applied.
-	if got := os.Getenv("OPENAI_API_KEY"); got != "sk-from-envelope" {
-		t.Fatalf("OPENAI_API_KEY = %q, want sk-from-envelope", got)
+	if got := os.Getenv("MEMQL_OPENAI_API_KEY"); got != "sk-from-envelope" {
+		t.Fatalf("MEMQL_OPENAI_API_KEY = %q, want sk-from-envelope", got)
 	}
 	if len(res.Skipped) != 2 {
 		t.Fatalf("expected 2 skipped, got %d (%v)", len(res.Skipped), res.Skipped)

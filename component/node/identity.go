@@ -199,7 +199,7 @@ func NewIdentity(version string) *Identity {
 
 // EnsureBearerToken fills in BearerToken when the operator left
 // MEMQL_NODE_TOKEN empty but opted into self-bootstrap (set
-// MEMQL_NODE_BOOTSTRAP_TOKEN + IDENTITY_VERIFIER_BASE_URL on this
+// MEMQL_NODE_BOOTSTRAP_TOKEN + MEMQL_IDENTITY_VERIFIER_BASE_URL on this
 // binary and the identity service). Calls the identity service's
 // `/node/bootstrap` endpoint with the shared secret to mint a fresh
 // class="node" JWT, then assigns it to id.BearerToken so the
@@ -229,7 +229,7 @@ func (id *Identity) EnsureBearerToken(ctx context.Context, logger *slog.Logger) 
 	// The identity service is the node-token ISSUER -- it hosts the
 	// `/node/bootstrap` endpoint other nodes call. It must NEVER
 	// self-bootstrap: the bootstrap POST would target this node's own
-	// `/node/bootstrap` (IDENTITY_VERIFIER_BASE_URL defaults to the
+	// `/node/bootstrap` (MEMQL_IDENTITY_VERIFIER_BASE_URL defaults to the
 	// identity service) BEFORE its HTTP listener is up, so it retries
 	// the full ~90s budget and blocks the listener from starting --
 	// tripping the container healthcheck and, transitively, every other
@@ -274,7 +274,7 @@ func (id *Identity) setBearerToken(tok string) {
 
 // CanRemintBearerToken reports whether this node can re-fetch its node token
 // on an auth failure (memql#1521): the self-bootstrap mint path must be
-// configured (MEMQL_NODE_BOOTSTRAP_TOKEN + IDENTITY_VERIFIER_BASE_URL). When
+// configured (MEMQL_NODE_BOOTSTRAP_TOKEN + MEMQL_IDENTITY_VERIFIER_BASE_URL). When
 // the token was provisioned out-of-band via MEMQL_NODE_TOKEN there is nothing
 // to re-mint, so connections leave their reauth hook unset and fall back to
 // the legacy reconnect-with-the-same-token behaviour. The identity node never

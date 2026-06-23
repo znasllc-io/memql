@@ -104,7 +104,7 @@ verifier (HTTP mode refuses to start without one -- default-deny):
 MEMQL_MCP_TRANSPORT=http \
 MEMQL_MCP_HTTP_ADDR=:8090 \
 MEMQL_MCP_MODE=authoring \
-IDENTITY_VERIFIER_BASE_URL=http://localhost:8085 \
+MEMQL_IDENTITY_VERIFIER_BASE_URL=http://localhost:8085 \
   ./bin/memql-mcp
 # then: claude mcp add --transport http memql-local-http \
 #   http://127.0.0.1:8090/mcp --header "Authorization: Bearer <local JWT>"

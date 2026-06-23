@@ -1572,7 +1572,7 @@ type RelationshipDecl struct {
 //	@modality("text")
 //	provider chat5Mini {
 //	  auth {
-//	    apiKey  env("MEMQL_SI_OPENAI_API_KEY")
+//	    apiKey  env("MEMQL_AI_OPENAI_API_KEY")
 //	  }
 //	  params {
 //	    maxTokens  4096
@@ -1585,7 +1585,7 @@ type RelationshipDecl struct {
 //	@base
 //	@type("OpenAI")
 //	provider openai {
-//	  auth { apiKey env("MEMQL_SI_OPENAI_API_KEY") }
+//	  auth { apiKey env("MEMQL_AI_OPENAI_API_KEY") }
 //	}
 //
 // Child providers inherit Type + Auth from a @extends("...") parent

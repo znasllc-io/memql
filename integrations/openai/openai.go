@@ -19,7 +19,7 @@ import (
 
 // Config holds the configuration for OpenAI voice providers.
 type Config struct {
-	// APIKey is the OpenAI API key (MEMQL_SI_OPENAI_API_KEY).
+	// APIKey is the OpenAI API key (MEMQL_AI_OPENAI_API_KEY).
 	APIKey string `json:"apiKey"`
 
 	// ASRModel is the transcription model used by the Realtime API in
@@ -37,14 +37,14 @@ type Config struct {
 	//
 	// To upgrade to streaming partials: enable gpt-4o-mini-transcribe
 	// (or gpt-4o-transcribe for higher accuracy) on the OpenAI project,
-	// then set POLYPHON_OPENAI_ASR_MODEL=gpt-4o-mini-transcribe.
+	// then set MEMQL_POLYPHON_OPENAI_ASR_MODEL=gpt-4o-mini-transcribe.
 	ASRModel string `json:"asrModel"`
 
 	// TTSModel is the text-to-speech model for the /v1/audio/speech
 	// HTTP API. Defaults to gpt-4o-mini-tts (TTSModelGPT4oMini) --
 	// the newest, lowest-latency, most natural-sounding voice. The
 	// constants below name the four currently-supported models so
-	// operators can swap via POLYPHON_OPENAI_TTS_MODEL without
+	// operators can swap via MEMQL_POLYPHON_OPENAI_TTS_MODEL without
 	// guessing the string:
 	//
 	//	TTSModelGPT4oMini  "gpt-4o-mini-tts"  default; cheapest + most natural
@@ -69,7 +69,7 @@ type Config struct {
 // Supported OpenAI TTS models. The Config.TTSModel field accepts any
 // string, but these are the four the bridge has been tested against
 // and the four documented to operators. Set
-// POLYPHON_OPENAI_TTS_MODEL=<value> to override the default.
+// MEMQL_POLYPHON_OPENAI_TTS_MODEL=<value> to override the default.
 const (
 	// TTSModelGPT4oMini is the default -- newest TTS family,
 	// cheapest, most natural-sounding voices, lowest latency.

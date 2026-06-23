@@ -73,7 +73,7 @@ func TestBuildPersonaInstructions_TrimsWhitespaceFields(t *testing.T) {
 }
 
 func TestBuildSessionPersona(t *testing.T) {
-	t.Setenv("POLYPHON_VOICE_PROVIDER", "openai")
+	t.Setenv("MEMQL_POLYPHON_VOICE_PROVIDER", "openai")
 	p := ResolvePersona(SessionAck{CanonicalVoice: "alto"}, Config{})
 
 	sp := BuildSessionPersona(p)

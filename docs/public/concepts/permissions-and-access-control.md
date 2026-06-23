@@ -63,7 +63,7 @@ Roles are stamped on the `v1:identity:user.role` field by the
 in-house identity service:
 
 - The cluster owner is minted at /setup with `role=owner`.
-- New internal users (email matches `IDENTITY_INTERNAL_DOMAINS`)
+- New internal users (email matches `MEMQL_IDENTITY_INTERNAL_DOMAINS`)
   default to the cluster's `internalDefaultRole`.
 - External users default to `reader` and live in their own
   personal partition.

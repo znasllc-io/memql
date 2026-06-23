@@ -9,7 +9,7 @@ Kubernetes manifests for the memQL multi-node mesh, deployed to AKS
 Staging/prod use the managed **Tiger Cloud** DB (`xahn9ru4v6`, Azure East
 US 2). There is **no postgres/pgadmin/nginx/livekit** in this directory --
 only the 7 memQL node-types. Every node connects to Tiger via the
-`MEMORY_NODES_DATABASE_DSN` key in the `memql-secrets` Secret.
+`MEMQL_DATABASE_DSN` key in the `memql-secrets` Secret.
 
 ## Mesh = cluster DNS
 
@@ -116,7 +116,7 @@ releases: (1) add the new shape + write both, (2) backfill + switch reads,
 ## Secrets (genesis A2)
 
 Four keys in `memql-secrets`: `MEMQL_MASTER_KEY`, `MEMQL_GENESIS_B64`,
-`MEMORY_NODES_DATABASE_DSN`, `MEMORY_NODES_DATABASE_DIRECT_DSN`. With
+`MEMQL_DATABASE_DSN`, `MEMORY_NODES_DATABASE_DIRECT_DSN`. With
 `MEMQL_GENESIS_AUTOLOAD=true`, each pod decrypts the sealed envelope in-process
 at boot and applies ~150 vars set-if-absent; the per-pod overrides (node type,
 mesh addresses, the DSNs) win. Every DB-connecting node mounts the Secret via
@@ -130,7 +130,7 @@ To kill the deploy-time connection storm (SQLSTATE 53300), bulk traffic rides
 the Tiger **transaction pooler** (PgBouncer) and only session-stateful work
 takes a direct backend:
 
-- `MEMORY_NODES_DATABASE_DSN` -> the **transaction pooler** (db
+- `MEMQL_DATABASE_DSN` -> the **transaction pooler** (db
   `tsdb_transaction`, pooler port `39578`). All queries + mutations. The
   pooler decouples client connections from Postgres backends, so a blue-green
   + rolling deploy surge no longer maps 1:1 to direct slots.
@@ -158,12 +158,12 @@ used to be forced by a ReadWriteOnce key PVC — only one pod could mount the
 signing key — so every deploy had an auth-down window.
 
 Now the Ed25519 signing key comes from the sealed envelope as
-`IDENTITY_SIGNING_KEY_B64` (a base64 32-byte seed). Every replica derives
+`MEMQL_IDENTITY_SIGNING_KEY_B64` (a base64 32-byte seed). Every replica derives
 the **same** key + `kid` + JWKS from it, so there's no single-writer volume.
 Generate one with `make identity-signing-key` and seal it into the genesis
 envelope. **Rotate** by generating a new seed, re-sealing, and rolling the
 deployment (automatic rotation is disabled in this mode). Without
-`IDENTITY_SIGNING_KEY_B64`, identity falls back to the on-disk `IDENTITY_KEY_DIR`
+`MEMQL_IDENTITY_SIGNING_KEY_B64`, identity falls back to the on-disk `MEMQL_IDENTITY_KEY_DIR`
 (dev) — which is single-replica only.
 
 ## Apply order
@@ -177,7 +177,7 @@ kubectl apply -f deploy/k8s/namespace.yaml
 kubectl create secret generic memql-secrets -n memql \
   --from-literal=MEMQL_MASTER_KEY="$MEMQL_MASTER_KEY" \
   --from-literal=MEMQL_GENESIS_B64="$(base64 < ~/.memql/genesis.znas)" \
-  --from-literal=MEMORY_NODES_DATABASE_DSN="$POOLER_DSN" \
+  --from-literal=MEMQL_DATABASE_DSN="$POOLER_DSN" \
   --from-literal=MEMORY_NODES_DATABASE_DIRECT_DSN="$(tiger db connection-string xahn9ru4v6 --with-password)"
 
 # 3. All node Deployments + Services (digest-pinned overlay, #699)

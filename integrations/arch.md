@@ -169,9 +169,9 @@ Self-registering plug-in. Capability:
 `integration.email.sendEmail`. Three sender flavors selected by env:
 
 - **GraphSender** (preferred) -- Microsoft Graph `sendMail` via OAuth
-  client-credentials. `EMAIL_AZURE_TENANT_ID` /
-  `EMAIL_AZURE_CLIENT_ID` / `EMAIL_AZURE_CLIENT_SECRET` /
-  `EMAIL_SENDER` / `EMAIL_FROM_NAME`. Legacy `AZURE_*` / `MAIL_*`
+  client-credentials. `MEMQL_EMAIL_AZURE_TENANT_ID` /
+  `MEMQL_EMAIL_AZURE_CLIENT_ID` / `MEMQL_EMAIL_AZURE_CLIENT_SECRET` /
+  `MEMQL_EMAIL_SENDER` / `MEMQL_EMAIL_FROM_NAME`. Legacy `AZURE_*` / `MAIL_*`
   names accepted as fallback during the rename window.
 - **SMTPSender** -- standard SMTP. `SMTP_HOST` / `SMTP_PORT` /
   `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM_ADDR` /

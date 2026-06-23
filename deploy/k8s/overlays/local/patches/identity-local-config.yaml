@@ -15,17 +15,17 @@ spec:
         - name: identity
           env:
             # Local identity URL: http (no TLS) via localhost port-forward.
-            - name: IDENTITY_BASE_URL
+            - name: MEMQL_IDENTITY_BASE_URL
               value: "http://localhost:8085"
-            - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+            - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
               value: "http://localhost:8085"
-            - name: IDENTITY_BOOTSTRAP_DOMAIN
+            - name: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN
               value: "localhost"
             # Allow both the copresent SPA (port 8080) and direct localhost.
-            - name: IDENTITY_CORS_ALLOWED_ORIGINS
+            - name: MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS
               value: "http://localhost:8080,http://localhost:3000"
             # OAuth redirect: localhost SPA + cockpit (unchanged).
-            - name: IDENTITY_REGISTERED_CLIENTS
+            - name: MEMQL_IDENTITY_REGISTERED_CLIENTS
               value: '[{"clientId":"app","redirectURIs":["http://localhost:8080/auth/callback","http://localhost:3000/auth/callback"]},{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]}]'
             # Run migrations on identity startup -- local Postgres starts empty
             # (Tiger Cloud staging has a pre-existing schema; local does not).

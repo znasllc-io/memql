@@ -36,7 +36,7 @@
 #     (only a superuser may terminate a superuser's sessions). `inspect` works
 #     with the read-only `tsdbadmin` recovery DSN.
 #
-# Requires: psql, and one of SUPERUSER_DSN / MEMORY_NODES_DATABASE_DSN, or the
+# Requires: psql, and one of SUPERUSER_DSN / MEMQL_DATABASE_DSN, or the
 #           `tiger` CLI (auth login'd) to resolve a DSN for TIGER_SVC.
 
 set -euo pipefail
@@ -54,7 +54,7 @@ DEPLOYER_APPNAME="${DEPLOYER_APPNAME:-deployer}"
 IDLE_THRESHOLD="${IDLE_THRESHOLD:-5 minutes}"
 
 # DSN resolution order: explicit SUPERUSER_DSN (needed to terminate
-# postgres-owned sessions) -> MEMORY_NODES_DATABASE_DSN -> `tiger` CLI.
+# postgres-owned sessions) -> MEMQL_DATABASE_DSN -> `tiger` CLI.
 SUPERUSER_DSN="${SUPERUSER_DSN:-}"
 TIGER_SVC="${TIGER_SVC:-xahn9ru4v6}"     # staging Tiger service id
 PGCONNECT_TIMEOUT_S="${PGCONNECT_TIMEOUT_S:-8}"
@@ -82,8 +82,8 @@ function resolve_dsn() {
         printf '%s' "$SUPERUSER_DSN"
         return 0
     fi
-    if [ -n "${MEMORY_NODES_DATABASE_DSN:-}" ]; then
-        printf '%s' "$MEMORY_NODES_DATABASE_DSN"
+    if [ -n "${MEMQL_DATABASE_DSN:-}" ]; then
+        printf '%s' "$MEMQL_DATABASE_DSN"
         return 0
     fi
     if command -v tiger >/dev/null 2>&1; then
@@ -100,7 +100,7 @@ function psql_target() {
     d="$(resolve_dsn)"
     if [ -z "$d" ]; then
         echo "ERROR: no DSN. Set SUPERUSER_DSN (to terminate postgres-owned" >&2
-        echo "       sessions) or MEMORY_NODES_DATABASE_DSN, or 'tiger auth login'." >&2
+        echo "       sessions) or MEMQL_DATABASE_DSN, or 'tiger auth login'." >&2
         return 1
     fi
     printf '%s' "$d"
@@ -199,7 +199,7 @@ Flags:
   --idle '<interval>' Override the idle threshold (default: '$IDLE_THRESHOLD').
 
 Env: SUPERUSER_DSN (required to terminate postgres-owned sessions),
-     MEMORY_NODES_DATABASE_DSN, TIGER_SVC ($TIGER_SVC),
+     MEMQL_DATABASE_DSN, TIGER_SVC ($TIGER_SVC),
      DEPLOYER_APPNAME ($DEPLOYER_APPNAME), IDLE_THRESHOLD ('$IDLE_THRESHOLD'),
      PGCONNECT_TIMEOUT_S ($PGCONNECT_TIMEOUT_S).
 EOF

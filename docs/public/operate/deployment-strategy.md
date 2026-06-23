@@ -166,7 +166,7 @@ shared secrets with ad-hoc `kubectl set env`.
 Shared secrets live in a single encrypted envelope sealed under
 `MEMQL_MASTER_KEY` (NaCl secretbox; see `component/secret/`). The cluster carries
 three keys in the `memql-secrets` Secret: `MEMQL_MASTER_KEY`,
-`MEMQL_GENESIS_B64` (the sealed envelope), and `MEMORY_NODES_DATABASE_DSN`.
+`MEMQL_GENESIS_B64` (the sealed envelope), and `MEMQL_DATABASE_DSN`.
 The manifest of expected keys is `scripts/secrets/manifest.yaml` (entries may be
 `optional: true` — documented + sealed-when-present but not required, e.g. the
 identity signing seed).
@@ -210,7 +210,7 @@ check exists precisely so neither side is updated alone.
 ## 5. Identity HA + signing key
 
 Identity runs **2 replicas in envMode**: the Ed25519 signing seed
-(`IDENTITY_SIGNING_KEY_B64`, std-base64 of 32 bytes) rides the genesis envelope,
+(`MEMQL_IDENTITY_SIGNING_KEY_B64`, std-base64 of 32 bytes) rides the genesis envelope,
 so every replica derives the **same** key + `kid` + JWKS. There is **no RWO key
 PVC** (which would force a single writer), the strategy is RollingUpdate, and a
 PodDisruptionBudget keeps ≥1 pod serving auth through disruptions.
@@ -221,8 +221,8 @@ PodDisruptionBudget keeps ≥1 pod serving auth through disruptions.
   nodes re-bootstrap on restart). The signing key is **JWT-only**; it does **not**
   encrypt stored secrets (those use `MEMQL_MASTER_KEY`), so rotating it never
   risks stored data.
-- **Disk-key mode (local dev only)**: when `IDENTITY_SIGNING_KEY_B64` is unset,
-  identity falls back to an on-disk keypair under `IDENTITY_KEY_DIR`
+- **Disk-key mode (local dev only)**: when `MEMQL_IDENTITY_SIGNING_KEY_B64` is unset,
+  identity falls back to an on-disk keypair under `MEMQL_IDENTITY_KEY_DIR`
   (single-writer; not for HA).
 
 ---
@@ -412,7 +412,7 @@ is the belt-and-suspenders signal against the surge-deadlock that stalled 0.9.6.
 kubectl create secret generic memql-secrets -n memql \
   --from-literal=MEMQL_MASTER_KEY="$MEMQL_MASTER_KEY" \
   --from-literal=MEMQL_GENESIS_B64="$(base64 < /tmp/<env>.genesis.znas)" \
-  --from-literal=MEMORY_NODES_DATABASE_DSN="$(tiger db connection-string <id> --with-password)"
+  --from-literal=MEMQL_DATABASE_DSN="$(tiger db connection-string <id> --with-password)"
 ```
 
 See also `deploy/k8s/README.md` (manifest-level reference) and

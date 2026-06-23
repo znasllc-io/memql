@@ -20,7 +20,7 @@ func testSeedB64() string {
 
 // TestNewKeyManagerFromSeed_Deterministic is the #550 invariant: the same
 // seed always yields the same keypair + kid, so multiple identity replicas
-// handed the same IDENTITY_SIGNING_KEY_B64 publish identical JWKS.
+// handed the same MEMQL_IDENTITY_SIGNING_KEY_B64 publish identical JWKS.
 func TestNewKeyManagerFromSeed_Deterministic(t *testing.T) {
 	seed := testSeedB64()
 
@@ -72,7 +72,7 @@ func TestNewKeyManagerFromSeed_BadInput(t *testing.T) {
 }
 
 // A valid env signing key satisfies the at-rest requirement: production
-// (non-localhost) config validates WITHOUT IDENTITY_KEY_ENCRYPTION_KEY.
+// (non-localhost) config validates WITHOUT MEMQL_IDENTITY_KEY_ENCRYPTION_KEY.
 func TestConfigValidate_SigningKeySatisfiesAtRest(t *testing.T) {
 	base := Config{
 		Enabled:             true,

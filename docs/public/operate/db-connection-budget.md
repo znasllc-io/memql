@@ -125,7 +125,7 @@ that wedged 0.9.87. The structural fix is **Tiger Cloud transaction-mode
 pooling (PgBouncer)** via a **hybrid endpoint split**:
 
 - **Bulk traffic** (the bun pool — all queries + mutations, every mesh pod) →
-  `MEMORY_NODES_DATABASE_DSN` points at the **transaction pooler** (db
+  `MEMQL_DATABASE_DSN` points at the **transaction pooler** (db
   `tsdb_transaction`, pooler port `39578`). Client connections decouple from
   Postgres backends, so a deploy surge no longer maps 1:1 to direct slots —
   the surge-killing multiplier.

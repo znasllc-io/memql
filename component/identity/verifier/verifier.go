@@ -121,7 +121,7 @@ func New(cfg Config, cache *JWKSCache, patVerifier PATVerifier, logger *slog.Log
 		return nil, errors.New("verifier.New: cache is required")
 	}
 	if !cfg.Enabled() {
-		return nil, errors.New("verifier.New: config not enabled (IDENTITY_VERIFIER_BASE_URL not set)")
+		return nil, errors.New("verifier.New: config not enabled (MEMQL_IDENTITY_VERIFIER_BASE_URL not set)")
 	}
 	return &Verifier{
 		cache:    cache,

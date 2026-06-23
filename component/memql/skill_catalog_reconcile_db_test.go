@@ -48,11 +48,11 @@ import (
 //
 // Postgres-gated: skips when no DB is reachable (CI without a DB), so it
 // never blocks the pipeline; it runs locally against the docker `memql-db`
-// and on any node with MEMORY_NODES_DATABASE_DSN set.
+// and on any node with MEMQL_DATABASE_DSN set.
 
 func reconcileTestDB(t *testing.T) *bun.DB {
 	t.Helper()
-	dsn := os.Getenv("MEMORY_NODES_DATABASE_DSN")
+	dsn := os.Getenv("MEMQL_DATABASE_DSN")
 	if dsn == "" {
 		dsn = "postgres://memql:memql_local_dev@localhost:5432/memql?sslmode=disable"
 	}

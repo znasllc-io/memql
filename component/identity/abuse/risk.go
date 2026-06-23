@@ -57,7 +57,7 @@ type ScoreResult struct {
 }
 
 // Weight constants are exported so tests and admin-UI tooling can
-// reason about them. Calibrated so IDENTITY_RISK_THRESHOLD=50
+// reason about them. Calibrated so MEMQL_IDENTITY_RISK_THRESHOLD=50
 // (the default) sits at the "block on first strong signal OR two
 // medium signals" line.
 const (

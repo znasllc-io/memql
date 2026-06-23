@@ -21,7 +21,7 @@
 # all, and the cluster only recovered after a manual identity reseal + a manual
 # mesh roll. Two facts make recovery automatic now, and this script LEANS ON
 # BOTH:
-#   * Identity's JWT signing key is a SHARED seed (IDENTITY_SIGNING_KEY_B64)
+#   * Identity's JWT signing key is a SHARED seed (MEMQL_IDENTITY_SIGNING_KEY_B64)
 #     that rides the sealed genesis envelope (MEMQL_GENESIS_B64 in the
 #     memql-secrets Secret), NOT the DB. The wipe never touches it, so every
 #     identity replica derives the SAME key + kid + JWKS after the reset --
@@ -46,7 +46,7 @@
 #      so nothing writes mid-reset, restoring the replica counts at the end
 #      (even on failure).
 #   5. Wipes: a one-shot in-cluster Job (postgres client) connects with
-#      MEMORY_NODES_DATABASE_DSN from the memql-secrets Secret and runs
+#      MEMQL_DATABASE_DSN from the memql-secrets Secret and runs
 #      DROP SCHEMA public CASCADE; CREATE SCHEMA public; + re-grants. The Job is
 #      generated INLINE (no destructive manifest left on disk to apply by
 #      accident).
@@ -88,16 +88,16 @@ ALLOWED_ENV="staging"
 EXPECTED_CONTEXT_SUBSTR="staging"
 CONFIRM_PHRASE="reset staging"
 SECRET_NAME="memql-secrets"
-DSN_KEY="MEMORY_NODES_DATABASE_DSN"
+DSN_KEY="MEMQL_DATABASE_DSN"
 WIPE_JOB="memql-db-reset-wipe"
 MIGRATE_JOB="memql-migrate"
 PSQL_IMAGE="postgres:16-alpine"
 
 # Auth coherence (#1522).
 IDENTITY_DEPLOY="identity"            # the auth/JWKS issuer Deployment
-GENESIS_KEY="MEMQL_GENESIS_B64"       # sealed envelope carrying IDENTITY_SIGNING_KEY_B64 (#1515/#550)
-SIGNING_KEY="IDENTITY_SIGNING_KEY_B64" # the shared signing seed, if surfaced directly
-EPHEMERAL_OPT_IN="IDENTITY_ALLOW_EPHEMERAL_KEY" # the #1515 per-pod ephemeral-key opt-in (divergent at >=2 replicas)
+GENESIS_KEY="MEMQL_GENESIS_B64"       # sealed envelope carrying MEMQL_IDENTITY_SIGNING_KEY_B64 (#1515/#550)
+SIGNING_KEY="MEMQL_IDENTITY_SIGNING_KEY_B64" # the shared signing seed, if surfaced directly
+EPHEMERAL_OPT_IN="MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY" # the #1515 per-pod ephemeral-key opt-in (divergent at >=2 replicas)
 JWKS_VERIFY_JOB="memql-db-reset-jwks-verify"
 JWKS_URL="https://identity:8085/.well-known/jwks.json"  # in-cluster identity TLS JWKS
 IDENTITY_READY_TIMEOUT="180s"
@@ -172,7 +172,7 @@ function verify_auth_seed() {
     info "pre-flight: verifying the shared identity signing seed (#1515) is in place..."
 
     # (a) The Secret must exist and carry the sealed genesis envelope (which
-    #     contains IDENTITY_SIGNING_KEY_B64), or the seed surfaced directly.
+    #     contains MEMQL_IDENTITY_SIGNING_KEY_B64), or the seed surfaced directly.
     if ! kubectl -n "$NS" get secret "$SECRET_NAME" >/dev/null 2>&1; then
         err "Secret '$SECRET_NAME' not found in namespace '$NS' -- cannot verify the identity signing seed."
         err "the reset would leave identity with no shared key. Seal + apply the genesis envelope first"

@@ -18,11 +18,11 @@ import (
 func init() {
 	memql.RegisterPlugin("telephony", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
 		integ, err := New(Config{
-			CarrierName:      os.Getenv("MEMQL_TELEPHONY_CARRIER"),
-			LiveKitURL:       firstEnv("LIVEKIT_URL", "POLYPHON_LIVEKIT_URL"),
-			LiveKitAPIKey:    os.Getenv("POLYPHON_LIVEKIT_API_KEY"),
-			LiveKitAPISecret: os.Getenv("POLYPHON_LIVEKIT_API_SECRET"),
-			SIPEdgeURI:       os.Getenv("MEMQL_TELEPHONY_SIP_EDGE_URI"),
+			CarrierName:          os.Getenv("MEMQL_TELEPHONY_CARRIER"),
+			LiveKitURL:           firstEnv("LIVEKIT_URL", "MEMQL_POLYPHON_LIVEKIT_URL"),
+			LiveKitAPIKey:        os.Getenv("MEMQL_POLYPHON_LIVEKIT_API_KEY"),
+			LiveKitAPISecret:     os.Getenv("MEMQL_POLYPHON_LIVEKIT_API_SECRET"),
+			SIPEdgeURI:           os.Getenv("MEMQL_TELEPHONY_SIP_EDGE_URI"),
 			OutboundSIPAddress:   os.Getenv("MEMQL_TELEPHONY_OUTBOUND_SIP_ADDRESS"),
 			OutboundAuthUsername: os.Getenv("MEMQL_TELEPHONY_OUTBOUND_AUTH_USERNAME"),
 			OutboundAuthPassword: os.Getenv("MEMQL_TELEPHONY_OUTBOUND_AUTH_PASSWORD"),

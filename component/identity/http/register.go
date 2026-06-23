@@ -55,7 +55,7 @@ type registerResponse struct {
 // client_id (no secret) it then uses at /authorize + /oauth/token.
 //
 // The endpoint is gated on Cfg.OAuthDCREnabled (env
-// IDENTITY_OAUTH_DCR_ENABLED, default true). When disabled it returns
+// MEMQL_IDENTITY_OAUTH_DCR_ENABLED, default true). When disabled it returns
 // 403 registration_disabled and persists nothing.
 //
 // Public clients only: token_endpoint_auth_method must be "none" (or

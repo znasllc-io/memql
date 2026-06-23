@@ -471,7 +471,7 @@ Richest real: base `google` (`dsl/providers/providers.memql:267`); derived
 @type("OpenAI")
 provider openai {
   auth {
-    apiKey  env("MEMQL_SI_OPENAI_API_KEY")
+    apiKey  env("MEMQL_AI_OPENAI_API_KEY")
     baseURL "https://api.openai.com/v1"
   }
 }

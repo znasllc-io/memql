@@ -28,7 +28,7 @@ func baseValidConfig() Config {
 }
 
 // TestValidate_EphemeralKeyGuard exercises the #1515 fail-fast guard: a
-// non-localhost deployment with no IDENTITY_SIGNING_KEY_B64 must refuse to
+// non-localhost deployment with no MEMQL_IDENTITY_SIGNING_KEY_B64 must refuse to
 // start (per-pod ephemeral key -> JWKS divergence -> ~50% auth failures)
 // unless it sets a shared seed OR explicitly opts into ephemeral keys.
 func TestValidate_EphemeralKeyGuard(t *testing.T) {
@@ -50,7 +50,7 @@ func TestValidate_EphemeralKeyGuard(t *testing.T) {
 				c.KeyEncryptionKey = devEncKey
 			},
 			wantErr:       true,
-			wantErrSubstr: "IDENTITY_SIGNING_KEY_B64 is not set",
+			wantErrSubstr: "MEMQL_IDENTITY_SIGNING_KEY_B64 is not set",
 		},
 		{
 			name: "shared seed set -> ALLOW",
@@ -125,8 +125,8 @@ func TestValidate_EphemeralGuardErrorIsActionable(t *testing.T) {
 		t.Fatal("expected a refusal error")
 	}
 	for _, want := range []string{
-		"IDENTITY_SIGNING_KEY_B64",
-		"IDENTITY_ALLOW_EPHEMERAL_KEY",
+		"MEMQL_IDENTITY_SIGNING_KEY_B64",
+		"MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY",
 		"jwks",
 	} {
 		if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(want)) {

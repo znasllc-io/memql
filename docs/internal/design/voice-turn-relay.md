@@ -68,7 +68,7 @@ running **both** endpoints via `ngrok start --all` over a generated
 config merged on top of the user's global `ngrok.yml` (for the
 authtoken):
 - `livekit` (https) -> `localhost:7880` -- LiveKit signaling; stamped
-  into `LIVEKIT_PUBLIC_URL` / `POLYPHON_LIVEKIT_PUBLIC_URL`.
+  into `LIVEKIT_PUBLIC_URL` / `MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL`.
 - `coturn` (tcp) -> `localhost:3478` -- the TURN relay.
 
 One agent (not two) because ngrok v3 binds a single local API on

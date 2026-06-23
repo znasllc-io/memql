@@ -166,7 +166,7 @@ Azure resources (create-or-converge, region: ${REGION_DISPLAY}):
     cae-memql-<env>  container apps environment
 
 Key Vault secrets (A2 genesis-envelope model -- issue #519):
-    ${KV_SECRET_DSN}   Tiger Cloud DSN (kept; from MEMORY_NODES_DATABASE_DSN)
+    ${KV_SECRET_DSN}   Tiger Cloud DSN (kept; from MEMQL_DATABASE_DSN)
     ${KV_SECRET_MASTER_KEY}            32-byte key from \$${MASTER_KEY_ENV_VAR} (operator env only)
     ${KV_SECRET_GENESIS_B64}           base64 of the sealed envelope
                               (\$MEMQL_GENESIS_PATH, default ~/.memql/genesis.znas)
@@ -640,13 +640,13 @@ function ensure_container_apps_env() {
 # SECRETS -- the A2 genesis-envelope model: exactly THREE Key Vault secrets
 #=============================================================================
 
-# Resolve the DSN value: prefer an already-exported MEMORY_NODES_DATABASE_DSN;
+# Resolve the DSN value: prefer an already-exported MEMQL_DATABASE_DSN;
 # else read it from the gitignored secrets file; else (interactive only)
 # prompt. Returns empty + non-zero if we can't resolve one. The DSN may
 # already have been written by tiger-provision.sh, so a missing value here
 # is a non-fatal skip rather than an error.
 function resolve_dsn_value() {
-    local var="MEMORY_NODES_DATABASE_DSN"
+    local var="MEMQL_DATABASE_DSN"
     local val="${!var:-}"
 
     if [ -n "${val}" ]; then
@@ -711,13 +711,13 @@ function set_kv_secret() {
 # we never clobber an unchanged value.
 function load_dsn_secret() {
     if [ "$DRY_RUN" = true ]; then
-        echo "  [plan] az keyvault secret set --vault-name ${KV_NAME} --name ${KV_SECRET_DSN} --value <MEMORY_NODES_DATABASE_DSN>"
+        echo "  [plan] az keyvault secret set --vault-name ${KV_NAME} --name ${KV_SECRET_DSN} --value <MEMQL_DATABASE_DSN>"
         return 0
     fi
 
     local value
     if ! value="$(resolve_dsn_value)"; then
-        warn "no value for MEMORY_NODES_DATABASE_DSN -- leaving ${KV_SECRET_DSN} unchanged."
+        warn "no value for MEMQL_DATABASE_DSN -- leaving ${KV_SECRET_DSN} unchanged."
         warn "  (tiger-provision.sh may already have stored it; that's fine.)"
         record_skipped "secret: ${KV_SECRET_DSN}"
         return 0

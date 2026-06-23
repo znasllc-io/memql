@@ -17,7 +17,7 @@ import (
 // The env-var registry (scripts/secrets/manifest.yaml, loaded via
 // component/genesis) carries a `default` on a handful of entries -- the
 // value memQL should run with when an operator never set one (e.g.
-// EMAIL_FROM_NAME="memQL"). This injector walks the manifest, selects
+// MEMQL_EMAIL_FROM_NAME="memQL"). This injector walks the manifest, selects
 // the entries that BOTH carry a default AND are concept-stored
 // (scope global/partition; node-scoped entries are per-pod process env
 // and are never concept-stored), and for each one writes the default as

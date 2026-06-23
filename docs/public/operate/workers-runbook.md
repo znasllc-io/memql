@@ -192,7 +192,7 @@ The user approves or denies on the canvas card.
 
 | Where           | What lands                                         |
 |-----------------|----------------------------------------------------|
-| `v1:identity:auditEvent` | Security signals: `worker_registered`, `worker_revoked`, `scope_elevation_*`, `kill_switch_*`, `worker_call_denied_*`. Default 365-day retention (`IDENTITY_AUDIT_LOG_RETENTION_DAYS`). |
+| `v1:identity:auditEvent` | Security signals: `worker_registered`, `worker_revoked`, `scope_elevation_*`, `kill_switch_*`, `worker_call_denied_*`. Default 365-day retention (`MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS`). |
 | `v1:worker:invocation` | Per-call telemetry: tool, action, args (redacted), duration, outcome, exit code, byte counts, output preview. Default 90-day retention (`WORKER_INVOCATION_RETENTION_DAYS`). |
 | Cockpit logs    | `~/.memql/state/worker.log` (LaunchAgent / systemd). |
 | Slog stream     | The `audit` slog logger on the agent node. Operator log retention applies here. |

@@ -4,7 +4,7 @@
 # key/secret is a self-chosen shared-secret pair synced from Key Vault via ESO
 # (deploy/external-secrets/externalsecret-livekit.yaml -> Secret `livekit-secrets`),
 # matching the memql-secrets pattern. The same key/secret is handed to the BFF
-# (POLYPHON_LIVEKIT_API_KEY/SECRET) so the tokens it mints validate here.
+# (MEMQL_POLYPHON_LIVEKIT_API_KEY/SECRET) so the tokens it mints validate here.
 #
 # Two planes:
 #   - Signaling (wss): browser -> ingress-nginx (TLS) -> livekit:7880. WebSocket.

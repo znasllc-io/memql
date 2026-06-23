@@ -6,7 +6,7 @@ import "testing"
 
 // The STT bootstrap must resolve the OpenAI key through the same
 // prefix-elision chain as the provider auth resolver: the prefixed
-// MEMQL_SI_OPENAI_API_KEY wins, the bare OPENAI_API_KEY (the form the
+// MEMQL_AI_OPENAI_API_KEY wins, the bare MEMQL_OPENAI_API_KEY (the form the
 // genesis envelope seeds) is the fallback (#1371).
 func TestOpenAIKeyFromEnvFallbackChain(t *testing.T) {
 	cases := []struct {
@@ -23,8 +23,8 @@ func TestOpenAIKeyFromEnvFallbackChain(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("MEMQL_SI_OPENAI_API_KEY", tc.prefixed)
-			t.Setenv("OPENAI_API_KEY", tc.bare)
+			t.Setenv("MEMQL_AI_OPENAI_API_KEY", tc.prefixed)
+			t.Setenv("MEMQL_OPENAI_API_KEY", tc.bare)
 			if got := openAIKeyFromEnv(); got != tc.want {
 				t.Fatalf("openAIKeyFromEnv() = %q, want %q", got, tc.want)
 			}

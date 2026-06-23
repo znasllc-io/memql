@@ -16,14 +16,14 @@ import (
 // and assert the server accepts the session instead of closing with
 // beta_api_shape_disabled or rejecting the config with an error event.
 //
-// Env-gated: skips unless OPENAI_API_KEY is set (never runs in CI lanes
+// Env-gated: skips unless MEMQL_OPENAI_API_KEY is set (never runs in CI lanes
 // without the secret). Asserts acceptance by sending a short burst of silence
 // and confirming the stream stays open with no error for a grace window --
 // the beta-shape rejection closes the socket within ~1s of connect.
 func TestASRStreamLiveGA(t *testing.T) {
-	apiKey := os.Getenv("OPENAI_API_KEY")
+	apiKey := os.Getenv("MEMQL_OPENAI_API_KEY")
 	if apiKey == "" {
-		t.Skip("OPENAI_API_KEY not set; skipping live GA ASR check")
+		t.Skip("MEMQL_OPENAI_API_KEY not set; skipping live GA ASR check")
 	}
 
 	model := os.Getenv("MEMQL_OPENAI_REALTIME_MODEL")

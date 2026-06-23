@@ -1151,7 +1151,15 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 		return s.handleSenseHover(envelope, payload.SenseHover)
 	case *memqlv1.MemqlClientMessage_SenseSignatureHelp:
 		return s.handleSenseSignatureHelp(envelope, payload.SenseSignatureHelp)
+	// Pack browser -- read-only DSL pack enumeration (memql#2127 / B1)
+	case *memqlv1.MemqlClientMessage_ListPackDomains:
+		return s.handleListPackDomains(envelope, payload.ListPackDomains)
+	case *memqlv1.MemqlClientMessage_ListPackFiles:
+		return s.handleListPackFiles(envelope, payload.ListPackFiles)
+	case *memqlv1.MemqlClientMessage_ReadPackFile:
+		return s.handleReadPackFile(envelope, payload.ReadPackFile)
 
+	// Authoring -- validate + session-define a user bundle (issue #2128 / C1)
 	case *memqlv1.MemqlClientMessage_AuthoringValidateBundle:
 		return s.handleAuthoringValidateBundle(envelope, payload.AuthoringValidateBundle)
 	case *memqlv1.MemqlClientMessage_AuthoringSessionDefineBundle:

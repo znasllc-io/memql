@@ -48,7 +48,7 @@ func TestMCPConformance(t *testing.T) {
 		label := c.Issue + "/" + c.Dim
 		ok := t.Run(label, func(t *testing.T) {
 			if skipped {
-				t.Skipf("requires Postgres (set MEMORY_NODES_DATABASE_DSN); validated in the CI conformance job")
+				t.Skipf("requires Postgres (set MEMQL_DATABASE_DSN); validated in the CI conformance job")
 			}
 			c.Run(t, e)
 		})

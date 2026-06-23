@@ -108,9 +108,9 @@ func TestStagingDBResetAuthCoherence(t *testing.T) {
 	src := sdbrSource(t)
 	checks := map[string]string{
 		`pre-flight seed verification`:    `verify_auth_seed`,
-		`refuses a missing signing seed`:  `IDENTITY_SIGNING_KEY_B64`,
+		`refuses a missing signing seed`:  `MEMQL_IDENTITY_SIGNING_KEY_B64`,
 		`checks the sealed genesis env`:   `MEMQL_GENESIS_B64`,
-		`ephemeral-key divergence guard`:  `IDENTITY_ALLOW_EPHEMERAL_KEY`,
+		`ephemeral-key divergence guard`:  `MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY`,
 		`ordered identity-first bring-up`: `bring_up_ordered`,
 		`waits identity Available`:        `rollout status`,
 		`post-reset auth verification`:    `verify_auth_coherence`,

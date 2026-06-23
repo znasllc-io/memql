@@ -63,11 +63,11 @@ cluster each value comes from the manifests in `deploy/k8s/base` /
 | `LIVEKIT_API_KEY` | `devkey` from the local overlay | yes |
 | `LIVEKIT_API_SECRET` | `secret` from the local overlay | yes |
 | `MEMQL_GRPC_ADDR` | `bff:50051` (cluster DNS) | yes |
-| `OPENAI_API_KEY` | `memql-secrets` Secret (seeded from the genesis envelope) | yes |
+| `MEMQL_OPENAI_API_KEY` | `memql-secrets` Secret (seeded from the genesis envelope) | yes |
 | `VOICE_AGENT_TOKEN` | `memql-secrets` Secret, seeded by `make up` / `make k3d-secrets` | yes |
 | `MEMQL_AVATAR_VENDOR` | `anam` default; overridable in the overlay | no |
-| `ANAM_API_KEY` | `memql-secrets` Secret | required when `MEMQL_AVATAR_VENDOR=anam` |
-| `SIMLI_API_KEY` | `memql-secrets` Secret | required when `MEMQL_AVATAR_VENDOR=simli` |
+| `MEMQL_ANAM_API_KEY` | `memql-secrets` Secret | required when `MEMQL_AVATAR_VENDOR=anam` |
+| `MEMQL_SIMLI_API_KEY` | `memql-secrets` Secret | required when `MEMQL_AVATAR_VENDOR=simli` |
 
 The avatar VIDEO path (which needs a publicly reachable LiveKit URL /
 TURN relay) is not wired locally -- audio works without it. Verify the

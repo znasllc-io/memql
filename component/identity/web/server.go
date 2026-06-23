@@ -156,7 +156,7 @@ type Server struct {
 
 	// Store backs the DB-side OAuth client resolution on /authorize.
 	// When non-nil, a client_id not present in the static
-	// IDENTITY_REGISTERED_CLIENTS slice falls back to the
+	// MEMQL_IDENTITY_REGISTERED_CLIENTS slice falls back to the
 	// dynamically-registered (RFC 7591) v1:identity:oauthClient rows.
 	// Nil keeps the static-only behaviour (tests / engine-less binaries).
 	Store *identity.Store

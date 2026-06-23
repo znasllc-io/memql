@@ -1,6 +1,9 @@
 package memoryNodes
 
 import (
+	"os"
+	"strings"
+
 	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -15,7 +18,20 @@ const (
 )
 
 func loadMemoryNodesEnvDatabaseOptions() (database.DatabaseEnvOptions, error) {
-	return database.LoadDatabaseEnvOptions(database.DatabaseEnvLoader{Prefix: memoryNodesDatabaseEnvPrefix})
+	opts, err := database.LoadDatabaseEnvOptions(database.DatabaseEnvLoader{Prefix: memoryNodesDatabaseEnvPrefix})
+	if err != nil {
+		return opts, err
+	}
+	// Epic 7.3 (memql#2106): the DSN var was renamed
+	// MEMORY_NODES_DATABASE_DSN -> MEMQL_DATABASE_DSN. The prefix-composed
+	// reader above still resolves the legacy MEMORY_NODES_DATABASE_DSN key
+	// (back-compat); prefer the canonical new name when it is set. The
+	// boot-time alias shim (genesis.ApplyLegacyEnvAliases) bridges the
+	// other direction for an operator who only set the legacy name.
+	if dsn := strings.TrimSpace(os.Getenv("MEMQL_DATABASE_DSN")); dsn != "" {
+		opts.DSN = dsn
+	}
+	return opts, nil
 }
 
 func loadMemoryNodesDatabaseArgs() ([]database.DatabaseArg, error) {

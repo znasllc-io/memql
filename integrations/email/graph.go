@@ -271,11 +271,11 @@ type GraphEnvKeys struct {
 // during the rename window; see resolveLegacyAlias.
 func DefaultGraphEnvKeys() GraphEnvKeys {
 	return GraphEnvKeys{
-		TenantId:     "EMAIL_AZURE_TENANT_ID",
-		ClientId:     "EMAIL_AZURE_CLIENT_ID",
-		ClientSecret: "EMAIL_AZURE_CLIENT_SECRET",
-		SenderAddr:   "EMAIL_SENDER",
-		FromName:     "EMAIL_FROM_NAME",
+		TenantId:     "MEMQL_EMAIL_AZURE_TENANT_ID",
+		ClientId:     "MEMQL_EMAIL_AZURE_CLIENT_ID",
+		ClientSecret: "MEMQL_EMAIL_AZURE_CLIENT_SECRET",
+		SenderAddr:   "MEMQL_EMAIL_SENDER",
+		FromName:     "MEMQL_EMAIL_FROM_NAME",
 	}
 }
 

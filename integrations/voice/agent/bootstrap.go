@@ -78,7 +78,7 @@ func ResolveVoiceAgentToken(ctx context.Context, getenv Getenv, httpClient *http
 	return "", fmt.Errorf(
 		"required env var VOICE_AGENT_TOKEN is unset; either provision a " +
 			"voice-agent JWT out-of-band (see docs/public/operate/auth/voice-agent-jwt.md) or " +
-			"set MEMQL_NODE_BOOTSTRAP_TOKEN + IDENTITY_VERIFIER_BASE_URL + " +
+			"set MEMQL_NODE_BOOTSTRAP_TOKEN + MEMQL_IDENTITY_VERIFIER_BASE_URL + " +
 			"MEMQL_VOICE_AGENT_INSTANCE_ID for the self-bootstrap path (memql#342)")
 }
 
@@ -94,7 +94,7 @@ func ResolveVoiceAgentToken(ctx context.Context, getenv Getenv, httpClient *http
 //
 //  1. VOICE_AGENT_TOKEN is empty (operator-provisioned token wins).
 //  2. MEMQL_NODE_BOOTSTRAP_TOKEN is set (the shared bootstrap secret).
-//  3. IDENTITY_VERIFIER_BASE_URL is set (somewhere to POST).
+//  3. MEMQL_IDENTITY_VERIFIER_BASE_URL is set (somewhere to POST).
 //  4. MEMQL_VOICE_AGENT_INSTANCE_ID is set (the audit instance label).
 func maybeBootstrapVoiceAgentToken(ctx context.Context, getenv Getenv, httpClient *http.Client, log TokenLogger) (string, error) {
 	if strings.TrimSpace(getenv("VOICE_AGENT_TOKEN")) != "" {
@@ -105,11 +105,11 @@ func maybeBootstrapVoiceAgentToken(ctx context.Context, getenv Getenv, httpClien
 		// Self-bootstrap not opted into.
 		return "", nil
 	}
-	identityBase := strings.TrimRight(strings.TrimSpace(getenv("IDENTITY_VERIFIER_BASE_URL")), "/")
+	identityBase := strings.TrimRight(strings.TrimSpace(getenv("MEMQL_IDENTITY_VERIFIER_BASE_URL")), "/")
 	if identityBase == "" {
 		return "", fmt.Errorf(
 			"voice-agent bootstrap requested (MEMQL_NODE_BOOTSTRAP_TOKEN set) " +
-				"but IDENTITY_VERIFIER_BASE_URL is empty -- cannot reach identity service")
+				"but MEMQL_IDENTITY_VERIFIER_BASE_URL is empty -- cannot reach identity service")
 	}
 	instanceID := strings.TrimSpace(getenv("MEMQL_VOICE_AGENT_INSTANCE_ID"))
 	if instanceID == "" {

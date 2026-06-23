@@ -189,8 +189,8 @@ outside the polyphon-bridge surface for this phase.
 ## Environment variables
 
 No new variables. The Polyphon Bridge Agent already reads
-`POLYPHON_LIVEKIT_URL`, `POLYPHON_LIVEKIT_API_KEY`,
-`POLYPHON_LIVEKIT_API_SECRET` from `.env.local`. The frontend never
+`MEMQL_POLYPHON_LIVEKIT_URL`, `MEMQL_POLYPHON_LIVEKIT_API_KEY`,
+`MEMQL_POLYPHON_LIVEKIT_API_SECRET` from `.env.local`. The frontend never
 sees these — it gets the URL and a per-session token from
 `/polyphon/room-token`.
 

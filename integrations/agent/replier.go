@@ -263,8 +263,8 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	//   4. Agent's stored providerConfig.llm.policyName.
 	//   5. Role-based default policy (strongReasoning for operator,
 	//      balancedChat otherwise).
-	//   6. Deploy-time env default (OPERATOR_AGENT_PROVIDER /
-	//      DEFAULT_AGENT_PROVIDER) -- the router's DefaultProvider
+	//   6. Deploy-time env default (MEMQL_OPERATOR_AGENT_PROVIDER /
+	//      MEMQL_DEFAULT_AGENT_PROVIDER) -- the router's DefaultProvider
 	//      slot, only consulted if 1-5 are all empty.
 	//   7. Router registry global default.
 	explicitProvider := strings.TrimSpace(msg.Hints["provider"])
@@ -320,10 +320,10 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// because we populated DefaultProvider below.
 	defaultProvider := ""
 	if operatorEnabled {
-		defaultProvider = strings.TrimSpace(os.Getenv("OPERATOR_AGENT_PROVIDER"))
+		defaultProvider = strings.TrimSpace(os.Getenv("MEMQL_OPERATOR_AGENT_PROVIDER"))
 	}
 	if defaultProvider == "" {
-		defaultProvider = strings.TrimSpace(os.Getenv("DEFAULT_AGENT_PROVIDER"))
+		defaultProvider = strings.TrimSpace(os.Getenv("MEMQL_DEFAULT_AGENT_PROVIDER"))
 	}
 
 	routerReq := router.ResolveRequest{

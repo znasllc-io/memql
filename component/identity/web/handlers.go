@@ -720,7 +720,7 @@ func (s *Server) pickOAuthCtx(ctx context.Context, clientId, redirectURI, fallba
 	}
 
 	// OAuth-canonical path: SPA supplied client_id + redirect_uri. Resolve
-	// via the DB-aware helper (static IDENTITY_REGISTERED_CLIENTS + the
+	// via the DB-aware helper (static MEMQL_IDENTITY_REGISTERED_CLIENTS + the
 	// dynamically-registered v1:identity:oauthClient store, #1573/#1586) so a
 	// DCR client (e.g. a claude.ai custom connector) matches here just as it
 	// does at /authorize -- otherwise the magic link is issued with no OAuth

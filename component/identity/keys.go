@@ -56,7 +56,7 @@ type KeyMaterial struct {
 
 // keyEnvelope is the on-disk representation: the private key bytes
 // optionally wrapped in AES-256-GCM keyed off the operator's
-// IDENTITY_KEY_ENCRYPTION_KEY. metadata fields are stored alongside
+// MEMQL_IDENTITY_KEY_ENCRYPTION_KEY. metadata fields are stored alongside
 // so we don't have to re-derive them on load.
 type keyEnvelope struct {
 	Version    int       `json:"version"`
@@ -99,10 +99,10 @@ type KeyManager struct {
 func NewKeyManagerFromSeed(seedB64 string) (*KeyManager, error) {
 	seed, err := base64.StdEncoding.DecodeString(seedB64)
 	if err != nil {
-		return nil, fmt.Errorf("identity: IDENTITY_SIGNING_KEY_B64 is not valid base64: %w", err)
+		return nil, fmt.Errorf("identity: MEMQL_IDENTITY_SIGNING_KEY_B64 is not valid base64: %w", err)
 	}
 	if len(seed) != ed25519.SeedSize {
-		return nil, fmt.Errorf("identity: IDENTITY_SIGNING_KEY_B64 must decode to %d bytes, got %d", ed25519.SeedSize, len(seed))
+		return nil, fmt.Errorf("identity: MEMQL_IDENTITY_SIGNING_KEY_B64 must decode to %d bytes, got %d", ed25519.SeedSize, len(seed))
 	}
 	priv := ed25519.NewKeyFromSeed(seed)
 	pub := priv.Public().(ed25519.PublicKey)
@@ -228,7 +228,7 @@ func (km *KeyManager) Rotate(overlapWindow time.Duration) (*KeyMaterial, error) 
 	defer km.mu.Unlock()
 
 	if km.envMode {
-		return nil, errors.New("identity: key rotation is disabled when the signing key is env-provided (IDENTITY_SIGNING_KEY_B64); re-seal the envelope with a new seed and roll the deployment to rotate")
+		return nil, errors.New("identity: key rotation is disabled when the signing key is env-provided (MEMQL_IDENTITY_SIGNING_KEY_B64); re-seal the envelope with a new seed and roll the deployment to rotate")
 	}
 
 	now := time.Now().UTC()
@@ -333,7 +333,7 @@ func (km *KeyManager) loadKeyFile(name string) (*KeyMaterial, error) {
 		}
 	case env.EncPayload != "":
 		if km.encryptionSecret == "" {
-			return nil, errors.New("encrypted key on disk but IDENTITY_KEY_ENCRYPTION_KEY is empty")
+			return nil, errors.New("encrypted key on disk but MEMQL_IDENTITY_KEY_ENCRYPTION_KEY is empty")
 		}
 		privBytes, err = decryptPrivateKey(env, km.encryptionSecret)
 		if err != nil {
@@ -456,7 +456,7 @@ func decryptPrivateKey(env keyEnvelope, secret string) ([]byte, error) {
 	}
 	pt, err := gcm.Open(nil, nonce, ct, nil)
 	if err != nil {
-		return nil, fmt.Errorf("AES-GCM open (likely wrong IDENTITY_KEY_ENCRYPTION_KEY): %w", err)
+		return nil, fmt.Errorf("AES-GCM open (likely wrong MEMQL_IDENTITY_KEY_ENCRYPTION_KEY): %w", err)
 	}
 	return pt, nil
 }

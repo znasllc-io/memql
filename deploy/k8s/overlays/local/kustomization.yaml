@@ -304,10 +304,10 @@ patches:
         value: IfNotPresent
   # ---------------------------------------------------------------------------
   # Local environment config (staging URLs -> localhost)
-  # All engine nodes carry IDENTITY_VERIFIER_EXPECTED_ISSUER pointing at the
+  # All engine nodes carry MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER pointing at the
   # staging identity host (identity.staging.copresent.ai). This must match
-  # what identity ISSUES in JWTs (IDENTITY_BASE_URL). Locally we set
-  # IDENTITY_BASE_URL=http://localhost:8085, so all verifiers must also expect
+  # what identity ISSUES in JWTs (MEMQL_IDENTITY_BASE_URL). Locally we set
+  # MEMQL_IDENTITY_BASE_URL=http://localhost:8085, so all verifiers must also expect
   # http://localhost:8085. Each node patched individually (strategic merge).
   # ---------------------------------------------------------------------------
   # identity-specific overrides: URL, CORS, OAuth clients, migrations, issuer.
@@ -320,7 +320,7 @@ patches:
     target:
       kind: Deployment
       name: bff
-  # Worker nodes: override IDENTITY_VERIFIER_EXPECTED_ISSUER to localhost.
+  # Worker nodes: override MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER to localhost.
   # Using JSON 6902 `add` (with merge semantics for existing keys in env) is
   # not directly supported, so we use a strategic-merge patch as inline YAML.
   # The env entries below use the strategic merge key (env.name) to replace
@@ -340,7 +340,7 @@ patches:
             containers:
               - name: cognition
                 env:
-                  - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
                     value: "http://localhost:8085"
   - target:
       kind: Deployment
@@ -357,7 +357,7 @@ patches:
             containers:
               - name: voice
                 env:
-                  - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
                     value: "http://localhost:8085"
   - target:
       kind: Deployment
@@ -374,7 +374,7 @@ patches:
             containers:
               - name: agent
                 env:
-                  - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
                     value: "http://localhost:8085"
   - target:
       kind: Deployment
@@ -391,7 +391,7 @@ patches:
             containers:
               - name: planner
                 env:
-                  - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
                     value: "http://localhost:8085"
   - target:
       kind: Deployment
@@ -408,7 +408,7 @@ patches:
             containers:
               - name: workbench
                 env:
-                  - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
                     value: "http://localhost:8085"
   - target:
       kind: Deployment
@@ -425,7 +425,7 @@ patches:
             containers:
               - name: mcp
                 env:
-                  - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
                     value: "http://localhost:8085"
   - target:
       kind: Deployment
@@ -442,7 +442,7 @@ patches:
             containers:
               - name: voice-agent
                 env:
-                  - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
                     value: "http://localhost:8085"
   # Override the Postgres pool bounds (base is tuned for Tiger Cloud limits;
   # local in-cluster Postgres can handle larger pools).

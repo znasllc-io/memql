@@ -22,7 +22,7 @@ const sttSampleRate = 16000
 
 // asrConfigFor builds the per-session polyphon.ASRConfig for the cascade.
 // The end-of-utterance tuning lives on the OpenAI client's own session
-// config (POLYPHON_OPENAI_VAD_SILENCE_MS); this config carries only the
+// config (MEMQL_POLYPHON_OPENAI_VAD_SILENCE_MS); this config carries only the
 // per-stream language + rate so the agent's resolved VoiceLanguage flows
 // through.
 func asrConfigFor(cfg Config) polyphon.ASRConfig {

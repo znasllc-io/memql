@@ -50,7 +50,7 @@ const ComponentName = "identity"
 const (
 	// DefaultKeyDir is where the Ed25519 keypair files live on disk.
 	// Relative to the working directory in dev. Override in
-	// staging/prod via IDENTITY_KEY_DIR.
+	// staging/prod via MEMQL_IDENTITY_KEY_DIR.
 	DefaultKeyDir = "var/identity/keys"
 
 	// DefaultAccessTokenTTLSeconds is the lifetime of issued access
@@ -182,7 +182,7 @@ func (m RegistrationMode) IsValid() bool {
 
 // RegisteredClient describes a relying-party application allowed to
 // initiate the OAuth-style code flow against this identity service.
-// Loaded from the IDENTITY_REGISTERED_CLIENTS env var as a JSON array.
+// Loaded from the MEMQL_IDENTITY_REGISTERED_CLIENTS env var as a JSON array.
 type RegisteredClient struct {
 	ClientId     string   `json:"clientId"`
 	RedirectURIs []string `json:"redirectURIs"`
@@ -216,21 +216,21 @@ type BootstrapConfig struct {
 	//   local.znas.io        (maintainer's local dev cluster)
 	//   staging.acme.com     (a customer's staging deployment)
 	//   acme.com             (the customer's production deployment)
-	// Env: IDENTITY_BOOTSTRAP_DOMAIN
+	// Env: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN
 	Domain string
 
 	// OwnerEmail is the email the cluster owner receives the
 	// first sign-in magic link at. Becomes v1:identity:user.
 	// primaryEmail on the auto-created owner row.
-	// Env: IDENTITY_BOOTSTRAP_OWNER_EMAIL
+	// Env: MEMQL_IDENTITY_BOOTSTRAP_OWNER_EMAIL
 	OwnerEmail string
 
 	// OwnerFirstName + OwnerLastName seed the owner's profile so
 	// CoPresent's "Welcome, Jose" header reads correctly without a
 	// follow-up edit. Env stamping pulls double duty: also baked
 	// into the JWT given_name / family_name claims.
-	// Env: IDENTITY_BOOTSTRAP_OWNER_FIRST_NAME
-	//      IDENTITY_BOOTSTRAP_OWNER_LAST_NAME
+	// Env: MEMQL_IDENTITY_BOOTSTRAP_OWNER_FIRST_NAME
+	//      MEMQL_IDENTITY_BOOTSTRAP_OWNER_LAST_NAME
 	OwnerFirstName string
 	OwnerLastName  string
 
@@ -248,34 +248,34 @@ type BootstrapConfig struct {
 	// OrgName is the organization label captured by the wizard.
 	// Reserved for future surfaces (admin UI, email templates);
 	// no functional use today.
-	// Env: IDENTITY_BOOTSTRAP_ORG_NAME
+	// Env: MEMQL_IDENTITY_BOOTSTRAP_ORG_NAME
 	OrgName string
 
-	// RegistrationMode overrides the runtime IDENTITY_REGISTRATION_MODE
+	// RegistrationMode overrides the runtime MEMQL_IDENTITY_REGISTRATION_MODE
 	// default at bootstrap time. When set here, the wizard's
 	// registration-mode radio is preselected; when set without a
 	// wizard visit, the cluster bootstraps with this mode in effect.
-	// Env: IDENTITY_BOOTSTRAP_REGISTRATION_MODE
+	// Env: MEMQL_IDENTITY_BOOTSTRAP_REGISTRATION_MODE
 	RegistrationMode string
 
 	// RegistrationDomains preselects the comma-separated allowlist
 	// shown when RegistrationMode is "domain_restricted".
-	// Env: IDENTITY_BOOTSTRAP_REGISTRATION_DOMAINS (comma-separated)
+	// Env: MEMQL_IDENTITY_BOOTSTRAP_REGISTRATION_DOMAINS (comma-separated)
 	RegistrationDomains []string
 
 	// InternalDomains preselects the comma-separated allowlist that
 	// flips users to internal=true at first login.
-	// Env: IDENTITY_BOOTSTRAP_INTERNAL_DOMAINS (comma-separated)
+	// Env: MEMQL_IDENTITY_BOOTSTRAP_INTERNAL_DOMAINS (comma-separated)
 	InternalDomains []string
 
 	// InternalDefaultRole is the cluster-wide role for internal users.
-	// Env: IDENTITY_BOOTSTRAP_INTERNAL_DEFAULT_ROLE (owner|admin|writer|reader)
+	// Env: MEMQL_IDENTITY_BOOTSTRAP_INTERNAL_DEFAULT_ROLE (owner|admin|writer|reader)
 	InternalDefaultRole string
 
 	// NotifyEmails preselects the waitlist-notification recipient
 	// list (comma-separated). Used only when RegistrationMode is
 	// "waitlist".
-	// Env: IDENTITY_BOOTSTRAP_NOTIFY_EMAILS (comma-separated)
+	// Env: MEMQL_IDENTITY_BOOTSTRAP_NOTIFY_EMAILS (comma-separated)
 	NotifyEmails []string
 }
 
@@ -296,23 +296,23 @@ type Config struct {
 	// Enabled gates the whole service. When false, the identity
 	// build-tag binary still compiles but the HTTP/gRPC handlers
 	// aren't wired in. Useful in tests and during partial rollout.
-	// Env: IDENTITY_ENABLED (bool, default false)
+	// Env: MEMQL_IDENTITY_ENABLED (bool, default false)
 	Enabled bool
 
 	// BaseURL is the public origin the identity service is reachable
 	// at. Used as the JWT `iss` claim, in redirect targets, and in
 	// links emitted into magic-link / invitation emails.
-	// Env: IDENTITY_BASE_URL (e.g. "https://auth.znasllc.io")
+	// Env: MEMQL_IDENTITY_BASE_URL (e.g. "https://auth.znasllc.io")
 	BaseURL string
 
 	// JWTAudience is the value placed in the JWT `aud` claim.
 	// Other nodes verify this matches their configured audience.
-	// Env: IDENTITY_JWT_AUDIENCE (default "memql")
+	// Env: MEMQL_IDENTITY_JWT_AUDIENCE (default "memql")
 	JWTAudience string
 
 	// KeyDir is the filesystem directory holding jwt-current.ed25519
 	// and (during rotation overlap) jwt-previous.ed25519.
-	// Env: IDENTITY_KEY_DIR (default "var/identity/keys")
+	// Env: MEMQL_IDENTITY_KEY_DIR (default "var/identity/keys")
 	KeyDir string
 
 	// KeyEncryptionKey is the master secret used to derive the
@@ -320,7 +320,7 @@ type Config struct {
 	// empty, keys are stored in plaintext (dev mode). Required in
 	// staging/prod — Validate() returns an error if BaseURL is set
 	// to a non-localhost origin and this is empty.
-	// Env: IDENTITY_KEY_ENCRYPTION_KEY (any string >= 16 bytes)
+	// Env: MEMQL_IDENTITY_KEY_ENCRYPTION_KEY (any string >= 16 bytes)
 	KeyEncryptionKey string
 
 	// SigningKeyB64 is a base64 (std) 32-byte Ed25519 seed that, when
@@ -332,12 +332,12 @@ type Config struct {
 	// the sealed genesis envelope like the other secrets. Automatic
 	// rotation is disabled in this mode (re-seal + roll to rotate).
 	// Empty = legacy on-disk KeyDir behaviour (dev).
-	// Env: IDENTITY_SIGNING_KEY_B64 (#550)
+	// Env: MEMQL_IDENTITY_SIGNING_KEY_B64 (#550)
 	SigningKeyB64 string
 
 	// AllowEphemeralKey opts a deployment INTO the per-pod ephemeral
-	// signing-key mode (no IDENTITY_SIGNING_KEY_B64). Without this, a
-	// non-localhost deployment that leaves IDENTITY_SIGNING_KEY_B64
+	// signing-key mode (no MEMQL_IDENTITY_SIGNING_KEY_B64). Without this, a
+	// non-localhost deployment that leaves MEMQL_IDENTITY_SIGNING_KEY_B64
 	// unset is REFUSED at startup: each replica would mint its own
 	// file-backed key on its own ephemeral container filesystem, so
 	// /.well-known/jwks.json diverges across replicas and ~half of all
@@ -349,74 +349,74 @@ type Config struct {
 	// Set this to true ONLY for single-node / dev deployments where one
 	// identity replica owns the only key (or where a shared key volume
 	// makes the on-disk key coherent). Multi-replica HA deployments MUST
-	// instead set IDENTITY_SIGNING_KEY_B64 so every replica derives the
-	// same key. localhost-shaped IDENTITY_BASE_URL origins are exempt
+	// instead set MEMQL_IDENTITY_SIGNING_KEY_B64 so every replica derives the
+	// same key. localhost-shaped MEMQL_IDENTITY_BASE_URL origins are exempt
 	// from the guard (local dev), so this knob is only needed when
 	// running ephemeral keys against a real (non-localhost) origin.
-	// Env: IDENTITY_ALLOW_EPHEMERAL_KEY (bool, default false)
+	// Env: MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY (bool, default false)
 	AllowEphemeralKey bool
 
 	// AccessTokenTTL is the lifetime of issued access tokens.
-	// Env: IDENTITY_ACCESS_TOKEN_TTL_SECONDS (default 900)
+	// Env: MEMQL_IDENTITY_ACCESS_TOKEN_TTL_SECONDS (default 900)
 	AccessTokenTTL time.Duration
 
 	// RefreshTokenTTL is the absolute lifetime of refresh tokens.
 	// Idle / max-age policies enforce earlier expiration in practice.
-	// Env: IDENTITY_REFRESH_TOKEN_TTL_SECONDS (default 2592000)
+	// Env: MEMQL_IDENTITY_REFRESH_TOKEN_TTL_SECONDS (default 2592000)
 	RefreshTokenTTL time.Duration
 
 	// MagicLinkTTL is how long a freshly issued magic link works.
-	// Env: IDENTITY_MAGIC_LINK_TTL_SECONDS (default 600)
+	// Env: MEMQL_IDENTITY_MAGIC_LINK_TTL_SECONDS (default 600)
 	MagicLinkTTL time.Duration
 
 	// InvitationTTL is how long an admin-issued user invitation
 	// remains valid before expiring (waitlist and invite-only modes).
-	// Env: IDENTITY_INVITATION_TTL_DAYS (default 7)
+	// Env: MEMQL_IDENTITY_INVITATION_TTL_DAYS (default 7)
 	InvitationTTL time.Duration
 
 	// SessionIdleTimeout — refresh fails if lastRefreshedAt plus
 	// this is in the past.
-	// Env: IDENTITY_SESSION_IDLE_DAYS (default 14)
+	// Env: MEMQL_IDENTITY_SESSION_IDLE_DAYS (default 14)
 	SessionIdleTimeout time.Duration
 
 	// SessionMaxAge — refresh fails if firstAuthenticatedAt plus
 	// this is in the past, regardless of activity.
-	// Env: IDENTITY_SESSION_MAX_DAYS (default 90)
+	// Env: MEMQL_IDENTITY_SESSION_MAX_DAYS (default 90)
 	SessionMaxAge time.Duration
 
 	// KeyRotationInterval drives the auto-rotation cron.
-	// Env: IDENTITY_KEY_ROTATION_DAYS (default 90)
+	// Env: MEMQL_IDENTITY_KEY_ROTATION_DAYS (default 90)
 	KeyRotationInterval time.Duration
 
 	// JWKSOverlapWindow is how long a retired key stays in JWKS so
 	// in-flight tokens still verify.
-	// Env: IDENTITY_JWKS_OVERLAP_HOURS (default 24)
+	// Env: MEMQL_IDENTITY_JWKS_OVERLAP_HOURS (default 24)
 	JWKSOverlapWindow time.Duration
 
 	// AuditLogRetention is how long audit-event rows are retained
 	// in the database. Slog output is unbounded.
-	// Env: IDENTITY_AUDIT_LOG_RETENTION_DAYS (default 365)
+	// Env: MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS (default 365)
 	AuditLogRetention time.Duration
 
 	// RegistrationMode — see RegistrationMode constants. Captured by
 	// first-run wizard if env unset.
-	// Env: IDENTITY_REGISTRATION_MODE (default "open")
+	// Env: MEMQL_IDENTITY_REGISTRATION_MODE (default "open")
 	RegistrationMode RegistrationMode
 
 	// RegistrationDomains is the allowlist consulted when
 	// RegistrationMode == domain_restricted. Comma-separated.
-	// Env: IDENTITY_REGISTRATION_DOMAINS
+	// Env: MEMQL_IDENTITY_REGISTRATION_DOMAINS
 	RegistrationDomains []string
 
 	// InternalDomains is the cluster's "internal users" allowlist.
 	// Email-domain match flags v1:identity:user.internal=true.
-	// Env: IDENTITY_INTERNAL_DOMAINS
+	// Env: MEMQL_IDENTITY_INTERNAL_DOMAINS
 	InternalDomains []string
 
 	// InternalDefaultRole is the cluster-wide role assigned to
 	// internal users on registration. External users get owner of
 	// their personal partition only and have no cluster-wide role.
-	// Env: IDENTITY_INTERNAL_DEFAULT_ROLE (default "writer")
+	// Env: MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE (default "writer")
 	InternalDefaultRole string
 
 	// Bootstrap captures the values needed at first-run cluster
@@ -437,7 +437,7 @@ type Config struct {
 
 	// BrandName — display name used in email subject prefixes and
 	// templates. Captured by first-run wizard, editable in admin UI.
-	// Env: IDENTITY_BRAND_NAME
+	// Env: MEMQL_IDENTITY_BRAND_NAME
 	BrandName string
 
 	// BrandPrimaryColor is the hex accent color in HTML emails and
@@ -445,25 +445,25 @@ type Config struct {
 	// matching the in-CSS :root --brand-primary fallback so a
 	// freshly bootstrapped cluster renders consistently from
 	// either side of the boundary.
-	// Env: IDENTITY_BRAND_PRIMARY_COLOR (default "#0433ff")
+	// Env: MEMQL_IDENTITY_BRAND_PRIMARY_COLOR (default "#0433ff")
 	BrandPrimaryColor string
 
 	// BrandLogoDataURI is the embedded horizontal logo (wordmark)
 	// as base64 data URI. Up to ~200KB. Empty = no logo block.
-	// Env: IDENTITY_BRAND_LOGO_DATA_URI
+	// Env: MEMQL_IDENTITY_BRAND_LOGO_DATA_URI
 	BrandLogoDataURI string
 
 	// BrandIconDataURI is the embedded square icon (icon-only mark)
 	// as base64 data URI. Used in compact contexts like favicon and
 	// share previews. Up to ~150KB. Empty = no icon.
-	// Env: IDENTITY_BRAND_ICON_DATA_URI
+	// Env: MEMQL_IDENTITY_BRAND_ICON_DATA_URI
 	BrandIconDataURI string
 
 	// RegisteredClients lists the relying-party applications allowed
 	// to initiate auth flows against this identity service. Each
 	// has a clientId and an explicit redirect-URI list (no
 	// wildcards). Loaded as a JSON array from the env var.
-	// Env: IDENTITY_REGISTERED_CLIENTS
+	// Env: MEMQL_IDENTITY_REGISTERED_CLIENTS
 	// Example:
 	//   [{"clientId":"copresent","redirectURIs":["https://app.copresent.ai/auth/callback"]}]
 	RegisteredClients []RegisteredClient
@@ -474,70 +474,70 @@ type Config struct {
 	// -- self-register a public client_id they then use at /authorize +
 	// /oauth/token. When false, POST /register returns 403
 	// registration_disabled and persists nothing.
-	// Env: IDENTITY_OAUTH_DCR_ENABLED (default true)
+	// Env: MEMQL_IDENTITY_OAUTH_DCR_ENABLED (default true)
 	OAuthDCREnabled bool
 
 	// CORSAllowedOrigins is the set of Origin values identity will
 	// allow on credentialed cross-origin requests (the refresh-token
 	// cookie path). Comma-separated.
-	// Env: IDENTITY_CORS_ALLOWED_ORIGINS
+	// Env: MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS
 	CORSAllowedOrigins []string
 
 	// AccessRequestNotifyEmails — admin recipients for waitlist
 	// notification emails. Empty = fall back to all owner+admin
 	// users on the cluster.
-	// Env: IDENTITY_ACCESS_REQUEST_NOTIFY_EMAILS (comma-separated)
+	// Env: MEMQL_IDENTITY_ACCESS_REQUEST_NOTIFY_EMAILS (comma-separated)
 	AccessRequestNotifyEmails []string
 
 	// AccessRequestNotifyThrottle batches notifications.
-	// Env: IDENTITY_ACCESS_REQUEST_NOTIFY_THROTTLE_MINUTES (default 5)
+	// Env: MEMQL_IDENTITY_ACCESS_REQUEST_NOTIFY_THROTTLE_MINUTES (default 5)
 	AccessRequestNotifyThrottle time.Duration
 
 	// RiskThreshold blocks registrations whose computed score is
 	// at or above this number. 0-100; lower = stricter.
-	// Env: IDENTITY_RISK_THRESHOLD (default 50)
+	// Env: MEMQL_IDENTITY_RISK_THRESHOLD (default 50)
 	RiskThreshold int
 
 	// RateLimitPerIPPerHour caps magic-link and access-request
 	// submissions from a single source IP.
-	// Env: IDENTITY_RATE_LIMIT_PER_IP_PER_HOUR (default 10)
+	// Env: MEMQL_IDENTITY_RATE_LIMIT_PER_IP_PER_HOUR (default 10)
 	RateLimitPerIPPerHour int
 
 	// DisposableEmailBlocklistEnabled toggles the embedded blocklist.
-	// Env: IDENTITY_DISPOSABLE_EMAIL_BLOCKLIST_ENABLED (default true)
+	// Env: MEMQL_IDENTITY_DISPOSABLE_EMAIL_BLOCKLIST_ENABLED (default true)
 	DisposableEmailBlocklistEnabled bool
 
 	// MXValidationEnabled toggles per-domain MX-record DNS check.
-	// Env: IDENTITY_MX_VALIDATION_ENABLED (default true)
+	// Env: MEMQL_IDENTITY_MX_VALIDATION_ENABLED (default true)
 	MXValidationEnabled bool
 
 	// EmailValidationProvider is the env-var stub for the future
 	// third-party email-deliverability provider plug-in. Defaults
 	// to "none"; reserved values include "kickbox", "verifalia",
 	// "zerobounce". Full plug-in lands in a later iteration.
-	// Env: IDENTITY_EMAIL_VALIDATION_PROVIDER (default "none")
+	// Env: MEMQL_IDENTITY_EMAIL_VALIDATION_PROVIDER (default "none")
 	EmailValidationProvider string
 
 	// TurnstileSiteKey + TurnstileSecret enable Cloudflare Turnstile
 	// on registration and login forms.
-	// Env: IDENTITY_TURNSTILE_SITE_KEY, IDENTITY_TURNSTILE_SECRET
+	// Env: MEMQL_IDENTITY_TURNSTILE_SITE_KEY, MEMQL_IDENTITY_TURNSTILE_SECRET
 	TurnstileSiteKey string
 	TurnstileSecret  string
 
 	// DataExportRateLimit caps per-user data-export frequency.
-	// Env: IDENTITY_DATA_EXPORT_RATE_LIMIT_HOURS (default 24)
+	// Env: MEMQL_IDENTITY_DATA_EXPORT_RATE_LIMIT_HOURS (default 24)
 	DataExportRateLimit time.Duration
 
 	// DeletionCooldown is the soft-delete grace window before a
 	// scheduled account deletion becomes irreversible.
-	// Env: IDENTITY_DELETION_COOLDOWN_DAYS (default 30)
+	// Env: MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS (default 30)
 	DeletionCooldown time.Duration
 
 	// TosOverridePath / PrivacyOverridePath let operators replace
 	// the embedded ToS / Privacy markdown with their own files at
 	// runtime (mounted as a Cloud Run secret / config volume).
 	// Empty = use the embedded defaults.
-	// Env: IDENTITY_TOS_OVERRIDE_PATH, IDENTITY_PRIVACY_OVERRIDE_PATH
+	// Env: MEMQL_IDENTITY_TOS_OVERRIDE_PATH, MEMQL_IDENTITY_PRIVACY_OVERRIDE_PATH
 	TosOverridePath     string
 	PrivacyOverridePath string
 
@@ -545,7 +545,7 @@ type Config struct {
 	// for JWT verification. Defaults to BaseURL +
 	// "/.well-known/jwks.json"; override only if the public-facing
 	// URL differs from the internal-mesh URL.
-	// Env: IDENTITY_JWKS_URL
+	// Env: MEMQL_IDENTITY_JWKS_URL
 	JWKSURL string
 
 	// NodeBootstrapToken is the shared secret that gates the
@@ -605,71 +605,71 @@ type LiveTokenSettings struct {
 // payload). Missing-but-required values are caught later by Validate.
 func LoadConfigFromEnv() (Config, error) {
 	cfg := Config{
-		Enabled:           envBool("IDENTITY_ENABLED", false),
-		BaseURL:           strings.TrimRight(os.Getenv("IDENTITY_BASE_URL"), "/"),
-		JWTAudience:       envString("IDENTITY_JWT_AUDIENCE", "memql"),
-		KeyDir:            envString("IDENTITY_KEY_DIR", DefaultKeyDir),
-		KeyEncryptionKey:  os.Getenv("IDENTITY_KEY_ENCRYPTION_KEY"),
-		SigningKeyB64:     strings.TrimSpace(os.Getenv("IDENTITY_SIGNING_KEY_B64")),
-		AllowEphemeralKey: envBool("IDENTITY_ALLOW_EPHEMERAL_KEY", false),
+		Enabled:           envBool("MEMQL_IDENTITY_ENABLED", false),
+		BaseURL:           strings.TrimRight(os.Getenv("MEMQL_IDENTITY_BASE_URL"), "/"),
+		JWTAudience:       envString("MEMQL_IDENTITY_JWT_AUDIENCE", "memql"),
+		KeyDir:            envString("MEMQL_IDENTITY_KEY_DIR", DefaultKeyDir),
+		KeyEncryptionKey:  os.Getenv("MEMQL_IDENTITY_KEY_ENCRYPTION_KEY"),
+		SigningKeyB64:     strings.TrimSpace(os.Getenv("MEMQL_IDENTITY_SIGNING_KEY_B64")),
+		AllowEphemeralKey: envBool("MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY", false),
 		Bootstrap: BootstrapConfig{
-			Domain:              strings.TrimRight(os.Getenv("IDENTITY_BOOTSTRAP_DOMAIN"), "/"),
-			OwnerEmail:          os.Getenv("IDENTITY_BOOTSTRAP_OWNER_EMAIL"),
-			OwnerFirstName:      os.Getenv("IDENTITY_BOOTSTRAP_OWNER_FIRST_NAME"),
-			OwnerLastName:       os.Getenv("IDENTITY_BOOTSTRAP_OWNER_LAST_NAME"),
-			OwnerPhone:          os.Getenv("IDENTITY_BOOTSTRAP_OWNER_PHONE"),
-			OwnerPrimaryRole:    os.Getenv("IDENTITY_BOOTSTRAP_OWNER_PRIMARY_ROLE"),
-			OwnerGender:         os.Getenv("IDENTITY_BOOTSTRAP_OWNER_GENDER"),
-			OwnerBirthdate:      os.Getenv("IDENTITY_BOOTSTRAP_OWNER_BIRTHDATE"),
-			OrgName:             os.Getenv("IDENTITY_BOOTSTRAP_ORG_NAME"),
-			RegistrationMode:    os.Getenv("IDENTITY_BOOTSTRAP_REGISTRATION_MODE"),
-			RegistrationDomains: envStringList("IDENTITY_BOOTSTRAP_REGISTRATION_DOMAINS"),
-			InternalDomains:     envStringList("IDENTITY_BOOTSTRAP_INTERNAL_DOMAINS"),
-			InternalDefaultRole: os.Getenv("IDENTITY_BOOTSTRAP_INTERNAL_DEFAULT_ROLE"),
-			NotifyEmails:        envStringList("IDENTITY_BOOTSTRAP_NOTIFY_EMAILS"),
+			Domain:              strings.TrimRight(os.Getenv("MEMQL_IDENTITY_BOOTSTRAP_DOMAIN"), "/"),
+			OwnerEmail:          os.Getenv("MEMQL_IDENTITY_BOOTSTRAP_OWNER_EMAIL"),
+			OwnerFirstName:      os.Getenv("MEMQL_IDENTITY_BOOTSTRAP_OWNER_FIRST_NAME"),
+			OwnerLastName:       os.Getenv("MEMQL_IDENTITY_BOOTSTRAP_OWNER_LAST_NAME"),
+			OwnerPhone:          os.Getenv("MEMQL_IDENTITY_BOOTSTRAP_OWNER_PHONE"),
+			OwnerPrimaryRole:    os.Getenv("MEMQL_IDENTITY_BOOTSTRAP_OWNER_PRIMARY_ROLE"),
+			OwnerGender:         os.Getenv("MEMQL_IDENTITY_BOOTSTRAP_OWNER_GENDER"),
+			OwnerBirthdate:      os.Getenv("MEMQL_IDENTITY_BOOTSTRAP_OWNER_BIRTHDATE"),
+			OrgName:             os.Getenv("MEMQL_IDENTITY_BOOTSTRAP_ORG_NAME"),
+			RegistrationMode:    os.Getenv("MEMQL_IDENTITY_BOOTSTRAP_REGISTRATION_MODE"),
+			RegistrationDomains: envStringList("MEMQL_IDENTITY_BOOTSTRAP_REGISTRATION_DOMAINS"),
+			InternalDomains:     envStringList("MEMQL_IDENTITY_BOOTSTRAP_INTERNAL_DOMAINS"),
+			InternalDefaultRole: os.Getenv("MEMQL_IDENTITY_BOOTSTRAP_INTERNAL_DEFAULT_ROLE"),
+			NotifyEmails:        envStringList("MEMQL_IDENTITY_BOOTSTRAP_NOTIFY_EMAILS"),
 		},
-		BrandName:                       os.Getenv("IDENTITY_BRAND_NAME"),
-		BrandPrimaryColor:               envString("IDENTITY_BRAND_PRIMARY_COLOR", "#0433ff"),
-		BrandLogoDataURI:                os.Getenv("IDENTITY_BRAND_LOGO_DATA_URI"),
-		BrandIconDataURI:                os.Getenv("IDENTITY_BRAND_ICON_DATA_URI"),
-		InternalDefaultRole:             envString("IDENTITY_INTERNAL_DEFAULT_ROLE", "writer"),
-		EmailValidationProvider:         envString("IDENTITY_EMAIL_VALIDATION_PROVIDER", "none"),
-		TurnstileSiteKey:                os.Getenv("IDENTITY_TURNSTILE_SITE_KEY"),
-		TurnstileSecret:                 os.Getenv("IDENTITY_TURNSTILE_SECRET"),
-		TosOverridePath:                 os.Getenv("IDENTITY_TOS_OVERRIDE_PATH"),
-		PrivacyOverridePath:             os.Getenv("IDENTITY_PRIVACY_OVERRIDE_PATH"),
-		JWKSURL:                         os.Getenv("IDENTITY_JWKS_URL"),
-		DisposableEmailBlocklistEnabled: envBool("IDENTITY_DISPOSABLE_EMAIL_BLOCKLIST_ENABLED", true),
-		MXValidationEnabled:             envBool("IDENTITY_MX_VALIDATION_ENABLED", true),
+		BrandName:                       os.Getenv("MEMQL_IDENTITY_BRAND_NAME"),
+		BrandPrimaryColor:               envString("MEMQL_IDENTITY_BRAND_PRIMARY_COLOR", "#0433ff"),
+		BrandLogoDataURI:                os.Getenv("MEMQL_IDENTITY_BRAND_LOGO_DATA_URI"),
+		BrandIconDataURI:                os.Getenv("MEMQL_IDENTITY_BRAND_ICON_DATA_URI"),
+		InternalDefaultRole:             envString("MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE", "writer"),
+		EmailValidationProvider:         envString("MEMQL_IDENTITY_EMAIL_VALIDATION_PROVIDER", "none"),
+		TurnstileSiteKey:                os.Getenv("MEMQL_IDENTITY_TURNSTILE_SITE_KEY"),
+		TurnstileSecret:                 os.Getenv("MEMQL_IDENTITY_TURNSTILE_SECRET"),
+		TosOverridePath:                 os.Getenv("MEMQL_IDENTITY_TOS_OVERRIDE_PATH"),
+		PrivacyOverridePath:             os.Getenv("MEMQL_IDENTITY_PRIVACY_OVERRIDE_PATH"),
+		JWKSURL:                         os.Getenv("MEMQL_IDENTITY_JWKS_URL"),
+		DisposableEmailBlocklistEnabled: envBool("MEMQL_IDENTITY_DISPOSABLE_EMAIL_BLOCKLIST_ENABLED", true),
+		MXValidationEnabled:             envBool("MEMQL_IDENTITY_MX_VALIDATION_ENABLED", true),
 		NodeBootstrapToken:              strings.TrimSpace(os.Getenv("MEMQL_NODE_BOOTSTRAP_TOKEN")),
-		OAuthDCREnabled:                 envBool("IDENTITY_OAUTH_DCR_ENABLED", true),
+		OAuthDCREnabled:                 envBool("MEMQL_IDENTITY_OAUTH_DCR_ENABLED", true),
 	}
 
-	cfg.AccessTokenTTL = envDurationSeconds("IDENTITY_ACCESS_TOKEN_TTL_SECONDS", DefaultAccessTokenTTLSeconds)
-	cfg.RefreshTokenTTL = envDurationSeconds("IDENTITY_REFRESH_TOKEN_TTL_SECONDS", DefaultRefreshTokenTTLSeconds)
-	cfg.MagicLinkTTL = envDurationSeconds("IDENTITY_MAGIC_LINK_TTL_SECONDS", DefaultMagicLinkTTLSeconds)
-	cfg.InvitationTTL = envDurationDays("IDENTITY_INVITATION_TTL_DAYS", DefaultInvitationTTLDays)
-	cfg.SessionIdleTimeout = envDurationDays("IDENTITY_SESSION_IDLE_DAYS", DefaultSessionIdleDays)
-	cfg.SessionMaxAge = envDurationDays("IDENTITY_SESSION_MAX_DAYS", DefaultSessionMaxDays)
-	cfg.KeyRotationInterval = envDurationDays("IDENTITY_KEY_ROTATION_DAYS", DefaultKeyRotationDays)
-	cfg.JWKSOverlapWindow = envDurationHours("IDENTITY_JWKS_OVERLAP_HOURS", DefaultJWKSOverlapHours)
-	cfg.AuditLogRetention = envDurationDays("IDENTITY_AUDIT_LOG_RETENTION_DAYS", DefaultAuditLogRetentionDays)
-	cfg.AccessRequestNotifyThrottle = envDurationMinutes("IDENTITY_ACCESS_REQUEST_NOTIFY_THROTTLE_MINUTES", DefaultAccessRequestNotifyThrottleMinutes)
-	cfg.DataExportRateLimit = envDurationHours("IDENTITY_DATA_EXPORT_RATE_LIMIT_HOURS", DefaultDataExportRateLimitHours)
-	cfg.DeletionCooldown = envDurationDays("IDENTITY_DELETION_COOLDOWN_DAYS", DefaultDeletionCooldownDays)
+	cfg.AccessTokenTTL = envDurationSeconds("MEMQL_IDENTITY_ACCESS_TOKEN_TTL_SECONDS", DefaultAccessTokenTTLSeconds)
+	cfg.RefreshTokenTTL = envDurationSeconds("MEMQL_IDENTITY_REFRESH_TOKEN_TTL_SECONDS", DefaultRefreshTokenTTLSeconds)
+	cfg.MagicLinkTTL = envDurationSeconds("MEMQL_IDENTITY_MAGIC_LINK_TTL_SECONDS", DefaultMagicLinkTTLSeconds)
+	cfg.InvitationTTL = envDurationDays("MEMQL_IDENTITY_INVITATION_TTL_DAYS", DefaultInvitationTTLDays)
+	cfg.SessionIdleTimeout = envDurationDays("MEMQL_IDENTITY_SESSION_IDLE_DAYS", DefaultSessionIdleDays)
+	cfg.SessionMaxAge = envDurationDays("MEMQL_IDENTITY_SESSION_MAX_DAYS", DefaultSessionMaxDays)
+	cfg.KeyRotationInterval = envDurationDays("MEMQL_IDENTITY_KEY_ROTATION_DAYS", DefaultKeyRotationDays)
+	cfg.JWKSOverlapWindow = envDurationHours("MEMQL_IDENTITY_JWKS_OVERLAP_HOURS", DefaultJWKSOverlapHours)
+	cfg.AuditLogRetention = envDurationDays("MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS", DefaultAuditLogRetentionDays)
+	cfg.AccessRequestNotifyThrottle = envDurationMinutes("MEMQL_IDENTITY_ACCESS_REQUEST_NOTIFY_THROTTLE_MINUTES", DefaultAccessRequestNotifyThrottleMinutes)
+	cfg.DataExportRateLimit = envDurationHours("MEMQL_IDENTITY_DATA_EXPORT_RATE_LIMIT_HOURS", DefaultDataExportRateLimitHours)
+	cfg.DeletionCooldown = envDurationDays("MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS", DefaultDeletionCooldownDays)
 
-	cfg.RegistrationMode = RegistrationMode(envString("IDENTITY_REGISTRATION_MODE", string(RegistrationModeOpen)))
-	cfg.RegistrationDomains = envStringList("IDENTITY_REGISTRATION_DOMAINS")
-	cfg.InternalDomains = envStringList("IDENTITY_INTERNAL_DOMAINS")
-	cfg.CORSAllowedOrigins = envStringList("IDENTITY_CORS_ALLOWED_ORIGINS")
-	cfg.AccessRequestNotifyEmails = envStringList("IDENTITY_ACCESS_REQUEST_NOTIFY_EMAILS")
+	cfg.RegistrationMode = RegistrationMode(envString("MEMQL_IDENTITY_REGISTRATION_MODE", string(RegistrationModeOpen)))
+	cfg.RegistrationDomains = envStringList("MEMQL_IDENTITY_REGISTRATION_DOMAINS")
+	cfg.InternalDomains = envStringList("MEMQL_IDENTITY_INTERNAL_DOMAINS")
+	cfg.CORSAllowedOrigins = envStringList("MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS")
+	cfg.AccessRequestNotifyEmails = envStringList("MEMQL_IDENTITY_ACCESS_REQUEST_NOTIFY_EMAILS")
 
-	cfg.RiskThreshold = envInt("IDENTITY_RISK_THRESHOLD", DefaultRiskThreshold)
-	cfg.RateLimitPerIPPerHour = envInt("IDENTITY_RATE_LIMIT_PER_IP_PER_HOUR", DefaultRateLimitPerIPPerHour)
+	cfg.RiskThreshold = envInt("MEMQL_IDENTITY_RISK_THRESHOLD", DefaultRiskThreshold)
+	cfg.RateLimitPerIPPerHour = envInt("MEMQL_IDENTITY_RATE_LIMIT_PER_IP_PER_HOUR", DefaultRateLimitPerIPPerHour)
 
-	clients, err := envRegisteredClients("IDENTITY_REGISTERED_CLIENTS")
+	clients, err := envRegisteredClients("MEMQL_IDENTITY_REGISTERED_CLIENTS")
 	if err != nil {
-		return cfg, fmt.Errorf("IDENTITY_REGISTERED_CLIENTS: %w", err)
+		return cfg, fmt.Errorf("MEMQL_IDENTITY_REGISTERED_CLIENTS: %w", err)
 	}
 	cfg.RegisteredClients = clients
 
@@ -690,54 +690,54 @@ func (c Config) Validate() error {
 	}
 
 	if c.BaseURL == "" {
-		return errors.New("IDENTITY_BASE_URL is required when IDENTITY_ENABLED=true")
+		return errors.New("MEMQL_IDENTITY_BASE_URL is required when MEMQL_IDENTITY_ENABLED=true")
 	}
 
 	parsed, err := url.Parse(c.BaseURL)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return fmt.Errorf("IDENTITY_BASE_URL must be an absolute URL (got %q)", c.BaseURL)
+		return fmt.Errorf("MEMQL_IDENTITY_BASE_URL must be an absolute URL (got %q)", c.BaseURL)
 	}
 
 	if !c.RegistrationMode.IsValid() {
-		return fmt.Errorf("IDENTITY_REGISTRATION_MODE %q is not one of: open, domain_restricted, invite_only, waitlist", c.RegistrationMode)
+		return fmt.Errorf("MEMQL_IDENTITY_REGISTRATION_MODE %q is not one of: open, domain_restricted, invite_only, waitlist", c.RegistrationMode)
 	}
 
 	if c.RegistrationMode == RegistrationModeDomainRestricted && len(c.RegistrationDomains) == 0 {
-		return errors.New("IDENTITY_REGISTRATION_DOMAINS must be set when IDENTITY_REGISTRATION_MODE=domain_restricted")
+		return errors.New("MEMQL_IDENTITY_REGISTRATION_DOMAINS must be set when MEMQL_IDENTITY_REGISTRATION_MODE=domain_restricted")
 	}
 
 	switch c.InternalDefaultRole {
 	case "owner", "admin", "developer", "writer", "reader":
 	default:
-		return fmt.Errorf("IDENTITY_INTERNAL_DEFAULT_ROLE %q must be one of: owner, admin, developer, writer, reader", c.InternalDefaultRole)
+		return fmt.Errorf("MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE %q must be one of: owner, admin, developer, writer, reader", c.InternalDefaultRole)
 	}
 
 	// An env-provided signing key (#550) lives in the sealed genesis
-	// envelope, not on disk, so the at-rest IDENTITY_KEY_ENCRYPTION_KEY
+	// envelope, not on disk, so the at-rest MEMQL_IDENTITY_KEY_ENCRYPTION_KEY
 	// requirement does not apply -- but it MUST be a valid 32-byte seed.
 	if c.SigningKeyB64 != "" {
 		seed, err := base64.StdEncoding.DecodeString(c.SigningKeyB64)
 		if err != nil {
-			return fmt.Errorf("IDENTITY_SIGNING_KEY_B64 is not valid base64: %w", err)
+			return fmt.Errorf("MEMQL_IDENTITY_SIGNING_KEY_B64 is not valid base64: %w", err)
 		}
 		if len(seed) != ed25519.SeedSize {
-			return fmt.Errorf("IDENTITY_SIGNING_KEY_B64 must decode to %d bytes (an Ed25519 seed), got %d", ed25519.SeedSize, len(seed))
+			return fmt.Errorf("MEMQL_IDENTITY_SIGNING_KEY_B64 must decode to %d bytes (an Ed25519 seed), got %d", ed25519.SeedSize, len(seed))
 		}
 	} else {
-		// FAIL-FAST GUARD (#1515): no IDENTITY_SIGNING_KEY_B64 means the
+		// FAIL-FAST GUARD (#1515): no MEMQL_IDENTITY_SIGNING_KEY_B64 means the
 		// signing key is FILE-backed on the pod's OWN ephemeral container
-		// filesystem (IDENTITY_KEY_DIR, no shared volume in the cluster
+		// filesystem (MEMQL_IDENTITY_KEY_DIR, no shared volume in the cluster
 		// manifest). With >=2 identity replicas each replica mints its
 		// OWN key, so /.well-known/jwks.json diverges across replicas and
 		// ~half of all token verifications (browser sessions AND mesh node
 		// tokens) fail with `unknown kid`. That is exactly the 2026-06-16
 		// staging auth outage. Refuse to start a non-localhost deployment
 		// in per-pod ephemeral-key mode unless the operator explicitly
-		// opts in via IDENTITY_ALLOW_EPHEMERAL_KEY=true (single-node / dev,
+		// opts in via MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true (single-node / dev,
 		// or a deployment with a shared key volume). localhost origins are
 		// exempt -- that's the local-dev path.
 		if !c.AllowEphemeralKey && !isLocalHost(parsed.Host) {
-			return errors.New("identity: IDENTITY_SIGNING_KEY_B64 is not set, so each replica would mint its OWN per-pod ephemeral signing key and /.well-known/jwks.json would diverge across replicas -- ~50% of token verifications (browser sessions AND mesh node tokens) fail with 'unknown kid' (this caused the 2026-06-16 auth outage). Fix: set IDENTITY_SIGNING_KEY_B64 to a shared base64-std-encoded 32-byte Ed25519 seed on every identity replica (generate with: `head -c 32 /dev/urandom | base64`), so all replicas derive the same key. For a single-node / dev deployment with no HA, set IDENTITY_ALLOW_EPHEMERAL_KEY=true to opt into per-pod ephemeral keys")
+			return errors.New("identity: MEMQL_IDENTITY_SIGNING_KEY_B64 is not set, so each replica would mint its OWN per-pod ephemeral signing key and /.well-known/jwks.json would diverge across replicas -- ~50% of token verifications (browser sessions AND mesh node tokens) fail with 'unknown kid' (this caused the 2026-06-16 auth outage). Fix: set MEMQL_IDENTITY_SIGNING_KEY_B64 to a shared base64-std-encoded 32-byte Ed25519 seed on every identity replica (generate with: `head -c 32 /dev/urandom | base64`), so all replicas derive the same key. For a single-node / dev deployment with no HA, set MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true to opt into per-pod ephemeral keys")
 		}
 
 		// Production posture requires the master key. We approximate
@@ -746,31 +746,31 @@ func (c Config) Validate() error {
 		// will hit this and configure the secret. Local dev hitting
 		// localhost passes through with plaintext keys.
 		if c.KeyEncryptionKey == "" && !isLocalHost(parsed.Host) {
-			return errors.New("IDENTITY_KEY_ENCRYPTION_KEY is required when IDENTITY_BASE_URL is not a localhost origin (production deployments must encrypt the signing key at rest, or set IDENTITY_SIGNING_KEY_B64)")
+			return errors.New("MEMQL_IDENTITY_KEY_ENCRYPTION_KEY is required when MEMQL_IDENTITY_BASE_URL is not a localhost origin (production deployments must encrypt the signing key at rest, or set MEMQL_IDENTITY_SIGNING_KEY_B64)")
 		}
 
 		if c.KeyEncryptionKey != "" && len(c.KeyEncryptionKey) < 16 {
-			return errors.New("IDENTITY_KEY_ENCRYPTION_KEY must be at least 16 bytes")
+			return errors.New("MEMQL_IDENTITY_KEY_ENCRYPTION_KEY must be at least 16 bytes")
 		}
 	}
 
 	if c.RiskThreshold < 0 || c.RiskThreshold > 100 {
-		return fmt.Errorf("IDENTITY_RISK_THRESHOLD must be between 0 and 100, got %d", c.RiskThreshold)
+		return fmt.Errorf("MEMQL_IDENTITY_RISK_THRESHOLD must be between 0 and 100, got %d", c.RiskThreshold)
 	}
 
 	for _, client := range c.RegisteredClients {
 		if client.ClientId == "" {
-			return errors.New("IDENTITY_REGISTERED_CLIENTS: every entry must have a non-empty clientId")
+			return errors.New("MEMQL_IDENTITY_REGISTERED_CLIENTS: every entry must have a non-empty clientId")
 		}
 		if len(client.RedirectURIs) == 0 {
-			return fmt.Errorf("IDENTITY_REGISTERED_CLIENTS: client %q has no redirectURIs", client.ClientId)
+			return fmt.Errorf("MEMQL_IDENTITY_REGISTERED_CLIENTS: client %q has no redirectURIs", client.ClientId)
 		}
 		for _, uri := range client.RedirectURIs {
 			if strings.Contains(uri, "*") {
-				return fmt.Errorf("IDENTITY_REGISTERED_CLIENTS: client %q has wildcard in redirect URI %q (wildcards are forbidden — list every URI explicitly)", client.ClientId, uri)
+				return fmt.Errorf("MEMQL_IDENTITY_REGISTERED_CLIENTS: client %q has wildcard in redirect URI %q (wildcards are forbidden — list every URI explicitly)", client.ClientId, uri)
 			}
 			if _, err := url.Parse(uri); err != nil {
-				return fmt.Errorf("IDENTITY_REGISTERED_CLIENTS: client %q has malformed redirect URI %q: %w", client.ClientId, uri, err)
+				return fmt.Errorf("MEMQL_IDENTITY_REGISTERED_CLIENTS: client %q has malformed redirect URI %q: %w", client.ClientId, uri, err)
 			}
 		}
 	}
@@ -856,7 +856,7 @@ func matchesLoopbackAnyPort(registered string, candidate *url.URL) bool {
 }
 
 // IsInternalEmail reports whether email's domain matches the
-// configured IDENTITY_INTERNAL_DOMAINS list (case-insensitive).
+// configured MEMQL_IDENTITY_INTERNAL_DOMAINS list (case-insensitive).
 func (c Config) IsInternalEmail(email string) bool {
 	domain := emailDomain(email)
 	if domain == "" {

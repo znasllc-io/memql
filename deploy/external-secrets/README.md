@@ -18,7 +18,7 @@ secret material. **External Secrets Operator** reconciles `memql-secrets` from
 ## The genesis-envelope boundary (unchanged)
 
 ESO owns the **k8s Secret** that carries `MEMQL_MASTER_KEY`, `MEMQL_GENESIS_B64`
-(the sealed A2 envelope), and `MEMORY_NODES_DATABASE_DSN`. It does **not** change
+(the sealed A2 envelope), and `MEMQL_DATABASE_DSN`. It does **not** change
 the genesis envelope itself: the A2 envelope stays the **app-internal**
 shared-secret bootstrap (`component/secret/`, `component/genesis/`), autoloaded
 at boot. To rotate a shared secret you still re-seal the envelope (DEPLOYMENT_STRATEGY
