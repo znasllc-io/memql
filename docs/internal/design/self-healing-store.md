@@ -157,3 +157,48 @@ event payload (E4.1) into the `PreconditionMiss` the loop consumes.
 The repair loop **proposes**; it does not decide. The decision — which
 proposal becomes a live overlay override, gated by role and captured as a
 version — is E4.5.
+
+## E4.5 — Human validation + capture-as-version, blast-radius-scaled by role
+
+A proposed override (E4.4) is **human-validated** before it becomes a live
+overlay, and the validation effort is **blast-radius-scaled by Epic 1 role**.
+
+### Concept additions (`v1:healing:healedOverride`)
+
+| Field | Role |
+|-------|------|
+| `blastRadius` | `personal` \| `shared` \| `spine_adjacent` — how widely the heal propagates; bigger radius ⇒ higher rank to validate |
+| `validationStatus` | `proposed` \| `validated` \| `rejected` |
+| `validatedBy` / `validatedAt` | who decided + when (audit) |
+| `rejectionReason` | why a validator declined (audit — a rejection is recorded, not dropped) |
+
+### Mutations
+
+- `validateOverride` — ACCEPT: read-merges, flips `valid` false→true +
+  `validationStatus` proposed→validated, stamps `validatedBy`/`validatedAt`,
+  bumps `version` (**capture-as-version** — each accepted heal is a new
+  version, append-only). Once validated the override is resolution-eligible.
+- `rejectOverride` — DECLINE: sets `validationStatus=rejected` (`valid` stays
+  false, so it is never resolution-eligible), records `rejectionReason`.
+
+### Blast-radius rank gate
+
+`component/memql/healing_validation_rankbound.go`,
+`validateHealingValidationRankBound`, wired in `executeWrite` by concept name.
+It gates **only the accept transition** (valid false→true; the prior-valid
+flag `meta.priorHealingValid` is captured in the read-merge) on the actor's
+role rank meeting the blast-radius floor:
+
+| blastRadius | min rank | role |
+|-------------|----------|------|
+| `personal` | 100 | user |
+| `shared` | 200 | admin |
+| `spine_adjacent` | 300 | developer |
+
+The owner validates any radius; a system actor bypasses (seed
+re-materialization). Ranks are read from the live `v1:rbac:role` catalog
+(`resolveActorRank` / `lookupRoleRankBySlug`), so a re-ranked/custom role
+resolves correctly. Fails **closed**: an unresolved rank is 0, below every
+floor, so the validation is denied. This is the role-gating Epic 4 ties to
+Epic 1's RBAC ranks — the wider a heal's reach, the more trust required to
+accept it. Mirrors `validateRbacCustomRoleRankBound`.

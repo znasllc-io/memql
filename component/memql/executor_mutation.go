@@ -55,6 +55,11 @@ type writeMeta struct {
 	// targets an already-base-tier override even if the caller tries to
 	// flip tier to overlay in the same delta (memql#2140).
 	priorBaseTier bool
+	// priorHealingValid is the prior row's healing `valid` flag (false when
+	// absent), captured before the delta overwrites it so the self-healing
+	// blast-radius validation guard only gates the valid false->true ACCEPT
+	// transition, not a re-write of an already-accepted override (memql#2143).
+	priorHealingValid bool
 }
 
 // executeUpdate runs the update() form: read the latest existing row by
@@ -396,6 +401,10 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			// guard can reject an edit that targets an already-base-tier
 			// override even if the delta flips tier to overlay.
 			meta.priorBaseTier = isBaseTier(priorPayload["tier"])
+			// Capture the PRIOR valid flag (memql#2143) so the self-healing
+			// blast-radius validation guard only gates the valid false->true
+			// ACCEPT transition, not a re-write of an already-accepted override.
+			meta.priorHealingValid = boolFromAny(priorPayload["valid"])
 			mergePayloadFields(priorPayload, payload, mutation.MergeFields)
 			payload = priorPayload
 		}
@@ -565,6 +574,16 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// See healing_base_immutable_validation.go.
 	if conceptMeta.Name == conceptHealingOverride {
 		if err := e.validateHealingBaseImmutable(ctx, payload, meta.priorBaseTier, actor); err != nil {
+			return nil, meta, err
+		}
+		// Self-healing blast-radius validation guard (memql#2143): the write
+		// that ACCEPTS a heal (valid false->true) is gated on the actor's role
+		// rank meeting the override's blastRadius-required rank (personal->user,
+		// shared->admin, spine_adjacent->developer; owner always allowed). A
+		// wider-reaching heal needs a higher-ranked validator. Only the
+		// false->true transition is gated (prior-valid flag captured above). See
+		// healing_validation_rankbound.go.
+		if err := e.validateHealingValidationRankBound(ctx, payload, meta.priorHealingValid, actor); err != nil {
 			return nil, meta, err
 		}
 	}
