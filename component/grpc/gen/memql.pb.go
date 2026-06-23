@@ -9938,8 +9938,8 @@ func (x *ResolveGuestInviteResult) GetErrorMessage() string {
 // fires once the guest confirms their display name. The stream
 // interceptor has already validated `Authorization: Guest <token>`
 // and stashed the resolved invitation + space in the request claims;
-// the handler runs mutationMarkGuestInvitationAccepted +
-// mutationCreateGuestParticipant back-to-back on the engine and
+// the handler runs markGuestInvitationAccepted +
+// createGuestParticipant back-to-back on the engine and
 // replies with the created participant ID on success.
 type JoinSpaceAsGuestMsg struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
