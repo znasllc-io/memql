@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -406,6 +407,59 @@ func (p *Parser) parseUseDeclaration() (*UseDeclaration, error) {
 	return nil, newParseErrorf(&p.current, "`use %s` is the retired Form A shape -- declare the dependency as Form B `use <module>.{ %s }` instead (file-top import block names the source module + lists the constructs pulled into local scope)", path, path)
 }
 
+// topLevelDeclParsers is the authoritative dispatch table for the
+// parser's top-level contextual construct keywords: it maps each
+// recognised keyword to the per-construct decl parser parseDefinition
+// invokes. It is the SINGLE source of "which contextual keyword starts
+// a top-level declaration" -- the parseDefinition switch keys off it,
+// the unexpected-token error lists its keys, and TopLevelDeclKeywords
+// (consumed by the #2124 drift test) is derived from it. Adding a new
+// top-level construct means adding exactly one entry here.
+//
+// `concept` is the schema declaration (annotations.ByReceiver[""]).
+// `spec` and `trait` share parseSpecDecl (trait=true); both are listed
+// so the keyword set is complete.
+var topLevelDeclParsers = map[string]func(p *Parser, attributes []*Attribute) (Node, error){
+	"concept":  func(p *Parser, a []*Attribute) (Node, error) { return p.parseConceptDecl(a) },
+	"shape":    func(p *Parser, a []*Attribute) (Node, error) { return p.parseShapeDecl(a) },
+	"provider": func(p *Parser, a []*Attribute) (Node, error) { return p.parseProviderDecl(a) },
+	"builtin":  func(p *Parser, a []*Attribute) (Node, error) { return p.parseBuiltinDecl(a) },
+	"tool":     func(p *Parser, a []*Attribute) (Node, error) { return p.parseToolDecl(a) },
+	"prompt":   func(p *Parser, a []*Attribute) (Node, error) { return p.parsePromptDecl(a) },
+	"policy":   func(p *Parser, a []*Attribute) (Node, error) { return p.parsePolicyDecl(a) },
+	"spec":     func(p *Parser, a []*Attribute) (Node, error) { return p.parseSpecDecl(a, false) },
+	"trait":    func(p *Parser, a []*Attribute) (Node, error) { return p.parseSpecDecl(a, true) },
+	"seed":     func(p *Parser, a []*Attribute) (Node, error) { return p.parseSeedDecl(a) },
+}
+
+// TopLevelDeclKeywords is the sorted set of contextual keywords that
+// introduce a top-level declaration in parseDefinition (concept /
+// shape / provider / builtin / tool / prompt / policy / spec / trait /
+// seed). It is derived from topLevelDeclParsers so it cannot drift
+// from the actual dispatch, and is the authoritative list the #2124
+// drift test compares dslspec's non-function, non-import constructs
+// against. It does NOT include `func` (the retired internal procedural
+// form, not an author-facing construct) nor `use` (the file-top import
+// statement, handled before parseDefinition).
+var TopLevelDeclKeywords = func() []string {
+	out := make([]string, 0, len(topLevelDeclParsers))
+	for kw := range topLevelDeclParsers {
+		out = append(out, kw)
+	}
+	sort.Strings(out)
+	return out
+}()
+
+// topLevelDeclKeywordList renders TopLevelDeclKeywords as a quoted,
+// comma-separated list for the parseDefinition unexpected-token error.
+func topLevelDeclKeywordList() string {
+	quoted := make([]string, len(TopLevelDeclKeywords))
+	for i, kw := range TopLevelDeclKeywords {
+		quoted[i] = "'" + kw + "'"
+	}
+	return strings.Join(quoted, ", ")
+}
+
 // parseDefinition parses a single definition (function).
 // Supports @attribute Python-style decorators before func declarations.
 func (p *Parser) parseDefinition() (Node, error) {
@@ -439,94 +493,22 @@ func (p *Parser) parseDefinition() (Node, error) {
 	case p.check(TokenKeywordFunc):
 		// Go-style: func (Type) name(args) (returns) { }
 		def, err = p.parseGoStyleFunction()
-	case p.check(TokenIdentifier) && p.current.Literal == "concept":
-		// Contextual keyword: `concept` at top-of-file introduces a
-		// concept declaration. It stays a plain identifier inside
-		// query bodies (concept==v1:foo:bar) and inside insert()
-		// payloads ({concept: "v1:..."}) -- no keyword promotion in
-		// the lexer so those sites keep working.
-		def, err = p.parseConceptDecl(attributes)
-		if err == nil {
-			attributes = nil
-		}
-	case p.check(TokenIdentifier) && p.current.Literal == "shape":
-		// Contextual keyword: `shape` at top-of-file introduces a
-		// struct-form shape declaration. Stays a plain identifier
-		// elsewhere (e.g. ShapeExpr's `<expr> with shape(...)`).
-		// memql#315 (sub-epic #309 / #306 child C).
-		def, err = p.parseShapeDecl(attributes)
-		if err == nil {
-			attributes = nil
-		}
-	case p.check(TokenIdentifier) && p.current.Literal == "provider":
-		// Contextual keyword: `provider` at top-of-file introduces an
-		// AI provider declaration. Same rationale as `concept` /
-		// `shape` -- kept as a plain identifier so the lexer doesn't
-		// disturb other uses, and the symmetry matches every other
-		// struct-form construct. memql#316 (sub-epic #309 sibling of
-		// #315).
-		def, err = p.parseProviderDecl(attributes)
-		if err == nil {
-			attributes = nil
-		}
-	case p.check(TokenIdentifier) && p.current.Literal == "builtin":
-		// Contextual keyword: `builtin` at top-of-file introduces a
-		// struct-form builtin declaration. memql#318
-		// (sub-epic #309 / #306 child C).
-		def, err = p.parseBuiltinDecl(attributes)
-		if err == nil {
-			attributes = nil
-		}
-	case p.check(TokenIdentifier) && p.current.Literal == "tool":
-		// Contextual keyword: `tool` at top-of-file introduces a
-		// struct-form AI tool declaration. memql#317 (sub-epic #309
-		// sibling of #315 / #316 / #318).
-		def, err = p.parseToolDecl(attributes)
-		if err == nil {
-			attributes = nil
-		}
-	case p.check(TokenIdentifier) && p.current.Literal == "prompt":
-		// Contextual keyword: `prompt` at top-of-file introduces a
-		// struct-form prompt declaration. memql#319
-		// (sub-epic #309 / #306 child C).
-		def, err = p.parsePromptDecl(attributes)
-		if err == nil {
-			attributes = nil
-		}
-	case p.check(TokenIdentifier) && p.current.Literal == "policy":
-		// Contextual keyword: `policy` at top-of-file introduces an
-		// AI Router routing-policy declaration. memql#333 (sub-epic
-		// #329 / Stage 1C of #310).
-		def, err = p.parsePolicyDecl(attributes)
-		if err == nil {
-			attributes = nil
-		}
-	case p.check(TokenIdentifier) && p.current.Literal == "spec":
-		// Contextual keyword: `spec` at top-of-file introduces a
-		// struct-form spec declaration. memql#334 (sub-epic #329 /
-		// #310 Stage 1C). Stays a plain identifier inside query
-		// bodies (the SpecRefExpression path uses bare names).
-		def, err = p.parseSpecDecl(attributes, false)
-		if err == nil {
-			attributes = nil
-		}
-	case p.check(TokenIdentifier) && p.current.Literal == "trait":
-		// Contextual keyword: `trait` at top-of-file introduces a
-		// struct-form trait declaration (same runtime contract as
-		// spec; concept-agnostic predicate). memql#334.
-		def, err = p.parseSpecDecl(attributes, true)
-		if err == nil {
-			attributes = nil
-		}
-	case p.check(TokenIdentifier) && p.current.Literal == "seed":
-		// Contextual keyword: `seed` at top-of-file introduces a seed
-		// declaration. memql#335 (sub-epic #329 / Stage 1C of #310).
-		def, err = p.parseSeedDecl(attributes)
+	case p.check(TokenIdentifier) && topLevelDeclParsers[p.current.Literal] != nil:
+		// Contextual top-level construct keyword (concept / shape /
+		// provider / builtin / tool / prompt / policy / spec / trait /
+		// seed). The dispatch table topLevelDeclParsers is the single
+		// authoritative set of recognised top-level keywords; the
+		// #2124 drift test asserts dslspec stays in lockstep with the
+		// derived TopLevelDeclKeywords. Each of these stays a plain
+		// identifier elsewhere (query bodies, insert payloads,
+		// `<expr> with shape(...)`) -- no lexer keyword promotion --
+		// so those sites keep working.
+		def, err = topLevelDeclParsers[p.current.Literal](p, attributes)
 		if err == nil {
 			attributes = nil
 		}
 	default:
-		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func', 'concept', 'shape', 'provider', 'builtin', 'tool', 'prompt', 'policy', 'spec', 'trait', or 'seed'", p.current.Literal)
+		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func' or one of %s", p.current.Literal, topLevelDeclKeywordList())
 	}
 
 	if err != nil {
