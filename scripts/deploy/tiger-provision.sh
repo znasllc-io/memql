@@ -557,8 +557,7 @@ function print_state_report() {
 
     echo ""
     echo "  Note: memQL runs auto-migrations on backend start"
-    echo "  (MEMORY_NODES_DATABASE_AUTO_MIGRATE=true,"
-    echo "  MEMORY_NODES_DATABASE_MIGRATE_ON_START=true in service.yaml),"
+    echo "  (MEMORY_NODES_DATABASE_MIGRATE_ON_START=true in service.yaml),"
     echo "  so the schema converges against this DB on first deploy."
 
     echo ""
