@@ -85,7 +85,8 @@ GOWORK=off make mcp            # -> bin/memql-mcp (engine node, no CoPresent DSL
 
 # Register it with Claude Code as a local subprocess. The binary runs the full
 # engine, so it needs the engine env (DB DSN + genesis) the same way any node
-# does -- the simplest path is to point it at your local dev-cluster database.
+# does -- the simplest path is to point it at your local k3d cluster database
+# (via the postgres port-forward, make db).
 claude mcp add memql-local -- /absolute/path/to/bin/memql-mcp
 ```
 
@@ -99,18 +100,19 @@ To test the network transport locally you also need a reachable identity
 verifier (HTTP mode refuses to start without one -- default-deny):
 
 ```bash
+# Forward the identity service first: kubectl port-forward -n memql svc/identity 8085:8085
 MEMQL_MCP_TRANSPORT=http \
 MEMQL_MCP_HTTP_ADDR=:8090 \
 MEMQL_MCP_MODE=authoring \
-IDENTITY_VERIFIER_BASE_URL=https://identity.local.znas.io \
+IDENTITY_VERIFIER_BASE_URL=http://localhost:8085 \
   ./bin/memql-mcp
 # then: claude mcp add --transport http memql-local-http \
 #   http://127.0.0.1:8090/mcp --header "Authorization: Bearer <local JWT>"
 ```
 
-The blessed local environment that provides identity + a database is the parity
-cluster (`make dev-cluster-up`); mint a local token against
-`identity.local.znas.io`.
+The blessed local environment that provides identity + a database is the k3d
+parity cluster (`make up`); mint a local token against the identity service via
+its port-forward (`localhost:8085`).
 
 ## Environment surface
 

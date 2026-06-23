@@ -616,10 +616,10 @@ Same env vars as the legacy `/memql/audio` path:
 | `MEMQL_STT_PROVIDER` | `openai-realtime`, `openai-whisper` | `openai-realtime` |
 | `MEMQL_SI_OPENAI_API_KEY` | OpenAI key (Realtime / Whisper) | required for OpenAI |
 
-`docker-compose.cluster.yml` brings up voice nodes alongside the BFF so
-streaming transcription works on the local cluster; nginx proxies
-`/memql/audio` on the `bff.local.znas.io` subdomain through to the voice
-node (STT lives there, not the bff).
+The local k3d cluster (`deploy/k8s/overlays/local`) brings up voice pods
+alongside the BFF so streaming transcription works locally; the BFF forwards
+`/memql/audio` to the voice node (STT lives there, not the bff). Reach the BFF
+from the host via `kubectl port-forward -n memql svc/bff 50051:50051`.
 
 ### Single-shot batch path
 

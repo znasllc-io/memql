@@ -19,7 +19,7 @@ clients already"). It is the deliverable of epic memql#1778.
 every environment — a bounded per-pod pool, graceful pool close on shutdown,
 leak-free reconnect, and a deploy that never exceeds the budget. Only the
 *numbers* differ per environment as config (per-pod pool size, the DB's
-`max_connections`, replica counts). Dev (docker-compose Postgres) and Azure
+`max_connections`, replica counts). Local (k3d Postgres pod) and Azure
 (AKS + Tiger Cloud) run the same code paths; they just plug in different limits.
 
 ## The budget formula
@@ -140,7 +140,7 @@ else falls back to the main pool (env-agnostic — local/dev without a pooler is
 unaffected). bun's `pgdriver` speaks the simple query protocol (no server-side
 prepared statements), so transaction pooling is safe. Wiring + the
 `kubectl create secret` recipe: `deploy/k8s/base/README.md`. Local parity:
-the in-compose PgBouncer in `docker/docker-compose.cluster.yml`.
+the PgBouncer pod in the k3d cluster (`deploy/k8s/base`).
 
 ### Budget under the pooler
 

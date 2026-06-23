@@ -17,59 +17,61 @@ end-of-utterance tuning.
 
 ## When to run this
 
-- Right after `make dev-cluster-refresh` to confirm the freshly-minted
-  `VOICE_AGENT_TOKEN` actually landed in `polyphon-voice-agent`.
+- After bringing up the local k3d cluster (`make up`) to confirm the
+  `voice` pod is running with a valid `VOICE_AGENT_TOKEN`.
 - After editing anything in `integrations/voice/agent/` or the
   LiveKit transport.
 - After a deploy to staging / prod, before declaring voice
   available.
 
+> Avatar VIDEO is staging-only. The local k3d cluster runs the audio
+> path against the in-cluster LiveKit Deployment
+> (`deploy/k8s/base/livekit.yaml`); there is no ngrok TURN relay or
+> public avatar URL locally. Verify the avatar on staging.
+
 ## The smoke check (manual)
 
-The fast "is the agent alive + authenticated" check:
+The fast "is the agent alive + authenticated" check against the local
+k3d cluster:
 
 ```bash
-# 1. Confirm the container is running (not restarting -- the symptom
-#    of a missing VOICE_AGENT_TOKEN).
-docker ps --filter name=polyphon-voice-agent
+# 1. Confirm the voice pod is Running (not CrashLoopBackOff -- the
+#    symptom of a missing VOICE_AGENT_TOKEN).
+kubectl get pods -n memql -l app=voice
 
-# 2. Confirm VOICE_AGENT_TOKEN is populated inside the container.
-docker exec polyphon-voice-agent sh -c 'test -n "$VOICE_AGENT_TOKEN" && echo OK'
+# 2. Confirm VOICE_AGENT_TOKEN is populated inside the pod.
+kubectl exec -n memql deploy/voice -- sh -c 'test -n "$VOICE_AGENT_TOKEN" && echo OK'
 
 # 3. Scan the recent log tail for auth failures or gRPC
 #    UNAUTHENTICATED responses.
-docker logs --tail 200 polyphon-voice-agent
+kubectl logs -n memql deploy/voice --tail 200
 ```
 
-If step 2 fails, the mint-and-inject step in dev-cluster-refresh didn't land
--- see the recovery in the failure-modes table below.
+If step 2 fails, the seeded `VOICE_AGENT_TOKEN` Secret didn't land --
+re-seed with `make k3d-secrets` (see the failure-modes table below).
 
-## The dev env contract
+## The env contract
 
 The voice-agent reads the following at startup
-(`integrations/voice/agent/config.go`, `LoadConfig`). Each one's
-source is locked in dev:
+(`integrations/voice/agent/config.go`, `LoadConfig`). In the local k3d
+cluster each value comes from the manifests in `deploy/k8s/base` /
+`deploy/k8s/overlays/local` plus the seeded `memql-secrets` Secret:
 
-| Var | Source in dev | Required? |
+| Var | Source in the local cluster | Required? |
 | --- | --- | --- |
-| `LIVEKIT_URL` | Hardcoded `ws://livekit:7880` in `docker-compose.polyphon.yml` (service-to-service) | yes |
-| `LIVEKIT_API_KEY` | Hardcoded `devkey` in compose | yes |
-| `LIVEKIT_API_SECRET` | Hardcoded `secret` in compose | yes |
-| `MEMQL_GRPC_ADDR` | Hardcoded `bff:50051` in compose | yes |
-| `OPENAI_API_KEY` | `.env.local` via `env_file:` (genesis-sealed in `genesis.znas`) | yes |
-| `VOICE_AGENT_TOKEN` | **Shell env at compose-up time** -- minted by `scripts/dev/refresh.sh` step 4 (see [#184](https://github.com/znasllc-io/memql/issues/184)) | yes |
-| `MEMQL_AVATAR_VENDOR` | Compose default `anam`; overridable via shell env | no |
-| `ANAM_API_KEY` | `.env.local` via `env_file:` | required when `MEMQL_AVATAR_VENDOR=anam` |
-| `SIMLI_API_KEY` | `.env.local` via `env_file:` | required when `MEMQL_AVATAR_VENDOR=simli` |
-| `LIVEKIT_PUBLIC_URL` | `.env.local`, rewritten by `lib_refresh_ngrok` to a fresh ngrok tunnel | required for the avatar; audio-only works without it |
+| `LIVEKIT_URL` | `ws://livekit:7880` (the in-cluster LiveKit Service) | yes |
+| `LIVEKIT_API_KEY` | `devkey` from the local overlay | yes |
+| `LIVEKIT_API_SECRET` | `secret` from the local overlay | yes |
+| `MEMQL_GRPC_ADDR` | `bff:50051` (cluster DNS) | yes |
+| `OPENAI_API_KEY` | `memql-secrets` Secret (seeded from the genesis envelope) | yes |
+| `VOICE_AGENT_TOKEN` | `memql-secrets` Secret, seeded by `make up` / `make k3d-secrets` | yes |
+| `MEMQL_AVATAR_VENDOR` | `anam` default; overridable in the overlay | no |
+| `ANAM_API_KEY` | `memql-secrets` Secret | required when `MEMQL_AVATAR_VENDOR=anam` |
+| `SIMLI_API_KEY` | `memql-secrets` Secret | required when `MEMQL_AVATAR_VENDOR=simli` |
 
-If the token check (step 2 above) fails, the mint-and-inject step in
-dev-cluster-refresh didn't land. Recover with the manual mint-and-recreate in
-the failure-modes table below.
-
-If the avatar fails to render but audio works, `LIVEKIT_PUBLIC_URL`
-is the usual cause -- check `ngrok` is installed and authed
-(`scripts/dev/install-deps.sh` surfaces a hint).
+The avatar VIDEO path (which needs a publicly reachable LiveKit URL /
+TURN relay) is not wired locally -- audio works without it. Verify the
+avatar on staging.
 
 ## The full round-trip (manual)
 
@@ -77,32 +79,32 @@ The smoke check confirms the agent is healthy + authenticated.
 End-to-end voice quality and latency still need a human in the
 loop:
 
-1. Open CoPresent (`https://app.local.znas.io` after dev-cluster-refresh).
+1. Open CoPresent (via the copresent SPA port-forward,
+   `kubectl port-forward -n memql svc/copresent 8080:8080`).
 2. Create or join a space; the BFF's `PolyphonRoomTokenMsg`
    handler dispatches the voice-agent into the room as the
    General Assistant participant.
 3. Speak. Watch the voice-agent logs:
    ```bash
-   docker logs -f polyphon-voice-agent
+   kubectl logs -n memql deploy/voice -f
    ```
    You should see:
    - `voice agent partial` lines (interim transcripts)
    - `voice agent final` line (final transcript)
    - `voice agent turn request` line (memql cognition dispatched)
    - TTS playback in the browser
-   - Avatar lip-sync (Anam, if `LIVEKIT_PUBLIC_URL` is reachable)
+   - Avatar lip-sync only applies on staging (audio-only locally)
 4. If anything goes silent, the next places to look are:
-   - `docker logs memql-cognition` -- routing decision + agent
-     dispatch.
-   - `docker logs memql-bff` -- the room token grant.
-   - `docker logs polyphon-livekit` -- room join / publish.
+   - `kubectl logs -n memql deploy/cognition` -- routing decision +
+     agent dispatch.
+   - `kubectl logs -n memql deploy/bff` -- the room token grant.
+   - `kubectl logs -n memql deploy/livekit` -- room join / publish.
 
 ## Common failure modes
 
 | Symptom | Cause | Recovery |
 | --- | --- | --- |
-| `polyphon-voice-agent` restarting forever | `VOICE_AGENT_TOKEN` empty | re-run `make dev-cluster-refresh`, or run [the manual mint-and-recreate](auth/voice-agent-jwt.md#bring-up-injection-dev--prod) |
-| Auth works but no TTS | OpenAI key missing in `.env.local` | seal the key into `~/.memql/genesis.znas` via `memql-cockpit genesis init` |
-| Audio works but no avatar | `ngrok` missing or `LIVEKIT_PUBLIC_URL` stale | install ngrok (`make install-deps` surfaces the hint), re-run `make dev-cluster-refresh` |
-| `UNAUTHENTICATED` in voice-agent logs | Token expired or identity row soft-deleted | re-mint with `make voice-agent-token INSTANCE=voice-agent-local` and recreate the service |
-| `voice agent turn request` lands but cognition doesn't reply | Cognition node down or routing broken | `docker logs memql-cognition`; bounce the cognition node |
+| `voice` pod CrashLoopBackOff | `VOICE_AGENT_TOKEN` empty | re-seed with `make k3d-secrets` then `kubectl rollout restart -n memql deploy/voice`, or run [the manual mint-and-recreate](auth/voice-agent-jwt.md#bring-up-injection-dev--prod) |
+| Auth works but no TTS | OpenAI key missing | seal the key into the genesis envelope, then `make k3d-secrets` |
+| `UNAUTHENTICATED` in voice-agent logs | Token expired or identity row soft-deleted | re-mint with `make voice-agent-token INSTANCE=voice-agent-local`, re-seed, and roll the voice Deployment |
+| `voice agent turn request` lands but cognition doesn't reply | Cognition node down or routing broken | `kubectl logs -n memql deploy/cognition`; `kubectl rollout restart -n memql deploy/cognition` |

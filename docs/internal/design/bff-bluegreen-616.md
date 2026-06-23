@@ -83,7 +83,7 @@ login steering).
 > `MEMQL_GRPC_ADDR=bff-active:50051`; `bff-active` carries port 50058. New mesh
 > connections can therefore only land on the active color. The unscoped `bff`
 > Service is retained as a same-namespace DNS alias for tooling/compat. (The
-> local docker-compose cluster has a single bff color and no Rollout, so it
+> local k3d cluster has a single bff color and no Rollout, so it
 > keeps dialing `bff:50058` -- env-agnostic: same star topology, only the
 > dial-target value differs per environment.)
 

@@ -22,10 +22,12 @@ memQL splits configuration into two tiers:
 1. **Bootstrap envelope** -- a small set of OS environment variables the
    process must see *before* it can read anything else. Things like
    "where is Postgres", "what node am I", "what's the master encryption
-   key". These are set in `docker-compose.cluster.yml` (dev) or in the
-   AKS deploy manifests (prod). There is no encrypted-at-rest path for
-   these --
-   they live in plain env.
+   key". Locally these are seeded into k8s Secrets by `make up`
+   (`scripts/k3d/seed-secrets.sh`) from the genesis envelope and mounted
+   into the pods by the manifests in `deploy/k8s/overlays/local`; in
+   staging/prod they ride the AKS deploy manifests + the cluster Secret.
+   There is no encrypted-at-rest path for these -- they live in plain env
+   inside the pod.
 2. **Concept storage** -- everything else. API keys, OAuth client
    secrets, model defaults, feature flags, mail-sender addresses, and
    any tunable a tenant might want to override. These live in four
@@ -179,11 +181,12 @@ applies to the OS env fallback.
 #### Why OS env stays around
 
 Providers are loaded eagerly during engine initialization. On a
-fresh `make dev-cluster-refresh`, the database wipe runs *before* the seed,
-so when providers first try to resolve their auth keys the concept
-storage is empty. The OS env fallback (populated from `.env.local`
-in dev or from the deploy manifest in prod) keeps providers alive
-through that bootstrap window until the seed completes.
+fresh `make down && make up`, the database starts empty, so when
+providers first try to resolve their auth keys the concept storage
+has no rows yet. The OS env fallback (populated from the k8s Secret
+seeded by `make up` in dev, or from the deploy manifest in prod)
+keeps providers alive through that bootstrap window until the concept
+seed completes.
 
 Future work to retire the OS env fallback cleanly: either lazy
 per-request provider auth resolution, or a post-seed engine reload
@@ -510,8 +513,8 @@ variables:
   ...
 ```
 
-The yaml only matters for the **dev-cluster-refresh workflow**. In
-production:
+The yaml only matters for the **operator concept-seeding workflow**
+(`make secrets-seed`). In production:
 
 - The `MEMQL_MASTER_KEY` env var is set explicitly on the deploy
   target.
@@ -520,16 +523,17 @@ production:
 
 ### Where the yaml lives in the bootstrap chain
 
-1. `make dev-cluster-refresh` runs `scripts/dev/cluster-refresh.sh`.
-2. `require_master_key` in `scripts/dev/lib.sh` calls
-   `go run ./scripts/secrets master-key`, which reads
-   `~/.memql/dev-secrets.yaml` and prints the `masterKey` field.
-3. The refresh script exports it as `MEMQL_MASTER_KEY` before
-   `docker compose up`, so every container has the key in env.
-4. After the stack is up, the same script runs
-   `go run ./scripts/secrets seed`, which encrypts each yaml entry
-   under the master key and upserts the row into the right concept
-   over gRPC.
+The bootstrap envelope (including `MEMQL_MASTER_KEY`) is seeded into a
+k8s Secret by `make up` (`scripts/k3d/seed-secrets.sh`) from the genesis
+envelope and mounted into the pods by `deploy/k8s/overlays/local`, so
+every pod has the key in env from first boot. The yaml is only used by
+the concept-seeding step:
+
+1. `make secrets-seed` runs `go run ./scripts/secrets seed`, which
+   reads `~/.memql/dev-secrets.yaml`.
+2. It encrypts each yaml entry under the master key (resolved from the
+   seeded `MEMQL_MASTER_KEY` env) and upserts the row into the right
+   concept over gRPC against the running memQL.
 
 ### Make targets
 
@@ -542,19 +546,18 @@ All driven by `scripts/secrets/main.go`:
 | `make secrets-list`                                             | Print the manifest, scope, and whether each entry has a value locally.           |
 | `make secret-set NAME=X VALUE=Y SCOPE=global`                   | One-off; doesn't touch the yaml.                                                 |
 | `make variable-set NAME=X VALUE=Y SCOPE=global`                 | Same for plaintext variables.                                                    |
-| `make secrets-export`                                           | Pull every active secret + variable from the running memQL, decrypt locally, merge into the yaml (memQL wins on conflict). Used to back state up before a `dev-cluster-refresh` wipes the database. |
+| `make secrets-export`                                           | Pull every active secret + variable from the running memQL, decrypt locally, merge into the yaml (memQL wins on conflict). Used to back state up before a `make down && make up` recreates the database. |
 
-`dev-cluster-refresh` does export -> wipe -> restart -> seed in one shot,
-so the yaml stays in sync as long as you go through that target.
+`make secrets-export` then `make secrets-seed` round-trips concept state
+through the yaml, so it stays in sync across a cluster recreate.
 
 ### Master-key resolution order (in process)
 
 `component/secret/encryption.go` reads `MEMQL_MASTER_KEY` from the OS
 env at first encrypt/decrypt call. There is no fallback. If absent
 when an encrypted secret is accessed, the process logs a fatal error.
-The yaml passthrough above is purely operator tooling -- it puts the
-key into the env before `docker compose up`. Inside the container,
-the value is just an env var.
+The seeded k8s Secret puts the key into the env before the pod's gRPC
+server starts. Inside the pod, the value is just an env var.
 
 For non-dev installs, set `MEMQL_MASTER_KEY` directly on the deploy
 target (Cloud Run env, Kubernetes secret, etc.). The yaml is never
@@ -580,9 +583,9 @@ each worker:
 Both are bootstrap envelope vars -- they have to be in the env
 before the gRPC server starts.
 
-`docker-compose.cluster.yml` has full worked examples -- the 2-replica
-staging-parity mesh (bff + cognition + agent + planner + voice +
-workbench), identity, the copresent SPA, and LiveKit.
+`deploy/k8s/overlays/local` (over `deploy/k8s/base`) has full worked
+examples -- the staging-parity mesh (bff + cognition + agent + planner +
+voice + workbench), identity, the copresent SPA, and LiveKit.
 
 ---
 
@@ -635,8 +638,7 @@ automatically.
 |-------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
 | [`scripts/secrets/manifest.yaml`](../../../scripts/secrets/manifest.yaml)        | Authoritative list of dev-bootstrap secrets + variables.                       |
 | [`scripts/secrets/main.go`](../../../scripts/secrets/main.go)                    | The CLI that powers every `make secret-*` / `make variable-*` target.          |
-| `scripts/dev/lib.sh`                                                          | `require_master_key`, `wait_for_memql`, etc. used by `dev-cluster-refresh`.    |
-| `scripts/dev/cluster-refresh.sh`                                              | The wipe -> restart -> reseed orchestrator behind `make dev-cluster-refresh`.  |
+| [`scripts/k3d/seed-secrets.sh`](../../../scripts/k3d/seed-secrets.sh)            | Seeds the bootstrap envelope into k8s Secrets (run by `make up` / `make k3d-secrets`). |
 | `dsl/platform/concepts.memql`                                                 | Schemas for global + partition-scoped secrets and variables.                   |
 | `component/secret/encryption.go`                                              | NaCl secretbox + `MEMQL_MASTER_KEY` resolution.                                |
 | `component/memql/ai_providers.go` (`resolveAuthPlaceholders`)                 | Provider-auth resolver (the env() / placeholder chain).                        |
@@ -647,7 +649,7 @@ automatically.
 | `component/identity/verifier/config.go`                                       | Per-node verifier env reads (bff/voice/cognition/agent/planner).               |
 | `component/node/identity.go`                                                  | Node-identity env reads.                                                       |
 | `component/server/memqlws/env.go`                                             | WebSocket tuning env reads.                                                    |
-| `docker/docker-compose.cluster.yml`                                           | Worked example of every required bootstrap env var for the dev cluster.        |
+| [`deploy/k8s/overlays/local`](../../../deploy/k8s/overlays/local)               | Worked example of every required bootstrap env var for the local cluster.       |
 
 ---
 
@@ -676,7 +678,7 @@ make secrets-export
 Pulls every active row from the running memQL, decrypts secrets
 locally with the master key, and merges the result into the yaml.
 Conflict resolution: memQL wins. Run this before any
-`make dev-cluster-refresh` that resets the database.
+`make down && make up` that resets the database.
 
 ### "Why is my provider giving 'no value' errors?"
 
@@ -698,9 +700,9 @@ Check the resolver chain in order:
 
 `make secret-set` / `make variable-set` write directly to the
 running memQL without modifying the yaml. Useful for one-off
-experiments. Note that on the next `dev-cluster-refresh` the wipe-and-reseed
-will replace the value with whatever's in the yaml -- export first
-if you want to keep it.
+experiments. Note that the next `make down && make up` recreates the
+database, so re-running `make secrets-seed` replaces the value with
+whatever's in the yaml -- export first if you want to keep it.
 
 ---
 

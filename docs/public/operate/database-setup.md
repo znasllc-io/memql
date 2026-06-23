@@ -192,7 +192,7 @@ Both staging and production databases have **automatic migrations enabled** via:
    └── 20260209120000_feature.down.sql  (rollback)
 
 2. Test locally:
-   make dev-cluster-up
+   make up
    # Migrations run automatically
 
 3. Test in staging:

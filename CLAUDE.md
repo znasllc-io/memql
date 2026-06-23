@@ -199,8 +199,8 @@ go test ./...
 
 Where a container image is built depends ONLY on where it runs:
 
-- **Local development** -- build images in your **local Docker** (`make
-  dev-cluster*` / `docker compose`). Fast, throwaway, never pushed to ACR.
+- **Local development** -- build images in your **local Docker** and import
+  them into k3d via `make dev`. Fast, throwaway, never pushed to ACR.
 - **Deploys to STAGING or PRODUCTION** -- images MUST be built on the **GitHub
   build server** (GitHub Actions, OIDC -> ACR `acrmemql`), NOT on an operator
   machine. This spans ALL repos in the project:
@@ -401,8 +401,9 @@ proxy/forward, an event consumed on a different replica. Add coverage to
 the cluster-e2e harness (`test/clustere2e/`) and/or the proxy-path tests
 (`component/grpc/ai_forward_test.go`); the test should FAIL against
 single-node-assuming code and PASS with the cross-node fix. The blessed
-local repro is the 2-replica parity cluster (`make dev-cluster-up`) --
-the only topology that reproduces this bug class. See
+local repro is the 2-replica parity cluster (`make up SERVERS=2` +
+`make k3d-scale N=2`) -- the only topology that reproduces this bug
+class. See
 [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
 
 #### Node image source: carrier-built vs engine-built (#1053) -- ENFORCED RULE
@@ -421,16 +422,16 @@ and will fail with `unknown prompt template "agentReply"`.
 | **voice** | engine voice-runtime (CGO; transport/forwarding only, no CoPresent refs) |
 | **identity** | engine (auth service, no CoPresent refs) |
 
-This MUST be identical in every environment -- local cluster
-(`docker-compose.cluster.yml`), staging, prod, and client deploys. The build
+This MUST be identical in every environment -- local k3d cluster
+(`deploy/k8s/overlays/local`), staging, prod, and client deploys. The build
 pipeline enforces it: `scripts/deploy/aks-deploy.sh` (`CARRIER_NODE_TYPES`)
-carrier-builds the set; the cluster compose builds the same nodes from the
-carrier Dockerfile. The pure-engine `memql-<type>` images are only for a
+carrier-builds the set; `make dev` builds the same carrier nodes locally and
+imports them into k3d. The pure-engine `memql-<type>` images are only for a
 memQL-standalone (no CoPresent) deployment.
 
 **Build tag reference:** [docs/public/build/build-tags.md](docs/public/build/build-tags.md)
-**Local cluster (staging parity -- THE blessed local topology, memql#1260):** `make dev-cluster-up` (background) / `make dev-cluster-down`, or `make dev-cluster` (foreground); `make dev-cluster-restart[-purge]` force a fresh `--no-cache` rebuild after Go/MemQL source edits. Uses `docker-compose.cluster.yml`. The cluster mirrors staging along the **mesh-delivery path** (memql#1212): 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench) with per-replica unique node ids (hostname-derived via `os.Hostname()`, the compose equivalent of staging's `fieldRef: metadata.name`), plus the copresent SPA + LiveKit behind the nginx TLS subdomain front door (`*.local.znas.io` -- app./identity./bff./agent./livekit., memql#1313). `make dev-cluster-status` prints the per-replica node ids (parity litmus). A few nodes off that path diverge for concrete local-host reasons (voice-agent opt-in pending re-home onto the cluster via memql#1310, lifecycle probes deferred to Phase 3) -- each is enumerated + justified in the divergence audit in the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle.
-**Single-node stack -- RETIRED (memql#1311):** the single-node `full.yml` + `nemoclaw` compose files were deleted; the 2-replica parity cluster (`make dev-cluster-refresh` / `make dev-cluster-up`) is the only supported local run path (memql#1304), since a single-node stack structurally cannot reproduce the resilient-mesh class of bugs.
+**Local cluster (staging parity -- THE blessed local topology, memql#2061 / Epic 0):** `make up` (k3d + ArgoCD + the local overlay at `deploy/k8s/overlays/local` + seeded secrets); `make dev [NODE=<type>]` rebuilds an image, imports it into k3d, and rolls the Deployment after Go/MemQL source edits; `make down` tears it down. The cluster mirrors staging along the **mesh-delivery path** (memql#1212) by running the same k8s manifests and ArgoCD reconciliation as AKS: scale to 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench) with `make up SERVERS=2` + `make k3d-scale N=2`, each pod carrying a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name` exactly as in staging. The cluster is reached via kubectl port-forwards (bff gRPC `:50051`, identity `:8085`, copresent SPA `:8080`, livekit `:7880`, postgres `:5432`) -- there is no nginx front door or `*.local.znas.io` subdomain. `make k3d-status` prints the per-pod node ids (parity litmus). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle. See the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
+**Previous Compose-based local stack -- RETIRED (memql#2068 / #2088):** the old cluster compose file, the single-node `full.yml`, and the `nemoclaw` overlay are fully removed. The k3d + ArgoCD cluster above is the only supported local run path; a single-node stack structurally cannot reproduce the resilient-mesh class of bugs.
 
 #### Client-tool relay (agent → browser, across nodes)
 
@@ -666,9 +667,10 @@ Make targets:
 - `make voice-agent-token` -- mint a `class="voice_agent"` JWT for the
   local cluster (used by `scripts/dev/refresh.sh`).
 
-Docker: the `voice-agent` service in
-`docker/docker-compose.polyphon.yml` runs the `memql-voice` image (the
-`voice-runtime` CGO stage) with `command: voice-agent`.
+Deployment: the `voice` Deployment runs the `memql-voice` image (the
+`voice-runtime` CGO stage) with the `voice-agent` subcommand; in the local
+k3d cluster it comes up from `deploy/k8s/base` alongside the LiveKit
+Deployment (`deploy/k8s/base/livekit.yaml`).
 
 `integrations/openai/` on the Go side also serves the `/memql/audio`
 WebSocket path for voice-first creation modals. The earlier Python voice-agent (LiveKit Agents 1.5)
@@ -784,7 +786,7 @@ the agent used no trained sources, citations is an empty array.
   - Per-agent workspaces at `/workspaces/{agentId}/`
   - AI calls routed through memQL's centralized provider system
 - **Upgrade path:** NVIDIA NemoClaw (Apache 2.0) adds OpenShell sandboxing — swap image when container is published
-- **Development:** the standalone `docker-compose.nemoclaw.yml` overlay was retired (memql#1311); a coding-agent sidecar for the parity cluster is pending re-home (memql#1310)
+- **Development:** the standalone nemoclaw overlay was retired (memql#1311); a coding-agent sidecar for the parity cluster is pending re-home (memql#1310)
 - **Cloud:** runs as a sidecar container alongside the agent node on AKS
 - **Agent capability:** `claw` flag on agent concept enables coding tools
 - **Tools:** `clawExecuteTask`, `clawReadFile`, `clawListFiles`, `clawSearchCode` (claw coding-agent tool surface; defined alongside the agent tool definitions)
@@ -2074,7 +2076,7 @@ the analyzeFile case end-to-end.
 
 1. **Documentation:** Check [GLOSSARY.md](GLOSSARY.md)
 2. **Quick start:** See [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md)
-3. **Logs:** `make dev-cluster-logs`
+3. **Logs:** `kubectl logs -n memql deploy/<node> -f`
 
 ---
 
@@ -2082,7 +2084,7 @@ the analyzeFile case end-to-end.
 
 - Each directory has a CLAUDE.md explaining its purpose
 - Use GLOSSARY.md to find specific documentation
-- Docker stack is self-contained (no manual setup needed)
+- The local k3d cluster is self-contained (`make up`; no manual setup needed)
 - Migrations run automatically on startup
 
 ### Makefile + shell-script convention
@@ -2095,7 +2097,7 @@ Makefile target becomes a one-liner that calls it.
 Concretely:
 
 - **Stays inline in the Makefile:** single commands (`go build`,
-  `go test`, `docker compose up`), short pipelines (~3 lines or
+  `go test`, `kubectl rollout restart`), short pipelines (~3 lines or
   fewer), `.PHONY` declarations, target dependencies, simple
   variable substitutions like `make secret-set NAME=... VALUE=...`.
 - **Goes into `scripts/<area>/<name>.sh`:** anything with
@@ -2112,17 +2114,17 @@ Shell-script rules (per the global convention in
 - **Function-based structure** -- one function per responsibility,
   `main()` at the bottom calls them in order. No long sequential
   blob of commands.
-- **Source `scripts/<area>/lib.sh`** for shared functions
-  (`check_docker`, `wait_for_memql`, etc.) so individual scripts
-  stay focused.
+- **Source a shared `scripts/<area>/*.sh` helper** for common
+  functions (`check_docker`, cluster waits, etc.) so individual
+  scripts stay focused.
 - File extension `.sh`, executable (`chmod +x`).
 - Named "shell scripts" in docs (the umbrella term); they're
   technically Bash scripts since we use `[[`, arrays, `function`
   keyword, etc.
 
-Current example: `scripts/dev/{lib,cluster-refresh,status}.sh`
-implements `make dev-cluster-refresh` and `make dev-status`. The
-Makefile targets are one-liners (`bash scripts/dev/cluster-refresh.sh`).
+Current example: `scripts/k3d/{up,dev,status}.sh` implements
+`make up`, `make dev`, and `make k3d-status`. The Makefile targets are
+one-liners (`bash scripts/k3d/up.sh`).
 
 ### Documentation Style Guidelines
 

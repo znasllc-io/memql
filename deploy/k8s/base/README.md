@@ -15,9 +15,9 @@ only the 7 memQL node-types. Every node connects to Tiger via the
 
 Each node's `Service` is named after its node-type short name (`bff`,
 `cognition`, `voice`, `agent`, `planner`, `identity`, `workbench`) in the
-`memql` namespace. Same-namespace cluster DNS resolves the compose mesh
+`memql` namespace. Same-namespace cluster DNS resolves the mesh
 values (`bff:50058`, `agent:50055`, ...), so `MEMQL_NODE_ADDRESS` /
-`MEMQL_WORKER_PEERS` match `docker/docker-compose.cluster.yml`.
+`MEMQL_WORKER_PEERS` are the same in the local k3d cluster and on AKS.
 
 **#1399 exception -- the parent dial target is `bff-active`, not `bff`.**
 Under the live Argo Rollouts blue/green cutover the unscoped `bff` Service
@@ -25,7 +25,7 @@ selects BOTH colors during the 3600s `scaleDownDelay`, so a leaf's single
 parent stream could land on a draining old-color pod (~1h mixed-version mesh).
 Leaf nodes therefore dial `bff-active:50058` (the Rollout-managed,
 color-pinned active Service, which carries `:50058` for exactly this reason);
-the voice-agent dials `bff-active:50051`. The local docker-compose cluster has
+the voice-agent dials `bff-active:50051`. The local k3d cluster has
 a single bff color and no Rollout, so it keeps `bff:50058` -- same star
 topology, only the dial-target value differs per environment.
 
@@ -143,8 +143,8 @@ takes a direct backend:
   (single-pool behavior), so dev/local without a pooler is unaffected.
 
 The split is env-agnostic: only the two DSN values differ per environment,
-never the code path. The local parity cluster mirrors it with an in-compose
-PgBouncer (`docker/docker-compose.cluster.yml`, #1932). bun's `pgdriver` speaks
+never the code path. The local k3d parity cluster mirrors it with a
+PgBouncer pod (#1932). bun's `pgdriver` speaks
 the simple query protocol (no server-side prepared statements), so it is
 transaction-pool safe. Migrations stay correct because they run on the direct
 endpoint; pods reading bulk through the pooler see the same schema (the pooler

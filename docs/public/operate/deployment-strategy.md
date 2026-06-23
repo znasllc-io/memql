@@ -88,8 +88,8 @@ tags). The `bff` carrier (`memql-bff-copresent`) and `copresent` SPA are built
 > staging/prod release, dispatch the build workflows, then assemble
 > `releases/<ver>.yaml` (`assemble-lockfile.sh`, digests resolved from ACR by
 > tag), pin `deploy/k8s/overlays/<env>`, merge, and let ArgoCD reconcile.
-> Local Docker builds (`make dev-cluster*`) are for LOCAL development only and
-> are never pushed.
+> Local Docker builds (`make dev`, imported into k3d) are for LOCAL
+> development only and are never pushed.
 
 One command takes the cluster from source to a rolled-out, gated deploy:
 

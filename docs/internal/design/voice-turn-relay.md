@@ -9,12 +9,20 @@ owner: znas
 
 # Anam avatar TURN media relay (local dev)
 
+> **RETIRED local path (memql#2068 / #2088).** The Compose-based local
+> stack this relay rode on -- the polyphon/coturn overlay and the
+> `make dev-refresh` ngrok bring-up described below -- is gone. The local
+> cluster is now k3d + ArgoCD and runs voice via the in-cluster LiveKit
+> Deployment (`deploy/k8s/base/livekit.yaml`); there is no local ngrok TURN
+> relay. This document is kept only as the historical record of WHY local
+> cloud-avatar VIDEO never worked. Avatar VIDEO is validated on STAGING.
+
 > **Determination (memql#1277): local cloud-avatar VIDEO does not render over
 > this relay, and cannot on free tunneling.** This relay reliably carries
 > LiveKit **signaling** and **browser <-> LiveKit** media, and the TURN path
 > passes a `turnutils_uclient` round-trip. But the **cloud-engine <-> LiveKit
 > media leg never connects**, so the Anam/Simli direct avatar shows no video
-> locally. Proven from live dev-cluster logs (see "Why cloud-avatar video can't
+> locally. Proven from live local-stack logs at the time (see "Why cloud-avatar video can't
 > render locally" below). The cloud engine joins LiveKit signaling fine, then
 > ICE fails because both sides only offer **unreachable host candidates** and
 > the cloud engine forms **no relay candidate** from the advertised TURN
@@ -76,9 +84,8 @@ is up) then:
    `:4040` API -> stamps `rtc.turn_servers[0]`.
 3. Restarts `polyphon-livekit` so it reloads the stamped config.
 
-`coturn` itself is the `memql-coturn` service in
-`docker/docker-compose.polyphon.yml`; it comes up with the rest of the
-stack and needs no per-refresh step.
+`coturn` itself ran as the `memql-coturn` service in the retired polyphon
+overlay; it came up with the rest of the stack and needed no per-refresh step.
 
 ## One-time operator setup: reserve an ngrok TCP address
 

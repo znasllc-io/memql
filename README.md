@@ -60,8 +60,8 @@ A concept (schema) and an LLM-callable tool in the same file, same language. Add
 ## Quick Start
 
 ```bash
-# Start development environment (Docker)
-make dev-cluster-up
+# Start the local cluster (k3d + ArgoCD)
+make up
 
 # Run tests
 go test ./...
@@ -101,11 +101,11 @@ make deploy VERSION=X
 
 ## Environments
 
-### Development (Docker)
-- **Database:** Local PostgreSQL + TimescaleDB container
-- **Service:** Local memQL container
+### Development (k3d + ArgoCD)
+- **Database:** PostgreSQL + TimescaleDB pod in the local k3d cluster
+- **Service:** memQL node pods reconciled by ArgoCD from `deploy/k8s/overlays/local`
 - **Access:** All developers
-- **Command:** `make dev-cluster-up`
+- **Command:** `make up`
 
 ### Staging (Cloud)
 - **Database:** TimescaleDB Cloud (Tiger Cloud)
@@ -135,7 +135,8 @@ make deploy VERSION=X
 **Software:**
 - Go 1.26.1+ (ARM64 build)
 - Docker Desktop for Mac (Apple Silicon)
-- Azure CLI (`az`) + kubectl
+- k3d + kubectl (`brew install k3d kubectl`)
+- Azure CLI (`az`) — for staging/prod deploys
 - git
 
 ### Local Development Workflow
@@ -146,9 +147,9 @@ make deploy VERSION=X
    cd memql
    ```
 
-2. **Start development environment**
+2. **Start the local cluster**
    ```bash
-   make dev-cluster-up
+   make up
    ```
 
 3. **Make changes and test**
@@ -156,11 +157,14 @@ make deploy VERSION=X
    # Edit code
    # ...
 
+   # Rebuild + reload the changed node into k3d
+   make dev
+
    # Run tests
    go test ./...
 
    # View logs
-   make dev-cluster-logs
+   kubectl logs -n memql deploy/bff -f
    ```
 
 4. **Deploy to staging for integration testing**
@@ -210,7 +214,7 @@ memQL/
 │   ├── public/            # Published docs (overview, concepts, language, ai,
 │   │                      #      build, operate) -- rendered on memql.io
 │   └── internal/          # Design records, plans, internal runbooks
-├── docker/                # Docker configuration
+├── deploy/k8s/            # Kustomize manifests (base + overlays/local|staging|prod)
 └── .claude/               # Configuration
 ```
 
@@ -220,11 +224,12 @@ memQL/
 
 | Task | Command |
 |------|---------|
-| **Start Docker stack** | `make dev-cluster-up` |
-| **Stop Docker services** | `make dev-cluster-down` |
+| **Start local cluster** | `make up` |
+| **Tear down cluster** | `make down` |
+| **Inner-loop rebuild + reload** | `make dev [NODE=<type>]` |
 | **Run Go test suite** | `go test ./...` |
 | **Deploy to staging** | `make deploy VERSION=X` |
-| **View container logs** | `make dev-cluster-logs` |
+| **View pod logs** | `kubectl logs -n memql deploy/<node> -f` |
 | **Database shell** | `psql postgres://memql:memql_dev@localhost:5432/memql` |
 
 ---
@@ -261,27 +266,26 @@ go test -cover ./...
 
 ---
 
-## Docker
+## Local Cluster (k3d + ArgoCD)
 
-### Development Stack
-
-Full stack with PostgreSQL + TimescaleDB + memQL service:
+Full stack with PostgreSQL + TimescaleDB + memQL node pods, reconciled
+by ArgoCD from `deploy/k8s/overlays/local`:
 
 ```bash
-# Start everything
-make dev-cluster-up
+# Bootstrap (cluster + ArgoCD + seeded secrets)
+make up
 
-# View logs
-make dev-cluster-logs
+# View pod logs
+kubectl logs -n memql deploy/bff -f
 
-# Access database
+# Access database (via the k3d postgres port-forward)
 psql postgres://memql:memql_dev@localhost:5432/memql
 
-# Stop (preserves data)
-make dev-cluster-down
+# Tear down
+make down
 ```
 
-**Documentation:** [docker/README.md](docker/README.md)
+**Documentation:** [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md)
 
 ---
 

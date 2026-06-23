@@ -33,8 +33,8 @@ This document establishes the **opinionated technologies and practices** for mem
 | **WebSocket** | Native Go | - | Real-time collaboration |
 | **AI** | Multi-provider (OpenAI, Anthropic) | latest | All AI text/chat/vision/speech goes through gRPC on `MemqlService.Stream` (`AiChatMsg`, `AiSpeechMsg`, `AiTranscribeMsg`, `AiSuggestMsg`). The legacy AI HTTP path is gone. |
 | **Auth** | In-house identity service | - | Magic-link login, JWT, JWKS-published; PAT for CLI |
-| **Container** | Docker | latest | Local development |
-| **Orchestration** | Docker Compose | 3.8+ | Multi-container management |
+| **Container** | Docker | latest | Local image builds (imported into k3d) |
+| **Orchestration** | k3d + ArgoCD | latest | Local Kubernetes cluster with GitOps reconciliation (staging parity) |
 | **Coding Agent** | NemoClaw (NVIDIA) | latest | Enterprise coding/automation agent (Apache 2.0) |
 
 ### Query Language
@@ -63,23 +63,23 @@ This document establishes the **opinionated technologies and practices** for mem
 
 | Component | Technology | Location |
 |-----------|-----------|----------|
-| **Database** | PostgreSQL + TimescaleDB | Docker container (local) |
-| **Service** | memQL | Docker container (local) |
-| **Ports** | 5432, 8088 (BFF HTTP), 50051 (BFF gRPC), 50059 (Voice), 18789 (NemoClaw) | localhost |
-| **Data** | Ephemeral | Docker volumes (can be reset) |
+| **Database** | PostgreSQL + TimescaleDB | Pod in the local k3d cluster |
+| **Service** | memQL node pods | k3d cluster, reconciled by ArgoCD from `deploy/k8s/overlays/local` |
+| **Access** | kubectl port-forwards (bff gRPC :50051, identity :8085, copresent SPA :8080, livekit :7880, postgres :5432) | localhost |
+| **Data** | Ephemeral | Recreated by `make down && make up` |
 
 **Commands:**
 ```bash
-# Start development environment
-make dev-cluster-up
+# Start the local cluster
+make up
 
-# Stop (preserves data)
-make dev-cluster-down
+# Inner-loop rebuild + reload after a code change
+make dev [NODE=<type>]
 
 # View logs
-make dev-cluster-logs
+kubectl logs -n memql deploy/bff -f
 
-# Access database
+# Access database (via the postgres port-forward; make db opens psql)
 psql postgres://memql:memql_dev@localhost:5432/memql
 ```
 
@@ -173,18 +173,19 @@ for the operator-side narrative.
 
 **Workflow:**
 1. Pull latest from `main`
-2. Start development Docker environment: `make dev-cluster-up`
+2. Start the local cluster: `make up`
 3. Make code changes
-4. Test locally: `go test ./...`
-5. View logs: `make dev-cluster-logs`
-6. Commit (directly to `main` for focused changes; feature branch + PR when review is useful)
+4. Rebuild + reload the changed node: `make dev [NODE=<type>]`
+5. Test locally: `go test ./...`
+6. View logs: `kubectl logs -n memql deploy/bff -f`
+7. Commit (directly to `main` for focused changes; feature branch + PR when review is useful)
 
 **Best Practices:**
-- Always use development Docker database (not staging database)
-- Reset development database if migrations conflict: stop services, remove Docker volumes, then restart
-- Use debug logging (enabled by default in Docker)
-- Test automations and functions in development before deploying
-- Generate `.env.local` (master key + bootstrap envelope) with `make bootstrap`, populate memQL config via `make secrets-init` + `make secrets-seed`
+- Always use the local k3d cluster database (not the staging database)
+- Reset the local database if migrations conflict: `make down && make up`
+- Use debug logging (enabled by default in the local overlay)
+- Test automations and functions locally before deploying
+- Secrets are seeded into k8s Secrets by `make up` (from the genesis envelope); re-seed with `make k3d-secrets`
 
 ---
 
@@ -251,17 +252,17 @@ for the operator-side narrative.
 | Tool | Purpose | Installation |
 |------|---------|--------------|
 | **Go 1.26.1+** | Backend development | https://go.dev/dl/ (ARM64 build) |
-| **Docker Desktop** | Local environment | https://docker.com/products/docker-desktop (Apple Silicon) |
-| **Docker Compose** | Local container orchestration | Pre-installed with Docker Desktop |
+| **Docker Desktop** | Image builds + k3d runtime | https://docker.com/products/docker-desktop (Apple Silicon) |
+| **k3d** | Local Kubernetes cluster | `brew install k3d` |
+| **kubectl** | Local + AKS cluster management | `brew install kubectl` |
 | **Azure CLI (`az`)** | Cloud deployments (AKS, ACR) | https://learn.microsoft.com/cli/azure/install-azure-cli |
-| **kubectl** | AKS cluster management | https://kubernetes.io/docs/tasks/tools/ |
 | **git** | Version control | Pre-installed on macOS |
 
 ### Optional Tools
 
 | Tool | Purpose | Installation |
 |------|---------|--------------|
-| **pgAdmin** | Database GUI | `docker-compose --profile tools up -d pgadmin` |
+| **Database GUI** | Inspect the local DB | Point any client at the forwarded `localhost:5432` (`make db` for a psql shell) |
 | **Tiger CLI** | Database management | `./scripts/tiger-setup.sh` |
 | **Postman** | API testing | https://postman.com/downloads/ |
 
@@ -303,10 +304,11 @@ memQL/
 
 ```bash
 # Development Environment
-make dev-cluster-up    # Start Docker stack
-make dev-cluster-down           # Stop containers
-make dev-cluster-logs        # View logs
-psql postgres://memql:memql_dev@localhost:5432/memql            # PostgreSQL shell
+make up                 # Start local k3d cluster (ArgoCD + local overlay + secrets)
+make dev [NODE=<type>]  # Rebuild + reload a node after a code change
+make down               # Tear down the cluster
+kubectl logs -n memql deploy/bff -f                             # View logs
+psql postgres://memql:memql_dev@localhost:5432/memql            # PostgreSQL shell (via make db)
 
 # Testing
 go test ./...                    # Run Go test suite
@@ -397,7 +399,7 @@ for the full design.
 1. **Migrations:** Automatic on startup (use carefully in production)
 2. **Seeding:** Use concept seeding for test data
 3. **Backups:** Managed by Tiger Cloud (production and staging)
-4. **Reset:** `make dev-cluster-restart-purge` for a fresh development database (drops volumes + rebuilds)
+4. **Reset:** `make down && make up` for a fresh local database (recreates the cluster)
 5. **Schema changes:** Coordinate with team
 
 ---

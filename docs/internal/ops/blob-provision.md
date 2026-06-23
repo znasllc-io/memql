@@ -238,7 +238,7 @@ it will find the existing account and container and only print the current key.
 
 | Environment | Storage backend | Where the conn string lives |
 |-------------|----------------|-----------------------------|
-| Local dev | Azurite (`UseDevelopmentStorage=true`) | Docker compose env var; NOT in any genesis envelope |
+| Local dev | Azurite (`UseDevelopmentStorage=true`) | Local overlay env / seeded k8s Secret; NOT in any genesis envelope |
 | Staging | `stmemqlstaging.blob.core.windows.net` | `~/Downloads/staging.genesis.env` only |
 | Production | `stmemqlproduction.blob.core.windows.net` (when provisioned) | `~/Downloads/production.genesis.env` only |
 

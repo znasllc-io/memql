@@ -41,7 +41,7 @@ Backend work: `feat/participant-video-backend` on the memQL repo
 
 | Concern                          | Where                                                                  |
 |----------------------------------|------------------------------------------------------------------------|
-| LiveKit Server (local dev)       | `memQL/docker/docker-compose.polyphon.yml` — `livekit:7880`            |
+| LiveKit Server (local dev)       | `memQL/deploy/k8s/base/livekit.yaml` — `livekit:7880` (k3d)            |
 | LiveKit Server (lab/prod)        | `memQL/infra/polyphon/k8s/livekit/deployment.yaml` — k8s LoadBalancer  |
 | Token issuance (gRPC)            | `PolyphonRoomTokenMsg` → `polyphon_handlers.go:handlePolyphonRoomToken` |
 | Token issuance (HTTP)            | `POST /polyphon/room-token` → returns `{token, roomName, livekitUrl, expiresAt}` |
@@ -95,9 +95,9 @@ no new token mutation, no new room concept.
    surface in this branch.
 9. **No backwards compatibility.** Pre-release; both sides update
    atomically. No flag gates.
-10. **Deployment unchanged.** LiveKit already runs in dev
-    (docker-compose.polyphon.yml) and lab/prod (k8s). No Terraform,
-    no new GCE VM, no new docker-compose file. If a standalone GCE
+10. **Deployment unchanged.** LiveKit already runs in the local k3d
+    cluster (`deploy/k8s/base/livekit.yaml`) and in lab/prod (k8s). No
+    Terraform, no new GCE VM, no new infra file. If a standalone GCE
     deploy is needed later, it ships in its own branch.
 
 ## What this branch delivers
@@ -197,13 +197,13 @@ sees these — it gets the URL and a per-session token from
 If a developer wants to run the stack:
 
 ```bash
-make dev-cluster-up
+make up
 ```
 
-This brings up the 2-replica parity cluster (Postgres, the memQL mesh
-nodes, identity, the copresent SPA, and LiveKit) behind the nginx TLS
-front door. The voice/avatar overlay (`docker-compose.polyphon.yml`) is
-pending re-home onto the cluster (memql#1310).
+This brings up the local k3d parity cluster (Postgres, the memQL mesh
+nodes, identity, the copresent SPA, and LiveKit), reached via kubectl
+port-forwards. LiveKit runs from the k8s Deployment
+(`deploy/k8s/base/livekit.yaml`); avatar VIDEO remains staging-only.
 
 ## Open coordination points
 

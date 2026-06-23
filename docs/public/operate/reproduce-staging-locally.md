@@ -209,18 +209,20 @@ with its justification.
 5. Fix and `make dev` to rebuild + restart. ArgoCD reconciles; the pod roll
    picks up the new image.
 
-## Relation to Docker Compose cluster
+## The previous Compose-based local stack is retired
 
-The Docker Compose cluster (`docker/docker-compose.cluster.yml`,
-`make dev-cluster-*`) is the **legacy** local topology. It remains available
-for reference and is not removed (pending owner validation of k3d). The k3d +
-ArgoCD topology is the **primary** local path as of memql#2061 (Epic 0) because:
+The k3d + ArgoCD topology is the **only** supported local path as of
+memql#2061 (Epic 0). The earlier Compose-based local stack is fully retired
+(memql#2068 / #2088) -- the old compose files and their `make` targets are
+deleted, replaced by `make up` / `make dev` / `make down`. k3d + ArgoCD wins
+because:
 
 - It uses the same manifests and reconciliation path as staging (Kustomize +
   ArgoCD), so GitOps bugs reproduce locally.
-- `fieldRef: metadata.name` for `MEMQL_NODE_ID` is identical to staging (the
-  Compose cluster used hostname-derived ids via `os.Hostname()`).
+- `fieldRef: metadata.name` for `MEMQL_NODE_ID` is identical to staging.
 - The ArgoCD `ignoreDifferences` and selfHeal behavior matches staging exactly.
 
-When the owner validates k3d on a real run, the Docker Compose cluster will be
-retired and the `make dev-cluster-*` targets removed.
+There is no nginx front door, no `*.local.znas.io` subdomains, and no mkcert
+TLS in this world -- the cluster is reached via kubectl port-forwards
+(bff gRPC `:50051`, identity `:8085`, copresent SPA `:8080`, livekit `:7880`,
+postgres `:5432`).

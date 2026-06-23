@@ -132,7 +132,7 @@ node-type binary (`make workbench`) and routes via
 `NodeService.Stream` to a Cloud Run service backed by GCS-FUSE.
 
 The cluster-mode code is committed and tested -- builds, proto,
-routers, handlers, service yaml, docker-compose entries all in
+routers, handlers, service yaml, k8s manifest entries all in
 place -- but is not yet active anywhere. Cross this bridge when
 the production cutover lands. Step-by-step plan in
 [docs/internal/ops/workbench-production.md](../ops/workbench-production.md): bucket

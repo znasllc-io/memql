@@ -132,9 +132,10 @@ cursor codec/walk + replica-agnosticism (cursor carries only the (createdAt,id)
 position + sort signature, no session state) proven in
 `component/memql/{cursor,keyset_pagination}_test.go`. The live 2-replica
 confirmations (`test/clustere2e/{keyset_cursor,result_cache_invalidation}_test.go`,
-build tag `clustere2e`, need `MEMQL_E2E_TOKEN` + `make dev-cluster-up`) exercise
-the identical path and remain an **operator soak** — not runnable in this
-environment (genesis/Docker cluster), called out per the verification posture.
+build tag `clustere2e`, need `MEMQL_E2E_TOKEN` + a running cluster via
+`make cluster-e2e` / `make up SERVERS=2`) exercise the identical path and
+remain an **operator soak** — not runnable in this environment (genesis/k3d
+cluster), called out per the verification posture.
 
 ### Task 5 — Cache hit ratios
 
