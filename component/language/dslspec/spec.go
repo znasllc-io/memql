@@ -269,6 +269,10 @@ func receiverKeyToConstructKeywords(receiverKey string) []string {
 		return []string{"provider"}
 	case "Shape":
 		return []string{"shape"}
+	case "Policy":
+		return []string{"policy"}
+	case "Seed":
+		return []string{"seed"}
 	default:
 		// Unknown receiver key: surface it under its lowercased self so the
 		// drift test notices rather than silently dropping it.
