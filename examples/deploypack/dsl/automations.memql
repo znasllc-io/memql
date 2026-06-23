@@ -1,26 +1,26 @@
-// automations.memql -- the deploy pack (examples/deploypack), Epic 2 / #2096 (E2.3).
+// automations.memql -- the deploy pack (examples/deploypack), Epic 2.
 //
-// THE CORE PORT: the deploy lifecycle that component/deploycontrol/deploy.go +
-// driver.go drive imperatively (pending -> in_progress -> apply the azure
-// effect -> succeeded | failed) is modeled here as an event-driven DSL
-// automation, keyed off the deployment status transition the CDC path emits
-// (graph.node.updated.v1:cluster:deployment). The in_progress transition fires
-// the matching IntegrationProvider effect from E2.2 (#2095) and the outcome
-// drives the terminal status transition.
+// THE CORE PORT (E2.3 / #2096): the deploy lifecycle that
+// component/deploycontrol/deploy.go + driver.go drive imperatively (pending ->
+// in_progress -> apply the azure effect -> succeeded | failed) is modeled here
+// as event-driven DSL automations, keyed off the deployment status transition
+// the CDC path emits (graph.node.updated.v1:cluster:deployment). Each transition
+// fires the matching IntegrationProvider effect from E2.2 (#2095).
 //
-// SAFETY (live deploy path): this drives the SAME azure effect the Go
-// orchestrator drives -- deployRunPromote -> Executor.RunPromote ->
-// scripts/release/promote.sh via the Argo Rollout. No behavioral change vs
-// deploy.go for the azure provider: in_progress fires the promote and the
-// outcome transitions the record to succeeded (clean) or failed (promote
-// reported failure) -- exactly deploy.go's apply + transitionStatusForErr, now
-// declarative. The Go orchestrator is NOT removed here (that is E2.5); this
-// automation is ADDITIVE so the two paths can be compared before the cutover.
+// MODEL A RECORD-BACK (E2.4 / #2097): after the pack commits the overlay and
+// ArgoCD reconciles, the reconciled state (synced / healthy + per-node spec) is
+// observed and recorded back into the deployment concept -- the GitOps-canonical
+// loop. The committed overlay stays the source of truth; the data layer mirrors
+// the observed state.
 //
-// This automation loads ONLY when the deploy pack is mounted (build-tag
-// `deploypack`), so it never fires in a default binary that lacks the pack.
+// SAFETY (live deploy path): drives the SAME azure effect the Go orchestrator
+// drives -- deployRunPromote -> Executor.RunPromote -> scripts/release/promote.sh
+// via the Argo Rollout. No behavioral change vs deploy.go for the azure
+// provider. ADDITIVE: the Go orchestrator is NOT removed here (that is E2.5);
+// these automations only load when the deploy pack is mounted (build tag
+// `deploypack`), so they never fire in a default binary.
 
-use deploypack.logic.{ driveDeploymentInProgress }
+use deploypack.logic.{ driveDeploymentInProgress, recordReconciledState }
 
 @enabled
 @trigger(event="graph.node.updated.v1:cluster:deployment")
@@ -28,5 +28,16 @@ use deploypack.logic.{ driveDeploymentInProgress }
 automation driveDeploymentInProgress {
   step run {
     logic driveDeploymentInProgress { event: event }
+  }
+}
+
+// ---- automations/deploypack/recordReconciledState ----
+
+@enabled
+@trigger(event="graph.node.updated.v1:cluster:deployment")
+@description("Model A record-back loop (#2097): when a v1:cluster:deployment reaches succeeded (the promote completed), observe the ArgoCD-reconciled state and append it back into the deployment concept -- the per-node readiness via createDeploymentNodeSpec and, only when ArgoCD reports NOT synced/healthy, a corrective transition. The committed overlay stays the source of truth; the data layer mirrors the observed state. Multi-node safe: the append is idempotent and the guard keeps it from re-triggering itself. Epic 2 / #2097.")
+automation recordReconciledState {
+  step run {
+    logic recordReconciledState { event: event }
   }
 }

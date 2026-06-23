@@ -16,7 +16,7 @@
 // branch -- one fires when success==true, the other when success!=true --
 // exactly deploy.go's runErr -> transitionStatusForErr(succeeded|failed).
 
-use deploypack.builtins.{ deployRunPromote }
+use deploypack.builtins.{ deployRunPromote, deployObserveReconciledState, deployRecordBack }
 use cluster.mutations.{ updateDeploymentStatus }
 
 @description("On every v1:cluster:deployment update: when the new status is in_progress AND the provider is azure (or empty -> azure default) AND a version + deploymentId are present, fire deployRunPromote (passing the environment enum; the handler maps it to the promote.sh env) and transition the deployment to succeeded when the promote reports success or failed otherwise. Acts only on the in_progress edge; other status updates are ignored. The event-driven port of deploy.go's apply+transition. Epic 2 / #2096.")
@@ -39,6 +39,42 @@ logic driveDeploymentInProgress {
       updateDeploymentStatus({ deploymentId: deploymentId, status: "succeeded" })
     }
     failed := if !result.Empty() && result.First().payload.success != true {
+      updateDeploymentStatus({ deploymentId: deploymentId, status: "failed" })
+    }
+    return deploymentId
+  }
+}
+
+// ---- logic/deploypack/recordReconciledState ----
+
+@description("Model A record-back loop (#2097): when a v1:cluster:deployment reaches succeeded (the promote completed), observe the ArgoCD-reconciled state and record it back into the deployment concept. On a clean reconciliation (synced && healthy) it appends the observed per-node spec via deployRecordBack (createDeploymentNodeSpec -- a DIFFERENT concept, so it does NOT re-trigger this v1:cluster:deployment automation). When ArgoCD reports the app is NOT synced/healthy, it appends a corrective failed transition (which moves status off succeeded, self-terminating). The committed overlay stays the source of truth; the data layer mirrors observed state. Multi-node safe: the per-node append is idempotent (asOf latest collapses) and the succeeded->terminal guards prevent a re-trigger loop. Epic 2 / #2097.")
+logic recordReconciledState {
+  args {
+    event object @required
+  }
+  body {
+    status := coalesce(args.event.node.payload.status, "")
+    provider := coalesce(args.event.node.payload.provider, "")
+    deploymentId := coalesce(args.event.node.payload.deploymentId, "")
+    version := coalesce(args.event.node.payload.version, "")
+    imageDigest := coalesce(args.event.node.payload.imageDigest, "")
+    isAzure := provider == "azure" || provider == ""
+
+    observation := if status == "succeeded" && isAzure && deploymentId != "" {
+      deployObserveReconciledState({ app: "" })
+    }
+    reconciled := !observation.Empty() && observation.First().payload.synced == true && observation.First().payload.healthy == true
+
+    recorded := if reconciled {
+      deployRecordBack({
+        deploymentId: deploymentId,
+        nodeType: "bff",
+        version: version,
+        replicas: 2,
+        imageDigest: imageDigest
+      })
+    }
+    corrected := if !observation.Empty() && reconciled != true {
       updateDeploymentStatus({ deploymentId: deploymentId, status: "failed" })
     }
     return deploymentId

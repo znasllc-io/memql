@@ -134,6 +134,14 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 				"imageDigest":  "string (optional) - resolved image digest",
 			},
 		},
+		{
+			Name:        "observeReconciledState",
+			Description: "Model A read leg: read the ArgoCD app's reconciled state via the Executor (kubectl -n argocd get app -o json) and map it with deploycontrol.MapArgoStatus. Returns synced/healthy/revision/outOfSync.",
+			Handler:     p.observeReconciledState,
+			ArgsSchema: map[string]string{
+				"app": "string (optional) - ArgoCD application name (defaults to the configured app)",
+			},
+		},
 	}
 }
 
@@ -288,6 +296,72 @@ func (p *Provider) recordBack(ctx context.Context, args map[string]any, _ int) (
 	}
 
 	return resultNode("deploypack-recordback:"+deploymentID, "recordBack", strings.Join(effects, ","), true), nil
+}
+
+// defaultArgoApp is the ArgoCD application name observeReconciledState reads
+// when the caller passes no app. MEMQL_DEPLOY_ARGO_APP overrides; "memql" is the
+// app the deploycontrol status path reads (kubectl -n argocd get app memql).
+func (p *Provider) defaultArgoApp() string {
+	if app := strings.TrimSpace(os.Getenv("MEMQL_DEPLOY_ARGO_APP")); app != "" {
+		return app
+	}
+	return "memql"
+}
+
+// observeReconciledState is the Model A READ leg (#2097): read the ArgoCD
+// application's reconciled state through the SAME Executor boundary the
+// deploycontrol status path uses (kubectl -n argocd get app <app> -o json) and
+// map it with deploycontrol.MapArgoStatus. It returns the observed sync/health
+// in the result node so the record-back automation can mirror it into the
+// deployment concept. Read-only: it never mutates the cluster.
+func (p *Provider) observeReconciledState(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if p.exec == nil {
+		return nil, fmt.Errorf("deploypack.observeReconciledState: no Executor wired")
+	}
+	app := argString(args, "app")
+	if app == "" {
+		app = p.defaultArgoApp()
+	}
+	raw, err := p.exec.KubectlJSON(ctx, "-n", "argocd", "get", "app", app, "-o", "json")
+	if err != nil {
+		// In-band failure (like runPromote): a transient read failure must not
+		// abort the record-back automation step -- it simply observes "not yet
+		// synced" and the loop re-observes on the next deployment update.
+		return observationNode(app, "", "", "", false, false, fmt.Sprintf("%v", err)), nil
+	}
+	argo, err := deploycontrol.MapArgoStatus(raw)
+	if err != nil {
+		return observationNode(app, "", "", "", false, false, fmt.Sprintf("%v", err)), nil
+	}
+	synced := argo.GetSyncStatus() == "Synced"
+	healthy := argo.GetHealthStatus() == "Healthy"
+	return observationNode(app, argo.GetSyncStatus(), argo.GetHealthStatus(),
+		argo.GetLastSyncRevision(), synced, healthy, ""), nil
+}
+
+// observationNode builds the result node observeReconciledState returns. The
+// boolean synced/healthy + the reconciled status strings let the record-back
+// automation branch (synced && healthy -> append succeeded) without re-parsing.
+func observationNode(app, syncStatus, healthStatus, revision string, synced, healthy bool, errMsg string) []memorynodes.MemoryNode {
+	payload, _ := json.Marshal(map[string]any{
+		"effect":       "observeReconciledState",
+		"app":          app,
+		"syncStatus":   syncStatus,
+		"healthStatus": healthStatus,
+		"revision":     revision,
+		"synced":       synced,
+		"healthy":      healthy,
+		"error":        errMsg,
+		"recordedAt":   time.Now().UTC().Format(time.RFC3339),
+		"integration":  integrationName,
+	})
+	return []memorynodes.MemoryNode{{
+		ID:        "deploypack-observe:" + app,
+		Concept:   "integration:deploypack:observation",
+		Type:      memorynodes.NodeTypeObject,
+		CreatedAt: time.Now().UTC(),
+		Payload:   payload,
+	}}
 }
 
 // NewProvider builds the pack's IntegrationProvider from a PluginContext. The

@@ -57,3 +57,11 @@ builtin deployRecordBack {
   replicas      int                @description("Per-node replica count. Used only when nodeType is set.")
   imageDigest   string             @description("Resolved image digest for the node type / deployment. Used only when nodeType is set.")
 }
+
+@enabled
+@executor("integration.deploypack.observeReconciledState")
+@args(profile="object")
+@description("Model A read leg (E2.4): read the ArgoCD application's reconciled state via the deploycontrol Executor (kubectl -n argocd get app -o json) and map it with deploycontrol.MapArgoStatus. Returns synced + healthy + revision + outOfSync so the record-back automation can mirror the GitOps-observed state into the deployment concept. Read-only; never mutates the cluster. Epic 2 / #2097.")
+builtin deployObserveReconciledState {
+  app  string  @description("ArgoCD application name to read (defaults to the configured app, e.g. 'memql', when empty).")
+}
