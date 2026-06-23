@@ -205,8 +205,10 @@ func TestValidateMemQL(t *testing.T) {
 	}
 }
 
-func TestCompileSource_EmitsNamingWarnings(t *testing.T) {
-	// Unprefixed Query function must emit a naming-prefix warning.
+func TestCompileSource_NoNamingWarnings(t *testing.T) {
+	// The naming-prefix lint is retired (DSL grammar redesign, C2/#2042):
+	// a query named without the `query` prefix must NOT emit a naming
+	// warning anymore. Names are free; references resolve structurally.
 	source := `
 args { role string }
 func (Query) activeUsers(args any) {
@@ -218,11 +220,10 @@ func (Query) activeUsers(args any) {
 		t.Fatalf("CompileSource error: %v", err)
 	}
 
-	if len(result.Warnings) == 0 {
-		t.Fatalf("expected naming warnings, got none")
-	}
-	if result.Warnings[0].Rule != "naming.query-prefix" {
-		t.Fatalf("unexpected rule: %s", result.Warnings[0].Rule)
+	for _, w := range result.Warnings {
+		if strings.HasPrefix(w.Rule, "naming.") {
+			t.Fatalf("naming-prefix lint should be retired, got warning %q", w.Rule)
+		}
 	}
 }
 
@@ -290,11 +291,16 @@ func (Automation) testAuto(_ any) {
 }
 
 func TestCompileFile_StrictWarnings(t *testing.T) {
-	// Unprefixed Query function triggers strict naming lint.
+	// An inline-block-step deprecation warning triggers strict lint.
+	// (The naming-prefix lint that used to drive this test is retired
+	// in C2/#2042; the strict-warnings path is unchanged.)
 	source := `
-args { role string }
-func (Query) activeUsers(args any) {
-	concept==v1:user
+@enabled
+func (Automation) testAuto(_ any) {
+	step1 := query {
+		concept==v1:test
+	}
+	return step1
 }`
 
 	ast, err := ParseMemQL(source)

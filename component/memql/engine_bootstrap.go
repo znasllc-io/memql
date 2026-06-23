@@ -321,6 +321,17 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 		return err
 	}
 
+	// DSL dependency-tree validation (grammar redesign C3/#2043).
+	// Replaces the retired naming-prefix convention: every structural
+	// reference (a query's `shape` slot, a shape's `include`) must
+	// resolve to a construct of the enclosing concept, or be an
+	// explicit `concept.name` cross-concept reference. A violation is a
+	// hard load-time error with an actionable fix message. No escape
+	// valve -- the project starts fresh under the new rule.
+	if err := ValidateDependencyTree(); err != nil {
+		return err
+	}
+
 	// Log boot validation summary
 	e.logBootValidationSummary(functionRegistry, shapeRegistry, specRegistry, providerRegistry)
 

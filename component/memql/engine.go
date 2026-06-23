@@ -256,7 +256,18 @@ func (e *MemQLEngine) resolveNamedShape(name string) (shapeTemplate, error) {
 	}
 	def, ok := e.shapes.Get(name)
 	if !ok {
-		return nil, fmt.Errorf("shape template %q not found", name)
+		// Explicit cross-concept reference form `concept.name` (DSL grammar
+		// redesign C2/#2043): a query/shape slot can qualify a shape that
+		// belongs to ANOTHER concept as `<concept>.<shape>`. Shapes register
+		// under their bare name, so strip the concept qualifier and retry.
+		if i := strings.LastIndexByte(name, '.'); i >= 0 {
+			if d2, ok2 := e.shapes.Get(name[i+1:]); ok2 {
+				def, ok = d2, true
+			}
+		}
+		if !ok {
+			return nil, fmt.Errorf("shape template %q not found", name)
+		}
 	}
 	if def.Template == nil {
 		return nil, fmt.Errorf("shape template %q has no template definition", name)
