@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.concepts.{ audioOverride, participant, presence, session, space, utterance, videoOverride }
+use cognition.concepts.{ audioOverride, participant, presence, session, utterance, videoOverride }
 
 @row
 @description("Per-(space, agent) audio override projection")
@@ -43,38 +43,6 @@ shape session sessionFull {
   payload.streams
   payload.startedAt
   payload.lastActivityAt
-}
-
-@row
-@description("Comprehensive space projection with all fields")
-shape space spaceFull {
-  row.id
-  payload.name
-  payload.description
-  payload.ownerUserId
-  payload.goal
-  payload.status
-  payload.archivedAt
-  payload.expiresAt
-  payload.savedAt
-  payload.scheduledAt
-  payload.settings
-  payload.turnStateId
-  payload.active
-  payload.spaceType
-  payload.kind
-  payload.private
-  payload.dailyDateKey
-  payload.maxHumans
-  payload.maxAgents
-  row.createdAt
-  row.createdBy
-}
-
-@row
-@description("Id-only projection of v1:cognition:space rows. Backs the heartbeat path (memql#287) that just needs to iterate active spaces -- avoids paying the spaceFull projection cost when only the id is consumed.")
-shape space partitionIdOnly {
-  row.id
 }
 
 @row

@@ -499,34 +499,6 @@ func MutationApproveRequestBuild(args MutationApproveRequestArgs) string {
 	return b.String()
 }
 
-// MutationArchiveSpace -- Insert a new version of a space record (typically used to archive a space). Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload -- per-row authz already gates that only the owner reaches this mutation, and at create time ownerUserId == actor.userId. Also stamps archivedAt (now) when the caller's payload omits it, so queryArchivedSpaces (which gates on status=='archived', not archivedAt presence) and the retention cron see a complete archived row even from minimal-payload callers. memql#401 / #1637.
-//
-// Bound concept: space.
-type MutationArchiveSpaceArgs struct {
-	PartitionId string
-	Payload     map[string]any
-}
-
-// MutationArchiveSpace calls the engine mutation mutationArchiveSpace.
-func (qc *QueryClient) MutationArchiveSpace(ctx context.Context, args MutationArchiveSpaceArgs) (*Result, error) {
-	call := MutationArchiveSpaceBuild(args)
-	return qc.executeNamed(ctx, "mutationArchiveSpace", call)
-}
-
-func MutationArchiveSpaceBuild(args MutationArchiveSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("mutationArchiveSpace({")
-	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 22 {
-		b.WriteString(", ")
-	}
-	b.WriteString("payload: ")
-	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString("})")
-	return b.String()
-}
-
 // MutationAssignResponsibility -- Persist a routing decision onto a v1:planner:responsibility (epic #632, C2): bind the resolved agent (assignedAgentId), optional role slug (assignedRoleSlug), and flip targetKind off 'unassigned' onto the concrete kind (assistant / specialist). Called by the reactive-loop router after agentFactoryAnalyze + createSpecialist/extendSpecialist mint or match an agent. Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier) so the router can only rewrite the row's own owner -- the poller impersonates the responsibility's owner in the AccessContext before calling, so this lands as an owned write.
 //
 // Bound concept: responsibility.
@@ -2809,46 +2781,6 @@ func MutationCreateClusterSettingsBuild(args MutationCreateClusterSettingsArgs) 
 		b.WriteString("authoredAutomationsEnabled: ")
 		b.WriteString(fmt.Sprintf("%v", args.AuthoredAutomationsEnabled))
 	}
-	b.WriteString("})")
-	return b.String()
-}
-
-// MutationCreateDailySpace -- Create a daily space (kind=daily, private=true). Idempotent on (userHash, dateKey). Phase 10: no maxHumans=1/maxAgents=1 lock; the user can grow a daily space into a full team conversation if they want.
-//
-// Bound concept: space.
-type MutationCreateDailySpaceArgs struct {
-	PartitionId  string
-	Name         string
-	DailyDateKey string
-	OwnerUserId  string
-}
-
-// MutationCreateDailySpace calls the engine mutation mutationCreateDailySpace.
-func (qc *QueryClient) MutationCreateDailySpace(ctx context.Context, args MutationCreateDailySpaceArgs) (*Result, error) {
-	call := MutationCreateDailySpaceBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateDailySpace", call)
-}
-
-func MutationCreateDailySpaceBuild(args MutationCreateDailySpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("mutationCreateDailySpace({")
-	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 26 {
-		b.WriteString(", ")
-	}
-	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 26 {
-		b.WriteString(", ")
-	}
-	b.WriteString("dailyDateKey: ")
-	b.WriteString(fmt.Sprintf("%q", args.DailyDateKey))
-	if b.Len() > 26 {
-		b.WriteString(", ")
-	}
-	b.WriteString("ownerUserId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -5471,133 +5403,6 @@ func MutationCreateSkillChangeEventBuild(args MutationCreateSkillChangeEventArgs
 	return b.String()
 }
 
-// MutationCreateSpace -- Create a space.
-//
-// Bound concept: space.
-type MutationCreateSpaceArgs struct {
-	PartitionId    string
-	Name           string
-	Description    string
-	Goal           map[string]any
-	Settings       map[string]any
-	Status         string
-	SpaceType      string
-	ScheduledAt    string
-	TurnStateId    string
-	ParticipantIds []any
-	UtteranceIds   []any
-	Active         bool
-	ActiveSet      bool // set true to send active; required because zero-value bool is ambiguous
-	MaxHumans      int
-	MaxAgents      int
-}
-
-// MutationCreateSpace calls the engine mutation mutationCreateSpace.
-func (qc *QueryClient) MutationCreateSpace(ctx context.Context, args MutationCreateSpaceArgs) (*Result, error) {
-	call := MutationCreateSpaceBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateSpace", call)
-}
-
-func MutationCreateSpaceBuild(args MutationCreateSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("mutationCreateSpace({")
-	if args.PartitionId != "" {
-		b.WriteString("partitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	}
-	if b.Len() > 21 {
-		b.WriteString(", ")
-	}
-	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if args.Description != "" {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("description: ")
-		b.WriteString(fmt.Sprintf("%q", args.Description))
-	}
-	if args.Goal != nil {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("goal: ")
-		b.WriteString(renderMemQLValue(args.Goal))
-	}
-	if args.Settings != nil {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("settings: ")
-		b.WriteString(renderMemQLValue(args.Settings))
-	}
-	if args.Status != "" {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("status: ")
-		b.WriteString(fmt.Sprintf("%q", args.Status))
-	}
-	if args.SpaceType != "" {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("spaceType: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceType))
-	}
-	if args.ScheduledAt != "" {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("scheduledAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.ScheduledAt))
-	}
-	if args.TurnStateId != "" {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("turnStateId: ")
-		b.WriteString(fmt.Sprintf("%q", args.TurnStateId))
-	}
-	if args.ParticipantIds != nil {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("participantIds: ")
-		b.WriteString(renderMemQLValue(args.ParticipantIds))
-	}
-	if args.UtteranceIds != nil {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("utteranceIds: ")
-		b.WriteString(renderMemQLValue(args.UtteranceIds))
-	}
-	if args.ActiveSet {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("active: ")
-		b.WriteString(fmt.Sprintf("%v", args.Active))
-	}
-	if args.MaxHumans != 0 {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("maxHumans: ")
-		b.WriteString(fmt.Sprintf("%v", args.MaxHumans))
-	}
-	if args.MaxAgents != 0 {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("maxAgents: ")
-		b.WriteString(fmt.Sprintf("%v", args.MaxAgents))
-	}
-	b.WriteString("})")
-	return b.String()
-}
-
 // MutationCreateSpawnEvent -- Record a node lifecycle event
 //
 // Bound concept: spawnEvent.
@@ -6752,34 +6557,6 @@ func MutationDeleteRecordBuild(args MutationDeleteRecordArgs) string {
 	b.WriteString("mutationDeleteRecord({")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	b.WriteString("})")
-	return b.String()
-}
-
-// MutationDeleteSpaceNow -- Insert a new version of a space record marking it as hard-deleted (deleted=true). Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).
-//
-// Bound concept: space.
-type MutationDeleteSpaceNowArgs struct {
-	PartitionId string
-	Payload     map[string]any
-}
-
-// MutationDeleteSpaceNow calls the engine mutation mutationDeleteSpaceNow.
-func (qc *QueryClient) MutationDeleteSpaceNow(ctx context.Context, args MutationDeleteSpaceNowArgs) (*Result, error) {
-	call := MutationDeleteSpaceNowBuild(args)
-	return qc.executeNamed(ctx, "mutationDeleteSpaceNow", call)
-}
-
-func MutationDeleteSpaceNowBuild(args MutationDeleteSpaceNowArgs) string {
-	var b strings.Builder
-	b.WriteString("mutationDeleteSpaceNow({")
-	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 24 {
-		b.WriteString(", ")
-	}
-	b.WriteString("payload: ")
-	b.WriteString(renderMemQLValue(args.Payload))
 	b.WriteString("})")
 	return b.String()
 }
@@ -9478,34 +9255,6 @@ func MutationRemoveAgentFromSpaceBuild(args MutationRemoveAgentFromSpaceArgs) st
 	return b.String()
 }
 
-// MutationRenameSpace -- Partial-update a space record (read-merge-write; typically used to rename a space). Only the fields in the caller's payload change; all other fields are preserved. Server-side stamps ownerUserId from actor.userId (memql#401 / #1637).
-//
-// Bound concept: space.
-type MutationRenameSpaceArgs struct {
-	PartitionId string
-	Payload     map[string]any
-}
-
-// MutationRenameSpace calls the engine mutation mutationRenameSpace.
-func (qc *QueryClient) MutationRenameSpace(ctx context.Context, args MutationRenameSpaceArgs) (*Result, error) {
-	call := MutationRenameSpaceBuild(args)
-	return qc.executeNamed(ctx, "mutationRenameSpace", call)
-}
-
-func MutationRenameSpaceBuild(args MutationRenameSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("mutationRenameSpace({")
-	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 21 {
-		b.WriteString(", ")
-	}
-	b.WriteString("payload: ")
-	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString("})")
-	return b.String()
-}
-
 // MutationRequestChanges -- Send a v1:forge:request back for changes: set status 'changes_requested' with a reason.
 //
 // Bound concept: request.
@@ -9628,34 +9377,6 @@ func MutationResolveApprovalRequestBuild(args MutationResolveApprovalRequestArgs
 		b.WriteString("decisionReason: ")
 		b.WriteString(fmt.Sprintf("%q", args.DecisionReason))
 	}
-	b.WriteString("})")
-	return b.String()
-}
-
-// MutationRestoreSpace -- Insert a new version of a space record to restore it to the active state. Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).
-//
-// Bound concept: space.
-type MutationRestoreSpaceArgs struct {
-	PartitionId string
-	Payload     map[string]any
-}
-
-// MutationRestoreSpace calls the engine mutation mutationRestoreSpace.
-func (qc *QueryClient) MutationRestoreSpace(ctx context.Context, args MutationRestoreSpaceArgs) (*Result, error) {
-	call := MutationRestoreSpaceBuild(args)
-	return qc.executeNamed(ctx, "mutationRestoreSpace", call)
-}
-
-func MutationRestoreSpaceBuild(args MutationRestoreSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("mutationRestoreSpace({")
-	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 22 {
-		b.WriteString(", ")
-	}
-	b.WriteString("payload: ")
-	b.WriteString(renderMemQLValue(args.Payload))
 	b.WriteString("})")
 	return b.String()
 }
@@ -9921,34 +9642,6 @@ func MutationRevokeWorkerTokenIdentityBuild(args MutationRevokeWorkerTokenIdenti
 	return b.String()
 }
 
-// MutationRolloverDailySpace -- Insert the terminal (archived/saved) version of a daily space at rollover. System-actor sweep helper; the caller passes the full updated payload including the preserved ownerUserId.
-//
-// Bound concept: space.
-type MutationRolloverDailySpaceArgs struct {
-	PartitionId string
-	Payload     map[string]any
-}
-
-// MutationRolloverDailySpace calls the engine mutation mutationRolloverDailySpace.
-func (qc *QueryClient) MutationRolloverDailySpace(ctx context.Context, args MutationRolloverDailySpaceArgs) (*Result, error) {
-	call := MutationRolloverDailySpaceBuild(args)
-	return qc.executeNamed(ctx, "mutationRolloverDailySpace", call)
-}
-
-func MutationRolloverDailySpaceBuild(args MutationRolloverDailySpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("mutationRolloverDailySpace({")
-	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 28 {
-		b.WriteString(", ")
-	}
-	b.WriteString("payload: ")
-	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString("})")
-	return b.String()
-}
-
 // MutationRotateAuthSession -- Rotate refresh-token bookkeeping on a session after a successful refresh. Stores the old hash as previousRefreshTokenHash with a fresh previousRotatedAt timestamp so the rotator can accept that hash inside its grace window.
 //
 // Bound concept: authSession.
@@ -9985,34 +9678,6 @@ func MutationRotateAuthSessionBuild(args MutationRotateAuthSessionArgs) string {
 	}
 	b.WriteString("newExpiresAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.NewExpiresAt))
-	b.WriteString("})")
-	return b.String()
-}
-
-// MutationSaveSpace -- Insert a new version of a space record with the 'saved' status payload. Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).
-//
-// Bound concept: space.
-type MutationSaveSpaceArgs struct {
-	PartitionId string
-	Payload     map[string]any
-}
-
-// MutationSaveSpace calls the engine mutation mutationSaveSpace.
-func (qc *QueryClient) MutationSaveSpace(ctx context.Context, args MutationSaveSpaceArgs) (*Result, error) {
-	call := MutationSaveSpaceBuild(args)
-	return qc.executeNamed(ctx, "mutationSaveSpace", call)
-}
-
-func MutationSaveSpaceBuild(args MutationSaveSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("mutationSaveSpace({")
-	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 19 {
-		b.WriteString(", ")
-	}
-	b.WriteString("payload: ")
-	b.WriteString(renderMemQLValue(args.Payload))
 	b.WriteString("})")
 	return b.String()
 }
@@ -11171,34 +10836,6 @@ func MutationSetResponsibilityStatusBuild(args MutationSetResponsibilityStatusAr
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
-	b.WriteString("})")
-	return b.String()
-}
-
-// MutationSetSpaceGoal -- Set or replace a space's structured goal {statement, timeframe} after creation. Partial update via update() -- only the goal changes; everything else inherits from the prior row.
-//
-// Bound concept: space.
-type MutationSetSpaceGoalArgs struct {
-	PartitionId string
-	Goal        map[string]any
-}
-
-// MutationSetSpaceGoal calls the engine mutation mutationSetSpaceGoal.
-func (qc *QueryClient) MutationSetSpaceGoal(ctx context.Context, args MutationSetSpaceGoalArgs) (*Result, error) {
-	call := MutationSetSpaceGoalBuild(args)
-	return qc.executeNamed(ctx, "mutationSetSpaceGoal", call)
-}
-
-func MutationSetSpaceGoalBuild(args MutationSetSpaceGoalArgs) string {
-	var b strings.Builder
-	b.WriteString("mutationSetSpaceGoal({")
-	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 22 {
-		b.WriteString(", ")
-	}
-	b.WriteString("goal: ")
-	b.WriteString(renderMemQLValue(args.Goal))
 	b.WriteString("})")
 	return b.String()
 }

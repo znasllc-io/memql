@@ -16,7 +16,6 @@ concept audioOverride {
   mode      enum("always_on", "always_off", "mirror_user")  @required @description("Effective publication state. The bridge gating path treats this exactly the same as the agent default once selected: always_on publishes unconditionally; always_off suppresses TTS while letting text replies still flow to chat; mirror_user honours the user's current mic state, querying it at TTS-start time (not per-frame).")
   active    bool  @default("true") @description("Soft-revoke flag. Setting active=false collapses back to the agent default without losing the row's history.")
 
-  @relationship(type="parent", field="partitionId", target=space, direction="outgoing")
   @relationship(type="interactsWith", field="agentId", target=agent, direction="outgoing")
 }
 
@@ -31,7 +30,6 @@ concept chunk {
   partitionId  string  @required  @description("Space where the text is being generated.")
   text  string  @required  @description("The text content of this chunk.")
 
-  @relationship(type="parent", field="partitionId", target=space, direction="outgoing")
   @relationship(type="createdBy", field="participantId", target=participant, direction="outgoing")
 }
 
@@ -95,7 +93,6 @@ concept participant {
   hidden  bool  @default(false)  @description("When true, the participant is present in the space for routing purposes but is never rendered in participant-facing UI (PresencePanel, invite lists, etc.).")
 
   @relationship(type="interactsWith", field="agentId", target=agent, direction="outgoing")
-  @relationship(type="parent", field="partitionId", target=space, direction="outgoing")
   @relationship(type="parent", field="userId", target=user, direction="outgoing")
   @relationship(type="interactsWith", field="forUserId", target=user, direction="outgoing")
 }
@@ -122,7 +119,6 @@ concept presence {
   partitionId  string  @required  @description("ID of the space this presence snapshot belongs to.")
   state  enum("idle", "listening", "thinking", "responding", "typing", "waiting", "needs_clarification", "needs_human", "paused", "error", "working", "using_tool", "researching", "investigating")  @required  @description("High-level, user-friendly state for UI rendering.")
 
-  @relationship(type="parent", field="partitionId", target=space, direction="outgoing")
   @relationship(type="parent", field="participantId", target=participant, direction="outgoing")
 }
 
@@ -146,49 +142,7 @@ concept session {
   startedAt  datetime  @description("When the session started.")
   streams  object  @description("Active stream and session identifiers for external services: {realtimeSessionId?, avatarStreamId?, audioTrackId?, videoTrackId?}. Matches the mutationCreateSessionForParticipant `streams object` arg and the SPA's SessionStreams payload (memql#1321).")
 
-  @relationship(type="parent", field="partitionId", target=space, direction="outgoing")
   @relationship(type="parent", field="participantId", target=participant, direction="outgoing")
-}
-
-@version("1.0.0")
-@namespace("cognition")
-@type("collection")
-@description("Persistent rooms where humans and AI assistants meet, converse, and interact. Every space is a multi-participant room with a bounded capacity for humans and for agents -- there is no longer a 1:1 vs group distinction.")
-@displayCard(primary="name", secondary="kind", tertiary="ownerUserId", status="status")
-concept space {
-  ownerUserId  string  @required  @description("v1:identity:user.id of the space owner. The owner is the human whose assistant is wired into the space (the only AI presence that speaks to humans). Stamped at create time from the request actor; the @relationship below pins the parent.")
-  active  bool  @default("true")  @description("Whether the space is active. Set to false when the space leaves the active list (archived, saved, or hard-deleted) -- traitIsActiveRecord (payload.active==true) hides it from active-tab queries.")
-  deleted  bool  @default("false")  @description("Hard-delete tombstone. Set to true by mutationDeleteSpaceNow (the Archived-tab \"Delete now\" override) and by the purgeExpiredArchivedSpaces cron when an archived space hits its retention deadline. traitIsNotDeleted (payload.deleted!=true) filters these rows out of every listing; mirrors v1:cognition:privateUtterance.deleted.")
-  archivedAt  datetime  @description("When the space was archived. Only set on rows whose status flipped to 'archived'. Cleared when the space is restored to active or saved.")
-  expiresAt  datetime  @description("Concrete deadline at which the purge cron hard-deletes this archived space. Stamped at archive time as archivedAt + User.preferences.archiveRetentionDays. Re-stamped on retention-setting changes so a 30->60 bump extends currently-archived spaces. The cron query is a plain `payload.expiresAt < now` comparison -- no per-row user lookup needed.")
-  savedAt  datetime  @description("When the user manually saved the space ('saved' status -- preserved indefinitely, never auto-deleted). Cleared when the space leaves the saved state.")
-  description  string  @description("Optional description of the space.")
-  goal {
-    statement  string  @description("Short statement of what the space is working toward (e.g. \"Plan Q3 roadmap\"). Set by the Configure-manually path in CreateSpaceModal; the display name can be auto-derived from it via aiSuggest(domain=spaceTitle). Optional -- the AI-describe path produces a name directly without a goal.")
-    timeframe  enum("daily", "weekly", "monthly")  @description("The cadence the goal is pursued on. Purely descriptive grounding for cognition -- NOT related to space.kind=daily or status=scheduled (those are separate lifecycle concerns).")
-  }
-  name  string  @required  @description("Display name of the space.")
-  participantIds  []string  @description("IDs of participants in this space.")
-  maxHumans  int  @default("5")  @description("Maximum number of human participants allowed in this space (default 5). Enforced at join time by the participant pre-insert guard.")
-  maxAgents  int  @default("1")  @description("Maximum number of AI assistant participants allowed in this space. Always 1 under the one-assistant model (copresent #124): a space carries EXACTLY ONE assistant -- the owner's currently-active one, auto-joined by the autoJoinAI automation. Specialists and system agents never participate in spaces.")
-  scheduledAt  datetime  @description("When the space is scheduled to start (if status is 'scheduled').")
-  settings {
-    autoTranscribe  bool  @default("true")  @description("Whether to automatically transcribe audio.")
-    defaultAITier  enum("text", "speechToText", "voiceToVoice", "voiceAvatar", "voiceVision")  @default("text")  @description("Default interaction tier for AI participants.")
-    recordMedia  bool  @default("false")  @description("Whether to record audio/video.")
-  }
-  spaceType  enum("employeeCheckin", "advocatePortal", "handoffSession", "<nil>")  @description("Type of HR space for mode-specific AI behavior.")
-  status  enum("active", "saved", "archived", "scheduled")  @default("active")  @description("Current lifecycle status of the space. Active = working space (default). Saved = manually preserved by the user; never auto-deleted. Archived = hidden from the active list and on a retention countdown to hard-delete (see archivedAt + User.preferences.archiveRetentionDays). Scheduled = future-dated meeting.")
-  kind  enum("regular", "daily")  @default("regular")  @description("Space kind. 'regular' is the user-created default. 'daily' is a per-user singleton automatically provisioned every day; pinned at the top of the active list, private to the user + their assistant, and rolled over by the rolloverDailySpace cron.")
-  private  bool  @default("false")  @description("When true, the space is private to its creator and their assistant -- no other users / agents can join. Daily spaces always set this to true.")
-  dailyDateKey  string  @description("YYYY-MM-DD date stamp for daily spaces, computed in the user's local timezone at provisioning time. Used to make the space id idempotent (daily-{userHash}-{dateKey}) so a duplicate provision is a no-op. Empty for non-daily spaces.")
-  turnStateId  string  @description("ID of the turn state owned by this space.")
-  utteranceIds  []string  @description("IDs of utterances in this space.")
-
-  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
-  @relationship(type="contains", field="participantIds", target=participant, direction="outgoing")
-  @relationship(type="owns", field="turnStateId", target=state, direction="outgoing")
-  @relationship(type="contains", field="utteranceIds", target=utterance, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -219,7 +173,6 @@ concept state {
   partitionId  string  @required  @description("ID of the space this turn state belongs to.")
   trigger  string  @description("Why this turn state version was produced (e.g., utterance, silence_nudge, init).")
 
-  @relationship(type="parent", field="partitionId", target=space, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -264,7 +217,6 @@ concept utterance {
 
   @relationship(type="interactsWith", field="participantId", target=participant, direction="outgoing")
   @relationship(type="interactsWith", field="replyToId", target=utterance, direction="outgoing")
-  @relationship(type="parent", field="partitionId", target=space, direction="outgoing")
 }
 
 // ---- concepts/v1/cognition/videoOverride/concept.memql ----
@@ -279,7 +231,6 @@ concept videoOverride {
   mode      enum("always_on", "always_off", "mirror_user")  @required @description("Effective publication state. The voice-agent's avatar-gating path treats this exactly the same as the agent default once selected: always_on publishes unconditionally; always_off suppresses video while letting audio + chat continue; mirror_user honours the user's current video state at session start.")
   active    bool  @default("true") @description("Soft-revoke flag. Setting active=false collapses back to the agent default without losing the row's history.")
 
-  @relationship(type="parent", field="partitionId", target=space, direction="outgoing")
   @relationship(type="interactsWith", field="agentId", target=agent, direction="outgoing")
 }
 
@@ -338,5 +289,4 @@ concept unmetCapability {
   rosterSnapshot   string  @description("JSON-serialized snapshot of the space's agent roster at decision time (id/name/role/domains/keywords). Used by the rollup to cluster missing domains.")
   reason           string  @description("Router's short explanation of why no agent fit.")
 
-  @relationship(type="parent", field="partitionId", target=space, direction="outgoing")
 }

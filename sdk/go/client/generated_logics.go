@@ -140,26 +140,6 @@ func LogicAuditEventRetentionSweepBuild(args LogicAuditEventRetentionSweepArgs) 
 	return b.String()
 }
 
-// LogicAutoJoinAI -- Triggered when a v1:cognition:space is created with status='active'. Auto-joins the creator's currently-active assistant as a v1:cognition:participant on the new space, with forUserId=creator and isGroupGA=true (so the participant guard prevents non-elevated callers from removing it via the Roster tab). This is the ONLY AI participant a space carries (maxAgents=1, one-assistant model copresent #124). Idempotent. Emits 'si.auto-joined' for observability.
-type LogicAutoJoinAIArgs struct {
-	Event map[string]any
-}
-
-// LogicAutoJoinAI calls the engine logic logicAutoJoinAI.
-func (qc *QueryClient) LogicAutoJoinAI(ctx context.Context, args LogicAutoJoinAIArgs) (*Result, error) {
-	call := LogicAutoJoinAIBuild(args)
-	return qc.executeNamed(ctx, "logicAutoJoinAI", call)
-}
-
-func LogicAutoJoinAIBuild(args LogicAutoJoinAIArgs) string {
-	var b strings.Builder
-	b.WriteString("logicAutoJoinAI({")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
-	return b.String()
-}
-
 // LogicBootstrapCluster -- Bootstraps the cluster's self-representation on first startup. Creates v1:cluster:cluster + v1:cluster:database + v1:cluster:identityProvider rows when no cluster row exists. Only BFF nodes run the create path. Idempotent: skips entirely if a cluster row already exists.
 type LogicBootstrapClusterArgs struct {
 	Event map[string]any
@@ -494,26 +474,6 @@ func (qc *QueryClient) LogicPruneStaleClusterNodes(ctx context.Context, args Log
 func LogicPruneStaleClusterNodesBuild(args LogicPruneStaleClusterNodesArgs) string {
 	var b strings.Builder
 	b.WriteString("logicPruneStaleClusterNodes({")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
-	return b.String()
-}
-
-// LogicPurgeExpiredArchivedSpaces -- Daily 02:00 UTC sweep that hard-deletes archived v1:cognition:space rows whose payload.expiresAt has passed (deadline pre-computed at archive time as archivedAt + retentionDays). Defensive: only acts on rows where status='archived' AND active=true AND expiresAt<now. Saved/scheduled/active spaces are untouched.
-type LogicPurgeExpiredArchivedSpacesArgs struct {
-	Event map[string]any
-}
-
-// LogicPurgeExpiredArchivedSpaces calls the engine logic logicPurgeExpiredArchivedSpaces.
-func (qc *QueryClient) LogicPurgeExpiredArchivedSpaces(ctx context.Context, args LogicPurgeExpiredArchivedSpacesArgs) (*Result, error) {
-	call := LogicPurgeExpiredArchivedSpacesBuild(args)
-	return qc.executeNamed(ctx, "logicPurgeExpiredArchivedSpaces", call)
-}
-
-func LogicPurgeExpiredArchivedSpacesBuild(args LogicPurgeExpiredArchivedSpacesArgs) string {
-	var b strings.Builder
-	b.WriteString("logicPurgeExpiredArchivedSpaces({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")

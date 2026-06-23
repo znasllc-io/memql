@@ -310,28 +310,6 @@ func QueryActiveAuthoringBundlesBuild(args QueryActiveAuthoringBundlesArgs) stri
 	return "queryActiveAuthoringBundles({})"
 }
 
-// QueryActiveDailySpacesForUser -- Active daily spaces owned by the given user. Sweep helper for the dailyspace rollover capability (system actor only).
-//
-// Bound concept: space.
-type QueryActiveDailySpacesForUserArgs struct {
-	UserId string
-}
-
-// QueryActiveDailySpacesForUser calls the engine query queryActiveDailySpacesForUser.
-func (qc *QueryClient) QueryActiveDailySpacesForUser(ctx context.Context, args QueryActiveDailySpacesForUserArgs) (*Result, error) {
-	call := QueryActiveDailySpacesForUserBuild(args)
-	return qc.executeNamed(ctx, "queryActiveDailySpacesForUser", call)
-}
-
-func QueryActiveDailySpacesForUserBuild(args QueryActiveDailySpacesForUserArgs) string {
-	var b strings.Builder
-	b.WriteString("queryActiveDailySpacesForUser({")
-	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	b.WriteString("})")
-	return b.String()
-}
-
 // QueryActiveDelegationsByIdentitySubject -- Get all active delegations whose identitySubject matches the argument. Used by the per-request DelegationResolver on the auth hot path. See memql#112.
 //
 // Bound concept: delegation.
@@ -396,23 +374,6 @@ func QueryActiveHumanParticipantsBuild(args QueryActiveHumanParticipantsArgs) st
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
-}
-
-// QueryActivePartitionIds -- Returns id-only projections of every active v1:cognition:space row (no status / archived filtering -- mirrors the pre-existing recomputeAllSpacesContext semantics that just need non-deleted rows). Backs the cognition heartbeat path that iterates spaces to recompute per-space context (memql#287; replaces a handwritten shape() runtime query under sub-epic #286).
-//
-// Bound concept: space.
-type QueryActivePartitionIdsArgs struct {
-}
-
-// QueryActivePartitionIds calls the engine query queryActivePartitionIds.
-func (qc *QueryClient) QueryActivePartitionIds(ctx context.Context, args QueryActivePartitionIdsArgs) (*Result, error) {
-	call := QueryActivePartitionIdsBuild(args)
-	return qc.executeNamed(ctx, "queryActivePartitionIds", call)
-}
-
-func QueryActivePartitionIdsBuild(args QueryActivePartitionIdsArgs) string {
-	_ = args
-	return "queryActivePartitionIds({})"
 }
 
 // QueryActivePlansForUser -- The caller's currently-RUNNING Plans -- the account's active tasks occupying concurrency slots (epic memql#902 / #909). Owned tier: payload.requestedBy==actor.userId binds server-side so a caller only sees their own. The active count is the result length; pair with queryAccountEntitlement for the cap and queryWaitingPlansForUser for the queue.
@@ -515,30 +476,6 @@ func (qc *QueryClient) QueryActiveSkillsFull(ctx context.Context, args QueryActi
 func QueryActiveSkillsFullBuild(args QueryActiveSkillsFullArgs) string {
 	_ = args
 	return "queryActiveSkillsFull({})"
-}
-
-// QueryActiveSpaces -- Returns spaces with status='active' (the default), scoped to the caller's per-row authz reach. Optional userId arg narrows to a specific owner (matches payload.ownerUserId, a v1:identity:user id -- NOT the createdBy email). Used by the cockpit Chat tab to populate the space list.
-//
-// Bound concept: space.
-type QueryActiveSpacesArgs struct {
-	UserId string
-}
-
-// QueryActiveSpaces calls the engine query queryActiveSpaces.
-func (qc *QueryClient) QueryActiveSpaces(ctx context.Context, args QueryActiveSpacesArgs) (*Result, error) {
-	call := QueryActiveSpacesBuild(args)
-	return qc.executeNamed(ctx, "queryActiveSpaces", call)
-}
-
-func QueryActiveSpacesBuild(args QueryActiveSpacesArgs) string {
-	var b strings.Builder
-	b.WriteString("queryActiveSpaces({")
-	if args.UserId != "" {
-		b.WriteString("userId: ")
-		b.WriteString(fmt.Sprintf("%q", args.UserId))
-	}
-	b.WriteString("})")
-	return b.String()
 }
 
 // QueryActiveUsers -- Active users in the cluster, optionally filtered by role or group membership. Both args are optional -- omit them to list all active users (the identity admin portal's user-list view).
@@ -717,23 +654,6 @@ func QueryAllAgentsBuild(args QueryAllAgentsArgs) string {
 	return "queryAllAgents({})"
 }
 
-// QueryAllArchivedSpacesAcrossUsers -- Returns every archived space in the partition, for the purge cron's per-row retention check.
-//
-// Bound concept: space.
-type QueryAllArchivedSpacesAcrossUsersArgs struct {
-}
-
-// QueryAllArchivedSpacesAcrossUsers calls the engine query queryAllArchivedSpacesAcrossUsers.
-func (qc *QueryClient) QueryAllArchivedSpacesAcrossUsers(ctx context.Context, args QueryAllArchivedSpacesAcrossUsersArgs) (*Result, error) {
-	call := QueryAllArchivedSpacesAcrossUsersBuild(args)
-	return qc.executeNamed(ctx, "queryAllArchivedSpacesAcrossUsers", call)
-}
-
-func QueryAllArchivedSpacesAcrossUsersBuild(args QueryAllArchivedSpacesAcrossUsersArgs) string {
-	_ = args
-	return "queryAllArchivedSpacesAcrossUsers({})"
-}
-
 // QueryAllDocumentChunkDomains -- Returns the parent domainId for every chunk in the active partition. Frontend groups + counts to render per-domain chunk counts in the Knowledge panel.
 //
 // Bound concept: documentChunk.
@@ -871,30 +791,6 @@ func QueryApprovalRequestByIdBuild(args QueryApprovalRequestByIdArgs) string {
 	b.WriteString("queryApprovalRequestById({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	b.WriteString("})")
-	return b.String()
-}
-
-// QueryArchivedSpaces -- Returns spaces with space.status == 'archived'. Optional filter: userId (matches payload.ownerUserId, a user id).
-//
-// Bound concept: space.
-type QueryArchivedSpacesArgs struct {
-	UserId string
-}
-
-// QueryArchivedSpaces calls the engine query queryArchivedSpaces.
-func (qc *QueryClient) QueryArchivedSpaces(ctx context.Context, args QueryArchivedSpacesArgs) (*Result, error) {
-	call := QueryArchivedSpacesBuild(args)
-	return qc.executeNamed(ctx, "queryArchivedSpaces", call)
-}
-
-func QueryArchivedSpacesBuild(args QueryArchivedSpacesArgs) string {
-	var b strings.Builder
-	b.WriteString("queryArchivedSpaces({")
-	if args.UserId != "" {
-		b.WriteString("userId: ")
-		b.WriteString(fmt.Sprintf("%q", args.UserId))
-	}
 	b.WriteString("})")
 	return b.String()
 }
@@ -1988,28 +1884,6 @@ func QueryExpiredActiveDelegationsBuild(args QueryExpiredActiveDelegationsArgs) 
 	return b.String()
 }
 
-// QueryExpiredArchivedSpaces -- Archived spaces whose space.expiresAt is before the supplied cutoff.
-//
-// Bound concept: space.
-type QueryExpiredArchivedSpacesArgs struct {
-	Now string
-}
-
-// QueryExpiredArchivedSpaces calls the engine query queryExpiredArchivedSpaces.
-func (qc *QueryClient) QueryExpiredArchivedSpaces(ctx context.Context, args QueryExpiredArchivedSpacesArgs) (*Result, error) {
-	call := QueryExpiredArchivedSpacesBuild(args)
-	return qc.executeNamed(ctx, "queryExpiredArchivedSpaces", call)
-}
-
-func QueryExpiredArchivedSpacesBuild(args QueryExpiredArchivedSpacesArgs) string {
-	var b strings.Builder
-	b.WriteString("queryExpiredArchivedSpaces({")
-	b.WriteString("now: ")
-	b.WriteString(fmt.Sprintf("%q", args.Now))
-	b.WriteString("})")
-	return b.String()
-}
-
 // QueryExpiredAuditEvents -- All audit events; the retention sweep iterates and per-row checks occurredAt + retention-days < now.
 //
 // Bound concept: auditEvent.
@@ -3002,28 +2876,6 @@ func QueryOAuthClientByClientIdBuild(args QueryOAuthClientByClientIdArgs) string
 	return b.String()
 }
 
-// QueryOwnedSpaceById -- Return the space with the given id ONLY IF the caller is the space owner. Defense-in-depth gate for HTTP handlers (e.g. /spaces/{id}/attachments) that need to reject cross-tenant access before doing expensive side effects like blob uploads. The DSL mutation that follows the upload re-enforces ownership, but this query lets the handler short-circuit early.
-//
-// Bound concept: space.
-type QueryOwnedSpaceByIdArgs struct {
-	PartitionId string
-}
-
-// QueryOwnedSpaceById calls the engine query queryOwnedSpaceById.
-func (qc *QueryClient) QueryOwnedSpaceById(ctx context.Context, args QueryOwnedSpaceByIdArgs) (*Result, error) {
-	call := QueryOwnedSpaceByIdBuild(args)
-	return qc.executeNamed(ctx, "queryOwnedSpaceById", call)
-}
-
-func QueryOwnedSpaceByIdBuild(args QueryOwnedSpaceByIdArgs) string {
-	var b strings.Builder
-	b.WriteString("queryOwnedSpaceById({")
-	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	b.WriteString("})")
-	return b.String()
-}
-
 // QueryParticipantByAgentSpace -- Check if an AI agent is already a participant in a space (excludes left status)
 //
 // Bound concept: participant.
@@ -3586,30 +3438,6 @@ func QueryRunningTrainAgentPlansBuild(args QueryRunningTrainAgentPlansArgs) stri
 	return "queryRunningTrainAgentPlans({})"
 }
 
-// QuerySavedSpaces -- Returns spaces with space.status == 'saved'. Optional filter: userId (matches payload.ownerUserId, a user id). Saved spaces carry active=false, so this query gates on status=='saved' + traitIsNotDeleted rather than traitIsActiveRecord (which would exclude every saved row).
-//
-// Bound concept: space.
-type QuerySavedSpacesArgs struct {
-	UserId string
-}
-
-// QuerySavedSpaces calls the engine query querySavedSpaces.
-func (qc *QueryClient) QuerySavedSpaces(ctx context.Context, args QuerySavedSpacesArgs) (*Result, error) {
-	call := QuerySavedSpacesBuild(args)
-	return qc.executeNamed(ctx, "querySavedSpaces", call)
-}
-
-func QuerySavedSpacesBuild(args QuerySavedSpacesArgs) string {
-	var b strings.Builder
-	b.WriteString("querySavedSpaces({")
-	if args.UserId != "" {
-		b.WriteString("userId: ")
-		b.WriteString(fmt.Sprintf("%q", args.UserId))
-	}
-	b.WriteString("})")
-	return b.String()
-}
-
 // QuerySearchUsers -- Search users, optionally gated by active status. Omit `active` to list every user; pass true to return only active users or false for only deactivated ones. Backs the searchUsers tool.
 //
 // Bound concept: user.
@@ -3749,28 +3577,6 @@ func QuerySpaceMediaBuild(args QuerySpaceMediaArgs) string {
 		b.WriteString("mediaType: ")
 		b.WriteString(fmt.Sprintf("%q", args.MediaType))
 	}
-	b.WriteString("})")
-	return b.String()
-}
-
-// QuerySpaceMeta -- Returns the full space record by id.
-//
-// Bound concept: space.
-type QuerySpaceMetaArgs struct {
-	PartitionId string
-}
-
-// QuerySpaceMeta calls the engine query querySpaceMeta.
-func (qc *QueryClient) QuerySpaceMeta(ctx context.Context, args QuerySpaceMetaArgs) (*Result, error) {
-	call := QuerySpaceMetaBuild(args)
-	return qc.executeNamed(ctx, "querySpaceMeta", call)
-}
-
-func QuerySpaceMetaBuild(args QuerySpaceMetaArgs) string {
-	var b strings.Builder
-	b.WriteString("querySpaceMeta({")
-	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
