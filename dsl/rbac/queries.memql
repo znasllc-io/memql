@@ -1,0 +1,69 @@
+// rbac domain -- capability catalog reads.
+//
+// Authz tier: PUBLIC reference data. The capability catalog is global,
+// immutable, deployment-wide configuration -- it carries no per-user
+// ownership, so every authenticated principal may read it. That is what
+// lets ANY node resolve "does role R hold capability (verb,resourceType)?"
+// locally without a per-row owner check (the cross-node enforcement
+// requirement of E1.6, memql#2074). None of these queries reference a
+// user-scope payload field, so the per-row-authz classifier does not flag
+// them; they are nonetheless explicitly @public to document the intent.
+//
+// The catalog is a small admin-defined registry consumed whole, so the
+// list reads are @unbounded + @cache like the agentRole / skill catalogs.
+// In E1.1 the catalog is seed-only (no runtime writes), so cache eviction
+// is a non-issue; the v1:rbac:* cross-node forward rule that 5.4 cache
+// invalidation needs lands alongside the custom-role mutations in E1.4 /
+// the enforcement wiring in E1.6.
+
+use rbac.concepts.{ capability }
+use common.traits.{ isActiveRecord }
+
+@enabled
+@public
+@description("List every active capability row across all roles -- the whole RBAC grant catalog. Backs the cockpit RBAC view and is the bulk read the E1.6 enforcement resolver warms its per-node decision cache from. Small admin/seed-defined registry consumed whole.")
+@unbounded("rbac capability catalog -- a small seed-defined bounded registry consumed whole")
+@cache(ttl="300")
+query capability activeCapabilities {
+  filter  isActiveRecord
+  shape   capabilityFull
+}
+
+@enabled
+@public
+@description("List the active capability grants for a single role, by its slug. The per-role grant set whose union IS the role's effective authorization. E1.6's resolver calls this (or reads it out of the warmed activeCapabilities cache) to answer 'does role R hold an allow for (verb,resourceType) with no overriding deny?'. roleSlug is a plain string FK into the role catalog (E1.2, memql#2070).")
+@unbounded("capabilities for one role -- bounded to that role's grant set")
+@cache(ttl="300")
+query capability capabilitiesForRole {
+  args {
+    roleSlug  string  @required
+  }
+  filter  payload.roleSlug==args.roleSlug && isActiveRecord
+  shape   capabilityFull
+}
+
+@enabled
+@public
+@description("Resolve the active capability rows for a single (role, verb, resourceType) triple. The precise lookup an enforcement decision needs: if it returns an allow row and no deny row, the role is granted that verb on that resource type. Returns a (usually tiny) row set rather than a single row because a role may legally carry both an allow and an overriding deny for the same triple -- the resolver inspects effect to decide.")
+@unbounded("capabilities for one (role, verb, resourceType) triple -- bounded to at most the allow+deny pair")
+query capability capabilityGrant {
+  args {
+    roleSlug      string  @required
+    verb          string  @required
+    resourceType  string  @required
+  }
+  filter  payload.roleSlug==args.roleSlug && payload.verb==args.verb && payload.resourceType==args.resourceType && isActiveRecord
+  shape   capabilityFull
+}
+
+@enabled
+@public
+@description("List every active capability across all roles for a single resource type -- e.g. 'who can do anything to a principal?'. Backs the cockpit's per-resource RBAC audit view and lets E1.3 governance reason about all principal-targeting grants in one read. Bounded to the (small) set of grants naming that resource type.")
+@unbounded("capabilities for one resource type -- bounded to that resource's grant set")
+query capability capabilitiesForResourceType {
+  args {
+    resourceType  string  @required
+  }
+  filter  payload.resourceType==args.resourceType && isActiveRecord
+  shape   capabilityFull
+}

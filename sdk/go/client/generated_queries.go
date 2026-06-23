@@ -310,6 +310,23 @@ func ActiveAuthoringBundlesBuild(args ActiveAuthoringBundlesArgs) string {
 	return "activeAuthoringBundles({})"
 }
 
+// ActiveCapabilities -- List every active capability row across all roles -- the whole RBAC grant catalog. Backs the cockpit RBAC view and is the bulk read the E1.6 enforcement resolver warms its per-node decision cache from. Small admin/seed-defined registry consumed whole.
+//
+// Bound concept: capability.
+type ActiveCapabilitiesArgs struct {
+}
+
+// ActiveCapabilities calls the engine query activeCapabilities.
+func (qc *QueryClient) ActiveCapabilities(ctx context.Context, args ActiveCapabilitiesArgs) (*Result, error) {
+	call := ActiveCapabilitiesBuild(args)
+	return qc.executeNamed(ctx, "activeCapabilities", call)
+}
+
+func ActiveCapabilitiesBuild(args ActiveCapabilitiesArgs) string {
+	_ = args
+	return "activeCapabilities({})"
+}
+
 // ActiveDelegationsByIdentitySubject -- Get all active delegations whose identitySubject matches the argument. Used by the per-request DelegationResolver on the auth hot path. See memql#112.
 //
 // Bound concept: delegation.
@@ -1253,6 +1270,84 @@ func CallsByPartitionBuild(args CallsByPartitionArgs) string {
 	b.WriteString("callsByPartition({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// CapabilitiesForResourceType -- List every active capability across all roles for a single resource type -- e.g. 'who can do anything to a principal?'. Backs the cockpit's per-resource RBAC audit view and lets E1.3 governance reason about all principal-targeting grants in one read. Bounded to the (small) set of grants naming that resource type.
+//
+// Bound concept: capability.
+type CapabilitiesForResourceTypeArgs struct {
+	ResourceType string
+}
+
+// CapabilitiesForResourceType calls the engine query capabilitiesForResourceType.
+func (qc *QueryClient) CapabilitiesForResourceType(ctx context.Context, args CapabilitiesForResourceTypeArgs) (*Result, error) {
+	call := CapabilitiesForResourceTypeBuild(args)
+	return qc.executeNamed(ctx, "capabilitiesForResourceType", call)
+}
+
+func CapabilitiesForResourceTypeBuild(args CapabilitiesForResourceTypeArgs) string {
+	var b strings.Builder
+	b.WriteString("capabilitiesForResourceType({")
+	b.WriteString("resourceType: ")
+	b.WriteString(fmt.Sprintf("%q", args.ResourceType))
+	b.WriteString("})")
+	return b.String()
+}
+
+// CapabilitiesForRole -- List the active capability grants for a single role, by its slug. The per-role grant set whose union IS the role's effective authorization. E1.6's resolver calls this (or reads it out of the warmed activeCapabilities cache) to answer 'does role R hold an allow for (verb,resourceType) with no overriding deny?'. roleSlug is a plain string FK into the role catalog (E1.2, memql#2070).
+//
+// Bound concept: capability.
+type CapabilitiesForRoleArgs struct {
+	RoleSlug string
+}
+
+// CapabilitiesForRole calls the engine query capabilitiesForRole.
+func (qc *QueryClient) CapabilitiesForRole(ctx context.Context, args CapabilitiesForRoleArgs) (*Result, error) {
+	call := CapabilitiesForRoleBuild(args)
+	return qc.executeNamed(ctx, "capabilitiesForRole", call)
+}
+
+func CapabilitiesForRoleBuild(args CapabilitiesForRoleArgs) string {
+	var b strings.Builder
+	b.WriteString("capabilitiesForRole({")
+	b.WriteString("roleSlug: ")
+	b.WriteString(fmt.Sprintf("%q", args.RoleSlug))
+	b.WriteString("})")
+	return b.String()
+}
+
+// CapabilityGrant -- Resolve the active capability rows for a single (role, verb, resourceType) triple. The precise lookup an enforcement decision needs: if it returns an allow row and no deny row, the role is granted that verb on that resource type. Returns a (usually tiny) row set rather than a single row because a role may legally carry both an allow and an overriding deny for the same triple -- the resolver inspects effect to decide.
+//
+// Bound concept: capability.
+type CapabilityGrantArgs struct {
+	RoleSlug     string
+	Verb         string
+	ResourceType string
+}
+
+// CapabilityGrant calls the engine query capabilityGrant.
+func (qc *QueryClient) CapabilityGrant(ctx context.Context, args CapabilityGrantArgs) (*Result, error) {
+	call := CapabilityGrantBuild(args)
+	return qc.executeNamed(ctx, "capabilityGrant", call)
+}
+
+func CapabilityGrantBuild(args CapabilityGrantArgs) string {
+	var b strings.Builder
+	b.WriteString("capabilityGrant({")
+	b.WriteString("roleSlug: ")
+	b.WriteString(fmt.Sprintf("%q", args.RoleSlug))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("verb: ")
+	b.WriteString(fmt.Sprintf("%q", args.Verb))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("resourceType: ")
+	b.WriteString(fmt.Sprintf("%q", args.ResourceType))
 	b.WriteString("})")
 	return b.String()
 }

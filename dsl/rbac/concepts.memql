@@ -1,0 +1,40 @@
+// rbac domain -- the consolidated, DSL-defined authorization model.
+//
+// Epic 1 (memql#2062) replaces the scattered, Go-hardcoded role
+// constants in component/auth/rbac.go with a SINGLE DSL-defined RBAC
+// model: primitive verbs composed into ranked roles, governed by
+// relational predicates, and extensible with data-defined custom
+// roles. This file lands E1.1 (memql#2069): the primitive verbs and
+// the capability model.
+//
+// THE MODEL, in one paragraph. Authorization is expressed as
+// CAPABILITIES. A capability is a single (verb x resourceType) grant
+// attached to a role. The five verbs are uniform across EVERY resource
+// type -- including the `principal` resource (a user/identity), which
+// is how user-management governance (E1.3, #2071) is expressed without
+// a bespoke grant verb: "manage a developer" is just `update` on a
+// principal of rank developer, gated by a rank+self predicate. Roles
+// (E1.2, #2070) are named, ranked bundles of capabilities. A role's
+// effective grant set is the union of its capability rows.
+//
+// Per-row authz tier: PUBLIC reference data. The capability catalog is
+// global, immutable, deployment-wide configuration (authored as `seed`
+// rows, materialized into _system). It carries no per-user ownership
+// and is readable by every authenticated principal so any node can
+// resolve "does role R hold capability (verb,resourceType)?" locally
+// without a per-row owner check. Writes are seed-only (E1.2 marks base
+// roles immutable at runtime; custom-role capabilities in E1.4 are
+// minted through a rank-bounded mutation, not free-form writes).
+
+@version("1.0.0")
+@namespace("rbac")
+@description("A single authorization GRANT: the right to apply one primitive verb to one resource type, attached to a role. Capability = (verb x resourceType) for a role. This is the atomic unit of the consolidated RBAC model (epic memql#2062). The five verbs (read/create/update/delete/execute) are UNIFORM across every resourceType, including `principal` -- applying a verb to the principal resource is how user-management governance is expressed (E1.3): e.g. `update` on a principal, gated by a rank+self predicate, means 'edit a user'; `create` on a principal means 'add a user' WITHOUT necessarily being able to edit existing ones (the create != update split). A role's effective grants are the union of its capability rows. Global / immutable reference data: authored as `seed` rows materialized into _system, readable by every principal, never per-user-owned. PUBLIC per-row-authz tier -- it is deployment-wide config, not user data. roleSlug points at the role this grant belongs to; the role rows themselves land in E1.2 (memql#2070), so until then capabilities reference a role purely by its stable slug string.")
+concept capability {
+  roleSlug      string  @required  @description("Stable kebab-case slug of the role this capability is granted to (e.g. 'owner', 'developer', 'admin', 'user', or a custom-role slug). A foreign-key-by-slug into the role catalog that E1.2 (memql#2070) introduces; kept as a plain string FK rather than a @relationship until the `role` concept exists, so E1.1 carries no forward dependency. A role's effective capability set is every capability row with a matching roleSlug.")
+  verb          enum("read", "create", "update", "delete", "execute")  @required  @description("The primitive verb this capability grants. The five verbs are the COMPLETE, uniform set across every resourceType -- there is deliberately no separate `grant`/`manage`/`admin` verb. read = observe a resource. create = bring a new resource into existence. update = modify an existing resource. delete = remove a resource. execute = run/invoke a resource (a tool, an automation, a deploy action). The create != update split is load-bearing for governance (E1.3): a role can hold `create` on principals of a given rank without holding `update`, i.e. 'mint developers but not edit existing ones'.")
+  resourceType  string  @required  @description("The kind of resource the verb applies to. Uniform verb set means the SAME five verbs are meaningful against every resourceType. Canonical values seeded in this domain: `principal` (a user/identity -- the governance-bearing resource; verbs on it gate user management per E1.3), `construct` (DSL authoring -- create/update/delete map to the MCP define/author surface, execute maps to inline DSL), `data` (graph rows -- the read/write data plane), `deployment` (cut-version / deploy / rollback actions, reached via `execute`), `agent` (agent templates), `group` (org groups), `role` (the RBAC role catalog itself -- create/update/delete on `role` is what bounds custom-role authoring in E1.4). resourceType is an open string (not a closed enum) so product layers can introduce their own resource kinds without an engine change; the seeded set above is the core vocabulary.")
+  effect        enum("allow", "deny")  @required  @default("allow")  @description("Whether this capability GRANTS (allow) or explicitly REVOKES (deny) the (verb,resourceType) for the role. allow is the overwhelming common case and the default. deny exists so a higher-ranked role or a custom role can carve a hole in an otherwise-broad grant (e.g. a finance role that is otherwise admin-like but must never `execute` on `deployment`); a deny always wins over an allow at resolution time. E1.6 (memql#2074) resolves an effective decision as: an allow capability exists AND no deny capability exists for the same (role,verb,resourceType).")
+  description   string  @description("Human-readable note explaining WHY this grant exists. Surfaced in the cockpit RBAC view. Optional; seeded capabilities carry one for auditability.")
+  predefined    bool    @default("false")  @description("True for capability rows authored by dsl/rbac/*.memql `seed` declarations on every startup -- the immutable base-role grant set (E1.2 marks these read-only at runtime so a base role can never be redefined to escalate). User-/custom-role capabilities minted via the rank-bounded mutation (E1.4) default to predefined=false and are editable within their creator's rank bound.")
+  active        bool    @default("true")  @description("Soft-deactivate flag. An inactive capability is ignored at resolution time but kept for audit. Lets a custom role's grant be retired without churning the row history.")
+}

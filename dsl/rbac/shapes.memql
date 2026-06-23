@@ -1,0 +1,17 @@
+// rbac domain -- row projections for the capability catalog.
+
+use rbac.concepts.{ capability }
+
+@description("Full projection of a capability row: the role it belongs to, the (verb, resourceType) grant it expresses, its allow/deny effect, and provenance/lifecycle flags. The canonical shape every capability query returns.")
+@row
+shape capability capabilityFull {
+  row.id
+  row.payload.roleSlug
+  row.payload.verb
+  row.payload.resourceType
+  row.payload.effect
+  row.payload.description
+  row.payload.predefined
+  row.payload.active
+  row.createdAt
+}

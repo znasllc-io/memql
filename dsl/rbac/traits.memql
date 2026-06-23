@@ -1,0 +1,34 @@
+// rbac domain -- capability-catalog row predicates (traits).
+//
+// Under the current grammar a payload-only predicate is a `trait`
+// (a concept-agnostic row predicate usable in a query `filter`); a
+// `spec` is reserved for actor.* authorization predicates usable in a
+// `requires` slot. These traits over the v1:rbac:capability concept
+// compile to SQL WHERE fragments and push down to the database. They
+// are the composable filter vocabulary the capability queries
+// (queries.memql) can stitch together, and the building blocks the
+// E1.6 enforcement resolver (memql#2074) leans on to answer "does role
+// R hold an ALLOW for (verb, resourceType) with no overriding DENY?".
+//
+// The CALLER-side rank/self governance predicates land as logic in
+// E1.3 (memql#2071); they are a different evaluation flavor (in-process
+// against the (actor, target) pair) and live in dsl/rbac/logic.memql
+// there.
+
+@enabled
+@description("Row predicate: the capability is an ALLOW grant. allow capabilities confer the (verb, resourceType); deny capabilities revoke it. The enforcement resolver (E1.6) treats a role as holding a grant when an allow row matches AND no deny row does.")
+trait capabilityIsAllow {
+  payload.effect == "allow"
+}
+
+@enabled
+@description("Row predicate: the capability is a DENY grant -- an explicit revocation that wins over any allow for the same (role, verb, resourceType). Lets a role carve a hole in an otherwise-broad grant set.")
+trait capabilityIsDeny {
+  payload.effect == "deny"
+}
+
+@enabled
+@description("Row predicate: the capability is a base-role (predefined, seed-authored) grant. The immutable grant set E1.2 (memql#2070) marks read-only at runtime. User/custom-role grants are predefined=false.")
+trait capabilityIsPredefined {
+  payload.predefined == true
+}
