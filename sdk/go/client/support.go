@@ -28,6 +28,22 @@ type Result struct {
 	payload any
 }
 
+// ResultFromRows builds a *Result wrapping the given rows. It exists so SDK
+// CONSUMERS (memql-cockpit and other thick clients) can construct a Result in
+// their unit tests without a live gRPC stream -- the Result payload field is
+// unexported, so a downstream test otherwise has no way to build the value a
+// fake QueryClient method must return. The rows are stored in the same
+// []any-of-map shape the engine's list envelope produces, so Rows() projects
+// them identically to a real result. Test-support only; production code gets
+// Results from the engine via the generated methods.
+func ResultFromRows(rows []Row) *Result {
+	items := make([]any, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, map[string]any(r))
+	}
+	return &Result{payload: items}
+}
+
 // Row is a single projected row -- the shape-flattened form every
 // query / mutation returns from the engine. The keys depend on the
 // construct's bound shape (`spaceFull`, `participantFull`, etc.).
