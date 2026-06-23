@@ -63,7 +63,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 
 	// Validate registered client + redirect URI. Resolve through the
 	// unified resolver so dynamically-registered (RFC 7591) clients in
-	// the store work exactly like static IDENTITY_REGISTERED_CLIENTS.
+	// the store work exactly like static MEMQL_IDENTITY_REGISTERED_CLIENTS.
 	if identity.ResolveClient(r.Context(), s.Cfg, s.Store, body.ClientId) == nil ||
 		!identity.ClientAllowsRedirectURI(r.Context(), s.Cfg, s.Store, body.ClientId, body.RedirectURI) {
 		s.writeJSONError(w, http.StatusBadRequest, "invalid_client", "client_id or redirect_uri is not registered")

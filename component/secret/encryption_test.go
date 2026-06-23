@@ -120,7 +120,7 @@ func TestEncrypt_NonceIsRandom(t *testing.T) {
 
 func TestSealOpenBlob_RoundTrip(t *testing.T) {
 	t.Setenv(EnvMasterKey, testKey(t))
-	plaintext := []byte("OPENAI_API_KEY=sk-test\nANTHROPIC_API_KEY=sk-ant\n")
+	plaintext := []byte("MEMQL_OPENAI_API_KEY=sk-test\nANTHROPIC_API_KEY=sk-ant\n")
 
 	env, err := SealBlob(plaintext)
 	if err != nil {

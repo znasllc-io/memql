@@ -11,7 +11,7 @@ a starting point. Cluster operators are expected to replace this
 document with one drafted with their own counsel before customer-facing
 launch.
 
-Override at runtime by setting `IDENTITY_TOS_OVERRIDE_PATH` to a
+Override at runtime by setting `MEMQL_IDENTITY_TOS_OVERRIDE_PATH` to a
 filesystem path holding a markdown document with the same front-matter
 shape (`documentType`, `version`, `effectiveDate`).
 

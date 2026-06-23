@@ -61,11 +61,11 @@ func TestSelectVoiceExecutor_FallbackOnError(t *testing.T) {
 }
 
 // TestSelectVoiceExecutor_FallbackOnMissingKey exercises the real build check
-// (not the test hook): realtime requested with no OPENAI_API_KEY falls back.
+// (not the test hook): realtime requested with no MEMQL_OPENAI_API_KEY falls back.
 func TestSelectVoiceExecutor_FallbackOnMissingKey(t *testing.T) {
 	plan := SelectVoiceExecutor(Config{VoiceExecutor: "realtime", OpenAIAPIKey: ""}, Persona{}, nil)
 	assert.Equal(t, ExecutorCascade, plan.Kind)
-	assert.Contains(t, plan.FallbackReason, "OPENAI_API_KEY is unset")
+	assert.Contains(t, plan.FallbackReason, "MEMQL_OPENAI_API_KEY is unset")
 }
 
 // TestValidateRealtimeBuildable_OK verifies the real check passes with a key

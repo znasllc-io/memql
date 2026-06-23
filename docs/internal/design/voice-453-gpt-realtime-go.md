@@ -181,7 +181,7 @@ Endpoint (GA conversation mode):
 ```
 wss://api.openai.com/v1/realtime?model=gpt-realtime
 Headers:
-  Authorization: Bearer <OPENAI_API_KEY>
+  Authorization: Bearer <MEMQL_OPENAI_API_KEY>
   OpenAI-Beta: realtime=v1
 ```
 
@@ -405,7 +405,7 @@ streaming. In Go:
 tool, send a canned audio clip + `response.create`, and assert that
 `response.output_audio.delta` frames keep arriving on the channel during
 the stub tool's `time.Sleep`. That isolates "async tool does not block
-audio" from the full room wiring. (Requires a live `OPENAI_API_KEY`; it
+audio" from the full room wiring. (Requires a live `MEMQL_OPENAI_API_KEY`; it
 is the live-credential follow-up, same caveat #432 carries.)
 
 ---
@@ -506,7 +506,7 @@ surface.
   conversation session shape, `turn_detection: null` (section 3.1),
   `input_audio_buffer.append` (3.2), and a `response.output_audio.delta`
   audio-out channel (3.5). **Live send/receive demonstration requires a
-  credentialed `OPENAI_API_KEY` and is the flagged follow-up** (the same
+  credentialed `MEMQL_OPENAI_API_KEY` and is the flagged follow-up** (the same
   live-infra caveat #432 carries) -- the protocol path is fully
   specified.
 

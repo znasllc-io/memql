@@ -65,7 +65,7 @@ spec:
     - name: memql-jwks-coherence
       rules:
         # Identity replicas must serve an IDENTICAL key set (in seed mode
-        # every replica derives the same key from IDENTITY_SIGNING_KEY_B64,
+        # every replica derives the same key from MEMQL_IDENTITY_SIGNING_KEY_B64,
         # so the fingerprint is rock-stable). If the fingerprints diverge
         # across identity replicas, tokens signed by one replica's key are
         # rejected by verifiers that fetched the other replica's JWKS --

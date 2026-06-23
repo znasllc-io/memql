@@ -73,12 +73,12 @@ Where `COMPONENT` is the subsystem that consumes the value:
 | Prefix          | Subsystem                                                                                  | Example                                                                          |
 |-----------------|--------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------|
 | `MEMQL_`        | memQL itself: master key, node identity, transport, engine tuning.                         | `MEMQL_MASTER_KEY`, `MEMQL_NODE_TYPE`, `MEMQL_GRPC_ADDRESS`, `MEMQL_DEFAULT_*`.   |
-| `MEMORY_NODES_` | Database tier (the row store).                                                             | `MEMORY_NODES_DATABASE_DSN`.                                                     |
-| `MEMQL_SI_`     | Synthetic-intelligence providers (LLM / STT / TTS). Vendor goes after the prefix.          | `MEMQL_SI_OPENAI_API_KEY`, `MEMQL_SI_ANTHROPIC_API_KEY`.                         |
-| `EMAIL_`        | Email integration (Microsoft Graph or SMTP sender).                                        | `EMAIL_AZURE_TENANT_ID`, `EMAIL_SENDER`, `EMAIL_FROM_NAME`.                      |
-| `IDENTITY_`     | In-house identity service (auth subsystem) -- both the service itself and the per-node verifier.   | `IDENTITY_BASE_URL`, `IDENTITY_VERIFIER_BASE_URL`, `IDENTITY_KEY_ENCRYPTION_KEY`.|
-| `ANAM_` / `SIMLI_` | Avatar vendors (lip-synced video). Used by the voice-agent avatar and the direct/Guide avatar (`integrations/avatardirect` + `integrations/avatarvendor`). | `ANAM_API_KEY`, `SIMLI_API_KEY`. |
-| `POLYPHON_`     | Polyphon voice helpers (room provider + /memql/audio path).                                | `POLYPHON_VOICE_PROVIDER`, `POLYPHON_LIVEKIT_URL`.                               |
+| `MEMORY_NODES_` | Database tier (the row store).                                                             | `MEMQL_DATABASE_DSN`.                                                     |
+| `MEMQL_SI_`     | Synthetic-intelligence providers (LLM / STT / TTS). Vendor goes after the prefix.          | `MEMQL_AI_OPENAI_API_KEY`, `MEMQL_AI_ANTHROPIC_API_KEY`.                         |
+| `EMAIL_`        | Email integration (Microsoft Graph or SMTP sender).                                        | `MEMQL_EMAIL_AZURE_TENANT_ID`, `MEMQL_EMAIL_SENDER`, `MEMQL_EMAIL_FROM_NAME`.                      |
+| `IDENTITY_`     | In-house identity service (auth subsystem) -- both the service itself and the per-node verifier.   | `MEMQL_IDENTITY_BASE_URL`, `MEMQL_IDENTITY_VERIFIER_BASE_URL`, `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY`.|
+| `ANAM_` / `SIMLI_` | Avatar vendors (lip-synced video). Used by the voice-agent avatar and the direct/Guide avatar (`integrations/avatardirect` + `integrations/avatarvendor`). | `MEMQL_ANAM_API_KEY`, `MEMQL_SIMLI_API_KEY`. |
+| `POLYPHON_`     | Polyphon voice helpers (room provider + /memql/audio path).                                | `MEMQL_POLYPHON_VOICE_PROVIDER`, `MEMQL_POLYPHON_LIVEKIT_URL`.                               |
 | `SERVER_`       | HTTP transport (listen address, public path, CORS).                                        | `SERVER_ADDRESS`, `SERVER_PUBLIC_PATH`.                                          |
 | `SERVICE_`      | Service-level metadata (logging, name).                                                    | `SERVICE_NAME`, `SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL`.                        |
 
@@ -98,7 +98,7 @@ the browser"):
 - **Vendor-only names without a component prefix.** `AZURE_TENANT_ID`
   is opaque -- Azure could mean storage, identity, OpenAI-on-Azure,
   or anything else. Always pair the vendor with the subsystem
-  (`EMAIL_AZURE_TENANT_ID`).
+  (`MEMQL_EMAIL_AZURE_TENANT_ID`).
 - **Two prefixes for the same thing.** We had `MAIL_*` and
   `AZURE_*` for the same (email) integration; merging onto `EMAIL_*`
   with the vendor as the second segment removes that ambiguity.
@@ -106,7 +106,7 @@ the browser"):
   repo, every var is "memQL's" -- prefixing every one of them with
   `MEMQL_` is noise. Reserve `MEMQL_` for things that are about
   memQL itself (master key, node identity, engine tuning), not for
-  things memQL happens to call (`OPENAI_API_KEY` reads cleaner than
+  things memQL happens to call (`MEMQL_OPENAI_API_KEY` reads cleaner than
   `MEMQL_OPENAI_API_KEY`).
 
 ### Migration window
@@ -171,7 +171,7 @@ display. See `component/secret/encryption.go`.
 ### Resolution chain (provider auth)
 
 When a `.memql` provider file references a placeholder like
-`env("MEMQL_SI_OPENAI_API_KEY")`, the resolver in
+`env("MEMQL_AI_OPENAI_API_KEY")`, the resolver in
 `component/memql/ai_providers.go` (`resolveAuthPlaceholders`) walks:
 
 1. `v1:platform:globalSecret`     -- `systemSecretResolver`
@@ -183,17 +183,17 @@ When a `.memql` provider file references a placeholder like
 
 Provider `.memql` files historically reference
 `MEMQL_SI_<VENDOR>_API_KEY` while the dev manifest seeds the bare
-form (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...). To bridge that
+form (`MEMQL_OPENAI_API_KEY`, `MEMQL_ANTHROPIC_API_KEY`, ...). To bridge that
 gap without renaming either side, every layer of the chain tries
 **both** names in priority order:
 
 ```
-authConceptLookupNames("MEMQL_SI_OPENAI_API_KEY")
-  -> ["MEMQL_SI_OPENAI_API_KEY", "OPENAI_API_KEY"]
+authConceptLookupNames("MEMQL_AI_OPENAI_API_KEY")
+  -> ["MEMQL_AI_OPENAI_API_KEY", "MEMQL_OPENAI_API_KEY"]
 ```
 
-So a provider asking for `MEMQL_SI_OPENAI_API_KEY` will pick up a
-value seeded as `OPENAI_API_KEY` automatically. The same elision
+So a provider asking for `MEMQL_AI_OPENAI_API_KEY` will pick up a
+value seeded as `MEMQL_OPENAI_API_KEY` automatically. The same elision
 applies to the OS env fallback.
 
 #### Why OS env stays around
@@ -215,10 +215,10 @@ hook so providers retry concept storage once seeding finishes.
 A miss at every layer produces:
 
 ```
-auth "apiKey" references MEMQL_SI_OPENAI_API_KEY but no value is in
-concept storage or OS env. Tried name(s) MEMQL_SI_OPENAI_API_KEY,
-OPENAI_API_KEY under v1:platform:globalSecret, v1:platform:globalVariable, and
-the process env. Seed it with `make secret-set NAME=OPENAI_API_KEY
+auth "apiKey" references MEMQL_AI_OPENAI_API_KEY but no value is in
+concept storage or OS env. Tried name(s) MEMQL_AI_OPENAI_API_KEY,
+MEMQL_OPENAI_API_KEY under v1:platform:globalSecret, v1:platform:globalVariable, and
+the process env. Seed it with `make secret-set NAME=MEMQL_OPENAI_API_KEY
 VALUE=... SCOPE=global` (or `variable-set` for non-sensitive values)
 ```
 
@@ -241,17 +241,17 @@ them.
 
 | Variable                             | Purpose                                                                                                     | Read by                                |
 |--------------------------------------|-------------------------------------------------------------------------------------------------------------|----------------------------------------|
-| `MEMORY_NODES_DATABASE_DSN`          | Postgres+TimescaleDB connection string. No default; the process exits if missing.                           | `component/database/database.go`       |
+| `MEMQL_DATABASE_DSN`          | Postgres+TimescaleDB connection string. No default; the process exits if missing.                           | `component/database/database.go`       |
 | `MEMQL_MASTER_KEY`                   | 32-byte hex key for NaCl secretbox. Required as soon as any encrypted secret is read; a binary that never decrypts (rare) can boot without it but every realistic deployment needs it. | `component/secret/encryption.go`       |
 
 ### Required when the matching feature is enabled
 
 | Variable                       | Required when                            | Notes                                                                                                                                              |
 |--------------------------------|------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
-| `IDENTITY_BASE_URL`            | identity binary, when `IDENTITY_ENABLED=true` | Public origin (e.g. `https://auth.example.com`). Used as JWT `iss` and in outbound email links.                                                       |
-| `IDENTITY_SIGNING_KEY_B64`     | identity binary running **>=2 replicas** | Shared base64-std 32-byte Ed25519 seed (#550) -- every replica derives the SAME key + JWKS. **REQUIRED for any multi-replica deployment**; without it each pod mints its own key, JWKS diverges, and ~50% of token verifications fail with `unknown kid` (the 2026-06-16 staging outage, #1515). `Config.Validate()` fail-fast refuses to boot a non-localhost deployment without it unless `IDENTITY_ALLOW_EPHEMERAL_KEY=true`. Generate: `head -c 32 /dev/urandom \| base64`. Sourced from the sealed genesis envelope in staging/prod. |
-| `IDENTITY_KEY_ENCRYPTION_KEY`  | identity binary in non-localhost prod (file-key mode) | Master secret (>=16 bytes) wrapping the on-disk Ed25519 signing keypair. Only the file-key (no-seed) path. Sourced from `v1:platform:globalSecret` of the same name in production.        |
-| `IDENTITY_VERIFIER_BASE_URL`   | non-identity binaries, prod auth          | URL the per-node verifier fetches JWKS from. Empty -> dev no-auth identity (`local-dev@memql.local`).                                                  |
+| `MEMQL_IDENTITY_BASE_URL`            | identity binary, when `MEMQL_IDENTITY_ENABLED=true` | Public origin (e.g. `https://auth.example.com`). Used as JWT `iss` and in outbound email links.                                                       |
+| `MEMQL_IDENTITY_SIGNING_KEY_B64`     | identity binary running **>=2 replicas** | Shared base64-std 32-byte Ed25519 seed (#550) -- every replica derives the SAME key + JWKS. **REQUIRED for any multi-replica deployment**; without it each pod mints its own key, JWKS diverges, and ~50% of token verifications fail with `unknown kid` (the 2026-06-16 staging outage, #1515). `Config.Validate()` fail-fast refuses to boot a non-localhost deployment without it unless `MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true`. Generate: `head -c 32 /dev/urandom \| base64`. Sourced from the sealed genesis envelope in staging/prod. |
+| `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY`  | identity binary in non-localhost prod (file-key mode) | Master secret (>=16 bytes) wrapping the on-disk Ed25519 signing keypair. Only the file-key (no-seed) path. Sourced from `v1:platform:globalSecret` of the same name in production.        |
+| `MEMQL_IDENTITY_VERIFIER_BASE_URL`   | non-identity binaries, prod auth          | URL the per-node verifier fetches JWKS from. Empty -> dev no-auth identity (`local-dev@memql.local`).                                                  |
 | `MEMQL_WORKER_PEERS`           | cluster mode, BFF first boot             | Comma-separated `type=host:port` seed list (e.g. `agent=agent:50055,cognition=cognition:50054,planner=planner:50056`). DB-based discovery via `v1:cluster:node` takes over once peers register. Without it the BFF can't find workers on first boot. |
 | `MEMQL_PARENT_ADDRESS`         | cluster mode, every non-BFF node         | `bff:50058` -- so the worker's outbound stream reaches BFF for event forwarding.                                                                   |
 
@@ -315,7 +315,7 @@ migrator's lock. memQL therefore runs a **hybrid endpoint split**:
 
 | Variable                              | Default        | Purpose                                                                                                                                                                                                 |
 |---------------------------------------|----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `MEMORY_NODES_DATABASE_DSN`           | required       | Main pool. Point this at the **transaction pooler** in pooled environments -- it carries all bulk queries + mutations (the surge-killing multiplier).                                                   |
+| `MEMQL_DATABASE_DSN`           | required       | Main pool. Point this at the **transaction pooler** in pooled environments -- it carries all bulk queries + mutations (the surge-killing multiplier).                                                   |
 | `MEMORY_NODES_DATABASE_DIRECT_DSN`    | unset          | Optional second, **non-pooled** endpoint. Session-stateful work (advisory locks, leader election, migrations) resolves its handle via `DirectBunDB()` so it bypasses the pooler. Small fixed pool (max 4 open / 1 idle). |
 
 When `DIRECT_DSN` is **unset**, `DirectBunDB()` falls back to the main
@@ -330,24 +330,24 @@ For the identity binary (`-tags identity`):
 
 | Variable                                  | Default                  | Purpose                                                                                                              |
 |-------------------------------------------|--------------------------|----------------------------------------------------------------------------------------------------------------------|
-| `IDENTITY_ENABLED`                        | `false`                  | Master toggle for the identity binary itself.                                                                        |
-| `IDENTITY_BASE_URL`                       | none                     | Public origin (used as JWT `iss` and in email links).                                                                |
-| `IDENTITY_JWT_AUDIENCE`                   | `memql`                  | Value placed in the JWT `aud` claim.                                                                                 |
-| `IDENTITY_ALLOW_EPHEMERAL_KEY`            | `false`                  | Opt into per-pod ephemeral file keys (no `IDENTITY_SIGNING_KEY_B64`). Single-node / dev only -- with >=2 replicas it allows JWKS divergence. The fail-fast guard (#1515) requires this to boot a non-localhost deployment that has no shared seed. |
-| `IDENTITY_KEY_DIR`                        | `var/identity/keys`      | On-disk Ed25519 keypair directory (file-key mode).                                                                   |
-| `IDENTITY_KEY_ENCRYPTION_KEY`             | none (required in prod)  | Master secret (>=16 bytes) wrapping the private key (file-key mode).                                                 |
-| `IDENTITY_REGISTRATION_MODE`              | `open`                   | `open` / `domain_restricted` / `invite_only` / `waitlist`.                                                           |
+| `MEMQL_IDENTITY_ENABLED`                        | `false`                  | Master toggle for the identity binary itself.                                                                        |
+| `MEMQL_IDENTITY_BASE_URL`                       | none                     | Public origin (used as JWT `iss` and in email links).                                                                |
+| `MEMQL_IDENTITY_JWT_AUDIENCE`                   | `memql`                  | Value placed in the JWT `aud` claim.                                                                                 |
+| `MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY`            | `false`                  | Opt into per-pod ephemeral file keys (no `MEMQL_IDENTITY_SIGNING_KEY_B64`). Single-node / dev only -- with >=2 replicas it allows JWKS divergence. The fail-fast guard (#1515) requires this to boot a non-localhost deployment that has no shared seed. |
+| `MEMQL_IDENTITY_KEY_DIR`                        | `var/identity/keys`      | On-disk Ed25519 keypair directory (file-key mode).                                                                   |
+| `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY`             | none (required in prod)  | Master secret (>=16 bytes) wrapping the private key (file-key mode).                                                 |
+| `MEMQL_IDENTITY_REGISTRATION_MODE`              | `open`                   | `open` / `domain_restricted` / `invite_only` / `waitlist`.                                                           |
 
 For every other binary (bff/voice/cognition/agent/planner):
 
 | Variable                                       | Default | Purpose                                                                                                                              |
 |------------------------------------------------|---------|--------------------------------------------------------------------------------------------------------------------------------------|
-| `IDENTITY_VERIFIER_BASE_URL`                   | empty   | Public origin of the identity service. Empty -> dev no-auth identity (`local-dev@memql.local`) with SECURITY warnings in the logs.   |
-| `IDENTITY_VERIFIER_AUDIENCE`                   | `memql` | Value compared against the JWT `aud` claim.                                                                                          |
-| `IDENTITY_VERIFIER_EXPECTED_ISSUER`            | `BASE`  | Override for JWT `iss`. Defaults to `IDENTITY_VERIFIER_BASE_URL`.                                                                    |
-| `IDENTITY_VERIFIER_JWKS_REFRESH_SECONDS`       | `300`   | Background JWKS refresh cadence.                                                                                                     |
-| `IDENTITY_VERIFIER_JWKS_FETCH_TIMEOUT_SECONDS` | `10`    | Per-fetch HTTP timeout.                                                                                                              |
-| `IDENTITY_VERIFIER_JWKS_URL`                   | derived | Override the JWKS URL when internal-mesh routing differs from the public origin.                                                     |
+| `MEMQL_IDENTITY_VERIFIER_BASE_URL`                   | empty   | Public origin of the identity service. Empty -> dev no-auth identity (`local-dev@memql.local`) with SECURITY warnings in the logs.   |
+| `MEMQL_IDENTITY_VERIFIER_AUDIENCE`                   | `memql` | Value compared against the JWT `aud` claim.                                                                                          |
+| `MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER`            | `BASE`  | Override for JWT `iss`. Defaults to `MEMQL_IDENTITY_VERIFIER_BASE_URL`.                                                                    |
+| `MEMQL_IDENTITY_VERIFIER_JWKS_REFRESH_SECONDS`       | `300`   | Background JWKS refresh cadence.                                                                                                     |
+| `MEMQL_IDENTITY_VERIFIER_JWKS_FETCH_TIMEOUT_SECONDS` | `10`    | Per-fetch HTTP timeout.                                                                                                              |
+| `MEMQL_IDENTITY_VERIFIER_JWKS_URL`                   | derived | Override the JWKS URL when internal-mesh routing differs from the public origin.                                                     |
 
 See [docs/public/operate/auth/identity-service.md](auth/identity-service.md) for
 the full operator narrative (anti-abuse knobs, key rotation, email
@@ -377,23 +377,23 @@ delivery).
 | `MEMQL_STT_PROVIDER`           | `openai-realtime` | `openai-realtime` / `openai-whisper`. |
 | `MEMQL_STT_LANGUAGE`           | `en`             | Hard-pinned transcription language for the streaming chat-mic path (`AiTranscribeStreamStart`). Drives the OpenAI Realtime session config (`en`). Overrides any client-supplied `language_hint` -- pinning English is what stops the wrong/mixed-language + short-word-hallucination failure mode. |
 | `MEMQL_STT_MIN_CONFIDENCE`     | `0.6`            | Floor a streaming FINAL transcript's confidence must clear to be emitted. OpenAI Realtime finals carry `1.0` and always pass, relying on server-VAD + the empty/denylist filters. Also gates a no-speech denylist of well-known silence hallucinations ("thank you", "thanks for watching", ...) so they're dropped only when confidence is low. `0` disables the confidence + denylist gates (empty-text drop still applies). |
-| `MEMQL_OPENAI_REALTIME_MODEL`  | empty            | Realtime model id; falls back to `POLYPHON_OPENAI_ASR_MODEL`.                    |
-| `POLYPHON_OPENAI_VAD_SILENCE_MS` | `600`          | Trailing-silence window (ms) the OpenAI server VAD requires before declaring end-of-utterance on the streaming ASR path. Lower = snappier finals; higher = better tolerance for mid-sentence pauses. See `docs/public/operate/voice-eou-tuning.md`. |
+| `MEMQL_OPENAI_REALTIME_MODEL`  | empty            | Realtime model id; falls back to `MEMQL_POLYPHON_OPENAI_ASR_MODEL`.                    |
+| `MEMQL_POLYPHON_OPENAI_VAD_SILENCE_MS` | `600`          | Trailing-silence window (ms) the OpenAI server VAD requires before declaring end-of-utterance on the streaming ASR path. Lower = snappier finals; higher = better tolerance for mid-sentence pauses. See `docs/public/operate/voice-eou-tuning.md`. |
 | `POLYPHON_VOICE_LANGUAGE`      | `en`             | BCP-47 language for the voice-agent's ASR sessions (the realtime path narrows it to the ISO-639-1 primary subtag). |
 | `MEMQL_WHISPER_MODEL`          | `whisper-1`      | Used when `MEMQL_STT_PROVIDER=openai-whisper`.                                   |
-| `POLYPHON_VOICE_PROVIDER`      | `openai`         | Voice provider for the `/memql/audio` WebSocket path. |
-| `POLYPHON_OPENAI_ASR_MODEL`    | none             | OpenAI ASR model for the `/memql/audio` path.                                    |
-| `POLYPHON_OPENAI_TTS_MODEL`    | none             | OpenAI TTS model for the `/memql/audio` path.                                    |
-| `POLYPHON_OPENAI_TTS_VOICE`    | none             | OpenAI TTS voice (`alloy`, `echo`, `nova`, ...).                                 |
-| `POLYPHON_PREDICTION_ENGINE_URL` | none           | External Polyphon prediction engine; absent = embedded engine.                   |
+| `MEMQL_POLYPHON_VOICE_PROVIDER`      | `openai`         | Voice provider for the `/memql/audio` WebSocket path. |
+| `MEMQL_POLYPHON_OPENAI_ASR_MODEL`    | none             | OpenAI ASR model for the `/memql/audio` path.                                    |
+| `MEMQL_POLYPHON_OPENAI_TTS_MODEL`    | none             | OpenAI TTS model for the `/memql/audio` path.                                    |
+| `MEMQL_POLYPHON_OPENAI_TTS_VOICE`    | none             | OpenAI TTS voice (`alloy`, `echo`, `nova`, ...).                                 |
+| `MEMQL_POLYPHON_PREDICTION_ENGINE_URL` | none           | External Polyphon prediction engine; absent = embedded engine.                   |
 | `VOICE_AGENT_TOKEN`            | unset            | Identity-issued `class="voice_agent"` JWT the Go voice-agent presents on `MemqlService.Stream`. When empty the agent self-bootstraps via `/node/bootstrap` (dev). See `docs/public/operate/auth/voice-agent-jwt.md`. |
 | `MEMQL_VOICE_EXECUTOR`         | `realtime`       | Go voice-agent executor: `realtime` (OpenAI gpt-realtime speech-to-speech, the default since #483) or `cascade` (OpenAI STT -> cognition -> OpenAI TTS). Realtime degrades cleanly to the cascade when its preconditions fail (persona build etc.), logging the reason -- so a fresh run uses realtime and there is no silent cascade surprise. Set `cascade` to opt out. The active executor is logged loudly at session start (`voice-agent voice executor: ...`). |
 | `MEMQL_VOICE_ROOM_NAME`        | unset            | LiveKit room the Go voice-agent joins (memQL convention: `polyphon-<spaceId>`). Falls back here when no `--room` flag is passed. |
 | `MEMQL_REALTIME_NOISE_REDUCTION` | `far_field`    | Server-side input noise reduction on the realtime voice session (`audio.input.noise_reduction`): `far_field` (laptop/conference mics -- the documented mitigation for speaker-echo phantom turns), `near_field` (headsets), or `off` (field omitted). Filters audio BEFORE the model's VAD, reducing turn-detection false positives. Layered with the `MEMQL_REALTIME_VAD_THRESHOLD` energy gate and the transcript filters. See `docs/public/operate/voice-realtime-ga.md` (#1431). |
 | `MEMQL_REALTIME_TRANSCRIPT_MIN_CONFIDENCE` | `-1.0` | Mean per-token logprob floor a realtime input-transcription FINAL must clear to reach chat (the session requests `item.input_audio_transcription.logprobs`; requires the `gpt-4o-transcribe` model family). Finals WITHOUT logprobs always pass -- the signal is intermittently missing and absence never drops a real utterance. Raise toward `-0.5` to gate harder; set very low (e.g. `-100`) to effectively disable. Composes with the #1199 hallucination denylist (#1431). |
 | `MEMQL_AVATAR_VENDOR`          | `anam`           | Avatar vendor on the voice-agent side: `anam`, `simli`, or `none`.               |
-| `ANAM_API_KEY`                 | unset            | Anam (CARA-3) API key. Required when avatar vendor=anam.                         |
-| `SIMLI_API_KEY`                | unset            | Simli API key. Required when avatar vendor=simli.                                |
+| `MEMQL_ANAM_API_KEY`                 | unset            | Anam (CARA-3) API key. Required when avatar vendor=anam.                         |
+| `MEMQL_SIMLI_API_KEY`                | unset            | Simli API key. Required when avatar vendor=simli.                                |
 
 #### Infra metadata
 
@@ -435,12 +435,12 @@ Stored in `v1:platform:globalSecret`, sealed under `MEMQL_MASTER_KEY`.
 
 | Name                          | Kind             | Purpose                                                                                                                                   |
 |-------------------------------|------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
-| `OPENAI_API_KEY`              | `vendor_api_key` | Instance-wide OpenAI key. Used by chat / TTS / STT / Realtime providers unless a tenant overrides it.                                     |
-| `ANTHROPIC_API_KEY`           | `vendor_api_key` | Instance-wide Anthropic key for Claude chat / vision providers.                                                                           |
-| `IDENTITY_KEY_ENCRYPTION_KEY` | `integration`    | Master secret (>=16 bytes) wrapping the identity service's on-disk Ed25519 signing keypair. Required in production.                       |
-| `EMAIL_AZURE_CLIENT_SECRET`   | `oauth_secret`   | Microsoft Graph client secret used by the **email integration**'s GraphSender. Legacy name `AZURE_CLIENT_SECRET` still accepted (fallback). |
-| `ANAM_API_KEY`                | `integration`    | Anam avatar vendor key (server-side). Used by the direct/Guide avatar (`integrations/avatardirect`) and the voice-agent avatar.            |
-| `SIMLI_API_KEY`               | `integration`    | Simli avatar vendor key (server-side). Used by the voice-agent avatar (direct-path Simli support lands in #293).                          |
+| `MEMQL_OPENAI_API_KEY`              | `vendor_api_key` | Instance-wide OpenAI key. Used by chat / TTS / STT / Realtime providers unless a tenant overrides it.                                     |
+| `MEMQL_ANTHROPIC_API_KEY`           | `vendor_api_key` | Instance-wide Anthropic key for Claude chat / vision providers.                                                                           |
+| `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY` | `integration`    | Master secret (>=16 bytes) wrapping the identity service's on-disk Ed25519 signing keypair. Required in production.                       |
+| `MEMQL_EMAIL_AZURE_CLIENT_SECRET`   | `oauth_secret`   | Microsoft Graph client secret used by the **email integration**'s GraphSender. Legacy name `AZURE_CLIENT_SECRET` still accepted (fallback). |
+| `MEMQL_ANAM_API_KEY`                | `integration`    | Anam avatar vendor key (server-side). Used by the direct/Guide avatar (`integrations/avatardirect`) and the voice-agent avatar.            |
+| `MEMQL_SIMLI_API_KEY`               | `integration`    | Simli avatar vendor key (server-side). Used by the voice-agent avatar (direct-path Simli support lands in #293).                          |
 
 ### Default global variables (manifest)
 
@@ -448,12 +448,12 @@ Stored in `v1:platform:globalVariable`.
 
 | Name                          | Default                              | Purpose                                                                                                                                |
 |-------------------------------|--------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|
-| `IDENTITY_BASE_URL`           | none                                 | Public origin of the identity service (e.g. `https://auth.example.com`).                                                               |
-| `IDENTITY_VERIFIER_BASE_URL`  | matches `IDENTITY_BASE_URL`          | Override only when internal-mesh routing differs from the public origin.                                                               |
-| `EMAIL_AZURE_TENANT_ID`       | none                                 | Azure AD tenant id used by the **email integration**'s GraphSender. Legacy name `AZURE_TENANT_ID` still accepted (fallback).           |
-| `EMAIL_AZURE_CLIENT_ID`       | none                                 | Azure AD application id used by the email integration's GraphSender. Legacy name `AZURE_CLIENT_ID` still accepted.                     |
-| `EMAIL_SENDER`                | none                                 | Sender address for transactional mail (e.g. `no-reply@znas.io`). Legacy name `MAIL_SENDER` still accepted.                             |
-| `EMAIL_FROM_NAME`             | `memQL`                              | Display name in the From header. Legacy name `MAIL_FROM_NAME` still accepted.                                                          |
+| `MEMQL_IDENTITY_BASE_URL`           | none                                 | Public origin of the identity service (e.g. `https://auth.example.com`).                                                               |
+| `MEMQL_IDENTITY_VERIFIER_BASE_URL`  | matches `MEMQL_IDENTITY_BASE_URL`          | Override only when internal-mesh routing differs from the public origin.                                                               |
+| `MEMQL_EMAIL_AZURE_TENANT_ID`       | none                                 | Azure AD tenant id used by the **email integration**'s GraphSender. Legacy name `AZURE_TENANT_ID` still accepted (fallback).           |
+| `MEMQL_EMAIL_AZURE_CLIENT_ID`       | none                                 | Azure AD application id used by the email integration's GraphSender. Legacy name `AZURE_CLIENT_ID` still accepted.                     |
+| `MEMQL_EMAIL_SENDER`                | none                                 | Sender address for transactional mail (e.g. `no-reply@znas.io`). Legacy name `MAIL_SENDER` still accepted.                             |
+| `MEMQL_EMAIL_FROM_NAME`             | `memQL`                              | Display name in the From header. Legacy name `MAIL_FROM_NAME` still accepted.                                                          |
 
 ### Variables consumed by the CoPresent frontend
 
@@ -491,12 +491,12 @@ overridden per-tenant by writing the same `name` into
 stamped on the row.
 
 The resolver always tries the partition-scoped row first and falls
-back to the global one. So a tenant with `OPENAI_API_KEY` in their
+back to the global one. So a tenant with `MEMQL_OPENAI_API_KEY` in their
 partition's `v1:platform:partitionSecret` will use their own key; everyone else
 keeps using the platform default.
 
 This is the BYOK ("bring your own key") path. The DSL surface is
-`resolveSecret("OPENAI_API_KEY")` and `resolveVariable("...")`; see
+`resolveSecret("MEMQL_OPENAI_API_KEY")` and `resolveVariable("...")`; see
 `component/memql/sense/builtins.go` for the builtin docs.
 
 ---
@@ -512,17 +512,17 @@ Schema:
 ```yaml
 masterKey: <64-hex-character master key>     # 32 bytes hex-encoded
 secrets:
-  - name: OPENAI_API_KEY
+  - name: MEMQL_OPENAI_API_KEY
     scope: global
     kind: vendor_api_key
     value: sk-proj-...
-  - name: ANTHROPIC_API_KEY
+  - name: MEMQL_ANTHROPIC_API_KEY
     scope: global
     kind: vendor_api_key
     value: sk-ant-...
   ...
 variables:
-  - name: IDENTITY_BASE_URL
+  - name: MEMQL_IDENTITY_BASE_URL
     scope: global
     value: https://auth.example.com
   - name: VITE_OPENAI_MODEL
@@ -677,7 +677,7 @@ automatically.
 
 ```bash
 # In the operator's local copy (dev):
-make secret-set NAME=OPENAI_API_KEY VALUE='sk-proj-newvalue' SCOPE=global
+make secret-set NAME=MEMQL_OPENAI_API_KEY VALUE='sk-proj-newvalue' SCOPE=global
 
 # Or for prod, point the same target at the prod gRPC endpoint by
 # setting MEMQL_GRPC_ENDPOINT in the calling shell.
@@ -708,7 +708,7 @@ Check the resolver chain in order:
    make secrets-list
    ```
    or in DSL:
-   `getQuery("queryConfigSecret", { name: "OPENAI_API_KEY" })`.
+   `getQuery("queryConfigSecret", { name: "MEMQL_OPENAI_API_KEY" })`.
 2. Does the running memQL have `MEMQL_MASTER_KEY` set in env?
 3. Is the master key the **same one** that encrypted the row? If
    you regenerated it, the existing rows are unreadable -- run

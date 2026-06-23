@@ -29,7 +29,7 @@
 # EXIT CODES: 0 = ok, 1 = WARN, 2 = CRIT (or unreachable). So a CronJob's
 #   last-run status + logs surface the state; a human/gate can branch on it.
 #
-# DSN: DIRECT_DSN -> MEMORY_NODES_DATABASE_DIRECT_DSN -> MEMORY_NODES_DATABASE_DSN
+# DSN: DIRECT_DSN -> MEMORY_NODES_DATABASE_DIRECT_DSN -> MEMQL_DATABASE_DSN
 #      -> `tiger db connection-string $TIGER_SVC`.
 #
 # Status-reporter: set -uo pipefail (NO -e). Function-based per CLAUDE.md.
@@ -66,7 +66,7 @@ Options:
   --leak-min=N     Warn when a NON-mesh application_name holds > N conns (default $LEAK_MIN)
   --reserved=N     Reserved slots (default $RESERVED_CONNECTIONS)
   --dsn=DSN        DB DSN (default: DIRECT_DSN / MEMORY_NODES_DATABASE_DIRECT_DSN
-                   / MEMORY_NODES_DATABASE_DSN / tiger CLI for \$TIGER_SVC)
+                   / MEMQL_DATABASE_DSN / tiger CLI for \$TIGER_SVC)
   --help
 
 Exit: 0 ok, 1 WARN, 2 CRIT/unreachable.
@@ -95,12 +95,12 @@ function resolve_dsn() {
     [[ -n "$DSN" ]] && return 0
     [[ -n "${DIRECT_DSN:-}" ]] && { DSN="$DIRECT_DSN"; return 0; }
     [[ -n "${MEMORY_NODES_DATABASE_DIRECT_DSN:-}" ]] && { DSN="$MEMORY_NODES_DATABASE_DIRECT_DSN"; return 0; }
-    [[ -n "${MEMORY_NODES_DATABASE_DSN:-}" ]] && { DSN="$MEMORY_NODES_DATABASE_DSN"; return 0; }
+    [[ -n "${MEMQL_DATABASE_DSN:-}" ]] && { DSN="$MEMQL_DATABASE_DSN"; return 0; }
     if command -v tiger >/dev/null 2>&1; then
         DSN="$(tiger db connection-string "$TIGER_SVC" --with-password 2>/dev/null)"
         [[ -n "$DSN" ]] && return 0
     fi
-    echo "CONN-MONITOR CRIT: no DSN (set DIRECT_DSN / MEMORY_NODES_DATABASE_DIRECT_DSN / MEMORY_NODES_DATABASE_DSN or auth tiger CLI)" >&2
+    echo "CONN-MONITOR CRIT: no DSN (set DIRECT_DSN / MEMORY_NODES_DATABASE_DIRECT_DSN / MEMQL_DATABASE_DSN or auth tiger CLI)" >&2
     exit 2
 }
 

@@ -47,7 +47,7 @@ func runVoiceAgentSubcommand(args []string) int {
 
 	// Subcommands dispatch in main() BEFORE the genesis auto-load, so load the
 	// envelope here -- in a cluster deploy the voice-agent's required secrets
-	// (OPENAI_API_KEY, MEMQL_NODE_BOOTSTRAP_TOKEN, ...)
+	// (MEMQL_OPENAI_API_KEY, MEMQL_NODE_BOOTSTRAP_TOKEN, ...)
 	// are sealed in MEMQL_GENESIS_B64 and would otherwise be missing (#1049).
 	if err := applySubcommandEnv("voice-agent"); err != nil {
 		fmt.Fprintf(os.Stderr, "voice-agent: %v\n", err)

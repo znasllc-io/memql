@@ -351,12 +351,12 @@ func sortedSetKeys(set map[string]struct{}) []string {
 
 // --- Part B: full PG-backed path (skips when no Postgres reachable) ----------
 
-// openVoiceScopeTestDB opens the dev Postgres (or $MEMORY_NODES_DATABASE_DSN);
+// openVoiceScopeTestDB opens the dev Postgres (or $MEMQL_DATABASE_DSN);
 // skips the test when none is reachable, so CI (no PG) is unaffected while a
 // local/integration run exercises the genuine Execute + ResolveSkills path.
 func openVoiceScopeTestDB(t *testing.T) *bun.DB {
 	t.Helper()
-	dsn := os.Getenv("MEMORY_NODES_DATABASE_DSN")
+	dsn := os.Getenv("MEMQL_DATABASE_DSN")
 	if dsn == "" {
 		dsn = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"
 	}

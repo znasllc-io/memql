@@ -66,30 +66,30 @@ Identity-tagged binary:
 
 | Variable                           | Required                  | Purpose                                                                                |
 |------------------------------------|---------------------------|----------------------------------------------------------------------------------------|
-| `IDENTITY_ENABLED`                 | yes (`true`)              | Gates the whole service.                                                               |
-| `IDENTITY_BASE_URL`                | yes                       | Public origin (e.g. `https://auth.example.com`). Used as JWT `iss` and email links.    |
-| `IDENTITY_SIGNING_KEY_B64`         | **yes for >=2 replicas**  | Shared base64-std 32-byte Ed25519 seed (#550). Every replica derives the SAME key + kid + JWKS. REQUIRED for any multi-replica / HA deployment -- see "Key management" below. |
-| `IDENTITY_ALLOW_EPHEMERAL_KEY`     | dev / single-node only    | Opt into per-pod ephemeral file keys (no shared seed). Default `false`. Only safe for one replica or a shared key volume. |
-| `IDENTITY_KEY_DIR`                 | recommended               | Where the on-disk Ed25519 key files live (file-key mode). Default `var/identity/keys`. |
-| `IDENTITY_KEY_ENCRYPTION_KEY`      | yes in non-localhost prod | Master secret (>=16 bytes) wrapping the on-disk private key (file-key mode).            |
-| `IDENTITY_REGISTERED_CLIENTS`      | yes for production        | JSON array of `{clientId, redirectURIs[]}` -- explicit, no wildcards.                  |
-| `IDENTITY_REGISTRATION_MODE`       | recommended               | `open` / `domain_restricted` / `invite_only` / `waitlist`. Default `open`.             |
-| `IDENTITY_INTERNAL_DOMAINS`        | recommended               | Comma-separated. Matches assign `internal=true` + `INTERNAL_DEFAULT_ROLE`.             |
-| `IDENTITY_INTERNAL_DEFAULT_ROLE`   | recommended               | `owner` / `admin` / `writer` / `reader`. Default `writer`.                             |
-| `IDENTITY_BRAND_NAME`              | recommended               | Subject prefix on outbound emails + admin UI title.                                    |
+| `MEMQL_IDENTITY_ENABLED`                 | yes (`true`)              | Gates the whole service.                                                               |
+| `MEMQL_IDENTITY_BASE_URL`                | yes                       | Public origin (e.g. `https://auth.example.com`). Used as JWT `iss` and email links.    |
+| `MEMQL_IDENTITY_SIGNING_KEY_B64`         | **yes for >=2 replicas**  | Shared base64-std 32-byte Ed25519 seed (#550). Every replica derives the SAME key + kid + JWKS. REQUIRED for any multi-replica / HA deployment -- see "Key management" below. |
+| `MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY`     | dev / single-node only    | Opt into per-pod ephemeral file keys (no shared seed). Default `false`. Only safe for one replica or a shared key volume. |
+| `MEMQL_IDENTITY_KEY_DIR`                 | recommended               | Where the on-disk Ed25519 key files live (file-key mode). Default `var/identity/keys`. |
+| `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY`      | yes in non-localhost prod | Master secret (>=16 bytes) wrapping the on-disk private key (file-key mode).            |
+| `MEMQL_IDENTITY_REGISTERED_CLIENTS`      | yes for production        | JSON array of `{clientId, redirectURIs[]}` -- explicit, no wildcards.                  |
+| `MEMQL_IDENTITY_REGISTRATION_MODE`       | recommended               | `open` / `domain_restricted` / `invite_only` / `waitlist`. Default `open`.             |
+| `MEMQL_IDENTITY_INTERNAL_DOMAINS`        | recommended               | Comma-separated. Matches assign `internal=true` + `INTERNAL_DEFAULT_ROLE`.             |
+| `MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE`   | recommended               | `owner` / `admin` / `writer` / `reader`. Default `writer`.                             |
+| `MEMQL_IDENTITY_BRAND_NAME`              | recommended               | Subject prefix on outbound emails + admin UI title.                                    |
 
 Other nodes (bff / voice / cognition / agent / planner):
 
 | Variable                                   | Required           | Purpose                                                                |
 |--------------------------------------------|--------------------|------------------------------------------------------------------------|
-| `IDENTITY_VERIFIER_BASE_URL`               | yes for prod auth  | Public identity origin. Verifier fetches `${BASE}/.well-known/jwks.json`. |
-| `IDENTITY_VERIFIER_AUDIENCE`               | recommended        | JWT `aud` value. Default `memql`.                                      |
-| `IDENTITY_VERIFIER_EXPECTED_ISSUER`        | optional           | Override JWT `iss`. Defaults to `BASE_URL`.                            |
-| `IDENTITY_VERIFIER_JWKS_REFRESH_SECONDS`   | optional           | Background refresh cadence. Default 300 (5 min).                       |
-| `IDENTITY_VERIFIER_JWKS_FETCH_TIMEOUT_SECONDS` | optional       | Per-fetch HTTP timeout. Default 10.                                    |
-| `IDENTITY_VERIFIER_JWKS_URL`               | optional           | Override the JWKS URL when internal-mesh routing differs from public.  |
+| `MEMQL_IDENTITY_VERIFIER_BASE_URL`               | yes for prod auth  | Public identity origin. Verifier fetches `${BASE}/.well-known/jwks.json`. |
+| `MEMQL_IDENTITY_VERIFIER_AUDIENCE`               | recommended        | JWT `aud` value. Default `memql`.                                      |
+| `MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER`        | optional           | Override JWT `iss`. Defaults to `BASE_URL`.                            |
+| `MEMQL_IDENTITY_VERIFIER_JWKS_REFRESH_SECONDS`   | optional           | Background refresh cadence. Default 300 (5 min).                       |
+| `MEMQL_IDENTITY_VERIFIER_JWKS_FETCH_TIMEOUT_SECONDS` | optional       | Per-fetch HTTP timeout. Default 10.                                    |
+| `MEMQL_IDENTITY_VERIFIER_JWKS_URL`               | optional           | Override the JWKS URL when internal-mesh routing differs from public.  |
 
-Leaving `IDENTITY_VERIFIER_BASE_URL` unset on a non-identity node
+Leaving `MEMQL_IDENTITY_VERIFIER_BASE_URL` unset on a non-identity node
 boots it in **dev no-auth mode**: the synthetic `local-dev` admin
 identity is stamped on every request. Never enable this in
 production.
@@ -98,12 +98,12 @@ production.
 
 | Variable                                          | Default | Effect                                                  |
 |---------------------------------------------------|---------|---------------------------------------------------------|
-| `IDENTITY_RATE_LIMIT_PER_IP_PER_HOUR`             | 10      | Caps magic-link / access-request submissions per IP.    |
-| `IDENTITY_RISK_THRESHOLD`                         | 50      | 0-100; lower = stricter. Blocks at-or-above the score.  |
-| `IDENTITY_DISPOSABLE_EMAIL_BLOCKLIST_ENABLED`     | true    | Toggles the embedded blocklist.                         |
-| `IDENTITY_MX_VALIDATION_ENABLED`                  | true    | Toggles per-domain MX-record DNS check.                 |
-| `IDENTITY_TURNSTILE_SITE_KEY`                     | empty   | Optional Cloudflare Turnstile site key.                 |
-| `IDENTITY_TURNSTILE_SECRET`                       | empty   | Optional Cloudflare Turnstile secret.                   |
+| `MEMQL_IDENTITY_RATE_LIMIT_PER_IP_PER_HOUR`             | 10      | Caps magic-link / access-request submissions per IP.    |
+| `MEMQL_IDENTITY_RISK_THRESHOLD`                         | 50      | 0-100; lower = stricter. Blocks at-or-above the score.  |
+| `MEMQL_IDENTITY_DISPOSABLE_EMAIL_BLOCKLIST_ENABLED`     | true    | Toggles the embedded blocklist.                         |
+| `MEMQL_IDENTITY_MX_VALIDATION_ENABLED`                  | true    | Toggles per-domain MX-record DNS check.                 |
+| `MEMQL_IDENTITY_TURNSTILE_SITE_KEY`                     | empty   | Optional Cloudflare Turnstile site key.                 |
+| `MEMQL_IDENTITY_TURNSTILE_SECRET`                       | empty   | Optional Cloudflare Turnstile secret.                   |
 
 Each rejection emits an audit event with `category=auth`,
 `action=magic_link_blocked`, and a `failureReason` matching the
@@ -115,12 +115,12 @@ pipeline to tune thresholds.
 
 | Variable                                | Default      | Notes                                                              |
 |-----------------------------------------|--------------|--------------------------------------------------------------------|
-| `IDENTITY_ACCESS_TOKEN_TTL_SECONDS`     | 900 (15 min) | Short by design -- limits XSS blast radius.                        |
-| `IDENTITY_REFRESH_TOKEN_TTL_SECONDS`    | 2,592,000    | Absolute lifetime. Idle/max-age policies enforce earlier expiry.   |
-| `IDENTITY_MAGIC_LINK_TTL_SECONDS`       | 600          | 10 min.                                                            |
-| `IDENTITY_INVITATION_TTL_DAYS`          | 7            | Admin-issued user invitations.                                     |
-| `IDENTITY_SESSION_IDLE_DAYS`            | 14           | Refresh fails if `lastRefreshedAt + idle < now`.                   |
-| `IDENTITY_SESSION_MAX_DAYS`             | 90           | Refresh fails if `firstAuthenticatedAt + max < now`.               |
+| `MEMQL_IDENTITY_ACCESS_TOKEN_TTL_SECONDS`     | 900 (15 min) | Short by design -- limits XSS blast radius.                        |
+| `MEMQL_IDENTITY_REFRESH_TOKEN_TTL_SECONDS`    | 2,592,000    | Absolute lifetime. Idle/max-age policies enforce earlier expiry.   |
+| `MEMQL_IDENTITY_MAGIC_LINK_TTL_SECONDS`       | 600          | 10 min.                                                            |
+| `MEMQL_IDENTITY_INVITATION_TTL_DAYS`          | 7            | Admin-issued user invitations.                                     |
+| `MEMQL_IDENTITY_SESSION_IDLE_DAYS`            | 14           | Refresh fails if `lastRefreshedAt + idle < now`.                   |
+| `MEMQL_IDENTITY_SESSION_MAX_DAYS`             | 90           | Refresh fails if `firstAuthenticatedAt + max < now`.               |
 
 ### Refresh-token rotation grace window
 
@@ -150,8 +150,8 @@ plug-in. Configure exactly one sender:
 - **LogSender** -- both unset; emails are written to the slog
   stream. Dev only.
 
-Branding controls (`IDENTITY_BRAND_NAME`,
-`IDENTITY_BRAND_PRIMARY_COLOR`, `IDENTITY_BRAND_LOGO_DATA_URI`)
+Branding controls (`MEMQL_IDENTITY_BRAND_NAME`,
+`MEMQL_IDENTITY_BRAND_PRIMARY_COLOR`, `MEMQL_IDENTITY_BRAND_LOGO_DATA_URI`)
 flow into all outbound templates.
 
 ## Key management
@@ -160,13 +160,13 @@ flow into all outbound templates.
 
 The identity service has two signing-key modes:
 
-- **Shared-seed mode (`IDENTITY_SIGNING_KEY_B64` set)** -- every
+- **Shared-seed mode (`MEMQL_IDENTITY_SIGNING_KEY_B64` set)** -- every
   replica derives the SAME Ed25519 key + `kid` from the same seed
   (#550). JWKS is coherent across all replicas, survives restarts and
   DB resets, and the deployment can run `replicas: >=2` on a rolling
   update. This is the REQUIRED posture for staging and prod.
-- **File-key mode (`IDENTITY_SIGNING_KEY_B64` unset)** -- each pod
-  reads/generates an Ed25519 key on its OWN `IDENTITY_KEY_DIR` (which,
+- **File-key mode (`MEMQL_IDENTITY_SIGNING_KEY_B64` unset)** -- each pod
+  reads/generates an Ed25519 key on its OWN `MEMQL_IDENTITY_KEY_DIR` (which,
   in the cluster manifest, is the pod's ephemeral container
   filesystem -- there is no shared PVC). With >=2 replicas, **each
   replica mints its own key**, so `/.well-known/jwks.json` diverges
@@ -174,15 +174,15 @@ The identity service has two signing-key modes:
   AND mesh node tokens) fail with `unknown kid`, flapping login.
 
 > **This caused the 2026-06-16 staging auth outage.** Staging ran
-> identity at `replicas: 2` but had no `IDENTITY_SIGNING_KEY_B64` in
+> identity at `replicas: 2` but had no `MEMQL_IDENTITY_SIGNING_KEY_B64` in
 > its sealed genesis envelope, so it fell into per-pod file-key mode
 > and JWKS flapped between the two pods' keys. The fix is the shared
 > seed (added to staging's envelope) plus the startup guard below.
 
 **Fail-fast guard.** `Config.Validate()` REFUSES to start a
-non-localhost deployment that has no `IDENTITY_SIGNING_KEY_B64` unless
+non-localhost deployment that has no `MEMQL_IDENTITY_SIGNING_KEY_B64` unless
 the operator explicitly opts into per-pod keys with
-`IDENTITY_ALLOW_EPHEMERAL_KEY=true`. This converts a silent ~50%
+`MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true`. This converts a silent ~50%
 auth-failure into a loud, copy-pasteable startup error. localhost /
 `*.local.<domain>` origins (local dev) are exempt.
 
@@ -192,17 +192,17 @@ Generate a fresh seed:
 head -c 32 /dev/urandom | base64
 ```
 
-Set the result as `IDENTITY_SIGNING_KEY_B64` on every identity replica
+Set the result as `MEMQL_IDENTITY_SIGNING_KEY_B64` on every identity replica
 (in the sealed genesis envelope for staging/prod). Rotate by resealing
 with a new seed and rolling the deployment -- automatic rotation is
-disabled in shared-seed mode. Use `IDENTITY_ALLOW_EPHEMERAL_KEY=true`
+disabled in shared-seed mode. Use `MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true`
 only for a single-replica or shared-key-volume dev deployment (the
 local docker cluster sets it because both replicas share one on-disk
 key via a Docker volume).
 
 ### File-key mode (single-node / dev)
 
-Ed25519 signing keys live in `IDENTITY_KEY_DIR`:
+Ed25519 signing keys live in `MEMQL_IDENTITY_KEY_DIR`:
 
 - `jwt-current.ed25519` -- the active signing key.
 - `jwt-previous.ed25519` -- present only during the rotation
@@ -210,13 +210,13 @@ Ed25519 signing keys live in `IDENTITY_KEY_DIR`:
   still verify.
 
 Files are 0600, the directory 0700. With
-`IDENTITY_KEY_ENCRYPTION_KEY` set, the private bytes are wrapped
+`MEMQL_IDENTITY_KEY_ENCRYPTION_KEY` set, the private bytes are wrapped
 in AES-256-GCM with an Argon2id-derived key (32 MiB, t=2). With
 the env var unset (dev only), private bytes are plaintext.
 
 `Config.Validate()` enforces "encryption-at-rest is mandatory in
-production": if `IDENTITY_BASE_URL` is not a localhost origin and
-`IDENTITY_KEY_ENCRYPTION_KEY` is empty, startup fails. Don't try
+production": if `MEMQL_IDENTITY_BASE_URL` is not a localhost origin and
+`MEMQL_IDENTITY_KEY_ENCRYPTION_KEY` is empty, startup fails. Don't try
 to defeat the guard.
 
 ### Rotation
@@ -224,8 +224,8 @@ to defeat the guard.
 Two paths:
 
 - **Cron**: a goroutine triggers `KeyManager.Rotate` every
-  `IDENTITY_KEY_ROTATION_DAYS` (default 90). The retired key
-  stays in JWKS for `IDENTITY_JWKS_OVERLAP_HOURS` (default 24).
+  `MEMQL_IDENTITY_KEY_ROTATION_DAYS` (default 90). The retired key
+  stays in JWKS for `MEMQL_IDENTITY_JWKS_OVERLAP_HOURS` (default 24).
 - **Admin "Rotate now"**: button in the admin UI's JWKS panel
   calls `Service.RotateNow`. Same code path; same overlap.
 
@@ -236,7 +236,7 @@ demand when they encounter a token signed under an unknown kid.
 
 ### Recovery
 
-If `IDENTITY_KEY_ENCRYPTION_KEY` is rotated incorrectly (the new
+If `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY` is rotated incorrectly (the new
 secret can't decrypt the old envelope), the binary fails to load
 the key files at startup with a clear AES-GCM error. Restore the
 original secret from your secret store, redeploy, then perform a
@@ -254,14 +254,14 @@ the cluster only recovered after a manual reseal + mesh roll. The reset
 is now auth-coherent by construction -- it leans on two facts and you do
 NOT have to do anything by hand afterward:
 
-- **The signing key is NOT in the DB.** `IDENTITY_SIGNING_KEY_B64` rides
+- **The signing key is NOT in the DB.** `MEMQL_IDENTITY_SIGNING_KEY_B64` rides
   the sealed genesis envelope (`MEMQL_GENESIS_B64` in the `memql-secrets`
   Secret); the wipe never touches the Secret, so every replica derives
   the same key + `kid` + JWKS after the reset -- as long as the seed is
   present. The reset **pre-flights** this BEFORE wiping: it refuses if
   the Secret carries no genesis envelope / direct seed, or if identity is
   running in the divergent per-pod ephemeral-key mode
-  (`IDENTITY_ALLOW_EPHEMERAL_KEY=true` at `replicas >= 2`). A wipe in
+  (`MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true` at `replicas >= 2`). A wipe in
   either state would leave auth unrecoverable, so it is blocked.
 - **Mesh nodes re-mint their token on auth failure (#1521).** Once
   identity is back with the stable key, every leaf reconnects on its own.
@@ -286,20 +286,20 @@ For running the binaries standalone (no cluster), set the same URL:
 
 ```bash
 # Identity binary
-IDENTITY_ENABLED=true \
-IDENTITY_BASE_URL=https://identity.local.znas.io \
-IDENTITY_REGISTRATION_MODE=open \
+MEMQL_IDENTITY_ENABLED=true \
+MEMQL_IDENTITY_BASE_URL=https://identity.local.znas.io \
+MEMQL_IDENTITY_REGISTRATION_MODE=open \
 make identity-assets identity
 ./bin/memql-identity
 
 # bff binary, points at the identity binary above
-IDENTITY_VERIFIER_BASE_URL=http://identity:8081 \
-IDENTITY_VERIFIER_EXPECTED_ISSUER=https://identity.local.znas.io \
+MEMQL_IDENTITY_VERIFIER_BASE_URL=http://identity:8081 \
+MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER=https://identity.local.znas.io \
 make bff
 ./bin/memql-bff
 ```
 
-Without `IDENTITY_VERIFIER_BASE_URL` the bff boots into no-auth
+Without `MEMQL_IDENTITY_VERIFIER_BASE_URL` the bff boots into no-auth
 dev mode; convenient for solo development that doesn't need real
 tokens, but the synthetic `local-dev` admin identity will be on
 every request.
@@ -314,7 +314,7 @@ every request.
   createdAt, retiresAt) and the rotation cadence.
 - Audit events for every auth lifecycle moment land in
   `v1:identity:auditEvent` (in addition to slog). Retention is
-  controlled by `IDENTITY_AUDIT_LOG_RETENTION_DAYS` (default 365).
+  controlled by `MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS` (default 365).
 
 ## Related
 

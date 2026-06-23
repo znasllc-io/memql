@@ -112,7 +112,7 @@ logic accountDeletionReminder25Days {
 // Daily 09:00 UTC sweep that emits a reminder event for each user
 // roughly 7 days into their deletion cooldown so the user has a
 // clear chance to cancel before the cooldown elapses (typically a
-// 30-day window, configurable via IDENTITY_DELETION_COOLDOWN_DAYS).
+// 30-day window, configurable via MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS).
 //
 // The 7-day window is bracketed [P7D, P8D) on deletionScheduledAt:
 // a row whose deletionScheduledAt was approximately 7 days ago lands
@@ -172,7 +172,7 @@ logic accountDeletionReminder7Days {
 // =====================
 //
 // Daily 03:00 UTC sweep. For each active user with deletionScheduledAt
-// set whose cooldown (IDENTITY_DELETION_COOLDOWN_DAYS, default 30) has
+// set whose cooldown (MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS, default 30) has
 // elapsed:
 //
 //   1. Soft-delete the user row + scrub PII (deleteUserHard).
@@ -206,14 +206,14 @@ logic accountDeletionReminder7Days {
 //       addDuration(item.payload.deletionScheduledAt, "P{cooldown}D") < timestamp()
 //   - There's no batch-update path; we revoke sessions one row at a
 //     time inside the loop.
-@description("Daily 03:00 UTC sweep that hard-deletes users whose deletionScheduledAt + IDENTITY_DELETION_COOLDOWN_DAYS (default 30) has elapsed, via deleteUserHard. Audit-event rows, invitations the user issued, and access-request rows are intentionally retained for the trail.")
+@description("Daily 03:00 UTC sweep that hard-deletes users whose deletionScheduledAt + MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS (default 30) has elapsed, via deleteUserHard. Audit-event rows, invitations the user issued, and access-request rows are intentionally retained for the trail.")
 logic accountDeletionSweep {
   args {
     event object @required
   }
   body {
   candidates := usersScheduledForDeletion({})
-  cooldown := globalVariable({ name: "IDENTITY_DELETION_COOLDOWN_DAYS" })
+  cooldown := globalVariable({ name: "MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS" })
 
   for item := range candidates.Nodes() {
     deleteUser := if addDuration(item.payload.deletionScheduledAt, concat("P", coalesce(cooldown.First().payload.value, "30"), "D")) < timestamp() {
@@ -243,7 +243,7 @@ logic accountDeletionSweep {
 // =========================
 //
 // Daily 02:00 UTC sweep that walks audit-event rows older than
-// IDENTITY_AUDIT_LOG_RETENTION_DAYS. The intent is rotation-grade
+// MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. The intent is rotation-grade
 // retention (typically 90-365 days for compliance).
 //
 // Note (intentional gap): MemQL has no row-removal mutation today
@@ -268,14 +268,14 @@ logic accountDeletionSweep {
 // Per-row windowing uses addDuration on item.payload.occurredAt
 // against `timestamp()`, same as accessRequestExpirySweep -- MemQL
 // can't push that into the filter today.
-@description("Daily 02:00 UTC sweep over v1:identity:auditEvent rows older than IDENTITY_AUDIT_LOG_RETENTION_DAYS. Observation-only today: emits an 'identity.audit.retention.observed' event with the candidate count -- MemQL has no delete() mutation and AuditEvent's append-only semantics forbid soft-delete via active=false. Per-row delete lands when one of those gaps closes.")
+@description("Daily 02:00 UTC sweep over v1:identity:auditEvent rows older than MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. Observation-only today: emits an 'identity.audit.retention.observed' event with the candidate count -- MemQL has no delete() mutation and AuditEvent's append-only semantics forbid soft-delete via active=false. Per-row delete lands when one of those gaps closes.")
 logic auditEventRetentionSweep {
   args {
     event object @required
   }
   body {
   allEvents := expiredAuditEvents({})
-  retentionDays := globalVariable({ name: "IDENTITY_AUDIT_LOG_RETENTION_DAYS" })
+  retentionDays := globalVariable({ name: "MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS" })
 
   // Count how many rows would be deleted under the configured
   // retention. The publishEvent emits one observation per cron

@@ -48,7 +48,7 @@ Key fields:
 - `displayName`, `primaryEmail`
 - `role` -- cluster-wide role: `owner` / `admin` / `writer` / `reader`
 - `internal` -- true when registration matched
-  `IDENTITY_INTERNAL_DOMAINS`
+  `MEMQL_IDENTITY_INTERNAL_DOMAINS`
 - `preferences` -- theme, language, notifications, archive
   retention, voice mode, CoPresent Control settings
 - `active`, `suspendedAt`, `suspendedReason`, `lastSeenAt`

@@ -538,7 +538,7 @@ Base providers carry vendor-level auth and type; children inherit via
 @type("Anthropic")
 provider anthropic {
   auth {
-    apiKey  env("MEMQL_SI_ANTHROPIC_API_KEY")
+    apiKey  env("MEMQL_AI_ANTHROPIC_API_KEY")
   }
 }
 ```

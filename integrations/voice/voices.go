@@ -28,7 +28,7 @@ import (
 // applying the same auto-selection rule the bridge-agent and the
 // engine's STT selector use:
 //
-//  1. POLYPHON_VOICE_PROVIDER explicit (non-empty) -> honor it.
+//  1. MEMQL_POLYPHON_VOICE_PROVIDER explicit (non-empty) -> honor it.
 //  2. Default -> "openai".
 //
 // Every node in the cluster (cognition, voice, bridge-agent) must
@@ -36,7 +36,7 @@ import (
 // side produces ids the other side can't synthesize. Hardcoding
 // "openai" anywhere is a bug -- always go through this helper.
 func ActiveProvider() string {
-	if v := strings.ToLower(strings.TrimSpace(os.Getenv("POLYPHON_VOICE_PROVIDER"))); v != "" {
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("MEMQL_POLYPHON_VOICE_PROVIDER"))); v != "" {
 		return v
 	}
 	return "openai"

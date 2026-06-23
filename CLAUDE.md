@@ -638,7 +638,7 @@ Env:
 - `MEMQL_GRPC_ADDR` -- the BFF's gRPC address (e.g. `bff:50051`).
 - `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` -- room
   transport.
-- `OPENAI_API_KEY` -- OpenAI (STT + TTS + realtime); required.
+- `MEMQL_OPENAI_API_KEY` -- OpenAI (STT + TTS + realtime); required.
 - `MEMQL_VOICE_EXECUTOR` -- `realtime` (default) or `cascade`.
 - `MEMQL_VOICE_ROOM_NAME` -- room to join (falls back when no
   `--room` flag is passed).
@@ -656,10 +656,10 @@ Env:
 - `VOICE_AGENT_TOKEN` -- identity-issued `class="voice_agent"` JWT
   (#109). Mint via `JWTIssuer.IssueVoiceAgentAccessToken`
   (`make voice-agent-token`); or self-bootstrap via
-  `MEMQL_NODE_BOOTSTRAP_TOKEN` + `IDENTITY_VERIFIER_BASE_URL` +
+  `MEMQL_NODE_BOOTSTRAP_TOKEN` + `MEMQL_IDENTITY_VERIFIER_BASE_URL` +
   `MEMQL_VOICE_AGENT_INSTANCE_ID`. See `docs/public/operate/auth/voice-agent-jwt.md`.
 - `MEMQL_AVATAR_VENDOR` -- `anam` (default) or `simli` or `none`.
-- `ANAM_API_KEY` / `SIMLI_API_KEY` -- vendor keys.
+- `MEMQL_ANAM_API_KEY` / `MEMQL_SIMLI_API_KEY` -- vendor keys.
 
 Make targets:
 - `make voice` -- build the `memql-voice` binary (carries the
@@ -683,7 +683,7 @@ baritone / ...) on `providerConfig.voice.voiceId`, plus a
 `gender` enum on the agent record. The catalog is gender-bucketed
 and provider-agnostic; the cognition handler resolves canonical ->
 provider voice id at TTS-publish time via the active
-`POLYPHON_VOICE_PROVIDER`. Voice is auto-assigned at agent creation
+`MEMQL_POLYPHON_VOICE_PROVIDER`. Voice is auto-assigned at agent creation
 (see CreateAgentModal on the CoPresent side) and never edited by
 the user. Two DSL builtins expose the catalog: `voicePickForGender`
 + `voiceResolve`. The General Assistant is hardcoded to canonical
@@ -952,8 +952,8 @@ identity-issued JWTs locally via the per-node verifier
 on a 5-min background refresh and on demand for unknown `kid`
 headers. They never see the private key.
 
-`IDENTITY_VERIFIER_BASE_URL` configures the verifier;
-`IDENTITY_BASE_URL` configures the identity service itself. See
+`MEMQL_IDENTITY_VERIFIER_BASE_URL` configures the verifier;
+`MEMQL_IDENTITY_BASE_URL` configures the identity service itself. See
 [docs/public/operate/auth/identity-service.md](docs/public/operate/auth/identity-service.md) for
 the operator-side narrative.
 
@@ -1453,7 +1453,7 @@ Base providers (vendor-level auth + type) use the same form:
 @type("OpenAI")
 provider openai {
   auth {
-    apiKey  env("MEMQL_SI_OPENAI_API_KEY")
+    apiKey  env("MEMQL_AI_OPENAI_API_KEY")
   }
 }
 ```

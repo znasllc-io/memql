@@ -79,7 +79,7 @@ func TestSerializeEntries(t *testing.T) {
 
 func TestSerializeEntries_RoundTrip(t *testing.T) {
 	in := []EnvEntry{
-		{Name: "OPENAI_API_KEY", Value: "sk-test-1234"},
+		{Name: "MEMQL_OPENAI_API_KEY", Value: "sk-test-1234"},
 		{Name: "MULTI_WORD", Value: "hello world"},
 	}
 	tmp := t.TempDir()
@@ -119,17 +119,17 @@ func TestLoadManifest_Embedded(t *testing.T) {
 	names := m.Names()
 	found := false
 	for _, n := range names {
-		if n == "OPENAI_API_KEY" {
+		if n == "MEMQL_OPENAI_API_KEY" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("OPENAI_API_KEY not present in embedded manifest names: %v", names)
+		t.Fatalf("MEMQL_OPENAI_API_KEY not present in embedded manifest names: %v", names)
 	}
 }
 
-// IDENTITY_SIGNING_KEY_B64 is declared optional (memql#619): it must be
+// MEMQL_IDENTITY_SIGNING_KEY_B64 is declared optional (memql#619): it must be
 // present in the manifest secrets (documented + sealed-when-present) but MUST
 // NOT appear in Names() (the required floor), so a local-dev .env that omits it
 // still seals.
@@ -144,26 +144,26 @@ func TestEmbeddedManifest_SigningKeyOptional(t *testing.T) {
 
 	var entry *ManifestEntry
 	for i := range m.Secrets {
-		if m.Secrets[i].Name == "IDENTITY_SIGNING_KEY_B64" {
+		if m.Secrets[i].Name == "MEMQL_IDENTITY_SIGNING_KEY_B64" {
 			entry = &m.Secrets[i]
 			break
 		}
 	}
 	if entry == nil {
-		t.Fatal("IDENTITY_SIGNING_KEY_B64 not declared in embedded manifest secrets")
+		t.Fatal("MEMQL_IDENTITY_SIGNING_KEY_B64 not declared in embedded manifest secrets")
 	}
 	if !entry.Optional {
-		t.Error("IDENTITY_SIGNING_KEY_B64 should be optional: true")
+		t.Error("MEMQL_IDENTITY_SIGNING_KEY_B64 should be optional: true")
 	}
 
 	for _, n := range m.Names() {
-		if n == "IDENTITY_SIGNING_KEY_B64" {
-			t.Fatal("IDENTITY_SIGNING_KEY_B64 must NOT be in Names() (the required floor) -- it is optional")
+		if n == "MEMQL_IDENTITY_SIGNING_KEY_B64" {
+			t.Fatal("MEMQL_IDENTITY_SIGNING_KEY_B64 must NOT be in Names() (the required floor) -- it is optional")
 		}
 	}
 
 	// A .env lacking the optional key must not be flagged as missing.
-	if missing := FindMissing(nil, m.Names()); contains(missing, "IDENTITY_SIGNING_KEY_B64") {
+	if missing := FindMissing(nil, m.Names()); contains(missing, "MEMQL_IDENTITY_SIGNING_KEY_B64") {
 		t.Errorf("optional key wrongly reported missing: %v", missing)
 	}
 }
@@ -483,8 +483,8 @@ func TestManifest_AllEntries_AndLookup(t *testing.T) {
 	if len(all) < 150 {
 		t.Fatalf("registry looks truncated: %d entries (expected the full ~200-var universe)", len(all))
 	}
-	if e, ok := m.Lookup("MEMORY_NODES_DATABASE_DSN"); !ok || e.Component != "database" {
-		t.Fatalf("Lookup(MEMORY_NODES_DATABASE_DSN) = %+v ok=%v", e, ok)
+	if e, ok := m.Lookup("MEMQL_DATABASE_DSN"); !ok || e.Component != "database" {
+		t.Fatalf("Lookup(MEMQL_DATABASE_DSN) = %+v ok=%v", e, ok)
 	}
 	if _, ok := m.Lookup("NOPE_NOT_A_VAR"); ok {
 		t.Fatal("Lookup of missing name returned ok=true")
@@ -531,12 +531,12 @@ func TestManifest_RequiredForNodeType(t *testing.T) {
 	req := m.RequiredForNodeType("bff")
 	found := false
 	for _, n := range req {
-		if n == "MEMORY_NODES_DATABASE_DSN" {
+		if n == "MEMQL_DATABASE_DSN" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("MEMORY_NODES_DATABASE_DSN not required for bff: %v", req)
+		t.Fatalf("MEMQL_DATABASE_DSN not required for bff: %v", req)
 	}
 }
 

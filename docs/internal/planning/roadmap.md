@@ -189,7 +189,7 @@ The cutover landed across epic #449:
 
 The Go agent reuses the env-var family the Python config defined
 verbatim (`LIVEKIT_*`, `MEMQL_DEEPGRAM_API_KEY`, `MEMQL_VOICE_EXECUTOR`
-[default `cascade`], `OPENAI_API_KEY` / `MEMQL_REALTIME_*` on the
+[default `cascade`], `MEMQL_OPENAI_API_KEY` / `MEMQL_REALTIME_*` on the
 realtime path, `MEMQL_AVATAR_VENDOR` / `ANAM_*` / `SIMLI_*`,
 `MEMQL_VOICE_ROOM_NAME`), authenticates with a class="voice_agent" JWT
 (`VOICE_AGENT_TOKEN`, or self-bootstrap via `/node/bootstrap`), and

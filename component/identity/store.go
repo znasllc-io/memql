@@ -1280,7 +1280,7 @@ func NewRequestId() string {
 type ClusterSettingsRow struct {
 	// ClusterDomain is the deployment-wide hostname suffix the
 	// operator entered in the /setup wizard (or set via
-	// IDENTITY_BOOTSTRAP_DOMAIN). Examples: local.znas.io,
+	// MEMQL_IDENTITY_BOOTSTRAP_DOMAIN). Examples: local.znas.io,
 	// staging.acme.com, acme.com. Every public service URL the
 	// cluster builds derives from it (app.<domain>, identity.
 	// <domain>, etc.). Required at bootstrap time.
@@ -1318,7 +1318,7 @@ type ClusterSettingsRow struct {
 
 	// AccessTokenTTLSeconds is the runtime-tunable lifetime for
 	// issued access tokens, in seconds. 0 means "fall back to the
-	// IDENTITY_ACCESS_TOKEN_TTL_SECONDS env / built-in default".
+	// MEMQL_IDENTITY_ACCESS_TOKEN_TTL_SECONDS env / built-in default".
 	// Read by /oauth/token + /auth/refresh on every issuance via
 	// LiveTokenSettings; admin form bounds it to [60, 86400].
 	AccessTokenTTLSeconds int
@@ -1333,7 +1333,7 @@ type ClusterSettingsRow struct {
 	// is valid, in days. 0 = fall through. Bounds: [1, 90].
 	InvitationTTLDays int
 	// RefreshCookieSameSite is the SameSite policy for the refresh
-	// cookie. Empty = inherit from IDENTITY_REFRESH_COOKIE_SAMESITE
+	// cookie. Empty = inherit from MEMQL_IDENTITY_REFRESH_COOKIE_SAMESITE
 	// env (which itself defaults to "lax"). Valid values: "lax",
 	// "none". The cookie is always Secure when BaseURL is HTTPS.
 	RefreshCookieSameSite string

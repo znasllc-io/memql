@@ -30,7 +30,7 @@
 //
 // Required env:
 //   - MEMQL_MASTER_KEY  for decrypt + seed
-//   - MEMQL_GRPC_ENDPOINT  default https://bff.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}:443
+//   - MEMQL_GRPC_ENDPOINT  default https://bff.${MEMQL_IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}:443
 package main
 
 import (
@@ -396,7 +396,7 @@ func parseFlags(args []string) map[string]string {
 
 func connectGRPC() (*grpc.ClientConn, error) {
 	// MEMQL_GRPC_ENDPOINT overrides the default
-	// https://bff.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}:443
+	// https://bff.${MEMQL_IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}:443
 	// endpoint. Accepts:
 	//
 	//   https://bff.<domain>          TLS, port 443 implied
@@ -407,7 +407,7 @@ func connectGRPC() (*grpc.ClientConn, error) {
 	endpoint := os.Getenv("MEMQL_GRPC_ENDPOINT")
 	useTLS := false
 	if endpoint == "" {
-		domain := os.Getenv("IDENTITY_BOOTSTRAP_DOMAIN")
+		domain := os.Getenv("MEMQL_IDENTITY_BOOTSTRAP_DOMAIN")
 		if strings.TrimSpace(domain) == "" {
 			domain = "local.znas.io"
 		}

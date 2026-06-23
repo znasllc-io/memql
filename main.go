@@ -67,6 +67,15 @@ func main() {
 		serviceLogger.Info("local .env override applied", "vars", overridden)
 	}
 
+	// Epic 7.3 (memql#2106): the owned env vars were renamed to the
+	// MEMQL_ convention. Bridge any pre-7.3 LEGACY names an operator's
+	// shell / .env / sealed envelope still carries onto their new names
+	// (set-if-absent, new wins), emitting one deprecation warning per
+	// bridged var. Runs after the envelope + .env layers are painted so
+	// a legacy value from any of them is honored, and before config is
+	// read so every consumer sees the new name.
+	genesis.ApplyLegacyEnvAliases(serviceLogger)
+
 	app.Run(app.RunConfig{
 		Logger:  serviceLogger,
 		Version: resolveVersionFn(),

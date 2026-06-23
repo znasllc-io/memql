@@ -2,7 +2,7 @@ package identity
 
 import "encoding/json"
 
-// parseRegisteredClientsJSON parses the IDENTITY_REGISTERED_CLIENTS
+// parseRegisteredClientsJSON parses the MEMQL_IDENTITY_REGISTERED_CLIENTS
 // env-var payload. Kept in its own file so the env-loading code in
 // config.go stays readable.
 func parseRegisteredClientsJSON(raw string) ([]RegisteredClient, error) {

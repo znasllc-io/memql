@@ -15,7 +15,7 @@ import (
 //
 // Operators that want to point CoPresent at a different gRPC
 // endpoint than the identity origin set MEMQL_DISCOVERY_GRPC_ENDPOINT
-// (or fall through to IDENTITY_BASE_URL's host as a sensible
+// (or fall through to MEMQL_IDENTITY_BASE_URL's host as a sensible
 // default).
 type DiscoveryDocument struct {
 	// IdentityURL is the OIDC issuer. Used by the cockpit's OAuth
@@ -109,7 +109,7 @@ func deriveGRPCEndpoint(identityURL string, env func(string) string) string {
 //  1. MEMQL_DISCOVERY_CLIENT_ID explicit override.
 //  2. The first registered client's clientId. Operators register
 //     the cockpit alongside the CoPresent SPA via
-//     IDENTITY_REGISTERED_CLIENTS.
+//     MEMQL_IDENTITY_REGISTERED_CLIENTS.
 //  3. Empty -- cockpit will refuse to use the discovery shortcut
 //     and prompt for explicit flags.
 func deriveClientId(cfg Config, env func(string) string) string {

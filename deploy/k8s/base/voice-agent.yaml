@@ -8,7 +8,7 @@
 # LiveKit for active polyphon-<spaceId> rooms and joins one. Single replica for
 # staging; concurrent multi-room dispatch is a follow-up (see dispatcher_voice.go).
 #
-# Secrets: OPENAI_API_KEY / MEMQL_NODE_BOOTSTRAP_TOKEN
+# Secrets: MEMQL_OPENAI_API_KEY / MEMQL_NODE_BOOTSTRAP_TOKEN
 # come from the genesis envelope (autoload, via memql-secrets). The LiveKit
 # api key/secret come from the ESO-synced livekit-secrets (the same pair the
 # BFF mints tokens with). Auth: VOICE_AGENT_TOKEN empty -> self-bootstrap mints
@@ -54,7 +54,7 @@ spec:
           args: ["voice-agent"]
           envFrom:
             # MEMQL_MASTER_KEY + MEMQL_GENESIS_B64 (genesis autoload) +
-            # MEMORY_NODES_DATABASE_DSN (unused here, harmless).
+            # MEMQL_DATABASE_DSN (unused here, harmless).
             - secretRef:
                 name: memql-secrets
           env:
@@ -64,8 +64,8 @@ spec:
             # self-chosen key/secret the BFF mints with). Note the agent reads
             # the non-POLYPHON_-prefixed names.
             - { name: LIVEKIT_URL, value: "ws://livekit:7880" }
-            - { name: LIVEKIT_API_KEY, valueFrom: { secretKeyRef: { name: livekit-secrets, key: POLYPHON_LIVEKIT_API_KEY } } }
-            - { name: LIVEKIT_API_SECRET, valueFrom: { secretKeyRef: { name: livekit-secrets, key: POLYPHON_LIVEKIT_API_SECRET } } }
+            - { name: LIVEKIT_API_KEY, valueFrom: { secretKeyRef: { name: livekit-secrets, key: MEMQL_POLYPHON_LIVEKIT_API_KEY } } }
+            - { name: LIVEKIT_API_SECRET, valueFrom: { secretKeyRef: { name: livekit-secrets, key: MEMQL_POLYPHON_LIVEKIT_API_SECRET } } }
             # The memql gRPC surface the agent speaks VoiceAgent* on.
             # #1399: dial the Rollout-managed ACTIVE bff (color-pinned), not the
             # unscoped `bff` Service, so the VoiceAgent* gRPC connection never
@@ -91,22 +91,22 @@ spec:
             # Avatar (#1428): the agent starts the GA's avatar (Simli) into the
             # polyphon room and forwards the assistant PCM over the
             # lk.audio_stream byte stream for lip-sync, source-agnostic across
-            # the cascade and realtime executors. SIMLI_API_KEY arrives via the
+            # the cascade and realtime executors. MEMQL_SIMLI_API_KEY arrives via the
             # genesis envelope autoload (memql-secrets). Set "none" to disable.
             - { name: MEMQL_AVATAR_VENDOR, value: "simli" }
             # The avatar vendor's CLOUD engine dials into LiveKit from the
             # public internet; the in-cluster ws://livekit:7880 is unreachable
             # for it (the avatar would never join/publish). Same public URL the
-            # BFF hands browsers (POLYPHON_LIVEKIT_PUBLIC_URL).
+            # BFF hands browsers (MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL).
             - { name: LIVEKIT_PUBLIC_URL, value: "wss://livekit.staging.copresent.ai" }
             # Per-pod instance id for the self-bootstrapped voice_agent JWT.
             - { name: MEMQL_VOICE_AGENT_INSTANCE_ID, valueFrom: { fieldRef: { fieldPath: metadata.name } } }
             # Self-bootstrap: VOICE_AGENT_TOKEN empty -> mint via the genesis
             # MEMQL_NODE_BOOTSTRAP_TOKEN against the identity verifier.
             - { name: VOICE_AGENT_TOKEN, value: "" }
-            - { name: IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
-            - { name: IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
-            - { name: IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.copresent.ai" }
+            - { name: MEMQL_IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
+            - { name: MEMQL_IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
+            - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.copresent.ai" }
             # Trust the internal cluster CA when calling https://identity:8085.
             - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }
             - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }

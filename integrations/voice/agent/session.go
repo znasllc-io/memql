@@ -78,10 +78,10 @@ type RoomJoiner interface {
 // identity, the resolved ack, and the resolved Persona (#456). The LiveKit
 // credentials come from Config.
 type RoomRequest struct {
-	PartitionID   string
-	GaAgentID string
-	RoomName  string
-	Ack       SessionAck
+	PartitionID string
+	GaAgentID   string
+	RoomName    string
+	Ack         SessionAck
 
 	// Persona is the resolved per-session persona/voice/audio-video config
 	// (#456). The cascade loop (#455), realtime executor (#457), and avatar
@@ -226,7 +226,7 @@ func (s *Session) Run(ctx context.Context) error {
 	// Resolve the voice executor (#457) behind the same seam as the cascade.
 	// Default is cascade (no regression); realtime is opt-in via
 	// MEMQL_VOICE_EXECUTOR=realtime and degrades cleanly back to the cascade
-	// when its preconditions fail (missing OPENAI_API_KEY / persona build).
+	// when its preconditions fail (missing MEMQL_OPENAI_API_KEY / persona build).
 	// The voice-build room joiner branches on the plan; the CGO-free build
 	// logs it only.
 	executor := SelectVoiceExecutor(s.cfg, s.persona, s.logger)
@@ -234,7 +234,7 @@ func (s *Session) Run(ctx context.Context) error {
 	reason := "normal"
 	if s.joiner != nil {
 		req := RoomRequest{
-			PartitionID:           s.spaceID,
+			PartitionID:       s.spaceID,
 			GaAgentID:         s.gaAgentID,
 			RoomName:          s.roomName,
 			Ack:               ack,
@@ -279,7 +279,7 @@ func (s *Session) start(ctx context.Context) (SessionAck, error) {
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentSessionStart{
 			VoiceAgentSessionStart: &memqlv1.VoiceAgentSessionStart{
-				PartitionId:      s.spaceID,
+				PartitionId:  s.spaceID,
 				GaAgentId:    s.gaAgentID,
 				RoomName:     s.roomName,
 				AvatarVendor: s.cfg.AvatarVendor,
@@ -338,9 +338,9 @@ func (s *Session) end(ctx context.Context, reason string) {
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentSessionEnd{
 			VoiceAgentSessionEnd: &memqlv1.VoiceAgentSessionEnd{
-				PartitionId:  s.spaceID,
-				RoomName: s.roomName,
-				Reason:   reason,
+				PartitionId: s.spaceID,
+				RoomName:    s.roomName,
+				Reason:      reason,
 			},
 		},
 	}

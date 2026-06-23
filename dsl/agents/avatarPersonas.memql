@@ -5,7 +5,7 @@
 // lists (copresent#239); the agent's avatarVendor/avatarPersonaId point
 // at the chosen entry and the voice-agent resolves it at session start
 // (integrations/avatarvendor/dispatch.go resolveSimliPlan -> Simli faceId,
-// authenticated by SIMLI_API_KEY).
+// authenticated by MEMQL_SIMLI_API_KEY).
 //
 // SIMLI ONLY (memql#1239). Anam is render-blocked for us (its ephemeral
 // client-audio session hard-caps at ~26-27s -- escalation memql#1236), so

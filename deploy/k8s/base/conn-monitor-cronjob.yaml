@@ -55,7 +55,7 @@ spec:
                 - /bin/sh
                 - -ec
                 - |
-                  DSN="${MEMORY_NODES_DATABASE_DIRECT_DSN:-$MEMORY_NODES_DATABASE_DSN}"
+                  DSN="${MEMORY_NODES_DATABASE_DIRECT_DSN:-$MEMQL_DATABASE_DSN}"
                   if [ -z "$DSN" ]; then echo "CONN-MONITOR CRIT: no DSN in memql-secrets"; exit 2; fi
                   MAXC=$(psql "$DSN" -At -c "SHOW max_connections;" 2>/dev/null)
                   case "$MAXC" in ''|*[!0-9]*) echo "CONN-MONITOR CRIT: instance unreachable (or at max_connections)"; exit 2;; esac

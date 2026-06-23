@@ -63,7 +63,7 @@ type JWKSCache struct {
 func NewJWKSCache(cfg Config, logger *slog.Logger) (*JWKSCache, error) {
 	url := cfg.EffectiveJWKSURL()
 	if url == "" {
-		return nil, errors.New("verifier.NewJWKSCache: empty JWKS URL (IDENTITY_VERIFIER_BASE_URL not set?)")
+		return nil, errors.New("verifier.NewJWKSCache: empty JWKS URL (MEMQL_IDENTITY_VERIFIER_BASE_URL not set?)")
 	}
 	// Trust the system roots plus the internal CA (MEMQL_HTTP_TLS_CA_FILE)
 	// when set, so the JWKS fetch works against an identity service that

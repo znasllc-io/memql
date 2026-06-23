@@ -50,7 +50,7 @@ automation accountDeletionReminder25Days {
 // Daily 09:00 UTC sweep that emits a reminder event for each user
 // roughly 7 days into their deletion cooldown so the user has a
 // clear chance to cancel before the cooldown elapses (typically a
-// 30-day window, configurable via IDENTITY_DELETION_COOLDOWN_DAYS).
+// 30-day window, configurable via MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS).
 //
 // The 7-day window is bracketed [P7D, P8D) on deletionScheduledAt:
 // a row whose deletionScheduledAt was approximately 7 days ago lands
@@ -89,7 +89,7 @@ automation accountDeletionReminder7Days {
 // =====================
 //
 // Daily 03:00 UTC sweep. For each active user with deletionScheduledAt
-// set whose cooldown (IDENTITY_DELETION_COOLDOWN_DAYS, default 30) has
+// set whose cooldown (MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS, default 30) has
 // elapsed:
 //
 //   1. Soft-delete the user row + scrub PII (deleteUserHard).
@@ -136,7 +136,7 @@ automation accountDeletionSweep {
 // =========================
 //
 // Daily 02:00 UTC sweep that walks audit-event rows older than
-// IDENTITY_AUDIT_LOG_RETENTION_DAYS. The intent is rotation-grade
+// MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. The intent is rotation-grade
 // retention (typically 90-365 days for compliance).
 //
 // Note (intentional gap): MemQL has no row-removal mutation today
@@ -163,7 +163,7 @@ automation accountDeletionSweep {
 // can't push that into the filter today.
 @enabled
 @trigger(schedule="0 0 2 * * *")
-@description("Daily 02:00 UTC sweep: identifies audit events past IDENTITY_AUDIT_LOG_RETENTION_DAYS. Currently observation-only; deletion lands when MemQL gains row-removal support.")
+@description("Daily 02:00 UTC sweep: identifies audit events past MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. Currently observation-only; deletion lands when MemQL gains row-removal support.")
 automation auditEventRetentionSweep {
   step run {
     logic auditEventRetentionSweep { event: event }

@@ -207,12 +207,12 @@ var BuiltinFunctions = map[string]BuiltinDef{
 	"secret": {
 		Signature:  `secret(name string)`,
 		Doc:        "Resolve a partition-scoped encrypted secret from v1:platform:partitionSecret. Falls back to v1:platform:globalSecret (global) if the partition lookup misses. Returns the decrypted plaintext; requires MEMQL_MASTER_KEY. Callers must never log the result.",
-		Parameters: []Parameter{{Label: "name", Documentation: "Secret name (e.g., \"OPENAI_API_KEY\")."}},
+		Parameters: []Parameter{{Label: "name", Documentation: "Secret name (e.g., \"MEMQL_OPENAI_API_KEY\")."}},
 	},
 	"systemSecret": {
 		Signature:  `systemSecret(name string)`,
 		Doc:        "Resolve an instance-wide (global) encrypted secret from v1:platform:globalSecret. No fallback. Returns the decrypted plaintext; requires MEMQL_MASTER_KEY.",
-		Parameters: []Parameter{{Label: "name", Documentation: "System secret name (e.g., \"IDENTITY_KEY_ENCRYPTION_KEY\")."}},
+		Parameters: []Parameter{{Label: "name", Documentation: "System secret name (e.g., \"MEMQL_IDENTITY_KEY_ENCRYPTION_KEY\")."}},
 	},
 	"step": {
 		Signature:  `step(name string)`,

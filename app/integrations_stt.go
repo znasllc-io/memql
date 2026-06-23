@@ -48,24 +48,24 @@ func (a *App) selectSTTProvider() {
 }
 
 // openAIKeyFromEnv resolves the OpenAI API key for the STT bootstrap,
-// trying MEMQL_SI_OPENAI_API_KEY first and falling back to the bare
-// OPENAI_API_KEY -- the same prefix-elision chain the provider auth
+// trying MEMQL_AI_OPENAI_API_KEY first and falling back to the bare
+// MEMQL_OPENAI_API_KEY -- the same prefix-elision chain the provider auth
 // resolver (component/memql/ai_providers.go, authConceptLookupNames)
 // and integrations/openairealtime use. The genesis envelope seeds the
 // bare form, so without the fallback the voice node boots with the
 // audio websocket silently disabled (#1371).
 func openAIKeyFromEnv() string {
-	if key := strings.TrimSpace(os.Getenv("MEMQL_SI_OPENAI_API_KEY")); key != "" {
+	if key := strings.TrimSpace(os.Getenv("MEMQL_AI_OPENAI_API_KEY")); key != "" {
 		return key
 	}
-	return strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	return strings.TrimSpace(os.Getenv("MEMQL_OPENAI_API_KEY"))
 }
 
 // initOpenAIRealtimeProvider wires the OpenAI Realtime API (streaming
 // transcription via WebSocket) as the active STT provider -- the default.
 //
 // Model resolution: honors MEMQL_OPENAI_REALTIME_MODEL; falls back to
-// POLYPHON_OPENAI_ASR_MODEL so a single env var can drive both paths;
+// MEMQL_POLYPHON_OPENAI_ASR_MODEL so a single env var can drive both paths;
 // defaults to "whisper-1".
 //
 // Why whisper-1 is the default (not gpt-4o-transcribe):
@@ -80,13 +80,13 @@ func openAIKeyFromEnv() string {
 func (a *App) initOpenAIRealtimeProvider(name string) {
 	openAIKey := openAIKeyFromEnv()
 	if openAIKey == "" {
-		a.Logger.Info("audio websocket disabled (neither MEMQL_SI_OPENAI_API_KEY nor OPENAI_API_KEY set for openai-realtime)")
+		a.Logger.Info("audio websocket disabled (neither MEMQL_AI_OPENAI_API_KEY nor MEMQL_OPENAI_API_KEY set for openai-realtime)")
 		return
 	}
 
 	model := strings.TrimSpace(os.Getenv("MEMQL_OPENAI_REALTIME_MODEL"))
 	if model == "" {
-		model = strings.TrimSpace(os.Getenv("POLYPHON_OPENAI_ASR_MODEL"))
+		model = strings.TrimSpace(os.Getenv("MEMQL_POLYPHON_OPENAI_ASR_MODEL"))
 	}
 	if model == "" {
 		model = "whisper-1"
@@ -109,9 +109,9 @@ func (a *App) initOpenAIRealtimeProvider(name string) {
 
 func (a *App) initWhisperProvider(name string) {
 	openAIKey := openAIKeyFromEnv()
-	openAIProject := strings.TrimSpace(os.Getenv("MEMQL_SI_OPENAI_PROJECT_ID"))
+	openAIProject := strings.TrimSpace(os.Getenv("MEMQL_AI_OPENAI_PROJECT_ID"))
 	if openAIKey == "" {
-		a.Logger.Info("audio websocket disabled (neither MEMQL_SI_OPENAI_API_KEY nor OPENAI_API_KEY set for whisper)")
+		a.Logger.Info("audio websocket disabled (neither MEMQL_AI_OPENAI_API_KEY nor MEMQL_OPENAI_API_KEY set for whisper)")
 		return
 	}
 	a.sttProvider = stt.NewOpenAIWhisperProvider(openAIKey, openAIProject, nil)

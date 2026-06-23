@@ -210,7 +210,7 @@ func (s *openaiASRStream) Close() error {
 //
 // Model selection: audio.input.transcription.model carries the transcription
 // model (whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe). Override via
-// MEMQL_OPENAI_REALTIME_MODEL on the voice node or POLYPHON_OPENAI_ASR_MODEL
+// MEMQL_OPENAI_REALTIME_MODEL on the voice node or MEMQL_POLYPHON_OPENAI_ASR_MODEL
 // on the bridge agent.
 func (s *openaiASRStream) sendSessionConfig(ctx context.Context, config polyphon.ASRConfig) error {
 	lang := config.Language
@@ -227,9 +227,9 @@ func (s *openaiASRStream) sendSessionConfig(ctx context.Context, config polyphon
 	// long enough for normal conversational pauses (especially the
 	// "...uh..." filler), short enough that the user doesn't feel
 	// the agent is stalling at end-of-utterance. Operators tune via
-	// POLYPHON_OPENAI_VAD_SILENCE_MS.
+	// MEMQL_POLYPHON_OPENAI_VAD_SILENCE_MS.
 	silenceMs := 600
-	if v := strings.TrimSpace(os.Getenv("POLYPHON_OPENAI_VAD_SILENCE_MS")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("MEMQL_POLYPHON_OPENAI_VAD_SILENCE_MS")); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
 			silenceMs = parsed
 		}

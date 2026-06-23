@@ -42,11 +42,11 @@ Run from a host that can reach the target Postgres instance.
 
 ```bash
 # Local k3d cluster (via the postgres port-forward, make db):
-MEMORY_NODES_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable' \
+MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable' \
   go run ./scripts/dedupe-peruser-seeds --dry-run
 
 # Staging / Cloud Run:
-MEMORY_NODES_DATABASE_DSN='<staging-dsn>' \
+MEMQL_DATABASE_DSN='<staging-dsn>' \
   go run ./scripts/dedupe-peruser-seeds --dry-run
 ```
 
@@ -83,7 +83,7 @@ The script prints:
 ## Execute command
 
 ```bash
-MEMORY_NODES_DATABASE_DSN='<dsn>' \
+MEMQL_DATABASE_DSN='<dsn>' \
   go run ./scripts/dedupe-peruser-seeds --execute
 ```
 

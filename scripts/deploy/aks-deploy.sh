@@ -188,7 +188,7 @@ Prerequisite (one-time, out-of-band -- REAL values, never committed):
     kubectl create secret generic $SECRET_NAME -n $NAMESPACE \\
       --from-literal=MEMQL_MASTER_KEY="\$MEMQL_MASTER_KEY" \\
       --from-literal=MEMQL_GENESIS_B64="\$(base64 < ~/.memql/genesis.znas)" \\
-      --from-literal=MEMORY_NODES_DATABASE_DSN="\$(tiger db connection-string xahn9ru4v6 --with-password)"
+      --from-literal=MEMQL_DATABASE_DSN="\$(tiger db connection-string xahn9ru4v6 --with-password)"
 
 Examples:
     $0 --version=0.9.6                 # build, push, roll out 0.9.6

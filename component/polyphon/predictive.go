@@ -203,7 +203,7 @@ func patternBasedPrediction(session *PolyphonSession, candidates []AgentCandidat
 // ---------------------------------------------------------------------------
 
 // ExternalPredictiveAnalyzer calls an external HTTP endpoint for prediction.
-// Activated when POLYPHON_PREDICTION_ENGINE_URL is set.
+// Activated when MEMQL_POLYPHON_PREDICTION_ENGINE_URL is set.
 type ExternalPredictiveAnalyzer struct {
 	endpoint string
 	client   *http.Client

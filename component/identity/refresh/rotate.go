@@ -9,8 +9,8 @@
 //     and emit a high-severity audit event.
 //  2. The session row must not be revoked.
 //  3. The session must be inside the idle window
-//     (lastRefreshedAt + IDENTITY_SESSION_IDLE_DAYS) and the absolute
-//     max-age (firstAuthenticatedAt + IDENTITY_SESSION_MAX_DAYS).
+//     (lastRefreshedAt + MEMQL_IDENTITY_SESSION_IDLE_DAYS) and the absolute
+//     max-age (firstAuthenticatedAt + MEMQL_IDENTITY_SESSION_MAX_DAYS).
 //  4. On success, mint a fresh access + refresh token pair and
 //     persist the new refresh-token hash atomically.
 package refresh

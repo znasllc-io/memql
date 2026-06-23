@@ -64,7 +64,7 @@ func (a *App) cluster() {
 
 	// Self-bootstrap a node-class JWT when MEMQL_NODE_TOKEN is empty
 	// but the operator opted into self-bootstrap via
-	// MEMQL_NODE_BOOTSTRAP_TOKEN + IDENTITY_VERIFIER_BASE_URL (see
+	// MEMQL_NODE_BOOTSTRAP_TOKEN + MEMQL_IDENTITY_VERIFIER_BASE_URL (see
 	// memql#338 and component/node/bootstrap_token.go). No-op when
 	// MEMQL_NODE_TOKEN was provisioned out-of-band; logs + proceeds
 	// on bootstrap failure rather than blocking cluster startup
@@ -785,7 +785,7 @@ func (a *App) EmitSystemShutdown() {
 
 // parseDatabaseInfo extracts non-secret database metadata from the DSN env var.
 func parseDatabaseInfo() map[string]any {
-	dsn := os.Getenv("MEMORY_NODES_DATABASE_DSN")
+	dsn := os.Getenv("MEMQL_DATABASE_DSN")
 	if dsn == "" {
 		return nil
 	}
@@ -816,26 +816,26 @@ func parseDatabaseInfo() map[string]any {
 // no-auth) so the cluster row is omitted rather than carrying a
 // half-populated entry.
 func parseIdentityProviderInfo() map[string]any {
-	baseURL := strings.TrimRight(os.Getenv("IDENTITY_VERIFIER_BASE_URL"), "/")
+	baseURL := strings.TrimRight(os.Getenv("MEMQL_IDENTITY_VERIFIER_BASE_URL"), "/")
 	if baseURL == "" {
-		// Identity binaries set IDENTITY_BASE_URL instead (they don't
+		// Identity binaries set MEMQL_IDENTITY_BASE_URL instead (they don't
 		// verify against a remote JWKS — they own the keys). Fall back
 		// to that so the row populates correctly on identity nodes.
-		baseURL = strings.TrimRight(os.Getenv("IDENTITY_BASE_URL"), "/")
+		baseURL = strings.TrimRight(os.Getenv("MEMQL_IDENTITY_BASE_URL"), "/")
 	}
 	if baseURL == "" {
 		return nil
 	}
 
 	info := map[string]any{
-		"name":         firstNonEmptyStr(os.Getenv("IDENTITY_BRAND_NAME"), "memQL Identity"),
+		"name":         firstNonEmptyStr(os.Getenv("MEMQL_IDENTITY_BRAND_NAME"), "memQL Identity"),
 		"providerType": "oidc",
-		"issuerUrl":    firstNonEmptyStr(os.Getenv("IDENTITY_VERIFIER_EXPECTED_ISSUER"), baseURL),
+		"issuerUrl":    firstNonEmptyStr(os.Getenv("MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER"), baseURL),
 	}
-	if aud := firstNonEmptyStr(os.Getenv("IDENTITY_VERIFIER_AUDIENCE"), os.Getenv("IDENTITY_JWT_AUDIENCE")); aud != "" {
+	if aud := firstNonEmptyStr(os.Getenv("MEMQL_IDENTITY_VERIFIER_AUDIENCE"), os.Getenv("MEMQL_IDENTITY_JWT_AUDIENCE")); aud != "" {
 		info["acceptedAudiences"] = []string{aud}
 	}
-	if jwksURL := firstNonEmptyStr(os.Getenv("IDENTITY_VERIFIER_JWKS_URL"), os.Getenv("IDENTITY_JWKS_URL")); jwksURL != "" {
+	if jwksURL := firstNonEmptyStr(os.Getenv("MEMQL_IDENTITY_VERIFIER_JWKS_URL"), os.Getenv("MEMQL_IDENTITY_JWKS_URL")); jwksURL != "" {
 		info["jwksUrl"] = jwksURL
 	}
 	return info

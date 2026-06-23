@@ -1,6 +1,6 @@
 // Package registration owns the policy decisions that fire when a
 // previously-unknown email shows up at /auth/magic-link. Different
-// IDENTITY_REGISTRATION_MODE settings produce different downstream
+// MEMQL_IDENTITY_REGISTRATION_MODE settings produce different downstream
 // actions (issue a magic link, enqueue an access request, reject); the
 // magiclink.Issuer calls Decide() to find out which path applies and
 // what user-shape to provision after a successful consume.

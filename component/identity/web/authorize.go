@@ -51,7 +51,7 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	// Never redirect on a failure here -- the redirect_uri is untrusted.
 	// Resolve through the unified resolver (static config first, then the
 	// DB-backed oauthClient store) so dynamically-registered (RFC 7591)
-	// clients work exactly like static IDENTITY_REGISTERED_CLIENTS.
+	// clients work exactly like static MEMQL_IDENTITY_REGISTERED_CLIENTS.
 	rc := identity.ResolveClient(r.Context(), s.Cfg, s.Store, clientID)
 	if clientID == "" || rc == nil {
 		s.renderAuthorizeError(w, http.StatusBadRequest,

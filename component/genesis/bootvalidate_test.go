@@ -126,7 +126,7 @@ func TestMissingRequired_EmbeddedRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadManifest: %v", err)
 	}
-	dbOnly := lookupFromMap(map[string]string{"MEMORY_NODES_DATABASE_DSN": "postgres://x"})
+	dbOnly := lookupFromMap(map[string]string{"MEMQL_DATABASE_DSN": "postgres://x"})
 
 	if got := MissingRequired("bff", m, dbOnly); got != nil {
 		t.Errorf("bff with DB DSN should boot, missing = %v", got)
@@ -134,9 +134,9 @@ func TestMissingRequired_EmbeddedRegistry(t *testing.T) {
 
 	got := MissingRequired("voice", m, dbOnly)
 	want := map[string]bool{
-		"POLYPHON_LIVEKIT_URL":        true,
-		"POLYPHON_LIVEKIT_API_KEY":    true,
-		"POLYPHON_LIVEKIT_API_SECRET": true,
+		"MEMQL_POLYPHON_LIVEKIT_URL":        true,
+		"MEMQL_POLYPHON_LIVEKIT_API_KEY":    true,
+		"MEMQL_POLYPHON_LIVEKIT_API_SECRET": true,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("voice missing = %v, want the LiveKit vars %v", got, want)

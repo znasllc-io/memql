@@ -75,7 +75,7 @@ func (a *App) transportMCP() {
 		// public issuer the verifier already expects.
 		authServerURL := strings.TrimSpace(os.Getenv("MEMQL_MCP_AUTH_SERVER_URL"))
 		if authServerURL == "" {
-			authServerURL = strings.TrimSpace(os.Getenv("IDENTITY_VERIFIER_EXPECTED_ISSUER"))
+			authServerURL = strings.TrimSpace(os.Getenv("MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER"))
 		}
 		dep, err := mcp.NewHTTPDependency(mcp.HTTPConfig{
 			Addr:          addr,

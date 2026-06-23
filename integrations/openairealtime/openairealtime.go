@@ -11,8 +11,8 @@
 //
 // The browser receives ONLY the short-lived ephemeral secret (`value`),
 // never the standing key. The standing OpenAI key is resolved from
-// v1:platform:globalSecret under MEMQL_SI_OPENAI_API_KEY (falling back to
-// the dev-seeded OPENAI_API_KEY), matching the AI-provider key convention
+// v1:platform:globalSecret under MEMQL_AI_OPENAI_API_KEY (falling back to
+// the dev-seeded MEMQL_OPENAI_API_KEY), matching the AI-provider key convention
 // documented in component/memql/ai_providers.go.
 //
 // This mirrors the integrations/avatardirect pattern -- the established way
@@ -53,8 +53,8 @@ const (
 	// Key resolution order mirrors the AI-provider convention in
 	// component/memql/ai_providers.go: the vendor-prefixed name first, then
 	// the dev-manifest bare form.
-	secretAPIKeyPrimary  = "MEMQL_SI_OPENAI_API_KEY"
-	secretAPIKeyFallback = "OPENAI_API_KEY"
+	secretAPIKeyPrimary  = "MEMQL_AI_OPENAI_API_KEY"
+	secretAPIKeyFallback = "MEMQL_OPENAI_API_KEY"
 )
 
 // Integration implements memql.IntegrationProvider for OpenAI Realtime
@@ -219,7 +219,7 @@ func (i *Integration) apiKey(ctx context.Context) (string, error) {
 	}
 
 	// 2) OS env fallback (dev): the OpenAI key is commonly provided as an env
-	// var (OPENAI_API_KEY / MEMQL_SI_OPENAI_API_KEY) via the genesis envelope
+	// var (MEMQL_OPENAI_API_KEY / MEMQL_AI_OPENAI_API_KEY) via the genesis envelope
 	// rather than seeded into globalSecret. This mirrors the AI-provider /
 	// bridge-agent resolution chain (see component/memql/ai_providers.go
 	// authConceptLookupNames) so the builtin works wherever those do, without

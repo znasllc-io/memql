@@ -20,11 +20,11 @@ the pre-existing dupes that #274 can't retroactively fix.
 
 ```bash
 # Inspect the plan without writing.
-MEMORY_NODES_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable' \
+MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable' \
   go run ./scripts/dedupe-peruser-seeds --dry-run
 
 # Apply the plan.
-MEMORY_NODES_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable' \
+MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable' \
   go run ./scripts/dedupe-peruser-seeds --execute
 ```
 

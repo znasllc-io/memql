@@ -70,7 +70,7 @@ var PolicyExposableConfig = []PolicyConfigField{
 		Key:         "authEnabled",
 		FieldName:   "AuthEnabled",
 		Sensitive:   false,
-		Description: "True when IDENTITY_VERIFIER_BASE_URL is set; gates whether bff/voice/etc. enforce JWT verification.",
+		Description: "True when MEMQL_IDENTITY_VERIFIER_BASE_URL is set; gates whether bff/voice/etc. enforce JWT verification.",
 	},
 	{
 		Key:         "demoMode",

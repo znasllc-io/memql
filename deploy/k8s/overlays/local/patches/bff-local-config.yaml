@@ -12,8 +12,8 @@ spec:
         - name: bff
           env:
             # Identity issuer: localhost port-forward.
-            - name: IDENTITY_VERIFIER_EXPECTED_ISSUER
+            - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
               value: "http://localhost:8085"
             # LiveKit: local server's public WebSocket URL (via k3d port-forward).
-            - name: POLYPHON_LIVEKIT_PUBLIC_URL
+            - name: MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL
               value: "ws://localhost:7880"

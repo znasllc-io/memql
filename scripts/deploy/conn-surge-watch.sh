@@ -25,7 +25,7 @@
 #   authoritative total that must stay under max_connections.
 #
 # DSN resolution (read-only is enough): DIRECT_DSN -> MEMORY_NODES_DATABASE_DIRECT_DSN
-#   -> MEMORY_NODES_DATABASE_DSN -> `tiger db connection-string $TIGER_SVC`.
+#   -> MEMQL_DATABASE_DSN -> `tiger db connection-string $TIGER_SVC`.
 #
 # Requires: psql, and one of the DSNs above or the `tiger` CLI (auth login'd).
 #
@@ -67,7 +67,7 @@ Options:
   --max-connections=N   Instance max_connections (default $MAX_CONNECTIONS / env MAX_CONNECTIONS)
   --reserved=N          Reserved slots (default $RESERVED_CONNECTIONS / env RESERVED_CONNECTIONS)
   --dsn=DSN             DB DSN to query (default: DIRECT_DSN / MEMORY_NODES_DATABASE_DIRECT_DSN
-                        / MEMORY_NODES_DATABASE_DSN / tiger CLI for \$TIGER_SVC)
+                        / MEMQL_DATABASE_DSN / tiger CLI for \$TIGER_SVC)
   --help
 
 Budget = max_connections - reserved. PASS = peak backends stays under budget
@@ -106,14 +106,14 @@ function resolve_dsn() {
     if [[ -n "${MEMORY_NODES_DATABASE_DIRECT_DSN:-}" ]]; then
         DSN="$MEMORY_NODES_DATABASE_DIRECT_DSN"; return 0
     fi
-    if [[ -n "${MEMORY_NODES_DATABASE_DSN:-}" ]]; then
-        DSN="$MEMORY_NODES_DATABASE_DSN"; return 0
+    if [[ -n "${MEMQL_DATABASE_DSN:-}" ]]; then
+        DSN="$MEMQL_DATABASE_DSN"; return 0
     fi
     if command -v tiger >/dev/null 2>&1; then
         DSN="$(tiger db connection-string "$TIGER_SVC" --with-password 2>/dev/null)"
         [[ -n "$DSN" ]] && return 0
     fi
-    echo "ERROR: no DSN. Set DIRECT_DSN / MEMORY_NODES_DATABASE_DIRECT_DSN / MEMORY_NODES_DATABASE_DSN, pass --dsn, or auth the tiger CLI." >&2
+    echo "ERROR: no DSN. Set DIRECT_DSN / MEMORY_NODES_DATABASE_DIRECT_DSN / MEMQL_DATABASE_DSN, pass --dsn, or auth the tiger CLI." >&2
     exit 1
 }
 

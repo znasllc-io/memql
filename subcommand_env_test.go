@@ -20,7 +20,7 @@ func TestApplySubcommandEnv_AutoloadDisabledIsNoop(t *testing.T) {
 // TestApplySubcommandEnv_FailsClosedOnBadEnvelope is the #751 regression guard:
 // the subcommand bootstrap must INVOKE the genesis envelope autoload (it didn't
 // before -- only ApplyLocalOverride ran, so envelope-sealed values like
-// IDENTITY_SIGNING_KEY_B64 were never decrypted and the service_account mint
+// MEMQL_IDENTITY_SIGNING_KEY_B64 were never decrypted and the service_account mint
 // failed). When autoload is requested but misconfigured (no master key), the
 // helper must FAIL CLOSED -- proving the autoload is wired in, and that a
 // credential mint aborts rather than proceeding on a half-applied config.

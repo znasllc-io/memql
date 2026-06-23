@@ -293,7 +293,7 @@ func LoadConfig(getenv Getenv) (Config, error) {
 	// MEMQL_VOICE_EXECUTOR=cascade. Both executors run on OpenAI (#1355), so
 	// the key is required up front.
 	cfg.VoiceExecutor = strings.ToLower(get("MEMQL_VOICE_EXECUTOR", "realtime"))
-	if cfg.OpenAIAPIKey, err = getRequired("OPENAI_API_KEY"); err != nil {
+	if cfg.OpenAIAPIKey, err = getRequired("MEMQL_OPENAI_API_KEY"); err != nil {
 		return Config{}, err
 	}
 	cfg.RealtimeModel = get("MEMQL_REALTIME_MODEL", "gpt-realtime-2")
@@ -335,8 +335,8 @@ func LoadConfig(getenv Getenv) (Config, error) {
 	cfg.RealtimeTranscriptMinConfidence = getFloat("MEMQL_REALTIME_TRANSCRIPT_MIN_CONFIDENCE", -1.0)
 
 	cfg.AvatarVendor = strings.ToLower(get("MEMQL_AVATAR_VENDOR", "anam"))
-	cfg.AnamAPIKey = get("ANAM_API_KEY", "")
-	cfg.SimliAPIKey = get("SIMLI_API_KEY", "")
+	cfg.AnamAPIKey = get("MEMQL_ANAM_API_KEY", "")
+	cfg.SimliAPIKey = get("MEMQL_SIMLI_API_KEY", "")
 	cfg.AnamDefaultPersonaID = get("ANAM_DEFAULT_PERSONA_ID", "")
 	cfg.AnamDefaultAvatarID = get("ANAM_DEFAULT_AVATAR_ID", "")
 	cfg.AnamDefaultPersonaNm = get("ANAM_DEFAULT_PERSONA_NAME", "Assistant")
@@ -345,8 +345,8 @@ func LoadConfig(getenv Getenv) (Config, error) {
 
 	// Cascade / labeled-transcript clients (#1355). Empty model values fall
 	// back to the openai package defaults.
-	cfg.CascadeASRModel = get("POLYPHON_OPENAI_ASR_MODEL", "")
-	cfg.CascadeTTSModel = get("POLYPHON_OPENAI_TTS_MODEL", "")
+	cfg.CascadeASRModel = get("MEMQL_POLYPHON_OPENAI_ASR_MODEL", "")
+	cfg.CascadeTTSModel = get("MEMQL_POLYPHON_OPENAI_TTS_MODEL", "")
 	cfg.VoiceLanguage = get("POLYPHON_VOICE_LANGUAGE", "en")
 
 	if cfg.VoiceExecutor != "cascade" && cfg.VoiceExecutor != "realtime" {

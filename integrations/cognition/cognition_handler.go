@@ -247,7 +247,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		// Resolve prediction analyzer: external if configured, model-based otherwise.
 		var analyzer polyphon.PredictiveAnalyzer
 		modelAnalyzer := polyphon.NewModelPredictiveAnalyzer(invokeAIFunc, embedFn)
-		if externalURL := os.Getenv("POLYPHON_PREDICTION_ENGINE_URL"); externalURL != "" {
+		if externalURL := os.Getenv("MEMQL_POLYPHON_PREDICTION_ENGINE_URL"); externalURL != "" {
 			analyzer = polyphon.NewExternalPredictiveAnalyzer(externalURL, modelAnalyzer)
 		} else {
 			analyzer = modelAnalyzer
@@ -2408,7 +2408,7 @@ func resolveAgentVoice(agent *agentPayload) string {
 	if canonical == "" {
 		return ""
 	}
-	// voice.ActiveProvider applies the same POLYPHON_VOICE_PROVIDER
+	// voice.ActiveProvider applies the same MEMQL_POLYPHON_VOICE_PROVIDER
 	// default rule the bridge-agent uses (see cmd/bridge-agent/main.go's
 	// initVoiceProviders). Hardcoding "openai" here is a bug -- a bridge
 	// on a different provider gets sent voice ids it can't synthesize

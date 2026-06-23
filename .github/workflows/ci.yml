@@ -332,7 +332,7 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     env:
-      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable
+      MEMQL_DATABASE_DSN: postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
