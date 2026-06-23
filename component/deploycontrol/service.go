@@ -255,20 +255,11 @@ func (s *Service) DeployStaging(ctx context.Context, req *memqlv1.DeployStagingR
 	if version == "" {
 		return nil, status.Error(codes.InvalidArgument, "deploy console: version is required")
 	}
-	detail := map[string]any{"env": "staging", "version": version}
-	act, err := s.authorize(ctx, "deploy_staging", detail)
+	act, err := s.authorize(ctx, "deploy_staging", map[string]any{"env": "staging", "version": version})
 	if err != nil {
 		return nil, err
 	}
-	// Persist the deployment record (#1872): write at deploy start
-	// (in_progress) so a record exists even if the process dies
-	// mid-rollout, then transition to succeeded/failed once promote.sh
-	// returns. Best-effort: never blocks the deploy.
-	deploymentID := s.recordDeployment(ctx, "staging", version, s.resolveImageDigest(version), act)
-	out, runErr := s.exec.RunPromote(ctx, version, "staging")
-	s.transitionDeployment(ctx, deploymentID, transitionStatusForErr(runErr))
-	return s.finishWrite(ctx, "deploy_staging", act, detail, out, runErr,
-		map[string]string{"env": "staging", "version": version}), nil
+	return s.promoteRelease(ctx, act, "deploy_staging", "staging", version), nil
 }
 
 // Promote copies a validated staging release into the prod overlay
@@ -278,18 +269,31 @@ func (s *Service) Promote(ctx context.Context, req *memqlv1.PromoteRequest) (*me
 	if version == "" {
 		return nil, status.Error(codes.InvalidArgument, "deploy console: version is required")
 	}
-	detail := map[string]any{"env": "prod", "version": version}
-	act, err := s.authorize(ctx, "promote", detail)
+	act, err := s.authorize(ctx, "promote", map[string]any{"env": "prod", "version": version})
 	if err != nil {
 		return nil, err
 	}
-	// Persist the deployment record (#1872), same pattern as
-	// DeployStaging: in_progress at start, succeeded/failed on return.
-	deploymentID := s.recordDeployment(ctx, "prod", version, s.resolveImageDigest(version), act)
-	out, runErr := s.exec.RunPromote(ctx, version, "prod")
+	return s.promoteRelease(ctx, act, "promote", "prod", version), nil
+}
+
+// promoteRelease is the shared record -> RunPromote -> transition ->
+// audit sequence behind the two legacy console promote actions
+// (DeployStaging env=staging, Promote env=prod). Extracting it (Epic 2 /
+// E2.5, #2098) reduces deploycontrol toward the Executor effect boundary
+// without changing behavior: the call order, the persisted deployment
+// record (#1872; in_progress at start -> succeeded/failed on return), the
+// promote.sh invocation via the SAME Executor.RunPromote, and the single
+// audit event are byte-identical to the inlined form. The azure deploy
+// path is unchanged.
+func (s *Service) promoteRelease(ctx context.Context, act actor, verb, consoleEnv, version string) *memqlv1.ActionResult {
+	// Persist the deployment record: write at deploy start (in_progress) so
+	// a record exists even if the process dies mid-rollout, then transition
+	// to succeeded/failed once promote.sh returns. Best-effort.
+	deploymentID := s.recordDeployment(ctx, consoleEnv, version, s.resolveImageDigest(version), act)
+	out, runErr := s.exec.RunPromote(ctx, version, consoleEnv)
 	s.transitionDeployment(ctx, deploymentID, transitionStatusForErr(runErr))
-	return s.finishWrite(ctx, "promote", act, detail, out, runErr,
-		map[string]string{"env": "prod", "version": version}), nil
+	return s.finishWrite(ctx, verb, act, map[string]any{"env": consoleEnv, "version": version}, out, runErr,
+		map[string]string{"env": consoleEnv, "version": version})
 }
 
 // Rollback reverts the overlay commit identified by commit_sha for the
