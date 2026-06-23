@@ -1164,6 +1164,9 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 		return s.handleAuthoringValidateBundle(envelope, payload.AuthoringValidateBundle)
 	case *memqlv1.MemqlClientMessage_AuthoringSessionDefineBundle:
 		return s.handleAuthoringSessionDefineBundle(envelope, payload.AuthoringSessionDefineBundle)
+	// DSL spec export -- portable language-intelligence surface (memql#2125 / A4)
+	case *memqlv1.MemqlClientMessage_DslSpec:
+		return s.handleDslSpec(envelope, payload.DslSpec)
 	// Polyphon -- multi-agent voice (Phase 3)
 	case *memqlv1.MemqlClientMessage_PolyphonRoomToken:
 		return s.handlePolyphonRoomToken(envelope, payload.PolyphonRoomToken)

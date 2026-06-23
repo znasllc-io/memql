@@ -254,6 +254,12 @@ message MemqlClientMessage {
     // gated DURABLE activation is out of scope here (issue #232).
     AuthoringValidateBundleMsg authoring_validate_bundle = 78;
     AuthoringSessionDefineBundleMsg authoring_session_define_bundle = 79;
+    // DSL spec export -- the portable, versioned JSON form of the DSL
+    // authoring surface (component/language/dslspec; epic memql#2122 / A4,
+    // issue #2125). The cockpit (and a future web/Monaco editor) fetch this
+    // ONE machine-readable spec so their language intelligence is derived
+    // from the exact same source of truth memQL Sense is. Read-only.
+    DslSpecMsg dsl_spec = 80;
   }
 }
 
@@ -378,6 +384,10 @@ message MemqlServerMessage {
     // taken by the B1 pack-browser replies above, so these start at 115.
     AuthoringValidateBundleResult authoring_validate_bundle_result = 115;
     AuthoringSessionDefineBundleResult authoring_session_define_bundle_result = 116;
+    // DSL spec export reply (see DslSpecMsg, memql#2125 / A4). Tags 112-116
+    // are taken by the B1 pack-browser + C1 authoring replies above, so this
+    // starts at 117.
+    DslSpecResult dsl_spec_result = 117;
   }
 }
 
@@ -1190,6 +1200,39 @@ message AuthoringSessionDefineBundleResult {
   repeated AuthoringConstruct defined = 3;     // constructs that became callable
   repeated AuthoringDiagnostic diagnostics = 4;
   string error = 5;  // non-empty when the bundle was rejected (validation or register)
+}
+
+// -----------------------------------------------------------------------------
+// DSL spec export -- portable language-intelligence surface (memql#2125 / A4)
+// -----------------------------------------------------------------------------
+//
+// Exports component/language/dslspec.Build() as portable JSON so the cockpit
+// and a future web/Monaco editor consume the EXACT same authoring surface that
+// memQL Sense is driven from: the top-level constructs, keywords, operators,
+// field types, per-construct annotation legality, and "legal-next" completion
+// rules. Read-only -- there is no spec mutation path; the spec is assembled
+// from the engine's own grammar tables + annotation registry.
+
+// DslSpecMsg requests the serialized DSL spec. The body is intentionally empty
+// -- the spec is whole and node-agnostic; a future negotiated version field can
+// be added without breaking the wire (the reply already carries the version).
+message DslSpecMsg {
+  string request_id = 1;
+}
+
+// DslSpecResult carries the spec as a JSON document plus its schema version.
+//
+// `spec_json` is the indented JSON produced by dslspec.(*Spec).JSON() -- the
+// portable form a Monaco/CodeMirror grammar is generated from. Its top-level
+// shape is { version, constructs[], annotations[], keywords[], operators[],
+// fieldTypes[], nextRules[] } (see component/language/dslspec/spec.go for the
+// per-element schemas). `version` mirrors the embedded spec.version
+// (dslspec.SpecVersion) at the envelope level so a consumer can check the
+// contract version WITHOUT parsing the document.
+message DslSpecResult {
+  string request_id = 1;
+  string spec_json = 2;  // dslspec.(*Spec).JSON() -- indented JSON document
+  string version = 3;    // schema version (dslspec.SpecVersion), echoed for cheap checks
 }
 
 // -----------------------------------------------------------------------------
