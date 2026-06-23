@@ -4,7 +4,7 @@
 // annotations each construct allows, and the "legal-next" rules that drive
 // context-aware completion.
 //
-// Why this package exists
+// # Why this package exists
 //
 // Before dslspec, memQL Sense (component/memql/sense) carried its
 // completion / hover / diagnose tables as hand-maintained Go literals
@@ -173,6 +173,7 @@ type Spec struct {
 	Operators   []Operator   `json:"operators"`
 	FieldTypes  []FieldType  `json:"fieldTypes"`
 	NextRules   []NextRule   `json:"nextRules"`
+	Builtins    []Builtin    `json:"builtins"`
 }
 
 // Build assembles the spec from the construct/keyword/operator/field-type
@@ -187,6 +188,7 @@ func Build() *Spec {
 		Operators:   operators(),
 		FieldTypes:  fieldTypes(),
 		NextRules:   nextRules(),
+		Builtins:    builtins(),
 	}
 }
 
