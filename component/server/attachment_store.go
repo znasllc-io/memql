@@ -195,16 +195,3 @@ func dslCall(fn string, args map[string]any) (string, error) {
 	}
 	return fn + "(" + string(b) + ")", nil
 }
-
-// jsonString returns a JSON-encoded string literal (including surrounding
-// quotes). Used by plan_store.go's per-field query builders; new callers
-// should prefer dslCall, which marshals the whole argument object.
-func jsonString(s string) string {
-	b, err := json.Marshal(s)
-	if err != nil {
-		escaped := strings.ReplaceAll(s, `\`, `\\`)
-		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-		return fmt.Sprintf(`"%s"`, escaped)
-	}
-	return string(b)
-}

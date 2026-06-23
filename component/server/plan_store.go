@@ -101,64 +101,78 @@ func (s *EnginePlanStore) CreateQueuedAnalyzePlan(ctx context.Context, p CreateP
 	// we use a deterministic heuristic so the estimate strip on the
 	// plan.created card has a number to show.)
 	estP50, estP90 := heuristicEstimateAnalyzeFile(p.MimeType, p.FileSize)
-	estimateBlock := fmt.Sprintf(
-		`{"p50Ms": %d, "p90Ms": %d, "confidence": "heuristic"}`,
-		estP50, estP90,
-	)
+	// Build every DSL call via dslCall, which marshals the whole
+	// argument object with encoding/json. This keeps the quote
+	// characters out of the Go format string entirely -- a value
+	// containing a double quote can't break out of its enclosing
+	// literal (go/unsafe-quoting), and CodeQL recognizes json.Marshal's
+	// output as safely quoted.
+	estimate := map[string]any{"p50Ms": estP50, "p90Ms": estP90, "confidence": "heuristic"}
 
 	// 1. Create the Plan in 'queued'.
-	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`createPlan({"planId": %s, "partitionId": %s, "kind": "analyzeFile", "goal": %s, "requestedBy": %s, "triggerSource": "user.explicit", "input": {"attachmentId": %s, "fileName": %s}})`,
-		jsonString(planId),
-		jsonString(p.PartitionId),
-		jsonString(goal),
-		jsonString(p.RequestedBy),
-		jsonString(p.AttachmentId),
-		jsonString(p.FileName),
-	)); err != nil {
+	createPlanQ, err := dslCall("createPlan", map[string]any{
+		"planId":        planId,
+		"partitionId":   p.PartitionId,
+		"kind":          "analyzeFile",
+		"goal":          goal,
+		"requestedBy":   p.RequestedBy,
+		"triggerSource": "user.explicit",
+		"input":         map[string]any{"attachmentId": p.AttachmentId, "fileName": p.FileName},
+	})
+	if err != nil {
+		return "", fmt.Errorf("build createPlan: %w", err)
+	}
+	if _, err := s.engine.Execute(ctx, createPlanQ); err != nil {
 		return "", fmt.Errorf("execute createPlan: %w", err)
 	}
 
 	// 1.5. Stamp the heuristic estimate on the Plan immediately
 	// after creation so the canvas card has it on first render.
-	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`updatePlanStatus({"planId": %s, "status": "queued", "estimate": %s, "estimatedAt": %s})`,
-		jsonString(planId), estimateBlock, jsonString(time.Now().UTC().Format(time.RFC3339)),
-	)); err != nil {
+	if estQ, err := dslCall("updatePlanStatus", map[string]any{
+		"planId":      planId,
+		"status":      "queued",
+		"estimate":    estimate,
+		"estimatedAt": time.Now().UTC().Format(time.RFC3339),
+	}); err == nil {
 		// Non-fatal: estimate is nice-to-have on the card.
-		_ = err
+		_, _ = s.engine.Execute(ctx, estQ)
 	}
 
 	// 1a. Emit the plan.created canvas card with the heuristic
 	// estimate baked in so the user sees the Plan exists from the
 	// moment it lands.
 	createdStateId := planId + ":created"
-	createdCardData := fmt.Sprintf(
-		`{"variant": "plan.created", "planId": %s, "goal": %s, "estimate": %s}`,
-		jsonString(planId),
-		jsonString(goal),
-		estimateBlock,
-	)
-	createdActor := fmt.Sprintf(`{"kind": "user", "userId": %s}`, jsonString(p.RequestedBy))
-	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`mutationCreateCanvasState({"stateId": %s, "space": %s, "kind": "card", "data": %s, "visibility": "private", "forUserId": %s, "actor": %s, "importance": "ambient"})`,
-		jsonString(createdStateId),
-		jsonString(p.PartitionId),
-		createdCardData,
-		jsonString(p.RequestedBy),
-		createdActor,
-	)); err != nil {
+	if cardQ, err := dslCall("mutationCreateCanvasState", map[string]any{
+		"stateId": createdStateId,
+		"space":   p.PartitionId,
+		"kind":    "card",
+		"data": map[string]any{
+			"variant":  "plan.created",
+			"planId":   planId,
+			"goal":     goal,
+			"estimate": estimate,
+		},
+		"visibility": "private",
+		"forUserId":  p.RequestedBy,
+		"actor":      map[string]any{"kind": "user", "userId": p.RequestedBy},
+		"importance": "ambient",
+	}); err == nil {
 		// Non-fatal -- Plan exists, card just won't render.
-		_ = err
+		_, _ = s.engine.Execute(ctx, cardQ)
 	}
 
 	// 2. Create the single Task in 'queued'.
-	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`createTask({"taskId": %s, "planId": %s, "kind": "fileProcessor", "seq": 0, "input": {"attachmentId": %s}})`,
-		jsonString(taskId),
-		jsonString(planId),
-		jsonString(p.AttachmentId),
-	)); err != nil {
+	createTaskQ, err := dslCall("createTask", map[string]any{
+		"taskId": taskId,
+		"planId": planId,
+		"kind":   "fileProcessor",
+		"seq":    0,
+		"input":  map[string]any{"attachmentId": p.AttachmentId},
+	})
+	if err != nil {
+		return "", fmt.Errorf("build createTask: %w", err)
+	}
+	if _, err := s.engine.Execute(ctx, createTaskQ); err != nil {
 		return "", fmt.Errorf("execute createTask: %w", err)
 	}
 
@@ -177,51 +191,61 @@ func (s *EnginePlanStore) CompleteAnalyzePlan(ctx context.Context, planId string
 	_, taskId := planAndTaskIds(p.AttachmentId)
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// 3. Transition Plan + Task to 'running'.
-	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`updatePlanStatus({"planId": %s, "status": "running", "startedAt": %s})`,
-		jsonString(planId), jsonString(now),
-	)); err != nil {
+	// 3. Transition Plan + Task to 'running'. (All DSL built via
+	// dslCall -> whole-object json.Marshal; no quote chars in the Go
+	// format string, so go/unsafe-quoting can't fire.)
+	runningPlanQ, err := dslCall("updatePlanStatus", map[string]any{
+		"planId": planId, "status": "running", "startedAt": now,
+	})
+	if err != nil {
+		return fmt.Errorf("build updatePlanStatus(running): %w", err)
+	}
+	if _, err := s.engine.Execute(ctx, runningPlanQ); err != nil {
 		return fmt.Errorf("execute updatePlanStatus(running): %w", err)
 	}
-	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`updateTaskStatus({"taskId": %s, "status": "running", "startedAt": %s})`,
-		jsonString(taskId), jsonString(now),
-	)); err != nil {
+	runningTaskQ, err := dslCall("updateTaskStatus", map[string]any{
+		"taskId": taskId, "status": "running", "startedAt": now,
+	})
+	if err != nil {
+		return fmt.Errorf("build updateTaskStatus(running): %w", err)
+	}
+	if _, err := s.engine.Execute(ctx, runningTaskQ); err != nil {
 		return fmt.Errorf("execute updateTaskStatus(running): %w", err)
 	}
 
 	// 4. Transition Task to 'succeeded' with the analysis output.
-	taskOutput := fmt.Sprintf(
-		`{"extractedText": %s, "mimeType": %s, "sizeBytes": %d}`,
-		jsonString(p.Transcription),
-		jsonString(p.MimeType),
-		p.FileSize,
-	)
-	taskCompletedAt := time.Now().UTC().Format(time.RFC3339)
-	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`updateTaskStatus({"taskId": %s, "status": "succeeded", "output": %s, "completedAt": %s})`,
-		jsonString(taskId), taskOutput, jsonString(taskCompletedAt),
-	)); err != nil {
+	taskSucceededQ, err := dslCall("updateTaskStatus", map[string]any{
+		"taskId": taskId,
+		"status": "succeeded",
+		"output": map[string]any{
+			"extractedText": p.Transcription,
+			"mimeType":      p.MimeType,
+			"sizeBytes":     p.FileSize,
+		},
+		"completedAt": time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		return fmt.Errorf("build updateTaskStatus(succeeded): %w", err)
+	}
+	if _, err := s.engine.Execute(ctx, taskSucceededQ); err != nil {
 		return fmt.Errorf("execute updateTaskStatus(succeeded): %w", err)
 	}
 
 	// 5. Create the v1:knowledge:document container row.
 	documentId := planId + ":document"
 	docFormat := pickDocumentFormat(p.MimeType)
-	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`mutationCreateDocument({"documentId": %s, "attachmentId": %s, "planId": %s, "partitionId": %s, "fileName": %s, "mimeType": %s, "format": %s, "summary": %s, "uploadedBy": %s})`,
-		jsonString(documentId),
-		jsonString(p.AttachmentId),
-		jsonString(planId),
-		jsonString(p.PartitionId),
-		jsonString(p.FileName),
-		jsonString(p.MimeType),
-		jsonString(docFormat),
-		jsonString(p.Summary),
-		jsonString(p.RequestedBy),
-	)); err != nil {
-		_ = err
+	if docQ, err := dslCall("mutationCreateDocument", map[string]any{
+		"documentId":   documentId,
+		"attachmentId": p.AttachmentId,
+		"planId":       planId,
+		"partitionId":  p.PartitionId,
+		"fileName":     p.FileName,
+		"mimeType":     p.MimeType,
+		"format":       docFormat,
+		"summary":      p.Summary,
+		"uploadedBy":   p.RequestedBy,
+	}); err == nil {
+		_, _ = s.engine.Execute(ctx, docQ)
 	}
 
 	// 6. Transition Plan to 'succeeded' with the rolled-up output.
@@ -229,20 +253,23 @@ func (s *EnginePlanStore) CompleteAnalyzePlan(ctx context.Context, planId string
 	if len(sample) > 500 {
 		sample = sample[:500] + "…"
 	}
-	planCompletedAt := time.Now().UTC().Format(time.RFC3339)
-	planOutput := fmt.Sprintf(
-		`{"summary": %s, "extractedTextSample": %s, "fullTextLength": %d, "fileName": %s, "attachmentId": %s, "documentId": %s}`,
-		jsonString(p.Summary),
-		jsonString(sample),
-		len(p.Transcription),
-		jsonString(p.FileName),
-		jsonString(p.AttachmentId),
-		jsonString(documentId),
-	)
-	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`updatePlanStatus({"planId": %s, "status": "succeeded", "output": %s, "completedAt": %s})`,
-		jsonString(planId), planOutput, jsonString(planCompletedAt),
-	)); err != nil {
+	planSucceededQ, err := dslCall("updatePlanStatus", map[string]any{
+		"planId": planId,
+		"status": "succeeded",
+		"output": map[string]any{
+			"summary":             p.Summary,
+			"extractedTextSample": sample,
+			"fullTextLength":      len(p.Transcription),
+			"fileName":            p.FileName,
+			"attachmentId":        p.AttachmentId,
+			"documentId":          documentId,
+		},
+		"completedAt": time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		return fmt.Errorf("build updatePlanStatus(succeeded): %w", err)
+	}
+	if _, err := s.engine.Execute(ctx, planSucceededQ); err != nil {
 		return fmt.Errorf("execute updatePlanStatus(succeeded): %w", err)
 	}
 
@@ -250,22 +277,27 @@ func (s *EnginePlanStore) CompleteAnalyzePlan(ctx context.Context, planId string
 	// so the card's Validate / Reject / Attach / Refine actions
 	// target the right Document.
 	stateId := planId + ":completed"
-	cardData := fmt.Sprintf(
-		`{"variant": "plan.completed", "planId": %s, "fileName": %s, "summary": %s, "status": "succeeded", "documentId": %s}`,
-		jsonString(planId),
-		jsonString(p.FileName),
-		jsonString(p.Summary),
-		jsonString(documentId),
-	)
-	actor := fmt.Sprintf(`{"kind": "user", "userId": %s}`, jsonString(p.RequestedBy))
-	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		`mutationCreateCanvasState({"stateId": %s, "space": %s, "kind": "card", "data": %s, "visibility": "private", "forUserId": %s, "actor": %s, "importance": "ambient"})`,
-		jsonString(stateId),
-		jsonString(p.PartitionId),
-		cardData,
-		jsonString(p.RequestedBy),
-		actor,
-	)); err != nil {
+	completedCardQ, err := dslCall("mutationCreateCanvasState", map[string]any{
+		"stateId": stateId,
+		"space":   p.PartitionId,
+		"kind":    "card",
+		"data": map[string]any{
+			"variant":    "plan.completed",
+			"planId":     planId,
+			"fileName":   p.FileName,
+			"summary":    p.Summary,
+			"status":     "succeeded",
+			"documentId": documentId,
+		},
+		"visibility": "private",
+		"forUserId":  p.RequestedBy,
+		"actor":      map[string]any{"kind": "user", "userId": p.RequestedBy},
+		"importance": "ambient",
+	})
+	if err != nil {
+		return fmt.Errorf("build mutationCreateCanvasState(plan.completed): %w", err)
+	}
+	if _, err := s.engine.Execute(ctx, completedCardQ); err != nil {
 		return fmt.Errorf("execute mutationCreateCanvasState(plan.completed): %w", err)
 	}
 
