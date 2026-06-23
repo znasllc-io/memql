@@ -59,6 +59,19 @@ type Options struct {
 	// resolves. Optional -- nil leaves the deploy path unchanged (no
 	// persistence), which is what unit tests + engineless binaries get.
 	Engine identity.EngineExecutor
+	// AutomationDriven flips Deploy / RollbackDeployment from the
+	// authoritative synchronous Go apply (select driver -> apply ->
+	// terminal transition) to the thinned KICK-OFF path: the RPC only
+	// transitions the record to in_progress (Deploy) or creates the
+	// rollback record at in_progress (RollbackDeployment) and returns an
+	// async ack, leaving the deploy pack's driveDeploymentInProgress /
+	// recordReconciledState automations (E2.3/E2.4, examples/deploypack)
+	// to own promote + the terminal transition. Gated behind the
+	// MEMQL_DEPLOY_AUTOMATION_DRIVEN env flag (#2115); default false keeps
+	// the Go lifecycle authoritative until the owner-gated staging
+	// cutover validates parity. Only meaningful when the deploy pack is
+	// mounted on the same (identity) binary (see app/anchor_deploypack.go).
+	AutomationDriven bool
 }
 
 // Service implements memqlv1.DeployControlServiceServer.
@@ -71,6 +84,10 @@ type Service struct {
 	exec     Executor
 	clock    func() time.Time
 	engine   identity.EngineExecutor
+	// automationDriven: when true, Deploy / RollbackDeployment only kick
+	// off the lifecycle (transition to in_progress) and let the deploy
+	// pack automations own promote + terminal. See Options.AutomationDriven.
+	automationDriven bool
 }
 
 // NewService constructs the deploy-control service.
@@ -98,12 +115,13 @@ func NewService(opts Options) (*Service, error) {
 		clock = func() time.Time { return time.Now().UTC() }
 	}
 	return &Service{
-		logger:   opts.Logger,
-		audit:    opts.Audit,
-		repoRoot: repoRoot,
-		exec:     executor,
-		clock:    clock,
-		engine:   opts.Engine,
+		logger:           opts.Logger,
+		audit:            opts.Audit,
+		repoRoot:         repoRoot,
+		exec:             executor,
+		clock:            clock,
+		engine:           opts.Engine,
+		automationDriven: opts.AutomationDriven,
 	}, nil
 }
 

@@ -343,3 +343,105 @@ func TestRollbackDeploymentDeniesNonAdmin(t *testing.T) {
 		t.Errorf("want one blocked audit event, got %+v", audit.events)
 	}
 }
+
+// --- Automation-driven kick-off path (#2115) ------------------------------
+
+// newAutomationDrivenService builds a service with the #2115
+// automation-driven flag set: Deploy / RollbackDeployment thin to a
+// kick-off and the deploy pack automations own promote + terminal.
+func newAutomationDrivenService(t *testing.T, exec Executor, audit identity.AuditLogger, eng identity.EngineExecutor) *Service {
+	t.Helper()
+	svc, err := NewService(Options{
+		Logger:           quietLogger(),
+		Audit:            audit,
+		RepoRoot:         t.TempDir(),
+		Executor:         exec,
+		Engine:           eng,
+		AutomationDriven: true,
+	})
+	if err != nil {
+		t.Fatalf("NewService(automationDriven): %v", err)
+	}
+	return svc
+}
+
+// In automation-driven mode Deploy only transitions the record to
+// in_progress and returns an async ack; it does NOT run promote.sh and
+// does NOT write a terminal transition -- the deploy pack's
+// driveDeploymentInProgress automation owns those (#2115).
+func TestDeployAutomationDrivenKicksOffWithoutApply(t *testing.T) {
+	eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{
+		fullDeploymentNode(map[string]any{
+			"deploymentId": "d1", "status": "pending", "version": "1.2.3",
+			"imageDigest": "sha256:abc", "provider": "azure", "environment": "staging",
+		}),
+	}}
+	exec := &fakeExecutor{promoteOut: "SHOULD NOT RUN"}
+	svc := newAutomationDrivenService(t, exec, &fakeAudit{}, eng)
+
+	res, err := svc.Deploy(ctxWithRole(auth.RoleOwner), &memqlv1.DeployRequest{DeploymentId: "d1"})
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if !res.GetOk() {
+		t.Fatalf("ok = false: %q", res.GetMessage())
+	}
+	// Async ack contract: accepted + kicked off, status in_progress.
+	if res.GetDetails()["async"] != "true" || res.GetDetails()["status"] != "in_progress" {
+		t.Errorf("details = %v, want async=true status=in_progress", res.GetDetails())
+	}
+	// The Go path must NOT have driven promote.sh.
+	if len(exec.promoteCalls) != 0 {
+		t.Errorf("automation-driven Deploy must NOT call promote.sh, got %v", exec.promoteCalls)
+	}
+	// Exactly one in_progress transition; NO terminal transition.
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "in_progress"`); got != 1 {
+		t.Errorf("in_progress transition = %d, want 1; queries = %v", got, eng.queries)
+	}
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "succeeded"`); got != 0 {
+		t.Errorf("automation-driven Deploy must NOT write succeeded, got %d; queries = %v", got, eng.queries)
+	}
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 0 {
+		t.Errorf("automation-driven Deploy must NOT write failed, got %d; queries = %v", got, eng.queries)
+	}
+}
+
+// In automation-driven mode RollbackDeployment creates the new rollback
+// record at in_progress and returns an async ack; it does NOT run
+// promote.sh and does NOT write the rolled_back/failed terminal -- the
+// deploy pack automation owns those (#2115).
+func TestRollbackDeploymentAutomationDrivenKicksOffWithoutApply(t *testing.T) {
+	eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{
+		fullDeploymentNode(map[string]any{
+			"deploymentId": "old1", "status": "succeeded", "version": "1.4.0",
+			"imageDigest": "sha256:old", "provider": "azure", "environment": "production",
+		}),
+	}}
+	exec := &fakeExecutor{promoteOut: "SHOULD NOT RUN"}
+	svc := newAutomationDrivenService(t, exec, &fakeAudit{}, eng)
+
+	res, err := svc.RollbackDeployment(ctxWithRole(auth.RoleOwner), &memqlv1.RollbackDeploymentRequest{ToDeploymentId: "old1"})
+	if err != nil {
+		t.Fatalf("RollbackDeployment: %v", err)
+	}
+	if !res.GetOk() {
+		t.Fatalf("ok = false: %q", res.GetMessage())
+	}
+	if res.GetDetails()["async"] != "true" || res.GetDetails()["newDeploymentId"] == "" {
+		t.Errorf("details = %v, want async=true + newDeploymentId", res.GetDetails())
+	}
+	// New rollback record created at in_progress (the kick-off CDC edge).
+	if got := countContaining(eng.queries, "createDeployment(", `status: "in_progress"`); got != 1 {
+		t.Errorf("create rollback record(in_progress) = %d, want 1; queries = %v", got, eng.queries)
+	}
+	// The Go path must NOT have driven promote.sh or any terminal transition.
+	if len(exec.promoteCalls) != 0 {
+		t.Errorf("automation-driven rollback must NOT call promote.sh, got %v", exec.promoteCalls)
+	}
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "rolled_back"`); got != 0 {
+		t.Errorf("automation-driven rollback must NOT write rolled_back, got %d; queries = %v", got, eng.queries)
+	}
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 0 {
+		t.Errorf("automation-driven rollback must NOT write failed, got %d; queries = %v", got, eng.queries)
+	}
+}
