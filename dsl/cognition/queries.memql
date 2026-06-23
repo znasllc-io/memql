@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.concepts.{ audioOverride, participant, presence, session, space, utterance, videoOverride }
+use cognition.concepts.{ audioOverride, participant, presence, session, utterance, videoOverride }
 
 @enabled
 @description("Get active human participants in a space")
@@ -14,33 +14,6 @@ query participant queryActiveHumanParticipants {
   }
   filter  payload.partitionId==args.partitionId && payload.participantType=="human" && traitStatusIsActive
   shape   participantFull
-}
-
-@enabled
-@description("Returns spaces with status='active' (the default), scoped to the caller's per-row authz reach. Optional userId arg narrows to a specific owner (matches payload.ownerUserId, a v1:identity:user id -- NOT the createdBy email). Used by the cockpit Chat tab to populate the space list.")
-@mcp
-query space queryActiveSpaces {
-  args {
-    userId  string
-  }
-  // Authz: gate on payload.ownerUserId==actor.userId (the caller only ever
-  // sees their own spaces). The optional args.userId narrows further but is
-  // redundant for a self-scoped caller; kept for wire-compat.
-  filter  traitIsActiveRecord && traitStatusIsActive && traitIsNotArchived && payload.ownerUserId==actor.userId && when(args.userId) { payload.ownerUserId==args.userId }
-  // Pagination (5.2 / epic #1964): bounded first page + keyset cursor over
-  // (createdAt, id) instead of a full spaces-list pull. Literal page size --
-  // the struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
-  paginate 50
-  shape    spaceFull
-}
-
-@enabled
-@description("Returns id-only projections of every active v1:cognition:space row (no status / archived filtering -- mirrors the pre-existing recomputeAllSpacesContext semantics that just need non-deleted rows). Backs the cognition heartbeat path that iterates spaces to recompute per-space context (memql#287; replaces a handwritten shape() runtime query under sub-epic #286).")
-@unbounded("active space ids -- internal enumeration for dispatch/sweeps, consumed whole")
-query space queryActivePartitionIds {
-  filter  traitIsActiveRecord
-  shape   partitionIdOnly
 }
 
 // queryLatestSpaceContextForSpace + queryLatestSpaceContextSnapshot
@@ -115,14 +88,6 @@ query utterance queryAgentInteractionCount {
 // No userId filter on purpose -- the cron must see every user's
 // archived rows in one pass.
 
-@enabled
-@description("Returns every archived space in the partition, for the purge cron's per-row retention check.")
-@unbounded("cross-user archived spaces -- an internal admin purge sweep that must see all")
-query space queryAllArchivedSpacesAcrossUsers {
-  filter  traitStatusIsArchived && traitIsNotDeleted
-  shape   spaceFull
-}
-
 // ---- queries/v1/cognition/archivedSpaces.memql ----
 
 // archivedSpaces - Query Archived Spaces
@@ -153,33 +118,7 @@ query space queryAllArchivedSpacesAcrossUsers {
 // on status=='archived' and excludes hard-delete tombstones via
 // traitIsNotDeleted.
 
-@enabled
-@description("Returns spaces with space.status == 'archived'. Optional filter: userId (matches payload.ownerUserId, a user id).")
-query space queryArchivedSpaces {
-  args {
-    userId  string
-  }
-  filter  traitStatusIsArchived && traitIsNotDeleted && payload.ownerUserId==actor.userId && when(args.userId) { payload.ownerUserId==args.userId }
-  // Pagination (5.2 / epic #1964): bounded first page + keyset cursor over
-  // (createdAt, id). Literal page size -- struct-query paginate takes an
-  // integer literal only.
-  sort     "createdAt", "desc"
-  paginate 50
-  shape    spaceFull
-}
-
 // ---- queries/v1/cognition/ownedSpaceById.memql ----
-
-@enabled
-@description("Return the space with the given id ONLY IF the caller is the space owner. Defense-in-depth gate for HTTP handlers (e.g. /spaces/{id}/attachments) that need to reject cross-tenant access before doing expensive side effects like blob uploads. The DSL mutation that follows the upload re-enforces ownership, but this query lets the handler short-circuit early.")
-@unbounded("owned space by id (guarded), gated to the owner -- bounded to a single row")
-query space queryOwnedSpaceById {
-  args {
-    partitionId  string  @required
-  }
-  filter  when(args.partitionId) { id==args.partitionId } && payload.ownerUserId==actor.userId && traitIsActiveRecord
-  shape   spaceFull
-}
 
 // The row's `partitionId` is auto-canonicalized to
 // `<partition>:v1:cognition:space:<slug>` on insert (concept's
@@ -194,7 +133,7 @@ query audioOverride queryAudioOverridesForSpace {
   args {
     partitionId  string  @required
   }
-  filter  payload.partitionId==canonicalId(args.partitionId, space) && traitIsActiveRecord
+  filter  payload.partitionId==args.partitionId && traitIsActiveRecord
   shape   audioOverrideFull
 }
 
@@ -223,17 +162,6 @@ query audioOverride queryAudioOverridesForSpace {
 // `now` is passed in (rather than read via timestamp() inline)
 // because the memQL query planner rejects function-call literals in
 // filter comparisons (see queryExpiredPendingGuestInvitations).
-
-@enabled
-@description("Archived spaces whose space.expiresAt is before the supplied cutoff.")
-@unbounded("expired archived spaces purge cron -- an internal sweep that must see all")
-query space queryExpiredArchivedSpaces {
-  args {
-    now  string  @required
-  }
-  filter  traitIsActiveRecord && traitStatusIsArchived && payload.expiresAt<args.now
-  shape   spaceFull
-}
 
 // ---- queries/v1/cognition/greetingUtterance.memql ----
 
@@ -465,21 +393,6 @@ query session queryParticipantSession {
 //   Array of space records via the spaceFull shape.
 //
 
-@enabled
-@description("Returns spaces with space.status == 'saved'. Optional filter: userId (matches payload.ownerUserId, a user id). Saved spaces carry active=false, so this query gates on status=='saved' + traitIsNotDeleted rather than traitIsActiveRecord (which would exclude every saved row).")
-query space querySavedSpaces {
-  args {
-    userId  string
-  }
-  filter  traitStatusIsSaved && traitIsNotDeleted && payload.ownerUserId==actor.userId && when(args.userId) { payload.ownerUserId==args.userId }
-  // Pagination (5.2 / epic #1964): bounded first page + keyset cursor over
-  // (createdAt, id). Literal page size -- struct-query paginate takes an
-  // integer literal only.
-  sort     "createdAt", "desc"
-  paginate 50
-  shape    spaceFull
-}
-
 // ---- queries/v1/cognition/aiParticipantForSpace.memql ----
 
 // queryAIParticipantForSpace - Find Active AI Participant in Space
@@ -531,16 +444,6 @@ query participant querySiParticipantForSpace {
 //   Single shaped record (or empty) with name, description, status,
 //   settings, slot capacities (maxHumans / maxAgents), selected
 //   specialist agent ids, createdBy, and createdAt.
-
-@enabled
-@description("Returns the full space record by id.")
-query space querySpaceMeta {
-  args {
-    partitionId  string  @required
-  }
-  filter  id==args.partitionId
-  shape   spaceFull
-}
 
 @enabled
 @description("Participants for a space, optionally narrowed by status or participantType. Used by the cognition handler + space-context engine.")
@@ -601,7 +504,7 @@ query videoOverride queryVideoOverridesForSpace {
   args {
     partitionId  string  @required
   }
-  filter  payload.partitionId==canonicalId(args.partitionId, space) && traitIsActiveRecord
+  filter  payload.partitionId==args.partitionId && traitIsActiveRecord
   shape   videoOverrideFull
 }
 
@@ -656,14 +559,3 @@ query presence querySpaceParticipantPresence {
 // a server-supplied userId from queryActiveUsers (never caller input),
 // mirroring queryAllArchivedSpacesAcrossUsers' cron-sweep precedent.
 
-@public
-@enabled
-@description("Active daily spaces owned by the given user. Sweep helper for the dailyspace rollover capability (system actor only).")
-@unbounded("active daily spaces for a user -- a per-user singleton bounded to a single row")
-query space queryActiveDailySpacesForUser {
-  args {
-    userId  string  @required
-  }
-  filter  payload.ownerUserId==args.userId && payload.kind=="daily" && traitIsActiveRecord && traitStatusIsActive && traitIsNotDeleted
-  shape   spaceFull
-}

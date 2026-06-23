@@ -3,7 +3,6 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.concepts.{ space }
 
 @version("1.0.0")
 @namespace("identity")
@@ -245,7 +244,6 @@ concept invitation {
   tokenHash             string                                                                @description("SHA-256 hex digest of the current guest invite token (guest kind only). Primary lookup key in the guest-auth interceptor and on the /join/<token> resolve path. The plaintext token is delivered in the email and never persisted server-side (see memql#108).")
   previousTokenHash     string                                                                @description("SHA-256 hex digest of the token this row carried before the most-recent resend rotation, when there was one. Used by the resolve handler to return a UX-friendly `superseded` status for an older link instead of a generic `invalid`. Carries only ONE generation of history -- the rotation before last drops off. Always empty before any resend has rotated the row.")
 
-  @relationship(type="parent", field="partitionId", target=space, direction="outgoing")
   @relationship(type="parent", field="inviterId", target=user, direction="outgoing")
   @relationship(type="parent", field="inviteeId", target=user, direction="outgoing")
 }

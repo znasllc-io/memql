@@ -161,11 +161,7 @@ func TestNamedQueryPaginationCrossNode(t *testing.T) {
 		sent := make(map[string]struct{}, total)
 		for i := 0; i < total; i++ {
 			sid := "v1:cognition:space:" + id.NewShortId()
-			if _, err := qcA.MutationCreateSpace(ctx, memqlclient.MutationCreateSpaceArgs{
-				PartitionId: sid,
-				Name:    fmt.Sprintf("named-query space probe %03d", i),
-				Status:  "active",
-			}); err != nil {
+			if _, err := qcA.ExecuteNamed(ctx, "mutationCreateSpace", buildMutationCreateSpace(sid, fmt.Sprintf("named-query space probe %03d", i), "active")); err != nil {
 				t.Fatalf("create space %d: %v", i, err)
 			}
 			sent[sid] = struct{}{}
@@ -177,7 +173,7 @@ func TestNamedQueryPaginationCrossNode(t *testing.T) {
 		// other active spaces this user owns from prior runs. We therefore assert
 		// page mechanics (bounded first page + cursor) and that every seeded id is
 		// walked exactly once with no dup, rather than an exact total count.
-		query := memqlclient.QueryActiveSpacesBuild(memqlclient.QueryActiveSpacesArgs{})
+		query := buildQueryActiveSpaces()
 
 		qcB := memqlclient.NewQueryClient(connB.Dispatcher())
 		cursor := ""

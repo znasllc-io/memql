@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.concepts.{ audioOverride, chunk, request, response, participant, presence, session, space, utterance, videoOverride }
+use cognition.concepts.{ audioOverride, chunk, request, response, participant, presence, session, utterance, videoOverride }
 use agents.concepts.{ agent }
 use identity.concepts.{ user, authSession }
 
@@ -19,7 +19,7 @@ mutation participant mutationAddAgentToSpace {
   insert {
     id: concat("si-", hash(concat(
       canonicalId(args.agentId, agent), ":",
-      canonicalId(args.partitionId, space)
+      args.partitionId
     )))
     args.partitionId
     args.agentId
@@ -40,21 +40,6 @@ mutation participant mutationAddAgentToSpace {
 //
 // Inserts a new version of a space record with the provided payload.
 // The caller is responsible for passing the full updated payload (e.g., active=false, status="archived").
-
-@enabled
-@description("Insert a new version of a space record (typically used to archive a space). Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload -- per-row authz already gates that only the owner reaches this mutation, and at create time ownerUserId == actor.userId. Also stamps archivedAt (now) when the caller's payload omits it, so queryArchivedSpaces (which gates on status=='archived', not archivedAt presence) and the retention cron see a complete archived row even from minimal-payload callers. memql#401 / #1637.")
-mutation space mutationArchiveSpace {
-  args {
-    partitionId  string  @required
-    payload  object  @required
-  }
-  insert {
-    id: args.partitionId
-    ownerUserId: actor.userId
-    args.payload
-    archivedAt: coalesce(args.payload.archivedAt, timestamp())
-  }
-}
 
 // ---- mutations/v1/cognition/createDailySpace.memql ----
 
@@ -112,27 +97,6 @@ mutation space mutationArchiveSpace {
 // mutation level still seeds nothing -- the autoJoinAI automation on
 // space-created handles the owner assistant, same path the regular
 // space flow uses.
-
-@enabled
-@description("Create a daily space (kind=daily, private=true). Idempotent on (userHash, dateKey). Phase 10: no maxHumans=1/maxAgents=1 lock; the user can grow a daily space into a full team conversation if they want.")
-mutation space mutationCreateDailySpace {
-  args {
-    partitionId       string  @required
-    name          string  @required
-    dailyDateKey  string  @required
-    ownerUserId   string  @required
-  }
-  insert {
-    id: args.partitionId
-    args.ownerUserId
-    args.name
-    args.dailyDateKey
-    kind: "daily"
-    private: true
-    status: "active"
-    active: true
-  }
-}
 
 // ---- mutations/v1/cognition/createGreetingUtterance.memql ----
 
@@ -232,44 +196,6 @@ mutation session mutationCreateSessionForParticipant {
 // there is no longer a 1:1 vs group distinction. `maxHumans` /
 // `maxAgents` default to 5 / 3 when the caller omits them.
 
-@enabled
-@description("Create a space.")
-mutation space mutationCreateSpace {
-  args {
-    partitionId           string
-    name              string  @required
-    description       string
-    goal              object
-    settings          object
-    status            string
-    spaceType         string
-    scheduledAt       string
-    turnStateId       string
-    participantIds    array
-    utteranceIds      array
-    active            bool
-    maxHumans         int
-    maxAgents         int
-  }
-  insert {
-    id: args.partitionId
-    ownerUserId: actor.userId
-    args.name
-    args.description
-    args.goal
-    args.settings
-    status: coalesce(args.status, "active")
-    args.spaceType
-    args.scheduledAt
-    args.turnStateId
-    args.participantIds
-    args.utteranceIds
-    active: coalesce(args.active, true)
-    maxHumans: coalesce(args.maxHumans, 5)
-    maxAgents: coalesce(args.maxAgents, 1)
-  }
-}
-
 // ---- mutations/v1/cognition/setSpaceGoal.memql ----
 
 // setSpaceGoal
@@ -285,20 +211,6 @@ mutation space mutationCreateSpace {
 // for cognition (NOT tied to space.kind=daily or status=scheduled).
 // Server-side stamps ownerUserId from actor.userId so the update stays
 // owned-classified for per-row authz.
-
-@enabled
-@description("Set or replace a space's structured goal {statement, timeframe} after creation. Partial update via update() -- only the goal changes; everything else inherits from the prior row.")
-mutation space mutationSetSpaceGoal {
-  args {
-    partitionId  string  @required
-    goal     object  @required
-  }
-  update {
-    id: args.partitionId
-    ownerUserId: actor.userId
-    args.goal
-  }
-}
 
 // ---- mutations/v1/cognition/deleteSpaceNow.memql ----
 
@@ -319,20 +231,6 @@ mutation space mutationSetSpaceGoal {
 // The frontend's copresentMutations.ts wrapper composes the payload
 // (typically: keep name + ids, set deleted=true / active=false /
 // status="archived").
-
-@enabled
-@description("Insert a new version of a space record marking it as hard-deleted (deleted=true). Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).")
-mutation space mutationDeleteSpaceNow {
-  args {
-    partitionId  string  @required
-    payload  object  @required
-  }
-  insert {
-    id: args.partitionId
-    ownerUserId: actor.userId
-    args.payload
-  }
-}
 
 // ---- mutations/v1/cognition/emitClientToolRequest.memql ----
 
@@ -477,7 +375,7 @@ mutation participant mutationJoinSpaceAsHuman {
     // land on the same participant id. The caller does not supply the
     // id (memql#213 dropped the ignored participantId arg).
     id: concat("participant-", hash(concat(
-      canonicalId(args.partitionId, space), ":",
+      args.partitionId, ":",
       canonicalId(args.userId, user)
     )))
     args.partitionId
@@ -534,7 +432,7 @@ mutation participant mutationJoinSpaceAsAI {
     // (memql#213 dropped the ignored participantId arg).
     id: concat("si-", hash(concat(
       canonicalId(args.agentId, agent), ":",
-      canonicalId(args.partitionId, space)
+      args.partitionId
     )))
     args.partitionId
     args.agentId
@@ -603,7 +501,7 @@ mutation participant mutationRemoveAgentFromSpace {
   update {
     id: concat("si-", hash(concat(
       canonicalId(args.agentId, agent), ":",
-      canonicalId(args.partitionId, space)
+      args.partitionId
     )))
     status: "left"
     leftAt: timestamp()
@@ -624,20 +522,6 @@ mutation participant mutationRemoveAgentFromSpace {
 // (mutationStartPlan, mutationCompleteToolInvocation) and the guide /
 // calendar / identity `update { id, args.payload }` pattern.
 
-@enabled
-@description("Partial-update a space record (read-merge-write; typically used to rename a space). Only the fields in the caller's payload change; all other fields are preserved. Server-side stamps ownerUserId from actor.userId (memql#401 / #1637).")
-mutation space mutationRenameSpace {
-  args {
-    partitionId  string  @required
-    payload  object  @required
-  }
-  update {
-    id: args.partitionId
-    ownerUserId: actor.userId
-    args.payload
-  }
-}
-
 // ---- mutations/v1/cognition/restoreSpace.memql ----
 
 // restoreSpace
@@ -651,20 +535,6 @@ mutation space mutationRenameSpace {
 // Same generic-upsert shape as the other space-lifecycle mutations
 // (archiveSpace / saveSpace / deleteSpaceNow). The frontend's
 // copresentMutations.ts wrappers compose the per-state payload.
-
-@enabled
-@description("Insert a new version of a space record to restore it to the active state. Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).")
-mutation space mutationRestoreSpace {
-  args {
-    partitionId  string  @required
-    payload  object  @required
-  }
-  insert {
-    id: args.partitionId
-    ownerUserId: actor.userId
-    args.payload
-  }
-}
 
 // ---- mutations/v1/cognition/saveSpace.memql ----
 
@@ -683,20 +553,6 @@ mutation space mutationRestoreSpace {
 // mutationDeleteSpaceNow -- they're all generic full-payload upserts;
 // the frontend (copresentMutations.ts wrappers) owns the per-state
 // payload composition.
-
-@enabled
-@description("Insert a new version of a space record with the 'saved' status payload. Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).")
-mutation space mutationSaveSpace {
-  args {
-    partitionId  string  @required
-    payload  object  @required
-  }
-  insert {
-    id: args.partitionId
-    ownerUserId: actor.userId
-    args.payload
-  }
-}
 
 // ---- mutations/v1/cognition/sendActionUtterance.memql ----
 
@@ -731,12 +587,12 @@ mutation utterance mutationSendActionUtterance {
       cond(
         args.action.idempotencyKey,
         concat("utt-", hash(concat(
-          canonicalId(args.partitionId, space), ":",
+          args.partitionId, ":",
           canonicalId(args.participantId, participant), ":",
           args.action.type, ":", args.action.idempotencyKey
         ))),
         concat("utt-", hash(concat(
-          canonicalId(args.partitionId, space), ":",
+          args.partitionId, ":",
           canonicalId(args.participantId, participant), ":",
           coalesce(args.createdAt, timestamp()), ":", args.action.type
         )))
@@ -789,12 +645,12 @@ mutation utterance mutationSendRealtimeTranscriptUtterance {
       cond(
         args.idempotencyKey,
         concat("utt-", hash(concat(
-          canonicalId(args.partitionId, space), ":",
+          args.partitionId, ":",
           canonicalId(args.participantId, participant), ":",
           args.idempotencyKey
         ))),
         concat("utt-", hash(concat(
-          canonicalId(args.partitionId, space), ":",
+          args.partitionId, ":",
           canonicalId(args.participantId, participant), ":",
           timestamp(), ":", coalesce(args.text, "")
         )))
@@ -849,7 +705,7 @@ mutation utterance mutationSendSpeechUtterance {
     id: coalesce(
       args.utteranceId,
       concat("utt-", hash(concat(
-        canonicalId(args.partitionId, space), ":",
+        args.partitionId, ":",
         canonicalId(args.participantId, participant), ":",
         timestamp()
       )))
@@ -936,7 +792,7 @@ mutation audioOverride mutationSetAgentAudioOverride {
   }
   insert {
     id: concat("audioOverride-", hash(concat(
-      canonicalId(args.partitionId, space), ":",
+      args.partitionId, ":",
       canonicalId(args.agentId, agent)
     )))
     args.partitionId
@@ -992,7 +848,7 @@ mutation videoOverride mutationSetAgentVideoOverride {
   }
   insert {
     id: concat("videoOverride-", hash(concat(
-      canonicalId(args.partitionId, space), ":",
+      args.partitionId, ":",
       canonicalId(args.agentId, agent)
     )))
     args.partitionId
@@ -1171,15 +1027,3 @@ mutation session mutationUpdateSessionStreams {
 // which must NOT become the space owner. The sweep preserves the
 // real ownerUserId in the payload it passes.
 
-@enabled
-@description("Insert the terminal (archived/saved) version of a daily space at rollover. System-actor sweep helper; the caller passes the full updated payload including the preserved ownerUserId.")
-mutation space mutationRolloverDailySpace {
-  args {
-    partitionId  string  @required
-    payload  object  @required
-  }
-  insert {
-    id: args.partitionId
-    args.payload
-  }
-}

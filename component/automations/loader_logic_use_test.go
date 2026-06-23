@@ -59,9 +59,11 @@ func TestDryRunCompileResolvesLogicConstructUseImports(t *testing.T) {
 		"indexLiveSourceOnCreate": false,
 		// v1:cognition:logic family (session). The daily-space automations
 		// (ensureDailySpaceOnAuthSession / provisionDailySpaceOnUserCreate /
-		// rolloverDailySpace) moved to the CoPresent pack in #1976; the
-		// remaining cognition `.logic.{ }` importers still exercise the branch.
-		"autoJoinAI": false, "bootstrapSession": false,
+		// rolloverDailySpace) moved to the CoPresent pack in #1976, and
+		// autoJoinAI / purgeExpiredArchivedSpaces moved in B2 (#2038) with the
+		// `space` concept; the remaining cognition `.logic.{ }` importers still
+		// exercise the branch.
+		"bootstrapSession": false,
 		"generateResponse": false,
 		"voiceMigrationOnSecondHuman": false,
 		// the remaining per-namespace logic concepts

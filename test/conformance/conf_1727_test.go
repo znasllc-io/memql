@@ -105,9 +105,8 @@ func runEventDryRunBinding(t *testing.T, e *Env) {
 		logic string
 		event map[string]any
 	}{
-		{"logicAutoJoinAI", map[string]any{
-			"id": "space-1727", "ownerUserId": "user-1727", "status": "active",
-		}},
+		// (logicAutoJoinAI moved to the CoPresent pack with the space concept
+		// in #2038/B2; the remaining cognition/data logics keep this coverage.)
 		{"logicVoiceMigrationOnSecondHuman", map[string]any{
 			"id": "user-1727", "activePartitionId": "space-1727",
 		}},

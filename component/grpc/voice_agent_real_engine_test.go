@@ -260,16 +260,25 @@ func (r *spaceContextParseResolver) CanonicalizeIdValue(ctx context.Context, val
 }
 
 func (r *spaceContextParseResolver) Execute(_ context.Context, query string) (*memqlengine.ExecuteResult, error) {
+	// querySpaceMeta moved to the CoPresent pack in B2 (#2038) alongside the
+	// `space` concept, so the pure (no-pack) engine under test can no longer
+	// parse it -- the carrier engine that runs this resolver in production
+	// (bff / cognition, both carrier-built) loads the pack and resolves it.
+	// Recognize the pack-owned query here and return the canned space row
+	// WITHOUT routing it through the core parser; the pack's own DSL load
+	// tests prove querySpaceMeta parses. The CORE querySpaceParticipants
+	// string is still validated through the real parser below (the live #1470
+	// retired-syntax guard).
+	if strings.Contains(query, "querySpaceMeta") {
+		r.sawSpaceMeta = true
+		return &memqlengine.ExecuteResult{Bundle: r.spaceBundle}, nil
+	}
 	if _, err := r.engine.Parse(query); err != nil {
 		r.parseFailed = append(r.parseFailed, query)
 		return nil, err
 	}
 	r.parsedOK = append(r.parsedOK, query)
-	switch {
-	case strings.Contains(query, "querySpaceMeta"):
-		r.sawSpaceMeta = true
-		return &memqlengine.ExecuteResult{Bundle: r.spaceBundle}, nil
-	case strings.Contains(query, "querySpaceParticipants"):
+	if strings.Contains(query, "querySpaceParticipants") {
 		r.sawParticipants = true
 		return &memqlengine.ExecuteResult{Bundle: r.participantsB}, nil
 	}
@@ -322,7 +331,8 @@ func TestVoiceSpaceContextRealEngine_ParsesAndResolves(t *testing.T) {
 	out := resolveVoiceSpaceContextVia(ctx, resolver, partitionId)
 
 	require.Empty(t, resolver.parseFailed,
-		"querySpaceMeta + querySpaceParticipants must parse cleanly through the real engine (#1470)")
+		"querySpaceParticipants must parse cleanly through the real engine (#1470); "+
+			"querySpaceMeta is pack-owned after B2 (#2038) and validated by the pack's load tests")
 	require.True(t, resolver.sawSpaceMeta, "the resolver must issue querySpaceMeta for the space row")
 	require.True(t, resolver.sawParticipants, "the resolver must issue querySpaceParticipants for the humans")
 	assert.Equal(t, "Q3 Roadmap", out.name, "space name must resolve from the space row")

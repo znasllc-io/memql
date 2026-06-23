@@ -145,11 +145,7 @@ func newSpaceWithHuman(ctx context.Context, t *testing.T, conn *memqlclient.Conn
 	t.Helper()
 	qc := memqlclient.NewQueryClient(conn.Dispatcher())
 	spaceID = "v1:cognition:space:" + id.NewShortId()
-	if _, err := qc.MutationCreateSpace(ctx, memqlclient.MutationCreateSpaceArgs{
-		PartitionId: spaceID,
-		Name:    "clustere2e delivery probe",
-		Status:  "active",
-	}); err != nil {
+	if _, err := qc.ExecuteNamed(ctx, "mutationCreateSpace", buildMutationCreateSpace(spaceID, "clustere2e delivery probe", "active")); err != nil {
 		t.Fatalf("create space: %v", err)
 	}
 	if _, err := qc.MutationJoinSpaceAsHuman(ctx, memqlclient.MutationJoinSpaceAsHumanArgs{

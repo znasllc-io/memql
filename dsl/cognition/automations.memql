@@ -3,17 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.logic.{ logicAutoJoinAI, logicBootstrapSession, logicGenerateResponse, logicPurgeExpiredArchivedSpaces, logicVoiceMigrationOnSecondHuman }
-
-@enabled
-@trigger(event="node.created", concept="v1:cognition:space", partition="*")
-@filter(payload.active==true)
-@description("On space creation, joins the creator's assistant plus any specialist agents picked at creation time. Joiners' GAs are never auto-joined.")
-automation autoJoinAI {
-  step run {
-    logic autoJoinAI { event: event }
-  }
-}
+use cognition.logic.{ logicBootstrapSession, logicGenerateResponse, logicVoiceMigrationOnSecondHuman }
 
 // automations/v1/cognition/bootstrapSession/automation.memql
 // Auto-creates a v1:cognition:session record when a participant is created.
@@ -43,35 +33,6 @@ automation generateResponse {
 }
 
 // ---- automations/v1/cognition/purgeExpiredArchivedSpaces/automation.memql ----
-
-// purgeExpiredArchivedSpaces
-// ==========================
-//
-// Daily sweep that hard-deletes archived spaces whose retention
-// window has elapsed. Pattern mirrors expireGuestInvitations.
-//
-// The deadline (payload.expiresAt) is pre-computed at archive time
-// (frontend stamps archivedAt + retentionDays), so the query is a
-// plain `expiresAt < now` comparison and the cron loop just calls
-// deleteSpaceNow per row.
-//
-// Defensive: only acts on rows where ALL of:
-//   payload.status == "archived"   (traitStatusIsArchived in the query)
-//   payload.active == true         (traitIsActiveRecord in the query)
-//   payload.expiresAt < now        (filter in the query)
-// Saved + scheduled + active spaces are untouched.
-//
-// Runs daily at 02:00 UTC. Cadence is loose (vs expireGuestInvitations's
-// 30-second tick) because retention is measured in days; missing the
-// boundary by a few hours doesn't matter -- next run catches it.
-@enabled
-@trigger(schedule="0 0 2 * * *")
-@description("Daily sweep to hard-delete archived spaces past their expiresAt deadline.")
-automation purgeExpiredArchivedSpaces {
-  step run {
-    logic purgeExpiredArchivedSpaces { event: event }
-  }
-}
 
 // voiceMigrationOnSecondHuman
 // ===========================

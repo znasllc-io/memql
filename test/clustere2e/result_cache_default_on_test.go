@@ -64,10 +64,7 @@ func TestResultCacheDefaultOn_CrossReplica(t *testing.T) {
 
 	createSpace := func(name string) string {
 		spaceID := "v1:cognition:space:" + id.NewShortId()
-		if _, err := qcA.MutationCreateSpace(ctx, memqlclient.MutationCreateSpaceArgs{
-			PartitionId: spaceID,
-			Name:    name,
-		}); err != nil {
+		if _, err := qcA.ExecuteNamed(ctx, "mutationCreateSpace", buildMutationCreateSpace(spaceID, name, "")); err != nil {
 			t.Fatalf("create space: %v", err)
 		}
 		return spaceID
@@ -81,7 +78,7 @@ func TestResultCacheDefaultOn_CrossReplica(t *testing.T) {
 	}
 
 	activeSpaceCount := func(qc *memqlclient.QueryClient) int {
-		res, err := qc.QueryActiveSpaces(ctx, memqlclient.QueryActiveSpacesArgs{})
+		res, err := qc.ExecuteNamed(ctx, "queryActiveSpaces", buildQueryActiveSpaces())
 		if err != nil {
 			t.Fatalf("queryActiveSpaces: %v", err)
 		}
@@ -112,7 +109,7 @@ func TestResultCacheDefaultOn_CrossReplica(t *testing.T) {
 	// proves eviction (not TTL lapse).
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		res, err := qcB.QueryActiveSpaces(ctx, memqlclient.QueryActiveSpacesArgs{})
+		res, err := qcB.ExecuteNamed(ctx, "queryActiveSpaces", buildQueryActiveSpaces())
 		if err != nil {
 			t.Fatalf("post-write queryActiveSpaces: %v", err)
 		}
