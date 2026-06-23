@@ -16,7 +16,7 @@ concept log {
   toState       enum("draft", "checked", "confirmed")  @required  @description("Validation state after the action")
   identityId    string  @required  @description("Identity who performed the action")
   identityType  enum("human", "synthetic")  @required  @description("Type of identity (denormalized for fast filtering)")
-  spaceId       string  @required  @description("Space ID for scoped log queries")
+  partitionId       string  @required  @description("Space ID for scoped log queries")
   note          string  @description("Optional reason, especially useful for reverts")
 
   @relationship(type="parent", field="recordId", target=record, direction="outgoing")
@@ -28,13 +28,13 @@ concept log {
 concept policy {
   active                bool    @default("true")  @description("Soft-delete flag (append-only semantics)")
   targetRecordType      string  @required  @description("Record type this policy applies to (e.g., 'vehicle', 'bird')")
-  spaceId               string  @description("Optional space scope. Null means global for this record type.")
+  partitionId               string  @description("Optional space scope. Null means global for this record type.")
   requiredChecks        int     @default("1")  @description("Number of synthetic checks needed for draft -> checked")
   requiredConfirmations int     @default("1")  @description("Number of human confirmations needed for checked -> confirmed")
   checkedDataUsable     bool    @default("false")  @description("Whether checked (not yet confirmed) records are usable live")
   revertMinRole         enum("owner", "admin", "writer", "reader")  @default("admin")  @description("Minimum role required to revert records")
 
-  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
+  @relationship(type="parent", field="partitionId", target=space, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -46,7 +46,7 @@ concept record {
   data                object    @required  @description("The actual data payload")
   label               string    @required  @description("Human-readable display label")
   recordType          string    @required  @description("Domain-specific record type (e.g., 'vehicle', 'bird', 'employee')")
-  spaceId             string    @required  @description("Space this record belongs to")
+  partitionId             string    @required  @description("Space this record belongs to")
   importSource        enum("chat-ai-research", "chat-file-upload", "manual")  @required  @description("How this data was imported")
   importedBy          string    @required  @description("Identity ID of the importer")
   naturalKeyField     string    @description("Name of the natural key field for conflict detection (e.g., 'vin', 'name')")
@@ -60,5 +60,5 @@ concept record {
   lastConfirmedBy     string    @description("Identity ID of last human confirmer")
   lastConfirmedAt     datetime  @description("When last confirmed by a human identity")
 
-  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
+  @relationship(type="parent", field="partitionId", target=space, direction="outgoing")
 }

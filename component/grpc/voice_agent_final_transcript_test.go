@@ -202,7 +202,7 @@ func TestHandleVoiceAgentFinalTranscript_MissingFieldsWarns(t *testing.T) {
 		&memqlv1.MemqlClientMessage{MessageId: "m1"},
 		&memqlv1.VoiceAgentFinalTranscript{
 			RequestId:     "r1",
-			SpaceId:       "space-1",
+			PartitionId:       "space-1",
 			SpeakerUserId: "standard:v1:cognition:participant:alice",
 			FinalText:     "   ", // missing
 		})

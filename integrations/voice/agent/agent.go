@@ -26,7 +26,7 @@ type RunOptions struct {
 	Getenv Getenv
 	// RoomName is the LiveKit room to join. When empty it is read from the
 	// MEMQL_VOICE_ROOM_NAME env var. The memQL convention is
-	// "polyphon-<spaceId>".
+	// "polyphon-<partitionId>".
 	RoomName string
 	// Dialer overrides the gRPC dialer (defaults to the insecure dialer).
 	Dialer Dialer
@@ -64,11 +64,11 @@ func Run(ctx context.Context, opts RunOptions) error {
 		// there is nothing to do. Exiting here would make docker crash-loop the
 		// container (the historical "room name is required" failure), so instead
 		// idle until the process is signalled. Provide a room via --room or
-		// MEMQL_VOICE_ROOM_NAME (memQL convention: polyphon-<spaceId>) and
+		// MEMQL_VOICE_ROOM_NAME (memQL convention: polyphon-<partitionId>) and
 		// restart to join one. Token resolution is skipped while idle -- no
 		// credential is needed to do nothing.
 		logger.Info("voice-agent: no room configured -- idling until signalled " +
-			"(set --room or MEMQL_VOICE_ROOM_NAME=polyphon-<spaceId> and restart to join a room)")
+			"(set --room or MEMQL_VOICE_ROOM_NAME=polyphon-<partitionId> and restart to join a room)")
 		<-ctx.Done()
 		logger.Info("voice-agent: idle shutdown (context cancelled)")
 		return nil

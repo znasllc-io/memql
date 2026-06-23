@@ -41,11 +41,11 @@ func sendFinalTranscript(ctx context.Context, client *Client, logger *slog.Logge
 	if err != nil {
 		if logger != nil {
 			logger.Warn("voice-agent final transcript send failed",
-				"executor", executor, "space_id", msg.GetSpaceId(), "err", err)
+				"executor", executor, "partition_id", msg.GetPartitionId(), "err", err)
 		}
 		return
 	}
-	go consumeFinalTranscriptReply(ctx, logger, executor, msg.GetSpaceId(), sendStart, replies, release)
+	go consumeFinalTranscriptReply(ctx, logger, executor, msg.GetPartitionId(), sendStart, replies, release)
 }
 
 // consumeFinalTranscriptReply awaits the server's reply to one final
@@ -70,7 +70,7 @@ func consumeFinalTranscriptReply(
 	case <-timer.C:
 		if logger != nil {
 			logger.Warn("voice-agent final transcript ack timed out",
-				"executor", executor, "space_id", spaceID,
+				"executor", executor, "partition_id", spaceID,
 				"timeout", finalAckWaitTimeout.String())
 		}
 	case reply, ok := <-replies:
@@ -81,7 +81,7 @@ func consumeFinalTranscriptReply(
 		// audio path (this goroutine), but the duration measures the server's
 		// synchronous utterance insert (engine mutation -> DB) for the turn.
 		logVoiceTiming(logger, "turn.final_transcript_ack", sendStart,
-			"executor", executor, "space_id", spaceID)
+			"executor", executor, "partition_id", spaceID)
 		logFinalTranscriptReply(logger, executor, spaceID, reply)
 	}
 }
@@ -95,12 +95,12 @@ func logFinalTranscriptReply(logger *slog.Logger, executor, spaceID string, repl
 	if ack := reply.GetVoiceAgentFinalAck(); ack != nil {
 		if ack.GetSuccess() {
 			logger.Debug("voice-agent final transcript acked",
-				"executor", executor, "space_id", spaceID,
+				"executor", executor, "partition_id", spaceID,
 				"request_id", ack.GetRequestId(), "utterance_id", ack.GetUtteranceId())
 			return
 		}
 		logger.Warn("voice-agent final transcript rejected",
-			"executor", executor, "space_id", spaceID,
+			"executor", executor, "partition_id", spaceID,
 			"request_id", ack.GetRequestId(),
 			"error_code", ack.GetErrorCode(),
 			"error_message", ack.GetErrorMessage())
@@ -108,13 +108,13 @@ func logFinalTranscriptReply(logger *slog.Logger, executor, spaceID string, repl
 	}
 	if qe := reply.GetQueryError(); qe != nil {
 		logger.Warn("voice-agent final transcript rejected",
-			"executor", executor, "space_id", spaceID,
+			"executor", executor, "partition_id", spaceID,
 			"request_id", qe.GetRequestId(),
 			"error_code", qe.GetError().GetCode(),
 			"error_message", qe.GetError().GetMessage())
 		return
 	}
 	logger.Debug("voice-agent final transcript: unexpected reply payload",
-		"executor", executor, "space_id", spaceID,
+		"executor", executor, "partition_id", spaceID,
 		"payload", ServerPayloadName(reply))
 }

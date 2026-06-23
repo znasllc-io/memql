@@ -27,14 +27,14 @@ const greetingMutationSource = `use cognition.concepts.{ utterance }
 
 mutation utterance mutationCreateGreetingUtterance {
   args {
-    spaceId        string  @required
+    partitionId        string  @required
     participantId  string  @required
     agentId        string  @required
     text           string  @required
     greetingKind   string  @required
   }
   insert {
-    args.spaceId
+    args.partitionId
     args.participantId
     participantType: "si"
     utteranceType: "text"
@@ -93,7 +93,7 @@ func renderGreetingPayload(t *testing.T) map[string]any {
 
 	engine := &MemQLEngine{}
 	mutation, err := engine.renderMutationTemplate(context.Background(), fn.MutationTemplate, map[string]any{
-		"spaceId":       "v1:cognition:space:daily-2026-05-29",
+		"partitionId":       "v1:cognition:space:daily-2026-05-29",
 		"participantId": "si-sofia-daily",
 		"agentId":       "v1:agents:agent:assistant-znas",
 		"text":          "Good to see you again -- jumping in.",

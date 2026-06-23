@@ -81,7 +81,7 @@ func TestHandleEventForward_PublishesLocally(t *testing.T) {
 		received <- e
 	})
 
-	payload, _ := structpb.NewStruct(map[string]any{"spaceId": "space-1"})
+	payload, _ := structpb.NewStruct(map[string]any{"partitionId": "space-1"})
 	svc.handleEventForward("peer-bff", &nodev1.EventForward{
 		EventId:      "evt-abc",
 		Topic:        "graph.node.created.v1:cognition:utterance",
@@ -97,8 +97,8 @@ func TestHandleEventForward_PublishesLocally(t *testing.T) {
 		if e.OriginNodeId != "bff-local" {
 			t.Errorf("expected OriginNodeId bff-local, got %q", e.OriginNodeId)
 		}
-		if e.Payload["spaceId"] != "space-1" {
-			t.Errorf("expected payload spaceId=space-1, got %v", e.Payload["spaceId"])
+		if e.Payload["partitionId"] != "space-1" {
+			t.Errorf("expected payload partitionId=space-1, got %v", e.Payload["partitionId"])
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for local bus publish -- peer event was not bridged")

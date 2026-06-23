@@ -138,7 +138,7 @@ func TestIsCompiledReference(t *testing.T) {
 		"$event.payload.id":           true,
 		"$item.id":                    true,
 		"$steps.getRow.result":        true,
-		"$ctx.spaceId":                true,
+		"$ctx.partitionId":                true,
 		"$input.x":                    true,
 		"$args":                       false, // no path segment
 		"$event":                      false, // bare token (pinned by #418 test)

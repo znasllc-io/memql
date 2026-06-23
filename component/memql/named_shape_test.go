@@ -44,13 +44,13 @@ func TestParseShapeExpressionString_UnescapedFromJSONFallback(t *testing.T) {
 }
 
 func TestParseShapeExpressionString_NestedPath(t *testing.T) {
-	tmpl, err := parseShapeExpressionString(`node(\"payload.spaceId\")`)
+	tmpl, err := parseShapeExpressionString(`node(\"payload.partitionId\")`)
 	require.NoError(t, err)
 	fn, ok := tmpl.(*shapeNodeFunc)
 	require.True(t, ok)
 	require.Len(t, fn.Fields, 1)
-	require.Equal(t, "payload.spaceId", fn.Fields[0].Raw)
-	require.Equal(t, []string{"payload", "spaceId"}, fn.Fields[0].Parts)
+	require.Equal(t, "payload.partitionId", fn.Fields[0].Raw)
+	require.Equal(t, []string{"payload", "partitionId"}, fn.Fields[0].Parts)
 }
 
 func TestParseShapeExpressionString_MultipleFields(t *testing.T) {
@@ -92,7 +92,7 @@ func TestConvertShapeDefinitionTemplate_MixedFieldTypes(t *testing.T) {
 		"displayName":    `node(\"payload.displayName\")`,
 		"lifecycleState": "production", // literal fallback
 		"nested": map[string]any{
-			"spaceId": `node(\"payload.spaceId\")`,
+			"partitionId": `node(\"payload.partitionId\")`,
 		},
 	}
 
@@ -117,9 +117,9 @@ func TestConvertShapeDefinitionTemplate_MixedFieldTypes(t *testing.T) {
 
 	nestedObj, ok := obj.Fields["nested"].(*shapeObject)
 	require.True(t, ok)
-	spaceNode, ok := nestedObj.Fields["spaceId"].(*shapeNodeFunc)
+	spaceNode, ok := nestedObj.Fields["partitionId"].(*shapeNodeFunc)
 	require.True(t, ok)
-	require.Equal(t, "payload.spaceId", spaceNode.Fields[0].Raw)
+	require.Equal(t, "payload.partitionId", spaceNode.Fields[0].Raw)
 }
 
 // --- resolveNamedShape + shape loader -----------------------------------------
@@ -133,7 +133,7 @@ func TestResolveNamedShape_EndToEnd(t *testing.T) {
 		Name: "utteranceFull",
 		Template: map[string]any{
 			"id":      `node(\"id\")`,
-			"spaceId": `node(\"payload.spaceId\")`,
+			"partitionId": `node(\"payload.partitionId\")`,
 			"text":    `node(\"payload.text\")`,
 		},
 	}))
@@ -146,7 +146,7 @@ func TestResolveNamedShape_EndToEnd(t *testing.T) {
 	obj, ok := resolved.(*shapeObject)
 	require.True(t, ok)
 	require.Contains(t, obj.Fields, "id")
-	require.Contains(t, obj.Fields, "spaceId")
+	require.Contains(t, obj.Fields, "partitionId")
 	require.Contains(t, obj.Fields, "text")
 
 	_, ok = obj.Fields["id"].(*shapeNodeFunc)

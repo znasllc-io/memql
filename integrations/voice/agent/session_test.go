@@ -74,14 +74,14 @@ func TestSession_Run_HandshakeAndEnd(t *testing.T) {
 	defer cancel()
 	require.NoError(t, sess.Run(ctx))
 
-	// spaceId is the room name minus the polyphon- prefix; gaAgentId is
-	// "<spaceId>-ga".
+	// partitionId is the room name minus the polyphon- prefix; gaAgentId is
+	// "<partitionId>-ga".
 	joiner.mu.Lock()
 	req := joiner.req
 	called := joiner.called
 	joiner.mu.Unlock()
 	require.True(t, called)
-	assert.Equal(t, "space-42", req.SpaceID)
+	assert.Equal(t, "space-42", req.PartitionID)
 	assert.Equal(t, "space-42-ga", req.GaAgentID)
 	assert.Equal(t, "polyphon-space-42", req.RoomName)
 	assert.Equal(t, "alto", req.Ack.CanonicalVoice)
@@ -94,7 +94,7 @@ func TestSession_Run_HandshakeAndEnd(t *testing.T) {
 	assert.NotNil(t, sent[0].GetVoiceAgentSessionStart())
 	last := sent[len(sent)-1]
 	require.NotNil(t, last.GetVoiceAgentSessionEnd())
-	assert.Equal(t, "space-42", last.GetVoiceAgentSessionEnd().GetSpaceId())
+	assert.Equal(t, "space-42", last.GetVoiceAgentSessionEnd().GetPartitionId())
 	assert.Equal(t, "normal", last.GetVoiceAgentSessionEnd().GetReason())
 }
 

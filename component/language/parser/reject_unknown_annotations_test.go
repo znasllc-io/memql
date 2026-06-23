@@ -13,7 +13,7 @@ func TestParseToolDecl_RejectsUnknownAnnotation(t *testing.T) {
 @requires("recent-chat")
 @description("a tool with a stale annotation")
 tool recentChat {
-  spaceId  string  @required
+  partitionId  string  @required
 }`
 
 	_, err := ParseToolDecl(source)

@@ -536,7 +536,7 @@ func (e *RealtimeExecutor) forwardPartial(speakerIdentity, text string) {
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentPartialTranscript{
 			VoiceAgentPartialTranscript: &memqlv1.VoiceAgentPartialTranscript{
-				SpaceId:       e.cfg.SpaceID,
+				PartitionId:       e.cfg.PartitionID,
 				SpeakerUserId: e.resolveSpeaker(speakerIdentity),
 				PartialText:   text,
 				Sequence:      seq,
@@ -602,7 +602,7 @@ func (e *RealtimeExecutor) getLastSpeaker() string {
 // being discarded (#1403).
 func (e *RealtimeExecutor) forwardFinal(speakerIdentity, text string, nativeAuthored bool) {
 	sendFinalTranscript(e.ctx, e.client, e.logger, "realtime", &memqlv1.VoiceAgentFinalTranscript{
-		SpaceId:        e.cfg.SpaceID,
+		PartitionId:        e.cfg.PartitionID,
 		SpeakerUserId:  e.resolveSpeaker(speakerIdentity),
 		FinalText:      text,
 		NativeAuthored: nativeAuthored,
@@ -612,7 +612,7 @@ func (e *RealtimeExecutor) forwardFinal(speakerIdentity, text string, nativeAuth
 	if e.logger != nil {
 		e.logger.Info("voice trace: turntaking event",
 			"stage", "voice.final", "executor", "realtime",
-			"space_id", e.cfg.SpaceID, "native_authored", nativeAuthored, "chars", len(text))
+			"partition_id", e.cfg.PartitionID, "native_authored", nativeAuthored, "chars", len(text))
 	}
 }
 
@@ -645,7 +645,7 @@ func (e *RealtimeExecutor) runTurn(speakerIdentity, utterance string) {
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentTurnRequest{
 			VoiceAgentTurnRequest: &memqlv1.VoiceAgentTurnRequest{
-				SpaceId:       e.cfg.SpaceID,
+				PartitionId:       e.cfg.PartitionID,
 				SpeakerUserId: e.resolveSpeaker(speakerIdentity),
 				UtteranceText: utterance,
 				GaAgentId:     e.cfg.GaAgentID,
@@ -664,7 +664,7 @@ func (e *RealtimeExecutor) runTurn(speakerIdentity, utterance string) {
 
 	// logGate stamps the gate round-trip's terminal outcome (#1426).
 	logGate := func(outcome string, extra ...any) {
-		attrs := append([]any{"space_id", e.cfg.SpaceID, "outcome", outcome}, extra...)
+		attrs := append([]any{"partition_id", e.cfg.PartitionID, "outcome", outcome}, extra...)
 		logVoiceTiming(e.logger, "turn.gate_roundtrip", turnStart, attrs...)
 	}
 
@@ -881,14 +881,14 @@ func (e *RealtimeExecutor) drainAudioOut() {
 				if stop := e.turnSpeechStopNanos.Swap(0); stop > 0 {
 					ms := (nowNanos - stop) / 1e6
 					e.logger.Info("voice trace: turntaking event",
-						"stage", "realtime.audio.first", "executor", "realtime", "space_id", e.cfg.SpaceID,
+						"stage", "realtime.audio.first", "executor", "realtime", "partition_id", e.cfg.PartitionID,
 						// #1426: the headline per-turn snappiness number, under
 						// the discoverable voice_timing key.
 						voiceTimingKey, "turn.speech_stop_to_first_audio", "duration_ms", ms,
 						"speech_stop_to_audio_ms", ms)
 				} else {
 					e.logger.Info("voice trace: turntaking event",
-						"stage", "realtime.audio.first", "executor", "realtime", "space_id", e.cfg.SpaceID)
+						"stage", "realtime.audio.first", "executor", "realtime", "partition_id", e.cfg.PartitionID)
 				}
 				// Latency probe: split the snappiness window -- response.created ->
 				// first audio is OpenAI's generation TTFB (the part NOT under our
@@ -898,7 +898,7 @@ func (e *RealtimeExecutor) drainAudioOut() {
 				if respCreated := e.turnResponseCreatedNanos.Swap(0); respCreated > 0 {
 					genMs := (nowNanos - respCreated) / 1e6
 					e.logger.Info("voice trace: turntaking event",
-						"stage", "realtime.audio.first.gen", "executor", "realtime", "space_id", e.cfg.SpaceID,
+						"stage", "realtime.audio.first.gen", "executor", "realtime", "partition_id", e.cfg.PartitionID,
 						voiceTimingKey, "turn.response_to_first_audio", "duration_ms", genMs)
 				}
 			}
@@ -914,7 +914,7 @@ func (e *RealtimeExecutor) drainAudioOut() {
 			}
 			if isFirstFrame && e.logger != nil {
 				e.logger.Info("voice trace: turntaking event",
-					"stage", "realtime.audio.sink_write", "executor", "realtime", "space_id", e.cfg.SpaceID,
+					"stage", "realtime.audio.sink_write", "executor", "realtime", "partition_id", e.cfg.PartitionID,
 					voiceTimingKey, "turn.sink_write_first", "duration_ms", (time.Now().UnixNano()-writeStartNanos)/1e6,
 					"sink_write_us", (time.Now().UnixNano()-writeStartNanos)/1e3)
 			}
@@ -958,7 +958,7 @@ func (e *RealtimeExecutor) drainEvents() {
 				// yet (the snappiness window opens at speech_stopped); just trace it.
 				if e.logger != nil {
 					e.logger.Info("voice trace: turntaking event",
-						"stage", "model.speech_started", "executor", "realtime", "space_id", e.cfg.SpaceID)
+						"stage", "model.speech_started", "executor", "realtime", "partition_id", e.cfg.PartitionID)
 				}
 			case openai.EventInputSpeechStopped:
 				// Observability: server-side VAD decided the human finished. This
@@ -974,7 +974,7 @@ func (e *RealtimeExecutor) drainEvents() {
 				e.kickToolLoop()
 				if e.logger != nil {
 					e.logger.Info("voice trace: turntaking event",
-						"stage", "model.speech_stopped", "executor", "realtime", "space_id", e.cfg.SpaceID)
+						"stage", "model.speech_stopped", "executor", "realtime", "partition_id", e.cfg.PartitionID)
 				}
 			case openai.EventResponseCreated:
 				// A new response opens a fresh transcript capture. Defensive
@@ -997,14 +997,14 @@ func (e *RealtimeExecutor) drainEvents() {
 					if stop := e.turnSpeechStopNanos.Load(); stop > 0 {
 						ms := (time.Now().UnixNano() - stop) / 1e6
 						e.logger.Info("voice trace: turntaking event",
-							"stage", stage, "executor", "realtime", "space_id", e.cfg.SpaceID,
+							"stage", stage, "executor", "realtime", "partition_id", e.cfg.PartitionID,
 							// #1426: end-of-speech -> response.create (the gate /
 							// cognition hops live inside this window).
 							voiceTimingKey, "turn.speech_stop_to_response", "duration_ms", ms,
 							"speech_stop_to_response_ms", ms)
 					} else {
 						e.logger.Info("voice trace: turntaking event",
-							"stage", stage, "executor", "realtime", "space_id", e.cfg.SpaceID)
+							"stage", stage, "executor", "realtime", "partition_id", e.cfg.PartitionID)
 					}
 				}
 			case openai.EventResponseDone:
@@ -1100,7 +1100,7 @@ func (e *RealtimeExecutor) drainEvents() {
 					// denylist filter below.
 					if e.logger != nil {
 						e.logger.Info("voice-agent realtime: dropped low-confidence input transcript (#1431)",
-							"space_id", e.cfg.SpaceID, "text", final,
+							"partition_id", e.cfg.PartitionID, "text", final,
 							"mean_logprob", meanLogprob(ev.Logprobs), "floor", e.confidenceGate.floor)
 					}
 					final = ""
@@ -1116,7 +1116,7 @@ func (e *RealtimeExecutor) drainEvents() {
 					// RESPONDING to silence is the deeper VAD fix, #481.)
 					if e.logger != nil {
 						e.logger.Info("voice-agent realtime: dropped hallucinated/empty input transcript (#1199)",
-							"space_id", e.cfg.SpaceID, "text", final)
+							"partition_id", e.cfg.PartitionID, "text", final)
 					}
 					final = ""
 				}
@@ -1241,7 +1241,7 @@ func (e *RealtimeExecutor) emitSpeaking(speaking bool) {
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentRealtimeSpeaking{
 			VoiceAgentRealtimeSpeaking: &memqlv1.VoiceAgentRealtimeSpeaking{
-				SpaceId:   e.cfg.SpaceID,
+				PartitionId:   e.cfg.PartitionID,
 				GaAgentId: e.cfg.GaAgentID,
 				Speaking:  speaking,
 			},

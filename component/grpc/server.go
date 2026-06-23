@@ -1574,7 +1574,7 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 	// voice CallTool proxy hop the agent-node session has no local voice
 	// scope -- the bff threads it on the CallToolMsg. The engine's central
 	// auto-injection (applyToolDefaults in ExecuteTool) stamps the
-	// `@autoInjected` spaceId / agentId / ownerUserId fields from
+	// `@autoInjected` partitionId / agentId / ownerUserId fields from
 	// ToolDefaultsFromContext, so set them here for any @autoInjected tool
 	// the voice model can reach (produceArtifact, requestComputerUseScope,
 	// editDocument, ...). Resolution is at the default layer, not per-tool,
@@ -1604,7 +1604,7 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 		if voiceScopeId == "" {
 			voiceScopeId = strings.TrimSpace(msg.GetVoiceAgentScopeId())
 		}
-		if spaceId := voiceScopeId; spaceId != "" {
+		if partitionId := voiceScopeId; partitionId != "" {
 			argsJSON := "{}"
 			if args != nil {
 				if b, err := json.Marshal(args.AsMap()); err == nil {
@@ -1614,7 +1614,7 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 			// The voice bridge self-mirrors the call via its own log sink
 			// (NewLogMirrorSink), so no mirrorRealtimeToolCall here -- it is a
 			// no-op for voice-agent sessions by design (avoids a double-log).
-			content, execErr := s.relayClientToolToBrowser(ctx, tool.Name, argsJSON, spaceId)
+			content, execErr := s.relayClientToolToBrowser(ctx, tool.Name, argsJSON, partitionId)
 			if execErr != nil {
 				// Surface a clean, user-legible message for the fast-fail
 				// browser-unreachable case (#1834) so voice doesn't speak a

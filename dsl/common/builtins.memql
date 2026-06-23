@@ -43,7 +43,7 @@ builtin authResolveUser {
 @args(profile="object")
 @description("Score utterance against agent candidates using Polyphon Cognition turn-taking algorithm.")
 builtin cognitionScore {
-  spaceId       string  @required
+  partitionId       string  @required
   utteranceId   string  @required
   text          string  @required
   speakerId     string  @required
@@ -67,7 +67,7 @@ builtin cognitionScore {
 @description("Update participant presence state (idle, thinking, typing, responding).")
 builtin cognitionTrackPresence {
   participantId  string  @required
-  spaceId        string  @required
+  partitionId        string  @required
   state          string  @required
   metadata       object
 }
@@ -281,7 +281,7 @@ builtin knowledgeAugmentDomainGenerate {
   topic              string  @required
   sourceUtteranceId  string
   sourceAgentId      string
-  spaceId            string  @required
+  partitionId            string  @required
   requestedBy        string  @required
 }
 
@@ -684,12 +684,12 @@ builtin tools {
 //       agentId: "<id>",
 //       domains: [...],
 //       tools: [...],
-//       spaceId: "<space>",       // for Plan + canvas-card scope
+//       partitionId: "<space>",       // for Plan + canvas-card scope
 //       requestedBy: "<user>"     // for actor + ownership
 //     })'
 //   })
 //
-// spaceId / requestedBy are optional -- when omitted the handler
+// partitionId / requestedBy are optional -- when omitted the handler
 // runs the pipeline without a Plan record (back-compat, lets DSL
 // callers from automations / tests skip the bookkeeping). The
 // CoPresent Training studio always passes both.
@@ -708,7 +708,7 @@ builtin trainAgent {
   domains      array
   tools        array
   provider     string
-  spaceId      string
+  partitionId      string
   requestedBy  string
 }
 

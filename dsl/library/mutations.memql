@@ -32,7 +32,7 @@ mutation artifact mutationCreateArtifact {
     mimeType          string
     live              bool
     scope             string  @enum("workspace", "private")
-    spaceId           string
+    partitionId           string
     agentId           string
     producedByPlanId  string
     producedByWorkerId   string
@@ -52,7 +52,7 @@ mutation artifact mutationCreateArtifact {
     args.mimeType
     live: coalesce(args.live, false)
     args.scope
-    args.spaceId
+    args.partitionId
     args.agentId
     args.producedByPlanId
     args.producedByWorkerId
@@ -80,7 +80,7 @@ mutation generatedOutput mutationCreateGeneratedOutput {
     format            string  @enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "other")
     mimeType          string
     source            string  @required @enum("workbench_generated", "computer_use", "agent_generated", "derived")
-    spaceId           string
+    partitionId           string
     producedByPlanId  string
     producedByAgentId string
     producedByWorkerId   string
@@ -96,7 +96,7 @@ mutation generatedOutput mutationCreateGeneratedOutput {
     format: coalesce(args.format, "markdown")
     args.mimeType
     args.source
-    args.spaceId
+    args.partitionId
     args.producedByPlanId
     args.producedByAgentId
     args.producedByWorkerId
@@ -114,7 +114,7 @@ mutation memory mutationCreateMemory {
     summary            string
     kind               string  @enum("fact", "preference", "instruction", "episodic", "other")
     agentId            string
-    spaceId            string
+    partitionId            string
     sourceUtteranceId  string
   }
   insert {
@@ -125,7 +125,7 @@ mutation memory mutationCreateMemory {
     args.summary
     kind: coalesce(args.kind, "fact")
     args.agentId
-    args.spaceId
+    args.partitionId
     args.sourceUtteranceId
   }
 }
@@ -160,7 +160,7 @@ mutation documentVersion mutationAppendDocumentVersion {
     note             string
     parentVersionId  string
     producedByPlanId string
-    spaceId          string
+    partitionId          string
   }
   insert {
     id: args.versionId
@@ -174,7 +174,7 @@ mutation documentVersion mutationAppendDocumentVersion {
     args.note
     args.parentVersionId
     args.producedByPlanId
-    args.spaceId
+    args.partitionId
     // timestamp(), NOT bare `now`: this mutation is invoked from the Go
     // edit/restore handlers; the hypertable time dimension + history
     // ordering key must be a real RFC3339 timestamp (same gotcha as
@@ -203,7 +203,7 @@ mutation generatedOutput mutationUpdateGeneratedOutputContent {
     format        string  @enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "other")
     mimeType      string
     source        string  @required @enum("workbench_generated", "computer_use", "agent_generated", "derived")
-    spaceId       string
+    partitionId       string
     producedByPlanId  string
     producedByAgentId string
   }
@@ -217,7 +217,7 @@ mutation generatedOutput mutationUpdateGeneratedOutputContent {
     format: coalesce(args.format, "markdown")
     args.mimeType
     args.source
-    args.spaceId
+    args.partitionId
     args.producedByPlanId
     args.producedByAgentId
   }

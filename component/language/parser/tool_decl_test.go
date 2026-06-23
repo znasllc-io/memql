@@ -112,7 +112,7 @@ func TestParseToolDecl_AutoInjectedField(t *testing.T) {
 	source := `@handler(type="function", name="createSomething")
 @description("Create something")
 tool createSomething {
-  spaceId  string  @required @autoInjected @description("Server-stamped")
+  partitionId  string  @required @autoInjected @description("Server-stamped")
   name     string  @required @description("User-supplied")
 }`
 
@@ -158,7 +158,7 @@ func TestParseToolDecl_DestructiveAndConfirmation(t *testing.T) {
 @handler(type="function", name="deleteSpace")
 @description("Delete a space")
 tool deleteSpace {
-  spaceId  string  @required
+  partitionId  string  @required
 }`
 
 	got, err := ParseToolDecl(source)

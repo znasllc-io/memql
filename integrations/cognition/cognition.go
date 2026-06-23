@@ -647,7 +647,7 @@ func (c *CognitionIntegration) Stop(ctx context.Context) {
 	c.Integration.Stop(ctx)
 }
 
-// PrewarmSpaceContext fires the per-space cache loaders for spaceId
+// PrewarmSpaceContext fires the per-space cache loaders for partitionId
 // without blocking on the result. Called by the bridge agent the
 // moment the user starts producing speech-classified RTP packets, so
 // the participant / utterance / space-info / attachment caches are
@@ -657,8 +657,8 @@ func (c *CognitionIntegration) Stop(ctx context.Context) {
 // Idempotent + best-effort -- if a loader fails we just log and
 // move on. The caller (HTTP handler in polyphonws) returns 202
 // Accepted immediately; the warmers run in background goroutines.
-func (c *CognitionIntegration) PrewarmSpaceContext(spaceId string) {
-	if c == nil || strings.TrimSpace(spaceId) == "" {
+func (c *CognitionIntegration) PrewarmSpaceContext(partitionId string) {
+	if c == nil || strings.TrimSpace(partitionId) == "" {
 		return
 	}
 	go func() {
@@ -668,20 +668,20 @@ func (c *CognitionIntegration) PrewarmSpaceContext(spaceId string) {
 		wg.Add(4)
 		go func() {
 			defer wg.Done()
-			_, _ = c.getParticipantsForPromptCached(ctx, spaceId)
+			_, _ = c.getParticipantsForPromptCached(ctx, partitionId)
 		}()
 		go func() {
 			defer wg.Done()
 			limit := c.ConversationHistoryLimit(ctx)
-			_, _ = c.getRecentUtterancesForPromptCached(ctx, spaceId, clampInt(limit, 10, 30))
+			_, _ = c.getRecentUtterancesForPromptCached(ctx, partitionId, clampInt(limit, 10, 30))
 		}()
 		go func() {
 			defer wg.Done()
-			_ = c.getSpaceInfoCached(ctx, spaceId)
+			_ = c.getSpaceInfoCached(ctx, partitionId)
 		}()
 		go func() {
 			defer wg.Done()
-			_ = c.getAttachmentsForPromptCached(ctx, spaceId)
+			_ = c.getAttachmentsForPromptCached(ctx, partitionId)
 		}()
 		wg.Wait()
 	}()

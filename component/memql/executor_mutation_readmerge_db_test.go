@@ -107,7 +107,7 @@ func uniqueSuffix(name string) string {
 
 // TestReadMerge_DeleteRecord_PreservesOmittedFields covers the record family
 // (v1:data:record). mutationDeleteRecord with ONLY the record id must flip
-// active=false while every required field (label, recordType, spaceId,
+// active=false while every required field (label, recordType, partitionId,
 // importSource, importedBy, data) is inherited from the persisted row.
 func TestReadMerge_DeleteRecord_PreservesOmittedFields(t *testing.T) {
 	eng, db, ctx := readMergeTestEngine(t)
@@ -116,7 +116,7 @@ func TestReadMerge_DeleteRecord_PreservesOmittedFields(t *testing.T) {
 
 	storedId := runMutation(t, ctx, eng, "mutationCreateRecord", map[string]any{
 		"recordId":     recordId,
-		"spaceId":      "space-1628",
+		"partitionId":      "space-1628",
 		"recordType":   "vehicle",
 		"label":        "2024 Toyota Camry",
 		"data":         map[string]any{"make": "Toyota", "model": "Camry"},
@@ -134,17 +134,17 @@ func TestReadMerge_DeleteRecord_PreservesOmittedFields(t *testing.T) {
 	require.Equal(t, false, p["active"], "delete must flip active=false")
 	// Omitted required fields inherited from the prior row (the #1628 fix).
 	// Compare against the before-snapshot so engine-side canonicalization of
-	// FK fields (spaceId -> v1:cognition:space:...) doesn't trip the test.
+	// FK fields (partitionId -> v1:cognition:space:...) doesn't trip the test.
 	require.Equal(t, before["label"], p["label"])
 	require.Equal(t, before["recordType"], p["recordType"])
-	require.Equal(t, before["spaceId"], p["spaceId"])
+	require.Equal(t, before["partitionId"], p["partitionId"])
 	require.Equal(t, before["importSource"], p["importSource"])
 	require.Equal(t, before["data"], p["data"], "data object preserved")
 }
 
 // TestReadMerge_UpdateDocumentValidation_PreservesOmittedFields covers the
 // knowledge family (v1:knowledge:document). A minimal validation transition
-// (documentId + validationStatus) must preserve fileName / planId / spaceId /
+// (documentId + validationStatus) must preserve fileName / planId / partitionId /
 // mimeType / format / uploadedBy.
 func TestReadMerge_UpdateDocumentValidation_PreservesOmittedFields(t *testing.T) {
 	eng, db, ctx := readMergeTestEngine(t)
@@ -155,7 +155,7 @@ func TestReadMerge_UpdateDocumentValidation_PreservesOmittedFields(t *testing.T)
 		"documentId":   docId,
 		"attachmentId": "att-1628",
 		"planId":       "plan-1628",
-		"spaceId":      "space-1628",
+		"partitionId":      "space-1628",
 		"fileName":     "fleet.csv",
 		"mimeType":     "text/csv",
 		"format":       "spreadsheet",
@@ -177,7 +177,7 @@ func TestReadMerge_UpdateDocumentValidation_PreservesOmittedFields(t *testing.T)
 	// snapshot so FK canonicalization, e.g. planId, doesn't trip the test).
 	require.Equal(t, before["fileName"], p["fileName"])
 	require.Equal(t, before["planId"], p["planId"])
-	require.Equal(t, before["spaceId"], p["spaceId"])
+	require.Equal(t, before["partitionId"], p["partitionId"])
 	require.Equal(t, before["mimeType"], p["mimeType"])
 	require.Equal(t, before["format"], p["format"])
 	require.Equal(t, before["uploadedBy"], p["uploadedBy"])
@@ -262,19 +262,19 @@ func TestReadMerge_UpdateNodeHealth_PreservesAddress(t *testing.T) {
 // for mutationLeaveSpace (dsl/cognition/mutations.memql): authored as
 // `insert { id: args.participantId; args.payload }`. A minimal leave payload
 // (status=left + leftAt) used to reject with
-// `” does not validate ... missing 'displayName','participantType','spaceId'`.
+// `” does not validate ... missing 'displayName','participantType','partitionId'`.
 // With the engine-level read-merge (memql#1709) the partial merges onto the
 // stored participant row: status flips to left while displayName /
-// participantType / spaceId / agentId / forUserId are inherited.
+// participantType / partitionId / agentId / forUserId are inherited.
 func TestReadMerge_LeaveSpace_PreservesParticipantFields(t *testing.T) {
 	eng, db, ctx := readMergeTestEngine(t)
 	const conceptName = "v1:cognition:participant"
 
 	// Seed an AI participant under the elevated system actor. The id is
-	// content-addressed on (agentId, spaceId), so capture the stored id the
+	// content-addressed on (agentId, partitionId), so capture the stored id the
 	// create returns and target the leave at exactly that row.
 	storedId := runMutation(t, ctx, eng, "mutationJoinSpaceAsAI", map[string]any{
-		"spaceId":     "space-" + uniqueSuffix("leave"),
+		"partitionId":     "space-" + uniqueSuffix("leave"),
 		"agentId":     "agent-" + uniqueSuffix("leave"),
 		"displayName": "Faye",
 		"forUserId":   "user-1709",
@@ -283,7 +283,7 @@ func TestReadMerge_LeaveSpace_PreservesParticipantFields(t *testing.T) {
 	require.Equal(t, "active", before["status"], "seed participant starts active")
 
 	// The fix: MINIMAL leave -- only status + leftAt, NO displayName /
-	// participantType / spaceId. Before #1709 this rejected as
+	// participantType / partitionId. Before #1709 this rejected as
 	// "missing properties"; now it read-merges.
 	runMutation(t, ctx, eng, "mutationLeaveSpace", map[string]any{
 		"participantId": storedId,
@@ -299,7 +299,7 @@ func TestReadMerge_LeaveSpace_PreservesParticipantFields(t *testing.T) {
 	// Omitted required + identity fields inherited from the prior row.
 	require.Equal(t, before["displayName"], p["displayName"], "displayName preserved (memql#1709)")
 	require.Equal(t, before["participantType"], p["participantType"], "participantType preserved (memql#1709)")
-	require.Equal(t, before["spaceId"], p["spaceId"], "spaceId preserved (memql#1709)")
+	require.Equal(t, before["partitionId"], p["partitionId"], "partitionId preserved (memql#1709)")
 	require.Equal(t, before["agentId"], p["agentId"], "agentId preserved (memql#1709)")
 	require.Equal(t, before["forUserId"], p["forUserId"], "forUserId preserved (memql#1709)")
 }

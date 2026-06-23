@@ -82,8 +82,8 @@ func (l *PlannerAgentLoop) mintApprovedTrainingPlan(ctx context.Context, planId 
 	trainPlanId := id.SystemNodeShortId("train", planId)
 	goal := fmt.Sprintf("Train specialist on %q (user-approved)", topic)
 	call := fmt.Sprintf(
-		`mutationCreatePlan({"planId": %q, "spaceId": %q, "parentPlanId": %q, "kind": "trainSpecialist", "goal": %q, "requestedBy": %q, "triggerSource": "user.approved", "input": %s})`,
-		trainPlanId, getString(plan, "spaceId"), planId, goal,
+		`mutationCreatePlan({"planId": %q, "partitionId": %q, "parentPlanId": %q, "kind": "trainSpecialist", "goal": %q, "requestedBy": %q, "triggerSource": "user.approved", "input": %s})`,
+		trainPlanId, getString(plan, "partitionId"), planId, goal,
 		getString(plan, "requestedBy"), string(inputJSON),
 	)
 	if _, err := l.engine.Execute(systemActorContext(ctx), call); err != nil {

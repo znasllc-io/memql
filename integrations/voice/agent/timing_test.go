@@ -18,13 +18,13 @@ func TestLogVoiceTiming_EmitsDiscoverableKey(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	start := time.Now().Add(-1500 * time.Millisecond)
-	logVoiceTiming(logger, "setup.realtime_connect", start, "space_id", "space-1")
+	logVoiceTiming(logger, "setup.realtime_connect", start, "partition_id", "space-1")
 
 	out := buf.String()
 	assert.Contains(t, out, "voice timing")
 	assert.Contains(t, out, "voice_timing=setup.realtime_connect")
 	assert.Contains(t, out, "duration_ms=")
-	assert.Contains(t, out, "space_id=space-1")
+	assert.Contains(t, out, "partition_id=space-1")
 
 	// The measured duration reflects the start stamp (>= the 1.5s offset).
 	idx := strings.Index(out, "duration_ms=")

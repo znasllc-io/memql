@@ -64,7 +64,7 @@ func TestForward_WireShape(t *testing.T) {
 
 	sent := sender.lastSent()
 	require.NotNil(t, sent)
-	assert.Equal(t, "s1", sent.GetSpaceId())
+	assert.Equal(t, "s1", sent.GetPartitionId())
 	assert.Equal(t, "ga1", sent.GetGaAgentId())
 	assert.Equal(t, "Our annual recurring revenue is up.", sent.GetText())
 	assert.Equal(t, "reply-to-99", sent.GetReplyToId())

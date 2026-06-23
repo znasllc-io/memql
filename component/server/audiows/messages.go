@@ -10,8 +10,8 @@ type AudioMessage struct {
 	// StreamId is the client-generated unique identifier for this audio stream
 	StreamId string `json:"streamId"`
 
-	// SpaceId is the space ID (required for "start")
-	SpaceId string `json:"spaceId,omitempty"`
+	// PartitionId is the space ID (required for "start")
+	PartitionId string `json:"partitionId,omitempty"`
 
 	// ParticipantId is the participant ID (required for "start")
 	ParticipantId string `json:"participantId,omitempty"`
@@ -100,8 +100,8 @@ type SynthesizeMessage struct {
 	// SampleRate is the audio sample rate in Hz (default: 24000)
 	SampleRate int `json:"sampleRate,omitempty"`
 
-	// SpaceId is the space ID (for context/agent lookup)
-	SpaceId string `json:"spaceId,omitempty"`
+	// PartitionId is the space ID (for context/agent lookup)
+	PartitionId string `json:"partitionId,omitempty"`
 
 	// ParticipantId is the AI participant ID to use for TTS
 	ParticipantId string `json:"participantId,omitempty"`
@@ -121,8 +121,8 @@ type TTSStartedMessage struct {
 	// SampleRate is the audio sample rate in Hz
 	SampleRate int `json:"sampleRate"`
 
-	// SpaceId is the space this TTS belongs to
-	SpaceId string `json:"spaceId,omitempty"`
+	// PartitionId is the space this TTS belongs to
+	PartitionId string `json:"partitionId,omitempty"`
 
 	// ParticipantId is the AI participant generating the audio
 	ParticipantId string `json:"participantId,omitempty"`
@@ -154,8 +154,8 @@ type TTSChunkMessage struct {
 	// Done indicates whether this is the final chunk
 	Done bool `json:"done"`
 
-	// SpaceId is the space this TTS belongs to
-	SpaceId string `json:"spaceId"`
+	// PartitionId is the space this TTS belongs to
+	PartitionId string `json:"partitionId"`
 
 	// ParticipantId is the AI participant generating the audio
 	ParticipantId string `json:"participantId"`
@@ -172,8 +172,8 @@ type TTSEndedMessage struct {
 	// RequestId matches the synthesize request
 	RequestId string `json:"requestId"`
 
-	// SpaceId is the space this TTS belongs to
-	SpaceId string `json:"spaceId,omitempty"`
+	// PartitionId is the space this TTS belongs to
+	PartitionId string `json:"partitionId,omitempty"`
 
 	// ParticipantId is the AI participant that generated the audio
 	ParticipantId string `json:"participantId,omitempty"`

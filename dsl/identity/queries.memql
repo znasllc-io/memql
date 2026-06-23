@@ -1019,9 +1019,9 @@ query auditEvent queryRecentAuditEvents {
 // userActiveSpace
 // ===============
 //
-// Returns a single user's current activeSpaceId. Frontend uses this to
+// Returns a single user's current activePartitionId. Frontend uses this to
 // derive the per-participant isActive flag (a participant is active iff
-// User.activeSpaceId == participant.spaceId for that participant's
+// User.activePartitionId == participant.partitionId for that participant's
 // userId).
 //
 // Phase 4 of the chat-architecture plan. Read-only counterpart of
@@ -1032,7 +1032,7 @@ query auditEvent queryRecentAuditEvents {
 // so the partition slot is _system; the rewriter handles that.
 
 @enabled
-@description("Returns a user's current activeSpaceId. Empty when the user is not focused on any space.")
+@description("Returns a user's current activePartitionId. Empty when the user is not focused on any space.")
 @unbounded("the user's active-space projection by id (guarded) -- bounded to a single row")
 query user queryUserActiveSpace {
   args {
@@ -1148,28 +1148,28 @@ query user queryUserCount {
 // usersActiveInSpace
 // ==================
 //
-// Returns the set of users whose activeSpaceId pointer matches the
-// supplied spaceId -- i.e., humans CURRENTLY focused on the given
+// Returns the set of users whose activePartitionId pointer matches the
+// supplied partitionId -- i.e., humans CURRENTLY focused on the given
 // space (camera, mic, voice transport bound here per the activity
 // model).
 //
 // Phase 7 of the chat-architecture plan -- backs the voice-migration
 // trigger automation. Read by voiceMigrationOnSecondHuman to count
-// active humans in a space when a user's activeSpaceId changes; the
+// active humans in a space when a user's activePartitionId changes; the
 // 1-to-2 transition fires the migration canvas cards.
 //
-// Note: a user with an empty activeSpaceId is "in the app but not on
+// Note: a user with an empty activePartitionId is "in the app but not on
 // any space" -- they don't appear here. The query result count IS the
 // active-human count for the space.
 
 @enabled
-@description("Returns users whose activeSpaceId == arg(spaceId). Active-human roster per the activity model (Phase 4).")
-@unbounded("users whose activeSpaceId matches a space -- bounded by space membership, presence resolution consumed whole")
+@description("Returns users whose activePartitionId == arg(partitionId). Active-human roster per the activity model (Phase 4).")
+@unbounded("users whose activePartitionId matches a space -- bounded by space membership, presence resolution consumed whole")
 query user queryUsersActiveInSpace {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
   }
-  filter  when(args.spaceId) { payload.activeSpaceId==args.spaceId }
+  filter  when(args.partitionId) { payload.activePartitionId==args.partitionId }
   shape   userActiveSpaceProjection
 }
 

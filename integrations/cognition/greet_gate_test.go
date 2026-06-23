@@ -128,10 +128,10 @@ func TestGreetGate_SingleReplicaWins(t *testing.T) {
 	defer db.Close()
 
 	g := newDispatchGate(func() *bun.DB { return db }, dispatchGateTestLogger())
-	spaceId := fmt.Sprintf("v1:cognition:space:greet-solo-%d", time.Now().UnixNano())
+	partitionId := fmt.Sprintf("v1:cognition:space:greet-solo-%d", time.Now().UnixNano())
 	agentId := "v1:agents:agent:solo"
 
-	proceed, release, err := g.tryGreet(context.Background(), spaceId, agentId)
+	proceed, release, err := g.tryGreet(context.Background(), partitionId, agentId)
 	if err != nil {
 		t.Fatalf("single-replica tryGreet errored: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestGreetGate_SingleReplicaWins(t *testing.T) {
 	}
 	release()
 
-	proceed2, release2, err := g.tryGreet(context.Background(), spaceId, agentId)
+	proceed2, release2, err := g.tryGreet(context.Background(), partitionId, agentId)
 	if err != nil || !proceed2 {
 		t.Fatalf("after release the lock must be re-acquirable: proceed=%v err=%v", proceed2, err)
 	}
@@ -148,7 +148,7 @@ func TestGreetGate_SingleReplicaWins(t *testing.T) {
 }
 
 // TestGreetGate_ExactlyOneReplicaGreets is the core acceptance check for #1386:
-// of TWO contending replicas firing the greeting for the SAME (spaceId, agentId)
+// of TWO contending replicas firing the greeting for the SAME (partitionId, agentId)
 // -- the two cognition replicas that both received the broadcast
 // participant.created event -- EXACTLY ONE proceeds and the other bails. Each
 // replica uses an INDEPENDENT *bun.DB (separate session, like separate pods) so
@@ -164,7 +164,7 @@ func TestGreetGate_ExactlyOneReplicaGreets(t *testing.T) {
 	gateA := newDispatchGate(func() *bun.DB { return dbA }, dispatchGateTestLogger())
 	gateB := newDispatchGate(func() *bun.DB { return dbB }, dispatchGateTestLogger())
 
-	spaceId := fmt.Sprintf("v1:cognition:space:greet-contend-%d", time.Now().UnixNano())
+	partitionId := fmt.Sprintf("v1:cognition:space:greet-contend-%d", time.Now().UnixNano())
 	agentId := "v1:agents:agent:greeter"
 
 	var (
@@ -181,7 +181,7 @@ func TestGreetGate_ExactlyOneReplicaGreets(t *testing.T) {
 		// Each replica re-checks greetingExists then takes the gate; we model
 		// only the gate contention here (greetingExists passes on both, exactly
 		// as in production before either inserts).
-		proceed, release, err := g.tryGreet(context.Background(), spaceId, agentId)
+		proceed, release, err := g.tryGreet(context.Background(), partitionId, agentId)
 		if err != nil {
 			atomic.AddInt32(&errs, 1)
 			return
@@ -227,15 +227,15 @@ func TestGreetGate_LoserStrictlyEnforcedWhileWinnerHolds(t *testing.T) {
 	winner := newDispatchGate(func() *bun.DB { return dbWinner }, dispatchGateTestLogger())
 	loser := newDispatchGate(func() *bun.DB { return dbLoser }, dispatchGateTestLogger())
 
-	spaceId := fmt.Sprintf("v1:cognition:space:greet-strict-%d", time.Now().UnixNano())
+	partitionId := fmt.Sprintf("v1:cognition:space:greet-strict-%d", time.Now().UnixNano())
 	agentId := "v1:agents:agent:greeter"
 
-	proceed, release, err := winner.tryGreet(context.Background(), spaceId, agentId)
+	proceed, release, err := winner.tryGreet(context.Background(), partitionId, agentId)
 	if err != nil || !proceed {
 		t.Fatalf("winner must acquire the greet lock: proceed=%v err=%v", proceed, err)
 	}
 
-	lProceed, lRelease, lErr := loser.tryGreet(context.Background(), spaceId, agentId)
+	lProceed, lRelease, lErr := loser.tryGreet(context.Background(), partitionId, agentId)
 	if lErr != nil {
 		t.Fatalf("loser must not error on a clean contention: %v", lErr)
 	}
@@ -246,7 +246,7 @@ func TestGreetGate_LoserStrictlyEnforcedWhileWinnerHolds(t *testing.T) {
 
 	release()
 
-	reProceed, reRelease, reErr := loser.tryGreet(context.Background(), spaceId, agentId)
+	reProceed, reRelease, reErr := loser.tryGreet(context.Background(), partitionId, agentId)
 	if reErr != nil || !reProceed {
 		t.Fatalf("after the winner releases, the greet lock must be re-acquirable (no wedge): proceed=%v err=%v", reProceed, reErr)
 	}

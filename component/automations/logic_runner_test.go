@@ -89,10 +89,10 @@ func TestLogicRunner_CompilesMultiStepBody(t *testing.T) {
 @description("test")
 logic doStuff {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
   }
   body {
-    first := queryFoo({ spaceId: args.spaceId })
+    first := queryFoo({ partitionId: args.partitionId })
     second := queryBar({ id: first.First().id })
     return coalesce(second.First(), first.First())
   }
@@ -205,17 +205,17 @@ func TestLogicRunner_SeedsCallerArgsEverywhere(t *testing.T) {
 		"event": map[string]any{
 			"payload": map[string]any{"id": "user-123"},
 		},
-		"spaceId": "space-abc",
+		"partitionId": "space-abc",
 	}
 	evaluator := r.newEvaluatorForLogic(args)
 
 	// `args` custom variable
-	val, err := evaluator.EvaluateValue(`$args.spaceId`)
+	val, err := evaluator.EvaluateValue(`$args.partitionId`)
 	if err != nil {
-		t.Fatalf("evaluate $args.spaceId: %v", err)
+		t.Fatalf("evaluate $args.partitionId: %v", err)
 	}
 	if val != "space-abc" {
-		t.Errorf("$args.spaceId = %#v, want %q", val, "space-abc")
+		t.Errorf("$args.partitionId = %#v, want %q", val, "space-abc")
 	}
 
 	// `event` custom variable plumbed from args
@@ -228,12 +228,12 @@ func TestLogicRunner_SeedsCallerArgsEverywhere(t *testing.T) {
 	}
 
 	// `ctx.input` mirrors args (legacy form still supported)
-	val, err = evaluator.EvaluateValue(`$ctx.input.spaceId`)
+	val, err = evaluator.EvaluateValue(`$ctx.input.partitionId`)
 	if err != nil {
-		t.Fatalf("evaluate $ctx.input.spaceId: %v", err)
+		t.Fatalf("evaluate $ctx.input.partitionId: %v", err)
 	}
 	if val != "space-abc" {
-		t.Errorf("$ctx.input.spaceId = %#v, want %q", val, "space-abc")
+		t.Errorf("$ctx.input.partitionId = %#v, want %q", val, "space-abc")
 	}
 }
 
@@ -248,14 +248,14 @@ func TestLogicRunner_EventBindingIsFirstClass(t *testing.T) {
 	args := map[string]any{
 		"event": map[string]any{
 			"topic":   "node.created",
-			"payload": map[string]any{"activeSpaceId": "space-xyz", "id": "user-2"},
+			"payload": map[string]any{"activePartitionId": "space-xyz", "id": "user-2"},
 		},
 	}
 	ev := r.newEvaluatorForLogic(args)
 
 	for _, expr := range []string{
-		`$args.event.payload.activeSpaceId`, // author-facing form in the live logics
-		`$event.payload.activeSpaceId`,      // bare form after the compiler's lift
+		`$args.event.payload.activePartitionId`, // author-facing form in the live logics
+		`$event.payload.activePartitionId`,      // bare form after the compiler's lift
 	} {
 		val, err := ev.EvaluateValue(expr)
 		if err != nil {
@@ -275,7 +275,7 @@ func TestLogicRunner_EventBindingIsFirstClass(t *testing.T) {
 // had no root to walk.
 func TestLogicRunner_EventBindingSeededWhenAbsent(t *testing.T) {
 	r := NewLogicRunner(nil, nil, nil)
-	ev := r.newEvaluatorForLogic(map[string]any{"spaceId": "space-abc"})
+	ev := r.newEvaluatorForLogic(map[string]any{"partitionId": "space-abc"})
 
 	// The envelope itself is a well-formed object (not nil).
 	envelope, err := ev.EvaluateValue(`$event`)

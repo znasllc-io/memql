@@ -60,7 +60,7 @@ type Tool struct {
 
 	// AutoInjectedFields enumerates argument names marked
 	// `@autoInjected` in the tool definition -- fields whose value
-	// is stamped server-side at dispatch time (spaceId,
+	// is stamped server-side at dispatch time (partitionId,
 	// ownerUserId, agentId, etc.). The central validator in
 	// si_tool_loop drops any LLM-supplied value for these fields
 	// before the handler runs, and the server-side default (via

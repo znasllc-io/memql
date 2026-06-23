@@ -73,7 +73,7 @@ func TestPostDeployGateDryRunPlansPromoteAndThreeConditions(t *testing.T) {
 		"Gate 3/3",             // functional auth
 		"selector hash == Rollout stable color",
 		"jwks.json",
-		"queryActiveSpaceIds", // the BFF->agent auth round-trip
+		"queryActivePartitionIds", // the BFF->agent auth round-trip
 		"VALIDATED",
 	} {
 		if !strings.Contains(out, want) {

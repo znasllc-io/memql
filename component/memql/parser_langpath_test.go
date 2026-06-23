@@ -34,7 +34,7 @@ var representativeRuntimeQueries = []struct {
 	{"compound filter joined by ;", `concept==v1:cluster:node; payload.name=="bff"`},
 	{"compound filter joined by &&", `concept==v1:cluster:node && payload.name=="bff"`},
 	{"actor accessor in RHS", `id==actor.userId`},
-	{"args accessor in RHS", `payload.spaceId==args.spaceId`},
+	{"args accessor in RHS", `payload.partitionId==args.partitionId`},
 	{"no-arg query invocation", `queryDueTrainAgentRetryPlans({})`},
 	{"single-arg mutation invocation", `mutationCreateRecord({recordId: "v1:data:record:abc"})`},
 	{"mixed-arg builtin invocation",
@@ -102,7 +102,7 @@ var shapeFallsBackToMemqlQueries = []struct {
 	query string
 }{
 	{"shape inline template", `shape(concept==v1:cognition:space;payload.active==true, {"id": node("id")})`},
-	{"shape composite paginate + sort", `shape(paginate(sort(concept==v1:cognition:space:context; payload.spaceId=="spc1", "createdAt", "desc"), 1), {"snapshot": node("payload.snapshot")})`},
+	{"shape composite paginate + sort", `shape(paginate(sort(concept==v1:cognition:space:context; payload.partitionId=="spc1", "createdAt", "desc"), 1), {"snapshot": node("payload.snapshot")})`},
 	// Array-form template (the parse-error failure mode):
 	{"shape array template", `shape(concept==v1:conversation;id=="conv-1",[node("id"),children(node("id")),"done"])`},
 	// Nested-object template with relationships (the

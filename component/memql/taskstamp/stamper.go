@@ -225,8 +225,8 @@ func (s *Stamper) createAdHocPlan(ctx context.Context, pc PlanContext) (string, 
 	planId := id.NewShortId()
 	goal := fmt.Sprintf("Ad-hoc tool actions by agent %s", pc.AgentId)
 	q := fmt.Sprintf(
-		`mutationCreateAdHocPlan({"planId": %q, "spaceId": %q, "agentId": %q, "ownerUserId": %q, "goal": %q})`,
-		planId, pc.SpaceId, pc.AgentId, pc.OwnerUserId, goal,
+		`mutationCreateAdHocPlan({"planId": %q, "partitionId": %q, "agentId": %q, "ownerUserId": %q, "goal": %q})`,
+		planId, pc.PartitionId, pc.AgentId, pc.OwnerUserId, goal,
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return "", err

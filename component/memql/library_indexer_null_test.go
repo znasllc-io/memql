@@ -66,7 +66,7 @@ func compileArtifactSchema(t *testing.T) *jsonschema.Schema {
 // renderArtifactPayloadFromMemoryIndexer renders the REAL
 // mutationCreateArtifact (loaded from the embedded DSL) with the exact
 // args logicIndexMemory passes for a memory whose OPTIONAL fields
-// (summary / agentId / spaceId) are absent. `coalesced` selects whether
+// (summary / agentId / partitionId) are absent. `coalesced` selects whether
 // those absent fields arrive as "" (the post-#1626 indexer output) or as
 // null (the pre-#1626 raw-passthrough that failed validation).
 func renderArtifactPayloadFromMemoryIndexer(t *testing.T, coalesced bool) map[string]any {
@@ -106,7 +106,7 @@ func renderArtifactPayloadFromMemoryIndexer(t *testing.T, coalesced bool) map[st
 		"title":            "Prefers concise replies",
 		"summary":          optional,
 		"agentId":          optional,
-		"spaceId":          optional,
+		"partitionId":          optional,
 		"live":             false,
 	}
 
@@ -133,7 +133,7 @@ func TestArtifactIndexerAbsentOptionalFieldsValidate(t *testing.T) {
 		"memory indexer payload with coalesced (\"\") optional fields must validate against v1:library:artifact (memql#1626)")
 	require.Equal(t, "", coalesced["summary"])
 	require.Equal(t, "", coalesced["agentId"])
-	require.Equal(t, "", coalesced["spaceId"])
+	require.Equal(t, "", coalesced["partitionId"])
 
 	// Pre-#1626: raw nullable passthrough produced explicit nulls, which
 	// the artifact string fields reject. This is the exact failure the
@@ -173,7 +173,7 @@ func TestLibraryIndexersCoalesceNullableOptionalFields(t *testing.T) {
 		// logicIndexDocument
 		{"logicIndexDocument", "summary", `summary: coalesce(args.event.payload.summary`, `summary: args.event.payload.summary`},
 		{"logicIndexDocument", "mimeType", `mimeType: coalesce(args.event.payload.mimeType`, `mimeType: args.event.payload.mimeType`},
-		{"logicIndexDocument", "spaceId", `spaceId: coalesce(args.event.payload.spaceId`, `spaceId: args.event.payload.spaceId`},
+		{"logicIndexDocument", "partitionId", `partitionId: coalesce(args.event.payload.partitionId`, `partitionId: args.event.payload.partitionId`},
 		{"logicIndexDocument", "producedByPlanId", `producedByPlanId: coalesce(args.event.payload.planId`, `producedByPlanId: args.event.payload.planId`},
 		// logicIndexNote
 		{"logicIndexNote", "summary", `summary: coalesce(args.event.payload.body`, `summary: args.event.payload.body`},
@@ -184,7 +184,7 @@ func TestLibraryIndexersCoalesceNullableOptionalFields(t *testing.T) {
 		// logicIndexMemory (the indexer failing live on 0.9.67)
 		{"logicIndexMemory", "summary", `summary: coalesce(args.event.payload.summary`, `summary: args.event.payload.summary`},
 		{"logicIndexMemory", "agentId", `agentId: coalesce(args.event.payload.agentId`, `agentId: args.event.payload.agentId`},
-		{"logicIndexMemory", "spaceId", `spaceId: coalesce(args.event.payload.spaceId`, `spaceId: args.event.payload.spaceId`},
+		{"logicIndexMemory", "partitionId", `partitionId: coalesce(args.event.payload.partitionId`, `partitionId: args.event.payload.partitionId`},
 		// logicIndexLiveSource (ownerId is genuinely optional -> ownerUserId)
 		{"logicIndexLiveSource", "ownerUserId", `ownerUserId: coalesce(args.event.payload.ownerId`, `ownerUserId: args.event.payload.ownerId`},
 		{"logicIndexLiveSource", "summary", `summary: coalesce(args.event.payload.description`, `summary: args.event.payload.description`},

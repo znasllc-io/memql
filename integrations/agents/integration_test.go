@@ -32,7 +32,7 @@ func TestCapabilities_InvokeEnsureForGoalAskSpecialist(t *testing.T) {
 		byName[c.Name] = true
 		// Required args schema entries for the async-creates-Plan contract.
 		if c.Name == "invoke" {
-			for _, key := range []string{"name", "prompt", "spaceId"} {
+			for _, key := range []string{"name", "prompt", "partitionId"} {
 				if _, ok := c.ArgsSchema[key]; !ok {
 					t.Errorf("invoke ArgsSchema missing %q", key)
 				}
@@ -66,7 +66,7 @@ func TestCapabilities_InvokeEnsureForGoalAskSpecialist(t *testing.T) {
 			}
 		}
 		if c.Name == "produceArtifact" {
-			for _, key := range []string{"goal", "ownerUserId", "spaceId"} {
+			for _, key := range []string{"goal", "ownerUserId", "partitionId"} {
 				if _, ok := c.ArgsSchema[key]; !ok {
 					t.Errorf("produceArtifact ArgsSchema missing %q", key)
 				}
@@ -91,7 +91,7 @@ func TestCapabilities_InvokeEnsureForGoalAskSpecialist(t *testing.T) {
 }
 
 // handleProduceArtifact's early validation paths are testable without a
-// wired engine: missing goal, ownerUserId, and spaceId all fail before the
+// wired engine: missing goal, ownerUserId, and partitionId all fail before the
 // engine.Execute call (the engine-nil check sits after arg validation, as in
 // requestUserFeedback). The success path (mints a Plan via mutationCreatePlan)
 // needs a wired engine + database and is exercised by the cluster, not here.
@@ -124,7 +124,7 @@ func TestHandleProduceArtifact_NormalContextMintsExactlyOnePlan(t *testing.T) {
 	nodes, err := i.handleProduceArtifact(context.Background(), map[string]any{
 		"goal":        "A markdown file listing 10 beautiful birds",
 		"ownerUserId": "u1",
-		"spaceId":     "s1",
+		"partitionId":     "s1",
 	}, 0)
 	if err != nil {
 		t.Fatalf("handleProduceArtifact (normal context): unexpected error: %v", err)
@@ -148,7 +148,7 @@ func TestHandleProduceArtifact_RequiresGoal(t *testing.T) {
 	i := New(memql.NewAgentRegistry(), nil)
 	_, err := i.handleProduceArtifact(context.Background(), map[string]any{
 		"ownerUserId": "u1",
-		"spaceId":     "s1",
+		"partitionId":     "s1",
 	}, 0)
 	if err == nil || !strings.Contains(err.Error(), "'goal' is required") {
 		t.Fatalf("expected 'goal' is required error, got: %v", err)
@@ -159,21 +159,21 @@ func TestHandleProduceArtifact_RequiresOwnerUserId(t *testing.T) {
 	i := New(memql.NewAgentRegistry(), nil)
 	_, err := i.handleProduceArtifact(context.Background(), map[string]any{
 		"goal":    "A markdown file listing 10 birds",
-		"spaceId": "s1",
+		"partitionId": "s1",
 	}, 0)
 	if err == nil || !strings.Contains(err.Error(), "'ownerUserId' required") {
 		t.Fatalf("expected 'ownerUserId' required error, got: %v", err)
 	}
 }
 
-func TestHandleProduceArtifact_RequiresSpaceId(t *testing.T) {
+func TestHandleProduceArtifact_RequiresPartitionId(t *testing.T) {
 	i := New(memql.NewAgentRegistry(), nil)
 	_, err := i.handleProduceArtifact(context.Background(), map[string]any{
 		"goal":        "A markdown file listing 10 birds",
 		"ownerUserId": "u1",
 	}, 0)
-	if err == nil || !strings.Contains(err.Error(), "'spaceId' required") {
-		t.Fatalf("expected 'spaceId' required error, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "'partitionId' required") {
+		t.Fatalf("expected 'partitionId' required error, got: %v", err)
 	}
 }
 
@@ -228,7 +228,7 @@ func TestHandleRequestUserFeedback_RequiresPlanId(t *testing.T) {
 
 func TestHandleInvoke_RequiresName(t *testing.T) {
 	i := New(memql.NewAgentRegistry(), nil)
-	_, err := i.handleInvoke(context.Background(), map[string]any{"prompt": "hi", "spaceId": "s1"}, 0)
+	_, err := i.handleInvoke(context.Background(), map[string]any{"prompt": "hi", "partitionId": "s1"}, 0)
 	if err == nil {
 		t.Fatal("expected error when name is missing")
 	}
@@ -245,7 +245,7 @@ func TestHandleInvoke_UnregisteredAgent(t *testing.T) {
 	_, err := i.handleInvoke(context.Background(), map[string]any{
 		"name":    "missing",
 		"prompt":  "hi",
-		"spaceId": "s1",
+		"partitionId": "s1",
 	}, 0)
 	if err == nil {
 		t.Fatal("expected error for unregistered agent name or missing engine")

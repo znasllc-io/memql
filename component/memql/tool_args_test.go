@@ -11,12 +11,12 @@ import (
 func TestApplyToolDefaults_FillsMissing(t *testing.T) {
 	tool := &Tool{Name: "t"}
 	args := map[string]any{"keyword": "go"}
-	defaults := map[string]any{"spaceId": "v1:cognition:space:abc", "keyword": "ignored"}
+	defaults := map[string]any{"partitionId": "v1:cognition:space:abc", "keyword": "ignored"}
 
 	got := applyToolDefaults(context.Background(), tool, args, defaults)
 	want := map[string]any{
 		"keyword": "go",                       // LLM-supplied value preserved
-		"spaceId": "v1:cognition:space:abc",   // default fills missing
+		"partitionId": "v1:cognition:space:abc",   // default fills missing
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("applyToolDefaults = %v, want %v", got, want)
@@ -26,24 +26,24 @@ func TestApplyToolDefaults_FillsMissing(t *testing.T) {
 func TestApplyToolDefaults_AutoInjectedServerWins(t *testing.T) {
 	tool := &Tool{
 		Name:               "t",
-		AutoInjectedFields: []string{"spaceId", "agentId"},
+		AutoInjectedFields: []string{"partitionId", "agentId"},
 	}
-	// LLM tries to forge spaceId + agentId. Server stamps the real
+	// LLM tries to forge partitionId + agentId. Server stamps the real
 	// values via defaults. Server values must win.
 	args := map[string]any{
-		"spaceId": "v1:cognition:space:FORGED",
+		"partitionId": "v1:cognition:space:FORGED",
 		"agentId": "v1:agents:agent:FORGED",
 		"keyword": "go", // not auto-injected, LLM value preserved
 	}
 	defaults := map[string]any{
-		"spaceId":       "v1:cognition:space:real",
+		"partitionId":       "v1:cognition:space:real",
 		"agentId":       "v1:agents:agent:real",
 		"participantId": "v1:cognition:participant:real",
 	}
 
 	got := applyToolDefaults(context.Background(), tool, args, defaults)
 	want := map[string]any{
-		"spaceId":       "v1:cognition:space:real",       // server wins
+		"partitionId":       "v1:cognition:space:real",       // server wins
 		"agentId":       "v1:agents:agent:real",          // server wins
 		"keyword":       "go",                            // LLM-supplied non-auto-injected preserved
 		"participantId": "v1:cognition:participant:real", // default fills missing
@@ -92,13 +92,13 @@ func TestApplyToolDefaults_NilToolPreservesLegacyBehavior(t *testing.T) {
 		"ownerUserId": "forged",
 	}
 	defaults := map[string]any{
-		"spaceId": "v1:cognition:space:real",
+		"partitionId": "v1:cognition:space:real",
 	}
 
 	got := applyToolDefaults(context.Background(), nil, args, defaults)
 	want := map[string]any{
 		"ownerUserId": "forged", // unchanged -- no @autoInjected info available
-		"spaceId":     "v1:cognition:space:real",
+		"partitionId":     "v1:cognition:space:real",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("applyToolDefaults(nil tool) =\n  got:  %v\n  want: %v", got, want)
@@ -109,10 +109,10 @@ func TestApplyToolDefaults_NilArgsAllocatesWhenNeeded(t *testing.T) {
 	// LLM emitted no args at all; defaults must materialize into a
 	// fresh map so the handler receives the server values.
 	tool := &Tool{Name: "t"}
-	defaults := map[string]any{"spaceId": "v1:cognition:space:abc"}
+	defaults := map[string]any{"partitionId": "v1:cognition:space:abc"}
 
 	got := applyToolDefaults(context.Background(), tool, nil, defaults)
-	want := map[string]any{"spaceId": "v1:cognition:space:abc"}
+	want := map[string]any{"partitionId": "v1:cognition:space:abc"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("applyToolDefaults(nil args) = %v, want %v", got, want)
 	}
@@ -224,7 +224,7 @@ func TestToolParser_AutoInjectedAnnotation(t *testing.T) {
 @handler(type="function", name="myTool")
 @description("test tool")
 tool myTool {
-  spaceId   string  @required @autoInjected @description("server-stamped")
+  partitionId   string  @required @autoInjected @description("server-stamped")
   keyword   string  @description("LLM-supplied")
   ownerUserId string @autoInjected @description("server-stamped")
 }`
@@ -240,7 +240,7 @@ tool myTool {
 		t.Fatalf("expected 1 tool, got %d", len(tools))
 	}
 	got := tools[0].AutoInjectedFields
-	want := []string{"spaceId", "ownerUserId"}
+	want := []string{"partitionId", "ownerUserId"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("AutoInjectedFields = %v, want %v", got, want)
 	}

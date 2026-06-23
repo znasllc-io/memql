@@ -399,7 +399,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 
 	// Auto-canonicalize @relationship payload fields. Every concept's
 	// outgoing relationships (foreign-key fields like
-	// participant.userId -> v1:identity:user, utterance.spaceId ->
+	// participant.userId -> v1:identity:user, utterance.partitionId ->
 	// v1:cognition:space) get rewritten to canonical
 	// `<partition>:<targetConcept>:<bareSlug>` form before the payload
 	// reaches the validators or the storage layer.

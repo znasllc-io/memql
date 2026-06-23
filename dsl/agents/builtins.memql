@@ -28,9 +28,9 @@
 //   prompt   Free-form prompt describing what you want the agent
 //            to do. The agent's tool loop reads this as the user's
 //            instruction; references to entities (attachmentId,
-//            spaceId, etc.) are resolved by the agent's tools via
+//            partitionId, etc.) are resolved by the agent's tools via
 //            queries.
-//   spaceId  Required by the planner -- the space the Plan lives in.
+//   partitionId  Required by the planner -- the space the Plan lives in.
 //            Callers without a space context can pass the system
 //            placeholder (a future iteration may relax this).
 //
@@ -47,7 +47,7 @@
 builtin agent {
   name     string    @required
   prompt   string    @required
-  spaceId  string    @required
+  partitionId  string    @required
 }
 
 // ---- builtin askSpecialist ------------------------------------------
@@ -91,7 +91,7 @@ builtin askSpecialist {
 //   { agentId, agentName, roleSlug, action, reasoning }.
 // Synchronous from the caller's perspective -- the factory completes
 // the write before returning so the GA can immediately invoke the
-// resulting agent via `agent("name", "prompt", spaceId)`.
+// resulting agent via `agent("name", "prompt", partitionId)`.
 
 // ---- builtin requestUserFeedback -------------------------------------
 //
@@ -120,7 +120,7 @@ builtin requestUserFeedback {
   agentId      string    @required
   ownerUserId  string    @required
   planId       string    @required
-  spaceId      string
+  partitionId      string
 }
 
 @enabled
@@ -130,7 +130,7 @@ builtin requestUserFeedback {
 builtin ensureAgentForGoal {
   goal         string    @required
   ownerUserId  string    @required
-  spaceId      string
+  partitionId      string
   planId       string
 }
 
@@ -155,5 +155,5 @@ builtin produceArtifact {
   filename     string
   agentId      string
   ownerUserId  string    @required
-  spaceId      string    @required
+  partitionId      string    @required
 }

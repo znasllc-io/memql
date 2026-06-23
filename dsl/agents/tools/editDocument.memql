@@ -45,5 +45,5 @@ tool editDocument {
   note         string  @description("Short human-readable summary of WHAT this revision changed (e.g. 'added three more birds', 'mentioned store credit in the refund policy'). Surfaced in the document's history list so the user can scan what each version changed.")
   agentId      string  @autoInjected @description("Calling agent id. Server-stamped from the agent runtime; becomes the version's authorId. The central validator drops any LLM-supplied value before dispatch.")
   producedByPlanId string @autoInjected @description("Active planner plan id, when the edit came through a plan. Server-stamped; recorded as the version's provenance. The central validator drops any LLM-supplied value.")
-  spaceId      string  @autoInjected @description("Space the edit happened in. Server-stamped from the agent runtime turn context; the central validator drops any LLM-supplied value.")
+  partitionId      string  @autoInjected @description("Space the edit happened in. Server-stamped from the agent runtime turn context; the central validator drops any LLM-supplied value.")
 }

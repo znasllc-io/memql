@@ -18,7 +18,7 @@ func TestIsHumanParticipantIdentity(t *testing.T) {
 		{"SPA participant id", "v1:cognition:participant:9dc3b323", true},
 		{"user id", "v1:identity:user:1c65cb0c", true},
 		{"guest", "guest:invite-abc", true},
-		{"voice-agent placeholder (spaceId-ga, the LIVE identity shape)", "v1:cognition:space:daily-9dc3b323-2026-06-09-ga", false},
+		{"voice-agent placeholder (partitionId-ga, the LIVE identity shape)", "v1:cognition:space:daily-9dc3b323-2026-06-09-ga", false},
 		{"voice-agent (agent concept id)", "v1:agents:agent:a9f3b7c2", false},
 		{"avatar vendor participant", "avatar-agent", false},
 		{"empty", "", false},

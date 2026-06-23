@@ -109,7 +109,7 @@ func TestClient_SendRequest_CorrelatesReply(t *testing.T) {
 	defer cancel()
 	reply, err := c.SendRequest(ctx, &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentSessionStart{
-			VoiceAgentSessionStart: &memqlv1.VoiceAgentSessionStart{SpaceId: "s1", GaAgentId: "s1-ga"},
+			VoiceAgentSessionStart: &memqlv1.VoiceAgentSessionStart{PartitionId: "s1", GaAgentId: "s1-ga"},
 		},
 	})
 	require.NoError(t, err)
@@ -132,7 +132,7 @@ func TestClient_SendRequest_ContextCancel(t *testing.T) {
 	defer cancel()
 	_, err := c.SendRequest(ctx, &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentSessionEnd{
-			VoiceAgentSessionEnd: &memqlv1.VoiceAgentSessionEnd{SpaceId: "s1"},
+			VoiceAgentSessionEnd: &memqlv1.VoiceAgentSessionEnd{PartitionId: "s1"},
 		},
 	})
 	require.Error(t, err)
@@ -171,7 +171,7 @@ func TestClient_StreamRequest_CollectsCorrelatedReplies(t *testing.T) {
 
 	ch, release, err := c.StreamRequest(context.Background(), &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentTurnRequest{
-			VoiceAgentTurnRequest: &memqlv1.VoiceAgentTurnRequest{SpaceId: "s1", GaAgentId: "s1-ga", UtteranceText: "hi"},
+			VoiceAgentTurnRequest: &memqlv1.VoiceAgentTurnRequest{PartitionId: "s1", GaAgentId: "s1-ga", UtteranceText: "hi"},
 		},
 	})
 	require.NoError(t, err)
@@ -253,7 +253,7 @@ func TestClient_UnmatchedPush_DoesNotPanic(t *testing.T) {
 	defer cancel()
 	reply, err := c.SendRequest(ctx, &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentSessionStart{
-			VoiceAgentSessionStart: &memqlv1.VoiceAgentSessionStart{SpaceId: "s1"},
+			VoiceAgentSessionStart: &memqlv1.VoiceAgentSessionStart{PartitionId: "s1"},
 		},
 	})
 	require.NoError(t, err)
@@ -266,7 +266,7 @@ func TestClient_SendRequest_AfterClose(t *testing.T) {
 	c.Close()
 	_, err := c.SendRequest(context.Background(), &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentSessionStart{
-			VoiceAgentSessionStart: &memqlv1.VoiceAgentSessionStart{SpaceId: "s1"},
+			VoiceAgentSessionStart: &memqlv1.VoiceAgentSessionStart{PartitionId: "s1"},
 		},
 	})
 	assert.ErrorIs(t, err, ErrClientClosed)

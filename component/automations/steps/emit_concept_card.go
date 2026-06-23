@@ -54,18 +54,18 @@ func (e *EmitConceptCardExecutor) Execute(ctx context.Context, step *automations
 		cardType = evaluated
 	}
 
-	// Evaluate spaceId
-	spaceId := cfg.SpaceId
-	if strings.HasPrefix(spaceId, "$") {
-		evaluated, err := stepCtx.Evaluator.EvaluateString(spaceId)
+	// Evaluate partitionId
+	partitionId := cfg.PartitionId
+	if strings.HasPrefix(partitionId, "$") {
+		evaluated, err := stepCtx.Evaluator.EvaluateString(partitionId)
 		if err != nil {
 			result.Status = "failed"
-			result.Error = fmt.Sprintf("failed to evaluate spaceId: %v", err)
+			result.Error = fmt.Sprintf("failed to evaluate partitionId: %v", err)
 			result.CompletedAt = time.Now()
 			result.Duration = result.CompletedAt.Sub(result.StartedAt)
-			return result, fmt.Errorf("failed to evaluate spaceId: %w", err)
+			return result, fmt.Errorf("failed to evaluate partitionId: %w", err)
 		}
-		spaceId = evaluated
+		partitionId = evaluated
 	}
 
 	// Evaluate conceptRef
@@ -95,7 +95,7 @@ func (e *EmitConceptCardExecutor) Execute(ctx context.Context, step *automations
 	// Build the utterance payload for the concept card
 	// Uses utteranceType "system" with action payload to hold card data
 	utterancePayload := map[string]any{
-		"spaceId":         spaceId,
+		"partitionId":         partitionId,
 		"participantId":   "system:concept-card",
 		"participantType": "system",
 		"utteranceType":   "system",
@@ -128,7 +128,7 @@ func (e *EmitConceptCardExecutor) Execute(ctx context.Context, step *automations
 		stepCtx.Logger.Debug("emitting concept card",
 			"step", step.ID,
 			"cardType", cardType,
-			"spaceId", spaceId,
+			"partitionId", partitionId,
 			"conceptRef", conceptRef,
 		)
 	}
@@ -147,7 +147,7 @@ func (e *EmitConceptCardExecutor) Execute(ctx context.Context, step *automations
 	result.Result = map[string]any{
 		"utteranceId":   utteranceId,
 		"cardType":      cardType,
-		"spaceId":       spaceId,
+		"partitionId":       partitionId,
 		"conceptRef":    conceptRef,
 		"utteranceType": "system",
 		"action": map[string]any{

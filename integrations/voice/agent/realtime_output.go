@@ -102,7 +102,7 @@ func (f *RealtimeOutputForwarder) Forward(ctx context.Context, text, replyToID s
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentRealtimeOutput{
 			VoiceAgentRealtimeOutput: &memqlv1.VoiceAgentRealtimeOutput{
-				SpaceId:   f.spaceID,
+				PartitionId:   f.spaceID,
 				GaAgentId: f.gaAgentID,
 				ReplyId:   replyID,
 				Text:      body,

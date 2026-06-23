@@ -25,7 +25,7 @@ type EditDocumentArgs struct {
 	AuthorId         string
 	ExpectedVersion  int
 	ProducedByPlanId string
-	SpaceId          string
+	PartitionId      string
 }
 
 // EditDocument calls the engine builtin editDocument.
@@ -88,12 +88,12 @@ func EditDocumentBuild(args EditDocumentArgs) string {
 		b.WriteString("producedByPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
 	}
-	if args.SpaceId != "" {
+	if args.PartitionId != "" {
 		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	b.WriteString("})")
 	return b.String()
@@ -165,7 +165,7 @@ type KnowledgeAugmentDomainGenerateArgs struct {
 	Topic             string
 	SourceUtteranceId string
 	SourceAgentId     string
-	SpaceId           string
+	PartitionId       string
 	RequestedBy       string
 }
 
@@ -202,8 +202,8 @@ func KnowledgeAugmentDomainGenerateBuild(args KnowledgeAugmentDomainGenerateArgs
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
@@ -333,7 +333,7 @@ type TrainAgentArgs struct {
 	Domains     []any
 	Tools       []any
 	Provider    string
-	SpaceId     string
+	PartitionId string
 	RequestedBy string
 }
 
@@ -369,12 +369,12 @@ func TrainAgentBuild(args TrainAgentArgs) string {
 		b.WriteString("provider: ")
 		b.WriteString(fmt.Sprintf("%q", args.Provider))
 	}
-	if args.SpaceId != "" {
+	if args.PartitionId != "" {
 		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.RequestedBy != "" {
 		if b.Len() > 12 {

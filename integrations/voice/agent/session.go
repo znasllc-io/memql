@@ -78,7 +78,7 @@ type RoomJoiner interface {
 // identity, the resolved ack, and the resolved Persona (#456). The LiveKit
 // credentials come from Config.
 type RoomRequest struct {
-	SpaceID   string
+	PartitionID   string
 	GaAgentID string
 	RoomName  string
 	Ack       SessionAck
@@ -151,7 +151,7 @@ func (s *Session) SetSpeakSink(sink SpeakSink) {
 func (s *Session) Persona() Persona { return s.persona }
 
 // NewSession builds a session for the given space. roomName is the LiveKit
-// room name (the memQL convention is "polyphon-<spaceId>"); spaceId is
+// room name (the memQL convention is "polyphon-<partitionId>"); partitionId is
 // derived by stripping that prefix, matching the Python agent so the value
 // sent to memQL matches the participant row's spaceID exactly. The joiner
 // may be nil, in which case the session runs the gRPC handshake and returns
@@ -159,7 +159,7 @@ func (s *Session) Persona() Persona { return s.persona }
 // voice build supplies a real RoomJoiner).
 func NewSession(cfg Config, client *Client, roomName string, joiner RoomJoiner, logger *slog.Logger) *Session {
 	spaceID := strings.TrimPrefix(roomName, "polyphon-")
-	// The voice-agent sends a placeholder ga_agent_id of "<spaceId>-ga"; the
+	// The voice-agent sends a placeholder ga_agent_id of "<partitionId>-ga"; the
 	// server resolves the real canonical agent id from the space's group-GA
 	// participant (see handleVoiceAgentSessionStart). The real wiring through
 	// the LiveKit token metadata is a follow-up (#456).
@@ -187,14 +187,14 @@ func (s *Session) Run(ctx context.Context) error {
 	}
 	defer s.client.Close()
 	// Setup phase (#1426): dispatch accepted -> gRPC stream open.
-	logVoiceTiming(s.logger, "setup.grpc_connect", connectStart, "space_id", s.spaceID)
+	logVoiceTiming(s.logger, "setup.grpc_connect", connectStart, "partition_id", s.spaceID)
 
 	// Setup phase (#1426): SessionStart -> SessionAck. This round-trip covers
 	// the server's synchronous engine loads (GA-id resolve, audio/video mode,
 	// persona) -- the server logs each individually under the same key.
 	ackStart := time.Now()
 	ack, err := s.start(ctx)
-	logVoiceTiming(s.logger, "setup.session_ack", ackStart, "space_id", s.spaceID, "ok", err == nil)
+	logVoiceTiming(s.logger, "setup.session_ack", ackStart, "partition_id", s.spaceID, "ok", err == nil)
 	if err != nil {
 		// Best-effort end notify even on a failed start so audit sees the
 		// attempt; reason "error".
@@ -234,7 +234,7 @@ func (s *Session) Run(ctx context.Context) error {
 	reason := "normal"
 	if s.joiner != nil {
 		req := RoomRequest{
-			SpaceID:           s.spaceID,
+			PartitionID:           s.spaceID,
 			GaAgentID:         s.gaAgentID,
 			RoomName:          s.roomName,
 			Ack:               ack,
@@ -255,7 +255,7 @@ func (s *Session) Run(ctx context.Context) error {
 		// Default (CGO-free) build path: no room joiner wired. The session
 		// handshake is complete; the media loop is the voice build's job.
 		s.logger.Info("voice-agent session ack received; no room joiner wired (audio loop is #455)",
-			"space_id", s.spaceID, "canonical_voice", ack.CanonicalVoice,
+			"partition_id", s.spaceID, "canonical_voice", ack.CanonicalVoice,
 			"executor", string(executor.Kind), "fallback_reason", executor.FallbackReason)
 	}
 
@@ -272,14 +272,14 @@ func (s *Session) start(ctx context.Context) (SessionAck, error) {
 
 	if s.logger != nil {
 		s.logger.Info("voice-agent session start",
-			"space_id", s.spaceID, "ga_agent_id", s.gaAgentID,
+			"partition_id", s.spaceID, "ga_agent_id", s.gaAgentID,
 			"room_name", s.roomName, "avatar_vendor", s.cfg.AvatarVendor)
 	}
 
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentSessionStart{
 			VoiceAgentSessionStart: &memqlv1.VoiceAgentSessionStart{
-				SpaceId:      s.spaceID,
+				PartitionId:      s.spaceID,
 				GaAgentId:    s.gaAgentID,
 				RoomName:     s.roomName,
 				AvatarVendor: s.cfg.AvatarVendor,
@@ -338,7 +338,7 @@ func (s *Session) end(ctx context.Context, reason string) {
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentSessionEnd{
 			VoiceAgentSessionEnd: &memqlv1.VoiceAgentSessionEnd{
-				SpaceId:  s.spaceID,
+				PartitionId:  s.spaceID,
 				RoomName: s.roomName,
 				Reason:   reason,
 			},

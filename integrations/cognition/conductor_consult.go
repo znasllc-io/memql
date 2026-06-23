@@ -546,7 +546,7 @@ func (c *CognitionIntegration) consultConductor(
 		if c.Logger != nil {
 			c.Logger.Warn("conductor: consult failed",
 				"error", err, "elapsed_ms", elapsed.Milliseconds(),
-				"spaceId", utterance.ScopeId)
+				"partitionId", utterance.ScopeId)
 		}
 		return nil, fmt.Errorf("conductorTurn invoke: %w", err)
 	}
@@ -619,7 +619,7 @@ func (c *CognitionIntegration) consultConductor(
 	}
 
 	c.logPlanTrace(planTrace{
-		SpaceId:       utterance.ScopeId,
+		PartitionId:       utterance.ScopeId,
 		UtteranceId:   utterance.ID,
 		UtteranceText: utterance.Text,
 		Plan:          plan,
@@ -639,7 +639,7 @@ func (c *CognitionIntegration) consultConductor(
 // at INFO with structured slog Attrs; the full raw JSON is logged at
 // DEBUG so high-volume environments can opt out.
 type planTrace struct {
-	SpaceId       string
+	PartitionId       string
 	UtteranceId   string
 	UtteranceText string
 	Plan          ConductorPlan
@@ -673,7 +673,7 @@ func (c *CognitionIntegration) logPlanTrace(t planTrace) {
 	chimeInNames := plansToNames(t.Plan.ChimeIns, t.Candidates)
 
 	logger.Info("conductor: plan",
-		"spaceId", t.SpaceId,
+		"partitionId", t.PartitionId,
 		"utteranceId", t.UtteranceId,
 		"utteranceFP", utteranceFP,
 		"rosterFP", rosterFP,
@@ -699,7 +699,7 @@ func (c *CognitionIntegration) logPlanTrace(t planTrace) {
 	if logger.Enabled(context.Background(), slog.LevelDebug) {
 		planJSON, _ := json.Marshal(t.Plan)
 		logger.Debug("conductor: plan trace (full)",
-			"spaceId", t.SpaceId,
+			"partitionId", t.PartitionId,
 			"utteranceId", t.UtteranceId,
 			"utteranceText", conductorTruncate(t.UtteranceText, 200),
 			"plan", string(planJSON),

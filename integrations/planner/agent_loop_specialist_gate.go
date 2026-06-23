@@ -191,13 +191,13 @@ func (l *PlannerAgentLoop) parkForSpecialistApproval(ctx context.Context, plan m
 // that triggered the request. Mirrors writeMintApprovalCard (the mintSkill
 // equivalent). memql#852 Gap 1.
 func (l *PlannerAgentLoop) writeSpecialistApprovalCard(ctx context.Context, plan map[string]any, action, message string) error {
-	spaceId := getString(plan, "spaceId")
-	if spaceId == "" {
+	partitionId := getString(plan, "partitionId")
+	if partitionId == "" {
 		// No space binding; nothing to render against. The
 		// awaitingFeedback park still happened -- the missing card just
 		// means the operator gets the bare feedbackReason instead of the
 		// rich approval surface.
-		return fmt.Errorf("plan has no spaceId; skipping plan.specialistApprovalRequested card")
+		return fmt.Errorf("plan has no partitionId; skipping plan.specialistApprovalRequested card")
 	}
 	planId := getString(plan, "id")
 	ownerAgentId := getString(plan, "ownerAgentId")
@@ -213,7 +213,7 @@ func (l *PlannerAgentLoop) writeSpecialistApprovalCard(ctx context.Context, plan
 
 	args := map[string]any{
 		"canvasStateId": fmt.Sprintf("specialist-approval-%s", planId),
-		"space":         spaceId,
+		"space":         partitionId,
 		"kind":          "card",
 		"data":          cardData,
 		"visibility":    "private",

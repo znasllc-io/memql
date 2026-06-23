@@ -51,7 +51,7 @@ concept artifact {
 
   scope            enum("workspace", "private")  @description("Shared-vs-private visibility tier, mirrored from the backing source's own scope (currently only v1:knowledge:liveSource carries one). 'workspace' = a partition-shared row with NO single owner (ownerUserId is empty); it is invisible to the owned reads and surfaces instead through the non-owned queryLibraryWorkspaceLiveSources path so every partition member sees it. 'private' = owner-scoped like everything else (gated by ownerUserId==actor.userId). Null for the ordinary owned rows (documents / notes / to-dos / memories) that have no shared tier.")
 
-  spaceId          string  @description("v1:cognition:space.id this item belongs to, when space-scoped (documents, generated outputs). Empty for user-global records (notes / to-dos / memories). Backs the per-space facet filter.")
+  partitionId          string  @description("v1:cognition:space.id this item belongs to, when space-scoped (documents, generated outputs). Empty for user-global records (notes / to-dos / memories). Backs the per-space facet filter.")
 
   agentId          string  @description("v1:agents:agent.id associated with this item, when one applies (e.g. the agent that produced a generated output or owns a memory). Backs the per-agent facet filter.")
 
@@ -97,7 +97,7 @@ concept generatedOutput {
   format            enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "other")  @required @default("markdown")  @description("Content classification -- picks the Library viewer. Mirrors the artifact.format vocabulary.")
   mimeType          string  @description("MIME type of the backing bytes when attachment-backed.")
   source            enum("workbench_generated", "computer_use", "agent_generated", "derived")  @required  @description("Provenance -- where the output was produced. Copied onto the artifact index row's source field.")
-  spaceId           string  @description("v1:cognition:space.id this output was produced in, when space-scoped.")
+  partitionId           string  @description("v1:cognition:space.id this output was produced in, when space-scoped.")
   producedByPlanId  string  @description("v1:planner:plan.id that produced this output, when it came from a plan.")
   producedByAgentId string  @description("v1:agents:agent.id that produced this output, when an agent emitted it.")
   producedByWorkerId   string  @description("v1:worker:registration.id of the worker MACHINE that produced this output, when source=computer_use. Empty otherwise. Copied onto the artifact index row.")
@@ -167,7 +167,7 @@ concept documentVersion {
 
   producedByPlanId string  @description("v1:planner:plan.id that produced this version, when an assistant/agent edit came through the planner. Provenance back-pointer mirroring the artifact/generatedOutput spine.")
 
-  spaceId          string  @description("v1:cognition:space.id the edit happened in, when space-scoped. Carried for facet parity with the artifact index; empty for user-global edits.")
+  partitionId          string  @description("v1:cognition:space.id the edit happened in, when space-scoped. Carried for facet parity with the artifact index; empty for user-global edits.")
 
   // NOTE: the append timestamp is the row intrinsic `createdAt` (the
   // MemoryNodes hypertable time dimension + the natural history ordering
@@ -201,7 +201,7 @@ concept memory {
   summary           string  @description("Optional one-line summary for dense list rendering.")
   kind              enum("fact", "preference", "instruction", "episodic", "other")  @required @default("fact")  @description("Memory flavor. fact = stable truth about the user; preference = how they like things done; instruction = a standing directive; episodic = a specific past interaction worth recalling.")
   agentId           string  @description("v1:agents:agent.id that formed / owns this memory, when agent-scoped. Empty for user-global memories.")
-  spaceId           string  @description("v1:cognition:space.id this memory was formed in, when space-scoped.")
+  partitionId           string  @description("v1:cognition:space.id this memory was formed in, when space-scoped.")
   sourceUtteranceId string  @description("Optional back-reference to the v1:cognition:utterance that produced this memory -- provenance for 'where did the assistant learn this'.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")

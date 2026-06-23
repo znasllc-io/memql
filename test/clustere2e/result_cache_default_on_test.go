@@ -65,7 +65,7 @@ func TestResultCacheDefaultOn_CrossReplica(t *testing.T) {
 	createSpace := func(name string) string {
 		spaceID := "v1:cognition:space:" + id.NewShortId()
 		if _, err := qcA.MutationCreateSpace(ctx, memqlclient.MutationCreateSpaceArgs{
-			SpaceId: spaceID,
+			PartitionId: spaceID,
 			Name:    name,
 		}); err != nil {
 			t.Fatalf("create space: %v", err)

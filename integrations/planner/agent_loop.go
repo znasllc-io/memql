@@ -131,7 +131,7 @@ func (l *PlannerAgentLoop) HandlePlanCreated(ev events.Event) {
 	if kind == "adHocAction" || kind == "scopeElevation" || kind == "agentInvocation" {
 		// adHocAction: stamper handles end-to-end.
 		// scopeElevation: existing handlePlanApprovedForExecution covers it.
-		// agentInvocation: minted by `agent("name", prompt, spaceId)`
+		// agentInvocation: minted by `agent("name", prompt, partitionId)`
 		//   builtin (integrations/agents). The agents integration owns
 		//   dispatch for this kind; the Planner Agent does NOT try to
 		//   decompose -- the caller named a specific agent.
@@ -781,7 +781,7 @@ func (l *PlannerAgentLoop) ensureSpecialistForPlan(ctx context.Context, planId s
 	}
 	goal := getString(plan, "goal")
 	ownerUserId := getString(plan, "requestedBy")
-	spaceId := getString(plan, "spaceId")
+	partitionId := getString(plan, "partitionId")
 	if goal == "" || ownerUserId == "" {
 		return l.markPlanFailed(ctx, planId,
 			"createSpecialist: plan is missing goal or requestedBy; cannot run factory")
@@ -798,8 +798,8 @@ func (l *PlannerAgentLoop) ensureSpecialistForPlan(ctx context.Context, planId s
 	// new specialist (memql#399). The factory hard-stamps
 	// kind="specialist" on any agent it creates regardless of caller.
 	call := fmt.Sprintf(
-		`ensureAgentForGoal({goal:%q, ownerUserId:%q, spaceId:%q, planId:%q})`,
-		goal, ownerUserId, spaceId, planId,
+		`ensureAgentForGoal({goal:%q, ownerUserId:%q, partitionId:%q, planId:%q})`,
+		goal, ownerUserId, partitionId, planId,
 	)
 	res, err := l.engine.Execute(systemActorContext(ctx), call)
 	if err != nil {

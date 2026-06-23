@@ -70,9 +70,9 @@ type cachedSpaceInfo struct {
 // {statement, timeframe} is preferred by templates that offer a
 // fallback chain; `description` still surfaces verbatim for spaces
 // created via the AI-describe path that produces no goal.
-func buildSpaceData(spaceId string, si spaceInfo) map[string]any {
+func buildSpaceData(partitionId string, si spaceInfo) map[string]any {
 	m := map[string]any{
-		"id":        spaceId,
+		"id":        partitionId,
 		"spaceType": si.spaceType,
 	}
 	if si.name != "" {
@@ -106,35 +106,35 @@ type cachedAttachments struct {
 	value     []map[string]any
 }
 
-func (c *CognitionIntegration) invalidatePromptCachesForSpace(spaceId string) {
+func (c *CognitionIntegration) invalidatePromptCachesForSpace(partitionId string) {
 	if c == nil {
 		return
 	}
-	spaceId = strings.TrimSpace(spaceId)
-	if spaceId == "" {
+	partitionId = strings.TrimSpace(partitionId)
+	if partitionId == "" {
 		return
 	}
 	c.promptCacheMu.Lock()
-	delete(c.participantsCache, spaceId)
-	delete(c.spaceContextCache, spaceId)
-	delete(c.aiParticipantCache, spaceId)
-	delete(c.spaceInfoCache, spaceId)
-	delete(c.attachmentsCache, spaceId)
+	delete(c.participantsCache, partitionId)
+	delete(c.spaceContextCache, partitionId)
+	delete(c.aiParticipantCache, partitionId)
+	delete(c.spaceInfoCache, partitionId)
+	delete(c.attachmentsCache, partitionId)
 	c.promptCacheMu.Unlock()
 }
 
-func (c *CognitionIntegration) getParticipantsForPromptCached(ctx context.Context, spaceId string) ([]map[string]any, error) {
+func (c *CognitionIntegration) getParticipantsForPromptCached(ctx context.Context, partitionId string) ([]map[string]any, error) {
 	if c == nil {
 		return nil, fmt.Errorf("cognition integration not configured")
 	}
-	spaceId = strings.TrimSpace(spaceId)
-	if spaceId == "" {
-		return nil, fmt.Errorf("spaceId is empty")
+	partitionId = strings.TrimSpace(partitionId)
+	if partitionId == "" {
+		return nil, fmt.Errorf("partitionId is empty")
 	}
 
 	now := time.Now()
 	c.promptCacheMu.Lock()
-	if entry, ok := c.participantsCache[spaceId]; ok && !entry.expiresAt.IsZero() && now.Before(entry.expiresAt) {
+	if entry, ok := c.participantsCache[partitionId]; ok && !entry.expiresAt.IsZero() && now.Before(entry.expiresAt) {
 		val := entry.value
 		c.promptCacheMu.Unlock()
 		return val, nil
@@ -142,14 +142,14 @@ func (c *CognitionIntegration) getParticipantsForPromptCached(ctx context.Contex
 	c.promptCacheMu.Unlock()
 
 	// Prevent thundering herd on cache miss (multiple concurrent responders / turn state evaluations).
-	key := "participants:" + spaceId
+	key := "participants:" + partitionId
 	anyVal, err, _ := c.participantsSF.Do(key, func() (any, error) {
-		val, err := c.getParticipantsForPrompt(ctx, spaceId)
+		val, err := c.getParticipantsForPrompt(ctx, partitionId)
 		if err != nil {
 			return nil, err
 		}
 		c.promptCacheMu.Lock()
-		c.participantsCache[spaceId] = cachedParticipants{expiresAt: time.Now().Add(defaultParticipantsCacheTTL), value: val}
+		c.participantsCache[partitionId] = cachedParticipants{expiresAt: time.Now().Add(defaultParticipantsCacheTTL), value: val}
 		c.promptCacheMu.Unlock()
 		return val, nil
 	})
@@ -160,32 +160,32 @@ func (c *CognitionIntegration) getParticipantsForPromptCached(ctx context.Contex
 	return val, nil
 }
 
-func (c *CognitionIntegration) getSpaceContextForPromptCached(ctx context.Context, spaceId string) map[string]any {
+func (c *CognitionIntegration) getSpaceContextForPromptCached(ctx context.Context, partitionId string) map[string]any {
 	if c == nil {
 		return nil
 	}
-	spaceId = strings.TrimSpace(spaceId)
-	if spaceId == "" {
+	partitionId = strings.TrimSpace(partitionId)
+	if partitionId == "" {
 		return nil
 	}
 
 	now := time.Now()
 	c.promptCacheMu.Lock()
-	if entry, ok := c.spaceContextCache[spaceId]; ok && !entry.expiresAt.IsZero() && now.Before(entry.expiresAt) {
+	if entry, ok := c.spaceContextCache[partitionId]; ok && !entry.expiresAt.IsZero() && now.Before(entry.expiresAt) {
 		val := entry.value
 		c.promptCacheMu.Unlock()
 		return val
 	}
 	c.promptCacheMu.Unlock()
 
-	key := "spacectx:" + spaceId
+	key := "spacectx:" + partitionId
 	anyVal, _, _ := c.spaceContextSF.Do(key, func() (any, error) {
-		val := c.getSpaceContextForPrompt(ctx, spaceId)
+		val := c.getSpaceContextForPrompt(ctx, partitionId)
 		if val == nil {
 			return nil, nil
 		}
 		c.promptCacheMu.Lock()
-		c.spaceContextCache[spaceId] = cachedSpaceContext{expiresAt: time.Now().Add(defaultSpaceContextCacheTTL), value: val}
+		c.spaceContextCache[partitionId] = cachedSpaceContext{expiresAt: time.Now().Add(defaultSpaceContextCacheTTL), value: val}
 		c.promptCacheMu.Unlock()
 		return val, nil
 	})
@@ -196,32 +196,32 @@ func (c *CognitionIntegration) getSpaceContextForPromptCached(ctx context.Contex
 	return val
 }
 
-func (c *CognitionIntegration) findAIParticipantCached(ctx context.Context, spaceId string) (*participantPayload, error) {
+func (c *CognitionIntegration) findAIParticipantCached(ctx context.Context, partitionId string) (*participantPayload, error) {
 	if c == nil {
 		return nil, fmt.Errorf("cognition integration not configured")
 	}
-	spaceId = strings.TrimSpace(spaceId)
-	if spaceId == "" {
-		return nil, fmt.Errorf("spaceId is empty")
+	partitionId = strings.TrimSpace(partitionId)
+	if partitionId == "" {
+		return nil, fmt.Errorf("partitionId is empty")
 	}
 
 	now := time.Now()
 	c.promptCacheMu.Lock()
-	if entry, ok := c.aiParticipantCache[spaceId]; ok && entry.value != nil && !entry.expiresAt.IsZero() && now.Before(entry.expiresAt) {
+	if entry, ok := c.aiParticipantCache[partitionId]; ok && entry.value != nil && !entry.expiresAt.IsZero() && now.Before(entry.expiresAt) {
 		val := entry.value
 		c.promptCacheMu.Unlock()
 		return val, nil
 	}
 	c.promptCacheMu.Unlock()
 
-	key := "siparticipant:" + spaceId
+	key := "siparticipant:" + partitionId
 	anyVal, err, _ := c.aiParticipantSF.Do(key, func() (any, error) {
-		val, err := c.findAIParticipant(ctx, spaceId)
+		val, err := c.findAIParticipant(ctx, partitionId)
 		if err != nil {
 			return nil, err
 		}
 		c.promptCacheMu.Lock()
-		c.aiParticipantCache[spaceId] = cachedAIParticipant{expiresAt: time.Now().Add(defaultAIParticipantCacheTTL), value: val}
+		c.aiParticipantCache[partitionId] = cachedAIParticipant{expiresAt: time.Now().Add(defaultAIParticipantCacheTTL), value: val}
 		c.promptCacheMu.Unlock()
 		return val, nil
 	})
@@ -274,13 +274,13 @@ func (c *CognitionIntegration) getAgentCached(ctx context.Context, agentId strin
 // Non-conversational utterance types (system) are skipped because their
 // text field carries payload data (system metadata) that is not useful for
 // prompt context and would waste buffer space.
-func (c *CognitionIntegration) recordRecentUtteranceForPrompt(spaceId, utteranceId, participantId, utteranceType, text string) {
+func (c *CognitionIntegration) recordRecentUtteranceForPrompt(partitionId, utteranceId, participantId, utteranceType, text string) {
 	if c == nil {
 		return
 	}
-	spaceId = strings.TrimSpace(spaceId)
+	partitionId = strings.TrimSpace(partitionId)
 	utteranceId = strings.TrimSpace(utteranceId)
-	if spaceId == "" || utteranceId == "" {
+	if partitionId == "" || utteranceId == "" {
 		return
 	}
 
@@ -307,7 +307,7 @@ func (c *CognitionIntegration) recordRecentUtteranceForPrompt(spaceId, utterance
 	c.recentUtterMu.Lock()
 	defer c.recentUtterMu.Unlock()
 
-	cur := c.recentUtterCache[spaceId]
+	cur := c.recentUtterCache[partitionId]
 	// Dedupe within the small buffer to avoid duplicates on retries.
 	for _, existing := range cur {
 		if asString(existing["id"]) == utteranceId {
@@ -318,18 +318,18 @@ func (c *CognitionIntegration) recordRecentUtteranceForPrompt(spaceId, utterance
 	if len(cur) > defaultRecentUtteranceLimit {
 		cur = cur[len(cur)-defaultRecentUtteranceLimit:]
 	}
-	c.recentUtterCache[spaceId] = cur
+	c.recentUtterCache[partitionId] = cur
 }
 
 // getRecentUtterancesForPromptCached returns recent utterances from the in-memory buffer when warm.
 // Falls back to the DB query when the buffer is empty or missing for the space.
-func (c *CognitionIntegration) getRecentUtterancesForPromptCached(ctx context.Context, spaceId string, limit int) ([]map[string]any, error) {
+func (c *CognitionIntegration) getRecentUtterancesForPromptCached(ctx context.Context, partitionId string, limit int) ([]map[string]any, error) {
 	if c == nil {
 		return nil, fmt.Errorf("cognition integration not configured")
 	}
-	spaceId = strings.TrimSpace(spaceId)
-	if spaceId == "" {
-		return nil, fmt.Errorf("spaceId is empty")
+	partitionId = strings.TrimSpace(partitionId)
+	if partitionId == "" {
+		return nil, fmt.Errorf("partitionId is empty")
 	}
 	if limit <= 0 {
 		limit = 1
@@ -337,7 +337,7 @@ func (c *CognitionIntegration) getRecentUtterancesForPromptCached(ctx context.Co
 
 	// Fast path: in-memory buffer.
 	c.recentUtterMu.Lock()
-	cur := c.recentUtterCache[spaceId]
+	cur := c.recentUtterCache[partitionId]
 	if len(cur) > 0 {
 		n := limit
 		if n > len(cur) {
@@ -358,15 +358,15 @@ func (c *CognitionIntegration) getRecentUtterancesForPromptCached(ctx context.Co
 	c.recentUtterMu.Unlock()
 
 	// Slow path: DB (singleflight per space+limit to avoid herd).
-	key := fmt.Sprintf("recent:%s:%d", spaceId, limit)
+	key := fmt.Sprintf("recent:%s:%d", partitionId, limit)
 	anyVal, err, _ := c.recentUtterSF.Do(key, func() (any, error) {
-		val, err := c.getRecentUtterancesForPrompt(ctx, spaceId, limit)
+		val, err := c.getRecentUtterancesForPrompt(ctx, partitionId, limit)
 		if err != nil {
 			return nil, err
 		}
 		// Best-effort warm.
 		c.recentUtterMu.Lock()
-		cur := c.recentUtterCache[spaceId]
+		cur := c.recentUtterCache[partitionId]
 		for _, it := range val {
 			if it == nil {
 				continue
@@ -391,7 +391,7 @@ func (c *CognitionIntegration) getRecentUtterancesForPromptCached(ctx context.Co
 				cur = cur[len(cur)-defaultRecentUtteranceLimit:]
 			}
 		}
-		c.recentUtterCache[spaceId] = cur
+		c.recentUtterCache[partitionId] = cur
 		c.recentUtterMu.Unlock()
 		return val, nil
 	})
@@ -405,19 +405,19 @@ func (c *CognitionIntegration) getRecentUtterancesForPromptCached(ctx context.Co
 // getSpaceInfoCached retrieves spaceType and description from the
 // space payload with caching. Returns zero-value spaceInfo if not
 // found.
-func (c *CognitionIntegration) getSpaceInfoCached(ctx context.Context, spaceId string) spaceInfo {
+func (c *CognitionIntegration) getSpaceInfoCached(ctx context.Context, partitionId string) spaceInfo {
 	if c == nil || c.engine == nil {
 		return spaceInfo{}
 	}
-	spaceId = strings.TrimSpace(spaceId)
-	if spaceId == "" {
+	partitionId = strings.TrimSpace(partitionId)
+	if partitionId == "" {
 		return spaceInfo{}
 	}
 
 	// Fast path: check cache.
 	now := time.Now()
 	c.promptCacheMu.Lock()
-	if entry, ok := c.spaceInfoCache[spaceId]; ok && !entry.expiresAt.IsZero() && now.Before(entry.expiresAt) {
+	if entry, ok := c.spaceInfoCache[partitionId]; ok && !entry.expiresAt.IsZero() && now.Before(entry.expiresAt) {
 		val := entry.value
 		c.promptCacheMu.Unlock()
 		return val
@@ -425,7 +425,7 @@ func (c *CognitionIntegration) getSpaceInfoCached(ctx context.Context, spaceId s
 	c.promptCacheMu.Unlock()
 
 	// Slow path: DB (singleflight to avoid herd).
-	anyVal, _, _ := c.spaceInfoSF.Do(spaceId, func() (any, error) {
+	anyVal, _, _ := c.spaceInfoSF.Do(partitionId, func() (any, error) {
 		// memql#289 (sub-epic #286): migrated from a handwritten
 		// `shape(paginate(filter;id==%s, 1), "spaceFull")` runtime
 		// query to the existing DSL-defined querySpaceMeta. The
@@ -434,7 +434,7 @@ func (c *CognitionIntegration) getSpaceInfoCached(ctx context.Context, spaceId s
 		// children B + D which required the #294 directive
 		// wiring). Downstream spaceFull-shape extraction is
 		// unchanged. Unblocks #250.
-		query := fmt.Sprintf(`querySpaceMeta({spaceId: %s})`, escapeJSONString(spaceId))
+		query := fmt.Sprintf(`querySpaceMeta({partitionId: %s})`, escapeJSONString(partitionId))
 		result, err := c.engine.Execute(ctx, query)
 		if err != nil {
 			return spaceInfo{}, nil
@@ -472,7 +472,7 @@ func (c *CognitionIntegration) getSpaceInfoCached(ctx context.Context, spaceId s
 		}
 		// Cache result (even empty to avoid repeated lookups).
 		c.promptCacheMu.Lock()
-		c.spaceInfoCache[spaceId] = cachedSpaceInfo{expiresAt: time.Now().Add(defaultSpaceInfoCacheTTL), value: val}
+		c.spaceInfoCache[partitionId] = cachedSpaceInfo{expiresAt: time.Now().Add(defaultSpaceInfoCacheTTL), value: val}
 		c.promptCacheMu.Unlock()
 		return val, nil
 	})
@@ -482,29 +482,29 @@ func (c *CognitionIntegration) getSpaceInfoCached(ctx context.Context, spaceId s
 
 // getAttachmentsForPromptCached returns attachment summaries for a space with TTL caching.
 // Only summaries (not full transcriptions) are returned so prompt size stays bounded.
-func (c *CognitionIntegration) getAttachmentsForPromptCached(ctx context.Context, spaceId string) []map[string]any {
+func (c *CognitionIntegration) getAttachmentsForPromptCached(ctx context.Context, partitionId string) []map[string]any {
 	if c == nil || c.engine == nil {
 		return nil
 	}
-	spaceId = strings.TrimSpace(spaceId)
-	if spaceId == "" {
+	partitionId = strings.TrimSpace(partitionId)
+	if partitionId == "" {
 		return nil
 	}
 
 	now := time.Now()
 	c.promptCacheMu.Lock()
-	if entry, ok := c.attachmentsCache[spaceId]; ok && !entry.expiresAt.IsZero() && now.Before(entry.expiresAt) {
+	if entry, ok := c.attachmentsCache[partitionId]; ok && !entry.expiresAt.IsZero() && now.Before(entry.expiresAt) {
 		val := entry.value
 		c.promptCacheMu.Unlock()
 		return val
 	}
 	c.promptCacheMu.Unlock()
 
-	key := "attachments:" + spaceId
+	key := "attachments:" + partitionId
 	anyVal, _, _ := c.attachmentsSF.Do(key, func() (any, error) {
-		val := c.getAttachmentsForPrompt(ctx, spaceId)
+		val := c.getAttachmentsForPrompt(ctx, partitionId)
 		c.promptCacheMu.Lock()
-		c.attachmentsCache[spaceId] = cachedAttachments{expiresAt: time.Now().Add(defaultAttachmentsCacheTTL), value: val}
+		c.attachmentsCache[partitionId] = cachedAttachments{expiresAt: time.Now().Add(defaultAttachmentsCacheTTL), value: val}
 		c.promptCacheMu.Unlock()
 		return val, nil
 	})
@@ -519,16 +519,16 @@ func (c *CognitionIntegration) getAttachmentsForPromptCached(ctx context.Context
 // slice of summary-only maps for inclusion in the AI prompt context.
 // Dispatches through the querySpaceAttachments MemQL function so
 // cognition Go code stays free of direct copresent concept references.
-func (c *CognitionIntegration) getAttachmentsForPrompt(ctx context.Context, spaceId string) []map[string]any {
+func (c *CognitionIntegration) getAttachmentsForPrompt(ctx context.Context, partitionId string) []map[string]any {
 	if c == nil || c.engine == nil {
 		return nil
 	}
-	query := fmt.Sprintf(`querySpaceAttachments({spaceId: %s, status: "ready"})`,
-		escapeJSONString(spaceId))
+	query := fmt.Sprintf(`querySpaceAttachments({partitionId: %s, status: "ready"})`,
+		escapeJSONString(partitionId))
 
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
-		c.Logger.Debug("fetch space attachments for prompt", "error", err, "spaceId", spaceId)
+		c.Logger.Debug("fetch space attachments for prompt", "error", err, "partitionId", partitionId)
 		return nil
 	}
 	data, err := extractDataFromResult(result)

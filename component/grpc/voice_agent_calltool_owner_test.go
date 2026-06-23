@@ -15,10 +15,10 @@ import (
 // spaceOwnerBundle builds a querySpaceMeta-style result node carrying the
 // spaceFull payload's ownerUserId (the field #1503 added to the shape so the
 // owner reaches the voice CallTool auto-injection layer).
-func spaceOwnerBundle(spaceId, ownerUserId string) *memqlv1.GraphBundle {
+func spaceOwnerBundle(partitionId, ownerUserId string) *memqlv1.GraphBundle {
 	payload, _ := structpb.NewStruct(map[string]any{"ownerUserId": ownerUserId})
 	return &memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{
-		{Id: spaceId, Concept: "v1:cognition:space", Payload: payload},
+		{Id: partitionId, Concept: "v1:cognition:space", Payload: payload},
 	}}
 }
 
@@ -73,7 +73,7 @@ func (e *simpleErr) Error() string { return e.s }
 // (VoiceAgentScopeId). This test exercises that hop: given ONLY the threaded
 // space id (the exact shape stampVoiceAgentScopeOnCallTool produces), the
 // resolved ToolDefaults must carry a non-empty ownerUserId (= the space owner)
-// + spaceId so produceArtifact's @autoInjected fields can be stamped and the
+// + partitionId so produceArtifact's @autoInjected fields can be stamped and the
 // plan mints.
 //
 // It FAILS against current main (which threads no owner across the hop and sets
@@ -99,7 +99,7 @@ func TestVoiceCallToolDefaultsVia_StampsOwnerAcrossProxyHop(t *testing.T) {
 	require.NotNil(t, defaults, "voice CallTool hop must set tool defaults on ctx")
 	assert.Equal(t, "user-jose", defaults["ownerUserId"],
 		"ownerUserId must resolve to the space owner across the bff->agent proxy hop (#1503)")
-	assert.Equal(t, "demo", defaults["spaceId"])
+	assert.Equal(t, "demo", defaults["partitionId"])
 	assert.Equal(t, "v1:agents:agent:sofia", defaults["agentId"])
 }
 

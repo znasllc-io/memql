@@ -29,7 +29,7 @@ func (c *CognitionIntegration) generateStreaming(
 	ctx context.Context,
 	agent *agentPayload,
 	trigger string,
-	spaceId string,
+	partitionId string,
 	participantId string,
 	replyId string,
 	participants []map[string]any,
@@ -53,7 +53,7 @@ func (c *CognitionIntegration) generateStreaming(
 		personality = "You are a helpful, professional assistant that supports users in their sessions. You respond when asked questions or when you can provide relevant insights."
 	}
 
-	spaceContext := c.getSpaceContextForPromptCached(ctx, strings.TrimSpace(spaceId))
+	spaceContext := c.getSpaceContextForPromptCached(ctx, strings.TrimSpace(partitionId))
 
 	// Build agent identity for prompt injection.
 	assistantData := map[string]any{
@@ -84,7 +84,7 @@ func (c *CognitionIntegration) generateStreaming(
 	data := map[string]any{
 		"trigger":           strings.TrimSpace(trigger),
 		"assistant":         assistantData,
-		"space":             buildSpaceData(strings.TrimSpace(spaceId), si),
+		"space":             buildSpaceData(strings.TrimSpace(partitionId), si),
 		"participants":      participants,
 		"history":           []map[string]any{},
 		"historyInMessages": true,
@@ -117,5 +117,5 @@ func (c *CognitionIntegration) generateStreaming(
 
 	tools := c.engine.ToolDefinitionsForNames(toolNames)
 
-	return c.runStreamingToolLoop(ctx, streamProvider, messages, tools, spaceId, participantId, replyId, "stream")
+	return c.runStreamingToolLoop(ctx, streamProvider, messages, tools, partitionId, participantId, replyId, "stream")
 }

@@ -89,8 +89,8 @@ func TestResult_RawNodes_PreservesFullShape(t *testing.T) {
 	if !ok {
 		t.Fatalf("RawNodes row[\"metadata\"] = %v, want nested map", row["metadata"])
 	}
-	if got := meta["spaceId"]; got != "v1:cognition:space:xyz" {
-		t.Errorf("RawNodes metadata[\"spaceId\"] = %v, want v1:cognition:space:xyz", got)
+	if got := meta["partitionId"]; got != "v1:cognition:space:xyz" {
+		t.Errorf("RawNodes metadata[\"partitionId\"] = %v, want v1:cognition:space:xyz", got)
 	}
 
 	// schema must survive.
@@ -186,7 +186,7 @@ func bundleFixture() map[string]any {
 						"version": "1",
 					},
 					"metadata": map[string]any{
-						"spaceId": "v1:cognition:space:xyz",
+						"partitionId": "v1:cognition:space:xyz",
 					},
 					"provenance": map[string]any{
 						"kind": "system",

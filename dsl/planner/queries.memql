@@ -28,15 +28,15 @@
 
 use planner.concepts.{ plan, task, taskState, responsibility }
 
-// payload.spaceId!="" is the tautological row-matches-all predicate:
-// spaceId is @required on the Plan concept, so every row passes. We
+// payload.partitionId!="" is the tautological row-matches-all predicate:
+// partitionId is @required on the Plan concept, so every row passes. We
 // can't use traitIsNotDeleted / traitIsActiveRecord because Plans
 // don't carry the `deleted` or `active` fields those traits filter
 // on.
 @enabled
 @description("Every Plan. Backs the global Tasks panel; the frontend pins current-space rows to the top of each lifecycle group.")
 query plan queryAllPlans {
-  filter  payload.spaceId!=""
+  filter  payload.partitionId!=""
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -171,7 +171,7 @@ query plan queryPlanById {
 // the frontend re-orders within each group as needed.
 //
 // Arguments:
-//   spaceId (string, required) - The cognition space whose Plans to read.
+//   partitionId (string, required) - The cognition space whose Plans to read.
 //
 // Returns:
 //   Array of plan records (planFull shape).
@@ -180,9 +180,9 @@ query plan queryPlanById {
 @description("All Plans in a space (Tasks page list). Frontend groups by status and applies the Done-window visual filter.")
 query plan queryPlansForSpace {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
   }
-  filter  payload.spaceId==args.spaceId
+  filter  payload.partitionId==args.partitionId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.

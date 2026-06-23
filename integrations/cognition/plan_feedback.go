@@ -57,7 +57,7 @@ const planStatusAwaitingFeedback = "awaitingFeedback"
 // and the pending question + options + reason to classify against / announce.
 type awaitingFeedbackPlan struct {
 	ID             string
-	SpaceId        string
+	PartitionId        string
 	Status         string
 	FeedbackReason string
 	Question       string
@@ -121,7 +121,7 @@ func (c *CognitionIntegration) handlePlanUpdatedForFeedback(event events.Event) 
 	if strings.TrimSpace(plan.Question) == "" {
 		return
 	}
-	if strings.TrimSpace(plan.SpaceId) == "" {
+	if strings.TrimSpace(plan.PartitionId) == "" {
 		return
 	}
 
@@ -144,14 +144,14 @@ func (c *CognitionIntegration) announceFeedbackRequest(ctx context.Context, plan
 	// Cross-replica gate: exactly one replica wins the (space, plan) lock and
 	// proceeds; the loser bails. Fails SAFE (proceeds) on any infra error,
 	// falling through to the read-before-write dedup below.
-	proceed, release, gateErr := c.dispatchGate.tryAnnounceFeedback(ctx, plan.SpaceId, plan.ID)
+	proceed, release, gateErr := c.dispatchGate.tryAnnounceFeedback(ctx, plan.PartitionId, plan.ID)
 	if gateErr != nil {
 		c.Logger.Warn("cognition: feedback announce gate errored; failing safe and proceeding",
-			"error", gateErr, "spaceId", plan.SpaceId, "planId", plan.ID)
+			"error", gateErr, "partitionId", plan.PartitionId, "planId", plan.ID)
 	}
 	if !proceed {
 		c.Logger.Debug("cognition: another replica owns this plan-feedback announcement, skipping",
-			"spaceId", plan.SpaceId, "planId", plan.ID)
+			"partitionId", plan.PartitionId, "planId", plan.ID)
 		return
 	}
 	defer release()
@@ -161,14 +161,14 @@ func (c *CognitionIntegration) announceFeedbackRequest(ctx context.Context, plan
 	// do not post it again. This is the fail-safe backstop behind the gate.
 	if c.queryHasFeedbackAnnouncement(ctx, plan.ID) {
 		c.Logger.Debug("cognition: feedback announcement already posted, skipping",
-			"spaceId", plan.SpaceId, "planId", plan.ID)
+			"partitionId", plan.PartitionId, "planId", plan.ID)
 		return
 	}
 
-	aiParticipant, err := c.findAIParticipant(ctx, plan.SpaceId)
+	aiParticipant, err := c.findAIParticipant(ctx, plan.PartitionId)
 	if err != nil || aiParticipant == nil || strings.TrimSpace(aiParticipant.ID) == "" {
 		c.Logger.Warn("cognition: no AI participant to announce plan feedback; skipping",
-			"error", err, "spaceId", plan.SpaceId, "planId", plan.ID)
+			"error", err, "partitionId", plan.PartitionId, "planId", plan.ID)
 		return
 	}
 
@@ -182,13 +182,13 @@ func (c *CognitionIntegration) announceFeedbackRequest(ctx context.Context, plan
 		"feedbackAnnouncePlanId": plan.ID,
 		"feedbackReason":         plan.FeedbackReason,
 	}
-	if err := c.insertAIResponse(ctx, plan.SpaceId, aiParticipant, "", "", message, source, nil, nil); err != nil {
+	if err := c.insertAIResponse(ctx, plan.PartitionId, aiParticipant, "", "", message, source, nil, nil); err != nil {
 		c.Logger.Warn("cognition: failed to post plan-feedback announcement",
-			"error", err, "spaceId", plan.SpaceId, "planId", plan.ID)
+			"error", err, "partitionId", plan.PartitionId, "planId", plan.ID)
 		return
 	}
 	c.Logger.Info("cognition: posted assistant plan-feedback announcement",
-		"spaceId", plan.SpaceId, "planId", plan.ID, "feedbackReason", plan.FeedbackReason)
+		"partitionId", plan.PartitionId, "planId", plan.ID, "feedbackReason", plan.FeedbackReason)
 }
 
 // tryRouteUtteranceAsPlanFeedback is the route-half entrypoint, called from
@@ -201,16 +201,16 @@ func (c *CognitionIntegration) announceFeedbackRequest(ctx context.Context, plan
 // awaitingFeedback Plan, the classifier is unsure, or anything errors -- a
 // false negative just means the user answers via the card or rephrases, which
 // is far cheaper than a false positive resuming the Plan with the wrong text.
-func (c *CognitionIntegration) tryRouteUtteranceAsPlanFeedback(ctx context.Context, spaceId, userText, lastAgentText string) (handled bool) {
+func (c *CognitionIntegration) tryRouteUtteranceAsPlanFeedback(ctx context.Context, partitionId, userText, lastAgentText string) (handled bool) {
 	if c == nil || c.engine == nil {
 		return false
 	}
 	userText = strings.TrimSpace(userText)
-	if spaceId == "" || userText == "" {
+	if partitionId == "" || userText == "" {
 		return false
 	}
 
-	plan := c.findAwaitingFeedbackPlanForSpace(ctx, spaceId)
+	plan := c.findAwaitingFeedbackPlanForSpace(ctx, partitionId)
 	if plan == nil {
 		return false
 	}
@@ -218,12 +218,12 @@ func (c *CognitionIntegration) tryRouteUtteranceAsPlanFeedback(ctx context.Conte
 	cls, err := c.classifyFeedbackRoute(ctx, plan, userText, lastAgentText)
 	if err != nil {
 		c.Logger.Warn("cognition: plan-feedback route classification failed; falling through to normal dispatch",
-			"error", err, "spaceId", spaceId, "planId", plan.ID)
+			"error", err, "partitionId", partitionId, "planId", plan.ID)
 		return false
 	}
 	if !cls.IsFeedback || cls.Confidence < feedbackRouteConfidenceThreshold {
 		c.Logger.Debug("cognition: message not routed as plan feedback",
-			"spaceId", spaceId, "planId", plan.ID,
+			"partitionId", partitionId, "planId", plan.ID,
 			"isFeedback", cls.IsFeedback, "confidence", cls.Confidence,
 			"reasoning", cls.Reasoning)
 		return false
@@ -238,18 +238,18 @@ func (c *CognitionIntegration) tryRouteUtteranceAsPlanFeedback(ctx context.Conte
 
 	if err := c.attachPlanFeedback(ctx, plan.ID, feedback); err != nil {
 		c.Logger.Warn("cognition: failed to attach routed plan feedback; falling through",
-			"error", err, "spaceId", spaceId, "planId", plan.ID)
+			"error", err, "partitionId", partitionId, "planId", plan.ID)
 		return false
 	}
 
 	c.Logger.Info("cognition: routed chat message into plan feedback intake",
-		"spaceId", spaceId, "planId", plan.ID,
+		"partitionId", partitionId, "planId", plan.ID,
 		"confidence", cls.Confidence, "feedbackLen", len(feedback))
 
 	// Best-effort confirmation so the user sees the loop closed. The Plan's
 	// resume (awaitingFeedback -> running) is driven by #1405 server-side;
 	// cognition only acknowledges here.
-	c.confirmPlanFeedbackRouted(ctx, spaceId)
+	c.confirmPlanFeedbackRouted(ctx, partitionId)
 	return true
 }
 
@@ -257,15 +257,15 @@ func (c *CognitionIntegration) tryRouteUtteranceAsPlanFeedback(ctx context.Conte
 // awaitingFeedback (carrying a question) for the space, or nil when none. Reads
 // via the existing queryPlansForSpace + scans client-side for the status (the
 // query has no status arg; the per-space plan count is small).
-func (c *CognitionIntegration) findAwaitingFeedbackPlanForSpace(ctx context.Context, spaceId string) *awaitingFeedbackPlan {
-	if c == nil || c.engine == nil || strings.TrimSpace(spaceId) == "" {
+func (c *CognitionIntegration) findAwaitingFeedbackPlanForSpace(ctx context.Context, partitionId string) *awaitingFeedbackPlan {
+	if c == nil || c.engine == nil || strings.TrimSpace(partitionId) == "" {
 		return nil
 	}
-	query := fmt.Sprintf(`queryPlansForSpace({spaceId: "%s"})`, spaceId)
+	query := fmt.Sprintf(`queryPlansForSpace({partitionId: "%s"})`, partitionId)
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		c.Logger.Debug("cognition: queryPlansForSpace failed for feedback routing",
-			"error", err, "spaceId", spaceId)
+			"error", err, "partitionId", partitionId)
 		return nil
 	}
 
@@ -347,8 +347,8 @@ func (c *CognitionIntegration) attachPlanFeedback(ctx context.Context, planId, f
 
 // confirmPlanFeedbackRouted posts a brief assistant confirmation that the
 // feedback was received and the work is resuming. Best-effort.
-func (c *CognitionIntegration) confirmPlanFeedbackRouted(ctx context.Context, spaceId string) {
-	aiParticipant, err := c.findAIParticipant(ctx, spaceId)
+func (c *CognitionIntegration) confirmPlanFeedbackRouted(ctx context.Context, partitionId string) {
+	aiParticipant, err := c.findAIParticipant(ctx, partitionId)
 	if err != nil || aiParticipant == nil || strings.TrimSpace(aiParticipant.ID) == "" {
 		return
 	}
@@ -356,9 +356,9 @@ func (c *CognitionIntegration) confirmPlanFeedbackRouted(ctx context.Context, sp
 		"outputMethod": "text",
 		"kind":         "planFeedbackAck",
 	}
-	if err := c.insertAIResponse(ctx, spaceId, aiParticipant, "", "",
+	if err := c.insertAIResponse(ctx, partitionId, aiParticipant, "", "",
 		"Got it -- I've passed that along and the task is picking back up.", source, nil, nil); err != nil {
-		c.Logger.Debug("cognition: failed to post plan-feedback confirmation", "error", err, "spaceId", spaceId)
+		c.Logger.Debug("cognition: failed to post plan-feedback confirmation", "error", err, "partitionId", partitionId)
 	}
 }
 
@@ -425,7 +425,7 @@ func awaitingFeedbackPlanFromPayload(node, payload map[string]any) *awaitingFeed
 	}
 	plan := &awaitingFeedbackPlan{
 		ID:             id,
-		SpaceId:        strings.TrimSpace(stringFromAny(payload["spaceId"])),
+		PartitionId:        strings.TrimSpace(stringFromAny(payload["partitionId"])),
 		Status:         strings.TrimSpace(stringFromAny(payload["status"])),
 		FeedbackReason: strings.TrimSpace(stringFromAny(payload["feedbackReason"])),
 		RequestedBy:    strings.TrimSpace(stringFromAny(payload["requestedBy"])),

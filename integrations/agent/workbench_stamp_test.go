@@ -61,7 +61,7 @@ func TestInjectAgentContext_CanvasPublishStampsDataPlanId(t *testing.T) {
 	}
 	tc := turnContext{
 		AgentId: "v1:agents:agent:abc",
-		SpaceId: "v1:cognition:space:s1",
+		PartitionId: "v1:cognition:space:s1",
 		PlanId:  "v1:planner:plan:p1",
 	}
 

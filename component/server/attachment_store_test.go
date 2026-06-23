@@ -13,10 +13,10 @@ import (
 // is always a single well-formed `fn({...})` call whose args round-trip
 // back to the original values.
 func TestDslCall_EscapesEmbeddedQuotes(t *testing.T) {
-	malicious := `x", "spaceId": "evil`
+	malicious := `x", "partitionId": "evil`
 	q, err := dslCall("queryAttachmentById", map[string]any{
 		"attachmentId": malicious,
-		"spaceId":      "s1",
+		"partitionId":      "s1",
 	})
 	if err != nil {
 		t.Fatalf("dslCall returned error: %v", err)
@@ -37,7 +37,7 @@ func TestDslCall_EscapesEmbeddedQuotes(t *testing.T) {
 	if got["attachmentId"] != malicious {
 		t.Fatalf("attachmentId mangled: got %q, want %q", got["attachmentId"], malicious)
 	}
-	if got["spaceId"] != "s1" {
-		t.Fatalf("spaceId broken out to %q; quote escaping failed", got["spaceId"])
+	if got["partitionId"] != "s1" {
+		t.Fatalf("partitionId broken out to %q; quote escaping failed", got["partitionId"])
 	}
 }

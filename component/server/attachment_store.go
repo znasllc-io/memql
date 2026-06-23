@@ -37,11 +37,11 @@ func (s *EngineAttachmentStore) CreateAttachment(ctx context.Context, params Att
 		return nil, fmt.Errorf("engine not configured")
 	}
 
-	nodeId := strings.TrimSpace(params.SpaceId) + ":" + id.NewShortId()
+	nodeId := strings.TrimSpace(params.PartitionId) + ":" + id.NewShortId()
 
 	args := map[string]any{
 		"attachmentId": nodeId,
-		"spaceId":      params.SpaceId,
+		"partitionId":      params.PartitionId,
 		"fileName":     params.FileName,
 		"mimeType":     params.MimeType,
 		"fileSize":     params.FileSize,
@@ -81,16 +81,16 @@ func (s *EngineAttachmentStore) CreateAttachment(ctx context.Context, params Att
 // actor is whoever the caller authenticated as (resolved by the gRPC
 // stream interceptor or HTTP auth middleware that wrapped this
 // request). If the result set is non-empty, the caller owns the space.
-func (s *EngineAttachmentStore) CallerOwnsSpace(ctx context.Context, spaceId string) (bool, error) {
+func (s *EngineAttachmentStore) CallerOwnsSpace(ctx context.Context, partitionId string) (bool, error) {
 	if s == nil || s.engine == nil {
 		return false, fmt.Errorf("engine not configured")
 	}
-	spaceId = strings.TrimSpace(spaceId)
-	if spaceId == "" {
-		return false, fmt.Errorf("spaceId is required")
+	partitionId = strings.TrimSpace(partitionId)
+	if partitionId == "" {
+		return false, fmt.Errorf("partitionId is required")
 	}
 
-	q, err := dslCall("queryOwnedSpaceById", map[string]any{"spaceId": spaceId})
+	q, err := dslCall("queryOwnedSpaceById", map[string]any{"partitionId": partitionId})
 	if err != nil {
 		return false, err
 	}
@@ -103,21 +103,21 @@ func (s *EngineAttachmentStore) CallerOwnsSpace(ctx context.Context, spaceId str
 
 // GetAttachment reads one v1:common:attachment row by id within a space via
 // the queryAttachmentById DSL query. The query's filter pins
-// payload.spaceId==args.spaceId, so an attachment id from a different space
+// payload.partitionId==args.partitionId, so an attachment id from a different space
 // returns no row. Returns nil (no error) when not found. (memql#804)
-func (s *EngineAttachmentStore) GetAttachment(ctx context.Context, attachmentId, spaceId string) (*AttachmentRow, error) {
+func (s *EngineAttachmentStore) GetAttachment(ctx context.Context, attachmentId, partitionId string) (*AttachmentRow, error) {
 	if s == nil || s.engine == nil {
 		return nil, fmt.Errorf("engine not configured")
 	}
 	attachmentId = strings.TrimSpace(attachmentId)
-	spaceId = strings.TrimSpace(spaceId)
-	if attachmentId == "" || spaceId == "" {
-		return nil, fmt.Errorf("attachmentId and spaceId are required")
+	partitionId = strings.TrimSpace(partitionId)
+	if attachmentId == "" || partitionId == "" {
+		return nil, fmt.Errorf("attachmentId and partitionId are required")
 	}
 
 	q, err := dslCall("queryAttachmentById", map[string]any{
 		"attachmentId": attachmentId,
-		"spaceId":      spaceId,
+		"partitionId":      partitionId,
 	})
 	if err != nil {
 		return nil, err
@@ -142,7 +142,7 @@ func (s *EngineAttachmentStore) GetAttachment(ctx context.Context, attachmentId,
 		FileName: getStr("fileName"),
 		MimeType: getStr("mimeType"),
 		BlobUrl:  getStr("blobUrl"),
-		SpaceId:  getStr("spaceId"),
+		PartitionId:  getStr("partitionId"),
 		Status:   getStr("status"),
 	}, nil
 }

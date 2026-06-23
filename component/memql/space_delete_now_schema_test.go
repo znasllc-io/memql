@@ -34,11 +34,11 @@ const deleteSpaceNowMutationSource = `use cognition.concepts.{ space }
 
 mutation space mutationDeleteSpaceNow {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
     payload  object  @required
   }
   insert {
-    id: args.spaceId
+    id: args.partitionId
     ownerUserId: actor.userId
     args.payload
   }
@@ -91,7 +91,7 @@ func renderDeleteSpaceNowPayload(t *testing.T) map[string]any {
 	ctx := context.Background()
 	engine := &MemQLEngine{}
 	mutation, err := engine.renderMutationTemplate(ctx, fn.MutationTemplate, map[string]any{
-		"spaceId": "v1:cognition:space:quarterly-review",
+		"partitionId": "v1:cognition:space:quarterly-review",
 		"payload": map[string]any{
 			"ownerUserId": "user-archivist",
 			"name":        "Quarterly Review",

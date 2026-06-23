@@ -22,7 +22,7 @@ import (
 func TestPlanFromUpdateEvent_FlattenedAwaitingFeedback(t *testing.T) {
 	ev := events.Event{Payload: map[string]any{
 		"nodeId":         "v1:planner:plan:abc",
-		"spaceId":        "v1:cognition:space:s1",
+		"partitionId":        "v1:cognition:space:s1",
 		"status":         "awaitingFeedback",
 		"feedbackReason": "scope_elevation_required",
 		"requestedBy":    "user-1",
@@ -38,7 +38,7 @@ func TestPlanFromUpdateEvent_FlattenedAwaitingFeedback(t *testing.T) {
 	if plan == nil {
 		t.Fatal("expected a plan from a flattened awaitingFeedback event")
 	}
-	if plan.ID != "v1:planner:plan:abc" || plan.SpaceId != "v1:cognition:space:s1" {
+	if plan.ID != "v1:planner:plan:abc" || plan.PartitionId != "v1:cognition:space:s1" {
 		t.Fatalf("wrong id/space: %+v", plan)
 	}
 	if plan.Status != "awaitingFeedback" {
@@ -59,7 +59,7 @@ func TestPlanFromUpdateEvent_NestedPayload(t *testing.T) {
 	ev := events.Event{Payload: map[string]any{
 		"id": "v1:planner:plan:nested",
 		"payload": map[string]any{
-			"spaceId":         "v1:cognition:space:s2",
+			"partitionId":         "v1:cognition:space:s2",
 			"status":          "awaitingFeedback",
 			"feedbackRequest": map[string]any{"question": "Which format -- PDF or DOCX?"},
 		},
@@ -71,7 +71,7 @@ func TestPlanFromUpdateEvent_NestedPayload(t *testing.T) {
 	if plan.ID != "v1:planner:plan:nested" {
 		t.Fatalf("wrong id: %q", plan.ID)
 	}
-	if plan.SpaceId != "v1:cognition:space:s2" || plan.Question == "" {
+	if plan.PartitionId != "v1:cognition:space:s2" || plan.Question == "" {
 		t.Fatalf("nested payload not read: %+v", plan)
 	}
 }
@@ -82,7 +82,7 @@ func TestPlanFromUpdateEvent_NonFeedbackIsIgnoredByHandlerPredicate(t *testing.T
 	// faithfully reflects a running plan so the predicate can reject it.
 	ev := events.Event{Payload: map[string]any{
 		"nodeId":  "v1:planner:plan:run",
-		"spaceId": "v1:cognition:space:s3",
+		"partitionId": "v1:cognition:space:s3",
 		"status":  "running",
 	}}
 	plan := planFromUpdateEvent(ev)
@@ -160,7 +160,7 @@ func TestNodesFromResult(t *testing.T) {
 func TestAwaitingFeedbackPlanFromPayload_PrefersNodeId(t *testing.T) {
 	node := map[string]any{"id": "v1:planner:plan:node"}
 	payload := map[string]any{
-		"spaceId":         "sp",
+		"partitionId":         "sp",
 		"status":          "awaitingFeedback",
 		"feedbackRequest": map[string]any{"question": "Q?"},
 	}
@@ -256,7 +256,7 @@ func TestAnnounceGate_ExactlyOneWinsUnderContention(t *testing.T) {
 	gateA := newDispatchGate(func() *bun.DB { return dbA }, dispatchGateTestLogger())
 	gateB := newDispatchGate(func() *bun.DB { return dbB }, dispatchGateTestLogger())
 
-	spaceId := "v1:cognition:space:announce"
+	partitionId := "v1:cognition:space:announce"
 	planId := fmt.Sprintf("v1:planner:plan:announce-%d", time.Now().UnixNano())
 
 	var (
@@ -270,7 +270,7 @@ func TestAnnounceGate_ExactlyOneWinsUnderContention(t *testing.T) {
 
 	attempt := func(g *dispatchGate) {
 		defer wg.Done()
-		proceed, release, err := g.tryAnnounceFeedback(context.Background(), spaceId, planId)
+		proceed, release, err := g.tryAnnounceFeedback(context.Background(), partitionId, planId)
 		if err != nil {
 			atomic.AddInt32(&errs, 1)
 			return
@@ -309,16 +309,16 @@ func TestAnnounceGate_ReclaimableAfterRelease(t *testing.T) {
 	db := openDispatchGateTestDB(t)
 	defer db.Close()
 	g := newDispatchGate(func() *bun.DB { return db }, dispatchGateTestLogger())
-	spaceId := "v1:cognition:space:reclaim"
+	partitionId := "v1:cognition:space:reclaim"
 	planId := fmt.Sprintf("v1:planner:plan:reclaim-%d", time.Now().UnixNano())
 
-	proceed, release, err := g.tryAnnounceFeedback(context.Background(), spaceId, planId)
+	proceed, release, err := g.tryAnnounceFeedback(context.Background(), partitionId, planId)
 	if err != nil || !proceed {
 		t.Fatalf("first acquire must win: proceed=%v err=%v", proceed, err)
 	}
 	release()
 
-	proceed2, release2, err := g.tryAnnounceFeedback(context.Background(), spaceId, planId)
+	proceed2, release2, err := g.tryAnnounceFeedback(context.Background(), partitionId, planId)
 	if err != nil || !proceed2 {
 		t.Fatalf("after release the lock must be re-acquirable: proceed=%v err=%v", proceed2, err)
 	}

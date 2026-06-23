@@ -206,8 +206,8 @@ spec specRichPredicate {
 //         use cognition.specs.{ specIsHumanParticipant }
 //
 //         query participant queryActiveHumanParticipants {
-//           args { spaceId string @required }
-//           filter payload.spaceId == args.spaceId && specIsHumanParticipant
+//           args { partitionId string @required }
+//           filter payload.partitionId == args.partitionId && specIsHumanParticipant
 //           shape  participantFull
 //         }
 //

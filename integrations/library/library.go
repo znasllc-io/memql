@@ -96,7 +96,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"authorId":         "string -- the editing user id (authorKind=user) or agent id (authorKind=assistant)",
 				"expectedVersion":  "number -- optional optimistic-concurrency token; the latest versionNumber the caller saw",
 				"producedByPlanId": "string -- optional planner plan id when an assistant edit came through the planner",
-				"spaceId":          "string -- optional space id the edit happened in",
+				"partitionId":          "string -- optional space id the edit happened in",
 			},
 		},
 		{
@@ -110,7 +110,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"note":             "string -- optional short note describing the change",
 				"agentId":          "string -- the editing agent id (recorded as authorId); auto-injected by the agent runtime",
 				"producedByPlanId": "string -- optional planner plan id",
-				"spaceId":          "string -- optional space id; auto-injected by the agent runtime",
+				"partitionId":          "string -- optional space id; auto-injected by the agent runtime",
 				"expectedVersion":  "number -- optional optimistic-concurrency token",
 			},
 		},
@@ -164,7 +164,7 @@ func (i *Integration) handleEditDocument(ctx context.Context, args map[string]an
 	}
 	authorId := strings.TrimSpace(asString(args["authorId"]))
 	producedByPlanId := strings.TrimSpace(asString(args["producedByPlanId"]))
-	spaceId := strings.TrimSpace(asString(args["spaceId"]))
+	partitionId := strings.TrimSpace(asString(args["partitionId"]))
 	expectedVersion, hasExpected := intArg(args["expectedVersion"])
 
 	// Resolve the backing generatedOutput to thread the owner + carry
@@ -231,7 +231,7 @@ func (i *Integration) handleEditDocument(ctx context.Context, args map[string]an
 		note:             note,
 		parentVersionId:  parentVersionId,
 		producedByPlanId: producedByPlanId,
-		spaceId:          spaceId,
+		partitionId:          partitionId,
 	}); err != nil {
 		return nil, fmt.Errorf("library.editDocument: append version: %w", err)
 	}
@@ -381,14 +381,14 @@ type appendArgs struct {
 	note             string
 	parentVersionId  string
 	producedByPlanId string
-	spaceId          string
+	partitionId          string
 }
 
 func (i *Integration) appendVersion(ctx context.Context, a appendArgs) error {
 	q := fmt.Sprintf(
-		`mutationAppendDocumentVersion({versionId: %q, documentId: %q, ownerUserId: %q, versionNumber: %d, content: %q, attachmentId: %q, authorKind: %q, authorId: %q, note: %q, parentVersionId: %q, producedByPlanId: %q, spaceId: %q})`,
+		`mutationAppendDocumentVersion({versionId: %q, documentId: %q, ownerUserId: %q, versionNumber: %d, content: %q, attachmentId: %q, authorKind: %q, authorId: %q, note: %q, parentVersionId: %q, producedByPlanId: %q, partitionId: %q})`,
 		a.versionId, a.documentId, a.ownerUserId, a.versionNumber, a.content, a.attachmentId,
-		a.authorKind, a.authorId, a.note, a.parentVersionId, a.producedByPlanId, a.spaceId,
+		a.authorKind, a.authorId, a.note, a.parentVersionId, a.producedByPlanId, a.partitionId,
 	)
 	_, err := i.engine.Execute(ctx, q)
 	return err
@@ -403,7 +403,7 @@ func (i *Integration) updateBackingContent(ctx context.Context, doc map[string]a
 	}
 	format := stringField(doc, "format")
 	q := fmt.Sprintf(
-		`mutationUpdateGeneratedOutputContent({outputId: %q, ownerUserId: %q, title: %q, summary: %q, body: %q, attachmentId: %q, format: %q, mimeType: %q, source: %q, spaceId: %q, producedByPlanId: %q, producedByAgentId: %q})`,
+		`mutationUpdateGeneratedOutputContent({outputId: %q, ownerUserId: %q, title: %q, summary: %q, body: %q, attachmentId: %q, format: %q, mimeType: %q, source: %q, partitionId: %q, producedByPlanId: %q, producedByAgentId: %q})`,
 		stringField(doc, "id"),
 		stringField(doc, "ownerUserId"),
 		stringField(doc, "title"),
@@ -413,7 +413,7 @@ func (i *Integration) updateBackingContent(ctx context.Context, doc map[string]a
 		format,
 		stringField(doc, "mimeType"),
 		source,
-		stringField(doc, "spaceId"),
+		stringField(doc, "partitionId"),
 		stringField(doc, "producedByPlanId"),
 		stringField(doc, "producedByAgentId"),
 	)
@@ -437,7 +437,7 @@ func (i *Integration) touchArtifact(ctx context.Context, doc map[string]any) {
 		source = "agent_generated"
 	}
 	q := fmt.Sprintf(
-		`mutationCreateArtifact({sourceConceptRef: %q, ownerUserId: %q, lens: "artifact", kind: "generated_output", source: %q, title: %q, summary: %q, format: %q, mimeType: %q, spaceId: %q, producedByPlanId: %q})`,
+		`mutationCreateArtifact({sourceConceptRef: %q, ownerUserId: %q, lens: "artifact", kind: "generated_output", source: %q, title: %q, summary: %q, format: %q, mimeType: %q, partitionId: %q, producedByPlanId: %q})`,
 		sourceRef,
 		stringField(doc, "ownerUserId"),
 		source,
@@ -445,7 +445,7 @@ func (i *Integration) touchArtifact(ctx context.Context, doc map[string]any) {
 		stringField(doc, "summary"),
 		stringField(doc, "format"),
 		stringField(doc, "mimeType"),
-		stringField(doc, "spaceId"),
+		stringField(doc, "partitionId"),
 		stringField(doc, "producedByPlanId"),
 	)
 	_, _ = i.engine.Execute(ctx, q)

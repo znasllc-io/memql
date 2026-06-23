@@ -57,7 +57,7 @@ func TestQueryDocumentsForDomain_MembershipJoin(t *testing.T) {
 			"documentId":   id,
 			"attachmentId": "att-" + id,
 			"planId":       "v1:planner:plan:p-" + sfx,
-			"spaceId":      "v1:cognition:space:s-" + sfx,
+			"partitionId":      "v1:cognition:space:s-" + sfx,
 			"fileName":     "f.csv",
 			"mimeType":     "text/csv",
 			"format":       "spreadsheet",

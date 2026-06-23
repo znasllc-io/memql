@@ -408,8 +408,8 @@ func errorResultNode(planId, action, code, msg string, started time.Time) []memo
 // the written bytes to v1:common:attachment so the Library renders /
 // downloads the real file (memql#733 local, memql#742 cluster).
 //
-// ownerUserId / spaceId are resolved from the producing Plan
-// (queryPlanById -> createdBy / spaceId): the workbench dispatch args
+// ownerUserId / partitionId are resolved from the producing Plan
+// (queryPlanById -> createdBy / partitionId): the workbench dispatch args
 // don't carry the user id, but the Plan's createdBy is server-stamped
 // from actor.userId so it is the authoritative owner. Idempotent: the
 // outputId is derived deterministically from (ownerUserId, planId,
@@ -440,7 +440,7 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 		return
 	}
 
-	ownerUserId, spaceId := i.resolvePlanOwner(ctx, planId)
+	ownerUserId, partitionId := i.resolvePlanOwner(ctx, planId)
 	if ownerUserId == "" {
 		if i.logger != nil {
 			i.logger.Warn("workbench: generatedOutput promotion skipped -- could not resolve plan owner",
@@ -472,9 +472,9 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 	// inline path when a blob backend IS configured (e.g. local Azurite).
 	// Binary deliverables (pdf/csv/images/...) still go to blob. (memql#888/#889)
 	attachmentId, mimeType := "", ""
-	if i.uploader != nil && i.bucket != "" && spaceId != "" && !isInlineTextFormat(format) {
+	if i.uploader != nil && i.bucket != "" && partitionId != "" && !isInlineTextFormat(format) {
 		if data := i.workbenchOutputBytes(planId, path, innerArgs, local); len(data) > 0 {
-			attachmentId, mimeType = i.uploadAttachmentBytes(mutationCtx, planId, path, title, spaceId, ownerUserId, data)
+			attachmentId, mimeType = i.uploadAttachmentBytes(mutationCtx, planId, path, title, partitionId, ownerUserId, data)
 		}
 	}
 
@@ -513,8 +513,8 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 		fmt.Fprintf(&b, `, producedByAgentId:%q`, agentId)
 	}
 	fmt.Fprintf(&b, `, producedByPlanId:%q`, planId)
-	if spaceId != "" {
-		fmt.Fprintf(&b, `, spaceId:%q`, spaceId)
+	if partitionId != "" {
+		fmt.Fprintf(&b, `, partitionId:%q`, partitionId)
 	}
 	b.WriteString("})")
 
@@ -622,14 +622,14 @@ func (i *Integration) workbenchOutputBytes(planId, relPath string, innerArgs map
 // fs_write re-versions / overwrites instead of leaking duplicates. Bytes
 // are passed in (never JSON-round-tripped), so binary content stays
 // intact on both the local and cluster paths.
-func (i *Integration) uploadAttachmentBytes(ctx context.Context, planId, relPath, fileName, spaceId, ownerUserId string, data []byte) (attachmentId, mimeType string) {
+func (i *Integration) uploadAttachmentBytes(ctx context.Context, planId, relPath, fileName, partitionId, ownerUserId string, data []byte) (attachmentId, mimeType string) {
 	if len(data) == 0 {
 		return "", ""
 	}
 
 	mimeType = detectMimeType(fileName, data)
 	det := string(genOutputIdEngine.MustFromMap(map[string]any{"planId": planId, "path": relPath}))[:16]
-	objectName := fmt.Sprintf("spaces/%s/attachments/%s/%s", spaceId, det, fileName)
+	objectName := fmt.Sprintf("spaces/%s/attachments/%s/%s", partitionId, det, fileName)
 
 	blobUrl, err := i.uploader.Upload(ctx, i.bucket, objectName, data, mimeType)
 	if err != nil {
@@ -640,10 +640,10 @@ func (i *Integration) uploadAttachmentBytes(ctx context.Context, planId, relPath
 		return "", ""
 	}
 
-	attachmentId = spaceId + ":" + det
+	attachmentId = partitionId + ":" + det
 	var b strings.Builder
-	fmt.Fprintf(&b, `mutationCreateAttachment({attachmentId:%q, spaceId:%q, fileName:%q, mimeType:%q, fileSize:%d, blobUrl:%q, status:%q, uploadedBy:%q})`,
-		attachmentId, spaceId, fileName, mimeType, len(data), blobUrl, "ready", ownerUserId)
+	fmt.Fprintf(&b, `mutationCreateAttachment({attachmentId:%q, partitionId:%q, fileName:%q, mimeType:%q, fileSize:%d, blobUrl:%q, status:%q, uploadedBy:%q})`,
+		attachmentId, partitionId, fileName, mimeType, len(data), blobUrl, "ready", ownerUserId)
 	if _, err := i.engine.Execute(ctx, b.String()); err != nil {
 		if i.logger != nil {
 			i.logger.Warn("workbench: attachment row create failed -- using pointer row",
@@ -704,7 +704,7 @@ func detectMimeType(fileName string, data []byte) string {
 }
 
 // resolvePlanOwner reads queryPlanById and returns the Plan's owner
-// user id and spaceId. Returns empty strings on any failure -- the
+// user id and partitionId. Returns empty strings on any failure -- the
 // caller treats an empty owner as "skip promotion". The planFull shape
 // flattens, so rows land in res.OutputPayload() with the fields as
 // top-level keys.
@@ -718,7 +718,7 @@ func detectMimeType(fileName string, data []byte) string {
 // owner-scoped success check (memql#939) find zero rows -> Plan failed even
 // though the file was written. requestedBy is faithfully forwarded from the
 // originating user, so it's the correct owner. (memql#952)
-func (i *Integration) resolvePlanOwner(ctx context.Context, planId string) (ownerUserId, spaceId string) {
+func (i *Integration) resolvePlanOwner(ctx context.Context, planId string) (ownerUserId, partitionId string) {
 	if i.engine == nil {
 		return "", ""
 	}
@@ -731,7 +731,7 @@ func (i *Integration) resolvePlanOwner(ctx context.Context, planId string) (owne
 			continue
 		}
 		owner := planOwnerFromRow(row)
-		space := strings.TrimSpace(stringFromRow(row, "spaceId"))
+		space := strings.TrimSpace(stringFromRow(row, "partitionId"))
 		if owner != "" {
 			return owner, space
 		}

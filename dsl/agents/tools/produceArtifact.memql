@@ -47,5 +47,5 @@ tool produceArtifact {
   filename             string  @description("Optional preferred filename for the deliverable (without path). When omitted the executing agent derives one from the goal.")
   agentId      string  @autoInjected @description("Calling agent id. Server-stamped from the agent runtime; the central validator drops any LLM-supplied value before dispatch.")
   ownerUserId  string  @autoInjected @description("Session-owner user id. Server-stamped; becomes the plan's requestedBy + owner attribution. The central validator drops any LLM-supplied value.")
-  spaceId      string  @autoInjected @description("Space the plan lives in. Server-stamped from the agent runtime turn context; the central validator drops any LLM-supplied value.")
+  partitionId      string  @autoInjected @description("Space the plan lives in. Server-stamped from the agent runtime turn context; the central validator drops any LLM-supplied value.")
 }

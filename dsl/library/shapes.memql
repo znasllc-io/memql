@@ -18,7 +18,7 @@ shape artifact artifactFull {
   payload.mimeType
   payload.live
   payload.scope
-  payload.spaceId
+  payload.partitionId
   payload.agentId
   payload.producedByPlanId
   payload.validationStatus
@@ -38,7 +38,7 @@ shape generatedOutput generatedOutputFull {
   payload.format
   payload.mimeType
   payload.source
-  payload.spaceId
+  payload.partitionId
   payload.producedByPlanId
   payload.producedByAgentId
   row.createdAt
@@ -54,7 +54,7 @@ shape memory memoryFull {
   payload.summary
   payload.kind
   payload.agentId
-  payload.spaceId
+  payload.partitionId
   payload.sourceUtteranceId
   row.createdAt
 }
@@ -72,7 +72,7 @@ shape documentVersion documentVersionSummary {
   payload.parentVersionId
   payload.attachmentId
   payload.producedByPlanId
-  payload.spaceId
+  payload.partitionId
   row.createdAt
 }
 
@@ -90,7 +90,7 @@ shape documentVersion documentVersionFull {
   payload.note
   payload.parentVersionId
   payload.producedByPlanId
-  payload.spaceId
+  payload.partitionId
   row.createdAt
 }
 

@@ -86,7 +86,7 @@ func TestTextChunkCrossReplicaDelivery(t *testing.T) {
 		qc := memqlclient.NewQueryClient(c.Dispatcher())
 		if _, err := qc.MutationUpdateParticipantPresence(ctx, memqlclient.MutationUpdateParticipantPresenceArgs{
 			PresenceId:    "presence-" + id.NewShortId(),
-			SpaceId:       spaceID,
+			PartitionId:       spaceID,
 			ParticipantId: participantID,
 			State:         "idle",
 			Label:         "probe",
@@ -111,7 +111,7 @@ func TestTextChunkCrossReplicaDelivery(t *testing.T) {
 	qc := memqlclient.NewQueryClient(producer.Dispatcher())
 	if _, err := qc.MutationEmitTextChunk(ctx, memqlclient.MutationEmitTextChunkArgs{
 		ChunkId:       chunkShort,
-		SpaceId:       spaceID,
+		PartitionId:       spaceID,
 		ParticipantId: participantID,
 		ReplyId:       "v1:cognition:utterance:" + id.NewShortId(),
 		Text:          "streamed-chunk cross-replica probe",

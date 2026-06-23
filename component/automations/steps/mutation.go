@@ -292,7 +292,7 @@ func (e *MutationExecutor) evaluateValue(evaluator *automations.Evaluator, value
 		// id-shaped value to canonical `<partition>:<conceptType>:
 		// <bareSlug>` form. Mirrors the engine-side
 		// evalCanonicalId so ids like
-		//   concat("participant-", hash(concat(canonicalId(ctx.spaceId, "v1:cognition:space"), ...)))
+		//   concat("participant-", hash(concat(canonicalId(ctx.partitionId, "v1:cognition:space"), ...)))
 		// resolve identically at arg-resolution and query-execute time.
 		// Without this branch, an automation that references a foreign
 		// key whose form differs from the eventual stored canonical

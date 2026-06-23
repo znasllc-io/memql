@@ -63,5 +63,5 @@ tool requestUserFeedback {
   planId       string  @autoInjected @description("The active Plan to park. Server-stamped from the agent runtime turn context; the central validator drops any LLM-supplied value before dispatch (memql#107).")
   agentId      string  @autoInjected @description("Calling agent id. Server-stamped from the agent runtime; the central validator drops any LLM-supplied value before dispatch.")
   ownerUserId  string  @autoInjected @description("Session-owner user id. Server-stamped; scopes the parked Plan's owner attribution. The central validator drops any LLM-supplied value.")
-  spaceId      string  @autoInjected @description("Target space for the canvas card. Server-stamped from the agent runtime; the central validator drops any LLM-supplied value.")
+  partitionId      string  @autoInjected @description("Target space for the canvas card. Server-stamped from the agent runtime; the central validator drops any LLM-supplied value.")
 }

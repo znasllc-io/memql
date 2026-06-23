@@ -115,7 +115,7 @@ func TestValidateCQSAcrossRegistry_SelfReferenceFromRewriter(t *testing.T) {
 	must(t, reg.Upsert(&Function{
 		Name:         "mutationAddAgentToSpace",
 		FunctionKind: "mutation",
-		ExprSource: `spaceId string @required
+		ExprSource: `partitionId string @required
 }
 func (Mutation) mutationAddAgentToSpace(ctx any) error {
   return insert(participant, id=concat("si-", hash("seed")))

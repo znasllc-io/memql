@@ -36,7 +36,7 @@ func TestMintApprovedTrainingPlan_MintsAndSucceeds(t *testing.T) {
 	parent := map[string]any{
 		"id": "plan-1", "kind": "userGoal", "status": "running",
 		"goal": "become an expert on French employment law",
-		"spaceId": "v1:cognition:space:s1", "requestedBy": "v1:identity:user:u1",
+		"partitionId": "v1:cognition:space:s1", "requestedBy": "v1:identity:user:u1",
 	}
 	agent := map[string]any{
 		"id": "v1:agents:agent:spec-1",
@@ -78,7 +78,7 @@ func TestMintApprovedTrainingPlan_MintsAndSucceeds(t *testing.T) {
 // (dispatcher-rejecting) Plan -- it escalates for feedback instead.
 func TestMintApprovedTrainingPlan_NoDomainEscalates(t *testing.T) {
 	parent := map[string]any{
-		"id": "plan-2", "goal": "x", "spaceId": "v1:cognition:space:s1", "requestedBy": "v1:identity:user:u1",
+		"id": "plan-2", "goal": "x", "partitionId": "v1:cognition:space:s1", "requestedBy": "v1:identity:user:u1",
 	}
 	agent := map[string]any{
 		"id":           "v1:agents:agent:spec-2",
@@ -105,7 +105,7 @@ func TestMintApprovedTrainingPlan_NoDomainEscalates(t *testing.T) {
 // TestMintApprovedTrainingPlan_NoSpecialistEscalates: a malformed decision
 // with no specialistId escalates without touching the agent/skill reads.
 func TestMintApprovedTrainingPlan_NoSpecialistEscalates(t *testing.T) {
-	parent := map[string]any{"id": "plan-3", "goal": "x", "spaceId": "s", "requestedBy": "u"}
+	parent := map[string]any{"id": "plan-3", "goal": "x", "partitionId": "s", "requestedBy": "u"}
 	fe := trainingFakeEngine(parent, map[string]any{}, nil)
 	l := newTestLoop(fe)
 

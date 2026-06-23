@@ -145,7 +145,7 @@ const VoiceGateDirectiveTopic = "voice.gate.directive"
 // directive; defer -> suppress). Best-effort: a nil eventBus is a no-op. The
 // payload keys mirror what extractVoiceGateDirective decodes (space-scoped --
 // voice is GA-only, so no per-agent key is needed).
-func (c *CognitionIntegration) publishVoiceGateDirective(ctx context.Context, spaceId, utteranceId string, d VoiceGateDecision, grounding string) {
+func (c *CognitionIntegration) publishVoiceGateDirective(ctx context.Context, partitionId, utteranceId string, d VoiceGateDecision, grounding string) {
 	if c == nil || c.eventBus == nil {
 		return
 	}
@@ -158,7 +158,7 @@ func (c *CognitionIntegration) publishVoiceGateDirective(ctx context.Context, sp
 		Kind:      events.KindAIEvent,
 		Timestamp: time.Now().UTC(),
 		Payload: map[string]any{
-			"spaceId":     spaceId,
+			"partitionId":     partitionId,
 			"engage":      d.Engage,
 			"mode":        d.Mode,
 			"brevity":     d.Brevity,

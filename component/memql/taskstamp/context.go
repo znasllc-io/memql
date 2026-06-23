@@ -19,7 +19,7 @@
 // Use:
 //
 //	ctx = taskstamp.WithPlanContext(ctx, taskstamp.PlanContext{
-//	    AgentId: "...", OwnerUserId: "...", SpaceId: "...",
+//	    AgentId: "...", OwnerUserId: "...", PartitionId: "...",
 //	    // PlanId + SemanticTaskId set by the caller when a real Plan
 //	    // is being executed; left empty for ad-hoc chat tool calls
 //	    // (the stamper materializes synthetic rows on first call).
@@ -91,10 +91,10 @@ type PlanContext struct {
 	// the ad-hoc path fires.
 	OwnerUserId string
 
-	// SpaceId is the v1:cognition:space.id the agent is operating in.
+	// PartitionId is the v1:cognition:space.id the agent is operating in.
 	// Required for synthetic Plan attribution. The stamper does NOT
 	// rewrite this for child Tasks -- they inherit via the Plan link.
-	SpaceId string
+	PartitionId string
 }
 
 // ctxKey is the Go context-key type for PlanContext lookup. Unexported

@@ -50,9 +50,9 @@ func TestRejectLegacyProceduralAuthorForm_StructFormPasses(t *testing.T) {
 	src := `@description("Active participants in a space.")
 query participant queryActiveParticipants {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
   }
-  filter participant.spaceId == args.spaceId
+  filter participant.partitionId == args.partitionId
   shape  participantFull
 }`
 	if err := RejectLegacyProceduralAuthorForm(src); err != nil {
@@ -67,9 +67,9 @@ func TestNormaliseAll_StructFormRoundTrips(t *testing.T) {
 	src := `@description("Active participants in a space.")
 query participant queryActiveParticipants {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
   }
-  filter participant.spaceId == args.spaceId
+  filter participant.partitionId == args.partitionId
   shape  participantFull
 }`
 	out, err := NormaliseAll(src)

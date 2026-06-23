@@ -246,7 +246,7 @@ func TestRun3_AttachDocumentToDomain_ArrayArg(t *testing.T) {
 		"documentId":   docId,
 		"attachmentId": "att-1",
 		"planId":       "plan-1",
-		"spaceId":      "space-1",
+		"partitionId":      "space-1",
 		"fileName":     "data.csv",
 		"mimeType":     "text/csv",
 		"format":       "spreadsheet",

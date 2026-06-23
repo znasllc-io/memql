@@ -250,9 +250,9 @@ var standardDomains = []StandardDomain{
 	// (Group + per-user Team) with hard isolation between them.
 	//
 	// Auto-attached at agent-prompt-assembly time whenever the agent is
-	// dispatching for a non-empty spaceId -- i.e., the agent is acting
+	// dispatching for a non-empty partitionId -- i.e., the agent is acting
 	// as a space participant. See replier.go for the auto-injection.
-	// 1-on-1 / direct interactions (no spaceId) skip the domain so we
+	// 1-on-1 / direct interactions (no partitionId) skip the domain so we
 	// don't pay retrieval cost when chat-thread context is irrelevant.
 	{ID: "recent-chat", Name: "Recent Chat", Category: "internal",
 		Description:         "Operational manual for the single-chat space architecture: one v1:cognition:utterance stream visible to all participants, the owner's assistant as the only AI presence that speaks to humans, specialists invoked via askSpecialist returning structured JSON, canvas-not-chat for system events, and the recentChat tool for read-only chat context. Auto-attached to any agent participating in a space.",

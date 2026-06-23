@@ -5520,7 +5520,7 @@ func (p *Parser) parseObject() (map[string]any, error) {
 			ident := p.current.Literal
 			p.advance()
 
-			// Shorthand A: a bare dotted path like `event.payload.spaceId`
+			// Shorthand A: a bare dotted path like `event.payload.partitionId`
 			// or `registerNode.result.node.id` with no `key:` prefix
 			// infers the key from the path's terminal segment. The
 			// lexer delivers the full dotted path as a single

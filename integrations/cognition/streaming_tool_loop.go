@@ -40,7 +40,7 @@ func (c *CognitionIntegration) runStreamingToolLoop(
 	streamProvider common.ChatStreamWithToolsProvider,
 	messages []common.ChatMessage,
 	tools []common.ToolDefinition,
-	spaceId, participantId, replyId string,
+	partitionId, participantId, replyId string,
 	logTag string,
 ) (*streamResult, error) {
 	start := time.Now()
@@ -61,7 +61,7 @@ func (c *CognitionIntegration) runStreamingToolLoop(
 		}
 
 		turnText, turnCalls, streamErr := c.consumeStreamingTurn(
-			ctx, chunks, spaceId, participantId, replyId, &textChunkIndex, &fullText)
+			ctx, chunks, partitionId, participantId, replyId, &textChunkIndex, &fullText)
 		if streamErr != nil {
 			c.Logger.Warn(logTag+": stream error",
 				"iter", iter, "error", streamErr)
@@ -121,11 +121,11 @@ func (c *CognitionIntegration) runStreamingToolLoop(
 		}
 	}
 
-	c.mutationEmitTextChunk(ctx, spaceId, participantId, replyId, "", textChunkIndex, true)
+	c.mutationEmitTextChunk(ctx, partitionId, participantId, replyId, "", textChunkIndex, true)
 
 	finalText := strings.TrimSpace(fullText.String())
 	c.Logger.Info(logTag+": complete",
-		"spaceId", spaceId,
+		"partitionId", partitionId,
 		"textChunks", textChunkIndex,
 		"textChars", len(finalText),
 		"toolCalls", len(allToolCalls),
@@ -150,7 +150,7 @@ func (c *CognitionIntegration) runStreamingToolLoop(
 func (c *CognitionIntegration) consumeStreamingTurn(
 	ctx context.Context,
 	chunks <-chan common.StreamToolChunk,
-	spaceId, participantId, replyId string,
+	partitionId, participantId, replyId string,
 	textChunkIndex *int,
 	fullText *strings.Builder,
 ) (turnText string, toolCalls []common.ToolCall, err error) {
@@ -169,7 +169,7 @@ func (c *CognitionIntegration) consumeStreamingTurn(
 
 	flush := func() {
 		if textBuffer.Len() > 0 {
-			c.mutationEmitTextChunk(ctx, spaceId, participantId, replyId, textBuffer.String(), *textChunkIndex, false)
+			c.mutationEmitTextChunk(ctx, partitionId, participantId, replyId, textBuffer.String(), *textChunkIndex, false)
 			textBuffer.Reset()
 			*textChunkIndex++
 			ticker.Reset(2 * time.Second)

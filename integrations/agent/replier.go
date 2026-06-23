@@ -458,9 +458,9 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// recent-chat auto-attach mirrors the copresent-ui /
 	// computer-use pattern: tool requires domain, domain doesn't require
 	// tool. Phase 5 of the chat-architecture plan -- every agent that
-	// is dispatching for a non-empty spaceId is acting as a space
+	// is dispatching for a non-empty partitionId is acting as a space
 	// participant, so the two-thread chat contract applies. 1-on-1 /
-	// direct interactions (no spaceId) skip the domain so we don't pay
+	// direct interactions (no partitionId) skip the domain so we don't pay
 	// retrieval cost when chat-thread context is irrelevant.
 	if strings.TrimSpace(msg.ScopeId) != "" {
 		domains = ensureDomain(domains, "recent-chat")
@@ -676,7 +676,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	turnCtx := turnContext{
 		AgentId:     msg.AgentId,
 		OwnerUserId: resolvedOwner,
-		SpaceId:     msg.ScopeId,
+		PartitionId:     msg.ScopeId,
 		// memql#1133: a produceArtifact executor turn (deliverable_surface=
 		// workbench) is already running inside a kind=produceArtifact plan; the
 		// tool loop REFUSES a produceArtifact re-delegation on this turn so the
@@ -701,7 +701,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 		"stage", "turnContext",
 		"agent_id", msg.AgentId,
 		"owner_user_id", resolvedOwner,
-		"space_id", msg.ScopeId,
+		"partition_id", msg.ScopeId,
 		"requestId", msg.RequestId,
 	)
 
@@ -868,16 +868,16 @@ type recentPlanOutcome struct {
 // Bounded to 3 entries + succeeded-only for prompt-size hygiene;
 // future tuning can widen if the agent keeps misreading older
 // Plans.
-func (r *Replier) recentPlanOutcomesForSpace(ctx context.Context, spaceId string) []recentPlanOutcome {
-	spaceId = strings.TrimSpace(spaceId)
-	if spaceId == "" || r.engine == nil {
+func (r *Replier) recentPlanOutcomesForSpace(ctx context.Context, partitionId string) []recentPlanOutcome {
+	partitionId = strings.TrimSpace(partitionId)
+	if partitionId == "" || r.engine == nil {
 		return nil
 	}
-	q := fmt.Sprintf(`queryPlansForSpace({spaceId:%q})`, spaceId)
+	q := fmt.Sprintf(`queryPlansForSpace({partitionId:%q})`, partitionId)
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Debug("agentReply: recentPlanOutcomesForSpace query failed",
-			"space_id", spaceId, "error", err)
+			"partition_id", partitionId, "error", err)
 		return nil
 	}
 	rows := planOutcomeRowsFromResult(res)

@@ -10,7 +10,7 @@ func TestExtractUtteranceFromEventReadsFlattenedSource(t *testing.T) {
 	event := events.Event{
 		Payload: map[string]any{
 			"nodeId":          "utt-1",
-			"spaceId":         "space-1",
+			"partitionId":         "space-1",
 			"participantId":   "participant-1",
 			"text":            "hello",
 			"utteranceType":   "speech",
@@ -37,7 +37,7 @@ func TestExtractUtteranceFromEventReadsNestedSource(t *testing.T) {
 		Payload: map[string]any{
 			"id": "utt-2",
 			"payload": map[string]any{
-				"spaceId":       "space-2",
+				"partitionId":       "space-2",
 				"participantId": "participant-2",
 				"text":          "nested payload source",
 				"utteranceType": "speech",

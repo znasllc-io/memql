@@ -12,13 +12,13 @@ concept attachment {
   fileSize  int  @description("File size in bytes.")
   blobUrl  string  @required  @description("Azure Blob Storage URL where the file is stored (https://account.blob.core.windows.net/container/object).")
   mimeType  string  @required  @description("MIME type of the uploaded file.")
-  spaceId  string  @required  @description("ID of the space this attachment belongs to.")
+  partitionId  string  @required  @description("ID of the space this attachment belongs to.")
   status  enum("processing", "ready", "error")  @required  @description("Processing status of the attachment.")
   summary  string  @description("AI-generated 2-3 sentence summary of the file content.")
   transcription  string  @description("Extracted plain text from the file, or image description for images.")
   uploadedBy  string  @required  @description("Actor identifier of the user who uploaded the file.")
 
-  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
+  @relationship(type="parent", field="partitionId", target=space, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -35,12 +35,12 @@ concept media {
   metadata  object  @description("Additional format-specific metadata.")
   mimeType  string  @required  @description("MIME type of the asset.")
   size  int  @description("File size in bytes.")
-  spaceId  string  @required  @description("ID of the space this media belongs to.")
+  partitionId  string  @required  @description("ID of the space this media belongs to.")
   transcription {
     text  string  @description("Full transcribed text.")
     timestamps  []object
   }
   url  string  @required  @description("Storage URL for the asset.")
 
-  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
+  @relationship(type="parent", field="partitionId", target=space, direction="outgoing")
 }

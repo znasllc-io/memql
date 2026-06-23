@@ -14,7 +14,7 @@ import (
 // server has no default for an auto-injected field, the
 // LLM-supplied value is dropped entirely. This is defense in
 // depth: an LLM that hallucinates or attempts to forge values for
-// fields like ownerUserId / agentId / spaceId can't sneak the
+// fields like ownerUserId / agentId / partitionId can't sneak the
 // forged value past the central validator just because the
 // runtime forgot to stamp the default.
 //
@@ -22,7 +22,7 @@ import (
 // and the server has NO default for an auto-injected field, the
 // caller-supplied value is preserved instead of dropped. Over MCP
 // the caller is the authenticated user (not an LLM), so a
-// caller-supplied spaceId on tools like recentChat is a legitimate
+// caller-supplied partitionId on tools like recentChat is a legitimate
 // input. The security invariant is maintained: when a server
 // default IS available it still wins regardless of MCP context,
 // so the MCP path cannot escalate beyond what the server would

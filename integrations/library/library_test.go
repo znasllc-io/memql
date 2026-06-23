@@ -176,7 +176,7 @@ func seededDoc() map[string]any {
 		"body":        "v1 body",
 		"format":      "markdown",
 		"source":      "agent_generated",
-		"spaceId":     "space-1",
+		"partitionId":     "space-1",
 	}
 }
 

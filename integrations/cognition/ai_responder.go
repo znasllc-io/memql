@@ -183,7 +183,7 @@ func currentUserDisplayNameFromContext(ctx context.Context) string {
 // utterancePayload represents the payload of an utterance node.
 type utterancePayload struct {
 	ID            string            `json:"-"` // Node ID, populated separately
-	SpaceId       string            `json:"spaceId"`
+	PartitionId       string            `json:"partitionId"`
 	ParticipantId string            `json:"participantId"`
 	UtteranceType string            `json:"utteranceType"`
 	Text          string            `json:"text"`
@@ -196,7 +196,7 @@ type participantPayload struct {
 	// ID is the node ID of the participant record (not the payload field).
 	// This is populated separately from the node, not from payload.
 	ID              string `json:"-"` // Populated from node.id, not from JSON payload
-	SpaceId         string `json:"spaceId"`
+	PartitionId         string `json:"partitionId"`
 	ParticipantType string `json:"participantType"`
 	DisplayName     string `json:"displayName"`
 	UserId          string `json:"userId,omitempty"`
@@ -528,8 +528,8 @@ func contextWithSystemActor(ctx context.Context) context.Context {
 // findAIParticipant finds an active AI participant in a space.
 // Returns the participant with its node ID populated (needed for creating utterances).
 // Delegates to the aiParticipantForSpace MemQL query function.
-func (c *CognitionIntegration) findAIParticipant(ctx context.Context, spaceId string) (*participantPayload, error) {
-	query := fmt.Sprintf(`querySiParticipantForSpace({spaceId: "%s"})`, spaceId)
+func (c *CognitionIntegration) findAIParticipant(ctx context.Context, partitionId string) (*participantPayload, error) {
+	query := fmt.Sprintf(`querySiParticipantForSpace({partitionId: "%s"})`, partitionId)
 
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
@@ -554,7 +554,7 @@ func (c *CognitionIntegration) findAIParticipant(ctx context.Context, spaceId st
 }
 
 // findParticipantById retrieves a participant by their node ID.
-func (c *CognitionIntegration) findParticipantById(ctx context.Context, spaceId, participantId string) (*participantPayload, error) {
+func (c *CognitionIntegration) findParticipantById(ctx context.Context, partitionId, participantId string) (*participantPayload, error) {
 	participantId = strings.TrimSpace(participantId)
 	if participantId == "" {
 		return nil, fmt.Errorf("participantId is empty")
@@ -658,8 +658,8 @@ func (c *CognitionIntegration) toolsForContext(spaceType string, noTools bool, a
 }
 
 // generateAIResponse calls the AI provider to generate a response.
-// The spaceId parameter identifies the space; prompt context is loaded via caches.
-func (c *CognitionIntegration) generateAIResponse(ctx context.Context, agent *agentPayload, trigger string, spaceId string, participants []map[string]any, recentUtterances []map[string]any, history []conversationMessage, si spaceInfo, attachmentSummaries []map[string]any, peerAgents ...*agentPayload) (string, error) {
+// The partitionId parameter identifies the space; prompt context is loaded via caches.
+func (c *CognitionIntegration) generateAIResponse(ctx context.Context, agent *agentPayload, trigger string, partitionId string, participants []map[string]any, recentUtterances []map[string]any, history []conversationMessage, si spaceInfo, attachmentSummaries []map[string]any, peerAgents ...*agentPayload) (string, error) {
 	if c == nil || c.engine == nil {
 		return "", fmt.Errorf("engine not configured")
 	}
@@ -669,8 +669,8 @@ func (c *CognitionIntegration) generateAIResponse(ctx context.Context, agent *ag
 		personality = "You are a helpful, professional assistant that supports users in their sessions. You respond when asked questions or when you can provide relevant insights."
 	}
 
-	spaceId = strings.TrimSpace(spaceId)
-	spaceContext := c.getSpaceContextForPromptCached(ctx, spaceId)
+	partitionId = strings.TrimSpace(partitionId)
+	spaceContext := c.getSpaceContextForPromptCached(ctx, partitionId)
 
 	// IMPORTANT: Prompt input validation expects JSON-ish types (map[string]any / []any),
 	// not typed Go slices/structs. Convert history into []map[string]any explicitly.
@@ -744,7 +744,7 @@ func (c *CognitionIntegration) generateAIResponse(ctx context.Context, agent *ag
 	data := map[string]any{
 		"trigger":         strings.TrimSpace(trigger),
 		"assistant":       assistantData,
-		"space":           buildSpaceData(spaceId, si),
+		"space":           buildSpaceData(partitionId, si),
 		"participants":    participants,
 		"history":         historyForPrompt,
 		"selectionReason": selectionReasonFromContext(ctx),
@@ -887,12 +887,12 @@ func stripRawToolCalls(text string) string {
 // attributed (the message reads as system-emitted). Action source
 // metadata defaults to {"outputMethod":"action","kind":<kind>} when
 // not supplied.
-func (c *CognitionIntegration) insertSystemActionUtterance(ctx context.Context, spaceId, participantId, kind, text string, extraSource map[string]string) error {
+func (c *CognitionIntegration) insertSystemActionUtterance(ctx context.Context, partitionId, participantId, kind, text string, extraSource map[string]string) error {
 	if c == nil || c.engine == nil {
 		return fmt.Errorf("engine not configured")
 	}
-	if strings.TrimSpace(spaceId) == "" {
-		return fmt.Errorf("spaceId is required")
+	if strings.TrimSpace(partitionId) == "" {
+		return fmt.Errorf("partitionId is required")
 	}
 	if strings.TrimSpace(text) == "" {
 		return fmt.Errorf("action utterance text is required")
@@ -955,7 +955,7 @@ func (c *CognitionIntegration) insertSystemActionUtterance(ctx context.Context, 
 	}
 
 	query := fmt.Sprintf(`insert("%s", id="%s", payload={
-		"spaceId": "%s",
+		"partitionId": "%s",
 		"participantId": "%s",
 		"participantType": "system",
 		"utteranceType": "action",
@@ -965,7 +965,7 @@ func (c *CognitionIntegration) insertSystemActionUtterance(ctx context.Context, 
 	})`,
 		memoryNodes.ConceptCognitionUtterance,
 		utteranceId,
-		spaceId,
+		partitionId,
 		pid,
 		escapeJSONString(text),
 		string(sourceJSON),
@@ -993,7 +993,7 @@ func (c *CognitionIntegration) insertSystemActionUtterance(ctx context.Context, 
 // sequence members, continuations, error follow-ups) -- they have no
 // streaming bubble to merge with, so insertAIResponse mints its own
 // `utt-si-<nano>` short id and the engine prefixes it at write time.
-func (c *CognitionIntegration) insertAIResponse(ctx context.Context, spaceId string, aiParticipant *participantPayload, replyId, replyToId, response string, source map[string]string, citations []*memqlv1.AgentTurnCitation, retrieved []*memqlv1.AgentRetrievedChunk) error {
+func (c *CognitionIntegration) insertAIResponse(ctx context.Context, partitionId string, aiParticipant *participantPayload, replyId, replyToId, response string, source map[string]string, citations []*memqlv1.AgentTurnCitation, retrieved []*memqlv1.AgentRetrievedChunk) error {
 	// Use the caller-supplied replyId when provided (so the committed
 	// utterance.id matches the chunks' replyId), else mint a fresh one.
 	// When replyId is fully qualified ({partition}:concept:uuid), the
@@ -1043,7 +1043,7 @@ func (c *CognitionIntegration) insertAIResponse(ctx context.Context, spaceId str
 
 	c.Logger.Debug("inserting AI response",
 		"utteranceId", utteranceId,
-		"spaceId", spaceId,
+		"partitionId", partitionId,
 		"participantId", participantId,
 		"agentId", aiParticipant.AgentId,
 		"replyToId", replyToId,
@@ -1123,7 +1123,7 @@ func (c *CognitionIntegration) insertAIResponse(ctx context.Context, spaceId str
 	// through escapeJSONString (json.Marshal -> quoted) so a stray double
 	// quote in an id cannot break out of the enclosing quotes (go/unsafe-quoting).
 	query := fmt.Sprintf(`insert("%s", id=%s, payload={
-		"spaceId": %s,
+		"partitionId": %s,
 		"participantId": %s,
 		"participantType": "si",
 		"utteranceType": "text",
@@ -1133,7 +1133,7 @@ func (c *CognitionIntegration) insertAIResponse(ctx context.Context, spaceId str
 	})`,
 		memoryNodes.ConceptCognitionUtterance,
 		escapeJSONString(utteranceId),
-		escapeJSONString(spaceId),
+		escapeJSONString(partitionId),
 		escapeJSONString(participantId), // AI participant node ID, resolved upstream via aiParticipantForSpace
 		escapeJSONString(response),
 		escapeJSONString(replyToId),
@@ -1158,7 +1158,7 @@ func (c *CognitionIntegration) insertAIResponse(ctx context.Context, spaceId str
 func extractUtteranceFromEvent(event events.Event) (*utterancePayload, error) {
 	// The event payload contains flattened fields from the node
 	// nodeId/id - the utterance ID
-	// spaceId, participantId, text, utteranceType - from the payload
+	// partitionId, participantId, text, utteranceType - from the payload
 
 	// Extract node ID
 	nodeId, _ := event.Payload["nodeId"].(string)
@@ -1171,12 +1171,12 @@ func extractUtteranceFromEvent(event events.Event) (*utterancePayload, error) {
 
 	// Extract utterance fields - they may be at top level (flattened) or in payload.
 	var (
-		spaceId, participantId, text, utteranceType string
+		partitionId, participantId, text, utteranceType string
 		source                                      map[string]string
 	)
 
 	// Try flattened fields first (how the event is emitted)
-	spaceId, _ = event.Payload["spaceId"].(string)
+	partitionId, _ = event.Payload["partitionId"].(string)
 	participantId, _ = event.Payload["participantId"].(string)
 	text, _ = event.Payload["text"].(string)
 	utteranceType, _ = event.Payload["utteranceType"].(string)
@@ -1184,8 +1184,8 @@ func extractUtteranceFromEvent(event events.Event) (*utterancePayload, error) {
 
 	// Fall back to nested payload if needed
 	if nestedPayload, ok := event.Payload["payload"].(map[string]any); ok {
-		if spaceId == "" {
-			spaceId, _ = nestedPayload["spaceId"].(string)
+		if partitionId == "" {
+			partitionId, _ = nestedPayload["partitionId"].(string)
 		}
 		if participantId == "" {
 			participantId, _ = nestedPayload["participantId"].(string)
@@ -1201,8 +1201,8 @@ func extractUtteranceFromEvent(event events.Event) (*utterancePayload, error) {
 		}
 	}
 
-	if spaceId == "" {
-		return nil, fmt.Errorf("missing spaceId in event payload")
+	if partitionId == "" {
+		return nil, fmt.Errorf("missing partitionId in event payload")
 	}
 	if participantId == "" {
 		return nil, fmt.Errorf("missing participantId in event payload")
@@ -1210,7 +1210,7 @@ func extractUtteranceFromEvent(event events.Event) (*utterancePayload, error) {
 
 	return &utterancePayload{
 		ID:            nodeId,
-		SpaceId:       spaceId,
+		PartitionId:       partitionId,
 		ParticipantId: participantId,
 		Text:          text,
 		UtteranceType: utteranceType,
@@ -1254,11 +1254,11 @@ func sourceMapFromAny(v any) map[string]string {
 
 // hasAIResponseForReply checks whether an AI response already exists for a given utterance.
 // Delegates to the hasAIResponseForReply MemQL query function.
-func (c *CognitionIntegration) queryHasAIResponseForReply(ctx context.Context, spaceId, siParticipantId, replyToId string) bool {
+func (c *CognitionIntegration) queryHasAIResponseForReply(ctx context.Context, partitionId, siParticipantId, replyToId string) bool {
 	if c == nil || c.engine == nil {
 		return false
 	}
-	if strings.TrimSpace(spaceId) == "" || strings.TrimSpace(siParticipantId) == "" || strings.TrimSpace(replyToId) == "" {
+	if strings.TrimSpace(partitionId) == "" || strings.TrimSpace(siParticipantId) == "" || strings.TrimSpace(replyToId) == "" {
 		return false
 	}
 	query := fmt.Sprintf(`queryHasAIResponseForReply({replyToId: "%s", participantId: "%s"})`,
@@ -1301,15 +1301,15 @@ func (c *CognitionIntegration) getUtteranceTextAndParticipant(ctx context.Contex
 
 // getParticipantsForPrompt retrieves participants for AI prompt context.
 // Delegates to the spaceParticipants MemQL query function.
-func (c *CognitionIntegration) getParticipantsForPrompt(ctx context.Context, spaceId string) ([]map[string]any, error) {
+func (c *CognitionIntegration) getParticipantsForPrompt(ctx context.Context, partitionId string) ([]map[string]any, error) {
 	if c == nil || c.engine == nil {
 		return nil, fmt.Errorf("engine not configured")
 	}
-	if strings.TrimSpace(spaceId) == "" {
-		return nil, fmt.Errorf("spaceId is empty")
+	if strings.TrimSpace(partitionId) == "" {
+		return nil, fmt.Errorf("partitionId is empty")
 	}
 
-	query := fmt.Sprintf(`querySpaceParticipants({spaceId: "%s"})`, spaceId)
+	query := fmt.Sprintf(`querySpaceParticipants({partitionId: "%s"})`, partitionId)
 
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
@@ -1341,23 +1341,23 @@ func (c *CognitionIntegration) getParticipantsForPrompt(ctx context.Context, spa
 	return out, nil
 }
 
-func (c *CognitionIntegration) getRecentUtterancesForPrompt(ctx context.Context, spaceId string, limit int) ([]map[string]any, error) {
+func (c *CognitionIntegration) getRecentUtterancesForPrompt(ctx context.Context, partitionId string, limit int) ([]map[string]any, error) {
 	if c == nil || c.engine == nil {
 		return nil, fmt.Errorf("engine not configured")
 	}
-	if strings.TrimSpace(spaceId) == "" {
-		return nil, fmt.Errorf("spaceId is empty")
+	if strings.TrimSpace(partitionId) == "" {
+		return nil, fmt.Errorf("partitionId is empty")
 	}
 	limit = clampInt(limit, 1, 200)
 
 	// Return utterances in chronological order (ASC) to match "most recent last".
 	query := fmt.Sprintf(`shape(
   sort(
-    paginate(concept==v1:cognition:utterance;payload.spaceId==%s, %d),
+    paginate(concept==v1:cognition:utterance;payload.partitionId==%s, %d),
     "createdAt","asc"
   ),
   "utteranceFull"
-)`, escapeJSONString(spaceId), limit)
+)`, escapeJSONString(partitionId), limit)
 
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {

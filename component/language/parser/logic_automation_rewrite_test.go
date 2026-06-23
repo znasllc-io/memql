@@ -60,7 +60,7 @@ func TestNormaliseAutomationSource_StepRewrite(t *testing.T) {
 @description("Demo automation.")
 automation autoJoinAI {
   step joinAgents {
-    logicJoinAgents { spaceId: event.node.id }
+    logicJoinAgents { partitionId: event.node.id }
   }
 }`
 	out, err := NormaliseAutomationSource(src)
@@ -73,7 +73,7 @@ automation autoJoinAI {
 	if strings.Contains(out, "(ctx any)") {
 		t.Fatalf("rewriter must not emit `ctx any` parameter; got %q", out)
 	}
-	if !strings.Contains(out, "joinAgents := logicJoinAgents({ spaceId: event.node.id })") {
+	if !strings.Contains(out, "joinAgents := logicJoinAgents({ partitionId: event.node.id })") {
 		t.Fatalf("step did not rewrite to assignment + verbatim event ref; got %q", out)
 	}
 	if strings.Contains(out, "ctx.input") {

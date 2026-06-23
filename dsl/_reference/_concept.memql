@@ -370,8 +370,8 @@ concept nestedExample {
 @description("A concept with three different relationship decorators.")
 concept relationshipExample {
   // Parent: this row hangs off a space.
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
-  spaceId    string @required
+  @relationship(type="parent", field="partitionId", target="v1:cognition:space", direction="outgoing")
+  partitionId    string @required
 
   // References (soft): this row may name an author.
   @relationship(type="references", field="authorId", target="v1:identity:user", direction="outgoing")

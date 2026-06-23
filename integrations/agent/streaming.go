@@ -239,7 +239,7 @@ func maxStreamingToolLoopIterations() int {
 type turnContext struct {
 	AgentId     string
 	OwnerUserId string
-	SpaceId     string
+	PartitionId     string
 	PlanId      string
 	// ThreadVisibility names which chat thread is dispatching this turn:
 	// "public" for Group-thread dispatches, "private" for per-user
@@ -306,14 +306,14 @@ func (r *Replier) runStreamingToolLoop(
 		PlanId:      turnCtx.PlanId,
 		AgentId:     turnCtx.AgentId,
 		OwnerUserId: turnCtx.OwnerUserId,
-		SpaceId:     turnCtx.SpaceId,
+		PartitionId:     turnCtx.PartitionId,
 	})
 
 	// Charge this turn's LLM calls against the per-conversation + per-plan
 	// cumulative budgets (memql#1144) so a single space or plan-lineage that
 	// loops is latched on its own, without touching other conversations.
 	ctx = memql.ContextWithBudgetScope(ctx,
-		memql.BudgetScopeId("space", turnCtx.SpaceId),
+		memql.BudgetScopeId("space", turnCtx.PartitionId),
 		memql.BudgetScopeId("plan", turnCtx.PlanId))
 
 	start := time.Now()
@@ -1053,7 +1053,7 @@ func parseToolArgs(raw string) map[string]any {
 // "additional property X not allowed."
 //
 // Per-tool routing matters because the field names diverge across
-// tools: requestComputerUseScope expects `spaceId`; canvasPublish
+// tools: requestComputerUseScope expects `partitionId`; canvasPublish
 // expects `space` (matches the v1:copresent:canvasState concept's
 // `space` column name); workerHost / workerComputer / workerStatus
 // don't need space at all. canvasPublish doesn't expose `agentId`
@@ -1067,7 +1067,7 @@ type agentContextStamp struct {
 	StampOwnerUserId bool
 	// SpaceField is the @input field name the tool uses for the
 	// space id. Empty = don't stamp a space at all. The two known
-	// names diverge by tool author choice: `spaceId` (camelCase id
+	// names diverge by tool author choice: `partitionId` (camelCase id
 	// convention) for most agent tools, `space` for canvasPublish
 	// (mirrors the canvasState concept column name).
 	SpaceField string
@@ -1125,19 +1125,19 @@ var agentContextStamps = map[string]agentContextStamp{
 	// (the schema marks both @autoInjected -- LLM-supplied values are not
 	// trusted). taskId stays optional (invocation filing only).
 	"workbenchHost":           {StampAgentId: true, StampPlanId: true},
-	"requestComputerUseScope": {StampAgentId: true, StampOwnerUserId: true, SpaceField: "spaceId"},
+	"requestComputerUseScope": {StampAgentId: true, StampOwnerUserId: true, SpaceField: "partitionId"},
 	// requestUserFeedback parks the ACTIVE Plan, so it needs the
 	// turn-context planId stamped (the LLM never knows its own Plan id);
 	// agentId / ownerUserId scope the mutation's owner attribution and
-	// spaceId targets the canvas card.
-	"requestUserFeedback": {StampAgentId: true, StampOwnerUserId: true, StampPlanId: true, SpaceField: "spaceId"},
+	// partitionId targets the canvas card.
+	"requestUserFeedback": {StampAgentId: true, StampOwnerUserId: true, StampPlanId: true, SpaceField: "partitionId"},
 	// produceArtifact CREATES a new plan (it doesn't park the active one),
 	// so it needs the calling agent, the owning user (-> the new plan's
 	// requestedBy), and the space the plan lives in. No planId stamp -- the
 	// handler mints a fresh one.
-	"produceArtifact": {StampAgentId: true, StampOwnerUserId: true, SpaceField: "spaceId"},
+	"produceArtifact": {StampAgentId: true, StampOwnerUserId: true, SpaceField: "partitionId"},
 	// canvasPublish: no flat agentId / ownerUserId in the schema;
-	// agentId rides inside `actor`. Space is `space`, not `spaceId`.
+	// agentId rides inside `actor`. Space is `space`, not `partitionId`.
 	// StampThreadVisibility carries the Phase 9 visibility-inheritance
 	// rule: per-user Team-thread dispatches stamp visibility=private +
 	// forUserId; Group-thread dispatches leave them unset so the
@@ -1168,8 +1168,8 @@ func injectAgentContext(toolName string, args map[string]any, ctx turnContext) {
 	if stamp.StampOwnerUserId && ctx.OwnerUserId != "" {
 		args["ownerUserId"] = ctx.OwnerUserId
 	}
-	if stamp.SpaceField != "" && ctx.SpaceId != "" {
-		args[stamp.SpaceField] = ctx.SpaceId
+	if stamp.SpaceField != "" && ctx.PartitionId != "" {
+		args[stamp.SpaceField] = ctx.PartitionId
 	}
 	if stamp.StampActor && ctx.AgentId != "" {
 		args["actor"] = map[string]any{
@@ -1218,7 +1218,7 @@ func injectAgentContext(toolName string, args map[string]any, ctx turnContext) {
 // the canvasPublish arg schema (kind/data/importance/space/actor).
 // Ambient / empty cards (no meaningful body) are skipped so the Library
 // isn't polluted with status chrome. Idempotent: outputId is derived
-// deterministically from (ownerUserId, spaceId, title) so a re-publish
+// deterministically from (ownerUserId, partitionId, title) so a re-publish
 // of the same card re-versions the same row. Best-effort: a promotion
 // failure is logged and swallowed and never breaks the turn.
 func (r *Replier) promoteCanvasOutput(ctx context.Context, turnCtx turnContext, args map[string]any) {
@@ -1253,7 +1253,7 @@ func (r *Replier) promoteCanvasOutput(ctx context.Context, turnCtx turnContext, 
 	// the Library list needs.
 	summary := deriveOutputSummary(data, body)
 
-	outputId := deriveGeneratedOutputId("agent_generated", ownerUserId, turnCtx.SpaceId+":"+title)
+	outputId := deriveGeneratedOutputId("agent_generated", ownerUserId, turnCtx.PartitionId+":"+title)
 
 	mutationCtx := withUserActor(ctx, ownerUserId)
 	var b strings.Builder
@@ -1268,8 +1268,8 @@ func (r *Replier) promoteCanvasOutput(ctx context.Context, turnCtx turnContext, 
 	if turnCtx.PlanId != "" {
 		fmt.Fprintf(&b, `, producedByPlanId:%q`, turnCtx.PlanId)
 	}
-	if turnCtx.SpaceId != "" {
-		fmt.Fprintf(&b, `, spaceId:%q`, turnCtx.SpaceId)
+	if turnCtx.PartitionId != "" {
+		fmt.Fprintf(&b, `, partitionId:%q`, turnCtx.PartitionId)
 	}
 	b.WriteString("})")
 

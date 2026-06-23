@@ -81,7 +81,7 @@ type planExecutionRow struct {
 	Kind         string
 	Status       string
 	Goal         string
-	SpaceId      string
+	PartitionId      string
 	OwnerAgentId string
 	RequestedBy  string
 	// StartedAt is the timestamp stamped on the most recent transition INTO
@@ -505,14 +505,14 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId, re
 		}
 	}
 
-	if plan.SpaceId == "" || plan.OwnerAgentId == "" || plan.Goal == "" {
+	if plan.PartitionId == "" || plan.OwnerAgentId == "" || plan.Goal == "" {
 		p.logger.Warn("plan execution: missing required fields on Plan; skipping",
 			"plan_id", planId,
-			"space_id", plan.SpaceId,
+			"partition_id", plan.PartitionId,
 			"agent_id", plan.OwnerAgentId,
 			"goal_present", plan.Goal != "",
 		)
-		p.markPlanFailed(ctx, planId, "plan missing spaceId / ownerAgentId / goal")
+		p.markPlanFailed(ctx, planId, "plan missing partitionId / ownerAgentId / goal")
 		return
 	}
 
@@ -576,7 +576,7 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId, re
 	turnMsg := &memqlv1.AgentGenerateTurnMsg{
 		RequestId: requestId,
 		AgentId:   plan.OwnerAgentId,
-		ScopeId:   plan.SpaceId,
+		ScopeId:   plan.PartitionId,
 		// participantId left empty: the planner doesn't look up the
 		// AI participant (cross-domain concept leak). The agent's
 		// reply lives on Plan.output.reply and the canvas card; no
@@ -1195,8 +1195,8 @@ func planRowsFromExecuteResult(res any) []planExecutionRow {
 		if v, ok := m["goal"].(string); ok {
 			row.Goal = v
 		}
-		if v, ok := m["spaceId"].(string); ok {
-			row.SpaceId = v
+		if v, ok := m["partitionId"].(string); ok {
+			row.PartitionId = v
 		}
 		if v, ok := m["ownerAgentId"].(string); ok {
 			row.OwnerAgentId = v

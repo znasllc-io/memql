@@ -116,14 +116,14 @@ func TestResolveAgentToolSlugsViaBundleShape(t *testing.T) {
 // models the proxied agent-node RECEIVER: the receiving session has NO locally
 // bound voiceAgentScopeId/voiceAgentGaAgentId (those live only on the bff
 // session that handled VoiceAgentSessionStart). Scope must STILL be applied
-// because the bff threaded the spaceId through the ListToolsMsg.
+// because the bff threaded the partitionId through the ListToolsMsg.
 //
 // Pre-fix (today's code) this path read s.voiceAgentScopeId off the receiver
 // session, found it empty, and failed open to the full 517-tool registry. The
 // fix threads the scope through the request and resolves from THAT.
 func TestVoiceAgentScopedToolNamesProxiedReceiver(t *testing.T) {
 	const realId = "v1:agents:agent:assistant-1c65cb0c"
-	const spaceId = "space-1"
+	const partitionId = "space-1"
 
 	// One fake backs both reads the receiver issues: the GA-id resolve off the
 	// threaded space, then the tool-surface read (queryAgentById -> skillIds ->
@@ -142,12 +142,12 @@ func TestVoiceAgentScopedToolNamesProxiedReceiver(t *testing.T) {
 		}
 	}
 
-	t.Run("threaded spaceId scopes the surface even with no local session state", func(t *testing.T) {
+	t.Run("threaded partitionId scopes the surface even with no local session state", func(t *testing.T) {
 		fake := newFake()
-		// Empty local scope (this is the proxied receiver); spaceId arrives
+		// Empty local scope (this is the proxied receiver); partitionId arrives
 		// ONLY via the threaded request.
-		set, _, scoped := voiceAgentScopedToolNamesVia(context.Background(), fake, spaceId, "", nil)
-		require.True(t, scoped, "scope must apply off the THREADED spaceId; failing open here is the #1448 bug")
+		set, _, scoped := voiceAgentScopedToolNamesVia(context.Background(), fake, partitionId, "", nil)
+		require.True(t, scoped, "scope must apply off the THREADED partitionId; failing open here is the #1448 bug")
 		assert.Equal(t, map[string]struct{}{
 			"todosCreate": {},
 			"notesCreate": {},
@@ -162,7 +162,7 @@ func TestVoiceAgentScopedToolNamesProxiedReceiver(t *testing.T) {
 }
 
 // TestStampVoiceAgentScopeOnListTools pins the bff SENDER half of the #1448
-// threading: a voice-agent session stamps its bound (spaceId, gaAgentId) onto
+// threading: a voice-agent session stamps its bound (partitionId, gaAgentId) onto
 // the ListToolsMsg before it is proxied; a non-voice session leaves it empty so
 // the proxied request is unchanged for text/browser callers.
 func TestStampVoiceAgentScopeOnListTools(t *testing.T) {
@@ -184,7 +184,7 @@ func TestStampVoiceAgentScopeOnListTools(t *testing.T) {
 }
 
 // TestStampVoiceAgentScopeOnCallTool pins the bff SENDER half of the CallTool
-// execution-context threading: a voice-agent session stamps its bound spaceId +
+// execution-context threading: a voice-agent session stamps its bound partitionId +
 // GA role onto the CallToolMsg before it is proxied to the agent node, so the
 // agent-node role gate runs against the GA role (not the empty caller role) and
 // the client-tool relay has the voice space. Non-voice callers stay untouched.

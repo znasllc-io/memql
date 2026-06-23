@@ -221,7 +221,7 @@ func extractUseConcepts(content string) []string {
 //
 // The import path always uses "concept" as the basename (the
 // concept files are named concept.memql) and explicitly aliases to
-// the concept name so body references like `space.spaceId` continue
+// the concept name so body references like `space.partitionId` continue
 // to work without re-targeting.
 func resolveConceptPaths(importingFile string, concepts []string, index map[string]string) ([]importEntry, []string) {
 	var entries []importEntry

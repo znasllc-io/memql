@@ -213,7 +213,7 @@ mutation missingCapability mutationLogMissingCapability {
     description     string  @required
     requestedFromPlanId  string
     requestedByAgentId   string
-    spaceId         string
+    partitionId         string
     partitionScope  string
     firstSeenAt     string  @required
     exampleGoal     string
@@ -225,7 +225,7 @@ mutation missingCapability mutationLogMissingCapability {
     args.description
     args.requestedFromPlanId
     args.requestedByAgentId
-    args.spaceId
+    args.partitionId
     args.partitionScope
     args.firstSeenAt
     lastSeenAt: args.firstSeenAt

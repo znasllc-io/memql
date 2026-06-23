@@ -18,7 +18,7 @@ import (
 // Regression suite for memql#1706: first-class event-context binding.
 //
 // Every event-trigger Logic reads the triggering event through its declared
-// `event` input (e.g. `args.event.payload.spaceId`). The LogicRunner must
+// `event` input (e.g. `args.event.payload.partitionId`). The LogicRunner must
 // thread that event into the per-step argument-resolution scope so the
 // references resolve to their event-derived values inside the NESTED steps --
 // not to empty/undefined (the #1706 failure shape, where the first nested
@@ -104,14 +104,14 @@ func TestEventContextThreadsIntoNestedSteps(t *testing.T) {
 		{
 			logic: "logicVoiceMigrationOnSecondHuman",
 			event: map[string]any{"topic": "node.created", "kind": "node.created", "payload": map[string]any{
-				"id": "user-2", "activeSpaceId": "space-xyz",
+				"id": "user-2", "activePartitionId": "space-xyz",
 			}},
 			wantValues: []string{"space-xyz"},
 		},
 		{
 			logic: "logicConflictDetection",
 			event: map[string]any{"topic": "node.created", "kind": "node.created", "payload": map[string]any{
-				"id": "rec-1", "spaceId": "space-1", "recordType": "contact",
+				"id": "rec-1", "partitionId": "space-1", "recordType": "contact",
 				"naturalKeyField": "email", "naturalKeyValue": "a@b.io",
 			}},
 			wantValues: []string{"space-1", "contact", "a@b.io"},
@@ -119,7 +119,7 @@ func TestEventContextThreadsIntoNestedSteps(t *testing.T) {
 		{
 			logic: "logicGenerateResponse",
 			event: map[string]any{"topic": "cognition.response.requested", "kind": "ai", "payload": map[string]any{
-				"utteranceId": "utt-1", "siParticipantId": "p-1", "spaceId": "space-1",
+				"utteranceId": "utt-1", "siParticipantId": "p-1", "partitionId": "space-1",
 				"agentId": "a-1", "promptTemplateId": "agentReply", "promptData": map[string]any{},
 			}},
 			wantValues: []string{"utt-1", "p-1"},

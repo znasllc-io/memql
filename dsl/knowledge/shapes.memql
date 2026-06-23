@@ -11,7 +11,7 @@ shape document documentFull {
   row.id
   payload.attachmentId
   payload.planId
-  payload.spaceId
+  payload.partitionId
   payload.fileName
   payload.mimeType
   payload.format

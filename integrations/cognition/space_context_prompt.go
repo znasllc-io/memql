@@ -8,12 +8,12 @@ import (
 
 // getSpaceContextForPrompt returns the latest space context object for prompt inputs.
 // The returned object is JSON-friendly and safe to pass into ai() prompt templates.
-func (c *CognitionIntegration) getSpaceContextForPrompt(ctx context.Context, spaceId string) map[string]any {
+func (c *CognitionIntegration) getSpaceContextForPrompt(ctx context.Context, partitionId string) map[string]any {
 	if c == nil || c.engine == nil {
 		return nil
 	}
-	spaceId = strings.TrimSpace(spaceId)
-	if spaceId == "" {
+	partitionId = strings.TrimSpace(partitionId)
+	if partitionId == "" {
 		return nil
 	}
 
@@ -25,7 +25,7 @@ func (c *CognitionIntegration) getSpaceContextForPrompt(ctx context.Context, spa
 	// directives. Downstream extractDataFromResult sees the same
 	// spaceContextFull-shaped result so the type-switch below is
 	// unchanged. Unblocks #250.
-	query := fmt.Sprintf(`queryLatestSpaceContextForSpace({spaceId: %s})`, escapeJSONString(spaceId))
+	query := fmt.Sprintf(`queryLatestSpaceContextForSpace({partitionId: %s})`, escapeJSONString(partitionId))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		return nil

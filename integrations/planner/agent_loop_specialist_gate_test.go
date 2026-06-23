@@ -108,7 +108,7 @@ func TestGateSpecialistAction_MultiStepProceeds(t *testing.T) {
 }
 
 // TestGateSpecialistAction_PublishesApprovalCard is memql#852 Gap 1: a
-// gated action whose Plan has a spaceId must, in addition to parking,
+// gated action whose Plan has a partitionId must, in addition to parking,
 // publish the plan.specialistApprovalRequested canvas card the copresent
 // SpecialistApprovalCard renders. The card carries the planId + action so
 // the frontend heading + approve flow target the right Plan.
@@ -116,7 +116,7 @@ func TestGateSpecialistAction_PublishesApprovalCard(t *testing.T) {
 	planRow := map[string]any{
 		"output": []any{map[string]any{
 			"id": "plan-3", "kind": "produceArtifact", "status": "planning",
-			"goal": "translate documents to French", "spaceId": "v1:cognition:space:s1",
+			"goal": "translate documents to French", "partitionId": "v1:cognition:space:s1",
 			"ownerAgentId": "v1:agents:agent:ga", "requestedBy": "v1:identity:user:u1",
 		}},
 	}
@@ -148,7 +148,7 @@ func TestGateSpecialistAction_PublishesApprovalCard(t *testing.T) {
 }
 
 // TestGateSpecialistAction_ParksWithoutCardWhenNoSpace verifies the card
-// publish is best-effort: a gated Plan with no spaceId still parks (no
+// publish is best-effort: a gated Plan with no partitionId still parks (no
 // render surface to attach to, so no card) -- the park must not be undone.
 func TestGateSpecialistAction_ParksWithoutCardWhenNoSpace(t *testing.T) {
 	planRow := map[string]any{
@@ -166,13 +166,13 @@ func TestGateSpecialistAction_ParksWithoutCardWhenNoSpace(t *testing.T) {
 
 	handled, err := l.gateSpecialistAction(context.Background(), "plan-4", "createSpecialist")
 	if err != nil || !handled {
-		t.Fatalf("gated createSpecialist must still be handled (parked) without a spaceId: handled=%v err=%v", handled, err)
+		t.Fatalf("gated createSpecialist must still be handled (parked) without a partitionId: handled=%v err=%v", handled, err)
 	}
 	exec, _, _ := fe.snapshot()
 	if countContains(exec, "specialist_approval_required") != 1 {
 		t.Fatalf("must still park to awaitingFeedback even with no card, got %d", countContains(exec, "specialist_approval_required"))
 	}
 	if countContains(exec, "mutationCreateCanvasState") != 0 {
-		t.Fatalf("no spaceId -> no canvas card, got %d mutationCreateCanvasState calls", countContains(exec, "mutationCreateCanvasState"))
+		t.Fatalf("no partitionId -> no canvas card, got %d mutationCreateCanvasState calls", countContains(exec, "mutationCreateCanvasState"))
 	}
 }

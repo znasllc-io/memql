@@ -11,7 +11,7 @@ import (
 // Logic functions (memql#1706).
 //
 // An event-triggered Logic reads the triggering event through its declared
-// `event` input -- e.g. `args.event.payload.spaceId`. The LogicRunner seeds
+// `event` input -- e.g. `args.event.payload.partitionId`. The LogicRunner seeds
 // that input into the per-step argument-resolution scope ONLY when the caller
 // passes an `event` arg, which in turn only happens reliably when the Logic
 // DECLARES `event` in its `args { }` block (the automation step that fires it

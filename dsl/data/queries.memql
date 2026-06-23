@@ -10,11 +10,11 @@ use data.concepts.{ log, policy, record }
 @description("Find confirmed records that may conflict with a new record by natural key + record type")
 query record queryDetectConflicts {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
     naturalKeyValue  string  @required
     recordType  string  @required
   }
-  filter  traitIsConfirmed && payload.spaceId==args.spaceId && payload.recordType==args.recordType && payload.naturalKeyValue==args.naturalKeyValue
+  filter  traitIsConfirmed && payload.partitionId==args.partitionId && payload.recordType==args.recordType && payload.naturalKeyValue==args.naturalKeyValue
   shape   recordFull
 }
 
@@ -25,18 +25,18 @@ query record queryDetectConflicts {
 //
 // Returns the active validation policy for a given record type.
 // If a space-specific policy exists, it takes precedence over the
-// global policy (where spaceId is null).
+// global policy (where partitionId is null).
 //
 // Arguments:
 //   targetRecordType (string, required) - Record type to look up policy for
-//   spaceId (string, optional)          - Space to check for space-specific policy
+//   partitionId (string, optional)          - Space to check for space-specific policy
 //
 // Returns:
 //   Array of matching policies (space-specific first, then global)
 //
 // Usage:
 //   policy({ targetRecordType: "vehicle" })                          // Global policy
-//   policy({ targetRecordType: "vehicle", spaceId: "space-123" })    // Space-specific or global
+//   policy({ targetRecordType: "vehicle", partitionId: "space-123" })    // Space-specific or global
 //
 
 @enabled
@@ -45,9 +45,9 @@ query record queryDetectConflicts {
 query policy queryPolicy {
   args {
     targetRecordType  string  @required
-    spaceId  string
+    partitionId  string
   }
-  filter  traitIsActiveRecord && payload.targetRecordType==args.targetRecordType && when(args.spaceId) { payload.spaceId==args.spaceId }
+  filter  traitIsActiveRecord && payload.targetRecordType==args.targetRecordType && when(args.partitionId) { payload.partitionId==args.partitionId }
   shape   policyFull
 }
 
@@ -60,7 +60,7 @@ query policy queryPolicy {
 // space, record type, and import source.
 //
 // Arguments:
-//   spaceId (string, optional)         - Filter by space ID
+//   partitionId (string, optional)         - Filter by space ID
 //   recordType (string, optional)      - Filter by record type (e.g., 'vehicle', 'bird')
 //   validationState (string, optional) - Filter by state: 'draft', 'checked', 'confirmed'
 //   importSource (string, optional)    - Filter by import source
@@ -71,20 +71,20 @@ query policy queryPolicy {
 // Usage:
 //   recordsByState()                                              // All active records
 //   recordsByState({ validationState: "draft" })                  // All draft records
-//   recordsByState({ spaceId: "space-123", validationState: "confirmed" })  // Confirmed in a space
-//   recordsByState({ spaceId: "space-123", recordType: "vehicle" })         // By type in a space
+//   recordsByState({ partitionId: "space-123", validationState: "confirmed" })  // Confirmed in a space
+//   recordsByState({ partitionId: "space-123", recordType: "vehicle" })         // By type in a space
 //
 
 @enabled
-@description("Returns active data records. Optional filters: spaceId, recordType, validationState, importSource")
+@description("Returns active data records. Optional filters: partitionId, recordType, validationState, importSource")
 query record queryRecordsByState {
   args {
-    spaceId  string
+    partitionId  string
     recordType  string
     validationState  string
     importSource  string
   }
-  filter  traitIsActiveRecord && when(args.spaceId) { payload.spaceId==args.spaceId } && when(args.recordType) { payload.recordType==args.recordType } && when(args.validationState) { payload.validationState==args.validationState } && when(args.importSource) { payload.importSource==args.importSource }
+  filter  traitIsActiveRecord && when(args.partitionId) { payload.partitionId==args.partitionId } && when(args.recordType) { payload.recordType==args.recordType } && when(args.validationState) { payload.validationState==args.validationState } && when(args.importSource) { payload.importSource==args.importSource }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -106,7 +106,7 @@ query record queryRecordsByState {
 // pass the appropriate includeChecked flag.
 //
 // Arguments:
-//   spaceId (string, optional)         - Filter by space ID
+//   partitionId (string, optional)         - Filter by space ID
 //   recordType (string, optional)      - Filter by record type
 //   includeChecked (bool, optional)    - Whether to include checked records (based on policy)
 //
@@ -114,8 +114,8 @@ query record queryRecordsByState {
 //   Array of usable data records
 //
 // Usage:
-//   usableRecords({ spaceId: "space-123" })                       // Confirmed only (default)
-//   usableRecords({ spaceId: "space-123", includeChecked: true })  // Checked + confirmed
+//   usableRecords({ partitionId: "space-123" })                       // Confirmed only (default)
+//   usableRecords({ partitionId: "space-123", includeChecked: true })  // Checked + confirmed
 //
 // Implementation note: Because the MemQL parser does not yet support
 // if-expression assignment (:=), this function always queries using
@@ -128,10 +128,10 @@ query record queryRecordsByState {
 @description("Returns usable data records (confirmed, or checked if policy allows)")
 query record queryUsableRecords {
   args {
-    spaceId  string
+    partitionId  string
     recordType  string
   }
-  filter  traitIsUsable && when(args.spaceId) { payload.spaceId==args.spaceId } && when(args.recordType) { payload.recordType==args.recordType }
+  filter  traitIsUsable && when(args.partitionId) { payload.partitionId==args.partitionId } && when(args.recordType) { payload.recordType==args.recordType }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -150,7 +150,7 @@ query record queryUsableRecords {
 //
 // Arguments:
 //   recordId (string, optional) - Filter by specific record
-//   spaceId (string, optional)  - Filter by space
+//   partitionId (string, optional)  - Filter by space
 //   action (string, optional)   - Filter by action type: 'check', 'confirm', 'revert'
 //
 // Returns:
@@ -158,19 +158,19 @@ query record queryUsableRecords {
 //
 // Usage:
 //   validationLog({ recordId: "record-uuid" })                      // All actions for a record
-//   validationLog({ spaceId: "space-123" })                         // All actions in a space
-//   validationLog({ spaceId: "space-123", action: "confirm" })      // Confirmations in a space
+//   validationLog({ partitionId: "space-123" })                         // All actions in a space
+//   validationLog({ partitionId: "space-123", action: "confirm" })      // Confirmations in a space
 //
 
 @enabled
-@description("Returns validation state change history. Optional filters: recordId, spaceId, action")
+@description("Returns validation state change history. Optional filters: recordId, partitionId, action")
 query log queryValidationLog {
   args {
     recordId  string
-    spaceId  string
+    partitionId  string
     action  string
   }
-  filter  traitIsActiveRecord && when(args.recordId) { payload.recordId==args.recordId } && when(args.spaceId) { payload.spaceId==args.spaceId } && when(args.action) { payload.action==args.action }
+  filter  traitIsActiveRecord && when(args.recordId) { payload.recordId==args.recordId } && when(args.partitionId) { payload.partitionId==args.partitionId } && when(args.action) { payload.action==args.action }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.

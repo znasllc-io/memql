@@ -32,7 +32,7 @@ const factoryResultConcept = "integration:agents:factory-result"
 //
 //	goal         string  required -- the user-stated goal
 //	ownerUserId  string  required -- target agent owner
-//	spaceId      string  optional -- forwarded to the analysis prompt
+//	partitionId      string  optional -- forwarded to the analysis prompt
 //	planId       string  optional -- planner-driven callers pass the
 //	                                  originating v1:planner:plan.id so
 //	                                  createAgent can stamp

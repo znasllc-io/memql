@@ -847,7 +847,7 @@ func (c *CognitionIntegration) emitUnmetCapability(
 	}
 
 	payload := map[string]any{
-		"spaceId":         strings.TrimSpace(utterance.ScopeId),
+		"partitionId":         strings.TrimSpace(utterance.ScopeId),
 		"utteranceId":     strings.TrimSpace(utterance.ID),
 		"utterance":       strings.TrimSpace(utterance.Text),
 		"speakerName":     strings.TrimSpace(utterance.SpeakerName),
@@ -892,8 +892,8 @@ func (c *CognitionIntegration) emitUnmetCapability(
 	// Best-effort: failures here log but don't abort the routing
 	// path. The unmet event above is the canonical signal; the user-
 	// facing notice is a UX courtesy on top.
-	spaceIdStr := strings.TrimSpace(utterance.ScopeId)
-	if spaceIdStr != "" {
+	partitionIdStr := strings.TrimSpace(utterance.ScopeId)
+	if partitionIdStr != "" {
 		var notice string
 		switch trigger {
 		case "no_fit_no_fallback":
@@ -910,19 +910,19 @@ func (c *CognitionIntegration) emitUnmetCapability(
 			notice = ""
 		}
 		if notice != "" && c != nil {
-			if insertErr := c.insertSystemActionUtterance(ctx, spaceIdStr, "", "unmet_capability", notice, map[string]string{
+			if insertErr := c.insertSystemActionUtterance(ctx, partitionIdStr, "", "unmet_capability", notice, map[string]string{
 				"trigger":  trigger,
 				"severity": outcome.Severity,
 			}); insertErr != nil && c.Logger != nil {
 				c.Logger.Debug("cognition: failed to insert unmet-capability notice (non-fatal)",
-					"error", insertErr, "spaceId", spaceIdStr, "trigger", trigger)
+					"error", insertErr, "partitionId", partitionIdStr, "trigger", trigger)
 			}
 		}
 	}
 
 	if c.Logger != nil {
 		c.Logger.Info("cognition: unmet capability",
-			"spaceId", payload["spaceId"],
+			"partitionId", payload["partitionId"],
 			"severity", outcome.Severity,
 			"turnMode", outcome.TurnMode,
 			"trigger", trigger,

@@ -39,11 +39,11 @@ func parseLogicForTest(t *testing.T, src, name string) (*languageParser.Function
 
 func TestValidateLogicEventFields_AcceptsDeclared(t *testing.T) {
 	src := `@enabled
-@eventField("spaceId", "siParticipantId")
+@eventField("partitionId", "siParticipantId")
 logic logicOk {
   args { event object @required }
   body {
-    return noop({ a: args.event.payload.spaceId, b: args.event.payload.siParticipantId })
+    return noop({ a: args.event.payload.partitionId, b: args.event.payload.siParticipantId })
   }
 }`
 	fd, raw := parseLogicForTest(t, src, "logicOk")
@@ -54,11 +54,11 @@ logic logicOk {
 
 func TestValidateLogicEventFields_RejectsUnknown(t *testing.T) {
 	src := `@enabled
-@eventField("spaceId")
+@eventField("partitionId")
 logic logicBad {
   args { event object @required }
   body {
-    return noop({ a: args.event.payload.spaceId, b: args.event.payload.typooo })
+    return noop({ a: args.event.payload.partitionId, b: args.event.payload.typooo })
   }
 }`
 	fd, raw := parseLogicForTest(t, src, "logicBad")
@@ -105,12 +105,12 @@ logic logicNested {
 }
 
 func TestValidateLogicEventFields_PayloadPrefixedDeclaration(t *testing.T) {
-	// `@eventField("payload.spaceId")` normalizes to head `spaceId`.
+	// `@eventField("payload.partitionId")` normalizes to head `partitionId`.
 	src := `@enabled
-@eventField("payload.spaceId")
+@eventField("payload.partitionId")
 logic logicPrefixed {
   args { event object @required }
-  body { return noop({ a: args.event.payload.spaceId }) }
+  body { return noop({ a: args.event.payload.partitionId }) }
 }`
 	fd, raw := parseLogicForTest(t, src, "logicPrefixed")
 	if err := validateLogicEventFields(raw, fd); err != nil {
@@ -120,10 +120,10 @@ logic logicPrefixed {
 
 func TestNormalizeEventFieldHead(t *testing.T) {
 	cases := map[string]string{
-		"spaceId":          "spaceId",
-		"payload.spaceId":  "spaceId",
+		"partitionId":          "partitionId",
+		"payload.partitionId":  "partitionId",
 		"payload.node.type": "node",
-		"  spaceId  ":      "spaceId",
+		"  partitionId  ":      "partitionId",
 	}
 	for in, want := range cases {
 		if got := normalizeEventFieldHead(in); got != want {

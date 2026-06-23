@@ -15,7 +15,7 @@ shape log logFull {
   payload.toState
   payload.identityId
   payload.identityType
-  payload.spaceId
+  payload.partitionId
   payload.note
   payload.active
   row.createdAt
@@ -26,7 +26,7 @@ shape log logFull {
 shape policy policyFull {
   row.id
   payload.targetRecordType
-  payload.spaceId
+  payload.partitionId
   payload.requiredChecks
   payload.requiredConfirmations
   payload.checkedDataUsable
@@ -39,7 +39,7 @@ shape policy policyFull {
 @description("Comprehensive data record projection with validation lifecycle fields")
 shape record recordFull {
   row.id
-  payload.spaceId
+  payload.partitionId
   payload.validationState
   payload.recordType
   payload.label

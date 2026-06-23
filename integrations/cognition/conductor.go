@@ -258,7 +258,7 @@ func conductorTruncate(s string, n int) string {
 type ConductorState struct {
 	mu sync.Mutex
 
-	SpaceId string
+	PartitionId string
 
 	// HumanIsTyping is set when a typing-indicator event arrives and
 	// cleared when the next utterance lands. Phase 3 wires this into
@@ -307,9 +307,9 @@ type ConductorState struct {
 }
 
 // NewConductorState creates an empty per-space conductor state.
-func NewConductorState(spaceId string) *ConductorState {
+func NewConductorState(partitionId string) *ConductorState {
 	return &ConductorState{
-		SpaceId:               spaceId,
+		PartitionId:               partitionId,
 		AgentsSpokenThisCycle: make(map[string]int),
 	}
 }
@@ -453,12 +453,12 @@ func NewConductorRegistry() *ConductorRegistry {
 
 // GetOrCreate returns the conductor state for the given space, creating
 // one on first call.
-func (r *ConductorRegistry) GetOrCreate(spaceId string) *ConductorState {
+func (r *ConductorRegistry) GetOrCreate(partitionId string) *ConductorState {
 	if r == nil {
 		return nil
 	}
 	r.mu.RLock()
-	if s, ok := r.states[spaceId]; ok {
+	if s, ok := r.states[partitionId]; ok {
 		r.mu.RUnlock()
 		return s
 	}
@@ -467,34 +467,34 @@ func (r *ConductorRegistry) GetOrCreate(spaceId string) *ConductorState {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// Re-check under write lock.
-	if s, ok := r.states[spaceId]; ok {
+	if s, ok := r.states[partitionId]; ok {
 		return s
 	}
-	s := NewConductorState(spaceId)
-	r.states[spaceId] = s
+	s := NewConductorState(partitionId)
+	r.states[partitionId] = s
 	return s
 }
 
 // Get returns the conductor state for the given space, or nil if not
 // yet created.
-func (r *ConductorRegistry) Get(spaceId string) *ConductorState {
+func (r *ConductorRegistry) Get(partitionId string) *ConductorState {
 	if r == nil {
 		return nil
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.states[spaceId]
+	return r.states[partitionId]
 }
 
 // Remove drops the state for the given space. Called when the space is
 // closed.
-func (r *ConductorRegistry) Remove(spaceId string) {
+func (r *ConductorRegistry) Remove(partitionId string) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.states, spaceId)
+	delete(r.states, partitionId)
 }
 
 // -----------------------------------------------------------------------------
@@ -716,11 +716,11 @@ func directiveFromContext(ctx context.Context) *AgentParticipationDirective {
 // conductorStateOrNil returns the per-space conductor state if it
 // exists, or nil. Used by the chime-in chain to read state without
 // blocking on registry initialisation.
-func conductorStateOrNil(c *CognitionIntegration, spaceId string) *ConductorState {
+func conductorStateOrNil(c *CognitionIntegration, partitionId string) *ConductorState {
 	if c == nil || c.conductors == nil {
 		return nil
 	}
-	return c.conductors.Get(spaceId)
+	return c.conductors.Get(partitionId)
 }
 
 // queryAgentIsKnownToUser runs the cross-space "have we met before?"

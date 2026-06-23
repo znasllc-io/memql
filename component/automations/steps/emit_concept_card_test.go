@@ -37,7 +37,7 @@ func TestEmitConceptCardExecutor_RequiresEngine(t *testing.T) {
 		Type: automations.StepTypeEmitConceptCard,
 		EmitConceptCard: &automations.EmitConceptCardStepConfig{
 			CardType:   "lead_captured",
-			SpaceId:    "test-space",
+			PartitionId:    "test-space",
 			ConceptRef: "v1:crm:lead:test-lead",
 			Data: map[string]any{
 				"name":  "Test Lead",
@@ -68,7 +68,7 @@ func TestEmitConceptCardExecutor_EvaluatesExpressions(t *testing.T) {
 		Type: automations.StepTypeEmitConceptCard,
 		EmitConceptCard: &automations.EmitConceptCardStepConfig{
 			CardType:   "lead_captured",
-			SpaceId:    "$event.payload.spaceId",
+			PartitionId:    "$event.payload.partitionId",
 			ConceptRef: "$steps.upsertLead.result.Bundle.nodes.0.id",
 			Data: map[string]any{
 				"name":  "$steps.extractLead.result[0].extraction.name",
@@ -80,7 +80,7 @@ func TestEmitConceptCardExecutor_EvaluatesExpressions(t *testing.T) {
 	eval := automations.NewEvaluator()
 	eval.SetCustom("event", map[string]any{
 		"payload": map[string]any{
-			"spaceId": "space-123",
+			"partitionId": "space-123",
 		},
 	})
 	eval.SetStepResult("upsertLead", &automations.StepResult{

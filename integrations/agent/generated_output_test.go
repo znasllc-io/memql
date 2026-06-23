@@ -64,7 +64,7 @@ func (discard) Write(p []byte) (int, error) { return len(p), nil }
 func TestPromoteCanvasOutput_SkipsEmptyCard(t *testing.T) {
 	ce := &captureEngine{}
 	r := newTestReplier(ce)
-	tc := turnContext{OwnerUserId: "user-1", AgentId: "agent-1", SpaceId: "space-1"}
+	tc := turnContext{OwnerUserId: "user-1", AgentId: "agent-1", PartitionId: "space-1"}
 
 	// No data at all.
 	r.promoteCanvasOutput(context.Background(), tc, map[string]any{})
@@ -85,7 +85,7 @@ func TestPromoteCanvasOutput_SkipsEmptyCard(t *testing.T) {
 func TestPromoteCanvasOutput_SkipsNoOwner(t *testing.T) {
 	ce := &captureEngine{}
 	r := newTestReplier(ce)
-	tc := turnContext{SpaceId: "space-1"} // no OwnerUserId
+	tc := turnContext{PartitionId: "space-1"} // no OwnerUserId
 	r.promoteCanvasOutput(context.Background(), tc, map[string]any{
 		"data": map[string]any{"title": "T", "source": "real body"},
 	})
@@ -97,7 +97,7 @@ func TestPromoteCanvasOutput_SkipsNoOwner(t *testing.T) {
 func TestPromoteCanvasOutput_PromotesRealCard(t *testing.T) {
 	ce := &captureEngine{}
 	r := newTestReplier(ce)
-	tc := turnContext{OwnerUserId: "user-1", AgentId: "agent-1", SpaceId: "space-1", PlanId: "plan-1"}
+	tc := turnContext{OwnerUserId: "user-1", AgentId: "agent-1", PartitionId: "space-1", PlanId: "plan-1"}
 	r.promoteCanvasOutput(context.Background(), tc, map[string]any{
 		"data": map[string]any{"title": "Report", "source": "# Heading\nbody"},
 	})
@@ -112,7 +112,7 @@ func TestPromoteCanvasOutput_PromotesRealCard(t *testing.T) {
 		`title:"Report"`,
 		`producedByAgentId:"agent-1"`,
 		`producedByPlanId:"plan-1"`,
-		`spaceId:"space-1"`,
+		`partitionId:"space-1"`,
 		// memql#1207: the summary is derived from the markdown heading.
 		`summary:"Heading"`,
 	} {
@@ -125,7 +125,7 @@ func TestPromoteCanvasOutput_PromotesRealCard(t *testing.T) {
 // TestPromoteCanvasOutput_EmitsDerivedSummary verifies the promotion path
 // stamps a derived summary (memql#1207) under each derivation branch.
 func TestPromoteCanvasOutput_EmitsDerivedSummary(t *testing.T) {
-	tc := turnContext{OwnerUserId: "user-1", SpaceId: "space-1"}
+	tc := turnContext{OwnerUserId: "user-1", PartitionId: "space-1"}
 	cases := []struct {
 		name string
 		data map[string]any

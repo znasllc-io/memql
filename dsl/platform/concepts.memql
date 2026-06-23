@@ -97,7 +97,7 @@ concept missingCapability {
   description     string  @required @description("Human-readable description: what the platform was being asked to do that it couldn't. Surfaced in the product backlog view.")
   requestedFromPlanId  string @description("v1:planner:plan.id where the gap was detected. Lets the platform team trace back to 'what was the user trying to accomplish when we hit this wall'.")
   requestedByAgentId   string @description("v1:agents:agent.id of the agent (typically the Planner Agent) that logged the gap. Empty for system-level detection.")
-  spaceId         string  @description("Optional space scope where the gap was detected. Useful for attributing 'this gap blocked work in space X'.")
+  partitionId         string  @description("Optional space scope where the gap was detected. Useful for attributing 'this gap blocked work in space X'.")
   partitionScope  string  @description("Partition where the gap was detected. Empty = unknown. Helps de-duplicate platform-wide vs tenant-specific gaps.")
   sightingCount   int     @default("1") @description("How many times this gap has been logged. New sightings of the same (kind, capability) increment rather than creating new rows. Drives 'most-requested capability' prioritization.")
   firstSeenAt     datetime @description("When the first sighting was logged.")

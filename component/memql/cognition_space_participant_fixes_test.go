@@ -133,7 +133,7 @@ func TestArchiveSpaceStampsArchivedAt(t *testing.T) {
 	// Caller deliberately omits archivedAt (and ownerUserId) -- the
 	// minimal-payload shape #1637 calls out as never surfacing.
 	mutation, err := eng.renderMutationTemplate(ctx, fn.MutationTemplate, map[string]any{
-		"spaceId": "space-001",
+		"partitionId": "space-001",
 		"payload": map[string]any{
 			"name":   "Quarterly Review",
 			"status": "archived",
@@ -163,7 +163,7 @@ func TestArchiveSpacePreservesCallerArchivedAt(t *testing.T) {
 	})
 	const callerArchivedAt = "2026-01-02T03:04:05Z"
 	mutation, err := eng.renderMutationTemplate(ctx, fn.MutationTemplate, map[string]any{
-		"spaceId": "space-001",
+		"partitionId": "space-001",
 		"payload": map[string]any{
 			"status":     "archived",
 			"active":     false,
@@ -202,7 +202,7 @@ func TestActiveHumanParticipantQueryMatchesActiveHuman(t *testing.T) {
 // TestTouchSessionBindsToAuthSession pins memql#1639.
 //
 // mutationTouchSession is meant to heartbeat a v1:identity:authSession but
-// was bound to v1:cognition:session, whose required participantId/spaceId
+// was bound to v1:cognition:session, whose required participantId/partitionId
 // an auth session never carries -- so validation was unsatisfiable. The fix
 // rebinds it to v1:identity:authSession.
 func TestTouchSessionBindsToAuthSession(t *testing.T) {
@@ -236,7 +236,7 @@ func TestPresenceAutoIdIsValidShortId(t *testing.T) {
 	// Auto-derived id (no presenceId passed): must be colon-free.
 	auto, err := eng.renderMutationTemplate(ctx, fn.MutationTemplate, map[string]any{
 		"participantId": participantID,
-		"spaceId":       "v1:cognition:space:room1",
+		"partitionId":       "v1:cognition:space:room1",
 		"state":         "thinking",
 		"label":         "Thinking…",
 	})
@@ -250,7 +250,7 @@ func TestPresenceAutoIdIsValidShortId(t *testing.T) {
 	// Determinism: same participant -> same id (latest-wins reads).
 	auto2, err := eng.renderMutationTemplate(ctx, fn.MutationTemplate, map[string]any{
 		"participantId": participantID,
-		"spaceId":       "v1:cognition:space:room1",
+		"partitionId":       "v1:cognition:space:room1",
 		"state":         "responding",
 		"label":         "Responding…",
 	})
@@ -261,7 +261,7 @@ func TestPresenceAutoIdIsValidShortId(t *testing.T) {
 	explicit, err := eng.renderMutationTemplate(ctx, fn.MutationTemplate, map[string]any{
 		"presenceId":    "presence-custom-1",
 		"participantId": participantID,
-		"spaceId":       "v1:cognition:space:room1",
+		"partitionId":       "v1:cognition:space:room1",
 		"state":         "idle",
 		"label":         "Idle",
 	})

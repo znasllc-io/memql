@@ -28,8 +28,8 @@ use identity.concepts.{ user }
 
 mutation participant joinSpace {
   insert {
-    id: concat("participant-", hash(concat(canonicalId(args.spaceId, space), ":", canonicalId(args.userId, user))))
-    spaceId: canonicalId(args.spaceId, space)
+    id: concat("participant-", hash(concat(canonicalId(args.partitionId, space), ":", canonicalId(args.userId, user))))
+    partitionId: canonicalId(args.partitionId, space)
   }
 }`
 
@@ -37,13 +37,13 @@ mutation participant joinSpace {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if !strings.Contains(got, `canonicalId(args.spaceId, "v1:cognition:space")`) {
+	if !strings.Contains(got, `canonicalId(args.partitionId, "v1:cognition:space")`) {
 		t.Fatalf("space ref not resolved to the canonical-id string form:\n%s", got)
 	}
 	if !strings.Contains(got, `canonicalId(args.userId, "v1:identity:user")`) {
 		t.Fatalf("user ref not resolved:\n%s", got)
 	}
-	if strings.Contains(got, "canonicalId(args.spaceId, space)") {
+	if strings.Contains(got, "canonicalId(args.partitionId, space)") {
 		t.Fatalf("typed form should have been rewritten away:\n%s", got)
 	}
 }
@@ -51,7 +51,7 @@ mutation participant joinSpace {
 // TestResolveCanonicalIdConceptRefs_StringFormUntouched proves the change is
 // additive: the existing quoted string form passes through unchanged.
 func TestResolveCanonicalIdConceptRefs_StringFormUntouched(t *testing.T) {
-	src := `filter  payload.spaceId==canonicalId(args.spaceId, "v1:cognition:space") && traitIsActiveRecord`
+	src := `filter  payload.partitionId==canonicalId(args.partitionId, "v1:cognition:space") && traitIsActiveRecord`
 	got, err := cidResolver(t).ResolveCanonicalIdConceptRefs(src)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -80,7 +80,7 @@ mutation x y { insert { id: canonicalId(args.id, widget) } }`
 // (e.g. an @description).
 func TestResolveCanonicalIdConceptRefs_SkipsStringLiteralProse(t *testing.T) {
 	src := `use cognition.concepts.{ space }
-@description("derive the id via canonicalId(args.spaceId, space) and hash it")
+@description("derive the id via canonicalId(args.partitionId, space) and hash it")
 query space q { filter id==args.x }`
 	got, err := cidResolver(t).ResolveCanonicalIdConceptRefs(src)
 	if err != nil {

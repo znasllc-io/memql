@@ -17,7 +17,7 @@ import (
 // TestCanonicalizeRelationshipComparisons exercises the engine's
 // query-time auto-canon pre-walk. Symmetric to
 // canonicalizeRelationshipFields (insert side); without this pass, a
-// query with `payload.spaceId == "bare-slug"` would miss canonical-
+// query with `payload.partitionId == "bare-slug"` would miss canonical-
 // stored rows and the daily-space presence panel would render empty
 // on first load.
 func TestCanonicalizeRelationshipComparisons(t *testing.T) {
@@ -27,16 +27,16 @@ func TestCanonicalizeRelationshipComparisons(t *testing.T) {
 		"v1:cognition:participant": {
 			Name: "v1:cognition:participant",
 			Relationships: []memoryNodes.RelationshipDefinition{
-				{Type: "parent", Field: "spaceId", TargetConcept: "v1:cognition:space", Direction: "outgoing"},
+				{Type: "parent", Field: "partitionId", TargetConcept: "v1:cognition:space", Direction: "outgoing"},
 				{Type: "parent", Field: "userId", TargetConcept: "v1:identity:user", Direction: "outgoing"},
 			},
 		},
 	})
 	ctx := context.Background()
 
-	t.Run("rewrites payload.spaceId with bare slug to canonical", func(t *testing.T) {
+	t.Run("rewrites payload.partitionId with bare slug to canonical", func(t *testing.T) {
 		expr := &ComparisonExpression{
-			Field:    FieldReference{Parts: []string{"payload", "spaceId"}, Raw: "payload.spaceId"},
+			Field:    FieldReference{Parts: []string{"payload", "partitionId"}, Raw: "payload.partitionId"},
 			Operator: OpEq,
 			Value:    "daily-9dc3b323-2026-05-06",
 		}
@@ -61,7 +61,7 @@ func TestCanonicalizeRelationshipComparisons(t *testing.T) {
 
 	t.Run("already-canonical RHS is unchanged (no AST clone)", func(t *testing.T) {
 		expr := &ComparisonExpression{
-			Field:    FieldReference{Parts: []string{"payload", "spaceId"}, Raw: "payload.spaceId"},
+			Field:    FieldReference{Parts: []string{"payload", "partitionId"}, Raw: "payload.partitionId"},
 			Operator: OpEq,
 			Value:    "v1:cognition:space:daily-abc",
 		}
@@ -93,7 +93,7 @@ func TestCanonicalizeRelationshipComparisons(t *testing.T) {
 		expr := &LogicalExpression{
 			Op: LogicalAnd,
 			Left: &ComparisonExpression{
-				Field:    FieldReference{Parts: []string{"payload", "spaceId"}, Raw: "payload.spaceId"},
+				Field:    FieldReference{Parts: []string{"payload", "partitionId"}, Raw: "payload.partitionId"},
 				Operator: OpEq,
 				Value:    "daily-abc",
 			},
@@ -111,7 +111,7 @@ func TestCanonicalizeRelationshipComparisons(t *testing.T) {
 
 	t.Run("no concept context skips rewrites", func(t *testing.T) {
 		expr := &ComparisonExpression{
-			Field:    FieldReference{Parts: []string{"payload", "spaceId"}, Raw: "payload.spaceId"},
+			Field:    FieldReference{Parts: []string{"payload", "partitionId"}, Raw: "payload.partitionId"},
 			Operator: OpEq,
 			Value:    "daily-abc",
 		}
@@ -153,7 +153,7 @@ func TestResolveCanonicalIdComparisons(t *testing.T) {
 
 	t.Run("bare slug literal RHS resolves to canonical id", func(t *testing.T) {
 		expr := &ComparisonExpression{
-			Field:    FieldReference{Parts: []string{"payload", "spaceId"}, Raw: "payload.spaceId"},
+			Field:    FieldReference{Parts: []string{"payload", "partitionId"}, Raw: "payload.partitionId"},
 			Operator: OpEq,
 			Value:    &ast.CanonicalIdExpr{Value: &ast.LiteralExpr{Value: "daily-abc"}, Concept: "v1:cognition:space"},
 		}
@@ -168,7 +168,7 @@ func TestResolveCanonicalIdComparisons(t *testing.T) {
 
 	t.Run("already-canonical literal RHS resolves to itself", func(t *testing.T) {
 		expr := &ComparisonExpression{
-			Field:    FieldReference{Parts: []string{"payload", "spaceId"}, Raw: "payload.spaceId"},
+			Field:    FieldReference{Parts: []string{"payload", "partitionId"}, Raw: "payload.partitionId"},
 			Operator: OpEq,
 			Value:    &ast.CanonicalIdExpr{Value: &ast.LiteralExpr{Value: "v1:cognition:space:daily-abc"}, Concept: "v1:cognition:space"},
 		}
@@ -193,7 +193,7 @@ func TestResolveCanonicalIdComparisons(t *testing.T) {
 		expr := &LogicalExpression{
 			Op: LogicalAnd,
 			Left: &ComparisonExpression{
-				Field:    FieldReference{Parts: []string{"payload", "spaceId"}, Raw: "payload.spaceId"},
+				Field:    FieldReference{Parts: []string{"payload", "partitionId"}, Raw: "payload.partitionId"},
 				Operator: OpEq,
 				Value:    &ast.CanonicalIdExpr{Value: &ast.LiteralExpr{Value: "daily-abc"}, Concept: "v1:cognition:space"},
 			},
@@ -210,7 +210,7 @@ func TestResolveCanonicalIdComparisons(t *testing.T) {
 
 	t.Run("non-canonicalId comparison passes through untouched", func(t *testing.T) {
 		expr := &ComparisonExpression{
-			Field:    FieldReference{Parts: []string{"payload", "spaceId"}, Raw: "payload.spaceId"},
+			Field:    FieldReference{Parts: []string{"payload", "partitionId"}, Raw: "payload.partitionId"},
 			Operator: OpEq,
 			Value:    "plain-string",
 		}
@@ -221,7 +221,7 @@ func TestResolveCanonicalIdComparisons(t *testing.T) {
 
 // TestCanonicalIdArgBinding_RealLoadedQueries is the #1360 regression:
 // the three shipped struct queries whose filter inlines
-// `canonicalId(args.spaceId, space)` alongside another comparison must
+// `canonicalId(args.partitionId, space)` alongside another comparison must
 // survive query-arg binding + the #1109 runtime pre-walk without
 // leaving a typed `*ast.CanonicalIdExpr` in any comparison value.
 //
@@ -230,7 +230,7 @@ func TestResolveCanonicalIdComparisons(t *testing.T) {
 // the REAL runtime entry (`engine.Parse` -> resolvePlanFunctions arg
 // binding -> resolveCanonicalIdComparisons, the same pre-walk
 // evaluateExpressionSet runs before SQL compile). In the live tree the
-// CanonicalIdExpr inner is an `*ast.ArgRefExpr` (args.spaceId is NOT
+// CanonicalIdExpr inner is an `*ast.ArgRefExpr` (args.partitionId is NOT
 // substituted inside canonicalId() during call-arg binding pre-fix),
 // which the #1109 pre-walk could not resolve -- the node survived to
 // the literal evaluator and failed the whole query with "unsupported
@@ -259,8 +259,8 @@ func TestCanonicalIdArgBinding_RealLoadedQueries(t *testing.T) {
 		name string
 		call string
 	}{
-		{"queryAudioOverridesForSpace", `queryAudioOverridesForSpace({spaceId: "demo-space"})`},
-		{"queryVideoOverridesForSpace", `queryVideoOverridesForSpace({spaceId: "demo-space"})`},
+		{"queryAudioOverridesForSpace", `queryAudioOverridesForSpace({partitionId: "demo-space"})`},
+		{"queryVideoOverridesForSpace", `queryVideoOverridesForSpace({partitionId: "demo-space"})`},
 	}
 
 	for _, tc := range cases {
@@ -283,12 +283,12 @@ func TestCanonicalIdArgBinding_RealLoadedQueries(t *testing.T) {
 				if _, isCid := c.Value.(*ast.CanonicalIdExpr); isCid {
 					t.Errorf("comparison %q still carries *ast.CanonicalIdExpr after arg binding + canonicalId pre-walk; the query would fail with \"unsupported literal type *ast.CanonicalIdExpr\" (#1360)", c.Field.Raw)
 				}
-				if c.Field.Raw == "payload.spaceId" {
+				if c.Field.Raw == "payload.partitionId" {
 					spaceVal = c.Value
 				}
 			})
 			require.Equal(t, wantCanonical, spaceVal,
-				"payload.spaceId comparison must resolve to the canonical space id")
+				"payload.partitionId comparison must resolve to the canonical space id")
 
 			// Cached-plan invariant (#1109): the registered function's
 			// stored expression tree must NOT have been mutated by the
@@ -482,7 +482,7 @@ func TestCanonicalizeRelationshipFields(t *testing.T) {
 		"v1:cognition:participant": {
 			Name: "v1:cognition:participant",
 			Relationships: []memoryNodes.RelationshipDefinition{
-				{Type: "parent", Field: "spaceId", TargetConcept: "v1:cognition:space", Direction: "outgoing"},
+				{Type: "parent", Field: "partitionId", TargetConcept: "v1:cognition:space", Direction: "outgoing"},
 				{Type: "parent", Field: "userId", TargetConcept: "v1:identity:user", Direction: "outgoing"},
 				// Reverse relationship -- engine should NOT rewrite it.
 				{Type: "child", Field: "deliveredTo", TargetConcept: "v1:cognition:utterance", Direction: "incoming"},
@@ -493,14 +493,14 @@ func TestCanonicalizeRelationshipFields(t *testing.T) {
 
 	t.Run("outgoing fields canonicalize, incoming and untagged fields untouched", func(t *testing.T) {
 		payload := map[string]any{
-			"spaceId":     "daily-2026-05-06", // bare -> default:v1:cognition:space:daily-...
+			"partitionId":     "daily-2026-05-06", // bare -> default:v1:cognition:space:daily-...
 			"userId":      "user-abc",         // bare -> v1:identity:user:user-abc
 			"deliveredTo": "utt-bare",         // incoming -> NOT rewritten
 			"displayName": "Jose",             // not a relationship field
 		}
 		err := engine.canonicalizeRelationshipFields(ctx, "v1:cognition:participant", payload)
 		require.NoError(t, err)
-		require.Equal(t, "v1:cognition:space:daily-2026-05-06", payload["spaceId"])
+		require.Equal(t, "v1:cognition:space:daily-2026-05-06", payload["partitionId"])
 		require.Equal(t, "v1:identity:user:user-abc", payload["userId"])
 		require.Equal(t, "utt-bare", payload["deliveredTo"])
 		require.Equal(t, "Jose", payload["displayName"])
@@ -508,12 +508,12 @@ func TestCanonicalizeRelationshipFields(t *testing.T) {
 
 	t.Run("already-canonical values pass through unchanged", func(t *testing.T) {
 		payload := map[string]any{
-			"spaceId": "v1:cognition:space:abc",
+			"partitionId": "v1:cognition:space:abc",
 			"userId":  "v1:identity:user:user-xyz",
 		}
 		err := engine.canonicalizeRelationshipFields(ctx, "v1:cognition:participant", payload)
 		require.NoError(t, err)
-		require.Equal(t, "v1:cognition:space:abc", payload["spaceId"])
+		require.Equal(t, "v1:cognition:space:abc", payload["partitionId"])
 		require.Equal(t, "v1:identity:user:user-xyz", payload["userId"])
 	})
 
@@ -523,18 +523,18 @@ func TestCanonicalizeRelationshipFields(t *testing.T) {
 		}
 		err := engine.canonicalizeRelationshipFields(ctx, "v1:cognition:participant", payload)
 		require.NoError(t, err)
-		_, hasSpace := payload["spaceId"]
+		_, hasSpace := payload["partitionId"]
 		require.False(t, hasSpace)
 	})
 
 	t.Run("empty-string field skipped (optional null-equivalent)", func(t *testing.T) {
 		payload := map[string]any{
-			"spaceId": "",
+			"partitionId": "",
 			"userId":  "user-abc",
 		}
 		err := engine.canonicalizeRelationshipFields(ctx, "v1:cognition:participant", payload)
 		require.NoError(t, err)
-		require.Equal(t, "", payload["spaceId"])
+		require.Equal(t, "", payload["partitionId"])
 		require.Equal(t, "v1:identity:user:user-abc", payload["userId"])
 	})
 

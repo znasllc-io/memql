@@ -89,11 +89,11 @@ func TestSpaceLists_SavedAndArchivedReturned(t *testing.T) {
 	// Saved + archived rows carry active=false; the queries must still find
 	// them (they gate on status + not-deleted, NOT active==true).
 	runMutation(t, ctx, eng, "mutationSaveSpace", map[string]any{
-		"spaceId": savedID,
+		"partitionId": savedID,
 		"payload": map[string]any{"name": "Saved one", "status": "saved", "active": false},
 	})
 	runMutation(t, ctx, eng, "mutationArchiveSpace", map[string]any{
-		"spaceId": archivedID,
+		"partitionId": archivedID,
 		"payload": map[string]any{"name": "Archived one", "status": "archived", "active": false},
 	})
 

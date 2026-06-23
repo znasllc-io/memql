@@ -41,12 +41,12 @@ logic logicIndexDocument {
     // fix on the generatedOutput path below. document.summary is optional and
     // resolves to an explicit null when absent, which the v1:library:artifact
     // string fields reject ("expected string, but got null"). mimeType /
-    // spaceId / planId are @required on document today but are coalesced
+    // partitionId / planId are @required on document today but are coalesced
     // defensively so an upstream contract change can't reopen this. format is
     // an @enum field ("" is not a member), so it stays raw -- it is @required
     // on document and never null; validationStatus is coalesced to "none"
     // inside mutationCreateArtifact.
-    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, document), ownerUserId: args.event.payload.uploadedBy, lens: "artifact", kind: "document", source: "uploaded", title: args.event.payload.fileName, summary: coalesce(args.event.payload.summary, ""), format: args.event.payload.format, mimeType: coalesce(args.event.payload.mimeType, ""), live: false, spaceId: coalesce(args.event.payload.spaceId, ""), producedByPlanId: coalesce(args.event.payload.planId, ""), validationStatus: args.event.payload.validationStatus })
+    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, document), ownerUserId: args.event.payload.uploadedBy, lens: "artifact", kind: "document", source: "uploaded", title: args.event.payload.fileName, summary: coalesce(args.event.payload.summary, ""), format: args.event.payload.format, mimeType: coalesce(args.event.payload.mimeType, ""), live: false, partitionId: coalesce(args.event.payload.partitionId, ""), producedByPlanId: coalesce(args.event.payload.planId, ""), validationStatus: args.event.payload.validationStatus })
     return indexed
   }
 }
@@ -60,7 +60,7 @@ logic logicIndexGeneratedOutput {
   body {
     // coalesce(..., "") on every OPTIONAL ref. Only source=computer_use
     // outputs carry a worker id; agent/workbench/standalone outputs lack
-    // producedByAgentId / producedByPlanId / spaceId / summary /
+    // producedByAgentId / producedByPlanId / partitionId / summary /
     // mimeType. An absent arg reference resolves to no value and is
     // dropped to an explicit null, which the v1:library:artifact string
     // fields reject ("expected string, but got null") -- so artifact
@@ -69,7 +69,7 @@ logic logicIndexGeneratedOutput {
     // absent value, so "" is the correct coalesce target.
     // ownerUserId / title / format / source are @required on
     // generatedOutput, so they always carry a value and pass through bare.
-    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, generatedOutput), ownerUserId: args.event.payload.ownerUserId, lens: "artifact", kind: "generated_output", source: args.event.payload.source, title: args.event.payload.title, summary: coalesce(args.event.payload.summary, ""), format: args.event.payload.format, mimeType: coalesce(args.event.payload.mimeType, ""), live: false, spaceId: coalesce(args.event.payload.spaceId, ""), agentId: coalesce(args.event.payload.producedByAgentId, ""), producedByPlanId: coalesce(args.event.payload.producedByPlanId, ""), producedByWorkerId: coalesce(args.event.payload.producedByWorkerId, ""), producedByWorkerName: coalesce(args.event.payload.producedByWorkerName, "") })
+    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, generatedOutput), ownerUserId: args.event.payload.ownerUserId, lens: "artifact", kind: "generated_output", source: args.event.payload.source, title: args.event.payload.title, summary: coalesce(args.event.payload.summary, ""), format: args.event.payload.format, mimeType: coalesce(args.event.payload.mimeType, ""), live: false, partitionId: coalesce(args.event.payload.partitionId, ""), agentId: coalesce(args.event.payload.producedByAgentId, ""), producedByPlanId: coalesce(args.event.payload.producedByPlanId, ""), producedByWorkerId: coalesce(args.event.payload.producedByWorkerId, ""), producedByWorkerName: coalesce(args.event.payload.producedByWorkerName, "") })
     return indexed
   }
 }
@@ -127,10 +127,10 @@ logic logicIndexMemory {
   }
   body {
     // coalesce(..., "") on the OPTIONAL fields. memory.summary / agentId /
-    // spaceId are all optional and resolve to an explicit null when absent,
+    // partitionId are all optional and resolve to an explicit null when absent,
     // which the v1:library:artifact string fields reject -- this is the
     // failure observed live on 0.9.67 (#1626). title is @required upstream.
-    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, memory), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "memory", source: "agent_generated", title: args.event.payload.title, summary: coalesce(args.event.payload.summary, ""), agentId: coalesce(args.event.payload.agentId, ""), spaceId: coalesce(args.event.payload.spaceId, ""), live: false })
+    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, memory), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "memory", source: "agent_generated", title: args.event.payload.title, summary: coalesce(args.event.payload.summary, ""), agentId: coalesce(args.event.payload.agentId, ""), partitionId: coalesce(args.event.payload.partitionId, ""), live: false })
     return indexed
   }
 }

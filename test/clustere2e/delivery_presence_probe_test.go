@@ -46,7 +46,7 @@ func TestPresenceDrivenDelivery(t *testing.T) {
 		// canonical id, so mint a fresh short id per connection instead.
 		if _, err := qc.MutationUpdateParticipantPresence(ctx, memqlclient.MutationUpdateParticipantPresenceArgs{
 			PresenceId:    "presence-" + id.NewShortId(),
-			SpaceId:       spaceID,
+			PartitionId:       spaceID,
 			ParticipantId: participantID,
 			State:         "idle",
 			Label:         "probe",
@@ -68,7 +68,7 @@ func TestPresenceDrivenDelivery(t *testing.T) {
 	qc := memqlclient.NewQueryClient(producer.Dispatcher())
 	if _, err := qc.MutationSendTextUtterance(ctx, memqlclient.MutationSendTextUtteranceArgs{
 		UtteranceId:     utteranceID,
-		SpaceId:         spaceID,
+		PartitionId:         spaceID,
 		ParticipantId:   participantID,
 		ParticipantType: "human",
 		Text:            "presence-driven cross-replica probe",

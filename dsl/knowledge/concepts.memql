@@ -13,7 +13,7 @@ use planner.concepts.{ plan }
 concept document {
   attachmentId      string  @required @description("Back-reference to v1:common:attachment. The bytes live in GCS via the attachment row; this Document carries the analyzed projection.")
   planId            string  @required @description("Back-reference to the v1:planner:plan that produced this analysis. Used by the Tasks page expand-drawer + by re-analysis triggers.")
-  spaceId           string  @required @description("Workspace partition this Document belongs to; redundant with attachment.spaceId but stored explicitly for cheap per-space queries.")
+  partitionId           string  @required @description("Workspace partition this Document belongs to; redundant with attachment.partitionId but stored explicitly for cheap per-space queries.")
   fileName          string  @required @description("Original filename, copied from the attachment for display.")
   mimeType          string  @required @description("MIME type, copied from the attachment.")
   format            enum("spreadsheet", "pdf", "image", "text", "markdown", "conversation") @required @description("High-level classification. Picks which item concept stores the breakdown: spreadsheet -> spreadsheetRow; pdf|text|markdown -> documentChunk; image -> imageRegion; conversation -> documentChunk (for chat-promoted segments).")

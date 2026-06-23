@@ -1,4 +1,4 @@
-// Package agents implements the `agent(name, prompt, spaceId)`
+// Package agents implements the `agent(name, prompt, partitionId)`
 // builtin's executor -- the runtime side of the agents-as-DSL-primitive
 // feature. Pairs with:
 //
@@ -89,7 +89,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema: map[string]string{
 				"name":    "string",
 				"prompt":  "string",
-				"spaceId": "string",
+				"partitionId": "string",
 			},
 		},
 		{
@@ -99,7 +99,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema: map[string]string{
 				"goal":        "string",
 				"ownerUserId": "string",
-				"spaceId":     "string",
+				"partitionId":     "string",
 			},
 		},
 		{
@@ -124,7 +124,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"agentId":     "string (required) -- calling agent id (auto-stamped)",
 				"ownerUserId": "string (required) -- session-owner user id (auto-stamped)",
 				"planId":      "string (required) -- the active Plan to park (auto-stamped)",
-				"spaceId":     "string (optional) -- target space (auto-stamped)",
+				"partitionId":     "string (optional) -- target space (auto-stamped)",
 			},
 		},
 		{
@@ -137,7 +137,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"filename":    "string (optional) -- preferred filename",
 				"agentId":     "string (optional) -- calling agent id (auto-stamped)",
 				"ownerUserId": "string (required) -- session-owner user id (auto-stamped); becomes the plan's requestedBy",
-				"spaceId":     "string (required) -- space the plan lives in (auto-stamped)",
+				"partitionId":     "string (required) -- space the plan lives in (auto-stamped)",
 			},
 		},
 	}
@@ -169,7 +169,7 @@ const agentInvocationKind = "agentInvocation"
 //
 //	args["name"]    string  required -- agent registry key (typically the roleSlug)
 //	args["prompt"]  string  required -- what you want the agent to do
-//	args["spaceId"] string  required -- the space the Plan lives in
+//	args["partitionId"] string  required -- the space the Plan lives in
 //
 // Returns ONE MemoryNode whose payload JSON is
 //
@@ -192,9 +192,9 @@ func (i *Integration) handleInvoke(ctx context.Context, args map[string]any, _ i
 	if prompt == "" {
 		return nil, fmt.Errorf("agent(%q): 'prompt' argument is required", name)
 	}
-	spaceId, _ := args["spaceId"].(string)
-	if spaceId == "" {
-		return nil, fmt.Errorf("agent(%q): 'spaceId' argument is required (use the system placeholder if no space context)", name)
+	partitionId, _ := args["partitionId"].(string)
+	if partitionId == "" {
+		return nil, fmt.Errorf("agent(%q): 'partitionId' argument is required (use the system placeholder if no space context)", name)
 	}
 
 	def, ok := i.agents.Get(name)
@@ -202,7 +202,7 @@ func (i *Integration) handleInvoke(ctx context.Context, args map[string]any, _ i
 		return nil, fmt.Errorf("agent(%q): no agent registered with that name (loaded names: %v)", name, i.agents.Names())
 	}
 
-	planId, err := i.createInvocationPlan(ctx, def, prompt, spaceId)
+	planId, err := i.createInvocationPlan(ctx, def, prompt, partitionId)
 	if err != nil {
 		return nil, fmt.Errorf("agent(%q): create plan: %w", name, err)
 	}
@@ -459,9 +459,9 @@ func (i *Integration) handleProduceArtifact(ctx context.Context, args map[string
 	if ownerUserId == "" {
 		return nil, fmt.Errorf("produceArtifact: 'ownerUserId' required (auto-injection failed -- no session owner in the turn context)")
 	}
-	spaceId := strings.TrimSpace(asString(args["spaceId"]))
-	if spaceId == "" {
-		return nil, fmt.Errorf("produceArtifact: 'spaceId' required (auto-injection failed -- no space in the turn context)")
+	partitionId := strings.TrimSpace(asString(args["partitionId"]))
+	if partitionId == "" {
+		return nil, fmt.Errorf("produceArtifact: 'partitionId' required (auto-injection failed -- no space in the turn context)")
 	}
 	// Default the output format to markdown unless the caller named one.
 	format := strings.TrimSpace(asString(args["format"]))
@@ -505,8 +505,8 @@ func (i *Integration) handleProduceArtifact(ctx context.Context, args map[string
 	mutationCtx := withUserActor(ctx, ownerUserId)
 	var qb strings.Builder
 	fmt.Fprintf(&qb,
-		`mutationCreatePlan({planId: %q, spaceId: %q, kind: %q, goal: %q, requestedBy: %q, triggerSource: "user.implicit", authorizedBy: %q, input: %s`,
-		planId, spaceId, produceArtifactKind, goal, ownerUserId, ownerUserId, string(inputJSON),
+		`mutationCreatePlan({planId: %q, partitionId: %q, kind: %q, goal: %q, requestedBy: %q, triggerSource: "user.implicit", authorizedBy: %q, input: %s`,
+		planId, partitionId, produceArtifactKind, goal, ownerUserId, ownerUserId, string(inputJSON),
 	)
 	if agentId != "" {
 		// Dispatch the production turn straight to the requesting assistant
@@ -579,7 +579,7 @@ func asString(v any) string {
 // requestedBy/authorizedBy default to the system actor today; a
 // future iteration will plumb the calling actor through so audit
 // tracks the user-on-whose-behalf the agent ran.
-func (i *Integration) createInvocationPlan(ctx context.Context, def *memql.AgentDefinition, prompt, spaceId string) (string, error) {
+func (i *Integration) createInvocationPlan(ctx context.Context, def *memql.AgentDefinition, prompt, partitionId string) (string, error) {
 	planId := id.NewShortId()
 	// Build the input object the planner agent loop reads when
 	// dispatching: agentName + prompt are the essential signal;
@@ -597,8 +597,8 @@ func (i *Integration) createInvocationPlan(ctx context.Context, def *memql.Agent
 	}
 
 	query := fmt.Sprintf(
-		`mutationCreatePlan({planId: %q, spaceId: %q, kind: %q, goal: %q, requestedBy: %q, triggerSource: "agent.dsl", authorizedBy: %q, input: %s})`,
-		planId, spaceId, agentInvocationKind, prompt, systemActorId, systemActorId, string(inputJSON),
+		`mutationCreatePlan({planId: %q, partitionId: %q, kind: %q, goal: %q, requestedBy: %q, triggerSource: "agent.dsl", authorizedBy: %q, input: %s})`,
+		planId, partitionId, agentInvocationKind, prompt, systemActorId, systemActorId, string(inputJSON),
 	)
 	if _, err := i.engine.Execute(ctx, query); err != nil {
 		return "", fmt.Errorf("execute mutationCreatePlan: %w", err)

@@ -122,13 +122,13 @@ func (e *MemQLEngine) validateAndStampParticipantPayload(ctx context.Context, pa
 	if resolvedForUser != "" {
 		newStatus := strings.TrimSpace(stringFromAny(payload["status"]))
 		if newStatus == "" || strings.EqualFold(newStatus, "active") {
-			spaceId := strings.TrimSpace(stringFromAny(payload["spaceId"]))
-			if spaceId == "" {
-				return fmt.Errorf("v1:cognition:participant: spaceId required")
+			partitionId := strings.TrimSpace(stringFromAny(payload["partitionId"]))
+			if partitionId == "" {
+				return fmt.Errorf("v1:cognition:participant: partitionId required")
 			}
 
 			activeCount, err := e.countActiveAIParticipantsForUser(
-				ctx, spaceId, resolvedForUser, strings.TrimSpace(mutationId))
+				ctx, partitionId, resolvedForUser, strings.TrimSpace(mutationId))
 			if err != nil {
 				return fmt.Errorf("v1:cognition:participant: cap check failed: %w", err)
 			}
@@ -156,7 +156,7 @@ func (e *MemQLEngine) validateAndStampParticipantPayload(ctx context.Context, pa
 // id in Go. Spaces typically carry fewer than 50 participants over their
 // lifetime, so a full scan + Go-side fold is acceptable -- and it avoids
 // dialect-specific DISTINCT ON wiring through bun.
-func (e *MemQLEngine) countActiveAIParticipantsForUser(ctx context.Context, spaceId, forUserId, excludeId string) (int, error) {
+func (e *MemQLEngine) countActiveAIParticipantsForUser(ctx context.Context, partitionId, forUserId, excludeId string) (int, error) {
 	if e == nil {
 		return 0, fmt.Errorf("engine is nil")
 	}
@@ -169,7 +169,7 @@ func (e *MemQLEngine) countActiveAIParticipantsForUser(ctx context.Context, spac
 	err := db.NewSelect().
 		Model(&nodes).
 		Where("concept = ?", memorynodes.ConceptCognitionParticipant).
-		Where("payload->>'spaceId' = ?", spaceId).
+		Where("payload->>'partitionId' = ?", partitionId).
 		Where("payload->>'participantType' = ?", "si").
 		OrderExpr(`"createdAt" DESC`).
 		Scan(ctx)
@@ -177,7 +177,7 @@ func (e *MemQLEngine) countActiveAIParticipantsForUser(ctx context.Context, spac
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, nil
 		}
-		return 0, fmt.Errorf("scan participants for space %q: %w", spaceId, err)
+		return 0, fmt.Errorf("scan participants for space %q: %w", partitionId, err)
 	}
 
 	seen := make(map[string]struct{})
@@ -222,17 +222,17 @@ func (e *MemQLEngine) validateHumanParticipantCap(ctx context.Context, payload m
 		return nil
 	}
 
-	spaceId := strings.TrimSpace(stringFromAny(payload["spaceId"]))
-	if spaceId == "" {
-		return fmt.Errorf("v1:cognition:participant: spaceId required")
+	partitionId := strings.TrimSpace(stringFromAny(payload["partitionId"]))
+	if partitionId == "" {
+		return fmt.Errorf("v1:cognition:participant: partitionId required")
 	}
 
-	maxHumans, err := e.spaceMaxHumans(ctx, spaceId)
+	maxHumans, err := e.spaceMaxHumans(ctx, partitionId)
 	if err != nil {
 		return fmt.Errorf("v1:cognition:participant: human cap check failed: %w", err)
 	}
 
-	activeCount, err := e.countActiveHumanParticipants(ctx, spaceId, strings.TrimSpace(mutationId))
+	activeCount, err := e.countActiveHumanParticipants(ctx, partitionId, strings.TrimSpace(mutationId))
 	if err != nil {
 		return fmt.Errorf("v1:cognition:participant: human cap check failed: %w", err)
 	}
@@ -262,7 +262,7 @@ func humanCapExceeded(activeCount, maxHumans int) bool {
 // spaceMaxHumans reads the latest version of the space row and returns
 // its maxHumans, falling back to defaultMaxHumansPerSpace when the row
 // is missing the field or carries a non-positive value.
-func (e *MemQLEngine) spaceMaxHumans(ctx context.Context, spaceId string) (int, error) {
+func (e *MemQLEngine) spaceMaxHumans(ctx context.Context, partitionId string) (int, error) {
 	if e == nil {
 		return 0, fmt.Errorf("engine is nil")
 	}
@@ -275,7 +275,7 @@ func (e *MemQLEngine) spaceMaxHumans(ctx context.Context, spaceId string) (int, 
 	err := db.NewSelect().
 		Model(&nodes).
 		Where("concept = ?", memorynodes.ConceptCognitionSpace).
-		Where("id = ?", spaceId).
+		Where("id = ?", partitionId).
 		OrderExpr(`"createdAt" DESC`).
 		Limit(1).
 		Scan(ctx)
@@ -283,7 +283,7 @@ func (e *MemQLEngine) spaceMaxHumans(ctx context.Context, spaceId string) (int, 
 		if errors.Is(err, sql.ErrNoRows) {
 			return defaultMaxHumansPerSpace, nil
 		}
-		return 0, fmt.Errorf("scan space %q: %w", spaceId, err)
+		return 0, fmt.Errorf("scan space %q: %w", partitionId, err)
 	}
 	if len(nodes) == 0 {
 		return defaultMaxHumansPerSpace, nil
@@ -304,7 +304,7 @@ func (e *MemQLEngine) spaceMaxHumans(ctx context.Context, spaceId string) (int, 
 // excludeId (the participant id about to be inserted) so an idempotent
 // re-join of the same member is not counted twice. Mirrors the scan +
 // Go-side dedup approach of countActiveAIParticipantsForUser.
-func (e *MemQLEngine) countActiveHumanParticipants(ctx context.Context, spaceId, excludeId string) (int, error) {
+func (e *MemQLEngine) countActiveHumanParticipants(ctx context.Context, partitionId, excludeId string) (int, error) {
 	if e == nil {
 		return 0, fmt.Errorf("engine is nil")
 	}
@@ -317,7 +317,7 @@ func (e *MemQLEngine) countActiveHumanParticipants(ctx context.Context, spaceId,
 	err := db.NewSelect().
 		Model(&nodes).
 		Where("concept = ?", memorynodes.ConceptCognitionParticipant).
-		Where("payload->>'spaceId' = ?", spaceId).
+		Where("payload->>'partitionId' = ?", partitionId).
 		Where("payload->>'participantType' = ?", "human").
 		OrderExpr(`"createdAt" DESC`).
 		Scan(ctx)
@@ -325,7 +325,7 @@ func (e *MemQLEngine) countActiveHumanParticipants(ctx context.Context, spaceId,
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, nil
 		}
-		return 0, fmt.Errorf("scan human participants for space %q: %w", spaceId, err)
+		return 0, fmt.Errorf("scan human participants for space %q: %w", partitionId, err)
 	}
 
 	seen := make(map[string]struct{})

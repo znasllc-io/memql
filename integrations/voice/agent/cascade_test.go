@@ -115,7 +115,7 @@ func newCascadeForTest(t *testing.T, fs *fakeStream, tts ttsSynthesizer, sink au
 	t.Helper()
 	c := newTestClient(t, fs)
 	cas := NewCascade(context.Background(), CascadeConfig{
-		SpaceID:   "s1",
+		PartitionID:   "s1",
 		GaAgentID: "s1-ga",
 		Thread:    memqlv1.VoiceAgentTurnRequest_THREAD_CONTEXT_TEAM,
 	}, c, tts, sink, "aura-2-thalia-en", nil)
@@ -312,7 +312,7 @@ func TestCascade_PerTrackSpeakerAttribution(t *testing.T) {
 	const track = "standard:v1:cognition:participant:alice"
 	fs := newFakeStream()
 	cas := newCascadeWithConfig(t, fs, CascadeConfig{
-		SpaceID:       "s1",
+		PartitionID:       "s1",
 		GaAgentID:     "s1-ga",
 		SpeakerUserID: "fallback-speaker",
 		Thread:        memqlv1.VoiceAgentTurnRequest_THREAD_CONTEXT_TEAM,
@@ -340,7 +340,7 @@ func TestCascade_PerTrackSpeakerAttribution(t *testing.T) {
 func TestCascade_SpeakerFallsBackToConfig(t *testing.T) {
 	fs := newFakeStream()
 	cas := newCascadeWithConfig(t, fs, CascadeConfig{
-		SpaceID:       "s1",
+		PartitionID:       "s1",
 		GaAgentID:     "s1-ga",
 		SpeakerUserID: "cfg-speaker",
 		Thread:        memqlv1.VoiceAgentTurnRequest_THREAD_CONTEXT_TEAM,
@@ -360,7 +360,7 @@ func TestCascade_SpeakerFallsBackToConfig(t *testing.T) {
 func TestCascade_EmptySpeakerStillSends(t *testing.T) {
 	fs := newFakeStream()
 	cas := newCascadeWithConfig(t, fs, CascadeConfig{
-		SpaceID:   "s1",
+		PartitionID:   "s1",
 		GaAgentID: "s1-ga",
 		Thread:    memqlv1.VoiceAgentTurnRequest_THREAD_CONTEXT_TEAM,
 	}, nil)
@@ -415,7 +415,7 @@ func TestCascade_FinalAckRejectionLogged(t *testing.T) {
 		})
 	}
 	cas := newCascadeWithConfig(t, fs, CascadeConfig{
-		SpaceID:   "s1",
+		PartitionID:   "s1",
 		GaAgentID: "s1-ga",
 		Thread:    memqlv1.VoiceAgentTurnRequest_THREAD_CONTEXT_TEAM,
 	}, logger)
@@ -439,7 +439,7 @@ func TestLogFinalTranscriptReply_Variants(t *testing.T) {
 		Payload: &memqlv1.MemqlServerMessage_QueryError{
 			QueryError: &memqlv1.QueryErrorMsg{
 				RequestId: "r2",
-				Error:     &memqlv1.QueryError{Code: "INVALID_ARGUMENT", Message: "spaceId, speakerUserId, finalText are required"},
+				Error:     &memqlv1.QueryError{Code: "INVALID_ARGUMENT", Message: "partitionId, speakerUserId, finalText are required"},
 			},
 		},
 	})

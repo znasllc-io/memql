@@ -178,7 +178,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"topic":             "string (required) - narrow topic the chunks should focus on.",
 				"sourceUtteranceId": "string (optional) - bare id of the utterance that triggered the augment; persisted on each chunk for provenance.",
 				"sourceAgentId":     "string (optional) - bare id of the agent whose retrieval gap surfaced this; provenance.",
-				"spaceId":           "string (required) - space the Plan row scopes to.",
+				"partitionId":           "string (required) - space the Plan row scopes to.",
 				"requestedBy":       "string (required) - user id requesting the augment; Plan ownership + audit.",
 			},
 		},

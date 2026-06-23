@@ -51,7 +51,7 @@ func TestStreamLifecycleTokenStream(t *testing.T) {
 	}
 
 	sess := NewStreamSession(sub, streamID, "token", "agent-1")
-	if _, err := sess.Start(ctx, map[string]any{"spaceId": "space-1", "agentId": "faye"}); err != nil {
+	if _, err := sess.Start(ctx, map[string]any{"partitionId": "space-1", "agentId": "faye"}); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	tokens := []string{"Hello", ", ", "world", "!"}
@@ -72,7 +72,7 @@ func TestStreamLifecycleTokenStream(t *testing.T) {
 	if got[0].Phase != StreamPhaseStart {
 		t.Fatalf("frame 0 phase=%q want start", got[0].Phase)
 	}
-	if got[0].Meta["spaceId"] != "space-1" {
+	if got[0].Meta["partitionId"] != "space-1" {
 		t.Fatalf("start meta lost: %+v", got[0].Meta)
 	}
 	for i, tok := range tokens {
@@ -163,7 +163,7 @@ func TestStreamLifecycleCrossReplicaReplay(t *testing.T) {
 	// Producer on node A: Start + several deltas up front.
 	sess := NewStreamSession(sub, streamID, "token", "agent-A")
 	bg := context.Background()
-	if _, err := sess.Start(bg, map[string]any{"spaceId": "s1"}); err != nil {
+	if _, err := sess.Start(bg, map[string]any{"partitionId": "s1"}); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	const firstBatch = 6

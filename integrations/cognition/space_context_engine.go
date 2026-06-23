@@ -14,8 +14,8 @@ const (
 	spaceContextIdPrefix = "spacectx-"
 )
 
-func spaceContextRecordId(spaceId string) string {
-	sid := strings.TrimSpace(spaceId)
+func spaceContextRecordId(partitionId string) string {
+	sid := strings.TrimSpace(partitionId)
 	if sid == "" {
 		return ""
 	}
@@ -25,70 +25,70 @@ func spaceContextRecordId(spaceId string) string {
 // handleParticipantChanged updates the space context snapshot whenever participants change.
 func (c *CognitionIntegration) handleParticipantChanged(event events.Event) {
 	ctx := contextWithSystemActor(context.Background())
-	spaceId, _ := event.Payload["spaceId"].(string)
-	if strings.TrimSpace(spaceId) == "" {
+	partitionId, _ := event.Payload["partitionId"].(string)
+	if strings.TrimSpace(partitionId) == "" {
 		if nested, ok := event.Payload["payload"].(map[string]any); ok {
-			spaceId, _ = nested["spaceId"].(string)
+			partitionId, _ = nested["partitionId"].(string)
 		}
 	}
-	if strings.TrimSpace(spaceId) == "" {
+	if strings.TrimSpace(partitionId) == "" {
 		return
 	}
-	c.invalidatePromptCachesForSpace(spaceId)
-	_ = c.recomputeAndUpsertSpaceContext(ctx, spaceId)
+	c.invalidatePromptCachesForSpace(partitionId)
+	_ = c.recomputeAndUpsertSpaceContext(ctx, partitionId)
 }
 
 // handleSessionChanged updates the space context snapshot whenever sessions change.
 func (c *CognitionIntegration) handleSessionChanged(event events.Event) {
 	ctx := contextWithSystemActor(context.Background())
-	spaceId, _ := event.Payload["spaceId"].(string)
-	if strings.TrimSpace(spaceId) == "" {
+	partitionId, _ := event.Payload["partitionId"].(string)
+	if strings.TrimSpace(partitionId) == "" {
 		if nested, ok := event.Payload["payload"].(map[string]any); ok {
-			spaceId, _ = nested["spaceId"].(string)
+			partitionId, _ = nested["partitionId"].(string)
 		}
 	}
-	if strings.TrimSpace(spaceId) == "" {
+	if strings.TrimSpace(partitionId) == "" {
 		return
 	}
-	c.invalidatePromptCachesForSpace(spaceId)
-	_ = c.recomputeAndUpsertSpaceContext(ctx, spaceId)
+	c.invalidatePromptCachesForSpace(partitionId)
+	_ = c.recomputeAndUpsertSpaceContext(ctx, partitionId)
 }
 
 // handleSpaceCreated bootstraps a space context record after a space is created.
 func (c *CognitionIntegration) handleSpaceCreated(event events.Event) {
 	ctx := contextWithSystemActor(context.Background())
-	spaceId, _ := event.Payload["nodeId"].(string)
-	if strings.TrimSpace(spaceId) == "" {
-		spaceId, _ = event.Payload["id"].(string)
+	partitionId, _ := event.Payload["nodeId"].(string)
+	if strings.TrimSpace(partitionId) == "" {
+		partitionId, _ = event.Payload["id"].(string)
 	}
-	if strings.TrimSpace(spaceId) == "" {
+	if strings.TrimSpace(partitionId) == "" {
 		if nested, ok := event.Payload["payload"].(map[string]any); ok {
-			spaceId, _ = nested["id"].(string)
+			partitionId, _ = nested["id"].(string)
 		}
 	}
-	if strings.TrimSpace(spaceId) == "" {
+	if strings.TrimSpace(partitionId) == "" {
 		return
 	}
-	c.invalidatePromptCachesForSpace(spaceId)
-	_ = c.recomputeAndUpsertSpaceContext(ctx, spaceId)
+	c.invalidatePromptCachesForSpace(partitionId)
+	_ = c.recomputeAndUpsertSpaceContext(ctx, partitionId)
 }
 
-func (c *CognitionIntegration) recomputeAndUpsertSpaceContext(ctx context.Context, spaceId string) error {
+func (c *CognitionIntegration) recomputeAndUpsertSpaceContext(ctx context.Context, partitionId string) error {
 	if c == nil || c.engine == nil {
 		return fmt.Errorf("engine not configured")
 	}
-	spaceId = strings.TrimSpace(spaceId)
-	if spaceId == "" {
-		return fmt.Errorf("spaceId is empty")
+	partitionId = strings.TrimSpace(partitionId)
+	if partitionId == "" {
+		return fmt.Errorf("partitionId is empty")
 	}
 
-	snap, err := c.computeSpaceContextSnapshot(ctx, spaceId)
+	snap, err := c.computeSpaceContextSnapshot(ctx, partitionId)
 	if err != nil {
 		return err
 	}
 
 	// Load latest snapshot for change detection (compare only snapshot object).
-	prev, _ := c.getLatestSpaceContextSnapshot(ctx, spaceId)
+	prev, _ := c.getLatestSpaceContextSnapshot(ctx, partitionId)
 	if prev != nil {
 		prevJSON := mustJSON(prev)
 		nextJSON := mustJSON(snap)
@@ -99,12 +99,12 @@ func (c *CognitionIntegration) recomputeAndUpsertSpaceContext(ctx context.Contex
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	payload := map[string]any{
-		"spaceId":       spaceId,
+		"partitionId":       partitionId,
 		"snapshot":      snap,
 		"computedAt":    now,
 		"lastUpdatedAt": now,
 	}
-	id := spaceContextRecordId(spaceId)
+	id := spaceContextRecordId(partitionId)
 	if id == "" {
 		return fmt.Errorf("invalid context record id")
 	}
@@ -117,10 +117,10 @@ func (c *CognitionIntegration) recomputeAndUpsertSpaceContext(ctx context.Contex
 	if err == nil {
 		// Best-effort: update in-memory cache so prompt builders don't need to re-query.
 		c.promptCacheMu.Lock()
-		c.spaceContextCache[spaceId] = cachedSpaceContext{
+		c.spaceContextCache[partitionId] = cachedSpaceContext{
 			expiresAt: time.Now().Add(defaultSpaceContextCacheTTL),
 			value: map[string]any{
-				"spaceId":     spaceId,
+				"partitionId":     partitionId,
 				"snapshot":    snap,
 				"computedAt":  now,
 				"lastUpdated": now,
@@ -131,13 +131,13 @@ func (c *CognitionIntegration) recomputeAndUpsertSpaceContext(ctx context.Contex
 	return err
 }
 
-func (c *CognitionIntegration) getLatestSpaceContextSnapshot(ctx context.Context, spaceId string) (map[string]any, error) {
+func (c *CognitionIntegration) getLatestSpaceContextSnapshot(ctx context.Context, partitionId string) (map[string]any, error) {
 	if c == nil || c.engine == nil {
 		return nil, fmt.Errorf("engine not configured")
 	}
-	spaceId = strings.TrimSpace(spaceId)
-	if spaceId == "" {
-		return nil, fmt.Errorf("spaceId is empty")
+	partitionId = strings.TrimSpace(partitionId)
+	if partitionId == "" {
+		return nil, fmt.Errorf("partitionId is empty")
 	}
 	// memql#290 (sub-epic #286, final child): migrated from a
 	// handwritten `shape(paginate(sort(filter, "createdAt",
@@ -149,7 +149,7 @@ func (c *CognitionIntegration) getLatestSpaceContextSnapshot(ctx context.Context
 	// comparison path. Downstream extractDataFromResult sees the
 	// same `{"snapshot": <map>}` shape so the type-switch below is
 	// unchanged. Closes sub-epic #286; unblocks #250.
-	query := fmt.Sprintf(`queryLatestSpaceContextSnapshot({spaceId: %s})`, escapeJSONString(spaceId))
+	query := fmt.Sprintf(`queryLatestSpaceContextSnapshot({partitionId: %s})`, escapeJSONString(partitionId))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		return nil, err
@@ -176,12 +176,12 @@ func (c *CognitionIntegration) getLatestSpaceContextSnapshot(ctx context.Context
 	return nil, nil
 }
 
-func (c *CognitionIntegration) computeSpaceContextSnapshot(ctx context.Context, spaceId string) (map[string]any, error) {
-	participants, err := c.loadParticipantsForContext(ctx, spaceId)
+func (c *CognitionIntegration) computeSpaceContextSnapshot(ctx context.Context, partitionId string) (map[string]any, error) {
+	participants, err := c.loadParticipantsForContext(ctx, partitionId)
 	if err != nil {
 		return nil, err
 	}
-	sessions, err := c.loadSessionsForContext(ctx, spaceId)
+	sessions, err := c.loadSessionsForContext(ctx, partitionId)
 	if err != nil {
 		return nil, err
 	}
@@ -302,8 +302,8 @@ func (c *CognitionIntegration) computeSpaceContextSnapshot(ctx context.Context, 
 
 // loadParticipantsForContext retrieves participants for space context computation.
 // Delegates to the spaceParticipants MemQL query function.
-func (c *CognitionIntegration) loadParticipantsForContext(ctx context.Context, spaceId string) ([]map[string]any, error) {
-	query := fmt.Sprintf(`querySpaceParticipants({spaceId: "%s"})`, spaceId)
+func (c *CognitionIntegration) loadParticipantsForContext(ctx context.Context, partitionId string) ([]map[string]any, error) {
+	query := fmt.Sprintf(`querySpaceParticipants({partitionId: "%s"})`, partitionId)
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		return nil, err
@@ -330,11 +330,11 @@ func (c *CognitionIntegration) loadParticipantsForContext(ctx context.Context, s
 	return out, nil
 }
 
-func (c *CognitionIntegration) loadSessionsForContext(ctx context.Context, spaceId string) ([]map[string]any, error) {
+func (c *CognitionIntegration) loadSessionsForContext(ctx context.Context, partitionId string) ([]map[string]any, error) {
 	query := fmt.Sprintf(`shape(
-  concept==v1:cognition:session;payload.spaceId==%s,
+  concept==v1:cognition:session;payload.partitionId==%s,
   "sessionFull"
-)`, escapeJSONString(spaceId))
+)`, escapeJSONString(partitionId))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		return nil, err

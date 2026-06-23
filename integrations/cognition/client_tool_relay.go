@@ -113,13 +113,13 @@ func (c *CognitionIntegration) startClientToolRelay() {
 // records the correlation and inserts a clientToolRequest graph node
 // so the browser receives the call via its space subscription.
 //
-// spaceId / participantId come from the cognition turn context; they
+// partitionId / participantId come from the cognition turn context; they
 // tell the browser whether the request applies to its session. agentId
 // is audit-only.
 func (c *CognitionIntegration) relayClientToolCall(
 	ctx context.Context,
 	requestId string,
-	spaceId string,
+	partitionId string,
 	participantId string,
 	agentId string,
 	call *memqlv1.ClientToolCall,
@@ -146,7 +146,7 @@ func (c *CognitionIntegration) relayClientToolCall(
 		"callId", callId,
 		"toolName", call.GetToolName(),
 		"argumentsJSON", call.GetArgumentsJson(),
-		"spaceId", spaceId,
+		"partitionId", partitionId,
 		"agentId", agentId,
 	)
 
@@ -189,7 +189,7 @@ func (c *CognitionIntegration) relayClientToolCall(
 		"callId": %s,
 		"toolName": %s,
 		"argumentsJSON": %s,
-		"spaceId": %s,
+		"partitionId": %s,
 		"participantId": %s,
 		"agentId": %s,
 		"expiresAt": %s
@@ -198,7 +198,7 @@ func (c *CognitionIntegration) relayClientToolCall(
 		escapeJSONString(callId),
 		escapeJSONString(call.GetToolName()),
 		escapeJSONString(call.GetArgumentsJson()),
-		escapeJSONString(spaceId),
+		escapeJSONString(partitionId),
 		escapeJSONString(participantId),
 		escapeJSONString(agentId),
 		escapeJSONString(expiresAt.Format(time.RFC3339Nano)),
@@ -235,7 +235,7 @@ func (c *CognitionIntegration) relayClientToolCall(
 	c.Logger.Info("client-tool relay: emitted request",
 		"callId", callId,
 		"toolName", call.GetToolName(),
-		"spaceId", spaceId,
+		"partitionId", partitionId,
 		"requestId", requestId,
 		"elapsed_ms", time.Since(relayStart).Milliseconds(),
 	)

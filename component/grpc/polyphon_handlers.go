@@ -35,7 +35,7 @@ func (s *streamSession) handlePolyphonRoomToken(envelope *memqlv1.MemqlClientMes
 	scopeId := strings.TrimSpace(msg.GetScopeId())
 	participantId := strings.TrimSpace(msg.GetParticipantId())
 	if scopeId == "" || participantId == "" {
-		s.sendQueryError(requestId, correlate, codes.InvalidArgument, "spaceId and participantId are required")
+		s.sendQueryError(requestId, correlate, codes.InvalidArgument, "partitionId and participantId are required")
 		return nil
 	}
 
@@ -116,7 +116,7 @@ func (s *streamSession) handlePolyphonUtterance(envelope *memqlv1.MemqlClientMes
 	text := strings.TrimSpace(msg.GetText())
 
 	if scopeId == "" || participantId == "" || text == "" {
-		s.sendQueryError(requestId, correlate, codes.InvalidArgument, "spaceId, participantId, and text are required")
+		s.sendQueryError(requestId, correlate, codes.InvalidArgument, "partitionId, participantId, and text are required")
 		return nil
 	}
 
@@ -124,7 +124,7 @@ func (s *streamSession) handlePolyphonUtterance(envelope *memqlv1.MemqlClientMes
 		// Use the sendTextUtterance mutation function instead of inline insert.
 		utteranceId := fmt.Sprintf("utt-%s-%d", participantId, time.Now().UnixNano())
 		textJSON, _ := json.Marshal(text)
-		query := fmt.Sprintf(`mutationSendTextUtterance({utteranceId: "%s", spaceId: "%s", participantId: "%s", text: %s, source: {inputMethod: "stt", pipeline: "polyphon"}})`,
+		query := fmt.Sprintf(`mutationSendTextUtterance({utteranceId: "%s", partitionId: "%s", participantId: "%s", text: %s, source: {inputMethod: "stt", pipeline: "polyphon"}})`,
 			utteranceId, scopeId, participantId, string(textJSON))
 
 		ctx := contextWithSystemActor(context.Background())

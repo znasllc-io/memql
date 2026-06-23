@@ -170,11 +170,11 @@ func TestParseConceptMemQL_WithRelationships(t *testing.T) {
 	content := []byte(`
 @description("A participant in a space.")
 concept Participant {
-  spaceId          string  @required
+  partitionId          string  @required
   participantType  enum("human", "si")  @required
   displayName      string  @required
 
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
+  @relationship(type="parent", field="partitionId", target="v1:cognition:space", direction="outgoing")
 }
 `)
 
@@ -191,8 +191,8 @@ concept Participant {
 	if rel.Type != "parent" {
 		t.Errorf("relationship.Type = %q, want %q", rel.Type, "parent")
 	}
-	if rel.Field != "spaceId" {
-		t.Errorf("relationship.Field = %q, want %q", rel.Field, "spaceId")
+	if rel.Field != "partitionId" {
+		t.Errorf("relationship.Field = %q, want %q", rel.Field, "partitionId")
 	}
 	if rel.TargetConcept != "v1:cognition:space" {
 		t.Errorf("relationship.TargetConcept = %q, want %q", rel.TargetConcept, "v1:cognition:space")

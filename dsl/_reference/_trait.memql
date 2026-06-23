@@ -151,7 +151,7 @@ trait traitIsClusterOwner {
 //     // REJECTED: traits cannot bind to a concept (and @useConcept
 //     // is retired across the DSL).
 //     @useConcept(participant)
-//     trait traitMatchesParticipant { payload.spaceId == "x" }
+//     trait traitMatchesParticipant { payload.partitionId == "x" }
 //
 //     // REJECTED: traits cannot bind to a shape.
 //     @shape("participantFull")
@@ -212,7 +212,7 @@ trait traitIsClusterOwner {
 //     rejected tree-wide -- #977).
 //
 //         query foo {
-//           filter payload.spaceId==args.spaceId && traitIsActiveRecord
+//           filter payload.partitionId==args.partitionId && traitIsActiveRecord
 //           shape  fooFull
 //         }
 //

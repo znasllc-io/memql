@@ -216,7 +216,7 @@ func (e *RealtimeExecutor) executeToolCall(p *pendingToolCall, arguments string)
 	// tool.transport memQL round-trip it times internally), regardless of when
 	// the result is later injected.
 	logVoiceTiming(e.logger, "tool.execute", execStart,
-		"space_id", e.cfg.SpaceID, "tool", p.name, "call_id", p.callID, "outcome", p.outcome)
+		"partition_id", e.cfg.PartitionID, "tool", p.name, "call_id", p.callID, "outcome", p.outcome)
 
 	p.doneAt = time.Now()
 	close(p.done)
@@ -297,13 +297,13 @@ func (e *RealtimeExecutor) injectReadyToolResults() bool {
 		// #1432 tool.result_inject: the injection leg; queue_wait_ms is how
 		// long the completed result waited for its FIFO turn.
 		logVoiceTiming(e.logger, "tool.result_inject", injectStart,
-			"space_id", e.cfg.SpaceID, "tool", p.name, "call_id", p.callID,
+			"partition_id", e.cfg.PartitionID, "tool", p.name, "call_id", p.callID,
 			"outcome", p.outcome, "queue_wait_ms", injectStart.Sub(p.doneAt).Milliseconds())
 		// #1432 tool.roundtrip: the per-call async arc, call emitted -> result
 		// in the model's context. The audible announce leg is shared across
 		// coalesced results and measured separately (tool.announce).
 		logVoiceTiming(e.logger, "tool.roundtrip", p.emitted,
-			"space_id", e.cfg.SpaceID, "tool", p.name, "call_id", p.callID, "outcome", p.outcome)
+			"partition_id", e.cfg.PartitionID, "tool", p.name, "call_id", p.callID, "outcome", p.outcome)
 		injected = true
 	}
 }
@@ -346,6 +346,6 @@ func (e *RealtimeExecutor) tryAnnounceToolResults(armedAt time.Time) bool {
 	}
 	// #1432 tool.announce: first uncovered result injected -> announce
 	// response fired (the coalesced audible leg of the async arc).
-	logVoiceTiming(e.logger, "tool.announce", armedAt, "space_id", e.cfg.SpaceID)
+	logVoiceTiming(e.logger, "tool.announce", armedAt, "partition_id", e.cfg.PartitionID)
 	return true
 }

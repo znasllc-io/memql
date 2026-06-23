@@ -16,7 +16,7 @@ func (c *CognitionIntegration) generateUnifiedStreaming(
 	ctx context.Context,
 	agent *agentPayload,
 	trigger string,
-	spaceId string,
+	partitionId string,
 	participantId string,
 	replyId string,
 	participants []map[string]any,
@@ -39,7 +39,7 @@ func (c *CognitionIntegration) generateUnifiedStreaming(
 		personality = "You are a helpful, professional assistant that supports users in their sessions. You respond when asked questions or when you can provide relevant insights."
 	}
 
-	spaceContext := c.getSpaceContextForPromptCached(ctx, strings.TrimSpace(spaceId))
+	spaceContext := c.getSpaceContextForPromptCached(ctx, strings.TrimSpace(partitionId))
 
 	data := map[string]any{
 		"trigger": strings.TrimSpace(trigger),
@@ -47,7 +47,7 @@ func (c *CognitionIntegration) generateUnifiedStreaming(
 			"name":        strings.TrimSpace(agent.Name),
 			"personality": personality,
 		},
-		"space":             buildSpaceData(strings.TrimSpace(spaceId), si),
+		"space":             buildSpaceData(strings.TrimSpace(partitionId), si),
 		"participants":      participants,
 		"history":           []map[string]any{},
 		"historyInMessages": true,
@@ -81,5 +81,5 @@ func (c *CognitionIntegration) generateUnifiedStreaming(
 	toolNames := c.toolsForContext(si.spaceType, false, agent)
 	tools := c.engine.ToolDefinitionsForNames(toolNames)
 
-	return c.runStreamingToolLoop(ctx, streamProvider, messages, tools, spaceId, participantId, replyId, "unified-stream")
+	return c.runStreamingToolLoop(ctx, streamProvider, messages, tools, partitionId, participantId, replyId, "unified-stream")
 }

@@ -16,7 +16,7 @@ import (
 // integrations for server-side fs_write promotion.
 //
 // Lives here (shared by the bff + agent builds) because BOTH nodes serve the
-// `/spaces/{spaceId}/attachments` surface: the bff is the frontend-facing node
+// `/spaces/{partitionId}/attachments` surface: the bff is the frontend-facing node
 // the SPA's upload/download requests route to (nginx + the Vite dev proxy send
 // `/spaces/...` to the bff), and the agent serves it on its own host for the
 // worker/workbench paths. Previously only the agent mounted it -- and only the

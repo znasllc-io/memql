@@ -35,9 +35,9 @@ import (
 //
 //   - Producer side (every node that emits a chat-reply event): on a LOCAL,
 //     non-remote chat-reply event we Publish a Deliverable to the substrate
-//     keyed by space:<spaceId>. The durable outbox row is the guarantee; the
+//     keyed by space:<partitionId>. The durable outbox row is the guarantee; the
 //     EventBridge mesh forward stays as the deduped low-latency fast-path.
-//   - Consumer side (bff only): a bff Subscribes to space:<spaceId> on the
+//   - Consumer side (bff only): a bff Subscribes to space:<partitionId> on the
 //     substrate and re-publishes each deliverable onto its LOCAL bus -- where
 //     the existing browser gRPC subscription already consumes it -- then Acks.
 //     A bff lazily subscribes to a space the moment it observes a local
@@ -85,7 +85,7 @@ const (
 
 // Chat-reply concept ids whose graph.node.created/updated events must reach the
 // WS-owning bff replica. Confirmed against the code: utterance + presence +
-// textChunk carry a spaceId field; canvasState carries a space field (see
+// textChunk carry a partitionId field; canvasState carries a space field (see
 // resolveSpaceKey).
 //
 // NOTE the presence id: the concept is declared under
@@ -111,7 +111,7 @@ const (
 //
 // clientToolRequest (memql#1846): the cross-node client-tool relay REQUEST leg
 // (cognition/voice -> browser). Cognition emits a v1:cognition:client:tool:request
-// graph node carrying a required spaceId; the browser picks it up off its space
+// graph node carrying a required partitionId; the browser picks it up off its space
 // subscription on the WS-owning bff replica and dispatches the UI-takeover tool.
 // Before #1846 that request rode ONLY the best-effort mesh fast-path
 // (EventBridge.forwardToPeers -> sendTarget), which silently skips any peer with
@@ -140,7 +140,7 @@ const (
 // On every space open the CoPresent client joins the space (participant row,
 // first open only -- idempotent content-addressed id) and creates a session row
 // (EVERY open, fresh sessionId), and heartbeats the session while the space
-// stays open (mutationTouchSession). Both concepts carry a required spaceId.
+// stays open (mutationTouchSession). Both concepts carry a required partitionId.
 // These are consumer-side subscription triggers ONLY -- they are never
 // published to the substrate (the producer set stays the chat-reply topics;
 // participant/session events keep riding the mesh fast-path).
@@ -438,19 +438,19 @@ func isSpaceInterestTopic(topic string) bool {
 	return false
 }
 
-// resolveSpaceKey extracts the logical delivery key (space:<spaceId>) from a
+// resolveSpaceKey extracts the logical delivery key (space:<partitionId>) from a
 // chat-reply event payload. The graph emitter flattens the node's fields onto
 // the event payload, so the space id is a top-level field: utterance + presence
-// use "spaceId", canvasState uses "space". We also fall back to the nested
+// use "partitionId", canvasState uses "space". We also fall back to the nested
 // "payload" map for robustness.
 func resolveSpaceKey(payload map[string]any) (RoutingKey, bool) {
-	for _, field := range []string{"spaceId", "space"} {
+	for _, field := range []string{"partitionId", "space"} {
 		if v := stringField(payload, field); v != "" {
 			return RoutingKey{Kind: "space", ID: v}, true
 		}
 	}
 	if nested, ok := payload["payload"].(map[string]any); ok {
-		for _, field := range []string{"spaceId", "space"} {
+		for _, field := range []string{"partitionId", "space"} {
 			if v := stringField(nested, field); v != "" {
 				return RoutingKey{Kind: "space", ID: v}, true
 			}

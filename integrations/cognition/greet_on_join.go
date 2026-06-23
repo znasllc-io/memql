@@ -63,17 +63,17 @@ type greetingPacingState struct {
 }
 
 // acquireGreetingPacingState looks up the per-space pacing state
-// for `spaceId`, creating it on first use. The returned pointer is
+// for `partitionId`, creating it on first use. The returned pointer is
 // stable for the lifetime of the process; callers must Lock its
 // mu field before reading or mutating its members.
-func (c *CognitionIntegration) acquireGreetingPacingState(spaceId string) *greetingPacingState {
+func (c *CognitionIntegration) acquireGreetingPacingState(partitionId string) *greetingPacingState {
 	c.greetingPacingMu.Lock()
 	defer c.greetingPacingMu.Unlock()
-	if state, ok := c.greetingPacing[spaceId]; ok {
+	if state, ok := c.greetingPacing[partitionId]; ok {
 		return state
 	}
 	state := &greetingPacingState{}
-	c.greetingPacing[spaceId] = state
+	c.greetingPacing[partitionId] = state
 	return state
 }
 
@@ -112,7 +112,7 @@ func (c *CognitionIntegration) handleAIParticipantGreeting(event events.Event) {
 		return
 	}
 
-	// Pull spaceId, participantId, agentId, displayName, status from
+	// Pull partitionId, participantId, agentId, displayName, status from
 	// the flattened event payload. The graph emitter splats the node
 	// payload onto event.Payload at create time; nested forms are a
 	// fallback for older paths.
@@ -138,7 +138,7 @@ func (c *CognitionIntegration) handleAIParticipantGreeting(event events.Event) {
 		return // a left-then-rejoined transition still produces a create event in some paths; don't greet on the leave
 	}
 
-	spaceId := getStr("spaceId")
+	partitionId := getStr("partitionId")
 	agentId := getStr("agentId")
 	displayName := getStr("displayName")
 
@@ -151,17 +151,17 @@ func (c *CognitionIntegration) handleAIParticipantGreeting(event events.Event) {
 	}
 	participantId = strings.TrimSpace(participantId)
 
-	if spaceId == "" || agentId == "" || participantId == "" {
+	if partitionId == "" || agentId == "" || participantId == "" {
 		return
 	}
 
-	go c.runGreetingTurn(spaceId, participantId, agentId, displayName)
+	go c.runGreetingTurn(partitionId, participantId, agentId, displayName)
 }
 
 // runGreetingTurn does the actual LLM call + insert. Runs in its own
 // goroutine off the event-bus path. Bounded ctx so a stuck LLM
 // provider doesn't leak goroutines.
-func (c *CognitionIntegration) runGreetingTurn(spaceId, participantId, agentId, displayName string) {
+func (c *CognitionIntegration) runGreetingTurn(partitionId, participantId, agentId, displayName string) {
 	ctx, cancel := context.WithTimeout(contextWithSystemActor(context.Background()), 60*time.Second)
 	defer cancel()
 
@@ -182,7 +182,7 @@ func (c *CognitionIntegration) runGreetingTurn(spaceId, participantId, agentId, 
 	// this (space, agent). queryGreetingUtterance checks on
 	// payload.source.kind=="agentGreeting" -- same predicate the
 	// deduped helper used.
-	if c.greetingExists(ctx, spaceId, agentId) {
+	if c.greetingExists(ctx, partitionId, agentId) {
 		return
 	}
 
@@ -193,21 +193,21 @@ func (c *CognitionIntegration) runGreetingTurn(spaceId, participantId, agentId, 
 	// both replicas because neither inserts its greeting until after the
 	// initial-delay sleep + LLM call. Without this gate both replicas
 	// greet -> the greeting posts twice. The advisory lock (keyed on
-	// (spaceId, agentId), held across the sleep + LLM call + insert,
+	// (partitionId, agentId), held across the sleep + LLM call + insert,
 	// released on return) lets exactly one replica through; the loser
 	// bails. Fails SAFE (proceeds) on any DB/lock error, falling through
 	// to the greetingExists checks which are themselves a durable dedup
 	// once one greeting lands -- so a gate-infra failure can at worst
 	// reproduce the old duplicate, never suppress a legitimate greeting.
 	// No-op on single-replica dev.
-	greetProceed, releaseGreetGate, greetGateErr := c.dispatchGate.tryGreet(ctx, spaceId, agentId)
+	greetProceed, releaseGreetGate, greetGateErr := c.dispatchGate.tryGreet(ctx, partitionId, agentId)
 	if greetGateErr != nil {
 		c.Logger.Warn("greet_on_join: greet gate errored; failing safe and proceeding",
-			"error", greetGateErr, "spaceId", spaceId, "agentId", agentId)
+			"error", greetGateErr, "partitionId", partitionId, "agentId", agentId)
 	}
 	if !greetProceed {
 		c.Logger.Debug("greet_on_join: another replica owns this greeting, skipping",
-			"spaceId", spaceId, "agentId", agentId)
+			"partitionId", partitionId, "agentId", agentId)
 		return
 	}
 	defer releaseGreetGate()
@@ -230,7 +230,7 @@ func (c *CognitionIntegration) runGreetingTurn(spaceId, participantId, agentId, 
 	// pass the pre-lock dedup check, and the second one shouldn't
 	// fire a duplicate greeting just because it queued behind the
 	// first.
-	pacing := c.acquireGreetingPacingState(spaceId)
+	pacing := c.acquireGreetingPacingState(partitionId)
 	pacing.mu.Lock()
 	defer pacing.mu.Unlock()
 
@@ -254,7 +254,7 @@ func (c *CognitionIntegration) runGreetingTurn(spaceId, participantId, agentId, 
 	// Re-check dedup post-sleep: another goroutine may have
 	// inserted a greeting for this (space, agent) while we were
 	// queued behind it.
-	if c.greetingExists(ctx, spaceId, agentId) {
+	if c.greetingExists(ctx, partitionId, agentId) {
 		return
 	}
 
@@ -263,16 +263,16 @@ func (c *CognitionIntegration) runGreetingTurn(spaceId, participantId, agentId, 
 	// sleep so a suppression the frontend armed during that window is seen --
 	// the guided intake is taking over the conversation, so an opening greeting
 	// on top of it is wasteful + noisy.
-	if c.greetSuppressed(ctx, spaceId) {
-		c.Logger.Debug("greet_on_join: suppressed for guide/first-run", "spaceId", spaceId)
+	if c.greetSuppressed(ctx, partitionId) {
+		c.Logger.Debug("greet_on_join: suppressed for guide/first-run", "partitionId", partitionId)
 		return
 	}
 
 	// Build the same context the conversational reply path uses, so
 	// the agent has space title, participant roster, peer roster,
 	// etc. when composing the greeting.
-	si := c.getSpaceInfoCached(ctx, spaceId)
-	participants, _ := c.getParticipantsForPromptCached(ctx, spaceId)
+	si := c.getSpaceInfoCached(ctx, partitionId)
+	participants, _ := c.getParticipantsForPromptCached(ctx, partitionId)
 	// Empty history -- this is the OPENING turn. The directive below
 	// makes the prompt branch into "greet, don't respond to nothing."
 	var history []conversationMessage
@@ -312,10 +312,10 @@ func (c *CognitionIntegration) runGreetingTurn(spaceId, participantId, agentId, 
 	}
 	ctx = contextWithDirective(ctx, greetDirective)
 
-	response, err := c.generateAIResponse(ctx, agent, "join_greeting", spaceId, participants, nil, history, si, nil)
+	response, err := c.generateAIResponse(ctx, agent, "join_greeting", partitionId, participants, nil, history, si, nil)
 	if err != nil {
 		c.Logger.Warn("greet_on_join: generate greeting failed",
-			"agentId", agentId, "spaceId", spaceId, "error", err)
+			"agentId", agentId, "partitionId", partitionId, "error", err)
 		return
 	}
 	response = strings.TrimSpace(response)
@@ -333,15 +333,15 @@ func (c *CognitionIntegration) runGreetingTurn(spaceId, participantId, agentId, 
 	// The AI display name is already carried by the participant row
 	// referenced via participantId; consumers derive it from there.
 	mutation := fmt.Sprintf(
-		`mutationCreateGreetingUtterance({spaceId: %s, participantId: %s, agentId: %s, text: %s, greetingKind: "agentGreeting"})`,
-		escapeJSONString(spaceId),
+		`mutationCreateGreetingUtterance({partitionId: %s, participantId: %s, agentId: %s, text: %s, greetingKind: "agentGreeting"})`,
+		escapeJSONString(partitionId),
 		escapeJSONString(participantId),
 		escapeJSONString(agentId),
 		escapeJSONString(response),
 	)
 	if _, err := c.engine.Execute(ctx, mutation); err != nil {
 		c.Logger.Warn("greet_on_join: insert greeting utterance failed",
-			"agentId", agentId, "spaceId", spaceId, "error", err)
+			"agentId", agentId, "partitionId", partitionId, "error", err)
 		return
 	}
 	// Stamp insert time on the pacing state so the next greeting
@@ -350,7 +350,7 @@ func (c *CognitionIntegration) runGreetingTurn(spaceId, participantId, agentId, 
 	// via the deferred Unlock at the top of this section.
 	pacing.lastGreetingAt = time.Now()
 	c.Logger.Info("greet_on_join: greeting posted",
-		"agentId", agentId, "spaceId", spaceId, "participantId", participantId,
+		"agentId", agentId, "partitionId", partitionId, "participantId", participantId,
 		"displayName", displayName)
 }
 
@@ -377,12 +377,12 @@ func agentWantsGreeting(agent *agentPayload) bool {
 // (space, agent). Mirrors the queryHasAIResponseForReply traversal
 // pattern: the engine returns an opaque map with `bundle.nodes`
 // at varying capitalisations, so we sniff both.
-func (c *CognitionIntegration) greetingExists(ctx context.Context, spaceId, agentId string) bool {
+func (c *CognitionIntegration) greetingExists(ctx context.Context, partitionId, agentId string) bool {
 	if c == nil || c.engine == nil {
 		return false
 	}
-	query := fmt.Sprintf(`queryGreetingUtterance({spaceId: %s, agentId: %s})`,
-		escapeJSONString(spaceId), escapeJSONString(agentId))
+	query := fmt.Sprintf(`queryGreetingUtterance({partitionId: %s, agentId: %s})`,
+		escapeJSONString(partitionId), escapeJSONString(agentId))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil || result == nil {
 		return false
@@ -413,12 +413,12 @@ func (c *CognitionIntegration) greetingExists(ctx context.Context, spaceId, agen
 // starting, so the opening greeting + its LLM call don't fire over the guided
 // intake that's taking over the conversation. Best-effort: a query error
 // returns false (greet as normal) rather than silently muting greetings.
-func (c *CognitionIntegration) greetSuppressed(ctx context.Context, spaceId string) bool {
+func (c *CognitionIntegration) greetSuppressed(ctx context.Context, partitionId string) bool {
 	if c == nil || c.engine == nil {
 		return false
 	}
-	query := fmt.Sprintf(`queryActiveGreetSuppression({spaceId: %s, now: %s})`,
-		escapeJSONString(spaceId), escapeJSONString(time.Now().UTC().Format(time.RFC3339)))
+	query := fmt.Sprintf(`queryActiveGreetSuppression({partitionId: %s, now: %s})`,
+		escapeJSONString(partitionId), escapeJSONString(time.Now().UTC().Format(time.RFC3339)))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil || result == nil {
 		return false

@@ -9,23 +9,23 @@ import (
 	"testing"
 )
 
-// TestNoNewSpaceIdInCore guards the partition-adoption boundary (issue 2.2):
+// TestNoNewPartitionIdInCore guards the partition-adoption boundary (issue 2.2):
 // `partition` is the canonical tenant scope, so core must not grow NEW
-// dependencies on `spaceId` (a CoPresent product notion). The 51 files that
+// dependencies on `partitionId` (a CoPresent product notion). The 51 files that
 // reference it today are grandfathered in testdata/spaceid_core_baseline.txt
 // and get re-pointed onto `partition` by Epic 3.2; this test fails the moment
-// a core .go file OUTSIDE that baseline introduces `spaceId`.
+// a core .go file OUTSIDE that baseline introduces `partitionId`.
 //
-// Additions-only ratchet: a baseline file that no longer references spaceId is
+// Additions-only ratchet: a baseline file that no longer references partitionId is
 // fine (Epic 3.2 prunes the list as it cleans up). The point is purely to stop
 // new leaks. See docs/public/concepts/partition-scoping.md.
-func TestNoNewSpaceIdInCore(t *testing.T) {
+func TestNoNewPartitionIdInCore(t *testing.T) {
 	root := repoRoot(t)
-	baseline := loadSpaceIdBaseline(t, filepath.Join(root, "component", "memql", "testdata", "spaceid_core_baseline.txt"))
+	baseline := loadPartitionIdBaseline(t, filepath.Join(root, "component", "memql", "testdata", "spaceid_core_baseline.txt"))
 
 	// Core directories expected to become product-agnostic.
 	coreDirs := []string{"component", "app"}
-	const needle = "spaceid" // case-insensitive match against spaceId / SpaceId / SpaceID
+	const needle = "spaceid" // case-insensitive match against partitionId / PartitionId / PartitionID
 
 	var offenders []string
 	for _, dir := range coreDirs {
@@ -42,7 +42,7 @@ func TestNoNewSpaceIdInCore(t *testing.T) {
 				return nil
 			}
 			// Skip tests, generated code, and the partition-scope files that
-			// legitimately NAME spaceId in order to forbid it.
+			// legitimately NAME partitionId in order to forbid it.
 			if strings.HasSuffix(name, "_test.go") ||
 				strings.HasSuffix(name, ".pb.go") ||
 				strings.Contains(path, string(os.PathSeparator)+"gen"+string(os.PathSeparator)) ||
@@ -69,7 +69,7 @@ func TestNoNewSpaceIdInCore(t *testing.T) {
 	}
 
 	if len(offenders) > 0 {
-		t.Fatalf("new `spaceId` use in core (%d file(s)): %s\n\n"+
+		t.Fatalf("new `partitionId` use in core (%d file(s)): %s\n\n"+
 			"`partition` is the canonical tenant scope -- scope via memql.PartitionScope / "+
 			"ResolvePartitionFromContext, not a product id. If this is a legitimate, "+
 			"unavoidable case being migrated by Epic 3.2, add the path to "+
@@ -79,7 +79,7 @@ func TestNoNewSpaceIdInCore(t *testing.T) {
 	}
 }
 
-func loadSpaceIdBaseline(t *testing.T, path string) map[string]bool {
+func loadPartitionIdBaseline(t *testing.T, path string) map[string]bool {
 	t.Helper()
 	f, err := os.Open(path)
 	if err != nil {

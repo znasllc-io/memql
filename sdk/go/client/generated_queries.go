@@ -380,7 +380,7 @@ func QueryActiveDelegationsForAgentBuild(args QueryActiveDelegationsForAgentArgs
 //
 // Bound concept: participant.
 type QueryActiveHumanParticipantsArgs struct {
-	SpaceId string
+	PartitionId string
 }
 
 // QueryActiveHumanParticipants calls the engine query queryActiveHumanParticipants.
@@ -392,10 +392,27 @@ func (qc *QueryClient) QueryActiveHumanParticipants(ctx context.Context, args Qu
 func QueryActiveHumanParticipantsBuild(args QueryActiveHumanParticipantsArgs) string {
 	var b strings.Builder
 	b.WriteString("queryActiveHumanParticipants({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
+}
+
+// QueryActivePartitionIds -- Returns id-only projections of every active v1:cognition:space row (no status / archived filtering -- mirrors the pre-existing recomputeAllSpacesContext semantics that just need non-deleted rows). Backs the cognition heartbeat path that iterates spaces to recompute per-space context (memql#287; replaces a handwritten shape() runtime query under sub-epic #286).
+//
+// Bound concept: space.
+type QueryActivePartitionIdsArgs struct {
+}
+
+// QueryActivePartitionIds calls the engine query queryActivePartitionIds.
+func (qc *QueryClient) QueryActivePartitionIds(ctx context.Context, args QueryActivePartitionIdsArgs) (*Result, error) {
+	call := QueryActivePartitionIdsBuild(args)
+	return qc.executeNamed(ctx, "queryActivePartitionIds", call)
+}
+
+func QueryActivePartitionIdsBuild(args QueryActivePartitionIdsArgs) string {
+	_ = args
+	return "queryActivePartitionIds({})"
 }
 
 // QueryActivePlansForUser -- The caller's currently-RUNNING Plans -- the account's active tasks occupying concurrency slots (epic memql#902 / #909). Owned tier: payload.requestedBy==actor.userId binds server-side so a caller only sees their own. The active count is the result length; pair with queryAccountEntitlement for the cap and queryWaitingPlansForUser for the queue.
@@ -498,23 +515,6 @@ func (qc *QueryClient) QueryActiveSkillsFull(ctx context.Context, args QueryActi
 func QueryActiveSkillsFullBuild(args QueryActiveSkillsFullArgs) string {
 	_ = args
 	return "queryActiveSkillsFull({})"
-}
-
-// QueryActiveSpaceIds -- Returns id-only projections of every active v1:cognition:space row (no status / archived filtering -- mirrors the pre-existing recomputeAllSpacesContext semantics that just need non-deleted rows). Backs the cognition heartbeat path that iterates spaces to recompute per-space context (memql#287; replaces a handwritten shape() runtime query under sub-epic #286).
-//
-// Bound concept: space.
-type QueryActiveSpaceIdsArgs struct {
-}
-
-// QueryActiveSpaceIds calls the engine query queryActiveSpaceIds.
-func (qc *QueryClient) QueryActiveSpaceIds(ctx context.Context, args QueryActiveSpaceIdsArgs) (*Result, error) {
-	call := QueryActiveSpaceIdsBuild(args)
-	return qc.executeNamed(ctx, "queryActiveSpaceIds", call)
-}
-
-func QueryActiveSpaceIdsBuild(args QueryActiveSpaceIdsArgs) string {
-	_ = args
-	return "queryActiveSpaceIds({})"
 }
 
 // QueryActiveSpaces -- Returns spaces with status='active' (the default), scoped to the caller's per-row authz reach. Optional userId arg narrows to a specific owner (matches payload.ownerUserId, a v1:identity:user id -- NOT the createdBy email). Used by the cockpit Chat tab to populate the space list.
@@ -921,12 +921,12 @@ func QueryAssistantAgentForUserBuild(args QueryAssistantAgentForUserArgs) string
 	return b.String()
 }
 
-// QueryAttachmentById -- Fetch a single v1:common:attachment row by id within a space. Backs the attachment download endpoint (GET /spaces/{spaceId}/attachments/{attachmentId}); the handler gates on space ownership first.
+// QueryAttachmentById -- Fetch a single v1:common:attachment row by id within a space. Backs the attachment download endpoint (GET /spaces/{partitionId}/attachments/{attachmentId}); the handler gates on space ownership first.
 //
 // Bound concept: attachment.
 type QueryAttachmentByIdArgs struct {
 	AttachmentId string
-	SpaceId      string
+	PartitionId  string
 }
 
 // QueryAttachmentById calls the engine query queryAttachmentById.
@@ -943,8 +943,8 @@ func QueryAttachmentByIdBuild(args QueryAttachmentByIdArgs) string {
 	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -953,7 +953,7 @@ func QueryAttachmentByIdBuild(args QueryAttachmentByIdArgs) string {
 //
 // Bound concept: audioOverride.
 type QueryAudioOverridesForSpaceArgs struct {
-	SpaceId string
+	PartitionId string
 }
 
 // QueryAudioOverridesForSpace calls the engine query queryAudioOverridesForSpace.
@@ -965,8 +965,8 @@ func (qc *QueryClient) QueryAudioOverridesForSpace(ctx context.Context, args Que
 func QueryAudioOverridesForSpaceBuild(args QueryAudioOverridesForSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("queryAudioOverridesForSpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -1622,7 +1622,7 @@ func QueryDeploymentsForClusterBuild(args QueryDeploymentsForClusterArgs) string
 //
 // Bound concept: record.
 type QueryDetectConflictsArgs struct {
-	SpaceId         string
+	PartitionId     string
 	NaturalKeyValue string
 	RecordType      string
 }
@@ -1636,8 +1636,8 @@ func (qc *QueryClient) QueryDetectConflicts(ctx context.Context, args QueryDetec
 func QueryDetectConflictsBuild(args QueryDetectConflictsArgs) string {
 	var b strings.Builder
 	b.WriteString("queryDetectConflicts({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
@@ -1788,7 +1788,7 @@ func QueryDocumentsForDomainBuild(args QueryDocumentsForDomainArgs) string {
 //
 // Bound concept: document.
 type QueryDocumentsForSpaceArgs struct {
-	SpaceId string
+	PartitionId string
 }
 
 // QueryDocumentsForSpace calls the engine query queryDocumentsForSpace.
@@ -1800,8 +1800,8 @@ func (qc *QueryClient) QueryDocumentsForSpace(ctx context.Context, args QueryDoc
 func QueryDocumentsForSpaceBuild(args QueryDocumentsForSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("queryDocumentsForSpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -2242,8 +2242,8 @@ func QueryGlobalVariablesBuild(args QueryGlobalVariablesArgs) string {
 //
 // Bound concept: utterance.
 type QueryGreetingUtteranceArgs struct {
-	SpaceId string
-	AgentId string
+	PartitionId string
+	AgentId     string
 }
 
 // QueryGreetingUtterance calls the engine query queryGreetingUtterance.
@@ -2255,8 +2255,8 @@ func (qc *QueryClient) QueryGreetingUtterance(ctx context.Context, args QueryGre
 func QueryGreetingUtteranceBuild(args QueryGreetingUtteranceArgs) string {
 	var b strings.Builder
 	b.WriteString("queryGreetingUtterance({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
@@ -2266,11 +2266,11 @@ func QueryGreetingUtteranceBuild(args QueryGreetingUtteranceArgs) string {
 	return b.String()
 }
 
-// QueryGroupGAForSpace -- Active AI (group GA) participant for a space. Callers must pass the canonical spaceId.
+// QueryGroupGAForSpace -- Active AI (group GA) participant for a space. Callers must pass the canonical partitionId.
 //
 // Bound concept: participant.
 type QueryGroupGAForSpaceArgs struct {
-	SpaceId string
+	PartitionId string
 }
 
 // QueryGroupGAForSpace calls the engine query queryGroupGAForSpace.
@@ -2282,8 +2282,8 @@ func (qc *QueryClient) QueryGroupGAForSpace(ctx context.Context, args QueryGroup
 func QueryGroupGAForSpaceBuild(args QueryGroupGAForSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("queryGroupGAForSpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -3006,7 +3006,7 @@ func QueryOAuthClientByClientIdBuild(args QueryOAuthClientByClientIdArgs) string
 //
 // Bound concept: space.
 type QueryOwnedSpaceByIdArgs struct {
-	SpaceId string
+	PartitionId string
 }
 
 // QueryOwnedSpaceById calls the engine query queryOwnedSpaceById.
@@ -3018,8 +3018,8 @@ func (qc *QueryClient) QueryOwnedSpaceById(ctx context.Context, args QueryOwnedS
 func QueryOwnedSpaceByIdBuild(args QueryOwnedSpaceByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("queryOwnedSpaceById({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -3028,8 +3028,8 @@ func QueryOwnedSpaceByIdBuild(args QueryOwnedSpaceByIdArgs) string {
 //
 // Bound concept: participant.
 type QueryParticipantByAgentSpaceArgs struct {
-	SpaceId string
-	AgentId string
+	PartitionId string
+	AgentId     string
 }
 
 // QueryParticipantByAgentSpace calls the engine query queryParticipantByAgentSpace.
@@ -3041,8 +3041,8 @@ func (qc *QueryClient) QueryParticipantByAgentSpace(ctx context.Context, args Qu
 func QueryParticipantByAgentSpaceBuild(args QueryParticipantByAgentSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("queryParticipantByAgentSpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
@@ -3052,11 +3052,11 @@ func QueryParticipantByAgentSpaceBuild(args QueryParticipantByAgentSpaceArgs) st
 	return b.String()
 }
 
-// QueryParticipantSession -- Returns session state for participants in spaces. Optional filters: spaceId, participantId
+// QueryParticipantSession -- Returns session state for participants in spaces. Optional filters: partitionId, participantId
 //
 // Bound concept: session.
 type QueryParticipantSessionArgs struct {
-	SpaceId       string
+	PartitionId   string
 	ParticipantId string
 }
 
@@ -3069,9 +3069,9 @@ func (qc *QueryClient) QueryParticipantSession(ctx context.Context, args QueryPa
 func QueryParticipantSessionBuild(args QueryParticipantSessionArgs) string {
 	var b strings.Builder
 	b.WriteString("queryParticipantSession({")
-	if args.SpaceId != "" {
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	if args.PartitionId != "" {
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.ParticipantId != "" {
 		if b.Len() > 25 {
@@ -3215,7 +3215,7 @@ func QueryPlansForResponsibilityBuild(args QueryPlansForResponsibilityArgs) stri
 //
 // Bound concept: plan.
 type QueryPlansForSpaceArgs struct {
-	SpaceId string
+	PartitionId string
 }
 
 // QueryPlansForSpace calls the engine query queryPlansForSpace.
@@ -3227,8 +3227,8 @@ func (qc *QueryClient) QueryPlansForSpace(ctx context.Context, args QueryPlansFo
 func QueryPlansForSpaceBuild(args QueryPlansForSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("queryPlansForSpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -3238,7 +3238,7 @@ func QueryPlansForSpaceBuild(args QueryPlansForSpaceArgs) string {
 // Bound concept: policy.
 type QueryPolicyArgs struct {
 	TargetRecordType string
-	SpaceId          string
+	PartitionId      string
 }
 
 // QueryPolicy calls the engine query queryPolicy.
@@ -3252,12 +3252,12 @@ func QueryPolicyBuild(args QueryPolicyArgs) string {
 	b.WriteString("queryPolicy({")
 	b.WriteString("targetRecordType: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetRecordType))
-	if args.SpaceId != "" {
+	if args.PartitionId != "" {
 		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	b.WriteString("})")
 	return b.String()
@@ -3392,11 +3392,11 @@ func QueryRecentAuditEventsBuild(args QueryRecentAuditEventsArgs) string {
 	return b.String()
 }
 
-// QueryRecordsByState -- Returns active data records. Optional filters: spaceId, recordType, validationState, importSource
+// QueryRecordsByState -- Returns active data records. Optional filters: partitionId, recordType, validationState, importSource
 //
 // Bound concept: record.
 type QueryRecordsByStateArgs struct {
-	SpaceId         string
+	PartitionId     string
 	RecordType      string
 	ValidationState string
 	ImportSource    string
@@ -3411,9 +3411,9 @@ func (qc *QueryClient) QueryRecordsByState(ctx context.Context, args QueryRecord
 func QueryRecordsByStateBuild(args QueryRecordsByStateArgs) string {
 	var b strings.Builder
 	b.WriteString("queryRecordsByState({")
-	if args.SpaceId != "" {
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	if args.PartitionId != "" {
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.RecordType != "" {
 		if b.Len() > 21 {
@@ -3639,7 +3639,7 @@ func QuerySearchUsersBuild(args QuerySearchUsersArgs) string {
 //
 // Bound concept: participant.
 type QuerySiParticipantForSpaceArgs struct {
-	SpaceId string
+	PartitionId string
 }
 
 // QuerySiParticipantForSpace calls the engine query querySiParticipantForSpace.
@@ -3651,8 +3651,8 @@ func (qc *QueryClient) QuerySiParticipantForSpace(ctx context.Context, args Quer
 func QuerySiParticipantForSpaceBuild(args QuerySiParticipantForSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("querySiParticipantForSpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -3727,8 +3727,8 @@ func QuerySkillNeedsRefreshBuild(args QuerySkillNeedsRefreshArgs) string {
 //
 // Bound concept: media.
 type QuerySpaceMediaArgs struct {
-	SpaceId   string
-	MediaType string
+	PartitionId string
+	MediaType   string
 }
 
 // QuerySpaceMedia calls the engine query querySpaceMedia.
@@ -3740,8 +3740,8 @@ func (qc *QueryClient) QuerySpaceMedia(ctx context.Context, args QuerySpaceMedia
 func QuerySpaceMediaBuild(args QuerySpaceMediaArgs) string {
 	var b strings.Builder
 	b.WriteString("querySpaceMedia({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if args.MediaType != "" {
 		if b.Len() > 17 {
 			b.WriteString(", ")
@@ -3757,7 +3757,7 @@ func QuerySpaceMediaBuild(args QuerySpaceMediaArgs) string {
 //
 // Bound concept: space.
 type QuerySpaceMetaArgs struct {
-	SpaceId string
+	PartitionId string
 }
 
 // QuerySpaceMeta calls the engine query querySpaceMeta.
@@ -3769,8 +3769,8 @@ func (qc *QueryClient) QuerySpaceMeta(ctx context.Context, args QuerySpaceMetaAr
 func QuerySpaceMetaBuild(args QuerySpaceMetaArgs) string {
 	var b strings.Builder
 	b.WriteString("querySpaceMeta({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -3779,7 +3779,7 @@ func QuerySpaceMetaBuild(args QuerySpaceMetaArgs) string {
 //
 // Bound concept: presence.
 type QuerySpaceParticipantPresenceArgs struct {
-	SpaceId string
+	PartitionId string
 }
 
 // QuerySpaceParticipantPresence calls the engine query querySpaceParticipantPresence.
@@ -3791,8 +3791,8 @@ func (qc *QueryClient) QuerySpaceParticipantPresence(ctx context.Context, args Q
 func QuerySpaceParticipantPresenceBuild(args QuerySpaceParticipantPresenceArgs) string {
 	var b strings.Builder
 	b.WriteString("querySpaceParticipantPresence({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -3801,7 +3801,7 @@ func QuerySpaceParticipantPresenceBuild(args QuerySpaceParticipantPresenceArgs) 
 //
 // Bound concept: participant.
 type QuerySpaceParticipantsArgs struct {
-	SpaceId         string
+	PartitionId     string
 	Status          string
 	ParticipantType string
 }
@@ -3815,8 +3815,8 @@ func (qc *QueryClient) QuerySpaceParticipants(ctx context.Context, args QuerySpa
 func QuerySpaceParticipantsBuild(args QuerySpaceParticipantsArgs) string {
 	var b strings.Builder
 	b.WriteString("querySpaceParticipants({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if args.Status != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
@@ -3839,7 +3839,7 @@ func QuerySpaceParticipantsBuild(args QuerySpaceParticipantsArgs) string {
 //
 // Bound concept: utterance.
 type QuerySpaceUtterancesArgs struct {
-	SpaceId       string
+	PartitionId   string
 	ParticipantId string
 	UtteranceType string
 }
@@ -3853,8 +3853,8 @@ func (qc *QueryClient) QuerySpaceUtterances(ctx context.Context, args QuerySpace
 func QuerySpaceUtterancesBuild(args QuerySpaceUtterancesArgs) string {
 	var b strings.Builder
 	b.WriteString("querySpaceUtterances({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if args.ParticipantId != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
@@ -4113,8 +4113,8 @@ func QueryUpcomingEventsBuild(args QueryUpcomingEventsArgs) string {
 //
 // Bound concept: record.
 type QueryUsableRecordsArgs struct {
-	SpaceId    string
-	RecordType string
+	PartitionId string
+	RecordType  string
 }
 
 // QueryUsableRecords calls the engine query queryUsableRecords.
@@ -4126,9 +4126,9 @@ func (qc *QueryClient) QueryUsableRecords(ctx context.Context, args QueryUsableR
 func QueryUsableRecordsBuild(args QueryUsableRecordsArgs) string {
 	var b strings.Builder
 	b.WriteString("queryUsableRecords({")
-	if args.SpaceId != "" {
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	if args.PartitionId != "" {
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.RecordType != "" {
 		if b.Len() > 20 {
@@ -4141,7 +4141,7 @@ func QueryUsableRecordsBuild(args QueryUsableRecordsArgs) string {
 	return b.String()
 }
 
-// QueryUserActiveSpace -- Returns a user's current activeSpaceId. Empty when the user is not focused on any space.
+// QueryUserActiveSpace -- Returns a user's current activePartitionId. Empty when the user is not focused on any space.
 //
 // Bound concept: user.
 type QueryUserActiveSpaceArgs struct {
@@ -4241,11 +4241,11 @@ func QueryUserDefaultsBuild(args QueryUserDefaultsArgs) string {
 	return "queryUserDefaults({})"
 }
 
-// QueryUsersActiveInSpace -- Returns users whose activeSpaceId == arg(spaceId). Active-human roster per the activity model (Phase 4).
+// QueryUsersActiveInSpace -- Returns users whose activePartitionId == arg(partitionId). Active-human roster per the activity model (Phase 4).
 //
 // Bound concept: user.
 type QueryUsersActiveInSpaceArgs struct {
-	SpaceId string
+	PartitionId string
 }
 
 // QueryUsersActiveInSpace calls the engine query queryUsersActiveInSpace.
@@ -4257,8 +4257,8 @@ func (qc *QueryClient) QueryUsersActiveInSpace(ctx context.Context, args QueryUs
 func QueryUsersActiveInSpaceBuild(args QueryUsersActiveInSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("queryUsersActiveInSpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -4319,13 +4319,13 @@ func QueryValidationEventsForTargetBuild(args QueryValidationEventsForTargetArgs
 	return b.String()
 }
 
-// QueryValidationLog -- Returns validation state change history. Optional filters: recordId, spaceId, action
+// QueryValidationLog -- Returns validation state change history. Optional filters: recordId, partitionId, action
 //
 // Bound concept: log.
 type QueryValidationLogArgs struct {
-	RecordId string
-	SpaceId  string
-	Action   string
+	RecordId    string
+	PartitionId string
+	Action      string
 }
 
 // QueryValidationLog calls the engine query queryValidationLog.
@@ -4341,12 +4341,12 @@ func QueryValidationLogBuild(args QueryValidationLogArgs) string {
 		b.WriteString("recordId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecordId))
 	}
-	if args.SpaceId != "" {
+	if args.PartitionId != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
-		b.WriteString("spaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+		b.WriteString("partitionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.Action != "" {
 		if b.Len() > 20 {
@@ -4380,7 +4380,7 @@ func QueryValidationQueueBuild(args QueryValidationQueueArgs) string {
 //
 // Bound concept: videoOverride.
 type QueryVideoOverridesForSpaceArgs struct {
-	SpaceId string
+	PartitionId string
 }
 
 // QueryVideoOverridesForSpace calls the engine query queryVideoOverridesForSpace.
@@ -4392,8 +4392,8 @@ func (qc *QueryClient) QueryVideoOverridesForSpace(ctx context.Context, args Que
 func QueryVideoOverridesForSpaceBuild(args QueryVideoOverridesForSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("queryVideoOverridesForSpace({")
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("partitionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	b.WriteString("})")
 	return b.String()
 }

@@ -15,14 +15,14 @@ func TestLogVoiceTiming_EmitsDiscoverableKey(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	logVoiceTiming(logger, "server.session_start.persona", time.Now(), "space_id", "space-1")
+	logVoiceTiming(logger, "server.session_start.persona", time.Now(), "partition_id", "space-1")
 
 	out := buf.String()
 	for _, want := range []string{
 		"voice timing",
 		"voice_timing=server.session_start.persona",
 		"duration_ms=",
-		"space_id=space-1",
+		"partition_id=space-1",
 	} {
 		if !bytes.Contains([]byte(out), []byte(want)) {
 			t.Fatalf("timing record missing %q; got %q", want, out)

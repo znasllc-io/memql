@@ -39,7 +39,7 @@ func runVoiceAgentSubcommand(args []string) int {
 	fs := flag.NewFlagSet("voice-agent", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	roomName := fs.String("room", "",
-		"LiveKit room name to join (the memQL convention is polyphon-<spaceId>). "+
+		"LiveKit room name to join (the memQL convention is polyphon-<partitionId>). "+
 			"Falls back to MEMQL_VOICE_ROOM_NAME when unset.")
 	if err := fs.Parse(args); err != nil {
 		return 2

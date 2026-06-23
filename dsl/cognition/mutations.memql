@@ -11,7 +11,7 @@ use identity.concepts.{ user, authSession }
 @description("Add the caller's agent to a space's roster. forUserId is server-stamped; per-user-per-space 3-cap and agent-ownership are enforced by the engine guard.")
 mutation participant mutationAddAgentToSpace {
   args {
-    spaceId              string  @required
+    partitionId              string  @required
     agentId              string  @required
     displayName          string  @required
     capabilityOverrides  object
@@ -19,9 +19,9 @@ mutation participant mutationAddAgentToSpace {
   insert {
     id: concat("si-", hash(concat(
       canonicalId(args.agentId, agent), ":",
-      canonicalId(args.spaceId, space)
+      canonicalId(args.partitionId, space)
     )))
-    args.spaceId
+    args.partitionId
     args.agentId
     participantType: "si"
     args.displayName
@@ -45,11 +45,11 @@ mutation participant mutationAddAgentToSpace {
 @description("Insert a new version of a space record (typically used to archive a space). Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload -- per-row authz already gates that only the owner reaches this mutation, and at create time ownerUserId == actor.userId. Also stamps archivedAt (now) when the caller's payload omits it, so queryArchivedSpaces (which gates on status=='archived', not archivedAt presence) and the retention cron see a complete archived row even from minimal-payload callers. memql#401 / #1637.")
 mutation space mutationArchiveSpace {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
     payload  object  @required
   }
   insert {
-    id: args.spaceId
+    id: args.partitionId
     ownerUserId: actor.userId
     args.payload
     archivedAt: coalesce(args.payload.archivedAt, timestamp())
@@ -117,13 +117,13 @@ mutation space mutationArchiveSpace {
 @description("Create a daily space (kind=daily, private=true). Idempotent on (userHash, dateKey). Phase 10: no maxHumans=1/maxAgents=1 lock; the user can grow a daily space into a full team conversation if they want.")
 mutation space mutationCreateDailySpace {
   args {
-    spaceId       string  @required
+    partitionId       string  @required
     name          string  @required
     dailyDateKey  string  @required
     ownerUserId   string  @required
   }
   insert {
-    id: args.spaceId
+    id: args.partitionId
     args.ownerUserId
     args.name
     args.dailyDateKey
@@ -143,7 +143,7 @@ mutation space mutationCreateDailySpace {
 // Uses a deterministic ID to prevent duplicate greetings.
 //
 // Arguments:
-//   spaceId (string, required)       - Space ID
+//   partitionId (string, required)       - Space ID
 //   participantId (string, required) - AI participant ID
 //   agentId (string, required)       - Agent template ID
 //   text (string, required)          - Greeting text
@@ -153,7 +153,7 @@ mutation space mutationCreateDailySpace {
 //
 // Usage:
 //   mutationCreateGreetingUtterance({
-//     spaceId: "space-123",
+//     partitionId: "space-123",
 //     participantId: "ai-sofia-space-123",
 //     agentId: "sofia",
 //     text: "Hi everyone!",
@@ -173,14 +173,14 @@ mutation space mutationCreateDailySpace {
 @description("Create a greeting utterance for an AI participant joining a space")
 mutation utterance mutationCreateGreetingUtterance {
   args {
-    spaceId        string  @required
+    partitionId        string  @required
     participantId  string  @required
     agentId        string  @required
     text           string  @required
     greetingKind   string  @required
   }
   insert {
-    args.spaceId
+    args.partitionId
     args.participantId
     participantType: "si"
     utteranceType: "text"
@@ -204,7 +204,7 @@ mutation utterance mutationCreateGreetingUtterance {
 mutation session mutationCreateSessionForParticipant {
   args {
     sessionId      string
-    spaceId        string  @required
+    partitionId        string  @required
     participantId  string  @required
     humanInput     object
     aiOutput       object
@@ -212,7 +212,7 @@ mutation session mutationCreateSessionForParticipant {
   }
   insert {
     id: args.sessionId
-    args.spaceId
+    args.partitionId
     args.participantId
     args.humanInput
     args.aiOutput
@@ -236,7 +236,7 @@ mutation session mutationCreateSessionForParticipant {
 @description("Create a space.")
 mutation space mutationCreateSpace {
   args {
-    spaceId           string
+    partitionId           string
     name              string  @required
     description       string
     goal              object
@@ -252,7 +252,7 @@ mutation space mutationCreateSpace {
     maxAgents         int
   }
   insert {
-    id: args.spaceId
+    id: args.partitionId
     ownerUserId: actor.userId
     args.name
     args.description
@@ -290,11 +290,11 @@ mutation space mutationCreateSpace {
 @description("Set or replace a space's structured goal {statement, timeframe} after creation. Partial update via update() -- only the goal changes; everything else inherits from the prior row.")
 mutation space mutationSetSpaceGoal {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
     goal     object  @required
   }
   update {
-    id: args.spaceId
+    id: args.partitionId
     ownerUserId: actor.userId
     args.goal
   }
@@ -324,11 +324,11 @@ mutation space mutationSetSpaceGoal {
 @description("Insert a new version of a space record marking it as hard-deleted (deleted=true). Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).")
 mutation space mutationDeleteSpaceNow {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
     payload  object  @required
   }
   insert {
-    id: args.spaceId
+    id: args.partitionId
     ownerUserId: actor.userId
     args.payload
   }
@@ -342,7 +342,7 @@ mutation space mutationDeleteSpaceNow {
 // Inserts a v1:cognition:client:tool:request record. Called by the
 // cognition client-tool relay when an agent node emits a ClientToolCall
 // that needs to reach a browser on BFF. Browsers subscribe to these
-// events scoped by spaceId/participantId, dispatch via their local
+// events scoped by partitionId/participantId, dispatch via their local
 // tool bridge, and answer by inserting a
 // v1:cognition:client:tool:response with the same callId.
 
@@ -354,7 +354,7 @@ mutation request mutationEmitClientToolRequest {
     callId         string  @required
     toolName       string  @required
     argumentsJSON  string
-    spaceId        string
+    partitionId        string
     participantId  string
     agentId        string
     expiresAt      string
@@ -364,7 +364,7 @@ mutation request mutationEmitClientToolRequest {
     args.callId
     args.toolName
     args.argumentsJSON
-    args.spaceId
+    args.partitionId
     args.participantId
     args.agentId
     args.expiresAt
@@ -392,7 +392,7 @@ mutation response mutationEmitClientToolResponse {
     contentJSON   string
     isError       bool
     errorMessage  string
-    spaceId       string
+    partitionId       string
   }
   insert {
     id: args.responseId
@@ -400,7 +400,7 @@ mutation response mutationEmitClientToolResponse {
     args.contentJSON
     isError: coalesce(args.isError, false)
     args.errorMessage
-    args.spaceId
+    args.partitionId
   }
 }
 
@@ -418,7 +418,7 @@ mutation response mutationEmitClientToolResponse {
 mutation chunk mutationEmitTextChunk {
   args {
     chunkId        string   @required
-    spaceId        string   @required
+    partitionId        string   @required
     participantId  string   @required
     replyId        string   @required
     text           string   @required
@@ -427,7 +427,7 @@ mutation chunk mutationEmitTextChunk {
   }
   insert {
     id: concat("text-chunk-", args.chunkId)
-    args.spaceId
+    args.partitionId
     args.participantId
     args.replyId
     args.text
@@ -444,7 +444,7 @@ mutation chunk mutationEmitTextChunk {
 // Creates (or re-creates) a human participant record for a space.
 //
 // IDEMPOTENCY:
-// The participant id is content-addressed on (canonical spaceId,
+// The participant id is content-addressed on (canonical partitionId,
 // canonical userId). Both args go through canonicalId() before
 // hashing, so the id is invariant whether the caller passes a bare
 // slug ("user-abc") or an already-canonical id
@@ -453,7 +453,7 @@ mutation chunk mutationEmitTextChunk {
 // one logical row, and the latest-version dedup at query time keeps
 // the UI from rendering doubles.
 //
-// The payload's spaceId and userId also get canonicalized at insert
+// The payload's partitionId and userId also get canonicalized at insert
 // time by the engine's @relationship auto-canon (see
 // MemQLEngine.canonicalizeRelationshipFields), so `payload.userId
 // == arg(...)` queries match consistently regardless of input
@@ -465,7 +465,7 @@ mutation chunk mutationEmitTextChunk {
 @description("Join a space as a human participant.")
 mutation participant mutationJoinSpaceAsHuman {
   args {
-    spaceId              string  @required
+    partitionId              string  @required
     userId               string  @required
     displayName          string  @required
     status               string
@@ -477,10 +477,10 @@ mutation participant mutationJoinSpaceAsHuman {
     // land on the same participant id. The caller does not supply the
     // id (memql#213 dropped the ignored participantId arg).
     id: concat("participant-", hash(concat(
-      canonicalId(args.spaceId, space), ":",
+      canonicalId(args.partitionId, space), ":",
       canonicalId(args.userId, user)
     )))
-    args.spaceId
+    args.partitionId
     args.userId
     participantType: "human"
     args.displayName
@@ -499,7 +499,7 @@ mutation participant mutationJoinSpaceAsHuman {
 //
 // IDEMPOTENCY:
 // The id is content-addressed on (canonical agentId, canonical
-// spaceId) -- both args go through canonicalId() before being
+// partitionId) -- both args go through canonicalId() before being
 // concatenated. The id is invariant whether the caller passes bare
 // slugs or already-canonical ids; repeat joins land on the SAME
 // participant id (memQL versions, no duplicate rows).
@@ -510,7 +510,7 @@ mutation participant mutationJoinSpaceAsHuman {
 // (space, agent) pair.
 //
 // The id pattern stays human-readable -- "si-{canonicalAgentId}-
-// {canonicalSpaceId}" -- so the legacy autoJoinAI automation that
+// {canonicalPartitionId}" -- so the legacy autoJoinAI automation that
 // computes the same string can keep using checkExistingGA's lookup
 // without re-encoding via hash().
 
@@ -518,7 +518,7 @@ mutation participant mutationJoinSpaceAsHuman {
 @description("Join a space as an AI participant. Uses canonicalized deterministic ID.")
 mutation participant mutationJoinSpaceAsAI {
   args {
-    spaceId              string  @required
+    partitionId              string  @required
     agentId              string  @required
     displayName          string  @required
     status               string
@@ -534,9 +534,9 @@ mutation participant mutationJoinSpaceAsAI {
     // (memql#213 dropped the ignored participantId arg).
     id: concat("si-", hash(concat(
       canonicalId(args.agentId, agent), ":",
-      canonicalId(args.spaceId, space)
+      canonicalId(args.partitionId, space)
     )))
-    args.spaceId
+    args.partitionId
     args.agentId
     participantType: "si"
     args.displayName
@@ -597,13 +597,13 @@ mutation participant mutationLeaveSpace {
 @description("Remove the caller's agent from a space (status='left'). The engine guard enforces caller-owns-agent and rejects removal of the pinned owner GA.")
 mutation participant mutationRemoveAgentFromSpace {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
     agentId  string  @required
   }
   update {
     id: concat("si-", hash(concat(
       canonicalId(args.agentId, agent), ":",
-      canonicalId(args.spaceId, space)
+      canonicalId(args.partitionId, space)
     )))
     status: "left"
     leftAt: timestamp()
@@ -628,11 +628,11 @@ mutation participant mutationRemoveAgentFromSpace {
 @description("Partial-update a space record (read-merge-write; typically used to rename a space). Only the fields in the caller's payload change; all other fields are preserved. Server-side stamps ownerUserId from actor.userId (memql#401 / #1637).")
 mutation space mutationRenameSpace {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
     payload  object  @required
   }
   update {
-    id: args.spaceId
+    id: args.partitionId
     ownerUserId: actor.userId
     args.payload
   }
@@ -656,11 +656,11 @@ mutation space mutationRenameSpace {
 @description("Insert a new version of a space record to restore it to the active state. Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).")
 mutation space mutationRestoreSpace {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
     payload  object  @required
   }
   insert {
-    id: args.spaceId
+    id: args.partitionId
     ownerUserId: actor.userId
     args.payload
   }
@@ -688,11 +688,11 @@ mutation space mutationRestoreSpace {
 @description("Insert a new version of a space record with the 'saved' status payload. Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).")
 mutation space mutationSaveSpace {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
     payload  object  @required
   }
   insert {
-    id: args.spaceId
+    id: args.partitionId
     ownerUserId: actor.userId
     args.payload
   }
@@ -717,7 +717,7 @@ mutation space mutationSaveSpace {
 mutation utterance mutationSendActionUtterance {
   args {
     utteranceId      string
-    spaceId          string  @required
+    partitionId          string  @required
     participantId    string  @required
     participantType  string
     replyToId        string
@@ -731,18 +731,18 @@ mutation utterance mutationSendActionUtterance {
       cond(
         args.action.idempotencyKey,
         concat("utt-", hash(concat(
-          canonicalId(args.spaceId, space), ":",
+          canonicalId(args.partitionId, space), ":",
           canonicalId(args.participantId, participant), ":",
           args.action.type, ":", args.action.idempotencyKey
         ))),
         concat("utt-", hash(concat(
-          canonicalId(args.spaceId, space), ":",
+          canonicalId(args.partitionId, space), ":",
           canonicalId(args.participantId, participant), ":",
           coalesce(args.createdAt, timestamp()), ":", args.action.type
         )))
       )
     )
-    args.spaceId
+    args.partitionId
     args.participantId
     participantType: coalesce(args.participantType, "human")
     utteranceType: "action"
@@ -773,7 +773,7 @@ mutation utterance mutationSendRealtimeTranscriptUtterance {
     utteranceId      string
     idempotencyKey   string
     createdAt        string
-    spaceId          string  @required
+    partitionId          string  @required
     participantId    string  @required
     participantType  string  @enum("human", "si", "system")
     text             string
@@ -789,19 +789,19 @@ mutation utterance mutationSendRealtimeTranscriptUtterance {
       cond(
         args.idempotencyKey,
         concat("utt-", hash(concat(
-          canonicalId(args.spaceId, space), ":",
+          canonicalId(args.partitionId, space), ":",
           canonicalId(args.participantId, participant), ":",
           args.idempotencyKey
         ))),
         concat("utt-", hash(concat(
-          canonicalId(args.spaceId, space), ":",
+          canonicalId(args.partitionId, space), ":",
           canonicalId(args.participantId, participant), ":",
           timestamp(), ":", coalesce(args.text, "")
         )))
       )
     )
     createdAt: coalesce(args.createdAt, timestamp())
-    args.spaceId
+    args.partitionId
     args.participantId
     participantType: coalesce(args.participantType, "human")
     utteranceType: "speech"
@@ -835,7 +835,7 @@ mutation utterance mutationSendRealtimeTranscriptUtterance {
 mutation utterance mutationSendSpeechUtterance {
   args {
     utteranceId      string
-    spaceId          string  @required
+    partitionId          string  @required
     participantId    string  @required
     participantType  string
     text             string
@@ -849,12 +849,12 @@ mutation utterance mutationSendSpeechUtterance {
     id: coalesce(
       args.utteranceId,
       concat("utt-", hash(concat(
-        canonicalId(args.spaceId, space), ":",
+        canonicalId(args.partitionId, space), ":",
         canonicalId(args.participantId, participant), ":",
         timestamp()
       )))
     )
-    args.spaceId
+    args.partitionId
     args.participantId
     participantType: coalesce(args.participantType, "human")
     utteranceType: "speech"
@@ -879,7 +879,7 @@ mutation utterance mutationSendSpeechUtterance {
 mutation utterance mutationSendTextUtterance {
   args {
     utteranceId      string
-    spaceId          string  @required
+    partitionId          string  @required
     participantId    string  @required
     participantType  string
     text             string  @required
@@ -889,7 +889,7 @@ mutation utterance mutationSendTextUtterance {
   }
   insert {
     id: args.utteranceId
-    args.spaceId
+    args.partitionId
     args.participantId
     participantType: coalesce(args.participantType, "human")
     utteranceType: "text"
@@ -905,14 +905,14 @@ mutation utterance mutationSendTextUtterance {
 // setAgentAudioOverride
 // ====================
 //
-// Writes the per-(spaceId, agentId) audio control override that the
+// Writes the per-(partitionId, agentId) audio control override that the
 // Bridge Agent gating path consults before publishing TTS into a
 // LiveKit room. The frontend's PresencePanel + canvas presence
 // widget orb-corner overlay calls this on every click cycle
 // (always_on -> always_off -> mirror_user -> always_on).
 //
 // IDEMPOTENCY:
-// The id is the deterministic audioOverride:hash(spaceId:agentId)
+// The id is the deterministic audioOverride:hash(partitionId:agentId)
 // so re-toggling the same orb hits the SAME row -- memQL stores the
 // versions as a time-series and the latest wins at read time. No
 // per-click row growth.
@@ -928,7 +928,7 @@ mutation utterance mutationSendTextUtterance {
 @description("Set the per-session audio control mode for an agent in a space.")
 mutation audioOverride mutationSetAgentAudioOverride {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
     agentId  string  @required
     mode     string  @required
     setBy    string
@@ -936,10 +936,10 @@ mutation audioOverride mutationSetAgentAudioOverride {
   }
   insert {
     id: concat("audioOverride-", hash(concat(
-      canonicalId(args.spaceId, space), ":",
+      canonicalId(args.partitionId, space), ":",
       canonicalId(args.agentId, agent)
     )))
-    args.spaceId
+    args.partitionId
     args.agentId
     args.setBy
     args.mode
@@ -957,7 +957,7 @@ mutation audioOverride mutationSetAgentAudioOverride {
 // setAgentVideoOverride
 // =====================
 //
-// Writes the per-(spaceId, agentId) video control override that the
+// Writes the per-(partitionId, agentId) video control override that the
 // voice-agent's avatar-gating path consults before publishing
 // lip-synced video (Anam / Simli) into a LiveKit room. The frontend's
 // PresencePanel orb-corner overlay calls this on every click cycle
@@ -968,7 +968,7 @@ mutation audioOverride mutationSetAgentAudioOverride {
 // versus v1:cognition:audioOverride, and the id prefix.
 //
 // IDEMPOTENCY:
-// The id is the deterministic videoOverride:hash(spaceId:agentId)
+// The id is the deterministic videoOverride:hash(partitionId:agentId)
 // so re-toggling the same orb hits the SAME row -- memQL stores the
 // versions as a time-series and the latest wins at read time. No
 // per-click row growth.
@@ -984,7 +984,7 @@ mutation audioOverride mutationSetAgentAudioOverride {
 @description("Set the per-session video control mode for an agent in a space.")
 mutation videoOverride mutationSetAgentVideoOverride {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
     agentId  string  @required
     mode     string  @required
     setBy    string
@@ -992,10 +992,10 @@ mutation videoOverride mutationSetAgentVideoOverride {
   }
   insert {
     id: concat("videoOverride-", hash(concat(
-      canonicalId(args.spaceId, space), ":",
+      canonicalId(args.partitionId, space), ":",
       canonicalId(args.agentId, agent)
     )))
-    args.spaceId
+    args.partitionId
     args.agentId
     args.setBy
     args.mode
@@ -1016,7 +1016,7 @@ mutation videoOverride mutationSetAgentVideoOverride {
 // Inserts a new version of a v1:identity:authSession record with the
 // provided payload. Typically used to bump lastActivityAt (append-only
 // heartbeat). Bound to authSession -- NOT v1:cognition:session, which
-// requires participantId/spaceId that an auth session never carries
+// requires participantId/partitionId that an auth session never carries
 // (memql#1639).
 
 @enabled
@@ -1046,7 +1046,7 @@ mutation presence mutationUpdateParticipantPresence {
   args {
     presenceId       string
     participantId    string  @required
-    spaceId          string  @required
+    partitionId          string  @required
     state            string  @required  @enum("idle", "listening", "thinking", "typing", "responding", "working", "waiting", "needs_human", "needs_clarification", "paused", "error", "using_tool", "researching", "investigating")
     label            string  @required
     reason           string
@@ -1067,7 +1067,7 @@ mutation presence mutationUpdateParticipantPresence {
       args.presenceId,
       concat("presence-", hash(args.participantId))
     )
-    args.spaceId
+    args.partitionId
     args.participantId
     args.state
     args.label
@@ -1110,7 +1110,7 @@ mutation participant mutationUpdateParticipantStatus {
 // The caller is responsible for passing the full updated payload.
 
 @enabled
-@description("Update a session record's device state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, spaceId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.")
+@description("Update a session record's device state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.")
 mutation session mutationUpdateSessionDevices {
   args {
     sessionId  string  @required
@@ -1131,7 +1131,7 @@ mutation session mutationUpdateSessionDevices {
 // The caller is responsible for passing the full updated payload.
 
 @enabled
-@description("Update a session record's stream state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, spaceId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.")
+@description("Update a session record's stream state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.")
 mutation session mutationUpdateSessionStreams {
   args {
     sessionId  string  @required
@@ -1175,11 +1175,11 @@ mutation session mutationUpdateSessionStreams {
 @description("Insert the terminal (archived/saved) version of a daily space at rollover. System-actor sweep helper; the caller passes the full updated payload including the preserved ownerUserId.")
 mutation space mutationRolloverDailySpace {
   args {
-    spaceId  string  @required
+    partitionId  string  @required
     payload  object  @required
   }
   insert {
-    id: args.spaceId
+    id: args.partitionId
     args.payload
   }
 }
