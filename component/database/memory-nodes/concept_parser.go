@@ -253,6 +253,17 @@ type parsedProperty struct {
 	// scrub (memql#1711) can enumerate and zero every such field
 	// generically instead of relying on a hand-maintained list.
 	pii bool
+	// internal marks the field as server-only (memql#2035, concept as
+	// single source of truth). An @internal field is NEVER auto-exposed
+	// in a shape's default projection and NEVER accepted from a
+	// mutation's caller args. Surfaces as the x-internal custom
+	// JSON-Schema keyword.
+	internal bool
+	// serverSet marks the field as stamped server-side (createdAt,
+	// createdBy, status, ...). A @serverSet field is NOT accepted from a
+	// mutation's caller args (it must be stamped) but MAY be projected.
+	// Surfaces as the x-serverSet custom JSON-Schema keyword.
+	serverSet bool
 	// Phase 3 discriminated-union variants
 	variantDiscriminator string
 	variants             []parsedPropertyVariant
@@ -533,6 +544,10 @@ func applyPropertyAttribute(prop *parsedProperty, attr *parser.Attribute) error 
 		prop.secret = true
 	case "pii":
 		prop.pii = true
+	case "internal":
+		prop.internal = true
+	case "serverSet":
+		prop.serverSet = true
 	case "variant":
 		// @variant(discriminator="field") is handled structurally
 		// in propertyDeclToParsed (it triggers variant-branch
@@ -703,6 +718,12 @@ func propertyToJSONSchema(prop parsedProperty) (map[string]any, error) {
 	}
 	if prop.pii {
 		schema["x-pii"] = true
+	}
+	if prop.internal {
+		schema["x-internal"] = true
+	}
+	if prop.serverSet {
+		schema["x-serverSet"] = true
 	}
 
 	switch prop.typeName {

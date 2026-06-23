@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -520,6 +521,120 @@ func (c *Concept) PIIFields() []string {
 		}
 	}
 	return result
+}
+
+// fieldClassification carries the C5 (memql#2035) per-field access
+// flags read off the concept's definition schema. A field is one of:
+//   - internal  (x-internal): server-only -- never projected, never
+//     accepted from caller args.
+//   - serverSet (x-serverSet): stamped server-side -- not accepted
+//     from caller args, but MAY be projected.
+//   - public    (neither): projectable AND caller-acceptable.
+type fieldClassification struct {
+	Name      string
+	Internal  bool
+	ServerSet bool
+}
+
+// classifyFields returns every top-level payload field the concept
+// declares, each tagged with its C5 access flags (x-internal /
+// x-serverSet). Order follows JSON map iteration and is not
+// significant; callers that need determinism sort the result. Returns
+// nil when the concept declares no fields or has no definition schema.
+func (c *Concept) classifyFields() []fieldClassification {
+	if c == nil {
+		return nil
+	}
+	raw, ok := c.Schemas[definitionSchemaKey]
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	var schema struct {
+		Properties map[string]struct {
+			Internal  bool `json:"x-internal"`
+			ServerSet bool `json:"x-serverSet"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return nil
+	}
+	result := make([]fieldClassification, 0, len(schema.Properties))
+	for name, prop := range schema.Properties {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		result = append(result, fieldClassification{
+			Name:      trimmed,
+			Internal:  prop.Internal,
+			ServerSet: prop.ServerSet,
+		})
+	}
+	return result
+}
+
+// ProjectableFields returns the names of every top-level payload field
+// a shape's default projection should expose: all declared fields
+// EXCEPT those marked @internal (x-internal). @serverSet fields ARE
+// projectable (createdAt / createdBy / status are commonly rendered),
+// so the default projection includes public + serverSet fields and
+// excludes only the server-only @internal set. Names are returned in
+// ascending order for deterministic shape templates. Backs the C5
+// empty-shape default projection (memql#2035).
+func (c *Concept) ProjectableFields() []string {
+	out := make([]string, 0)
+	for _, f := range c.classifyFields() {
+		if f.Internal {
+			continue
+		}
+		out = append(out, f.Name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// PublicFields returns the names of every top-level payload field that
+// is neither @internal nor @serverSet -- the caller-writable,
+// projectable subset. Names are returned in ascending order. Backs the
+// C5 mutation accept-list validation (memql#2035).
+func (c *Concept) PublicFields() []string {
+	out := make([]string, 0)
+	for _, f := range c.classifyFields() {
+		if f.Internal || f.ServerSet {
+			continue
+		}
+		out = append(out, f.Name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// InternalFields returns the names of every top-level payload field the
+// concept marks @internal (x-internal) -- server-only fields that are
+// never projected and never accepted from caller args. Ascending order.
+func (c *Concept) InternalFields() []string {
+	out := make([]string, 0)
+	for _, f := range c.classifyFields() {
+		if f.Internal {
+			out = append(out, f.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ServerSetFields returns the names of every top-level payload field the
+// concept marks @serverSet (x-serverSet) -- fields stamped server-side
+// and never accepted from caller args (but projectable). Ascending order.
+func (c *Concept) ServerSetFields() []string {
+	out := make([]string, 0)
+	for _, f := range c.classifyFields() {
+		if f.ServerSet {
+			out = append(out, f.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func toNode(node *MemoryNode) Node {

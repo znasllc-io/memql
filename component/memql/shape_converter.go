@@ -95,10 +95,37 @@ func shapeDeclToShapeDefinition(decl *languageParser.ShapeDecl, origin string) (
 		useConcepts = append([]string{signatureConcept}, useConcepts...)
 	}
 
-	// Body paths. Translate each to its storage form + record which
-	// @useConcept names actually got referenced.
+	// Empty body. C5 (memql#2035): a signature-bound shape with no body
+	// defaults to projecting every projectable field of its concept --
+	// "concept is the single source of truth for fields." We can't
+	// enumerate the concept here (the converter has no registry); emit a
+	// DefaultProjection marker with an empty Template and let
+	// expandDefaultShapeProjections fill it once concepts are loaded.
+	// An empty body WITHOUT a signature concept stays an error (there's
+	// no concept to derive fields from -- e.g. an @actor-only shape).
 	if len(decl.Paths) == 0 {
-		return nil, fmt.Errorf("%s: shape %q has no body fields", origin, decl.Name)
+		if signatureConcept == "" {
+			return nil, fmt.Errorf("%s: shape %q has no body fields and no signature concept -- an empty-body shape must bind a concept (`shape <Concept> %s { }`) so the default projection can be derived", origin, decl.Name, decl.Name)
+		}
+		// Reject stray @useConcept on a default-projection shape: with no
+		// body, those names can never be referenced (the unused-concept
+		// rule below would reject them anyway, but a targeted message is
+		// clearer).
+		for _, name := range useConcepts {
+			if name != signatureConcept {
+				return nil, fmt.Errorf("%s: shape %q: @useConcept(%s) declared on an empty-body (default-projection) shape, but an empty body references nothing -- drop the @useConcept or add an explicit body", origin, decl.Name, name)
+			}
+		}
+		return &ShapeDefinition{
+			Name:              decl.Name,
+			Description:       description,
+			Template:          map[string]any{},
+			Origin:            origin,
+			KindRow:           true,
+			KindActor:         kindActor,
+			UseConcepts:       useConcepts,
+			DefaultProjection: true,
+		}, nil
 	}
 	template := make(map[string]any, len(decl.Paths))
 	usedConcepts := make(map[string]bool, len(useConcepts))
