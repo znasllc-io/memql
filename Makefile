@@ -337,6 +337,54 @@ db:
 	psql postgres://memql:memql_dev@localhost:5432/memql
 
 # ---------------------------------------------------------------------------
+# k3d / ArgoCD local cluster (Argo-parity, E0 -- #2061)
+# ---------------------------------------------------------------------------
+# Pure-Argo inner loop: images built locally, imported into k3d, ArgoCD
+# reconciles the local overlay. No direct-apply bypass ever.
+#
+# Prerequisites: docker, k3d, kubectl (brew install k3d kubectl)
+#
+# Quick start:
+#   make k3d-up        # create cluster + install ArgoCD + seed secrets
+#   make k3d-down      # tear down cluster
+#   make k3d-secrets   # (re-)seed k8s Secrets in a running cluster
+#
+# Optional env overrides:
+#   MEMQL_K3D_CLUSTER          cluster name (default: memql)
+#   MEMQL_K3D_TARGET_REVISION  ArgoCD git revision (default: current branch)
+#   MEMQL_K3D_SERVERS          k3d server count (default: 1)
+#   MEMQL_K3D_AGENTS           k3d agent count (default: 0)
+
+.PHONY: k3d-up k3d-down k3d-secrets
+
+## Bootstrap the local k3d cluster: create cluster, install ArgoCD
+## (pinned v2.13.3, same as staging), apply the memql-local Application,
+## and seed k8s Secrets. ArgoCD will sync the local overlay.
+##   make k3d-up                       # current branch as targetRevision
+##   make k3d-up REVISION=main         # pin to main
+##   make k3d-up SERVERS=2 AGENTS=1   # multi-node (see E0.5 / #2067)
+k3d-up:
+	@bash scripts/k3d/up.sh \
+		$${CLUSTER:+--cluster=$${CLUSTER}} \
+		$${REVISION:+--revision=$${REVISION}} \
+		$${SERVERS:+--servers=$${SERVERS}} \
+		$${AGENTS:+--agents=$${AGENTS}} \
+		$${NO_SECRETS:+--no-secrets}
+
+## Tear down the local k3d cluster.
+## Pass PURGE=1 to also remove the kubeconfig context.
+k3d-down:
+	@bash scripts/k3d/down.sh \
+		$${CLUSTER:+--cluster=$${CLUSTER}} \
+		$${PURGE:+--purge}
+
+## (Re-)seed the k8s Secrets in a running k3d cluster. Safe to re-run.
+## Required after 'make k3d-up --no-secrets' or if secrets drift.
+k3d-secrets:
+	@bash scripts/k3d/seed-secrets.sh \
+		$${CLUSTER:+--namespace=$${NAMESPACE:-memql}}
+
+# ---------------------------------------------------------------------------
 # Test targets
 # ---------------------------------------------------------------------------
 
