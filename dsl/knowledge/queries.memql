@@ -8,12 +8,12 @@ use knowledge.concepts.{ documentChunk }
 @enabled
 @description("Returns the parent domainId for every chunk in the active partition. Frontend groups + counts to render per-domain chunk counts in the Knowledge panel.")
 @unbounded("distinct chunk domain ids -- a bounded dedupe enumeration consumed whole")
-query documentChunk queryAllDocumentChunkDomains {
+query documentChunk allDocumentChunkDomains {
   filter  payload.domainId!=""
   shape   documentChunkDomainLite
 }
 
-// queryDocumentChunksForDomain -- every chunk in a knowledge domain.
+// documentChunksForDomain -- every chunk in a knowledge domain.
 // Backs the Trainer Agent's mode='refresh' existingCorpus input: the
 // trainSpecialist dispatcher reads the current chunks so the Trainer
 // can decide what's still current vs. what to mark superseded. The
@@ -22,7 +22,7 @@ query documentChunk queryAllDocumentChunkDomains {
 
 @enabled
 @description("Every documentChunk attached to a knowledge domain, full shape. Consumed by the trainSpecialist dispatcher for the Trainer Agent's mode='refresh' existingCorpus (read-what's-there-now-to-decide-what-to-supersede).")
-query documentChunk queryDocumentChunksForDomain {
+query documentChunk documentChunksForDomain {
   args {
     domainId  string  @required
   }

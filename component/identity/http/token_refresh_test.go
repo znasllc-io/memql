@@ -25,8 +25,8 @@ type refreshFakeEngine struct {
 	mu sync.Mutex
 
 	// curHash is the hash currently accepted by
-	// queryAuthSessionByRefreshTokenHash. It moves forward on every
-	// mutationRotateAuthSession call, so the previous token stops
+	// authSessionByRefreshTokenHash. It moves forward on every
+	// rotateAuthSession call, so the previous token stops
 	// resolving -- exactly what proves the old refresh token is
 	// invalidated.
 	curHash    string
@@ -41,7 +41,7 @@ func (f *refreshFakeEngine) Execute(_ context.Context, q string) (*memqlengine.E
 	defer f.mu.Unlock()
 
 	switch {
-	case strings.HasPrefix(q, "queryAuthSessionByRefreshTokenHash("):
+	case strings.HasPrefix(q, "authSessionByRefreshTokenHash("):
 		presented := extractField(q, "refreshTokenHash")
 		if presented != f.curHash || f.curHash == "" {
 			// No match -> empty bundle. The rotator then tries the
@@ -59,18 +59,18 @@ func (f *refreshFakeEngine) Execute(_ context.Context, q string) (*memqlengine.E
 		}
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{node}}}, nil
 
-	case strings.HasPrefix(q, "queryAuthSessionByPreviousRefreshTokenHash("):
+	case strings.HasPrefix(q, "authSessionByPreviousRefreshTokenHash("):
 		// No grace-window row in these tests.
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
 
-	case strings.HasPrefix(q, "mutationRotateAuthSession("):
+	case strings.HasPrefix(q, "rotateAuthSession("):
 		f.rotations++
 		newHash := extractField(q, "newRefreshTokenHash")
 		f.lastNewHsh = newHash
 		f.curHash = newHash // old token no longer resolves
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
 
-	case strings.HasPrefix(q, "queryUserById("):
+	case strings.HasPrefix(q, "userById("):
 		node := &memqlv1.MemoryNode{
 			Id: f.userId,
 			Payload: &structpb.Struct{Fields: map[string]*structpb.Value{

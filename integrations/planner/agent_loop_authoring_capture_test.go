@@ -44,7 +44,7 @@ func (f *fakeCaptureEngine) dryRunCalls() int {
 	return f.dryRunN
 }
 
-// capturePlanRow is the queryPlanById result for a completed task plan.
+// capturePlanRow is the planById result for a completed task plan.
 func capturePlanRow(planId, owner, goal string) map[string]any {
 	return map[string]any{
 		"id":          planId,
@@ -55,8 +55,8 @@ func capturePlanRow(planId, owner, goal string) map[string]any {
 }
 
 // newCaptureFixture builds a capture engine + dispatcher whose:
-//   - queryPlanById returns the given plan row,
-//   - queryAuthoringBundleForPlan returns existingBundle rows (nil = none),
+//   - planById returns the given plan row,
+//   - authoringBundleForPlan returns existingBundle rows (nil = none),
 //   - authoringDesign yields a one-author-dep design (the digest spec),
 //   - authoringEmit / authoringRepair yield the automation + spec constructs,
 //   - Gate-1 returns the scripted reports, Gate-2 returns dryRun.
@@ -83,11 +83,11 @@ func newCaptureFixture(t *testing.T, plan map[string]any, existingBundle []any, 
 		},
 		execResponder: func(query string) (any, error) {
 			switch {
-			case strings.Contains(query, "queryAuthoringBundleForPlan"):
+			case strings.Contains(query, "authoringBundleForPlan"):
 				return map[string]any{"output": existingBundle}, nil
-			case strings.Contains(query, "queryPlanById"):
+			case strings.Contains(query, "planById"):
 				return map[string]any{"output": []any{plan}}, nil
-			case strings.Contains(query, "queryCataloguedConstructsForOwner"):
+			case strings.Contains(query, "cataloguedConstructsForOwner"):
 				return map[string]any{"output": []any{}}, nil
 			}
 			// mutations + anything else
@@ -116,19 +116,19 @@ func TestRunCapture_CleanPath(t *testing.T) {
 	}
 
 	exec, _, _ := ce.snapshot()
-	if n := countContains(exec, "mutationCreateAuthoringBundle"); n != 1 {
+	if n := countContains(exec, "createAuthoringBundle"); n != 1 {
 		t.Fatalf("want exactly 1 create-bundle, got %d (exec=%v)", n, exec)
 	}
-	if !anyCallContainsAll(exec, `mutationCreateAuthoringBundle`, `"sourcePlanId":"p-capture"`) {
+	if !anyCallContainsAll(exec, `createAuthoringBundle`, `"sourcePlanId":"p-capture"`) {
 		t.Fatalf("create-bundle must stamp sourcePlanId; exec=%v", exec)
 	}
-	if n := countContains(exec, "mutationCreateAuthoringConstruct"); n != 2 {
+	if n := countContains(exec, "createAuthoringConstruct"); n != 2 {
 		t.Fatalf("want 2 construct rows (automation + spec), got %d", n)
 	}
-	if !anyCallContainsAll(exec, "mutationRecordBundleValidation", `"status":"validated"`) {
+	if !anyCallContainsAll(exec, "recordBundleValidation", `"status":"validated"`) {
 		t.Fatalf("clean Gate-1 must record status=validated; exec=%v", exec)
 	}
-	if !anyCallContainsAll(exec, "mutationRecordBundleDryRun", `"status":"dryRunPassed"`) {
+	if !anyCallContainsAll(exec, "recordBundleDryRun", `"status":"dryRunPassed"`) {
 		t.Fatalf("clean Gate-2 must record status=dryRunPassed; exec=%v", exec)
 	}
 	if got := ce.dryRunCalls(); got != 1 {
@@ -154,10 +154,10 @@ func TestRunCapture_Gate1FailMarksFailedNoDryRun(t *testing.T) {
 	}
 
 	exec, _, _ := ce.snapshot()
-	if !anyCallContainsAll(exec, "mutationRecordBundleValidation", `"status":"failed"`) {
+	if !anyCallContainsAll(exec, "recordBundleValidation", `"status":"failed"`) {
 		t.Fatalf("unclean Gate-1 must record status=failed; exec=%v", exec)
 	}
-	if countContains(exec, "mutationRecordBundleDryRun") != 0 {
+	if countContains(exec, "recordBundleDryRun") != 0 {
 		t.Fatalf("a non-compiling bundle must NOT be dry-run; exec=%v", exec)
 	}
 	if got := ce.dryRunCalls(); got != 0 {
@@ -180,7 +180,7 @@ func TestRunCapture_IdempotentSkip(t *testing.T) {
 	}
 
 	exec, si, _ := ce.snapshot()
-	if countContains(exec, "mutationCreateAuthoringBundle") != 0 {
+	if countContains(exec, "createAuthoringBundle") != 0 {
 		t.Fatalf("idempotent skip must author nothing; exec=%v", exec)
 	}
 	if countContains(si, "authoringDesign") != 0 {
@@ -236,10 +236,10 @@ func TestHandlePlanUpdated_DispatchesOnSucceededTask(t *testing.T) {
 
 	waitFor(t, func() bool {
 		exec, _, _ := ce.snapshot()
-		return countContains(exec, "mutationCreateAuthoringBundle") == 1
+		return countContains(exec, "createAuthoringBundle") == 1
 	})
 	exec, _, _ := ce.snapshot()
-	if !anyCallContainsAll(exec, "mutationCreateAuthoringBundle", `"sourcePlanId":"plan-async"`) {
+	if !anyCallContainsAll(exec, "createAuthoringBundle", `"sourcePlanId":"plan-async"`) {
 		t.Fatalf("async capture must stamp sourcePlanId; exec=%v", exec)
 	}
 }

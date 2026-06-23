@@ -186,15 +186,15 @@ func TestQueryStructFormBackwardCompatPlainFilterShape(t *testing.T) {
 // instead of a row set. count is the outermost wrapper and mutually
 // exclusive with shape / sort / paginate.
 func TestQueryStructFormCountDirective(t *testing.T) {
-	source := `query user queryUserCount {
-  filter  traitIsActiveRecord
+	source := `query user userCount {
+  filter  isActiveRecord
   count
 }`
 	out, err := NormaliseQuerySource(source)
 	if err != nil {
 		t.Fatalf("NormaliseQuerySource: %v", err)
 	}
-	want := `count(concept==user;traitIsActiveRecord)`
+	want := `count(concept==user;isActiveRecord)`
 	if !strings.Contains(out, want) {
 		t.Errorf("expected count wrap %q, got:\n%s", want, out)
 	}
@@ -215,8 +215,8 @@ func TestQueryStructFormCountNoFilter(t *testing.T) {
 }
 
 func TestQueryStructFormCountRejectsShape(t *testing.T) {
-	source := `query user queryUserCount {
-  filter  traitIsActiveRecord
+	source := `query user userCount {
+  filter  isActiveRecord
   count
   shape   userFull
 }`
@@ -226,8 +226,8 @@ func TestQueryStructFormCountRejectsShape(t *testing.T) {
 }
 
 func TestQueryStructFormCountRejectsPaginate(t *testing.T) {
-	source := `query user queryUserCount {
-  filter  traitIsActiveRecord
+	source := `query user userCount {
+  filter  isActiveRecord
   count
   paginate 10
 }`

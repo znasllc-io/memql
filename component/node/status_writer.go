@@ -26,7 +26,7 @@ type EngineExecutor interface {
 // StatusChangeHandler in the bootstrap phase.
 //
 // On every transition it schedules a MemQL `updateNodeHealth` mutation
-// (see mutations/v1/cluster/mutationUpdateNodeHealth.memql). That insert
+// (see mutations/v1/cluster/updateNodeHealth.memql). That insert
 // shares its `id` with the peer's NodeId so the concept records a
 // time-series of health changes for that node. The engine's existing CDC
 // path emits graph.node.created.<partition>.v1:cluster:node, which the
@@ -120,16 +120,16 @@ const (
 
 // persistHealthTransition upserts a peer's v1:cluster:node health row (#1755).
 //
-// The normal path is the read-merge mutationUpdateNodeHealth (preserves
+// The normal path is the read-merge updateNodeHealth (preserves
 // nodeType/address/capabilities/labels). But that depends on the row already
-// existing -- created by the peer's own logicRegisterNode at startup. When that
+// existing -- created by the peer's own registerNode at startup. When that
 // initial write never committed (the peer's registration, or its first
 // transition, hit a transient DB error during a roll), the row is missing and
 // EVERY subsequent update fails permanently with "no existing row ... use
 // insert()", wedging health tracking for that peer for its whole lifetime.
 //
 // So when the update reports a missing row we fall back to an insert
-// (mutationCreateNode) carrying this transition's health -- the row self-heals
+// (createNode) carrying this transition's health -- the row self-heals
 // instead of staying wedged. Transient DB errors on either call are retried
 // with a bounded backoff.
 func (w *NodeStatusWriter) persistHealthTransition(ctx context.Context, updateQuery, nodeId, nodeType, address, health, lastSeenISO string) error {
@@ -269,14 +269,14 @@ func buildUpdateNodeHealthCall(nodeId, nodeType, address, health, lastSeenISO st
 	if err != nil {
 		return "", err
 	}
-	return "mutationUpdateNodeHealth(" + string(body) + ")", nil
+	return "updateNodeHealth(" + string(body) + ")", nil
 }
 
 // buildCreateNodeHealthCall formats the insert fallback (#1755): when the
 // read-merge update reports a missing row, this inserts the v1:cluster:node row
 // under the peer's NodeId carrying this transition's health, so health tracking
 // self-heals instead of wedging. Shares the createNode mutation the peer's own
-// logicRegisterNode uses, so the row shape is identical.
+// registerNode uses, so the row shape is identical.
 func buildCreateNodeHealthCall(nodeId, nodeType, address, health, lastSeenISO string) (string, error) {
 	if strings.TrimSpace(nodeId) == "" {
 		return "", fmt.Errorf("status_writer: nodeId is required")
@@ -299,5 +299,5 @@ func buildCreateNodeHealthCall(nodeId, nodeType, address, health, lastSeenISO st
 	if err != nil {
 		return "", err
 	}
-	return "mutationCreateNode(" + string(body) + ")", nil
+	return "createNode(" + string(body) + ")", nil
 }

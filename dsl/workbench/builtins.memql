@@ -20,7 +20,7 @@ builtin workbenchDispatchHost {
 
 // workbenchTeardownDirectory -- on-disk teardown of a per-Plan
 // workspace. Called from the releaseWorkspaceOnPlanTerminal logic
-// alongside mutationReleaseWorkspace (which flips the lifecycle
+// alongside releaseWorkspace (which flips the lifecycle
 // bit on the concept row). The integration removes the directory
 // tree under MEMQL_WORKBENCH_ROOT/{planId}/. Idempotent: a Plan
 // that never provisioned a workspace is a no-op.

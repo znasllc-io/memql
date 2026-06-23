@@ -209,7 +209,7 @@ func buildStampTokenBudgetQuery(planId string, budget int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf(`mutationUpdatePlanStatus(%s)`, string(argsJSON)), nil
+	return fmt.Sprintf(`updatePlanStatus(%s)`, string(argsJSON)), nil
 }
 
 // stampPlanTokenBudget sets Plan.tokenBudget (best-effort).
@@ -244,7 +244,7 @@ func (l *PlannerAgentLoop) parkForBudgetApproval(ctx context.Context, planId, me
 		fbReqJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"awaitingFeedback", feedbackReason:"budget_approval_required", feedbackRequest:%s})`,
+		`updatePlanStatus({planId:%q, status:"awaitingFeedback", feedbackReason:"budget_approval_required", feedbackRequest:%s})`,
 		planId, string(fbReqJSON),
 	)
 	_, err = l.engine.Execute(systemActorContext(ctx), q)

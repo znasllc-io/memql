@@ -121,7 +121,7 @@ concept semanticMemory {
   reinforceCount int     @required  @default("1")  @description("How many consolidation runs have distilled this belief. Starts at 1 (the run that created it); the reinforce mutation takes the bumped value (computed engine-side). A high reinforceCount is independent corroboration -- a belief seen across many runs is more trustworthy than a one-off.")
   lastReinforced datetime  @required  @description("When this belief was last created or reinforced -- the decay clock. The decay sweep measures age as now - lastReinforced; beliefs unreinforced past MEMQL_HARNESS_CONSOLIDATION_DECAY_DAYS lose confidence, and ones that fall below the prune floor are removed. Reset to now() on every reinforcement.")
   status         enum("active", "pruned")  @required  @default("active")  @description("Belief lifecycle. active = a live belief the recall path returns. pruned = decayed below the confidence floor and retired; the row is kept (append-only model) but filtered out of recall and dedup. Soft-delete because MemQL has no row-removal mutation -- mirrors the safety / platform retention crons.")
-  provenanceMutation  string  @description("Name of the mutation that produced this semanticMemory version (mutationCreateHarnessSemanticMemory / mutationReinforceHarnessSemanticMemory / mutationDecayHarnessSemanticMemory / mutationPruneHarnessSemanticMemory). Pairs with the engine-stamped createdBy intrinsic to name every transition in the audit trail.")
+  provenanceMutation  string  @description("Name of the mutation that produced this semanticMemory version (createHarnessSemanticMemory / reinforceHarnessSemanticMemory / decayHarnessSemanticMemory / pruneHarnessSemanticMemory). Pairs with the engine-stamped createdBy intrinsic to name every transition in the audit trail.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="formedFrom", field="sourceEpisodes", target=observation, direction="outgoing")
@@ -136,7 +136,7 @@ concept consolidationCursor {
   watermark    datetime  @required  @description("The createdAt of the newest episodic node already consolidated for this owner. The next run reads episodes with createdAt > watermark only; advancing this after each run is what bounds consolidation cost incrementally. Set to the engine-computed max(createdAt) over the batch the run processed.")
   lastRunAt    datetime  @description("When consolidation last ran for this owner. Diagnostic / observability only -- the watermark (not this) is the correctness-bearing field. Useful for spotting an owner whose consolidation has stalled.")
   episodesSeen int     @description("Running count of episodic nodes consolidated for this owner across all runs. Diagnostic only -- lets an operator see consolidation throughput per owner. The reinforce/advance mutation takes the bumped value (computed engine-side, since the parser has no arithmetic).")
-  provenanceMutation  string  @description("Name of the mutation that produced this cursor version (mutationAdvanceHarnessConsolidationCursor). Pairs with the engine-stamped createdBy intrinsic to name the transition in the audit trail.")
+  provenanceMutation  string  @description("Name of the mutation that produced this cursor version (advanceHarnessConsolidationCursor). Pairs with the engine-stamped createdBy intrinsic to name the transition in the audit trail.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }

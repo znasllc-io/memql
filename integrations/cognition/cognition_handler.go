@@ -171,7 +171,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// before the normal turn dispatch, check whether a Plan in this space is
 	// parked in awaitingFeedback and whether this user message answers its
 	// pending question. On a confident hit we route the answer into
-	// mutationAttachPlanFeedback (which resumes the Plan cross-replica
+	// attachPlanFeedback (which resumes the Plan cross-replica
 	// exactly-once, #1405) and post a brief confirmation, then STOP -- the
 	// message was the answer to a question, not a fresh turn for an agent to
 	// respond to. On any miss / error this falls through to normal dispatch,
@@ -810,7 +810,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	defer releaseGate()
 
 	// Idempotency: skip if we've already responded to this utterance.
-	if c.queryHasAIResponseForReply(ctx, partitionId, winnerParticipant.ID, utterance.ID) {
+	if c.hasAIResponseForReply(ctx, partitionId, winnerParticipant.ID, utterance.ID) {
 		c.Logger.Debug("cognition: AI response already exists, skipping",
 			"partitionId", partitionId, "replyToId", utterance.ID)
 		_ = c.upsertParticipantPresence(ctx, partitionId, winnerParticipant.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
@@ -855,7 +855,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// Inject tool defaults so that tool calls receive partitionId and
 	// participantId even if the AI model omits them.
 	defaults := map[string]any{
-		"partitionId":       partitionId,
+		"partitionId":   partitionId,
 		"participantId": winnerParticipant.ID,
 	}
 	// Inject workspace for claw-capable agents.
@@ -2143,7 +2143,7 @@ func (c *CognitionIntegration) findActiveHumanParticipants(ctx context.Context, 
 // findParticipantsByType is the shared implementation behind the AI / human
 // participant lookups. participantType should be "si" or "human".
 func (c *CognitionIntegration) findParticipantsByType(ctx context.Context, partitionId, participantType string) ([]*participantPayload, error) {
-	query := fmt.Sprintf(`querySpaceParticipants({partitionId: "%s", participantType: "%s", status: "active"})`, partitionId, participantType)
+	query := fmt.Sprintf(`spaceParticipants({partitionId: "%s", participantType: "%s", status: "active"})`, partitionId, participantType)
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("execute query: %w", err)
@@ -2171,7 +2171,7 @@ func (c *CognitionIntegration) findParticipantsByType(ctx context.Context, parti
 		if !ok {
 			continue
 		}
-		// Defensive concept filter. The querySpaceParticipants shape is
+		// Defensive concept filter. The spaceParticipants shape is
 		// declared @concepts("v1:cognition:participant") so in principle
 		// this is redundant, but in practice the shape runtime has been
 		// observed returning agent and human-participant nodes from a
@@ -2344,7 +2344,7 @@ func (c *CognitionIntegration) lookupAudioOverride(ctx context.Context, partitio
 	if c == nil || c.engine == nil || strings.TrimSpace(partitionId) == "" || strings.TrimSpace(agentId) == "" {
 		return ""
 	}
-	q := fmt.Sprintf(`queryAudioOverridesForSpace({partitionId: %q})`, partitionId)
+	q := fmt.Sprintf(`audioOverridesForSpace({partitionId: %q})`, partitionId)
 	res, err := c.engine.Execute(ctx, q)
 	if err != nil {
 		c.Logger.Debug("cognition: audio override lookup failed (non-fatal)", "error", err, "partitionId", partitionId)

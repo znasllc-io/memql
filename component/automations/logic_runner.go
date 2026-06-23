@@ -94,7 +94,7 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 		// Wire the engine's event bus so `emit` / publishEvent steps INSIDE a
 		// logic body can publish. Without this the StepContext.EventBus is nil
 		// and any logic that emits (e.g. logicAutoJoinAI's emitAutoJoinComplete,
-		// logicBootstrapSession's session.created) fails its emit step with
+		// bootstrapSession's session.created) fails its emit step with
 		// "event bus not configured" -- and because the compiler topologically
 		// orders steps with no inter-dependency arbitrarily, that abort can land
 		// BEFORE the load-bearing mutation step (the AI join / session insert),
@@ -217,7 +217,7 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 // mis-resolves:
 //
 //   - Bare step-variable references -- `return nodeRecord` after
-//     `nodeRecord := mutationCreateNode(...)`. The engine treats the
+//     `nodeRecord := createNode(...)`. The engine treats the
 //     bare identifier as a spec name and emits `unknown spec
 //     "nodeRecord"`.
 //   - Step-method calls -- `expiredDelegations.Len()`,

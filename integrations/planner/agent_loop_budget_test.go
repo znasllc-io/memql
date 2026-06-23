@@ -158,11 +158,11 @@ func TestInvokeAndDispatch_AtCap_ParksWithoutLLMCall(t *testing.T) {
 	fe := &fakeEngine{
 		execResponder: func(query string) (any, error) {
 			switch {
-			case strings.Contains(query, "queryPlanById"):
+			case strings.Contains(query, "planById"):
 				return planRowEnvelope(planRow), nil
-			case strings.Contains(query, "queryTasksForPlan"):
+			case strings.Contains(query, "tasksForPlan"):
 				return rowsEnvelope(), nil
-			case strings.Contains(query, "queryActiveAgentsForUser"):
+			case strings.Contains(query, "activeAgentsForUser"):
 				return rowsEnvelope(), nil
 			}
 			return nil, nil
@@ -180,7 +180,7 @@ func TestInvokeAndDispatch_AtCap_ParksWithoutLLMCall(t *testing.T) {
 	if countContains(exec, "awaitingFeedback") == 0 {
 		t.Fatalf("at the LLM ceiling the loop must park to awaitingFeedback; exec=%v", exec)
 	}
-	if countContains(exec, "mutationRecordPlannerInvocation") != 0 {
+	if countContains(exec, "recordPlannerInvocation") != 0 {
 		t.Fatalf("a blocked call must NOT record an invocation; exec=%v", exec)
 	}
 }
@@ -204,11 +204,11 @@ func TestInvokeAndDispatch_UnderCap_CallsLLMAndRecords(t *testing.T) {
 	fe := &fakeEngine{
 		execResponder: func(query string) (any, error) {
 			switch {
-			case strings.Contains(query, "queryPlanById"):
+			case strings.Contains(query, "planById"):
 				return planRowEnvelope(planRow), nil
-			case strings.Contains(query, "queryTasksForPlan"):
+			case strings.Contains(query, "tasksForPlan"):
 				return rowsEnvelope(), nil
-			case strings.Contains(query, "queryActiveAgentsForUser"):
+			case strings.Contains(query, "activeAgentsForUser"):
 				return rowsEnvelope(), nil
 			}
 			return nil, nil
@@ -228,7 +228,7 @@ func TestInvokeAndDispatch_UnderCap_CallsLLMAndRecords(t *testing.T) {
 	if len(si) != 1 {
 		t.Fatalf("under the ceiling the loop must call InvokeAI exactly once, got %v", si)
 	}
-	if countContains(exec, "mutationRecordPlannerInvocation") != 1 {
+	if countContains(exec, "recordPlannerInvocation") != 1 {
 		t.Fatalf("a successful call must record exactly one invocation; exec=%v", exec)
 	}
 }

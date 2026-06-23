@@ -160,7 +160,7 @@ func TestMutationTemplate_MergeFieldsAnnotationPlumbing(t *testing.T) {
 	src := `@enabled
 @mergeFields("preferences")
 @description("Set User.preferences.computerUseEnabled.")
-mutation user mutationToggleComputerUseEnabled {
+mutate user toggleComputerUseEnabled {
   args {
     userId   string  @required
     enabled  bool    @required
@@ -173,7 +173,7 @@ mutation user mutationToggleComputerUseEnabled {
   }
 }`
 
-	fn, err := tryParseNewFunctionSyntax("mutationToggleComputerUseEnabled", "mutation", src, "test.memql", registry)
+	fn, err := tryParseNewFunctionSyntax("toggleComputerUseEnabled", "mutation", src, "test.memql", registry)
 	require.NoError(t, err)
 	require.NotNil(t, fn.MutationTemplate)
 	require.Equal(t, []string{"preferences"}, fn.MutationTemplate.MergeFields)
@@ -204,7 +204,7 @@ func TestMutationTemplate_MergeFieldsRejectedOnInsert(t *testing.T) {
 
 	src := `@enabled
 @mergeFields("preferences")
-mutation user mutationCreateUserBad {
+mutate user mutationCreateUserBad {
   args {
     userId  string  @required
   }
@@ -221,7 +221,7 @@ mutation user mutationCreateUserBad {
 
 // TestToggleComputerUseEnabled_DSLCarriesMergeFields is the memql#1339
 // regression test against the REAL DSL tree: the shipped
-// mutationToggleComputerUseEnabled (dsl/worker/mutations.memql) must
+// toggleComputerUseEnabled (dsl/worker/mutations.memql) must
 // carry @mergeFields("preferences"). Without it, flipping the
 // computer-use kill switch wipes every other User.preferences key
 // (theme, timezone, archiveRetentionDays, dailySpaceEnabled, voice
@@ -237,9 +237,9 @@ func TestToggleComputerUseEnabled_DSLCarriesMergeFields(t *testing.T) {
 	_, _, err := LoadUnifiedFunctions(nil, fnRegistry, conceptRegistry)
 	require.NoError(t, err)
 
-	fn, err := fnRegistry.Get("mutationToggleComputerUseEnabled")
-	require.NoError(t, err, "mutationToggleComputerUseEnabled must load from dsl/worker/mutations.memql")
+	fn, err := fnRegistry.Get("toggleComputerUseEnabled")
+	require.NoError(t, err, "toggleComputerUseEnabled must load from dsl/worker/mutations.memql")
 	require.NotNil(t, fn.MutationTemplate)
 	require.Equal(t, []string{"preferences"}, fn.MutationTemplate.MergeFields,
-		"mutationToggleComputerUseEnabled must deep-merge preferences or the kill switch wipes every other preference key (memql#1339)")
+		"toggleComputerUseEnabled must deep-merge preferences or the kill switch wipes every other preference key (memql#1339)")
 }

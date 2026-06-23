@@ -41,7 +41,7 @@ func TestEntitlementResolve_NilEngineIsUnlimited(t *testing.T) {
 
 func TestEntitlementResolve_FiniteCap(t *testing.T) {
 	fe := &fakeEngine{execResponder: func(query string) (any, error) {
-		if !strings.Contains(query, "queryAccountEntitlement") {
+		if !strings.Contains(query, "accountEntitlement") {
 			return nil, nil
 		}
 		// numbers arrive as float64 from a JSON decode -- exercise that path.

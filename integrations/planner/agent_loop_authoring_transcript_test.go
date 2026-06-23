@@ -63,11 +63,11 @@ func TestRunCaptureTranscript_PersistsLiteralCalls(t *testing.T) {
 		aiResponder: func(string, map[string]any) (any, error) { aiCalls++; return nil, nil },
 		execResponder: func(query string) (any, error) {
 			switch {
-			case strings.Contains(query, "queryAuthoringBundleForPlan"):
+			case strings.Contains(query, "authoringBundleForPlan"):
 				return map[string]any{"output": []any{}}, nil
-			case strings.Contains(query, "queryPlanById"):
+			case strings.Contains(query, "planById"):
 				return map[string]any{"output": []any{plan}}, nil
-			case strings.Contains(query, "queryTasksForPlan"):
+			case strings.Contains(query, "tasksForPlan"):
 				return map[string]any{"output": tasks}, nil
 			}
 			return nil, nil
@@ -84,18 +84,18 @@ func TestRunCaptureTranscript_PersistsLiteralCalls(t *testing.T) {
 
 	_, _, _ = fe.snapshot()
 	exec, _, _ := fe.snapshot()
-	if !anyCallContainsAll(exec, "mutationCreateAuthoringBundle", `"sourcePlanId":"p-tr"`) {
+	if !anyCallContainsAll(exec, "createAuthoringBundle", `"sourcePlanId":"p-tr"`) {
 		t.Errorf("must persist a bundle stamped with the source plan; exec=%v", exec)
 	}
 	// One automation construct, source = the verbatim workbenchHost call.
-	if !anyCallContainsAll(exec, "mutationCreateAuthoringConstruct", `"kind":"automation"`, "workbenchHost") {
+	if !anyCallContainsAll(exec, "createAuthoringConstruct", `"kind":"automation"`, "workbenchHost") {
 		t.Errorf("construct must carry the verbatim workbenchHost call; exec=%v", exec)
 	}
 	// The failed tool + the semantic row must NOT appear in the transcript.
-	if anyCallContainsAll(exec, "mutationCreateAuthoringConstruct", "brokenTool") {
+	if anyCallContainsAll(exec, "createAuthoringConstruct", "brokenTool") {
 		t.Errorf("a failed tool call must not be transcribed; exec=%v", exec)
 	}
-	if !anyCallContainsAll(exec, "mutationRecordBundleValidation", `"status":"validated"`, `"transcript":true`) {
+	if !anyCallContainsAll(exec, "recordBundleValidation", `"status":"validated"`, `"transcript":true`) {
 		t.Errorf("transcript bundle must be marked validated+transcript; exec=%v", exec)
 	}
 }
@@ -107,11 +107,11 @@ func TestRunCaptureTranscript_NoCallsSkips(t *testing.T) {
 	fe := &fakeEngine{
 		execResponder: func(query string) (any, error) {
 			switch {
-			case strings.Contains(query, "queryAuthoringBundleForPlan"):
+			case strings.Contains(query, "authoringBundleForPlan"):
 				return map[string]any{"output": []any{}}, nil
-			case strings.Contains(query, "queryPlanById"):
+			case strings.Contains(query, "planById"):
 				return map[string]any{"output": []any{plan}}, nil
-			case strings.Contains(query, "queryTasksForPlan"):
+			case strings.Contains(query, "tasksForPlan"):
 				return map[string]any{"output": []any{}}, nil
 			}
 			return nil, nil
@@ -122,7 +122,7 @@ func TestRunCaptureTranscript_NoCallsSkips(t *testing.T) {
 		t.Fatalf("runCaptureTranscript: %v", err)
 	}
 	exec, _, _ := fe.snapshot()
-	if anyCallContainsAll(exec, "mutationCreateAuthoringBundle") {
+	if anyCallContainsAll(exec, "createAuthoringBundle") {
 		t.Errorf("no tool calls => no bundle; exec=%v", exec)
 	}
 }
@@ -149,11 +149,11 @@ func TestRunCaptureTranscript_Gate1ReRunnable(t *testing.T) {
 			fe := &fakeEngine{
 				execResponder: func(query string) (any, error) {
 					switch {
-					case strings.Contains(query, "queryAuthoringBundleForPlan"):
+					case strings.Contains(query, "authoringBundleForPlan"):
 						return map[string]any{"output": []any{}}, nil
-					case strings.Contains(query, "queryPlanById"):
+					case strings.Contains(query, "planById"):
 						return map[string]any{"output": []any{plan}}, nil
-					case strings.Contains(query, "queryTasksForPlan"):
+					case strings.Contains(query, "tasksForPlan"):
 						return map[string]any{"output": tasks}, nil
 					}
 					return nil, nil
@@ -169,7 +169,7 @@ func TestRunCaptureTranscript_Gate1ReRunnable(t *testing.T) {
 				t.Fatalf("Gate-1 compile was not invoked on the rendered transcript")
 			}
 			exec, _, _ := ce.snapshot()
-			if !anyCallContainsAll(exec, "mutationRecordBundleValidation", `"status":"validated"`, `"transcript":true`, `"gate1":"ran"`, tc.wantReRun) {
+			if !anyCallContainsAll(exec, "recordBundleValidation", `"status":"validated"`, `"transcript":true`, `"gate1":"ran"`, tc.wantReRun) {
 				t.Errorf("validation must record the gate1 verdict %s; exec=%v", tc.wantReRun, exec)
 			}
 		})

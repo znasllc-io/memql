@@ -99,7 +99,7 @@ type Writer interface {
 	// MarkStepReady transitions a pending/blocked step to ready.
 	MarkStepReady(ctx context.Context, step StepView) error
 	// StartStep claims durably (ready -> running) via
-	// mutationStartHarnessStep. The atomic guard is StepClaimer; this is
+	// startHarnessStep. The atomic guard is StepClaimer; this is
 	// the durable transition write that follows a won claim.
 	StartStep(ctx context.Context, stepID string) error
 	// CompleteStep records a running step's result (running -> done).
@@ -114,7 +114,7 @@ type Writer interface {
 	SetPlanStatus(ctx context.Context, plan PlanView, status, errorMessage string) error
 }
 
-// Observation is the payload for mutationRecordHarnessObservation. kind
+// Observation is the payload for recordHarnessObservation. kind
 // is one of tool_result / error / note / decision (#582). The json field
 // on the concept is `data`, not `payload` (the #582 gotcha).
 type Observation struct {

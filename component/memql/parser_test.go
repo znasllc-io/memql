@@ -194,7 +194,7 @@ func TestParseValidateFunction(t *testing.T) {
 // recurse with the same rule, and quoted string keys still parse so
 // JSON-serialized tool calls remain compatible. This is the regression
 // guard for "cognition integration silently silently never finds AI
-// participants because querySpaceParticipants({partitionId: ...}) fails to
+// participants because spaceParticipants({partitionId: ...}) fails to
 // parse with 'function argument keys must be strings'."
 func TestParseFunctionArgs_UnquotedKeys(t *testing.T) {
 	engine := newParserTestEngine(t)

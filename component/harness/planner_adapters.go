@@ -263,10 +263,10 @@ func NewEnginePlanWriter(exec Executor) *EnginePlanWriter {
 }
 
 // CreatePlan creates a v1:harness:plan (status open) via
-// mutationCreateHarnessPlan.
+// createHarnessPlan.
 func (w *EnginePlanWriter) CreatePlan(ctx context.Context, planID, goal string, input map[string]any) error {
 	q := fmt.Sprintf(
-		`mutationCreateHarnessPlan({planId:%q, goal:%q, input:%s})`,
+		`createHarnessPlan({planId:%q, goal:%q, input:%s})`,
 		planID, goal, mustJSON(input),
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
@@ -276,10 +276,10 @@ func (w *EnginePlanWriter) CreatePlan(ctx context.Context, planID, goal string, 
 }
 
 // AddStep adds a v1:harness:step (status pending) via
-// mutationAddHarnessStep, carrying its dependsOn DAG in-edges.
+// addHarnessStep, carrying its dependsOn DAG in-edges.
 func (w *EnginePlanWriter) AddStep(ctx context.Context, step NewStep) error {
 	q := fmt.Sprintf(
-		`mutationAddHarnessStep({stepId:%q, planId:%q, title:%q, idempotencyKey:%q, dependsOn:%s, input:%s})`,
+		`addHarnessStep({stepId:%q, planId:%q, title:%q, idempotencyKey:%q, dependsOn:%s, input:%s})`,
 		step.ID, step.PlanID, step.Title, step.IdempotencyKey,
 		mustJSONSlice(step.DependsOn), mustJSON(step.Input),
 	)
@@ -323,10 +323,10 @@ func (w *EnginePlanWriter) AssignAgent(ctx context.Context, step NewStep, agentI
 }
 
 // RecordDecision appends a `decision` v1:harness:observation via
-// mutationRecordHarnessObservation.
+// recordHarnessObservation.
 func (w *EnginePlanWriter) RecordDecision(ctx context.Context, obs Observation) error {
 	q := fmt.Sprintf(
-		`mutationRecordHarnessObservation({stepId:%q, planId:%q, kind:%q, content:%q, data:%s})`,
+		`recordHarnessObservation({stepId:%q, planId:%q, kind:%q, content:%q, data:%s})`,
 		obs.StepID, obs.PlanID, obs.Kind, obs.Content, mustJSON(obs.Data),
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
@@ -340,7 +340,7 @@ func (w *EnginePlanWriter) RecordDecision(ctx context.Context, obs Observation) 
 // ---------------------------------------------------------------------------
 
 // EngineAgentFactory creates + upgrades agents through the EXISTING
-// agents-namespace mutations (mutationCreateAgent / mutationUpdateAgent)
+// agents-namespace mutations (createAgent / updateAgent)
 // via engine.Execute. It reuses those mutations, never redefines them
 // (#587 stays in lane). An optional embed func stores the new agent's
 // capability embedding so future fitScores hit a cached vector.
@@ -356,7 +356,7 @@ func NewEngineAgentFactory(exec Executor, embed EmbedFunc) *EngineAgentFactory {
 	return &EngineAgentFactory{exec: exec, embed: embed}
 }
 
-// CreateAgent persists a freshly-composed specialist via mutationCreateAgent
+// CreateAgent persists a freshly-composed specialist via createAgent
 // with kind=specialist, the scoped tools + knowledge domains packed under
 // capabilities, the role's system prompt, and the originating plan id on
 // the lineage. Returns the minted agent id.
@@ -376,7 +376,7 @@ func (f *EngineAgentFactory) CreateAgent(ctx context.Context, spec ComposedAgent
 		"originatingPlanId": originatingPlanID,
 	}
 	q := fmt.Sprintf(
-		`mutationCreateAgent({agentId:%q, ownerUserId:%q, name:%q, description:%q, personality:%q, role:%q, roleSlug:%q, kind:%q, capabilities:%s})`,
+		`createAgent({agentId:%q, ownerUserId:%q, name:%q, description:%q, personality:%q, role:%q, roleSlug:%q, kind:%q, capabilities:%s})`,
 		agentID, ownerUserID, spec.Name, spec.Description, spec.SystemPrompt,
 		"specialist", spec.RoleSlug, "specialist", capabilitiesJSON,
 	)
@@ -391,7 +391,7 @@ func (f *EngineAgentFactory) CreateAgent(ctx context.Context, spec ComposedAgent
 		"tools":            spec.Tools,
 	}
 	if _, err := f.exec.Execute(ctx, fmt.Sprintf(
-		`mutationUpdateAgent({agentId:%q, payload:%s})`, agentID, mustJSONAny(upd),
+		`updateAgent({agentId:%q, payload:%s})`, agentID, mustJSONAny(upd),
 	)); err != nil {
 		// Non-fatal: the agent exists; lineage/capability stamping is best
 		// effort. The roster falls back to keywords for the capability text.
@@ -402,7 +402,7 @@ func (f *EngineAgentFactory) CreateAgent(ctx context.Context, spec ComposedAgent
 }
 
 // UpgradeAgent attaches the merged knowledge/tools to an existing agent
-// via mutationUpdateAgent (partial update). newDomains/newTools are the
+// via updateAgent (partial update). newDomains/newTools are the
 // already-merged full lists from MergeCapabilities.
 func (f *EngineAgentFactory) UpgradeAgent(ctx context.Context, agentID string, newDomains, newTools []string, originatingPlanID string) error {
 	upd := map[string]any{
@@ -410,7 +410,7 @@ func (f *EngineAgentFactory) UpgradeAgent(ctx context.Context, agentID string, n
 		"tools":            newTools,
 	}
 	q := fmt.Sprintf(
-		`mutationUpdateAgent({agentId:%q, payload:%s})`, agentID, mustJSONAny(upd),
+		`updateAgent({agentId:%q, payload:%s})`, agentID, mustJSONAny(upd),
 	)
 	if _, err := f.exec.Execute(ctx, q); err != nil {
 		return fmt.Errorf("upgrade agent %q: %w", agentID, err)

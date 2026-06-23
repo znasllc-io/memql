@@ -301,7 +301,7 @@ func (l *Loader) CompileSource(source, origin string) (*Automation, error) {
 //     `logic` prefix, lowercase the first letter) -- resolving to the unique
 //     automation whose step invokes that logic. This makes a logic construct
 //     reachable by the name an author naturally reaches for (the QA pain in
-//     #1663: `logicRevokeExpiredDelegations` / `revokeExpiredDelegations` both
+//     #1663: `revokeExpiredDelegations` / `revokeExpiredDelegations` both
 //     now resolve to the `expireDelegations` automation that wraps them).
 //
 // If no automation matches but the name corresponds to a logic construct that
@@ -329,13 +329,12 @@ func (l *Loader) LoadByName(name string) (*Automation, error) {
 	}
 
 	// 2. Logic-alias resolution. A wrapped logic construct resolves to the
-	//    automation whose step invokes it, accepting both the full `logicXxx`
-	//    name and the bare invocation form.
-	full := fullLogicName(name)
-	bare := bareLogicName(name)
+	//    automation whose step invokes it. Post-C6 (memql#2036) both the
+	//    construct declaration and its invocation are bare, so the match is
+	//    a direct name comparison.
 	for _, a := range automations {
 		for _, invoked := range invokedLogicNames(a) {
-			if invoked == name || invoked == full || bareLogicName(invoked) == bare {
+			if invoked == name {
 				return a, nil
 			}
 		}
@@ -343,7 +342,7 @@ func (l *Loader) LoadByName(name string) (*Automation, error) {
 
 	// 3. Distinguish a logic construct that exists but is internal-only (no
 	//    wrapping automation) from a name that matches nothing at all.
-	if _, ok := memql.DSLConstructSource(l.logger, "logic", full); ok {
+	if _, ok := memql.DSLConstructSource(l.logger, "logic", name); ok {
 		return nil, fmt.Errorf(
 			"%q is a logic construct but no automation wraps it, so it is not a runnable entry point via run_automation", name)
 	}
@@ -351,11 +350,12 @@ func (l *Loader) LoadByName(name string) (*Automation, error) {
 	return nil, fmt.Errorf("automation %q not found", name)
 }
 
-// invokedLogicNames returns the full `logicXxx` construct names invoked by an
-// automation's steps (walking nested parallel / forEach / switch containers).
-// A `logic <bare> { ... }` step is rewritten by the parser into a function-call
-// step whose Function.Name is the full `logicXxx` form, so these are exactly
-// the StepTypeFunction steps whose name carries the `logic` kind prefix.
+// invokedLogicNames returns the bare construct names invoked by an
+// automation's function-call steps (walking nested parallel / forEach / switch
+// containers). Post-C6 (memql#2036) a `logic <name> { ... }` step is rewritten
+// by the parser into a function-call step whose Function.Name is the bare logic
+// name, so these are the StepTypeFunction steps. (Sub-automation dispatch is
+// StepTypeAutomation and is therefore excluded.)
 func invokedLogicNames(a *Automation) []string {
 	if a == nil {
 		return nil
@@ -366,7 +366,7 @@ func invokedLogicNames(a *Automation) []string {
 		if s == nil {
 			return
 		}
-		if s.Type == StepTypeFunction && s.Function != nil && isLogicConstructName(s.Function.Name) {
+		if s.Type == StepTypeFunction && s.Function != nil {
 			out = append(out, s.Function.Name)
 		}
 		if s.Parallel != nil {
@@ -397,38 +397,9 @@ func invokedLogicNames(a *Automation) []string {
 	return out
 }
 
-// isLogicConstructName reports whether name is a full `logicXxx` construct name
-// (the `logic` kind prefix followed by an upper-cased first letter -- so it does
-// not misfire on an ordinary identifier like "logical").
-func isLogicConstructName(name string) bool {
-	const prefix = "logic"
-	if !strings.HasPrefix(name, prefix) || len(name) <= len(prefix) {
-		return false
-	}
-	c := name[len(prefix)]
-	return c >= 'A' && c <= 'Z'
-}
-
-// fullLogicName returns the full `logicXxx` construct name for name. If name is
-// already in that form it is returned unchanged; otherwise the bare form is
-// promoted (`logic` + Title-cased first letter).
-func fullLogicName(name string) string {
-	if isLogicConstructName(name) || name == "" {
-		return name
-	}
-	return "logic" + strings.ToUpper(name[:1]) + name[1:]
-}
-
-// bareLogicName returns the bare invocation form of a logic name (strip the
-// `logic` prefix, lowercase the first letter). A name not in `logicXxx` form is
-// returned unchanged, so it composes safely with already-bare inputs.
-func bareLogicName(name string) string {
-	if !isLogicConstructName(name) {
-		return name
-	}
-	rest := name[len("logic"):]
-	return strings.ToLower(rest[:1]) + rest[1:]
-}
+// The logic name prefix bridge (isLogicConstructName / fullLogicName /
+// bareLogicName) was removed by C6 (memql#2036): construct names are now bare,
+// so logic resolution is a direct name comparison (see LoadByName step 2).
 
 // loadMemQL loads and compiles a .memql file from embedded filesystem.
 func (l *Loader) loadMemQL(path string) (*Automation, error) {
@@ -464,7 +435,7 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 			"  - For mutations: see mutations/v1/ directory\n\n" +
 			"Examples:\n" +
 			"  Instead of: query({ query: \"concept==v1:agents:agent; ...\" })\n" +
-			"  Use: queryActiveAgents({ tier: \"pro\" })\n\n" +
+			"  Use: activeAgents({ tier: \"pro\" })\n\n" +
 			"  Instead of: mutation({ concept: \"v1:cognition:space\", ... })\n" +
 			"  Use: mutationCreateSpace({ name: \"My Space\", ... })")
 	}

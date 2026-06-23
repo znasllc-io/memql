@@ -427,7 +427,7 @@ func (i *Integration) storeSeedChunk(
 		return fmt.Errorf("embed: %w", err)
 	}
 
-	// The mutationCreateDocumentChunk mutation only takes the core
+	// The createDocumentChunk mutation only takes the core
 	// fields. To carry our seedSource / seedTier / recipeVersion /
 	// kind / title / keyTerms we encode them into sourceRef + a
 	// separate metadata stamp via a follow-up mutation? Or stuff
@@ -459,7 +459,7 @@ func (i *Integration) storeSeedChunk(
 	enrichedBody := fmt.Sprintf("<!--seed:%s-->\n\n## %s\n\n%s", string(metadataJSON), cleanTitle, c.Body)
 
 	insertQuery := fmt.Sprintf(
-		`mutationCreateDocumentChunk({chunkId: %s, domainId: %s, text: %s, source: %s, sourceRef: %s, seq: %d, tokenCount: %d})`,
+		`createDocumentChunk({chunkId: %s, domainId: %s, text: %s, source: %s, sourceRef: %s, seq: %d, tokenCount: %d})`,
 		quoteString(chunkId),
 		quoteString(d.ID),
 		quoteString(enrichedBody),

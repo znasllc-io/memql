@@ -531,9 +531,9 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// rather than "agent silently feels familiar without grounds."
 	if agentId := strings.TrimSpace(msg.AgentId); agentId != "" {
 		if _, alreadySet := data["agentIsKnownToUser"]; !alreadySet {
-			query := fmt.Sprintf(`queryAgentInteractionCount({agentId: "%s"})`, agentId)
+			query := fmt.Sprintf(`agentInteractionCount({agentId: "%s"})`, agentId)
 			if result, err := r.engine.Execute(ctx, query); err == nil {
-				// queryAgentInteractionCount uses shape() so the
+				// agentInteractionCount uses shape() so the
 				// row count lives under the adapter's "data" axis.
 				// The earlier code only checked the top-level []any
 				// shape and silently saw zero, defaulting every
@@ -676,7 +676,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	turnCtx := turnContext{
 		AgentId:     msg.AgentId,
 		OwnerUserId: resolvedOwner,
-		PartitionId:     msg.ScopeId,
+		PartitionId: msg.ScopeId,
 		// memql#1133: a produceArtifact executor turn (deliverable_surface=
 		// workbench) is already running inside a kind=produceArtifact plan; the
 		// tool loop REFUSES a produceArtifact re-delegation on this turn so the
@@ -796,7 +796,7 @@ func (r *Replier) finishTurn(result *TurnResult, prep *preparedTurn, requestId s
 //
 // Adapter shape: r.engine.Execute returns the CognitionEngineAdapter's
 // converted map, which has shape `{"data": <shape rows>, "bundle":
-// {nodes:[...], rootIds:[...]}}`. queryAgentOwner uses shape() so
+// {nodes:[...], rootIds:[...]}}`. agentOwner uses shape() so
 // createdBy lands inside `data`. We navigate that path first; the
 // `bundle.nodes` fallback handles non-shape future variants without
 // needing a code change.
@@ -805,7 +805,7 @@ func (r *Replier) resolveOwnerForAgent(ctx context.Context, agentId string) stri
 	if agentId == "" || r.engine == nil {
 		return ""
 	}
-	q := fmt.Sprintf(`queryAgentOwner({agentId:%q})`, agentId)
+	q := fmt.Sprintf(`agentOwner({agentId:%q})`, agentId)
 	result, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Debug("agentReply: resolveOwnerForAgent query failed",
@@ -873,7 +873,7 @@ func (r *Replier) recentPlanOutcomesForSpace(ctx context.Context, partitionId st
 	if partitionId == "" || r.engine == nil {
 		return nil
 	}
-	q := fmt.Sprintf(`queryPlansForSpace({partitionId:%q})`, partitionId)
+	q := fmt.Sprintf(`plansForSpace({partitionId:%q})`, partitionId)
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Debug("agentReply: recentPlanOutcomesForSpace query failed",
@@ -922,7 +922,7 @@ func (r *Replier) recentPlanOutcomesForSpace(ctx context.Context, partitionId st
 	return out
 }
 
-// planOutcomeRowsFromResult unpacks queryPlansForSpace's shape()
+// planOutcomeRowsFromResult unpacks plansForSpace's shape()
 // result. Mirrors planRowsFromExecuteResult on the planner side --
 // shape() unwraps single matches; multi-match returns []any.
 // Returns rows in the order the engine produced them
@@ -957,7 +957,7 @@ func planOutcomeRowsFromResult(res any) []map[string]any {
 // planner doesn't (planner is deliberately NOT in the agent
 // concept's visibility list -- it's a cross-domain leak we wanted
 // to avoid). The agent node IS in the visibility list, so it can
-// load its own record via queryAgentById and stamp the result onto
+// load its own record via agentById and stamp the result onto
 // msg.ActingAgent before prompt rendering.
 //
 // Without this fallback, planner-driven post-approval turns landed
@@ -980,7 +980,7 @@ func (r *Replier) fillActingAgentIfEmpty(ctx context.Context, msg *memqlv1.Agent
 	if agentId == "" {
 		return
 	}
-	q := fmt.Sprintf(`queryAgentById({agentId:%q})`, agentId)
+	q := fmt.Sprintf(`agentById({agentId:%q})`, agentId)
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Debug("agentReply: fillActingAgentIfEmpty query failed",
@@ -1090,7 +1090,7 @@ func stampActingAgentRoleIfMissing(ctx context.Context, msg *memqlv1.AgentGenera
 	return ctx
 }
 
-// agentRowFromExecuteResult unpacks queryAgentById's shape() result.
+// agentRowFromExecuteResult unpacks agentById's shape() result.
 // Same pattern as planRowsFromExecuteResult on the planner side --
 // shape() returns the row unwrapped when there's exactly one match,
 // []any otherwise. Returns nil when the agent isn't found.
@@ -1184,7 +1184,7 @@ func countAdapterRows(result any) int {
 // instance-wide behavioural rules every agent reply runs through
 // (name-handling, repeat-back rules, greeting style). Edited from
 // Settings > Assistant Etiquette on the frontend; persisted via
-// the standard mutationSetGlobalVariable upsert. Empty string is
+// the standard setGlobalVariable upsert. Empty string is
 // the safe default -- the template skips the ETIQUETTE block when
 // nothing is configured.
 //
@@ -1193,7 +1193,7 @@ func countAdapterRows(result any) int {
 // couldn't load; etiquette is a quality nudge, not a hard gate.
 func (r *Replier) loadAssistantEtiquette(ctx context.Context) string {
 	const variableName = "MEMQL_ASSISTANT_ETIQUETTE"
-	query := fmt.Sprintf(`queryGlobalVariable({name: "%s"})`, variableName)
+	query := fmt.Sprintf(`globalVariable({name: "%s"})`, variableName)
 	result, err := r.engine.Execute(ctx, query)
 	if err != nil {
 		r.logger.Debug("agentReply: etiquette load failed",
@@ -1204,7 +1204,7 @@ func (r *Replier) loadAssistantEtiquette(ctx context.Context) string {
 }
 
 // extractEtiquetteValue pulls the variable's value out of the
-// adapter-wrapped query result. queryGlobalVariable runs through
+// adapter-wrapped query result. globalVariable runs through
 // shape("variableFull"), so the projected row carries flattened
 // fields (`payload.value` collapses to `value`) and lands under
 // the adapter's "data" axis. We tolerate a variety of return

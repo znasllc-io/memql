@@ -56,7 +56,9 @@ func (qc *QueryClient) BrowseConcept(ctx context.Context, conceptId string) (*Re
 // the continuation cursor for the next page.
 //
 // cursor   -- opaque continuation token from a prior page's
-//             PageResult.NextCursor; "" for the first page.
+//
+//	PageResult.NextCursor; "" for the first page.
+//
 // pageSize -- rows per page; <= 0 uses DefaultConceptBrowsePageSize.
 //
 // Walking the full registry:
@@ -102,7 +104,7 @@ func (qc *QueryClient) BrowseConceptPage(ctx context.Context, conceptId, cursor 
 
 // GetRowByConceptAndId returns the single row matching (conceptId,
 // rowId). Same admin-surface caveat as BrowseConcept -- product code
-// should use a typed lookup primitive (queryUserById, queryAgentById,
+// should use a typed lookup primitive (userById, agentById,
 // etc.) instead.
 func (qc *QueryClient) GetRowByConceptAndId(ctx context.Context, conceptId, rowId string) (*Result, error) {
 	if conceptId == "" {

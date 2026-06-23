@@ -7,7 +7,7 @@ use router.concepts.{ budget, call }
 
 @enabled
 @description("Record a single AI call through the memQL AI Router. Writes one v1:router:call row per call for observability, usage reporting, and cost attribution.")
-mutation call mutationRecordRouterCall {
+mutate call recordRouterCall {
   args {
     callId              string  @required
     requestId           string  @required
@@ -76,7 +76,7 @@ mutation call mutationRecordRouterCall {
 
 @enabled
 @description("Create or update a budget cap. Scope 'partition' covers all agents; scope 'agent' targets one v1:agents:agent by scopeId.")
-mutation budget mutationSetBudget {
+mutate budget setBudget {
   args {
     id                 string  @required
     scope              string  @required

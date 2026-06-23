@@ -91,7 +91,7 @@ func TestMaybeCheckpoint_ParksAtBoundary(t *testing.T) {
 		}},
 	}
 	fe := &fakeEngine{execResponder: func(query string) (any, error) {
-		if containsAll(query, "queryPlanById") {
+		if containsAll(query, "planById") {
 			return planRow, nil
 		}
 		return nil, nil
@@ -124,7 +124,7 @@ func TestMaybeCheckpoint_Idempotent(t *testing.T) {
 		}},
 	}
 	fe := &fakeEngine{execResponder: func(query string) (any, error) {
-		if containsAll(query, "queryPlanById") {
+		if containsAll(query, "planById") {
 			return planRow, nil
 		}
 		return nil, nil
@@ -148,7 +148,7 @@ func TestMaybeCheckpoint_NonRunningNoOp(t *testing.T) {
 		}},
 	}
 	fe := &fakeEngine{execResponder: func(query string) (any, error) {
-		if containsAll(query, "queryPlanById") {
+		if containsAll(query, "planById") {
 			return planRow, nil
 		}
 		return nil, nil

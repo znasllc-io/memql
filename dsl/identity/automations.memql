@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use identity.logic.{ logicAccessRequestExpirySweep, logicAccountDeletionReminder25Days, logicAccountDeletionReminder7Days, logicAccountDeletionSweep, logicAuditEventRetentionSweep, logicMagicLinkExpirySweep, logicOnDelegationCreated, logicRevokeExpiredDelegations }
+use identity.logic.{ accessRequestExpirySweep, accountDeletionReminder25Days, accountDeletionReminder7Days, accountDeletionSweep, auditEventRetentionSweep, magicLinkExpirySweep, onDelegationCreated, revokeExpiredDelegations }
 
 @enabled
 @trigger(schedule="0 0 4 * * *")
@@ -92,7 +92,7 @@ automation accountDeletionReminder7Days {
 // set whose cooldown (IDENTITY_DELETION_COOLDOWN_DAYS, default 30) has
 // elapsed:
 //
-//   1. Soft-delete the user row + scrub PII (mutationDeleteUserHard).
+//   1. Soft-delete the user row + scrub PII (deleteUserHard).
 //   2. Revoke every active auth session for the user's JWT subject so
 //      any in-flight tokens stop authorizing.
 //
@@ -117,7 +117,7 @@ automation accountDeletionReminder7Days {
 //
 // MemQL parser limitations:
 //
-//   - The filter side of queryUsersScheduledForDeletion can't push
+//   - The filter side of usersScheduledForDeletion can't push
 //     the cooldown math into the query (see that file's header).
 //     Per-row gating uses
 //       addDuration(item.payload.deletionScheduledAt, "P{cooldown}D") < timestamp()
@@ -156,7 +156,7 @@ automation accountDeletionSweep {
 //
 // flip this cron to call the corresponding mutation per row inside
 // the for-loop. The query side
-// (queryExpiredAuditEvents) is stable either way.
+// (expiredAuditEvents) is stable either way.
 //
 // Per-row windowing uses addDuration on item.payload.occurredAt
 // against `timestamp()`, same as accessRequestExpirySweep -- MemQL
@@ -177,12 +177,12 @@ automation auditEventRetentionSweep {
 //
 // Scheduled automation: every 5 minutes, soft-revoke every delegation
 // whose expiresAt is past. The query + iteration + revoke loop lives
-// in `logicRevokeExpiredDelegations`; the automation is just the
+// in `revokeExpiredDelegations`; the automation is just the
 // trigger + one step that calls it.
 
 @enabled
 @trigger(schedule="0 */5 * * * *")
-@description("Soft-revoke expired delegations every 5 minutes. The query + revoke loop is in logicRevokeExpiredDelegations.")
+@description("Soft-revoke expired delegations every 5 minutes. The query + revoke loop is in revokeExpiredDelegations.")
 automation expireDelegations {
   step revoke {
     logic revokeExpiredDelegations { now: timestamp() }
@@ -199,7 +199,7 @@ automation expireDelegations {
 //
 // Path detail. There is no row-removal mutation in MemQL today
 // (Insert and Update only), so "tombstoning" the row uses the
-// existing mutationConsumeMagicLinkRequest. The handler that
+// existing consumeMagicLinkRequest. The handler that
 // processes /auth/magic-link/consume already rejects rows with
 // non-empty consumedAt; stamping consumedAt on already-expired rows
 // here is a belt-and-suspenders guard:

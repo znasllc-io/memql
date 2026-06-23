@@ -76,7 +76,7 @@ func defaultRoutingRules() []RoutingRule {
 		// memql#1396). A cached read on any replica is now evicted purely via
 		// this broadcast channel, with zero per-concept routing rules.
 		{Pattern: "cache.invalidate.*", TargetType: ""},
-		// Planner graph events: BFF owns the writes (mutationCreatePlan
+		// Planner graph events: BFF owns the writes (createPlan
 		// fires on BFF), the planner-tagged binary subscribes
 		// graph.node.created.v1:planner:plan in its
 		// PlannerAgentLoop.HandlePlanCreated. Without this forward

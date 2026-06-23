@@ -70,7 +70,7 @@ func TestWatchdogIsStranded(t *testing.T) {
 	}
 }
 
-// candidatePlanRow builds a queryStrandedCandidatePlans / queryPlanById
+// candidatePlanRow builds a strandedCandidatePlans / planById
 // response in the flat shape MaterializeRows reads (rows under `output`).
 func candidatePlanRows(rows ...map[string]any) any {
 	out := make([]any, 0, len(rows))
@@ -86,7 +86,7 @@ func strandedRow(planId, kind, createdAt string) map[string]any {
 		"kind":         kind,
 		"status":       "queued",
 		"goal":         "make me a list of 10 birds",
-		"partitionId":      "v1:cognition:space:s1",
+		"partitionId":  "v1:cognition:space:s1",
 		"ownerAgentId": "v1:agents:agent:a1",
 		"requestedBy":  "v1:identity:user:u1",
 		"createdAt":    createdAt,
@@ -94,15 +94,15 @@ func strandedRow(planId, kind, createdAt string) map[string]any {
 }
 
 // watchdogEngine answers the candidate query with the given rows and routes
-// every other query (queryPlanById during recovery, the InvokeAI gate, the
+// every other query (planById during recovery, the InvokeAI gate, the
 // mutations) through the shared fakeEngine so recovery runs without panicking.
 func newWatchdogEngine(candidate any) *fakeEngine {
 	return &fakeEngine{
 		execResponder: func(q string) (any, error) {
 			switch {
-			case strings.Contains(q, "queryStrandedCandidatePlans"):
+			case strings.Contains(q, "strandedCandidatePlans"):
 				return candidate, nil
-			case strings.Contains(q, "queryPlanById"):
+			case strings.Contains(q, "planById"):
 				// Recovery re-loads the plan; hand back a queued userGoal so
 				// invokeAndDispatch proceeds into triage/gate (which, with a
 				// nil aiResponder, parks/fails harmlessly -- we only assert
@@ -130,13 +130,13 @@ func TestWatchdogRecoversStrandedPlan(t *testing.T) {
 	w.pollOnce(context.Background())
 
 	execCalls, _, _ := eng.snapshot()
-	if countContains(execCalls, "queryStrandedCandidatePlans") != 1 {
-		t.Fatalf("watchdog should run the candidate query once, got %d", countContains(execCalls, "queryStrandedCandidatePlans"))
+	if countContains(execCalls, "strandedCandidatePlans") != 1 {
+		t.Fatalf("watchdog should run the candidate query once, got %d", countContains(execCalls, "strandedCandidatePlans"))
 	}
-	// Recovery re-loads the plan via queryPlanById (proof RecoverStranded ->
+	// Recovery re-loads the plan via planById (proof RecoverStranded ->
 	// invokeAndDispatch fired for the stranded plan).
-	if countContains(execCalls, "queryPlanById") == 0 {
-		t.Fatal("watchdog recovery should re-drive the plan (queryPlanById expected)")
+	if countContains(execCalls, "planById") == 0 {
+		t.Fatal("watchdog recovery should re-drive the plan (planById expected)")
 	}
 }
 
@@ -155,8 +155,8 @@ func TestWatchdogSkipsFreshAndExcludedKinds(t *testing.T) {
 	w.pollOnce(context.Background())
 
 	execCalls, _, _ := eng.snapshot()
-	if countContains(execCalls, "queryPlanById") != 0 {
-		t.Fatalf("no recovery should fire for fresh / excluded-kind plans, got %d queryPlanById", countContains(execCalls, "queryPlanById"))
+	if countContains(execCalls, "planById") != 0 {
+		t.Fatalf("no recovery should fire for fresh / excluded-kind plans, got %d planById", countContains(execCalls, "planById"))
 	}
 }
 
@@ -212,12 +212,12 @@ func TestWatchdogCrossReplicaRecoversExactlyOnce(t *testing.T) {
 	aCalls, _, _ := a.eng.snapshot()
 	bCalls, _, _ := b.eng.snapshot()
 	// Count REPLICAS that recovered (re-loaded the plan), not total calls --
-	// the winning replica's invokeAndDispatch may queryPlanById more than once.
+	// the winning replica's invokeAndDispatch may planById more than once.
 	recoveredReplicas := 0
-	if countContains(aCalls, "queryPlanById") > 0 {
+	if countContains(aCalls, "planById") > 0 {
 		recoveredReplicas++
 	}
-	if countContains(bCalls, "queryPlanById") > 0 {
+	if countContains(bCalls, "planById") > 0 {
 		recoveredReplicas++
 	}
 	if recoveredReplicas == 0 {

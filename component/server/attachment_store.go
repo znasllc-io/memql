@@ -41,7 +41,7 @@ func (s *EngineAttachmentStore) CreateAttachment(ctx context.Context, params Att
 
 	args := map[string]any{
 		"attachmentId": nodeId,
-		"partitionId":      params.PartitionId,
+		"partitionId":  params.PartitionId,
 		"fileName":     params.FileName,
 		"mimeType":     params.MimeType,
 		"fileSize":     params.FileSize,
@@ -102,7 +102,7 @@ func (s *EngineAttachmentStore) CallerOwnsSpace(ctx context.Context, partitionId
 }
 
 // GetAttachment reads one v1:common:attachment row by id within a space via
-// the queryAttachmentById DSL query. The query's filter pins
+// the attachmentById DSL query. The query's filter pins
 // payload.partitionId==args.partitionId, so an attachment id from a different space
 // returns no row. Returns nil (no error) when not found. (memql#804)
 func (s *EngineAttachmentStore) GetAttachment(ctx context.Context, attachmentId, partitionId string) (*AttachmentRow, error) {
@@ -115,16 +115,16 @@ func (s *EngineAttachmentStore) GetAttachment(ctx context.Context, attachmentId,
 		return nil, fmt.Errorf("attachmentId and partitionId are required")
 	}
 
-	q, err := dslCall("queryAttachmentById", map[string]any{
+	q, err := dslCall("attachmentById", map[string]any{
 		"attachmentId": attachmentId,
-		"partitionId":      partitionId,
+		"partitionId":  partitionId,
 	})
 	if err != nil {
 		return nil, err
 	}
 	res, err := s.engine.Execute(ctx, q)
 	if err != nil {
-		return nil, fmt.Errorf("execute queryAttachmentById: %w", err)
+		return nil, fmt.Errorf("execute attachmentById: %w", err)
 	}
 	rows := memql.MaterializeRows(res)
 	if len(rows) == 0 {
@@ -138,12 +138,12 @@ func (s *EngineAttachmentStore) GetAttachment(ctx context.Context, attachmentId,
 		return ""
 	}
 	return &AttachmentRow{
-		ID:       getStr("id"),
-		FileName: getStr("fileName"),
-		MimeType: getStr("mimeType"),
-		BlobUrl:  getStr("blobUrl"),
-		PartitionId:  getStr("partitionId"),
-		Status:   getStr("status"),
+		ID:          getStr("id"),
+		FileName:    getStr("fileName"),
+		MimeType:    getStr("mimeType"),
+		BlobUrl:     getStr("blobUrl"),
+		PartitionId: getStr("partitionId"),
+		Status:      getStr("status"),
 	}, nil
 }
 

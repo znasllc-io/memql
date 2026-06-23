@@ -49,7 +49,7 @@ func actionReplayEnabled() bool {
 // on a mismatch lands in Phase 4 (#1739); Phase 1 simply declines to replay.
 func (a *App) tryReplayAction(ctx context.Context, step harness.StepView, inputFP string) (replayed bool, result map[string]any, found bool) {
 	adapter := &CognitionEngineAdapter{Engine: a.engine}
-	q := fmt.Sprintf(`queryActionByInputFingerprint({inputFingerprint:%q})`, inputFP)
+	q := fmt.Sprintf(`actionByInputFingerprint({inputFingerprint:%q})`, inputFP)
 	res, err := adapter.Execute(ctx, q)
 	if err != nil {
 		return false, nil, false
@@ -149,10 +149,10 @@ func (a *App) resolveReplaySurfaces(ctx context.Context, payload map[string]any,
 }
 
 // loadOwnerSurfaces reads the calling owner's registered surfaces via
-// querySurfacesForOwner and projects them for the resolver.
+// surfacesForOwner and projects them for the resolver.
 func (a *App) loadOwnerSurfaces(ctx context.Context) []surfaceresolver.Surface {
 	adapter := &CognitionEngineAdapter{Engine: a.engine}
-	res, err := adapter.Execute(ctx, `querySurfacesForOwner()`)
+	res, err := adapter.Execute(ctx, `surfacesForOwner()`)
 	if err != nil {
 		return nil
 	}
@@ -337,7 +337,7 @@ func (a *App) mintActionFromRun(ctx context.Context, step harness.StepView, inpu
 	}
 
 	q := fmt.Sprintf(
-		`mutationMintAction({slug:%q, intent:%q, capability:%q, sideEffectClass:%q, status:%q, inputFingerprint:%q, calls:%s, resourceEdges:%s, paramBindings:%s, templateFingerprint:%q, recordedResult:%s, resultFingerprint:%q, recordedSurface:%q, provenancePlanId:%q, provenanceStepId:%q})`,
+		`mintAction({slug:%q, intent:%q, capability:%q, sideEffectClass:%q, status:%q, inputFingerprint:%q, calls:%s, resourceEdges:%s, paramBindings:%s, templateFingerprint:%q, recordedResult:%s, resultFingerprint:%q, recordedSurface:%q, provenancePlanId:%q, provenanceStepId:%q})`,
 		slug, intent, dominantCap, sideEffectClass, status, inputFP, string(callsJSON), string(edgesJSON), string(bindingsJSON), templateFP, string(resultJSON), resultFP, recordedSurfaceKind, step.PlanID, step.ID,
 	)
 	adapter := &CognitionEngineAdapter{Engine: a.engine}
@@ -348,12 +348,12 @@ func (a *App) mintActionFromRun(ctx context.Context, step harness.StepView, inpu
 
 // reinforceAction bumps an action's reliability + reinforceCount after a
 // verified replay. The new values are computed in Go (the MemQL parser has no
-// arithmetic) and handed to mutationReinforceAction. Best-effort.
+// arithmetic) and handed to reinforceAction. Best-effort.
 func (a *App) reinforceAction(ctx context.Context, id string, payload map[string]any) {
 	rel, _ := payload["reliability"].(float64)
 	cnt, _ := payload["reinforceCount"].(float64)
 	nextRel, nextCnt := actionreplay.Reinforce(rel, int(cnt))
-	q := fmt.Sprintf(`mutationReinforceAction({actionId:%q, reliability:%v, reinforceCount:%d})`,
+	q := fmt.Sprintf(`reinforceAction({actionId:%q, reliability:%v, reinforceCount:%d})`,
 		id, nextRel, nextCnt)
 	adapter := &CognitionEngineAdapter{Engine: a.engine}
 	if _, err := adapter.Execute(ctx, q); err != nil && a.Logger != nil {
@@ -463,7 +463,7 @@ func buildParamBindings(trace actiontrace.CandidateTrace, stepInput map[string]a
 func (a *App) tryParameterizedReplay(ctx context.Context, step harness.StepView) (replayed bool, result map[string]any, found bool) {
 	templateFP := actionreplay.Fingerprint(parambind.TemplateFingerprintKeys(step.Input))
 	adapter := &CognitionEngineAdapter{Engine: a.engine}
-	res, err := adapter.Execute(ctx, fmt.Sprintf(`queryActionByTemplateFingerprint({templateFingerprint:%q})`, templateFP))
+	res, err := adapter.Execute(ctx, fmt.Sprintf(`actionByTemplateFingerprint({templateFingerprint:%q})`, templateFP))
 	if err != nil {
 		return false, nil, false
 	}

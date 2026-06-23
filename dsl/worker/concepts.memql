@@ -31,7 +31,7 @@ concept invocation {
   bytesIn        int  @description("Bytes the worker streamed in (e.g. fs_write payload).")
   bytesOut       int  @description("Bytes the worker streamed out (stdout + stderr + fs_read body, etc).")
   outputPreview  string  @description("First 1024 chars of stdout/data, for quick debugging without fetching the full body. Sensitive tokens are NOT scrubbed here -- preview is for owner eyes, audit-log readers don't see this field.")
-  deleted        bool  @default("false")  @description("Soft-delete flag. mutationSoftDeleteWorkerInvocation stamps this true once the workerInvocationRetentionSweep cron retires a row past its WORKER_INVOCATION_RETENTION_DAYS window; the underlying time-series row survives for forensic recovery. Queries filter deleted rows out via traitIsNotDeleted (payload.deleted!=true).")
+  deleted        bool  @default("false")  @description("Soft-delete flag. softDeleteWorkerInvocation stamps this true once the workerInvocationRetentionSweep cron retires a row past its WORKER_INVOCATION_RETENTION_DAYS window; the underlying time-series row survives for forensic recovery. Queries filter deleted rows out via isNotDeleted (payload.deleted!=true).")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="workerId", target=registration, direction="outgoing")

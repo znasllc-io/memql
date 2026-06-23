@@ -32,7 +32,7 @@
 // framing -- beliefs are durable, so distilling once a day is plenty;
 // the watermark guarantees nothing is missed between runs.
 
-use harness.logic.{ logicConsolidateMemory }
+use harness.logic.{ consolidateMemory }
 
 @enabled
 @trigger(schedule="0 45 2 * * *")

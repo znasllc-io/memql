@@ -21,32 +21,32 @@ func extractMintRows(res any) []map[string]any {
 // handleMintSkill is the Phase 3 (memql#159) dispatch path for the
 // planner agent's mintSkill action. Three steps:
 //
-//   1. Catalog-search-before-mint: walk the active skill catalog and
-//      reject the mint if any existing row already covers >60% of the
-//      requested bundle. Mint is the last resort; near-matches should
-//      have come back as extendSpecialist on a prior iteration. When
-//      this fires we escalate with a feedbackReason that names the
-//      near-match so the operator can re-aim the planner.
+//  1. Catalog-search-before-mint: walk the active skill catalog and
+//     reject the mint if any existing row already covers >60% of the
+//     requested bundle. Mint is the last resort; near-matches should
+//     have come back as extendSpecialist on a prior iteration. When
+//     this fires we escalate with a feedbackReason that names the
+//     near-match so the operator can re-aim the planner.
 //
-//   2. Authority gate: load the planner's agentAuthorization rows for
-//      the Plan's requestedBy user. The mint is in-envelope when a row
-//      carries action='mintSkill' AND (skillTierAllowlist empty OR the
-//      requested tier is in the allowlist) AND the row is active +
-//      unexpired. Empty allowlist defaults to ["A"] -- B/C require
-//      explicit opt-in per the issue body.
+//  2. Authority gate: load the planner's agentAuthorization rows for
+//     the Plan's requestedBy user. The mint is in-envelope when a row
+//     carries action='mintSkill' AND (skillTierAllowlist empty OR the
+//     requested tier is in the allowlist) AND the row is active +
+//     unexpired. Empty allowlist defaults to ["A"] -- B/C require
+//     explicit opt-in per the issue body.
 //
-//   3a. In-envelope: invoke mutationMintSkill with the payload + the
-//       Plan / planner provenance. The next planner iteration will
-//       see the new catalog row and can dispatch via the standard
-//       extendSpecialist path.
+//     3a. In-envelope: invoke mintSkill with the payload + the
+//     Plan / planner provenance. The next planner iteration will
+//     see the new catalog row and can dispatch via the standard
+//     extendSpecialist path.
 //
-//   3b. Out-of-envelope: write a v1:copresent:canvasState row of
-//       kind='card' / data.variant='mintSkillApprovalRequested',
-//       then transition the Plan to awaitingFeedback with
-//       feedbackReason='mint_skill_approval_required'. The next turn
-//       resumes once the user clicks Approve / Approve-and-allow /
-//       Reject on the card and the canvas-action handler stamps the
-//       resulting feedbackResponse.
+//     3b. Out-of-envelope: write a v1:copresent:canvasState row of
+//     kind='card' / data.variant='mintSkillApprovalRequested',
+//     then transition the Plan to awaitingFeedback with
+//     feedbackReason='mint_skill_approval_required'. The next turn
+//     resumes once the user clicks Approve / Approve-and-allow /
+//     Reject on the card and the canvas-action handler stamps the
+//     resulting feedbackResponse.
 func (l *PlannerAgentLoop) handleMintSkill(ctx context.Context, planId string, d plannerDecision) error {
 	if err := validateMintPayload(d); err != nil {
 		return l.markPlanFailed(ctx, planId, err.Error())
@@ -143,9 +143,9 @@ func (l *PlannerAgentLoop) findCatalogOverlap(ctx context.Context, d plannerDeci
 		return "", 0, nil
 	}
 
-	res, err := l.engine.Execute(systemActorContext(ctx), `queryActiveSkillsFull({})`)
+	res, err := l.engine.Execute(systemActorContext(ctx), `activeSkillsFull({})`)
 	if err != nil {
-		return "", 0, fmt.Errorf("queryActiveSkillsFull: %w", err)
+		return "", 0, fmt.Errorf("activeSkillsFull: %w", err)
 	}
 	for _, row := range extractMintRows(res) {
 		existing := unionStringSets(
@@ -183,10 +183,10 @@ func (l *PlannerAgentLoop) checkMintAuthority(ctx context.Context, ownerAgentId,
 	if ownerAgentId == "" {
 		return false, "plan has no ownerAgentId; cannot resolve planner grant", nil
 	}
-	call := fmt.Sprintf(`queryAgentAuthorizationsForUser({userId:%q})`, requestedBy)
+	call := fmt.Sprintf(`agentAuthorizationsForUser({userId:%q})`, requestedBy)
 	res, err := l.engine.Execute(systemActorContext(ctx), call)
 	if err != nil {
-		return false, "", fmt.Errorf("queryAgentAuthorizationsForUser: %w", err)
+		return false, "", fmt.Errorf("agentAuthorizationsForUser: %w", err)
 	}
 	now := time.Now().UTC()
 	for _, row := range extractMintRows(res) {
@@ -217,7 +217,7 @@ func (l *PlannerAgentLoop) checkMintAuthority(ctx context.Context, ownerAgentId,
 	return false, "no active mintSkill grant on planner agent", nil
 }
 
-// executeMintSkill invokes mutationMintSkill with the decision
+// executeMintSkill invokes mintSkill with the decision
 // payload + the Phase 3 provenance triad. Returns the new skill's id
 // on success.
 func (l *PlannerAgentLoop) executeMintSkill(ctx context.Context, d plannerDecision, planId, ownerAgentId string) (string, error) {
@@ -243,7 +243,7 @@ func (l *PlannerAgentLoop) executeMintSkill(ctx context.Context, d plannerDecisi
 	if err != nil {
 		return "", fmt.Errorf("marshal mint args: %w", err)
 	}
-	call := fmt.Sprintf(`mutationMintSkill(%s)`, string(payload))
+	call := fmt.Sprintf(`mintSkill(%s)`, string(payload))
 	if _, err := l.engine.Execute(systemActorContext(ctx), call); err != nil {
 		return "", err
 	}

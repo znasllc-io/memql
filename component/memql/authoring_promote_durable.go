@@ -19,8 +19,8 @@ package memql
 //	a. relies on the Gate-1 compile/bind already performed by AuthorSessionBundle
 //	   (the construct arrives already compiled -- *Function or *Spec on .Compiled);
 //	b. persists a v1:authoring:bundle + v1:authoring:construct row pair via the
-//	   EXISTING #954 mutations (mutationCreateAuthoringBundle /
-//	   mutationCreateAuthoringConstruct) -- NO new DSL -- capturing source + kind
+//	   EXISTING #954 mutations (createAuthoringBundle /
+//	   createAuthoringConstruct) -- NO new DSL -- capturing source + kind
 //	   + owner + a status marker for reviewability/audit;
 //	c. calls the EXISTING PromoteAuthoredConstruct so it is immediately callable
 //	   by all sessions exactly as today (shared registry, core-first never-shadow);
@@ -304,12 +304,12 @@ func (s *enginePromoteStore) CreatePromoteBundle(ctx context.Context, bundleId, 
 	if err != nil {
 		return err
 	}
-	if _, err := s.engine.Execute(ctx, "mutationCreateAuthoringBundle("+string(args)+")"); err != nil {
+	if _, err := s.engine.Execute(ctx, "createAuthoringBundle("+string(args)+")"); err != nil {
 		return err
 	}
-	// mutationCreateAuthoringBundle inserts status "draft"; transition it to
+	// createAuthoringBundle inserts status "draft"; transition it to
 	// active so the boot re-hydration's system-active enumeration picks it up.
-	if _, err := s.engine.Execute(ctx, fmt.Sprintf(`mutationActivateAuthoringBundle({"bundleId":%q})`, bundleId)); err != nil {
+	if _, err := s.engine.Execute(ctx, fmt.Sprintf(`activateAuthoringBundle({"bundleId":%q})`, bundleId)); err != nil {
 		return err
 	}
 	return nil
@@ -327,7 +327,7 @@ func (s *enginePromoteStore) CreatePromoteConstruct(ctx context.Context, constru
 	if err != nil {
 		return err
 	}
-	if _, err := s.engine.Execute(ctx, "mutationCreateAuthoringConstruct("+string(args)+")"); err != nil {
+	if _, err := s.engine.Execute(ctx, "createAuthoringConstruct("+string(args)+")"); err != nil {
 		return err
 	}
 	// Flip the construct to active so it reads as a live promoted record.
@@ -335,7 +335,7 @@ func (s *enginePromoteStore) CreatePromoteConstruct(ctx context.Context, constru
 	if err != nil {
 		return err
 	}
-	if _, err := s.engine.Execute(ctx, "mutationSetConstructStatus("+string(cargs)+")"); err != nil {
+	if _, err := s.engine.Execute(ctx, "setConstructStatus("+string(cargs)+")"); err != nil {
 		return err
 	}
 	return nil
@@ -351,7 +351,7 @@ type enginePromoteRehydrateStore struct {
 
 func (s *enginePromoteRehydrateStore) LoadPromotedBundles(ctx context.Context) ([]AuthoringBundleRow, error) {
 	ownerCtx := rearmClusterOwnerContext(ctx)
-	res, err := s.engine.Execute(ownerCtx, "querySystemActiveAuthoringBundles()")
+	res, err := s.engine.Execute(ownerCtx, "systemActiveAuthoringBundles()")
 	if err != nil {
 		return nil, err
 	}
@@ -378,7 +378,7 @@ func (s *enginePromoteRehydrateStore) LoadPromotedBundles(ctx context.Context) (
 
 func (s *enginePromoteRehydrateStore) LoadConstructsForBundle(ctx context.Context, owner, bundleId string) ([]AuthoringConstructRow, error) {
 	authorCtx := auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: owner, Role: auth.RoleWriter})
-	q := fmt.Sprintf(`queryAuthoringConstructsForBundle({"bundleId":%q})`, bundleId)
+	q := fmt.Sprintf(`authoringConstructsForBundle({"bundleId":%q})`, bundleId)
 	res, err := s.engine.Execute(authorCtx, q)
 	if err != nil {
 		return nil, err

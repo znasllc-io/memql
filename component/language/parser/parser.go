@@ -346,7 +346,7 @@ func (p *Parser) parseImportEntry() (*ImportDecl, error) {
 //	Form B (canonical post-migration):
 //	  use <dotted.path>.{ name1, name2, ... }
 //	  use cognition.concepts.{ participant, space }
-//	  use common.traits.{ traitIsActiveRecord, traitIsNotDeleted }
+//	  use common.traits.{ isActiveRecord, isNotDeleted }
 //
 // Form B names a module file and lists the constructs to pull into
 // the importing file's local scope. The lexer breaks `path.{` into
@@ -857,7 +857,7 @@ func (p *Parser) parseGoStyleFunction() (*FunctionDef, error) {
 		// @enabled is a no-op kept for backward compatibility.
 		// Pre-#360 the default was false, which silently disabled
 		// every logic function in the tree that authors had written
-		// without @enabled -- including chat-reply (logicGenerateResponse),
+		// without @enabled -- including chat-reply (generateResponse),
 		// greet-on-join's auto-join (logicAutoJoinAI), and the
 		// retention sweeps. Queries / mutations / automations all
 		// carried @enabled explicitly so the flip changes behaviour

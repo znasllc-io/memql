@@ -46,7 +46,7 @@ func (f *pagedFakeEngine) Execute(_ context.Context, _ string) (*memqlengine.Exe
 }
 
 // TestListForUserDrainsAllKeysetPages proves ListForUser walks the
-// keyset cursor across every page (queryWorkerTokensForUser is
+// keyset cursor across every page (workerTokensForUser is
 // `paginate 50`). The revoke ownership check fans out over this list, so
 // a worker token on page 2+ must still be found-as-owned rather than
 // silently rejected.

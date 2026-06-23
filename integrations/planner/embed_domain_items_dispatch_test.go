@@ -9,7 +9,7 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 )
 
-// embedPlanRow builds the queryPlanById response in the shape-projected
+// embedPlanRow builds the planById response in the shape-projected
 // form MaterializeRows reads (a flat row under an `output` envelope),
 // mirroring trainPlanRow in train_specialist_dispatch_test.go.
 func embedPlanRow(planId, domainId, documentId string) any {
@@ -49,7 +49,7 @@ func TestEmbedDomainItemsDispatcher_RunsAndCompletes(t *testing.T) {
 	eng := &fakeEngine{
 		execResponder: func(q string) (any, error) {
 			switch {
-			case strings.Contains(q, "queryPlanById"):
+			case strings.Contains(q, "planById"):
 				return embedPlanRow("plan-e1", "physics_qm", ""), nil
 			case strings.Contains(q, "embedDomainItems("):
 				return embedResultRow(3, 1), nil
@@ -101,7 +101,7 @@ func TestEmbedDomainItemsDispatcher_DuplicateEventAfterCompletionIsDropped(t *te
 	eng := &fakeEngine{
 		execResponder: func(q string) (any, error) {
 			switch {
-			case strings.Contains(q, "queryPlanById"):
+			case strings.Contains(q, "planById"):
 				return embedPlanRow("plan-dup", "physics_qm", ""), nil
 			case strings.Contains(q, "embedDomainItems("):
 				return embedResultRow(2, 0), nil
@@ -149,7 +149,7 @@ func TestEmbedDomainItemsDispatcher_ConcurrentCreatedUpdatedDispatchesOnce(t *te
 	eng := &fakeEngine{
 		execResponder: func(q string) (any, error) {
 			switch {
-			case strings.Contains(q, "queryPlanById"):
+			case strings.Contains(q, "planById"):
 				return embedPlanRow("plan-race", "physics_qm", ""), nil
 			case strings.Contains(q, "embedDomainItems("):
 				return embedResultRow(1, 0), nil
@@ -195,7 +195,7 @@ func TestEmbedDomainItemsDispatcher_PassesDocumentScope(t *testing.T) {
 	eng := &fakeEngine{
 		execResponder: func(q string) (any, error) {
 			switch {
-			case strings.Contains(q, "queryPlanById"):
+			case strings.Contains(q, "planById"):
 				return embedPlanRow("plan-e2", "hr_records", "doc-42"), nil
 			case strings.Contains(q, "embedDomainItems("):
 				return embedResultRow(5, 0), nil
@@ -254,7 +254,7 @@ func TestEmbedDomainItemsDispatcher_IgnoresOtherKinds(t *testing.T) {
 func TestEmbedDomainItemsDispatcher_FailsWhenNoDomain(t *testing.T) {
 	eng := &fakeEngine{
 		execResponder: func(q string) (any, error) {
-			if strings.Contains(q, "queryPlanById") {
+			if strings.Contains(q, "planById") {
 				return map[string]any{
 					"output": []any{
 						map[string]any{

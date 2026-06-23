@@ -9,7 +9,7 @@ use todos.concepts.{ todo }
 
 @enabled
 @description("List the caller's to-dos. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible. Optional done filter narrows to open (done=false) or completed (done=true) items; omit it to return everything.")
-query todo queryTodos {
+query todo todos {
   args {
     done  bool
   }
@@ -26,7 +26,7 @@ query todo queryTodos {
 @unbounded("todo by id (guarded), gated to the owner -- bounded to a single row")
 @description("Fetch a single to-do by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's to-do even with its id. Used by the complete / update tools to confirm the row exists before re-inserting a new version.")
 @mcp
-query todo queryTodoById {
+query todo todoById {
   args {
     todoId  string  @required
   }

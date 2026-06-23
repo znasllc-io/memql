@@ -10,7 +10,7 @@ package memql
 // dedup signature (CatalogKey) and the embed text (CatalogMatchText) from the
 // construct's own source, stamps the provenance (who = the owning bundle's
 // owner, source bundle = catalogedFromBundleId, when = catalogedAt) via
-// mutationCatalogueConstruct, and grows the construct's content vector in
+// catalogueConstruct, and grows the construct's content vector in
 // node_vectors so the fuzzy retrieval tier has something to compare against.
 //
 // The embedding write goes through the same integration.embedding.store
@@ -77,7 +77,7 @@ func PlanCatalogPromotion(constructID, kind, name, source, fromBundleID string) 
 
 // PromoteConstructToCatalog is the catalog-write path: it computes the
 // promotion plan, records it on the v1:authoring:construct row via
-// mutationCatalogueConstruct (catalogued=true + catalogKey + catalogMatchText
+// catalogueConstruct (catalogued=true + catalogKey + catalogMatchText
 // + provenance), then embeds the MatchText into node_vectors keyed by the
 // construct id so the near-match retrieval tier can rank it.
 //
@@ -104,8 +104,8 @@ func (e *MemQLEngine) PromoteConstructToCatalog(ctx context.Context, constructID
 	if err != nil {
 		return CatalogPromotion{}, fmt.Errorf("catalog: marshal promotion args: %w", err)
 	}
-	if _, err := e.Execute(ctx, "mutationCatalogueConstruct("+string(args)+")"); err != nil {
-		return CatalogPromotion{}, fmt.Errorf("catalog: mutationCatalogueConstruct: %w", err)
+	if _, err := e.Execute(ctx, "catalogueConstruct("+string(args)+")"); err != nil {
+		return CatalogPromotion{}, fmt.Errorf("catalog: catalogueConstruct: %w", err)
 	}
 
 	e.embedCatalogConstruct(ctx, plan.ConstructID, plan.MatchText)

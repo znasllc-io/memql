@@ -135,21 +135,21 @@ func TestEmitTSMethods_QueryWithArgs(t *testing.T) {
 // TestEmitTSMethods_NoArgs verifies the zero-arg path: the args
 // interface is empty, the builder short-circuits to the no-arg literal,
 // and the prototype method's args parameter is optional so callers can
-// invoke `qc.queryActiveAgentRoles()` without ceremony.
+// invoke `qc.activeAgentRoles()` without ceremony.
 func TestEmitTSMethods_NoArgs(t *testing.T) {
 	c := Construct{
 		Kind:        "query",
-		Name:        "queryActiveAgentRoles",
+		Name:        "activeAgentRoles",
 		Description: "List active agent roles.",
 	}
 
 	out := string(emitTSMethods([]Construct{c}, "query", ""))
 
 	wants := []string{
-		`export interface QueryActiveAgentRolesArgs {`,
+		`export interface ActiveAgentRolesArgs {`,
 		`void args;`,
-		`return "queryActiveAgentRoles({})";`,
-		`queryActiveAgentRoles(args?: QueryActiveAgentRolesArgs, opts?: QueryCallOptions): Promise<Result>;`,
+		`return "activeAgentRoles({})";`,
+		`activeAgentRoles(args?: ActiveAgentRolesArgs, opts?: QueryCallOptions): Promise<Result>;`,
 	}
 	for _, w := range wants {
 		if !strings.Contains(out, w) {
@@ -346,7 +346,7 @@ query space queryArchivedSpaces {
 `)
 	writeFixture(t, core, "mutations/createSpace.memql", `
 @description("Create a space")
-mutation space mutationCreateSpace {
+mutate space mutationCreateSpace {
   args {
     name  string  @required
   }
@@ -534,7 +534,7 @@ query board queryCopresentBoard {
 func TestEmitGoMethods_SeparatorGuardUsesRealPrefixLength(t *testing.T) {
 	c := Construct{
 		Kind:    "mutation",
-		Name:    "mutationUpdateParticipantPresence", // 33 chars -- the in-the-wild repro
+		Name:    "updateParticipantPresence", // 33 chars -- the in-the-wild repro
 		Concept: "presence",
 		Args: []ArgField{
 			{Name: "presenceId", Type: "string"}, // leading OPTIONAL field
@@ -545,7 +545,7 @@ func TestEmitGoMethods_SeparatorGuardUsesRealPrefixLength(t *testing.T) {
 
 	out := string(emitMethods([]Construct{c}, "Mutation"))
 
-	wantGuard := fmt.Sprintf("if b.Len() > %d {", len("mutationUpdateParticipantPresence({"))
+	wantGuard := fmt.Sprintf("if b.Len() > %d {", len("updateParticipantPresence({"))
 	if !strings.Contains(out, wantGuard) {
 		t.Errorf("emitted builder missing real-prefix-length guard %q\n--- output ---\n%s", wantGuard, out)
 	}
@@ -564,7 +564,7 @@ func TestEmitGoMethods_SeparatorGuardUsesRealPrefixLength(t *testing.T) {
 func TestEmitGoMethods_OptionalObjectAndArrayArgsAreNilGuarded(t *testing.T) {
 	c := Construct{
 		Kind:    "mutation",
-		Name:    "mutationCreateSessionForParticipant",
+		Name:    "createSessionForParticipant",
 		Concept: "session",
 		Args: []ArgField{
 			{Name: "partitionId", Type: "string", Required: true},

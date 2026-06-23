@@ -58,7 +58,7 @@ spec requiresOwner {
 // in a query filter.
 func TestSpecRole_AllowsReclassifiedTrait(t *testing.T) {
 	spec, err := declToSpec(t, `@description("kind is assistant")
-trait traitAgentKindAssistant {
+trait agentKindAssistant {
   payload.kind == "assistant"
 }`)
 	if err != nil {
@@ -104,13 +104,13 @@ func TestRejectAuthzSpecInFilter_RejectsSpec(t *testing.T) {
 // (IsTrait == true) bare-referenced in a filter passes.
 func TestRejectAuthzSpecInFilter_AllowsTrait(t *testing.T) {
 	reg := newSpecRegistry()
-	if err := reg.add(&Spec{Name: "traitAgentKindAssistant", Kind: SpecKindRow, IsTrait: true}); err != nil {
+	if err := reg.add(&Spec{Name: "agentKindAssistant", Kind: SpecKindRow, IsTrait: true}); err != nil {
 		t.Fatalf("seed trait: %v", err)
 	}
 
 	filter := &LogicalExpression{
 		Op:   "&&",
-		Left: &SpecReferenceExpression{Name: "traitAgentKindAssistant"},
+		Left: &SpecReferenceExpression{Name: "agentKindAssistant"},
 		Right: &ComparisonExpression{
 			Field:    FieldReference{Raw: "payload.ownerUserId", Parts: []string{"payload", "ownerUserId"}},
 			Operator: OpEq,
@@ -128,7 +128,7 @@ func TestRejectAuthzSpecInFilter_AllowsTrait(t *testing.T) {
 func TestEvaluateSpec_RejectsTraitAsAuthzGate(t *testing.T) {
 	reg := newSpecRegistry()
 	if err := reg.add(&Spec{
-		Name:    "traitAgentKindAssistant",
+		Name:    "agentKindAssistant",
 		Kind:    SpecKindRow,
 		IsTrait: true,
 		Expr: &ComparisonExpression{
@@ -141,7 +141,7 @@ func TestEvaluateSpec_RejectsTraitAsAuthzGate(t *testing.T) {
 	}
 	e := &MemQLEngine{specs: reg}
 
-	_, err := e.EvaluateSpec(context.Background(), "traitAgentKindAssistant")
+	_, err := e.EvaluateSpec(context.Background(), "agentKindAssistant")
 	if err == nil {
 		t.Fatal("expected a trait (data predicate) to be rejected as an authorization gate")
 	}

@@ -4,7 +4,7 @@
 // user "save" action: when a backing row is created (a document, a
 // generated output, later a note / todo / calendar event / live
 // source), an automation folds it into a v1:library:artifact index
-// row via mutationCreateArtifact. Because promotion runs on the
+// row via createArtifact. Because promotion runs on the
 // owner's behalf (not as the owner), ownerUserId is threaded from the
 // backing row's owner rather than stamped from actor.userId -- the
 // same shape v1:knowledge:document uses with its uploadedBy field.
@@ -19,7 +19,7 @@ use library.concepts.{ artifact, generatedOutput, memory, documentVersion }
 
 @enabled
 @description("Insert (or re-version) a Library artifact index row for a backing source concept. System / automation-invoked: ownerUserId is threaded from the backing row's owner because promotion runs server-side on the owner's behalf. Idempotent -- the id is derived from sourceConceptRef so re-promoting the same source versions the same row. Not a user-facing tool; the Library is populated automatically.")
-mutation artifact mutationCreateArtifact {
+mutate artifact createArtifact {
   args {
     sourceConceptRef  string  @required
     ownerUserId       string  @required
@@ -59,7 +59,7 @@ mutation artifact mutationCreateArtifact {
     args.producedByWorkerName
     validationStatus: coalesce(args.validationStatus, "none")
     // timestamp(), NOT bare `now`: this mutation is invoked from the index
-    // automations (logicIndexGeneratedOutput et al.), and the automation step
+    // automations (indexGeneratedOutput et al.), and the automation step
     // resolver only evaluates the function-call forms timestamp()/now() -- a
     // bare `now` passes through as the literal string "now" and fails the
     // artifact's updatedAt date-time format. (memql#980)
@@ -68,8 +68,8 @@ mutation artifact mutationCreateArtifact {
 }
 
 @enabled
-@description("Create a generated-output row -- a deliverable PRODUCED through the app (workbench result, computer-use output, or standalone agent output). System / agent-invoked: ownerUserId is the producing user. logicIndexGeneratedOutput folds the new row into the Library index automatically. body carries inline text outputs; attachmentId references file bytes for file-backed outputs.")
-mutation generatedOutput mutationCreateGeneratedOutput {
+@description("Create a generated-output row -- a deliverable PRODUCED through the app (workbench result, computer-use output, or standalone agent output). System / agent-invoked: ownerUserId is the producing user. indexGeneratedOutput folds the new row into the Library index automatically. body carries inline text outputs; attachmentId references file bytes for file-backed outputs.")
+mutate generatedOutput createGeneratedOutput {
   args {
     outputId          string  @required
     ownerUserId       string  @required
@@ -105,8 +105,8 @@ mutation generatedOutput mutationCreateGeneratedOutput {
 }
 
 @enabled
-@description("Create a memory the assistant retains about the user. Owned: ownerUserId is stamped from actor.userId, so a memory can only ever be created for the acting user (or their delegated agent's bound user). logicIndexMemory folds it into the Library Records lens automatically.")
-mutation memory mutationCreateMemory {
+@description("Create a memory the assistant retains about the user. Owned: ownerUserId is stamped from actor.userId, so a memory can only ever be created for the acting user (or their delegated agent's bound user). indexMemory folds it into the Library Records lens automatically.")
+mutate memory createMemory {
   args {
     memoryId           string  @required
     title              string  @required
@@ -132,7 +132,7 @@ mutation memory mutationCreateMemory {
 
 // ---- documentVersion: append-only version history (memql#1228) ----
 //
-// mutationAppendDocumentVersion is the single low-level write for the
+// appendDocumentVersion is the single low-level write for the
 // version history. It is NOT a user-facing tool: the user/assistant
 // edit + restore flows go through the Go edit handler
 // (integration.library.editDocument / restoreDocumentVersion), which
@@ -141,13 +141,13 @@ mutation memory mutationCreateMemory {
 // THIS mutation to append the immutable snapshot. System / handler-
 // invoked: ownerUserId is threaded from the backing document's owner
 // because the append runs server-side on the owner's behalf (mirrors
-// mutationCreateArtifact). Each call inserts a brand-new immutable row
+// createArtifact). Each call inserts a brand-new immutable row
 // (its own versionId) -- the history is append-only, nothing is ever
 // overwritten.
 
 @enabled
 @description("Append an immutable document-version snapshot to a logical document's history. Handler-invoked (integration.library.editDocument / restoreDocumentVersion) -- ownerUserId is threaded from the backing document's owner, versionNumber + versionId are computed server-side from the current latest. Append-only: every call inserts a new immutable row; nothing is overwritten.")
-mutation documentVersion mutationAppendDocumentVersion {
+mutate documentVersion appendDocumentVersion {
   args {
     versionId        string  @required
     documentId       string  @required
@@ -178,12 +178,12 @@ mutation documentVersion mutationAppendDocumentVersion {
     // timestamp(), NOT bare `now`: this mutation is invoked from the Go
     // edit/restore handlers; the hypertable time dimension + history
     // ordering key must be a real RFC3339 timestamp (same gotcha as
-    // mutationCreateArtifact.updatedAt, memql#980).
+    // createArtifact.updatedAt, memql#980).
     createdAt: timestamp()
   }
 }
 
-// mutationUpdateGeneratedOutputContent re-inserts a generatedOutput row
+// updateGeneratedOutputContent re-inserts a generatedOutput row
 // (SAME id) with the new latest content so the artifact index + Library
 // viewer -- which resolve content through the backing generatedOutput --
 // reflect the edit. memQL is append-only by (id, createdAt), so this
@@ -192,7 +192,7 @@ mutation documentVersion mutationAppendDocumentVersion {
 // Version; ownerUserId is threaded from the existing row's owner.
 @enabled
 @description("Re-insert a generatedOutput row (same id, new version) carrying the latest edited content so the Library viewer + artifact index reflect the most recent document version. Append-only by (id, createdAt): a new node version, reads return the latest. Handler-invoked by integration.library.editDocument / restoreDocumentVersion; ownerUserId is threaded from the existing row.")
-mutation generatedOutput mutationUpdateGeneratedOutputContent {
+mutate generatedOutput updateGeneratedOutputContent {
   args {
     outputId      string  @required
     ownerUserId   string  @required

@@ -25,17 +25,17 @@
 //      multi-node race must author once). The claim is never released: a Plan
 //      id is minted once and never reused, so once-ever is the right guarantee.
 //   2. Idempotency: skip if a bundle already exists for this Plan
-//      (queryAuthoringBundleForPlan) -- belt-and-suspenders with the in-process
+//      (authoringBundleForPlan) -- belt-and-suspenders with the in-process
 //      claim across restarts / cross-node re-delivery (memql#1155).
 //   3. runDesignPass: the task goal becomes the design statement -> a
 //      catalog-aware reuse-or-author dependency plan.
 //   4. emitAndRepairBundle: emit the .memql + run Gate 1 (sandbox compile+bind)
 //      + the bounded repair loop.
-//   5. Persist: mutationCreateAuthoringBundle (sourcePlanId set) + a
-//      mutationCreateAuthoringConstruct per authored construct +
-//      mutationRecordBundleValidation (validated | failed).
+//   5. Persist: createAuthoringBundle (sourcePlanId set) + a
+//      createAuthoringConstruct per authored construct +
+//      recordBundleValidation (validated | failed).
 //   6. On a Gate-1-clean bundle, handoffToGate2 (behavioral dry-run) ->
-//      mutationRecordBundleDryRun (dryRunPassed | failed). Terminal state is
+//      recordBundleDryRun (dryRunPassed | failed). Terminal state is
 //      dryRunPassed; Gate 3 (user approval) + activation are a later user
 //      action via the #1162 surface, never automatic.
 //
@@ -289,7 +289,7 @@ func (d *AuthoringCaptureDispatcher) runCapture(ctx context.Context, planId, kin
 // Plan (idempotency), or "" if none. Read under ownerActorContext so the
 // owner-scoped query filter resolves to the task owner.
 func (d *AuthoringCaptureDispatcher) existingBundleForPlan(ctx context.Context, ownerUserId, planId string) (string, error) {
-	q := fmt.Sprintf(`queryAuthoringBundleForPlan({sourcePlanId:%q})`, planId)
+	q := fmt.Sprintf(`authoringBundleForPlan({sourcePlanId:%q})`, planId)
 	res, err := d.engine.Execute(ownerActorContext(ctx, ownerUserId), q)
 	if err != nil {
 		return "", err
@@ -315,7 +315,7 @@ func (d *AuthoringCaptureDispatcher) persistBundle(ctx context.Context, ownerUse
 		"sourcePlanId":        planId,
 		"reusedConstructRefs": reuseRefsForBundle(bundle),
 	}
-	q := fmt.Sprintf(`mutationCreateAuthoringBundle(%s)`, encodeArgs(args))
+	q := fmt.Sprintf(`createAuthoringBundle(%s)`, encodeArgs(args))
 	_, err := d.engine.Execute(ownerActorContext(ctx, ownerUserId), q)
 	return err
 }
@@ -331,7 +331,7 @@ func (d *AuthoringCaptureDispatcher) persistConstructs(ctx context.Context, owne
 			"targetNamespace": authoredTargetNamespace,
 			"source":          c.Source,
 		}
-		q := fmt.Sprintf(`mutationCreateAuthoringConstruct(%s)`, encodeArgs(args))
+		q := fmt.Sprintf(`createAuthoringConstruct(%s)`, encodeArgs(args))
 		if _, err := d.engine.Execute(ownerActorContext(ctx, ownerUserId), q); err != nil {
 			return fmt.Errorf("construct %s/%s: %w", c.Kind, c.Name, err)
 		}
@@ -352,7 +352,7 @@ func (d *AuthoringCaptureDispatcher) recordValidation(ctx context.Context, owner
 		args["status"] = "failed"
 		args["failureReason"] = "gate1: " + firstFailureHeadline(report)
 	}
-	q := fmt.Sprintf(`mutationRecordBundleValidation(%s)`, encodeArgs(args))
+	q := fmt.Sprintf(`recordBundleValidation(%s)`, encodeArgs(args))
 	_, err := d.engine.Execute(ownerActorContext(ctx, ownerUserId), q)
 	return err
 }
@@ -370,7 +370,7 @@ func (d *AuthoringCaptureDispatcher) recordDryRun(ctx context.Context, ownerUser
 		args["status"] = "failed"
 		args["failureReason"] = "gate2: behavioral dry-run reported a hard step failure"
 	}
-	q := fmt.Sprintf(`mutationRecordBundleDryRun(%s)`, encodeArgs(args))
+	q := fmt.Sprintf(`recordBundleDryRun(%s)`, encodeArgs(args))
 	_, err := d.engine.Execute(ownerActorContext(ctx, ownerUserId), q)
 	return err
 }

@@ -33,23 +33,23 @@
 //                               concept: "v1:harness:semanticMemory",
 //                               limit: 1 })           // active only
 //          if match.cosine >= MEMQL_HARNESS_CONSOLIDATION_DEDUP_THRESHOLD:
-//              mutationReinforceHarnessSemanticMemory({       // no duplicate
+//              reinforceHarnessSemanticMemory({       // no duplicate
 //                memoryId: match.id,
 //                confidence: bump(match.confidence),  // Go arithmetic
 //                reinforceCount: match.reinforceCount + 1,
 //                sourceEpisodes: dedupMerge(match.sourceEpisodes,
 //                                           cluster.ids) })
 //          else:
-//              mutationCreateHarnessSemanticMemory({          // new belief
+//              createHarnessSemanticMemory({          // new belief
 //                kind: belief.kind, content: belief.content,
 //                sourceEpisodes: cluster.ids,
 //                confidence: belief.confidence })
 //     5. decay sweep: for each active belief unreinforced past
 //        MEMQL_HARNESS_CONSOLIDATION_DECAY_DAYS:
-//          mutationDecayHarnessSemanticMemory({ memoryId, confidence: decay(...) })
+//          decayHarnessSemanticMemory({ memoryId, confidence: decay(...) })
 //          if decayed < MEMQL_HARNESS_CONSOLIDATION_PRUNE_CONFIDENCE:
-//              mutationPruneHarnessSemanticMemory({ memoryId })
-//     6. mutationAdvanceHarnessConsolidationCursor({
+//              pruneHarnessSemanticMemory({ memoryId })
+//     6. advanceHarnessConsolidationCursor({
 //          watermark: max(createdAt over batch),
 //          episodesSeen: cursor.episodesSeen + batch.len })
 //
@@ -63,7 +63,7 @@
 
 @enabled
 @description("Entry point for the daily memory-consolidation automation (#586). Per #586 the precise per-owner loop -- similarity clustering of the since-watermark episode batch, the blocking LLM distill per cluster, similarTo dedup, the confidence bump / decay arithmetic, and the max(createdAt) watermark advance -- runs in the Go harness consolidation handler (the same DSL-entry / Go-loop split the knowledge refresh-cron made), because the MemQL parser has neither arithmetic on number/datetime fields nor an in-DSL clustering primitive. This body is the scheduled trigger surface; the file header documents the full Go-handler contract it drives. Returns a sentinel until the handler is wired (mirrors logicRefreshDueKnowledgeDomains).")
-logic logicConsolidateMemory {
+logic consolidateMemory {
   args {
     event object @required
   }
@@ -73,9 +73,9 @@ logic logicConsolidateMemory {
     // reinforce/create -> decay/prune -> advance watermark) is owned
     // by the Go harness consolidation handler. The full contract is in
     // this file's header; the mutations it calls
-    // (mutationCreateHarnessSemanticMemory / mutationReinforceHarnessSemanticMemory /
-    // mutationDecayHarnessSemanticMemory / mutationPruneHarnessSemanticMemory /
-    // mutationAdvanceHarnessConsolidationCursor) ship in
+    // (createHarnessSemanticMemory / reinforceHarnessSemanticMemory /
+    // decayHarnessSemanticMemory / pruneHarnessSemanticMemory /
+    // advanceHarnessConsolidationCursor) ship in
     // dsl/harness/mutations.memql and the distill prompt
     // (consolidateMemory) in dsl/harness/prompts.memql.
     return args.event.topic

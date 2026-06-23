@@ -15,7 +15,7 @@ package memql
 //
 // The run is driven by a synthetic or replayed trigger event, and captures a
 // full trace + a side-effect manifest + a cost estimate as the Gate-3 approval
-// artifact (persisted via mutationRecordBundleDryRun).
+// artifact (persisted via recordBundleDryRun).
 //
 // Like the Gate-1 automation-compile seam (authoring_sandbox_automation.go),
 // the actual execution lives in component/automations (which imports
@@ -186,7 +186,7 @@ type CostEstimate struct {
 }
 
 // BundleDryRunReport is the Gate-2 result -- the approval artifact persisted via
-// mutationRecordBundleDryRun. Its JSON matches the v1:authoring:bundle
+// recordBundleDryRun. Its JSON matches the v1:authoring:bundle
 // .dryRunReport field shape exactly: {ok, trace, sideEffectManifest,
 // costEstimate}.
 type BundleDryRunReport struct {
@@ -276,7 +276,7 @@ func RunBundleDryRun(ctx context.Context, engine *MemQLEngine, req DryRunRequest
 	return run(ctx, engine, req)
 }
 
-// dryRunBundleStatus maps a report to the bundle status mutationRecordBundleDryRun
+// dryRunBundleStatus maps a report to the bundle status recordBundleDryRun
 // transitions to: dryRunPassed on a clean run, failed otherwise.
 func dryRunBundleStatus(report BundleDryRunReport) string {
 	if report.OK {
@@ -285,7 +285,7 @@ func dryRunBundleStatus(report BundleDryRunReport) string {
 	return "failed"
 }
 
-// BuildDryRunMutationCall renders the mutationRecordBundleDryRun(...) call that
+// BuildDryRunMutationCall renders the recordBundleDryRun(...) call that
 // persists a dry-run report as the Gate-3 approval artifact. The report rides on
 // the `dryRunReport` object arg; status is dryRunPassed / failed; failureReason
 // carries the headline on a failed run. Exposed (and pure) so the report ->
@@ -306,11 +306,11 @@ func BuildDryRunMutationCall(bundleId string, report BundleDryRunReport) (string
 	if report.FailureReason != "" {
 		args["failureReason"] = report.FailureReason
 	}
-	return "mutationRecordBundleDryRun(" + renderDryRunMemQLValue(args) + ")", nil
+	return "recordBundleDryRun(" + renderDryRunMemQLValue(args) + ")", nil
 }
 
 // PersistDryRunReport records a dry-run report on its bundle via
-// mutationRecordBundleDryRun (the Gate-2 persist path referenced by
+// recordBundleDryRun (the Gate-2 persist path referenced by
 // dsl/authoring/mutations.memql). It transitions the bundle to dryRunPassed /
 // failed and stores the trace + side-effect manifest + cost estimate as the
 // approval artifact. Requires a live engine DB (the mutation writes a row).

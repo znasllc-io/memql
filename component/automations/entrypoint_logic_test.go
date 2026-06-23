@@ -52,7 +52,7 @@ func TestEntryPointLogicAuditCatchesOrphan(t *testing.T) {
 }
 
 // TestEntryPointLogicInvokable proves the headline acceptance case:
-// logicServiceVersionProbe (the engine-only @entrypoint example, memql#1707)
+// serviceVersionProbe (the engine-only @entrypoint example, memql#1707)
 // is invokable via run_automation. It resolves through LoadByName (both
 // spellings) to an auto-generated wrapper whose step invokes the logic, and
 // the live + dry-run paths converge on the same source.
@@ -62,7 +62,7 @@ func TestEntryPointLogicInvokable(t *testing.T) {
 
 	const wrapperName = "serviceVersionProbeEntrypoint"
 
-	for _, input := range []string{"logicServiceVersionProbe", "serviceVersionProbe"} {
+	for _, input := range []string{"serviceVersionProbe", "serviceVersionProbe"} {
 		t.Run(input, func(t *testing.T) {
 			auto, err := loader.LoadByName(input)
 			if err != nil {
@@ -75,12 +75,12 @@ func TestEntryPointLogicInvokable(t *testing.T) {
 			names := invokedLogicNames(auto)
 			found := false
 			for _, n := range names {
-				if n == "logicServiceVersionProbe" {
+				if n == "serviceVersionProbe" {
 					found = true
 				}
 			}
 			if !found {
-				t.Fatalf("wrapper %q does not invoke logicServiceVersionProbe (steps invoke %v)", wrapperName, names)
+				t.Fatalf("wrapper %q does not invoke serviceVersionProbe (steps invoke %v)", wrapperName, names)
 			}
 
 			// Dry-run source fetch by the resolved canonical name -- exactly what
@@ -97,7 +97,7 @@ func TestEntryPointLogicInvokable(t *testing.T) {
 }
 
 // TestEntryPointWrapperGenerated confirms the generator surfaces
-// logicServiceVersionProbe as an @entrypoint logic with a no-arg call
+// serviceVersionProbe as an @entrypoint logic with a no-arg call
 // shape (the logic declares no args block).
 func TestEntryPointWrapperGenerated(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -105,12 +105,12 @@ func TestEntryPointWrapperGenerated(t *testing.T) {
 
 	var got *memql.EntryPointLogicWrapper
 	for i := range wrappers {
-		if wrappers[i].LogicName == "logicServiceVersionProbe" {
+		if wrappers[i].LogicName == "serviceVersionProbe" {
 			got = &wrappers[i]
 		}
 	}
 	if got == nil {
-		t.Fatalf("logicServiceVersionProbe not surfaced as @entrypoint; got %d wrappers", len(wrappers))
+		t.Fatalf("serviceVersionProbe not surfaced as @entrypoint; got %d wrappers", len(wrappers))
 	}
 	if got.BareName != "serviceVersionProbe" {
 		t.Errorf("BareName = %q, want serviceVersionProbe", got.BareName)

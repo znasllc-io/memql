@@ -24,7 +24,7 @@
 //   - Fire-and-forget (automation case): ignore the return.
 //   - Subscribe to graph.node.updated.v1:planner:plan filtered by
 //     id==<planId> for lifecycle progression.
-//   - Direct query via queryPlanById to read current state + output.
+//   - Direct query via planById to read current state + output.
 //
 // For blocking AI work from DSL, use `ai("promptName", args)` -- the
 // synchronous structured-output path. `agent()` is for agent-
@@ -48,7 +48,7 @@ import (
 // memql.IntegrationProvider. Constructed by the plug-in factory in
 // plugin.go from PluginContext.Agents + .Engine.
 //
-// The engine handle lets the handler call mutationCreatePlan via the
+// The engine handle lets the handler call createPlan via the
 // engine's Execute path -- the canonical write path. No AI / LLM
 // providers are needed at this layer anymore: dispatch (the actual
 // agent-tool-loop work) is owned by the planner integration's
@@ -87,8 +87,8 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Async-invoke a DSL-registered agent. Mints a v1:planner:plan row with kind=agentInvocation in queued status and returns the planId. The planner agent loop picks the Plan up and drives the agent's tool loop.",
 			Handler:     i.handleInvoke,
 			ArgsSchema: map[string]string{
-				"name":    "string",
-				"prompt":  "string",
+				"name":        "string",
+				"prompt":      "string",
 				"partitionId": "string",
 			},
 		},
@@ -99,7 +99,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema: map[string]string{
 				"goal":        "string",
 				"ownerUserId": "string",
-				"partitionId":     "string",
+				"partitionId": "string",
 			},
 		},
 		{
@@ -124,7 +124,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"agentId":     "string (required) -- calling agent id (auto-stamped)",
 				"ownerUserId": "string (required) -- session-owner user id (auto-stamped)",
 				"planId":      "string (required) -- the active Plan to park (auto-stamped)",
-				"partitionId":     "string (optional) -- target space (auto-stamped)",
+				"partitionId": "string (optional) -- target space (auto-stamped)",
 			},
 		},
 		{
@@ -137,7 +137,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"filename":    "string (optional) -- preferred filename",
 				"agentId":     "string (optional) -- calling agent id (auto-stamped)",
 				"ownerUserId": "string (required) -- session-owner user id (auto-stamped); becomes the plan's requestedBy",
-				"partitionId":     "string (required) -- space the plan lives in (auto-stamped)",
+				"partitionId": "string (required) -- space the plan lives in (auto-stamped)",
 			},
 		},
 	}
@@ -411,11 +411,11 @@ func (i *Integration) handleRequestUserFeedback(ctx context.Context, args map[st
 	mutationCtx := withUserActor(ctx, ownerUserId)
 
 	q := fmt.Sprintf(
-		`mutationRequestPlanFeedback({planId:%q, feedbackRequest:%s})`,
+		`requestPlanFeedback({planId:%q, feedbackRequest:%s})`,
 		planId, string(fbReqJSON),
 	)
 	if _, err := i.engine.Execute(mutationCtx, q); err != nil {
-		return nil, fmt.Errorf("requestUserFeedback: mutationRequestPlanFeedback failed: %w", err)
+		return nil, fmt.Errorf("requestUserFeedback: requestPlanFeedback failed: %w", err)
 	}
 
 	payload, err := json.Marshal(map[string]any{
@@ -439,7 +439,7 @@ func (i *Integration) handleRequestUserFeedback(ctx context.Context, args map[st
 
 // handleProduceArtifact delegates a "produce an artifact" request to the
 // planner. It mints a v1:planner:plan (kind=produceArtifact,
-// triggerSource=user.implicit) via the single mutationCreatePlan write path,
+// triggerSource=user.implicit) via the single createPlan write path,
 // carrying the goal + desired format/filename in Plan.input, and returns a
 // small ack {status:"delegated", planId, ack}. The plan auto-runs (the planner
 // agent loop auto-starts produceArtifact plans), so the deliverable is
@@ -497,7 +497,7 @@ func (i *Integration) handleProduceArtifact(ctx context.Context, args map[string
 	}
 
 	// requestedBy is the OWNING USER so the planner's specialist lookup
-	// (queryActiveAgentsForUser{ownerUserId: requestedBy}) sees the user's
+	// (activeAgentsForUser{ownerUserId: requestedBy}) sees the user's
 	// agents, and the produced artifact is owned by the user. The mutation
 	// runs under a synthetic user actor for the same reason
 	// requestUserFeedback does -- the per-tool context doesn't carry the
@@ -505,7 +505,7 @@ func (i *Integration) handleProduceArtifact(ctx context.Context, args map[string
 	mutationCtx := withUserActor(ctx, ownerUserId)
 	var qb strings.Builder
 	fmt.Fprintf(&qb,
-		`mutationCreatePlan({planId: %q, partitionId: %q, kind: %q, goal: %q, requestedBy: %q, triggerSource: "user.implicit", authorizedBy: %q, input: %s`,
+		`createPlan({planId: %q, partitionId: %q, kind: %q, goal: %q, requestedBy: %q, triggerSource: "user.implicit", authorizedBy: %q, input: %s`,
 		planId, partitionId, produceArtifactKind, goal, ownerUserId, ownerUserId, string(inputJSON),
 	)
 	if agentId != "" {
@@ -515,7 +515,7 @@ func (i *Integration) handleProduceArtifact(ctx context.Context, args map[string
 	}
 	qb.WriteString(`})`)
 	if _, err := i.engine.Execute(mutationCtx, qb.String()); err != nil {
-		return nil, fmt.Errorf("produceArtifact: mutationCreatePlan failed: %w", err)
+		return nil, fmt.Errorf("produceArtifact: createPlan failed: %w", err)
 	}
 
 	payload, err := json.Marshal(map[string]any{
@@ -597,11 +597,11 @@ func (i *Integration) createInvocationPlan(ctx context.Context, def *memql.Agent
 	}
 
 	query := fmt.Sprintf(
-		`mutationCreatePlan({planId: %q, partitionId: %q, kind: %q, goal: %q, requestedBy: %q, triggerSource: "agent.dsl", authorizedBy: %q, input: %s})`,
+		`createPlan({planId: %q, partitionId: %q, kind: %q, goal: %q, requestedBy: %q, triggerSource: "agent.dsl", authorizedBy: %q, input: %s})`,
 		planId, partitionId, agentInvocationKind, prompt, systemActorId, systemActorId, string(inputJSON),
 	)
 	if _, err := i.engine.Execute(ctx, query); err != nil {
-		return "", fmt.Errorf("execute mutationCreatePlan: %w", err)
+		return "", fmt.Errorf("execute createPlan: %w", err)
 	}
 	return planId, nil
 }

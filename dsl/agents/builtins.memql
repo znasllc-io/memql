@@ -38,7 +38,7 @@
 //   { planId: string, agent: {name, role, roleSlug} }
 // The caller can subscribe to graph.node.updated.v1:planner:plan
 // filtered by id==<planId>, or query the Plan later via
-// queryPlanById, to observe progress + read Plan.output on success.
+// planById, to observe progress + read Plan.output on success.
 
 @enabled
 @executor("integration.agents.invoke")
@@ -81,11 +81,11 @@ builtin askSpecialist {
 //     prompt against the role catalog + the user's existing agents.
 //   - action="match": returns the existing agent id verbatim.
 //   - action="extend": unions missing locked/relevant domains + tools
-//     onto an existing same-role agent via mutationUpdateAgent, then
+//     onto an existing same-role agent via updateAgent, then
 //     returns its id.
 //   - action="create": composes capabilities from the chosen role's
 //     locked + default + analysis-supplied sets and writes a new
-//     v1:agents:agent row via mutationCreateAgent.
+//     v1:agents:agent row via createAgent.
 //
 // Returns one MemoryNode whose payload is
 //   { agentId, agentName, roleSlug, action, reasoning }.
@@ -101,7 +101,7 @@ builtin askSpecialist {
 // active Plan (planId is auto-stamped by the agent streaming loop's
 // agentContextStamps, so the LLM never has to supply it) to
 // status=awaitingFeedback / feedbackReason=feedback_required via
-// mutationRequestPlanFeedback, and returns a small ack payload
+// requestPlanFeedback, and returns a small ack payload
 // {status:"awaiting_user", planId, kind}.
 //
 // Mirrors the worker integration's requestComputerUseScope /
@@ -138,7 +138,7 @@ builtin ensureAgentForGoal {
 //
 // Backs the Assistant's `produceArtifact` tool (dsl/agents/tools/
 // produceArtifact.memql). Mints a v1:planner:plan (kind="produceArtifact",
-// triggerSource="user.implicit") via mutationCreatePlan and returns a small
+// triggerSource="user.implicit") via createPlan and returns a small
 // ack {status:"delegated", planId, ack}. The plan auto-runs (the planner
 // agent loop auto-starts produceArtifact plans, skipping the manual Run gate),
 // so the deliverable is produced + landed in the Library asynchronously while

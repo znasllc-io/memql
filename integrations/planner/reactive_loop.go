@@ -11,11 +11,11 @@
 //
 //   C1 (#638) TICK -- a time.Ticker poll mirroring refresh_cron.go /
 //      retry.go: spawned once at Start(), clean ctx shutdown. Each tick
-//      sweeps queryActiveResponsibilitiesAcrossUsers (cross-user; the
+//      sweeps activeResponsibilitiesAcrossUsers (cross-user; the
 //      planner node has no single user context), does the Go-side
 //      due-check (cron for recurring, condition for reactive -- MemQL
 //      can't evaluate either in a filter), records lastEvaluatedAt via
-//      mutationRecordResponsibilityEvaluation, and dedups: a
+//      recordResponsibilityEvaluation, and dedups: a
 //      responsibility with a live Plan already in flight is skipped
 //      (continuity).
 //
@@ -24,11 +24,11 @@
 //      ensureAgentForGoal factory (agentFactoryAnalyze +
 //      createSpecialist/extendSpecialist) to match / extend / mint, then
 //      persist the assignment back onto the responsibility
-//      (mutationAssignResponsibility). Idempotent -- a row that already
+//      (assignResponsibility). Idempotent -- a row that already
 //      names a concrete agent skips the factory.
 //
 //   C3 (#640) HONOR -- reactive / recurring -> create a Plan
-//      (kind=agentProactive) via mutationCreatePlan owned by the
+//      (kind=agentProactive) via createPlan owned by the
 //      assigned agent; standing / behavioral -> inject the directive
 //      into the assigned specialist's lineage.extensionGoals[] (the
 //      agent-context-assembly path) so it applies whenever that
@@ -270,7 +270,7 @@ func (r *ReactiveLoop) tick(ctx context.Context) {
 // archetype (the Go-side code below filters by due-ness per archetype).
 func (r *ReactiveLoop) sweepResponsibilities(ctx context.Context) ([]map[string]any, error) {
 	res, err := r.engine.Execute(reactiveSystemActorContext(ctx),
-		`queryActiveResponsibilitiesAcrossUsers({})`)
+		`activeResponsibilitiesAcrossUsers({})`)
 	if err != nil {
 		return nil, err
 	}
@@ -445,7 +445,7 @@ func (r *ReactiveLoop) recurringIsDue(row map[string]any, now time.Time) bool {
 // the responsibility (matched on input.responsibilityId). Terminal
 // statuses are succeeded / failed / cancelled; anything else is live.
 func (r *ReactiveLoop) hasLivePlan(ctx context.Context, respId string) bool {
-	q := fmt.Sprintf(`queryPlansForResponsibility({responsibilityId:%q})`, respId)
+	q := fmt.Sprintf(`plansForResponsibility({responsibilityId:%q})`, respId)
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		// Fail open toward NOT-spawning would wedge the responsibility
@@ -522,7 +522,7 @@ func (r *ReactiveLoop) routeResponsibility(ctx context.Context, userId string, r
 // Returns empty when none is found (the loop proceeds; the GA relays at
 // work time once available).
 func (r *ReactiveLoop) resolveAssistant(ctx context.Context, userId string) string {
-	q := fmt.Sprintf(`queryAssistantAgentForUser({ownerUserId:%q})`, userId)
+	q := fmt.Sprintf(`assistantAgentForUser({ownerUserId:%q})`, userId)
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Debug("planner reactive loop: resolveAssistant failed",
@@ -540,7 +540,7 @@ func (r *ReactiveLoop) resolveAssistant(ctx context.Context, userId string) stri
 // (the same path the Planner Agent loop's createSpecialist /
 // extendSpecialist actions use) to match / extend / mint a specialist
 // for the responsibility's statement. The factory runs agentFactoryAnalyze
-// and issues mutationCreateAgent / mutationUpdateAgent itself; we just
+// and issues createAgent / updateAgent itself; we just
 // pluck the resulting agentId.
 func (r *ReactiveLoop) mintOrExtendSpecialist(ctx context.Context, userId string, row map[string]any) (string, error) {
 	goal := getString(row, "statement")
@@ -564,7 +564,7 @@ func (r *ReactiveLoop) mintOrExtendSpecialist(ctx context.Context, userId string
 }
 
 // assign persists the routing decision onto the responsibility via the
-// owned-tier mutationAssignResponsibility. Best-effort: a failed assign
+// owned-tier assignResponsibility. Best-effort: a failed assign
 // doesn't block honoring (the routing result is already in hand for this
 // tick), it just means the row's binding isn't durable until the next
 // successful tick.
@@ -586,7 +586,7 @@ func (r *ReactiveLoop) assign(ctx context.Context, respId, targetKind, agentId, 
 	if roleSlug != "" {
 		args["assignedRoleSlug"] = roleSlug
 	}
-	q := fmt.Sprintf(`mutationAssignResponsibility(%s)`, encodeArgs(args))
+	q := fmt.Sprintf(`assignResponsibility(%s)`, encodeArgs(args))
 	if _, err := r.engine.Execute(ctx, q); err != nil {
 		r.logger.Warn("planner reactive loop: assign failed",
 			"responsibilityId", respId, "agentId", agentId, "error", err)
@@ -621,7 +621,7 @@ func (r *ReactiveLoop) honorResponsibility(ctx context.Context, userId string, r
 
 // createResponsibilityPlan inserts an agentProactive Plan owned by the
 // assigned agent, carrying the input.responsibilityId back-pointer the
-// C1 dedup query (queryPlansForResponsibility) matches on. requestedBy
+// C1 dedup query (plansForResponsibility) matches on. requestedBy
 // is the responsibility owner; triggerSource='system' marks the
 // provenance (no person asked).
 func (r *ReactiveLoop) createResponsibilityPlan(ctx context.Context, userId string, row map[string]any, agentId string) (string, error) {
@@ -647,17 +647,17 @@ func (r *ReactiveLoop) createResponsibilityPlan(ctx context.Context, userId stri
 		"successCriteria":  getString(row, "successCriteria"),
 	}
 	call := fmt.Sprintf(
-		`mutationCreatePlan({planId:%q, partitionId:%q, kind:%q, goal:%q, requestedBy:%q, authorizedBy:%q, triggerSource:"system", input:%s})`,
+		`createPlan({planId:%q, partitionId:%q, kind:%q, goal:%q, requestedBy:%q, authorizedBy:%q, triggerSource:"system", input:%s})`,
 		planId, partitionId, reactiveProactivePlanKind, goal, userId, userId, mustJSONObject(input),
 	)
 	if _, err := r.engine.Execute(ctx, call); err != nil {
-		return "", fmt.Errorf("mutationCreatePlan: %w", err)
+		return "", fmt.Errorf("createPlan: %w", err)
 	}
 	// Stamp the owning agent (best-effort) so downstream dispatch knows
 	// who runs it. Reuse the plan-status update path.
 	if agentId != "" {
 		upd := fmt.Sprintf(
-			`mutationUpdatePlanStatus({planId:%q, status:"routing", ownerAgentId:%q})`,
+			`updatePlanStatus({planId:%q, status:"routing", ownerAgentId:%q})`,
 			planId, agentId,
 		)
 		if _, err := r.engine.Execute(ctx, upd); err != nil {
@@ -706,14 +706,14 @@ func (r *ReactiveLoop) maybeInjectStanding(ctx context.Context, row map[string]a
 		}
 	}
 	goals = append(goals, directive)
-	// Partial-update only the lineage.extensionGoals path. mutationUpdateAgent
+	// Partial-update only the lineage.extensionGoals path. updateAgent
 	// merges the payload object onto the prior row.
 	payload := map[string]any{
 		"lineage": map[string]any{
 			"extensionGoals": goals,
 		},
 	}
-	call := fmt.Sprintf(`mutationUpdateAgent({agentId:%q, payload:%s})`,
+	call := fmt.Sprintf(`updateAgent({agentId:%q, payload:%s})`,
 		agentId, mustJSONObject(payload))
 	if _, err := r.engine.Execute(ctx, call); err != nil {
 		r.logger.Warn("planner reactive loop: standing inject failed",
@@ -729,7 +729,7 @@ func (r *ReactiveLoop) maybeInjectStanding(ctx context.Context, row map[string]a
 // responsibility (owned-tier, under the impersonated owner ctx).
 func (r *ReactiveLoop) recordEvaluation(ctx context.Context, respId, result string) {
 	q := fmt.Sprintf(
-		`mutationRecordResponsibilityEvaluation({responsibilityId:%q, lastResult:%q})`,
+		`recordResponsibilityEvaluation({responsibilityId:%q, lastResult:%q})`,
 		respId, truncate(result, 280),
 	)
 	if _, err := r.engine.Execute(ctx, q); err != nil {
@@ -809,9 +809,9 @@ func (r *ReactiveLoop) dispatchConvergenceAction(ctx context.Context, userId str
 	switch a.Kind {
 	case "createPlan":
 		row := map[string]any{
-			"id":           a.ResponsibilityId,
-			"statement":    a.Statement,
-			"trigger":      "reactive",
+			"id":               a.ResponsibilityId,
+			"statement":        a.Statement,
+			"trigger":          "reactive",
 			"scopePartitionId": "",
 		}
 		// Route through the same Plan path; resolve the agent loosely (GA
@@ -841,10 +841,10 @@ func (r *ReactiveLoop) dispatchConvergenceAction(ctx context.Context, userId str
 		// agent toward the capability gap in the statement.
 		if a.ResponsibilityId != "" {
 			row := map[string]any{
-				"id":          a.ResponsibilityId,
-				"statement":   a.Statement,
-				"targetKind":  "unassigned",
-				"trigger":     "standing",
+				"id":         a.ResponsibilityId,
+				"statement":  a.Statement,
+				"targetKind": "unassigned",
+				"trigger":    "standing",
 			}
 			if _, err := r.routeResponsibility(ctx, userId, row); err != nil {
 				r.logger.Warn("planner reactive loop: convergence extendSpecialist failed",
@@ -882,10 +882,10 @@ func (r *ReactiveLoop) loadSpaceGoals(ctx context.Context, userId string) []map[
 			continue
 		}
 		out = append(out, map[string]any{
-			"partitionId":   getString(sp, "id"),
-			"name":      getString(sp, "name"),
-			"statement": statement,
-			"timeframe": getString(goal, "timeframe"),
+			"partitionId": getString(sp, "id"),
+			"name":        getString(sp, "name"),
+			"statement":   statement,
+			"timeframe":   getString(goal, "timeframe"),
 		})
 	}
 	return out
@@ -955,7 +955,7 @@ func (r *ReactiveLoop) markConverged(userId string, now time.Time) {
 // --- loaders ---------------------------------------------------------------
 
 func (r *ReactiveLoop) loadAgent(ctx context.Context, agentId string) map[string]any {
-	q := fmt.Sprintf(`queryAgentById({agentId:%q})`, agentId)
+	q := fmt.Sprintf(`agentById({agentId:%q})`, agentId)
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		return nil

@@ -74,7 +74,7 @@ func (s *Store) Create(ctx context.Context, pairingId, ownerUserId, codeHash, cl
 		return errors.New("workerpairing.Store.Create: pairingId, ownerUserId, codeHash, clusterURL all required")
 	}
 	q := fmt.Sprintf(
-		`mutationCreateWorkerPairingCode({pairingId:%q,ownerUserId:%q,codeHash:%q,clusterURL:%q,expiresAt:%q,sourceIP:%q})`,
+		`createWorkerPairingCode({pairingId:%q,ownerUserId:%q,codeHash:%q,clusterURL:%q,expiresAt:%q,sourceIP:%q})`,
 		pairingId, ownerUserId, codeHash, clusterURL,
 		expiresAt.UTC().Format(time.RFC3339Nano), sourceIP,
 	)
@@ -93,7 +93,7 @@ func (s *Store) Redeem(ctx context.Context, pairingId, redeemedBy, redeemedFromI
 		return errors.New("workerpairing.Store: engine not wired")
 	}
 	q := fmt.Sprintf(
-		`mutationRedeemWorkerPairingCode({pairingId:%q,redeemedAt:%q,redeemedBy:%q,redeemedFromIP:%q})`,
+		`redeemWorkerPairingCode({pairingId:%q,redeemedAt:%q,redeemedBy:%q,redeemedFromIP:%q})`,
 		BareSlug(pairingId), at.UTC().Format(time.RFC3339Nano), redeemedBy, redeemedFromIP,
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
@@ -112,7 +112,7 @@ func (s *Store) LookupByHash(ctx context.Context, codeHash string) (*Row, error)
 	if codeHash == "" {
 		return nil, nil
 	}
-	q := fmt.Sprintf(`queryWorkerPairingCodeByHash({codeHash:%q})`, codeHash)
+	q := fmt.Sprintf(`workerPairingCodeByHash({codeHash:%q})`, codeHash)
 	res, err := s.Engine.Execute(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("workerpairing.Store.LookupByHash: %w", err)
@@ -120,7 +120,7 @@ func (s *Store) LookupByHash(ctx context.Context, codeHash string) (*Row, error)
 	if res == nil {
 		return nil, nil
 	}
-	// queryWorkerPairingCodeByHash uses shape() so rows land in
+	// workerPairingCodeByHash uses shape() so rows land in
 	// res.OutputPayload (Data axis), not Bundle.Nodes. Same shape-axis
 	// fall-through used by component/identity/store.go,
 	// workertoken/store.go, and pat/store.go.

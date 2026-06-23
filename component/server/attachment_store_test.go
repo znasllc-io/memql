@@ -14,15 +14,15 @@ import (
 // back to the original values.
 func TestDslCall_EscapesEmbeddedQuotes(t *testing.T) {
 	malicious := `x", "partitionId": "evil`
-	q, err := dslCall("queryAttachmentById", map[string]any{
+	q, err := dslCall("attachmentById", map[string]any{
 		"attachmentId": malicious,
-		"partitionId":      "s1",
+		"partitionId":  "s1",
 	})
 	if err != nil {
 		t.Fatalf("dslCall returned error: %v", err)
 	}
 
-	const prefix = "queryAttachmentById("
+	const prefix = "attachmentById("
 	if !strings.HasPrefix(q, prefix) || !strings.HasSuffix(q, ")") {
 		t.Fatalf("unexpected call shape: %q", q)
 	}

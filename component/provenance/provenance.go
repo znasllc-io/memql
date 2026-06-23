@@ -83,7 +83,7 @@ type Provenance struct {
 
 	// Via is the mutation actually executed by the engine. Set by
 	// the engine itself, NOT by the caller -- if an automation calls
-	// `mutationCreateAgent`, Via is `mutationCreateAgent` and the
+	// `createAgent`, Via is `createAgent` and the
 	// automation's intent is captured in {Kind, Name, Trigger}.
 	Via string `json:"via,omitempty"`
 }
@@ -111,9 +111,9 @@ func (p Provenance) IsZero() bool {
 
 // String renders the provenance compactly for log output.
 //
-//	"seed:assistant via=mutationCreateAgent"
-//	"automation:reRouteNeedsAgentOnAgentCreate trigger=graph.node.created.v1:agents:agent via=mutationUpdatePlanStatus"
-//	"direct:mutationCreateAgent"
+//	"seed:assistant via=createAgent"
+//	"automation:reRouteNeedsAgentOnAgentCreate trigger=graph.node.created.v1:agents:agent via=updatePlanStatus"
+//	"direct:createAgent"
 //	"system:conceptSeeder:v1:cluster:nodeType"
 func (p Provenance) String() string {
 	if p.IsZero() {

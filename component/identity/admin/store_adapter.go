@@ -170,14 +170,14 @@ type ClusterSettingsRow struct {
 	RefreshCookieSameSite string
 }
 
-// read runs queryClusterSettingsCurrent and projects the resulting
+// read runs clusterSettingsCurrent and projects the resulting
 // node into a ClusterSettingsRow. Returns (nil, nil) when no row
 // exists yet.
 func (r *LiveSettingsReader) read(ctx context.Context) (*ClusterSettingsRow, error) {
 	if r == nil || r.Engine == nil {
 		return nil, nil
 	}
-	res, err := r.Engine.Execute(ctx, `queryClusterSettingsCurrent({})`)
+	res, err := r.Engine.Execute(ctx, `clusterSettingsCurrent({})`)
 	if err != nil {
 		return nil, err
 	}

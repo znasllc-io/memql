@@ -529,7 +529,7 @@ func substituteArgRefValue(v any, args map[string]any) any {
 		return nil
 	case *ast.ArgRefExpr:
 		// The PARSER arg-ref node. A nested call inside a Logic body
-		// (`mutationRecordRequestEvent({ note: args.note })`) reaches the F.6
+		// (`recordRequestEvent({ note: args.note })`) reaches the F.6
 		// hoist with its object-literal arg values still carried as raw parser
 		// nodes -- convertFunctionCallExpr shallow-copies a FunctionCallExpr's
 		// Args verbatim, so the inner `args.note` is never converted to the
@@ -757,7 +757,7 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		// Process conditional filter: check if the arg is present AND
 		// non-nil. A present-but-nil value is treated as absent: tool
 		// handlers materialize an omitted optional arg as an explicit
-		// `null` (e.g. todosList's `queryTodos({done: $args.done})`
+		// `null` (e.g. todosList's `todos({done: $args.done})`
 		// collapses the unfilled placeholder to `null`), so a plain
 		// `exists` check would let nil leak into the guarded predicate
 		// (`payload.done == args.done`) and fail the query with

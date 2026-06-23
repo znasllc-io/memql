@@ -80,9 +80,9 @@ query queryFoo { filter id == args.id; shape participantFull }`
 // can span multiple lines (the lexer strips newlines).
 func TestParseUseDeclaration_FormB_MultiLine(t *testing.T) {
 	source := `use common.traits.{
-    traitIsActiveRecord,
-    traitIsNotDeleted,
-    traitStatusIsActive,
+    isActiveRecord,
+    isNotDeleted,
+    statusIsActive,
 }
 query queryFoo { filter id == args.id; shape someFull }`
 	tokens, err := NewLexer(source).Tokenize()

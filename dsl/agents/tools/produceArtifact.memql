@@ -18,7 +18,7 @@
 //
 // The handler:
 //   1. Mints a v1:planner:plan (kind="produceArtifact", triggerSource=
-//      "user.implicit") via the single mutationCreatePlan write path. The
+//      "user.implicit") via the single createPlan write path. The
 //      desired output format + filename ride in Plan.input so the executing
 //      agent knows what to write.
 //   2. Returns a small ack payload {status:"delegated", planId, ack}. The

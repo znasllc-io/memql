@@ -61,7 +61,7 @@ type invitationSummary struct {
 	ID                string
 	Kind              string
 	Status            string
-	PartitionId           string
+	PartitionId       string
 	SpaceName         string
 	InviterId         string
 	InviterName       string
@@ -115,7 +115,7 @@ func (s *streamSession) resolveEmailSender() email.Sender {
 	return email.NewLogSender(s.logger)
 }
 
-// lookupInvitationByTokenHash runs queryInvitationByTokenHash and
+// lookupInvitationByTokenHash runs invitationByTokenHash and
 // returns the first matching invitation (or nil when no match). Used
 // by handleResolveGuestInvite + the guest auth middleware.
 func lookupInvitationByTokenHash(ctx context.Context, engine *memqlengine.MemQLEngine, tokenHash string) (*invitationSummary, error) {
@@ -125,7 +125,7 @@ func lookupInvitationByTokenHash(ctx context.Context, engine *memqlengine.MemQLE
 	if strings.TrimSpace(tokenHash) == "" {
 		return nil, fmt.Errorf("tokenHash required")
 	}
-	query := fmt.Sprintf(`queryInvitationByTokenHash({tokenHash: "%s"})`, tokenHash)
+	query := fmt.Sprintf(`invitationByTokenHash({tokenHash: "%s"})`, tokenHash)
 	result, err := engine.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query guest invitation: %w", err)
@@ -165,7 +165,7 @@ func lookupInvitationByTokenHash(ctx context.Context, engine *memqlengine.MemQLE
 		ID:                getStr("id"),
 		Kind:              getStr("kind"),
 		Status:            getStr("status"),
-		PartitionId:           getStr("partitionId"),
+		PartitionId:       getStr("partitionId"),
 		SpaceName:         getStr("spaceName"),
 		InviterId:         getStr("inviterId"),
 		InviterName:       getStr("inviterName"),
@@ -256,7 +256,7 @@ func listPendingGuestInvitationsForEmail(ctx context.Context, engine *memqlengin
 			ID:                id,
 			Kind:              "guest",
 			Status:            "pending",
-			PartitionId:           getStr("partitionId"),
+			PartitionId:       getStr("partitionId"),
 			SpaceName:         getStr("spaceName"),
 			InviterId:         getStr("inviterId"),
 			InviterName:       getStr("inviterName"),
@@ -279,7 +279,7 @@ func kickGuestInvitation(ctx context.Context, engine *memqlengine.MemQLEngine, i
 	}
 	args := map[string]any{
 		"invitationId": inv.ID,
-		"partitionId":      inv.PartitionId,
+		"partitionId":  inv.PartitionId,
 		"spaceName":    inv.SpaceName,
 		"inviterId":    inv.InviterId,
 		"inviterName":  inv.InviterName,
@@ -395,7 +395,7 @@ func (s *streamSession) handleSendGuestInvite(envelope *memqlv1.MemqlClientMessa
 	// rides in the email below and never lands in the database.
 	args := map[string]any{
 		"invitationId": invitationId,
-		"partitionId":      partitionId,
+		"partitionId":  partitionId,
 		"spaceName":    strings.TrimSpace(msg.GetSpaceName()),
 		"inviterId":    inviterId,
 		"inviterName":  strings.TrimSpace(msg.GetInviterName()),
@@ -488,7 +488,7 @@ func (s *streamSession) handleResolveGuestInvite(envelope *memqlv1.MemqlClientMe
 		if previous != nil {
 			result := &memqlv1.ResolveGuestInviteResult{
 				InvitationId: previous.ID,
-				PartitionId:      previous.PartitionId,
+				PartitionId:  previous.PartitionId,
 				SpaceName:    previous.SpaceName,
 				InviterName:  previous.InviterName,
 				InviteeEmail: previous.InviteeEmail,
@@ -507,7 +507,7 @@ func (s *streamSession) handleResolveGuestInvite(envelope *memqlv1.MemqlClientMe
 	// Derive status from the record.
 	result := &memqlv1.ResolveGuestInviteResult{
 		InvitationId: summary.ID,
-		PartitionId:      summary.PartitionId,
+		PartitionId:  summary.PartitionId,
 		SpaceName:    summary.SpaceName,
 		InviterName:  summary.InviterName,
 		InviteeEmail: summary.InviteeEmail,
@@ -549,7 +549,7 @@ func lookupInvitationByPreviousTokenHash(ctx context.Context, engine *memqlengin
 	if strings.TrimSpace(tokenHash) == "" {
 		return nil, fmt.Errorf("tokenHash required")
 	}
-	query := fmt.Sprintf(`queryInvitationByPreviousTokenHash({tokenHash: "%s"})`, tokenHash)
+	query := fmt.Sprintf(`invitationByPreviousTokenHash({tokenHash: "%s"})`, tokenHash)
 	result, err := engine.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query invitation by previousTokenHash: %w", err)
@@ -587,7 +587,7 @@ func lookupInvitationByPreviousTokenHash(ctx context.Context, engine *memqlengin
 		ID:                getStr("id"),
 		Kind:              getStr("kind"),
 		Status:            getStr("status"),
-		PartitionId:           getStr("partitionId"),
+		PartitionId:       getStr("partitionId"),
 		SpaceName:         getStr("spaceName"),
 		InviterId:         getStr("inviterId"),
 		InviterName:       getStr("inviterName"),
@@ -696,7 +696,7 @@ func (s *streamSession) handleJoinSpaceAsGuest(envelope *memqlv1.MemqlClientMess
 	// Mutation 1: stamp the invitation as accepted.
 	markArgs := map[string]any{
 		"invitationId": invitationId,
-		"partitionId":      partitionId,
+		"partitionId":  partitionId,
 		"spaceName":    invite.SpaceName,
 		"inviterId":    invite.InviterId,
 		"inviterName":  invite.InviterName,
@@ -713,7 +713,7 @@ func (s *streamSession) handleJoinSpaceAsGuest(envelope *memqlv1.MemqlClientMess
 	// Mutation 2: create the guest's Participant record.
 	pArgs := map[string]any{
 		"participantId": participantId,
-		"partitionId":       partitionId,
+		"partitionId":   partitionId,
 		"displayName":   displayName,
 	}
 	pJSON, _ := json.Marshal(pArgs)
@@ -725,13 +725,13 @@ func (s *streamSession) handleJoinSpaceAsGuest(envelope *memqlv1.MemqlClientMess
 	return send(&memqlv1.JoinSpaceAsGuestResult{
 		Success:       true,
 		ParticipantId: participantId,
-		PartitionId:       partitionId,
+		PartitionId:   partitionId,
 	})
 }
 
 // lookupInvitationById keys on the invitation's record id. Used by
 // the resend + cancel handlers which take an invitationId from the
-// authenticated inviter side. Runs the `queryInvitationById` DSL so
+// authenticated inviter side. Runs the `invitationById` DSL so
 // the returned fields come through `invitationFull` (matches the
 // other lookups in this file).
 func lookupInvitationById(ctx context.Context, engine *memqlengine.MemQLEngine, invitationId string) (*invitationSummary, error) {
@@ -741,7 +741,7 @@ func lookupInvitationById(ctx context.Context, engine *memqlengine.MemQLEngine, 
 	if strings.TrimSpace(invitationId) == "" {
 		return nil, fmt.Errorf("invitationId required")
 	}
-	q := fmt.Sprintf(`queryInvitationById({invitationId: %q})`, invitationId)
+	q := fmt.Sprintf(`invitationById({invitationId: %q})`, invitationId)
 	result, err := engine.Execute(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("lookup by id: %w", err)
@@ -783,7 +783,7 @@ func lookupInvitationById(ctx context.Context, engine *memqlengine.MemQLEngine, 
 		ID:                id,
 		Kind:              getStr("kind"),
 		Status:            getStr("status"),
-		PartitionId:           getStr("partitionId"),
+		PartitionId:       getStr("partitionId"),
 		SpaceName:         getStr("spaceName"),
 		InviterId:         getStr("inviterId"),
 		InviterName:       getStr("inviterName"),
@@ -865,13 +865,13 @@ func (s *streamSession) handleCancelGuestInvite(envelope *memqlv1.MemqlClientMes
 // Pre-memql#108 behavior was to read a server-stored plain token off
 // the row and replay the same email. That left a recoverable token
 // at rest. We now:
-//   1. Mint a fresh plain token + hash.
-//   2. Call mutationRotateGuestInvitationToken to swap the row's
-//      hash to the new one AND stamp the prior hash as
-//      previousTokenHash (so /join/<oldToken> returns `superseded`
-//      instead of `invalid`).
-//   3. Email the new /join/<token> URL. The old URL no longer
-//      authenticates.
+//  1. Mint a fresh plain token + hash.
+//  2. Call mutationRotateGuestInvitationToken to swap the row's
+//     hash to the new one AND stamp the prior hash as
+//     previousTokenHash (so /join/<oldToken> returns `superseded`
+//     instead of `invalid`).
+//  3. Email the new /join/<token> URL. The old URL no longer
+//     authenticates.
 //
 // The "this link replaces any prior link we sent" copy lives in the
 // email template (set via email.GuestInviteParams.Resend=true).

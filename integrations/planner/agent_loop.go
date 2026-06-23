@@ -53,7 +53,7 @@ type PlannerAgentLoop struct {
 	handled *handledPlanSet
 	// resumed dedups feedback-resume re-entries (epic memql#1404 / memql#1405)
 	// keyed by planId@startedAt: a Plan resumed from awaitingFeedback via
-	// mutationAttachPlanFeedback re-enters invokeAndDispatch exactly once per
+	// attachPlanFeedback re-enters invokeAndDispatch exactly once per
 	// resume on this replica, even when the resume's graph.node.updated event
 	// is re-delivered. A distinct resume (a later parking + answering cycle)
 	// carries a fresh startedAt -> fresh key -> re-enters again, mirroring the
@@ -144,7 +144,7 @@ func (l *PlannerAgentLoop) HandlePlanCreated(ev events.Event) {
 	}
 	if status != "planning" && status != "queued" {
 		// We only kick off on freshly-created Plans. The new userGoal
-		// lifecycle stamps `planning` at mutationCreatePlan time and
+		// lifecycle stamps `planning` at createPlan time and
 		// transitions to `queued` once the planner agent has finished
 		// decomposing + emitting tasks. Legacy callers / scope-
 		// elevation flows still land in `queued` directly; accept
@@ -324,7 +324,7 @@ func (l *PlannerAgentLoop) HandlePlanUpdated(ev events.Event) {
 			// Resume-from-feedback re-entry (epic memql#1404 / memql#1405).
 			// A decompose-loop Plan parked in awaitingFeedback (a budget /
 			// rate-limit / convergence park, or the agent's requestUserFeedback)
-			// resumes to running via mutationAttachPlanFeedback, which stamps the
+			// resumes to running via attachPlanFeedback, which stamps the
 			// user's answer on Plan.feedbackResponse and a fresh startedAt. The
 			// produceArtifact / scopeElevation kinds are handled by
 			// handlePlanApprovedForExecution (executeApprovedPlan threads the
@@ -349,7 +349,7 @@ func (l *PlannerAgentLoop) HandlePlanUpdated(ev events.Event) {
 }
 
 // maybeResumeFromFeedback re-enters the decompose loop for a Plan that was
-// resumed from awaitingFeedback by mutationAttachPlanFeedback (epic
+// resumed from awaitingFeedback by attachPlanFeedback (epic
 // memql#1404 / memql#1405). It is the decompose-loop counterpart to
 // handlePlanApprovedForExecution's resume of produceArtifact / scopeElevation
 // Plans. Returns true when it claimed + handled the resume (the caller then
@@ -405,7 +405,7 @@ func (l *PlannerAgentLoop) maybeResumeFromFeedback(ctx context.Context, planId s
 // on failure the plan stays in planning and the safety net never fires (no
 // plannerAgent call was made), so there's nothing to spam. (memql#816)
 func (l *PlannerAgentLoop) startPlanDirect(ctx context.Context, planId string) {
-	q := fmt.Sprintf(`mutationStartPlan({planId:%q})`, planId)
+	q := fmt.Sprintf(`startPlan({planId:%q})`, planId)
 	if _, err := l.engine.Execute(systemActorContext(ctx), q); err != nil {
 		l.logger.Warn("planner agent loop: startPlanDirect failed",
 			"planId", planId, "error", err)
@@ -723,7 +723,7 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 		return l.ensureSpecialistForPlan(ctx, planId, iter, conv)
 	case "mintSkill":
 		// Phase 3 (memql#159): authority gate + catalog-search
-		// heuristic + mutationMintSkill dispatch. In-envelope mints
+		// heuristic + mintSkill dispatch. In-envelope mints
 		// execute immediately; out-of-envelope mints surface a canvas
 		// approval card and park the Plan with
 		// feedbackReason='mint_skill_approval_required'.
@@ -765,7 +765,7 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 // in integrations/agents/factory.go -- it reads the role catalog +
 // the user's existing agents, runs the agentFactoryAnalyze
 // structured-output prompt to pick a role / domains / tools, and
-// writes via mutationCreateAgent or mutationUpdateAgent. Returns
+// writes via createAgent or updateAgent. Returns
 // {agentId, action, reasoning} on a synthetic in-flight MemoryNode.
 //
 // We call it directly from Go rather than through the GA's
@@ -830,7 +830,7 @@ func (l *PlannerAgentLoop) ensureSpecialistForPlan(ctx context.Context, planId s
 
 // extractAgentFactoryResult digs the {agentId, action} fields out of
 // the ensureAgentForGoal builtin's return. The engine wraps results
-// in {bundle: {nodes: [...]}} envelopes (same shape queryPlanById
+// in {bundle: {nodes: [...]}} envelopes (same shape planById
 // returns); we route through plannerExtractRows to normalize to a
 // flat row slice, then pluck the factory-specific fields off the
 // first row's top-level or payload.
@@ -863,7 +863,7 @@ func extractAgentFactoryResult(res any) (agentId, action string) {
 // Bare-identifier keys per MemQL function-call syntax.
 func (l *PlannerAgentLoop) assignOwnerAgent(ctx context.Context, planId, agentId string) error {
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"routing", ownerAgentId:%q})`,
+		`updatePlanStatus({planId:%q, status:"routing", ownerAgentId:%q})`,
 		planId, agentId,
 	)
 	_, err := l.engine.Execute(systemActorContext(ctx), q)
@@ -872,14 +872,14 @@ func (l *PlannerAgentLoop) assignOwnerAgent(ctx context.Context, planId, agentId
 
 // --- engine helpers -------------------------------------------------------
 
-// loadPlan resolves a Plan by id via the queryPlanById DSL function.
+// loadPlan resolves a Plan by id via the planById DSL function.
 // The function lives in core's dsl/planner/queries.memql (moved there
 // from copresent on 2026-05-17). Earlier versions of this method used
 // a `from(v1:planner:plan) ?.id==X` syntax that the engine doesn't
 // support -- the engine's only entry point for reading a concept is
 // a named query function, not an inline `from()` clause.
 func (l *PlannerAgentLoop) loadPlan(ctx context.Context, planId string) (map[string]any, error) {
-	q := fmt.Sprintf(`queryPlanById({planId:%q})`, planId)
+	q := fmt.Sprintf(`planById({planId:%q})`, planId)
 	res, err := l.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
@@ -895,7 +895,7 @@ func (l *PlannerAgentLoop) loadPlan(ctx context.Context, planId string) (map[str
 		if len(raw) > 500 {
 			raw = raw[:500] + "...(truncated)"
 		}
-		l.logger.Warn("planner agent loop: queryPlanById returned no rows",
+		l.logger.Warn("planner agent loop: planById returned no rows",
 			"planId", planId, "query", q, "rawResponse", raw)
 		return nil, fmt.Errorf("plan %s not found", planId)
 	}
@@ -903,7 +903,7 @@ func (l *PlannerAgentLoop) loadPlan(ctx context.Context, planId string) (map[str
 }
 
 func (l *PlannerAgentLoop) loadTasks(ctx context.Context, planId string) ([]map[string]any, error) {
-	q := fmt.Sprintf(`queryTasksForPlan({planId:%q})`, planId)
+	q := fmt.Sprintf(`tasksForPlan({planId:%q})`, planId)
 	res, err := l.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
@@ -920,7 +920,7 @@ func (l *PlannerAgentLoop) loadSpecialists(ctx context.Context, plan map[string]
 	if ownerUserId == "" {
 		return nil, nil
 	}
-	q := fmt.Sprintf(`queryActiveAgentsForUser({ownerUserId:%q})`, ownerUserId)
+	q := fmt.Sprintf(`activeAgentsForUser({ownerUserId:%q})`, ownerUserId)
 	res, err := l.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
@@ -938,7 +938,7 @@ func (l *PlannerAgentLoop) loadSpecialists(ctx context.Context, plan map[string]
 // argument from the parse without erroring, which is exactly the
 // failure mode that left an earlier set of Plans stuck in queued. See
 // plan_execution.go for the canonical call shape and worker/store.go
-// for the same pattern against queryPlanById.
+// for the same pattern against planById.
 
 func (l *PlannerAgentLoop) stampPhases(ctx context.Context, planId string, outline []phaseOutline) error {
 	if len(outline) == 0 {
@@ -955,7 +955,7 @@ func (l *PlannerAgentLoop) stampPhases(ctx context.Context, planId string, outli
 	// status to "running" here, which prematurely transitioned the
 	// plan out of planning and broke the UI gating + the Run button.
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"planning", phases:%s})`,
+		`updatePlanStatus({planId:%q, status:"planning", phases:%s})`,
 		planId, string(phasesJSON),
 	)
 	_, err = l.engine.Execute(systemActorContext(ctx), q)
@@ -983,11 +983,11 @@ func (l *PlannerAgentLoop) insertDispatchedTask(ctx context.Context, planId stri
 	// Build the args block via json.Marshal -- the MemQL parser
 	// accepts a JSON object literal as a function call's argument map
 	// (quoted keys, properly-typed values incl. integers), which is
-	// the same pattern the cockpit's mutationCreatePlan call uses.
+	// the same pattern the cockpit's createPlan call uses.
 	// The earlier handcrafted fmt.Sprintf produced bare-key /
 	// bare-int syntax (`seq:0, attemptNumber:1, ...`) which the
 	// parser rejected at the first integer-literal value.
-	// task.AgentId is intentionally NOT passed to mutationCreateSemanticTask --
+	// task.AgentId is intentionally NOT passed to createSemanticTask --
 	// the task concept doesn't carry an agentId field (per the v1
 	// design where the parent Plan's ownerAgentId is the single
 	// authority on "who runs the tasks under this Plan"). We DO
@@ -1007,7 +1007,7 @@ func (l *PlannerAgentLoop) insertDispatchedTask(ctx context.Context, planId stri
 	if err != nil {
 		return fmt.Errorf("marshal task args: %w", err)
 	}
-	q := fmt.Sprintf("mutationCreateSemanticTask(%s)", string(argsJSON))
+	q := fmt.Sprintf("createSemanticTask(%s)", string(argsJSON))
 	if _, err := l.engine.Execute(systemActorContext(ctx), q); err != nil {
 		l.logger.Warn("planner agent loop: insertDispatchedTask query rejected",
 			"planId", planId, "query", q, "error", err)
@@ -1020,14 +1020,14 @@ func (l *PlannerAgentLoop) insertDispatchedTask(ctx context.Context, planId stri
 	// "queued" and waits for the user to click Run). The agent /
 	// dispatch surface that consumes status==running events is what
 	// actually executes tasks; that path fires from
-	// mutationStartPlan, not from here.
+	// startPlan, not from here.
 	//
 	// We do stamp ownerAgentId so the queued plan's "who's going to
 	// run this" is visible in the cockpit while the user reviews the
 	// task list.
 	if task.AgentId != "" {
 		q2 := fmt.Sprintf(
-			`mutationUpdatePlanStatus({planId:%q, status:"planning", ownerAgentId:%q})`,
+			`updatePlanStatus({planId:%q, status:"planning", ownerAgentId:%q})`,
 			planId, task.AgentId,
 		)
 		if _, err := l.engine.Execute(systemActorContext(ctx), q2); err != nil {
@@ -1045,7 +1045,7 @@ func (l *PlannerAgentLoop) insertDispatchedTask(ctx context.Context, planId stri
 // done planning.
 func (l *PlannerAgentLoop) markPlanningComplete(ctx context.Context, planId string) error {
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"queued"})`,
+		`updatePlanStatus({planId:%q, status:"queued"})`,
 		planId,
 	)
 	_, err := l.engine.Execute(systemActorContext(ctx), q)
@@ -1058,7 +1058,7 @@ func (l *PlannerAgentLoop) markPlanSucceeded(ctx context.Context, planId string,
 		outputJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"succeeded", output:%s, completedAt:%q})`,
+		`updatePlanStatus({planId:%q, status:"succeeded", output:%s, completedAt:%q})`,
 		planId, string(outputJSON), time.Now().UTC().Format(time.RFC3339),
 	)
 	_, err = l.engine.Execute(systemActorContext(ctx), q)
@@ -1067,7 +1067,7 @@ func (l *PlannerAgentLoop) markPlanSucceeded(ctx context.Context, planId string,
 
 func (l *PlannerAgentLoop) markPlanFailed(ctx context.Context, planId, errorMessage string) error {
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"failed", errorMessage:%q, completedAt:%q})`,
+		`updatePlanStatus({planId:%q, status:"failed", errorMessage:%q, completedAt:%q})`,
 		planId, errorMessage, time.Now().UTC().Format(time.RFC3339),
 	)
 	_, err := l.engine.Execute(systemActorContext(ctx), q)
@@ -1088,7 +1088,7 @@ func (l *PlannerAgentLoop) escalateAwaitingFeedback(ctx context.Context, planId,
 		fbReqJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"awaitingFeedback", feedbackReason:%q, feedbackRequest:%s})`,
+		`updatePlanStatus({planId:%q, status:"awaitingFeedback", feedbackReason:%q, feedbackRequest:%s})`,
 		planId, reason, string(fbReqJSON),
 	)
 	_, err = l.engine.Execute(systemActorContext(ctx), q)
@@ -1122,7 +1122,7 @@ type plannerDecision struct {
 	// mintSkill payload (Phase 3 / memql#159). Populated only when
 	// Action == "mintSkill"; the handler in mint_skill_handler.go
 	// runs the authority gate + catalog-search heuristic on these
-	// fields before issuing mutationMintSkill.
+	// fields before issuing mintSkill.
 	Name          string   `json:"name,omitempty"`
 	Slug          string   `json:"slug,omitempty"`
 	Description   string   `json:"description,omitempty"`

@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -165,14 +165,14 @@ func (i *Integration) handleReleaseNumber(ctx context.Context, args map[string]a
 	return handleNode("telephony:number:released", map[string]string{"e164": e164}), nil
 }
 
-// recordNumber persists a provisioned DID via mutationRecordNumber.
+// recordNumber persists a provisioned DID via recordNumber.
 func (i *Integration) recordNumber(ctx context.Context, num Number, partitionID, purpose string) {
 	eng, err := i.requireEngine()
 	if err != nil {
 		return
 	}
 	q := fmt.Sprintf(
-		`mutationRecordNumber({e164: %q, carrier: %q, partitionId: %q, purpose: %q, providerId: %q, numberType: %q, monthlyCost: %s})`,
+		`recordNumber({e164: %q, carrier: %q, partitionId: %q, purpose: %q, providerId: %q, numberType: %q, monthlyCost: %s})`,
 		num.E164, i.carrier.Name(), partitionID, purpose, num.ProviderID, string(orType(num.Type)), strconv.FormatFloat(num.MonthlyCost, 'f', -1, 64),
 	)
 	if _, err := eng.Execute(ctx, q); err != nil && i.logger != nil {

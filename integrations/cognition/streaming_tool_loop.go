@@ -121,7 +121,7 @@ func (c *CognitionIntegration) runStreamingToolLoop(
 		}
 	}
 
-	c.mutationEmitTextChunk(ctx, partitionId, participantId, replyId, "", textChunkIndex, true)
+	c.emitTextChunk(ctx, partitionId, participantId, replyId, "", textChunkIndex, true)
 
 	finalText := strings.TrimSpace(fullText.String())
 	c.Logger.Info(logTag+": complete",
@@ -146,7 +146,7 @@ func (c *CognitionIntegration) runStreamingToolLoop(
 // accumulates across turns so the returned streamResult.Text contains the
 // entire reply.
 //
-// replyId is forwarded through to mutationEmitTextChunk -- see runStreamingToolLoop.
+// replyId is forwarded through to emitTextChunk -- see runStreamingToolLoop.
 func (c *CognitionIntegration) consumeStreamingTurn(
 	ctx context.Context,
 	chunks <-chan common.StreamToolChunk,
@@ -169,7 +169,7 @@ func (c *CognitionIntegration) consumeStreamingTurn(
 
 	flush := func() {
 		if textBuffer.Len() > 0 {
-			c.mutationEmitTextChunk(ctx, partitionId, participantId, replyId, textBuffer.String(), *textChunkIndex, false)
+			c.emitTextChunk(ctx, partitionId, participantId, replyId, textBuffer.String(), *textChunkIndex, false)
 			textBuffer.Reset()
 			*textChunkIndex++
 			ticker.Reset(2 * time.Second)

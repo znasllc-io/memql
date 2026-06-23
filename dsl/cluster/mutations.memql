@@ -7,7 +7,7 @@ use cluster.concepts.{ cluster, database, deployment, identityProvider, node, sp
 
 @enabled
 @description("Create the cluster record")
-mutation cluster mutationCreateCluster {
+mutate cluster createCluster {
   args {
     name                string  @required
     region              string
@@ -37,7 +37,7 @@ mutation cluster mutationCreateCluster {
 
 @enabled
 @description("Register the cluster's database in the graph")
-mutation database mutationCreateDatabase {
+mutate database createDatabase {
   args {
     host     string  @required
     dbName   string  @required
@@ -59,7 +59,7 @@ mutation database mutationCreateDatabase {
 
 @enabled
 @description("Register the cluster's identity provider in the graph")
-mutation identityProvider mutationCreateIdentityProvider {
+mutate identityProvider createIdentityProvider {
   args {
     name            string  @required
     issuerUrl       string  @required
@@ -85,7 +85,7 @@ mutation identityProvider mutationCreateIdentityProvider {
 
 @enabled
 @description("Register a node in the cluster")
-mutation node mutationCreateNode {
+mutate node createNode {
   args {
     id            string
     nodeType      string    @required
@@ -121,7 +121,7 @@ mutation node mutationCreateNode {
 
 @enabled
 @description("Record a node lifecycle event")
-mutation spawnEvent mutationCreateSpawnEvent {
+mutate spawnEvent createSpawnEvent {
   args {
     nodeId       string  @required
     nodeType     string  @required
@@ -154,8 +154,8 @@ mutation spawnEvent mutationCreateSpawnEvent {
 // subscribes to for live topology updates.
 
 @enabled
-@description("Record a node health transition. Read-merges the existing v1:cluster:node row (created on startup by logicRegisterNode under the same NodeId) so only health + lastSeen change; nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to \"\" and reset capabilities/labels on every transition).")
-mutation node mutationUpdateNodeHealth {
+@description("Record a node health transition. Read-merges the existing v1:cluster:node row (created on startup by registerNode under the same NodeId) so only health + lastSeen change; nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to \"\" and reset capabilities/labels on every transition).")
+mutate node updateNodeHealth {
   args {
     id        string  @required
     health    string  @required
@@ -172,10 +172,10 @@ mutation node mutationUpdateNodeHealth {
 
 // Write a new deployment record at deploy start (#1872). The
 // deploymentId is used as the explicit concept id so every later
-// status transition (mutationUpdateDeploymentStatus) appends a new
+// status transition (updateDeploymentStatus) appends a new
 // payload version under the SAME time-series timeline -- one record per
 // deployment, reconstructable asOf any time. deploymentId is ALSO
-// stamped as a payload field so queryDeploymentById can filter on the
+// stamped as a payload field so deploymentById can filter on the
 // bare id without canonical-id prefixing.
 //
 // Admin action: the Deployment Console gates this path to owner/admin
@@ -183,13 +183,13 @@ mutation node mutationUpdateNodeHealth {
 // is spec("requiresOwnerOrAdmin") in dsl/deployment/specs.memql.
 //
 // Every field is bound with an explicit key + coalesce to a valid value
-// (mirroring mutationCreateNode #1643/#1671): status defaults to
+// (mirroring createNode #1643/#1671): status defaults to
 // "pending" and environment to "development" so the enum columns always
 // receive a member of their value set; the plain string fields coalesce
 // to "" when the caller omits them.
 @enabled
 @description("Create a v1:cluster:deployment record at deploy start (status defaults to pending). Uses deploymentId as the concept id so status transitions append to one timeline. #1872.")
-mutation deployment mutationCreateDeployment {
+mutate deployment createDeployment {
   args {
     deploymentId         string  @required
     status               string  @enum("pending", "in_progress", "succeeded", "failed", "superseded", "rolled_back")
@@ -225,7 +225,7 @@ mutation deployment mutationCreateDeployment {
 // ---- mutations/v1/cluster/updateDeploymentStatus.memql ----
 
 // Transition a deployment's status (#1872). Read-merge update form
-// (mirrors mutationUpdateNodeHealth): only status + updatedAt change;
+// (mirrors updateNodeHealth): only status + updatedAt change;
 // every other field (version/imageDigest/provider/environment/region/
 // clusterId/triggeredBy/notes/changelog/previousDeploymentId) inherits
 // from the persisted row, so a status-only transition never wipes the
@@ -238,7 +238,7 @@ mutation deployment mutationCreateDeployment {
 // DSL mirror spec("requiresOwnerOrAdmin").
 @enabled
 @description("Transition a v1:cluster:deployment's status (pending -> in_progress -> succeeded|failed; succeeded -> superseded; any -> rolled_back). Read-merge update: only status + updatedAt change, deploy metadata inherits. #1872.")
-mutation deployment mutationUpdateDeploymentStatus {
+mutate deployment updateDeploymentStatus {
   args {
     deploymentId  string  @required
     status        string  @required @enum("pending", "in_progress", "succeeded", "failed", "superseded", "rolled_back")

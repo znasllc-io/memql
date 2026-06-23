@@ -113,11 +113,11 @@ func TestValidateCQSAcrossRegistry_SelfReferenceFromRewriter(t *testing.T) {
 	// name with a `(` immediately after, which extractBareCallNames
 	// would otherwise mark as a callee.
 	must(t, reg.Upsert(&Function{
-		Name:         "mutationAddAgentToSpace",
+		Name:         "addAgentToSpace",
 		FunctionKind: "mutation",
 		ExprSource: `partitionId string @required
 }
-func (Mutation) mutationAddAgentToSpace(ctx any) error {
+func (Mutation) addAgentToSpace(ctx any) error {
   return insert(participant, id=concat("si-", hash("seed")))
 }`,
 	}))

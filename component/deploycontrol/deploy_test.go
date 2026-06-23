@@ -88,10 +88,10 @@ func TestDeployAzureProviderUsesPromote(t *testing.T) {
 		t.Errorf("azure deploy must NOT call docker compose, got %v", exec.composeCalls)
 	}
 	// in_progress then succeeded transitions.
-	if got := countContaining(eng.queries, "mutationUpdateDeploymentStatus(", `status: "in_progress"`); got != 1 {
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "in_progress"`); got != 1 {
 		t.Errorf("in_progress transition = %d, want 1; queries = %v", got, eng.queries)
 	}
-	if got := countContaining(eng.queries, "mutationUpdateDeploymentStatus(", `status: "succeeded"`); got != 1 {
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "succeeded"`); got != 1 {
 		t.Errorf("succeeded transition = %d, want 1; queries = %v", got, eng.queries)
 	}
 }
@@ -144,7 +144,7 @@ func TestDeployTransitionsFailedOnDriverError(t *testing.T) {
 	if !strings.Contains(res.GetMessage(), "promote.sh exit 1") {
 		t.Errorf("message = %q, want driver failure reason", res.GetMessage())
 	}
-	if got := countContaining(eng.queries, "mutationUpdateDeploymentStatus(", `status: "failed"`); got != 1 {
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 1 {
 		t.Errorf("failed transition = %d, want 1; queries = %v", got, eng.queries)
 	}
 	if len(audit.events) != 1 || audit.events[0].Outcome != identity.AuditOutcomeFailure {
@@ -170,7 +170,7 @@ func TestDeployUnknownProviderFails(t *testing.T) {
 	if len(exec.promoteCalls) != 0 || len(exec.composeCalls) != 0 {
 		t.Error("no driver should run for an unknown provider")
 	}
-	if got := countContaining(eng.queries, "mutationUpdateDeploymentStatus(", `status: "failed"`); got != 1 {
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 1 {
 		t.Errorf("failed transition = %d, want 1; queries = %v", got, eng.queries)
 	}
 }
@@ -249,7 +249,7 @@ func TestRollbackDeploymentRedeploysHistoricalDigest(t *testing.T) {
 	// previousDeploymentId provenance.
 	var createCall string
 	for _, q := range eng.queries {
-		if strings.HasPrefix(q, "mutationCreateDeployment(") {
+		if strings.HasPrefix(q, "createDeployment(") {
 			createCall = q
 		}
 	}
@@ -266,7 +266,7 @@ func TestRollbackDeploymentRedeploysHistoricalDigest(t *testing.T) {
 		t.Errorf("new rollback record should start in_progress: %s", createCall)
 	}
 	// Terminal transition is rolled_back, NOT a color flip / git revert.
-	if got := countContaining(eng.queries, "mutationUpdateDeploymentStatus(", `status: "rolled_back"`); got != 1 {
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "rolled_back"`); got != 1 {
 		t.Errorf("rolled_back transition = %d, want 1; queries = %v", got, eng.queries)
 	}
 	if res.GetDetails()["newDeploymentId"] == "" {
@@ -296,7 +296,7 @@ func TestRollbackDeploymentRejectsNonSucceededTarget(t *testing.T) {
 	if len(exec.promoteCalls) != 0 {
 		t.Error("no driver should run for an invalid rollback target")
 	}
-	if countContaining(eng.queries, "mutationCreateDeployment(") != 0 {
+	if countContaining(eng.queries, "createDeployment(") != 0 {
 		t.Error("rejected rollback must not create a new record")
 	}
 }
@@ -316,10 +316,10 @@ func TestRollbackDeploymentTransitionsFailedOnDriverError(t *testing.T) {
 	if res.GetOk() {
 		t.Error("ok = true, want false on rollback driver error")
 	}
-	if got := countContaining(eng.queries, "mutationUpdateDeploymentStatus(", `status: "failed"`); got != 1 {
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 1 {
 		t.Errorf("failed transition = %d, want 1; queries = %v", got, eng.queries)
 	}
-	if got := countContaining(eng.queries, "mutationUpdateDeploymentStatus(", `status: "rolled_back"`); got != 0 {
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "rolled_back"`); got != 0 {
 		t.Errorf("must NOT mark rolled_back on driver failure; queries = %v", eng.queries)
 	}
 }

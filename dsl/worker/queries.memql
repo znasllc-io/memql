@@ -9,8 +9,8 @@ use worker.concepts.{ invocation, registration }
 @enabled
 @unbounded("expired worker-invocation retention sweep -- an internal sweep that must see all")
 @description("List worker invocation rows for retention pruning. Caller filters by age.")
-query invocation queryExpiredWorkerInvocations {
-  filter  payload.action!="" && traitIsNotDeleted
+query invocation expiredWorkerInvocations {
+  filter  payload.action!="" && isNotDeleted
   shape   workerInvocationFull
 }
 
@@ -28,11 +28,11 @@ query invocation queryExpiredWorkerInvocations {
 
 @enabled
 @description("List all worker invocations belonging to a Plan.")
-query invocation queryInvocationsForPlan {
+query invocation invocationsForPlan {
   args {
     planId  string  @required
   }
-  filter  payload.planId==args.planId && traitIsNotDeleted
+  filter  payload.planId==args.planId && isNotDeleted
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -60,11 +60,11 @@ query invocation queryInvocationsForPlan {
 @enabled
 @public
 @description("List worker invocations belonging to a user.")
-query invocation queryInvocationsForUser {
+query invocation invocationsForUser {
   args {
     ownerUserId  string  @required
   }
-  filter  payload.ownerUserId==args.ownerUserId && traitIsNotDeleted
+  filter  payload.ownerUserId==args.ownerUserId && isNotDeleted
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -75,11 +75,11 @@ query invocation queryInvocationsForUser {
 
 @enabled
 @description("List a user's running plans.")
-query plan queryRunningPlansForUser {
+query plan runningPlansForUser {
   args {
     userId  string  @required
   }
-  filter  payload.requestedBy==args.userId && traitStatusIsRunning
+  filter  payload.requestedBy==args.userId && statusIsRunning
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -95,7 +95,7 @@ query plan queryRunningPlansForUser {
 //
 // Existing-registration probe used by the WorkerService Register
 // handshake. The interceptor has already resolved the worker
-// identity (via queryWorkerTokenByKeyHash); this query is the
+// identity (via workerTokenByKeyHash); this query is the
 // follow-up call from upsertRegistration that decides whether to
 // insert a new v1:worker:registration row or refresh the existing
 // one for that identity (1:1 mapping by identityId).
@@ -106,7 +106,7 @@ query plan queryRunningPlansForUser {
 @enabled
 @unbounded("worker by identityId -- bounded to a single row")
 @description("Look up the worker registration owned by an identity row.")
-query registration queryWorkerByIdentityId {
+query registration workerByIdentityId {
   args {
     identityId  string  @required
   }
@@ -141,7 +141,7 @@ query registration queryWorkerByIdentityId {
 @enabled
 @public
 @description("List all workers owned by a user.")
-query registration queryWorkersForUser {
+query registration workersForUser {
   args {
     ownerUserId  string  @required
   }

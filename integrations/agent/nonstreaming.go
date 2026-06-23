@@ -239,7 +239,7 @@ func (r *Replier) runNonStreamingToolLoop(
 		PlanId:      turnCtx.PlanId,
 		AgentId:     turnCtx.AgentId,
 		OwnerUserId: turnCtx.OwnerUserId,
-		PartitionId:     turnCtx.PartitionId,
+		PartitionId: turnCtx.PartitionId,
 	})
 
 	// Tag the lane so every model HTTP call this loop makes counts against
@@ -708,7 +708,7 @@ func (r *Replier) persistTaskStateOnPause(ctx context.Context, turnCtx turnConte
 			"error", err, "task_id", taskId)
 		return
 	}
-	call := fmt.Sprintf("mutationPersistTaskState(%s)", string(payload))
+	call := fmt.Sprintf("persistTaskState(%s)", string(payload))
 	if _, err := r.engine.Execute(withUserActor(ctx, turnCtx.OwnerUserId), call); err != nil {
 		r.logger.Warn("agent background: persist taskState on pause failed",
 			"error", err, "task_id", taskId)

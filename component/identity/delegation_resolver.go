@@ -141,11 +141,11 @@ func (r *EngineDelegationResolver) ResolveActiveDelegation(ctx context.Context, 
 		DelegationId: chosen.ID,
 		IdentityId:   chosen.IdentityId,
 		DelegatingIdentity: auth.UserIdentity{
-			Subject:     chosen.IdentitySubject,
-			Email:       user.PrimaryEmail,
-			Role:        string(delegatorRole),
-			FirstName:   user.FirstName,
-			LastName:    user.LastName,
+			Subject:   chosen.IdentitySubject,
+			Email:     user.PrimaryEmail,
+			Role:      string(delegatorRole),
+			FirstName: user.FirstName,
+			LastName:  user.LastName,
 		},
 		IdentityType: chosen.IdentityType,
 		AgentId:      chosen.AgentId,
@@ -182,21 +182,21 @@ func (r *EngineDelegationResolver) now() time.Time {
 // delegationRow is the in-memory shape projected from a delegationFull
 // query. Mirrors the relevant payload fields.
 type delegationRow struct {
-	ID               string
-	IdentityId       string
-	IdentitySubject  string
-	IdentityType     string
-	AgentId          string
-	RoleCeiling      string
-	Scopes           []string
-	ExpiresAt        time.Time
-	Active           bool
-	RevokedAt        time.Time
-	CreatedAt        time.Time
+	ID              string
+	IdentityId      string
+	IdentitySubject string
+	IdentityType    string
+	AgentId         string
+	RoleCeiling     string
+	Scopes          []string
+	ExpiresAt       time.Time
+	Active          bool
+	RevokedAt       time.Time
+	CreatedAt       time.Time
 }
 
 func (r *EngineDelegationResolver) lookupActiveBySubject(ctx context.Context, subject string) ([]*delegationRow, error) {
-	query := fmt.Sprintf(`queryActiveDelegationsByIdentitySubject({identitySubject: %q})`, subject)
+	query := fmt.Sprintf(`activeDelegationsByIdentitySubject({identitySubject: %q})`, subject)
 	result, err := r.Engine.Execute(ctx, query)
 	if err != nil {
 		return nil, err
@@ -211,7 +211,7 @@ func (r *EngineDelegationResolver) lookupActiveBySubject(ctx context.Context, su
 			continue
 		}
 		// Belt-and-suspenders: skip revoked rows even though the query's
-		// traitIsActiveRecord filter should have done this -- the trait
+		// isActiveRecord filter should have done this -- the trait
 		// could drift, and a stale row riding through silently here would
 		// be worse than an extra in-memory check.
 		if !row.Active || !row.RevokedAt.IsZero() {
@@ -316,11 +316,11 @@ func (r *EngineDelegationResolver) audit(ctx context.Context, subject string, ro
 	}
 	reason = sanitizeLogValue(reason)
 	detail := map[string]any{
-		"delegation_id":     row.ID,
-		"agent_id":          row.AgentId,
-		"identity_id":       row.IdentityId,
-		"role_ceiling":      row.RoleCeiling,
-		"scopes":            row.Scopes,
+		"delegation_id":      row.ID,
+		"agent_id":           row.AgentId,
+		"identity_id":        row.IdentityId,
+		"role_ceiling":       row.RoleCeiling,
+		"scopes":             row.Scopes,
 		"delegating_subject": row.IdentitySubject,
 	}
 	if !row.ExpiresAt.IsZero() {

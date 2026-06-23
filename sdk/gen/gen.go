@@ -60,8 +60,10 @@ var (
 	// Anchored at column 0 to avoid matching `logic X { ... }` nested
 	// inside automation step bodies -- those are call-site references,
 	// not top-level declarations.
+	// The mutation declaration keyword is `mutate` (C6 / memql#2036); it is
+	// normalised to the canonical kind label "mutation" in CollectConstructs.
 	constructHeader = regexp.MustCompile(
-		`(?m)^(query|mutation|logic|builtin)[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`,
+		`(?m)^(query|mutate|logic|builtin)[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`,
 	)
 	// @sdk opt-in marker above a builtin: emits a typed wrapper for an
 	// otherwise-internal builtin.
@@ -303,6 +305,9 @@ func CollectConstructs(root string) ([]Construct, error) {
 		for _, m := range matches {
 			// m: [headStart, headEnd, kindStart, kindEnd, conceptStart, conceptEnd, nameStart, nameEnd]
 			kind := src[m[2]:m[3]]
+			if kind == "mutate" {
+				kind = "mutation" // canonical kind label (surface keyword is `mutate`)
+			}
 			concept := ""
 			if m[4] >= 0 {
 				concept = src[m[4]:m[5]]

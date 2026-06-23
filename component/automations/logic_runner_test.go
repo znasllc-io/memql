@@ -304,7 +304,7 @@ func TestLogicRunner_EventBindingSeededWhenAbsent(t *testing.T) {
 // runtime then refuses to run the Logic with "logic %q has no
 // `_return` step (body must end with `return <expr>`)". Every
 // multi-statement Logic across the DSL trees hit this -- including
-// logicRevokeExpiredDelegations, the cluster/identity sweeps, etc.
+// revokeExpiredDelegations, the cluster/identity sweeps, etc.
 // compileBodyToAutomation re-attaches a synthetic Step at the end
 // of the slice; this test guards that fix.
 func TestLogicRunner_PreservesReturnStep(t *testing.T) {
@@ -357,7 +357,7 @@ logic logicSweep {
 // doesn't recognise the dotted shape and would fail with
 // `function "stepName.method" not found`).
 //
-// This is the path that lets logicRevokeExpiredDelegations,
+// This is the path that lets revokeExpiredDelegations,
 // purgeExpired{ArchivedSpaces,PolicyTraces}, and the rest of the
 // `return X.Len()` family run end-to-end.
 func TestLogicRunner_TryEvaluateReturnLocally_PureStepMethod(t *testing.T) {
@@ -631,7 +631,7 @@ func TestReconstructPositionalBuiltinCall(t *testing.T) {
 	})
 
 	t.Run("non-positional-builtin name is not handled", func(t *testing.T) {
-		fn := &FunctionStepConfig{Name: "queryUserById", Args: map[string]any{"0": "x"}}
+		fn := &FunctionStepConfig{Name: "userById", Args: map[string]any{"0": "x"}}
 		if _, ok := reconstructPositionalBuiltinCall(fn); ok {
 			t.Errorf("expected ok=false for non-positional-builtin %q", fn.Name)
 		}

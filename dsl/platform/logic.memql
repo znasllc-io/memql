@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use platform.queries.{ queryAllPolicyTraces, queryGlobalVariable }
+use platform.queries.{ allPolicyTraces, globalVariable }
 
 // purgeExpiredPolicyTraces
 // ========================
@@ -18,13 +18,13 @@ use platform.queries.{ queryAllPolicyTraces, queryGlobalVariable }
 // Schedule chosen as 02:30 UTC (offset from the 02:00 archive
 // purge so the two crons don't contend on the same DB window).
 @description("Daily 02:30 UTC sweep over v1:platform:policyTrace rows older than MEMQL_POLICYTRACE_RETENTION_DAYS (default 90). Currently observation-only: emits a 'platform.policyTrace.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation.")
-logic logicPurgeExpiredPolicyTraces {
+logic purgeExpiredPolicyTraces {
   args {
     event object @required
   }
   body {
-  allTraces := queryAllPolicyTraces({})
-  retentionDays := queryGlobalVariable({ name: "MEMQL_POLICYTRACE_RETENTION_DAYS" })
+  allTraces := allPolicyTraces({})
+  retentionDays := globalVariable({ name: "MEMQL_POLICYTRACE_RETENTION_DAYS" })
 
   emitObservation := publishEvent({
     topic: "platform.policyTrace.retention.observed",

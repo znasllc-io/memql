@@ -1,7 +1,7 @@
 package memql
 
 // cluster_stale_nodes_filter_test.go -- regression coverage for memql#1642:
-// queryStaleClusterNodes must push its `olderThan` arg down onto a
+// staleClusterNodes must push its `olderThan` arg down onto a
 // `payload.lastSeen < olderThan` filter comparison. Before the fix the query
 // took no args and applied no lastSeen predicate, so it returned the identical
 // node set for every threshold (e.g. olderThan=2026 and olderThan=2020 both
@@ -45,7 +45,7 @@ func TestQueryStaleClusterNodes_OlderThanPushdown(t *testing.T) {
 	eng := loadedStaleNodesEngine(t)
 
 	const cutoff = "2020-01-01T00:00:00Z"
-	plan, err := eng.Parse(`queryStaleClusterNodes({olderThan: "` + cutoff + `"})`)
+	plan, err := eng.Parse(`staleClusterNodes({olderThan: "` + cutoff + `"})`)
 	require.NoError(t, err)
 	require.NotNil(t, plan.Root)
 
@@ -57,7 +57,7 @@ func TestQueryStaleClusterNodes_OlderThanPushdown(t *testing.T) {
 	})
 
 	require.NotNil(t, lastSeenCmp,
-		"queryStaleClusterNodes must apply a payload.lastSeen predicate when olderThan is supplied (issue #1642)")
+		"staleClusterNodes must apply a payload.lastSeen predicate when olderThan is supplied (issue #1642)")
 	require.Equal(t, OpLt, lastSeenCmp.Operator,
 		"the lastSeen predicate must be a strict '<' comparison against olderThan")
 	require.Equal(t, cutoff, lastSeenCmp.Value,
@@ -70,13 +70,13 @@ func TestQueryStaleClusterNodes_OlderThanPushdown(t *testing.T) {
 func TestQueryStaleClusterNodes_NoOlderThan_DropsGuard(t *testing.T) {
 	eng := loadedStaleNodesEngine(t)
 
-	plan, err := eng.Parse(`queryStaleClusterNodes({})`)
+	plan, err := eng.Parse(`staleClusterNodes({})`)
 	require.NoError(t, err)
 	require.NotNil(t, plan.Root)
 
 	walkComparisonExpressions(plan.Root, func(c *ComparisonExpression) {
 		if c.Field.Raw == "payload.lastSeen" {
-			t.Errorf("arg-free queryStaleClusterNodes must not carry a lastSeen predicate (when-guard should drop), got %#v", c)
+			t.Errorf("arg-free staleClusterNodes must not carry a lastSeen predicate (when-guard should drop), got %#v", c)
 		}
 	})
 }

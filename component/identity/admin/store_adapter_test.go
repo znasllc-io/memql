@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/identity"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -25,7 +25,7 @@ func clusterSettingsNode(id, brandName string) *memqlv1.MemoryNode {
 }
 
 // clusterSettingsFakeEngine records every query it receives and returns
-// a canned node list for queryClusterSettingsCurrent calls.
+// a canned node list for clusterSettingsCurrent calls.
 type clusterSettingsFakeEngine struct {
 	nodes   []*memqlv1.MemoryNode
 	queries []string
@@ -33,7 +33,7 @@ type clusterSettingsFakeEngine struct {
 
 func (f *clusterSettingsFakeEngine) Execute(_ context.Context, q string) (*memqlengine.ExecuteResult, error) {
 	f.queries = append(f.queries, q)
-	if strings.HasPrefix(q, "queryClusterSettingsCurrent(") {
+	if strings.HasPrefix(q, "clusterSettingsCurrent(") {
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: f.nodes}}, nil
 	}
 	return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
@@ -41,11 +41,11 @@ func (f *clusterSettingsFakeEngine) Execute(_ context.Context, q string) (*memql
 
 // TestLiveSettingsReaderSnapshotPicksCanonicalRow proves that when the
 // engine returns the canonical "cluster" row (as it does after the
-// id=="cluster" filter was added to queryClusterSettingsCurrent in
+// id=="cluster" filter was added to clusterSettingsCurrent in
 // fix/1807-identity-brand-singleton), Snapshot resolves the brandName
 // deterministically regardless of how many nodes the engine returns.
 //
-// Before the fix, queryClusterSettingsCurrent had NO filter and the
+// Before the fix, clusterSettingsCurrent had NO filter and the
 // engine could return multiple distinct clusterSettings rows (one per
 // id in the DB). Callers took Nodes[0], which was non-deterministic
 // across replicas when a stale miskeyed row existed alongside the
@@ -74,8 +74,8 @@ func TestLiveSettingsReaderSnapshotPicksCanonicalRow(t *testing.T) {
 		t.Fatal("no queries issued; reader may have short-circuited before calling the engine")
 	}
 	for _, q := range eng.queries {
-		if !strings.HasPrefix(q, "queryClusterSettingsCurrent(") {
-			t.Errorf("unexpected query %q; expected queryClusterSettingsCurrent", q)
+		if !strings.HasPrefix(q, "clusterSettingsCurrent(") {
+			t.Errorf("unexpected query %q; expected clusterSettingsCurrent", q)
 		}
 	}
 }

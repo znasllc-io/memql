@@ -179,7 +179,7 @@ func SelectRunnable(steps []StepView) []StepView {
 // ready (or blocked -> ready) because their dependencies are now all
 // done. This is what lets a blocked step become ready and run once its
 // blocker completes (acceptance criterion). The controller flips each
-// returned step to ready via mutationAddHarnessStep's state machine
+// returned step to ready via addHarnessStep's state machine
 // (pending->ready / blocked->ready are legal edges per #582).
 func PromotablePending(steps []StepView) []StepView {
 	byID := indexByID(steps)

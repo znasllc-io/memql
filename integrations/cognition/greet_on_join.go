@@ -96,7 +96,7 @@ func (c *CognitionIntegration) acquireGreetingPacingState(partitionId string) *g
 // generateAIResponse with a synthesized AgentParticipationDirective
 // so the reply is authored by the model, in the agent's own voice.
 //
-// Idempotency: keyed off the existing queryGreetingUtterance check
+// Idempotency: keyed off the existing greetingUtterance check
 // (kind=="agentGreeting"), the same dedup the deleted automation
 // used. Re-firing the event (or a participant row updating) won't
 // produce duplicate greetings.
@@ -179,7 +179,7 @@ func (c *CognitionIntegration) runGreetingTurn(partitionId, participantId, agent
 	}
 
 	// Idempotency: bail if any greeting utterance already exists for
-	// this (space, agent). queryGreetingUtterance checks on
+	// this (space, agent). greetingUtterance checks on
 	// payload.source.kind=="agentGreeting" -- same predicate the
 	// deduped helper used.
 	if c.greetingExists(ctx, partitionId, agentId) {
@@ -324,7 +324,7 @@ func (c *CognitionIntegration) runGreetingTurn(partitionId, participantId, agent
 	}
 
 	// Persist via the existing greeting mutation -- preserves the
-	// kind=="agentGreeting" marker so queryGreetingUtterance and
+	// kind=="agentGreeting" marker so greetingUtterance and
 	// agentInteractionCount keep counting it the same way.
 	// NOTE: displayName is deliberately NOT passed into the utterance
 	// insert -- it is not a field on v1:cognition:utterance (the concept
@@ -333,7 +333,7 @@ func (c *CognitionIntegration) runGreetingTurn(partitionId, participantId, agent
 	// The AI display name is already carried by the participant row
 	// referenced via participantId; consumers derive it from there.
 	mutation := fmt.Sprintf(
-		`mutationCreateGreetingUtterance({partitionId: %s, participantId: %s, agentId: %s, text: %s, greetingKind: "agentGreeting"})`,
+		`createGreetingUtterance({partitionId: %s, participantId: %s, agentId: %s, text: %s, greetingKind: "agentGreeting"})`,
 		escapeJSONString(partitionId),
 		escapeJSONString(participantId),
 		escapeJSONString(agentId),
@@ -374,14 +374,14 @@ func agentWantsGreeting(agent *agentPayload) bool {
 
 // greetingExists is the dedup probe -- true when an utterance with
 // payload.source.kind=="agentGreeting" already exists for the given
-// (space, agent). Mirrors the queryHasAIResponseForReply traversal
+// (space, agent). Mirrors the hasAIResponseForReply traversal
 // pattern: the engine returns an opaque map with `bundle.nodes`
 // at varying capitalisations, so we sniff both.
 func (c *CognitionIntegration) greetingExists(ctx context.Context, partitionId, agentId string) bool {
 	if c == nil || c.engine == nil {
 		return false
 	}
-	query := fmt.Sprintf(`queryGreetingUtterance({partitionId: %s, agentId: %s})`,
+	query := fmt.Sprintf(`greetingUtterance({partitionId: %s, agentId: %s})`,
 		escapeJSONString(partitionId), escapeJSONString(agentId))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil || result == nil {

@@ -15,11 +15,11 @@ import (
 //
 //   #1674  the `has` array-membership operator (the desugared form of
 //          `<scalar> in payload.<arrayField>`) failed in the in-memory
-//          comparison path -> queryNotesByTag / notesSearch / querySkillNeedsRefresh
+//          comparison path -> notesByTag / notesSearch / skillNeedsRefresh
 //          returned nothing when tagged/array data existed.
 //   #1675  querySavedSpaces / queryArchivedSpaces gated on the active==true
 //          trait, so saved/archived rows (active=false) never came back.
-//   #1685  queryInvocationsForPlan / queryExpiredWorkerInvocations omitted the
+//   #1685  invocationsForPlan / expiredWorkerInvocations omitted the
 //          not-deleted trait, so soft-deleted invocations leaked through.
 //   #1682  searchUsers ignored its active/limit filter args (returned all users).
 //
@@ -58,20 +58,20 @@ func TestHasOperator_NotesByTag(t *testing.T) {
 
 	alpha := fmt.Sprintf("v1:notes:note:alpha-%s", sfx)
 	beta := fmt.Sprintf("v1:notes:note:beta-%s", sfx)
-	runMutation(t, ctx, eng, "mutationCreateNote", map[string]any{
+	runMutation(t, ctx, eng, "createNote", map[string]any{
 		"noteId": alpha, "body": "alpha body", "tags": []string{"work", "urgent"},
 	})
-	runMutation(t, ctx, eng, "mutationCreateNote", map[string]any{
+	runMutation(t, ctx, eng, "createNote", map[string]any{
 		"noteId": beta, "body": "beta body", "tags": []string{"personal"},
 	})
 
 	// The headline #1674 assertion: a tag-membership query returns the
 	// matching row (before the fix this errored / returned nothing).
-	work := queryIds(t, ctx, eng, `queryNotesByTag({"tag":"urgent"})`)
+	work := queryIds(t, ctx, eng, `notesByTag({"tag":"urgent"})`)
 	require.True(t, contains(work, alpha), "note tagged 'urgent' must be returned (#1674), got %v", work)
 	require.False(t, contains(work, beta), "note NOT tagged 'urgent' must be excluded, got %v", work)
 
-	personal := queryIds(t, ctx, eng, `queryNotesByTag({"tag":"personal"})`)
+	personal := queryIds(t, ctx, eng, `notesByTag({"tag":"personal"})`)
 	require.True(t, contains(personal, beta), "note tagged 'personal' must be returned, got %v", personal)
 	require.False(t, contains(personal, alpha), "alpha must be excluded from 'personal', got %v", personal)
 }
@@ -90,11 +90,11 @@ func TestSpaceLists_SavedAndArchivedReturned(t *testing.T) {
 	// them (they gate on status + not-deleted, NOT active==true).
 	runMutation(t, ctx, eng, "mutationSaveSpace", map[string]any{
 		"partitionId": savedID,
-		"payload": map[string]any{"name": "Saved one", "status": "saved", "active": false},
+		"payload":     map[string]any{"name": "Saved one", "status": "saved", "active": false},
 	})
 	runMutation(t, ctx, eng, "mutationArchiveSpace", map[string]any{
 		"partitionId": archivedID,
-		"payload": map[string]any{"name": "Archived one", "status": "archived", "active": false},
+		"payload":     map[string]any{"name": "Archived one", "status": "archived", "active": false},
 	})
 
 	saved := queryIds(t, ctx, eng, "querySavedSpaces()")
@@ -122,18 +122,18 @@ func TestWorkerInvocations_SoftDeletedExcluded(t *testing.T) {
 			"action": "exec", "startedAt": "2026-01-01T00:00:00Z", "outcome": "success",
 		}
 	}
-	runMutation(t, ctx, eng, "mutationCreateWorkerInvocation", base(liveID))
-	runMutation(t, ctx, eng, "mutationCreateWorkerInvocation", base(deadID))
+	runMutation(t, ctx, eng, "createWorkerInvocation", base(liveID))
+	runMutation(t, ctx, eng, "createWorkerInvocation", base(deadID))
 
 	// Soft-delete one of them.
-	runMutation(t, ctx, eng, "mutationSoftDeleteWorkerInvocation", map[string]any{"invocationId": deadID})
+	runMutation(t, ctx, eng, "softDeleteWorkerInvocation", map[string]any{"invocationId": deadID})
 
-	forPlan := queryIds(t, ctx, eng, fmt.Sprintf(`queryInvocationsForPlan({"planId":%q})`, planID))
+	forPlan := queryIds(t, ctx, eng, fmt.Sprintf(`invocationsForPlan({"planId":%q})`, planID))
 	require.True(t, contains(forPlan, liveID), "live invocation must be returned, got %v", forPlan)
-	require.False(t, contains(forPlan, deadID), "soft-deleted invocation must be excluded from queryInvocationsForPlan (#1685), got %v", forPlan)
+	require.False(t, contains(forPlan, deadID), "soft-deleted invocation must be excluded from invocationsForPlan (#1685), got %v", forPlan)
 
-	expired := queryIds(t, ctx, eng, "queryExpiredWorkerInvocations()")
-	require.False(t, contains(expired, deadID), "soft-deleted invocation must be excluded from queryExpiredWorkerInvocations (#1685), got %v", expired)
+	expired := queryIds(t, ctx, eng, "expiredWorkerInvocations()")
+	require.False(t, contains(expired, deadID), "soft-deleted invocation must be excluded from expiredWorkerInvocations (#1685), got %v", expired)
 }
 
 // --- #1682: searchUsers honors active + limit -------------------------------
@@ -150,13 +150,13 @@ func TestSearchUsers_ActiveAndLimitApplied(t *testing.T) {
 	activeB := fmt.Sprintf("v1:identity:user:su-active-b-%s", sfx)
 	inactive := fmt.Sprintf("v1:identity:user:su-inactive-%s", sfx)
 	for i, id := range []string{activeA, activeB, inactive} {
-		runMutation(t, ctx, eng, "mutationCreateUser", map[string]any{
+		runMutation(t, ctx, eng, "createUser", map[string]any{
 			"userId": id, "displayName": fmt.Sprintf("SU %d", i),
 			"primaryEmail": fmt.Sprintf("su-%d-%s@example.com", i, sfx),
 		})
 	}
 	// Deactivate the third via partial read-merge update.
-	runMutation(t, ctx, eng, "mutationUpdateUser", map[string]any{
+	runMutation(t, ctx, eng, "updateUser", map[string]any{
 		"userId": inactive, "payload": map[string]any{"active": false},
 	})
 
@@ -181,7 +181,7 @@ func TestSearchUsers_ActiveAndLimitApplied(t *testing.T) {
 	// limit=N caps the result count. Seed a few more active users so the cap bites.
 	for i := 0; i < 5; i++ {
 		id := fmt.Sprintf("v1:identity:user:su-bulk-%s-%d", sfx, i)
-		runMutation(t, ctx, eng, "mutationCreateUser", map[string]any{
+		runMutation(t, ctx, eng, "createUser", map[string]any{
 			"userId": id, "displayName": fmt.Sprintf("Bulk %d", i),
 			"primaryEmail": fmt.Sprintf("bulk-%d-%s@example.com", i, sfx),
 		})

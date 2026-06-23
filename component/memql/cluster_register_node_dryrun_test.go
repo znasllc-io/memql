@@ -3,8 +3,8 @@ package memql_test
 // cluster_register_node_dryrun_test.go -- regression coverage for memql#1643(a)
 // and memql#1671:
 //
-// logicRegisterNode must bind its event input fields through to BOTH the
-// mutationCreateNode step (nodeRecord) and the mutationCreateSpawnEvent step
+// registerNode must bind its event input fields through to BOTH the
+// createNode step (nodeRecord) and the createSpawnEvent step
 // (spawnEvent) via explicit keyed args with coalesce fallbacks.
 //
 // #1643(a) fixed the nodeRecord step:
@@ -12,10 +12,10 @@ package memql_test
 //   The original call mixed bare-shorthand args with a multi-segment path
 //   (args.event.payload.node.id / .address) and carried an unknown `flavor` key:
 //
-//     mutationCreateNode({
+//     createNode({
 //       args.event.payload.node.id,                       // dotted -> NOT a valid shorthand
 //       nodeType: args.event.payload.node.type,
-//       flavor:   coalesce(args.event.payload.node.flavor, ""),  // not a mutationCreateNode arg
+//       flavor:   coalesce(args.event.payload.node.flavor, ""),  // not a createNode arg
 //       args.event.payload.node.address                   // dotted -> NOT a valid shorthand
 //     })
 //
@@ -32,7 +32,7 @@ package memql_test
 //
 // #1671 found that the spawnEvent step was STILL broken after #1643(a):
 //
-//   spawnEvent := mutationCreateSpawnEvent({
+//   spawnEvent := createSpawnEvent({
 //     nodeId:   coalesce(args.event.payload.node.id, ""),
 //     nodeType: args.event.payload.node.type,   // <-- bare path, no coalesce!
 //     ...
@@ -41,11 +41,11 @@ package memql_test
 //   args.event.payload.node.type evaluates to nil when the sandbox does not
 //   thread the trigger event into the logic step's args.event envelope. The live
 //   executor resolves it for real, but a nil nodeType fails the @required
-//   validation: "function mutationCreateSpawnEvent: argument validation failed:
+//   validation: "function createSpawnEvent: argument validation failed:
 //   required argument nodeType is missing".
 //
 // Both fixes bind every @required field with an explicit key + coalesce, the
-// same shape logicDeregisterNode uses.
+// same shape deregisterNode uses.
 //
 // Driven through the Gate-2 dry-run sandbox (no Postgres). NB: the sandbox
 // executor does not thread the trigger event into a logic step's `args.event`
@@ -53,7 +53,7 @@ package memql_test
 // is load-bearing: it reproduces the exact nil-path that fails @required
 // validation in the live executor (the same reproduction that caught both
 // #1643(a) and #1671). The live executor resolves the fields for real; the
-// identical access in logicBootstrapCluster is the production-proven precedent.
+// identical access in bootstrapCluster is the production-proven precedent.
 
 import (
 	"context"
@@ -66,7 +66,7 @@ import (
 )
 
 // registerNodeAutomation mirrors dsl/cluster/automations.memql's registerNode:
-// a single step invoking the logicRegisterNode construct with the trigger event.
+// a single step invoking the registerNode construct with the trigger event.
 const registerNodeAutomation = `@enabled
 @trigger(event="system.startup")
 @description("Register this node in the database on startup")
@@ -77,7 +77,7 @@ automation registerNode {
 }`
 
 // TestDryRun_RegisterNode_BindsCleanMutationArgs: a dry-run of the registerNode
-// automation must record a mutationCreateNode write whose argument map contains
+// automation must record a createNode write whose argument map contains
 // EXACTLY the valid keyed args (id / nodeType / address) -- no stray `flavor`
 // key and no untyped-nil values from a corrupted shorthand parse. Before the
 // #1643(a) fix this recorded `map[address:<nil> flavor: id:<nil> nodeType:<nil>]`
@@ -121,27 +121,27 @@ func TestDryRun_RegisterNode_BindsCleanMutationArgs(t *testing.T) {
 	pl := nodeMut.Payload
 
 	// Regression guard 1: the unknown `flavor` arg (not part of the
-	// mutationCreateNode schema) must be gone.
+	// createNode schema) must be gone.
 	if _, ok := pl["flavor"]; ok {
-		t.Errorf("mutationCreateNode args must not carry a stray 'flavor' key: %+v", pl)
+		t.Errorf("createNode args must not carry a stray 'flavor' key: %+v", pl)
 	}
 
 	// Regression guard 2: the keyed args must bind to real string values
 	// (coalesce(...,\"\")), never the untyped-nil the corrupted shorthand
-	// produced. nodeType is @required on mutationCreateNode -- an untyped nil
+	// produced. nodeType is @required on createNode -- an untyped nil
 	// here is exactly the "required argument missing" failure.
 	for _, k := range []string{"id", "nodeType", "address"} {
 		v, ok := pl[k]
 		if !ok {
-			t.Errorf("expected mutationCreateNode arg %q to be bound, missing from %+v", k, pl)
+			t.Errorf("expected createNode arg %q to be bound, missing from %+v", k, pl)
 			continue
 		}
 		if v == nil {
-			t.Errorf("mutationCreateNode arg %q bound to untyped nil (shorthand-corruption regression): %+v", k, pl)
+			t.Errorf("createNode arg %q bound to untyped nil (shorthand-corruption regression): %+v", k, pl)
 			continue
 		}
 		if _, isStr := v.(string); !isStr {
-			t.Errorf("expected mutationCreateNode arg %q to bind a string, got %T (%v)", k, v, v)
+			t.Errorf("expected createNode arg %q to bind a string, got %T (%v)", k, v, v)
 		}
 	}
 }
@@ -151,7 +151,7 @@ func TestDryRun_RegisterNode_BindsCleanMutationArgs(t *testing.T) {
 // The #1643(a) fix corrected the nodeRecord step but left the spawnEvent step
 // with a bare (uncoalesced) path:
 //
-//	spawnEvent := mutationCreateSpawnEvent({
+//	spawnEvent := createSpawnEvent({
 //	  nodeId:   coalesce(args.event.payload.node.id, ""),
 //	  nodeType: args.event.payload.node.type,   // <-- no coalesce!
 //	  ...
@@ -201,7 +201,7 @@ func TestDryRun_RegisterNode_SpawnEventBindsNodeType(t *testing.T) {
 
 	pl := spawnMut.Payload
 
-	// #1671 regression: nodeType is @required on mutationCreateSpawnEvent.
+	// #1671 regression: nodeType is @required on createSpawnEvent.
 	// Before the fix, `nodeType: args.event.payload.node.type` evaluated to nil
 	// in the sandbox (event not threaded), so the recorded payload had
 	// nodeType=nil -- exactly the value that fails @required validation in the
@@ -210,15 +210,15 @@ func TestDryRun_RegisterNode_SpawnEventBindsNodeType(t *testing.T) {
 	for _, k := range []string{"nodeId", "nodeType", "action"} {
 		v, ok := pl[k]
 		if !ok {
-			t.Errorf("mutationCreateSpawnEvent arg %q missing from recorded payload %+v (#1671 regression)", k, pl)
+			t.Errorf("createSpawnEvent arg %q missing from recorded payload %+v (#1671 regression)", k, pl)
 			continue
 		}
 		if v == nil {
-			t.Errorf("mutationCreateSpawnEvent arg %q is nil (#1671 regression: bare path without coalesce): %+v", k, pl)
+			t.Errorf("createSpawnEvent arg %q is nil (#1671 regression: bare path without coalesce): %+v", k, pl)
 			continue
 		}
 		if _, isStr := v.(string); !isStr {
-			t.Errorf("mutationCreateSpawnEvent arg %q expected string, got %T (%v)", k, v, v)
+			t.Errorf("createSpawnEvent arg %q expected string, got %T (%v)", k, v, v)
 		}
 	}
 }

@@ -14,14 +14,14 @@
 // action:
 //
 //   - spawnTrainingPlan  -> ALWAYS gated. Training never happens
-//                           automatically; it requires explicit user
-//                           approval (metrics.specialistApproved) or the
-//                           tokenCapDisabled escape hatch.
+//     automatically; it requires explicit user
+//     approval (metrics.specialistApproved) or the
+//     tokenCapDisabled escape hatch.
 //   - createSpecialist /  -> gated for ONE-OFF plan kinds (produceArtifact,
 //     extendSpecialist       adHocAction) -- those must finish with an
-//                            existing agent. For other (genuine
-//                            multi-step) plans it's allowed, since a real
-//                            program may legitimately need a specialist.
+//     existing agent. For other (genuine
+//     multi-step) plans it's allowed, since a real
+//     program may legitimately need a specialist.
 //
 // When gated and not approved, the loop parks the Plan to
 // awaitingFeedback(specialist_approval_required) instead of running the
@@ -168,7 +168,7 @@ func (l *PlannerAgentLoop) parkForSpecialistApproval(ctx context.Context, plan m
 		fbReqJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"awaitingFeedback", feedbackReason:"specialist_approval_required", feedbackRequest:%s})`,
+		`updatePlanStatus({planId:%q, status:"awaitingFeedback", feedbackReason:"specialist_approval_required", feedbackRequest:%s})`,
 		planId, string(fbReqJSON),
 	)
 	if _, err = l.engine.Execute(systemActorContext(ctx), q); err != nil {

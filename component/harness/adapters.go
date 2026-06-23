@@ -210,7 +210,7 @@ func (r *BunStepReader) planPartition(_ context.Context, _ string) (string, erro
 
 // EngineWriter writes harness state through the #582 mutations via
 // engine.Execute. It also serves as the StepClaimer: the atomic
-// ready->running claim IS mutationStartHarnessStep, whose engine guard
+// ready->running claim IS startHarnessStep, whose engine guard
 // (#582) rejects a second concurrent claim (prior status != ready). One
 // claim wins; the loser gets an invalid-transition error -> claimed=false.
 type EngineWriter struct {
@@ -222,13 +222,13 @@ func NewEngineWriter(exec Executor) *EngineWriter {
 	return &EngineWriter{exec: exec}
 }
 
-// ClaimStep performs the atomic claim by issuing mutationStartHarnessStep.
+// ClaimStep performs the atomic claim by issuing startHarnessStep.
 // Success == this caller won the ready->running race. An invalid-transition
 // error (the guard rejecting a non-ready prior status) means another
 // reconcile already claimed it -> claimed=false, no error surfaced.
 func (w *EngineWriter) ClaimStep(ctx context.Context, _ string, stepID string, _ int) (bool, error) {
 	q := fmt.Sprintf(
-		`mutationStartHarnessStep({stepId:%q, assignedAgent:%q})`,
+		`startHarnessStep({stepId:%q, assignedAgent:%q})`,
 		stepID, systemActorId,
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
@@ -246,7 +246,7 @@ func (w *EngineWriter) ClaimStep(ctx context.Context, _ string, stepID string, _
 func (w *EngineWriter) StartStep(_ context.Context, _ string) error { return nil }
 
 // MarkStepReady transitions a pending/blocked step to ready via
-// mutationReadyHarnessStep (#1635) -- the dedicated ready-promotion write the
+// readyHarnessStep (#1635) -- the dedicated ready-promotion write the
 // original #582 mutation surface lacked (addStep hardcoded status=pending; the
 // transition mutations only covered running/done/failed, so this used to be a
 // raw re-version insert re-asserting every field). The mutation is an update
@@ -254,7 +254,7 @@ func (w *EngineWriter) StartStep(_ context.Context, _ string) error { return nil
 // routes through validateHarnessStepTransition (the same guard the named
 // transition mutations hit), so no field re-assertion is needed.
 func (w *EngineWriter) MarkStepReady(ctx context.Context, step StepView) error {
-	q := fmt.Sprintf(`mutationReadyHarnessStep({stepId:%q})`, step.ID)
+	q := fmt.Sprintf(`readyHarnessStep({stepId:%q})`, step.ID)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
 		return fmt.Errorf("mark step %q ready: %w", step.ID, err)
 	}
@@ -265,7 +265,7 @@ func (w *EngineWriter) MarkStepReady(ctx context.Context, step StepView) error {
 func (w *EngineWriter) CompleteStep(ctx context.Context, stepID string, result map[string]any) error {
 	resultJSON := mustJSON(result)
 	q := fmt.Sprintf(
-		`mutationCompleteHarnessStep({stepId:%q, result:%s})`,
+		`completeHarnessStep({stepId:%q, result:%s})`,
 		stepID, resultJSON,
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
@@ -277,7 +277,7 @@ func (w *EngineWriter) CompleteStep(ctx context.Context, stepID string, result m
 // FailStep marks a running step failed (running -> failed).
 func (w *EngineWriter) FailStep(ctx context.Context, stepID, errorMessage string) error {
 	q := fmt.Sprintf(
-		`mutationFailHarnessStep({stepId:%q, errorMessage:%q})`,
+		`failHarnessStep({stepId:%q, errorMessage:%q})`,
 		stepID, errorMessage,
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
@@ -291,7 +291,7 @@ func (w *EngineWriter) FailStep(ctx context.Context, stepID, errorMessage string
 func (w *EngineWriter) RecordObservation(ctx context.Context, obs Observation) error {
 	dataJSON := mustJSON(obs.Data)
 	q := fmt.Sprintf(
-		`mutationRecordHarnessObservation({stepId:%q, planId:%q, kind:%q, content:%q, data:%s})`,
+		`recordHarnessObservation({stepId:%q, planId:%q, kind:%q, content:%q, data:%s})`,
 		obs.StepID, obs.PlanID, obs.Kind, obs.Content, dataJSON,
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
@@ -301,7 +301,7 @@ func (w *EngineWriter) RecordObservation(ctx context.Context, obs Observation) e
 }
 
 // SetPlanStatus promotes a plan to a terminal status. The #582 surface
-// ships mutationCreateHarnessPlan but no dedicated plan-status setter (the
+// ships createHarnessPlan but no dedicated plan-status setter (the
 // plan lifecycle was left for the reconciler to drive). The promotion is
 // a raw re-version insert against v1:harness:plan carrying the new status:
 // the plan concept has no engine transition guard, so the append-only

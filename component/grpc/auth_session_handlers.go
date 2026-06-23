@@ -84,7 +84,7 @@ func bearerTokenFromIncomingContext(ctx context.Context) string {
 	return strings.TrimSpace(parts[1])
 }
 
-// LookupAuthSessionByTokenHash runs queryAuthSessionByTokenHash and
+// LookupAuthSessionByTokenHash runs authSessionByTokenHash and
 // returns the matching session (or nil when no row is found).
 // Exported so the auth middleware can reuse the same projection.
 func LookupAuthSessionByTokenHash(ctx context.Context, engine *memqlengine.MemQLEngine, tokenHash string) (*authSessionSummary, error) {
@@ -94,7 +94,7 @@ func LookupAuthSessionByTokenHash(ctx context.Context, engine *memqlengine.MemQL
 	if strings.TrimSpace(tokenHash) == "" {
 		return nil, fmt.Errorf("tokenHash required")
 	}
-	query := fmt.Sprintf(`queryAuthSessionByTokenHash({tokenHash: "%s"})`, tokenHash)
+	query := fmt.Sprintf(`authSessionByTokenHash({tokenHash: "%s"})`, tokenHash)
 	result, err := engine.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query auth session: %w", err)
@@ -118,7 +118,7 @@ func listAuthSessionsForSubject(ctx context.Context, engine *memqlengine.MemQLEn
 	if strings.TrimSpace(subject) == "" {
 		return nil, fmt.Errorf("subject required")
 	}
-	query := fmt.Sprintf(`queryAuthSessionsForSubject({subject: %q})`, subject)
+	query := fmt.Sprintf(`authSessionsForSubject({subject: %q})`, subject)
 	result, err := engine.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query auth sessions for subject: %w", err)
@@ -332,7 +332,7 @@ func (s *streamSession) handleRevokeAllSessions(envelope *memqlv1.MemqlClientMes
 }
 
 // RevokeAuthSessionRow persists a single revocation by running
-// mutationRevokeAuthSession with the discriminator fields the
+// revokeAuthSession with the discriminator fields the
 // latest-wins projection requires. Exported so the LogoutHandler
 // adapter (in app/) can revoke a row directly without dispatching
 // through the gRPC stream.
@@ -350,7 +350,7 @@ func RevokeAuthSessionRow(ctx context.Context, engine *memqlengine.MemQLEngine, 
 		"revokedReason": reason,
 	}
 	argsJSON, _ := json.Marshal(args)
-	query := fmt.Sprintf("mutationRevokeAuthSession(%s)", renderQueryArgs(argsJSON))
+	query := fmt.Sprintf("revokeAuthSession(%s)", renderQueryArgs(argsJSON))
 	if _, err := engine.Execute(ctx, query); err != nil {
 		return fmt.Errorf("revoke auth session: %w", err)
 	}
@@ -379,7 +379,7 @@ func CreateAuthSessionRow(ctx context.Context, engine *memqlengine.MemQLEngine, 
 		"expiresAt":   row.ExpiresAt.UTC().Format(time.RFC3339),
 	}
 	argsJSON, _ := json.Marshal(args)
-	query := fmt.Sprintf("mutationCreateAuthSession(%s)", renderQueryArgs(argsJSON))
+	query := fmt.Sprintf("createAuthSession(%s)", renderQueryArgs(argsJSON))
 	if _, err := engine.Execute(ctx, query); err != nil {
 		return fmt.Errorf("create auth session: %w", err)
 	}

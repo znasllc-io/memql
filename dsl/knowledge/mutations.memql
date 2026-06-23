@@ -13,7 +13,7 @@ use knowledge.concepts.{ documentChunk }
 
 @enabled
 @description("Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the CoPresent UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceUtteranceId / sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.")
-mutation documentChunk mutationCreateDocumentChunk {
+mutate documentChunk createDocumentChunk {
   args {
     chunkId            string  @required
     domainId           string  @required
@@ -72,9 +72,9 @@ mutation documentChunk mutationCreateDocumentChunk {
 
 // ---- mutations/v1/knowledge/writeKnowledgeChunk.memql ----
 
-// mutationWriteKnowledgeChunk -- the Trainer Agent's chunk-write path
+// writeKnowledgeChunk -- the Trainer Agent's chunk-write path
 // (Q3 / Q9). Backs the writeKnowledgeChunk tool the Trainer Agent calls
-// during a trainSpecialist Plan. Distinct from mutationCreateDocumentChunk
+// during a trainSpecialist Plan. Distinct from createDocumentChunk
 // (the general chunk-write path used by the seeder / bridge / CoPresent
 // ingest) only in that it hard-stamps source="trainerAgent",
 // validationStatus="validated" (Trainer output ships as canonical, the
@@ -83,7 +83,7 @@ mutation documentChunk mutationCreateDocumentChunk {
 
 @enabled
 @description("Write a knowledge chunk distilled by the Trainer Agent during a trainSpecialist Plan. Hard-stamps source='trainerAgent' + validationStatus='validated'. sourceRef is REQUIRED (the Trainer's no-fabricated-citations invariant -- every chunk points at a real URL or named source). Lands as canonical, retrievable once embedded.")
-mutation documentChunk mutationWriteKnowledgeChunk {
+mutate documentChunk writeKnowledgeChunk {
   args {
     chunkId      string  @required
     domainId     string  @required
@@ -109,7 +109,7 @@ mutation documentChunk mutationWriteKnowledgeChunk {
 
 // ---- mutations/v1/knowledge/markChunkSuperseded.memql ----
 
-// mutationMarkChunkSuperseded -- the Trainer Agent's refresh-mode
+// markChunkSuperseded -- the Trainer Agent's refresh-mode
 // deprecation path (Q9). Backs the markChunkSuperseded tool. When a
 // trainSpecialist Plan runs with mode='refresh', the Trainer reads the
 // existing corpus, web-searches for updates, and flags outdated chunks
@@ -119,7 +119,7 @@ mutation documentChunk mutationWriteKnowledgeChunk {
 
 @enabled
 @description("Flag an existing knowledge chunk as outdated. Called by the Trainer Agent's markChunkSuperseded tool during a mode='refresh' trainSpecialist Plan. Sets superseded=true + supersededAt + supersededReason; retrieval excludes superseded chunks. Partial update -- the chunk row is preserved for audit.")
-mutation documentChunk mutationMarkChunkSuperseded {
+mutate documentChunk markChunkSuperseded {
   args {
     chunkId           string  @required
     supersededAt      string  @required

@@ -3,7 +3,7 @@ package mcp
 // Tests for the MCP actor-identity wiring + unknown-tool error semantics
 // surfaced by the live staging smoke test:
 //   - a reflected query tool must run with the session's authenticated actor
-//     on the context (so self-scoped reads like queryCurrentUser resolve
+//     on the context (so self-scoped reads like currentUser resolve
 //     actor.userId instead of failing "id cannot be empty") -- #1595;
 //   - a tools/call for a tool that does not exist must be a JSON-RPC protocol
 //     error, not a 200 response carrying isError:true.
@@ -48,7 +48,7 @@ func dispatchToolsCall(t *testing.T, s *Server, name string, args map[string]any
 // TestReflectedToolGetsActorEnvelope: a reflected tool call runs with the
 // session's acting user/role stamped as an auth.AccessContext, so a self-scoped
 // query resolves actor.userId. This is the fix for the staging "id cannot be
-// empty" failure on queryCurrentUser (#1595).
+// empty" failure on currentUser (#1595).
 func TestReflectedToolGetsActorEnvelope(t *testing.T) {
 	eng := newFakeEngine()
 	const user = "v1:identity:user:96377b35"
@@ -93,7 +93,7 @@ func TestUnknownToolIsProtocolError(t *testing.T) {
 	eng := newFakeEngine() // knows openTool / gaTool, plus the meta-tools
 	s := NewServer(nil, "memql-mcp", "0", eng, Config{Tier: TierAuthoring, ActingUser: "u", ActingRole: "owner"})
 
-	resp := dispatchToolsCall(t, s, "currentUser", map[string]any{}) // not "queryCurrentUser"
+	resp := dispatchToolsCall(t, s, "currentUser", map[string]any{}) // not "currentUser"
 	if resp.Error == nil {
 		t.Fatalf("expected a JSON-RPC error for an unknown tool, got result: %v", resp.Result)
 	}

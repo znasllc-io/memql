@@ -14,61 +14,61 @@ var (
 	_ = strings.Builder{}
 )
 
-// MutationActivateAuthoringBundle -- Activate a bundle after Gate 3 approval: status -> active and activatedAt stamped. The authored-construct runtime (#959) registers the bundle's constructs on this transition; member constructs are flipped to active via mutationSetConstructStatus.
+// ActivateAuthoringBundle -- Activate a bundle after Gate 3 approval: status -> active and activatedAt stamped. The authored-construct runtime (#959) registers the bundle's constructs on this transition; member constructs are flipped to active via setConstructStatus.
 //
 // Bound concept: bundle.
-type MutationActivateAuthoringBundleArgs struct {
+type ActivateAuthoringBundleArgs struct {
 	BundleId string
 }
 
-// MutationActivateAuthoringBundle calls the engine mutation mutationActivateAuthoringBundle.
-func (qc *QueryClient) MutationActivateAuthoringBundle(ctx context.Context, args MutationActivateAuthoringBundleArgs) (*Result, error) {
-	call := MutationActivateAuthoringBundleBuild(args)
-	return qc.executeNamed(ctx, "mutationActivateAuthoringBundle", call)
+// ActivateAuthoringBundle calls the engine mutation activateAuthoringBundle.
+func (qc *QueryClient) ActivateAuthoringBundle(ctx context.Context, args ActivateAuthoringBundleArgs) (*Result, error) {
+	call := ActivateAuthoringBundleBuild(args)
+	return qc.executeNamed(ctx, "activateAuthoringBundle", call)
 }
 
-func MutationActivateAuthoringBundleBuild(args MutationActivateAuthoringBundleArgs) string {
+func ActivateAuthoringBundleBuild(args ActivateAuthoringBundleArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationActivateAuthoringBundle({")
+	b.WriteString("activateAuthoringBundle({")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationAddAgentToSpace -- Add the caller's agent to a space's roster. forUserId is server-stamped; per-user-per-space 3-cap and agent-ownership are enforced by the engine guard.
+// AddAgentToSpace -- Add the caller's agent to a space's roster. forUserId is server-stamped; per-user-per-space 3-cap and agent-ownership are enforced by the engine guard.
 //
 // Bound concept: participant.
-type MutationAddAgentToSpaceArgs struct {
+type AddAgentToSpaceArgs struct {
 	PartitionId         string
 	AgentId             string
 	DisplayName         string
 	CapabilityOverrides map[string]any
 }
 
-// MutationAddAgentToSpace calls the engine mutation mutationAddAgentToSpace.
-func (qc *QueryClient) MutationAddAgentToSpace(ctx context.Context, args MutationAddAgentToSpaceArgs) (*Result, error) {
-	call := MutationAddAgentToSpaceBuild(args)
-	return qc.executeNamed(ctx, "mutationAddAgentToSpace", call)
+// AddAgentToSpace calls the engine mutation addAgentToSpace.
+func (qc *QueryClient) AddAgentToSpace(ctx context.Context, args AddAgentToSpaceArgs) (*Result, error) {
+	call := AddAgentToSpaceBuild(args)
+	return qc.executeNamed(ctx, "addAgentToSpace", call)
 }
 
-func MutationAddAgentToSpaceBuild(args MutationAddAgentToSpaceArgs) string {
+func AddAgentToSpaceBuild(args AddAgentToSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationAddAgentToSpace({")
+	b.WriteString("addAgentToSpace({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 25 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 25 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
 	if args.CapabilityOverrides != nil {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capabilityOverrides: ")
@@ -78,10 +78,10 @@ func MutationAddAgentToSpaceBuild(args MutationAddAgentToSpaceArgs) string {
 	return b.String()
 }
 
-// MutationAddHarnessStep -- Add a v1:harness:step to a plan, status='pending', attempt=0. ownerUserId is stamped from actor.userId (owned tier). Creating the step emits graph.node.created.*.v1:harness:step automatically on insert.
+// AddHarnessStep -- Add a v1:harness:step to a plan, status='pending', attempt=0. ownerUserId is stamped from actor.userId (owned tier). Creating the step emits graph.node.created.*.v1:harness:step automatically on insert.
 //
 // Bound concept: step.
-type MutationAddHarnessStepArgs struct {
+type AddHarnessStepArgs struct {
 	StepId         string
 	PlanId         string
 	Title          string
@@ -90,43 +90,43 @@ type MutationAddHarnessStepArgs struct {
 	Input          map[string]any
 }
 
-// MutationAddHarnessStep calls the engine mutation mutationAddHarnessStep.
-func (qc *QueryClient) MutationAddHarnessStep(ctx context.Context, args MutationAddHarnessStepArgs) (*Result, error) {
-	call := MutationAddHarnessStepBuild(args)
-	return qc.executeNamed(ctx, "mutationAddHarnessStep", call)
+// AddHarnessStep calls the engine mutation addHarnessStep.
+func (qc *QueryClient) AddHarnessStep(ctx context.Context, args AddHarnessStepArgs) (*Result, error) {
+	call := AddHarnessStepBuild(args)
+	return qc.executeNamed(ctx, "addHarnessStep", call)
 }
 
-func MutationAddHarnessStepBuild(args MutationAddHarnessStepArgs) string {
+func AddHarnessStepBuild(args AddHarnessStepArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationAddHarnessStep({")
+	b.WriteString("addHarnessStep({")
 	if args.StepId != "" {
 		b.WriteString("stepId: ")
 		b.WriteString(fmt.Sprintf("%q", args.StepId))
 	}
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("idempotencyKey: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdempotencyKey))
 	if args.DependsOn != nil {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("dependsOn: ")
 		b.WriteString(renderMemQLValue(args.DependsOn))
 	}
 	if args.Input != nil {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("input: ")
@@ -136,35 +136,35 @@ func MutationAddHarnessStepBuild(args MutationAddHarnessStepArgs) string {
 	return b.String()
 }
 
-// MutationAdvanceHarnessConsolidationCursor -- Advance the per-owner v1:harness:consolidationCursor watermark to the engine-computed max(createdAt) of the batch just consolidated -- the incremental-cost mechanism (next run reads only episodes newer than this). Upserts on a stable per-owner id so it creates the cursor on first run and advances it thereafter. episodesSeen takes the engine-computed running total. ownerUserId stamped from actor.userId (owned tier).
+// AdvanceHarnessConsolidationCursor -- Advance the per-owner v1:harness:consolidationCursor watermark to the engine-computed max(createdAt) of the batch just consolidated -- the incremental-cost mechanism (next run reads only episodes newer than this). Upserts on a stable per-owner id so it creates the cursor on first run and advances it thereafter. episodesSeen takes the engine-computed running total. ownerUserId stamped from actor.userId (owned tier).
 //
 // Bound concept: consolidationCursor.
-type MutationAdvanceHarnessConsolidationCursorArgs struct {
+type AdvanceHarnessConsolidationCursorArgs struct {
 	CursorId     string
 	Watermark    string
 	EpisodesSeen int
 }
 
-// MutationAdvanceHarnessConsolidationCursor calls the engine mutation mutationAdvanceHarnessConsolidationCursor.
-func (qc *QueryClient) MutationAdvanceHarnessConsolidationCursor(ctx context.Context, args MutationAdvanceHarnessConsolidationCursorArgs) (*Result, error) {
-	call := MutationAdvanceHarnessConsolidationCursorBuild(args)
-	return qc.executeNamed(ctx, "mutationAdvanceHarnessConsolidationCursor", call)
+// AdvanceHarnessConsolidationCursor calls the engine mutation advanceHarnessConsolidationCursor.
+func (qc *QueryClient) AdvanceHarnessConsolidationCursor(ctx context.Context, args AdvanceHarnessConsolidationCursorArgs) (*Result, error) {
+	call := AdvanceHarnessConsolidationCursorBuild(args)
+	return qc.executeNamed(ctx, "advanceHarnessConsolidationCursor", call)
 }
 
-func MutationAdvanceHarnessConsolidationCursorBuild(args MutationAdvanceHarnessConsolidationCursorArgs) string {
+func AdvanceHarnessConsolidationCursorBuild(args AdvanceHarnessConsolidationCursorArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationAdvanceHarnessConsolidationCursor({")
+	b.WriteString("advanceHarnessConsolidationCursor({")
 	if args.CursorId != "" {
 		b.WriteString("cursorId: ")
 		b.WriteString(fmt.Sprintf("%q", args.CursorId))
 	}
-	if b.Len() > 43 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("watermark: ")
 	b.WriteString(fmt.Sprintf("%q", args.Watermark))
 	if args.EpisodesSeen != 0 {
-		if b.Len() > 43 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("episodesSeen: ")
@@ -174,10 +174,10 @@ func MutationAdvanceHarnessConsolidationCursorBuild(args MutationAdvanceHarnessC
 	return b.String()
 }
 
-// MutationAdvanceRequest -- Transition a v1:forge:request to a new status (the approval pipeline edges). update read-merges the prior row. The role guard belongs in an engine pre-insert hook (follow-up).
+// AdvanceRequest -- Transition a v1:forge:request to a new status (the approval pipeline edges). update read-merges the prior row. The role guard belongs in an engine pre-insert hook (follow-up).
 //
 // Bound concept: request.
-type MutationAdvanceRequestArgs struct {
+type AdvanceRequestArgs struct {
 	RequestId         string
 	Status            string
 	ValidatedByUserId string
@@ -185,38 +185,38 @@ type MutationAdvanceRequestArgs struct {
 	Resolution        string
 }
 
-// MutationAdvanceRequest calls the engine mutation mutationAdvanceRequest.
-func (qc *QueryClient) MutationAdvanceRequest(ctx context.Context, args MutationAdvanceRequestArgs) (*Result, error) {
-	call := MutationAdvanceRequestBuild(args)
-	return qc.executeNamed(ctx, "mutationAdvanceRequest", call)
+// AdvanceRequest calls the engine mutation advanceRequest.
+func (qc *QueryClient) AdvanceRequest(ctx context.Context, args AdvanceRequestArgs) (*Result, error) {
+	call := AdvanceRequestBuild(args)
+	return qc.executeNamed(ctx, "advanceRequest", call)
 }
 
-func MutationAdvanceRequestBuild(args MutationAdvanceRequestArgs) string {
+func AdvanceRequestBuild(args AdvanceRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationAdvanceRequest({")
+	b.WriteString("advanceRequest({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
 	if args.ValidatedByUserId != "" {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("validatedByUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ValidatedByUserId))
 	}
 	if args.ApprovedByUserId != "" {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("approvedByUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ApprovedByUserId))
 	}
 	if args.Resolution != "" {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("resolution: ")
@@ -226,10 +226,10 @@ func MutationAdvanceRequestBuild(args MutationAdvanceRequestArgs) string {
 	return b.String()
 }
 
-// MutationAppendDocumentVersion -- Append an immutable document-version snapshot to a logical document's history. Handler-invoked (integration.library.editDocument / restoreDocumentVersion) -- ownerUserId is threaded from the backing document's owner, versionNumber + versionId are computed server-side from the current latest. Append-only: every call inserts a new immutable row; nothing is overwritten.
+// AppendDocumentVersion -- Append an immutable document-version snapshot to a logical document's history. Handler-invoked (integration.library.editDocument / restoreDocumentVersion) -- ownerUserId is threaded from the backing document's owner, versionNumber + versionId are computed server-side from the current latest. Append-only: every call inserts a new immutable row; nothing is overwritten.
 //
 // Bound concept: documentVersion.
-type MutationAppendDocumentVersionArgs struct {
+type AppendDocumentVersionArgs struct {
 	VersionId     string
 	DocumentId    string
 	OwnerUserId   string
@@ -245,81 +245,81 @@ type MutationAppendDocumentVersionArgs struct {
 	PartitionId      string
 }
 
-// MutationAppendDocumentVersion calls the engine mutation mutationAppendDocumentVersion.
-func (qc *QueryClient) MutationAppendDocumentVersion(ctx context.Context, args MutationAppendDocumentVersionArgs) (*Result, error) {
-	call := MutationAppendDocumentVersionBuild(args)
-	return qc.executeNamed(ctx, "mutationAppendDocumentVersion", call)
+// AppendDocumentVersion calls the engine mutation appendDocumentVersion.
+func (qc *QueryClient) AppendDocumentVersion(ctx context.Context, args AppendDocumentVersionArgs) (*Result, error) {
+	call := AppendDocumentVersionBuild(args)
+	return qc.executeNamed(ctx, "appendDocumentVersion", call)
 }
 
-func MutationAppendDocumentVersionBuild(args MutationAppendDocumentVersionArgs) string {
+func AppendDocumentVersionBuild(args AppendDocumentVersionArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationAppendDocumentVersion({")
+	b.WriteString("appendDocumentVersion({")
 	b.WriteString("versionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.VersionId))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("documentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("versionNumber: ")
 	b.WriteString(fmt.Sprintf("%v", args.VersionNumber))
 	if args.Content != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("content: ")
 		b.WriteString(fmt.Sprintf("%q", args.Content))
 	}
 	if args.AttachmentId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attachmentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
 	}
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("authorKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.AuthorKind))
 	if args.AuthorId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authorId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AuthorId))
 	}
 	if args.Note != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
 		b.WriteString(fmt.Sprintf("%q", args.Note))
 	}
 	if args.ParentVersionId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("parentVersionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParentVersionId))
 	}
 	if args.ProducedByPlanId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
 	}
 	if args.PartitionId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
@@ -329,10 +329,10 @@ func MutationAppendDocumentVersionBuild(args MutationAppendDocumentVersionArgs) 
 	return b.String()
 }
 
-// MutationApplyResponsibilityIntake -- Apply the responsibilityIntake result to a draft v1:planner:responsibility (issue #637). The dispatcher stamps the inferred field set (trigger / schedule / condition / targetKind / assignedRoleSlug / successCriteria / notifyHow) plus the intake outcome. When intake was CLEAR (no questions) the dispatcher passes status='active' + intakeStatus='clear' so the row goes straight live; when intake produced 1-2 questions it passes status='draft' + intakeStatus='awaitingAnswers' + intakeRequest so the row parks for the user (mirrors the Plan awaitingFeedback surfacing). Partial-update: only the supplied fields change. System write -- no ownerUserId re-stamp.
+// ApplyResponsibilityIntake -- Apply the responsibilityIntake result to a draft v1:planner:responsibility (issue #637). The dispatcher stamps the inferred field set (trigger / schedule / condition / targetKind / assignedRoleSlug / successCriteria / notifyHow) plus the intake outcome. When intake was CLEAR (no questions) the dispatcher passes status='active' + intakeStatus='clear' so the row goes straight live; when intake produced 1-2 questions it passes status='draft' + intakeStatus='awaitingAnswers' + intakeRequest so the row parks for the user (mirrors the Plan awaitingFeedback surfacing). Partial-update: only the supplied fields change. System write -- no ownerUserId re-stamp.
 //
 // Bound concept: responsibility.
-type MutationApplyResponsibilityIntakeArgs struct {
+type ApplyResponsibilityIntakeArgs struct {
 	ResponsibilityId string
 	// Enum: reactive | standing | recurring
 	Trigger   string
@@ -350,82 +350,82 @@ type MutationApplyResponsibilityIntakeArgs struct {
 	IntakeRequest map[string]any
 }
 
-// MutationApplyResponsibilityIntake calls the engine mutation mutationApplyResponsibilityIntake.
-func (qc *QueryClient) MutationApplyResponsibilityIntake(ctx context.Context, args MutationApplyResponsibilityIntakeArgs) (*Result, error) {
-	call := MutationApplyResponsibilityIntakeBuild(args)
-	return qc.executeNamed(ctx, "mutationApplyResponsibilityIntake", call)
+// ApplyResponsibilityIntake calls the engine mutation applyResponsibilityIntake.
+func (qc *QueryClient) ApplyResponsibilityIntake(ctx context.Context, args ApplyResponsibilityIntakeArgs) (*Result, error) {
+	call := ApplyResponsibilityIntakeBuild(args)
+	return qc.executeNamed(ctx, "applyResponsibilityIntake", call)
 }
 
-func MutationApplyResponsibilityIntakeBuild(args MutationApplyResponsibilityIntakeArgs) string {
+func ApplyResponsibilityIntakeBuild(args ApplyResponsibilityIntakeArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationApplyResponsibilityIntake({")
+	b.WriteString("applyResponsibilityIntake({")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
 	if args.Trigger != "" {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("trigger: ")
 		b.WriteString(fmt.Sprintf("%q", args.Trigger))
 	}
 	if args.Schedule != "" {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("schedule: ")
 		b.WriteString(fmt.Sprintf("%q", args.Schedule))
 	}
 	if args.Condition != nil {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("condition: ")
 		b.WriteString(renderMemQLValue(args.Condition))
 	}
 	if args.TargetKind != "" {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
 	}
 	if args.AssignedRoleSlug != "" {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
 	}
 	if args.SuccessCriteria != "" {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("successCriteria: ")
 		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
 	}
 	if args.NotifyHow != "" {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notifyHow: ")
 		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
 	}
 	if args.Status != "" {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
 	if args.IntakeStatus != "" {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("intakeStatus: ")
 		b.WriteString(fmt.Sprintf("%q", args.IntakeStatus))
 	}
 	if args.IntakeRequest != nil {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("intakeRequest: ")
@@ -435,39 +435,39 @@ func MutationApplyResponsibilityIntakeBuild(args MutationApplyResponsibilityInta
 	return b.String()
 }
 
-// MutationApproveAccessRequest -- Approve an access request (status=approved, stamps reviewer + invitation).
+// ApproveAccessRequest -- Approve an access request (status=approved, stamps reviewer + invitation).
 //
 // Bound concept: accessRequest.
-type MutationApproveAccessRequestArgs struct {
+type ApproveAccessRequestArgs struct {
 	RequestId    string
 	ReviewedBy   string
 	InvitationId string
 	ReviewerNote string
 }
 
-// MutationApproveAccessRequest calls the engine mutation mutationApproveAccessRequest.
-func (qc *QueryClient) MutationApproveAccessRequest(ctx context.Context, args MutationApproveAccessRequestArgs) (*Result, error) {
-	call := MutationApproveAccessRequestBuild(args)
-	return qc.executeNamed(ctx, "mutationApproveAccessRequest", call)
+// ApproveAccessRequest calls the engine mutation approveAccessRequest.
+func (qc *QueryClient) ApproveAccessRequest(ctx context.Context, args ApproveAccessRequestArgs) (*Result, error) {
+	call := ApproveAccessRequestBuild(args)
+	return qc.executeNamed(ctx, "approveAccessRequest", call)
 }
 
-func MutationApproveAccessRequestBuild(args MutationApproveAccessRequestArgs) string {
+func ApproveAccessRequestBuild(args ApproveAccessRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationApproveAccessRequest({")
+	b.WriteString("approveAccessRequest({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reviewedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.ReviewedBy))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("invitationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.InvitationId))
 	if args.ReviewerNote != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reviewerNote: ")
@@ -477,32 +477,32 @@ func MutationApproveAccessRequestBuild(args MutationApproveAccessRequestArgs) st
 	return b.String()
 }
 
-// MutationApproveRequest -- Approve a v1:forge:request (owner action): set status 'queued' (ready to implement) and stamp approvedByUserId from actor.userId.
+// ApproveRequest -- Approve a v1:forge:request (owner action): set status 'queued' (ready to implement) and stamp approvedByUserId from actor.userId.
 //
 // Bound concept: request.
-type MutationApproveRequestArgs struct {
+type ApproveRequestArgs struct {
 	RequestId string
 }
 
-// MutationApproveRequest calls the engine mutation mutationApproveRequest.
-func (qc *QueryClient) MutationApproveRequest(ctx context.Context, args MutationApproveRequestArgs) (*Result, error) {
-	call := MutationApproveRequestBuild(args)
-	return qc.executeNamed(ctx, "mutationApproveRequest", call)
+// ApproveRequest calls the engine mutation approveRequest.
+func (qc *QueryClient) ApproveRequest(ctx context.Context, args ApproveRequestArgs) (*Result, error) {
+	call := ApproveRequestBuild(args)
+	return qc.executeNamed(ctx, "approveRequest", call)
 }
 
-func MutationApproveRequestBuild(args MutationApproveRequestArgs) string {
+func ApproveRequestBuild(args ApproveRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationApproveRequest({")
+	b.WriteString("approveRequest({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationAssignResponsibility -- Persist a routing decision onto a v1:planner:responsibility (epic #632, C2): bind the resolved agent (assignedAgentId), optional role slug (assignedRoleSlug), and flip targetKind off 'unassigned' onto the concrete kind (assistant / specialist). Called by the reactive-loop router after agentFactoryAnalyze + createSpecialist/extendSpecialist mint or match an agent. Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier) so the router can only rewrite the row's own owner -- the poller impersonates the responsibility's owner in the AccessContext before calling, so this lands as an owned write.
+// AssignResponsibility -- Persist a routing decision onto a v1:planner:responsibility (epic #632, C2): bind the resolved agent (assignedAgentId), optional role slug (assignedRoleSlug), and flip targetKind off 'unassigned' onto the concrete kind (assistant / specialist). Called by the reactive-loop router after agentFactoryAnalyze + createSpecialist/extendSpecialist mint or match an agent. Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier) so the router can only rewrite the row's own owner -- the poller impersonates the responsibility's owner in the AccessContext before calling, so this lands as an owned write.
 //
 // Bound concept: responsibility.
-type MutationAssignResponsibilityArgs struct {
+type AssignResponsibilityArgs struct {
 	ResponsibilityId string
 	// Enum: assistant | specialist
 	TargetKind       string
@@ -510,31 +510,31 @@ type MutationAssignResponsibilityArgs struct {
 	AssignedRoleSlug string
 }
 
-// MutationAssignResponsibility calls the engine mutation mutationAssignResponsibility.
-func (qc *QueryClient) MutationAssignResponsibility(ctx context.Context, args MutationAssignResponsibilityArgs) (*Result, error) {
-	call := MutationAssignResponsibilityBuild(args)
-	return qc.executeNamed(ctx, "mutationAssignResponsibility", call)
+// AssignResponsibility calls the engine mutation assignResponsibility.
+func (qc *QueryClient) AssignResponsibility(ctx context.Context, args AssignResponsibilityArgs) (*Result, error) {
+	call := AssignResponsibilityBuild(args)
+	return qc.executeNamed(ctx, "assignResponsibility", call)
 }
 
-func MutationAssignResponsibilityBuild(args MutationAssignResponsibilityArgs) string {
+func AssignResponsibilityBuild(args AssignResponsibilityArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationAssignResponsibility({")
+	b.WriteString("assignResponsibility({")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetKind))
 	if args.AssignedAgentId != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedAgentId))
 	}
 	if args.AssignedRoleSlug != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
@@ -544,26 +544,26 @@ func MutationAssignResponsibilityBuild(args MutationAssignResponsibilityArgs) st
 	return b.String()
 }
 
-// MutationAttachPlanFeedback -- Attach a user's free-text feedback to a Plan parked in awaitingFeedback and resume it (epic memql#1404 / #1405). Stamps feedbackResponse{response, respondedBy, respondedAt}, transitions awaitingFeedback -> running (fresh startedAt for a clean cross-replica resume claim), and clears feedbackReason/feedbackRequest so the request is consumed. The engine guard (validateFeedbackIntakeTransition) rejects the write unless the prior status is awaitingFeedback and the actor owns the Plan. The owning agent is re-invoked with the feedback in its resume context. Callable by the needs-feedback card AND the assistant chat path (#1406).
+// AttachPlanFeedback -- Attach a user's free-text feedback to a Plan parked in awaitingFeedback and resume it (epic memql#1404 / #1405). Stamps feedbackResponse{response, respondedBy, respondedAt}, transitions awaitingFeedback -> running (fresh startedAt for a clean cross-replica resume claim), and clears feedbackReason/feedbackRequest so the request is consumed. The engine guard (validateFeedbackIntakeTransition) rejects the write unless the prior status is awaitingFeedback and the actor owns the Plan. The owning agent is re-invoked with the feedback in its resume context. Callable by the needs-feedback card AND the assistant chat path (#1406).
 //
 // Bound concept: plan.
-type MutationAttachPlanFeedbackArgs struct {
+type AttachPlanFeedbackArgs struct {
 	PlanId   string
 	Feedback string
 }
 
-// MutationAttachPlanFeedback calls the engine mutation mutationAttachPlanFeedback.
-func (qc *QueryClient) MutationAttachPlanFeedback(ctx context.Context, args MutationAttachPlanFeedbackArgs) (*Result, error) {
-	call := MutationAttachPlanFeedbackBuild(args)
-	return qc.executeNamed(ctx, "mutationAttachPlanFeedback", call)
+// AttachPlanFeedback calls the engine mutation attachPlanFeedback.
+func (qc *QueryClient) AttachPlanFeedback(ctx context.Context, args AttachPlanFeedbackArgs) (*Result, error) {
+	call := AttachPlanFeedbackBuild(args)
+	return qc.executeNamed(ctx, "attachPlanFeedback", call)
 }
 
-func MutationAttachPlanFeedbackBuild(args MutationAttachPlanFeedbackArgs) string {
+func AttachPlanFeedbackBuild(args AttachPlanFeedbackArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationAttachPlanFeedback({")
+	b.WriteString("attachPlanFeedback({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("feedback: ")
@@ -572,26 +572,26 @@ func MutationAttachPlanFeedbackBuild(args MutationAttachPlanFeedbackArgs) string
 	return b.String()
 }
 
-// MutationAttachToRequest -- Link a v1:common:attachment to a v1:forge:request by replacing its attachmentIds array. Caller must read-modify-write: fetch the existing attachmentIds, append the new id, pass the full array here. update read-merges all other request fields.
+// AttachToRequest -- Link a v1:common:attachment to a v1:forge:request by replacing its attachmentIds array. Caller must read-modify-write: fetch the existing attachmentIds, append the new id, pass the full array here. update read-merges all other request fields.
 //
 // Bound concept: request.
-type MutationAttachToRequestArgs struct {
+type AttachToRequestArgs struct {
 	RequestId     string
 	AttachmentIds []string
 }
 
-// MutationAttachToRequest calls the engine mutation mutationAttachToRequest.
-func (qc *QueryClient) MutationAttachToRequest(ctx context.Context, args MutationAttachToRequestArgs) (*Result, error) {
-	call := MutationAttachToRequestBuild(args)
-	return qc.executeNamed(ctx, "mutationAttachToRequest", call)
+// AttachToRequest calls the engine mutation attachToRequest.
+func (qc *QueryClient) AttachToRequest(ctx context.Context, args AttachToRequestArgs) (*Result, error) {
+	call := AttachToRequestBuild(args)
+	return qc.executeNamed(ctx, "attachToRequest", call)
 }
 
-func MutationAttachToRequestBuild(args MutationAttachToRequestArgs) string {
+func AttachToRequestBuild(args AttachToRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationAttachToRequest({")
+	b.WriteString("attachToRequest({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 25 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("attachmentIds: ")
@@ -600,26 +600,26 @@ func MutationAttachToRequestBuild(args MutationAttachToRequestArgs) string {
 	return b.String()
 }
 
-// MutationBumpActionVersion -- Bump a v1:actions:action monotonic version on edit (Phase 5 #1740; value computed engine-side). Pins stay on the prior version until the verified upgrade migration moves them.
+// BumpActionVersion -- Bump a v1:actions:action monotonic version on edit (Phase 5 #1740; value computed engine-side). Pins stay on the prior version until the verified upgrade migration moves them.
 //
 // Bound concept: action.
-type MutationBumpActionVersionArgs struct {
+type BumpActionVersionArgs struct {
 	ActionId string
 	Version  int
 }
 
-// MutationBumpActionVersion calls the engine mutation mutationBumpActionVersion.
-func (qc *QueryClient) MutationBumpActionVersion(ctx context.Context, args MutationBumpActionVersionArgs) (*Result, error) {
-	call := MutationBumpActionVersionBuild(args)
-	return qc.executeNamed(ctx, "mutationBumpActionVersion", call)
+// BumpActionVersion calls the engine mutation bumpActionVersion.
+func (qc *QueryClient) BumpActionVersion(ctx context.Context, args BumpActionVersionArgs) (*Result, error) {
+	call := BumpActionVersionBuild(args)
+	return qc.executeNamed(ctx, "bumpActionVersion", call)
 }
 
-func MutationBumpActionVersionBuild(args MutationBumpActionVersionArgs) string {
+func BumpActionVersionBuild(args BumpActionVersionArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationBumpActionVersion({")
+	b.WriteString("bumpActionVersion({")
 	b.WriteString("actionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ActionId))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("version: ")
@@ -628,32 +628,32 @@ func MutationBumpActionVersionBuild(args MutationBumpActionVersionArgs) string {
 	return b.String()
 }
 
-// MutationBumpMissingCapabilitySighting -- Per Q7 missing-capability surface: a repeat sighting of an already-logged gap. Increments sightingCount and refreshes lastSeenAt. The Planner Agent calls this when it encounters a known gap; aggregated counts feed the platform-roadmap prioritization view.
+// BumpMissingCapabilitySighting -- Per Q7 missing-capability surface: a repeat sighting of an already-logged gap. Increments sightingCount and refreshes lastSeenAt. The Planner Agent calls this when it encounters a known gap; aggregated counts feed the platform-roadmap prioritization view.
 //
 // Bound concept: missingCapability.
-type MutationBumpMissingCapabilitySightingArgs struct {
+type BumpMissingCapabilitySightingArgs struct {
 	MissingId     string
 	SightingCount int
 	LastSeenAt    string
 }
 
-// MutationBumpMissingCapabilitySighting calls the engine mutation mutationBumpMissingCapabilitySighting.
-func (qc *QueryClient) MutationBumpMissingCapabilitySighting(ctx context.Context, args MutationBumpMissingCapabilitySightingArgs) (*Result, error) {
-	call := MutationBumpMissingCapabilitySightingBuild(args)
-	return qc.executeNamed(ctx, "mutationBumpMissingCapabilitySighting", call)
+// BumpMissingCapabilitySighting calls the engine mutation bumpMissingCapabilitySighting.
+func (qc *QueryClient) BumpMissingCapabilitySighting(ctx context.Context, args BumpMissingCapabilitySightingArgs) (*Result, error) {
+	call := BumpMissingCapabilitySightingBuild(args)
+	return qc.executeNamed(ctx, "bumpMissingCapabilitySighting", call)
 }
 
-func MutationBumpMissingCapabilitySightingBuild(args MutationBumpMissingCapabilitySightingArgs) string {
+func BumpMissingCapabilitySightingBuild(args BumpMissingCapabilitySightingArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationBumpMissingCapabilitySighting({")
+	b.WriteString("bumpMissingCapabilitySighting({")
 	b.WriteString("missingId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MissingId))
-	if b.Len() > 39 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("sightingCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.SightingCount))
-	if b.Len() > 39 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastSeenAt: ")
@@ -662,26 +662,26 @@ func MutationBumpMissingCapabilitySightingBuild(args MutationBumpMissingCapabili
 	return b.String()
 }
 
-// MutationBumpPATLastUsedAt -- Bump the lastUsedAt stamp on a PAT identity. Best-effort; callers must not fail the request on error. Read-merges the existing row so only lastUsedAt changes; identityType/credentials/label/active/usableByAgents inherit from the persisted row instead of being re-supplied (memql#1628).
+// BumpPATLastUsedAt -- Bump the lastUsedAt stamp on a PAT identity. Best-effort; callers must not fail the request on error. Read-merges the existing row so only lastUsedAt changes; identityType/credentials/label/active/usableByAgents inherit from the persisted row instead of being re-supplied (memql#1628).
 //
 // Bound concept: identity.
-type MutationBumpPATLastUsedAtArgs struct {
+type BumpPATLastUsedAtArgs struct {
 	IdentityId string
 	LastUsedAt string
 }
 
-// MutationBumpPATLastUsedAt calls the engine mutation mutationBumpPATLastUsedAt.
-func (qc *QueryClient) MutationBumpPATLastUsedAt(ctx context.Context, args MutationBumpPATLastUsedAtArgs) (*Result, error) {
-	call := MutationBumpPATLastUsedAtBuild(args)
-	return qc.executeNamed(ctx, "mutationBumpPATLastUsedAt", call)
+// BumpPATLastUsedAt calls the engine mutation bumpPATLastUsedAt.
+func (qc *QueryClient) BumpPATLastUsedAt(ctx context.Context, args BumpPATLastUsedAtArgs) (*Result, error) {
+	call := BumpPATLastUsedAtBuild(args)
+	return qc.executeNamed(ctx, "bumpPATLastUsedAt", call)
 }
 
-func MutationBumpPATLastUsedAtBuild(args MutationBumpPATLastUsedAtArgs) string {
+func BumpPATLastUsedAtBuild(args BumpPATLastUsedAtArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationBumpPATLastUsedAt({")
+	b.WriteString("bumpPATLastUsedAt({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastUsedAt: ")
@@ -690,48 +690,48 @@ func MutationBumpPATLastUsedAtBuild(args MutationBumpPATLastUsedAtArgs) string {
 	return b.String()
 }
 
-// MutationBumpUserDataExport -- Stamp dataExportLastAt = now after a successful /me/export download.
+// BumpUserDataExport -- Stamp dataExportLastAt = now after a successful /me/export download.
 //
 // Bound concept: user.
-type MutationBumpUserDataExportArgs struct {
+type BumpUserDataExportArgs struct {
 	UserId string
 }
 
-// MutationBumpUserDataExport calls the engine mutation mutationBumpUserDataExport.
-func (qc *QueryClient) MutationBumpUserDataExport(ctx context.Context, args MutationBumpUserDataExportArgs) (*Result, error) {
-	call := MutationBumpUserDataExportBuild(args)
-	return qc.executeNamed(ctx, "mutationBumpUserDataExport", call)
+// BumpUserDataExport calls the engine mutation bumpUserDataExport.
+func (qc *QueryClient) BumpUserDataExport(ctx context.Context, args BumpUserDataExportArgs) (*Result, error) {
+	call := BumpUserDataExportBuild(args)
+	return qc.executeNamed(ctx, "bumpUserDataExport", call)
 }
 
-func MutationBumpUserDataExportBuild(args MutationBumpUserDataExportArgs) string {
+func BumpUserDataExportBuild(args BumpUserDataExportArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationBumpUserDataExport({")
+	b.WriteString("bumpUserDataExport({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationBumpUserRevocationEpoch -- Stamp revocationEpoch on the user row. Bulk-revoke admin path for memql#106. Caller computes the +1 in Go.
+// BumpUserRevocationEpoch -- Stamp revocationEpoch on the user row. Bulk-revoke admin path for memql#106. Caller computes the +1 in Go.
 //
 // Bound concept: user.
-type MutationBumpUserRevocationEpochArgs struct {
+type BumpUserRevocationEpochArgs struct {
 	UserId   string
 	NewEpoch int
 }
 
-// MutationBumpUserRevocationEpoch calls the engine mutation mutationBumpUserRevocationEpoch.
-func (qc *QueryClient) MutationBumpUserRevocationEpoch(ctx context.Context, args MutationBumpUserRevocationEpochArgs) (*Result, error) {
-	call := MutationBumpUserRevocationEpochBuild(args)
-	return qc.executeNamed(ctx, "mutationBumpUserRevocationEpoch", call)
+// BumpUserRevocationEpoch calls the engine mutation bumpUserRevocationEpoch.
+func (qc *QueryClient) BumpUserRevocationEpoch(ctx context.Context, args BumpUserRevocationEpochArgs) (*Result, error) {
+	call := BumpUserRevocationEpochBuild(args)
+	return qc.executeNamed(ctx, "bumpUserRevocationEpoch", call)
 }
 
-func MutationBumpUserRevocationEpochBuild(args MutationBumpUserRevocationEpochArgs) string {
+func BumpUserRevocationEpochBuild(args BumpUserRevocationEpochArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationBumpUserRevocationEpoch({")
+	b.WriteString("bumpUserRevocationEpoch({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newEpoch: ")
@@ -740,60 +740,60 @@ func MutationBumpUserRevocationEpochBuild(args MutationBumpUserRevocationEpochAr
 	return b.String()
 }
 
-// MutationCancelScheduledDeletion -- Cancel a scheduled account deletion (clears deletionScheduledAt).
+// CancelScheduledDeletion -- Cancel a scheduled account deletion (clears deletionScheduledAt).
 //
 // Bound concept: user.
-type MutationCancelScheduledDeletionArgs struct {
+type CancelScheduledDeletionArgs struct {
 	UserId string
 }
 
-// MutationCancelScheduledDeletion calls the engine mutation mutationCancelScheduledDeletion.
-func (qc *QueryClient) MutationCancelScheduledDeletion(ctx context.Context, args MutationCancelScheduledDeletionArgs) (*Result, error) {
-	call := MutationCancelScheduledDeletionBuild(args)
-	return qc.executeNamed(ctx, "mutationCancelScheduledDeletion", call)
+// CancelScheduledDeletion calls the engine mutation cancelScheduledDeletion.
+func (qc *QueryClient) CancelScheduledDeletion(ctx context.Context, args CancelScheduledDeletionArgs) (*Result, error) {
+	call := CancelScheduledDeletionBuild(args)
+	return qc.executeNamed(ctx, "cancelScheduledDeletion", call)
 }
 
-func MutationCancelScheduledDeletionBuild(args MutationCancelScheduledDeletionArgs) string {
+func CancelScheduledDeletionBuild(args CancelScheduledDeletionArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCancelScheduledDeletion({")
+	b.WriteString("cancelScheduledDeletion({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationCatalogueConstruct -- Promote a construct into the owner's reusable catalog with provenance (#957): catalogued -> true, catalogKey set to the dedup signature, catalogMatchText set to the embedded near-match text, and the provenance pair (catalogedAt + catalogedFromBundleId) stamped so later bundles that compose it inherit where it came from. The embedding itself is written separately into node_vectors by the Go catalog-write path (PromoteConstructToCatalog). Called post-activation as the catalog-write path.
+// CatalogueConstruct -- Promote a construct into the owner's reusable catalog with provenance (#957): catalogued -> true, catalogKey set to the dedup signature, catalogMatchText set to the embedded near-match text, and the provenance pair (catalogedAt + catalogedFromBundleId) stamped so later bundles that compose it inherit where it came from. The embedding itself is written separately into node_vectors by the Go catalog-write path (PromoteConstructToCatalog). Called post-activation as the catalog-write path.
 //
 // Bound concept: construct.
-type MutationCatalogueConstructArgs struct {
+type CatalogueConstructArgs struct {
 	ConstructId      string
 	CatalogKey       string
 	CatalogMatchText string
 	FromBundleId     string
 }
 
-// MutationCatalogueConstruct calls the engine mutation mutationCatalogueConstruct.
-func (qc *QueryClient) MutationCatalogueConstruct(ctx context.Context, args MutationCatalogueConstructArgs) (*Result, error) {
-	call := MutationCatalogueConstructBuild(args)
-	return qc.executeNamed(ctx, "mutationCatalogueConstruct", call)
+// CatalogueConstruct calls the engine mutation catalogueConstruct.
+func (qc *QueryClient) CatalogueConstruct(ctx context.Context, args CatalogueConstructArgs) (*Result, error) {
+	call := CatalogueConstructBuild(args)
+	return qc.executeNamed(ctx, "catalogueConstruct", call)
 }
 
-func MutationCatalogueConstructBuild(args MutationCatalogueConstructArgs) string {
+func CatalogueConstructBuild(args CatalogueConstructArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCatalogueConstruct({")
+	b.WriteString("catalogueConstruct({")
 	b.WriteString("constructId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("catalogKey: ")
 	b.WriteString(fmt.Sprintf("%q", args.CatalogKey))
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("catalogMatchText: ")
 	b.WriteString(fmt.Sprintf("%q", args.CatalogMatchText))
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fromBundleId: ")
@@ -802,38 +802,38 @@ func MutationCatalogueConstructBuild(args MutationCatalogueConstructArgs) string
 	return b.String()
 }
 
-// MutationCheckRecord -- Synthetically check a data record, updating check count and validation state
+// CheckRecord -- Synthetically check a data record, updating check count and validation state
 //
 // Bound concept: record.
-type MutationCheckRecordArgs struct {
+type CheckRecordArgs struct {
 	RecordId      string
 	IdentityId    string
 	NewCheckCount float64
 	NewState      string
 }
 
-// MutationCheckRecord calls the engine mutation mutationCheckRecord.
-func (qc *QueryClient) MutationCheckRecord(ctx context.Context, args MutationCheckRecordArgs) (*Result, error) {
-	call := MutationCheckRecordBuild(args)
-	return qc.executeNamed(ctx, "mutationCheckRecord", call)
+// CheckRecord calls the engine mutation checkRecord.
+func (qc *QueryClient) CheckRecord(ctx context.Context, args CheckRecordArgs) (*Result, error) {
+	call := CheckRecordBuild(args)
+	return qc.executeNamed(ctx, "checkRecord", call)
 }
 
-func MutationCheckRecordBuild(args MutationCheckRecordArgs) string {
+func CheckRecordBuild(args CheckRecordArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCheckRecord({")
+	b.WriteString("checkRecord({")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	if b.Len() > 21 {
+	if b.Len() > 13 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 21 {
+	if b.Len() > 13 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newCheckCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.NewCheckCount))
-	if b.Len() > 21 {
+	if b.Len() > 13 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newState: ")
@@ -842,10 +842,10 @@ func MutationCheckRecordBuild(args MutationCheckRecordArgs) string {
 	return b.String()
 }
 
-// MutationCloseCall -- Close a call record on disconnect: stamp end time, duration, disposition, and cost estimate.
+// CloseCall -- Close a call record on disconnect: stamp end time, duration, disposition, and cost estimate.
 //
 // Bound concept: call.
-type MutationCloseCallArgs struct {
+type CloseCallArgs struct {
 	Id              string
 	DurationSeconds int
 	// Enum: completed | no_answer | busy | failed | canceled
@@ -853,28 +853,28 @@ type MutationCloseCallArgs struct {
 	CostEstimate any
 }
 
-// MutationCloseCall calls the engine mutation mutationCloseCall.
-func (qc *QueryClient) MutationCloseCall(ctx context.Context, args MutationCloseCallArgs) (*Result, error) {
-	call := MutationCloseCallBuild(args)
-	return qc.executeNamed(ctx, "mutationCloseCall", call)
+// CloseCall calls the engine mutation closeCall.
+func (qc *QueryClient) CloseCall(ctx context.Context, args CloseCallArgs) (*Result, error) {
+	call := CloseCallBuild(args)
+	return qc.executeNamed(ctx, "closeCall", call)
 }
 
-func MutationCloseCallBuild(args MutationCloseCallArgs) string {
+func CloseCallBuild(args CloseCallArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCloseCall({")
+	b.WriteString("closeCall({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 19 {
+	if b.Len() > 11 {
 		b.WriteString(", ")
 	}
 	b.WriteString("durationSeconds: ")
 	b.WriteString(fmt.Sprintf("%v", args.DurationSeconds))
-	if b.Len() > 19 {
+	if b.Len() > 11 {
 		b.WriteString(", ")
 	}
 	b.WriteString("disposition: ")
 	b.WriteString(fmt.Sprintf("%q", args.Disposition))
-	if b.Len() > 19 {
+	if b.Len() > 11 {
 		b.WriteString(", ")
 	}
 	b.WriteString("costEstimate: ")
@@ -883,27 +883,27 @@ func MutationCloseCallBuild(args MutationCloseCallArgs) string {
 	return b.String()
 }
 
-// MutationCompleteHarnessStep -- Record a running step's result (running -> done). done is terminal. The engine step guard rejects the transition when the prior status is not 'running'.
+// CompleteHarnessStep -- Record a running step's result (running -> done). done is terminal. The engine step guard rejects the transition when the prior status is not 'running'.
 //
 // Bound concept: step.
-type MutationCompleteHarnessStepArgs struct {
+type CompleteHarnessStepArgs struct {
 	StepId string
 	Result map[string]any
 }
 
-// MutationCompleteHarnessStep calls the engine mutation mutationCompleteHarnessStep.
-func (qc *QueryClient) MutationCompleteHarnessStep(ctx context.Context, args MutationCompleteHarnessStepArgs) (*Result, error) {
-	call := MutationCompleteHarnessStepBuild(args)
-	return qc.executeNamed(ctx, "mutationCompleteHarnessStep", call)
+// CompleteHarnessStep calls the engine mutation completeHarnessStep.
+func (qc *QueryClient) CompleteHarnessStep(ctx context.Context, args CompleteHarnessStepArgs) (*Result, error) {
+	call := CompleteHarnessStepBuild(args)
+	return qc.executeNamed(ctx, "completeHarnessStep", call)
 }
 
-func MutationCompleteHarnessStepBuild(args MutationCompleteHarnessStepArgs) string {
+func CompleteHarnessStepBuild(args CompleteHarnessStepArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCompleteHarnessStep({")
+	b.WriteString("completeHarnessStep({")
 	b.WriteString("stepId: ")
 	b.WriteString(fmt.Sprintf("%q", args.StepId))
 	if args.Result != nil {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("result: ")
@@ -913,26 +913,26 @@ func MutationCompleteHarnessStepBuild(args MutationCompleteHarnessStepArgs) stri
 	return b.String()
 }
 
-// MutationCompleteTodo -- Mark a to-do complete (or re-open it) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so the operation re-enforces ownership and can never transfer the row. The caller threads the full updated payload (with done flipped); the complete tool builds it from the current row + done=true.
+// CompleteTodo -- Mark a to-do complete (or re-open it) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so the operation re-enforces ownership and can never transfer the row. The caller threads the full updated payload (with done flipped); the complete tool builds it from the current row + done=true.
 //
 // Bound concept: todo.
-type MutationCompleteTodoArgs struct {
+type CompleteTodoArgs struct {
 	TodoId  string
 	Payload map[string]any
 }
 
-// MutationCompleteTodo calls the engine mutation mutationCompleteTodo.
-func (qc *QueryClient) MutationCompleteTodo(ctx context.Context, args MutationCompleteTodoArgs) (*Result, error) {
-	call := MutationCompleteTodoBuild(args)
-	return qc.executeNamed(ctx, "mutationCompleteTodo", call)
+// CompleteTodo calls the engine mutation completeTodo.
+func (qc *QueryClient) CompleteTodo(ctx context.Context, args CompleteTodoArgs) (*Result, error) {
+	call := CompleteTodoBuild(args)
+	return qc.executeNamed(ctx, "completeTodo", call)
 }
 
-func MutationCompleteTodoBuild(args MutationCompleteTodoArgs) string {
+func CompleteTodoBuild(args CompleteTodoArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCompleteTodo({")
+	b.WriteString("completeTodo({")
 	b.WriteString("todoId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TodoId))
-	if b.Len() > 22 {
+	if b.Len() > 14 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -941,10 +941,10 @@ func MutationCompleteTodoBuild(args MutationCompleteTodoArgs) string {
 	return b.String()
 }
 
-// MutationCompleteToolInvocation -- Update a toolInvocation Task to a terminal state with its result or error. Companion to mutationCreateToolInvocationTask. Status MUST be 'succeeded' or 'failed' (the only terminal transitions a toolInvocation can take -- there is no 'paused' or 'cancelled' on a tool call). On succeeded: toolResult populated. On failed: errorMessage populated.
+// CompleteToolInvocation -- Update a toolInvocation Task to a terminal state with its result or error. Companion to createToolInvocationTask. Status MUST be 'succeeded' or 'failed' (the only terminal transitions a toolInvocation can take -- there is no 'paused' or 'cancelled' on a tool call). On succeeded: toolResult populated. On failed: errorMessage populated.
 //
 // Bound concept: task.
-type MutationCompleteToolInvocationArgs struct {
+type CompleteToolInvocationArgs struct {
 	TaskId       string
 	Status       string
 	ToolResult   map[string]any
@@ -952,38 +952,38 @@ type MutationCompleteToolInvocationArgs struct {
 	CompletedAt  string
 }
 
-// MutationCompleteToolInvocation calls the engine mutation mutationCompleteToolInvocation.
-func (qc *QueryClient) MutationCompleteToolInvocation(ctx context.Context, args MutationCompleteToolInvocationArgs) (*Result, error) {
-	call := MutationCompleteToolInvocationBuild(args)
-	return qc.executeNamed(ctx, "mutationCompleteToolInvocation", call)
+// CompleteToolInvocation calls the engine mutation completeToolInvocation.
+func (qc *QueryClient) CompleteToolInvocation(ctx context.Context, args CompleteToolInvocationArgs) (*Result, error) {
+	call := CompleteToolInvocationBuild(args)
+	return qc.executeNamed(ctx, "completeToolInvocation", call)
 }
 
-func MutationCompleteToolInvocationBuild(args MutationCompleteToolInvocationArgs) string {
+func CompleteToolInvocationBuild(args CompleteToolInvocationArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCompleteToolInvocation({")
+	b.WriteString("completeToolInvocation({")
 	b.WriteString("taskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TaskId))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
 	if args.ToolResult != nil {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("toolResult: ")
 		b.WriteString(renderMemQLValue(args.ToolResult))
 	}
 	if args.ErrorMessage != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
 	if args.CompletedAt != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("completedAt: ")
@@ -993,60 +993,60 @@ func MutationCompleteToolInvocationBuild(args MutationCompleteToolInvocationArgs
 	return b.String()
 }
 
-// MutationConfirmAction -- Confirm a candidate v1:actions:action, promoting it to active so it is offered for replay (Phase 4 #1739, the human gate for real-machine side effects).
+// ConfirmAction -- Confirm a candidate v1:actions:action, promoting it to active so it is offered for replay (Phase 4 #1739, the human gate for real-machine side effects).
 //
 // Bound concept: action.
-type MutationConfirmActionArgs struct {
+type ConfirmActionArgs struct {
 	ActionId string
 }
 
-// MutationConfirmAction calls the engine mutation mutationConfirmAction.
-func (qc *QueryClient) MutationConfirmAction(ctx context.Context, args MutationConfirmActionArgs) (*Result, error) {
-	call := MutationConfirmActionBuild(args)
-	return qc.executeNamed(ctx, "mutationConfirmAction", call)
+// ConfirmAction calls the engine mutation confirmAction.
+func (qc *QueryClient) ConfirmAction(ctx context.Context, args ConfirmActionArgs) (*Result, error) {
+	call := ConfirmActionBuild(args)
+	return qc.executeNamed(ctx, "confirmAction", call)
 }
 
-func MutationConfirmActionBuild(args MutationConfirmActionArgs) string {
+func ConfirmActionBuild(args ConfirmActionArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationConfirmAction({")
+	b.WriteString("confirmAction({")
 	b.WriteString("actionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ActionId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationConfirmRecord -- Human confirm a data record, updating confirm count and validation state
+// ConfirmRecord -- Human confirm a data record, updating confirm count and validation state
 //
 // Bound concept: record.
-type MutationConfirmRecordArgs struct {
+type ConfirmRecordArgs struct {
 	RecordId        string
 	IdentityId      string
 	NewConfirmCount float64
 	NewState        string
 }
 
-// MutationConfirmRecord calls the engine mutation mutationConfirmRecord.
-func (qc *QueryClient) MutationConfirmRecord(ctx context.Context, args MutationConfirmRecordArgs) (*Result, error) {
-	call := MutationConfirmRecordBuild(args)
-	return qc.executeNamed(ctx, "mutationConfirmRecord", call)
+// ConfirmRecord calls the engine mutation confirmRecord.
+func (qc *QueryClient) ConfirmRecord(ctx context.Context, args ConfirmRecordArgs) (*Result, error) {
+	call := ConfirmRecordBuild(args)
+	return qc.executeNamed(ctx, "confirmRecord", call)
 }
 
-func MutationConfirmRecordBuild(args MutationConfirmRecordArgs) string {
+func ConfirmRecordBuild(args ConfirmRecordArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationConfirmRecord({")
+	b.WriteString("confirmRecord({")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	if b.Len() > 23 {
+	if b.Len() > 15 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 23 {
+	if b.Len() > 15 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newConfirmCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.NewConfirmCount))
-	if b.Len() > 23 {
+	if b.Len() > 15 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newState: ")
@@ -1055,25 +1055,55 @@ func MutationConfirmRecordBuild(args MutationConfirmRecordArgs) string {
 	return b.String()
 }
 
-// MutationConsumeAuthCode -- Mark an auth code consumed (stamps consumedAt = now).
+// ConsumeAuthCode -- Mark an auth code consumed (stamps consumedAt = now).
 //
 // Bound concept: authCode.
-type MutationConsumeAuthCodeArgs struct {
+type ConsumeAuthCodeArgs struct {
 	CodeId         string
 	ConsumedFromIP string
 }
 
-// MutationConsumeAuthCode calls the engine mutation mutationConsumeAuthCode.
-func (qc *QueryClient) MutationConsumeAuthCode(ctx context.Context, args MutationConsumeAuthCodeArgs) (*Result, error) {
-	call := MutationConsumeAuthCodeBuild(args)
-	return qc.executeNamed(ctx, "mutationConsumeAuthCode", call)
+// ConsumeAuthCode calls the engine mutation consumeAuthCode.
+func (qc *QueryClient) ConsumeAuthCode(ctx context.Context, args ConsumeAuthCodeArgs) (*Result, error) {
+	call := ConsumeAuthCodeBuild(args)
+	return qc.executeNamed(ctx, "consumeAuthCode", call)
 }
 
-func MutationConsumeAuthCodeBuild(args MutationConsumeAuthCodeArgs) string {
+func ConsumeAuthCodeBuild(args ConsumeAuthCodeArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationConsumeAuthCode({")
+	b.WriteString("consumeAuthCode({")
 	b.WriteString("codeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.CodeId))
+	if args.ConsumedFromIP != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("consumedFromIP: ")
+		b.WriteString(fmt.Sprintf("%q", args.ConsumedFromIP))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// ConsumeMagicLinkRequest -- Mark a magic-link request consumed (stamps consumedAt = now).
+//
+// Bound concept: magicLinkRequest.
+type ConsumeMagicLinkRequestArgs struct {
+	RequestId      string
+	ConsumedFromIP string
+}
+
+// ConsumeMagicLinkRequest calls the engine mutation consumeMagicLinkRequest.
+func (qc *QueryClient) ConsumeMagicLinkRequest(ctx context.Context, args ConsumeMagicLinkRequestArgs) (*Result, error) {
+	call := ConsumeMagicLinkRequestBuild(args)
+	return qc.executeNamed(ctx, "consumeMagicLinkRequest", call)
+}
+
+func ConsumeMagicLinkRequestBuild(args ConsumeMagicLinkRequestArgs) string {
+	var b strings.Builder
+	b.WriteString("consumeMagicLinkRequest({")
+	b.WriteString("requestId: ")
+	b.WriteString(fmt.Sprintf("%q", args.RequestId))
 	if args.ConsumedFromIP != "" {
 		if b.Len() > 25 {
 			b.WriteString(", ")
@@ -1085,40 +1115,10 @@ func MutationConsumeAuthCodeBuild(args MutationConsumeAuthCodeArgs) string {
 	return b.String()
 }
 
-// MutationConsumeMagicLinkRequest -- Mark a magic-link request consumed (stamps consumedAt = now).
-//
-// Bound concept: magicLinkRequest.
-type MutationConsumeMagicLinkRequestArgs struct {
-	RequestId      string
-	ConsumedFromIP string
-}
-
-// MutationConsumeMagicLinkRequest calls the engine mutation mutationConsumeMagicLinkRequest.
-func (qc *QueryClient) MutationConsumeMagicLinkRequest(ctx context.Context, args MutationConsumeMagicLinkRequestArgs) (*Result, error) {
-	call := MutationConsumeMagicLinkRequestBuild(args)
-	return qc.executeNamed(ctx, "mutationConsumeMagicLinkRequest", call)
-}
-
-func MutationConsumeMagicLinkRequestBuild(args MutationConsumeMagicLinkRequestArgs) string {
-	var b strings.Builder
-	b.WriteString("mutationConsumeMagicLinkRequest({")
-	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if args.ConsumedFromIP != "" {
-		if b.Len() > 33 {
-			b.WriteString(", ")
-		}
-		b.WriteString("consumedFromIP: ")
-		b.WriteString(fmt.Sprintf("%q", args.ConsumedFromIP))
-	}
-	b.WriteString("})")
-	return b.String()
-}
-
-// MutationCreateAccessRequest -- Create a self-service access request (waitlist row, status=pending).
+// CreateAccessRequest -- Create a self-service access request (waitlist row, status=pending).
 //
 // Bound concept: accessRequest.
-type MutationCreateAccessRequestArgs struct {
+type CreateAccessRequestArgs struct {
 	RequestId         string
 	Email             string
 	Name              string
@@ -1129,59 +1129,59 @@ type MutationCreateAccessRequestArgs struct {
 	UserAgent         string
 }
 
-// MutationCreateAccessRequest calls the engine mutation mutationCreateAccessRequest.
-func (qc *QueryClient) MutationCreateAccessRequest(ctx context.Context, args MutationCreateAccessRequestArgs) (*Result, error) {
-	call := MutationCreateAccessRequestBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateAccessRequest", call)
+// CreateAccessRequest calls the engine mutation createAccessRequest.
+func (qc *QueryClient) CreateAccessRequest(ctx context.Context, args CreateAccessRequestArgs) (*Result, error) {
+	call := CreateAccessRequestBuild(args)
+	return qc.executeNamed(ctx, "createAccessRequest", call)
 }
 
-func MutationCreateAccessRequestBuild(args MutationCreateAccessRequestArgs) string {
+func CreateAccessRequestBuild(args CreateAccessRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateAccessRequest({")
+	b.WriteString("createAccessRequest({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("email: ")
 	b.WriteString(fmt.Sprintf("%q", args.Email))
 	if args.Name != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("name: ")
 		b.WriteString(fmt.Sprintf("%q", args.Name))
 	}
 	if args.AdditionalContext != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("additionalContext: ")
 		b.WriteString(fmt.Sprintf("%q", args.AdditionalContext))
 	}
 	if args.RiskScore != 0 {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("riskScore: ")
 		b.WriteString(fmt.Sprintf("%v", args.RiskScore))
 	}
 	if args.RiskSignals != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("riskSignals: ")
 		b.WriteString(fmt.Sprintf("%q", args.RiskSignals))
 	}
 	if args.SourceIP != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceIP))
 	}
 	if args.UserAgent != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userAgent: ")
@@ -1191,10 +1191,10 @@ func MutationCreateAccessRequestBuild(args MutationCreateAccessRequestArgs) stri
 	return b.String()
 }
 
-// MutationCreateAdHocPlan -- Create a synthetic Plan that wraps an ad-hoc tool call made outside any user-initiated planning context. Per Q5: every tool call must produce a Task; Tasks must have a parent Plan; chat-driven tool calls (no user-facing Plan) get a synthetic Plan with kind='adHocAction' so the invariant holds. Status is set to running and completes immediately when the synthetic semantic Task wrapping the tool call resolves.
+// CreateAdHocPlan -- Create a synthetic Plan that wraps an ad-hoc tool call made outside any user-initiated planning context. Per Q5: every tool call must produce a Task; Tasks must have a parent Plan; chat-driven tool calls (no user-facing Plan) get a synthetic Plan with kind='adHocAction' so the invariant holds. Status is set to running and completes immediately when the synthetic semantic Task wrapping the tool call resolves.
 //
 // Bound concept: plan.
-type MutationCreateAdHocPlanArgs struct {
+type CreateAdHocPlanArgs struct {
 	PlanId      string
 	PartitionId string
 	AgentId     string
@@ -1202,33 +1202,33 @@ type MutationCreateAdHocPlanArgs struct {
 	Goal        string
 }
 
-// MutationCreateAdHocPlan calls the engine mutation mutationCreateAdHocPlan.
-func (qc *QueryClient) MutationCreateAdHocPlan(ctx context.Context, args MutationCreateAdHocPlanArgs) (*Result, error) {
-	call := MutationCreateAdHocPlanBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateAdHocPlan", call)
+// CreateAdHocPlan calls the engine mutation createAdHocPlan.
+func (qc *QueryClient) CreateAdHocPlan(ctx context.Context, args CreateAdHocPlanArgs) (*Result, error) {
+	call := CreateAdHocPlanBuild(args)
+	return qc.executeNamed(ctx, "createAdHocPlan", call)
 }
 
-func MutationCreateAdHocPlanBuild(args MutationCreateAdHocPlanArgs) string {
+func CreateAdHocPlanBuild(args CreateAdHocPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateAdHocPlan({")
+	b.WriteString("createAdHocPlan({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 25 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 25 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 25 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 25 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("goal: ")
@@ -1237,10 +1237,10 @@ func MutationCreateAdHocPlanBuild(args MutationCreateAdHocPlanArgs) string {
 	return b.String()
 }
 
-// MutationCreateAgent -- Create a new AI agent template. The `kind` arg defaults to `assistant` -- the safe value for the CoPresent CreateAgentModal flow. The SeedMaterializer (running under the `system:seedMaterializer` actor) passes `kind: \"system\"` when materializing platform agents (MemQL Planner / MemQL Trainer). The planner integration (running under the `system:planner` actor; memql#399) passes `kind: \"specialist\"` when auto-provisioning a specialist for a Plan's capability gap. User-actor calls that try to pass `kind in (\"system\", \"specialist\
+// CreateAgent -- Create a new AI agent template. The `kind` arg defaults to `assistant` -- the safe value for the CoPresent CreateAgentModal flow. The SeedMaterializer (running under the `system:seedMaterializer` actor) passes `kind: \"system\"` when materializing platform agents (MemQL Planner / MemQL Trainer). The planner integration (running under the `system:planner` actor; memql#399) passes `kind: \"specialist\"` when auto-provisioning a specialist for a Plan's capability gap. User-actor calls that try to pass `kind in (\"system\", \"specialist\
 //
 // Bound concept: agent.
-type MutationCreateAgentArgs struct {
+type CreateAgentArgs struct {
 	AgentId         string
 	OwnerUserId     string
 	Name            string
@@ -1264,138 +1264,138 @@ type MutationCreateAgentArgs struct {
 	DeletedSet      bool // set true to send deleted; required because zero-value bool is ambiguous
 }
 
-// MutationCreateAgent calls the engine mutation mutationCreateAgent.
-func (qc *QueryClient) MutationCreateAgent(ctx context.Context, args MutationCreateAgentArgs) (*Result, error) {
-	call := MutationCreateAgentBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateAgent", call)
+// CreateAgent calls the engine mutation createAgent.
+func (qc *QueryClient) CreateAgent(ctx context.Context, args CreateAgentArgs) (*Result, error) {
+	call := CreateAgentBuild(args)
+	return qc.executeNamed(ctx, "createAgent", call)
 }
 
-func MutationCreateAgentBuild(args MutationCreateAgentArgs) string {
+func CreateAgentBuild(args CreateAgentArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateAgent({")
+	b.WriteString("createAgent({")
 	if args.AgentId != "" {
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.OwnerUserId != "" {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	}
-	if b.Len() > 21 {
+	if b.Len() > 13 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Description != "" {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.Personality != "" {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("personality: ")
 		b.WriteString(fmt.Sprintf("%q", args.Personality))
 	}
 	if args.Role != "" {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("role: ")
 		b.WriteString(fmt.Sprintf("%q", args.Role))
 	}
 	if args.RoleSlug != "" {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("roleSlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.RoleSlug))
 	}
 	if args.Kind != "" {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("kind: ")
 		b.WriteString(fmt.Sprintf("%q", args.Kind))
 	}
 	if args.Gender != "" {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("gender: ")
 		b.WriteString(fmt.Sprintf("%q", args.Gender))
 	}
 	if args.AudioControl != "" {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("audioControl: ")
 		b.WriteString(fmt.Sprintf("%q", args.AudioControl))
 	}
 	if args.VideoControl != "" {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("videoControl: ")
 		b.WriteString(fmt.Sprintf("%q", args.VideoControl))
 	}
 	if args.AvatarPersonaId != "" {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("avatarPersonaId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AvatarPersonaId))
 	}
 	if args.AvatarVendor != "" {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("avatarVendor: ")
 		b.WriteString(fmt.Sprintf("%q", args.AvatarVendor))
 	}
 	if args.Capabilities != nil {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capabilities: ")
 		b.WriteString(renderMemQLValue(args.Capabilities))
 	}
 	if args.Avatar != nil {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("avatar: ")
 		b.WriteString(renderMemQLValue(args.Avatar))
 	}
 	if args.ProviderConfig != nil {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("providerConfig: ")
 		b.WriteString(renderMemQLValue(args.ProviderConfig))
 	}
 	if args.TriggerBehavior != nil {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("triggerBehavior: ")
 		b.WriteString(renderMemQLValue(args.TriggerBehavior))
 	}
 	if args.ActiveSet {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
 	if args.DeletedSet {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("deleted: ")
@@ -1405,10 +1405,10 @@ func MutationCreateAgentBuild(args MutationCreateAgentArgs) string {
 	return b.String()
 }
 
-// MutationCreateAgentAuthorization -- Grant a standing authorization for an agent to trigger a plan kind without per-Plan approval.
+// CreateAgentAuthorization -- Grant a standing authorization for an agent to trigger a plan kind without per-Plan approval.
 //
 // Bound concept: agentAuthorization.
-type MutationCreateAgentAuthorizationArgs struct {
+type CreateAgentAuthorizationArgs struct {
 	AuthId           string
 	AgentId          string
 	UserId           string
@@ -1419,55 +1419,55 @@ type MutationCreateAgentAuthorizationArgs struct {
 	ComputerUseScope string
 }
 
-// MutationCreateAgentAuthorization calls the engine mutation mutationCreateAgentAuthorization.
-func (qc *QueryClient) MutationCreateAgentAuthorization(ctx context.Context, args MutationCreateAgentAuthorizationArgs) (*Result, error) {
-	call := MutationCreateAgentAuthorizationBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateAgentAuthorization", call)
+// CreateAgentAuthorization calls the engine mutation createAgentAuthorization.
+func (qc *QueryClient) CreateAgentAuthorization(ctx context.Context, args CreateAgentAuthorizationArgs) (*Result, error) {
+	call := CreateAgentAuthorizationBuild(args)
+	return qc.executeNamed(ctx, "createAgentAuthorization", call)
 }
 
-func MutationCreateAgentAuthorizationBuild(args MutationCreateAgentAuthorizationArgs) string {
+func CreateAgentAuthorizationBuild(args CreateAgentAuthorizationArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateAgentAuthorization({")
+	b.WriteString("createAgentAuthorization({")
 	if args.AuthId != "" {
 		b.WriteString("authId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AuthId))
 	}
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanKind))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceScope: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceScope))
 	if args.TokenBudgetCap != 0 {
-		if b.Len() > 34 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenBudgetCap: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenBudgetCap))
 	}
 	if args.ExpiresAt != "" {
-		if b.Len() > 34 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	}
 	if args.ComputerUseScope != "" {
-		if b.Len() > 34 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("computerUseScope: ")
@@ -1477,10 +1477,10 @@ func MutationCreateAgentAuthorizationBuild(args MutationCreateAgentAuthorization
 	return b.String()
 }
 
-// MutationCreateAgentRole -- Insert (or version) a v1:agents:agentRole catalog row. Called by the SeedMaterializer when it walks role seed declarations under dsl/agents/roles/ (the materializer stamps the seed body's `id` into `agentRoleId`); also callable directly when a user mints a custom (non-predefined) role from the UI. predefined=true marks the row as locked in the UI; user-created roles default to false and remain fully editable. Phase 2 cut (#158): the args surface collapses the seven flat lockedDomain / defaultDomain / availableDomain / lockedTool / defaultTool / forbiddenTool / lockedLiveKnowledge fields into the five skill-id fields the role catalog now carries plus a maxSkills cap. The mutation is partition-agnostic for global-scoped concepts -- the engine stamps every v1:agents:agentRole insert into the _system slot regardless of the envelope.
+// CreateAgentRole -- Insert (or version) a v1:agents:agentRole catalog row. Called by the SeedMaterializer when it walks role seed declarations under dsl/agents/roles/ (the materializer stamps the seed body's `id` into `agentRoleId`); also callable directly when a user mints a custom (non-predefined) role from the UI. predefined=true marks the row as locked in the UI; user-created roles default to false and remain fully editable. Phase 2 cut (#158): the args surface collapses the seven flat lockedDomain / defaultDomain / availableDomain / lockedTool / defaultTool / forbiddenTool / lockedLiveKnowledge fields into the five skill-id fields the role catalog now carries plus a maxSkills cap. The mutation is partition-agnostic for global-scoped concepts -- the engine stamps every v1:agents:agentRole insert into the _system slot regardless of the envelope.
 //
 // Bound concept: agentRole.
-type MutationCreateAgentRoleArgs struct {
+type CreateAgentRoleArgs struct {
 	AgentRoleId           string
 	Slug                  string
 	Name                  string
@@ -1501,115 +1501,115 @@ type MutationCreateAgentRoleArgs struct {
 	PredefinedSet         bool // set true to send predefined; required because zero-value bool is ambiguous
 }
 
-// MutationCreateAgentRole calls the engine mutation mutationCreateAgentRole.
-func (qc *QueryClient) MutationCreateAgentRole(ctx context.Context, args MutationCreateAgentRoleArgs) (*Result, error) {
-	call := MutationCreateAgentRoleBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateAgentRole", call)
+// CreateAgentRole calls the engine mutation createAgentRole.
+func (qc *QueryClient) CreateAgentRole(ctx context.Context, args CreateAgentRoleArgs) (*Result, error) {
+	call := CreateAgentRoleBuild(args)
+	return qc.executeNamed(ctx, "createAgentRole", call)
 }
 
-func MutationCreateAgentRoleBuild(args MutationCreateAgentRoleArgs) string {
+func CreateAgentRoleBuild(args CreateAgentRoleArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateAgentRole({")
+	b.WriteString("createAgentRole({")
 	if args.AgentRoleId != "" {
 		b.WriteString("agentRoleId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentRoleId))
 	}
-	if b.Len() > 25 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	if b.Len() > 25 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Description != "" {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.Category != "" {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("category: ")
 		b.WriteString(fmt.Sprintf("%q", args.Category))
 	}
 	if args.Tier != "" {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tier: ")
 		b.WriteString(fmt.Sprintf("%q", args.Tier))
 	}
 	if args.LockedSkillIds != nil {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lockedSkillIds: ")
 		b.WriteString(renderMemQLValue(args.LockedSkillIds))
 	}
 	if args.DefaultSkillIds != nil {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("defaultSkillIds: ")
 		b.WriteString(renderMemQLValue(args.DefaultSkillIds))
 	}
 	if args.AvailableSkillIds != nil {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("availableSkillIds: ")
 		b.WriteString(renderMemQLValue(args.AvailableSkillIds))
 	}
 	if args.ForbiddenSkillIds != nil {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("forbiddenSkillIds: ")
 		b.WriteString(renderMemQLValue(args.ForbiddenSkillIds))
 	}
 	if args.MaxSkills != 0 {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("maxSkills: ")
 		b.WriteString(fmt.Sprintf("%v", args.MaxSkills))
 	}
 	if args.RecommendedPolicySlug != "" {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recommendedPolicySlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecommendedPolicySlug))
 	}
 	if args.RecommendedGender != "" {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recommendedGender: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecommendedGender))
 	}
 	if args.SystemPromptHints != "" {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("systemPromptHints: ")
 		b.WriteString(fmt.Sprintf("%q", args.SystemPromptHints))
 	}
 	if args.ActiveSet {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
 	if args.PredefinedSet {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("predefined: ")
@@ -1619,10 +1619,10 @@ func MutationCreateAgentRoleBuild(args MutationCreateAgentRoleArgs) string {
 	return b.String()
 }
 
-// MutationCreateApprovalRequest -- Create one v1:safety:approvalRequest row in `pending` status. Called from component/safety/approval/sink.go when an Ask verdict fires in enforce mode AND no active row already exists for the descriptor's correlationKey. argsRedacted arrives pre-scrubbed (same semantics as classification.argsRedacted). expiresAt is the advisory TTL -- the sink computes it from MEMQL_SAFETY_APPROVAL_TTL_HOURS (default 24h) at create time.
+// CreateApprovalRequest -- Create one v1:safety:approvalRequest row in `pending` status. Called from component/safety/approval/sink.go when an Ask verdict fires in enforce mode AND no active row already exists for the descriptor's correlationKey. argsRedacted arrives pre-scrubbed (same semantics as classification.argsRedacted). expiresAt is the advisory TTL -- the sink computes it from MEMQL_SAFETY_APPROVAL_TTL_HOURS (default 24h) at create time.
 //
 // Bound concept: approvalRequest.
-type MutationCreateApprovalRequestArgs struct {
+type CreateApprovalRequestArgs struct {
 	CorrelationKey string
 	Surface        string
 	Action         string
@@ -1636,76 +1636,76 @@ type MutationCreateApprovalRequestArgs struct {
 	PlanId         string
 }
 
-// MutationCreateApprovalRequest calls the engine mutation mutationCreateApprovalRequest.
-func (qc *QueryClient) MutationCreateApprovalRequest(ctx context.Context, args MutationCreateApprovalRequestArgs) (*Result, error) {
-	call := MutationCreateApprovalRequestBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateApprovalRequest", call)
+// CreateApprovalRequest calls the engine mutation createApprovalRequest.
+func (qc *QueryClient) CreateApprovalRequest(ctx context.Context, args CreateApprovalRequestArgs) (*Result, error) {
+	call := CreateApprovalRequestBuild(args)
+	return qc.executeNamed(ctx, "createApprovalRequest", call)
 }
 
-func MutationCreateApprovalRequestBuild(args MutationCreateApprovalRequestArgs) string {
+func CreateApprovalRequestBuild(args CreateApprovalRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateApprovalRequest({")
+	b.WriteString("createApprovalRequest({")
 	b.WriteString("correlationKey: ")
 	b.WriteString(fmt.Sprintf("%q", args.CorrelationKey))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("surface: ")
 	b.WriteString(fmt.Sprintf("%q", args.Surface))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
 	b.WriteString(fmt.Sprintf("%q", args.Action))
 	if args.ArgsRedacted != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("argsRedacted: ")
 		b.WriteString(fmt.Sprintf("%q", args.ArgsRedacted))
 	}
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.Categories != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("categories: ")
 		b.WriteString(fmt.Sprintf("%q", args.Categories))
 	}
 	if args.Reason != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
 	if args.ExpiresAt != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	}
 	if args.AgentId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.OwnerUserId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	}
 	if args.PlanId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
@@ -1715,10 +1715,10 @@ func MutationCreateApprovalRequestBuild(args MutationCreateApprovalRequestArgs) 
 	return b.String()
 }
 
-// MutationCreateArtifact -- Insert (or re-version) a Library artifact index row for a backing source concept. System / automation-invoked: ownerUserId is threaded from the backing row's owner because promotion runs server-side on the owner's behalf. Idempotent -- the id is derived from sourceConceptRef so re-promoting the same source versions the same row. Not a user-facing tool; the Library is populated automatically.
+// CreateArtifact -- Insert (or re-version) a Library artifact index row for a backing source concept. System / automation-invoked: ownerUserId is threaded from the backing row's owner because promotion runs server-side on the owner's behalf. Idempotent -- the id is derived from sourceConceptRef so re-promoting the same source versions the same row. Not a user-facing tool; the Library is populated automatically.
 //
 // Bound concept: artifact.
-type MutationCreateArtifactArgs struct {
+type CreateArtifactArgs struct {
 	SourceConceptRef string
 	OwnerUserId      string
 	// Enum: artifact | record
@@ -1745,114 +1745,114 @@ type MutationCreateArtifactArgs struct {
 	ValidationStatus string
 }
 
-// MutationCreateArtifact calls the engine mutation mutationCreateArtifact.
-func (qc *QueryClient) MutationCreateArtifact(ctx context.Context, args MutationCreateArtifactArgs) (*Result, error) {
-	call := MutationCreateArtifactBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateArtifact", call)
+// CreateArtifact calls the engine mutation createArtifact.
+func (qc *QueryClient) CreateArtifact(ctx context.Context, args CreateArtifactArgs) (*Result, error) {
+	call := CreateArtifactBuild(args)
+	return qc.executeNamed(ctx, "createArtifact", call)
 }
 
-func MutationCreateArtifactBuild(args MutationCreateArtifactArgs) string {
+func CreateArtifactBuild(args CreateArtifactArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateArtifact({")
+	b.WriteString("createArtifact({")
 	b.WriteString("sourceConceptRef: ")
 	b.WriteString(fmt.Sprintf("%q", args.SourceConceptRef))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lens: ")
 	b.WriteString(fmt.Sprintf("%q", args.Lens))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
 	if args.Summary != "" {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
 		b.WriteString(fmt.Sprintf("%q", args.Summary))
 	}
 	if args.Format != "" {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("format: ")
 		b.WriteString(fmt.Sprintf("%q", args.Format))
 	}
 	if args.MimeType != "" {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mimeType: ")
 		b.WriteString(fmt.Sprintf("%q", args.MimeType))
 	}
 	if args.LiveSet {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("live: ")
 		b.WriteString(fmt.Sprintf("%v", args.Live))
 	}
 	if args.Scope != "" {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("scope: ")
 		b.WriteString(fmt.Sprintf("%q", args.Scope))
 	}
 	if args.PartitionId != "" {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.AgentId != "" {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.ProducedByPlanId != "" {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
 	}
 	if args.ProducedByWorkerId != "" {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByWorkerId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByWorkerId))
 	}
 	if args.ProducedByWorkerName != "" {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByWorkerName: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByWorkerName))
 	}
 	if args.ValidationStatus != "" {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("validationStatus: ")
@@ -1862,10 +1862,10 @@ func MutationCreateArtifactBuild(args MutationCreateArtifactArgs) string {
 	return b.String()
 }
 
-// MutationCreateAuditEvent -- Append a row to the append-only security audit log.
+// CreateAuditEvent -- Append a row to the append-only security audit log.
 //
 // Bound concept: auditEvent.
-type MutationCreateAuditEventArgs struct {
+type CreateAuditEventArgs struct {
 	EventId    string
 	OccurredAt string
 	// Enum: auth | identity | authorization | configuration | admin | data
@@ -1889,125 +1889,125 @@ type MutationCreateAuditEventArgs struct {
 	PrevEventHash string
 }
 
-// MutationCreateAuditEvent calls the engine mutation mutationCreateAuditEvent.
-func (qc *QueryClient) MutationCreateAuditEvent(ctx context.Context, args MutationCreateAuditEventArgs) (*Result, error) {
-	call := MutationCreateAuditEventBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateAuditEvent", call)
+// CreateAuditEvent calls the engine mutation createAuditEvent.
+func (qc *QueryClient) CreateAuditEvent(ctx context.Context, args CreateAuditEventArgs) (*Result, error) {
+	call := CreateAuditEventBuild(args)
+	return qc.executeNamed(ctx, "createAuditEvent", call)
 }
 
-func MutationCreateAuditEventBuild(args MutationCreateAuditEventArgs) string {
+func CreateAuditEventBuild(args CreateAuditEventArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateAuditEvent({")
+	b.WriteString("createAuditEvent({")
 	b.WriteString("eventId: ")
 	b.WriteString(fmt.Sprintf("%q", args.EventId))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("occurredAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.OccurredAt))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("category: ")
 	b.WriteString(fmt.Sprintf("%q", args.Category))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
 	b.WriteString(fmt.Sprintf("%q", args.Action))
 	if args.ActorUserId != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorUserId))
 	}
 	if args.ActorEmail != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorEmail: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorEmail))
 	}
 	if args.ActorRole != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorRole: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorRole))
 	}
 	if args.ActorIdentityId != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorIdentityId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorIdentityId))
 	}
 	if args.TargetType != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetType: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetType))
 	}
 	if args.TargetId != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetId: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetId))
 	}
 	if args.TargetEmail != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetEmail: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetEmail))
 	}
 	if args.Detail != nil {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("detail: ")
 		b.WriteString(renderMemQLValue(args.Detail))
 	}
 	if args.SourceIP != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceIP))
 	}
 	if args.UserAgent != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userAgent: ")
 		b.WriteString(fmt.Sprintf("%q", args.UserAgent))
 	}
 	if args.CorrelationId != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("correlationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.CorrelationId))
 	}
 	if args.Outcome != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("outcome: ")
 		b.WriteString(fmt.Sprintf("%q", args.Outcome))
 	}
 	if args.FailureReason != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("failureReason: ")
 		b.WriteString(fmt.Sprintf("%q", args.FailureReason))
 	}
 	if args.PrevEventHash != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("prevEventHash: ")
@@ -2017,10 +2017,10 @@ func MutationCreateAuditEventBuild(args MutationCreateAuditEventArgs) string {
 	return b.String()
 }
 
-// MutationCreateAuthCode -- Mint a one-time OAuth authorization code from a consumed magic link.
+// CreateAuthCode -- Mint a one-time OAuth authorization code from a consumed magic link.
 //
 // Bound concept: authCode.
-type MutationCreateAuthCodeArgs struct {
+type CreateAuthCodeArgs struct {
 	CodeId              string
 	Code                string
 	CodeHash            string
@@ -2035,74 +2035,74 @@ type MutationCreateAuthCodeArgs struct {
 	ExpiresAt           string
 }
 
-// MutationCreateAuthCode calls the engine mutation mutationCreateAuthCode.
-func (qc *QueryClient) MutationCreateAuthCode(ctx context.Context, args MutationCreateAuthCodeArgs) (*Result, error) {
-	call := MutationCreateAuthCodeBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateAuthCode", call)
+// CreateAuthCode calls the engine mutation createAuthCode.
+func (qc *QueryClient) CreateAuthCode(ctx context.Context, args CreateAuthCodeArgs) (*Result, error) {
+	call := CreateAuthCodeBuild(args)
+	return qc.executeNamed(ctx, "createAuthCode", call)
 }
 
-func MutationCreateAuthCodeBuild(args MutationCreateAuthCodeArgs) string {
+func CreateAuthCodeBuild(args CreateAuthCodeArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateAuthCode({")
+	b.WriteString("createAuthCode({")
 	b.WriteString("codeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.CodeId))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("code: ")
 	b.WriteString(fmt.Sprintf("%q", args.Code))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("codeHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.CodeHash))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("clientId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ClientId))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("redirectURI: ")
 	b.WriteString(fmt.Sprintf("%q", args.RedirectURI))
 	if args.State != "" {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("state: ")
 		b.WriteString(fmt.Sprintf("%q", args.State))
 	}
 	if args.CodeChallenge != "" {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("codeChallenge: ")
 		b.WriteString(fmt.Sprintf("%q", args.CodeChallenge))
 	}
 	if args.CodeChallengeMethod != "" {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("codeChallengeMethod: ")
 		b.WriteString(fmt.Sprintf("%q", args.CodeChallengeMethod))
 	}
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("magicLinkRequestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MagicLinkRequestId))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
@@ -2111,10 +2111,10 @@ func MutationCreateAuthCodeBuild(args MutationCreateAuthCodeArgs) string {
 	return b.String()
 }
 
-// MutationCreateAuthSession -- Create a bearer-token session record at issuance time.
+// CreateAuthSession -- Create a bearer-token session record at issuance time.
 //
 // Bound concept: authSession.
-type MutationCreateAuthSessionArgs struct {
+type CreateAuthSessionArgs struct {
 	SessionId string
 	Subject   string
 	TokenHash string
@@ -2126,54 +2126,54 @@ type MutationCreateAuthSessionArgs struct {
 	ExpiresAt   string
 }
 
-// MutationCreateAuthSession calls the engine mutation mutationCreateAuthSession.
-func (qc *QueryClient) MutationCreateAuthSession(ctx context.Context, args MutationCreateAuthSessionArgs) (*Result, error) {
-	call := MutationCreateAuthSessionBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateAuthSession", call)
+// CreateAuthSession calls the engine mutation createAuthSession.
+func (qc *QueryClient) CreateAuthSession(ctx context.Context, args CreateAuthSessionArgs) (*Result, error) {
+	call := CreateAuthSessionBuild(args)
+	return qc.executeNamed(ctx, "createAuthSession", call)
 }
 
-func MutationCreateAuthSessionBuild(args MutationCreateAuthSessionArgs) string {
+func CreateAuthSessionBuild(args CreateAuthSessionArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateAuthSession({")
+	b.WriteString("createAuthSession({")
 	b.WriteString("sessionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SessionId))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("subject: ")
 	b.WriteString(fmt.Sprintf("%q", args.Subject))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
 	if args.UserId != "" {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UserId))
 	}
 	if args.IdentityId != "" {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("identityId: ")
 		b.WriteString(fmt.Sprintf("%q", args.IdentityId))
 	}
 	if args.ClientLabel != "" {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clientLabel: ")
 		b.WriteString(fmt.Sprintf("%q", args.ClientLabel))
 	}
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
@@ -2182,10 +2182,10 @@ func MutationCreateAuthSessionBuild(args MutationCreateAuthSessionArgs) string {
 	return b.String()
 }
 
-// MutationCreateAuthoringBundle -- Create a draft authoring bundle -- the atomic unit a Responsibility compiles into. ownerUserId is stamped from actor.userId. Members are added via mutationCreateAuthoringConstruct; reused (composed) constructs are recorded on reusedConstructRefs.
+// CreateAuthoringBundle -- Create a draft authoring bundle -- the atomic unit a Responsibility compiles into. ownerUserId is stamped from actor.userId. Members are added via createAuthoringConstruct; reused (composed) constructs are recorded on reusedConstructRefs.
 //
 // Bound concept: bundle.
-type MutationCreateAuthoringBundleArgs struct {
+type CreateAuthoringBundleArgs struct {
 	BundleId            string
 	Title               string
 	Summary             string
@@ -2196,59 +2196,59 @@ type MutationCreateAuthoringBundleArgs struct {
 	ReusedConstructRefs []map[string]any
 }
 
-// MutationCreateAuthoringBundle calls the engine mutation mutationCreateAuthoringBundle.
-func (qc *QueryClient) MutationCreateAuthoringBundle(ctx context.Context, args MutationCreateAuthoringBundleArgs) (*Result, error) {
-	call := MutationCreateAuthoringBundleBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateAuthoringBundle", call)
+// CreateAuthoringBundle calls the engine mutation createAuthoringBundle.
+func (qc *QueryClient) CreateAuthoringBundle(ctx context.Context, args CreateAuthoringBundleArgs) (*Result, error) {
+	call := CreateAuthoringBundleBuild(args)
+	return qc.executeNamed(ctx, "createAuthoringBundle", call)
 }
 
-func MutationCreateAuthoringBundleBuild(args MutationCreateAuthoringBundleArgs) string {
+func CreateAuthoringBundleBuild(args CreateAuthoringBundleArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateAuthoringBundle({")
+	b.WriteString("createAuthoringBundle({")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
 	if args.Summary != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
 		b.WriteString(fmt.Sprintf("%q", args.Summary))
 	}
 	if args.ResponsibilityId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("responsibilityId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
 	}
 	if args.SourcePlanId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourcePlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourcePlanId))
 	}
 	if args.Version != 0 {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
 		b.WriteString(fmt.Sprintf("%v", args.Version))
 	}
 	if args.SupersedesBundleId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("supersedesBundleId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SupersedesBundleId))
 	}
 	if args.ReusedConstructRefs != nil {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reusedConstructRefs: ")
@@ -2258,10 +2258,10 @@ func MutationCreateAuthoringBundleBuild(args MutationCreateAuthoringBundleArgs) 
 	return b.String()
 }
 
-// MutationCreateAuthoringConstruct -- Create an authored construct (the .memql source for one automation / logic / shape / spec / trait / policy / mutation / query / prompt) as a member of a bundle. ownerUserId stamped from actor.userId; status starts draft and follows the bundle.
+// CreateAuthoringConstruct -- Create an authored construct (the .memql source for one automation / logic / shape / spec / trait / policy / mutation / query / prompt) as a member of a bundle. ownerUserId stamped from actor.userId; status starts draft and follows the bundle.
 //
 // Bound concept: construct.
-type MutationCreateAuthoringConstructArgs struct {
+type CreateAuthoringConstructArgs struct {
 	ConstructId string
 	BundleId    string
 	// Enum: automation | logic | shape | spec | trait | policy | mutation | query | prompt
@@ -2271,38 +2271,38 @@ type MutationCreateAuthoringConstructArgs struct {
 	Source          string
 }
 
-// MutationCreateAuthoringConstruct calls the engine mutation mutationCreateAuthoringConstruct.
-func (qc *QueryClient) MutationCreateAuthoringConstruct(ctx context.Context, args MutationCreateAuthoringConstructArgs) (*Result, error) {
-	call := MutationCreateAuthoringConstructBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateAuthoringConstruct", call)
+// CreateAuthoringConstruct calls the engine mutation createAuthoringConstruct.
+func (qc *QueryClient) CreateAuthoringConstruct(ctx context.Context, args CreateAuthoringConstructArgs) (*Result, error) {
+	call := CreateAuthoringConstructBuild(args)
+	return qc.executeNamed(ctx, "createAuthoringConstruct", call)
 }
 
-func MutationCreateAuthoringConstructBuild(args MutationCreateAuthoringConstructArgs) string {
+func CreateAuthoringConstructBuild(args CreateAuthoringConstructArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateAuthoringConstruct({")
+	b.WriteString("createAuthoringConstruct({")
 	b.WriteString("constructId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetNamespace: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetNamespace))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
@@ -2311,10 +2311,10 @@ func MutationCreateAuthoringConstructBuild(args MutationCreateAuthoringConstruct
 	return b.String()
 }
 
-// MutationCreateAvatarPersona -- Insert a v1:agents:avatarPersona catalog row (memql#609). Called by the SeedMaterializer when it walks the avatar-persona seed declarations under dsl/agents/avatarPersonas.memql -- the materializer stamps the seed body's `id` (the seed name) into `avatarPersonaId`. The seeds themselves are hand-curated in dsl/agents/avatarPersonas.memql (the vendor-issued faceId pasted in per persona). Global operator catalog: the engine stamps the insert into the _system slot regardless of the caller's partition, exactly like mutationCreateAgentRole / mutationCreateSkill.
+// CreateAvatarPersona -- Insert a v1:agents:avatarPersona catalog row (memql#609). Called by the SeedMaterializer when it walks the avatar-persona seed declarations under dsl/agents/avatarPersonas.memql -- the materializer stamps the seed body's `id` (the seed name) into `avatarPersonaId`. The seeds themselves are hand-curated in dsl/agents/avatarPersonas.memql (the vendor-issued faceId pasted in per persona). Global operator catalog: the engine stamps the insert into the _system slot regardless of the caller's partition, exactly like createAgentRole / createSkill.
 //
 // Bound concept: avatarPersona.
-type MutationCreateAvatarPersonaArgs struct {
+type CreateAvatarPersonaArgs struct {
 	AvatarPersonaId string
 	Vendor          string
 	PersonaId       string
@@ -2326,55 +2326,55 @@ type MutationCreateAvatarPersonaArgs struct {
 	ActiveSet       bool // set true to send active; required because zero-value bool is ambiguous
 }
 
-// MutationCreateAvatarPersona calls the engine mutation mutationCreateAvatarPersona.
-func (qc *QueryClient) MutationCreateAvatarPersona(ctx context.Context, args MutationCreateAvatarPersonaArgs) (*Result, error) {
-	call := MutationCreateAvatarPersonaBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateAvatarPersona", call)
+// CreateAvatarPersona calls the engine mutation createAvatarPersona.
+func (qc *QueryClient) CreateAvatarPersona(ctx context.Context, args CreateAvatarPersonaArgs) (*Result, error) {
+	call := CreateAvatarPersonaBuild(args)
+	return qc.executeNamed(ctx, "createAvatarPersona", call)
 }
 
-func MutationCreateAvatarPersonaBuild(args MutationCreateAvatarPersonaArgs) string {
+func CreateAvatarPersonaBuild(args CreateAvatarPersonaArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateAvatarPersona({")
+	b.WriteString("createAvatarPersona({")
 	if args.AvatarPersonaId != "" {
 		b.WriteString("avatarPersonaId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AvatarPersonaId))
 	}
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("vendor: ")
 	b.WriteString(fmt.Sprintf("%q", args.Vendor))
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("personaId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PersonaId))
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("gender: ")
 	b.WriteString(fmt.Sprintf("%q", args.Gender))
 	if args.ImageRef != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("imageRef: ")
 		b.WriteString(fmt.Sprintf("%q", args.ImageRef))
 	}
 	if args.PreviewRef != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("previewRef: ")
 		b.WriteString(fmt.Sprintf("%q", args.PreviewRef))
 	}
 	if args.ActiveSet {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -2384,10 +2384,10 @@ func MutationCreateAvatarPersonaBuild(args MutationCreateAvatarPersonaArgs) stri
 	return b.String()
 }
 
-// MutationCreateCalendarEvent -- Create a native calendar event owned by the authenticated caller. ownerUserId is stamped from actor.userId (caller-scoped write); createdAt + createdBy are engine-stamped row intrinsics (NOT payload fields -- declaring them is rejected as reserved, memql#1673); source defaults to 'native'. The reactive harness's reminder triggers pick the row up via queryUpcomingEvents. Pass `eventId` to control the id (idempotent re-create), else the engine assigns one.
+// CreateCalendarEvent -- Create a native calendar event owned by the authenticated caller. ownerUserId is stamped from actor.userId (caller-scoped write); createdAt + createdBy are engine-stamped row intrinsics (NOT payload fields -- declaring them is rejected as reserved, memql#1673); source defaults to 'native'. The reactive harness's reminder triggers pick the row up via upcomingEvents. Pass `eventId` to control the id (idempotent re-create), else the engine assigns one.
 //
 // Bound concept: calendarEvent.
-type MutationCreateCalendarEventArgs struct {
+type CreateCalendarEventArgs struct {
 	EventId    string
 	Title      string
 	StartsAt   string
@@ -2399,57 +2399,57 @@ type MutationCreateCalendarEventArgs struct {
 	Recurrence string
 }
 
-// MutationCreateCalendarEvent calls the engine mutation mutationCreateCalendarEvent.
-func (qc *QueryClient) MutationCreateCalendarEvent(ctx context.Context, args MutationCreateCalendarEventArgs) (*Result, error) {
-	call := MutationCreateCalendarEventBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateCalendarEvent", call)
+// CreateCalendarEvent calls the engine mutation createCalendarEvent.
+func (qc *QueryClient) CreateCalendarEvent(ctx context.Context, args CreateCalendarEventArgs) (*Result, error) {
+	call := CreateCalendarEventBuild(args)
+	return qc.executeNamed(ctx, "createCalendarEvent", call)
 }
 
-func MutationCreateCalendarEventBuild(args MutationCreateCalendarEventArgs) string {
+func CreateCalendarEventBuild(args CreateCalendarEventArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateCalendarEvent({")
+	b.WriteString("createCalendarEvent({")
 	if args.EventId != "" {
 		b.WriteString("eventId: ")
 		b.WriteString(fmt.Sprintf("%q", args.EventId))
 	}
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("startsAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.StartsAt))
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("endsAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.EndsAt))
 	if args.AllDaySet {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("allDay: ")
 		b.WriteString(fmt.Sprintf("%v", args.AllDay))
 	}
 	if args.Location != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("location: ")
 		b.WriteString(fmt.Sprintf("%q", args.Location))
 	}
 	if args.Notes != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notes: ")
 		b.WriteString(fmt.Sprintf("%q", args.Notes))
 	}
 	if args.Recurrence != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recurrence: ")
@@ -2459,10 +2459,10 @@ func MutationCreateCalendarEventBuild(args MutationCreateCalendarEventArgs) stri
 	return b.String()
 }
 
-// MutationCreateCluster -- Create the cluster record
+// CreateCluster -- Create the cluster record
 //
 // Bound concept: cluster.
-type MutationCreateClusterArgs struct {
+type CreateClusterArgs struct {
 	Name        string
 	Region      string
 	Environment string
@@ -2474,59 +2474,59 @@ type MutationCreateClusterArgs struct {
 	Provider           string
 }
 
-// MutationCreateCluster calls the engine mutation mutationCreateCluster.
-func (qc *QueryClient) MutationCreateCluster(ctx context.Context, args MutationCreateClusterArgs) (*Result, error) {
-	call := MutationCreateClusterBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateCluster", call)
+// CreateCluster calls the engine mutation createCluster.
+func (qc *QueryClient) CreateCluster(ctx context.Context, args CreateClusterArgs) (*Result, error) {
+	call := CreateClusterBuild(args)
+	return qc.executeNamed(ctx, "createCluster", call)
 }
 
-func MutationCreateClusterBuild(args MutationCreateClusterArgs) string {
+func CreateClusterBuild(args CreateClusterArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateCluster({")
+	b.WriteString("createCluster({")
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Region != "" {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("region: ")
 		b.WriteString(fmt.Sprintf("%q", args.Region))
 	}
-	if b.Len() > 23 {
+	if b.Len() > 15 {
 		b.WriteString(", ")
 	}
 	b.WriteString("environment: ")
 	b.WriteString(fmt.Sprintf("%q", args.Environment))
 	if args.Status != "" {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
 	if args.DatabaseId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("databaseId: ")
 		b.WriteString(fmt.Sprintf("%q", args.DatabaseId))
 	}
 	if args.IdentityProviderId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("identityProviderId: ")
 		b.WriteString(fmt.Sprintf("%q", args.IdentityProviderId))
 	}
 	if args.Version != "" {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
 		b.WriteString(fmt.Sprintf("%q", args.Version))
 	}
 	if args.Provider != "" {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provider: ")
@@ -2536,10 +2536,10 @@ func MutationCreateClusterBuild(args MutationCreateClusterArgs) string {
 	return b.String()
 }
 
-// MutationCreateClusterSettings -- Persist (or refresh) the singleton cluster-settings row.
+// CreateClusterSettings -- Persist (or refresh) the singleton cluster-settings row.
 //
 // Bound concept: clusterSettings.
-type MutationCreateClusterSettingsArgs struct {
+type CreateClusterSettingsArgs struct {
 	Id                string
 	ClusterDomain     string
 	BrandName         string
@@ -2571,183 +2571,183 @@ type MutationCreateClusterSettingsArgs struct {
 	AuthoredAutomationsEnabledSet bool // set true to send authoredAutomationsEnabled; required because zero-value bool is ambiguous
 }
 
-// MutationCreateClusterSettings calls the engine mutation mutationCreateClusterSettings.
-func (qc *QueryClient) MutationCreateClusterSettings(ctx context.Context, args MutationCreateClusterSettingsArgs) (*Result, error) {
-	call := MutationCreateClusterSettingsBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateClusterSettings", call)
+// CreateClusterSettings calls the engine mutation createClusterSettings.
+func (qc *QueryClient) CreateClusterSettings(ctx context.Context, args CreateClusterSettingsArgs) (*Result, error) {
+	call := CreateClusterSettingsBuild(args)
+	return qc.executeNamed(ctx, "createClusterSettings", call)
 }
 
-func MutationCreateClusterSettingsBuild(args MutationCreateClusterSettingsArgs) string {
+func CreateClusterSettingsBuild(args CreateClusterSettingsArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateClusterSettings({")
+	b.WriteString("createClusterSettings({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
 	if args.ClusterDomain != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clusterDomain: ")
 		b.WriteString(fmt.Sprintf("%q", args.ClusterDomain))
 	}
 	if args.BrandName != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandName: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandName))
 	}
 	if args.BrandPrimaryColor != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandPrimaryColor: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandPrimaryColor))
 	}
 	if args.BrandLogoDataURI != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandLogoDataURI: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandLogoDataURI))
 	}
 	if args.BrandIconDataURI != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandIconDataURI: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandIconDataURI))
 	}
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registrationMode: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegistrationMode))
 	if args.RegistrationDomains != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("registrationDomains: ")
 		b.WriteString(fmt.Sprintf("%q", args.RegistrationDomains))
 	}
 	if args.InternalDomains != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("internalDomains: ")
 		b.WriteString(fmt.Sprintf("%q", args.InternalDomains))
 	}
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("internalDefaultRole: ")
 	b.WriteString(fmt.Sprintf("%q", args.InternalDefaultRole))
 	if args.RegisteredClientsJSON != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("registeredClientsJSON: ")
 		b.WriteString(fmt.Sprintf("%q", args.RegisteredClientsJSON))
 	}
 	if args.AccessRequestNotifyEmails != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accessRequestNotifyEmails: ")
 		b.WriteString(fmt.Sprintf("%q", args.AccessRequestNotifyEmails))
 	}
 	if args.BootstrapEmail != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapEmail: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapEmail))
 	}
 	if args.BootstrapFirstName != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapFirstName: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapFirstName))
 	}
 	if args.BootstrapLastName != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapLastName: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapLastName))
 	}
 	if args.BootstrapPhone != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapPhone: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapPhone))
 	}
 	if args.BootstrapPrimaryRole != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapPrimaryRole: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapPrimaryRole))
 	}
 	if args.BootstrapGender != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapGender: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapGender))
 	}
 	if args.BootstrapBirthdate != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapBirthdate: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapBirthdate))
 	}
 	if args.BootstrappedAt != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrappedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
 	}
 	if args.AccessTokenTTLSeconds != 0 {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accessTokenTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.AccessTokenTTLSeconds))
 	}
 	if args.RefreshTokenTTLSeconds != 0 {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("refreshTokenTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.RefreshTokenTTLSeconds))
 	}
 	if args.MagicLinkTTLSeconds != 0 {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("magicLinkTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.MagicLinkTTLSeconds))
 	}
 	if args.InvitationTTLDays != 0 {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("invitationTTLDays: ")
 		b.WriteString(fmt.Sprintf("%v", args.InvitationTTLDays))
 	}
 	if args.RefreshCookieSameSite != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("refreshCookieSameSite: ")
 		b.WriteString(fmt.Sprintf("%q", args.RefreshCookieSameSite))
 	}
 	if args.AuthoredAutomationsEnabledSet {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authoredAutomationsEnabled: ")
@@ -2757,33 +2757,33 @@ func MutationCreateClusterSettingsBuild(args MutationCreateClusterSettingsArgs) 
 	return b.String()
 }
 
-// MutationCreateDatabase -- Register the cluster's database in the graph
+// CreateDatabase -- Register the cluster's database in the graph
 //
 // Bound concept: database.
-type MutationCreateDatabaseArgs struct {
+type CreateDatabaseArgs struct {
 	Host    string
 	DbName  string
 	SslMode string
 }
 
-// MutationCreateDatabase calls the engine mutation mutationCreateDatabase.
-func (qc *QueryClient) MutationCreateDatabase(ctx context.Context, args MutationCreateDatabaseArgs) (*Result, error) {
-	call := MutationCreateDatabaseBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateDatabase", call)
+// CreateDatabase calls the engine mutation createDatabase.
+func (qc *QueryClient) CreateDatabase(ctx context.Context, args CreateDatabaseArgs) (*Result, error) {
+	call := CreateDatabaseBuild(args)
+	return qc.executeNamed(ctx, "createDatabase", call)
 }
 
-func MutationCreateDatabaseBuild(args MutationCreateDatabaseArgs) string {
+func CreateDatabaseBuild(args CreateDatabaseArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateDatabase({")
+	b.WriteString("createDatabase({")
 	b.WriteString("host: ")
 	b.WriteString(fmt.Sprintf("%q", args.Host))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("dbName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DbName))
 	if args.SslMode != "" {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sslMode: ")
@@ -2793,10 +2793,10 @@ func MutationCreateDatabaseBuild(args MutationCreateDatabaseArgs) string {
 	return b.String()
 }
 
-// MutationCreateDelegation -- Create a new delegation granting an agent scoped authority on behalf of an identity.
+// CreateDelegation -- Create a new delegation granting an agent scoped authority on behalf of an identity.
 //
 // Bound concept: delegation.
-type MutationCreateDelegationArgs struct {
+type CreateDelegationArgs struct {
 	DelegationId    string
 	IdentityId      string
 	IdentitySubject string
@@ -2811,63 +2811,63 @@ type MutationCreateDelegationArgs struct {
 	Note             string
 }
 
-// MutationCreateDelegation calls the engine mutation mutationCreateDelegation.
-func (qc *QueryClient) MutationCreateDelegation(ctx context.Context, args MutationCreateDelegationArgs) (*Result, error) {
-	call := MutationCreateDelegationBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateDelegation", call)
+// CreateDelegation calls the engine mutation createDelegation.
+func (qc *QueryClient) CreateDelegation(ctx context.Context, args CreateDelegationArgs) (*Result, error) {
+	call := CreateDelegationBuild(args)
+	return qc.executeNamed(ctx, "createDelegation", call)
 }
 
-func MutationCreateDelegationBuild(args MutationCreateDelegationArgs) string {
+func CreateDelegationBuild(args CreateDelegationArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateDelegation({")
+	b.WriteString("createDelegation({")
 	if args.DelegationId != "" {
 		b.WriteString("delegationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.DelegationId))
 	}
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identitySubject: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentitySubject))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityType: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityType))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("roleCeiling: ")
 	b.WriteString(fmt.Sprintf("%q", args.RoleCeiling))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("scopes: ")
 	b.WriteString(renderMemQLValue(args.Scopes))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("createdBySubject: ")
 	b.WriteString(fmt.Sprintf("%q", args.CreatedBySubject))
 	if args.ExpiresAt != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	}
 	if args.Note != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
@@ -2877,10 +2877,10 @@ func MutationCreateDelegationBuild(args MutationCreateDelegationArgs) string {
 	return b.String()
 }
 
-// MutationCreateDeployment -- Create a v1:cluster:deployment record at deploy start (status defaults to pending). Uses deploymentId as the concept id so status transitions append to one timeline. #1872.
+// CreateDeployment -- Create a v1:cluster:deployment record at deploy start (status defaults to pending). Uses deploymentId as the concept id so status transitions append to one timeline. #1872.
 //
 // Bound concept: deployment.
-type MutationCreateDeploymentArgs struct {
+type CreateDeploymentArgs struct {
 	DeploymentId string
 	// Enum: pending | in_progress | succeeded | failed | superseded | rolled_back
 	Status      string
@@ -2897,89 +2897,89 @@ type MutationCreateDeploymentArgs struct {
 	PreviousDeploymentId string
 }
 
-// MutationCreateDeployment calls the engine mutation mutationCreateDeployment.
-func (qc *QueryClient) MutationCreateDeployment(ctx context.Context, args MutationCreateDeploymentArgs) (*Result, error) {
-	call := MutationCreateDeploymentBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateDeployment", call)
+// CreateDeployment calls the engine mutation createDeployment.
+func (qc *QueryClient) CreateDeployment(ctx context.Context, args CreateDeploymentArgs) (*Result, error) {
+	call := CreateDeploymentBuild(args)
+	return qc.executeNamed(ctx, "createDeployment", call)
 }
 
-func MutationCreateDeploymentBuild(args MutationCreateDeploymentArgs) string {
+func CreateDeploymentBuild(args CreateDeploymentArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateDeployment({")
+	b.WriteString("createDeployment({")
 	b.WriteString("deploymentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
 	if args.Status != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
 	if args.Version != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
 		b.WriteString(fmt.Sprintf("%q", args.Version))
 	}
 	if args.ImageDigest != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("imageDigest: ")
 		b.WriteString(fmt.Sprintf("%q", args.ImageDigest))
 	}
 	if args.Provider != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provider: ")
 		b.WriteString(fmt.Sprintf("%q", args.Provider))
 	}
 	if args.Environment != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("environment: ")
 		b.WriteString(fmt.Sprintf("%q", args.Environment))
 	}
 	if args.Region != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("region: ")
 		b.WriteString(fmt.Sprintf("%q", args.Region))
 	}
 	if args.ClusterId != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clusterId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ClusterId))
 	}
 	if args.TriggeredBy != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("triggeredBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.TriggeredBy))
 	}
 	if args.Notes != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notes: ")
 		b.WriteString(fmt.Sprintf("%q", args.Notes))
 	}
 	if args.Changelog != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("changelog: ")
 		b.WriteString(fmt.Sprintf("%q", args.Changelog))
 	}
 	if args.PreviousDeploymentId != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("previousDeploymentId: ")
@@ -2989,10 +2989,10 @@ func MutationCreateDeploymentBuild(args MutationCreateDeploymentArgs) string {
 	return b.String()
 }
 
-// MutationCreateDocumentChunk -- Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the CoPresent UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceUtteranceId / sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.
+// CreateDocumentChunk -- Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the CoPresent UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceUtteranceId / sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.
 //
 // Bound concept: documentChunk.
-type MutationCreateDocumentChunkArgs struct {
+type CreateDocumentChunkArgs struct {
 	ChunkId           string
 	DomainId          string
 	Text              string
@@ -3005,69 +3005,69 @@ type MutationCreateDocumentChunkArgs struct {
 	SourceTopic       string
 }
 
-// MutationCreateDocumentChunk calls the engine mutation mutationCreateDocumentChunk.
-func (qc *QueryClient) MutationCreateDocumentChunk(ctx context.Context, args MutationCreateDocumentChunkArgs) (*Result, error) {
-	call := MutationCreateDocumentChunkBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateDocumentChunk", call)
+// CreateDocumentChunk calls the engine mutation createDocumentChunk.
+func (qc *QueryClient) CreateDocumentChunk(ctx context.Context, args CreateDocumentChunkArgs) (*Result, error) {
+	call := CreateDocumentChunkBuild(args)
+	return qc.executeNamed(ctx, "createDocumentChunk", call)
 }
 
-func MutationCreateDocumentChunkBuild(args MutationCreateDocumentChunkArgs) string {
+func CreateDocumentChunkBuild(args CreateDocumentChunkArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateDocumentChunk({")
+	b.WriteString("createDocumentChunk({")
 	b.WriteString("chunkId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ChunkId))
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
 	if args.SourceRef != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceRef: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceRef))
 	}
 	if args.Seq != 0 {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("seq: ")
 		b.WriteString(fmt.Sprintf("%v", args.Seq))
 	}
 	if args.TokenCount != 0 {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenCount: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenCount))
 	}
 	if args.SourceUtteranceId != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceUtteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceUtteranceId))
 	}
 	if args.SourceAgentId != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceAgentId))
 	}
 	if args.SourceTopic != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceTopic: ")
@@ -3077,10 +3077,10 @@ func MutationCreateDocumentChunkBuild(args MutationCreateDocumentChunkArgs) stri
 	return b.String()
 }
 
-// MutationCreateGeneratedOutput -- Create a generated-output row -- a deliverable PRODUCED through the app (workbench result, computer-use output, or standalone agent output). System / agent-invoked: ownerUserId is the producing user. logicIndexGeneratedOutput folds the new row into the Library index automatically. body carries inline text outputs; attachmentId references file bytes for file-backed outputs.
+// CreateGeneratedOutput -- Create a generated-output row -- a deliverable PRODUCED through the app (workbench result, computer-use output, or standalone agent output). System / agent-invoked: ownerUserId is the producing user. indexGeneratedOutput folds the new row into the Library index automatically. body carries inline text outputs; attachmentId references file bytes for file-backed outputs.
 //
 // Bound concept: generatedOutput.
-type MutationCreateGeneratedOutputArgs struct {
+type CreateGeneratedOutputArgs struct {
 	OutputId     string
 	OwnerUserId  string
 	Title        string
@@ -3099,97 +3099,97 @@ type MutationCreateGeneratedOutputArgs struct {
 	ProducedByWorkerName string
 }
 
-// MutationCreateGeneratedOutput calls the engine mutation mutationCreateGeneratedOutput.
-func (qc *QueryClient) MutationCreateGeneratedOutput(ctx context.Context, args MutationCreateGeneratedOutputArgs) (*Result, error) {
-	call := MutationCreateGeneratedOutputBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateGeneratedOutput", call)
+// CreateGeneratedOutput calls the engine mutation createGeneratedOutput.
+func (qc *QueryClient) CreateGeneratedOutput(ctx context.Context, args CreateGeneratedOutputArgs) (*Result, error) {
+	call := CreateGeneratedOutputBuild(args)
+	return qc.executeNamed(ctx, "createGeneratedOutput", call)
 }
 
-func MutationCreateGeneratedOutputBuild(args MutationCreateGeneratedOutputArgs) string {
+func CreateGeneratedOutputBuild(args CreateGeneratedOutputArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateGeneratedOutput({")
+	b.WriteString("createGeneratedOutput({")
 	b.WriteString("outputId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OutputId))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
 	if args.Summary != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
 		b.WriteString(fmt.Sprintf("%q", args.Summary))
 	}
 	if args.Body != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("body: ")
 		b.WriteString(fmt.Sprintf("%q", args.Body))
 	}
 	if args.AttachmentId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attachmentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
 	}
 	if args.Format != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("format: ")
 		b.WriteString(fmt.Sprintf("%q", args.Format))
 	}
 	if args.MimeType != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mimeType: ")
 		b.WriteString(fmt.Sprintf("%q", args.MimeType))
 	}
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
 	if args.PartitionId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.ProducedByPlanId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
 	}
 	if args.ProducedByAgentId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByAgentId))
 	}
 	if args.ProducedByWorkerId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByWorkerId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByWorkerId))
 	}
 	if args.ProducedByWorkerName != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByWorkerName: ")
@@ -3199,10 +3199,10 @@ func MutationCreateGeneratedOutputBuild(args MutationCreateGeneratedOutputArgs) 
 	return b.String()
 }
 
-// MutationCreateGreetingUtterance -- Create a greeting utterance for an AI participant joining a space
+// CreateGreetingUtterance -- Create a greeting utterance for an AI participant joining a space
 //
 // Bound concept: utterance.
-type MutationCreateGreetingUtteranceArgs struct {
+type CreateGreetingUtteranceArgs struct {
 	PartitionId   string
 	ParticipantId string
 	AgentId       string
@@ -3210,33 +3210,33 @@ type MutationCreateGreetingUtteranceArgs struct {
 	GreetingKind  string
 }
 
-// MutationCreateGreetingUtterance calls the engine mutation mutationCreateGreetingUtterance.
-func (qc *QueryClient) MutationCreateGreetingUtterance(ctx context.Context, args MutationCreateGreetingUtteranceArgs) (*Result, error) {
-	call := MutationCreateGreetingUtteranceBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateGreetingUtterance", call)
+// CreateGreetingUtterance calls the engine mutation createGreetingUtterance.
+func (qc *QueryClient) CreateGreetingUtterance(ctx context.Context, args CreateGreetingUtteranceArgs) (*Result, error) {
+	call := CreateGreetingUtteranceBuild(args)
+	return qc.executeNamed(ctx, "createGreetingUtterance", call)
 }
 
-func MutationCreateGreetingUtteranceBuild(args MutationCreateGreetingUtteranceArgs) string {
+func CreateGreetingUtteranceBuild(args CreateGreetingUtteranceArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateGreetingUtterance({")
+	b.WriteString("createGreetingUtterance({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("greetingKind: ")
@@ -3245,35 +3245,35 @@ func MutationCreateGreetingUtteranceBuild(args MutationCreateGreetingUtteranceAr
 	return b.String()
 }
 
-// MutationCreateHarnessPlan -- Create a v1:harness:plan in status='open'. ownerUserId is stamped from actor.userId (owned tier). Single write path for plan creation.
+// CreateHarnessPlan -- Create a v1:harness:plan in status='open'. ownerUserId is stamped from actor.userId (owned tier). Single write path for plan creation.
 //
 // Bound concept: plan.
-type MutationCreateHarnessPlanArgs struct {
+type CreateHarnessPlanArgs struct {
 	PlanId string
 	Goal   string
 	Input  map[string]any
 }
 
-// MutationCreateHarnessPlan calls the engine mutation mutationCreateHarnessPlan.
-func (qc *QueryClient) MutationCreateHarnessPlan(ctx context.Context, args MutationCreateHarnessPlanArgs) (*Result, error) {
-	call := MutationCreateHarnessPlanBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateHarnessPlan", call)
+// CreateHarnessPlan calls the engine mutation createHarnessPlan.
+func (qc *QueryClient) CreateHarnessPlan(ctx context.Context, args CreateHarnessPlanArgs) (*Result, error) {
+	call := CreateHarnessPlanBuild(args)
+	return qc.executeNamed(ctx, "createHarnessPlan", call)
 }
 
-func MutationCreateHarnessPlanBuild(args MutationCreateHarnessPlanArgs) string {
+func CreateHarnessPlanBuild(args CreateHarnessPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateHarnessPlan({")
+	b.WriteString("createHarnessPlan({")
 	if args.PlanId != "" {
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("goal: ")
 	b.WriteString(fmt.Sprintf("%q", args.Goal))
 	if args.Input != nil {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("input: ")
@@ -3283,10 +3283,10 @@ func MutationCreateHarnessPlanBuild(args MutationCreateHarnessPlanArgs) string {
 	return b.String()
 }
 
-// MutationCreateHarnessSemanticMemory -- Create a v1:harness:semanticMemory -- a new distilled belief. ownerUserId stamped from actor.userId (owned tier). sourceEpisodes records provenance back to the episodic nodes it was distilled from. confidence/reinforceCount/lastReinforced seed the decay clock. content is the embedding source for similarTo dedup + recall (#585).
+// CreateHarnessSemanticMemory -- Create a v1:harness:semanticMemory -- a new distilled belief. ownerUserId stamped from actor.userId (owned tier). sourceEpisodes records provenance back to the episodic nodes it was distilled from. confidence/reinforceCount/lastReinforced seed the decay clock. content is the embedding source for similarTo dedup + recall (#585).
 //
 // Bound concept: semanticMemory.
-type MutationCreateHarnessSemanticMemoryArgs struct {
+type CreateHarnessSemanticMemoryArgs struct {
 	MemoryId string
 	// Enum: fact | preference | outcome
 	Kind           string
@@ -3296,40 +3296,40 @@ type MutationCreateHarnessSemanticMemoryArgs struct {
 	LastReinforced string
 }
 
-// MutationCreateHarnessSemanticMemory calls the engine mutation mutationCreateHarnessSemanticMemory.
-func (qc *QueryClient) MutationCreateHarnessSemanticMemory(ctx context.Context, args MutationCreateHarnessSemanticMemoryArgs) (*Result, error) {
-	call := MutationCreateHarnessSemanticMemoryBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateHarnessSemanticMemory", call)
+// CreateHarnessSemanticMemory calls the engine mutation createHarnessSemanticMemory.
+func (qc *QueryClient) CreateHarnessSemanticMemory(ctx context.Context, args CreateHarnessSemanticMemoryArgs) (*Result, error) {
+	call := CreateHarnessSemanticMemoryBuild(args)
+	return qc.executeNamed(ctx, "createHarnessSemanticMemory", call)
 }
 
-func MutationCreateHarnessSemanticMemoryBuild(args MutationCreateHarnessSemanticMemoryArgs) string {
+func CreateHarnessSemanticMemoryBuild(args CreateHarnessSemanticMemoryArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateHarnessSemanticMemory({")
+	b.WriteString("createHarnessSemanticMemory({")
 	if args.MemoryId != "" {
 		b.WriteString("memoryId: ")
 		b.WriteString(fmt.Sprintf("%q", args.MemoryId))
 	}
-	if b.Len() > 37 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 37 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("content: ")
 	b.WriteString(fmt.Sprintf("%q", args.Content))
-	if b.Len() > 37 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("sourceEpisodes: ")
 	b.WriteString(renderMemQLValue(args.SourceEpisodes))
-	if b.Len() > 37 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
 	b.WriteString(fmt.Sprintf("%q", args.Confidence))
-	if b.Len() > 37 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastReinforced: ")
@@ -3338,10 +3338,10 @@ func MutationCreateHarnessSemanticMemoryBuild(args MutationCreateHarnessSemantic
 	return b.String()
 }
 
-// MutationCreateIdentity -- Create a new identity (credential set owned by a user).
+// CreateIdentity -- Create a new identity (credential set owned by a user).
 //
 // Bound concept: identity.
-type MutationCreateIdentityArgs struct {
+type CreateIdentityArgs struct {
 	IdentityId string
 	UserId     string
 	// Enum: oauth | api_key | service_account | magic_link | worker_token
@@ -3352,41 +3352,41 @@ type MutationCreateIdentityArgs struct {
 	UsableByAgentsSet bool // set true to send usableByAgents; required because zero-value bool is ambiguous
 }
 
-// MutationCreateIdentity calls the engine mutation mutationCreateIdentity.
-func (qc *QueryClient) MutationCreateIdentity(ctx context.Context, args MutationCreateIdentityArgs) (*Result, error) {
-	call := MutationCreateIdentityBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateIdentity", call)
+// CreateIdentity calls the engine mutation createIdentity.
+func (qc *QueryClient) CreateIdentity(ctx context.Context, args CreateIdentityArgs) (*Result, error) {
+	call := CreateIdentityBuild(args)
+	return qc.executeNamed(ctx, "createIdentity", call)
 }
 
-func MutationCreateIdentityBuild(args MutationCreateIdentityArgs) string {
+func CreateIdentityBuild(args CreateIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateIdentity({")
+	b.WriteString("createIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityType: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityType))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("credentials: ")
 	b.WriteString(renderMemQLValue(args.Credentials))
 	if args.Label != "" {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("label: ")
 		b.WriteString(fmt.Sprintf("%q", args.Label))
 	}
 	if args.UsableByAgentsSet {
-		if b.Len() > 24 {
+		if b.Len() > 16 {
 			b.WriteString(", ")
 		}
 		b.WriteString("usableByAgents: ")
@@ -3396,41 +3396,41 @@ func MutationCreateIdentityBuild(args MutationCreateIdentityArgs) string {
 	return b.String()
 }
 
-// MutationCreateIdentityProvider -- Register the cluster's identity provider in the graph
+// CreateIdentityProvider -- Register the cluster's identity provider in the graph
 //
 // Bound concept: identityProvider.
-type MutationCreateIdentityProviderArgs struct {
+type CreateIdentityProviderArgs struct {
 	Name           string
 	IssuerUrl      string
 	ClientIdPrefix string
 	RedirectUrl    string
 }
 
-// MutationCreateIdentityProvider calls the engine mutation mutationCreateIdentityProvider.
-func (qc *QueryClient) MutationCreateIdentityProvider(ctx context.Context, args MutationCreateIdentityProviderArgs) (*Result, error) {
-	call := MutationCreateIdentityProviderBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateIdentityProvider", call)
+// CreateIdentityProvider calls the engine mutation createIdentityProvider.
+func (qc *QueryClient) CreateIdentityProvider(ctx context.Context, args CreateIdentityProviderArgs) (*Result, error) {
+	call := CreateIdentityProviderBuild(args)
+	return qc.executeNamed(ctx, "createIdentityProvider", call)
 }
 
-func MutationCreateIdentityProviderBuild(args MutationCreateIdentityProviderArgs) string {
+func CreateIdentityProviderBuild(args CreateIdentityProviderArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateIdentityProvider({")
+	b.WriteString("createIdentityProvider({")
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("issuerUrl: ")
 	b.WriteString(fmt.Sprintf("%q", args.IssuerUrl))
 	if args.ClientIdPrefix != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clientIdPrefix: ")
 		b.WriteString(fmt.Sprintf("%q", args.ClientIdPrefix))
 	}
 	if args.RedirectUrl != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("redirectUrl: ")
@@ -3440,10 +3440,10 @@ func MutationCreateIdentityProviderBuild(args MutationCreateIdentityProviderArgs
 	return b.String()
 }
 
-// MutationCreateMagicLinkRequest -- Create a magic-link request row at issuance time.
+// CreateMagicLinkRequest -- Create a magic-link request row at issuance time.
 //
 // Bound concept: magicLinkRequest.
-type MutationCreateMagicLinkRequestArgs struct {
+type CreateMagicLinkRequestArgs struct {
 	RequestId    string
 	Email        string
 	TokenHash    string
@@ -3454,55 +3454,55 @@ type MutationCreateMagicLinkRequestArgs struct {
 	InvitationId string
 }
 
-// MutationCreateMagicLinkRequest calls the engine mutation mutationCreateMagicLinkRequest.
-func (qc *QueryClient) MutationCreateMagicLinkRequest(ctx context.Context, args MutationCreateMagicLinkRequestArgs) (*Result, error) {
-	call := MutationCreateMagicLinkRequestBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateMagicLinkRequest", call)
+// CreateMagicLinkRequest calls the engine mutation createMagicLinkRequest.
+func (qc *QueryClient) CreateMagicLinkRequest(ctx context.Context, args CreateMagicLinkRequestArgs) (*Result, error) {
+	call := CreateMagicLinkRequestBuild(args)
+	return qc.executeNamed(ctx, "createMagicLinkRequest", call)
 }
 
-func MutationCreateMagicLinkRequestBuild(args MutationCreateMagicLinkRequestArgs) string {
+func CreateMagicLinkRequestBuild(args CreateMagicLinkRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateMagicLinkRequest({")
+	b.WriteString("createMagicLinkRequest({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("email: ")
 	b.WriteString(fmt.Sprintf("%q", args.Email))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	if args.SourceIP != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceIP))
 	}
 	if args.UserAgent != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userAgent: ")
 		b.WriteString(fmt.Sprintf("%q", args.UserAgent))
 	}
 	if args.OauthCtxJSON != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("oauthCtxJSON: ")
 		b.WriteString(fmt.Sprintf("%q", args.OauthCtxJSON))
 	}
 	if args.InvitationId != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("invitationId: ")
@@ -3512,10 +3512,10 @@ func MutationCreateMagicLinkRequestBuild(args MutationCreateMagicLinkRequestArgs
 	return b.String()
 }
 
-// MutationCreateMemory -- Create a memory the assistant retains about the user. Owned: ownerUserId is stamped from actor.userId, so a memory can only ever be created for the acting user (or their delegated agent's bound user). logicIndexMemory folds it into the Library Records lens automatically.
+// CreateMemory -- Create a memory the assistant retains about the user. Owned: ownerUserId is stamped from actor.userId, so a memory can only ever be created for the acting user (or their delegated agent's bound user). indexMemory folds it into the Library Records lens automatically.
 //
 // Bound concept: memory.
-type MutationCreateMemoryArgs struct {
+type CreateMemoryArgs struct {
 	MemoryId string
 	Title    string
 	Content  string
@@ -3527,57 +3527,57 @@ type MutationCreateMemoryArgs struct {
 	SourceUtteranceId string
 }
 
-// MutationCreateMemory calls the engine mutation mutationCreateMemory.
-func (qc *QueryClient) MutationCreateMemory(ctx context.Context, args MutationCreateMemoryArgs) (*Result, error) {
-	call := MutationCreateMemoryBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateMemory", call)
+// CreateMemory calls the engine mutation createMemory.
+func (qc *QueryClient) CreateMemory(ctx context.Context, args CreateMemoryArgs) (*Result, error) {
+	call := CreateMemoryBuild(args)
+	return qc.executeNamed(ctx, "createMemory", call)
 }
 
-func MutationCreateMemoryBuild(args MutationCreateMemoryArgs) string {
+func CreateMemoryBuild(args CreateMemoryArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateMemory({")
+	b.WriteString("createMemory({")
 	b.WriteString("memoryId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
-	if b.Len() > 22 {
+	if b.Len() > 14 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
-	if b.Len() > 22 {
+	if b.Len() > 14 {
 		b.WriteString(", ")
 	}
 	b.WriteString("content: ")
 	b.WriteString(fmt.Sprintf("%q", args.Content))
 	if args.Summary != "" {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
 		b.WriteString(fmt.Sprintf("%q", args.Summary))
 	}
 	if args.Kind != "" {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("kind: ")
 		b.WriteString(fmt.Sprintf("%q", args.Kind))
 	}
 	if args.AgentId != "" {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.PartitionId != "" {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.SourceUtteranceId != "" {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceUtteranceId: ")
@@ -3587,10 +3587,10 @@ func MutationCreateMemoryBuild(args MutationCreateMemoryArgs) string {
 	return b.String()
 }
 
-// MutationCreateNode -- Register a node in the cluster
+// CreateNode -- Register a node in the cluster
 //
 // Bound concept: node.
-type MutationCreateNodeArgs struct {
+type CreateNodeArgs struct {
 	Id           string
 	NodeType     string
 	Address      string
@@ -3604,82 +3604,82 @@ type MutationCreateNodeArgs struct {
 	Region       string
 }
 
-// MutationCreateNode calls the engine mutation mutationCreateNode.
-func (qc *QueryClient) MutationCreateNode(ctx context.Context, args MutationCreateNodeArgs) (*Result, error) {
-	call := MutationCreateNodeBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateNode", call)
+// CreateNode calls the engine mutation createNode.
+func (qc *QueryClient) CreateNode(ctx context.Context, args CreateNodeArgs) (*Result, error) {
+	call := CreateNodeBuild(args)
+	return qc.executeNamed(ctx, "createNode", call)
 }
 
-func MutationCreateNodeBuild(args MutationCreateNodeArgs) string {
+func CreateNodeBuild(args CreateNodeArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateNode({")
+	b.WriteString("createNode({")
 	if args.Id != "" {
 		b.WriteString("id: ")
 		b.WriteString(fmt.Sprintf("%q", args.Id))
 	}
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeType))
 	if args.Address != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("address: ")
 		b.WriteString(fmt.Sprintf("%q", args.Address))
 	}
 	if args.Health != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("health: ")
 		b.WriteString(fmt.Sprintf("%q", args.Health))
 	}
 	if args.LastSeen != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastSeen: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastSeen))
 	}
 	if args.Capabilities != nil {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capabilities: ")
 		b.WriteString(renderMemQLValue(args.Capabilities))
 	}
 	if args.Labels != nil {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("labels: ")
 		b.WriteString(renderMemQLValue(args.Labels))
 	}
 	if args.DeploymentId != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("deploymentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
 	}
 	if args.Provider != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provider: ")
 		b.WriteString(fmt.Sprintf("%q", args.Provider))
 	}
 	if args.Environment != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("environment: ")
 		b.WriteString(fmt.Sprintf("%q", args.Environment))
 	}
 	if args.Region != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("region: ")
@@ -3689,10 +3689,10 @@ func MutationCreateNodeBuild(args MutationCreateNodeArgs) string {
 	return b.String()
 }
 
-// MutationCreateNodeTokenIdentity -- Create a node_token identity (machine credential for a cluster-internal node binary). Stores only the SHA-256 hex hash; the actual credential is a class=node JWT.
+// CreateNodeTokenIdentity -- Create a node_token identity (machine credential for a cluster-internal node binary). Stores only the SHA-256 hex hash; the actual credential is a class=node JWT.
 //
 // Bound concept: identity.
-type MutationCreateNodeTokenIdentityArgs struct {
+type CreateNodeTokenIdentityArgs struct {
 	IdentityId       string
 	UserId           string
 	NodeId           string
@@ -3704,58 +3704,58 @@ type MutationCreateNodeTokenIdentityArgs struct {
 	BootstrappedFrom string
 }
 
-// MutationCreateNodeTokenIdentity calls the engine mutation mutationCreateNodeTokenIdentity.
-func (qc *QueryClient) MutationCreateNodeTokenIdentity(ctx context.Context, args MutationCreateNodeTokenIdentityArgs) (*Result, error) {
-	call := MutationCreateNodeTokenIdentityBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateNodeTokenIdentity", call)
+// CreateNodeTokenIdentity calls the engine mutation createNodeTokenIdentity.
+func (qc *QueryClient) CreateNodeTokenIdentity(ctx context.Context, args CreateNodeTokenIdentityArgs) (*Result, error) {
+	call := CreateNodeTokenIdentityBuild(args)
+	return qc.executeNamed(ctx, "createNodeTokenIdentity", call)
 }
 
-func MutationCreateNodeTokenIdentityBuild(args MutationCreateNodeTokenIdentityArgs) string {
+func CreateNodeTokenIdentityBuild(args CreateNodeTokenIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateNodeTokenIdentity({")
+	b.WriteString("createNodeTokenIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeId))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeType))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mintedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
 	if args.ExpiresAt != "" {
-		if b.Len() > 33 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	}
 	if args.BootstrappedAt != "" {
-		if b.Len() > 33 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrappedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
 	}
 	if args.BootstrappedFrom != "" {
-		if b.Len() > 33 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrappedFrom: ")
@@ -3765,41 +3765,41 @@ func MutationCreateNodeTokenIdentityBuild(args MutationCreateNodeTokenIdentityAr
 	return b.String()
 }
 
-// MutationCreateNote -- Create a note for the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own notes. title and tags are optional; body is required. updatedAt is stamped to now.
+// CreateNote -- Create a note for the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own notes. title and tags are optional; body is required. updatedAt is stamped to now.
 //
 // Bound concept: note.
-type MutationCreateNoteArgs struct {
+type CreateNoteArgs struct {
 	NoteId string
 	Title  string
 	Body   string
 	Tags   []string
 }
 
-// MutationCreateNote calls the engine mutation mutationCreateNote.
-func (qc *QueryClient) MutationCreateNote(ctx context.Context, args MutationCreateNoteArgs) (*Result, error) {
-	call := MutationCreateNoteBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateNote", call)
+// CreateNote calls the engine mutation createNote.
+func (qc *QueryClient) CreateNote(ctx context.Context, args CreateNoteArgs) (*Result, error) {
+	call := CreateNoteBuild(args)
+	return qc.executeNamed(ctx, "createNote", call)
 }
 
-func MutationCreateNoteBuild(args MutationCreateNoteArgs) string {
+func CreateNoteBuild(args CreateNoteArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateNote({")
+	b.WriteString("createNote({")
 	b.WriteString("noteId: ")
 	b.WriteString(fmt.Sprintf("%q", args.NoteId))
 	if args.Title != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("title: ")
 		b.WriteString(fmt.Sprintf("%q", args.Title))
 	}
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("body: ")
 	b.WriteString(fmt.Sprintf("%q", args.Body))
 	if args.Tags != nil {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tags: ")
@@ -3809,10 +3809,10 @@ func MutationCreateNoteBuild(args MutationCreateNoteArgs) string {
 	return b.String()
 }
 
-// MutationCreateOAuthClient -- Persist a dynamically-registered public OAuth client (RFC 7591).
+// CreateOAuthClient -- Persist a dynamically-registered public OAuth client (RFC 7591).
 //
 // Bound concept: oauthClient.
-type MutationCreateOAuthClientArgs struct {
+type CreateOAuthClientArgs struct {
 	ClientId                string
 	ClientName              string
 	RedirectURIsJSON        string
@@ -3822,51 +3822,51 @@ type MutationCreateOAuthClientArgs struct {
 	RegisteredAt            string
 }
 
-// MutationCreateOAuthClient calls the engine mutation mutationCreateOAuthClient.
-func (qc *QueryClient) MutationCreateOAuthClient(ctx context.Context, args MutationCreateOAuthClientArgs) (*Result, error) {
-	call := MutationCreateOAuthClientBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateOAuthClient", call)
+// CreateOAuthClient calls the engine mutation createOAuthClient.
+func (qc *QueryClient) CreateOAuthClient(ctx context.Context, args CreateOAuthClientArgs) (*Result, error) {
+	call := CreateOAuthClientBuild(args)
+	return qc.executeNamed(ctx, "createOAuthClient", call)
 }
 
-func MutationCreateOAuthClientBuild(args MutationCreateOAuthClientArgs) string {
+func CreateOAuthClientBuild(args CreateOAuthClientArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateOAuthClient({")
+	b.WriteString("createOAuthClient({")
 	b.WriteString("clientId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ClientId))
 	if args.ClientName != "" {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clientName: ")
 		b.WriteString(fmt.Sprintf("%q", args.ClientName))
 	}
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("redirectURIsJSON: ")
 	b.WriteString(fmt.Sprintf("%q", args.RedirectURIsJSON))
 	if args.GrantTypes != "" {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("grantTypes: ")
 		b.WriteString(fmt.Sprintf("%q", args.GrantTypes))
 	}
 	if args.ResponseTypes != "" {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("responseTypes: ")
 		b.WriteString(fmt.Sprintf("%q", args.ResponseTypes))
 	}
 	if args.TokenEndpointAuthMethod != "" {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenEndpointAuthMethod: ")
 		b.WriteString(fmt.Sprintf("%q", args.TokenEndpointAuthMethod))
 	}
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registeredAt: ")
@@ -3875,10 +3875,10 @@ func MutationCreateOAuthClientBuild(args MutationCreateOAuthClientArgs) string {
 	return b.String()
 }
 
-// MutationCreatePATIdentity -- Create a Personal Access Token identity (api_key) owned by a user. Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.
+// CreatePATIdentity -- Create a Personal Access Token identity (api_key) owned by a user. Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.
 //
 // Bound concept: identity.
-type MutationCreatePATIdentityArgs struct {
+type CreatePATIdentityArgs struct {
 	IdentityId        string
 	UserId            string
 	Label             string
@@ -3887,34 +3887,34 @@ type MutationCreatePATIdentityArgs struct {
 	UsableByAgentsSet bool // set true to send usableByAgents; required because zero-value bool is ambiguous
 }
 
-// MutationCreatePATIdentity calls the engine mutation mutationCreatePATIdentity.
-func (qc *QueryClient) MutationCreatePATIdentity(ctx context.Context, args MutationCreatePATIdentityArgs) (*Result, error) {
-	call := MutationCreatePATIdentityBuild(args)
-	return qc.executeNamed(ctx, "mutationCreatePATIdentity", call)
+// CreatePATIdentity calls the engine mutation createPATIdentity.
+func (qc *QueryClient) CreatePATIdentity(ctx context.Context, args CreatePATIdentityArgs) (*Result, error) {
+	call := CreatePATIdentityBuild(args)
+	return qc.executeNamed(ctx, "createPATIdentity", call)
 }
 
-func MutationCreatePATIdentityBuild(args MutationCreatePATIdentityArgs) string {
+func CreatePATIdentityBuild(args CreatePATIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreatePATIdentity({")
+	b.WriteString("createPATIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
 	b.WriteString(fmt.Sprintf("%q", args.Label))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
 	if args.UsableByAgentsSet {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("usableByAgents: ")
@@ -3924,10 +3924,10 @@ func MutationCreatePATIdentityBuild(args MutationCreatePATIdentityArgs) string {
 	return b.String()
 }
 
-// MutationCreatePlan -- Insert a v1:planner:plan row in status='queued'. Single write path for Plan creation across all trigger sources.
+// CreatePlan -- Insert a v1:planner:plan row in status='queued'. Single write path for Plan creation across all trigger sources.
 //
 // Bound concept: plan.
-type MutationCreatePlanArgs struct {
+type CreatePlanArgs struct {
 	PlanId                  string
 	PartitionId             string
 	ParentPlanId            string
@@ -3945,95 +3945,95 @@ type MutationCreatePlanArgs struct {
 	ChatAnchorMessageId     string
 }
 
-// MutationCreatePlan calls the engine mutation mutationCreatePlan.
-func (qc *QueryClient) MutationCreatePlan(ctx context.Context, args MutationCreatePlanArgs) (*Result, error) {
-	call := MutationCreatePlanBuild(args)
-	return qc.executeNamed(ctx, "mutationCreatePlan", call)
+// CreatePlan calls the engine mutation createPlan.
+func (qc *QueryClient) CreatePlan(ctx context.Context, args CreatePlanArgs) (*Result, error) {
+	call := CreatePlanBuild(args)
+	return qc.executeNamed(ctx, "createPlan", call)
 }
 
-func MutationCreatePlanBuild(args MutationCreatePlanArgs) string {
+func CreatePlanBuild(args CreatePlanArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreatePlan({")
+	b.WriteString("createPlan({")
 	if args.PlanId != "" {
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if args.ParentPlanId != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("parentPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParentPlanId))
 	}
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("goal: ")
 	b.WriteString(fmt.Sprintf("%q", args.Goal))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestedBy))
 	if args.TriggerSource != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("triggerSource: ")
 		b.WriteString(fmt.Sprintf("%q", args.TriggerSource))
 	}
 	if args.AuthorizedBy != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authorizedBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.AuthorizedBy))
 	}
 	if args.OwnerAgentId != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerAgentId))
 	}
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("input: ")
 	b.WriteString(renderMemQLValue(args.Input))
 	if args.RefinementContext != nil {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("refinementContext: ")
 		b.WriteString(renderMemQLValue(args.RefinementContext))
 	}
 	if args.TokenBudget != 0 {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenBudget: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenBudget))
 	}
 	if args.PauseExtendsDeadlineSet {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("pauseExtendsDeadline: ")
 		b.WriteString(fmt.Sprintf("%v", args.PauseExtendsDeadline))
 	}
 	if args.ChatAnchorMessageId != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("chatAnchorMessageId: ")
@@ -4043,10 +4043,10 @@ func MutationCreatePlanBuild(args MutationCreatePlanArgs) string {
 	return b.String()
 }
 
-// MutationCreateProject -- Register a v1:forge:project. createdByUserId is stamped from actor.userId.
+// CreateProject -- Register a v1:forge:project. createdByUserId is stamped from actor.userId.
 //
 // Bound concept: project.
-type MutationCreateProjectArgs struct {
+type CreateProjectArgs struct {
 	ProjectId   string
 	Slug        string
 	Name        string
@@ -4055,45 +4055,45 @@ type MutationCreateProjectArgs struct {
 	Description string
 }
 
-// MutationCreateProject calls the engine mutation mutationCreateProject.
-func (qc *QueryClient) MutationCreateProject(ctx context.Context, args MutationCreateProjectArgs) (*Result, error) {
-	call := MutationCreateProjectBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateProject", call)
+// CreateProject calls the engine mutation createProject.
+func (qc *QueryClient) CreateProject(ctx context.Context, args CreateProjectArgs) (*Result, error) {
+	call := CreateProjectBuild(args)
+	return qc.executeNamed(ctx, "createProject", call)
 }
 
-func MutationCreateProjectBuild(args MutationCreateProjectArgs) string {
+func CreateProjectBuild(args CreateProjectArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateProject({")
+	b.WriteString("createProject({")
 	if args.ProjectId != "" {
 		b.WriteString("projectId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProjectId))
 	}
-	if b.Len() > 23 {
+	if b.Len() > 15 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	if b.Len() > 23 {
+	if b.Len() > 15 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.TargetApp != "" {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetApp: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetApp))
 	}
 	if args.Repo != "" {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("repo: ")
 		b.WriteString(fmt.Sprintf("%q", args.Repo))
 	}
 	if args.Description != "" {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
@@ -4103,10 +4103,10 @@ func MutationCreateProjectBuild(args MutationCreateProjectArgs) string {
 	return b.String()
 }
 
-// MutationCreateRecord -- Create a data record in draft validation state awaiting check and confirmation
+// CreateRecord -- Create a data record in draft validation state awaiting check and confirmation
 //
 // Bound concept: record.
-type MutationCreateRecordArgs struct {
+type CreateRecordArgs struct {
 	RecordId           string
 	PartitionId        string
 	RecordType         string
@@ -4121,77 +4121,77 @@ type MutationCreateRecordArgs struct {
 	CreatedAt          string
 }
 
-// MutationCreateRecord calls the engine mutation mutationCreateRecord.
-func (qc *QueryClient) MutationCreateRecord(ctx context.Context, args MutationCreateRecordArgs) (*Result, error) {
-	call := MutationCreateRecordBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateRecord", call)
+// CreateRecord calls the engine mutation createRecord.
+func (qc *QueryClient) CreateRecord(ctx context.Context, args CreateRecordArgs) (*Result, error) {
+	call := CreateRecordBuild(args)
+	return qc.executeNamed(ctx, "createRecord", call)
 }
 
-func MutationCreateRecordBuild(args MutationCreateRecordArgs) string {
+func CreateRecordBuild(args CreateRecordArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateRecord({")
+	b.WriteString("createRecord({")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	if b.Len() > 22 {
+	if b.Len() > 14 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 22 {
+	if b.Len() > 14 {
 		b.WriteString(", ")
 	}
 	b.WriteString("recordType: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordType))
-	if b.Len() > 22 {
+	if b.Len() > 14 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
 	b.WriteString(fmt.Sprintf("%q", args.Label))
-	if b.Len() > 22 {
+	if b.Len() > 14 {
 		b.WriteString(", ")
 	}
 	b.WriteString("data: ")
 	b.WriteString(renderMemQLValue(args.Data))
-	if b.Len() > 22 {
+	if b.Len() > 14 {
 		b.WriteString(", ")
 	}
 	b.WriteString("importSource: ")
 	b.WriteString(fmt.Sprintf("%q", args.ImportSource))
-	if b.Len() > 22 {
+	if b.Len() > 14 {
 		b.WriteString(", ")
 	}
 	b.WriteString("importedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.ImportedBy))
 	if args.NaturalKeyField != "" {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyField: ")
 		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyField))
 	}
 	if args.NaturalKeyValue != "" {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyValue: ")
 		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyValue))
 	}
 	if args.SourceAttachmentId != "" {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceAttachmentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceAttachmentId))
 	}
 	if args.Confidence != 0 {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("confidence: ")
 		b.WriteString(fmt.Sprintf("%v", args.Confidence))
 	}
 	if args.CreatedAt != "" {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("createdAt: ")
@@ -4201,10 +4201,10 @@ func MutationCreateRecordBuild(args MutationCreateRecordArgs) string {
 	return b.String()
 }
 
-// MutationCreateRecordBatch -- Create a single data record from a batch import in draft validation state (called once per record)
+// CreateRecordBatch -- Create a single data record from a batch import in draft validation state (called once per record)
 //
 // Bound concept: record.
-type MutationCreateRecordBatchArgs struct {
+type CreateRecordBatchArgs struct {
 	RecordId           string
 	PartitionId        string
 	RecordType         string
@@ -4218,70 +4218,70 @@ type MutationCreateRecordBatchArgs struct {
 	Confidence         float64
 }
 
-// MutationCreateRecordBatch calls the engine mutation mutationCreateRecordBatch.
-func (qc *QueryClient) MutationCreateRecordBatch(ctx context.Context, args MutationCreateRecordBatchArgs) (*Result, error) {
-	call := MutationCreateRecordBatchBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateRecordBatch", call)
+// CreateRecordBatch calls the engine mutation createRecordBatch.
+func (qc *QueryClient) CreateRecordBatch(ctx context.Context, args CreateRecordBatchArgs) (*Result, error) {
+	call := CreateRecordBatchBuild(args)
+	return qc.executeNamed(ctx, "createRecordBatch", call)
 }
 
-func MutationCreateRecordBatchBuild(args MutationCreateRecordBatchArgs) string {
+func CreateRecordBatchBuild(args CreateRecordBatchArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateRecordBatch({")
+	b.WriteString("createRecordBatch({")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("recordType: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordType))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
 	b.WriteString(fmt.Sprintf("%q", args.Label))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("data: ")
 	b.WriteString(renderMemQLValue(args.Data))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("importSource: ")
 	b.WriteString(fmt.Sprintf("%q", args.ImportSource))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("importedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.ImportedBy))
 	if args.SourceAttachmentId != "" {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceAttachmentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceAttachmentId))
 	}
 	if args.NaturalKeyField != "" {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyField: ")
 		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyField))
 	}
 	if args.NaturalKeyValue != "" {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyValue: ")
 		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyValue))
 	}
 	if args.Confidence != 0 {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("confidence: ")
@@ -4291,10 +4291,10 @@ func MutationCreateRecordBatchBuild(args MutationCreateRecordBatchArgs) string {
 	return b.String()
 }
 
-// MutationCreateRequest -- Submit a v1:forge:request. submitterUserId + submitterRole are stamped server-side from actor (no spoofing). status lands 'submitted'; the routeRequest automation routes it by role.
+// CreateRequest -- Submit a v1:forge:request. submitterUserId + submitterRole are stamped server-side from actor (no spoofing). status lands 'submitted'; the routeRequest automation routes it by role.
 //
 // Bound concept: request.
-type MutationCreateRequestArgs struct {
+type CreateRequestArgs struct {
 	RequestId     string
 	ProjectId     string
 	RequestType   string
@@ -4304,50 +4304,50 @@ type MutationCreateRequestArgs struct {
 	Priority      string
 }
 
-// MutationCreateRequest calls the engine mutation mutationCreateRequest.
-func (qc *QueryClient) MutationCreateRequest(ctx context.Context, args MutationCreateRequestArgs) (*Result, error) {
-	call := MutationCreateRequestBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateRequest", call)
+// CreateRequest calls the engine mutation createRequest.
+func (qc *QueryClient) CreateRequest(ctx context.Context, args CreateRequestArgs) (*Result, error) {
+	call := CreateRequestBuild(args)
+	return qc.executeNamed(ctx, "createRequest", call)
 }
 
-func MutationCreateRequestBuild(args MutationCreateRequestArgs) string {
+func CreateRequestBuild(args CreateRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateRequest({")
+	b.WriteString("createRequest({")
 	if args.RequestId != "" {
 		b.WriteString("requestId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RequestId))
 	}
-	if b.Len() > 23 {
+	if b.Len() > 15 {
 		b.WriteString(", ")
 	}
 	b.WriteString("projectId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ProjectId))
 	if args.RequestType != "" {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requestType: ")
 		b.WriteString(fmt.Sprintf("%q", args.RequestType))
 	}
-	if b.Len() > 23 {
+	if b.Len() > 15 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
-	if b.Len() > 23 {
+	if b.Len() > 15 {
 		b.WriteString(", ")
 	}
 	b.WriteString("body: ")
 	b.WriteString(fmt.Sprintf("%q", args.Body))
 	if args.AttachmentIds != nil {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attachmentIds: ")
 		b.WriteString(renderMemQLValue(args.AttachmentIds))
 	}
 	if args.Priority != "" {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("priority: ")
@@ -4357,10 +4357,10 @@ func MutationCreateRequestBuild(args MutationCreateRequestArgs) string {
 	return b.String()
 }
 
-// MutationCreateResponsibility -- Create a v1:planner:responsibility in status='draft'. ownerUserId is stamped from actor.userId (owned tier) so a caller cannot author a directive owned by someone else. trigger discriminates the archetype: recurring carries schedule, reactive carries condition, standing carries neither. Single write path for responsibility creation.
+// CreateResponsibility -- Create a v1:planner:responsibility in status='draft'. ownerUserId is stamped from actor.userId (owned tier) so a caller cannot author a directive owned by someone else. trigger discriminates the archetype: recurring carries schedule, reactive carries condition, standing carries neither. Single write path for responsibility creation.
 //
 // Bound concept: responsibility.
-type MutationCreateResponsibilityArgs struct {
+type CreateResponsibilityArgs struct {
 	ResponsibilityId string
 	Statement        string
 	// Enum: reactive | standing | recurring
@@ -4378,87 +4378,87 @@ type MutationCreateResponsibilityArgs struct {
 	EnabledSet       bool // set true to send enabled; required because zero-value bool is ambiguous
 }
 
-// MutationCreateResponsibility calls the engine mutation mutationCreateResponsibility.
-func (qc *QueryClient) MutationCreateResponsibility(ctx context.Context, args MutationCreateResponsibilityArgs) (*Result, error) {
-	call := MutationCreateResponsibilityBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateResponsibility", call)
+// CreateResponsibility calls the engine mutation createResponsibility.
+func (qc *QueryClient) CreateResponsibility(ctx context.Context, args CreateResponsibilityArgs) (*Result, error) {
+	call := CreateResponsibilityBuild(args)
+	return qc.executeNamed(ctx, "createResponsibility", call)
 }
 
-func MutationCreateResponsibilityBuild(args MutationCreateResponsibilityArgs) string {
+func CreateResponsibilityBuild(args CreateResponsibilityArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateResponsibility({")
+	b.WriteString("createResponsibility({")
 	if args.ResponsibilityId != "" {
 		b.WriteString("responsibilityId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
 	}
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("statement: ")
 	b.WriteString(fmt.Sprintf("%q", args.Statement))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("trigger: ")
 	b.WriteString(fmt.Sprintf("%q", args.Trigger))
 	if args.Schedule != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("schedule: ")
 		b.WriteString(fmt.Sprintf("%q", args.Schedule))
 	}
 	if args.Condition != nil {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("condition: ")
 		b.WriteString(renderMemQLValue(args.Condition))
 	}
 	if args.TargetKind != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
 	}
 	if args.AssignedAgentId != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedAgentId))
 	}
 	if args.AssignedRoleSlug != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
 	}
 	if args.SuccessCriteria != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("successCriteria: ")
 		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
 	}
 	if args.NotifyHow != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notifyHow: ")
 		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
 	}
 	if args.ScopePartitionId != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("scopePartitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ScopePartitionId))
 	}
 	if args.EnabledSet {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("enabled: ")
@@ -4468,10 +4468,10 @@ func MutationCreateResponsibilityBuild(args MutationCreateResponsibilityArgs) st
 	return b.String()
 }
 
-// MutationCreateScopeElevationPlan -- Insert a Plan in awaitingFeedback / scope_elevation_required for a pending computer_use task. The emitScopeElevationCanvasCard automation lands the canvas card; the user approves or denies via the card's buttons.
+// CreateScopeElevationPlan -- Insert a Plan in awaitingFeedback / scope_elevation_required for a pending computer_use task. The emitScopeElevationCanvasCard automation lands the canvas card; the user approves or denies via the card's buttons.
 //
 // Bound concept: plan.
-type MutationCreateScopeElevationPlanArgs struct {
+type CreateScopeElevationPlanArgs struct {
 	PlanId         string
 	AgentId        string
 	OwnerUserId    string
@@ -4481,45 +4481,45 @@ type MutationCreateScopeElevationPlanArgs struct {
 	RequestedScope string
 }
 
-// MutationCreateScopeElevationPlan calls the engine mutation mutationCreateScopeElevationPlan.
-func (qc *QueryClient) MutationCreateScopeElevationPlan(ctx context.Context, args MutationCreateScopeElevationPlanArgs) (*Result, error) {
-	call := MutationCreateScopeElevationPlanBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateScopeElevationPlan", call)
+// CreateScopeElevationPlan calls the engine mutation createScopeElevationPlan.
+func (qc *QueryClient) CreateScopeElevationPlan(ctx context.Context, args CreateScopeElevationPlanArgs) (*Result, error) {
+	call := CreateScopeElevationPlanBuild(args)
+	return qc.executeNamed(ctx, "createScopeElevationPlan", call)
 }
 
-func MutationCreateScopeElevationPlanBuild(args MutationCreateScopeElevationPlanArgs) string {
+func CreateScopeElevationPlanBuild(args CreateScopeElevationPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateScopeElevationPlan({")
+	b.WriteString("createScopeElevationPlan({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	if args.PartitionId != "" {
-		if b.Len() > 34 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("intent: ")
 	b.WriteString(fmt.Sprintf("%q", args.Intent))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("summary: ")
 	b.WriteString(fmt.Sprintf("%q", args.Summary))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestedScope: ")
@@ -4528,10 +4528,10 @@ func MutationCreateScopeElevationPlanBuild(args MutationCreateScopeElevationPlan
 	return b.String()
 }
 
-// MutationCreateSemanticTask -- Create a semantic Task -- the Planner-decision unit. Differs from mutationCreateTask (in bff-copresent) by carrying the new category/logicalStepId/attemptNumber fields explicitly. Used by the Planner Agent at decomposition time and by the taskstamp Stamper to materialize the parent semantic Task for ad-hoc tool calls.
+// CreateSemanticTask -- Create a semantic Task -- the Planner-decision unit. Differs from createTask (in bff-copresent) by carrying the new category/logicalStepId/attemptNumber fields explicitly. Used by the Planner Agent at decomposition time and by the taskstamp Stamper to materialize the parent semantic Task for ad-hoc tool calls.
 //
 // Bound concept: task.
-type MutationCreateSemanticTaskArgs struct {
+type CreateSemanticTaskArgs struct {
 	TaskId        string
 	PlanId        string
 	Kind          string
@@ -4543,61 +4543,61 @@ type MutationCreateSemanticTaskArgs struct {
 	Input         map[string]any
 }
 
-// MutationCreateSemanticTask calls the engine mutation mutationCreateSemanticTask.
-func (qc *QueryClient) MutationCreateSemanticTask(ctx context.Context, args MutationCreateSemanticTaskArgs) (*Result, error) {
-	call := MutationCreateSemanticTaskBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateSemanticTask", call)
+// CreateSemanticTask calls the engine mutation createSemanticTask.
+func (qc *QueryClient) CreateSemanticTask(ctx context.Context, args CreateSemanticTaskArgs) (*Result, error) {
+	call := CreateSemanticTaskBuild(args)
+	return qc.executeNamed(ctx, "createSemanticTask", call)
 }
 
-func MutationCreateSemanticTaskBuild(args MutationCreateSemanticTaskArgs) string {
+func CreateSemanticTaskBuild(args CreateSemanticTaskArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateSemanticTask({")
+	b.WriteString("createSemanticTask({")
 	b.WriteString("taskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TaskId))
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("seq: ")
 	b.WriteString(fmt.Sprintf("%v", args.Seq))
 	if args.LogicalStepId != "" {
-		if b.Len() > 28 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("logicalStepId: ")
 		b.WriteString(fmt.Sprintf("%q", args.LogicalStepId))
 	}
 	if args.AttemptNumber != 0 {
-		if b.Len() > 28 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attemptNumber: ")
 		b.WriteString(fmt.Sprintf("%v", args.AttemptNumber))
 	}
 	if args.Phase != "" {
-		if b.Len() > 28 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("phase: ")
 		b.WriteString(fmt.Sprintf("%q", args.Phase))
 	}
 	if args.DependsOn != nil {
-		if b.Len() > 28 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("dependsOn: ")
 		b.WriteString(renderMemQLValue(args.DependsOn))
 	}
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("input: ")
@@ -4606,10 +4606,10 @@ func MutationCreateSemanticTaskBuild(args MutationCreateSemanticTaskArgs) string
 	return b.String()
 }
 
-// MutationCreateSessionForParticipant -- Create a session record for a participant in a space.
+// CreateSessionForParticipant -- Create a session record for a participant in a space.
 //
 // Bound concept: session.
-type MutationCreateSessionForParticipantArgs struct {
+type CreateSessionForParticipantArgs struct {
 	SessionId     string
 	PartitionId   string
 	ParticipantId string
@@ -4618,45 +4618,45 @@ type MutationCreateSessionForParticipantArgs struct {
 	Streams       map[string]any
 }
 
-// MutationCreateSessionForParticipant calls the engine mutation mutationCreateSessionForParticipant.
-func (qc *QueryClient) MutationCreateSessionForParticipant(ctx context.Context, args MutationCreateSessionForParticipantArgs) (*Result, error) {
-	call := MutationCreateSessionForParticipantBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateSessionForParticipant", call)
+// CreateSessionForParticipant calls the engine mutation createSessionForParticipant.
+func (qc *QueryClient) CreateSessionForParticipant(ctx context.Context, args CreateSessionForParticipantArgs) (*Result, error) {
+	call := CreateSessionForParticipantBuild(args)
+	return qc.executeNamed(ctx, "createSessionForParticipant", call)
 }
 
-func MutationCreateSessionForParticipantBuild(args MutationCreateSessionForParticipantArgs) string {
+func CreateSessionForParticipantBuild(args CreateSessionForParticipantArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateSessionForParticipant({")
+	b.WriteString("createSessionForParticipant({")
 	if args.SessionId != "" {
 		b.WriteString("sessionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SessionId))
 	}
-	if b.Len() > 37 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 37 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	if args.HumanInput != nil {
-		if b.Len() > 37 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("humanInput: ")
 		b.WriteString(renderMemQLValue(args.HumanInput))
 	}
 	if args.AiOutput != nil {
-		if b.Len() > 37 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("aiOutput: ")
 		b.WriteString(renderMemQLValue(args.AiOutput))
 	}
 	if args.Streams != nil {
-		if b.Len() > 37 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("streams: ")
@@ -4666,10 +4666,10 @@ func MutationCreateSessionForParticipantBuild(args MutationCreateSessionForParti
 	return b.String()
 }
 
-// MutationCreateSkill -- Materialize a v1:agents:skill catalog row from a `seed skill ...` declaration under dsl/agents/skills/*.memql. Matches the SeedMaterializer's `mutationCreate<Concept>` naming convention -- the materializer stamps the seed body's id into `skillId` and forwards every other seed body field as a same-named arg, so this mutation's arg surface mirrors the on-disk seed body 1:1. Sibling to `mutationMintSkill`: same row shape, but the seed path is for the predefined catalog (predefined defaults true) and carries no originatingPlanId / mintedByAgentId provenance triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to materialize with `function \"mutationCreateSkill\" not found`. The materializer convention itself lives in component/memql/seed_materializer.go.
+// CreateSkill -- Materialize a v1:agents:skill catalog row from a `seed skill ...` declaration under dsl/agents/skills/*.memql. Matches the SeedMaterializer's `mutationCreate<Concept>` naming convention -- the materializer stamps the seed body's id into `skillId` and forwards every other seed body field as a same-named arg, so this mutation's arg surface mirrors the on-disk seed body 1:1. Sibling to `mintSkill`: same row shape, but the seed path is for the predefined catalog (predefined defaults true) and carries no originatingPlanId / mintedByAgentId provenance triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to materialize with `function \"createSkill\" not found`. The materializer convention itself lives in component/memql/seed_materializer.go.
 //
 // Bound concept: skill.
-type MutationCreateSkillArgs struct {
+type CreateSkillArgs struct {
 	SkillId       string
 	Slug          string
 	Name          string
@@ -4686,85 +4686,85 @@ type MutationCreateSkillArgs struct {
 	ActiveSet     bool // set true to send active; required because zero-value bool is ambiguous
 }
 
-// MutationCreateSkill calls the engine mutation mutationCreateSkill.
-func (qc *QueryClient) MutationCreateSkill(ctx context.Context, args MutationCreateSkillArgs) (*Result, error) {
-	call := MutationCreateSkillBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateSkill", call)
+// CreateSkill calls the engine mutation createSkill.
+func (qc *QueryClient) CreateSkill(ctx context.Context, args CreateSkillArgs) (*Result, error) {
+	call := CreateSkillBuild(args)
+	return qc.executeNamed(ctx, "createSkill", call)
 }
 
-func MutationCreateSkillBuild(args MutationCreateSkillArgs) string {
+func CreateSkillBuild(args CreateSkillArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateSkill({")
+	b.WriteString("createSkill({")
 	if args.SkillId != "" {
 		b.WriteString("skillId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SkillId))
 	}
-	if b.Len() > 21 {
+	if b.Len() > 13 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	if b.Len() > 21 {
+	if b.Len() > 13 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Description != "" {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.Category != "" {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("category: ")
 		b.WriteString(fmt.Sprintf("%q", args.Category))
 	}
 	if args.Tags != nil {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tags: ")
 		b.WriteString(renderMemQLValue(args.Tags))
 	}
 	if args.DomainIds != nil {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("domainIds: ")
 		b.WriteString(renderMemQLValue(args.DomainIds))
 	}
 	if args.ToolSlugs != nil {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("toolSlugs: ")
 		b.WriteString(renderMemQLValue(args.ToolSlugs))
 	}
 	if args.LiveSourceIds != nil {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("liveSourceIds: ")
 		b.WriteString(renderMemQLValue(args.LiveSourceIds))
 	}
-	if b.Len() > 21 {
+	if b.Len() > 13 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.PredefinedSet {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("predefined: ")
 		b.WriteString(fmt.Sprintf("%v", args.Predefined))
 	}
 	if args.ActiveSet {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -4774,10 +4774,10 @@ func MutationCreateSkillBuild(args MutationCreateSkillArgs) string {
 	return b.String()
 }
 
-// MutationCreateSkillChangeEvent -- Append a v1:agents:skillChangeEvent row recording a skill attach / reconfigure on an agent. Phase 2 (#158) cut: every Planner Agent extendSpecialist / createSpecialist flow that lands a skill on an agent issues one of these per skill. Phase 3 also writes them from the cockpit Skills admin view when a human attaches a skill manually. Empty actorAgentId + actorUserId is allowed for system-driven attaches (the migration tool writes events with actorUserId='system:migration:phase2'). The caller is responsible for providing skillChangeEventId -- mint via the standard NewShortId / MustFromMap helpers caller-side.
+// CreateSkillChangeEvent -- Append a v1:agents:skillChangeEvent row recording a skill attach / reconfigure on an agent. Phase 2 (#158) cut: every Planner Agent extendSpecialist / createSpecialist flow that lands a skill on an agent issues one of these per skill. Phase 3 also writes them from the cockpit Skills admin view when a human attaches a skill manually. Empty actorAgentId + actorUserId is allowed for system-driven attaches (the migration tool writes events with actorUserId='system:migration:phase2'). The caller is responsible for providing skillChangeEventId -- mint via the standard NewShortId / MustFromMap helpers caller-side.
 //
 // Bound concept: skillChangeEvent.
-type MutationCreateSkillChangeEventArgs struct {
+type CreateSkillChangeEventArgs struct {
 	SkillChangeEventId string
 	TargetAgentId      string
 	SkillId            string
@@ -4789,64 +4789,64 @@ type MutationCreateSkillChangeEventArgs struct {
 	PlanId             string
 }
 
-// MutationCreateSkillChangeEvent calls the engine mutation mutationCreateSkillChangeEvent.
-func (qc *QueryClient) MutationCreateSkillChangeEvent(ctx context.Context, args MutationCreateSkillChangeEventArgs) (*Result, error) {
-	call := MutationCreateSkillChangeEventBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateSkillChangeEvent", call)
+// CreateSkillChangeEvent calls the engine mutation createSkillChangeEvent.
+func (qc *QueryClient) CreateSkillChangeEvent(ctx context.Context, args CreateSkillChangeEventArgs) (*Result, error) {
+	call := CreateSkillChangeEventBuild(args)
+	return qc.executeNamed(ctx, "createSkillChangeEvent", call)
 }
 
-func MutationCreateSkillChangeEventBuild(args MutationCreateSkillChangeEventArgs) string {
+func CreateSkillChangeEventBuild(args CreateSkillChangeEventArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateSkillChangeEvent({")
+	b.WriteString("createSkillChangeEvent({")
 	b.WriteString("skillChangeEventId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SkillChangeEventId))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetAgentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetAgentId))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("skillId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SkillId))
 	if args.ChangeKind != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("changeKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.ChangeKind))
 	}
 	if args.Before != nil {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("before: ")
 		b.WriteString(renderMemQLValue(args.Before))
 	}
 	if args.After != nil {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("after: ")
 		b.WriteString(renderMemQLValue(args.After))
 	}
 	if args.ActorAgentId != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorAgentId))
 	}
 	if args.ActorUserId != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorUserId))
 	}
 	if args.PlanId != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
@@ -4856,10 +4856,10 @@ func MutationCreateSkillChangeEventBuild(args MutationCreateSkillChangeEventArgs
 	return b.String()
 }
 
-// MutationCreateSpawnEvent -- Record a node lifecycle event
+// CreateSpawnEvent -- Record a node lifecycle event
 //
 // Bound concept: spawnEvent.
-type MutationCreateSpawnEventArgs struct {
+type CreateSpawnEventArgs struct {
 	NodeId      string
 	NodeType    string
 	Action      string
@@ -4868,43 +4868,43 @@ type MutationCreateSpawnEventArgs struct {
 	Metadata    map[string]any
 }
 
-// MutationCreateSpawnEvent calls the engine mutation mutationCreateSpawnEvent.
-func (qc *QueryClient) MutationCreateSpawnEvent(ctx context.Context, args MutationCreateSpawnEventArgs) (*Result, error) {
-	call := MutationCreateSpawnEventBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateSpawnEvent", call)
+// CreateSpawnEvent calls the engine mutation createSpawnEvent.
+func (qc *QueryClient) CreateSpawnEvent(ctx context.Context, args CreateSpawnEventArgs) (*Result, error) {
+	call := CreateSpawnEventBuild(args)
+	return qc.executeNamed(ctx, "createSpawnEvent", call)
 }
 
-func MutationCreateSpawnEventBuild(args MutationCreateSpawnEventArgs) string {
+func CreateSpawnEventBuild(args CreateSpawnEventArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateSpawnEvent({")
+	b.WriteString("createSpawnEvent({")
 	b.WriteString("nodeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeId))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeType))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
 	b.WriteString(fmt.Sprintf("%q", args.Action))
 	if args.InitiatorId != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("initiatorId: ")
 		b.WriteString(fmt.Sprintf("%q", args.InitiatorId))
 	}
 	if args.Reason != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
 	if args.Metadata != nil {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("metadata: ")
@@ -4914,10 +4914,10 @@ func MutationCreateSpawnEventBuild(args MutationCreateSpawnEventArgs) string {
 	return b.String()
 }
 
-// MutationCreateTask -- Insert a v1:planner:task row in status='queued'. Single write path for Task creation, called by the planner during decomposition.
+// CreateTask -- Insert a v1:planner:task row in status='queued'. Single write path for Task creation, called by the planner during decomposition.
 //
 // Bound concept: task.
-type MutationCreateTaskArgs struct {
+type CreateTaskArgs struct {
 	TaskId string
 	PlanId string
 	// Enum: semantic | toolInvocation
@@ -4930,63 +4930,63 @@ type MutationCreateTaskArgs struct {
 	Input            map[string]any
 }
 
-// MutationCreateTask calls the engine mutation mutationCreateTask.
-func (qc *QueryClient) MutationCreateTask(ctx context.Context, args MutationCreateTaskArgs) (*Result, error) {
-	call := MutationCreateTaskBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateTask", call)
+// CreateTask calls the engine mutation createTask.
+func (qc *QueryClient) CreateTask(ctx context.Context, args CreateTaskArgs) (*Result, error) {
+	call := CreateTaskBuild(args)
+	return qc.executeNamed(ctx, "createTask", call)
 }
 
-func MutationCreateTaskBuild(args MutationCreateTaskArgs) string {
+func CreateTaskBuild(args CreateTaskArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateTask({")
+	b.WriteString("createTask({")
 	if args.TaskId != "" {
 		b.WriteString("taskId: ")
 		b.WriteString(fmt.Sprintf("%q", args.TaskId))
 	}
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	if args.Category != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("category: ")
 		b.WriteString(fmt.Sprintf("%q", args.Category))
 	}
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("seq: ")
 	b.WriteString(fmt.Sprintf("%v", args.Seq))
 	if args.Phase != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("phase: ")
 		b.WriteString(fmt.Sprintf("%q", args.Phase))
 	}
 	if args.ExecutionSurface != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("executionSurface: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExecutionSurface))
 	}
 	if args.ExecutorBackend != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("executorBackend: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExecutorBackend))
 	}
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("input: ")
@@ -4995,10 +4995,10 @@ func MutationCreateTaskBuild(args MutationCreateTaskArgs) string {
 	return b.String()
 }
 
-// MutationCreateTodo -- Create a to-do for the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own to-dos. sourceResponsibilityId is optional -- responsibilities pass it to attribute app-generated tasks; user-created to-dos leave it empty.
+// CreateTodo -- Create a to-do for the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own to-dos. sourceResponsibilityId is optional -- responsibilities pass it to attribute app-generated tasks; user-created to-dos leave it empty.
 //
 // Bound concept: todo.
-type MutationCreateTodoArgs struct {
+type CreateTodoArgs struct {
 	TodoId string
 	Title  string
 	DueAt  string
@@ -5007,36 +5007,36 @@ type MutationCreateTodoArgs struct {
 	SourceResponsibilityId string
 }
 
-// MutationCreateTodo calls the engine mutation mutationCreateTodo.
-func (qc *QueryClient) MutationCreateTodo(ctx context.Context, args MutationCreateTodoArgs) (*Result, error) {
-	call := MutationCreateTodoBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateTodo", call)
+// CreateTodo calls the engine mutation createTodo.
+func (qc *QueryClient) CreateTodo(ctx context.Context, args CreateTodoArgs) (*Result, error) {
+	call := CreateTodoBuild(args)
+	return qc.executeNamed(ctx, "createTodo", call)
 }
 
-func MutationCreateTodoBuild(args MutationCreateTodoArgs) string {
+func CreateTodoBuild(args CreateTodoArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateTodo({")
+	b.WriteString("createTodo({")
 	b.WriteString("todoId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TodoId))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("dueAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.DueAt))
 	if args.Priority != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("priority: ")
 		b.WriteString(fmt.Sprintf("%q", args.Priority))
 	}
 	if args.SourceResponsibilityId != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceResponsibilityId: ")
@@ -5046,10 +5046,10 @@ func MutationCreateTodoBuild(args MutationCreateTodoArgs) string {
 	return b.String()
 }
 
-// MutationCreateToolInvocationTask -- Create a toolInvocation Task -- the engine-auto-stamped record of an agent tool call. Per Q5+Q6: every tool call by an executing agent produces one of these, parented to the semantic Task that was executing when the tool fired. The engine's tool-dispatch wrapper inserts this row at dispatch time then calls mutationCompleteToolInvocation when the call returns. parentTaskId is required (a toolInvocation row must have a semantic parent); the engine enforces this invariant.
+// CreateToolInvocationTask -- Create a toolInvocation Task -- the engine-auto-stamped record of an agent tool call. Per Q5+Q6: every tool call by an executing agent produces one of these, parented to the semantic Task that was executing when the tool fired. The engine's tool-dispatch wrapper inserts this row at dispatch time then calls completeToolInvocation when the call returns. parentTaskId is required (a toolInvocation row must have a semantic parent); the engine enforces this invariant.
 //
 // Bound concept: task.
-type MutationCreateToolInvocationTaskArgs struct {
+type CreateToolInvocationTaskArgs struct {
 	TaskId       string
 	PlanId       string
 	ParentTaskId string
@@ -5058,40 +5058,40 @@ type MutationCreateToolInvocationTaskArgs struct {
 	Seq          int
 }
 
-// MutationCreateToolInvocationTask calls the engine mutation mutationCreateToolInvocationTask.
-func (qc *QueryClient) MutationCreateToolInvocationTask(ctx context.Context, args MutationCreateToolInvocationTaskArgs) (*Result, error) {
-	call := MutationCreateToolInvocationTaskBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateToolInvocationTask", call)
+// CreateToolInvocationTask calls the engine mutation createToolInvocationTask.
+func (qc *QueryClient) CreateToolInvocationTask(ctx context.Context, args CreateToolInvocationTaskArgs) (*Result, error) {
+	call := CreateToolInvocationTaskBuild(args)
+	return qc.executeNamed(ctx, "createToolInvocationTask", call)
 }
 
-func MutationCreateToolInvocationTaskBuild(args MutationCreateToolInvocationTaskArgs) string {
+func CreateToolInvocationTaskBuild(args CreateToolInvocationTaskArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateToolInvocationTask({")
+	b.WriteString("createToolInvocationTask({")
 	b.WriteString("taskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TaskId))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("parentTaskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParentTaskId))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toolName: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToolName))
 	if args.ToolArgs != nil {
-		if b.Len() > 34 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("toolArgs: ")
 		b.WriteString(renderMemQLValue(args.ToolArgs))
 	}
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("seq: ")
@@ -5100,10 +5100,10 @@ func MutationCreateToolInvocationTaskBuild(args MutationCreateToolInvocationTask
 	return b.String()
 }
 
-// MutationCreateUser -- Create a new user (person / synthetic principal).
+// CreateUser -- Create a new user (person / synthetic principal).
 //
 // Bound concept: user.
-type MutationCreateUserArgs struct {
+type CreateUserArgs struct {
 	UserId       string
 	DisplayName  string
 	PrimaryEmail string
@@ -5113,43 +5113,43 @@ type MutationCreateUserArgs struct {
 	Preferences map[string]any
 }
 
-// MutationCreateUser calls the engine mutation mutationCreateUser.
-func (qc *QueryClient) MutationCreateUser(ctx context.Context, args MutationCreateUserArgs) (*Result, error) {
-	call := MutationCreateUserBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateUser", call)
+// CreateUser calls the engine mutation createUser.
+func (qc *QueryClient) CreateUser(ctx context.Context, args CreateUserArgs) (*Result, error) {
+	call := CreateUserBuild(args)
+	return qc.executeNamed(ctx, "createUser", call)
 }
 
-func MutationCreateUserBuild(args MutationCreateUserArgs) string {
+func CreateUserBuild(args CreateUserArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateUser({")
+	b.WriteString("createUser({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("primaryEmail: ")
 	b.WriteString(fmt.Sprintf("%q", args.PrimaryEmail))
 	if args.Role != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("role: ")
 		b.WriteString(fmt.Sprintf("%q", args.Role))
 	}
 	if args.GroupIds != nil {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("groupIds: ")
 		b.WriteString(renderMemQLValue(args.GroupIds))
 	}
 	if args.Preferences != nil {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("preferences: ")
@@ -5159,10 +5159,10 @@ func MutationCreateUserBuild(args MutationCreateUserArgs) string {
 	return b.String()
 }
 
-// MutationCreateUserOnFirstLogin -- Create a user record on first successful magic-link login.
+// CreateUserOnFirstLogin -- Create a user record on first successful magic-link login.
 //
 // Bound concept: user.
-type MutationCreateUserOnFirstLoginArgs struct {
+type CreateUserOnFirstLoginArgs struct {
 	UserId       string
 	DisplayName  string
 	FirstName    string
@@ -5179,90 +5179,90 @@ type MutationCreateUserOnFirstLoginArgs struct {
 	Preferences map[string]any
 }
 
-// MutationCreateUserOnFirstLogin calls the engine mutation mutationCreateUserOnFirstLogin.
-func (qc *QueryClient) MutationCreateUserOnFirstLogin(ctx context.Context, args MutationCreateUserOnFirstLoginArgs) (*Result, error) {
-	call := MutationCreateUserOnFirstLoginBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateUserOnFirstLogin", call)
+// CreateUserOnFirstLogin calls the engine mutation createUserOnFirstLogin.
+func (qc *QueryClient) CreateUserOnFirstLogin(ctx context.Context, args CreateUserOnFirstLoginArgs) (*Result, error) {
+	call := CreateUserOnFirstLoginBuild(args)
+	return qc.executeNamed(ctx, "createUserOnFirstLogin", call)
 }
 
-func MutationCreateUserOnFirstLoginBuild(args MutationCreateUserOnFirstLoginArgs) string {
+func CreateUserOnFirstLoginBuild(args CreateUserOnFirstLoginArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateUserOnFirstLogin({")
+	b.WriteString("createUserOnFirstLogin({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
 	if args.FirstName != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("firstName: ")
 		b.WriteString(fmt.Sprintf("%q", args.FirstName))
 	}
 	if args.LastName != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastName: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastName))
 	}
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("primaryEmail: ")
 	b.WriteString(fmt.Sprintf("%q", args.PrimaryEmail))
 	if args.Phone != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("phone: ")
 		b.WriteString(fmt.Sprintf("%q", args.Phone))
 	}
 	if args.PrimaryRole != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("primaryRole: ")
 		b.WriteString(fmt.Sprintf("%q", args.PrimaryRole))
 	}
 	if args.Gender != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("gender: ")
 		b.WriteString(fmt.Sprintf("%q", args.Gender))
 	}
 	if args.Birthdate != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("birthdate: ")
 		b.WriteString(fmt.Sprintf("%q", args.Birthdate))
 	}
 	if args.Role != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("role: ")
 		b.WriteString(fmt.Sprintf("%q", args.Role))
 	}
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("internal: ")
 	b.WriteString(fmt.Sprintf("%v", args.Internal))
 	if args.GroupIds != nil {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("groupIds: ")
 		b.WriteString(renderMemQLValue(args.GroupIds))
 	}
 	if args.Preferences != nil {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("preferences: ")
@@ -5272,10 +5272,10 @@ func MutationCreateUserOnFirstLoginBuild(args MutationCreateUserOnFirstLoginArgs
 	return b.String()
 }
 
-// MutationCreateVoiceAgentTokenIdentity -- Create a voice_agent_token identity (credential row for the Go voice-agent process). Plain JWT is returned by JWTIssuer.IssueVoiceAgentAccessToken; this row stores only the SHA-256 of an auxiliary random bearer for schema completeness + audit fingerprinting.
+// CreateVoiceAgentTokenIdentity -- Create a voice_agent_token identity (credential row for the Go voice-agent process). Plain JWT is returned by JWTIssuer.IssueVoiceAgentAccessToken; this row stores only the SHA-256 of an auxiliary random bearer for schema completeness + audit fingerprinting.
 //
 // Bound concept: identity.
-type MutationCreateVoiceAgentTokenIdentityArgs struct {
+type CreateVoiceAgentTokenIdentityArgs struct {
 	IdentityId string
 	UserId     string
 	InstanceId string
@@ -5285,46 +5285,46 @@ type MutationCreateVoiceAgentTokenIdentityArgs struct {
 	Label      string
 }
 
-// MutationCreateVoiceAgentTokenIdentity calls the engine mutation mutationCreateVoiceAgentTokenIdentity.
-func (qc *QueryClient) MutationCreateVoiceAgentTokenIdentity(ctx context.Context, args MutationCreateVoiceAgentTokenIdentityArgs) (*Result, error) {
-	call := MutationCreateVoiceAgentTokenIdentityBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateVoiceAgentTokenIdentity", call)
+// CreateVoiceAgentTokenIdentity calls the engine mutation createVoiceAgentTokenIdentity.
+func (qc *QueryClient) CreateVoiceAgentTokenIdentity(ctx context.Context, args CreateVoiceAgentTokenIdentityArgs) (*Result, error) {
+	call := CreateVoiceAgentTokenIdentityBuild(args)
+	return qc.executeNamed(ctx, "createVoiceAgentTokenIdentity", call)
 }
 
-func MutationCreateVoiceAgentTokenIdentityBuild(args MutationCreateVoiceAgentTokenIdentityArgs) string {
+func CreateVoiceAgentTokenIdentityBuild(args CreateVoiceAgentTokenIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateVoiceAgentTokenIdentity({")
+	b.WriteString("createVoiceAgentTokenIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 39 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 39 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("instanceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.InstanceId))
-	if b.Len() > 39 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if b.Len() > 39 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mintedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
 	if args.ExpiresAt != "" {
-		if b.Len() > 39 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	}
 	if args.Label != "" {
-		if b.Len() > 39 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("label: ")
@@ -5334,10 +5334,10 @@ func MutationCreateVoiceAgentTokenIdentityBuild(args MutationCreateVoiceAgentTok
 	return b.String()
 }
 
-// MutationCreateWorkerInvocation -- Insert a worker tool-invocation telemetry row.
+// CreateWorkerInvocation -- Insert a worker tool-invocation telemetry row.
 //
 // Bound concept: invocation.
-type MutationCreateWorkerInvocationArgs struct {
+type CreateWorkerInvocationArgs struct {
 	InvocationId  string
 	OwnerUserId   string
 	WorkerId      string
@@ -5361,138 +5361,138 @@ type MutationCreateWorkerInvocationArgs struct {
 	OutputPreview string
 }
 
-// MutationCreateWorkerInvocation calls the engine mutation mutationCreateWorkerInvocation.
-func (qc *QueryClient) MutationCreateWorkerInvocation(ctx context.Context, args MutationCreateWorkerInvocationArgs) (*Result, error) {
-	call := MutationCreateWorkerInvocationBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateWorkerInvocation", call)
+// CreateWorkerInvocation calls the engine mutation createWorkerInvocation.
+func (qc *QueryClient) CreateWorkerInvocation(ctx context.Context, args CreateWorkerInvocationArgs) (*Result, error) {
+	call := CreateWorkerInvocationBuild(args)
+	return qc.executeNamed(ctx, "createWorkerInvocation", call)
 }
 
-func MutationCreateWorkerInvocationBuild(args MutationCreateWorkerInvocationArgs) string {
+func CreateWorkerInvocationBuild(args CreateWorkerInvocationArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateWorkerInvocation({")
+	b.WriteString("createWorkerInvocation({")
 	b.WriteString("invocationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.InvocationId))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("workerId: ")
 	b.WriteString(fmt.Sprintf("%q", args.WorkerId))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	if args.PlanId != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
 	if args.TaskId != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("taskId: ")
 		b.WriteString(fmt.Sprintf("%q", args.TaskId))
 	}
 	if args.CorrelationId != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("correlationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.CorrelationId))
 	}
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tool: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tool))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
 	b.WriteString(fmt.Sprintf("%q", args.Action))
 	if args.ArgsRedacted != nil {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("argsRedacted: ")
 		b.WriteString(renderMemQLValue(args.ArgsRedacted))
 	}
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("startedAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.StartedAt))
 	if args.CompletedAt != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("completedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.CompletedAt))
 	}
 	if args.DurationMs != 0 {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("durationMs: ")
 		b.WriteString(fmt.Sprintf("%v", args.DurationMs))
 	}
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("outcome: ")
 	b.WriteString(fmt.Sprintf("%q", args.Outcome))
 	if args.ExitCode != 0 {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("exitCode: ")
 		b.WriteString(fmt.Sprintf("%v", args.ExitCode))
 	}
 	if args.Signal != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("signal: ")
 		b.WriteString(fmt.Sprintf("%q", args.Signal))
 	}
 	if args.ErrorCode != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorCode: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorCode))
 	}
 	if args.ErrorMessage != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
 	if args.BytesIn != 0 {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bytesIn: ")
 		b.WriteString(fmt.Sprintf("%v", args.BytesIn))
 	}
 	if args.BytesOut != 0 {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bytesOut: ")
 		b.WriteString(fmt.Sprintf("%v", args.BytesOut))
 	}
 	if args.OutputPreview != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("outputPreview: ")
@@ -5502,10 +5502,10 @@ func MutationCreateWorkerInvocationBuild(args MutationCreateWorkerInvocationArgs
 	return b.String()
 }
 
-// MutationCreateWorkerPairingCode -- Persist a worker-pairing-code row at creation time.
+// CreateWorkerPairingCode -- Persist a worker-pairing-code row at creation time.
 //
 // Bound concept: workerPairingCode.
-type MutationCreateWorkerPairingCodeArgs struct {
+type CreateWorkerPairingCodeArgs struct {
 	PairingId   string
 	OwnerUserId string
 	CodeHash    string
@@ -5514,39 +5514,39 @@ type MutationCreateWorkerPairingCodeArgs struct {
 	SourceIP    string
 }
 
-// MutationCreateWorkerPairingCode calls the engine mutation mutationCreateWorkerPairingCode.
-func (qc *QueryClient) MutationCreateWorkerPairingCode(ctx context.Context, args MutationCreateWorkerPairingCodeArgs) (*Result, error) {
-	call := MutationCreateWorkerPairingCodeBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateWorkerPairingCode", call)
+// CreateWorkerPairingCode calls the engine mutation createWorkerPairingCode.
+func (qc *QueryClient) CreateWorkerPairingCode(ctx context.Context, args CreateWorkerPairingCodeArgs) (*Result, error) {
+	call := CreateWorkerPairingCodeBuild(args)
+	return qc.executeNamed(ctx, "createWorkerPairingCode", call)
 }
 
-func MutationCreateWorkerPairingCodeBuild(args MutationCreateWorkerPairingCodeArgs) string {
+func CreateWorkerPairingCodeBuild(args CreateWorkerPairingCodeArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateWorkerPairingCode({")
+	b.WriteString("createWorkerPairingCode({")
 	b.WriteString("pairingId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PairingId))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("codeHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.CodeHash))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("clusterURL: ")
 	b.WriteString(fmt.Sprintf("%q", args.ClusterURL))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	if args.SourceIP != "" {
-		if b.Len() > 33 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceIP: ")
@@ -5556,10 +5556,10 @@ func MutationCreateWorkerPairingCodeBuild(args MutationCreateWorkerPairingCodeAr
 	return b.String()
 }
 
-// MutationCreateWorkerRegistration -- Create a worker registration row on first connect.
+// CreateWorkerRegistration -- Create a worker registration row on first connect.
 //
 // Bound concept: registration.
-type MutationCreateWorkerRegistrationArgs struct {
+type CreateWorkerRegistrationArgs struct {
 	RegistrationId       string
 	OwnerUserId          string
 	IdentityId           string
@@ -5577,98 +5577,98 @@ type MutationCreateWorkerRegistrationArgs struct {
 	LastConnectedFromIP  string
 }
 
-// MutationCreateWorkerRegistration calls the engine mutation mutationCreateWorkerRegistration.
-func (qc *QueryClient) MutationCreateWorkerRegistration(ctx context.Context, args MutationCreateWorkerRegistrationArgs) (*Result, error) {
-	call := MutationCreateWorkerRegistrationBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateWorkerRegistration", call)
+// CreateWorkerRegistration calls the engine mutation createWorkerRegistration.
+func (qc *QueryClient) CreateWorkerRegistration(ctx context.Context, args CreateWorkerRegistrationArgs) (*Result, error) {
+	call := CreateWorkerRegistrationBuild(args)
+	return qc.executeNamed(ctx, "createWorkerRegistration", call)
 }
 
-func MutationCreateWorkerRegistrationBuild(args MutationCreateWorkerRegistrationArgs) string {
+func CreateWorkerRegistrationBuild(args CreateWorkerRegistrationArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateWorkerRegistration({")
+	b.WriteString("createWorkerRegistration({")
 	b.WriteString("registrationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegistrationId))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("capabilities: ")
 	b.WriteString(renderMemQLValue(args.Capabilities))
 	if args.CapabilityDescriptor != nil {
-		if b.Len() > 34 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capabilityDescriptor: ")
 		b.WriteString(renderMemQLValue(args.CapabilityDescriptor))
 	}
 	if args.Labels != nil {
-		if b.Len() > 34 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("labels: ")
 		b.WriteString(renderMemQLValue(args.Labels))
 	}
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("concurrency: ")
 	b.WriteString(renderMemQLValue(args.Concurrency))
 	if args.PlatformInfo != nil {
-		if b.Len() > 34 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("platformInfo: ")
 		b.WriteString(renderMemQLValue(args.PlatformInfo))
 	}
 	if args.Permissions != nil {
-		if b.Len() > 34 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("permissions: ")
 		b.WriteString(renderMemQLValue(args.Permissions))
 	}
 	if args.Version != "" {
-		if b.Len() > 34 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
 		b.WriteString(fmt.Sprintf("%q", args.Version))
 	}
 	if args.BuildTag != "" {
-		if b.Len() > 34 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("buildTag: ")
 		b.WriteString(fmt.Sprintf("%q", args.BuildTag))
 	}
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registeredAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegisteredAt))
 	if args.LastSeenAt != "" {
-		if b.Len() > 34 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastSeenAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastSeenAt))
 	}
 	if args.LastConnectedFromIP != "" {
-		if b.Len() > 34 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastConnectedFromIP: ")
@@ -5678,10 +5678,10 @@ func MutationCreateWorkerRegistrationBuild(args MutationCreateWorkerRegistration
 	return b.String()
 }
 
-// MutationCreateWorkerTokenIdentity -- Create a worker_token identity (machine credential for a memql-cockpit-worker). Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.
+// CreateWorkerTokenIdentity -- Create a worker_token identity (machine credential for a memql-cockpit-worker). Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.
 //
 // Bound concept: identity.
-type MutationCreateWorkerTokenIdentityArgs struct {
+type CreateWorkerTokenIdentityArgs struct {
 	IdentityId             string
 	UserId                 string
 	Name                   string
@@ -5692,53 +5692,53 @@ type MutationCreateWorkerTokenIdentityArgs struct {
 	ExpiresAt              string
 }
 
-// MutationCreateWorkerTokenIdentity calls the engine mutation mutationCreateWorkerTokenIdentity.
-func (qc *QueryClient) MutationCreateWorkerTokenIdentity(ctx context.Context, args MutationCreateWorkerTokenIdentityArgs) (*Result, error) {
-	call := MutationCreateWorkerTokenIdentityBuild(args)
-	return qc.executeNamed(ctx, "mutationCreateWorkerTokenIdentity", call)
+// CreateWorkerTokenIdentity calls the engine mutation createWorkerTokenIdentity.
+func (qc *QueryClient) CreateWorkerTokenIdentity(ctx context.Context, args CreateWorkerTokenIdentityArgs) (*Result, error) {
+	call := CreateWorkerTokenIdentityBuild(args)
+	return qc.executeNamed(ctx, "createWorkerTokenIdentity", call)
 }
 
-func MutationCreateWorkerTokenIdentityBuild(args MutationCreateWorkerTokenIdentityArgs) string {
+func CreateWorkerTokenIdentityBuild(args CreateWorkerTokenIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationCreateWorkerTokenIdentity({")
+	b.WriteString("createWorkerTokenIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 35 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 35 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 35 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if b.Len() > 35 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registeredBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegisteredBy))
 	if args.CapabilitiesAdvertised != nil {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capabilitiesAdvertised: ")
 		b.WriteString(renderMemQLValue(args.CapabilitiesAdvertised))
 	}
 	if args.LabelsAdvertised != nil {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("labelsAdvertised: ")
 		b.WriteString(renderMemQLValue(args.LabelsAdvertised))
 	}
 	if args.ExpiresAt != "" {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
@@ -5748,26 +5748,26 @@ func MutationCreateWorkerTokenIdentityBuild(args MutationCreateWorkerTokenIdenti
 	return b.String()
 }
 
-// MutationDecayAction -- Set a v1:actions:action decayed reliability from the consolidation sweep (Phase 4 #1739; value computed engine-side).
+// DecayAction -- Set a v1:actions:action decayed reliability from the consolidation sweep (Phase 4 #1739; value computed engine-side).
 //
 // Bound concept: action.
-type MutationDecayActionArgs struct {
+type DecayActionArgs struct {
 	ActionId    string
 	Reliability any
 }
 
-// MutationDecayAction calls the engine mutation mutationDecayAction.
-func (qc *QueryClient) MutationDecayAction(ctx context.Context, args MutationDecayActionArgs) (*Result, error) {
-	call := MutationDecayActionBuild(args)
-	return qc.executeNamed(ctx, "mutationDecayAction", call)
+// DecayAction calls the engine mutation decayAction.
+func (qc *QueryClient) DecayAction(ctx context.Context, args DecayActionArgs) (*Result, error) {
+	call := DecayActionBuild(args)
+	return qc.executeNamed(ctx, "decayAction", call)
 }
 
-func MutationDecayActionBuild(args MutationDecayActionArgs) string {
+func DecayActionBuild(args DecayActionArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationDecayAction({")
+	b.WriteString("decayAction({")
 	b.WriteString("actionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ActionId))
-	if b.Len() > 21 {
+	if b.Len() > 13 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reliability: ")
@@ -5776,26 +5776,26 @@ func MutationDecayActionBuild(args MutationDecayActionArgs) string {
 	return b.String()
 }
 
-// MutationDecayHarnessSemanticMemory -- Decay an unreinforced v1:harness:semanticMemory: lower confidence to the engine-computed decayed value. lastReinforced is intentionally NOT reset (decay keeps measuring age from the last real reinforcement). ownerUserId re-stamped from actor.userId (owned tier). A belief that decays below the prune floor is then retired via mutationPruneHarnessSemanticMemory.
+// DecayHarnessSemanticMemory -- Decay an unreinforced v1:harness:semanticMemory: lower confidence to the engine-computed decayed value. lastReinforced is intentionally NOT reset (decay keeps measuring age from the last real reinforcement). ownerUserId re-stamped from actor.userId (owned tier). A belief that decays below the prune floor is then retired via pruneHarnessSemanticMemory.
 //
 // Bound concept: semanticMemory.
-type MutationDecayHarnessSemanticMemoryArgs struct {
+type DecayHarnessSemanticMemoryArgs struct {
 	MemoryId   string
 	Confidence any
 }
 
-// MutationDecayHarnessSemanticMemory calls the engine mutation mutationDecayHarnessSemanticMemory.
-func (qc *QueryClient) MutationDecayHarnessSemanticMemory(ctx context.Context, args MutationDecayHarnessSemanticMemoryArgs) (*Result, error) {
-	call := MutationDecayHarnessSemanticMemoryBuild(args)
-	return qc.executeNamed(ctx, "mutationDecayHarnessSemanticMemory", call)
+// DecayHarnessSemanticMemory calls the engine mutation decayHarnessSemanticMemory.
+func (qc *QueryClient) DecayHarnessSemanticMemory(ctx context.Context, args DecayHarnessSemanticMemoryArgs) (*Result, error) {
+	call := DecayHarnessSemanticMemoryBuild(args)
+	return qc.executeNamed(ctx, "decayHarnessSemanticMemory", call)
 }
 
-func MutationDecayHarnessSemanticMemoryBuild(args MutationDecayHarnessSemanticMemoryArgs) string {
+func DecayHarnessSemanticMemoryBuild(args DecayHarnessSemanticMemoryArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationDecayHarnessSemanticMemory({")
+	b.WriteString("decayHarnessSemanticMemory({")
 	b.WriteString("memoryId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
-	if b.Len() > 36 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
@@ -5804,120 +5804,120 @@ func MutationDecayHarnessSemanticMemoryBuild(args MutationDecayHarnessSemanticMe
 	return b.String()
 }
 
-// MutationDeleteAgent -- Soft-delete an agent (active:false, deleted:true). Read-merges the existing row so the caller only passes the agent id; every other required field (kind, name, ...) inherits from the persisted row instead of being re-supplied (memql#1628).
+// DeleteAgent -- Soft-delete an agent (active:false, deleted:true). Read-merges the existing row so the caller only passes the agent id; every other required field (kind, name, ...) inherits from the persisted row instead of being re-supplied (memql#1628).
 //
 // Bound concept: agent.
-type MutationDeleteAgentArgs struct {
+type DeleteAgentArgs struct {
 	AgentId string
 }
 
-// MutationDeleteAgent calls the engine mutation mutationDeleteAgent.
-func (qc *QueryClient) MutationDeleteAgent(ctx context.Context, args MutationDeleteAgentArgs) (*Result, error) {
-	call := MutationDeleteAgentBuild(args)
-	return qc.executeNamed(ctx, "mutationDeleteAgent", call)
+// DeleteAgent calls the engine mutation deleteAgent.
+func (qc *QueryClient) DeleteAgent(ctx context.Context, args DeleteAgentArgs) (*Result, error) {
+	call := DeleteAgentBuild(args)
+	return qc.executeNamed(ctx, "deleteAgent", call)
 }
 
-func MutationDeleteAgentBuild(args MutationDeleteAgentArgs) string {
+func DeleteAgentBuild(args DeleteAgentArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationDeleteAgent({")
+	b.WriteString("deleteAgent({")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationDeleteCalendarEvent -- Soft-delete a calendarEvent by stamping deleted=true. The time-series row survives for history + so a future external-sync reconciler can propagate the deletion upstream; queries hide it via traitIsNotDeleted. The calendar tool reads the row via the owner-scoped queryCalendarEventById before calling this, so a caller can only delete their own events.
+// DeleteCalendarEvent -- Soft-delete a calendarEvent by stamping deleted=true. The time-series row survives for history + so a future external-sync reconciler can propagate the deletion upstream; queries hide it via isNotDeleted. The calendar tool reads the row via the owner-scoped calendarEventById before calling this, so a caller can only delete their own events.
 //
 // Bound concept: calendarEvent.
-type MutationDeleteCalendarEventArgs struct {
+type DeleteCalendarEventArgs struct {
 	EventId string
 }
 
-// MutationDeleteCalendarEvent calls the engine mutation mutationDeleteCalendarEvent.
-func (qc *QueryClient) MutationDeleteCalendarEvent(ctx context.Context, args MutationDeleteCalendarEventArgs) (*Result, error) {
-	call := MutationDeleteCalendarEventBuild(args)
-	return qc.executeNamed(ctx, "mutationDeleteCalendarEvent", call)
+// DeleteCalendarEvent calls the engine mutation deleteCalendarEvent.
+func (qc *QueryClient) DeleteCalendarEvent(ctx context.Context, args DeleteCalendarEventArgs) (*Result, error) {
+	call := DeleteCalendarEventBuild(args)
+	return qc.executeNamed(ctx, "deleteCalendarEvent", call)
 }
 
-func MutationDeleteCalendarEventBuild(args MutationDeleteCalendarEventArgs) string {
+func DeleteCalendarEventBuild(args DeleteCalendarEventArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationDeleteCalendarEvent({")
+	b.WriteString("deleteCalendarEvent({")
 	b.WriteString("eventId: ")
 	b.WriteString(fmt.Sprintf("%q", args.EventId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationDeleteRecord -- Soft-delete a data record (sets active=false)
+// DeleteRecord -- Soft-delete a data record (sets active=false)
 //
 // Bound concept: record.
-type MutationDeleteRecordArgs struct {
+type DeleteRecordArgs struct {
 	RecordId string
 }
 
-// MutationDeleteRecord calls the engine mutation mutationDeleteRecord.
-func (qc *QueryClient) MutationDeleteRecord(ctx context.Context, args MutationDeleteRecordArgs) (*Result, error) {
-	call := MutationDeleteRecordBuild(args)
-	return qc.executeNamed(ctx, "mutationDeleteRecord", call)
+// DeleteRecord calls the engine mutation deleteRecord.
+func (qc *QueryClient) DeleteRecord(ctx context.Context, args DeleteRecordArgs) (*Result, error) {
+	call := DeleteRecordBuild(args)
+	return qc.executeNamed(ctx, "deleteRecord", call)
 }
 
-func MutationDeleteRecordBuild(args MutationDeleteRecordArgs) string {
+func DeleteRecordBuild(args DeleteRecordArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationDeleteRecord({")
+	b.WriteString("deleteRecord({")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationDeleteUserHard -- Hard-delete (soft-delete + generic @pii scrub) a user after the deletion-cooldown sweep.
+// DeleteUserHard -- Hard-delete (soft-delete + generic @pii scrub) a user after the deletion-cooldown sweep.
 //
 // Bound concept: user.
-type MutationDeleteUserHardArgs struct {
+type DeleteUserHardArgs struct {
 	UserId string
 }
 
-// MutationDeleteUserHard calls the engine mutation mutationDeleteUserHard.
-func (qc *QueryClient) MutationDeleteUserHard(ctx context.Context, args MutationDeleteUserHardArgs) (*Result, error) {
-	call := MutationDeleteUserHardBuild(args)
-	return qc.executeNamed(ctx, "mutationDeleteUserHard", call)
+// DeleteUserHard calls the engine mutation deleteUserHard.
+func (qc *QueryClient) DeleteUserHard(ctx context.Context, args DeleteUserHardArgs) (*Result, error) {
+	call := DeleteUserHardBuild(args)
+	return qc.executeNamed(ctx, "deleteUserHard", call)
 }
 
-func MutationDeleteUserHardBuild(args MutationDeleteUserHardArgs) string {
+func DeleteUserHardBuild(args DeleteUserHardArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationDeleteUserHard({")
+	b.WriteString("deleteUserHard({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationDeprecateAction -- Deprecate a v1:actions:action (reliability below floor or superseded), removing it from replay (Phase 4 #1739).
+// DeprecateAction -- Deprecate a v1:actions:action (reliability below floor or superseded), removing it from replay (Phase 4 #1739).
 //
 // Bound concept: action.
-type MutationDeprecateActionArgs struct {
+type DeprecateActionArgs struct {
 	ActionId string
 }
 
-// MutationDeprecateAction calls the engine mutation mutationDeprecateAction.
-func (qc *QueryClient) MutationDeprecateAction(ctx context.Context, args MutationDeprecateActionArgs) (*Result, error) {
-	call := MutationDeprecateActionBuild(args)
-	return qc.executeNamed(ctx, "mutationDeprecateAction", call)
+// DeprecateAction calls the engine mutation deprecateAction.
+func (qc *QueryClient) DeprecateAction(ctx context.Context, args DeprecateActionArgs) (*Result, error) {
+	call := DeprecateActionBuild(args)
+	return qc.executeNamed(ctx, "deprecateAction", call)
 }
 
-func MutationDeprecateActionBuild(args MutationDeprecateActionArgs) string {
+func DeprecateActionBuild(args DeprecateActionArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationDeprecateAction({")
+	b.WriteString("deprecateAction({")
 	b.WriteString("actionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ActionId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationEmitClientToolRequest -- Emit a client-tool request envelope for cross-node relay to a browser stream.
+// EmitClientToolRequest -- Emit a client-tool request envelope for cross-node relay to a browser stream.
 //
 // Bound concept: request.
-type MutationEmitClientToolRequestArgs struct {
+type EmitClientToolRequestArgs struct {
 	RequestId     string
 	CallId        string
 	ToolName      string
@@ -5928,57 +5928,57 @@ type MutationEmitClientToolRequestArgs struct {
 	ExpiresAt     string
 }
 
-// MutationEmitClientToolRequest calls the engine mutation mutationEmitClientToolRequest.
-func (qc *QueryClient) MutationEmitClientToolRequest(ctx context.Context, args MutationEmitClientToolRequestArgs) (*Result, error) {
-	call := MutationEmitClientToolRequestBuild(args)
-	return qc.executeNamed(ctx, "mutationEmitClientToolRequest", call)
+// EmitClientToolRequest calls the engine mutation emitClientToolRequest.
+func (qc *QueryClient) EmitClientToolRequest(ctx context.Context, args EmitClientToolRequestArgs) (*Result, error) {
+	call := EmitClientToolRequestBuild(args)
+	return qc.executeNamed(ctx, "emitClientToolRequest", call)
 }
 
-func MutationEmitClientToolRequestBuild(args MutationEmitClientToolRequestArgs) string {
+func EmitClientToolRequestBuild(args EmitClientToolRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationEmitClientToolRequest({")
+	b.WriteString("emitClientToolRequest({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("callId: ")
 	b.WriteString(fmt.Sprintf("%q", args.CallId))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toolName: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToolName))
 	if args.ArgumentsJSON != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("argumentsJSON: ")
 		b.WriteString(fmt.Sprintf("%q", args.ArgumentsJSON))
 	}
 	if args.PartitionId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.ParticipantId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	}
 	if args.AgentId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.ExpiresAt != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
@@ -5988,10 +5988,10 @@ func MutationEmitClientToolRequestBuild(args MutationEmitClientToolRequestArgs) 
 	return b.String()
 }
 
-// MutationEmitClientToolResponse -- Emit a client-tool response envelope fulfilling a pending clientToolRequest.
+// EmitClientToolResponse -- Emit a client-tool response envelope fulfilling a pending clientToolRequest.
 //
 // Bound concept: response.
-type MutationEmitClientToolResponseArgs struct {
+type EmitClientToolResponseArgs struct {
 	ResponseId   string
 	CallId       string
 	ContentJSON  string
@@ -6001,45 +6001,45 @@ type MutationEmitClientToolResponseArgs struct {
 	PartitionId  string
 }
 
-// MutationEmitClientToolResponse calls the engine mutation mutationEmitClientToolResponse.
-func (qc *QueryClient) MutationEmitClientToolResponse(ctx context.Context, args MutationEmitClientToolResponseArgs) (*Result, error) {
-	call := MutationEmitClientToolResponseBuild(args)
-	return qc.executeNamed(ctx, "mutationEmitClientToolResponse", call)
+// EmitClientToolResponse calls the engine mutation emitClientToolResponse.
+func (qc *QueryClient) EmitClientToolResponse(ctx context.Context, args EmitClientToolResponseArgs) (*Result, error) {
+	call := EmitClientToolResponseBuild(args)
+	return qc.executeNamed(ctx, "emitClientToolResponse", call)
 }
 
-func MutationEmitClientToolResponseBuild(args MutationEmitClientToolResponseArgs) string {
+func EmitClientToolResponseBuild(args EmitClientToolResponseArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationEmitClientToolResponse({")
+	b.WriteString("emitClientToolResponse({")
 	b.WriteString("responseId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponseId))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("callId: ")
 	b.WriteString(fmt.Sprintf("%q", args.CallId))
 	if args.ContentJSON != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("contentJSON: ")
 		b.WriteString(fmt.Sprintf("%q", args.ContentJSON))
 	}
 	if args.IsErrorSet {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("isError: ")
 		b.WriteString(fmt.Sprintf("%v", args.IsError))
 	}
 	if args.ErrorMessage != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
 	if args.PartitionId != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
@@ -6049,10 +6049,10 @@ func MutationEmitClientToolResponseBuild(args MutationEmitClientToolResponseArgs
 	return b.String()
 }
 
-// MutationEmitTextChunk -- Emit a streaming text chunk during AI response generation.
+// EmitTextChunk -- Emit a streaming text chunk during AI response generation.
 //
 // Bound concept: chunk.
-type MutationEmitTextChunkArgs struct {
+type EmitTextChunkArgs struct {
 	ChunkId       string
 	PartitionId   string
 	ParticipantId string
@@ -6062,43 +6062,43 @@ type MutationEmitTextChunkArgs struct {
 	Done          bool
 }
 
-// MutationEmitTextChunk calls the engine mutation mutationEmitTextChunk.
-func (qc *QueryClient) MutationEmitTextChunk(ctx context.Context, args MutationEmitTextChunkArgs) (*Result, error) {
-	call := MutationEmitTextChunkBuild(args)
-	return qc.executeNamed(ctx, "mutationEmitTextChunk", call)
+// EmitTextChunk calls the engine mutation emitTextChunk.
+func (qc *QueryClient) EmitTextChunk(ctx context.Context, args EmitTextChunkArgs) (*Result, error) {
+	call := EmitTextChunkBuild(args)
+	return qc.executeNamed(ctx, "emitTextChunk", call)
 }
 
-func MutationEmitTextChunkBuild(args MutationEmitTextChunkArgs) string {
+func EmitTextChunkBuild(args EmitTextChunkArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationEmitTextChunk({")
+	b.WriteString("emitTextChunk({")
 	b.WriteString("chunkId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ChunkId))
-	if b.Len() > 23 {
+	if b.Len() > 15 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 23 {
+	if b.Len() > 15 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	if b.Len() > 23 {
+	if b.Len() > 15 {
 		b.WriteString(", ")
 	}
 	b.WriteString("replyId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ReplyId))
-	if b.Len() > 23 {
+	if b.Len() > 15 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
-	if b.Len() > 23 {
+	if b.Len() > 15 {
 		b.WriteString(", ")
 	}
 	b.WriteString("index: ")
 	b.WriteString(fmt.Sprintf("%v", args.Index))
-	if b.Len() > 23 {
+	if b.Len() > 15 {
 		b.WriteString(", ")
 	}
 	b.WriteString("done: ")
@@ -6107,49 +6107,49 @@ func MutationEmitTextChunkBuild(args MutationEmitTextChunkArgs) string {
 	return b.String()
 }
 
-// MutationExpireAccessRequest -- Expire a pending access request (status=expired).
+// ExpireAccessRequest -- Expire a pending access request (status=expired).
 //
 // Bound concept: accessRequest.
-type MutationExpireAccessRequestArgs struct {
+type ExpireAccessRequestArgs struct {
 	RequestId string
 }
 
-// MutationExpireAccessRequest calls the engine mutation mutationExpireAccessRequest.
-func (qc *QueryClient) MutationExpireAccessRequest(ctx context.Context, args MutationExpireAccessRequestArgs) (*Result, error) {
-	call := MutationExpireAccessRequestBuild(args)
-	return qc.executeNamed(ctx, "mutationExpireAccessRequest", call)
+// ExpireAccessRequest calls the engine mutation expireAccessRequest.
+func (qc *QueryClient) ExpireAccessRequest(ctx context.Context, args ExpireAccessRequestArgs) (*Result, error) {
+	call := ExpireAccessRequestBuild(args)
+	return qc.executeNamed(ctx, "expireAccessRequest", call)
 }
 
-func MutationExpireAccessRequestBuild(args MutationExpireAccessRequestArgs) string {
+func ExpireAccessRequestBuild(args ExpireAccessRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationExpireAccessRequest({")
+	b.WriteString("expireAccessRequest({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationFailHarnessStep -- Mark a running step failed (running -> failed). Stamps errorMessage + completedAt. The engine step guard rejects the transition when the prior status is not 'running'. Retry (failed -> ready, attempt++) is a separate write.
+// FailHarnessStep -- Mark a running step failed (running -> failed). Stamps errorMessage + completedAt. The engine step guard rejects the transition when the prior status is not 'running'. Retry (failed -> ready, attempt++) is a separate write.
 //
 // Bound concept: step.
-type MutationFailHarnessStepArgs struct {
+type FailHarnessStepArgs struct {
 	StepId       string
 	ErrorMessage string
 }
 
-// MutationFailHarnessStep calls the engine mutation mutationFailHarnessStep.
-func (qc *QueryClient) MutationFailHarnessStep(ctx context.Context, args MutationFailHarnessStepArgs) (*Result, error) {
-	call := MutationFailHarnessStepBuild(args)
-	return qc.executeNamed(ctx, "mutationFailHarnessStep", call)
+// FailHarnessStep calls the engine mutation failHarnessStep.
+func (qc *QueryClient) FailHarnessStep(ctx context.Context, args FailHarnessStepArgs) (*Result, error) {
+	call := FailHarnessStepBuild(args)
+	return qc.executeNamed(ctx, "failHarnessStep", call)
 }
 
-func MutationFailHarnessStepBuild(args MutationFailHarnessStepArgs) string {
+func FailHarnessStepBuild(args FailHarnessStepArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationFailHarnessStep({")
+	b.WriteString("failHarnessStep({")
 	b.WriteString("stepId: ")
 	b.WriteString(fmt.Sprintf("%q", args.StepId))
 	if args.ErrorMessage != "" {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
@@ -6159,10 +6159,10 @@ func MutationFailHarnessStepBuild(args MutationFailHarnessStepArgs) string {
 	return b.String()
 }
 
-// MutationFoldResponsibilityIntakeAnswers -- Fold the user's answers to the intake clarifying questions back into a v1:planner:responsibility and re-stamp the re-inferred field set (issue #637). Called after the user answers the intakeRequest questions: the dispatcher re-runs responsibilityIntake with the answers folded in, then writes the final trigger / schedule / condition / targetKind / assignedRoleSlug / successCriteria / notifyHow, records intakeResponse for audit, sets intakeStatus='applied', and flips status='active'. System write -- no ownerUserId re-stamp.
+// FoldResponsibilityIntakeAnswers -- Fold the user's answers to the intake clarifying questions back into a v1:planner:responsibility and re-stamp the re-inferred field set (issue #637). Called after the user answers the intakeRequest questions: the dispatcher re-runs responsibilityIntake with the answers folded in, then writes the final trigger / schedule / condition / targetKind / assignedRoleSlug / successCriteria / notifyHow, records intakeResponse for audit, sets intakeStatus='applied', and flips status='active'. System write -- no ownerUserId re-stamp.
 //
 // Bound concept: responsibility.
-type MutationFoldResponsibilityIntakeAnswersArgs struct {
+type FoldResponsibilityIntakeAnswersArgs struct {
 	ResponsibilityId string
 	IntakeResponse   map[string]any
 	// Enum: reactive | standing | recurring
@@ -6176,66 +6176,66 @@ type MutationFoldResponsibilityIntakeAnswersArgs struct {
 	NotifyHow        string
 }
 
-// MutationFoldResponsibilityIntakeAnswers calls the engine mutation mutationFoldResponsibilityIntakeAnswers.
-func (qc *QueryClient) MutationFoldResponsibilityIntakeAnswers(ctx context.Context, args MutationFoldResponsibilityIntakeAnswersArgs) (*Result, error) {
-	call := MutationFoldResponsibilityIntakeAnswersBuild(args)
-	return qc.executeNamed(ctx, "mutationFoldResponsibilityIntakeAnswers", call)
+// FoldResponsibilityIntakeAnswers calls the engine mutation foldResponsibilityIntakeAnswers.
+func (qc *QueryClient) FoldResponsibilityIntakeAnswers(ctx context.Context, args FoldResponsibilityIntakeAnswersArgs) (*Result, error) {
+	call := FoldResponsibilityIntakeAnswersBuild(args)
+	return qc.executeNamed(ctx, "foldResponsibilityIntakeAnswers", call)
 }
 
-func MutationFoldResponsibilityIntakeAnswersBuild(args MutationFoldResponsibilityIntakeAnswersArgs) string {
+func FoldResponsibilityIntakeAnswersBuild(args FoldResponsibilityIntakeAnswersArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationFoldResponsibilityIntakeAnswers({")
+	b.WriteString("foldResponsibilityIntakeAnswers({")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
-	if b.Len() > 41 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("intakeResponse: ")
 	b.WriteString(renderMemQLValue(args.IntakeResponse))
 	if args.Trigger != "" {
-		if b.Len() > 41 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("trigger: ")
 		b.WriteString(fmt.Sprintf("%q", args.Trigger))
 	}
 	if args.Schedule != "" {
-		if b.Len() > 41 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("schedule: ")
 		b.WriteString(fmt.Sprintf("%q", args.Schedule))
 	}
 	if args.Condition != nil {
-		if b.Len() > 41 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("condition: ")
 		b.WriteString(renderMemQLValue(args.Condition))
 	}
 	if args.TargetKind != "" {
-		if b.Len() > 41 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
 	}
 	if args.AssignedRoleSlug != "" {
-		if b.Len() > 41 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
 	}
 	if args.SuccessCriteria != "" {
-		if b.Len() > 41 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("successCriteria: ")
 		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
 	}
 	if args.NotifyHow != "" {
-		if b.Len() > 41 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notifyHow: ")
@@ -6245,10 +6245,10 @@ func MutationFoldResponsibilityIntakeAnswersBuild(args MutationFoldResponsibilit
 	return b.String()
 }
 
-// MutationInsertOutputScreening -- Insert one v1:safety:outputScreening row recording the OutputGate's verdict for a single piece of incoming content. Called from component/safety/recorder/output_persisting.go via the engine's mutation path; the args correspond 1:1 to the concept fields. redactedSample arrives already truncated + secret-scrubbed by the caller (cap 4 KiB).
+// InsertOutputScreening -- Insert one v1:safety:outputScreening row recording the OutputGate's verdict for a single piece of incoming content. Called from component/safety/recorder/output_persisting.go via the engine's mutation path; the args correspond 1:1 to the concept fields. redactedSample arrives already truncated + secret-scrubbed by the caller (cap 4 KiB).
 //
 // Bound concept: outputScreening.
-type MutationInsertOutputScreeningArgs struct {
+type InsertOutputScreeningArgs struct {
 	ContentType    string
 	ContentLength  any
 	RedactedSample string
@@ -6267,104 +6267,104 @@ type MutationInsertOutputScreeningArgs struct {
 	Mode           string
 }
 
-// MutationInsertOutputScreening calls the engine mutation mutationInsertOutputScreening.
-func (qc *QueryClient) MutationInsertOutputScreening(ctx context.Context, args MutationInsertOutputScreeningArgs) (*Result, error) {
-	call := MutationInsertOutputScreeningBuild(args)
-	return qc.executeNamed(ctx, "mutationInsertOutputScreening", call)
+// InsertOutputScreening calls the engine mutation insertOutputScreening.
+func (qc *QueryClient) InsertOutputScreening(ctx context.Context, args InsertOutputScreeningArgs) (*Result, error) {
+	call := InsertOutputScreeningBuild(args)
+	return qc.executeNamed(ctx, "insertOutputScreening", call)
 }
 
-func MutationInsertOutputScreeningBuild(args MutationInsertOutputScreeningArgs) string {
+func InsertOutputScreeningBuild(args InsertOutputScreeningArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationInsertOutputScreening({")
+	b.WriteString("insertOutputScreening({")
 	b.WriteString("contentType: ")
 	b.WriteString(fmt.Sprintf("%q", args.ContentType))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("contentLength: ")
 	b.WriteString(fmt.Sprintf("%q", args.ContentLength))
 	if args.RedactedSample != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("redactedSample: ")
 		b.WriteString(fmt.Sprintf("%q", args.RedactedSample))
 	}
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.Categories != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("categories: ")
 		b.WriteString(fmt.Sprintf("%q", args.Categories))
 	}
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("verdict: ")
 	b.WriteString(fmt.Sprintf("%q", args.Verdict))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("screener: ")
 	b.WriteString(fmt.Sprintf("%q", args.Screener))
 	if args.RuleId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ruleId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RuleId))
 	}
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
 	b.WriteString(fmt.Sprintf("%q", args.Confidence))
 	if args.Reason != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("latencyMs: ")
 	b.WriteString(fmt.Sprintf("%q", args.LatencyMs))
 	if args.AgentId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.OwnerUserId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	}
 	if args.PlanId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
 	if args.CorrelationId != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("correlationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.CorrelationId))
 	}
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mode: ")
@@ -6373,10 +6373,10 @@ func MutationInsertOutputScreeningBuild(args MutationInsertOutputScreeningArgs) 
 	return b.String()
 }
 
-// MutationInsertPolicyTrace -- Persist a single policy evaluation trace to v1:platform:policyTrace.
+// InsertPolicyTrace -- Persist a single policy evaluation trace to v1:platform:policyTrace.
 //
 // Bound concept: policyTrace.
-type MutationInsertPolicyTraceArgs struct {
+type InsertPolicyTraceArgs struct {
 	PolicyName      string
 	Tier            string
 	ActorUserId     string
@@ -6389,65 +6389,65 @@ type MutationInsertPolicyTraceArgs struct {
 	Error           string
 }
 
-// MutationInsertPolicyTrace calls the engine mutation mutationInsertPolicyTrace.
-func (qc *QueryClient) MutationInsertPolicyTrace(ctx context.Context, args MutationInsertPolicyTraceArgs) (*Result, error) {
-	call := MutationInsertPolicyTraceBuild(args)
-	return qc.executeNamed(ctx, "mutationInsertPolicyTrace", call)
+// InsertPolicyTrace calls the engine mutation insertPolicyTrace.
+func (qc *QueryClient) InsertPolicyTrace(ctx context.Context, args InsertPolicyTraceArgs) (*Result, error) {
+	call := InsertPolicyTraceBuild(args)
+	return qc.executeNamed(ctx, "insertPolicyTrace", call)
 }
 
-func MutationInsertPolicyTraceBuild(args MutationInsertPolicyTraceArgs) string {
+func InsertPolicyTraceBuild(args InsertPolicyTraceArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationInsertPolicyTrace({")
+	b.WriteString("insertPolicyTrace({")
 	b.WriteString("policyName: ")
 	b.WriteString(fmt.Sprintf("%q", args.PolicyName))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.ActorUserId != "" {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorUserId))
 	}
 	if args.ActorRole != "" {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorRole: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorRole))
 	}
 	if args.CallerPartition != "" {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("callerPartition: ")
 		b.WriteString(fmt.Sprintf("%q", args.CallerPartition))
 	}
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("argsHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.ArgsHash))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("resultJson: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResultJson))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("traceJson: ")
 	b.WriteString(fmt.Sprintf("%q", args.TraceJson))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("durationMs: ")
 	b.WriteString(fmt.Sprintf("%v", args.DurationMs))
 	if args.Error != "" {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("error: ")
@@ -6457,10 +6457,10 @@ func MutationInsertPolicyTraceBuild(args MutationInsertPolicyTraceArgs) string {
 	return b.String()
 }
 
-// MutationInsertSafetyClassification -- Insert one v1:safety:classification row recording the Gate's decision for a single proposed action. Called from component/safety/recorder/persisting.go via the engine's mutation path; the args correspond 1:1 to the concept fields. argsRedacted is scrubbed by the caller: Body + Args run through safety.RedactedPayload (TOKEN/SECRET/PASSWORD/Authorization fragments replaced with [REDACTED]); when the classifier flags `credential_access` the recorder additionally drops Command/URL/Paths to avoid persisting credential-bearing surface strings (the rule's reason is preserved). This mutation does not perform its own scrub pass.
+// InsertSafetyClassification -- Insert one v1:safety:classification row recording the Gate's decision for a single proposed action. Called from component/safety/recorder/persisting.go via the engine's mutation path; the args correspond 1:1 to the concept fields. argsRedacted is scrubbed by the caller: Body + Args run through safety.RedactedPayload (TOKEN/SECRET/PASSWORD/Authorization fragments replaced with [REDACTED]); when the classifier flags `credential_access` the recorder additionally drops Command/URL/Paths to avoid persisting credential-bearing surface strings (the rule's reason is preserved). This mutation does not perform its own scrub pass.
 //
 // Bound concept: classification.
-type MutationInsertSafetyClassificationArgs struct {
+type InsertSafetyClassificationArgs struct {
 	Surface       string
 	Action        string
 	ArgsRedacted  string
@@ -6479,104 +6479,104 @@ type MutationInsertSafetyClassificationArgs struct {
 	Mode          string
 }
 
-// MutationInsertSafetyClassification calls the engine mutation mutationInsertSafetyClassification.
-func (qc *QueryClient) MutationInsertSafetyClassification(ctx context.Context, args MutationInsertSafetyClassificationArgs) (*Result, error) {
-	call := MutationInsertSafetyClassificationBuild(args)
-	return qc.executeNamed(ctx, "mutationInsertSafetyClassification", call)
+// InsertSafetyClassification calls the engine mutation insertSafetyClassification.
+func (qc *QueryClient) InsertSafetyClassification(ctx context.Context, args InsertSafetyClassificationArgs) (*Result, error) {
+	call := InsertSafetyClassificationBuild(args)
+	return qc.executeNamed(ctx, "insertSafetyClassification", call)
 }
 
-func MutationInsertSafetyClassificationBuild(args MutationInsertSafetyClassificationArgs) string {
+func InsertSafetyClassificationBuild(args InsertSafetyClassificationArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationInsertSafetyClassification({")
+	b.WriteString("insertSafetyClassification({")
 	b.WriteString("surface: ")
 	b.WriteString(fmt.Sprintf("%q", args.Surface))
-	if b.Len() > 36 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
 	b.WriteString(fmt.Sprintf("%q", args.Action))
 	if args.ArgsRedacted != "" {
-		if b.Len() > 36 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("argsRedacted: ")
 		b.WriteString(fmt.Sprintf("%q", args.ArgsRedacted))
 	}
-	if b.Len() > 36 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.Categories != "" {
-		if b.Len() > 36 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("categories: ")
 		b.WriteString(fmt.Sprintf("%q", args.Categories))
 	}
-	if b.Len() > 36 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("decision: ")
 	b.WriteString(fmt.Sprintf("%q", args.Decision))
-	if b.Len() > 36 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
 	if args.RuleId != "" {
-		if b.Len() > 36 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ruleId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RuleId))
 	}
-	if b.Len() > 36 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
 	b.WriteString(fmt.Sprintf("%q", args.Confidence))
 	if args.Reason != "" {
-		if b.Len() > 36 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
-	if b.Len() > 36 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("latencyMs: ")
 	b.WriteString(fmt.Sprintf("%q", args.LatencyMs))
 	if args.AgentId != "" {
-		if b.Len() > 36 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.OwnerUserId != "" {
-		if b.Len() > 36 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	}
 	if args.PlanId != "" {
-		if b.Len() > 36 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
 	if args.CorrelationId != "" {
-		if b.Len() > 36 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("correlationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.CorrelationId))
 	}
-	if b.Len() > 36 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mode: ")
@@ -6585,10 +6585,10 @@ func MutationInsertSafetyClassificationBuild(args MutationInsertSafetyClassifica
 	return b.String()
 }
 
-// MutationJoinSpaceAsAI -- Join a space as an AI participant. Uses canonicalized deterministic ID.
+// JoinSpaceAsAI -- Join a space as an AI participant. Uses canonicalized deterministic ID.
 //
 // Bound concept: participant.
-type MutationJoinSpaceAsAIArgs struct {
+type JoinSpaceAsAIArgs struct {
 	PartitionId         string
 	AgentId             string
 	DisplayName         string
@@ -6602,64 +6602,64 @@ type MutationJoinSpaceAsAIArgs struct {
 	IsGroupGASet        bool // set true to send isGroupGA; required because zero-value bool is ambiguous
 }
 
-// MutationJoinSpaceAsAI calls the engine mutation mutationJoinSpaceAsAI.
-func (qc *QueryClient) MutationJoinSpaceAsAI(ctx context.Context, args MutationJoinSpaceAsAIArgs) (*Result, error) {
-	call := MutationJoinSpaceAsAIBuild(args)
-	return qc.executeNamed(ctx, "mutationJoinSpaceAsAI", call)
+// JoinSpaceAsAI calls the engine mutation joinSpaceAsAI.
+func (qc *QueryClient) JoinSpaceAsAI(ctx context.Context, args JoinSpaceAsAIArgs) (*Result, error) {
+	call := JoinSpaceAsAIBuild(args)
+	return qc.executeNamed(ctx, "joinSpaceAsAI", call)
 }
 
-func MutationJoinSpaceAsAIBuild(args MutationJoinSpaceAsAIArgs) string {
+func JoinSpaceAsAIBuild(args JoinSpaceAsAIArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationJoinSpaceAsAI({")
+	b.WriteString("joinSpaceAsAI({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 23 {
+	if b.Len() > 15 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 23 {
+	if b.Len() > 15 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
 	if args.Status != "" {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
 	if args.JoinedAt != "" {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("joinedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.JoinedAt))
 	}
 	if args.CapabilityOverrides != nil {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capabilityOverrides: ")
 		b.WriteString(renderMemQLValue(args.CapabilityOverrides))
 	}
 	if args.HiddenSet {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("hidden: ")
 		b.WriteString(fmt.Sprintf("%v", args.Hidden))
 	}
 	if args.ForUserId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("forUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ForUserId))
 	}
 	if args.IsGroupGASet {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("isGroupGA: ")
@@ -6669,10 +6669,10 @@ func MutationJoinSpaceAsAIBuild(args MutationJoinSpaceAsAIArgs) string {
 	return b.String()
 }
 
-// MutationJoinSpaceAsHuman -- Join a space as a human participant.
+// JoinSpaceAsHuman -- Join a space as a human participant.
 //
 // Bound concept: participant.
-type MutationJoinSpaceAsHumanArgs struct {
+type JoinSpaceAsHumanArgs struct {
 	PartitionId         string
 	UserId              string
 	DisplayName         string
@@ -6681,43 +6681,43 @@ type MutationJoinSpaceAsHumanArgs struct {
 	CapabilityOverrides map[string]any
 }
 
-// MutationJoinSpaceAsHuman calls the engine mutation mutationJoinSpaceAsHuman.
-func (qc *QueryClient) MutationJoinSpaceAsHuman(ctx context.Context, args MutationJoinSpaceAsHumanArgs) (*Result, error) {
-	call := MutationJoinSpaceAsHumanBuild(args)
-	return qc.executeNamed(ctx, "mutationJoinSpaceAsHuman", call)
+// JoinSpaceAsHuman calls the engine mutation joinSpaceAsHuman.
+func (qc *QueryClient) JoinSpaceAsHuman(ctx context.Context, args JoinSpaceAsHumanArgs) (*Result, error) {
+	call := JoinSpaceAsHumanBuild(args)
+	return qc.executeNamed(ctx, "joinSpaceAsHuman", call)
 }
 
-func MutationJoinSpaceAsHumanBuild(args MutationJoinSpaceAsHumanArgs) string {
+func JoinSpaceAsHumanBuild(args JoinSpaceAsHumanArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationJoinSpaceAsHuman({")
+	b.WriteString("joinSpaceAsHuman({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
 	if args.Status != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
 	if args.JoinedAt != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("joinedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.JoinedAt))
 	}
 	if args.CapabilityOverrides != nil {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capabilityOverrides: ")
@@ -6727,26 +6727,26 @@ func MutationJoinSpaceAsHumanBuild(args MutationJoinSpaceAsHumanArgs) string {
 	return b.String()
 }
 
-// MutationLeaveSpace -- Insert a new version of a participant record (typically used to mark the participant as left).
+// LeaveSpace -- Insert a new version of a participant record (typically used to mark the participant as left).
 //
 // Bound concept: participant.
-type MutationLeaveSpaceArgs struct {
+type LeaveSpaceArgs struct {
 	ParticipantId string
 	Payload       map[string]any
 }
 
-// MutationLeaveSpace calls the engine mutation mutationLeaveSpace.
-func (qc *QueryClient) MutationLeaveSpace(ctx context.Context, args MutationLeaveSpaceArgs) (*Result, error) {
-	call := MutationLeaveSpaceBuild(args)
-	return qc.executeNamed(ctx, "mutationLeaveSpace", call)
+// LeaveSpace calls the engine mutation leaveSpace.
+func (qc *QueryClient) LeaveSpace(ctx context.Context, args LeaveSpaceArgs) (*Result, error) {
+	call := LeaveSpaceBuild(args)
+	return qc.executeNamed(ctx, "leaveSpace", call)
 }
 
-func MutationLeaveSpaceBuild(args MutationLeaveSpaceArgs) string {
+func LeaveSpaceBuild(args LeaveSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationLeaveSpace({")
+	b.WriteString("leaveSpace({")
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -6755,10 +6755,10 @@ func MutationLeaveSpaceBuild(args MutationLeaveSpaceArgs) string {
 	return b.String()
 }
 
-// MutationLogMissingCapability -- Per Q7 missing-capability surface: log a new gap the Planner Agent identified during a Plan. First sighting creates the row; repeat sightings (same (kind, capability)) call mutationBumpMissingCapabilitySighting instead so the row stays unique-by-capability and sightingCount climbs. Status defaults to 'open'.
+// LogMissingCapability -- Per Q7 missing-capability surface: log a new gap the Planner Agent identified during a Plan. First sighting creates the row; repeat sightings (same (kind, capability)) call bumpMissingCapabilitySighting instead so the row stays unique-by-capability and sightingCount climbs. Status defaults to 'open'.
 //
 // Bound concept: missingCapability.
-type MutationLogMissingCapabilityArgs struct {
+type LogMissingCapabilityArgs struct {
 	MissingId           string
 	Kind                string
 	Capability          string
@@ -6771,67 +6771,67 @@ type MutationLogMissingCapabilityArgs struct {
 	ExampleGoal         string
 }
 
-// MutationLogMissingCapability calls the engine mutation mutationLogMissingCapability.
-func (qc *QueryClient) MutationLogMissingCapability(ctx context.Context, args MutationLogMissingCapabilityArgs) (*Result, error) {
-	call := MutationLogMissingCapabilityBuild(args)
-	return qc.executeNamed(ctx, "mutationLogMissingCapability", call)
+// LogMissingCapability calls the engine mutation logMissingCapability.
+func (qc *QueryClient) LogMissingCapability(ctx context.Context, args LogMissingCapabilityArgs) (*Result, error) {
+	call := LogMissingCapabilityBuild(args)
+	return qc.executeNamed(ctx, "logMissingCapability", call)
 }
 
-func MutationLogMissingCapabilityBuild(args MutationLogMissingCapabilityArgs) string {
+func LogMissingCapabilityBuild(args LogMissingCapabilityArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationLogMissingCapability({")
+	b.WriteString("logMissingCapability({")
 	b.WriteString("missingId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MissingId))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("capability: ")
 	b.WriteString(fmt.Sprintf("%q", args.Capability))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("description: ")
 	b.WriteString(fmt.Sprintf("%q", args.Description))
 	if args.RequestedFromPlanId != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requestedFromPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RequestedFromPlanId))
 	}
 	if args.RequestedByAgentId != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requestedByAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RequestedByAgentId))
 	}
 	if args.PartitionId != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.PartitionScope != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionScope: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionScope))
 	}
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("firstSeenAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.FirstSeenAt))
 	if args.ExampleGoal != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("exampleGoal: ")
@@ -6841,41 +6841,41 @@ func MutationLogMissingCapabilityBuild(args MutationLogMissingCapabilityArgs) st
 	return b.String()
 }
 
-// MutationMarkChunkSuperseded -- Flag an existing knowledge chunk as outdated. Called by the Trainer Agent's markChunkSuperseded tool during a mode='refresh' trainSpecialist Plan. Sets superseded=true + supersededAt + supersededReason; retrieval excludes superseded chunks. Partial update -- the chunk row is preserved for audit.
+// MarkChunkSuperseded -- Flag an existing knowledge chunk as outdated. Called by the Trainer Agent's markChunkSuperseded tool during a mode='refresh' trainSpecialist Plan. Sets superseded=true + supersededAt + supersededReason; retrieval excludes superseded chunks. Partial update -- the chunk row is preserved for audit.
 //
 // Bound concept: documentChunk.
-type MutationMarkChunkSupersededArgs struct {
+type MarkChunkSupersededArgs struct {
 	ChunkId          string
 	SupersededAt     string
 	Reason           string
 	SupersededReason string
 }
 
-// MutationMarkChunkSuperseded calls the engine mutation mutationMarkChunkSuperseded.
-func (qc *QueryClient) MutationMarkChunkSuperseded(ctx context.Context, args MutationMarkChunkSupersededArgs) (*Result, error) {
-	call := MutationMarkChunkSupersededBuild(args)
-	return qc.executeNamed(ctx, "mutationMarkChunkSuperseded", call)
+// MarkChunkSuperseded calls the engine mutation markChunkSuperseded.
+func (qc *QueryClient) MarkChunkSuperseded(ctx context.Context, args MarkChunkSupersededArgs) (*Result, error) {
+	call := MarkChunkSupersededBuild(args)
+	return qc.executeNamed(ctx, "markChunkSuperseded", call)
 }
 
-func MutationMarkChunkSupersededBuild(args MutationMarkChunkSupersededArgs) string {
+func MarkChunkSupersededBuild(args MarkChunkSupersededArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationMarkChunkSuperseded({")
+	b.WriteString("markChunkSuperseded({")
 	b.WriteString("chunkId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ChunkId))
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("supersededAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.SupersededAt))
 	if args.Reason != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
 	if args.SupersededReason != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("supersededReason: ")
@@ -6885,32 +6885,32 @@ func MutationMarkChunkSupersededBuild(args MutationMarkChunkSupersededArgs) stri
 	return b.String()
 }
 
-// MutationMarkResponsibilityIntakePending -- Mark a v1:planner:responsibility's intake as in-progress (issue #637). The intake dispatcher calls this when it claims a freshly-created draft so a created+updated double-fire (or a multi-node race) doesn't run the responsibilityIntake prompt twice -- intakeStatus flips ” -> 'pending'. System write (system:planner actor): no ownerUserId re-stamp, no user-scope reference, so it's engine-internal bookkeeping on a row the human already owns.
+// MarkResponsibilityIntakePending -- Mark a v1:planner:responsibility's intake as in-progress (issue #637). The intake dispatcher calls this when it claims a freshly-created draft so a created+updated double-fire (or a multi-node race) doesn't run the responsibilityIntake prompt twice -- intakeStatus flips ” -> 'pending'. System write (system:planner actor): no ownerUserId re-stamp, no user-scope reference, so it's engine-internal bookkeeping on a row the human already owns.
 //
 // Bound concept: responsibility.
-type MutationMarkResponsibilityIntakePendingArgs struct {
+type MarkResponsibilityIntakePendingArgs struct {
 	ResponsibilityId string
 }
 
-// MutationMarkResponsibilityIntakePending calls the engine mutation mutationMarkResponsibilityIntakePending.
-func (qc *QueryClient) MutationMarkResponsibilityIntakePending(ctx context.Context, args MutationMarkResponsibilityIntakePendingArgs) (*Result, error) {
-	call := MutationMarkResponsibilityIntakePendingBuild(args)
-	return qc.executeNamed(ctx, "mutationMarkResponsibilityIntakePending", call)
+// MarkResponsibilityIntakePending calls the engine mutation markResponsibilityIntakePending.
+func (qc *QueryClient) MarkResponsibilityIntakePending(ctx context.Context, args MarkResponsibilityIntakePendingArgs) (*Result, error) {
+	call := MarkResponsibilityIntakePendingBuild(args)
+	return qc.executeNamed(ctx, "markResponsibilityIntakePending", call)
 }
 
-func MutationMarkResponsibilityIntakePendingBuild(args MutationMarkResponsibilityIntakePendingArgs) string {
+func MarkResponsibilityIntakePendingBuild(args MarkResponsibilityIntakePendingArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationMarkResponsibilityIntakePending({")
+	b.WriteString("markResponsibilityIntakePending({")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationMintAction -- Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1, #1736). ownerUserId stamped from actor.userId (owned tier). Stores the replayable capability calls keyed by inputFingerprint.
+// MintAction -- Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1, #1736). ownerUserId stamped from actor.userId (owned tier). Stores the replayable capability calls keyed by inputFingerprint.
 //
 // Bound concept: action.
-type MutationMintActionArgs struct {
+type MintActionArgs struct {
 	ActionId            string
 	Slug                string
 	Intent              string
@@ -6929,111 +6929,111 @@ type MutationMintActionArgs struct {
 	ProvenanceStepId    string
 }
 
-// MutationMintAction calls the engine mutation mutationMintAction.
-func (qc *QueryClient) MutationMintAction(ctx context.Context, args MutationMintActionArgs) (*Result, error) {
-	call := MutationMintActionBuild(args)
-	return qc.executeNamed(ctx, "mutationMintAction", call)
+// MintAction calls the engine mutation mintAction.
+func (qc *QueryClient) MintAction(ctx context.Context, args MintActionArgs) (*Result, error) {
+	call := MintActionBuild(args)
+	return qc.executeNamed(ctx, "mintAction", call)
 }
 
-func MutationMintActionBuild(args MutationMintActionArgs) string {
+func MintActionBuild(args MintActionArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationMintAction({")
+	b.WriteString("mintAction({")
 	if args.ActionId != "" {
 		b.WriteString("actionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActionId))
 	}
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("intent: ")
 	b.WriteString(fmt.Sprintf("%q", args.Intent))
 	if args.Capability != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capability: ")
 		b.WriteString(fmt.Sprintf("%q", args.Capability))
 	}
 	if args.SideEffectClass != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sideEffectClass: ")
 		b.WriteString(fmt.Sprintf("%q", args.SideEffectClass))
 	}
 	if args.Status != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("inputFingerprint: ")
 	b.WriteString(fmt.Sprintf("%q", args.InputFingerprint))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("calls: ")
 	b.WriteString(renderMemQLValue(args.Calls))
 	if args.ResourceEdges != nil {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("resourceEdges: ")
 		b.WriteString(renderMemQLValue(args.ResourceEdges))
 	}
 	if args.ParamBindings != nil {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("paramBindings: ")
 		b.WriteString(renderMemQLValue(args.ParamBindings))
 	}
 	if args.TemplateFingerprint != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("templateFingerprint: ")
 		b.WriteString(fmt.Sprintf("%q", args.TemplateFingerprint))
 	}
 	if args.RecordedResult != nil {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recordedResult: ")
 		b.WriteString(renderMemQLValue(args.RecordedResult))
 	}
 	if args.ResultFingerprint != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("resultFingerprint: ")
 		b.WriteString(fmt.Sprintf("%q", args.ResultFingerprint))
 	}
 	if args.RecordedSurface != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recordedSurface: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecordedSurface))
 	}
 	if args.ProvenancePlanId != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provenancePlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProvenancePlanId))
 	}
 	if args.ProvenanceStepId != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provenanceStepId: ")
@@ -7043,10 +7043,10 @@ func MutationMintActionBuild(args MutationMintActionArgs) string {
 	return b.String()
 }
 
-// MutationMintSkill -- Mint a new v1:agents:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId + mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check.
+// MintSkill -- Mint a new v1:agents:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId + mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check.
 //
 // Bound concept: skill.
-type MutationMintSkillArgs struct {
+type MintSkillArgs struct {
 	SkillId           string
 	Slug              string
 	Name              string
@@ -7061,85 +7061,85 @@ type MutationMintSkillArgs struct {
 	MintedByAgentId   string
 }
 
-// MutationMintSkill calls the engine mutation mutationMintSkill.
-func (qc *QueryClient) MutationMintSkill(ctx context.Context, args MutationMintSkillArgs) (*Result, error) {
-	call := MutationMintSkillBuild(args)
-	return qc.executeNamed(ctx, "mutationMintSkill", call)
+// MintSkill calls the engine mutation mintSkill.
+func (qc *QueryClient) MintSkill(ctx context.Context, args MintSkillArgs) (*Result, error) {
+	call := MintSkillBuild(args)
+	return qc.executeNamed(ctx, "mintSkill", call)
 }
 
-func MutationMintSkillBuild(args MutationMintSkillArgs) string {
+func MintSkillBuild(args MintSkillArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationMintSkill({")
+	b.WriteString("mintSkill({")
 	if args.SkillId != "" {
 		b.WriteString("skillId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SkillId))
 	}
-	if b.Len() > 19 {
+	if b.Len() > 11 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	if b.Len() > 19 {
+	if b.Len() > 11 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Description != "" {
-		if b.Len() > 19 {
+		if b.Len() > 11 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.Category != "" {
-		if b.Len() > 19 {
+		if b.Len() > 11 {
 			b.WriteString(", ")
 		}
 		b.WriteString("category: ")
 		b.WriteString(fmt.Sprintf("%q", args.Category))
 	}
 	if args.Tags != nil {
-		if b.Len() > 19 {
+		if b.Len() > 11 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tags: ")
 		b.WriteString(renderMemQLValue(args.Tags))
 	}
 	if args.DomainIds != nil {
-		if b.Len() > 19 {
+		if b.Len() > 11 {
 			b.WriteString(", ")
 		}
 		b.WriteString("domainIds: ")
 		b.WriteString(renderMemQLValue(args.DomainIds))
 	}
 	if args.ToolSlugs != nil {
-		if b.Len() > 19 {
+		if b.Len() > 11 {
 			b.WriteString(", ")
 		}
 		b.WriteString("toolSlugs: ")
 		b.WriteString(renderMemQLValue(args.ToolSlugs))
 	}
 	if args.LiveSourceIds != nil {
-		if b.Len() > 19 {
+		if b.Len() > 11 {
 			b.WriteString(", ")
 		}
 		b.WriteString("liveSourceIds: ")
 		b.WriteString(renderMemQLValue(args.LiveSourceIds))
 	}
-	if b.Len() > 19 {
+	if b.Len() > 11 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.OriginatingPlanId != "" {
-		if b.Len() > 19 {
+		if b.Len() > 11 {
 			b.WriteString(", ")
 		}
 		b.WriteString("originatingPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OriginatingPlanId))
 	}
 	if args.MintedByAgentId != "" {
-		if b.Len() > 19 {
+		if b.Len() > 11 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mintedByAgentId: ")
@@ -7149,10 +7149,10 @@ func MutationMintSkillBuild(args MutationMintSkillArgs) string {
 	return b.String()
 }
 
-// MutationPersistTaskState -- Persist a Task's working state for async parking + planner re-invocation. Called when a Task transitions to paused / awaitingFeedback.
+// PersistTaskState -- Persist a Task's working state for async parking + planner re-invocation. Called when a Task transitions to paused / awaitingFeedback.
 //
 // Bound concept: taskState.
-type MutationPersistTaskStateArgs struct {
+type PersistTaskStateArgs struct {
 	StateId           string
 	TaskId            string
 	WorkingMemory     map[string]any
@@ -7161,47 +7161,47 @@ type MutationPersistTaskStateArgs struct {
 	PendingSubPlanIds []string
 }
 
-// MutationPersistTaskState calls the engine mutation mutationPersistTaskState.
-func (qc *QueryClient) MutationPersistTaskState(ctx context.Context, args MutationPersistTaskStateArgs) (*Result, error) {
-	call := MutationPersistTaskStateBuild(args)
-	return qc.executeNamed(ctx, "mutationPersistTaskState", call)
+// PersistTaskState calls the engine mutation persistTaskState.
+func (qc *QueryClient) PersistTaskState(ctx context.Context, args PersistTaskStateArgs) (*Result, error) {
+	call := PersistTaskStateBuild(args)
+	return qc.executeNamed(ctx, "persistTaskState", call)
 }
 
-func MutationPersistTaskStateBuild(args MutationPersistTaskStateArgs) string {
+func PersistTaskStateBuild(args PersistTaskStateArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationPersistTaskState({")
+	b.WriteString("persistTaskState({")
 	if args.StateId != "" {
 		b.WriteString("stateId: ")
 		b.WriteString(fmt.Sprintf("%q", args.StateId))
 	}
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("taskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TaskId))
 	if args.WorkingMemory != nil {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("workingMemory: ")
 		b.WriteString(renderMemQLValue(args.WorkingMemory))
 	}
 	if args.ReasoningChain != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reasoningChain: ")
 		b.WriteString(fmt.Sprintf("%q", args.ReasoningChain))
 	}
 	if args.ToolCallHistory != nil {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("toolCallHistory: ")
 		b.WriteString(renderMemQLValue(args.ToolCallHistory))
 	}
 	if args.PendingSubPlanIds != nil {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("pendingSubPlanIds: ")
@@ -7211,33 +7211,33 @@ func MutationPersistTaskStateBuild(args MutationPersistTaskStateArgs) string {
 	return b.String()
 }
 
-// MutationProvisionWorkspace -- Create the v1:workbench:workspace row for a Plan on first workbenchHost call. Storage root is supplied by the workbench integration which has already created the directory on disk.
+// ProvisionWorkspace -- Create the v1:workbench:workspace row for a Plan on first workbenchHost call. Storage root is supplied by the workbench integration which has already created the directory on disk.
 //
 // Bound concept: workspace.
-type MutationProvisionWorkspaceArgs struct {
+type ProvisionWorkspaceArgs struct {
 	// Synthesized id, typically `{planId}` since one workspace per Plan.
 	WorkspaceId string
 	PlanId      string
 	StorageRoot string
 }
 
-// MutationProvisionWorkspace calls the engine mutation mutationProvisionWorkspace.
-func (qc *QueryClient) MutationProvisionWorkspace(ctx context.Context, args MutationProvisionWorkspaceArgs) (*Result, error) {
-	call := MutationProvisionWorkspaceBuild(args)
-	return qc.executeNamed(ctx, "mutationProvisionWorkspace", call)
+// ProvisionWorkspace calls the engine mutation provisionWorkspace.
+func (qc *QueryClient) ProvisionWorkspace(ctx context.Context, args ProvisionWorkspaceArgs) (*Result, error) {
+	call := ProvisionWorkspaceBuild(args)
+	return qc.executeNamed(ctx, "provisionWorkspace", call)
 }
 
-func MutationProvisionWorkspaceBuild(args MutationProvisionWorkspaceArgs) string {
+func ProvisionWorkspaceBuild(args ProvisionWorkspaceArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationProvisionWorkspace({")
+	b.WriteString("provisionWorkspace({")
 	b.WriteString("workspaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("storageRoot: ")
@@ -7246,54 +7246,54 @@ func MutationProvisionWorkspaceBuild(args MutationProvisionWorkspaceArgs) string
 	return b.String()
 }
 
-// MutationPruneHarnessSemanticMemory -- Prune a decayed v1:harness:semanticMemory: status -> 'pruned' (soft-delete; the append-only model has no row removal). Recall (#585) + consolidation dedup filter status=='active', so a pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from actor.userId (owned tier).
+// PruneHarnessSemanticMemory -- Prune a decayed v1:harness:semanticMemory: status -> 'pruned' (soft-delete; the append-only model has no row removal). Recall (#585) + consolidation dedup filter status=='active', so a pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from actor.userId (owned tier).
 //
 // Bound concept: semanticMemory.
-type MutationPruneHarnessSemanticMemoryArgs struct {
+type PruneHarnessSemanticMemoryArgs struct {
 	MemoryId string
 }
 
-// MutationPruneHarnessSemanticMemory calls the engine mutation mutationPruneHarnessSemanticMemory.
-func (qc *QueryClient) MutationPruneHarnessSemanticMemory(ctx context.Context, args MutationPruneHarnessSemanticMemoryArgs) (*Result, error) {
-	call := MutationPruneHarnessSemanticMemoryBuild(args)
-	return qc.executeNamed(ctx, "mutationPruneHarnessSemanticMemory", call)
+// PruneHarnessSemanticMemory calls the engine mutation pruneHarnessSemanticMemory.
+func (qc *QueryClient) PruneHarnessSemanticMemory(ctx context.Context, args PruneHarnessSemanticMemoryArgs) (*Result, error) {
+	call := PruneHarnessSemanticMemoryBuild(args)
+	return qc.executeNamed(ctx, "pruneHarnessSemanticMemory", call)
 }
 
-func MutationPruneHarnessSemanticMemoryBuild(args MutationPruneHarnessSemanticMemoryArgs) string {
+func PruneHarnessSemanticMemoryBuild(args PruneHarnessSemanticMemoryArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationPruneHarnessSemanticMemory({")
+	b.WriteString("pruneHarnessSemanticMemory({")
 	b.WriteString("memoryId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationReadyHarnessStep -- Promote a step to ready (pending -> ready when dependsOn is satisfied, or blocked -> ready when the blocker finishes). Read-merges the prior row so owned-tier fields are preserved. The engine step guard validates the transition and rejects an illegal source status. Without this mutation the state machine is stuck at 'pending' (#1635).
+// ReadyHarnessStep -- Promote a step to ready (pending -> ready when dependsOn is satisfied, or blocked -> ready when the blocker finishes). Read-merges the prior row so owned-tier fields are preserved. The engine step guard validates the transition and rejects an illegal source status. Without this mutation the state machine is stuck at 'pending' (#1635).
 //
 // Bound concept: step.
-type MutationReadyHarnessStepArgs struct {
+type ReadyHarnessStepArgs struct {
 	StepId string
 }
 
-// MutationReadyHarnessStep calls the engine mutation mutationReadyHarnessStep.
-func (qc *QueryClient) MutationReadyHarnessStep(ctx context.Context, args MutationReadyHarnessStepArgs) (*Result, error) {
-	call := MutationReadyHarnessStepBuild(args)
-	return qc.executeNamed(ctx, "mutationReadyHarnessStep", call)
+// ReadyHarnessStep calls the engine mutation readyHarnessStep.
+func (qc *QueryClient) ReadyHarnessStep(ctx context.Context, args ReadyHarnessStepArgs) (*Result, error) {
+	call := ReadyHarnessStepBuild(args)
+	return qc.executeNamed(ctx, "readyHarnessStep", call)
 }
 
-func MutationReadyHarnessStepBuild(args MutationReadyHarnessStepArgs) string {
+func ReadyHarnessStepBuild(args ReadyHarnessStepArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationReadyHarnessStep({")
+	b.WriteString("readyHarnessStep({")
 	b.WriteString("stepId: ")
 	b.WriteString(fmt.Sprintf("%q", args.StepId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationRecordActionCandidate -- Record a v1:actions:candidate trace (the captured capability sequence + value/resource provenance for one LLM step, #1735). ownerUserId is stamped from actor.userId (owned tier). status is always 'candidate' on insert.
+// RecordActionCandidate -- Record a v1:actions:candidate trace (the captured capability sequence + value/resource provenance for one LLM step, #1735). ownerUserId is stamped from actor.userId (owned tier). status is always 'candidate' on insert.
 //
 // Bound concept: candidate.
-type MutationRecordActionCandidateArgs struct {
+type RecordActionCandidateArgs struct {
 	CandidateId   string
 	PlanId        string
 	StepId        string
@@ -7302,43 +7302,43 @@ type MutationRecordActionCandidateArgs struct {
 	CallCount     int
 }
 
-// MutationRecordActionCandidate calls the engine mutation mutationRecordActionCandidate.
-func (qc *QueryClient) MutationRecordActionCandidate(ctx context.Context, args MutationRecordActionCandidateArgs) (*Result, error) {
-	call := MutationRecordActionCandidateBuild(args)
-	return qc.executeNamed(ctx, "mutationRecordActionCandidate", call)
+// RecordActionCandidate calls the engine mutation recordActionCandidate.
+func (qc *QueryClient) RecordActionCandidate(ctx context.Context, args RecordActionCandidateArgs) (*Result, error) {
+	call := RecordActionCandidateBuild(args)
+	return qc.executeNamed(ctx, "recordActionCandidate", call)
 }
 
-func MutationRecordActionCandidateBuild(args MutationRecordActionCandidateArgs) string {
+func RecordActionCandidateBuild(args RecordActionCandidateArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRecordActionCandidate({")
+	b.WriteString("recordActionCandidate({")
 	if args.CandidateId != "" {
 		b.WriteString("candidateId: ")
 		b.WriteString(fmt.Sprintf("%q", args.CandidateId))
 	}
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("stepId: ")
 	b.WriteString(fmt.Sprintf("%q", args.StepId))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("calls: ")
 	b.WriteString(renderMemQLValue(args.Calls))
 	if args.ResourceEdges != nil {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("resourceEdges: ")
 		b.WriteString(renderMemQLValue(args.ResourceEdges))
 	}
 	if args.CallCount != 0 {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("callCount: ")
@@ -7348,10 +7348,10 @@ func MutationRecordActionCandidateBuild(args MutationRecordActionCandidateArgs) 
 	return b.String()
 }
 
-// MutationRecordBundleDryRun -- Record the Gate 2 (tiered behavioral dry-run, #958) result on a bundle and transition status. status is dryRunPassed on success or failed otherwise; dryRunReport carries the trace + side-effect manifest + cost estimate (the Gate 3 approval artifact).
+// RecordBundleDryRun -- Record the Gate 2 (tiered behavioral dry-run, #958) result on a bundle and transition status. status is dryRunPassed on success or failed otherwise; dryRunReport carries the trace + side-effect manifest + cost estimate (the Gate 3 approval artifact).
 //
 // Bound concept: bundle.
-type MutationRecordBundleDryRunArgs struct {
+type RecordBundleDryRunArgs struct {
 	BundleId string
 	// Enum: dryRunPassed | failed
 	Status        string
@@ -7359,29 +7359,29 @@ type MutationRecordBundleDryRunArgs struct {
 	FailureReason string
 }
 
-// MutationRecordBundleDryRun calls the engine mutation mutationRecordBundleDryRun.
-func (qc *QueryClient) MutationRecordBundleDryRun(ctx context.Context, args MutationRecordBundleDryRunArgs) (*Result, error) {
-	call := MutationRecordBundleDryRunBuild(args)
-	return qc.executeNamed(ctx, "mutationRecordBundleDryRun", call)
+// RecordBundleDryRun calls the engine mutation recordBundleDryRun.
+func (qc *QueryClient) RecordBundleDryRun(ctx context.Context, args RecordBundleDryRunArgs) (*Result, error) {
+	call := RecordBundleDryRunBuild(args)
+	return qc.executeNamed(ctx, "recordBundleDryRun", call)
 }
 
-func MutationRecordBundleDryRunBuild(args MutationRecordBundleDryRunArgs) string {
+func RecordBundleDryRunBuild(args RecordBundleDryRunArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRecordBundleDryRun({")
+	b.WriteString("recordBundleDryRun({")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("dryRunReport: ")
 	b.WriteString(renderMemQLValue(args.DryRunReport))
 	if args.FailureReason != "" {
-		if b.Len() > 28 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("failureReason: ")
@@ -7391,10 +7391,10 @@ func MutationRecordBundleDryRunBuild(args MutationRecordBundleDryRunArgs) string
 	return b.String()
 }
 
-// MutationRecordBundleValidation -- Record the Gate 1 (isolated compile+bind, #956) result on a bundle and transition status. status is validated on success or failed on a binding error; validationReport carries the structured diagnostics; failureReason carries the headline on failure. Re-stamps ownerUserId (keeps the row owned + satisfies per-row authz).
+// RecordBundleValidation -- Record the Gate 1 (isolated compile+bind, #956) result on a bundle and transition status. status is validated on success or failed on a binding error; validationReport carries the structured diagnostics; failureReason carries the headline on failure. Re-stamps ownerUserId (keeps the row owned + satisfies per-row authz).
 //
 // Bound concept: bundle.
-type MutationRecordBundleValidationArgs struct {
+type RecordBundleValidationArgs struct {
 	BundleId string
 	// Enum: validated | failed
 	Status           string
@@ -7402,29 +7402,29 @@ type MutationRecordBundleValidationArgs struct {
 	FailureReason    string
 }
 
-// MutationRecordBundleValidation calls the engine mutation mutationRecordBundleValidation.
-func (qc *QueryClient) MutationRecordBundleValidation(ctx context.Context, args MutationRecordBundleValidationArgs) (*Result, error) {
-	call := MutationRecordBundleValidationBuild(args)
-	return qc.executeNamed(ctx, "mutationRecordBundleValidation", call)
+// RecordBundleValidation calls the engine mutation recordBundleValidation.
+func (qc *QueryClient) RecordBundleValidation(ctx context.Context, args RecordBundleValidationArgs) (*Result, error) {
+	call := RecordBundleValidationBuild(args)
+	return qc.executeNamed(ctx, "recordBundleValidation", call)
 }
 
-func MutationRecordBundleValidationBuild(args MutationRecordBundleValidationArgs) string {
+func RecordBundleValidationBuild(args RecordBundleValidationArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRecordBundleValidation({")
+	b.WriteString("recordBundleValidation({")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("validationReport: ")
 	b.WriteString(renderMemQLValue(args.ValidationReport))
 	if args.FailureReason != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("failureReason: ")
@@ -7434,10 +7434,10 @@ func MutationRecordBundleValidationBuild(args MutationRecordBundleValidationArgs
 	return b.String()
 }
 
-// MutationRecordCall -- Write an append-only call record. A completed leg writes one row with the real duration + disposition; durationSeconds/disposition default to an in-progress row when omitted (Amendment A: bound to partition + partition-scoped room).
+// RecordCall -- Write an append-only call record. A completed leg writes one row with the real duration + disposition; durationSeconds/disposition default to an in-progress row when omitted (Amendment A: bound to partition + partition-scoped room).
 //
 // Bound concept: call.
-type MutationRecordCallArgs struct {
+type RecordCallArgs struct {
 	// Enum: inbound | outbound
 	Direction       string
 	FromE164        string
@@ -7453,73 +7453,73 @@ type MutationRecordCallArgs struct {
 	CostEstimate any
 }
 
-// MutationRecordCall calls the engine mutation mutationRecordCall.
-func (qc *QueryClient) MutationRecordCall(ctx context.Context, args MutationRecordCallArgs) (*Result, error) {
-	call := MutationRecordCallBuild(args)
-	return qc.executeNamed(ctx, "mutationRecordCall", call)
+// RecordCall calls the engine mutation recordCall.
+func (qc *QueryClient) RecordCall(ctx context.Context, args RecordCallArgs) (*Result, error) {
+	call := RecordCallBuild(args)
+	return qc.executeNamed(ctx, "recordCall", call)
 }
 
-func MutationRecordCallBuild(args MutationRecordCallArgs) string {
+func RecordCallBuild(args RecordCallArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRecordCall({")
+	b.WriteString("recordCall({")
 	b.WriteString("direction: ")
 	b.WriteString(fmt.Sprintf("%q", args.Direction))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fromE164: ")
 	b.WriteString(fmt.Sprintf("%q", args.FromE164))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toE164: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToE164))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("room: ")
 	b.WriteString(fmt.Sprintf("%q", args.Room))
 	if args.Carrier != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("carrier: ")
 		b.WriteString(fmt.Sprintf("%q", args.Carrier))
 	}
 	if args.ProviderCallId != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("providerCallId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProviderCallId))
 	}
 	if args.AgentId != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.DurationSeconds != 0 {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("durationSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.DurationSeconds))
 	}
 	if args.Disposition != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("disposition: ")
 		b.WriteString(fmt.Sprintf("%q", args.Disposition))
 	}
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("costEstimate: ")
@@ -7528,10 +7528,10 @@ func MutationRecordCallBuild(args MutationRecordCallArgs) string {
 	return b.String()
 }
 
-// MutationRecordDependencyEdge -- Record one dependency edge for a bundle's construct (#957). Written by the compile/bind pass once it resolves a construct's references. ownerUserId stamped from actor.userId.
+// RecordDependencyEdge -- Record one dependency edge for a bundle's construct (#957). Written by the compile/bind pass once it resolves a construct's references. ownerUserId stamped from actor.userId.
 //
 // Bound concept: dependencyEdge.
-type MutationRecordDependencyEdgeArgs struct {
+type RecordDependencyEdgeArgs struct {
 	EdgeId        string
 	BundleId      string
 	FromConstruct string
@@ -7544,43 +7544,43 @@ type MutationRecordDependencyEdgeArgs struct {
 	ToSource string
 }
 
-// MutationRecordDependencyEdge calls the engine mutation mutationRecordDependencyEdge.
-func (qc *QueryClient) MutationRecordDependencyEdge(ctx context.Context, args MutationRecordDependencyEdgeArgs) (*Result, error) {
-	call := MutationRecordDependencyEdgeBuild(args)
-	return qc.executeNamed(ctx, "mutationRecordDependencyEdge", call)
+// RecordDependencyEdge calls the engine mutation recordDependencyEdge.
+func (qc *QueryClient) RecordDependencyEdge(ctx context.Context, args RecordDependencyEdgeArgs) (*Result, error) {
+	call := RecordDependencyEdgeBuild(args)
+	return qc.executeNamed(ctx, "recordDependencyEdge", call)
 }
 
-func MutationRecordDependencyEdgeBuild(args MutationRecordDependencyEdgeArgs) string {
+func RecordDependencyEdgeBuild(args RecordDependencyEdgeArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRecordDependencyEdge({")
+	b.WriteString("recordDependencyEdge({")
 	b.WriteString("edgeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.EdgeId))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fromConstruct: ")
 	b.WriteString(fmt.Sprintf("%q", args.FromConstruct))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fromKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.FromKind))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toName: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToName))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToKind))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toSource: ")
@@ -7589,10 +7589,10 @@ func MutationRecordDependencyEdgeBuild(args MutationRecordDependencyEdgeArgs) st
 	return b.String()
 }
 
-// MutationRecordHarnessObservation -- Append a v1:harness:observation for a step (tool_result / error / note / decision). ownerUserId stamped from actor.userId (owned tier). content is the embedding source for semantic recall (#585).
+// RecordHarnessObservation -- Append a v1:harness:observation for a step (tool_result / error / note / decision). ownerUserId stamped from actor.userId (owned tier). content is the embedding source for semantic recall (#585).
 //
 // Bound concept: observation.
-type MutationRecordHarnessObservationArgs struct {
+type RecordHarnessObservationArgs struct {
 	ObservationId string
 	StepId        string
 	PlanId        string
@@ -7602,43 +7602,43 @@ type MutationRecordHarnessObservationArgs struct {
 	Data    map[string]any
 }
 
-// MutationRecordHarnessObservation calls the engine mutation mutationRecordHarnessObservation.
-func (qc *QueryClient) MutationRecordHarnessObservation(ctx context.Context, args MutationRecordHarnessObservationArgs) (*Result, error) {
-	call := MutationRecordHarnessObservationBuild(args)
-	return qc.executeNamed(ctx, "mutationRecordHarnessObservation", call)
+// RecordHarnessObservation calls the engine mutation recordHarnessObservation.
+func (qc *QueryClient) RecordHarnessObservation(ctx context.Context, args RecordHarnessObservationArgs) (*Result, error) {
+	call := RecordHarnessObservationBuild(args)
+	return qc.executeNamed(ctx, "recordHarnessObservation", call)
 }
 
-func MutationRecordHarnessObservationBuild(args MutationRecordHarnessObservationArgs) string {
+func RecordHarnessObservationBuild(args RecordHarnessObservationArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRecordHarnessObservation({")
+	b.WriteString("recordHarnessObservation({")
 	if args.ObservationId != "" {
 		b.WriteString("observationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ObservationId))
 	}
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("stepId: ")
 	b.WriteString(fmt.Sprintf("%q", args.StepId))
 	if args.PlanId != "" {
-		if b.Len() > 34 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("content: ")
 	b.WriteString(fmt.Sprintf("%q", args.Content))
 	if args.Data != nil {
-		if b.Len() > 34 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("data: ")
@@ -7648,26 +7648,26 @@ func MutationRecordHarnessObservationBuild(args MutationRecordHarnessObservation
 	return b.String()
 }
 
-// MutationRecordLegalAcceptance -- Replace a user's legalAcceptance array (caller must read-modify-write to append).
+// RecordLegalAcceptance -- Replace a user's legalAcceptance array (caller must read-modify-write to append).
 //
 // Bound concept: user.
-type MutationRecordLegalAcceptanceArgs struct {
+type RecordLegalAcceptanceArgs struct {
 	UserId          string
 	LegalAcceptance []map[string]any
 }
 
-// MutationRecordLegalAcceptance calls the engine mutation mutationRecordLegalAcceptance.
-func (qc *QueryClient) MutationRecordLegalAcceptance(ctx context.Context, args MutationRecordLegalAcceptanceArgs) (*Result, error) {
-	call := MutationRecordLegalAcceptanceBuild(args)
-	return qc.executeNamed(ctx, "mutationRecordLegalAcceptance", call)
+// RecordLegalAcceptance calls the engine mutation recordLegalAcceptance.
+func (qc *QueryClient) RecordLegalAcceptance(ctx context.Context, args RecordLegalAcceptanceArgs) (*Result, error) {
+	call := RecordLegalAcceptanceBuild(args)
+	return qc.executeNamed(ctx, "recordLegalAcceptance", call)
 }
 
-func MutationRecordLegalAcceptanceBuild(args MutationRecordLegalAcceptanceArgs) string {
+func RecordLegalAcceptanceBuild(args RecordLegalAcceptanceArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRecordLegalAcceptance({")
+	b.WriteString("recordLegalAcceptance({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("legalAcceptance: ")
@@ -7676,10 +7676,10 @@ func MutationRecordLegalAcceptanceBuild(args MutationRecordLegalAcceptanceArgs) 
 	return b.String()
 }
 
-// MutationRecordNumber -- Persist a provisioned DID. Called after a carrier BuyNumber succeeds.
+// RecordNumber -- Persist a provisioned DID. Called after a carrier BuyNumber succeeds.
 //
 // Bound concept: number.
-type MutationRecordNumberArgs struct {
+type RecordNumberArgs struct {
 	E164        string
 	Carrier     string
 	PartitionId string
@@ -7691,49 +7691,49 @@ type MutationRecordNumberArgs struct {
 	MonthlyCost any
 }
 
-// MutationRecordNumber calls the engine mutation mutationRecordNumber.
-func (qc *QueryClient) MutationRecordNumber(ctx context.Context, args MutationRecordNumberArgs) (*Result, error) {
-	call := MutationRecordNumberBuild(args)
-	return qc.executeNamed(ctx, "mutationRecordNumber", call)
+// RecordNumber calls the engine mutation recordNumber.
+func (qc *QueryClient) RecordNumber(ctx context.Context, args RecordNumberArgs) (*Result, error) {
+	call := RecordNumberBuild(args)
+	return qc.executeNamed(ctx, "recordNumber", call)
 }
 
-func MutationRecordNumberBuild(args MutationRecordNumberArgs) string {
+func RecordNumberBuild(args RecordNumberArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRecordNumber({")
+	b.WriteString("recordNumber({")
 	b.WriteString("e164: ")
 	b.WriteString(fmt.Sprintf("%q", args.E164))
-	if b.Len() > 22 {
+	if b.Len() > 14 {
 		b.WriteString(", ")
 	}
 	b.WriteString("carrier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Carrier))
-	if b.Len() > 22 {
+	if b.Len() > 14 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if args.Purpose != "" {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("purpose: ")
 		b.WriteString(fmt.Sprintf("%q", args.Purpose))
 	}
 	if args.ProviderId != "" {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("providerId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProviderId))
 	}
 	if args.NumberType != "" {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("numberType: ")
 		b.WriteString(fmt.Sprintf("%q", args.NumberType))
 	}
-	if b.Len() > 22 {
+	if b.Len() > 14 {
 		b.WriteString(", ")
 	}
 	b.WriteString("monthlyCost: ")
@@ -7742,35 +7742,35 @@ func MutationRecordNumberBuild(args MutationRecordNumberArgs) string {
 	return b.String()
 }
 
-// MutationRecordPlannerInvocation -- Record a planner-agent LLM invocation against a Plan: advance metrics.llmCallCount + tokenSpent without changing status. Caller computes the new totals Go-side (the parser has no arithmetic).
+// RecordPlannerInvocation -- Record a planner-agent LLM invocation against a Plan: advance metrics.llmCallCount + tokenSpent without changing status. Caller computes the new totals Go-side (the parser has no arithmetic).
 //
 // Bound concept: plan.
-type MutationRecordPlannerInvocationArgs struct {
+type RecordPlannerInvocationArgs struct {
 	PlanId     string
 	TokenSpent int
 	Metrics    map[string]any
 }
 
-// MutationRecordPlannerInvocation calls the engine mutation mutationRecordPlannerInvocation.
-func (qc *QueryClient) MutationRecordPlannerInvocation(ctx context.Context, args MutationRecordPlannerInvocationArgs) (*Result, error) {
-	call := MutationRecordPlannerInvocationBuild(args)
-	return qc.executeNamed(ctx, "mutationRecordPlannerInvocation", call)
+// RecordPlannerInvocation calls the engine mutation recordPlannerInvocation.
+func (qc *QueryClient) RecordPlannerInvocation(ctx context.Context, args RecordPlannerInvocationArgs) (*Result, error) {
+	call := RecordPlannerInvocationBuild(args)
+	return qc.executeNamed(ctx, "recordPlannerInvocation", call)
 }
 
-func MutationRecordPlannerInvocationBuild(args MutationRecordPlannerInvocationArgs) string {
+func RecordPlannerInvocationBuild(args RecordPlannerInvocationArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRecordPlannerInvocation({")
+	b.WriteString("recordPlannerInvocation({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	if args.TokenSpent != 0 {
-		if b.Len() > 33 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenSpent: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenSpent))
 	}
 	if args.Metrics != nil {
-		if b.Len() > 33 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("metrics: ")
@@ -7780,10 +7780,10 @@ func MutationRecordPlannerInvocationBuild(args MutationRecordPlannerInvocationAr
 	return b.String()
 }
 
-// MutationRecordRequestEvent -- Append a v1:forge:requestEvent (the time-series audit trail). actorUserId + actorRole stamped from actor. requestId is normalized to the short id form (shortId()) so the trail keys consistently whether the caller passes a canonical node id (automation path) or a bare short id (tool path) -- #1859.
+// RecordRequestEvent -- Append a v1:forge:requestEvent (the time-series audit trail). actorUserId + actorRole stamped from actor. requestId is normalized to the short id form (shortId()) so the trail keys consistently whether the caller passes a canonical node id (automation path) or a bare short id (tool path) -- #1859.
 //
 // Bound concept: requestEvent.
-type MutationRecordRequestEventArgs struct {
+type RecordRequestEventArgs struct {
 	EventId    string
 	RequestId  string
 	Kind       string
@@ -7792,45 +7792,45 @@ type MutationRecordRequestEventArgs struct {
 	Note       string
 }
 
-// MutationRecordRequestEvent calls the engine mutation mutationRecordRequestEvent.
-func (qc *QueryClient) MutationRecordRequestEvent(ctx context.Context, args MutationRecordRequestEventArgs) (*Result, error) {
-	call := MutationRecordRequestEventBuild(args)
-	return qc.executeNamed(ctx, "mutationRecordRequestEvent", call)
+// RecordRequestEvent calls the engine mutation recordRequestEvent.
+func (qc *QueryClient) RecordRequestEvent(ctx context.Context, args RecordRequestEventArgs) (*Result, error) {
+	call := RecordRequestEventBuild(args)
+	return qc.executeNamed(ctx, "recordRequestEvent", call)
 }
 
-func MutationRecordRequestEventBuild(args MutationRecordRequestEventArgs) string {
+func RecordRequestEventBuild(args RecordRequestEventArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRecordRequestEvent({")
+	b.WriteString("recordRequestEvent({")
 	if args.EventId != "" {
 		b.WriteString("eventId: ")
 		b.WriteString(fmt.Sprintf("%q", args.EventId))
 	}
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
 	if args.FromStatus != "" {
-		if b.Len() > 28 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("fromStatus: ")
 		b.WriteString(fmt.Sprintf("%q", args.FromStatus))
 	}
 	if args.ToStatus != "" {
-		if b.Len() > 28 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("toStatus: ")
 		b.WriteString(fmt.Sprintf("%q", args.ToStatus))
 	}
 	if args.Note != "" {
-		if b.Len() > 28 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
@@ -7840,26 +7840,26 @@ func MutationRecordRequestEventBuild(args MutationRecordRequestEventArgs) string
 	return b.String()
 }
 
-// MutationRecordResponsibilityEvaluation -- Record the outcome of an evaluation/run on a v1:planner:responsibility: stamp lastEvaluatedAt to now() and lastResult to the run headline. Called by the reactive-loop evaluator (epic #632) after a reactive condition check, a recurring scheduled tick, or a standing review. ownerUserId re-stamped from actor.userId (owned tier).
+// RecordResponsibilityEvaluation -- Record the outcome of an evaluation/run on a v1:planner:responsibility: stamp lastEvaluatedAt to now() and lastResult to the run headline. Called by the reactive-loop evaluator (epic #632) after a reactive condition check, a recurring scheduled tick, or a standing review. ownerUserId re-stamped from actor.userId (owned tier).
 //
 // Bound concept: responsibility.
-type MutationRecordResponsibilityEvaluationArgs struct {
+type RecordResponsibilityEvaluationArgs struct {
 	ResponsibilityId string
 	LastResult       string
 }
 
-// MutationRecordResponsibilityEvaluation calls the engine mutation mutationRecordResponsibilityEvaluation.
-func (qc *QueryClient) MutationRecordResponsibilityEvaluation(ctx context.Context, args MutationRecordResponsibilityEvaluationArgs) (*Result, error) {
-	call := MutationRecordResponsibilityEvaluationBuild(args)
-	return qc.executeNamed(ctx, "mutationRecordResponsibilityEvaluation", call)
+// RecordResponsibilityEvaluation calls the engine mutation recordResponsibilityEvaluation.
+func (qc *QueryClient) RecordResponsibilityEvaluation(ctx context.Context, args RecordResponsibilityEvaluationArgs) (*Result, error) {
+	call := RecordResponsibilityEvaluationBuild(args)
+	return qc.executeNamed(ctx, "recordResponsibilityEvaluation", call)
 }
 
-func MutationRecordResponsibilityEvaluationBuild(args MutationRecordResponsibilityEvaluationArgs) string {
+func RecordResponsibilityEvaluationBuild(args RecordResponsibilityEvaluationArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRecordResponsibilityEvaluation({")
+	b.WriteString("recordResponsibilityEvaluation({")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
-	if b.Len() > 40 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastResult: ")
@@ -7868,10 +7868,10 @@ func MutationRecordResponsibilityEvaluationBuild(args MutationRecordResponsibili
 	return b.String()
 }
 
-// MutationRecordRouterCall -- Record a single AI call through the memQL AI Router. Writes one v1:router:call row per call for observability, usage reporting, and cost attribution.
+// RecordRouterCall -- Record a single AI call through the memQL AI Router. Writes one v1:router:call row per call for observability, usage reporting, and cost attribution.
 //
 // Bound concept: call.
-type MutationRecordRouterCallArgs struct {
+type RecordRouterCallArgs struct {
 	CallId               string
 	RequestId            string
 	AgentId              string
@@ -7903,165 +7903,165 @@ type MutationRecordRouterCallArgs struct {
 	FallbackFromModel    string
 }
 
-// MutationRecordRouterCall calls the engine mutation mutationRecordRouterCall.
-func (qc *QueryClient) MutationRecordRouterCall(ctx context.Context, args MutationRecordRouterCallArgs) (*Result, error) {
-	call := MutationRecordRouterCallBuild(args)
-	return qc.executeNamed(ctx, "mutationRecordRouterCall", call)
+// RecordRouterCall calls the engine mutation recordRouterCall.
+func (qc *QueryClient) RecordRouterCall(ctx context.Context, args RecordRouterCallArgs) (*Result, error) {
+	call := RecordRouterCallBuild(args)
+	return qc.executeNamed(ctx, "recordRouterCall", call)
 }
 
-func MutationRecordRouterCallBuild(args MutationRecordRouterCallArgs) string {
+func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRecordRouterCall({")
+	b.WriteString("recordRouterCall({")
 	b.WriteString("callId: ")
 	b.WriteString(fmt.Sprintf("%q", args.CallId))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
 	if args.AgentId != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.UserId != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UserId))
 	}
 	if args.PromptName != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("promptName: ")
 		b.WriteString(fmt.Sprintf("%q", args.PromptName))
 	}
 	if args.PolicyName != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("policyName: ")
 		b.WriteString(fmt.Sprintf("%q", args.PolicyName))
 	}
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("vendor: ")
 	b.WriteString(fmt.Sprintf("%q", args.Vendor))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("model: ")
 	b.WriteString(fmt.Sprintf("%q", args.Model))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("providerName: ")
 	b.WriteString(fmt.Sprintf("%q", args.ProviderName))
 	if args.InputTokens != 0 {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("inputTokens: ")
 		b.WriteString(fmt.Sprintf("%v", args.InputTokens))
 	}
 	if args.OutputTokens != 0 {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("outputTokens: ")
 		b.WriteString(fmt.Sprintf("%v", args.OutputTokens))
 	}
 	if args.CachedInputTokens != 0 {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("cachedInputTokens: ")
 		b.WriteString(fmt.Sprintf("%v", args.CachedInputTokens))
 	}
 	if args.TokensEstimatedSet {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokensEstimated: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokensEstimated))
 	}
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("inputCost: ")
 	b.WriteString(fmt.Sprintf("%q", args.InputCost))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("outputCost: ")
 	b.WriteString(fmt.Sprintf("%q", args.OutputCost))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("cachedInputCost: ")
 	b.WriteString(fmt.Sprintf("%q", args.CachedInputCost))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("totalCost: ")
 	b.WriteString(fmt.Sprintf("%q", args.TotalCost))
 	if args.PricingConfiguredSet {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("pricingConfigured: ")
 		b.WriteString(fmt.Sprintf("%v", args.PricingConfigured))
 	}
 	if args.TimeToFirstTokenMs != 0 {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("timeToFirstTokenMs: ")
 		b.WriteString(fmt.Sprintf("%v", args.TimeToFirstTokenMs))
 	}
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("totalDurationMs: ")
 	b.WriteString(fmt.Sprintf("%v", args.TotalDurationMs))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tokensPerSec: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokensPerSec))
 	if args.StreamingSet {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("streaming: ")
 		b.WriteString(fmt.Sprintf("%v", args.Streaming))
 	}
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("outcome: ")
 	b.WriteString(fmt.Sprintf("%q", args.Outcome))
 	if args.ErrorCategory != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorCategory: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorCategory))
 	}
 	if args.ErrorMessage != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
 	if args.FallbackFromModel != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("fallbackFromModel: ")
@@ -8071,10 +8071,10 @@ func MutationRecordRouterCallBuild(args MutationRecordRouterCallArgs) string {
 	return b.String()
 }
 
-// MutationRecordTrunk -- Persist a LiveKit SIP trunk configuration. secretRef points at external-secrets, never a secret value.
+// RecordTrunk -- Persist a LiveKit SIP trunk configuration. secretRef points at external-secrets, never a secret value.
 //
 // Bound concept: trunk.
-type MutationRecordTrunkArgs struct {
+type RecordTrunkArgs struct {
 	Carrier string
 	// Enum: inbound | outbound | both
 	Direction      string
@@ -8084,45 +8084,45 @@ type MutationRecordTrunkArgs struct {
 	SecretRef      string
 }
 
-// MutationRecordTrunk calls the engine mutation mutationRecordTrunk.
-func (qc *QueryClient) MutationRecordTrunk(ctx context.Context, args MutationRecordTrunkArgs) (*Result, error) {
-	call := MutationRecordTrunkBuild(args)
-	return qc.executeNamed(ctx, "mutationRecordTrunk", call)
+// RecordTrunk calls the engine mutation recordTrunk.
+func (qc *QueryClient) RecordTrunk(ctx context.Context, args RecordTrunkArgs) (*Result, error) {
+	call := RecordTrunkBuild(args)
+	return qc.executeNamed(ctx, "recordTrunk", call)
 }
 
-func MutationRecordTrunkBuild(args MutationRecordTrunkArgs) string {
+func RecordTrunkBuild(args RecordTrunkArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRecordTrunk({")
+	b.WriteString("recordTrunk({")
 	b.WriteString("carrier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Carrier))
-	if b.Len() > 21 {
+	if b.Len() > 13 {
 		b.WriteString(", ")
 	}
 	b.WriteString("direction: ")
 	b.WriteString(fmt.Sprintf("%q", args.Direction))
 	if args.Name != "" {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("name: ")
 		b.WriteString(fmt.Sprintf("%q", args.Name))
 	}
 	if args.LivekitTrunkId != "" {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("livekitTrunkId: ")
 		b.WriteString(fmt.Sprintf("%q", args.LivekitTrunkId))
 	}
 	if args.SipEdgeUri != "" {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sipEdgeUri: ")
 		b.WriteString(fmt.Sprintf("%q", args.SipEdgeUri))
 	}
 	if args.SecretRef != "" {
-		if b.Len() > 21 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("secretRef: ")
@@ -8132,39 +8132,39 @@ func MutationRecordTrunkBuild(args MutationRecordTrunkArgs) string {
 	return b.String()
 }
 
-// MutationRedeemWorkerPairingCode -- Stamp a pairing-code row redeemed.
+// RedeemWorkerPairingCode -- Stamp a pairing-code row redeemed.
 //
 // Bound concept: workerPairingCode.
-type MutationRedeemWorkerPairingCodeArgs struct {
+type RedeemWorkerPairingCodeArgs struct {
 	PairingId      string
 	RedeemedAt     string
 	RedeemedBy     string
 	RedeemedFromIP string
 }
 
-// MutationRedeemWorkerPairingCode calls the engine mutation mutationRedeemWorkerPairingCode.
-func (qc *QueryClient) MutationRedeemWorkerPairingCode(ctx context.Context, args MutationRedeemWorkerPairingCodeArgs) (*Result, error) {
-	call := MutationRedeemWorkerPairingCodeBuild(args)
-	return qc.executeNamed(ctx, "mutationRedeemWorkerPairingCode", call)
+// RedeemWorkerPairingCode calls the engine mutation redeemWorkerPairingCode.
+func (qc *QueryClient) RedeemWorkerPairingCode(ctx context.Context, args RedeemWorkerPairingCodeArgs) (*Result, error) {
+	call := RedeemWorkerPairingCodeBuild(args)
+	return qc.executeNamed(ctx, "redeemWorkerPairingCode", call)
 }
 
-func MutationRedeemWorkerPairingCodeBuild(args MutationRedeemWorkerPairingCodeArgs) string {
+func RedeemWorkerPairingCodeBuild(args RedeemWorkerPairingCodeArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRedeemWorkerPairingCode({")
+	b.WriteString("redeemWorkerPairingCode({")
 	b.WriteString("pairingId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PairingId))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("redeemedAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.RedeemedAt))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("redeemedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.RedeemedBy))
 	if args.RedeemedFromIP != "" {
-		if b.Len() > 33 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("redeemedFromIP: ")
@@ -8174,10 +8174,10 @@ func MutationRedeemWorkerPairingCodeBuild(args MutationRedeemWorkerPairingCodeAr
 	return b.String()
 }
 
-// MutationRefreshWorkerRegistration -- Refresh registration-authoritative fields on worker reconnect.
+// RefreshWorkerRegistration -- Refresh registration-authoritative fields on worker reconnect.
 //
 // Bound concept: registration.
-type MutationRefreshWorkerRegistrationArgs struct {
+type RefreshWorkerRegistrationArgs struct {
 	RegistrationId       string
 	Name                 string
 	Capabilities         []any
@@ -8192,81 +8192,81 @@ type MutationRefreshWorkerRegistrationArgs struct {
 	LastConnectedFromIP  string
 }
 
-// MutationRefreshWorkerRegistration calls the engine mutation mutationRefreshWorkerRegistration.
-func (qc *QueryClient) MutationRefreshWorkerRegistration(ctx context.Context, args MutationRefreshWorkerRegistrationArgs) (*Result, error) {
-	call := MutationRefreshWorkerRegistrationBuild(args)
-	return qc.executeNamed(ctx, "mutationRefreshWorkerRegistration", call)
+// RefreshWorkerRegistration calls the engine mutation refreshWorkerRegistration.
+func (qc *QueryClient) RefreshWorkerRegistration(ctx context.Context, args RefreshWorkerRegistrationArgs) (*Result, error) {
+	call := RefreshWorkerRegistrationBuild(args)
+	return qc.executeNamed(ctx, "refreshWorkerRegistration", call)
 }
 
-func MutationRefreshWorkerRegistrationBuild(args MutationRefreshWorkerRegistrationArgs) string {
+func RefreshWorkerRegistrationBuild(args RefreshWorkerRegistrationArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRefreshWorkerRegistration({")
+	b.WriteString("refreshWorkerRegistration({")
 	b.WriteString("registrationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegistrationId))
-	if b.Len() > 35 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 35 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("capabilities: ")
 	b.WriteString(renderMemQLValue(args.Capabilities))
 	if args.CapabilityDescriptor != nil {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capabilityDescriptor: ")
 		b.WriteString(renderMemQLValue(args.CapabilityDescriptor))
 	}
 	if args.Labels != nil {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("labels: ")
 		b.WriteString(renderMemQLValue(args.Labels))
 	}
-	if b.Len() > 35 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("concurrency: ")
 	b.WriteString(renderMemQLValue(args.Concurrency))
 	if args.PlatformInfo != nil {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("platformInfo: ")
 		b.WriteString(renderMemQLValue(args.PlatformInfo))
 	}
 	if args.Permissions != nil {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("permissions: ")
 		b.WriteString(renderMemQLValue(args.Permissions))
 	}
 	if args.Version != "" {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
 		b.WriteString(fmt.Sprintf("%q", args.Version))
 	}
 	if args.BuildTag != "" {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("buildTag: ")
 		b.WriteString(fmt.Sprintf("%q", args.BuildTag))
 	}
-	if b.Len() > 35 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastSeenAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.LastSeenAt))
 	if args.LastConnectedFromIP != "" {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastConnectedFromIP: ")
@@ -8276,10 +8276,10 @@ func MutationRefreshWorkerRegistrationBuild(args MutationRefreshWorkerRegistrati
 	return b.String()
 }
 
-// MutationRegisterSurface -- Register a v1:actions:surface (workbench / computer-use:<machineId> / mcp:<server>) with its served capabilities + availability + failover priority. ownerUserId stamped from actor.userId (owned tier). #1737.
+// RegisterSurface -- Register a v1:actions:surface (workbench / computer-use:<machineId> / mcp:<server>) with its served capabilities + availability + failover priority. ownerUserId stamped from actor.userId (owned tier). #1737.
 //
 // Bound concept: surface.
-type MutationRegisterSurfaceArgs struct {
+type RegisterSurfaceArgs struct {
 	SurfaceId    string
 	Slug         string
 	Kind         string
@@ -8288,43 +8288,43 @@ type MutationRegisterSurfaceArgs struct {
 	Priority     int
 }
 
-// MutationRegisterSurface calls the engine mutation mutationRegisterSurface.
-func (qc *QueryClient) MutationRegisterSurface(ctx context.Context, args MutationRegisterSurfaceArgs) (*Result, error) {
-	call := MutationRegisterSurfaceBuild(args)
-	return qc.executeNamed(ctx, "mutationRegisterSurface", call)
+// RegisterSurface calls the engine mutation registerSurface.
+func (qc *QueryClient) RegisterSurface(ctx context.Context, args RegisterSurfaceArgs) (*Result, error) {
+	call := RegisterSurfaceBuild(args)
+	return qc.executeNamed(ctx, "registerSurface", call)
 }
 
-func MutationRegisterSurfaceBuild(args MutationRegisterSurfaceArgs) string {
+func RegisterSurfaceBuild(args RegisterSurfaceArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRegisterSurface({")
+	b.WriteString("registerSurface({")
 	if args.SurfaceId != "" {
 		b.WriteString("surfaceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SurfaceId))
 	}
-	if b.Len() > 25 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	if b.Len() > 25 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
 	if args.MachineId != "" {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("machineId: ")
 		b.WriteString(fmt.Sprintf("%q", args.MachineId))
 	}
-	if b.Len() > 25 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("capabilities: ")
 	b.WriteString(renderMemQLValue(args.Capabilities))
 	if args.Priority != 0 {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("priority: ")
@@ -8334,32 +8334,32 @@ func MutationRegisterSurfaceBuild(args MutationRegisterSurfaceArgs) string {
 	return b.String()
 }
 
-// MutationReinforceAction -- Reinforce a v1:actions:action after a verified replay: set the engine-computed reliability + reinforceCount and reset the decay clock (Phase 1 #1736; surface-aware decay lands in Phase 4 #1739).
+// ReinforceAction -- Reinforce a v1:actions:action after a verified replay: set the engine-computed reliability + reinforceCount and reset the decay clock (Phase 1 #1736; surface-aware decay lands in Phase 4 #1739).
 //
 // Bound concept: action.
-type MutationReinforceActionArgs struct {
+type ReinforceActionArgs struct {
 	ActionId       string
 	Reliability    any
 	ReinforceCount int
 }
 
-// MutationReinforceAction calls the engine mutation mutationReinforceAction.
-func (qc *QueryClient) MutationReinforceAction(ctx context.Context, args MutationReinforceActionArgs) (*Result, error) {
-	call := MutationReinforceActionBuild(args)
-	return qc.executeNamed(ctx, "mutationReinforceAction", call)
+// ReinforceAction calls the engine mutation reinforceAction.
+func (qc *QueryClient) ReinforceAction(ctx context.Context, args ReinforceActionArgs) (*Result, error) {
+	call := ReinforceActionBuild(args)
+	return qc.executeNamed(ctx, "reinforceAction", call)
 }
 
-func MutationReinforceActionBuild(args MutationReinforceActionArgs) string {
+func ReinforceActionBuild(args ReinforceActionArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationReinforceAction({")
+	b.WriteString("reinforceAction({")
 	b.WriteString("actionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ActionId))
-	if b.Len() > 25 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reliability: ")
 	b.WriteString(fmt.Sprintf("%q", args.Reliability))
-	if b.Len() > 25 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reinforceCount: ")
@@ -8368,38 +8368,38 @@ func MutationReinforceActionBuild(args MutationReinforceActionArgs) string {
 	return b.String()
 }
 
-// MutationReinforceHarnessSemanticMemory -- Reinforce an existing v1:harness:semanticMemory (dedup path): take the engine-computed bumped confidence + reinforceCount, reset lastReinforced to now(), and replace sourceEpisodes with the merged/deduped provenance. No new belief row -- this is why re-running over the same episodes does not duplicate. ownerUserId re-stamped from actor.userId (owned tier).
+// ReinforceHarnessSemanticMemory -- Reinforce an existing v1:harness:semanticMemory (dedup path): take the engine-computed bumped confidence + reinforceCount, reset lastReinforced to now(), and replace sourceEpisodes with the merged/deduped provenance. No new belief row -- this is why re-running over the same episodes does not duplicate. ownerUserId re-stamped from actor.userId (owned tier).
 //
 // Bound concept: semanticMemory.
-type MutationReinforceHarnessSemanticMemoryArgs struct {
+type ReinforceHarnessSemanticMemoryArgs struct {
 	MemoryId       string
 	Confidence     any
 	ReinforceCount int
 	SourceEpisodes []string
 }
 
-// MutationReinforceHarnessSemanticMemory calls the engine mutation mutationReinforceHarnessSemanticMemory.
-func (qc *QueryClient) MutationReinforceHarnessSemanticMemory(ctx context.Context, args MutationReinforceHarnessSemanticMemoryArgs) (*Result, error) {
-	call := MutationReinforceHarnessSemanticMemoryBuild(args)
-	return qc.executeNamed(ctx, "mutationReinforceHarnessSemanticMemory", call)
+// ReinforceHarnessSemanticMemory calls the engine mutation reinforceHarnessSemanticMemory.
+func (qc *QueryClient) ReinforceHarnessSemanticMemory(ctx context.Context, args ReinforceHarnessSemanticMemoryArgs) (*Result, error) {
+	call := ReinforceHarnessSemanticMemoryBuild(args)
+	return qc.executeNamed(ctx, "reinforceHarnessSemanticMemory", call)
 }
 
-func MutationReinforceHarnessSemanticMemoryBuild(args MutationReinforceHarnessSemanticMemoryArgs) string {
+func ReinforceHarnessSemanticMemoryBuild(args ReinforceHarnessSemanticMemoryArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationReinforceHarnessSemanticMemory({")
+	b.WriteString("reinforceHarnessSemanticMemory({")
 	b.WriteString("memoryId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
-	if b.Len() > 40 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
 	b.WriteString(fmt.Sprintf("%q", args.Confidence))
-	if b.Len() > 40 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reinforceCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.ReinforceCount))
-	if b.Len() > 40 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("sourceEpisodes: ")
@@ -8408,33 +8408,33 @@ func MutationReinforceHarnessSemanticMemoryBuild(args MutationReinforceHarnessSe
 	return b.String()
 }
 
-// MutationRejectAccessRequest -- Reject an access request (status=rejected, stamps reviewer + note).
+// RejectAccessRequest -- Reject an access request (status=rejected, stamps reviewer + note).
 //
 // Bound concept: accessRequest.
-type MutationRejectAccessRequestArgs struct {
+type RejectAccessRequestArgs struct {
 	RequestId    string
 	ReviewedBy   string
 	ReviewerNote string
 }
 
-// MutationRejectAccessRequest calls the engine mutation mutationRejectAccessRequest.
-func (qc *QueryClient) MutationRejectAccessRequest(ctx context.Context, args MutationRejectAccessRequestArgs) (*Result, error) {
-	call := MutationRejectAccessRequestBuild(args)
-	return qc.executeNamed(ctx, "mutationRejectAccessRequest", call)
+// RejectAccessRequest calls the engine mutation rejectAccessRequest.
+func (qc *QueryClient) RejectAccessRequest(ctx context.Context, args RejectAccessRequestArgs) (*Result, error) {
+	call := RejectAccessRequestBuild(args)
+	return qc.executeNamed(ctx, "rejectAccessRequest", call)
 }
 
-func MutationRejectAccessRequestBuild(args MutationRejectAccessRequestArgs) string {
+func RejectAccessRequestBuild(args RejectAccessRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRejectAccessRequest({")
+	b.WriteString("rejectAccessRequest({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reviewedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.ReviewedBy))
 	if args.ReviewerNote != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reviewerNote: ")
@@ -8444,28 +8444,28 @@ func MutationRejectAccessRequestBuild(args MutationRejectAccessRequestArgs) stri
 	return b.String()
 }
 
-// MutationReleaseWorkspace -- Mark a workbench workspace as released. Called from releaseWorkspaceOnPlanTerminal when the parent Plan reaches a terminal status. The actual on-disk teardown is the workbench integration's responsibility -- this mutation only flips the lifecycle bit.
+// ReleaseWorkspace -- Mark a workbench workspace as released. Called from releaseWorkspaceOnPlanTerminal when the parent Plan reaches a terminal status. The actual on-disk teardown is the workbench integration's responsibility -- this mutation only flips the lifecycle bit.
 //
 // Bound concept: workspace.
-type MutationReleaseWorkspaceArgs struct {
+type ReleaseWorkspaceArgs struct {
 	WorkspaceId string
 	// Why the workspace was released. Drives the released-row audit trail.
 	// Enum: plan_terminal | explicit | ttl_expired
 	Reason string
 }
 
-// MutationReleaseWorkspace calls the engine mutation mutationReleaseWorkspace.
-func (qc *QueryClient) MutationReleaseWorkspace(ctx context.Context, args MutationReleaseWorkspaceArgs) (*Result, error) {
-	call := MutationReleaseWorkspaceBuild(args)
-	return qc.executeNamed(ctx, "mutationReleaseWorkspace", call)
+// ReleaseWorkspace calls the engine mutation releaseWorkspace.
+func (qc *QueryClient) ReleaseWorkspace(ctx context.Context, args ReleaseWorkspaceArgs) (*Result, error) {
+	call := ReleaseWorkspaceBuild(args)
+	return qc.executeNamed(ctx, "releaseWorkspace", call)
 }
 
-func MutationReleaseWorkspaceBuild(args MutationReleaseWorkspaceArgs) string {
+func ReleaseWorkspaceBuild(args ReleaseWorkspaceArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationReleaseWorkspace({")
+	b.WriteString("releaseWorkspace({")
 	b.WriteString("workspaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reason: ")
@@ -8474,26 +8474,26 @@ func MutationReleaseWorkspaceBuild(args MutationReleaseWorkspaceArgs) string {
 	return b.String()
 }
 
-// MutationRemoveAgentFromSpace -- Remove the caller's agent from a space (status='left'). The engine guard enforces caller-owns-agent and rejects removal of the pinned owner GA.
+// RemoveAgentFromSpace -- Remove the caller's agent from a space (status='left'). The engine guard enforces caller-owns-agent and rejects removal of the pinned owner GA.
 //
 // Bound concept: participant.
-type MutationRemoveAgentFromSpaceArgs struct {
+type RemoveAgentFromSpaceArgs struct {
 	PartitionId string
 	AgentId     string
 }
 
-// MutationRemoveAgentFromSpace calls the engine mutation mutationRemoveAgentFromSpace.
-func (qc *QueryClient) MutationRemoveAgentFromSpace(ctx context.Context, args MutationRemoveAgentFromSpaceArgs) (*Result, error) {
-	call := MutationRemoveAgentFromSpaceBuild(args)
-	return qc.executeNamed(ctx, "mutationRemoveAgentFromSpace", call)
+// RemoveAgentFromSpace calls the engine mutation removeAgentFromSpace.
+func (qc *QueryClient) RemoveAgentFromSpace(ctx context.Context, args RemoveAgentFromSpaceArgs) (*Result, error) {
+	call := RemoveAgentFromSpaceBuild(args)
+	return qc.executeNamed(ctx, "removeAgentFromSpace", call)
 }
 
-func MutationRemoveAgentFromSpaceBuild(args MutationRemoveAgentFromSpaceArgs) string {
+func RemoveAgentFromSpaceBuild(args RemoveAgentFromSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRemoveAgentFromSpace({")
+	b.WriteString("removeAgentFromSpace({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
@@ -8502,26 +8502,26 @@ func MutationRemoveAgentFromSpaceBuild(args MutationRemoveAgentFromSpaceArgs) st
 	return b.String()
 }
 
-// MutationRequestChanges -- Send a v1:forge:request back for changes: set status 'changes_requested' with a reason.
+// RequestChanges -- Send a v1:forge:request back for changes: set status 'changes_requested' with a reason.
 //
 // Bound concept: request.
-type MutationRequestChangesArgs struct {
+type RequestChangesArgs struct {
 	RequestId  string
 	Resolution string
 }
 
-// MutationRequestChanges calls the engine mutation mutationRequestChanges.
-func (qc *QueryClient) MutationRequestChanges(ctx context.Context, args MutationRequestChangesArgs) (*Result, error) {
-	call := MutationRequestChangesBuild(args)
-	return qc.executeNamed(ctx, "mutationRequestChanges", call)
+// RequestChanges calls the engine mutation requestChanges.
+func (qc *QueryClient) RequestChanges(ctx context.Context, args RequestChangesArgs) (*Result, error) {
+	call := RequestChangesBuild(args)
+	return qc.executeNamed(ctx, "requestChanges", call)
 }
 
-func MutationRequestChangesBuild(args MutationRequestChangesArgs) string {
+func RequestChangesBuild(args RequestChangesArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRequestChanges({")
+	b.WriteString("requestChanges({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("resolution: ")
@@ -8530,26 +8530,26 @@ func MutationRequestChangesBuild(args MutationRequestChangesArgs) string {
 	return b.String()
 }
 
-// MutationRequestPlanFeedback -- Transition an existing running Plan to awaitingFeedback / feedback_required with a feedbackRequest{question, kind, options?, timeoutAt}. Backs the requestUserFeedback agent tool. Partial-update via update() -- only status / feedbackReason / feedbackRequest change; required fields inherit from the prior row. The user's answer (feedbackResponse + status->running) resumes the Plan via the existing planner re-invocation path.
+// RequestPlanFeedback -- Transition an existing running Plan to awaitingFeedback / feedback_required with a feedbackRequest{question, kind, options?, timeoutAt}. Backs the requestUserFeedback agent tool. Partial-update via update() -- only status / feedbackReason / feedbackRequest change; required fields inherit from the prior row. The user's answer (feedbackResponse + status->running) resumes the Plan via the existing planner re-invocation path.
 //
 // Bound concept: plan.
-type MutationRequestPlanFeedbackArgs struct {
+type RequestPlanFeedbackArgs struct {
 	PlanId          string
 	FeedbackRequest map[string]any
 }
 
-// MutationRequestPlanFeedback calls the engine mutation mutationRequestPlanFeedback.
-func (qc *QueryClient) MutationRequestPlanFeedback(ctx context.Context, args MutationRequestPlanFeedbackArgs) (*Result, error) {
-	call := MutationRequestPlanFeedbackBuild(args)
-	return qc.executeNamed(ctx, "mutationRequestPlanFeedback", call)
+// RequestPlanFeedback calls the engine mutation requestPlanFeedback.
+func (qc *QueryClient) RequestPlanFeedback(ctx context.Context, args RequestPlanFeedbackArgs) (*Result, error) {
+	call := RequestPlanFeedbackBuild(args)
+	return qc.executeNamed(ctx, "requestPlanFeedback", call)
 }
 
-func MutationRequestPlanFeedbackBuild(args MutationRequestPlanFeedbackArgs) string {
+func RequestPlanFeedbackBuild(args RequestPlanFeedbackArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRequestPlanFeedback({")
+	b.WriteString("requestPlanFeedback({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("feedbackRequest: ")
@@ -8558,39 +8558,39 @@ func MutationRequestPlanFeedbackBuild(args MutationRequestPlanFeedbackArgs) stri
 	return b.String()
 }
 
-// MutationResolveApprovalRequest -- Resolve a pending v1:safety:approvalRequest. Sets status (`approved` or `denied`), decidedBy, decidedAt, and decisionReason. Called from the cockpit approval card (follow-up in memql-cockpit) or directly via CLI / mutation as the v0 workaround until the card lands. Does NOT re-check that status was `pending` -- the read-modify-write happens on the caller side (cockpit / CLI calls queryApprovalRequestById first); v1 ships the simple shape.
+// ResolveApprovalRequest -- Resolve a pending v1:safety:approvalRequest. Sets status (`approved` or `denied`), decidedBy, decidedAt, and decisionReason. Called from the cockpit approval card (follow-up in memql-cockpit) or directly via CLI / mutation as the v0 workaround until the card lands. Does NOT re-check that status was `pending` -- the read-modify-write happens on the caller side (cockpit / CLI calls approvalRequestById first); v1 ships the simple shape.
 //
 // Bound concept: approvalRequest.
-type MutationResolveApprovalRequestArgs struct {
+type ResolveApprovalRequestArgs struct {
 	Id             string
 	Status         string
 	DecidedBy      string
 	DecisionReason string
 }
 
-// MutationResolveApprovalRequest calls the engine mutation mutationResolveApprovalRequest.
-func (qc *QueryClient) MutationResolveApprovalRequest(ctx context.Context, args MutationResolveApprovalRequestArgs) (*Result, error) {
-	call := MutationResolveApprovalRequestBuild(args)
-	return qc.executeNamed(ctx, "mutationResolveApprovalRequest", call)
+// ResolveApprovalRequest calls the engine mutation resolveApprovalRequest.
+func (qc *QueryClient) ResolveApprovalRequest(ctx context.Context, args ResolveApprovalRequestArgs) (*Result, error) {
+	call := ResolveApprovalRequestBuild(args)
+	return qc.executeNamed(ctx, "resolveApprovalRequest", call)
 }
 
-func MutationResolveApprovalRequestBuild(args MutationResolveApprovalRequestArgs) string {
+func ResolveApprovalRequestBuild(args ResolveApprovalRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationResolveApprovalRequest({")
+	b.WriteString("resolveApprovalRequest({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("decidedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.DecidedBy))
 	if args.DecisionReason != "" {
-		if b.Len() > 32 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("decisionReason: ")
@@ -8600,60 +8600,60 @@ func MutationResolveApprovalRequestBuild(args MutationResolveApprovalRequestArgs
 	return b.String()
 }
 
-// MutationRetireAuthoringBundle -- Retire a bundle: status -> retired and retiredAt stamped. Used when a new version supersedes it or the user removes the capability. The authored runtime (#959) unregisters its constructs on this transition.
+// RetireAuthoringBundle -- Retire a bundle: status -> retired and retiredAt stamped. Used when a new version supersedes it or the user removes the capability. The authored runtime (#959) unregisters its constructs on this transition.
 //
 // Bound concept: bundle.
-type MutationRetireAuthoringBundleArgs struct {
+type RetireAuthoringBundleArgs struct {
 	BundleId string
 }
 
-// MutationRetireAuthoringBundle calls the engine mutation mutationRetireAuthoringBundle.
-func (qc *QueryClient) MutationRetireAuthoringBundle(ctx context.Context, args MutationRetireAuthoringBundleArgs) (*Result, error) {
-	call := MutationRetireAuthoringBundleBuild(args)
-	return qc.executeNamed(ctx, "mutationRetireAuthoringBundle", call)
+// RetireAuthoringBundle calls the engine mutation retireAuthoringBundle.
+func (qc *QueryClient) RetireAuthoringBundle(ctx context.Context, args RetireAuthoringBundleArgs) (*Result, error) {
+	call := RetireAuthoringBundleBuild(args)
+	return qc.executeNamed(ctx, "retireAuthoringBundle", call)
 }
 
-func MutationRetireAuthoringBundleBuild(args MutationRetireAuthoringBundleArgs) string {
+func RetireAuthoringBundleBuild(args RetireAuthoringBundleArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRetireAuthoringBundle({")
+	b.WriteString("retireAuthoringBundle({")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationRevertRecord -- Revert a data record to a previous validation state with counter reset
+// RevertRecord -- Revert a data record to a previous validation state with counter reset
 //
 // Bound concept: record.
-type MutationRevertRecordArgs struct {
+type RevertRecordArgs struct {
 	RecordId     string
 	ToState      string
 	CheckCount   float64
 	ConfirmCount float64
 }
 
-// MutationRevertRecord calls the engine mutation mutationRevertRecord.
-func (qc *QueryClient) MutationRevertRecord(ctx context.Context, args MutationRevertRecordArgs) (*Result, error) {
-	call := MutationRevertRecordBuild(args)
-	return qc.executeNamed(ctx, "mutationRevertRecord", call)
+// RevertRecord calls the engine mutation revertRecord.
+func (qc *QueryClient) RevertRecord(ctx context.Context, args RevertRecordArgs) (*Result, error) {
+	call := RevertRecordBuild(args)
+	return qc.executeNamed(ctx, "revertRecord", call)
 }
 
-func MutationRevertRecordBuild(args MutationRevertRecordArgs) string {
+func RevertRecordBuild(args RevertRecordArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRevertRecord({")
+	b.WriteString("revertRecord({")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	if b.Len() > 22 {
+	if b.Len() > 14 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toState: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToState))
-	if b.Len() > 22 {
+	if b.Len() > 14 {
 		b.WriteString(", ")
 	}
 	b.WriteString("checkCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.CheckCount))
-	if b.Len() > 22 {
+	if b.Len() > 14 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confirmCount: ")
@@ -8662,49 +8662,49 @@ func MutationRevertRecordBuild(args MutationRevertRecordArgs) string {
 	return b.String()
 }
 
-// MutationRevokeAgentAuthorization -- Soft-revoke a standing authorization. User-revocable from the agent's settings at any time. Read-merges the existing row so the caller only passes the auth id; agentId/userId/planKind/spaceScope inherit from the persisted row (memql#1628).
+// RevokeAgentAuthorization -- Soft-revoke a standing authorization. User-revocable from the agent's settings at any time. Read-merges the existing row so the caller only passes the auth id; agentId/userId/planKind/spaceScope inherit from the persisted row (memql#1628).
 //
 // Bound concept: agentAuthorization.
-type MutationRevokeAgentAuthorizationArgs struct {
+type RevokeAgentAuthorizationArgs struct {
 	AuthId string
 }
 
-// MutationRevokeAgentAuthorization calls the engine mutation mutationRevokeAgentAuthorization.
-func (qc *QueryClient) MutationRevokeAgentAuthorization(ctx context.Context, args MutationRevokeAgentAuthorizationArgs) (*Result, error) {
-	call := MutationRevokeAgentAuthorizationBuild(args)
-	return qc.executeNamed(ctx, "mutationRevokeAgentAuthorization", call)
+// RevokeAgentAuthorization calls the engine mutation revokeAgentAuthorization.
+func (qc *QueryClient) RevokeAgentAuthorization(ctx context.Context, args RevokeAgentAuthorizationArgs) (*Result, error) {
+	call := RevokeAgentAuthorizationBuild(args)
+	return qc.executeNamed(ctx, "revokeAgentAuthorization", call)
 }
 
-func MutationRevokeAgentAuthorizationBuild(args MutationRevokeAgentAuthorizationArgs) string {
+func RevokeAgentAuthorizationBuild(args RevokeAgentAuthorizationArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRevokeAgentAuthorization({")
+	b.WriteString("revokeAgentAuthorization({")
 	b.WriteString("authId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AuthId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationRevokeAuthSession -- Mark a bearer-token session revoked. Read-merges the existing row so only revokedReason + revokedAt change; the discriminator fields (subject, tokenHash, source, expiresAt, userId) and the rotation bookkeeping inherit from the persisted row instead of being re-supplied (memql#1628).
+// RevokeAuthSession -- Mark a bearer-token session revoked. Read-merges the existing row so only revokedReason + revokedAt change; the discriminator fields (subject, tokenHash, source, expiresAt, userId) and the rotation bookkeeping inherit from the persisted row instead of being re-supplied (memql#1628).
 //
 // Bound concept: authSession.
-type MutationRevokeAuthSessionArgs struct {
+type RevokeAuthSessionArgs struct {
 	SessionId string
 	// Enum: user_action | all_sessions | admin
 	RevokedReason string
 }
 
-// MutationRevokeAuthSession calls the engine mutation mutationRevokeAuthSession.
-func (qc *QueryClient) MutationRevokeAuthSession(ctx context.Context, args MutationRevokeAuthSessionArgs) (*Result, error) {
-	call := MutationRevokeAuthSessionBuild(args)
-	return qc.executeNamed(ctx, "mutationRevokeAuthSession", call)
+// RevokeAuthSession calls the engine mutation revokeAuthSession.
+func (qc *QueryClient) RevokeAuthSession(ctx context.Context, args RevokeAuthSessionArgs) (*Result, error) {
+	call := RevokeAuthSessionBuild(args)
+	return qc.executeNamed(ctx, "revokeAuthSession", call)
 }
 
-func MutationRevokeAuthSessionBuild(args MutationRevokeAuthSessionArgs) string {
+func RevokeAuthSessionBuild(args RevokeAuthSessionArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRevokeAuthSession({")
+	b.WriteString("revokeAuthSession({")
 	b.WriteString("sessionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SessionId))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("revokedReason: ")
@@ -8713,35 +8713,35 @@ func MutationRevokeAuthSessionBuild(args MutationRevokeAuthSessionArgs) string {
 	return b.String()
 }
 
-// MutationRevokeDelegation -- Revoke a delegation: authoritatively flips active=false and stamps revokedAt/revokedBySubject regardless of caller input. Read-merges the persisted row so every other field is preserved (memql#1729).
+// RevokeDelegation -- Revoke a delegation: authoritatively flips active=false and stamps revokedAt/revokedBySubject regardless of caller input. Read-merges the persisted row so every other field is preserved (memql#1729).
 //
 // Bound concept: delegation.
-type MutationRevokeDelegationArgs struct {
+type RevokeDelegationArgs struct {
 	DelegationId     string
 	RevokedBySubject string
 	RevokedAt        string
 }
 
-// MutationRevokeDelegation calls the engine mutation mutationRevokeDelegation.
-func (qc *QueryClient) MutationRevokeDelegation(ctx context.Context, args MutationRevokeDelegationArgs) (*Result, error) {
-	call := MutationRevokeDelegationBuild(args)
-	return qc.executeNamed(ctx, "mutationRevokeDelegation", call)
+// RevokeDelegation calls the engine mutation revokeDelegation.
+func (qc *QueryClient) RevokeDelegation(ctx context.Context, args RevokeDelegationArgs) (*Result, error) {
+	call := RevokeDelegationBuild(args)
+	return qc.executeNamed(ctx, "revokeDelegation", call)
 }
 
-func MutationRevokeDelegationBuild(args MutationRevokeDelegationArgs) string {
+func RevokeDelegationBuild(args RevokeDelegationArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRevokeDelegation({")
+	b.WriteString("revokeDelegation({")
 	b.WriteString("delegationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DelegationId))
 	if args.RevokedBySubject != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("revokedBySubject: ")
 		b.WriteString(fmt.Sprintf("%q", args.RevokedBySubject))
 	}
 	if args.RevokedAt != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("revokedAt: ")
@@ -8751,85 +8751,85 @@ func MutationRevokeDelegationBuild(args MutationRevokeDelegationArgs) string {
 	return b.String()
 }
 
-// MutationRevokeNodeTokenIdentity -- Revoke a node_token identity by flipping active=false on the row. Read-merges the existing row so only `active` changes; the credentials block + every other field inherit from the persisted row instead of being re-supplied (memql#1628 -- replaces the old whole-replace restate-every-credentials-field pattern). memql#350.
+// RevokeNodeTokenIdentity -- Revoke a node_token identity by flipping active=false on the row. Read-merges the existing row so only `active` changes; the credentials block + every other field inherit from the persisted row instead of being re-supplied (memql#1628 -- replaces the old whole-replace restate-every-credentials-field pattern). memql#350.
 //
 // Bound concept: identity.
-type MutationRevokeNodeTokenIdentityArgs struct {
+type RevokeNodeTokenIdentityArgs struct {
 	IdentityId string
 }
 
-// MutationRevokeNodeTokenIdentity calls the engine mutation mutationRevokeNodeTokenIdentity.
-func (qc *QueryClient) MutationRevokeNodeTokenIdentity(ctx context.Context, args MutationRevokeNodeTokenIdentityArgs) (*Result, error) {
-	call := MutationRevokeNodeTokenIdentityBuild(args)
-	return qc.executeNamed(ctx, "mutationRevokeNodeTokenIdentity", call)
+// RevokeNodeTokenIdentity calls the engine mutation revokeNodeTokenIdentity.
+func (qc *QueryClient) RevokeNodeTokenIdentity(ctx context.Context, args RevokeNodeTokenIdentityArgs) (*Result, error) {
+	call := RevokeNodeTokenIdentityBuild(args)
+	return qc.executeNamed(ctx, "revokeNodeTokenIdentity", call)
 }
 
-func MutationRevokeNodeTokenIdentityBuild(args MutationRevokeNodeTokenIdentityArgs) string {
+func RevokeNodeTokenIdentityBuild(args RevokeNodeTokenIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRevokeNodeTokenIdentity({")
+	b.WriteString("revokeNodeTokenIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationRevokePATIdentity -- Soft-revoke a PAT identity (api_key) by flipping active=false. Read-merges the existing row so only `active` changes; identityType/credentials/label/usableByAgents inherit from the persisted row instead of being re-supplied (memql#1628).
+// RevokePATIdentity -- Soft-revoke a PAT identity (api_key) by flipping active=false. Read-merges the existing row so only `active` changes; identityType/credentials/label/usableByAgents inherit from the persisted row instead of being re-supplied (memql#1628).
 //
 // Bound concept: identity.
-type MutationRevokePATIdentityArgs struct {
+type RevokePATIdentityArgs struct {
 	IdentityId string
 }
 
-// MutationRevokePATIdentity calls the engine mutation mutationRevokePATIdentity.
-func (qc *QueryClient) MutationRevokePATIdentity(ctx context.Context, args MutationRevokePATIdentityArgs) (*Result, error) {
-	call := MutationRevokePATIdentityBuild(args)
-	return qc.executeNamed(ctx, "mutationRevokePATIdentity", call)
+// RevokePATIdentity calls the engine mutation revokePATIdentity.
+func (qc *QueryClient) RevokePATIdentity(ctx context.Context, args RevokePATIdentityArgs) (*Result, error) {
+	call := RevokePATIdentityBuild(args)
+	return qc.executeNamed(ctx, "revokePATIdentity", call)
 }
 
-func MutationRevokePATIdentityBuild(args MutationRevokePATIdentityArgs) string {
+func RevokePATIdentityBuild(args RevokePATIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRevokePATIdentity({")
+	b.WriteString("revokePATIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationRevokeWorker -- Revoke a worker registration.
+// RevokeWorker -- Revoke a worker registration.
 //
 // Bound concept: registration.
-type MutationRevokeWorkerArgs struct {
+type RevokeWorkerArgs struct {
 	RegistrationId string
 	RevokedAt      string
 	RevokedBy      string
 	RevokeReason   string
 }
 
-// MutationRevokeWorker calls the engine mutation mutationRevokeWorker.
-func (qc *QueryClient) MutationRevokeWorker(ctx context.Context, args MutationRevokeWorkerArgs) (*Result, error) {
-	call := MutationRevokeWorkerBuild(args)
-	return qc.executeNamed(ctx, "mutationRevokeWorker", call)
+// RevokeWorker calls the engine mutation revokeWorker.
+func (qc *QueryClient) RevokeWorker(ctx context.Context, args RevokeWorkerArgs) (*Result, error) {
+	call := RevokeWorkerBuild(args)
+	return qc.executeNamed(ctx, "revokeWorker", call)
 }
 
-func MutationRevokeWorkerBuild(args MutationRevokeWorkerArgs) string {
+func RevokeWorkerBuild(args RevokeWorkerArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRevokeWorker({")
+	b.WriteString("revokeWorker({")
 	b.WriteString("registrationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegistrationId))
-	if b.Len() > 22 {
+	if b.Len() > 14 {
 		b.WriteString(", ")
 	}
 	b.WriteString("revokedAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.RevokedAt))
 	if args.RevokedBy != "" {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("revokedBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.RevokedBy))
 	}
 	if args.RevokeReason != "" {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("revokeReason: ")
@@ -8839,60 +8839,60 @@ func MutationRevokeWorkerBuild(args MutationRevokeWorkerArgs) string {
 	return b.String()
 }
 
-// MutationRevokeWorkerTokenIdentity -- Revoke (deactivate) a worker_token identity row.
+// RevokeWorkerTokenIdentity -- Revoke (deactivate) a worker_token identity row.
 //
 // Bound concept: identity.
-type MutationRevokeWorkerTokenIdentityArgs struct {
+type RevokeWorkerTokenIdentityArgs struct {
 	IdentityId string
 }
 
-// MutationRevokeWorkerTokenIdentity calls the engine mutation mutationRevokeWorkerTokenIdentity.
-func (qc *QueryClient) MutationRevokeWorkerTokenIdentity(ctx context.Context, args MutationRevokeWorkerTokenIdentityArgs) (*Result, error) {
-	call := MutationRevokeWorkerTokenIdentityBuild(args)
-	return qc.executeNamed(ctx, "mutationRevokeWorkerTokenIdentity", call)
+// RevokeWorkerTokenIdentity calls the engine mutation revokeWorkerTokenIdentity.
+func (qc *QueryClient) RevokeWorkerTokenIdentity(ctx context.Context, args RevokeWorkerTokenIdentityArgs) (*Result, error) {
+	call := RevokeWorkerTokenIdentityBuild(args)
+	return qc.executeNamed(ctx, "revokeWorkerTokenIdentity", call)
 }
 
-func MutationRevokeWorkerTokenIdentityBuild(args MutationRevokeWorkerTokenIdentityArgs) string {
+func RevokeWorkerTokenIdentityBuild(args RevokeWorkerTokenIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRevokeWorkerTokenIdentity({")
+	b.WriteString("revokeWorkerTokenIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationRotateAuthSession -- Rotate refresh-token bookkeeping on a session after a successful refresh. Stores the old hash as previousRefreshTokenHash with a fresh previousRotatedAt timestamp so the rotator can accept that hash inside its grace window.
+// RotateAuthSession -- Rotate refresh-token bookkeeping on a session after a successful refresh. Stores the old hash as previousRefreshTokenHash with a fresh previousRotatedAt timestamp so the rotator can accept that hash inside its grace window.
 //
 // Bound concept: authSession.
-type MutationRotateAuthSessionArgs struct {
+type RotateAuthSessionArgs struct {
 	SessionId                string
 	NewRefreshTokenHash      string
 	PreviousRefreshTokenHash string
 	NewExpiresAt             string
 }
 
-// MutationRotateAuthSession calls the engine mutation mutationRotateAuthSession.
-func (qc *QueryClient) MutationRotateAuthSession(ctx context.Context, args MutationRotateAuthSessionArgs) (*Result, error) {
-	call := MutationRotateAuthSessionBuild(args)
-	return qc.executeNamed(ctx, "mutationRotateAuthSession", call)
+// RotateAuthSession calls the engine mutation rotateAuthSession.
+func (qc *QueryClient) RotateAuthSession(ctx context.Context, args RotateAuthSessionArgs) (*Result, error) {
+	call := RotateAuthSessionBuild(args)
+	return qc.executeNamed(ctx, "rotateAuthSession", call)
 }
 
-func MutationRotateAuthSessionBuild(args MutationRotateAuthSessionArgs) string {
+func RotateAuthSessionBuild(args RotateAuthSessionArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationRotateAuthSession({")
+	b.WriteString("rotateAuthSession({")
 	b.WriteString("sessionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SessionId))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newRefreshTokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.NewRefreshTokenHash))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("previousRefreshTokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.PreviousRefreshTokenHash))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newExpiresAt: ")
@@ -8901,32 +8901,32 @@ func MutationRotateAuthSessionBuild(args MutationRotateAuthSessionArgs) string {
 	return b.String()
 }
 
-// MutationScheduleAccountDeletion -- Schedule the user for hard-deletion after the cooldown.
+// ScheduleAccountDeletion -- Schedule the user for hard-deletion after the cooldown.
 //
 // Bound concept: user.
-type MutationScheduleAccountDeletionArgs struct {
+type ScheduleAccountDeletionArgs struct {
 	UserId string
 }
 
-// MutationScheduleAccountDeletion calls the engine mutation mutationScheduleAccountDeletion.
-func (qc *QueryClient) MutationScheduleAccountDeletion(ctx context.Context, args MutationScheduleAccountDeletionArgs) (*Result, error) {
-	call := MutationScheduleAccountDeletionBuild(args)
-	return qc.executeNamed(ctx, "mutationScheduleAccountDeletion", call)
+// ScheduleAccountDeletion calls the engine mutation scheduleAccountDeletion.
+func (qc *QueryClient) ScheduleAccountDeletion(ctx context.Context, args ScheduleAccountDeletionArgs) (*Result, error) {
+	call := ScheduleAccountDeletionBuild(args)
+	return qc.executeNamed(ctx, "scheduleAccountDeletion", call)
 }
 
-func MutationScheduleAccountDeletionBuild(args MutationScheduleAccountDeletionArgs) string {
+func ScheduleAccountDeletionBuild(args ScheduleAccountDeletionArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationScheduleAccountDeletion({")
+	b.WriteString("scheduleAccountDeletion({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationSendActionUtterance -- Create an action utterance in a space.
+// SendActionUtterance -- Create an action utterance in a space.
 //
 // Bound concept: utterance.
-type MutationSendActionUtteranceArgs struct {
+type SendActionUtteranceArgs struct {
 	UtteranceId     string
 	PartitionId     string
 	ParticipantId   string
@@ -8937,58 +8937,58 @@ type MutationSendActionUtteranceArgs struct {
 	Action          map[string]any
 }
 
-// MutationSendActionUtterance calls the engine mutation mutationSendActionUtterance.
-func (qc *QueryClient) MutationSendActionUtterance(ctx context.Context, args MutationSendActionUtteranceArgs) (*Result, error) {
-	call := MutationSendActionUtteranceBuild(args)
-	return qc.executeNamed(ctx, "mutationSendActionUtterance", call)
+// SendActionUtterance calls the engine mutation sendActionUtterance.
+func (qc *QueryClient) SendActionUtterance(ctx context.Context, args SendActionUtteranceArgs) (*Result, error) {
+	call := SendActionUtteranceBuild(args)
+	return qc.executeNamed(ctx, "sendActionUtterance", call)
 }
 
-func MutationSendActionUtteranceBuild(args MutationSendActionUtteranceArgs) string {
+func SendActionUtteranceBuild(args SendActionUtteranceArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSendActionUtterance({")
+	b.WriteString("sendActionUtterance({")
 	if args.UtteranceId != "" {
 		b.WriteString("utteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
 	}
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	if args.ParticipantType != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
 	}
 	if args.ReplyToId != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("replyToId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ReplyToId))
 	}
 	if args.Source != nil {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("source: ")
 		b.WriteString(renderMemQLValue(args.Source))
 	}
 	if args.CreatedAt != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("createdAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.CreatedAt))
 	}
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
@@ -8997,10 +8997,10 @@ func MutationSendActionUtteranceBuild(args MutationSendActionUtteranceArgs) stri
 	return b.String()
 }
 
-// MutationSendRealtimeTranscriptUtterance -- Create a transcript-only realtime voice utterance in a space.
+// SendRealtimeTranscriptUtterance -- Create a transcript-only realtime voice utterance in a space.
 //
 // Bound concept: utterance.
-type MutationSendRealtimeTranscriptUtteranceArgs struct {
+type SendRealtimeTranscriptUtteranceArgs struct {
 	UtteranceId    string
 	IdempotencyKey string
 	CreatedAt      string
@@ -9016,87 +9016,87 @@ type MutationSendRealtimeTranscriptUtteranceArgs struct {
 	Source          map[string]any
 }
 
-// MutationSendRealtimeTranscriptUtterance calls the engine mutation mutationSendRealtimeTranscriptUtterance.
-func (qc *QueryClient) MutationSendRealtimeTranscriptUtterance(ctx context.Context, args MutationSendRealtimeTranscriptUtteranceArgs) (*Result, error) {
-	call := MutationSendRealtimeTranscriptUtteranceBuild(args)
-	return qc.executeNamed(ctx, "mutationSendRealtimeTranscriptUtterance", call)
+// SendRealtimeTranscriptUtterance calls the engine mutation sendRealtimeTranscriptUtterance.
+func (qc *QueryClient) SendRealtimeTranscriptUtterance(ctx context.Context, args SendRealtimeTranscriptUtteranceArgs) (*Result, error) {
+	call := SendRealtimeTranscriptUtteranceBuild(args)
+	return qc.executeNamed(ctx, "sendRealtimeTranscriptUtterance", call)
 }
 
-func MutationSendRealtimeTranscriptUtteranceBuild(args MutationSendRealtimeTranscriptUtteranceArgs) string {
+func SendRealtimeTranscriptUtteranceBuild(args SendRealtimeTranscriptUtteranceArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSendRealtimeTranscriptUtterance({")
+	b.WriteString("sendRealtimeTranscriptUtterance({")
 	if args.UtteranceId != "" {
 		b.WriteString("utteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
 	}
 	if args.IdempotencyKey != "" {
-		if b.Len() > 41 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("idempotencyKey: ")
 		b.WriteString(fmt.Sprintf("%q", args.IdempotencyKey))
 	}
 	if args.CreatedAt != "" {
-		if b.Len() > 41 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("createdAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.CreatedAt))
 	}
-	if b.Len() > 41 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 41 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	if args.ParticipantType != "" {
-		if b.Len() > 41 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
 	}
 	if args.Text != "" {
-		if b.Len() > 41 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("text: ")
 		b.WriteString(fmt.Sprintf("%q", args.Text))
 	}
 	if args.AudioId != "" {
-		if b.Len() > 41 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("audioId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AudioId))
 	}
 	if args.VideoId != "" {
-		if b.Len() > 41 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("videoId: ")
 		b.WriteString(fmt.Sprintf("%q", args.VideoId))
 	}
 	if args.Duration != 0 {
-		if b.Len() > 41 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("duration: ")
 		b.WriteString(fmt.Sprintf("%v", args.Duration))
 	}
 	if args.Timestamps != nil {
-		if b.Len() > 41 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("timestamps: ")
 		b.WriteString(renderMemQLValue(args.Timestamps))
 	}
 	if args.Source != nil {
-		if b.Len() > 41 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("source: ")
@@ -9106,10 +9106,10 @@ func MutationSendRealtimeTranscriptUtteranceBuild(args MutationSendRealtimeTrans
 	return b.String()
 }
 
-// MutationSendSpeechUtterance -- Create a speech utterance in a space.
+// SendSpeechUtterance -- Create a speech utterance in a space.
 //
 // Bound concept: utterance.
-type MutationSendSpeechUtteranceArgs struct {
+type SendSpeechUtteranceArgs struct {
 	UtteranceId     string
 	PartitionId     string
 	ParticipantId   string
@@ -9122,73 +9122,73 @@ type MutationSendSpeechUtteranceArgs struct {
 	Source          map[string]any
 }
 
-// MutationSendSpeechUtterance calls the engine mutation mutationSendSpeechUtterance.
-func (qc *QueryClient) MutationSendSpeechUtterance(ctx context.Context, args MutationSendSpeechUtteranceArgs) (*Result, error) {
-	call := MutationSendSpeechUtteranceBuild(args)
-	return qc.executeNamed(ctx, "mutationSendSpeechUtterance", call)
+// SendSpeechUtterance calls the engine mutation sendSpeechUtterance.
+func (qc *QueryClient) SendSpeechUtterance(ctx context.Context, args SendSpeechUtteranceArgs) (*Result, error) {
+	call := SendSpeechUtteranceBuild(args)
+	return qc.executeNamed(ctx, "sendSpeechUtterance", call)
 }
 
-func MutationSendSpeechUtteranceBuild(args MutationSendSpeechUtteranceArgs) string {
+func SendSpeechUtteranceBuild(args SendSpeechUtteranceArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSendSpeechUtterance({")
+	b.WriteString("sendSpeechUtterance({")
 	if args.UtteranceId != "" {
 		b.WriteString("utteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
 	}
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	if args.ParticipantType != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
 	}
 	if args.Text != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("text: ")
 		b.WriteString(fmt.Sprintf("%q", args.Text))
 	}
 	if args.AudioId != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("audioId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AudioId))
 	}
 	if args.VideoId != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("videoId: ")
 		b.WriteString(fmt.Sprintf("%q", args.VideoId))
 	}
 	if args.Duration != 0 {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("duration: ")
 		b.WriteString(fmt.Sprintf("%v", args.Duration))
 	}
 	if args.Timestamps != nil {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("timestamps: ")
 		b.WriteString(renderMemQLValue(args.Timestamps))
 	}
 	if args.Source != nil {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("source: ")
@@ -9198,10 +9198,10 @@ func MutationSendSpeechUtteranceBuild(args MutationSendSpeechUtteranceArgs) stri
 	return b.String()
 }
 
-// MutationSendTextUtterance -- Create a text utterance in a space.
+// SendTextUtterance -- Create a text utterance in a space.
 //
 // Bound concept: utterance.
-type MutationSendTextUtteranceArgs struct {
+type SendTextUtteranceArgs struct {
 	UtteranceId     string
 	PartitionId     string
 	ParticipantId   string
@@ -9212,57 +9212,57 @@ type MutationSendTextUtteranceArgs struct {
 	Citations       []map[string]any
 }
 
-// MutationSendTextUtterance calls the engine mutation mutationSendTextUtterance.
-func (qc *QueryClient) MutationSendTextUtterance(ctx context.Context, args MutationSendTextUtteranceArgs) (*Result, error) {
-	call := MutationSendTextUtteranceBuild(args)
-	return qc.executeNamed(ctx, "mutationSendTextUtterance", call)
+// SendTextUtterance calls the engine mutation sendTextUtterance.
+func (qc *QueryClient) SendTextUtterance(ctx context.Context, args SendTextUtteranceArgs) (*Result, error) {
+	call := SendTextUtteranceBuild(args)
+	return qc.executeNamed(ctx, "sendTextUtterance", call)
 }
 
-func MutationSendTextUtteranceBuild(args MutationSendTextUtteranceArgs) string {
+func SendTextUtteranceBuild(args SendTextUtteranceArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSendTextUtterance({")
+	b.WriteString("sendTextUtterance({")
 	if args.UtteranceId != "" {
 		b.WriteString("utteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
 	}
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	if args.ParticipantType != "" {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
 	}
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
 	if args.ReplyToId != "" {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("replyToId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ReplyToId))
 	}
 	if args.Source != nil {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("source: ")
 		b.WriteString(renderMemQLValue(args.Source))
 	}
 	if args.Citations != nil {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("citations: ")
@@ -9272,10 +9272,10 @@ func MutationSendTextUtteranceBuild(args MutationSendTextUtteranceArgs) string {
 	return b.String()
 }
 
-// MutationSetAccountEntitlement -- Set (upsert) an account's task-concurrency entitlement (epic memql#902 / #903). Deterministic per-account id so each set appends a new version and the latest wins. Finite maxConcurrentTasks caps the account; <=0 or tier='enterprise' leaves it unlimited.
+// SetAccountEntitlement -- Set (upsert) an account's task-concurrency entitlement (epic memql#902 / #903). Deterministic per-account id so each set appends a new version and the latest wins. Finite maxConcurrentTasks caps the account; <=0 or tier='enterprise' leaves it unlimited.
 //
 // Bound concept: accountEntitlement.
-type MutationSetAccountEntitlementArgs struct {
+type SetAccountEntitlementArgs struct {
 	AccountId string
 	// Enum: free | pro | team | enterprise
 	Tier               string
@@ -9285,38 +9285,38 @@ type MutationSetAccountEntitlementArgs struct {
 	Note        string
 }
 
-// MutationSetAccountEntitlement calls the engine mutation mutationSetAccountEntitlement.
-func (qc *QueryClient) MutationSetAccountEntitlement(ctx context.Context, args MutationSetAccountEntitlementArgs) (*Result, error) {
-	call := MutationSetAccountEntitlementBuild(args)
-	return qc.executeNamed(ctx, "mutationSetAccountEntitlement", call)
+// SetAccountEntitlement calls the engine mutation setAccountEntitlement.
+func (qc *QueryClient) SetAccountEntitlement(ctx context.Context, args SetAccountEntitlementArgs) (*Result, error) {
+	call := SetAccountEntitlementBuild(args)
+	return qc.executeNamed(ctx, "setAccountEntitlement", call)
 }
 
-func MutationSetAccountEntitlementBuild(args MutationSetAccountEntitlementArgs) string {
+func SetAccountEntitlementBuild(args SetAccountEntitlementArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSetAccountEntitlement({")
+	b.WriteString("setAccountEntitlement({")
 	b.WriteString("accountId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AccountId))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.MaxConcurrentTasks != 0 {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("maxConcurrentTasks: ")
 		b.WriteString(fmt.Sprintf("%v", args.MaxConcurrentTasks))
 	}
 	if args.AccountKind != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accountKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.AccountKind))
 	}
 	if args.Note != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
@@ -9326,10 +9326,10 @@ func MutationSetAccountEntitlementBuild(args MutationSetAccountEntitlementArgs) 
 	return b.String()
 }
 
-// MutationSetAgentAudioOverride -- Set the per-session audio control mode for an agent in a space.
+// SetAgentAudioOverride -- Set the per-session audio control mode for an agent in a space.
 //
 // Bound concept: audioOverride.
-type MutationSetAgentAudioOverrideArgs struct {
+type SetAgentAudioOverrideArgs struct {
 	PartitionId string
 	AgentId     string
 	Mode        string
@@ -9338,36 +9338,36 @@ type MutationSetAgentAudioOverrideArgs struct {
 	ActiveSet   bool // set true to send active; required because zero-value bool is ambiguous
 }
 
-// MutationSetAgentAudioOverride calls the engine mutation mutationSetAgentAudioOverride.
-func (qc *QueryClient) MutationSetAgentAudioOverride(ctx context.Context, args MutationSetAgentAudioOverrideArgs) (*Result, error) {
-	call := MutationSetAgentAudioOverrideBuild(args)
-	return qc.executeNamed(ctx, "mutationSetAgentAudioOverride", call)
+// SetAgentAudioOverride calls the engine mutation setAgentAudioOverride.
+func (qc *QueryClient) SetAgentAudioOverride(ctx context.Context, args SetAgentAudioOverrideArgs) (*Result, error) {
+	call := SetAgentAudioOverrideBuild(args)
+	return qc.executeNamed(ctx, "setAgentAudioOverride", call)
 }
 
-func MutationSetAgentAudioOverrideBuild(args MutationSetAgentAudioOverrideArgs) string {
+func SetAgentAudioOverrideBuild(args SetAgentAudioOverrideArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSetAgentAudioOverride({")
+	b.WriteString("setAgentAudioOverride({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mode: ")
 	b.WriteString(fmt.Sprintf("%q", args.Mode))
 	if args.SetBy != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("setBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.SetBy))
 	}
 	if args.ActiveSet {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -9377,10 +9377,10 @@ func MutationSetAgentAudioOverrideBuild(args MutationSetAgentAudioOverrideArgs) 
 	return b.String()
 }
 
-// MutationSetAgentVideoOverride -- Set the per-session video control mode for an agent in a space.
+// SetAgentVideoOverride -- Set the per-session video control mode for an agent in a space.
 //
 // Bound concept: videoOverride.
-type MutationSetAgentVideoOverrideArgs struct {
+type SetAgentVideoOverrideArgs struct {
 	PartitionId string
 	AgentId     string
 	Mode        string
@@ -9389,36 +9389,36 @@ type MutationSetAgentVideoOverrideArgs struct {
 	ActiveSet   bool // set true to send active; required because zero-value bool is ambiguous
 }
 
-// MutationSetAgentVideoOverride calls the engine mutation mutationSetAgentVideoOverride.
-func (qc *QueryClient) MutationSetAgentVideoOverride(ctx context.Context, args MutationSetAgentVideoOverrideArgs) (*Result, error) {
-	call := MutationSetAgentVideoOverrideBuild(args)
-	return qc.executeNamed(ctx, "mutationSetAgentVideoOverride", call)
+// SetAgentVideoOverride calls the engine mutation setAgentVideoOverride.
+func (qc *QueryClient) SetAgentVideoOverride(ctx context.Context, args SetAgentVideoOverrideArgs) (*Result, error) {
+	call := SetAgentVideoOverrideBuild(args)
+	return qc.executeNamed(ctx, "setAgentVideoOverride", call)
 }
 
-func MutationSetAgentVideoOverrideBuild(args MutationSetAgentVideoOverrideArgs) string {
+func SetAgentVideoOverrideBuild(args SetAgentVideoOverrideArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSetAgentVideoOverride({")
+	b.WriteString("setAgentVideoOverride({")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mode: ")
 	b.WriteString(fmt.Sprintf("%q", args.Mode))
 	if args.SetBy != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("setBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.SetBy))
 	}
 	if args.ActiveSet {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -9428,56 +9428,56 @@ func MutationSetAgentVideoOverrideBuild(args MutationSetAgentVideoOverrideArgs) 
 	return b.String()
 }
 
-// MutationSetAuthoredAutomationsEnabled -- Flip the cluster-wide GLOBAL KILL SWITCH for planner-authored automations (epic memql#954, issue #961). Partial-update of the singleton cluster-settings row (id='cluster'): sets authoredAutomationsEnabled true (resume) or false (halt). false halts EVERY authored automation across the whole cluster -- the governance hard stop -- independent of any bundle status or per-user kill switch. Operator-only in practice (the admin settings surface calls it); the authored scheduler reads the flag through queryClusterSettingsCurrent on its global gate.
+// SetAuthoredAutomationsEnabled -- Flip the cluster-wide GLOBAL KILL SWITCH for planner-authored automations (epic memql#954, issue #961). Partial-update of the singleton cluster-settings row (id='cluster'): sets authoredAutomationsEnabled true (resume) or false (halt). false halts EVERY authored automation across the whole cluster -- the governance hard stop -- independent of any bundle status or per-user kill switch. Operator-only in practice (the admin settings surface calls it); the authored scheduler reads the flag through clusterSettingsCurrent on its global gate.
 //
 // Bound concept: clusterSettings.
-type MutationSetAuthoredAutomationsEnabledArgs struct {
+type SetAuthoredAutomationsEnabledArgs struct {
 	Enabled bool
 }
 
-// MutationSetAuthoredAutomationsEnabled calls the engine mutation mutationSetAuthoredAutomationsEnabled.
-func (qc *QueryClient) MutationSetAuthoredAutomationsEnabled(ctx context.Context, args MutationSetAuthoredAutomationsEnabledArgs) (*Result, error) {
-	call := MutationSetAuthoredAutomationsEnabledBuild(args)
-	return qc.executeNamed(ctx, "mutationSetAuthoredAutomationsEnabled", call)
+// SetAuthoredAutomationsEnabled calls the engine mutation setAuthoredAutomationsEnabled.
+func (qc *QueryClient) SetAuthoredAutomationsEnabled(ctx context.Context, args SetAuthoredAutomationsEnabledArgs) (*Result, error) {
+	call := SetAuthoredAutomationsEnabledBuild(args)
+	return qc.executeNamed(ctx, "setAuthoredAutomationsEnabled", call)
 }
 
-func MutationSetAuthoredAutomationsEnabledBuild(args MutationSetAuthoredAutomationsEnabledArgs) string {
+func SetAuthoredAutomationsEnabledBuild(args SetAuthoredAutomationsEnabledArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSetAuthoredAutomationsEnabled({")
+	b.WriteString("setAuthoredAutomationsEnabled({")
 	b.WriteString("enabled: ")
 	b.WriteString(fmt.Sprintf("%v", args.Enabled))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationSetAuthoringBundleStatus -- Generic lifecycle transition for the remaining bundle states: paused (circuit breaker / user hold), retired (superseded or removed), or failed. retiredAt is stamped by mutationRetireAuthoringBundle; this mutation handles pause/unpause + failed. failureReason optional.
+// SetAuthoringBundleStatus -- Generic lifecycle transition for the remaining bundle states: paused (circuit breaker / user hold), retired (superseded or removed), or failed. retiredAt is stamped by retireAuthoringBundle; this mutation handles pause/unpause + failed. failureReason optional.
 //
 // Bound concept: bundle.
-type MutationSetAuthoringBundleStatusArgs struct {
+type SetAuthoringBundleStatusArgs struct {
 	BundleId string
 	// Enum: draft | paused | active | failed
 	Status        string
 	FailureReason string
 }
 
-// MutationSetAuthoringBundleStatus calls the engine mutation mutationSetAuthoringBundleStatus.
-func (qc *QueryClient) MutationSetAuthoringBundleStatus(ctx context.Context, args MutationSetAuthoringBundleStatusArgs) (*Result, error) {
-	call := MutationSetAuthoringBundleStatusBuild(args)
-	return qc.executeNamed(ctx, "mutationSetAuthoringBundleStatus", call)
+// SetAuthoringBundleStatus calls the engine mutation setAuthoringBundleStatus.
+func (qc *QueryClient) SetAuthoringBundleStatus(ctx context.Context, args SetAuthoringBundleStatusArgs) (*Result, error) {
+	call := SetAuthoringBundleStatusBuild(args)
+	return qc.executeNamed(ctx, "setAuthoringBundleStatus", call)
 }
 
-func MutationSetAuthoringBundleStatusBuild(args MutationSetAuthoringBundleStatusArgs) string {
+func SetAuthoringBundleStatusBuild(args SetAuthoringBundleStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSetAuthoringBundleStatus({")
+	b.WriteString("setAuthoringBundleStatus({")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
 	if args.FailureReason != "" {
-		if b.Len() > 34 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("failureReason: ")
@@ -9487,10 +9487,10 @@ func MutationSetAuthoringBundleStatusBuild(args MutationSetAuthoringBundleStatus
 	return b.String()
 }
 
-// MutationSetBudget -- Create or update a budget cap. Scope 'partition' covers all agents; scope 'agent' targets one v1:agents:agent by scopeId.
+// SetBudget -- Create or update a budget cap. Scope 'partition' covers all agents; scope 'agent' targets one v1:agents:agent by scopeId.
 //
 // Bound concept: budget.
-type MutationSetBudgetArgs struct {
+type SetBudgetArgs struct {
 	Id                string
 	Scope             string
 	ScopeId           string
@@ -9502,55 +9502,55 @@ type MutationSetBudgetArgs struct {
 	ActiveSet         bool // set true to send active; required because zero-value bool is ambiguous
 }
 
-// MutationSetBudget calls the engine mutation mutationSetBudget.
-func (qc *QueryClient) MutationSetBudget(ctx context.Context, args MutationSetBudgetArgs) (*Result, error) {
-	call := MutationSetBudgetBuild(args)
-	return qc.executeNamed(ctx, "mutationSetBudget", call)
+// SetBudget calls the engine mutation setBudget.
+func (qc *QueryClient) SetBudget(ctx context.Context, args SetBudgetArgs) (*Result, error) {
+	call := SetBudgetBuild(args)
+	return qc.executeNamed(ctx, "setBudget", call)
 }
 
-func MutationSetBudgetBuild(args MutationSetBudgetArgs) string {
+func SetBudgetBuild(args SetBudgetArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSetBudget({")
+	b.WriteString("setBudget({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 19 {
+	if b.Len() > 11 {
 		b.WriteString(", ")
 	}
 	b.WriteString("scope: ")
 	b.WriteString(fmt.Sprintf("%q", args.Scope))
 	if args.ScopeId != "" {
-		if b.Len() > 19 {
+		if b.Len() > 11 {
 			b.WriteString(", ")
 		}
 		b.WriteString("scopeId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ScopeId))
 	}
-	if b.Len() > 19 {
+	if b.Len() > 11 {
 		b.WriteString(", ")
 	}
 	b.WriteString("periodType: ")
 	b.WriteString(fmt.Sprintf("%q", args.PeriodType))
-	if b.Len() > 19 {
+	if b.Len() > 11 {
 		b.WriteString(", ")
 	}
 	b.WriteString("limitUSD: ")
 	b.WriteString(fmt.Sprintf("%q", args.LimitUSD))
 	if args.AlertThresholdPct != 0 {
-		if b.Len() > 19 {
+		if b.Len() > 11 {
 			b.WriteString(", ")
 		}
 		b.WriteString("alertThresholdPct: ")
 		b.WriteString(fmt.Sprintf("%v", args.AlertThresholdPct))
 	}
 	if args.ResetAt != "" {
-		if b.Len() > 19 {
+		if b.Len() > 11 {
 			b.WriteString(", ")
 		}
 		b.WriteString("resetAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ResetAt))
 	}
 	if args.ActiveSet {
-		if b.Len() > 19 {
+		if b.Len() > 11 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -9560,10 +9560,10 @@ func MutationSetBudgetBuild(args MutationSetBudgetArgs) string {
 	return b.String()
 }
 
-// MutationSetConsent -- Record TCPA consent / opt-out for an external number (append-only; newest wins).
+// SetConsent -- Record TCPA consent / opt-out for an external number (append-only; newest wins).
 //
 // Bound concept: consent.
-type MutationSetConsentArgs struct {
+type SetConsentArgs struct {
 	PhoneNumber string
 	PartitionId string
 	// Enum: opted_in | opted_out
@@ -9572,36 +9572,36 @@ type MutationSetConsentArgs struct {
 	Source string
 }
 
-// MutationSetConsent calls the engine mutation mutationSetConsent.
-func (qc *QueryClient) MutationSetConsent(ctx context.Context, args MutationSetConsentArgs) (*Result, error) {
-	call := MutationSetConsentBuild(args)
-	return qc.executeNamed(ctx, "mutationSetConsent", call)
+// SetConsent calls the engine mutation setConsent.
+func (qc *QueryClient) SetConsent(ctx context.Context, args SetConsentArgs) (*Result, error) {
+	call := SetConsentBuild(args)
+	return qc.executeNamed(ctx, "setConsent", call)
 }
 
-func MutationSetConsentBuild(args MutationSetConsentArgs) string {
+func SetConsentBuild(args SetConsentArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSetConsent({")
+	b.WriteString("setConsent({")
 	b.WriteString("phoneNumber: ")
 	b.WriteString(fmt.Sprintf("%q", args.PhoneNumber))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
 	if args.Reason != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
 	if args.Source != "" {
-		if b.Len() > 20 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("source: ")
@@ -9611,26 +9611,26 @@ func MutationSetConsentBuild(args MutationSetConsentArgs) string {
 	return b.String()
 }
 
-// MutationSetConstructCompiledForm -- Store the cached compiled form for a construct, produced by the Gate 1 compile+bind harness (#956), so activation doesn't re-parse.
+// SetConstructCompiledForm -- Store the cached compiled form for a construct, produced by the Gate 1 compile+bind harness (#956), so activation doesn't re-parse.
 //
 // Bound concept: construct.
-type MutationSetConstructCompiledFormArgs struct {
+type SetConstructCompiledFormArgs struct {
 	ConstructId  string
 	CompiledForm map[string]any
 }
 
-// MutationSetConstructCompiledForm calls the engine mutation mutationSetConstructCompiledForm.
-func (qc *QueryClient) MutationSetConstructCompiledForm(ctx context.Context, args MutationSetConstructCompiledFormArgs) (*Result, error) {
-	call := MutationSetConstructCompiledFormBuild(args)
-	return qc.executeNamed(ctx, "mutationSetConstructCompiledForm", call)
+// SetConstructCompiledForm calls the engine mutation setConstructCompiledForm.
+func (qc *QueryClient) SetConstructCompiledForm(ctx context.Context, args SetConstructCompiledFormArgs) (*Result, error) {
+	call := SetConstructCompiledFormBuild(args)
+	return qc.executeNamed(ctx, "setConstructCompiledForm", call)
 }
 
-func MutationSetConstructCompiledFormBuild(args MutationSetConstructCompiledFormArgs) string {
+func SetConstructCompiledFormBuild(args SetConstructCompiledFormArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSetConstructCompiledForm({")
+	b.WriteString("setConstructCompiledForm({")
 	b.WriteString("constructId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("compiledForm: ")
@@ -9639,27 +9639,27 @@ func MutationSetConstructCompiledFormBuild(args MutationSetConstructCompiledForm
 	return b.String()
 }
 
-// MutationSetConstructStatus -- Set a construct's lifecycle status (draft / active / retired), following its parent bundle. The authored runtime flips constructs to active on bundle activation and retired on bundle retirement.
+// SetConstructStatus -- Set a construct's lifecycle status (draft / active / retired), following its parent bundle. The authored runtime flips constructs to active on bundle activation and retired on bundle retirement.
 //
 // Bound concept: construct.
-type MutationSetConstructStatusArgs struct {
+type SetConstructStatusArgs struct {
 	ConstructId string
 	// Enum: draft | active | retired
 	Status string
 }
 
-// MutationSetConstructStatus calls the engine mutation mutationSetConstructStatus.
-func (qc *QueryClient) MutationSetConstructStatus(ctx context.Context, args MutationSetConstructStatusArgs) (*Result, error) {
-	call := MutationSetConstructStatusBuild(args)
-	return qc.executeNamed(ctx, "mutationSetConstructStatus", call)
+// SetConstructStatus calls the engine mutation setConstructStatus.
+func (qc *QueryClient) SetConstructStatus(ctx context.Context, args SetConstructStatusArgs) (*Result, error) {
+	call := SetConstructStatusBuild(args)
+	return qc.executeNamed(ctx, "setConstructStatus", call)
 }
 
-func MutationSetConstructStatusBuild(args MutationSetConstructStatusArgs) string {
+func SetConstructStatusBuild(args SetConstructStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSetConstructStatus({")
+	b.WriteString("setConstructStatus({")
 	b.WriteString("constructId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
@@ -9668,10 +9668,10 @@ func MutationSetConstructStatusBuild(args MutationSetConstructStatusArgs) string
 	return b.String()
 }
 
-// MutationSetGlobalSecret -- Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.
+// SetGlobalSecret -- Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.
 //
 // Bound concept: globalSecret.
-type MutationSetGlobalSecretArgs struct {
+type SetGlobalSecretArgs struct {
 	Id             string
 	Name           string
 	EncryptedValue string
@@ -9683,55 +9683,55 @@ type MutationSetGlobalSecretArgs struct {
 	ActiveSet      bool // set true to send active; required because zero-value bool is ambiguous
 }
 
-// MutationSetGlobalSecret calls the engine mutation mutationSetGlobalSecret.
-func (qc *QueryClient) MutationSetGlobalSecret(ctx context.Context, args MutationSetGlobalSecretArgs) (*Result, error) {
-	call := MutationSetGlobalSecretBuild(args)
-	return qc.executeNamed(ctx, "mutationSetGlobalSecret", call)
+// SetGlobalSecret calls the engine mutation setGlobalSecret.
+func (qc *QueryClient) SetGlobalSecret(ctx context.Context, args SetGlobalSecretArgs) (*Result, error) {
+	call := SetGlobalSecretBuild(args)
+	return qc.executeNamed(ctx, "setGlobalSecret", call)
 }
 
-func MutationSetGlobalSecretBuild(args MutationSetGlobalSecretArgs) string {
+func SetGlobalSecretBuild(args SetGlobalSecretArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSetGlobalSecret({")
+	b.WriteString("setGlobalSecret({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 25 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 25 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("encryptedValue: ")
 	b.WriteString(fmt.Sprintf("%q", args.EncryptedValue))
-	if b.Len() > 25 {
+	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fingerprint: ")
 	b.WriteString(fmt.Sprintf("%q", args.Fingerprint))
 	if args.Kind != "" {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("kind: ")
 		b.WriteString(fmt.Sprintf("%q", args.Kind))
 	}
 	if args.Description != "" {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.AddedBy != "" {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("addedBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.AddedBy))
 	}
 	if args.ActiveSet {
-		if b.Len() > 25 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -9741,10 +9741,10 @@ func MutationSetGlobalSecretBuild(args MutationSetGlobalSecretArgs) string {
 	return b.String()
 }
 
-// MutationSetGlobalVariable -- Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable.
+// SetGlobalVariable -- Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable.
 //
 // Bound concept: globalVariable.
-type MutationSetGlobalVariableArgs struct {
+type SetGlobalVariableArgs struct {
 	Id          string
 	Name        string
 	Value       string
@@ -9753,36 +9753,36 @@ type MutationSetGlobalVariableArgs struct {
 	ActiveSet   bool // set true to send active; required because zero-value bool is ambiguous
 }
 
-// MutationSetGlobalVariable calls the engine mutation mutationSetGlobalVariable.
-func (qc *QueryClient) MutationSetGlobalVariable(ctx context.Context, args MutationSetGlobalVariableArgs) (*Result, error) {
-	call := MutationSetGlobalVariableBuild(args)
-	return qc.executeNamed(ctx, "mutationSetGlobalVariable", call)
+// SetGlobalVariable calls the engine mutation setGlobalVariable.
+func (qc *QueryClient) SetGlobalVariable(ctx context.Context, args SetGlobalVariableArgs) (*Result, error) {
+	call := SetGlobalVariableBuild(args)
+	return qc.executeNamed(ctx, "setGlobalVariable", call)
 }
 
-func MutationSetGlobalVariableBuild(args MutationSetGlobalVariableArgs) string {
+func SetGlobalVariableBuild(args SetGlobalVariableArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSetGlobalVariable({")
+	b.WriteString("setGlobalVariable({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 27 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("value: ")
 	b.WriteString(fmt.Sprintf("%q", args.Value))
 	if args.Description != "" {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.ActiveSet {
-		if b.Len() > 27 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -9792,10 +9792,10 @@ func MutationSetGlobalVariableBuild(args MutationSetGlobalVariableArgs) string {
 	return b.String()
 }
 
-// MutationSetNumberE911 -- Set E911 / caller-ID verification state on an owned DID (by row id).
+// SetNumberE911 -- Set E911 / caller-ID verification state on an owned DID (by row id).
 //
 // Bound concept: number.
-type MutationSetNumberE911Args struct {
+type SetNumberE911Args struct {
 	Id                  string
 	E911Registered      bool
 	E911AddressId       string
@@ -9803,31 +9803,31 @@ type MutationSetNumberE911Args struct {
 	CallerIdVerifiedSet bool // set true to send callerIdVerified; required because zero-value bool is ambiguous
 }
 
-// MutationSetNumberE911 calls the engine mutation mutationSetNumberE911.
-func (qc *QueryClient) MutationSetNumberE911(ctx context.Context, args MutationSetNumberE911Args) (*Result, error) {
-	call := MutationSetNumberE911Build(args)
-	return qc.executeNamed(ctx, "mutationSetNumberE911", call)
+// SetNumberE911 calls the engine mutation setNumberE911.
+func (qc *QueryClient) SetNumberE911(ctx context.Context, args SetNumberE911Args) (*Result, error) {
+	call := SetNumberE911Build(args)
+	return qc.executeNamed(ctx, "setNumberE911", call)
 }
 
-func MutationSetNumberE911Build(args MutationSetNumberE911Args) string {
+func SetNumberE911Build(args SetNumberE911Args) string {
 	var b strings.Builder
-	b.WriteString("mutationSetNumberE911({")
+	b.WriteString("setNumberE911({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 23 {
+	if b.Len() > 15 {
 		b.WriteString(", ")
 	}
 	b.WriteString("e911Registered: ")
 	b.WriteString(fmt.Sprintf("%v", args.E911Registered))
 	if args.E911AddressId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("e911AddressId: ")
 		b.WriteString(fmt.Sprintf("%q", args.E911AddressId))
 	}
 	if args.CallerIdVerifiedSet {
-		if b.Len() > 23 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("callerIdVerified: ")
@@ -9837,10 +9837,10 @@ func MutationSetNumberE911Build(args MutationSetNumberE911Args) string {
 	return b.String()
 }
 
-// MutationSetPartitionSecret -- Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.
+// SetPartitionSecret -- Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.
 //
 // Bound concept: partitionSecret.
-type MutationSetPartitionSecretArgs struct {
+type SetPartitionSecretArgs struct {
 	Id             string
 	Name           string
 	EncryptedValue string
@@ -9852,55 +9852,55 @@ type MutationSetPartitionSecretArgs struct {
 	ActiveSet      bool // set true to send active; required because zero-value bool is ambiguous
 }
 
-// MutationSetPartitionSecret calls the engine mutation mutationSetPartitionSecret.
-func (qc *QueryClient) MutationSetPartitionSecret(ctx context.Context, args MutationSetPartitionSecretArgs) (*Result, error) {
-	call := MutationSetPartitionSecretBuild(args)
-	return qc.executeNamed(ctx, "mutationSetPartitionSecret", call)
+// SetPartitionSecret calls the engine mutation setPartitionSecret.
+func (qc *QueryClient) SetPartitionSecret(ctx context.Context, args SetPartitionSecretArgs) (*Result, error) {
+	call := SetPartitionSecretBuild(args)
+	return qc.executeNamed(ctx, "setPartitionSecret", call)
 }
 
-func MutationSetPartitionSecretBuild(args MutationSetPartitionSecretArgs) string {
+func SetPartitionSecretBuild(args SetPartitionSecretArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSetPartitionSecret({")
+	b.WriteString("setPartitionSecret({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("encryptedValue: ")
 	b.WriteString(fmt.Sprintf("%q", args.EncryptedValue))
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fingerprint: ")
 	b.WriteString(fmt.Sprintf("%q", args.Fingerprint))
 	if args.Kind != "" {
-		if b.Len() > 28 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("kind: ")
 		b.WriteString(fmt.Sprintf("%q", args.Kind))
 	}
 	if args.Description != "" {
-		if b.Len() > 28 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.AddedBy != "" {
-		if b.Len() > 28 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("addedBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.AddedBy))
 	}
 	if args.ActiveSet {
-		if b.Len() > 28 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -9910,10 +9910,10 @@ func MutationSetPartitionSecretBuild(args MutationSetPartitionSecretArgs) string
 	return b.String()
 }
 
-// MutationSetPartitionVariable -- Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable.
+// SetPartitionVariable -- Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable.
 //
 // Bound concept: partitionVariable.
-type MutationSetPartitionVariableArgs struct {
+type SetPartitionVariableArgs struct {
 	Id          string
 	Name        string
 	Value       string
@@ -9922,36 +9922,36 @@ type MutationSetPartitionVariableArgs struct {
 	ActiveSet   bool // set true to send active; required because zero-value bool is ambiguous
 }
 
-// MutationSetPartitionVariable calls the engine mutation mutationSetPartitionVariable.
-func (qc *QueryClient) MutationSetPartitionVariable(ctx context.Context, args MutationSetPartitionVariableArgs) (*Result, error) {
-	call := MutationSetPartitionVariableBuild(args)
-	return qc.executeNamed(ctx, "mutationSetPartitionVariable", call)
+// SetPartitionVariable calls the engine mutation setPartitionVariable.
+func (qc *QueryClient) SetPartitionVariable(ctx context.Context, args SetPartitionVariableArgs) (*Result, error) {
+	call := SetPartitionVariableBuild(args)
+	return qc.executeNamed(ctx, "setPartitionVariable", call)
 }
 
-func MutationSetPartitionVariableBuild(args MutationSetPartitionVariableArgs) string {
+func SetPartitionVariableBuild(args SetPartitionVariableArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSetPartitionVariable({")
+	b.WriteString("setPartitionVariable({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("value: ")
 	b.WriteString(fmt.Sprintf("%q", args.Value))
 	if args.Description != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.ActiveSet {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -9961,10 +9961,10 @@ func MutationSetPartitionVariableBuild(args MutationSetPartitionVariableArgs) st
 	return b.String()
 }
 
-// MutationSetPolicy -- Create or update a validation policy for a record type
+// SetPolicy -- Create or update a validation policy for a record type
 //
 // Bound concept: policy.
-type MutationSetPolicyArgs struct {
+type SetPolicyArgs struct {
 	PolicyId              string
 	TargetRecordType      string
 	PartitionId           string
@@ -9975,52 +9975,52 @@ type MutationSetPolicyArgs struct {
 	RevertMinRole         string
 }
 
-// MutationSetPolicy calls the engine mutation mutationSetPolicy.
-func (qc *QueryClient) MutationSetPolicy(ctx context.Context, args MutationSetPolicyArgs) (*Result, error) {
-	call := MutationSetPolicyBuild(args)
-	return qc.executeNamed(ctx, "mutationSetPolicy", call)
+// SetPolicy calls the engine mutation setPolicy.
+func (qc *QueryClient) SetPolicy(ctx context.Context, args SetPolicyArgs) (*Result, error) {
+	call := SetPolicyBuild(args)
+	return qc.executeNamed(ctx, "setPolicy", call)
 }
 
-func MutationSetPolicyBuild(args MutationSetPolicyArgs) string {
+func SetPolicyBuild(args SetPolicyArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSetPolicy({")
+	b.WriteString("setPolicy({")
 	b.WriteString("policyId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PolicyId))
-	if b.Len() > 19 {
+	if b.Len() > 11 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetRecordType: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetRecordType))
 	if args.PartitionId != "" {
-		if b.Len() > 19 {
+		if b.Len() > 11 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.RequiredChecks != 0 {
-		if b.Len() > 19 {
+		if b.Len() > 11 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requiredChecks: ")
 		b.WriteString(fmt.Sprintf("%v", args.RequiredChecks))
 	}
 	if args.RequiredConfirmations != 0 {
-		if b.Len() > 19 {
+		if b.Len() > 11 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requiredConfirmations: ")
 		b.WriteString(fmt.Sprintf("%v", args.RequiredConfirmations))
 	}
 	if args.CheckedDataUsableSet {
-		if b.Len() > 19 {
+		if b.Len() > 11 {
 			b.WriteString(", ")
 		}
 		b.WriteString("checkedDataUsable: ")
 		b.WriteString(fmt.Sprintf("%v", args.CheckedDataUsable))
 	}
 	if args.RevertMinRole != "" {
-		if b.Len() > 19 {
+		if b.Len() > 11 {
 			b.WriteString(", ")
 		}
 		b.WriteString("revertMinRole: ")
@@ -10030,27 +10030,27 @@ func MutationSetPolicyBuild(args MutationSetPolicyArgs) string {
 	return b.String()
 }
 
-// MutationSetResponsibilityStatus -- Transition a v1:planner:responsibility's lifecycle status (draft / active / paused / archived). Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier).
+// SetResponsibilityStatus -- Transition a v1:planner:responsibility's lifecycle status (draft / active / paused / archived). Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier).
 //
 // Bound concept: responsibility.
-type MutationSetResponsibilityStatusArgs struct {
+type SetResponsibilityStatusArgs struct {
 	ResponsibilityId string
 	// Enum: draft | active | paused | archived
 	Status string
 }
 
-// MutationSetResponsibilityStatus calls the engine mutation mutationSetResponsibilityStatus.
-func (qc *QueryClient) MutationSetResponsibilityStatus(ctx context.Context, args MutationSetResponsibilityStatusArgs) (*Result, error) {
-	call := MutationSetResponsibilityStatusBuild(args)
-	return qc.executeNamed(ctx, "mutationSetResponsibilityStatus", call)
+// SetResponsibilityStatus calls the engine mutation setResponsibilityStatus.
+func (qc *QueryClient) SetResponsibilityStatus(ctx context.Context, args SetResponsibilityStatusArgs) (*Result, error) {
+	call := SetResponsibilityStatusBuild(args)
+	return qc.executeNamed(ctx, "setResponsibilityStatus", call)
 }
 
-func MutationSetResponsibilityStatusBuild(args MutationSetResponsibilityStatusArgs) string {
+func SetResponsibilityStatusBuild(args SetResponsibilityStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSetResponsibilityStatus({")
+	b.WriteString("setResponsibilityStatus({")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
@@ -10059,26 +10059,26 @@ func MutationSetResponsibilityStatusBuild(args MutationSetResponsibilityStatusAr
 	return b.String()
 }
 
-// MutationSetSurfaceAvailability -- Set a v1:actions:surface availability flag (the resolver's failover signal) and refresh its lastSeen heartbeat. #1737.
+// SetSurfaceAvailability -- Set a v1:actions:surface availability flag (the resolver's failover signal) and refresh its lastSeen heartbeat. #1737.
 //
 // Bound concept: surface.
-type MutationSetSurfaceAvailabilityArgs struct {
+type SetSurfaceAvailabilityArgs struct {
 	SurfaceId string
 	Available bool
 }
 
-// MutationSetSurfaceAvailability calls the engine mutation mutationSetSurfaceAvailability.
-func (qc *QueryClient) MutationSetSurfaceAvailability(ctx context.Context, args MutationSetSurfaceAvailabilityArgs) (*Result, error) {
-	call := MutationSetSurfaceAvailabilityBuild(args)
-	return qc.executeNamed(ctx, "mutationSetSurfaceAvailability", call)
+// SetSurfaceAvailability calls the engine mutation setSurfaceAvailability.
+func (qc *QueryClient) SetSurfaceAvailability(ctx context.Context, args SetSurfaceAvailabilityArgs) (*Result, error) {
+	call := SetSurfaceAvailabilityBuild(args)
+	return qc.executeNamed(ctx, "setSurfaceAvailability", call)
 }
 
-func MutationSetSurfaceAvailabilityBuild(args MutationSetSurfaceAvailabilityArgs) string {
+func SetSurfaceAvailabilityBuild(args SetSurfaceAvailabilityArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSetSurfaceAvailability({")
+	b.WriteString("setSurfaceAvailability({")
 	b.WriteString("surfaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SurfaceId))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("available: ")
@@ -10087,35 +10087,35 @@ func MutationSetSurfaceAvailabilityBuild(args MutationSetSurfaceAvailabilityArgs
 	return b.String()
 }
 
-// MutationSetUserActiveSpace -- Set or clear the caller's activePartitionId. Empty partitionId clears the pointer.
+// SetUserActiveSpace -- Set or clear the caller's activePartitionId. Empty partitionId clears the pointer.
 //
 // Bound concept: user.
-type MutationSetUserActiveSpaceArgs struct {
+type SetUserActiveSpaceArgs struct {
 	UserId            string
 	PartitionId       string
 	ActivePartitionId string
 }
 
-// MutationSetUserActiveSpace calls the engine mutation mutationSetUserActiveSpace.
-func (qc *QueryClient) MutationSetUserActiveSpace(ctx context.Context, args MutationSetUserActiveSpaceArgs) (*Result, error) {
-	call := MutationSetUserActiveSpaceBuild(args)
-	return qc.executeNamed(ctx, "mutationSetUserActiveSpace", call)
+// SetUserActiveSpace calls the engine mutation setUserActiveSpace.
+func (qc *QueryClient) SetUserActiveSpace(ctx context.Context, args SetUserActiveSpaceArgs) (*Result, error) {
+	call := SetUserActiveSpaceBuild(args)
+	return qc.executeNamed(ctx, "setUserActiveSpace", call)
 }
 
-func MutationSetUserActiveSpaceBuild(args MutationSetUserActiveSpaceArgs) string {
+func SetUserActiveSpaceBuild(args SetUserActiveSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSetUserActiveSpace({")
+	b.WriteString("setUserActiveSpace({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
 	if args.PartitionId != "" {
-		if b.Len() > 28 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.ActivePartitionId != "" {
-		if b.Len() > 28 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("activePartitionId: ")
@@ -10125,60 +10125,60 @@ func MutationSetUserActiveSpaceBuild(args MutationSetUserActiveSpaceArgs) string
 	return b.String()
 }
 
-// MutationSoftDeleteWorkerInvocation -- Soft-delete a worker invocation row past retention.
+// SoftDeleteWorkerInvocation -- Soft-delete a worker invocation row past retention.
 //
 // Bound concept: invocation.
-type MutationSoftDeleteWorkerInvocationArgs struct {
+type SoftDeleteWorkerInvocationArgs struct {
 	InvocationId string
 }
 
-// MutationSoftDeleteWorkerInvocation calls the engine mutation mutationSoftDeleteWorkerInvocation.
-func (qc *QueryClient) MutationSoftDeleteWorkerInvocation(ctx context.Context, args MutationSoftDeleteWorkerInvocationArgs) (*Result, error) {
-	call := MutationSoftDeleteWorkerInvocationBuild(args)
-	return qc.executeNamed(ctx, "mutationSoftDeleteWorkerInvocation", call)
+// SoftDeleteWorkerInvocation calls the engine mutation softDeleteWorkerInvocation.
+func (qc *QueryClient) SoftDeleteWorkerInvocation(ctx context.Context, args SoftDeleteWorkerInvocationArgs) (*Result, error) {
+	call := SoftDeleteWorkerInvocationBuild(args)
+	return qc.executeNamed(ctx, "softDeleteWorkerInvocation", call)
 }
 
-func MutationSoftDeleteWorkerInvocationBuild(args MutationSoftDeleteWorkerInvocationArgs) string {
+func SoftDeleteWorkerInvocationBuild(args SoftDeleteWorkerInvocationArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationSoftDeleteWorkerInvocation({")
+	b.WriteString("softDeleteWorkerInvocation({")
 	b.WriteString("invocationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.InvocationId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationStampNodeTokenBootstrap -- Update audit fields on a node_token identity row when the bootstrap handler issues a fresh JWT for it. memql#343. Read-merges the existing row and deep-merges credentials (@mergeFields) so only the rotating keyHash + bootstrappedAt/bootstrappedFrom change; nodeId/nodeType/mintedBy/expiresAt/lastConnectAt inherit from the persisted row instead of being re-supplied or wiped (memql#1628).
+// StampNodeTokenBootstrap -- Update audit fields on a node_token identity row when the bootstrap handler issues a fresh JWT for it. memql#343. Read-merges the existing row and deep-merges credentials (@mergeFields) so only the rotating keyHash + bootstrappedAt/bootstrappedFrom change; nodeId/nodeType/mintedBy/expiresAt/lastConnectAt inherit from the persisted row instead of being re-supplied or wiped (memql#1628).
 //
 // Bound concept: identity.
-type MutationStampNodeTokenBootstrapArgs struct {
+type StampNodeTokenBootstrapArgs struct {
 	IdentityId       string
 	KeyHash          string
 	BootstrappedAt   string
 	BootstrappedFrom string
 }
 
-// MutationStampNodeTokenBootstrap calls the engine mutation mutationStampNodeTokenBootstrap.
-func (qc *QueryClient) MutationStampNodeTokenBootstrap(ctx context.Context, args MutationStampNodeTokenBootstrapArgs) (*Result, error) {
-	call := MutationStampNodeTokenBootstrapBuild(args)
-	return qc.executeNamed(ctx, "mutationStampNodeTokenBootstrap", call)
+// StampNodeTokenBootstrap calls the engine mutation stampNodeTokenBootstrap.
+func (qc *QueryClient) StampNodeTokenBootstrap(ctx context.Context, args StampNodeTokenBootstrapArgs) (*Result, error) {
+	call := StampNodeTokenBootstrapBuild(args)
+	return qc.executeNamed(ctx, "stampNodeTokenBootstrap", call)
 }
 
-func MutationStampNodeTokenBootstrapBuild(args MutationStampNodeTokenBootstrapArgs) string {
+func StampNodeTokenBootstrapBuild(args StampNodeTokenBootstrapArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationStampNodeTokenBootstrap({")
+	b.WriteString("stampNodeTokenBootstrap({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bootstrappedAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bootstrappedFrom: ")
@@ -10187,27 +10187,27 @@ func MutationStampNodeTokenBootstrapBuild(args MutationStampNodeTokenBootstrapAr
 	return b.String()
 }
 
-// MutationStartHarnessStep -- Claim a ready step (ready -> running). Stamps assignedAgent + startedAt. The engine step guard rejects the transition when the prior status is not 'ready'.
+// StartHarnessStep -- Claim a ready step (ready -> running). Stamps assignedAgent + startedAt. The engine step guard rejects the transition when the prior status is not 'ready'.
 //
 // Bound concept: step.
-type MutationStartHarnessStepArgs struct {
+type StartHarnessStepArgs struct {
 	StepId        string
 	AssignedAgent string
 }
 
-// MutationStartHarnessStep calls the engine mutation mutationStartHarnessStep.
-func (qc *QueryClient) MutationStartHarnessStep(ctx context.Context, args MutationStartHarnessStepArgs) (*Result, error) {
-	call := MutationStartHarnessStepBuild(args)
-	return qc.executeNamed(ctx, "mutationStartHarnessStep", call)
+// StartHarnessStep calls the engine mutation startHarnessStep.
+func (qc *QueryClient) StartHarnessStep(ctx context.Context, args StartHarnessStepArgs) (*Result, error) {
+	call := StartHarnessStepBuild(args)
+	return qc.executeNamed(ctx, "startHarnessStep", call)
 }
 
-func MutationStartHarnessStepBuild(args MutationStartHarnessStepArgs) string {
+func StartHarnessStepBuild(args StartHarnessStepArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationStartHarnessStep({")
+	b.WriteString("startHarnessStep({")
 	b.WriteString("stepId: ")
 	b.WriteString(fmt.Sprintf("%q", args.StepId))
 	if args.AssignedAgent != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedAgent: ")
@@ -10217,48 +10217,48 @@ func MutationStartHarnessStepBuild(args MutationStartHarnessStepArgs) string {
 	return b.String()
 }
 
-// MutationStartPlan -- Promote a Plan from queued (planning complete, tasks emitted) to running. Triggered by the user clicking Run in the cockpit Planner tab, or by an automation that auto-runs plans on the user's behalf.
+// StartPlan -- Promote a Plan from queued (planning complete, tasks emitted) to running. Triggered by the user clicking Run in the cockpit Planner tab, or by an automation that auto-runs plans on the user's behalf.
 //
 // Bound concept: plan.
-type MutationStartPlanArgs struct {
+type StartPlanArgs struct {
 	PlanId string
 }
 
-// MutationStartPlan calls the engine mutation mutationStartPlan.
-func (qc *QueryClient) MutationStartPlan(ctx context.Context, args MutationStartPlanArgs) (*Result, error) {
-	call := MutationStartPlanBuild(args)
-	return qc.executeNamed(ctx, "mutationStartPlan", call)
+// StartPlan calls the engine mutation startPlan.
+func (qc *QueryClient) StartPlan(ctx context.Context, args StartPlanArgs) (*Result, error) {
+	call := StartPlanBuild(args)
+	return qc.executeNamed(ctx, "startPlan", call)
 }
 
-func MutationStartPlanBuild(args MutationStartPlanArgs) string {
+func StartPlanBuild(args StartPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationStartPlan({")
+	b.WriteString("startPlan({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationToggleComputerUseEnabled -- Set User.preferences.computerUseEnabled.
+// ToggleComputerUseEnabled -- Set User.preferences.computerUseEnabled.
 //
 // Bound concept: user.
-type MutationToggleComputerUseEnabledArgs struct {
+type ToggleComputerUseEnabledArgs struct {
 	UserId  string
 	Enabled bool
 }
 
-// MutationToggleComputerUseEnabled calls the engine mutation mutationToggleComputerUseEnabled.
-func (qc *QueryClient) MutationToggleComputerUseEnabled(ctx context.Context, args MutationToggleComputerUseEnabledArgs) (*Result, error) {
-	call := MutationToggleComputerUseEnabledBuild(args)
-	return qc.executeNamed(ctx, "mutationToggleComputerUseEnabled", call)
+// ToggleComputerUseEnabled calls the engine mutation toggleComputerUseEnabled.
+func (qc *QueryClient) ToggleComputerUseEnabled(ctx context.Context, args ToggleComputerUseEnabledArgs) (*Result, error) {
+	call := ToggleComputerUseEnabledBuild(args)
+	return qc.executeNamed(ctx, "toggleComputerUseEnabled", call)
 }
 
-func MutationToggleComputerUseEnabledBuild(args MutationToggleComputerUseEnabledArgs) string {
+func ToggleComputerUseEnabledBuild(args ToggleComputerUseEnabledArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationToggleComputerUseEnabled({")
+	b.WriteString("toggleComputerUseEnabled({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 34 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("enabled: ")
@@ -10267,26 +10267,26 @@ func MutationToggleComputerUseEnabledBuild(args MutationToggleComputerUseEnabled
 	return b.String()
 }
 
-// MutationTouchSession -- Update an auth-session record (typically a heartbeat to bump lastActivityAt). Read-merges the existing row (update()): only the fields in `payload` change; the @required discriminators (subject, tokenHash, source, expiresAt) and every other omitted field inherit from the persisted row instead of having to be re-supplied (memql#1628). The session row must already exist.
+// TouchSession -- Update an auth-session record (typically a heartbeat to bump lastActivityAt). Read-merges the existing row (update()): only the fields in `payload` change; the @required discriminators (subject, tokenHash, source, expiresAt) and every other omitted field inherit from the persisted row instead of having to be re-supplied (memql#1628). The session row must already exist.
 //
 // Bound concept: authSession.
-type MutationTouchSessionArgs struct {
+type TouchSessionArgs struct {
 	SessionId string
 	Payload   map[string]any
 }
 
-// MutationTouchSession calls the engine mutation mutationTouchSession.
-func (qc *QueryClient) MutationTouchSession(ctx context.Context, args MutationTouchSessionArgs) (*Result, error) {
-	call := MutationTouchSessionBuild(args)
-	return qc.executeNamed(ctx, "mutationTouchSession", call)
+// TouchSession calls the engine mutation touchSession.
+func (qc *QueryClient) TouchSession(ctx context.Context, args TouchSessionArgs) (*Result, error) {
+	call := TouchSessionBuild(args)
+	return qc.executeNamed(ctx, "touchSession", call)
 }
 
-func MutationTouchSessionBuild(args MutationTouchSessionArgs) string {
+func TouchSessionBuild(args TouchSessionArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationTouchSession({")
+	b.WriteString("touchSession({")
 	b.WriteString("sessionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SessionId))
-	if b.Len() > 22 {
+	if b.Len() > 14 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -10295,47 +10295,131 @@ func MutationTouchSessionBuild(args MutationTouchSessionArgs) string {
 	return b.String()
 }
 
-// MutationTouchWorkspace -- Bump lastUsedAt on a workbench workspace after a successful dispatch. Cheap; called per successful workbenchHost call.
+// TouchWorkspace -- Bump lastUsedAt on a workbench workspace after a successful dispatch. Cheap; called per successful workbenchHost call.
 //
 // Bound concept: workspace.
-type MutationTouchWorkspaceArgs struct {
+type TouchWorkspaceArgs struct {
 	WorkspaceId string
 }
 
-// MutationTouchWorkspace calls the engine mutation mutationTouchWorkspace.
-func (qc *QueryClient) MutationTouchWorkspace(ctx context.Context, args MutationTouchWorkspaceArgs) (*Result, error) {
-	call := MutationTouchWorkspaceBuild(args)
-	return qc.executeNamed(ctx, "mutationTouchWorkspace", call)
+// TouchWorkspace calls the engine mutation touchWorkspace.
+func (qc *QueryClient) TouchWorkspace(ctx context.Context, args TouchWorkspaceArgs) (*Result, error) {
+	call := TouchWorkspaceBuild(args)
+	return qc.executeNamed(ctx, "touchWorkspace", call)
 }
 
-func MutationTouchWorkspaceBuild(args MutationTouchWorkspaceArgs) string {
+func TouchWorkspaceBuild(args TouchWorkspaceArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationTouchWorkspace({")
+	b.WriteString("touchWorkspace({")
 	b.WriteString("workspaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationUpdateAgent -- Partial update of a v1:agents:agent row. Only the fields you pass are changed; other fields inherit from the prior row.
+// UpdateAgent -- Partial update of a v1:agents:agent row. Only the fields you pass are changed; other fields inherit from the prior row.
 //
 // Bound concept: agent.
-type MutationUpdateAgentArgs struct {
+type UpdateAgentArgs struct {
 	AgentId string
 	Payload map[string]any
 }
 
-// MutationUpdateAgent calls the engine mutation mutationUpdateAgent.
-func (qc *QueryClient) MutationUpdateAgent(ctx context.Context, args MutationUpdateAgentArgs) (*Result, error) {
-	call := MutationUpdateAgentBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateAgent", call)
+// UpdateAgent calls the engine mutation updateAgent.
+func (qc *QueryClient) UpdateAgent(ctx context.Context, args UpdateAgentArgs) (*Result, error) {
+	call := UpdateAgentBuild(args)
+	return qc.executeNamed(ctx, "updateAgent", call)
 }
 
-func MutationUpdateAgentBuild(args MutationUpdateAgentArgs) string {
+func UpdateAgentBuild(args UpdateAgentArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateAgent({")
+	b.WriteString("updateAgent({")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	if b.Len() > 13 {
+		b.WriteString(", ")
+	}
+	b.WriteString("payload: ")
+	b.WriteString(renderMemQLValue(args.Payload))
+	b.WriteString("})")
+	return b.String()
+}
+
+// UpdateAgentAuthScope -- Set computerUseScope on an agent authorization row.
+//
+// Bound concept: agentAuthorization.
+type UpdateAgentAuthScopeArgs struct {
+	AuthorizationId  string
+	ComputerUseScope string
+}
+
+// UpdateAgentAuthScope calls the engine mutation updateAgentAuthScope.
+func (qc *QueryClient) UpdateAgentAuthScope(ctx context.Context, args UpdateAgentAuthScopeArgs) (*Result, error) {
+	call := UpdateAgentAuthScopeBuild(args)
+	return qc.executeNamed(ctx, "updateAgentAuthScope", call)
+}
+
+func UpdateAgentAuthScopeBuild(args UpdateAgentAuthScopeArgs) string {
+	var b strings.Builder
+	b.WriteString("updateAgentAuthScope({")
+	b.WriteString("authorizationId: ")
+	b.WriteString(fmt.Sprintf("%q", args.AuthorizationId))
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
+	b.WriteString("computerUseScope: ")
+	b.WriteString(fmt.Sprintf("%q", args.ComputerUseScope))
+	b.WriteString("})")
+	return b.String()
+}
+
+// UpdateAgentAuthorization -- Partial update of a v1:agents:agentAuthorization row. Mirrors updateAgent semantics: only the fields passed in `payload` change; everything else inherits from the prior row. Backs the canvas mintSkillApprovalRequested card's 'Approve & always allow this tier' action (memql-bff-copresent#38, memql#169) -- the SPA reads the current skillTierAllowlist, appends the approved tier, and writes the whole array back as `{skillTierAllowlist: [...]}`. Per the agentAuthorization concept's revocation contract this is an OWNED write: only the granting user (the row's payload.userId) may update their own authorization grant.
+//
+// Bound concept: agentAuthorization.
+type UpdateAgentAuthorizationArgs struct {
+	AuthId  string
+	Payload map[string]any
+}
+
+// UpdateAgentAuthorization calls the engine mutation updateAgentAuthorization.
+func (qc *QueryClient) UpdateAgentAuthorization(ctx context.Context, args UpdateAgentAuthorizationArgs) (*Result, error) {
+	call := UpdateAgentAuthorizationBuild(args)
+	return qc.executeNamed(ctx, "updateAgentAuthorization", call)
+}
+
+func UpdateAgentAuthorizationBuild(args UpdateAgentAuthorizationArgs) string {
+	var b strings.Builder
+	b.WriteString("updateAgentAuthorization({")
+	b.WriteString("authId: ")
+	b.WriteString(fmt.Sprintf("%q", args.AuthId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("payload: ")
+	b.WriteString(renderMemQLValue(args.Payload))
+	b.WriteString("})")
+	return b.String()
+}
+
+// UpdateCalendarEvent -- Partial update of a calendarEvent. Only the fields passed in `payload` change; everything else inherits from the prior row. Backs editing an event (reschedule, rename, change location / notes / recurrence). The calendar tool reads the row via the owner-scoped calendarEventById before calling this, so cross-user edits are impossible.
+//
+// Bound concept: calendarEvent.
+type UpdateCalendarEventArgs struct {
+	EventId string
+	Payload map[string]any
+}
+
+// UpdateCalendarEvent calls the engine mutation updateCalendarEvent.
+func (qc *QueryClient) UpdateCalendarEvent(ctx context.Context, args UpdateCalendarEventArgs) (*Result, error) {
+	call := UpdateCalendarEventBuild(args)
+	return qc.executeNamed(ctx, "updateCalendarEvent", call)
+}
+
+func UpdateCalendarEventBuild(args UpdateCalendarEventArgs) string {
+	var b strings.Builder
+	b.WriteString("updateCalendarEvent({")
+	b.WriteString("eventId: ")
+	b.WriteString(fmt.Sprintf("%q", args.EventId))
 	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
@@ -10345,94 +10429,10 @@ func MutationUpdateAgentBuild(args MutationUpdateAgentArgs) string {
 	return b.String()
 }
 
-// MutationUpdateAgentAuthScope -- Set computerUseScope on an agent authorization row.
-//
-// Bound concept: agentAuthorization.
-type MutationUpdateAgentAuthScopeArgs struct {
-	AuthorizationId  string
-	ComputerUseScope string
-}
-
-// MutationUpdateAgentAuthScope calls the engine mutation mutationUpdateAgentAuthScope.
-func (qc *QueryClient) MutationUpdateAgentAuthScope(ctx context.Context, args MutationUpdateAgentAuthScopeArgs) (*Result, error) {
-	call := MutationUpdateAgentAuthScopeBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateAgentAuthScope", call)
-}
-
-func MutationUpdateAgentAuthScopeBuild(args MutationUpdateAgentAuthScopeArgs) string {
-	var b strings.Builder
-	b.WriteString("mutationUpdateAgentAuthScope({")
-	b.WriteString("authorizationId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AuthorizationId))
-	if b.Len() > 30 {
-		b.WriteString(", ")
-	}
-	b.WriteString("computerUseScope: ")
-	b.WriteString(fmt.Sprintf("%q", args.ComputerUseScope))
-	b.WriteString("})")
-	return b.String()
-}
-
-// MutationUpdateAgentAuthorization -- Partial update of a v1:agents:agentAuthorization row. Mirrors mutationUpdateAgent semantics: only the fields passed in `payload` change; everything else inherits from the prior row. Backs the canvas mintSkillApprovalRequested card's 'Approve & always allow this tier' action (memql-bff-copresent#38, memql#169) -- the SPA reads the current skillTierAllowlist, appends the approved tier, and writes the whole array back as `{skillTierAllowlist: [...]}`. Per the agentAuthorization concept's revocation contract this is an OWNED write: only the granting user (the row's payload.userId) may update their own authorization grant.
-//
-// Bound concept: agentAuthorization.
-type MutationUpdateAgentAuthorizationArgs struct {
-	AuthId  string
-	Payload map[string]any
-}
-
-// MutationUpdateAgentAuthorization calls the engine mutation mutationUpdateAgentAuthorization.
-func (qc *QueryClient) MutationUpdateAgentAuthorization(ctx context.Context, args MutationUpdateAgentAuthorizationArgs) (*Result, error) {
-	call := MutationUpdateAgentAuthorizationBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateAgentAuthorization", call)
-}
-
-func MutationUpdateAgentAuthorizationBuild(args MutationUpdateAgentAuthorizationArgs) string {
-	var b strings.Builder
-	b.WriteString("mutationUpdateAgentAuthorization({")
-	b.WriteString("authId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AuthId))
-	if b.Len() > 34 {
-		b.WriteString(", ")
-	}
-	b.WriteString("payload: ")
-	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString("})")
-	return b.String()
-}
-
-// MutationUpdateCalendarEvent -- Partial update of a calendarEvent. Only the fields passed in `payload` change; everything else inherits from the prior row. Backs editing an event (reschedule, rename, change location / notes / recurrence). The calendar tool reads the row via the owner-scoped queryCalendarEventById before calling this, so cross-user edits are impossible.
-//
-// Bound concept: calendarEvent.
-type MutationUpdateCalendarEventArgs struct {
-	EventId string
-	Payload map[string]any
-}
-
-// MutationUpdateCalendarEvent calls the engine mutation mutationUpdateCalendarEvent.
-func (qc *QueryClient) MutationUpdateCalendarEvent(ctx context.Context, args MutationUpdateCalendarEventArgs) (*Result, error) {
-	call := MutationUpdateCalendarEventBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateCalendarEvent", call)
-}
-
-func MutationUpdateCalendarEventBuild(args MutationUpdateCalendarEventArgs) string {
-	var b strings.Builder
-	b.WriteString("mutationUpdateCalendarEvent({")
-	b.WriteString("eventId: ")
-	b.WriteString(fmt.Sprintf("%q", args.EventId))
-	if b.Len() > 29 {
-		b.WriteString(", ")
-	}
-	b.WriteString("payload: ")
-	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString("})")
-	return b.String()
-}
-
-// MutationUpdateClusterSettings -- Update the singleton cluster-settings row from the admin UI. Read-merges the existing row (update()): only the fields the caller actually passes change; every omitted field -- internalDomains, brand*, TTLs, bootstrap*, etc. -- inherits from the persisted row instead of being wiped to its empty default (memql#1686). registrationMode + internalDefaultRole stay @required because the admin form always submits them.
+// UpdateClusterSettings -- Update the singleton cluster-settings row from the admin UI. Read-merges the existing row (update()): only the fields the caller actually passes change; every omitted field -- internalDomains, brand*, TTLs, bootstrap*, etc. -- inherits from the persisted row instead of being wiped to its empty default (memql#1686). registrationMode + internalDefaultRole stay @required because the admin form always submits them.
 //
 // Bound concept: clusterSettings.
-type MutationUpdateClusterSettingsArgs struct {
+type UpdateClusterSettingsArgs struct {
 	Id                string
 	ClusterDomain     string
 	BrandName         string
@@ -10464,183 +10464,183 @@ type MutationUpdateClusterSettingsArgs struct {
 	AuthoredAutomationsEnabledSet bool // set true to send authoredAutomationsEnabled; required because zero-value bool is ambiguous
 }
 
-// MutationUpdateClusterSettings calls the engine mutation mutationUpdateClusterSettings.
-func (qc *QueryClient) MutationUpdateClusterSettings(ctx context.Context, args MutationUpdateClusterSettingsArgs) (*Result, error) {
-	call := MutationUpdateClusterSettingsBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateClusterSettings", call)
+// UpdateClusterSettings calls the engine mutation updateClusterSettings.
+func (qc *QueryClient) UpdateClusterSettings(ctx context.Context, args UpdateClusterSettingsArgs) (*Result, error) {
+	call := UpdateClusterSettingsBuild(args)
+	return qc.executeNamed(ctx, "updateClusterSettings", call)
 }
 
-func MutationUpdateClusterSettingsBuild(args MutationUpdateClusterSettingsArgs) string {
+func UpdateClusterSettingsBuild(args UpdateClusterSettingsArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateClusterSettings({")
+	b.WriteString("updateClusterSettings({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
 	if args.ClusterDomain != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clusterDomain: ")
 		b.WriteString(fmt.Sprintf("%q", args.ClusterDomain))
 	}
 	if args.BrandName != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandName: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandName))
 	}
 	if args.BrandPrimaryColor != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandPrimaryColor: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandPrimaryColor))
 	}
 	if args.BrandLogoDataURI != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandLogoDataURI: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandLogoDataURI))
 	}
 	if args.BrandIconDataURI != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandIconDataURI: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandIconDataURI))
 	}
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registrationMode: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegistrationMode))
 	if args.RegistrationDomains != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("registrationDomains: ")
 		b.WriteString(fmt.Sprintf("%q", args.RegistrationDomains))
 	}
 	if args.InternalDomains != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("internalDomains: ")
 		b.WriteString(fmt.Sprintf("%q", args.InternalDomains))
 	}
-	if b.Len() > 31 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("internalDefaultRole: ")
 	b.WriteString(fmt.Sprintf("%q", args.InternalDefaultRole))
 	if args.RegisteredClientsJSON != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("registeredClientsJSON: ")
 		b.WriteString(fmt.Sprintf("%q", args.RegisteredClientsJSON))
 	}
 	if args.AccessRequestNotifyEmails != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accessRequestNotifyEmails: ")
 		b.WriteString(fmt.Sprintf("%q", args.AccessRequestNotifyEmails))
 	}
 	if args.BootstrapEmail != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapEmail: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapEmail))
 	}
 	if args.BootstrapFirstName != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapFirstName: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapFirstName))
 	}
 	if args.BootstrapLastName != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapLastName: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapLastName))
 	}
 	if args.BootstrapPhone != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapPhone: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapPhone))
 	}
 	if args.BootstrapPrimaryRole != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapPrimaryRole: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapPrimaryRole))
 	}
 	if args.BootstrapGender != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapGender: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapGender))
 	}
 	if args.BootstrapBirthdate != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapBirthdate: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapBirthdate))
 	}
 	if args.BootstrappedAt != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrappedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
 	}
 	if args.AccessTokenTTLSeconds != 0 {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accessTokenTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.AccessTokenTTLSeconds))
 	}
 	if args.RefreshTokenTTLSeconds != 0 {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("refreshTokenTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.RefreshTokenTTLSeconds))
 	}
 	if args.MagicLinkTTLSeconds != 0 {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("magicLinkTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.MagicLinkTTLSeconds))
 	}
 	if args.InvitationTTLDays != 0 {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("invitationTTLDays: ")
 		b.WriteString(fmt.Sprintf("%v", args.InvitationTTLDays))
 	}
 	if args.RefreshCookieSameSite != "" {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("refreshCookieSameSite: ")
 		b.WriteString(fmt.Sprintf("%q", args.RefreshCookieSameSite))
 	}
 	if args.AuthoredAutomationsEnabledSet {
-		if b.Len() > 31 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authoredAutomationsEnabled: ")
@@ -10650,27 +10650,27 @@ func MutationUpdateClusterSettingsBuild(args MutationUpdateClusterSettingsArgs) 
 	return b.String()
 }
 
-// MutationUpdateDeploymentStatus -- Transition a v1:cluster:deployment's status (pending -> in_progress -> succeeded|failed; succeeded -> superseded; any -> rolled_back). Read-merge update: only status + updatedAt change, deploy metadata inherits. #1872.
+// UpdateDeploymentStatus -- Transition a v1:cluster:deployment's status (pending -> in_progress -> succeeded|failed; succeeded -> superseded; any -> rolled_back). Read-merge update: only status + updatedAt change, deploy metadata inherits. #1872.
 //
 // Bound concept: deployment.
-type MutationUpdateDeploymentStatusArgs struct {
+type UpdateDeploymentStatusArgs struct {
 	DeploymentId string
 	// Enum: pending | in_progress | succeeded | failed | superseded | rolled_back
 	Status string
 }
 
-// MutationUpdateDeploymentStatus calls the engine mutation mutationUpdateDeploymentStatus.
-func (qc *QueryClient) MutationUpdateDeploymentStatus(ctx context.Context, args MutationUpdateDeploymentStatusArgs) (*Result, error) {
-	call := MutationUpdateDeploymentStatusBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateDeploymentStatus", call)
+// UpdateDeploymentStatus calls the engine mutation updateDeploymentStatus.
+func (qc *QueryClient) UpdateDeploymentStatus(ctx context.Context, args UpdateDeploymentStatusArgs) (*Result, error) {
+	call := UpdateDeploymentStatusBuild(args)
+	return qc.executeNamed(ctx, "updateDeploymentStatus", call)
 }
 
-func MutationUpdateDeploymentStatusBuild(args MutationUpdateDeploymentStatusArgs) string {
+func UpdateDeploymentStatusBuild(args UpdateDeploymentStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateDeploymentStatus({")
+	b.WriteString("updateDeploymentStatus({")
 	b.WriteString("deploymentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
-	if b.Len() > 32 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
@@ -10679,10 +10679,10 @@ func MutationUpdateDeploymentStatusBuild(args MutationUpdateDeploymentStatusArgs
 	return b.String()
 }
 
-// MutationUpdateGeneratedOutputContent -- Re-insert a generatedOutput row (same id, new version) carrying the latest edited content so the Library viewer + artifact index reflect the most recent document version. Append-only by (id, createdAt): a new node version, reads return the latest. Handler-invoked by integration.library.editDocument / restoreDocumentVersion; ownerUserId is threaded from the existing row.
+// UpdateGeneratedOutputContent -- Re-insert a generatedOutput row (same id, new version) carrying the latest edited content so the Library viewer + artifact index reflect the most recent document version. Append-only by (id, createdAt): a new node version, reads return the latest. Handler-invoked by integration.library.editDocument / restoreDocumentVersion; ownerUserId is threaded from the existing row.
 //
 // Bound concept: generatedOutput.
-type MutationUpdateGeneratedOutputContentArgs struct {
+type UpdateGeneratedOutputContentArgs struct {
 	OutputId     string
 	OwnerUserId  string
 	Title        string
@@ -10699,83 +10699,83 @@ type MutationUpdateGeneratedOutputContentArgs struct {
 	ProducedByAgentId string
 }
 
-// MutationUpdateGeneratedOutputContent calls the engine mutation mutationUpdateGeneratedOutputContent.
-func (qc *QueryClient) MutationUpdateGeneratedOutputContent(ctx context.Context, args MutationUpdateGeneratedOutputContentArgs) (*Result, error) {
-	call := MutationUpdateGeneratedOutputContentBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateGeneratedOutputContent", call)
+// UpdateGeneratedOutputContent calls the engine mutation updateGeneratedOutputContent.
+func (qc *QueryClient) UpdateGeneratedOutputContent(ctx context.Context, args UpdateGeneratedOutputContentArgs) (*Result, error) {
+	call := UpdateGeneratedOutputContentBuild(args)
+	return qc.executeNamed(ctx, "updateGeneratedOutputContent", call)
 }
 
-func MutationUpdateGeneratedOutputContentBuild(args MutationUpdateGeneratedOutputContentArgs) string {
+func UpdateGeneratedOutputContentBuild(args UpdateGeneratedOutputContentArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateGeneratedOutputContent({")
+	b.WriteString("updateGeneratedOutputContent({")
 	b.WriteString("outputId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OutputId))
-	if b.Len() > 38 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 38 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
 	if args.Summary != "" {
-		if b.Len() > 38 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
 		b.WriteString(fmt.Sprintf("%q", args.Summary))
 	}
 	if args.Body != "" {
-		if b.Len() > 38 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("body: ")
 		b.WriteString(fmt.Sprintf("%q", args.Body))
 	}
 	if args.AttachmentId != "" {
-		if b.Len() > 38 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attachmentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
 	}
 	if args.Format != "" {
-		if b.Len() > 38 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("format: ")
 		b.WriteString(fmt.Sprintf("%q", args.Format))
 	}
 	if args.MimeType != "" {
-		if b.Len() > 38 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mimeType: ")
 		b.WriteString(fmt.Sprintf("%q", args.MimeType))
 	}
-	if b.Len() > 38 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
 	if args.PartitionId != "" {
-		if b.Len() > 38 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.ProducedByPlanId != "" {
-		if b.Len() > 38 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
 	}
 	if args.ProducedByAgentId != "" {
-		if b.Len() > 38 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByAgentId: ")
@@ -10785,26 +10785,26 @@ func MutationUpdateGeneratedOutputContentBuild(args MutationUpdateGeneratedOutpu
 	return b.String()
 }
 
-// MutationUpdateIdentity -- Update an identity record. Read-merges the existing row (update()): only the fields in `payload` change; every omitted field (identityType discriminator, credentials, label, active, usableByAgents) inherits from the persisted row instead of being wiped (memql#1628 class). The row must already exist (use mutationCreateIdentity to create).
+// UpdateIdentity -- Update an identity record. Read-merges the existing row (update()): only the fields in `payload` change; every omitted field (identityType discriminator, credentials, label, active, usableByAgents) inherits from the persisted row instead of being wiped (memql#1628 class). The row must already exist (use createIdentity to create).
 //
 // Bound concept: identity.
-type MutationUpdateIdentityArgs struct {
+type UpdateIdentityArgs struct {
 	IdentityId string
 	Payload    map[string]any
 }
 
-// MutationUpdateIdentity calls the engine mutation mutationUpdateIdentity.
-func (qc *QueryClient) MutationUpdateIdentity(ctx context.Context, args MutationUpdateIdentityArgs) (*Result, error) {
-	call := MutationUpdateIdentityBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateIdentity", call)
+// UpdateIdentity calls the engine mutation updateIdentity.
+func (qc *QueryClient) UpdateIdentity(ctx context.Context, args UpdateIdentityArgs) (*Result, error) {
+	call := UpdateIdentityBuild(args)
+	return qc.executeNamed(ctx, "updateIdentity", call)
 }
 
-func MutationUpdateIdentityBuild(args MutationUpdateIdentityArgs) string {
+func UpdateIdentityBuild(args UpdateIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateIdentity({")
+	b.WriteString("updateIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 24 {
+	if b.Len() > 16 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -10813,33 +10813,33 @@ func MutationUpdateIdentityBuild(args MutationUpdateIdentityArgs) string {
 	return b.String()
 }
 
-// MutationUpdateMissingCapabilityStatus -- Operator-driven status transition on a missingCapability row. Used by the platform team's backlog tooling to mark a gap as in_progress, resolved (with a note on what shipped), or wontfix.
+// UpdateMissingCapabilityStatus -- Operator-driven status transition on a missingCapability row. Used by the platform team's backlog tooling to mark a gap as in_progress, resolved (with a note on what shipped), or wontfix.
 //
 // Bound concept: missingCapability.
-type MutationUpdateMissingCapabilityStatusArgs struct {
+type UpdateMissingCapabilityStatusArgs struct {
 	MissingId  string
 	Status     string
 	Resolution string
 }
 
-// MutationUpdateMissingCapabilityStatus calls the engine mutation mutationUpdateMissingCapabilityStatus.
-func (qc *QueryClient) MutationUpdateMissingCapabilityStatus(ctx context.Context, args MutationUpdateMissingCapabilityStatusArgs) (*Result, error) {
-	call := MutationUpdateMissingCapabilityStatusBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateMissingCapabilityStatus", call)
+// UpdateMissingCapabilityStatus calls the engine mutation updateMissingCapabilityStatus.
+func (qc *QueryClient) UpdateMissingCapabilityStatus(ctx context.Context, args UpdateMissingCapabilityStatusArgs) (*Result, error) {
+	call := UpdateMissingCapabilityStatusBuild(args)
+	return qc.executeNamed(ctx, "updateMissingCapabilityStatus", call)
 }
 
-func MutationUpdateMissingCapabilityStatusBuild(args MutationUpdateMissingCapabilityStatusArgs) string {
+func UpdateMissingCapabilityStatusBuild(args UpdateMissingCapabilityStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateMissingCapabilityStatus({")
+	b.WriteString("updateMissingCapabilityStatus({")
 	b.WriteString("missingId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MissingId))
-	if b.Len() > 39 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
 	if args.Resolution != "" {
-		if b.Len() > 39 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("resolution: ")
@@ -10849,32 +10849,32 @@ func MutationUpdateMissingCapabilityStatusBuild(args MutationUpdateMissingCapabi
 	return b.String()
 }
 
-// MutationUpdateNodeHealth -- Record a node health transition. Read-merges the existing v1:cluster:node row (created on startup by logicRegisterNode under the same NodeId) so only health + lastSeen change; nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to \"\" and reset capabilities/labels on every transition).
+// UpdateNodeHealth -- Record a node health transition. Read-merges the existing v1:cluster:node row (created on startup by registerNode under the same NodeId) so only health + lastSeen change; nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to \"\" and reset capabilities/labels on every transition).
 //
 // Bound concept: node.
-type MutationUpdateNodeHealthArgs struct {
+type UpdateNodeHealthArgs struct {
 	Id       string
 	Health   string
 	LastSeen string
 }
 
-// MutationUpdateNodeHealth calls the engine mutation mutationUpdateNodeHealth.
-func (qc *QueryClient) MutationUpdateNodeHealth(ctx context.Context, args MutationUpdateNodeHealthArgs) (*Result, error) {
-	call := MutationUpdateNodeHealthBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateNodeHealth", call)
+// UpdateNodeHealth calls the engine mutation updateNodeHealth.
+func (qc *QueryClient) UpdateNodeHealth(ctx context.Context, args UpdateNodeHealthArgs) (*Result, error) {
+	call := UpdateNodeHealthBuild(args)
+	return qc.executeNamed(ctx, "updateNodeHealth", call)
 }
 
-func MutationUpdateNodeHealthBuild(args MutationUpdateNodeHealthArgs) string {
+func UpdateNodeHealthBuild(args UpdateNodeHealthArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateNodeHealth({")
+	b.WriteString("updateNodeHealth({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("health: ")
 	b.WriteString(fmt.Sprintf("%q", args.Health))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastSeen: ")
@@ -10883,26 +10883,26 @@ func MutationUpdateNodeHealthBuild(args MutationUpdateNodeHealthArgs) string {
 	return b.String()
 }
 
-// MutationUpdateNote -- Update a note (title / body / tags) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so a caller can never reassign ownership; updatedAt is re-stamped to now. The caller threads the full merged payload built from the current row plus the changed fields.
+// UpdateNote -- Update a note (title / body / tags) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so a caller can never reassign ownership; updatedAt is re-stamped to now. The caller threads the full merged payload built from the current row plus the changed fields.
 //
 // Bound concept: note.
-type MutationUpdateNoteArgs struct {
+type UpdateNoteArgs struct {
 	NoteId  string
 	Payload map[string]any
 }
 
-// MutationUpdateNote calls the engine mutation mutationUpdateNote.
-func (qc *QueryClient) MutationUpdateNote(ctx context.Context, args MutationUpdateNoteArgs) (*Result, error) {
-	call := MutationUpdateNoteBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateNote", call)
+// UpdateNote calls the engine mutation updateNote.
+func (qc *QueryClient) UpdateNote(ctx context.Context, args UpdateNoteArgs) (*Result, error) {
+	call := UpdateNoteBuild(args)
+	return qc.executeNamed(ctx, "updateNote", call)
 }
 
-func MutationUpdateNoteBuild(args MutationUpdateNoteArgs) string {
+func UpdateNoteBuild(args UpdateNoteArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateNote({")
+	b.WriteString("updateNote({")
 	b.WriteString("noteId: ")
 	b.WriteString(fmt.Sprintf("%q", args.NoteId))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -10911,27 +10911,27 @@ func MutationUpdateNoteBuild(args MutationUpdateNoteArgs) string {
 	return b.String()
 }
 
-// MutationUpdateNumberStatus -- Update a DID's lifecycle status (e.g. on release).
+// UpdateNumberStatus -- Update a DID's lifecycle status (e.g. on release).
 //
 // Bound concept: number.
-type MutationUpdateNumberStatusArgs struct {
+type UpdateNumberStatusArgs struct {
 	Id string
 	// Enum: active | releasing | released
 	Status string
 }
 
-// MutationUpdateNumberStatus calls the engine mutation mutationUpdateNumberStatus.
-func (qc *QueryClient) MutationUpdateNumberStatus(ctx context.Context, args MutationUpdateNumberStatusArgs) (*Result, error) {
-	call := MutationUpdateNumberStatusBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateNumberStatus", call)
+// UpdateNumberStatus calls the engine mutation updateNumberStatus.
+func (qc *QueryClient) UpdateNumberStatus(ctx context.Context, args UpdateNumberStatusArgs) (*Result, error) {
+	call := UpdateNumberStatusBuild(args)
+	return qc.executeNamed(ctx, "updateNumberStatus", call)
 }
 
-func MutationUpdateNumberStatusBuild(args MutationUpdateNumberStatusArgs) string {
+func UpdateNumberStatusBuild(args UpdateNumberStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateNumberStatus({")
+	b.WriteString("updateNumberStatus({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 28 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
@@ -10940,10 +10940,10 @@ func MutationUpdateNumberStatusBuild(args MutationUpdateNumberStatusArgs) string
 	return b.String()
 }
 
-// MutationUpdateParticipantPresence -- Upsert a participant presence snapshot for multi-client status consistency.
+// UpdateParticipantPresence -- Upsert a participant presence snapshot for multi-client status consistency.
 //
 // Bound concept: presence.
-type MutationUpdateParticipantPresenceArgs struct {
+type UpdateParticipantPresenceArgs struct {
 	PresenceId    string
 	ParticipantId string
 	PartitionId   string
@@ -10958,76 +10958,76 @@ type MutationUpdateParticipantPresenceArgs struct {
 	Intent          map[string]any
 }
 
-// MutationUpdateParticipantPresence calls the engine mutation mutationUpdateParticipantPresence.
-func (qc *QueryClient) MutationUpdateParticipantPresence(ctx context.Context, args MutationUpdateParticipantPresenceArgs) (*Result, error) {
-	call := MutationUpdateParticipantPresenceBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateParticipantPresence", call)
+// UpdateParticipantPresence calls the engine mutation updateParticipantPresence.
+func (qc *QueryClient) UpdateParticipantPresence(ctx context.Context, args UpdateParticipantPresenceArgs) (*Result, error) {
+	call := UpdateParticipantPresenceBuild(args)
+	return qc.executeNamed(ctx, "updateParticipantPresence", call)
 }
 
-func MutationUpdateParticipantPresenceBuild(args MutationUpdateParticipantPresenceArgs) string {
+func UpdateParticipantPresenceBuild(args UpdateParticipantPresenceArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateParticipantPresence({")
+	b.WriteString("updateParticipantPresence({")
 	if args.PresenceId != "" {
 		b.WriteString("presenceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PresenceId))
 	}
-	if b.Len() > 35 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	if b.Len() > 35 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 35 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("state: ")
 	b.WriteString(fmt.Sprintf("%q", args.State))
-	if b.Len() > 35 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
 	b.WriteString(fmt.Sprintf("%q", args.Label))
 	if args.Reason != "" {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
 	if args.SinceAt != "" {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sinceAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.SinceAt))
 	}
 	if args.LastUpdatedAt != "" {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastUpdatedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastUpdatedAt))
 	}
 	if args.LastUtteranceId != "" {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastUtteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastUtteranceId))
 	}
 	if args.LastError != "" {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastError: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastError))
 	}
 	if args.Intent != nil {
-		if b.Len() > 35 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("intent: ")
@@ -11037,26 +11037,26 @@ func MutationUpdateParticipantPresenceBuild(args MutationUpdateParticipantPresen
 	return b.String()
 }
 
-// MutationUpdateParticipantStatus -- Update a participant record (typically status). Read-merges the existing row (update()): only the fields in `payload` change; every omitted field inherits from the persisted row instead of being wiped (memql#1628 class). The participant row must already exist (created on join).
+// UpdateParticipantStatus -- Update a participant record (typically status). Read-merges the existing row (update()): only the fields in `payload` change; every omitted field inherits from the persisted row instead of being wiped (memql#1628 class). The participant row must already exist (created on join).
 //
 // Bound concept: participant.
-type MutationUpdateParticipantStatusArgs struct {
+type UpdateParticipantStatusArgs struct {
 	ParticipantId string
 	Payload       map[string]any
 }
 
-// MutationUpdateParticipantStatus calls the engine mutation mutationUpdateParticipantStatus.
-func (qc *QueryClient) MutationUpdateParticipantStatus(ctx context.Context, args MutationUpdateParticipantStatusArgs) (*Result, error) {
-	call := MutationUpdateParticipantStatusBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateParticipantStatus", call)
+// UpdateParticipantStatus calls the engine mutation updateParticipantStatus.
+func (qc *QueryClient) UpdateParticipantStatus(ctx context.Context, args UpdateParticipantStatusArgs) (*Result, error) {
+	call := UpdateParticipantStatusBuild(args)
+	return qc.executeNamed(ctx, "updateParticipantStatus", call)
 }
 
-func MutationUpdateParticipantStatusBuild(args MutationUpdateParticipantStatusArgs) string {
+func UpdateParticipantStatusBuild(args UpdateParticipantStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateParticipantStatus({")
+	b.WriteString("updateParticipantStatus({")
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	if b.Len() > 33 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -11065,10 +11065,10 @@ func MutationUpdateParticipantStatusBuild(args MutationUpdateParticipantStatusAr
 	return b.String()
 }
 
-// MutationUpdatePlanStatus -- Update a Plan's status with the full v1 lifecycle field set (paused/awaitingFeedback/needsAgent + metrics + estimate + token spend). Partial-update via update() -- only the fields you pass are changed; required fields inherit from the prior row.
+// UpdatePlanStatus -- Update a Plan's status with the full v1 lifecycle field set (paused/awaitingFeedback/needsAgent + metrics + estimate + token spend). Partial-update via update() -- only the fields you pass are changed; required fields inherit from the prior row.
 //
 // Bound concept: plan.
-type MutationUpdatePlanStatusArgs struct {
+type UpdatePlanStatusArgs struct {
 	PlanId                   string
 	Status                   string
 	OwnerAgentId             string
@@ -11092,150 +11092,150 @@ type MutationUpdatePlanStatusArgs struct {
 	ComputerUseScope         string
 }
 
-// MutationUpdatePlanStatus calls the engine mutation mutationUpdatePlanStatus.
-func (qc *QueryClient) MutationUpdatePlanStatus(ctx context.Context, args MutationUpdatePlanStatusArgs) (*Result, error) {
-	call := MutationUpdatePlanStatusBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdatePlanStatus", call)
+// UpdatePlanStatus calls the engine mutation updatePlanStatus.
+func (qc *QueryClient) UpdatePlanStatus(ctx context.Context, args UpdatePlanStatusArgs) (*Result, error) {
+	call := UpdatePlanStatusBuild(args)
+	return qc.executeNamed(ctx, "updatePlanStatus", call)
 }
 
-func MutationUpdatePlanStatusBuild(args MutationUpdatePlanStatusArgs) string {
+func UpdatePlanStatusBuild(args UpdatePlanStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdatePlanStatus({")
+	b.WriteString("updatePlanStatus({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
 	if args.OwnerAgentId != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerAgentId))
 	}
 	if args.Output != nil {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("output: ")
 		b.WriteString(renderMemQLValue(args.Output))
 	}
 	if args.ErrorMessage != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
 	if args.StartedAt != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("startedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.StartedAt))
 	}
 	if args.CompletedAt != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("completedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.CompletedAt))
 	}
 	if args.CancelledBy != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("cancelledBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.CancelledBy))
 	}
 	if args.PausedAt != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("pausedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.PausedAt))
 	}
 	if args.TotalPausedMs != 0 {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("totalPausedMs: ")
 		b.WriteString(fmt.Sprintf("%v", args.TotalPausedMs))
 	}
 	if args.FeedbackRequest != nil {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("feedbackRequest: ")
 		b.WriteString(renderMemQLValue(args.FeedbackRequest))
 	}
 	if args.FeedbackResponse != nil {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("feedbackResponse: ")
 		b.WriteString(renderMemQLValue(args.FeedbackResponse))
 	}
 	if args.FeedbackReason != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("feedbackReason: ")
 		b.WriteString(fmt.Sprintf("%q", args.FeedbackReason))
 	}
 	if args.RecommendationCardId != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recommendationCardId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecommendationCardId))
 	}
 	if args.Phases != nil {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("phases: ")
 		b.WriteString(renderMemQLValue(args.Phases))
 	}
 	if args.Estimate != nil {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("estimate: ")
 		b.WriteString(renderMemQLValue(args.Estimate))
 	}
 	if args.EstimatedAt != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("estimatedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.EstimatedAt))
 	}
 	if args.TokenSpent != 0 {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenSpent: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenSpent))
 	}
 	if args.TokenAllocatedToChildren != 0 {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenAllocatedToChildren: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenAllocatedToChildren))
 	}
 	if args.Metrics != nil {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("metrics: ")
 		b.WriteString(renderMemQLValue(args.Metrics))
 	}
 	if args.ComputerUseScope != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("computerUseScope: ")
@@ -11245,10 +11245,10 @@ func MutationUpdatePlanStatusBuild(args MutationUpdatePlanStatusArgs) string {
 	return b.String()
 }
 
-// MutationUpdateRecord -- Update a data record (resets validation state to draft)
+// UpdateRecord -- Update a data record (resets validation state to draft)
 //
 // Bound concept: record.
-type MutationUpdateRecordArgs struct {
+type UpdateRecordArgs struct {
 	RecordId        string
 	Data            map[string]any
 	Label           string
@@ -11257,47 +11257,47 @@ type MutationUpdateRecordArgs struct {
 	Confidence      float64
 }
 
-// MutationUpdateRecord calls the engine mutation mutationUpdateRecord.
-func (qc *QueryClient) MutationUpdateRecord(ctx context.Context, args MutationUpdateRecordArgs) (*Result, error) {
-	call := MutationUpdateRecordBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateRecord", call)
+// UpdateRecord calls the engine mutation updateRecord.
+func (qc *QueryClient) UpdateRecord(ctx context.Context, args UpdateRecordArgs) (*Result, error) {
+	call := UpdateRecordBuild(args)
+	return qc.executeNamed(ctx, "updateRecord", call)
 }
 
-func MutationUpdateRecordBuild(args MutationUpdateRecordArgs) string {
+func UpdateRecordBuild(args UpdateRecordArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateRecord({")
+	b.WriteString("updateRecord({")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
 	if args.Data != nil {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("data: ")
 		b.WriteString(renderMemQLValue(args.Data))
 	}
 	if args.Label != "" {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("label: ")
 		b.WriteString(fmt.Sprintf("%q", args.Label))
 	}
 	if args.NaturalKeyField != "" {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyField: ")
 		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyField))
 	}
 	if args.NaturalKeyValue != "" {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyValue: ")
 		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyValue))
 	}
 	if args.Confidence != 0 {
-		if b.Len() > 22 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("confidence: ")
@@ -11307,10 +11307,10 @@ func MutationUpdateRecordBuild(args MutationUpdateRecordArgs) string {
 	return b.String()
 }
 
-// MutationUpdateResponsibility -- Update an existing v1:planner:responsibility's editable fields (statement / schedule / condition / target binding / scope / enabled). Partial-update via update() -- only the fields you pass change; required fields inherit from the prior row. ownerUserId re-stamped from actor.userId (owned tier) so a caller can only rewrite their own rows.
+// UpdateResponsibility -- Update an existing v1:planner:responsibility's editable fields (statement / schedule / condition / target binding / scope / enabled). Partial-update via update() -- only the fields you pass change; required fields inherit from the prior row. ownerUserId re-stamped from actor.userId (owned tier) so a caller can only rewrite their own rows.
 //
 // Bound concept: responsibility.
-type MutationUpdateResponsibilityArgs struct {
+type UpdateResponsibilityArgs struct {
 	ResponsibilityId string
 	Statement        string
 	// Enum: reactive | standing | recurring
@@ -11328,89 +11328,89 @@ type MutationUpdateResponsibilityArgs struct {
 	EnabledSet       bool // set true to send enabled; required because zero-value bool is ambiguous
 }
 
-// MutationUpdateResponsibility calls the engine mutation mutationUpdateResponsibility.
-func (qc *QueryClient) MutationUpdateResponsibility(ctx context.Context, args MutationUpdateResponsibilityArgs) (*Result, error) {
-	call := MutationUpdateResponsibilityBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateResponsibility", call)
+// UpdateResponsibility calls the engine mutation updateResponsibility.
+func (qc *QueryClient) UpdateResponsibility(ctx context.Context, args UpdateResponsibilityArgs) (*Result, error) {
+	call := UpdateResponsibilityBuild(args)
+	return qc.executeNamed(ctx, "updateResponsibility", call)
 }
 
-func MutationUpdateResponsibilityBuild(args MutationUpdateResponsibilityArgs) string {
+func UpdateResponsibilityBuild(args UpdateResponsibilityArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateResponsibility({")
+	b.WriteString("updateResponsibility({")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
 	if args.Statement != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("statement: ")
 		b.WriteString(fmt.Sprintf("%q", args.Statement))
 	}
 	if args.Trigger != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("trigger: ")
 		b.WriteString(fmt.Sprintf("%q", args.Trigger))
 	}
 	if args.Schedule != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("schedule: ")
 		b.WriteString(fmt.Sprintf("%q", args.Schedule))
 	}
 	if args.Condition != nil {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("condition: ")
 		b.WriteString(renderMemQLValue(args.Condition))
 	}
 	if args.TargetKind != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
 	}
 	if args.AssignedAgentId != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedAgentId))
 	}
 	if args.AssignedRoleSlug != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
 	}
 	if args.SuccessCriteria != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("successCriteria: ")
 		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
 	}
 	if args.NotifyHow != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notifyHow: ")
 		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
 	}
 	if args.ScopePartitionId != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("scopePartitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ScopePartitionId))
 	}
 	if args.EnabledSet {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("enabled: ")
@@ -11420,26 +11420,26 @@ func MutationUpdateResponsibilityBuild(args MutationUpdateResponsibilityArgs) st
 	return b.String()
 }
 
-// MutationUpdateSessionDevices -- Update a session record's device state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.
+// UpdateSessionDevices -- Update a session record's device state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.
 //
 // Bound concept: session.
-type MutationUpdateSessionDevicesArgs struct {
+type UpdateSessionDevicesArgs struct {
 	SessionId string
 	Payload   map[string]any
 }
 
-// MutationUpdateSessionDevices calls the engine mutation mutationUpdateSessionDevices.
-func (qc *QueryClient) MutationUpdateSessionDevices(ctx context.Context, args MutationUpdateSessionDevicesArgs) (*Result, error) {
-	call := MutationUpdateSessionDevicesBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateSessionDevices", call)
+// UpdateSessionDevices calls the engine mutation updateSessionDevices.
+func (qc *QueryClient) UpdateSessionDevices(ctx context.Context, args UpdateSessionDevicesArgs) (*Result, error) {
+	call := UpdateSessionDevicesBuild(args)
+	return qc.executeNamed(ctx, "updateSessionDevices", call)
 }
 
-func MutationUpdateSessionDevicesBuild(args MutationUpdateSessionDevicesArgs) string {
+func UpdateSessionDevicesBuild(args UpdateSessionDevicesArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateSessionDevices({")
+	b.WriteString("updateSessionDevices({")
 	b.WriteString("sessionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SessionId))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -11448,26 +11448,26 @@ func MutationUpdateSessionDevicesBuild(args MutationUpdateSessionDevicesArgs) st
 	return b.String()
 }
 
-// MutationUpdateSessionStreams -- Update a session record's stream state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.
+// UpdateSessionStreams -- Update a session record's stream state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.
 //
 // Bound concept: session.
-type MutationUpdateSessionStreamsArgs struct {
+type UpdateSessionStreamsArgs struct {
 	SessionId string
 	Payload   map[string]any
 }
 
-// MutationUpdateSessionStreams calls the engine mutation mutationUpdateSessionStreams.
-func (qc *QueryClient) MutationUpdateSessionStreams(ctx context.Context, args MutationUpdateSessionStreamsArgs) (*Result, error) {
-	call := MutationUpdateSessionStreamsBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateSessionStreams", call)
+// UpdateSessionStreams calls the engine mutation updateSessionStreams.
+func (qc *QueryClient) UpdateSessionStreams(ctx context.Context, args UpdateSessionStreamsArgs) (*Result, error) {
+	call := UpdateSessionStreamsBuild(args)
+	return qc.executeNamed(ctx, "updateSessionStreams", call)
 }
 
-func MutationUpdateSessionStreamsBuild(args MutationUpdateSessionStreamsArgs) string {
+func UpdateSessionStreamsBuild(args UpdateSessionStreamsArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateSessionStreams({")
+	b.WriteString("updateSessionStreams({")
 	b.WriteString("sessionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SessionId))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -11476,10 +11476,10 @@ func MutationUpdateSessionStreamsBuild(args MutationUpdateSessionStreamsArgs) st
 	return b.String()
 }
 
-// MutationUpdateTaskStatus -- Update a Task's status with optional output / error / lifecycle / metrics / parking fields. Partial-update via update() -- only the fields you pass change; required fields inherit from the prior row.
+// UpdateTaskStatus -- Update a Task's status with optional output / error / lifecycle / metrics / parking fields. Partial-update via update() -- only the fields you pass change; required fields inherit from the prior row.
 //
 // Bound concept: task.
-type MutationUpdateTaskStatusArgs struct {
+type UpdateTaskStatusArgs struct {
 	TaskId             string
 	Status             string
 	Output             map[string]any
@@ -11491,66 +11491,66 @@ type MutationUpdateTaskStatusArgs struct {
 	Metrics            map[string]any
 }
 
-// MutationUpdateTaskStatus calls the engine mutation mutationUpdateTaskStatus.
-func (qc *QueryClient) MutationUpdateTaskStatus(ctx context.Context, args MutationUpdateTaskStatusArgs) (*Result, error) {
-	call := MutationUpdateTaskStatusBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateTaskStatus", call)
+// UpdateTaskStatus calls the engine mutation updateTaskStatus.
+func (qc *QueryClient) UpdateTaskStatus(ctx context.Context, args UpdateTaskStatusArgs) (*Result, error) {
+	call := UpdateTaskStatusBuild(args)
+	return qc.executeNamed(ctx, "updateTaskStatus", call)
 }
 
-func MutationUpdateTaskStatusBuild(args MutationUpdateTaskStatusArgs) string {
+func UpdateTaskStatusBuild(args UpdateTaskStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateTaskStatus({")
+	b.WriteString("updateTaskStatus({")
 	b.WriteString("taskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TaskId))
-	if b.Len() > 26 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
 	if args.Output != nil {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("output: ")
 		b.WriteString(renderMemQLValue(args.Output))
 	}
 	if args.ErrorMessage != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
 	if args.StartedAt != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("startedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.StartedAt))
 	}
 	if args.CompletedAt != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("completedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.CompletedAt))
 	}
 	if args.ParkedAt != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("parkedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParkedAt))
 	}
 	if args.ParkedAtCheckpoint != "" {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("parkedAtCheckpoint: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParkedAtCheckpoint))
 	}
 	if args.Metrics != nil {
-		if b.Len() > 26 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("metrics: ")
@@ -11560,26 +11560,26 @@ func MutationUpdateTaskStatusBuild(args MutationUpdateTaskStatusArgs) string {
 	return b.String()
 }
 
-// MutationUpdateTodo -- Update a to-do (title / dueAt / priority) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so a caller can never reassign ownership. The caller threads the full merged payload; the update tool builds it from the current row plus the changed fields.
+// UpdateTodo -- Update a to-do (title / dueAt / priority) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so a caller can never reassign ownership. The caller threads the full merged payload; the update tool builds it from the current row plus the changed fields.
 //
 // Bound concept: todo.
-type MutationUpdateTodoArgs struct {
+type UpdateTodoArgs struct {
 	TodoId  string
 	Payload map[string]any
 }
 
-// MutationUpdateTodo calls the engine mutation mutationUpdateTodo.
-func (qc *QueryClient) MutationUpdateTodo(ctx context.Context, args MutationUpdateTodoArgs) (*Result, error) {
-	call := MutationUpdateTodoBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateTodo", call)
+// UpdateTodo calls the engine mutation updateTodo.
+func (qc *QueryClient) UpdateTodo(ctx context.Context, args UpdateTodoArgs) (*Result, error) {
+	call := UpdateTodoBuild(args)
+	return qc.executeNamed(ctx, "updateTodo", call)
 }
 
-func MutationUpdateTodoBuild(args MutationUpdateTodoArgs) string {
+func UpdateTodoBuild(args UpdateTodoArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateTodo({")
+	b.WriteString("updateTodo({")
 	b.WriteString("todoId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TodoId))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -11588,26 +11588,26 @@ func MutationUpdateTodoBuild(args MutationUpdateTodoArgs) string {
 	return b.String()
 }
 
-// MutationUpdateUser -- Partial update of a v1:identity:user row. Only the fields you pass are changed; other fields inherit from the prior row.
+// UpdateUser -- Partial update of a v1:identity:user row. Only the fields you pass are changed; other fields inherit from the prior row.
 //
 // Bound concept: user.
-type MutationUpdateUserArgs struct {
+type UpdateUserArgs struct {
 	UserId  string
 	Payload map[string]any
 }
 
-// MutationUpdateUser calls the engine mutation mutationUpdateUser.
-func (qc *QueryClient) MutationUpdateUser(ctx context.Context, args MutationUpdateUserArgs) (*Result, error) {
-	call := MutationUpdateUserBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateUser", call)
+// UpdateUser calls the engine mutation updateUser.
+func (qc *QueryClient) UpdateUser(ctx context.Context, args UpdateUserArgs) (*Result, error) {
+	call := UpdateUserBuild(args)
+	return qc.executeNamed(ctx, "updateUser", call)
 }
 
-func MutationUpdateUserBuild(args MutationUpdateUserArgs) string {
+func UpdateUserBuild(args UpdateUserArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateUser({")
+	b.WriteString("updateUser({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 20 {
+	if b.Len() > 12 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -11616,33 +11616,33 @@ func MutationUpdateUserBuild(args MutationUpdateUserArgs) string {
 	return b.String()
 }
 
-// MutationUpdateWorkerLastSeen -- Bump lastSeenAt + lastConnectedFromIP on a worker registration.
+// UpdateWorkerLastSeen -- Bump lastSeenAt + lastConnectedFromIP on a worker registration.
 //
 // Bound concept: registration.
-type MutationUpdateWorkerLastSeenArgs struct {
+type UpdateWorkerLastSeenArgs struct {
 	RegistrationId      string
 	LastSeenAt          string
 	LastConnectedFromIP string
 }
 
-// MutationUpdateWorkerLastSeen calls the engine mutation mutationUpdateWorkerLastSeen.
-func (qc *QueryClient) MutationUpdateWorkerLastSeen(ctx context.Context, args MutationUpdateWorkerLastSeenArgs) (*Result, error) {
-	call := MutationUpdateWorkerLastSeenBuild(args)
-	return qc.executeNamed(ctx, "mutationUpdateWorkerLastSeen", call)
+// UpdateWorkerLastSeen calls the engine mutation updateWorkerLastSeen.
+func (qc *QueryClient) UpdateWorkerLastSeen(ctx context.Context, args UpdateWorkerLastSeenArgs) (*Result, error) {
+	call := UpdateWorkerLastSeenBuild(args)
+	return qc.executeNamed(ctx, "updateWorkerLastSeen", call)
 }
 
-func MutationUpdateWorkerLastSeenBuild(args MutationUpdateWorkerLastSeenArgs) string {
+func UpdateWorkerLastSeenBuild(args UpdateWorkerLastSeenArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationUpdateWorkerLastSeen({")
+	b.WriteString("updateWorkerLastSeen({")
 	b.WriteString("registrationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegistrationId))
-	if b.Len() > 30 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastSeenAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.LastSeenAt))
 	if args.LastConnectedFromIP != "" {
-		if b.Len() > 30 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastConnectedFromIP: ")
@@ -11652,32 +11652,32 @@ func MutationUpdateWorkerLastSeenBuild(args MutationUpdateWorkerLastSeenArgs) st
 	return b.String()
 }
 
-// MutationValidateRequest -- Validate a v1:forge:request (developer action): set status 'needs_approval' and stamp validatedByUserId from actor.userId.
+// ValidateRequest -- Validate a v1:forge:request (developer action): set status 'needs_approval' and stamp validatedByUserId from actor.userId.
 //
 // Bound concept: request.
-type MutationValidateRequestArgs struct {
+type ValidateRequestArgs struct {
 	RequestId string
 }
 
-// MutationValidateRequest calls the engine mutation mutationValidateRequest.
-func (qc *QueryClient) MutationValidateRequest(ctx context.Context, args MutationValidateRequestArgs) (*Result, error) {
-	call := MutationValidateRequestBuild(args)
-	return qc.executeNamed(ctx, "mutationValidateRequest", call)
+// ValidateRequest calls the engine mutation validateRequest.
+func (qc *QueryClient) ValidateRequest(ctx context.Context, args ValidateRequestArgs) (*Result, error) {
+	call := ValidateRequestBuild(args)
+	return qc.executeNamed(ctx, "validateRequest", call)
 }
 
-func MutationValidateRequestBuild(args MutationValidateRequestArgs) string {
+func ValidateRequestBuild(args ValidateRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationValidateRequest({")
+	b.WriteString("validateRequest({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
 	b.WriteString("})")
 	return b.String()
 }
 
-// MutationWriteKnowledgeChunk -- Write a knowledge chunk distilled by the Trainer Agent during a trainSpecialist Plan. Hard-stamps source='trainerAgent' + validationStatus='validated'. sourceRef is REQUIRED (the Trainer's no-fabricated-citations invariant -- every chunk points at a real URL or named source). Lands as canonical, retrievable once embedded.
+// WriteKnowledgeChunk -- Write a knowledge chunk distilled by the Trainer Agent during a trainSpecialist Plan. Hard-stamps source='trainerAgent' + validationStatus='validated'. sourceRef is REQUIRED (the Trainer's no-fabricated-citations invariant -- every chunk points at a real URL or named source). Lands as canonical, retrievable once embedded.
 //
 // Bound concept: documentChunk.
-type MutationWriteKnowledgeChunkArgs struct {
+type WriteKnowledgeChunkArgs struct {
 	ChunkId     string
 	DomainId    string
 	Text        string
@@ -11687,48 +11687,48 @@ type MutationWriteKnowledgeChunkArgs struct {
 	SourceTopic string
 }
 
-// MutationWriteKnowledgeChunk calls the engine mutation mutationWriteKnowledgeChunk.
-func (qc *QueryClient) MutationWriteKnowledgeChunk(ctx context.Context, args MutationWriteKnowledgeChunkArgs) (*Result, error) {
-	call := MutationWriteKnowledgeChunkBuild(args)
-	return qc.executeNamed(ctx, "mutationWriteKnowledgeChunk", call)
+// WriteKnowledgeChunk calls the engine mutation writeKnowledgeChunk.
+func (qc *QueryClient) WriteKnowledgeChunk(ctx context.Context, args WriteKnowledgeChunkArgs) (*Result, error) {
+	call := WriteKnowledgeChunkBuild(args)
+	return qc.executeNamed(ctx, "writeKnowledgeChunk", call)
 }
 
-func MutationWriteKnowledgeChunkBuild(args MutationWriteKnowledgeChunkArgs) string {
+func WriteKnowledgeChunkBuild(args WriteKnowledgeChunkArgs) string {
 	var b strings.Builder
-	b.WriteString("mutationWriteKnowledgeChunk({")
+	b.WriteString("writeKnowledgeChunk({")
 	b.WriteString("chunkId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ChunkId))
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
-	if b.Len() > 29 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("sourceRef: ")
 	b.WriteString(fmt.Sprintf("%q", args.SourceRef))
 	if args.Seq != 0 {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("seq: ")
 		b.WriteString(fmt.Sprintf("%v", args.Seq))
 	}
 	if args.TokenCount != 0 {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenCount: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenCount))
 	}
 	if args.SourceTopic != "" {
-		if b.Len() > 29 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceTopic: ")

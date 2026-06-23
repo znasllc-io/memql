@@ -640,11 +640,11 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 // that rewrites `<Concept>.X` references in the construct body to
 // `payload.X` before the expression parser tokenises.
 //
-// The mutation declaration keyword accepts both `mutation` and the C1
-// (memql#2041) verb alias `mutate`; both bind the signature concept the
-// same way.
+// The mutation declaration keyword is the C1 (memql#2041) verb `mutate`;
+// it binds the signature concept the same way query/shape/seed do. The
+// transitional `mutation` noun alias was dropped by C6 (memql#2036).
 var signatureConceptRe = regexp.MustCompile(
-	`(?m)^[ \t]*(?:query|mutation|mutate|shape|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`,
+	`(?m)^[ \t]*(?:query|mutate|shape|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`,
 )
 
 // extractAllSignatureConceptNames scans raw .memql source for every

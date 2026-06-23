@@ -21,14 +21,14 @@ tool describeFunction {
 
 // Pagination (epic #1964 / memql#1975): the dynamic `limit` bound is applied
 // HERE by the handler's outer paginate($args.limit) wrapper. The inner
-// querySearchUsers therefore declares ONLY `sort` (deterministic, keyset-
+// searchUsers therefore declares ONLY `sort` (deterministic, keyset-
 // eligible order) and NO inner `paginate` -- two nested paginate() directives
 // are rejected by the engine ("multiple paginate() directives are not
 // supported"), which broke this tool for every call after the 5.3 backfill
 // added an inner `paginate 50` while this wrapper was still here. One paginate,
 // driven by the caller's limit.
 @enabled
-@handler(type="query", query="paginate(querySearchUsers({active: $args.active}), $args.limit)")
+@handler(type="query", query="paginate(searchUsers({active: $args.active}), $args.limit)")
 @executionTime("fast")
 @description("Search for users")
 @mcp

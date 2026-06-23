@@ -101,7 +101,7 @@ func validateDeclaredUsage(rawSource string, funcDef *languageParser.FunctionDef
 }
 
 // extractFunctionBody returns the contents between the first
-// `func (...) name(...) {` (or `query name {` / `mutation name {`)
+// `func (...) name(...) {` (or `query name {` / `mutate name {`)
 // opening brace and its matching closing brace. Returns the empty
 // string when no body is found.
 //
@@ -160,7 +160,7 @@ func extractFunctionBody(source string) string {
 // rewriters run):
 //
 //   - `func (Receiver) name(<args>) <returns> {` (procedural form)
-//   - `query NAME {` / `mutation NAME {` / `automation NAME {`
+//   - `query NAME {` / `mutate NAME {` / `automation NAME {`
 //     `spec NAME {` / `trait NAME {` (struct form, pre-rewrite)
 //
 // The check looks at the last logical line ending at `prefix`. The

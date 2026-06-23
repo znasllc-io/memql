@@ -112,7 +112,7 @@ automation foo {
 		},
 		{
 			name:   "no automation in source",
-			source: `mutation foo { insert { id: "x" } }`,
+			source: `mutate foo { insert { id: "x" } }`,
 			want:   false,
 		},
 	}
@@ -198,7 +198,9 @@ automation ensureDailySpaceOnAuthSession {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out, "run := logicEnsureDailySpaceOnAuthSession({ event: event })") {
+	// Post-C6 (memql#2036) a `logic <name>` step resolves by bare name -- no
+	// prefix promotion -- so the rewritten call uses the bare construct name.
+	if !strings.Contains(out, "run := ensureDailySpaceOnAuthSession({ event: event })") {
 		t.Fatalf("expected `{ event: event }` verbatim; got %q", out)
 	}
 	if strings.Contains(out, "ctx.input") {

@@ -12,7 +12,7 @@ import (
 // (see issue #301).
 func TestParseSpecMemQL_GoldenPath_RowSpec(t *testing.T) {
 	src := []byte(`@description("Matches participants with human participantType.")
-spec specIsHumanParticipant {
+spec isHumanParticipant {
   payload.participantType == "human"
 }`)
 
@@ -23,8 +23,8 @@ spec specIsHumanParticipant {
 	if got == nil {
 		t.Fatal("expected non-nil *Spec")
 	}
-	if got.Name != "specIsHumanParticipant" {
-		t.Errorf("Name = %q, want specIsHumanParticipant", got.Name)
+	if got.Name != "isHumanParticipant" {
+		t.Errorf("Name = %q, want isHumanParticipant", got.Name)
 	}
 	if got.IsTrait {
 		t.Error("IsTrait = true, want false (this is a spec, not a trait)")
@@ -109,7 +109,7 @@ spec specFoo {
 func TestParseSpecMemQL_TraitGoldenPath(t *testing.T) {
 	src := []byte(`@enabled
 @description("Records with active==true.")
-trait traitIsActiveRecord {
+trait isActiveRecord {
   payload.active == true
 }`)
 
@@ -123,7 +123,7 @@ trait traitIsActiveRecord {
 	if !got.IsTrait {
 		t.Error("IsTrait = false, want true")
 	}
-	if got.Name != "traitIsActiveRecord" {
-		t.Errorf("Name = %q, want traitIsActiveRecord", got.Name)
+	if got.Name != "isActiveRecord" {
+		t.Errorf("Name = %q, want isActiveRecord", got.Name)
 	}
 }

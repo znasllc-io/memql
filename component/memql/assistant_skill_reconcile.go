@@ -15,7 +15,7 @@ import (
 //
 // WHY THIS EXISTS
 //
-// mutationCreateAgent is create-only: the SeedMaterializer's per-user
+// createAgent is create-only: the SeedMaterializer's per-user
 // sweep inserts `assistant-<userId>` once and is a no-op on every later
 // boot (it dedups on the deterministic id). So editing the assistant
 // seed's skillIds in dsl/agents/assistant.memql only affects users
@@ -38,7 +38,7 @@ import (
 // capabilities.skillIds; it never removes a skill the user (or planner)
 // added, and it touches nothing else on the row -- name, avatar,
 // personality, providerConfig and any other user-editable field are
-// preserved (the write is a partial mutationUpdateAgent carrying only
+// preserved (the write is a partial updateAgent carrying only
 // {capabilities: {...}}). A row already carrying every canonical skill
 // is skipped (no redundant version written).
 //
@@ -135,7 +135,7 @@ func (m *SeedMaterializer) reconcileAssistantSkills(ctx context.Context) (Assist
 		}
 
 		// Build the FULL capabilities object with only skillIds changed.
-		// mutationUpdateAgent has no @mergeFields, so its `update`
+		// updateAgent has no @mergeFields, so its `update`
 		// contract is top-level REPLACE: a partial {capabilities:
 		// {skillIds}} would wipe every sibling capability flag (avatar /
 		// lipSync / vision / voiceToVoice / tools / domains / keywords).
@@ -198,9 +198,9 @@ func (m *SeedMaterializer) canonicalAssistantSkillIds() []string {
 	return stringSliceFromAny(caps["skillIds"])
 }
 
-// writeReconciledAssistantSkills issues mutationUpdateAgent carrying the
+// writeReconciledAssistantSkills issues updateAgent carrying the
 // FULL capabilities object (with skillIds merged) as the only changed
-// top-level field. Because mutationUpdateAgent does top-level replace
+// top-level field. Because updateAgent does top-level replace
 // (no @mergeFields), the caller MUST pass the complete capabilities map
 // -- a partial would wipe sibling flags. Every OTHER top-level field is
 // omitted and inherits from the prior row. The system-actor + reconcile
@@ -217,7 +217,7 @@ func (m *SeedMaterializer) writeReconciledAssistantSkills(ctx context.Context, a
 	if err != nil {
 		return fmt.Errorf("marshal args: %w", err)
 	}
-	call := fmt.Sprintf(`mutationUpdateAgent(%s)`, string(payloadJSON))
+	call := fmt.Sprintf(`updateAgent(%s)`, string(payloadJSON))
 	ctx = provenance.ContextWithProvenance(systemActorContext(ctx), provenance.System("reconcile:assistant-skillids"))
 	_, err = m.engine.Execute(ctx, call)
 	return err

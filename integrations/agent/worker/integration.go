@@ -133,7 +133,7 @@ func (i *Integration) planPartitionId(ctx context.Context, planId string) string
 	if i.engine == nil || strings.TrimSpace(planId) == "" {
 		return ""
 	}
-	res, err := i.engine.Execute(ctx, fmt.Sprintf(`queryPlanById({"planId":%q})`, planId))
+	res, err := i.engine.Execute(ctx, fmt.Sprintf(`planById({"planId":%q})`, planId))
 	if err != nil || res == nil || res.Bundle == nil || len(res.Bundle.Nodes) == 0 {
 		return ""
 	}
@@ -265,7 +265,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"summary":        "string (required) -- one-paragraph card body",
 				"agentId":        "string (required)",
 				"ownerUserId":    "string (required)",
-				"partitionId":        "string (optional) -- target space for the canvas card",
+				"partitionId":    "string (optional) -- target space for the canvas card",
 			},
 		},
 	}
@@ -409,7 +409,7 @@ func (i *Integration) promoteWorkerOutput(ctx context.Context, req Request) {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, `mutationCreateGeneratedOutput({outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q, format:%q`,
+	fmt.Fprintf(&b, `createGeneratedOutput({outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q, format:%q`,
 		outputId, ownerUserId, title, body, "computer_use", format)
 	if req.AgentId != "" {
 		fmt.Fprintf(&b, `, producedByAgentId:%q`, req.AgentId)
@@ -617,7 +617,7 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 
 	planId := fmt.Sprintf("scope-elevation-%d", time.Now().UnixNano())
 	q := fmt.Sprintf(
-		`mutationCreateScopeElevationPlan({planId:%q, agentId:%q, ownerUserId:%q, partitionId:%q, intent:%q, summary:%q, requestedScope:%q})`,
+		`createScopeElevationPlan({planId:%q, agentId:%q, ownerUserId:%q, partitionId:%q, intent:%q, summary:%q, requestedScope:%q})`,
 		planId, agentId, ownerUserId, partitionId, intent, summary, scope,
 	)
 	if _, err := i.engine.Execute(mutationCtx, q); err != nil {
@@ -639,11 +639,11 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 	}}, nil
 }
 
-// workerHasConfigured runs queryWorkersForUser and reports whether
+// workerHasConfigured runs workersForUser and reports whether
 // any non-revoked rows exist. Lives in the integration to avoid
 // pulling in app-package code from the agent build.
 //
-// queryWorkersForUser uses shape(), which means rows land in
+// workersForUser uses shape(), which means rows land in
 // res.OutputPayload() (Data axis), NOT res.Bundle.Nodes. The earlier
 // implementation read Bundle.Nodes only and silently returned false
 // for every user -- exactly the symptom Sofia hit when the
@@ -654,7 +654,7 @@ func workerHasConfigured(ctx context.Context, engine *memql.MemQLEngine, ownerUs
 	if engine == nil || strings.TrimSpace(ownerUserId) == "" {
 		return false, nil
 	}
-	q := fmt.Sprintf(`queryWorkersForUser({ownerUserId:%q})`, ownerUserId)
+	q := fmt.Sprintf(`workersForUser({ownerUserId:%q})`, ownerUserId)
 	res, err := engine.Execute(ctx, q)
 	if err != nil {
 		return false, err

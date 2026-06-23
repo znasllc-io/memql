@@ -57,7 +57,7 @@ func (s *candidateTraceSink) captured() []actiontrace.CapturedCall {
 }
 
 // recordActionCandidate runs the data-flow tracer over the captured calls and
-// persists a v1:actions:candidate via mutationRecordActionCandidate. It is
+// persists a v1:actions:candidate via recordActionCandidate. It is
 // best-effort: a step with no capability calls records nothing, and any write
 // error is logged but never propagated (the step's own result is unaffected).
 //
@@ -89,7 +89,7 @@ func (a *App) recordActionCandidate(ctx context.Context, step harness.StepView, 
 	}
 
 	q := fmt.Sprintf(
-		`mutationRecordActionCandidate({planId:%q, stepId:%q, calls:%s, resourceEdges:%s, callCount:%d})`,
+		`recordActionCandidate({planId:%q, stepId:%q, calls:%s, resourceEdges:%s, callCount:%d})`,
 		step.PlanID, step.ID, string(callsJSON), string(edgesJSON), len(trace.Calls),
 	)
 	adapter := &CognitionEngineAdapter{Engine: a.engine}

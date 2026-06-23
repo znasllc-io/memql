@@ -24,9 +24,9 @@ func TestRun3_CreateTools_AreTypedFunctionHandlers(t *testing.T) {
 		tool string
 		fn   string
 	}{
-		{"calendarCreate", "mutationCreateCalendarEvent"}, // #1673 / #1683
-		{"notesCreate", "mutationCreateNote"},             // #1683
-		{"todosCreate", "mutationCreateTodo"},             // #1683
+		{"calendarCreate", "createCalendarEvent"}, // #1673 / #1683
+		{"notesCreate", "createNote"},             // #1683
+		{"todosCreate", "createTodo"},             // #1683
 	}
 	for _, c := range cases {
 		tool, err := registry.Get(c.tool)

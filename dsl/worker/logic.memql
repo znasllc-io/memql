@@ -17,23 +17,23 @@
 // affected plan (we deliberately do NOT auto-resume on flag flip --
 // the kill switch is the emergency-stop, and re-enable is the
 // confirmation, but resume is per-plan-explicit).
-use planner.mutations.{ mutationUpdatePlanStatus }
-use platform.queries.{ queryGlobalVariable }
-use worker.mutations.{ mutationSoftDeleteWorkerInvocation }
-use worker.queries.{ queryExpiredWorkerInvocations, queryRunningPlansForUser }
+use planner.mutations.{ updatePlanStatus }
+use platform.queries.{ globalVariable }
+use worker.mutations.{ softDeleteWorkerInvocation }
+use worker.queries.{ expiredWorkerInvocations, runningPlansForUser }
 
 @description("Triggered on v1:identity:user update. When preferences.computerUseEnabled flips true->false, transitions every running plan owned by that user (with computerUseScope set) to awaitingFeedback with feedbackReason='kill_switch_engaged'. Re-enable flips the flag back; resume is per-plan-explicit (no auto-resume on flag flip).")
-logic logicKillSwitchSuspendsRunningPlans {
+logic killSwitchSuspendsRunningPlans {
   args {
     event object @required
   }
   body {
   enabled := coalesce(args.event.node.payload.preferences.computerUseEnabled, true)
   userId := coalesce(args.event.node.id, "")
-  plans := queryRunningPlansForUser({ userId: userId })
+  plans := runningPlansForUser({ userId: userId })
   for item := range plans.Nodes() {
     suspend := if !enabled && item.payload.computerUseScope != "" {
-      mutationUpdatePlanStatus({
+      updatePlanStatus({
         planId: item.id,
         status: "awaitingFeedback",
         feedbackReason: "kill_switch_engaged"
@@ -58,22 +58,22 @@ logic logicKillSwitchSuspendsRunningPlans {
 // WORKER_INVOCATION_RETENTION_DAYS env var.
 //
 // MemQL parser limitations:
-//   - The filter side of queryExpiredWorkerInvocations can't push
+//   - The filter side of expiredWorkerInvocations can't push
 //     the duration math into the query (no `>` operator on
 //     datetime). Per-row gating uses
 //       addDuration(item.createdAt, "P{retention}D") < timestamp()
 @description("Daily 02:30 UTC sweep that soft-deletes v1:worker:invocation rows older than WORKER_INVOCATION_RETENTION_DAYS (default 90). Per-row windowing via addDuration since MemQL filters can't push duration math down. Per-user invocation queries filter on @skipDeleted so rows disappear from UIs the moment the soft-delete lands.")
-logic logicWorkerInvocationRetentionSweep {
+logic workerInvocationRetentionSweep {
   args {
     event object @required
   }
   body {
-  candidates := queryExpiredWorkerInvocations({})
-  retention := queryGlobalVariable({ name: "WORKER_INVOCATION_RETENTION_DAYS" })
+  candidates := expiredWorkerInvocations({})
+  retention := globalVariable({ name: "WORKER_INVOCATION_RETENTION_DAYS" })
 
   for item := range candidates.Nodes() {
     sweep := if addDuration(item.createdAt, concat("P", coalesce(retention.First().payload.value, "90"), "D")) < timestamp() {
-      mutationSoftDeleteWorkerInvocation({
+      softDeleteWorkerInvocation({
         invocationId: item.id
       })
     }

@@ -76,7 +76,7 @@ func TestParseGoalComplexity(t *testing.T) {
 
 // triageFakeEngine extends the shared fakeEngine pattern: it answers the
 // goalComplexityTriage InvokeAI with a canned complexity and the
-// queryPlanById Execute with a canned plan row, so we can assert which
+// planById Execute with a canned plan row, so we can assert which
 // prompts the loop calls.
 func newTriageLoop(t *testing.T, complexity, ownerAgentId string) (*PlannerAgentLoop, *fakeEngine) {
 	t.Helper()
@@ -94,7 +94,7 @@ func newTriageLoop(t *testing.T, complexity, ownerAgentId string) (*PlannerAgent
 	}
 	fe := &fakeEngine{
 		execResponder: func(query string) (any, error) {
-			if containsAll(query, "queryPlanById") {
+			if containsAll(query, "planById") {
 				return planRow, nil
 			}
 			return nil, nil
@@ -109,7 +109,9 @@ func newTriageLoop(t *testing.T, complexity, ownerAgentId string) (*PlannerAgent
 	return &PlannerAgentLoop{engine: fe, logger: slog.New(slog.NewTextHandler(discardWriter{}, nil))}, fe
 }
 
-func containsAll(s string, sub string) bool { return len(sub) == 0 || (len(s) >= len(sub) && indexOf(s, sub) >= 0) }
+func containsAll(s string, sub string) bool {
+	return len(sub) == 0 || (len(s) >= len(sub) && indexOf(s, sub) >= 0)
+}
 func indexOf(s, sub string) int {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {
@@ -124,7 +126,7 @@ type discardWriter struct{}
 func (discardWriter) Write(p []byte) (int, error) { return len(p), nil }
 
 // Trivial goal WITH an owning agent: triage must shortcut to a single
-// direct production turn (mutationStartPlan) and make ZERO plannerAgent
+// direct production turn (startPlan) and make ZERO plannerAgent
 // (decompose) calls.
 func TestTriage_TrivialWithOwner_ShortcutsNoDecompose(t *testing.T) {
 	l, fe := newTriageLoop(t, "trivial", "agent-1")
@@ -143,8 +145,8 @@ func TestTriage_TrivialWithOwner_ShortcutsNoDecompose(t *testing.T) {
 		t.Fatalf("expected exactly 1 cheap triage call, got %d", countContains(si, "goalComplexityTriage"))
 	}
 	exec, _, _ := fe.snapshot()
-	if countContains(exec, "mutationStartPlan") != 1 {
-		t.Fatalf("trivial shortcut must call mutationStartPlan once, got %d", countContains(exec, "mutationStartPlan"))
+	if countContains(exec, "startPlan") != 1 {
+		t.Fatalf("trivial shortcut must call startPlan once, got %d", countContains(exec, "startPlan"))
 	}
 }
 
@@ -157,8 +159,8 @@ func TestTriage_TrivialNoOwner_FallsThrough(t *testing.T) {
 		t.Fatalf("trivial without owner must fall through: handled=%v err=%v", handled, err)
 	}
 	exec, _, _ := fe.snapshot()
-	if countContains(exec, "mutationStartPlan") != 0 {
-		t.Fatalf("no-owner trivial must NOT shortcut-start the plan, got %d mutationStartPlan", countContains(exec, "mutationStartPlan"))
+	if countContains(exec, "startPlan") != 0 {
+		t.Fatalf("no-owner trivial must NOT shortcut-start the plan, got %d startPlan", countContains(exec, "startPlan"))
 	}
 }
 
@@ -213,7 +215,7 @@ func newProduceArtifactTriageLoop(t *testing.T, complexity, ownerAgentId string)
 	}
 	fe := &fakeEngine{
 		execResponder: func(query string) (any, error) {
-			if containsAll(query, "queryPlanById") {
+			if containsAll(query, "planById") {
 				return planRow, nil
 			}
 			return nil, nil
@@ -240,8 +242,8 @@ func TestTriage_ProduceArtifactTrivial_RoutesDirect(t *testing.T) {
 	if countContains(si, "goalComplexityTriage") != 1 {
 		t.Fatalf("expected exactly 1 classifier call, got %d", countContains(si, "goalComplexityTriage"))
 	}
-	if countContains(exec, "mutationStartPlan") != 1 {
-		t.Fatalf("expected 1 mutationStartPlan, got %d", countContains(exec, "mutationStartPlan"))
+	if countContains(exec, "startPlan") != 1 {
+		t.Fatalf("expected 1 startPlan, got %d", countContains(exec, "startPlan"))
 	}
 }
 
@@ -254,8 +256,8 @@ func TestTriage_ProduceArtifactModerate_FallsThroughToDecompose(t *testing.T) {
 		t.Fatalf("moderate produceArtifact must fall through to decompose: handled=%v err=%v", handled, err)
 	}
 	exec, _, _ := fe.snapshot()
-	if countContains(exec, "mutationStartPlan") != 0 {
-		t.Fatalf("moderate artifact must NOT shortcut-start, got %d mutationStartPlan", countContains(exec, "mutationStartPlan"))
+	if countContains(exec, "startPlan") != 0 {
+		t.Fatalf("moderate artifact must NOT shortcut-start, got %d startPlan", countContains(exec, "startPlan"))
 	}
 }
 
@@ -269,8 +271,8 @@ func TestTriage_ProduceArtifactClassifyError_FallsBackDirect(t *testing.T) {
 		t.Fatalf("classify error on produceArtifact must fall back to direct: handled=%v err=%v", handled, err)
 	}
 	exec, _, _ := fe.snapshot()
-	if countContains(exec, "mutationStartPlan") != 1 {
-		t.Fatalf("expected the direct-turn fallback to start the plan once, got %d", countContains(exec, "mutationStartPlan"))
+	if countContains(exec, "startPlan") != 1 {
+		t.Fatalf("expected the direct-turn fallback to start the plan once, got %d", countContains(exec, "startPlan"))
 	}
 }
 

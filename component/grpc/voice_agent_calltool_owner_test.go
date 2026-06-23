@@ -82,8 +82,8 @@ func (e *simpleErr) Error() string { return e.s }
 func TestVoiceCallToolDefaultsVia_StampsOwnerAcrossProxyHop(t *testing.T) {
 	fake := &queryRoutingResolver{
 		bySubstr: map[string]*memqlv1.GraphBundle{
-			"querySpaceMeta":       spaceOwnerBundle("standard:v1:cognition:space:demo", "user-jose"),
-			"queryGroupGAForSpace": gaParticipantBundle("v1:agents:agent:sofia"),
+			"querySpaceMeta":  spaceOwnerBundle("standard:v1:cognition:space:demo", "user-jose"),
+			"groupGAForSpace": gaParticipantBundle("v1:agents:agent:sofia"),
 		},
 	}
 

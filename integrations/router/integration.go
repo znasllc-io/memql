@@ -121,7 +121,7 @@ func (i *Integration) handleSetApiKey(ctx context.Context, args map[string]any, 
 	if err != nil {
 		return nil, fmt.Errorf("integration.router.setApiKey: marshal mutation args: %w", err)
 	}
-	query := fmt.Sprintf("mutationSetPartitionSecret(%s)", string(argsJSON))
+	query := fmt.Sprintf("setPartitionSecret(%s)", string(argsJSON))
 	if _, err := i.engine.Execute(ctx, query); err != nil {
 		return nil, fmt.Errorf("integration.router.setApiKey: execute mutation: %w", err)
 	}

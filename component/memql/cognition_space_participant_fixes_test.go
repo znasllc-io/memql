@@ -41,42 +41,42 @@ func mustLoadFn(t *testing.T, eng *MemQLEngine, name string) *Function {
 
 // TestActiveHumanParticipantQueryMatchesActiveHuman pins memql#1638.
 //
-// queryActiveHumanParticipants applied traitIsActiveRecord
+// activeHumanParticipants applied isActiveRecord
 // (payload.active==true), but the v1:cognition:participant concept has NO
 // `active` field -- lifecycle lives on the `status` enum. So the predicate
 // could never match and the query returned [] even with an active human in
-// the space (one querySpaceParticipants happily returned). The fix drops
-// traitIsActiveRecord and keeps the status==active + participantType==human
-// gate, mirroring querySiParticipantForSpace.
+// the space (one spaceParticipants happily returned). The fix drops
+// isActiveRecord and keeps the status==active + participantType==human
+// gate, mirroring siParticipantForSpace.
 func TestActiveHumanParticipantQueryMatchesActiveHuman(t *testing.T) {
 	eng := loadFullCognitionEngine(t)
-	fn := mustLoadFn(t, eng, "queryActiveHumanParticipants")
+	fn := mustLoadFn(t, eng, "activeHumanParticipants")
 	filter := queryFilterBody(t, fn.ExprSource)
 
 	require.Contains(t, filter, `payload.participantType=="human"`)
-	require.Contains(t, filter, "traitStatusIsActive",
+	require.Contains(t, filter, "statusIsActive",
 		"must gate on status==active (the participant lifecycle field)")
-	require.NotContains(t, filter, "traitIsActiveRecord",
-		"participant has no `active` field -- traitIsActiveRecord (payload.active==true) can never match a participant row")
+	require.NotContains(t, filter, "isActiveRecord",
+		"participant has no `active` field -- isActiveRecord (payload.active==true) can never match a participant row")
 }
 
 // TestTouchSessionBindsToAuthSession pins memql#1639.
 //
-// mutationTouchSession is meant to heartbeat a v1:identity:authSession but
+// touchSession is meant to heartbeat a v1:identity:authSession but
 // was bound to v1:cognition:session, whose required participantId/partitionId
 // an auth session never carries -- so validation was unsatisfiable. The fix
 // rebinds it to v1:identity:authSession.
 func TestTouchSessionBindsToAuthSession(t *testing.T) {
 	eng := loadFullCognitionEngine(t)
-	fn := mustLoadFn(t, eng, "mutationTouchSession")
+	fn := mustLoadFn(t, eng, "touchSession")
 	require.NotNil(t, fn.MutationTemplate)
 	require.Equal(t, "v1:identity:authSession", fn.MutationTemplate.Concept,
-		"mutationTouchSession must validate against v1:identity:authSession, not v1:cognition:session")
+		"touchSession must validate against v1:identity:authSession, not v1:cognition:session")
 }
 
 // TestPresenceAutoIdIsValidShortId pins memql#1640.
 //
-// When mutationUpdateParticipantPresence auto-derived presenceId it did
+// When updateParticipantPresence auto-derived presenceId it did
 // `concat("presence-", args.participantId)`. participantId is a canonical
 // colon id (v1:cognition:participant:...), so the derived id carried colons
 // and was rejected as an invalid shortId. The fix hash()-encodes the
@@ -85,7 +85,7 @@ func TestTouchSessionBindsToAuthSession(t *testing.T) {
 // workaround must keep winning.
 func TestPresenceAutoIdIsValidShortId(t *testing.T) {
 	eng := loadFullCognitionEngine(t)
-	fn := mustLoadFn(t, eng, "mutationUpdateParticipantPresence")
+	fn := mustLoadFn(t, eng, "updateParticipantPresence")
 	require.NotNil(t, fn.MutationTemplate)
 
 	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{
@@ -97,7 +97,7 @@ func TestPresenceAutoIdIsValidShortId(t *testing.T) {
 	// Auto-derived id (no presenceId passed): must be colon-free.
 	auto, err := eng.renderMutationTemplate(ctx, fn.MutationTemplate, map[string]any{
 		"participantId": participantID,
-		"partitionId":       "v1:cognition:space:room1",
+		"partitionId":   "v1:cognition:space:room1",
 		"state":         "thinking",
 		"label":         "Thinking…",
 	})
@@ -111,7 +111,7 @@ func TestPresenceAutoIdIsValidShortId(t *testing.T) {
 	// Determinism: same participant -> same id (latest-wins reads).
 	auto2, err := eng.renderMutationTemplate(ctx, fn.MutationTemplate, map[string]any{
 		"participantId": participantID,
-		"partitionId":       "v1:cognition:space:room1",
+		"partitionId":   "v1:cognition:space:room1",
 		"state":         "responding",
 		"label":         "Responding…",
 	})
@@ -122,7 +122,7 @@ func TestPresenceAutoIdIsValidShortId(t *testing.T) {
 	explicit, err := eng.renderMutationTemplate(ctx, fn.MutationTemplate, map[string]any{
 		"presenceId":    "presence-custom-1",
 		"participantId": participantID,
-		"partitionId":       "v1:cognition:space:room1",
+		"partitionId":   "v1:cognition:space:room1",
 		"state":         "idle",
 		"label":         "Idle",
 	})

@@ -237,7 +237,7 @@ func (r *Router) providerLookup(name string, mod providerModality) (any, Resolve
 	return nil, Resolved{}, false
 }
 
-// buildRouterCallArgs assembles the mutationRecordRouterCall arg map for one
+// buildRouterCallArgs assembles the recordRouterCall arg map for one
 // call. callId is the row's own shortId -- a freshly-minted bare slug, NOT the
 // requestId. The requestId is a fully-qualified utterance id
 // (v1:cognition:utterance:<uuid>); using it as the v1:router:call shortId is
@@ -303,7 +303,7 @@ func (r *Router) recordCall(rec CallRecord) {
 			r.logger.Warn("router: marshal record args failed", "error", err, "requestId", rec.RequestId)
 			return
 		}
-		query := fmt.Sprintf("mutationRecordRouterCall(%s)", string(payload))
+		query := fmt.Sprintf("recordRouterCall(%s)", string(payload))
 		if _, err := r.engine.Execute(ctx, query); err != nil {
 			r.recordsDropped.Add(1)
 			r.logger.Warn("router: failed to write v1:router:call row",

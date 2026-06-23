@@ -10,7 +10,7 @@ import (
 
 func TestCompileSource_SimpleQuery(t *testing.T) {
 	source := `
-func (Query) queryActiveUsers(role any) {
+func (Query) activeUsers(role any) {
 	concept==v1:user;?.payload.role==args.role
 }`
 
@@ -24,8 +24,8 @@ func (Query) queryActiveUsers(role any) {
 	}
 
 	fn := result.Functions[0]
-	if fn.Name != "queryActiveUsers" {
-		t.Errorf("Expected name 'queryActiveUsers', got %q", fn.Name)
+	if fn.Name != "activeUsers" {
+		t.Errorf("Expected name 'activeUsers', got %q", fn.Name)
 	}
 	if fn.Type != "query" {
 		t.Errorf("Expected type 'query', got %q", fn.Type)
@@ -258,7 +258,7 @@ func TestCompileSource_FunctionCallStepInAutomation(t *testing.T) {
 	source := `
 @enabled
 func (Automation) testAuto(_ any) {
-	checkUser := queryUserById(userId=event.payload.userId)
+	checkUser := userById(userId=event.payload.userId)
 	return checkUser
 }`
 
@@ -285,8 +285,8 @@ func (Automation) testAuto(_ any) {
 	if !ok {
 		t.Fatalf("expected function config object, got %T", steps[0]["function"])
 	}
-	if functionConfig["name"] != "queryUserById" {
-		t.Fatalf("expected function name queryUserById, got %v", functionConfig["name"])
+	if functionConfig["name"] != "userById" {
+		t.Fatalf("expected function name userById, got %v", functionConfig["name"])
 	}
 }
 
@@ -394,7 +394,7 @@ func TestIsAutomationFile(t *testing.T) {
 
 func TestCompiler_ConditionalFilter(t *testing.T) {
 	source := `
-func (Query) queryActiveUsers(role any) {
+func (Query) activeUsers(role any) {
 	concept==v1:user;?.payload.role==args.role
 }`
 
@@ -773,8 +773,8 @@ func TestParseObjectLiteral_BarePathShorthand(t *testing.T) {
 	}
 	checks := map[string]string{
 		"partitionId": "event.payload.partitionId",
-		"id":      "registerNode.result.node.id",
-		"name":    "explicit",
+		"id":          "registerNode.result.node.id",
+		"name":        "explicit",
 	}
 	for key, want := range checks {
 		got, _ := obj[key].(string)

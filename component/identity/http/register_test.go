@@ -9,14 +9,14 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/identity"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/identity"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// registerFakeEngine records mutationCreateOAuthClient calls and serves
-// the persisted row back on a subsequent queryOAuthClientByClientId, so
+// registerFakeEngine records createOAuthClient calls and serves
+// the persisted row back on a subsequent oAuthClientByClientId, so
 // a test can register then resolve through one fake.
 type registerFakeEngine struct {
 	mu      sync.Mutex
@@ -31,7 +31,7 @@ func (f *registerFakeEngine) Execute(_ context.Context, q string) (*memqlengine.
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	switch {
-	case strings.HasPrefix(q, "mutationCreateOAuthClient("):
+	case strings.HasPrefix(q, "createOAuthClient("):
 		clientId := extractField(q, "clientId")
 		uris := extractField(q, "redirectURIsJSON")
 		f.created[clientId] = &memqlv1.MemoryNode{
@@ -42,7 +42,7 @@ func (f *registerFakeEngine) Execute(_ context.Context, q string) (*memqlengine.
 			}},
 		}
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
-	case strings.HasPrefix(q, "queryOAuthClientByClientId("):
+	case strings.HasPrefix(q, "oAuthClientByClientId("):
 		clientId := extractField(q, "clientId")
 		if n, ok := f.created[clientId]; ok {
 			return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{n}}}, nil

@@ -586,16 +586,15 @@ func buildStructQueryExpr(conceptId, filter, shape, sort, paginate, asOf string,
 // Mutation
 // =============================================================================
 
-// mutationStructHeader matches both the legacy and the canonical
-// post-migration shapes; mirrors queryStructHeader.
+// mutationStructHeader matches the canonical struct-form mutation
+// header; mirrors queryStructHeader.
 //
-// The declaration keyword accepts both `mutation` (the historical noun)
-// and `mutate` (the descriptive verb introduced by C1 / memql#2041 of
-// the grammar redesign, epic #2031). Both map to the same internal
-// ReceiverMutation kind -- `mutate` is purely a surface keyword. The
-// dual-accept is transitional: C6 sweeps the .memql tree from `mutation`
-// to `mutate` and drops the `mutation` alternative here.
-var mutationStructHeader = regexp.MustCompile(`(?m)^[ \t]*(?:mutation|mutate)[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+// The declaration keyword is `mutate` (the descriptive verb introduced
+// by C1 / memql#2041 of the grammar redesign, epic #2031), which maps to
+// the internal ReceiverMutation kind. The transitional `mutation` noun
+// alias was dropped by C6 (memql#2036) once the .memql tree was swept to
+// `mutate`.
+var mutationStructHeader = regexp.MustCompile(`(?m)^[ \t]*mutate[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 
 // LooksLikeStructMutation reports whether the source declares a
 // struct-form mutation.
@@ -603,7 +602,7 @@ func LooksLikeStructMutation(source string) bool {
 	return mutationStructHeader.MatchString(source)
 }
 
-// NormaliseMutationSource rewrites every `mutation NAME { ... }`
+// NormaliseMutationSource rewrites every `mutate NAME { ... }`
 // block to the procedural form.
 func NormaliseMutationSource(source string) (string, error) {
 	return rewriteEachBlock(source, mutationStructHeader, "struct-form mutation", true, emitMutation)
@@ -1023,8 +1022,9 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 // translateStepCall converts a step body into the legacy call
 // expression. Supported shapes:
 //
-//	`<kind> <bareName> { <args> }` -- kind is logic / mutation /
-//	  query / automation; produces `<kind><PascalCase(bare)>({ args })`.
+//	`<kind> <bareName> { <args> }` -- kind is logic / mutate /
+//	  query / automation; produces `<bareName>({ args })` (post-C6 the
+//	  construct name is bare; the kind keyword only selects the slot).
 //	`publishEvent { <args> }`      -- builtin; `publishEvent({ args })`.
 //	`<prefixedName> { <args> }`    -- direct form.
 //	`<name>(<args>)`               -- already parenthesised; passthrough.
@@ -1062,8 +1062,17 @@ func translateStepCall(body string) (string, error) {
 		if bare == "" {
 			return "", fmt.Errorf("expected name after `%s` keyword", first)
 		}
-		fullName := first + strings.ToUpper(bare[:1]) + bare[1:]
-		return finishCall(fullName, strings.TrimLeft(after, " \t\n\r"))
+		// Post-C6 (memql#2036): construct names are bare. The logic / query
+		// / mutate kinds resolve by bare name directly -- no prefix promotion.
+		// `automation` is the exception: it keeps an internal
+		// `automation<PascalCase>` marker so the compiler emits a
+		// StepTypeAutomation sub-dispatch (automation_generator.go strips the
+		// marker back to the bare sub-automation name).
+		name := bare
+		if first == "automation" {
+			name = first + strings.ToUpper(bare[:1]) + bare[1:]
+		}
+		return finishCall(name, strings.TrimLeft(after, " \t\n\r"))
 	}
 
 	return finishCall(first, strings.TrimLeft(rest, " \t\n\r"))
@@ -1352,7 +1361,7 @@ func splitLeadingIdent(s string) (string, string) {
 
 func kindPrefix(name string) bool {
 	switch name {
-	case "logic", "mutation", "query", "automation":
+	case "logic", "mutate", "query", "automation":
 		return true
 	}
 	return false
@@ -1417,7 +1426,7 @@ func NormaliseFileTopArgs(source string) (string, error) {
 // Accepts both `<kind> <name> {` and the post-migration
 // `<kind> <Concept> <name> {` (signature-bound concept; PR #48/49).
 // `mutate` is the C1 (memql#2041) verb alias for `mutation`.
-var structConstructHeaderForArgs = regexp.MustCompile(`(?m)^[ \t]*(query|mutation|mutate)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`)
+var structConstructHeaderForArgs = regexp.MustCompile(`(?m)^[ \t]*(query|mutate)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`)
 
 func isInsideStructConstructHeader(source string, argsLoc int) bool {
 	for _, m := range structConstructHeaderForArgs.FindAllStringIndex(source[:argsLoc], -1) {

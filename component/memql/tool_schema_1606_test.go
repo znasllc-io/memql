@@ -56,7 +56,7 @@ func TestToolDeclToTool_ScalarArrayItemsAccepted(t *testing.T) {
 
 // Test #1606 part 2: a free-form object args field (no declared
 // sub-fields) must allow arbitrary keys. This is the
-// mutationUpdateTodo.payload failure: every payload key rejected by
+// updateTodo.payload failure: every payload key rejected by
 // additionalProperties:false.
 func TestJSONSchemaForArgsField_FreeFormObjectIsOpen(t *testing.T) {
 	got := jsonSchemaForArgsField(&FunctionArgsField{Type: "object"})

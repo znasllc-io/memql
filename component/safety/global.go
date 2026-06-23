@@ -112,7 +112,7 @@ func (g *Gate) EnforceDecision(surface Surface, decision Decision, cls Classific
 		// enforce mode (#232); we only land here when the sink
 		// returned Pending or Unconfigured. cls.Reason carries the
 		// approvalRequest id when one was created -- callers /
-		// approvers can resolve via mutationResolveApprovalRequest.
+		// approvers can resolve via resolveApprovalRequest.
 		if cls.Reason != "" {
 			return false, "requires user approval: " + cls.Reason
 		}

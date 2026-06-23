@@ -31,7 +31,7 @@ func schemaSourceCheck() check {
 func runSchemaSource(t *testing.T, e *Env) {
 	wrappers := e.Eng.MCPPromotedFunctionTools()
 	if len(wrappers) == 0 {
-		t.Fatal("no @mcp-promoted functions found; expected queryLibraryArtifactById et al.")
+		t.Fatal("no @mcp-promoted functions found; expected libraryArtifactById et al.")
 	}
 
 	// The connector-facing surface (tools/list) must carry every promoted

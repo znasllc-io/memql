@@ -51,7 +51,7 @@ type Claims struct {
 
 // UserLookup is the narrow interface the PAT path uses to materialize
 // claims after the keyHash lookup. The wiring layer satisfies this
-// with a closure that runs queryUserById against the engine.
+// with a closure that runs userById against the engine.
 type UserLookup interface {
 	UserById(ctx context.Context, userId string) (*UserSummary, error)
 }

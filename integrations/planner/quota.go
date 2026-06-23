@@ -70,7 +70,7 @@ func (r *EntitlementResolver) Resolve(ctx context.Context, accountId string) Ent
 		return unlimited
 	}
 
-	q := fmt.Sprintf(`queryAccountEntitlement({accountId:%q})`, accountId)
+	q := fmt.Sprintf(`accountEntitlement({accountId:%q})`, accountId)
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Warn("entitlement resolve: query failed; defaulting to unlimited",
@@ -110,7 +110,7 @@ type entitlementRow struct {
 }
 
 // latestEntitlementRow picks the newest time-series version from a
-// queryAccountEntitlement result. The deterministic per-account id means there
+// accountEntitlement result. The deterministic per-account id means there
 // is normally one current row; if a reader sees more than one version, the
 // latest createdAt wins (RFC3339 timestamps compare lexically).
 func latestEntitlementRow(res any) (entitlementRow, bool) {
@@ -127,7 +127,7 @@ func latestEntitlementRow(res any) (entitlementRow, bool) {
 	return best, true
 }
 
-// entitlementRowsFromExecuteResult unpacks queryAccountEntitlement's shape()
+// entitlementRowsFromExecuteResult unpacks accountEntitlement's shape()
 // result into entitlementRow values. Mirrors planRowsFromExecuteResult: a
 // single-row match returns the lone map unwrapped, a multi-row match returns
 // []any, and an empty match returns []any{}.

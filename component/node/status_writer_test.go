@@ -43,7 +43,7 @@ func TestBuildUpdateNodeHealthCall_MinimalFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.HasPrefix(got, "mutationUpdateNodeHealth({") {
+	if !strings.HasPrefix(got, "updateNodeHealth({") {
 		t.Errorf("expected mutation call prefix, got %q", got)
 	}
 	for _, needle := range []string{

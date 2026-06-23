@@ -184,7 +184,7 @@ func (c *CognitionIntegration) relayClientToolCall(
 	// insert() upserts, so this is defensive.
 	requestNodeId := callId
 
-	mutation := fmt.Sprintf(`mutationEmitClientToolRequest({
+	mutation := fmt.Sprintf(`emitClientToolRequest({
 		"requestId": %s,
 		"callId": %s,
 		"toolName": %s,

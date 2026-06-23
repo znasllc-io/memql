@@ -18,7 +18,7 @@ import (
 //
 // The downstream effect: every query / mutation / logic construct that
 // binds to one of those concepts resolves an EMPTY concept id over the
-// connector -- queryAllOutputScreenings / queryActiveApprovalsByCorrelationKey
+// connector -- allOutputScreenings / activeApprovalsByCorrelationKey
 // failed with `concept "" not found in registry`, the insert/resolve
 // mutations with `mutation template concept is required`, and the retention
 // sweep logic at its `allRows` step.

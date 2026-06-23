@@ -75,7 +75,7 @@ type AttachmentStore interface {
 	// re-enforces ownership; this is defense in depth.
 	CallerOwnsSpace(ctx context.Context, partitionId string) (bool, error)
 	// GetAttachment reads one v1:common:attachment row by id within a space
-	// (queryAttachmentById). Returns nil (no error) when not found. Backs the
+	// (attachmentById). Returns nil (no error) when not found. Backs the
 	// download endpoint (memql#804); callers gate on CallerOwnsSpace first.
 	GetAttachment(ctx context.Context, attachmentId, partitionId string) (*AttachmentRow, error)
 }
@@ -83,12 +83,12 @@ type AttachmentStore interface {
 // AttachmentRow is the projected v1:common:attachment row the download path
 // needs: the storage URL plus the metadata to serve the bytes back.
 type AttachmentRow struct {
-	ID       string
-	FileName string
-	MimeType string
-	BlobUrl  string
-	PartitionId  string
-	Status   string
+	ID          string
+	FileName    string
+	MimeType    string
+	BlobUrl     string
+	PartitionId string
+	Status      string
 }
 
 // FileDownloader reads stored file bytes back from object storage given the
@@ -106,7 +106,7 @@ type AISummarizer interface {
 
 // AttachmentCreateParams describes the data needed to persist an attachment node.
 type AttachmentCreateParams struct {
-	PartitionId       string
+	PartitionId   string
 	FileName      string
 	MimeType      string
 	FileSize      int
@@ -120,7 +120,7 @@ type AttachmentCreateParams struct {
 // AttachmentResponse is the JSON body returned on successful upload.
 type AttachmentResponse struct {
 	ID            string `json:"id"`
-	PartitionId       string `json:"partitionId"`
+	PartitionId   string `json:"partitionId"`
 	FileName      string `json:"fileName"`
 	MimeType      string `json:"mimeType"`
 	FileSize      int    `json:"fileSize"`
@@ -314,7 +314,7 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// for now the Attachment record exists immediately and the
 	// canvas card carries the analysis result).
 	params := AttachmentCreateParams{
-		PartitionId:       partitionId,
+		PartitionId:   partitionId,
 		FileName:      fileName,
 		MimeType:      mimeType,
 		FileSize:      len(data),
@@ -346,7 +346,7 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			analyzeParams := CreatePlanForAttachmentParams{
 				AttachmentId: attachmentId,
-				PartitionId:      partitionId,
+				PartitionId:  partitionId,
 				FileName:     fileName,
 				RequestedBy:  actor,
 				MimeType:     mimeType,
@@ -382,7 +382,7 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// fallback returns empty values for them.
 		resp := AttachmentResponse{
 			ID:            objectName,
-			PartitionId:       partitionId,
+			PartitionId:   partitionId,
 			FileName:      fileName,
 			MimeType:      mimeType,
 			FileSize:      len(data),

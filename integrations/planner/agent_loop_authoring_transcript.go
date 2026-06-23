@@ -135,7 +135,7 @@ func (d *AuthoringCaptureDispatcher) runCaptureTranscript(ctx context.Context, p
 // loadToolCalls reads the plan's succeeded toolInvocation tasks (the literal
 // calls the agent made) in seq order.
 func (d *AuthoringCaptureDispatcher) loadToolCalls(ctx context.Context, planId string) ([]toolCall, error) {
-	q := fmt.Sprintf(`queryTasksForPlan({planId:%q})`, planId)
+	q := fmt.Sprintf(`tasksForPlan({planId:%q})`, planId)
 	res, err := d.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
@@ -196,7 +196,7 @@ func (d *AuthoringCaptureDispatcher) persistTranscriptBundle(ctx context.Context
 		"summary":      fmt.Sprintf("Verbatim transcript of the %d call(s) this task ran.", callCount),
 		"sourcePlanId": planId,
 	}
-	q := fmt.Sprintf(`mutationCreateAuthoringBundle(%s)`, encodeArgs(args))
+	q := fmt.Sprintf(`createAuthoringBundle(%s)`, encodeArgs(args))
 	_, err := d.engine.Execute(ownerActorContext(ctx, ownerUserId), q)
 	return err
 }
@@ -234,7 +234,7 @@ func (d *AuthoringCaptureDispatcher) recordTranscriptValidated(ctx context.Conte
 		"status":           "validated",
 		"validationReport": vr,
 	}
-	q := fmt.Sprintf(`mutationRecordBundleValidation(%s)`, encodeArgs(args))
+	q := fmt.Sprintf(`recordBundleValidation(%s)`, encodeArgs(args))
 	_, err := d.engine.Execute(ownerActorContext(ctx, ownerUserId), q)
 	return err
 }

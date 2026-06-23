@@ -231,7 +231,7 @@ func (i *Integration) augmentDomainGenerateHandler(ctx context.Context, args map
 	})
 
 	createPlanQuery := fmt.Sprintf(
-		`mutationCreatePlan({planId: %s, partitionId: %s, kind: %s, goal: %s, requestedBy: %s, triggerSource: %s, input: %s})`,
+		`createPlan({planId: %s, partitionId: %s, kind: %s, goal: %s, requestedBy: %s, triggerSource: %s, input: %s})`,
 		quoteString(planId),
 		quoteString(partitionId),
 		quoteString("augmentDomain"),
@@ -248,7 +248,7 @@ func (i *Integration) augmentDomainGenerateHandler(ctx context.Context, args map
 	// the generation is executing. updatePlanStatus accepts a
 	// startedAt for the running transition.
 	startQuery := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId: %s, status: %s, startedAt: %s})`,
+		`updatePlanStatus({planId: %s, status: %s, startedAt: %s})`,
 		quoteString(planId),
 		quoteString("running"),
 		quoteString(startedAt),
@@ -326,7 +326,7 @@ func (i *Integration) augmentDomainGenerateHandler(ctx context.Context, args map
 		"topic":       topic,
 	})
 	completeQuery := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId: %s, status: %s, completedAt: %s, output: %s})`,
+		`updatePlanStatus({planId: %s, status: %s, completedAt: %s, output: %s})`,
 		quoteString(planId),
 		quoteString("succeeded"),
 		quoteString(completedAt),
@@ -354,7 +354,7 @@ func (i *Integration) augmentDomainGenerateHandler(ctx context.Context, args map
 func (i *Integration) failAugmentPlan(ctx context.Context, planId, errMsg string) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId: %s, status: %s, completedAt: %s, errorMessage: %s})`,
+		`updatePlanStatus({planId: %s, status: %s, completedAt: %s, errorMessage: %s})`,
 		quoteString(planId),
 		quoteString("failed"),
 		quoteString(now),
@@ -410,7 +410,7 @@ func (i *Integration) storeAugmentChunk(
 	enrichedBody := fmt.Sprintf("<!--seed:%s-->\n\n## %s\n\n%s", string(metadataJSON), cleanTitle, c.Body)
 
 	insertQuery := fmt.Sprintf(
-		`mutationCreateDocumentChunk({chunkId: %s, domainId: %s, text: %s, sourceRef: %s, seq: %d, tokenCount: %d, source: %s, sourceUtteranceId: %s, sourceAgentId: %s, sourceTopic: %s})`,
+		`createDocumentChunk({chunkId: %s, domainId: %s, text: %s, sourceRef: %s, seq: %d, tokenCount: %d, source: %s, sourceUtteranceId: %s, sourceAgentId: %s, sourceTopic: %s})`,
 		quoteString(chunkId),
 		quoteString(domainId),
 		quoteString(enrichedBody),
@@ -472,10 +472,10 @@ func (i *Integration) lookupDomainMeta(ctx context.Context, domainId string) (st
 // id string.
 func augmentPlanId(domainId, topic, sourceUtteranceId string) string {
 	return string(id.New().MustFromMap(map[string]any{
-		"kind":               "augment-plan",
-		"domainId":           domainId,
-		"topic":              topic,
-		"sourceUtteranceId":  sourceUtteranceId,
+		"kind":              "augment-plan",
+		"domainId":          domainId,
+		"topic":             topic,
+		"sourceUtteranceId": sourceUtteranceId,
 	}))
 }
 

@@ -14,13 +14,13 @@ package memql
 // Two seams keep this honest:
 //
 //  1. CROSS-OWNER ENUMERATION is admin-gated. The active bundles span owners, so
-//     the enumerating query (querySystemActiveAuthoringBundles) is the ADMIN /
+//     the enumerating query (systemActiveAuthoringBundles) is the ADMIN /
 //     cluster-owner-scoped read -- the only authoring query that is NOT
 //     owner-filtered. The re-arm runs it under a cluster-owner envelope.
 //
 //  2. PER-BUNDLE WORK stays under the BUNDLE AUTHOR's envelope. Loading a
 //     bundle's member constructs goes through the SAME owner-scoped query the
-//     interactive path uses (queryAuthoringConstructsForBundle, filtered on
+//     interactive path uses (authoringConstructsForBundle, filtered on
 //     payload.ownerUserId == actor.userId), run under the author's userId -- so
 //     the re-arm never reads another owner's constructs through an admin bypass.
 //     The scheduler then runs each firing under AuthorContext (the author's
@@ -208,7 +208,7 @@ func (s *engineRearmStore) LoadSystemActiveBundles(ctx context.Context) ([]Autho
 	// The system-scoped query is cluster-owner gated; run it under a
 	// cluster-owner envelope so it returns every owner's active bundles.
 	ownerCtx := rearmClusterOwnerContext(ctx)
-	res, err := s.engine.Execute(ownerCtx, "querySystemActiveAuthoringBundles()")
+	res, err := s.engine.Execute(ownerCtx, "systemActiveAuthoringBundles()")
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +247,7 @@ func (s *engineRearmStore) LoadConstructsForOwner(ctx context.Context, owner, bu
 		UserId: owner,
 		Role:   auth.RoleWriter,
 	})
-	q := fmt.Sprintf(`queryAuthoringConstructsForBundle({"bundleId":%q})`, bundleId)
+	q := fmt.Sprintf(`authoringConstructsForBundle({"bundleId":%q})`, bundleId)
 	res, err := s.engine.Execute(authorCtx, q)
 	if err != nil {
 		return nil, err

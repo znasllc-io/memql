@@ -22,9 +22,9 @@ import (
 // its canonical stored id.
 func seedRecord(t *testing.T, e *Env, recordId, partitionId, label string, data map[string]any) string {
 	t.Helper()
-	out := e.runMutation(t, "mutationCreateRecord", map[string]any{
+	out := e.runMutation(t, "createRecord", map[string]any{
 		"recordId":     recordId,
-		"partitionId":      partitionId,
+		"partitionId":  partitionId,
 		"recordType":   "vehicle",
 		"label":        label,
 		"data":         data,
@@ -101,13 +101,13 @@ func runLifecycle(t *testing.T, e *Env) {
 		map[string]any{"make": "Honda", "model": "Accord"})
 
 	// READ -- both are present, active, in the space.
-	got := asArray(t, e.runQuery(t, "queryRecordsByState", map[string]any{"partitionId": space}))
+	got := asArray(t, e.runQuery(t, "recordsByState", map[string]any{"partitionId": space}))
 	if !containsID(got, idA) || !containsID(got, idB) {
 		t.Fatalf("lifecycle READ: expected both %s and %s in %v", idA, idB, idIDs(got))
 	}
 
 	// UPDATE -- a minimal label change must succeed and persist.
-	e.runMutation(t, "mutationUpdateRecord", map[string]any{
+	e.runMutation(t, "updateRecord", map[string]any{
 		"recordId": idA,
 		"label":    "2024 Toyota Camry (updated)",
 	})
@@ -117,12 +117,12 @@ func runLifecycle(t *testing.T, e *Env) {
 	}
 
 	// DELETE -- flips active=false; the active-filtered read no longer returns it.
-	e.runMutation(t, "mutationDeleteRecord", map[string]any{"recordId": idA})
+	e.runMutation(t, "deleteRecord", map[string]any{"recordId": idA})
 	pa = e.latestPayload(t, "v1:data:record", idA)
 	if pa["active"] != false {
 		t.Fatalf("lifecycle DELETE: active not flipped to false; got %v", pa["active"])
 	}
-	after := asArray(t, e.runQuery(t, "queryRecordsByState", map[string]any{"partitionId": space}))
+	after := asArray(t, e.runQuery(t, "recordsByState", map[string]any{"partitionId": space}))
 	if containsID(after, idA) {
 		t.Fatalf("lifecycle DELETE: deleted record %s still returned by active query: %v", idA, idIDs(after))
 	}
@@ -151,7 +151,7 @@ func runFilter(t *testing.T, e *Env) {
 	inX2 := seedRecord(t, e, "rec-X2-"+uniqueSuffix("flt"), spaceX, "X two", map[string]any{"k": 2})
 	outY := seedRecord(t, e, "rec-Y1-"+uniqueSuffix("flt"), spaceY, "Y one", map[string]any{"k": 3})
 
-	res := asArray(t, e.runQuery(t, "queryRecordsByState", map[string]any{"partitionId": spaceX}))
+	res := asArray(t, e.runQuery(t, "recordsByState", map[string]any{"partitionId": spaceX}))
 
 	// Inclusion: both spaceX records present.
 	if !containsID(res, inX1) || !containsID(res, inX2) {
@@ -164,7 +164,7 @@ func runFilter(t *testing.T, e *Env) {
 	}
 
 	// recordType is an additional ANDed predicate -- a non-matching type excludes.
-	none := asArray(t, e.runQuery(t, "queryRecordsByState", map[string]any{
+	none := asArray(t, e.runQuery(t, "recordsByState", map[string]any{
 		"partitionId": spaceX, "recordType": "no-such-type",
 	}))
 	if containsID(none, inX1) || containsID(none, inX2) {
@@ -192,7 +192,7 @@ func runPartialUpdate(t *testing.T, e *Env) {
 
 	// MINIMAL delete -- id only, no required record fields. Pre-#1709 this
 	// rejected ("missing properties") or wiped omitted fields; now it read-merges.
-	e.runMutation(t, "mutationDeleteRecord", map[string]any{"recordId": recID})
+	e.runMutation(t, "deleteRecord", map[string]any{"recordId": recID})
 
 	after := e.latestPayload(t, "v1:data:record", recID)
 	if after["active"] != false {
@@ -219,7 +219,7 @@ func envelopeCheck() check {
 
 func runEnvelope(t *testing.T, e *Env) {
 	// 0 results: a never-seeded space.
-	zero := e.runQuery(t, "queryRecordsByState", map[string]any{"partitionId": "space-empty-" + uniqueSuffix("env")})
+	zero := e.runQuery(t, "recordsByState", map[string]any{"partitionId": "space-empty-" + uniqueSuffix("env")})
 	z := asArray(t, zero)
 	if len(z) != 0 {
 		t.Fatalf("#1710 (0): expected empty array, got %v", z)
@@ -228,7 +228,7 @@ func runEnvelope(t *testing.T, e *Env) {
 	// 1 result.
 	oneSpace := "space-one-" + uniqueSuffix("env")
 	seedRecord(t, e, "rec-one-"+uniqueSuffix("env"), oneSpace, "solo", map[string]any{"k": 1})
-	one := asArray(t, e.runQuery(t, "queryRecordsByState", map[string]any{"partitionId": oneSpace}))
+	one := asArray(t, e.runQuery(t, "recordsByState", map[string]any{"partitionId": oneSpace}))
 	if len(one) != 1 {
 		t.Fatalf("#1710 (1): expected a single-element ARRAY (not a bare object), got %d elems: %v", len(one), one)
 	}
@@ -238,7 +238,7 @@ func runEnvelope(t *testing.T, e *Env) {
 	for i := 0; i < 3; i++ {
 		seedRecord(t, e, fmt.Sprintf("rec-many-%d-%s", i, uniqueSuffix("env")), manySpace, fmt.Sprintf("m%d", i), map[string]any{"k": i})
 	}
-	many := asArray(t, e.runQuery(t, "queryRecordsByState", map[string]any{"partitionId": manySpace}))
+	many := asArray(t, e.runQuery(t, "recordsByState", map[string]any{"partitionId": manySpace}))
 	if len(many) != 3 {
 		t.Fatalf("#1710 (many): expected 3 elems, got %d: %v", len(many), many)
 	}

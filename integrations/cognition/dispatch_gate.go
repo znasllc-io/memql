@@ -43,7 +43,7 @@ const feedbackAnnounceGateLockClass int32 = 0x464E4452
 // The bug: the utterance-created event is broadcast to BOTH cognition replicas
 // (the graph.node.created.v1:cognition:* bridge rule fans out to all peers), so
 // both run handleUtteranceForCognition. The only cross-replica guard was the
-// read-before-write queryHasAIResponseForReply SELECT, which BOTH replicas pass
+// read-before-write hasAIResponseForReply SELECT, which BOTH replicas pass
 // because neither inserts its AI response until the multi-second LLM turn ends.
 // Each then mints its own replyId and inserts a row -> two identical replies.
 //
@@ -101,7 +101,7 @@ const feedbackAnnounceGateLockClass int32 = 0x464E4452
 // never DROP a reply. So on ANY infrastructure failure (nil getter, DB not
 // ready, connection error, lock-query error) tryDispatch returns
 // (proceed=true, release=noop): the replica falls through to the existing
-// queryHasAIResponseForReply read-before-write check downstream. The fail-safe
+// hasAIResponseForReply read-before-write check downstream. The fail-safe
 // fires ONLY when the gate cannot make a trustworthy lock decision (the DB is
 // the gate's source of truth); a clean "another replica owns this" answer is
 // honored strictly. A duplicate is recoverable; a dropped reply is not.

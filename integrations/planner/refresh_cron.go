@@ -77,8 +77,8 @@ const (
 	// real user/space, so these sentinels keep the row well-formed
 	// without pretending a person asked for it (triggerSource='system'
 	// is the authoritative provenance marker).
-	refreshSystemPartitionId    = "system:knowledge-refresh"
-	refreshSystemRequester  = "system"
+	refreshSystemPartitionId = "system:knowledge-refresh"
+	refreshSystemRequester   = "system"
 )
 
 // RefreshCron polls queryDueRefreshDomains and spawns
@@ -93,9 +93,9 @@ type RefreshCron struct {
 
 	cancel context.CancelFunc
 
-	mu             sync.Mutex
-	lastSpawned    map[string]time.Time // domainId -> when we last spawned a refresh
-	startedOnce    sync.Once
+	mu          sync.Mutex
+	lastSpawned map[string]time.Time // domainId -> when we last spawned a refresh
+	startedOnce sync.Once
 }
 
 // NewRefreshCron constructs a cron poller pinned to the planner
@@ -326,11 +326,11 @@ func (c *RefreshCron) spawnRefreshPlan(ctx context.Context, row map[string]any) 
 	inputJSON := mustJSONObject(input)
 
 	// mode lives on input.mode (the dispatcher reads it there); the Plan
-	// concept's top-level `mode` field is set by mutationCreatePlan only
-	// when wired -- mutationCreatePlan's arg surface doesn't carry mode,
+	// concept's top-level `mode` field is set by createPlan only
+	// when wired -- createPlan's arg surface doesn't carry mode,
 	// so we don't pass it. The dispatcher branches on input.mode.
 	call := fmt.Sprintf(
-		`mutationCreatePlan({"planId": %q, "partitionId": %q, "kind": "trainSpecialist", "goal": %q, "requestedBy": %q, "triggerSource": "system", "input": %s})`,
+		`createPlan({"planId": %q, "partitionId": %q, "kind": "trainSpecialist", "goal": %q, "requestedBy": %q, "triggerSource": "system", "input": %s})`,
 		planId, refreshSystemPartitionId, goal, requestedBy, inputJSON,
 	)
 	_, err := c.engine.Execute(systemActorContext(ctx), call)
@@ -388,7 +388,7 @@ func domainNameOrId(name, id string) string {
 }
 
 // mustJSONObject marshals a map to a JSON object literal for inline
-// embedding in a mutationCreatePlan call. The MemQL parser accepts a
+// embedding in a createPlan call. The MemQL parser accepts a
 // JSON object literal as a function argument's object value (quoted
 // keys, typed values).
 func mustJSONObject(m map[string]any) string {

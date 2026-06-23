@@ -1,7 +1,7 @@
 // mutations.memql
 //
 // Write paths in the `actions` namespace (epic #1734). Phase 0 (#1735)
-// ships ONE: mutationRecordActionCandidate -- the single path that records
+// ships ONE: recordActionCandidate -- the single path that records
 // a captured trace as a v1:actions:candidate row.
 //
 // Authorization (owned tier): ownerUserId is stamped from actor.userId so
@@ -10,12 +10,12 @@
 // owned. Provenance: provenanceMutation is stamped with this mutation's own
 // name; the engine stamps createdBy from the authenticated actor.
 //
-// Id handling mirrors mutationRecordHarnessObservation: candidateId is
+// Id handling mirrors recordHarnessObservation: candidateId is
 // optional -- when omitted the engine assigns the id on insert.
 
 use actions.concepts.{ candidate }
 
-// mutationRecordActionCandidate
+// recordActionCandidate
 // =============================
 // Append a v1:actions:candidate trace for a completed LLM step. The
 // ordered capability calls (with per-arg value provenance) and the
@@ -26,7 +26,7 @@ use actions.concepts.{ candidate }
 // it is NOT exposed on the MCP/SDK surface (no @mcp / @sdk).
 @enabled
 @description("Record a v1:actions:candidate trace (the captured capability sequence + value/resource provenance for one LLM step, #1735). ownerUserId is stamped from actor.userId (owned tier). status is always 'candidate' on insert.")
-mutation candidate mutationRecordActionCandidate {
+mutate candidate recordActionCandidate {
   args {
     candidateId   string
     planId        string    @required
@@ -44,11 +44,11 @@ mutation candidate mutationRecordActionCandidate {
     args.calls
     args.resourceEdges
     args.callCount
-    provenanceMutation: "mutationRecordActionCandidate"
+    provenanceMutation: "recordActionCandidate"
   }
 }
 
-// mutationMintAction
+// mintAction
 // ==================
 // Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1,
 // #1736). ownerUserId is stamped from actor.userId (owned tier). The harness
@@ -58,7 +58,7 @@ mutation candidate mutationRecordActionCandidate {
 // Internal write path -- not on the MCP/SDK surface.
 @enabled
 @description("Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1, #1736). ownerUserId stamped from actor.userId (owned tier). Stores the replayable capability calls keyed by inputFingerprint.")
-mutation action mutationMintAction {
+mutate action mintAction {
   args {
     actionId          string
     slug              string    @required
@@ -95,11 +95,11 @@ mutation action mutationMintAction {
     args.recordedSurface
     args.provenancePlanId
     args.provenanceStepId
-    provenanceMutation: "mutationMintAction"
+    provenanceMutation: "mintAction"
   }
 }
 
-// mutationReinforceAction
+// reinforceAction
 // =======================
 // Bump an action's reliability + reinforceCount after a verified successful
 // replay (fingerprint match). The new values are computed engine-side (the
@@ -108,7 +108,7 @@ mutation action mutationMintAction {
 // and the captured calls are preserved. Internal write path.
 @enabled
 @description("Reinforce a v1:actions:action after a verified replay: set the engine-computed reliability + reinforceCount and reset the decay clock (Phase 1 #1736; surface-aware decay lands in Phase 4 #1739).")
-mutation action mutationReinforceAction {
+mutate action reinforceAction {
   args {
     actionId       string  @required
     reliability    float   @required
@@ -119,11 +119,11 @@ mutation action mutationReinforceAction {
     args.reliability
     args.reinforceCount
     lastReinforced: now()
-    provenanceMutation: "mutationReinforceAction"
+    provenanceMutation: "reinforceAction"
   }
 }
 
-// mutationRegisterSurface
+// registerSurface
 // =======================
 // Register (or re-version) an execution surface in the resolver's registry
 // (Phase 2, #1737). ownerUserId is stamped from actor.userId (owned tier).
@@ -131,7 +131,7 @@ mutation action mutationReinforceAction {
 // data the resolver binds against.
 @enabled
 @description("Register a v1:actions:surface (workbench / computer-use:<machineId> / mcp:<server>) with its served capabilities + availability + failover priority. ownerUserId stamped from actor.userId (owned tier). #1737.")
-mutation surface mutationRegisterSurface {
+mutate surface registerSurface {
   args {
     surfaceId    string
     slug         string    @required
@@ -151,18 +151,18 @@ mutation surface mutationRegisterSurface {
     priority: coalesce(args.priority, 100)
     status: "active"
     lastSeen: now()
-    provenanceMutation: "mutationRegisterSurface"
+    provenanceMutation: "registerSurface"
   }
 }
 
-// mutationSetSurfaceAvailability
+// setSurfaceAvailability
 // ==============================
 // Flip a surface's availability (the failover signal) and stamp the
 // heartbeat clock. update read-merges so the served capabilities + slug are
 // preserved. #1737.
 @enabled
 @description("Set a v1:actions:surface availability flag (the resolver's failover signal) and refresh its lastSeen heartbeat. #1737.")
-mutation surface mutationSetSurfaceAvailability {
+mutate surface setSurfaceAvailability {
   args {
     surfaceId  string   @required
     available  boolean  @required
@@ -171,11 +171,11 @@ mutation surface mutationSetSurfaceAvailability {
     id: args.surfaceId
     args.available
     lastSeen: now()
-    provenanceMutation: "mutationSetSurfaceAvailability"
+    provenanceMutation: "setSurfaceAvailability"
   }
 }
 
-// mutationConfirmAction
+// confirmAction
 // =====================
 // Promote a confirm-gated candidate action to active after a human confirms
 // it (Phase 4 #1739). A real-machine write/exec action mints as candidate and
@@ -184,18 +184,18 @@ mutation surface mutationSetSurfaceAvailability {
 // ownerUserId are preserved. Internal write path driven by the confirm UI.
 @enabled
 @description("Confirm a candidate v1:actions:action, promoting it to active so it is offered for replay (Phase 4 #1739, the human gate for real-machine side effects).")
-mutation action mutationConfirmAction {
+mutate action confirmAction {
   args {
     actionId  string  @required
   }
   update {
     id: args.actionId
     status: "active"
-    provenanceMutation: "mutationConfirmAction"
+    provenanceMutation: "confirmAction"
   }
 }
 
-// mutationDeprecateAction
+// deprecateAction
 // =======================
 // Deprecate an action whose reliability fell below the floor (Phase 4 #1739).
 // A deprecated action is kept (append-only) but excluded from the active-only
@@ -203,18 +203,18 @@ mutation action mutationConfirmAction {
 // decay sweep.
 @enabled
 @description("Deprecate a v1:actions:action (reliability below floor or superseded), removing it from replay (Phase 4 #1739).")
-mutation action mutationDeprecateAction {
+mutate action deprecateAction {
   args {
     actionId  string  @required
   }
   update {
     id: args.actionId
     status: "deprecated"
-    provenanceMutation: "mutationDeprecateAction"
+    provenanceMutation: "deprecateAction"
   }
 }
 
-// mutationDecayAction
+// decayAction
 // ===================
 // Set an action's decayed reliability (Phase 4 #1739). The decayed value is
 // computed engine-side from lastReinforced age (the MemQL parser has no
@@ -222,7 +222,7 @@ mutation action mutationDeprecateAction {
 // the consolidation sweep.
 @enabled
 @description("Set a v1:actions:action decayed reliability from the consolidation sweep (Phase 4 #1739; value computed engine-side).")
-mutation action mutationDecayAction {
+mutate action decayAction {
   args {
     actionId     string  @required
     reliability  float   @required
@@ -230,11 +230,11 @@ mutation action mutationDecayAction {
   update {
     id: args.actionId
     args.reliability
-    provenanceMutation: "mutationDecayAction"
+    provenanceMutation: "decayAction"
   }
 }
 
-// mutationBumpActionVersion
+// bumpActionVersion
 // =========================
 // Bump an action's monotonic version (Phase 5 #1740). References pin by
 // default, so an edited action lands a new version and existing pins stay on
@@ -243,7 +243,7 @@ mutation action mutationDecayAction {
 // handed in. update read-merges so the captured calls + ownerUserId persist.
 @enabled
 @description("Bump a v1:actions:action monotonic version on edit (Phase 5 #1740; value computed engine-side). Pins stay on the prior version until the verified upgrade migration moves them.")
-mutation action mutationBumpActionVersion {
+mutate action bumpActionVersion {
   args {
     actionId  string  @required
     version   int     @required
@@ -251,6 +251,6 @@ mutation action mutationBumpActionVersion {
   update {
     id: args.actionId
     args.version
-    provenanceMutation: "mutationBumpActionVersion"
+    provenanceMutation: "bumpActionVersion"
   }
 }

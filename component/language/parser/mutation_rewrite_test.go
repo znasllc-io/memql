@@ -16,7 +16,7 @@ import (
 // every fixture below declares the binding through the signature.
 
 func TestNormaliseMutationSource_AcceptsBareInsert(t *testing.T) {
-	src := `mutation space createSpace {
+	src := `mutate space createSpace {
   insert {
     id: "x"
     name: "untitled"
@@ -36,7 +36,7 @@ func TestNormaliseMutationSource_AcceptsBareInsert(t *testing.T) {
 }
 
 func TestNormaliseMutationSource_AcceptsBareUpdate(t *testing.T) {
-	src := `mutation space renameSpace {
+	src := `mutate space renameSpace {
   update {
     id: args.id
     name: "new"
@@ -56,7 +56,7 @@ func TestNormaliseMutationSource_AcceptsBareUpdate(t *testing.T) {
 // from the `mutation <Concept> <name>` signature now.
 func TestNormaliseMutationSource_RejectsNamedInsert(t *testing.T) {
 	for _, target := range []string{"participant", "space"} {
-		src := "mutation space createSpace {\n  insert " + target + " {\n    id: \"x\"\n    name: \"untitled\"\n  }\n}"
+		src := "mutate space createSpace {\n  insert " + target + " {\n    id: \"x\"\n    name: \"untitled\"\n  }\n}"
 		_, err := NormaliseMutationSource(src)
 		if err == nil {
 			t.Fatalf("expected the named form `insert %s {` to be rejected", target)
@@ -68,7 +68,7 @@ func TestNormaliseMutationSource_RejectsNamedInsert(t *testing.T) {
 }
 
 func TestNormaliseMutationSource_RejectsNamedUpdate(t *testing.T) {
-	src := `mutation space renameSpace {
+	src := `mutate space renameSpace {
   update space {
     id: "x"
     name: "new"

@@ -34,7 +34,7 @@ func activeStatusNode(t *testing.T) memorynodes.MemoryNode {
 // post-filters every candidate via the ctx-less nodeMatchesExpression, which
 // has no actor.* handling. With zero candidate rows the post-filter loop never
 // ran, so the query "worked" only when its result set was empty -- exactly the
-// querySystemActiveAuthoringBundles symptom in the issue.
+// systemActiveAuthoringBundles symptom in the issue.
 //
 // The fix resolves actor.* comparisons to their query-time boolean constant
 // BEFORE post-filtering (the gate is already enforced once in the SQL WHERE),
@@ -66,14 +66,14 @@ func nonClusterOwnerCtx(userId string) context.Context {
 
 // seedActiveAuthoringBundle creates a draft authoring bundle owned by the
 // caller, then activates it (status -> active) so it satisfies the
-// traitStatusIsActive half of querySystemActiveAuthoringBundles' filter.
+// statusIsActive half of systemActiveAuthoringBundles' filter.
 func seedActiveAuthoringBundle(t *testing.T, ctx context.Context, eng *MemQLEngine, bundleId string) {
 	t.Helper()
-	create := fmt.Sprintf(`mutationCreateAuthoringBundle({"bundleId":%q,"title":%q})`, bundleId, "actor-postfilter #1659 guard")
+	create := fmt.Sprintf(`createAuthoringBundle({"bundleId":%q,"title":%q})`, bundleId, "actor-postfilter #1659 guard")
 	if _, err := eng.Execute(ctx, create); err != nil {
 		t.Fatalf("create bundle: %v", err)
 	}
-	activate := fmt.Sprintf(`mutationActivateAuthoringBundle({"bundleId":%q})`, bundleId)
+	activate := fmt.Sprintf(`activateAuthoringBundle({"bundleId":%q})`, bundleId)
 	if _, err := eng.Execute(ctx, activate); err != nil {
 		t.Fatalf("activate bundle: %v", err)
 	}
@@ -81,7 +81,7 @@ func seedActiveAuthoringBundle(t *testing.T, ctx context.Context, eng *MemQLEngi
 
 // TestActorClusterOwnerPostFilter_WithActiveRows is the headline #1659 guard.
 // With an active bundle present, the cluster-owner caller must read it back
-// through querySystemActiveAuthoringBundles WITHOUT the post-filter blowing up
+// through systemActiveAuthoringBundles WITHOUT the post-filter blowing up
 // on the actor.isClusterOwner term.
 func TestActorClusterOwnerPostFilter_WithActiveRows(t *testing.T) {
 	eng, _, _ := readMergeTestEngine(t)
@@ -90,7 +90,7 @@ func TestActorClusterOwnerPostFilter_WithActiveRows(t *testing.T) {
 	bundleId := "v1:authoring:bundle:b-1659-owner"
 	seedActiveAuthoringBundle(t, ownerCtx, eng, bundleId)
 
-	res, err := eng.Execute(ownerCtx, "querySystemActiveAuthoringBundles()")
+	res, err := eng.Execute(ownerCtx, "systemActiveAuthoringBundles()")
 	// Before the fix this fails with:
 	//   field "actor.isClusterOwner" is not supported in queries
 	require.NoError(t, err, "cluster-owner query must not error on the actor.isClusterOwner post-filter (#1659)")
@@ -120,7 +120,7 @@ func TestActorClusterOwnerPostFilter_GateStillEnforced(t *testing.T) {
 	seedActiveAuthoringBundle(t, ownerCtx, eng, bundleId)
 
 	// A different, non-cluster-owner user runs the system-scoped query.
-	res, err := eng.Execute(nonClusterOwnerCtx("u-intruder-1659"), "querySystemActiveAuthoringBundles()")
+	res, err := eng.Execute(nonClusterOwnerCtx("u-intruder-1659"), "systemActiveAuthoringBundles()")
 	require.NoError(t, err)
 	require.NotNil(t, res)
 

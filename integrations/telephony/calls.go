@@ -138,7 +138,7 @@ func (i *Integration) closeRoomLegs(ctx context.Context, room, disposition strin
 	return nil
 }
 
-// writeCallRecord persists one completed call via mutationRecordCall. One
+// writeCallRecord persists one completed call via recordCall. One
 // append-only row per call, with the real duration + disposition. Bound to a
 // partition + partition-scoped room (Amendment A).
 func (i *Integration) writeCallRecord(ctx context.Context, c openCall, disposition string) error {
@@ -158,11 +158,11 @@ func (i *Integration) writeCallRecord(ctx context.Context, c openCall, dispositi
 	return nil
 }
 
-// callRecordMutation builds the mutationRecordCall query for a completed call,
+// callRecordMutation builds the recordCall query for a completed call,
 // including the per-call cost estimate. Pure + unit-testable.
 func callRecordMutation(c openCall, durationSeconds int, disposition string, costEstimate float64) string {
 	return fmt.Sprintf(
-		`mutationRecordCall({direction: %q, fromE164: %q, toE164: %q, partitionId: %q, room: %q, carrier: %q, agentId: %q, durationSeconds: %d, disposition: %q, costEstimate: %g})`,
+		`recordCall({direction: %q, fromE164: %q, toE164: %q, partitionId: %q, room: %q, carrier: %q, agentId: %q, durationSeconds: %d, disposition: %q, costEstimate: %g})`,
 		c.direction, c.fromE164, c.toE164, c.partitionID, c.room, "", c.agentID, durationSeconds, disposition, costEstimate,
 	)
 }

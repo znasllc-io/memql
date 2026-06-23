@@ -6,14 +6,14 @@
 // ownerUserId from actor.userId so every row is caller-owned (the
 // per-row authz guard). Update + delete are partial updates by id;
 // the calendar tool reads the row through the owner-scoped
-// queryCalendarEventById first, so a caller can only mutate their own
+// calendarEventById first, so a caller can only mutate their own
 // events. Exposed as typed SDK methods on `conn.query`.
 
 use calendar.concepts.{ calendarEvent }
 
 @enabled
-@description("Create a native calendar event owned by the authenticated caller. ownerUserId is stamped from actor.userId (caller-scoped write); createdAt + createdBy are engine-stamped row intrinsics (NOT payload fields -- declaring them is rejected as reserved, memql#1673); source defaults to 'native'. The reactive harness's reminder triggers pick the row up via queryUpcomingEvents. Pass `eventId` to control the id (idempotent re-create), else the engine assigns one.")
-mutation calendarEvent mutationCreateCalendarEvent {
+@description("Create a native calendar event owned by the authenticated caller. ownerUserId is stamped from actor.userId (caller-scoped write); createdAt + createdBy are engine-stamped row intrinsics (NOT payload fields -- declaring them is rejected as reserved, memql#1673); source defaults to 'native'. The reactive harness's reminder triggers pick the row up via upcomingEvents. Pass `eventId` to control the id (idempotent re-create), else the engine assigns one.")
+mutate calendarEvent createCalendarEvent {
   args {
     eventId      string
     title        string  @required
@@ -40,8 +40,8 @@ mutation calendarEvent mutationCreateCalendarEvent {
 }
 
 @enabled
-@description("Partial update of a calendarEvent. Only the fields passed in `payload` change; everything else inherits from the prior row. Backs editing an event (reschedule, rename, change location / notes / recurrence). The calendar tool reads the row via the owner-scoped queryCalendarEventById before calling this, so cross-user edits are impossible.")
-mutation calendarEvent mutationUpdateCalendarEvent {
+@description("Partial update of a calendarEvent. Only the fields passed in `payload` change; everything else inherits from the prior row. Backs editing an event (reschedule, rename, change location / notes / recurrence). The calendar tool reads the row via the owner-scoped calendarEventById before calling this, so cross-user edits are impossible.")
+mutate calendarEvent updateCalendarEvent {
   args {
     eventId  string  @required
     payload  object  @required
@@ -53,8 +53,8 @@ mutation calendarEvent mutationUpdateCalendarEvent {
 }
 
 @enabled
-@description("Soft-delete a calendarEvent by stamping deleted=true. The time-series row survives for history + so a future external-sync reconciler can propagate the deletion upstream; queries hide it via traitIsNotDeleted. The calendar tool reads the row via the owner-scoped queryCalendarEventById before calling this, so a caller can only delete their own events.")
-mutation calendarEvent mutationDeleteCalendarEvent {
+@description("Soft-delete a calendarEvent by stamping deleted=true. The time-series row survives for history + so a future external-sync reconciler can propagate the deletion upstream; queries hide it via isNotDeleted. The calendar tool reads the row via the owner-scoped calendarEventById before calling this, so a caller can only delete their own events.")
+mutate calendarEvent deleteCalendarEvent {
   args {
     eventId  string  @required
   }

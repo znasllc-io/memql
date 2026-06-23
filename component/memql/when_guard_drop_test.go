@@ -55,7 +55,7 @@ func TestWhenGuardDrop(t *testing.T) {
 
 		// Arg present-but-nil -> treated as absent and dropped. #1631: tool
 		// handlers materialize an omitted optional arg as an explicit `null`
-		// (todosList's `queryTodos({done: $args.done})` collapses the
+		// (todosList's `todos({done: $args.done})` collapses the
 		// unfilled placeholder to `null`), so the args map carries the key
 		// with a nil value. Before the fix this slipped past the existence
 		// check, leaked nil into `payload.done == args.done`, and failed the

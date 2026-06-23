@@ -77,7 +77,7 @@ func countContains(calls []string, sub string) int {
 	return n
 }
 
-// trainPlanRow builds the queryPlanById response in the shape-projected
+// trainPlanRow builds the planById response in the shape-projected
 // form MaterializeRows reads: a flat row under an `output` envelope
 // (the planFull shape projects payload.input -> a flat `input` key, so
 // the dispatcher reads plan["input"] directly, not plan.payload.input).
@@ -106,7 +106,7 @@ func TestTrainSpecialistDispatcher_RunsTrainerAndCompletes(t *testing.T) {
 	eng := &fakeEngine{
 		toolResult: "wrote 5 chunks",
 		execResponder: func(q string) (any, error) {
-			if strings.Contains(q, "queryPlanById") {
+			if strings.Contains(q, "planById") {
 				return trainPlanRow("plan-1", "initial", "physics_qm"), nil
 			}
 			return nil, nil
@@ -163,7 +163,7 @@ func TestTrainSpecialistDispatcher_ConcurrentCreatedUpdatedDispatchesOnce(t *tes
 	eng := &fakeEngine{
 		toolResult: "wrote 5 chunks",
 		execResponder: func(q string) (any, error) {
-			if strings.Contains(q, "queryPlanById") {
+			if strings.Contains(q, "planById") {
 				return trainPlanRow("plan-race", "initial", "physics_qm"), nil
 			}
 			return nil, nil
@@ -207,7 +207,7 @@ func TestTrainSpecialistDispatcher_RefreshResetsStale(t *testing.T) {
 	eng := &fakeEngine{
 		toolResult: "refreshed; superseded 2 chunks",
 		execResponder: func(q string) (any, error) {
-			if strings.Contains(q, "queryPlanById") {
+			if strings.Contains(q, "planById") {
 				return trainPlanRow("plan-2", "refresh", "physics_qm"), nil
 			}
 			return nil, nil
@@ -226,7 +226,7 @@ func TestTrainSpecialistDispatcher_RefreshResetsStale(t *testing.T) {
 	})
 
 	exec, _, _ := eng.snapshot()
-	if got := countContains(exec, "queryDocumentChunksForDomain"); got != 1 {
+	if got := countContains(exec, "documentChunksForDomain"); got != 1 {
 		t.Errorf("refresh mode should load existing corpus; got %d (exec=%v)", got, exec)
 	}
 	if got := countContains(exec, "mutationResetStaleAfterRefresh"); got != 1 {
@@ -329,11 +329,11 @@ func TestRefreshCron_SpawnRefreshPlanCallShape(t *testing.T) {
 	}
 	exec, _, _ := eng.snapshot()
 	if len(exec) != 1 {
-		t.Fatalf("expected one mutationCreatePlan call; got %d", len(exec))
+		t.Fatalf("expected one createPlan call; got %d", len(exec))
 	}
 	q := exec[0]
 	for _, want := range []string{
-		"mutationCreatePlan",
+		"createPlan",
 		`"kind": "trainSpecialist"`,
 		`"triggerSource": "system"`,
 		`"mode":"refresh"`,
@@ -370,7 +370,7 @@ func TestRefreshCron_StaleSignalThreshold(t *testing.T) {
 	}}
 	c.HandleDomainUpdated(at)
 	exec, _, _ := eng.snapshot()
-	if countContains(exec, "mutationCreatePlan") != 1 {
+	if countContains(exec, "createPlan") != 1 {
 		t.Errorf("at-threshold stale signal should spawn exactly one refresh; got %v", exec)
 	}
 }

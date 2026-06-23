@@ -7,7 +7,7 @@ import "context"
 // keyset-paginated wrappers around specific named primitives whose
 // list views can exceed the engine's page size.
 //
-// Why these exist: the generated typed methods (QueryAllPlans, ...)
+// Why these exist: the generated typed methods (AllPlans, ...)
 // dispatch through executeNamed, which neither threads an inbound
 // continuation cursor nor surfaces the response nextCursor -- so a
 // consumer of the plain generated method silently sees only the first
@@ -25,18 +25,18 @@ import "context"
 // epic #1964). Add a wrapper here only for a named query that genuinely
 // renders an unbounded list AND declares `sort` + `paginate`.
 
-// QueryAllPlansPage returns ONE keyset page of queryAllPlans plus the
+// AllPlansPage returns ONE keyset page of allPlans plus the
 // cursor to continue. Pass an empty cursor for the first page; thread
 // PageResult.NextCursor back in for "load more". An empty NextCursor
 // means the plan set is exhausted. Backs the cockpit Planner list view.
-func (qc *QueryClient) QueryAllPlansPage(ctx context.Context, args QueryAllPlansArgs, cursor string) (*PageResult, error) {
-	return qc.ExecutePaginated(ctx, QueryAllPlansBuild(args), cursor)
+func (qc *QueryClient) AllPlansPage(ctx context.Context, args AllPlansArgs, cursor string) (*PageResult, error) {
+	return qc.ExecutePaginated(ctx, AllPlansBuild(args), cursor)
 }
 
-// QueryAuthoringBundlesForOwnerPage returns ONE keyset page of
-// queryAuthoringBundlesForOwner plus the continuation cursor. Backs the
+// AuthoringBundlesForOwnerPage returns ONE keyset page of
+// authoringBundlesForOwner plus the continuation cursor. Backs the
 // cockpit Bundles list view, whose per-owner bundle set accumulates
 // over time and exceeds one page.
-func (qc *QueryClient) QueryAuthoringBundlesForOwnerPage(ctx context.Context, args QueryAuthoringBundlesForOwnerArgs, cursor string) (*PageResult, error) {
-	return qc.ExecutePaginated(ctx, QueryAuthoringBundlesForOwnerBuild(args), cursor)
+func (qc *QueryClient) AuthoringBundlesForOwnerPage(ctx context.Context, args AuthoringBundlesForOwnerArgs, cursor string) (*PageResult, error) {
+	return qc.ExecutePaginated(ctx, AuthoringBundlesForOwnerBuild(args), cursor)
 }

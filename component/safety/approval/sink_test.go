@@ -30,9 +30,9 @@ func (s *stubEngine) Execute(_ context.Context, query string) (any, error) {
 	s.calls = append(s.calls, query)
 	s.mu.Unlock()
 	switch {
-	case strings.HasPrefix(query, "queryActiveApprovalsByCorrelationKey"):
+	case strings.HasPrefix(query, "activeApprovalsByCorrelationKey"):
 		return s.queryRes, s.queryErr
-	case strings.HasPrefix(query, "mutationCreateApprovalRequest"):
+	case strings.HasPrefix(query, "createApprovalRequest"):
 		return s.mutRes, s.mutErr
 	}
 	return nil, errors.New("stubEngine: unexpected query: " + query)
@@ -164,11 +164,11 @@ func TestSinkNoActiveRowCreatesPending(t *testing.T) {
 	// Verify the mutation call carries the descriptor fields.
 	mut := engine.Calls()[1]
 	for _, frag := range []string{
-		`mutationCreateApprovalRequest(`,
+		`createApprovalRequest(`,
 		`surface: "workbench"`,
 		`action: "exec"`,
 		`tier: "high"`,
-		`status` /* not in args, set by mutation */, // soft check that mutation built
+		`status`, /* not in args, set by mutation */ // soft check that mutation built
 	} {
 		if frag == `status` /* sentinel */ {
 			continue

@@ -98,7 +98,7 @@ const (
 // to keep the node package off the database package).
 //
 // textChunk (memql#1326): the agent TEXT-chat path streams reply tokens as
-// v1:cognition:text:chunk graph inserts (cognition's mutationEmitTextChunk),
+// v1:cognition:text:chunk graph inserts (cognition's emitTextChunk),
 // NOT over the #1266 gRPC stream channel -- so the chunks are chat-reply
 // payload exactly like the committed utterance they precede. Left off this set
 // at #1264, they rode only the mesh star: cognition's single parent dial lands
@@ -140,7 +140,7 @@ const (
 // On every space open the CoPresent client joins the space (participant row,
 // first open only -- idempotent content-addressed id) and creates a session row
 // (EVERY open, fresh sessionId), and heartbeats the session while the space
-// stays open (mutationTouchSession). Both concepts carry a required partitionId.
+// stays open (touchSession). Both concepts carry a required partitionId.
 // These are consumer-side subscription triggers ONLY -- they are never
 // published to the substrate (the producer set stays the chat-reply topics;
 // participant/session events keep riding the mesh fast-path).

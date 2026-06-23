@@ -234,12 +234,12 @@ func maxStreamingToolLoopIterations() int {
 // every other turn leaves it empty. workerHost / workerComputer
 // dispatches on that turn carry the plan id through to the
 // v1:worker:invocation row, which is what makes
-// queryInvocationsForPlan(planId) return rows so the planner's
+// invocationsForPlan(planId) return rows so the planner's
 // outcome detector can stamp Plan succeeded/failed correctly.
 type turnContext struct {
 	AgentId     string
 	OwnerUserId string
-	PartitionId     string
+	PartitionId string
 	PlanId      string
 	// ThreadVisibility names which chat thread is dispatching this turn:
 	// "public" for Group-thread dispatches, "private" for per-user
@@ -306,7 +306,7 @@ func (r *Replier) runStreamingToolLoop(
 		PlanId:      turnCtx.PlanId,
 		AgentId:     turnCtx.AgentId,
 		OwnerUserId: turnCtx.OwnerUserId,
-		PartitionId:     turnCtx.PartitionId,
+		PartitionId: turnCtx.PartitionId,
 	})
 
 	// Charge this turn's LLM calls against the per-conversation + per-plan
@@ -1081,7 +1081,7 @@ type agentContextStamp struct {
 	// docs). Used by worker tools so the v1:worker:invocation row
 	// they persist downstream is filed under the right Plan id;
 	// without it the row lands with planId="" and the planner's
-	// queryInvocationsForPlan filter misses it, surfacing as
+	// invocationsForPlan filter misses it, surfacing as
 	// Plan-stamped-failed even when the worker tool succeeded.
 	StampPlanId bool
 	// StampThreadVisibility stamps args["visibility"] from the
@@ -1257,7 +1257,7 @@ func (r *Replier) promoteCanvasOutput(ctx context.Context, turnCtx turnContext, 
 
 	mutationCtx := withUserActor(ctx, ownerUserId)
 	var b strings.Builder
-	fmt.Fprintf(&b, `mutationCreateGeneratedOutput({outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q`,
+	fmt.Fprintf(&b, `createGeneratedOutput({outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q`,
 		outputId, ownerUserId, title, body, "agent_generated")
 	if summary != "" {
 		fmt.Fprintf(&b, `, summary:%q`, summary)

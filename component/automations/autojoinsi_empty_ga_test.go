@@ -24,7 +24,7 @@ import (
 // not apply the leading `!` negation operator, so `!getGA.Empty()`
 // evaluated truthy unconditionally, the join branch fired with no GA,
 // and coalesce(getGA.First().id, "") resolved to nil -- which
-// queryParticipantByAgentSpace rejected as a missing required
+// participantByAgentSpace rejected as a missing required
 // `agentId`.
 //
 // The fix guards the join on a POSITIVE id-presence check,
@@ -147,14 +147,14 @@ func TestAutoJoinAI_BangEmptyGuard_NowHonoursNegation(t *testing.T) {
 // or `!`-negation, neither of which the condition evaluator resolves at
 // runtime).
 func TestAutoJoinAI_JoinGuardCompilesToResolvablePath(t *testing.T) {
-	src := `use cognition.queries.{ queryParticipantByAgentSpace }
+	src := `use cognition.queries.{ participantByAgentSpace }
 @description("autoJoinAI guard shape")
 logic logicAutoJoinGuardShape {
   args { event object @required }
   body {
-    getGA := queryParticipantByAgentSpace({ partitionId: args.event.payload.id, agentId: "seed" })
+    getGA := participantByAgentSpace({ partitionId: args.event.payload.id, agentId: "seed" })
     joinGA := if first(getGA).id != "" {
-      queryParticipantByAgentSpace({ partitionId: args.event.payload.id, agentId: "join" })
+      participantByAgentSpace({ partitionId: args.event.payload.id, agentId: "join" })
     }
     return joinGA
   }

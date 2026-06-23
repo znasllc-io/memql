@@ -16,11 +16,11 @@
 use forge.concepts.{ project, request, requestEvent }
 
 // ---------------------------------------------------------------------------
-// mutationCreateProject -- register a project forge develops against.
+// createProject -- register a project forge develops against.
 // ---------------------------------------------------------------------------
 @enabled
 @description("Register a v1:forge:project. createdByUserId is stamped from actor.userId.")
-mutation project mutationCreateProject {
+mutate project createProject {
   args {
     projectId    string
     slug         string  @required
@@ -38,19 +38,19 @@ mutation project mutationCreateProject {
     args.description
     status: "active"
     createdByUserId: actor.userId
-    provenanceMutation: "mutationCreateProject"
+    provenanceMutation: "createProject"
   }
 }
 
 // ---------------------------------------------------------------------------
-// mutationCreateRequest -- submit a request. submitterUserId + submitterRole
+// createRequest -- submit a request. submitterUserId + submitterRole
 // are stamped from the auth context; status always lands 'submitted' and the
 // routeRequest automation (fired by node.created) sets the role-based next
 // state. Returns the created request.
 // ---------------------------------------------------------------------------
 @enabled
 @description("Submit a v1:forge:request. submitterUserId + submitterRole are stamped server-side from actor (no spoofing). status lands 'submitted'; the routeRequest automation routes it by role.")
-mutation request mutationCreateRequest {
+mutate request createRequest {
   args {
     requestId      string
     projectId      string    @required
@@ -72,19 +72,19 @@ mutation request mutationCreateRequest {
     priority: coalesce(args.priority, "normal")
     status: "submitted"
     targetEnv: "staging"
-    provenanceMutation: "mutationCreateRequest"
+    provenanceMutation: "createRequest"
   }
 }
 
 // ---------------------------------------------------------------------------
-// mutationAdvanceRequest -- the generic transition. update read-merges so
+// advanceRequest -- the generic transition. update read-merges so
 // untouched fields (body, submitter, attachments) survive. Callers pass the
 // target status and the relevant actor stamp (validatedByUserId /
-// approvedByUserId). Pair every call with mutationRecordRequestEvent.
+// approvedByUserId). Pair every call with recordRequestEvent.
 // ---------------------------------------------------------------------------
 @enabled
 @description("Transition a v1:forge:request to a new status (the approval pipeline edges). update read-merges the prior row. The role guard belongs in an engine pre-insert hook (follow-up).")
-mutation request mutationAdvanceRequest {
+mutate request advanceRequest {
   args {
     requestId          string  @required
     status             string  @required
@@ -98,7 +98,7 @@ mutation request mutationAdvanceRequest {
     args.validatedByUserId
     args.approvedByUserId
     args.resolution
-    provenanceMutation: "mutationAdvanceRequest"
+    provenanceMutation: "advanceRequest"
   }
 }
 
@@ -112,7 +112,7 @@ mutation request mutationAdvanceRequest {
 
 @enabled
 @description("Validate a v1:forge:request (developer action): set status 'needs_approval' and stamp validatedByUserId from actor.userId.")
-mutation request mutationValidateRequest {
+mutate request validateRequest {
   args {
     requestId  string  @required
   }
@@ -120,13 +120,13 @@ mutation request mutationValidateRequest {
     id: args.requestId
     status: "needs_approval"
     validatedByUserId: actor.userId
-    provenanceMutation: "mutationValidateRequest"
+    provenanceMutation: "validateRequest"
   }
 }
 
 @enabled
 @description("Approve a v1:forge:request (owner action): set status 'queued' (ready to implement) and stamp approvedByUserId from actor.userId.")
-mutation request mutationApproveRequest {
+mutate request approveRequest {
   args {
     requestId  string  @required
   }
@@ -134,13 +134,13 @@ mutation request mutationApproveRequest {
     id: args.requestId
     status: "queued"
     approvedByUserId: actor.userId
-    provenanceMutation: "mutationApproveRequest"
+    provenanceMutation: "approveRequest"
   }
 }
 
 @enabled
 @description("Send a v1:forge:request back for changes: set status 'changes_requested' with a reason.")
-mutation request mutationRequestChanges {
+mutate request requestChanges {
   args {
     requestId  string  @required
     resolution string  @required
@@ -149,25 +149,25 @@ mutation request mutationRequestChanges {
     id: args.requestId
     status: "changes_requested"
     args.resolution
-    provenanceMutation: "mutationRequestChanges"
+    provenanceMutation: "requestChanges"
   }
 }
 
 // ---------------------------------------------------------------------------
-// mutationAttachToRequest -- link one v1:common:attachment to a request by
+// attachToRequest -- link one v1:common:attachment to a request by
 // writing the full (updated) attachmentIds array. The mutation DSL update
 // block replaces array fields on write; it cannot natively append a single
 // element. Callers must read-modify-write: fetch the current attachmentIds
-// via forgeRequestById (or queryRequestById), append the new id client-side,
+// via forgeRequestById (or requestById), append the new id client-side,
 // and pass the resulting array here. This mirrors the
-// mutationRecordLegalAcceptance pattern -- the closest workable approach
+// recordLegalAcceptance pattern -- the closest workable approach
 // until the DSL gains a native arrayAppend expression. update read-merges
 // all other request fields (body, status, submitter, priority, etc.) so
 // they survive unchanged.
 // ---------------------------------------------------------------------------
 @enabled
 @description("Link a v1:common:attachment to a v1:forge:request by replacing its attachmentIds array. Caller must read-modify-write: fetch the existing attachmentIds, append the new id, pass the full array here. update read-merges all other request fields.")
-mutation request mutationAttachToRequest {
+mutate request attachToRequest {
   args {
     requestId      string    @required
     attachmentIds  []string  @required
@@ -175,20 +175,20 @@ mutation request mutationAttachToRequest {
   update {
     id: args.requestId
     args.attachmentIds
-    provenanceMutation: "mutationAttachToRequest"
+    provenanceMutation: "attachToRequest"
   }
 }
 
 // ---------------------------------------------------------------------------
-// mutationRecordRequestEvent -- append an audit/pipeline event. actorUserId +
+// recordRequestEvent -- append an audit/pipeline event. actorUserId +
 // actorRole stamped from the auth context.
 //
 // requestId is normalized to the SHORT id form via shortId() (#1859). The two
 // caller paths feed two id shapes:
-//   - automation path (logicRouteRequest / logicRecordTransition) passes
+//   - automation path (routeRequest / recordTransition) passes
 //     args.event.payload.id, which is the CANONICAL node id
 //     (v1:forge:request:r-...) of the created/updated request row;
-//   - tool path (logicRecordMentoring) passes the SHORT tool arg (r-...).
+//   - tool path (recordMentoring) passes the SHORT tool arg (r-...).
 // Without normalization the audit trail splits across both forms and
 // forgeRequestHistory(<shortId>) finds only the tool-written events.
 // shortId() strips the `v1:forge:request:` concept prefix; it is idempotent
@@ -197,7 +197,7 @@ mutation request mutationAttachToRequest {
 // ---------------------------------------------------------------------------
 @enabled
 @description("Append a v1:forge:requestEvent (the time-series audit trail). actorUserId + actorRole stamped from actor. requestId is normalized to the short id form (shortId()) so the trail keys consistently whether the caller passes a canonical node id (automation path) or a bare short id (tool path) -- #1859.")
-mutation requestEvent mutationRecordRequestEvent {
+mutate requestEvent recordRequestEvent {
   args {
     eventId     string
     requestId   string  @required
@@ -215,6 +215,6 @@ mutation requestEvent mutationRecordRequestEvent {
     args.fromStatus
     args.toStatus
     args.note
-    provenanceMutation: "mutationRecordRequestEvent"
+    provenanceMutation: "recordRequestEvent"
   }
 }

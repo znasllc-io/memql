@@ -21,7 +21,7 @@
 //   (input.nextAttemptAt = now + 5min)
 //      |
 //      | poll loop wakes every 60s, finds the Plan via
-//      | queryDueTrainAgentRetryPlans
+//      | dueTrainAgentRetryPlans
 //      v
 //   processRetryPlan(...)
 //      |
@@ -119,7 +119,7 @@ func (i *Integration) enqueueRetryPlan(
 	})
 
 	createQ := fmt.Sprintf(
-		`mutationCreatePlan({"planId": %s, "partitionId": %s, "kind": "trainAgentRetryStep", "goal": %s, "requestedBy": %s, "triggerSource": "system", "input": %s})`,
+		`createPlan({"planId": %s, "partitionId": %s, "kind": "trainAgentRetryStep", "goal": %s, "requestedBy": %s, "triggerSource": "system", "input": %s})`,
 		quoteString(planId),
 		quoteString(partitionId),
 		quoteString(goal),
@@ -280,7 +280,7 @@ func (i *Integration) pollRetries(ctx context.Context) {
 	if i.engine == nil {
 		return
 	}
-	res, err := i.engine.Execute(ctx, "queryDueTrainAgentRetryPlans({})")
+	res, err := i.engine.Execute(ctx, "dueTrainAgentRetryPlans({})")
 	if err != nil {
 		i.Logger.Debug("training.pollRetries: query failed (likely engine not ready yet)", "err", err)
 		return
@@ -372,7 +372,7 @@ func (i *Integration) processRetryPlan(ctx context.Context, planId string, paylo
 	// node doesn't double-execute) -- best-effort.
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, _ = i.engine.Execute(ctx, fmt.Sprintf(
-		`mutationUpdatePlanStatus({"planId": %s, "status": "running", "startedAt": %s})`,
+		`updatePlanStatus({"planId": %s, "status": "running", "startedAt": %s})`,
 		quoteString(planId), quoteString(now),
 	))
 
@@ -398,7 +398,7 @@ func (i *Integration) processRetryPlan(ctx context.Context, planId string, paylo
 			"originalPlanId": originalPlanId,
 		})
 		_, _ = i.engine.Execute(ctx, fmt.Sprintf(
-			`mutationUpdatePlanStatus({"planId": %s, "status": "succeeded", "output": %s, "completedAt": %s})`,
+			`updatePlanStatus({"planId": %s, "status": "succeeded", "output": %s, "completedAt": %s})`,
 			quoteString(planId), successOutput, quoteString(completedAt),
 		))
 		i.emitRetryCompletedCard(ctx, planId, originalPlanId, partitionId, requestedBy, agentId, step, attempt)
@@ -415,7 +415,7 @@ func (i *Integration) processRetryPlan(ctx context.Context, planId string, paylo
 		failedAt := time.Now().UTC().Format(time.RFC3339)
 		errMsg := fmt.Sprintf("attempt %d/%d failed: %v", nextAttempt, retryMaxAttempts, runErr)
 		_, _ = i.engine.Execute(ctx, fmt.Sprintf(
-			`mutationUpdatePlanStatus({"planId": %s, "status": "failed", "errorMessage": %s, "completedAt": %s})`,
+			`updatePlanStatus({"planId": %s, "status": "failed", "errorMessage": %s, "completedAt": %s})`,
 			quoteString(planId), quoteString(errMsg), quoteString(failedAt),
 		))
 		i.emitRetryFailedCard(ctx, planId, originalPlanId, partitionId, requestedBy, agentId, step, retryMaxAttempts, errMsg)
@@ -437,13 +437,13 @@ func (i *Integration) processRetryPlan(ctx context.Context, planId string, paylo
 		"failureReason":  runErr.Error(),
 	}
 	// Re-create the plan row with status=queued + bumped input.
-	// memQL Plans are time-series; mutationCreatePlan with the
+	// memQL Plans are time-series; createPlan with the
 	// existing planId inserts a fresh row that supersedes the prior
 	// (cache(ttl=0) on the concept reads latest only). The
 	// status-update mutation above set it to running; this brings
 	// it back to queued for the next poll window.
 	_, _ = i.engine.Execute(ctx, fmt.Sprintf(
-		`mutationCreatePlan({"planId": %s, "partitionId": %s, "kind": "trainAgentRetryStep", "goal": %s, "requestedBy": %s, "triggerSource": "system", "input": %s})`,
+		`createPlan({"planId": %s, "partitionId": %s, "kind": "trainAgentRetryStep", "goal": %s, "requestedBy": %s, "triggerSource": "system", "input": %s})`,
 		quoteString(planId),
 		quoteString(partitionId),
 		quoteString(fmt.Sprintf("Retry training step (%s) -- attempt %d/%d", humanStep(step), nextAttempt+1, retryMaxAttempts)),

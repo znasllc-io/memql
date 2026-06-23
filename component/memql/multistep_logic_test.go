@@ -19,20 +19,20 @@ import (
 // the resulting AutomationDef.
 func TestMultiStepLogicReturnParsing(t *testing.T) {
 	// Minimal reproduction of dsl/identity/logic.memql's
-	// logicRevokeExpiredDelegations body shape. The parser layer
+	// revokeExpiredDelegations body shape. The parser layer
 	// doesn't care that the inner calls are unresolved -- it just has
 	// to recognise the trailing `return` keyword + expression.
-	source := `@useQuery(queryExpiredActiveDelegations)
-@useMutation(mutationRevokeDelegation)
-@description("repro of logicRevokeExpiredDelegations shape")
-logic logicRevokeExpiredDelegations {
+	source := `@useQuery(expiredActiveDelegations)
+@useMutation(revokeDelegation)
+@description("repro of revokeExpiredDelegations shape")
+logic revokeExpiredDelegations {
   args {
     now string @required
   }
   body {
-    expiredDelegations := queryExpiredActiveDelegations({ now: args.now })
+    expiredDelegations := expiredActiveDelegations({ now: args.now })
     for item := range expiredDelegations.Nodes() {
-      revokeStep := mutationRevokeDelegation({
+      revokeStep := revokeDelegation({
         delegationId: item.id,
         revokedBySubject: "system:expiry",
         revokedAt: args.now
@@ -123,8 +123,8 @@ logic logicRevokeExpiredDelegations {
 // converter only knew about FunctionCallExpr and rejected the
 // typed forms with `unsupported parser expression type:
 // *ast.CoalesceExpr`. That broke every Logic body whose `return`
-// expression used `coalesce(...)` -- logicBootstrapSession,
-// logicReleaseWorkspaceOnPlanTerminal, etc. -- because
+// expression used `coalesce(...)` -- bootstrapSession,
+// releaseWorkspaceOnPlanTerminal, etc. -- because
 // extractLogicReturnExpression handed the raw CoalesceExpr to
 // the converter.
 func TestConvertExpressionHandlesCoalesce(t *testing.T) {
@@ -256,7 +256,7 @@ logic logicSample {
 }
 
 // TestTopLevelMultiStatementIfWithForRange pins the workbench
-// logicReleaseWorkspaceOnPlanTerminal shape -- an outer `if cond`
+// releaseWorkspaceOnPlanTerminal shape -- an outer `if cond`
 // with an inner `for item := range x.Nodes() { ... }` plus a
 // trailing statement. The for-range inner steps must inherit the
 // outer if's condition so the mutation only runs when the gate is
@@ -272,7 +272,7 @@ logic logicSample {
   body {
     planId := someQuery({ id: args.event.id })
     if planId != "" {
-      workspaces := queryWorkspaceForPlan({ planId: planId })
+      workspaces := workspaceForPlan({ planId: planId })
       for item := range workspaces.Nodes() {
         flip := if item.payload.status == "provisioned" {
           someMutation({ id: item.id })
@@ -401,7 +401,7 @@ func parseLogicBody(t *testing.T, source string) *languageParser.AutomationDef {
 // path so a fix lands a green test, not a stab in the dark.
 func TestForRangeWithInnerConditionalStep(t *testing.T) {
 	source := `
-@description("repro of logicReleaseWorkspaceOnPlanTerminal inner-if shape")
+@description("repro of releaseWorkspaceOnPlanTerminal inner-if shape")
 logic logicSample {
   args {
     event object @required

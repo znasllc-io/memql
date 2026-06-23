@@ -67,7 +67,7 @@ func (r *queryRoutingResolver) ResolveSkills(_ context.Context, skillIds []strin
 	return memqlengine.SkillBundle{}, nil
 }
 
-// agentSkillsBundle builds a queryAgentById-style result node carrying a
+// agentSkillsBundle builds a agentById-style result node carrying a
 // capabilities.skillIds list (the post-#158 shape the tool-scope path reads).
 func agentSkillsBundle(agentId string, skillIds ...string) *memqlv1.GraphBundle {
 	caps := map[string]any{"skillIds": toAny(skillIds)}
@@ -184,7 +184,7 @@ func TestResolveGroupGAAgentIdVia(t *testing.T) {
 
 	t.Run("resolves the GA participant's real agent id", func(t *testing.T) {
 		fake := &queryRoutingResolver{bySubstr: map[string]*memqlv1.GraphBundle{
-			"queryGroupGAForSpace": gaParticipantBundle(realId),
+			"groupGAForSpace": gaParticipantBundle(realId),
 		}}
 		got := resolveGroupGAAgentIdVia(ctx, fake, "space-1", nil)
 		assert.Equal(t, realId, got)
@@ -213,12 +213,12 @@ func TestResolveAgentToolSlugsVia(t *testing.T) {
 	ctx := context.Background()
 	const realId = "v1:agents:agent:assistant-1c65cb0c"
 
-	t.Run("queries the real id via queryAgentById (not a placeholder, not retired ?. syntax)", func(t *testing.T) {
+	t.Run("queries the real id via agentById (not a placeholder, not retired ?. syntax)", func(t *testing.T) {
 		fake := &queryRoutingResolver{}
 		resolveAgentToolSlugsVia(ctx, fake, realId, nil)
 		require.NotEmpty(t, fake.lastQueries())
 		q := fake.lastQueries()[0]
-		assert.Contains(t, q, `queryAgentById(`, "must use the tested named query, not a raw from() select")
+		assert.Contains(t, q, `agentById(`, "must use the tested named query, not a raw from() select")
 		assert.NotContains(t, q, "?.", "must NOT use the retired optional-chain syntax the parser rejects (#1454)")
 		assert.Contains(t, q, realId, "the scope read must use the resolved real id")
 		assert.NotContains(t, q, "-ga", "must NOT carry the <space>-ga placeholder")
@@ -227,7 +227,7 @@ func TestResolveAgentToolSlugsVia(t *testing.T) {
 	t.Run("resolves skillIds -> tool slugs (the #1454 fix)", func(t *testing.T) {
 		fake := &queryRoutingResolver{
 			bySubstr: map[string]*memqlv1.GraphBundle{
-				"queryAgentById": agentSkillsBundle(realId, "todos", "notes"),
+				"agentById": agentSkillsBundle(realId, "todos", "notes"),
 			},
 			skillBundles: map[string]memqlengine.SkillBundle{
 				"todos,notes": {ToolSlugs: []string{"todosCreate", "notesCreate"}},
@@ -243,7 +243,7 @@ func TestResolveAgentToolSlugsVia(t *testing.T) {
 
 	t.Run("row with no skills scopes to empty (does NOT fail open)", func(t *testing.T) {
 		fake := &queryRoutingResolver{bySubstr: map[string]*memqlv1.GraphBundle{
-			"queryAgentById": agentSkillsBundle(realId), // capabilities present, skillIds empty
+			"agentById": agentSkillsBundle(realId), // capabilities present, skillIds empty
 		}}
 		slugs, _, found := resolveAgentToolSlugsVia(ctx, fake, realId, nil)
 		assert.True(t, found, "found=true is authoritative even with no skills")
@@ -259,7 +259,7 @@ func TestResolveAgentToolSlugsVia(t *testing.T) {
 
 	t.Run("skill resolution error fails open", func(t *testing.T) {
 		fake := &queryRoutingResolver{
-			bySubstr:   map[string]*memqlv1.GraphBundle{"queryAgentById": agentSkillsBundle(realId, "todos")},
+			bySubstr:   map[string]*memqlv1.GraphBundle{"agentById": agentSkillsBundle(realId, "todos")},
 			resolveErr: fmt.Errorf("skill catalog down"),
 		}
 		_, _, found := resolveAgentToolSlugsVia(ctx, fake, realId, nil)
@@ -273,12 +273,12 @@ func TestResolveAgentSessionRecordVia(t *testing.T) {
 	ctx := context.Background()
 	const realId = "v1:agents:agent:assistant-1c65cb0c"
 
-	t.Run("persona query is keyed on the real id via queryAgentById", func(t *testing.T) {
+	t.Run("persona query is keyed on the real id via agentById", func(t *testing.T) {
 		fake := &queryRoutingResolver{}
 		resolveAgentSessionRecordVia(ctx, fake, realId)
 		require.NotEmpty(t, fake.lastQueries())
 		q := fake.lastQueries()[0]
-		assert.Contains(t, q, `queryAgentById(`, "persona read uses the tested named query (agentFull carries name/role/personality)")
+		assert.Contains(t, q, `agentById(`, "persona read uses the tested named query (agentFull carries name/role/personality)")
 		assert.NotContains(t, q, "?.", "must NOT use the retired optional-chain syntax (#1454)")
 		assert.Contains(t, q, realId, "persona must be resolved by the real id, not the placeholder")
 		assert.NotContains(t, q, "-ga")

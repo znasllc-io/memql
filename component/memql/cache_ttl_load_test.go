@@ -105,13 +105,13 @@ func TestLoad_EmbeddedCachedQueriesCarryHint(t *testing.T) {
 
 	// query name -> expected TTL seconds (the values authored in dsl/).
 	want := map[string]int64{
-		"queryActiveAgentRoles": 300,
-		"queryAgentRoleBySlug":  300,
-		"queryActiveSkills":     300,
-		"queryActiveSkillsFull": 300,
-		"querySkillBySlug":      300,
-		"queryRouterBudgets":    120,
-		"querySpaceUtterances":  30,
+		"activeAgentRoles": 300,
+		"agentRoleBySlug":  300,
+		"activeSkills":     300,
+		"activeSkillsFull": 300,
+		"skillBySlug":      300,
+		"routerBudgets":    120,
+		"spaceUtterances":  30,
 	}
 
 	for name, ttl := range want {

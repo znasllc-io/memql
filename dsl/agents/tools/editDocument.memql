@@ -16,7 +16,7 @@
 //     Library viewer + artifact index reflect the latest content.
 //
 // Nothing is overwritten or lost: the prior version stays retained in history,
-// and the user can restore it later (queryDocumentVersions +
+// and the user can restore it later (documentVersions +
 // mutationRestoreDocumentVersion). The latest pointer always reflects the newest
 // version.
 //

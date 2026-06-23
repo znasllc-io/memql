@@ -2,7 +2,7 @@
 //
 // Orchestration logic for the `forge` namespace.
 //
-// logicRouteRequest -- the role-based router. Fired by the routeRequest
+// routeRequest -- the role-based router. Fired by the routeRequest
 // automation when a v1:forge:request is created (status 'submitted'), it sets
 // the next pipeline state from the submitter's role:
 //
@@ -16,9 +16,9 @@
 //
 // The three guards are mutually exclusive, so exactly one transition fires.
 // Each `if cond { mutation }` only runs its side effect when the guard holds
-// (same pattern as data.logicConflictDetection's guarded publishEvent).
+// (same pattern as data.conflictDetection's guarded publishEvent).
 //
-// No loop risk: the trigger is node.created; mutationAdvanceRequest is an
+// No loop risk: the trigger is node.created; advanceRequest is an
 // update (node.updated), which does not re-fire this automation.
 //
 // The mentoring touch for non-owners (Claude teaches the submitter about what
@@ -26,11 +26,11 @@
 // submitRequest tool description; a server-side `mentored` event is recorded
 // when that happens. (Prompts land in the next slice.)
 
-use forge.mutations.{ mutationAdvanceRequest, mutationAttachToRequest, mutationRecordRequestEvent }
-use forge.queries.{ queryRequestById }
+use forge.mutations.{ advanceRequest, attachToRequest, recordRequestEvent }
+use forge.queries.{ requestById }
 
 // ---------------------------------------------------------------------------
-// logicRecordTransition -- append one requestEvent per post-creation pipeline
+// recordTransition -- append one requestEvent per post-creation pipeline
 // transition. Called by the recordTransition node.updated automation.
 //
 // Status → kind mapping (the canonical pipeline edges after routing):
@@ -42,13 +42,13 @@ use forge.queries.{ queryRequestById }
 // Status values NOT handled here (handled elsewhere or terminal with no event):
 //   submitted           -> initial insert; 'routed' is recorded by routeRequest
 //   needs_validation    -> the routeRequest automation records 'routed' already
-//   validated           -> intermediate state set by mutationValidateRequest
+//   validated           -> intermediate state set by validateRequest
 //                         before the approval hop; no standalone event kind;
 //                         mapped via the needs_approval transition above
 //
 // Loop guard (two layers):
 //   1. This automation writes v1:forge:requestEvent (a DIFFERENT concept),
-//      so mutationRecordRequestEvent never fires graph.node.updated on the
+//      so recordRequestEvent never fires graph.node.updated on the
 //      v1:forge:request concept -- the trigger cannot re-fire.
 //   2. The status whitelist below means an update that changes only a non-status
 //      field (e.g. priority bump) is caught by the empty-kind guard and returns
@@ -63,28 +63,28 @@ use forge.queries.{ queryRequestById }
 
 @enabled
 @description("Route a newly-submitted v1:forge:request to its next pipeline state by submitter role (owner -> queued; developer -> needs_approval; non-developer -> needs_validation). Records a 'routed' audit event.")
-logic logicRouteRequest {
+logic routeRequest {
   args {
     event  object  @required
   }
   body {
     fastTrack := if args.event.payload.submitterRole == "owner" {
-      mutationAdvanceRequest({ requestId: args.event.payload.id, status: "queued", approvedByUserId: args.event.payload.submitterUserId })
+      advanceRequest({ requestId: args.event.payload.id, status: "queued", approvedByUserId: args.event.payload.submitterUserId })
     }
     toApproval := if args.event.payload.submitterRole == "admin" || args.event.payload.submitterRole == "writer" {
-      mutationAdvanceRequest({ requestId: args.event.payload.id, status: "needs_approval" })
+      advanceRequest({ requestId: args.event.payload.id, status: "needs_approval" })
     }
     toValidation := if args.event.payload.submitterRole == "reader" {
-      mutationAdvanceRequest({ requestId: args.event.payload.id, status: "needs_validation" })
+      advanceRequest({ requestId: args.event.payload.id, status: "needs_validation" })
     }
-    recordRouted := mutationRecordRequestEvent({ requestId: args.event.payload.id, kind: "routed", fromStatus: "submitted", note: "routed by submitter role" })
+    recordRouted := recordRequestEvent({ requestId: args.event.payload.id, kind: "routed", fromStatus: "submitted", note: "routed by submitter role" })
     return args.event.payload.id
   }
 }
 
 @enabled
 @description("On v1:forge:request node.updated: append exactly one v1:forge:requestEvent for the four post-creation pipeline transitions (validated / approved / changes_requested / rejected). Each guard is mutually exclusive; at most one fires per invocation. Returns early (no write) for unrecognised statuses.")
-logic logicRecordTransition {
+logic recordTransition {
   args {
     event  object  @required
   }
@@ -97,7 +97,7 @@ logic logicRecordTransition {
     // status; the rest are no-ops (condition evaluates false, step skipped).
     // MemQL logic bodies use := for every declaration; bodies inside `if`
     // blocks must be function calls (not string literals), so each mapped
-    // status gets its own mutationRecordRequestEvent call.
+    // status gets its own recordRequestEvent call.
     //
     // Mapping (toStatus -> kind):
     //   needs_approval    -> "validated"          (developer validated the request)
@@ -110,32 +110,34 @@ logic logicRecordTransition {
     //   validated (intermediate)     -> no standalone kind; next hop is needs_approval
     //
     // Loop guard (two layers):
-    //   1. mutationRecordRequestEvent writes v1:forge:requestEvent (a DIFFERENT
+    //   1. recordRequestEvent writes v1:forge:requestEvent (a DIFFERENT
     //      concept), so it NEVER triggers graph.node.updated on v1:forge:request.
     //   2. The per-status guards only fire on the four whitelisted values, so
     //      updates that change only non-status fields are always silent.
     evtValidated        := if toStatus == "needs_approval" {
-      mutationRecordRequestEvent({ requestId: requestId, kind: "validated",         fromStatus: fromStatus, toStatus: toStatus })
+      recordRequestEvent({ requestId: requestId, kind: "validated",         fromStatus: fromStatus, toStatus: toStatus })
     }
     evtApproved         := if toStatus == "queued" {
-      mutationRecordRequestEvent({ requestId: requestId, kind: "approved",          fromStatus: fromStatus, toStatus: toStatus })
+      recordRequestEvent({ requestId: requestId, kind: "approved",          fromStatus: fromStatus, toStatus: toStatus })
     }
     evtChangesRequested := if toStatus == "changes_requested" {
-      mutationRecordRequestEvent({ requestId: requestId, kind: "changes_requested", fromStatus: fromStatus, toStatus: toStatus })
+      recordRequestEvent({ requestId: requestId, kind: "changes_requested", fromStatus: fromStatus, toStatus: toStatus })
     }
     evtRejected         := if toStatus == "rejected" {
-      mutationRecordRequestEvent({ requestId: requestId, kind: "rejected",          fromStatus: fromStatus, toStatus: toStatus })
+      recordRequestEvent({ requestId: requestId, kind: "rejected",          fromStatus: fromStatus, toStatus: toStatus })
     }
     return toStatus
   }
 }
 
-// logicAttachToRequest -- read-merge-append helper for the forgeAttachToRequest
-// MCP tool. MCP tool args cannot be []string today, so the tool takes a single
-// attachmentId (scalar). This logic function fetches the current request row,
-// appends the new id to the existing attachmentIds array via the DSL append()
-// function (available in the step evaluator), and writes the full updated array
-// via mutationAttachToRequest.
+// appendAttachmentToRequest -- read-merge-append helper for the
+// forgeAttachToRequest MCP tool. MCP tool args cannot be []string today, so the
+// tool takes a single attachmentId (scalar). This logic function fetches the
+// current request row, appends the new id to the existing attachmentIds array
+// via the DSL append() function (available in the step evaluator), and writes
+// the full updated array via the attachToRequest mutation. (The logic carries a
+// distinct name from the mutation it wraps -- C6/memql#2036 de-prefixing would
+// otherwise collide logicAttachToRequest with mutationAttachToRequest.)
 //
 // Sequential attaches APPEND without clobbering: append() reads the existing
 // step-result array (`existing.First().payload.attachmentIds`) and adds the new
@@ -150,36 +152,36 @@ logic logicRecordTransition {
 // array-membership guard isn't supported yet), so callers should avoid attaching
 // the same id twice.
 @enabled
-@description("Append one v1:common:attachment id to a v1:forge:request's attachmentIds array. Fetches the current row, appends the new id, writes the full updated array via mutationAttachToRequest. Backed by the step evaluator's append() -- the closest native append the DSL supports without a Go builtin.")
-logic logicAttachToRequest {
+@description("Append one v1:common:attachment id to a v1:forge:request's attachmentIds array. Fetches the current row, appends the new id, writes the full updated array via the attachToRequest mutation. Backed by the step evaluator's append() -- the closest native append the DSL supports without a Go builtin.")
+logic appendAttachmentToRequest {
   args {
     requestId     string  @required
     attachmentId  string  @required
   }
   body {
-    existing := queryRequestById({ requestId: args.requestId })
-    attach   := mutationAttachToRequest({ requestId: args.requestId, attachmentIds: append(existing.First().payload.attachmentIds, args.attachmentId) })
+    existing := requestById({ requestId: args.requestId })
+    attach   := attachToRequest({ requestId: args.requestId, attachmentIds: append(existing.First().payload.attachmentIds, args.attachmentId) })
     return args.requestId
   }
 }
 
 // ---------------------------------------------------------------------------
-// logicRecordMentoring -- the forgeRecordMentoring tool handler. The tool
+// recordMentoring -- the forgeRecordMentoring tool handler. The tool
 // surface intentionally does NOT expose `kind` (it is always "mentored"), so
-// it cannot point straight at mutationRecordRequestEvent -- that mutation
+// it cannot point straight at recordRequestEvent -- that mutation
 // requires `kind`, and a direct mapping left it unset, failing with
 // "required argument kind is missing" (#1827). This wrapper injects the
 // constant kind="mentored" and forwards the caller's id / requestId / note.
 // ---------------------------------------------------------------------------
 @enabled
 @description("Record a 'mentored' v1:forge:requestEvent after a non-owner submitter was taught about the area they touched. Injects kind='mentored' and forwards the note verbatim.")
-logic logicRecordMentoring {
+logic recordMentoring {
   args {
     eventId    string
     requestId  string  @required
     note       string  @required
   }
   body {
-    return mutationRecordRequestEvent({ eventId: args.eventId, requestId: args.requestId, kind: "mentored", note: args.note })
+    return recordRequestEvent({ eventId: args.eventId, requestId: args.requestId, kind: "mentored", note: args.note })
   }
 }

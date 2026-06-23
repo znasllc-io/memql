@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.logic.{ logicBootstrapSession, logicGenerateResponse, logicVoiceMigrationOnSecondHuman }
+use cognition.logic.{ bootstrapSession, generateResponse, voiceMigrationOnSecondHuman }
 
 // automations/v1/cognition/bootstrapSession/automation.memql
 // Auto-creates a v1:cognition:session record when a participant is created.
@@ -52,12 +52,12 @@ automation generateResponse {
 //
 // TRIGGER:
 // graph.node.created.v1:identity:user fires on every user-row write
-// (primary path: mutationSetUserActiveSpace shipping a new version).
+// (primary path: setUserActiveSpace shipping a new version).
 // We filter to rows whose payload.activePartitionId is non-empty -- a user
 // whose pointer is set has just become active in some space.
 //
 // FIRE CONDITION:
-// queryUsersActiveInSpace returns the full set of users currently
+// usersActiveInSpace returns the full set of users currently
 // pointing at the same space. We act when the count is exactly 2 --
 // the just-joined user PLUS one prior active human. Counts of 1 (single
 // user) and 3+ (already migrated) are no-ops.

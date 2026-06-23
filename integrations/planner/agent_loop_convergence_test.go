@@ -68,11 +68,11 @@ func TestInvokeAndDispatch_OscillatingPlanner_Parks(t *testing.T) {
 	fe := &fakeEngine{
 		execResponder: func(query string) (any, error) {
 			switch {
-			case strings.Contains(query, "queryPlanById"):
+			case strings.Contains(query, "planById"):
 				return rowsEnvelope(planRow), nil
-			case strings.Contains(query, "queryTasksForPlan"):
+			case strings.Contains(query, "tasksForPlan"):
 				return rowsEnvelope(), nil
-			case strings.Contains(query, "queryActiveAgentsForUser"):
+			case strings.Contains(query, "activeAgentsForUser"):
 				return rowsEnvelope(), nil
 			}
 			return nil, nil

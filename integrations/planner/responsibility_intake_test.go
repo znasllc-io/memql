@@ -22,7 +22,7 @@ func responsibilityEvent(id, status, intakeStatus string) events.Event {
 
 // TestResponsibilityIntake_AssignDoesNotReTriggerFirstPass locks in the
 // memql#1645 fix. memQL is append-only: a routing-only
-// mutationAssignResponsibility materialises a fresh row version and re-fires
+// assignResponsibility materialises a fresh row version and re-fires
 // graph.node.created for a still-draft (intakeStatus=="") responsibility.
 // Before the fix, that re-entered first-pass intake -- re-inferring
 // trigger/schedule from the bare statement and clobbering the user's explicit
@@ -33,7 +33,7 @@ func TestResponsibilityIntake_AssignDoesNotReTriggerFirstPass(t *testing.T) {
 	const rid = "v1:planner:responsibility:r1"
 	eng := &fakeEngine{
 		execResponder: func(q string) (any, error) {
-			// loadResponsibility -> queryResponsibilityById. The row stays
+			// loadResponsibility -> responsibilityById. The row stays
 			// draft + intakeStatus="" throughout (simulating the worst case
 			// where the durable intakeStatus marker has not been observed),
 			// so only the in-process guard can prevent a re-fire.
@@ -49,7 +49,7 @@ func TestResponsibilityIntake_AssignDoesNotReTriggerFirstPass(t *testing.T) {
 		aiResponder: func(_ string, _ map[string]any) (any, error) {
 			// The model "re-infers" a DIFFERENT cadence -- this is exactly the
 			// clobber #1645 reports. A clear result (no questions) flips the
-			// row to active via mutationApplyResponsibilityIntake.
+			// row to active via applyResponsibilityIntake.
 			return map[string]any{
 				"trigger":    "standing",
 				"targetKind": "assistant",
@@ -65,7 +65,7 @@ func TestResponsibilityIntake_AssignDoesNotReTriggerFirstPass(t *testing.T) {
 		return countContains(si, "responsibilityIntake") >= 1
 	})
 
-	// 2. mutationAssignResponsibility on the still-draft row re-fires BOTH
+	// 2. assignResponsibility on the still-draft row re-fires BOTH
 	//    graph.node.created (update materialises as insert) and
 	//    graph.node.updated. Neither may re-trigger first-pass intake.
 	d.HandleResponsibilityCreated(responsibilityEvent(rid, "draft", ""))
@@ -80,8 +80,8 @@ func TestResponsibilityIntake_AssignDoesNotReTriggerFirstPass(t *testing.T) {
 			"(assignment must not re-trigger first-pass intake -- memql#1645)", got)
 	}
 	exec, _, _ := eng.snapshot()
-	if got := countContains(exec, "mutationApplyResponsibilityIntake"); got > 1 {
-		t.Fatalf("mutationApplyResponsibilityIntake ran %d times; the intake "+
+	if got := countContains(exec, "applyResponsibilityIntake"); got > 1 {
+		t.Fatalf("applyResponsibilityIntake ran %d times; the intake "+
 			"cascade must not re-run as a side effect of assignment", got)
 	}
 }
@@ -125,6 +125,6 @@ func TestResponsibilityIntake_FoldAnswersStillFiresOnUpdate(t *testing.T) {
 
 	waitFor(t, func() bool {
 		exec, _, _ := eng.snapshot()
-		return countContains(exec, "mutationFoldResponsibilityIntakeAnswers") >= 1
+		return countContains(exec, "foldResponsibilityIntakeAnswers") >= 1
 	})
 }

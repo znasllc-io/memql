@@ -5,11 +5,11 @@ import (
 	"testing"
 )
 
-// C1 (memql#2041, epic #2031): `mutate` is the descriptive verb that
-// replaces `mutation` as the mutation declaration keyword. It is a pure
-// surface keyword -- it rewrites and parses identically to `mutation`
-// and maps to the same internal ReceiverMutation kind. The dual-accept
-// is transitional; C6 sweeps the tree to `mutate` and drops `mutation`.
+// C1 (memql#2041, epic #2031) introduced `mutate` as the descriptive verb
+// replacing `mutation` as the mutation declaration keyword, with a
+// transitional dual-accept. C6 (memql#2036) swept the tree to `mutate` and
+// DROPPED the `mutation` noun alias -- `mutate` is now the only accepted
+// mutation declaration keyword. These tests lock that end-state.
 
 // parseToFunctionDef runs the full author-source pipeline (NormaliseAll
 // rewrite -> tokenize -> parse) and returns the single FunctionDef.
@@ -41,11 +41,10 @@ func parseToFunctionDef(t *testing.T, src string) *FunctionDef {
 	return nil
 }
 
-// TestMutateVerb_RewritesIdenticallyToMutation proves the verb alias and
-// the legacy noun produce byte-identical procedural IR (modulo the
-// keyword itself), so every downstream stage sees the same shape.
-func TestMutateVerb_RewritesIdenticallyToMutation(t *testing.T) {
-	body := ` space createSpace {
+// TestMutateVerb_RewritesToProceduralForm proves the `mutate` verb rewrites
+// cleanly to the internal `func (Mutation)` procedural form.
+func TestMutateVerb_RewritesToProceduralForm(t *testing.T) {
+	src := `mutate space createSpace {
   args {
     spaceId string @required
     name    string @required
@@ -56,24 +55,17 @@ func TestMutateVerb_RewritesIdenticallyToMutation(t *testing.T) {
     status:    "active"
   }
 }`
-	mutationOut, err := NormaliseAll("mutation" + body)
-	if err != nil {
-		t.Fatalf("`mutation` form should rewrite cleanly, got: %v", err)
-	}
-	mutateOut, err := NormaliseAll("mutate" + body)
+	out, err := NormaliseAll(src)
 	if err != nil {
 		t.Fatalf("`mutate` form should rewrite cleanly, got: %v", err)
 	}
-	if mutationOut != mutateOut {
-		t.Fatalf("`mutate` and `mutation` should rewrite identically.\nmutation:\n%s\nmutate:\n%s", mutationOut, mutateOut)
-	}
-	if !strings.Contains(mutateOut, "func (Mutation) createSpace") {
-		t.Fatalf("`mutate` should emit the same `func (Mutation)` procedural form; got %q", mutateOut)
+	if !strings.Contains(out, "func (Mutation) createSpace") {
+		t.Fatalf("`mutate` should emit the `func (Mutation)` procedural form; got %q", out)
 	}
 }
 
 // TestMutateVerb_ParsesToReceiverMutation proves `mutate` parses to the
-// same AST receiver kind as `mutation`.
+// ReceiverMutation AST kind.
 func TestMutateVerb_ParsesToReceiverMutation(t *testing.T) {
 	mutateSrc := `mutate space createSpace {
   insert {
@@ -81,26 +73,12 @@ func TestMutateVerb_ParsesToReceiverMutation(t *testing.T) {
     name: args.name
   }
 }`
-	mutationSrc := `mutation space createSpace {
-  insert {
-    id:   args.spaceId
-    name: args.name
-  }
-}`
-
 	mutateFn := parseToFunctionDef(t, mutateSrc)
-	mutationFn := parseToFunctionDef(t, mutationSrc)
-
 	if mutateFn.Receiver.Type != ReceiverMutation {
 		t.Fatalf("`mutate` should parse to ReceiverMutation, got %v", mutateFn.Receiver.Type)
 	}
-	if mutateFn.Receiver.Type != mutationFn.Receiver.Type {
-		t.Fatalf("`mutate` (%v) and `mutation` (%v) should map to the same receiver kind",
-			mutateFn.Receiver.Type, mutationFn.Receiver.Type)
-	}
-	if mutateFn.Name != mutationFn.Name {
-		t.Fatalf("both forms should parse the same construct name; got %q vs %q",
-			mutateFn.Name, mutationFn.Name)
+	if mutateFn.Name != "createSpace" {
+		t.Fatalf("expected construct name createSpace, got %q", mutateFn.Name)
 	}
 }
 
@@ -119,5 +97,34 @@ func TestMutateVerb_SignatureConceptStillBinds(t *testing.T) {
 	}
 	if !strings.Contains(out, "insert(") || !strings.Contains(out, "space") {
 		t.Fatalf("emitted insert should target the signature concept `space`; got %q", out)
+	}
+}
+
+// TestLegacyMutationKeywordRejected proves the dropped `mutation` noun alias
+// is no longer recognised as a struct-form mutation header (C6 end-state):
+// the rewriter detector ignores it, whereas the `mutate` verb is recognised.
+// (`mutation` is consequently never rewritten to the procedural form, so a
+// loader can no longer materialise it as a mutation construct.)
+func TestLegacyMutationKeywordRejected(t *testing.T) {
+	// Build the legacy keyword by concatenation so the C6 codemod
+	// (scripts/rename/deprefix.py) does not rewrite this intentional fixture.
+	legacyKeyword := "muta" + "tion"
+	body := ` space createSpace {
+  insert {
+    id:   args.spaceId
+    name: args.name
+  }
+}`
+	if LooksLikeStructMutation(legacyKeyword + body) {
+		t.Fatalf("`mutation` keyword must no longer be recognised as a struct mutation")
+	}
+	if !LooksLikeStructMutation("mutate" + body) {
+		t.Fatalf("`mutate` keyword must still be recognised as a struct mutation")
+	}
+	// The legacy keyword is left untouched by the mutation rewriter (no
+	// procedural `func (Mutation)` is emitted for it).
+	out, err := NormaliseMutationSource(legacyKeyword + body)
+	if err == nil && strings.Contains(out, "func (Mutation)") {
+		t.Fatalf("`mutation` keyword must not rewrite to the procedural mutation form; got %q", out)
 	}
 }

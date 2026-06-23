@@ -724,7 +724,7 @@ builtin trainAgent {
 //   1. The training integration's background poll loop calls it
 //      directly when it picks up a queued trainAgentRetryStep Plan
 //      whose input.nextAttemptAt is past (see
-//      queryDueTrainAgentRetryPlans).
+//      dueTrainAgentRetryPlans).
 //
 //   2. The frontend's "Retry now" button on the training.completed
 //      card can call it directly to skip the backoff window and

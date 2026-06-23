@@ -93,7 +93,7 @@ func TestReactiveLoop_StandingNeverDueOnHeartbeat(t *testing.T) {
 func TestReactiveLoop_HasLivePlan(t *testing.T) {
 	eng := &fakeEngine{
 		execResponder: func(q string) (any, error) {
-			if strings.Contains(q, "queryPlansForResponsibility") {
+			if strings.Contains(q, "plansForResponsibility") {
 				return rowsEnvelope(map[string]any{"id": "p1", "status": "running"}), nil
 			}
 			return nil, nil
@@ -108,7 +108,7 @@ func TestReactiveLoop_HasLivePlan(t *testing.T) {
 func TestReactiveLoop_NoLivePlan_AllTerminal(t *testing.T) {
 	eng := &fakeEngine{
 		execResponder: func(q string) (any, error) {
-			if strings.Contains(q, "queryPlansForResponsibility") {
+			if strings.Contains(q, "plansForResponsibility") {
 				return rowsEnvelope(
 					map[string]any{"id": "p1", "status": "succeeded"},
 					map[string]any{"id": "p2", "status": "cancelled"},
@@ -128,7 +128,7 @@ func TestReactiveLoop_NoLivePlan_AllTerminal(t *testing.T) {
 func TestReactiveLoop_RouteAssistant_ResolvesGA(t *testing.T) {
 	eng := &fakeEngine{
 		execResponder: func(q string) (any, error) {
-			if strings.Contains(q, "queryAssistantAgentForUser") {
+			if strings.Contains(q, "assistantAgentForUser") {
 				return rowsEnvelope(map[string]any{"id": "v1:agents:agent:ga1"}), nil
 			}
 			return nil, nil
@@ -149,7 +149,7 @@ func TestReactiveLoop_RouteAssistant_ResolvesGA(t *testing.T) {
 		t.Fatalf("expected GA id, got %q", agentId)
 	}
 	exec, _, _ := eng.snapshot()
-	if countContains(exec, "mutationAssignResponsibility") == 0 {
+	if countContains(exec, "assignResponsibility") == 0 {
 		t.Fatalf("assistant routing should persist the assignment")
 	}
 }
@@ -181,7 +181,7 @@ func TestReactiveLoop_RouteUnassigned_RunsFactory(t *testing.T) {
 	if countContains(exec, "ensureAgentForGoal") == 0 {
 		t.Fatalf("unassigned routing must run the factory")
 	}
-	if countContains(exec, "mutationAssignResponsibility") == 0 {
+	if countContains(exec, "assignResponsibility") == 0 {
 		t.Fatalf("specialist routing must persist the assignment")
 	}
 }
@@ -227,13 +227,13 @@ func TestReactiveLoop_HonorRecurring_CreatesPlan(t *testing.T) {
 		t.Fatalf("recurring honor should report a spawned Plan, got %q", res)
 	}
 	exec, _, _ := eng.snapshot()
-	if countContains(exec, "mutationCreatePlan") == 0 {
+	if countContains(exec, "createPlan") == 0 {
 		t.Fatalf("recurring honor must create a Plan")
 	}
 	// The plan must carry the responsibilityId back-pointer for dedup.
 	found := false
 	for _, c := range exec {
-		if strings.Contains(c, "mutationCreatePlan") && strings.Contains(c, "responsibilityId") {
+		if strings.Contains(c, "createPlan") && strings.Contains(c, "responsibilityId") {
 			found = true
 		}
 	}
@@ -245,7 +245,7 @@ func TestReactiveLoop_HonorRecurring_CreatesPlan(t *testing.T) {
 func TestReactiveLoop_HonorStanding_InjectsContextNoPlan(t *testing.T) {
 	eng := &fakeEngine{
 		execResponder: func(q string) (any, error) {
-			if strings.Contains(q, "queryAgentById") {
+			if strings.Contains(q, "agentById") {
 				return rowsEnvelope(map[string]any{
 					"id":      "v1:agents:agent:spec1",
 					"lineage": map[string]any{"extensionGoals": []any{"existing goal"}},
@@ -265,16 +265,16 @@ func TestReactiveLoop_HonorStanding_InjectsContextNoPlan(t *testing.T) {
 		t.Fatalf("honor standing: %v", err)
 	}
 	exec, _, _ := eng.snapshot()
-	if countContains(exec, "mutationCreatePlan") != 0 {
+	if countContains(exec, "createPlan") != 0 {
 		t.Fatalf("standing honor must NOT create a Plan")
 	}
-	if countContains(exec, "mutationUpdateAgent") == 0 {
-		t.Fatalf("standing honor must inject the directive via mutationUpdateAgent")
+	if countContains(exec, "updateAgent") == 0 {
+		t.Fatalf("standing honor must inject the directive via updateAgent")
 	}
 	// The injected payload must append the directive to extensionGoals.
 	found := false
 	for _, c := range exec {
-		if strings.Contains(c, "mutationUpdateAgent") &&
+		if strings.Contains(c, "updateAgent") &&
 			strings.Contains(c, "extensionGoals") &&
 			strings.Contains(c, "comment every private function") {
 			found = true
@@ -288,7 +288,7 @@ func TestReactiveLoop_HonorStanding_InjectsContextNoPlan(t *testing.T) {
 func TestReactiveLoop_StandingInject_Idempotent(t *testing.T) {
 	eng := &fakeEngine{
 		execResponder: func(q string) (any, error) {
-			if strings.Contains(q, "queryAgentById") {
+			if strings.Contains(q, "agentById") {
 				return rowsEnvelope(map[string]any{
 					"id":      "v1:agents:agent:spec1",
 					"lineage": map[string]any{"extensionGoals": []any{"comment every private function"}},
@@ -305,7 +305,7 @@ func TestReactiveLoop_StandingInject_Idempotent(t *testing.T) {
 	}
 	r.maybeInjectStanding(ownerActorContext(context.Background(), "u1"), row, "v1:agents:agent:spec1")
 	exec, _, _ := eng.snapshot()
-	if countContains(exec, "mutationUpdateAgent") != 0 {
+	if countContains(exec, "updateAgent") != 0 {
 		t.Fatalf("a directive already present must not be re-written (idempotent)")
 	}
 }
@@ -313,7 +313,7 @@ func TestReactiveLoop_StandingInject_Idempotent(t *testing.T) {
 func TestReactiveLoop_ProcessStanding_InjectsNoPlanNoDueCheck(t *testing.T) {
 	eng := &fakeEngine{
 		execResponder: func(q string) (any, error) {
-			if strings.Contains(q, "queryAgentById") {
+			if strings.Contains(q, "agentById") {
 				return rowsEnvelope(map[string]any{
 					"id":      "v1:agents:agent:spec1",
 					"lineage": map[string]any{"extensionGoals": []any{}},
@@ -335,16 +335,16 @@ func TestReactiveLoop_ProcessStanding_InjectsNoPlanNoDueCheck(t *testing.T) {
 		t.Fatalf("a standing row bound to a specialist should be honored (injected)")
 	}
 	exec, _, _ := eng.snapshot()
-	if countContains(exec, "mutationCreatePlan") != 0 {
+	if countContains(exec, "createPlan") != 0 {
 		t.Fatalf("standing row must not create a Plan")
 	}
-	if countContains(exec, "queryPlansForResponsibility") != 0 {
+	if countContains(exec, "plansForResponsibility") != 0 {
 		t.Fatalf("standing row must not run the live-plan dedup query (not Plan-driven)")
 	}
-	if countContains(exec, "mutationUpdateAgent") == 0 {
-		t.Fatalf("standing row must inject via mutationUpdateAgent")
+	if countContains(exec, "updateAgent") == 0 {
+		t.Fatalf("standing row must inject via updateAgent")
 	}
-	if countContains(exec, "mutationRecordResponsibilityEvaluation") == 0 {
+	if countContains(exec, "recordResponsibilityEvaluation") == 0 {
 		t.Fatalf("standing row should stamp lastResult/lastEvaluatedAt")
 	}
 }
@@ -385,7 +385,7 @@ func TestReactiveLoop_ConvergenceLowConfidenceDropped(t *testing.T) {
 		convergenceAction{Kind: "createPlan", Statement: "x", Confidence: 0.4},
 		time.Now().UTC())
 	exec, _, _ := eng.snapshot()
-	if countContains(exec, "mutationCreatePlan") != 0 {
+	if countContains(exec, "createPlan") != 0 {
 		t.Fatalf("low-confidence convergence actions must be dropped (quiet guard)")
 	}
 }
@@ -393,7 +393,7 @@ func TestReactiveLoop_ConvergenceLowConfidenceDropped(t *testing.T) {
 func TestReactiveLoop_ConvergenceDedup(t *testing.T) {
 	eng := &fakeEngine{
 		execResponder: func(q string) (any, error) {
-			if strings.Contains(q, "queryAssistantAgentForUser") {
+			if strings.Contains(q, "assistantAgentForUser") {
 				return rowsEnvelope(map[string]any{"id": "ga1"}), nil
 			}
 			return nil, nil
@@ -405,8 +405,8 @@ func TestReactiveLoop_ConvergenceDedup(t *testing.T) {
 	r.dispatchConvergenceAction(ownerActorContext(context.Background(), "u1"), "u1", act, now)
 	r.dispatchConvergenceAction(ownerActorContext(context.Background(), "u1"), "u1", act, now.Add(time.Minute))
 	exec, _, _ := eng.snapshot()
-	if countContains(exec, "mutationCreatePlan") != 1 {
-		t.Fatalf("the dedup guard should let the same action fire exactly once within the guard window, got %d", countContains(exec, "mutationCreatePlan"))
+	if countContains(exec, "createPlan") != 1 {
+		t.Fatalf("the dedup guard should let the same action fire exactly once within the guard window, got %d", countContains(exec, "createPlan"))
 	}
 }
 
@@ -425,18 +425,18 @@ func TestAssign_OnlyWritesRoutingFields(t *testing.T) {
 		"v1:planner:responsibility:r1", "specialist", "v1:agents:agent:spec1", "marketing",
 	)
 	exec, _, _ := eng.snapshot()
-	if countContains(exec, "mutationAssignResponsibility") == 0 {
-		t.Fatalf("assign must call mutationAssignResponsibility")
+	if countContains(exec, "assignResponsibility") == 0 {
+		t.Fatalf("assign must call assignResponsibility")
 	}
 	// Intake fields must NEVER appear in the mutation call (memql#1680).
 	intakeFields := []string{"trigger", "schedule", "successCriteria", "notifyHow", "intakeStatus"}
 	for _, call := range exec {
-		if !strings.Contains(call, "mutationAssignResponsibility") {
+		if !strings.Contains(call, "assignResponsibility") {
 			continue
 		}
 		for _, field := range intakeFields {
 			if strings.Contains(call, field) {
-				t.Fatalf("mutationAssignResponsibility must not include intake field %q (memql#1680); got:\n  %s", field, call)
+				t.Fatalf("assignResponsibility must not include intake field %q (memql#1680); got:\n  %s", field, call)
 			}
 		}
 	}
@@ -456,11 +456,11 @@ func TestAssign_RoleOnly_OmitsAssignedAgentId(t *testing.T) {
 		"v1:planner:responsibility:r1", "specialist", "", "marketing",
 	)
 	exec, _, _ := eng.snapshot()
-	if countContains(exec, "mutationAssignResponsibility") == 0 {
-		t.Fatalf("assign must call mutationAssignResponsibility even for a role-only call")
+	if countContains(exec, "assignResponsibility") == 0 {
+		t.Fatalf("assign must call assignResponsibility even for a role-only call")
 	}
 	for _, call := range exec {
-		if strings.Contains(call, "mutationAssignResponsibility") && strings.Contains(call, "assignedAgentId") {
+		if strings.Contains(call, "assignResponsibility") && strings.Contains(call, "assignedAgentId") {
 			t.Fatalf("role-only assign must not stamp assignedAgentId in the mutation call (memql#1680); got:\n  %s", call)
 		}
 	}

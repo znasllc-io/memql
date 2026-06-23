@@ -10816,7 +10816,7 @@ func (x *CreateWorkerTokenResult) GetErrorMessage() string {
 // RevokeWorkerTokenMsg flips active=false on the worker_token
 // identity row. The interceptor refuses any future connect attempt
 // with this token; in-flight stream lifetimes are untouched (the
-// agent node's worker registry handles those via mutationRevokeWorker
+// agent node's worker registry handles those via revokeWorker
 // on v1:worker:registration).
 type RevokeWorkerTokenMsg struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`

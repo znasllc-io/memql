@@ -9,7 +9,7 @@ import (
 // TestTypedWrapperForwardsAllArgs is the #1713 arg-forwarding guard: a
 // first-class @mcp-promoted query tool called by its own name (the typed
 // wrapper path) must forward EVERY arg to the named-construct executor without
-// dropping any -- the exact queryLibraryArtifactById/artifactId regression the
+// dropping any -- the exact libraryArtifactById/artifactId regression the
 // issue reports ("required argument artifactId is missing" via the typed
 // wrapper, even though it was supplied; works via run_query).
 //
@@ -18,14 +18,14 @@ import (
 // binds the arg identically on both paths.
 func TestTypedWrapperForwardsAllArgs(t *testing.T) {
 	eng := newFakeEngine()
-	eng.promotedFns = map[string]string{"queryLibraryArtifactById": "query"}
+	eng.promotedFns = map[string]string{"libraryArtifactById": "query"}
 
 	res := callMCPTool(context.Background(), eng, "reader", TierAuthoring,
-		"queryLibraryArtifactById", map[string]any{"artifactId": "abc"})
+		"libraryArtifactById", map[string]any{"artifactId": "abc"})
 	if isErr, _ := res["isError"].(bool); isErr {
 		t.Fatalf("typed wrapper returned an error result: %v", res)
 	}
-	if !strings.HasPrefix(eng.query, "queryLibraryArtifactById(") {
+	if !strings.HasPrefix(eng.query, "libraryArtifactById(") {
 		t.Fatalf("typed wrapper did not route to the named-construct executor; query=%q", eng.query)
 	}
 	if !strings.Contains(eng.query, `"artifactId":"abc"`) {
@@ -41,12 +41,12 @@ func TestTypedWrapperAndRunQueryForwardIdentically(t *testing.T) {
 	args := map[string]any{"artifactId": "abc", "lens": "x"}
 
 	typed := newFakeEngine()
-	typed.promotedFns = map[string]string{"queryLibraryArtifactById": "query"}
-	callMCPTool(context.Background(), typed, "reader", TierAuthoring, "queryLibraryArtifactById", args)
+	typed.promotedFns = map[string]string{"libraryArtifactById": "query"}
+	callMCPTool(context.Background(), typed, "reader", TierAuthoring, "libraryArtifactById", args)
 
 	dispatch := newFakeEngine()
 	callMCPTool(context.Background(), dispatch, "reader", TierAuthoring, toolRunQuery,
-		map[string]any{"name": "queryLibraryArtifactById", "args": args})
+		map[string]any{"name": "libraryArtifactById", "args": args})
 
 	if typed.query == "" || typed.query != dispatch.query {
 		t.Fatalf("typed wrapper and run_query diverged:\n  typed   =%q\n  run_query=%q", typed.query, dispatch.query)

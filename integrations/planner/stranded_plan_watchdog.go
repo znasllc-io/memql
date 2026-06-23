@@ -14,10 +14,10 @@
 // planner integration (the same node that owns the agent loop), mirroring
 // RefreshCron / FairnessCron:
 //
-//   - Polls queryStrandedCandidatePlans (status in [planning, queued]).
+//   - Polls strandedCandidatePlans (status in [planning, queued]).
 //   - Applies the precise "older than the strand threshold" check Go-side
 //     (the MemQL comparison evaluator can't do createdAt-vs-now()
-//     arithmetic; cf. queryDueTrainAgentRetryPlans).
+//     arithmetic; cf. dueTrainAgentRetryPlans).
 //   - Skips the kinds the agent loop never owns (trainSpecialist /
 //     embedDomainItems / adHocAction / scopeElevation / agentInvocation):
 //     those have their own dispatchers, and re-driving them through
@@ -139,7 +139,7 @@ func loadWatchdogConfig() watchdogConfig {
 	return cfg
 }
 
-// StrandedPlanWatchdog polls queryStrandedCandidatePlans and re-drives
+// StrandedPlanWatchdog polls strandedCandidatePlans and re-drives
 // Plans whose plan-created event was lost (memql#1389).
 type StrandedPlanWatchdog struct {
 	engine    Engine
@@ -241,7 +241,7 @@ func (w *StrandedPlanWatchdog) pollOnce(ctx context.Context) {
 	if w.engine == nil || w.agentLoop == nil {
 		return
 	}
-	res, err := w.engine.Execute(systemActorContext(ctx), `queryStrandedCandidatePlans({})`)
+	res, err := w.engine.Execute(systemActorContext(ctx), `strandedCandidatePlans({})`)
 	if err != nil {
 		w.logger.Debug("planner stranded-plan watchdog: query failed (engine likely not ready)", "error", err)
 		return

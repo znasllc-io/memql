@@ -98,7 +98,7 @@ func (l *PlannerAgentLoop) persistSectionableBundle(ctx context.Context, ownerUs
 		"summary":      fmt.Sprintf("Generated parallel plan-automation: %d sections fan out then assemble (memql#1394).", sectionCount(bundle)),
 		"sourcePlanId": planId,
 	}
-	if _, err := l.engine.Execute(ownerActorContext(ctx, ownerUserId), fmt.Sprintf(`mutationCreateAuthoringBundle(%s)`, encodeArgs(args))); err != nil {
+	if _, err := l.engine.Execute(ownerActorContext(ctx, ownerUserId), fmt.Sprintf(`createAuthoringBundle(%s)`, encodeArgs(args))); err != nil {
 		return fmt.Errorf("create bundle: %w", err)
 	}
 	for _, c := range bundle.Constructs {
@@ -110,7 +110,7 @@ func (l *PlannerAgentLoop) persistSectionableBundle(ctx context.Context, ownerUs
 			"targetNamespace": authoredTargetNamespace,
 			"source":          c.Source,
 		}
-		if _, err := l.engine.Execute(ownerActorContext(ctx, ownerUserId), fmt.Sprintf(`mutationCreateAuthoringConstruct(%s)`, encodeArgs(cargs))); err != nil {
+		if _, err := l.engine.Execute(ownerActorContext(ctx, ownerUserId), fmt.Sprintf(`createAuthoringConstruct(%s)`, encodeArgs(cargs))); err != nil {
 			return fmt.Errorf("create construct %s/%s: %w", c.Kind, c.Name, err)
 		}
 	}
@@ -119,7 +119,7 @@ func (l *PlannerAgentLoop) persistSectionableBundle(ctx context.Context, ownerUs
 		"validationReport": structToObject(report),
 		"status":           "validated",
 	}
-	if _, err := l.engine.Execute(ownerActorContext(ctx, ownerUserId), fmt.Sprintf(`mutationRecordBundleValidation(%s)`, encodeArgs(vargs))); err != nil {
+	if _, err := l.engine.Execute(ownerActorContext(ctx, ownerUserId), fmt.Sprintf(`recordBundleValidation(%s)`, encodeArgs(vargs))); err != nil {
 		return fmt.Errorf("record validation: %w", err)
 	}
 	return nil

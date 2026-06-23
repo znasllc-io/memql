@@ -34,8 +34,8 @@ func forgeSystemActorContext(actorID string) context.Context {
 // actor's own role via forgeRequestRoleAllowed, which rejected the owner
 // ("queued" requires owner) and admin/writer ("needs_approval") routes --
 // the system actor has role "system", not the submitter's role. That abort
-// happened inside logicRouteRequest's mutationAdvanceRequest step, BEFORE
-// the trailing mutationRecordRequestEvent ran, leaving the request stuck
+// happened inside routeRequest's advanceRequest step, BEFORE
+// the trailing recordRequestEvent ran, leaving the request stuck
 // "submitted" with empty history. Only the reader -> "needs_validation"
 // route (not role-gated) survived.
 //
@@ -53,8 +53,8 @@ func TestValidateForgeRequestTransition_SystemActorBypass(t *testing.T) {
 	// the system actor enacts it -- including the role-gated owner/dev routes
 	// that the pre-fix guard rejected.
 	targets := []string{
-		forgeStatusQueued,         // owner submitter route (owner-only role gate)
-		forgeStatusNeedsApproval,  // admin/writer submitter route (dev role gate)
+		forgeStatusQueued,          // owner submitter route (owner-only role gate)
+		forgeStatusNeedsApproval,   // admin/writer submitter route (dev role gate)
 		forgeStatusNeedsValidation, // reader submitter route (was the only one working)
 	}
 	for _, target := range targets {

@@ -31,7 +31,7 @@ func runPIIScrub(t *testing.T, e *Env) {
 	}
 
 	userId := "user-pii-" + uniqueSuffix("scrub")
-	storedId := storedID(t, e.runMutation(t, "mutationCreateUser", map[string]any{
+	storedId := storedID(t, e.runMutation(t, "createUser", map[string]any{
 		"userId":       userId,
 		"displayName":  "Quinn Conformance",
 		"primaryEmail": "quinn.conformance@example.com",
@@ -45,7 +45,7 @@ func runPIIScrub(t *testing.T, e *Env) {
 	}
 
 	// Hard delete -> the engine scrubs every @pii field by annotation.
-	e.runMutation(t, "mutationDeleteUserHard", map[string]any{"userId": userId})
+	e.runMutation(t, "deleteUserHard", map[string]any{"userId": userId})
 
 	after := e.latestPayload(t, conceptName, storedId)
 	if after["active"] != false {

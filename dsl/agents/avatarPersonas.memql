@@ -10,7 +10,7 @@
 // SIMLI ONLY (memql#1239). Anam is render-blocked for us (its ephemeral
 // client-audio session hard-caps at ~26-27s -- escalation memql#1236), so
 // the product catalog is exclusively CUSTOM Simli avatars we generate from
-// our own operator images. queryAvatarPersonas ALSO hard-filters
+// our own operator images. avatarPersonas ALSO hard-filters
 // vendor=="simli", so only Simli entries can ever surface in copresent.
 // The Anam stock personas (Mia / Liv / Gabriel / Finn) were removed here.
 //

@@ -78,7 +78,7 @@ func (s *AdminServer) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 
 		// Stamp the verified admin's identity onto the context so
 		// engine mutations triggered by admin handlers
-		// (mutationUpdateUser, mutationCreateAuditEvent, etc.)
+		// (updateUser, createAuditEvent, etc.)
 		// satisfy the actor-required check. Without this the
 		// mutation pipeline rejects with "no actor found in
 		// context". Use the real admin's subject + email so audit

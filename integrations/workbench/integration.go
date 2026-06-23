@@ -409,7 +409,7 @@ func errorResultNode(planId, action, code, msg string, started time.Time) []memo
 // downloads the real file (memql#733 local, memql#742 cluster).
 //
 // ownerUserId / partitionId are resolved from the producing Plan
-// (queryPlanById -> createdBy / partitionId): the workbench dispatch args
+// (planById -> createdBy / partitionId): the workbench dispatch args
 // don't carry the user id, but the Plan's createdBy is server-stamped
 // from actor.userId so it is the authoritative owner. Idempotent: the
 // outputId is derived deterministically from (ownerUserId, planId,
@@ -479,7 +479,7 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, `mutationCreateGeneratedOutput({outputId:%q, ownerUserId:%q, title:%q, source:%q, format:%q`,
+	fmt.Fprintf(&b, `createGeneratedOutput({outputId:%q, ownerUserId:%q, title:%q, source:%q, format:%q`,
 		outputId, ownerUserId, title, "workbench_generated", format)
 	if attachmentId != "" {
 		// File-backed: the bytes ARE the deliverable, so reference the
@@ -498,7 +498,7 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 		// directly (markdown / plain), no attachment round-trip needed. (memql#889)
 		fmt.Fprintf(&b, `, body:%q`, inline)
 		// Carry a real one-line summary derived from the content we already
-		// hold, so logicIndexGeneratedOutput stamps a meaningful
+		// hold, so indexGeneratedOutput stamps a meaningful
 		// artifact.summary instead of nothing (memql#1392). Attachment-backed
 		// and pointer rows have no text to summarize; they simply omit the
 		// field and the index logic resolves it to null.
@@ -541,7 +541,7 @@ const inlineSummaryMaxRunes = 200
 // (leading markdown `#`s stripped), whitespace-collapsed and truncated
 // to inlineSummaryMaxRunes runes with an ellipsis. Returns "" when
 // nothing usable exists -- the row then carries no summary and
-// logicIndexGeneratedOutput resolves the missing field to null instead
+// indexGeneratedOutput resolves the missing field to null instead
 // of leaking the unresolved reference literal (memql#1392).
 func deriveInlineSummary(body string) string {
 	line := ""
@@ -703,7 +703,7 @@ func detectMimeType(fileName string, data []byte) string {
 	return "application/octet-stream"
 }
 
-// resolvePlanOwner reads queryPlanById and returns the Plan's owner
+// resolvePlanOwner reads planById and returns the Plan's owner
 // user id and partitionId. Returns empty strings on any failure -- the
 // caller treats an empty owner as "skip promotion". The planFull shape
 // flattens, so rows land in res.OutputPayload() with the fields as
@@ -722,7 +722,7 @@ func (i *Integration) resolvePlanOwner(ctx context.Context, planId string) (owne
 	if i.engine == nil {
 		return "", ""
 	}
-	res, err := i.engine.Execute(ctx, fmt.Sprintf(`queryPlanById({planId:%q})`, planId))
+	res, err := i.engine.Execute(ctx, fmt.Sprintf(`planById({planId:%q})`, planId))
 	if err != nil || res == nil {
 		return "", ""
 	}
@@ -896,7 +896,7 @@ func outputPayloadRows(payload any) []map[string]any {
 }
 
 // withUserActor stamps a synthetic TokenInfo on ctx so the
-// mutationCreateGeneratedOutput insert attributes its createdBy column
+// createGeneratedOutput insert attributes its createdBy column
 // to the producing user. The workbench dispatch path doesn't carry the
 // user's JWT into the per-call context, and the mutation handler
 // requires an actor. Mirrors the worker integration's helper and

@@ -46,14 +46,14 @@ const conceptForgeRequest = "v1:forge:request"
 // Forge request status enum values. Must stay in lockstep with the
 // `status` enum in dsl/forge/concepts.memql:request.
 const (
-	forgeStatusSubmitted      = "submitted"
+	forgeStatusSubmitted       = "submitted"
 	forgeStatusNeedsValidation = "needs_validation"
-	forgeStatusValidated      = "validated"
-	forgeStatusNeedsApproval  = "needs_approval"
-	forgeStatusApproved       = "approved"
-	forgeStatusChangesReq     = "changes_requested"
-	forgeStatusRejected       = "rejected"
-	forgeStatusQueued         = "queued"
+	forgeStatusValidated       = "validated"
+	forgeStatusNeedsApproval   = "needs_approval"
+	forgeStatusApproved        = "approved"
+	forgeStatusChangesReq      = "changes_requested"
+	forgeStatusRejected        = "rejected"
+	forgeStatusQueued          = "queued"
 )
 
 // forgeRequestTransitions is the allowed-transition adjacency for the
@@ -77,7 +77,7 @@ var forgeRequestTransitions = map[string]map[string]bool{
 		forgeStatusQueued:          true,
 	},
 	forgeStatusNeedsValidation: {
-		// mutationValidateRequest promotes a developer-validated request
+		// validateRequest promotes a developer-validated request
 		// straight to needs_approval in one hop (it stamps validatedByUserId
 		// and sets status=needs_approval), so this edge MUST exist or the
 		// guard rejects the reader-path validation and the request wedges at
@@ -92,10 +92,10 @@ var forgeRequestTransitions = map[string]map[string]bool{
 		forgeStatusNeedsApproval: true,
 	},
 	forgeStatusNeedsApproval: {
-		forgeStatusApproved:  true,
-		forgeStatusQueued:    true,
+		forgeStatusApproved:   true,
+		forgeStatusQueued:     true,
 		forgeStatusChangesReq: true,
-		forgeStatusRejected:  true,
+		forgeStatusRejected:   true,
 	},
 	forgeStatusChangesReq: {
 		forgeStatusNeedsValidation: true,
@@ -223,7 +223,7 @@ func forgeRequestRoleAllowed(status, role string) bool {
 // role against forgeRequestRoleAllowed is wrong: it has no submitter role,
 // so the role gate would reject the owner/admin/writer routes (only the
 // reader path, which is not role-gated, slipped through), aborting
-// logicRouteRequest before it recorded the "routed" requestEvent and
+// routeRequest before it recorded the "routed" requestEvent and
 // leaving the request stuck "submitted" with empty history. The submitter
 // authority was already enforced when the request was submitted; this
 // guard exempts the system actor exactly like its sibling guards

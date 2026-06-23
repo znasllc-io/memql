@@ -67,7 +67,7 @@ type depRef struct {
 var (
 	depShapeRowRe    = regexp.MustCompile(`^\s*shape\s+([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*\{`)
 	depShapeActorRe  = regexp.MustCompile(`^\s*shape\s+([A-Za-z_]\w*)\s*\{`)
-	depConsumerRe    = regexp.MustCompile(`^\s*(query|mutation)\s+([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*\{`)
+	depConsumerRe    = regexp.MustCompile(`^\s*(query|mutate)\s+([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*\{`)
 	depShapeClauseRe = regexp.MustCompile(`^\s*shape\s+([A-Za-z_][\w.]*)\s*$`)
 	depIncludeRe     = regexp.MustCompile(`^\s*include\s+([A-Za-z_][\w.]*)\s*$`)
 )
@@ -78,8 +78,8 @@ var (
 // is correct; only the projection borrows a shape whose signature names
 // the sibling. This is not a cross-concept-leak bug.
 var depSharedShapeExempt = map[string]string{
-	"queryGlobalVariable":  "variableFull",
-	"queryGlobalVariables": "variableFull",
+	"globalVariable":  "variableFull",
+	"globalVariables": "variableFull",
 }
 
 // ValidateDependencyTree runs the dependency-tree validator over the

@@ -22,13 +22,13 @@ func oauthClientNode(clientId, redirectURIsJSON string) *memqlv1.MemoryNode {
 }
 
 // resolverFakeEngine returns the given oauthClient nodes for any
-// queryOAuthClientByClientId call; errors for everything else.
+// oAuthClientByClientId call; errors for everything else.
 type resolverFakeEngine struct {
 	nodes []*memqlv1.MemoryNode
 }
 
 func (f *resolverFakeEngine) Execute(_ context.Context, q string) (*memqlengine.ExecuteResult, error) {
-	if strings.HasPrefix(q, "queryOAuthClientByClientId(") {
+	if strings.HasPrefix(q, "oAuthClientByClientId(") {
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: f.nodes}}, nil
 	}
 	return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil

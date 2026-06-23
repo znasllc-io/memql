@@ -11,7 +11,7 @@ package clustere2e
 // just the replica that handled the write -- otherwise a cached read on a
 // sibling replica goes stale the moment a row it depends on is written.
 //
-// 5.5 turned this from a dormant primitive into a live path: querySpaceUtterances
+// 5.5 turned this from a dormant primitive into a live path: spaceUtterances
 // now carries @cache(ttl="30") and v1:cognition:* writes (created/updated/deleted)
 // are forwarded cross-node by the routing rules in component/node/routing.go.
 // This test drives the end-to-end hit/evict/miss cycle through the SDK over
@@ -68,7 +68,7 @@ func TestResultCacheInvalidation_CrossReplica(t *testing.T) {
 		uid := "v1:cognition:utterance:" + id.NewShortId()
 		if _, err := qcA.MutationSendTextUtterance(ctx, memqlclient.MutationSendTextUtteranceArgs{
 			UtteranceId:     uid,
-			PartitionId:         spaceID,
+			PartitionId:     spaceID,
 			ParticipantId:   participantID,
 			ParticipantType: "human",
 			Text:            text,
@@ -89,7 +89,7 @@ func TestResultCacheInvalidation_CrossReplica(t *testing.T) {
 	utteranceCount := func(qc *memqlclient.QueryClient) int {
 		res, err := qc.QuerySpaceUtterances(ctx, memqlclient.QuerySpaceUtterancesArgs{PartitionId: spaceID})
 		if err != nil {
-			t.Fatalf("querySpaceUtterances: %v", err)
+			t.Fatalf("spaceUtterances: %v", err)
 		}
 		return len(res.Rows())
 	}
@@ -106,7 +106,7 @@ func TestResultCacheInvalidation_CrossReplica(t *testing.T) {
 	// WRITE a new utterance on connA (a different replica than connB, typically).
 	// This is graph.node.created.v1:cognition:utterance -- forwarded cross-node by
 	// the routing rules, so the invalidation subscriber fires on connB's replica
-	// and evicts the cached querySpaceUtterances result.
+	// and evicts the cached spaceUtterances result.
 	newID := sendUtterance("cache-invalidation POST-WRITE row")
 
 	// The post-write read on connB MUST reflect the new row. If invalidation did
@@ -121,7 +121,7 @@ func TestResultCacheInvalidation_CrossReplica(t *testing.T) {
 	for {
 		res, err := qcB.QuerySpaceUtterances(ctx, memqlclient.QuerySpaceUtterancesArgs{PartitionId: spaceID})
 		if err != nil {
-			t.Fatalf("post-write querySpaceUtterances: %v", err)
+			t.Fatalf("post-write spaceUtterances: %v", err)
 		}
 		found := false
 		for _, row := range res.Rows() {
@@ -139,7 +139,7 @@ func TestResultCacheInvalidation_CrossReplica(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("post-write read on connB never reflected new utterance %s within 5s "+
 				"(well under the 30s @cache TTL) -- cross-node cache invalidation did not evict the "+
-				"stale cached querySpaceUtterances result on the sibling replica", newID)
+				"stale cached spaceUtterances result on the sibling replica", newID)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}

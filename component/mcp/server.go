@@ -277,7 +277,7 @@ func (s *Server) handleMessage(ctx context.Context, raw []byte) *rpcResponse {
 func (s *Server) route(ctx context.Context, req *rpcRequest) *rpcResponse {
 	// Stamp the authenticated actor onto the context so the engine's query
 	// evaluator resolves actor.userId / actor.role for self-scoped reads
-	// (queryCurrentUser et al.) and per-row authz. The MCP layer previously only
+	// (currentUser et al.) and per-row authz. The MCP layer previously only
 	// set the agent ROLE; without the auth AccessContext a reflected query tool
 	// ran with an empty actor and self-scoped reads failed with "id cannot be
 	// empty" (#1595). Applies to every engine-backed method (tools/call,

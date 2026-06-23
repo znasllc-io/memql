@@ -127,7 +127,7 @@ func TestReadMergeAudit_EveryMutationRoutesThroughReadMergePath(t *testing.T) {
 	t.Logf("  update-kind mutations: %v", updateKind)
 }
 
-// TestReadMergeAudit_Run4Regressions pins mutationLeaveSpace -- one of the two
+// TestReadMergeAudit_Run4Regressions pins leaveSpace -- one of the two
 // mutations the issue called out as still-broken in Run 4. It is authored as
 // insert{} with an explicit id and a partial payload -- the exact shape that
 // used to reject with "” does not validate ... missing properties". The
@@ -138,7 +138,7 @@ func TestReadMergeAudit_EveryMutationRoutesThroughReadMergePath(t *testing.T) {
 // DSL conversion. The behavioural preservation proof is TestReadMerge_LeaveSpace_*
 // in the DB-gated file.
 //
-// mutationRevokeDelegation was the OTHER Run-4 mutation, but it has since been
+// revokeDelegation was the OTHER Run-4 mutation, but it has since been
 // intentionally converted to an update{} (read-merge) form (memql#1729): a
 // revoke is a state transition, so the terminal state (active=false +
 // revokedAt) must be forced by the mutation itself rather than supplied by the
@@ -149,7 +149,7 @@ func TestReadMergeAudit_EveryMutationRoutesThroughReadMergePath(t *testing.T) {
 func TestReadMergeAudit_Run4Regressions(t *testing.T) {
 	templates := loadAllMutationTemplates(t)
 
-	for _, name := range []string{"mutationLeaveSpace"} {
+	for _, name := range []string{"leaveSpace"} {
 		tmpl, ok := templates[name]
 		require.True(t, ok, "%s must be registered from the unified tree", name)
 		require.True(t, hasExplicitID(tmpl),
@@ -161,14 +161,14 @@ func TestReadMergeAudit_Run4Regressions(t *testing.T) {
 				"is the canonical fix, not a per-mutation update{} conversion", name)
 	}
 
-	// mutationRevokeDelegation must be update-kind (authoritative revoke,
+	// revokeDelegation must be update-kind (authoritative revoke,
 	// memql#1729) -- the inverse assertion, so a regression back to insert{}
 	// (where the caller payload could leave the row active) fails here.
-	revoke, ok := templates["mutationRevokeDelegation"]
-	require.True(t, ok, "mutationRevokeDelegation must be registered from the unified tree")
+	revoke, ok := templates["revokeDelegation"]
+	require.True(t, ok, "revokeDelegation must be registered from the unified tree")
 	require.True(t, hasExplicitID(revoke),
-		"mutationRevokeDelegation must target an explicit id (memql#1729)")
+		"revokeDelegation must target an explicit id (memql#1729)")
 	require.Equal(t, ast.MutationKindUpdate, revoke.Kind,
-		"mutationRevokeDelegation must be update-kind so it authoritatively forces "+
+		"revokeDelegation must be update-kind so it authoritatively forces "+
 			"active=false regardless of caller input (memql#1729)")
 }

@@ -107,11 +107,14 @@ func deploymentNode(env, status, version string) *memqlv1.MemoryNode {
 	return &memqlv1.MemoryNode{Payload: st}
 }
 
-// mutationsOf returns the mutation* queries the engine was asked to run.
+// mutationsOf returns the write (mutation) calls the engine was asked to run.
+// Post-C6 (memql#2036) mutation construct names are bare -- no `mutation`
+// prefix -- so we match deploycontrol's actual write verbs (createDeployment /
+// updateDeploymentStatus) rather than a kind prefix.
 func mutationsOf(eng *fakeEngine) []string {
 	var out []string
 	for _, q := range eng.queries {
-		if strings.HasPrefix(q, "mutation") {
+		if strings.HasPrefix(q, "createDeployment(") || strings.HasPrefix(q, "updateDeploymentStatus(") {
 			out = append(out, q)
 		}
 	}
@@ -205,12 +208,12 @@ func TestCutVersionDefaultsToPatchAndCreatesPending(t *testing.T) {
 	if res.GetDetails()["deploymentId"] == "" {
 		t.Error("deploymentId empty")
 	}
-	// Exactly one mutationCreateDeployment with status pending + version.
+	// Exactly one createDeployment with status pending + version.
 	if len(mutationsOf(eng)) != 1 {
 		t.Fatalf("mutation calls = %d, want 1", len(mutationsOf(eng)))
 	}
 	call := mutationsOf(eng)[0]
-	if !strings.HasPrefix(call, "mutationCreateDeployment(") {
+	if !strings.HasPrefix(call, "createDeployment(") {
 		t.Errorf("unexpected mutation: %s", call)
 	}
 	if !strings.Contains(call, `status: "pending"`) {

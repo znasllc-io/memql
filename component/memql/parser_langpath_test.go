@@ -13,11 +13,11 @@ import (
 //   - 121 of 123 sites go through SDK builders that produce
 //     `funcName({k: v, ...})` invocations (Mutation/Query/Builtin/
 //     Logic). MutationProvisionWorkspaceBuild is a representative
-//     mutation, queryDueTrainAgentRetryPlans is representative of a
+//     mutation, dueTrainAgentRetryPlans is representative of a
 //     no-arg query, trainAgent is a builtin with mixed arg types.
 //   - 2 of 123 sites pass hand-written string literals:
 //     "concept==v1:cluster:node" (filter) and
-//     "queryDueTrainAgentRetryPlans({})" (already covered).
+//     "dueTrainAgentRetryPlans({})" (already covered).
 //   - The filter form joined by `;` (AND) shows up in
 //     hand-written admin queries via `BrowseConcept`.
 //   - actor./args./payload. accessors flow through the
@@ -35,14 +35,14 @@ var representativeRuntimeQueries = []struct {
 	{"compound filter joined by &&", `concept==v1:cluster:node && payload.name=="bff"`},
 	{"actor accessor in RHS", `id==actor.userId`},
 	{"args accessor in RHS", `payload.partitionId==args.partitionId`},
-	{"no-arg query invocation", `queryDueTrainAgentRetryPlans({})`},
-	{"single-arg mutation invocation", `mutationCreateRecord({recordId: "v1:data:record:abc"})`},
+	{"no-arg query invocation", `dueTrainAgentRetryPlans({})`},
+	{"single-arg mutation invocation", `createRecord({recordId: "v1:data:record:abc"})`},
 	{"mixed-arg builtin invocation",
 		`trainAgent({agentId: "v1:agents:agent:abc", domains: ["x", "y"], tools: []})`},
 	// Bare-parens no-arg invocation -- some integrations write
 	// `queryFoo()` instead of `queryFoo({})`. Found at
-	// integrations/agents/factory.go:238 (queryActiveAgentRoles()).
-	{"bare-parens no-arg invocation", `queryActiveAgentRoles()`},
+	// integrations/agents/factory.go:238 (activeAgentRoles()).
+	{"bare-parens no-arg invocation", `activeAgentRoles()`},
 	// Modern single-paren directive calls -- the langparser now
 	// emits the specialised AST nodes directly (#254). reflect.DeepEqual
 	// holds against the memql parser for every shape below.
@@ -381,7 +381,6 @@ func TestLangparserPathUnsupported_QuoteAware(t *testing.T) {
 		})
 	}
 }
-
 
 // TestParseViaLangparser_FallsBackOnParseError pins the #249 soak
 // contract: ANY langparser parse error returns ErrUnsupportedQueryShape

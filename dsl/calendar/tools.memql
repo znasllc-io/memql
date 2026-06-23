@@ -14,10 +14,10 @@
 // query / mutation: reads self-scope on actor.userId; create stamps
 // ownerUserId from actor.userId; update / delete are reached only after
 // the agent has read the row through the owner-scoped
-// queryCalendarEventById, so cross-user writes are impossible.
+// calendarEventById, so cross-user writes are impossible.
 
 @enabled
-@handler(type="query", query="queryUpcomingEvents({\"windowStart\": \"$args.windowStart\", \"windowEnd\": \"$args.windowEnd\"})")
+@handler(type="query", query="upcomingEvents({\"windowStart\": \"$args.windowStart\", \"windowEnd\": \"$args.windowEnd\"})")
 @executionTime("fast")
 @description("List the caller's upcoming calendar events whose start falls in [windowStart, windowEnd]. Use this for 'what's coming up' and as the source for day-before reminders. Returns the caller's own events only.")
 @mcp
@@ -27,7 +27,7 @@ tool calendarList {
 }
 
 @enabled
-@handler(type="query", query="queryFindEvents({\"title\": \"$args.title\"})")
+@handler(type="query", query="findEvents({\"title\": \"$args.title\"})")
 @executionTime("fast")
 @description("Find the caller's calendar events by exact title (e.g. 'Karate class'). Returns the caller's own events only. For time-window browsing use calendarList instead.")
 @mcp
@@ -36,7 +36,7 @@ tool calendarFind {
 }
 
 @enabled
-@handler(type="function", name="mutationCreateCalendarEvent")
+@handler(type="function", name="createCalendarEvent")
 @executionTime("fast")
 @description("Create a native calendar event for the caller. The event is owned by the caller (ownerUserId is stamped server-side from the auth context); source is 'native'. Returns the created event. Use ISO-8601 / RFC3339 timestamps for startsAt / endsAt.")
 @mcp
@@ -51,7 +51,7 @@ tool calendarCreate {
 }
 
 @enabled
-@handler(type="query", query="mutationUpdateCalendarEvent({\"eventId\": \"$args.eventId\", \"payload\": \"$args.payload\"})")
+@handler(type="query", query="updateCalendarEvent({\"eventId\": \"$args.eventId\", \"payload\": \"$args.payload\"})")
 @executionTime("fast")
 @description("Update an existing calendar event the caller owns (reschedule, rename, change location / notes / recurrence). Look the event up first via calendarList or calendarFind to get its id. Only the fields in `payload` change.")
 @mcp
@@ -61,7 +61,7 @@ tool calendarUpdate {
 }
 
 @enabled
-@handler(type="query", query="mutationDeleteCalendarEvent({\"eventId\": \"$args.eventId\"})")
+@handler(type="query", query="deleteCalendarEvent({\"eventId\": \"$args.eventId\"})")
 @executionTime("fast")
 @description("Delete a calendar event the caller owns (soft-delete; recoverable in history). Look the event up first via calendarList or calendarFind to get its id.")
 @mcp

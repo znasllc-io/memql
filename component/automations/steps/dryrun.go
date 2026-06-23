@@ -27,7 +27,7 @@ package steps
 //
 // Increment 1 (this file + sandbox_registry.go) covers the ephemeral sandbox
 // partition + mutation isolation + webhook block + the behavioral trace. AI/web
-// metering, the cost estimate, and the mutationRecordBundleDryRun persist path
+// metering, the cost estimate, and the recordBundleDryRun persist path
 // are increment 2; full-sandbox-live mode is increment 3.
 
 import (

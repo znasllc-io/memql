@@ -9,7 +9,7 @@ use cluster.shapes.{ deploymentFull }
 @enabled
 @description("Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...)")
 @unbounded("node-type registry -- a tiny bounded topology set consumed whole")
-query nodeType queryClusterNodeTypes {
+query nodeType clusterNodeTypes {
 }
 
 // ---- queries/v1/cluster/clusterNodes.memql ----
@@ -24,27 +24,27 @@ query nodeType queryClusterNodeTypes {
 @enabled
 @description("Returns all cluster node rows (CLI dedupes to latest per id)")
 @unbounded("registered cluster nodes -- a bounded topology set consumed whole")
-query node queryClusterNodes {
+query node clusterNodes {
 }
 
 // ---- queries/v1/cluster/nodesForDeployment.memql ----
 
 // All cluster nodes belonging to a given deployment (#1873). A
 // deployment's topology = every node stamped with its deploymentId at
-// registration (logicRegisterNode). `asOf latest` collapses the
+// registration (registerNode). `asOf latest` collapses the
 // append-only v1:cluster:node stream to one row per node id (its current
-// state), mirroring queryStaleClusterNodes -- so this returns the live
+// state), mirroring staleClusterNodes -- so this returns the live
 // membership of the deployment, not every historical liveness row.
 //
 // Authz: no user-scope field is referenced (filters on payload.deploymentId,
 // infrastructure topology), so this lands in the conformance "other" bucket
-// alongside queryClusterNodes / queryStaleClusterNodes -- no caller-check
+// alongside clusterNodes / staleClusterNodes -- no caller-check
 // needed (per-row-authz-audit.md).
 
 @enabled
 @description("Latest-per-id cluster node rows for one deploymentId -- the live topology of that deployment (#1873). asOf latest collapses the append-only node stream to current state per node.")
 @unbounded("nodes in one deployment -- a bounded topology set consumed whole")
-query node queryNodesForDeployment {
+query node nodesForDeployment {
   args {
     deploymentId  string  @required
   }
@@ -64,12 +64,12 @@ query node queryNodesForDeployment {
 // node that has since re-registered under the current deployment drops out.
 //
 // Authz: filters on payload.deploymentId only (infrastructure topology, no
-// user-scope field) -> conformance "other" bucket, same as queryClusterNodes.
+// user-scope field) -> conformance "other" bucket, same as clusterNodes.
 
 @enabled
 @description("Latest-per-id cluster nodes whose deploymentId != the supplied current deployment -- orphans from a previous deploy (feeds the reaper #1874 + cockpit orphan highlight). #1873.")
 @unbounded("nodes outside a deployment -- a bounded topology set for drain/cutover, consumed whole")
-query node queryNodesNotInDeployment {
+query node nodesNotInDeployment {
   args {
     deploymentId  string  @required
   }
@@ -84,7 +84,7 @@ query node queryNodesNotInDeployment {
 
 @enabled
 @description("Returns all cluster spawn events")
-query spawnEvent queryClusterSpawnEvents {
+query spawnEvent clusterSpawnEvents {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -100,12 +100,12 @@ query spawnEvent queryClusterSpawnEvents {
 @enabled
 @description("Returns the existing cluster record, if any")
 @unbounded("the cluster singleton row -- bounded to a single row")
-query cluster queryExistingCluster {
+query cluster existingCluster {
 }
 
 // ---- queries/v1/cluster/staleClusterNodes.memql ----
 
-// queryStaleClusterNodes
+// staleClusterNodes
 // ======================
 //
 // Returns the LATEST row per node id whose health is not already a
@@ -114,7 +114,7 @@ query cluster queryExistingCluster {
 // hanging around after a K8s rollover.
 //
 // Why `asOf latest`: the v1:cluster:node store is append-only -- every
-// liveness transition (mutationUpdateNodeHealth) appends a new row under
+// liveness transition (updateNodeHealth) appends a new row under
 // the same id, so a plain scan would return every historical row. The
 // struct-form `asOf latest` directive collapses to one row per id (the
 // most recent), which is exactly what the prune needs:
@@ -128,13 +128,13 @@ query cluster queryExistingCluster {
 // the MemQL query planner rejects function-call literals (addDuration /
 // timestamp) inside filter comparisons, and addDuration accepts only
 // positive ISO-8601 durations. So the windowing math lives on the
-// per-row side in logicPruneStaleClusterNodes, mirroring
-// logicAccessRequestExpirySweep / logicPurgeExpiredArchivedSpaces.
+// per-row side in pruneStaleClusterNodes, mirroring
+// accessRequestExpirySweep / logicPurgeExpiredArchivedSpaces.
 
 @enabled
 @description("Latest-per-id cluster node rows whose health is not already 'stopped'. When olderThan is supplied, restricts to rows whose lastSeen is strictly before it (RFC3339 cutoff). Drives the stale-node prune cron.")
 @unbounded("stale-node reaper sweep -- an internal sweep that must see all stale nodes")
-query node queryStaleClusterNodes {
+query node staleClusterNodes {
   args {
     olderThan  string  @description("Optional RFC3339 cutoff; when set, only rows whose lastSeen is strictly before it are returned.")
   }
@@ -152,13 +152,13 @@ query node queryStaleClusterNodes {
 // transition under the same concept id = deploymentId), so a plain scan
 // would return every transition; asOf latest collapses to the current
 // state. Ordering newest-first by createdAt is applied by the consumer
-// (cockpit Deployments view), mirroring queryClusterNodes' "CLI dedupes
+// (cockpit Deployments view), mirroring clusterNodes' "CLI dedupes
 // + sorts" note -- the MemQL query planner has no order/limit clause.
 
 @enabled
 @description("Deployment history for a cluster: latest-per-deploymentId rows (asOf latest -> current status per deployment) filtered to a clusterId. Backs the cockpit Deployments history list (consumer sorts newest-first by createdAt). #1872.")
 @unbounded("deployments for a cluster -- a bounded topology set consumed whole")
-query deployment queryDeploymentsForCluster {
+query deployment deploymentsForCluster {
   args {
     clusterId  string  @required
   }
@@ -180,7 +180,7 @@ query deployment queryDeploymentsForCluster {
 @enabled
 @description("All status-transition rows for one deployment, by deploymentId, oldest-to-newest (full lifecycle history; reconstructable asOf any time). #1872.")
 @unbounded("deployment by unique deploymentId -- bounded to a single row")
-query deployment queryDeploymentById {
+query deployment deploymentById {
   args {
     deploymentId  string  @required
   }
@@ -212,12 +212,12 @@ query deployment queryDeploymentById {
 //
 // Authz: filters on payload.status only (infrastructure topology, no
 // user-scope field) -> conformance "other" bucket, same as
-// queryNodesNotInDeployment / queryDeploymentsForCluster.
+// nodesNotInDeployment / deploymentsForCluster.
 
 @enabled
 @description("Latest-per-deploymentId deployment rows whose status is terminal-not-active (superseded / failed / rolled_back) -- the deployments whose still-registered nodes are orphans. Feeds the active-topology reaper (#1874). asOf latest -> current status per deployment.")
 @unbounded("superseded/failed/rolled-back deployments GC sweep -- an internal sweep that must see all")
-query deployment querySupersededDeployments {
+query deployment supersededDeployments {
   filter  payload.status in ["superseded", "failed", "rolled_back"]
   shape   deploymentFull
   asOf    latest

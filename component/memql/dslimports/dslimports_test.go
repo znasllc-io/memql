@@ -247,7 +247,7 @@ func TestLoad_NonProceduralOnlyFileLoadsCleanly(t *testing.T) {
 		"shapes.memql":   `shape foo {` + "\n  payload.bar\n}\n",
 		"shapesCB.memql": `shape workspace workspaceFull {` + "\n  row.id\n}\n",
 		"specs.memql":    `spec specIsActive {` + "\n  payload.active==true\n}\n",
-		"traits.memql":   `trait traitIsActiveRecord {` + "\n  payload.active==true\n}\n",
+		"traits.memql":   `trait isActiveRecord {` + "\n  payload.active==true\n}\n",
 		"seeds.memql":    `seed agent assistant {` + "\n  name: \"Assistant\"\n}\n",
 	}
 	for filename, body := range cases {

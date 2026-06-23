@@ -81,7 +81,7 @@ func TestValidateFileComposition_MutationWithQueries(t *testing.T) {
 	source := `
 @enabled
 @audit
-func (Mutation) mutationCreateUser() {
+func (Mutation) createUser() {
   insert("v1:user", payload={"name": args.name})
 }
 
@@ -181,7 +181,7 @@ func (Automation) workflow(_ any) {
 }
 
 @enabled
-func (Mutation) mutationCreateRecord() {
+func (Mutation) createRecord() {
   insert("v1:b", payload={})
 }
 `
@@ -370,7 +370,7 @@ args {
   email  string  @required
   name   string  @required
 }
-func (Mutation) mutationCreateUser(args any) {
+func (Mutation) createUser(args any) {
   insert("v1:user", {
     payload: {
       email: args.email,

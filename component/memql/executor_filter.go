@@ -646,7 +646,7 @@ func (e *MemQLEngine) canonicalizeRelationshipFieldValue(ctx context.Context, co
 // (e.g. a `var foo *ComparisonExpression = nil` stashed into an
 // ExpressionNode): the outer `expr == nil` check returns false for that
 // shape, the type switch still matches, and then `node.Field` dereferences
-// nil. Seen in the wild on querySpaceParticipants when a compiled sub-
+// nil. Seen in the wild on spaceParticipants when a compiled sub-
 // expression had a nil branch -- panic'd the BFF.
 func extractConceptFromExpression(expr ExpressionNode) string {
 	if expr == nil {
@@ -1152,7 +1152,7 @@ func compilePayloadComparison(path []string, op ComparisonOperator, value any) (
 		// is logically DISTINCT FROM any concrete value, so a `!=`
 		// predicate must MATCH it. Plain SQL `<>` returns NULL (not true)
 		// when either side is NULL, which silently drops every row that
-		// lacks the field -- the bug behind traitIsNotDeleted
+		// lacks the field -- the bug behind isNotDeleted
 		// (`payload.deleted != true`) excluding rows that never had a
 		// `deleted` key (the concept @default isn't always stamped). Use
 		// IS DISTINCT FROM so absent == not-equal == included. OpEq keeps
@@ -1160,8 +1160,8 @@ func compilePayloadComparison(path []string, op ComparisonOperator, value any) (
 		//
 		// EXCEPTION -- comparison to the empty string (#1708/#1714): `!= ""`
 		// is the canonical "field is set" idiom across the DSL
-		// (traitIsDeletionScheduled = `deletionScheduledAt != ""`,
-		// queryExpiredConsumedAuthCodes = `consumedAt != ""`, etc). An ABSENT
+		// (isDeletionScheduled = `deletionScheduledAt != ""`,
+		// expiredConsumedAuthCodes = `consumedAt != ""`, etc). An ABSENT
 		// string field is logically EQUAL to "" (both mean "not set"), so it
 		// must NOT match `!= ""`. Under the #1685 IS DISTINCT FROM rule those
 		// queries wrongly returned every row whose field was absent (all

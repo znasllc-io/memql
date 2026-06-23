@@ -65,7 +65,7 @@ shape agent agentFull {
 }
 
 @row
-@description("Minimal agent projection used by queryAgentRoleSlugsInUse: just id + roleSlug, since the create-agent dropdown only needs to know which slugs are taken (not the full agent payload).")
+@description("Minimal agent projection used by agentRoleSlugsInUse: just id + roleSlug, since the create-agent dropdown only needs to know which slugs are taken (not the full agent payload).")
 shape agent agentRoleSlugLite {
   row.id
   payload.roleSlug

@@ -21,13 +21,13 @@ import (
 // These tests pin the fix for memql#1626: the six sibling Library
 // indexer logics (logicIndex{Document,Note,Todo,CalendarEvent,Memory,
 // LiveSource}) passed RAW nullable fields straight into
-// mutationCreateArtifact. When an optional field was ABSENT on the
+// createArtifact. When an optional field was ABSENT on the
 // backing row it resolved to an explicit null, and the
 // v1:library:artifact string fields reject null
 // ("expected string, but got null"), so artifact auto-indexing failed
 // for every record whose optional fields were absent.
 //
-// #1605 fixed exactly this on logicIndexGeneratedOutput with
+// #1605 fixed exactly this on indexGeneratedOutput with
 // `coalesce(field, "")`; #1626 is the same fix applied to the six
 // siblings it missed. The systemic alternative -- making the concept's
 // optional string fields nullable -- is not expressible in the concept
@@ -64,8 +64,8 @@ func compileArtifactSchema(t *testing.T) *jsonschema.Schema {
 }
 
 // renderArtifactPayloadFromMemoryIndexer renders the REAL
-// mutationCreateArtifact (loaded from the embedded DSL) with the exact
-// args logicIndexMemory passes for a memory whose OPTIONAL fields
+// createArtifact (loaded from the embedded DSL) with the exact
+// args indexMemory passes for a memory whose OPTIONAL fields
 // (summary / agentId / partitionId) are absent. `coalesced` selects whether
 // those absent fields arrive as "" (the post-#1626 indexer output) or as
 // null (the pre-#1626 raw-passthrough that failed validation).
@@ -81,9 +81,9 @@ func renderArtifactPayloadFromMemoryIndexer(t *testing.T, coalesced bool) map[st
 		t.Fatalf("LoadUnifiedFunctions: %v", err)
 	}
 
-	fn, err := registry.Get("mutationCreateArtifact")
-	require.NoError(t, err, "mutationCreateArtifact must register from dsl/library/mutations.memql")
-	require.NotNil(t, fn.MutationTemplate, "mutationCreateArtifact must carry a mutation template")
+	fn, err := registry.Get("createArtifact")
+	require.NoError(t, err, "createArtifact must register from dsl/library/mutations.memql")
+	require.NotNil(t, fn.MutationTemplate, "createArtifact must carry a mutation template")
 
 	// The optional-field value the memory indexer hands the mutation: ""
 	// when coalesced (post-#1626), nil when raw (pre-#1626).
@@ -106,7 +106,7 @@ func renderArtifactPayloadFromMemoryIndexer(t *testing.T, coalesced bool) map[st
 		"title":            "Prefers concise replies",
 		"summary":          optional,
 		"agentId":          optional,
-		"partitionId":          optional,
+		"partitionId":      optional,
 		"live":             false,
 	}
 
@@ -170,16 +170,16 @@ func TestLibraryIndexersCoalesceNullableOptionalFields(t *testing.T) {
 		want   string
 		rawBad string
 	}{
-		// logicIndexNote
-		{"logicIndexNote", "summary", `summary: coalesce(args.event.payload.body`, `summary: args.event.payload.body`},
-		// logicIndexTodo
-		{"logicIndexTodo", "title", `title: coalesce(args.event.payload.title`, `title: args.event.payload.title`},
-		// logicIndexCalendarEvent
-		{"logicIndexCalendarEvent", "title", `title: coalesce(args.event.payload.title`, `title: args.event.payload.title`},
-		// logicIndexMemory (the indexer failing live on 0.9.67)
-		{"logicIndexMemory", "summary", `summary: coalesce(args.event.payload.summary`, `summary: args.event.payload.summary`},
-		{"logicIndexMemory", "agentId", `agentId: coalesce(args.event.payload.agentId`, `agentId: args.event.payload.agentId`},
-		{"logicIndexMemory", "partitionId", `partitionId: coalesce(args.event.payload.partitionId`, `partitionId: args.event.payload.partitionId`},
+		// indexNote
+		{"indexNote", "summary", `summary: coalesce(args.event.payload.body`, `summary: args.event.payload.body`},
+		// indexTodo
+		{"indexTodo", "title", `title: coalesce(args.event.payload.title`, `title: args.event.payload.title`},
+		// indexCalendarEvent
+		{"indexCalendarEvent", "title", `title: coalesce(args.event.payload.title`, `title: args.event.payload.title`},
+		// indexMemory (the indexer failing live on 0.9.67)
+		{"indexMemory", "summary", `summary: coalesce(args.event.payload.summary`, `summary: args.event.payload.summary`},
+		{"indexMemory", "agentId", `agentId: coalesce(args.event.payload.agentId`, `agentId: args.event.payload.agentId`},
+		{"indexMemory", "partitionId", `partitionId: coalesce(args.event.payload.partitionId`, `partitionId: args.event.payload.partitionId`},
 	}
 
 	for _, tc := range cases {

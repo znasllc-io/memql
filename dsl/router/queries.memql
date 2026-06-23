@@ -14,10 +14,10 @@ use router.concepts.{ budget }
 @unbounded("router budgets (optionally by scope) -- a small bounded config set consumed whole")
 @description("Returns all active budget rows for the current partition.")
 @cache(ttl="120")
-query budget queryRouterBudgets {
+query budget routerBudgets {
   args {
     scope  string
   }
-  filter  when(args.scope) { payload.scope==args.scope } && traitIsActiveRecord
+  filter  when(args.scope) { payload.scope==args.scope } && isActiveRecord
   shape   budgetFull
 }

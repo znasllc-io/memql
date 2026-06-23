@@ -243,7 +243,7 @@ func (c *ASTConverter) convertComparisonExpr(expr *languageParser.ComparisonExpr
 		// are NOT caller-passed args -- map them to the engine
 		// ActorReference so they resolve from the actor's
 		// AccessContext at filter time (resolveActorReferences ->
-		// resolveActorPath), e.g. queryCurrentUser's `id==actor.userId`.
+		// resolveActorPath), e.g. currentUser's `id==actor.userId`.
 		// Without this they become an ArgReference, miss the args bag,
 		// and the comparison silently matches zero rows. See memql#216.
 		// caller.X retired by #221; the language parser rejects it,

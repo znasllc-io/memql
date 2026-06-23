@@ -46,7 +46,7 @@ var ErrUserNotProvisioned = errors.New("auth: user not provisioned in database")
 //  1. `sub` must already be a canonical v1:identity:user id (every
 //     identity-service-issued JWT carries one). Anything else is
 //     rejected with ErrUserNotProvisioned.
-//  2. queryUserById(userId) -> user row (for Role + email).
+//  2. userById(userId) -> user row (for Role + email).
 //
 // If step 2 returns no rows, ErrUserNotProvisioned is returned so the
 // caller can decide whether to short-circuit with a claims-based
@@ -65,7 +65,7 @@ func (r *IdentityResolver) LoadFromClaims(ctx context.Context, claims map[string
 	}
 	userId := subject
 
-	userQuery := fmt.Sprintf(`queryUserById({"userId": %s})`, quoteJSON(userId))
+	userQuery := fmt.Sprintf(`userById({"userId": %s})`, quoteJSON(userId))
 	user, err := r.Engine.ExecuteShaped(ctx, userQuery)
 	if err != nil {
 		return nil, fmt.Errorf("userById: %w", err)

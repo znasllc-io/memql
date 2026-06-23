@@ -13,7 +13,7 @@ import (
 // rest of the rewriter (id hoist, payload translation) is unchanged.
 
 func TestNormaliseMutation_AcceptStamp_AutoBinds(t *testing.T) {
-	src := `mutation space createSpace {
+	src := `mutate space createSpace {
   args {
     id          string @required
     name        string @required
@@ -51,7 +51,7 @@ func TestNormaliseMutation_AcceptStamp_AutoBinds(t *testing.T) {
 }
 
 func TestNormaliseMutation_AcceptOnly_NoStamp(t *testing.T) {
-	src := `mutation space createSpace {
+	src := `mutate space createSpace {
   args {
     id   string @required
     name string @required
@@ -69,7 +69,7 @@ func TestNormaliseMutation_AcceptOnly_NoStamp(t *testing.T) {
 
 func TestNormaliseMutation_Accept_RequiresMatchingArg(t *testing.T) {
 	// `description` is accepted but never declared in args -> error.
-	src := `mutation space createSpace {
+	src := `mutate space createSpace {
   args {
     id   string @required
     name string @required
@@ -87,7 +87,7 @@ func TestNormaliseMutation_Accept_RequiresMatchingArg(t *testing.T) {
 
 func TestNormaliseMutation_Accept_RejectsKeyValueEntry(t *testing.T) {
 	// A `key: value` pair in accept is a mistake -- it belongs in stamp.
-	src := `mutation space createSpace {
+	src := `mutate space createSpace {
   args { id string @required }
   accept { id, status: "active" }
 }`
@@ -101,7 +101,7 @@ func TestNormaliseMutation_Accept_RejectsKeyValueEntry(t *testing.T) {
 }
 
 func TestNormaliseMutation_Accept_RejectsMixWithInsert(t *testing.T) {
-	src := `mutation space createSpace {
+	src := `mutate space createSpace {
   args { id string @required }
   accept { id }
   insert { id: args.id }

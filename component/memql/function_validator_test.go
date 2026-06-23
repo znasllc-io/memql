@@ -45,7 +45,7 @@ func TestValidateFunctionArgs_RichSchemas(t *testing.T) {
 	}
 
 	valid := map[string]any{
-		"partitionId":        "space-1",
+		"partitionId":    "space-1",
 		"questionNumber": 4,
 		"status":         "active",
 		"scheduledAt":    "2026-01-01T12:00:00Z",
@@ -185,11 +185,11 @@ func TestConvertArgsField_InvalidPatternFailsLoad(t *testing.T) {
 // while the bundle still populates.
 //
 // Regression for: frontend-reported empty `data` on every query*() that uses
-// a named shape (e.g., querySpaceUtterances, queryActiveSpaces).
+// a named shape (e.g., spaceUtterances, queryActiveSpaces).
 func TestResolvePlanFunctions_PreservesNamedShapeReference(t *testing.T) {
 	reg := newFunctionRegistry()
 	require.NoError(t, reg.add(&Function{
-		Name:         "querySpaceUtterances",
+		Name:         "spaceUtterances",
 		FunctionKind: "query",
 		Enabled:      true,
 		Expr: &ShapeExpression{
@@ -204,7 +204,7 @@ func TestResolvePlanFunctions_PreservesNamedShapeReference(t *testing.T) {
 
 	plan := &QueryPlan{
 		Root: &FunctionCallExpression{
-			Name: "querySpaceUtterances",
+			Name: "spaceUtterances",
 			Args: map[string]any{},
 		},
 	}

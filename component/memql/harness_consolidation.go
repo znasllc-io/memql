@@ -18,10 +18,10 @@ import "time"
 //
 // The Go consolidation handler (registered by the agent-node init
 // path) calls these helpers and feeds their results into the harness
-// mutations (mutationCreateHarnessSemanticMemory /
-// mutationReinforceHarnessSemanticMemory /
-// mutationDecayHarnessSemanticMemory / mutationPruneHarnessSemanticMemory
-// / mutationAdvanceHarnessConsolidationCursor).
+// mutations (createHarnessSemanticMemory /
+// reinforceHarnessSemanticMemory /
+// decayHarnessSemanticMemory / pruneHarnessSemanticMemory
+// / advanceHarnessConsolidationCursor).
 
 // Consolidation tuning defaults. The handler reads the matching env
 // vars at runtime (MEMQL_HARNESS_CONSOLIDATION_*) and falls back to

@@ -176,7 +176,7 @@ func (e *MemQLEngine) loadPriorPayload(ctx context.Context, conceptMeta *memoryn
 // remains top-level replacement -- the contract every existing
 // mutation was written against (memql#350 documents mutations that
 // deliberately restate every nested field under it). The opt-in exists
-// because a mutation like mutationToggleComputerUseEnabled writes a
+// because a mutation like toggleComputerUseEnabled writes a
 // single key into User.preferences and would otherwise wipe every
 // sibling preference (theme, timezone, archiveRetentionDays, ...) on
 // each kill-switch flip (memql#1339).
@@ -297,7 +297,7 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 // This hoists what used to be a per-mutation concern (each update/revoke/
 // delete mutation had to either be authored as update{} or re-state every
 // required field) into one place, so a mutation authored as insert{} that
-// is semantically an update -- e.g. mutationLeaveSpace, mutationRevokeDelegation
+// is semantically an update -- e.g. leaveSpace, revokeDelegation
 // -- preserves siblings automatically, without a DSL change.
 //
 // requirePrior gates the update() contract: when true (the update() path)
@@ -523,7 +523,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		}
 	}
 	// Generic feedback-intake guard (epic memql#1404 / memql#1405): the
-	// resume produced by mutationAttachPlanFeedback (a feedbackResponse with
+	// resume produced by attachPlanFeedback (a feedbackResponse with
 	// a respondedBy + status=running) is only legal when the Plan is
 	// currently awaitingFeedback AND the actor owns it (or is privileged).
 	// The append-only DSL cannot reject a conditional transition on its own,

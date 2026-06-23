@@ -104,7 +104,7 @@ type NewStep struct {
 }
 
 // AgentFactory creates and upgrades agents via the agents-namespace
-// mutations (mutationCreateAgent / mutationUpdateAgent). Reused, never
+// mutations (createAgent / updateAgent). Reused, never
 // redefined (#587 stays in lane).
 type AgentFactory interface {
 	// CreateAgent persists a freshly-composed specialist and returns its

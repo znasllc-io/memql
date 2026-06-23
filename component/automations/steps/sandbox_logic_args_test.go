@@ -67,7 +67,7 @@ func TestResolveLogicCallArgs_EmptyArgs(t *testing.T) {
 	reg := newSandboxStepRegistry(NewRegistry(), nil, "sandbox:dryrun:test", "", "")
 	stepCtx := &automations.StepContext{Evaluator: automations.NewEvaluator()}
 
-	got := reg.resolveLogicCallArgs(&automations.FunctionStepConfig{Name: "logicServiceVersionProbe"}, stepCtx)
+	got := reg.resolveLogicCallArgs(&automations.FunctionStepConfig{Name: "serviceVersionProbe"}, stepCtx)
 	if len(got) != 0 {
 		t.Fatalf("expected empty args, got %#v", got)
 	}

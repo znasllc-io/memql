@@ -336,8 +336,8 @@ func TestKeysetPagination_FallbackOrderByEndsWithIdAsc(t *testing.T) {
 //   - every non-final page is exactly the page size (a full window each time the
 //     cursor advances -- no short reads that would signal a broken predicate).
 //
-// 500 rows at pageSize 50 mirrors querySpaceUtterances / queryActiveSpaces /
-// queryWorkerTokensForUser, all of which carry `sort "createdAt","desc"` +
+// 500 rows at pageSize 50 mirrors spaceUtterances / queryActiveSpaces /
+// workerTokensForUser, all of which carry `sort "createdAt","desc"` +
 // `paginate 50` on main. Postgres-gated (skips without a reachable DB) like its
 // siblings in this file.
 func TestKeysetPagination_LoadBoundedFirstPageWalksFullSet(t *testing.T) {

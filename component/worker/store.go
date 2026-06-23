@@ -54,7 +54,7 @@ func (s *EngineStore) CreateRegistration(ctx context.Context, row RegistrationRo
 	if err != nil {
 		return fmt.Errorf("worker.store: marshal create args: %w", err)
 	}
-	query := fmt.Sprintf("mutationCreateWorkerRegistration(%s)", string(body))
+	query := fmt.Sprintf("createWorkerRegistration(%s)", string(body))
 	if _, err := s.Engine.Execute(ctx, query); err != nil {
 		return fmt.Errorf("worker.store: create registration: %w", err)
 	}
@@ -90,7 +90,7 @@ func (s *EngineStore) RefreshRegistration(ctx context.Context, row RegistrationR
 	if err != nil {
 		return fmt.Errorf("worker.store: marshal refresh args: %w", err)
 	}
-	query := fmt.Sprintf("mutationRefreshWorkerRegistration(%s)", string(body))
+	query := fmt.Sprintf("refreshWorkerRegistration(%s)", string(body))
 	if _, err := s.Engine.Execute(ctx, query); err != nil {
 		return fmt.Errorf("worker.store: refresh registration: %w", err)
 	}
@@ -111,7 +111,7 @@ func (s *EngineStore) UpdateLastSeen(ctx context.Context, registrationId string,
 	if err != nil {
 		return fmt.Errorf("worker.store: marshal lastSeen args: %w", err)
 	}
-	query := fmt.Sprintf("mutationUpdateWorkerLastSeen(%s)", string(body))
+	query := fmt.Sprintf("updateWorkerLastSeen(%s)", string(body))
 	if _, err := s.Engine.Execute(ctx, query); err != nil {
 		return fmt.Errorf("worker.store: update lastSeen: %w", err)
 	}
@@ -133,7 +133,7 @@ func (s *EngineStore) RevokeRegistration(ctx context.Context, registrationId, re
 	if err != nil {
 		return fmt.Errorf("worker.store: marshal revoke args: %w", err)
 	}
-	query := fmt.Sprintf("mutationRevokeWorker(%s)", string(body))
+	query := fmt.Sprintf("revokeWorker(%s)", string(body))
 	if _, err := s.Engine.Execute(ctx, query); err != nil {
 		return fmt.Errorf("worker.store: revoke registration: %w", err)
 	}
@@ -172,7 +172,7 @@ func (s *EngineStore) CreateInvocation(ctx context.Context, row InvocationRow) e
 	if err != nil {
 		return fmt.Errorf("worker.store: marshal invocation args: %w", err)
 	}
-	query := fmt.Sprintf("mutationCreateWorkerInvocation(%s)", string(body))
+	query := fmt.Sprintf("createWorkerInvocation(%s)", string(body))
 	if _, err := s.Engine.Execute(ctx, query); err != nil {
 		return fmt.Errorf("worker.store: create invocation: %w", err)
 	}
@@ -185,7 +185,7 @@ func (s *EngineStore) WorkerByIdentityId(ctx context.Context, identityId string)
 	if s == nil || s.Engine == nil {
 		return nil, nil
 	}
-	query := fmt.Sprintf(`queryWorkerByIdentityId({"identityId":%q})`, identityId)
+	query := fmt.Sprintf(`workerByIdentityId({"identityId":%q})`, identityId)
 	nodes, err := s.executeAndExtract(ctx, query)
 	if err != nil {
 		return nil, err
@@ -204,7 +204,7 @@ func (s *EngineStore) WorkersForUser(ctx context.Context, ownerUserId string) ([
 	if s == nil || s.Engine == nil {
 		return nil, nil
 	}
-	query := fmt.Sprintf(`queryWorkersForUser({"ownerUserId":%q})`, ownerUserId)
+	query := fmt.Sprintf(`workersForUser({"ownerUserId":%q})`, ownerUserId)
 	nodes, err := s.executeAndExtract(ctx, query)
 	if err != nil {
 		return nil, err

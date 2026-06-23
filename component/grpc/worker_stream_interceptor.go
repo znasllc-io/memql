@@ -94,7 +94,7 @@ func (f WorkerTokenResolverFunc) ResolveWorkerToken(ctx context.Context, plainTo
 }
 
 // EngineWorkerTokenResolver looks up worker tokens by hashing the
-// presented plain token and consulting queryWorkerTokenByKeyHash
+// presented plain token and consulting workerTokenByKeyHash
 // via the workertoken.Store.
 type EngineWorkerTokenResolver struct {
 	Engine *memqlengine.MemQLEngine

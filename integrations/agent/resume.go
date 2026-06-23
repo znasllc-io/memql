@@ -35,7 +35,7 @@ func (r *Replier) loadResumeContext(ctx context.Context, taskId string) (string,
 	if taskId == "" || r.engine == nil {
 		return "", false
 	}
-	q := fmt.Sprintf(`queryTaskStateById({taskId:%q})`, taskId)
+	q := fmt.Sprintf(`taskStateById({taskId:%q})`, taskId)
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Debug("agent background: resume taskState lookup failed",
@@ -53,7 +53,7 @@ func (r *Replier) loadResumeContext(ctx context.Context, taskId string) (string,
 	return block, true
 }
 
-// latestTaskStateRow unpacks queryTaskStateById's shape() result and returns
+// latestTaskStateRow unpacks taskStateById's shape() result and returns
 // the most recently-created row (taskState is versioned one-row-per-persist;
 // the #906 writer uses a deterministic stateId so today there's exactly one,
 // but pick the newest by createdAt defensively). Returns nil on no match.

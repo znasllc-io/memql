@@ -1244,7 +1244,7 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 	ctx = contextWithEnvelopeProvenance(ctx, envelope)
 
 	// Resolve + attach the caller's AccessContext so the engine can bind
-	// actor.* references in DSL filters/bodies (e.g. queryCurrentUser's
+	// actor.* references in DSL filters/bodies (e.g. currentUser's
 	// `id==actor.userId`, or `createdBy: actor.userId` on mutations). The
 	// verifier interceptor only stamps claims onto the stream context;
 	// ensureAccess converts them to a full AccessContext (cached per

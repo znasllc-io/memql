@@ -40,7 +40,7 @@ prompt cognitionPlanTriage {
 
 @defaultProvider("chat54Mini")
 @templateFile("prompts/cognitionFeedbackRoute.tmpl")
-@description("epic #1404 / child #1406 (assistant-mediated plan feedback). A Plan in this space is parked in awaitingFeedback with a pending question; classify whether the user's latest chat message is the ANSWER to that question (vs. an unrelated remark) and, when it is, extract the free-text feedback to fold into mutationAttachPlanFeedback. Cheap small-model structured call; runs only when the space actually has an awaitingFeedback Plan.")
+@description("epic #1404 / child #1406 (assistant-mediated plan feedback). A Plan in this space is parked in awaitingFeedback with a pending question; classify whether the user's latest chat message is the ANSWER to that question (vs. an unrelated remark) and, when it is, extract the free-text feedback to fold into attachPlanFeedback. Cheap small-model structured call; runs only when the space actually has an awaitingFeedback Plan.")
 prompt cognitionFeedbackRoute {
   question       string  @required @description("The feedback question the Plan is awaiting (Plan.feedbackRequest.question).")
   userText       string  @required @description("The user's latest chat message to classify against the question.")

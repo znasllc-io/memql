@@ -49,7 +49,7 @@ concept artifact {
 
   live             bool    @default("false")  @description("True when this row is a live-data source (kind=live_source, source=live). The Library renders a LIVE badge + freshness indicator computed from the backing liveSource's latest liveSnapshot (materializedAt / expiresAt). False for everything else.")
 
-  scope            enum("workspace", "private")  @description("Shared-vs-private visibility tier, mirrored from the backing source's own scope (currently only v1:knowledge:liveSource carries one). 'workspace' = a partition-shared row with NO single owner (ownerUserId is empty); it is invisible to the owned reads and surfaces instead through the non-owned queryLibraryWorkspaceLiveSources path so every partition member sees it. 'private' = owner-scoped like everything else (gated by ownerUserId==actor.userId). Null for the ordinary owned rows (documents / notes / to-dos / memories) that have no shared tier.")
+  scope            enum("workspace", "private")  @description("Shared-vs-private visibility tier, mirrored from the backing source's own scope (currently only v1:knowledge:liveSource carries one). 'workspace' = a partition-shared row with NO single owner (ownerUserId is empty); it is invisible to the owned reads and surfaces instead through the non-owned libraryWorkspaceLiveSources path so every partition member sees it. 'private' = owner-scoped like everything else (gated by ownerUserId==actor.userId). Null for the ordinary owned rows (documents / notes / to-dos / memories) that have no shared tier.")
 
   partitionId          string  @description("v1:cognition:space.id this item belongs to, when space-scoped (documents, generated outputs). Empty for user-global records (notes / to-dos / memories). Backs the per-space facet filter.")
 
@@ -77,7 +77,7 @@ concept artifact {
 // Those had no home concept; generatedOutput is it. Like document, the
 // raw bytes (when file-backed) live on a v1:common:attachment row; the
 // inline-text case keeps the body here directly. Each generatedOutput is
-// auto-promoted to an artifact index row by logicIndexGeneratedOutput.
+// auto-promoted to an artifact index row by indexGeneratedOutput.
 //
 // NOTE: the Go producers that emit these rows (workbench / computer-use /
 // agent integrations promoting their terminal outputs) are the remaining
@@ -87,7 +87,7 @@ concept artifact {
 @version("1.0.0")
 @namespace("library")
 @displayCard(primary="title", secondary="summary", tertiary="createdAt")
-@description("A deliverable PRODUCED through the app (as opposed to an uploaded document): a workbench result, a computer-use output, or a standalone agent output. Carries either inline text (body) or a reference to file bytes (attachmentId -> v1:common:attachment). Auto-promoted into the Library by logicIndexGeneratedOutput on creation. Per-row authz: owned -- ownerUserId is the producing user; reads gate on ownerUserId==actor.userId.")
+@description("A deliverable PRODUCED through the app (as opposed to an uploaded document): a workbench result, a computer-use output, or a standalone agent output. Carries either inline text (body) or a reference to file bytes (attachmentId -> v1:common:attachment). Auto-promoted into the Library by indexGeneratedOutput on creation. Per-row authz: owned -- ownerUserId is the producing user; reads gate on ownerUserId==actor.userId.")
 concept generatedOutput {
   ownerUserId       string  @required  @description("v1:identity:user.id this output belongs to (the user the producing agent / plan acts for). The per-row authz key for Library reads.")
   title             string  @required  @description("Display title for the output, e.g. 'Ten most beautiful birds'.")
@@ -138,7 +138,7 @@ concept generatedOutput {
 //
 // Per-row authz tier: owned. ownerUserId is threaded from the backing
 // document's owner on every append (edits run server-side on the
-// owner's behalf, mirroring mutationCreateArtifact); every read gates
+// owner's behalf, mirroring createArtifact); every read gates
 // on ownerUserId==actor.userId so a caller can only ever see their own
 // document history.
 
@@ -188,7 +188,7 @@ concept documentVersion {
 // see and navigate what the assistant has retained. Per-row authz:
 // owned -- created in the user's (or their delegated agent's) session,
 // ownerUserId stamped from actor.userId; reads gate on
-// ownerUserId==actor.userId. Auto-promoted via logicIndexMemory.
+// ownerUserId==actor.userId. Auto-promoted via indexMemory.
 
 @version("1.0.0")
 @namespace("library")

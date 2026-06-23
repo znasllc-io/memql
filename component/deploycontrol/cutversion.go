@@ -179,7 +179,7 @@ func (s *Service) currentVersionForEnv(ctx context.Context, consoleEnv string) (
 	haveBest := false
 	if s.engine != nil {
 		clusterID := strings.TrimSpace(os.Getenv("MEMQL_CLUSTER_ID"))
-		query := "queryDeploymentsForCluster(" + renderDeploymentArgs(map[string]any{"clusterId": clusterID}) + ")"
+		query := "deploymentsForCluster(" + renderDeploymentArgs(map[string]any{"clusterId": clusterID}) + ")"
 		res, err := s.engine.Execute(ctx, query)
 		switch {
 		case err != nil:
@@ -259,7 +259,7 @@ func (s *Service) createPendingDeployment(ctx context.Context, consoleEnv, versi
 		"clusterId":    strings.TrimSpace(os.Getenv("MEMQL_CLUSTER_ID")),
 		"triggeredBy":  act.userID,
 	}
-	query := "mutationCreateDeployment(" + renderDeploymentArgs(args) + ")"
+	query := "createDeployment(" + renderDeploymentArgs(args) + ")"
 	if _, err := s.engine.Execute(ctx, query); err != nil {
 		return "", err
 	}

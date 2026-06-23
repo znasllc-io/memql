@@ -12,7 +12,7 @@ import (
 // Regression coverage for memql#1633: several mutations silently dropped
 // caller-supplied args that weren't declared in their args { ... } block (or
 // weren't forwarded into the insert/update body), losing valid data with no
-// error -- and in mutationCreateTask's case leaving a @required concept field
+// error -- and in createTask's case leaving a @required concept field
 // unsatisfied. The fix is two-pronged:
 //
 //  1. Wire the missing args through (args block + insert/update body) so the
@@ -60,7 +60,7 @@ func TestDroppedArgs1633_WireThrough(t *testing.T) {
 	reg := load1633Functions(t)
 
 	t.Run("createTask carries category", func(t *testing.T) {
-		payload := renderPayload(t, reg, "mutationCreateTask", map[string]any{
+		payload := renderPayload(t, reg, "createTask", map[string]any{
 			"taskId": "t1", "planId": "p1", "category": "toolInvocation",
 			"kind": "callTool", "seq": int64(0), "input": map[string]any{},
 		})
@@ -69,7 +69,7 @@ func TestDroppedArgs1633_WireThrough(t *testing.T) {
 	})
 
 	t.Run("createTask defaults category to semantic", func(t *testing.T) {
-		payload := renderPayload(t, reg, "mutationCreateTask", map[string]any{
+		payload := renderPayload(t, reg, "createTask", map[string]any{
 			"taskId": "t2", "planId": "p1", "kind": "llmAnalyze",
 			"seq": int64(1), "input": map[string]any{},
 		})
@@ -78,7 +78,7 @@ func TestDroppedArgs1633_WireThrough(t *testing.T) {
 	})
 
 	t.Run("createNode carries capabilities", func(t *testing.T) {
-		payload := renderPayload(t, reg, "mutationCreateNode", map[string]any{
+		payload := renderPayload(t, reg, "createNode", map[string]any{
 			"id": "n1", "nodeType": "bff", "capabilities": []any{"http"},
 		})
 		require.Equal(t, []any{"http"}, payload["capabilities"],
@@ -86,7 +86,7 @@ func TestDroppedArgs1633_WireThrough(t *testing.T) {
 	})
 
 	t.Run("createSpawnEvent carries initiatorId and metadata", func(t *testing.T) {
-		payload := renderPayload(t, reg, "mutationCreateSpawnEvent", map[string]any{
+		payload := renderPayload(t, reg, "createSpawnEvent", map[string]any{
 			"nodeId": "n1", "nodeType": "bff", "action": "spawned",
 			"initiatorId": "n0", "metadata": map[string]any{"k": "v"},
 		})
@@ -95,7 +95,7 @@ func TestDroppedArgs1633_WireThrough(t *testing.T) {
 	})
 
 	t.Run("createCluster honors supplied status", func(t *testing.T) {
-		payload := renderPayload(t, reg, "mutationCreateCluster", map[string]any{
+		payload := renderPayload(t, reg, "createCluster", map[string]any{
 			"name": "staging", "environment": "staging", "status": "degraded",
 		})
 		require.Equal(t, "degraded", payload["status"],
@@ -103,14 +103,14 @@ func TestDroppedArgs1633_WireThrough(t *testing.T) {
 	})
 
 	t.Run("createCluster defaults status to healthy", func(t *testing.T) {
-		payload := renderPayload(t, reg, "mutationCreateCluster", map[string]any{
+		payload := renderPayload(t, reg, "createCluster", map[string]any{
 			"name": "staging", "environment": "staging",
 		})
 		require.Equal(t, "healthy", payload["status"])
 	})
 
 	t.Run("markChunkSuperseded maps reason to supersededReason", func(t *testing.T) {
-		payload := renderPayload(t, reg, "mutationMarkChunkSuperseded", map[string]any{
+		payload := renderPayload(t, reg, "markChunkSuperseded", map[string]any{
 			"chunkId": "c1", "supersededAt": "2026-01-01T00:00:00Z",
 			"reason": "superseded by 2026 figures",
 		})
@@ -119,14 +119,14 @@ func TestDroppedArgs1633_WireThrough(t *testing.T) {
 	})
 
 	t.Run("setUserActiveSpace persists partitionId", func(t *testing.T) {
-		payload := renderPayload(t, reg, "mutationSetUserActiveSpace", map[string]any{
+		payload := renderPayload(t, reg, "setUserActiveSpace", map[string]any{
 			"userId": "u1", "partitionId": "s1",
 		})
 		require.Equal(t, "s1", payload["activePartitionId"])
 	})
 
 	t.Run("setUserActiveSpace persists activePartitionId alias", func(t *testing.T) {
-		payload := renderPayload(t, reg, "mutationSetUserActiveSpace", map[string]any{
+		payload := renderPayload(t, reg, "setUserActiveSpace", map[string]any{
 			"userId": "u1", "activePartitionId": "s2",
 		})
 		require.Equal(t, "s2", payload["activePartitionId"],
@@ -137,7 +137,7 @@ func TestDroppedArgs1633_WireThrough(t *testing.T) {
 func TestDroppedArgs1633_RejectUnknownArgs(t *testing.T) {
 	reg := load1633Functions(t)
 
-	fn, err := reg.Get("mutationCreateTask")
+	fn, err := reg.Get("createTask")
 	require.NoError(t, err)
 
 	// A now-declared arg is accepted.
@@ -163,7 +163,7 @@ func TestDroppedArgs1633_StrictGateOnlyAtMCP(t *testing.T) {
 	e := &MemQLEngine{} // concepts/db nil
 
 	call := &FunctionCallExpression{
-		Name: "mutationCreateTask",
+		Name: "createTask",
 		Args: map[string]any{"bogusArg": "x"},
 	}
 

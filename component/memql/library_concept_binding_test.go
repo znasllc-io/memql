@@ -30,16 +30,16 @@ func TestLibraryQueriesRegister(t *testing.T) {
 		name    string
 		concept string
 	}{
-		{"queryLibraryArtifacts", "v1:library:artifact"},
-		{"queryLibraryArtifactsByLens", "v1:library:artifact"},
-		{"queryLibraryArtifactsByKind", "v1:library:artifact"},
+		{"libraryArtifacts", "v1:library:artifact"},
+		{"libraryArtifactsByLens", "v1:library:artifact"},
+		{"libraryArtifactsByKind", "v1:library:artifact"},
 		// queryLibraryArtifactsBySpace moved to the CoPresent pack
 		// (dsl/copresent) in Epic 3 3.6 (memql#1903) -- the per-space facet
 		// is a product surface; it's no longer registered in engine-only core.
-		{"queryLibraryArtifactById", "v1:library:artifact"},
-		{"queryGeneratedOutputById", "v1:library:generatedOutput"},
-		{"queryMemoryById", "v1:library:memory"},
-		{"queryLibraryWorkspaceLiveSources", "v1:library:artifact"},
+		{"libraryArtifactById", "v1:library:artifact"},
+		{"generatedOutputById", "v1:library:generatedOutput"},
+		{"memoryById", "v1:library:memory"},
+		{"libraryWorkspaceLiveSources", "v1:library:artifact"},
 	}
 	for _, tc := range cases {
 		fn, err := registry.Get(tc.name)

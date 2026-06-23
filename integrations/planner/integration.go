@@ -128,9 +128,9 @@ type PlannerIntegration struct {
 	// session-scoped lock. Optional: when nil, admission falls back to
 	// dbGetter (and DirectBunDB itself falls back to the main pool when
 	// DIRECT_DSN is unset), so behavior is unchanged locally / in dev.
-	directDBGetter func() *bun.DB
-	entitlements   *EntitlementResolver
-	admission      *AdmissionController
+	directDBGetter   func() *bun.DB
+	entitlements     *EntitlementResolver
+	admission        *AdmissionController
 	agentLoop        *PlannerAgentLoop
 	trainDispatch    *TrainSpecialistDispatcher
 	embedDispatch    *EmbedDomainItemsDispatcher
@@ -165,7 +165,7 @@ type PlannerIntegration struct {
 type PlannerArg func(*PlannerIntegration)
 
 // WithEngine wires the engine adapter the integration uses for
-// queryPlanById + mutationUpdatePlanStatus + insert AI utterance.
+// planById + updatePlanStatus + insert AI utterance.
 func WithEngine(engine Engine) PlannerArg {
 	return func(p *PlannerIntegration) { p.engine = engine }
 }
@@ -360,7 +360,7 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 		// Plans -- the agent loop skips that kind so the two don't race.
 		// Subscribes to both created + updated so a Plan spawned in
 		// 'planning' (cron / stale-signal path) AND one flipped to
-		// 'running' (mutationStartPlan) both dispatch; the dispatcher's
+		// 'running' (startPlan) both dispatch; the dispatcher's
 		// own claim guard dedups the double-fire.
 		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
 			"graph.node.created.v1:planner:plan",
@@ -446,7 +446,7 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 			p.refreshCron.Start(ctx)
 		}
 		// Start the reactive planner loop (#638-#641). Polls
-		// queryActiveResponsibilitiesAcrossUsers, does the cron / condition
+		// activeResponsibilitiesAcrossUsers, does the cron / condition
 		// due-check Go-side, routes each due responsibility to an agent,
 		// honors it per archetype (Plan vs context injection), and runs the
 		// per-user goals x responsibilities convergence step.

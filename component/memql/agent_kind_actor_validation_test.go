@@ -26,7 +26,7 @@ func userActorContext() (context.Context, string) {
 
 // systemPlannerContext mirrors integrations/planner/agent_loop.go's
 // systemActorContext: subject "system:planner", role "system". This
-// is the context the planner integration's mutationCreateAgent call
+// is the context the planner integration's createAgent call
 // runs under when auto-provisioning a kind="specialist" agent.
 func systemPlannerContext() (context.Context, string) {
 	token := &auth.TokenInfo{

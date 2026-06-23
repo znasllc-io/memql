@@ -178,14 +178,14 @@ func (r *AgentRegistry) LoadFromRows(ctx context.Context, engine *MemQLEngine, l
 		return 0, fmt.Errorf("engine is nil")
 	}
 
-	// Use the canonical queryAllAgents (dsl/agents/queries.memql).
+	// Use the canonical allAgents (dsl/agents/queries.memql).
 	// The raw `node(concept==...)` shorthand isn't valid query
 	// syntax -- node() requires a JSON object argument. Going
 	// through the named query also gets shape resolution + trait
 	// filtering for free.
-	result, err := engine.Execute(ctx, `queryAllAgents({})`)
+	result, err := engine.Execute(ctx, `allAgents({})`)
 	if err != nil {
-		return 0, fmt.Errorf("queryAllAgents: %w", err)
+		return 0, fmt.Errorf("allAgents: %w", err)
 	}
 
 	rows := extractRowList(result)
@@ -258,7 +258,7 @@ func extractRowList(result any) []map[string]any {
 
 // agentDefinitionFromRow builds an AgentDefinition from a single
 // v1:agents:agent row map. The materialized row's payload mirrors
-// what mutationCreateAgent stamped (which in turn came from the
+// what createAgent stamped (which in turn came from the
 // seed body), so this is a near-direct field mapping.
 //
 // Returns ok=false when the row lacks the minimum fields (id +

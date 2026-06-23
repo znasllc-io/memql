@@ -2,7 +2,7 @@ package conformance
 
 // conf_1729_test.go -- regression dimension for memql#1729.
 //
-// mutationRevokeDelegation used to be authored as
+// revokeDelegation used to be authored as
 // `insert { id: args.delegationId; args.payload }` -- it spread the caller's
 // payload and never forced the revoked terminal state. A revoke call that
 // omitted `active` therefore left the row active=true (the engine read-merge
@@ -11,7 +11,7 @@ package conformance
 //
 // The fix rewrites the mutation to an update{} (read-merge) that AUTHORITATIVELY
 // forces `active: false` and guarantees `revokedAt` is stamped, regardless of
-// caller input -- mirroring the sibling mutationRevokePATIdentity. The caller
+// caller input -- mirroring the sibling revokePATIdentity. The caller
 // supplies only delegationId (+ optional revokedBySubject / revokedAt); the
 // terminal state can no longer depend on (or be subverted by) the payload.
 //
@@ -20,7 +20,7 @@ package conformance
 //      active=false with a non-empty revokedAt (the engine forces them), while
 //      every other field is preserved by the read-merge.
 //   2. The revoked row is excluded from the active-delegation query
-//      (queryActiveDelegationsForAgent), i.e. the revoke actually takes effect.
+//      (activeDelegationsForAgent), i.e. the revoke actually takes effect.
 
 import (
 	"fmt"
@@ -40,7 +40,7 @@ func TestConf1729RevokeForcesTerminalState(t *testing.T) {
 	agentID := "agent-1729-" + sfx
 
 	// CREATE -- a live delegation.
-	createOut := e.runMutation(t, "mutationCreateDelegation", map[string]any{
+	createOut := e.runMutation(t, "createDelegation", map[string]any{
 		"delegationId":     delegationID,
 		"identityId":       identityID,
 		"identitySubject":  identitySubject,
@@ -59,15 +59,15 @@ func TestConf1729RevokeForcesTerminalState(t *testing.T) {
 	}
 
 	// Present in the active-delegation query while live.
-	activeBefore := asArray(t, e.runQuery(t, "queryActiveDelegationsForAgent", map[string]any{"agentId": agentID}))
+	activeBefore := asArray(t, e.runQuery(t, "activeDelegationsForAgent", map[string]any{"agentId": agentID}))
 	if !containsID(activeBefore, storedID) {
-		t.Fatalf("#1729 precondition: active delegation %s missing from queryActiveDelegationsForAgent; got %v", storedID, idIDs(activeBefore))
+		t.Fatalf("#1729 precondition: active delegation %s missing from activeDelegationsForAgent; got %v", storedID, idIDs(activeBefore))
 	}
 
 	// REVOKE -- the caller supplies ONLY the revoker subject. It passes neither
 	// `active` nor `revokedAt`; the mutation must force both itself. This is the
 	// exact "partial payload that omits active" case from the bug report.
-	e.runMutation(t, "mutationRevokeDelegation", map[string]any{
+	e.runMutation(t, "revokeDelegation", map[string]any{
 		"delegationId":     storedID,
 		"revokedBySubject": ownerUID,
 	})
@@ -95,9 +95,9 @@ func TestConf1729RevokeForcesTerminalState(t *testing.T) {
 	}
 
 	// (2) excluded from the active-delegation query -- the revoke took effect.
-	activeAfter := asArray(t, e.runQuery(t, "queryActiveDelegationsForAgent", map[string]any{"agentId": agentID}))
+	activeAfter := asArray(t, e.runQuery(t, "activeDelegationsForAgent", map[string]any{"agentId": agentID}))
 	if containsID(activeAfter, storedID) {
-		t.Fatalf("#1729: revoked delegation %s still returned by queryActiveDelegationsForAgent; got %v", storedID, idIDs(activeAfter))
+		t.Fatalf("#1729: revoked delegation %s still returned by activeDelegationsForAgent; got %v", storedID, idIDs(activeAfter))
 	}
 
 	t.Logf("#1729: revoke forced active=false + revokedAt=%s with no caller-supplied terminal state, preserved siblings, and excluded the row from the active query", revokedAt)

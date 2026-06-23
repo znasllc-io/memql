@@ -85,7 +85,7 @@ type Resolution struct {
 	File string
 
 	// Name is the symbol's declaration name (e.g. "participant",
-	// "querySpaceParticipants").
+	// "spaceParticipants").
 	Name string
 
 	// ConceptId is populated when Kind == SymbolConcept and the

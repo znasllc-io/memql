@@ -3,8 +3,8 @@
 // Event-driven orchestration for the `forge` namespace.
 //
 // routeRequest -- the first forge automation. Fires when a v1:forge:request
-// is created (the submitRequest tool -> mutationCreateRequest -> node.created)
-// and routes it through logicRouteRequest by submitter role. This is the
+// is created (the submitRequest tool -> createRequest -> node.created)
+// and routes it through routeRequest by submitter role. This is the
 // idiomatic MemQL shape: an MCP tool writes a node, a node.created automation
 // orchestrates. The whole pipeline (validate -> approve -> implement) hangs
 // off this spine; later phase automations (spike, implement, deploy) trigger
@@ -13,13 +13,13 @@
 // recordTransition -- fires on node.updated for v1:forge:request and appends
 // one requestEvent per pipeline transition. Only the post-creation statuses are
 // handled here; the initial 'routed' event is already recorded by routeRequest
-// inside logicRouteRequest. Loop safety: the recorder writes a requestEvent
+// inside routeRequest. Loop safety: the recorder writes a requestEvent
 // (a DIFFERENT concept), so it cannot re-trigger this node.updated automation.
-// A status whitelist in logicRecordTransition ensures we only record meaningful
+// A status whitelist in recordTransition ensures we only record meaningful
 // pipeline transitions and silently ignore unrelated field updates (e.g. priority
 // bumps that leave status unchanged or land on a status we don't map).
 
-use forge.logic.{ logicRecordTransition, logicRouteRequest }
+use forge.logic.{ recordTransition, routeRequest }
 
 @enabled
 @trigger(event="node.created", concept="v1:forge:request", partition="*")
