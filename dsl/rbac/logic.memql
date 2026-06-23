@@ -1,0 +1,58 @@
+// rbac domain -- relational governance predicates (E1.3, memql#2071).
+//
+// Governance answers "who can manage whom" over a (actor, target, verb)
+// triple, using the rank model E1.2 authored in v1:rbac:role.rank (HIGHER ==
+// more privileged). The locked rules:
+//
+//   - update/delete on a principal: actor.rank > target.rank OR actor==target.
+//   - owner-principal: editable only by an owner.
+//   - create on a principal is a capability + rank-bound grant (a creator may
+//     mint a principal strictly below their own rank), INDEPENDENT of update
+//     -- the create != edit split.
+//
+// WHY THE DECISION LIVES IN A BUILTIN, NOT INLINE LOGIC. The rule is
+// RELATIONAL: it compares actor.rank vs target.rank. The DSL spec grammar can
+// read only actor.* (context-spec) OR only payload.* (row-spec), never an
+// (actor, target) pair; and the logic-body expression grammar does not support
+// the numeric ">" comparison the rank rule needs in a `return`. So the
+// security-critical rank arithmetic lives in Go
+// (component/auth/rbac_governance.go: GovernPrincipal / CanCreatePrincipal),
+// exposed to the DSL as the `rbacGovernPrincipal` / `rbacCanCreatePrincipal`
+// builtins (dsl/rbac/builtins.memql -> integration.rbac.*).
+//
+// These logic functions are the DSL-reachable, named entry points the E1.6
+// (memql#2074) enforcement path calls. They do the part the DSL CAN do --
+// resolve the actor + target ranks from the role catalog (roleBySlug, a plain
+// call) -- and hand the resolved ranks + ids + verb to the Go core, which does
+// the comparison the grammar can't. The actor side is the resolved auth
+// envelope (actor.userId / actor.role / actor.isClusterOwner); the target side
+// is passed as args.
+
+use rbac.queries.{ roleBySlug }
+use rbac.builtins.{ rbacGovernPrincipal, rbacCanCreatePrincipal }
+
+@description("Relational governance entry point: may the actor apply `verb` (update/delete) to the target principal? Resolves the actor + target ranks from the role catalog (roleBySlug) and hands them with the ids + verb + owner flag to the Go core (component/auth/rbac_governance.go:GovernPrincipal), which applies actor.rank > target.rank OR actor==target with the owner-only carve-out. read passes through (capability gates it); create is gated by governanceCanCreatePrincipal (the create != edit split).")
+logic governanceCanManagePrincipal {
+  args {
+    targetUserId   string  @required
+    targetRoleSlug string  @required
+    verb           string  @required
+  }
+  body {
+    actorRole  := roleBySlug({ slug: actor.role })
+    targetRole := roleBySlug({ slug: args.targetRoleSlug })
+    return rbacGovernPrincipal({ actorUserId: actor.userId, actorRank: actorRole.First().payload.rank, actorIsOwner: actor.isClusterOwner, targetUserId: args.targetUserId, targetRank: targetRole.First().payload.rank, targetRoleSlug: args.targetRoleSlug, verb: args.verb })
+  }
+}
+
+@description("Relational governance entry point for the create != edit split: may the actor CREATE a principal carrying newRoleSlug? Resolves the actor + new-role ranks (roleBySlug) and hands them to the Go core (component/auth/rbac_governance.go:CanCreatePrincipal), which permits minting a principal STRICTLY BELOW the actor's own rank (an owner at any sub-owner rank). Independent of update -- a role can hold create-on-principal without update-on-principal.")
+logic governanceCanCreatePrincipal {
+  args {
+    newRoleSlug string  @required
+  }
+  body {
+    actorRole := roleBySlug({ slug: actor.role })
+    newRole   := roleBySlug({ slug: args.newRoleSlug })
+    return rbacCanCreatePrincipal({ actorRank: actorRole.First().payload.rank, actorIsOwner: actor.isClusterOwner, newRank: newRole.First().payload.rank })
+  }
+}
