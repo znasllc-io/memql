@@ -81,7 +81,28 @@ func (s *Service) Deploy(ctx context.Context, req *memqlv1.DeployRequest) (*memq
 			map[string]string{"deploymentId": deploymentID, "provider": rec.provider}), nil
 	}
 
-	// pending -> in_progress, apply, -> succeeded | failed.
+	// Automation-driven kick-off (#2115, MEMQL_DEPLOY_AUTOMATION_DRIVEN):
+	// transition pending -> in_progress and STOP. The in_progress
+	// transition emits the v1:cluster:deployment CDC update that the
+	// deploy pack's driveDeploymentInProgress automation (E2.3) consumes;
+	// that automation fires deployRunPromote (the SAME promote.sh effect)
+	// and owns the succeeded|failed terminal transition. The RPC returns
+	// an async ack immediately; callers poll GetDeploymentStatus / the
+	// deployment concept for resolution.
+	if s.automationDriven {
+		s.transitionDeployment(ctx, deploymentID, "in_progress")
+		return s.finishWrite(ctx, "deploy", act, detail, asyncDeployAck(deploymentID), nil, map[string]string{
+			"deploymentId": deploymentID,
+			"version":      rec.version,
+			"provider":     rec.provider,
+			"environment":  rec.environment,
+			"status":       "in_progress",
+			"async":        "true",
+		}), nil
+	}
+
+	// Synchronous Go apply (authoritative until the owner-gated staging
+	// cutover, #2115): pending -> in_progress, apply, -> succeeded | failed.
 	s.transitionDeployment(ctx, deploymentID, "in_progress")
 	out, runErr := driver.apply(ctx, s.specFor(deploymentID, rec))
 	s.transitionDeployment(ctx, deploymentID, transitionStatusForErr(runErr))
@@ -149,6 +170,32 @@ func (s *Service) RollbackDeployment(ctx context.Context, req *memqlv1.RollbackD
 			map[string]string{"toDeploymentId": toID}), nil
 	}
 
+	// Automation-driven kick-off (#2115): the rollback record was just
+	// created at in_progress, which emits the CDC update the deploy pack's
+	// driveDeploymentInProgress automation consumes -- it re-pins the
+	// historical digest via deployRunPromote and owns the terminal
+	// transition. Return an async ack immediately.
+	//
+	// PARITY NOTE (#2115): the automation drives in_progress -> succeeded
+	// (it has no rollback-aware terminal), so an automation-driven
+	// rollback lands in `succeeded` carrying previousDeploymentId
+	// provenance, whereas the synchronous Go path lands it in
+	// `rolled_back`. Reconciling the terminal status (teach the automation
+	// a rollback edge, or accept succeeded+provenance) is part of the
+	// owner-gated staging validation + Go-apply retirement (steps 5-6).
+	if s.automationDriven {
+		return s.finishWrite(ctx, "rollback_deployment", act, detail, asyncRollbackAck(toID, newID), nil, map[string]string{
+			"toDeploymentId":  toID,
+			"newDeploymentId": newID,
+			"version":         target.version,
+			"imageDigest":     target.imageDigest,
+			"provider":        target.provider,
+			"environment":     target.environment,
+			"status":          "in_progress",
+			"async":           "true",
+		}), nil
+	}
+
 	out, runErr := driver.apply(ctx, s.specFor(newID, target))
 	if runErr != nil {
 		s.transitionDeployment(ctx, newID, "failed")
@@ -164,6 +211,27 @@ func (s *Service) RollbackDeployment(ctx context.Context, req *memqlv1.RollbackD
 		"provider":        target.provider,
 		"environment":     target.environment,
 	}), nil
+}
+
+// asyncDeployAck is the message returned by the automation-driven Deploy
+// kick-off (#2115): the RPC has transitioned the record to in_progress
+// and the deploy pack automation owns promote + the terminal status.
+// The async contract is: ok=true means "accepted + kicked off", NOT
+// "deploy succeeded"; the caller polls the deployment concept (or
+// GetDeploymentStatus) for the terminal status.
+func asyncDeployAck(deploymentID string) string {
+	return fmt.Sprintf("deploy kicked off (automation-driven): deployment %s -> in_progress; "+
+		"the deploy pack drives promote + the terminal status. "+
+		"Poll the deployment concept / GetDeploymentStatus for resolution.", deploymentID)
+}
+
+// asyncRollbackAck mirrors asyncDeployAck for the rollback record path:
+// the new in_progress rollback record is created and the automation owns
+// promote + terminal. ok=true means "accepted + kicked off".
+func asyncRollbackAck(toID, newID string) string {
+	return fmt.Sprintf("rollback kicked off (automation-driven): new deployment %s "+
+		"(rollback to %s) -> in_progress; the deploy pack drives promote + the terminal status. "+
+		"Poll the deployment concept / GetDeploymentStatus for resolution.", newID, toID)
 }
 
 // specFor builds the driver spec for applying a record under a given

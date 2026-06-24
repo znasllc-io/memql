@@ -145,8 +145,83 @@ are owned by the deployment-v2 runbooks:
 - Disaster recovery:
   [`docs/internal/ops/dr-runbook.md`](../../internal/ops/dr-runbook.md)
 
+## Automation-driven deploy path (owner-gated cutover, #2115)
+
+By default the gRPC `Deploy` / `RollbackDeployment` actions run the
+**synchronous Go apply**: the deploy-control service selects the driver,
+runs `scripts/release/promote.sh` through the Executor boundary, and
+transitions the deployment record `in_progress -> succeeded | failed`
+inline, returning the promote output synchronously. This is the
+authoritative live path.
+
+The **deploy-as-a-pack** thinning (Epic 2) ports that lifecycle into the
+DSL: the `examples/deploypack` automations `driveDeploymentInProgress`
+(E2.3) and `recordReconciledState` (E2.4) drive promote + the terminal
+transition off the deployment-record CDC edge, through the *same*
+Executor effects. Flipping the live mechanism to that path is a
+behavioral change to a privileged live path, so it is gated behind one
+env flag and rolled out by the owner, not landed by default.
+
+### The flag
+
+`MEMQL_DEPLOY_AUTOMATION_DRIVEN` (identity node; default off). When
+truthy it does two coupled things, both reading the one flag so they
+can never diverge:
+
+1. **Anchors the pack on the identity binary** (`app/anchor_deploypack.go`,
+   at init time before the engine loads its DSL tree) so the
+   `driveDeploymentInProgress` / `recordReconciledState` automations are
+   actually loaded where the Deploy Console writes deployment records.
+2. **Thins `Deploy` / `RollbackDeployment`** to a kick-off: `Deploy`
+   transitions the record to `in_progress` and returns; `RollbackDeployment`
+   creates the new rollback record at `in_progress` and returns. The
+   in_progress CDC edge triggers the automation, which owns promote + the
+   terminal transition.
+
+### Async response contract
+
+Under the flag, the action RPCs are **async**: `ok=true` means "accepted
+and kicked off", NOT "deploy succeeded". The reply carries
+`details.async="true"` and `details.status="in_progress"` (Deploy) /
+plus `details.newDeploymentId` (rollback). The terminal status is read
+back from the deployment concept (or `GetDeploymentStatus`) once the
+automation resolves it -- the console already polls deployment status,
+so it reflects `succeeded` / `failed` when the rollout settles.
+
+Known parity item for the cutover: an automation-driven **rollback**
+lands in `succeeded` (carrying `previousDeploymentId` provenance), not
+`rolled_back`, because the shared `driveDeploymentInProgress` automation
+has no rollback-aware terminal. Reconcile during validation (teach the
+automation a rollback edge, or accept succeeded+provenance) before
+retiring the Go apply.
+
+### Owner cutover runbook (steps 5-6 of #2115)
+
+The code prep (mount + thinned path + async contract + tests) is landed
+behind the default-off flag, so merging is a no-op on the live path.
+The remaining steps are owner-gated:
+
+1. **Staging:** set `MEMQL_DEPLOY_AUTOMATION_DRIVEN=true` on the staging
+   identity node (genesis envelope -> re-seal -> roll the identity pod).
+2. Run a real staging deploy through the console and confirm the
+   automation drives it end-to-end: overlay commit, Argo reconcile,
+   rollout, and the deployment-concept timeline land the same as the Go
+   path. Compare against a Go-path deploy for parity.
+3. **Retire the Go apply** (#2115 step 6) only after staging parity
+   passes: remove the now-duplicated driver selection + synchronous
+   apply + terminal transition from `deploy.go` / `driver.go`, leaving
+   the Executor effect boundary + the proto/gRPC surface intact, and
+   rewrite the synchronous `deploy_test.go` contract for the
+   automation-driven path. Then remove the flag (path becomes
+   unconditional).
+
+Until step 2 passes, the Go lifecycle stays authoritative
+(flag off everywhere).
+
 ## References
 
+- Automation-driven deploy cutover: znasllc-io/memql#2115 (Epic 2
+  follow-up; meta #2060).
 - Deployment Console epic: znasllc-io/memql#724 (children #725-#729 +
   cockpit#144/#145).
 - Deployment-v2 design + epic: [`docs/internal/design/deployment-v2.md`](../../internal/design/deployment-v2.md), #697.
