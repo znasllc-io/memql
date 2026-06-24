@@ -27,6 +27,22 @@ patches:
         value:
           name: NODE_IP
           value: "20.246.247.180"
+  # E2.5a (#2115): owner-gated automation-driven deploy cutover on staging.
+  # Flips the identity node's gRPC Deploy/RollbackDeployment to the thinned
+  # kick-off path and anchors the deploy pack so its lifecycle automations
+  # drive promote + terminal. SAFE ONLY once the identity image pinned below
+  # is rebuilt from main >= 03d2f220 (carries #2159 + #2161); on an older
+  # image this env is a harmless no-op. Revert this patch to restore the
+  # synchronous Go apply. See docs/public/operate/deployment-console.md.
+  - target:
+      kind: Deployment
+      name: identity
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: MEMQL_DEPLOY_AUTOMATION_DRIVEN
+          value: "true"
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
