@@ -77,7 +77,12 @@ type AuthoringConstructRow struct {
 	Name            string `json:"name"`
 	TargetNamespace string `json:"targetNamespace"`
 	Source          string `json:"source"`
-	Catalogued      bool   `json:"catalogued"`
+	// Status follows the parent bundle's lifecycle at a construct grain
+	// (draft / active / retired). The durable-demote path flips it to
+	// "retired"; the boot + cross-node re-hydration skip retired rows so a
+	// demoted construct never re-registers after a restart.
+	Status     string `json:"status"`
+	Catalogued bool   `json:"catalogued"`
 }
 
 // BundleApprovalArtifact is the Gate-3 review surface a user approves against:

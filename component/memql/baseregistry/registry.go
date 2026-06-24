@@ -221,6 +221,22 @@ func (r *Registry[T]) Upsert(name string, item *T) error {
 	return nil
 }
 
+// Remove deletes an entry by name. It is a no-op when the name is absent
+// (so an idempotent caller -- e.g. a durable DEMOTE re-applied via the
+// cross-node broadcast -- never errors), and when the registry is nil.
+func (r *Registry[T]) Remove(name string) {
+	if r == nil {
+		return
+	}
+	key := strings.TrimSpace(name)
+	if key == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.byName, key)
+}
+
 func (r *Registry[T]) kindLabel() string {
 	if r == nil || r.kind == "" {
 		return "registry"

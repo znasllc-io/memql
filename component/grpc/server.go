@@ -1168,6 +1168,10 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 	// live cross-node propagation; issue znasllc-io/memql-cockpit#232).
 	case *memqlv1.MemqlClientMessage_DurablePromoteBundle:
 		return s.handleDurablePromoteBundle(envelope, payload.DurablePromoteBundle)
+	// Durable demotion (retire) of a previously promoted bundle out of the shared
+	// registry (owner-gated, live cross-node propagation; memql#2163).
+	case *memqlv1.MemqlClientMessage_DurableDemoteBundle:
+		return s.handleDurableDemoteBundle(envelope, payload.DurableDemoteBundle)
 	// DSL spec export -- portable language-intelligence surface (memql#2125 / A4)
 	case *memqlv1.MemqlClientMessage_DslSpec:
 		return s.handleDslSpec(envelope, payload.DslSpec)

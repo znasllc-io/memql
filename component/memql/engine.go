@@ -1241,6 +1241,13 @@ func (e *MemQLEngine) run(ctx context.Context, markStarted func()) error {
 	// within seconds (no restart). Scoped to the engine lifecycle context.
 	e.StartAuthoringPromoteSubscriber(ctx)
 
+	// memql#2163: wire LIVE cross-node propagation of durable DEMOTIONS, the
+	// inverse of the promote subscriber above. A durable demote on any node
+	// broadcasts authoring.demote.<bundleId>; this subscriber removes the
+	// demoted bundle's constructs from this node's shared registry on receipt,
+	// so a demote on node A takes effect on node B within seconds (no restart).
+	e.StartAuthoringDemoteSubscriber(ctx)
+
 	markStarted()
 
 	<-common.EnsureContext(ctx).Done()

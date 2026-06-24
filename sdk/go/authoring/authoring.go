@@ -198,6 +198,59 @@ func (c *Client) DurablePromoteBundle(ctx context.Context, sources string) (*Pro
 	}, nil
 }
 
+// DemoteResult is the response from DurableDemoteBundle, the inverse of
+// PromoteResult. On success OK is true and Demoted lists the constructs durably
+// demoted out of the shared registry (persisted as retired so a restart never
+// re-hydrates them, and -- via the live broadcast -- removed on every node within
+// seconds). On failure OK is false and Error explains the rejection (no demotable
+// constructs in the source, or a per-construct demote failure).
+type DemoteResult struct {
+	OK          bool
+	Demoted     []Construct
+	Diagnostics []Diagnostic
+	Error       string
+}
+
+// DurableDemoteBundle durably demotes every plain construct (query / mutation /
+// logic / spec / trait) named in the bundle source OUT of the SHARED engine
+// registry -- the inverse of DurablePromoteBundle (memql#2163). The demoted
+// constructs are persisted as retired (so a restart never re-hydrates them),
+// removed from the shared registry on this node (author-promoted-only safety
+// gate -- a core construct can never be removed), and -- via a live cross-node
+// broadcast -- removed on every node within seconds with no restart. OWNER-only:
+// the engine rejects a non-owner caller with a permission-denied wire error.
+//
+// A demote needs only the names + kinds the source declares; it never compiles
+// the construct, so a construct whose source no longer compiles can still be
+// demoted. The Go error return is reserved for wire-level failures (dispatcher
+// closed, context cancelled, permission denied); a demote the engine rejected
+// comes back as OK=false with a populated Error.
+func (c *Client) DurableDemoteBundle(ctx context.Context, sources string) (*DemoteResult, error) {
+	msg := &memqlv1.MemqlClientMessage{
+		Payload: &memqlv1.MemqlClientMessage_DurableDemoteBundle{
+			DurableDemoteBundle: &memqlv1.DurableDemoteBundleMsg{Sources: sources},
+		},
+	}
+	resp, err := c.dispatcher.SendAndWait(ctx, msg)
+	if err != nil {
+		return nil, fmt.Errorf("authoring.durableDemoteBundle: %w", err)
+	}
+	result := resp.GetDurableDemoteBundleResult()
+	if result == nil {
+		return nil, fmt.Errorf("authoring.durableDemoteBundle: empty response")
+	}
+	demoted := make([]Construct, 0, len(result.GetDemoted()))
+	for _, d := range result.GetDemoted() {
+		demoted = append(demoted, Construct{Kind: d.GetKind(), Name: d.GetName()})
+	}
+	return &DemoteResult{
+		OK:          result.GetOk(),
+		Demoted:     demoted,
+		Diagnostics: protoDiagnostics(result.GetDiagnostics()),
+		Error:       result.GetError(),
+	}, nil
+}
+
 // protoDiagnostics adapts the wire diagnostics into the SDK form. Lives here
 // (unexported) so no memqlv1 type leaks across the package boundary.
 func protoDiagnostics(in []*memqlv1.AuthoringDiagnostic) []Diagnostic {

@@ -484,3 +484,56 @@ func (e *MemQLEngine) PromoteAuthoredConstruct(ctx context.Context, c *AuthoredC
 		return fmt.Errorf("authoring: promotion of %s constructs is not supported (function-family + spec only)", c.Kind)
 	}
 }
+
+// DemoteAuthoredConstruct is the inverse of PromoteAuthoredConstruct: it removes
+// a previously AUTHOR-PROMOTED construct from the engine's DURABLE, SHARED
+// registries so it is no longer callable by any session for the lifetime of the
+// process (memql#2163). It is the in-process half of the durable DEMOTE; the
+// MCP / gRPC server enforces the owner role before calling it.
+//
+// SAFETY-CRITICAL: it removes ONLY a construct that was promoted via the
+// authored path. It checks e.promotedAuthored for the (kind:name) key; if the
+// name is absent it returns an error and removes NOTHING -- so a sealed core
+// construct (which a promotion can never shadow, and so never carries a
+// promotedAuthored marker) can NEVER be unregistered by a demote. This mirrors
+// the core-first never-shadow invariant PromoteAuthoredConstruct enforces, in
+// reverse.
+//
+// On success it removes the construct from the matching shared registry
+// (functions for query/mutation/logic, specs for spec/trait) and clears the
+// promotedAuthored marker, so a later re-promote of the same name registers
+// fresh. Idempotent-unfriendly by design: demoting a name that was never
+// author-promoted is an error, not a no-op, so the caller learns it asked to
+// remove something it does not own.
+func (e *MemQLEngine) DemoteAuthoredConstruct(ctx context.Context, kind, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("authoring: demote requires a construct name")
+	}
+	switch kind {
+	case "query", "mutation", "logic":
+		if e.functions == nil {
+			return fmt.Errorf("authoring: demote %s %q: function registry is not initialized", kind, name)
+		}
+		key := "function:" + name
+		if _, promoted := e.promotedAuthored.Load(key); !promoted {
+			return fmt.Errorf("authoring: demote %s %q: not an author-promoted construct (demotion cannot remove a core construct)", kind, name)
+		}
+		e.functions.Remove(name)
+		e.promotedAuthored.Delete(key)
+		return nil
+	case "spec", "trait":
+		if e.specs == nil {
+			return fmt.Errorf("authoring: demote %s %q: spec registry is not initialized", kind, name)
+		}
+		key := "spec:" + name
+		if _, promoted := e.promotedAuthored.Load(key); !promoted {
+			return fmt.Errorf("authoring: demote %s %q: not an author-promoted construct (demotion cannot remove a core construct)", kind, name)
+		}
+		e.specs.Remove(name)
+		e.promotedAuthored.Delete(key)
+		return nil
+	default:
+		return fmt.Errorf("authoring: demotion of %s constructs is not supported (function-family + spec only)", kind)
+	}
+}
