@@ -307,17 +307,18 @@ func (h *Handler) ServeUtterance(w http.ResponseWriter, r *http.Request) {
 	utteranceId := fmt.Sprintf("utt-%s-%d", bareParticipantId, time.Now().UnixNano())
 	textJSON, _ := json.Marshal(req.Text)
 
-	query := fmt.Sprintf(`insert("%s", id="%s", payload={
-		"partitionId": "%s",
-		"participantId": "%s",
+	payloadJSON, _ := json.Marshal(map[string]any{
+		"partitionId":     req.PartitionId,
+		"participantId":   req.ParticipantId,
 		"participantType": "human",
-		"utteranceType": "text",
-		"text": %s,
-		"source": {
-			"inputMethod": "stt",
-			"pipeline": "polyphon"
-		}
-	})`, memoryNodes.ConceptCognitionUtterance, utteranceId, req.PartitionId, req.ParticipantId, string(textJSON))
+		"utteranceType":   "text",
+		"text":            json.RawMessage(textJSON),
+		"source":          map[string]any{"inputMethod": "stt", "pipeline": "polyphon"},
+	})
+	conceptJSON, _ := json.Marshal(memoryNodes.ConceptCognitionUtterance)
+	uttIdJSON, _ := json.Marshal(utteranceId)
+	// Whole-object json.Marshal -- no literal quote in the Go format string.
+	query := fmt.Sprintf(`insert(%s, id=%s, payload=%s)`, string(conceptJSON), string(uttIdJSON), string(payloadJSON))
 
 	ctx := contextWithSystemActor(context.Background())
 

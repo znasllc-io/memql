@@ -197,13 +197,13 @@ func (c *CognitionIntegration) emitTextChunk(ctx context.Context, partitionId, p
 	}
 
 	query := fmt.Sprintf(`emitTextChunk({
-		"chunkId": %s,
-		"partitionId": %s,
-		"participantId": %s,
-		"replyId": %s,
-		"text": %s,
-		"index": %d,
-		"done": %s
+		chunkId: %s,
+		partitionId: %s,
+		participantId: %s,
+		replyId: %s,
+		text: %s,
+		index: %d,
+		done: %s
 	})`,
 		escapeJSONString(chunkId),
 		escapeJSONString(partitionId),

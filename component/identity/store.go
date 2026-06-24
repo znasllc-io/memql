@@ -373,7 +373,7 @@ func (s *Store) LookupUserById(ctx context.Context, userId string) (*UserRow, er
 	if strings.TrimSpace(userId) == "" {
 		return nil, nil
 	}
-	query := fmt.Sprintf(`userById({userId: "%s"})`, escapeMemQLString(userId))
+	query := fmt.Sprintf(`userById({userId: %s})`, dslJSONString(userId))
 	nodes, err := s.executeAndExtract(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: lookup user by id: %w", err)
@@ -386,8 +386,19 @@ func (s *Store) LookupUserById(ctx context.Context, userId string) (*UserRow, er
 
 // LookupUserByEmail returns the user with the given primary email,
 // or nil if no match exists.
+
+// dslJSONString returns a JSON-encoded string literal (with surrounding
+// quotes) for safe interpolation into a memQL DSL call. encoding/json's
+// quoting keeps a value containing a double quote from breaking out of its
+// enclosing literal -- and is the form CodeQL go/unsafe-quoting recognizes
+// as safe.
+func dslJSONString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
 func (s *Store) LookupUserByEmail(ctx context.Context, email string) (*UserRow, error) {
-	query := fmt.Sprintf(`userByEmail({primaryEmail: "%s"})`, escapeMemQLString(email))
+	query := fmt.Sprintf(`userByEmail({primaryEmail: %s})`, dslJSONString(email))
 	nodes, err := s.executeAndExtract(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: lookup user by email: %w", err)

@@ -356,7 +356,7 @@ func TestStreamingToolLoop_ToolErrorEndsCleanly(t *testing.T) {
 func countDoneEmits(queries []string) int {
 	n := 0
 	for _, q := range queries {
-		if strings.Contains(q, `"done": true`) {
+		if strings.Contains(q, `done: true`) {
 			n++
 		}
 	}
@@ -368,11 +368,11 @@ func countDoneEmits(queries []string) int {
 func collectChunkIndices(queries []string) []int {
 	var out []int
 	for _, q := range queries {
-		idx := strings.Index(q, `"index":`)
+		idx := strings.Index(q, `index:`)
 		if idx < 0 {
 			continue
 		}
-		rest := strings.TrimSpace(q[idx+len(`"index":`):])
+		rest := strings.TrimSpace(q[idx+len(`index:`):])
 		// Read the integer up to the next comma or newline.
 		end := 0
 		for end < len(rest) && (rest[end] == '-' || (rest[end] >= '0' && rest[end] <= '9')) {

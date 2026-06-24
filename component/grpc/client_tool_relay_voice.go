@@ -211,14 +211,14 @@ func (s *streamSession) relayClientToolToBrowser(
 	// agent attributes via the acting agent on context.
 	agentId := memqlengine.ActingAgentIdFromContext(ctx)
 	mutation := fmt.Sprintf(`emitClientToolRequest({
-		"requestId": %s,
-		"callId": %s,
-		"toolName": %s,
-		"argumentsJSON": %s,
-		"partitionId": %s,
-		"participantId": %s,
-		"agentId": %s,
-		"expiresAt": %s
+		requestId: %s,
+		callId: %s,
+		toolName: %s,
+		argumentsJSON: %s,
+		partitionId: %s,
+		participantId: %s,
+		agentId: %s,
+		expiresAt: %s
 	})`,
 		escapeGraphJSONString(callId),
 		escapeGraphJSONString(callId),
