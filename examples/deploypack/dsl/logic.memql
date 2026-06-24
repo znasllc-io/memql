@@ -19,7 +19,7 @@
 use deploypack.builtins.{ deployRunPromote, deployObserveReconciledState, deployRecordBack }
 use cluster.mutations.{ updateDeploymentStatus }
 
-@description("On every v1:cluster:deployment update: when the new status is in_progress AND the provider is azure (or empty -> azure default) AND a version + deploymentId are present, fire deployRunPromote (passing the environment enum; the handler maps it to the promote.sh env) and transition the deployment to succeeded when the promote reports success or failed otherwise. Acts only on the in_progress edge; other status updates are ignored. The event-driven port of deploy.go's apply+transition. Epic 2 / #2096.")
+@description("On every v1:cluster:deployment update: when the new status is in_progress AND the provider is azure (or empty -> azure default) AND a version + deploymentId are present, fire deployRunPromote (passing the environment enum; the handler maps it to the promote.sh env) and transition the deployment to its terminal status. A FORWARD deploy lands in succeeded; a ROLLBACK record (one carrying previousDeploymentId) lands in rolled_back -- matching deploy.go's RollbackDeployment terminal exactly (#2115 parity). A promote failure lands in failed either way. Acts only on the in_progress edge; other status updates are ignored. The event-driven port of deploy.go's apply+transition. Epic 2 / #2096.")
 logic driveDeploymentInProgress {
   args {
     event object @required
@@ -30,13 +30,24 @@ logic driveDeploymentInProgress {
     deploymentId := coalesce(args.event.node.payload.deploymentId, "")
     version := coalesce(args.event.node.payload.version, "")
     environment := coalesce(args.event.node.payload.environment, "")
+    previousDeploymentId := coalesce(args.event.node.payload.previousDeploymentId, "")
     isAzure := provider == "azure" || provider == ""
+    isRollback := previousDeploymentId != ""
 
     result := if status == "in_progress" && isAzure && version != "" && deploymentId != "" {
       deployRunPromote({ version: version, env: environment })
     }
-    succeeded := if !result.Empty() && result.First().payload.success == true {
+    promoted := !result.Empty() && result.First().payload.success == true
+
+    // Terminal status mirrors deploy.go exactly: a forward deploy -> succeeded,
+    // a rollback record (previousDeploymentId set) -> rolled_back, a promote
+    // failure -> failed (#2115). The DSL if-expression has no else, so each
+    // mutually-exclusive outcome is its own guarded transition.
+    succeeded := if promoted && !isRollback {
       updateDeploymentStatus({ deploymentId: deploymentId, status: "succeeded" })
+    }
+    rolledBack := if promoted && isRollback {
+      updateDeploymentStatus({ deploymentId: deploymentId, status: "rolled_back" })
     }
     failed := if !result.Empty() && result.First().payload.success != true {
       updateDeploymentStatus({ deploymentId: deploymentId, status: "failed" })
