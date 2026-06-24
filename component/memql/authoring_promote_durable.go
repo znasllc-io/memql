@@ -338,6 +338,11 @@ func rehydratePromotedConstructsWithStore(ctx context.Context, store promoteRehy
 			if !isDurablePromotableKind(row.Kind) {
 				continue
 			}
+			if isRetiredConstructStatus(row.Status) {
+				// A demoted (retired) construct must NOT re-register after a
+				// restart -- skip it so the demote survives the boot walk.
+				continue
+			}
 			result.Seen++
 			if perr := cfg.promote(ctx, row); perr != nil {
 				result.Failed = append(result.Failed, row.Kind+":"+row.Name)

@@ -164,6 +164,74 @@ func (s *streamSession) handleDurablePromoteBundle(envelope *memqlv1.MemqlClient
 	})
 }
 
+// handleDurableDemoteBundle is the inverse of handleDurablePromoteBundle
+// (memql#2163): it durably DEMOTES (retires) every previously promoted plain
+// construct named in the bundle source out of the SHARED engine registry. OWNER-
+// only, same gate as the promote handler. There is no Gate-1 compile -- a demote
+// only needs the names + kinds, so a construct whose source no longer compiles
+// can still be demoted.
+//
+// On success the named constructs are removed from the shared registry on this
+// node (author-promoted-only safety gate -- a core construct can never be
+// removed), the persisted bundle/construct rows are flipped to "retired" (so a
+// restart never re-hydrates them), and a broadcast event removes them on EVERY
+// node within seconds. On failure (no demotable constructs, or a per-construct
+// demote error) it returns ok=false with a populated error.
+func (s *streamSession) handleDurableDemoteBundle(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.DurableDemoteBundleMsg) error {
+	if msg == nil {
+		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument, "durable_demote_bundle: request body missing")
+	}
+	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
+
+	if allowed, err := s.requireOwnerRole(requestId, envelope.GetMessageId()); !allowed {
+		return err
+	}
+
+	// Owner is the authenticated caller; the persisted retire writes run under
+	// its envelope, mirroring the promote handler.
+	ac := s.ensureAccess(s.stream.Context())
+	owner := ""
+	if ac != nil {
+		owner = strings.TrimSpace(ac.UserId)
+	}
+	if owner == "" {
+		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Unauthenticated,
+			"durable_demote_bundle: an authenticated owner is required to demote a bundle")
+	}
+
+	if s.service == nil || s.service.engine == nil {
+		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Unavailable,
+			"durable_demote_bundle: engine unavailable on this node")
+	}
+	res, err := s.service.engine.DemoteBundleDurable(s.stream.Context(), owner, msg.GetSources())
+
+	result := &memqlv1.DurableDemoteBundleResult{
+		RequestId:   requestId,
+		Ok:          res.OK,
+		Demoted:     durableDemotedConstructsToProto(res.Demoted),
+		Diagnostics: authoringDiagnosticsToProto(res.Diagnostics),
+	}
+	if err != nil {
+		result.Ok = false
+		result.Error = err.Error()
+	}
+	return s.sendServerMessage(envelope.GetMessageId(), &memqlv1.MemqlServerMessage{
+		Payload: &memqlv1.MemqlServerMessage_DurableDemoteBundleResult{
+			DurableDemoteBundleResult: result,
+		},
+	})
+}
+
+// durableDemotedConstructsToProto maps the engine-side DefinedConstructs (the
+// durably-demoted ones) onto the wire form.
+func durableDemotedConstructsToProto(demoted []memqlengine.DefinedConstruct) []*memqlv1.AuthoringConstruct {
+	out := make([]*memqlv1.AuthoringConstruct, 0, len(demoted))
+	for _, c := range demoted {
+		out = append(out, &memqlv1.AuthoringConstruct{Kind: c.Kind, Name: c.Name})
+	}
+	return out
+}
+
 // requireOwnerRole resolves the caller's access and enforces the OWNER-only
 // gate the durable promote needs (issue #232). This is the higher bar than
 // requireAuthoringRole (owner OR developer): promotion makes a construct durable

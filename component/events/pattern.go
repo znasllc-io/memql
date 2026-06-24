@@ -231,3 +231,32 @@ func BundleFromAuthoringPromoteTopic(topic string) (string, bool) {
 	}
 	return bundleId, true
 }
+
+// TopicAuthoringDemoteForBundle returns the dedicated authoring-demote topic for
+// the given bundle id (memql#2163), the inverse of
+// TopicAuthoringPromoteForBundle: a durable DEMOTE emits
+// authoring.demote.<bundleId> on a separate broadcast channel ONLY the
+// authoring-demote subscriber consumes; a single `authoring.demote.*` routing
+// rule forwards it to every node, so a demote on one node REMOVES the
+// construct(s) from every replica's shared registry with no restart and no
+// per-construct routing rule. Bundle ids carry hyphen + short-id segments, not
+// dots, so the whole remainder after the prefix is the bundle id.
+func TopicAuthoringDemoteForBundle(bundleId string) string {
+	return BuildTopicWithConcept(TopicAuthoringDemote, bundleId)
+}
+
+// BundleFromAuthoringDemoteTopic extracts the bundle id from an
+// authoring.demote.{bundleId} topic, the inverse of
+// TopicAuthoringDemoteForBundle. Returns the bundle id and true on a match; ""
+// and false otherwise.
+func BundleFromAuthoringDemoteTopic(topic string) (string, bool) {
+	prefix := TopicAuthoringDemote + "."
+	if !strings.HasPrefix(topic, prefix) {
+		return "", false
+	}
+	bundleId := strings.TrimSpace(topic[len(prefix):])
+	if bundleId == "" {
+		return "", false
+	}
+	return bundleId, true
+}

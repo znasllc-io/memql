@@ -272,6 +272,12 @@ message MemqlClientMessage {
     // becomes callable on EVERY node within seconds (no restart). OWNER-only
     // (stricter than the define surface, which is owner-or-developer).
     DurablePromoteBundleMsg durable_promote_bundle = 81;
+    // DurableDemoteBundleMsg -- the inverse of DurablePromoteBundle (memql#2163):
+    // durably DEMOTE (retire) every previously promoted plain construct named in
+    // the bundle source out of the shared engine registry, flip the persisted
+    // rows to retired (so a restart never re-hydrates them), and broadcast the
+    // live cross-node removal. OWNER-only, same gate as durable_promote_bundle.
+    DurableDemoteBundleMsg durable_demote_bundle = 82;
   }
 }
 
@@ -402,6 +408,8 @@ message MemqlServerMessage {
     DslSpecResult dsl_spec_result = 117;
     // Durable-promote reply (see DurablePromoteBundleMsg, memql-cockpit#232).
     DurablePromoteBundleResult durable_promote_bundle_result = 118;
+    // Durable-demote reply (see DurableDemoteBundleMsg, memql#2163).
+    DurableDemoteBundleResult durable_demote_bundle_result = 119;
   }
 }
 
@@ -1235,6 +1243,29 @@ message DurablePromoteBundleResult {
   repeated AuthoringConstruct promoted = 3;     // constructs durably promoted into the shared registry
   repeated AuthoringDiagnostic diagnostics = 4; // per-construct compile/bind diagnostics
   string error = 5;  // non-empty when the bundle was rejected (validation) or a promote failed
+}
+
+// DurableDemoteBundleMsg requests the owner-gated DURABLE demotion of a
+// previously promoted bundle out of the SHARED engine registry (memql#2163) --
+// the inverse of DurablePromoteBundleMsg. The engine removes every plain
+// construct (query / mutation / logic / spec / trait) the source names from the
+// shared registry (author-promoted-only safety gate, never a core construct),
+// flips the persisted bundle/construct rows to "retired" (so a restart never
+// re-hydrates them), and broadcasts a live cross-node removal event so the
+// construct stops being callable on every node within seconds. There is NO
+// Gate-1 compile -- demote only needs the names + kinds, not a compiled form, so
+// a construct whose source no longer compiles can still be demoted. OWNER-only.
+message DurableDemoteBundleMsg {
+  string request_id = 1;
+  string sources = 2;  // .memql bundle source (names + kinds drive the demote)
+}
+
+message DurableDemoteBundleResult {
+  string request_id = 1;
+  bool ok = 2;  // true only when every plain construct named in the source was demoted
+  repeated AuthoringConstruct demoted = 3;      // constructs durably demoted out of the shared registry
+  repeated AuthoringDiagnostic diagnostics = 4; // per-construct diagnostics (currently unused; demote does not compile)
+  string error = 5;  // non-empty when the demote was rejected (no demotable constructs) or a demote failed
 }
 
 // -----------------------------------------------------------------------------

@@ -86,6 +86,16 @@ func defaultRoutingRules() []RoutingRule {
 		// every replica re-hydrates the promoted bundle from the shared DB on
 		// the broadcast. Mirrors the cache.invalidate.* single-broadcast pattern.
 		{Pattern: "authoring.promote.*", TargetType: ""},
+		// Authoring-demote forwarding (memql#2163). The inverse of the
+		// authoring.promote.* rule above: a durable DEMOTE emits
+		// authoring.demote.<bundleId> (see MemQLEngine.publishAuthoringDemote);
+		// ONLY the authoring-demote subscriber consumes it (no automations, no
+		// other consumers), so forwarding it everywhere has ZERO side effects.
+		// This is what makes a demote on node A REMOVE the construct from node B's
+		// shared registry within seconds with no restart: every replica removes
+		// the demoted bundle's constructs on the broadcast. Same single-broadcast
+		// pattern as cache.invalidate.* / authoring.promote.*.
+		{Pattern: "authoring.demote.*", TargetType: ""},
 		// Planner graph events: BFF owns the writes (createPlan
 		// fires on BFF), the planner-tagged binary subscribes
 		// graph.node.created.v1:planner:plan in its

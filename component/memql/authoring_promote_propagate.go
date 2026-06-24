@@ -145,6 +145,11 @@ func rehydratePromotedBundleWithStore(ctx context.Context, store promoteRehydrat
 		if !isDurablePromotableKind(row.Kind) {
 			continue
 		}
+		if isRetiredConstructStatus(row.Status) {
+			// A demoted (retired) construct must NOT re-register from a
+			// stale promote broadcast -- skip it.
+			continue
+		}
 		result.Seen++
 		if perr := cfg.promote(ctx, row); perr != nil {
 			result.Failed = append(result.Failed, row.Kind+":"+row.Name)

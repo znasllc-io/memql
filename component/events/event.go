@@ -108,6 +108,17 @@ const (
 	// so a single broadcast routing rule forwards it everywhere with zero
 	// side effects (no automations).
 	KindAuthoringPromote
+
+	// KindAuthoringDemote is emitted on the dedicated authoring-demote broadcast
+	// channel (memql#2163) when a durably-promoted plain construct is removed
+	// (demoted) from the shared registry. The inverse of KindAuthoringPromote: it
+	// carries the demoted bundle id + owner so EVERY node REMOVES that bundle's
+	// constructs from its own shared registry within seconds -- making a demote on
+	// node A take effect on node B with no restart. Like cache.invalidate.* /
+	// authoring.promote.*, ONLY the authoring-demote subscriber consumes it, so a
+	// single broadcast routing rule forwards it everywhere with zero side effects
+	// (no automations).
+	KindAuthoringDemote
 )
 
 // String returns a human-readable name for the event kind.
@@ -175,6 +186,8 @@ func (k Kind) String() string {
 		return "precondition_missed"
 	case KindAuthoringPromote:
 		return "authoring_promote"
+	case KindAuthoringDemote:
+		return "authoring_demote"
 	default:
 		return "unspecified"
 	}
@@ -237,6 +250,15 @@ const (
 	// cache.invalidate.* (memql#1970): a single-consumer broadcast topic with
 	// zero automation side effects.
 	TopicAuthoringPromote = "authoring.promote"
+
+	// Authoring-demote broadcast (memql#2163). The inverse of
+	// authoring.promote: a durable DEMOTE emits authoring.demote.<bundleId> on
+	// this separate channel, ONLY the authoring-demote subscriber consumes it,
+	// and a single broadcast routing rule (authoring.demote.*) forwards it to
+	// every node so a demote on one node REMOVES the construct(s) from every
+	// node's shared registry within seconds (no restart). Single-consumer
+	// broadcast topic with zero automation side effects, like authoring.promote.
+	TopicAuthoringDemote = "authoring.demote"
 
 	// MCP Tool events
 	TopicToolCalled    = "tool.called"
