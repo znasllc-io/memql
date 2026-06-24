@@ -529,7 +529,7 @@ func contextWithSystemActor(ctx context.Context) context.Context {
 // Returns the participant with its node ID populated (needed for creating utterances).
 // Delegates to the aiParticipantForSpace MemQL query function.
 func (c *CognitionIntegration) findAIParticipant(ctx context.Context, partitionId string) (*participantPayload, error) {
-	query := fmt.Sprintf(`siParticipantForSpace({partitionId: "%s"})`, partitionId)
+	query := fmt.Sprintf(`siParticipantForSpace({partitionId: %s})`, escapeJSONString(partitionId))
 
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
@@ -559,7 +559,7 @@ func (c *CognitionIntegration) findParticipantById(ctx context.Context, partitio
 	if participantId == "" {
 		return nil, fmt.Errorf("participantId is empty")
 	}
-	query := fmt.Sprintf(`concept==v1:cognition:participant;id=="%s"`, participantId)
+	query := fmt.Sprintf(`concept==v1:cognition:participant;id==%s`, escapeJSONString(participantId))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("execute query: %w", err)
@@ -579,7 +579,7 @@ func (c *CognitionIntegration) findParticipantById(ctx context.Context, partitio
 // getAgent retrieves an agent by ID.
 // Delegates to the agentById MemQL query function.
 func (c *CognitionIntegration) getAgent(ctx context.Context, id string) (*agentPayload, error) {
-	query := fmt.Sprintf(`agentById({agentId: "%s"})`, id)
+	query := fmt.Sprintf(`agentById({agentId: %s})`, escapeJSONString(id))
 
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
@@ -954,22 +954,24 @@ func (c *CognitionIntegration) insertSystemActionUtterance(ctx context.Context, 
 		pid = "_system"
 	}
 
-	query := fmt.Sprintf(`insert("%s", id="%s", payload={
-		"partitionId": "%s",
-		"participantId": "%s",
+	payloadJSON, err := json.Marshal(map[string]any{
+		"partitionId":     partitionId,
+		"participantId":   pid,
 		"participantType": "system",
-		"utteranceType": "action",
-		"text": %s,
-		"source": %s,
-		"action": %s
-	})`,
-		memoryNodes.ConceptCognitionUtterance,
-		utteranceId,
-		partitionId,
-		pid,
-		escapeJSONString(text),
-		string(sourceJSON),
-		string(actionJSON),
+		"utteranceType":   "action",
+		"text":            text,
+		"source":          json.RawMessage(sourceJSON),
+		"action":          json.RawMessage(actionJSON),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal action utterance payload: %w", err)
+	}
+	// Whole-object json.Marshal: no quote character lives in the Go format
+	// string, so a value with a double quote can't break out (go/unsafe-quoting).
+	query := fmt.Sprintf(`insert(%s, id=%s, payload=%s)`,
+		escapeJSONString(memoryNodes.ConceptCognitionUtterance),
+		escapeJSONString(utteranceId),
+		string(payloadJSON),
 	)
 	if _, err := c.engine.Execute(ctx, query); err != nil {
 		return fmt.Errorf("insert action utterance: %w", err)
@@ -1056,7 +1058,7 @@ func (c *CognitionIntegration) insertAIResponse(ctx context.Context, partitionId
 	// rendering the bubble. Empty -> the field is omitted from the
 	// insert payload entirely (no `"citations": []`) to keep older
 	// utterances visually identical.
-	citationsClause := ""
+	var citationsRaw json.RawMessage
 	if len(citations) > 0 {
 		entries := make([]map[string]string, 0, len(citations))
 		for _, c := range citations {
@@ -1078,8 +1080,7 @@ func (c *CognitionIntegration) insertAIResponse(ctx context.Context, partitionId
 			if err != nil {
 				return fmt.Errorf("marshal citations: %w", err)
 			}
-			citationsClause = fmt.Sprintf(`,
-		"citations": %s`, string(citationsJSON))
+			citationsRaw = json.RawMessage(citationsJSON)
 		}
 	}
 
@@ -1090,7 +1091,7 @@ func (c *CognitionIntegration) insertAIResponse(ctx context.Context, partitionId
 	// considered but didn't draw on. Same shape as citations: we
 	// drop the field entirely when empty so older utterances stay
 	// visually identical.
-	retrievedClause := ""
+	var retrievedRaw json.RawMessage
 	if len(retrieved) > 0 {
 		entries := make([]map[string]any, 0, len(retrieved))
 		for _, r := range retrieved {
@@ -1114,32 +1115,37 @@ func (c *CognitionIntegration) insertAIResponse(ctx context.Context, partitionId
 			if err != nil {
 				return fmt.Errorf("marshal retrieved: %w", err)
 			}
-			retrievedClause = fmt.Sprintf(`,
-		"retrieved": %s`, string(retrievedJSON))
+			retrievedRaw = json.RawMessage(retrievedJSON)
 		}
 	}
 
 	// Build the insert mutation. Every interpolated string value is routed
 	// through escapeJSONString (json.Marshal -> quoted) so a stray double
 	// quote in an id cannot break out of the enclosing quotes (go/unsafe-quoting).
-	query := fmt.Sprintf(`insert("%s", id=%s, payload={
-		"partitionId": %s,
-		"participantId": %s,
+	payload := map[string]any{
+		"partitionId":     partitionId,
+		"participantId":   participantId, // AI participant node ID, resolved upstream via aiParticipantForSpace
 		"participantType": "si",
-		"utteranceType": "text",
-		"text": %s,
-		"replyToId": %s,
-		"source": %s%s%s
-	})`,
-		memoryNodes.ConceptCognitionUtterance,
+		"utteranceType":   "text",
+		"text":            response,
+		"replyToId":       replyToId,
+		"source":          json.RawMessage(sourceJSON),
+	}
+	if citationsRaw != nil {
+		payload["citations"] = citationsRaw
+	}
+	if retrievedRaw != nil {
+		payload["retrieved"] = retrievedRaw
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal utterance payload: %w", err)
+	}
+	// Whole-object json.Marshal -- no literal quote in the Go format string.
+	query := fmt.Sprintf(`insert(%s, id=%s, payload=%s)`,
+		escapeJSONString(memoryNodes.ConceptCognitionUtterance),
 		escapeJSONString(utteranceId),
-		escapeJSONString(partitionId),
-		escapeJSONString(participantId), // AI participant node ID, resolved upstream via aiParticipantForSpace
-		escapeJSONString(response),
-		escapeJSONString(replyToId),
-		string(sourceJSON),
-		citationsClause,
-		retrievedClause,
+		string(payloadJSON),
 	)
 
 	_, err = c.engine.Execute(ctx, query)
@@ -1261,8 +1267,8 @@ func (c *CognitionIntegration) hasAIResponseForReply(ctx context.Context, partit
 	if strings.TrimSpace(partitionId) == "" || strings.TrimSpace(siParticipantId) == "" || strings.TrimSpace(replyToId) == "" {
 		return false
 	}
-	query := fmt.Sprintf(`hasAIResponseForReply({replyToId: "%s", participantId: "%s"})`,
-		replyToId, siParticipantId,
+	query := fmt.Sprintf(`hasAIResponseForReply({replyToId: %s, participantId: %s})`,
+		escapeJSONString(replyToId), escapeJSONString(siParticipantId),
 	)
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
@@ -1487,9 +1493,9 @@ func getMapKeys(m map[string]any) []string {
 }
 
 func escapeJSONString(s string) string {
-	data, err := json.Marshal(s)
-	if err != nil {
-		return fmt.Sprintf(`"%s"`, strings.ReplaceAll(s, `"`, `\"`))
-	}
+	// json.Marshal of a string never errors and returns a fully escaped,
+	// double-quoted JSON literal -- the form CodeQL recognizes as safely
+	// quoted (no manual-quoting fallback).
+	data, _ := json.Marshal(s)
 	return string(data)
 }

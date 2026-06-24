@@ -531,7 +531,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// rather than "agent silently feels familiar without grounds."
 	if agentId := strings.TrimSpace(msg.AgentId); agentId != "" {
 		if _, alreadySet := data["agentIsKnownToUser"]; !alreadySet {
-			query := fmt.Sprintf(`agentInteractionCount({agentId: "%s"})`, agentId)
+			query := fmt.Sprintf(`agentInteractionCount({agentId: %s})`, jsonString(agentId))
 			if result, err := r.engine.Execute(ctx, query); err == nil {
 				// agentInteractionCount uses shape() so the
 				// row count lives under the adapter's "data" axis.

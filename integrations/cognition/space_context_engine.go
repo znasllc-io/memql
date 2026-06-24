@@ -303,7 +303,9 @@ func (c *CognitionIntegration) computeSpaceContextSnapshot(ctx context.Context, 
 // loadParticipantsForContext retrieves participants for space context computation.
 // Delegates to the spaceParticipants MemQL query function.
 func (c *CognitionIntegration) loadParticipantsForContext(ctx context.Context, partitionId string) ([]map[string]any, error) {
-	query := fmt.Sprintf(`spaceParticipants({partitionId: "%s"})`, partitionId)
+	// escapeJSONString (json.Marshal) supplies the quotes, so no literal
+	// quote remains in the format string (go/unsafe-quoting).
+	query := fmt.Sprintf(`spaceParticipants({partitionId: %s})`, escapeJSONString(partitionId))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		return nil, err
