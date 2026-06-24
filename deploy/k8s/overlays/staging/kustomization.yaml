@@ -1,13 +1,18 @@
-# Staging overlay -> 0.11.0 engine + 0.11.1 carriers. The five carrier
-# nodes (bff/cognition/agent/planner/workbench) are pinned to the 0.11.1
-# rebuild that adds the legacy env-alias shim to the carrier main.go
-# (visionarys-io/memql-bff-copresent#144): without it the carriers
-# fail-fast'd on MEMQL_DATABASE_DSN because the live memql-secrets +
-# genesis envelope still use the pre-Epic-7.3 legacy names. Engine nodes
-# (identity/mcp/voice) + the SPA stay at the 0.11.0 digests (unchanged
-# source). See releases/0.11.1.yaml (engineVersion 0.11.0).
+# Staging overlay -> 0.11.2: uniform FULL-STACK cut. All 9 images pinned
+# at 0.11.2 (engineVersion 0.11.2). This release rolls up two boot fixes
+# found while rolling 0.11.0 onto staging, where the live memql-secrets +
+# genesis envelope still carry the pre-Epic-7.3 LEGACY env names:
+#   - carrier main.go was missing genesis.ApplyLegacyEnvAliases, so every
+#     carrier node fail-fast'd on MEMQL_DATABASE_DSN
+#     (visionarys-io/memql-bff-copresent#144).
+#   - the subcommand env loader was missing the same shim, so the
+#     voice-agent subcommand fail-fast'd on MEMQL_OPENAI_API_KEY (#2177;
+#     also repairs the #691 deploy-gate service_account mint path).
+# Engine images (identity/mcp/voice) carry the subcommand fix at 0.11.2;
+# the carriers carry the main.go fix (same digests as the 0.11.1 rebuild,
+# re-tagged 0.11.2); the SPA is unchanged. See releases/0.11.2.yaml.
 #
-# Staging overlay -> 0.11.0: FULL-STACK cut bringing staging current with
+# Staging overlay history -> 0.11.0: FULL-STACK cut bringing staging current with
 # main (the 115 commits since the 0.10.0 cut -- authoring promote/demote
 # durability, the deploy-as-a-pack automation path + #2115 parity, the
 # cockpit Editor/Sense + Clusters work, the env-config registry / Epic 7
@@ -44,7 +49,7 @@ patches:
   # Flips the identity node's gRPC Deploy/RollbackDeployment to the thinned
   # kick-off path and anchors the deploy pack so its lifecycle automations
   # drive promote + terminal. SAFE because the identity image pinned below is
-  # 0.11.0 (built from main >= #2159 + #2161 flag handling + #2168, which makes
+  # 0.11.2 (built from main >= #2159 + #2161 flag handling + #2168, which makes
   # an automation-driven rollback land in rolled_back, matching the Go path).
   # Revert this patch to restore the synchronous Go apply. See
   # docs/public/operate/deployment-console.md.
@@ -60,13 +65,13 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:b0f1382a7388fca993b9579a57906f905578e3c1dc1076b20b6b5ada89ccde81
+    digest: sha256:9a408bde0804474316b6e13323e987483368919c27f72cc0e9cf4710b3a420e0
   - name: acrmemql.azurecr.io/memql-bff-copresent
     digest: sha256:8095085e20c73b38a36c7a01a52c8d6777a4bff733e90e4c94f1c6209b80506d
   - name: acrmemql.azurecr.io/memql-cognition
     digest: sha256:d6a49703dc71b429a8539373288a8b6352c329ffaa0d64c4383ee839447f91eb
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:00def056c944962cf92cac4faf8834827890fd3184b29ec17bfd9793eb2fdf77
+    digest: sha256:a769c6968b78088acf472a7bdc9acfcb4cb922be6782db6942730165422a07da
   - name: acrmemql.azurecr.io/memql-agent
     digest: sha256:df6f3ea62dc387dfacec10d72447f1394fbe47abec422b5413d0cf46af2779a2
   - name: acrmemql.azurecr.io/memql-planner
@@ -76,7 +81,7 @@ images:
   # memql-mcp (epic memql#1550): remote MCP node, engine-built on the GitHub
   # build server (#1581 wired it into build-engine-images + the release tooling).
   - name: acrmemql.azurecr.io/memql-mcp
-    digest: sha256:68d02fdaf85b959fa50965d4ad357700e35364ff0fa1a29854cf473efe77c5ff
+    digest: sha256:8cd301fe1b84a8eb977d9b1a07bb566c2fad5e81c97afaf7bb37a2ca9aad1cd4
   # CoPresent SPA -- unchanged since 0.10.0, digest carried forward.
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:68c6c465472d15cb6cd55ecf2a68912adf51820ae995f3889d76d4f2573f9227
