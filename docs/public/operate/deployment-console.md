@@ -191,12 +191,11 @@ back from the deployment concept (or `GetDeploymentStatus`) once the
 automation resolves it -- the console already polls deployment status,
 so it reflects `succeeded` / `failed` when the rollout settles.
 
-Known parity item for the cutover: an automation-driven **rollback**
-lands in `succeeded` (carrying `previousDeploymentId` provenance), not
-`rolled_back`, because the shared `driveDeploymentInProgress` automation
-has no rollback-aware terminal. Reconcile during validation (teach the
-automation a rollback edge, or accept succeeded+provenance) before
-retiring the Go apply.
+Terminal-status parity: an automation-driven **rollback** lands in
+`rolled_back` (the `driveDeploymentInProgress` automation branches on
+`previousDeploymentId`), matching the synchronous Go path exactly; a
+forward deploy lands in `succeeded` and a promote failure in `failed`
+(#2115).
 
 ### Owner cutover runbook (steps 5-6 of #2115)
 

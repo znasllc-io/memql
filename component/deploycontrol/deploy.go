@@ -171,18 +171,13 @@ func (s *Service) RollbackDeployment(ctx context.Context, req *memqlv1.RollbackD
 	}
 
 	// Automation-driven kick-off (#2115): the rollback record was just
-	// created at in_progress, which emits the CDC update the deploy pack's
-	// driveDeploymentInProgress automation consumes -- it re-pins the
-	// historical digest via deployRunPromote and owns the terminal
-	// transition. Return an async ack immediately.
-	//
-	// PARITY NOTE (#2115): the automation drives in_progress -> succeeded
-	// (it has no rollback-aware terminal), so an automation-driven
-	// rollback lands in `succeeded` carrying previousDeploymentId
-	// provenance, whereas the synchronous Go path lands it in
-	// `rolled_back`. Reconciling the terminal status (teach the automation
-	// a rollback edge, or accept succeeded+provenance) is part of the
-	// owner-gated staging validation + Go-apply retirement (steps 5-6).
+	// created at in_progress carrying previousDeploymentId, which emits the
+	// CDC update the deploy pack's driveDeploymentInProgress automation
+	// consumes -- it re-pins the historical digest via deployRunPromote and
+	// owns the terminal transition. Because the record carries
+	// previousDeploymentId, the automation lands it in `rolled_back` (not
+	// `succeeded`), matching this Go path's terminal exactly. Return an
+	// async ack immediately.
 	if s.automationDriven {
 		return s.finishWrite(ctx, "rollback_deployment", act, detail, asyncRollbackAck(toID, newID), nil, map[string]string{
 			"toDeploymentId":  toID,
