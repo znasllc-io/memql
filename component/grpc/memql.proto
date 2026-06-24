@@ -260,6 +260,18 @@ message MemqlClientMessage {
     // ONE machine-readable spec so their language intelligence is derived
     // from the exact same source of truth memQL Sense is. Read-only.
     DslSpecMsg dsl_spec = 80;
+    // Durable promotion of a plain authored bundle into the SHARED engine
+    // registry (issue znasllc-io/memql-cockpit#232, engine half). The
+    // owner-gated, restart-durable counterpart to AuthoringSessionDefineBundle:
+    // it validates the bundle via the Gate-1 sandbox, then for every plain
+    // construct (query / mutation / logic / spec / trait) compiles it and calls
+    // PromoteConstructDurable -- persisting a reviewable v1:authoring:bundle +
+    // construct row pair AND registering it into the shared registry so it is
+    // callable by every session, core-first, never shadowing core. A successful
+    // promote broadcasts a live cross-node propagation event so the construct
+    // becomes callable on EVERY node within seconds (no restart). OWNER-only
+    // (stricter than the define surface, which is owner-or-developer).
+    DurablePromoteBundleMsg durable_promote_bundle = 81;
   }
 }
 
@@ -388,6 +400,8 @@ message MemqlServerMessage {
     // are taken by the B1 pack-browser + C1 authoring replies above, so this
     // starts at 117.
     DslSpecResult dsl_spec_result = 117;
+    // Durable-promote reply (see DurablePromoteBundleMsg, memql-cockpit#232).
+    DurablePromoteBundleResult durable_promote_bundle_result = 118;
   }
 }
 
@@ -1200,6 +1214,27 @@ message AuthoringSessionDefineBundleResult {
   repeated AuthoringConstruct defined = 3;     // constructs that became callable
   repeated AuthoringDiagnostic diagnostics = 4;
   string error = 5;  // non-empty when the bundle was rejected (validation or register)
+}
+
+// DurablePromoteBundleMsg requests the owner-gated DURABLE promotion of a plain
+// authored bundle into the SHARED engine registry (issue
+// znasllc-io/memql-cockpit#232). The engine validates the bundle via the Gate-1
+// sandbox, then compiles + durably promotes every plain construct (query /
+// mutation / logic / spec / trait) via PromoteConstructDurable -- persisting a
+// reviewable bundle/construct row pair AND registering into the shared registry.
+// A successful promote broadcasts a live cross-node propagation event so the
+// construct becomes callable on every node within seconds. OWNER-only.
+message DurablePromoteBundleMsg {
+  string request_id = 1;
+  string sources = 2;  // .memql bundle source
+}
+
+message DurablePromoteBundleResult {
+  string request_id = 1;
+  bool ok = 2;  // true only when validation passed and every plain construct promoted
+  repeated AuthoringConstruct promoted = 3;     // constructs durably promoted into the shared registry
+  repeated AuthoringDiagnostic diagnostics = 4; // per-construct compile/bind diagnostics
+  string error = 5;  // non-empty when the bundle was rejected (validation) or a promote failed
 }
 
 // -----------------------------------------------------------------------------

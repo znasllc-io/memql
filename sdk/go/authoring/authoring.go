@@ -13,8 +13,14 @@
 //     constructs become callable BY NAME for the lifetime of the stream, never
 //     shadowing core, and are dropped when the stream (session) ends.
 //
-// Owner-gated DURABLE activation/promotion is out of scope for this surface
-// (issue #232); validate + inject only.
+// A third operation adds the owner-gated DURABLE promotion (issue
+// znasllc-io/memql-cockpit#232):
+//
+//   - DurablePromoteBundle validates the bundle, then durably promotes every
+//     plain construct (query / mutation / logic / spec / trait) into the SHARED
+//     engine registry: persisted (reviewable + restart-durable), callable by
+//     every session, and -- via a live cross-node broadcast -- callable on every
+//     node within seconds with no restart. OWNER-only.
 //
 // The package mirrors sdk/go/sense in shape -- a Client wrapping a
 // client.Dispatcher, typed SDK-owned values (no memqlv1.* leaks into the public
@@ -138,6 +144,55 @@ func (c *Client) SessionDefineBundle(ctx context.Context, sources string) (*Sess
 	return &SessionDefineResult{
 		OK:          result.GetOk(),
 		Defined:     defined,
+		Diagnostics: protoDiagnostics(result.GetDiagnostics()),
+		Error:       result.GetError(),
+	}, nil
+}
+
+// PromoteResult is the response from DurablePromoteBundle. On success OK is true
+// and Promoted lists the constructs durably promoted into the shared registry
+// (persisted, restart-durable, and -- via the live broadcast -- callable on every
+// node within seconds). On failure OK is false, Error explains the rejection
+// (validation or a per-construct promote failure), and Diagnostics carries the
+// per-construct compile/bind detail.
+type PromoteResult struct {
+	OK          bool
+	Promoted    []Construct
+	Diagnostics []Diagnostic
+	Error       string
+}
+
+// DurablePromoteBundle validates the bundle, then durably promotes every plain
+// construct (query / mutation / logic / spec / trait) into the SHARED engine
+// registry. The promoted constructs are persisted (reviewable + restart-durable),
+// callable by every session, and -- via a live cross-node broadcast -- callable
+// on every node within seconds with no restart. OWNER-only: the engine rejects a
+// non-owner caller with a permission-denied wire error.
+//
+// The Go error return is reserved for wire-level failures (dispatcher closed,
+// context cancelled, permission denied); a bundle the engine rejected on
+// validation comes back as OK=false with a populated Error + diagnostics.
+func (c *Client) DurablePromoteBundle(ctx context.Context, sources string) (*PromoteResult, error) {
+	msg := &memqlv1.MemqlClientMessage{
+		Payload: &memqlv1.MemqlClientMessage_DurablePromoteBundle{
+			DurablePromoteBundle: &memqlv1.DurablePromoteBundleMsg{Sources: sources},
+		},
+	}
+	resp, err := c.dispatcher.SendAndWait(ctx, msg)
+	if err != nil {
+		return nil, fmt.Errorf("authoring.durablePromoteBundle: %w", err)
+	}
+	result := resp.GetDurablePromoteBundleResult()
+	if result == nil {
+		return nil, fmt.Errorf("authoring.durablePromoteBundle: empty response")
+	}
+	promoted := make([]Construct, 0, len(result.GetPromoted()))
+	for _, p := range result.GetPromoted() {
+		promoted = append(promoted, Construct{Kind: p.GetKind(), Name: p.GetName()})
+	}
+	return &PromoteResult{
+		OK:          result.GetOk(),
+		Promoted:    promoted,
 		Diagnostics: protoDiagnostics(result.GetDiagnostics()),
 		Error:       result.GetError(),
 	}, nil

@@ -97,6 +97,17 @@ const (
 	// loop (E4.4 / memql#2142) subscribes to the dedicated
 	// healing.precondition.missed topic.
 	KindPreconditionMissed
+
+	// KindAuthoringPromote is emitted on the dedicated authoring-promote
+	// broadcast channel (issue znasllc-io/memql-cockpit#232) when a plain
+	// construct is durably promoted into the shared registry. It carries the
+	// promoted bundle id + owner so EVERY node re-hydrates that bundle's
+	// constructs into its own shared registry within seconds -- making a
+	// promote on node A callable on node B with no restart. Like
+	// cache.invalidate.*, ONLY the authoring-promote subscriber consumes it,
+	// so a single broadcast routing rule forwards it everywhere with zero
+	// side effects (no automations).
+	KindAuthoringPromote
 )
 
 // String returns a human-readable name for the event kind.
@@ -162,6 +173,8 @@ func (k Kind) String() string {
 		return "cache_invalidate"
 	case KindPreconditionMissed:
 		return "precondition_missed"
+	case KindAuthoringPromote:
+		return "authoring_promote"
 	default:
 		return "unspecified"
 	}
@@ -214,6 +227,16 @@ const (
 	// dedicated topic + a healing.* forward routing rule makes the miss
 	// signal mesh-consistent (multi-node is the default).
 	TopicPreconditionMissed = "healing.precondition.missed"
+
+	// Authoring-promote broadcast (issue znasllc-io/memql-cockpit#232). A
+	// dedicated channel: a durable promote emits authoring.promote.<bundleId>
+	// here, ONLY the authoring-promote subscriber consumes it, and a single
+	// broadcast routing rule (authoring.promote.*) forwards it to every node
+	// so a promote on one node re-hydrates the bundle's constructs into every
+	// node's shared registry within seconds (no restart). Modeled on
+	// cache.invalidate.* (memql#1970): a single-consumer broadcast topic with
+	// zero automation side effects.
+	TopicAuthoringPromote = "authoring.promote"
 
 	// MCP Tool events
 	TopicToolCalled    = "tool.called"

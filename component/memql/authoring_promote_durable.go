@@ -38,6 +38,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -77,6 +78,83 @@ const AuditActionConstructPromoted = "authored_construct_promoted"
 // re-hydration simply won't find it, consistent with "not durable").
 func (e *MemQLEngine) PromoteConstructDurable(ctx context.Context, owner string, c *AuthoredConstruct) error {
 	return e.promoteConstructDurableWithStore(ctx, &enginePromoteStore{engine: e}, owner, c)
+}
+
+// PromoteBundleResult reports the outcome of a bundle-level durable promote
+// (issue znasllc-io/memql-cockpit#232): the per-construct compile/bind
+// diagnostics, the constructs that were durably promoted into the shared
+// registry, and an overall OK. OK is true only when validation passed AND every
+// plain construct promoted. On a validation failure nothing is promoted and the
+// diagnostics explain why; on a mid-promote failure Promoted holds the ones that
+// did land before the failing one.
+type PromoteBundleResult struct {
+	OK          bool                `json:"ok"`
+	Promoted    []DefinedConstruct  `json:"promoted,omitempty"`
+	Diagnostics []SandboxDiagnostic `json:"diagnostics,omitempty"`
+}
+
+// PromoteBundleDurable validates a `.memql` bundle through the Gate-1 sandbox,
+// then durably promotes every PLAIN construct (query / mutation / logic / spec /
+// trait) it defines into the shared engine registry (issue
+// znasllc-io/memql-cockpit#232). It is the bundle-level entry point the
+// owner-gated gRPC durable-promote handler drives, reusing the exact validate +
+// compile path AuthorSessionBundle uses (so a construct arrives compiled) and
+// then the per-construct PromoteConstructDurable (which persists the reviewable
+// rows, registers core-first never-shadow, and broadcasts the live cross-node
+// propagation event).
+//
+// owner is the AUTHENTICATED actor; the OWNER-ONLY gate is enforced by the
+// caller (the gRPC handler matches the MCP promote owner gate). A bundle that
+// fails validation promotes nothing and returns OK=false with the diagnostics +
+// a non-nil error; a per-construct promote failure stops at that construct and
+// returns the error (the ones already promoted stay -- each is independently
+// durable + propagated).
+func (e *MemQLEngine) PromoteBundleDurable(ctx context.Context, owner, bundleSource string) (PromoteBundleResult, error) {
+	return e.promoteBundleDurableWithStore(ctx, &enginePromoteStore{engine: e}, owner, bundleSource)
+}
+
+// promoteBundleDurableWithStore is the store-driven core of PromoteBundleDurable,
+// split out so it is unit testable with a fake promoteStore (no live DB), exactly
+// like promoteConstructDurableWithStore.
+func (e *MemQLEngine) promoteBundleDurableWithStore(ctx context.Context, store promoteStore, owner, bundleSource string) (PromoteBundleResult, error) {
+	owner = strings.TrimSpace(owner)
+	if owner == "" {
+		return PromoteBundleResult{}, fmt.Errorf("authoring: durable promote requires an authenticated owner")
+	}
+
+	// Validate + compile via the SAME session-define path (Gate-1 sandbox, then
+	// compile each function-family/spec construct into its executable form). A
+	// throwaway owner-scoped registry holds the compiled forms; nothing about it
+	// is durable -- it exists only to carry the *Function / *Spec into the
+	// per-construct PromoteConstructDurable.
+	reg := NewAuthoredRuntimeRegistry()
+	defineRes, err := AuthorSessionBundle(reg, owner, bundleSource)
+	result := PromoteBundleResult{OK: defineRes.OK, Diagnostics: defineRes.Diagnostics}
+	if err != nil {
+		// Validation/compile failure: nothing registered, nothing to promote.
+		return result, err
+	}
+
+	// Promote each PLAIN construct (the function family + spec/trait). Concepts
+	// and shapes register as session metadata but are not durably promotable
+	// here -- skip them, exactly as the durable-promote kind gate does.
+	for _, c := range SplitBundleSource(bundleSource) {
+		if !isDurablePromotableKind(c.Kind) {
+			continue
+		}
+		ac, ok := reg.Lookup(owner, c.Kind, c.Name)
+		if !ok {
+			// The compile step above did not register it (an unsupported kind
+			// the splitter surfaced but the compiler skipped); leave it out.
+			continue
+		}
+		if perr := e.promoteConstructDurableWithStore(ctx, store, owner, ac); perr != nil {
+			result.OK = false
+			return result, fmt.Errorf("authoring: durable promote %s %q: %w", c.Kind, c.Name, perr)
+		}
+		result.Promoted = append(result.Promoted, DefinedConstruct{Kind: c.Kind, Name: c.Name})
+	}
+	return result, nil
 }
 
 // promoteStore is the narrow graph surface the durable promote needs: persist a
@@ -138,7 +216,42 @@ func (e *MemQLEngine) promoteConstructDurableWithStore(ctx context.Context, stor
 		e.Logger.Info("authored construct durably promoted into the shared registry",
 			"owner", owner, "kind", c.Kind, "name", c.Name, "bundleId", bundleId, "action", AuditActionConstructPromoted)
 	}
+
+	// Live cross-node propagation (issue znasllc-io/memql-cockpit#232). The
+	// construct is now durable + callable ON THIS NODE, but every other node's
+	// shared registry is still in-memory-only and does not know about it -- so
+	// without this broadcast the promote would not become callable elsewhere
+	// until a restart re-hydrates it. Emit the dedicated authoring-promote
+	// broadcast carrying the persisted bundle id + owner; every node receives it
+	// (single broadcast routing rule) and re-hydrates this bundle's constructs
+	// from the shared DB into its own registry within seconds. Best-effort: a
+	// missing event bus (a non-mesh / unit-test engine) degrades to the local
+	// promote only -- the persisted row still re-hydrates on the next boot.
+	e.publishAuthoringPromote(bundleId, owner)
 	return nil
+}
+
+// publishAuthoringPromote emits the dedicated authoring-promote broadcast event
+// (issue znasllc-io/memql-cockpit#232) for a durably-promoted bundle on the
+// separate authoring.promote.<bundleId> channel. ONLY the authoring-promote
+// subscriber consumes this channel, and a single broadcast routing rule
+// (authoring.promote.*) forwards it to every node -- so a promote on one node
+// re-hydrates the bundle into every node's shared registry with zero side
+// effects (no automations, no other consumers). The payload carries the bundle
+// id + owner so the receiving node can load the bundle's persisted constructs.
+func (e *MemQLEngine) publishAuthoringPromote(bundleId, owner string) {
+	if e == nil || e.eventBus == nil {
+		return
+	}
+	bundleId = strings.TrimSpace(bundleId)
+	if bundleId == "" {
+		return
+	}
+	e.eventBus.Publish(events.NewEvent(
+		events.TopicAuthoringPromoteForBundle(bundleId),
+		events.KindAuthoringPromote,
+		map[string]any{"bundleId": bundleId, "owner": owner},
+	))
 }
 
 // isDurablePromotableKind reports whether a construct kind can be durably

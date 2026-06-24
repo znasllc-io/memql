@@ -1164,6 +1164,10 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 		return s.handleAuthoringValidateBundle(envelope, payload.AuthoringValidateBundle)
 	case *memqlv1.MemqlClientMessage_AuthoringSessionDefineBundle:
 		return s.handleAuthoringSessionDefineBundle(envelope, payload.AuthoringSessionDefineBundle)
+	// Durable promotion of a plain bundle into the shared registry (owner-gated,
+	// live cross-node propagation; issue znasllc-io/memql-cockpit#232).
+	case *memqlv1.MemqlClientMessage_DurablePromoteBundle:
+		return s.handleDurablePromoteBundle(envelope, payload.DurablePromoteBundle)
 	// DSL spec export -- portable language-intelligence surface (memql#2125 / A4)
 	case *memqlv1.MemqlClientMessage_DslSpec:
 		return s.handleDslSpec(envelope, payload.DslSpec)

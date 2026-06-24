@@ -76,6 +76,16 @@ func defaultRoutingRules() []RoutingRule {
 		// memql#1396). A cached read on any replica is now evicted purely via
 		// this broadcast channel, with zero per-concept routing rules.
 		{Pattern: "cache.invalidate.*", TargetType: ""},
+		// Authoring-promote forwarding (issue znasllc-io/memql-cockpit#232).
+		// ONE broadcast rule forwards the dedicated authoring-promote channel to
+		// every node type. A durable promote emits authoring.promote.<bundleId>
+		// (see MemQLEngine.publishAuthoringPromote); ONLY the authoring-promote
+		// subscriber consumes it (no automations, no other consumers), so
+		// forwarding it everywhere has ZERO side effects. This is what makes a
+		// promote on node A callable on node B within seconds with no restart:
+		// every replica re-hydrates the promoted bundle from the shared DB on
+		// the broadcast. Mirrors the cache.invalidate.* single-broadcast pattern.
+		{Pattern: "authoring.promote.*", TargetType: ""},
 		// Planner graph events: BFF owns the writes (createPlan
 		// fires on BFF), the planner-tagged binary subscribes
 		// graph.node.created.v1:planner:plan in its
