@@ -169,9 +169,12 @@ truthy it does two coupled things, both reading the one flag so they
 can never diverge:
 
 1. **Anchors the pack on the identity binary** (`app/anchor_deploypack.go`,
-   at init time before the engine loads its DSL tree) so the
-   `driveDeploymentInProgress` / `recordReconciledState` automations are
-   actually loaded where the Deploy Console writes deployment records.
+   in a bootstrap phase after genesis autoload and before the engine loads
+   its DSL tree) so the `driveDeploymentInProgress` / `recordReconciledState`
+   automations are actually loaded where the Deploy Console writes deployment
+   records. (The mount reads the flag at the same point as the thinned Deploy
+   path, so it works whether the flag is set as a k8s env var OR via the
+   genesis envelope.)
 2. **Thins `Deploy` / `RollbackDeployment`** to a kick-off: `Deploy`
    transitions the record to `in_progress` and returns; `RollbackDeployment`
    creates the new rollback record at `in_progress` and returns. The
