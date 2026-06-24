@@ -34,5 +34,12 @@ func applySubcommandEnv(prefix string) error {
 	if _, err := genesis.ApplyLocalOverride("."); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: local .env override failed: %v\n", prefix, err)
 	}
+	// Epic 7.3 (memql#2106): bridge any pre-7.3 LEGACY env names the envelope /
+	// .env still carries onto their new MEMQL_ names (set-if-absent), mirroring
+	// main(). Without it a subcommand sees only the legacy names: the voice-agent
+	// subcommand fail-fast'd on the required MEMQL_OPENAI_API_KEY on a cluster
+	// whose sealed envelope still carries the legacy OPENAI_API_KEY. nil logger:
+	// this path logs to stderr via Fprintf, not slog, so the bridge runs silently.
+	genesis.ApplyLegacyEnvAliases(nil)
 	return nil
 }
