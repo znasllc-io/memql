@@ -9,19 +9,25 @@ owner: znas
 
 # Cockpit Editor
 
-The **Editor** is a Cockpit tab that browses a connected node's DSL
-**packs** read-only: a domain tree on the left, the `.memql` / `.tmpl`
-files inside the selected domain in the middle, and the selected file's
+The **Editor** is a Cockpit tab (`F3`) with two surfaces. By default
+it **browses** a connected node's DSL **packs** read-only: a domain
+tree on the left, the `.memql` / `.tmpl` files inside the selected
+domain in the middle, and the selected file's
 [Sense](../language/sense.md)-colored source on the right. It is the
 fastest way to read the exact DSL a running node carries -- core
 embedded constructs and any plugin-registered packs alike -- with
 syntax highlighting and hover.
 
-> The Editor is **read-only**. Browsing and viewing embedded / pack
-> files is shipped today. In-Editor authoring (writing a runtime
-> bundle, validating it, and injecting it) is a separate, not-yet-
-> shipped surface -- see [Authoring](#authoring-coming-in-230--231)
-> below.
+`Ctrl+B` toggles into **authoring mode**, where you create and edit a
+local `.memql` **bundle** with the same live IntelliSense and then
+[**Validate**](#validate-the-gate-1-sandbox) and
+[**Inject**](#inject-session-define) it against the running engine. See
+[Authoring a bundle](#authoring-a-bundle) below.
+
+> Browsing packs is **read-only** -- embedded and plugin-registered
+> pack files cannot be edited in place. Authoring edits a separate
+> local bundle, never a pack; injecting a bundle is **session-scoped**
+> and never mutates the durable schema.
 
 The Cockpit ships from its own repo,
 `github.com/znasllc-io/memql-cockpit`; this page documents the engine
@@ -38,12 +44,14 @@ Two terms that look similar and are not the same:
   Go module compiled into it). The Editor browses packs, and they are
   **read-only** there -- a pack subtree is owned by its registering
   module and the embedded tree is immutable.
-- A **bundle** is a runtime-authored set of constructs
-  (`v1:authoring:bundle`) validated and injected through the authoring
-  API. Bundles are not packs; they are not part of the binary. Editing
-  what you see in the Editor would mean authoring a bundle -- the
-  [Authoring](#authoring-coming-in-230--231) path, which is not yet
-  wired into the Cockpit.
+- A **bundle** is a runtime-authored set of constructs validated and
+  injected through the authoring API. Bundles are not packs; they are
+  not part of the binary. In the Cockpit a bundle is a local directory
+  of `.memql` files under `~/.memql/bundles/<name>/`, authored in
+  [authoring mode](#authoring-a-bundle); editing what you see in the
+  read-only browser would mean authoring a bundle instead. Validating
+  or injecting a bundle never edits a pack and never touches the
+  binary's embedded tree.
 
 ---
 
@@ -113,59 +121,136 @@ These are the as-built bindings from the Editor panel (`cli/dsledit/`):
 
 ---
 
-## Authoring (coming in #230 / #231)
+## Authoring a bundle
 
-Editing a pack file in place is **not** how runtime authoring works,
-and the in-Editor authoring UI is **not yet available in the Cockpit**.
-Authoring a bundle (writing constructs, validating them, injecting
-them) is tracked as:
+`Ctrl+B` from the read-only browser switches the Editor into
+**authoring mode** (and `Ctrl+B` again switches back). Authoring mode
+lets you write a local `.memql` **bundle** with the same Sense
+IntelliSense the browser uses for coloring, then validate and inject it
+against the connected node. Nothing you author touches a pack or the
+binary's embedded tree -- a bundle lives on your machine until you
+explicitly inject it, and an inject is session-scoped.
 
-- **C2 (memql-cockpit#230)** -- the in-Editor bundle authoring mode.
-- **C3 (memql-cockpit#231)** -- wiring the Validate / Inject actions to
-  the engine.
+Authoring mode is a connected-cluster surface for Validate / Inject
+(those drive the engine over gRPC), but the local bundle editing -- the
+panes, the on-disk files -- works whether or not a cluster is selected.
 
-Until those land, the Editor is browse-and-read only. The underlying
-**engine contract** those actions will call is already shipped and
-callable today via the Go SDK (`sdk/go/authoring`), so this section
-documents that contract -- not a Cockpit UI.
+### The three panes
 
-### The validate / inject engine contract
+Authoring mode mirrors the browser's three-pane shape, but the panes
+are local-bundle-oriented:
 
-Two operations over the engine's gRPC stream, both reusing the
-authoring machinery in `component/memql/authoring_session.go` +
-`authoring_sandbox.go`:
+| Pane | Shows |
+|---|---|
+| **BUNDLES** | Your local bundle directories under `~/.memql/bundles/`. The open bundle is marked with `*`. |
+| **FILES** | The `.memql` / `.tmpl` files in the selected bundle. The open file is marked with `*`. |
+| **EDITOR** | The editable buffer for the open file -- Sense-colored, with inline diagnostics, completion, and hover. A `*` next to the file name in the pane title means unsaved changes. |
 
-- **ValidateBundle** runs the Gate-1 isolated compile-and-bind sandbox
-  over a `.memql` bundle and returns per-construct diagnostics plus an
-  overall `OK`. It slices the source into `(kind, name, source)`
-  constructs and compiles + binds each in ISOLATION against a read-only
-  clone of the live concept registry. It NEVER mutates engine state and
-  registers nothing -- safe to call against a running engine. A bundle
-  with no recognizable constructs comes back as `OK=false` with a
-  single explaining diagnostic, so the caller always gets a typed
-  answer rather than a bare error.
+A bundle is just a directory; a file is created with a `.memql`
+extension when you don't supply one (so typing `queries` yields
+`queries.memql`). Bundle and file names must be a single safe path
+segment -- no separators, no traversal, no leading dot.
 
-- **SessionDefineBundle** (the SDK name for the engine's
-  `AuthorSessionBundle`) validates, then registers the bundle's
-  constructs into the caller's **owner-scoped, stream-scoped** authored
-  registry, NON-DURABLY. Function-family constructs (`query` /
-  `mutation` / `logic`) become callable by name for the lifetime of the
-  stream, never shadowing core, and are dropped when the stream
-  (session) ends. A bundle that fails validation registers nothing and
-  returns the diagnostics with `OK=false`.
+### Live IntelliSense
 
-Owner-gated **durable** activation / promotion of a bundle is out of
-scope for this surface (tracked separately, #232); the contract above
-is validate plus non-durable session inject only.
+The EDITOR pane drives the same [MemQL Sense](../language/sense.md)
+service as the read-only viewer, through the Sense SDK
+(`sdk/go/sense`):
 
-From the SDK:
+- **Coloring + diagnostics** refresh automatically as you type
+  (debounced), so syntax highlighting and inline error / warning
+  underlines track the buffer. An initial pass runs when you open a
+  file, so coloring appears before you type.
+- **Completion** (`Ctrl+Space`) requests context-aware completions at
+  the cursor and opens a popup anchored at the cursor cell. The popup
+  **live-filters** to the identifier prefix under the cursor as you
+  keep typing, and closes when the word ends. `↑` / `↓` move the
+  selection; `Enter` or `Tab` accepts (replacing the typed prefix);
+  `Esc` dismisses.
+- **Hover** (`Ctrl+K`) requests Sense hover at the cursor -- function
+  docs, a concept schema, an annotation's documentation -- in an
+  overlay anchored at the cursor; `Esc` closes it.
+
+Because Sense is driven from the same `dslspec` source of truth that
+backs the load-time grammar, the completions and diagnostics you see
+while authoring are exactly what the engine will accept -- see
+[MemQL Sense & the DSL Spec](../language/sense.md).
+
+### Validate (the Gate-1 sandbox)
+
+`Ctrl+G` **validates** the open bundle. The Cockpit concatenates every
+`.memql` / `.tmpl` file in the bundle into one source payload (a bundle
+is validated as a whole, since constructs can reference each other
+across files), saves any unsaved buffer first, and calls `ValidateBundle`
+over the authoring SDK (`sdk/go/authoring`).
+
+Validate runs the engine's **Gate-1 isolated compile-and-bind
+sandbox**: it slices the source into `(kind, name, source)` constructs
+and compiles + binds each in ISOLATION against a read-only clone of the
+live concept registry (bundle-declared concepts are overlaid onto the
+clone first, so a construct that references a concept the same bundle
+defines resolves). It **never mutates engine state and registers
+nothing** -- safe to run against a running node. The result lands in a
+per-construct overlay (`Esc` closes it): each construct shows `[ok]`,
+`[!!]` with the compile/bind error, or `[--] skipped` for a kind the
+sandbox does not yet compile (a skip does not fail the bundle). A
+bundle with no recognizable constructs comes back as not-OK with a
+single explaining line.
+
+### Inject (session-define)
+
+`Ctrl+R` **injects** the open bundle: it validates through the same
+Gate-1 sandbox and, on success, registers the bundle's constructs into
+**your stream's owner-scoped authored registry** via
+`SessionDefineBundle`. Function-family constructs (`query` / `mutation`
+/ `logic`, plus `spec` / `trait`) become **callable by name for the
+lifetime of this session**.
+
+Inject is deliberately narrow:
+
+- **Session-scoped / ephemeral.** The authored registry lives for the
+  stream and is **dropped when the session ends**. Injecting changes
+  nothing durable -- restart the Cockpit (or disconnect) and the
+  injected constructs are gone.
+- **Never shadows core.** Resolution is core-first: an injected
+  construct whose name a sealed core construct already owns is dropped,
+  so authoring can only *add* owner-private capability, never redefine
+  platform behaviour.
+- **Owner-scoped.** Constructs are keyed to your `userId`; one
+  session can never resolve another's injected constructs.
+
+A bundle that fails validation registers nothing and the overlay shows
+the rejection plus the failing diagnostics.
+
+Both Validate and Inject require the **owner or developer** role (the
+engine's `auth.CanAuthor` gate) -- validation reveals the live concept
+surface, and a session-define changes what is callable on the stream.
+Either action works from any pane focus (the `Ctrl` combos never
+collide with editor typing).
+
+### Durable promotion is not yet available
+
+Inject is the only path the Cockpit wires today, and it is
+session-scoped by design. Promoting a validated bundle to a
+**durable**, cluster-wide construct -- owner-gated, persisted, and
+surviving restarts -- is a separate **Phase-2** action tracked in
+**memql-cockpit#232**. It is still being built; there is no
+durable-promote control in the Editor yet. Until it lands, treat inject
+as a way to try a construct out within your own session, not to ship
+one.
+
+### The engine contract behind the actions
+
+Both actions go through the Go authoring SDK, which wraps the engine's
+authoring machinery (`component/memql/authoring_session.go` +
+`authoring_sandbox.go`). The same contract is callable directly:
 
 ```go
 import "github.com/znasllc-io/memql/sdk/go/authoring"
 
 client := authoring.NewClient(dispatcher)
 
-// Validate only -- never mutates engine state.
+// Validate only -- Gate-1 sandbox, never mutates engine state.
 vr, err := client.ValidateBundle(ctx, bundleSource)
 // vr.OK, vr.Diagnostics[].{Name, Kind, OK, Skipped, Error}
 
@@ -178,6 +263,24 @@ A wire-level failure (dispatcher closed, context cancelled, permission
 denied) surfaces as a Go error; a bundle that simply fails to compile
 comes back as `OK=false` with diagnostics, not as an error.
 
+### Authoring key bindings
+
+These are the as-built bindings for authoring mode
+(`cli/dsledit/author.go`):
+
+| Key | Action |
+|---|---|
+| `Ctrl+B` | Toggle back to the read-only pack browser |
+| `Tab` | Cycle focus: BUNDLES → FILES → EDITOR → BUNDLES |
+| `N` | BUNDLES: new bundle. FILES: new file (prompts for a name) |
+| `Enter` | BUNDLES: open the bundle's files. FILES: open the file in the editor |
+| `Ctrl+S` | EDITOR: save the buffer to disk |
+| `Ctrl+Space` | EDITOR: Sense completion at the cursor |
+| `Ctrl+K` | EDITOR: Sense hover at the cursor |
+| `Ctrl+G` | Validate the bundle (Gate-1 sandbox; no engine mutation) |
+| `Ctrl+R` | Inject the bundle (session-define; session-scoped, never shadows core) |
+| `Esc` | Dismiss the Validate / Inject overlay, a completion / hover popup, or a name prompt |
+
 ---
 
 ## Where this lives
@@ -187,14 +290,17 @@ comes back as `OK=false` with diagnostics, not as an error.
 | Pack-browse engine API | `dsl/pack_browse.go` |
 | Pack-browse SDK | `sdk/go/pack/` |
 | Authoring engine contract | `component/memql/authoring_session.go`, `authoring_sandbox.go` |
+| Authoring gRPC handlers | `component/grpc/authoring_handlers.go` |
 | Authoring SDK | `sdk/go/authoring/` |
-| Editor panel (Cockpit, separate repo) | `cli/dsledit/` in `memql-cockpit` |
+| Editor panel + authoring mode (Cockpit, separate repo) | `cli/dsledit/` (`view.go` browser, `author.go` authoring + Validate/Inject, `bundle.go` local workspace IO) in `memql-cockpit` |
 
 ## See also
 
 - [MemQL Sense & the DSL Spec](../language/sense.md) -- the language
-  intelligence that colors the SOURCE pane.
+  intelligence that colors the SOURCE pane and drives authoring-mode
+  completion, hover, and diagnostics.
 - [Building a Pack](../build/building-a-pack.md) -- how a compile-time
-  pack is authored and registered.
+  pack is authored and registered (the durable, embedded counterpart
+  to a runtime bundle).
 - [MemQL Language](../language/memql.md) -- the DSL reference.
 </content>

@@ -48,7 +48,7 @@ The complete map of memQL documentation. Layout + rules:
 - **Auth** (`operate/auth/`): [Access Model](docs/public/operate/auth/access-model.md) · [Identity Service](docs/public/operate/auth/identity-service.md) · [User Provisioning](docs/public/operate/auth/user-provisioning.md) · [Actor Envelope](docs/public/operate/auth/actor-envelope.md) · [Per-row Authz](docs/public/operate/auth/per-row-authz-audit.md) · machine creds: [node](docs/public/operate/auth/node-jwt.md) / [voice-agent](docs/public/operate/auth/voice-agent-jwt.md) / [service-account](docs/public/operate/auth/service-account-jwt.md)
 
 ### Cockpit (`cockpit/`)
-- [Cockpit Editor](docs/public/cockpit/editor.md) — the read-only DSL pack browser (domains/files/Sense-colored source + hover), pack-vs-bundle terminology, and the validate/inject authoring engine contract (in-Editor authoring UI lands with #230/#231).
+- [Cockpit Editor](docs/public/cockpit/editor.md) — the read-only DSL pack browser (domains/files/Sense-colored source + hover), pack-vs-bundle terminology, and `Ctrl+B` authoring mode: write a local `.memql` bundle with live IntelliSense, then Validate (Gate-1 sandbox) and Inject (session-scoped session-define; durable promotion is a separate Phase-2 action).
 - The Cockpit (terminal IDE + ops console) ships from its own repo,
   `github.com/znasllc-io/memql-cockpit`; the rest of its product docs live there.
 
