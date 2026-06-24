@@ -1234,6 +1234,13 @@ func (e *MemQLEngine) run(ctx context.Context, markStarted func()) error {
 	// context (the subscription is torn down when ctx is cancelled).
 	e.StartCacheInvalidationSubscriber(ctx)
 
+	// #232: wire LIVE cross-node propagation of durable promotions. A durable
+	// promote on any node broadcasts authoring.promote.<bundleId>; this
+	// subscriber re-hydrates the promoted bundle into this node's shared
+	// registry on receipt, so a promote on node A becomes callable on node B
+	// within seconds (no restart). Scoped to the engine lifecycle context.
+	e.StartAuthoringPromoteSubscriber(ctx)
+
 	markStarted()
 
 	<-common.EnsureContext(ctx).Done()

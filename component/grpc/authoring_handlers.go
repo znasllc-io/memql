@@ -106,6 +106,89 @@ func (s *streamSession) handleAuthoringSessionDefineBundle(envelope *memqlv1.Mem
 	})
 }
 
+// handleDurablePromoteBundle validates the bundle via the Gate-1 sandbox, then
+// durably promotes every plain construct into the SHARED engine registry (issue
+// znasllc-io/memql-cockpit#232, engine half). It is the owner-gated, restart-
+// durable, LIVE-cross-node-propagating counterpart to the session-define
+// surface above. OWNER-only: it matches the MCP `promote` gate (roleCanPromote /
+// promoteGate -- owner role, strictly higher than the owner-or-developer
+// CanAuthor bar the define/validate surface uses).
+//
+// On success the promoted constructs are persisted (reviewable + restart-
+// durable), registered into the shared registry (callable by every session on
+// this node, core-first never-shadow), and a broadcast event makes them callable
+// on EVERY node within seconds. On a validation failure it returns ok=false with
+// the diagnostics + a populated error and promotes nothing.
+func (s *streamSession) handleDurablePromoteBundle(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.DurablePromoteBundleMsg) error {
+	if msg == nil {
+		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument, "durable_promote_bundle: request body missing")
+	}
+	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
+
+	if allowed, err := s.requireOwnerRole(requestId, envelope.GetMessageId()); !allowed {
+		return err
+	}
+
+	// Owner is the authenticated caller; the persisted rows are stamped to it
+	// and PromoteConstructDurable runs the writes under its envelope.
+	ac := s.ensureAccess(s.stream.Context())
+	owner := ""
+	if ac != nil {
+		owner = strings.TrimSpace(ac.UserId)
+	}
+	if owner == "" {
+		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Unauthenticated,
+			"durable_promote_bundle: an authenticated owner is required to promote a bundle")
+	}
+
+	if s.service == nil || s.service.engine == nil {
+		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Unavailable,
+			"durable_promote_bundle: engine unavailable on this node")
+	}
+	res, err := s.service.engine.PromoteBundleDurable(s.stream.Context(), owner, msg.GetSources())
+
+	result := &memqlv1.DurablePromoteBundleResult{
+		RequestId:   requestId,
+		Ok:          res.OK,
+		Promoted:    durablePromotedConstructsToProto(res.Promoted),
+		Diagnostics: authoringDiagnosticsToProto(res.Diagnostics),
+	}
+	if err != nil {
+		result.Ok = false
+		result.Error = err.Error()
+	}
+	return s.sendServerMessage(envelope.GetMessageId(), &memqlv1.MemqlServerMessage{
+		Payload: &memqlv1.MemqlServerMessage_DurablePromoteBundleResult{
+			DurablePromoteBundleResult: result,
+		},
+	})
+}
+
+// requireOwnerRole resolves the caller's access and enforces the OWNER-only
+// gate the durable promote needs (issue #232). This is the higher bar than
+// requireAuthoringRole (owner OR developer): promotion makes a construct durable
+// + cluster-wide, so it matches the MCP `promote` op's owner-only gate
+// (roleCanPromote). Returns allowed=true to proceed; when allowed=false the
+// denial has already been sent and the returned error is the send error.
+func (s *streamSession) requireOwnerRole(requestId, correlate string) (bool, error) {
+	ac := s.ensureAccess(s.stream.Context())
+	if ac == nil || ac.Role != auth.RoleOwner {
+		return false, s.sendQueryError(requestId, correlate, codes.PermissionDenied,
+			"durable promotion requires the owner role")
+	}
+	return true, nil
+}
+
+// durablePromotedConstructsToProto maps the engine-side DefinedConstructs (the
+// durably-promoted ones) onto the wire form.
+func durablePromotedConstructsToProto(promoted []memqlengine.DefinedConstruct) []*memqlv1.AuthoringConstruct {
+	out := make([]*memqlv1.AuthoringConstruct, 0, len(promoted))
+	for _, c := range promoted {
+		out = append(out, &memqlv1.AuthoringConstruct{Kind: c.Kind, Name: c.Name})
+	}
+	return out
+}
+
 // requireAuthoringRole resolves the caller's access and enforces the authoring
 // gate (owner or developer -- the same auth.CanAuthor bar the MCP `define` op
 // uses). Returns allowed=true to proceed. When allowed=false the denial has

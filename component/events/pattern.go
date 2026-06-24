@@ -202,3 +202,32 @@ func ConceptFromCacheInvalidateTopic(topic string) (string, bool) {
 	}
 	return concept, true
 }
+
+// TopicAuthoringPromoteForBundle returns the dedicated authoring-promote topic
+// for the given bundle id (issue znasllc-io/memql-cockpit#232). Example:
+// TopicAuthoringPromoteForBundle("mcp-promote-abc") returns
+// "authoring.promote.mcp-promote-abc". This is the separate broadcast channel
+// ONLY the authoring-promote subscriber consumes; a single
+// `authoring.promote.*` routing rule forwards it to every node, so a durable
+// promote re-hydrates the bundle on every replica with no per-construct routing
+// rule. Bundle ids carry hyphen + short-id segments, not dots, so the whole
+// remainder after the prefix is the bundle id.
+func TopicAuthoringPromoteForBundle(bundleId string) string {
+	return BuildTopicWithConcept(TopicAuthoringPromote, bundleId)
+}
+
+// BundleFromAuthoringPromoteTopic extracts the bundle id from an
+// authoring.promote.{bundleId} topic, the inverse of
+// TopicAuthoringPromoteForBundle. Returns the bundle id and true on a match; ""
+// and false otherwise.
+func BundleFromAuthoringPromoteTopic(topic string) (string, bool) {
+	prefix := TopicAuthoringPromote + "."
+	if !strings.HasPrefix(topic, prefix) {
+		return "", false
+	}
+	bundleId := strings.TrimSpace(topic[len(prefix):])
+	if bundleId == "" {
+		return "", false
+	}
+	return bundleId, true
+}
