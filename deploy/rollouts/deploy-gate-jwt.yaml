@@ -1,12 +1,15 @@
 # deploy-gate service_account JWT provisioning (deployment-v2 Phase 3, #691/#701).
 #
-# The deploy-gate AnalysisTemplate authenticates with a short-lived
-# class="service_account" JWT delivered as the `deploy-gate-jwt` Secret (key
-# MEMQL_SVC_JWT). The JWT TTL is 1h (no refresh path), so a CronJob re-mints it
-# ahead of expiry. Minting requires the identity signing key, which only the
-# identity binary holds -- so the CronJob execs `service-account-token mint`
-# inside the live identity pod (autoloads the genesis envelope per #751) and
-# writes the result back to the Secret.
+# The deploy-gate AnalysisTemplate self-mints a fresh service_account JWT at gate
+# time (#2179, see analysis/deploy-gate.yaml) and uses the `deploy-gate-jwt`
+# Secret (key MEMQL_SVC_JWT) only as a FALLBACK. This CronJob keeps that fallback
+# warm: it re-mints the static token with a wide 6h TTL on a */45m cadence, so a
+# missed/failed mint can't expire it before the next run (the tight 1h TTL +
+# stale secret was the #2179 root cause that aborted every bff rollout on the
+# gate). Minting requires the identity signing key, which only the identity
+# binary holds -- so the CronJob execs `service-account-token mint` inside the
+# live identity pod (autoloads the genesis envelope per #751) and writes the
+# result back to the Secret.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -60,7 +63,10 @@ metadata:
   labels:
     app.kubernetes.io/part-of: memql
 spec:
-  # 1h TTL -> re-mint every 45m so a fresh token is always in the Secret.
+  # 6h TTL -> re-mint every 45m so the fallback static token always has a wide
+  # expiry margin (a missed/failed mint can't strand the gate). The gate's own
+  # self-mint init container (#2179) is the primary credential; this keeps the
+  # fallback fresh.
   schedule: "*/45 * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 2
@@ -91,7 +97,7 @@ spec:
                   echo "minting via $pod"
                   token="$(kubectl -n memql exec "$pod" -- \
                     /app/memql service-account-token mint \
-                      --label deploy-gate-staging --subject system:deploy-gate)"
+                      --label deploy-gate-staging --subject system:deploy-gate --ttl 6h)"
                   case "$token" in
                     eyJ*) : ;;  # looks like a JWT
                     *) echo "mint did not return a JWT"; exit 1 ;;

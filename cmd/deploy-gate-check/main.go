@@ -58,7 +58,8 @@ const defaultGateQuery = "queryActivePartitionIds({})"
 
 func main() {
 	addr := flag.String("addr", "bff:50051", "node gRPC address (host:port) to run the authenticated query against")
-	jwt := flag.String("jwt", "", "class=service_account JWT bearer (#691). Falls back to $MEMQL_SVC_JWT.")
+	jwt := flag.String("jwt", "", "class=service_account JWT bearer (#691). Highest precedence; falls back to --jwt-file then $MEMQL_SVC_JWT.")
+	jwtFile := flag.String("jwt-file", "", "path to a file holding a class=service_account JWT (or $MEMQL_SVC_JWT_FILE). Read only if it exists AND is non-empty; a missing/empty file falls through to $MEMQL_SVC_JWT. Lets a best-effort init container mint a FRESH token at gate time while the static secret stays a fallback (#2179).")
 	query := flag.String("query", defaultGateQuery, "MemQL query to run. Must be a well-formed query: the gate proves the authenticated BFF->engine path, and a parse error would emit a spurious `memql query execution failed` ERROR on the node every gate run (znasllc-io/memql#1130). queryActivePartitionIds is the id-only projection of active v1:cognition:space rows (dsl/cognition/queries.memql) -- a real cognition-concept read that also exercises the BFF->cognition fan.")
 	readyzURL := flag.String("readyz-url", "", "override the /readyz URL (default: derive http://<addr-host>:8085/readyz)")
 	fanAgent := flag.Bool("fan-agent", false, "reserved: the ExecuteQuery already fans BFF->cognition for cognition-concept reads; logged for parity with the AnalysisTemplate")
@@ -66,10 +67,7 @@ func main() {
 	useTLS := flag.Bool("tls", false, "dial gRPC over TLS (default: insecure, matching the in-cluster gateway)")
 	flag.Parse()
 
-	token := strings.TrimSpace(*jwt)
-	if token == "" {
-		token = strings.TrimSpace(os.Getenv("MEMQL_SVC_JWT"))
-	}
+	token := resolveToken(*jwt, *jwtFile, os.Getenv("MEMQL_SVC_JWT_FILE"), os.Getenv("MEMQL_SVC_JWT"))
 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
@@ -88,6 +86,39 @@ func main() {
 	fmt.Println("deploy-gate-check: PASS")
 }
 
+// resolveToken resolves the service_account JWT bearer from up to three sources,
+// first non-empty wins (#2179):
+//
+//  1. flagJWT     -- the --jwt flag value (explicit override; highest priority).
+//  2. file        -- the file named by flagJWTFile (--jwt-file) or, if that is
+//     empty, envFile ($MEMQL_SVC_JWT_FILE). The file is used ONLY if it exists
+//     AND its trimmed contents are non-empty. A missing file, an unreadable
+//     file, or an empty/whitespace-only file is NOT an error -- it falls through
+//     to the next source. This lets a best-effort init container mint a FRESH
+//     token at gate time (writing e.g. /gate/svc-jwt); if the mint fails the
+//     file is absent and the gate transparently falls back to the static secret.
+//  3. envJWT      -- $MEMQL_SVC_JWT (the static, CronJob-minted secret fallback).
+//
+// All sources are trimmed (the mint writes a trailing newline). Returns "" when
+// nothing resolves; the caller's existing "no JWT" error path then fires.
+func resolveToken(flagJWT, flagJWTFile, envFile, envJWT string) string {
+	if t := strings.TrimSpace(flagJWT); t != "" {
+		return t
+	}
+	path := strings.TrimSpace(flagJWTFile)
+	if path == "" {
+		path = strings.TrimSpace(envFile)
+	}
+	if path != "" {
+		if b, err := os.ReadFile(path); err == nil {
+			if t := strings.TrimSpace(string(b)); t != "" {
+				return t
+			}
+		}
+	}
+	return strings.TrimSpace(envJWT)
+}
+
 type gateConfig struct {
 	addr      string
 	token     string
@@ -104,7 +135,7 @@ func run(ctx context.Context, c gateConfig) error {
 	fmt.Println("deploy-gate-check: 1/2 readiness OK (/readyz ready)")
 
 	if c.token == "" {
-		return errors.New("authenticated query: no JWT (set --jwt or $MEMQL_SVC_JWT)")
+		return errors.New("authenticated query: no JWT (set --jwt, --jwt-file/$MEMQL_SVC_JWT_FILE, or $MEMQL_SVC_JWT)")
 	}
 	if err := checkAuthQueryWithRetry(ctx, c); err != nil {
 		return fmt.Errorf("authenticated query: %w", err)
