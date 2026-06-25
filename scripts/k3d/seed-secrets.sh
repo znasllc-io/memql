@@ -162,21 +162,45 @@ function seed_memql_secrets() {
 #=============================================================================
 
 function seed_livekit_secrets() {
-    # For local dev, use a fixed API key/secret pair that matches the
-    # livekit.yaml config. The livekit server reads its keys from
-    # LIVEKIT_KEYS="<key>:<secret>" env (set by this secret via envFrom).
-    # These values are non-production dev placeholders.
-    local lk_key="${LIVEKIT_API_KEY:-local-livekit-key}"
-    local lk_secret="${LIVEKIT_API_SECRET:-local-livekit-secret-dev-placeholder}"
+    # LOCAL DEV -> LIVEKIT CLOUD (Epic #2184 / #2186).
+    #
+    # The local dev loop uses a LiveKit Cloud project as the SIP + WebRTC
+    # media plane (no self-hosted livekit-server / livekit/sip locally; the
+    # local overlay removes those workloads). So the API key/secret AND the
+    # URL must point at the operator's LiveKit Cloud project, sourced from the
+    # environment -- NEVER hard-coded. Staging/prod stay self-hosted and pull
+    # these from ESO/Key Vault instead (the no-cloud-leak guard,
+    # scripts/deploy/livekit_cloud_guard_test.go, keeps cloud out of those
+    # overlays).
+    #
+    # Both credential pairs must point at the SAME cloud project (verified on
+    # main): the voice-agent reads the bare LIVEKIT_* names; telephony + the
+    # voice/bff token-minters read the MEMQL_POLYPHON_LIVEKIT_* names.
+    local lk_url="${LIVEKIT_URL:-${MEMQL_POLYPHON_LIVEKIT_URL:-}}"
+    local lk_public_url="${MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL:-$lk_url}"
+    local lk_key="${LIVEKIT_API_KEY:-${MEMQL_POLYPHON_LIVEKIT_API_KEY:-}}"
+    local lk_secret="${LIVEKIT_API_SECRET:-${MEMQL_POLYPHON_LIVEKIT_API_SECRET:-}}"
 
-    info "seeding livekit-secrets (LiveKit API credentials for local livekit)..."
+    if [ -z "$lk_url" ] || [ -z "$lk_key" ] || [ -z "$lk_secret" ]; then
+        warn "LiveKit Cloud project not fully configured for local dev."
+        warn "  voice + telephony need a LiveKit Cloud project. Set before 'make up':"
+        warn "    export LIVEKIT_URL=wss://<your-project>.livekit.cloud"
+        warn "    export LIVEKIT_API_KEY=<cloud-api-key>"
+        warn "    export LIVEKIT_API_SECRET=<cloud-api-secret>"
+        warn "  Seeding livekit-secrets with whatever is set; voice/telephony"
+        warn "  pods stay degraded (LiveKit not configured) until provided."
+    fi
+
+    info "seeding livekit-secrets (LiveKit Cloud credentials for local dev)..."
     kubectl create secret generic livekit-secrets \
         --namespace="$NAMESPACE" \
+        --from-literal="MEMQL_POLYPHON_LIVEKIT_URL=$lk_url" \
+        --from-literal="MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL=$lk_public_url" \
         --from-literal="MEMQL_POLYPHON_LIVEKIT_API_KEY=$lk_key" \
         --from-literal="MEMQL_POLYPHON_LIVEKIT_API_SECRET=$lk_secret" \
+        --from-literal="LIVEKIT_URL=$lk_url" \
         --from-literal="LIVEKIT_API_KEY=$lk_key" \
         --from-literal="LIVEKIT_API_SECRET=$lk_secret" \
-        --from-literal="LIVEKIT_KEYS=${lk_key}:${lk_secret}" \
         --dry-run=client -o yaml \
         | kubectl apply -f -
     info "livekit-secrets seeded."
@@ -223,8 +247,11 @@ Environment:
     MEMQL_MASTER_KEY       Master key for genesis decryption.
     MEMQL_LOCAL_DB_USER    Postgres user (default: memql).
     MEMQL_LOCAL_DB_PASSWORD Postgres password (default: memql_dev).
-    LIVEKIT_API_KEY        LiveKit API key (default: local-livekit-key).
-    LIVEKIT_API_SECRET     LiveKit API secret (default: placeholder).
+    LIVEKIT_URL            LiveKit Cloud project URL for local dev
+                           (wss://<project>.livekit.cloud). Required for
+                           local voice/telephony (Epic #2184 / #2186).
+    LIVEKIT_API_KEY        LiveKit Cloud API key.
+    LIVEKIT_API_SECRET     LiveKit Cloud API secret.
 EOF
 }
 
