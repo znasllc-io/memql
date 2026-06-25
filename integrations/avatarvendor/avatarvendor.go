@@ -36,16 +36,18 @@ import (
 // bounded so a wedged vendor can't hang session bring-up. This is the DEFAULT;
 // override with MEMQL_AVATAR_REQUEST_TIMEOUT_SECONDS via avatarRequestTimeout().
 //
-// 30s (was 15s): Simli's POST /integrations/livekit/agents -- which spins up an
-// avatar agent and joins the LiveKit room before responding -- routinely exceeds
-// 15s when the room is reached over a dev ngrok tunnel (memql#1274). On a real
-// public LiveKit (staging/prod) it returns fast, so the higher cap only matters
-// on the slow local path; a wedged vendor is still bounded.
+// 30s (was 15s): Simli's POST /integrations/livekit/agents spins up an avatar
+// agent and joins the LiveKit room *before* responding, so the call's latency
+// is dominated by a cold vendor-side agent bring-up + room join, not the REST
+// round-trip. That cold path routinely exceeds 15s even against a fast public
+// LiveKit (LiveKit Cloud for local dev, self-hosted for staging/prod), so 30s
+// is a generous-but-bounded ceiling rather than a latency floor: a warm call
+// still returns immediately, while a wedged vendor stays bounded (memql#1274).
 const AvatarRequestTimeout = 30 * time.Second
 
 // avatarRequestTimeout returns the per-call REST timeout: the env override
 // MEMQL_AVATAR_REQUEST_TIMEOUT_SECONDS (1..300s) when set + valid, else
-// AvatarRequestTimeout. Lets a slow local tunnel be tuned without a rebuild.
+// AvatarRequestTimeout. Lets an outlier vendor be tuned without a rebuild.
 func avatarRequestTimeout() time.Duration {
 	if s := strings.TrimSpace(os.Getenv("MEMQL_AVATAR_REQUEST_TIMEOUT_SECONDS")); s != "" {
 		if n, err := strconv.Atoi(s); err == nil && n >= 1 && n <= 300 {
