@@ -158,6 +158,120 @@ patches:
       metadata:
         name: livekit
   # ---------------------------------------------------------------------------
+  # LiveKit Cloud for local dev (Epic #2184 / #2186)
+  # ---------------------------------------------------------------------------
+  # The local dev loop uses a LiveKit Cloud project as the SIP + WebRTC media
+  # plane -- there is NO self-hosted livekit-server / livekit/sip / coordination
+  # Redis locally (Cloud's TURN handles NAT, so no coturn/ngrok either). Remove
+  # those base workloads, then repoint the LiveKit URL env on voice / voice-agent
+  # / bff at the cloud project. The URL + key/secret are sourced from the
+  # livekit-secrets Secret that seed-secrets.sh fills from the operator's
+  # environment (LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET) -- NEVER
+  # hard-coded. Staging/prod stay self-hosted and pull these from ESO/Key Vault;
+  # the no-cloud-leak guard (scripts/deploy/livekit_cloud_guard_test.go) fails
+  # CI if a *.livekit.cloud reference ever lands in a staging/prod overlay.
+  #
+  # Remove the self-hosted media-plane workloads (livekit-server + SIP edge +
+  # the LiveKit<->SIP coordination Redis).
+  - target: { kind: Deployment, name: livekit }
+    patch: |
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: livekit }
+  - target: { kind: Service, name: livekit }
+    patch: |
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata: { name: livekit }
+  - target: { kind: Service, name: livekit-rtc }
+    patch: |
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata: { name: livekit-rtc }
+  - target: { kind: ConfigMap, name: livekit-config }
+    patch: |
+      $patch: delete
+      apiVersion: v1
+      kind: ConfigMap
+      metadata: { name: livekit-config }
+  - target: { kind: Deployment, name: livekit-sip }
+    patch: |
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: livekit-sip }
+  - target: { kind: Service, name: livekit-sip }
+    patch: |
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata: { name: livekit-sip }
+  - target: { kind: ConfigMap, name: livekit-sip-config }
+    patch: |
+      $patch: delete
+      apiVersion: v1
+      kind: ConfigMap
+      metadata: { name: livekit-sip-config }
+  - target: { kind: Deployment, name: livekit-redis }
+    patch: |
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: livekit-redis }
+  - target: { kind: Service, name: livekit-redis }
+    patch: |
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata: { name: livekit-redis }
+  # Repoint the LiveKit URL env at the cloud project (secret-sourced). The
+  # `value: null` strategic-merge directive deletes the base's hard-coded
+  # ws://livekit:7880 so valueFrom is the only source. (bff's LiveKit URL +
+  # public URL are repointed in patches/bff-local-config.yaml.)
+  - target: { kind: Deployment, name: voice-agent }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: voice-agent, namespace: memql }
+      spec:
+        template:
+          spec:
+            containers:
+              - name: voice-agent
+                env:
+                  - name: LIVEKIT_URL
+                    value: null
+                    valueFrom:
+                      secretKeyRef: { name: livekit-secrets, key: LIVEKIT_URL }
+                  # The avatar vendor (cloud) joins the room over a publicly-
+                  # reachable URL -- the cloud project URL on the local path.
+                  - name: LIVEKIT_PUBLIC_URL
+                    value: null
+                    valueFrom:
+                      secretKeyRef: { name: livekit-secrets, key: MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL }
+  - target: { kind: Deployment, name: voice }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: voice, namespace: memql }
+      spec:
+        template:
+          spec:
+            containers:
+              - name: voice
+                env:
+                  - name: MEMQL_POLYPHON_LIVEKIT_URL
+                    value: null
+                    valueFrom:
+                      secretKeyRef: { name: livekit-secrets, key: MEMQL_POLYPHON_LIVEKIT_URL }
+                  - name: MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL
+                    value: null
+                    valueFrom:
+                      secretKeyRef: { name: livekit-secrets, key: MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL }
+  # ---------------------------------------------------------------------------
   # Replicas: 1 per app node (multi-node is a separate opt-in via #2067)
   # ---------------------------------------------------------------------------
   - target:

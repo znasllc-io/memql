@@ -14,6 +14,21 @@ spec:
             # Identity issuer: localhost port-forward.
             - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
               value: "http://localhost:8085"
-            # LiveKit: local server's public WebSocket URL (via k3d port-forward).
+            # LiveKit Cloud for local dev (Epic #2184 / #2186): the bff mints
+            # room tokens against the cloud project and hands browsers its
+            # public URL. Both come from livekit-secrets (seed-secrets.sh fills
+            # them from the operator's LIVEKIT_URL env -- never hard-coded).
+            # `value: null` deletes the base's ws://livekit:7880 so valueFrom
+            # is the only source.
+            - name: MEMQL_POLYPHON_LIVEKIT_URL
+              value: null
+              valueFrom:
+                secretKeyRef:
+                  name: livekit-secrets
+                  key: MEMQL_POLYPHON_LIVEKIT_URL
             - name: MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL
-              value: "ws://localhost:7880"
+              value: null
+              valueFrom:
+                secretKeyRef:
+                  name: livekit-secrets
+                  key: MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL
