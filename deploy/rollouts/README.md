@@ -43,11 +43,13 @@ whose entrypoint is **`deploy-gate-check`** (`cmd/deploy-gate-check`, built by
 no shell — distroless static):
 
 - **`/readyz`** over Go `net/http` (the #657 schema assertion);
-- the **authenticated query** over `MemqlService.Stream` gRPC with
-  `Authorization: Bearer $MEMQL_SVC_JWT` (the `service_account` JWT, #691),
-  mirroring `component/grpc/gateway.go`. It passes when the BFF accepts the token
-  and the engine answers; a gRPC `Unauthenticated`/`PermissionDenied` (auth
-  rejected) or `Unavailable` (backend down) is a FAIL.
+- the **authenticated query** over `MemqlService.Stream` gRPC with the
+  `service_account` JWT (#691), mirroring `component/grpc/gateway.go`. It passes
+  when the BFF accepts the token and the engine answers; a gRPC
+  `Unauthenticated`/`PermissionDenied` (auth rejected) or `Unavailable` (backend
+  down) is a FAIL. Token resolution (#2179): `--jwt-file`/`$MEMQL_SVC_JWT_FILE`
+  (the fresh token written by the `mint` init container, if present) >
+  `$MEMQL_SVC_JWT` (the static `deploy-gate-jwt` Secret fallback).
 
 Build:
 ```bash
@@ -58,20 +60,28 @@ CI builds the image on every change (`.github/workflows/deploy-gate-image.yml`);
 the digest-emitting ACR **push** is wired with the per-repo image pipeline
 (release lockfile, #702) once ACR OIDC is set up.
 
-## Provisioning the gate JWT (#691)
+## Provisioning the gate JWT (#691 / #2179)
 
-The gate authenticates with a short-lived `class="service_account"` JWT
-delivered as the `deploy-gate-jwt` Secret:
+The gate **self-mints** a fresh `class="service_account"` JWT at gate time: a
+best-effort `mint` init container (`analysis/deploy-gate.yaml`) execs
+`service-account-token mint --ttl 3h` in the running identity pod and writes the
+token to `/gate/svc-jwt`, which `deploy-gate-check` reads via
+`MEMQL_SVC_JWT_FILE`. On any mint failure the init container exits 0 without
+writing the file, and the gate falls back to the static `deploy-gate-jwt` Secret
+(`MEMQL_SVC_JWT`). So the gate never depends on the static secret being fresh.
+
+The static fallback Secret is kept warm by the `deploy-gate-jwt-mint` CronJob
+(`deploy-gate-jwt.yaml`), which re-mints every 45m with a wide **6h** TTL. To
+seed/refresh it by hand:
 
 ```bash
 TOKEN="$(kubectl -n memql exec deploy/identity -- \
-          memql service-account-token mint --label deploy-gate-staging)"
+          memql service-account-token mint --label deploy-gate-staging --ttl 6h)"
 kubectl -n memql create secret generic deploy-gate-jwt \
   --from-literal=MEMQL_SVC_JWT="$TOKEN" --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-Wire an identity-side `CronJob` to re-mint on the 1h TTL cadence. Full design:
-`docs/public/operate/auth/service-account-jwt.md`.
+Full design: `docs/public/operate/auth/service-account-jwt.md`.
 
 ## Convert BFF → blue/green (SUPERVISED cutover)
 

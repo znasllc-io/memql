@@ -58,14 +58,72 @@ spec:
             template:
               spec:
                 restartPolicy: Never
+                # Self-mint a FRESH service_account JWT at gate time (#2179). The
+                # `mint` init container (below) best-effort execs the mint inside
+                # the running identity pod and writes the token to /gate/svc-jwt;
+                # the `gate` container reads it via MEMQL_SVC_JWT_FILE. If the mint
+                # fails for ANY reason (no identity pod, mint error, non-JWT output)
+                # the init container exits 0 WITHOUT writing the file, and the gate
+                # transparently falls back to the static MEMQL_SVC_JWT secret env
+                # (the CronJob-minted deploy-gate-jwt Secret). So this is strictly
+                # safer than the static-only path: best case a fresh mint, worst
+                # case identical to before. The static secret going stale
+                # (minted, then rejected Unauthenticated) was the #2179 root cause
+                # that aborted every bff rollout on the gate.
+                serviceAccountName: deploy-gate-jwt-minter
+                volumes:
+                  - name: gate-token
+                    emptyDir: {}
+                initContainers:
+                  - name: mint
+                    # Same pinned kubectl+shell image as the deploy-gate-jwt
+                    # CronJob mint step (alpine/k8s; rancher/kubectl is distroless,
+                    # no /bin/sh). Mirrors that script's structure + identity-pod
+                    # selector. BEST-EFFORT: never `exit 1` on a mint failure --
+                    # always `exit 0` so the gate falls back to the static secret.
+                    image: alpine/k8s@sha256:dfe8c7a06c41d0b6e8757da99531f8f302e9a2687fa0155af4c4087df585c9c8
+                    command: ["/bin/sh", "-c"]
+                    args:
+                      - |
+                        set -u
+                        pod="$(kubectl -n {{args.namespace}} get pod -l app.kubernetes.io/name=identity \
+                          --field-selector=status.phase=Running \
+                          -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+                        if [ -z "$pod" ]; then
+                          echo "deploy-gate mint: no running identity pod; falling back to static MEMQL_SVC_JWT secret"
+                          exit 0
+                        fi
+                        echo "deploy-gate mint: minting a fresh service_account JWT via $pod"
+                        token="$(kubectl -n {{args.namespace}} exec "$pod" -- \
+                          /app/memql service-account-token mint \
+                            --label deploy-gate-staging --subject system:deploy-gate --ttl 3h 2>/dev/null || true)"
+                        case "$token" in
+                          eyJ*)
+                            printf '%s' "$token" > /gate/svc-jwt
+                            echo "deploy-gate mint: fresh token written to /gate/svc-jwt"
+                            ;;
+                          *)
+                            echo "deploy-gate mint: mint did not return a JWT; falling back to static MEMQL_SVC_JWT secret"
+                            ;;
+                        esac
+                        exit 0
+                    volumeMounts:
+                      - name: gate-token
+                        mountPath: /gate
                 containers:
                   - name: gate
                     # deploy-gate-check is a distroless static binary (no /bin/sh,
                     # no curl in the image). It runs BOTH gate legs in-process:
                     #   1. /readyz schema assertion (#657) -- derived from --addr
                     #      host as http://<host>:8085/readyz;
-                    #   2. the authenticated service_account query over gRPC (#691)
-                    #      using $MEMQL_SVC_JWT.
+                    #   2. the authenticated service_account query over gRPC (#691).
+                    #      Token resolution (#2179): MEMQL_SVC_JWT_FILE (the fresh
+                    #      self-minted token at /gate/svc-jwt, if the init container
+                    #      wrote it) > MEMQL_SVC_JWT (the static CronJob-minted
+                    #      secret fallback). A missing/empty file falls through to
+                    #      the secret, so the gate never depends on the static
+                    #      secret being fresh -- only on at least one source being
+                    #      valid.
                     # A non-200/not-ready /readyz, an auth rejection
                     # (Unauthenticated/PermissionDenied), or a backend Unavailable
                     # exits non-zero -> the metric fails -> the Rollout auto-aborts
@@ -74,14 +132,21 @@ spec:
                     # the #712 false-negative that aborted the first cutover).
                     image: acrmemql.azurecr.io/deploy-gate@sha256:4a65bd3dcf9e2f25092617e76667b5f40bf1a122e8dd58a6973322de241189c7
                     env:
-                      # The machine identity (#691): short-lived class=
-                      # service_account JWT minted into this Secret by the
-                      # deploy-gate-jwt CronJob. deploy-gate-check reads it here.
+                      # Preferred: the fresh self-minted token written by the
+                      # `mint` init container at gate time (#2179).
+                      - name: MEMQL_SVC_JWT_FILE
+                        value: /gate/svc-jwt
+                      # Fallback: the static class=service_account JWT minted into
+                      # this Secret by the deploy-gate-jwt CronJob. Used only when
+                      # the self-mint file is absent/empty.
                       - name: MEMQL_SVC_JWT
                         valueFrom:
                           secretKeyRef:
                             name: deploy-gate-jwt
                             key: MEMQL_SVC_JWT
+                    volumeMounts:
+                      - name: gate-token
+                        mountPath: /gate
                     args:
                       - "--addr={{args.service}}:50051"
                       # Must be a well-formed MemQL query: a parse error makes the

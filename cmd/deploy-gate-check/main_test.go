@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,6 +12,53 @@ import (
 
 	"github.com/znasllc-io/memql/component/language/parser"
 )
+
+// TestResolveToken pins the #2179 token-resolution precedence: --jwt flag >
+// --jwt-file / $MEMQL_SVC_JWT_FILE (only if the file exists AND is non-empty) >
+// $MEMQL_SVC_JWT. A missing or empty file is NOT an error -- it falls through to
+// the next source, so a best-effort self-mint init container that fails to write
+// the file leaves the gate on the static-secret fallback (strictly safer than
+// today). All sources are trimmed (the mint writes a trailing newline).
+func TestResolveToken(t *testing.T) {
+	dir := t.TempDir()
+
+	write := func(name, contents string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(contents), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		return p
+	}
+
+	fileWithToken := write("svc-jwt", "eyJfile\n")  // trailing newline trimmed
+	emptyFile := write("empty", "   \n")            // whitespace-only -> falls through
+	missing := filepath.Join(dir, "does-not-exist") // missing -> falls through
+
+	cases := []struct {
+		name                                  string
+		flagJWT, flagJWTFile, envFile, envJWT string
+		want                                  string
+	}{
+		{"flag-wins-over-everything", "eyJflag", fileWithToken, fileWithToken, "eyJenv", "eyJflag"},
+		{"flag-is-trimmed", "  eyJflag  ", "", "", "eyJenv", "eyJflag"},
+		{"file-flag-over-env", "", fileWithToken, "", "eyJenv", "eyJfile"},
+		{"file-env-over-secret-env", "", "", fileWithToken, "eyJenv", "eyJfile"},
+		{"flag-jwt-file-beats-env-jwt-file", "", fileWithToken, missing, "eyJenv", "eyJfile"},
+		{"missing-file-falls-through-to-env", "", missing, "", "eyJenv", "eyJenv"},
+		{"empty-file-falls-through-to-env", "", emptyFile, "", "eyJenv", "eyJenv"},
+		{"no-file-configured-uses-env", "", "", "", "eyJenv", "eyJenv"},
+		{"env-jwt-is-trimmed", "", "", "", "  eyJenv\n", "eyJenv"},
+		{"nothing-resolves-empty", "", missing, "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveToken(tc.flagJWT, tc.flagJWTFile, tc.envFile, tc.envJWT); got != tc.want {
+				t.Fatalf("resolveToken(%q,%q,%q,%q) = %q, want %q",
+					tc.flagJWT, tc.flagJWTFile, tc.envFile, tc.envJWT, got, tc.want)
+			}
+		})
+	}
+}
 
 // TestDefaultGateQueryParses is the regression guard for znasllc-io/memql#1130:
 // the deploy gate's default query is sent to the engine on every gate run, so it

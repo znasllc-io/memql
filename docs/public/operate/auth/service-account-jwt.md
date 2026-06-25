@@ -175,8 +175,12 @@ runs. The allowlist — not the actor role — is the primary blast-radius bound
 
 ```
    Argo Rollout step ──► AnalysisTemplate (Job, IN-CLUSTER)
-        env: MEMQL_SVC_JWT  ◄── k8s Secret (minted by an identity-side Job)
+        initContainer `mint` ──► best-effort self-mint a FRESH token (#2179)
+            execs `service-account-token mint` in the identity pod,
+            writes /gate/svc-jwt; on ANY failure exits 0 (no file)
         │
+        ▼  token resolution (#2179):  MEMQL_SVC_JWT_FILE (/gate/svc-jwt, fresh)
+        │                              > MEMQL_SVC_JWT (static Secret fallback)
         ▼  authenticated WS/gRPC, IN-CLUSTER (no public host, no firewall dep)
    bff:50058 (MemqlService.Stream)
         │  serviceAccount interceptor admits class=service_account, pins surface
@@ -190,20 +194,39 @@ Because the check runs **inside the mesh** against service DNS, it is immune to
 the public-host routing (#680) and rolling-convergence (#682) failure modes the
 old shell smoke hit, and needs no firewall exception.
 
+**Self-minting gate + static-secret fallback (#2179).** The gate Job no longer
+depends on the static `deploy-gate-jwt` Secret being fresh. A best-effort `mint`
+init container finds the running identity pod and execs
+`service-account-token mint --ttl 3h`, writing the fresh token to a shared
+`emptyDir` at `/gate/svc-jwt`; `deploy-gate-check` reads it via
+`MEMQL_SVC_JWT_FILE` (precedence: `--jwt` flag > `--jwt-file`/`$MEMQL_SVC_JWT_FILE`
+file, if present and non-empty > `$MEMQL_SVC_JWT`). On **any** mint failure (no
+identity pod, mint error, non-JWT output) the init container exits 0 without
+writing the file, and the gate falls back to the static `MEMQL_SVC_JWT` secret.
+This is strictly safer than the static-only path: best case a fresh mint, worst
+case identical to before. The init container reuses the
+`deploy-gate-jwt-minter` ServiceAccount's RBAC (get/list pods, create pods/exec,
+read the Secret). The static secret going stale — minted, then rejected
+`Unauthenticated` — was the #2179 root cause that aborted every bff rollout on
+the gate.
+
 ## Provisioning into the cluster
 
-Deliver the JWT to the gate as a k8s Secret (consumed as `MEMQL_SVC_JWT`):
+The gate self-mints a fresh token at gate time (#2179, above); the static
+`deploy-gate-jwt` Secret (consumed as `MEMQL_SVC_JWT`) is the **fallback** for
+when the self-mint can't run. Seed/refresh it the same way:
 
 ```bash
 TOKEN="$(kubectl -n memql exec deploy/identity -- \
-          memql service-account-token mint --label deploy-gate-staging)"
+          memql service-account-token mint --label deploy-gate-staging --ttl 6h)"
 kubectl -n memql create secret generic deploy-gate-jwt \
   --from-literal=MEMQL_SVC_JWT="$TOKEN" --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-A short-lived identity-side `CronJob` re-mints on the TTL cadence (Phase 3
-wiring); until then re-run the mint before a deploy. The token never lives in
-git and never leaves the cluster.
+The identity-side `deploy-gate-jwt-mint` `CronJob`
+(`deploy/rollouts/deploy-gate-jwt.yaml`) re-mints the fallback every 45m with a
+wide **6h** TTL, so a missed/failed mint can't strand the gate before the next
+run. The token never lives in git and never leaves the cluster.
 
 ## Rotation & revocation
 
