@@ -8,6 +8,20 @@ updates:
     labels:
       - "dependencies"
       - "go"
+    ignore:
+      # github.com/livekit/protocol is version-coupled to server-sdk-go: a
+      # protocol minor/major bump ahead of server-sdk-go breaks the build
+      # (e.g. 1.47.0+ dropped the Scenario_* types that server-sdk-go v2.16.6
+      # still imports — see issue #2181). protocol must only move in lockstep
+      # with a server-sdk-go release that supports it, which a server-sdk-go
+      # bump pulls in transitively. So block standalone protocol minor/major
+      # bumps here; patch updates within the current line still flow.
+      # Remove this entry once livekit cuts a tagged server-sdk-go that
+      # builds against protocol >= 1.48.x and bump both together.
+      - dependency-name: "github.com/livekit/protocol"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
 
   - package-ecosystem: "github-actions"
     directory: "/"
