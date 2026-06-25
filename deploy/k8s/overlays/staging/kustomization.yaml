@@ -45,23 +45,11 @@ patches:
         value:
           name: NODE_IP
           value: "20.246.247.180"
-  # E2.5a (#2115): owner-gated automation-driven deploy cutover on staging.
-  # Flips the identity node's gRPC Deploy/RollbackDeployment to the thinned
-  # kick-off path and anchors the deploy pack so its lifecycle automations
-  # drive promote + terminal. SAFE because the identity image pinned below is
-  # 0.11.2 (built from main >= #2159 + #2161 flag handling + #2168, which makes
-  # an automation-driven rollback land in rolled_back, matching the Go path).
-  # Revert this patch to restore the synchronous Go apply. See
-  # docs/public/operate/deployment-console.md.
-  - target:
-      kind: Deployment
-      name: identity
-    patch: |
-      - op: add
-        path: /spec/template/spec/containers/0/env/-
-        value:
-          name: MEMQL_DEPLOY_AUTOMATION_DRIVEN
-          value: "true"
+  # NOTE: the automation-driven deploy cutover (#2115) is now the ONLY path --
+  # #2115 step 6 retired the synchronous Go apply and dropped the
+  # MEMQL_DEPLOY_AUTOMATION_DRIVEN flag, so the deploy pack is always anchored
+  # on the identity binary and Deploy/RollbackDeployment always kick off the
+  # lifecycle automations. No env patch is needed here anymore.
 
 images:
   - name: acrmemql.azurecr.io/memql-identity

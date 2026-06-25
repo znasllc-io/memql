@@ -386,12 +386,6 @@ variables:
     optional: true
     description: "Repository root the deploy-control executor is anchored at; defaults to the process working directory."
 
-  - name: MEMQL_DEPLOY_AUTOMATION_DRIVEN
-    component: engine
-    scope: node
-    optional: true
-    description: "Identity node only (#2115): when truthy, anchors the deploy pack on this binary and thins gRPC Deploy/RollbackDeployment to a kick-off so the deploy pack automations own promote + terminal; default off keeps the synchronous Go apply authoritative. Owner-gated staging cutover."
-
   - name: MEMQL_ENVIRONMENT
     component: engine
     scope: node

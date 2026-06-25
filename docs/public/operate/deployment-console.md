@@ -145,80 +145,49 @@ are owned by the deployment-v2 runbooks:
 - Disaster recovery:
   [`docs/internal/ops/dr-runbook.md`](../../internal/ops/dr-runbook.md)
 
-## Automation-driven deploy path (owner-gated cutover, #2115)
+## Automation-driven deploy path (#2115)
 
-By default the gRPC `Deploy` / `RollbackDeployment` actions run the
-**synchronous Go apply**: the deploy-control service selects the driver,
-runs `scripts/release/promote.sh` through the Executor boundary, and
-transitions the deployment record `in_progress -> succeeded | failed`
-inline, returning the promote output synchronously. This is the
-authoritative live path.
+The gRPC `Deploy` / `RollbackDeployment` actions are **automation-driven
+kick-offs**. The synchronous Go apply they once ran (select driver ->
+`scripts/release/promote.sh` -> inline `in_progress -> succeeded | failed`
+transition) was **retired in #2115 step 6**: it is no longer a code path, and
+there is no opt-in/opt-out flag.
 
-The **deploy-as-a-pack** thinning (Epic 2) ports that lifecycle into the
-DSL: the `examples/deploypack` automations `driveDeploymentInProgress`
-(E2.3) and `recordReconciledState` (E2.4) drive promote + the terminal
-transition off the deployment-record CDC edge, through the *same*
-Executor effects. Flipping the live mechanism to that path is a
-behavioral change to a privileged live path, so it is gated behind one
-env flag and rolled out by the owner, not landed by default.
+How a deploy now flows:
 
-### The flag
-
-`MEMQL_DEPLOY_AUTOMATION_DRIVEN` (identity node; default off). When
-truthy it does two coupled things, both reading the one flag so they
-can never diverge:
-
-1. **Anchors the pack on the identity binary** (`app/anchor_deploypack.go`,
-   in a bootstrap phase after genesis autoload and before the engine loads
-   its DSL tree) so the `driveDeploymentInProgress` / `recordReconciledState`
-   automations are actually loaded where the Deploy Console writes deployment
-   records. (The mount reads the flag at the same point as the thinned Deploy
-   path, so it works whether the flag is set as a k8s env var OR via the
-   genesis envelope.)
-2. **Thins `Deploy` / `RollbackDeployment`** to a kick-off: `Deploy`
-   transitions the record to `in_progress` and returns; `RollbackDeployment`
-   creates the new rollback record at `in_progress` and returns. The
-   in_progress CDC edge triggers the automation, which owns promote + the
-   terminal transition.
+1. The deploy pack (`examples/deploypack`) is **always anchored on the
+   identity binary** (`app/anchor_deploypack.go`, a bootstrap phase after
+   genesis autoload and before the engine loads its DSL tree), so the
+   `driveDeploymentInProgress` (E2.3) / `recordReconciledState` (E2.4)
+   automations are loaded where the Deploy Console writes deployment records.
+2. `Deploy` validates the record's provider and transitions it to
+   `in_progress`, then returns. `RollbackDeployment` creates the new rollback
+   record at `in_progress` (carrying the historical digest +
+   `previousDeploymentId`), then returns.
+3. The `in_progress` CDC edge triggers `driveDeploymentInProgress`, which runs
+   promote through the **same Executor effects** (`scripts/release/promote.sh`)
+   and owns the terminal transition.
 
 ### Async response contract
 
-Under the flag, the action RPCs are **async**: `ok=true` means "accepted
-and kicked off", NOT "deploy succeeded". The reply carries
-`details.async="true"` and `details.status="in_progress"` (Deploy) /
-plus `details.newDeploymentId` (rollback). The terminal status is read
-back from the deployment concept (or `GetDeploymentStatus`) once the
-automation resolves it -- the console already polls deployment status,
-so it reflects `succeeded` / `failed` when the rollout settles.
+The action RPCs are **async**: `ok=true` means "accepted and kicked off", NOT
+"deploy succeeded". The reply carries `details.async="true"` and
+`details.status="in_progress"` (Deploy) plus `details.newDeploymentId`
+(rollback). The terminal status is read back from the deployment concept (or
+`GetDeploymentStatus`) once the automation resolves it -- the console already
+polls deployment status, so it reflects `succeeded` / `failed` when the
+rollout settles.
 
 Terminal-status parity: an automation-driven **rollback** lands in
 `rolled_back` (the `driveDeploymentInProgress` automation branches on
-`previousDeploymentId`), matching the synchronous Go path exactly; a
-forward deploy lands in `succeeded` and a promote failure in `failed`
-(#2115).
+`previousDeploymentId`, #2168); a forward deploy lands in `succeeded` and a
+promote failure in `failed`.
 
-### Owner cutover runbook (steps 5-6 of #2115)
-
-The code prep (mount + thinned path + async contract + tests) is landed
-behind the default-off flag, so merging is a no-op on the live path.
-The remaining steps are owner-gated:
-
-1. **Staging:** set `MEMQL_DEPLOY_AUTOMATION_DRIVEN=true` on the staging
-   identity node (genesis envelope -> re-seal -> roll the identity pod).
-2. Run a real staging deploy through the console and confirm the
-   automation drives it end-to-end: overlay commit, Argo reconcile,
-   rollout, and the deployment-concept timeline land the same as the Go
-   path. Compare against a Go-path deploy for parity.
-3. **Retire the Go apply** (#2115 step 6) only after staging parity
-   passes: remove the now-duplicated driver selection + synchronous
-   apply + terminal transition from `deploy.go` / `driver.go`, leaving
-   the Executor effect boundary + the proto/gRPC surface intact, and
-   rewrite the synchronous `deploy_test.go` contract for the
-   automation-driven path. Then remove the flag (path becomes
-   unconditional).
-
-Until step 2 passes, the Go lifecycle stays authoritative
-(flag off everywhere).
+> The `MEMQL_DEPLOY_AUTOMATION_DRIVEN` env flag that gated this during the
+> owner-supervised staging cutover (steps 1-5) is **removed** -- the path is
+> unconditional. The cutover was verified live on staging on 2026-06-24;
+> step 6 (this retirement) lands the cleanup. The next real staging release
+> exercises the automation path end-to-end as the standing validation.
 
 ## References
 

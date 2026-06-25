@@ -1,7 +1,6 @@
 package deploycontrol
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
@@ -14,6 +13,14 @@ import (
 	"github.com/znasllc-io/memql/component/identity"
 )
 
+// Deploy / RollbackDeployment are automation-driven kick-offs (#2115 step 6
+// retired the synchronous Go apply): the RPC validates the record and
+// transitions it to in_progress (Deploy) / creates the rollback record at
+// in_progress (RollbackDeployment), then returns an async ack. The deploy
+// pack automations (examples/deploypack) own promote + the terminal
+// transition. So the RPC NEVER calls promote.sh and NEVER writes a terminal
+// status -- the only synchronous write is the in_progress kick-off edge.
+
 // fullDeploymentNode builds a v1:cluster:deployment query-result node
 // carrying every field loadDeployment reads.
 func fullDeploymentNode(fields map[string]any) *memqlv1.MemoryNode {
@@ -21,31 +28,23 @@ func fullDeploymentNode(fields map[string]any) *memqlv1.MemoryNode {
 	return &memqlv1.MemoryNode{Payload: st}
 }
 
-// --- selectDriver ---------------------------------------------------------
+// --- provider allow-list + env mapping ------------------------------------
 
-func TestSelectDriver(t *testing.T) {
-	exec := &fakeExecutor{}
-	cases := map[string]string{
-		"azure": "azure",
-		"":      "azure", // empty defaults to azure
-	}
-	for provider, want := range cases {
-		d, err := selectDriver(exec, provider)
-		if err != nil {
-			t.Errorf("selectDriver(%q) err = %v", provider, err)
-			continue
-		}
-		if d.provider() != want {
-			t.Errorf("selectDriver(%q) -> %q, want %q", provider, d.provider(), want)
+func TestValidateDeploymentProvider(t *testing.T) {
+	// azure + empty (legacy default) are accepted.
+	for _, ok := range []string{"azure", ""} {
+		if err := validateDeploymentProvider(ok); err != nil {
+			t.Errorf("validateDeploymentProvider(%q) err = %v, want nil", ok, err)
 		}
 	}
-	if _, err := selectDriver(exec, "gcp"); err == nil {
-		t.Error("selectDriver(gcp) expected error for unknown provider")
+	// An unknown provider is rejected.
+	if err := validateDeploymentProvider("gcp"); err == nil {
+		t.Error("validateDeploymentProvider(gcp) expected error for unknown provider")
 	}
-	// The retired docker-local provider is now a hard error: local
-	// clusters are operated via `make up` (k3d + ArgoCD), not the console.
-	if _, err := selectDriver(exec, "docker-local"); err == nil {
-		t.Error("selectDriver(docker-local) expected error for retired provider")
+	// The retired docker-local provider is a hard error: local clusters are
+	// operated via `make up` (k3d + ArgoCD), not the console.
+	if err := validateDeploymentProvider("docker-local"); err == nil {
+		t.Error("validateDeploymentProvider(docker-local) expected error for retired provider")
 	}
 }
 
@@ -57,24 +56,26 @@ func TestConsoleEnvFor(t *testing.T) {
 		"":            "",
 	}
 	for env, want := range cases {
-		if got := consoleEnvFor(env); got != want {
-			t.Errorf("consoleEnvFor(%q) = %q, want %q", env, got, want)
+		if got := ConsoleEnvFor(env); got != want {
+			t.Errorf("ConsoleEnvFor(%q) = %q, want %q", env, got, want)
 		}
 	}
 }
 
-// --- Deploy: driver selection by provider ---------------------------------
+// --- Deploy: automation-driven kick-off -----------------------------------
 
-// An azure-provider record deploys via promote.sh (the Argo path) and
-// transitions in_progress -> succeeded.
-func TestDeployAzureProviderUsesPromote(t *testing.T) {
+// An azure-provider record kicks off the lifecycle: the RPC transitions the
+// record to in_progress and returns an async ack. It does NOT run promote.sh
+// and does NOT write a terminal transition -- the deploy pack's
+// driveDeploymentInProgress automation owns those (#2115).
+func TestDeployKicksOffWithoutApply(t *testing.T) {
 	eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{
 		fullDeploymentNode(map[string]any{
 			"deploymentId": "d1", "status": "pending", "version": "1.2.3",
 			"imageDigest": "sha256:abc", "provider": "azure", "environment": "staging",
 		}),
 	}}
-	exec := &fakeExecutor{promoteOut: "SUCCESS: promoted"}
+	exec := &fakeExecutor{promoteOut: "SHOULD NOT RUN"}
 	svc := newTestServiceWithEngine(t, exec, &fakeAudit{}, eng)
 
 	res, err := svc.Deploy(ctxWithRole(auth.RoleOwner), &memqlv1.DeployRequest{DeploymentId: "d1"})
@@ -84,22 +85,29 @@ func TestDeployAzureProviderUsesPromote(t *testing.T) {
 	if !res.GetOk() {
 		t.Fatalf("ok = false: %q", res.GetMessage())
 	}
-	// azure driver -> promote.sh (version, staging).
-	if len(exec.promoteCalls) != 1 || exec.promoteCalls[0] != [2]string{"1.2.3", "staging"} {
-		t.Errorf("promote calls = %v, want [[1.2.3 staging]]", exec.promoteCalls)
+	// Async ack contract: accepted + kicked off, status in_progress.
+	if res.GetDetails()["async"] != "true" || res.GetDetails()["status"] != "in_progress" {
+		t.Errorf("details = %v, want async=true status=in_progress", res.GetDetails())
 	}
-	// in_progress then succeeded transitions.
+	// The RPC must NOT have driven promote.sh.
+	if len(exec.promoteCalls) != 0 {
+		t.Errorf("automation-driven Deploy must NOT call promote.sh, got %v", exec.promoteCalls)
+	}
+	// Exactly one in_progress transition; NO terminal transition.
 	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "in_progress"`); got != 1 {
 		t.Errorf("in_progress transition = %d, want 1; queries = %v", got, eng.queries)
 	}
-	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "succeeded"`); got != 1 {
-		t.Errorf("succeeded transition = %d, want 1; queries = %v", got, eng.queries)
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "succeeded"`); got != 0 {
+		t.Errorf("automation-driven Deploy must NOT write succeeded, got %d; queries = %v", got, eng.queries)
+	}
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 0 {
+		t.Errorf("automation-driven Deploy must NOT write failed, got %d; queries = %v", got, eng.queries)
 	}
 }
 
-// A docker-local record can no longer deploy: the provider is retired
-// and selectDriver rejects it, so the record transitions to failed and
-// no driver runs (local clusters use `make up`, not the deploy console).
+// A docker-local record can no longer deploy: the provider is retired and
+// validateDeploymentProvider rejects it, so the record transitions to failed
+// and no kick-off happens (local clusters use `make up`, not the console).
 func TestDeployDockerLocalProviderRejected(t *testing.T) {
 	eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{
 		fullDeploymentNode(map[string]any{
@@ -120,39 +128,13 @@ func TestDeployDockerLocalProviderRejected(t *testing.T) {
 	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 1 {
 		t.Errorf("failed transition = %d, want 1; queries = %v", got, eng.queries)
 	}
-}
-
-// A driver failure transitions the record to failed and surfaces the reason.
-func TestDeployTransitionsFailedOnDriverError(t *testing.T) {
-	eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{
-		fullDeploymentNode(map[string]any{
-			"deploymentId": "d3", "status": "pending", "version": "1.0.0",
-			"provider": "azure", "environment": "production",
-		}),
-	}}
-	exec := &fakeExecutor{promoteErr: errors.New("promote.sh exit 1")}
-	audit := &fakeAudit{}
-	svc := newTestServiceWithEngine(t, exec, audit, eng)
-
-	res, err := svc.Deploy(ctxWithRole(auth.RoleOwner), &memqlv1.DeployRequest{DeploymentId: "d3"})
-	if err != nil {
-		t.Fatalf("Deploy returned status err = %v, want ActionResult ok=false", err)
-	}
-	if res.GetOk() {
-		t.Error("ok = true, want false on driver error")
-	}
-	if !strings.Contains(res.GetMessage(), "promote.sh exit 1") {
-		t.Errorf("message = %q, want driver failure reason", res.GetMessage())
-	}
-	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 1 {
-		t.Errorf("failed transition = %d, want 1; queries = %v", got, eng.queries)
-	}
-	if len(audit.events) != 1 || audit.events[0].Outcome != identity.AuditOutcomeFailure {
-		t.Fatalf("want one failure audit event, got %+v", audit.events)
+	// A rejected provider never reaches the in_progress kick-off.
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "in_progress"`); got != 0 {
+		t.Errorf("rejected provider must NOT kick off in_progress, got %d; queries = %v", got, eng.queries)
 	}
 }
 
-// An unknown provider marks the record failed and never runs a driver.
+// An unknown provider marks the record failed and never kicks off.
 func TestDeployUnknownProviderFails(t *testing.T) {
 	eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{
 		fullDeploymentNode(map[string]any{
@@ -168,14 +150,14 @@ func TestDeployUnknownProviderFails(t *testing.T) {
 		t.Error("ok = true, want false on unknown provider")
 	}
 	if len(exec.promoteCalls) != 0 {
-		t.Error("no driver should run for an unknown provider")
+		t.Error("no promote should run for an unknown provider")
 	}
 	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 1 {
 		t.Errorf("failed transition = %d, want 1; queries = %v", got, eng.queries)
 	}
 }
 
-// A not-found deployment id surfaces a clear error, no driver run.
+// A not-found deployment id surfaces a clear error, no kick-off.
 func TestDeployNotFound(t *testing.T) {
 	eng := &fakeEngine{} // empty query result
 	exec := &fakeExecutor{}
@@ -189,7 +171,7 @@ func TestDeployNotFound(t *testing.T) {
 		t.Errorf("message = %q, want not-found notice", res.GetMessage())
 	}
 	if len(exec.promoteCalls) != 0 {
-		t.Error("no driver should run for a missing deployment")
+		t.Error("no promote should run for a missing deployment")
 	}
 }
 
@@ -217,12 +199,14 @@ func TestDeployDeniesNonAdmin(t *testing.T) {
 	}
 }
 
-// --- RollbackDeployment ---------------------------------------------------
+// --- RollbackDeployment: automation-driven kick-off -----------------------
 
-// Rollback of a succeeded azure deployment creates a NEW record pointing
-// at the historical digest, redeploys via the same driver, and lands in
-// rolled_back.
-func TestRollbackDeploymentRedeploysHistoricalDigest(t *testing.T) {
+// Rolling back a succeeded azure deployment creates a NEW record at
+// in_progress carrying the historical digest + previousDeploymentId
+// provenance, returns an async ack, and does NOT run promote.sh or write the
+// terminal -- the deploy pack automation re-pins the digest and lands the
+// record in rolled_back (#2168).
+func TestRollbackDeploymentKicksOffWithoutApply(t *testing.T) {
 	eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{
 		fullDeploymentNode(map[string]any{
 			"deploymentId": "good1", "status": "succeeded", "version": "1.4.0",
@@ -230,9 +214,8 @@ func TestRollbackDeploymentRedeploysHistoricalDigest(t *testing.T) {
 			"region": "eastus", "clusterId": "v1:cluster:cluster:c1",
 		}),
 	}}
-	exec := &fakeExecutor{promoteOut: "SUCCESS: re-promoted"}
-	audit := &fakeAudit{}
-	svc := newTestServiceWithEngine(t, exec, audit, eng)
+	exec := &fakeExecutor{promoteOut: "SHOULD NOT RUN"}
+	svc := newTestServiceWithEngine(t, exec, &fakeAudit{}, eng)
 
 	res, err := svc.RollbackDeployment(ctxWithRole(auth.RoleOwner), &memqlv1.RollbackDeploymentRequest{ToDeploymentId: "good1"})
 	if err != nil {
@@ -241,12 +224,15 @@ func TestRollbackDeploymentRedeploysHistoricalDigest(t *testing.T) {
 	if !res.GetOk() {
 		t.Fatalf("ok = false: %q", res.GetMessage())
 	}
-	// Redeployed the historical version via the azure driver.
-	if len(exec.promoteCalls) != 1 || exec.promoteCalls[0] != [2]string{"1.4.0", "prod"} {
-		t.Errorf("promote calls = %v, want [[1.4.0 prod]]", exec.promoteCalls)
+	// Async ack contract: accepted + kicked off, with a new record id.
+	if res.GetDetails()["async"] != "true" || res.GetDetails()["status"] != "in_progress" {
+		t.Errorf("details = %v, want async=true status=in_progress", res.GetDetails())
 	}
-	// A NEW record was created carrying the historical digest +
-	// previousDeploymentId provenance.
+	if res.GetDetails()["newDeploymentId"] == "" {
+		t.Error("details.newDeploymentId empty")
+	}
+	// A NEW record was created at in_progress carrying the historical digest +
+	// previousDeploymentId provenance (the kick-off CDC edge).
 	var createCall string
 	for _, q := range eng.queries {
 		if strings.HasPrefix(q, "createDeployment(") {
@@ -265,16 +251,19 @@ func TestRollbackDeploymentRedeploysHistoricalDigest(t *testing.T) {
 	if !strings.Contains(createCall, `status: "in_progress"`) {
 		t.Errorf("new rollback record should start in_progress: %s", createCall)
 	}
-	// Terminal transition is rolled_back, NOT a color flip / git revert.
-	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "rolled_back"`); got != 1 {
-		t.Errorf("rolled_back transition = %d, want 1; queries = %v", got, eng.queries)
+	// The RPC must NOT have driven promote.sh or any terminal transition.
+	if len(exec.promoteCalls) != 0 {
+		t.Errorf("automation-driven rollback must NOT call promote.sh, got %v", exec.promoteCalls)
 	}
-	if res.GetDetails()["newDeploymentId"] == "" {
-		t.Error("details.newDeploymentId empty")
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "rolled_back"`); got != 0 {
+		t.Errorf("automation-driven rollback must NOT write rolled_back, got %d; queries = %v", got, eng.queries)
+	}
+	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 0 {
+		t.Errorf("automation-driven rollback must NOT write failed, got %d; queries = %v", got, eng.queries)
 	}
 }
 
-// Rolling back to a non-succeeded deployment is rejected (no driver, no
+// Rolling back to a non-succeeded deployment is rejected (no kick-off, no
 // new record).
 func TestRollbackDeploymentRejectsNonSucceededTarget(t *testing.T) {
 	eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{
@@ -294,33 +283,10 @@ func TestRollbackDeploymentRejectsNonSucceededTarget(t *testing.T) {
 		t.Errorf("message = %q, want succeeded-target requirement", res.GetMessage())
 	}
 	if len(exec.promoteCalls) != 0 {
-		t.Error("no driver should run for an invalid rollback target")
+		t.Error("no promote should run for an invalid rollback target")
 	}
 	if countContaining(eng.queries, "createDeployment(") != 0 {
 		t.Error("rejected rollback must not create a new record")
-	}
-}
-
-// A driver failure during rollback transitions the NEW record to failed.
-func TestRollbackDeploymentTransitionsFailedOnDriverError(t *testing.T) {
-	eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{
-		fullDeploymentNode(map[string]any{
-			"deploymentId": "good2", "status": "succeeded", "version": "2.0.0",
-			"imageDigest": "sha256:two", "provider": "azure", "environment": "staging",
-		}),
-	}}
-	exec := &fakeExecutor{promoteErr: errors.New("promote boom")}
-	svc := newTestServiceWithEngine(t, exec, &fakeAudit{}, eng)
-
-	res, _ := svc.RollbackDeployment(ctxWithRole(auth.RoleOwner), &memqlv1.RollbackDeploymentRequest{ToDeploymentId: "good2"})
-	if res.GetOk() {
-		t.Error("ok = true, want false on rollback driver error")
-	}
-	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 1 {
-		t.Errorf("failed transition = %d, want 1; queries = %v", got, eng.queries)
-	}
-	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "rolled_back"`); got != 0 {
-		t.Errorf("must NOT mark rolled_back on driver failure; queries = %v", eng.queries)
 	}
 }
 
@@ -341,107 +307,5 @@ func TestRollbackDeploymentDeniesNonAdmin(t *testing.T) {
 	}
 	if len(audit.events) != 1 || audit.events[0].Outcome != identity.AuditOutcomeBlocked {
 		t.Errorf("want one blocked audit event, got %+v", audit.events)
-	}
-}
-
-// --- Automation-driven kick-off path (#2115) ------------------------------
-
-// newAutomationDrivenService builds a service with the #2115
-// automation-driven flag set: Deploy / RollbackDeployment thin to a
-// kick-off and the deploy pack automations own promote + terminal.
-func newAutomationDrivenService(t *testing.T, exec Executor, audit identity.AuditLogger, eng identity.EngineExecutor) *Service {
-	t.Helper()
-	svc, err := NewService(Options{
-		Logger:           quietLogger(),
-		Audit:            audit,
-		RepoRoot:         t.TempDir(),
-		Executor:         exec,
-		Engine:           eng,
-		AutomationDriven: true,
-	})
-	if err != nil {
-		t.Fatalf("NewService(automationDriven): %v", err)
-	}
-	return svc
-}
-
-// In automation-driven mode Deploy only transitions the record to
-// in_progress and returns an async ack; it does NOT run promote.sh and
-// does NOT write a terminal transition -- the deploy pack's
-// driveDeploymentInProgress automation owns those (#2115).
-func TestDeployAutomationDrivenKicksOffWithoutApply(t *testing.T) {
-	eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{
-		fullDeploymentNode(map[string]any{
-			"deploymentId": "d1", "status": "pending", "version": "1.2.3",
-			"imageDigest": "sha256:abc", "provider": "azure", "environment": "staging",
-		}),
-	}}
-	exec := &fakeExecutor{promoteOut: "SHOULD NOT RUN"}
-	svc := newAutomationDrivenService(t, exec, &fakeAudit{}, eng)
-
-	res, err := svc.Deploy(ctxWithRole(auth.RoleOwner), &memqlv1.DeployRequest{DeploymentId: "d1"})
-	if err != nil {
-		t.Fatalf("Deploy: %v", err)
-	}
-	if !res.GetOk() {
-		t.Fatalf("ok = false: %q", res.GetMessage())
-	}
-	// Async ack contract: accepted + kicked off, status in_progress.
-	if res.GetDetails()["async"] != "true" || res.GetDetails()["status"] != "in_progress" {
-		t.Errorf("details = %v, want async=true status=in_progress", res.GetDetails())
-	}
-	// The Go path must NOT have driven promote.sh.
-	if len(exec.promoteCalls) != 0 {
-		t.Errorf("automation-driven Deploy must NOT call promote.sh, got %v", exec.promoteCalls)
-	}
-	// Exactly one in_progress transition; NO terminal transition.
-	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "in_progress"`); got != 1 {
-		t.Errorf("in_progress transition = %d, want 1; queries = %v", got, eng.queries)
-	}
-	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "succeeded"`); got != 0 {
-		t.Errorf("automation-driven Deploy must NOT write succeeded, got %d; queries = %v", got, eng.queries)
-	}
-	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 0 {
-		t.Errorf("automation-driven Deploy must NOT write failed, got %d; queries = %v", got, eng.queries)
-	}
-}
-
-// In automation-driven mode RollbackDeployment creates the new rollback
-// record at in_progress and returns an async ack; it does NOT run
-// promote.sh and does NOT write the rolled_back/failed terminal -- the
-// deploy pack automation owns those (#2115).
-func TestRollbackDeploymentAutomationDrivenKicksOffWithoutApply(t *testing.T) {
-	eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{
-		fullDeploymentNode(map[string]any{
-			"deploymentId": "old1", "status": "succeeded", "version": "1.4.0",
-			"imageDigest": "sha256:old", "provider": "azure", "environment": "production",
-		}),
-	}}
-	exec := &fakeExecutor{promoteOut: "SHOULD NOT RUN"}
-	svc := newAutomationDrivenService(t, exec, &fakeAudit{}, eng)
-
-	res, err := svc.RollbackDeployment(ctxWithRole(auth.RoleOwner), &memqlv1.RollbackDeploymentRequest{ToDeploymentId: "old1"})
-	if err != nil {
-		t.Fatalf("RollbackDeployment: %v", err)
-	}
-	if !res.GetOk() {
-		t.Fatalf("ok = false: %q", res.GetMessage())
-	}
-	if res.GetDetails()["async"] != "true" || res.GetDetails()["newDeploymentId"] == "" {
-		t.Errorf("details = %v, want async=true + newDeploymentId", res.GetDetails())
-	}
-	// New rollback record created at in_progress (the kick-off CDC edge).
-	if got := countContaining(eng.queries, "createDeployment(", `status: "in_progress"`); got != 1 {
-		t.Errorf("create rollback record(in_progress) = %d, want 1; queries = %v", got, eng.queries)
-	}
-	// The Go path must NOT have driven promote.sh or any terminal transition.
-	if len(exec.promoteCalls) != 0 {
-		t.Errorf("automation-driven rollback must NOT call promote.sh, got %v", exec.promoteCalls)
-	}
-	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "rolled_back"`); got != 0 {
-		t.Errorf("automation-driven rollback must NOT write rolled_back, got %d; queries = %v", got, eng.queries)
-	}
-	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 0 {
-		t.Errorf("automation-driven rollback must NOT write failed, got %d; queries = %v", got, eng.queries)
 	}
 }

@@ -48,17 +48,6 @@ func (a *App) setupDeployControlService() {
 	// image's app dir in the cluster) is used.
 	repoRoot := os.Getenv("MEMQL_DEPLOY_REPO_ROOT")
 
-	// Automation-driven deploy cutover (#2115). When
-	// MEMQL_DEPLOY_AUTOMATION_DRIVEN is set, the gRPC Deploy /
-	// RollbackDeployment paths thin to a kick-off (transition the record
-	// to in_progress) and let the deploy pack's driveDeploymentInProgress
-	// / recordReconciledState automations own promote + terminal. The
-	// SAME flag also anchors the pack on this identity binary at init time
-	// (app/anchor_deploypack.go) so those automations are actually loaded
-	// where the Deploy Console lives. Default false keeps the synchronous
-	// Go apply authoritative until the owner-gated staging cutover.
-	automationDriven := deployAutomationDriven()
-
 	svc, err := deploycontrol.NewService(deploycontrol.Options{
 		Logger:   a.Logger,
 		Audit:    auditLogger,
@@ -66,8 +55,7 @@ func (a *App) setupDeployControlService() {
 		// Engine persists deployments as v1:cluster:deployment records
 		// (#1872): write RPCs record at deploy start + transition on
 		// resolution. The engine satisfies identity.EngineExecutor.
-		Engine:           a.engine,
-		AutomationDriven: automationDriven,
+		Engine: a.engine,
 	})
 	if err != nil {
 		a.fatal("deploy-control service: build failed", "error", err,
@@ -77,15 +65,14 @@ func (a *App) setupDeployControlService() {
 	a.grpcServer.RegisterService(svc.Register)
 
 	a.deployControlService = svc
-	a.Logger.Info("deploy-control service registered on identity node",
-		"component", identity.ComponentName,
-		"automationDriven", automationDriven)
-	if automationDriven {
-		a.Logger.Warn("deploy-control: AUTOMATION-DRIVEN deploy path active "+
-			"(MEMQL_DEPLOY_AUTOMATION_DRIVEN); Deploy/RollbackDeployment kick off the "+
-			"deploy pack automations instead of the synchronous Go apply (#2115)",
-			"component", identity.ComponentName)
-	}
+	// Deploy / RollbackDeployment are automation-driven (#2115 step 6
+	// retired the synchronous Go apply): they kick off the lifecycle and the
+	// deploy pack automations (anchored on this binary via anchorDeployPack)
+	// own promote + the terminal transition.
+	a.Logger.Info("deploy-control service registered on identity node "+
+		"(automation-driven: Deploy/RollbackDeployment kick off the deploy pack "+
+		"automations which own promote + terminal, #2115)",
+		"component", identity.ComponentName)
 
 	// Wire the read-only /admin/deployments view (memql#726) to the
 	// in-process service. The admin server is constructed earlier in
