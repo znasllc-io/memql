@@ -24,10 +24,12 @@ end-of-utterance tuning.
 - After a deploy to staging / prod, before declaring voice
   available.
 
-> Avatar VIDEO is staging-only. The local k3d cluster runs the audio
-> path against the in-cluster LiveKit Deployment
-> (`deploy/k8s/base/livekit.yaml`); there is no ngrok TURN relay or
-> public avatar URL locally. Verify the avatar on staging.
+> The voice/media plane is environment-selectable (Epic #2184): the local
+> k3d cluster runs the audio path against a **LiveKit Cloud** project
+> (outbound; Cloud's TURN handles NAT), while staging/prod self-host LiveKit
+> (`deploy/k8s/base/livekit.yaml`). There is no self-hosted livekit-server /
+> livekit/sip / ngrok TURN in the local dev loop. Avatar VIDEO is validated
+> on staging.
 
 ## The smoke check (manual)
 
@@ -55,13 +57,14 @@ re-seed with `make k3d-secrets` (see the failure-modes table below).
 The voice-agent reads the following at startup
 (`integrations/voice/agent/config.go`, `LoadConfig`). In the local k3d
 cluster each value comes from the manifests in `deploy/k8s/base` /
-`deploy/k8s/overlays/local` plus the seeded `memql-secrets` Secret:
+`deploy/k8s/overlays/local` plus the seeded `livekit-secrets` +
+`memql-secrets` Secrets:
 
 | Var | Source in the local cluster | Required? |
 | --- | --- | --- |
-| `LIVEKIT_URL` | `ws://livekit:7880` (the in-cluster LiveKit Service) | yes |
-| `LIVEKIT_API_KEY` | `devkey` from the local overlay | yes |
-| `LIVEKIT_API_SECRET` | `secret` from the local overlay | yes |
+| `LIVEKIT_URL` | `wss://<project>.livekit.cloud` from `livekit-secrets` (seed-secrets.sh sources it from your `LIVEKIT_URL` env, #2186) | yes |
+| `LIVEKIT_API_KEY` | the LiveKit Cloud project key, from `livekit-secrets` | yes |
+| `LIVEKIT_API_SECRET` | the LiveKit Cloud project secret, from `livekit-secrets` | yes |
 | `MEMQL_GRPC_ADDR` | `bff:50051` (cluster DNS) | yes |
 | `MEMQL_OPENAI_API_KEY` | `memql-secrets` Secret (seeded from the genesis envelope) | yes |
 | `VOICE_AGENT_TOKEN` | `memql-secrets` Secret, seeded by `make up` / `make k3d-secrets` | yes |
@@ -69,9 +72,10 @@ cluster each value comes from the manifests in `deploy/k8s/base` /
 | `MEMQL_ANAM_API_KEY` | `memql-secrets` Secret | required when `MEMQL_AVATAR_VENDOR=anam` |
 | `MEMQL_SIMLI_API_KEY` | `memql-secrets` Secret | required when `MEMQL_AVATAR_VENDOR=simli` |
 
-The avatar VIDEO path (which needs a publicly reachable LiveKit URL /
-TURN relay) is not wired locally -- audio works without it. Verify the
-avatar on staging.
+Set `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` to your LiveKit
+Cloud project before `make up`; without them the voice pod stays degraded
+(LiveKit not configured). Avatar VIDEO is validated on staging. Staging/prod
+resolve these to the self-hosted `livekit-server` instead.
 
 ## The full round-trip (manual)
 
@@ -98,7 +102,9 @@ loop:
    - `kubectl logs -n memql deploy/cognition` -- routing decision +
      agent dispatch.
    - `kubectl logs -n memql deploy/bff` -- the room token grant.
-   - `kubectl logs -n memql deploy/livekit` -- room join / publish.
+   - The **LiveKit Cloud** project dashboard -- room join / publish (there is
+     no local `livekit` pod on the Cloud dev plane; staging/prod use
+     `kubectl logs -n memql deploy/livekit`).
 
 ## Common failure modes
 

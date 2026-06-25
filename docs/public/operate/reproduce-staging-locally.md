@@ -36,7 +36,7 @@ cross-node mesh bugs reproduces locally instead of only on staging.
 | Blob storage | Azurite emulator | Azure Blob | config only |
 | Secrets / keys | dev defaults (seeded by `make k3d-secrets`) | Key Vault via ESO | config only |
 | ExternalSecrets | deleted by `$patch: delete` in local overlay | present | config only |
-| LiveKit | present (livekit image, dev keys) | present | config only |
+| LiveKit | **LiveKit Cloud** (outbound; no self-hosted livekit/sip/redis locally) | self-hosted `livekit-server` + `livekit/sip` | divergent -- justified (Epic #2184) |
 | Ingress | port-forwards from k3d (no ingress controller) | ingress-nginx | divergent -- justified |
 | Digest-pinning gate | skipped for `ENV=local` in drift-check.sh | enforced | divergent -- justified |
 
@@ -85,7 +85,6 @@ After `make up`, these local ports are forwarded from the k3d cluster:
 |------|---------|
 | `8080` | ingress (identity HTTP on `/`, bff on `/memql`) |
 | `8085` | identity service (direct) |
-| `7880` | LiveKit signaling |
 | `50051` | bff gRPC |
 | `5432` | Postgres (direct) |
 
@@ -105,7 +104,8 @@ make dev NODE=bff
 make dev NODE=identity
 make dev NODE=cognition
 
-# Pull and import upstream infra images (postgres/azurite/livekit/redis):
+# Pull and import upstream infra images (postgres/azurite; the local dev
+# loop uses LiveKit Cloud, so no local livekit/redis images are needed):
 make dev PULL_INFRA=1
 ```
 
@@ -183,13 +183,15 @@ with its justification.
 | 3 | **Digest-pinning gate** | skipped for `ENV=local` in `scripts/deploy/drift-check.sh` | enforced | Local images are built by `make dev` with a stable `:local` tag; they have no ACR digest. The gate exemption is tested by `TestDriftCheckRenderedLocalOverlaySkipsDigestGate`. |
 | 4 | **ExternalSecrets / Key Vault** | deleted by `$patch: delete` in local overlay | ESO syncs from Key Vault | Dev secrets are seeded directly by `make k3d-secrets`. |
 | 5 | **Connection pooler** | direct Postgres connection | Tiger Cloud managed PgBouncer | Single-node dev without a pool is safe; the hybrid-endpoint split used in staging can be reproduced by running PgBouncer as a separate pod if needed. |
-| 6 | **voice-agent** | opt-in (`deploy/k8s/overlays/local/` includes it) | in base | Needs live OpenAI + LiveKit creds. The local overlay includes the deployment; set real creds in `make k3d-secrets` to enable. |
+| 6 | **voice-agent** | opt-in (`deploy/k8s/overlays/local/` includes it) | in base | Needs live OpenAI + a **LiveKit Cloud** project. Export `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` before `make up` (seed-secrets sources them); see [voice-bringup-verification.md](voice-bringup-verification.md) and, for telephony, [telephony-local-dev.md](telephony-local-dev.md). |
 
 ### Config-only -- EXPECTED to differ
 
 - `MEMQL_DATABASE_DSN` (local Postgres vs Tiger Cloud).
 - Blob backend (Azurite connection string vs Azure Blob).
-- LiveKit keys (dev `devkey`/`secret` vs ESO-synced Key Vault secret).
+- LiveKit plane (local → a **LiveKit Cloud** project, creds from your env via
+  `livekit-secrets`; staging/prod → self-hosted `livekit-server`, key/secret
+  ESO-synced from Key Vault — Epic #2184).
 - Bootstrap/dev escape hatches (`MEMQL_IDENTITY_ALLOW_INSECURE_*`).
 - `MEMQL_IDENTITY_BASE_URL` / `MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER` (local port-forward
   vs AKS ingress hostname).
@@ -224,5 +226,6 @@ because:
 
 There is no nginx front door, no `*.local.znas.io` subdomains, and no mkcert
 TLS in this world -- the cluster is reached via kubectl port-forwards
-(bff gRPC `:50051`, identity `:8085`, copresent SPA `:8080`, livekit `:7880`,
-postgres `:5432`).
+(bff gRPC `:50051`, identity `:8085`, copresent SPA `:8080`, postgres `:5432`;
+the voice/media plane is LiveKit Cloud, reached outbound -- no local
+port-forward).
