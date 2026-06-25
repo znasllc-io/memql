@@ -24,14 +24,16 @@ import (
 // and `kubectl argo rollouts promote|abort` -- NEVER ad-hoc
 // `kubectl set image`.
 //
-// Scope note (E2.5 / #2098): this PR consolidates the effect SEAM (the
-// gRPC Service's legacy promote actions now share promoteRelease, and the
-// pack reuses this Executor + ConsoleEnvFor). The Go deploy LIFECYCLE
-// (deploy.go's Deploy/RollbackDeployment apply+transition) remains the
-// AUTHORITATIVE path for the live azure deploy and is NOT removed here.
-// Retiring it in favour of the pack automations requires anchoring the
-// pack on the identity node and an async gRPC contract change -- an
-// owner-gated, staging-validated cutover tracked separately (E2.5a).
+// Scope note: the effect SEAM is consolidated here (the gRPC Service's
+// legacy promote actions share promoteRelease, and the deploy pack reuses
+// this Executor + ConsoleEnvFor). The synchronous Go deploy LIFECYCLE that
+// deploy.go's Deploy/RollbackDeployment once ran (select driver -> apply ->
+// terminal transition) was RETIRED in #2115 step 6: those actions now only
+// validate + kick off the lifecycle (transition to in_progress), and the
+// deploy pack automations (examples/deploypack, anchored on the identity
+// node) own promote + the terminal transition through THIS Executor's
+// effects. The legacy console actions (DeployStaging / Promote / Rollback /
+// RolloutAction) still call these effects synchronously.
 type Executor interface {
 	// RunPromote invokes scripts/release/promote.sh --version=<version>
 	// --env=<env>. Used by both DeployStaging (env=staging) and Promote
