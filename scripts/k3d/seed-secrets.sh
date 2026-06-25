@@ -6,6 +6,8 @@
 # Seed the k8s Secrets that the local k3d overlay requires.
 # Replaces the cloud paths that staging/prod use (ESO + Azure Key Vault):
 #
+#   identity-tls           -- identity server TLS cert (self-signed cluster CA)
+#   memql-ca               -- the cluster CA cert, mounted on every node
 #   memql-secrets          -- main app envelope (MEMQL_MASTER_KEY,
 #                             MEMQL_GENESIS_B64, DATABASE_DSN, ...)
 #   livekit-secrets        -- LiveKit API key + secret for local livekit
@@ -111,6 +113,34 @@ function resolve_master_key() {
     warn "MEMQL_MASTER_KEY is unset; using insecure dev placeholder."
     warn "Override by setting MEMQL_MASTER_KEY in your environment."
     echo "local-dev-placeholder-not-for-production"
+}
+
+#=============================================================================
+# INTERNAL TLS CA (identity-tls + memql-ca)
+#=============================================================================
+
+function seed_internal_ca() {
+    # The identity node serves its HTTP surface over TLS (the node-bootstrap
+    # handler rejects plaintext) and every other node mounts the CA to trust
+    # it -- see deploy/k8s/base/*.yaml (secretName: memql-ca) and the cloud
+    # equivalent in scripts/deploy/aks-deploy.sh step 2a. Without these two
+    # secrets every node that mounts memql-ca stalls in ContainerCreating with
+    # a FailedMount, so the local bootstrap must generate them too. The
+    # generator is idempotent (kubectl apply), so re-running make up / make
+    # k3d-secrets is safe.
+    local gen="${REPO_ROOT}/deploy/k8s/base/tls/gen-internal-ca.sh"
+    if [ ! -f "$gen" ]; then
+        warn "internal CA generator not found at $gen; skipping."
+        warn "  identity TLS + memql-ca will be missing; nodes will FailedMount."
+        return
+    fi
+    # Already present? Leave them be (preserves a manually-rotated CA).
+    if kubectl get secret memql-ca identity-tls -n "$NAMESPACE" &>/dev/null; then
+        info "internal CA already present (memql-ca + identity-tls); skipping."
+        return
+    fi
+    info "seeding internal TLS CA (identity-tls + memql-ca)..."
+    NAMESPACE="$NAMESPACE" bash "$gen"
 }
 
 #=============================================================================
@@ -268,6 +298,7 @@ function parse_arguments() {
 function main() {
     parse_arguments "$@"
     check_prerequisites
+    seed_internal_ca
     seed_db_creds
     seed_memql_secrets
     seed_livekit_secrets
