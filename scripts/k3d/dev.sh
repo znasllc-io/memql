@@ -73,11 +73,6 @@ LOCAL_TAG="local"
 # The bff-copresent sibling repo is expected one directory up (workspace layout).
 BFF_REPO="${MEMQL_BFF_COPRESENT_REPO:-${REPO_ROOT}/../memql-bff-copresent}"
 
-# ACR image base (carrier images reference the carrier repo image base).
-# For local builds we override to 'memql' as the image name prefix.
-ENGINE_IMAGE_BASE="${MEMQL_ENGINE_IMAGE_BASE:-acrmemql.azurecr.io/memql}"
-CARRIER_IMAGE_BASE="${MEMQL_CARRIER_IMAGE_BASE:-acrmemql.azurecr.io/memql-carrier}"
-
 # Engine node types (built from this repo's Dockerfile)
 ENGINE_NODES=(identity voice mcp)
 
@@ -175,27 +170,49 @@ function deployment_name_for_node() {
     esac
 }
 
+function image_name_for_node() {
+    # Map node type to the in-cluster image ref the local overlay's pods
+    # pull. These MUST match the `newName`s in
+    # deploy/k8s/overlays/local/kustomization.yaml's `images:` block --
+    # k3d imports under exactly this name so the kubelet resolves it
+    # locally instead of trying to pull from a registry. The bff node's
+    # image is named memql-bff-copresent (carrier); every other node is
+    # memql-<node>.
+    local node="$1"
+    case "$node" in
+        bff) echo "memql-bff-copresent:${LOCAL_TAG}" ;;
+        *)   echo "memql-${node}:${LOCAL_TAG}" ;;
+    esac
+}
+
 #=============================================================================
 # BUILD ENGINE IMAGE (identity / voice / mcp)
 #=============================================================================
 
 function build_engine_node() {
     local node="$1"
-    local image="${ENGINE_IMAGE_BASE}-${node}:${LOCAL_TAG}"
+    local image
+    image="$(image_name_for_node "$node")"
 
     section "Building engine image: ${node} -> ${image}"
 
-    # voice requires CGO for LibOpus; other engine nodes are CGO-free.
-    local build_args=()
+    # BUILD_TAGS selects which node-type binary the builder stage compiles
+    # (go build -tags <node>) -- mirrors scripts/deploy/aks-deploy.sh. The
+    # engine Dockerfile has two runtime stages: the default distroless
+    # `runtime` for CGO-free nodes (identity, mcp) and `voice-runtime`
+    # (debian + libopus) for voice, which needs CGO for LibOpus.
+    local build_args=(--build-arg "BUILD_TAGS=${node}")
+    local target="runtime"
     if [[ "$node" == "voice" ]]; then
         build_args+=(--build-arg CGO_ENABLED=1)
+        target="voice-runtime"
         warn "voice node requires libopus headers -- building from repo Dockerfile."
         warn "If the build fails with 'opus.h not found', see docs/public/build/build-tags.md."
     fi
 
     docker build \
         "${build_args[@]}" \
-        --target "${node}-runtime" \
+        --target "${target}" \
         --tag "${image}" \
         --file "${REPO_ROOT}/Dockerfile" \
         "${REPO_ROOT}"
@@ -209,7 +226,8 @@ function build_engine_node() {
 
 function build_carrier_node() {
     local node="$1"
-    local image="${CARRIER_IMAGE_BASE}-${node}:${LOCAL_TAG}"
+    local image
+    image="$(image_name_for_node "$node")"
 
     section "Building carrier image: ${node} -> ${image}"
 
@@ -272,11 +290,11 @@ function process_node() {
 
     if is_engine_node "$node"; then
         build_engine_node "$node"
-        import_image "${ENGINE_IMAGE_BASE}-${node}:${LOCAL_TAG}"
+        import_image "$(image_name_for_node "$node")"
         restart_deployment "$node"
     elif is_carrier_node "$node"; then
         build_carrier_node "$node"
-        import_image "${CARRIER_IMAGE_BASE}-${node}:${LOCAL_TAG}"
+        import_image "$(image_name_for_node "$node")"
         restart_deployment "$node"
     else
         error "Unknown node type: '${node}'. Valid values:"
@@ -348,8 +366,6 @@ Environment overrides:
     MEMQL_K3D_CLUSTER            cluster name
     MEMQL_K3D_NAMESPACE          k8s namespace
     MEMQL_BFF_COPRESENT_REPO     path to memql-bff-copresent checkout
-    MEMQL_ENGINE_IMAGE_BASE      engine image prefix (default: acrmemql.azurecr.io/memql)
-    MEMQL_CARRIER_IMAGE_BASE     carrier image prefix (default: acrmemql.azurecr.io/memql-carrier)
 
 Examples:
     $0                            # rebuild + restart all app nodes
