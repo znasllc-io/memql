@@ -10,15 +10,33 @@ owner: znas
 # Telephony -- PSTN calling for memQL voice agents
 
 memQL voice agents can answer inbound PSTN calls and place outbound PSTN
-calls. A phone call is just another LiveKit room participant: a self-hosted
-`livekit/sip` edge turns a SIP call into a room participant (inbound) and dials
-a number into a room on demand (outbound), and the existing voice agent
-answers via the OpenAI Realtime path. No Twilio.
+calls. A phone call is just another LiveKit room participant: a `livekit/sip`
+edge turns a SIP call into a room participant (inbound) and dials a number into
+a room on demand (outbound), and the existing voice agent answers via the
+OpenAI Realtime path. No Twilio.
 
 Telephony is **core and product-agnostic**. Calls and numbers bind to a
 generic [partition](../concepts/partition-scoping.md), never to a CoPresent
 `space`. A product may map its own scope onto a partition in its pack; the
 telephony core only ever sees `partitionId`.
+
+## Two media planes (Epic #2184)
+
+The LiveKit media plane is **environment-selectable** — telephony code is
+identical on both planes (`lksdk.NewSIPClient` + `NewRoomServiceClient`); only
+the env differs:
+
+| | SIP + WebRTC media plane | `MEMQL_TELEPHONY_SIP_EDGE_URI` |
+|---|---|---|
+| **Local dev** | **LiveKit Cloud** (outbound; Cloud's TURN handles NAT). No self-hosted livekit-server / livekit/sip / coturn locally. | **unset/empty** — Cloud is the edge; the Telnyx Connection points at the Cloud SIP URI and the inbound trunk + dispatch rule are created via the LiveKit API. |
+| **Staging / prod** | **self-hosted** `livekit-server` + `livekit/sip` (`deploy/k8s/base/livekit*.yaml`). | the in-cluster `livekit/sip` edge (the carrier-reachable SIP URI). |
+
+The local-dev bring-up flow is its own runbook:
+[telephony-local-dev.md](telephony-local-dev.md). An automated guard
+(`scripts/deploy/livekit_cloud_guard_test.go`) fails CI if a `*.livekit.cloud`
+reference ever lands in a staging/prod overlay, so the two planes can never
+cross-contaminate. The rest of this page documents the **self-hosted**
+(staging/prod) plane.
 
 > Epic 4 (memql#1906) builds this in dependency-ordered slices. This page
 > grows with each slice. **Live PSTN verification** (a real inbound and a real
