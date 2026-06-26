@@ -1,6 +1,15 @@
-# Epic 1 — AI → AI rename
+---
+title: Epic 1 — SI → AI rename
+audience: internal
+status: historical
+area: internal
+sinceVersion: "0.9.87"
+owner: znas
+---
 
-Rename "AI / AI" to "AI" across DSL, Go, wire/proto, and
+# Epic 1 — SI → AI rename
+
+Rename "SI / synthetic intelligence" to "AI" across DSL, Go, wire/proto, and
 frontend, in one coordinated sweep. **Runs first** (before decoupling).
 **Session: S1. Gate produced: G1.**
 
@@ -13,7 +22,7 @@ rename: **`si()` → `ai()`**, grammar node `SIExpression → AIExpression`.
 
 ## Hard denylist (must NOT be renamed)
 `SIP*` (SIP telephony trunk code), `TSInterface*`/`TSImport*`/`CSS*`/`CJS*`
-(TS/CSS AST node names in the frontend), and English words containing "AI":
+(TS/CSS AST node names in the frontend), and English words containing "SI":
 `POSIX`, `VERSION`, `MISSING`, `INSIDE`, `OUTSIDE`, `ANALYSIS`, `DECISIONS`,
 `SILENTLY`, `PERSISTS`, `EPSILON`, `UNSIGNALED`, `SID` (review individually).
 
@@ -22,7 +31,7 @@ rename: **`si()` → `ai()`**, grammar node `SIExpression → AIExpression`.
 ## Issue 1.1 — Build the rename tooling: curated allowlist/denylist [foundation]
 **Problem:** A blind `sed` corrupts `SIP*`, `TS*`, and English words.
 **Approach:** Produce a scripted, word-boundary, case-preserving renamer driven
-by an explicit **allowlist** of AI-identifiers (see buckets below) and the
+by an explicit **allowlist** of SI-identifiers (see buckets below) and the
 **denylist** above. Dry-run mode emits a diff for review. Covers `.go`,
 `.memql`, `.proto`, `.ts/.tsx`, `.md`.
 **Acceptance:** Dry-run over all repos shows only intended identifiers; zero
@@ -43,7 +52,7 @@ parser/classifier registration (`component/memql` spec-kind table), and all
 `ToolCallingChatSIProvider`, `openSIProvider`), `generateSIResponse`,
 `insertSIResponse`, `proxySI`, files `core/common/si.go`,
 `component/memql/si_providers.go`.
-**Acceptance:** Core compiles; tests green; no internal AI identifiers remain
+**Acceptance:** Core compiles; tests green; no internal SI identifiers remain
 (outside denylist).
 
 ## Issue 1.4 — Rename wire/proto names + regenerate [G:1.1] (sub-gate for 1.5/1.6)
@@ -58,7 +67,7 @@ contract; a cross-node smoke test passes.
 
 ## Issue 1.5 — Propagate rename to CoPresent BFF pack [G:1.4]
 **Scope:** `si()` → `ai()` in `memql-bff-copresent/dsl/copresent/*.memql`;
-AI-named generated Go/args (`MutationJoinSpaceAsSIArgs`, `LogicAutoJoinSIArgs`,
+SI-named generated Go/args (`MutationJoinSpaceAsSIArgs`, `LogicAutoJoinSIArgs`,
 `buildQueryHasSIResponseForReply`, etc.); regenerate against the new wire.
 **Acceptance:** BFF builds + tests green against renamed core/wire.
 
@@ -68,10 +77,10 @@ identifiers (`isSITyping`, etc.). **Do not touch `SIP*` or `TS*` AST names.**
 **Acceptance:** Frontend type-checks + builds against the regenerated gRPC TS.
 
 ## Issue 1.7 — Docs, comments, descriptions + Epic verification [G:1.2,1.3,1.4,1.5,1.6]
-**Scope:** Prose "AI"/"AI" in `@description(...)`, comments,
+**Scope:** Prose "SI"/"synthetic intelligence" in `@description(...)`, comments,
 `*.md`. Then full verification.
 **Acceptance (G1):** All four repos build + test green; a repo-wide scan shows
-zero AI-as-synthetic-intelligence identifiers outside the denylist. Run the
+zero SI-as-synthetic-intelligence identifiers outside the denylist. Run the
 final scan via a fresh verification sub-session.
 
 ---
