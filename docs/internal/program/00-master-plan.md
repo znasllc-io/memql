@@ -5,7 +5,7 @@ telephony on top of it. Built from the analysis in
 [`05-current-state-map.md`](05-current-state-map.md).
 
 **Epics**
-1. [AI → AI rename](01-epic-si-to-ai-rename.md)
+1. [SI → AI rename](01-epic-si-to-ai-rename.md)
 2. [Platform / plugin architecture](02-epic-platform-plugin.md)
 3. [Decouple CoPresent from core](03-epic-decouple-copresent.md)
 4. [Telephony into core](04-epic-telephony.md)
@@ -14,7 +14,7 @@ telephony on top of it. Built from the analysis in
 
 ## Guiding decisions (locked)
 
-- **AI → AI rename runs first**, as one coordinated sweep **including the
+- **SI → AI rename runs first**, as one coordinated sweep **including the
   wire/proto names** (regenerate `.pb.go` + frontend TS, roll all nodes + SPA
   together). Rationale: rename while everything is in one place, so the
   decoupling never chases renamed symbols.

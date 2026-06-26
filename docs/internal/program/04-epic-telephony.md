@@ -1,3 +1,11 @@
+---
+title: Epic 4 — Telephony into core
+audience: internal
+status: historical
+area: internal
+owner: znas
+---
+
 # Epic 4 — Telephony into core
 
 Inbound + outbound PSTN calling for MemQL voice agents, via self-hosted
@@ -5,12 +13,14 @@ Inbound + outbound PSTN calling for MemQL voice agents, via self-hosted
 first), driven by the OpenAI Realtime voice path. **No Twilio.**
 **Session: S4. Starts at G3.**
 
-**Repo:** `memql`.
+**Repo:** `memql`. **Status: shipped** (epic #1906, all 8 issues #2010–#2017
+merged). Canonical operator docs:
+[`docs/public/operate/telephony.md`](../../public/operate/telephony.md) and
+[`telephony-local-dev.md`](../../public/operate/telephony-local-dev.md).
 
-The detailed issue drafts live in
-[`/telephony-issues.md`](../../../telephony-issues.md) (8 dependency-ordered
-issues). This epic file records the **two amendments** required because it now
-lands on the decoupled, renamed core.
+This epic file records the **two amendments** required because telephony
+landed on the decoupled, renamed core. The original 8 dependency-ordered
+issue drafts were realized as #2010–#2017.
 
 ## Amendment A — attach to a partition/room, NOT a CoPresent `space`
 The original drafts referenced `polyphon-<spaceId>` rooms. After Epic 3, core
@@ -31,9 +41,8 @@ renamed wire names). No `si`-named identifiers introduced.
 
 ## Cost model (unchanged, validated)
 Worst case ≈ $0.11/min outbound, $0.12/min inbound; OpenAI Realtime audio is
-~90% of per-minute cost. Silence is ~free with VAD gating. Full model in
-[`/telephony-sip-integration-plan.md`](../../../telephony-sip-integration-plan.md)
-(if copied into the repo) or the program handoff.
+~90% of per-minute cost. Silence is ~free with VAD gating. The shipped cost
+controls live in [`docs/public/operate/telephony.md`](../../public/operate/telephony.md).
 
 ## Why last
 Depends on **G3**: a clean, partition-based core so telephony binds to the
@@ -41,7 +50,7 @@ generic primitive and inherits none of the CoPresent coupling.
 
 ---
 
-## Issue list (from telephony-issues.md, with amendments)
+## Issue list (realized as #2010–#2017, with amendments)
 1. CarrierProvider abstraction + Telnyx impl
 2. `v1:telephony:{number,trunk,call}` concepts — **partitionId** (Amendment A)
 3. Self-host `livekit/sip` (K8s)

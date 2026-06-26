@@ -1,3 +1,11 @@
+---
+title: Epic 3 — Decouple CoPresent from core
+audience: internal
+status: historical
+area: internal
+owner: znas
+---
+
 # Epic 3 — Decouple CoPresent from core
 
 Move all CoPresent-specific concepts, logic, and integrations out of core

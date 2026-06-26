@@ -1,8 +1,19 @@
+---
+title: Session Handoff Prompts
+audience: internal
+status: historical
+area: internal
+owner: znas
+---
+
 # Session Handoff Prompts
 
 Copy-paste prompts to run the four epics as separate sessions with explicit
 gates. **S1 starts now. S2/S3 start at G1. S4 starts at G3.** Gate definitions
 and the parallel plan: [`00-master-plan.md`](00-master-plan.md).
+
+> **Historical.** All four epics shipped (Epic 4 #1906 last). These prompts are
+> kept as a record of how the program was sequenced.
 
 > **How gates work between sessions.** A session that depends on a gate must
 > not start its gated work until the producing session confirms the gate is
@@ -37,7 +48,7 @@ work as specified.
 
 ---
 
-## SESSION S1 — Epic 1: AI → AI rename  (starts NOW · produces G1)
+## SESSION S1 — Epic 1: SI → AI rename  (starts NOW · produces G1)
 
 ```
 You own Epic 1 (AI→AI rename) of the memql platformization program. Read, in
@@ -45,7 +56,7 @@ order: memql/docs/internal/program/00-master-plan.md and 01-epic-si-to-ai-
 rename.md. Work the repos: znasllc-io/memql, memql-bff-copresent, memql-cockpit,
 and the copresent frontend.
 
-Goal: rename "AI / AI" → "AI" across DSL, Go, wire/proto,
+Goal: rename "SI / synthetic intelligence" → "AI" across DSL, Go, wire/proto,
 and frontend in ONE coordinated sweep, including the breaking proto names.
 Centerpiece: the DSL construct si("prompt", args) → ai(...), and SIExpression →
 AIExpression.
@@ -123,8 +134,8 @@ space + knowledge flow. When green, announce G3 OPEN. Session S4 is waiting.
 ```
 You own Epic 4 (telephony into core) of the memql program. DO NOT START until G3
 is open (core decoupled, engine-only build green). Read: memql/docs/internal/
-program/00-master-plan.md, 04-epic-telephony.md, memql/telephony-issues.md, and
-memql/telephony-sip-integration-plan.md. Repo: znasllc-io/memql.
+program/00-master-plan.md, 04-epic-telephony.md, and the shipped operator docs
+at memql/docs/public/operate/telephony.md. Repo: znasllc-io/memql.
 
 Goal: inbound + outbound PSTN calling via self-hosted livekit/sip + a carrier-
 agnostic CarrierProvider abstraction (Telnyx first), driven by the OpenAI
