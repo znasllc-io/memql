@@ -41,7 +41,7 @@
 #      in the divergent ephemeral-key mode) so the post-reset JWKS stays
 #      coherent. Refuses LOUDLY if it is not -- a wipe without the seed would
 #      leave auth unrecoverable without a manual reseal.
-#   3. Requires an interactive typed confirmation (unless --yes).
+#   3. Requires an explicit --confirm='reset staging' param (or --yes).
 #   4. Captures + scales the namespace's app Deployments AND Argo Rollouts to 0
 #      so nothing writes mid-reset, restoring the replica counts at the end
 #      (even on failure).
@@ -62,15 +62,20 @@
 #      serving a well-formed JWKS (an in-cluster probe). Reports a clear PASS so
 #      the operator knows login + mesh are healthy with NO manual recovery.
 #
+# Non-interactive by design (capability-script contract, #2221): the
+# destructive confirmation is an explicit param, never a blocking prompt.
+#
 # Usage:
 #   scripts/deploy/staging-db-reset.sh --env=staging [--namespace=memql]
-#                                      [--yes] [--dry-run]
+#                                      (--confirm='reset staging' | --yes) [--dry-run]
 #
 #   --env=ENV         Must be "staging". Anything else (esp. production) is
 #                     refused -- this tool is staging-only by design.
 #   --namespace=NS    Kubernetes namespace (default: memql).
-#   --yes             Skip the interactive typed confirmation (for an operator
-#                     who has already confirmed out of band). Still env- and
+#   --confirm=PHRASE  Must equal 'reset staging' to proceed (or set CONFIRM=...).
+#                     Replaces the old interactive typed confirmation.
+#   --yes             Skip the confirmation entirely (for an operator who has
+#                     already confirmed out of band). Still env- and
 #                     context-guarded.
 #   --dry-run         Print the full plan and touch NOTHING.
 #   --help            Show this help.
@@ -126,10 +131,12 @@ function parse_arguments() {
     NS="$DEFAULT_NS"
     DRY_RUN=false
     ASSUME_YES=false
+    CONFIRM="${CONFIRM:-}"
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --env=*)       ENV="${1#*=}"; shift ;;
             --namespace=*) NS="${1#*=}"; shift ;;
+            --confirm=*)   CONFIRM="${1#*=}"; shift ;;
             --yes)         ASSUME_YES=true; shift ;;
             --dry-run)     DRY_RUN=true; shift ;;
             --help|-h)     show_help; exit 0 ;;
@@ -233,14 +240,15 @@ BANNER
         return 0
     fi
     if [[ "$ASSUME_YES" == true ]]; then
-        warn "--yes given; skipping the interactive prompt."
+        warn "--yes given; skipping confirmation."
         return 0
     fi
-    local answer=""
-    read -r -p "Type '$CONFIRM_PHRASE' to proceed (anything else aborts): " answer
-    if [[ "$answer" != "$CONFIRM_PHRASE" ]]; then
-        err "confirmation did not match; aborting. Nothing was changed."
-        exit 1
+    # Non-interactive by contract (capability-script contract, #2221): the
+    # confirmation is an explicit param, never a blocking prompt. The operator
+    # (or an action executor) must pass --confirm='<phrase>' (or CONFIRM=...).
+    if [[ "$CONFIRM" != "$CONFIRM_PHRASE" ]]; then
+        err "confirmation required: pass --confirm='$CONFIRM_PHRASE' (or CONFIRM='$CONFIRM_PHRASE'), or --yes. Nothing was changed."
+        exit 3
     fi
 }
 

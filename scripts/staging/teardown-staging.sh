@@ -23,8 +23,9 @@ set -euo pipefail
 #   --keyvault   ALSO purge the Key Vault (DESTROYS sealed secrets) -- off by default
 #   --all        == --compute --database --ancillary  (NOT registry/keyvault)
 #
-# Safety: prints a plan and requires typing the env name unless --yes is set.
-# Always dry-runs unless --confirm is passed.
+# Safety: prints a plan and requires --confirm-name='<env>' (or --yes) before
+# executing. Always dry-runs unless --confirm is passed. Non-interactive by
+# contract (#2221): no blocking prompt.
 
 #=============================================================================
 # CONFIGURATION
@@ -48,7 +49,10 @@ ENV_NAME="staging"
 
 function show_help() {
     cat << EOF
-Usage: $0 [tiers] [--confirm] [--yes]
+Usage: $0 [tiers] [--confirm] [--confirm-name=$ENV_NAME | --yes]
+
+Non-interactive by contract (capability-script contract, #2221): the
+destructive confirmation is an explicit param, never a blocking prompt.
 
 Tiers:
     --compute     Delete the AKS cluster ($AKS_CLUSTER): nodes, public IPs,
@@ -60,34 +64,37 @@ Tiers:
     --all         == --compute --database --ancillary (keeps ACR + Key Vault).
 
 Modes:
-    --confirm     Actually execute (default is DRY-RUN -- prints what it would do).
-    --yes         Skip the type-the-env-name interactive confirmation.
-    --help        Show this help.
+    --confirm         Actually execute (default is DRY-RUN -- prints what it would do).
+    --confirm-name=N  Must equal the env name ('$ENV_NAME') to proceed under --confirm
+                      (or set CONFIRM_NAME=...). Replaces the old typed prompt.
+    --yes             Skip the confirmation entirely (CI/non-interactive).
+    --help            Show this help.
 
 Examples:
-    $0 --all                 # dry-run the full nuke (compute+db+ancillary)
-    $0 --all --confirm       # execute it (interactive confirm)
-    $0 --compute --database --confirm --yes   # CI/non-interactive
+    $0 --all                                       # dry-run the full nuke
+    $0 --all --confirm --confirm-name=$ENV_NAME    # execute it (explicit confirm)
+    $0 --compute --database --confirm --yes        # CI/non-interactive
 EOF
 }
 
 function parse_arguments() {
     DO_COMPUTE=false; DO_DATABASE=false; DO_ANCILLARY=false
     DO_REGISTRY=false; DO_KEYVAULT=false
-    CONFIRM=false; ASSUME_YES=false
+    CONFIRM=false; ASSUME_YES=false; CONFIRM_NAME="${CONFIRM_NAME:-}"
     [ $# -eq 0 ] && { show_help; exit 0; }
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --compute)   DO_COMPUTE=true; shift ;;
-            --database)  DO_DATABASE=true; shift ;;
-            --ancillary) DO_ANCILLARY=true; shift ;;
-            --registry)  DO_REGISTRY=true; shift ;;
-            --keyvault)  DO_KEYVAULT=true; shift ;;
-            --all)       DO_COMPUTE=true; DO_DATABASE=true; DO_ANCILLARY=true; shift ;;
-            --confirm)   CONFIRM=true; shift ;;
-            --yes)       ASSUME_YES=true; shift ;;
-            --help)      show_help; exit 0 ;;
-            *) echo "ERROR: unknown option: $1"; show_help; exit 1 ;;
+            --compute)        DO_COMPUTE=true; shift ;;
+            --database)       DO_DATABASE=true; shift ;;
+            --ancillary)      DO_ANCILLARY=true; shift ;;
+            --registry)       DO_REGISTRY=true; shift ;;
+            --keyvault)       DO_KEYVAULT=true; shift ;;
+            --all)            DO_COMPUTE=true; DO_DATABASE=true; DO_ANCILLARY=true; shift ;;
+            --confirm)        CONFIRM=true; shift ;;
+            --confirm-name=*) CONFIRM_NAME="${1#*=}"; shift ;;
+            --yes)            ASSUME_YES=true; shift ;;
+            --help)           show_help; exit 0 ;;
+            *) echo "ERROR: unknown option: $1" >&2; show_help; exit 1 ;;
         esac
     done
 }
@@ -117,9 +124,14 @@ function print_plan() {
 function confirm_or_die() {
     [ "$CONFIRM" = false ] && return 0
     [ "$ASSUME_YES" = true ] && return 0
-    echo "This DESTROYS the resources above and is hard to reverse."
-    read -r -p "Type the environment name ('$ENV_NAME') to proceed: " typed
-    [ "$typed" = "$ENV_NAME" ] || { echo "Confirmation mismatch -- aborting."; exit 1; }
+    # Non-interactive by contract (capability-script contract, #2221): the
+    # destructive confirmation is an explicit param, never a blocking prompt.
+    # Pass --confirm-name='<env>' (or CONFIRM_NAME=...) matching the env name.
+    echo "This DESTROYS the resources above and is hard to reverse." >&2
+    if [ "$CONFIRM_NAME" != "$ENV_NAME" ]; then
+        echo "ERROR: confirmation required: pass --confirm-name='$ENV_NAME' (or CONFIRM_NAME='$ENV_NAME'), or --yes. Aborting." >&2
+        exit 3
+    fi
 }
 
 # run CMD... -- echoes it; only executes when --confirm is set.

@@ -3,8 +3,9 @@
 # scripts/k3d/dev.sh
 # ==================
 #
-# Inner-loop dev command: build one or more node images locally,
-# import them into the k3d cluster, and restart the relevant Deployments.
+# Capability: k3d.dev -- inner-loop dev command: build one or more node images
+# locally, import them into the k3d cluster, and restart the relevant
+# Deployments.
 #
 # Design
 # ------
@@ -52,18 +53,36 @@
 #   make dev NODE=bff,cognition       # comma-separated list
 #   make dev PULL_INFRA=1            # pull + re-import infra images
 #
-# Per the repo + global Skills+Scripts convention (CLAUDE.md): function-based,
-# one responsibility per function, main() at the bottom. set -euo pipefail.
+# This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
+# JSON result envelope on stdout, human logs on stderr, honest exit codes.
+# Contract: docs/internal/design/capability-script-contract.md
 #
-# Refs: #2066 #2061
+# Idempotent: each invocation rebuilds + re-imports the requested images and
+# rolls the Deployments; safe to re-run.
+#
+# Exit codes: 0 ok | 2 bad param (unknown node type) | 4 prerequisite missing
+#             (docker/k3d/kubectl absent, cluster not running, carrier repo
+#             missing)
+#
+# Refs: #2066 #2061 #2221
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/capability.sh
+source "${SCRIPT_DIR}/../lib/capability.sh"
+
+cap_init "k3d.dev" "Build node image(s) locally, import into k3d, and restart Deployments."
+cap_spec_param "node"       "node type(s) to rebuild, comma-separated (default: all app nodes)" ""
+cap_spec_param "pull-infra" "pull + import infra images (flag)"                                 ""
+cap_spec_param "cluster"    "k3d cluster name"                                                  "MEMQL_K3D_CLUSTER"
+cap_spec_param "namespace"  "k8s namespace"                                                     "MEMQL_K3D_NAMESPACE"
+cap_spec_param "no-wait"    "skip rollout status wait (flag)"                                   ""
 
 #=============================================================================
 # CONFIGURATION
 #=============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 CLUSTER_NAME="${MEMQL_K3D_CLUSTER:-memql}"
@@ -90,19 +109,26 @@ INFRA_IMAGES=(
     "livekit/livekit-server:v1.8"
 )
 
+# Outcome tracking (result envelope + idempotency reporting).
+REBUILT_COUNT=0
+RESTARTED=false
+INFRA_PULLED=false
+
 #=============================================================================
-# OUTPUT HELPERS
+# OUTPUT HELPERS -- delegate to the capability runtime (all logs to STDERR)
 #=============================================================================
 
-function info()  { echo "INFO:  $*"; }
-function warn()  { echo "WARN:  $*"; }
-function error() { echo "ERROR: $*" >&2; }
+function info()  { cap_info  "$*"; }
+function warn()  { cap_warn  "$*"; }
+function error() { cap_error "$*"; }
 
 function section() {
-    echo ""
-    echo "------------------------------------------------------------"
-    echo "  $*"
-    echo "------------------------------------------------------------"
+    {
+        echo ""
+        echo "------------------------------------------------------------"
+        echo "  $*"
+        echo "------------------------------------------------------------"
+    } >&2
 }
 
 #=============================================================================
@@ -120,12 +146,12 @@ function check_prerequisites() {
 
     if [ ${#missing[@]} -gt 0 ]; then
         error "Missing required tools: ${missing[*]}"
-        exit 1
+        cap_fail 4 "missing required tools: ${missing[*]}"
     fi
 
     if ! k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}[[:space:]]"; then
         error "Cluster '${CLUSTER_NAME}' is not running. Run 'make up' first."
-        exit 1
+        cap_fail 4 "cluster '${CLUSTER_NAME}' is not running"
     fi
 
     kubectl config use-context "k3d-${CLUSTER_NAME}" &>/dev/null || true
@@ -164,8 +190,7 @@ function deployment_name_for_node() {
         planner)    echo "planner" ;;
         workbench)  echo "workbench" ;;
         *)
-            error "Unknown node type: $node"
-            exit 1
+            cap_fail 2 "unknown node type: $node"
             ;;
     esac
 }
@@ -215,7 +240,7 @@ function build_engine_node() {
         --target "${target}" \
         --tag "${image}" \
         --file "${REPO_ROOT}/Dockerfile" \
-        "${REPO_ROOT}"
+        "${REPO_ROOT}" >&2
 
     info "Built ${image}."
 }
@@ -237,7 +262,7 @@ function build_carrier_node() {
         error "sibling checkout at the workspace level. Clone it first:"
         error "  git clone git@github.com:znasllc-io/memql-bff-copresent.git ${BFF_REPO}"
         error "Or set MEMQL_BFF_COPRESENT_REPO to its location."
-        exit 1
+        cap_fail 4 "memql-bff-copresent repo not found at ${BFF_REPO}"
     fi
 
     # The carrier Dockerfile expects the workspace root as the build context
@@ -250,7 +275,7 @@ function build_carrier_node() {
         --build-arg CGO_ENABLED=0 \
         --tag "${image}" \
         --file "${BFF_REPO}/Dockerfile" \
-        "${workspace_root}"
+        "${workspace_root}" >&2
 
     info "Built ${image}."
 }
@@ -263,7 +288,7 @@ function import_image() {
     local image="$1"
 
     info "Importing ${image} into k3d cluster '${CLUSTER_NAME}'..."
-    k3d image import "${image}" --cluster "${CLUSTER_NAME}"
+    k3d image import "${image}" --cluster "${CLUSTER_NAME}" >&2
     info "Imported ${image}."
 }
 
@@ -277,7 +302,7 @@ function restart_deployment() {
     deployment="$(deployment_name_for_node "$node")"
 
     info "Rolling restart of Deployment '${deployment}' in namespace '${NAMESPACE}'..."
-    kubectl rollout restart deployment/"${deployment}" -n "${NAMESPACE}"
+    kubectl rollout restart deployment/"${deployment}" -n "${NAMESPACE}" >&2
     info "Restart initiated. Watch: kubectl rollout status deployment/${deployment} -n ${NAMESPACE}"
 }
 
@@ -300,8 +325,12 @@ function process_node() {
         error "Unknown node type: '${node}'. Valid values:"
         error "  Engine nodes:  ${ENGINE_NODES[*]}"
         error "  Carrier nodes: ${CARRIER_NODES[*]}"
-        exit 1
+        cap_fail 2 "unknown node type: ${node}"
     fi
+
+    REBUILT_COUNT=$((REBUILT_COUNT + 1))
+    RESTARTED=true
+    cap_changed
 }
 
 #=============================================================================
@@ -313,11 +342,14 @@ function pull_and_import_infra() {
 
     for image in "${INFRA_IMAGES[@]}"; do
         info "Pulling ${image}..."
-        docker pull "${image}"
+        docker pull "${image}" >&2
         info "Importing ${image} into k3d..."
-        k3d image import "${image}" --cluster "${CLUSTER_NAME}"
+        k3d image import "${image}" --cluster "${CLUSTER_NAME}" >&2
         info "Done: ${image}"
     done
+
+    INFRA_PULLED=true
+    cap_changed
 }
 
 #=============================================================================
@@ -337,59 +369,8 @@ function wait_for_rollouts() {
             info "Waiting for ${deployment}..."
             kubectl rollout status deployment/"${deployment}" \
                 -n "${NAMESPACE}" \
-                --timeout=120s || warn "${deployment} rollout did not complete in 120s -- check 'kubectl get pods -n ${NAMESPACE}'"
+                --timeout=120s >&2 || warn "${deployment} rollout did not complete in 120s -- check 'kubectl get pods -n ${NAMESPACE}'"
         fi
-    done
-}
-
-#=============================================================================
-# PARSE ARGUMENTS
-#=============================================================================
-
-function show_help() {
-    cat <<EOF
-Usage: $0 [options]
-
-Rebuild node image(s), import into k3d, and restart Deployments.
-
-Options:
-    --node=TYPE[,TYPE,...]  Node type(s) to rebuild (default: all app nodes)
-                            Engine: ${ENGINE_NODES[*]}
-                            Carrier: ${CARRIER_NODES[*]}
-    --pull-infra            Pull + import infra images (postgres, azurite, redis, livekit)
-    --cluster=NAME          k3d cluster name (default: ${CLUSTER_NAME})
-    --namespace=NS          k8s namespace (default: ${NAMESPACE})
-    --no-wait               Skip rollout status wait
-    --help                  Show this help message
-
-Environment overrides:
-    MEMQL_K3D_CLUSTER            cluster name
-    MEMQL_K3D_NAMESPACE          k8s namespace
-    MEMQL_BFF_COPRESENT_REPO     path to memql-bff-copresent checkout
-
-Examples:
-    $0                            # rebuild + restart all app nodes
-    $0 --node=bff                 # rebuild + restart bff only
-    $0 --node=bff,cognition       # rebuild + restart bff + cognition
-    $0 --pull-infra               # re-import infra images (postgres/azurite/redis/livekit)
-EOF
-}
-
-NODES_ARG=""
-PULL_INFRA=false
-WAIT=true
-
-function parse_arguments() {
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --node=*)       NODES_ARG="${1#*=}";    shift ;;
-            --pull-infra)   PULL_INFRA=true;        shift ;;
-            --cluster=*)    CLUSTER_NAME="${1#*=}"; shift ;;
-            --namespace=*)  NAMESPACE="${1#*=}";    shift ;;
-            --no-wait)      WAIT=false;             shift ;;
-            --help)         show_help; exit 0 ;;
-            *) error "Unknown option: $1"; show_help; exit 2 ;;
-        esac
     done
 }
 
@@ -398,19 +379,30 @@ function parse_arguments() {
 #=============================================================================
 
 function main() {
-    parse_arguments "$@"
+    cap_handle_meta "$@"
+    cap_parse_flags "$@"
+
+    CLUSTER_NAME="$(cap_param cluster "${MEMQL_K3D_CLUSTER:-memql}")"
+    NAMESPACE="$(cap_param namespace "${MEMQL_K3D_NAMESPACE:-memql}")"
+    local nodes_arg pull_infra wait_flag
+    nodes_arg="$(cap_param node "")"
+    pull_infra="$(cap_flag pull-infra)"
+    wait_flag="$(cap_flag no-wait)"
+
+    cap_require cluster "$CLUSTER_NAME"
+    cap_require namespace "$NAMESPACE"
 
     check_prerequisites
 
     # Resolve node list.
     local nodes_to_build=()
-    if [ -n "${NODES_ARG}" ]; then
-        IFS=',' read -ra nodes_to_build <<< "${NODES_ARG}"
+    if [ -n "${nodes_arg}" ]; then
+        IFS=',' read -ra nodes_to_build <<< "${nodes_arg}"
     else
         nodes_to_build=("${ALL_APP_NODES[@]}")
     fi
 
-    if [ "${PULL_INFRA}" = true ]; then
+    if [ -n "${pull_infra}" ]; then
         pull_and_import_infra
     fi
 
@@ -420,7 +412,7 @@ function main() {
             process_node "$node"
         done
 
-        if [ "${WAIT}" = true ]; then
+        if [ -z "${wait_flag}" ]; then
             wait_for_rollouts "${nodes_to_build[@]}"
         fi
     fi
@@ -429,6 +421,14 @@ function main() {
     info "Cluster '${CLUSTER_NAME}' is running the latest local build."
     info "ArgoCD app status: kubectl get app memql-local -n argocd"
     info "Pod status:        kubectl get pods -n ${NAMESPACE}"
+
+    cap_result_set     cluster     "$CLUSTER_NAME"
+    cap_result_set     namespace   "$NAMESPACE"
+    cap_result_set     nodes       "${nodes_to_build[*]}"
+    cap_result_set_raw rebuilt     "$REBUILT_COUNT"
+    cap_result_set_raw restarted   "$RESTARTED"
+    cap_result_set_raw infraPulled "$INFRA_PULLED"
+    cap_ok
 }
 
 main "$@"

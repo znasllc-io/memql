@@ -28,20 +28,35 @@
 # /K1SZFPTOtr/KBHBeksoGMGw==).  It is not secret but lives in memql-secrets
 # so the blob integration reads it via the existing genesis envelope path.
 #
-# Per the repo + global Skills+Scripts convention (CLAUDE.md): function-based,
-# one responsibility per function, main() at the bottom. set -euo pipefail.
+# This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
+# JSON result envelope on stdout, human logs on stderr, honest exit codes.
+# Contract: docs/internal/design/capability-script-contract.md
+#
+# Exit codes: 0 ok | 2 bad param | 4 prerequisite missing (kubectl/cluster/ns)
+#
+# Refs: #2061 #2221
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/capability.sh
+source "${SCRIPT_DIR}/../lib/capability.sh"
+
+cap_init "k3d.seedSecrets" "Seed the k8s Secrets that the local k3d overlay requires."
+cap_spec_param "namespace" "k8s namespace to seed into" "MEMQL_K3D_NAMESPACE"
 
 #=============================================================================
 # CONFIGURATION
 #=============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 NAMESPACE="${MEMQL_K3D_NAMESPACE:-memql}"
 CLUSTER_NAME="${MEMQL_K3D_CLUSTER:-memql}"
+
+# Result accumulators.
+SEEDED_COUNT=0
+GENESIS_SOURCE="none"
 
 # Azurite well-known dev account + key (not secret; standard Azurite default).
 AZURITE_ACCOUNT="devstoreaccount1"
@@ -57,9 +72,9 @@ LOCAL_DB_NAME="${MEMQL_LOCAL_DB_NAME:-memql}"
 # OUTPUT HELPERS
 #=============================================================================
 
-function info()  { echo "INFO:  $*"; }
-function warn()  { echo "WARN:  $*"; }
-function error() { echo "ERROR: $*" >&2; }
+function info()  { cap_info "$*"; }
+function warn()  { cap_warn "$*"; }
+function error() { cap_error "$*"; }
 
 #=============================================================================
 # PREREQUISITE CHECKS
@@ -67,17 +82,14 @@ function error() { echo "ERROR: $*" >&2; }
 
 function check_prerequisites() {
     if ! command -v kubectl &> /dev/null; then
-        error "kubectl is required but not found. Install kubectl first."
-        exit 1
+        cap_fail 4 "kubectl is required but not found. Install kubectl first."
     fi
     if ! kubectl cluster-info &> /dev/null; then
-        error "kubectl cannot reach the cluster. Run 'make up' first."
-        exit 1
+        cap_fail 4 "kubectl cannot reach the cluster. Run 'make up' first."
     fi
     # Ensure the namespace exists before creating secrets.
     if ! kubectl get namespace "$NAMESPACE" &> /dev/null; then
-        error "namespace $NAMESPACE does not exist. Run 'make up' first."
-        exit 1
+        cap_fail 4 "namespace $NAMESPACE does not exist. Run 'make up' first."
     fi
 }
 
@@ -140,7 +152,8 @@ function seed_internal_ca() {
         return
     fi
     info "seeding internal TLS CA (identity-tls + memql-ca)..."
-    NAMESPACE="$NAMESPACE" bash "$gen"
+    NAMESPACE="$NAMESPACE" bash "$gen" >&2
+    SEEDED_COUNT=$((SEEDED_COUNT + 1))
 }
 
 #=============================================================================
@@ -155,7 +168,8 @@ function seed_db_creds() {
         --from-literal="POSTGRES_PASSWORD=$LOCAL_DB_PASSWORD" \
         --from-literal="POSTGRES_DB=$LOCAL_DB_NAME" \
         --dry-run=client -o yaml \
-        | kubectl apply -f -
+        | kubectl apply -f - >&2
+    SEEDED_COUNT=$((SEEDED_COUNT + 1))
     info "memql-local-db-creds seeded."
 }
 
@@ -183,7 +197,8 @@ function seed_memql_secrets() {
         --from-literal="MEMORY_NODES_DATABASE_DIRECT_DSN=$db_direct_dsn" \
         --from-literal="AZURE_BLOB_CONNECTION_STRING=$AZURITE_CONN" \
         --dry-run=client -o yaml \
-        | kubectl apply -f -
+        | kubectl apply -f - >&2
+    SEEDED_COUNT=$((SEEDED_COUNT + 1))
     info "memql-secrets seeded."
 }
 
@@ -232,7 +247,8 @@ function seed_livekit_secrets() {
         --from-literal="LIVEKIT_API_KEY=$lk_key" \
         --from-literal="LIVEKIT_API_SECRET=$lk_secret" \
         --dry-run=client -o yaml \
-        | kubectl apply -f -
+        | kubectl apply -f - >&2
+    SEEDED_COUNT=$((SEEDED_COUNT + 1))
     info "livekit-secrets seeded."
 }
 
@@ -253,7 +269,8 @@ function seed_telephony_secrets() {
         --from-literal="TELNYX_CONNECTION_ID=disabled" \
         --from-literal="TELNYX_OUTBOUND_PROFILE_ID=disabled" \
         --dry-run=client -o yaml \
-        | kubectl apply -f -
+        | kubectl apply -f - >&2
+    SEEDED_COUNT=$((SEEDED_COUNT + 1))
     info "telephony-secrets seeded (stub)."
 }
 
@@ -261,51 +278,38 @@ function seed_telephony_secrets() {
 # ENTRY POINT
 #=============================================================================
 
-function show_help() {
-    cat << EOF
-Usage: $0 [options]
-
-Seed k8s Secrets for the local k3d overlay. Safe to re-run (idempotent).
-
-Options:
-    --namespace=NS       k8s namespace to seed into (default: $NAMESPACE)
-    --help               Show this help.
-
-Environment:
-    MEMQL_GENESIS_B64      Base64-encoded sealed genesis envelope (preferred).
-    MEMQL_GENESIS_FILE     Path to genesis file (default: ~/.memql/genesis.znas).
-    MEMQL_MASTER_KEY       Master key for genesis decryption.
-    MEMQL_LOCAL_DB_USER    Postgres user (default: memql).
-    MEMQL_LOCAL_DB_PASSWORD Postgres password (default: memql_dev).
-    LIVEKIT_URL            LiveKit Cloud project URL for local dev
-                           (wss://<project>.livekit.cloud). Required for
-                           local voice/telephony (Epic #2184 / #2186).
-    LIVEKIT_API_KEY        LiveKit Cloud API key.
-    LIVEKIT_API_SECRET     LiveKit Cloud API secret.
-EOF
-}
-
-function parse_arguments() {
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --namespace=*) NAMESPACE="${1#*=}"; shift ;;
-            --help)        show_help; exit 0 ;;
-            *) echo "ERROR: unknown option: $1"; show_help; exit 2 ;;
-        esac
-    done
-}
-
 function main() {
-    parse_arguments "$@"
+    cap_handle_meta "$@"
+    cap_parse_flags "$@"
+
+    NAMESPACE="$(cap_param namespace "$NAMESPACE")"
+    cap_require namespace "$NAMESPACE"
+
+    # Genesis source for the result envelope (computed here -- the resolver
+    # runs in a $(...) subshell and cannot mutate this global).
+    if [ -n "${MEMQL_GENESIS_B64:-}" ]; then
+        GENESIS_SOURCE="envelope"
+    elif [ -f "${MEMQL_GENESIS_FILE:-$HOME/.memql/genesis.znas}" ]; then
+        GENESIS_SOURCE="file"
+    else
+        GENESIS_SOURCE="none"
+    fi
+
     check_prerequisites
     seed_internal_ca
     seed_db_creds
     seed_memql_secrets
     seed_livekit_secrets
     seed_telephony_secrets
-    echo ""
+
     info "All local secrets seeded. The k3d cluster can now start the memQL stack."
     info "ArgoCD reconciles automatically; check: kubectl get app memql-local -n argocd -w"
+
+    cap_changed
+    cap_result_set     namespace "$NAMESPACE"
+    cap_result_set_raw secretsSeeded "$SEEDED_COUNT"
+    cap_result_set     source "$GENESIS_SOURCE"
+    cap_ok
 }
 
 main "$@"

@@ -3,7 +3,8 @@
 # scripts/k3d/up.sh
 # =================
 #
-# Bootstrap a local k3d cluster running ArgoCD pointed at the local overlay.
+# Capability: k3d.up -- bootstrap a local k3d cluster running ArgoCD pointed at
+# the local overlay.
 #
 # Steps:
 #   1. Verify prerequisites (docker, k3d, kubectl, git).
@@ -30,18 +31,40 @@
 # `mcp` node; reach it on demand with:
 #   kubectl port-forward -n memql svc/mcp 50051:50051
 #
-# Per the repo + global Skills+Scripts convention (CLAUDE.md): function-based,
-# one responsibility per function, main() at the bottom. set -euo pipefail.
+# This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
+# JSON result envelope on stdout, human logs on stderr, honest exit codes.
+# Contract: docs/internal/design/capability-script-contract.md
 #
-# Refs: #2063 #2061
+# Idempotent: an existing cluster / ArgoCD install is detected and skipped
+# (changed=false for that step). Re-running on a healthy cluster is a safe
+# no-op.
+#
+# Exit codes: 0 ok | 2 bad param | 4 prerequisite missing (docker/k3d/kubectl/git
+#             absent or docker not running) | 5 operation failed (ArgoCD never
+#             became ready)
+#
+# Refs: #2063 #2061 #2221
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/capability.sh
+source "${SCRIPT_DIR}/../lib/capability.sh"
+
+cap_init "k3d.up" "Bootstrap a local k3d cluster running ArgoCD pointed at the local overlay."
+cap_spec_param "cluster"        "k3d cluster name"                                  "MEMQL_K3D_CLUSTER"
+cap_spec_param "revision"       "git branch/tag/SHA for the ArgoCD Application"     "MEMQL_K3D_TARGET_REVISION"
+cap_spec_param "namespace"      "k8s namespace for the memQL stack"                 "MEMQL_K3D_NAMESPACE"
+cap_spec_param "repo-url"       "git repo URL for the ArgoCD Application"           "MEMQL_K3D_REPO_URL"
+cap_spec_param "servers"        "number of k3d server nodes"                        "MEMQL_K3D_SERVERS"
+cap_spec_param "agents"         "number of k3d agent nodes"                         "MEMQL_K3D_AGENTS"
+cap_spec_param "argocd-timeout" "ArgoCD readiness timeout (seconds)"                "MEMQL_K3D_ARGOCD_TIMEOUT"
+cap_spec_param "no-secrets"     "skip secret seeding (flag)"                        ""
 
 #=============================================================================
 # CONFIGURATION
 #=============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 CLUSTER_NAME="${MEMQL_K3D_CLUSTER:-memql}"
@@ -63,19 +86,26 @@ K3D_AGENTS="${MEMQL_K3D_AGENTS:-0}"
 # needs more than a couple of minutes on a cold image cache -- default high.
 ARGOCD_TIMEOUT="${MEMQL_K3D_ARGOCD_TIMEOUT:-300}"
 
+# Outcome tracking (result envelope + idempotency reporting).
+CLUSTER_CREATED=false
+ARGOCD_READY=false
+SECRETS_SEEDED=false
+
 #=============================================================================
-# OUTPUT HELPERS
+# OUTPUT HELPERS -- delegate to the capability runtime (all logs to STDERR)
 #=============================================================================
 
-function info()  { echo "INFO:  $*"; }
-function warn()  { echo "WARN:  $*"; }
-function error() { echo "ERROR: $*" >&2; }
+function info()  { cap_info  "$*"; }
+function warn()  { cap_warn  "$*"; }
+function error() { cap_error "$*"; }
 
 function section() {
-    echo ""
-    echo "============================================================"
-    echo "  $*"
-    echo "============================================================"
+    {
+        echo ""
+        echo "============================================================"
+        echo "  $*"
+        echo "============================================================"
+    } >&2
 }
 
 #=============================================================================
@@ -117,12 +147,12 @@ function check_prerequisites() {
         error "  docker: https://docs.docker.com/get-docker/"
         error "  k3d:    brew install k3d  (or https://k3d.io)"
         error "  kubectl: brew install kubectl"
-        exit 1
+        cap_fail 4 "missing required tools: ${missing[*]}"
     fi
 
     if ! docker info &>/dev/null; then
         error "Docker daemon is not running. Start Docker Desktop first."
-        exit 1
+        cap_fail 4 "docker daemon is not running"
     fi
 
     info "All prerequisites satisfied."
@@ -156,9 +186,11 @@ function create_cluster() {
         --port "7880:7880@loadbalancer" \
         --port "5432:5432@loadbalancer" \
         --wait \
-        --timeout "120s"
+        --timeout "120s" >&2
 
     info "Cluster '${CLUSTER_NAME}' created."
+    CLUSTER_CREATED=true
+    cap_changed
 
     # Merge kubeconfig for this cluster.
     k3d kubeconfig merge "${CLUSTER_NAME}" --kubeconfig-merge-default &>/dev/null
@@ -176,12 +208,13 @@ function install_argocd() {
     if kubectl get namespace "${ARGOCD_NAMESPACE}" &>/dev/null; then
         if kubectl get deployment argocd-server -n "${ARGOCD_NAMESPACE}" &>/dev/null; then
             info "ArgoCD already installed in namespace '${ARGOCD_NAMESPACE}' -- skipping."
+            ARGOCD_READY=true
             return 0
         fi
     fi
 
     info "Applying ArgoCD bootstrap (namespace + install.yaml pinned to ${ARGOCD_VERSION})..."
-    kubectl apply -k "${REPO_ROOT}/deploy/argocd/bootstrap"
+    kubectl apply -k "${REPO_ROOT}/deploy/argocd/bootstrap" >&2
 
     wait_for_argocd
 }
@@ -198,16 +231,18 @@ function wait_for_argocd() {
 
     if kubectl rollout status deployment/argocd-server \
         -n "${ARGOCD_NAMESPACE}" \
-        --timeout="${ARGOCD_TIMEOUT}s"; then
+        --timeout="${ARGOCD_TIMEOUT}s" >&2; then
         info "ArgoCD ${ARGOCD_VERSION} is ready."
+        ARGOCD_READY=true
         return 0
     fi
 
     warn "rollout status timed out; re-checking the Available condition directly..."
     if kubectl wait --for=condition=Available deployment/argocd-server \
         -n "${ARGOCD_NAMESPACE}" \
-        --timeout=60s; then
+        --timeout=60s >&2; then
         info "ArgoCD ${ARGOCD_VERSION} is ready (became Available just after the rollout wait)."
+        ARGOCD_READY=true
         return 0
     fi
 
@@ -217,7 +252,7 @@ function wait_for_argocd() {
     error "  kubectl describe deployment/argocd-server -n ${ARGOCD_NAMESPACE}"
     error "Then re-run 'make up' (it is idempotent) or raise the timeout:"
     error "  MEMQL_K3D_ARGOCD_TIMEOUT=600 make up"
-    return 1
+    cap_fail 5 "ArgoCD server did not become ready within ${ARGOCD_TIMEOUT}s"
 }
 
 #=============================================================================
@@ -232,11 +267,11 @@ function apply_argocd_app() {
     info "Overlay path:    ${OVERLAY_PATH}"
 
     # Apply the memql AppProject first (required before the Application).
-    kubectl apply -f "${REPO_ROOT}/deploy/argocd/apps/project.yaml"
+    kubectl apply -f "${REPO_ROOT}/deploy/argocd/apps/project.yaml" >&2
 
     # Generate and apply the local Application manifest.
     # We template the targetRevision so it follows the current branch.
-    kubectl apply -f - <<YAML
+    kubectl apply -f - >&2 <<YAML
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -288,11 +323,12 @@ function seed_secrets() {
     # Ensure the memql namespace exists before seeding.
     if ! kubectl get namespace "${NAMESPACE}" &>/dev/null; then
         info "Namespace '${NAMESPACE}' not yet created by ArgoCD -- creating for secrets..."
-        kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+        kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - >&2
     fi
 
     info "Running scripts/k3d/seed-secrets.sh..."
-    bash "${SCRIPT_DIR}/seed-secrets.sh" --namespace="${NAMESPACE}"
+    bash "${SCRIPT_DIR}/seed-secrets.sh" --namespace="${NAMESPACE}" >&2
+    SECRETS_SEEDED=true
 }
 
 #=============================================================================
@@ -302,80 +338,29 @@ function seed_secrets() {
 function print_summary() {
     section "Bootstrap complete"
 
-    echo ""
-    echo "  Cluster:        k3d-${CLUSTER_NAME}"
-    echo "  ArgoCD version: ${ARGOCD_VERSION}"
-    echo "  Application:    memql-local (${TARGET_REVISION} -> ${OVERLAY_PATH})"
-    echo "  Namespace:      ${NAMESPACE}"
-    echo ""
-    echo "  Port-forwards (via k3d LoadBalancer):"
-    echo "    http://localhost:8085   identity"
-    echo "    ws://localhost:7880     livekit"
-    echo "    localhost:5432          postgres (debug)"
-    echo ""
-    echo "  Engine gRPC head (mcp), on demand:"
-    echo "    kubectl port-forward -n ${NAMESPACE} svc/mcp 50051:50051"
-    echo ""
-    echo "  Next steps:"
-    echo "    1. Watch ArgoCD sync:  kubectl get apps -n argocd -w"
-    echo "    2. Check pod status:   kubectl get pods -n ${NAMESPACE}"
-    echo "    3. Inner-loop dev:     make dev (E0.4 -- build -> import -> sync)"
-    echo ""
-    echo "  Tear down:  make down"
-    echo ""
-}
-
-#=============================================================================
-# PARSE ARGUMENTS
-#=============================================================================
-
-function show_help() {
-    cat <<EOF
-Usage: $0 [options]
-
-Bootstrap a local k3d cluster with ArgoCD pointing at the local overlay.
-
-Options:
-    --cluster=NAME        k3d cluster name (default: ${CLUSTER_NAME})
-    --revision=REV        Git branch/tag/SHA for the ArgoCD Application
-                          (default: current branch = ${TARGET_REVISION})
-    --namespace=NS        k8s namespace for the memQL stack (default: ${NAMESPACE})
-    --servers=N           Number of k3d server nodes (default: ${K3D_SERVERS})
-    --agents=N            Number of k3d agent nodes (default: ${K3D_AGENTS})
-    --no-secrets          Skip secret seeding (useful if already seeded)
-    --help                Show this help message
-
-Environment overrides:
-    MEMQL_K3D_CLUSTER           cluster name
-    MEMQL_K3D_TARGET_REVISION   git revision for ArgoCD
-    MEMQL_K3D_NAMESPACE         k8s namespace
-    MEMQL_K3D_REPO_URL          git repo URL
-    MEMQL_K3D_SERVERS           server node count
-    MEMQL_K3D_AGENTS            agent node count
-    MEMQL_K3D_ARGOCD_TIMEOUT    ArgoCD readiness timeout (seconds)
-
-Example:
-    $0                         # bootstrap with current branch
-    $0 --revision=main         # bootstrap against main
-    $0 --servers=2 --agents=1  # multi-node (see E0.5 / #2067)
-EOF
-}
-
-SKIP_SECRETS=false
-
-function parse_arguments() {
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --cluster=*)  CLUSTER_NAME="${1#*=}";        shift ;;
-            --revision=*) TARGET_REVISION="${1#*=}";     shift ;;
-            --namespace=*) NAMESPACE="${1#*=}";          shift ;;
-            --servers=*)  K3D_SERVERS="${1#*=}";         shift ;;
-            --agents=*)   K3D_AGENTS="${1#*=}";          shift ;;
-            --no-secrets) SKIP_SECRETS=true;             shift ;;
-            --help)       show_help; exit 0 ;;
-            *) error "Unknown option: $1"; show_help; exit 2 ;;
-        esac
-    done
+    {
+        echo ""
+        echo "  Cluster:        k3d-${CLUSTER_NAME}"
+        echo "  ArgoCD version: ${ARGOCD_VERSION}"
+        echo "  Application:    memql-local (${TARGET_REVISION} -> ${OVERLAY_PATH})"
+        echo "  Namespace:      ${NAMESPACE}"
+        echo ""
+        echo "  Port-forwards (via k3d LoadBalancer):"
+        echo "    http://localhost:8085   identity"
+        echo "    ws://localhost:7880     livekit"
+        echo "    localhost:5432          postgres (debug)"
+        echo ""
+        echo "  Engine gRPC head (mcp), on demand:"
+        echo "    kubectl port-forward -n ${NAMESPACE} svc/mcp 50051:50051"
+        echo ""
+        echo "  Next steps:"
+        echo "    1. Watch ArgoCD sync:  kubectl get apps -n argocd -w"
+        echo "    2. Check pod status:   kubectl get pods -n ${NAMESPACE}"
+        echo "    3. Inner-loop dev:     make dev (E0.4 -- build -> import -> sync)"
+        echo ""
+        echo "  Tear down:  make down"
+        echo ""
+    } >&2
 }
 
 #=============================================================================
@@ -383,7 +368,21 @@ function parse_arguments() {
 #=============================================================================
 
 function main() {
-    parse_arguments "$@"
+    cap_handle_meta "$@"
+    cap_parse_flags "$@"
+
+    CLUSTER_NAME="$(cap_param cluster "${MEMQL_K3D_CLUSTER:-memql}")"
+    TARGET_REVISION="$(cap_param revision "${TARGET_REVISION}")"
+    NAMESPACE="$(cap_param namespace "${MEMQL_K3D_NAMESPACE:-memql}")"
+    REPO_URL="$(cap_param repo-url "${MEMQL_K3D_REPO_URL:-https://github.com/znasllc-io/memql.git}")"
+    K3D_SERVERS="$(cap_param servers "${MEMQL_K3D_SERVERS:-1}")"
+    K3D_AGENTS="$(cap_param agents "${MEMQL_K3D_AGENTS:-0}")"
+    ARGOCD_TIMEOUT="$(cap_param argocd-timeout "${MEMQL_K3D_ARGOCD_TIMEOUT:-300}")"
+    local skip_secrets
+    skip_secrets="$(cap_flag no-secrets)"
+
+    cap_require cluster "$CLUSTER_NAME"
+    cap_require namespace "$NAMESPACE"
 
     info "memQL k3d bootstrap"
     info "Cluster:   ${CLUSTER_NAME}"
@@ -394,7 +393,7 @@ function main() {
     create_cluster
     install_argocd
 
-    if [ "${SKIP_SECRETS}" = false ]; then
+    if [[ -z "$skip_secrets" ]]; then
         seed_secrets
     else
         info "Skipping secret seeding (--no-secrets)."
@@ -402,6 +401,16 @@ function main() {
 
     apply_argocd_app
     print_summary
+
+    cap_result_set     cluster        "$CLUSTER_NAME"
+    cap_result_set     revision       "$TARGET_REVISION"
+    cap_result_set     namespace      "$NAMESPACE"
+    cap_result_set_raw servers        "$K3D_SERVERS"
+    cap_result_set_raw agents         "$K3D_AGENTS"
+    cap_result_set_raw clusterCreated "$CLUSTER_CREATED"
+    cap_result_set_raw argocdReady    "$ARGOCD_READY"
+    cap_result_set_raw secretsSeeded  "$SECRETS_SEEDED"
+    cap_ok
 }
 
 main "$@"

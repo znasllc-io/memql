@@ -3,19 +3,35 @@
 # scripts/k3d/status.sh
 # =====================
 #
-# Print a parity litmus for the local k3d cluster: pod status, per-replica
-# MEMQL_NODE_ID values (cross-node mesh test), and ArgoCD sync status.
+# Capability: k3d.status -- print a parity litmus for the local k3d cluster:
+# pod status, per-replica MEMQL_NODE_ID values (cross-node mesh test), and
+# ArgoCD sync status.
 #
-# Backs 'make status'. Primary use: verify the mesh formed across
-# replicas and that each pod has a UNIQUE node id (required for
-# cross-node event routing).
+# Backs 'make status'. Primary use: verify the mesh formed across replicas
+# and that each pod has a UNIQUE node id (required for cross-node event
+# routing). This is a status REPORTER: the human-readable table goes to
+# STDERR (so `make status` still shows it inline), and the machine-readable
+# litmus RESULT (pods / uniqueNodeIds / meshHealthy) is the single JSON
+# envelope on STDOUT.
 #
-# Per the repo + global Skills+Scripts convention (CLAUDE.md): function-based,
-# one responsibility per function, main() at the bottom. set -euo pipefail.
+# This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
+# JSON result envelope on stdout, human logs on stderr, honest exit codes.
+# Contract: docs/internal/design/capability-script-contract.md
 #
-# Refs: #2067 #2061
+# Exit codes: 0 ok | 2 bad param | 4 cluster unreachable
+#
+# Refs: #2067 #2061 #2221
 
-set -euo pipefail
+# Reporter: no -e so an individual kubectl failure doesn't abort the report.
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/capability.sh
+source "${SCRIPT_DIR}/../lib/capability.sh"
+
+cap_init "k3d.status" "Print local k3d cluster status and mesh litmus."
+cap_spec_param "cluster"   "k3d cluster name" "MEMQL_K3D_CLUSTER"
+cap_spec_param "namespace" "k8s namespace"    "MEMQL_K3D_NAMESPACE"
 
 #=============================================================================
 # CONFIGURATION
@@ -24,18 +40,25 @@ set -euo pipefail
 CLUSTER_NAME="${MEMQL_K3D_CLUSTER:-memql}"
 NAMESPACE="${MEMQL_K3D_NAMESPACE:-memql}"
 
+# Litmus accumulators (populated by check_node_ids).
+PODS_TOTAL=0
+UNIQUE_NODE_IDS=0
+MESH_HEALTHY=false
+
 #=============================================================================
 # OUTPUT HELPERS
 #=============================================================================
 
-function info()  { echo "INFO:  $*"; }
-function warn()  { echo "WARN:  $*"; }
+function info()  { cap_info "$*"; }
+function warn()  { cap_warn "$*"; }
 
 function section() {
-    echo ""
-    echo "============================================================"
-    echo "  $*"
-    echo "============================================================"
+    {
+        echo ""
+        echo "============================================================"
+        echo "  $*"
+        echo "============================================================"
+    } >&2
 }
 
 #=============================================================================
@@ -46,12 +69,16 @@ function check_cluster() {
     section "k3d cluster '${CLUSTER_NAME}'"
 
     if ! k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}[[:space:]]"; then
-        echo "  STATUS: cluster '${CLUSTER_NAME}' is NOT running."
-        echo "  Run:    make up"
-        return 1
+        {
+            echo "  STATUS: cluster '${CLUSTER_NAME}' is NOT running."
+            echo "  Run:    make up"
+        } >&2
+        cap_result_set     cluster "$CLUSTER_NAME"
+        cap_result_set     namespace "$NAMESPACE"
+        cap_fail 4 "k3d cluster '${CLUSTER_NAME}' is not running"
     fi
 
-    k3d cluster list 2>/dev/null | grep -E "^NAME|^${CLUSTER_NAME}"
+    k3d cluster list 2>/dev/null | grep -E "^NAME|^${CLUSTER_NAME}" >&2
     kubectl config use-context "k3d-${CLUSTER_NAME}" &>/dev/null || true
 }
 
@@ -63,7 +90,7 @@ function check_argocd() {
     section "ArgoCD Application"
 
     if ! kubectl get namespace argocd &>/dev/null; then
-        echo "  STATUS: ArgoCD namespace not found -- run 'make up' first."
+        echo "  STATUS: ArgoCD namespace not found -- run 'make up' first." >&2
         return 0
     fi
 
@@ -73,11 +100,13 @@ function check_argocd() {
 "NAME:.metadata.name,\
 SYNC:.status.sync.status,\
 HEALTH:.status.health.status,\
-REVISION:.status.sync.revision" 2>/dev/null || \
-        kubectl get application memql-local -n argocd 2>/dev/null
+REVISION:.status.sync.revision" 2>/dev/null >&2 || \
+        kubectl get application memql-local -n argocd 2>/dev/null >&2
     else
-        echo "  STATUS: memql-local Application not found."
-        echo "  Run:    make up"
+        {
+            echo "  STATUS: memql-local Application not found."
+            echo "  Run:    make up"
+        } >&2
     fi
 }
 
@@ -89,13 +118,13 @@ function check_pods() {
     section "Pods in namespace '${NAMESPACE}'"
 
     if ! kubectl get namespace "${NAMESPACE}" &>/dev/null; then
-        echo "  STATUS: namespace '${NAMESPACE}' not found -- ArgoCD may not have synced yet."
+        echo "  STATUS: namespace '${NAMESPACE}' not found -- ArgoCD may not have synced yet." >&2
         return 0
     fi
 
     kubectl get pods -n "${NAMESPACE}" \
         -o wide \
-        --sort-by=.metadata.name 2>/dev/null || echo "  (no pods found)"
+        --sort-by=.metadata.name 2>/dev/null >&2 || echo "  (no pods found)" >&2
 }
 
 #=============================================================================
@@ -106,7 +135,7 @@ function check_node_ids() {
     section "Mesh litmus: MEMQL_NODE_ID per running pod (must be unique)"
 
     if ! kubectl get namespace "${NAMESPACE}" &>/dev/null; then
-        echo "  (namespace not ready)"
+        echo "  (namespace not ready)" >&2
         return 0
     fi
 
@@ -116,7 +145,7 @@ function check_node_ids() {
         -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
 
     if [ -z "$pods" ]; then
-        echo "  (no running pods found)"
+        echo "  (no running pods found)" >&2
         return 0
     fi
 
@@ -125,7 +154,7 @@ function check_node_ids() {
         local node_id
         node_id=$(kubectl exec -n "${NAMESPACE}" "${pod}" \
             -- sh -c 'echo ${MEMQL_NODE_ID:-UNSET}' 2>/dev/null || echo "ERROR")
-        echo "  ${pod}: MEMQL_NODE_ID=${node_id}"
+        echo "  ${pod}: MEMQL_NODE_ID=${node_id}" >&2
         node_ids+=("${node_id}")
     done
 
@@ -134,12 +163,17 @@ function check_node_ids() {
     unique_count=$(printf '%s\n' "${node_ids[@]}" | sort -u | wc -l | tr -d ' ')
     local total_count=${#node_ids[@]}
 
-    echo ""
+    PODS_TOTAL="${total_count}"
+    UNIQUE_NODE_IDS="${unique_count}"
+
+    echo "" >&2
     if [ "${unique_count}" -eq "${total_count}" ]; then
-        echo "  PASS: all ${total_count} pod(s) have unique MEMQL_NODE_ID values."
+        echo "  PASS: all ${total_count} pod(s) have unique MEMQL_NODE_ID values." >&2
+        MESH_HEALTHY=true
     else
         warn "FAIL: ${total_count} pods but only ${unique_count} unique MEMQL_NODE_ID values."
         warn "Shared node ids cause silent event-routing failures (mesh #1388 class of bugs)."
+        MESH_HEALTHY=false
     fi
 }
 
@@ -151,44 +185,16 @@ function check_secrets() {
     section "k8s Secrets"
 
     if ! kubectl get namespace "${NAMESPACE}" &>/dev/null; then
-        echo "  (namespace not ready)"
+        echo "  (namespace not ready)" >&2
         return 0
     fi
 
     for secret in memql-secrets memql-local-db-creds livekit-secrets telephony-secrets; do
         if kubectl get secret "${secret}" -n "${NAMESPACE}" &>/dev/null; then
-            echo "  PRESENT: ${secret}"
+            echo "  PRESENT: ${secret}" >&2
         else
-            echo "  MISSING: ${secret}  (run: make secrets)"
+            echo "  MISSING: ${secret}  (run: make secrets)" >&2
         fi
-    done
-}
-
-#=============================================================================
-# PARSE ARGUMENTS
-#=============================================================================
-
-function show_help() {
-    cat <<EOF
-Usage: $0 [options]
-
-Print local k3d cluster status and mesh litmus.
-
-Options:
-    --cluster=NAME   k3d cluster name (default: ${CLUSTER_NAME})
-    --namespace=NS   k8s namespace (default: ${NAMESPACE})
-    --help           Show this help message
-EOF
-}
-
-function parse_arguments() {
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --cluster=*)   CLUSTER_NAME="${1#*=}"; shift ;;
-            --namespace=*) NAMESPACE="${1#*=}";    shift ;;
-            --help)        show_help; exit 0 ;;
-            *) echo "ERROR: Unknown option: $1"; show_help; exit 2 ;;
-        esac
     done
 }
 
@@ -197,7 +203,11 @@ function parse_arguments() {
 #=============================================================================
 
 function main() {
-    parse_arguments "$@"
+    cap_handle_meta "$@"
+    cap_parse_flags "$@"
+
+    CLUSTER_NAME="$(cap_param cluster "$CLUSTER_NAME")"
+    NAMESPACE="$(cap_param namespace "$NAMESPACE")"
 
     check_cluster
     check_argocd
@@ -205,10 +215,19 @@ function main() {
     check_secrets
     check_node_ids
 
-    echo ""
-    echo "  Tear down:  make down"
-    echo "  Inner loop: make dev [NODE=<type>]"
-    echo ""
+    {
+        echo ""
+        echo "  Tear down:  make down"
+        echo "  Inner loop: make dev [NODE=<type>]"
+        echo ""
+    } >&2
+
+    cap_result_set     cluster "$CLUSTER_NAME"
+    cap_result_set     namespace "$NAMESPACE"
+    cap_result_set_raw pods "$PODS_TOTAL"
+    cap_result_set_raw uniqueNodeIds "$UNIQUE_NODE_IDS"
+    cap_result_set_raw meshHealthy "$MESH_HEALTHY"
+    cap_ok
 }
 
 main "$@"

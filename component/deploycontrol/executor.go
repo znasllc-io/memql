@@ -24,6 +24,15 @@ import (
 // and `kubectl argo rollouts promote|abort` -- NEVER ad-hoc
 // `kubectl set image`.
 //
+// Capability-script contract (#2221): the deploy/ops scripts an action
+// resolves to are CAPABILITY SCRIPTS -- non-interactive, structured params in,
+// a single JSON result envelope on stdout, logs on stderr, honest exit codes
+// (docs/internal/design/capability-script-contract.md). Parse such a script's
+// stdout with ParseCapabilityResult (capability_result.go) rather than scraping
+// prose, and trust the exit code. The k3d engine-local scripts (scripts/k3d/*)
+// are the reference implementation; promote.sh + the Azure/ArgoCD scripts
+// converge onto the contract via the Makefile/ArgoCD refactor track.
+//
 // Scope note: the effect SEAM is consolidated here (the gRPC Service's
 // legacy promote actions share promoteRelease, and the deploy pack reuses
 // this Executor + ConsoleEnvFor). The synchronous Go deploy LIFECYCLE that
