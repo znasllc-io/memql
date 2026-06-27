@@ -3,10 +3,14 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 //
-// bootstrapCluster stays a terse single-step pass-through
-// (`automation NAME @trigger(...) => logic L`, memql#2215 / ADR S2.4) -- its
-// conditional create logic is not yet expressible as pure-decide + persist
-// steps (#2235). deregisterNode + registerNode are longhand: the inline graph
+// bootstrapCluster + pruneStaleClusterNodes stay terse single-step pass-throughs
+// (`automation NAME @trigger(...) => logic L`, memql#2215 / ADR S2.4) and keep
+// their logic-purity baseline entries (#2235): bootstrapCluster's conditional
+// creates gate the critical system.startup path and need behavioral verification
+// before moving to if-steps; pruneStaleClusterNodes' per-row sweep needs a forEach
+// automation step, which the parser does not yet implement (struct-form forEach/for
+// is ADR S7 target syntax, not yet wired). See the deferral notes on their
+// callGraphBaseline entries. deregisterNode + registerNode are longhand: the inline graph
 // write that used to live in their pass-through `logic` (an ADR S2.1 logic-
 // purity violation, baselined under #2217) now lives in the automation as a
 // mutation step (the bare `<mutation>{ ... }` call form), so no `logic`
