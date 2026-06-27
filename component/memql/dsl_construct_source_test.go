@@ -26,7 +26,7 @@ func quietLogger() *slog.Logger {
 func TestDSLConstructSource_AutomationKind(t *testing.T) {
 	logger := quietLogger()
 
-	for _, name := range []string{"registerNode", "expireDelegations", "pruneStaleClusterNodes"} {
+	for _, name := range []string{"bootstrapCluster", "expireDelegations", "pruneStaleClusterNodes"} {
 		src, ok := memql.DSLConstructSource(logger, "automation", name)
 		if !ok {
 			t.Fatalf("DSLConstructSource(automation, %q): not found (the #1663 dry-run gap)", name)
@@ -48,12 +48,12 @@ func TestDSLConstructSource_AutomationKind(t *testing.T) {
 func TestDSLConstructSource_NonAutomationLogicKind(t *testing.T) {
 	logger := quietLogger()
 
-	src, ok := memql.DSLConstructSource(logger, "logic", "registerNode")
+	src, ok := memql.DSLConstructSource(logger, "logic", "pruneStaleClusterNodes")
 	if !ok {
-		t.Fatalf("DSLConstructSource(logic, registerNode): not found")
+		t.Fatalf("DSLConstructSource(logic, pruneStaleClusterNodes): not found")
 	}
-	if !strings.Contains(src, "logic registerNode") {
-		t.Fatalf("DSLConstructSource(logic, registerNode): unexpected source:\n%s", src)
+	if !strings.Contains(src, "logic pruneStaleClusterNodes") {
+		t.Fatalf("DSLConstructSource(logic, pruneStaleClusterNodes): unexpected source:\n%s", src)
 	}
 
 	// An internal-only logic construct (no wrapping automation) is still

@@ -14,11 +14,11 @@ func TestDeadLogicLint(t *testing.T) {
 			t.Errorf("serviceVersionProbe should have been retired with @entrypoint")
 		}
 	}
-	// Sanity: a referenced logic must NOT be reported dead. registerNode is
-	// invoked by the cluster registerNode automation.
+	// Sanity: a referenced logic must NOT be reported dead. bootstrapCluster is
+	// invoked by the cluster bootstrapCluster automation.
 	for _, n := range dead {
-		if n == "registerNode" {
-			t.Errorf("registerNode is referenced by an automation; must not be flagged dead")
+		if n == "bootstrapCluster" {
+			t.Errorf("bootstrapCluster is referenced by an automation; must not be flagged dead")
 		}
 	}
 }

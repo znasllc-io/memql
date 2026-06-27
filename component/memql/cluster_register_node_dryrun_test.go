@@ -47,13 +47,11 @@ package memql_test
 // Both fixes bind every @required field with an explicit key + coalesce, the
 // same shape deregisterNode uses.
 //
-// Driven through the Gate-2 dry-run sandbox (no Postgres). NB: the sandbox
-// executor does not thread the trigger event into a logic step's `args.event`
-// envelope -- args.event.payload.node.* evaluates to nil in the sandbox. This
-// is load-bearing: it reproduces the exact nil-path that fails @required
-// validation in the live executor (the same reproduction that caught both
-// #1643(a) and #1671). The live executor resolves the fields for real; the
-// identical access in bootstrapCluster is the production-proven precedent.
+// Driven through the Gate-2 dry-run sandbox (no Postgres). Each createNode /
+// createSpawnEvent mutation step reads event.payload.node.* directly and wraps
+// every value in coalesce(...,""), so a @required arg is always bound to a
+// non-nil string even when a nested field is absent -- the structural guarantee
+// that retired the #1643(a)/#1671 shorthand-corruption + bare-path bugs.
 
 import (
 	"context"
@@ -65,14 +63,32 @@ import (
 	_ "github.com/znasllc-io/memql/component/automations/steps"
 )
 
-// registerNodeAutomation mirrors dsl/cluster/automations.memql's registerNode:
-// a single step invoking the registerNode construct with the trigger event.
+// registerNodeAutomation mirrors dsl/cluster/automations.memql's registerNode.
+// Since #2235 registerNode is no longer a pass-through logic: the createNode +
+// createSpawnEvent writes are direct mutation steps on the automation, so the
+// binding hygiene these tests guard is now verified on the real authored shape.
 const registerNodeAutomation = `@enabled
 @trigger(event="system.startup")
 @description("Register this node in the database on startup")
 automation registerNode {
-  step run {
-    logic registerNode { event: event }
+  step node {
+    createNode {
+      id:           coalesce(event.payload.node.id, ""),
+      nodeType:     coalesce(event.payload.node.type, ""),
+      address:      coalesce(event.payload.node.address, ""),
+      deploymentId: coalesce(event.payload.deploymentId, ""),
+      provider:     coalesce(event.payload.provider, ""),
+      environment:  coalesce(event.payload.environment, ""),
+      region:       coalesce(event.payload.region, "")
+    }
+  }
+  step spawn {
+    createSpawnEvent {
+      nodeId:   coalesce(event.payload.node.id, ""),
+      nodeType: coalesce(event.payload.node.type, ""),
+      action:   "spawned",
+      reason:   "system.startup"
+    }
   }
 }`
 
@@ -151,17 +167,16 @@ func TestDryRun_RegisterNode_BindsCleanMutationArgs(t *testing.T) {
 // The #1643(a) fix corrected the nodeRecord step but left the spawnEvent step
 // with a bare (uncoalesced) path:
 //
-//	spawnEvent := createSpawnEvent({
-//	  nodeId:   coalesce(args.event.payload.node.id, ""),
-//	  nodeType: args.event.payload.node.type,   // <-- no coalesce!
+//	createSpawnEvent {
+//	  nodeId:   coalesce(event.payload.node.id, ""),
+//	  nodeType: event.payload.node.type,   // <-- the pre-#1671 bare path, no coalesce!
 //	  ...
-//	})
+//	}
 //
-// In the dry-run sandbox, args.event.payload.node.type evaluates to nil (the
-// sandbox does not thread the trigger event into a logic step's args.event
-// envelope). Passing nil for a @required field causes the live executor to
-// reject the call with "required argument 'nodeType' is missing". After the
-// fix, nodeType is coalesced to "" so the recorded payload is a non-nil string.
+// Passing nil for a @required field causes the live executor to reject the call
+// with "required argument 'nodeType' is missing". Because the createSpawnEvent
+// step now binds nodeType: coalesce(event.payload.node.type, ""), the recorded
+// payload is always a non-nil string (at minimum "").
 func TestDryRun_RegisterNode_SpawnEventBindsNodeType(t *testing.T) {
 	eng := newDryRunEngine(t)
 
