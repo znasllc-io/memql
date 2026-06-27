@@ -361,6 +361,13 @@ var structFormSteps = []structFormStep{
 	{"query", LooksLikeStructQuery, NormaliseQuerySource},
 	{"mutation", LooksLikeStructMutation, NormaliseMutationSource},
 	{"logic", LooksLikeStructLogic, NormaliseLogicSource},
+	// Terse single-step automation lowering (memql#2215) MUST run before
+	// the struct-form automation stage: it expands `automation NAME
+	// @trigger(...) => logic L` into the canonical longhand block that
+	// NormaliseAutomationSource then compiles. Excluded from
+	// StructFormKeywords below (it is the same `automation` keyword, not
+	// a new construct).
+	{"terse automation", LooksLikeTerseAutomation, NormaliseTerseAutomationSource},
 	{"automation", LooksLikeStructAutomation, NormaliseAutomationSource},
 	{"file-top args", LooksLikeFileTopArgs, NormaliseFileTopArgs},
 }
@@ -375,7 +382,13 @@ var structFormSteps = []structFormStep{
 var StructFormKeywords = func() []string {
 	out := make([]string, 0, len(structFormSteps))
 	for _, s := range structFormSteps {
-		if s.name == "file-top args" {
+		// "file-top args" and "terse automation" are rewrite stages, not
+		// author-facing top-level construct keywords: the former is the
+		// bare `args { ... }` block, the latter is sugar over the same
+		// `automation` keyword. Neither contributes a new keyword to the
+		// recognised construct set (#2124 drift test compares this list
+		// against dslspec's "function" category constructs).
+		if s.name == "file-top args" || s.name == "terse automation" {
 			continue
 		}
 		out = append(out, s.name)
@@ -985,6 +998,56 @@ func LooksLikeLegacyAutomation(source string) bool {
 // assigns each step's call to a named variable.
 func NormaliseAutomationSource(source string) (string, error) {
 	return rewriteEachBlock(source, automationStructHeader, "struct-form automation", false, emitAutomation)
+}
+
+// terseAutomationHeader matches the terse single-step automation form
+// (ADR §2.4 / §7, memql#2215):
+//
+//	automation NAME @trigger(event="...")    => logic logicName
+//	automation NAME @trigger(schedule="...")  => logic logicName
+//
+// It kills the pass-through ceremony (an automation whose entire body
+// was `step run { logic X { event: event } }`) without hiding the
+// reactive surface: the `@trigger` stays greppable on the declaration
+// line. Group 1 is leading indentation, group 2 the automation name,
+// group 3 the whole `@trigger(...)` annotation, group 4 the target
+// logic name. The `@trigger` arg list carries no nested parens, so a
+// `[^)]*` capture is exact.
+var terseAutomationHeader = regexp.MustCompile(`(?m)^([ \t]*)automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+(@trigger\([^)]*\))[ \t]*=>[ \t]*logic[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*$`)
+
+// LooksLikeTerseAutomation reports whether the source declares a terse
+// single-step automation (the `=> logic X` arrow form).
+func LooksLikeTerseAutomation(source string) bool {
+	return terseAutomationHeader.MatchString(source)
+}
+
+// NormaliseTerseAutomationSource lowers every terse single-step
+// automation to the canonical longhand struct form, hoisting the inline
+// `@trigger(...)` to its own annotation line above the declaration:
+//
+//	@trigger(event="system.startup")
+//	automation registerNode {
+//	  step run {
+//	    logic registerNode { event: event }
+//	  }
+//	}
+//
+// The longhand it emits is byte-for-byte the shape the four existing
+// cluster pass-throughs already use, so the subsequent
+// NormaliseAutomationSource stage compiles the terse and the longhand
+// forms to an IDENTICAL runtime automation -- there is no separate
+// terse execution path, hence no dry-run/live divergence to babysit.
+//
+// The synthesized step always forwards the bound trigger payload as
+// `event`. A target logic that declares no args simply ignores the
+// unbound value (undeclared args are dropped at invocation), so the
+// "forward event when the logic takes args, empty otherwise" contract
+// holds without the rewriter needing cross-file arg visibility.
+func NormaliseTerseAutomationSource(source string) (string, error) {
+	return terseAutomationHeader.ReplaceAllString(
+		source,
+		"${1}${3}\n${1}automation ${2} {\n${1}  step run {\n${1}    logic ${4} { event: event }\n${1}  }\n${1}}",
+	), nil
 }
 
 // automationStep is the parsed shape of a single step.
