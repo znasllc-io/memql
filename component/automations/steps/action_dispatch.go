@@ -1,14 +1,12 @@
 package steps
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -30,10 +28,20 @@ type engineToolInvoker interface {
 }
 
 // defaultDispatcher dispatches authored-action capabilities by namespace.
-// shell/fs/http run directly on the local surface; integration.* and mcp.*
+// fs.* / http.* run directly on the local surface; integration.* / mcp.*
 // resolve to engine tools via ExecuteToolByName. It is deterministic given
 // deterministic inputs + backend, which is what makes an authored action
 // replay token-free and fingerprint-verifiable.
+//
+// shell.* is recognised but NOT executed here. A shell capability's backend is
+// a DETERMINISTIC capability SCRIPT invoked with structured params (the merged
+// capability-script contract, #2221: `--flag=value` in, one JSON envelope
+// out), NOT an arbitrary rendered command string run through `sh -c` -- that
+// would be a command-injection sink on author/event-derived params. The
+// capability-script runner that drives those scripts + parses the envelope
+// (component/deploycontrol.ParseCapabilityResult) is wired into the dispatcher
+// in I8; until then shell.* returns a clear "not yet wired" error rather than
+// an unsafe shell.
 type defaultDispatcher struct {
 	engine engineToolInvoker
 }
@@ -46,8 +54,6 @@ func newDefaultDispatcher(engine engineToolInvoker) *defaultDispatcher {
 
 func (d *defaultDispatcher) Invoke(ctx context.Context, capability string, args map[string]any) (any, error) {
 	switch {
-	case capability == "shell.exec":
-		return d.shellExec(ctx, args)
 	case capability == "fs.readFile":
 		return d.fsReadFile(args)
 	case capability == "fs.writeFile":
@@ -58,33 +64,14 @@ func (d *defaultDispatcher) Invoke(ctx context.Context, capability string, args 
 		return d.httpRequest(ctx, http.MethodPost, args)
 	case strings.HasPrefix(capability, "integration."), strings.HasPrefix(capability, "mcp."):
 		return d.engineTool(ctx, capability, args)
+	case strings.HasPrefix(capability, "shell."):
+		// Deferred to the capability-script runner (I8): a shell capability is
+		// a deterministic script invoked with structured params, never an
+		// arbitrary rendered command string through a shell.
+		return nil, fmt.Errorf("capability %q: shell.* backend is delivered by the capability-script runner (a deterministic script with structured params, #2221) and is wired into the dispatcher in I8 -- not available in the default dispatcher yet", capability)
 	default:
-		return nil, fmt.Errorf("capability %q is not supported by the default dispatcher (supported: shell.exec, fs.readFile, fs.writeFile, http.get, http.post, integration.*, mcp.*)", capability)
+		return nil, fmt.Errorf("capability %q is not supported by the default dispatcher (supported: fs.readFile, fs.writeFile, http.get, http.post, integration.*, mcp.*; shell.* lands in I8)", capability)
 	}
-}
-
-// shellExec runs args["cmd"] via `sh -c` on the local surface. Per the
-// capability-script contract, a deterministic script logs to stderr and emits
-// a JSON result envelope on stdout; we decode stdout as JSON when possible and
-// otherwise return the trimmed text. A non-zero exit is an error.
-func (d *defaultDispatcher) shellExec(ctx context.Context, args map[string]any) (any, error) {
-	cmd, _ := args["cmd"].(string)
-	if strings.TrimSpace(cmd) == "" {
-		return nil, fmt.Errorf("shell.exec requires a non-empty \"cmd\" argument")
-	}
-	c := exec.CommandContext(ctx, "/bin/sh", "-c", cmd)
-	var stdout, stderr bytes.Buffer
-	c.Stdout = &stdout
-	c.Stderr = &stderr
-	runErr := c.Run()
-	out := strings.TrimSpace(stdout.String())
-	if runErr != nil {
-		return nil, fmt.Errorf("shell.exec failed: %v: %s", runErr, strings.TrimSpace(stderr.String()))
-	}
-	return map[string]any{
-		"stdout": decodeMaybeJSON(out),
-		"stderr": strings.TrimSpace(stderr.String()),
-	}, nil
 }
 
 func (d *defaultDispatcher) fsReadFile(args map[string]any) (any, error) {

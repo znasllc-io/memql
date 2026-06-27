@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -149,17 +150,34 @@ func TestAuthoredFloatingRefResolvesLatest(t *testing.T) {
 	}
 }
 
-// TestDefaultDispatcherShellExec proves the real default dispatcher executes a
-// deterministic shell capability end to end (no engine needed for shell.*).
-func TestDefaultDispatcherShellExec(t *testing.T) {
+// TestDefaultDispatcherFsRoundTrip proves the real default dispatcher executes
+// a deterministic fs capability end to end (no engine needed for fs.*): a write
+// then a read of the same path returns the written content, with a stable
+// fingerprint across identical runs (token-free replay).
+func TestDefaultDispatcherFsRoundTrip(t *testing.T) {
 	d := newDefaultDispatcher(nil)
-	out, err := d.Invoke(context.Background(), "shell.exec", map[string]any{"cmd": "printf hello"})
+	path := filepath.Join(t.TempDir(), "manifest.txt")
+
+	if _, err := d.Invoke(context.Background(), "fs.writeFile",
+		map[string]any{"path": path, "content": "v1.2.3\n"}); err != nil {
+		t.Fatalf("fs.writeFile: %v", err)
+	}
+	out, err := d.Invoke(context.Background(), "fs.readFile", map[string]any{"path": path})
 	if err != nil {
-		t.Fatalf("shell.exec: %v", err)
+		t.Fatalf("fs.readFile: %v", err)
 	}
 	m, ok := out.(map[string]any)
-	if !ok || m["stdout"] != "hello" {
-		t.Fatalf("unexpected shell.exec result: %#v", out)
+	if !ok || m["content"] != "v1.2.3\n" {
+		t.Fatalf("unexpected fs.readFile result: %#v", out)
+	}
+}
+
+// TestDefaultDispatcherShellDeferred asserts shell.* is recognised but routed
+// to the (not-yet-wired) capability-script runner rather than an unsafe shell.
+func TestDefaultDispatcherShellDeferred(t *testing.T) {
+	d := newDefaultDispatcher(nil)
+	if _, err := d.Invoke(context.Background(), "shell.exec", map[string]any{"cmd": "echo hi"}); err == nil {
+		t.Fatal("expected shell.* to be deferred (not executed) in the default dispatcher")
 	}
 }
 
