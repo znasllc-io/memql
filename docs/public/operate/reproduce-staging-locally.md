@@ -83,13 +83,21 @@ After `make up`, these local ports are forwarded from the k3d cluster:
 
 | Port | Service |
 |------|---------|
-| `8080` | ingress (identity HTTP on `/`, bff on `/memql`) |
 | `8085` | identity service (direct) |
-| `50051` | bff gRPC |
+| `7880` | livekit (WebSocket) |
 | `5432` | Postgres (direct) |
 
+The CoPresent SPA (`:8080`) and the `bff` carrier gRPC head (`:50051`) are NOT
+part of the engine repo's local overlay (#2204) -- they are built and pinned
+from their own sibling repos. The local engine gRPC head is the `mcp` node,
+reached on demand:
+
+```bash
+kubectl port-forward -n memql svc/mcp 50051:50051
+```
+
 Access identity: `http://localhost:8085`
-Access bff gRPC: `localhost:50051`
+Access the engine gRPC head: `localhost:50051` (after the port-forward above)
 
 ## Inner-loop dev
 
@@ -226,6 +234,7 @@ because:
 
 There is no nginx front door, no `*.local.znas.io` subdomains, and no mkcert
 TLS in this world -- the cluster is reached via kubectl port-forwards
-(bff gRPC `:50051`, identity `:8085`, copresent SPA `:8080`, postgres `:5432`;
-the voice/media plane is LiveKit Cloud, reached outbound -- no local
-port-forward).
+(identity `:8085`, postgres `:5432`, and the `mcp` engine gRPC head `:50051`
+on demand; the CoPresent SPA + bff carrier are engine-external and absent
+locally, #2204; the voice/media plane is LiveKit Cloud, reached outbound --
+no local port-forward).
