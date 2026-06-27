@@ -9,46 +9,61 @@ use library.logic.{ indexGeneratedOutput, indexNote, indexTodo, indexCalendarEve
 
 @enabled
 @trigger(event="node.created", concept="v1:library:generatedOutput", partition="*")
-@description("On generated-output creation, promote the new v1:library:generatedOutput into the Library as an artifact index row.")
+@description("On generated-output creation, promote the new v1:library:generatedOutput into the Library as an artifact index row. decide (pure logic builds the args) -> persist (the single createArtifact write). #2235.")
 automation indexGeneratedOutputOnCreate {
-  step run {
+  step decide {
     logic indexGeneratedOutput { event: event }
+  }
+  step persist {
+    createArtifact({ sourceConceptRef: field(step("decide"), "sourceConceptRef"), ownerUserId: field(step("decide"), "ownerUserId"), lens: field(step("decide"), "lens"), kind: field(step("decide"), "kind"), source: field(step("decide"), "source"), title: field(step("decide"), "title"), summary: field(step("decide"), "summary"), format: field(step("decide"), "format"), mimeType: field(step("decide"), "mimeType"), live: field(step("decide"), "live"), partitionId: field(step("decide"), "partitionId"), agentId: field(step("decide"), "agentId"), producedByPlanId: field(step("decide"), "producedByPlanId"), producedByWorkerId: field(step("decide"), "producedByWorkerId"), producedByWorkerName: field(step("decide"), "producedByWorkerName") })
   }
 }
 
 @enabled
 @trigger(event="node.created", concept="v1:notes:note", partition="*")
-@description("On note creation, promote it into the Library Records lens.")
+@description("On note creation, promote it into the Library Records lens. decide (pure logic builds the args) -> persist (the single createArtifact write). #2235.")
 automation indexNoteOnCreate {
-  step run {
+  step decide {
     logic indexNote { event: event }
+  }
+  step persist {
+    createArtifact({ sourceConceptRef: field(step("decide"), "sourceConceptRef"), ownerUserId: field(step("decide"), "ownerUserId"), lens: field(step("decide"), "lens"), kind: field(step("decide"), "kind"), source: field(step("decide"), "source"), title: field(step("decide"), "title"), summary: field(step("decide"), "summary"), live: field(step("decide"), "live") })
   }
 }
 
 @enabled
 @trigger(event="node.created", concept="v1:todos:todo", partition="*")
-@description("On to-do creation, promote it into the Library Records lens.")
+@description("On to-do creation, promote it into the Library Records lens. decide (pure logic builds the args) -> persist (the single createArtifact write). #2235.")
 automation indexTodoOnCreate {
-  step run {
+  step decide {
     logic indexTodo { event: event }
+  }
+  step persist {
+    createArtifact({ sourceConceptRef: field(step("decide"), "sourceConceptRef"), ownerUserId: field(step("decide"), "ownerUserId"), lens: field(step("decide"), "lens"), kind: field(step("decide"), "kind"), source: field(step("decide"), "source"), title: field(step("decide"), "title"), live: field(step("decide"), "live") })
   }
 }
 
 @enabled
 @trigger(event="node.created", concept="v1:calendar:calendarEvent", partition="*")
-@description("On calendar-event creation, promote it into the Library Records lens.")
+@description("On calendar-event creation, promote it into the Library Records lens. decide (pure logic builds the args) -> persist (the single createArtifact write). #2235.")
 automation indexCalendarEventOnCreate {
-  step run {
+  step decide {
     logic indexCalendarEvent { event: event }
+  }
+  step persist {
+    createArtifact({ sourceConceptRef: field(step("decide"), "sourceConceptRef"), ownerUserId: field(step("decide"), "ownerUserId"), lens: field(step("decide"), "lens"), kind: field(step("decide"), "kind"), source: field(step("decide"), "source"), title: field(step("decide"), "title"), live: field(step("decide"), "live") })
   }
 }
 
 @enabled
 @trigger(event="node.created", concept="v1:library:memory", partition="*")
-@description("On memory creation, promote it into the Library Records lens.")
+@description("On memory creation, promote it into the Library Records lens. decide (pure logic builds the args) -> persist (the single createArtifact write). #2235.")
 automation indexMemoryOnCreate {
-  step run {
+  step decide {
     logic indexMemory { event: event }
+  }
+  step persist {
+    createArtifact({ sourceConceptRef: field(step("decide"), "sourceConceptRef"), ownerUserId: field(step("decide"), "ownerUserId"), lens: field(step("decide"), "lens"), kind: field(step("decide"), "kind"), source: field(step("decide"), "source"), title: field(step("decide"), "title"), summary: field(step("decide"), "summary"), agentId: field(step("decide"), "agentId"), partitionId: field(step("decide"), "partitionId"), live: field(step("decide"), "live") })
   }
 }
 

@@ -402,7 +402,7 @@ func IndexGeneratedOutputBuild(args IndexGeneratedOutputArgs) string {
 	return b.String()
 }
 
-// IndexMemory -- On v1:library:memory creation, promote it into the Library Records lens (lens=record, kind=memory, source=agent_generated).
+// IndexMemory -- PURE decision: build the createArtifact args that promote a v1:library:memory into the Library Records lens (lens=record, kind=memory, source=agent_generated). The WRITE happens in the indexMemoryOnCreate automation's persist step (ADR §2.1 single-writer). #2235.
 type IndexMemoryArgs struct {
 	Event map[string]any
 }
