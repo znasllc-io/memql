@@ -2,74 +2,38 @@
 // Per-construct DSL layout: every <kind>s.memql file in a domain
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
+//
+// All four cluster automations are single-step pass-throughs, so they use the
+// terse form `automation NAME @trigger(...) => logic L` (memql#2215 / ADR S2.4),
+// which lowers to the canonical `step run { logic L { event: event } }` and
+// removes the wrapper ceremony without hiding the reactive surface.
 
 use cluster.logic.{ bootstrapCluster, deregisterNode, pruneStaleClusterNodes, registerNode }
 
+// Bootstrap cluster, database, and identity provider records on first startup.
 @enabled
-@trigger(event="system.startup")
 @description("Bootstrap cluster, database, and identity provider records on first startup")
-automation bootstrapCluster {
-  step run {
-    logic bootstrapCluster { event: event }
-  }
-}
+automation bootstrapCluster @trigger(event="system.startup") => logic bootstrapCluster
 
-// ---- automations/v1/cluster/deregisterNode/automation.memql ----
-
-// Record node shutdown in the database.
-// Creates a spawn event with action="stopped".
+// Record node shutdown in the database (a spawn event with action="stopped").
 @enabled
-@trigger(event="system.shutdown")
 @description("Record node shutdown in the database")
-automation deregisterNode {
-  step run {
-    logic deregisterNode { event: event }
-  }
-}
+automation deregisterNode @trigger(event="system.shutdown") => logic deregisterNode
 
-// ---- automations/v1/cluster/registerNode/automation.memql ----
-
-// Register this node in the database when it starts up.
-// Creates a v1:cluster:node record and a spawn event.
-// Runs on ALL node types. Safe to run on every restart.
-//
-// Passes the peer's NodeId as the explicit concept id so later rows
-// written by NodeStatusWriter (via updateNodeHealth) share the same
-// time-series timeline -- one concept row per real node.
+// Register this node in the database when it starts up: a v1:cluster:node record
+// + a spawn event. Runs on ALL node types; safe to run on every restart. The
+// peer's NodeId is passed as the explicit concept id so later NodeStatusWriter
+// rows (via updateNodeHealth) share the same time-series timeline.
 @enabled
-@trigger(event="system.startup")
 @description("Register this node in the database on startup")
-automation registerNode {
-  step run {
-    logic registerNode { event: event }
-  }
-}
+automation registerNode @trigger(event="system.startup") => logic registerNode
 
-// ---- automations/v1/cluster/pruneStaleClusterNodes/automation.memql ----
-
-// Heartbeat-based prune of departed cluster nodes (#1061). Every 10
-// minutes, marks v1:cluster:node rows whose latest lastSeen is older
-// than MEMQL_NODE_STALE_PRUNE_MINUTES (default 30) as health="stopped"
-// so topology / CLI / WorkerDialer stop treating dead pods (left behind
-// by K8s rollovers) as live. Env-agnostic: identical in local cluster
-// compose and staging -- only the window config differs per env.
-//
-// BACKSTOP, not the fast path (#1874). The active reconciliation loop
-// (TopologyReconciler, component/node/reconciler.go) now drives topology
-// freshness to SECONDS -- it retires superseded-deployment orphans
-// immediately and mesh-absent (crashed/OOM/forced-replace) nodes within a
-// short grace window. This 30-min cron remains purely as the lazy safety net
-// for anything the fast path missed (the fast loop disabled, or no reconcile
-// leader). The two never write conflicting statuses: both append the same
-// idempotent terminal health="stopped", and staleClusterNodes excludes
-// already-stopped rows, so once the fast path retires a node this cron skips it.
-//
+// Heartbeat-based prune of departed cluster nodes (#1061). Every 10 minutes,
+// mark v1:cluster:node rows whose latest lastSeen is older than
+// MEMQL_NODE_STALE_PRUNE_MINUTES (default 30) as health="stopped" so topology /
+// CLI / WorkerDialer stop treating dead pods as live. BACKSTOP to the fast
+// reconciler (#1874); both append the same idempotent terminal health="stopped".
 // Six-field cron (sec min hour dom mon dow): minute 0,10,20,30,40,50.
 @enabled
-@trigger(schedule="0 */10 * * * *")
 @description("Every 10 min: mark departed cluster nodes (lastSeen older than MEMQL_NODE_STALE_PRUNE_MINUTES, default 30) as health='stopped'.")
-automation pruneStaleClusterNodes {
-  step run {
-    logic pruneStaleClusterNodes { event: event }
-  }
-}
+automation pruneStaleClusterNodes @trigger(schedule="0 */10 * * * *") => logic pruneStaleClusterNodes

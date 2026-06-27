@@ -240,6 +240,12 @@ var automationDeclHeader = regexp.MustCompile(
 // automations because the function-parse pipeline has no automation case, but
 // the dry-run sandbox only needs the source TEXT, not a parsed *Function.
 func ExtractAutomationSlices(source string) []FunctionSlice {
+	// Lower terse single-step automations (memql#2215) to longhand first so the
+	// `automation NAME {` header scan below discovers them; offsets then align
+	// with the lowered source.
+	if lowered, err := languageParser.NormaliseTerseAutomationSource(source); err == nil {
+		source = lowered
+	}
 	scan := languageParser.BlankComments(source)
 	matches := automationDeclHeader.FindAllStringSubmatchIndex(scan, -1)
 	if len(matches) == 0 {
