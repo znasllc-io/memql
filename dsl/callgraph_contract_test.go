@@ -15,7 +15,7 @@ import (
 // authoring sandbox (strict), so this baseline only guards direct edits to the
 // existing debt.
 //
-// Every entry is a `<rule>|<kind>|<construct>` key. All 22 are `logic-purity`:
+// Every entry is a `<rule>|<kind>|<construct>` key. All are `logic-purity`:
 // logics that perform a graph write inline (the §2.1 single-writer debt). The
 // handoff scoped only the four cluster pass-throughs, but enforcing the
 // contract tree-wide surfaced the full set across cognition / planner /
@@ -31,7 +31,6 @@ var callGraphBaseline = []string{
 	"logic-purity|logic|appendAttachmentToRequest",
 	"logic-purity|logic|bootstrapCluster",
 	"logic-purity|logic|bootstrapSession",
-	"logic-purity|logic|deregisterNode",
 	"logic-purity|logic|generateResponse",
 	"logic-purity|logic|indexCalendarEvent",
 	"logic-purity|logic|indexGeneratedOutput",
@@ -43,7 +42,6 @@ var callGraphBaseline = []string{
 	"logic-purity|logic|pruneStaleClusterNodes",
 	"logic-purity|logic|recordMentoring",
 	"logic-purity|logic|recordTransition",
-	"logic-purity|logic|registerNode",
 	"logic-purity|logic|releaseWorkspaceOnPlanTerminal",
 	"logic-purity|logic|revokeExpiredDelegations",
 	"logic-purity|logic|routeRequest",

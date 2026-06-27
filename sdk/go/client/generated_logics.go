@@ -270,26 +270,6 @@ func DeploymentRollbackAllowedBuild(args DeploymentRollbackAllowedArgs) string {
 	return "deploymentRollbackAllowed({})"
 }
 
-// DeregisterNode -- Records node shutdown by creating a v1:cluster:spawnEvent with action='stopped' and reason='system.shutdown'. Fires when the node is going down.
-type DeregisterNodeArgs struct {
-	Event map[string]any
-}
-
-// DeregisterNode calls the engine logic deregisterNode.
-func (qc *QueryClient) DeregisterNode(ctx context.Context, args DeregisterNodeArgs) (*Result, error) {
-	call := DeregisterNodeBuild(args)
-	return qc.executeNamed(ctx, "deregisterNode", call)
-}
-
-func DeregisterNodeBuild(args DeregisterNodeArgs) string {
-	var b strings.Builder
-	b.WriteString("deregisterNode({")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
-	return b.String()
-}
-
 // GenerateResponse -- Generates and inserts an AI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via sendTextUtterance, and bumps participant presence to idle. Idempotent via hasAIResponseForReply.
 type GenerateResponseArgs struct {
 	Event map[string]any
@@ -678,26 +658,6 @@ func (qc *QueryClient) RecordTransition(ctx context.Context, args RecordTransiti
 func RecordTransitionBuild(args RecordTransitionArgs) string {
 	var b strings.Builder
 	b.WriteString("recordTransition({")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
-	return b.String()
-}
-
-// RegisterNode -- Registers this node on startup. Creates a v1:cluster:node record (using the peer's NodeId as the explicit concept id so later NodeStatusWriter rows share the same time-series timeline) and a v1:cluster:spawnEvent with action='spawned' and reason='system.startup'. Runs on every node type; safe to re-run on every restart.
-type RegisterNodeArgs struct {
-	Event map[string]any
-}
-
-// RegisterNode calls the engine logic registerNode.
-func (qc *QueryClient) RegisterNode(ctx context.Context, args RegisterNodeArgs) (*Result, error) {
-	call := RegisterNodeBuild(args)
-	return qc.executeNamed(ctx, "registerNode", call)
-}
-
-func RegisterNodeBuild(args RegisterNodeArgs) string {
-	var b strings.Builder
-	b.WriteString("registerNode({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
