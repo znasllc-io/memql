@@ -24,6 +24,7 @@ import (
 	// here (shared vendor-REST core the voice-agent imports).
 	_ "github.com/znasllc-io/memql/integrations/database"
 	_ "github.com/znasllc-io/memql/integrations/actionsearch"
+	_ "github.com/znasllc-io/memql/integrations/deployversion"
 	_ "github.com/znasllc-io/memql/integrations/email"
 	_ "github.com/znasllc-io/memql/integrations/embedding"
 	_ "github.com/znasllc-io/memql/integrations/fileprocessor"

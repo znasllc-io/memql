@@ -220,6 +220,56 @@ func ConsolidateMemoryBuild(args ConsolidateMemoryArgs) string {
 	return b.String()
 }
 
+// DeployGateGreen -- Pure gate check: did the deploy gate pass? Reads the runDeployGate action's structured result object. Fails closed: false when the result or its `passed` flag is absent. The deploy automation (I10) branches success/rollback on this decision.
+type DeployGateGreenArgs struct {
+	Gate map[string]any
+}
+
+// DeployGateGreen calls the engine logic deployGateGreen.
+func (qc *QueryClient) DeployGateGreen(ctx context.Context, args DeployGateGreenArgs) (*Result, error) {
+	call := DeployGateGreenBuild(args)
+	return qc.executeNamed(ctx, "deployGateGreen", call)
+}
+
+func DeployGateGreenBuild(args DeployGateGreenArgs) string {
+	var b strings.Builder
+	b.WriteString("deployGateGreen({")
+	b.WriteString("gate: ")
+	b.WriteString(renderMemQLValue(args.Gate))
+	b.WriteString("})")
+	return b.String()
+}
+
+// DeploymentForwardAllowed -- Pure forward-deploy role gate, mirroring spec requiresDeveloperOrAbove (#1876): true when the actor holds developer, admin, or owner. Writer/reader are read-only.
+type DeploymentForwardAllowedArgs struct {
+}
+
+// DeploymentForwardAllowed calls the engine logic deploymentForwardAllowed.
+func (qc *QueryClient) DeploymentForwardAllowed(ctx context.Context, args DeploymentForwardAllowedArgs) (*Result, error) {
+	call := DeploymentForwardAllowedBuild(args)
+	return qc.executeNamed(ctx, "deploymentForwardAllowed", call)
+}
+
+func DeploymentForwardAllowedBuild(args DeploymentForwardAllowedArgs) string {
+	_ = args
+	return "deploymentForwardAllowed({})"
+}
+
+// DeploymentRollbackAllowed -- Pure rollback role gate, mirroring spec requiresOwner (#1876): true ONLY when the actor holds the owner role. Rollback is owner-only -- not even admin may roll back.
+type DeploymentRollbackAllowedArgs struct {
+}
+
+// DeploymentRollbackAllowed calls the engine logic deploymentRollbackAllowed.
+func (qc *QueryClient) DeploymentRollbackAllowed(ctx context.Context, args DeploymentRollbackAllowedArgs) (*Result, error) {
+	call := DeploymentRollbackAllowedBuild(args)
+	return qc.executeNamed(ctx, "deploymentRollbackAllowed", call)
+}
+
+func DeploymentRollbackAllowedBuild(args DeploymentRollbackAllowedArgs) string {
+	_ = args
+	return "deploymentRollbackAllowed({})"
+}
+
 // DeregisterNode -- Records node shutdown by creating a v1:cluster:spawnEvent with action='stopped' and reason='system.shutdown'. Fires when the node is going down.
 type DeregisterNodeArgs struct {
 	Event map[string]any
@@ -448,6 +498,34 @@ func MagicLinkExpirySweepBuild(args MagicLinkExpirySweepArgs) string {
 	b.WriteString("magicLinkExpirySweep({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString("})")
+	return b.String()
+}
+
+// NextDeploymentVersion -- Decide the next release version by bumping the current version (bump in {major, minor, patch}, default patch). Pure: delegates the version arithmetic to the read-only suggestNextVersion builtin. Returns { current, bump, next }.
+type NextDeploymentVersionArgs struct {
+	Current string
+	Bump    string
+}
+
+// NextDeploymentVersion calls the engine logic nextDeploymentVersion.
+func (qc *QueryClient) NextDeploymentVersion(ctx context.Context, args NextDeploymentVersionArgs) (*Result, error) {
+	call := NextDeploymentVersionBuild(args)
+	return qc.executeNamed(ctx, "nextDeploymentVersion", call)
+}
+
+func NextDeploymentVersionBuild(args NextDeploymentVersionArgs) string {
+	var b strings.Builder
+	b.WriteString("nextDeploymentVersion({")
+	b.WriteString("current: ")
+	b.WriteString(fmt.Sprintf("%q", args.Current))
+	if args.Bump != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("bump: ")
+		b.WriteString(fmt.Sprintf("%q", args.Bump))
+	}
 	b.WriteString("})")
 	return b.String()
 }

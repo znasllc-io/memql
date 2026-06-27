@@ -1,0 +1,22 @@
+// builtins.memql
+//
+// Deployment-namespace Go-backed builtins. READ-ONLY computation the
+// deployment bundle's pure `logic` needs but the MemQL language cannot
+// express inline.
+//
+// suggestNextVersion exists because the next-release-version decision is
+// version arithmetic (parse X.Y.Z, increment a part) and MemQL has no native
+// string-split / integer-parse. Per the _reference/_logic blessed pattern
+// ("a read-only builtin does the mapping"), nextDeploymentVersion
+// (logic.memql) delegates the arithmetic here. Pure + deterministic + no side
+// effects, so it is safe to call from a logic body under the call-graph
+// contract (ADR §2). Backed by integrations/deployversion (mirrors the
+// cut-version semver in component/deploycontrol/semver.go).
+
+@enabled
+@executor("integration.deployversion.suggestNextVersion")
+@description("Compute the next release version by bumping a clean three-part numeric version (X.Y.Z; classic semver or CalVer). bump in {major, minor, patch}, default patch; major/minor zero the lower parts. Pure + read-only. Returns { current, bump, next }.")
+builtin suggestNextVersion {
+  current  string  @required
+  bump     string
+}

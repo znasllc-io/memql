@@ -1,0 +1,81 @@
+// logic.memql
+//
+// Deployment-namespace PURE logic -- the decision layer of the DevOps
+// deployment bundle (epic #2212, I9 #2223). Per the behavioral-constructs
+// ADR §2: logic decides, mutations persist, actions touch the world,
+// automations orchestrate. These logics DECIDE -- gate-green, next version,
+// who may deploy -- over args + (read-only) builtins. They perform NO writes
+// and call NO actions, so they pass the call-graph contract
+// (dsl/callgraph_contract_test.go). The WRITES that consume these decisions
+// live in the per-environment deploy automations (I10), which reuse the
+// existing createDeployment / updateDeploymentStatus mutations
+// (dsl/cluster/mutations.memql) one-write-per-step.
+
+use deployment.builtins.{ suggestNextVersion }
+
+// ---- gate ----
+
+// deployGateGreen is the pure post-deploy-gate check. It reads the structured
+// gate-result object produced by the runDeployGate action (I8) -- whose
+// capability result carries a `passed` boolean -- and returns whether the
+// gate is green. Defaults to false when the result or its `passed` flag is
+// absent, so a missing/garbled gate result fails CLOSED (never auto-promotes).
+@enabled
+@description("Pure gate check: did the deploy gate pass? Reads the runDeployGate action's structured result object. Fails closed: false when the result or its `passed` flag is absent. The deploy automation (I10) branches success/rollback on this decision.")
+logic deployGateGreen {
+  args {
+    gate object @required
+  }
+  body {
+    return coalesce(args.gate.passed, false)
+  }
+}
+
+// ---- version ----
+
+// nextDeploymentVersion decides the next release version by bumping the
+// current one. MemQL has no native string-split / int-parse, so the version
+// arithmetic is delegated to the read-only suggestNextVersion builtin (the
+// _reference/_logic blessed pattern). Pure: a query/builtin read + return, no
+// write. Returns the builtin result object { current, bump, next }; the deploy
+// automation reads `.next` and stamps it on the deployment record via
+// createDeployment.
+@enabled
+@description("Decide the next release version by bumping the current version (bump in {major, minor, patch}, default patch). Pure: delegates the version arithmetic to the read-only suggestNextVersion builtin. Returns { current, bump, next }.")
+logic nextDeploymentVersion {
+  args {
+    current  string  @required
+    bump     string
+  }
+  body {
+    return suggestNextVersion({ current: args.current, bump: coalesce(args.bump, "patch") })
+  }
+}
+
+// ---- role gating ----
+
+// deploymentForwardAllowed is the pure forward-deploy role gate. It mirrors
+// spec requiresDeveloperOrAbove (dsl/deployment/specs.memql, #1876): a cut +
+// forward deploy is engineering power (developer / admin / owner); writer /
+// reader stay read-only. Reads actor.role (the resolved auth context,
+// available in every body). The deploy automation calls this before kicking
+// off a deploy; an out-of-role caller's request is dropped.
+@enabled
+@description("Pure forward-deploy role gate, mirroring spec requiresDeveloperOrAbove (#1876): true when the actor holds developer, admin, or owner. Writer/reader are read-only.")
+logic deploymentForwardAllowed {
+  body {
+    return actor.role == "developer" || actor.role == "admin" || actor.role == "owner"
+  }
+}
+
+// deploymentRollbackAllowed is the pure rollback role gate. It mirrors spec
+// requiresOwner (dsl/deployment/specs.memql, #1876): rollback is owner-only --
+// not even admin may roll back. Reads actor.role. The rollback automation
+// calls this before reverting; a non-owner's request is dropped.
+@enabled
+@description("Pure rollback role gate, mirroring spec requiresOwner (#1876): true ONLY when the actor holds the owner role. Rollback is owner-only -- not even admin may roll back.")
+logic deploymentRollbackAllowed {
+  body {
+    return actor.role == "owner"
+  }
+}
