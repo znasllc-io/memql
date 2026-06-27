@@ -227,10 +227,58 @@ patches:
       apiVersion: v1
       kind: Service
       metadata: { name: livekit-redis }
+  # ---------------------------------------------------------------------------
+  # CoPresent (SPA + bff carrier) -- NOT part of the engine repo (#2204)
+  # ---------------------------------------------------------------------------
+  # The `copresent` SPA and the `bff` (memql-bff-copresent carrier) are built
+  # and version-pinned from their OWN sibling repos, not from this engine repo,
+  # so they cannot be built by the local inner loop (`make dev`) and have no
+  # business coming up on `make up`. They live in base/ because staging/prod
+  # legitimately run them; the engine's local overlay deletes them. Remove the
+  # bff Deployment + its two Services (cluster `bff` + `bff-external`
+  # LoadBalancer) and the copresent Deployment + Service + PodDisruptionBudget.
+  # The matching public-entry Ingresses are already deleted above.
+  - target: { kind: Deployment, name: bff }
+    patch: |
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: bff }
+  - target: { kind: Service, name: bff }
+    patch: |
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata: { name: bff }
+  - target: { kind: Service, name: bff-external }
+    patch: |
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata: { name: bff-external }
+  - target: { kind: Deployment, name: copresent }
+    patch: |
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: copresent }
+  - target: { kind: Service, name: copresent }
+    patch: |
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata: { name: copresent }
+  - target: { kind: PodDisruptionBudget, name: copresent }
+    patch: |
+      $patch: delete
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata: { name: copresent }
   # Repoint the LiveKit URL env at the cloud project (secret-sourced). The
   # `value: null` strategic-merge directive deletes the base's hard-coded
-  # ws://livekit:7880 so valueFrom is the only source. (bff's LiveKit URL +
-  # public URL are repointed in patches/bff-local-config.yaml.)
+  # ws://livekit:7880 so valueFrom is the only source. (bff is deleted from the
+  # local overlay -- see the CoPresent delete block above -- so it carries no
+  # local LiveKit repoint.)
   - target: { kind: Deployment, name: voice-agent }
     patch: |
       apiVersion: apps/v1
@@ -283,13 +331,6 @@ patches:
         value: 1
   - target:
       kind: Deployment
-      name: bff
-    patch: |
-      - op: replace
-        path: /spec/replicas
-        value: 1
-  - target:
-      kind: Deployment
       name: cognition
     patch: |
       - op: replace
@@ -326,13 +367,6 @@ patches:
   - target:
       kind: Deployment
       name: mcp
-    patch: |
-      - op: replace
-        path: /spec/replicas
-        value: 1
-  - target:
-      kind: Deployment
-      name: copresent
     patch: |
       - op: replace
         path: /spec/replicas
@@ -352,13 +386,6 @@ patches:
         value: IfNotPresent
   - target:
       kind: Deployment
-      name: bff
-    patch: |
-      - op: add
-        path: /spec/template/spec/containers/0/imagePullPolicy
-        value: IfNotPresent
-  - target:
-      kind: Deployment
       name: cognition
     patch: |
       - op: add
@@ -395,13 +422,6 @@ patches:
   - target:
       kind: Deployment
       name: mcp
-    patch: |
-      - op: add
-        path: /spec/template/spec/containers/0/imagePullPolicy
-        value: IfNotPresent
-  - target:
-      kind: Deployment
-      name: copresent
     patch: |
       - op: add
         path: /spec/template/spec/containers/0/imagePullPolicy
@@ -429,11 +449,6 @@ patches:
     target:
       kind: Deployment
       name: identity
-  # bff-specific overrides: LiveKit public URL + issuer.
-  - path: patches/bff-local-config.yaml
-    target:
-      kind: Deployment
-      name: bff
   # Worker nodes: override MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER to localhost.
   # Using JSON 6902 `add` (with merge semantics for existing keys in env) is
   # not directly supported, so we use a strategic-merge patch as inline YAML.
@@ -575,9 +590,6 @@ images:
   - name: acrmemql.azurecr.io/memql-identity
     newName: memql-identity
     newTag: local
-  - name: acrmemql.azurecr.io/memql-bff-copresent
-    newName: memql-bff-copresent
-    newTag: local
   - name: acrmemql.azurecr.io/memql-cognition
     newName: memql-cognition
     newTag: local
@@ -595,7 +607,4 @@ images:
     newTag: local
   - name: acrmemql.azurecr.io/memql-mcp
     newName: memql-mcp
-    newTag: local
-  - name: acrmemql.azurecr.io/copresent
-    newName: copresent
     newTag: local

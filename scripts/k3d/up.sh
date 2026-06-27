@@ -20,11 +20,15 @@
 # `make dev` (E0.4): rebuild → k3d image import → argo sync.
 #
 # Port-forwards exposed by the cluster:
-#   8080  -> copresent (SPA)
 #   8085  -> identity
 #   7880  -> livekit
-#   50051 -> bff gRPC
 #   5432  -> postgres (optional debug access)
+#
+# The engine repo runs the engine mesh only -- the CoPresent SPA (:8080) and
+# the bff carrier gRPC head (:50051) belong to their own sibling repos and are
+# deleted from the local overlay (#2204). The local engine gRPC head is the
+# `mcp` node; reach it on demand with:
+#   kubectl port-forward -n memql svc/mcp 50051:50051
 #
 # Per the repo + global Skills+Scripts convention (CLAUDE.md): function-based,
 # one responsibility per function, main() at the bottom. set -euo pipefail.
@@ -139,19 +143,17 @@ function create_cluster() {
 
     info "Creating cluster with ${K3D_SERVERS} server(s) and ${K3D_AGENTS} agent(s)..."
 
-    # Port-forward table:
-    #   8080:80    copresent SPA (nginx / ingress)
+    # Port-forward table (engine mesh only -- no SPA, no bff carrier; #2204):
     #   8085:8085  identity HTTP
     #   7880:7880  livekit WebSocket
-    #   50051:50051 bff gRPC
     #   5432:5432  postgres (debug)
+    # The mcp gRPC head (:50051) is reached on demand via
+    # `kubectl port-forward -n memql svc/mcp 50051:50051`.
     k3d cluster create "${CLUSTER_NAME}" \
         --servers "${K3D_SERVERS}" \
         --agents "${K3D_AGENTS}" \
-        --port "8080:80@loadbalancer" \
         --port "8085:8085@loadbalancer" \
         --port "7880:7880@loadbalancer" \
-        --port "50051:50051@loadbalancer" \
         --port "5432:5432@loadbalancer" \
         --wait \
         --timeout "120s"
@@ -307,11 +309,12 @@ function print_summary() {
     echo "  Namespace:      ${NAMESPACE}"
     echo ""
     echo "  Port-forwards (via k3d LoadBalancer):"
-    echo "    http://localhost:8080   copresent SPA"
     echo "    http://localhost:8085   identity"
     echo "    ws://localhost:7880     livekit"
-    echo "    localhost:50051         bff gRPC"
     echo "    localhost:5432          postgres (debug)"
+    echo ""
+    echo "  Engine gRPC head (mcp), on demand:"
+    echo "    kubectl port-forward -n ${NAMESPACE} svc/mcp 50051:50051"
     echo ""
     echo "  Next steps:"
     echo "    1. Watch ArgoCD sync:  kubectl get apps -n argocd -w"
