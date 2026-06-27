@@ -42,7 +42,7 @@ owner: znas
 
 ```bash
 make up                  # k3d cluster + ArgoCD + local overlay + seeded secrets
-make k3d-status          # parity litmus: distinct per-pod MEMQL_NODE_ID
+make status          # parity litmus: distinct per-pod MEMQL_NODE_ID
 ```
 
 `make up` creates a k3d cluster, installs ArgoCD, applies the local
@@ -55,7 +55,7 @@ cluster up multi-node and scale the Deployments:
 
 ```bash
 make up SERVERS=2 AGENTS=1
-make k3d-scale N=2
+make scale N=2
 ```
 
 This brings up Postgres + TimescaleDB, the
@@ -76,7 +76,7 @@ envelope via `scripts/k3d/seed-secrets.sh`. If you change a secret,
 re-seed with:
 
 ```bash
-make k3d-secrets
+make secrets
 ```
 
 See [docs/public/operate/env-vars.md](../operate/env-vars.md) for the full

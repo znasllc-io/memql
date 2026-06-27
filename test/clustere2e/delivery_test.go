@@ -3,7 +3,7 @@
 // Package clustere2e is the Phase-0 cluster-parity gate for the
 // resilient-mesh epic (memql#1259). It boots against the local
 // 2-replica k3d + ArgoCD cluster (deploy/k8s/overlays/local, scaled to
-// 2 replicas per Deployment via `make k3d-scale N=2` -- the topology
+// 2 replicas per Deployment via `make scale N=2` -- the topology
 // adopted as first-class in memql#1260, migrated off Docker Compose in
 // memql#2068/#2088) and asserts the delivery
 // invariant that staging kept breaking: an event produced anywhere in

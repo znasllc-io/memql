@@ -14,13 +14,13 @@
 # Prerequisites: docker, k3d, kubectl (brew install k3d kubectl)
 make up          # create cluster + install ArgoCD + seed secrets
 make dev         # inner-loop: rebuild images -> import -> restart pods
-make k3d-status      # mesh litmus (unique MEMQL_NODE_ID per pod)
+make status      # mesh litmus (unique MEMQL_NODE_ID per pod)
 make down        # tear down
 
 # Multi-node mesh testing (2 replicas per Deployment -- staging parity):
 make up SERVERS=2 AGENTS=1
-make k3d-scale N=2
-make k3d-status   # verify unique MEMQL_NODE_IDs
+make scale N=2
+make status   # verify unique MEMQL_NODE_IDs
 
 # Run tests
 go test ./...
@@ -148,7 +148,7 @@ The k3d + ArgoCD cluster is the local dev topology (memql#2061 /
 E0 -- Argo parity). It mirrors staging (AKS + ArgoCD + the k8s
 overlays in `deploy/k8s/`) so the same manifests and reconciliation
 path run locally and in staging. Multi-node is the default (#2067):
-use `make up SERVERS=2 + make k3d-scale N=2` for full cross-node
+use `make up SERVERS=2 + make scale N=2` for full cross-node
 mesh testing.
 
 **Prerequisites:** docker, k3d, kubectl (`brew install k3d kubectl`).
@@ -164,11 +164,11 @@ make dev NODE=bff             # single node (faster)
 make dev PULL_INFRA=1        # refresh infra images (postgres/azurite/livekit)
 
 # Multi-node scaling:
-make k3d-scale N=2                # 2 replicas per Deployment
-make k3d-status                   # litmus: verify unique MEMQL_NODE_ID per pod
+make scale N=2                # 2 replicas per Deployment
+make status                   # litmus: verify unique MEMQL_NODE_ID per pod
 
 # Secrets (re-seed if changed):
-make k3d-secrets
+make secrets
 
 # Tear down:
 make down                     # keep kubeconfig
@@ -265,9 +265,9 @@ frontend coordination.
 |------|---------|-------------|
 | **Bootstrap k3d cluster** | `make up` | Create cluster + install ArgoCD + seed secrets (memql#2061 / Epic 0) |
 | **Inner-loop rebuild** | `make dev [NODE=<type>]` | Build image -> k3d import -> kubectl rollout restart |
-| **Cluster litmus** | `make k3d-status` | Verify unique MEMQL_NODE_ID per pod (mesh parity check) |
-| **Multi-node scaling** | `make k3d-scale N=2` | 2 replicas per Deployment for cross-node mesh testing |
-| **Re-seed secrets** | `make k3d-secrets` | Idempotent; use after cluster recreate |
+| **Cluster litmus** | `make status` | Verify unique MEMQL_NODE_ID per pod (mesh parity check) |
+| **Multi-node scaling** | `make scale N=2` | 2 replicas per Deployment for cross-node mesh testing |
+| **Re-seed secrets** | `make secrets` | Idempotent; use after cluster recreate |
 | **Tear down cluster** | `make down` | Delete k3d cluster (PURGE=1 also removes kubeconfig) |
 | **Run tests** | `go test ./...` | Go tests |
 | **Build binary** | `go build -o bin/memql .` | Build BFF binary (default) |
@@ -402,7 +402,7 @@ the cluster-e2e harness (`test/clustere2e/`) and/or the proxy-path tests
 (`component/grpc/ai_forward_test.go`); the test should FAIL against
 single-node-assuming code and PASS with the cross-node fix. The blessed
 local repro is the 2-replica parity cluster (`make up SERVERS=2` +
-`make k3d-scale N=2`) -- the only topology that reproduces this bug
+`make scale N=2`) -- the only topology that reproduces this bug
 class. See
 [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
 
@@ -430,7 +430,7 @@ imports them into k3d. The pure-engine `memql-<type>` images are only for a
 memQL-standalone (no CoPresent) deployment.
 
 **Build tag reference:** [docs/public/build/build-tags.md](docs/public/build/build-tags.md)
-**Local cluster (staging parity -- THE blessed local topology, memql#2061 / Epic 0):** `make up` (k3d + ArgoCD + the local overlay at `deploy/k8s/overlays/local` + seeded secrets); `make dev [NODE=<type>]` rebuilds an image, imports it into k3d, and rolls the Deployment after Go/MemQL source edits; `make down` tears it down. The cluster mirrors staging along the **mesh-delivery path** (memql#1212) by running the same k8s manifests and ArgoCD reconciliation as AKS: scale to 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench) with `make up SERVERS=2` + `make k3d-scale N=2`, each pod carrying a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name` exactly as in staging. The cluster is reached via kubectl port-forwards (identity `:8085`, livekit `:7880`, postgres `:5432`; the engine gRPC head is the `mcp` node on demand: `kubectl port-forward -n memql svc/mcp 50051:50051`) -- there is no nginx front door or `*.local.znas.io` subdomain. The CoPresent SPA and the `bff` carrier are NOT part of the engine repo's local overlay (#2204); they are built from their own sibling repos. `make k3d-status` prints the per-pod node ids (parity litmus). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle. See the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
+**Local cluster (staging parity -- THE blessed local topology, memql#2061 / Epic 0):** `make up` (k3d + ArgoCD + the local overlay at `deploy/k8s/overlays/local` + seeded secrets); `make dev [NODE=<type>]` rebuilds an image, imports it into k3d, and rolls the Deployment after Go/MemQL source edits; `make down` tears it down. The cluster mirrors staging along the **mesh-delivery path** (memql#1212) by running the same k8s manifests and ArgoCD reconciliation as AKS: scale to 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench) with `make up SERVERS=2` + `make scale N=2`, each pod carrying a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name` exactly as in staging. The cluster is reached via kubectl port-forwards (identity `:8085`, livekit `:7880`, postgres `:5432`; the engine gRPC head is the `mcp` node on demand: `kubectl port-forward -n memql svc/mcp 50051:50051`) -- there is no nginx front door or `*.local.znas.io` subdomain. The CoPresent SPA and the `bff` carrier are NOT part of the engine repo's local overlay (#2204); they are built from their own sibling repos. `make status` prints the per-pod node ids (parity litmus). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle. See the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
 **Previous Compose-based local stack -- RETIRED (memql#2068 / #2088):** the old cluster compose file, the single-node `full.yml`, and the `nemoclaw` overlay are fully removed. The k3d + ArgoCD cluster above is the only supported local run path; a single-node stack structurally cannot reproduce the resilient-mesh class of bugs.
 
 #### Client-tool relay (agent → browser, across nodes)
@@ -2126,7 +2126,7 @@ Shell-script rules (per the global convention in
   keyword, etc.
 
 Current example: `scripts/k3d/{up,dev,status}.sh` implements
-`make up`, `make dev`, and `make k3d-status`. The Makefile targets are
+`make up`, `make dev`, and `make status`. The Makefile targets are
 one-liners (`bash scripts/k3d/up.sh`).
 
 ### Documentation Style Guidelines

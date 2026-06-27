@@ -656,7 +656,7 @@ automatically.
 |-------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
 | [`scripts/secrets/manifest.yaml`](../../../scripts/secrets/manifest.yaml)        | Authoritative list of dev-bootstrap secrets + variables.                       |
 | [`scripts/secrets/main.go`](../../../scripts/secrets/main.go)                    | The CLI that powers every `make secret-*` / `make variable-*` target.          |
-| [`scripts/k3d/seed-secrets.sh`](../../../scripts/k3d/seed-secrets.sh)            | Seeds the bootstrap envelope into k8s Secrets (run by `make up` / `make k3d-secrets`). |
+| [`scripts/k3d/seed-secrets.sh`](../../../scripts/k3d/seed-secrets.sh)            | Seeds the bootstrap envelope into k8s Secrets (run by `make up` / `make secrets`). |
 | `dsl/platform/concepts.memql`                                                 | Schemas for global + partition-scoped secrets and variables.                   |
 | `component/secret/encryption.go`                                              | NaCl secretbox + `MEMQL_MASTER_KEY` resolution.                                |
 | `component/memql/ai_providers.go` (`resolveAuthPlaceholders`)                 | Provider-auth resolver (the env() / placeholder chain).                        |

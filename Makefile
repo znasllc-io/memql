@@ -145,11 +145,7 @@ identity-signing-key:
 # Run targets
 # ---------------------------------------------------------------------------
 
-.PHONY: run cluster-e2e db
-
-## Run the standalone server locally
-run: build
-	./$(BIN_DIR)/memql
+.PHONY: cluster-e2e db
 
 ## Cross-replica delivery gate (memql#1261): boot the 2-replica k3d +
 ## ArgoCD cluster (deploy/k8s/overlays/local, scaled to 2 via scale.sh)
@@ -177,7 +173,7 @@ db:
 # Quick start:
 #   make up        # create cluster + install ArgoCD + seed secrets
 #   make down      # tear down cluster
-#   make k3d-secrets   # (re-)seed k8s Secrets in a running cluster
+#   make secrets   # (re-)seed k8s Secrets in a running cluster
 #
 # Optional env overrides:
 #   MEMQL_K3D_CLUSTER          cluster name (default: memql)
@@ -185,7 +181,7 @@ db:
 #   MEMQL_K3D_SERVERS          k3d server count (default: 1)
 #   MEMQL_K3D_AGENTS           k3d agent count (default: 0)
 
-.PHONY: up down k3d-secrets dev k3d-status k3d-scale
+.PHONY: up down secrets dev status scale
 
 ## Bootstrap the local k3d cluster: create cluster, install ArgoCD
 ## (pinned v2.13.3, same as staging), apply the memql-local Application,
@@ -209,8 +205,8 @@ down:
 		$${PURGE:+--purge}
 
 ## (Re-)seed the k8s Secrets in a running k3d cluster. Safe to re-run.
-## Required after 'make up --no-secrets' or if secrets drift.
-k3d-secrets:
+## Required after 'make up NO_SECRETS=1' or if secrets drift.
+secrets:
 	@bash scripts/k3d/seed-secrets.sh \
 		$${CLUSTER:+--namespace=$${NAMESPACE:-memql}}
 
@@ -230,7 +226,7 @@ dev:
 
 ## Print k3d cluster status + mesh litmus (unique MEMQL_NODE_ID per pod).
 ## Use after scaling to verify cross-node mesh formation.
-k3d-status:
+status:
 	@bash scripts/k3d/status.sh \
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
 		$${NAMESPACE:+--namespace=$${NAMESPACE}}
@@ -238,11 +234,11 @@ k3d-status:
 ## Scale all app Deployments to N replicas. Use N=2 for cross-node mesh
 ## testing (E0.5); N=1 to reset to single-node default.
 ## ArgoCD ignoreDifferences excludes /spec/replicas so selfHeal won't revert.
-##   make k3d-scale N=2   # multi-node (2 replicas per Deployment)
-##   make k3d-scale N=1   # single-node (default)
-k3d-scale:
+##   make scale N=2   # multi-node (2 replicas per Deployment)
+##   make scale N=1   # single-node (default)
+scale:
 	@bash scripts/k3d/scale.sh \
-		$${N:?usage: make k3d-scale N=<replicas>} \
+		$${N:?usage: make scale N=<replicas>} \
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
 		$${NAMESPACE:+--namespace=$${NAMESPACE}}
 
@@ -364,7 +360,7 @@ proto-gen-check:
 # Docker image targets
 # ---------------------------------------------------------------------------
 
-.PHONY: docker docker-bff docker-voice docker-cognition docker-agent docker-planner release publish-releases
+.PHONY: release publish-releases
 
 ## Cut an immutable release image memql:<VERSION> from VERSION + the short
 ## git SHA (znasllc-io/memql#493, epic #491). memQL is the upstream module;
@@ -404,29 +400,11 @@ publish-releases:
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
-## Build the default Docker image (BFF)
-docker:
-	docker build -f docker/memql.Dockerfile -t memql:latest .
-
-## Build BFF Docker image
-docker-bff:
-	docker build -f docker/memql.Dockerfile --build-arg BUILD_TAGS=bff -t memql:bff .
-
-## Build voice Docker image
-docker-voice:
-	docker build -f docker/memql.Dockerfile --build-arg BUILD_TAGS=voice -t memql:voice .
-
-## Build cognition Docker image
-docker-cognition:
-	docker build -f docker/memql.Dockerfile --build-arg BUILD_TAGS=cognition -t memql:cognition .
-
-## Build agent Docker image
-docker-agent:
-	docker build -f docker/memql.Dockerfile --build-arg BUILD_TAGS=agent -t memql:agent .
-
-## Build planner Docker image
-docker-planner:
-	docker build -f docker/memql.Dockerfile --build-arg BUILD_TAGS=planner -t memql:planner .
+# The per-node `docker-*` targets (docker / docker-bff / docker-voice /
+# docker-cognition / docker-agent / docker-planner) were removed in #2205:
+# immutable release images come from `make release` (and the GitHub build
+# server for staging/prod), while the local inner loop is `make dev` (build +
+# k3d import). A hand-built `docker build` image fed neither path.
 
 # ---------------------------------------------------------------------------
 # Genesis envelope / dev tooling
@@ -513,7 +491,11 @@ deploy-setup:
 conn-headroom-check:
 	@bash scripts/deploy/conn-headroom-check.sh
 
-.PHONY: db-provision blob-provision livekit-provision deploy deploy-rollback
+# ===========================================================================
+# PROVISION -- one-time Azure infrastructure bootstrap (idempotent)
+# ===========================================================================
+
+.PHONY: db-provision blob-provision livekit-provision
 
 ## Provision (create-or-verify) a dedicated Azure Storage account + blob
 ## container for ENV and print the connection string for inclusion in the
@@ -565,17 +547,31 @@ livekit-provision:
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
-## End-to-end AKS deploy for the memQL node mesh (znasllc-io/memql#532,
-## epic #522 -- SUPERSEDES the ACA make deploy #495): build + push the six
-## engine node images to ACR (voice with CGO + the voice-runtime stage),
-## ensure the internal TLS secrets, apply the manifests IDENTITY-FIRST
-## (one-time migration + JWKS), wait for rollout, then smoke-test the live
-## front door. Idempotent. memql-secrets (genesis b64 + master key + DSN)
-## is a one-time out-of-band prerequisite. The bff carrier + copresent SPA
-## are built + pinned from their own repos. Impl in
-## scripts/deploy/aks-deploy.sh per the function-based shell convention.
-## (Lower-level apply-only primitive: `make deploy-aks`.)
-##   make deploy VERSION=0.9.6                 # build + push + roll out 0.9.6
+# ===========================================================================
+# BREAK-GLASS -- imperative deploy. ArgoCD OWNS local + staging (deploys =
+# merges; selfHeal reverts out-of-band kubectl applies), so these targets are
+# the escape hatch for when Argo is unavailable, plus the prod path until prod
+# is on ArgoCD (#2207).
+#
+# THE BLESSED STAGING DEPLOY IS A GIT MERGE, NOT `make deploy`:
+#   bump the image digest in deploy/k8s/overlays/staging + merge to main
+#   -> ArgoCD reconciles. Rollback = `git revert` the overlay. See
+#   docs/public/operate/deployment-strategy.md.
+# ===========================================================================
+
+.PHONY: deploy deploy-rollback
+
+## BREAK-GLASS / prod imperative AKS deploy (znasllc-io/memql#532, epic #522).
+## NOT the normal staging path -- staging is GitOps (digest bump in
+## overlays/staging + merge -> ArgoCD syncs). Use this only when ArgoCD is
+## unavailable, or for prod (ENV=production) until prod is on ArgoCD (#2207).
+## Builds + pushes the engine node images to ACR, ensures the internal TLS
+## secrets, applies the manifests IDENTITY-FIRST (one-time migration + JWKS),
+## waits for rollout, then smoke-tests the live front door. Idempotent.
+## memql-secrets (genesis b64 + master key + DSN) is a one-time out-of-band
+## prerequisite. The bff carrier + copresent SPA are built + pinned from their
+## own repos. Impl in scripts/deploy/aks-deploy.sh.
+##   make deploy ENV=production VERSION=0.9.6  # prod imperative roll-out
 ##   make deploy VERSION=0.9.6 DRY_RUN=1       # full plan, no changes
 ##   make deploy SKIP_BUILD=1                  # apply the manifests' pinned tags
 ##   make deploy VERSION=0.9.6 NO_SMOKE=1      # skip the post-deploy smoke test
@@ -640,6 +636,10 @@ deploy-autoscaler:
 		--env=$${ENV:-staging} \
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
+
+# ===========================================================================
+# OPERATOR RUNBOOKS -- staging release / reset / smoke (idempotent, fail-loud)
+# ===========================================================================
 
 .PHONY: release-staging reset-staging
 
@@ -742,6 +742,16 @@ version:
 help:
 	@echo "memQL Makefile — v$(VERSION)"
 	@echo ""
+	@echo "LOCAL (k3d + ArgoCD cluster -- the blessed local topology, #2061)"
+	@echo "  make up                        Boot k3d + ArgoCD + the local overlay (single-node default)"
+	@echo "  make up SERVERS=2 AGENTS=1     Multi-node cluster (for cross-node mesh testing)"
+	@echo "  make dev [NODE=<type>]         Inner loop: rebuild image -> k3d import -> rollout restart"
+	@echo "  make status                    Show per-pod MEMQL_NODE_IDs (mesh parity litmus) + ArgoCD sync"
+	@echo "  make scale N=2                 Scale every app Deployment to N replicas (2 = staging parity)"
+	@echo "  make secrets                   (Re-)seed the k8s Secrets in a running cluster"
+	@echo "  make down [PURGE=1]            Tear down the k3d cluster (PURGE=1 also drops the kubeconfig context)"
+	@echo "  make db                        Connect to development database (psql, via the postgres port-forward)"
+	@echo ""
 	@echo "BUILD"
 	@echo "  make              Build standalone server + healthcheck"
 	@echo "  make build        Build standalone server"
@@ -751,17 +761,6 @@ help:
 	@echo "  make cognition    Build cognition node binary"
 	@echo "  make agent        Build agent node binary"
 	@echo "  make planner      Build planner node binary"
-	@echo ""
-	@echo "RUN (k3d + ArgoCD local cluster -- Argo parity, #2061)"
-	@echo "  make run          Run standalone server locally (single process, not a topology)"
-	@echo "  make up                        BLESSED local topology: boot k3d + ArgoCD + the local overlay (single-node default)"
-	@echo "  make up SERVERS=2 AGENTS=1     Multi-node cluster (for cross-node mesh testing)"
-	@echo "  make dev [NODE=<type>]         Inner loop: rebuild image -> k3d import -> rollout restart"
-	@echo "  make k3d-scale N=2             Scale every app Deployment to N replicas (2 = staging parity)"
-	@echo "  make k3d-status                Show per-pod MEMQL_NODE_IDs (mesh parity litmus) + ArgoCD sync"
-	@echo "  make k3d-secrets               (Re-)seed the k8s Secrets in a running cluster"
-	@echo "  make down [PURGE=1]            Tear down the k3d cluster (PURGE=1 also drops the kubeconfig context)"
-	@echo "  make db           Connect to development database (psql, via the k3d postgres port-forward)"
 	@echo ""
 	@echo "TEST"
 	@echo "  make test         Run all tests"
@@ -779,14 +778,7 @@ help:
 	@echo "RELEASE"
 	@echo "  make release                            Cut immutable memql:<VERSION> image (VERSION + short SHA)"
 	@echo "  make release VERSION=X.Y.Z ACR=acrmemql PUSH=1   Build + push the pinnable release tag to the shared ACR"
-	@echo ""
-	@echo "DOCKER"
-	@echo "  make docker            Build default Docker image"
-	@echo "  make docker-bff        Build BFF image"
-	@echo "  make docker-voice      Build voice image"
-	@echo "  make docker-cognition  Build cognition image"
-	@echo "  make docker-agent      Build agent image"
-	@echo "  make docker-planner    Build planner image"
+	@echo "  (Staging/prod images are built on the GitHub build server, not locally -- see CLAUDE.md.)"
 	@echo ""
 	@echo "DEV TOOLING"
 	@echo "  Authoring of env vars / secrets is in memql-cockpit (see"
@@ -795,15 +787,30 @@ help:
 	@echo "  make install-deps              Install + verify build tools (protoc, plugins, go, docker, k3d, kubectl)"
 	@echo "  make genesis-seal ENV_FILE=... Seal a plaintext .env into ~/.memql/genesis.znas"
 	@echo ""
-	@echo "AZURE DEPLOY (epic #491)"
-	@echo "  make deploy-setup              Idempotent Azure + toolchain bootstrap (ENV=staging|production)"
-	@echo "  make deploy-setup DRY_RUN=1    Same, but print the plan without mutating"
-	@echo "  make db-provision              Provision Tiger Cloud DB + wire DSN to Key Vault (ENV=...)"
-	@echo "  make db-provision DRY_RUN=1    Same, but print the plan without mutating"
-	@echo "  make blob-provision            Provision Azure Storage account + container; print conn string (#807)"
-	@echo "  make blob-provision DRY_RUN=1  Same, but print the plan without mutating"
-	@echo "  make deploy                    Build/push + deploy the cluster to Container Apps (ENV=...)"
-	@echo "  make deploy DRY_RUN=1          Same, but print the full deploy plan without mutating"
+	@echo "PROVISION (one-time Azure infra bootstrap, idempotent; ENV=staging|production)"
+	@echo "  make deploy-setup [DRY_RUN=1]  Azure + toolchain bootstrap (resource group, ACR, Key Vault, ACA env)"
+	@echo "  make db-provision [DRY_RUN=1]  Provision Tiger Cloud DB + wire DSN to Key Vault"
+	@echo "  make blob-provision [DRY_RUN=1] Provision Azure Storage account + container; print conn string (#807)"
+	@echo "  make livekit-provision [DRY_RUN=1] Provision self-hosted LiveKit secret pair into Key Vault"
+	@echo ""
+	@echo "OPERATOR RUNBOOKS (staging)"
+	@echo "  make release-staging VERSION=X.Y.Z  Build -> apply digest-pinned overlay -> promote -> functional gate -> smoke"
+	@echo "  make release-staging VERIFY=1       Recover a stuck/false-green release (promote + gate + smoke only)"
+	@echo "  make reset-staging                  Wipe staging to a fresh, auth-coherent, verified-usable state"
+	@echo "  make staging-db-reset               Destructive manual staging DB wipe (typed confirmation)"
+	@echo "  make smoke-staging                  End-to-end smoke test against the live staging front door"
+	@echo ""
+	@echo "DEPLOY -- the normal way:"
+	@echo "  STAGING is GitOps: bump the image digest in deploy/k8s/overlays/staging and"
+	@echo "  merge to main -> ArgoCD reconciles. Rollback = 'git revert' the overlay."
+	@echo "  (release-staging above wraps build+digest-pin+promote+gate for you.)"
+	@echo ""
+	@echo "BREAK-GLASS (imperative deploy -- ArgoCD owns staging; use only when Argo is unavailable, or for prod until #2207)"
+	@echo "  make deploy ENV=production VERSION=X.Y.Z  Imperative prod roll-out (build + push + apply + smoke)"
+	@echo "  make deploy [DRY_RUN=1]                    Imperative apply (escape hatch; NOT the staging norm)"
+	@echo "  make deploy-aks [DRY_RUN=1]                Apply-only manifests primitive (no build)"
+	@echo "  make deploy-rollback ARGS=--list           git-revert-based overlay rollback"
+	@echo "  make deploy-autoscaler [DRY_RUN=1]         Converge AKS nodepool autoscaler sizing (owner-gated)"
 	@echo ""
 	@echo "UTILITY"
 	@echo "  make clean        Remove build artifacts"

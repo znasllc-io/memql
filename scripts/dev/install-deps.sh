@@ -91,7 +91,7 @@ function check_k3d() {
 
 function check_kubectl() {
     if ! command -v kubectl >/dev/null 2>&1; then
-        echo "  HINT: kubectl is not installed -- 'make up' / 'make dev' / 'make k3d-status' need it."
+        echo "  HINT: kubectl is not installed -- 'make up' / 'make dev' / 'make status' need it."
         echo "        macOS:  brew install kubectl"
         echo "        Linux:  https://kubernetes.io/docs/tasks/tools/#kubectl"
         return 0

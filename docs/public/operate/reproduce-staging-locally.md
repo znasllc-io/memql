@@ -27,14 +27,14 @@ cross-node mesh bugs reproduces locally instead of only on staging.
 | Manifests | `deploy/k8s/overlays/local/` | `deploy/k8s/overlays/staging/` | same base, env config differs |
 | Node-type split | identity / voice / mcp / bff / cognition / agent / planner / workbench / voice-agent | same | identical |
 | Build model | engine (`Dockerfile`) for identity/voice/mcp; carrier (`memql-bff-copresent/Dockerfile`) for bff/cognition/agent/planner/workbench | same | identical |
-| Replicas per mesh node (default) | **1** (scale to 2 with `make k3d-scale N=2`) | **2** | equivalent |
+| Replicas per mesh node (default) | **1** (scale to 2 with `make scale N=2`) | **2** | equivalent |
 | Per-replica node id | `fieldRef: metadata.name` (downward API, same as staging) | `fieldRef: metadata.name` | **identical** |
 | `MEMQL_NODE_ID` uniqueness | enforced by fieldRef -- unique per pod | enforced by fieldRef | identical |
 | ArgoCD `ignoreDifferences` | `/spec/replicas` excluded | same | identical |
 | Database | local Postgres + TimescaleDB (postgres pod) | Tiger Cloud | config only |
 | Connection pooler | not present locally (single db-pool pod, direct) | Tiger Cloud managed PgBouncer | config only |
 | Blob storage | Azurite emulator | Azure Blob | config only |
-| Secrets / keys | dev defaults (seeded by `make k3d-secrets`) | Key Vault via ESO | config only |
+| Secrets / keys | dev defaults (seeded by `make secrets`) | Key Vault via ESO | config only |
 | ExternalSecrets | deleted by `$patch: delete` in local overlay | present | config only |
 | LiveKit | **LiveKit Cloud** (outbound; no self-hosted livekit/sip/redis locally) | self-hosted `livekit-server` + `livekit/sip` | divergent -- justified (Epic #2184) |
 | Ingress | port-forwards from k3d (no ingress controller) | ingress-nginx | divergent -- justified |
@@ -62,7 +62,7 @@ make up
 
 # Multi-node (2 servers + 1 agent, for cross-node mesh testing):
 make up SERVERS=2 AGENTS=1
-make k3d-scale N=2
+make scale N=2
 ```
 
 `make up` does the following in order:
@@ -132,26 +132,26 @@ pod restart is purely at the pod level; ArgoCD still owns the Deployment spec.
 
 ```bash
 # Scale to 2 replicas per Deployment:
-make k3d-scale N=2
+make scale N=2
 
 # Litmus: verify every pod has a UNIQUE MEMQL_NODE_ID:
-make k3d-status
+make status
 
 # Scale back to single-node:
-make k3d-scale N=1
+make scale N=1
 ```
 
 Because `deploy/k8s/base/` sets `MEMQL_NODE_ID` via `fieldRef: metadata.name`,
 each pod automatically gets a unique node id matching its pod name. No overlay
 changes are needed to enable multi-node.
 
-`make k3d-status` checks that all running pods have distinct `MEMQL_NODE_ID`
+`make status` checks that all running pods have distinct `MEMQL_NODE_ID`
 values. Shared ids are the root cause of the #1042 class of mesh bugs.
 
 ## Re-seed secrets
 
 ```bash
-make k3d-secrets
+make secrets
 ```
 
 This re-runs `scripts/k3d/seed-secrets.sh` and is idempotent. Use it if you've
@@ -186,10 +186,10 @@ with its justification.
 
 | # | Divergence | Local | Staging | Why acceptable |
 |---|---|---|---|---|
-| 1 | **Replicas (default)** | 1 per Deployment | 2 per Deployment | Resource-constrained laptops. Multi-node is opt-in via `make k3d-scale N=2`. The fieldRef mechanism is identical to staging so the multi-node path fully reproduces. |
+| 1 | **Replicas (default)** | 1 per Deployment | 2 per Deployment | Resource-constrained laptops. Multi-node is opt-in via `make scale N=2`. The fieldRef mechanism is identical to staging so the multi-node path fully reproduces. |
 | 2 | **Ingress** | k3d port-forwards (no ingress controller) | ingress-nginx on AKS | Port-forwards are sufficient for local dev; installing nginx in k3d adds significant startup time for no functional gain. |
 | 3 | **Digest-pinning gate** | skipped for `ENV=local` in `scripts/deploy/drift-check.sh` | enforced | Local images are built by `make dev` with a stable `:local` tag; they have no ACR digest. The gate exemption is tested by `TestDriftCheckRenderedLocalOverlaySkipsDigestGate`. |
-| 4 | **ExternalSecrets / Key Vault** | deleted by `$patch: delete` in local overlay | ESO syncs from Key Vault | Dev secrets are seeded directly by `make k3d-secrets`. |
+| 4 | **ExternalSecrets / Key Vault** | deleted by `$patch: delete` in local overlay | ESO syncs from Key Vault | Dev secrets are seeded directly by `make secrets`. |
 | 5 | **Connection pooler** | direct Postgres connection | Tiger Cloud managed PgBouncer | Single-node dev without a pool is safe; the hybrid-endpoint split used in staging can be reproduced by running PgBouncer as a separate pod if needed. |
 | 6 | **voice-agent** | opt-in (`deploy/k8s/overlays/local/` includes it) | in base | Needs live OpenAI + a **LiveKit Cloud** project. Export `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` before `make up` (seed-secrets sources them); see [voice-bringup-verification.md](voice-bringup-verification.md) and, for telephony, [telephony-local-dev.md](telephony-local-dev.md). |
 
@@ -206,8 +206,8 @@ with its justification.
 
 ## Worked example: reproduce a cross-node mesh bug
 
-1. `make up SERVERS=2 AGENTS=1 && make k3d-scale N=2`.
-2. `make k3d-status` -- verify all pods show distinct `MEMQL_NODE_ID` values.
+1. `make up SERVERS=2 AGENTS=1 && make scale N=2`.
+2. `make status` -- verify all pods show distinct `MEMQL_NODE_ID` values.
    If any share an id, stop: the mesh cannot reproduce cross-node bugs.
 3. Reproduce the scenario (e.g. send a chat message that triggers an assistant
    reply). Watch logs:
