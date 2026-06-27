@@ -1,6 +1,6 @@
 // Tests for the manual staging DB reset (scripts/deploy/staging-db-reset.sh,
 // znasllc-io/memql#1500). The script is DESTRUCTIVE, so most of its value is in
-// the guards: staging-only, a kube-context check, a typed confirmation, replica
+// the guards: staging-only, a kube-context check, an explicit --confirm, replica
 // restore on exit, and -- critically -- that it is NEVER wired into a deploy.
 // These run from `go test ./...` with no live cluster. Same package as the
 // other scripts/deploy tests; names are sdbr-prefixed to avoid collisions.
@@ -86,7 +86,8 @@ func TestStagingDBResetGuards(t *testing.T) {
 	checks := map[string]string{
 		`staging-only env gate`:          `ALLOWED_ENV="staging"`,
 		`wrong-cluster guard`:            `EXPECTED_CONTEXT_SUBSTR`,
-		`typed confirmation`:             `CONFIRM_PHRASE`,
+		`explicit --confirm param`:       `--confirm=`,
+		`confirmation phrase`:            `CONFIRM_PHRASE`,
 		`replica restore via trap`:       `trap restore_replicas EXIT`,
 		`destructive wipe`:               `DROP SCHEMA`,
 		`schema rebuilt via migrate Job`: `migrate-job.yaml`,
@@ -96,6 +97,11 @@ func TestStagingDBResetGuards(t *testing.T) {
 		if !strings.Contains(src, want) {
 			t.Errorf("missing %s (expected %q in the script)", name, want)
 		}
+	}
+	// Non-interactive by the capability-script contract (#2221): the destructive
+	// confirmation must be an explicit param, never a blocking `read -p` prompt.
+	if strings.Contains(src, "read -r -p") || strings.Contains(src, "read -p") {
+		t.Error("staging-db-reset.sh must be non-interactive: no `read -p` confirmation prompt (use --confirm=<phrase>)")
 	}
 }
 

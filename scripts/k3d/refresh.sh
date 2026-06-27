@@ -3,11 +3,11 @@
 # scripts/k3d/refresh.sh
 # ======================
 #
-# One-command clean-slate local environment: nuke and repave the k3d +
-# ArgoCD cluster, then rebuild the engine images so the mesh actually comes
-# up. This is the old-muscle-memory `make refresh` -- the recovery path when
-# the in-cluster DB or ArgoCD state has drifted and a from-scratch boot is
-# faster than untangling it.
+# Capability: k3d.refresh -- one-command clean-slate local environment: nuke
+# and repave the k3d + ArgoCD cluster, then rebuild the engine images so the
+# mesh actually comes up. This is the old-muscle-memory `make refresh` -- the
+# recovery path when the in-cluster DB or ArgoCD state has drifted and a
+# from-scratch boot is faster than untangling it.
 #
 # Steps (in order):
 #   1. down --purge   -- tear down the k3d cluster. This destroys the
@@ -31,24 +31,37 @@
 # (plus NAMESPACE). The ArgoCD Application tracks the current git branch, so
 # push your branch before refreshing (ArgoCD cannot read local-only branches).
 #
-# Per the repo + global Skills+Scripts convention (CLAUDE.md): function-based,
-# one responsibility per function, main() at the bottom. set -euo pipefail.
+# This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
+# JSON result envelope on stdout, human logs on stderr, honest exit codes.
+# Contract: docs/internal/design/capability-script-contract.md
 #
-# Refs: #2206 #2061
+# Exit codes: 0 ok | 2 bad param
+#
+# Refs: #2206 #2061 #2221
 
 set -euo pipefail
 
-#=============================================================================
-# CONFIGURATION
-#=============================================================================
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/capability.sh
+source "${SCRIPT_DIR}/../lib/capability.sh"
+
+cap_init "k3d.refresh" "Nuke and repave the local k3d + ArgoCD cluster, then rebuild engine images."
+cap_spec_param "cluster"   "k3d cluster name"                             "CLUSTER"
+cap_spec_param "namespace" "k8s namespace"                                "NAMESPACE"
+cap_spec_param "revision"  "git revision for the ArgoCD Application"      "REVISION"
+cap_spec_param "servers"   "k3d server node count"                        "SERVERS"
+cap_spec_param "agents"    "k3d agent node count"                         "AGENTS"
+
+#=============================================================================
+# CONFIGURATION (env-resolved defaults; cap_param flags/stdin override in main)
+#=============================================================================
 
 CLUSTER_NAME="${CLUSTER:-${MEMQL_K3D_CLUSTER:-memql}}"
 NAMESPACE="${NAMESPACE:-${MEMQL_K3D_NAMESPACE:-memql}}"
 SERVERS="${SERVERS:-}"
 AGENTS="${AGENTS:-}"
 REVISION="${REVISION:-}"
+HEALTHY=false
 
 # How long to wait for ArgoCD to create the app Deployments after `up`, and
 # how long to wait for them to become Available after the image rebuild.
@@ -59,15 +72,17 @@ HEALTHY_TIMEOUT="${MEMQL_REFRESH_HEALTHY_TIMEOUT:-300}"
 # OUTPUT HELPERS
 #=============================================================================
 
-function info()  { echo "INFO:  $*"; }
-function warn()  { echo "WARN:  $*"; }
-function error() { echo "ERROR: $*" >&2; }
+function info()  { cap_info "$*"; }
+function warn()  { cap_warn "$*"; }
+function error() { cap_error "$*"; }
 
 function section() {
-    echo ""
-    echo "############################################################"
-    echo "#  $*"
-    echo "############################################################"
+    {
+        echo ""
+        echo "############################################################"
+        echo "#  $*"
+        echo "############################################################"
+    } >&2
 }
 
 #=============================================================================
@@ -76,7 +91,7 @@ function section() {
 
 function nuke() {
     section "refresh 1/5: tearing down cluster '${CLUSTER_NAME}' (purge)"
-    PURGE=1 bash "${SCRIPT_DIR}/down.sh" --cluster="${CLUSTER_NAME}" --purge
+    PURGE=1 bash "${SCRIPT_DIR}/down.sh" --cluster="${CLUSTER_NAME}" --purge >&2
 }
 
 #=============================================================================
@@ -90,7 +105,7 @@ function bringup() {
         --namespace="${NAMESPACE}" \
         ${REVISION:+--revision="${REVISION}"} \
         ${SERVERS:+--servers="${SERVERS}"} \
-        ${AGENTS:+--agents="${AGENTS}"}
+        ${AGENTS:+--agents="${AGENTS}"} >&2
 }
 
 #=============================================================================
@@ -134,7 +149,7 @@ function rebuild_images() {
     # rollout; it skips a Deployment that doesn't exist yet.
     bash "${SCRIPT_DIR}/dev.sh" \
         --cluster="${CLUSTER_NAME}" \
-        --namespace="${NAMESPACE}"
+        --namespace="${NAMESPACE}" >&2
 }
 
 #=============================================================================
@@ -146,67 +161,41 @@ function wait_for_healthy() {
 
     if kubectl wait --for=condition=Available deploy --all \
         -n "${NAMESPACE}" \
-        --timeout="${HEALTHY_TIMEOUT}s"; then
+        --timeout="${HEALTHY_TIMEOUT}s" >&2; then
         info "All Deployments in '${NAMESPACE}' are Available."
+        HEALTHY=true
     else
         warn "Not all Deployments became Available within ${HEALTHY_TIMEOUT}s."
         warn "Inspect: kubectl get pods -n ${NAMESPACE}"
+        HEALTHY=false
     fi
 
-    echo ""
     info "Refresh complete. Cluster state:"
-    kubectl get deploy -n "${NAMESPACE}" 2>/dev/null || true
-    echo ""
+    kubectl get deploy -n "${NAMESPACE}" >&2 2>/dev/null || true
     info "Mesh litmus:    make status"
     info "Inner loop:     make dev [NODE=<type>]"
     info "Engine gRPC:    kubectl port-forward -n ${NAMESPACE} svc/mcp 50051:50051"
 }
 
 #=============================================================================
-# PARSE ARGUMENTS
-#=============================================================================
-
-function show_help() {
-    cat <<EOF
-Usage: $0 [options]
-
-Nuke and repave the local k3d + ArgoCD cluster, then rebuild engine images.
-
-Options:
-    --cluster=NAME   k3d cluster name (default: ${CLUSTER_NAME})
-    --namespace=NS   k8s namespace (default: ${NAMESPACE})
-    --revision=REV   git revision for the ArgoCD Application (default: branch)
-    --servers=N      k3d server node count
-    --agents=N       k3d agent node count
-    --help           Show this help message
-
-Environment overrides (same as 'make up'):
-    CLUSTER / SERVERS / AGENTS / REVISION / NAMESPACE
-    MEMQL_REFRESH_CREATE_TIMEOUT   wait for Deployments to be created (default ${CREATE_TIMEOUT}s)
-    MEMQL_REFRESH_HEALTHY_TIMEOUT  wait for Deployments to be Available (default ${HEALTHY_TIMEOUT}s)
-EOF
-}
-
-function parse_arguments() {
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --cluster=*)   CLUSTER_NAME="${1#*=}"; shift ;;
-            --namespace=*) NAMESPACE="${1#*=}";    shift ;;
-            --revision=*)  REVISION="${1#*=}";     shift ;;
-            --servers=*)   SERVERS="${1#*=}";      shift ;;
-            --agents=*)    AGENTS="${1#*=}";       shift ;;
-            --help)        show_help; exit 0 ;;
-            *) error "Unknown option: $1"; show_help; exit 2 ;;
-        esac
-    done
-}
-
-#=============================================================================
 # ENTRY POINT
 #=============================================================================
 
+function raw_int_or_null() {
+    if [[ -n "$1" ]]; then printf '%s' "$1"; else printf 'null'; fi
+}
+
 function main() {
-    parse_arguments "$@"
+    cap_handle_meta "$@"
+    cap_parse_flags "$@"
+
+    CLUSTER_NAME="$(cap_param cluster "$CLUSTER_NAME")"
+    NAMESPACE="$(cap_param namespace "$NAMESPACE")"
+    REVISION="$(cap_param revision "$REVISION")"
+    SERVERS="$(cap_param servers "$SERVERS")"
+    AGENTS="$(cap_param agents "$AGENTS")"
+    cap_require cluster "$CLUSTER_NAME"
+    cap_require namespace "$NAMESPACE"
 
     info "memQL local refresh (clean-slate)"
     info "Cluster:   ${CLUSTER_NAME}"
@@ -217,6 +206,15 @@ function main() {
     wait_for_deployments_created
     rebuild_images
     wait_for_healthy
+
+    cap_changed
+    cap_result_set     cluster "$CLUSTER_NAME"
+    cap_result_set     namespace "$NAMESPACE"
+    cap_result_set_raw servers "$(raw_int_or_null "$SERVERS")"
+    cap_result_set_raw agents  "$(raw_int_or_null "$AGENTS")"
+    cap_result_set_raw rebuilt true
+    cap_result_set_raw healthy "$HEALTHY"
+    cap_ok
 }
 
 main "$@"

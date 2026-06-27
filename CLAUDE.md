@@ -2131,6 +2131,37 @@ Current example: `scripts/k3d/{up,dev,status}.sh` implements
 `make up`, `make dev`, and `make status`. The Makefile targets are
 one-liners (`bash scripts/k3d/up.sh`).
 
+#### Capability scripts (the hardened successor)
+
+A **capability script** is a deploy/ops script that is also the
+deterministic backend behind a DSL `action` -- so it must run
+**identically** whether an automation/action executor or a human
+invokes it. These scripts adopt the **capability-script contract**
+([docs/internal/design/capability-script-contract.md](docs/internal/design/capability-script-contract.md),
+#2221), which is the function-based convention above **plus**:
+
+- **non-interactive** -- no `read -p` / `select` prompts; a
+  destructive confirmation is an explicit `--confirm=<phrase>` param,
+  never a blocking prompt;
+- **structured params in** -- `--flag=value` > stdin JSON
+  (`--params-stdin`) > env > documented defaults; no positional args;
+- **structured result out** -- exactly one JSON envelope on **stdout**,
+  all human logs on **stderr**;
+- **honest, stable exit codes** (0 ok; 2 bad param; 3 refused; 4
+  prerequisite missing; 5 op failed);
+- **no decisions inside** -- no branching on environment/version/role
+  (that lives in DSL `logic`); only mechanical idempotency branches.
+
+They `source scripts/lib/capability.sh` (the shared runtime:
+`cap_init` / `cap_param` / `cap_ok` / `cap_fail` / `cap_info`-to-stderr
+/ `--print-spec`). The reference implementation is the `scripts/k3d/*`
+engine-local path; `scripts/lib/capability_contract_test.go` enforces
+the contract on every script that sources the library (and gates
+non-interactivity across `scripts/{k3d,deploy,staging,release}`). The
+Go effect seam parses the envelope via
+`deploycontrol.ParseCapabilityResult`. Use this contract for any new
+script a DSL `action` will drive.
+
 ### Documentation Style Guidelines
 
 **No Emojis:** All documentation, skills, and CLI responses must use professional formatting without emojis. Use:

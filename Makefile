@@ -252,7 +252,7 @@ status:
 ##   make scale N=1   # single-node (default)
 scale:
 	@bash scripts/k3d/scale.sh \
-		$${N:?usage: make scale N=<replicas>} \
+		--replicas=$${N:?usage: make scale N=<replicas>} \
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
 		$${NAMESPACE:+--namespace=$${NAMESPACE}}
 
