@@ -1,0 +1,179 @@
+// =============================================================================
+// MemQL Automation Reference
+// =============================================================================
+//
+// This file is the source of truth for `automation` syntax. It is NOT loaded
+// by the engine (the leading underscore on the path tells every walker to
+// skip it -- see component/memql/dslfs/walker.go).
+//
+// `automation` is the behavioral DSL's ONLY reactive + composing construct.
+// From the behavioral-constructs ADR
+// (docs/internal/design/dsl-behavioral-constructs-adr.md, §2):
+//
+//     logic decides, mutations persist, actions touch the world,
+//     queries read, automations orchestrate and react.
+//
+// An automation is triggered by an event / schedule / CDC change (or invoked
+// by reference, ADR §2.2) and sequences steps. It is the one place the
+// decide -> persist -> act rhythm comes together: call `logic` to decide,
+// call a `mutation` to persist one write, call an `action` to reach the
+// outside world, call a `query` to read, and call a sub-automation to
+// compose. It is also the only construct that may carry a `@trigger`.
+//
+// ----------------------------------------------------------------------------
+// Call-graph contract (ADR §2 table) -- enforced by the I2 call-graph validator
+// ----------------------------------------------------------------------------
+//
+//   Construct  | May call                                       | May NOT
+//   -----------|------------------------------------------------|---------
+//   automation | logic, query, mutation, action, sub-automation;| --
+//              | branch (switch / success-failure), loop        |
+//              | (forEach), fan-out (parallel)                  |
+//
+// Automations consume the layers above them and never the other way around:
+// a logic/query/mutation/action never calls back into an automation.
+//
+// =============================================================================
+//   1. Automation-level annotations
+// =============================================================================
+//
+//   @enabled / @disabled    Lifecycle flag. @enabled is the explicit-on
+//                           default; @disabled skips the automation at load.
+//   @description("text")    Human-readable description.            optional
+//   @trigger(...)           The reactive surface. EXACTLY ONE per automation
+//                           (the only construct allowed to carry it).
+//
+// Trigger forms:
+//   @trigger(event="<name>", concept="v1:<ns>:<concept>", partition="*")
+//                           Fire on a graph/event-bus event. `concept` scopes
+//                           it to a concept; `partition="*"` is still required
+//                           while the event topic carries a partition segment
+//                           (#56 phase 8 removes it).
+//   @trigger(schedule="<6-field cron>")
+//                           Time-driven (sec min hour dom mon dow), e.g.
+//                           @trigger(schedule="0 */10 * * * *") = every 10 min.
+//
+// =============================================================================
+//   2. Terse single-step form -- replaces the pass-through ceremony (ADR §2.4)
+// =============================================================================
+//
+// Most automations existed only to make a `logic` reactive: their whole body
+// was `step run { logic X { event: event } }`. The terse form expresses that
+// in one line WITHOUT hiding the reactive surface (it stays greppable):
+//
+//     automation NAME @trigger(event="...") => logic logicName
+//
+// The loader lowers it to the canonical single-step automation; it forwards
+// the trigger payload as `event` when the target logic declares args, and
+// calls it with an empty object otherwise. The terse and longhand forms
+// compile to IDENTICAL runtime automations (dry-run + live parity).
+//
+// Examples (the cluster pass-throughs, terse):
+//
+//     automation registerNode   @trigger(event="system.startup")  => logic registerNode
+//     automation deregisterNode  @trigger(event="system.shutdown") => logic deregisterNode
+//     automation pruneStaleNodes @trigger(schedule="0 */10 * * * *") => logic pruneStaleClusterNodes
+//
+// NOTE: terse-form parsing lands in I3 (#2215); this section documents the
+// committed target syntax (ADR §7) ahead of that parser work.
+//
+// =============================================================================
+//   3. Full form -- the canonical longhand single-step automation
+// =============================================================================
+//
+// The longhand the terse form lowers to. `event` is the bound trigger
+// payload; `args.X` reaches its fields inside step calls.
+
+@enabled
+@trigger(event="system.startup")
+@description("Register this node in the database on startup (longhand single-step form).")
+automation registerNodeLonghand {
+  step run {
+    logic registerNode { event: event }
+  }
+}
+
+// =============================================================================
+//   4. Full form -- multi-step orchestration (decide / persist / act / branch)
+// =============================================================================
+//
+// The deployment bundle's shape (illustrative; the real bundle lands in
+// Phase 3). Engine mesh ONLY -- no bff/copresent. Actions default to the
+// `cockpit/runner` surface; the env `switch` stays in ONE automation.
+//
+// Step vocabulary an automation may use:
+//   step NAME { logic L { ... } }          -- decide (pure)
+//   step NAME { query Q { ... } }          -- read
+//   step NAME { mutation M { ... } }       -- persist (one write per step)
+//   step NAME { action("act@1") { args { ... } } on surface(<expr>) }
+//                                          -- touch the world (external capability)
+//   step NAME { automation Sub { ... } }   -- compose a sub-automation
+//   forEach x in <list> { ... }            -- loop / fan one step over a list
+//   switch <expr> { case "v" { ... } default { ... } }   -- branch
+//   parallel { ... }                       -- fan-out concurrently
+//   on success when <logic> { ... } / on failure { ... }  -- terminal branch
+//
+//   @enabled
+//   @trigger(event="deploy.requested", concept="v1:cluster:deployment")
+//   @description("Deploy the memQL ENGINE cluster to an environment. No bff/copresent.")
+//   automation deployEngineCluster {
+//     step authorize { logic requireForwardDeploy { event: event } }   // requiresDeveloperOrAbove
+//     step record    { mutation createDeployment {                     // ONE write
+//                        deploymentId: event.payload.deploymentId,
+//                        environment:  event.payload.environment,
+//                        triggeredBy:  event.actor.id } }
+//     step clone     { action("cloneRepoAtVersion@1") {
+//                        args { workdir: event.payload.workdir, ref: event.payload.ref } }
+//                      on surface("cockpit/runner") }
+//     step build     { forEach nodeType in logic engineNodeTypes() {
+//                        action("buildEngineImage@1") {
+//                          args { nodeType: nodeType, version: event.payload.version,
+//                                 workdir: event.payload.workdir } } } }
+//     step place {
+//       switch event.payload.environment {
+//         case "development" {
+//           forEach nodeType in logic engineNodeTypes() {
+//             action("importImageToK3d@1") { args { nodeType: nodeType, cluster: "memql" } } }
+//         }
+//         default {  // staging | production -> GitOps (deploys = merges)
+//           action("pinOverlayDigests@1") {
+//             args { overlayPath: logic overlayPathForEnv({ env: event.payload.environment }),
+//                    digests: $steps.build.result } }
+//           action("argoSync@1") { args { app: "memql", revision: event.payload.ref } }
+//         }
+//       }
+//     }
+//     step gate { action("runDeployGate@1") {
+//                   args { env: event.payload.environment, workdir: event.payload.workdir } } }
+//     step finish {
+//       on success when logic deployGatePassed({ gate: $steps.gate.result }) {
+//         mutation updateDeploymentStatus { deploymentId: event.payload.deploymentId, status: "succeeded" }
+//         action("notifyDeploy@1") { args { env: event.payload.environment, status: "succeeded" } }
+//       }
+//       on failure {
+//         action("revertOverlay@1") { args { overlayPath: logic overlayPathForEnv({ env: event.payload.environment }) } }
+//         mutation updateDeploymentStatus { deploymentId: event.payload.deploymentId, status: "failed" }
+//         action("notifyDeploy@1") { args { env: event.payload.environment, status: "failed" } }
+//       }
+//     }
+//   }
+//
+// =============================================================================
+//   5. NON-COMPLIANT examples
+// =============================================================================
+//
+// 5a. Two writes in one step. Each mutation step performs exactly one graph
+//     write; split a second write into its own step.
+//
+//   // INVALID: two mutations crammed into one step.
+//   step record {
+//     mutation createDeployment { ... }
+//     mutation updateDeploymentStatus { ... }   // <- second write: split it out
+//   }
+//
+// 5b. A trigger on a non-automation. `@trigger` is automation-only -- a
+//     logic/query/mutation carrying one is rejected (see `_logic.memql` §5c).
+//
+// See `_logic.memql` for pure decisions and `_action.memql` (I6) for the
+// external-capability construct each `action(...)` step references.
+// =============================================================================
