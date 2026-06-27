@@ -8,7 +8,7 @@
 // Bootstrap the cluster's self-representation in the database on first startup.
 // Creates records for the cluster, its database, and its identity provider.
 // Only BFF nodes run this. Idempotent: skips if cluster already exists.
-use cluster.mutations.{ createCluster, createDatabase, createIdentityProvider, createNode, createSpawnEvent, updateNodeHealth }
+use cluster.mutations.{ createCluster, createDatabase, createIdentityProvider, updateNodeHealth }
 use cluster.queries.{ existingCluster, staleClusterNodes }
 use platform.queries.{ globalVariable }
 
@@ -52,93 +52,6 @@ logic bootstrapCluster {
   }
 
   return coalesce(clusterRecord, existing.First())
-  }
-}
-
-// ---- logic/v1/cluster/deregisterNode.memql ----
-
-// Record node shutdown in the database.
-// Creates a spawn event with action="stopped".
-@description("Records node shutdown by creating a v1:cluster:spawnEvent with action='stopped' and reason='system.shutdown'. Fires when the node is going down.")
-logic deregisterNode {
-  args {
-    event object @required
-  }
-  body {
-  spawnEvent := createSpawnEvent({
-    nodeId:   coalesce(args.event.payload.node.id, ""),
-    nodeType: coalesce(args.event.payload.node.type, ""),
-    action:   "stopped",
-    reason:   "system.shutdown"
-  })
-
-  return spawnEvent
-  }
-}
-
-// ---- logic/v1/cluster/registerNode.memql ----
-
-// Register this node in the database when it starts up.
-// Creates a v1:cluster:node record and a spawn event.
-// Runs on ALL node types. Safe to run on every restart.
-//
-// Passes the peer's NodeId as the explicit concept id so later rows
-// written by NodeStatusWriter (via updateNodeHealth) share the same
-// time-series timeline -- one concept row per real node.
-@description("Registers this node on startup. Creates a v1:cluster:node record (using the peer's NodeId as the explicit concept id so later NodeStatusWriter rows share the same time-series timeline) and a v1:cluster:spawnEvent with action='spawned' and reason='system.startup'. Runs on every node type; safe to re-run on every restart.")
-logic registerNode {
-  args {
-    event object @required
-  }
-  body {
-  // Create the node record. Pass the peer's NodeId as the explicit
-  // concept id so later rows from NodeStatusWriter share the same
-  // time-series timeline (EmitSystemStartup always populates
-  // node.id -- a generated UUID when MEMQL_NODE_ID is unset).
-  //
-  // Every field is bound with an EXPLICIT key + coalesce, mirroring
-  // deregisterNode (#1643): a multi-segment path like
-  // `args.event.payload.node.id` is NOT eligible for the bare `args.X`
-  // object-literal shorthand (only simple identifiers are), so the old
-  // shorthand form corrupted the arg map -- nodeType never reached
-  // createNode ("required argument nodeType is missing"). `flavor`
-  // was also dropped: it is not a createNode arg (the insert body
-  // never reads it).
-  // deploymentId + provider/environment/region tie this node row to the
-  // deployment that created it (#1873). deploymentId arrives on the
-  // top-level startup payload (EmitSystemStartup reads MEMQL_DEPLOYMENT_ID,
-  // injected per-deploy by the rollout via downward API; "local" in dev).
-  // provider/environment/region already ride the top-level payload (the
-  // same fields bootstrapCluster stamps on the cluster row). All are
-  // multi-segment paths, so they need an EXPLICIT key + coalesce (see the
-  // #1643/#1671 note above) -- the bare `args.X` shorthand is identifier-only.
-  nodeRecord := createNode({
-    id:           coalesce(args.event.payload.node.id, ""),
-    nodeType:     coalesce(args.event.payload.node.type, ""),
-    address:      coalesce(args.event.payload.node.address, ""),
-    deploymentId: coalesce(args.event.payload.deploymentId, ""),
-    provider:     coalesce(args.event.payload.provider, ""),
-    environment:  coalesce(args.event.payload.environment, ""),
-    region:       coalesce(args.event.payload.region, "")
-  })
-
-  // Record the spawn event. The mutation schema only accepts the flat
-  // fields below; version/address aren't persisted on the event (they
-  // already live on the node record from createNode above).
-  // Every field is bound with an EXPLICIT key + coalesce, mirroring
-  // the nodeRecord step above (#1671): a multi-segment path like
-  // args.event.payload.node.type evaluates to nil when the field is
-  // absent; passing nil for a @required arg triggers "required
-  // argument missing" at validation time. coalesce(...,"") ensures a
-  // non-nil string reaches createSpawnEvent.
-  spawnEvent := createSpawnEvent({
-    nodeId:   coalesce(args.event.payload.node.id, ""),
-    nodeType: coalesce(args.event.payload.node.type, ""),
-    action:   "spawned",
-    reason:   "system.startup"
-  })
-
-  return nodeRecord
   }
 }
 

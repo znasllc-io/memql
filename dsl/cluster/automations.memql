@@ -3,30 +3,84 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 //
-// All four cluster automations are single-step pass-throughs, so they use the
-// terse form `automation NAME @trigger(...) => logic L` (memql#2215 / ADR S2.4),
-// which lowers to the canonical `step run { logic L { event: event } }` and
-// removes the wrapper ceremony without hiding the reactive surface.
+// bootstrapCluster + pruneStaleClusterNodes stay terse single-step pass-throughs
+// (`automation NAME @trigger(...) => logic L`, memql#2215 / ADR S2.4) and keep
+// their logic-purity baseline entries (#2235): bootstrapCluster's conditional
+// creates gate the critical system.startup path and need behavioral verification
+// before moving to if-steps; pruneStaleClusterNodes' per-row sweep needs a forEach
+// automation step, which the parser does not yet implement (struct-form forEach/for
+// is ADR S7 target syntax, not yet wired). See the deferral notes on their
+// callGraphBaseline entries. deregisterNode + registerNode are longhand: the inline graph
+// write that used to live in their pass-through `logic` (an ADR S2.1 logic-
+// purity violation, baselined under #2217) now lives in the automation as a
+// mutation step (the bare `<mutation>{ ... }` call form), so no `logic`
+// indirection survives (#2235).
 
-use cluster.logic.{ bootstrapCluster, deregisterNode, pruneStaleClusterNodes, registerNode }
+use cluster.logic.{ bootstrapCluster, pruneStaleClusterNodes }
+use cluster.mutations.{ createNode, createSpawnEvent }
 
 // Bootstrap cluster, database, and identity provider records on first startup.
 @enabled
 @description("Bootstrap cluster, database, and identity provider records on first startup")
 automation bootstrapCluster @trigger(event="system.startup") => logic bootstrapCluster
 
-// Record node shutdown in the database (a spawn event with action="stopped").
+// Record node shutdown in the database: append a v1:cluster:spawnEvent with
+// action="stopped", reason="system.shutdown". The former deregisterNode logic
+// was a single inline write (ADR S2.1 logic-purity violation); the write now
+// lives here as a mutation step and the logic is gone (#2235). Every field is
+// bound with an explicit key + coalesce: a multi-segment path like
+// event.payload.node.id evaluates to nil when absent, and passing nil for a
+// @required mutation arg (nodeId / nodeType / action) trips "required argument
+// missing" at validation; coalesce(..., "") guarantees a non-nil string.
 @enabled
+@trigger(event="system.shutdown")
 @description("Record node shutdown in the database")
-automation deregisterNode @trigger(event="system.shutdown") => logic deregisterNode
+automation deregisterNode {
+  step persist {
+    createSpawnEvent {
+      nodeId:   coalesce(event.payload.node.id, ""),
+      nodeType: coalesce(event.payload.node.type, ""),
+      action:   "stopped",
+      reason:   "system.shutdown"
+    }
+  }
+}
 
 // Register this node in the database when it starts up: a v1:cluster:node record
 // + a spawn event. Runs on ALL node types; safe to run on every restart. The
-// peer's NodeId is passed as the explicit concept id so later NodeStatusWriter
-// rows (via updateNodeHealth) share the same time-series timeline.
+// peer's NodeId is passed as the explicit concept id (createNode.id) so later
+// NodeStatusWriter rows (via updateNodeHealth) share the same time-series
+// timeline -- one concept row per real node. The former registerNode logic did
+// both inline writes (ADR S2.1 logic-purity violation); each write is now its
+// own mutation step and the logic is gone (#2235). Every field is bound with an
+// explicit key + coalesce for the same reason as deregisterNode above: a
+// multi-segment path is nil when absent and would trip the @required check.
+// version/address are not createSpawnEvent args (they already live on the node
+// record from createNode), so the spawn step carries only the flat event fields.
 @enabled
+@trigger(event="system.startup")
 @description("Register this node in the database on startup")
-automation registerNode @trigger(event="system.startup") => logic registerNode
+automation registerNode {
+  step node {
+    createNode {
+      id:           coalesce(event.payload.node.id, ""),
+      nodeType:     coalesce(event.payload.node.type, ""),
+      address:      coalesce(event.payload.node.address, ""),
+      deploymentId: coalesce(event.payload.deploymentId, ""),
+      provider:     coalesce(event.payload.provider, ""),
+      environment:  coalesce(event.payload.environment, ""),
+      region:       coalesce(event.payload.region, "")
+    }
+  }
+  step spawn {
+    createSpawnEvent {
+      nodeId:   coalesce(event.payload.node.id, ""),
+      nodeType: coalesce(event.payload.node.type, ""),
+      action:   "spawned",
+      reason:   "system.startup"
+    }
+  }
+}
 
 // Heartbeat-based prune of departed cluster nodes (#1061). Every 10 minutes,
 // mark v1:cluster:node rows whose latest lastSeen is older than

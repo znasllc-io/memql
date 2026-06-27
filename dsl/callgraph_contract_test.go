@@ -15,7 +15,7 @@ import (
 // authoring sandbox (strict), so this baseline only guards direct edits to the
 // existing debt.
 //
-// Every entry is a `<rule>|<kind>|<construct>` key. All 22 are `logic-purity`:
+// Every entry is a `<rule>|<kind>|<construct>` key. All are `logic-purity`:
 // logics that perform a graph write inline (the §2.1 single-writer debt). The
 // handoff scoped only the four cluster pass-throughs, but enforcing the
 // contract tree-wide surfaced the full set across cognition / planner /
@@ -29,16 +29,23 @@ var callGraphBaseline = []string{
 	"logic-purity|logic|accessRequestExpirySweep",
 	"logic-purity|logic|accountDeletionSweep",
 	"logic-purity|logic|appendAttachmentToRequest",
+	// #2235: deferred. The 3 conditional creates gate the CRITICAL system.startup
+	// bootstrap; migrating to if-steps needs behavioral verification of the
+	// condition-eval semantics (existingCluster.Empty() && node.type=="bff") that a
+	// load-only test can't prove. Left baselined per the safe-or-defer rule.
 	"logic-purity|logic|bootstrapCluster",
 	"logic-purity|logic|bootstrapSession",
-	"logic-purity|logic|deregisterNode",
 	"logic-purity|logic|generateResponse",
 	"logic-purity|logic|killSwitchSuspendsRunningPlans",
 	"logic-purity|logic|magicLinkExpirySweep",
+	// #2235: deferred. Per-row sweep (updateNodeHealth inside `for ... range`) needs
+	// a forEach automation step; struct-form forEach/for is documented (ADR S7) but
+	// NOT yet parsed (NormaliseAutomationSource rejects it), and a go-style
+	// `func (Automation)` loop is the internal-only lowering form, not an author
+	// surface. Same blocker as the identity/worker sweep logics below.
 	"logic-purity|logic|pruneStaleClusterNodes",
 	"logic-purity|logic|recordMentoring",
 	"logic-purity|logic|recordTransition",
-	"logic-purity|logic|registerNode",
 	"logic-purity|logic|releaseWorkspaceOnPlanTerminal",
 	"logic-purity|logic|revokeExpiredDelegations",
 	"logic-purity|logic|routeRequest",
