@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/znasllc-io/memql/component/actions"
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/harness/actionpin"
 	"github.com/znasllc-io/memql/component/harness/actionreplay"
@@ -21,7 +22,18 @@ import (
 // Surface resolution + the consolidation lifecycle remain on the merged
 // surfaceresolver / actiontrust packages; this executor performs the literal +
 // parameterized replay against the default surface.
-type ActionExecutor struct{}
+type ActionExecutor struct {
+	// Registry is the authored-action registry (memql#2218). When nil the
+	// process-wide registry (actions.Default(), lazily loaded from the
+	// embedded DSL tree) is used. Tests inject a registry here.
+	Registry *actions.Registry
+
+	// Dispatcher is the capability backend for authored actions. When nil a
+	// default dispatcher bound to the step's engine is built per run (shell.* /
+	// fs.* / http.* run locally; integration.* / mcp.* resolve to engine
+	// tools). Tests inject a fake dispatcher here.
+	Dispatcher CapabilityDispatcher
+}
 
 // Execute runs an action step.
 func (e *ActionExecutor) Execute(ctx context.Context, step *automations.Step, stepCtx *Context) (*automations.StepResult, error) {
@@ -40,16 +52,13 @@ func (e *ActionExecutor) Execute(ctx context.Context, step *automations.Step, st
 	if step.Action == nil {
 		return fail("action configuration is required")
 	}
-	if stepCtx.Engine == nil {
-		return fail("MemQL engine not configured")
-	}
 
 	ref, err := actionpin.Parse(step.Action.Ref)
 	if err != nil {
 		return fail(fmt.Sprintf("invalid action ref %q: %v", step.Action.Ref, err))
 	}
 
-	// The step's args are the input the action's parameters re-bind from.
+	// The step's args are the input the action's parameters bind from.
 	input := map[string]any{}
 	for k, v := range step.Action.Args {
 		input[k] = v
@@ -64,6 +73,27 @@ func (e *ActionExecutor) Execute(ctx context.Context, step *automations.Step, st
 		stepCtx.Logger.Debug("executing action step", "step", step.ID, "ref", step.Action.Ref)
 	}
 
+	// AUTHORED path (memql#2218): an authored action resolved by name binds
+	// params -> renders argTemplate -> invokes its single capability on the
+	// default surface, token-free. This is preferred over the replay-capture
+	// path; only a ref with no authored definition falls through to replay.
+	if authored := e.resolveAuthored(ref); authored != nil {
+		res, aerr := e.executeAuthored(ctx, stepCtx, authored, ref, input)
+		if aerr != nil {
+			return fail(fmt.Sprintf("action %q failed: %v", step.Action.Ref, aerr))
+		}
+		result.Status = "success"
+		result.Result = res
+		result.CompletedAt = time.Now()
+		result.Duration = result.CompletedAt.Sub(result.StartedAt)
+		return result, nil
+	}
+
+	// REPLAY-CAPTURE path (action library, #1758): replay the stored capability
+	// calls from the graph. Requires the engine.
+	if stepCtx.Engine == nil {
+		return fail("MemQL engine not configured")
+	}
 	results, rerr := e.replayActionRef(ctx, stepCtx, ref, input, 0)
 	if rerr != nil {
 		return fail(fmt.Sprintf("action %q replay failed: %v", step.Action.Ref, rerr))
@@ -78,6 +108,68 @@ func (e *ActionExecutor) Execute(ctx context.Context, step *automations.Step, st
 	result.CompletedAt = time.Now()
 	result.Duration = result.CompletedAt.Sub(result.StartedAt)
 	return result, nil
+}
+
+// resolveAuthored looks an action ref up in the authored-action registry
+// (the executor's injected registry, or the process-wide default). A pinned
+// ref resolves to its exact version; a floating ref to the latest. Returns
+// nil when no authored action matches (the caller falls through to replay).
+func (e *ActionExecutor) resolveAuthored(ref actionpin.Ref) *actions.Action {
+	reg := e.Registry
+	if reg == nil {
+		reg = actions.Default()
+	}
+	if reg == nil {
+		return nil
+	}
+	if ref.Floating {
+		if a, ok := reg.LookupLatest(ref.ID); ok {
+			return a
+		}
+		return nil
+	}
+	if a, ok := reg.Lookup(ref.ID, ref.Version); ok {
+		return a
+	}
+	return nil
+}
+
+// executeAuthored runs an authored action: bind step input to params, render
+// the argTemplate, dispatch the single capability on the default surface, and
+// fingerprint the result. The result map is deterministic for a given input +
+// backend, so an identical input replays token-free with a matching
+// resultFingerprint (reusing component/harness/actionreplay.Fingerprint).
+func (e *ActionExecutor) executeAuthored(ctx context.Context, stepCtx *Context, a *actions.Action, ref actionpin.Ref, input map[string]any) (map[string]any, error) {
+	bound, err := actions.Bind(a, input)
+	if err != nil {
+		return nil, err
+	}
+	rendered, err := actions.Render(a, bound)
+	if err != nil {
+		return nil, err
+	}
+
+	disp := e.Dispatcher
+	if disp == nil {
+		var engine engineToolInvoker
+		if stepCtx != nil && stepCtx.Engine != nil {
+			engine = stepCtx.Engine
+		}
+		disp = newDefaultDispatcher(engine)
+	}
+
+	out, err := disp.Invoke(ctx, a.Capability, rendered)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]any{
+		"authored":          true,
+		"ref":               actionpin.Format(ref),
+		"capability":        a.Capability,
+		"result":            out,
+		"resultFingerprint": actionreplay.Fingerprint(out),
+	}, nil
 }
 
 // maxCompositeDepth bounds composite recursion so a cyclic composite (a

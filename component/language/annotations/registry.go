@@ -41,6 +41,9 @@ var ByReceiver = map[string][]string{
 	"Automation": {
 		"description", "enabled", "disabled", "trigger", "filter", "mcp",
 	},
+	"Action": {
+		"description", "enabled", "disabled", "kind", "sideEffect",
+	},
 	"Spec": {
 		"description", "enabled", "disabled", "shape",
 	},
@@ -91,6 +94,9 @@ var Docs = map[string]string{
 	// Automation.
 	"trigger": "Event trigger for automations. Format: @trigger(event=\"graph.node.created.*.v1:ns:concept\") or @trigger(schedule=\"0 0 * * * *\").",
 	"filter":  "Filter expression for automation triggers.",
+	// Action (memql#2218, behavioral-constructs ADR §2.3).
+	"kind":       "On an action: the action kind. @kind(\"primitive\") = one external capability rendered from params (the only kind today; composites collapse into automations, ADR §2.2).",
+	"sideEffect": "On an action: coarse risk class @sideEffect(\"read\"|\"write\"|\"exec\") carried for authoring + the surface-aware trust gate. The AUTHORITATIVE sideEffectClass lives on the capability (ADR §7) so an authored/generated action cannot spoof it.",
 	// Pagination opt-out (epic 5, memql#1965).
 	"unbounded": "On a list-returning query: opt out of the pagination authoring rule and the implicit 50-row runtime cap. Format: @unbounded(\"reason\"). The reason string is REQUIRED -- it documents why this query is a legitimate full-set read (small bounded catalog, sweep job, etc.) and is enumerated by the pagination audit report. A query that paginates/sorts is already bounded and must NOT carry @unbounded; the engine clamps the realized window to MEMORY_ENGINE_MAX_WINDOW regardless. See docs/public/language/authoring-rules.md.",
 	// MCP promotion (epic memql#1529 Phase 4 #1534).

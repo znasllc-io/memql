@@ -36,7 +36,7 @@ func TestConstructsCoverLiveGrammar(t *testing.T) {
 		"concept": true, "query": true, "mutation": true, "logic": true,
 		"automation": true, "spec": true, "trait": true, "shape": true,
 		"tool": true, "prompt": true, "provider": true, "builtin": true,
-		"policy": true, "seed": true, "use": true,
+		"policy": true, "seed": true, "use": true, "action": true,
 	}
 	got := map[string]bool{}
 	for _, c := range Build().Constructs {

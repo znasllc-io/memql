@@ -1,0 +1,164 @@
+package steps
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+)
+
+// CapabilityDispatcher invokes a single external capability (the authored-
+// action backend, memql#2218). The capability name selects the namespace
+// (shell.* / fs.* / http.* / integration.* / mcp.*); args is the rendered
+// argTemplate. It returns the capability's result (decoded to a Go value) or
+// an error. A dispatcher runs on a SINGLE default surface for now -- surface
+// resolution lands with the surface-aware trust ladder later.
+type CapabilityDispatcher interface {
+	Invoke(ctx context.Context, capability string, args map[string]any) (any, error)
+}
+
+// engineToolInvoker is the slice of the MemQL engine the default dispatcher
+// needs for integration.* / mcp.* capabilities (they resolve to engine tools).
+type engineToolInvoker interface {
+	ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error)
+}
+
+// defaultDispatcher dispatches authored-action capabilities by namespace.
+// shell/fs/http run directly on the local surface; integration.* and mcp.*
+// resolve to engine tools via ExecuteToolByName. It is deterministic given
+// deterministic inputs + backend, which is what makes an authored action
+// replay token-free and fingerprint-verifiable.
+type defaultDispatcher struct {
+	engine engineToolInvoker
+}
+
+// newDefaultDispatcher builds the default capability dispatcher bound to the
+// engine (for integration.* / mcp.*).
+func newDefaultDispatcher(engine engineToolInvoker) *defaultDispatcher {
+	return &defaultDispatcher{engine: engine}
+}
+
+func (d *defaultDispatcher) Invoke(ctx context.Context, capability string, args map[string]any) (any, error) {
+	switch {
+	case capability == "shell.exec":
+		return d.shellExec(ctx, args)
+	case capability == "fs.readFile":
+		return d.fsReadFile(args)
+	case capability == "fs.writeFile":
+		return d.fsWriteFile(args)
+	case capability == "http.get":
+		return d.httpRequest(ctx, http.MethodGet, args)
+	case capability == "http.post":
+		return d.httpRequest(ctx, http.MethodPost, args)
+	case strings.HasPrefix(capability, "integration."), strings.HasPrefix(capability, "mcp."):
+		return d.engineTool(ctx, capability, args)
+	default:
+		return nil, fmt.Errorf("capability %q is not supported by the default dispatcher (supported: shell.exec, fs.readFile, fs.writeFile, http.get, http.post, integration.*, mcp.*)", capability)
+	}
+}
+
+// shellExec runs args["cmd"] via `sh -c` on the local surface. Per the
+// capability-script contract, a deterministic script logs to stderr and emits
+// a JSON result envelope on stdout; we decode stdout as JSON when possible and
+// otherwise return the trimmed text. A non-zero exit is an error.
+func (d *defaultDispatcher) shellExec(ctx context.Context, args map[string]any) (any, error) {
+	cmd, _ := args["cmd"].(string)
+	if strings.TrimSpace(cmd) == "" {
+		return nil, fmt.Errorf("shell.exec requires a non-empty \"cmd\" argument")
+	}
+	c := exec.CommandContext(ctx, "/bin/sh", "-c", cmd)
+	var stdout, stderr bytes.Buffer
+	c.Stdout = &stdout
+	c.Stderr = &stderr
+	runErr := c.Run()
+	out := strings.TrimSpace(stdout.String())
+	if runErr != nil {
+		return nil, fmt.Errorf("shell.exec failed: %v: %s", runErr, strings.TrimSpace(stderr.String()))
+	}
+	return map[string]any{
+		"stdout": decodeMaybeJSON(out),
+		"stderr": strings.TrimSpace(stderr.String()),
+	}, nil
+}
+
+func (d *defaultDispatcher) fsReadFile(args map[string]any) (any, error) {
+	path, _ := args["path"].(string)
+	if path == "" {
+		return nil, fmt.Errorf("fs.readFile requires a \"path\" argument")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("fs.readFile %q: %w", path, err)
+	}
+	return map[string]any{"path": path, "content": string(b)}, nil
+}
+
+func (d *defaultDispatcher) fsWriteFile(args map[string]any) (any, error) {
+	path, _ := args["path"].(string)
+	if path == "" {
+		return nil, fmt.Errorf("fs.writeFile requires a \"path\" argument")
+	}
+	content, _ := args["content"].(string)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return nil, fmt.Errorf("fs.writeFile %q: %w", path, err)
+	}
+	return map[string]any{"path": path, "bytesWritten": len(content)}, nil
+}
+
+func (d *defaultDispatcher) httpRequest(ctx context.Context, method string, args map[string]any) (any, error) {
+	url, _ := args["url"].(string)
+	if url == "" {
+		return nil, fmt.Errorf("%s requires a \"url\" argument", strings.ToLower(method))
+	}
+	var body io.Reader
+	if b, ok := args["body"].(string); ok && b != "" {
+		body = strings.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http %s %q: %w", method, url, err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return map[string]any{"status": resp.StatusCode, "body": decodeMaybeJSON(string(respBody))}, nil
+}
+
+func (d *defaultDispatcher) engineTool(ctx context.Context, capability string, args map[string]any) (any, error) {
+	if d.engine == nil {
+		return nil, fmt.Errorf("capability %q requires the MemQL engine, which is not configured", capability)
+	}
+	out, err := d.engine.ExecuteToolByName(ctx, capability, args)
+	if err != nil {
+		return nil, fmt.Errorf("capability %q: %w", capability, err)
+	}
+	return decodeMaybeJSON(out), nil
+}
+
+// decodeMaybeJSON returns the parsed JSON value when s is valid JSON, else the
+// raw string. Keeps a structured result envelope structured (so its
+// fingerprint is stable) without forcing every capability to emit JSON.
+func decodeMaybeJSON(s string) any {
+	t := strings.TrimSpace(s)
+	if t == "" {
+		return ""
+	}
+	if t[0] != '{' && t[0] != '[' {
+		return s
+	}
+	var v any
+	if err := json.Unmarshal([]byte(t), &v); err != nil {
+		return s
+	}
+	return v
+}
