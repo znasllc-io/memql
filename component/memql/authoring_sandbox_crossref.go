@@ -27,6 +27,7 @@ import (
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/callgraph"
 )
 
 // SandboxCompileBundleWithEngine runs the full Gate 1 pass: the per-construct
@@ -97,6 +98,16 @@ func (r *crossRefResolver) check(c SandboxConstruct) string {
 	// All construct kinds that carry file-top `use` imports get
 	// cross-construct reference resolution.
 	if msg := r.checkUseImports(c, origin); msg != "" {
+		return msg
+	}
+
+	// Behavioral call-graph contract (ADR §2): logic purity, mutation
+	// single-write, query read-only, trigger monopoly. Strict at
+	// define->promote -- newly authored constructs are held to the contract
+	// even while the whole-tree CI gate is still in its warning window (I5
+	// flips that). Builtin side-effect classification arrives with I7; a nil
+	// classifier means no builtin findings here yet.
+	if msg := r.checkCallGraph(c, origin); msg != "" {
 		return msg
 	}
 
@@ -341,4 +352,19 @@ func singularKind(kind string) string {
 	default:
 		return strings.TrimSuffix(kind, "s")
 	}
+}
+
+// checkCallGraph enforces the ADR §2 behavioral call-graph contract on a
+// single authored construct (see component/memql/callgraph). It rejects at
+// define->promote so newly authored logic/mutation/query constructs cannot
+// introduce a contract violation, independent of the whole-tree CI gate's
+// migration window. Builtin side-effect classification (the read-only-builtin
+// rule) lands with I7; a nil classifier yields no builtin findings here.
+func (r *crossRefResolver) checkCallGraph(c SandboxConstruct, origin string) string {
+	useKinds := callgraph.UseKinds(c.Source)
+	findings := callgraph.ConstructFindings(c.Kind, c.Name, c.Source, useKinds, nil)
+	if len(findings) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s: %s", origin, findings[0].Message)
 }
