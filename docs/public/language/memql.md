@@ -1044,6 +1044,17 @@ automation bootstrapSession {
 
 The triggering event is bound as the `event` value in step bodies and is conventionally forwarded to logic as `{ event: event }`; inside the logic body it is read as `args.event.payload.<field>`, `args.event.topic`, etc.
 
+### Terse single-step form
+
+When an automation exists only to make one `logic` reactive — its whole body is `step run { logic X { event: event } }` — use the terse single-step form instead. It keeps the reactive surface explicit and greppable (the `@trigger` stays on the declaration line) while dropping the boilerplate:
+
+```memql
+automation registerNode        @trigger(event="system.startup")    => logic registerNode
+automation pruneStaleClusterNodes @trigger(schedule="0 */10 * * * *") => logic pruneStaleClusterNodes
+```
+
+This lowers to the canonical longhand above — identical runtime automation, no separate execution path (dry-run and live stay in parity). The synthesized step always forwards the bound trigger payload as `{ event: event }`; a target logic that declares no args simply ignores it. Use the longhand block form whenever the automation has more than one step or any branching/looping.
+
 ### `@filter` Annotation
 
 `@filter` attaches a filter predicate to an automation as an alternative to embedding it in the trigger — useful when the expression is complex:
