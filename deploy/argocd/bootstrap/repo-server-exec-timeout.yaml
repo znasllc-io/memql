@@ -1,0 +1,26 @@
+# Raise the Argo CD repo-server exec timeout.
+#
+# The repo-server runs `git fetch origin --tags --force --prune` against the
+# memql repo on every manifest generation. memql carries a large history plus
+# many release / SDK tags, so on a cold cache (first bootstrap) or a slow link
+# that fetch can exceed Argo CD's default ARGOCD_EXEC_TIMEOUT of 90s, leaving
+# the Application stuck in a ComparisonError:
+#
+#   Failed to load target state: ... `git fetch origin --tags --force --prune`
+#   failed timeout after 1m30s
+#
+# 90s is too tight for the initial fetch; 300s gives comfortable headroom while
+# still bounding a genuinely hung fetch. Applies in every environment (same
+# repo), so it lives in the shared bootstrap rather than a local-only overlay.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argocd-repo-server
+spec:
+  template:
+    spec:
+      containers:
+        - name: argocd-repo-server
+          env:
+            - name: ARGOCD_EXEC_TIMEOUT
+              value: "300s"

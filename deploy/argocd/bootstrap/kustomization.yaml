@@ -21,3 +21,8 @@ resources:
   # Upstream Argo CD v2.13.3 stable install (pinned). Cluster-scoped + namespaced
   # resources for a self-contained install.
   - https://raw.githubusercontent.com/argoproj/argo-cd/v2.13.3/manifests/install.yaml
+
+patches:
+  # Raise the repo-server git/exec timeout above the 90s default so the first
+  # fetch of the large memql repo (history + many tags) doesn't time out.
+  - path: repo-server-exec-timeout.yaml
