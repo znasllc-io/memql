@@ -18,6 +18,7 @@ package surfaceresolver
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Surface is a registered execution backend (a projection of
@@ -35,9 +36,29 @@ type Surface struct {
 
 func (s Surface) serves(capability string) bool {
 	for _, c := range s.Capabilities {
-		if c == capability {
+		if capabilityMatches(c, capability) {
 			return true
 		}
+	}
+	return false
+}
+
+// capabilityMatches reports whether a surface's declared capability pattern
+// covers a concrete capability verb. A surface declares coverage as DATA
+// (action-library §7), so a pattern may be:
+//   - exact ("fs.writeFile") -- matches that verb only;
+//   - a namespace wildcard ("fs.*") -- matches any verb under that namespace
+//     ("fs.writeFile", "fs.readFile", "integration.argocd.sync" under
+//     "integration.argocd.*", ...). The "." is kept so "fs.*" matches
+//     "fs.writeFile" but NOT a sibling namespace like "fsx.y";
+//   - "*" -- matches every capability.
+func capabilityMatches(pattern, capability string) bool {
+	if pattern == capability || pattern == "*" {
+		return true
+	}
+	if strings.HasSuffix(pattern, ".*") {
+		prefix := pattern[:len(pattern)-1] // drop the "*", keep the trailing "."
+		return strings.HasPrefix(capability, prefix)
 	}
 	return false
 }

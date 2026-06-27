@@ -10,6 +10,7 @@ import (
 	"github.com/znasllc-io/memql/component/harness/actionpin"
 	"github.com/znasllc-io/memql/component/harness/actionreplay"
 	"github.com/znasllc-io/memql/component/harness/parambind"
+	"github.com/znasllc-io/memql/component/harness/surfaceresolver"
 )
 
 // ActionExecutor replays an action-library action referenced by a step
@@ -78,7 +79,7 @@ func (e *ActionExecutor) Execute(ctx context.Context, step *automations.Step, st
 	// default surface, token-free. This is preferred over the replay-capture
 	// path; only a ref with no authored definition falls through to replay.
 	if authored := e.resolveAuthored(ref); authored != nil {
-		res, aerr := e.executeAuthored(ctx, stepCtx, authored, ref, input)
+		res, aerr := e.executeAuthored(ctx, stepCtx, authored, ref, input, step.Action.Surface)
 		if aerr != nil {
 			return fail(fmt.Sprintf("action %q failed: %v", step.Action.Ref, aerr))
 		}
@@ -134,12 +135,25 @@ func (e *ActionExecutor) resolveAuthored(ref actionpin.Ref) *actions.Action {
 	return nil
 }
 
-// executeAuthored runs an authored action: bind step input to params, render
-// the argTemplate, dispatch the single capability on the default surface, and
-// fingerprint the result. The result map is deterministic for a given input +
-// backend, so an identical input replays token-free with a matching
-// resultFingerprint (reusing component/harness/actionreplay.Fingerprint).
-func (e *ActionExecutor) executeAuthored(ctx context.Context, stepCtx *Context, a *actions.Action, ref actionpin.Ref, input map[string]any) (map[string]any, error) {
+// executeAuthored runs an authored action: resolve the execution SURFACE
+// (memql#2220), bind step input to params, render the argTemplate, dispatch the
+// single capability on the resolved surface, and fingerprint the result. The
+// result map is deterministic for a given input + backend, so an identical
+// input replays token-free with a matching resultFingerprint (reusing
+// component/harness/actionreplay.Fingerprint).
+func (e *ActionExecutor) executeAuthored(ctx context.Context, stepCtx *Context, a *actions.Action, ref actionpin.Ref, input map[string]any, explicitSurface string) (map[string]any, error) {
+	// Surface resolution (action-library §7.2): explicit `surface:` binding >
+	// policy default (deploy pack -> cockpit/runner, so deploy actions run
+	// OUTSIDE the target cluster) > availability failover. An explicit binding
+	// that cannot be honored is an authoring error and fails loud; otherwise
+	// resolution is best-effort (the dispatch backend is surface-agnostic
+	// today, so an unresolved surface still runs -- e.g. a carrier-only mcp.*
+	// capability with no engine builtin).
+	surface, serr := resolveActionSurface(a, explicitSurface)
+	if serr != nil {
+		return nil, serr
+	}
+
 	bound, err := actions.Bind(a, input)
 	if err != nil {
 		return nil, err
@@ -163,13 +177,39 @@ func (e *ActionExecutor) executeAuthored(ctx context.Context, stepCtx *Context, 
 		return nil, err
 	}
 
-	return map[string]any{
+	res := map[string]any{
 		"authored":          true,
 		"ref":               actionpin.Format(ref),
 		"capability":        a.Capability,
 		"result":            out,
 		"resultFingerprint": actionreplay.Fingerprint(out),
-	}, nil
+	}
+	if surface != "" {
+		res["surface"] = surface
+	}
+	return res, nil
+}
+
+// resolveActionSurface binds the action's single capability to an execution
+// surface with the §7.2 precedence explicit > policy default > availability,
+// over the engine's built-in surface registry (actions.BuiltinSurfaces). It
+// returns the chosen surface slug, or "" when no engine surface resolves and no
+// explicit binding was requested (best-effort: the caller proceeds unresolved).
+// An explicit binding that cannot be honored returns an error.
+func resolveActionSurface(a *actions.Action, explicit string) (string, error) {
+	policyDefault := actions.PolicyDefaultSurface(a)
+	resolved, err := surfaceresolver.Resolve(a.Capability, explicit, policyDefault, actions.BuiltinSurfaces())
+	if err != nil {
+		if explicit != "" {
+			// An explicitly requested surface that does not serve the
+			// capability (or is unavailable) is an authoring error.
+			return "", err
+		}
+		// No engine-registered surface serves this capability and none was
+		// demanded -- proceed unresolved.
+		return "", nil
+	}
+	return resolved.Slug, nil
 }
 
 // maxCompositeDepth bounds composite recursion so a cyclic composite (a

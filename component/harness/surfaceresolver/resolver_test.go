@@ -154,3 +154,59 @@ func TestResolvePlan_IndependentCallsResolveSeparately(t *testing.T) {
 		t.Fatalf("uncoupled calls should be in distinct groups")
 	}
 }
+
+// cockpitRunner mirrors the engine's cockpit/runner control surface: it
+// declares namespace WILDCARDS, which must match concrete verbs.
+func cockpitRunner(prio int, avail bool) Surface {
+	return Surface{
+		ID:           "cockpit/runner",
+		Slug:         "cockpit/runner",
+		Kind:         "cockpit-runner",
+		Capabilities: []string{"shell.*", "fs.*", "integration.argocd.*", "integration.github.*"},
+		Available:    avail,
+		Priority:     prio,
+	}
+}
+
+func TestResolve_WildcardCapabilityMatch(t *testing.T) {
+	surfaces := []Surface{cockpitRunner(50, true)}
+	for _, capability := range []string{"shell.exec", "fs.writeFile", "integration.argocd.sync", "integration.github.tagRelease"} {
+		s, err := Resolve(capability, "", "", surfaces)
+		if err != nil || s.Slug != "cockpit/runner" {
+			t.Fatalf("wildcard match %q: want cockpit/runner, got %v (%v)", capability, s.Slug, err)
+		}
+	}
+	// A sibling namespace must NOT match "fs.*".
+	if _, err := Resolve("fsx.writeFile", "", "", surfaces); err == nil {
+		t.Fatalf("fs.* must not match the fsx namespace")
+	}
+	// An unlisted namespace is unserved.
+	if _, err := Resolve("mcp.invoke", "", "", surfaces); err == nil {
+		t.Fatalf("cockpit/runner must not serve mcp.*")
+	}
+}
+
+// TestResolve_DeployActionPrecedenceOverCockpitRunner exercises the §7.2
+// precedence with cockpit/runner as the policy default (the deploy-action
+// case): explicit wins; else the cockpit/runner policy default; else
+// availability.
+func TestResolve_DeployActionPrecedenceOverCockpitRunner(t *testing.T) {
+	surfaces := []Surface{cockpitRunner(50, true), wb(10, true, "shell.exec")}
+
+	// policy default = cockpit/runner pins shell.exec to the runner even though
+	// the lower-priority workbench is available (would win on availability).
+	s, err := Resolve("shell.exec", "", "cockpit/runner", surfaces)
+	if err != nil || s.Slug != "cockpit/runner" {
+		t.Fatalf("policy default: want cockpit/runner, got %v (%v)", s.Slug, err)
+	}
+	// explicit overrides the cockpit/runner policy default.
+	s, _ = Resolve("shell.exec", "workbench", "cockpit/runner", surfaces)
+	if s.Slug != "workbench" {
+		t.Fatalf("explicit over policy: want workbench, got %v", s.Slug)
+	}
+	// no policy: availability failover (workbench lower priority) wins.
+	s, _ = Resolve("shell.exec", "", "", surfaces)
+	if s.Slug != "workbench" {
+		t.Fatalf("availability: want workbench, got %v", s.Slug)
+	}
+}
