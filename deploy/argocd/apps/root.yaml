@@ -17,7 +17,7 @@ spec:
     path: deploy/argocd/apps
     directory:
       recurse: true
-      include: '{project.yaml,memql.yaml,rollouts.yaml,root.yaml}'
+      include: '{project.yaml,memql.yaml,memql-prod.yaml,rollouts.yaml,root.yaml}'
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

@@ -27,6 +27,7 @@ back automatically.
 | `apps/project.yaml` | `AppProject memql` — restricts the reconciler to THIS repo + the `memql`/`argocd` namespaces. |
 | `apps/root.yaml` | App-of-apps: renders everything under `apps/`, so adding an app is a PR. |
 | `apps/memql.yaml` | The mesh + CoPresent Application; source = `deploy/k8s/overlays/staging`. |
+| `apps/memql-prod.yaml` | The PROD mesh + CoPresent Application; source = `deploy/k8s/overlays/prod`. **Manual-sync** (#2207). |
 
 ## Bootstrap (one-time, per cluster)
 
@@ -83,6 +84,68 @@ kubectl -n argocd port-forward svc/argocd-server 8080:443 &
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
 argocd login localhost:8080 --username admin --insecure
 ```
+
+## Prod on ArgoCD (#2207)
+
+Prod reconciles the same way as staging — a deploy is a digest bump **merged**
+to `deploy/k8s/overlays/prod`, not a `kubectl set image` / `rollout undo`. The
+difference: `apps/memql-prod.yaml` starts on **manual sync** (no `automated:`
+block) because prod is the highest-stakes surface. An operator triggers the sync
+explicitly for every deploy; promote to auto-sync (`automated: {prune, selfHeal}`)
+later once a couple of clean GitOps prod deploys have happened.
+
+```
+   PR merges digest change to deploy/k8s/overlays/prod  (on main)
+                         │
+                         ▼  (no auto-sync — operator triggers it)
+              argocd app sync memql-prod
+                         ▼
+                   memql namespace (PROD cluster)
+```
+
+### Prod deploy (the steady-state flow)
+
+```bash
+# 1. Pin the prod digests: edit deploy/k8s/overlays/prod -> PR -> merge to main.
+# 2. Confirm git is digest-pinned + the live cluster has no out-of-band drift:
+bash scripts/deploy/drift-check.sh --live --env=prod      # must report converged
+# 3. Hold a sustained authenticated WS client against the prod entrypoint here
+#    (the zero-dropped-streams check) BEFORE the first tag->digest cutover sync,
+#    exactly as the staging "First sync" section above describes.
+argocd app sync memql-prod
+argocd app wait memql-prod --health
+# 4. Validation authority — the existing post-deploy functional gate:
+bash scripts/deploy/post-deploy-gate.sh                   # the deploy is "good" only if this passes
+```
+
+Rollback = `git revert` the overlay change + re-sync (`argocd app sync
+memql-prod`). On manual-sync there is no `selfHeal`, so the app's OutOfSync
+status and `drift-check.sh --live --env=prod` are the drift authority until
+auto-sync is enabled.
+
+### Prerequisites (one-time, owner-gated)
+
+Prod is a **separate cluster** from staging, so before `memql-prod` can sync:
+
+1. **Register the prod cluster** in Argo CD as a cluster secret
+   (`argocd cluster add <prod-context>`, or an
+   `argocd.argoproj.io/secret-type=cluster` Secret in the `argocd` namespace).
+2. **Set the destination** in `apps/memql-prod.yaml` — replace the
+   `https://PROD-CLUSTER-API-SERVER-REPLACE-ME` placeholder with the registered
+   cluster's API server URL (or a `name:` reference to the cluster secret).
+3. **Whitelist that server** in the `memql` AppProject
+   (`apps/project.yaml` `destinations`) — the project currently only allows the
+   in-cluster `https://kubernetes.default.svc`, so a different prod server is
+   rejected until added.
+4. Ensure the prod `memql` namespace + `memql-secrets` exist (same out-of-band
+   prereq as staging).
+
+Until those are done the app is **inert and fails closed** (the placeholder
+server is not a real cluster), which is the intended not-yet-configured state.
+
+The imperative `make deploy ENV=production` path stays available as a documented
+**break-glass** escape hatch (its full demotion is tracked by #2205) until a
+couple of clean GitOps prod deploys have happened.
 
 ## Break-glass (incident procedure)
 
