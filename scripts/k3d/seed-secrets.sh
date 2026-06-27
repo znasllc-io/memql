@@ -13,7 +13,7 @@
 #   livekit-secrets        -- LiveKit API key + secret for local livekit
 #   memql-local-db-creds   -- Postgres credentials for the in-cluster DB
 #
-# Called by `make k3d-secrets` and by `make up` on first boot.
+# Called by `make secrets` and by `make up` on first boot.
 # Safe to re-run: uses `kubectl apply` (idempotent, creates or updates).
 #
 # PREREQUISITES

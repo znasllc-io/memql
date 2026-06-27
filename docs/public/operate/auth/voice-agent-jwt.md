@@ -139,7 +139,7 @@ healthy and inject it as the pod's `VOICE_AGENT_TOKEN`:
    identity binary's
    `voice-agent-token mint --instance-id=voice-agent-local`
    subcommand and captures the JWT.
-4. Seed the JWT into the `memql-secrets` Secret (`make k3d-secrets`
+4. Seed the JWT into the `memql-secrets` Secret (`make secrets`
    after updating the genesis envelope) and roll the Deployment
    (`kubectl rollout restart -n memql deploy/voice`). Once
    `VOICE_AGENT_TOKEN` is set, the explicit token wins over the

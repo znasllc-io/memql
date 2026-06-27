@@ -116,7 +116,7 @@ Azurite itself, and safe to use locally.
 The in-cluster hostname is `azurite` (the k8s Service name). This value
 is stamped into `~/Downloads/local.genesis.env` so `make genesis-seal`
 bundles it into the sealed envelope and the seeded `memql-secrets` Secret
-(`make up` / `make k3d-secrets`) lands it onto the agent pod. See
+(`make up` / `make secrets`) lands it onto the agent pod. See
 #806 for the full wiring.
 
 ### Staging

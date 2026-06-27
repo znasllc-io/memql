@@ -18,9 +18,9 @@
 #
 # Usage
 # -----
-#   make k3d-scale N=2    # scale to 2 replicas per Deployment (multi-node)
-#   make k3d-scale N=1    # scale back to 1 (single-node, default)
-#   make k3d-status       # litmus check: verify unique node ids per pod
+#   make scale N=2    # scale to 2 replicas per Deployment (multi-node)
+#   make scale N=1    # scale back to 1 (single-node, default)
+#   make status       # litmus check: verify unique node ids per pod
 #
 # Per the repo + global Skills+Scripts convention (CLAUDE.md): function-based,
 # one responsibility per function, main() at the bottom. set -euo pipefail.
@@ -104,7 +104,7 @@ function scale_all() {
     if [ "${n}" -gt 1 ]; then
         echo ""
         info "Multi-node mode active (replicas=${n})."
-        info "Run 'make k3d-status' to verify each pod has a UNIQUE MEMQL_NODE_ID."
+        info "Run 'make status' to verify each pod has a UNIQUE MEMQL_NODE_ID."
         info "Unique ids are required for cross-node mesh routing to work (#1388 class)."
     fi
 }
@@ -130,8 +130,8 @@ Options:
 Examples:
     $0 2              # scale to multi-node (2 replicas each)
     $0 1              # scale back to single-node
-    make k3d-scale N=2
-    make k3d-scale N=1
+    make scale N=2
+    make scale N=1
 EOF
 }
 

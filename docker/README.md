@@ -6,13 +6,13 @@ not Docker Compose. The Docker Compose stack was retired in memql#2068 /
 locally and in staging. See the k3d runbook:
 [docs/public/operate/reproduce-staging-locally.md](../docs/public/operate/reproduce-staging-locally.md)
 and the quick start in [CLAUDE.md](../CLAUDE.md) (`make up` / `make dev` /
-`make k3d-status` / `make down`).
+`make status` / `make down`).
 
 ## Files in this directory
 
 | File | Purpose |
 |------|---------|
-| `memql.Dockerfile` | The engine image (`--target <type>-runtime`): standalone + the engine node-type variants (identity / voice / mcp). Used by `make docker*` and `scripts/release/release.sh`. The carrier images (bff / cognition / agent / planner / workbench) build from `memql-bff-copresent/Dockerfile`. |
+| `memql.Dockerfile` | The engine image (`--target <type>-runtime`): standalone + the engine node-type variants (identity / voice / mcp). Used by `make dev` (`scripts/k3d/dev.sh`, local k3d import) and `scripts/release/release.sh` (`make release`). The carrier images (bff / cognition / agent / planner / workbench) build from `memql-bff-copresent/Dockerfile`. |
 | `init-db.sql` | The PostgreSQL extension bootstrap the migrations expect (TimescaleDB, etc.). Referenced by `.github/workflows/ci.yml` and applied by the local k3d postgres on first boot. |
 
 Local image builds (engine + carrier) are imported into k3d by

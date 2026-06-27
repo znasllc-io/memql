@@ -10,7 +10,7 @@
 #   BlobEndpoint=http://azurite:10000/devstoreaccount1;
 # The memql genesis.znas sealed envelope must carry this value for the blob
 # integration to pick it up via the autoload path (MEMQL_GENESIS_AUTOLOAD=true).
-# See scripts/k3d/seed-secrets.sh for how `make k3d-secrets` populates it.
+# See scripts/k3d/seed-secrets.sh for how `make secrets` populates it.
 #
 # IMAGE: mcr.microsoft.com/azure-storage/azurite:3.34.0 (Microsoft, MIT).
 # Pinned by tag (mutable); digest-pin gate skipped for the `local` overlay.

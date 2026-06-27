@@ -6,7 +6,7 @@
 # Print a parity litmus for the local k3d cluster: pod status, per-replica
 # MEMQL_NODE_ID values (cross-node mesh test), and ArgoCD sync status.
 #
-# Backs 'make k3d-status'. Primary use: verify the mesh formed across
+# Backs 'make status'. Primary use: verify the mesh formed across
 # replicas and that each pod has a UNIQUE node id (required for
 # cross-node event routing).
 #
@@ -159,7 +159,7 @@ function check_secrets() {
         if kubectl get secret "${secret}" -n "${NAMESPACE}" &>/dev/null; then
             echo "  PRESENT: ${secret}"
         else
-            echo "  MISSING: ${secret}  (run: make k3d-secrets)"
+            echo "  MISSING: ${secret}  (run: make secrets)"
         fi
     done
 }

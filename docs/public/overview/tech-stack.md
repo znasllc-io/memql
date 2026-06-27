@@ -185,7 +185,7 @@ for the operator-side narrative.
 - Reset the local database if migrations conflict: `make down && make up`
 - Use debug logging (enabled by default in the local overlay)
 - Test automations and functions locally before deploying
-- Secrets are seeded into k8s Secrets by `make up` (from the genesis envelope); re-seed with `make k3d-secrets`
+- Secrets are seeded into k8s Secrets by `make up` (from the genesis envelope); re-seed with `make secrets`
 
 ---
 

@@ -13,7 +13,7 @@
 #   - azurite.yaml       -- Azure Blob emulator (replaces Azure Blob Storage)
 #   - db-pool-local.yaml -- looser pool bounds for local Postgres (not Tiger Cloud)
 #
-# SECRETS (created by `make k3d-secrets`, NOT committed)
+# SECRETS (created by `make secrets`, NOT committed)
 #   - memql-secrets         -- main app envelope (genesis, DB DSN, blob conn string)
 #   - livekit-secrets       -- LiveKit API key+secret for local livekit server
 #   - telephony-secrets     -- stub (telephony disabled locally)
@@ -59,7 +59,7 @@ resources:
 patches:
   # ExternalSecret resources require External Secrets Operator + Azure Key Vault.
   # Not available locally; the corresponding secrets are created directly via
-  # `make k3d-secrets` in the local bootstrap (#2065).
+  # `make secrets` in the local bootstrap (#2065).
   - target:
       kind: ExternalSecret
       name: livekit-secrets

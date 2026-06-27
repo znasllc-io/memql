@@ -10,7 +10,7 @@
 # gate is skipped for `local` (see scripts/deploy/drift-check.sh).
 #
 # CREDENTIALS: loaded from the `memql-local-db-creds` Secret created by
-# `make k3d-secrets` during bootstrap (#2063). The Secret is not committed
+# `make secrets` during bootstrap (#2063). The Secret is not committed
 # (it carries a password); developers create it once per cluster.
 #
 # PERSISTENCE: a PVC backed by k3d's default local-path StorageClass.
