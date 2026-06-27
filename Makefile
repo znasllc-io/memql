@@ -181,7 +181,7 @@ db:
 #   MEMQL_K3D_SERVERS          k3d server count (default: 1)
 #   MEMQL_K3D_AGENTS           k3d agent count (default: 0)
 
-.PHONY: up down secrets dev status scale
+.PHONY: up down refresh secrets dev status scale
 
 ## Bootstrap the local k3d cluster: create cluster, install ArgoCD
 ## (pinned v2.13.3, same as staging), apply the memql-local Application,
@@ -203,6 +203,20 @@ down:
 	@bash scripts/k3d/down.sh \
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
 		$${PURGE:+--purge}
+
+## Clean-slate local environment: nuke + repave. Tears down the cluster
+## (wiping the in-cluster DB by construction), recreates it with ArgoCD +
+## secrets, rebuilds + imports the engine images, and waits for the mesh to
+## be Available. Idempotent. Honors the same overrides as 'make up'.
+##   make refresh                      # full nuke + rebuild
+##   make refresh SERVERS=2 AGENTS=1   # multi-node clean slate
+refresh:
+	@bash scripts/k3d/refresh.sh \
+		$${CLUSTER:+--cluster=$${CLUSTER}} \
+		$${NAMESPACE:+--namespace=$${NAMESPACE}} \
+		$${REVISION:+--revision=$${REVISION}} \
+		$${SERVERS:+--servers=$${SERVERS}} \
+		$${AGENTS:+--agents=$${AGENTS}}
 
 ## (Re-)seed the k8s Secrets in a running k3d cluster. Safe to re-run.
 ## Required after 'make up NO_SECRETS=1' or if secrets drift.
@@ -746,6 +760,7 @@ help:
 	@echo "  make up                        Boot k3d + ArgoCD + the local overlay (single-node default)"
 	@echo "  make up SERVERS=2 AGENTS=1     Multi-node cluster (for cross-node mesh testing)"
 	@echo "  make dev [NODE=<type>]         Inner loop: rebuild image -> k3d import -> rollout restart"
+	@echo "  make refresh                   Clean slate: nuke + repave (fresh DB + ArgoCD), rebuild images, wait healthy"
 	@echo "  make status                    Show per-pod MEMQL_NODE_IDs (mesh parity litmus) + ArgoCD sync"
 	@echo "  make scale N=2                 Scale every app Deployment to N replicas (2 = staging parity)"
 	@echo "  make secrets                   (Re-)seed the k8s Secrets in a running cluster"
