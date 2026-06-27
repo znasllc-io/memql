@@ -54,8 +54,10 @@ OVERLAY_PATH="deploy/k8s/overlays/local"
 K3D_SERVERS="${MEMQL_K3D_SERVERS:-1}"
 K3D_AGENTS="${MEMQL_K3D_AGENTS:-0}"
 
-# Timeout for ArgoCD readiness check (seconds)
-ARGOCD_TIMEOUT="${MEMQL_K3D_ARGOCD_TIMEOUT:-120}"
+# Timeout for ArgoCD readiness check (seconds). On a fresh cluster all seven
+# ArgoCD components pull their images concurrently, so the first boot routinely
+# needs more than a couple of minutes on a cold image cache -- default high.
+ARGOCD_TIMEOUT="${MEMQL_K3D_ARGOCD_TIMEOUT:-300}"
 
 #=============================================================================
 # OUTPUT HELPERS
@@ -179,12 +181,41 @@ function install_argocd() {
     info "Applying ArgoCD bootstrap (namespace + install.yaml pinned to ${ARGOCD_VERSION})..."
     kubectl apply -k "${REPO_ROOT}/deploy/argocd/bootstrap"
 
-    info "Waiting for ArgoCD server to become ready (timeout: ${ARGOCD_TIMEOUT}s)..."
-    kubectl rollout status deployment/argocd-server \
-        -n "${ARGOCD_NAMESPACE}" \
-        --timeout="${ARGOCD_TIMEOUT}s"
+    wait_for_argocd
+}
 
-    info "ArgoCD ${ARGOCD_VERSION} is ready."
+# Wait for ArgoCD to become ready. argocd-server is the gate, but it depends on
+# argocd-repo-server + argocd-redis, and on a fresh cluster every component
+# pulls its image concurrently -- so `rollout status` can legitimately need
+# several minutes the first time. We guard the wait (set -e would otherwise
+# abort on a timeout) and, if it does time out, re-check the Deployment's
+# Available condition before giving up: the rollout frequently flips ready a
+# beat after the status watch returns.
+function wait_for_argocd() {
+    info "Waiting for ArgoCD server to become ready (timeout: ${ARGOCD_TIMEOUT}s)..."
+
+    if kubectl rollout status deployment/argocd-server \
+        -n "${ARGOCD_NAMESPACE}" \
+        --timeout="${ARGOCD_TIMEOUT}s"; then
+        info "ArgoCD ${ARGOCD_VERSION} is ready."
+        return 0
+    fi
+
+    warn "rollout status timed out; re-checking the Available condition directly..."
+    if kubectl wait --for=condition=Available deployment/argocd-server \
+        -n "${ARGOCD_NAMESPACE}" \
+        --timeout=60s; then
+        info "ArgoCD ${ARGOCD_VERSION} is ready (became Available just after the rollout wait)."
+        return 0
+    fi
+
+    error "ArgoCD server did not become ready within ${ARGOCD_TIMEOUT}s."
+    error "Image pulls may still be in flight on a slow connection. Inspect with:"
+    error "  kubectl get pods -n ${ARGOCD_NAMESPACE}"
+    error "  kubectl describe deployment/argocd-server -n ${ARGOCD_NAMESPACE}"
+    error "Then re-run 'make up' (it is idempotent) or raise the timeout:"
+    error "  MEMQL_K3D_ARGOCD_TIMEOUT=600 make up"
+    return 1
 }
 
 #=============================================================================
