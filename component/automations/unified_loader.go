@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"strings"
 
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
@@ -61,6 +62,13 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 			return nil
 		}
 		source := string(data)
+		// Lower terse single-step automations (memql#2215) to their longhand
+		// block form so the slice extractor below (which keys off `automation
+		// NAME {`) discovers them. compileMemQL re-runs the rewriter, so this is
+		// idempotent for already-longhand sources.
+		if lowered, lerr := languageParser.NormaliseTerseAutomationSource(source); lerr == nil {
+			source = lowered
+		}
 		for _, slice := range extractAutomationSlices(source) {
 			origin := "unified:" + path + ":" + slice.Name
 			automation, compileErr := l.compileMemQL(slice.Source, origin)
