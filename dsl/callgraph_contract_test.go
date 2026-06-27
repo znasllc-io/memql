@@ -53,9 +53,6 @@ var callGraphBaseline = []string{
 	// NOT yet parsed (NormaliseAutomationSource rejects it), and a go-style
 	// `func (Automation)` loop is the internal-only lowering form, not an author
 	// surface. Same blocker as the identity/worker sweep logics below.
-	"logic-purity|logic|recordMentoring",
-	"logic-purity|logic|recordTransition",
-	"logic-purity|logic|routeRequest",
 	// #2235: NOT migrated, blocked on engine bug #2254 -- date-window gate
 	// `addDuration(item.createdAt, "P{N}D") < timestamp()` is constant-false
 	// in the condition evaluator. See the accessRequest/accountDeletion note

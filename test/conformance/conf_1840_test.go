@@ -37,12 +37,19 @@ package conformance
 //     positionally; emit named args in stable key order.
 //
 // This dimension drives the genuine connector surface (real MCP tools/call over
-// a fully-loaded engine) for the three logic-backed forge tools + the multi-step
-// router logic, and asserts NO arg-resolution failure leaks. It FAILS on any of
-// the three pre-#1840 paths and PASSES once all three are threaded.
+// a fully-loaded engine) for the forge tools, and asserts NO arg-resolution
+// failure leaks. It FAILS on the pre-#1840 paths and PASSES once they are threaded.
+//
+// #2235 update (logic-purity burn-down): the mentoring wrapper logic was retired
+// (forgeRecordMentoring now targets the thin `recordMentoredEvent` mutation
+// directly), and routing is no longer a forge `logic` -- routeRequest /
+// recordTransition became EVENT-BOUND automation steps (no decide logic; args
+// bind from event.payload). So this dimension now covers the two remaining
+// logic-layer arg-resolution surfaces: section A = the mentoring mutation,
+// section B = the attach read-merge-append logic. The automation path (routing +
+// the audit writes) is exercised end-to-end by conf_1847 / conf_1859.
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -91,7 +98,7 @@ func runForgeLogicArgResolution(t *testing.T, e *Env) {
 		"body":      "Reproduce the *ast.ArgRefExpr leak across the forge logic layer.",
 	})
 
-	// --- A. forgeRecordMentoring -> recordMentoring (single-return F.6) ---
+	// --- A. forgeRecordMentoring -> recordMentoredEvent mutation (#2235) ---
 	eventId := "evt-" + suffix
 	note := "Here is what the approval pipeline does and why it matters."
 	outA, isErrA := e.toolCall(t, "forgeRecordMentoring", map[string]any{
@@ -135,30 +142,16 @@ func runForgeLogicArgResolution(t *testing.T, e *Env) {
 	//      with NO partial / corrupting write to attachmentIds.
 	runForgeAttachHardening(t, e, requestId, attachmentId)
 
-	// --- C. routeRequest (multi-step LogicRunner; the routeRequest spine) ---
-	// Drive the router logic exactly as the node.created automation does -- a
-	// single `event` object whose payload carries the submitter role + id. Owner
-	// fast-tracks to 'queued' and records a 'routed' audit event; every nested
-	// mutation arg (`args.event.payload.id`, ...) must resolve.
-	routeArgs, _ := json.Marshal(map[string]any{
-		"event": map[string]any{
-			"payload": map[string]any{
-				"id":              requestId,
-				"submitterRole":   "owner",
-				"submitterUserId": ownerUID,
-			},
-		},
-	})
-	if _, err := e.Eng.Execute(e.Ctx, "routeRequest("+string(routeArgs)+")"); err != nil {
-		assertNoArgRefLeak(t, "routeRequest", err.Error())
-		t.Fatalf("#1840: routeRequest (multi-step) failed: %v", err)
-	}
-	routedEvents := asArray(t, e.runQuery(t, "requestEvents", map[string]any{"requestId": requestId}))
-	if !hasEventKind(routedEvents, "routed") {
-		t.Fatalf("#1840: routeRequest did not record a 'routed' audit event; events=%v", routedEvents)
-	}
+	// NOTE (#2235): routing is no longer a forge `logic`. routeRequest /
+	// recordTransition are now EVENT-BOUND automation steps (no decide logic;
+	// args bind from event.payload), so there is nothing to drive via
+	// engine.Execute here. Their end-to-end dispatch + the 'routed' / per-status
+	// audit writes are covered by conf_1847 / conf_1859 (which run the REAL
+	// automations). This dimension now covers the remaining logic-layer
+	// arg-resolution surface: the mentoring mutation (A) + the attach
+	// read-merge-append logic (B).
 
-	t.Logf("#1840: forge logic layer resolved caller args across mentoring, attach, and the multi-step router")
+	t.Logf("#1840: forge logic-layer caller args resolved across the mentoring mutation + the attach read-merge-append logic")
 }
 
 // runForgeAttachHardening drives the #1848 acceptance criteria against the SAME
