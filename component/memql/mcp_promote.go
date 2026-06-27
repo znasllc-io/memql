@@ -217,14 +217,5 @@ func DSLConstructSource(logger *slog.Logger, kind, name string) (string, bool) {
 			}
 		}
 	}
-	// An automation lookup that misses the authored tree may be a synthetic
-	// entry-point-logic wrapper (memql#1707) -- generated, not on disk. The
-	// dry-run run_automation path resolves the wrapper name via LoadByName and
-	// then fetches its source here, so return the generated source.
-	if kind == string(languageParser.FunctionTypeAutomation) {
-		if src, ok := EntryPointWrapperSource(logger, name); ok {
-			return src, true
-		}
-	}
 	return "", false
 }

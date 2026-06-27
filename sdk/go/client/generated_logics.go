@@ -686,21 +686,6 @@ func RouteRequestBuild(args RouteRequestArgs) string {
 	return b.String()
 }
 
-// ServiceVersionProbe -- Engine-only @entrypoint probe (memql#1707). Returns the current memQL service version via the serviceVersion builtin. Invokable directly via run_automation with no triggering event; carries no product coupling.
-type ServiceVersionProbeArgs struct {
-}
-
-// ServiceVersionProbe calls the engine logic serviceVersionProbe.
-func (qc *QueryClient) ServiceVersionProbe(ctx context.Context, args ServiceVersionProbeArgs) (*Result, error) {
-	call := ServiceVersionProbeBuild(args)
-	return qc.executeNamed(ctx, "serviceVersionProbe", call)
-}
-
-func ServiceVersionProbeBuild(args ServiceVersionProbeArgs) string {
-	_ = args
-	return "serviceVersionProbe({})"
-}
-
 // VoiceMigrationOnSecondHuman -- Phase 7 of chat-architecture. Triggered when a user's activePartitionId pointer changes. When exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team to Group thread. Idempotent via content-addressed stateIds.
 type VoiceMigrationOnSecondHumanArgs struct {
 	Event map[string]any

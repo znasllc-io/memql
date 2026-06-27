@@ -17,7 +17,8 @@ func allChecks() []check {
 		// DB-free dimensions (run everywhere, including go-checks).
 		schemaSourceCheck(), // #1713
 		systemIDCheck(),     // #1712
-		entrypointCheck(),   // #1707
+		deadLogicCheck(),    // #2216
+
 		literalEvalCheck(),  // #1705
 		// DB-backed dimensions (run in the CI conformance job).
 		lifecycleCheck(),               // #1715 contract

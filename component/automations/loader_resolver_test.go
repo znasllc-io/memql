@@ -52,10 +52,6 @@ func TestLoadByName_CanonicalResolution(t *testing.T) {
 		// bare, so this is the only invocation form.
 		{name: "revokeExpiredDelegations", wantAuto: "expireDelegations"},
 
-		// An @entrypoint logic with no authored wrapper resolves to its
-		// auto-generated wrapping automation (memql#1707) -- a runnable entry
-		// point reachable by its bare construct name.
-		{name: "serviceVersionProbe", wantAuto: "serviceVersionProbeEntrypoint"},
 
 		// Genuinely unknown name -> plain "not found" (and NOT the
 		// not-a-runnable-entry-point error).

@@ -10,7 +10,6 @@
 // Only BFF nodes run this. Idempotent: skips if cluster already exists.
 use cluster.mutations.{ createCluster, createDatabase, createIdentityProvider, createNode, createSpawnEvent, updateNodeHealth }
 use cluster.queries.{ existingCluster, staleClusterNodes }
-use common.builtins.{ serviceVersion }
 use platform.queries.{ globalVariable }
 
 @description("Bootstraps the cluster's self-representation on first startup. Creates v1:cluster:cluster + v1:cluster:database + v1:cluster:identityProvider rows when no cluster row exists. Only BFF nodes run the create path. Idempotent: skips entirely if a cluster row already exists.")
@@ -216,29 +215,3 @@ logic pruneStaleClusterNodes {
   return stale.Len()
   }
 }
-
-// ---- serviceVersionProbe -----------------------------------
-//
-// The canonical engine-only @entrypoint logic (memql#1707). An
-// @entrypoint logic is invokable directly via run_automation (no
-// triggering event); the engine auto-generates a wrapping automation
-// for it at load so it is reachable by name on both the live and
-// dry-run paths, and the registry audit (ValidateEntryPointLogics)
-// fails the build on any orphan.
-//
-// This probe exists purely to keep that invariant exercised in the
-// engine-only core: it wraps the no-arg `serviceVersion` builtin --
-// zero product coupling -- so engine-only deployments (mcp / identity /
-// voice) still carry a live @entrypoint example. The product entry
-// point that originally surfaced the feature
-// (logicEnsureDailySpaceForCaller) moved to the CoPresent pack in
-// #1976; it is no longer a core construct.
-@enabled
-@entrypoint
-@description("Engine-only @entrypoint probe (memql#1707). Returns the current memQL service version via the serviceVersion builtin. Invokable directly via run_automation with no triggering event; carries no product coupling.")
-logic serviceVersionProbe {
-  body {
-    return serviceVersion({})
-  }
-}
-
