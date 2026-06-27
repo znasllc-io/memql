@@ -291,6 +291,16 @@ func CollectConstructs(root string) ([]Construct, error) {
 			return err
 		}
 		if d.IsDir() {
+			// Skip underscore-prefixed directories (e.g. dsl/_reference/)
+			// exactly as the engine DSL walker does
+			// (component/memql/dslfs/walker.go). They hold authoring
+			// skeletons -- documentation, not loadable constructs -- and
+			// must never leak into the generated SDK. The skeleton tree
+			// stayed inert here until _reference/_logic.memql (memql#2213)
+			// became the first skeleton carrying a `logic` construct.
+			if d.Name() != "." && strings.HasPrefix(d.Name(), "_") {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if !strings.HasSuffix(path, ".memql") {
