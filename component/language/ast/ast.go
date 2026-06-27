@@ -1415,6 +1415,57 @@ type PromptDecl struct {
 
 func (*PromptDecl) node() {}
 
+// ActionDecl is the shared-frontend AST node for a struct-form authored
+// `action` declaration (memql#2218, behavioral-constructs ADR section 2.3):
+//
+//	@kind("primitive") @sideEffect("exec")
+//	action cloneRepoAtVersion {
+//	  capability "shell.exec"
+//	  intent "..."
+//	  params { workdir string @required; ref string @required }
+//	  argTemplate { cmd: "git -C $params.workdir checkout $params.ref" }
+//	}
+//
+// An authored action is DECLARATIVE (no procedural body): it names exactly
+// one external `Capability`, a natural-language `Intent`, an input schema
+// (`Params`), and an `ArgTemplate` that renders the concrete capability
+// arguments from those params (a "$params.<name>" reference is substituted
+// with the bound value at run time). It NEVER touches the MemQL graph.
+//
+// The action lives in its own registry (component/actions), not the engine's
+// tool/prompt kinds: it is invoked from an automation `action("name@1")` step
+// and replayed token-free (fingerprint-verified) on identical input. The I7
+// call-graph validator enforces the one-external-capability / no-graph rules.
+type ActionDecl struct {
+	Name        string         // action name (the slice/reference name)
+	Attributes  []*Attribute   // action-level annotations (@kind, @sideEffect, @description, @enabled/@disabled)
+	Capability  string         // the single external capability verb (shell.exec, fs.readFile, integration.github.tagRelease, ...)
+	Intent      string         // natural-language description of what the action does
+	Params      []*ActionField // input schema (the params block)
+	ArgTemplate []*ActionArg   // ordered capability-argument templates (the argTemplate block)
+	Path        string         // source path, for errors/diagnostics
+}
+
+func (*ActionDecl) node() {}
+
+// ActionField is a single parameter declaration inside an ActionDecl
+// `params { ... }` block. Mirrors PromptField/BuiltinField so the
+// per-field grammar stays uniform across struct-form declarations.
+type ActionField struct {
+	Name       string
+	Type       string       // e.g. "string", "object", "[]string"
+	Required   bool         // from @required
+	Attributes []*Attribute // any other field-level annotations (@description, @enum, @default)
+}
+
+// ActionArg is one `key: "template"` entry inside an ActionDecl
+// `argTemplate { ... }` block. Key is the capability argument name;
+// Template is the raw template string rendered from params at run time.
+type ActionArg struct {
+	Key      string
+	Template string
+}
+
 // PromptField is a single field declaration inside a PromptDecl
 // body. Mirrors BuiltinField (memql#318) so the per-construct
 // playbook for langparser-native struct declarations stays uniform.

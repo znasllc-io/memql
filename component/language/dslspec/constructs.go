@@ -66,6 +66,15 @@ func constructs() []Construct {
 			BodyBlocks:         []string{"args", "body"},
 		},
 		{
+			Keyword:            "action",
+			Category:           CategoryDeclarative,
+			Doc:                "Authored external-side-effect primitive (behavioral-constructs ADR §2.3): performs exactly ONE external capability (shell.* / fs.* / http.* / integration.* / mcp.*) on a surface and never touches the graph. Declarative body: capability + intent + params{} + argTemplate{}. Invoked from an automation `action(\"name@1\")` step; replays token-free (fingerprint-verified) on identical input.",
+			AnnotationReceiver: "Action",
+			RegistryBacked:     true,
+			ConceptInSignature: false,
+			BodyBlocks:         []string{"params", "argTemplate"},
+		},
+		{
 			Keyword:            "spec",
 			Category:           CategoryPredicate,
 			Doc:                "Atomic boolean predicate. Row-specs (payload.X / intrinsics) compile to SQL; context-specs (actor.X) evaluate in-process. Mixing both is rejected.",

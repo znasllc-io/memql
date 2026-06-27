@@ -134,6 +134,9 @@ type (
 	ToolFieldDecl           = ast.ToolFieldDecl
 	PromptDecl              = ast.PromptDecl
 	PromptField             = ast.PromptField
+	ActionDecl              = ast.ActionDecl
+	ActionField             = ast.ActionField
+	ActionArg               = ast.ActionArg
 	PolicyDecl              = ast.PolicyDecl
 	SeedDecl                = ast.SeedDecl
 	SeedBlock               = ast.SeedBlock
