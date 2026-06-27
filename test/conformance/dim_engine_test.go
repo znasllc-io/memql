@@ -66,40 +66,29 @@ func runSystemID(t *testing.T, e *Env) {
 	t.Logf("#1712: %d system-generated ids all pass the engine ID validator", n)
 }
 
-// --- #1707: entry-point logics invokable ---
+// --- #2216: dead-logic lint (replaced the #1707 @entrypoint audit) ---
 
-func entrypointCheck() check {
+func deadLogicCheck() check {
 	return check{
-		Issue:   "#1707",
-		Dim:     "entry-point-logics-invokable",
+		Issue:   "#2216",
+		Dim:     "dead-logic-lint",
 		NeedsDB: false,
-		Run:     runEntrypoint,
+		Run:     runDeadLogic,
 	}
 }
 
-func runEntrypoint(t *testing.T, e *Env) {
+// runDeadLogic exercises the dead-logic lint that replaced the retired
+// @entrypoint registration audit (ADR §2.4). Every logic must be referenced by
+// some logic / query / tool / automation. WARNING phase: orphans are logged,
+// not failed (I5 promotes it to a hard gate). It also guards the @entrypoint
+// retirement -- the lint API must exist and run cleanly.
+func runDeadLogic(t *testing.T, e *Env) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	wrappers := memql.EntryPointLogicWrappers(logger)
-	if len(wrappers) == 0 {
-		t.Fatal("#1707: no @entrypoint logics surfaced; the invariant gate has nothing to enforce")
+	dead := memql.DeadLogicNames(logger)
+	for _, name := range dead {
+		t.Logf("#2216 WARNING: dead logic %q -- no logic/query/tool/automation references it", name)
 	}
-	for _, w := range wrappers {
-		if w.LogicName == "" {
-			t.Errorf("#1707: entry-point wrapper has empty LogicName: %+v", w)
-		}
-		if w.WrapperName == "" {
-			t.Errorf("#1707: entry-point logic %q has no wrapping automation name", w.LogicName)
-		}
-		// The generated wrapper source must actually declare the automation AND
-		// call the logic -- otherwise the "invocation path" is vacuous.
-		if !strings.Contains(w.Source, "automation "+w.WrapperName) {
-			t.Errorf("#1707: wrapper source for %q does not declare automation %q:\n%s", w.LogicName, w.WrapperName, w.Source)
-		}
-		if !strings.Contains(w.Source, w.BareName) {
-			t.Errorf("#1707: wrapper %q does not invoke its logic %q:\n%s", w.WrapperName, w.BareName, w.Source)
-		}
-	}
-	t.Logf("#1707: %d @entrypoint logics each have a wrapping automation invocation path", len(wrappers))
+	t.Logf("#2216: dead-logic lint ran; %d orphan(s) (warning window)", len(dead))
 }
 
 // --- #1705: LiteralValueNode / bare-literal AST evaluation ---
