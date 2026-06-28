@@ -125,8 +125,18 @@ automations; nothing sits between).
 > composition is `component/harness/actionplan` (REUSE >= 0.82 / ADAPT >= 0.60 /
 > SYNTHESIZE), and reliability reinforcement is `component/harness/actionreplay`.
 > DevOps-DSL-epic item I12 (#2229) is therefore satisfied by #1734 and was closed
-> as already-delivered; a future rename of the composed `kind` to `automation`
-> would be cosmetic.
+> as already-delivered.
+>
+> **Terminology, resolved (#2277).** The runtime tag for the composed
+> library object is `kind=composite` on `v1:actions:action`; this section's
+> "automation promoted into the library" is the same object. `composite` is the
+> **canonical implementation term** -- read it as "a library-promoted automation"
+> wherever this ADR says "automation." We do **not** rename the stored enum value
+> to `automation`: it would be a purely cosmetic change to a persisted enum that
+> requires a data migration over existing `v1:actions:action` rows (and updates to
+> every reader -- `actionplan` / `actionreplay` / `action_substitution` / the
+> action step executor), with zero behavioral gain. The two names are reconciled
+> here instead.
 
 ### 2.3 Action = external-capability only (Q3)
 
