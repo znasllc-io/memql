@@ -4,16 +4,31 @@
 // files cover the other construct kinds.
 
 use cognition.logic.{ bootstrapSession, generateResponse, voiceMigrationOnSecondHuman }
+use cognition.mutations.{ createSessionForParticipant }
+use cognition.queries.{ participantSession }
 
 // automations/v1/cognition/bootstrapSession/automation.memql
 // Auto-creates a v1:cognition:session record when a participant is created.
 // Ensures every participant has a session tracking their real-time interaction state.
 @enabled
 @trigger(event="node.created", concept="v1:cognition:participant", partition="*")
-@description("Auto-creates a session when a participant joins a space")
+@description("Auto-creates a session when a participant joins a space. decide (pure arg-builder logic, ids off the event) -> check (participantSession idempotency) -> persist (createSessionForParticipant, gated on no existing session) -> emit ('session.created'). All ids thread via field(decide.result, ...). #2235.")
 automation bootstrapSession {
-  step run {
+  step decide {
     logic bootstrapSession { event: event }
+  }
+  step check {
+    participantSession({ participantId: field(decide.result, "participantId") })
+  }
+  step persist {
+    if steps.check.empty == true {
+      createSessionForParticipant({ participantId: field(decide.result, "participantId"), partitionId: field(decide.result, "partitionId") })
+    }
+  }
+  step emit {
+    if steps.check.empty == true {
+      publishEvent({ topic: "session.created", payload: { sessionId: field(decide.result, "participantId"), participantId: field(decide.result, "participantId"), partitionId: field(decide.result, "partitionId"), timestamp: timestamp() } })
+    }
   }
 }
 

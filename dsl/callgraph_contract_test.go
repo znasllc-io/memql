@@ -46,7 +46,15 @@ var callGraphBaseline = []string{
 	// bootstrap; migrating to if-steps needs behavioral verification of the
 	// condition-eval semantics (existingCluster.Empty() && node.type=="bff") that a
 	// load-only test can't prove. Left baselined per the safe-or-defer rule.
-	"logic-purity|logic|bootstrapSession",
+	// #2235: NOT migrated -- deferred. generateResponse keeps the ai() prompt
+	// projection intrinsic, which can't be an automation step (positional-arg
+	// engine projection) and so must stay in the logic; gating it by idempotency
+	// AND threading the routing ids through field(decide.result, ...) (the only
+	// binding form that threads at runtime -- event.payload.* does NOT thread into
+	// a top-level automation step, #1706) can't both be expressed without either
+	// an unconditional LLM call or an unverified ai()-in-object-literal return.
+	// bootstrapSession (no ai()) migrated; this one held baselined pending a
+	// follow-up. See #2212.
 	"logic-purity|logic|generateResponse",
 	// #2235: deferred. Per-row sweep (updateNodeHealth inside `for ... range`) needs
 	// a forEach automation step; struct-form forEach/for is documented (ADR S7) but

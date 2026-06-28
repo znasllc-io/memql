@@ -41,14 +41,14 @@
 // - bootstrapSession automation creates sessions for new AI
 //   participants.
 // - Emits "si.auto-joined" event for observability.
-use cognition.mutations.{ createSessionForParticipant, sendTextUtterance }
-use cognition.queries.{ hasAIResponseForReply, participantSession }
+use cognition.mutations.{ sendTextUtterance }
+use cognition.queries.{ hasAIResponseForReply }
 use identity.queries.{ usersActiveInSpace }
 
 // automations/v1/cognition/bootstrapSession/automation.memql
 // Auto-creates a v1:cognition:session record when a participant is created.
 // Ensures every participant has a session tracking their real-time interaction state.
-@description("Auto-creates a v1:cognition:session record when a v1:cognition:participant is created, with default device + stream state. Ensures every participant has a session tracking their real-time interaction state. Idempotent via participantSession existence check. Emits 'session.created' for downstream consumers.")
+@description("PURE arg-builder (#2235): emit the participantId + partitionId the bootstrapSession automation needs, read off the triggering participant-created event. The idempotency read (participantSession), the createSessionForParticipant write, and the 'session.created' emit all moved to the automation's check/persist/emit steps (ADR §2.1 single-writer). Kept a single pure object-literal return over event fields -- the LogicRunner / engine resolves it cleanly (no intermediate-step reference), exactly like the library index logics; the automation reads the ids back via field(decide.result, ...) so they thread the same proven way.")
 logic bootstrapSession {
   args {
     event object @required
@@ -57,22 +57,7 @@ logic bootstrapSession {
   // The event payload contains the newly created participant node with flattened fields:
   // args.event.payload.id = participant ID
   // args.event.payload.partitionId = space ID (flattened from node payload)
-  // args.event.payload.participantType = "human" or "si" (flattened from node payload)
-  // args.event.payload.payload = full node payload for backwards compatibility
-
-  // Check if session already exists for this participant
-  checkExistingSession := participantSession({ participantId: args.event.payload.id })
-
-  // Create the session record with default device + stream state.
-  // Voice / video flow is no longer gated by a tier ceiling -- the
-  // user's mic toggle (humanInput.microphoneEnabled) plus each
-  // agent's audioControl mode decide who publishes audio in the room.
-  createSession := if checkExistingSession.Empty() { createSessionForParticipant({ participantId: args.event.payload.id, partitionId: args.event.payload.partitionId }) }
-
-  // Emit session created event for downstream consumers
-  emitSessionCreated := if checkExistingSession.Empty() { publishEvent({ topic: "session.created", payload: { sessionId: args.event.payload.id, participantId: args.event.payload.id, partitionId: args.event.payload.partitionId, timestamp: timestamp() } }) }
-
-  return coalesce(createSession, checkExistingSession.First())
+  return { participantId: args.event.payload.id, partitionId: args.event.payload.partitionId }
   }
 }
 

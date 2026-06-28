@@ -160,7 +160,7 @@ func BootstrapClusterBuild(args BootstrapClusterArgs) string {
 	return b.String()
 }
 
-// BootstrapSession -- Auto-creates a v1:cognition:session record when a v1:cognition:participant is created, with default device + stream state. Ensures every participant has a session tracking their real-time interaction state. Idempotent via participantSession existence check. Emits 'session.created' for downstream consumers.
+// BootstrapSession -- PURE arg-builder (#2235): emit the participantId + partitionId the bootstrapSession automation needs, read off the triggering participant-created event. The idempotency read (participantSession), the createSessionForParticipant write, and the 'session.created' emit all moved to the automation's check/persist/emit steps (ADR §2.1 single-writer). Kept a single pure object-literal return over event fields -- the LogicRunner / engine resolves it cleanly (no intermediate-step reference), exactly like the library index logics; the automation reads the ids back via field(decide.result, ...) so they thread the same proven way.
 type BootstrapSessionArgs struct {
 	Event map[string]any
 }
