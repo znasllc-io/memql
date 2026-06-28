@@ -3,7 +3,8 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use worker.logic.{ killSwitchSuspendsRunningPlans, workerInvocationRetentionSweep }
+use worker.logic.{ killSwitchSuspendsRunningPlans, workerInvocationRetentionSweep, workerInvocationRetentionWindow }
+use worker.mutations.{ softDeleteWorkerInvocation }
 use planner.mutations.{ updatePlanStatus }
 
 @enabled
@@ -46,9 +47,21 @@ automation killSwitchSuspendsRunningPlans {
 //       addDuration(item.createdAt, "P{retention}D") < timestamp()
 @enabled
 @trigger(schedule="0 30 2 * * *")
-@description("Daily 02:30 UTC sweep: soft-delete worker-invocation rows past retention.")
+@description("Daily 02:30 UTC sweep: soft-delete worker-invocation rows past WORKER_INVOCATION_RETENTION_DAYS. decide (pure) returns the candidate rows; window reads the retention var; the forEach apply gates each row on createdAt + P{N}D < now (#2256/#2254 evaluator fix) and soft-deletes it.")
 automation workerInvocationRetentionSweep {
-  step run {
+  step window {
+    logic workerInvocationRetentionWindow { event: event }
+  }
+  step decide {
     logic workerInvocationRetentionSweep { event: event }
+  }
+  step apply {
+    forEach item in decide.result {
+      if addDuration(item.createdAt, concat("P", coalesce(window.First().payload.value, "90"), "D")) < timestamp() {
+        softDeleteWorkerInvocation {
+          invocationId: item.id
+        }
+      }
+    }
   }
 }
