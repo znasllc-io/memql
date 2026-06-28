@@ -1054,6 +1054,13 @@ func NormaliseTerseAutomationSource(source string) (string, error) {
 type automationStep struct {
 	name string
 	call string
+	// raw marks a step whose `call` is a complete top-level procedural
+	// statement (e.g. a `for item := range ... { ... }` loop) that must be
+	// emitted verbatim into the automation body rather than as a
+	// `<name> := <call>` assignment. The forEach step (memql#2246) is the
+	// only producer today; the for-range statement is not an assignment
+	// expression, so parseGoStyleStep cannot consume it after `:=`.
+	raw bool
 }
 
 func emitAutomation(name, _conceptId, body, _preamble string) (string, error) {
@@ -1068,9 +1075,14 @@ func emitAutomation(name, _conceptId, body, _preamble string) (string, error) {
 	sb.WriteString(fmt.Sprintf("func (Automation) %s(_ any) {\n", name))
 	for _, s := range steps {
 		sb.WriteString("  ")
-		sb.WriteString(s.name)
-		sb.WriteString(" := ")
-		sb.WriteString(s.call)
+		if s.raw {
+			// A raw step (forEach loop) is a complete top-level statement.
+			sb.WriteString(s.call)
+		} else {
+			sb.WriteString(s.name)
+			sb.WriteString(" := ")
+			sb.WriteString(s.call)
+		}
 		sb.WriteString("\n")
 	}
 	sb.WriteString("}")
@@ -1101,6 +1113,18 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 		stepBody := strings.TrimSpace(body[openIdx+1 : closeIdx])
 		if stepBody == "" {
 			return nil, fmt.Errorf("step %q: body is empty", stepName)
+		}
+		// A `forEach`/`for` step body lowers to a top-level for-range loop
+		// statement (StepTypeForEach), not a `<name> := <call>` assignment
+		// (memql#2246). Everything else is a single call expression.
+		if lead, _ := splitLeadingIdent(stepBody); lead == "forEach" || lead == "for" {
+			stmt, err := translateForEachStepCall(stepName, stepBody)
+			if err != nil {
+				return nil, fmt.Errorf("step %q: %w", stepName, err)
+			}
+			out = append(out, automationStep{name: stepName, call: stmt, raw: true})
+			pos = closeIdx + 1
+			continue
 		}
 		call, err := translateStepCall(stepBody)
 		if err != nil {
@@ -1203,6 +1227,185 @@ func translateConditionalStepCall(rest string) (string, error) {
 		return "", fmt.Errorf("conditional step body: %w", err)
 	}
 	return "if " + cond + " { " + call + " }", nil
+}
+
+// translateForEachStepCall handles the per-item iteration step body
+// (memql#2246). It accepts two authoring shapes inside a `step { ... }`:
+//
+//	forEach <var> in <expr> [where <cond>] { <call> [<call> ...] }
+//	for <var> := range <expr> [if <cond>] { <call> [<call> ...] }
+//
+// and lowers both to the procedural top-level loop statement
+//
+//	for item := range <expr> [if <cond>] { <step>_do1 := <call> ... }
+//
+// which the procedural parser's parseForRangeStep already compiles into a
+// StepTypeForEach StepDef whose Do[] children the ForEachExecutor runs once
+// per item. The procedural parser pins the iteration variable to the
+// canonical `item`, so the author's chosen variable is renamed to `item`
+// throughout the body + filter. Each inner call is translated recursively
+// through translateStepCall (so it accepts the same `<kind> <name> { ... }`
+// / bare / `if cond { ... }` shapes as any other step) and is assigned a
+// synthesized name so the nested parseGoStyleStep accepts it.
+func translateForEachStepCall(stepName, body string) (string, error) {
+	body = strings.TrimSpace(body)
+	first, rest := splitLeadingIdent(body)
+	isForEach := first == "forEach"
+	if first != "forEach" && first != "for" {
+		return "", fmt.Errorf("forEach step: expected `forEach` or `for`, got %q", first)
+	}
+
+	rest = strings.TrimLeft(rest, " \t\n\r")
+	iterVar, afterVar := splitLeadingIdent(rest)
+	if iterVar == "" {
+		return "", fmt.Errorf("%s step: expected an iteration variable after %q", first, first)
+	}
+	afterVar = strings.TrimLeft(afterVar, " \t\n\r")
+
+	// Separator between the iteration variable and the collection
+	// expression: `in` for forEach, `:= range` for the go-style for.
+	var afterSep string
+	if isForEach {
+		kw, tail := splitLeadingIdent(afterVar)
+		if kw != "in" {
+			return "", fmt.Errorf("forEach step: expected `in` after the iteration variable %q, got %q", iterVar, parallelSnippet(afterVar))
+		}
+		afterSep = strings.TrimLeft(tail, " \t\n\r")
+	} else {
+		if !strings.HasPrefix(afterVar, ":=") {
+			return "", fmt.Errorf("for step: expected `:=` after the iteration variable %q, got %q", iterVar, parallelSnippet(afterVar))
+		}
+		afterVar = strings.TrimLeft(afterVar[2:], " \t\n\r")
+		kw, tail := splitLeadingIdent(afterVar)
+		if kw != "range" {
+			return "", fmt.Errorf("for step: expected `range` after `:=`, got %q", parallelSnippet(afterVar))
+		}
+		afterSep = strings.TrimLeft(tail, " \t\n\r")
+	}
+
+	// The loop body opens at the first `{` (mirrors the procedural parser,
+	// which reads the collection expression until `if`/`{`).
+	braceIdx := strings.IndexByte(afterSep, '{')
+	if braceIdx < 0 {
+		return "", fmt.Errorf("%s step: expected `{` to open the loop body", first)
+	}
+	closeIdx := findMatchingCloseBrace(afterSep, braceIdx)
+	if closeIdx < 0 {
+		return "", fmt.Errorf("%s step: missing closing brace for the loop body", first)
+	}
+	if tail := strings.TrimSpace(afterSep[closeIdx+1:]); tail != "" {
+		return "", fmt.Errorf("%s step: unexpected trailing text after the loop body: %q", first, parallelSnippet(tail))
+	}
+
+	header := strings.TrimSpace(afterSep[:braceIdx])
+	inner := strings.TrimSpace(afterSep[braceIdx+1 : closeIdx])
+	if inner == "" {
+		return "", fmt.Errorf("%s step: the loop body is empty", first)
+	}
+
+	// Split an optional filter clause off the collection expression. The
+	// filter keyword is `where` for forEach and `if` for the go-style for;
+	// both lower to the procedural `if <cond>` filter clause.
+	filterKw := "if"
+	if isForEach {
+		filterKw = "where"
+	}
+	collection := header
+	filter := ""
+	if idx := indexWord(header, filterKw); idx >= 0 {
+		collection = strings.TrimSpace(header[:idx])
+		filter = strings.TrimSpace(header[idx+len(filterKw):])
+		if filter == "" {
+			return "", fmt.Errorf("%s step: empty `%s` filter clause", first, filterKw)
+		}
+	}
+	if collection == "" {
+		return "", fmt.Errorf("%s step: missing the collection expression", first)
+	}
+
+	calls, err := parseForEachInnerCalls(inner)
+	if err != nil {
+		return "", err
+	}
+
+	// Rename the author's iteration variable to the canonical `item`.
+	rename := func(s string) string { return renameWord(s, iterVar, "item") }
+
+	var sb strings.Builder
+	sb.WriteString("for item := range ")
+	sb.WriteString(collection)
+	if filter != "" {
+		sb.WriteString(" if ")
+		sb.WriteString(rename(filter))
+	}
+	sb.WriteString(" {")
+	for i, c := range calls {
+		sb.WriteString("\n    ")
+		sb.WriteString(fmt.Sprintf("%s_do%d := ", stepName, i+1))
+		sb.WriteString(rename(c))
+	}
+	sb.WriteString("\n  }")
+	return sb.String(), nil
+}
+
+// parseForEachInnerCalls splits a forEach loop body into its sequence of
+// call statements and translates each through translateStepCall. Every call
+// is a brace-bodied form -- `<kind> <name> { ... }`, bare `<name> { ... }`,
+// or `if <cond> { <call> }` -- so the call span runs from the start of the
+// statement through the matching close brace of its first `{`. Whitespace,
+// commas, and `//` line comments between statements are skipped.
+func parseForEachInnerCalls(inner string) ([]string, error) {
+	var out []string
+	pos := 0
+	for {
+		pos = skipParallelInsignificant(inner, pos)
+		if pos >= len(inner) {
+			break
+		}
+		braceRel := strings.IndexByte(inner[pos:], '{')
+		if braceRel < 0 {
+			return nil, fmt.Errorf("forEach step: inner call %q must have a `{ ... }` body", parallelSnippet(inner[pos:]))
+		}
+		braceIdx := pos + braceRel
+		closeIdx := findMatchingCloseBrace(inner, braceIdx)
+		if closeIdx < 0 {
+			return nil, fmt.Errorf("forEach step: inner call missing closing brace")
+		}
+		callSrc := strings.TrimSpace(inner[pos : closeIdx+1])
+		call, err := translateStepCall(callSrc)
+		if err != nil {
+			return nil, fmt.Errorf("forEach step: %w", err)
+		}
+		out = append(out, call)
+		pos = closeIdx + 1
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("forEach step: the loop body has no calls")
+	}
+	return out, nil
+}
+
+// indexWord returns the byte index of the first whole-word occurrence of
+// word in s, or -1. A whole word is bounded by identifier-character
+// boundaries (so `in` does not match inside `info`).
+func indexWord(s, word string) int {
+	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(word) + `\b`)
+	loc := re.FindStringIndex(s)
+	if loc == nil {
+		return -1
+	}
+	return loc[0]
+}
+
+// renameWord replaces every whole-word occurrence of from with to in s. Used
+// to rename a forEach author's iteration variable to the canonical `item`
+// (e.g. `node.id` -> `item.id`) without touching substrings (`updateNode`).
+func renameWord(s, from, to string) string {
+	if from == to || from == "" {
+		return s
+	}
+	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(from) + `\b`)
+	return re.ReplaceAllString(s, to)
 }
 
 // translateParallelStepCall handles the `parallel { ... }` step body
