@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/actions/capability"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/callgraph"
@@ -356,13 +357,16 @@ func singularKind(kind string) string {
 
 // checkCallGraph enforces the ADR §2 behavioral call-graph contract on a
 // single authored construct (see component/memql/callgraph). It rejects at
-// define->promote so newly authored logic/mutation/query constructs cannot
-// introduce a contract violation, independent of the whole-tree CI gate's
-// migration window. Builtin side-effect classification (the read-only-builtin
-// rule) lands with I7; a nil classifier yields no builtin findings here.
+// define->promote so newly authored logic/mutation/query/action constructs
+// cannot introduce a contract violation, independent of the whole-tree CI
+// gate's migration window. Builtin side-effect classification (the
+// read-only-builtin rule, ADR §3) is sourced from the capability registry
+// (component/actions/capability), so a side-effecting integration builtin used
+// in a query/logic is rejected here.
 func (r *crossRefResolver) checkCallGraph(c SandboxConstruct, origin string) string {
 	useKinds := callgraph.UseKinds(c.Source)
-	findings := callgraph.ConstructFindings(c.Kind, c.Name, c.Source, useKinds, nil)
+	sideEffecting := callgraph.SideEffectClassifier(capability.DefaultClassifier())
+	findings := callgraph.ConstructFindings(c.Kind, c.Name, c.Source, useKinds, sideEffecting)
 	if len(findings) == 0 {
 		return ""
 	}

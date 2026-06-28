@@ -13,11 +13,11 @@ import (
 // Automations are intentionally absent -- they are the permissive composing
 // construct (they may call anything), so they need no per-construct analysis.
 // Every other kind (concepts/shapes/specs/...) has no behavioral body to walk.
-var restrictedKinds = map[string]bool{"logic": true, "query": true, "mutation": true}
+var restrictedKinds = map[string]bool{"logic": true, "query": true, "mutation": true, "action": true}
 
 // headerRE returns the construct-header matcher for a restricted kind. Group 1
 // is the construct name. mutation/query carry a concept segment in the
-// signature (`mutation <Concept> <name> {`); logic does not.
+// signature (`mutation <Concept> <name> {`); logic and action do not.
 func headerRE(kind string) *regexp.Regexp {
 	switch kind {
 	case "logic":
@@ -26,6 +26,8 @@ func headerRE(kind string) *regexp.Regexp {
 		return regexp.MustCompile(`(?m)^query[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 	case "mutation":
 		return regexp.MustCompile(`(?m)^mutation[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+	case "action":
+		return regexp.MustCompile(`(?m)^action[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 	default:
 		return nil
 	}

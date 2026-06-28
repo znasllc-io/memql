@@ -1,9 +1,10 @@
-package dsl
+package dsl_test
 
 import (
 	"sort"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/actions/capability"
 	"github.com/znasllc-io/memql/component/memql/callgraph"
 )
 
@@ -50,14 +51,30 @@ var callGraphBaseline = []string{
 	"logic-purity|logic|revokeExpiredDelegations",
 	"logic-purity|logic|routeRequest",
 	"logic-purity|logic|workerInvocationRetentionSweep",
+	// #2219: pre-existing read-only-builtin debt surfaced when I7 turned the
+	// builtin side-effect classifier on. releaseWorkspaceOnPlanTerminal (already
+	// baselined above for logic-purity) also calls the side-effecting builtin
+	// workbenchTeardownDirectory (@executor integration.workbench.teardownDirectory,
+	// class=write) from a read context. Per ADR §3 the teardown belongs in an
+	// action reached from an automation step, not inline in a logic. This is the
+	// ONLY such finding tree-wide (a wholesale builtin->action migration is the
+	// large follow-up, epic #2212); grandfathered here so the gate stays green.
+	// When the teardown moves to an action, delete this line (burn-down).
+	"read-only-builtin|logic|releaseWorkspaceOnPlanTerminal",
 }
 
 // TestCallGraphContract is the HARD whole-tree gate for the behavioral
-// call-graph contract (ADR §2). The builtin side-effect classifier is nil until
-// I7 declares sideEffectClass on capabilities, so the read-only-builtin rule
-// does not fire on the real tree yet.
+// call-graph contract (ADR §2). I7 sources the builtin side-effect classifier
+// from the capability registry (component/actions/capability), so the
+// read-only-builtin rule (ADR §3) now fires on the real tree: a side-effecting
+// integration builtin used inside a query/logic is a finding (one such
+// pre-existing case is baselined above).
 func TestCallGraphContract(t *testing.T) {
-	findings, err := callgraph.CheckTree(".", nil)
+	sideEffecting, err := capability.ClassifierFromDir(".")
+	if err != nil {
+		t.Fatalf("build builtin side-effect classifier: %v", err)
+	}
+	findings, err := callgraph.CheckTree(".", callgraph.SideEffectClassifier(sideEffecting))
 	if err != nil {
 		t.Fatalf("walk DSL tree: %v", err)
 	}
