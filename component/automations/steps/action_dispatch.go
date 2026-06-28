@@ -33,23 +33,23 @@ type engineToolInvoker interface {
 // deterministic inputs + backend, which is what makes an authored action
 // replay token-free and fingerprint-verifiable.
 //
-// shell.* is recognised but NOT executed here. A shell capability's backend is
-// a DETERMINISTIC capability SCRIPT invoked with structured params (the merged
-// capability-script contract, #2221: `--flag=value` in, one JSON envelope
-// out), NOT an arbitrary rendered command string run through `sh -c` -- that
-// would be a command-injection sink on author/event-derived params. The
-// capability-script runner that drives those scripts + parses the envelope
-// (component/deploycontrol.ParseCapabilityResult) is wired into the dispatcher
-// in I8; until then shell.* returns a clear "not yet wired" error rather than
-// an unsafe shell.
+// shell.* runs a DETERMINISTIC capability SCRIPT invoked with structured params
+// (the merged capability-script contract, #2221: `--name=value` argv flags in,
+// one JSON envelope out), NOT an arbitrary rendered command string run through
+// `sh -c` -- that would be a command-injection sink on author/event-derived
+// params. The capability-script runner (capability_script.go, I8/#2222)
+// launches an ALLOWLISTED script via an argv slice and parses its envelope
+// through deploycontrol.ParseCapabilityResult.
 type defaultDispatcher struct {
 	engine engineToolInvoker
+	script *capabilityScriptRunner
 }
 
 // newDefaultDispatcher builds the default capability dispatcher bound to the
-// engine (for integration.* / mcp.*).
+// engine (for integration.* / mcp.*) with the capability-script runner wired in
+// for shell.* (I8, #2222).
 func newDefaultDispatcher(engine engineToolInvoker) *defaultDispatcher {
-	return &defaultDispatcher{engine: engine}
+	return &defaultDispatcher{engine: engine, script: newCapabilityScriptRunner()}
 }
 
 func (d *defaultDispatcher) Invoke(ctx context.Context, capability string, args map[string]any) (any, error) {
@@ -65,12 +65,15 @@ func (d *defaultDispatcher) Invoke(ctx context.Context, capability string, args 
 	case strings.HasPrefix(capability, "integration."), strings.HasPrefix(capability, "mcp."):
 		return d.engineTool(ctx, capability, args)
 	case strings.HasPrefix(capability, "shell."):
-		// Deferred to the capability-script runner (I8): a shell capability is
-		// a deterministic script invoked with structured params, never an
-		// arbitrary rendered command string through a shell.
-		return nil, fmt.Errorf("capability %q: shell.* backend is delivered by the capability-script runner (a deterministic script with structured params, #2221) and is wired into the dispatcher in I8 -- not available in the default dispatcher yet", capability)
+		// The capability-script runner (I8, #2222): a shell capability names an
+		// allowlisted capability script via its `script` arg and is invoked with
+		// structured params as argv flags, never a rendered command string.
+		if d.script == nil {
+			d.script = newCapabilityScriptRunner()
+		}
+		return d.script.Invoke(ctx, args)
 	default:
-		return nil, fmt.Errorf("capability %q is not supported by the default dispatcher (supported: fs.readFile, fs.writeFile, http.get, http.post, integration.*, mcp.*; shell.* lands in I8)", capability)
+		return nil, fmt.Errorf("capability %q is not supported by the default dispatcher (supported: fs.readFile, fs.writeFile, http.get, http.post, shell.* via the capability-script runner, integration.*, mcp.*)", capability)
 	}
 }
 
