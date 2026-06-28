@@ -1,0 +1,133 @@
+// queries.memql
+//
+// Deployment-namespace READS -- the deploy record queries the DevOps deployment
+// bundle owns (epic #2212, I11 #2225). Relocated from dsl/cluster/queries.memql
+// into the cohesive `deployment` pack alongside the concepts, shapes, and
+// mutations of the deploy data model. The concept ids are held stable
+// (v1:cluster:deployment / v1:cluster:deploymentNodeSpec -- see concepts.memql),
+// so only the import path moved (`use deployment.concepts/shapes.{ ... }`); the
+// query NAMES are unchanged, so component/deploycontrol (deploymentById,
+// deploymentsForCluster), component/node/reconciler.go (supersededDeployments),
+// the cockpit Deployments view, and the SDK keep resolving them by name.
+//
+// SCOPE NOTE. The `query node` topology lookups that filter on a node's
+// payload.deploymentId (nodesForDeployment / nodesNotInDeployment) stay in
+// dsl/cluster/queries.memql -- they read the v1:cluster:node concept (cluster
+// topology), not the deployment record, so they belong with the cluster
+// concept they project. Only the deployment-RECORD reads move here.
+
+use deployment.concepts.{ deployment, deploymentNodeSpec }
+use deployment.shapes.{ deploymentFull, deploymentNodeSpecFull }
+
+// ---- deploymentsForCluster ----
+
+// Deployment history for a cluster (#1872). Returns ONE row per
+// deployment -- the LATEST payload version per deploymentId via
+// `asOf latest`, so each entry reflects the deployment's CURRENT
+// status (pending/in_progress/succeeded/failed/superseded/rolled_back).
+// The deployment store is append-only (one row appended per status
+// transition under the same concept id = deploymentId), so a plain scan
+// would return every transition; asOf latest collapses to the current
+// state. Ordering newest-first by createdAt is applied by the consumer
+// (cockpit Deployments view), mirroring clusterNodes' "CLI dedupes
+// + sorts" note -- the MemQL query planner has no order/limit clause.
+
+@enabled
+@description("Deployment history for a cluster: latest-per-deploymentId rows (asOf latest -> current status per deployment) filtered to a clusterId. Backs the cockpit Deployments history list (consumer sorts newest-first by createdAt). #1872.")
+@unbounded("deployments for a cluster -- a bounded topology set consumed whole")
+query deployment deploymentsForCluster {
+  args {
+    clusterId  string  @required
+  }
+  filter  payload.clusterId == args.clusterId
+  shape   deploymentFull
+  asOf    latest
+}
+
+// ---- deploymentById ----
+
+// Full status-transition history for a single deployment (#1872).
+// Filters on payload.deploymentId (NOT the canonical row id, which would
+// need partition+concept prefixing) so the caller passes the bare
+// deploymentId. Returns EVERY appended row for that deployment -- the
+// complete lifecycle timeline -- so a deployment's status is
+// reconstructable asOf any point in time (acceptance criterion). No asOf
+// directive: the consumer wants all versions, not the latest.
+
+@enabled
+@description("All status-transition rows for one deployment, by deploymentId, oldest-to-newest (full lifecycle history; reconstructable asOf any time). #1872.")
+@unbounded("deployment by unique deploymentId -- bounded to a single row")
+query deployment deploymentById {
+  args {
+    deploymentId  string  @required
+  }
+  filter  payload.deploymentId == args.deploymentId
+  shape   deploymentFull
+}
+
+// ---- supersededDeployments ----
+
+// Deployment-aware reaper input (#1874). Returns ONE row per deployment
+// (latest-per-deploymentId via `asOf latest`) whose CURRENT status is a
+// terminal-not-active one -- superseded (a newer deploy promoted past it),
+// failed, or rolled_back. These are exactly the deployments whose nodes are
+// orphans: still-registered pods from a deploy that is no longer the active
+// or in-flight one. The active-topology reconciler (TopologyReconciler,
+// component/node/reconciler.go) reads this set every tick and immediately
+// retires (health="stopped") any non-stopped v1:cluster:node whose
+// deploymentId lands in it -- so a superseded deployment's nodes clear from
+// topology within seconds of promotion completing, instead of waiting on the
+// liveness lapse or the 30-min prune.
+//
+// Why status-driven (not "deploymentId != currentId"): keying off the
+// deployment's recorded status avoids cutting an OLD deployment's pods while
+// they are still in-flight during a rollover overlap -- a node is only an
+// orphan once its deployment is explicitly marked superseded/failed/
+// rolled_back by the deploy driver. A node whose deploymentId has NO
+// deployment row (e.g. the dev "local" id) never matches, so local/dev
+// clusters are untouched by the orphan path.
+//
+// Authz: filters on payload.status only (infrastructure topology, no
+// user-scope field) -> conformance "other" bucket, same as
+// nodesNotInDeployment / deploymentsForCluster.
+
+@enabled
+@description("Latest-per-deploymentId deployment rows whose status is terminal-not-active (superseded / failed / rolled_back) -- the deployments whose still-registered nodes are orphans. Feeds the active-topology reaper (#1874). asOf latest -> current status per deployment.")
+@unbounded("superseded/failed/rolled-back deployments GC sweep -- an internal sweep that must see all")
+query deployment supersededDeployments {
+  filter  payload.status in ["superseded", "failed", "rolled_back"]
+  shape   deploymentFull
+  asOf    latest
+}
+
+// ---- nodeSpecsForDeployment ----
+
+// A deployment's full per-node-type spec set (Epic 2 / #2094). Returns
+// ONE row per node type -- the LATEST payload version per
+// (deploymentId, nodeType) via `asOf latest`, so each entry reflects
+// the node type's CURRENT spec (version / replicas / imageDigest). The
+// deploymentNodeSpec store is append-only (one row appended per re-pin
+// under the same composite concept id), so a plain scan would return
+// every transition; asOf latest collapses to the current spec per node
+// type. The caller passes the bare deploymentId (filter is on
+// payload.deploymentId, NOT the canonical row id).
+//
+// Engine-as-spine resolution (empty version -> the deployment's engine
+// version) is the CONSUMER's job: this query returns the raw per-node
+// pins; the deploy pack resolves "" against the lockfile engineVersion.
+//
+// Authz: filters on payload.deploymentId only (infrastructure topology,
+// no user-scope field) -> conformance "other" bucket, same as
+// nodesForDeployment / deploymentsForCluster.
+
+@enabled
+@description("Latest-per-(deploymentId, nodeType) deploymentNodeSpec rows for one deploymentId -- the deployment's current per-node-type spec set (version / replicas / imageDigest). asOf latest collapses the append-only spec stream to current state per node type. Engine-as-spine resolution of an empty version is the consumer's job. Epic 2 / #2094.")
+@unbounded("per-node specs for one deployment -- a bounded topology set consumed whole")
+query deploymentNodeSpec nodeSpecsForDeployment {
+  args {
+    deploymentId  string  @required
+  }
+  filter  payload.deploymentId == args.deploymentId
+  shape   deploymentNodeSpecFull
+  asOf    latest
+}

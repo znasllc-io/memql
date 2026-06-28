@@ -116,33 +116,13 @@ concept trainingResult {
   step                string  @description("For trainAgentRetryStep results: which step was retried ('identityVector' or 'distillPrompt'). Empty for the main trainAgent capability.")
 }
 
-@version("1.0.0")
-@namespace("cluster")
-@description("A persisted deployment record (foundation of epic #1871, issue #1872). Append-only + time-series like the other cluster concepts: the row is written at deploy start (pending/in_progress) and every status transition appends a new payload version under the SAME concept id (the deploymentId, which is also the rollout hash) -- so the full lifecycle is reconstructable asOf any time, and `asOf latest` collapses to the deployment's current status. The CDC path emits graph.node.created/updated.<partition>.v1:cluster:deployment on every write, which the cockpit Deployments view subscribes to (same mechanism v1:cluster:node uses for live topology). The image digest -- previously only in releases/*.yaml on disk -- now lands in the data layer so history, node<->deploy linkage, next-version suggestion, and rollback can all be served from a query.")
-concept deployment {
-  deploymentId         string  @required @description("Stable deployment id; also the Argo rollout hash. Used as the concept row id so status transitions append to one timeline.")
-  status               enum("pending", "in_progress", "succeeded", "failed", "superseded", "rolled_back")  @default("pending") @description("Deployment lifecycle status. pending -> in_progress -> succeeded | failed; succeeded -> superseded when a newer deploy promotes; any -> rolled_back on an explicit rollback.")
-  version              string  @description("memQL semver being deployed (e.g. '2026.6.21').")
-  imageDigest          string  @description("Resolved container image digest for this deploy (sha256:...). Empty until the build/lockfile resolves it.")
-  provider             string  @description("Deploy target / cloud provider: 'docker-local' (local Docker) or 'azure' (AKS).")
-  environment          enum("development", "staging", "production")  @description("Target environment for this deployment.")
-  region               string  @description("Cloud region (e.g. 'us-central1') or 'local'.")
-  clusterId            string  @description("Node id of the v1:cluster:cluster this deployment targets. Plain string FK (not a @relationship -- cross-concept references use FK fields).")
-  triggeredBy          string  @description("v1:identity:user.id of the operator who initiated the deploy.")
-  updatedAt            datetime  @description("Timestamp of the most recent status transition. The row intrinsic createdAt carries the deploy-start time.")
-  notes                string  @description("Optional free-form operator notes.")
-  changelog            string  @description("Optional changelog / release-notes summary for this version.")
-  previousDeploymentId string  @description("Optional deploymentId of the deploy this one supersedes. Plain string FK (not a @relationship).")
-}
-
-@version("1.0.0")
-@namespace("cluster")
-@description("Per-node-type spec for a deployment (Epic 2 / #2094). One row per (deploymentId, nodeType): the version + replica count + resolved image digest a given node type runs under a deployment. Engine-as-spine: an empty `version` means this node type resolves against the parent deployment's engine version (the release lockfile's engineVersion); a non-empty `version` pins this node type to a specific version that overrides the spine. Append-only + time-series like the parent deployment: the row is written when the spec is first set and every re-pin (version/replicas/imageDigest change) appends a new payload version under the SAME concept id -- `concat(deploymentId, ':', nodeType)` -- so the per-node-type spec history is reconstructable asOf any time, and `asOf latest` collapses to the node type's current spec. The CDC path emits graph.node.created/updated.<partition>.v1:cluster:deploymentNodeSpec on every write. deploymentId is a plain string FK to v1:cluster:deployment.deploymentId (cross-concept references use FK fields, not @relationship). A deployment's full per-node spec set = every deploymentNodeSpec with the same deploymentId.")
-concept deploymentNodeSpec {
-  deploymentId  string  @required @description("FK to v1:cluster:deployment.deploymentId this spec belongs to. Plain string FK (not a @relationship -- cross-concept references use FK fields). Part of the composite concept id concat(deploymentId, ':', nodeType).")
-  nodeType      string  @required @description("Node role this spec targets: bff, voice, cognition, agent, planner, identity, mcp, workbench. Part of the composite concept id concat(deploymentId, ':', nodeType) so each (deployment, nodeType) pin appends to one timeline.")
-  version       string  @description("memQL version this node type is pinned to (e.g. '2026.6.21'). Empty means engine-as-spine: resolve against the parent deployment's engine version (the release lockfile's engineVersion) rather than a per-node pin. A non-empty value overrides the spine for this node type only.")
-  replicas      int     @default("1") @description("Desired replica count for this node type under this deployment. Staging/prod parity defaults to 2 via the overlay; the concept default is 1 for a single-node baseline.")
-  imageDigest   string  @description("Resolved container image digest for this node type (sha256:...). Empty until the build/lockfile resolves it. Mirrors the per-component digest in releases/<version>.yaml.")
-  updatedAt     datetime  @description("Timestamp of the most recent spec transition. The row intrinsic createdAt carries the first-set time.")
-}
+// The deploy DATA model -- the `deployment` + `deploymentNodeSpec` concepts --
+// was CENTRALIZED into the cohesive deployment pack by I11 (#2225): see
+// dsl/deployment/concepts.memql. The concept ids are unchanged
+// (v1:cluster:deployment / v1:cluster:deploymentNodeSpec -- still @namespace
+// "cluster", since the id is assembled from the annotations, not the directory),
+// so every consumer (the deployEngineCluster trigger, the createDeployment /
+// updateDeploymentStatus mutations, component/deploycontrol, the cockpit deploy
+// command, the SDK) is unaffected. The cluster topology queries that read a
+// node's payload.deploymentId (nodesForDeployment / nodesNotInDeployment) stay
+// here with the v1:cluster:node concept they project.

@@ -17,7 +17,7 @@
 // exactly deploy.go's runErr -> transitionStatusForErr(succeeded|failed).
 
 use deploypack.builtins.{ deployRunPromote, deployObserveReconciledState, deployRecordBack }
-use cluster.mutations.{ updateDeploymentStatus }
+use deployment.mutations.{ updateDeploymentStatus }
 
 @description("On every v1:cluster:deployment update: when the new status is in_progress AND the provider is azure (or empty -> azure default) AND a version + deploymentId are present, fire deployRunPromote (passing the environment enum; the handler maps it to the promote.sh env) and transition the deployment to its terminal status. A FORWARD deploy lands in succeeded; a ROLLBACK record (one carrying previousDeploymentId) lands in rolled_back -- matching deploy.go's RollbackDeployment terminal exactly (#2115 parity). A promote failure lands in failed either way. Acts only on the in_progress edge; other status updates are ignored. The event-driven port of deploy.go's apply+transition. Epic 2 / #2096.")
 logic driveDeploymentInProgress {

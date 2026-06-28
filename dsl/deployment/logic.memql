@@ -9,7 +9,7 @@
 // (dsl/callgraph_contract_test.go). The WRITES that consume these decisions
 // live in the per-environment deploy automations (I10), which reuse the
 // existing createDeployment / updateDeploymentStatus mutations
-// (dsl/cluster/mutations.memql) one-write-per-step.
+// (dsl/deployment/mutations.memql) one-write-per-step.
 
 use deployment.builtins.{ suggestNextVersion }
 
