@@ -147,66 +147,62 @@ func TestArtifactIndexerAbsentOptionalFieldsValidate(t *testing.T) {
 }
 
 // TestLibraryIndexersCoalesceNullableOptionalFields guards against the
-// memql#1626 "1 of 7" regression directly at the fix site: it reads the
-// REAL dsl/library/logic.memql from the embedded tree and asserts every
-// sibling indexer wraps its nullable optional fields in coalesce(...)
-// rather than passing the raw `field: args.event.payload.X` form that
-// resolves to null and fails artifact validation.
+// memql#1626 "1 of 7" regression directly at the fix site. #2235 moved
+// the createArtifact write out of the (now-deleted) index* promotion
+// logics and into the index*OnCreate automation steps (dsl/library/
+// automations.memql) -- the cluster registerNode/deregisterNode shape.
+// This reads the REAL automations.memql from the embedded tree and
+// asserts every indexer step wraps its nullable optional fields in
+// coalesce(...) rather than binding the raw `field: event.payload.X`
+// form that resolves to null and fails artifact validation.
 //
-// A sibling that reverts any of these fields to the raw form -- exactly
+// An indexer that reverts any of these fields to the raw form -- exactly
 // how #1605 left 6 of 7 indexers broken -- fails here.
 func TestLibraryIndexersCoalesceNullableOptionalFields(t *testing.T) {
-	data, err := fs.ReadFile(dsl.Tree(), "library/logic.memql")
-	require.NoError(t, err, "library/logic.memql must be readable from the embedded DSL tree")
-	blocks := splitLogicBlocks(string(data))
+	data, err := fs.ReadFile(dsl.Tree(), "library/automations.memql")
+	require.NoError(t, err, "library/automations.memql must be readable from the embedded DSL tree")
+	blocks := splitAutomationBlocks(string(data))
 
 	// Each entry: the indexer's mutation-call binding for a nullable
 	// optional field that MUST be coalesced. The `want` substring is the
 	// coalesced form that must be present; the `rawBad` substring is the
 	// raw passthrough that must be absent (it is the null-producing bug).
 	cases := []struct {
-		logic  string
-		field  string
-		want   string
-		rawBad string
+		automation string
+		field      string
+		want       string
+		rawBad     string
 	}{
-		// indexNote
-		{"indexNote", "summary", `summary: coalesce(args.event.payload.body`, `summary: args.event.payload.body`},
-		// indexTodo
-		{"indexTodo", "title", `title: coalesce(args.event.payload.title`, `title: args.event.payload.title`},
-		// indexCalendarEvent
-		{"indexCalendarEvent", "title", `title: coalesce(args.event.payload.title`, `title: args.event.payload.title`},
-		// indexMemory (the indexer failing live on 0.9.67)
-		{"indexMemory", "summary", `summary: coalesce(args.event.payload.summary`, `summary: args.event.payload.summary`},
-		{"indexMemory", "agentId", `agentId: coalesce(args.event.payload.agentId`, `agentId: args.event.payload.agentId`},
-		{"indexMemory", "partitionId", `partitionId: coalesce(args.event.payload.partitionId`, `partitionId: args.event.payload.partitionId`},
+		// indexNoteOnCreate
+		{"indexNoteOnCreate", "summary", `summary:          coalesce(event.payload.body`, `summary:          event.payload.body`},
+		// indexMemoryOnCreate (the indexer failing live on 0.9.67)
+		{"indexMemoryOnCreate", "summary", `summary:          coalesce(event.payload.summary`, `summary:          event.payload.summary`},
+		{"indexMemoryOnCreate", "agentId", `agentId:          coalesce(event.payload.agentId`, `agentId:          event.payload.agentId`},
+		{"indexMemoryOnCreate", "partitionId", `partitionId:      coalesce(event.payload.partitionId`, `partitionId:      event.payload.partitionId`},
 	}
 
 	for _, tc := range cases {
-		t.Run(tc.logic+"/"+tc.field, func(t *testing.T) {
-			block, ok := blocks[tc.logic]
-			require.True(t, ok, "%s must exist in library/logic.memql", tc.logic)
+		t.Run(tc.automation+"/"+tc.field, func(t *testing.T) {
+			block, ok := blocks[tc.automation]
+			require.True(t, ok, "%s must exist in library/automations.memql", tc.automation)
 			require.Contains(t, block, tc.want,
-				"%s must coalesce its nullable %s field (memql#1626)", tc.logic, tc.field)
-			// The coalesced form is `field: coalesce(args...)`, so the raw
-			// `field: args...` passthrough is never a substring of it --
-			// a plain NotContains over THIS logic's block (title is legitimately
-			// raw in sibling indexers where it is @required upstream) cleanly
-			// catches a revert to the raw form.
+				"%s must coalesce its nullable %s field (memql#1626)", tc.automation, tc.field)
+			// The coalesced form is `field: coalesce(event...)`, so the raw
+			// `field: event...` passthrough is never a substring of it -- a
+			// plain NotContains over THIS automation's block cleanly catches a
+			// revert to the raw form.
 			require.NotContains(t, block, tc.rawBad,
-				"%s must NOT pass %s raw (resolves to null -> artifact validation fails, memql#1626)", tc.logic, tc.field)
+				"%s must NOT bind %s raw (resolves to null -> artifact validation fails, memql#1626)", tc.automation, tc.field)
 		})
 	}
 }
 
-// splitLogicBlocks carves library/logic.memql into a map keyed by logic
-// name, each value the source text from that `logic NAME {` declaration
-// up to (but not including) the next one. Lets the coalesce assertions
-// scope to a single indexer -- title is legitimately passed raw in the
-// memory / generatedOutput indexers (it is @required upstream there), so
-// a whole-file substring check would false-positive.
-func splitLogicBlocks(src string) map[string]string {
-	const marker = "\nlogic "
+// splitAutomationBlocks carves library/automations.memql into a map keyed
+// by automation name, each value the source text from that `automation
+// NAME {` declaration up to (but not including) the next one. Lets the
+// coalesce assertions scope to a single indexer.
+func splitAutomationBlocks(src string) map[string]string {
+	const marker = "\nautomation "
 	out := map[string]string{}
 	starts := []int{}
 	for i := 0; ; {
@@ -224,8 +220,8 @@ func splitLogicBlocks(src string) map[string]string {
 			end = starts[idx+1]
 		}
 		block := src[s:end]
-		// name := the token after "logic " up to the next space / brace / newline.
-		rest := block[len("logic "):]
+		// name := the token after "automation " up to the next space / brace / newline.
+		rest := block[len("automation "):]
 		name := rest
 		if cut := strings.IndexAny(rest, " {\n"); cut >= 0 {
 			name = rest[:cut]
