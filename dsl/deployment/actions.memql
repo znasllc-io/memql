@@ -1,0 +1,223 @@
+// actions.memql
+//
+// Deployment-namespace AUTHORED ACTIONS -- the world-touching layer of the
+// DevOps deployment bundle (epic #2212, I8 #2222). Per the behavioral-
+// constructs ADR §2: logic decides, mutations persist, ACTIONS TOUCH THE
+// WORLD, automations orchestrate. Each action below is a single external
+// capability rendered from typed params; it calls NO logic/query/mutation/
+// automation, touches NO graph, and carries no reactive trigger, so every one passes
+// the I7 action-rules validator (component/memql/callgraph) and the whole-tree
+// gate (dsl/callgraph_contract_test.go).
+//
+// SURFACE. These actions live under dsl/deployment/, so they inherit the
+// `cockpit/runner` policy-default surface with NO per-action annotation (I13,
+// component/actions/surfaces.go: deployPackPrefixes). They run OUTSIDE the
+// target cluster -- on the operator/CI cockpit runner -- so a deploy never
+// executes its own world-touch in-cluster.
+//
+// CAPABILITY BACKENDS. The shell actions name `shell.script` and select a
+// NAMED capability script (the I14 contract, #2221) by its `script` arg; the
+// action executor's capability-script runner (component/automations/steps/
+// capability_script.go) maps that id to an ALLOWLISTED scripts/* path, runs it
+// with the rendered params as a JSON object on stdin (never a `sh -c` string),
+// and parses the one JSON envelope it writes to stdout. This is injection-safe
+// by construction: an author/event value can only pick an allowlisted script
+// and travels as data, never as a command line. The integration-backed action
+// (tagRelease) resolves to an engine tool instead -- the same atomic shape.
+//
+// These actions are CONSUMED by the per-environment deploy automations (I10,
+// #2224); this file authors the primitives only.
+
+// =============================================================================
+//   Shell-backed deploy actions (capability "shell.script")
+// =============================================================================
+
+// cloneRepoAtVersion -- check out a clean working tree at a pinned ref so a
+// build runs against a known version. Backend: scripts/deploy/clone-repo.sh.
+@kind("primitive")
+@sideEffect("exec")
+@description("Check out the memQL repo at a specific version into a clean workdir on the deploy runner.")
+action cloneRepoAtVersion {
+  capability "shell.script"
+  intent "Clone/checkout a repository working tree at the requested ref so the build runs against a pinned version."
+  params {
+    workdir string @required @description("Absolute path of the repository working tree on the runner.")
+    ref     string @required @description("Git ref (branch, tag, or SHA) to check out.")
+  }
+  argTemplate {
+    script:  "deploy.cloneRepo"
+    workdir: "$params.workdir"
+    ref:     "$params.ref"
+  }
+}
+
+// buildEngineImage -- build one engine node image for a version. Backend:
+// scripts/deploy/build-image.sh (a thin, dry-run-capable wrapper; the real
+// release build runs on the GitHub build server, not here -- this is the
+// local/no-op surface).
+@kind("primitive")
+@sideEffect("exec")
+@description("Build a single engine node image at a version on the deploy runner (local/dry-run surface).")
+action buildEngineImage {
+  capability "shell.script"
+  intent "Build the container image for one engine node type at the requested version so it can be imported or pushed."
+  params {
+    nodeType string @required @description("Engine node type, e.g. identity / cognition / voice / agent / planner.")
+    version  string @required @description("Version tag to build, e.g. 0.12.0.")
+    workdir  string @required @description("Absolute path of the checked-out repository on the runner.")
+  }
+  argTemplate {
+    script:   "deploy.buildImage"
+    nodeType: "$params.nodeType"
+    version:  "$params.version"
+    workdir:  "$params.workdir"
+  }
+}
+
+// importImageToK3d -- load a built node image into the local k3d cluster (the
+// development-environment placement step). Backend: scripts/k3d/import-image.sh.
+@kind("primitive")
+@sideEffect("exec")
+@description("Import a built engine node image into the local k3d cluster (development placement).")
+action importImageToK3d {
+  capability "shell.script"
+  intent "Load a locally built node image into the k3d cluster so the development overlay can run it."
+  params {
+    nodeType string @required @description("Engine node type whose image to import.")
+    cluster  string @required @description("Target k3d cluster name, e.g. memql.")
+    version  string          @description("Image version tag to import; defaults to the dev tag when omitted.")
+  }
+  argTemplate {
+    script:   "k3d.importImage"
+    nodeType: "$params.nodeType"
+    cluster:  "$params.cluster"
+    version:  "$params.version"
+  }
+}
+
+// pinOverlayDigests -- pin a kustomize overlay to the exact image digests for a
+// release (the GitOps placement step for staging/production). Backend:
+// scripts/deploy/pin-overlay-digests.sh.
+@kind("primitive")
+@sideEffect("exec")
+@description("Pin a kustomize overlay to the resolved image digests for a release (GitOps placement).")
+action pinOverlayDigests {
+  capability "shell.script"
+  intent "Write the resolved per-node image digests into the environment overlay so ArgoCD deploys exactly those images."
+  params {
+    overlayPath string @required @description("Path to the environment overlay, e.g. deploy/k8s/overlays/staging.")
+    digests     object @required @description("Map of node type -> image@sha256 digest to pin.")
+  }
+  argTemplate {
+    script:      "overlay.pinDigests"
+    overlayPath: "$params.overlayPath"
+    digests:     "$params.digests"
+  }
+}
+
+// argoSync -- trigger an ArgoCD application sync to the pinned revision.
+// Backend: scripts/deploy/argo-sync.sh.
+@kind("primitive")
+@sideEffect("exec")
+@description("Trigger an ArgoCD application sync to a target revision.")
+action argoSync {
+  capability "shell.script"
+  intent "Ask ArgoCD to reconcile the application to the pinned git revision."
+  params {
+    app      string @required @description("ArgoCD application name, e.g. memql.")
+    revision string @required @description("Git revision (tag/SHA) to sync to.")
+  }
+  argTemplate {
+    script:   "argocd.sync"
+    app:      "$params.app"
+    revision: "$params.revision"
+  }
+}
+
+// runDeployGate -- run the post-deploy gate and return a structured result
+// carrying `passed`. The deploy automation (I10) branches success/rollback on
+// logic deployGateGreen, which reads this action's `passed`. Backend:
+// scripts/deploy/deploy-gate.sh.
+@kind("primitive")
+@sideEffect("exec")
+@description("Run the post-deploy gate for an environment and return a structured pass/fail result.")
+action runDeployGate {
+  capability "shell.script"
+  intent "Execute the post-deploy verification gate and report whether the deployment is healthy."
+  params {
+    env     string @required @description("Target environment: development | staging | production.")
+    workdir string @required @description("Absolute path of the checked-out repository on the runner.")
+  }
+  argTemplate {
+    script:  "deploy.gate"
+    env:     "$params.env"
+    workdir: "$params.workdir"
+  }
+}
+
+// revertOverlay -- roll an overlay back to a previous deployment's pinned
+// digests (owner-only via the deploy automation's spec gate). Backend:
+// scripts/deploy/revert-overlay.sh.
+@kind("primitive")
+@sideEffect("exec")
+@description("Revert an environment overlay to a previous deployment's pinned digests (rollback).")
+action revertOverlay {
+  capability "shell.script"
+  intent "Restore the overlay's image digests to those of a prior deployment so ArgoCD rolls the environment back."
+  params {
+    overlayPath    string @required @description("Path to the environment overlay to revert.")
+    toDeploymentId string @required @description("Deployment id whose pinned digests to restore.")
+  }
+  argTemplate {
+    script:         "overlay.revert"
+    overlayPath:    "$params.overlayPath"
+    toDeploymentId: "$params.toDeploymentId"
+  }
+}
+
+// notifyDeploy -- post a deploy status notification. Backend:
+// scripts/deploy/notify.sh (a no-op-locally notifier; an integration.slack.*
+// backend can replace it where a Slack engine tool is configured).
+@kind("primitive")
+@sideEffect("exec")
+@description("Post a deploy status notification (succeeded/failed) for a deployment.")
+action notifyDeploy {
+  capability "shell.script"
+  intent "Announce the outcome of a deployment so operators see succeeded/failed without reading logs."
+  params {
+    env          string @required @description("Target environment the deploy ran against.")
+    status       string @required @description("Deploy outcome: succeeded | failed.")
+    deploymentId string @required @description("Deployment id the notification refers to.")
+  }
+  argTemplate {
+    script:       "deploy.notify"
+    env:          "$params.env"
+    status:       "$params.status"
+    deploymentId: "$params.deploymentId"
+  }
+}
+
+// =============================================================================
+//   Integration-backed deploy action (capability "integration.*")
+// =============================================================================
+
+// tagRelease -- cut a git tag + GitHub release for a shipped version. A SIDE-
+// EFFECTING integration (class=write, ADR §3) is reachable ONLY through an
+// action; it resolves to the engine's integration tool, not a shell script.
+// integration.github.* is control-plane by capability, so it also pins to the
+// cockpit/runner surface (I13 deployControlCapabilityPrefixes).
+@kind("primitive")
+@sideEffect("write")
+@description("Tag a GitHub release for a shipped version.")
+action tagRelease {
+  capability "integration.github.tagRelease"
+  intent "Cut a git tag + release on GitHub for the version that just deployed."
+  params {
+    repo    string @required @description("owner/name of the repository.")
+    version string @required @description("Semver tag to create, e.g. 0.12.0.")
+  }
+  argTemplate {
+    repo: "$params.repo"
+    tag:  "$params.version"
+  }
+}
