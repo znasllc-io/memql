@@ -4,6 +4,7 @@
 // files cover the other construct kinds.
 
 use identity.logic.{ accessRequestExpirySweep, accountDeletionReminder25Days, accountDeletionReminder7Days, accountDeletionSweep, auditEventRetentionSweep, magicLinkExpirySweep, onDelegationCreated, revokeExpiredDelegations }
+use identity.mutations.{ consumeMagicLinkRequest, revokeDelegation }
 
 @enabled
 @trigger(schedule="0 0 4 * * *")
@@ -184,8 +185,17 @@ automation auditEventRetentionSweep {
 @trigger(schedule="0 */5 * * * *")
 @description("Soft-revoke expired delegations every 5 minutes. The query + revoke loop is in revokeExpiredDelegations.")
 automation expireDelegations {
-  step revoke {
+  step decide {
     logic revokeExpiredDelegations { now: timestamp() }
+  }
+  step apply {
+    forEach item in decide.Nodes() {
+      revokeDelegation {
+        delegationId: item.id,
+        revokedBySubject: "system:expiry",
+        revokedAt: timestamp()
+      }
+    }
   }
 }
 
@@ -222,8 +232,16 @@ automation expireDelegations {
 @trigger(schedule="0 0 * * * *")
 @description("Hourly sweep: mark expired magic-link requests as consumed-from-system so the row is canonically spent.")
 automation magicLinkExpirySweep {
-  step run {
+  step decide {
     logic magicLinkExpirySweep { event: event }
+  }
+  step apply {
+    forEach item in decide.Nodes() {
+      consumeMagicLinkRequest {
+        requestId: item.id,
+        consumedFromIP: "system:expiry"
+      }
+    }
   }
 }
 

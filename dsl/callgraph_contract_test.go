@@ -38,7 +38,6 @@ var callGraphBaseline = []string{
 	"logic-purity|logic|bootstrapSession",
 	"logic-purity|logic|generateResponse",
 	"logic-purity|logic|killSwitchSuspendsRunningPlans",
-	"logic-purity|logic|magicLinkExpirySweep",
 	// #2235: deferred. Per-row sweep (updateNodeHealth inside `for ... range`) needs
 	// a forEach automation step; struct-form forEach/for is documented (ADR S7) but
 	// NOT yet parsed (NormaliseAutomationSource rejects it), and a go-style
@@ -48,7 +47,6 @@ var callGraphBaseline = []string{
 	"logic-purity|logic|recordMentoring",
 	"logic-purity|logic|recordTransition",
 	"logic-purity|logic|releaseWorkspaceOnPlanTerminal",
-	"logic-purity|logic|revokeExpiredDelegations",
 	"logic-purity|logic|routeRequest",
 	"logic-purity|logic|workerInvocationRetentionSweep",
 	// #2219: pre-existing read-only-builtin debt surfaced when I7 turned the
