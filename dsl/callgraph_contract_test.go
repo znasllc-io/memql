@@ -35,8 +35,6 @@ var callGraphBaseline = []string{
 	// condition-eval semantics (existingCluster.Empty() && node.type=="bff") that a
 	// load-only test can't prove. Left baselined per the safe-or-defer rule.
 	"logic-purity|logic|bootstrapCluster",
-	"logic-purity|logic|bootstrapSession",
-	"logic-purity|logic|generateResponse",
 	"logic-purity|logic|killSwitchSuspendsRunningPlans",
 	// #2235: deferred. Per-row sweep (updateNodeHealth inside `for ... range`) needs
 	// a forEach automation step; struct-form forEach/for is documented (ADR S7) but

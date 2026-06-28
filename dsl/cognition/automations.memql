@@ -4,16 +4,27 @@
 // files cover the other construct kinds.
 
 use cognition.logic.{ bootstrapSession, generateResponse, voiceMigrationOnSecondHuman }
+use cognition.mutations.{ createSessionForParticipant, sendTextUtterance }
 
 // automations/v1/cognition/bootstrapSession/automation.memql
 // Auto-creates a v1:cognition:session record when a participant is created.
 // Ensures every participant has a session tracking their real-time interaction state.
 @enabled
 @trigger(event="node.created", concept="v1:cognition:participant", partition="*")
-@description("Auto-creates a session when a participant joins a space")
+@description("Auto-creates a session when a participant joins a space. decide (pure logic: participantSession idempotency check + ids) -> persist (createSessionForParticipant, gated on shouldCreate) -> emit ('session.created'). #2235.")
 automation bootstrapSession {
-  step run {
+  step decide {
     logic bootstrapSession { event: event }
+  }
+  step persist {
+    if steps.decide.result.shouldCreate == true {
+      createSessionForParticipant({ participantId: field(step("decide"), "participantId"), partitionId: field(step("decide"), "partitionId") })
+    }
+  }
+  step emit {
+    if steps.decide.result.shouldCreate == true {
+      publishEvent({ topic: "session.created", payload: { sessionId: field(step("decide"), "participantId"), participantId: field(step("decide"), "participantId"), partitionId: field(step("decide"), "partitionId"), timestamp: timestamp() } })
+    }
   }
 }
 
@@ -25,10 +36,20 @@ automation bootstrapSession {
 // non-streaming AI response is needed.
 @enabled
 @trigger(event="cognition.response.requested")
-@description("Generate and insert AI response for an utterance")
+@description("Generate and insert AI response for an utterance. decide (pure logic: hasAIResponseForReply idempotency check + AI reply text) -> persist (sendTextUtterance, gated on shouldRespond) -> presence (cognitionTrackPresence -> idle). #2235.")
 automation generateResponse {
-  step run {
+  step decide {
     logic generateResponse { event: event }
+  }
+  step persist {
+    if steps.decide.result.shouldRespond == true {
+      sendTextUtterance({ partitionId: field(step("decide"), "partitionId"), participantId: field(step("decide"), "siParticipantId"), text: field(step("decide"), "aiResponse"), replyToId: field(step("decide"), "utteranceId"), source: { inputMethod: "si", agentId: field(step("decide"), "agentId") } })
+    }
+  }
+  step presence {
+    if steps.decide.result.shouldRespond == true {
+      cognitionTrackPresence({ participantId: field(step("decide"), "siParticipantId"), partitionId: field(step("decide"), "partitionId"), state: "idle" })
+    }
   }
 }
 

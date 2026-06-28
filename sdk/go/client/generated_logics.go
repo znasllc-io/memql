@@ -160,7 +160,7 @@ func BootstrapClusterBuild(args BootstrapClusterArgs) string {
 	return b.String()
 }
 
-// BootstrapSession -- Auto-creates a v1:cognition:session record when a v1:cognition:participant is created, with default device + stream state. Ensures every participant has a session tracking their real-time interaction state. Idempotent via participantSession existence check. Emits 'session.created' for downstream consumers.
+// BootstrapSession -- PURE decision (#2235): run the participantSession idempotency check and emit the data the bootstrapSession automation needs -- shouldCreate (false when a session already exists for this participant) plus the participantId + partitionId. The session WRITE (createSessionForParticipant) and the 'session.created' emit moved to the automation's persist/emit steps (ADR §2.1 single-writer).
 type BootstrapSessionArgs struct {
 	Event map[string]any
 }
@@ -270,7 +270,7 @@ func DeploymentRollbackAllowedBuild(args DeploymentRollbackAllowedArgs) string {
 	return "deploymentRollbackAllowed({})"
 }
 
-// GenerateResponse -- Generates and inserts an AI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via sendTextUtterance, and bumps participant presence to idle. Idempotent via hasAIResponseForReply.
+// GenerateResponse -- PURE decision (#2235): run the hasAIResponseForReply idempotency check and (when no prior response exists) generate the AI reply text via the prompt template. Returns shouldRespond, the generated text, and the routing ids (siParticipantId / utteranceId / partitionId / agentId). The utterance WRITE (sendTextUtterance) and the presence bump (cognitionTrackPresence -> idle) moved to the generateResponse automation's persist/presence steps (ADR §2.1 single-writer).
 type GenerateResponseArgs struct {
 	Event map[string]any
 }
