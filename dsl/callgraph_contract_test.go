@@ -42,19 +42,8 @@ var callGraphBaseline = []string{
 	"logic-purity|logic|accessRequestExpirySweep",
 	"logic-purity|logic|accountDeletionSweep",
 	"logic-purity|logic|appendAttachmentToRequest",
-	// #2235: deferred. The 3 conditional creates gate the CRITICAL system.startup
-	// bootstrap; migrating to if-steps needs behavioral verification of the
-	// condition-eval semantics (existingCluster.Empty() && node.type=="bff") that a
-	// load-only test can't prove. Left baselined per the safe-or-defer rule.
-	"logic-purity|logic|bootstrapCluster",
 	"logic-purity|logic|bootstrapSession",
 	"logic-purity|logic|generateResponse",
-	// #2235: deferred. Per-row sweep (updateNodeHealth inside `for ... range`) needs
-	// a forEach automation step; struct-form forEach/for is documented (ADR S7) but
-	// NOT yet parsed (NormaliseAutomationSource rejects it), and a go-style
-	// `func (Automation)` loop is the internal-only lowering form, not an author
-	// surface. Same blocker as the identity/worker sweep logics below.
-	"logic-purity|logic|pruneStaleClusterNodes",
 	"logic-purity|logic|recordMentoring",
 	"logic-purity|logic|recordTransition",
 	"logic-purity|logic|routeRequest",

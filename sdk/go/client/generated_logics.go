@@ -140,7 +140,7 @@ func AuditEventRetentionSweepBuild(args AuditEventRetentionSweepArgs) string {
 	return b.String()
 }
 
-// BootstrapCluster -- Bootstraps the cluster's self-representation on first startup. Creates v1:cluster:cluster + v1:cluster:database + v1:cluster:identityProvider rows when no cluster row exists. Only BFF nodes run the create path. Idempotent: skips entirely if a cluster row already exists.
+// BootstrapCluster -- Decides whether to run the cluster bootstrap writes on first startup (ADR S2.1 pure logic, #2235). Reads existingCluster() and returns the boolean `create` -- true only when no cluster row exists yet AND this node is the bff (both idempotency guards). The calling automation gates the three conditional creates (v1:cluster:database / :identityProvider / :cluster) on `steps.decide.result == true`, with the idp create additionally requiring an identityProvider block in the startup envelope.
 type BootstrapClusterArgs struct {
 	Event map[string]any
 }
@@ -530,7 +530,7 @@ func OnDelegationCreatedBuild(args OnDelegationCreatedArgs) string {
 	return b.String()
 }
 
-// PruneStaleClusterNodes -- Every 10 min: mark departed cluster nodes terminal. Reads the LATEST non-stopped row per id (staleClusterNodes, asOf latest -> idempotent), and for each whose lastSeen + MEMQL_NODE_STALE_PRUNE_MINUTES (default 30) has passed, appends a health='stopped' row via updateNodeHealth. Append-only prune (cluster:node has no deleted field); consumers treat stopped as gone (WorkerDialer skips it, CLI/topology dedupe latest-per-id). Per-row windowing in the if guard since MemQL filters can't push the duration math down.
+// PruneStaleClusterNodes -- Decides which departed cluster nodes to retire (ADR S2.1 pure logic, #2235). Reads MEMQL_NODE_STALE_PRUNE_MINUTES (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, and returns staleClusterNodes({olderThan: cutoff}).Nodes() -- the LATEST non-stopped rows whose lastSeen is past the window (the olderThan arg pushes a payload.lastSeen<cutoff predicate onto the query, #1642). The calling automation appends the terminal health='stopped' row per returned node via a forEach updateNodeHealth step.
 type PruneStaleClusterNodesArgs struct {
 	Event map[string]any
 }
