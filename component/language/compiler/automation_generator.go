@@ -505,6 +505,13 @@ func stepExpressionStrings(c *Compiler, step *parser.StepDef) []string {
 			collectStringsFromValue(c, cfg.Mutation.ParentTemplate, &out)
 			collectStringsFromValue(c, cfg.Mutation.AliasOfTemplate, &out)
 		}
+	case *parser.ActionStepConfig:
+		// Action-step args carry inter-step references (e.g.
+		// `digests: build.result`), so the topo sort must see them to order
+		// an action after the step it consumes (epic #2212, I10 #2224).
+		for _, v := range cfg.Args {
+			collectStringsFromValue(c, v, &out)
+		}
 	case *parser.ForEachStepConfig:
 		if cfg.Source != "" {
 			out = append(out, cfg.Source)
@@ -515,6 +522,29 @@ func stepExpressionStrings(c *Compiler, step *parser.StepDef) []string {
 	case *parser.ParallelStepConfig:
 		for i := range cfg.Branches {
 			out = append(out, stepExpressionStrings(c, &cfg.Branches[i])...)
+		}
+	case *parser.SwitchStepConfig:
+		// The switch SELECTOR expression (e.g. `outcome.result`) is a
+		// first-class inter-step reference -- without it the finish/finalize
+		// branch sorts ahead of the step that produces the value it switches
+		// on. The per-case step bodies carry their own references too (e.g. a
+		// case action consuming `build.result`). Both must feed the topo sort
+		// (epic #2212, I10 #2224).
+		if cfg.Expression != "" {
+			out = append(out, cfg.Expression)
+		}
+		for _, cs := range cfg.Cases {
+			if cs == nil {
+				continue
+			}
+			for i := range cs.Steps {
+				out = append(out, stepExpressionStrings(c, &cs.Steps[i])...)
+			}
+		}
+		if cfg.Default != nil {
+			for i := range cfg.Default.Steps {
+				out = append(out, stepExpressionStrings(c, &cfg.Default.Steps[i])...)
+			}
 		}
 	}
 	return out

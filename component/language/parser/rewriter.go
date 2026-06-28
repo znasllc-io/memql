@@ -1116,9 +1116,21 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 		}
 		// A `forEach`/`for` step body lowers to a top-level for-range loop
 		// statement (StepTypeForEach), not a `<name> := <call>` assignment
-		// (memql#2246). Everything else is a single call expression.
-		if lead, _ := splitLeadingIdent(stepBody); lead == "forEach" || lead == "for" {
+		// (memql#2246). A `switch` step body lowers to a top-level switch
+		// statement (StepTypeSwitch), likewise emitted raw (epic #2212, I10
+		// #2224). Everything else is a single call expression.
+		lead, _ := splitLeadingIdent(stepBody)
+		if lead == "forEach" || lead == "for" {
 			stmt, err := translateForEachStepCall(stepName, stepBody)
+			if err != nil {
+				return nil, fmt.Errorf("step %q: %w", stepName, err)
+			}
+			out = append(out, automationStep{name: stepName, call: stmt, raw: true})
+			pos = closeIdx + 1
+			continue
+		}
+		if lead == "switch" {
+			stmt, err := translateSwitchStepCall(stepName, stepBody)
 			if err != nil {
 				return nil, fmt.Errorf("step %q: %w", stepName, err)
 			}
@@ -1172,6 +1184,10 @@ func translateStepCall(body string) (string, error) {
 
 	if first == "parallel" {
 		return translateParallelStepCall(rest)
+	}
+
+	if first == "action" {
+		return translateActionStepCall(rest)
 	}
 
 	if kindPrefix(first) {
@@ -1343,6 +1359,246 @@ func translateForEachStepCall(stepName, body string) (string, error) {
 		sb.WriteString("\n    ")
 		sb.WriteString(fmt.Sprintf("%s_do%d := ", stepName, i+1))
 		sb.WriteString(rename(c))
+	}
+	sb.WriteString("\n  }")
+	return sb.String(), nil
+}
+
+// findMatchingCloseParen returns the index of the `)` matching the `(` at
+// openIdx, or -1. Same depth-counting contract as findMatchingCloseBrace.
+func findMatchingCloseParen(s string, openIdx int) int {
+	if openIdx < 0 || openIdx >= len(s) || s[openIdx] != '(' {
+		return -1
+	}
+	depth := 0
+	for i := openIdx; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// translateActionStepCall handles the authored action step body (epic #2212,
+// I10 #2224) -- the external-capability step a deploy automation drives:
+//
+//	action("<id>@<ver>") { args { <k>: <v>, ... } } [on surface("<name>")]
+//	action { ref: "<id>@<ver>", args: { ... }, surface: "<name>" }   (procedural)
+//
+// and lowers the authoring form to the procedural action-step config that the
+// parser's parseActionStepConfig already accepts (StepTypeAction):
+//
+//	action { ref: "<id>@<ver>"[, args: { <k>: <v>, ... }][, surface: "<name>"] }
+//
+// rest is everything after the leading `action` ident. Actions default to the
+// policy surface (cockpit/runner for the deploy pack, I13), so `on surface(...)`
+// is optional. Inner `args { ... }` is a brace block (no colon) in the authoring
+// form; it is rewritten to the `args: { ... }` key the action config parser reads.
+func translateActionStepCall(rest string) (string, error) {
+	rest = strings.TrimLeft(rest, " \t\n\r")
+	if rest == "" {
+		return "", fmt.Errorf("action step: expected `(\"id@ver\")` or a `{ ... }` body after `action`")
+	}
+
+	// Procedural pass-through: `action { ref: ..., args: ..., surface: ... }`.
+	if rest[0] == '{' {
+		closeIdx := findMatchingCloseBrace(rest, 0)
+		if closeIdx < 0 {
+			return "", fmt.Errorf("action step: missing closing brace for the action body")
+		}
+		if tail := strings.TrimSpace(rest[closeIdx+1:]); tail != "" {
+			return "", fmt.Errorf("action step: unexpected trailing text after the action body: %q", parallelSnippet(tail))
+		}
+		return "action " + rest[:closeIdx+1], nil
+	}
+
+	// Authoring form: `action("ref@1") { args { ... } } [on surface("x")]`.
+	if rest[0] != '(' {
+		return "", fmt.Errorf("action step: expected `(\"id@ver\")` after `action`, got %q", parallelSnippet(rest))
+	}
+	parenClose := findMatchingCloseParen(rest, 0)
+	if parenClose < 0 {
+		return "", fmt.Errorf("action step: missing closing `)` after the action ref")
+	}
+	ref := strings.TrimSpace(rest[1:parenClose])
+	if ref == "" {
+		return "", fmt.Errorf("action step: empty action ref in `action(...)`")
+	}
+	if ref[0] != '"' {
+		ref = `"` + ref + `"`
+	}
+	rest = strings.TrimLeft(rest[parenClose+1:], " \t\n\r")
+
+	argsClause := ""
+	if rest != "" && rest[0] == '{' {
+		bClose := findMatchingCloseBrace(rest, 0)
+		if bClose < 0 {
+			return "", fmt.Errorf("action step: missing closing brace for the action body")
+		}
+		body := strings.TrimSpace(rest[1:bClose])
+		rest = strings.TrimLeft(rest[bClose+1:], " \t\n\r")
+		if body != "" {
+			ai, after := splitLeadingIdent(body)
+			if ai != "args" {
+				return "", fmt.Errorf("action step: expected `args { ... }` in the action body, got %q", parallelSnippet(body))
+			}
+			after = strings.TrimLeft(after, " \t\n\r")
+			if after == "" || after[0] != '{' {
+				return "", fmt.Errorf("action step: expected `{` after `args`")
+			}
+			aClose := findMatchingCloseBrace(after, 0)
+			if aClose < 0 {
+				return "", fmt.Errorf("action step: missing closing brace for the args block")
+			}
+			if tail := strings.TrimSpace(after[aClose+1:]); tail != "" {
+				return "", fmt.Errorf("action step: unexpected trailing text in the action body: %q", parallelSnippet(tail))
+			}
+			argsClause = ", args: " + after[:aClose+1]
+		}
+	}
+
+	surfaceClause := ""
+	if rest != "" {
+		kw, afterKw := splitLeadingIdent(rest)
+		if kw != "on" {
+			return "", fmt.Errorf("action step: unexpected trailing text after the action body: %q", parallelSnippet(rest))
+		}
+		afterKw = strings.TrimLeft(afterKw, " \t\n\r")
+		sw, afterSw := splitLeadingIdent(afterKw)
+		if sw != "surface" {
+			return "", fmt.Errorf("action step: expected `surface(\"...\")` after `on`, got %q", parallelSnippet(afterKw))
+		}
+		afterSw = strings.TrimLeft(afterSw, " \t\n\r")
+		if afterSw == "" || afterSw[0] != '(' {
+			return "", fmt.Errorf("action step: expected `(` after `surface`")
+		}
+		pc := findMatchingCloseParen(afterSw, 0)
+		if pc < 0 {
+			return "", fmt.Errorf("action step: missing closing `)` after surface")
+		}
+		s := strings.TrimSpace(afterSw[1:pc])
+		if tail := strings.TrimSpace(afterSw[pc+1:]); tail != "" {
+			return "", fmt.Errorf("action step: unexpected trailing text after `on surface(...)`: %q", parallelSnippet(tail))
+		}
+		if s == "" {
+			return "", fmt.Errorf("action step: empty surface in `on surface(...)`")
+		}
+		surfaceClause = ", surface: " + s
+	}
+
+	return "action { ref: " + ref + argsClause + surfaceClause + " }", nil
+}
+
+// translateSwitchStepCall handles the authored switch step body (epic #2212,
+// I10 #2224) -- the single env-branch a deploy automation carries:
+//
+//	switch <expr> { case "v" { <call> ... } ... default { <call> ... } }
+//
+// and lowers it to the procedural switch statement parseSwitchStep accepts:
+//
+//	switch <expr> { case "v": <name> := <call> ... default: <name> := <call> ... }
+//
+// stepName seeds the synthesized per-call step ids. Each case body is a sequence
+// of brace-bodied calls (mutation / logic / action / `if cond { ... }`), reusing
+// parseForEachInnerCalls to split + translate them -- so an `action(...)` inside a
+// case lowers through translateActionStepCall like anywhere else. An empty case
+// body (`case "v" { }`) is allowed: it lowers to a label with no steps, which is
+// how an env that takes no action in this branch is expressed.
+func translateSwitchStepCall(stepName, full string) (string, error) {
+	first, rest := splitLeadingIdent(full)
+	if first != "switch" {
+		return "", fmt.Errorf("switch step: expected `switch`, got %q", first)
+	}
+	rest = strings.TrimLeft(rest, " \t\n\r")
+	braceIdx := strings.IndexByte(rest, '{')
+	if braceIdx < 0 {
+		return "", fmt.Errorf("switch step: expected `{` after the switch expression")
+	}
+	expr := strings.TrimSpace(rest[:braceIdx])
+	if expr == "" {
+		return "", fmt.Errorf("switch step: missing switch expression between `switch` and `{`")
+	}
+	closeIdx := findMatchingCloseBrace(rest, braceIdx)
+	if closeIdx < 0 {
+		return "", fmt.Errorf("switch step: missing closing brace for the switch body")
+	}
+	if tail := strings.TrimSpace(rest[closeIdx+1:]); tail != "" {
+		return "", fmt.Errorf("switch step: unexpected trailing text after the switch body: %q", parallelSnippet(tail))
+	}
+	inner := rest[braceIdx+1 : closeIdx]
+
+	var sb strings.Builder
+	sb.WriteString("switch ")
+	sb.WriteString(expr)
+	sb.WriteString(" {")
+
+	pos := 0
+	callIdx := 0
+	sawClause := false
+	for {
+		pos = skipParallelInsignificant(inner, pos)
+		if pos >= len(inner) {
+			break
+		}
+		kw, afterKw := splitLeadingIdent(inner[pos:])
+		if kw != "case" && kw != "default" {
+			return "", fmt.Errorf("switch step: expected `case` or `default`, got %q", parallelSnippet(inner[pos:]))
+		}
+		pos += len(inner[pos:]) - len(afterKw)
+
+		var label string
+		if kw == "case" {
+			pos = skipParallelInsignificant(inner, pos)
+			b := strings.IndexByte(inner[pos:], '{')
+			if b < 0 {
+				return "", fmt.Errorf("switch step: expected `{` after the case value")
+			}
+			label = strings.TrimSpace(inner[pos : pos+b])
+			if label == "" {
+				return "", fmt.Errorf("switch step: empty case value")
+			}
+			pos += b
+		} else {
+			pos = skipParallelInsignificant(inner, pos)
+			if pos >= len(inner) || inner[pos] != '{' {
+				return "", fmt.Errorf("switch step: expected `{` after `default`")
+			}
+		}
+
+		bClose := findMatchingCloseBrace(inner, pos)
+		if bClose < 0 {
+			return "", fmt.Errorf("switch step: missing closing brace for the %s body", kw)
+		}
+		caseBody := strings.TrimSpace(inner[pos+1 : bClose])
+		pos = bClose + 1
+		sawClause = true
+
+		if kw == "case" {
+			sb.WriteString("\n    case ")
+			sb.WriteString(label)
+			sb.WriteString(":")
+		} else {
+			sb.WriteString("\n    default:")
+		}
+		if caseBody != "" {
+			calls, err := parseForEachInnerCalls(caseBody)
+			if err != nil {
+				return "", fmt.Errorf("switch step %s body: %w", kw, err)
+			}
+			for _, c := range calls {
+				callIdx++
+				sb.WriteString(fmt.Sprintf(" %s_c%d := %s", stepName, callIdx, c))
+			}
+		}
+	}
+	if !sawClause {
+		return "", fmt.Errorf("switch step: at least one `case`/`default` clause is required")
 	}
 	sb.WriteString("\n  }")
 	return sb.String(), nil
