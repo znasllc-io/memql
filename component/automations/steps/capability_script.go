@@ -25,10 +25,11 @@ import (
 // `/bin/sh -c <string>` sink (CodeQL command-injection). This runner never
 // reintroduces it:
 //
-//  1. No shell. The script is launched as `bash <path> --name=value...` via
-//     exec.CommandContext with an argv SLICE; there is no `sh -c`, no shell
-//     word-splitting, and no string interpolation of any author/event value
-//     into a command line.
+//  1. No shell. The script is executed DIRECTLY via its shebang
+//     (`exec.CommandContext(ctx, <allowlisted-path>, flags...)`) -- the command
+//     is the constant allowlisted path, never the `bash` interpreter and never
+//     `sh -c`. There is no shell word-splitting and no string interpolation of
+//     any author/event value into a command line.
 //  2. Allowlisted target. The action names a capability-script *id*
 //     (e.g. "deploy.cloneRepo"); the runner maps that id to a repo-relative
 //     path through the STATIC capabilityScriptAllowlist below. An author- or
@@ -254,17 +255,17 @@ func encodeFlagValue(v any) (string, error) {
 	return string(b), nil
 }
 
-// runCapabilityScript launches an allowlisted capability script as
-// `bash <path> --name=value...` (an argv slice -- no shell) with stdin closed,
-// and returns its stdout (the result envelope) and stderr (human logs)
-// separately. The exec error (e.g. a non-zero exit) is returned for context;
-// the caller prefers the parsed envelope over the raw error.
+// runCapabilityScript executes an allowlisted capability script DIRECTLY via
+// its shebang -- `exec.CommandContext(ctx, path, flags...)`, where path is the
+// constant allowlisted backend (never the `bash` interpreter) and each flag is
+// its own argv element -- with stdin closed, and returns its stdout (the result
+// envelope) and stderr (human logs) separately. The command is the script
+// path, not a shell, so the tainted flag values are inert argv data: there is
+// no `sh -c`, no word-splitting, and no metacharacter expansion. The exec error
+// (e.g. a non-zero exit) is returned for context; the caller prefers the parsed
+// envelope over the raw error.
 func runCapabilityScript(ctx context.Context, path string, flags []string) (stdout, stderr []byte, err error) {
-	// bash <path> <flags...> : each flag is its own argv element. Launching
-	// `bash <path>` (not `sh -c <string>`) keeps every argument literal -- no
-	// word-splitting, no metacharacter expansion.
-	argv := append([]string{path}, flags...)
-	cmd := exec.CommandContext(ctx, "bash", argv...)
+	cmd := exec.CommandContext(ctx, path, flags...)
 	cmd.Stdin = nil // closed stdin: a conformant capability script never blocks
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
