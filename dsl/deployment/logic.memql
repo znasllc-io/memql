@@ -79,3 +79,50 @@ logic deploymentRollbackAllowed {
     return actor.role == "owner"
   }
 }
+
+// ---- engine mesh ----
+
+// engineNodeTypes is the canonical list of ENGINE node types the deploy
+// bundle builds + places. Engine mesh ONLY -- identity, cognition, voice,
+// agent, planner, workbench, mcp, voice-agent. There is deliberately NO bff
+// and NO copresent here: those are the CoPresent carrier/product layer, built
+// + shipped by their own repos, not by the engine deploy automation (I10
+// #2224). Pure: a list literal, no read, no write. This is the DEFAULT engine
+// set the deploy EMITTER (cockpit `deploy --env` / CI) stamps onto the
+// deploy.requested event payload as `engineNodeTypes`; the deployEngineCluster
+// automation (automations.memql) reads the set off the event and fans the
+// per-node build (and the development-environment k3d import) over it with a
+// forEach step. (Reading from the event -- not a logic step -- is what keeps
+// the per-node fan-out free of an inter-step dependency so the deploy phases
+// run in the authored order; see the automation header.) An emitter may pass a
+// SUBSET to redeploy a single node.
+@enabled
+@description("Canonical ENGINE node-type list the deploy bundle builds + places: identity, cognition, voice, agent, planner, workbench, mcp, voice-agent. No bff/copresent (carrier/product layer, shipped by their own repos).")
+logic engineNodeTypes {
+  body {
+    return ["identity", "cognition", "voice", "agent", "planner", "workbench", "mcp", "voice-agent"]
+  }
+}
+
+// ---- outcome ----
+
+// deployOutcomeLabel maps the post-deploy gate result to the terminal
+// deployment STATUS the automation stamps + announces: "succeeded" when the
+// gate passed, "failed" otherwise. It mirrors deployGateGreen's fail-closed
+// coalesce (a missing/garbled gate result is treated as NOT passed -> "failed")
+// so a deploy never auto-succeeds on a blank gate. Pure: reads the action
+// result object + returns a string, no write. The deployEngineCluster
+// automation switches its finalize step on this label -- the "succeeded"/"failed"
+// fork that the env switch's GitOps placement and the rollback share. Returning
+// a string (rather than the deployGateGreen bool) is what lets the success /
+// failure branching ride the same `switch` construct the env placement uses.
+@enabled
+@description("Map the deploy-gate result to the terminal deployment status label: \"succeeded\" when the gate passed, else \"failed\" (fail-closed, mirroring deployGateGreen). The deploy automation's finalize step switches on this.")
+logic deployOutcomeLabel {
+  args {
+    gate object @required
+  }
+  body {
+    return cond(coalesce(args.gate.passed, false), "succeeded", "failed")
+  }
+}

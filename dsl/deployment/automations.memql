@@ -1,0 +1,221 @@
+// automations.memql
+//
+// Deployment-namespace ORCHESTRATION -- the keystone of the DevOps deployment
+// bundle (epic #2212, I10 #2224). Per the behavioral-constructs ADR §2: logic
+// decides, mutations persist, actions touch the world, AUTOMATIONS ORCHESTRATE.
+// This file authors the one automation that ties the bundle together:
+// deployEngineCluster sequences the I8 deploy actions (actions.memql) with the
+// I9 deploy decisions (logic.memql) and the persisted deployment lifecycle
+// (createDeployment / updateDeploymentStatus, dsl/cluster/mutations.memql), one
+// write per step. It is the single construct allowed to compose all the layers
+// (branch / loop / call logic+query+mutation+action), and it stays
+// contract-clean: the logics it calls are pure, each mutation step is one
+// write, each action step is one external capability on the cockpit/runner
+// surface (I13). It therefore PASSES the call-graph validator
+// (dsl/callgraph_contract_test.go) rather than being baselined.
+//
+// =============================================================================
+//   Deploy event taxonomy
+// =============================================================================
+//
+// One event drives the whole bundle:
+//
+//   topic    : deploy.requested
+//   concept  : v1:cluster:deployment
+//   payload  : {
+//     deploymentId          string   // the v1:cluster:deployment timeline id;
+//                                     // createDeployment uses it as the concept
+//                                     // id so every status transition appends to
+//                                     // one timeline (#1872).
+//     environment           string   // development | staging | production. THE
+//                                     // single switch dimension -- one coherent
+//                                     // flow, differing only by this value
+//                                     // (owner decision: env switch in ONE
+//                                     // automation, not per-env automations).
+//     engineNodeTypes       []string // the ENGINE node types to (re)build + place
+//                                     // this deploy. The emitter fills it from the
+//                                     // canonical logic engineNodeTypes (logic.memql)
+//                                     // -- all eight by default, or a subset for a
+//                                     // single-node redeploy. Engine mesh ONLY: no
+//                                     // bff/copresent. The bundle reads the set off
+//                                     // the EVENT (not a logic step) so the per-node
+//                                     // build/import fan-out carries no inter-step
+//                                     // dependency and the deploy phases execute in
+//                                     // the authored order under the compiler's
+//                                     // dependency topo-sort (a forEach/switch step
+//                                     // result is not addressable by name, so a
+//                                     // later phase cannot depend on it -- keeping
+//                                     // every phase dependency-free preserves the
+//                                     // clone -> build -> place -> gate sequence).
+//     ref                   string   // git ref (tag/branch/SHA) to check out + sync.
+//     version               string   // version tag to build/stamp, e.g. 0.12.0.
+//     workdir               string   // absolute path of the checked-out tree on
+//                                     // the deploy runner.
+//     overlayPath           string   // kustomize overlay for staging/production
+//                                     // (e.g. deploy/k8s/overlays/staging). The
+//                                     // emitter resolves env->overlay (the
+//                                     // Makefile/ArgoCD track owns that mapping);
+//                                     // unused on the development path.
+//     digests               object   // map nodeType -> image@sha256 the overlay is
+//                                     // pinned to (staging/production). The build
+//                                     // server (HARD RULE: staging/prod images build
+//                                     // on GitHub, not here) resolves tag->digest and
+//                                     // the emitter passes the map; unused on the
+//                                     // development path (k3d imports local builds).
+//     previousDeploymentId  string   // the deployment to roll back to on a failed
+//                                     // staging/production deploy (revertOverlay).
+//     triggeredBy           string   // actor/system id stamped on the record.
+//   }
+//
+// WHO EMITS IT. The event is raised on the cockpit/runner control surface, NOT
+// from inside the target cluster:
+//   - cockpit `deploy --env=<env>` (I15, memql-cockpit) -- the primary path.
+//     `make {up,deploy}` delegate to the cockpit, which loads the pinned
+//     deployment bundle and emits deploy.requested with the payload above, then
+//     the embedded runtime runs THIS automation.
+//   - CI -- a release pipeline can emit the same event on a tag to drive a
+//     staging/production GitOps deploy from the build server.
+//   - schedule -- a future cron emitter (e.g. nightly staging refresh) raises
+//     the identical event; the automation is emitter-agnostic.
+//
+// AUTHORIZATION. `authorize` records the pure forward-deploy role decision
+// (logic deploymentForwardAllowed, mirroring spec requiresDeveloperOrAbove,
+// #1876). The HARD gate is upstream + at the writes: createDeployment /
+// updateDeploymentStatus are only ever reached through the Go-gated deploy RPCs
+// (deploycontrol.authorize), so the deploy-start write and every transition
+// inherit that authorization (specs.memql). The step keeps the decision visible
+// + greppable in the run record.
+//
+// =============================================================================
+//   deployEngineCluster -- the one orchestration
+// =============================================================================
+//
+// Sequence (decide -> record -> clone -> build -> place -> gate -> finish):
+//
+//   authorize       logic deploymentForwardAllowed       (decide: role gate)
+//   record          createDeployment                     (persist: one write)
+//   clone           action cloneRepoAtVersion            (act: checkout the ref)
+//   build           forEach nt: action buildEngineImage  (act: one image / node)
+//   importDevImages forEach nt where env==development:    (act: dev placement --
+//                     action importImageToK3d              per-node k3d import)
+//   place           switch env { development {} default { (act: staging/prod
+//                     pinOverlayDigests + argoSync } }     placement -- GitOps)
+//   gate            action runDeployGate                 (act: post-deploy gate)
+//   outcome         logic deployOutcomeLabel             (decide: succeeded/failed)
+//   finalize        switch outcome.result {              (persist + act + persist)
+//                     succeeded { updateDeploymentStatus succeeded; notifyDeploy }
+//                     default   { revertOverlay; updateDeploymentStatus failed;
+//                                 notifyDeploy } }
+//
+// EXECUTION ORDER. The automation scheduler runs steps in the compiler's
+// dependency topo-sort order (a step executes after every step it references).
+// The deploy is an ORDERED side-effect pipeline whose phases mostly do NOT pass
+// data to each other, so each phase reads only the EVENT payload (a reserved
+// root, not a step) and carries no inter-step reference -- which keeps every
+// phase at the same dependency depth, where the sort preserves the authored
+// source order (clone -> build -> place -> gate). The only data edges are the
+// two at the tail: outcome reads gate.result, finalize switches on
+// outcome.result, so they sort last exactly where the sequence wants them. A
+// forEach/switch step's result is NOT addressable by name, so a later phase
+// could not depend on it even if we wanted -- reading from the payload is what
+// makes the pipeline order deterministic.
+//
+// PLACEMENT shape (the env split). `place` is the single env `switch`: the
+// development case takes no GitOps action (overlays/ArgoCD are not the dev
+// path); staging/production pin the overlay to the resolved digests and ask
+// ArgoCD to sync (deploys = merges). The per-NODE development k3d import is the
+// adjacent `importDevImages` forEach gated `where env=="development"` -- the
+// procedural switch-case grammar hosts single steps, not loops, so a per-node
+// loop rides a top-level where-filtered forEach instead of living inside the
+// case. Both stay in THIS one automation; there are no per-env automations.
+//
+// LIFECYCLE record. record -> finalize is the deployment timeline the bundle
+// persists: createDeployment (in_progress) at start, updateDeploymentStatus
+// (succeeded | failed) at finish -- reconstructable asOf any time off the one
+// v1:cluster:deployment concept-id timeline (#1872).
+//
+// DRY-RUN. The action backends are dry-run-capable capability scripts (I8/I14):
+// a development deploy runs end-to-end through the bundle against no-op/dry-run
+// backends and records the full lifecycle; staging/production are authored +
+// dry-runnable and go live once the build-server + ArgoCD wiring is exercised.
+
+use deployment.logic.{ deploymentForwardAllowed, deployOutcomeLabel }
+use cluster.mutations.{ createDeployment, updateDeploymentStatus }
+
+@enabled
+@trigger(event="deploy.requested", concept="v1:cluster:deployment", partition="*")
+@description("Deploy the memQL ENGINE cluster to an environment (development | staging | production) on the cockpit/runner surface. Sequences clone -> build -> place (env switch) -> gate -> success/failure finish, recording the deployment lifecycle. Engine mesh ONLY -- no bff/copresent.")
+automation deployEngineCluster {
+  step authorize {
+    logic deploymentForwardAllowed { event: event }
+  }
+  step record {
+    createDeployment {
+      deploymentId: event.payload.deploymentId,
+      environment:  event.payload.environment,
+      version:      event.payload.version,
+      triggeredBy:  event.payload.triggeredBy,
+      status:       "in_progress",
+      previousDeploymentId: event.payload.previousDeploymentId
+    }
+  }
+  step clone {
+    action("cloneRepoAtVersion@1") {
+      args { workdir: event.payload.workdir, ref: event.payload.ref }
+    }
+  }
+  step build {
+    forEach nt in event.payload.engineNodeTypes {
+      action("buildEngineImage@1") {
+        args { nodeType: nt, version: event.payload.version, workdir: event.payload.workdir }
+      }
+    }
+  }
+  step importDevImages {
+    forEach nt in event.payload.engineNodeTypes where event.payload.environment == "development" {
+      action("importImageToK3d@1") {
+        args { nodeType: nt, cluster: "memql", version: event.payload.version }
+      }
+    }
+  }
+  step place {
+    switch event.payload.environment {
+      case "development" { }
+      default {
+        action("pinOverlayDigests@1") {
+          args { overlayPath: event.payload.overlayPath, digests: event.payload.digests }
+        }
+        action("argoSync@1") {
+          args { app: "memql", revision: event.payload.ref }
+        }
+      }
+    }
+  }
+  step gate {
+    action("runDeployGate@1") {
+      args { env: event.payload.environment, workdir: event.payload.workdir }
+    }
+  }
+  step outcome {
+    logic deployOutcomeLabel { gate: gate.result }
+  }
+  step finalize {
+    switch outcome.result {
+      case "succeeded" {
+        updateDeploymentStatus { deploymentId: event.payload.deploymentId, status: "succeeded" }
+        action("notifyDeploy@1") {
+          args { env: event.payload.environment, status: "succeeded", deploymentId: event.payload.deploymentId }
+        }
+      }
+      default {
+        action("revertOverlay@1") {
+          args { overlayPath: event.payload.overlayPath, toDeploymentId: event.payload.previousDeploymentId }
+        }
+        updateDeploymentStatus { deploymentId: event.payload.deploymentId, status: "failed" }
+        action("notifyDeploy@1") {
+          args { env: event.payload.environment, status: "failed", deploymentId: event.payload.deploymentId }
+        }
+      }
+    }
+  }
+}

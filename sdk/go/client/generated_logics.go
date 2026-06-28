@@ -240,6 +240,26 @@ func DeployGateGreenBuild(args DeployGateGreenArgs) string {
 	return b.String()
 }
 
+// DeployOutcomeLabel -- Map the deploy-gate result to the terminal deployment status label: \"succeeded\" when the gate passed, else \"failed\" (fail-closed, mirroring deployGateGreen). The deploy automation's finalize step switches on this.
+type DeployOutcomeLabelArgs struct {
+	Gate map[string]any
+}
+
+// DeployOutcomeLabel calls the engine logic deployOutcomeLabel.
+func (qc *QueryClient) DeployOutcomeLabel(ctx context.Context, args DeployOutcomeLabelArgs) (*Result, error) {
+	call := DeployOutcomeLabelBuild(args)
+	return qc.executeNamed(ctx, "deployOutcomeLabel", call)
+}
+
+func DeployOutcomeLabelBuild(args DeployOutcomeLabelArgs) string {
+	var b strings.Builder
+	b.WriteString("deployOutcomeLabel({")
+	b.WriteString("gate: ")
+	b.WriteString(renderMemQLValue(args.Gate))
+	b.WriteString("})")
+	return b.String()
+}
+
 // DeploymentForwardAllowed -- Pure forward-deploy role gate, mirroring spec requiresDeveloperOrAbove (#1876): true when the actor holds developer, admin, or owner. Writer/reader are read-only.
 type DeploymentForwardAllowedArgs struct {
 }
@@ -268,6 +288,21 @@ func (qc *QueryClient) DeploymentRollbackAllowed(ctx context.Context, args Deplo
 func DeploymentRollbackAllowedBuild(args DeploymentRollbackAllowedArgs) string {
 	_ = args
 	return "deploymentRollbackAllowed({})"
+}
+
+// EngineNodeTypes -- Canonical ENGINE node-type list the deploy bundle builds + places: identity, cognition, voice, agent, planner, workbench, mcp, voice-agent. No bff/copresent (carrier/product layer, shipped by their own repos).
+type EngineNodeTypesArgs struct {
+}
+
+// EngineNodeTypes calls the engine logic engineNodeTypes.
+func (qc *QueryClient) EngineNodeTypes(ctx context.Context, args EngineNodeTypesArgs) (*Result, error) {
+	call := EngineNodeTypesBuild(args)
+	return qc.executeNamed(ctx, "engineNodeTypes", call)
+}
+
+func EngineNodeTypesBuild(args EngineNodeTypesArgs) string {
+	_ = args
+	return "engineNodeTypes({})"
 }
 
 // GenerateResponse -- Generates and inserts an AI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via sendTextUtterance, and bumps participant presence to idle. Idempotent via hasAIResponseForReply.

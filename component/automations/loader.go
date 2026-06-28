@@ -842,6 +842,17 @@ func (l *Loader) validateSteps(steps []*Step) error {
 			if step.Function == nil {
 				return fmt.Errorf("step %q: function configuration required for type 'function'", step.ID)
 			}
+		case StepTypeAction:
+			// Action-library replay step (#1758): one external capability on
+			// a resolved surface. Consumed by the deploy bundle's
+			// deployEngineCluster (I10 #2224), the first authored automation to
+			// drive action steps through this loader.
+			if step.Action == nil {
+				return fmt.Errorf("step %q: action configuration required for type 'action'", step.ID)
+			}
+			if step.Action.Ref == "" {
+				return fmt.Errorf("step %q: action step requires a non-empty ref", step.ID)
+			}
 		case StepTypeForEach:
 			if step.ForEach == nil {
 				return fmt.Errorf("step %q: forEach configuration required for type 'forEach'", step.ID)
