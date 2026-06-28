@@ -31,6 +31,7 @@ func allChecks() []check {
 		forgeLogicArgResolutionCheck(), // #1840
 		automationLogicFullBodyCheck(), // #1847
 		forgeAuditShortIdCheck(),       // #1859
+		libraryIndexPromotionCheck(),   // #2235
 	}
 }
 
