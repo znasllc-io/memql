@@ -1,17 +1,25 @@
 package conformance
 
-// dim_event_test.go -- the event-trigger logic dimension (#1706). A multi-step
-// event logic must bind the triggering event into nested step-arg scope, so
-// args.event.payload.<field> resolves inside the logic body. bootstrapSession
-// is the vehicle: given a participant.created-shaped event it threads
-// args.event.payload.id into both the existence query AND the session-create
-// mutation. Before #1706 args.event was unresolved, so the created session
-// carried no participant link and a read-back by that id came back empty.
+// dim_event_test.go -- the event-trigger dimension (#1706). An event-triggered
+// automation must bind the triggering event into nested step-arg scope, so
+// event.payload.<field> resolves inside the steps. bootstrapSession is the
+// vehicle: given a participant.created-shaped event it threads event.payload.id
+// + event.payload.partitionId into the existence-check decide logic AND the
+// session-create mutation step. Before #1706 the event was unresolved, so the
+// created session carried no participant link and a read-back by that id came
+// back empty.
+//
+// #2271 update: bootstrapSession's inline write was migrated out of the `logic`
+// (it is now PURE -- it decides; the automation persists). So this dimension
+// fires the bootstrapSession AUTOMATION (the real event path) instead of calling
+// the logic directly. The event-binding contract is unchanged and still the
+// right end-to-end check: driving the automation must still create a session
+// keyed by the event's participant id.
 
 import (
-	"encoding/json"
-	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/events"
 )
 
 func eventTriggerCheck() check {
@@ -27,33 +35,17 @@ func runEventTrigger(t *testing.T, e *Env) {
 	pid := "participant-evt-" + uniqueSuffix("evt")
 	sid := "space-evt-" + uniqueSuffix("evt")
 
-	// A representative participant.created event. The logic reads
-	// args.event.payload.id and args.event.payload.partitionId.
-	event := map[string]any{
-		"event": map[string]any{
-			"topic": "node.created",
-			"payload": map[string]any{
-				"id":              pid,
-				"partitionId":     sid,
-				"participantType": "human",
-			},
-		},
-	}
-	body, err := json.Marshal(event)
-	if err != nil {
-		t.Fatalf("#1706: marshal event: %v", err)
-	}
-
-	_, execErr := e.Eng.Execute(e.Ctx, "bootstrapSession("+string(body)+")")
-	if execErr != nil {
-		if strings.Contains(execErr.Error(), "unresolved") || strings.Contains(execErr.Error(), "args.event") {
-			t.Fatalf("#1706 regression: event reference did not bind into logic scope: %v", execErr)
-		}
-		t.Fatalf("#1706: bootstrapSession execution failed: %v", execErr)
-	}
+	// Fire the bootstrapSession AUTOMATION with a representative
+	// participant.created event. The decide logic reads event.payload.id; the
+	// gated createSession step binds event.payload.id + event.payload.partitionId.
+	fireForgeAutomation(t, e, "bootstrapSession", "node.created", events.KindNodeCreated, map[string]any{
+		"id":              pid,
+		"partitionId":     sid,
+		"participantType": "human",
+	})
 
 	// Read back by the event's participant id. A non-empty result proves
-	// args.event.payload.id threaded through both the query and the create.
+	// event.payload.id threaded through both the decide query AND the create step.
 	rows := asArray(t, e.runQuery(t, "participantSession", map[string]any{"participantId": pid}))
 	if len(rows) == 0 {
 		t.Fatalf("#1706: no session bound to event participant %q -- event payload did not thread into the create", pid)
@@ -62,5 +54,5 @@ func runEventTrigger(t *testing.T, e *Env) {
 	if got := rowID(rows[0]); got == "" {
 		t.Logf("#1706: session row has no id field (shape omits it); presence already proves binding")
 	}
-	t.Logf("#1706: event-triggered logic bound args.event.payload into nested step scope (session created for %s)", pid)
+	t.Logf("#1706: event-triggered automation bound event.payload into nested step scope (session created for %s)", pid)
 }

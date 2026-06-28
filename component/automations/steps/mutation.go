@@ -673,6 +673,11 @@ func (e *MutationExecutor) evaluateField(evaluator *automations.Evaluator, expr 
 
 // getNestedField extracts a nested field from an object using dot notation.
 func getNestedField(obj any, path string) any {
+	// Peel a Bundle-wrapped engine envelope so field(decide.result, "x") reads
+	// the flat value a logic/query step returned, not the opaque envelope. The
+	// resolvePath `.result` branch already unwraps for path-style reads; this
+	// covers the field() route defensively. #2271.
+	obj = automations.UnwrapStepResult(obj)
 	if obj == nil || path == "" {
 		return nil
 	}
