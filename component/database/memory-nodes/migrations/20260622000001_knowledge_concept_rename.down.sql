@@ -1,7 +1,7 @@
 -- Reverse of the knowledge concept namespace fix (memql#1960):
 -- v1:knowledge:* -> v1:common:* for the three migrated concepts. Idempotent.
-
---bun:split
+-- No leading `--bun:split`: a comment-only pre-first-split segment logs
+-- `pgdriver: query is empty` on every migrate (memql#2275).
 
 UPDATE "MemoryNodes" SET
   concept = 'v1:common:documentChunk',

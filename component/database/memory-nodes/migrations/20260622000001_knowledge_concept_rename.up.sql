@@ -17,8 +17,11 @@
 -- Idempotent: re-running finds no remaining v1:common:{documentChunk,
 -- knowledgeBridge,knowledgeDomain} and is a no-op. Pre-release / no-compat: the
 -- old ids are not retained.
-
---bun:split
+--
+-- NOTE: no leading `--bun:split` before this first statement -- bun runs the
+-- pre-first-split segment as its own query, and a comment-only segment makes the
+-- pgdriver log `query is empty` on every migrate (memql#2275). The header shares
+-- this first statement's segment.
 
 -- (1) Own rows: concept column + the id prefix, for each of the three concepts.
 UPDATE "MemoryNodes" SET
