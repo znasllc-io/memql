@@ -45,19 +45,8 @@ var callGraphBaseline = []string{
 	"logic-purity|logic|pruneStaleClusterNodes",
 	"logic-purity|logic|recordMentoring",
 	"logic-purity|logic|recordTransition",
-	"logic-purity|logic|releaseWorkspaceOnPlanTerminal",
 	"logic-purity|logic|routeRequest",
 	"logic-purity|logic|workerInvocationRetentionSweep",
-	// #2219: pre-existing read-only-builtin debt surfaced when I7 turned the
-	// builtin side-effect classifier on. releaseWorkspaceOnPlanTerminal (already
-	// baselined above for logic-purity) also calls the side-effecting builtin
-	// workbenchTeardownDirectory (@executor integration.workbench.teardownDirectory,
-	// class=write) from a read context. Per ADR §3 the teardown belongs in an
-	// action reached from an automation step, not inline in a logic. This is the
-	// ONLY such finding tree-wide (a wholesale builtin->action migration is the
-	// large follow-up, epic #2212); grandfathered here so the gate stays green.
-	// When the teardown moves to an action, delete this line (burn-down).
-	"read-only-builtin|logic|releaseWorkspaceOnPlanTerminal",
 }
 
 // TestCallGraphContract is the HARD whole-tree gate for the behavioral

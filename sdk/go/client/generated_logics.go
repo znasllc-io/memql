@@ -664,7 +664,7 @@ func RecordTransitionBuild(args RecordTransitionArgs) string {
 	return b.String()
 }
 
-// ReleaseWorkspaceOnPlanTerminal -- On every v1:planner:plan update, checks the new status; if terminal (succeeded/failed/cancelled) AND a v1:workbench:workspace exists for the planId AND it is still provisioned, flips the concept row to released AND calls the workbench integration to remove the on-disk directory tree. Also fires the teardown unconditionally on terminal status even when no concept row exists -- the MVP Go integration provisions workspaces in-memory + on-disk without writing the concept row, so the teardown call cleans those up too. Idempotent on both paths.
+// ReleaseWorkspaceOnPlanTerminal -- Pure decide for the workspace-release sweep: returns every v1:workbench:workspace for the updated plan. The terminal-status gate, the per-row release write (provisioned workspaces only), and the unconditional on-disk teardown all live in the releaseWorkspaceOnPlanTerminal automation's steps (#2235).
 type ReleaseWorkspaceOnPlanTerminalArgs struct {
 	Event map[string]any
 }
