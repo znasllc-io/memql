@@ -27,6 +27,18 @@ import (
 // migrated, its line here disappears from the findings and the gate flags it as
 // stale -- delete the line in the same PR.
 var callGraphBaseline = []string{
+	// #2235: NOT migrated, blocked on engine bug #2254. These two (plus
+	// workerInvocationRetentionSweep below) gate their per-row write on a
+	// date window `addDuration(item.<ts>, "P{N}D") < timestamp()`, which is
+	// CONSTANT-FALSE in the automation condition evaluator (numeric-only `<`
+	// via toNumber() -> 0 for RFC3339; addDuration/timestamp not evaluated in
+	// the filter-value path). The current impure logic compiles to the
+	// identical condition, so these crons are already dead in production --
+	// accountDeletionSweep never hard-deletes a user past cooldown
+	// (compliance). A migration that preserved that dead behavior while
+	// removing the baseline line would falsely mark them "done." Migrate once
+	// #2254 lands. The 4 non-windowing identity/worker/workbench sweeps were
+	// migrated to forEach (#2251 + follow-up).
 	"logic-purity|logic|accessRequestExpirySweep",
 	"logic-purity|logic|accountDeletionSweep",
 	"logic-purity|logic|appendAttachmentToRequest",
@@ -46,6 +58,10 @@ var callGraphBaseline = []string{
 	"logic-purity|logic|recordMentoring",
 	"logic-purity|logic|recordTransition",
 	"logic-purity|logic|routeRequest",
+	// #2235: NOT migrated, blocked on engine bug #2254 -- date-window gate
+	// `addDuration(item.createdAt, "P{N}D") < timestamp()` is constant-false
+	// in the condition evaluator. See the accessRequest/accountDeletion note
+	// at the top of this baseline. Migrate once #2254 lands.
 	"logic-purity|logic|workerInvocationRetentionSweep",
 }
 
