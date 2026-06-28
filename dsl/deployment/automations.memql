@@ -6,7 +6,7 @@
 // This file authors the one automation that ties the bundle together:
 // deployEngineCluster sequences the I8 deploy actions (actions.memql) with the
 // I9 deploy decisions (logic.memql) and the persisted deployment lifecycle
-// (createDeployment / updateDeploymentStatus, dsl/cluster/mutations.memql), one
+// (createDeployment / updateDeploymentStatus, dsl/deployment/mutations.memql), one
 // write per step. It is the single construct allowed to compose all the layers
 // (branch / loop / call logic+query+mutation+action), and it stays
 // contract-clean: the logics it calls are pure, each mutation step is one
@@ -140,7 +140,7 @@
 // dry-runnable and go live once the build-server + ArgoCD wiring is exercised.
 
 use deployment.logic.{ deploymentForwardAllowed, deployOutcomeLabel }
-use cluster.mutations.{ createDeployment, updateDeploymentStatus }
+use deployment.mutations.{ createDeployment, updateDeploymentStatus }
 
 @enabled
 @trigger(event="deploy.requested", concept="v1:cluster:deployment", partition="*")

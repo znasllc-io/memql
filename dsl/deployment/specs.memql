@@ -24,7 +24,7 @@
 //     GetDeploymentStatus).
 //
 // #1872 (persisted deployments): createDeployment +
-// updateDeploymentStatus (dsl/cluster/mutations.memql) are only
+// updateDeploymentStatus (dsl/deployment/mutations.memql) are only
 // ever invoked from these Go-gated write RPCs, so the deploy-start write
 // and every status transition inherit the same authorization decision
 // the console read/write path enforces.
