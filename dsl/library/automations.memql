@@ -14,12 +14,18 @@
 // path like event.payload.summary is nil when absent, and passing nil for a
 // string field trips the v1:library:artifact "expected string, got null"
 // rejection (the #1626 failure), so the optional fields coalesce to "".
+//
+// sourceConceptRef binds event.payload.id DIRECTLY. The earlier
+// `canonicalId(event.payload.id, <concept>)` form resolved to nil in a
+// top-level step arg (the concept-ref builtin does not evaluate there), so
+// createArtifact failed with "required argument sourceConceptRef is missing" --
+// silently breaking Library promotion (proven on a seeded DB; forward-fixes
+// #2265's canonicalId-in-step bug). canonicalId is unnecessary anyway: a
+// node.created event's payload.id IS the stored canonical concept id
+// (e.g. v1:library:memory:mem-...), so the direct bind yields the identical ref.
+// The #2235 library-index-promotion conformance dimension guards all five paths.
 
 use library.mutations.{ createArtifact }
-use library.concepts.{ memory, generatedOutput }
-use notes.concepts.{ note }
-use todos.concepts.{ todo }
-use calendar.concepts.{ calendarEvent }
 
 @enabled
 @trigger(event="node.created", concept="v1:library:generatedOutput", partition="*")
@@ -27,7 +33,7 @@ use calendar.concepts.{ calendarEvent }
 automation indexGeneratedOutputOnCreate {
   step persist {
     createArtifact {
-      sourceConceptRef:     canonicalId(event.payload.id, generatedOutput),
+      sourceConceptRef:     event.payload.id,
       ownerUserId:          event.payload.ownerUserId,
       lens:                 "artifact",
       kind:                 "generated_output",
@@ -52,7 +58,7 @@ automation indexGeneratedOutputOnCreate {
 automation indexNoteOnCreate {
   step persist {
     createArtifact {
-      sourceConceptRef: canonicalId(event.payload.id, note),
+      sourceConceptRef: event.payload.id,
       ownerUserId:      event.payload.ownerUserId,
       lens:             "record",
       kind:             "note",
@@ -70,7 +76,7 @@ automation indexNoteOnCreate {
 automation indexTodoOnCreate {
   step persist {
     createArtifact {
-      sourceConceptRef: canonicalId(event.payload.id, todo),
+      sourceConceptRef: event.payload.id,
       ownerUserId:      event.payload.ownerUserId,
       lens:             "record",
       kind:             "todo",
@@ -87,7 +93,7 @@ automation indexTodoOnCreate {
 automation indexCalendarEventOnCreate {
   step persist {
     createArtifact {
-      sourceConceptRef: canonicalId(event.payload.id, calendarEvent),
+      sourceConceptRef: event.payload.id,
       ownerUserId:      event.payload.ownerUserId,
       lens:             "record",
       kind:             "calendar_event",
@@ -104,7 +110,7 @@ automation indexCalendarEventOnCreate {
 automation indexMemoryOnCreate {
   step persist {
     createArtifact {
-      sourceConceptRef: canonicalId(event.payload.id, memory),
+      sourceConceptRef: event.payload.id,
       ownerUserId:      event.payload.ownerUserId,
       lens:             "record",
       kind:             "memory",
