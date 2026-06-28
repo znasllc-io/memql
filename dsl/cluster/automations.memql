@@ -3,26 +3,78 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 //
-// bootstrapCluster + pruneStaleClusterNodes stay terse single-step pass-throughs
-// (`automation NAME @trigger(...) => logic L`, memql#2215 / ADR S2.4) and keep
-// their logic-purity baseline entries (#2235): bootstrapCluster's conditional
-// creates gate the critical system.startup path and need behavioral verification
-// before moving to if-steps; pruneStaleClusterNodes' per-row sweep needs a forEach
-// automation step, which the parser does not yet implement (struct-form forEach/for
-// is ADR S7 target syntax, not yet wired). See the deferral notes on their
-// callGraphBaseline entries. deregisterNode + registerNode are longhand: the inline graph
-// write that used to live in their pass-through `logic` (an ADR S2.1 logic-
-// purity violation, baselined under #2217) now lives in the automation as a
-// mutation step (the bare `<mutation>{ ... }` call form), so no `logic`
-// indirection survives (#2235).
+// All four cluster automations are now longhand multi-step blocks: the inline
+// graph writes that used to live in their pass-through `logic` (ADR S2.1 logic-
+// purity violations, baselined under #2217) now live here as the automation's
+// own steps, so no impure `logic` survives (#2235). The four logic-purity
+// baseline entries were removed across the migrating PRs (deregisterNode +
+// registerNode under PR #2239; bootstrapCluster + pruneStaleClusterNodes here):
+//   - deregisterNode / registerNode -- the inline createSpawnEvent / createNode
+//     writes became bare `<mutation>{ ... }` mutation steps.
+//   - bootstrapCluster -- the pure `bootstrapCluster` logic decides
+//     { create, withIdentityProvider }; the three conditional creates moved
+//     onto `if`-gated mutation steps (gated on `steps.decide.result.<field> ==
+//     true` -- a step-result field resolves in a COMPARISON, not bare-truthy).
+//   - pruneStaleClusterNodes -- the pure `pruneStaleClusterNodes` logic returns
+//     the rows past the stale window (window math pushed into the query via
+//     olderThan); the per-row terminal write moved onto a `forEach` step.
+//
+// Authoring note (#2235): inside a step, use the bare `<mutation>{ ... }` call
+// form -- the `mutate <name>{` keyword form collides with the struct-form
+// mutation-DEFINITION rewriter (NormaliseMutationSource matches the header
+// anywhere in the file).
 
 use cluster.logic.{ bootstrapCluster, pruneStaleClusterNodes }
-use cluster.mutations.{ createNode, createSpawnEvent }
+use cluster.mutations.{ createCluster, createDatabase, createIdentityProvider, createNode, createSpawnEvent, updateNodeHealth }
 
 // Bootstrap cluster, database, and identity provider records on first startup.
+// The pure bootstrapCluster logic decides { create, withIdentityProvider }
+// (create == existingCluster() empty AND node.type=="bff"); the three creates
+// are `if`-gated mutation steps so nothing is written once a cluster exists or
+// off the bff node, and the identityProvider row lands only when the startup
+// envelope carries one. Every create field binds an explicit key + coalesce (a
+// multi-segment path like event.payload.database.host is nil when absent, and a
+// nil @required arg trips validation), mirroring registerNode/deregisterNode.
 @enabled
+@trigger(event="system.startup")
 @description("Bootstrap cluster, database, and identity provider records on first startup")
-automation bootstrapCluster @trigger(event="system.startup") => logic bootstrapCluster
+automation bootstrapCluster {
+  step decide {
+    logic bootstrapCluster {
+      event: event
+    }
+  }
+  step database {
+    if steps.decide.result == true {
+      createDatabase {
+        host:    coalesce(event.payload.database.host, "localhost"),
+        dbName:  coalesce(event.payload.database.dbName, "memql"),
+        sslMode: coalesce(event.payload.database.sslMode, "disable")
+      }
+    }
+  }
+  step identityProvider {
+    if steps.decide.result == true && exists(payload.identityProvider) {
+      createIdentityProvider {
+        name:           coalesce(event.payload.identityProvider.name, "memql-identity"),
+        issuerUrl:      coalesce(event.payload.identityProvider.issuerUrl, ""),
+        clientIdPrefix: coalesce(event.payload.identityProvider.clientIdPrefix, ""),
+        redirectUrl:    coalesce(event.payload.identityProvider.redirectUrl, "")
+      }
+    }
+  }
+  step cluster {
+    if steps.decide.result == true {
+      createCluster {
+        name:        "development",
+        environment: "development",
+        region:      "local",
+        provider:    coalesce(event.payload.provider, ""),
+        version:     coalesce(event.payload.node.version, "")
+      }
+    }
+  }
+}
 
 // Record node shutdown in the database: append a v1:cluster:spawnEvent with
 // action="stopped", reason="system.shutdown". The former deregisterNode logic
@@ -88,6 +140,28 @@ automation registerNode {
 // CLI / WorkerDialer stop treating dead pods as live. BACKSTOP to the fast
 // reconciler (#1874); both append the same idempotent terminal health="stopped".
 // Six-field cron (sec min hour dom mon dow): minute 0,10,20,30,40,50.
+//
+// The pure pruneStaleClusterNodes logic decides WHICH rows to retire (cutoff =
+// now - window, pushed into staleClusterNodes via olderThan) and returns that
+// node list (#2235). The `prune` forEach step appends the terminal
+// health="stopped" row per returned node -- the per-row write that used to live
+// inline in the logic. updateNodeHealth takes only id / health / lastSeen.
 @enabled
+@trigger(schedule="0 */10 * * * *")
 @description("Every 10 min: mark departed cluster nodes (lastSeen older than MEMQL_NODE_STALE_PRUNE_MINUTES, default 30) as health='stopped'.")
-automation pruneStaleClusterNodes @trigger(schedule="0 */10 * * * *") => logic pruneStaleClusterNodes
+automation pruneStaleClusterNodes {
+  step decide {
+    logic pruneStaleClusterNodes {
+      event: event
+    }
+  }
+  step prune {
+    forEach node in decide.result {
+      updateNodeHealth {
+        id:       node.id,
+        health:   "stopped",
+        lastSeen: timestamp()
+      }
+    }
+  }
+}
