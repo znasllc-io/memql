@@ -1,69 +1,119 @@
 // library domain -- promotion triggers.
 //
-// Event-driven population of the Library index. Each backing-row
-// creation event folds into a v1:library:artifact index row via the
-// matching promotion logic. Records (notes / todos / calendar events /
-// memory) and live sources are wired the same way on #696.
+// Event-driven population of the Library index. Each backing-row creation
+// event folds into a v1:library:artifact index row. The createArtifact write
+// lives directly in the automation's mutation step, binding its args from the
+// trigger event payload (which IS the created row), with coalesce on the
+// optional fields. #2235: this replaces the former promotion-logic indirection
+// (each index* logic did the write inline -- an ADR §2.1 logic-purity
+// violation). Mirrors the cluster registerNode/deregisterNode form: the logic
+// is gone; the write is an event-bound mutation step.
+//
+// Authoring note (#2235): inside a step a mutation is the bare `<mutation>{ ... }`
+// call (brace body, NOT `mutate <name>` and NOT `name({...})`); a multi-segment
+// path like event.payload.summary is nil when absent, and passing nil for a
+// string field trips the v1:library:artifact "expected string, got null"
+// rejection (the #1626 failure), so the optional fields coalesce to "".
 
-use library.logic.{ indexGeneratedOutput, indexNote, indexTodo, indexCalendarEvent, indexMemory }
+use library.mutations.{ createArtifact }
+use library.concepts.{ memory, generatedOutput }
+use notes.concepts.{ note }
+use todos.concepts.{ todo }
+use calendar.concepts.{ calendarEvent }
 
 @enabled
 @trigger(event="node.created", concept="v1:library:generatedOutput", partition="*")
-@description("On generated-output creation, promote the new v1:library:generatedOutput into the Library as an artifact index row. decide (pure logic builds the args) -> persist (the single createArtifact write). #2235.")
+@description("On generated-output creation, promote the new v1:library:generatedOutput into the Library as an artifact index row (lens=artifact, kind=generated_output). #2235.")
 automation indexGeneratedOutputOnCreate {
-  step decide {
-    logic indexGeneratedOutput { event: event }
-  }
   step persist {
-    createArtifact({ sourceConceptRef: field(decide.result, "sourceConceptRef"), ownerUserId: field(decide.result, "ownerUserId"), lens: field(decide.result, "lens"), kind: field(decide.result, "kind"), source: field(decide.result, "source"), title: field(decide.result, "title"), summary: field(decide.result, "summary"), format: field(decide.result, "format"), mimeType: field(decide.result, "mimeType"), live: field(decide.result, "live"), partitionId: field(decide.result, "partitionId"), agentId: field(decide.result, "agentId"), producedByPlanId: field(decide.result, "producedByPlanId"), producedByWorkerId: field(decide.result, "producedByWorkerId"), producedByWorkerName: field(decide.result, "producedByWorkerName") })
+    createArtifact {
+      sourceConceptRef:     canonicalId(event.payload.id, generatedOutput),
+      ownerUserId:          event.payload.ownerUserId,
+      lens:                 "artifact",
+      kind:                 "generated_output",
+      source:               event.payload.source,
+      title:                event.payload.title,
+      summary:              coalesce(event.payload.summary, ""),
+      format:               event.payload.format,
+      mimeType:             coalesce(event.payload.mimeType, ""),
+      live:                 false,
+      partitionId:          coalesce(event.payload.partitionId, ""),
+      agentId:              coalesce(event.payload.producedByAgentId, ""),
+      producedByPlanId:     coalesce(event.payload.producedByPlanId, ""),
+      producedByWorkerId:   coalesce(event.payload.producedByWorkerId, ""),
+      producedByWorkerName: coalesce(event.payload.producedByWorkerName, "")
+    }
   }
 }
 
 @enabled
 @trigger(event="node.created", concept="v1:notes:note", partition="*")
-@description("On note creation, promote it into the Library Records lens. decide (pure logic builds the args) -> persist (the single createArtifact write). #2235.")
+@description("On note creation, promote it into the Library Records lens (lens=record, kind=note, source=agent_generated). #2235.")
 automation indexNoteOnCreate {
-  step decide {
-    logic indexNote { event: event }
-  }
   step persist {
-    createArtifact({ sourceConceptRef: field(decide.result, "sourceConceptRef"), ownerUserId: field(decide.result, "ownerUserId"), lens: field(decide.result, "lens"), kind: field(decide.result, "kind"), source: field(decide.result, "source"), title: field(decide.result, "title"), summary: field(decide.result, "summary"), live: field(decide.result, "live") })
+    createArtifact {
+      sourceConceptRef: canonicalId(event.payload.id, note),
+      ownerUserId:      event.payload.ownerUserId,
+      lens:             "record",
+      kind:             "note",
+      source:           "agent_generated",
+      title:            coalesce(event.payload.title, "Untitled note"),
+      summary:          coalesce(event.payload.body, ""),
+      live:             false
+    }
   }
 }
 
 @enabled
 @trigger(event="node.created", concept="v1:todos:todo", partition="*")
-@description("On to-do creation, promote it into the Library Records lens. decide (pure logic builds the args) -> persist (the single createArtifact write). #2235.")
+@description("On to-do creation, promote it into the Library Records lens (lens=record, kind=todo, source=agent_generated). #2235.")
 automation indexTodoOnCreate {
-  step decide {
-    logic indexTodo { event: event }
-  }
   step persist {
-    createArtifact({ sourceConceptRef: field(decide.result, "sourceConceptRef"), ownerUserId: field(decide.result, "ownerUserId"), lens: field(decide.result, "lens"), kind: field(decide.result, "kind"), source: field(decide.result, "source"), title: field(decide.result, "title"), live: field(decide.result, "live") })
+    createArtifact {
+      sourceConceptRef: canonicalId(event.payload.id, todo),
+      ownerUserId:      event.payload.ownerUserId,
+      lens:             "record",
+      kind:             "todo",
+      source:           "agent_generated",
+      title:            coalesce(event.payload.title, "Untitled to-do"),
+      live:             false
+    }
   }
 }
 
 @enabled
 @trigger(event="node.created", concept="v1:calendar:calendarEvent", partition="*")
-@description("On calendar-event creation, promote it into the Library Records lens. decide (pure logic builds the args) -> persist (the single createArtifact write). #2235.")
+@description("On calendar-event creation, promote it into the Library Records lens (lens=record, kind=calendar_event, source=agent_generated). #2235.")
 automation indexCalendarEventOnCreate {
-  step decide {
-    logic indexCalendarEvent { event: event }
-  }
   step persist {
-    createArtifact({ sourceConceptRef: field(decide.result, "sourceConceptRef"), ownerUserId: field(decide.result, "ownerUserId"), lens: field(decide.result, "lens"), kind: field(decide.result, "kind"), source: field(decide.result, "source"), title: field(decide.result, "title"), live: field(decide.result, "live") })
+    createArtifact {
+      sourceConceptRef: canonicalId(event.payload.id, calendarEvent),
+      ownerUserId:      event.payload.ownerUserId,
+      lens:             "record",
+      kind:             "calendar_event",
+      source:           "agent_generated",
+      title:            coalesce(event.payload.title, "Untitled event"),
+      live:             false
+    }
   }
 }
 
 @enabled
 @trigger(event="node.created", concept="v1:library:memory", partition="*")
-@description("On memory creation, promote it into the Library Records lens. decide (pure logic builds the args) -> persist (the single createArtifact write). #2235.")
+@description("On memory creation, promote it into the Library Records lens (lens=record, kind=memory, source=agent_generated). #2235.")
 automation indexMemoryOnCreate {
-  step decide {
-    logic indexMemory { event: event }
-  }
   step persist {
-    createArtifact({ sourceConceptRef: field(decide.result, "sourceConceptRef"), ownerUserId: field(decide.result, "ownerUserId"), lens: field(decide.result, "lens"), kind: field(decide.result, "kind"), source: field(decide.result, "source"), title: field(decide.result, "title"), summary: field(decide.result, "summary"), agentId: field(decide.result, "agentId"), partitionId: field(decide.result, "partitionId"), live: field(decide.result, "live") })
+    createArtifact {
+      sourceConceptRef: canonicalId(event.payload.id, memory),
+      ownerUserId:      event.payload.ownerUserId,
+      lens:             "record",
+      kind:             "memory",
+      source:           "agent_generated",
+      title:            event.payload.title,
+      summary:          coalesce(event.payload.summary, ""),
+      agentId:          coalesce(event.payload.agentId, ""),
+      partitionId:      coalesce(event.payload.partitionId, ""),
+      live:             false
+    }
   }
 }
-
