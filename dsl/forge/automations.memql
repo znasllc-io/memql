@@ -20,21 +20,60 @@
 // bumps that leave status unchanged or land on a status we don't map).
 
 use forge.logic.{ recordTransition, routeRequest }
+use forge.mutations.{ advanceRequest, recordRequestEvent }
 
 @enabled
 @trigger(event="node.created", concept="v1:forge:request", partition="*")
-@description("On submission of a v1:forge:request, route it to its next approval-pipeline state by the submitter's role (owner fast-track / developer -> needs_approval / non-developer -> needs_validation) and record a 'routed' audit event.")
+@description("On submission of a v1:forge:request, route it to its next approval-pipeline state by the submitter's role (owner fast-track / developer -> needs_approval / non-developer -> needs_validation) and record a 'routed' audit event. decide (pure logic projects requestId + role + submitterUserId) -> per-role persist steps (advanceRequest) + persistRouted (recordRequestEvent). #2235.")
 automation routeRequest {
-  step run {
+  step decide {
     logic routeRequest { event: event }
+  }
+  step persistOwner {
+    if field(step("decide"), "submitterRole") == "owner" {
+      advanceRequest({ requestId: field(step("decide"), "requestId"), status: "queued", approvedByUserId: field(step("decide"), "submitterUserId") })
+    }
+  }
+  step persistDeveloper {
+    if field(step("decide"), "submitterRole") == "admin" || field(step("decide"), "submitterRole") == "writer" {
+      advanceRequest({ requestId: field(step("decide"), "requestId"), status: "needs_approval" })
+    }
+  }
+  step persistReader {
+    if field(step("decide"), "submitterRole") == "reader" {
+      advanceRequest({ requestId: field(step("decide"), "requestId"), status: "needs_validation" })
+    }
+  }
+  step persistRouted {
+    recordRequestEvent({ requestId: field(step("decide"), "requestId"), kind: "routed", fromStatus: "submitted", note: "routed by submitter role" })
   }
 }
 
 @enabled
 @trigger(event="node.updated", concept="v1:forge:request", partition="*")
-@description("On every v1:forge:request status transition (validate / approve / changes-requested / reject), append exactly one v1:forge:requestEvent with the derived kind, fromStatus (event.oldStatus), and toStatus (event.payload.status). Silently skips updates that do not change status or land on an unrecognised status. No loop risk: the recorder writes a requestEvent (a different concept) so it cannot re-fire this automation.")
+@description("On every v1:forge:request status transition (validate / approve / changes-requested / reject), append exactly one v1:forge:requestEvent with the derived kind, fromStatus (event.oldStatus), and toStatus (event.payload.status). Silently skips updates that do not change status or land on an unrecognised status. No loop risk: the recorder writes a requestEvent (a different concept) so it cannot re-fire this automation. decide (pure logic projects requestId + fromStatus + toStatus) -> four mutually-exclusive persist steps (recordRequestEvent). #2235.")
 automation recordTransition {
-  step run {
+  step decide {
     logic recordTransition { event: event }
+  }
+  step persistValidated {
+    if field(step("decide"), "toStatus") == "needs_approval" {
+      recordRequestEvent({ requestId: field(step("decide"), "requestId"), kind: "validated", fromStatus: field(step("decide"), "fromStatus"), toStatus: field(step("decide"), "toStatus") })
+    }
+  }
+  step persistApproved {
+    if field(step("decide"), "toStatus") == "queued" {
+      recordRequestEvent({ requestId: field(step("decide"), "requestId"), kind: "approved", fromStatus: field(step("decide"), "fromStatus"), toStatus: field(step("decide"), "toStatus") })
+    }
+  }
+  step persistChangesRequested {
+    if field(step("decide"), "toStatus") == "changes_requested" {
+      recordRequestEvent({ requestId: field(step("decide"), "requestId"), kind: "changes_requested", fromStatus: field(step("decide"), "fromStatus"), toStatus: field(step("decide"), "toStatus") })
+    }
+  }
+  step persistRejected {
+    if field(step("decide"), "toStatus") == "rejected" {
+      recordRequestEvent({ requestId: field(step("decide"), "requestId"), kind: "rejected", fromStatus: field(step("decide"), "fromStatus"), toStatus: field(step("decide"), "toStatus") })
+    }
   }
 }

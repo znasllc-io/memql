@@ -30,6 +30,14 @@ package conformance
 // args.event.payload.id`, so a dispatch that only evaluates the return drops
 // both. It FAILS on pre-fix main (the staging shape) and PASSES once the
 // automation-step logic invocation runs the full body.
+//
+// #2235 update (logic-purity burn-down): routeRequest + recordTransition are
+// now PURE decision logics; their advanceRequest / recordRequestEvent writes
+// moved into the automations' explicit decide->persist steps (ADR §2.1
+// single-writer). This dimension's contract is unchanged and still the right
+// end-to-end check: driving the REAL automation must still PERSIST the side
+// effects (now via the persist steps instead of the logic body). It would FAIL
+// if a persist step were dropped or mis-wired.
 
 import (
 	"testing"
@@ -84,7 +92,7 @@ func runAutomationLogicFullBody(t *testing.T, e *Env) {
 	afterRoute := requestRow(t, e, canonicalRouteId)
 	if got := asStr(afterRoute["status"]); got != "queued" {
 		t.Fatalf("#1847: routeRequest did not advance the owner request to 'queued' "+
-			"(multi-step logic body's advanceRequest step was skipped); status=%v", afterRoute["status"])
+			"(the automation's advanceRequest persist step was skipped); status=%v", afterRoute["status"])
 	}
 
 	// The 'routed' audit event (recordRequestEvent) is the other
@@ -95,13 +103,13 @@ func runAutomationLogicFullBody(t *testing.T, e *Env) {
 	routedEvents := asArray(t, e.runQuery(t, "requestEvents", map[string]any{"requestId": routeRequestId}))
 	if !hasEventKind(routedEvents, "routed") {
 		t.Fatalf("#1847: routeRequest did not write a 'routed' requestEvent "+
-			"(multi-step logic body's recordRequestEvent step was skipped); events=%v", routedEvents)
+			"(the automation's recordRequestEvent persist step was skipped); events=%v", routedEvents)
 	}
 
 	// --- B. recordTransition (node.updated -> recordTransition) ----------
-	// recordTransition has the same unreferenced-side-effect shape: its
-	// `return toStatus` references none of the guarded recordRequestEvent
-	// steps. A status transition to "queued" must append an 'approved' event.
+	// recordTransition's automation appends the audit event via a guarded
+	// recordRequestEvent persist step (one per mapped toStatus). A status
+	// transition to "queued" must append an 'approved' event.
 	transitionRequestId := "req-transition-" + suffix
 	e.runMutation(t, "createRequest", map[string]any{
 		"requestId": transitionRequestId,
@@ -127,7 +135,7 @@ func runAutomationLogicFullBody(t *testing.T, e *Env) {
 	transitionEvents := asArray(t, e.runQuery(t, "requestEvents", map[string]any{"requestId": transitionRequestId}))
 	if !hasEventKind(transitionEvents, "approved") {
 		t.Fatalf("#1847: recordTransition did not write an 'approved' requestEvent on the queued transition "+
-			"(multi-step logic body's guarded recordRequestEvent step was skipped); events=%v", transitionEvents)
+			"(the automation's guarded recordRequestEvent persist step was skipped); events=%v", transitionEvents)
 	}
 
 	t.Logf("#1847: automation-step multi-step-logic dispatch ran the FULL body (side-effecting steps persisted) for routeRequest + recordTransition")

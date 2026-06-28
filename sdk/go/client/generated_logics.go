@@ -610,41 +610,7 @@ func PurgeExpiredSafetyClassificationsBuild(args PurgeExpiredSafetyClassificatio
 	return b.String()
 }
 
-// RecordMentoring -- Record a 'mentored' v1:forge:requestEvent after a non-owner submitter was taught about the area they touched. Injects kind='mentored' and forwards the note verbatim.
-type RecordMentoringArgs struct {
-	EventId   string
-	RequestId string
-	Note      string
-}
-
-// RecordMentoring calls the engine logic recordMentoring.
-func (qc *QueryClient) RecordMentoring(ctx context.Context, args RecordMentoringArgs) (*Result, error) {
-	call := RecordMentoringBuild(args)
-	return qc.executeNamed(ctx, "recordMentoring", call)
-}
-
-func RecordMentoringBuild(args RecordMentoringArgs) string {
-	var b strings.Builder
-	b.WriteString("recordMentoring({")
-	if args.EventId != "" {
-		b.WriteString("eventId: ")
-		b.WriteString(fmt.Sprintf("%q", args.EventId))
-	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
-	}
-	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 17 {
-		b.WriteString(", ")
-	}
-	b.WriteString("note: ")
-	b.WriteString(fmt.Sprintf("%q", args.Note))
-	b.WriteString("})")
-	return b.String()
-}
-
-// RecordTransition -- On v1:forge:request node.updated: append exactly one v1:forge:requestEvent for the four post-creation pipeline transitions (validated / approved / changes_requested / rejected). Each guard is mutually exclusive; at most one fires per invocation. Returns early (no write) for unrecognised statuses.
+// RecordTransition -- PURE decision: project the transition inputs (requestId + fromStatus + toStatus) the recordTransition automation needs to append exactly one v1:forge:requestEvent for the four post-creation pipeline transitions (needs_approval -> validated / queued -> approved / changes_requested / rejected). Each persist step is mutually exclusive; at most one fires per invocation. The WRITE (recordRequestEvent) happens in the recordTransition automation's persist steps (ADR §2.1 single-writer). #2235.
 type RecordTransitionArgs struct {
 	Event map[string]any
 }
@@ -704,7 +670,7 @@ func RevokeExpiredDelegationsBuild(args RevokeExpiredDelegationsArgs) string {
 	return b.String()
 }
 
-// RouteRequest -- Route a newly-submitted v1:forge:request to its next pipeline state by submitter role (owner -> queued; developer -> needs_approval; non-developer -> needs_validation). Records a 'routed' audit event.
+// RouteRequest -- PURE decision: project the routing inputs (requestId + submitterRole + submitterUserId) the routeRequest automation needs to advance a newly-submitted v1:forge:request by role (owner -> queued; developer -> needs_approval; non-developer -> needs_validation) and record the 'routed' audit event. The WRITES (advanceRequest + recordRequestEvent) happen in the routeRequest automation's persist steps (ADR §2.1 single-writer). #2235.
 type RouteRequestArgs struct {
 	Event map[string]any
 }

@@ -37,9 +37,18 @@ package conformance
 //     positionally; emit named args in stable key order.
 //
 // This dimension drives the genuine connector surface (real MCP tools/call over
-// a fully-loaded engine) for the three logic-backed forge tools + the multi-step
-// router logic, and asserts NO arg-resolution failure leaks. It FAILS on any of
-// the three pre-#1840 paths and PASSES once all three are threaded.
+// a fully-loaded engine) for the forge tools + the router logic, and asserts NO
+// arg-resolution failure leaks. It FAILS on any of the three pre-#1840 paths and
+// PASSES once all three are threaded.
+//
+// #2235 update (logic-purity burn-down): the mentoring wrapper logic was
+// retired (forgeRecordMentoring now targets the thin `recordMentoredEvent`
+// mutation directly), and routeRequest is now a PURE decision logic whose
+// advanceRequest + 'routed' recordRequestEvent writes moved to the routeRequest
+// automation's persist steps. Section A therefore exercises the direct-mutation
+// tool path, and section C asserts arg-resolution on routeRequest's pure return
+// (the end-to-end automation dispatch + the 'routed' write stay covered by
+// conf_1847 / conf_1859). The arg-resolution machinery under test is unchanged.
 
 import (
 	"encoding/json"
@@ -91,7 +100,7 @@ func runForgeLogicArgResolution(t *testing.T, e *Env) {
 		"body":      "Reproduce the *ast.ArgRefExpr leak across the forge logic layer.",
 	})
 
-	// --- A. forgeRecordMentoring -> recordMentoring (single-return F.6) ---
+	// --- A. forgeRecordMentoring -> recordMentoredEvent mutation (#2235) ---
 	eventId := "evt-" + suffix
 	note := "Here is what the approval pipeline does and why it matters."
 	outA, isErrA := e.toolCall(t, "forgeRecordMentoring", map[string]any{
@@ -135,11 +144,15 @@ func runForgeLogicArgResolution(t *testing.T, e *Env) {
 	//      with NO partial / corrupting write to attachmentIds.
 	runForgeAttachHardening(t, e, requestId, attachmentId)
 
-	// --- C. routeRequest (multi-step LogicRunner; the routeRequest spine) ---
-	// Drive the router logic exactly as the node.created automation does -- a
-	// single `event` object whose payload carries the submitter role + id. Owner
-	// fast-tracks to 'queued' and records a 'routed' audit event; every nested
-	// mutation arg (`args.event.payload.id`, ...) must resolve.
+	// --- C. routeRequest (pure decision logic; #2235) ---
+	// routeRequest is now a PURE logic: it projects the routing inputs
+	// (requestId + submitterRole + submitterUserId); the routeRequest AUTOMATION
+	// performs the advanceRequest + 'routed' recordRequestEvent writes in its
+	// persist steps (the end-to-end dispatch + 'routed' write are covered by
+	// conf_1847 / conf_1859). This dimension keeps the #1840 coverage by driving
+	// the logic DIRECTLY via engine.Execute and asserting every nested arg
+	// (`args.event.payload.id`, `args.event.payload.submitterRole`, ...)
+	// RESOLVES in the returned decision -- no *ast.ArgRefExpr leak.
 	routeArgs, _ := json.Marshal(map[string]any{
 		"event": map[string]any{
 			"payload": map[string]any{
@@ -149,16 +162,22 @@ func runForgeLogicArgResolution(t *testing.T, e *Env) {
 			},
 		},
 	})
-	if _, err := e.Eng.Execute(e.Ctx, "routeRequest("+string(routeArgs)+")"); err != nil {
+	routeRes, err := e.Eng.Execute(e.Ctx, "routeRequest("+string(routeArgs)+")")
+	if err != nil {
 		assertNoArgRefLeak(t, "routeRequest", err.Error())
-		t.Fatalf("#1840: routeRequest (multi-step) failed: %v", err)
+		t.Fatalf("#1840: routeRequest (pure decision) failed: %v", err)
 	}
-	routedEvents := asArray(t, e.runQuery(t, "requestEvents", map[string]any{"requestId": requestId}))
-	if !hasEventKind(routedEvents, "routed") {
-		t.Fatalf("#1840: routeRequest did not record a 'routed' audit event; events=%v", routedEvents)
+	routeText := fmt.Sprintf("%v", routeRes)
+	assertNoArgRefLeak(t, "routeRequest", routeText)
+	// The projected decision must carry the RESOLVED caller args -- the
+	// requestId (from args.event.payload.id) and the submitter role -- proving
+	// the return object literal's arg refs were rewritten, not stringified raw.
+	if !strings.Contains(routeText, requestId) || !strings.Contains(routeText, "owner") {
+		t.Fatalf("#1840: routeRequest decision did not carry the resolved args "+
+			"(requestId=%q, submitterRole=owner); got %v", requestId, routeRes)
 	}
 
-	t.Logf("#1840: forge logic layer resolved caller args across mentoring, attach, and the multi-step router")
+	t.Logf("#1840: forge logic layer resolved caller args across mentoring (mutation), attach, and the pure router decision")
 }
 
 // runForgeAttachHardening drives the #1848 acceptance criteria against the SAME

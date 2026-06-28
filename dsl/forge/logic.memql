@@ -26,7 +26,7 @@
 // submitRequest tool description; a server-side `mentored` event is recorded
 // when that happens. (Prompts land in the next slice.)
 
-use forge.mutations.{ advanceRequest, attachToRequest, recordRequestEvent }
+use forge.mutations.{ attachToRequest }
 use forge.queries.{ requestById }
 
 // ---------------------------------------------------------------------------
@@ -62,71 +62,41 @@ use forge.queries.{ requestById }
 // ---------------------------------------------------------------------------
 
 @enabled
-@description("Route a newly-submitted v1:forge:request to its next pipeline state by submitter role (owner -> queued; developer -> needs_approval; non-developer -> needs_validation). Records a 'routed' audit event.")
+@description("PURE decision: project the routing inputs (requestId + submitterRole + submitterUserId) the routeRequest automation needs to advance a newly-submitted v1:forge:request by role (owner -> queued; developer -> needs_approval; non-developer -> needs_validation) and record the 'routed' audit event. The WRITES (advanceRequest + recordRequestEvent) happen in the routeRequest automation's persist steps (ADR §2.1 single-writer). #2235.")
 logic routeRequest {
   args {
     event  object  @required
   }
   body {
-    fastTrack := if args.event.payload.submitterRole == "owner" {
-      advanceRequest({ requestId: args.event.payload.id, status: "queued", approvedByUserId: args.event.payload.submitterUserId })
-    }
-    toApproval := if args.event.payload.submitterRole == "admin" || args.event.payload.submitterRole == "writer" {
-      advanceRequest({ requestId: args.event.payload.id, status: "needs_approval" })
-    }
-    toValidation := if args.event.payload.submitterRole == "reader" {
-      advanceRequest({ requestId: args.event.payload.id, status: "needs_validation" })
-    }
-    recordRouted := recordRequestEvent({ requestId: args.event.payload.id, kind: "routed", fromStatus: "submitted", note: "routed by submitter role" })
-    return args.event.payload.id
+    // Pure projection -- the role-conditional advanceRequest and the
+    // unconditional 'routed' recordRequestEvent moved to the automation's
+    // persist steps. requestId is the canonical node id (advanceRequest
+    // updates by it; recordRequestEvent normalizes via shortId()).
+    return { requestId: args.event.payload.id, submitterRole: coalesce(args.event.payload.submitterRole, ""), submitterUserId: coalesce(args.event.payload.submitterUserId, "") }
   }
 }
 
 @enabled
-@description("On v1:forge:request node.updated: append exactly one v1:forge:requestEvent for the four post-creation pipeline transitions (validated / approved / changes_requested / rejected). Each guard is mutually exclusive; at most one fires per invocation. Returns early (no write) for unrecognised statuses.")
+@description("PURE decision: project the transition inputs (requestId + fromStatus + toStatus) the recordTransition automation needs to append exactly one v1:forge:requestEvent for the four post-creation pipeline transitions (needs_approval -> validated / queued -> approved / changes_requested / rejected). Each persist step is mutually exclusive; at most one fires per invocation. The WRITE (recordRequestEvent) happens in the recordTransition automation's persist steps (ADR §2.1 single-writer). #2235.")
 logic recordTransition {
   args {
     event  object  @required
   }
   body {
-    toStatus   := coalesce(args.event.payload.status, "")
-    fromStatus := coalesce(args.event.oldStatus, "")
-    requestId  := coalesce(args.event.payload.id, "")
-
-    // Four mutually exclusive guards -- exactly one fires on a recognised
-    // status; the rest are no-ops (condition evaluates false, step skipped).
-    // MemQL logic bodies use := for every declaration; bodies inside `if`
-    // blocks must be function calls (not string literals), so each mapped
-    // status gets its own recordRequestEvent call.
-    //
-    // Mapping (toStatus -> kind):
+    // Pure projection -- the four mutually-exclusive recordRequestEvent
+    // writes moved to the automation's per-status persist steps, each
+    // guarding on toStatus so exactly one fires on a recognised status and
+    // the rest are no-ops. Mapping (toStatus -> kind):
     //   needs_approval    -> "validated"          (developer validated the request)
     //   queued            -> "approved"           (owner approved; ready to implement)
     //   changes_requested -> "changes_requested"  (reviewer sent it back)
     //   rejected          -> "rejected"           (terminal rejection)
+    // Statuses NOT mapped: submitted / needs_validation (routeRequest records
+    // "routed"); validated (intermediate, no standalone kind).
     //
-    // Statuses NOT mapped (handled elsewhere or no standalone event kind):
-    //   submitted / needs_validation -> routeRequest records "routed"
-    //   validated (intermediate)     -> no standalone kind; next hop is needs_approval
-    //
-    // Loop guard (two layers):
-    //   1. recordRequestEvent writes v1:forge:requestEvent (a DIFFERENT
-    //      concept), so it NEVER triggers graph.node.updated on v1:forge:request.
-    //   2. The per-status guards only fire on the four whitelisted values, so
-    //      updates that change only non-status fields are always silent.
-    evtValidated        := if toStatus == "needs_approval" {
-      recordRequestEvent({ requestId: requestId, kind: "validated",         fromStatus: fromStatus, toStatus: toStatus })
-    }
-    evtApproved         := if toStatus == "queued" {
-      recordRequestEvent({ requestId: requestId, kind: "approved",          fromStatus: fromStatus, toStatus: toStatus })
-    }
-    evtChangesRequested := if toStatus == "changes_requested" {
-      recordRequestEvent({ requestId: requestId, kind: "changes_requested", fromStatus: fromStatus, toStatus: toStatus })
-    }
-    evtRejected         := if toStatus == "rejected" {
-      recordRequestEvent({ requestId: requestId, kind: "rejected",          fromStatus: fromStatus, toStatus: toStatus })
-    }
-    return toStatus
+    // Prior-status availability: the engine publishes graph.node.updated with
+    // event.oldStatus = the prior row's status (#1158); it is the fromStatus.
+    return { requestId: coalesce(args.event.payload.id, ""), fromStatus: coalesce(args.event.oldStatus, ""), toStatus: coalesce(args.event.payload.status, "") }
   }
 }
 
@@ -165,23 +135,9 @@ logic appendAttachmentToRequest {
   }
 }
 
-// ---------------------------------------------------------------------------
-// recordMentoring -- the forgeRecordMentoring tool handler. The tool
-// surface intentionally does NOT expose `kind` (it is always "mentored"), so
-// it cannot point straight at recordRequestEvent -- that mutation
-// requires `kind`, and a direct mapping left it unset, failing with
-// "required argument kind is missing" (#1827). This wrapper injects the
-// constant kind="mentored" and forwards the caller's id / requestId / note.
-// ---------------------------------------------------------------------------
-@enabled
-@description("Record a 'mentored' v1:forge:requestEvent after a non-owner submitter was taught about the area they touched. Injects kind='mentored' and forwards the note verbatim.")
-logic recordMentoring {
-  args {
-    eventId    string
-    requestId  string  @required
-    note       string  @required
-  }
-  body {
-    return recordRequestEvent({ eventId: args.eventId, requestId: args.requestId, kind: "mentored", note: args.note })
-  }
-}
+// recordMentoring (RETIRED, #2235) -- the forgeRecordMentoring tool's
+// 'mentored'-event write was a §2.1 single-writer violation (a logic that
+// wrote inline). It is replaced by the thin `recordMentoredEvent` mutation in
+// mutations.memql (kind="mentored" injected in its insert body), which the
+// forgeRecordMentoring tool now targets directly -- a pure single-aggregate
+// write with no wrapper logic.

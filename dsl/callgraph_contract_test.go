@@ -44,10 +44,7 @@ var callGraphBaseline = []string{
 	// `func (Automation)` loop is the internal-only lowering form, not an author
 	// surface. Same blocker as the identity/worker sweep logics below.
 	"logic-purity|logic|pruneStaleClusterNodes",
-	"logic-purity|logic|recordMentoring",
-	"logic-purity|logic|recordTransition",
 	"logic-purity|logic|releaseWorkspaceOnPlanTerminal",
-	"logic-purity|logic|routeRequest",
 	"logic-purity|logic|workerInvocationRetentionSweep",
 	// #2219: pre-existing read-only-builtin debt surfaced when I7 turned the
 	// builtin side-effect classifier on. releaseWorkspaceOnPlanTerminal (already
