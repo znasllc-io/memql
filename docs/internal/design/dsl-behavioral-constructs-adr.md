@@ -108,6 +108,26 @@ stays trivial -- lift a run's steps into an automation block. This also resolves
 the draft's open question on `skill` (skills are capability bundles *above*
 automations; nothing sits between).
 
+> **Implementation status (I12 / #2229).** The library lifecycle this section
+> describes -- version + `intent` embedding + `reliability` + the
+> `candidate -> active -> deprecated` status ladder, invoke-by-reference with
+> params, and the planner's retrieval-augmented REUSE / ADAPT / SYNTHESIZE
+> composition -- **shipped under the action-library epic #1734** (phases
+> #1735-#1740 + activation #1758, all merged). The runtime carries it on the
+> `v1:actions:action` concept (`dsl/actions/concepts.memql`): primitives
+> (`kind=primitive`) and **composites** (`kind=composite`, `steps[]` of child
+> action refs). A composite IS the "automation promoted into the library" this
+> section names -- same versioned, embedded, reliability-scored, status-laddered
+> object; the only terminology drift is that the shipped concept tags the
+> composed kind `composite` rather than `automation`. Invoke-by-reference is
+> `action("id@version")` (`component/harness/actionpin`), retrieval is
+> `searchActions` (pgvector over `intent`, `integrations/actionsearch`),
+> composition is `component/harness/actionplan` (REUSE >= 0.82 / ADAPT >= 0.60 /
+> SYNTHESIZE), and reliability reinforcement is `component/harness/actionreplay`.
+> DevOps-DSL-epic item I12 (#2229) is therefore satisfied by #1734 and was closed
+> as already-delivered; a future rename of the composed `kind` to `automation`
+> would be cosmetic.
+
 ### 2.3 Action = external-capability only (Q3)
 
 An action performs exactly one **external** capability call on a surface and
