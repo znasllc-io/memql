@@ -27,6 +27,18 @@ import (
 // migrated, its line here disappears from the findings and the gate flags it as
 // stale -- delete the line in the same PR.
 var callGraphBaseline = []string{
+	// #2235: NOT migrated, blocked on engine bug #2254. These two (plus
+	// workerInvocationRetentionSweep below) gate their per-row write on a
+	// date window `addDuration(item.<ts>, "P{N}D") < timestamp()`, which is
+	// CONSTANT-FALSE in the automation condition evaluator (numeric-only `<`
+	// via toNumber() -> 0 for RFC3339; addDuration/timestamp not evaluated in
+	// the filter-value path). The current impure logic compiles to the
+	// identical condition, so these crons are already dead in production --
+	// accountDeletionSweep never hard-deletes a user past cooldown
+	// (compliance). A migration that preserved that dead behavior while
+	// removing the baseline line would falsely mark them "done." Migrate once
+	// #2254 lands. The 4 non-windowing identity/worker/workbench sweeps were
+	// migrated to forEach (#2251 + follow-up).
 	"logic-purity|logic|accessRequestExpirySweep",
 	"logic-purity|logic|accountDeletionSweep",
 	"logic-purity|logic|appendAttachmentToRequest",
@@ -37,7 +49,6 @@ var callGraphBaseline = []string{
 	"logic-purity|logic|bootstrapCluster",
 	"logic-purity|logic|bootstrapSession",
 	"logic-purity|logic|generateResponse",
-	"logic-purity|logic|killSwitchSuspendsRunningPlans",
 	// #2235: deferred. Per-row sweep (updateNodeHealth inside `for ... range`) needs
 	// a forEach automation step; struct-form forEach/for is documented (ADR S7) but
 	// NOT yet parsed (NormaliseAutomationSource rejects it), and a go-style
@@ -46,19 +57,12 @@ var callGraphBaseline = []string{
 	"logic-purity|logic|pruneStaleClusterNodes",
 	"logic-purity|logic|recordMentoring",
 	"logic-purity|logic|recordTransition",
-	"logic-purity|logic|releaseWorkspaceOnPlanTerminal",
 	"logic-purity|logic|routeRequest",
+	// #2235: NOT migrated, blocked on engine bug #2254 -- date-window gate
+	// `addDuration(item.createdAt, "P{N}D") < timestamp()` is constant-false
+	// in the condition evaluator. See the accessRequest/accountDeletion note
+	// at the top of this baseline. Migrate once #2254 lands.
 	"logic-purity|logic|workerInvocationRetentionSweep",
-	// #2219: pre-existing read-only-builtin debt surfaced when I7 turned the
-	// builtin side-effect classifier on. releaseWorkspaceOnPlanTerminal (already
-	// baselined above for logic-purity) also calls the side-effecting builtin
-	// workbenchTeardownDirectory (@executor integration.workbench.teardownDirectory,
-	// class=write) from a read context. Per ADR §3 the teardown belongs in an
-	// action reached from an automation step, not inline in a logic. This is the
-	// ONLY such finding tree-wide (a wholesale builtin->action migration is the
-	// large follow-up, epic #2212); grandfathered here so the gate stays green.
-	// When the teardown moves to an action, delete this line (burn-down).
-	"read-only-builtin|logic|releaseWorkspaceOnPlanTerminal",
 }
 
 // TestCallGraphContract is the HARD whole-tree gate for the behavioral

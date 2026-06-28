@@ -8,12 +8,31 @@
 // event the integration listens for.
 
 use workbench.logic.{ releaseWorkspaceOnPlanTerminal }
+use workbench.mutations.{ releaseWorkspace }
+use workbench.builtins.{ workbenchTeardownDirectory }
 
 @enabled
 @trigger(event="graph.node.updated.v1:planner:plan")
-@description("When a Plan transitions to a terminal status (succeeded / failed / cancelled), release the associated workbench workspace if one exists. The releaseWorkspace mutation flips the concept row; the workbench integration consumes the resulting graph.node.updated event and removes the on-disk directory tree.")
+@description("When a Plan transitions to a terminal status (succeeded / failed / cancelled), release the associated workbench workspace if one exists and tear down its on-disk directory. decide (pure) returns the plan's workspaces; apply releases each still-provisioned one (gated on terminal status); teardown removes the directory tree on terminal status even when no concept row exists (the MVP integration provisions in-memory + on-disk without writing the row).")
 automation releaseWorkspaceOnPlanTerminal {
-  step run {
+  step decide {
     logic releaseWorkspaceOnPlanTerminal { event: event }
+  }
+  step apply {
+    forEach item in decide.Nodes() {
+      if item.payload.status == "provisioned" && (event.node.payload.status == "succeeded" || event.node.payload.status == "failed" || event.node.payload.status == "cancelled") {
+        releaseWorkspace {
+          workspaceId: item.id,
+          reason: "plan_terminal"
+        }
+      }
+    }
+  }
+  step teardown {
+    if exists(event.node.id) && (event.node.payload.status == "succeeded" || event.node.payload.status == "failed" || event.node.payload.status == "cancelled") {
+      workbenchTeardownDirectory {
+        planId: event.node.id
+      }
+    }
   }
 }

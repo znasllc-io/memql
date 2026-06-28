@@ -442,7 +442,7 @@ func IndexTodoBuild(args IndexTodoArgs) string {
 	return b.String()
 }
 
-// KillSwitchSuspendsRunningPlans -- Triggered on v1:identity:user update. When preferences.computerUseEnabled flips true->false, transitions every running plan owned by that user (with computerUseScope set) to awaitingFeedback with feedbackReason='kill_switch_engaged'. Re-enable flips the flag back; resume is per-plan-explicit (no auto-resume on flag flip).
+// KillSwitchSuspendsRunningPlans -- Pure decide for the kill-switch sweep: returns every running plan owned by the updated user. The suspend write + the gate (computerUseEnabled==false AND the plan has a computerUseScope) live in the killSwitchSuspendsRunningPlans automation's forEach step (#2235). Re-enable flips the flag back; resume is per-plan-explicit.
 type KillSwitchSuspendsRunningPlansArgs struct {
 	Event map[string]any
 }
@@ -664,7 +664,7 @@ func RecordTransitionBuild(args RecordTransitionArgs) string {
 	return b.String()
 }
 
-// ReleaseWorkspaceOnPlanTerminal -- On every v1:planner:plan update, checks the new status; if terminal (succeeded/failed/cancelled) AND a v1:workbench:workspace exists for the planId AND it is still provisioned, flips the concept row to released AND calls the workbench integration to remove the on-disk directory tree. Also fires the teardown unconditionally on terminal status even when no concept row exists -- the MVP Go integration provisions workspaces in-memory + on-disk without writing the concept row, so the teardown call cleans those up too. Idempotent on both paths.
+// ReleaseWorkspaceOnPlanTerminal -- Pure decide for the workspace-release sweep: returns every v1:workbench:workspace for the updated plan. The terminal-status gate, the per-row release write (provisioned workspaces only), and the unconditional on-disk teardown all live in the releaseWorkspaceOnPlanTerminal automation's steps (#2235).
 type ReleaseWorkspaceOnPlanTerminalArgs struct {
 	Event map[string]any
 }
