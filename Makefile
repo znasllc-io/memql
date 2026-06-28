@@ -186,6 +186,12 @@ db:
 ## Bootstrap the local k3d cluster: create cluster, install ArgoCD
 ## (pinned v2.13.3, same as staging), apply the memql-local Application,
 ## and seed k8s Secrets. ArgoCD will sync the local overlay.
+##
+## This is the GitOps path: the local engine "deploy" IS the ArgoCD sync of the
+## local overlay (the primary deploy path, same as staging). It is NOT the
+## cockpit break-glass path -- `make deploy` is the imperative cockpit-delegated
+## path (I16, #2227). `make up` stays a cluster-bootstrap launcher so the local
+## inner loop never depends on the owner-gated cockpit deploy.
 ##   make up                       # current branch as targetRevision
 ##   make up REVISION=main         # pin to main
 ##   make up SERVERS=2 AGENTS=1   # multi-node (see E0.5 / #2067)
@@ -575,28 +581,39 @@ livekit-provision:
 
 .PHONY: deploy deploy-rollback
 
-## BREAK-GLASS / prod imperative AKS deploy (znasllc-io/memql#532, epic #522).
+## BREAK-GLASS imperative deploy -- DELEGATES TO THE COCKPIT (I16, epic
+## znasllc-io/memql#2212/#2227). `make` is a thin launcher now: it shells into
+## `memql-cockpit deploy`, which embeds the engine automation runtime, loads the
+## deployment bundle, and runs the PINNED `deployEngineCluster` automation
+## (role-gated + audited + version-pinned) from OUTSIDE the target cluster. The
+## env `switch` lives in that ONE automation -- `make` only forwards ENV.
+## See DEVOPS_DSL_BUNDLE_HANDOFF.md "Execution model".
+##
 ## NOT the normal staging path -- staging is GitOps (digest bump in
-## overlays/staging + merge -> ArgoCD syncs). Use this only when ArgoCD is
-## unavailable, or for prod (ENV=production) until prod is on ArgoCD (#2207).
-## Builds + pushes the engine node images to ACR, ensures the internal TLS
-## secrets, applies the manifests IDENTITY-FIRST (one-time migration + JWKS),
-## waits for rollout, then smoke-tests the live front door. Idempotent.
-## memql-secrets (genesis b64 + master key + DSN) is a one-time out-of-band
-## prerequisite. The bff carrier + copresent SPA are built + pinned from their
-## own repos. Impl in scripts/deploy/aks-deploy.sh.
-##   make deploy ENV=production VERSION=0.9.6  # prod imperative roll-out
-##   make deploy VERSION=0.9.6 DRY_RUN=1       # full plan, no changes
-##   make deploy SKIP_BUILD=1                  # apply the manifests' pinned tags
-##   make deploy VERSION=0.9.6 NO_SMOKE=1      # skip the post-deploy smoke test
+## overlays/staging + merge -> ArgoCD syncs). Use this break-glass path only
+## when ArgoCD is unavailable, or for prod (ENV=production) until prod is on
+## ArgoCD (#2207).
+##
+## OWNER-GATED (honest, not a silent failure): the cockpit's in-process engine
+## carries no database yet, so DB-backed deployment steps cannot complete until
+## the I13 runner surface + a live engine DB are wired (memql#2220/#2228). A real
+## deploy reports `BLOCKED (owner-gated): ...` cleanly; a DRY_RUN is a clean
+## no-op resolve. The cockpit binary is resolved by scripts/deploy/cockpit.sh
+## (COCKPIT_BIN > PATH > built from the sibling ../memql-cockpit via `make
+## cockpit`). There is NO fallback to the old script path.
+##
+## Forwarded knobs: ENV->--env, VERSION->--ref, DRY_RUN->--dry-run, plus the
+## role gate (ROLE->--role or MEMQL_COCKPIT_ROLE; deny-by-default) and ACTOR->
+## --actor for the audit trail. ARGS passes extra cockpit flags through.
+##   make deploy ENV=production VERSION=0.9.6 ROLE=developer  # prod imperative roll-out
+##   make deploy ENV=development VERSION=0.9.6 DRY_RUN=1 ROLE=developer  # resolve only, no changes
+##   make deploy ENV=staging COCKPIT_BIN=/path/to/memql-cockpit  # pin the binary
 deploy:
-	@bash scripts/deploy/aks-deploy.sh \
+	@COCKPIT_BIN="$${COCKPIT_BIN:-}" bash scripts/deploy/cockpit.sh deploy \
 		--env=$${ENV:-staging} \
-		$${VERSION:+--version=$$VERSION} \
-		$${SKIP_BUILD:+--skip-build} \
-		$${SKIP_TLS:+--skip-tls} \
-		$${NO_SMOKE:+--no-smoke} \
-		$${NO_GATE:+--no-gate} \
+		$${VERSION:+--ref=$$VERSION} \
+		$${ROLE:+--role=$$ROLE} \
+		$${ACTOR:+--actor=$$ACTOR} \
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
