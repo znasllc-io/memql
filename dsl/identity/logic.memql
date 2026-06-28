@@ -28,7 +28,7 @@
 //
 // The pending-access-request table is small (admin queue), so
 // iterating all of it daily is cheap.
-use identity.mutations.{ consumeMagicLinkRequest, deleteUserHard, expireAccessRequest, revokeDelegation }
+use identity.mutations.{ deleteUserHard, expireAccessRequest }
 use identity.queries.{ expiredActiveDelegations, expiredAuditEvents, expiredMagicLinkRequests, expiredPendingAccessRequests, usersInDeletionCooldown, usersScheduledForDeletion }
 use platform.queries.{ globalVariable }
 
@@ -329,16 +329,7 @@ logic magicLinkExpirySweep {
     event object @required
   }
   body {
-  expired := expiredMagicLinkRequests({ now: timestamp() })
-
-  for item := range expired.Nodes() {
-    consumeStep := consumeMagicLinkRequest({
-      requestId: item.id,
-      consumedFromIP: "system:expiry"
-    })
-  }
-
-  return expired.Len()
+  return expiredMagicLinkRequests({ now: timestamp() })
   }
 }
 
@@ -392,14 +383,6 @@ logic revokeExpiredDelegations {
     now string @required
   }
   body {
-    expiredDelegations := expiredActiveDelegations({ now: args.now })
-    for item := range expiredDelegations.Nodes() {
-      revokeStep := revokeDelegation({
-        delegationId: item.id,
-        revokedBySubject: "system:expiry",
-        revokedAt: args.now
-      })
-    }
-    return expiredDelegations.Len()
+    return expiredActiveDelegations({ now: args.now })
   }
 }
