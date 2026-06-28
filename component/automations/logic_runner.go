@@ -258,10 +258,124 @@ func EvaluateLocalExpr(expr string, evaluator *Evaluator) (any, bool, error) {
 	if val, handled := tryEvaluateLiteralLocally(expr); handled {
 		return val, true, nil
 	}
+	if val, handled, err := tryEvaluateObjectLiteralLocally(expr, evaluator); err != nil || handled {
+		return val, handled, err
+	}
 	if val, handled, err := tryEvaluateReturnLocally(expr, evaluator); err != nil || handled {
 		return val, handled, err
 	}
 	return tryEvaluateBuiltinLocally(expr, evaluator)
+}
+
+// tryEvaluateObjectLiteralLocally resolves an object-literal return /
+// step-RHS -- `{ key: <expr>, ... }` -- by evaluating each value against the
+// local Evaluator and building a Go map, instead of stringifying it back into a
+// query for engine.Execute.
+//
+// The engine round-trip is the #2274 blocker: a value that references a prior
+// step result (e.g. `rows: found`, a node list) renders back into the query text
+// as a JSON array / envelope and the engine parser rejects it ("unexpected token
+// after expression"). Resolving locally keeps each value as its Go value, so the
+// decide->persist pattern can return a flat object whose fields a downstream step
+// reads via `field(decide.result, "x")` / `decide.result.x` (the #2271 read-side
+// unwrap exposes them flat).
+//
+// Values resolve through the same leaf path the rest of a logic body uses
+// (literals, bare step refs, builtins, then step/path references); nested object
+// literals recurse. Returns (map, true, nil) for an object literal, and
+// (nil, false, nil) for anything else (so the caller falls through).
+func tryEvaluateObjectLiteralLocally(expr string, evaluator *Evaluator) (any, bool, error) {
+	expr = strings.TrimSpace(expr)
+	if len(expr) < 2 || expr[0] != '{' || expr[len(expr)-1] != '}' {
+		return nil, false, nil
+	}
+	inner := strings.TrimSpace(expr[1 : len(expr)-1])
+	out := map[string]any{}
+	if inner == "" {
+		return out, true, nil
+	}
+	pairs, err := splitTopLevelArgs(inner)
+	if err != nil {
+		return nil, false, nil // not a clean object literal -- let the normal path try
+	}
+	for _, pair := range pairs {
+		key, rawVal, ok := splitFirstTopLevelColon(pair)
+		if !ok {
+			return nil, false, nil // not key:value shape -- not an object literal we own
+		}
+		key = strings.TrimSpace(key)
+		if len(key) >= 2 && (key[0] == '"' || key[0] == '\'') && key[len(key)-1] == key[0] {
+			key = key[1 : len(key)-1]
+		}
+		val, verr := resolveObjectLiteralValue(strings.TrimSpace(rawVal), evaluator)
+		if verr != nil {
+			return nil, false, fmt.Errorf("object literal field %q: %w", key, verr)
+		}
+		out[key] = val
+	}
+	return out, true, nil
+}
+
+// resolveObjectLiteralValue resolves one object-literal value expression against
+// the evaluator: nested object literals recurse, then the shared leaf path
+// (literals / bare step refs / builtins), then step / path references
+// (`args.event.payload.x`, `someStep.First()`, `someStep`, `$steps.x...`). The
+// result is unwrapped so a Bundle-backed step ref yields its flat value (#2271).
+func resolveObjectLiteralValue(raw string, evaluator *Evaluator) (any, error) {
+	if len(raw) >= 2 && raw[0] == '{' && raw[len(raw)-1] == '}' {
+		if v, handled, err := tryEvaluateObjectLiteralLocally(raw, evaluator); err != nil {
+			return nil, err
+		} else if handled {
+			return v, nil
+		}
+	}
+	if v, handled, err := EvaluateLocalExpr(raw, evaluator); err != nil {
+		return nil, err
+	} else if handled {
+		return UnwrapStepResult(v), nil
+	}
+	v, err := evaluator.EvaluateStepReference(raw)
+	if err != nil {
+		return nil, err
+	}
+	return UnwrapStepResult(v), nil
+}
+
+// splitFirstTopLevelColon splits "key: value" on the first colon not nested in
+// brackets or a quoted string. ok=false when there is no top-level colon.
+func splitFirstTopLevelColon(s string) (key, val string, ok bool) {
+	var (
+		depth     int
+		inString  bool
+		quoteChar byte
+	)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			if c == '\\' && i+1 < len(s) {
+				i++
+				continue
+			}
+			if c == quoteChar {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"', '\'':
+			inString = true
+			quoteChar = c
+		case '(', '[', '{':
+			depth++
+		case ')', ']', '}':
+			depth--
+		case ':':
+			if depth == 0 {
+				return s[:i], s[i+1:], true
+			}
+		}
+	}
+	return "", "", false
 }
 
 // tryEvaluateLiteralLocally resolves a return / step-RHS expression that is a

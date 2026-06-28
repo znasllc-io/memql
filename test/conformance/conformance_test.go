@@ -33,6 +33,7 @@ func allChecks() []check {
 		forgeAuditShortIdCheck(),       // #1859
 		libraryIndexPromotionCheck(),   // #2235
 		cognitionDecidePersistCheck(),  // #2271
+		objectLiteralReturnCheck(),     // #2274
 	}
 }
 

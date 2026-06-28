@@ -1072,6 +1072,14 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 		switch v := e.Value.(type) {
 		case string:
 			return fmt.Sprintf("%q", v)
+		case map[string]any, []any:
+			// Object / array literals (e.g. an object-literal `return { k: <expr> }`).
+			// Render proper MemQL via valueToString, which recurses into each value
+			// (ExpressionNode -> its source form, nested map/array, scalar). Without
+			// this they hit the default %v below and serialize as a Go map string
+			// with AST pointers (`map[k:0x...]`), which the engine then rejects --
+			// the #2274 object-literal-return bug.
+			return c.valueToString(v)
 		default:
 			return fmt.Sprintf("%v", v)
 		}
