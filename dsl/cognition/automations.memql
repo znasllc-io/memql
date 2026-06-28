@@ -4,16 +4,45 @@
 // files cover the other construct kinds.
 
 use cognition.logic.{ bootstrapSession, generateResponse, voiceMigrationOnSecondHuman }
+use cognition.mutations.{ createSessionForParticipant, sendTextUtterance }
 
 // automations/v1/cognition/bootstrapSession/automation.memql
 // Auto-creates a v1:cognition:session record when a participant is created.
 // Ensures every participant has a session tracking their real-time interaction state.
+//
+// #2235 / #2271: the pure `bootstrapSession` logic decides whether a session is
+// missing (`steps.decide.result == true`); the two writes that used to live
+// inline in the logic (ADR §2.1 logic-purity violation) are now `if`-gated steps
+// here -- the createSessionForParticipant insert and the session.created emit --
+// mirroring the cluster bootstrapCluster pattern. Every field binds an explicit
+// key + coalesce (a nil @required mutation arg trips validation).
 @enabled
 @trigger(event="node.created", concept="v1:cognition:participant", partition="*")
 @description("Auto-creates a session when a participant joins a space")
 automation bootstrapSession {
-  step run {
+  step decide {
     logic bootstrapSession { event: event }
+  }
+  step createSession {
+    if steps.decide.result == true {
+      createSessionForParticipant {
+        participantId: coalesce(event.payload.id, ""),
+        partitionId:   coalesce(event.payload.partitionId, "")
+      }
+    }
+  }
+  step emitSessionCreated {
+    if steps.decide.result == true {
+      publishEvent({
+        topic: "session.created",
+        payload: {
+          sessionId:     coalesce(event.payload.id, ""),
+          participantId: coalesce(event.payload.id, ""),
+          partitionId:   coalesce(event.payload.partitionId, ""),
+          timestamp:     timestamp()
+        }
+      })
+    }
   }
 }
 
@@ -23,12 +52,41 @@ automation bootstrapSession {
 // reception, concurrent context loading, Polyphon scoring, and streaming
 // dispatch, then emits this event with pre-loaded context when a
 // non-streaming AI response is needed.
+//
+// #2235 / #2271: the pure `generateResponse` logic does the idempotency read +
+// the ai() call and returns the reply TEXT as a scalar (empty when already
+// answered). The two writes that used to live inline in the logic (the
+// sendTextUtterance insert -- the ADR §2.1 logic-purity violation -- plus the
+// presence bump) are now `if`-gated steps here, gated on
+// `steps.decide.result != ""` and reading the reply text via
+// `steps.decide.result`. The #2271 engine fix unwraps the Bundle-wrapped step
+// result so that read resolves flat at real-DB runtime.
 @enabled
 @trigger(event="cognition.response.requested")
 @description("Generate and insert AI response for an utterance")
 automation generateResponse {
-  step run {
+  step decide {
     logic generateResponse { event: event }
+  }
+  step insert {
+    if steps.decide.result != "" {
+      sendTextUtterance {
+        partitionId:   coalesce(event.payload.partitionId, ""),
+        participantId: coalesce(event.payload.siParticipantId, ""),
+        text:          steps.decide.result,
+        replyToId:     coalesce(event.payload.utteranceId, ""),
+        source:        { inputMethod: "si", agentId: coalesce(event.payload.agentId, "") }
+      }
+    }
+  }
+  step presence {
+    if steps.decide.result != "" {
+      cognitionTrackPresence({
+        participantId: coalesce(event.payload.siParticipantId, ""),
+        partitionId:   coalesce(event.payload.partitionId, ""),
+        state:         "idle"
+      })
+    }
   }
 }
 

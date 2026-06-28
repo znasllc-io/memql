@@ -132,6 +132,20 @@ func (r *ExecuteResult) OutputPayload() any {
 	return r.Bundle
 }
 
+// FlatOutput returns the flat value a construct returned (the `output` payload
+// -- the map of an object-literal return, or a scalar) when one is set, and
+// (nil, false) for a Bundle-backed result. Callers that need to peel the
+// engine envelope off a step result for a downstream read (#2271) use this so a
+// Bundle-backed result is left intact (e.g. `decide.result.Bundle.nodes`),
+// while an object/scalar return reads flat (`decide.result.x` /
+// `field(decide.result, "x")` / the scalar `decide.result`).
+func (r *ExecuteResult) FlatOutput() (any, bool) {
+	if r == nil || r.output == nil {
+		return nil, false
+	}
+	return r.output, true
+}
+
 func (r *ExecuteResult) setOutput(payload any) {
 	if r == nil {
 		return

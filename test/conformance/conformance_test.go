@@ -32,6 +32,7 @@ func allChecks() []check {
 		automationLogicFullBodyCheck(), // #1847
 		forgeAuditShortIdCheck(),       // #1859
 		libraryIndexPromotionCheck(),   // #2235
+		cognitionDecidePersistCheck(),  // #2271
 	}
 }
 

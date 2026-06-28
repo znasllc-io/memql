@@ -174,7 +174,7 @@ func BootstrapClusterBuild(args BootstrapClusterArgs) string {
 	return b.String()
 }
 
-// BootstrapSession -- Auto-creates a v1:cognition:session record when a v1:cognition:participant is created, with default device + stream state. Ensures every participant has a session tracking their real-time interaction state. Idempotent via participantSession existence check. Emits 'session.created' for downstream consumers.
+// BootstrapSession -- Decides whether a new v1:cognition:session must be created for a freshly-created participant: returns true when no session exists yet (idempotency via participantSession). The bootstrapSession automation performs the gated createSessionForParticipant insert + session.created emit.
 type BootstrapSessionArgs struct {
 	Event map[string]any
 }
@@ -319,7 +319,7 @@ func EngineNodeTypesBuild(args EngineNodeTypesArgs) string {
 	return "engineNodeTypes({})"
 }
 
-// GenerateResponse -- Generates and inserts an AI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via sendTextUtterance, and bumps participant presence to idle. Idempotent via hasAIResponseForReply.
+// GenerateResponse -- Decides + generates the AI reply for a cognition.response.requested event: returns the reply text (empty when a response already exists -- idempotency via hasAIResponseForReply). The generateResponse automation performs the gated sendTextUtterance insert + presence bump from this text.
 type GenerateResponseArgs struct {
 	Event map[string]any
 }

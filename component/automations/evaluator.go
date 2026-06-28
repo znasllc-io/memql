@@ -1869,7 +1869,10 @@ func (e *Evaluator) resolvePath(path string) (any, error) {
 				parts = parts[3:]
 				goto navigate
 			case "result":
-				current = stepResult.Result
+				// Peel the Bundle-wrapped engine envelope so a returned
+				// object-literal field (decide.result.x) reads the flat value
+				// the construct returned, not the opaque envelope. #2271.
+				current = UnwrapStepResult(stepResult.Result)
 				parts = parts[3:]
 				goto navigate
 			}

@@ -27,26 +27,26 @@ import (
 // migrated, its line here disappears from the findings and the gate flags it as
 // stale -- delete the line in the same PR.
 var callGraphBaseline = []string{
-	// #2235: DEFERRED (safe-or-defer). bootstrapSession and generateResponse are
-	// cognition's two critical event-driven orchestrations -- session bootstrap
-	// (read existing session, then conditionally create the session row + emit
-	// session.created) and the core AI-response path (idempotency check, then a
-	// gated ai() call whose result feeds a sendTextUtterance write + a presence
-	// update). Both carry multiple conditional writes with intermediate
-	// dependencies; an `if`-step / forEach migration is mechanically possible but
-	// needs DB-backed behavioral verification of the gate + chaining semantics
-	// that a load-only test can't prove, on paths where a regression silently
-	// breaks session creation or every AI reply. A prior migration attempt was
-	// reverted for exactly this reason. Left baselined pending an owner decision
-	// to migrate the critical paths with DB-backed verification.
+	// EMPTY -- the call-graph purity contract (ADR §2.1) is fully enforced
+	// tree-wide with zero grandfathered violations (the #2235 burn-down is
+	// complete).
+	//
+	// The final two entries (bootstrapSession + generateResponse, cognition's
+	// two critical event-driven orchestrations) were migrated under #2271: the
+	// engine now unwraps a logic/query step's Bundle-wrapped result so a
+	// downstream automation step reads the returned value flat
+	// (decide.result.x / field(decide.result, "x") / the scalar decide.result),
+	// which unblocked the decide->persist pattern at real-DB runtime. Both pure
+	// logics now only READ + decide (generateResponse also calls ai(), a
+	// read/compute); their graph writes (createSessionForParticipant +
+	// session.created emit; sendTextUtterance + presence bump) moved onto
+	// `if`-gated automation steps in dsl/cognition/automations.memql.
 	//
 	// The retention/expiry/deletion date-window sweeps (accountDeletionSweep,
 	// accessRequestExpirySweep, workerInvocationRetentionSweep) were migrated to
 	// pure decide + window + forEach automation steps once the condition
 	// evaluator learned to evaluate the date-window gate (#2256/#2254). The 4
 	// non-windowing identity/worker/workbench sweeps migrated earlier (#2251).
-	"logic-purity|logic|bootstrapSession",
-	"logic-purity|logic|generateResponse",
 }
 
 // TestCallGraphContract is the HARD whole-tree gate for the behavioral

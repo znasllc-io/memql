@@ -41,14 +41,19 @@
 // - bootstrapSession automation creates sessions for new AI
 //   participants.
 // - Emits "si.auto-joined" event for observability.
-use cognition.mutations.{ createSessionForParticipant, sendTextUtterance }
 use cognition.queries.{ hasAIResponseForReply, participantSession }
 use identity.queries.{ usersActiveInSpace }
 
 // automations/v1/cognition/bootstrapSession/automation.memql
 // Auto-creates a v1:cognition:session record when a participant is created.
 // Ensures every participant has a session tracking their real-time interaction state.
-@description("Auto-creates a v1:cognition:session record when a v1:cognition:participant is created, with default device + stream state. Ensures every participant has a session tracking their real-time interaction state. Idempotent via participantSession existence check. Emits 'session.created' for downstream consumers.")
+// PURE decide logic (#2235 / #2271): it only READS (the existence check) and
+// returns the boolean decision "no session exists yet -> create one". The two
+// writes it used to perform inline (the createSessionForParticipant insert + the
+// session.created emit -- the ADR §2.1 logic-purity violation) now live as
+// `if`-gated steps on the bootstrapSession automation, gated on
+// `steps.decide.result == true`, mirroring the cluster bootstrapCluster pattern.
+@description("Decides whether a new v1:cognition:session must be created for a freshly-created participant: returns true when no session exists yet (idempotency via participantSession). The bootstrapSession automation performs the gated createSessionForParticipant insert + session.created emit.")
 logic bootstrapSession {
   args {
     event object @required
@@ -58,21 +63,11 @@ logic bootstrapSession {
   // args.event.payload.id = participant ID
   // args.event.payload.partitionId = space ID (flattened from node payload)
   // args.event.payload.participantType = "human" or "si" (flattened from node payload)
-  // args.event.payload.payload = full node payload for backwards compatibility
 
-  // Check if session already exists for this participant
+  // Check if session already exists for this participant; decide create-or-not.
   checkExistingSession := participantSession({ participantId: args.event.payload.id })
 
-  // Create the session record with default device + stream state.
-  // Voice / video flow is no longer gated by a tier ceiling -- the
-  // user's mic toggle (humanInput.microphoneEnabled) plus each
-  // agent's audioControl mode decide who publishes audio in the room.
-  createSession := if checkExistingSession.Empty() { createSessionForParticipant({ participantId: args.event.payload.id, partitionId: args.event.payload.partitionId }) }
-
-  // Emit session created event for downstream consumers
-  emitSessionCreated := if checkExistingSession.Empty() { publishEvent({ topic: "session.created", payload: { sessionId: args.event.payload.id, participantId: args.event.payload.id, partitionId: args.event.payload.partitionId, timestamp: timestamp() } }) }
-
-  return coalesce(createSession, checkExistingSession.First())
+  return checkExistingSession.Empty()
   }
 }
 
@@ -82,7 +77,16 @@ logic bootstrapSession {
 // reception, concurrent context loading, Polyphon scoring, and streaming
 // dispatch, then emits this event with pre-loaded context when a
 // non-streaming AI response is needed.
-@description("Generates and inserts an AI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via sendTextUtterance, and bumps participant presence to idle. Idempotent via hasAIResponseForReply.")
+// PURE decide logic (#2235 / #2271): idempotency READ + the ai() call, returning
+// the generated reply TEXT as a scalar (empty string when a response already
+// exists, so nothing is written). The two graph writes it used to perform inline
+// (the sendTextUtterance insert -- the ADR §2.1 logic-purity violation -- plus
+// the presence bump) now live as `if`-gated steps on the generateResponse
+// automation, gated on `steps.decide.result != ""` and reading the reply text
+// via `steps.decide.result`. This is the scalar form of the decide->persist
+// pattern; the engine fix (#2271) makes the Bundle-wrapped step result read flat.
+// ai() is a read/compute (not a graph write), so the logic stays contract-pure.
+@description("Decides + generates the AI reply for a cognition.response.requested event: returns the reply text (empty when a response already exists -- idempotency via hasAIResponseForReply). The generateResponse automation performs the gated sendTextUtterance insert + presence bump from this text.")
 @eventField("agentId", "promptData", "promptTemplateId", "siParticipantId", "partitionId", "utteranceId")
 logic generateResponse {
   args {
@@ -90,47 +94,27 @@ logic generateResponse {
   }
   body {
   // The event payload is assembled by the Go cognition handler with:
-  //   partitionId           - Space where the utterance was sent
+  //   partitionId       - Space where the utterance was sent
   //   utteranceId       - The triggering utterance node ID
-  //   triggerText       - The utterance text that triggered the response
   //   siParticipantId   - The AI participant that should respond
   //   agentId           - The agent concept ID for the responding AI
   //   promptTemplateId  - Which prompt template to use (e.g., "cognitionReply")
   //   promptData        - Pre-assembled prompt data (assistant, space, participants, history, etc.)
-  //   toolNames         - Tool whitelist for the AI response
 
-  // Check idempotency -- skip if we already responded to this utterance
+  // Check idempotency -- skip if we already responded to this utterance.
   existingResponse := hasAIResponseForReply({
     replyToId: args.event.payload.utteranceId,
     participantId: args.event.payload.siParticipantId
   })
 
-  // Generate AI response via the prompt template
+  // Generate the AI response via the prompt template (only when not already answered).
   aiResponse := if existingResponse.Empty() {
     ai(args.event.payload.promptTemplateId, args.event.payload.promptData)
   }
 
-  // Insert the AI response as a new utterance
-  insertResponse := if existingResponse.Empty() {
-    sendTextUtterance({
-      args.event.payload.partitionId,
-      participantId: args.event.payload.siParticipantId,
-      text: aiResponse,
-      replyToId: args.event.payload.utteranceId,
-      source: { inputMethod: "si", agentId: args.event.payload.agentId }
-    })
-  }
-
-  // Update presence to idle after responding
-  presenceUpdate := if existingResponse.Empty() {
-    cognitionTrackPresence({
-      participantId: args.event.payload.siParticipantId,
-      args.event.payload.partitionId,
-      state: "idle"
-    })
-  }
-
-  return insertResponse
+  // The reply text -- empty string when already answered, so the automation's
+  // `!= ""`-gated persist + presence steps skip.
+  return coalesce(aiResponse, "")
   }
 }
 
