@@ -95,7 +95,11 @@ func runForgeLogicArgResolution(t *testing.T, e *Env) {
 		"requestId": requestId,
 		"projectId": projectId,
 		"title":     "conf-1840 forge logic arg resolution",
-		"body":      "Reproduce the *ast.ArgRefExpr leak across the forge logic layer.",
+		// NB: keep this body free of the argRefLeakSignatures substrings -- since
+		// #2240 forgeAttachToRequest returns the full updated row (it points at the
+		// attachToRequest mutation, not the old id-returning logic), so the body
+		// round-trips into the tool result the leak detector scans.
+		"body": "Reproduce the unresolved arg-reference leak across the forge logic layer.",
 	})
 
 	// --- A. forgeRecordMentoring -> recordMentoredEvent mutation (#2235) ---
