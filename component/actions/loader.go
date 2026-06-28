@@ -10,6 +10,7 @@ import (
 
 	memqldsl "github.com/znasllc-io/memql/dsl"
 
+	"github.com/znasllc-io/memql/component/actions/capability"
 	"github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
@@ -60,6 +61,22 @@ func DeclToAction(d *ast.ActionDecl, origin string) (*Action, error) {
 
 	if a.Kind != "primitive" {
 		return nil, fmt.Errorf("action %q (%s): only @kind(\"primitive\") authored actions are supported, got %q", d.Name, origin, a.Kind)
+	}
+
+	// The capability's namespace must be in the vocabulary (ADR §2.3).
+	if !capability.ValidNamespace(a.Capability) {
+		return nil, fmt.Errorf("action %q (%s): capability %q is not in the namespace vocabulary -- one of fs.* / shell.* / http.* / integration.* / mcp.*", d.Name, origin, a.Capability)
+	}
+	// The AUTHORITATIVE sideEffectClass lives on the CAPABILITY, not the action
+	// (ADR §7): an authored or generated action cannot spoof its risk class. A
+	// declared @sideEffect that disagrees with the capability's class is
+	// rejected; an omitted @sideEffect is derived from the capability.
+	if class, known := capability.CapabilityClass(a.Capability); known {
+		if a.SideEffect == "" {
+			a.SideEffect = class
+		} else if a.SideEffect != class {
+			return nil, fmt.Errorf("action %q (%s): declared @sideEffect %q does not match capability %q class %q -- the authoritative class lives on the capability (ADR §7); fix @sideEffect or the capability", d.Name, origin, a.SideEffect, a.Capability, class)
+		}
 	}
 
 	for _, f := range d.Params {

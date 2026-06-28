@@ -58,10 +58,25 @@ var (
 	writeBlockRE = regexp.MustCompile(`(?m)^\s*(insert|update)\s*\{`)
 	// A trigger annotation (the reactive surface).
 	triggerRE = regexp.MustCompile(`@trigger\b`)
+	// A capability declaration inside an action body:
+	// `capability "<namespace>.<verb>"` at statement position.
+	capabilityRE = regexp.MustCompile(`(?m)^[ \t]*capability[ \t]+"([^"]*)"`)
 	// File-top use import: `use a.b.c.{ x, y }`. The brace body may span
 	// lines; `[^}]*` (with default dot) crosses newlines.
 	useRE = regexp.MustCompile(`(?m)^[ \t]*use[ \t]+([A-Za-z_][A-Za-z0-9_.]*)\.\{([^}]*)\}`)
 )
+
+// validCapabilityNamespaces is the closed action-capability vocabulary
+// (ADR §2.3). The authoritative per-verb sideEffectClass registry lives in
+// component/actions/capability; the structural call-graph rules only need the
+// namespace set. Kept in sync by component/actions/capability.Namespaces.
+var validCapabilityNamespaces = map[string]bool{
+	"fs":          true,
+	"shell":       true,
+	"http":        true,
+	"integration": true,
+	"mcp":         true,
+}
 
 // singular maps a construct-file base name (the `<kind>s` segment) to the
 // singular construct kind.
@@ -187,6 +202,37 @@ func ConstructFindings(kind, name, text string, useKinds map[string]string, side
 			if ck == "mutation" {
 				add("mutation-single-write", fmt.Sprintf("calls mutation %q -- a second aggregate write is rejected (ADR §2.3); sequence writes as separate automation steps", cn))
 			}
+		}
+	case "action":
+		// An action performs EXACTLY ONE external capability call on a surface
+		// and NEVER touches the MemQL graph or any other construct (ADR §2.3).
+		caps := capabilityRE.FindAllStringSubmatch(text, -1)
+		switch len(caps) {
+		case 0:
+			add("action-one-capability", "declares no external capability -- an action performs exactly one (ADR §2.3)")
+		case 1:
+			// The single capability's namespace must be in the vocabulary.
+			capName := caps[0][1]
+			ns := capName
+			if i := strings.IndexByte(capName, '.'); i >= 0 {
+				ns = capName[:i]
+			}
+			if !validCapabilityNamespaces[ns] {
+				add("action-capability-namespace", fmt.Sprintf("capability %q is not in the namespace vocabulary -- one of fs.* / shell.* / http.* / integration.* / mcp.* (ADR §2.3)", capName))
+			}
+		default:
+			add("action-one-capability", fmt.Sprintf("declares %d capabilities -- an action performs exactly one (ADR §2.3); compose multiples in an automation", len(caps)))
+		}
+		// An action may not invoke any other DSL construct.
+		for cn, ck := range calls {
+			switch ck {
+			case "logic", "query", "mutation", "automation", "action":
+				add("action-no-calls", fmt.Sprintf("calls %s %q -- an action is a single external capability and may not invoke other constructs (ADR §2.3)", ck, cn))
+			}
+		}
+		// An action never reaches the graph: graph writes are mutations.
+		if writeBlockRE.MatchString(text) {
+			add("action-no-graph", "contains a graph write block -- an action never touches the MemQL graph (ADR §2.3); persist via a following mutation step")
 		}
 	}
 	return out
