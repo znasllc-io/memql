@@ -37,7 +37,6 @@ var callGraphBaseline = []string{
 	"logic-purity|logic|bootstrapCluster",
 	"logic-purity|logic|bootstrapSession",
 	"logic-purity|logic|generateResponse",
-	"logic-purity|logic|killSwitchSuspendsRunningPlans",
 	// #2235: deferred. Per-row sweep (updateNodeHealth inside `for ... range`) needs
 	// a forEach automation step; struct-form forEach/for is documented (ADR S7) but
 	// NOT yet parsed (NormaliseAutomationSource rejects it), and a go-style

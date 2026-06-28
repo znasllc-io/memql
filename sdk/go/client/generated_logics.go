@@ -442,7 +442,7 @@ func IndexTodoBuild(args IndexTodoArgs) string {
 	return b.String()
 }
 
-// KillSwitchSuspendsRunningPlans -- Triggered on v1:identity:user update. When preferences.computerUseEnabled flips true->false, transitions every running plan owned by that user (with computerUseScope set) to awaitingFeedback with feedbackReason='kill_switch_engaged'. Re-enable flips the flag back; resume is per-plan-explicit (no auto-resume on flag flip).
+// KillSwitchSuspendsRunningPlans -- Pure decide for the kill-switch sweep: returns every running plan owned by the updated user. The suspend write + the gate (computerUseEnabled==false AND the plan has a computerUseScope) live in the killSwitchSuspendsRunningPlans automation's forEach step (#2235). Re-enable flips the flag back; resume is per-plan-explicit.
 type KillSwitchSuspendsRunningPlansArgs struct {
 	Event map[string]any
 }

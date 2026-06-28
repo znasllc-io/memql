@@ -17,30 +17,17 @@
 // affected plan (we deliberately do NOT auto-resume on flag flip --
 // the kill switch is the emergency-stop, and re-enable is the
 // confirmation, but resume is per-plan-explicit).
-use planner.mutations.{ updatePlanStatus }
 use platform.queries.{ globalVariable }
 use worker.mutations.{ softDeleteWorkerInvocation }
 use worker.queries.{ expiredWorkerInvocations, runningPlansForUser }
 
-@description("Triggered on v1:identity:user update. When preferences.computerUseEnabled flips true->false, transitions every running plan owned by that user (with computerUseScope set) to awaitingFeedback with feedbackReason='kill_switch_engaged'. Re-enable flips the flag back; resume is per-plan-explicit (no auto-resume on flag flip).")
+@description("Pure decide for the kill-switch sweep: returns every running plan owned by the updated user. The suspend write + the gate (computerUseEnabled==false AND the plan has a computerUseScope) live in the killSwitchSuspendsRunningPlans automation's forEach step (#2235). Re-enable flips the flag back; resume is per-plan-explicit.")
 logic killSwitchSuspendsRunningPlans {
   args {
     event object @required
   }
   body {
-  enabled := coalesce(args.event.node.payload.preferences.computerUseEnabled, true)
-  userId := coalesce(args.event.node.id, "")
-  plans := runningPlansForUser({ userId: userId })
-  for item := range plans.Nodes() {
-    suspend := if !enabled && item.payload.computerUseScope != "" {
-      updatePlanStatus({
-        planId: item.id,
-        status: "awaitingFeedback",
-        feedbackReason: "kill_switch_engaged"
-      })
-    }
-  }
-  return plans.Len()
+  return runningPlansForUser({ userId: coalesce(args.event.node.id, "") })
   }
 }
 
