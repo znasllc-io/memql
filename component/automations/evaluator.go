@@ -10,6 +10,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // VariableResolver resolves variable names to their values.
@@ -510,39 +513,7 @@ func (e *Evaluator) evaluateCoalesce(expr string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(args) == 0 {
-		return nil, nil
-	}
-
-	for i, raw := range args {
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
-			continue
-		}
-
-		val, ok := e.evaluateCoalesceArg(raw)
-		if !ok {
-			continue
-		}
-
-		// #1614: the FINAL arg is the ultimate fallback -- return it even
-		// when it resolves to "" (so coalesce(absent, "") -> ""). A
-		// NON-final arg that resolves to nil or "" is treated as missing
-		// and skipped, so coalesce("", fallback) / coalesce(emptyField,
-		// fallback) still fall through.
-		if i == len(args)-1 {
-			return val, nil
-		}
-		if val == nil {
-			continue
-		}
-		if s, isString := val.(string); isString && strings.TrimSpace(s) == "" {
-			continue
-		}
-		return val, nil
-	}
-
-	return nil, nil
+	return e.coalesceFromArgs(args, e.evaluateCoalesceArg), nil
 }
 
 func (e *Evaluator) evaluateCoalesceArg(raw string) (any, bool) {
@@ -789,6 +760,35 @@ func (e *Evaluator) EvaluateFilterValue(expr string) (any, error) {
 		return sum / float64(len(arr)), nil
 	}
 
+	// timestamp() -- the current evaluation time as an RFC3339 string. The
+	// executor / logic-runner seeds a stable "timestamp" custom value per run;
+	// prefer it so every comparison in one pass reads a single clock, and fall
+	// back to now when unseeded. Without this a date-window gate like
+	// `addDuration(...) < timestamp()` could not resolve its right operand
+	// (#2256).
+	if expr == "timestamp()" {
+		if v, ok := e.custom["timestamp"]; ok {
+			return v, nil
+		}
+		return time.Now().UTC().Format(time.RFC3339), nil
+	}
+
+	// Builtin calls usable as comparison operands (#2256): concat / coalesce /
+	// addDuration. Before this they fell through to the literal-string fallback
+	// at the bottom of this function, and a date-arithmetic expression then
+	// toNumber()'d to 0 -- making every retention/deletion date-window gate
+	// constant-false (#2254). An unrecognised call name falls through unchanged.
+	if name, builtinArgs, ok := matchBuiltinCall(expr); ok {
+		switch name {
+		case "concat":
+			return e.evaluateConcatArgs(builtinArgs)
+		case "coalesce":
+			return e.evaluateBareCoalesce(builtinArgs)
+		case "addDuration":
+			return e.evaluateAddDurationCall(builtinArgs)
+		}
+	}
+
 	// Bare step-variable reference: a single identifier (no dot) that names a
 	// recorded step result. A logic body's guard like `if toStatus == "queued"`
 	// (recordTransition, where `toStatus := coalesce(...)` is a prior step)
@@ -862,6 +862,171 @@ func (e *Evaluator) EvaluateFilterValue(expr string) (any, error) {
 
 	// Treat as literal value
 	return expr, nil
+}
+
+// matchBuiltinCall reports whether expr is a single top-level function call
+// `<ident>(<args>)` -- the opening paren follows a bare identifier, the closing
+// paren is the final character, and the parens inside the args are balanced.
+// Used to dispatch builtin calls that appear as a comparison operand in a
+// condition / filter context (#2256). Returns the function name and the raw
+// (unsplit) argument text.
+func matchBuiltinCall(expr string) (name, args string, ok bool) {
+	expr = strings.TrimSpace(expr)
+	open := strings.IndexByte(expr, '(')
+	if open <= 0 || !strings.HasSuffix(expr, ")") {
+		return "", "", false
+	}
+	name = expr[:open]
+	for i, r := range name {
+		switch {
+		case r == '_':
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return "", "", false
+		}
+	}
+	args = expr[open+1 : len(expr)-1]
+	depth := 0
+	for _, r := range args {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth < 0 {
+				return "", "", false
+			}
+		}
+	}
+	if depth != 0 {
+		return "", "", false
+	}
+	return name, strings.TrimSpace(args), true
+}
+
+// evaluateOperand resolves a builtin-call argument: a quoted string literal is
+// unquoted to its value, everything else routes through EvaluateFilterValue.
+// EvaluateFilterValue does not strip surrounding quotes (it treats an unknown
+// token as a literal verbatim), so addDuration("...", "P30D") needs this to
+// hand the duration parser `P30D` rather than `"P30D"` (#2256).
+func (e *Evaluator) evaluateOperand(raw string) (any, error) {
+	raw = strings.TrimSpace(raw)
+	if v, ok, err := parseQuotedStringLiteral(raw); err == nil && ok {
+		return v, nil
+	}
+	return e.EvaluateFilterValue(raw)
+}
+
+// evaluateConcatArgs evaluates a concat(a, b, ...) call: each argument is
+// resolved through evaluateOperand, string-formatted, and joined (#2256).
+func (e *Evaluator) evaluateConcatArgs(argsRaw string) (any, error) {
+	parts, err := splitCoalesceArgs(argsRaw)
+	if err != nil {
+		return nil, err
+	}
+	var b strings.Builder
+	for _, raw := range parts {
+		val, err := e.evaluateOperand(raw)
+		if err != nil {
+			return nil, fmt.Errorf("concat() argument %q: %w", raw, err)
+		}
+		if val == nil {
+			continue
+		}
+		b.WriteString(FormatValue(val))
+	}
+	return b.String(), nil
+}
+
+// evaluateBareCoalesce evaluates a bare coalesce(a, b, ...) call (the
+// no-`$`-prefix form that appears as a condition operand), reusing the same
+// first-non-empty + final-fallback semantics as $coalesce() (#1614, #2256).
+func (e *Evaluator) evaluateBareCoalesce(argsRaw string) (any, error) {
+	args, err := splitCoalesceArgs(argsRaw)
+	if err != nil {
+		return nil, err
+	}
+	return e.coalesceFromArgs(args, e.coalesceBareArg), nil
+}
+
+// coalesceBareArg resolves a bare-form coalesce argument: a quoted literal,
+// numeric, or a bare field path (resolved through EvaluateFilterValue). A nil
+// resolution (absent field) counts as "missing" so coalesce falls through --
+// the bare condition form (`coalesce(item.payload.x, "30")`) needs path
+// resolution that evaluateCoalesceArg (the $-form helper) does not do (#2256).
+func (e *Evaluator) coalesceBareArg(raw string) (any, bool) {
+	val, err := e.evaluateOperand(raw)
+	if err != nil || val == nil {
+		return nil, false
+	}
+	return val, true
+}
+
+// evaluateAddDurationCall evaluates addDuration(timestamp, isoDuration): it
+// resolves both operands, parses the timestamp (RFC3339 / date-only) and the
+// ISO-8601 duration through the shared memql parsers, and returns the shifted
+// timestamp as an RFC3339 string -- the form a `< timestamp()` window
+// comparison then reads as a real date instead of 0 (#2254).
+func (e *Evaluator) evaluateAddDurationCall(argsRaw string) (any, error) {
+	args, err := splitCoalesceArgs(argsRaw)
+	if err != nil {
+		return nil, err
+	}
+	if len(args) != 2 {
+		return nil, fmt.Errorf("addDuration() expects 2 args, got %d", len(args))
+	}
+	tsVal, err := e.evaluateOperand(args[0])
+	if err != nil {
+		return nil, fmt.Errorf("addDuration() timestamp arg: %w", err)
+	}
+	durVal, err := e.evaluateOperand(args[1])
+	if err != nil {
+		return nil, fmt.Errorf("addDuration() duration arg: %w", err)
+	}
+	tsStr := FormatValue(tsVal)
+	t, err := memql.ParseFlexibleTimestamp(tsStr)
+	if err != nil {
+		return nil, fmt.Errorf("addDuration() invalid timestamp %q: %w", tsStr, err)
+	}
+	durStr := FormatValue(durVal)
+	d, err := memql.ParseISO8601Duration(durStr)
+	if err != nil {
+		return nil, fmt.Errorf("addDuration() invalid duration %q: %w", durStr, err)
+	}
+	return t.Add(d).Format(time.RFC3339), nil
+}
+
+// coalesceFromArgs runs the shared coalesce selection over already-split args:
+// the first non-nil / non-empty argument wins, EXCEPT the final argument is the
+// ultimate fallback and is returned even when it resolves to "" (#1614) -- so
+// coalesce(absent, "") -> "" while coalesce("", fallback) falls through.
+func (e *Evaluator) coalesceFromArgs(args []string, evalArg func(string) (any, bool)) any {
+	if len(args) == 0 {
+		return nil
+	}
+	for i, raw := range args {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		val, ok := evalArg(raw)
+		if !ok {
+			continue
+		}
+		if i == len(args)-1 {
+			return val
+		}
+		if val == nil {
+			continue
+		}
+		if s, isString := val.(string); isString && strings.TrimSpace(s) == "" {
+			continue
+		}
+		return val
+	}
+	return nil
 }
 
 // EvaluateStepReference resolves a value that may reference a step result or loop item.
@@ -1457,21 +1622,23 @@ func (e *Evaluator) evaluateComparison(condition, op string) (bool, error) {
 
 	rightRaw := strings.TrimSpace(parts[1])
 
-	// Quoted string literal.
+	var right any
+	// Quoted string literal -- captured here and used verbatim, INCLUDING the
+	// empty string. Letting `""` fall through to parseUnquotedLiteral /
+	// EvaluateFilterValue collapsed it to nil, and compareValues(value, nil) is
+	// never equal, so `X != ""` spuriously fired on empty-string rows -- the
+	// #2257 kill-switch over-suspend. Keeping "" a real string is the fix.
 	if s, ok, err := parseQuotedStringLiteral(rightRaw); err != nil {
 		return false, err
 	} else if ok {
-		rightRaw = s
-	}
-
-	var right any
-	// Typed literals: null/true/false/numbers.
-	if lit, ok := parseUnquotedLiteral(rightRaw); ok {
+		right = s
+	} else if lit, ok := parseUnquotedLiteral(rightRaw); ok {
+		// Typed literals: null/true/false/numbers.
 		right = lit
 	} else {
-		// Use EvaluateFilterValue for right side too (could be a path reference)
-		// Note: EvaluateFilterValue returns strings for unknown tokens; we only treat
-		// "null"/"true"/"false"/numbers as typed literals via parseUnquotedLiteral above.
+		// Use EvaluateFilterValue for right side too (could be a path reference).
+		// EvaluateFilterValue returns strings for unknown tokens; only
+		// null/true/false/numbers are treated as typed literals above.
 		val, err := e.EvaluateFilterValue(rightRaw)
 		if err != nil {
 			// Treat as literal string
@@ -1481,11 +1648,30 @@ func (e *Evaluator) evaluateComparison(condition, op string) (bool, error) {
 		}
 	}
 
-	equal := compareValues(left, right)
+	// Empty / missing equivalence (#2257): a missing field resolves to nil and
+	// an empty field to ""; compared against an empty-string literal these must
+	// be equal, else `X != ""` over-fires on empty/absent rows (and `X == ""`
+	// under-fires). Only the nil<->"" gap is collapsed; non-empty operands are
+	// unaffected.
+	equal := compareValues(left, right) || (isEmptyish(left) && isEmptyish(right))
 	if op == "==" {
 		return equal, nil
 	}
 	return !equal, nil
+}
+
+// isEmptyish reports whether v is the "empty" sentinel for equality purposes:
+// nil, or a string that is empty / whitespace-only. Lets a missing field (nil)
+// and an empty-string field both compare equal to an empty-string literal
+// (#2257).
+func isEmptyish(v any) bool {
+	if v == nil {
+		return true
+	}
+	if s, ok := v.(string); ok {
+		return strings.TrimSpace(s) == ""
+	}
+	return false
 }
 
 // evaluateNumericComparison handles >, <, >=, <= comparisons.
@@ -1506,18 +1692,100 @@ func (e *Evaluator) evaluateNumericComparison(condition, op string) (bool, error
 		return false, err
 	}
 
-	leftNum := toNumber(left)
-	rightNum := toNumber(right)
+	return compareOrdered(left, right, op)
+}
 
+// compareOrdered evaluates an ordering comparison (> < >= <=). It tries, in
+// order: a numeric comparison (both operands numeric), an RFC3339 / date
+// timestamp comparison (both operands non-numeric date strings), and finally a
+// lexicographic string comparison. Before this, ordering coerced every operand
+// through toNumber(), which returns 0 for any non-numeric string (RFC3339 dates
+// included), so a window gate like `addDuration(...) < timestamp()` was
+// `0 < 0` -> constant-false and three retention/deletion crons silently never
+// fired (#2254).
+func compareOrdered(left, right any, op string) (bool, error) {
+	if lNum, lOK := asNumber(left); lOK {
+		if rNum, rOK := asNumber(right); rOK {
+			return applyOrder(lNum, rNum, op)
+		}
+	}
+
+	leftStr, leftIsStr := left.(string)
+	rightStr, rightIsStr := right.(string)
+	if leftIsStr && rightIsStr {
+		if lt, lerr := memql.ParseFlexibleTimestamp(leftStr); lerr == nil {
+			if rt, rerr := memql.ParseFlexibleTimestamp(rightStr); rerr == nil {
+				switch op {
+				case ">":
+					return lt.After(rt), nil
+				case "<":
+					return lt.Before(rt), nil
+				case ">=":
+					return !lt.Before(rt), nil
+				case "<=":
+					return !lt.After(rt), nil
+				}
+			}
+		}
+		return applyOrder2(leftStr, rightStr, op)
+	}
+
+	// Mixed / non-comparable operands: keep the legacy numeric coercion so a
+	// numeric-vs-stringified-number comparison still behaves as before.
+	return applyOrder(toNumber(left), toNumber(right), op)
+}
+
+// asNumber reports whether v is (or parses as) a number, returning its float64
+// value. A non-numeric string (e.g. an RFC3339 date) returns ok=false so the
+// caller can fall back to a timestamp / lexicographic comparison (#2254).
+func asNumber(v any) (float64, bool) {
+	switch n := v.(type) {
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case float64:
+		return n, true
+	case json.Number:
+		if f, err := n.Float64(); err == nil {
+			return f, true
+		}
+		return 0, false
+	case string:
+		if f, err := strconv.ParseFloat(strings.TrimSpace(n), 64); err == nil {
+			return f, true
+		}
+		return 0, false
+	default:
+		return 0, false
+	}
+}
+
+func applyOrder(l, r float64, op string) (bool, error) {
 	switch op {
 	case ">":
-		return leftNum > rightNum, nil
+		return l > r, nil
 	case "<":
-		return leftNum < rightNum, nil
+		return l < r, nil
 	case ">=":
-		return leftNum >= rightNum, nil
+		return l >= r, nil
 	case "<=":
-		return leftNum <= rightNum, nil
+		return l <= r, nil
+	default:
+		return false, fmt.Errorf("unknown operator: %s", op)
+	}
+}
+
+func applyOrder2(l, r, op string) (bool, error) {
+	switch op {
+	case ">":
+		return l > r, nil
+	case "<":
+		return l < r, nil
+	case ">=":
+		return l >= r, nil
+	case "<=":
+		return l <= r, nil
 	default:
 		return false, fmt.Errorf("unknown operator: %s", op)
 	}
