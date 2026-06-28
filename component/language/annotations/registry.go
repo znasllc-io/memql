@@ -33,7 +33,7 @@ var ByReceiver = map[string][]string{
 	},
 	"Mutation": {
 		"description", "enabled", "disabled", "internal", "actor", "public",
-		"mergeFields", "scrubPii", "mcp",
+		"mergeFields", "appendFields", "scrubPii", "mcp",
 	},
 	"Logic": {
 		"description", "enabled", "disabled", "eventField",
@@ -80,15 +80,16 @@ var ByReceiver = map[string][]string{
 // TestEveryAnnotationHasDoc in component/memql/sense).
 var Docs = map[string]string{
 	// Lifecycle / shared.
-	"enabled":     "Enable this definition. Functions are disabled by default.",
-	"disabled":    "Disable this definition.",
-	"description": "Human-readable description of this definition.",
-	"eventField":  "On an event-triggered logic: declare the allowed top-level event payload fields (e.g. @eventField(\"partitionId\", \"siParticipantId\")). Opt-in field-level validation -- every event.payload.<field> reference in the body is checked against this set at load time, rejecting typos / fields the (possibly synthetic, handler-assembled) triggering event cannot carry (memql#1743). Bare names or payload.-prefixed paths both normalize to the head segment.",
-	"internal":    "Hide from external API discovery.",
-	"public":      "Per-row-authz marker: this query/mutation is intentionally callable without a caller-scope filter (concept catalogs, pre-auth login paths). See docs/public/operate/auth/per-row-authz-audit.md.",
-	"actor":       "On a mutation: resolves auth-context (`actor.X`) fields. On a shape: kind marker -- projects the auth-context envelope (actor.userId / role / ...).",
-	"mergeFields": "On an update mutation: deep-merge the named object-typed payload fields into the stored object instead of replacing them wholesale, so sibling keys survive a single-key write. Format: @mergeFields(\"preferences\").",
-	"scrubPii":    "On an update mutation (the hard-delete / data-deletion path): after the partial payload merges, zero EVERY field the bound concept marks @pii. The field set is derived from the schema, so a newly-annotated PII field is scrubbed automatically with no change to the mutation. Bare flag, no arguments. See memql#1711.",
+	"enabled":      "Enable this definition. Functions are disabled by default.",
+	"disabled":     "Disable this definition.",
+	"description":  "Human-readable description of this definition.",
+	"eventField":   "On an event-triggered logic: declare the allowed top-level event payload fields (e.g. @eventField(\"partitionId\", \"siParticipantId\")). Opt-in field-level validation -- every event.payload.<field> reference in the body is checked against this set at load time, rejecting typos / fields the (possibly synthetic, handler-assembled) triggering event cannot carry (memql#1743). Bare names or payload.-prefixed paths both normalize to the head segment.",
+	"internal":     "Hide from external API discovery.",
+	"public":       "Per-row-authz marker: this query/mutation is intentionally callable without a caller-scope filter (concept catalogs, pre-auth login paths). See docs/public/operate/auth/per-row-authz-audit.md.",
+	"actor":        "On a mutation: resolves auth-context (`actor.X`) fields. On a shape: kind marker -- projects the auth-context envelope (actor.userId / role / ...).",
+	"mergeFields":  "On an update mutation: deep-merge the named object-typed payload fields into the stored object instead of replacing them wholesale, so sibling keys survive a single-key write. Format: @mergeFields(\"preferences\").",
+	"appendFields": "On an update mutation: append the named array-typed payload fields' elements to the stored array instead of replacing it wholesale, so a single-writer mutation can accumulate list items (e.g. attach one id). Format: @appendFields(\"attachmentIds\").",
+	"scrubPii":     "On an update mutation (the hard-delete / data-deletion path): after the partial payload merges, zero EVERY field the bound concept marks @pii. The field set is derived from the schema, so a newly-annotated PII field is scrubbed automatically with no change to the mutation. Bare flag, no arguments. See memql#1711.",
 	// Query / spec.
 	"shape": "Optional: pin the shape a spec's predicate reads (the eval strategy is otherwise derived from the body's field references).",
 	// Automation.

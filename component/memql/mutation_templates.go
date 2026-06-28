@@ -56,6 +56,13 @@ type FunctionMutationTemplate struct {
 	// AliasOfTemplate is an optional aliasOf relationship hint.
 	AliasOfTemplate any
 
+	// AppendFields carries the mutation's @appendFields("a", "b")
+	// annotation: array-typed payload fields whose partial-write
+	// elements the update executor APPENDS to the stored array instead
+	// of replacing it wholesale. Only valid on update-kind mutations
+	// (memql#2240).
+	AppendFields []string
+
 	// MergeFields carries the mutation's @mergeFields("a", "b")
 	// annotation: object-typed payload fields that the update executor
 	// deep-merges into the stored object instead of replacing it
@@ -199,15 +206,16 @@ func (e *MemQLEngine) renderMutationTemplate(ctx context.Context, tmpl *Function
 	}
 
 	return MutationNode{
-		Kind:        kind,
-		Concept:     concept,
-		ID:          strings.TrimSpace(id),
-		PayloadRaw:  string(payloadJSON),
-		CreatedAt:   createdAtRef,
-		ParentRef:   parentRef,
-		AliasOfRef:  aliasRef,
-		MergeFields: tmpl.MergeFields,
-		ScrubPii:    tmpl.ScrubPii,
+		Kind:         kind,
+		Concept:      concept,
+		ID:           strings.TrimSpace(id),
+		PayloadRaw:   string(payloadJSON),
+		CreatedAt:    createdAtRef,
+		ParentRef:    parentRef,
+		AliasOfRef:   aliasRef,
+		MergeFields:  tmpl.MergeFields,
+		AppendFields: tmpl.AppendFields,
+		ScrubPii:     tmpl.ScrubPii,
 	}, nil
 }
 
@@ -1236,6 +1244,40 @@ func mutationMergeFields(funcDef *languageParser.FunctionDef, kind ast.MutationK
 	}
 	if len(fields) > 0 && kind != ast.MutationKindUpdate {
 		return nil, fmt.Errorf("@mergeFields is only valid on update mutations (insert writes the full payload; there is nothing stored to merge against)")
+	}
+	return fields, nil
+}
+
+// mutationAppendFields extracts the @appendFields("a", "b") annotation
+// from a mutation definition into the field-name list the update
+// executor appends (rather than replaces). Only meaningful on update-kind
+// mutations -- an insert writes the full payload, so there is no stored
+// array to append to -- so its presence on an insert is a load-time error
+// rather than a silent no-op. See memql#2240.
+func mutationAppendFields(funcDef *languageParser.FunctionDef, kind ast.MutationKind) ([]string, error) {
+	var fields []string
+	for _, attr := range funcDef.Attributes {
+		if attr == nil || attr.Name != languageParser.AttrAppendFields {
+			continue
+		}
+		switch v := attr.Value.(type) {
+		case string:
+			if s := strings.TrimSpace(v); s != "" {
+				fields = append(fields, s)
+			}
+		case []string:
+			for _, raw := range v {
+				if s := strings.TrimSpace(raw); s != "" {
+					fields = append(fields, s)
+				}
+			}
+		}
+		if len(fields) == 0 {
+			return nil, fmt.Errorf(`@appendFields requires at least one field name, e.g. @appendFields("attachmentIds")`)
+		}
+	}
+	if len(fields) > 0 && kind != ast.MutationKindUpdate {
+		return nil, fmt.Errorf("@appendFields is only valid on update mutations (insert writes the full payload; there is nothing stored to append to)")
 	}
 	return fields, nil
 }

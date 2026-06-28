@@ -201,6 +201,63 @@ func (e *MemQLEngine) loadPriorPayload(ctx context.Context, conceptMeta *memoryn
 // When a merge-listed field's prior or partial value is not an object
 // (absent, null, scalar, array), the field falls back to plain
 // replacement -- mirroring the default and avoiding type surprises.
+// appendPayloadFields rewrites the partial update payload so that, for each
+// field named in appendFields, the partial array's elements are APPENDED to
+// the prior (stored) array rather than replacing it. It runs BEFORE
+// mergePayloadFields, mutating partial[field] in place to the combined array;
+// the subsequent top-level-replace merge then writes that combined array.
+//
+// appendFields is opt-in per named mutation via @appendFields("a", "b") (see
+// mutationAppendFields in mutation_templates.go). The default update() contract
+// remains top-level replacement, so an array field NOT listed still replaces
+// wholesale. This is the engine-level append primitive that lets a single
+// pure mutation accumulate list elements (attach one id to
+// request.attachmentIds) without a read-merge-append logic wrapper -- the
+// logic-purity-clean form (memql#2240). Not deduped: appending an
+// already-present element yields a duplicate, matching the prior
+// read-merge-append behavior.
+//
+// A non-array prior value (absent / null / scalar) is treated as an empty
+// array, so the FIRST append on a row with no array yet starts fresh. A
+// non-array partial value is wrapped as a single element.
+func appendPayloadFields(prior, partial map[string]any, appendFields []string) {
+	for _, f := range appendFields {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		newVal, present := partial[f]
+		if !present {
+			// Field not written in this call -- nothing to append; the
+			// stored array survives untouched via the omitted-field inherit.
+			continue
+		}
+		combined := append([]any{}, toAppendSlice(prior[f])...)
+		combined = append(combined, toAppendSlice(newVal)...)
+		partial[f] = combined
+	}
+}
+
+// toAppendSlice normalises an array-ish payload value to []any for appending.
+// nil / absent -> empty; []any and []string pass through; any other scalar is
+// wrapped as a single element (so @appendFields tolerates a scalar partial).
+func toAppendSlice(v any) []any {
+	switch arr := v.(type) {
+	case nil:
+		return nil
+	case []any:
+		return arr
+	case []string:
+		out := make([]any, len(arr))
+		for i, s := range arr {
+			out[i] = s
+		}
+		return out
+	default:
+		return []any{v}
+	}
+}
+
 func mergePayloadFields(prior, partial map[string]any, mergeFields []string) {
 	mergeSet := make(map[string]struct{}, len(mergeFields))
 	for _, f := range mergeFields {
@@ -405,6 +462,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			// blast-radius validation guard only gates the valid false->true
 			// ACCEPT transition, not a re-write of an already-accepted override.
 			meta.priorHealingValid = boolFromAny(priorPayload["valid"])
+			appendPayloadFields(priorPayload, payload, mutation.AppendFields)
 			mergePayloadFields(priorPayload, payload, mutation.MergeFields)
 			payload = priorPayload
 		}

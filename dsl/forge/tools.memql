@@ -163,9 +163,9 @@ tool forgeRecordMentoring {
 // ----- attachments -----
 
 @enabled
-@handler(type="function", name="appendAttachmentToRequest")
+@handler(type="function", name="attachToRequest")
 @executionTime("fast")
-@description("Attach ONE screenshot or file (a v1:common:attachment id) to an existing forge request. Callable repeatedly to accumulate multiple attachments. Internally fetches the current attachmentIds array, appends the new id, and writes the full updated array -- no clobbering of existing attachments. The v1:common:attachment must already exist (uploaded via the space attachments endpoint).")
+@description("Attach ONE screenshot or file (a v1:common:attachment id) to an existing forge request. Callable repeatedly to accumulate multiple attachments. Appends the id to the request's attachmentIds (no clobbering of existing attachments) via the @appendFields-backed attachToRequest mutation. The v1:common:attachment must already exist (uploaded via the space attachments endpoint).")
 @allowedRoles("owner", "admin", "developer", "writer", "reader")
 @mcp
 tool forgeAttachToRequest {

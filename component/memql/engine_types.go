@@ -443,6 +443,12 @@ type MutationNode struct {
 	// update() query strings and unannotated mutations. See memql#1339.
 	MergeFields []string
 
+	// AppendFields names array-typed payload fields whose partial-write
+	// elements executeUpdate APPENDS to the stored array instead of
+	// replacing it wholesale. Populated from a mutation's @appendFields
+	// annotation; always empty otherwise. See memql#2240.
+	AppendFields []string
+
 	// ScrubPii is set from a mutation's @scrubPii annotation: when true,
 	// executeUpdate enumerates every @pii-annotated field on the bound
 	// concept (Concept.PIIFields()) and zeroes it after the partial
