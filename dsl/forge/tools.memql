@@ -149,7 +149,7 @@ tool forgeRequestChanges {
 // ----- mentoring -----
 
 @enabled
-@handler(type="function", name="recordMentoring")
+@handler(type="function", name="recordMentoredEvent")
 @executionTime("fast")
 @description("Record a 'mentored' requestEvent after Claude has delivered a teaching explanation to a non-owner submitter. Call this immediately after showing the mentoring explanation to the user. Pass the request id and the explanation text as the note (kind='mentored' is injected server-side). Owner submissions skip this tool -- only call it when the submitter role is NOT 'owner'.")
 @allowedRoles("owner", "admin", "developer", "writer", "reader")

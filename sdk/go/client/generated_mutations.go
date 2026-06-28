@@ -7939,6 +7939,42 @@ func RecordLegalAcceptanceBuild(args RecordLegalAcceptanceArgs) string {
 	return b.String()
 }
 
+// RecordMentoredEvent -- Append a 'mentored' v1:forge:requestEvent after a non-owner submitter was taught about the area they touched. Injects kind='mentored' and forwards eventId / requestId / note. actorUserId + actorRole stamped from actor; requestId normalized to short form (shortId(), #1859). The forgeRecordMentoring tool's direct single writer (replaces the recordMentoring logic -- #2235).
+//
+// Bound concept: requestEvent.
+type RecordMentoredEventArgs struct {
+	EventId   string
+	RequestId string
+	Note      string
+}
+
+// RecordMentoredEvent calls the engine mutation recordMentoredEvent.
+func (qc *QueryClient) RecordMentoredEvent(ctx context.Context, args RecordMentoredEventArgs) (*Result, error) {
+	call := RecordMentoredEventBuild(args)
+	return qc.executeNamed(ctx, "recordMentoredEvent", call)
+}
+
+func RecordMentoredEventBuild(args RecordMentoredEventArgs) string {
+	var b strings.Builder
+	b.WriteString("recordMentoredEvent({")
+	if args.EventId != "" {
+		b.WriteString("eventId: ")
+		b.WriteString(fmt.Sprintf("%q", args.EventId))
+	}
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("note: ")
+	b.WriteString(fmt.Sprintf("%q", args.Note))
+	b.WriteString("})")
+	return b.String()
+}
+
 // RecordNumber -- Persist a provisioned DID. Called after a carrier BuyNumber succeeds.
 //
 // Bound concept: number.

@@ -6,11 +6,12 @@ package conformance
 // audit events ARE written, but `forgeRequestHistory(<shortId>)` returns empty
 // because the automation path keys the events under the CANONICAL request id.
 //
-//   routeRequest / recordTransition write
-//   `recordRequestEvent({ requestId: args.event.payload.id, ... })`,
-//   and a node.created / node.updated event's `payload.id` is the CANONICAL
-//   node id (`v1:forge:request:r-...`). The TOOL path (recordMentoring)
-//   passes the SHORT tool arg, so its `mentored` event is keyed short. The
+//   the routeRequest / recordTransition automations write (since #2235,
+//   event-bound persist steps) `recordRequestEvent { requestId: event.payload.id,
+//   ... }`, and a node.created / node.updated event's `payload.id` is the
+//   CANONICAL node id (`v1:forge:request:r-...`). The TOOL path (recordMentoredEvent,
+//   the forgeRecordMentoring handler since #2235; formerly the recordMentoring
+//   logic) passes the SHORT tool arg, so its `mentored` event is keyed short. The
 //   audit trail splits across two id forms; requestEvents matches the
 //   field literally, so a short-id read only finds one form.
 //
@@ -101,13 +102,16 @@ func runForgeAuditShortId(t *testing.T, e *Env) {
 			"transition (recordTransition keyed it under the canonical id); events=%v", shortId, afterTransition)
 	}
 
-	// --- C. tool path (recordMentoring -> 'mentored', short id) ----------
+	// --- C. tool path (recordMentoredEvent -> 'mentored', short id) ----------
 	// The mentoring tool forwards the caller's SHORT requestId verbatim. After the
 	// fix shortId() is a no-op on an already-short id, so the tool-written event
 	// stays short and must STILL be found under the short id (no regression), and
 	// it must sit alongside the automation-written events under ONE id form.
+	// (recordMentoredEvent normalizes via shortId() identically; here we drive
+	// recordRequestEvent directly with kind="mentored" to exercise the same
+	// short-keyed write the tool produces.)
 	e.runMutation(t, "recordRequestEvent", map[string]any{
-		"requestId": shortId, // short tool arg, exactly as recordMentoring passes it
+		"requestId": shortId, // short tool arg, exactly as recordMentoredEvent passes it
 		"kind":      "mentored",
 		"note":      "conf-1859 mentoring touch",
 	})

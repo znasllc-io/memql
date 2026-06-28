@@ -188,7 +188,7 @@ mutate request attachToRequest {
 //   - automation path (routeRequest / recordTransition) passes
 //     args.event.payload.id, which is the CANONICAL node id
 //     (v1:forge:request:r-...) of the created/updated request row;
-//   - tool path (recordMentoring) passes the SHORT tool arg (r-...).
+//   - tool path (recordMentoredEvent) passes the SHORT tool arg (r-...).
 // Without normalization the audit trail splits across both forms and
 // forgeRequestHistory(<shortId>) finds only the tool-written events.
 // shortId() strips the `v1:forge:request:` concept prefix; it is idempotent
@@ -216,5 +216,38 @@ mutate requestEvent recordRequestEvent {
     args.toStatus
     args.note
     provenanceMutation: "recordRequestEvent"
+  }
+}
+
+// ---------------------------------------------------------------------------
+// recordMentoredEvent -- the forgeRecordMentoring tool's direct single writer.
+// The tool surface intentionally does NOT expose `kind` (it is always
+// "mentored"), so it cannot point straight at recordRequestEvent (which
+// requires kind). This thin mutation injects the constant kind="mentored" in
+// its insert body and forwards the caller's eventId / requestId / note,
+// keeping the tool path a pure single-aggregate write. Replaces the former
+// recordMentoring wrapper logic (which performed the write inline -- the
+// §2.1 single-writer violation). #2235.
+//
+// requestId is normalized via shortId() exactly like recordRequestEvent so the
+// tool-written 'mentored' events key under the same short id form as the
+// automation-written audit events (#1859).
+// ---------------------------------------------------------------------------
+@enabled
+@description("Append a 'mentored' v1:forge:requestEvent after a non-owner submitter was taught about the area they touched. Injects kind='mentored' and forwards eventId / requestId / note. actorUserId + actorRole stamped from actor; requestId normalized to short form (shortId(), #1859). The forgeRecordMentoring tool's direct single writer (replaces the recordMentoring logic -- #2235).")
+mutate requestEvent recordMentoredEvent {
+  args {
+    eventId    string
+    requestId  string  @required
+    note       string  @required
+  }
+  insert {
+    id: args.eventId
+    requestId: shortId(args.requestId)
+    kind: "mentored"
+    actorUserId: actor.userId
+    actorRole: actor.role
+    args.note
+    provenanceMutation: "recordMentoredEvent"
   }
 }

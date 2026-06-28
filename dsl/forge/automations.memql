@@ -2,39 +2,129 @@
 //
 // Event-driven orchestration for the `forge` namespace.
 //
-// routeRequest -- the first forge automation. Fires when a v1:forge:request
-// is created (the submitRequest tool -> createRequest -> node.created)
-// and routes it through routeRequest by submitter role. This is the
-// idiomatic MemQL shape: an MCP tool writes a node, a node.created automation
-// orchestrates. The whole pipeline (validate -> approve -> implement) hangs
-// off this spine; later phase automations (spike, implement, deploy) trigger
-// off subsequent request transitions.
+// routeRequest -- fires on v1:forge:request node.created and routes the new
+// request to its next pipeline state by submitter role, then records a 'routed'
+// audit event. recordTransition -- fires on node.updated and appends one
+// v1:forge:requestEvent per recognised status transition.
 //
-// recordTransition -- fires on node.updated for v1:forge:request and appends
-// one requestEvent per pipeline transition. Only the post-creation statuses are
-// handled here; the initial 'routed' event is already recorded by routeRequest
-// inside routeRequest. Loop safety: the recorder writes a requestEvent
-// (a DIFFERENT concept), so it cannot re-trigger this node.updated automation.
-// A status whitelist in recordTransition ensures we only record meaningful
-// pipeline transitions and silently ignore unrelated field updates (e.g. priority
-// bumps that leave status unchanged or land on a status we don't map).
+// #2235 (logic-purity burn-down): both automations are EVENT-BOUND multi-step
+// blocks -- there is NO `decide` logic. Each persist step binds its mutation
+// args DIRECTLY from the triggering event payload (the node.created /
+// node.updated envelope's payload IS the request row, so the request id is
+// event.payload.id), mirroring the proven cluster registerNode / deregisterNode
+// pattern. This deliberately avoids reading a prior logic step's object result:
+// a logic step's result is the raw (Bundle-wrapped) engine envelope, so
+// field(decide.result, "x") resolves to nil and silently sends the mutation
+// all-missing args ("required argument requestId is missing") -- the failure on
+// the seeded-DB conformance gate (#1840 / #1847 / #1859).
+//
+// Authoring note (#2235): inside a step, use the bare `<mutation>{ ... }` call
+// form -- the `mutate <name>{` keyword form collides with the struct-form
+// mutation-DEFINITION rewriter (NormaliseMutationSource matches the header
+// anywhere in the file).
+//
+// The routeRequest developer transition is split into two single-equality steps
+// (persistAdmin + persistWriter) rather than one `submitterRole == "admin" ||
+// == "writer"` step, sidestepping the condition evaluator's compound-operator
+// quirks (#2256 / #2257) -- simple `==` on a present string is the proven-green
+// shape.
+//
+// Loop safety: routeRequest's advanceRequest is an update on the SAME
+// v1:forge:request, which fires node.updated -- consumed only by recordTransition,
+// which writes v1:forge:requestEvent (a DIFFERENT concept) and so never re-fires
+// node.updated on v1:forge:request. No cycle.
 
-use forge.logic.{ recordTransition, routeRequest }
+use forge.mutations.{ advanceRequest, recordRequestEvent }
 
 @enabled
 @trigger(event="node.created", concept="v1:forge:request", partition="*")
-@description("On submission of a v1:forge:request, route it to its next approval-pipeline state by the submitter's role (owner fast-track / developer -> needs_approval / non-developer -> needs_validation) and record a 'routed' audit event.")
+@description("On submission of a v1:forge:request, route it to its next approval-pipeline state by the submitter's role (owner fast-track -> queued / developer -> needs_approval / non-developer -> needs_validation) and record a 'routed' audit event. Event-bound persist steps bind args from event.payload (#2235).")
 automation routeRequest {
-  step run {
-    logic routeRequest { event: event }
+  step persistOwner {
+    if event.payload.submitterRole == "owner" {
+      advanceRequest {
+        requestId: event.payload.id,
+        status: "queued",
+        approvedByUserId: event.payload.submitterUserId
+      }
+    }
+  }
+  step persistAdmin {
+    if event.payload.submitterRole == "admin" {
+      advanceRequest {
+        requestId: event.payload.id,
+        status: "needs_approval"
+      }
+    }
+  }
+  step persistWriter {
+    if event.payload.submitterRole == "writer" {
+      advanceRequest {
+        requestId: event.payload.id,
+        status: "needs_approval"
+      }
+    }
+  }
+  step persistReader {
+    if event.payload.submitterRole == "reader" {
+      advanceRequest {
+        requestId: event.payload.id,
+        status: "needs_validation"
+      }
+    }
+  }
+  step persistRouted {
+    recordRequestEvent {
+      requestId: event.payload.id,
+      kind: "routed",
+      fromStatus: "submitted",
+      note: "routed by submitter role"
+    }
   }
 }
 
 @enabled
 @trigger(event="node.updated", concept="v1:forge:request", partition="*")
-@description("On every v1:forge:request status transition (validate / approve / changes-requested / reject), append exactly one v1:forge:requestEvent with the derived kind, fromStatus (event.oldStatus), and toStatus (event.payload.status). Silently skips updates that do not change status or land on an unrecognised status. No loop risk: the recorder writes a requestEvent (a different concept) so it cannot re-fire this automation.")
+@description("On every v1:forge:request status transition (validate / approve / changes-requested / reject), append exactly one v1:forge:requestEvent with the derived kind, fromStatus (event.payload.oldStatus), and toStatus (event.payload.status). Silently skips updates that do not change status or land on an unrecognised status. No loop risk: the recorder writes a requestEvent (a different concept) so it cannot re-fire this automation. Event-bound persist steps bind args from event.payload (#2235).")
 automation recordTransition {
-  step run {
-    logic recordTransition { event: event }
+  step persistValidated {
+    if event.payload.status == "needs_approval" {
+      recordRequestEvent {
+        requestId: event.payload.id,
+        kind: "validated",
+        fromStatus: event.payload.oldStatus,
+        toStatus: event.payload.status
+      }
+    }
+  }
+  step persistApproved {
+    if event.payload.status == "queued" {
+      recordRequestEvent {
+        requestId: event.payload.id,
+        kind: "approved",
+        fromStatus: event.payload.oldStatus,
+        toStatus: event.payload.status
+      }
+    }
+  }
+  step persistChangesRequested {
+    if event.payload.status == "changes_requested" {
+      recordRequestEvent {
+        requestId: event.payload.id,
+        kind: "changes_requested",
+        fromStatus: event.payload.oldStatus,
+        toStatus: event.payload.status
+      }
+    }
+  }
+  step persistRejected {
+    if event.payload.status == "rejected" {
+      recordRequestEvent {
+        requestId: event.payload.id,
+        kind: "rejected",
+        fromStatus: event.payload.oldStatus,
+        toStatus: event.payload.status
+      }
+    }
   }
 }

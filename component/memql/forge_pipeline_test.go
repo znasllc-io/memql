@@ -15,11 +15,17 @@ import (
 // them against the guard so the DSL and the engine can never silently
 // drift apart:
 //
-//  1. ROUTING (dsl/forge/logic.memql:routeRequest) -- the submitter's
-//     role picks the next pipeline status on submission.
-//  2. EVENT TRAIL (dsl/forge/logic.memql:recordTransition) -- each
+//  1. ROUTING (dsl/forge/automations.memql:routeRequest) -- the submitter's
+//     role picks the next pipeline status on submission. Since #2235 there is
+//     no routeRequest logic: the role-guarded advanceRequest writes are
+//     EVENT-BOUND condition steps (if event.payload.submitterRole == "<role>"
+//     { advanceRequest { ... } }) -- the developer branch split into a
+//     persistAdmin + persistWriter pair (one `==` each).
+//  2. EVENT TRAIL (dsl/forge/automations.memql:recordTransition) -- each
 //     post-creation transition appends exactly one requestEvent whose kind
-//     is derived from the new status.
+//     is derived from the new status. Since #2235 there is no recordTransition
+//     logic: the guarded recordRequestEvent writes are EVENT-BOUND condition
+//     steps (if event.payload.status == "<status>" { recordRequestEvent { ... } }).
 //  3. QUERY GATING (dsl/forge/traits.memql) -- the developer/owner tiers
 //     that keep the validation + approval queues empty for non-developers.
 //
@@ -44,15 +50,17 @@ var forgeEventKindContract = map[string]string{
 	forgeStatusRejected:      "rejected",
 }
 
-// readForgeLogic loads the authored routing/recording logic from disk so the
-// contract maps above can be checked against what the DSL actually says
-// (not just restated). The test binary runs in the package directory, so the
-// bundle is two levels up.
-func readForgeLogic(t *testing.T) string {
+// readForgeAutomations loads the authored routing/recording automations from
+// disk so the contract maps above can be checked against what the DSL actually
+// says (not just restated). Since #2235 the role/status guards + the
+// status->kind writes live in the automation persist steps (the routeRequest /
+// recordTransition logics are now pure projections). The test binary runs in
+// the package directory, so the bundle is two levels up.
+func readForgeAutomations(t *testing.T) string {
 	t.Helper()
-	b, err := os.ReadFile("../../dsl/forge/logic.memql")
+	b, err := os.ReadFile("../../dsl/forge/automations.memql")
 	if err != nil {
-		t.Fatalf("read dsl/forge/logic.memql: %v", err)
+		t.Fatalf("read dsl/forge/automations.memql: %v", err)
 	}
 	return string(b)
 }
@@ -77,15 +85,17 @@ func TestForgeRoutingContractMatchesGuard(t *testing.T) {
 // actually encodes the role -> status map this test pins. Catches an edit to
 // the DSL that changes routing without updating the contract (and vice versa).
 func TestForgeRoutingContractMatchesDSL(t *testing.T) {
-	src := readForgeLogic(t)
+	src := readForgeAutomations(t)
 	for role, target := range forgeRoutingContract {
+		// The role guard is an event-bound condition step:
+		// `if event.payload.submitterRole == "<role>" { advanceRequest { ... } }`.
 		needRole := `submitterRole == "` + role + `"`
 		if !strings.Contains(src, needRole) {
-			t.Errorf("routeRequest missing role guard %q", needRole)
+			t.Errorf("routeRequest automation missing role guard %q", needRole)
 		}
 		needStatus := `status: "` + target + `"`
 		if !strings.Contains(src, needStatus) {
-			t.Errorf("routeRequest missing routed status %q (for role %s)", needStatus, role)
+			t.Errorf("routeRequest automation missing routed status %q (for role %s)", needStatus, role)
 		}
 	}
 }
@@ -94,15 +104,17 @@ func TestForgeRoutingContractMatchesDSL(t *testing.T) {
 // whitelisted toStatus to the expected requestEvent kind, so the audit trail
 // stays complete and correctly labelled.
 func TestForgeEventKindContractMatchesDSL(t *testing.T) {
-	src := readForgeLogic(t)
+	src := readForgeAutomations(t)
 	for status, kind := range forgeEventKindContract {
-		needStatus := `toStatus == "` + status + `"`
+		// The per-status guard is an event-bound condition step:
+		// `if event.payload.status == "<status>" { recordRequestEvent { ... } }`.
+		needStatus := `status == "` + status + `"`
 		needKind := `kind: "` + kind + `"`
 		if !strings.Contains(src, needStatus) {
-			t.Errorf("recordTransition missing guard %q", needStatus)
+			t.Errorf("recordTransition automation missing guard %q", needStatus)
 		}
 		if !strings.Contains(src, needKind) {
-			t.Errorf("recordTransition missing event kind %q (for status %s)", needKind, status)
+			t.Errorf("recordTransition automation missing event kind %q (for status %s)", needKind, status)
 		}
 	}
 }

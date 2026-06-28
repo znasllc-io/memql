@@ -645,60 +645,6 @@ func PurgeExpiredSafetyClassificationsBuild(args PurgeExpiredSafetyClassificatio
 	return b.String()
 }
 
-// RecordMentoring -- Record a 'mentored' v1:forge:requestEvent after a non-owner submitter was taught about the area they touched. Injects kind='mentored' and forwards the note verbatim.
-type RecordMentoringArgs struct {
-	EventId   string
-	RequestId string
-	Note      string
-}
-
-// RecordMentoring calls the engine logic recordMentoring.
-func (qc *QueryClient) RecordMentoring(ctx context.Context, args RecordMentoringArgs) (*Result, error) {
-	call := RecordMentoringBuild(args)
-	return qc.executeNamed(ctx, "recordMentoring", call)
-}
-
-func RecordMentoringBuild(args RecordMentoringArgs) string {
-	var b strings.Builder
-	b.WriteString("recordMentoring({")
-	if args.EventId != "" {
-		b.WriteString("eventId: ")
-		b.WriteString(fmt.Sprintf("%q", args.EventId))
-	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
-	}
-	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 17 {
-		b.WriteString(", ")
-	}
-	b.WriteString("note: ")
-	b.WriteString(fmt.Sprintf("%q", args.Note))
-	b.WriteString("})")
-	return b.String()
-}
-
-// RecordTransition -- On v1:forge:request node.updated: append exactly one v1:forge:requestEvent for the four post-creation pipeline transitions (validated / approved / changes_requested / rejected). Each guard is mutually exclusive; at most one fires per invocation. Returns early (no write) for unrecognised statuses.
-type RecordTransitionArgs struct {
-	Event map[string]any
-}
-
-// RecordTransition calls the engine logic recordTransition.
-func (qc *QueryClient) RecordTransition(ctx context.Context, args RecordTransitionArgs) (*Result, error) {
-	call := RecordTransitionBuild(args)
-	return qc.executeNamed(ctx, "recordTransition", call)
-}
-
-func RecordTransitionBuild(args RecordTransitionArgs) string {
-	var b strings.Builder
-	b.WriteString("recordTransition({")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
-	return b.String()
-}
-
 // ReleaseWorkspaceOnPlanTerminal -- Pure decide for the workspace-release sweep: returns every v1:workbench:workspace for the updated plan. The terminal-status gate, the per-row release write (provisioned workspaces only), and the unconditional on-disk teardown all live in the releaseWorkspaceOnPlanTerminal automation's steps (#2235).
 type ReleaseWorkspaceOnPlanTerminalArgs struct {
 	Event map[string]any
@@ -735,26 +681,6 @@ func RevokeExpiredDelegationsBuild(args RevokeExpiredDelegationsArgs) string {
 	b.WriteString("revokeExpiredDelegations({")
 	b.WriteString("now: ")
 	b.WriteString(fmt.Sprintf("%q", args.Now))
-	b.WriteString("})")
-	return b.String()
-}
-
-// RouteRequest -- Route a newly-submitted v1:forge:request to its next pipeline state by submitter role (owner -> queued; developer -> needs_approval; non-developer -> needs_validation). Records a 'routed' audit event.
-type RouteRequestArgs struct {
-	Event map[string]any
-}
-
-// RouteRequest calls the engine logic routeRequest.
-func (qc *QueryClient) RouteRequest(ctx context.Context, args RouteRequestArgs) (*Result, error) {
-	call := RouteRequestBuild(args)
-	return qc.executeNamed(ctx, "routeRequest", call)
-}
-
-func RouteRequestBuild(args RouteRequestArgs) string {
-	var b strings.Builder
-	b.WriteString("routeRequest({")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")
 	return b.String()
 }
