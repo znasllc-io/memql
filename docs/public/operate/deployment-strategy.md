@@ -74,7 +74,34 @@ tags). The `bff` carrier (`memql-bff-copresent`) and `copresent` SPA are built
 
 ---
 
-## 2. Deploy: `make deploy VERSION=X` (`scripts/deploy/aks-deploy.sh`)
+## 2. Deploy: `make deploy ENV=X VERSION=Y` (delegates to the cockpit)
+
+> **`make deploy` is now a thin launcher over the cockpit (I16, epic
+> znasllc-io/memql#2212/#2227).** It no longer calls `scripts/deploy/aks-deploy.sh`
+> directly; it shells into `memql-cockpit deploy --env=<env> --ref=<ver>`, which
+> embeds the engine automation runtime, loads the deployment bundle, and runs the
+> PINNED `deployEngineCluster` automation (role-gated + audited + version-pinned)
+> from OUTSIDE the target cluster. The per-environment `switch` lives in that ONE
+> automation; `make` only forwards `ENV`. The automation drives the same deploy
+> actions → capability scripts (`aks-deploy.sh` et al. are the capability
+> *backend* now, also reused by `make release-staging`), so the build/apply/gate
+> mechanics described below are what the bundle ultimately runs.
+>
+> **Binary resolution + owner-gating.** `scripts/deploy/cockpit.sh` resolves the
+> cockpit binary (`COCKPIT_BIN` > on `PATH` > built from the sibling
+> `../memql-cockpit` via `make cockpit`). The cockpit's in-process engine carries
+> no database yet, so a live `make deploy` reports `BLOCKED (owner-gated): …` and
+> changes nothing until the I13 runner surface + a live engine DB land
+> (memql#2220/#2228); `DRY_RUN=1` is a clean no-op resolve. The forward-deploy
+> role gate is deny-by-default — pass `ROLE=developer` (or set
+> `MEMQL_COCKPIT_ROLE`) for an authorized caller. There is NO fallback to the old
+> direct-script path; the cockpit IS the break-glass path. The GitOps release
+> path (digest bump → ArgoCD) remains primary and separate (§4–5).
+>
+> ```
+> make deploy ENV=staging VERSION=0.9.6 ROLE=developer   # break-glass via cockpit
+> make deploy ENV=development DRY_RUN=1 ROLE=developer    # resolve only, no changes
+> ```
 
 > **Image builds for staging/production go through the GitHub BUILD SERVER, not
 > the operator laptop (HARD RULE).** The canonical release builds every image
