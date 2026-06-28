@@ -27,36 +27,26 @@ import (
 // migrated, its line here disappears from the findings and the gate flags it as
 // stale -- delete the line in the same PR.
 var callGraphBaseline = []string{
-	// #2235: NOT migrated, blocked on engine bug #2254. These two (plus
-	// workerInvocationRetentionSweep below) gate their per-row write on a
-	// date window `addDuration(item.<ts>, "P{N}D") < timestamp()`, which is
-	// CONSTANT-FALSE in the automation condition evaluator (numeric-only `<`
-	// via toNumber() -> 0 for RFC3339; addDuration/timestamp not evaluated in
-	// the filter-value path). The current impure logic compiles to the
-	// identical condition, so these crons are already dead in production --
-	// accountDeletionSweep never hard-deletes a user past cooldown
-	// (compliance). A migration that preserved that dead behavior while
-	// removing the baseline line would falsely mark them "done." Migrate once
-	// #2254 lands. The 4 non-windowing identity/worker/workbench sweeps were
-	// migrated to forEach (#2251 + follow-up).
-	"logic-purity|logic|accessRequestExpirySweep",
-	"logic-purity|logic|accountDeletionSweep",
-	// #2235: deferred. The 3 conditional creates gate the CRITICAL system.startup
-	// bootstrap; migrating to if-steps needs behavioral verification of the
-	// condition-eval semantics (existingCluster.Empty() && node.type=="bff") that a
-	// load-only test can't prove. Left baselined per the safe-or-defer rule.
+	// #2235: DEFERRED (safe-or-defer). bootstrapSession and generateResponse are
+	// cognition's two critical event-driven orchestrations -- session bootstrap
+	// (read existing session, then conditionally create the session row + emit
+	// session.created) and the core AI-response path (idempotency check, then a
+	// gated ai() call whose result feeds a sendTextUtterance write + a presence
+	// update). Both carry multiple conditional writes with intermediate
+	// dependencies; an `if`-step / forEach migration is mechanically possible but
+	// needs DB-backed behavioral verification of the gate + chaining semantics
+	// that a load-only test can't prove, on paths where a regression silently
+	// breaks session creation or every AI reply. A prior migration attempt was
+	// reverted for exactly this reason. Left baselined pending an owner decision
+	// to migrate the critical paths with DB-backed verification.
+	//
+	// The retention/expiry/deletion date-window sweeps (accountDeletionSweep,
+	// accessRequestExpirySweep, workerInvocationRetentionSweep) were migrated to
+	// pure decide + window + forEach automation steps once the condition
+	// evaluator learned to evaluate the date-window gate (#2256/#2254). The 4
+	// non-windowing identity/worker/workbench sweeps migrated earlier (#2251).
 	"logic-purity|logic|bootstrapSession",
 	"logic-purity|logic|generateResponse",
-	// #2235: deferred. Per-row sweep (updateNodeHealth inside `for ... range`) needs
-	// a forEach automation step; struct-form forEach/for is documented (ADR S7) but
-	// NOT yet parsed (NormaliseAutomationSource rejects it), and a go-style
-	// `func (Automation)` loop is the internal-only lowering form, not an author
-	// surface. Same blocker as the identity/worker sweep logics below.
-	// #2235: NOT migrated, blocked on engine bug #2254 -- date-window gate
-	// `addDuration(item.createdAt, "P{N}D") < timestamp()` is constant-false
-	// in the condition evaluator. See the accessRequest/accountDeletion note
-	// at the top of this baseline. Migrate once #2254 lands.
-	"logic-purity|logic|workerInvocationRetentionSweep",
 }
 
 // TestCallGraphContract is the HARD whole-tree gate for the behavioral

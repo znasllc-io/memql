@@ -18,7 +18,6 @@
 // the kill switch is the emergency-stop, and re-enable is the
 // confirmation, but resume is per-plan-explicit).
 use platform.queries.{ globalVariable }
-use worker.mutations.{ softDeleteWorkerInvocation }
 use worker.queries.{ expiredWorkerInvocations, runningPlansForUser }
 
 @description("Pure decide for the kill-switch sweep: returns every running plan owned by the updated user. The suspend write + the gate (computerUseEnabled==false AND the plan has a computerUseScope) live in the killSwitchSuspendsRunningPlans automation's forEach step (#2235). Re-enable flips the flag back; resume is per-plan-explicit.")
@@ -49,24 +48,29 @@ logic killSwitchSuspendsRunningPlans {
 //     the duration math into the query (no `>` operator on
 //     datetime). Per-row gating uses
 //       addDuration(item.createdAt, "P{retention}D") < timestamp()
-@description("Daily 02:30 UTC sweep that soft-deletes v1:worker:invocation rows older than WORKER_INVOCATION_RETENTION_DAYS (default 90). Per-row windowing via addDuration since MemQL filters can't push duration math down. Per-user invocation queries filter on @skipDeleted so rows disappear from UIs the moment the soft-delete lands.")
+@description("Pure decide for the worker-invocation retention sweep: returns every soft-deletable candidate row. The retention-var read, the per-row window gate (createdAt + P{N}D < now), and the soft-delete write live in the workerInvocationRetentionSweep automation's window + forEach steps (#2235; the date-window gate is evaluated correctly by the condition evaluator since #2256/#2254).")
 logic workerInvocationRetentionSweep {
   args {
     event object @required
   }
   body {
   candidates := expiredWorkerInvocations({})
-  retention := globalVariable({ name: "WORKER_INVOCATION_RETENTION_DAYS" })
-
-  for item := range candidates.Nodes() {
-    sweep := if addDuration(item.createdAt, concat("P", coalesce(retention.First().payload.value, "90"), "D")) < timestamp() {
-      softDeleteWorkerInvocation({
-        invocationId: item.id
-      })
-    }
-  }
-
-  return candidates.Len()
+  return candidates.Nodes()
   }
 }
 
+
+// workerInvocationRetentionWindow -- pure read of the retention window
+// global variable for the workerInvocationRetentionSweep automation's
+// per-row date gate (#2235). Returns the v1:platform:globalVariable row so
+// the automation reads window.First().payload.value in its forEach `if`.
+@enabled
+@description("Pure read: returns the WORKER_INVOCATION_RETENTION_DAYS global variable row for the workerInvocationRetentionSweep automation's per-row window gate (#2235).")
+logic workerInvocationRetentionWindow {
+  args {
+    event object @required
+  }
+  body {
+  return globalVariable({ name: "WORKER_INVOCATION_RETENTION_DAYS" })
+  }
+}
