@@ -15,7 +15,7 @@ automation indexGeneratedOutputOnCreate {
     logic indexGeneratedOutput { event: event }
   }
   step persist {
-    createArtifact({ sourceConceptRef: field(step("decide"), "sourceConceptRef"), ownerUserId: field(step("decide"), "ownerUserId"), lens: field(step("decide"), "lens"), kind: field(step("decide"), "kind"), source: field(step("decide"), "source"), title: field(step("decide"), "title"), summary: field(step("decide"), "summary"), format: field(step("decide"), "format"), mimeType: field(step("decide"), "mimeType"), live: field(step("decide"), "live"), partitionId: field(step("decide"), "partitionId"), agentId: field(step("decide"), "agentId"), producedByPlanId: field(step("decide"), "producedByPlanId"), producedByWorkerId: field(step("decide"), "producedByWorkerId"), producedByWorkerName: field(step("decide"), "producedByWorkerName") })
+    createArtifact({ sourceConceptRef: field(decide.result, "sourceConceptRef"), ownerUserId: field(decide.result, "ownerUserId"), lens: field(decide.result, "lens"), kind: field(decide.result, "kind"), source: field(decide.result, "source"), title: field(decide.result, "title"), summary: field(decide.result, "summary"), format: field(decide.result, "format"), mimeType: field(decide.result, "mimeType"), live: field(decide.result, "live"), partitionId: field(decide.result, "partitionId"), agentId: field(decide.result, "agentId"), producedByPlanId: field(decide.result, "producedByPlanId"), producedByWorkerId: field(decide.result, "producedByWorkerId"), producedByWorkerName: field(decide.result, "producedByWorkerName") })
   }
 }
 
@@ -27,7 +27,7 @@ automation indexNoteOnCreate {
     logic indexNote { event: event }
   }
   step persist {
-    createArtifact({ sourceConceptRef: field(step("decide"), "sourceConceptRef"), ownerUserId: field(step("decide"), "ownerUserId"), lens: field(step("decide"), "lens"), kind: field(step("decide"), "kind"), source: field(step("decide"), "source"), title: field(step("decide"), "title"), summary: field(step("decide"), "summary"), live: field(step("decide"), "live") })
+    createArtifact({ sourceConceptRef: field(decide.result, "sourceConceptRef"), ownerUserId: field(decide.result, "ownerUserId"), lens: field(decide.result, "lens"), kind: field(decide.result, "kind"), source: field(decide.result, "source"), title: field(decide.result, "title"), summary: field(decide.result, "summary"), live: field(decide.result, "live") })
   }
 }
 
@@ -39,7 +39,7 @@ automation indexTodoOnCreate {
     logic indexTodo { event: event }
   }
   step persist {
-    createArtifact({ sourceConceptRef: field(step("decide"), "sourceConceptRef"), ownerUserId: field(step("decide"), "ownerUserId"), lens: field(step("decide"), "lens"), kind: field(step("decide"), "kind"), source: field(step("decide"), "source"), title: field(step("decide"), "title"), live: field(step("decide"), "live") })
+    createArtifact({ sourceConceptRef: field(decide.result, "sourceConceptRef"), ownerUserId: field(decide.result, "ownerUserId"), lens: field(decide.result, "lens"), kind: field(decide.result, "kind"), source: field(decide.result, "source"), title: field(decide.result, "title"), live: field(decide.result, "live") })
   }
 }
 
@@ -51,7 +51,7 @@ automation indexCalendarEventOnCreate {
     logic indexCalendarEvent { event: event }
   }
   step persist {
-    createArtifact({ sourceConceptRef: field(step("decide"), "sourceConceptRef"), ownerUserId: field(step("decide"), "ownerUserId"), lens: field(step("decide"), "lens"), kind: field(step("decide"), "kind"), source: field(step("decide"), "source"), title: field(step("decide"), "title"), live: field(step("decide"), "live") })
+    createArtifact({ sourceConceptRef: field(decide.result, "sourceConceptRef"), ownerUserId: field(decide.result, "ownerUserId"), lens: field(decide.result, "lens"), kind: field(decide.result, "kind"), source: field(decide.result, "source"), title: field(decide.result, "title"), live: field(decide.result, "live") })
   }
 }
 
@@ -63,7 +63,7 @@ automation indexMemoryOnCreate {
     logic indexMemory { event: event }
   }
   step persist {
-    createArtifact({ sourceConceptRef: field(step("decide"), "sourceConceptRef"), ownerUserId: field(step("decide"), "ownerUserId"), lens: field(step("decide"), "lens"), kind: field(step("decide"), "kind"), source: field(step("decide"), "source"), title: field(step("decide"), "title"), summary: field(step("decide"), "summary"), agentId: field(step("decide"), "agentId"), partitionId: field(step("decide"), "partitionId"), live: field(step("decide"), "live") })
+    createArtifact({ sourceConceptRef: field(decide.result, "sourceConceptRef"), ownerUserId: field(decide.result, "ownerUserId"), lens: field(decide.result, "lens"), kind: field(decide.result, "kind"), source: field(decide.result, "source"), title: field(decide.result, "title"), summary: field(decide.result, "summary"), agentId: field(decide.result, "agentId"), partitionId: field(decide.result, "partitionId"), live: field(decide.result, "live") })
   }
 }
 
