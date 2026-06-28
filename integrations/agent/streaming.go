@@ -1248,9 +1248,9 @@ func (r *Replier) promoteCanvasOutput(ctx context.Context, turnCtx turnContext, 
 	// Derive a one-line summary for the Library list (memql#1207). Prefer an
 	// explicit intent/summary the card data carries; otherwise derive from the
 	// markdown body (first heading, else first non-empty sentence/line),
-	// trimmed/truncated. dsl/library/logic.memql propagates
-	// generatedOutput.summary -> artifact.summary, so setting it here is all
-	// the Library list needs.
+	// trimmed/truncated. The indexGeneratedOutputOnCreate automation
+	// (dsl/library/automations.memql) propagates generatedOutput.summary ->
+	// artifact.summary, so setting it here is all the Library list needs.
 	summary := deriveOutputSummary(data, body)
 
 	outputId := deriveGeneratedOutputId("agent_generated", ownerUserId, turnCtx.PartitionId+":"+title)
