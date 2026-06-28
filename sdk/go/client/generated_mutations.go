@@ -572,12 +572,12 @@ func AttachPlanFeedbackBuild(args AttachPlanFeedbackArgs) string {
 	return b.String()
 }
 
-// AttachToRequest -- Link a v1:common:attachment to a v1:forge:request by replacing its attachmentIds array. Caller must read-modify-write: fetch the existing attachmentIds, append the new id, pass the full array here. update read-merges all other request fields.
+// AttachToRequest -- Attach ONE v1:common:attachment to a v1:forge:request by appending its id to attachmentIds (no clobbering of existing attachments). Backed by @appendFields -- the update executor appends to the stored array. update read-merges all other request fields.
 //
 // Bound concept: request.
 type AttachToRequestArgs struct {
-	RequestId     string
-	AttachmentIds []string
+	RequestId    string
+	AttachmentId string
 }
 
 // AttachToRequest calls the engine mutation attachToRequest.
@@ -594,8 +594,8 @@ func AttachToRequestBuild(args AttachToRequestArgs) string {
 	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
-	b.WriteString("attachmentIds: ")
-	b.WriteString(renderMemQLValue(args.AttachmentIds))
+	b.WriteString("attachmentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
 	b.WriteString("})")
 	return b.String()
 }

@@ -804,6 +804,17 @@ const (
 	// otherwise wipe every other preference (memql#1339).
 	AttrMergeFields = "mergeFields"
 
+	// @appendFields("a", "b") opts an update-kind mutation into
+	// engine-side array APPEND for the named array-typed payload
+	// fields: instead of the partial array REPLACING the stored array
+	// wholesale (the default top-level-replace contract), the partial
+	// array's elements are appended to the stored array. This lets a
+	// single-writer mutation accumulate list elements (e.g. attach one
+	// id to request.attachmentIds) without a read-merge-append logic
+	// wrapper -- the logic-purity-clean form (memql#2240). Like
+	// @mergeFields, only valid on update-kind mutations.
+	AttrAppendFields = "appendFields"
+
 	// @scrubPii opts an update-kind mutation into engine-side generic
 	// PII scrubbing: after the partial payload merges onto the stored
 	// row, the engine enumerates EVERY field the bound concept declares

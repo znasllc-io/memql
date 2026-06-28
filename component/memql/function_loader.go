@@ -464,6 +464,11 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				return nil, fmt.Errorf("function %q: %w", expectedName, err)
 			}
 
+			appendFields, err := mutationAppendFields(funcDef, stmt.Kind)
+			if err != nil {
+				return nil, fmt.Errorf("function %q: %w", expectedName, err)
+			}
+
 			scrubPii, err := mutationScrubPii(funcDef, stmt.Kind)
 			if err != nil {
 				return nil, fmt.Errorf("function %q: %w", expectedName, err)
@@ -525,6 +530,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				ParentTemplate:         parentTemplate,
 				AliasOfTemplate:        aliasOfTemplate,
 				MergeFields:            mergeFields,
+				AppendFields:           appendFields,
 				ScrubPii:               scrubPii,
 			}
 			fn.ExprSource = extractExpressionFromContent(content)

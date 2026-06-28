@@ -43,6 +43,7 @@ construct-specific (see the end of this document) or rejected.
 | `@retry(count=3)` | No | Yes | Yes | Retry on failure |
 | `@idempotent` | No | Yes | No | Safe to retry without side effects |
 | `@mergeFields("a", "b")` | No | Yes | No | Deep-merge the named object payload fields on update instead of replacing them |
+| `@appendFields("a", "b")` | No | Yes | No | Append the named array payload fields' elements to the stored array on update instead of replacing them |
 | **Auditing** |
 | `@audit` | No | Yes | Yes | Log all executions for audit trail |
 | **Triggers (Automation Only)** |
@@ -204,6 +205,21 @@ would otherwise wipe sibling keys (memql#1339).
 ```memql
 @mergeFields("preferences")
 mutation user mutationToggleComputerUseEnabled { ... }
+```
+
+#### `@appendFields("...")`
+Opts an update-kind mutation into engine-side array APPEND for the named
+array-typed payload fields: the partial array's elements are appended to
+the stored array instead of replacing it wholesale (the default contract
+is top-level replace). Lets a pure single-writer mutation accumulate list
+elements -- e.g. attach one id to a request's attachmentIds -- without a
+read-merge-append logic wrapper (memql#2240). Like `@mergeFields`, only
+valid on update-kind mutations; not deduped (re-appending an existing
+element yields a duplicate).
+
+```memql
+@appendFields("attachmentIds")
+mutation request attachToRequest { ... }
 ```
 
 ---

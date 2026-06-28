@@ -154,27 +154,28 @@ mutate request requestChanges {
 }
 
 // ---------------------------------------------------------------------------
-// attachToRequest -- link one v1:common:attachment to a request by
-// writing the full (updated) attachmentIds array. The mutation DSL update
-// block replaces array fields on write; it cannot natively append a single
-// element. Callers must read-modify-write: fetch the current attachmentIds
-// via forgeRequestById (or requestById), append the new id client-side,
-// and pass the resulting array here. This mirrors the
-// recordLegalAcceptance pattern -- the closest workable approach
-// until the DSL gains a native arrayAppend expression. update read-merges
-// all other request fields (body, status, submitter, priority, etc.) so
-// they survive unchanged.
+// attachToRequest -- link ONE v1:common:attachment to a request by APPENDING
+// its id to the stored attachmentIds array. @appendFields("attachmentIds")
+// (memql#2240) makes the update executor append the new id to the prior array
+// instead of replacing it wholesale, so this is a PURE single-writer mutation
+// with no read-merge-append logic wrapper. update read-merges all OTHER request
+// fields (body, status, submitter, priority, ...) so they survive unchanged;
+// the id is appended without clobbering existing attachments. Not deduped:
+// attaching an already-present id appends a duplicate, so callers avoid
+// attaching the same id twice. Replaces the former read-modify-write contract
+// + the appendAttachmentToRequest logic (#2235 burn-down).
 // ---------------------------------------------------------------------------
 @enabled
-@description("Link a v1:common:attachment to a v1:forge:request by replacing its attachmentIds array. Caller must read-modify-write: fetch the existing attachmentIds, append the new id, pass the full array here. update read-merges all other request fields.")
+@appendFields("attachmentIds")
+@description("Attach ONE v1:common:attachment to a v1:forge:request by appending its id to attachmentIds (no clobbering of existing attachments). Backed by @appendFields -- the update executor appends to the stored array. update read-merges all other request fields.")
 mutate request attachToRequest {
   args {
-    requestId      string    @required
-    attachmentIds  []string  @required
+    requestId     string  @required
+    attachmentId  string  @required
   }
   update {
     id: args.requestId
-    args.attachmentIds
+    attachmentIds: args.attachmentId
     provenanceMutation: "attachToRequest"
   }
 }

@@ -2,69 +2,30 @@
 //
 // Orchestration logic for the `forge` namespace.
 //
-// Only one logic remains here: appendAttachmentToRequest (the read-merge-append
-// helper behind the forgeAttachToRequest MCP tool). The former routeRequest and
-// recordTransition logics were RETIRED in #2235 -- their role/status routing is
-// now expressed directly as EVENT-BOUND persist steps in automations.memql (no
-// decide logic; mutation args bind from event.payload), and the recordMentoring
-// tool handler became the thin recordMentoredEvent mutation.
-
-use forge.mutations.{ attachToRequest }
-use forge.queries.{ requestById }
-
-// routeRequest / recordTransition (RETIRED, #2235) -- the role-based router and
-// the per-transition audit recorder were impure logics (graph writes inline,
-// ADR §2.1). They are gone; their behavior now lives in the routeRequest /
-// recordTransition automations as event-bound mutation steps that bind args
-// straight from the node.created / node.updated event payload (the proven
-// cluster registerNode / deregisterNode pattern). A logic step's result is the
-// raw Bundle-wrapped engine envelope, so a decide->persist field(decide.result,
-// ...) read resolves to nil ("required argument missing") -- event-bound binding
-// is the working form. See automations.memql.
-
-// appendAttachmentToRequest -- read-merge-append helper for the
-// forgeAttachToRequest MCP tool. MCP tool args cannot be []string today, so the
-// tool takes a single attachmentId (scalar). This logic function fetches the
-// current request row, appends the new id to the existing attachmentIds array
-// via the DSL append() function (available in the step evaluator), and writes
-// the full updated array via the attachToRequest mutation. (The logic carries a
-// distinct name from the mutation it wraps -- C6/memql#2036 de-prefixing would
-// otherwise collide logicAttachToRequest with mutationAttachToRequest.)
+// This namespace now has ZERO logic functions -- every forge tool handler and
+// request transition is expressed as a pure single-writer mutation or an
+// event-bound automation persist step (#2235 burn-down, #2240):
 //
-// Sequential attaches APPEND without clobbering: append() reads the existing
-// step-result array (`existing.First().payload.attachmentIds`) and adds the new
-// id, so calling this N times yields the N ids in order. On the FIRST attach the
-// row has no attachmentIds yet, so the read resolves to an absent array and
-// append() starts fresh with the single id. (#1848 fixed the prior corruption
-// where the unresolved read leaked its raw source text as a literal array
-// element; see component/language/compiler stepMethodAccessorPath +
-// component/automations/steps evaluateAppend.)
+//   - routeRequest / recordTransition (RETIRED, #2235): the role-based router
+//     and per-transition audit recorder were impure logics (graph writes
+//     inline, ADR section 2.1). Their behavior now lives in the routeRequest /
+//     recordTransition automations as event-bound mutation steps that bind args
+//     straight from the node.created / node.updated event payload (the proven
+//     cluster registerNode / deregisterNode pattern). A logic step's result is
+//     the raw Bundle-wrapped engine envelope, so a decide->persist
+//     field(decide.result, ...) read resolves to nil ("required argument
+//     missing") -- event-bound binding is the working form. See automations.memql.
 //
-// Not deduped: re-attaching an already-present id appends a duplicate (an in-DSL
-// array-membership guard isn't supported yet), so callers should avoid attaching
-// the same id twice.
+//   - recordMentoring (RETIRED, #2235): the 'mentored'-event write was a 2.1
+//     single-writer violation (a logic that wrote inline). It is replaced by the
+//     thin recordMentoredEvent mutation (kind="mentored" injected in its insert
+//     body), which the forgeRecordMentoring tool targets directly.
 //
-// NOTE (#2235): this is the last impure forge logic (an inline attachToRequest
-// write). It is a read-merge-APPEND with no calling automation, which the
-// mutation DSL cannot express natively (no arrayAppend), so it stays baselined;
-// tracked as the follow-up #2240.
-@enabled
-@description("Append one v1:common:attachment id to a v1:forge:request's attachmentIds array. Fetches the current row, appends the new id, writes the full updated array via the attachToRequest mutation. Backed by the step evaluator's append() -- the closest native append the DSL supports without a Go builtin.")
-logic appendAttachmentToRequest {
-  args {
-    requestId     string  @required
-    attachmentId  string  @required
-  }
-  body {
-    existing := requestById({ requestId: args.requestId })
-    attach   := attachToRequest({ requestId: args.requestId, attachmentIds: append(existing.First().payload.attachmentIds, args.attachmentId) })
-    return args.requestId
-  }
-}
-
-// recordMentoring (RETIRED, #2235) -- the forgeRecordMentoring tool's
-// 'mentored'-event write was a §2.1 single-writer violation (a logic that
-// wrote inline). It is replaced by the thin `recordMentoredEvent` mutation in
-// mutations.memql (kind="mentored" injected in its insert body), which the
-// forgeRecordMentoring tool now targets directly -- a pure single-aggregate
-// write with no wrapper logic.
+//   - appendAttachmentToRequest (RETIRED, #2240): the read-merge-append helper
+//     behind the forgeAttachToRequest tool did a read (requestById) + write
+//     (attachToRequest) because the mutation DSL could not append one element to
+//     an array. attachToRequest is now a PURE single-writer mutation using
+//     @appendFields("attachmentIds") -- the update executor appends the new id
+//     to the stored array natively (component/memql/executor_mutation.go
+//     appendPayloadFields), so no read-merge-append logic wrapper is needed. The
+//     forgeAttachToRequest tool targets the mutation directly.

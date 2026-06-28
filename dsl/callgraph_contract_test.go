@@ -41,7 +41,6 @@ var callGraphBaseline = []string{
 	// migrated to forEach (#2251 + follow-up).
 	"logic-purity|logic|accessRequestExpirySweep",
 	"logic-purity|logic|accountDeletionSweep",
-	"logic-purity|logic|appendAttachmentToRequest",
 	// #2235: deferred. The 3 conditional creates gate the CRITICAL system.startup
 	// bootstrap; migrating to if-steps needs behavioral verification of the
 	// condition-eval semantics (existingCluster.Empty() && node.type=="bff") that a

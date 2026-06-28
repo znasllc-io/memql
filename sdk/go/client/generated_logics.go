@@ -94,32 +94,6 @@ func AccountDeletionSweepBuild(args AccountDeletionSweepArgs) string {
 	return b.String()
 }
 
-// AppendAttachmentToRequest -- Append one v1:common:attachment id to a v1:forge:request's attachmentIds array. Fetches the current row, appends the new id, writes the full updated array via the attachToRequest mutation. Backed by the step evaluator's append() -- the closest native append the DSL supports without a Go builtin.
-type AppendAttachmentToRequestArgs struct {
-	RequestId    string
-	AttachmentId string
-}
-
-// AppendAttachmentToRequest calls the engine logic appendAttachmentToRequest.
-func (qc *QueryClient) AppendAttachmentToRequest(ctx context.Context, args AppendAttachmentToRequestArgs) (*Result, error) {
-	call := AppendAttachmentToRequestBuild(args)
-	return qc.executeNamed(ctx, "appendAttachmentToRequest", call)
-}
-
-func AppendAttachmentToRequestBuild(args AppendAttachmentToRequestArgs) string {
-	var b strings.Builder
-	b.WriteString("appendAttachmentToRequest({")
-	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("attachmentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
-	b.WriteString("})")
-	return b.String()
-}
-
 // AuditEventRetentionSweep -- Daily 02:00 UTC sweep over v1:identity:auditEvent rows older than MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. Observation-only today: emits an 'identity.audit.retention.observed' event with the candidate count -- MemQL has no delete() mutation and AuditEvent's append-only semantics forbid soft-delete via active=false. Per-row delete lands when one of those gaps closes.
 type AuditEventRetentionSweepArgs struct {
 	Event map[string]any
