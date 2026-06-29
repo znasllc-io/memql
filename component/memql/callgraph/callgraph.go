@@ -50,7 +50,7 @@ type SideEffectClassifier func(builtinName string) bool
 var (
 	// A call site: an identifier immediately followed by `(`. Intersected
 	// with the file's use-map so only cross-file construct calls count --
-	// pure helpers (coalesce/concat/if) and method calls (.First()) are
+	// pure helpers (coalesce/concat/if) and method calls (.first()) are
 	// never imported, so they fall out.
 	callRE = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
 	// A graph write: an `insert {` or `update {` block opener at statement

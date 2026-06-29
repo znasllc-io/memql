@@ -15,7 +15,7 @@ automation killSwitchSuspendsRunningPlans {
     logic killSwitchSuspendsRunningPlans { event: event }
   }
   step apply {
-    forEach item in decide.Nodes() {
+    forEach item in decide.nodes() {
       if exists(item.payload.computerUseScope) && event.node.payload.preferences.computerUseEnabled == false {
         updatePlanStatus {
           planId: item.id,
@@ -57,7 +57,7 @@ automation workerInvocationRetentionSweep {
   }
   step apply {
     forEach item in decide.result {
-      if addDuration(item.createdAt, concat("P", coalesce(window.First().payload.value, "90"), "D")) < now {
+      if addDuration(item.createdAt, concat("P", coalesce(window.first().payload.value, "90"), "D")) < now {
         softDeleteWorkerInvocation {
           invocationId: item.id
         }

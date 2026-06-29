@@ -323,7 +323,7 @@ func resolveArgsRefs(args map[string]any, evaluator *automations.Evaluator) (map
 //
 // Why resolve builtins here at all? The function-arg renderer
 // (renderMemQLValue) quotes every string that isn't a runtime reference,
-// so an unresolved builtin call like `coalesce(autoRole.First().payload.value,
+// so an unresolved builtin call like `coalesce(autoRole.first().payload.value,
 // "writer")` reaches the engine as a STRING LITERAL, not as an expression.
 // The receiving function's validator then sees the raw expression text as
 // the argument value -- failing enum validation ("coalesce(...)" is not in

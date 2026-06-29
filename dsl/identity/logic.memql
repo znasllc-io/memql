@@ -38,7 +38,7 @@ logic accessRequestExpirySweep {
   }
   body {
   pending := expiredPendingAccessRequests({})
-  return pending.Nodes()
+  return pending.nodes()
   }
 }
 
@@ -71,7 +71,7 @@ logic accountDeletionReminder25Days {
   body {
   candidates := usersInDeletionCooldown({})
 
-  for item := range candidates.Nodes() {
+  for item := range candidates.nodes() {
     emitReminder := if addDuration(item.payload.deletionScheduledAt, "P25D") < now && addDuration(item.payload.deletionScheduledAt, "P26D") >= now {
       publishEvent({
         topic: "identity.deletion.reminder",
@@ -87,7 +87,7 @@ logic accountDeletionReminder25Days {
     }
   }
 
-  return candidates.Len()
+  return candidates.count()
   }
 }
 
@@ -131,7 +131,7 @@ logic accountDeletionReminder7Days {
   body {
   candidates := usersInDeletionCooldown({})
 
-  for item := range candidates.Nodes() {
+  for item := range candidates.nodes() {
     // Window: deletionScheduledAt is between 7 and 8 days ago.
     // Equivalent: scheduledAt + P7D < now AND scheduledAt + P8D >= now.
     emitReminder := if addDuration(item.payload.deletionScheduledAt, "P7D") < now && addDuration(item.payload.deletionScheduledAt, "P8D") >= now {
@@ -149,7 +149,7 @@ logic accountDeletionReminder7Days {
     }
   }
 
-  return candidates.Len()
+  return candidates.count()
   }
 }
 
@@ -212,7 +212,7 @@ logic accountDeletionSweep {
   // user" helper) lands, add a second forEach apply step in the
   // accountDeletionSweep automation that revokes each session via
   // revokeAuthSession.
-  return candidates.Nodes()
+  return candidates.nodes()
   }
 }
 
@@ -261,13 +261,13 @@ logic auditEventRetentionSweep {
   emitObservation := publishEvent({
     topic: "identity.audit.retention.observed",
     payload: {
-      candidateCount: allEvents.Len(),
-      retentionDays: coalesce(retentionDays.First().payload.value, "365"),
+      candidateCount: allEvents.count(),
+      retentionDays: coalesce(retentionDays.first().payload.value, "365"),
       timestamp: now
     }
   })
 
-  return allEvents.Len()
+  return allEvents.count()
   }
 }
 

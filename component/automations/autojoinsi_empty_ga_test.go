@@ -19,11 +19,11 @@ import (
 //
 // When the owner has NO assistant, getActiveGA is a skipped `if` and
 // getFallbackGA returns 0 rows, so coalesce(...) yields a NON-NIL but
-// EMPTY (0-node) ExecuteResult. The original guard `!getGA.Empty()`
+// EMPTY (0-node) ExecuteResult. The original guard `!getGA.empty()`
 // could never gate that case: the automation condition evaluator does
-// not apply the leading `!` negation operator, so `!getGA.Empty()`
+// not apply the leading `!` negation operator, so `!getGA.empty()`
 // evaluated truthy unconditionally, the join branch fired with no GA,
-// and coalesce(getGA.First().id, "") resolved to nil -- which
+// and coalesce(getGA.first().id, "") resolved to nil -- which
 // participantByAgentSpace rejected as a missing required
 // `agentId`.
 //
@@ -31,7 +31,7 @@ import (
 // `first(getGA).id != ""`, which the compiler rewrites to a fully
 // resolvable `$steps.getGA.result.Bundle.nodes.0.id` path. These tests
 // pin both the runtime condition semantics and the compiled shape so a
-// revert to the broken `!...Empty()` form is caught.
+// revert to the broken `!...empty()` form is caught.
 
 func autoJoinResult(ids ...string) *memqlengine.ExecuteResult {
 	var nodes []*memqlv1.MemoryNode
@@ -94,16 +94,17 @@ func TestAutoJoinAI_JoinGuard_NoOpsWithoutAssistant(t *testing.T) {
 // Pins the now-FIXED negation semantics behind the original #1044 bug.
 //
 // memql#1096 taught the condition evaluator to honour a leading `!`, so the
-// `! $steps.getGA.Empty` form the compiler emits for `!getGA.Empty()` now
-// correctly evaluates to FALSE on an empty result (Empty=true, !Empty=false)
+// `! $steps.getGA.empty` form the compiler emits for `!getGA.empty()` now
+// correctly evaluates to FALSE on an empty result (empty=true, !empty=false)
 // and TRUE on a non-empty one. The #1044 DSL guard was rewritten to the
 // positive `first(getGA).id != ""` form before the evaluator was fixed; that
 // form stays as belt-and-suspenders (see
 // TestAutoJoinAI_JoinGuard_NoOpsWithoutAssistant), but the `!`-negation form
 // it replaced is no longer broken -- this test pins that fix.
 func TestAutoJoinAI_BangEmptyGuard_NowHonoursNegation(t *testing.T) {
-	// `! ...` is the form the compiler emits for `!getGA.Empty()`.
-	const guard = "! $steps.getGA.Empty"
+	// `! ...` is the form the compiler emits for `!getGA.empty()` (the
+	// lowercase accessor spelling; Story 5 / #2303 retired `.Empty()`).
+	const guard = "! $steps.getGA.empty"
 
 	cases := []struct {
 		name  string
@@ -175,7 +176,7 @@ logic logicAutoJoinGuardShape {
 		t.Fatalf("compiled guard missing resolvable first()-id path; got:\n%s", compiled)
 	}
 	// Guard against a regression to either runtime-unresolvable form.
-	if strings.Contains(compiled, `getGA.Empty()`) {
-		t.Fatalf("compiled guard still carries the runtime-unresolvable getGA.Empty() method-call form:\n%s", compiled)
+	if strings.Contains(compiled, `getGA.empty()`) {
+		t.Fatalf("compiled guard still carries the runtime-unresolvable getGA.empty() method-call form:\n%s", compiled)
 	}
 }

@@ -182,7 +182,7 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 		return nil, fmt.Errorf("logic %q has no `_return` step (body must end with `return <expr>`)", fnName)
 	}
 	// Short-circuit pure step-method-call returns like
-	// `expiredDelegations.Len()` / `existing.First()` / `rows.Empty()`.
+	// `expiredDelegations.count()` / `existing.first()` / `rows.empty()`.
 	// The engine's expression parser doesn't recognise the
 	// `stepName.method()` shape and looks the whole dotted name up as
 	// a top-level function (-> "function not found"). The local
@@ -220,8 +220,8 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 //     `nodeRecord := createNode(...)`. The engine treats the
 //     bare identifier as a spec name and emits `unknown spec
 //     "nodeRecord"`.
-//   - Step-method calls -- `expiredDelegations.Len()`,
-//     `existing.First()`, `rows.Empty()`, etc. The engine looks the
+//   - Step-method calls -- `expiredDelegations.count()`,
+//     `existing.first()`, `rows.empty()`, etc. The engine looks the
 //     dotted name up as a top-level function and emits "function not
 //     found".
 //
@@ -247,7 +247,7 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 // recognise as a function call:
 //   - a scalar literal (`1`, `"x"`, `true`, `null`) -> its typed value,
 //   - a bare step reference (`getActiveGA`) -> the step's result,
-//   - a `stepName.method()` call (`rows.First()` / `rows.Len()` / ...),
+//   - a `stepName.method()` call (`rows.first()` / `rows.count()` / ...),
 //   - a local positional builtin (`coalesce(...)`, #362).
 //
 // Returns (value, true, nil) when it resolved the expression locally,
@@ -319,7 +319,7 @@ func tryEvaluateObjectLiteralLocally(expr string, evaluator *Evaluator) (any, bo
 // resolveObjectLiteralValue resolves one object-literal value expression against
 // the evaluator: nested object literals recurse, then the shared leaf path
 // (literals / bare step refs / builtins), then step / path references
-// (`args.event.payload.x`, `someStep.First()`, `someStep`, `$steps.x...`). The
+// (`args.event.payload.x`, `someStep.first()`, `someStep`, `$steps.x...`). The
 // result is unwrapped so a Bundle-backed step ref yields its flat value (#2271).
 func resolveObjectLiteralValue(raw string, evaluator *Evaluator) (any, error) {
 	if len(raw) >= 2 && raw[0] == '{' && raw[len(raw)-1] == '}' {
@@ -478,7 +478,15 @@ func tryEvaluateReturnLocally(expr string, evaluator *Evaluator) (any, bool, err
 	if !evaluator.HasStep(firstSegment) {
 		return nil, false, nil
 	}
-	val, err := evaluator.EvaluateStepReference(expr)
+	// Resolve the parens-stripped dotted form (`rows.first` not `rows.first()`).
+	// Story 5 (ADR §2.2 / #2303) unified step accessors on the lowercase
+	// spelling, which lexically overlaps the Story 4 collection-method set
+	// (`first` / `last` / `count` / `empty`). EvaluateStepReference checks for a
+	// collection chain BEFORE it strips a trailing `()`, so passing the raw
+	// `step.first()` would misroute a step-result accessor into the collection
+	// evaluator. The dotted form (no `(`) is unambiguous and resolves through
+	// resolvePath's step-accessor cases.
+	val, err := evaluator.EvaluateStepReference(inner)
 	if err != nil {
 		return nil, false, err
 	}
@@ -726,7 +734,7 @@ func evaluateScalarArg(raw string, evaluator *Evaluator) (any, error) {
 		}
 		return val, nil
 	}
-	// Normalize step-method CALLS (`rows.First().id`) to the navigable dotted
+	// Normalize step-method CALLS (`rows.first().id`) to the navigable dotted
 	// form (`rows.First.id`) the resolver already handles -- so a method-then-
 	// field path inside a coalesce arg resolves to its value instead of its raw
 	// text (memql#593; matches the arg-time normalizer).
@@ -738,11 +746,13 @@ func evaluateScalarArg(raw string, evaluator *Evaluator) (any, error) {
 }
 
 // stepMethodAccessors are the step-method names resolvePath navigates in dotted
-// form (`rows.first` / `rows.First` / `rows.Len` / ...).
-var stepMethodAccessors = []string{"First", "Last", "Empty", "Count", "Len", "Nodes", "Ran"}
+// form (`rows.first` / `rows.count` / `rows.nodes` / ...). Story 5 (ADR §2.2 /
+// #2303) retired the capitalized aliases; `Ran` is the lone capitalized
+// survivor (no lowercase pair).
+var stepMethodAccessors = []string{"first", "last", "empty", "count", "nodes", "Ran"}
 
 // normalizeStepMethodCalls strips the `()` from a step-method CALL so a
-// method-THEN-field path (`rows.First().id`) collapses to the navigable dotted
+// method-THEN-field path (`rows.first().id`) collapses to the navigable dotted
 // form (`rows.First.id`) the resolver already understands. The logic-time
 // counterpart to the arg-time method-accessor normalizer (memql#593).
 func normalizeStepMethodCalls(expr string) string {

@@ -2592,7 +2592,7 @@ func (p *Parser) parseForRangeStep() (*StepDef, error) {
 //
 //	if <cond> {
 //	  name := funcCall(...)
-//	  for item := range collection.Nodes() { ... }
+//	  for item := range collection.nodes() { ... }
 //	  if <nestedCond> { ... }
 //	  funcCall(...)            // bare call -- emits an anonymous step
 //	}
@@ -2671,7 +2671,7 @@ func (p *Parser) parseIfStatement() (*IfStmt, error) {
 // reads up to but does NOT consume the matching '}'. Accepts:
 //
 //   - `name := <funcCall>` step assignments
-//   - `for item := range collection.Nodes() { ... }` for-range steps
+//   - `for item := range collection.nodes() { ... }` for-range steps
 //   - nested `if cond { ... }` statements
 //   - bare function-call expressions (emit an anonymous function step)
 //
@@ -4718,7 +4718,7 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Phase 6: accept post-call dotted access like `.First().payload.id`.
+		// Phase 6: accept post-call dotted access like `.first().payload.id`.
 		// The shared lexer may emit the leading `.` as part of the
 		// following identifier (TokenIdentifier starting with ".") or
 		// as a standalone TokenOperator ".". Wrap each segment in a

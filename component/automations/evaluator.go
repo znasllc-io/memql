@@ -484,7 +484,7 @@ func (e *Evaluator) EvaluateValue(expr string) (any, error) {
 	// memql#575) so a selector builtin like coalesce(getActiveGA, getFallbackGA)
 	// in a LOGIC body picks the first step that produced rows instead of
 	// rendering the identifier as its OWN NAME (a literal string). That literal
-	// then defeats the downstream `getGA.First().id` read and feeds an
+	// then defeats the downstream `getGA.first().id` read and feeds an
 	// unevaluated coalesce(...) expression into a mutation arg -- the memql#580
 	// ghost-AI root cause. The logic-runner path bottoms out here (via
 	// EvaluateStepReference / evaluateScalarArg), and #575 only patched the
@@ -1065,9 +1065,10 @@ func (e *Evaluator) EvaluateStepReference(expr string) (any, error) {
 	}
 
 	// Normalise method-call syntax for step-result shorthand accessors
-	// (`.Nodes()`, `.First()`, `.Len()`, `.Empty()`, `.Last()`, `.Ran()`).
+	// (`.nodes()`, `.first()`, `.count()`, `.empty()`, `.last()`, `.Ran()`).
 	// These can legally appear with or without parentheses (see the
-	// comment near `case "nodes", "Nodes":` in resolvePath). We strip a
+	// comment near `case "nodes":` in resolvePath; Story 5 / #2303
+	// retired the capitalized aliases except `.Ran()`). We strip a
 	// single trailing `()` here so the path matcher, which only accepts
 	// `a-zA-Z0-9._-`, still recognises the expression as a step
 	// reference.
@@ -1830,35 +1831,38 @@ func (e *Evaluator) resolvePath(path string) (any, error) {
 		if !ok {
 			return nil, fmt.Errorf("step %q not found", stepId)
 		}
-		// Result shorthand accessors. Both field-style (.count, .empty,
-		// .first, .nodes) and Go-style method names (.Len, .Empty,
-		// .First, .Last, .Nodes, .Ran) are recognised. Phase 6 of
-		// the language-improvements plan migrates existing callsites
-		// to the method-style; Phase 4 lands the recognition here so
-		// both forms work during the grace period.
+		// Result shorthand accessors. The canonical surface is the
+		// lowercase field-style spelling (.count, .empty, .first,
+		// .last, .nodes). Story 5 (ADR §2.2 / #2303) retired the
+		// legacy capitalized Go-style aliases (.Len, .Empty, .First,
+		// .Last, .Nodes) that were recognised here during the
+		// language-improvements grace period; only the lowercase
+		// forms resolve now.
 		//
-		// .Ran() is new: it disambiguates "step skipped (condition
-		// evaluated to false, step never executed)" from "step ran
-		// but produced zero results". With only .empty, those two
-		// states collapsed, which was a real bug-farm.
+		// .Ran() is the one capitalized accessor that survives: it has
+		// no lowercase pair and is a distinct accessor (not part of the
+		// retired result-set surface). It disambiguates "step skipped
+		// (condition evaluated to false, step never executed)" from
+		// "step ran but produced zero results". With only .empty, those
+		// two states collapsed, which was a real bug-farm.
 		if len(parts) > 2 {
 			switch parts[2] {
-			case "count", "Len":
+			case "count":
 				nodes, _ := e.GetStepNodes(stepId)
 				current = len(nodes)
 				parts = parts[3:]
 				goto navigate
-			case "nodes", "Nodes":
+			case "nodes":
 				nodes, _ := e.GetStepNodes(stepId)
 				current = toAnySlice(nodes)
 				parts = parts[3:]
 				goto navigate
-			case "empty", "Empty":
+			case "empty":
 				nodes, _ := e.GetStepNodes(stepId)
 				current = len(nodes) == 0
 				parts = parts[3:]
 				goto navigate
-			case "first", "First":
+			case "first":
 				nodes, _ := e.GetStepNodes(stepId)
 				if len(nodes) > 0 {
 					current = nodes[0]
@@ -1867,7 +1871,7 @@ func (e *Evaluator) resolvePath(path string) (any, error) {
 				}
 				parts = parts[3:]
 				goto navigate
-			case "last", "Last":
+			case "last":
 				nodes, _ := e.GetStepNodes(stepId)
 				if len(nodes) > 0 {
 					current = nodes[len(nodes)-1]

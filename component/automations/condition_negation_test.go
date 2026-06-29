@@ -11,7 +11,7 @@ import (
 // Regression for memql#1096: the automation/logic condition evaluator must
 // honour a leading `!` (NOT) operator. Before the fix `evaluateAtomicCondition`
 // fell through to EvaluateValue + isTruthy without ever negating, so `!true`
-// read truthy and `! $steps.x.Empty` fired even on an empty result. These
+// read truthy and `! $steps.x.empty` fired even on an empty result. These
 // tests pin the now-correct negation semantics plus its composition with
 // `&&` / `||` / parens, and assert `!=` comparisons stay unaffected.
 
@@ -54,28 +54,28 @@ func TestEvaluateCondition_BangLiterals(t *testing.T) {
 	}
 }
 
-// `! $steps.x.Empty` is the method-truthiness form the compiler emits for
-// `!x.Empty()`. On an empty step result Empty=true so `!Empty` must be FALSE;
-// on a non-empty result Empty=false so `!Empty` must be TRUE.
+// `! $steps.x.empty` is the method-truthiness form the compiler emits for
+// `!x.empty()`. On an empty step result empty=true so `!empty` must be FALSE;
+// on a non-empty result empty=false so `!empty` must be TRUE.
 func TestEvaluateCondition_BangStepEmpty(t *testing.T) {
 	cases := []struct {
 		name  string
 		empty bool
 		want  bool
 	}{
-		{"empty result -> !Empty is false", true, false},
-		{"non-empty result -> !Empty is true", false, true},
+		{"empty result -> !empty is false", true, false},
+		{"non-empty result -> !empty is true", false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := NewEvaluator()
 			e.SetStepResult("x", negStepResult(tc.empty))
-			got, err := e.EvaluateCondition("! $steps.x.Empty")
+			got, err := e.EvaluateCondition("! $steps.x.empty")
 			if err != nil {
 				t.Fatalf("EvaluateCondition: %v", err)
 			}
 			if got != tc.want {
-				t.Errorf("`! $steps.x.Empty` (empty=%v) = %v, want %v", tc.empty, got, tc.want)
+				t.Errorf("`! $steps.x.empty` (empty=%v) = %v, want %v", tc.empty, got, tc.want)
 			}
 		})
 	}
@@ -85,12 +85,12 @@ func TestEvaluateCondition_BangStepEmpty(t *testing.T) {
 func TestEvaluateCondition_BangNoSpace(t *testing.T) {
 	e := NewEvaluator()
 	e.SetStepResult("x", negStepResult(true)) // empty -> Empty truthy-ish
-	got, err := e.EvaluateCondition("!$steps.x.Empty")
+	got, err := e.EvaluateCondition("!$steps.x.empty")
 	if err != nil {
 		t.Fatalf("EvaluateCondition: %v", err)
 	}
 	if got != false {
-		t.Errorf("`!$steps.x.Empty` on empty = %v, want false", got)
+		t.Errorf("`!$steps.x.empty` on empty = %v, want false", got)
 	}
 }
 

@@ -479,7 +479,7 @@ func OnDelegationCreatedBuild(args OnDelegationCreatedArgs) string {
 	return b.String()
 }
 
-// PruneStaleClusterNodes -- Decides which departed cluster nodes to retire (ADR S2.1 pure logic, #2235). Reads MEMQL_NODE_STALE_PRUNE_MINUTES (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, and returns staleClusterNodes({olderThan: cutoff}).Nodes() -- the LATEST non-stopped rows whose lastSeen is past the window (the olderThan arg pushes a payload.lastSeen<cutoff predicate onto the query, #1642). The calling automation appends the terminal health='stopped' row per returned node via a forEach updateNodeHealth step.
+// PruneStaleClusterNodes -- Decides which departed cluster nodes to retire (ADR S2.1 pure logic, #2235). Reads MEMQL_NODE_STALE_PRUNE_MINUTES (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, and returns staleClusterNodes({olderThan: cutoff}).nodes() -- the LATEST non-stopped rows whose lastSeen is past the window (the olderThan arg pushes a payload.lastSeen<cutoff predicate onto the query, #1642). The calling automation appends the terminal health='stopped' row per returned node via a forEach updateNodeHealth step.
 type PruneStaleClusterNodesArgs struct {
 	Event map[string]any
 }

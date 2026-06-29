@@ -29,13 +29,13 @@ logic purgeExpiredPolicyTraces {
   emitObservation := publishEvent({
     topic: "platform.policyTrace.retention.observed",
     payload: {
-      candidateCount: allTraces.Len(),
-      retentionDays: coalesce(retentionDays.First().payload.value, "90"),
+      candidateCount: allTraces.count(),
+      retentionDays: coalesce(retentionDays.first().payload.value, "90"),
       timestamp: now
     }
   })
 
-  return allTraces.Len()
+  return allTraces.count()
   }
 }
 

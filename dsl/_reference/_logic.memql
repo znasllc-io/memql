@@ -141,7 +141,7 @@ logic engineNodeTypes {
 //     body {
 //       existing := existingCluster()                       // query (read)
 //       version  := serviceVersion({})                      // read-only builtin
-//       needsBootstrap := existing.Empty() && args.event.payload.node.type == "bff"
+//       needsBootstrap := existing.empty() && args.event.payload.node.type == "bff"
 //       return { needsBootstrap: needsBootstrap, version: version }
 //     }
 //   }

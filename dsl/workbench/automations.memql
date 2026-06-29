@@ -19,7 +19,7 @@ automation releaseWorkspaceOnPlanTerminal {
     logic releaseWorkspaceOnPlanTerminal { event: event }
   }
   step apply {
-    forEach item in decide.Nodes() {
+    forEach item in decide.nodes() {
       if item.payload.status == "provisioned" && (event.node.payload.status == "succeeded" || event.node.payload.status == "failed" || event.node.payload.status == "cancelled") {
         releaseWorkspace {
           workspaceId: item.id,

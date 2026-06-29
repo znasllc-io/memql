@@ -16,13 +16,13 @@ logic purgeExpiredSafetyClassifications {
     emitObservation := publishEvent({
       topic: "safety.classification.retention.observed",
       payload: {
-        candidateCount: allRows.Len(),
-        retentionDays: coalesce(retentionDays.First().payload.value, "90"),
+        candidateCount: allRows.count(),
+        retentionDays: coalesce(retentionDays.first().payload.value, "90"),
         timestamp: now
       }
     })
 
-    return allRows.Len()
+    return allRows.count()
   }
 }
 
@@ -39,12 +39,12 @@ logic purgeExpiredOutputScreenings {
     emitObservation := publishEvent({
       topic: "safety.outputScreening.retention.observed",
       payload: {
-        candidateCount: allRows.Len(),
-        retentionDays: coalesce(retentionDays.First().payload.value, "90"),
+        candidateCount: allRows.count(),
+        retentionDays: coalesce(retentionDays.first().payload.value, "90"),
         timestamp: now
       }
     })
 
-    return allRows.Len()
+    return allRows.count()
   }
 }

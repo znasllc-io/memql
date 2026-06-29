@@ -41,7 +41,7 @@ logic governanceCanManagePrincipal {
   body {
     actorRole  := roleBySlug({ slug: actor.role })
     targetRole := roleBySlug({ slug: args.targetRoleSlug })
-    return rbacGovernPrincipal({ actorUserId: actor.userId, actorRank: actorRole.First().payload.rank, actorIsOwner: actor.isClusterOwner, targetUserId: args.targetUserId, targetRank: targetRole.First().payload.rank, targetRoleSlug: args.targetRoleSlug, verb: args.verb })
+    return rbacGovernPrincipal({ actorUserId: actor.userId, actorRank: actorRole.first().payload.rank, actorIsOwner: actor.isClusterOwner, targetUserId: args.targetUserId, targetRank: targetRole.first().payload.rank, targetRoleSlug: args.targetRoleSlug, verb: args.verb })
   }
 }
 
@@ -53,6 +53,6 @@ logic governanceCanCreatePrincipal {
   body {
     actorRole := roleBySlug({ slug: actor.role })
     newRole   := roleBySlug({ slug: args.newRoleSlug })
-    return rbacCanCreatePrincipal({ actorRank: actorRole.First().payload.rank, actorIsOwner: actor.isClusterOwner, newRank: newRole.First().payload.rank })
+    return rbacCanCreatePrincipal({ actorRank: actorRole.first().payload.rank, actorIsOwner: actor.isClusterOwner, newRank: newRole.first().payload.rank })
   }
 }

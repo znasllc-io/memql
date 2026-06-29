@@ -55,7 +55,7 @@ logic workerInvocationRetentionSweep {
   }
   body {
   candidates := expiredWorkerInvocations({})
-  return candidates.Nodes()
+  return candidates.nodes()
   }
 }
 
@@ -63,7 +63,7 @@ logic workerInvocationRetentionSweep {
 // workerInvocationRetentionWindow -- pure read of the retention window
 // global variable for the workerInvocationRetentionSweep automation's
 // per-row date gate (#2235). Returns the v1:platform:globalVariable row so
-// the automation reads window.First().payload.value in its forEach `if`.
+// the automation reads window.first().payload.value in its forEach `if`.
 @enabled
 @description("Pure read: returns the WORKER_INVOCATION_RETENTION_DAYS global variable row for the workerInvocationRetentionSweep automation's per-row window gate (#2235).")
 logic workerInvocationRetentionWindow {
