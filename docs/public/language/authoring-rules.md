@@ -167,7 +167,7 @@ use cognition.queries.{ queryActiveSpaceIds }
 logic logicListSpacesSorted {
   args { event object @required }
   body {
-    return sort(queryActiveSpaceIds({}), "payload.name", "asc")
+    return sort(queryActiveSpaceIds({}), "name", "asc")
   }
 }
 ```
@@ -203,7 +203,7 @@ bodies.)
 
 **Where directives DO work**: in raw query strings sent through
 `MemqlClientMessage.Stream` (the public RPC), e.g.
-`sort(concept==v1:cluster:node, "payload.name", "asc")`. That goes
+`sort(concept==v1:cluster:node, "name", "asc")`. That goes
 through the top-level parser, which knows about directives.
 
 ---
@@ -364,7 +364,7 @@ Where:
   signature
 - `id-segment` = the trimmed value of the `id:` field
 
-If you omit `id:`, the engine derives a content hash from the payload.
+If you omit `id:`, the engine derives a content hash from the 
 Same payload twice ⇒ same id ⇒ a new time-series row under that id.
 Different payload ⇒ different id ⇒ a different row.
 
@@ -663,12 +663,12 @@ Authors never write `ctx.X` -- it is not part of the author surface.
 **Rule.** Shapes are struct-form path lists. Each body line is a
 projection path. A payload property is written by **bare name**
 (`name`, `description`) -- the concept is bound by the
-`shape <Concept> <name>` signature, so `payload.` is removed; row
+`shape <Concept> <name>` signature, so `` is removed; row
 metadata stays `row.X` (`row.id`, `row.createdAt`) and the auth
 envelope stays `actor.X` (`actor.userId`). The projected field is
 keyed by the path's **terminal segment**. Every shape declares its
 kind via `@row` (concept payload + row intrinsics) and/or `@actor`
-(engine envelope, no signature concept). The explicit `payload.X`
+(engine envelope, no signature concept). The explicit `X`
 form is rejected at load.
 
 ```memql
@@ -695,14 +695,14 @@ its template wrapper are gone --
 func (Shape) agentFull {
   @template({
     node("id"),
-    node("payload.name")
+    node("name")
   })
 }
 ```
 
 The terminal-segment keying carried over from the old `node("...")`
-shorthand: `payload.name` projects as `name`, exactly like
-`node("payload.name")` did. Live examples sit in every
+shorthand: `name` projects as `name`, exactly like
+`node("name")` did. Live examples sit in every
 `dsl/<namespace>/shapes.memql` file.
 
 ---
@@ -801,7 +801,7 @@ this as a PR-review checklist item.
 
 **Rule.** The engine auto-stamps a small set of intrinsic fields on
 every inserted node version. They live on the row itself, not in the
-payload. Declaring any of them as a payload property in a concept
+ Declaring any of them as a payload property in a concept
 schema is rejected at concept-load time by
 `ensureReservedFieldsNotDeclared`:
 
@@ -896,7 +896,7 @@ short-name (the stringly-typed `"v1:ns:name"` literal is retired):
 
 The engine ALSO auto-canonicalizes `@relationship`-tagged payload
 fields at insert time (`canonicalizeRelationshipFields` in
-`component/memql/partition_context.go`), so `payload.userId == arg(...)`
+`component/memql/partition_context.go`), so `userId == arg(...)`
 queries work with canonical-stored values. But the id derivation
 runs BEFORE the payload auto-canon, so `canonicalId()` in the id
 template is still required for stable deterministic ids.
@@ -966,13 +966,16 @@ query space queryActiveSpaces {
   args {
     ownerId  string  @required
   }
-  filter  payload.ownerId == args.ownerId && traitIsActiveRecord
+  filter  ownerId == args.ownerId && traitIsActiveRecord
   shape   spaceFull
 }
 
-// Spec — struct form. No args, no return.
-spec specIsHumanParticipant {
-  payload.participantType == "human"
+// Spec — struct form. Binds one shape XOR concept in the signature;
+// the body returns a boolean over bare field names. No args.
+use cognition.concepts.{ participant }
+
+spec participant specIsHumanParticipant {
+  return participantType == "human"
 }
 ```
 
@@ -1020,10 +1023,10 @@ For Logic bodies the author surface is ctx-free: write
 write `ctx.output = ...`.
 
 **Why `args.X` is required (not bare).** In a mutation's `insert`
-block, the keys ARE bare field names of the row's payload. Saying
+block, the keys ARE bare field names of the row's  Saying
 `spaceId: args.spaceId` keeps the LHS (concept payload key) and RHS
 (caller arg) visually distinct. The same precedent applies to query
-filters: `payload.spaceId == args.spaceId` reads correctly without
+filters: `spaceId == args.spaceId` reads correctly without
 needing the reader to guess which side is concept-field vs caller-arg.
 
 **For automations:** the triggering event payload is bound as
@@ -1039,18 +1042,18 @@ A PR that violates any of them fails before the engine ever parses
 the change. The gates, with their test names:
 
 - **Canonical filter prefixes** (`TestFilterSyntaxCanonical`).
-  Filter predicates reference payload fields as `payload.<field>`
+  Filter predicates reference payload fields as `<field>`
   and row intrinsics (`id`, `concept`, `createdAt`, `createdBy`,
   `partition`, `type`, `schema`) by their bare names. The
   `<conceptName>.<field>` alias form is rejected.
 - **Mandatory trait specs** (`TestNoInlineTraitablePredicates`).
   When a trait in `dsl/common/traits.memql` covers a predicate, the
   filter must call the trait, not inline the comparison:
-  `traitIsActiveRecord` (not `payload.active == true`),
-  `traitIsNotDeleted` (not `payload.deleted != true`),
-  `traitStatusIsActive` (not `payload.status == "active"`), and so
+  `traitIsActiveRecord` (not `active == true`),
+  `traitIsNotDeleted` (not `deleted != true`),
+  `traitStatusIsActive` (not `status == "active"`), and so
   on for the status / identity-type / deletion-scheduled traits.
-  Concept-specific predicates (`payload.ownerUserId == args.userId`)
+  Concept-specific predicates (`ownerUserId == args.userId`)
   stay inline.
 - **No concept-name shortId prefixes** (`TestNoShortIdConceptPrefix`).
   Derived ids are the bare unique part (uuid / hash / slug) — never
@@ -1062,7 +1065,7 @@ the change. The gates, with their test names:
   rejected.
 - **Per-row authz classification** (`TestPerRowAuthzClassification`).
   Every query / mutation that touches a user-scope field
-  (`payload.ownerUserId`, `payload.userId`, `payload.createdBy`, ...)
+  (`ownerUserId`, `userId`, `createdBy`, ...)
   must either carry a caller-scope check (`actor.userId` in the
   filter / write), an admin gate (`actor.isClusterOwner` or a
   `requiresClusterOwner` spec), or an explicit `@public` annotation
@@ -1137,7 +1140,7 @@ query space querySpaceMeta {
 
 // Bounded list — compliant (paginate window).
 query space queryFirstTenSpaces {
-  filter  payload.active==true
+  filter  active==true
   paginate 10
   shape   spaceFull
 }
@@ -1151,7 +1154,7 @@ query provider queryAllProviders {
 
 // VIOLATION — list read with no bound. Pulls the whole table.
 query widget queryAllWidgets {
-  filter  payload.ownerUserId==args.ownerUserId
+  filter  ownerUserId==args.ownerUserId
   shape   widgetFull
 }
 ```

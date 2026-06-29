@@ -98,9 +98,10 @@ reads through the envelope.
    decision. (Engine plumbing that constructs the envelope is the
    sole exception.)
 2. **`@actor` shapes carry the binding.** Specs that want to gate
-   on actor state declare `@shape("actorEnvelope")` (or a more
-   specific actor shape). The post-load validator catches missing
-   bindings.
+   on actor state bind the shape in their signature
+   (`spec actorEnvelope <name> { return <key> }`, or a more specific
+   actor shape) and read the projected key bare. The post-load
+   validator catches a binding that resolves to no registered shape.
 3. **`actor.now` is the only clock.** Never use Go's `time.Now()`
    in a DSL evaluator path; that's a source of test-flake +
    replay-skew.

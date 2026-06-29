@@ -1029,7 +1029,7 @@ How the DSL constructs lean on each other. Each layer can only depend
         ▼                                       ▼
    ┌─────────┐                              ┌────────┐
    │  Specs  │                              │Prompts │
-   │@shape→  │                              │tmpl +  │
+   │signature│                              │tmpl +  │
    │predicate│                              │schema  │
    └────┬────┘                              └────┬───┘
         │                                        │
@@ -1069,16 +1069,16 @@ How the DSL constructs lean on each other. Each layer can only depend
   `statusRowTrait`, etc.). The legacy `@concepts(...)` binding
   annotation is retired. Shapes can `include` other shapes for
   composition + aliasing.
-- **Specs** are atomic boolean predicates. The eval strategy is
-  derived from the spec body's field references (`@shape("name")` is
-  an optional pin, not required):
-  - body references `payload.X` / row intrinsics → spec compiles to a
-    SQL `WHERE` fragment.
-  - body references `actor.X` → spec evaluates in-process against the
-    auth-context envelope.
-  - mixed (row + actor) → REJECTED at load time. Split into a
-    row-spec + a context-spec and compose them at the call site (the
-    row-spec in a query filter, the context-spec via `spec("name")`).
+- **Specs** are atomic boolean predicates. A spec **binds one shape XOR
+  concept in its signature** (`spec <boundName> <name>`) and the body
+  `return`s a boolean over bare field names. The binding picks the eval
+  strategy (epic #2281):
+  - concept or `@row` shape binding → row-spec, compiles to a SQL
+    `WHERE` fragment.
+  - `@actor` shape binding → context-spec, evaluates in-process against
+    the auth envelope (invoked via `spec("name")`).
+  A spec body never reads `actor.*` / `row.*` directly. A `trait` is the
+  one deliberately-unbound row predicate (bare payload fields).
 - **Mutations** write to concepts via the bare `insert { ... }` /
   `update { ... }` block (target from the signature). One write per
   body.
@@ -1137,7 +1137,7 @@ surface entirely.
 | `now` | RFC3339 timestamp captured at eval start | every body |
 | `partition` | Active partition for this call | every body |
 | `config.X` | Allow-listed config (`component/config/policy_exposable.go`) | every body |
-| `payload.X`, `id`, `concept`, `type`, `createdAt`, `createdBy`, `schema` | Row fields / intrinsics | queries' `filter` + `shape` only (SQL pushdown) |
+| `X`, `id`, `concept`, `type`, `createdAt`, `createdBy`, `schema` | Row fields / intrinsics | queries' `filter` + `shape` only (SQL pushdown) |
 
 For automations, the triggering event is bound as `args`, so
 `args.topic`, `args.kind`, and `args.payload.<field>` are how you
@@ -1298,7 +1298,7 @@ rejected at parse time with a migration-pointing error.
 
 The bound concept's payload is referenced from filter clauses by the
 **bare property name** (epic #2292 — the concept is bound by the
-signature, so `payload.` is removed) and from mutation bodies via the
+signature, so `` is removed) and from mutation bodies via the
 bare `insert { ... }` / `update { ... }` block without re-stating the
 concept id.
 
@@ -1306,7 +1306,7 @@ concept id.
 `dsl/conformance_test.go`):
 
 - Payload fields: **bare property** (`status`, `ownerUserId`) — never
-  `payload.<field>` (removed, epic #2292) and never `<conceptName>.<field>`
+  `<field>` (removed, epic #2292) and never `<conceptName>.<field>`
 - Intrinsics (`id`, `concept`, `createdAt`, `createdBy`,
   `partition`, `type`, `schema`): bare names
 - **One Go boolean grammar** (operator standardization #971): `&&`
@@ -1321,8 +1321,8 @@ concept id.
   dropped as if never written (unambiguous under `||`). The `?.`
   optional-chain prefix it replaces is retired.
 - When a trait spec covers the predicate (e.g. `traitIsActiveRecord`
-  for `payload.active==true`), the trait is mandatory. Inline
-  `payload.active==true` / `payload.deleted==false` are rejected
+  for `active==true`), the trait is mandatory. Inline
+  `active==true` / `deleted==false` are rejected
   by the conformance test.
 
 **Argument resolution.** Caller-passed args declared in the
@@ -1956,7 +1956,7 @@ Refinement child Plans (kind='refineAnalysis') spawned by the
 front-end Refine action are picked up by the
 `handleRefinementPlan` automation (triggers on
 graph.node.created.*.v1:planner:plan filtered by
-payload.kind=='refineAnalysis'); the automation drives the child
+kind=='refineAnalysis'); the automation drives the child
 Plan through queued -> running -> succeeded and emits its own
 plan.completed card. v0.x acknowledges feedback as the result;
 LLM-backed re-analysis ships with the async planner integration.

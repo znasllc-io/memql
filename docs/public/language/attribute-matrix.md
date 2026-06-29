@@ -267,12 +267,12 @@ automation pruneStaleClusterNodes { ... }
 ```
 
 #### `@filter(...)`
-Predicate over the triggering event's payload. The automation only
+Predicate over the triggering event's  The automation only
 fires when the predicate holds.
 
 ```memql
 @trigger(event="node.created", concept="v1:cognition:space", partition="*")
-@filter(payload.active==true)
+@filter(active==true)
 automation autoJoinSI { ... }
 ```
 
@@ -302,7 +302,7 @@ query participant queryActiveHumanParticipants {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==args.spaceId && payload.participantType=="human" && traitIsActiveRecord
+  filter  spaceId==args.spaceId && participantType=="human" && traitIsActiveRecord
   shape   participantFull
 }
 ```
@@ -369,8 +369,8 @@ sets; unknown annotations are rejected at load time:
 - **Policies** (AI provider selection): `@primary`, `@fallback`,
   `@maxLatencyMs`, `@maxTimeToFirstTokenMs`, `@preferredRole`,
   `@description`.
-- **Specs / traits**: `@description`, optional `@shape("name")` on
-  specs, lifecycle flags.
+- **Specs / traits**: `@description`, lifecycle flags. (A spec binds its
+  shape/concept in the signature; the `@shape("name")` pin is removed.)
 - **Shapes**: `@row` and/or `@actor` (kind declaration),
   `@description`.
 

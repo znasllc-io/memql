@@ -13,58 +13,65 @@ owner: znas
 
 ## What Specs Are
 
-Specs are atomic, named boolean predicates declared in struct form:
+Specs are atomic, named boolean predicates declared in struct form. A
+spec **binds exactly one shape XOR concept in its signature** and the
+body **`return`s a boolean** over **bare** field names (epic #2281):
 
 ```memql
-spec NAME {
-  <single-boolean-expression>
+spec <boundName> <name> {
+  return <boolean-expression>
 }
 ```
 
-They are evaluated in one of two ways, picked by the engine based on
-which fields the body references:
+`<boundName>` resolves through the file-top `use` import (a shape import
+binds a shape, a concept import binds a concept). The binding picks how
+the spec is evaluated:
 
-- **Row-specs** -- the body references `payload.X` and/or row
-  intrinsics (`id`, `concept`, `type`, `createdAt`, `createdBy`,
-  `schema`). The expression compiles into a SQL `WHERE` fragment
-  and pushes down to the database for filtering.
-- **Context-specs** -- the body references `actor.X` only
-  (e.g. `actor.role`, `actor.isClusterOwner`). The expression
-  evaluates in-process against the auth-context envelope; invoked
-  via the `spec("name")` builtin, or from Go via
+- **Row-specs** -- bind a concept or a `@row` shape. The expression
+  compiles into a SQL `WHERE` fragment and pushes down to the database
+  for filtering.
+- **Context-specs** -- bind an `@actor` shape (the only gateway to the
+  auth envelope). The expression evaluates in-process against the auth
+  context; invoked via the `spec("name")` builtin, or from Go via
   `engine.EvaluateSpec(ctx, "name")`, for actor-based checks like
   "is admin", "owns partition", etc.
 
-Bodies that mix both flavors (row + actor references in the same
-expression) are rejected at load time.
+A spec body never reads `actor.*` / `row.*` directly -- bind a shape
+that projects it and read the projected key bare. A `trait` is the one
+deliberately-unbound row predicate (bare payload fields, validated at
+the call site).
 
 ## Authoring rules
 
-- Body is a single boolean expression. No `ctx`, no `return`, no
-  parameter.
+- Body is a single `return <boolean expression>` over bare field names
+  (no `payload.` prefix -- the binding names the surface).
 - Side-effect free. Specs cannot call mutation functions or logic
   functions.
-- Prefer `spec*` naming for row-specs (matches the call sites in
-  query filter clauses). Actor-only context-specs may drop the
+- Prefer `spec*` naming for concept-bound row-specs (matches the call
+  sites in query filter clauses). Actor-bound context-specs may drop the
   prefix when the name reads more naturally (`requiresAdmin`).
-- The legacy `func (Spec) name(ctx any) bool { return <expr> }`
-  form is retired; the parser rejects it with a migration hint.
+- The `@shape("name")` annotation is removed; the legacy
+  `func (Spec) name(ctx any) bool { ... }` form and the older
+  bare-expression body (no `return`) are retired and rejected with a
+  migration hint.
 
 ## Examples
 
 ### Row-spec (SQL pushdown)
 
 ```memql
+use cognition.concepts.{ participant }
+
 @enabled
 @description("Matches participants with human participantType")
-spec specIsHumanParticipant {
-  payload.participantType == "human"
+spec participant specIsHumanParticipant {
+  return participantType == "human"
 }
 
 @enabled
 @description("Active records created by system automation")
-spec specSystemActive {
-  payload.active == true && createdBy == "system:automation"
+spec participant specSystemActive {
+  return active == true && createdBy == "system:automation"
 }
 ```
 
@@ -80,7 +87,7 @@ query participant queryHumanParticipants {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==args.spaceId && specIsHumanParticipant
+  filter  spaceId==args.spaceId && specIsHumanParticipant
   shape   participantFull
 }
 ```
@@ -95,15 +102,15 @@ use common.shapes.{ actorEnvelope }
 
 @enabled
 @description("Caller must hold owner or admin role to use the Deployment Console.")
-@shape("actorEnvelope")
-spec requiresOwnerOrAdmin {
-  actor.role == "admin" || actor.role == "owner"
+spec actorEnvelope requiresOwnerOrAdmin {
+  return role == "admin" || role == "owner"
 }
 ```
 
-(`@shape("name")` is an optional pin -- the eval strategy comes from
-the body's field references, but when present the engine verifies the
-body reads a subset of the named shape's projected fields.)
+(The `actorEnvelope` `@actor` shape is the gateway to the auth envelope;
+the spec reads its projected key -- `role` -- by bare name. The
+signature binding is verified at load: it must resolve to an imported
+shape or concept.)
 
 Context-specs are invoked via the `spec("name")` builtin or, from Go,
 `engine.EvaluateSpec(ctx, "name")` against the request's auth context.
