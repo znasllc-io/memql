@@ -124,25 +124,32 @@ func compileSortField(field SortField) (compiledSortField, error) {
 		}
 	}
 
+	// Bare payload access (epic #2292): a sort key names a payload property
+	// by BARE name (the concept is bound by the query signature), so a
+	// non-intrinsic field sorts on the payload surface. The legacy explicit
+	// `payload.<path>` form is still accepted (passthrough) for
+	// runtime/SDK callers.
+	pathExpr := strings.TrimSpace(name)
 	if strings.HasPrefix(lowered, "payload.") {
 		parts := strings.SplitN(name, ".", 2)
 		if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
-			return compiledSortField{}, fmt.Errorf("payload sort field must include a property path (e.g., payload.title)")
+			return compiledSortField{}, fmt.Errorf("payload sort field must include a property path (e.g., \"title\")")
 		}
-		pathExpr := strings.TrimSpace(parts[1])
-		path, err := splitRelationshipField(pathExpr)
-		if err != nil {
-			return compiledSortField{}, fmt.Errorf("payload path %q is invalid: %w", name, err)
-		}
-		return compiledSortField{
-			kind:        sortFieldPayload,
-			direction:   direction,
-			payloadPath: path,
-			name:        "payload." + strings.ToLower(strings.Join(path, ".")),
-		}, nil
+		pathExpr = strings.TrimSpace(parts[1])
 	}
-
-	return compiledSortField{}, fmt.Errorf("field %q is not supported; use intrinsic fields or payload.<path>", name)
+	if pathExpr == "" {
+		return compiledSortField{}, fmt.Errorf("sort field is required; name a payload property (e.g. \"title\") or an intrinsic")
+	}
+	path, err := splitRelationshipField(pathExpr)
+	if err != nil {
+		return compiledSortField{}, fmt.Errorf("sort path %q is invalid: %w", name, err)
+	}
+	return compiledSortField{
+		kind:        sortFieldPayload,
+		direction:   direction,
+		payloadPath: path,
+		name:        "payload." + strings.ToLower(strings.Join(path, ".")),
+	}, nil
 }
 
 func normalizeSortDirection(direction SortDirection) SortDirection {
