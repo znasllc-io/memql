@@ -18,6 +18,15 @@ type Parser struct {
 	current Token
 	uses    []*UseDeclaration // populated during parseFile for implicit concept resolution
 
+	// src is the original source the tokens were lexed from, stored as
+	// runes because Token.Pos / Token.EndPos are rune indices (the lexer
+	// scans over a []rune). It is populated by ParseFile and by the
+	// function loader so a collection-chain step RHS (#2317) can be sliced
+	// back to its EXACT source span. Nil for callers that don't set it
+	// (e.g. ad-hoc NewParser(tokens) expression parses) -- the step-RHS
+	// branch falls back to the existing error in that case.
+	src []rune
+
 	// pendingArgs holds a file-top `args { ... }` block parsed
 	// immediately before the next definition. parseFile attaches it
 	// to the resulting FunctionDef and clears the field.
@@ -69,6 +78,30 @@ func NewParser(tokens []Token) *Parser {
 		p.current = tokens[0]
 	}
 	return p
+}
+
+// SetSource records the original source string the tokens were lexed from
+// so byte-exact source spans can be sliced during parsing (#2317). Callers
+// that parse logic bodies (the function loader, ParseFile) set this; it must
+// be the EXACT string handed to NewLexer, since Token.Pos / Token.EndPos are
+// rune indices into it.
+func (p *Parser) SetSource(source string) {
+	p.src = []rune(source)
+}
+
+// sliceSource returns the verbatim source span from rune index start to the
+// end of the most-recently-consumed token, trimmed of surrounding
+// whitespace. Returns "" when no source was recorded (SetSource not called)
+// or the span is degenerate -- callers treat "" as "source unavailable".
+func (p *Parser) sliceSource(start int) string {
+	if p.src == nil || p.pos == 0 {
+		return ""
+	}
+	end := p.tokens[p.pos-1].EndPos
+	if start < 0 || end > len(p.src) || end <= start {
+		return ""
+	}
+	return strings.TrimSpace(string(p.src[start:end]))
 }
 
 // Parse parses the token stream and returns the root AST node.
@@ -127,6 +160,7 @@ func ParseFile(source string) (*File, error) {
 		return nil, err
 	}
 	parser := NewParser(tokens)
+	parser.SetSource(source)
 	return parser.parseFile()
 }
 
@@ -1430,12 +1464,36 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 	// assignment position we normalise those to FunctionCallExpr so
 	// the compiler pipeline treats them uniformly.
 	if p.check(TokenIdentifier) && p.peekAhead(1).Type == TokenParenOpen {
+		rhsStart := p.current.Pos
 		expr, err := p.parseExpression()
 		if err != nil {
 			return nil, err
 		}
 		call, ok := expressionToFunctionCall(expr)
 		if !ok {
+			// Collection-method / lambda chain RHS (#2317):
+			//   active := args.members.where(m => m.active)
+			// is not a function-call step. Capture the chain's VERBATIM
+			// source span and emit a query step carrying it; the
+			// LogicRunner's collection-chain branch
+			// (tryEvaluateCollectionChainLocally) re-parses that source and
+			// evaluates the chain in-memory. We slice the original source
+			// rather than reconstruct via expressionToString because the
+			// latter emits engine-IR (`arg("members").where(...)`), which
+			// does not round-trip an arg-receiver chain. Only a genuine
+			// *MethodCallExpr is rescued here; any OTHER non-call expr (a
+			// bare literal `x := 5`, a comparison, ...) keeps erroring.
+			if chain, isChain := expr.(*MethodCallExpr); isChain {
+				if raw := p.sliceSource(rhsStart); raw != "" {
+					chain.Raw = raw
+					return &StepDef{
+						ID:         names[0],
+						Type:       StepTypeQuery,
+						RetryCount: retryCount,
+						Config:     &QueryStepConfig{Query: chain},
+					}, nil
+				}
+			}
 			return nil, newParseErrorf(&p.current,
 				"step RHS must be a function call or builtin; got %T. "+
 					"Wrap raw values in a helper or use 'query { }' / 'mutation { }' blocks.",

@@ -169,6 +169,31 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 				}
 			}
 		}
+		// Collection-method / lambda chain RHS (#2317): an intermediate
+		// `active := rows.where(r => r.active)` assignment evaluates the chain
+		// in-memory against the local Evaluator -- the base receiver (a prior
+		// `:=` step result or `args.X`) resolves through it, normalised to its
+		// node collection -- and binds the resulting collection as the step
+		// result, so a later `return active.count()` reads it. Only a genuine
+		// chain is short-circuited; a plain query / function / builtin step
+		// falls through to the step registry. (The struct-form parser support
+		// for a method-chain step RHS lands in #2316; this is the runtime
+		// dispatch that backs it.)
+		if step.Type == StepTypeQuery && step.Query != nil {
+			if val, handled, err := tryEvaluateCollectionChainLocally(step.Query.Query, evaluator); err != nil {
+				return nil, fmt.Errorf("logic %q step %q: %w", fnName, step.ID, err)
+			} else if handled {
+				now := time.Now()
+				evaluator.SetStepResult(step.ID, &StepResult{
+					StepId:      step.ID,
+					Status:      "success",
+					StartedAt:   now,
+					CompletedAt: now,
+					Result:      val,
+				})
+				continue
+			}
+		}
 		if err := r.runOneStep(ctx, step, stepCtx, evaluator); err != nil {
 			return nil, fmt.Errorf("logic %q step %q: %w", fnName, step.ID, err)
 		}
@@ -262,6 +287,14 @@ func EvaluateLocalExpr(expr string, evaluator *Evaluator) (any, bool, error) {
 		return val, handled, err
 	}
 	if val, handled, err := tryEvaluateReturnLocally(expr, evaluator); err != nil || handled {
+		return val, handled, err
+	}
+	// Collection-method / lambda chain (#2317): `rows.where(r => r.active).count()`
+	// over a prior step result or `args.X`. Routed AFTER the single
+	// step-method short-circuit so a bare `step.count()` keeps its legacy
+	// step-result-accessor semantics; only a genuine chain (carrying a lambda
+	// or a non-accessor collection operator) lands here.
+	if val, handled, err := tryEvaluateCollectionChainLocally(expr, evaluator); err != nil || handled {
 		return val, handled, err
 	}
 	return tryEvaluateBuiltinLocally(expr, evaluator)

@@ -200,6 +200,10 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	}
 
 	p := languageParser.NewParser(tokens)
+	// Record the (fully-rewritten) source so a collection-chain logic step
+	// RHS can be sliced back to its exact span during parsing (#2317). The
+	// tokens were lexed from this same `content`, so the rune offsets line up.
+	p.SetSource(content)
 	ast, err := p.Parse()
 	if err != nil {
 		return nil, withRewriteCause(err, rewriteErr)

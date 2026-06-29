@@ -99,7 +99,11 @@ func (e *ForEachExecutor) Execute(ctx context.Context, step *automations.Step, s
 			filterEval := stepCtx.Evaluator.Clone()
 			filterEval.SetItem(item, itemName)
 
-			matches, err := filterEval.EvaluateCondition(forEachCfg.Filter)
+			// EvaluateForEachFilter (#2318) routes a genuine collection /
+			// lambda chain filter (`item.tags.any(t => t == "vip")`) through
+			// the in-memory collection surface and keeps the legacy
+			// string-condition path for everything else.
+			matches, err := filterEval.EvaluateForEachFilter(forEachCfg.Filter)
 			if err != nil {
 				// Log warning but continue
 				if stepCtx.Logger != nil {

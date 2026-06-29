@@ -207,6 +207,22 @@ func (e *Evaluator) GetStepNodes(stepId string) ([]any, bool) {
 		return nil, false
 	}
 
+	// A collection-valued step result (Story 4 collection chain bound by a
+	// `:=` step, #2317) is already the node list -- return it directly so the
+	// step-result accessors (.count() / .first() / .empty() / .last() / .nodes)
+	// work over a `active := rows.where(...)` result, not just a Bundle-wrapped
+	// query result. A Bundle / *ExecuteResult keeps the envelope-aware path below.
+	switch v := result.(type) {
+	case []any:
+		return v, true
+	case []map[string]any:
+		out := make([]any, len(v))
+		for i := range v {
+			out[i] = v[i]
+		}
+		return out, true
+	}
+
 	// Try to extract Bundle.nodes from the result
 	// First, try direct map access
 	if resultMap, ok := result.(map[string]any); ok {
@@ -1051,9 +1067,11 @@ func (e *Evaluator) EvaluateStepReference(expr string) (any, error) {
 	// then resolve the chain's base receiver through the standard evaluator
 	// and run the in-memory method chain over it.
 	if memql.LooksLikeCollectionChain(expr) {
-		val, isChain, err := memql.EvaluateCollectionChainString(expr, func(basePath string) (any, error) {
-			return e.EvaluateStepReference(basePath)
-		})
+		val, isChain, err := memql.EvaluateCollectionChainString(
+			expr,
+			e.resolveCollectionBase,
+			e.collectionLambdaArgs(),
+		)
 		if isChain {
 			return val, err
 		}

@@ -85,15 +85,22 @@ func LooksLikeCollectionChain(src string) bool {
 
 // EvaluateCollectionChainString parses, converts, and evaluates a
 // collection-method chain string (Story 4 / #2302 / ADR §2.2) for use as
-// an automation forEach source. The chain's base receiver path (e.g.
-// `args.members`, `loadUsers.result`) is resolved by the caller-supplied
-// resolveBase callback (the automations evaluator), then the in-memory
-// method chain runs over it.
+// an automation forEach source, a logic-body chain (#2317), or a forEach
+// filter (#2318). The chain's base receiver path (e.g. `args.members`,
+// `loadUsers.result`, a prior `:=` step variable) is resolved by the
+// caller-supplied resolveBase callback (the automations evaluator), then the
+// in-memory method chain runs over it.
+//
+// args carries the caller's outer arguments so a lambda body can read an outer
+// `args.X` reference that is NOT the bound element (#2318); pass nil when there
+// are none (element-only lambdas don't need it). The base receiver is resolved
+// via resolveBase regardless, so an `args.X` BASE keeps resolving through the
+// caller.
 //
 // Returns isChain=false (with a nil error) when src does not parse to a
 // collection-method chain, so the caller falls back to its normal source
 // resolution. A genuine evaluation failure returns isChain=true + the error.
-func EvaluateCollectionChainString(src string, resolveBase func(basePath string) (any, error)) (value any, isChain bool, err error) {
+func EvaluateCollectionChainString(src string, resolveBase func(basePath string) (any, error), args map[string]any) (value any, isChain bool, err error) {
 	pexpr, perr := parser.ParseExpression(strings.TrimSpace(src))
 	if perr != nil {
 		return nil, false, nil
@@ -123,7 +130,7 @@ func EvaluateCollectionChainString(src string, resolveBase func(basePath string)
 	}
 	substituteChainBase(chain, &LiteralValueNode{Value: resolved})
 
-	val, eerr := evaluateCollectionMethodExpression(chain, nil)
+	val, eerr := evaluateCollectionMethodExpression(chain, args)
 	if eerr != nil {
 		return nil, true, eerr
 	}
