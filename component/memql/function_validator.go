@@ -786,6 +786,19 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		}
 		return &LambdaExpression{Params: append([]string(nil), node.Params...), Body: body}, nil
 
+	case *ArithmeticExpression:
+		// #2316: fold any `args.X` operand into a concrete literal (lambda
+		// param references pass through unchanged for per-element binding).
+		left, err := v.expandExpressionWithArgs(node.Left, args)
+		if err != nil {
+			return nil, err
+		}
+		right, err := v.expandExpressionWithArgs(node.Right, args)
+		if err != nil {
+			return nil, err
+		}
+		return &ArithmeticExpression{Op: node.Op, Left: left, Right: right}, nil
+
 	case *ConditionalFilterExpression:
 		// Process conditional filter: check if the arg is present AND
 		// non-nil. A present-but-nil value is treated as absent: tool

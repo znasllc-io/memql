@@ -548,6 +548,24 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		return result, nil
 	}
 
+	// Top-level arithmetic (#2316): a Logic whose body is a single
+	// `return args.a + args.b` resolves -- after expandExpressionWithArgs
+	// folds the operand ArgRefExpressions into concrete literals -- to a
+	// *ArithmeticExpression at plan.Root. There is no node-set to evaluate:
+	// the computed scalar IS the result. Evaluated in-memory and wrapped as
+	// the function's return value, like the LiteralValueNode and
+	// CollectionMethodExpression branches above.
+	if arithExpr, ok := plan.Root.(*ArithmeticExpression); ok {
+		val, err := evalCollScalar(arithExpr, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		result := newExecuteResult(nil)
+		result.setOutput(val)
+		e.emitQueryExecutedEvent(startTime, result, false)
+		return result, nil
+	}
+
 	if plan.Root == nil {
 		return nil, fmt.Errorf("query must include at least one filter or relationship expression")
 	}

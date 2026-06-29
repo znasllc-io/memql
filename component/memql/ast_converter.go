@@ -104,6 +104,8 @@ func (c *ASTConverter) ConvertExpression(expr languageParser.ExpressionNode) (Ex
 		return c.convertLogicalExpr(node)
 	case *languageParser.ComparisonExpr:
 		return c.convertComparisonExpr(node)
+	case *languageParser.ArithmeticExpr:
+		return c.convertArithmeticExpr(node)
 	case *languageParser.RelationshipExpr:
 		return c.convertRelationshipExpr(node)
 	case *languageParser.SortExpr:
@@ -233,6 +235,29 @@ func (c *ASTConverter) convertPositionalBuiltin(name string, args []languagePars
 		out[strconv.Itoa(i)] = converted
 	}
 	return &FunctionCallExpression{Name: name, Args: out}, nil
+}
+
+// convertArithmeticExpr converts a parser ArithmeticExpr (#2316) to the engine
+// ArithmeticExpression. Arithmetic is IN-MEMORY only: it is admitted ONLY when
+// the converter was built with WithCollectionMethods (logic bodies / collection
+// lambdas). Specs and query filters use the default converter and get a scope
+// error -- mirroring how the collection-method surface is gated.
+func (c *ASTConverter) convertArithmeticExpr(expr *languageParser.ArithmeticExpr) (ExpressionNode, error) {
+	if expr == nil {
+		return nil, nil
+	}
+	if !c.allowCollectionMethods {
+		return nil, fmt.Errorf("arithmetic operators (+ - * / %%) are only available in logic / collection lambdas (in-memory), not in specs or query filters (#2316)")
+	}
+	left, err := c.ConvertExpression(expr.Left)
+	if err != nil {
+		return nil, fmt.Errorf("convert arithmetic left: %w", err)
+	}
+	right, err := c.ConvertExpression(expr.Right)
+	if err != nil {
+		return nil, fmt.Errorf("convert arithmetic right: %w", err)
+	}
+	return &ArithmeticExpression{Op: expr.Op, Left: left, Right: right}, nil
 }
 
 // convertLogicalExpr converts languageParser.LogicalExpr to memql.LogicalExpression.

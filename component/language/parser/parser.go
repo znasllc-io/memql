@@ -4382,7 +4382,7 @@ func (p *Parser) parseNullCoalesce() (ExpressionNode, error) {
 
 // parseLogicalAnd parses semicolon-separated or &&-separated (AND) expressions.
 func (p *Parser) parseLogicalAnd() (ExpressionNode, error) {
-	left, err := p.parsePrimary()
+	left, err := p.parseAdditive()
 	if err != nil {
 		return nil, err
 	}
@@ -4392,7 +4392,7 @@ func (p *Parser) parseLogicalAnd() (ExpressionNode, error) {
 
 	for p.check(TokenSemicolon) || p.check(TokenAmpAmp) {
 		p.advance()
-		right, err := p.parsePrimary()
+		right, err := p.parseAdditive()
 		if err != nil {
 			return nil, err
 		}
@@ -4407,6 +4407,107 @@ func (p *Parser) parseLogicalAnd() (ExpressionNode, error) {
 	}
 
 	return left, nil
+}
+
+// isComparisonOperatorLiteral reports whether a TokenOperator literal is one
+// of the six comparison operators. Used to keep the arithmetic operators
+// (`+ - * / %`, #2316) -- which the lexer now also emits as TokenOperator --
+// from being misread as comparisons inside parseIdentifierExpression.
+func isComparisonOperatorLiteral(lit string) bool {
+	switch lit {
+	case "==", "!=", "<", "<=", ">", ">=":
+		return true
+	}
+	return false
+}
+
+// isAdditiveOperatorLiteral reports the `+` / `-` additive operators (#2316).
+func isAdditiveOperatorLiteral(lit string) bool {
+	return lit == "+" || lit == "-"
+}
+
+// isMultiplicativeOperatorLiteral reports the `* / %` operators (#2316).
+func isMultiplicativeOperatorLiteral(lit string) bool {
+	return lit == "*" || lit == "/" || lit == "%"
+}
+
+// atArithmeticOperator reports whether the current token is one of the
+// binary arithmetic operators (#2316).
+func (p *Parser) atArithmeticOperator() bool {
+	if !p.check(TokenOperator) {
+		return false
+	}
+	return isAdditiveOperatorLiteral(p.current.Literal) || isMultiplicativeOperatorLiteral(p.current.Literal)
+}
+
+// parseAdditive parses `+` / `-` binary arithmetic (#2316). It sits just
+// below the &&/|| logical levels and above multiplication, so `* / %` bind
+// tighter. Left-associative: `a - b - c` parses as `(a - b) - c`.
+func (p *Parser) parseAdditive() (ExpressionNode, error) {
+	left, err := p.parseMultiplicative()
+	if err != nil {
+		return nil, err
+	}
+	if left == nil {
+		return nil, nil
+	}
+	for p.check(TokenOperator) && isAdditiveOperatorLiteral(p.current.Literal) {
+		op := p.current.Literal
+		p.advance()
+		right, err := p.parseMultiplicative()
+		if err != nil {
+			return nil, err
+		}
+		if right == nil {
+			return nil, newParseErrorf(&p.current, "expected an expression after %q", op)
+		}
+		left = &ArithmeticExpr{Op: op, Left: left, Right: right}
+	}
+	return left, nil
+}
+
+// parseMultiplicative parses `* / %` binary arithmetic (#2316). Tighter than
+// additive, looser than unary minus / primaries. Left-associative.
+func (p *Parser) parseMultiplicative() (ExpressionNode, error) {
+	left, err := p.parseUnary()
+	if err != nil {
+		return nil, err
+	}
+	if left == nil {
+		return nil, nil
+	}
+	for p.check(TokenOperator) && isMultiplicativeOperatorLiteral(p.current.Literal) {
+		op := p.current.Literal
+		p.advance()
+		right, err := p.parseUnary()
+		if err != nil {
+			return nil, err
+		}
+		if right == nil {
+			return nil, newParseErrorf(&p.current, "expected an expression after %q", op)
+		}
+		left = &ArithmeticExpr{Op: op, Left: left, Right: right}
+	}
+	return left, nil
+}
+
+// parseUnary folds a leading unary minus on a primary into `0 - <primary>`
+// (#2316), reusing the binary ArithmeticExpr machinery so no separate unary
+// node is needed. A `-` glued to a digit (`-5`) is already a numeric literal
+// from the lexer and never reaches here. Recurses to allow `- - x`.
+func (p *Parser) parseUnary() (ExpressionNode, error) {
+	if p.check(TokenOperator) && p.current.Literal == "-" {
+		p.advance()
+		operand, err := p.parseUnary()
+		if err != nil {
+			return nil, err
+		}
+		if operand == nil {
+			return nil, newParseErrorf(&p.current, "expected an expression after unary '-'")
+		}
+		return &ArithmeticExpr{Op: "-", Left: &LiteralExpr{Value: int64(0)}, Right: operand}, nil
+	}
+	return p.parsePrimary()
 }
 
 // parsePrimary parses primary expressions.
@@ -4745,9 +4846,22 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 		if argPath != "" && !p.check(TokenOperator) && !p.check(TokenKeywordIn) && !p.check(TokenKeywordHas) && !p.check(TokenKeywordNot) {
 			return &ArgRefExpr{Path: argPath}, nil
 		}
+		// `args.X` immediately followed by an arithmetic operator (#2316) is
+		// an arithmetic operand, not a comparison LHS -- return the ArgRefExpr
+		// and let parseAdditive / parseMultiplicative consume the operator.
+		if argPath != "" && p.check(TokenOperator) && p.atArithmeticOperator() {
+			return &ArgRefExpr{Path: argPath}, nil
+		}
 	}
 	if strings.HasPrefix(name, "ctx.") {
 		argPath := strings.TrimPrefix(name, "ctx.")
+		if argPath != "" && p.check(TokenOperator) && p.atArithmeticOperator() {
+			switch argPath {
+			case "input", "output", "actor", "partition", "now", "config", "error", "trace":
+			default:
+				return &ArgRefExpr{Path: argPath}, nil
+			}
+		}
 		if argPath != "" && !p.check(TokenOperator) && !p.check(TokenKeywordIn) && !p.check(TokenKeywordHas) && !p.check(TokenKeywordNot) {
 			switch argPath {
 			case "input", "output", "actor", "partition", "now", "config", "error", "trace":
@@ -4759,8 +4873,12 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 		}
 	}
 
-	// Check for comparison operator (symbol-based)
-	if p.check(TokenOperator) {
+	// Check for comparison operator (symbol-based). Only the six comparison
+	// operators are consumed here; an arithmetic operator (`+ - * / %`, #2316)
+	// is left for the additive/multiplicative levels above parsePrimary, so a
+	// bare reference like `m.a` followed by `+` falls through to the
+	// SpecReferenceExpr return below.
+	if p.check(TokenOperator) && isComparisonOperatorLiteral(p.current.Literal) {
 		op := ComparisonOperator(p.current.Literal)
 		p.advance()
 

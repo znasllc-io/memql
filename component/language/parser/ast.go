@@ -29,6 +29,7 @@ type (
 	RelationshipFunction    = ast.RelationshipFunction
 	LogicalExpr             = ast.LogicalExpr
 	ComparisonExpr          = ast.ComparisonExpr
+	ArithmeticExpr          = ast.ArithmeticExpr
 	RelationshipExpr        = ast.RelationshipExpr
 	SortExpr                = ast.SortExpr
 	PaginateExpr            = ast.PaginateExpr
