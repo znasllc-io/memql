@@ -47,7 +47,7 @@ query node nodesForDeployment {
   args {
     deploymentId  string  @required
   }
-  filter  payload.deploymentId == args.deploymentId
+  filter  deploymentId == args.deploymentId
   asOf    latest
 }
 
@@ -72,7 +72,7 @@ query node nodesNotInDeployment {
   args {
     deploymentId  string  @required
   }
-  filter  payload.deploymentId != args.deploymentId
+  filter  deploymentId != args.deploymentId
   asOf    latest
 }
 
@@ -137,7 +137,7 @@ query node staleClusterNodes {
   args {
     olderThan  string  @description("Optional RFC3339 cutoff; when set, only rows whose lastSeen is strictly before it are returned.")
   }
-  filter  payload.health!="stopped" && when(args.olderThan) { payload.lastSeen<args.olderThan }
+  filter  health!="stopped" && when(args.olderThan) { lastSeen<args.olderThan }
   asOf    latest
 }
 

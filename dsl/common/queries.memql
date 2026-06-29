@@ -26,7 +26,7 @@ query attachment attachmentById {
     attachmentId  string  @required
     partitionId       string  @required
   }
-  filter  when(args.attachmentId) { id==args.attachmentId } && payload.partitionId==args.partitionId
+  filter  when(args.attachmentId) { id==args.attachmentId } && partitionId==args.partitionId
   shape   attachmentDownload
 }
 
@@ -54,7 +54,7 @@ query media spaceMedia {
     partitionId    string  @required @pattern("^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]{1,128}$")
     mediaType  string
   }
-  filter  payload.partitionId==args.partitionId && when(args.mediaType) { payload.mediaType==args.mediaType }
+  filter  partitionId==args.partitionId && when(args.mediaType) { mediaType==args.mediaType }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.

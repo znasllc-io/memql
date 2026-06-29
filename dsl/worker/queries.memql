@@ -10,7 +10,7 @@ use worker.concepts.{ invocation, registration }
 @unbounded("expired worker-invocation retention sweep -- an internal sweep that must see all")
 @description("List worker invocation rows for retention pruning. Caller filters by age.")
 query invocation expiredWorkerInvocations {
-  filter  payload.action!="" && isNotDeleted
+  filter  action!="" && isNotDeleted
   shape   workerInvocationFull
 }
 
@@ -32,7 +32,7 @@ query invocation invocationsForPlan {
   args {
     planId  string  @required
   }
-  filter  payload.planId==args.planId && isNotDeleted
+  filter  planId==args.planId && isNotDeleted
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -64,7 +64,7 @@ query invocation invocationsForUser {
   args {
     ownerUserId  string  @required
   }
-  filter  payload.ownerUserId==args.ownerUserId && isNotDeleted
+  filter  ownerUserId==args.ownerUserId && isNotDeleted
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -79,7 +79,7 @@ query plan runningPlansForUser {
   args {
     userId  string  @required
   }
-  filter  payload.requestedBy==args.userId && statusIsRunning
+  filter  requestedBy==args.userId && statusIsRunning
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -110,7 +110,7 @@ query registration workerByIdentityId {
   args {
     identityId  string  @required
   }
-  filter  payload.identityId==args.identityId
+  filter  identityId==args.identityId
   shape   workerRegistrationFull
 }
 
@@ -145,7 +145,7 @@ query registration workersForUser {
   args {
     ownerUserId  string  @required
   }
-  filter  payload.ownerUserId==args.ownerUserId
+  filter  ownerUserId==args.ownerUserId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.

@@ -14,7 +14,7 @@ query record detectConflicts {
     naturalKeyValue  string  @required
     recordType  string  @required
   }
-  filter  isConfirmed && payload.partitionId==args.partitionId && payload.recordType==args.recordType && payload.naturalKeyValue==args.naturalKeyValue
+  filter  isConfirmed && partitionId==args.partitionId && recordType==args.recordType && naturalKeyValue==args.naturalKeyValue
   shape   recordFull
 }
 
@@ -47,7 +47,7 @@ query policy policy {
     targetRecordType  string  @required
     partitionId  string
   }
-  filter  isActiveRecord && payload.targetRecordType==args.targetRecordType && when(args.partitionId) { payload.partitionId==args.partitionId }
+  filter  isActiveRecord && targetRecordType==args.targetRecordType && when(args.partitionId) { partitionId==args.partitionId }
   shape   policyFull
 }
 
@@ -84,7 +84,7 @@ query record recordsByState {
     validationState  string
     importSource  string
   }
-  filter  isActiveRecord && when(args.partitionId) { payload.partitionId==args.partitionId } && when(args.recordType) { payload.recordType==args.recordType } && when(args.validationState) { payload.validationState==args.validationState } && when(args.importSource) { payload.importSource==args.importSource }
+  filter  isActiveRecord && when(args.partitionId) { partitionId==args.partitionId } && when(args.recordType) { recordType==args.recordType } && when(args.validationState) { validationState==args.validationState } && when(args.importSource) { importSource==args.importSource }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -131,7 +131,7 @@ query record usableRecords {
     partitionId  string
     recordType  string
   }
-  filter  isUsable && when(args.partitionId) { payload.partitionId==args.partitionId } && when(args.recordType) { payload.recordType==args.recordType }
+  filter  isUsable && when(args.partitionId) { partitionId==args.partitionId } && when(args.recordType) { recordType==args.recordType }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -170,7 +170,7 @@ query log validationLog {
     partitionId  string
     action  string
   }
-  filter  isActiveRecord && when(args.recordId) { payload.recordId==args.recordId } && when(args.partitionId) { payload.partitionId==args.partitionId } && when(args.action) { payload.action==args.action }
+  filter  isActiveRecord && when(args.recordId) { recordId==args.recordId } && when(args.partitionId) { partitionId==args.partitionId } && when(args.action) { action==args.action }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.

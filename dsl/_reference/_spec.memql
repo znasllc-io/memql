@@ -197,7 +197,7 @@ spec agent richPredicate {
 //
 //         query participant activeHumanParticipants {
 //           args { partitionId string @required }
-//           filter payload.partitionId == args.partitionId && isHumanParticipant
+//           filter partitionId == args.partitionId && isHumanParticipant
 //           shape  participantFull
 //         }
 //

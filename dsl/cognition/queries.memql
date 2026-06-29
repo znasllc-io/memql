@@ -12,7 +12,7 @@ query participant activeHumanParticipants {
   args {
     partitionId  string  @required
   }
-  filter  payload.partitionId==args.partitionId && payload.participantType=="human" && statusIsActive
+  filter  partitionId==args.partitionId && participantType=="human" && statusIsActive
   shape   participantFull
 }
 
@@ -61,7 +61,7 @@ query utterance agentInteractionCount {
   args {
     agentId  string  @required
   }
-  filter  payload.source.agentId==args.agentId && payload.utteranceType in ["speech", "agentGreeting"] && isActiveRecord
+  filter  source.agentId==args.agentId && utteranceType in ["speech", "agentGreeting"] && isActiveRecord
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -133,7 +133,7 @@ query audioOverride audioOverridesForSpace {
   args {
     partitionId  string  @required
   }
-  filter  payload.partitionId==args.partitionId && isActiveRecord
+  filter  partitionId==args.partitionId && isActiveRecord
   shape   audioOverrideFull
 }
 
@@ -193,7 +193,7 @@ query utterance greetingUtterance {
     partitionId  string  @required
     agentId  string  @required
   }
-  filter  payload.partitionId==args.partitionId && payload.source.agentId==args.agentId && payload.source.kind in ["agentGreeting"] && isActiveRecord
+  filter  partitionId==args.partitionId && source.agentId==args.agentId && source.kind in ["agentGreeting"] && isActiveRecord
   shape   utteranceFull
 }
 
@@ -219,7 +219,7 @@ query utterance feedbackAnnouncementForPlan {
   args {
     planId  string  @required
   }
-  filter  payload.source.feedbackAnnouncePlanId==args.planId && isActiveRecord
+  filter  source.feedbackAnnouncePlanId==args.planId && isActiveRecord
   shape   utteranceFull
 }
 
@@ -247,7 +247,7 @@ query participant groupGAForSpace {
   args {
     partitionId  string  @required
   }
-  filter  payload.partitionId==args.partitionId && payload.participantType=="si" && statusIsActive
+  filter  partitionId==args.partitionId && participantType=="si" && statusIsActive
   shape   participantFull
 }
 
@@ -275,7 +275,7 @@ query utterance hasAIResponseForReply {
     replyToId  string  @required
     participantId  string  @required
   }
-  filter  payload.replyToId==args.replyToId && payload.participantId==args.participantId
+  filter  replyToId==args.replyToId && participantId==args.participantId
   shape   utteranceFull
 }
 
@@ -317,7 +317,7 @@ query participant participantByAgentSpace {
     partitionId  string  @required
     agentId  string  @required
   }
-  filter  payload.partitionId==args.partitionId && payload.agentId==args.agentId && payload.status!="left"
+  filter  partitionId==args.partitionId && agentId==args.agentId && status!="left"
   shape   participantFull
 }
 
@@ -365,7 +365,7 @@ query session participantSession {
     partitionId  string
     participantId  string
   }
-  filter  when(args.partitionId) { payload.partitionId==args.partitionId } && when(args.participantId) { payload.participantId==args.participantId }
+  filter  when(args.partitionId) { partitionId==args.partitionId } && when(args.participantId) { participantId==args.participantId }
   shape   sessionFull
 }
 
@@ -415,7 +415,7 @@ query participant siParticipantForSpace {
   args {
     partitionId  string  @required
   }
-  filter  payload.partitionId==args.partitionId && payload.participantType=="si" && statusIsActive
+  filter  partitionId==args.partitionId && participantType=="si" && statusIsActive
   shape   participantFull
 }
 
@@ -454,7 +454,7 @@ query participant spaceParticipants {
     status           string
     participantType  string
   }
-  filter  payload.partitionId==args.partitionId && when(args.status) { payload.status==args.status } && when(args.participantType) { payload.participantType==args.participantType }
+  filter  partitionId==args.partitionId && when(args.status) { status==args.status } && when(args.participantType) { participantType==args.participantType }
   shape   participantFull
 }
 
@@ -476,7 +476,7 @@ query utterance spaceUtterances {
     participantId    string
     utteranceType    string
   }
-  filter  payload.partitionId==args.partitionId && when(args.participantId) { payload.participantId==args.participantId } && when(args.utteranceType) { payload.utteranceType==args.utteranceType }
+  filter  partitionId==args.partitionId && when(args.participantId) { participantId==args.participantId } && when(args.utteranceType) { utteranceType==args.utteranceType }
   // Pagination (5.2 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of the full message-history pull. The append-only
   // utterance stream is the canonical keyset-eligible shape. Literal page size
@@ -504,7 +504,7 @@ query videoOverride videoOverridesForSpace {
   args {
     partitionId  string  @required
   }
-  filter  payload.partitionId==args.partitionId && isActiveRecord
+  filter  partitionId==args.partitionId && isActiveRecord
   shape   videoOverrideFull
 }
 
@@ -532,7 +532,7 @@ query presence spaceParticipantPresence {
   args {
     partitionId  string  @required
   }
-  filter  payload.partitionId==args.partitionId
+  filter  partitionId==args.partitionId
   shape   presenceFull
 }
 

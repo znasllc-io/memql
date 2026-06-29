@@ -53,11 +53,11 @@ func TestActiveHumanParticipantQueryMatchesActiveHuman(t *testing.T) {
 	fn := mustLoadFn(t, eng, "activeHumanParticipants")
 	filter := queryFilterBody(t, fn.ExprSource)
 
-	require.Contains(t, filter, `payload.participantType=="human"`)
+	require.Contains(t, filter, `participantType=="human"`)
 	require.Contains(t, filter, "statusIsActive",
 		"must gate on status==active (the participant lifecycle field)")
 	require.NotContains(t, filter, "isActiveRecord",
-		"participant has no `active` field -- isActiveRecord (payload.active==true) can never match a participant row")
+		"participant has no `active` field -- isActiveRecord (active==true) can never match a participant row")
 }
 
 // TestTouchSessionBindsToAuthSession pins memql#1639.

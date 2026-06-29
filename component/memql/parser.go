@@ -173,6 +173,15 @@ func (e *MemQLEngine) parseWithFunctions(query string, fns *FunctionRegistry, sp
 		}
 		plan.Root = resolvedRoot
 	}
+	// Bare payload access (epic #2292): a filter predicates on payload
+	// properties by BARE name (the concept is bound by the query
+	// signature). Rewrite each bare, non-reserved field reference to its
+	// underlying payload.<prop> form so both the SQL pushdown and the
+	// in-memory evaluator consume the canonical access. Runs AFTER spec +
+	// function inlining so inlined query-author fields are present; inlined
+	// specs/traits already carry payload.* (first part "payload") and are
+	// skipped. The legacy explicit payload.X form passes through unchanged.
+	rewriteBarePayloadFilterFields(plan.Root)
 	populateCacheHints(plan)
 	populateConceptFields(plan)
 	if err := validateAIContext(plan.Root); err != nil {
@@ -180,6 +189,70 @@ func (e *MemQLEngine) parseWithFunctions(query string, fns *FunctionRegistry, sp
 	}
 
 	return plan, nil
+}
+
+// reservedFilterHead reports whether a filter field's first path segment
+// is a reserved engine name or a row intrinsic -- such a reference is NOT
+// a payload property and must not be payload-prefixed by the bare-access
+// rewrite (epic #2292).
+func reservedFilterHead(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "payload", "actor", "args", "now", "config", "trace", "meta",
+		"schema", "partition", "provenance":
+		return true
+	}
+	_, ok := resolveIntrinsicField(name)
+	return ok
+}
+
+// rewriteBarePayloadFilterFields walks a resolved query plan expression
+// and rewrites every bare payload field reference (a FieldReference whose
+// first segment is not a reserved head per reservedFilterHead) to its
+// payload.<...> form. Spec references and comparison values are left
+// untouched. Mirrors collectConceptFields' wrapper traversal so it reaches
+// comparisons nested under directive wrappers.
+func rewriteBarePayloadFilterFields(expr ExpressionNode) {
+	switch node := expr.(type) {
+	case *ComparisonExpression:
+		node.Field = barePayloadFieldRef(node.Field)
+		for i := range node.FieldSelections {
+			node.FieldSelections[i] = barePayloadFieldRef(node.FieldSelections[i])
+		}
+	case *LogicalExpression:
+		rewriteBarePayloadFilterFields(node.Left)
+		rewriteBarePayloadFilterFields(node.Right)
+	case *RelationshipExpression:
+		rewriteBarePayloadFilterFields(node.Target)
+	case *SortExpression:
+		rewriteBarePayloadFilterFields(node.Target)
+	case *PaginateExpression:
+		rewriteBarePayloadFilterFields(node.Target)
+	case *SelectExpression:
+		rewriteBarePayloadFilterFields(node.Target)
+	case *TimestampExpression:
+		rewriteBarePayloadFilterFields(node.Target)
+	case *DepthExpression:
+		rewriteBarePayloadFilterFields(node.Target)
+	case *CountExpression:
+		rewriteBarePayloadFilterFields(node.Target)
+	case *ShapeExpression:
+		rewriteBarePayloadFilterFields(node.Target)
+	}
+}
+
+// barePayloadFieldRef returns ref unchanged when its head is reserved (a
+// row intrinsic, actor/args/config/now/trace, or an already-payload
+// path); otherwise it prepends "payload" so a bare property reads the
+// payload surface.
+func barePayloadFieldRef(ref FieldReference) FieldReference {
+	if len(ref.Parts) == 0 {
+		return ref
+	}
+	if reservedFilterHead(ref.Parts[0]) {
+		return ref
+	}
+	parts := append([]string{"payload"}, ref.Parts...)
+	return FieldReference{Raw: strings.Join(parts, "."), Parts: parts}
 }
 
 func applyDirectiveWrappers(plan *QueryPlan) (ExpressionNode, error) {

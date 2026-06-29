@@ -39,7 +39,7 @@ query deployment deploymentsForCluster {
   args {
     clusterId  string  @required
   }
-  filter  payload.clusterId == args.clusterId
+  filter  clusterId == args.clusterId
   shape   deploymentFull
   asOf    latest
 }
@@ -61,7 +61,7 @@ query deployment deploymentById {
   args {
     deploymentId  string  @required
   }
-  filter  payload.deploymentId == args.deploymentId
+  filter  deploymentId == args.deploymentId
   shape   deploymentFull
 }
 
@@ -95,7 +95,7 @@ query deployment deploymentById {
 @description("Latest-per-deploymentId deployment rows whose status is terminal-not-active (superseded / failed / rolled_back) -- the deployments whose still-registered nodes are orphans. Feeds the active-topology reaper (#1874). asOf latest -> current status per deployment.")
 @unbounded("superseded/failed/rolled-back deployments GC sweep -- an internal sweep that must see all")
 query deployment supersededDeployments {
-  filter  payload.status in ["superseded", "failed", "rolled_back"]
+  filter  status in ["superseded", "failed", "rolled_back"]
   shape   deploymentFull
   asOf    latest
 }
@@ -127,7 +127,7 @@ query deploymentNodeSpec nodeSpecsForDeployment {
   args {
     deploymentId  string  @required
   }
-  filter  payload.deploymentId == args.deploymentId
+  filter  deploymentId == args.deploymentId
   shape   deploymentNodeSpecFull
   asOf    latest
 }

@@ -7,7 +7,7 @@ use safety.shapes.{ classificationFull, approvalRequestFull, outputScreeningFull
 @unbounded("safety classification catalog -- a bounded config set consumed whole")
 @description("Returns every v1:safety:classification row. Used by the retention sweep (mirrors allPolicyTraces); future cockpit Command Safety view will layer more targeted queries on top.")
 query classification allSafetyClassifications {
-  filter  payload.surface!=""
+  filter  surface!=""
   shape   classificationFull
 }
 
@@ -18,7 +18,7 @@ query approvalRequest activeApprovalsByCorrelationKey {
   args {
     correlationKey string @required
   }
-  filter  payload.correlationKey==args.correlationKey && payload.status!="denied" && payload.status!="expired"
+  filter  correlationKey==args.correlationKey && status!="denied" && status!="expired"
   shape   approvalRequestFull
 }
 
@@ -36,6 +36,6 @@ query approvalRequest approvalRequestById {
 @unbounded("output screening catalog -- a bounded config set consumed whole")
 @description("Returns every v1:safety:outputScreening row. Used by the retention sweep (mirrors allSafetyClassifications); future cockpit prompt-injection dashboard will layer more targeted queries on top.")
 query outputScreening allOutputScreenings {
-  filter  payload.contentType!=""
+  filter  contentType!=""
   shape   outputScreeningFull
 }

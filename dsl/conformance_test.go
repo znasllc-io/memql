@@ -40,15 +40,11 @@ func itoa(i int) string { return strconv.Itoa(i) }
 // rejects the accessor; TestNoCallerVocabulary catches author drift
 // earlier with a clear file:line.)
 func TestFilterSyntaxCanonical(t *testing.T) {
-	intrinsics := map[string]bool{
-		"id": true, "concept": true, "createdAt": true,
-		"createdBy": true, "partition": true, "type": true,
-		"schema": true, "payload": true,
-		// reserved engine-side names that may appear bare on the LHS
-		"args": true, "actor": true, "now": true,
-		"config": true, "trace": true,
-	}
-
+	// Bare payload access (epic #2292): a filter predicates on payload
+	// properties by BARE name -- the concept is bound by the query
+	// signature. The explicit `payload.` prefix is the violation now;
+	// intrinsics and the reserved engine heads (args / actor / now /
+	// config / trace) stay as they are.
 	type violation struct {
 		file string
 		line int
@@ -57,26 +53,14 @@ func TestFilterSyntaxCanonical(t *testing.T) {
 	var violations []violation
 
 	visitFilterPredicates(t, func(file string, lineno int, pred string) {
-		// ?.<head>(.<rest>)? or <head>(.<rest>)?
 		head, _ := splitFilterRef(pred)
-		if head == "" {
-			return
+		if head == "payload" {
+			violations = append(violations, violation{file, lineno, pred})
 		}
-		if intrinsics[head] {
-			return
-		}
-		// Heads like "isActiveRecord" (no `.` after) are spec
-		// calls, not field refs. Only flag if the predicate has a
-		// `.` after the head (so it's <head>.<field>) or an operator
-		// that proves it's a comparison.
-		if !strings.Contains(pred, ".") && !hasFilterOperator(pred) {
-			return
-		}
-		violations = append(violations, violation{file, lineno, pred})
 	})
 
 	if len(violations) > 0 {
-		t.Errorf("found %d filter predicates using non-canonical prefix (must be payload.X or bare intrinsic):", len(violations))
+		t.Errorf("found %d filter predicates using the removed `payload.` prefix (write the payload property by bare name):", len(violations))
 		for _, v := range violations {
 			t.Errorf("  %s:%d  %s", v.file, v.line, v.text)
 		}
@@ -103,25 +87,29 @@ func TestNoInlineTraitablePredicates(t *testing.T) {
 		re   *regexp.Regexp
 		hint string
 	}
+	// Under bare payload access (epic #2292) a filter predicates on a
+	// payload property by bare name, so these traitable predicates match
+	// the bare field (a leading word boundary anchors the field name and
+	// avoids matching a longer identifier like `inactive`).
 	rules := []rule{
-		{regexp.MustCompile(`payload\.active\s*==\s*true\b`), "isActiveRecord"},
-		{regexp.MustCompile(`payload\.active\s*!=\s*false\b`), "isActiveRecord"},
-		{regexp.MustCompile(`payload\.deleted\s*==\s*false\b`), "isNotDeleted"},
-		{regexp.MustCompile(`payload\.deleted\s*!=\s*true\b`), "isNotDeleted"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"active"`), "statusIsActive"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"archived"`), "statusIsArchived"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"saved"`), "statusIsSaved"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"pending"`), "statusIsPending"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"running"`), "statusIsRunning"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"cancelled"`), "isCancelled"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"completed"`), "isCompleted"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"inProgress"`), "isInProgress"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"open"`), "isOpen"},
-		{regexp.MustCompile(`payload\.status\s*==\s*"scheduled"`), "isScheduled"},
-		{regexp.MustCompile(`payload\.status\s*!=\s*"archived"`), "isNotArchived"},
-		{regexp.MustCompile(`payload\.identityType\s*==\s*"api_key"`), "identityIsApiKey"},
-		{regexp.MustCompile(`payload\.identityType\s*==\s*"worker_token"`), "identityIsWorkerToken"},
-		{regexp.MustCompile(`payload\.deletionScheduledAt\s*!=\s*""`), "isDeletionScheduled"},
+		{regexp.MustCompile(`\bactive\s*==\s*true\b`), "isActiveRecord"},
+		{regexp.MustCompile(`\bactive\s*!=\s*false\b`), "isActiveRecord"},
+		{regexp.MustCompile(`\bdeleted\s*==\s*false\b`), "isNotDeleted"},
+		{regexp.MustCompile(`\bdeleted\s*!=\s*true\b`), "isNotDeleted"},
+		{regexp.MustCompile(`\bstatus\s*==\s*"active"`), "statusIsActive"},
+		{regexp.MustCompile(`\bstatus\s*==\s*"archived"`), "statusIsArchived"},
+		{regexp.MustCompile(`\bstatus\s*==\s*"saved"`), "statusIsSaved"},
+		{regexp.MustCompile(`\bstatus\s*==\s*"pending"`), "statusIsPending"},
+		{regexp.MustCompile(`\bstatus\s*==\s*"running"`), "statusIsRunning"},
+		{regexp.MustCompile(`\bstatus\s*==\s*"cancelled"`), "isCancelled"},
+		{regexp.MustCompile(`\bstatus\s*==\s*"completed"`), "isCompleted"},
+		{regexp.MustCompile(`\bstatus\s*==\s*"inProgress"`), "isInProgress"},
+		{regexp.MustCompile(`\bstatus\s*==\s*"open"`), "isOpen"},
+		{regexp.MustCompile(`\bstatus\s*==\s*"scheduled"`), "isScheduled"},
+		{regexp.MustCompile(`\bstatus\s*!=\s*"archived"`), "isNotArchived"},
+		{regexp.MustCompile(`\bidentityType\s*==\s*"api_key"`), "identityIsApiKey"},
+		{regexp.MustCompile(`\bidentityType\s*==\s*"worker_token"`), "identityIsWorkerToken"},
+		{regexp.MustCompile(`\bdeletionScheduledAt\s*!=\s*""`), "isDeletionScheduled"},
 	}
 
 	type violation struct {
