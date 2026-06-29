@@ -65,9 +65,11 @@ shape participant participantFull {
 // =============================================================================
 //
 // A trait shape is `@row` WITHOUT a signature-bound concept. It declares
-// row fields that any concept might have. Specs bind to trait shapes via
-// the spec's `@shape("<name>")` annotation to express predicates that
-// apply across many concepts.
+// row fields that any concept might have. These scaffolds support shape
+// composition (`include`) across concepts. (Note: cross-concept boolean
+// predicates are now authored as a `trait` -- the deliberately UNBOUND
+// row predicate -- not by pinning a trait shape; the spec `@shape("...")`
+// pin was removed in epic #2281.)
 //
 // Trait shapes shipped under `dsl/common/shapes.memql`:
 //   activeRowTrait      payload.active
@@ -95,8 +97,10 @@ shape statusRowTrait {
 //
 // A caller shape declares `@actor` (project auth envelope) instead of
 // `@row`. Body paths reference `actor.*` fields. The canonical example
-// is `actorEnvelope`, used by every context-spec via the spec's
-// `@shape("actorEnvelope")` binding.
+// is `actorEnvelope`, bound by every context-spec via its SIGNATURE
+// (`spec actorEnvelope <name> { return <bare key> }`). An @actor shape is
+// the ONLY gateway to the auth envelope -- a spec body never reads
+// actor.* directly.
 
 @actor
 @description("Caller envelope projection: authenticated actor, role, and now.")
@@ -209,21 +213,20 @@ shape participant pathSyntaxExample {
 //           shape  participantFull
 //         }
 //
-//   - From a spec's `@shape("...")` binding:
+//   - From a spec's SIGNATURE binding (epic #2281):
 //
 //         use common.shapes.{ actorEnvelope }
 //
-//         @shape("actorEnvelope")
-//         spec requiresAdmin {
-//           actor.role == "admin"
+//         spec actorEnvelope requiresAdmin {
+//           return role == "admin"
 //         }
 //
-//     The shape must exist at engine startup. The post-load
-//     ValidateSpecBindings pass enforces this and errors with
-//
-//          `spec %q binds @shape(%s) but no such shape is registered`
-//
-//     when a referenced shape is missing.
+//     The bound shape must exist at engine startup. The post-load
+//     spec-binding resolver (resolveSpecBindings) resolves the signature
+//     binding, rewrites the body's bare keys to their underlying access
+//     form (here `role` -> `actor.role`), and classifies the spec
+//     (an @actor shape -> context-spec). A binding that resolves to no
+//     registered shape or concept is reported as a violation.
 //
 //   - From a mutation's `insert` / `update` body: payload field
 //     references inside the mutation correspond to the shape's

@@ -119,7 +119,48 @@ func (r *crossRefResolver) check(c SandboxConstruct) string {
 			return msg
 		}
 	}
+
+	// Spec signature binding (epic #2281): a spec binds exactly one shape
+	// XOR concept in its signature; that binding is the spec's dependency
+	// edge. Verify it resolves to a registered/bundle shape or concept.
+	if c.Kind == "spec" {
+		if msg := r.checkSpecBinding(c, origin); msg != "" {
+			return msg
+		}
+	}
 	return ""
+}
+
+// checkSpecBinding verifies a spec's signature binding (`spec <BoundName>
+// <name>`) resolves to an imported shape or concept -- the spec ->
+// shape|concept dependency edge (epic #2281). A trait carries no binding
+// and is skipped. A binding that resolves to neither a shape nor a
+// concept (in the live registries, the bundle, or the overlay) is a
+// dangling dependency.
+func (r *crossRefResolver) checkSpecBinding(c SandboxConstruct, origin string) string {
+	decl, err := languageParser.ParseSpecDecl(stripUseDeclarations(c.Source))
+	if err != nil || decl == nil {
+		// The compile pass owns parse diagnostics; don't double-report.
+		return ""
+	}
+	if decl.IsTrait || decl.BoundName == "" {
+		return ""
+	}
+	name := decl.BoundName
+	// Shape binding: bundle sibling or live shape registry.
+	if (r.bundleByKind["shape"] != nil && r.bundleByKind["shape"][name]) ||
+		(r.engine != nil && r.engine.Shapes().Has(name)) {
+		return ""
+	}
+	// Concept binding: bundle sibling or overlay (resolves the bare name to
+	// a canonical id via the file's concept imports as a namespace hint).
+	if r.bundleByKind["concept"] != nil && r.bundleByKind["concept"][name] {
+		return ""
+	}
+	if id, err := r.resolveConceptId(c.Source, name); err == nil && id != "" {
+		return ""
+	}
+	return fmt.Sprintf("%s: spec binding %q resolves to neither a shape nor a concept -- import it (use ...shapes.{ %s } or use ...concepts.{ %s }) and bind it in the signature", origin, name, name, name)
 }
 
 // checkUseImports resolves every file-top `use <path>.{ name, ... }` import

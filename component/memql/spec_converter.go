@@ -56,18 +56,23 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 	}
 
 	// The accepted annotation surface for specs + traits is the single
-	// physical registry (component/language/annotations), the same source
-	// the function load-gate + editor derive from. Spec and trait share the
-	// "Spec" receiver set: description / enabled / disabled / shape.
+	// physical registry (component/language/annotations): description /
+	// enabled / disabled. The @shape pin is removed (epic #2281, Story 5)
+	// -- the binding moved to the signature -- and @row / @actor are
+	// shape-only ambient gateways (Story 4); a spec/trait carrying them is
+	// rejected with a migration hint.
 	allowed := annotations.Set("Spec")
 
 	var description string
 	for _, attr := range decl.Attributes {
-		// The retired @use* family keeps an explicit migration hint (it is
-		// absent from the registry, so it would otherwise read as a generic
-		// unknown annotation).
-		if attr.Name == "useConcept" || attr.Name == "useShape" {
+		switch attr.Name {
+		case "useConcept", "useShape":
+			// Retired @use* family (#301) keeps an explicit migration hint.
 			return nil, fmt.Errorf("%s: @%s is retired (#301) -- bind via file-top `use <namespace>.{ %s }` imports", origin, attr.Name, decl.Name)
+		case "shape":
+			return nil, fmt.Errorf("%s: @shape is removed (epic #2281) -- a spec binds its shape/concept in the signature: `spec <boundName> %s { return <bool> }` (boundName resolves via the file-top `use` import)", origin, decl.Name)
+		case "row", "actor":
+			return nil, fmt.Errorf("%s: @%s is a shape-only marker (epic #2281) -- a %s may not carry it. To predicate on %s data, bind a @%s shape in the signature and read its projected key by bare name", origin, attr.Name, kindLabel, ambientWord(attr.Name), attr.Name)
 		}
 		if !allowed[attr.Name] {
 			return nil, fmt.Errorf("%s: unknown %s annotation @%s (supported: %s)", origin, kindLabel, attr.Name, strings.Join(annotations.ByReceiver["Spec"], " / "))
@@ -79,12 +84,6 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 				return nil, fmt.Errorf("%s: @description expects a string value", origin)
 			}
 			description = val
-		case "shape":
-			if _, ok := attr.Value.(string); !ok {
-				return nil, fmt.Errorf("%s: @shape expects a string value (the pinned shape name)", origin)
-			}
-			// No-op pin: documents the shape the predicate reads; the eval
-			// strategy is derived from the body, not this annotation.
 		case "enabled", "disabled":
 			// Author-surface lifecycle no-ops; the engine controls spec
 			// lifecycle.
@@ -96,7 +95,7 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 	}
 
 	if decl.Body == nil {
-		return nil, fmt.Errorf("%s: %s %q: body is empty (expected a boolean expression)", origin, kindLabel, decl.Name)
+		return nil, fmt.Errorf("%s: %s %q: body is empty (expected `return <boolean expression>`)", origin, kindLabel, decl.Name)
 	}
 
 	converter := NewASTConverter()
@@ -112,23 +111,65 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 		return nil, fmt.Errorf("%s: %s %q body must be boolean: %w", origin, kindLabel, decl.Name, err)
 	}
 
-	kind, classErr := classifySpecKind(expr)
-	if classErr != nil {
-		return nil, fmt.Errorf("%s: classify %s %q: %w", origin, kindLabel, decl.Name, classErr)
+	// Bare-only access (epic #2281): the body reads the bound surface by
+	// bare field name. A `payload.` / `actor.` / `row.` / `meta.` prefix is
+	// the old form -- reject it with a migration hint. The signature
+	// already names the single bound context.
+	if err := rejectPrefixedSpecFields(expr, origin, kindLabel, decl.Name); err != nil {
+		return nil, err
 	}
 
-	if err := validateSpecRole(decl.IsTrait, kind, decl.Name); err != nil {
-		return nil, fmt.Errorf("%s: %w", origin, err)
-	}
-
+	// Classification + binding resolution are deferred to the post-load
+	// resolveSpecBindings pass (engine bootstrap), which has the shape +
+	// concept registries needed to resolve BoundName, rewrite the bare
+	// field references to their underlying access form, and pick the eval
+	// strategy. Kind is left empty here and finalized there.
 	return &Spec{
 		Name:        decl.Name,
 		Description: description,
 		ExprSource:  canonicalExpression(expr),
 		Expr:        expr,
-		Kind:        kind,
+		Kind:        "",
 		UsesAI:      detectAIUsage(expr),
 		Origin:      origin,
+		BoundName:   decl.BoundName,
 		IsTrait:     decl.IsTrait,
 	}, nil
+}
+
+// ambientWord maps the shape-kind marker to the ambient surface it
+// unlocks, for the spec-carries-@row/@actor migration message.
+func ambientWord(marker string) string {
+	if marker == "actor" {
+		return "caller / auth-envelope"
+	}
+	return "row-metadata"
+}
+
+// rejectPrefixedSpecFields walks the spec/trait body and rejects any
+// field reference that carries a `payload.` / `actor.` / `row.` / `meta.`
+// prefix. Under the spec/shape binding redesign (epic #2281) the body
+// reads bound fields by BARE name; the prefixed forms are retired.
+func rejectPrefixedSpecFields(expr ExpressionNode, origin, kindLabel, name string) error {
+	var walkErr error
+	walkSpecRefs(expr, func(ref FieldReference) {
+		if walkErr != nil || len(ref.Parts) == 0 {
+			return
+		}
+		switch strings.ToLower(strings.TrimSpace(ref.Parts[0])) {
+		case "payload", "meta":
+			walkErr = fmt.Errorf("%s: %s %q body references %q -- read the bound field by BARE name (drop the `payload.` prefix); the signature already names the bound concept/shape", origin, kindLabel, name, joinParts(ref.Parts))
+		case "actor":
+			walkErr = fmt.Errorf("%s: %s %q body references %q -- a %s body may not read actor.* directly (epic #2281). Bind an @actor shape in the signature and read its projected key by bare name", origin, kindLabel, name, joinParts(ref.Parts), kindLabel)
+		case "row":
+			walkErr = fmt.Errorf("%s: %s %q body references %q -- a %s body may not read row.* directly (epic #2281). Bind a @row shape in the signature and read its projected key by bare name", origin, kindLabel, name, joinParts(ref.Parts), kindLabel)
+		}
+	})
+	return walkErr
+}
+
+// joinParts renders a FieldReference's parts as a dotted path for
+// diagnostics.
+func joinParts(parts []string) string {
+	return strings.Join(parts, ".")
 }

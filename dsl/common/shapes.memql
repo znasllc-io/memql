@@ -109,8 +109,9 @@ shape validationRowTrait {
 // =============================================================================
 //
 // @actor shapes project the engine's auth envelope rather than row
-// fields. Context-specs (predicates that check actor.* fields only)
-// bind here via `@shape("actorEnvelope")`.
+// fields. Context-specs (caller predicates) bind here via their
+// SIGNATURE -- `spec actorEnvelope <name> { return <bare key> }` (epic
+// #2281) -- and read the projected key by bare name.
 
 @actor
 @description("Actor envelope projection: authenticated actor, role, and now.")

@@ -36,7 +36,7 @@ func TestExtractJSONObject_StripsProseWrapper(t *testing.T) {
 // now recovers a prose-wrapped construct list instead of erroring.
 func TestParseEmittedConstructs_ToleratesProse(t *testing.T) {
 	resp := "Looking at each diagnostic:\n1. The spec needed `payload`.\n\n" +
-		`{"constructs":[{"kind":"spec","name":"specActive","source":"spec specActive {\n  payload.active == true\n}"}]}` +
+		`{"constructs":[{"kind":"spec","name":"specActive","source":"spec activeRowTrait specActive {\n  return active == true\n}"}]}` +
 		"\n\nThat should compile now."
 	got, err := parseEmittedConstructs(resp)
 	if err != nil {
@@ -103,9 +103,9 @@ func TestRunCapture_FlattensMultiPhaseDesign(t *testing.T) {
       "automationPurpose": "Make a bird list.",
       "phases": [
         {"name": "birdListPhase0", "purpose": "gather", "dependencies": [
-          {"kind":"spec","name":"specA","purpose":"p","candidateSource":"spec specA {\n  payload.active == true\n}"}]},
+          {"kind":"spec","name":"specA","purpose":"p","candidateSource":"spec activeRowTrait specA {\n  return active == true\n}"}]},
         {"name": "birdListPhase1", "purpose": "render", "dependencies": [
-          {"kind":"spec","name":"specB","purpose":"p","candidateSource":"spec specB {\n  payload.active == true\n}"}]}
+          {"kind":"spec","name":"specB","purpose":"p","candidateSource":"spec activeRowTrait specB {\n  return active == true\n}"}]}
       ]
     }`
 	fe := &fakeEngine{
@@ -116,7 +116,7 @@ func TestRunCapture_FlattensMultiPhaseDesign(t *testing.T) {
 			case "authoringEmit":
 				name, _ := data["automationName"].(string)
 				auto := memql.SandboxConstruct{Kind: "automation", Name: name, Source: "automation " + name + " { }"}
-				spec := memql.SandboxConstruct{Kind: "spec", Name: "specA", Source: "spec specA {\n  payload.active == true\n}"}
+				spec := memql.SandboxConstruct{Kind: "spec", Name: "specA", Source: "spec activeRowTrait specA {\n  return active == true\n}"}
 				return emitJSON(t, []memql.SandboxConstruct{auto, spec}), nil
 			}
 			return nil, nil

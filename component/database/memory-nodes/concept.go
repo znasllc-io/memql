@@ -573,6 +573,21 @@ func (c *Concept) classifyFields() []fieldClassification {
 	return result
 }
 
+// DeclaredFields returns the names of every top-level payload field
+// declared on the concept's definition schema, INCLUDING @internal /
+// @serverSet fields. Backs the spec/shape binding validator (epic
+// #2281): a concept-bound spec may predicate by bare name on any
+// declared field, internal ones included. Names are returned in
+// ascending order for deterministic diagnostics.
+func (c *Concept) DeclaredFields() []string {
+	out := make([]string, 0)
+	for _, f := range c.classifyFields() {
+		out = append(out, f.Name)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // ProjectableFields returns the names of every top-level payload field
 // a shape's default projection should expose: all declared fields
 // EXCEPT those marked @internal (x-internal). @serverSet fields ARE

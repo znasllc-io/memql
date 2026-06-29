@@ -112,9 +112,18 @@ type Spec struct {
 	UsesAI      bool
 	Origin      string
 
+	// BoundName is the spec's signature binding -- the shape XOR
+	// concept named by `spec <BoundName> <Name>` (epic #2281). The
+	// post-load resolveSpecBindings pass resolves it (shape registry
+	// first, then concept registry), rewrites the body's bare field
+	// references to their underlying access form, and classifies the
+	// spec (an @actor shape -> context-spec; a concept or @row shape ->
+	// row-spec). Empty for traits (the deliberately-unbound predicate).
+	BoundName string
+
 	// IsTrait flags this entry as a trait rather than a spec.
 	// Traits share the runtime contract (atomic boolean predicate)
-	// but are concept-agnostic.
+	// but are deliberately unbound (concept-agnostic).
 	IsTrait bool
 }
 
@@ -130,6 +139,7 @@ func (s *Spec) clone() *Spec {
 		Kind:        s.Kind,
 		UsesAI:      s.UsesAI,
 		Origin:      s.Origin,
+		BoundName:   s.BoundName,
 		IsTrait:     s.IsTrait,
 	}
 }

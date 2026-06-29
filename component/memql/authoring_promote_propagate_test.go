@@ -29,7 +29,7 @@ import (
 func TestPromoteBundleDurable_ValidateFail(t *testing.T) {
 	e := &MemQLEngine{specs: newSpecRegistry(), functions: newFunctionRegistry()}
 	store := &fakePromoteStore{}
-	res, err := e.promoteBundleDurableWithStore(context.Background(), store, "owner-1", `spec broken { actor.role == }`)
+	res, err := e.promoteBundleDurableWithStore(context.Background(), store, "owner-1", `spec actorEnvelope broken { return role == }`)
 	if err == nil {
 		t.Fatal("expected a validation error for a broken bundle")
 	}

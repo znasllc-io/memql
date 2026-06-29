@@ -31,8 +31,8 @@ mutate mcpWidget mutationCreateMcpWidget {
 }`
 
 const sessionSpecSrc = `@description("session spec")
-spec mcpSessSpec {
-  actor.role == "admin"
+spec actorEnvelope mcpSessSpec {
+  return role == "admin"
 }`
 
 // SplitBundleSource recognizes concept + function-family + shape constructs and
@@ -80,7 +80,7 @@ func TestAuthorSessionBundle_ValidatesAndRegisters(t *testing.T) {
 // An invalid bundle registers nothing and reports the failure.
 func TestAuthorSessionBundle_RejectsInvalid(t *testing.T) {
 	reg := NewAuthoredRuntimeRegistry()
-	res, err := AuthorSessionBundle(reg, "owner-1", `spec broken { actor.role == }`)
+	res, err := AuthorSessionBundle(reg, "owner-1", `spec actorEnvelope broken { return role == }`)
 	if err == nil {
 		t.Fatal("expected an error for an invalid bundle")
 	}

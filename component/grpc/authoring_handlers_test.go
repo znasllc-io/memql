@@ -96,7 +96,7 @@ func TestAuthoringValidate_OK(t *testing.T) {
 // hard-fail diagnostic.
 func TestAuthoringValidate_FailCarriesDiagnostics(t *testing.T) {
 	s, cs := newAuthoringSession(t, auth.RoleOwner, "u1")
-	require.NoError(t, dispatchValidate(s, `spec broken { actor.role == }`))
+	require.NoError(t, dispatchValidate(s, `spec actorEnvelope broken { return role == }`))
 
 	res := cs.lastSent().GetAuthoringValidateBundleResult()
 	require.NotNil(t, res)
@@ -157,7 +157,7 @@ func TestAuthoringSessionDefine_InjectsCallable(t *testing.T) {
 // per-construct diagnostics.
 func TestAuthoringSessionDefine_FailRegistersNothing(t *testing.T) {
 	s, cs := newAuthoringSession(t, auth.RoleOwner, "owner-1")
-	require.NoError(t, dispatchSessionDefine(s, `spec broken { actor.role == }`))
+	require.NoError(t, dispatchSessionDefine(s, `spec actorEnvelope broken { return role == }`))
 
 	res := cs.lastSent().GetAuthoringSessionDefineBundleResult()
 	require.NotNil(t, res)

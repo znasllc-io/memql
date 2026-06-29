@@ -26,7 +26,7 @@ func gate2Bundle() authoringBundle {
 		AutomationName: "dailyDigest",
 		Constructs: []memql.SandboxConstruct{
 			{Kind: "automation", Name: "dailyDigest", Source: "automation dailyDigest { }"},
-			{Kind: "spec", Name: "specActive", Source: "spec specActive { payload.active == true }"},
+			{Kind: "spec", Name: "specActive", Source: "spec activeRowTrait specActive { return active == true }"},
 		},
 	}
 }
@@ -117,7 +117,7 @@ func TestHandoffToGate2_MissingAutomationErrors(t *testing.T) {
 	g2 := &fakeGate2{report: memql.BundleDryRunReport{OK: true}}
 	noAuto := authoringBundle{
 		AutomationName: "dailyDigest",
-		Constructs:     []memql.SandboxConstruct{{Kind: "spec", Name: "specActive", Source: "spec specActive { payload.active == true }"}},
+		Constructs:     []memql.SandboxConstruct{{Kind: "spec", Name: "specActive", Source: "spec activeRowTrait specActive { return active == true }"}},
 	}
 	if _, err := l.handoffToGate2(context.Background(), "b1", noAuto, nil, g2); err == nil {
 		t.Fatalf("a bundle with no automation must error")
