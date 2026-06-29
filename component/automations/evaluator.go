@@ -1045,6 +1045,20 @@ func (e *Evaluator) EvaluateStepReference(expr string) (any, error) {
 		return nil, nil
 	}
 
+	// Story 4 (#2302 / ADR §2.2): a forEach source may be a collection-method
+	// chain (`args.members.where(m => m.active)`). Detect it cheaply (legacy
+	// step/path sources never carry `=>` or a `.<collectionMethod>(` call),
+	// then resolve the chain's base receiver through the standard evaluator
+	// and run the in-memory method chain over it.
+	if memql.LooksLikeCollectionChain(expr) {
+		val, isChain, err := memql.EvaluateCollectionChainString(expr, func(basePath string) (any, error) {
+			return e.EvaluateStepReference(basePath)
+		})
+		if isChain {
+			return val, err
+		}
+	}
+
 	// If already a $ expression, use standard evaluation
 	if strings.HasPrefix(expr, "$") {
 		return e.EvaluateValue(expr)

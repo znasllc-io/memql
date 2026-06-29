@@ -505,6 +505,14 @@ func (l *Lexer) scanOperator(start, startLine, startColumn int) (Token, error) {
 		return Token{Type: TokenOperator, Literal: "==", Pos: start, Line: startLine, Column: startColumn}, nil
 	}
 
+	// Check for => (arrow lambda, Story 4 / ADR §2.2 collection methods).
+	// `args.members.where(m => m.active)` needs `=>` to separate the lambda
+	// param list from its body. It is only valid inside a collection method
+	// call; the parser rejects it elsewhere.
+	if l.match('>') {
+		return Token{Type: TokenOperator, Literal: "=>", Pos: start, Line: startLine, Column: startColumn}, nil
+	}
+
 	// Single =
 	return Token{Type: TokenOperator, Literal: "=", Pos: start, Line: startLine, Column: startColumn}, nil
 }

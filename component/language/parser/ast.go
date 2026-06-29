@@ -38,6 +38,8 @@ type (
 	CountExpr               = ast.CountExpr
 	ShapeExpr               = ast.ShapeExpr
 	FunctionCallExpr        = ast.FunctionCallExpr
+	MethodCallExpr          = ast.MethodCallExpr
+	LambdaExpr              = ast.LambdaExpr
 	BuiltinFunctionExpr     = ast.BuiltinFunctionExpr
 	SpecReferenceExpr       = ast.SpecReferenceExpr
 	ConditionalFilterExpr   = ast.ConditionalFilterExpr

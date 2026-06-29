@@ -22,6 +22,11 @@ const ASTConverterComponentName = common.ComponentName("astConverter")
 // which must be converted to the memql package's AST types for execution.
 type ASTConverter struct {
 	logger *slog.Logger
+	// allowCollectionMethods admits the Story 4 (#2302 / ADR §2.2)
+	// collection-method + lambda nodes. It is OFF by default so specs and
+	// query filters (which share this converter) reject the surface at
+	// load; the logic-body loader opts in via WithCollectionMethods().
+	allowCollectionMethods bool
 }
 
 // ASTConverterOption configures the ASTConverter.
@@ -31,6 +36,15 @@ type ASTConverterOption func(*ASTConverter)
 func WithASTConverterLogger(logger *slog.Logger) ASTConverterOption {
 	return func(c *ASTConverter) {
 		c.logger = logger
+	}
+}
+
+// WithCollectionMethods admits the Story 4 collection-method + lambda
+// surface (ADR §2.2). Used only by the logic-body loader; specs and query
+// filters use the default converter, which rejects the surface.
+func WithCollectionMethods() ASTConverterOption {
+	return func(c *ASTConverter) {
+		c.allowCollectionMethods = true
 	}
 }
 
@@ -108,6 +122,10 @@ func (c *ASTConverter) ConvertExpression(expr languageParser.ExpressionNode) (Ex
 		return c.convertShapeExpr(node)
 	case *languageParser.FunctionCallExpr:
 		return c.convertFunctionCallExpr(node)
+	case *languageParser.MethodCallExpr:
+		return c.convertMethodCallExpr(node)
+	case *languageParser.LambdaExpr:
+		return c.convertLambdaExpr(node)
 	case *languageParser.BuiltinFunctionExpr:
 		return c.convertBuiltinFunctionExpr(node)
 	case *languageParser.SpecReferenceExpr:
@@ -613,6 +631,52 @@ func (c *ASTConverter) convertFunctionCallExpr(expr *languageParser.FunctionCall
 		Name: expr.Name,
 		Args: args,
 	}, nil
+}
+
+// convertMethodCallExpr converts a parser MethodCallExpr (Story 4 / #2302
+// / ADR §2.2) to the engine CollectionMethodExpression. The surface is
+// rejected unless the converter was constructed with WithCollectionMethods
+// (logic bodies only); specs and query filters get the scope error.
+func (c *ASTConverter) convertMethodCallExpr(expr *languageParser.MethodCallExpr) (ExpressionNode, error) {
+	if expr == nil {
+		return nil, nil
+	}
+	if !c.allowCollectionMethods {
+		return nil, fmt.Errorf("collection methods (.where/.select/.count/...) are not allowed in specs or query filters; use them in logic bodies or automation forEach (ADR §2.2)")
+	}
+	receiver, err := c.ConvertExpression(expr.Receiver)
+	if err != nil {
+		return nil, fmt.Errorf("convert collection-method receiver: %w", err)
+	}
+	args := make([]ExpressionNode, 0, len(expr.Args))
+	for i, a := range expr.Args {
+		conv, err := c.ConvertExpression(a)
+		if err != nil {
+			return nil, fmt.Errorf("convert collection-method %q arg %d: %w", expr.Method, i, err)
+		}
+		args = append(args, conv)
+	}
+	return &CollectionMethodExpression{
+		Receiver: receiver,
+		Method:   expr.Method,
+		Args:     args,
+	}, nil
+}
+
+// convertLambdaExpr converts a parser LambdaExpr to the engine
+// LambdaExpression. Only reachable when collection methods are admitted.
+func (c *ASTConverter) convertLambdaExpr(expr *languageParser.LambdaExpr) (ExpressionNode, error) {
+	if expr == nil {
+		return nil, nil
+	}
+	if !c.allowCollectionMethods {
+		return nil, fmt.Errorf("lambdas (x => ...) are only valid as collection-method arguments in logic bodies or automation forEach (ADR §2.2)")
+	}
+	body, err := c.ConvertExpression(expr.Body)
+	if err != nil {
+		return nil, fmt.Errorf("convert lambda body: %w", err)
+	}
+	return &LambdaExpression{Params: append([]string(nil), expr.Params...), Body: body}, nil
 }
 
 // convertBuiltinFunctionExpr converts languageParser.BuiltinFunctionExpr to memql.BuiltinFunctionExpression.

@@ -181,6 +181,24 @@ func cloneExpressionNode(expr ExpressionNode) ExpressionNode {
 		return &LiteralValueNode{Value: node.Value}
 	case *constantBoolExpression:
 		return &constantBoolExpression{value: node.value}
+	case *CollectionMethodExpression:
+		// Story 4 (#2302 / ADR §2.2): clone the receiver and each argument
+		// (lambdas included) so a registered logic body's stored tree is
+		// never mutated by arg substitution.
+		argsCopy := make([]ExpressionNode, len(node.Args))
+		for i, a := range node.Args {
+			argsCopy[i] = cloneExpressionNode(a)
+		}
+		return &CollectionMethodExpression{
+			Receiver: cloneExpressionNode(node.Receiver),
+			Method:   node.Method,
+			Args:     argsCopy,
+		}
+	case *LambdaExpression:
+		return &LambdaExpression{
+			Params: append([]string(nil), node.Params...),
+			Body:   cloneExpressionNode(node.Body),
+		}
 	case *CallerRefExpression:
 		return &CallerRefExpression{}
 	case *ErrorRefExpression:

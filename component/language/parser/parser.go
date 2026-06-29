@@ -39,6 +39,14 @@ type Parser struct {
 	// runtime query strings) stays permissive so handwritten query
 	// expressions keep working.
 	currentFuncType FunctionType
+
+	// suppressCommaOr disables the legacy `,`-as-OR separator at the
+	// logical-OR precedence level. It is set while parsing the arguments
+	// of a Story 4 collection method (#2302 / ADR §2.2) so a comma
+	// terminates one argument instead of folding the next into an OR
+	// expression (e.g. `reduce(0, (acc, n) => ...)` -- the `0` arg must
+	// stop at the comma). `||` still parses as OR.
+	suppressCommaOr bool
 }
 
 // recordDeferredError stashes a parse error that surfaces from inside
@@ -4332,7 +4340,7 @@ func (p *Parser) parseLogicalOr() (ExpressionNode, error) {
 		return nil, nil
 	}
 
-	for p.check(TokenComma) || p.check(TokenPipePipe) {
+	for (!p.suppressCommaOr && p.check(TokenComma)) || p.check(TokenPipePipe) {
 		p.advance()
 		right, err := p.parseNullCoalesce()
 		if err != nil {
@@ -4855,6 +4863,15 @@ func (p *Parser) parseFunctionCall(name string) (ExpressionNode, error) {
 	p.advance() // consume '('
 
 	lname := strings.ToLower(name)
+
+	// Story 4 (#2302 / ADR §2.2): a fused dotted path whose final segment
+	// is a collection operator (`args.members.where`) is a collection-method
+	// call, not a generic function call. Intercept before the table-driven
+	// dispatch so the receiver path + lambda args parse correctly. The
+	// engine converter enforces scope (logic/forEach only).
+	if recvPath, method, ok := isCollectionMethodPath(name); ok {
+		return p.parseCollectionMethodCall(recvPath, method)
+	}
 
 	// index() with no args = forEach index accessor; index(arr, i) = array element (general parsing)
 	if lname == "index" && p.check(TokenParenClose) {
@@ -6411,6 +6428,23 @@ func (p *Parser) consumePostCallDotAccess(call ExpressionNode) (ExpressionNode, 
 	for {
 		switch {
 		case p.check(TokenOperator) && p.current.Literal == ".":
+			// Story 4: a chained `.method(...)` collection call where the
+			// `.` is a standalone operator token followed by `method(`.
+			if next := p.peekAhead(1); next.Type == TokenIdentifier && collectionMethods[next.Literal] && p.peekAhead(2).Type == TokenParenOpen {
+				method := next.Literal
+				p.advance() // consume '.'
+				p.advance() // consume method ident
+				p.advance() // consume '('
+				args, err := p.parseMethodArgList()
+				if err != nil {
+					return nil, err
+				}
+				if err := p.expect(TokenParenClose); err != nil {
+					return nil, err
+				}
+				call = &MethodCallExpr{Receiver: call, Method: method, Args: args}
+				continue
+			}
 			p.advance() // consume '.'
 			if !p.check(TokenIdentifier) {
 				return nil, newParseErrorf(&p.current, "expected identifier after '.', got %q", p.current.Literal)
@@ -6426,6 +6460,25 @@ func (p *Parser) consumePostCallDotAccess(call ExpressionNode) (ExpressionNode, 
 				call = &DotAccessExpr{Object: call, Field: segment}
 			}
 		case p.check(TokenIdentifier) && strings.HasPrefix(p.current.Literal, "."):
+			// Story 4: a chained `.method(...)` collection call where the
+			// lexer fused the leading `.` into the identifier (`.count`)
+			// and the next token is `(`. The method must be a single
+			// segment (no further dots) for the call form.
+			seg := strings.TrimPrefix(p.current.Literal, ".")
+			if !strings.Contains(seg, ".") && collectionMethods[seg] && p.peekAhead(1).Type == TokenParenOpen {
+				method := seg
+				p.advance() // consume '.method'
+				p.advance() // consume '('
+				args, err := p.parseMethodArgList()
+				if err != nil {
+					return nil, err
+				}
+				if err := p.expect(TokenParenClose); err != nil {
+					return nil, err
+				}
+				call = &MethodCallExpr{Receiver: call, Method: method, Args: args}
+				continue
+			}
 			literal := strings.TrimPrefix(p.current.Literal, ".")
 			p.advance()
 			for _, segment := range strings.Split(literal, ".") {

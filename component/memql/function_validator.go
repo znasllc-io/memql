@@ -753,6 +753,39 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 			Args:     node.Args,
 		}, nil
 
+	case *CollectionMethodExpression:
+		// Story 4 (#2302 / ADR §2.2): expand the receiver and each
+		// argument with the caller args so an `args.X` receiver folds to
+		// a concrete collection literal. Lambda parameter references are
+		// untouched (they bind per-element at evaluation time).
+		receiver, err := v.expandExpressionWithArgs(node.Receiver, args)
+		if err != nil {
+			return nil, err
+		}
+		newArgs := make([]ExpressionNode, len(node.Args))
+		for i, a := range node.Args {
+			ea, err := v.expandExpressionWithArgs(a, args)
+			if err != nil {
+				return nil, err
+			}
+			newArgs[i] = ea
+		}
+		return &CollectionMethodExpression{
+			Receiver: receiver,
+			Method:   node.Method,
+			Args:     newArgs,
+		}, nil
+
+	case *LambdaExpression:
+		// Expand the lambda body with caller args (substitutes any outer
+		// `args.X` references); the param bindings resolve at evaluation
+		// time, so bare element-field references pass through unchanged.
+		body, err := v.expandExpressionWithArgs(node.Body, args)
+		if err != nil {
+			return nil, err
+		}
+		return &LambdaExpression{Params: append([]string(nil), node.Params...), Body: body}, nil
+
 	case *ConditionalFilterExpression:
 		// Process conditional filter: check if the arg is present AND
 		// non-nil. A present-but-nil value is treated as absent: tool
