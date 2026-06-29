@@ -64,7 +64,7 @@ When `MEMQL_DSL_PATH` is unset, the binary reads its baked-in embedded tree. Set
 ### Basic Query
 
 ```
-concept==v1:examples:world && payload.status=="active"
+concept==v1:examples:world && status=="active"
 ```
 
 This returns all active worlds. MemQL responses use **omission semantics**—fields are only present when they contain data (see [Response Envelope](#response-envelope)):
@@ -215,7 +215,7 @@ When a concept has a field that points TO another concept (like `spaceId` pointi
 tree, err := memEngine.Execute(ctx, `
 	sort(
 		paginate(
-			concept==v1:examples:world && payload.status=="active",
+			concept==v1:examples:world && status=="active",
 			50
 		),
 		"createdAt","desc"
@@ -227,7 +227,7 @@ tree, err := memEngine.Execute(ctx, `
 
 ```json
 {
-  "query": "sort(paginate(contains(id==\"project-abc\") && payload.status==\"open\",25),\"payload.due_date\",\"asc\",\"createdAt\",\"desc\")"
+  "query": "sort(paginate(contains(id==\"project-abc\") && status==\"open\",25),\"due_date\",\"asc\",\"createdAt\",\"desc\")"
 }
 ```
 
@@ -242,7 +242,7 @@ Frames are JSON encodings of the existing protobuf envelopes. A typical request/
   "messageId": "req-123",
   "executeQuery": {
     "requestId": "req-123",
-    "query": "concept==v1:examples:world && payload.status==\"active\""
+    "query": "concept==v1:examples:world && status==\"active\""
   }
 }
 ```
@@ -282,9 +282,9 @@ Configuration variables (prefixed with `MEMQL_WS_`) let you tune the gateway:
 | Component            | Description                                                                                                     |
 |----------------------|-----------------------------------------------------------------------------------------------------------------|
 | Filters              | Comparison expressions joined by `&&` (AND) and `\|\|` (OR), with `!` (NOT) and parentheses, using Go precedence. |
-| Fields               | `concept`, `id`, `type`, `createdAt`, `createdBy`, or `payload.<path>`.                                         |
+| Fields               | `concept`, `id`, `type`, `createdAt`, `createdBy`, or a bare payload property (`status`, `profile.name`).                                         |
 | Operators            | `==`, `!=`, `>`, `>=`, `<`, `<=`, `==nil`, `!=nil` (plus `in` in DSL filter clauses — see Operator Reference).  |
-| Parentheses          | Group complex logic: `(concept==v1:assistant \|\| concept==v1:examples:persona) && payload.active==true`.       |
+| Parentheses          | Group complex logic: `(concept==v1:assistant \|\| concept==v1:examples:persona) && active==true`.       |
 | Limit                | Use `paginate(<expr>, limit)` to request an explicit page size; omitting both `paginate` and `sort` caps the read at `MEMORY_ENGINE_DEFAULT_LIST_CAP` (default 50, the unmarked-list backstop). Continuation is via keyset cursors, not an offset skip. |
 
 > **Retired operator forms.** The legacy `;`-as-AND and `,`-as-OR separators, the `has` membership operator, the `?.` optional-chain prefix, and the `??` null-coalescing operator are all retired (#977, and `??` in the struct-form Phase 4 work). The parser rejects them in authored DSL filters with migration-pointing errors. Use `&&` / `||`, `in`, `when(args.x) { ... }`, and `coalesce(a, b, ...)` respectively.
@@ -316,16 +316,16 @@ This design ensures predictable, exact-match behavior and avoids ambiguous resul
 Filters are core comparison expressions that narrow the set of returned nodes:
 
 ```text
-concept==v1:assistant && payload.active==true
+concept==v1:assistant && active==true
 ```
 
 - Use `&&` for AND logic, `||` for OR logic, `!` for negation
-- Group with parentheses: `(concept==A || concept==B) && payload.active==true`
-- Field paths support dot notation for nested JSON: `payload.profile.name`
+- Group with parentheses: `(concept==A || concept==B) && active==true`
+- Field paths support dot notation for nested JSON: `profile.name`
 
 In **authored DSL filter clauses** (the `filter` line of a struct query) two more forms are available:
 
-- **Membership**: the single `in` operator — `args.x in payload.list` or `payload.kind in ["a", "b"]`.
+- **Membership**: the single `in` operator — `args.x in list` or `kind in ["a", "b"]`.
 - **Arg-conditional predicates**: the `when(args.x) { <expr> }` guard — if `args.x` is absent at call time, the guarded block and its connective are dropped as if never written (unambiguous under `||`).
 
 ### Directives
@@ -348,7 +348,7 @@ Directives can be nested: `sort(paginate(concept==v1:assistant, 10), "createdAt"
 MemQL supports deep dot-notation for accessing nested JSON fields:
 
 ```text
-payload.profile.settings.theme == "dark"
+profile.settings.theme == "dark"
 ```
 
 Path segments follow JSON keys, including arrays via numeric indices when needed.
@@ -357,20 +357,20 @@ Path segments follow JSON keys, including arrays via numeric indices when needed
 
 | Operator          | Example                                                                 | Notes                                                                                     |
 |-------------------|-------------------------------------------------------------------------|-------------------------------------------------------------------------------------------|
-| `==` / `!=`       | `payload.status=="open"`                                                | Direct equality / inequality.                                                             |
-| `>` / `<`         | `payload.score>0.85`                                                    | Numeric comparisons (strings use lexical ordering).                                       |
-| `>=` / `<=`       | `payload.attempts<=3`                                                   | Greater-than-or-equal / less-than-or-equal.                                               |
-| `in`              | `payload.stage in ["lead", "qualified", "won"]`                         | Membership against a collection. Works with scalar fields against lists and scalars against array fields. DSL filter clauses only — in a runtime query string, rewrite as a disjunction (`x=="a" \|\| x=="b"`). |
-| `==nil`           | `payload.metadata.notes==nil`                                           | Field absent or explicitly `null`. Apply to payload paths or intrinsic columns.           |
-| `!=nil`           | `payload.metadata.tags!=nil`                                            | Field present with a non-null value.                                                      |
+| `==` / `!=`       | `status=="open"`                                                | Direct equality / inequality.                                                             |
+| `>` / `<`         | `score>0.85`                                                    | Numeric comparisons (strings use lexical ordering).                                       |
+| `>=` / `<=`       | `attempts<=3`                                                   | Greater-than-or-equal / less-than-or-equal.                                               |
+| `in`              | `stage in ["lead", "qualified", "won"]`                         | Membership against a collection. Works with scalar fields against lists and scalars against array fields. DSL filter clauses only — in a runtime query string, rewrite as a disjunction (`x=="a" \|\| x=="b"`). |
+| `==nil`           | `metadata.notes==nil`                                           | Field absent or explicitly `null`. Apply to payload paths or intrinsic columns.           |
+| `!=nil`           | `metadata.tags!=nil`                                            | Field present with a non-null value.                                                      |
 
 Combined example covering several operators:
 
 ```
 concept==v1:lead &&
-payload.source!=nil &&
-payload.metadata.owner==nil &&
-(payload.status=="new" || payload.status=="contacted")
+source!=nil &&
+metadata.owner==nil &&
+(status=="new" || status=="contacted")
 ```
 
 The query above returns all leads in `new`/`contacted` state that already have a `source` value but still need an assigned `owner`.
@@ -381,13 +381,13 @@ In DSL filter clauses, the `in` operator works with both scalar and string-array
 
 **Scalar field:**
 ```memql
-payload.status in ["active", "pending"]
+status in ["active", "pending"]
 ```
 Matches if `status` equals "active" OR "pending".
 
 **Array field (automatic detection):**
 ```memql
-"filters" in payload.topics
+"filters" in topics
 ```
 Matches if the `topics` array contains "filters". For example, a module with `topics: ["filters", "limits", "sorting"]` matches.
 
@@ -410,7 +410,7 @@ Relationship expressions wrap another MemQL query and expand results through con
 | `ids(expr)`     | Returns lightweight nodes (no payload/schema) useful for identifier lists.                               |
 
 Relationship outputs can be combined with filters:
-`contains(id=="project-123") && payload.status=="open" && payload.priority<=2`
+`contains(id=="project-123") && status=="open" && priority<=2`
 
 **Note:** Relationship pointer fields are optional — if a node has a null or missing pointer field, it is silently skipped during traversal rather than causing an error.
 
@@ -422,7 +422,7 @@ Use `sort(<expr>, "<field>", "<direction>?", ...)` to order results. The functio
 - Requires at least one string literal field name; directions are optional (`"asc"` or `"desc"`, defaulting to `"desc"`).
 - Allows multiple field/direction pairs for deterministic tie-breaking.
 - Must wrap the entire query expression (i.e., `sort(...)` should be the outermost call).
-- Supported fields: `id`, `concept`, `createdAt`, `createdBy`, `type`, and `payload.<path>`.
+- Supported fields: `id`, `concept`, `createdAt`, `createdBy`, `type`, and bare payload properties (`status`, `metadata.tags`).
 - Limits and offsets always apply **after** sorting. Sorting on payload properties may cause the engine to fetch up to `MEMORY_ENGINE_MAX_WINDOW` rows to guarantee correctness.
 
 Example:
@@ -458,7 +458,7 @@ marked `@unbounded("reason")` is rewritten to an explicit wide paginate
 and bypasses the 50-cap. See the [pagination authoring rule](authoring-rules.md#23-list-returning-queries-must-declare-their-bound).
 
 ```
-paginate(concept==v1:examples:module && payload.worldId=="v1:examples:world:world-aurora", 200)
+paginate(concept==v1:examples:module && worldId=="v1:examples:world:world-aurora", 200)
 ```
 
 ### Temporal Snapshots
@@ -466,7 +466,7 @@ paginate(concept==v1:examples:module && payload.worldId=="v1:examples:world:worl
 `asOf(<expr>, "<timestamp>")` evaluates a query using a consistent historical snapshot. Supply an RFC3339/RFC3339Nano timestamp string:
 
 ```
-asOf(concept==v1:assistant && payload.active==true, "2025-11-01T00:00:00Z")
+asOf(concept==v1:assistant && active==true, "2025-11-01T00:00:00Z")
 ```
 
 ### Depth Overrides
@@ -492,15 +492,15 @@ use cognition.concepts.{ audioOverride }
 @description("Per-(space, agent) audio override projection")
 shape audioOverride audioOverrideFull {
   row.id
-  payload.spaceId
-  payload.agentId
-  payload.mode
-  payload.active
+  spaceId
+  agentId
+  mode
+  active
   row.createdAt
 }
 ```
 
-Body path translations: `row.X` → row intrinsic (`id`, `createdAt`, `createdBy`, etc.); `payload.X` → payload field. Each path becomes a template entry keyed by the path's terminal segment.
+Body path translations: a bare `name` → payload property; `row.X` → row intrinsic (`id`, `createdAt`, `createdBy`, etc.); `actor.X` → auth envelope. Each path becomes a template entry keyed by the path's terminal segment.
 
 **Actor shapes** project the engine envelope (the authenticated actor + engine timestamp + allow-listed config). They carry no signature concept. Closed field set: `actor.userId` / `actor.role` / `actor.identityId` / `actor.isClusterOwner` / `actor.now` / `actor.config.<allow-listed-key>`:
 
@@ -704,7 +704,7 @@ insert("v1:lead", id="lead-123", payload={"name": "John", "email": "john@example
 concept==v1:lead && id=="lead-123"
 
 -- Query unclassified leads (current version missing classification field)
-concept==v1:lead && payload.classification==nil
+concept==v1:lead && classification==nil
 ```
 
 **Soft deletes:** to "delete" a record, insert a version with `active: false`.
@@ -747,56 +747,55 @@ mutation space mutationArchiveSpace {
 
 ## Specs
 
-Specs are atomic boolean predicates, declared in struct form in `dsl/<namespace>/specs.memql`. The body is a **single boolean expression**. The engine classifies a spec by walking its field references and picks the evaluation strategy:
+Specs are atomic boolean predicates, declared in struct form in `dsl/<namespace>/specs.memql`. A spec **binds exactly one shape XOR concept in its signature** (`spec <boundName> <name>`, resolved via the file-top `use` import) and the body **`return`s a boolean** over **bare** field names. The binding picks the evaluation strategy:
 
-- **Row-specs** reference `payload.X` and/or row intrinsics (`id`, `concept`, `type`, `createdAt`, `createdBy`, `schema`). They compile into a SQL `WHERE` fragment and push down to the database for filtering.
-- **Context-specs** reference `actor.X` only (e.g. `actor.role`, `actor.isClusterOwner`). They evaluate in-process against the auth-context envelope; call them via `spec("name")` for actor-based checks like "is admin."
+- **Row-specs** bind a concept or a `@row` shape. They compile into a SQL `WHERE` fragment and push down to the database for filtering.
+- **Context-specs** bind an `@actor` shape (the only gateway to the auth envelope). They evaluate in-process against the auth context; call them via `spec("name")` for actor-based checks like "is admin."
 
-Bodies that mix both flavors are rejected at load time.
+A spec body never reads `actor.*` / `row.*` directly — bind a shape that projects it and read the projected key bare. The `@shape("name")` annotation is **removed**; the binding moved to the signature.
 
 ```memql
 use cognition.concepts.{ participant }
 
 @description("Matches participants with human participantType")
-spec specIsHumanParticipant {
-  payload.participantType == "human"
+spec participant specIsHumanParticipant {
+  return participantType == "human"
 }
+
+use common.shapes.{ actorEnvelope }
 
 @enabled
 @description("Actor holds an admin role")
-@shape("actorEnvelope")
-spec requiresAdmin {
-  actor.role == "admin"
+spec actorEnvelope requiresAdmin {
+  return role == "admin"
 }
 ```
 
-**`@shape("name")` is optional** on a spec — the eval strategy is derived from the spec body's field references, not the shape. When present it documents/pins the shape the predicate reads: concept-specific specs pin a concept-bound `@row` shape; actor-side specs an `@actor` shape; cross-concept specs a **trait shape**.
-
 ### Traits
 
-Traits are cross-concept predicate scaffolds declared in `dsl/common/traits.memql`:
+A `trait` is the one deliberately **unbound** row predicate — a cross-concept scaffold declared in `dsl/<namespace>/traits.memql`, with no signature binding, a `return` body over bare payload fields, validated against the concrete concept at the call site:
 
 ```memql
 @enabled
 @description("Matches records with active==true field")
-trait traitIsActiveRecord {
-  payload.active==true
+trait isActiveRecord {
+  return active == true
 }
 ```
 
-When a trait covers a predicate (e.g. `traitIsActiveRecord` for `payload.active==true`), **using the trait is mandatory** in authored query filters — inline `payload.active==true` / `payload.deleted==false` are rejected by the conformance test (`dsl/conformance_test.go`).
+When a trait covers a predicate (e.g. `traitIsActiveRecord` for `active==true`), **using the trait is mandatory** in authored query filters — inline `active==true` / `deleted==false` are rejected by the conformance test (`dsl/conformance_test.go`).
 
 ### Using Specs and Traits in Filters
 
 Specs and traits are referenced by bare name inside DSL query filter clauses:
 
 ```memql
-filter  payload.spaceId==args.spaceId && specIsHumanParticipant && traitIsActiveRecord
+filter  spaceId==args.spaceId && specIsHumanParticipant && traitIsActiveRecord
 ```
 
 During load the engine resolves every spec reference into the underlying expression tree, so the resulting query plan behaves exactly as if the spec contents were written inline. Spec dependencies are resolved at load; cycles and duplicates are rejected.
 
-> **Retired forms.** The receiver-function spec (`func (Spec) name(ctx any) bool { return <expr> }`), the JSON spec format (`specs/v1/*.json` documents with an `expression` string), and runtime inline spec definitions (`name := expr` inside a query string) are all retired and rejected. Author the predicate as a struct spec and reference it by name. Specs carry no `ctx`, no `return`, no parameter — the body is the bare boolean expression.
+> **Retired forms.** The receiver-function spec (`func (Spec) name(ctx any) bool { ... }`), the older bare-expression body (no `return`), the `@shape("name")` pin, the JSON spec format (`specs/v1/*.json` documents with an `expression` string), and runtime inline spec definitions (`name := expr` inside a query string) are all retired and rejected. Author the predicate as a signature-bound struct spec (`spec <boundName> <name> { return <bool> }`) and reference it by name.
 
 ## Queries (Named Functions)
 
@@ -815,9 +814,9 @@ query participant querySpaceParticipants {
     status           string  @enum("active", "idle", "left")
     participantType  string  @enum("human", "si")
   }
-  filter  when(args.spaceId) { payload.spaceId==args.spaceId } &&
-          when(args.status) { payload.status==args.status } &&
-          when(args.participantType) { payload.participantType==args.participantType } &&
+  filter  when(args.spaceId) { spaceId==args.spaceId } &&
+          when(args.status) { status==args.status } &&
+          when(args.participantType) { participantType==args.participantType } &&
           traitIsActiveRecord
   shape   participantFull
 }
@@ -832,7 +831,7 @@ query context queryLatestSpaceContextForSpace {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==args.spaceId
+  filter  spaceId==args.spaceId
   sort    "createdAt", "desc"
   paginate 1
   shape   spaceContextFull
@@ -868,7 +867,7 @@ How names resolve inside a body:
 | `now` | RFC3339 timestamp captured at eval start | every body |
 | `partition` | Active partition for this call | every body |
 | `config.X` | Allow-listed config | every body |
-| `payload.X`, `id`, `concept`, `type`, `createdAt`, `createdBy`, `schema` | Row fields / intrinsics | queries' `filter` + `shape` only (SQL pushdown) |
+| `X`, `id`, `concept`, `type`, `createdAt`, `createdBy`, `schema` | Row fields / intrinsics | queries' `filter` + `shape` only (SQL pushdown) |
 
 **Reserved engine names.** `now`, `actor`, `partition`, `config`, `trace` are reserved as top-level identifiers. An `args` field that collides with one of these names is rejected at load time.
 
@@ -1062,7 +1061,7 @@ This lowers to the canonical longhand above — identical runtime automation, no
 ```memql
 @enabled
 @trigger(event="node.created", concept="v1:cognition:space", partition="*")
-@filter(payload.active==true)
+@filter(active==true)
 @description("On space creation, joins the creator's assistant plus any specialist agents.")
 automation autoJoinSI {
   step run {
@@ -1374,7 +1373,7 @@ Cache keys are computed from the normalized query expression (cache hints fold i
 ### Finding Unprocessed Items
 
 ```memql
-concept==v1:task && payload.processed==nil
+concept==v1:task && processed==nil
 ```
 
 ### Filtering by Date Range
@@ -1392,7 +1391,7 @@ concept==v1:user || concept==v1:admin
 ### Nested Field Queries
 
 ```memql
-concept==v1:profile && payload.settings.notifications.email==true
+concept==v1:profile && settings.notifications.email==true
 ```
 
 ## Worked Examples
@@ -1400,7 +1399,7 @@ concept==v1:profile && payload.settings.notifications.email==true
 ### Basic Listing (historical snapshot)
 
 ```
-asOf(concept==v1:assistant && payload.active==true, "2025-11-01T00:00:00Z")
+asOf(concept==v1:assistant && active==true, "2025-11-01T00:00:00Z")
 ```
 
 List all assistants that were active at the start of November 2025.
@@ -1409,7 +1408,7 @@ List all assistants that were active at the start of November 2025.
 
 ```
 sort(
-  paginate(concept==v1:examples:world && payload.status=="active", 25, 25),
+  paginate(concept==v1:examples:world && status=="active", 25, 25),
   "createdAt","desc"
 )
 ```
@@ -1419,7 +1418,7 @@ Returns the second page of active worlds, sorted by recency.
 ### Graph Traversal
 
 ```
-childOf(concept==v1:examples:world && id=="v1:examples:world:world-aurora") && payload.tier=="silver"
+childOf(concept==v1:examples:world && id=="v1:examples:world:world-aurora") && tier=="silver"
 ```
 
 Fetch all silver-tier modules that belong to `world-aurora`.
@@ -1429,12 +1428,12 @@ Fetch all silver-tier modules that belong to `world-aurora`.
 ```
 parentOf(
   contains(
-    concept==v1:examples:module && payload.tier in ["silver", "gold"]
+    concept==v1:examples:module && tier in ["silver", "gold"]
   )
-) && payload.status=="active"
+) && status=="active"
 ```
 
-(DSL filter clause — at the runtime string surface, write the membership as `(payload.tier=="silver" || payload.tier=="gold")`.)
+(DSL filter clause — at the runtime string surface, write the membership as `(tier=="silver" || tier=="gold")`.)
 
 ### Insert Examples
 
@@ -1641,8 +1640,8 @@ This is a condensed syntax specification designed to fit within limited context 
 ```text
 concept==v1:namespace:name
 id=="node-id"
-payload.field==value
-payload.nested.path==value
+field==value
+nested.path==value
 createdAt>"2025-01-01T00:00:00Z"
 ```
 
@@ -1650,15 +1649,15 @@ createdAt>"2025-01-01T00:00:00Z"
 
 | Operator | Example | Description |
 |----------|---------|-------------|
-| `==` | `payload.status=="active"` | Equality |
-| `!=` | `payload.status!="left"` | Inequality |
-| `>` | `payload.score>0.5` | Greater than |
-| `>=` | `payload.count>=10` | Greater than or equal |
-| `<` | `payload.age<30` | Less than |
-| `<=` | `payload.priority<=5` | Less than or equal |
-| `==nil` | `payload.field==nil` | Field is null/absent |
-| `!=nil` | `payload.field!=nil` | Field exists |
-| `in` | `payload.kind in ["a", "b"]` | Membership — DSL filter clauses only; in runtime strings write a disjunction |
+| `==` | `status=="active"` | Equality |
+| `!=` | `status!="left"` | Inequality |
+| `>` | `score>0.5` | Greater than |
+| `>=` | `count>=10` | Greater than or equal |
+| `<` | `age<30` | Less than |
+| `<=` | `priority<=5` | Less than or equal |
+| `==nil` | `field==nil` | Field is null/absent |
+| `!=nil` | `field!=nil` | Field exists |
+| `in` | `kind in ["a", "b"]` | Membership — DSL filter clauses only; in runtime strings write a disjunction |
 
 ### Logical Operators
 
@@ -1712,7 +1711,7 @@ use common.traits.{ traitIsActiveRecord }
 
 query participant queryX {
   args { spaceId string @required }
-  filter payload.spaceId==args.spaceId && traitIsActiveRecord
+  filter spaceId==args.spaceId && traitIsActiveRecord
   shape participantFull
 }
 
@@ -1721,10 +1720,10 @@ mutation space mutationCreateSpace {
   insert { id: args.spaceId  name: args.name  status: "active"  createdAt: now  createdBy: actor.userId }
 }
 
-spec specIsHumanParticipant { payload.participantType == "human" }
+spec participant specIsHumanParticipant { return participantType == "human" }
 
 @row
-shape participant participantCard { row.id  payload.displayName }
+shape participant participantCard { row.id  displayName }
 
 @trigger(event="node.created", concept="v1:cognition:participant", partition="*")
 automation bootstrapSession { step run { logic bootstrapSession { event: event } } }
@@ -1734,7 +1733,7 @@ automation bootstrapSession { step run { logic bootstrapSession { event: event }
 
 ```memql
 # Get active users
-concept==v1:user && payload.active==true
+concept==v1:user && active==true
 
 # Get users created this year
 concept==v1:user && createdAt>"2025-01-01T00:00:00Z"
@@ -1750,7 +1749,7 @@ Use this reference when constructing MemQL queries. Always validate syntax and c
 
 ## Runtime Parser (epic #218: #248 → #249 → #250)
 
-The runtime grammar consumed by `engine.Execute(ctx, query string)` — function invocations (`funcName({k: v, ...})`), filter expressions (`concept==X && payload.Y==Z`), `insert(...)` literals, and introspection meta-commands — is parsed exclusively through the language parser (`langparser.ParseExpression` + `ASTConverter`). The legacy in-package recursive-descent runtime parser was retired in #328 / #250 after the soak window; there is no fallback path.
+The runtime grammar consumed by `engine.Execute(ctx, query string)` — function invocations (`funcName({k: v, ...})`), filter expressions (`concept==X && Y==Z`), `insert(...)` literals, and introspection meta-commands — is parsed exclusively through the language parser (`langparser.ParseExpression` + `ASTConverter`). The legacy in-package recursive-descent runtime parser was retired in #328 / #250 after the soak window; there is no fallback path.
 
 A small set of legacy runtime shapes is rejected upfront with a typed `ErrUnsupportedQueryShape` carrying a shape-specific migration hint:
 

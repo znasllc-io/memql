@@ -49,12 +49,12 @@ mutation user mutationArchiveUser {
   }
 }
 
-spec specStatusIsActive {
-  payload.status == "active"
+spec space specStatusIsActive {
+  return status == "active"
 }
 
 trait traitIsActiveRecord {
-  payload.active == true
+  return active == true
 }
 ```
 

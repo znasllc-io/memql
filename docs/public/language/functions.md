@@ -116,7 +116,7 @@ actor.userId         -- Resolved auth context (role, identityId, isClusterOwner,
 now                  -- RFC3339 timestamp captured at evaluation start
 partition            -- Active partition for this call
 config.X             -- Allow-listed config entry
-payload.fieldName    -- Row payload field (query filter / shape contexts)
+fieldName    -- Row payload field (query filter / shape contexts)
 id, createdAt, ...   -- Row intrinsics, bare names
 ```
 
@@ -131,15 +131,15 @@ context:
 
 | Operator | Meaning | Example |
 |----------|---------|---------|
-| `==` | Equal | `payload.role=="admin"` |
-| `!=` | Not equal | `payload.status!="archived"` |
-| `>` `>=` `<` `<=` | Comparisons | `payload.count>=10` |
-| `in` | Membership | `payload.kind in ["a", "b"]`, `args.x in payload.list` |
-| `&&` | Logical AND | `payload.spaceId==args.spaceId && traitIsActiveRecord` |
+| `==` | Equal | `role=="admin"` |
+| `!=` | Not equal | `status!="archived"` |
+| `>` `>=` `<` `<=` | Comparisons | `count>=10` |
+| `in` | Membership | `kind in ["a", "b"]`, `args.x in list` |
+| `&&` | Logical AND | `spaceId==args.spaceId && traitIsActiveRecord` |
 | `\|\|` | Logical OR | `actor.role=="admin" \|\| actor.role=="owner"` |
-| `!` | Logical NOT | `!payload.hidden` |
+| `!` | Logical NOT | `!hidden` |
 | `( )` | Grouping (Go precedence: `!` > comparisons > `&&` > `\|\|`) | `(a \|\| b) && c` |
-| `when(args.x) { ... }` | Arg-conditional predicate: when `args.x` is absent, the guarded block and its connective are dropped | `when(args.role) { payload.role==args.role }` |
+| `when(args.x) { ... }` | Arg-conditional predicate: when `args.x` is absent, the guarded block and its connective are dropped | `when(args.role) { role==args.role }` |
 
 > **Retired operator forms** (all rejected at parse time and by the
 > conformance suite, `TestNoRetiredOperatorForms`):
@@ -167,19 +167,19 @@ query participant queryActiveHumanParticipants {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==args.spaceId && payload.participantType=="human" && traitStatusIsActive && traitIsActiveRecord
+  filter  spaceId==args.spaceId && participantType=="human" && traitStatusIsActive && traitIsActiveRecord
   shape   participantFull
 }
 ```
 
 Filter rules (enforced by `dsl/conformance_test.go`):
 
-- Payload fields are `payload.<field>` -- never `<conceptName>.<field>`.
+- Payload fields are `<field>` -- never `<conceptName>.<field>`.
 - Intrinsics (`id`, `concept`, `createdAt`, `createdBy`, `partition`,
   `type`, `schema`) are bare names.
 - Named trait / spec predicates are called bare
   (`traitIsActiveRecord`), and are **mandatory** where a trait covers
-  the predicate -- inline `payload.active==true` is rejected when
+  the predicate -- inline `active==true` is rejected when
   `traitIsActiveRecord` exists.
 
 ### Optional Filters with `when()`
@@ -212,7 +212,7 @@ query context queryLatestSpaceContextForSpace {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==args.spaceId
+  filter  spaceId==args.spaceId
   sort    "createdAt", "desc"
   paginate 1
   shape   spaceContextFull
@@ -368,7 +368,7 @@ use cognition.logic.{ logicAutoJoinSI }
 
 @enabled
 @trigger(event="node.created", concept="v1:cognition:space", partition="*")
-@filter(payload.active==true)
+@filter(active==true)
 @description("On space creation, join the creator's assistant into the space.")
 automation autoJoinSI {
   step run {
@@ -439,7 +439,7 @@ A precondition that evaluates false is a **miss**:
 2. The harness emits a structured `healing.precondition.missed` event
    (see [events](../concepts/events.md#self-healing-events)) carrying the
    automation + precondition identity, the failed `check`, the asserted
-   `literal`, and the triggering event payload.
+   `literal`, and the triggering event 
 
 A miss is **both** the clean self-healing repair trigger and the
 cross-machine portability mechanism: a literal asserted by a precondition
@@ -463,7 +463,7 @@ authored/deterministic deploy spine but are never themselves LLM-healed.
 | `@enabled` / `@disabled` | none | Lifecycle switch (disabled constructs stay in the tree, are not loaded) |
 | `@trigger` | `event="..."`, `concept="..."`, `partition="*"` | Event-based trigger; lifecycle events like `system.startup` / `system.shutdown` take `event` only |
 | `@trigger` | `schedule="..."` | Six-field cron schedule |
-| `@filter` | `(<predicate>)` | Event-payload predicate gating the trigger, e.g. `@filter(payload.active==true)` |
+| `@filter` | `(<predicate>)` | Event-payload predicate gating the trigger, e.g. `@filter(active==true)` |
 | `@description` | `"..."` | Human-readable description |
 | `precondition NAME { ... }` | `check:` (req), `literal:`, `description:` | First-class deterministic check; a miss aborts the run + emits `healing.precondition.missed` (Epic 4 self-healing) |
 
@@ -666,8 +666,8 @@ use cognition.concepts.{ space }
 @row
 shape space spaceCard {
   row.id
-  row.payload.name
-  row.payload.description
+  name
+  description
   row.createdAt
 }
 ```
@@ -710,7 +710,7 @@ query participant querySpaceParticipants {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==args.spaceId && traitIsActiveRecord
+  filter  spaceId==args.spaceId && traitIsActiveRecord
   shape   participantFull
 }
 ```
