@@ -18,7 +18,7 @@ automation accessRequestExpirySweep {
   }
   step apply {
     forEach item in decide.result {
-      if addDuration(item.createdAt, concat("P", coalesce(window.First().payload.value, "30"), "D")) < timestamp() {
+      if addDuration(item.createdAt, concat("P", coalesce(window.First().payload.value, "30"), "D")) < now {
         expireAccessRequest {
           requestId: item.id
         }
@@ -133,7 +133,7 @@ automation accountDeletionReminder7Days {
 //   - The filter side of usersScheduledForDeletion can't push
 //     the cooldown math into the query (see that file's header).
 //     Per-row gating uses
-//       addDuration(item.payload.deletionScheduledAt, "P{cooldown}D") < timestamp()
+//       addDuration(item.payload.deletionScheduledAt, "P{cooldown}D") < now
 //   - There's no batch-update path; we revoke sessions one row at a
 //     time inside the loop.
 @enabled
@@ -148,7 +148,7 @@ automation accountDeletionSweep {
   }
   step apply {
     forEach item in decide.result {
-      if addDuration(item.payload.deletionScheduledAt, concat("P", coalesce(window.First().payload.value, "30"), "D")) < timestamp() {
+      if addDuration(item.payload.deletionScheduledAt, concat("P", coalesce(window.First().payload.value, "30"), "D")) < now {
         deleteUserHard {
           userId: item.id
         }
@@ -184,7 +184,7 @@ automation accountDeletionSweep {
 // (expiredAuditEvents) is stable either way.
 //
 // Per-row windowing uses addDuration on item.payload.occurredAt
-// against `timestamp()`, same as accessRequestExpirySweep -- MemQL
+// against `now`, same as accessRequestExpirySweep -- MemQL
 // can't push that into the filter today.
 @enabled
 @trigger(schedule="0 0 2 * * *")
@@ -210,14 +210,14 @@ automation auditEventRetentionSweep {
 @description("Soft-revoke expired delegations every 5 minutes. The query + revoke loop is in revokeExpiredDelegations.")
 automation expireDelegations {
   step decide {
-    logic revokeExpiredDelegations { now: timestamp() }
+    logic revokeExpiredDelegations { now: now }
   }
   step apply {
     forEach item in decide.Nodes() {
       revokeDelegation {
         delegationId: item.id,
         revokedBySubject: "system:expiry",
-        revokedAt: timestamp()
+        revokedAt: now
       }
     }
   }
@@ -249,7 +249,7 @@ automation expireDelegations {
 // own expiresAt check makes the sweep's tightness irrelevant. If
 // the operator wants tighter cleanup, bump the cadence here.
 //
-// `now` is passed in (rather than read via timestamp() inline)
+// The `now` cutoff is passed in as an arg (rather than referencing the clock inline)
 // because the memQL query planner rejects function-call literals
 // in filter comparisons.
 @enabled

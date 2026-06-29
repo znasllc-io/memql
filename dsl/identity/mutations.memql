@@ -19,7 +19,7 @@ mutate accessRequest approveAccessRequest {
     status: "approved"
     args.reviewedBy
     args.invitationId
-    reviewedAt: timestamp()
+    reviewedAt: now
     reviewerNote: coalesce(args.reviewerNote, "")
   }
 }
@@ -76,7 +76,7 @@ mutate user bumpUserDataExport {
   }
   update {
     id: args.userId
-    dataExportLastAt: timestamp()
+    dataExportLastAt: now
   }
 }
 
@@ -191,7 +191,7 @@ mutate authCode consumeAuthCode {
   }
   update {
     id: args.codeId
-    consumedAt: timestamp()
+    consumedAt: now
     consumedFromIP: coalesce(args.consumedFromIP, "")
   }
 }
@@ -226,7 +226,7 @@ mutate magicLinkRequest consumeMagicLinkRequest {
   }
   update {
     id: args.requestId
-    consumedAt: timestamp()
+    consumedAt: now
     consumedFromIP: coalesce(args.consumedFromIP, "")
   }
 }
@@ -527,8 +527,8 @@ mutate authSession createAuthSession {
     args.source
     clientLabel: coalesce(args.clientLabel, "")
     args.expiresAt
-    lastActivityAt: timestamp()
-    firstAuthenticatedAt: timestamp()
+    lastActivityAt: now
+    firstAuthenticatedAt: now
     refreshTokenHash: ""
     revokedReason: ""
   }
@@ -1390,7 +1390,7 @@ mutate accessRequest rejectAccessRequest {
     id: args.requestId
     status: "rejected"
     args.reviewedBy
-    reviewedAt: timestamp()
+    reviewedAt: now
     reviewerNote: coalesce(args.reviewerNote, "")
   }
 }
@@ -1432,7 +1432,7 @@ mutate authSession revokeAuthSession {
   update {
     id: args.sessionId
     args.revokedReason
-    revokedAt: timestamp()
+    revokedAt: now
   }
 }
 
@@ -1466,7 +1466,7 @@ mutate delegation revokeDelegation {
   update {
     id: args.delegationId
     active: false
-    revokedAt: coalesce(args.revokedAt, timestamp())
+    revokedAt: coalesce(args.revokedAt, now)
     revokedBySubject: coalesce(args.revokedBySubject, "")
   }
 }
@@ -1566,9 +1566,9 @@ mutate authSession rotateAuthSession {
     id: args.sessionId
     refreshTokenHash: args.newRefreshTokenHash
     args.previousRefreshTokenHash
-    previousRotatedAt: timestamp()
+    previousRotatedAt: now
     expiresAt: args.newExpiresAt
-    lastRefreshedAt: timestamp()
+    lastRefreshedAt: now
   }
 }
 
@@ -1599,7 +1599,7 @@ mutate user scheduleAccountDeletion {
   }
   update {
     id: args.userId
-    deletionScheduledAt: timestamp()
+    deletionScheduledAt: now
   }
 }
 

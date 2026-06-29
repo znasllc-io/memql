@@ -28,7 +28,7 @@ query policyTrace policyTracesForPolicy {
 // Returns every persisted PolicyTrace row. The
 // purgeExpiredPolicyTraces cron iterates the result and per-row
 // tests whether createdAt + MEMQL_POLICYTRACE_RETENTION_DAYS is
-// past `timestamp()` -- same shape as expiredAuditEvents
+// past `now` -- same shape as expiredAuditEvents
 // in the identity tree (MemQL filter expressions can't inline
 // addDuration today).
 //

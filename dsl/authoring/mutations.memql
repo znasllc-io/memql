@@ -106,7 +106,7 @@ mutate bundle activateAuthoringBundle {
     id: args.bundleId
     ownerUserId: actor.userId
     status: "active"
-    activatedAt: timestamp()
+    activatedAt: now
   }
 }
 
@@ -136,7 +136,7 @@ mutate bundle retireAuthoringBundle {
     id: args.bundleId
     ownerUserId: actor.userId
     status: "retired"
-    retiredAt: timestamp()
+    retiredAt: now
   }
 }
 

@@ -159,7 +159,7 @@ query audioOverride audioOverridesForSpace {
 // extends them; deleted-already rows aren't restored, matching the
 // product spec.
 //
-// `now` is passed in (rather than read via timestamp() inline)
+// The `now` cutoff is passed in as an arg (rather than referencing the clock inline)
 // because the memQL query planner rejects function-call literals in
 // filter comparisons (see queryExpiredPendingGuestInvitations).
 

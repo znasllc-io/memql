@@ -45,10 +45,11 @@ The **built-in surface** -- the bare functions a body calls (`coalesce`,
 `concat`, `now`, `timestamp`, `year`, `first`, `filter`, ...) -- never got the
 same treatment. It has three problems:
 
-1. **Nondeterminism is invisible.** `now` and `timestamp()` read the wall clock,
-   but they are ambient grammar accessors: nothing in a construct's `use` block
-   reveals that it depends on the clock. This is exactly the ambient-input
-   problem the import model solved everywhere else.
+1. **The clock has three redundant spellings.** `now`, `now()`, and
+   `timestamp()` all read the wall clock and are in fact the *same* primitive
+   (2.1), but a reader has to know all three. The fix is one author spelling --
+   the bare reserved `now` -- so the clock dependency is a single, legible
+   declared name rather than a scattered call surface.
 
 2. **The collection surface is incoherent.** There are *two* overlapping ways to
    work with a set of rows: grammar builtins (`first` / `last` / and the
@@ -73,16 +74,17 @@ carries. Ground truth, which this ADR builds on:
 
 | Handoff item | Reality on `main` | Disposition |
 |---|---|---|
-| `now` reads the clock | `now` is a **reserved engine identifier** (eval-start RFC3339 stamp, captured once per eval), in the same bucket as `actor` / `partition` / `config` | **stays ambient** (see 2.1) |
-| `timestamp` reads the clock | all ~80 `timestamp(...)` call sites are **no-arg** `timestamp()` (a fresh wall-clock read); zero use the string-arg parse form | **imported `core`** (see 2.1) |
+| `now` reads the clock | `now` is a **reserved engine identifier** (the current RFC3339 timestamp, evaluated in-engine), in the same bucket as `actor` / `partition` / `config` | **stays ambient** (see 2.1) |
+| `timestamp` reads the clock (distinct from `now`) | `now`, `now()`, `timestamp()` are the **same** primitive (one AST node, one evaluator); all ~80 `timestamp()` + ~27 `now()` call sites just mean "current time" | **collapse to bare `now`** (see 2.1) |
 | `globalVariable` is a builtin | it is a **query** (`use platform.queries.{ globalVariable }`) reading `v1:platform:globalVariable` | **already imported -- no change** |
 | `env` is a builtin | `env("...")` is a **provider `auth {}`-block-only** construct, resolved at provider registration; not callable in logic/automation/query bodies | **already constrained -- out of scope** |
 | `uuid` / random | **does not exist** in the tree | forward-looking rule only (see 2.1) |
 
 The practical consequence: the language is *already* mostly explicit about
-ambient input. The real expression-level migration is narrow (the `timestamp()`
-clock read), and the bulk of this epic's work is the **collection/lambda
-library** (2.2) and the **temporal contract** (2.3).
+ambient input. The real expression-level migration is narrow -- collapsing the
+three redundant clock spellings (`now` / `now()` / `timestamp()`) to the single
+ambient reserved `now` -- and the bulk of this epic's work is the
+**collection/lambda library** (2.2) and the **temporal contract** (2.3).
 
 ## 2. Decision
 
@@ -96,25 +98,44 @@ the same value while observing nothing outside those arguments?*
   **-> imported from `core`.** The `use` block reveals every source of
   nondeterminism.
 
-**One refinement on the clock (owner ruling 2026-06-29).** The eval-start
-timestamp is *engine-provided context*, not a free clock read. It is captured
-once per evaluation and is stable for the whole call -- exactly like `actor`,
-`partition`, and `config`, which are also ambient because they are declared
-engine context surfaced as reserved names. Therefore:
+**The clock is ONE primitive -- it collapses to the ambient reserved `now`
+(owner ruling 2026-06-29, revised after implementation grounding).** The
+handoff's premise was that `now` and `timestamp()` are two distinct clock reads,
+one of which (`timestamp()`) should be imported. The implementation says
+otherwise: `now`, `now()`, and `timestamp()` **all** parse to the same AST node
+(`TimestampExprFunc`) and evaluate through the same
+`RuntimeEvaluator.EvaluateTimestamp()` (a fresh `time.Now()`). There is no
+eval-start-vs-fresh distinction in the engine, and bare `now` is *canonicalized
+to the call-form internally* (`mutation_templates.classifyScalarOrExpr` maps
+`now` -> `now()`; `compiler/automation_generator` emits `timestamp()`) and
+re-parsed -- so the parser must keep accepting the call-forms; they are the
+engine's internal canonical representation. Given that, gating an alias of `now`
+behind an import would be ceremony with no semantic payoff. Therefore:
 
-- **bare `now`** -- the reserved eval-start identifier -- **stays ambient.**
-  `createdAt: now` in a mutation is unchanged. This keeps the single most common
-  idiom terse and is consistent with the other reserved engine names.
-- The **call form `now()`** is redundant with bare `now` and is **retired** in
-  favour of it (migrated, not imported).
-- **`timestamp()`** is a genuine *fresh wall-clock read at the point of call*
-  (distinct from the eval-start stamp), so it is **imported from `core`**. A body
-  that reads the live clock declares it: `use core.{ timestamp }`.
-- **`uuid()` / random** (none exist today) are **`core`** when introduced.
+- **The author surface is the bare reserved identifier `now`** -- the single
+  way to express "current time", in the same bucket as `actor` / `partition` /
+  `config`. Its presence in a body *is* the declared dependency; nondeterminism
+  stays legible without an import line.
+- **The `now()` / `timestamp()` call-forms are retired at the AUTHOR surface**,
+  enforced by the `TestNoClockCallForms` conformance gate (`dsl/`). The parser
+  keeps them for internal canonicalization; authors never write them.
+- **No `core` import for the clock.** `timestamp()` is not imported because it is
+  semantically `now`.
+- **`uuid()` / random** (none exist today) are the forward-looking members of
+  `core` *if* a genuinely-new nondeterministic primitive is introduced -- one
+  that is NOT an alias of an existing reserved identifier.
+
+So `DependencyCore` and the intrinsic `core` namespace remain defined (the
+machine-readable scaffold from Story 2), but `CoreBuiltinNames()` is **empty
+today**. This is the honest outcome of the grounding in 1.1: the language was
+already explicit about ambient input, so the expression-level work reduces to
+*collapsing the redundant clock spellings to one reserved name*. The
+substance of this epic is the collection library (2.2) and temporal visibility
+(2.3).
 
 **Classification of the current `dslspec` table.** Every entry stays in its
-`dslspec` category; the new axis is an ambient-vs-`core` flag. The complete
-ruling:
+`dslspec` category; the `Dependency` axis (Story 2) flags the would-be `core`
+members. The complete ruling:
 
 | Built-in | `dslspec` category | Ruling | Why |
 |---|---|---|---|
@@ -122,46 +143,34 @@ ruling:
 | `addDuration`, `daysBetween`, `subtractTimestamps`, `year`, `quarter`, `month`, `dayOfMonth`, `isAnniversary`, `isFirstDayOfQuarter` | expr | **ambient** | pure given a passed timestamp (no clock read) |
 | `memqlVersion` | expr | **ambient** | constant per running binary; deterministic within a deploy (documented exception -- it is build metadata, not runtime ambient input) |
 | `first`, `last` | expr | **fold into collection lib** (2.2) | collection ops -- retired as grammar builtins |
-| bare `now` | reserved keyword | **ambient** | eval-start engine context (with `actor`/`partition`/`config`) |
-| `now()` (call form) | accessor | **retire -> bare `now`** | redundant with the reserved identifier |
-| `timestamp()` | accessor | **import `core`** | fresh wall-clock read -- nondeterministic |
-| `uuid` / random | (absent) | **import `core`** (future) | nondeterminism |
+| bare `now` | reserved keyword | **ambient (the one clock primitive)** | engine context (with `actor`/`partition`/`config`); the sole author spelling |
+| `now()` / `timestamp()` (call forms) | accessor | **retire at author surface -> bare `now`** | aliases of `now`; kept in the parser for internal canonicalization, banned in authored files by `TestNoClockCallForms` |
+| `uuid` / random | (absent) | **`core` (future)** | the only genuine `core` candidate -- a nondeterministic primitive that is not an alias of a reserved identifier |
 | `globalVariable` (query) | -- | **already imported** | a `platform` query, not a builtin |
 | `env(...)` (provider auth) | -- | **already constrained** | provider-registration-only; not a body builtin |
 | `actor`, `item`, `index`, `event`, `field`, `var`, `step`, `input`, `error` | accessor | **ambient** (unchanged) | bound-context accessors, resolved deterministically within their scope |
 | `ai`, `node`, `children`, `parent`, `payload`, `similar`, `embed`, `systemVar`, `secret`, `systemSecret` | registry | **out of scope** | runtime-registry builtins; their nondeterminism is already mediated by the integration/registry layer, not the expression grammar. Revisited only if one is ever lifted into the ambient grammar. |
 
-### 2.1.1 The `core` bundle
+### 2.1.1 The `core` bundle -- defined, empty today
 
-`use core.{ ... }` is the canonical "this body is nondeterministic" signal, and
-a reader scanning imports should see `core` as its own line, not buried among
-`common` helpers. The author-facing syntax is therefore `use core.{ timestamp }`,
-exactly parallel to `use common.builtins.{ ... }`.
+A `core` import would be the canonical "this body reads a nondeterministic
+primitive" signal. The machine-readable scaffold exists -- `BuiltinDependency` /
+`DependencyCore` on `dslspec.Builtin`, and `dslspec.CoreBuiltinNames()` (Story
+[#2300](https://github.com/znasllc-io/memql/issues/2300)) -- but
+**`CoreBuiltinNames()` is empty today**, because the only candidate (the clock)
+collapsed to the ambient reserved `now` (2.1) and the other handoff candidates
+(`globalVariable`, `env`) were already a query / provider-scoped (1.1).
 
-**The `core` namespace is intrinsic (loader-level), not a `dsl/core/*.memql`
-construct file** (decided in story
-[#2300](https://github.com/znasllc-io/memql/issues/2300) once the mechanism met
-the grammar). Its members are **engine intrinsics**: `timestamp()` is parsed as
-a grammar accessor (`parser.parseTimestampAccessor`) and evaluated in-engine
-(`component/memql/mutation_templates.go`, `case "now", "timestamp"`). It has no
-integration executor a DSL `builtin` declaration could point at -- a
-`builtin timestamp { @executor(...) }` would fail load with "unknown executor".
-So the bundle is defined in Go, not in a `.memql` file:
-
-- **Membership** is `dslspec.CoreBuiltinNames()` -- the set of `dslspec.Builtins`
-  entries flagged `DependencyCore` (the machine-readable classification added in
-  Story 2). Initial membership: **`timestamp`** (the no-arg wall-clock read).
-  Deliberately thin -- the tree is already disciplined elsewhere -- but it
-  establishes the pattern and is the home for `uuid` / random and any future
-  nondeterministic primitive.
-- **Resolution + enforcement** (Story
-  [#2301](https://github.com/znasllc-io/memql/issues/2301)): the loader
-  recognises `core` as a virtual import namespace whose only legal members are
-  `CoreBuiltinNames()`; the impure names are removed from the *ambient* resolver
-  so a body that calls `timestamp()` without `use core.{ timestamp }` is a
-  **load error** with a migration hint. Sense offers an imported builtin in
-  completion only when the file has the import. The `dslspec` drift guard stays
-  green because the classification is an orthogonal field, not a name change.
+When the `core` namespace gains its first real member (`uuid` / random), it is
+defined as an **intrinsic (loader-level) namespace, not a `dsl/core/*.memql`
+construct file** -- a grammar-level primitive evaluated in-engine has no
+integration executor a DSL `builtin` declaration could point at (a
+`builtin uuid { @executor(...) }` would fail load with "unknown executor"). At
+that point the loader recognises `core` as a virtual import namespace whose
+legal members are `CoreBuiltinNames()`, the name is removed from the ambient
+resolver, and a body that calls it without the import is a load error. None of
+that is wired now because there is nothing to wire -- the scaffold is in place
+so adding the first member is a small, well-scoped change rather than a redesign.
 
 ### 2.2 The collection/lambda library (ambient language, pure bodies)
 
@@ -177,9 +186,10 @@ Rules:
 - **Ambient** -- they are built-in collection methods and pass the purity test;
   no `use`.
 - **Lambda bodies must be pure** -- no mutations, no actions, no triggers. Any
-  *impure* call inside a lambda still obeys 2.1: a lambda that reads the clock
-  must `use core.{ timestamp }`. Impurity stays visible without bloating the
-  `use` block with `where` / `first`.
+  *impure* call inside a lambda still obeys 2.1: a future `core` primitive
+  (`uuid` / random) used inside a lambda is imported like anywhere else. Ambient
+  context (`now`, `actor`) is readable; impurity stays visible without bloating
+  the `use` block with `where` / `first`.
 - **Replaces, not adds.** The grammar builtins `first` / `last` / `filter` /
   `map` / `count` and the engine result-set methods `.First()` / `.Nodes()` /
   `.Len()` / `.Empty()` / `.Count()` are retired (story
@@ -251,30 +261,35 @@ decisions above. Published as durable reference by story
 `concat`, `addDuration`, the date extractors), the collection/lambda methods
 (`where` / `first` / ...), control flow (`if` / `for` / `return`), and the
 reserved engine identifiers (`now`, `actor`, `partition`, `config`, `trace`).
-**Ambient-but-imported from `core`:** `timestamp()`, `uuid` / random -- the
-nondeterministic reads.
+**Ambient-but-imported from `core` (future):** `uuid` / random -- a
+nondeterministic primitive that is not an alias of a reserved identifier. Empty
+today.
 
 ## 4. Worked examples (target syntax)
 
-A logic that reads the live clock declares it; one that only stamps eval-start
-does not:
+The current time is the bare reserved `now` -- one spelling, no import, no call
+parens:
 
 ```memql
-// Pure: only eval-start stamp -> bare now, no core import.
+// Current time = bare `now` (ambient). The now() / timestamp() call-forms are
+// banned in authored files by TestNoClockCallForms.
 logic logicExpiryFromNow {
   args { ttlHours int @required }
   body { return addDuration(now, concat("PT", toString(args.ttlHours), "H")) }
 }
 
-// Impure: a fresh wall-clock read -> use core.{ timestamp }.
-use core.{ timestamp }
 logic logicIsStale {
   args { lastSeen string @required, windowMinutes int @required }
   body {
-    return subtractTimestamps(timestamp(), args.lastSeen) >
+    return subtractTimestamps(now, args.lastSeen) >
            addDuration("PT0S", concat("PT", toString(args.windowMinutes), "M"))
   }
 }
+
+// FUTURE (when a real core member lands): a genuinely-new nondeterministic
+// primitive that is NOT an alias of a reserved name is imported, e.g.
+//   use core.builtins.{ uuid }
+//   logic logicNewId { body { return uuid() } }
 ```
 
 Collection lambdas in logic + `forEach`, rejected in a spec:
@@ -314,7 +329,7 @@ query node queryNodesAt {       // asOf <ts> -> deterministic, no marker
 |---|---|---|
 | 1 (#2299) | This ADR | docs only |
 | 2 (#2300) | Tag `dslspec` entries ambient/import; stand up `dsl/core/` + `core.builtins` | small |
-| 3 (#2301) | Make `timestamp()` resolve only via `use core.{ timestamp }`; retire `now()` call-form -> bare `now`; migrate sites (~80 `timestamp()`, ~27 `now()`). Prefer bare `now` where eval-start semantics suffice, reserving `core.timestamp()` for genuine call-time reads. | medium |
+| 3 (#2301) | Collapse the clock to bare `now`: migrate ~80 `timestamp()` + ~27 `now()` -> bare `now` (behavior-preserving -- they were already the same value); add the `TestNoClockCallForms` conformance gate banning the call-forms in authored files; revert `timestamp`'s Story-2 `core` flag (bundle now empty). Parser keeps the call-forms for internal canonicalization. | medium |
 | 4 (#2302) | Implement the collection/lambda library + arrow lambdas; pure-body + scope enforcement | large |
 | 5 (#2303) | Retire `.First()`/`.Nodes()`/`.Len()`/`.Empty()`/`.Count()` + `first`/`last`/`filter`/`map`/`count` grammar builtins; migrate | large |
 | 6 (#2304) | In-memory-vs-SQL guardrail lint | small |
@@ -327,18 +342,20 @@ same PR and the owner flagged.
 
 ## 6. Consequences
 
-- **Positive.** Nondeterminism is visible at the import line. One coherent
-  collection surface instead of two. Temporal time-dependence is legible on a
-  query's contract. The built-in surface now obeys the same explicit-dependency
-  thesis as concepts/specs/shapes/queries.
-- **Cost.** A medium call-site migration (`timestamp()`), a large new library
-  plus the retirement of the legacy collection surface, and a parser change to
-  de-register the impure names from the ambient set.
-- **Deliberately small `core` initial membership.** Because `globalVariable` is
-  already a query and `env` is already provider-scoped, `core` starts with just
-  `timestamp`. That is a feature, not a gap: it confirms the language was already
-  mostly explicit, and `core` is the durable home for future nondeterministic
-  primitives (`uuid` / random).
+- **Positive.** The clock is one legible reserved name (`now`) instead of three
+  spellings. One coherent collection surface instead of two. Temporal
+  time-dependence is legible on a query's contract. The built-in surface now
+  obeys the same explicit-dependency thesis as concepts/specs/shapes/queries.
+- **Cost.** A medium, behavior-preserving call-site migration (the clock
+  collapse), a large new library plus the retirement of the legacy collection
+  surface, and the conformance gate.
+- **`core` is empty today, by grounding not omission.** `globalVariable` is
+  already a query, `env` is already provider-scoped, and the clock collapsed to
+  ambient `now` -- so there is no current `core` member. The scaffold
+  (`DependencyCore`, `CoreBuiltinNames()`, the intrinsic-namespace plan) is in
+  place so the first genuine nondeterministic primitive (`uuid` / random) is a
+  small change.
 - **Pre-release, no shims.** Per the repo's no-backwards-compat rule, the legacy
-  collection surface and `now()` call form are deleted, not deprecated; consumers
+  collection surface and the `now()` / `timestamp()` author-surface call forms are
+  retired, not deprecated; consumers
   are migrated in the same change.

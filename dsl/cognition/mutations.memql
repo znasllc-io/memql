@@ -26,7 +26,7 @@ mutate participant addAgentToSpace {
     participantType: "si"
     args.displayName
     status: "active"
-    joinedAt: timestamp()
+    joinedAt: now
     args.capabilityOverrides
     hidden: false
     isGroupGA: false
@@ -181,8 +181,8 @@ mutate session createSessionForParticipant {
     args.humanInput
     args.aiOutput
     args.streams
-    startedAt: timestamp()
-    lastActivityAt: timestamp()
+    startedAt: now
+    lastActivityAt: now
   }
 }
 
@@ -383,7 +383,7 @@ mutate participant joinSpaceAsHuman {
     participantType: "human"
     args.displayName
     status: coalesce(args.status, "active")
-    joinedAt: coalesce(args.joinedAt, timestamp())
+    joinedAt: coalesce(args.joinedAt, now)
     args.capabilityOverrides
   }
 }
@@ -439,7 +439,7 @@ mutate participant joinSpaceAsAI {
     participantType: "si"
     args.displayName
     status: coalesce(args.status, "active")
-    joinedAt: coalesce(args.joinedAt, timestamp())
+    joinedAt: coalesce(args.joinedAt, now)
     args.capabilityOverrides
     hidden: coalesce(args.hidden, false)
     args.forUserId
@@ -453,7 +453,7 @@ mutate participant joinSpaceAsAI {
 // ==========
 //
 // Inserts a new version of a participant record with the provided payload.
-// The caller is responsible for passing the full updated payload (e.g., status="left", leftAt=timestamp()).
+// The caller is responsible for passing the full updated payload (e.g., status="left", leftAt=now).
 
 @enabled
 @description("Insert a new version of a participant record (typically used to mark the participant as left).")
@@ -504,7 +504,7 @@ mutate participant removeAgentFromSpace {
       args.partitionId
     )))
     status: "left"
-    leftAt: timestamp()
+    leftAt: now
   }
 }
 
@@ -546,7 +546,7 @@ mutate participant removeAgentFromSpace {
 // deletes regardless of the user's archive retention setting.
 //
 // The caller is responsible for passing the full updated payload
-// (e.g., status="saved", active=true, savedAt=timestamp(),
+// (e.g., status="saved", active=true, savedAt=now,
 // archivedAt: null to clear any prior archive timestamp).
 //
 // Pattern matches mutationArchiveSpace / mutationRestoreSpace /
@@ -594,7 +594,7 @@ mutate utterance sendActionUtterance {
         concat("utt-", hash(concat(
           args.partitionId, ":",
           canonicalId(args.participantId, participant), ":",
-          coalesce(args.createdAt, timestamp()), ":", args.action.type
+          coalesce(args.createdAt, now), ":", args.action.type
         )))
       )
     )
@@ -652,11 +652,11 @@ mutate utterance sendRealtimeTranscriptUtterance {
         concat("utt-", hash(concat(
           args.partitionId, ":",
           canonicalId(args.participantId, participant), ":",
-          timestamp(), ":", coalesce(args.text, "")
+          now, ":", coalesce(args.text, "")
         )))
       )
     )
-    createdAt: coalesce(args.createdAt, timestamp())
+    createdAt: coalesce(args.createdAt, now)
     args.partitionId
     args.participantId
     participantType: coalesce(args.participantType, "human")
@@ -707,7 +707,7 @@ mutate utterance sendSpeechUtterance {
       concat("utt-", hash(concat(
         args.partitionId, ":",
         canonicalId(args.participantId, participant), ":",
-        timestamp()
+        now
       )))
     )
     args.partitionId
@@ -928,8 +928,8 @@ mutate presence updateParticipantPresence {
     args.state
     args.label
     args.reason
-    sinceAt: coalesce(args.sinceAt, timestamp())
-    lastUpdatedAt: coalesce(args.lastUpdatedAt, timestamp())
+    sinceAt: coalesce(args.sinceAt, now)
+    lastUpdatedAt: coalesce(args.lastUpdatedAt, now)
     args.lastUtteranceId
     args.lastError
     args.intent

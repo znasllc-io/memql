@@ -104,7 +104,7 @@ mutate task createToolInvocationTask {
     // node's process, so it's always inProcess (mirrors createSemanticTask). (memql#889)
     executionSurface: "inProcess"
     input: coalesce(args.toolArgs, {})
-    startedAt: now()
+    startedAt: now
   }
 }
 
@@ -123,7 +123,7 @@ mutate task completeToolInvocation {
     args.status
     args.toolResult
     args.errorMessage
-    completedAt: coalesce(args.completedAt, now())
+    completedAt: coalesce(args.completedAt, now)
   }
 }
 
@@ -202,7 +202,7 @@ mutate plan startPlan {
   update {
     id: args.planId
     status: "running"
-    startedAt: now()
+    startedAt: now
   }
 }
 
@@ -352,7 +352,7 @@ mutate plan requestPlanFeedback {
 // What it stamps (partial-update via update(), so every @required field
 // inherits from the prior row):
 //   - feedbackResponse = { response: <free text>, respondedBy: actor.userId,
-//                          respondedAt: now() } -- carried into the agent's
+//                          respondedAt: now } -- carried into the agent's
 //     resume context (the planner threads it into the resumed turn's
 //     history; the agent prompt's feedbackResponse slot per
 //     dsl/agents/prompts.memql).
@@ -360,7 +360,7 @@ mutate plan requestPlanFeedback {
 //     re-invocation path (handlePlanApprovedForExecution for
 //     produceArtifact/scopeElevation; the agent loop for decompose kinds)
 //     picks the running transition up and re-invokes the owning agent.
-//   - startedAt = now() -- a fresh transition-into-running timestamp so the
+//   - startedAt = now -- a fresh transition-into-running timestamp so the
 //     planner's cross-replica execution claim (planId@startedAt, memql#1363)
 //     keys on a NEW value and resume executes exactly once even when the
 //     feedback lands on a different replica than the one that parked it.
@@ -388,11 +388,11 @@ mutate plan attachPlanFeedback {
     status: "running"
     feedbackReason: ""
     feedbackRequest: {}
-    startedAt: now()
+    startedAt: now
     feedbackResponse: {
         response: args.feedback,
         respondedBy: actor.userId,
-        respondedAt: now()
+        respondedAt: now
       }
   }
 }
@@ -669,7 +669,7 @@ mutate responsibility setResponsibilityStatus {
 }
 
 @enabled
-@description("Record the outcome of an evaluation/run on a v1:planner:responsibility: stamp lastEvaluatedAt to now() and lastResult to the run headline. Called by the reactive-loop evaluator (epic #632) after a reactive condition check, a recurring scheduled tick, or a standing review. ownerUserId re-stamped from actor.userId (owned tier).")
+@description("Record the outcome of an evaluation/run on a v1:planner:responsibility: stamp lastEvaluatedAt to now and lastResult to the run headline. Called by the reactive-loop evaluator (epic #632) after a reactive condition check, a recurring scheduled tick, or a standing review. ownerUserId re-stamped from actor.userId (owned tier).")
 mutate responsibility recordResponsibilityEvaluation {
   args {
     responsibilityId  string  @required
@@ -679,7 +679,7 @@ mutate responsibility recordResponsibilityEvaluation {
     id: args.responsibilityId
     ownerUserId: actor.userId
     args.lastResult
-    lastEvaluatedAt: now()
+    lastEvaluatedAt: now
   }
 }
 

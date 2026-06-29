@@ -58,12 +58,12 @@ mutate artifact createArtifact {
     args.producedByWorkerId
     args.producedByWorkerName
     validationStatus: coalesce(args.validationStatus, "none")
-    // timestamp(), NOT bare `now`: this mutation is invoked from the index
+    // now, NOT bare `now`: this mutation is invoked from the index
     // automations (indexGeneratedOutput et al.), and the automation step
-    // resolver only evaluates the function-call forms timestamp()/now() -- a
+    // resolver only evaluates the function-call forms now/now -- a
     // bare `now` passes through as the literal string "now" and fails the
     // artifact's updatedAt date-time format. (memql#980)
-    updatedAt: timestamp()
+    updatedAt: now
   }
 }
 
@@ -175,11 +175,11 @@ mutate documentVersion appendDocumentVersion {
     args.parentVersionId
     args.producedByPlanId
     args.partitionId
-    // timestamp(), NOT bare `now`: this mutation is invoked from the Go
+    // now, NOT bare `now`: this mutation is invoked from the Go
     // edit/restore handlers; the hypertable time dimension + history
     // ordering key must be a real RFC3339 timestamp (same gotcha as
     // createArtifact.updatedAt, memql#980).
-    createdAt: timestamp()
+    createdAt: now
   }
 }
 

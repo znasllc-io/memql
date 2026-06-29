@@ -44,7 +44,7 @@ automation killSwitchSuspendsRunningPlans {
 //   - The filter side of expiredWorkerInvocations can't push
 //     the duration math into the query (no `>` operator on
 //     datetime). Per-row gating uses
-//       addDuration(item.createdAt, "P{retention}D") < timestamp()
+//       addDuration(item.createdAt, "P{retention}D") < now
 @enabled
 @trigger(schedule="0 30 2 * * *")
 @description("Daily 02:30 UTC sweep: soft-delete worker-invocation rows past WORKER_INVOCATION_RETENTION_DAYS. decide (pure) returns the candidate rows; window reads the retention var; the forEach apply gates each row on createdAt + P{N}D < now (#2256/#2254 evaluator fix) and soft-deletes it.")
@@ -57,7 +57,7 @@ automation workerInvocationRetentionSweep {
   }
   step apply {
     forEach item in decide.result {
-      if addDuration(item.createdAt, concat("P", coalesce(window.First().payload.value, "90"), "D")) < timestamp() {
+      if addDuration(item.createdAt, concat("P", coalesce(window.First().payload.value, "90"), "D")) < now {
         softDeleteWorkerInvocation {
           invocationId: item.id
         }

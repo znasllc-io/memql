@@ -18,7 +18,7 @@ mutate record checkRecord {
     id: args.recordId
     checkCount: args.newCheckCount
     lastCheckedBy: args.identityId
-    lastCheckedAt: timestamp()
+    lastCheckedAt: now
     validationState: args.newState
   }
 }
@@ -60,7 +60,7 @@ mutate record confirmRecord {
     id: args.recordId
     confirmCount: args.newConfirmCount
     lastConfirmedBy: args.identityId
-    lastConfirmedAt: timestamp()
+    lastConfirmedAt: now
     validationState: args.newState
   }
 }
@@ -120,7 +120,7 @@ mutate record createRecord {
   }
   insert {
     id: args.recordId
-    createdAt: coalesce(args.createdAt, timestamp())
+    createdAt: coalesce(args.createdAt, now)
     args.partitionId
     args.recordType
     args.label

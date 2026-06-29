@@ -34,7 +34,7 @@
 //   recall({
 //     text:     "what did I try last time I hit this error?",
 //     concept:  "v1:harness:observation",  // default; the recall source
-//     window:   86400,    // seconds; createdAt >= now()-window (hypertable prune). 0 = all history
+//     window:   86400,    // seconds; createdAt >= now-window (hypertable prune). 0 = all history
 //     k:        10,        // top-k (default 10)
 //     halfLife: 3600,      // recency half-life in seconds (default 3600)
 //     wSem:     0.7,        // semantic (cosine) weight (default 0.7)

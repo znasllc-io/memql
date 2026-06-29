@@ -18,7 +18,7 @@ logic purgeExpiredSafetyClassifications {
       payload: {
         candidateCount: allRows.Len(),
         retentionDays: coalesce(retentionDays.First().payload.value, "90"),
-        timestamp: timestamp()
+        timestamp: now
       }
     })
 
@@ -41,7 +41,7 @@ logic purgeExpiredOutputScreenings {
       payload: {
         candidateCount: allRows.Len(),
         retentionDays: coalesce(retentionDays.First().payload.value, "90"),
-        timestamp: timestamp()
+        timestamp: now
       }
     })
 

@@ -173,7 +173,7 @@ concept documentVersion {
   // MemoryNodes hypertable time dimension + the natural history ordering
   // key) -- it is NOT declared as a concept field here because createdAt
   // is a reserved row intrinsic. The shapes project it via row.createdAt
-  // and the append mutation stamps it via `createdAt: timestamp()` in the
+  // and the append mutation stamps it via `createdAt: now` in the
   // insert block.
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")

@@ -118,7 +118,7 @@ mutate action reinforceAction {
     id: args.actionId
     args.reliability
     args.reinforceCount
-    lastReinforced: now()
+    lastReinforced: now
     provenanceMutation: "reinforceAction"
   }
 }
@@ -150,7 +150,7 @@ mutate surface registerSurface {
     available: true
     priority: coalesce(args.priority, 100)
     status: "active"
-    lastSeen: now()
+    lastSeen: now
     provenanceMutation: "registerSurface"
   }
 }
@@ -170,7 +170,7 @@ mutate surface setSurfaceAvailability {
   update {
     id: args.surfaceId
     args.available
-    lastSeen: now()
+    lastSeen: now
     provenanceMutation: "setSurfaceAvailability"
   }
 }
