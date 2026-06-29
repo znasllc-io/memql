@@ -93,19 +93,24 @@ type callableEntry struct {
 func buildCallableParsers() map[string]callableEntry {
 	return map[string]callableEntry{
 		// --- Accessors (loop / step / automation / reserved-identifier) ---
-		"var":       {CallableAccessor, (*Parser).parseVarAccessor},
-		"step":      {CallableAccessor, (*Parser).parseStepAccessor},
-		"field":     {CallableAccessor, (*Parser).parseFieldAccessor},
-		"input":     {CallableAccessor, (*Parser).parseInputAccessor},
-		"item":      {CallableAccessor, (*Parser).parseItemAccessor},
-		"event":     {CallableAccessor, (*Parser).parseEventAccessor},
-		"actor":     {CallableAccessor, (*Parser).parseActorAccessor},
-		"error":     {CallableAccessor, (*Parser).parseErrorAccessor},
-		"timestamp": {CallableAccessor, (*Parser).parseTimestampAccessor},
-		"now":       {CallableAccessor, (*Parser).parseTimestampAccessor},
+		"var":   {CallableAccessor, (*Parser).parseVarAccessor},
+		"step":  {CallableAccessor, (*Parser).parseStepAccessor},
+		"field": {CallableAccessor, (*Parser).parseFieldAccessor},
+		"input": {CallableAccessor, (*Parser).parseInputAccessor},
+		"item":  {CallableAccessor, (*Parser).parseItemAccessor},
+		"event": {CallableAccessor, (*Parser).parseEventAccessor},
+		"actor": {CallableAccessor, (*Parser).parseActorAccessor},
+		"error": {CallableAccessor, (*Parser).parseErrorAccessor},
 
 		// --- Retired (recognised only to emit a migration hint) ---
 		"caller": {CallableRetired, (*Parser).parseCallerRetired},
+		// now() / timestamp() call-forms retired in favour of the bare
+		// reserved identifier `now` (epic #2298 / #2301). `now` is the one
+		// clock primitive; it is parsed directly to TimestampExprFunc in
+		// parseValue / parsePrimary. The call-forms remain here only to emit
+		// a migration hint instead of an opaque "unknown function" error.
+		"now":       {CallableRetired, (*Parser).parseClockCallFormRetired},
+		"timestamp": {CallableRetired, (*Parser).parseClockCallFormRetired},
 
 		// --- Editor-callable expression builtins ---
 		"memqlversion":        {CallableBuiltin, (*Parser).parseMemqlVersionFunction},
@@ -182,6 +187,16 @@ var relationshipWrapperNames = []string{
 // two parsers by the #244 cross-parser equivalence test).
 func (p *Parser) parseCallerRetired() (ExpressionNode, error) {
 	return nil, newParseErrorf(&p.current, "%s", baseparser.ErrCallerRetired.Error())
+}
+
+// parseClockCallFormRetired is the dispatch target for the retired now() /
+// timestamp() call-forms (epic #2298 / #2301). The clock is one primitive
+// spelled as the bare reserved identifier `now`; the call-forms are gone from
+// the author surface. This keeps the parser from silently treating now() /
+// timestamp() as an unknown function call and instead points the author at the
+// bare form.
+func (p *Parser) parseClockCallFormRetired() (ExpressionNode, error) {
+	return nil, newParseErrorf(&p.current, "now() / timestamp() are retired -- use the bare reserved identifier `now` (core-builtins ADR / #2301)")
 }
 
 // CallableBuiltins is the sorted set of editor-callable expression builtin

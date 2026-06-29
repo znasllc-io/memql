@@ -19,17 +19,16 @@ var clockCallFormRe = regexp.MustCompile(`\b(now|timestamp)\(\s*\)`)
 // #2301): authored .memql files must express "current time" as the bare
 // reserved identifier `now`, never the call-forms `now()` / `timestamp()`.
 //
-// `now`, `now()`, and `timestamp()` are ONE clock primitive -- all three parse
-// to TimestampExprFunc and evaluate via RuntimeEvaluator.EvaluateTimestamp()
-// (a fresh time.Now()). The engine canonicalizes bare `now` -> `now()` ->
-// `timestamp()` internally (mutation_templates.classifyScalarOrExpr,
-// compiler/automation_generator) and re-parses those strings, so the PARSER
-// must keep accepting the call-forms -- they are the engine's internal
-// canonical form. This test enforces the retirement at the AUTHOR surface only:
-// a human writes `createdAt: now`, and the engine does the rest. Keeping a
-// single author-facing spelling matches the other reserved engine identifiers
-// (`actor` / `partition` / `config`) and makes every clock dependency legible
-// as a declared name rather than a hidden call.
+// `now`, `now()`, and `timestamp()` are ONE clock primitive. The bare reserved
+// identifier `now` parses directly to the canonical TimestampExprFunc node
+// (parser parseValue / parsePrimary) and evaluates to a fresh time.Now(); the
+// call-forms are RETIRED in the parser (CallableRetired -> a parse error). This
+// test is the belt-and-suspenders guard: it gives a clear tree-wide file:line
+// report of any stray call-form rather than a single parse error during load,
+// and documents the contract at the source. Keeping one author-facing spelling
+// matches the other reserved engine identifiers (`actor` / `partition` /
+// `config`) and makes every clock dependency legible as a declared name rather
+// than a hidden call.
 //
 // _reference/ skeletons are exempt (they document the grammar, including forms
 // authors do not write).

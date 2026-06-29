@@ -102,23 +102,27 @@ the same value while observing nothing outside those arguments?*
 (owner ruling 2026-06-29, revised after implementation grounding).** The
 handoff's premise was that `now` and `timestamp()` are two distinct clock reads,
 one of which (`timestamp()`) should be imported. The implementation says
-otherwise: `now`, `now()`, and `timestamp()` **all** parse to the same AST node
-(`TimestampExprFunc`) and evaluate through the same
-`RuntimeEvaluator.EvaluateTimestamp()` (a fresh `time.Now()`). There is no
-eval-start-vs-fresh distinction in the engine, and bare `now` is *canonicalized
-to the call-form internally* (`mutation_templates.classifyScalarOrExpr` maps
-`now` -> `now()`; `compiler/automation_generator` emits `timestamp()`) and
-re-parsed -- so the parser must keep accepting the call-forms; they are the
-engine's internal canonical representation. Given that, gating an alias of `now`
-behind an import would be ceremony with no semantic payoff. Therefore:
+otherwise: `now`, `now()`, and `timestamp()` are ONE primitive -- they evaluate
+through the same `RuntimeEvaluator.EvaluateTimestamp()` (a fresh `time.Now()`),
+with no eval-start-vs-fresh distinction. Given that, gating an alias of `now`
+behind an import would be ceremony with no semantic payoff. The clock collapses
+to a single spelling and the call-forms are removed outright. Therefore:
 
 - **The author surface is the bare reserved identifier `now`** -- the single
   way to express "current time", in the same bucket as `actor` / `partition` /
-  `config`. Its presence in a body *is* the declared dependency; nondeterminism
-  stays legible without an import line.
-- **The `now()` / `timestamp()` call-forms are retired at the AUTHOR surface**,
-  enforced by the `TestNoClockCallForms` conformance gate (`dsl/`). The parser
-  keeps them for internal canonicalization; authors never write them.
+  `config`. The parser maps bare `now` directly to the canonical
+  `TimestampExprFunc` node (`parseValue` / `parsePrimary`), so it resolves to the
+  clock identically in every position: mutation values, comparison RHS (filter
+  pushdown via `executor_filter`), and logic / automation operands. Its presence
+  in a body *is* the declared dependency; nondeterminism stays legible without an
+  import line.
+- **The `now()` / `timestamp()` call-forms are RETIRED in the parser**
+  (`CallableRetired` -> a migration-hint parse error). Writing them is an error,
+  not just a lint finding; the `TestNoClockCallForms` conformance gate (`dsl/`)
+  is the belt-and-suspenders tree-wide report. (Internally, the automations
+  string-evaluator still resolves the serialized `"timestamp()"` form that
+  `compiler/automation_generator` emits for a `TimestampExprFunc` -- that is an
+  engine-internal representation, never an author surface.)
 - **No `core` import for the clock.** `timestamp()` is not imported because it is
   semantically `now`.
 - **`uuid()` / random** (none exist today) are the forward-looking members of
@@ -144,7 +148,7 @@ members. The complete ruling:
 | `memqlVersion` | expr | **ambient** | constant per running binary; deterministic within a deploy (documented exception -- it is build metadata, not runtime ambient input) |
 | `first`, `last` | expr | **fold into collection lib** (2.2) | collection ops -- retired as grammar builtins |
 | bare `now` | reserved keyword | **ambient (the one clock primitive)** | engine context (with `actor`/`partition`/`config`); the sole author spelling |
-| `now()` / `timestamp()` (call forms) | accessor | **retire at author surface -> bare `now`** | aliases of `now`; kept in the parser for internal canonicalization, banned in authored files by `TestNoClockCallForms` |
+| `now()` / `timestamp()` (call forms) | (retired) | **removed -> bare `now`** | aliases of `now`; retired in the parser (`CallableRetired` -> parse error), also caught tree-wide by `TestNoClockCallForms` |
 | `uuid` / random | (absent) | **`core` (future)** | the only genuine `core` candidate -- a nondeterministic primitive that is not an alias of a reserved identifier |
 | `globalVariable` (query) | -- | **already imported** | a `platform` query, not a builtin |
 | `env(...)` (provider auth) | -- | **already constrained** | provider-registration-only; not a body builtin |
@@ -329,7 +333,7 @@ query node queryNodesAt {       // asOf <ts> -> deterministic, no marker
 |---|---|---|
 | 1 (#2299) | This ADR | docs only |
 | 2 (#2300) | Tag `dslspec` entries ambient/import; stand up `dsl/core/` + `core.builtins` | small |
-| 3 (#2301) | Collapse the clock to bare `now`: migrate ~80 `timestamp()` + ~27 `now()` -> bare `now` (behavior-preserving -- they were already the same value); add the `TestNoClockCallForms` conformance gate banning the call-forms in authored files; revert `timestamp`'s Story-2 `core` flag (bundle now empty). Parser keeps the call-forms for internal canonicalization. | medium |
+| 3 (#2301) | Collapse the clock to bare `now`: migrate ~80 `timestamp()` + ~27 `now()` -> bare `now` (behavior-preserving); parse bare `now` directly to `TimestampExprFunc` (`parseValue` / `parsePrimary`) so it resolves to the clock in filter RHS + logic/automation operands (+ `ast_converter` case for the validation path); RETIRE the `now()` / `timestamp()` call-forms in the parser (`CallableRetired`); `TestNoClockCallForms` gate; remove the `now` / `timestamp` dslspec accessor entries; revert `timestamp`'s Story-2 `core` flag (bundle now empty). | medium |
 | 4 (#2302) | Implement the collection/lambda library + arrow lambdas; pure-body + scope enforcement | large |
 | 5 (#2303) | Retire `.First()`/`.Nodes()`/`.Len()`/`.Empty()`/`.Count()` + `first`/`last`/`filter`/`map`/`count` grammar builtins; migrate | large |
 | 6 (#2304) | In-memory-vs-SQL guardrail lint | small |

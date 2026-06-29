@@ -354,22 +354,14 @@ func builtins() []Builtin {
 
 		// ============================================================
 		// Context accessors (parser.CallableAccessors, + index).
-		// now / actor / partition / config / trace are ALSO reserved
-		// keywords (keywords()); they are listed here too because they are
-		// callable like functions and Sense offers them in call completion.
+		// actor / partition / config / trace are ALSO reserved keywords
+		// (keywords()); they are listed here too because they are callable
+		// like functions and Sense offers them in call completion.
+		//
+		// `now` is NOT here: the clock is the bare reserved identifier `now`
+		// (a keyword, see keywords()), and the now() / timestamp() call-forms
+		// are retired (epic #2298 / #2301 -- CallableRetired in the parser).
 		// ============================================================
-		{
-			Name:      "now",
-			Category:  CategoryBuiltinAccessor,
-			Signature: `now()`,
-			Doc:       "The current timestamp (RFC3339), evaluated when reached. Authors write the bare reserved identifier `now` (see keywords); the `now()` call-form is retired at the author surface and kept only for the engine's internal canonicalization.",
-		},
-		{
-			Name:      "timestamp",
-			Category:  CategoryBuiltinAccessor,
-			Signature: `timestamp()`,
-			Doc:       "Internal canonical call-form of the current timestamp; identical to `now`. Authors write the bare reserved identifier `now` -- the `timestamp()` / `now()` call-forms are retired at the author surface (conformance) and kept only for the engine's internal canonicalization. See the core-builtins ADR.",
-		},
 		{
 			Name:      "error",
 			Category:  CategoryBuiltinAccessor,

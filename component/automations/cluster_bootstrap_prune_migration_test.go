@@ -92,7 +92,7 @@ automation pruneStaleClusterNodes {
       updateNodeHealth {
         id:       node.id,
         health:   "stopped",
-        lastSeen: timestamp()
+        lastSeen: now
       }
     }
   }

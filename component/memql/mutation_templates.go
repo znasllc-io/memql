@@ -1570,17 +1570,18 @@ func classifyScalarOrExpr(raw string) any {
 		return false
 	case "null":
 		return nil
-	case "now", "timestamp":
-		// Bare `now` / `timestamp` are reserved engine identifiers that
-		// resolve to the RFC3339 timestamp captured at eval start (see
-		// the language arg-resolution table). They only reach here from
-		// the UNQUOTED object-literal path -- a quoted "now" comes through
-		// scanQuotedString and is never reclassified -- so mapping them to
-		// the canonical call form lets the existing evalString("now()")
-		// path stamp a real timestamp at render time. Without this, an
-		// authored `createdAt: now` / `updatedAt: now` was stored as the
-		// literal string "now" and rejected by date-time validation
-		// (memql#1629). Quoted "now" string literals are preserved.
+	case "now":
+		// Bare `now` is the reserved engine identifier for the current
+		// timestamp. It reaches here from the UNQUOTED object-literal
+		// (mutation insert/update value) path -- a quoted "now" comes through
+		// scanQuotedString and is never reclassified -- so mapping it to the
+		// canonical call form lets the existing evalString("now()") path stamp
+		// a real timestamp at render time. Without this, an authored
+		// `createdAt: now` was stored as the literal string "now" and rejected
+		// by date-time validation (memql#1629). The `timestamp` spelling is
+		// retired (epic #2298 / #2301): only bare `now` is the clock; a bare
+		// `timestamp` is now an ordinary identifier. Quoted "now" string
+		// literals are preserved.
 		return raw + "()"
 	}
 	if i, err := strconv.ParseInt(raw, 10, 64); err == nil {
