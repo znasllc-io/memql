@@ -1,0 +1,16 @@
+// specs.memql
+//
+// Common-namespace specs. Under the spec/shape binding redesign (epic
+// #2281) a caller / authorization predicate is a `spec` bound to an
+// @actor shape in its signature; it reads the projected envelope key by
+// bare name and evaluates in-process (context-spec). Callers invoke it
+// via spec("name") (e.g. the per-row-authz admin gate), never by bare
+// name in a query filter.
+
+use common.shapes.{ actorEnvelope }
+
+@enabled
+@description("Actor must hold an identity-issued JWT with the admin role.")
+spec actorEnvelope requiresAdmin {
+  return role == "admin"
+}

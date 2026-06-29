@@ -57,7 +57,7 @@
 
 use forge.concepts.{ project, request, requestEvent }
 use forge.shapes.{ projectFull, requestFull, requestEventFull }
-use forge.traits.{ forgeDeveloper, forgeApprover }
+use forge.specs.{ forgeDeveloper, forgeApprover }
 use common.traits.{ statusIsActive }
 
 @enabled

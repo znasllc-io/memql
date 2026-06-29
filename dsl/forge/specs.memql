@@ -1,0 +1,31 @@
+// specs.memql
+//
+// forge-namespace specs. Under the spec/shape binding redesign (epic
+// #2281) a caller / role predicate is a `spec` bound to an @actor shape
+// in its signature (it reads the projected envelope key by bare name and
+// evaluates against the auth context). These gate the developer/owner-
+// only read paths (the validation + approval queues) at the query layer,
+// so non-developers literally cannot list other people's requests to act
+// on them. Submission and "my own requests" stay open to every
+// authenticated team member.
+//
+// Cluster roles are owner/admin/writer/reader (there is no literal
+// "developer" role), so the forge personas map on:
+//   owner   -> approver / fast-track
+//   admin   -> senior developer (validate + approve)
+//   writer  -> junior developer (validate)
+//   reader  -> non-developer employee (submit-only, mentored)
+
+use common.shapes.{ actorEnvelope }
+
+@enabled
+@description("Caller is a forge developer (owner/admin/writer) -- may see the validation queue and validate requests.")
+spec actorEnvelope forgeDeveloper {
+  return role == "owner" || role == "admin" || role == "writer"
+}
+
+@enabled
+@description("Caller is a forge approver (owner) -- holds final approval + fast-track authority.")
+spec actorEnvelope forgeApprover {
+  return role == "owner"
+}

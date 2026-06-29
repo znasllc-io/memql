@@ -6,7 +6,7 @@
 @enabled
 @description("Matches records with active==true field")
 trait isActiveRecord {
-  payload.active==true
+  return active==true
 }
 
 // ---- specs/v1/common/isCancelled.memql ----
@@ -23,7 +23,7 @@ trait isActiveRecord {
 @enabled
 @description("Matches records with cancelled status")
 trait isCancelled {
-  payload.status=="cancelled"
+  return status=="cancelled"
 }
 
 // ---- specs/v1/data/isChecked.memql ----
@@ -41,7 +41,7 @@ trait isCancelled {
 @enabled
 @description("Matches active data records in checked validation state")
 trait isChecked {
-  payload.active==true && payload.validationState=="checked"
+  return active==true && validationState=="checked"
 }
 
 // ---- specs/v1/common/isCompleted.memql ----
@@ -60,7 +60,7 @@ trait isChecked {
 @enabled
 @description("Matches records with completed status")
 trait isCompleted {
-  payload.status=="completed"
+  return status=="completed"
 }
 
 // ---- specs/v1/data/isConfirmed.memql ----
@@ -78,7 +78,7 @@ trait isCompleted {
 @enabled
 @description("Matches active data records in confirmed validation state")
 trait isConfirmed {
-  payload.active==true && payload.validationState=="confirmed"
+  return active==true && validationState=="confirmed"
 }
 
 // ---- specs/v1/data/isDraft.memql ----
@@ -95,7 +95,7 @@ trait isConfirmed {
 @enabled
 @description("Matches active data records in draft validation state")
 trait isDraft {
-  payload.active==true && payload.validationState=="draft"
+  return active==true && validationState=="draft"
 }
 
 // ---- specs/v1/common/isInProgress.memql ----
@@ -112,7 +112,7 @@ trait isDraft {
 @enabled
 @description("Matches records with inProgress status")
 trait isInProgress {
-  payload.status=="inProgress"
+  return status=="inProgress"
 }
 
 // ---- specs/v1/common/isNotArchived.memql ----
@@ -129,7 +129,7 @@ trait isInProgress {
 @enabled
 @description("Matches records that are not archived")
 trait isNotArchived {
-  payload.status!="archived"
+  return status!="archived"
 }
 
 // ---- specs/v1/common/isNotDeleted.memql ----
@@ -149,7 +149,7 @@ trait isNotArchived {
 @enabled
 @description("Excludes records with deleted==true field")
 trait isNotDeleted {
-  payload.deleted!=true
+  return deleted!=true
 }
 
 // ---- specs/v1/common/isOpen.memql ----
@@ -168,7 +168,7 @@ trait isNotDeleted {
 @enabled
 @description("Matches records with open status requiring action")
 trait isOpen {
-  payload.status=="open"
+  return status=="open"
 }
 
 // ---- specs/v1/common/isScheduled.memql ----
@@ -186,7 +186,7 @@ trait isOpen {
 @enabled
 @description("Matches records with scheduled status")
 trait isScheduled {
-  payload.status=="scheduled"
+  return status=="scheduled"
 }
 
 // ---- specs/v1/data/isUsable.memql ----
@@ -210,14 +210,14 @@ trait isScheduled {
 @enabled
 @description("Matches active data records in checked or confirmed validation state")
 trait isUsable {
-  payload.active==true && payload.validationState!="draft"
+  return active==true && validationState!="draft"
 }
 
-@enabled
-@description("Actor must hold an identity-issued JWT with admin or owner role.")
-trait requiresAdmin {
-  actor.role == "admin"
-}
+// `requiresAdmin` was an actor.* predicate; under the spec/shape binding
+// redesign (epic #2281) a caller predicate is a `spec` bound to an
+// @actor shape, not a trait (a trait is the deliberately-unbound row
+// predicate over payload fields). It now lives in dsl/common/specs.memql
+// as `spec actorEnvelope requiresAdmin`.
 
 // ---- specs/v1/common/statusIsActive.memql ----
 
@@ -235,7 +235,7 @@ trait requiresAdmin {
 @enabled
 @description("Matches records with active status")
 trait statusIsActive {
-  payload.status=="active"
+  return status=="active"
 }
 
 // ---- specs/v1/common/statusIsArchived.memql ----
@@ -258,7 +258,7 @@ trait statusIsActive {
 @enabled
 @description("Matches records with payload.status == 'archived'.")
 trait statusIsArchived {
-  payload.status=="archived"
+  return status=="archived"
 }
 
 // ---- specs/v1/common/statusIsSaved.memql ----
@@ -277,7 +277,7 @@ trait statusIsArchived {
 @enabled
 @description("Matches records with payload.status == 'saved'.")
 trait statusIsSaved {
-  payload.status=="saved"
+  return status=="saved"
 }
 
 // ---- statusIsPending ----
@@ -289,7 +289,7 @@ trait statusIsSaved {
 @enabled
 @description("Matches records with payload.status == 'pending'.")
 trait statusIsPending {
-  payload.status=="pending"
+  return status=="pending"
 }
 
 // ---- statusIsRunning ----
@@ -301,7 +301,7 @@ trait statusIsPending {
 @enabled
 @description("Matches records with payload.status == 'running'.")
 trait statusIsRunning {
-  payload.status=="running"
+  return status=="running"
 }
 
 // ---- identityIsApiKey ----
@@ -314,7 +314,7 @@ trait statusIsRunning {
 @enabled
 @description("Matches v1:identity:identity rows with identityType=='api_key'.")
 trait identityIsApiKey {
-  payload.identityType=="api_key"
+  return identityType=="api_key"
 }
 
 // ---- identityIsWorkerToken ----
@@ -327,7 +327,7 @@ trait identityIsApiKey {
 @enabled
 @description("Matches v1:identity:identity rows with identityType=='worker_token'.")
 trait identityIsWorkerToken {
-  payload.identityType=="worker_token"
+  return identityType=="worker_token"
 }
 
 // ---- identityIsNodeToken ----
@@ -341,7 +341,7 @@ trait identityIsWorkerToken {
 @enabled
 @description("Matches v1:identity:identity rows with identityType=='node_token'.")
 trait identityIsNodeToken {
-  payload.identityType=="node_token"
+  return identityType=="node_token"
 }
 
 // ---- isDeletionScheduled ----
@@ -353,5 +353,5 @@ trait identityIsNodeToken {
 @enabled
 @description("Matches records that have a deletion scheduled (deletionScheduledAt is set).")
 trait isDeletionScheduled {
-  payload.deletionScheduledAt!=""
+  return deletionScheduledAt!=""
 }

@@ -11,7 +11,7 @@
 
 @description("Matches participants with human participantType")
 trait isHumanParticipant {
-  payload.participantType == "human"
+  return participantType == "human"
 }
 
 // isAIParticipant - AI Participant Type Trait
@@ -25,5 +25,5 @@ trait isHumanParticipant {
 //
 @description("Matches participants with AI participantType")
 trait isAIParticipant {
-  payload.participantType=="si"
+  return participantType=="si"
 }
