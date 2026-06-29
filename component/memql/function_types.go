@@ -170,6 +170,16 @@ type Function struct {
 	// reachable through the generic run_query / run_mutation dispatchers.
 	// (epic memql#1529 Phase 4 #1534)
 	MCPPromoted bool
+
+	// LatestMode marks a query whose `asOf latest` clause reads the live
+	// tip of the append-only stream, so its result is CLOCK-DEPENDENT
+	// (not reproducible). It is the contract surface for temporal
+	// visibility (core-builtins ADR §2.3, story memql#2305): consumers
+	// read it to see the query is time-dependent. Auto-derived at load
+	// from a `asOf latest` clause in the body (authoritative) OR an
+	// explicit `@latestMode` annotation. A query with `asOf <explicit
+	// timestamp>` is deterministic and leaves this false. Queries only.
+	LatestMode bool
 }
 
 func (f *Function) clone() *Function {
@@ -217,6 +227,7 @@ func (f *Function) clone() *Function {
 		Idempotent:        f.Idempotent,
 		Audit:             f.Audit,
 		MCPPromoted:       f.MCPPromoted,
+		LatestMode:        f.LatestMode,
 	}
 }
 

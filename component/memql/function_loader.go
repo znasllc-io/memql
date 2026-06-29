@@ -629,6 +629,19 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				}
 				fn.Expr = engineExpr
 				fn.ExprSource = extractExpressionFromContent(content)
+
+				// Temporal-access visibility (core-builtins ADR §2.3,
+				// story memql#2305). A query that reads `asOf latest`
+				// returns clock-dependent (non-reproducible) data, so
+				// its loaded contract is marked time-dependent. An
+				// `asOf <explicit timestamp>` is deterministic and is
+				// NOT marked. The flag is auto-derived from the clause
+				// (authoritative -- cannot drift from the body) and may
+				// also be asserted by an explicit `@latestMode`
+				// annotation (the author-facing contract surface).
+				if funcDef.Type == languageParser.FunctionTypeQuery {
+					fn.LatestMode = queryLatestMode(engineExpr) || hasFlagAttribute(funcDef.Attributes, "latestMode")
+				}
 			} else {
 				return nil, fmt.Errorf("function %q body is not an expression node: %T", expectedName, funcDef.Body)
 			}

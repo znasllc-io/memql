@@ -28,6 +28,17 @@ type Parser struct {
 	// no error-return path. parseFile drains the slice after parsing
 	// completes and surfaces the first entry.
 	deferredErrors []error
+
+	// currentFuncType is the receiver kind of the construct whose body
+	// is being parsed (set in parseGoStyleFunction around the body
+	// switch, restored after). It lets construct-scoped grammar rules
+	// reject a clause used in the wrong construct -- specifically the
+	// query-only `asOf` time-travel clause (core-builtins ADR §2.3),
+	// which parseAsOfFunction rejects when this is an explicit
+	// non-query kind. The zero value ("" -- standalone ParseExpression /
+	// runtime query strings) stays permissive so handwritten query
+	// expressions keep working.
+	currentFuncType FunctionType
 }
 
 // recordDeferredError stashes a parse error that surfaces from inside
@@ -813,7 +824,13 @@ func (p *Parser) parseGoStyleFunction() (*FunctionDef, error) {
 		return nil, err
 	}
 
-	// Parse body based on receiver type.
+	// Parse body based on receiver type. Stash the receiver kind so
+	// construct-scoped grammar rules (the query-only `asOf` clause --
+	// core-builtins ADR §2.3) can reject misuse while parsing the body.
+	prevFuncType := p.currentFuncType
+	p.currentFuncType = funcType
+	defer func() { p.currentFuncType = prevFuncType }()
+
 	var body Node
 
 	switch funcType {
@@ -5207,6 +5224,15 @@ func (p *Parser) parseSelectFunction() (ExpressionNode, error) {
 // either a string literal (parsed as RFC3339Nano) or the bare
 // identifier `latest`.
 func (p *Parser) parseAsOfFunction() (ExpressionNode, error) {
+	// `asOf` is a query-only clause: it compiles to a time-travel read
+	// against the graph and is rejected in logic / automation / mutation
+	// / spec bodies (core-builtins ADR §2.3). The temporal dependency is
+	// declared THROUGH the query a body imports, never inline. A zero
+	// currentFuncType ("" -- standalone expression / runtime query
+	// string) stays permissive; an explicit non-query kind is rejected.
+	if p.currentFuncType != "" && p.currentFuncType != FunctionTypeQuery {
+		return nil, newParseErrorf(&p.current, "`asOf` is a query-only clause and cannot appear in a %s body; time-travel reads belong in a query the body imports (core-builtins ADR §2.3)", p.currentFuncType)
+	}
 	if p.check(TokenParenClose) {
 		return nil, newParseErrorf(&p.current, "asOf() requires an expression argument")
 	}

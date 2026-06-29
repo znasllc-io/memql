@@ -238,6 +238,15 @@ func (p *specMemQLParser) buildSpec(decl *specDecl, origin string) (*Spec, error
 	if err != nil {
 		return nil, fmt.Errorf("%s: convert body of %s %q: %w", origin, kindLabel, decl.name, err)
 	}
+	// `asOf` is a query-only time-travel clause -- a spec/trait is an
+	// atomic boolean predicate, never a temporal read (core-builtins
+	// ADR §2.3). Spec bodies are parsed through the context-free
+	// ParseExpression entry, so the parser's receiver-scoped gate does
+	// not see them; reject the compiled clause here with the same
+	// clear message.
+	if findTemporalAccess(expr) != nil {
+		return nil, fmt.Errorf("%s: `asOf` is a query-only clause and cannot appear in a %s body (%q); time-travel reads belong in a query the body imports (core-builtins ADR §2.3)", origin, kindLabel, decl.name)
+	}
 	expr, err = normalizeSpecCallsToReferences(expr)
 	if err != nil {
 		return nil, fmt.Errorf("%s: normalize body of %s %q: %w", origin, kindLabel, decl.name, err)
