@@ -196,7 +196,17 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 		e.Logger.Warn("unified spec loader returned an error",
 			"component", "memql.engine", "error", ulErr)
 	}
-	_ = shapeRegistry // shape-binding validation moved to the spec/shape modern path; the legacy @useShape(N) post-load check is retired.
+
+	// Spec/shape binding redesign (epic #2281): finalize every spec +
+	// trait now that concepts + shapes are loaded. Resolves each spec's
+	// signature binding, rewrites the body's bare field references to
+	// their underlying access form, and classifies row-spec vs
+	// context-spec. A binding violation is a contract error -- surfaced
+	// loudly rather than silently dropped.
+	if rsErr := resolveSpecBindings(e.Logger, specRegistry, shapeRegistry, e.concepts); rsErr != nil {
+		e.Logger.Warn("spec binding resolver reported violations",
+			"component", "memql.engine", "error", rsErr)
+	}
 
 	// Pass 2: overlay builtins from the new tree (struct-form
 	// `builtin NAME { ... }` blocks). Builtins are functions

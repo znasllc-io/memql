@@ -45,7 +45,7 @@ var ByReceiver = map[string][]string{
 		"description", "enabled", "disabled", "kind", "sideEffect",
 	},
 	"Spec": {
-		"description", "enabled", "disabled", "shape",
+		"description", "enabled", "disabled",
 	},
 	"Tool": {
 		"description", "enabled", "disabled", "handler", "executionTime",
@@ -90,8 +90,6 @@ var Docs = map[string]string{
 	"mergeFields":  "On an update mutation: deep-merge the named object-typed payload fields into the stored object instead of replacing them wholesale, so sibling keys survive a single-key write. Format: @mergeFields(\"preferences\").",
 	"appendFields": "On an update mutation: append the named array-typed payload fields' elements to the stored array instead of replacing it wholesale, so a single-writer mutation can accumulate list items (e.g. attach one id). Format: @appendFields(\"attachmentIds\").",
 	"scrubPii":     "On an update mutation (the hard-delete / data-deletion path): after the partial payload merges, zero EVERY field the bound concept marks @pii. The field set is derived from the schema, so a newly-annotated PII field is scrubbed automatically with no change to the mutation. Bare flag, no arguments. See memql#1711.",
-	// Query / spec.
-	"shape": "Optional: pin the shape a spec's predicate reads (the eval strategy is otherwise derived from the body's field references).",
 	// Automation.
 	"trigger": "Event trigger for automations. Format: @trigger(event=\"graph.node.created.*.v1:ns:concept\") or @trigger(schedule=\"0 0 * * * *\").",
 	"filter":  "Filter expression for automation triggers.",

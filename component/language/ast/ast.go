@@ -1512,9 +1512,10 @@ type PromptField struct {
 // file-top use + signature; traits are concept-agnostic).
 type SpecDecl struct {
 	Name       string         // spec / trait name
+	BoundName  string         // signature binding: `spec <BoundName> <Name>` resolves to an imported shape XOR concept (specs only; empty for traits)
 	IsTrait    bool           // true for `trait NAME { ... }`, false for `spec NAME { ... }`
 	Attributes []*Attribute   // declaration-level annotations
-	Body       ExpressionNode // parsed boolean expression body
+	Body       ExpressionNode // parsed boolean expression body (the `return <bool>` body's expression)
 	Path       string         // source path, for errors/diagnostics
 }
 
