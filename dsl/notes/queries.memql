@@ -9,7 +9,7 @@ use notes.concepts.{ note }
 @enabled
 @description("List the caller's notes. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible.")
 query note notes {
-  filter  payload.ownerUserId==actor.userId
+  filter  ownerUserId==actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full notes-list pull. Literal page size --
   // the struct-query paginate directive only accepts an integer literal.
@@ -26,7 +26,7 @@ query note noteById {
   args {
     noteId  string  @required
   }
-  filter  when(args.noteId) { id==args.noteId } && payload.ownerUserId==actor.userId
+  filter  when(args.noteId) { id==args.noteId } && ownerUserId==actor.userId
   shape   noteFull
 }
 
@@ -36,7 +36,7 @@ query note notesByTag {
   args {
     tag  string  @required
   }
-  filter  payload.ownerUserId==actor.userId && when(args.tag) { args.tag in payload.tags }
+  filter  ownerUserId==actor.userId && when(args.tag) { args.tag in tags }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full tag-filtered notes pull. Literal page
   // size -- the struct-query paginate directive only accepts an integer literal.

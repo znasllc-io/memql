@@ -35,7 +35,7 @@ query accountEntitlement accountEntitlement {
   args {
     accountId  string  @required
   }
-  filter  payload.accountId==args.accountId
+  filter  accountId==args.accountId
   shape   accountEntitlementFull
 }
 
@@ -92,7 +92,7 @@ query delegation activeDelegationsForAgent {
   args {
     agentId  string  @required
   }
-  filter  payload.agentId==args.agentId && isActiveRecord
+  filter  agentId==args.agentId && isActiveRecord
   shape   delegationFull
 }
 
@@ -127,7 +127,7 @@ query delegation activeDelegationsByIdentitySubject {
   args {
     identitySubject  string  @required
   }
-  filter  payload.identitySubject==args.identitySubject && isActiveRecord
+  filter  identitySubject==args.identitySubject && isActiveRecord
   shape   delegationFull
 }
 
@@ -138,7 +138,7 @@ query user activeUsers {
     role     string
     groupId  string
   }
-  filter  isActiveRecord && when(args.role) { payload.role==args.role } && when(args.groupId) { args.groupId in payload.groupIds }
+  filter  isActiveRecord && when(args.role) { role==args.role } && when(args.groupId) { args.groupId in groupIds }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -171,7 +171,7 @@ query user searchUsers {
   args {
     active  boolean
   }
-  filter  when(args.active) { payload.active==args.active }
+  filter  when(args.active) { active==args.active }
   sort    "createdAt", "desc"
   shape   userFull
 }
@@ -215,7 +215,7 @@ query auditEvent auditEventsByActor {
   args {
     userId  string  @required
   }
-  filter  payload.actorUserId==args.userId
+  filter  actorUserId==args.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -257,7 +257,7 @@ query auditEvent auditEventsByTarget {
   args {
     targetId  string  @required
   }
-  filter  payload.targetId==args.targetId
+  filter  targetId==args.targetId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -296,7 +296,7 @@ query authCode authCodeByCodeHash {
   args {
     codeHash  string  @required
   }
-  filter  payload.codeHash==args.codeHash
+  filter  codeHash==args.codeHash
   shape   authCodeFull
 }
 
@@ -329,7 +329,7 @@ query oauthClient oAuthClientByClientId {
   args {
     clientId  string  @required
   }
-  filter  payload.clientId==args.clientId
+  filter  clientId==args.clientId
   shape   oauthClientFull
 }
 
@@ -367,7 +367,7 @@ query authSession authSessionByPreviousRefreshTokenHash {
   args {
     previousRefreshTokenHash  string  @required
   }
-  filter  payload.previousRefreshTokenHash==args.previousRefreshTokenHash
+  filter  previousRefreshTokenHash==args.previousRefreshTokenHash
   shape   authSessionFull
 }
 
@@ -406,7 +406,7 @@ query authSession authSessionByRefreshTokenHash {
   args {
     refreshTokenHash  string  @required
   }
-  filter  payload.refreshTokenHash==args.refreshTokenHash
+  filter  refreshTokenHash==args.refreshTokenHash
   shape   authSessionFull
 }
 
@@ -439,7 +439,7 @@ query authSession authSessionByTokenHash {
   args {
     tokenHash  string  @required
   }
-  filter  payload.tokenHash==args.tokenHash
+  filter  tokenHash==args.tokenHash
   shape   authSessionFull
 }
 
@@ -473,7 +473,7 @@ query authSession authSessionsForSubject {
   args {
     subject  string  @required
   }
-  filter  payload.subject==args.subject
+  filter  subject==args.subject
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -547,7 +547,7 @@ query delegation delegationsByIdentity {
   args {
     identityId  string  @required
   }
-  filter  payload.identityId==args.identityId
+  filter  identityId==args.identityId
   shape   delegationFull
 }
 
@@ -581,7 +581,7 @@ query delegation expiredActiveDelegations {
   args {
     now  string  @required
   }
-  filter  isActiveRecord && payload.expiresAt<args.now
+  filter  isActiveRecord && expiresAt<args.now
   shape   delegationFull
 }
 
@@ -615,7 +615,7 @@ query delegation expiredActiveDelegations {
 @description("All audit events; the retention sweep iterates and per-row checks occurredAt + retention-days < now.")
 @unbounded("expired audit-event retention purge sweep -- an internal sweep that must see all")
 query auditEvent expiredAuditEvents {
-  filter  payload.action!=""
+  filter  action!=""
   shape   auditEventFull
 }
 
@@ -652,7 +652,7 @@ query authCode expiredConsumedAuthCodes {
   args {
     now  string  @required
   }
-  filter  payload.expiresAt<args.now && payload.consumedAt!=""
+  filter  expiresAt<args.now && consumedAt!=""
   shape   authCodeFull
 }
 
@@ -686,7 +686,7 @@ query magicLinkRequest expiredMagicLinkRequests {
   args {
     now  string  @required
   }
-  filter  payload.expiresAt<args.now
+  filter  expiresAt<args.now
   shape   magicLinkRequestFull
 }
 
@@ -782,7 +782,7 @@ query invitation invitationByTokenHash {
   args {
     tokenHash  string  @required
   }
-  filter  payload.kind=="guest" && payload.tokenHash==args.tokenHash
+  filter  kind=="guest" && tokenHash==args.tokenHash
   shape   invitationFull
 }
 
@@ -821,7 +821,7 @@ query invitation invitationByPreviousTokenHash {
   args {
     tokenHash  string  @required
   }
-  filter  payload.kind=="guest" && payload.previousTokenHash==args.tokenHash
+  filter  kind=="guest" && previousTokenHash==args.tokenHash
   shape   invitationFull
 }
 
@@ -856,7 +856,7 @@ query magicLinkRequest magicLinkRequestByTokenHash {
   args {
     tokenHash  string  @required
   }
-  filter  payload.tokenHash==args.tokenHash
+  filter  tokenHash==args.tokenHash
   shape   magicLinkRequestFull
 }
 
@@ -896,7 +896,7 @@ query identity patIdentitiesForUser {
   args {
     userId  string  @required
   }
-  filter  payload.userId==args.userId && identityIsApiKey
+  filter  userId==args.userId && identityIsApiKey
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -969,7 +969,7 @@ query identity patIdentityByKeyHash {
   args {
     keyHash  string  @required
   }
-  filter  identityIsApiKey && payload.credentials.keyHash==args.keyHash
+  filter  identityIsApiKey && credentials.keyHash==args.keyHash
   shape   identityFull
 }
 
@@ -1005,7 +1005,7 @@ query auditEvent recentAuditEvents {
   args {
     category  string
   }
-  filter  when(args.category) { payload.category==args.category }
+  filter  when(args.category) { category==args.category }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -1067,7 +1067,7 @@ query user userByEmail {
   args {
     primaryEmail  string  @required
   }
-  filter  payload.primaryEmail==args.primaryEmail && isActiveRecord
+  filter  primaryEmail==args.primaryEmail && isActiveRecord
   shape   userFull
 }
 
@@ -1169,7 +1169,7 @@ query user usersActiveInSpace {
   args {
     partitionId  string  @required
   }
-  filter  when(args.partitionId) { payload.activePartitionId==args.partitionId }
+  filter  when(args.partitionId) { activePartitionId==args.partitionId }
   shape   userActiveSpaceProjection
 }
 
@@ -1266,7 +1266,7 @@ query workerPairingCode workerPairingCodeByHash {
   args {
     codeHash  string  @required
   }
-  filter  payload.codeHash==args.codeHash
+  filter  codeHash==args.codeHash
   shape   workerPairingCodeFull
 }
 
@@ -1296,7 +1296,7 @@ query identity workerTokenByKeyHash {
   args {
     keyHash  string  @required
   }
-  filter  identityIsWorkerToken && payload.credentials.keyHash==args.keyHash
+  filter  identityIsWorkerToken && credentials.keyHash==args.keyHash
   shape   identityFull
 }
 
@@ -1324,7 +1324,7 @@ query identity workerTokensForUser {
   args {
     userId  string  @required
   }
-  filter  identityIsWorkerToken && payload.userId==args.userId
+  filter  identityIsWorkerToken && userId==args.userId
   // Pagination (5.2 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table token pull. The engine emits a
   // nextCursor on a full page; an inbound cursor (ExecuteQueryMsg.cursor)
@@ -1367,7 +1367,7 @@ query identity nodeTokenIdentityByBinding {
     nodeType  string  @required
     nodeId    string  @required
   }
-  filter  identityIsNodeToken && payload.credentials.nodeType==args.nodeType && payload.credentials.nodeId==args.nodeId
+  filter  identityIsNodeToken && credentials.nodeType==args.nodeType && credentials.nodeId==args.nodeId
   shape   identityFull
 }
 

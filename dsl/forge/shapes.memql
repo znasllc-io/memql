@@ -8,13 +8,13 @@ use forge.concepts.{ project, request, requestEvent }
 @description("Full v1:forge:project projection.")
 shape project projectFull {
   row.id
-  payload.slug
-  payload.name
-  payload.targetApp
-  payload.repo
-  payload.description
-  payload.status
-  payload.createdByUserId
+  slug
+  name
+  targetApp
+  repo
+  description
+  status
+  createdByUserId
   row.createdAt
 }
 
@@ -22,19 +22,19 @@ shape project projectFull {
 @description("Full v1:forge:request projection: every field a queue/detail view or the routing logic needs.")
 shape request requestFull {
   row.id
-  payload.projectId
-  payload.requestType
-  payload.title
-  payload.body
-  payload.submitterUserId
-  payload.submitterRole
-  payload.attachmentIds
-  payload.priority
-  payload.status
-  payload.targetEnv
-  payload.validatedByUserId
-  payload.approvedByUserId
-  payload.resolution
+  projectId
+  requestType
+  title
+  body
+  submitterUserId
+  submitterRole
+  attachmentIds
+  priority
+  status
+  targetEnv
+  validatedByUserId
+  approvedByUserId
+  resolution
   row.createdAt
 }
 
@@ -42,12 +42,12 @@ shape request requestFull {
 @description("Full v1:forge:requestEvent projection: the audit-trail row.")
 shape requestEvent requestEventFull {
   row.id
-  payload.requestId
-  payload.kind
-  payload.actorUserId
-  payload.actorRole
-  payload.fromStatus
-  payload.toStatus
-  payload.note
+  requestId
+  kind
+  actorUserId
+  actorRole
+  fromStatus
+  toStatus
+  note
   row.createdAt
 }

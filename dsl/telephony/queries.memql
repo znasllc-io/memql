@@ -12,7 +12,7 @@ query number numbersByPartition {
   args {
     partitionId  string  @required
   }
-  filter  payload.partitionId==args.partitionId && actor.isClusterOwner==true
+  filter  partitionId==args.partitionId && actor.isClusterOwner==true
   sort    "createdAt", "desc"
   shape   numberFull
 }
@@ -32,7 +32,7 @@ query call callsByPartition {
   args {
     partitionId  string  @required
   }
-  filter  payload.partitionId==args.partitionId && actor.isClusterOwner==true
+  filter  partitionId==args.partitionId && actor.isClusterOwner==true
   sort    "createdAt", "desc"
   paginate 100
   shape   callFull
@@ -44,7 +44,7 @@ query call callsByNumber {
   args {
     e164  string  @required
   }
-  filter  (payload.fromE164==args.e164 || payload.toE164==args.e164) && actor.isClusterOwner==true
+  filter  (fromE164==args.e164 || toE164==args.e164) && actor.isClusterOwner==true
   sort    "createdAt", "desc"
   paginate 100
   shape   callFull
@@ -56,7 +56,7 @@ query consent consentOptOut {
   args {
     phoneNumber  string  @required
   }
-  filter  payload.phoneNumber==args.phoneNumber && payload.status=="opted_out"
+  filter  phoneNumber==args.phoneNumber && status=="opted_out"
   sort    "createdAt", "desc"
   shape   consentFull
 }
@@ -67,7 +67,7 @@ query number numberByE164 {
   args {
     e164  string  @required
   }
-  filter  payload.e164==args.e164
+  filter  e164==args.e164
   sort    "createdAt", "desc"
   shape   numberFull
 }

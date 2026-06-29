@@ -11,7 +11,7 @@ query policyTrace policyTracesForPolicy {
   args {
     policyName  string  @required
   }
-  filter  payload.policyName==args.policyName
+  filter  policyName==args.policyName
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -36,7 +36,7 @@ query policyTrace policyTracesForPolicy {
 @enabled
 @description("All persisted policy traces; the retention sweep iterates and per-row checks createdAt + retention-days < now.")
 query policyTrace allPolicyTraces {
-  filter  payload.policyName!=""
+  filter  policyName!=""
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -74,7 +74,7 @@ query globalVariable globalVariable {
   args {
     name  string  @required
   }
-  filter  payload.name==args.name && isActiveRecord
+  filter  name==args.name && isActiveRecord
   shape   variableFull
 }
 
@@ -107,7 +107,7 @@ query globalVariable globalVariables {
   args {
     names  array  @required
   }
-  filter  payload.name in args.names && isActiveRecord
+  filter  name in args.names && isActiveRecord
   shape   variableFull
 }
 
@@ -155,7 +155,7 @@ query globalVariable globalVariables {
 @description("Returns default configuration variables for user provisioning. Used by bootstrapUser automation.")
 @unbounded("user-default variables -- a fixed bounded allow-list of names consumed whole")
 query globalVariable userDefaults {
-  filter  isActiveRecord && payload.name in ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME", "MEMQL_DEFAULT_USER_LANGUAGE", "MEMQL_AUTO_PROVISION_USERS", "MEMQL_UPDATE_LAST_SEEN"]
+  filter  isActiveRecord && name in ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME", "MEMQL_DEFAULT_USER_LANGUAGE", "MEMQL_AUTO_PROVISION_USERS", "MEMQL_UPDATE_LAST_SEEN"]
 }
 
 @enabled
@@ -164,7 +164,7 @@ query missingCapability missingCapabilitiesByStatus {
   args {
     status  string  @required
   }
-  filter  payload.status==args.status
+  filter  status==args.status
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -181,6 +181,6 @@ query missingCapability missingCapabilityByKindAndName {
     kind        string  @required
     capability  string  @required
   }
-  filter  payload.kind==args.kind && payload.capability==args.capability
+  filter  kind==args.kind && capability==args.capability
   shape   missingCapabilityFull
 }

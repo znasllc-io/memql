@@ -17,7 +17,7 @@ query candidate actionCandidatesForPlan {
   args {
     planId  string  @required
   }
-  filter  payload.planId == args.planId && payload.ownerUserId == actor.userId
+  filter  planId == args.planId && ownerUserId == actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -37,7 +37,7 @@ query action actionByInputFingerprint {
   args {
     inputFingerprint  string  @required
   }
-  filter  payload.inputFingerprint == args.inputFingerprint && statusIsActive && payload.ownerUserId == actor.userId
+  filter  inputFingerprint == args.inputFingerprint && statusIsActive && ownerUserId == actor.userId
   shape   actionFull
 }
 
@@ -48,7 +48,7 @@ query action actionByInputFingerprint {
 @enabled
 @description("List the calling owner's active v1:actions:surface registry entries for the capability->surface resolver (Phase 2 #1737). Owned tier.")
 query surface surfacesForOwner {
-  filter  payload.ownerUserId == actor.userId && statusIsActive
+  filter  ownerUserId == actor.userId && statusIsActive
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -69,7 +69,7 @@ query action actionByTemplateFingerprint {
   args {
     templateFingerprint  string  @required
   }
-  filter  payload.templateFingerprint == args.templateFingerprint && statusIsActive && payload.ownerUserId == actor.userId
+  filter  templateFingerprint == args.templateFingerprint && statusIsActive && ownerUserId == actor.userId
   shape   actionFull
 }
 
@@ -78,7 +78,7 @@ query action actionByTemplateFingerprint {
 @enabled
 @description("List the calling owner's candidate v1:actions:action rows awaiting confirmation (real-machine side effects gate on a human, Phase 4 #1739). Owned tier.")
 query action actionsPendingConfirm {
-  filter  payload.status == "candidate" && payload.ownerUserId == actor.userId
+  filter  status == "candidate" && ownerUserId == actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -93,7 +93,7 @@ query action actionsPendingConfirm {
 @enabled
 @description("List the calling owner's active v1:actions:action rows for the consolidation decay/deprecate sweep (Phase 4 #1739). Owned tier.")
 query action activeActionsForOwner {
-  filter  payload.ownerUserId == actor.userId && statusIsActive
+  filter  ownerUserId == actor.userId && statusIsActive
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -112,7 +112,7 @@ query action actionByIdAndVersion {
     actionId  string  @required
     version   int     @required
   }
-  filter  id == args.actionId && payload.version == args.version && payload.ownerUserId == actor.userId
+  filter  id == args.actionId && version == args.version && ownerUserId == actor.userId
   shape   actionFull
 }
 
@@ -124,7 +124,7 @@ query action actionById {
   args {
     actionId  string  @required
   }
-  filter  id == args.actionId && payload.ownerUserId == actor.userId
+  filter  id == args.actionId && ownerUserId == actor.userId
   shape   actionFull
 }
 

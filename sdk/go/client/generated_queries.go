@@ -1978,7 +1978,7 @@ func FeedbackAnnouncementForPlanBuild(args FeedbackAnnouncementForPlanArgs) stri
 //
 // Bound concept: calendarEvent.
 type FindEventsArgs struct {
-	// Exact event title to match against payload.title.
+	// Exact event title to match against title.
 	Title string
 }
 
@@ -3845,9 +3845,9 @@ func TodosBuild(args TodosArgs) string {
 //
 // Bound concept: calendarEvent.
 type UpcomingEventsArgs struct {
-	// Inclusive lower bound on payload.startsAt (typically `now`).
+	// Inclusive lower bound on startsAt (typically `now`).
 	WindowStart string
-	// Inclusive upper bound on payload.startsAt (e.g. now + 48h for a day-before reminder sweep).
+	// Inclusive upper bound on startsAt (e.g. now + 48h for a day-before reminder sweep).
 	WindowEnd string
 }
 

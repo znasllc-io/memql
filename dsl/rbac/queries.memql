@@ -38,7 +38,7 @@ query role roleBySlug {
   args {
     slug  string  @required
   }
-  filter  payload.slug==args.slug && isActiveRecord
+  filter  slug==args.slug && isActiveRecord
   shape   roleFull
 }
 
@@ -61,7 +61,7 @@ query capability capabilitiesForRole {
   args {
     roleSlug  string  @required
   }
-  filter  payload.roleSlug==args.roleSlug && isActiveRecord
+  filter  roleSlug==args.roleSlug && isActiveRecord
   shape   capabilityFull
 }
 
@@ -75,7 +75,7 @@ query capability capabilityGrant {
     verb          string  @required
     resourceType  string  @required
   }
-  filter  payload.roleSlug==args.roleSlug && payload.verb==args.verb && payload.resourceType==args.resourceType && isActiveRecord
+  filter  roleSlug==args.roleSlug && verb==args.verb && resourceType==args.resourceType && isActiveRecord
   shape   capabilityFull
 }
 
@@ -87,6 +87,6 @@ query capability capabilitiesForResourceType {
   args {
     resourceType  string  @required
   }
-  filter  payload.resourceType==args.resourceType && isActiveRecord
+  filter  resourceType==args.resourceType && isActiveRecord
   shape   capabilityFull
 }

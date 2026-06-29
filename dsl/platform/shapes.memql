@@ -9,16 +9,16 @@ use platform.concepts.{ missingCapability, partitionVariable }
 @description("Comprehensive policy-trace projection for v1:platform:policyTrace rows. Backs the policyTracesForPolicy debug query and any operator surface that lists recent policy evaluations.")
 shape policyTrace policyTraceFull {
   row.id
-  payload.policyName
-  payload.tier
-  payload.actorUserId
-  payload.actorRole
-  payload.callerPartition
-  payload.argsHash
-  payload.resultJson
-  payload.traceJson
-  payload.durationMs
-  payload.error
+  policyName
+  tier
+  actorUserId
+  actorRole
+  callerPartition
+  argsHash
+  resultJson
+  traceJson
+  durationMs
+  error
   row.createdAt
 }
 
@@ -26,9 +26,9 @@ shape policyTrace policyTraceFull {
 @description("Comprehensive configuration variable projection. Used for both v1:platform:partitionVariable (partition-scoped) and v1:platform:globalVariable (global) -- the two concepts share the same field layout, so one shape serves both.")
 shape partitionVariable variableFull {
   row.id
-  payload.name
-  payload.value
-  payload.description
+  name
+  value
+  description
   row.createdAt
 }
 
@@ -36,17 +36,17 @@ shape partitionVariable variableFull {
 @description("Missing-capability projection for the platform-backlog view + the Planner Agent's lookup-by-(kind, capability) before logging a new sighting. Carries the dedup key (kind, capability) plus the prioritization signals (sightingCount, lastSeenAt, exampleGoals).")
 shape missingCapability missingCapabilityFull {
   row.id
-  payload.kind
-  payload.capability
-  payload.description
-  payload.requestedFromPlanId
-  payload.requestedByAgentId
-  payload.partitionId
-  payload.partitionScope
-  payload.sightingCount
-  payload.firstSeenAt
-  payload.lastSeenAt
-  payload.status
-  payload.resolution
-  payload.exampleGoals
+  kind
+  capability
+  description
+  requestedFromPlanId
+  requestedByAgentId
+  partitionId
+  partitionScope
+  sightingCount
+  firstSeenAt
+  lastSeenAt
+  status
+  resolution
+  exampleGoals
 }

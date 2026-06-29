@@ -18,6 +18,6 @@ query budget routerBudgets {
   args {
     scope  string
   }
-  filter  when(args.scope) { payload.scope==args.scope } && isActiveRecord
+  filter  when(args.scope) { scope==args.scope } && isActiveRecord
   shape   budgetFull
 }

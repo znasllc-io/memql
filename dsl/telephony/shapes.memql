@@ -7,15 +7,15 @@ use telephony.concepts.{ number, trunk, call, consent }
 @description("Full DID projection: address, carrier, the bound partition (Amendment A), purpose/status, origination class, and cost/lifecycle.")
 shape number numberFull {
   row.id
-  payload.e164
-  payload.carrier
-  payload.partitionId
-  payload.purpose
-  payload.status
-  payload.providerId
-  payload.numberType
-  payload.monthlyCost
-  payload.purchasedAt
+  e164
+  carrier
+  partitionId
+  purpose
+  status
+  providerId
+  numberType
+  monthlyCost
+  purchasedAt
   row.createdAt
 }
 
@@ -23,13 +23,13 @@ shape number numberFull {
 @description("Full trunk projection: carrier, direction, LiveKit trunk id, SIP edge, secret reference (never the secret), and status.")
 shape trunk trunkFull {
   row.id
-  payload.carrier
-  payload.direction
-  payload.name
-  payload.livekitTrunkId
-  payload.sipEdgeUri
-  payload.secretRef
-  payload.status
+  carrier
+  direction
+  name
+  livekitTrunkId
+  sipEdgeUri
+  secretRef
+  status
   row.createdAt
 }
 
@@ -37,19 +37,19 @@ shape trunk trunkFull {
 @description("Full call-record projection for billing + observability: direction, endpoints, the bound partition + room (Amendment A), carrier, timing, duration, disposition, and cost attribution.")
 shape call callFull {
   row.id
-  payload.direction
-  payload.fromE164
-  payload.toE164
-  payload.partitionId
-  payload.room
-  payload.carrier
-  payload.providerCallId
-  payload.agentId
-  payload.startedAt
-  payload.endedAt
-  payload.durationSeconds
-  payload.disposition
-  payload.costEstimate
+  direction
+  fromE164
+  toE164
+  partitionId
+  room
+  carrier
+  providerCallId
+  agentId
+  startedAt
+  endedAt
+  durationSeconds
+  disposition
+  costEstimate
   row.createdAt
 }
 
@@ -57,10 +57,10 @@ shape call callFull {
 @description("Consent / opt-out projection for an external number.")
 shape consent consentFull {
   row.id
-  payload.phoneNumber
-  payload.partitionId
-  payload.status
-  payload.reason
-  payload.source
+  phoneNumber
+  partitionId
+  status
+  reason
+  source
   row.createdAt
 }

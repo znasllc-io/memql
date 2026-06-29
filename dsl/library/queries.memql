@@ -19,7 +19,7 @@ use library.shapes.{ artifactFull, generatedOutputFull, memoryFull, documentVers
 @enabled
 @description("List the caller's entire Library (artifacts + records). Owned: the row set is gated by ownerUserId==actor.userId server-side. The default Library read; the panel filters by lens / kind and searches client-side over this set, or calls the narrower facet queries below when a single facet dominates.")
 query artifact libraryArtifacts {
-  filter  payload.ownerUserId==actor.userId
+  filter  ownerUserId==actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -34,7 +34,7 @@ query artifact libraryArtifactsByLens {
   args {
     lens  string  @required
   }
-  filter  payload.ownerUserId==actor.userId && payload.lens==args.lens
+  filter  ownerUserId==actor.userId && lens==args.lens
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -49,7 +49,7 @@ query artifact libraryArtifactsByKind {
   args {
     kind  string  @required
   }
-  filter  payload.ownerUserId==actor.userId && payload.kind==args.kind
+  filter  ownerUserId==actor.userId && kind==args.kind
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -73,7 +73,7 @@ query artifact libraryArtifactById {
   args {
     artifactId  string  @required
   }
-  filter  when(args.artifactId) { id==args.artifactId } && payload.ownerUserId==actor.userId
+  filter  when(args.artifactId) { id==args.artifactId } && ownerUserId==actor.userId
   shape   artifactFull
 }
 
@@ -84,7 +84,7 @@ query generatedOutput generatedOutputById {
   args {
     outputId  string  @required
   }
-  filter  when(args.outputId) { id==args.outputId } && payload.ownerUserId==actor.userId
+  filter  when(args.outputId) { id==args.outputId } && ownerUserId==actor.userId
   shape   generatedOutputFull
 }
 
@@ -94,7 +94,7 @@ query generatedOutput generatedOutputsForPlan {
   args {
     planId  string  @required
   }
-  filter  payload.ownerUserId==actor.userId && payload.producedByPlanId==args.planId
+  filter  ownerUserId==actor.userId && producedByPlanId==args.planId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -110,7 +110,7 @@ query memory memoryById {
   args {
     memoryId  string  @required
   }
-  filter  when(args.memoryId) { id==args.memoryId } && payload.ownerUserId==actor.userId
+  filter  when(args.memoryId) { id==args.memoryId } && ownerUserId==actor.userId
   shape   memoryFull
 }
 
@@ -129,7 +129,7 @@ query memory memoryById {
 @public
 @description("List the partition's workspace-scoped live sources for the Library Records lens. Non-owned by design: workspace liveSources have no single owner (empty ownerUserId), so this reads kind=live_source AND scope=workspace with no caller gate and the frontend merges it into the owned Records results. Private live sources are excluded here -- they surface through the owner-gated queries. See the @public justification above (#723).")
 query artifact libraryWorkspaceLiveSources {
-  filter  payload.kind=="live_source" && payload.scope=="workspace"
+  filter  kind=="live_source" && scope=="workspace"
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -153,7 +153,7 @@ query documentVersion documentVersions {
   args {
     documentId  string  @required
   }
-  filter  payload.ownerUserId==actor.userId && payload.documentId==args.documentId
+  filter  ownerUserId==actor.userId && documentId==args.documentId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -169,7 +169,7 @@ query documentVersion documentVersionById {
   args {
     versionId  string  @required
   }
-  filter  when(args.versionId) { id==args.versionId } && payload.ownerUserId==actor.userId
+  filter  when(args.versionId) { id==args.versionId } && ownerUserId==actor.userId
   shape   documentVersionFull
 }
 
@@ -188,7 +188,7 @@ query documentVersion documentVersionsForOwner {
   args {
     documentId  string  @required
   }
-  filter  payload.ownerUserId==actor.userId && payload.documentId==args.documentId
+  filter  ownerUserId==actor.userId && documentId==args.documentId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.

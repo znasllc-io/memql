@@ -9,11 +9,11 @@ use cognition.concepts.{ audioOverride, participant, presence, session, utteranc
 @description("Per-(space, agent) audio override projection")
 shape audioOverride audioOverrideFull {
   row.id
-  payload.partitionId
-  payload.agentId
-  payload.setBy
-  payload.mode
-  payload.active
+  partitionId
+  agentId
+  setBy
+  mode
+  active
   row.createdAt
 }
 
@@ -21,16 +21,16 @@ shape audioOverride audioOverrideFull {
 @description("Comprehensive participant projection with all fields")
 shape participant participantFull {
   row.id
-  payload.partitionId
-  payload.userId
-  payload.agentId
-  payload.participantType
-  payload.displayName
-  payload.status
-  payload.joinedAt
-  payload.leftAt
-  payload.capabilityOverrides
-  payload.hidden
+  partitionId
+  userId
+  agentId
+  participantType
+  displayName
+  status
+  joinedAt
+  leftAt
+  capabilityOverrides
+  hidden
   row.createdAt
 }
 
@@ -38,31 +38,31 @@ shape participant participantFull {
 @description("Comprehensive session projection with device + stream state")
 shape session sessionFull {
   row.id
-  payload.humanInput
-  payload.aiOutput
-  payload.streams
-  payload.startedAt
-  payload.lastActivityAt
+  humanInput
+  aiOutput
+  streams
+  startedAt
+  lastActivityAt
 }
 
 @row
 @description("Comprehensive utterance projection with all fields")
 shape utterance utteranceFull {
   row.id
-  payload.partitionId
-  payload.participantId
-  payload.utteranceType
-  payload.text
-  payload.action
-  payload.audioId
-  payload.videoId
-  payload.duration
-  payload.replyToId
-  payload.timestamps
-  payload.analysis
-  payload.source
-  payload.citations
-  payload.retrieved
+  partitionId
+  participantId
+  utteranceType
+  text
+  action
+  audioId
+  videoId
+  duration
+  replyToId
+  timestamps
+  analysis
+  source
+  citations
+  retrieved
   row.createdAt
 }
 
@@ -70,11 +70,11 @@ shape utterance utteranceFull {
 @description("Per-(space, agent) video override projection")
 shape videoOverride videoOverrideFull {
   row.id
-  payload.partitionId
-  payload.agentId
-  payload.setBy
-  payload.mode
-  payload.active
+  partitionId
+  agentId
+  setBy
+  mode
+  active
   row.createdAt
 }
 
@@ -86,15 +86,15 @@ shape videoOverride videoOverrideFull {
 @description("UI-friendly presence snapshot for a participant. Carries the high-level state (thinking / responding / waiting / ...) plus the short UI label + timing fields. The SPA keys these latest-wins by participantId to drive the presence panel + chat activity indicator.")
 shape presence presenceFull {
   row.id
-  payload.partitionId
-  payload.participantId
-  payload.state
-  payload.label
-  payload.reason
-  payload.intent
-  payload.sinceAt
-  payload.lastUpdatedAt
-  payload.lastUtteranceId
-  payload.lastError
+  partitionId
+  participantId
+  state
+  label
+  reason
+  intent
+  sinceAt
+  lastUpdatedAt
+  lastUtteranceId
+  lastError
   row.createdAt
 }

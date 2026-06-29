@@ -9,13 +9,13 @@ use actions.concepts.{ candidate, action, surface }
 @description("Full v1:actions:candidate projection: every field the action-library browse/recall surfaces need to inspect a captured trace (#1735).")
 shape candidate candidateFull {
   row.id
-  payload.ownerUserId
-  payload.planId
-  payload.stepId
-  payload.status
-  payload.calls
-  payload.resourceEdges
-  payload.callCount
+  ownerUserId
+  planId
+  stepId
+  status
+  calls
+  resourceEdges
+  callCount
   row.createdAt
 }
 
@@ -23,25 +23,25 @@ shape candidate candidateFull {
 @description("Full v1:actions:action projection: the fields the harness replay path needs to resolve + replay an action (Phase 1 #1736).")
 shape action actionFull {
   row.id
-  payload.ownerUserId
-  payload.slug
-  payload.kind
-  payload.intent
-  payload.capability
-  payload.sideEffectClass
-  payload.inputFingerprint
-  payload.calls
-  payload.resourceEdges
-  payload.paramBindings
-  payload.templateFingerprint
-  payload.steps
-  payload.recordedResult
-  payload.resultFingerprint
-  payload.recordedSurface
-  payload.reliability
-  payload.reinforceCount
-  payload.version
-  payload.status
+  ownerUserId
+  slug
+  kind
+  intent
+  capability
+  sideEffectClass
+  inputFingerprint
+  calls
+  resourceEdges
+  paramBindings
+  templateFingerprint
+  steps
+  recordedResult
+  resultFingerprint
+  recordedSurface
+  reliability
+  reinforceCount
+  version
+  status
   row.createdAt
 }
 
@@ -49,14 +49,14 @@ shape action actionFull {
 @description("Full v1:actions:surface projection: the fields the resolver needs to bind a capability to a surface (Phase 2 #1737).")
 shape surface surfaceFull {
   row.id
-  payload.ownerUserId
-  payload.slug
-  payload.kind
-  payload.machineId
-  payload.capabilities
-  payload.available
-  payload.priority
-  payload.status
-  payload.lastSeen
+  ownerUserId
+  slug
+  kind
+  machineId
+  capabilities
+  available
+  priority
+  status
+  lastSeen
   row.createdAt
 }

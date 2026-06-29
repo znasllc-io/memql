@@ -85,14 +85,14 @@ query project projectBySlug {
   args {
     slug  string  @required
   }
-  filter  payload.slug == args.slug
+  filter  slug == args.slug
   shape   projectFull
 }
 
 @enabled
 @description("List the caller's own submitted requests, newest-first. Open to any team member.")
 query request myRequests {
-  filter  payload.submitterUserId == actor.userId
+  filter  submitterUserId == actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -117,7 +117,7 @@ query request projectRequests {
   args {
     projectId  string  @required
   }
-  filter  payload.projectId == args.projectId
+  filter  projectId == args.projectId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -131,7 +131,7 @@ query request projectRequests {
 @enabled
 @description("The validation queue: requests awaiting first-line developer validation. Developer/owner only (forgeDeveloper).")
 query request validationQueue {
-  filter  payload.status == "needs_validation" && forgeDeveloper
+  filter  status == "needs_validation" && forgeDeveloper
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -143,7 +143,7 @@ query request validationQueue {
 @enabled
 @description("The approval queue: validated requests awaiting owner approval. Owner only (forgeApprover).")
 query request approvalQueue {
-  filter  payload.status == "needs_approval" && forgeApprover
+  filter  status == "needs_approval" && forgeApprover
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -158,7 +158,7 @@ query requestEvent requestEvents {
   args {
     requestId  string  @required
   }
-  filter  payload.requestId == args.requestId
+  filter  requestId == args.requestId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.

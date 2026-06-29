@@ -6,12 +6,12 @@ use rbac.concepts.{ capability, role }
 @row
 shape role roleFull {
   row.id
-  row.payload.slug
-  row.payload.name
-  row.payload.rank
-  row.payload.description
-  row.payload.predefined
-  row.payload.active
+  slug
+  name
+  rank
+  description
+  predefined
+  active
   row.createdAt
 }
 
@@ -19,12 +19,12 @@ shape role roleFull {
 @row
 shape capability capabilityFull {
   row.id
-  row.payload.roleSlug
-  row.payload.verb
-  row.payload.resourceType
-  row.payload.effect
-  row.payload.description
-  row.payload.predefined
-  row.payload.active
+  roleSlug
+  verb
+  resourceType
+  effect
+  description
+  predefined
+  active
   row.createdAt
 }

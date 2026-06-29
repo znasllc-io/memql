@@ -75,8 +75,8 @@ concept crossWidget {
 @row
 shape crossWidget crossWidgetCard {
   row.id
-  row.payload.label
-  row.payload.count
+  label
+  count
 }`,
 		},
 	}, eng)
@@ -135,7 +135,7 @@ concept crossThing {
 
 @row
 shape crossThing crossThingCard {
-  row.payload.name
+  name
 }`,
 		},
 		{
@@ -148,7 +148,7 @@ use crossns.shapes.{ crossThingCard }
 
 @description("query over the bundle concept via the bundle shape")
 query crossThing queryCrossThing {
-  filter  payload.name == "x"
+  filter  name == "x"
   shape   crossThingCard
 }`,
 		},
@@ -181,8 +181,8 @@ concept crossFieldThing {
 
 @row
 shape crossFieldThing crossFieldCard {
-  row.payload.label
-  row.payload.doesNotExist
+  label
+  doesNotExist
 }`,
 		},
 	}, eng)
@@ -232,7 +232,7 @@ shape user crossUserCard {
 
 @row
 shape user crossUserBogus {
-  row.payload.thisFieldIsNotOnUser
+  thisFieldIsNotOnUser
 }`,
 		},
 	}, eng)

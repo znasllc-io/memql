@@ -13,7 +13,7 @@ query workspace workspaceForPlan {
   args {
     planId  string  @required
   }
-  filter  payload.planId==args.planId
+  filter  planId==args.planId
   shape   workspaceFull
 }
 
@@ -21,6 +21,6 @@ query workspace workspaceForPlan {
 @unbounded("provisioned workspaces -- an internal lifecycle sweep that must see all")
 @description("List provisioned workspaces for inventory / debugging. Filtered to status=provisioned so released rows don't clutter the view.")
 query workspace provisionedWorkspaces {
-  filter  payload.status=="provisioned"
+  filter  status=="provisioned"
   shape   workspaceFull
 }

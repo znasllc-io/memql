@@ -24,7 +24,7 @@ query healedOverride resolveValidOverride {
   args {
     baseConstructId  string  @required
   }
-  filter  payload.baseConstructId==args.baseConstructId && payload.ownerUserId==actor.userId && payload.tier=="overlay" && payload.valid==true && isActiveRecord
+  filter  baseConstructId==args.baseConstructId && ownerUserId==actor.userId && tier=="overlay" && valid==true && isActiveRecord
   sort     "version", "desc"
   paginate 1
   shape   healedOverrideFull
@@ -36,7 +36,7 @@ query healedOverride overridesForConstruct {
   args {
     baseConstructId  string  @required
   }
-  filter  payload.baseConstructId==args.baseConstructId && payload.ownerUserId==actor.userId
+  filter  baseConstructId==args.baseConstructId && ownerUserId==actor.userId
   sort     "version", "desc"
   paginate 50
   shape   healedOverrideFull
@@ -49,6 +49,6 @@ query healedOverride overrideById {
   args {
     overrideId  string  @required
   }
-  filter  when(args.overrideId) { id==args.overrideId } && payload.ownerUserId==actor.userId
+  filter  when(args.overrideId) { id==args.overrideId } && ownerUserId==actor.userId
   shape   healedOverrideFull
 }

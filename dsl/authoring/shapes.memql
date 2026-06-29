@@ -10,20 +10,20 @@ use authoring.concepts.{ bundle, construct, dependencyEdge }
 @description("Comprehensive bundle projection: every field including the validation/dry-run reports and lifecycle timestamps. Backs the management list, the Gate 3 approval artifact, and the runtime loader.")
 shape bundle bundleFull {
   row.id
-  payload.ownerUserId
-  payload.responsibilityId
-  payload.sourcePlanId
-  payload.title
-  payload.summary
-  payload.status
-  payload.version
-  payload.supersedesBundleId
-  payload.reusedConstructRefs
-  payload.validationReport
-  payload.dryRunReport
-  payload.failureReason
-  payload.activatedAt
-  payload.retiredAt
+  ownerUserId
+  responsibilityId
+  sourcePlanId
+  title
+  summary
+  status
+  version
+  supersedesBundleId
+  reusedConstructRefs
+  validationReport
+  dryRunReport
+  failureReason
+  activatedAt
+  retiredAt
   row.createdAt
   row.createdBy
 }
@@ -32,19 +32,19 @@ shape bundle bundleFull {
 @description("Comprehensive construct projection: source + cached compiled form + catalog metadata. Backs the gate runners (compile/bind the closure), the runtime register path, and the catalog matcher.")
 shape construct constructFull {
   row.id
-  payload.ownerUserId
-  payload.bundleId
-  payload.kind
-  payload.name
-  payload.targetNamespace
-  payload.source
-  payload.compiledForm
-  payload.status
-  payload.catalogued
-  payload.catalogKey
-  payload.catalogMatchText
-  payload.catalogedAt
-  payload.catalogedFromBundleId
+  ownerUserId
+  bundleId
+  kind
+  name
+  targetNamespace
+  source
+  compiledForm
+  status
+  catalogued
+  catalogKey
+  catalogMatchText
+  catalogedAt
+  catalogedFromBundleId
   row.createdAt
   row.createdBy
 }
@@ -53,13 +53,13 @@ shape construct constructFull {
 @description("Dependency edge projection (#957): from-construct, to-construct, resolution source, and owning bundle. Backs dependency-closure + impact-analysis views.")
 shape dependencyEdge dependencyEdgeFull {
   row.id
-  payload.ownerUserId
-  payload.bundleId
-  payload.fromConstruct
-  payload.fromKind
-  payload.toName
-  payload.toKind
-  payload.toSource
+  ownerUserId
+  bundleId
+  fromConstruct
+  fromKind
+  toName
+  toKind
+  toSource
   row.createdAt
   row.createdBy
 }

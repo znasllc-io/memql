@@ -1214,7 +1214,7 @@ SQL or evaluate against the auth envelope.
 Per-row authorization is the only gate (see
 [docs/public/operate/auth/per-row-authz-audit.md](docs/public/operate/auth/per-row-authz-audit.md)).
 Every query and mutation in the DSL classifies as **owned** (filter
-on `payload.ownerUserId == actor.userId`), **granted** (relationship
+on `ownerUserId == actor.userId`), **granted** (relationship
 predicate gates on actor.userId), **admin** (cluster-owner spec), or
 **public** (`@public` annotation). The classification test in
 `dsl/conformance_test.go` hard-fails on any new unclassified
@@ -1296,15 +1296,17 @@ annotation family (`@useConcept`, `@useShape`, `@useQuery`,
 `@useMutation`, `@useLogic`, `@useBuiltin`, etc.) is retired and
 rejected at parse time with a migration-pointing error.
 
-The bound concept's payload is referenced from filter clauses as
-`payload.<field>` and from mutation bodies via the bare
-`insert { ... }` / `update { ... }` block without re-stating the
+The bound concept's payload is referenced from filter clauses by the
+**bare property name** (epic #2292 — the concept is bound by the
+signature, so `payload.` is removed) and from mutation bodies via the
+bare `insert { ... }` / `update { ... }` block without re-stating the
 concept id.
 
 **Canonical filter-clause syntax** (enforced by
 `dsl/conformance_test.go`):
 
-- Payload fields: `payload.<field>` — never `<conceptName>.<field>`
+- Payload fields: **bare property** (`status`, `ownerUserId`) — never
+  `payload.<field>` (removed, epic #2292) and never `<conceptName>.<field>`
 - Intrinsics (`id`, `concept`, `createdAt`, `createdBy`,
   `partition`, `type`, `schema`): bare names
 - **One Go boolean grammar** (operator standardization #971): `&&`
@@ -1312,8 +1314,8 @@ concept id.
   (`!` > comparisons > `&&` > `||`). The legacy `;`-AND and `,`-OR
   separators are retired in authored filters and rejected by the
   conformance test (`TestNoRetiredOperatorForms`).
-- Membership is the single `in` operator: `args.x in payload.list`
-  or `payload.kind in ["a", "b"]`. `has` (its reverse) is retired.
+- Membership is the single `in` operator: `args.x in list`
+  or `kind in ["a", "b"]` (payload props bare). `has` (its reverse) is retired.
 - Arg-conditional predicates use the `when(args.x) { <expr> }` guard:
   if `args.x` is absent the guarded block AND its connective are
   dropped as if never written (unambiguous under `||`). The `?.`
@@ -1350,7 +1352,7 @@ query participant querySpaceParticipants {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==args.spaceId && traitIsActiveRecord
+  filter  spaceId==args.spaceId && traitIsActiveRecord
   shape   participantFull
 }
 ```
@@ -1514,8 +1516,8 @@ use cognition.concepts.{ space }
 @row
 shape space spaceCard {
   row.id
-  row.payload.name
-  row.payload.description
+  name
+  description
   row.createdAt
 }
 ```
@@ -1539,8 +1541,8 @@ shape actorEnvelope {
 
 **Mixed shapes** carry both `@row` and `@actor` — useful for predicates
 that compare row fields against actor context (e.g. "rows I created" =
-`row.payload.createdBy == actor.userId`). The row concept is
-signature-bound:
+`row.createdBy == actor.userId`). The row concept is signature-bound;
+payload props are bare, `row.X` / `actor.X` are the ambient prefixes:
 ```memql
 use cognition.concepts.{ space }
 
@@ -1548,7 +1550,7 @@ use cognition.concepts.{ space }
 @actor
 shape space ownedSpace {
   row.id
-  row.payload.ownerId
+  ownerId
   actor.userId
 }
 ```
@@ -1568,59 +1570,52 @@ inputs and no return; the body is a path list (+ optional `include`
 statements).
 
 ### Specs
-Atomic boolean predicates — struct form, mirrors how concepts +
-shapes read. The body is a single boolean expression. The engine
-classifies a spec by walking its field references and picks the
-evaluation strategy:
+Atomic boolean predicates — **signature-bound** (epic #2281). A spec
+binds exactly one shape XOR concept in its signature
+(`spec <boundName> <name>`, resolved via the file-top `use` import) and
+the body `return`s a boolean over **bare** field names. The binding
+picks the evaluation strategy:
 
-- **Row-specs** reference `payload.X` and/or row intrinsics
-  (`id`, `concept`, `type`, `createdAt`, `createdBy`, `schema`).
-  They compile into a SQL `WHERE` fragment and push down to the
-  database for filtering.
-- **Context-specs** reference `actor.X` only (e.g. `actor.role`,
-  `actor.isClusterOwner`). They evaluate in-process; called from
-  policies via `spec("name")` for actor-based checks like "is
-  admin," "owns partition," etc.
+- **Row-specs** bind a concept or a `@row` shape. They compile into a
+  SQL `WHERE` fragment and push down to the database for filtering.
+- **Context-specs** bind an `@actor` shape (the only gateway to the auth
+  envelope). They evaluate in-process; invoked via `spec("name")` for
+  actor-based checks like "is admin," "owns partition," etc.
 
-Bodies that mix both flavors are rejected at load time.
-
-**`@shape("name")` is optional** on a spec (only a handful of specs
-carry it — the eval strategy is derived from the spec body's field
-references, not the shape). When present it documents/pins the shape
-the predicate reads: concept-specific specs pin a concept-bound `@row`
-shape; actor-side specs an `@actor` shape; cross-concept specs a
-**trait shape** (a `@row` shape, signature-bound to its concept — the
-predicate scaffolds in `dsl/common/shapes.memql`: `activeRowTrait`,
-`statusRowTrait`, `deletedRowTrait`, `archivedRowTrait`,
-`savedRowTrait`, `validationRowTrait`).
+A spec body never reads `actor.*` / `row.*` directly (bind a shape that
+projects it and read the projected key bare). The `@shape("name")`
+annotation is **removed** — the binding moved to the signature. A
+`trait` is the one deliberately-unbound row predicate (bare payload
+fields, validated at the call site).
 
 ```memql
-@enabled
-@description("Matches participants with human participantType")
-@shape("participantFull")
-spec specIsHumanParticipant {
-  payload.participantType == "human"            // row-spec
-}
+use cognition.concepts.{ participant }
 
 @enabled
-@description("Actor holds an admin or owner role")
-@shape("actorEnvelope")
-spec requiresAdmin {
-  actor.role == "admin"                         // context-spec
+@description("Matches participants with human participantType")
+spec participant specIsHumanParticipant {
+  return participantType == "human"             // concept-bound row-spec
+}
+
+use common.shapes.{ actorEnvelope }
+
+@enabled
+@description("Actor holds an admin role")
+spec actorEnvelope requiresAdmin {
+  return role == "admin"                        // @actor-bound context-spec
 }
 
 @enabled
 @description("Matches records with active==true field")
-@shape("activeRowTrait")
-spec specIsActiveRecord {
-  payload.active == true                        // cross-concept row-spec
+trait isActiveRecord {
+  return active == true                         // unbound cross-concept trait
 }
 ```
-Specs are exempt from the ctx-envelope return contract that queries /
-mutations / policies / automations follow — no `ctx`, no `return`,
-no parameter. The legacy
-`func (Spec) name(ctx any) bool { return <expr> }` form is retired
-and rejected at parse time.
+A spec/trait body is a single `return <boolean expression>` over bare
+field names (epic #2281); there is no `ctx` envelope and no parameter.
+Both the legacy `func (Spec) name(ctx any) bool { ... }` receiver form
+and the older bare-expression body (no `return`) are retired and
+rejected at parse time.
 
 **Caller-context checks use specs, not policies.** The decision-policy
 tier that once hosted caller-based boolean predicates is retired

@@ -6,10 +6,10 @@ use notes.concepts.{ note }
 @description("Comprehensive note projection: every payload field plus row id and timestamps. The default shape for list / create / update / search reads.")
 shape note noteFull {
   row.id
-  payload.ownerUserId
-  payload.title
-  payload.body
-  payload.tags
-  payload.updatedAt
+  ownerUserId
+  title
+  body
+  tags
+  updatedAt
   row.createdAt
 }

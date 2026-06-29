@@ -18,7 +18,7 @@ query calendarEvent calendarEventById {
   args {
     eventId  string  @required
   }
-  filter  id==args.eventId && payload.ownerUserId==actor.userId && isNotDeleted
+  filter  id==args.eventId && ownerUserId==actor.userId && isNotDeleted
   shape   calendarEventFull
 }
 
@@ -27,10 +27,10 @@ query calendarEvent calendarEventById {
 @mcp
 query calendarEvent upcomingEvents {
   args {
-    windowStart  datetime  @required @description("Inclusive lower bound on payload.startsAt (typically `now`).")
-    windowEnd    datetime  @required @description("Inclusive upper bound on payload.startsAt (e.g. now + 48h for a day-before reminder sweep).")
+    windowStart  datetime  @required @description("Inclusive lower bound on startsAt (typically `now`).")
+    windowEnd    datetime  @required @description("Inclusive upper bound on startsAt (e.g. now + 48h for a day-before reminder sweep).")
   }
-  filter  payload.ownerUserId==actor.userId && payload.startsAt>=args.windowStart && payload.startsAt<=args.windowEnd && isNotDeleted
+  filter  ownerUserId==actor.userId && startsAt>=args.windowStart && startsAt<=args.windowEnd && isNotDeleted
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -46,7 +46,7 @@ query calendarEvent eventsByDay {
     dayStart  datetime  @required @description("Inclusive start-of-day instant in the user's timezone (e.g. 2026-06-01T00:00:00-07:00).")
     dayEnd    datetime  @required @description("Exclusive end-of-day instant (next midnight) in the user's timezone.")
   }
-  filter  payload.ownerUserId==actor.userId && payload.startsAt>=args.dayStart && payload.startsAt<args.dayEnd && isNotDeleted
+  filter  ownerUserId==actor.userId && startsAt>=args.dayStart && startsAt<args.dayEnd && isNotDeleted
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -59,9 +59,9 @@ query calendarEvent eventsByDay {
 @description("Find the caller's own events by exact title. Self-scoped via actor.userId. Backs the calendar tool's `find` action ('find my dentist appointment'); the agent passes the title it captured. Exact match keeps the predicate SQL-pushdownable -- substring / semantic search is a downstream concern (the agent can list a window via upcomingEvents and filter conversationally).")
 query calendarEvent findEvents {
   args {
-    title  string  @required @description("Exact event title to match against payload.title.")
+    title  string  @required @description("Exact event title to match against title.")
   }
-  filter  payload.ownerUserId==actor.userId && payload.title==args.title && isNotDeleted
+  filter  ownerUserId==actor.userId && title==args.title && isNotDeleted
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.

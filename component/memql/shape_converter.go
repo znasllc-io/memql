@@ -131,6 +131,19 @@ func shapeDeclToShapeDefinition(decl *languageParser.ShapeDecl, origin string) (
 	usedConcepts := make(map[string]bool, len(useConcepts))
 
 	for _, path := range decl.Paths {
+		// Bare payload access (epic #2292): the concept is bound by the
+		// signature, so a payload property is written by BARE name. The
+		// explicit `payload.X` (and legacy `row.payload.X`) author form is
+		// rejected with a migration hint. `row.X` / `actor.X` are unchanged.
+		if path == "payload" || strings.HasPrefix(path, "payload.") || strings.HasPrefix(path, "row.payload.") || strings.HasPrefix(path, "row.payload") {
+			bare := path
+			bare = strings.TrimPrefix(bare, "row.")
+			bare = strings.TrimPrefix(bare, "payload.")
+			if bare == "" || bare == "payload" {
+				bare = "<property>"
+			}
+			return nil, fmt.Errorf("%s: shape %q body path %q uses the removed `payload.` prefix -- write the payload property by bare name (%q); the concept is bound by the signature", origin, decl.Name, path, bare)
+		}
 		storedPath := translateShapeBodyPath(path, useConcepts)
 		// Record which @useConcept name(s) got referenced via the
 		// `<name>.X` prefix form. Signature-bound concepts don't go
