@@ -560,7 +560,10 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				if err != nil {
 					return nil, fmt.Errorf("function %q: %w", expectedName, err)
 				}
-				converter := NewASTConverter()
+				// Logic bodies admit the Story 4 collection-method + lambda
+				// surface (ADR §2.2). Specs and query filters use the default
+				// converter, which rejects it.
+				converter := NewASTConverter(WithCollectionMethods())
 				engineExpr, err := converter.ConvertExpression(retExpr)
 				if err != nil {
 					return nil, fmt.Errorf("convert function %q body: %w", expectedName, err)
@@ -1074,6 +1077,11 @@ func validateFunctions(functions map[string]*Function) error {
 		}
 	}
 
+	// Story 4 (#2302 / ADR §2.2): collection lambda bodies must be pure.
+	if err := enforceLambdaPurity(functions); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -1118,7 +1126,125 @@ func collectFunctionRefsRecursive(expr ExpressionNode, refs *[]string) {
 		collectFunctionRefsRecursive(node.Filter, refs)
 	case *ArgRefExpression:
 		// ArgRefExpression doesn't reference functions
+	case *CollectionMethodExpression:
+		// Story 4 (#2302): traverse the receiver + args so any function a
+		// chain references is seen by unknown-ref + cycle validation.
+		collectFunctionRefsRecursive(node.Receiver, refs)
+		for _, a := range node.Args {
+			collectFunctionRefsRecursive(a, refs)
+		}
+	case *LambdaExpression:
+		collectFunctionRefsRecursive(node.Body, refs)
 	}
+}
+
+// enforceLambdaPurity walks every loaded function body for collection
+// lambdas (Story 4 / #2302 / ADR §2.2) and rejects a lambda whose body
+// calls a mutation or action. Lambda bodies must be pure: they only read
+// fields and compute values, never mutate state. Runs in the post-load
+// validation pass where the full registry is available so a call name can
+// be classified.
+func enforceLambdaPurity(functions map[string]*Function) error {
+	for name, fn := range functions {
+		if fn == nil || fn.Expr == nil {
+			continue
+		}
+		if err := walkForImpureLambda(fn.Expr, functions); err != nil {
+			return fmt.Errorf("logic %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// walkForImpureLambda finds LambdaExpression nodes and validates their
+// bodies contain no mutation/action call.
+func walkForImpureLambda(expr ExpressionNode, functions map[string]*Function) error {
+	switch node := expr.(type) {
+	case nil:
+		return nil
+	case *CollectionMethodExpression:
+		if err := walkForImpureLambda(node.Receiver, functions); err != nil {
+			return err
+		}
+		for _, a := range node.Args {
+			if err := walkForImpureLambda(a, functions); err != nil {
+				return err
+			}
+		}
+	case *LambdaExpression:
+		if bad := findImpureCall(node.Body, functions); bad != "" {
+			return fmt.Errorf("lambda body must be pure: mutation/action %q is not allowed inside a collection lambda (ADR §2.2)", bad)
+		}
+		return walkForImpureLambda(node.Body, functions)
+	case *LogicalExpression:
+		if err := walkForImpureLambda(node.Left, functions); err != nil {
+			return err
+		}
+		return walkForImpureLambda(node.Right, functions)
+	case *CountExpression:
+		return walkForImpureLambda(node.Target, functions)
+	case *ShapeExpression:
+		return walkForImpureLambda(node.Target, functions)
+	}
+	return nil
+}
+
+// findImpureCall returns the name of the first mutation/action call found
+// anywhere in expr, or "" when the body is pure.
+func findImpureCall(expr ExpressionNode, functions map[string]*Function) string {
+	switch node := expr.(type) {
+	case nil:
+		return ""
+	case *FunctionCallExpression:
+		if isMutationOrActionName(node.Name, functions) {
+			return node.Name
+		}
+		return ""
+	case *BuiltinFunctionExpression:
+		if isMutationOrActionName(node.Name, functions) {
+			return node.Name
+		}
+		return ""
+	case *LogicalExpression:
+		if bad := findImpureCall(node.Left, functions); bad != "" {
+			return bad
+		}
+		return findImpureCall(node.Right, functions)
+	case *CollectionMethodExpression:
+		if bad := findImpureCall(node.Receiver, functions); bad != "" {
+			return bad
+		}
+		for _, a := range node.Args {
+			if bad := findImpureCall(a, functions); bad != "" {
+				return bad
+			}
+		}
+		return ""
+	case *LambdaExpression:
+		return findImpureCall(node.Body, functions)
+	case *ComparisonExpression:
+		if v, ok := node.Value.(ExpressionNode); ok {
+			return findImpureCall(v, functions)
+		}
+		return ""
+	}
+	return ""
+}
+
+// isMutationOrActionName reports whether a call name resolves to a mutation
+// or action -- either by registry classification or by the conventional
+// `mutation`/`mutate` name prefix (a backstop for names not yet in the
+// passed registry).
+func isMutationOrActionName(name string, functions map[string]*Function) bool {
+	key := strings.TrimSpace(name)
+	if fn, ok := functions[key]; ok && fn != nil {
+		kind := strings.ToLower(strings.TrimSpace(fn.FunctionKind))
+		if kind == "mutation" || kind == "action" {
+			return true
+		}
+	}
+	lower := strings.ToLower(key)
+	return strings.HasPrefix(lower, "mutation") || strings.HasPrefix(lower, "mutate")
 }
 
 // detectFunctionCycle uses DFS to detect cycles in the function dependency graph.

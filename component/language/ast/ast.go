@@ -216,6 +216,33 @@ type FunctionCallExpr struct {
 func (*FunctionCallExpr) node()           {}
 func (*FunctionCallExpr) expressionNode() {}
 
+// MethodCallExpr is a method-chained collection call (Story 4 / #2302 /
+// ADR §2.2): `args.members.where(m => m.active).count()`. Receiver is the
+// collection being operated on (a dotted-path arg/spec reference or a prior
+// MethodCallExpr in a chain); Method is the collection operator name
+// (where/select/count/...); Args are the parsed call arguments, each of which
+// may be a LambdaExpr. These nodes are only valid in logic bodies and
+// automation forEach; specs and query filters reject them at load.
+type MethodCallExpr struct {
+	Receiver ExpressionNode
+	Method   string
+	Args     []ExpressionNode
+}
+
+func (*MethodCallExpr) node()           {}
+func (*MethodCallExpr) expressionNode() {}
+
+// LambdaExpr is an arrow lambda used as a collection-method argument
+// (Story 4 / #2302): `m => m.active` or `(acc, x) => acc + x`. Params are the
+// bound parameter names; Body is the (pure) expression evaluated per element.
+type LambdaExpr struct {
+	Params []string
+	Body   ExpressionNode
+}
+
+func (*LambdaExpr) node()           {}
+func (*LambdaExpr) expressionNode() {}
+
 // BuiltinFunctionExpr represents a builtin function invocation.
 type BuiltinFunctionExpr struct {
 	Name     string

@@ -530,6 +530,24 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		return result, nil
 	}
 
+	// Top-level collection-method chain (Story 4 / #2302 / ADR §2.2): a
+	// Logic whose body is a single `return args.X.where(...).count()`
+	// expands -- after the receiver's ArgRefExpression folds to a concrete
+	// collection literal -- to a *CollectionMethodExpression at plan.Root.
+	// The chain is evaluated in-memory here and wrapped as the function's
+	// return value, the same way the BuiltinFunctionExpression and
+	// LiteralValueNode branches above package a Logic's output.
+	if collExpr, ok := plan.Root.(*CollectionMethodExpression); ok {
+		val, err := evaluateCollectionMethodExpression(collExpr, nil)
+		if err != nil {
+			return nil, err
+		}
+		result := newExecuteResult(nil)
+		result.setOutput(val)
+		e.emitQueryExecutedEvent(startTime, result, false)
+		return result, nil
+	}
+
 	if plan.Root == nil {
 		return nil, fmt.Errorf("query must include at least one filter or relationship expression")
 	}
