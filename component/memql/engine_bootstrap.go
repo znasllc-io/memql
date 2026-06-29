@@ -349,6 +349,13 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 		return err
 	}
 
+	// Story 6 (#2304 / ADR §2.2): in-memory-vs-SQL guardrail lint. Warn
+	// (never fail) when a logic body runs a Story 4 collection chain over an
+	// unfiltered full-concept query read -- that work belongs in a query
+	// `filter` / SQL pushdown, not an in-memory scan. Mirrors the dead-logic
+	// lint's warning severity; load is unaffected.
+	warnInMemoryCollectionScans(e.Logger, functionRegistry.Snapshot())
+
 	// Log boot validation summary
 	e.logBootValidationSummary(functionRegistry, shapeRegistry, specRegistry, providerRegistry)
 
