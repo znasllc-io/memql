@@ -601,8 +601,7 @@ func TestCompiler_ExpressionToString_NoArgAccessors(t *testing.T) {
 		source   string
 		expected string
 	}{
-		{"timestamp", `func (Query) ts() { timestamp() }`, "timestamp()"},
-		{"now", `func (Query) ts() { now() }`, "timestamp()"},
+		{"now", `func (Query) ts() { now }`, "timestamp()"},
 		{"input", `func (Query) inp() { input() }`, "input()"},
 		{"item", `func (Query) it() { item() }`, "item()"},
 		{"index", `func (Query) idx() { index() }`, "index()"},
@@ -709,7 +708,7 @@ func TestCompiler_ExpressionToJSONExpr(t *testing.T) {
 		},
 		{
 			name:     "timestamp ref",
-			source:   `func (Query) t() { timestamp() }`,
+			source:   `func (Query) t() { now }`,
 			expected: "$timestamp",
 		},
 	}

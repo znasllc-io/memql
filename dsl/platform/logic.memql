@@ -31,7 +31,7 @@ logic purgeExpiredPolicyTraces {
     payload: {
       candidateCount: allTraces.Len(),
       retentionDays: coalesce(retentionDays.First().payload.value, "90"),
-      timestamp: timestamp()
+      timestamp: now
     }
   })
 

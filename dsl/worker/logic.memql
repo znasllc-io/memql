@@ -47,7 +47,7 @@ logic killSwitchSuspendsRunningPlans {
 //   - The filter side of expiredWorkerInvocations can't push
 //     the duration math into the query (no `>` operator on
 //     datetime). Per-row gating uses
-//       addDuration(item.createdAt, "P{retention}D") < timestamp()
+//       addDuration(item.createdAt, "P{retention}D") < now
 @description("Pure decide for the worker-invocation retention sweep: returns every soft-deletable candidate row. The retention-var read, the per-row window gate (createdAt + P{N}D < now), and the soft-delete write live in the workerInvocationRetentionSweep automation's window + forEach steps (#2235; the date-window gate is evaluated correctly by the condition evaluator since #2256/#2254).")
 logic workerInvocationRetentionSweep {
   args {

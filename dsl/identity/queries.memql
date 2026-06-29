@@ -560,18 +560,19 @@ query delegation delegationsByIdentity {
 // time. Used by the expireDelegations automation to find delegations
 // to deactivate.
 //
-// The cutoff is passed in (rather than read via timestamp() inline)
-// because the memQL query planner rejects function-call literals in
-// filter comparisons ("unsupported literal type *ast.TimestampExprFunc").
-// The automation populates `now` via `timestamp()` at the call site
-// so the resulting arg is a plain datetime value. Matches the
-// expireGuestInvitations / expiredPendingGuestInvitations pattern.
+// The cutoff is passed in as the `now` arg (rather than referencing the
+// clock inline) because the memQL query planner rejects the timestamp
+// call-form AST node in filter comparisons ("unsupported literal type
+// *ast.TimestampExprFunc"). The automation supplies the arg from the bare
+// reserved `now` identifier at the call site so the resulting value is a
+// plain datetime. Matches the expireGuestInvitations /
+// expiredPendingGuestInvitations pattern.
 //
 // Returns:
 //   Array of expired delegation records in delegationFull shape
 //
 // Usage:
-//   expiredActiveDelegations({ now: timestamp() })
+//   expiredActiveDelegations({ now: now })
 //
 
 @enabled
@@ -592,7 +593,7 @@ query delegation expiredActiveDelegations {
 //
 // Returns every audit-event row. The auditEventRetentionSweep cron
 // iterates the result and per-row tests
-// `addDuration(item.auditEvent.occurredAt, "P{N}D") < timestamp()` to
+// `addDuration(item.auditEvent.occurredAt, "P{N}D") < now` to
 // decide whether the row is past
 // MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. Same MemQL-parser limitation
 // as expiredPendingAccessRequests: filter expressions can't
@@ -635,8 +636,8 @@ query auditEvent expiredAuditEvents {
 // in-flight token exchange. Expiry-only cleanup of unspent codes is a
 // separate concern; this query is the spent-code reaper.
 //
-// `now` is passed in (rather than inline timestamp()) per the
-// pattern in expiredActiveDelegations.
+// The `now` cutoff is passed in as an arg (rather than referencing the
+// clock inline) per the pattern in expiredActiveDelegations.
 //
 // Arguments:
 //   now (string) - cutoff timestamp (ISO 8601)
@@ -667,10 +668,11 @@ query authCode expiredConsumedAuthCodes {
 // cron decides what to do with them (a consumed-then-expired row
 // is identical to an expired row from the consume handler's POV).
 //
-// `now` is passed in (rather than read via timestamp() inline) for
-// the same reason as expiredActiveDelegations: the memQL query
-// planner rejects function-call literals in filter comparisons.
-// The automation populates `now` via `timestamp()` at the call site.
+// The `now` cutoff is passed in as an arg (rather than referencing the
+// clock inline) for the same reason as expiredActiveDelegations: the memQL
+// query planner rejects the timestamp call-form AST node in filter
+// comparisons. The automation supplies it from the bare reserved `now`
+// identifier at the call site.
 //
 // Arguments:
 //   now (string) - cutoff timestamp (ISO 8601 / RFC 3339)
@@ -699,7 +701,7 @@ query magicLinkRequest expiredMagicLinkRequests {
 // by the accessRequestExpirySweep cron (daily 04:00 UTC): the cron
 // iterates the result and per-row tests whether the row is older
 // than IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS by comparing
-// `addDuration(item.createdAt, "P{N}D") < timestamp()` before
+// `addDuration(item.createdAt, "P{N}D") < now` before
 // calling expireAccessRequest.
 //
 // MemQL parser limitation: filter expressions don't accept inline
@@ -1215,7 +1217,7 @@ query user usersInDeletionCooldown {
 // Returns active users whose deletionScheduledAt is non-empty. The
 // accountDeletionSweep cron iterates the result and per-row checks
 // whether the cooldown has elapsed
-// (deletionScheduledAt + MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS < now())
+// (deletionScheduledAt + MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS < now)
 // before calling deleteUserHard.
 //
 // Active-only: a user already hard-deleted (active=false, PII
@@ -1226,7 +1228,7 @@ query user usersInDeletionCooldown {
 // addDuration() calls (the planner rejects function-call literals
 // in filter comparisons), so we cannot push the cooldown math down
 // to the query. The automation does it per-row via
-// `if addDuration(item.user.deletionScheduledAt, "P{N}D") < timestamp()`.
+// `if addDuration(item.user.deletionScheduledAt, "P{N}D") < now`.
 // `addDuration` only accepts positive ISO-8601 durations -- there
 // is no negative-duration literal -- so the math has to live on the
 // "deadline-vs-now" side of the comparison, not "now-minus-cooldown".

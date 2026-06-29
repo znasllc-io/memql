@@ -4837,6 +4837,15 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 		}, nil
 	}
 
+	// Bare reserved `now` is the canonical current-timestamp primitive
+	// (epic #2298 / #2301): emit the TimestampExprFunc node so it resolves
+	// to the clock in every expression position (logic / automation operands,
+	// function arguments like `addDuration(now, ...)`), identically to the
+	// retired now() / timestamp() call-forms.
+	if name == "now" {
+		return &TimestampExprFunc{}, nil
+	}
+
 	// Just an identifier (field reference or spec reference)
 	return &SpecReferenceExpr{Name: name}, nil
 }
@@ -5605,6 +5614,16 @@ func (p *Parser) parseValue() (any, error) {
 			// is the single source for both the actor/args/ctx dispatch
 			// AND the caller-rejection migration hint that BOTH parsers
 			// emit identically (#244 / epic #218).
+			// Bare reserved `now` is the canonical current-timestamp
+			// primitive (epic #2298 / #2301): emit the TimestampExprFunc
+			// node so a comparison RHS like `expiresAt < now` resolves to
+			// the clock identically to the retired `now()` / `timestamp()`
+			// call-forms (executor_filter handles TimestampExprFunc).
+			// Without this, bare `now` fell through as the literal string
+			// "now" and the predicate never matched.
+			if val == "now" {
+				return &TimestampExprFunc{}, nil
+			}
 			kind, _, accErr := baseparser.ClassifyAccessor(val)
 			if accErr != nil {
 				return nil, accErr
@@ -5897,14 +5916,6 @@ func (p *Parser) parseErrorAccessor() (ExpressionNode, error) {
 		return nil, err
 	}
 	return &ErrorExpr{Message: message}, nil
-}
-
-// parseTimestampAccessor parses timestamp() or now() - current time.
-func (p *Parser) parseTimestampAccessor() (ExpressionNode, error) {
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-	return &TimestampExprFunc{}, nil
 }
 
 // parseMemqlVersionFunction parses memqlVersion() - current service version.

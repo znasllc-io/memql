@@ -39,7 +39,7 @@ automation bootstrapSession {
           sessionId:     coalesce(event.payload.id, ""),
           participantId: coalesce(event.payload.id, ""),
           partitionId:   coalesce(event.payload.partitionId, ""),
-          timestamp:     timestamp()
+          timestamp:     now
         }
       })
     }

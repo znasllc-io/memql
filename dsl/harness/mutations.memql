@@ -130,7 +130,7 @@ mutate step startHarnessStep {
     id: args.stepId
     status: "running"
     args.assignedAgent
-    startedAt: now()
+    startedAt: now
     provenanceMutation: "startHarnessStep"
   }
 }
@@ -151,7 +151,7 @@ mutate step completeHarnessStep {
     id: args.stepId
     status: "done"
     args.result
-    completedAt: now()
+    completedAt: now
     provenanceMutation: "completeHarnessStep"
   }
 }
@@ -174,7 +174,7 @@ mutate step failHarnessStep {
     id: args.stepId
     status: "failed"
     args.errorMessage
-    completedAt: now()
+    completedAt: now
     provenanceMutation: "failHarnessStep"
   }
 }
@@ -269,7 +269,7 @@ mutate semanticMemory createHarnessSemanticMemory {
     args.sourceEpisodes
     confidence: coalesce(args.confidence, 0.5)
     reinforceCount: 1
-    lastReinforced: coalesce(args.lastReinforced, now())
+    lastReinforced: coalesce(args.lastReinforced, now)
     status: "active"
     provenanceMutation: "createHarnessSemanticMemory"
   }
@@ -288,7 +288,7 @@ mutate semanticMemory createHarnessSemanticMemory {
 // MERGED, deduped provenance list (prior + this run's contributors),
 // so the audit trail grows as evidence accumulates.
 @enabled
-@description("Reinforce an existing v1:harness:semanticMemory (dedup path): take the engine-computed bumped confidence + reinforceCount, reset lastReinforced to now(), and replace sourceEpisodes with the merged/deduped provenance. No new belief row -- this is why re-running over the same episodes does not duplicate. ownerUserId re-stamped from actor.userId (owned tier).")
+@description("Reinforce an existing v1:harness:semanticMemory (dedup path): take the engine-computed bumped confidence + reinforceCount, reset lastReinforced to now, and replace sourceEpisodes with the merged/deduped provenance. No new belief row -- this is why re-running over the same episodes does not duplicate. ownerUserId re-stamped from actor.userId (owned tier).")
 mutate semanticMemory reinforceHarnessSemanticMemory {
   args {
     memoryId        string    @required
@@ -302,7 +302,7 @@ mutate semanticMemory reinforceHarnessSemanticMemory {
     args.confidence
     args.reinforceCount
     args.sourceEpisodes
-    lastReinforced: now()
+    lastReinforced: now
     provenanceMutation: "reinforceHarnessSemanticMemory"
   }
 }
@@ -374,7 +374,7 @@ mutate consolidationCursor advanceHarnessConsolidationCursor {
     id: args.cursorId
     ownerUserId: actor.userId
     args.watermark
-    lastRunAt: now()
+    lastRunAt: now
     args.episodesSeen
     provenanceMutation: "advanceHarnessConsolidationCursor"
   }

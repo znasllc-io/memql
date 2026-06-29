@@ -72,7 +72,7 @@ logic accountDeletionReminder25Days {
   candidates := usersInDeletionCooldown({})
 
   for item := range candidates.Nodes() {
-    emitReminder := if addDuration(item.payload.deletionScheduledAt, "P25D") < timestamp() && addDuration(item.payload.deletionScheduledAt, "P26D") >= timestamp() {
+    emitReminder := if addDuration(item.payload.deletionScheduledAt, "P25D") < now && addDuration(item.payload.deletionScheduledAt, "P26D") >= now {
       publishEvent({
         topic: "identity.deletion.reminder",
         payload: {
@@ -81,7 +81,7 @@ logic accountDeletionReminder25Days {
           deletionScheduledAt: item.payload.deletionScheduledAt,
           milestoneDays: 25,
           subject: "Final notice: your <BRAND_NAME> account will be deleted in 5 days",
-          timestamp: timestamp()
+          timestamp: now
         }
       })
     }
@@ -134,7 +134,7 @@ logic accountDeletionReminder7Days {
   for item := range candidates.Nodes() {
     // Window: deletionScheduledAt is between 7 and 8 days ago.
     // Equivalent: scheduledAt + P7D < now AND scheduledAt + P8D >= now.
-    emitReminder := if addDuration(item.payload.deletionScheduledAt, "P7D") < timestamp() && addDuration(item.payload.deletionScheduledAt, "P8D") >= timestamp() {
+    emitReminder := if addDuration(item.payload.deletionScheduledAt, "P7D") < now && addDuration(item.payload.deletionScheduledAt, "P8D") >= now {
       publishEvent({
         topic: "identity.deletion.reminder",
         payload: {
@@ -143,7 +143,7 @@ logic accountDeletionReminder7Days {
           deletionScheduledAt: item.payload.deletionScheduledAt,
           milestoneDays: 7,
           subject: "Your <BRAND_NAME> account will be permanently deleted soon",
-          timestamp: timestamp()
+          timestamp: now
         }
       })
     }
@@ -188,7 +188,7 @@ logic accountDeletionReminder7Days {
 //   - The filter side of usersScheduledForDeletion can't push
 //     the cooldown math into the query (see that file's header).
 //     Per-row gating uses
-//       addDuration(item.payload.deletionScheduledAt, "P{cooldown}D") < timestamp()
+//       addDuration(item.payload.deletionScheduledAt, "P{cooldown}D") < now
 //   - There's no batch-update path; we revoke sessions one row at a
 //     time inside the loop.
 @description("Pure decide for the account-deletion sweep: returns every user scheduled for deletion. The cooldown-var read, the per-row window gate (deletionScheduledAt + P{N}D < now), and the deleteUserHard write live in the accountDeletionSweep automation's window + forEach steps (#2235; date-window gate evaluated correctly since #2256/#2254). Audit-event rows, invitations the user issued, and access-request rows are intentionally retained for the trail.")
@@ -243,7 +243,7 @@ logic accountDeletionSweep {
 // (expiredAuditEvents) is stable either way.
 //
 // Per-row windowing uses addDuration on item.payload.occurredAt
-// against `timestamp()`, same as accessRequestExpirySweep -- MemQL
+// against `now`, same as accessRequestExpirySweep -- MemQL
 // can't push that into the filter today.
 @description("Daily 02:00 UTC sweep over v1:identity:auditEvent rows older than MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. Observation-only today: emits an 'identity.audit.retention.observed' event with the candidate count -- MemQL has no delete() mutation and AuditEvent's append-only semantics forbid soft-delete via active=false. Per-row delete lands when one of those gaps closes.")
 logic auditEventRetentionSweep {
@@ -263,7 +263,7 @@ logic auditEventRetentionSweep {
     payload: {
       candidateCount: allEvents.Len(),
       retentionDays: coalesce(retentionDays.First().payload.value, "365"),
-      timestamp: timestamp()
+      timestamp: now
     }
   })
 
@@ -297,7 +297,7 @@ logic auditEventRetentionSweep {
 // own expiresAt check makes the sweep's tightness irrelevant. If
 // the operator wants tighter cleanup, bump the cadence here.
 //
-// `now` is passed in (rather than read via timestamp() inline)
+// The `now` cutoff is passed in as an arg (rather than referencing the clock inline)
 // because the memQL query planner rejects function-call literals
 // in filter comparisons.
 @description("Hourly sweep that stamps consumedAt + consumedFromIP='system:expiry' on v1:identity:magiclink rows whose expiresAt is in the past, so the row reads as 'spent' in audit queries and any subsequent click is idempotently rejected by the consume handler's own expiresAt guard.")
@@ -306,7 +306,7 @@ logic magicLinkExpirySweep {
     event object @required
   }
   body {
-  return expiredMagicLinkRequests({ now: timestamp() })
+  return expiredMagicLinkRequests({ now: now })
   }
 }
 
@@ -332,7 +332,7 @@ logic onDelegationCreated {
       args.event.node.payload.roleCeiling,
       args.event.node.payload.scopes,
       args.event.node.payload.createdBySubject,
-      timestamp: timestamp()
+      timestamp: now
     }
   })
   return emitEvent
@@ -349,7 +349,7 @@ logic onDelegationCreated {
 // number of rows processed so the caller can surface a count.
 //
 // `now` is passed by the caller (the automation step computes
-// `timestamp()` so the query receives a plain RFC3339 string) because
+// `now` so the query receives a plain RFC3339 string) because
 // the memQL query planner doesn't accept function-call literals in
 // comparison expressions yet.
 

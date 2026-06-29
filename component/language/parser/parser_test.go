@@ -903,26 +903,35 @@ func TestParser_FirstLastFunctions(t *testing.T) {
 	}
 }
 
-func TestParser_TimestampFunction(t *testing.T) {
-	tests := []string{"timestamp()", "now()"}
+// TestParser_BareNowIsTimestamp asserts the clock contract after epic
+// #2298 / #2301: the bare reserved identifier `now` parses to the canonical
+// TimestampExprFunc node, and the retired now() / timestamp() call-forms are
+// a parse error pointing at the bare form.
+func TestParser_BareNowIsTimestamp(t *testing.T) {
+	t.Run("bare now -> TimestampExprFunc", func(t *testing.T) {
+		lexer := NewLexer("now")
+		tokens, err := lexer.Tokenize()
+		if err != nil {
+			t.Fatalf("Lexer error: %v", err)
+		}
+		ast, err := NewParser(tokens).Parse()
+		if err != nil {
+			t.Fatalf("Parser error: %v", err)
+		}
+		if _, ok := ast.(*TimestampExprFunc); !ok {
+			t.Fatalf("Expected TimestampExprFunc, got %T", ast)
+		}
+	})
 
-	for _, input := range tests {
-		t.Run(input, func(t *testing.T) {
+	for _, input := range []string{"now()", "timestamp()"} {
+		t.Run("retired "+input, func(t *testing.T) {
 			lexer := NewLexer(input)
 			tokens, err := lexer.Tokenize()
 			if err != nil {
 				t.Fatalf("Lexer error: %v", err)
 			}
-
-			parser := NewParser(tokens)
-			ast, err := parser.Parse()
-			if err != nil {
-				t.Fatalf("Parser error: %v", err)
-			}
-
-			_, ok := ast.(*TimestampExprFunc)
-			if !ok {
-				t.Fatalf("Expected TimestampExprFunc, got %T", ast)
+			if _, err := NewParser(tokens).Parse(); err == nil {
+				t.Fatalf("expected parse error for retired call-form %q, got nil", input)
 			}
 		})
 	}

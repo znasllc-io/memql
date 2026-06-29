@@ -183,6 +183,17 @@ func (c *ASTConverter) ConvertExpression(expr languageParser.ExpressionNode) (Ex
 		// carrying Go nil; the executor's truthiness + comparison
 		// helpers handle it the same as any other zero-valued literal.
 		return &LiteralValueNode{Value: nil}, nil
+	case *languageParser.TimestampExprFunc:
+		// Bare `now` -- the one clock primitive (epic #2298 / #2301). The
+		// logic runtime evaluates `now` via the string path
+		// (compiler/automation_generator emits "timestamp()", the automations
+		// evaluator resolves it to the current clock); this body/value
+		// converter wraps the canonical ast node as a literal so a bare `now`
+		// in a Logic body or a comparison value compiles instead of failing
+		// "unsupported parser expression type". In comparison-value position
+		// executor_filter resolves the wrapped *ast.TimestampExprFunc to the
+		// current time.
+		return &LiteralValueNode{Value: node}, nil
 	default:
 		return nil, fmt.Errorf("unsupported parser expression type: %T", expr)
 	}

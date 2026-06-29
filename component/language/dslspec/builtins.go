@@ -84,9 +84,13 @@ const (
 	// integration registry, a separate mechanism) are ambient.
 	DependencyAmbient BuiltinDependency = ""
 	// DependencyCore marks a nondeterministic language-level primitive that
-	// resolves only when imported via `use core.{ ... }`. Initial membership:
-	// timestamp() (the fresh wall-clock read). The forward-looking home for
-	// uuid / random when introduced.
+	// resolves only when imported via a core import. Membership is currently
+	// EMPTY: the clock primitive collapsed to the ambient reserved `now`
+	// (timestamp() is an alias, not a distinct read -- owner ruling 2026-06-29,
+	// recorded in the core-builtins ADR), and globalVariable / env were already
+	// a query / provider-scoped. DependencyCore is the forward-looking home for
+	// a genuinely-new nondeterministic primitive (uuid / random) if one is
+	// introduced.
 	DependencyCore BuiltinDependency = "core"
 )
 
@@ -122,14 +126,12 @@ type Builtin struct {
 }
 
 // CoreBuiltinNames is the sorted set of builtin names classified
-// DependencyCore -- the membership of the intrinsic `core` import namespace.
-// It is the machine-readable definition of the `core` bundle: Story 3 (#2301)
-// resolves `use core.{ ... }` against this set and errors when one of these
-// names is called without its import. The `core` namespace is intrinsic
-// (loader-level), NOT a dsl/core/*.memql construct file, because its members
-// are engine intrinsics (timestamp() is parsed as a grammar accessor and
-// evaluated in-engine; it has no integration executor a `builtin` declaration
-// could point at).
+// DependencyCore -- the membership of the forward-looking `core` import
+// namespace. It is currently EMPTY (see DependencyCore): the clock primitive
+// collapsed to the ambient reserved `now` rather than an imported timestamp().
+// The accessor stays available for a genuinely-new nondeterministic primitive
+// (uuid / random); when one lands it is flagged DependencyCore here and the
+// intrinsic (loader-level) `core` namespace is wired to resolve it.
 func CoreBuiltinNames() []string {
 	out := make([]string, 0)
 	for _, b := range builtins() {
@@ -352,23 +354,14 @@ func builtins() []Builtin {
 
 		// ============================================================
 		// Context accessors (parser.CallableAccessors, + index).
-		// now / actor / partition / config / trace are ALSO reserved
-		// keywords (keywords()); they are listed here too because they are
-		// callable like functions and Sense offers them in call completion.
+		// actor / partition / config / trace are ALSO reserved keywords
+		// (keywords()); they are listed here too because they are callable
+		// like functions and Sense offers them in call completion.
+		//
+		// `now` is NOT here: the clock is the bare reserved identifier `now`
+		// (a keyword, see keywords()), and the now() / timestamp() call-forms
+		// are retired (epic #2298 / #2301 -- CallableRetired in the parser).
 		// ============================================================
-		{
-			Name:      "now",
-			Category:  CategoryBuiltinAccessor,
-			Signature: `now()`,
-			Doc:       "Return the current timestamp (RFC3339 captured at eval start).",
-		},
-		{
-			Name:       "timestamp",
-			Category:   CategoryBuiltinAccessor,
-			Dependency: DependencyCore,
-			Signature:  `timestamp()`,
-			Doc:        "Read the current wall clock at the point of call (a fresh, nondeterministic read distinct from the eval-start `now`). Imported from core: `use core.{ timestamp }`. See the core-builtins ADR.",
-		},
 		{
 			Name:      "error",
 			Category:  CategoryBuiltinAccessor,

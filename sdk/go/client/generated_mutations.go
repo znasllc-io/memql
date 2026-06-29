@@ -8139,7 +8139,7 @@ func RecordRequestEventBuild(args RecordRequestEventArgs) string {
 	return b.String()
 }
 
-// RecordResponsibilityEvaluation -- Record the outcome of an evaluation/run on a v1:planner:responsibility: stamp lastEvaluatedAt to now() and lastResult to the run headline. Called by the reactive-loop evaluator (epic #632) after a reactive condition check, a recurring scheduled tick, or a standing review. ownerUserId re-stamped from actor.userId (owned tier).
+// RecordResponsibilityEvaluation -- Record the outcome of an evaluation/run on a v1:planner:responsibility: stamp lastEvaluatedAt to now and lastResult to the run headline. Called by the reactive-loop evaluator (epic #632) after a reactive condition check, a recurring scheduled tick, or a standing review. ownerUserId re-stamped from actor.userId (owned tier).
 //
 // Bound concept: responsibility.
 type RecordResponsibilityEvaluationArgs struct {
@@ -8667,7 +8667,7 @@ func ReinforceActionBuild(args ReinforceActionArgs) string {
 	return b.String()
 }
 
-// ReinforceHarnessSemanticMemory -- Reinforce an existing v1:harness:semanticMemory (dedup path): take the engine-computed bumped confidence + reinforceCount, reset lastReinforced to now(), and replace sourceEpisodes with the merged/deduped provenance. No new belief row -- this is why re-running over the same episodes does not duplicate. ownerUserId re-stamped from actor.userId (owned tier).
+// ReinforceHarnessSemanticMemory -- Reinforce an existing v1:harness:semanticMemory (dedup path): take the engine-computed bumped confidence + reinforceCount, reset lastReinforced to now, and replace sourceEpisodes with the merged/deduped provenance. No new belief row -- this is why re-running over the same episodes does not duplicate. ownerUserId re-stamped from actor.userId (owned tier).
 //
 // Bound concept: semanticMemory.
 type ReinforceHarnessSemanticMemoryArgs struct {

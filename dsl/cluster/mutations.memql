@@ -100,12 +100,12 @@ mutate node createNode {
     region        string
   }
   insert {
-    id: coalesce(args.id, concat("node-", hash(concat(args.nodeType, ":", timestamp()))))
+    id: coalesce(args.id, concat("node-", hash(concat(args.nodeType, ":", now))))
     args.nodeType
     address: coalesce(args.address, "")
     parentId: ""
     health: coalesce(args.health, "healthy")
-    lastSeen: coalesce(args.lastSeen, timestamp())
+    lastSeen: coalesce(args.lastSeen, now)
     capabilities: coalesce(args.capabilities, [])
     labels: coalesce(args.labels, {})
     deploymentId: coalesce(args.deploymentId, "")

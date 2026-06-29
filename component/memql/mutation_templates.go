@@ -324,6 +324,25 @@ func (e *mutationTemplateEvaluator) evalValue(ctx context.Context, v any) (any, 
 	}
 }
 
+// evalOperandString evaluates a BARE (unquoted) operand pulled out of an
+// expression -- a coalesce / concat / cond argument. Quoted operands are
+// filtered by the callers (via isQuotedString) before reaching here, so a bare
+// `now` token here is unambiguously the reserved clock keyword and resolves to
+// the current timestamp. This is the only place a bare `now` becomes the clock
+// without first being rewritten to the `now()` call form: classifyScalarOrExpr
+// rewrites top-level bare scalars (`createdAt: now` -> `now()`), but it sees
+// the whole `coalesce(args.createdAt, now)` string as one expression and never
+// reaches the inner `now`. Resolving it here (rather than in the shared
+// evalString) keeps a top-level QUOTED `"now"` literal -- which arrives at
+// evalString as the bare text "now" with its quotes already stripped -- from
+// being mistaken for the clock. (epic #2298 / #2301.)
+func (e *mutationTemplateEvaluator) evalOperandString(ctx context.Context, raw string) (any, error) {
+	if strings.TrimSpace(raw) == "now" {
+		return e.now.Format(time.RFC3339Nano), nil
+	}
+	return e.evalString(ctx, raw)
+}
+
 func (e *mutationTemplateEvaluator) evalString(ctx context.Context, s string) (any, error) {
 	trimmed := strings.TrimSpace(s)
 	if trimmed == "" {
@@ -436,7 +455,15 @@ func (e *mutationTemplateEvaluator) evalString(ctx context.Context, s string) (a
 		}
 	}
 
-	// timestamp()/now()
+	// The clock. classifyScalarOrExpr rewrites a bare top-level `now` to the
+	// canonical call form `now()`, and the automation generator emits
+	// `timestamp()`, so the clock reaches this evaluator as a call form here.
+	// A bare `now` operand nested in an expression (e.g.
+	// `coalesce(args.createdAt, now)`) is resolved one level up by
+	// evalOperandString before it reaches this path -- NOT here, because a
+	// standalone top-level value of literally "now" only ever originates from
+	// a QUOTED string literal (`label: "now"`) that must stay the literal
+	// string, never the clock.
 	if trimmed == "timestamp()" || trimmed == "now()" {
 		return e.now.Format(time.RFC3339Nano), nil
 	}
@@ -598,8 +625,8 @@ func (e *mutationTemplateEvaluator) evalConcat(ctx context.Context, expr string)
 			b.WriteString(unquoteSafe(raw))
 			continue
 		}
-		// Evaluate as expression string (supports arg(), var(), timestamp(), concat(), hash())
-		ev, err := e.evalString(ctx, raw)
+		// Evaluate as expression string (supports arg(), var(), now, concat(), hash())
+		ev, err := e.evalOperandString(ctx, raw)
 		if err != nil {
 			return "", err
 		}
@@ -1090,7 +1117,7 @@ func (e *mutationTemplateEvaluator) evalCoalesce(ctx context.Context, expr strin
 		if isQuotedString(raw) {
 			ev = unquoteSafe(raw)
 		} else {
-			ev, err = e.evalString(ctx, raw)
+			ev, err = e.evalOperandString(ctx, raw)
 			if err != nil {
 				return nil, err
 			}
@@ -1146,7 +1173,7 @@ func (e *mutationTemplateEvaluator) evalCond(ctx context.Context, expr string) (
 	if isQuotedString(chosen) {
 		return unquoteSafe(chosen), nil
 	}
-	return e.evalString(ctx, chosen)
+	return e.evalOperandString(ctx, chosen)
 }
 
 func (e *mutationTemplateEvaluator) evalCondition(ctx context.Context, raw string) (bool, error) {
@@ -1570,17 +1597,18 @@ func classifyScalarOrExpr(raw string) any {
 		return false
 	case "null":
 		return nil
-	case "now", "timestamp":
-		// Bare `now` / `timestamp` are reserved engine identifiers that
-		// resolve to the RFC3339 timestamp captured at eval start (see
-		// the language arg-resolution table). They only reach here from
-		// the UNQUOTED object-literal path -- a quoted "now" comes through
-		// scanQuotedString and is never reclassified -- so mapping them to
-		// the canonical call form lets the existing evalString("now()")
-		// path stamp a real timestamp at render time. Without this, an
-		// authored `createdAt: now` / `updatedAt: now` was stored as the
-		// literal string "now" and rejected by date-time validation
-		// (memql#1629). Quoted "now" string literals are preserved.
+	case "now":
+		// Bare `now` is the reserved engine identifier for the current
+		// timestamp. It reaches here from the UNQUOTED object-literal
+		// (mutation insert/update value) path -- a quoted "now" comes through
+		// scanQuotedString and is never reclassified -- so mapping it to the
+		// canonical call form lets the existing evalString("now()") path stamp
+		// a real timestamp at render time. Without this, an authored
+		// `createdAt: now` was stored as the literal string "now" and rejected
+		// by date-time validation (memql#1629). The `timestamp` spelling is
+		// retired (epic #2298 / #2301): only bare `now` is the clock; a bare
+		// `timestamp` is now an ordinary identifier. Quoted "now" string
+		// literals are preserved.
 		return raw + "()"
 	}
 	if i, err := strconv.ParseInt(raw, 10, 64); err == nil {
