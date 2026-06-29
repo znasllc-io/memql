@@ -93,8 +93,8 @@ logic doStuff {
   }
   body {
     first := queryFoo({ partitionId: args.partitionId })
-    second := queryBar({ id: first.First().id })
-    return coalesce(second.First(), first.First())
+    second := queryBar({ id: first.first().id })
+    return coalesce(second.first(), first.first())
   }
 }`
 	body := parseLogicBody(t, src)
@@ -161,10 +161,10 @@ logic provisionThing {
   }
   body {
     existing := queryThing({ name: args.name })
-    created := if existing.Empty() {
+    created := if existing.empty() {
       mutationCreateThing({ name: args.name })
     }
-    return coalesce(created, existing.First())
+    return coalesce(created, existing.first())
   }
 }`
 	body := parseLogicBody(t, src)
@@ -317,10 +317,10 @@ logic logicSweep {
   }
   body {
     rows := queryFoo({ now: args.now })
-    for item := range rows.Nodes() {
+    for item := range rows.nodes() {
       tick := mutationBar({ id: item.id })
     }
-    return rows.Len()
+    return rows.count()
   }
 }`
 	body := parseLogicBody(t, src)
@@ -359,7 +359,7 @@ logic logicSweep {
 //
 // This is the path that lets revokeExpiredDelegations,
 // purgeExpired{ArchivedSpaces,PolicyTraces}, and the rest of the
-// `return X.Len()` family run end-to-end.
+// `return X.count()` family run end-to-end.
 func TestLogicRunner_TryEvaluateReturnLocally_PureStepMethod(t *testing.T) {
 	evaluator := NewEvaluator()
 	evaluator.SetStepResult("expiredDelegations", &StepResult{
@@ -375,37 +375,37 @@ func TestLogicRunner_TryEvaluateReturnLocally_PureStepMethod(t *testing.T) {
 		},
 	})
 
-	// .Len() -> count of nodes
-	val, handled, err := tryEvaluateReturnLocally("expiredDelegations.Len()", evaluator)
+	// .count() -> count of nodes
+	val, handled, err := tryEvaluateReturnLocally("expiredDelegations.count()", evaluator)
 	if err != nil {
 		t.Fatalf("tryEvaluateReturnLocally: %v", err)
 	}
 	if !handled {
-		t.Fatalf("expected handled=true for `expiredDelegations.Len()`; bound step ID should be recognised")
+		t.Fatalf("expected handled=true for `expiredDelegations.count()`; bound step ID should be recognised")
 	}
 	if val != 3 {
-		t.Errorf(".Len() = %#v, want 3", val)
+		t.Errorf(".count() = %#v, want 3", val)
 	}
 
-	// .Empty() -> false (3 nodes)
-	val, handled, err = tryEvaluateReturnLocally("expiredDelegations.Empty()", evaluator)
+	// .empty() -> false (3 nodes)
+	val, handled, err = tryEvaluateReturnLocally("expiredDelegations.empty()", evaluator)
 	if err != nil {
 		t.Fatalf("tryEvaluateReturnLocally: %v", err)
 	}
 	if !handled || val != false {
-		t.Errorf(".Empty() = (handled=%v val=%#v); want (true, false)", handled, val)
+		t.Errorf(".empty() = (handled=%v val=%#v); want (true, false)", handled, val)
 	}
 
-	// .First().id navigation
-	val, handled, err = tryEvaluateReturnLocally("expiredDelegations.First()", evaluator)
+	// .first().id navigation
+	val, handled, err = tryEvaluateReturnLocally("expiredDelegations.first()", evaluator)
 	if err != nil {
 		t.Fatalf("tryEvaluateReturnLocally: %v", err)
 	}
 	if !handled {
-		t.Errorf(".First() should be handled locally")
+		t.Errorf(".first() should be handled locally")
 	}
 	if m, ok := val.(map[string]any); !ok || m["id"] != "d1" {
-		t.Errorf(".First() = %#v, want first node {id: d1}", val)
+		t.Errorf(".first() = %#v, want first node {id: d1}", val)
 	}
 }
 
@@ -457,10 +457,10 @@ func TestLogicRunner_TryEvaluateReturnLocally_FallsThrough(t *testing.T) {
 		name string
 		expr string
 	}{
-		{"compound coalesce", `coalesce(rows.First(), "fallback")`},
+		{"compound coalesce", `coalesce(rows.first(), "fallback")`},
 		{"mutation call", `mutationCreateThing({name: "x"})`},
 		{"builtin call", `ensureDailySpaceForCaller({})`},
-		{"unknown step", `notARealStep.Len()`},
+		{"unknown step", `notARealStep.count()`},
 		{"bare unknown identifier", `notARealStep`},
 		{"single-segment call", `someFunc()`},
 		{"empty expr", ``},
@@ -480,7 +480,7 @@ func TestLogicRunner_TryEvaluateReturnLocally_FallsThrough(t *testing.T) {
 
 // TestLogicRunner_TryEvaluateBuiltinLocally_Coalesce pins the
 // positional-builtin short-circuit (#362). Before this lands,
-// `return coalesce(stepX, stepY.First())` and step-RHS
+// `return coalesce(stepX, stepY.first())` and step-RHS
 // `enabled := coalesce(args.X, true)` both fall through to
 // engine.Execute, which fails the lookup with `function "coalesce"
 // not found`. The local short-circuit evaluates each arg against
@@ -559,7 +559,7 @@ func TestLogicRunner_TryEvaluateBuiltinLocally_Coalesce(t *testing.T) {
 
 	t.Run("bare step ref + step.method() return values", func(t *testing.T) {
 		// Mirrors cluster/logic.memql line 52:
-		//   return coalesce(clusterRecord, existing.First())
+		//   return coalesce(clusterRecord, existing.first())
 		// When the create-branch ran, clusterRecord is bound. When it
 		// didn't, clusterRecord.Status=="skipped" and the fallback is
 		// the first existing row.
@@ -569,7 +569,7 @@ func TestLogicRunner_TryEvaluateBuiltinLocally_Coalesce(t *testing.T) {
 			Result: map[string]any{"id": "new-cluster"},
 		})
 		val, _, err := tryEvaluateBuiltinLocally(
-			`coalesce(clusterRecord, existing.First())`,
+			`coalesce(clusterRecord, existing.first())`,
 			evaluator,
 		)
 		if err != nil {
@@ -818,7 +818,7 @@ func TestTryEvaluateLiteralLocally_StrictMatching(t *testing.T) {
 	nonLiterals := []string{
 		"",
 		"someStep",
-		"rows.Len()",
+		"rows.count()",
 		"coalesce(a, b)",
 		`queryFoo({id: "x"})`,
 		"payload.active==true",
@@ -887,7 +887,7 @@ logic logicSeedKnowledgeDomains {
 }
 
 // emptyQueryStepRegistry is a step-registry stub whose every dispatched step
-// returns a result with zero rows, so a downstream `existing.Empty()` guard
+// returns a result with zero rows, so a downstream `existing.empty()` guard
 // evaluates true (the first-boot path where the seeded records do not yet
 // exist and the conditional mutation steps must fire). It records each
 // dispatched step ID so a test can assert exactly which steps reached the
@@ -904,7 +904,7 @@ func (r *emptyQueryStepRegistry) Execute(_ context.Context, step *Step, _ *StepC
 		Status:      "success",
 		StartedAt:   now,
 		CompletedAt: now,
-		// Empty Bundle -> GetStepNodes returns zero nodes -> .Empty() == true.
+		// Empty Bundle -> GetStepNodes returns zero nodes -> .empty() == true.
 		Result: map[string]any{"Bundle": map[string]any{"nodes": []any{}}},
 	}, nil
 }
@@ -913,14 +913,14 @@ func (r *emptyQueryStepRegistry) Execute(_ context.Context, step *Step, _ *StepC
 // staging seed automation that failed at boot with the SAME filterless-query
 // guard error -- `logicSeedWelcomeCurriculum` (memql#1129). Its body has a
 // distinct shape from logicSeedKnowledgeDomains: a lookup query, then several
-// CONDITIONAL mutation steps gated on `existing.Empty()`, then a bare literal
+// CONDITIONAL mutation steps gated on `existing.empty()`, then a bare literal
 // `return 1` --
 //
 //	logic logicSeedWelcomeCurriculum {
 //	  body {
 //	    existing := queryCurriculumBySlug({ slug: "copresent.welcome.v1" })
-//	    insertCurriculum := if existing.Empty() { mutationCreateCurriculum({...}) }
-//	    insertGreeting    := if existing.Empty() { mutationCreateSegment({...}) }
+//	    insertCurriculum := if existing.empty() { mutationCreateCurriculum({...}) }
+//	    insertGreeting    := if existing.empty() { mutationCreateSegment({...}) }
 //	    return 1
 //	  }
 //	}
@@ -943,7 +943,7 @@ logic logicSeedWelcomeCurriculum {
   }
   body {
     existing := queryCurriculumBySlug({ slug: "copresent.welcome.v1" })
-    insertCurriculum := if existing.Empty() {
+    insertCurriculum := if existing.empty() {
       mutationCreateCurriculum({
         curriculumId: "v1:curriculum:curriculum:copresent-welcome-v1",
         slug: "copresent.welcome.v1",
@@ -952,7 +952,7 @@ logic logicSeedWelcomeCurriculum {
         active: true
       })
     }
-    insertGreeting := if existing.Empty() {
+    insertGreeting := if existing.empty() {
       mutationCreateSegment({
         segmentId: "v1:curriculum:segment:copresent-welcome-v1-greeting",
         curriculumId: "v1:curriculum:curriculum:copresent-welcome-v1",

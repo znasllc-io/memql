@@ -111,14 +111,14 @@ func TestEvaluateHash_ProducesSHA256Hex(t *testing.T) {
 }
 
 // TestCoalesce_StepMethodAccessorResolves exercises the exact expression
-// that broke bootstrapIdentity: coalesce(stepId.First().payload.value,
+// that broke bootstrapIdentity: coalesce(stepId.first().payload.value,
 // "fallback") where the step result is empty. The expected outcome is
 // that the method accessor normalizes to .first, the path resolves to
 // nil (empty step), and coalesce returns "fallback".
 //
-// Before the normalizer, .First() tripped LooksLikePath (parens not
+// Before the normalizer, .first() tripped LooksLikePath (parens not
 // allowed), the first coalesce arg resolved to the raw string
-// "autoRole.First().payload.value", coalesce treated that non-nil string
+// "autoRole.first().payload.value", coalesce treated that non-nil string
 // as the winning branch, and downstream enum validation rejected the
 // raw expression text.
 func TestCoalesce_StepMethodAccessorResolves(t *testing.T) {
@@ -130,7 +130,7 @@ func TestCoalesce_StepMethodAccessorResolves(t *testing.T) {
 		Metadata: map[string]any{"itemCount": 0},
 	})
 
-	got, err := resolveArgValueRef(`coalesce(autoRole.First().payload.value, "writer")`, eval)
+	got, err := resolveArgValueRef(`coalesce(autoRole.first().payload.value, "writer")`, eval)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

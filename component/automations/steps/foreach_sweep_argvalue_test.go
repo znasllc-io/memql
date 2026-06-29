@@ -20,7 +20,7 @@ import (
 // + an automation that does the per-row WRITE via a step-wrapped forEach:
 //
 //	step decide { logic <pure> { event: event } }
-//	step apply  { forEach item in decide.Nodes() { mut({ id: item.id, ... }) } }
+//	step apply  { forEach item in decide.nodes() { mut({ id: item.id, ... }) } }
 //
 // For the destructive sweeps (accountDeletionSweep -> deleteUserHard) and the
 // safety sweep (killSwitchSuspendsRunningPlans -> updatePlanStatus) it is not
@@ -120,7 +120,7 @@ func TestForEachSweep_BareWrite_PerRowArgs(t *testing.T) {
 automation sweepBare {
   step decide { logic decideRows { event: event } }
   step apply {
-    forEach item in decide.Nodes() {
+    forEach item in decide.nodes() {
       mutate markRow { rowId: item.id, label: item.payload.label }
     }
   }
@@ -160,7 +160,7 @@ func TestForEachSweep_ConditionalWrite_GatesPerRow(t *testing.T) {
 automation sweepConditional {
   step decide { logic decideRows { event: event } }
   step apply {
-    forEach item in decide.Nodes() {
+    forEach item in decide.nodes() {
       if item.payload.label == "expired" {
         mutate retireRow { rowId: item.id }
       }
@@ -202,7 +202,7 @@ func TestForEachSweep_KillSwitch_EventGate(t *testing.T) {
 automation killSwitch {
   step decide { logic decideRows { event: event } }
   step apply {
-    forEach item in decide.Nodes() {
+    forEach item in decide.nodes() {
       if exists(item.payload.computerUseScope) && event.node.payload.preferences.computerUseEnabled == false {
         updatePlanStatus { planId: item.id, status: "awaitingFeedback", feedbackReason: "kill_switch_engaged" }
       }
@@ -279,7 +279,7 @@ func TestForEachSweep_ReleaseWorkspace(t *testing.T) {
 automation rw {
   step decide { logic decideRows { event: event } }
   step apply {
-    forEach item in decide.Nodes() {
+    forEach item in decide.nodes() {
       if item.payload.status == "provisioned" && (event.node.payload.status == "succeeded" || event.node.payload.status == "failed" || event.node.payload.status == "cancelled") {
         releaseWorkspace { workspaceId: item.id, reason: "plan_terminal" }
       }

@@ -13,11 +13,11 @@ import (
 // builds the GA participant id via
 //
 //	getGA := coalesce(getActiveGA, getFallbackGA)
-//	... agentId: coalesce(getGA.First().id, "")
+//	... agentId: coalesce(getGA.first().id, "")
 //
 // Before the fix, `getActiveGA` fell through to EvaluateString and resolved to
 // the literal string "getActiveGA", so coalesce returned that string, getGA had
-// no navigable nodes, and the unevaluated `coalesce(getGA.First().id, "")`
+// no navigable nodes, and the unevaluated `coalesce(getGA.first().id, "")`
 // literal flowed into the mutation as the agentId -- a ghost AI on every fresh
 // daily space.
 
@@ -44,7 +44,7 @@ func resolveAutoJoinGAId(t *testing.T, active, fallback *automations.StepResult)
 	}
 	eval.SetStepResult("getGA", &automations.StepResult{StepId: "getGA", Status: "success", Result: ga})
 
-	id, err := exec.evaluateValue(eval, `coalesce(getGA.First().id, "")`)
+	id, err := exec.evaluateValue(eval, `coalesce(getGA.first().id, "")`)
 	if err != nil {
 		t.Fatalf("evaluating agentId: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestBareStepIdentifier_AutoJoinAI_FallbackAgent(t *testing.T) {
 
 func TestBareStepIdentifier_AutoJoinAI_NoAgent(t *testing.T) {
 	// The fired query returned zero rows and the other branch was skipped: there
-	// is genuinely no GA. The id must resolve to nil/"" so the `!getGA.Empty()`
+	// is genuinely no GA. The id must resolve to nil/"" so the `!getGA.empty()`
 	// guard suppresses the join -- NOT to a literal expression.
 	active := &automations.StepResult{StepId: "getActiveGA", Status: "success", Result: bundleResult()} // empty rowset
 	fallback := &automations.StepResult{StepId: "getFallbackGA", Status: "skipped"}
@@ -118,19 +118,19 @@ func TestBareIdentifier_NonStep_StaysLiteral(t *testing.T) {
 
 // Fail-closed regression for memql#580: a builtin expression arg that does not
 // resolve must NOT pass its raw source text through into the mutation arg.
-// Previously `coalesce(getGA.First().id, "")` over a missing/garbage getGA
-// returned the literal string `coalesce(getGA.First().id, "")`, which became
+// Previously `coalesce(getGA.first().id, "")` over a missing/garbage getGA
+// returned the literal string `coalesce(getGA.first().id, "")`, which became
 // the ghost AI agentId. resolveArgValueRef must now return nil instead.
 func TestResolveArgValueRef_UnresolvedBuiltin_DropsToNil(t *testing.T) {
 	eval := automations.NewEvaluator()
 	// Reproduce the exact production pre-fix state: getGA is PRESENT but holds a
 	// non-navigable value (the literal step name "getActiveGA" the broken
-	// logic-runner coalesce produced before memql#580 item 1). getGA.First().id
+	// logic-runner coalesce produced before memql#580 item 1). getGA.first().id
 	// then resolves to nil, coalesce's "" arm is empty (skipped), so the whole
 	// expression is nil -- and must NOT pass the raw literal through.
 	eval.SetStepResult("getGA", &automations.StepResult{StepId: "getGA", Status: "success", Result: "getActiveGA"})
 
-	got, err := resolveArgValueRef(`coalesce(getGA.First().id, "")`, eval)
+	got, err := resolveArgValueRef(`coalesce(getGA.first().id, "")`, eval)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

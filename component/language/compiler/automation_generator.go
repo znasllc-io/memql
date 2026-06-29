@@ -35,13 +35,14 @@ func bareDottedIdentifier(s string) bool {
 }
 
 // stepMethodAccessorPath reports whether s is a dotted reference whose only
-// non-identifier segments are no-arg method accessors -- `First()`, `Last()`,
-// `Empty()`, `Count()`, `Len()`, `Nodes()`, `Ran()` (the step-result accessors
-// the runtime evaluator understands and normalizeStepMethodAccessors rewrites
-// to dotted shorthand). Examples that match:
+// non-identifier segments are no-arg method accessors -- `first()`, `last()`,
+// `empty()`, `count()`, `nodes()`, `Ran()` (the step-result accessors the
+// runtime evaluator understands and normalizeStepMethodAccessors rewrites to
+// dotted shorthand; Story 5 / #2303 retired the capitalized aliases except
+// `Ran()`). Examples that match:
 //
-//	existing.First().payload.attachmentIds
-//	rows.Last().id
+//	existing.first().payload.attachmentIds
+//	rows.last().id
 //
 // This is the unquoted-runtime-reference companion to bareDottedIdentifier for
 // the method-accessor case (which bareDottedIdentifier rejects because the
@@ -269,14 +270,14 @@ func isRuntimeReference(s string) bool {
 		return true
 	}
 
-	// Step-method-accessor paths (e.g. `existing.First().payload.attachmentIds`)
+	// Step-method-accessor paths (e.g. `existing.first().payload.attachmentIds`)
 	// are runtime references too. The parser captures these as raw source-text
 	// strings when they appear as a positional-builtin operand (e.g. the array
-	// arg of `append(existing.First().payload.attachmentIds, args.x)`). Without
+	// arg of `append(existing.first().payload.attachmentIds, args.x)`). Without
 	// this check valueToString quotes the whole thing into a STRING LITERAL --
 	// so it never resolves against the step result and the literal source text
 	// leaks into the write (the #1848 `["existing.first.payload.attachmentIds",
-	// ...]` corruption). Recognise the `<ident>.First()/.Last()/...` shape and
+	// ...]` corruption). Recognise the `<ident>.first()/.last()/...` shape and
 	// keep it unquoted so the evaluator's resolvePath navigates the step result.
 	if stepMethodAccessorPath(strings.TrimSpace(s)) {
 		return true
@@ -1285,6 +1286,22 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 			args[i] = c.expressionToString(arg)
 		}
 		return fmt.Sprintf("or(%s)", strings.Join(args, ", "))
+
+	case *parser.MethodCallExpr:
+		// A `<receiver>.<method>(<args>)` chain. Story 5 (ADR §2.2 / #2303)
+		// unified the step-result accessors on the lowercase spelling
+		// (`existing.first()`, `rows.count()`, `found.empty()`), which the
+		// parser now lexes into a MethodCallExpr because those names overlap
+		// the Story 4 (#2302) collection-method set. Round-trip the chain back
+		// to its source text so a logic-body `return existing.first()` reaches
+		// the runtime as a navigable step reference (the local Evaluator's
+		// EvaluateStepReference resolves it via resolvePath's step-accessor
+		// cases) instead of leaking the Go `%T` type name as a literal.
+		args := make([]string, len(e.Args))
+		for i, a := range e.Args {
+			args[i] = c.expressionToString(a)
+		}
+		return fmt.Sprintf("%s.%s(%s)", c.expressionToString(e.Receiver), e.Method, strings.Join(args, ", "))
 
 	default:
 		// SAFETY: emitting `%T` here puts the Go type name (e.g.

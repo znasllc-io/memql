@@ -157,7 +157,7 @@ func TestBootstrapCluster_CompilesToDecideThenGatedCreates(t *testing.T) {
 // logic's decision (the `decide` result) and the trigger envelope, the create
 // steps fire under "bff + no cluster (+ idp present for the idp row)" and are
 // skipped otherwise. This is the behavioral half -- that the relocated
-// condition reproduces the original `if existing.Empty() && node.type=="bff"
+// condition reproduces the original `if existing.empty() && node.type=="bff"
 // (&& identityProvider != nil)` guards.
 func TestBootstrapCluster_GateSemantics(t *testing.T) {
 	const (

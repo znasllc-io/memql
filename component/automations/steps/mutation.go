@@ -170,25 +170,27 @@ func (e *MutationExecutor) evaluatePayload(evaluator *automations.Evaluator, pay
 
 // stepMethodAccessors maps MemQL's method-style step accessors to their
 // dotted-shorthand form that the engine evaluator's resolvePath understands.
-// The engine accepts both forms (see resolvePath in evaluator.go); the
-// arg-time resolver only recognizes the dotted form, so we normalize here.
+// resolvePath navigates the dotted form (see evaluator.go); the arg-time
+// resolver only recognizes the dotted form, so we normalize the call form
+// here. Story 5 (ADR §2.2 / #2303) retired the capitalized aliases, so the
+// canonical lowercase spellings are the only ones normalized (`.Ran()` is the
+// lone capitalized survivor -- it has no lowercase pair).
 //
-// Without this, expressions like autoRole.First().payload.value end up
+// Without this, expressions like autoRole.first().payload.value end up
 // failing LooksLikePath (which rejects parens) and fall through to
 // EvaluateString -- which returns the raw string, defeating any wrapping
 // coalesce() or cond() that depends on detecting nil to pick a fallback.
 var stepMethodAccessors = map[string]string{
-	".First()": ".first",
-	".Last()":  ".last",
-	".Empty()": ".empty",
-	".Count()": ".count",
-	".Len()":   ".count",
-	".Nodes()": ".nodes",
-	".Ran()":   ".ran",
+	".first()": ".first",
+	".last()":  ".last",
+	".empty()": ".empty",
+	".count()": ".count",
+	".nodes()": ".nodes",
+	".Ran()":   ".Ran",
 }
 
 // normalizeStepMethodAccessors rewrites any occurrence of a method-style
-// step accessor (e.g. ".First()") to its dotted-shorthand equivalent
+// step accessor (e.g. ".first()") to its dotted-shorthand equivalent
 // (e.g. ".first"), preserving the rest of the expression. Safe to call
 // on any string -- if no method accessor is present, the string is
 // returned unchanged.
@@ -205,7 +207,7 @@ func normalizeStepMethodAccessors(s string) string {
 func (e *MutationExecutor) evaluateValue(evaluator *automations.Evaluator, value any) (any, error) {
 	switch v := value.(type) {
 	case string:
-		// Normalize step method accessors up-front: autoRole.First().payload.value
+		// Normalize step method accessors up-front: autoRole.first().payload.value
 		// -> autoRole.first.payload.value. Downstream resolvers understand the
 		// dotted-shorthand form; they do not understand the method form.
 		v = normalizeStepMethodAccessors(v)
@@ -341,7 +343,7 @@ func (e *MutationExecutor) evaluateValue(evaluator *automations.Evaluator, value
 		// passes its step args here as bare identifiers; without this they fall
 		// through to EvaluateString below and render as their OWN NAME (a literal
 		// string), which is non-nil/non-empty -- so coalesce returns the string
-		// "getActiveGA" and the chained `getGA.First().id` read finds no nodes,
+		// "getActiveGA" and the chained `getGA.first().id` read finds no nodes,
 		// silently defeating autoJoinAI -> ghost AI (memql#574). Guarded on a
 		// real step id so non-step bare literals keep their prior behaviour.
 		if isBareStepIdentifier(v) {

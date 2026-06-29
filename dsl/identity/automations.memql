@@ -18,7 +18,7 @@ automation accessRequestExpirySweep {
   }
   step apply {
     forEach item in decide.result {
-      if addDuration(item.createdAt, concat("P", coalesce(window.First().payload.value, "30"), "D")) < now {
+      if addDuration(item.createdAt, concat("P", coalesce(window.first().payload.value, "30"), "D")) < now {
         expireAccessRequest {
           requestId: item.id
         }
@@ -148,7 +148,7 @@ automation accountDeletionSweep {
   }
   step apply {
     forEach item in decide.result {
-      if addDuration(item.payload.deletionScheduledAt, concat("P", coalesce(window.First().payload.value, "30"), "D")) < now {
+      if addDuration(item.payload.deletionScheduledAt, concat("P", coalesce(window.first().payload.value, "30"), "D")) < now {
         deleteUserHard {
           userId: item.id
         }
@@ -213,7 +213,7 @@ automation expireDelegations {
     logic revokeExpiredDelegations { now: now }
   }
   step apply {
-    forEach item in decide.Nodes() {
+    forEach item in decide.nodes() {
       revokeDelegation {
         delegationId: item.id,
         revokedBySubject: "system:expiry",
@@ -260,7 +260,7 @@ automation magicLinkExpirySweep {
     logic magicLinkExpirySweep { event: event }
   }
   step apply {
-    forEach item in decide.Nodes() {
+    forEach item in decide.nodes() {
       consumeMagicLinkRequest {
         requestId: item.id,
         consumedFromIP: "system:expiry"

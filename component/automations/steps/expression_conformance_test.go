@@ -20,10 +20,14 @@ package steps
 //     evaluators bottom out in (arg-time evaluateValue vs the logic-time leaf
 //     Evaluator.EvaluateValue).
 //   - localExprCases: the local-expression subset logic bodies actually use --
-//     coalesce + step-method calls (.First()/.Len()/.Empty()) AND a method-THEN-
+//     coalesce + step-method calls (.first()/.count()/.empty()) AND a method-THEN-
 //     field path inside a coalesce arg (the ghost-AI shape) -- run through the
 //     FULL logic-time path (EvaluateLocalExpr) vs arg-time evaluateValue. They
 //     all converge.
+//
+// Story 5 (ADR §2.2 / #2303) retired the legacy capitalized accessor spelling
+// (.First()/.Len()/.Empty()/.Last()/.Nodes()); only the lowercase forms resolve
+// now. TestStepMethodAccessors_CapitalizedRetired pins that retirement.
 
 import (
 	"fmt"
@@ -150,19 +154,19 @@ var localExprCases = []conformanceCase{
 	{
 		name:  "step_method_first",
 		setup: seedStep("rows", nodeResult("v1:x:1", map[string]any{"k": "v"}), "success"),
-		expr:  "rows.First()",
+		expr:  "rows.first()",
 		want:  map[string]any{"id": "v1:x:1", "payload": map[string]any{"k": "v"}},
 	},
 	{
-		name:  "step_method_len",
+		name:  "step_method_count",
 		setup: seedStep("rows", nodeResult("v1:x:1", nil), "success"),
-		expr:  "rows.Len()",
+		expr:  "rows.count()",
 		want:  1,
 	},
 	{
 		name:  "step_method_empty_false",
 		setup: seedStep("rows", nodeResult("v1:x:1", nil), "success"),
-		expr:  "rows.Empty()",
+		expr:  "rows.empty()",
 		want:  false,
 	},
 	{
@@ -171,9 +175,48 @@ var localExprCases = []conformanceCase{
 		// than ever flowing the raw expression text (memql#593).
 		name:  "coalesce_method_then_field",
 		setup: seedStep("rows", nodeResult("v1:x:1", map[string]any{"k": "v"}), "success"),
-		expr:  `coalesce(rows.First().id, "")`,
+		expr:  `coalesce(rows.first().id, "")`,
 		want:  "v1:x:1",
 	},
+}
+
+// TestStepMethodAccessors_CapitalizedRetired pins Story 5 (ADR §2.2 / #2303):
+// the legacy capitalized accessor spelling no longer resolves through either
+// evaluator. The logic-time path errors ("unknown StepResult field: First"),
+// and the arg-time path falls through to the raw, unresolved expression text
+// (never the resolved value). Either way, the capitalized form is no longer a
+// working accessor -- the lowercase localExprCases above are the live surface.
+func TestStepMethodAccessors_CapitalizedRetired(t *testing.T) {
+	retired := []string{"rows.First()", "rows.Len()", "rows.Empty()", "rows.Last()", "rows.Nodes()"}
+	for _, expr := range retired {
+		expr := expr
+		t.Run(expr, func(t *testing.T) {
+			seed := seedStep("rows", nodeResult("v1:x:1", map[string]any{"k": "v"}), "success")
+
+			// Logic-time path: must NOT resolve to a value (errors on the
+			// unknown capitalized field).
+			if _, err := logicLocal(seededEvaluator(seed), expr); err == nil {
+				t.Fatalf("logicLocal(%q) resolved, but the capitalized accessor was retired (#2303)", expr)
+			}
+
+			// Arg-time path: falls through to the raw, unresolved literal.
+			got, err := argTime(seededEvaluator(seed), expr)
+			if err != nil {
+				t.Fatalf("argTime(%q): unexpected error: %v", expr, err)
+			}
+			if got != expr {
+				t.Fatalf("argTime(%q) = %#v, want the raw unresolved literal %q (capitalized accessor retired, #2303)", expr, got, expr)
+			}
+		})
+	}
+}
+
+func seededEvaluator(setup func(*automations.Evaluator)) *automations.Evaluator {
+	eval := automations.NewEvaluator()
+	if setup != nil {
+		setup(eval)
+	}
+	return eval
 }
 
 func TestExpressionEvaluators_Conformance(t *testing.T) {

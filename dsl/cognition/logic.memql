@@ -67,7 +67,7 @@ logic bootstrapSession {
   // Check if session already exists for this participant; decide create-or-not.
   checkExistingSession := participantSession({ participantId: args.event.payload.id })
 
-  return checkExistingSession.Empty()
+  return checkExistingSession.empty()
   }
 }
 
@@ -108,7 +108,7 @@ logic generateResponse {
   })
 
   // Generate the AI response via the prompt template (only when not already answered).
-  aiResponse := if existingResponse.Empty() {
+  aiResponse := if existingResponse.empty() {
     ai(args.event.payload.promptTemplateId, args.event.payload.promptData)
   }
 
@@ -174,7 +174,7 @@ logic voiceMigrationOnSecondHuman {
   // 2. ANY OTHER count is a no-op (single user = first to focus the
   // space; 3+ = already migrated; 0 wouldn't appear here because the
   // event filter required a non-empty activePartitionId on the writer).
-  publishGroupCard := if active.Count() == 2 {
+  publishGroupCard := if active.count() == 2 {
     mutationCreateCanvasState({
       stateId: concat("voice-migrated-public-", hash(args.event.payload.activePartitionId)),
       space: args.event.payload.activePartitionId,
@@ -189,7 +189,7 @@ logic voiceMigrationOnSecondHuman {
     })
   }
 
-  publishPrivateCard := if active.Count() == 2 {
+  publishPrivateCard := if active.count() == 2 {
     mutationCreateCanvasState({
       stateId: concat("voice-migrated-private-", hash(concat(
         args.event.payload.activePartitionId, ":", args.event.payload.id

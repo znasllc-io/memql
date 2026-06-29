@@ -62,7 +62,7 @@ func runObjectLiteralReturn(t *testing.T, e *Env) {
   args { event object @required }
   body {
     found := participantSession({ participantId: args.event.payload.id })
-    return { wasEmpty: found.Empty(), pid: args.event.payload.id, lit: "constant" }
+    return { wasEmpty: found.empty(), pid: args.event.payload.id, lit: "constant" }
   }
 }`
 	body := parseLogicForTest(t, src)

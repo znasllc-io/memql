@@ -31,14 +31,14 @@ logic revokeExpiredDelegations {
   }
   body {
     expiredDelegations := expiredActiveDelegations({ now: args.now })
-    for item := range expiredDelegations.Nodes() {
+    for item := range expiredDelegations.nodes() {
       revokeStep := revokeDelegation({
         delegationId: item.id,
         revokedBySubject: "system:expiry",
         revokedAt: args.now
       })
     }
-    return expiredDelegations.Len()
+    return expiredDelegations.count()
   }
 }
 `
@@ -257,7 +257,7 @@ logic logicSample {
 
 // TestTopLevelMultiStatementIfWithForRange pins the workbench
 // releaseWorkspaceOnPlanTerminal shape -- an outer `if cond`
-// with an inner `for item := range x.Nodes() { ... }` plus a
+// with an inner `for item := range x.nodes() { ... }` plus a
 // trailing statement. The for-range inner steps must inherit the
 // outer if's condition so the mutation only runs when the gate is
 // open; ifStatementToSteps' walk into ForEachStepConfig.Do handles
@@ -273,7 +273,7 @@ logic logicSample {
     planId := someQuery({ id: args.event.id })
     if planId != "" {
       workspaces := workspaceForPlan({ planId: planId })
-      for item := range workspaces.Nodes() {
+      for item := range workspaces.nodes() {
         flip := if item.payload.status == "provisioned" {
           someMutation({ id: item.id })
         }
@@ -408,12 +408,12 @@ logic logicSample {
   }
   body {
     workspaces := queryFoo({ planId: "x" })
-    for item := range workspaces.Nodes() {
+    for item := range workspaces.nodes() {
       flip := if item.payload.status == "provisioned" {
         mutationBar({ id: item.id, reason: "x" })
       }
     }
-    return workspaces.Len()
+    return workspaces.count()
   }
 }
 `
@@ -453,10 +453,10 @@ logic logicSample {
   }
   body {
     rows := someQuery({ now: args.now })
-    for item := range rows.Nodes() {
+    for item := range rows.nodes() {
       tick := someMutation({ id: item.id })
     }
-    return rows.Len()
+    return rows.count()
   }
 }
 `

@@ -14,7 +14,7 @@ import (
 // The autoJoinAI logic body derives the GA participant id with:
 //
 //	getGA := coalesce(getActiveGA, getFallbackGA)   // logic-runner path
-//	... agentId: coalesce(getGA.First().id, "")     // arg-time path (memql#575)
+//	... agentId: coalesce(getGA.first().id, "")     // arg-time path (memql#575)
 //
 // memql#575 taught only the ARG-TIME evaluator to resolve a bare step
 // identifier to its result. The LOGIC-RUNNER path (which evaluates
@@ -22,8 +22,8 @@ import (
 // Evaluator.EvaluateStepReference -> EvaluateValue, which still rendered a
 // bare step name as its OWN LITERAL STRING. So `getGA` held the string
 // "getActiveGA" instead of the query's *ExecuteResult, every downstream
-// getGA.First().id collapsed to nil, and the unevaluated
-// coalesce(getGA.First().id, "") literal flowed into the mutation as the
+// getGA.first().id collapsed to nil, and the unevaluated
+// coalesce(getGA.first().id, "") literal flowed into the mutation as the
 // agentId -> ghost AI.
 //
 // These tests pin the fix: a bare identifier that names a KNOWN step now
