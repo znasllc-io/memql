@@ -29,7 +29,7 @@ package annotations
 // the editor projection of each decl parser's accepted set.
 var ByReceiver = map[string][]string{
 	"Query": {
-		"description", "enabled", "disabled", "internal", "public", "mcp", "unbounded", "cache", "nocache",
+		"description", "enabled", "disabled", "internal", "public", "mcp", "unbounded", "cache", "nocache", "latestMode",
 	},
 	"Mutation": {
 		"description", "enabled", "disabled", "internal", "actor", "public",
@@ -98,6 +98,8 @@ var Docs = map[string]string{
 	"sideEffect": "On an action: coarse risk class @sideEffect(\"read\"|\"write\"|\"exec\") carried for authoring + the surface-aware trust gate. The AUTHORITATIVE sideEffectClass lives on the capability (ADR §7) so an authored/generated action cannot spoof it.",
 	// Pagination opt-out (epic 5, memql#1965).
 	"unbounded": "On a list-returning query: opt out of the pagination authoring rule and the implicit 50-row runtime cap. Format: @unbounded(\"reason\"). The reason string is REQUIRED -- it documents why this query is a legitimate full-set read (small bounded catalog, sweep job, etc.) and is enumerated by the pagination audit report. A query that paginates/sorts is already bounded and must NOT carry @unbounded; the engine clamps the realized window to MEMORY_ENGINE_MAX_WINDOW regardless. See docs/public/language/authoring-rules.md.",
+	// Temporal-access visibility (core-builtins ADR §2.3, memql#2305).
+	"latestMode": "On a query: marks the query as time-dependent because it reads `asOf latest` (the live tip of the append-only stream), so its result is clock-dependent / not reproducible. The engine AUTO-DERIVES this from a `asOf latest` clause in the body, so the annotation is an explicit, reader-facing restatement of that contract -- not a switch. A query with `asOf <explicit timestamp>` is deterministic and is NOT time-dependent. See core-builtins-and-collections-adr.md §2.3.",
 	// MCP promotion (epic memql#1529 Phase 4 #1534).
 	"mcp": "Expose this construct on the MCP connector surface. On a query/mutation/automation it promotes the construct into its own first-class MCP tool (otherwise it stays reachable via the generic run_query / run_mutation / run_automation dispatchers). On a tool it opts the tool into the curated connector allowlist: once ANY tool carries @mcp, tools/list reflects only @mcp tools (otherwise -- zero tagged -- the full tool surface is reflected, so the annotation is inert until the curated set is tagged).",
 	// Tool.
