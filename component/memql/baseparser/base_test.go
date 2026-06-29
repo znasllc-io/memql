@@ -320,8 +320,8 @@ func TestValidateConstructAnnotations(t *testing.T) {
 	// Plain happy-path: only allow-listed annotations present.
 	src := `@enabled
 @description("x")
-spec foo {
-  payload.x == 1
+spec activeRowTrait foo {
+  return x == 1
 }`
 	allowed := map[string]bool{"description": true, "enabled": true, "shape": true}
 	if err := ValidateConstructAnnotations(src, "spec", allowed); err != nil {
@@ -330,7 +330,7 @@ spec foo {
 
 	src2 := `@description("x")
 @bogus
-spec foo { true }`
+spec activeRowTrait foo { return true }`
 	err := ValidateConstructAnnotations(src2, "spec", allowed)
 	if err == nil {
 		t.Fatal("expected error for @bogus")
@@ -345,7 +345,7 @@ spec foo { true }`
 	// the per-construct annotations.
 	srcUse := `@description("x")
 @useShape(participantFull)
-spec foo { payload.x == 1 }`
+spec activeRowTrait foo { return x == 1 }`
 	allowedWithUse := map[string]bool{"description": true, "useShape": true}
 	if err = ValidateConstructAnnotations(srcUse, "spec", allowedWithUse); err == nil {
 		t.Fatal("expected @useShape to be rejected post-lockdown")

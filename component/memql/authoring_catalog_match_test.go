@@ -9,12 +9,12 @@ import (
 // different names produce the same match text.
 func TestCatalogMatchText_NameIndependent(t *testing.T) {
 	a, err := CatalogMatchText("spec", `@description("Caller is admin")
-spec isAdmin { actor.role == "admin" }`)
+spec actorEnvelope isAdmin { return role == "admin" }`)
 	if err != nil {
 		t.Fatalf("a: %v", err)
 	}
 	b, err := CatalogMatchText("spec", `@description("Caller is admin")
-spec adminCheck { actor.role=="admin" }`)
+spec actorEnvelope adminCheck { return role=="admin" }`)
 	if err != nil {
 		t.Fatalf("b: %v", err)
 	}
@@ -30,9 +30,9 @@ spec adminCheck { actor.role=="admin" }`)
 // text differs (intent is part of the semantic signal).
 func TestCatalogMatchText_IntentMatters(t *testing.T) {
 	a, _ := CatalogMatchText("spec", `@description("admin only")
-spec s { actor.role == "admin" }`)
+spec actorEnvelope s { return role == "admin" }`)
 	b, _ := CatalogMatchText("spec", `@description("owner only")
-spec s { actor.role == "admin" }`)
+spec actorEnvelope s { return role == "admin" }`)
 	if a == b {
 		t.Errorf("different descriptions should yield different match text, both = %q", a)
 	}
@@ -41,7 +41,7 @@ spec s { actor.role == "admin" }`)
 // TestCatalogMatchText_NoDescription: works (form only) when there is no
 // @description.
 func TestCatalogMatchText_NoDescription(t *testing.T) {
-	got, err := CatalogMatchText("spec", `spec s { actor.role == "admin" }`)
+	got, err := CatalogMatchText("spec", `spec actorEnvelope s { return role == "admin" }`)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestCatalogMatchText_NoDescription(t *testing.T) {
 
 // TestCatalogMatchText_BadSource: unparseable source errors.
 func TestCatalogMatchText_BadSource(t *testing.T) {
-	if _, err := CatalogMatchText("spec", `spec broken { actor.role == }`); err == nil {
+	if _, err := CatalogMatchText("spec", `spec actorEnvelope broken { return role == }`); err == nil {
 		t.Errorf("expected an error for unparseable source")
 	}
 }
@@ -66,10 +66,10 @@ func TestCatalogMatchText_BadSource(t *testing.T) {
 // uses matching descriptions (here: none); a same-predicate construct with a
 // DIFFERENT description is intentionally a fuzzy-tier match, not exact.
 func TestDecideReuse_ExactMatch(t *testing.T) {
-	key, _ := CatalogKey("spec", `spec isAdmin { actor.role == "admin" }`)
+	key, _ := CatalogKey("spec", `spec actorEnvelope isAdmin { return role == "admin" }`)
 	catalog := []CatalogEntry{{Name: "isAdmin", Kind: "spec", CatalogKey: key}}
 
-	d, err := DecideReuse("spec", `spec wantAdmin { actor.role=="admin" }`, catalog)
+	d, err := DecideReuse("spec", `spec actorEnvelope wantAdmin { return role=="admin" }`, catalog)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -86,11 +86,11 @@ func TestDecideReuse_ExactMatch(t *testing.T) {
 // similarTo tier (which will recognize the high semantic similarity).
 func TestDecideReuse_DifferentDescriptionIsFuzzy(t *testing.T) {
 	key, _ := CatalogKey("spec", `@description("is administrator")
-spec isAdmin { actor.role == "admin" }`)
+spec actorEnvelope isAdmin { return role == "admin" }`)
 	catalog := []CatalogEntry{{Name: "isAdmin", Kind: "spec", CatalogKey: key}}
 
 	d, err := DecideReuse("spec", `@description("admin gate")
-spec wantAdmin { actor.role=="admin" }`, catalog)
+spec actorEnvelope wantAdmin { return role=="admin" }`, catalog)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -105,11 +105,11 @@ spec wantAdmin { actor.role=="admin" }`, catalog)
 // TestDecideReuse_Gap: no exact match -> MatchText for the similarTo layer,
 // ExactMatch nil.
 func TestDecideReuse_Gap(t *testing.T) {
-	key, _ := CatalogKey("spec", `spec isAdmin { actor.role == "admin" }`)
+	key, _ := CatalogKey("spec", `spec actorEnvelope isAdmin { return role == "admin" }`)
 	catalog := []CatalogEntry{{Name: "isAdmin", Kind: "spec", CatalogKey: key}}
 
 	d, err := DecideReuse("spec", `@description("owner gate")
-spec wantOwner { actor.role=="owner" }`, catalog)
+spec actorEnvelope wantOwner { return role=="owner" }`, catalog)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}

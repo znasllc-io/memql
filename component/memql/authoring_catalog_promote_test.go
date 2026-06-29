@@ -11,7 +11,7 @@ import (
 // similarTo near-match.
 func TestPlanCatalogPromotion_DerivesKeyAndText(t *testing.T) {
 	src := `@description("Caller is admin")
-spec isAdmin { actor.role == "admin" }`
+spec actorEnvelope isAdmin { return role == "admin" }`
 
 	wantKey, _ := CatalogKey("spec", src)
 	wantText, _ := CatalogMatchText("spec", src)
@@ -38,14 +38,14 @@ spec isAdmin { actor.role == "admin" }`
 // PlanCatalogPromotion produces a CatalogEntry whose key an identical
 // (name-different) construct reuses exactly -- the promote -> reuse round-trip.
 func TestPlanCatalogPromotion_MatchesDeterministicReuse(t *testing.T) {
-	p, err := PlanCatalogPromotion("c1", "spec", "isAdmin", `spec isAdmin { actor.role == "admin" }`, "b1")
+	p, err := PlanCatalogPromotion("c1", "spec", "isAdmin", `spec actorEnvelope isAdmin { return role == "admin" }`, "b1")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	catalog := []CatalogEntry{{Name: p.Name, Kind: p.Kind, CatalogKey: p.CatalogKey}}
 
 	// A same-behavior construct under a different name reuses the promoted one.
-	d, err := DecideReuse("spec", `spec wantAdmin { actor.role=="admin" }`, catalog)
+	d, err := DecideReuse("spec", `spec actorEnvelope wantAdmin { return role=="admin" }`, catalog)
 	if err != nil {
 		t.Fatalf("DecideReuse: %v", err)
 	}
@@ -57,10 +57,10 @@ func TestPlanCatalogPromotion_MatchesDeterministicReuse(t *testing.T) {
 // TestPlanCatalogPromotion_RequiresIDAndBundle: promotion needs the construct id
 // and the source bundle (provenance) -- both are required.
 func TestPlanCatalogPromotion_RequiresIDAndBundle(t *testing.T) {
-	if _, err := PlanCatalogPromotion("", "spec", "s", `spec s { actor.role == "admin" }`, "b1"); err == nil {
+	if _, err := PlanCatalogPromotion("", "spec", "s", `spec actorEnvelope s { return role == "admin" }`, "b1"); err == nil {
 		t.Errorf("expected an error for empty constructId")
 	}
-	if _, err := PlanCatalogPromotion("c1", "spec", "s", `spec s { actor.role == "admin" }`, ""); err == nil {
+	if _, err := PlanCatalogPromotion("c1", "spec", "s", `spec actorEnvelope s { return role == "admin" }`, ""); err == nil {
 		t.Errorf("expected an error for empty fromBundleId (provenance)")
 	}
 }
@@ -68,7 +68,7 @@ func TestPlanCatalogPromotion_RequiresIDAndBundle(t *testing.T) {
 // TestPlanCatalogPromotion_BadSource: an unparseable construct cannot be
 // promoted (you only promote constructs that compiled in the sandbox).
 func TestPlanCatalogPromotion_BadSource(t *testing.T) {
-	_, err := PlanCatalogPromotion("c1", "spec", "broken", `spec broken { actor.role == }`, "b1")
+	_, err := PlanCatalogPromotion("c1", "spec", "broken", `spec actorEnvelope broken { return role == }`, "b1")
 	if err == nil {
 		t.Errorf("expected an error for unparseable source")
 	}
@@ -78,7 +78,7 @@ func TestPlanCatalogPromotion_BadSource(t *testing.T) {
 // signal (kind + intent + form) so the embedding has something to bite on.
 func TestPlanCatalogPromotion_TextIsEmbeddable(t *testing.T) {
 	p, err := PlanCatalogPromotion("c1", "spec", "isAdmin", `@description("admin gate")
-spec isAdmin { actor.role == "admin" }`, "b1")
+spec actorEnvelope isAdmin { return role == "admin" }`, "b1")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}

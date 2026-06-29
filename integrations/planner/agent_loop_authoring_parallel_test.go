@@ -146,11 +146,11 @@ func TestRunDesignPass_ResolvesPhaseDependsOn(t *testing.T) {
       "automationPurpose": "Parallel fetch then merge.",
       "phases": [
         {"name": "fetchSales", "purpose": "sales", "dependencies": [
-          {"kind": "spec", "name": "s1", "purpose": "p", "candidateSource": "spec s1 {\n  payload.active == true\n}"}]},
+          {"kind": "spec", "name": "s1", "purpose": "p", "candidateSource": "spec activeRowTrait s1 {\n  return active == true\n}"}]},
         {"name": "fetchSupport", "purpose": "support", "dependencies": [
-          {"kind": "spec", "name": "s2", "purpose": "p", "candidateSource": "spec s2 {\n  payload.active == true\n}"}]},
+          {"kind": "spec", "name": "s2", "purpose": "p", "candidateSource": "spec activeRowTrait s2 {\n  return active == true\n}"}]},
         {"name": "merge", "purpose": "merge", "dependsOn": ["fetchSales", "fetchSupport"], "dependencies": [
-          {"kind": "spec", "name": "s3", "purpose": "p", "candidateSource": "spec s3 {\n  payload.active == true\n}"}]}
+          {"kind": "spec", "name": "s3", "purpose": "p", "candidateSource": "spec activeRowTrait s3 {\n  return active == true\n}"}]}
       ]
     }`
 	fe := designEngine(designOut, nil)

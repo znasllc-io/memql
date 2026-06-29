@@ -82,7 +82,7 @@ func TestEmitBundle_MultiPhase(t *testing.T) {
 	// spec dep. The fake returns the same shape for every authoringEmit call;
 	// the emit code normalizes the automation name to the phase name.
 	p0auto := memql.SandboxConstruct{Kind: "automation", Name: "ignored0", Source: "automation ignored0 { }"}
-	p0spec := memql.SandboxConstruct{Kind: "spec", Name: "specPhase0", Source: "spec specPhase0 {\n  payload.active == true\n}"}
+	p0spec := memql.SandboxConstruct{Kind: "spec", Name: "specPhase0", Source: "spec activeRowTrait specPhase0 {\n  return active == true\n}"}
 	fe := &fakeEngine{
 		aiResponder: func(templateId string, data map[string]any) (any, error) {
 			if templateId == "authoringEmit" {
@@ -150,9 +150,9 @@ func TestRunDesignPass_ResolvesPhases(t *testing.T) {
       "automationPurpose": "Onboard in phases.",
       "phases": [
         {"name": "onboardUserPhase0", "purpose": "create", "dependencies": [
-          {"kind": "spec", "name": "specNewUser", "purpose": "new", "candidateSource": "spec specNewUser {\n  payload.active == true\n}"}]},
+          {"kind": "spec", "name": "specNewUser", "purpose": "new", "candidateSource": "spec activeRowTrait specNewUser {\n  return active == true\n}"}]},
         {"name": "onboardUserPhase1", "purpose": "notify", "dependencies": [
-          {"kind": "spec", "name": "specNotify", "purpose": "notify", "candidateSource": "spec specNotify {\n  payload.active == true\n}"}]}
+          {"kind": "spec", "name": "specNotify", "purpose": "notify", "candidateSource": "spec activeRowTrait specNotify {\n  return active == true\n}"}]}
       ]
     }`
 	fe := designEngine(designOut, nil)

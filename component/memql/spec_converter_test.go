@@ -7,17 +7,18 @@ import (
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-// TestSpecDeclToSpec_AcceptsShapeAndEnabled guards #1031: a spec carrying
-// @enabled + @shape (e.g. dsl/deployment/specs.memql's requiresOwnerOrAdmin)
-// must convert cleanly. Both annotations are in the "Spec" receiver surface
-// in component/language/annotations; before the fix specDeclToSpec rejected
-// them and LoadUnifiedSpecs silently dropped the spec at boot.
-func TestSpecDeclToSpec_AcceptsShapeAndEnabled(t *testing.T) {
+// TestSpecDeclToSpec_AcceptsBindingAndEnabled guards #1031 under the epic
+// #2281 binding model: a spec carrying @enabled plus a signature binding
+// (e.g. dsl/deployment/specs.memql's requiresOwnerOrAdmin) must convert
+// cleanly. @enabled is in the "Spec" receiver surface in
+// component/language/annotations; the bound name moved from the retired
+// @shape pin to the signature. Classification (row vs context) is deferred
+// to the engine-bootstrap binding resolver, so Kind is empty at conversion.
+func TestSpecDeclToSpec_AcceptsBindingAndEnabled(t *testing.T) {
 	src := `@enabled
 @description("Caller must hold owner or admin role.")
-@shape("actorEnvelope")
-spec requiresOwnerOrAdminFixture {
-  actor.role == "admin" || actor.role == "owner"
+spec actorEnvelope requiresOwnerOrAdminFixture {
+  return role == "admin" || role == "owner"
 }`
 	decl, err := languageParser.ParseSpecDecl(src)
 	if err != nil {
@@ -25,7 +26,7 @@ spec requiresOwnerOrAdminFixture {
 	}
 	spec, err := specDeclToSpec(decl, "test:spec")
 	if err != nil {
-		t.Fatalf("specDeclToSpec rejected a valid @shape/@enabled spec: %v", err)
+		t.Fatalf("specDeclToSpec rejected a valid bound @enabled spec: %v", err)
 	}
 	if spec.Name != "requiresOwnerOrAdminFixture" {
 		t.Errorf("Name = %q, want requiresOwnerOrAdminFixture", spec.Name)
@@ -33,8 +34,8 @@ spec requiresOwnerOrAdminFixture {
 	if spec.Description != "Caller must hold owner or admin role." {
 		t.Errorf("Description = %q, want the @description body", spec.Description)
 	}
-	if spec.Kind != SpecKindContext {
-		t.Errorf("Kind = %q, want %q (actor-only body)", spec.Kind, SpecKindContext)
+	if spec.BoundName != "actorEnvelope" {
+		t.Errorf("BoundName = %q, want actorEnvelope", spec.BoundName)
 	}
 }
 
@@ -44,8 +45,8 @@ spec requiresOwnerOrAdminFixture {
 func TestSpecDeclToSpec_RejectsUnknownAnnotation(t *testing.T) {
 	// @public is a valid annotation for Query/Mutation but not for Spec.
 	src := `@public
-spec specWithMisplacedAnnotation {
-  actor.role == "admin"
+spec actorEnvelope specWithMisplacedAnnotation {
+  return role == "admin"
 }`
 	decl, err := languageParser.ParseSpecDecl(src)
 	if err != nil {

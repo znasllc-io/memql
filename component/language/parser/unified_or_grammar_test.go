@@ -104,17 +104,19 @@ func TestOrPrecedenceAndParens(t *testing.T) {
 func TestSpecWithOrLoads(t *testing.T) {
 	src := `@enabled
 @description("Caller must hold owner or admin role to use the Deployment Console.")
-@shape("actorEnvelope")
-spec requiresOwnerOrAdmin {
-  actor.role == "admin" || actor.role == "owner"
+spec actorEnvelope requiresOwnerOrAdmin {
+  return role == "admin" || role == "owner"
 }`
 
 	decl, err := ParseSpecDecl(src)
 	if err != nil {
 		t.Fatalf("ParseSpecDecl: %v", err)
 	}
+	if decl.BoundName != "actorEnvelope" {
+		t.Fatalf("expected signature binding actorEnvelope, got %q", decl.BoundName)
+	}
 	got := renderExpr(decl.Body)
-	if got != "(actor.role || actor.role)" {
+	if got != "(role || role)" {
 		t.Fatalf("spec body did not parse as an OR over the role comparisons, got: %s", got)
 	}
 	if !strings.Contains(got, "||") {

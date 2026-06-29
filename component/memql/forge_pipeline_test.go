@@ -216,19 +216,21 @@ func TestForgeQueueGatingTiers(t *testing.T) {
 		}
 	}
 
-	// And the traits the queues actually reference exist with the right
-	// role sets in the bundle.
-	traits, err := os.ReadFile("../../dsl/forge/traits.memql")
+	// And the specs the queues actually reference exist with the right
+	// role sets in the bundle. Under the spec/shape binding redesign (epic
+	// #2281) the caller/role predicates are @actor-bound specs that read
+	// the projected envelope key by BARE name (no `actor.` prefix).
+	specs, err := os.ReadFile("../../dsl/forge/specs.memql")
 	if err != nil {
-		t.Fatalf("read dsl/forge/traits.memql: %v", err)
+		t.Fatalf("read dsl/forge/specs.memql: %v", err)
 	}
-	ts := string(traits)
+	ss := string(specs)
 	for _, must := range []string{
 		"forgeDeveloper", "forgeApprover",
-		`actor.role == "owner"`, `actor.role == "admin"`, `actor.role == "writer"`,
+		`role == "owner"`, `role == "admin"`, `role == "writer"`,
 	} {
-		if !strings.Contains(ts, must) {
-			t.Errorf("traits.memql missing expected fragment %q", must)
+		if !strings.Contains(ss, must) {
+			t.Errorf("specs.memql missing expected fragment %q", must)
 		}
 	}
 }

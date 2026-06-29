@@ -19,28 +19,15 @@ func declToSpec(t *testing.T, src string) (*Spec, error) {
 	return specDeclToSpec(decl, "test.memql")
 }
 
-// TestSpecRole_RejectsRowOnlySpec locks the declaration-time role
-// split: a `spec` whose body reads only payload / row intrinsics is a
-// data/state predicate and must be declared a `trait`.
-func TestSpecRole_RejectsRowOnlySpec(t *testing.T) {
-	_, err := declToSpec(t, `@description("kind is assistant")
-spec specAgentKindAssistant {
-  payload.kind == "assistant"
-}`)
-	if err == nil {
-		t.Fatal("expected a row-only spec to be rejected (it must be declared a trait)")
-	}
-	if !strings.Contains(err.Error(), "declare it as a `trait`") {
-		t.Errorf("error should point the author at `trait`, got: %v", err)
-	}
-}
-
-// TestSpecRole_AllowsContextSpec confirms an authorization spec
-// (reads actor.*) is accepted as a `spec`.
+// TestSpecRole_AllowsContextSpec confirms an actor-bound spec converts
+// cleanly as a spec (not a trait). Under the epic #2281 binding model the
+// spec binds its shape in the signature and reads the projected field by
+// bare name. Classification (row vs context) is deferred to the
+// engine-bootstrap binding resolver, so Kind is empty at conversion time.
 func TestSpecRole_AllowsContextSpec(t *testing.T) {
 	spec, err := declToSpec(t, `@description("owner only")
-spec requiresOwner {
-  actor.role == "owner"
+spec actorEnvelope requiresOwner {
+  return role == "owner"
 }`)
 	if err != nil {
 		t.Fatalf("context-spec should be a valid spec, got: %v", err)
@@ -48,60 +35,30 @@ spec requiresOwner {
 	if spec.IsTrait {
 		t.Error("IsTrait = true, want false (this is a spec)")
 	}
-	if spec.Kind != SpecKindContext {
-		t.Errorf("Kind = %q, want %q", spec.Kind, SpecKindContext)
+	if spec.BoundName != "actorEnvelope" {
+		t.Errorf("BoundName = %q, want actorEnvelope", spec.BoundName)
 	}
 }
 
-// TestSpecRole_AllowsReclassifiedTrait confirms the reclassified
-// data predicate loads as a `trait`, classifies row, and so is usable
-// in a query filter.
-func TestSpecRole_AllowsReclassifiedTrait(t *testing.T) {
+// TestSpecRole_AllowsTrait confirms a deliberately UNBOUND trait (a row
+// predicate over bare payload fields) converts cleanly as a trait.
+func TestSpecRole_AllowsTrait(t *testing.T) {
 	spec, err := declToSpec(t, `@description("kind is assistant")
 trait agentKindAssistant {
-  payload.kind == "assistant"
+  return kind == "assistant"
 }`)
 	if err != nil {
-		t.Fatalf("reclassified payload predicate should be a valid trait, got: %v", err)
+		t.Fatalf("row predicate should be a valid trait, got: %v", err)
 	}
 	if !spec.IsTrait {
 		t.Error("IsTrait = false, want true (this is a trait)")
 	}
-	if spec.Kind != SpecKindRow {
-		t.Errorf("Kind = %q, want %q (payload body classifies row)", spec.Kind, SpecKindRow)
-	}
 }
 
-// TestRejectAuthzSpecInFilter_RejectsSpec locks the filter-slot usage
-// half of the split: a bare reference to an authorization `spec`
-// (IsTrait == false) inside a query filter is rejected.
-func TestRejectAuthzSpecInFilter_RejectsSpec(t *testing.T) {
-	reg := newSpecRegistry()
-	if err := reg.add(&Spec{Name: "requiresOwner", Kind: SpecKindContext, IsTrait: false}); err != nil {
-		t.Fatalf("seed spec: %v", err)
-	}
-
-	// Bare reference to the authz spec, composed into a filter.
-	filter := &LogicalExpression{
-		Op:   "&&",
-		Left: &SpecReferenceExpression{Name: "requiresOwner"},
-		Right: &ComparisonExpression{
-			Field:    FieldReference{Raw: "payload.status", Parts: []string{"payload", "status"}},
-			Operator: OpEq,
-			Value:    "active",
-		},
-	}
-	err := rejectAuthzSpecInFilter(filter, reg)
-	if err == nil {
-		t.Fatal("expected an authorization spec bare-referenced in a filter to be rejected")
-	}
-	if !strings.Contains(err.Error(), "requires") {
-		t.Errorf("error should mention the `requires` slot, got: %v", err)
-	}
-}
-
-// TestRejectAuthzSpecInFilter_AllowsTrait confirms a data `trait`
-// (IsTrait == true) bare-referenced in a filter passes.
+// TestRejectAuthzSpecInFilter_AllowsTrait confirms the retired filter-usage
+// guard is a no-op: a data `trait` (IsTrait == true) bare-referenced in a
+// filter passes. The trait-vs-spec ROLE split (#2034) is superseded by the
+// binding model (epic #2281), so rejectAuthzSpecInFilter always returns nil.
 func TestRejectAuthzSpecInFilter_AllowsTrait(t *testing.T) {
 	reg := newSpecRegistry()
 	if err := reg.add(&Spec{Name: "agentKindAssistant", Kind: SpecKindRow, IsTrait: true}); err != nil {

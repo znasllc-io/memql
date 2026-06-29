@@ -84,7 +84,7 @@ var automationCon = memql.SandboxConstruct{
 	Kind: "automation", Name: "dailyDigest", Source: "automation dailyDigest { }",
 }
 var specCon = memql.SandboxConstruct{
-	Kind: "spec", Name: "specDigestItemActive", Source: "spec specDigestItemActive {\n  payload.active == true\n}",
+	Kind: "spec", Name: "specDigestItemActive", Source: "spec activeRowTrait specDigestItemActive {\n  return active == true\n}",
 }
 
 // emitFakeEngine returns a fakeEngine whose authoringEmit / authoringRepair
@@ -159,7 +159,7 @@ func TestEmitAndRepair_CleanFirstPass(t *testing.T) {
 // compiles after one repair re-emit. Acceptance: Responsibility -> Gate-1-clean
 // bundle WITHIN the repair budget.
 func TestEmitAndRepair_RepairsThenClean(t *testing.T) {
-	brokenSpec := memql.SandboxConstruct{Kind: "spec", Name: "specDigestItemActive", Source: "@bogus(\"x\")\nspec specDigestItemActive {\n  payload.active == true\n}"}
+	brokenSpec := memql.SandboxConstruct{Kind: "spec", Name: "specDigestItemActive", Source: "@bogus(\"x\")\nspec activeRowTrait specDigestItemActive {\n  return active == true\n}"}
 	fixedSpec := specCon
 
 	fe := emitFakeEngine(
@@ -295,7 +295,7 @@ func TestEmitBundle_ReuseEdgesNotAuthored(t *testing.T) {
 // TestParseEmittedConstructs_DropsIncomplete: entries missing kind/name/source
 // are dropped; an all-empty result errors.
 func TestParseEmittedConstructs_DropsIncomplete(t *testing.T) {
-	good := `{"constructs":[{"kind":"spec","name":"s1","source":"spec s1 { payload.x==1 }"},{"kind":"spec","name":"","source":"x"}]}`
+	good := `{"constructs":[{"kind":"spec","name":"s1","source":"spec activeRowTrait s1 { return x==1 }"},{"kind":"spec","name":"","source":"x"}]}`
 	out, err := parseEmittedConstructs(good)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -328,13 +328,14 @@ func (realSandbox) CompileBundle(constructs []memql.SandboxConstruct) memql.Sand
 func TestEmitAndRepair_RealGate1_RepairsToClean(t *testing.T) {
 	auto := memql.SandboxConstruct{Kind: "logic", Name: "logicDigest",
 		Source: "logic logicDigest {\n  args { userId string @required }\n  body { return args.userId }\n}"}
-	// payload.active is a data/state predicate -> a `trait` under the
-	// trait-vs-spec role split (#2034). The unknown annotation @bogus is
-	// the genuine Gate-1 break the single repair clears.
+	// An `active` field predicate is a data/state predicate -> a `trait`
+	// (deliberately UNBOUND, reading payload fields by bare name under epic
+	// #2281). The unknown annotation @bogus is the genuine Gate-1 break the
+	// single repair clears.
 	broken := memql.SandboxConstruct{Kind: "trait", Name: "specDigestActive",
-		Source: "@bogus(\"x\")\ntrait specDigestActive {\n  payload.active == true\n}"}
+		Source: "@bogus(\"x\")\ntrait specDigestActive {\n  return active == true\n}"}
 	fixed := memql.SandboxConstruct{Kind: "trait", Name: "specDigestActive",
-		Source: "trait specDigestActive {\n  payload.active == true\n}"}
+		Source: "trait specDigestActive {\n  return active == true\n}"}
 
 	fe := emitFakeEngine(
 		emitJSON(t, []memql.SandboxConstruct{auto, broken}),

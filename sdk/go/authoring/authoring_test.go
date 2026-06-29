@@ -65,7 +65,7 @@ func TestDurableDemoteBundle_MapsResult(t *testing.T) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		res, err := c.DurableDemoteBundle(ctx, "spec mcpSessSpec { actor.role == \"admin\" }")
+		res, err := c.DurableDemoteBundle(ctx, "spec actorEnvelope mcpSessSpec { return role == \"admin\" }")
 		resCh <- res
 		errCh <- err
 	}()
