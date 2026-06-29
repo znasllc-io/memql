@@ -133,26 +133,35 @@ ruling:
 
 ### 2.1.1 The `core` bundle
 
-Impure language-level primitives live in a new **`dsl/core/`** namespace
-(parallel to `dsl/common/`), declared in `dsl/core/builtins.memql`. We choose a
-dedicated `core` namespace over reusing `common` because the semantic is
-distinct and load-bearing: `use core.{ ... }` is the canonical "this body is
-nondeterministic" signal, and a reader scanning imports should see `core` as its
-own line, not buried among `common` helpers.
+`use core.{ ... }` is the canonical "this body is nondeterministic" signal, and
+a reader scanning imports should see `core` as its own line, not buried among
+`common` helpers. The author-facing syntax is therefore `use core.{ timestamp }`,
+exactly parallel to `use common.builtins.{ ... }`.
 
-Initial membership: **`timestamp`** (the no-arg wall-clock read). It is
-deliberately thin -- the tree is already disciplined elsewhere -- but it
-establishes the pattern and is the home for `uuid` / random and any future
-nondeterministic primitive.
+**The `core` namespace is intrinsic (loader-level), not a `dsl/core/*.memql`
+construct file** (decided in story
+[#2300](https://github.com/znasllc-io/memql/issues/2300) once the mechanism met
+the grammar). Its members are **engine intrinsics**: `timestamp()` is parsed as
+a grammar accessor (`parser.parseTimestampAccessor`) and evaluated in-engine
+(`component/memql/mutation_templates.go`, `case "now", "timestamp"`). It has no
+integration executor a DSL `builtin` declaration could point at -- a
+`builtin timestamp { @executor(...) }` would fail load with "unknown executor".
+So the bundle is defined in Go, not in a `.memql` file:
 
-Mechanism (recorded here, refined in story
-[#2300](https://github.com/znasllc-io/memql/issues/2300) /
-[#2301](https://github.com/znasllc-io/memql/issues/2301)): the impure names are
-**de-registered from the ambient accessor set** (`parser.CallableAccessors`) and
-resolve **only** when pulled in via `use core.{ ... }`. Using an impure built-in
-without its import is a **load error** carrying a migration hint. The `dslspec`
-table marks them so Sense offers them in completion only when imported, and the
-drift guard stays green.
+- **Membership** is `dslspec.CoreBuiltinNames()` -- the set of `dslspec.Builtins`
+  entries flagged `DependencyCore` (the machine-readable classification added in
+  Story 2). Initial membership: **`timestamp`** (the no-arg wall-clock read).
+  Deliberately thin -- the tree is already disciplined elsewhere -- but it
+  establishes the pattern and is the home for `uuid` / random and any future
+  nondeterministic primitive.
+- **Resolution + enforcement** (Story
+  [#2301](https://github.com/znasllc-io/memql/issues/2301)): the loader
+  recognises `core` as a virtual import namespace whose only legal members are
+  `CoreBuiltinNames()`; the impure names are removed from the *ambient* resolver
+  so a body that calls `timestamp()` without `use core.{ timestamp }` is a
+  **load error** with a migration hint. Sense offers an imported builtin in
+  completion only when the file has the import. The `dslspec` drift guard stays
+  green because the classification is an orthogonal field, not a name change.
 
 ### 2.2 The collection/lambda library (ambient language, pure bodies)
 

@@ -1,5 +1,7 @@
 package dslspec
 
+import "sort"
+
 // builtins.go is the single source of truth for the memQL expression-level
 // builtins -- the bare functions an author calls inside a filter / shape /
 // mutation / logic body (concat / coalesce / hash / lower / year / ...), the
@@ -57,6 +59,37 @@ const (
 	CategoryBuiltinRegistry BuiltinCategory = "registry"
 )
 
+// BuiltinDependency is the second, orthogonal axis on a builtin (the first is
+// BuiltinCategory): whether the name is ambient language (free to call) or an
+// imported dependency that a body must declare via a `use` import. This is the
+// machine-readable form of the purity line decided in the core-builtins ADR
+// (docs/internal/design/core-builtins-and-collections-adr.md, epic #2298): a
+// call that always returns the same value given identical explicit arguments,
+// observing nothing outside them, is ambient; a call that reads the clock /
+// environment / randomness is imported from `core` so the `use` block reveals
+// every source of nondeterminism.
+//
+// This axis is set in Story 2 (#2300) as the definitive classification; the
+// loader-level enforcement (a load error when an imported builtin is used
+// without its `use core.{ ... }` import) and the `use core` resolution land in
+// Story 3 (#2301). Sense uses it to offer an imported builtin in completion
+// only when the file has the import.
+type BuiltinDependency string
+
+const (
+	// DependencyAmbient is the zero value: the name is ambient language and
+	// needs no import. Every pure operator, every reserved engine identifier
+	// (bare now / actor / partition / config), and -- on this axis -- the
+	// runtime-registry builtins (whose own resolution is mediated by the
+	// integration registry, a separate mechanism) are ambient.
+	DependencyAmbient BuiltinDependency = ""
+	// DependencyCore marks a nondeterministic language-level primitive that
+	// resolves only when imported via `use core.{ ... }`. Initial membership:
+	// timestamp() (the fresh wall-clock read). The forward-looking home for
+	// uuid / random when introduced.
+	DependencyCore BuiltinDependency = "core"
+)
+
 // BuiltinParam is one positional/variadic/optional parameter of a builtin, for
 // signature help and hover.
 type BuiltinParam struct {
@@ -82,6 +115,30 @@ type Builtin struct {
 	// Params lists the parameters for signature help. Empty for nullary
 	// accessors (now() / item() / event() / input() / index()).
 	Params []BuiltinParam `json:"params,omitempty"`
+	// Dependency is the ambient-vs-imported classification (see
+	// BuiltinDependency). Zero value (DependencyAmbient) means ambient -- the
+	// common case; only the nondeterministic core primitives set it.
+	Dependency BuiltinDependency `json:"dependency,omitempty"`
+}
+
+// CoreBuiltinNames is the sorted set of builtin names classified
+// DependencyCore -- the membership of the intrinsic `core` import namespace.
+// It is the machine-readable definition of the `core` bundle: Story 3 (#2301)
+// resolves `use core.{ ... }` against this set and errors when one of these
+// names is called without its import. The `core` namespace is intrinsic
+// (loader-level), NOT a dsl/core/*.memql construct file, because its members
+// are engine intrinsics (timestamp() is parsed as a grammar accessor and
+// evaluated in-engine; it has no integration executor a `builtin` declaration
+// could point at).
+func CoreBuiltinNames() []string {
+	out := make([]string, 0)
+	for _, b := range builtins() {
+		if b.Dependency == DependencyCore {
+			out = append(out, b.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // builtins returns the full editor-callable builtin table. The grammar-
@@ -306,11 +363,11 @@ func builtins() []Builtin {
 			Doc:       "Return the current timestamp (RFC3339 captured at eval start).",
 		},
 		{
-			Name:      "timestamp",
-			Category:  CategoryBuiltinAccessor,
-			Signature: `timestamp(value? string)`,
-			Doc:       "Parse or return a timestamp. With no arguments, same as now().",
-			Params:    []BuiltinParam{{Name: "value", Doc: "Optional timestamp string to parse."}},
+			Name:       "timestamp",
+			Category:   CategoryBuiltinAccessor,
+			Dependency: DependencyCore,
+			Signature:  `timestamp()`,
+			Doc:        "Read the current wall clock at the point of call (a fresh, nondeterministic read distinct from the eval-start `now`). Imported from core: `use core.{ timestamp }`. See the core-builtins ADR.",
 		},
 		{
 			Name:      "error",
