@@ -188,7 +188,7 @@ query context queryLatestSpaceContextForSpace {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId == args.spaceId
+  filter  spaceId == args.spaceId
   sort    "createdAt", "desc"
   paginate 1
   shape   spaceContextFull
@@ -661,12 +661,15 @@ Authors never write `ctx.X` -- it is not part of the author surface.
 ## 16. Shape bodies: the key comes from the path's terminal segment
 
 **Rule.** Shapes are struct-form path lists. Each body line is a
-projection path (`payload.name`, `row.id`, `row.createdAt`,
-`actor.userId`); the projected field is keyed by the path's
-**terminal segment**. Every shape declares its kind via `@row`
-(concept payload + row intrinsics; the concept is named by the
-`shape <Concept> <name>` signature) and/or `@actor` (engine
-envelope, no signature concept).
+projection path. A payload property is written by **bare name**
+(`name`, `description`) -- the concept is bound by the
+`shape <Concept> <name>` signature, so `payload.` is removed; row
+metadata stays `row.X` (`row.id`, `row.createdAt`) and the auth
+envelope stays `actor.X` (`actor.userId`). The projected field is
+keyed by the path's **terminal segment**. Every shape declares its
+kind via `@row` (concept payload + row intrinsics) and/or `@actor`
+(engine envelope, no signature concept). The explicit `payload.X`
+form is rejected at load.
 
 ```memql
 use agents.concepts.{ agent }
@@ -675,8 +678,8 @@ use agents.concepts.{ agent }
 @description("Full agent projection")
 shape agent agentFull {
   row.id
-  payload.name
-  payload.description
+  name
+  description
   row.createdAt
 }
 ```
