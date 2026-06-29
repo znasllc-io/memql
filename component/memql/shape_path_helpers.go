@@ -30,26 +30,37 @@ import (
 //     subscripts) get a "" terminal so the converter knows to skip
 //     the template-entry collapse.
 
-// translateShapeBodyPath rewrites the head of a dotted shape path
-// from a bound-concept bare name to `payload`. `row.X` paths drop
-// the `row.` prefix; `actor.X` paths pass through; everything else
-// is returned unchanged.
+// translateShapeBodyPath rewrites an author-facing shape body path to
+// its stored projection path (epic #2292). Since the shape's concept is
+// bound by the signature, a payload property is written by BARE name --
+// `status` -> the stored `payload.status`. Ambient prefixes are
+// preserved:
+//
+//   - `row.X`        -> `X`             (row intrinsic / metadata)
+//   - `row.payload.X`-> `payload.X`     (legacy nested form; authoring
+//     it is rejected upstream)
+//   - `actor.X`      -> `actor.X`       (auth envelope)
+//   - bare `X`       -> `payload.X`     (payload property -- the new
+//     default author form)
+//
+// useConcepts is retained for signature compatibility but unused: the
+// legacy `<concept>.X` head form is gone (the concept binds via the
+// signature).
 func translateShapeBodyPath(path string, useConcepts []string) string {
+	_ = useConcepts
 	if strings.HasPrefix(path, "row.") {
 		return strings.TrimPrefix(path, "row.")
 	}
 	if strings.HasPrefix(path, "actor.") {
 		return path
 	}
-	if idx := strings.Index(path, "."); idx > 0 {
-		head := path[:idx]
-		for _, c := range useConcepts {
-			if head == c {
-				return "payload." + path[idx+1:]
-			}
-		}
+	if strings.HasPrefix(path, "payload.") {
+		// Old explicit form -- rejected at the converter; pass through if
+		// it ever reaches here so the stored path stays well-formed.
+		return path
 	}
-	return path
+	// Bare payload property -> stored payload path.
+	return "payload." + path
 }
 
 // pathTerminalKey returns the terminal identifier segment of a

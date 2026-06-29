@@ -38,24 +38,25 @@
 // =============================================================================
 //
 // A concept-bound shape declares `@row` (project row fields) and binds
-// the source concept via its SIGNATURE: `shape <Concept> <name>`. The
-// body lists the row intrinsics and payload fields to project. Body
-// translations:
+// the source concept via its SIGNATURE: `shape <Concept> <name>`. Because
+// the concept is bound, a payload property is written by BARE name -- the
+// `payload.` prefix is removed (epic #2292). Body forms:
 //
-//   row.X            -> row intrinsic (id, createdAt, createdBy, etc.)
-//   payload.X        -> payload field
+//   <prop>           -> payload property (bare; e.g. `status`, `displayName`)
+//   row.X            -> row intrinsic / metadata (id, createdAt, createdBy, ...)
+//   actor.X          -> auth envelope (requires @actor)
 //
-// The bare-name dotted-prefix form (`participant.X`) is retired; payload
-// fields are always written as `payload.X` post-migration.
+// The explicit `payload.X` form is rejected at load with a migration hint
+// (write the property bare). `row.X` / `actor.X` are unchanged.
 
 @row
 @description("Comprehensive participant projection.")
 shape participant participantFull {
   row.id
-  payload.partitionId
-  payload.userId
-  payload.displayName
-  payload.status
+  partitionId
+  userId
+  displayName
+  status
   row.createdAt
   row.createdBy
 }
@@ -82,13 +83,13 @@ shape participant participantFull {
 @row
 @description("Concept-agnostic scaffold for predicates that check payload.active.")
 shape activeRowTrait {
-  payload.active
+  active
 }
 
 @row
 @description("Concept-agnostic scaffold for predicates that check payload.status.")
 shape statusRowTrait {
-  payload.status
+  status
 }
 
 // =============================================================================
@@ -125,7 +126,7 @@ shape actorEnvelope {
 @description("Hypothetical mixed projection -- row + caller envelope.")
 shape participant participantWithCallerContext {
   row.id
-  payload.displayName
+  displayName
   actor.userId
   actor.role
 }
@@ -142,16 +143,14 @@ shape participant participantWithCallerContext {
 //
 // Field path translation rules:
 //
-//   row.X                Row intrinsic (no `payload.` prefix). Renders
-//                        in the projection under key X.
+//   <prop>               Payload property (BARE). Renders under key <prop>.
+//                        The concept is bound by the signature, so payload
+//                        properties carry no prefix (epic #2292). The
+//                        explicit `payload.X` form is rejected at load.
+//
+//   row.X                Row intrinsic / metadata. Renders under key X.
 //                        Intrinsics: id, createdAt, createdBy, concept,
 //                        partition, type, schema.
-//
-//   payload.X            Payload field reference. Renders under key X.
-//                        This is the only legal way to reference a
-//                        payload field -- the legacy bare-prefix form
-//                        (`<conceptName>.X`) is rejected at load time
-//                        by the legacy-filter-form validator.
 //
 //   actor.X             Auth-envelope reference. Requires @actor.
 
@@ -160,9 +159,9 @@ shape participant participantWithCallerContext {
 shape participant pathSyntaxExample {
   row.id                            // intrinsic
   row.createdAt                     // intrinsic
-  payload.partitionId                   // payload field
-  payload.displayName               // payload field
-  payload.status                    // payload field
+  partitionId                   // payload field
+  displayName               // payload field
+  status                    // payload field
 }
 
 // =============================================================================

@@ -9,26 +9,26 @@ use worker.concepts.{ invocation, registration }
 @description("Full projection of a v1:worker:invocation row. Backs the per-plan and per-user invocation feeds.")
 shape invocation workerInvocationFull {
   row.id
-  payload.ownerUserId
-  payload.workerId
-  payload.agentId
-  payload.planId
-  payload.taskId
-  payload.correlationId
-  payload.tool
-  payload.action
-  payload.argsRedacted
-  payload.startedAt
-  payload.completedAt
-  payload.durationMs
-  payload.outcome
-  payload.exitCode
-  payload.signal
-  payload.errorCode
-  payload.errorMessage
-  payload.bytesIn
-  payload.bytesOut
-  payload.outputPreview
+  ownerUserId
+  workerId
+  agentId
+  planId
+  taskId
+  correlationId
+  tool
+  action
+  argsRedacted
+  startedAt
+  completedAt
+  durationMs
+  outcome
+  exitCode
+  signal
+  errorCode
+  errorMessage
+  bytesIn
+  bytesOut
+  outputPreview
   row.createdAt
 }
 
@@ -36,22 +36,22 @@ shape invocation workerInvocationFull {
 @description("Full projection of a v1:worker:registration row. Backs the /me/workers panel + /admin/workers + the agent-side dispatch routing path. Includes lastSeenAt so the frontend can compute online/offline state.")
 shape registration workerRegistrationFull {
   row.id
-  payload.ownerUserId
-  payload.identityId
-  payload.name
-  payload.capabilities
-  payload.capabilityDescriptor
-  payload.labels
-  payload.concurrency
-  payload.platformInfo
-  payload.permissions
-  payload.version
-  payload.buildTag
-  payload.registeredAt
-  payload.lastSeenAt
-  payload.lastConnectedFromIP
-  payload.revokedAt
-  payload.revokedBy
-  payload.revokeReason
+  ownerUserId
+  identityId
+  name
+  capabilities
+  capabilityDescriptor
+  labels
+  concurrency
+  platformInfo
+  permissions
+  version
+  buildTag
+  registeredAt
+  lastSeenAt
+  lastConnectedFromIP
+  revokedAt
+  revokedBy
+  revokeReason
   row.createdAt
 }

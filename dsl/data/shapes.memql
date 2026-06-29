@@ -9,15 +9,15 @@ use data.concepts.{ log, policy, record }
 @description("Validation log entry projection with full audit trail fields")
 shape log logFull {
   row.id
-  payload.recordId
-  payload.action
-  payload.fromState
-  payload.toState
-  payload.identityId
-  payload.identityType
-  payload.partitionId
-  payload.note
-  payload.active
+  recordId
+  action
+  fromState
+  toState
+  identityId
+  identityType
+  partitionId
+  note
+  active
   row.createdAt
 }
 
@@ -25,13 +25,13 @@ shape log logFull {
 @description("Validation policy projection with all configuration fields")
 shape policy policyFull {
   row.id
-  payload.targetRecordType
-  payload.partitionId
-  payload.requiredChecks
-  payload.requiredConfirmations
-  payload.checkedDataUsable
-  payload.revertMinRole
-  payload.active
+  targetRecordType
+  partitionId
+  requiredChecks
+  requiredConfirmations
+  checkedDataUsable
+  revertMinRole
+  active
   row.createdAt
 }
 
@@ -39,23 +39,23 @@ shape policy policyFull {
 @description("Comprehensive data record projection with validation lifecycle fields")
 shape record recordFull {
   row.id
-  payload.partitionId
-  payload.validationState
-  payload.recordType
-  payload.label
-  payload.naturalKeyField
-  payload.naturalKeyValue
-  payload.data
-  payload.importSource
-  payload.importedBy
-  payload.sourceAttachmentId
-  payload.confidence
-  payload.checkCount
-  payload.confirmCount
-  payload.lastCheckedBy
-  payload.lastCheckedAt
-  payload.lastConfirmedBy
-  payload.lastConfirmedAt
-  payload.active
+  partitionId
+  validationState
+  recordType
+  label
+  naturalKeyField
+  naturalKeyValue
+  data
+  importSource
+  importedBy
+  sourceAttachmentId
+  confidence
+  checkCount
+  confirmCount
+  lastCheckedBy
+  lastCheckedAt
+  lastConfirmedBy
+  lastConfirmedAt
+  active
   row.createdAt
 }

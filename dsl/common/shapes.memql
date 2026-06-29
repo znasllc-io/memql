@@ -10,28 +10,28 @@ use common.concepts.{ media, attachment }
 @description("Attachment projection for the download endpoint (memql#804): the file's storage URL + the metadata needed to serve it back (name + MIME + owning space for the cross-space guard).")
 shape attachment attachmentDownload {
   row.id
-  payload.fileName
-  payload.mimeType
-  payload.blobUrl
-  payload.partitionId
-  payload.status
+  fileName
+  mimeType
+  blobUrl
+  partitionId
+  status
 }
 
 @row
 @description("Minimal document-chunk projection used for per-domain counting on the frontend. Returns only the parent domainId for each chunk so the Knowledge panel can build a {domainId: count} map without paying for full-chunk-payload bandwidth.")
 shape documentChunk documentChunkDomainLite {
-  payload.domainId
+  domainId
 }
 
 @row
 @description("Document chunk projection including the source reference and ordering.")
 shape documentChunk documentChunkFull {
   row.id
-  payload.domainId
-  payload.text
-  payload.sourceRef
-  payload.seq
-  payload.tokenCount
+  domainId
+  text
+  sourceRef
+  seq
+  tokenCount
   row.createdAt
 }
 
@@ -69,39 +69,39 @@ shape documentChunk documentChunkFull {
 @row
 @description("Concept-agnostic scaffold for predicates that check payload.active.")
 shape activeRowTrait {
-  payload.active
+  active
 }
 
 @row
 @description("Concept-agnostic scaffold for predicates that check payload.status.")
 shape statusRowTrait {
-  payload.status
+  status
 }
 
 @row
 @description("Concept-agnostic scaffold for predicates that check payload.deleted (soft-delete flag).")
 shape deletedRowTrait {
-  payload.deleted
+  deleted
 }
 
 @row
 @description("Concept-agnostic scaffold for predicates that check payload.archivedAt (archive timestamp).")
 shape archivedRowTrait {
-  payload.archivedAt
+  archivedAt
 }
 
 @row
 @description("Concept-agnostic scaffold for predicates that check payload.savedAt (save timestamp).")
 shape savedRowTrait {
-  payload.savedAt
+  savedAt
 }
 
 @row
 @description("Concept-agnostic scaffold for predicates that check the validation lifecycle (payload.validationStatus + payload.checkedAt + payload.confirmedAt).")
 shape validationRowTrait {
-  payload.validationStatus
-  payload.checkedAt
-  payload.confirmedAt
+  validationStatus
+  checkedAt
+  confirmedAt
 }
 
 // =============================================================================
@@ -136,15 +136,15 @@ shape actorEnvelope {
 @description("Full projection of a v1:common:media row -- every payload field used by the CoPresent SPA's Media interface, plus the row intrinsics the frontend reads for ordering and ids.")
 shape media mediaFull {
   row.id
-  payload.partitionId
-  payload.mediaType
-  payload.mimeType
-  payload.url
-  payload.filename
-  payload.size
-  payload.duration
-  payload.dimensions
-  payload.transcription
-  payload.metadata
+  partitionId
+  mediaType
+  mimeType
+  url
+  filename
+  size
+  duration
+  dimensions
+  transcription
+  metadata
   row.createdAt
 }

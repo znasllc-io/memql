@@ -6,19 +6,19 @@ use healing.concepts.{ healedOverride }
 @description("Comprehensive healed-override projection: every payload field plus row id and timestamps. The default shape for resolution + list + create reads of the two-tier base/overlay store (E4.2 / memql#2140).")
 shape healedOverride healedOverrideFull {
   row.id
-  payload.ownerUserId
-  payload.baseConstructId
-  payload.tier
-  payload.overrideData
-  payload.valid
-  payload.version
-  payload.active
-  payload.reason
-  payload.sourcePreconditionId
-  payload.blastRadius
-  payload.validationStatus
-  payload.validatedBy
-  payload.validatedAt
-  payload.rejectionReason
+  ownerUserId
+  baseConstructId
+  tier
+  overrideData
+  valid
+  version
+  active
+  reason
+  sourcePreconditionId
+  blastRadius
+  validationStatus
+  validatedBy
+  validatedAt
+  rejectionReason
   row.createdAt
 }

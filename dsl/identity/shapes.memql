@@ -9,11 +9,11 @@ use identity.concepts.{ accessRequest, accountEntitlement, auditEvent, authCode,
 @description("Full projection of v1:identity:accountEntitlement -- the per-account concurrency cap (epic memql#902 / #903) read by the admission controller (#904) and the Tasks UX (#909). createdAt is carried so a reader that gets more than one time-series version can pick the latest.")
 shape accountEntitlement accountEntitlementFull {
   row.id
-  payload.accountId
-  payload.accountKind
-  payload.tier
-  payload.maxConcurrentTasks
-  payload.note
+  accountId
+  accountKind
+  tier
+  maxConcurrentTasks
+  note
   row.createdAt
   row.createdBy
 }
@@ -22,18 +22,18 @@ shape accountEntitlement accountEntitlementFull {
 @description("Full projection of v1:identity:accessRequest including review state and risk signals.")
 shape accessRequest accessRequestFull {
   row.id
-  payload.email
-  payload.name
-  payload.additionalContext
-  payload.status
-  payload.riskScore
-  payload.riskSignals
-  payload.sourceIP
-  payload.userAgent
-  payload.reviewedBy
-  payload.reviewedAt
-  payload.reviewerNote
-  payload.invitationId
+  email
+  name
+  additionalContext
+  status
+  riskScore
+  riskSignals
+  sourceIP
+  userAgent
+  reviewedBy
+  reviewedAt
+  reviewerNote
+  invitationId
   row.createdAt
 }
 
@@ -41,23 +41,23 @@ shape accessRequest accessRequestFull {
 @description("Full projection of v1:identity:auditEvent including actor, target, and source attribution.")
 shape auditEvent auditEventFull {
   row.id
-  payload.occurredAt
-  payload.category
-  payload.action
-  payload.actorUserId
-  payload.actorEmail
-  payload.actorRole
-  payload.actorIdentityId
-  payload.targetType
-  payload.targetId
-  payload.targetEmail
-  payload.detail
-  payload.sourceIP
-  payload.userAgent
-  payload.correlationId
-  payload.outcome
-  payload.failureReason
-  payload.prevEventHash
+  occurredAt
+  category
+  action
+  actorUserId
+  actorEmail
+  actorRole
+  actorIdentityId
+  targetType
+  targetId
+  targetEmail
+  detail
+  sourceIP
+  userAgent
+  correlationId
+  outcome
+  failureReason
+  prevEventHash
   row.createdAt
 }
 
@@ -65,16 +65,16 @@ shape auditEvent auditEventFull {
 @description("Full projection of v1:identity:authCode. Excludes the plaintext code field; only the SHA-256 hash is exposed to query consumers so a query result can never be replayed at the token endpoint.")
 shape authCode authCodeFull {
   row.id
-  payload.codeHash
-  payload.clientId
-  payload.redirectURI
-  payload.state
-  payload.userId
-  payload.identityId
-  payload.magicLinkRequestId
-  payload.expiresAt
-  payload.consumedAt
-  payload.consumedFromIP
+  codeHash
+  clientId
+  redirectURI
+  state
+  userId
+  identityId
+  magicLinkRequestId
+  expiresAt
+  consumedAt
+  consumedFromIP
   row.createdAt
 }
 
@@ -82,13 +82,13 @@ shape authCode authCodeFull {
 @description("Full projection of v1:identity:oauthClient -- a dynamically-registered (RFC 7591) public OAuth client. No secret column; public clients only.")
 shape oauthClient oauthClientFull {
   row.id
-  payload.clientId
-  payload.clientName
-  payload.redirectURIsJSON
-  payload.grantTypes
-  payload.responseTypes
-  payload.tokenEndpointAuthMethod
-  payload.registeredAt
+  clientId
+  clientName
+  redirectURIsJSON
+  grantTypes
+  responseTypes
+  tokenEndpointAuthMethod
+  registeredAt
   row.createdAt
 }
 
@@ -96,21 +96,21 @@ shape oauthClient oauthClientFull {
 @description("Full projection of v1:identity:authSession including revocation state.")
 shape authSession authSessionFull {
   row.id
-  payload.userId
-  payload.identityId
-  payload.subject
-  payload.tokenHash
-  payload.refreshTokenHash
-  payload.previousRefreshTokenHash
-  payload.previousRotatedAt
-  payload.source
-  payload.clientLabel
-  payload.expiresAt
-  payload.lastRefreshedAt
-  payload.firstAuthenticatedAt
-  payload.lastActivityAt
-  payload.revokedAt
-  payload.revokedReason
+  userId
+  identityId
+  subject
+  tokenHash
+  refreshTokenHash
+  previousRefreshTokenHash
+  previousRotatedAt
+  source
+  clientLabel
+  expiresAt
+  lastRefreshedAt
+  firstAuthenticatedAt
+  lastActivityAt
+  revokedAt
+  revokedReason
   row.createdAt
 }
 
@@ -118,19 +118,19 @@ shape authSession authSessionFull {
 @description("Full projection of v1:identity:clusterSettings -- the singleton runtime-editable cluster configuration row.")
 shape clusterSettings clusterSettingsFull {
   row.id
-  payload.registrationMode
-  payload.registrationDomains
-  payload.internalDomains
-  payload.internalDefaultRole
-  payload.brandName
-  payload.brandPrimaryColor
-  payload.brandLogoDataURI
-  payload.registeredClientsJSON
-  payload.accessRequestNotifyEmails
-  payload.accessRequestNotifyThrottleMins
-  payload.bootstrapEmail
-  payload.bootstrappedAt
-  payload.authoredAutomationsEnabled
+  registrationMode
+  registrationDomains
+  internalDomains
+  internalDefaultRole
+  brandName
+  brandPrimaryColor
+  brandLogoDataURI
+  registeredClientsJSON
+  accessRequestNotifyEmails
+  accessRequestNotifyThrottleMins
+  bootstrapEmail
+  bootstrappedAt
+  authoredAutomationsEnabled
   row.createdAt
 }
 
@@ -138,18 +138,18 @@ shape clusterSettings clusterSettingsFull {
 @description("Comprehensive delegation projection with all fields")
 shape delegation delegationFull {
   row.id
-  payload.identityId
-  payload.identitySubject
-  payload.identityType
-  payload.agentId
-  payload.agentSubject
-  payload.roleCeiling
-  payload.scopes
-  payload.expiresAt
-  payload.note
-  payload.active
-  payload.revokedAt
-  payload.revokedBySubject
+  identityId
+  identitySubject
+  identityType
+  agentId
+  agentSubject
+  roleCeiling
+  scopes
+  expiresAt
+  note
+  active
+  revokedAt
+  revokedBySubject
   row.createdAt
 }
 
@@ -157,13 +157,13 @@ shape delegation delegationFull {
 @description("Comprehensive identity projection for the post-restructure identity concept: a credential set owned by a user. Use userFull for the person and delegationFull for delegations.")
 shape identity identityFull {
   row.id
-  payload.userId
-  payload.identityType
-  payload.credentials
-  payload.label
-  payload.usableByAgents
-  payload.active
-  payload.lastUsedAt
+  userId
+  identityType
+  credentials
+  label
+  usableByAgents
+  active
+  lastUsedAt
   row.createdAt
 }
 
@@ -171,30 +171,30 @@ shape identity identityFull {
 @description("Compact identity projection with the identifying fields only. The full credentials object lives on identityFull.")
 shape identity identitySummary {
   row.id
-  payload.userId
-  payload.identityType
-  payload.label
-  payload.usableByAgents
-  payload.active
+  userId
+  identityType
+  label
+  usableByAgents
+  active
 }
 
 @row
 @description("Comprehensive invitation projection (user + guest kinds)")
 shape invitation invitationFull {
   row.id
-  payload.kind
-  payload.partitionId
-  payload.spaceName
-  payload.inviterId
-  payload.inviterName
-  payload.inviteeId
-  payload.inviteeEmail
-  payload.inviteeName
-  payload.tokenHash
-  payload.previousTokenHash
-  payload.expiresAt
-  payload.status
-  payload.respondedAt
+  kind
+  partitionId
+  spaceName
+  inviterId
+  inviterName
+  inviteeId
+  inviteeEmail
+  inviteeName
+  tokenHash
+  previousTokenHash
+  expiresAt
+  status
+  respondedAt
   row.createdAt
 }
 
@@ -202,15 +202,15 @@ shape invitation invitationFull {
 @description("Full projection of v1:identity:magicLinkRequest including consume state.")
 shape magicLinkRequest magicLinkRequestFull {
   row.id
-  payload.email
-  payload.tokenHash
-  payload.expiresAt
-  payload.consumedAt
-  payload.consumedFromIP
-  payload.oauthCtxJSON
-  payload.sourceIP
-  payload.userAgent
-  payload.invitationId
+  email
+  tokenHash
+  expiresAt
+  consumedAt
+  consumedFromIP
+  oauthCtxJSON
+  sourceIP
+  userAgent
+  invitationId
   row.createdAt
 }
 
@@ -218,11 +218,11 @@ shape magicLinkRequest magicLinkRequestFull {
 @description("Lightweight PAT (api_key identity) projection for UI listings. Excludes credentials entirely so neither the keyHash nor any future per-variant secret material lands in user-facing payloads.")
 shape identity patSummary {
   row.id
-  payload.userId
-  payload.label
-  payload.usableByAgents
-  payload.active
-  payload.lastUsedAt
+  userId
+  label
+  usableByAgents
+  active
+  lastUsedAt
   row.createdAt
 }
 
@@ -230,30 +230,30 @@ shape identity patSummary {
 @description("Lightweight projection: just the user's id and activePartitionId pointer. Phase 4 of the chat-architecture plan.")
 shape user userActiveSpaceProjection {
   row.id
-  payload.activePartitionId
+  activePartitionId
 }
 
 @row
 @description("Comprehensive user projection: the person behind one or more identities.")
 shape user userFull {
   row.id
-  payload.displayName
-  payload.firstName
-  payload.lastName
-  payload.primaryEmail
-  payload.phone
-  payload.primaryRole
-  payload.gender
-  payload.birthdate
-  payload.role
-  payload.groupIds
-  payload.preferences
-  payload.active
-  payload.suspendedAt
-  payload.suspendedReason
-  payload.lastSeenAt
-  payload.activePartitionId
-  payload.revocationEpoch
+  displayName
+  firstName
+  lastName
+  primaryEmail
+  phone
+  primaryRole
+  gender
+  birthdate
+  role
+  groupIds
+  preferences
+  active
+  suspendedAt
+  suspendedReason
+  lastSeenAt
+  activePartitionId
+  revocationEpoch
   row.createdAt
 }
 
@@ -261,13 +261,13 @@ shape user userFull {
 @description("Full projection of a v1:identity:workerPairingCode row. Backs the Pair-aware gRPC interceptor's lookup path + the redeem handler's validation path.")
 shape workerPairingCode workerPairingCodeFull {
   row.id
-  payload.ownerUserId
-  payload.codeHash
-  payload.clusterURL
-  payload.expiresAt
-  payload.redeemedAt
-  payload.redeemedBy
-  payload.redeemedFromIP
-  payload.sourceIP
+  ownerUserId
+  codeHash
+  clusterURL
+  expiresAt
+  redeemedAt
+  redeemedBy
+  redeemedFromIP
+  sourceIP
   row.createdAt
 }

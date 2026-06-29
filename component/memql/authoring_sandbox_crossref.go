@@ -358,17 +358,27 @@ func conceptPayloadFields(concept *memoryNodes.Concept) map[string]bool {
 
 // payloadFieldFromPath returns the top-level payload field a shape path
 // projects, or "" when the path is a row intrinsic (row.id / row.createdAt /
-// ...) or an actor path. `row.payload.label` -> "label";
-// `row.payload.nested.x` -> "nested" (top-level field).
+// ...) or an actor path. Under bare payload access (epic #2292) the author
+// writes a payload property by bare name, so a bare path's first segment IS
+// the payload field. `status` -> "status"; `address.city` -> "address";
+// `row.id` -> ""; `actor.role` -> ""; legacy `row.payload.label` -> "label".
 func payloadFieldFromPath(path string) string {
 	segs := strings.Split(path, ".")
-	// Tolerate both `row.payload.x` and bare `payload.x`.
+	if len(segs) == 0 {
+		return ""
+	}
+	// Explicit payload.X / row.payload.X (legacy / internal storage form).
 	for i := 0; i < len(segs)-1; i++ {
 		if segs[i] == "payload" {
 			return segs[i+1]
 		}
 	}
-	return ""
+	// Ambient prefixes are not payload fields.
+	if segs[0] == "row" || segs[0] == "actor" {
+		return ""
+	}
+	// Bare path: the first segment is the (top-level) payload field.
+	return segs[0]
 }
 
 // singularKind maps a `use`-path construct-kind segment (plural) to the

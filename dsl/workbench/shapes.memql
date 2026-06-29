@@ -6,11 +6,11 @@ use workbench.concepts.{ workspace }
 @description("Full projection of a v1:workbench:workspace row. Used by workspaceForPlan (the integration's existence-check) and provisionedWorkspaces (inventory).")
 shape workspace workspaceFull {
   row.id
-  payload.planId
-  payload.status
-  payload.storageRoot
-  payload.createdAt
-  payload.lastUsedAt
-  payload.releasedAt
-  payload.releasedReason
+  planId
+  status
+  storageRoot
+  createdAt
+  lastUsedAt
+  releasedAt
+  releasedReason
 }

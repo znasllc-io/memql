@@ -10,14 +10,14 @@ use router.concepts.{ budget, call }
 shape budget budgetFull {
   row.id
   row.createdAt
-  payload.scope
-  payload.scopeId
-  payload.periodType
-  payload.limitUSD
-  payload.alertThresholdPct
-  payload.alertSent
-  payload.resetAt
-  payload.active
+  scope
+  scopeId
+  periodType
+  limitUSD
+  alertThresholdPct
+  alertSent
+  resetAt
+  active
 }
 
 @row
@@ -25,29 +25,29 @@ shape budget budgetFull {
 shape call callFull {
   row.id
   row.createdAt
-  payload.requestId
-  payload.agentId
-  payload.userId
-  payload.promptName
-  payload.policyName
-  payload.vendor
-  payload.model
-  payload.providerName
-  payload.inputTokens
-  payload.outputTokens
-  payload.cachedInputTokens
-  payload.tokensEstimated
-  payload.inputCost
-  payload.outputCost
-  payload.cachedInputCost
-  payload.totalCost
-  payload.pricingConfigured
-  payload.timeToFirstTokenMs
-  payload.totalDurationMs
-  payload.tokensPerSec
-  payload.streaming
-  payload.outcome
-  payload.errorCategory
-  payload.errorMessage
-  payload.fallbackFromModel
+  requestId
+  agentId
+  userId
+  promptName
+  policyName
+  vendor
+  model
+  providerName
+  inputTokens
+  outputTokens
+  cachedInputTokens
+  tokensEstimated
+  inputCost
+  outputCost
+  cachedInputCost
+  totalCost
+  pricingConfigured
+  timeToFirstTokenMs
+  totalDurationMs
+  tokensPerSec
+  streaming
+  outcome
+  errorCategory
+  errorMessage
+  fallbackFromModel
 }

@@ -13,31 +13,31 @@ use planner.concepts.{ plan, task, taskState, responsibility }
 @description("Comprehensive plan projection for the Tasks page row, the plan.created / plan.completed canvas cards, and the planner's own routing decisions. Carries every Plan field including lifecycle timestamps, the per-kind input/output blobs, and the token + estimate accounting the Tasks page progress strips read.")
 shape plan planFull {
   row.id
-  payload.partitionId
-  payload.kind
-  payload.status
-  payload.goal
-  payload.ownerAgentId
-  payload.requestedBy
-  payload.input
-  payload.output
-  payload.errorMessage
-  payload.startedAt
-  payload.completedAt
-  payload.cancelledBy
-  payload.phases
-  payload.estimate
-  payload.estimatedAt
-  payload.tokenBudget
-  payload.tokenSpent
-  payload.tokenAllocatedToChildren
-  payload.tokenCapDisabled
-  payload.metrics
-  payload.parentPlanId
-  payload.retryThreshold
-  payload.feedbackReason
-  payload.feedbackRequest
-  payload.feedbackResponse
+  partitionId
+  kind
+  status
+  goal
+  ownerAgentId
+  requestedBy
+  input
+  output
+  errorMessage
+  startedAt
+  completedAt
+  cancelledBy
+  phases
+  estimate
+  estimatedAt
+  tokenBudget
+  tokenSpent
+  tokenAllocatedToChildren
+  tokenCapDisabled
+  metrics
+  parentPlanId
+  retryThreshold
+  feedbackReason
+  feedbackRequest
+  feedbackResponse
   row.createdAt
   row.createdBy
 }
@@ -46,29 +46,29 @@ shape plan planFull {
 @description("Comprehensive task projection for the Tasks page expand-drawer (which lists Tasks under a Plan) and the planner's per-Task lifecycle automations. Carries the metrics rollup (tokensSpent, llmCallCount, toolCallCount, modelBreakdown[]) so per-task token cost surfaces in the cockpit's planner detail pane.")
 shape task taskFull {
   row.id
-  payload.planId
-  payload.category
-  payload.parentTaskId
-  payload.kind
-  payload.logicalStepId
-  payload.attemptNumber
-  payload.toolName
-  payload.toolArgs
-  payload.toolResult
-  payload.status
-  payload.seq
-  payload.phase
-  payload.dependsOn
-  payload.executionSurface
-  payload.executorBackend
-  payload.input
-  payload.output
-  payload.metrics
-  payload.errorMessage
-  payload.startedAt
-  payload.completedAt
-  payload.parkedAt
-  payload.parkedAtCheckpoint
+  planId
+  category
+  parentTaskId
+  kind
+  logicalStepId
+  attemptNumber
+  toolName
+  toolArgs
+  toolResult
+  status
+  seq
+  phase
+  dependsOn
+  executionSurface
+  executorBackend
+  input
+  output
+  metrics
+  errorMessage
+  startedAt
+  completedAt
+  parkedAt
+  parkedAtCheckpoint
   row.createdAt
   row.createdBy
 }
@@ -77,11 +77,11 @@ shape task taskFull {
 @description("TaskState projection. Used by the planner to bootstrap an agent's resume context after a paused / awaitingFeedback Task is resumed.")
 shape taskState taskStateFull {
   row.id
-  payload.taskId
-  payload.workingMemory
-  payload.reasoningChain
-  payload.toolCallHistory
-  payload.pendingSubPlanIds
+  taskId
+  workingMemory
+  reasoningChain
+  toolCallHistory
+  pendingSubPlanIds
   row.createdAt
 }
 
@@ -89,24 +89,24 @@ shape taskState taskStateFull {
 @description("Comprehensive responsibility projection (epic #631). Carries every field across the reactive / standing / recurring archetypes -- trigger discriminator, schedule (recurring), condition (reactive), target binding (assistant / specialist / unassigned + assignedAgentId / assignedRoleSlug), scope pin, lifecycle status + enabled flag, and the lastEvaluatedAt / lastResult run bookkeeping the reactive-loop epic #632 consumes.")
 shape responsibility responsibilityFull {
   row.id
-  payload.ownerUserId
-  payload.statement
-  payload.trigger
-  payload.schedule
-  payload.condition
-  payload.targetKind
-  payload.assignedAgentId
-  payload.assignedRoleSlug
-  payload.successCriteria
-  payload.notifyHow
-  payload.scopePartitionId
-  payload.enabled
-  payload.status
-  payload.intakeStatus
-  payload.intakeRequest
-  payload.intakeResponse
-  payload.lastEvaluatedAt
-  payload.lastResult
+  ownerUserId
+  statement
+  trigger
+  schedule
+  condition
+  targetKind
+  assignedAgentId
+  assignedRoleSlug
+  successCriteria
+  notifyHow
+  scopePartitionId
+  enabled
+  status
+  intakeStatus
+  intakeRequest
+  intakeResponse
+  lastEvaluatedAt
+  lastResult
   row.createdAt
   row.createdBy
 }
