@@ -99,6 +99,7 @@ func allExpressionNodeImplementers() map[string]ExpressionNode {
 		"SpecReferenceExpression":     &SpecReferenceExpression{Name: "s"},
 		"RelationshipExpression":      &RelationshipExpression{},
 		"ComparisonExpression":        &ComparisonExpression{Field: FieldReference{Parts: []string{"payload", "x"}}, Operator: OpEq, Value: "v"},
+		"ArithmeticExpression":        &ArithmeticExpression{Op: "+", Left: &LiteralValueNode{Value: int64(1)}, Right: &LiteralValueNode{Value: int64(2)}},
 		"BuiltinFunctionExpression":   &BuiltinFunctionExpression{Name: "b"},
 		"SortExpression":              &SortExpression{},
 		"PaginateExpression":          &PaginateExpression{},

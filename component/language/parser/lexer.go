@@ -376,11 +376,18 @@ func (l *Lexer) NextToken() (Token, error) {
 	case '=':
 		return l.scanOperator(start, startLine, startColumn)
 	case '-':
-		// Check for negative number
+		// A `-` immediately followed by a digit is a negative numeric
+		// literal (`-5`), preserved exactly as before (#2316). Otherwise
+		// `-` is the subtraction / unary-minus operator. Note `-` is also
+		// an identifier character (node ids like `bff-local`), so a `-`
+		// glued to an identifier with no leading whitespace is absorbed by
+		// scanIdentifier and never reaches this case; subtraction therefore
+		// needs the `-` surrounded by spaces (`a - b`).
 		if l.hasNext() && isDigit(l.peekNext()) {
 			return l.scanNumber(start, startLine, startColumn)
 		}
-		return l.scanIdentifier(start, startLine, startColumn)
+		l.advance()
+		return makeToken(TokenOperator, "-"), nil
 	case '/':
 		// Check for Go-style comments (//, /* */)
 		if l.hasNext() && l.peekNext() == '/' {
@@ -391,8 +398,21 @@ func (l *Lexer) NextToken() (Token, error) {
 			l.skipBlockComment()
 			return l.NextToken() // recurse to get next real token
 		}
-		// Single / is not a valid token in MemQL
-		return Token{}, fmt.Errorf("unexpected '/' at position %d", start)
+		// A standalone `/` (not `//` or `/*`) is the division operator (#2316).
+		l.advance()
+		return makeToken(TokenOperator, "/"), nil
+	case '+':
+		// Addition operator (#2316).
+		l.advance()
+		return makeToken(TokenOperator, "+"), nil
+	case '*':
+		// Multiplication operator (#2316).
+		l.advance()
+		return makeToken(TokenOperator, "*"), nil
+	case '%':
+		// Modulo operator (#2316).
+		l.advance()
+		return makeToken(TokenOperator, "%"), nil
 	}
 
 	if isDigit(ch) {

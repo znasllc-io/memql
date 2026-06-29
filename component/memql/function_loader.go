@@ -1135,6 +1135,9 @@ func collectFunctionRefsRecursive(expr ExpressionNode, refs *[]string) {
 		}
 	case *LambdaExpression:
 		collectFunctionRefsRecursive(node.Body, refs)
+	case *ArithmeticExpression:
+		collectFunctionRefsRecursive(node.Left, refs)
+		collectFunctionRefsRecursive(node.Right, refs)
 	}
 }
 
@@ -1222,6 +1225,11 @@ func findImpureCall(expr ExpressionNode, functions map[string]*Function) string 
 		return ""
 	case *LambdaExpression:
 		return findImpureCall(node.Body, functions)
+	case *ArithmeticExpression:
+		if bad := findImpureCall(node.Left, functions); bad != "" {
+			return bad
+		}
+		return findImpureCall(node.Right, functions)
 	case *ComparisonExpression:
 		if v, ok := node.Value.(ExpressionNode); ok {
 			return findImpureCall(v, functions)

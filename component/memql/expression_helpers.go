@@ -84,6 +84,12 @@ func cloneExpressionNode(expr ExpressionNode) ExpressionNode {
 			clone.FieldSelections = copyFieldReferences(node.FieldSelections)
 		}
 		return &clone
+	case *ArithmeticExpression:
+		return &ArithmeticExpression{
+			Op:    node.Op,
+			Left:  cloneExpressionNode(node.Left),
+			Right: cloneExpressionNode(node.Right),
+		}
 	case *RelationshipExpression:
 		return &RelationshipExpression{
 			Function: node.Function,

@@ -43,6 +43,8 @@ func evaluateSpecExpression(goCtx context.Context, engine *MemQLEngine, expr Exp
 		return evaluateSpecComparison(node, ctx)
 	case *LogicalExpression:
 		return evaluateSpecLogical(goCtx, engine, node, ctx)
+	case *ArithmeticExpression:
+		return evaluateSpecArithmetic(goCtx, engine, node, ctx)
 	case *FunctionCallExpression:
 		return evaluateSpecFunctionCall(goCtx, engine, node, ctx)
 	case *LiteralValueNode:
@@ -93,6 +95,26 @@ func evaluateSpecSubCall(goCtx context.Context, engine *MemQLEngine, call *Funct
 		return nil, fmt.Errorf("spec() first argument must be a string, got %T", rawName)
 	}
 	return engine.EvaluateSpec(goCtx, name)
+}
+
+// evaluateSpecArithmetic evaluates a binary arithmetic node (#2316) in the
+// in-process expression evaluator that backs the logic/spec path. Arithmetic
+// is rejected in specs at load (the default AST converter), so this is the
+// logic-body backstop -- it evaluates both operands and applies the numeric
+// operator.
+func evaluateSpecArithmetic(goCtx context.Context, engine *MemQLEngine, expr *ArithmeticExpression, ctx map[string]any) (any, error) {
+	if expr == nil {
+		return nil, nil
+	}
+	lhs, err := evaluateSpecExpression(goCtx, engine, expr.Left, ctx)
+	if err != nil {
+		return nil, err
+	}
+	rhs, err := evaluateSpecExpression(goCtx, engine, expr.Right, ctx)
+	if err != nil {
+		return nil, err
+	}
+	return evalArithmetic(expr.Op, lhs, rhs)
 }
 
 func evaluateSpecLogical(goCtx context.Context, engine *MemQLEngine, expr *LogicalExpression, ctx map[string]any) (any, error) {

@@ -194,6 +194,8 @@ func evalCollScalar(expr ExpressionNode, args map[string]any, locals map[string]
 		return evalCollComparison(node, args, locals)
 	case *LogicalExpression:
 		return evalCollLogical(node, args, locals)
+	case *ArithmeticExpression:
+		return evalCollArithmetic(node, args, locals)
 	default:
 		return nil, fmt.Errorf("unsupported expression %T inside a collection lambda", expr)
 	}
@@ -275,6 +277,21 @@ func evalCollComparisonValue(value any, args, locals map[string]any) (any, error
 	default:
 		return value, nil
 	}
+}
+
+// evalCollArithmetic evaluates a binary arithmetic node (#2316) inside the
+// collection-lambda subset: evaluate both operands, then apply the numeric
+// operator (int op int -> int64, any float -> float64; div/mod by zero error).
+func evalCollArithmetic(node *ArithmeticExpression, args, locals map[string]any) (any, error) {
+	lhs, err := evalCollScalar(node.Left, args, locals)
+	if err != nil {
+		return nil, err
+	}
+	rhs, err := evalCollScalar(node.Right, args, locals)
+	if err != nil {
+		return nil, err
+	}
+	return evalArithmetic(node.Op, lhs, rhs)
 }
 
 func evalCollLogical(node *LogicalExpression, args, locals map[string]any) (any, error) {

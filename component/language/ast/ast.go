@@ -130,6 +130,22 @@ type ComparisonExpr struct {
 func (*ComparisonExpr) node()           {}
 func (*ComparisonExpr) expressionNode() {}
 
+// ArithmeticExpr is a binary arithmetic operation (#2316): one of
+// `+` `-` `*` `/` `%`. Left-associative; `* / %` bind tighter than
+// `+ -`. It is evaluated IN-MEMORY only -- the engine AST converter
+// admits it in logic bodies / collection lambdas and rejects it in
+// specs / query filters (no SQL pushdown). A unary minus on a primary
+// is folded into `0 - <primary>` by the parser, so there is no separate
+// unary node.
+type ArithmeticExpr struct {
+	Op    string
+	Left  ExpressionNode
+	Right ExpressionNode
+}
+
+func (*ArithmeticExpr) node()           {}
+func (*ArithmeticExpr) expressionNode() {}
+
 // RelationshipExpr wraps a nested expression within a relationship function invocation.
 type RelationshipExpr struct {
 	Function RelationshipFunction
