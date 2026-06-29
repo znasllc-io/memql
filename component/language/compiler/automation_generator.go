@@ -1288,6 +1288,14 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 		return fmt.Sprintf("or(%s)", strings.Join(args, ", "))
 
 	case *parser.MethodCallExpr:
+		// A collection chain captured as a multi-statement logic step RHS
+		// (#2317) carries its verbatim source text on Raw -- emit it as-is so
+		// the chain reaches the runtime exactly as the author wrote it (the
+		// per-node reconstruction below emits engine-IR for an arg receiver,
+		// e.g. `arg("members")`, which the collection evaluator can't resolve).
+		if e.Raw != "" {
+			return e.Raw
+		}
 		// A `<receiver>.<method>(<args>)` chain. Story 5 (ADR §2.2 / #2303)
 		// unified the step-result accessors on the lowercase spelling
 		// (`existing.first()`, `rows.count()`, `found.empty()`), which the

@@ -243,6 +243,16 @@ type MethodCallExpr struct {
 	Receiver ExpressionNode
 	Method   string
 	Args     []ExpressionNode
+
+	// Raw is the verbatim source text of the whole chain, captured by the
+	// parser when a collection chain appears as a multi-statement logic step
+	// RHS (`active := args.members.where(m => m.active)`, #2317). It lets the
+	// step round-trip to its EXACT source so the LogicRunner's in-memory
+	// collection evaluator re-parses what the author wrote -- the per-node
+	// expressionToString reconstruction is engine-IR (e.g. `arg("members")`),
+	// not source, so it cannot reproduce an arg-receiver chain. Empty for the
+	// step-result-accessor MethodCallExprs produced elsewhere (Story 5).
+	Raw string
 }
 
 func (*MethodCallExpr) node()           {}

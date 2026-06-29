@@ -50,6 +50,7 @@ func parseLogicBody(t *testing.T, src string) *languageParser.AutomationDef {
 		t.Fatalf("Tokenize: %v", err)
 	}
 	parser := languageParser.NewParser(tokens)
+	parser.SetSource(normalised)
 	ast, err := parser.Parse()
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -883,6 +884,79 @@ logic logicSeedKnowledgeDomains {
 	// literal return must NOT have been dispatched into engine.Execute.
 	if len(registry.dispatched) != 1 || registry.dispatched[0] != "seed" {
 		t.Errorf("dispatched steps = %v, want exactly [seed] (the literal return must bypass the engine)", registry.dispatched)
+	}
+}
+
+// TestLogicRunner_RunLogic_CollectionChainStepRHS pins gap 2 (#2317)
+// END-TO-END: a multi-statement logic body whose intermediate step RHS is a
+// collection-method / lambda chain over a caller arg --
+//
+//	logic logicProbe {
+//	  args { members []object @required }
+//	  body {
+//	    active := args.members.where(m => m.active)
+//	    return active.count()
+//	  }
+//	}
+//
+// must LOAD (the parser emits a query step carrying the chain's verbatim
+// source instead of rejecting the *ast.MethodCallExpr RHS) AND EVALUATE (the
+// LogicRunner's collection-chain branch resolves `args.members`, runs the
+// `where(m => m.active)` filter in-memory, binds the filtered collection as
+// the `active` step result, and the trailing `active.count()` counts it).
+// Neither the chain step nor the count return reaches the step registry --
+// both resolve locally -- so a zero-value engine + stub registry is enough.
+func TestLogicRunner_RunLogic_CollectionChainStepRHS(t *testing.T) {
+	src := `@enabled
+@description("collection-chain step RHS probe (#2317)")
+logic logicProbe {
+  args {
+    members []object @required
+  }
+  body {
+    active := args.members.where(m => m.active)
+    return active.count()
+  }
+}
+`
+	body := parseLogicBody(t, src)
+	registry := &recordingStepRegistry{}
+	r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
+
+	members := []any{
+		map[string]any{"name": "alice", "active": true},
+		map[string]any{"name": "bob", "active": false},
+		map[string]any{"name": "carol", "active": true},
+	}
+	out, err := r.RunLogic(context.Background(), "logicProbe", body, map[string]any{
+		"members": members,
+	})
+	if err != nil {
+		t.Fatalf("RunLogic returned error (#2317 collection-chain step RHS must load + evaluate): %v", err)
+	}
+	if !numericEquals(out, 2) {
+		t.Errorf("RunLogic return = %#v (%T), want 2 (the active member count)", out, out)
+	}
+	// Neither the chain step nor the count return should have hit the
+	// registry -- both are resolved in-memory by the LogicRunner.
+	if len(registry.dispatched) != 0 {
+		t.Errorf("dispatched steps = %v, want none (the collection chain + count resolve locally)", registry.dispatched)
+	}
+}
+
+// numericEquals reports whether v is the integer n regardless of whether it
+// arrived as int / int64 / float64 (the collection-count path can surface any
+// of these depending on the resolver leg).
+func numericEquals(v any, n int) bool {
+	switch x := v.(type) {
+	case int:
+		return x == n
+	case int64:
+		return x == int64(n)
+	case float64:
+		return x == float64(n)
+	default:
+		return false
 	}
 }
 
