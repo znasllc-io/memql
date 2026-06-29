@@ -113,6 +113,12 @@ automation registerNodeLonghand {
 //   parallel { ... }                       -- fan-out concurrently
 //   on success when <logic> { ... } / on failure { ... }  -- terminal branch
 //
+// A `forEach` source may be a collection chain from the in-memory
+// collection/lambda library (ADR §2.2, #2302) -- e.g.
+// `forEach m in args.members.where(m => m.active) { ... }`. Lambda bodies stay
+// PURE (no mutations / actions inside the lambda); the side effects live in
+// the forEach step body. See `_logic.memql` §6 for the full method surface.
+//
 //   @enabled
 //   @trigger(event="deploy.requested", concept="v1:cluster:deployment")
 //   @description("Deploy the memQL ENGINE cluster to an environment. No bff/copresent.")

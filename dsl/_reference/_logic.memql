@@ -183,6 +183,58 @@ logic engineNodeTypes {
 //   @trigger(event="system.startup")   // <- rejected on a logic
 //   logic onStartupBad { body { return true } }
 //
+// =============================================================================
+//   6. Collection / lambda library (ADR §2.2, #2302)
+// =============================================================================
+//
+// A single LINQ-style, method-chained collection library with arrow lambdas
+// is the in-memory, post-fetch way to filter / project / aggregate a set
+// inside a `logic` body (and in an automation `forEach` source). It is
+// REJECTED in specs and query filters -- those push the predicate down to SQL.
+//
+//   args.members.where(m => m.role == "admin" && m.active).count()
+//   nodes.where(n => n.status == "active").orderByDesc(n => n.createdAt).first()
+//
+// Surface (all over a collection receiver): where / select / first / last /
+// single / any / all / count / sum / min / max / avg / orderBy / orderByDesc /
+// take / skip / distinct / groupBy / reduce / empty / contains.
+//
+//   @description("Count the active admins among the passed members.")
+//   logic logicActiveAdminCount {
+//     args { members []object @required }
+//     body { return args.members.where(m => m.role == "admin" && m.active).count() }
+//   }
+//
+// Rules:
+//   - Lambda bodies must be PURE -- a mutation / action call inside a lambda
+//     is a load error (ADR §2.2). Reading bare `now` is fine.
+//   - The legacy result-set methods `.First()/.Nodes()/.Len()/.Empty()/.Count()`
+//     are RETIRED (#2303); step-result accessors are the lowercase
+//     `.first()/.nodes()/.count()/.empty()/.last()` (+ `.Ran()`), e.g.
+//     `existing.empty()` / `rows.count()` in the §4 multi-statement form above.
+//
+// =============================================================================
+//   7. Ambient vs imported (the clock and other nondeterminism) (ADR §2.1)
+// =============================================================================
+//
+// Bare `now` is the AMBIENT current-timestamp primitive -- no import, captured
+// at eval start (the `now()` / `timestamp()` call-forms are RETIRED, #2301). A
+// source of nondeterminism that reads fresh state at call time (a fresh
+// wall-clock read, randomness) is an IMPORTED `core` dependency, so the
+// file-top `use` block reveals it:
+//
+//   use core.{ timestamp }   // fresh wall-clock read -> declared dependency
+//
+// The full ambient-vs-imported classification + the whole construct matrix
+// live in the durable record: docs/internal/design/core-builtins-and-collections-adr.md
+// (§2.1 the purity line, §2.2 collections + temporal, §3 the construct matrix).
+//
+// Temporal reads are query-only: a query may carry `asOf latest` (mark its
+// contract `@latestMode` so consumers see it is time-dependent) or
+// `asOf <ts>` (deterministic); logic / automation never time-travel directly
+// (ADR §2.3 / #2305).
+//
+// =============================================================================
 // See `_automation.memql` for the construct that legitimately writes,
 // acts, and reacts; and `_action.memql` (lands in I6) for the external-
 // capability construct.
