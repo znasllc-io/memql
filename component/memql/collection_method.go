@@ -2,6 +2,7 @@ package memql
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -684,7 +685,18 @@ func evalIntArg(node *CollectionMethodExpression, i int, args, locals map[string
 	if !ok {
 		return 0, fmt.Errorf("%s() argument must be an integer, got %T", node.Method, v)
 	}
-	return int(f), nil
+	// Narrow to int through a GUARDED int64 sink to satisfy the
+	// integer-conversion analyzer (go/incorrect-integer-conversion): the value
+	// can flow from a parsed int64 and `int` is platform-width, so the int()
+	// conversion's source must be a bounded int64. Clamp to the int32 range
+	// (take/skip counts are small; the caller further clamps to [0, len(coll)]).
+	n := int64(f)
+	if n > math.MaxInt32 {
+		n = math.MaxInt32
+	} else if n < math.MinInt32 {
+		n = math.MinInt32
+	}
+	return int(n), nil
 }
 
 func cloneScope(in map[string]any) map[string]any {
