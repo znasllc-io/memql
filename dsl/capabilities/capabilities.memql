@@ -1,0 +1,32 @@
+// capabilities.memql -- declared capability vocabulary
+// (construct-invocation epic memql#2322, Story 5 / memql#2325).
+//
+// A `capability` is a surface-backed, side-effect-classified declaration
+// with a dotted/namespaced name and NO body. It is declared like a typed
+// builtin: `@sideEffect` -- the UNSPOOFABLE risk class (ADR §7) -- lives
+// HERE, on the capability, not on the action that invokes it. The
+// implementation is supplied by the runtime surface (fs / shell / http /
+// integration / mcp), so there is no DSL body.
+//
+// Capabilities are imported at the VERB level
+// (`use capabilities.integration.github.{ tagRelease }`) and called via
+// `capability tagRelease(...)`. The invocation grammar and the action
+// rewrite land in later stories of the epic; this file exercises the
+// DECLARATION + import + registry plumbing.
+
+@sideEffect("write")
+@description("Create a git tag + GitHub release for a version.")
+capability integration.github.tagRelease {
+  args {
+    repo string @required
+    tag  string @required
+  }
+}
+
+@sideEffect("read")
+@description("Read a file from the local filesystem surface.")
+capability fs.readFile {
+  args {
+    path string @required
+  }
+}

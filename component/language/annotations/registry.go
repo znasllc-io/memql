@@ -44,6 +44,9 @@ var ByReceiver = map[string][]string{
 	"Action": {
 		"description", "enabled", "disabled", "kind", "sideEffect",
 	},
+	"Capability": {
+		"description", "enabled", "disabled", "sideEffect",
+	},
 	"Spec": {
 		"description", "enabled", "disabled",
 	},

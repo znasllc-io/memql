@@ -1,0 +1,78 @@
+// _capability.memql -- authoring reference skeleton for the `capability`
+// construct (construct-invocation epic memql#2322, Story 5 / memql#2325).
+//
+// This file is REFERENCE-ONLY. Files and directories under dsl/_reference/
+// are NOT loaded by the engine (the loaders skip underscore-prefixed
+// paths); they document each construct's authoring shape for humans + Sense.
+//
+// ---------------------------------------------------------------------------
+// What a `capability` is
+// ---------------------------------------------------------------------------
+// A surface-backed external capability VERB. It is declared like a typed,
+// side-effect-classified `builtin` with NO body -- the implementation is
+// supplied by the runtime surface, not the DSL.
+//
+//   - Name is namespaced/DOTTED. The leading segment is the namespace, one
+//     of the five-namespace closed vocabulary:
+//       fs.*           filesystem               (fs.readFile, fs.writeFile)
+//       shell.*        process execution        (shell.exec, shell.script)
+//       http.*         outbound HTTP            (http.get, http.post)
+//       integration.*  a named integration      (integration.<domain>.<fn>)
+//       mcp.*          an MCP tool invocation   (mcp.<tool>)
+//
+//   - @sideEffect("read"|"write"|"exec") lives HERE. This is the
+//     UNSPOOFABLE side-effect classification (ADR §7): an authored or
+//     planner-generated action that invokes the capability cannot claim a
+//     softer class than the capability declares.
+//
+//   - @description(...) documents the verb; it is also the planner's
+//     embedding source.
+//
+//   - The body is an OPTIONAL `args { ... }` input schema, using the same
+//     args-block grammar as action / builtin / file-top args. There is NO
+//     `body { ... }` block -- a `body` is the procedural marker and a
+//     capability is never procedural.
+//
+// ---------------------------------------------------------------------------
+// Declaration shape
+// ---------------------------------------------------------------------------
+@sideEffect("write")
+@description("Create a git tag + GitHub release for a version.")
+capability integration.github.tagRelease {
+  args {
+    repo string @required
+    tag  string @required
+  }
+}
+
+// A read capability with a single arg.
+@sideEffect("read")
+@description("Read a file from the local filesystem surface.")
+capability fs.readFile {
+  args {
+    path string @required
+  }
+}
+
+// An exec capability may take no args at all (args block omitted).
+@sideEffect("exec")
+@description("Run a shell script on the host surface.")
+capability shell.script { }
+
+// ---------------------------------------------------------------------------
+// Importing + calling (verb-level)
+// ---------------------------------------------------------------------------
+// Capabilities are imported at the VERB level, consistent with every other
+// `use`. The import path is `capabilities.<namespace-path>.{ verbNames }`:
+//
+//     use capabilities.integration.github.{ tagRelease }
+//     use capabilities.fs.{ readFile }
+//
+// and invoked via the call form (invocation grammar lands in Story 2):
+//
+//     capability tagRelease({ repo: args.repo, tag: args.tag })
+//
+// The action rewrite (Story 4) is what binds a capability call into an
+// authored `action`. This story is purely the DECLARATION + import + the
+// registry/cross-ref plumbing that lets a declared+imported capability
+// validate.

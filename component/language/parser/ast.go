@@ -140,6 +140,7 @@ type (
 	ActionDecl              = ast.ActionDecl
 	ActionField             = ast.ActionField
 	ActionArg               = ast.ActionArg
+	CapabilityDecl          = ast.CapabilityDecl
 	PolicyDecl              = ast.PolicyDecl
 	SeedDecl                = ast.SeedDecl
 	SeedBlock               = ast.SeedBlock

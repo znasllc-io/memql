@@ -180,6 +180,28 @@ func (r *crossRefResolver) checkUseImports(c SandboxConstruct, origin string) st
 		if len(u.Parts) < 2 {
 			continue
 		}
+		// Capability imports: `use capabilities.<namespace-path>.{ verb, ... }`
+		// (construct-invocation ADR Decision 4, Story 5 / memql#2325). The
+		// discriminator is the FIRST path segment ("capabilities"); the
+		// remaining segments form the capability's dotted namespace path, and
+		// each imported name is a verb under it. The full capability name is
+		// `<namespace-path>.<verb>` (e.g.
+		// `use capabilities.integration.github.{ tagRelease }` ->
+		// integration.github.tagRelease). Resolve against the bundle's own
+		// capability declarations + the declared-capability registry.
+		if u.Parts[0] == "capabilities" {
+			nsPath := strings.Join(u.Parts[1:], ".")
+			for _, name := range u.Names {
+				full := name
+				if nsPath != "" {
+					full = nsPath + "." + name
+				}
+				if !r.capabilityResolves(full) {
+					return fmt.Sprintf("%s: unresolved capability %q imported from %q -- no capability by that name declared in this bundle or the capability registry", origin, full, u.Path)
+				}
+			}
+			continue
+		}
 		kind := u.Parts[len(u.Parts)-1]
 		namespace := u.Parts[len(u.Parts)-2]
 		for _, name := range u.Names {
@@ -189,6 +211,23 @@ func (r *crossRefResolver) checkUseImports(c SandboxConstruct, origin string) st
 		}
 	}
 	return ""
+}
+
+// capabilityResolves reports whether a full dotted capability name resolves
+// against the bundle's own `capability` declarations or the process-wide
+// declared-capability registry (loaded from the embedded DSL tree). A
+// registry-load failure is treated as resolve-tolerant so a broken tree
+// (caught loudly by the dedicated capability-loader test) does not mask an
+// otherwise-clean authored bundle.
+func (r *crossRefResolver) capabilityResolves(full string) bool {
+	if r.bundleByKind["capability"] != nil && r.bundleByKind["capability"][full] {
+		return true
+	}
+	names, err := declaredCapabilityNames()
+	if err != nil {
+		return true
+	}
+	return names[full]
 }
 
 // resolves reports whether an imported name of the given construct-kind

@@ -261,6 +261,8 @@ func receiverKeyToConstructKeywords(receiverKey string) []string {
 		return []string{"automation"}
 	case "Action":
 		return []string{"action"}
+	case "Capability":
+		return []string{"capability"}
 	case "Spec":
 		return []string{"spec", "trait"}
 	case "Tool":
