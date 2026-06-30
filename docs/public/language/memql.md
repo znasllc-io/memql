@@ -612,7 +612,7 @@ Two legacy forms are retired (both rejected at parse time):
 
 ```memql
 // Inside a logic body
-siResponse := if existingResponse.Empty() {
+siResponse := if existingResponse.empty() {
   si(args.event.payload.promptTemplateId, args.event.payload.promptData)
 }
 ```
@@ -743,7 +743,7 @@ mutation space mutationArchiveSpace {
 - `insert { ... }` writes a new row of the signature concept; `update { id: ..., ... }` is the partial-update counterpart for read-merge-validate-write flows.
 - A bare `args.X` entry spreads the field under its own name; `name: <expr>` assigns explicitly.
 - Engine-provided names are available in the body: `now` (RFC3339 timestamp captured at eval start), `actor.userId` / `actor.role` / `actor.identityId` / `actor.isClusterOwner`, `partition`, and allow-listed `config.X`.
-- Helper calls like `concat(...)`, `hash(...)`, `canonicalId(args.x, concept)`, `timestamp()`, and `coalesce(a, b, ...)` are available for computed fields.
+- Helper calls like `concat(...)`, `hash(...)`, `canonicalId(args.x, concept)`, and `coalesce(a, b, ...)` are available for computed fields; the current time is the bare reserved `now` (no call parens — see "Logic" below).
 
 ## Specs
 
@@ -837,6 +837,28 @@ query context queryLatestSpaceContextForSpace {
   shape   spaceContextFull
 }
 ```
+
+### Temporal queries (`asOf`)
+
+Time-travel is a **query-only** clause (alongside `filter` / `shape` / `sort` / `paginate`); it is rejected in logic / automation / spec bodies, which never time-travel directly. Two forms:
+
+```memql
+@latestMode    // surfaced on the contract: this query is time-dependent
+query node queryLiveNodes {
+  asOf latest
+  filter  type == "node"
+  shape   nodeCard
+}
+
+query node queryNodesAt {        // asOf <ts> -> deterministic, no marker
+  args { at string @required }
+  asOf args.at
+  shape nodeCard
+}
+```
+
+- `asOf latest` reads current (clock-dependent) state. Mark the query `@latestMode` so consumers see on its contract that the result is time-dependent.
+- `asOf <explicit timestamp>` reads immutable historical state — deterministic, so it needs no marker.
 
 ### Imports
 
@@ -952,9 +974,9 @@ logic logicPurgeExpiredArchivedSpaces {
     event object @required
   }
   body {
-    expired := queryExpiredArchivedSpaces({ now: timestamp() })
+    expired := queryExpiredArchivedSpaces({ now: now })
 
-    for item := range expired.Nodes() {
+    for item := range expired.nodes() {
       deleteStep := mutationDeleteSpaceNow({
         spaceId: item.id,
         payload: {
@@ -966,22 +988,59 @@ logic logicPurgeExpiredArchivedSpaces {
       })
     }
 
-    return expired.Len()
+    return expired.count()
   }
 }
 ```
 
-**Result accessors.** A query-step result exposes `X.Nodes()` (the matched node slice), `X.Empty()` (true when nothing matched), and `X.Len()` (match count). Within a `for item := range X.Nodes()` loop, the loop variable **must be named `item`**; `item.id` and `item.payload.<field>` reach the current node.
+`now` above is the bare reserved current-timestamp primitive — it resolves to the clock in every body with no import and no call parens. The `now()` / `timestamp()` call-forms are **retired** and rejected at parse time.
+
+**Result accessors.** A query-step result is a collection you can iterate or run the collection/lambda library over (see below). It exposes the lowercase accessors `X.nodes()` (the matched node slice), `X.empty()` (true when nothing matched), `X.count()` (match count), `X.first()` / `X.last()` (a single node), and `X.Ran()` (whether a guarded step executed). Within a `for item := range X.nodes()` loop, the loop variable **must be named `item`**; `item.id` and `item.payload.<field>` reach the current node.
+
+> **Retired.** The capitalized accessors `.First()` / `.Nodes()` / `.Len()` / `.Empty()` / `.Count()` / `.Last()` are retired in favor of the lowercase spellings above (`.Len()` → `.count()`). `.Ran()` is kept (it has no lowercase pair).
 
 **Conditional steps** use `if <cond> { <call> }`:
 
 ```memql
-siResponse := if existingResponse.Empty() {
+siResponse := if existingResponse.empty() {
   si(args.event.payload.promptTemplateId, args.event.payload.promptData)
 }
 ```
 
 Logic functions return via the trailing `return <expr>` — there is no `ctx.output = ...`. The `LogicRunner` walks intermediate steps in dependency order through the same step registry the automation scheduler uses, then evaluates the trailing `return <expr>` as the function's return value.
+
+### Collection / lambda library
+
+A single LINQ-style, method-chained collection library with **arrow lambdas** is the in-memory, post-fetch way to filter, project, and aggregate a set inside a `logic` body (and an automation `forEach` source — see below). It operates on collections already in memory — a query-step result, an `args` list, a `select` projection — and never touches the database:
+
+```memql
+// active admins among the passed members
+args.members.where(m => m.role == "admin" && m.active).count()
+
+// newest active node
+nodes.where(n => n.status == "active").orderByDesc(n => n.createdAt).first()
+```
+
+Arrow lambdas are `x => expr` (one param) and `(acc, x) => expr` (two, for `reduce`). The method surface, all over a collection receiver:
+
+| Group | Methods | Returns |
+|---|---|---|
+| Filter / project | `where(x => bool)`, `select(x => v)`, `distinct(x => k?)`, `take(n)`, `skip(n)` | collection |
+| Order | `orderBy(x => k)`, `orderByDesc(x => k)` | collection |
+| Pick one | `first(x => bool?)`, `last()`, `single(x => bool?)` | item |
+| Test | `any(x => bool?)`, `all(x => bool)`, `empty()`, `contains(v)` | bool |
+| Aggregate | `count(x => bool?)`, `sum`/`min`/`max`/`avg(x => n)`, `groupBy(x => k)`, `reduce(seed, (acc, x) => v)` | number / groups / any |
+
+Rules:
+
+- **Pure lambda bodies.** A lambda may read bare `now` / `actor` and call pure operators, but a mutation or action inside a lambda is a load error.
+- **Where it is legal.** Only in `logic` bodies and automation `forEach` sources/filters. It is **rejected in `spec` bodies** (a spec is an atomic boolean over one bound thing) and **rejected in query `filter` clauses** (those push down to SQL; lambdas are in-memory post-fetch). A lint also warns when a `where()` runs over an unfiltered full-concept fetch — that belongs in a query `filter`, not an in-memory scan.
+
+This library replaces the retired grammar builtins (`first` / `last` / `filter` / `map` / `count`) and the retired capitalized result-set methods. (The `count` / `first` / `last` **query directives** used inside a `query { ... }` body for SQL are a separate surface and still exist.) The full construct matrix lives in the ADR: [core-builtins-and-collections-adr.md](../../internal/design/core-builtins-and-collections-adr.md).
+
+### In-memory arithmetic
+
+Binary `+` `-` `*` `/` `%` (Go precedence) are available in `logic` and collection-lambda bodies, evaluated **in memory**. They are **rejected in specs and query filters** (those compile to SQL). Subtraction requires spacing — write `a - b`, not `a-b` — so hyphenated identifiers and ids (`bff-local`) are preserved. This enables aggregates like `reduce(0, (acc, n) => acc + n)` and ratios like `spent / budget`.
 
 ## Builtins
 
@@ -1112,12 +1171,12 @@ This is also the shape the phased-authoring headline synthesizer emits for a dep
 In automation and logic bodies, MemQL supports a small amount of "bare reference" convenience, but it is **strictly limited**:
 
 - **for-range loops**: the loop variable **must be named `item`**
-  - Valid: `for item := range someStep.Nodes() { ... }`
+  - Valid: `for item := range someStep.nodes() { ... }`
   - Invalid: `for lead := range ... { ... }`
-- **Bare dotted paths** are only auto-resolved when they start with a **known step ID** (e.g. `expired.Nodes()` where `expired := ...`), the reserved **`item.*`** root inside a for-range body, or a reserved engine name (`event`, `args`, `actor`, `now`, `timestamp`, ...).
+- **Bare dotted paths** are only auto-resolved when they start with a **known step ID** (e.g. `expired.nodes()` where `expired := ...`), the reserved **`item.*`** root inside a for-range body, or a reserved engine name (`event`, `args`, `actor`, `now`, ...).
 - If you need a **literal string containing dots**, quote it: `"foo.bar"`.
 
-Reserved reference names in condition strings (never step names): `event`, `item`, `index`, `arg`, `var`, `input`, `error`, `step`, `field`, `timestamp`, `now`, `true`, `false`, `nil`, `null`.
+Reserved reference names in condition strings (never step names): `event`, `item`, `index`, `arg`, `var`, `input`, `error`, `step`, `field`, `now`, `true`, `false`, `nil`, `null`.
 
 > **Retired.** The receiver form `func (Automation) name() { ... }` is rejected at parse time — automations are authored as the `automation <name> { step ... }` struct form shown above. JSON workflow definitions (`workflows/v1/**`) and the `$var.NAME` variable-substitution machinery they used are gone entirely.
 

@@ -336,7 +336,7 @@ only fires when the condition holds:
 ```memql
 body {
   getUser := queryUserById({ userId: args.event.payload.ownerUserId })
-  activeAssistantId := coalesce(getUser.First().payload.preferences.activeAssistantId, "")
+  activeAssistantId := coalesce(getUser.first().payload.preferences.activeAssistantId, "")
 
   getActiveGA := if activeAssistantId != "" {
     queryAgentById({ agentId: activeAssistantId })
@@ -350,8 +350,13 @@ body {
 ```
 
 Step results are referenced by their **bare step name**; result
-navigation uses accessors like `step.First()`, `step.Empty()`, and
-`step.metadata.itemCount`.
+navigation uses the lowercase accessors `step.first()`, `step.empty()`,
+`step.count()` (and `step.Ran()` for whether a guarded step executed).
+A step result is also a collection you can run the collection/lambda
+library over (`where` / `select` / `count` / ...) — see
+[memql.md](memql.md#collection--lambda-library). The capitalized
+`.First()` / `.Empty()` / `.Nodes()` / `.Len()` / `.Count()` / `.Last()`
+accessors are retired.
 
 ---
 
@@ -506,7 +511,7 @@ Verified author-surface helpers (see `component/language/parser`):
 
 | Function | Description |
 |----------|-------------|
-| `timestamp()` | Current ISO timestamp |
+| `now` | Current ISO timestamp — the bare reserved primitive (no call parens; `now()` / `timestamp()` are retired). See Data Access above. |
 | `addDuration(ts, dur)` | Timestamp arithmetic |
 | `daysBetween(a, b)` / `subtractTimestamps(a, b)` | Differences |
 | `year(ts)` / `quarter(ts)` / `month(ts)` / `dayOfMonth(ts)` | Components |

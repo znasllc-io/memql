@@ -496,7 +496,7 @@ instead of silently stripping the field.
 ## 13. Step references are validated + topologically sorted at compile time
 
 **Rule.** A step's condition or arg referencing another step's result
-(`foo.First().payload.x`, `first(foo).x`, `foo.Empty()`, etc.) is
+(`foo.first().payload.x`, `foo.empty()`, etc.) is
 validated at compile time. The compiler:
 
 - collects every step ID into a symbol table;
@@ -515,7 +515,7 @@ Example of a typo that surfaces at compile time:
 ```memql
 checkUser := queryUserById({ userId: args.event.payload.userId })
 
-result := if cehckUser.Empty() {   // typo: cehckUser -> checkUser
+result := if cehckUser.empty() {   // typo: cehckUser -> checkUser
   mutationCreateUser({...})
 }
 ```
@@ -529,8 +529,8 @@ automation "bootstrapUser": step "result" references unknown step "cehckUser" --
 Example of a cycle (would deadlock at runtime):
 
 ```memql
-a := if b.Empty() { queryFoo({}) }
-b := if a.Empty() { queryBar({}) }
+a := if b.empty() { queryFoo({}) }
+b := if a.empty() { queryBar({}) }
 ```
 
 The compiler emits:
@@ -735,9 +735,9 @@ mutationSendTextUtterance({
 - **At least two dotted segments required.** Single identifiers like
   `allAgents` are NOT eligible -- they'd collide with step-reference
   semantics where `allAgents` means "the `allAgents` step's result".
-  Use `allAgents.Nodes()` in a `for` loop, not inside an object arg.
+  Use `allAgents.nodes()` in a `for` loop, not inside an object arg.
 - **Every segment must be a simple identifier.** Method calls
-  (`.Nodes()`), index access (`.Nodes()[0]`), and call arguments
+  (`.nodes()`), index access (`.nodes()[0]`), and call arguments
   (`concat(...)`) all disqualify the value.
 - **Terminal segment must match what you intend as the key.** If the
   path's terminal segment isn't the field you want
