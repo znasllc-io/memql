@@ -12,7 +12,7 @@ use planner.mutations.{ updatePlanStatus }
 @description("Suspend the user's worker-using plans when computerUseEnabled flips false. decide (pure) returns the running plans; the forEach apply gates each on computerUseEnabled==false AND the plan having a computerUseScope, then transitions it to awaitingFeedback.")
 automation killSwitchSuspendsRunningPlans {
   step decide {
-    logic killSwitchSuspendsRunningPlans { event: event }
+    logic killSwitchSuspendsRunningPlans ( event: event )
   }
   step apply {
     forEach item in decide.nodes() {
@@ -50,10 +50,10 @@ automation killSwitchSuspendsRunningPlans {
 @description("Daily 02:30 UTC sweep: soft-delete worker-invocation rows past WORKER_INVOCATION_RETENTION_DAYS. decide (pure) returns the candidate rows; window reads the retention var; the forEach apply gates each row on createdAt + P{N}D < now (#2256/#2254 evaluator fix) and soft-deletes it.")
 automation workerInvocationRetentionSweep {
   step window {
-    logic workerInvocationRetentionWindow { event: event }
+    logic workerInvocationRetentionWindow ( event: event )
   }
   step decide {
-    logic workerInvocationRetentionSweep { event: event }
+    logic workerInvocationRetentionSweep ( event: event )
   }
   step apply {
     forEach item in decide.result {

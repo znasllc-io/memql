@@ -48,7 +48,7 @@ logic nextDeploymentVersion {
     bump     string
   }
   body {
-    return suggestNextVersion({ current: args.current, bump: coalesce(args.bump, "patch") })
+    return builtin suggestNextVersion( current: args.current, bump: coalesce(args.bump, "patch") )
   }
 }
 

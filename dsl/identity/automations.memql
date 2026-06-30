@@ -11,10 +11,10 @@ use identity.mutations.{ consumeMagicLinkRequest, deleteUserHard, expireAccessRe
 @description("Daily 04:00 UTC sweep: expire pending access requests older than IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS. decide (pure) returns the pending candidates; window reads the expiry var; the forEach apply gates each row on createdAt + P{N}D < now (#2256/#2254 evaluator fix) and stamps status=expired.")
 automation accessRequestExpirySweep {
   step window {
-    logic accessRequestExpiryWindow { event: event }
+    logic accessRequestExpiryWindow ( event: event )
   }
   step decide {
-    logic accessRequestExpirySweep { event: event }
+    logic accessRequestExpirySweep ( event: event )
   }
   step apply {
     forEach item in decide.result {
@@ -53,7 +53,7 @@ automation accessRequestExpirySweep {
 @description("Daily 09:05 UTC: emit identity.deletion.reminder events (urgent) for users at the 25-day mark of their deletion cooldown.")
 automation accountDeletionReminder25Days {
   step run {
-    logic accountDeletionReminder25Days { event: event }
+    logic accountDeletionReminder25Days ( event: event )
   }
 }
 
@@ -94,7 +94,7 @@ automation accountDeletionReminder25Days {
 @description("Daily 09:00 UTC: emit identity.deletion.reminder events for users at the 7-day mark of their deletion cooldown.")
 automation accountDeletionReminder7Days {
   step run {
-    logic accountDeletionReminder7Days { event: event }
+    logic accountDeletionReminder7Days ( event: event )
   }
 }
 
@@ -141,10 +141,10 @@ automation accountDeletionReminder7Days {
 @description("Daily 03:00 UTC sweep: hard-delete users past MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS. decide (pure) returns users scheduled for deletion; window reads the cooldown var; the forEach apply gates each row on deletionScheduledAt + P{N}D < now (#2256/#2254 evaluator fix) and hard-deletes via deleteUserHard. Auth-session revocation is the documented gap noted in the decide logic.")
 automation accountDeletionSweep {
   step window {
-    logic accountDeletionWindow { event: event }
+    logic accountDeletionWindow ( event: event )
   }
   step decide {
-    logic accountDeletionSweep { event: event }
+    logic accountDeletionSweep ( event: event )
   }
   step apply {
     forEach item in decide.result {
@@ -191,7 +191,7 @@ automation accountDeletionSweep {
 @description("Daily 02:00 UTC sweep: identifies audit events past MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. Currently observation-only; deletion lands when MemQL gains row-removal support.")
 automation auditEventRetentionSweep {
   step run {
-    logic auditEventRetentionSweep { event: event }
+    logic auditEventRetentionSweep ( event: event )
   }
 }
 
@@ -210,7 +210,7 @@ automation auditEventRetentionSweep {
 @description("Soft-revoke expired delegations every 5 minutes. The query + revoke loop is in revokeExpiredDelegations.")
 automation expireDelegations {
   step decide {
-    logic revokeExpiredDelegations { now: now }
+    logic revokeExpiredDelegations ( now: now )
   }
   step apply {
     forEach item in decide.nodes() {
@@ -257,7 +257,7 @@ automation expireDelegations {
 @description("Hourly sweep: mark expired magic-link requests as consumed-from-system so the row is canonically spent.")
 automation magicLinkExpirySweep {
   step decide {
-    logic magicLinkExpirySweep { event: event }
+    logic magicLinkExpirySweep ( event: event )
   }
   step apply {
     forEach item in decide.nodes() {
@@ -279,7 +279,7 @@ automation magicLinkExpirySweep {
 @description("Emit delegation.created event with full context for audit logging")
 automation onDelegationCreated {
   step run {
-    logic onDelegationCreated { event: event }
+    logic onDelegationCreated ( event: event )
   }
 }
 

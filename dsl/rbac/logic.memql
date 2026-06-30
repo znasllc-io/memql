@@ -39,9 +39,9 @@ logic governanceCanManagePrincipal {
     verb           string  @required
   }
   body {
-    actorRole  := roleBySlug({ slug: actor.role })
-    targetRole := roleBySlug({ slug: args.targetRoleSlug })
-    return rbacGovernPrincipal({ actorUserId: actor.userId, actorRank: actorRole.first().payload.rank, actorIsOwner: actor.isClusterOwner, targetUserId: args.targetUserId, targetRank: targetRole.first().payload.rank, targetRoleSlug: args.targetRoleSlug, verb: args.verb })
+    actorRole  := query roleBySlug( slug: actor.role )
+    targetRole := query roleBySlug( slug: args.targetRoleSlug )
+    return builtin rbacGovernPrincipal( actorUserId: actor.userId, actorRank: actorRole.first().payload.rank, actorIsOwner: actor.isClusterOwner, targetUserId: args.targetUserId, targetRank: targetRole.first().payload.rank, targetRoleSlug: args.targetRoleSlug, verb: args.verb )
   }
 }
 
@@ -51,8 +51,8 @@ logic governanceCanCreatePrincipal {
     newRoleSlug string  @required
   }
   body {
-    actorRole := roleBySlug({ slug: actor.role })
-    newRole   := roleBySlug({ slug: args.newRoleSlug })
-    return rbacCanCreatePrincipal({ actorRank: actorRole.first().payload.rank, actorIsOwner: actor.isClusterOwner, newRank: newRole.first().payload.rank })
+    actorRole := query roleBySlug( slug: actor.role )
+    newRole   := query roleBySlug( slug: args.newRoleSlug )
+    return builtin rbacCanCreatePrincipal( actorRank: actorRole.first().payload.rank, actorIsOwner: actor.isClusterOwner, newRank: newRole.first().payload.rank )
   }
 }

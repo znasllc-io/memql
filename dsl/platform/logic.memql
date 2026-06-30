@@ -23,17 +23,17 @@ logic purgeExpiredPolicyTraces {
     event object @required
   }
   body {
-  allTraces := allPolicyTraces({})
-  retentionDays := globalVariable({ name: "MEMQL_POLICYTRACE_RETENTION_DAYS" })
+  allTraces := query allPolicyTraces()
+  retentionDays := query globalVariable( name: "MEMQL_POLICYTRACE_RETENTION_DAYS" )
 
-  emitObservation := publishEvent({
+  emitObservation := publishEvent(
     topic: "platform.policyTrace.retention.observed",
     payload: {
       candidateCount: allTraces.count(),
       retentionDays: coalesce(retentionDays.first().payload.value, "90"),
       timestamp: now
     }
-  })
+  )
 
   return allTraces.count()
   }

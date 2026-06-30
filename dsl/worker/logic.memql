@@ -26,7 +26,7 @@ logic killSwitchSuspendsRunningPlans {
     event object @required
   }
   body {
-  return runningPlansForUser({ userId: coalesce(args.event.node.id, "") })
+  return query runningPlansForUser( userId: coalesce(args.event.node.id, "") )
   }
 }
 
@@ -54,7 +54,7 @@ logic workerInvocationRetentionSweep {
     event object @required
   }
   body {
-  candidates := expiredWorkerInvocations({})
+  candidates := query expiredWorkerInvocations()
   return candidates.nodes()
   }
 }
@@ -71,6 +71,6 @@ logic workerInvocationRetentionWindow {
     event object @required
   }
   body {
-  return globalVariable({ name: "WORKER_INVOCATION_RETENTION_DAYS" })
+  return query globalVariable( name: "WORKER_INVOCATION_RETENTION_DAYS" )
   }
 }

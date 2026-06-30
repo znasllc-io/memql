@@ -21,7 +21,7 @@ use safety.logic.{ purgeExpiredSafetyClassifications, purgeExpiredOutputScreenin
 @description("Daily 02:35 UTC sweep: identifies safety-classification rows past MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS (default 90). Observation-only until MemQL gains row-removal support.")
 automation purgeExpiredSafetyClassifications {
   step run {
-    logic purgeExpiredSafetyClassifications { event: event }
+    logic purgeExpiredSafetyClassifications ( event: event )
   }
 }
 
@@ -37,6 +37,6 @@ automation purgeExpiredSafetyClassifications {
 @description("Daily 02:40 UTC sweep: identifies output-screening rows past MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90). Observation-only until MemQL gains row-removal support.")
 automation purgeExpiredOutputScreenings {
   step run {
-    logic purgeExpiredOutputScreenings { event: event }
+    logic purgeExpiredOutputScreenings ( event: event )
   }
 }

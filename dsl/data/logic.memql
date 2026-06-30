@@ -33,10 +33,10 @@ logic conflictDetection {
   }
   body {
   // Query confirmed records with matching natural key + record type
-  matchingConfirmed := detectConflicts({ partitionId: args.event.payload.partitionId, recordType: args.event.payload.recordType, naturalKeyValue: args.event.payload.naturalKeyValue })
+  matchingConfirmed := query detectConflicts( partitionId: args.event.payload.partitionId, recordType: args.event.payload.recordType, naturalKeyValue: args.event.payload.naturalKeyValue )
 
   // If conflicts exist, emit detection event for the UI
-  emitConflicts := if !matchingConfirmed.empty() { publishEvent({ topic: "data.conflicts.detected", payload: { partitionId: args.event.payload.partitionId, recordId: args.event.payload.id, recordType: args.event.payload.recordType, naturalKeyField: args.event.payload.naturalKeyField, naturalKeyValue: args.event.payload.naturalKeyValue, matchCount: matchingConfirmed.count(), matches: matchingConfirmed.nodes(), requiresHumanApproval: true, timestamp: now } }) }
+  emitConflicts := if !matchingConfirmed.empty() { publishEvent( topic: "data.conflicts.detected", payload: { partitionId: args.event.payload.partitionId, recordId: args.event.payload.id, recordType: args.event.payload.recordType, naturalKeyField: args.event.payload.naturalKeyField, naturalKeyValue: args.event.payload.naturalKeyValue, matchCount: matchingConfirmed.count(), matches: matchingConfirmed.nodes(), requiresHumanApproval: true, timestamp: now } ) }
 
   return emitConflicts
   }

@@ -1913,7 +1913,12 @@ func splitLeadingIdent(s string) (string, string) {
 
 func kindPrefix(name string) bool {
 	switch name {
-	case "logic", "mutate", "query", "automation":
+	// `mutate` is the legacy step verb; `mutation` is the canonical
+	// kind-prefixed invocation keyword the tree migrated to (Story 3 / #2326).
+	// `builtin` lets a builtin step carry its kind prefix too. The kind is a
+	// readability/validation tag here -- finishCall strips it and the bare name
+	// resolves at runtime regardless of kind.
+	case "logic", "mutate", "mutation", "query", "builtin", "automation":
 		return true
 	}
 	return false
