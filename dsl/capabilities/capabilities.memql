@@ -1,18 +1,51 @@
-// capabilities.memql -- declared capability vocabulary
-// (construct-invocation epic memql#2322, Story 5 / memql#2325).
+// capabilities.memql -- the capability CATALOG: the declared, typed,
+// side-effect-classified capability vocabulary (construct-invocation epic
+// memql#2322; declared shape from Story 5 / memql#2325; reconciliation + strict
+// arg-typing from Story 8 / memql#2330).
 //
-// A `capability` is a surface-backed, side-effect-classified declaration
-// with a dotted/namespaced name and NO body. It is declared like a typed
-// builtin: `@sideEffect` -- the UNSPOOFABLE risk class (ADR §7) -- lives
-// HERE, on the capability, not on the action that invokes it. The
-// implementation is supplied by the runtime surface (fs / shell / http /
-// integration / mcp), so there is no DSL body.
+// A `capability` is a surface-backed declaration with a dotted/namespaced name
+// and NO body. It is declared like a typed builtin: `@sideEffect` -- the
+// UNSPOOFABLE risk class (ADR §7) -- lives HERE, on the capability, not on the
+// action that invokes it. The implementation is supplied by the runtime surface
+// (fs / shell / http / integration / mcp), so there is no DSL body.
+//
+// SOURCE OF TRUTH + RECONCILIATION (Story 8 B). This catalog is the DSL-side
+// source of truth for action->capability calls, and is reconciled against the
+// authoritative Go vocabulary registry (component/actions/capability) at load:
+//
+//   - every declared name MUST resolve to a verb in the Go closed vocabulary
+//     (capability.CapabilityClass known) -- the catalog cannot invent a
+//     capability outside the surface-backed set; and
+//   - each `@sideEffect` MUST equal that verb's authoritative Go class
+//     (read / write / exec). The class is unspoofable: a decl cannot relabel
+//     its risk class. A mismatch / unknown name fails the catalog load loud
+//     (component/actions.LoadCatalogFromFS; enforced at engine Init).
+//
+// (The Go vocabulary may carry verbs not yet declared here; that direction is
+// fine -- declare them as the system grows to use them.)
+//
+// STRICT ARG-TYPING (Story 8 C). Each capability's `args { ... }` schema is the
+// contract a calling action's `capability <verb>(...)` arguments are validated
+// against (component/actions.DeclToAction): every @required arg present, no
+// unknown args for a CLOSED capability, types compatible.
+//
+// OPEN vs CLOSED capabilities. `shell.*` and `mcp.*` are PASS-THROUGH / open:
+// their per-call argument surface varies and is validated DOWNSTREAM, not by
+// the static schema -- `shell.script` selects an ALLOWLISTED named capability
+// script (the I14 contract, #2221) by its reserved `script` arg, and every
+// other arg is a structured param the script validates via its own
+// `--print-spec` envelope (never a `sh -c` string); an `mcp.<tool>` call
+// carries the tool's own JSON-schema'd args. For an open capability the catalog
+// still enforces the declared @required args but tolerates extras. `fs.*` /
+// `http.*` / `integration.*` are CLOSED/typed: an undeclared arg is rejected.
 //
 // Capabilities are imported at the VERB level
 // (`use capabilities.integration.github.{ tagRelease }`) and called via
-// `capability tagRelease(...)`. The invocation grammar and the action
-// rewrite land in later stories of the epic; this file exercises the
-// DECLARATION + import + registry plumbing.
+// `capability tagRelease(...)` from an action body.
+
+// =============================================================================
+//   integration.*  -- named integration backends (closed/typed)
+// =============================================================================
 
 @sideEffect("write")
 @description("Create a git tag + GitHub release for a version.")
@@ -23,9 +56,21 @@ capability integration.github.tagRelease {
   }
 }
 
+// =============================================================================
+//   fs.*  -- filesystem surface (closed/typed)
+// =============================================================================
+
 @sideEffect("read")
 @description("Read a file from the local filesystem surface.")
 capability fs.readFile {
+  args {
+    path string @required
+  }
+}
+
+@sideEffect("read")
+@description("Stat a path on the local filesystem surface (existence + metadata).")
+capability fs.stat {
   args {
     path string @required
   }
@@ -40,15 +85,37 @@ capability fs.writeFile {
   }
 }
 
-// shell.* are PERMISSIVE / open-arg capabilities. `shell.script` runs an
-// ALLOWLISTED named capability script (the I14 contract, #2221) selected by its
-// reserved `script` arg; every other arg is a structured param forwarded to the
-// script as data (never a `sh -c` string). The full typed catalog + the strict
-// capability->surface resolver are deferred to Story 8 (#2330), so the arg
-// schema below is intentionally LENIENT: only the clearly-required selector is
-// marked @required, and extra/loose args a script consumes are tolerated rather
-// than hard-failed. This keeps a generic shell capability authorable today
-// without enumerating every script's argument surface.
+// =============================================================================
+//   http.*  -- outbound HTTP surface (closed/typed)
+// =============================================================================
+
+@sideEffect("read")
+@description("Issue an HTTP GET to an outbound URL and return the response.")
+capability http.get {
+  args {
+    url string @required
+  }
+}
+
+@sideEffect("write")
+@description("Issue an HTTP POST to an outbound URL with a body.")
+capability http.post {
+  args {
+    url  string @required
+    body string
+  }
+}
+
+// =============================================================================
+//   shell.*  -- process execution on the runner surface (OPEN/pass-through)
+// =============================================================================
+
+// `shell.script` runs an ALLOWLISTED named capability script (the I14 contract,
+// #2221) selected by its reserved `script` arg; every other arg is a structured
+// param forwarded to the script as data (never a `sh -c` string) and validated
+// by that script's own `--print-spec` envelope at run time. Only the stable
+// selector is declared @required here; the rest of the per-script argument
+// surface is intentionally open (see the OPEN vs CLOSED note above).
 @sideEffect("exec")
 @description("Run an allowlisted named capability script on the runner surface, passing structured params as data.")
 capability shell.script {
