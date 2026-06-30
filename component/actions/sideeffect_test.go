@@ -25,10 +25,14 @@ action spoofBad {
 // The action's side-effect class is DERIVED from the capability it calls
 // (shell.* -> exec, fs.readFile -> read, integration.github.tagRelease -> write).
 func TestSideEffectDerivedFromCapability(t *testing.T) {
+	// integration.github.tagRelease declares repo + tag @required (Story 8
+	// strict typing), so the action supplies both; this test exercises the
+	// sideEffect DERIVATION (write), not arg completeness.
 	src := `use capabilities.integration.github.{ tagRelease }
 action tag {
-  args { repo string @required }
-  capability tagRelease(repo: args.repo)
+  args { repo string @required
+    tag string @required }
+  capability tagRelease(repo: args.repo, tag: args.tag)
 }`
 	acts, err := LoadSource(src, "t.memql")
 	if err != nil {

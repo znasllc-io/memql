@@ -119,6 +119,22 @@ func DeclToAction(d *ast.ActionDecl, origin string, capImports map[string]string
 		}
 		a.CallArgs = append(a.CallArgs, out)
 	}
+
+	// Strict capability arg-typing (construct-invocation ADR, Story 8 /
+	// memql#2330). The lenient Story-4 handling is replaced: when the called
+	// capability is DECLARED in the catalog, its `args { ... }` schema is the
+	// contract -- every @required arg must be present, a closed capability
+	// rejects unknown args, and types must be compatible. A capability the
+	// catalog does not declare (namespace-valid but undeclared) is left to the
+	// existing namespace check; there is no schema to enforce.
+	if err := DefaultCatalogError(); err != nil {
+		return nil, fmt.Errorf("action %q (%s): capability catalog failed to load/reconcile: %w", d.Name, origin, err)
+	}
+	if info, ok := DefaultCatalog().Lookup(a.Capability); ok {
+		if err := validateCapabilityArgs(a, info); err != nil {
+			return nil, fmt.Errorf("%s: %w", origin, err)
+		}
+	}
 	return a, nil
 }
 
