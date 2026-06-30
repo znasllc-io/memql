@@ -2016,8 +2016,11 @@ LLM-backed re-analysis ships with the async planner integration.
   Plan on exceed rather than making another LLM call. The 75%/90%
   soft-warning canvas cards remain the Go side's responsibility -- the
   original `tokenBudgetSoftWarning` automation was deleted because
-  computing `spent / budget` needs arithmetic the MemQL parser doesn't
-  support yet. NOTE: a deeper goal-resolution restructure (cost-aware
+  computing `spent / budget` needed arithmetic the MemQL parser did not
+  support at the time. In-memory arithmetic (`+ - * / %`) in logic /
+  collection-lambda bodies has since landed (#2316), so that computation
+  is now expressible if the soft-warning automation is reintroduced.
+  NOTE: a deeper goal-resolution restructure (cost-aware
   routing, model tiering, up-front token estimate + user-approval
   threshold) is tracked in epic memql#836 -- the current cap bounds
   spend but does not make a trivial request cheap.
