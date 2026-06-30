@@ -29,10 +29,10 @@ func (qc *QueryClient) AccessRequestById(ctx context.Context, args AccessRequest
 
 func AccessRequestByIdBuild(args AccessRequestByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("accessRequestById({")
+	b.WriteString("query accessRequestById(")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -51,10 +51,10 @@ func (qc *QueryClient) AccountEntitlement(ctx context.Context, args AccountEntit
 
 func AccountEntitlementBuild(args AccountEntitlementArgs) string {
 	var b strings.Builder
-	b.WriteString("accountEntitlement({")
+	b.WriteString("query accountEntitlement(")
 	b.WriteString("accountId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AccountId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -73,10 +73,10 @@ func (qc *QueryClient) ActionById(ctx context.Context, args ActionByIdArgs) (*Re
 
 func ActionByIdBuild(args ActionByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("actionById({")
+	b.WriteString("query actionById(")
 	b.WriteString("actionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ActionId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -96,15 +96,15 @@ func (qc *QueryClient) ActionByIdAndVersion(ctx context.Context, args ActionById
 
 func ActionByIdAndVersionBuild(args ActionByIdAndVersionArgs) string {
 	var b strings.Builder
-	b.WriteString("actionByIdAndVersion({")
+	b.WriteString("query actionByIdAndVersion(")
 	b.WriteString("actionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ActionId))
-	if b.Len() > 22 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("version: ")
 	b.WriteString(fmt.Sprintf("%v", args.Version))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -123,10 +123,10 @@ func (qc *QueryClient) ActionByInputFingerprint(ctx context.Context, args Action
 
 func ActionByInputFingerprintBuild(args ActionByInputFingerprintArgs) string {
 	var b strings.Builder
-	b.WriteString("actionByInputFingerprint({")
+	b.WriteString("query actionByInputFingerprint(")
 	b.WriteString("inputFingerprint: ")
 	b.WriteString(fmt.Sprintf("%q", args.InputFingerprint))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -145,10 +145,10 @@ func (qc *QueryClient) ActionByTemplateFingerprint(ctx context.Context, args Act
 
 func ActionByTemplateFingerprintBuild(args ActionByTemplateFingerprintArgs) string {
 	var b strings.Builder
-	b.WriteString("actionByTemplateFingerprint({")
+	b.WriteString("query actionByTemplateFingerprint(")
 	b.WriteString("templateFingerprint: ")
 	b.WriteString(fmt.Sprintf("%q", args.TemplateFingerprint))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -167,10 +167,10 @@ func (qc *QueryClient) ActionCandidatesForPlan(ctx context.Context, args ActionC
 
 func ActionCandidatesForPlanBuild(args ActionCandidatesForPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("actionCandidatesForPlan({")
+	b.WriteString("query actionCandidatesForPlan(")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -188,7 +188,7 @@ func (qc *QueryClient) ActionsPendingConfirm(ctx context.Context, args ActionsPe
 
 func ActionsPendingConfirmBuild(args ActionsPendingConfirmArgs) string {
 	_ = args
-	return "actionsPendingConfirm({})"
+	return "query actionsPendingConfirm()"
 }
 
 // ActiveActionsForOwner -- List the calling owner's active v1:actions:action rows for the consolidation decay/deprecate sweep (Phase 4 #1739). Owned tier.
@@ -205,7 +205,7 @@ func (qc *QueryClient) ActiveActionsForOwner(ctx context.Context, args ActiveAct
 
 func ActiveActionsForOwnerBuild(args ActiveActionsForOwnerArgs) string {
 	_ = args
-	return "activeActionsForOwner({})"
+	return "query activeActionsForOwner()"
 }
 
 // ActiveAgentRoles -- List every active agentRole row. Backs the role picker on the cockpit's agent-creation surface and on the role-management view. predefined rows render with a lock icon; user-created rows are fully editable.
@@ -222,7 +222,7 @@ func (qc *QueryClient) ActiveAgentRoles(ctx context.Context, args ActiveAgentRol
 
 func ActiveAgentRolesBuild(args ActiveAgentRolesArgs) string {
 	_ = args
-	return "activeAgentRoles({})"
+	return "query activeAgentRoles()"
 }
 
 // ActiveAgents -- Returns available AI agent templates. Optional filter: groupId
@@ -240,12 +240,12 @@ func (qc *QueryClient) ActiveAgents(ctx context.Context, args ActiveAgentsArgs) 
 
 func ActiveAgentsBuild(args ActiveAgentsArgs) string {
 	var b strings.Builder
-	b.WriteString("activeAgents({")
+	b.WriteString("query activeAgents(")
 	if args.GroupId != "" {
 		b.WriteString("groupId: ")
 		b.WriteString(fmt.Sprintf("%q", args.GroupId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -264,10 +264,10 @@ func (qc *QueryClient) ActiveAgentsForUser(ctx context.Context, args ActiveAgent
 
 func ActiveAgentsForUserBuild(args ActiveAgentsForUserArgs) string {
 	var b strings.Builder
-	b.WriteString("activeAgentsForUser({")
+	b.WriteString("query activeAgentsForUser(")
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -286,10 +286,10 @@ func (qc *QueryClient) ActiveApprovalsByCorrelationKey(ctx context.Context, args
 
 func ActiveApprovalsByCorrelationKeyBuild(args ActiveApprovalsByCorrelationKeyArgs) string {
 	var b strings.Builder
-	b.WriteString("activeApprovalsByCorrelationKey({")
+	b.WriteString("query activeApprovalsByCorrelationKey(")
 	b.WriteString("correlationKey: ")
 	b.WriteString(fmt.Sprintf("%q", args.CorrelationKey))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -307,7 +307,7 @@ func (qc *QueryClient) ActiveAuthoringBundles(ctx context.Context, args ActiveAu
 
 func ActiveAuthoringBundlesBuild(args ActiveAuthoringBundlesArgs) string {
 	_ = args
-	return "activeAuthoringBundles({})"
+	return "query activeAuthoringBundles()"
 }
 
 // ActiveCapabilities -- List every active capability row across all roles -- the whole RBAC grant catalog. Backs the cockpit RBAC view and is the bulk read the E1.6 enforcement resolver warms its per-node decision cache from. Small admin/seed-defined registry consumed whole.
@@ -324,7 +324,7 @@ func (qc *QueryClient) ActiveCapabilities(ctx context.Context, args ActiveCapabi
 
 func ActiveCapabilitiesBuild(args ActiveCapabilitiesArgs) string {
 	_ = args
-	return "activeCapabilities({})"
+	return "query activeCapabilities()"
 }
 
 // ActiveDelegationsByIdentitySubject -- Get all active delegations whose identitySubject matches the argument. Used by the per-request DelegationResolver on the auth hot path. See memql#112.
@@ -342,10 +342,10 @@ func (qc *QueryClient) ActiveDelegationsByIdentitySubject(ctx context.Context, a
 
 func ActiveDelegationsByIdentitySubjectBuild(args ActiveDelegationsByIdentitySubjectArgs) string {
 	var b strings.Builder
-	b.WriteString("activeDelegationsByIdentitySubject({")
+	b.WriteString("query activeDelegationsByIdentitySubject(")
 	b.WriteString("identitySubject: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentitySubject))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -364,10 +364,10 @@ func (qc *QueryClient) ActiveDelegationsForAgent(ctx context.Context, args Activ
 
 func ActiveDelegationsForAgentBuild(args ActiveDelegationsForAgentArgs) string {
 	var b strings.Builder
-	b.WriteString("activeDelegationsForAgent({")
+	b.WriteString("query activeDelegationsForAgent(")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -386,10 +386,10 @@ func (qc *QueryClient) ActiveHumanParticipants(ctx context.Context, args ActiveH
 
 func ActiveHumanParticipantsBuild(args ActiveHumanParticipantsArgs) string {
 	var b strings.Builder
-	b.WriteString("activeHumanParticipants({")
+	b.WriteString("query activeHumanParticipants(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -407,7 +407,7 @@ func (qc *QueryClient) ActivePlansForUser(ctx context.Context, args ActivePlansF
 
 func ActivePlansForUserBuild(args ActivePlansForUserArgs) string {
 	_ = args
-	return "activePlansForUser({})"
+	return "query activePlansForUser()"
 }
 
 // ActiveProjects -- List active v1:forge:project rows.
@@ -424,7 +424,7 @@ func (qc *QueryClient) ActiveProjects(ctx context.Context, args ActiveProjectsAr
 
 func ActiveProjectsBuild(args ActiveProjectsArgs) string {
 	_ = args
-	return "activeProjects({})"
+	return "query activeProjects()"
 }
 
 // ActiveResponsibilities -- The caller's active + enabled responsibilities -- the live working set. Owned tier (ownerUserId == actor.userId). status filtered via statusIsActive; enabled==true drops soft-disabled rows.
@@ -441,7 +441,7 @@ func (qc *QueryClient) ActiveResponsibilities(ctx context.Context, args ActiveRe
 
 func ActiveResponsibilitiesBuild(args ActiveResponsibilitiesArgs) string {
 	_ = args
-	return "activeResponsibilities({})"
+	return "query activeResponsibilities()"
 }
 
 // ActiveResponsibilitiesAcrossUsers -- Every active + enabled responsibility in the partition, regardless of owner -- the cross-user sweep the reactive-loop heartbeat (epic #632) walks each tick. Cron-sweep-helper shape (no owner filter; classifies as 'other' like queryAllArchivedSpacesAcrossUsers). The planner poller reads this under the system actor, then impersonates each row's ownerUserId for the owned-tier per-user writes.
@@ -458,7 +458,7 @@ func (qc *QueryClient) ActiveResponsibilitiesAcrossUsers(ctx context.Context, ar
 
 func ActiveResponsibilitiesAcrossUsersBuild(args ActiveResponsibilitiesAcrossUsersArgs) string {
 	_ = args
-	return "activeResponsibilitiesAcrossUsers({})"
+	return "query activeResponsibilitiesAcrossUsers()"
 }
 
 // ActiveRoles -- List every active role in the catalog -- the base roles plus any custom roles. Backs the cockpit RBAC view's role list and the rank picker the E1.4 custom-role creation flow uses to choose a slot. Higher rank == more privileged. Small registry consumed whole.
@@ -475,7 +475,7 @@ func (qc *QueryClient) ActiveRoles(ctx context.Context, args ActiveRolesArgs) (*
 
 func ActiveRolesBuild(args ActiveRolesArgs) string {
 	_ = args
-	return "activeRoles({})"
+	return "query activeRoles()"
 }
 
 // ActiveSkills -- List every active skill catalog row -- summary projection. Backs the Skills picker on the role-edit surface (cockpit#124) and the Planner Agent's candidate scan when deciding which skill bundle to attach in extendSpecialist. Predefined rows render with a lock icon; user-created rows are fully editable.
@@ -492,7 +492,7 @@ func (qc *QueryClient) ActiveSkills(ctx context.Context, args ActiveSkillsArgs) 
 
 func ActiveSkillsBuild(args ActiveSkillsArgs) string {
 	_ = args
-	return "activeSkills({})"
+	return "query activeSkills()"
 }
 
 // ActiveSkillsFull -- List every active skill catalog row with its full bundle composition (domainIds + toolSlugs + liveSourceIds). Heavier projection than activeSkills; use this when a caller needs to resolve agent capabilities by unioning skill bundles in-process (cockpit#124's Agents view does this on every detail render). The catalog is small (25 rows in Phase 2; growth tracked via the Phase 3 mintSkill roadmap) so the single-shot full-list query is cheaper than N skillBySlug round-trips.
@@ -509,7 +509,7 @@ func (qc *QueryClient) ActiveSkillsFull(ctx context.Context, args ActiveSkillsFu
 
 func ActiveSkillsFullBuild(args ActiveSkillsFullArgs) string {
 	_ = args
-	return "activeSkillsFull({})"
+	return "query activeSkillsFull()"
 }
 
 // ActiveUsers -- Active users in the cluster, optionally filtered by role or group membership. Both args are optional -- omit them to list all active users (the identity admin portal's user-list view).
@@ -528,19 +528,19 @@ func (qc *QueryClient) ActiveUsers(ctx context.Context, args ActiveUsersArgs) (*
 
 func ActiveUsersBuild(args ActiveUsersArgs) string {
 	var b strings.Builder
-	b.WriteString("activeUsers({")
+	b.WriteString("query activeUsers(")
 	if args.Role != "" {
 		b.WriteString("role: ")
 		b.WriteString(fmt.Sprintf("%q", args.Role))
 	}
 	if args.GroupId != "" {
-		if b.Len() > 13 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("groupId: ")
 		b.WriteString(fmt.Sprintf("%q", args.GroupId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -559,10 +559,10 @@ func (qc *QueryClient) AgentAuthorizationsForUser(ctx context.Context, args Agen
 
 func AgentAuthorizationsForUserBuild(args AgentAuthorizationsForUserArgs) string {
 	var b strings.Builder
-	b.WriteString("agentAuthorizationsForUser({")
+	b.WriteString("query agentAuthorizationsForUser(")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -581,10 +581,10 @@ func (qc *QueryClient) AgentById(ctx context.Context, args AgentByIdArgs) (*Resu
 
 func AgentByIdBuild(args AgentByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("agentById({")
+	b.WriteString("query agentById(")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -603,10 +603,10 @@ func (qc *QueryClient) AgentInteractionCount(ctx context.Context, args AgentInte
 
 func AgentInteractionCountBuild(args AgentInteractionCountArgs) string {
 	var b strings.Builder
-	b.WriteString("agentInteractionCount({")
+	b.WriteString("query agentInteractionCount(")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -625,10 +625,10 @@ func (qc *QueryClient) AgentOwner(ctx context.Context, args AgentOwnerArgs) (*Re
 
 func AgentOwnerBuild(args AgentOwnerArgs) string {
 	var b strings.Builder
-	b.WriteString("agentOwner({")
+	b.WriteString("query agentOwner(")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -647,10 +647,10 @@ func (qc *QueryClient) AgentRoleBySlug(ctx context.Context, args AgentRoleBySlug
 
 func AgentRoleBySlugBuild(args AgentRoleBySlugArgs) string {
 	var b strings.Builder
-	b.WriteString("agentRoleBySlug({")
+	b.WriteString("query agentRoleBySlug(")
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -668,7 +668,7 @@ func (qc *QueryClient) AgentRoleSlugsInUse(ctx context.Context, args AgentRoleSl
 
 func AgentRoleSlugsInUseBuild(args AgentRoleSlugsInUseArgs) string {
 	_ = args
-	return "agentRoleSlugsInUse({})"
+	return "query agentRoleSlugsInUse()"
 }
 
 // AllAgents -- Returns all AI agent templates regardless of active status.
@@ -685,7 +685,7 @@ func (qc *QueryClient) AllAgents(ctx context.Context, args AllAgentsArgs) (*Resu
 
 func AllAgentsBuild(args AllAgentsArgs) string {
 	_ = args
-	return "allAgents({})"
+	return "query allAgents()"
 }
 
 // AllDocumentChunkDomains -- Returns the parent domainId for every chunk in the active partition. Frontend groups + counts to render per-domain chunk counts in the Knowledge panel.
@@ -702,7 +702,7 @@ func (qc *QueryClient) AllDocumentChunkDomains(ctx context.Context, args AllDocu
 
 func AllDocumentChunkDomainsBuild(args AllDocumentChunkDomainsArgs) string {
 	_ = args
-	return "allDocumentChunkDomains({})"
+	return "query allDocumentChunkDomains()"
 }
 
 // AllNumbers -- ADMIN: every provisioned DID across all partitions, newest first. Cluster-owner gated. Backs the cockpit numbers view.
@@ -719,7 +719,7 @@ func (qc *QueryClient) AllNumbers(ctx context.Context, args AllNumbersArgs) (*Re
 
 func AllNumbersBuild(args AllNumbersArgs) string {
 	_ = args
-	return "allNumbers({})"
+	return "query allNumbers()"
 }
 
 // AllOutputScreenings -- Returns every v1:safety:outputScreening row. Used by the retention sweep (mirrors allSafetyClassifications); future cockpit prompt-injection dashboard will layer more targeted queries on top.
@@ -736,7 +736,7 @@ func (qc *QueryClient) AllOutputScreenings(ctx context.Context, args AllOutputSc
 
 func AllOutputScreeningsBuild(args AllOutputScreeningsArgs) string {
 	_ = args
-	return "allOutputScreenings({})"
+	return "query allOutputScreenings()"
 }
 
 // AllPlans -- Every Plan. Backs the global Tasks panel; the frontend pins current-space rows to the top of each lifecycle group.
@@ -753,7 +753,7 @@ func (qc *QueryClient) AllPlans(ctx context.Context, args AllPlansArgs) (*Result
 
 func AllPlansBuild(args AllPlansArgs) string {
 	_ = args
-	return "allPlans({})"
+	return "query allPlans()"
 }
 
 // AllPolicyTraces -- All persisted policy traces; the retention sweep iterates and per-row checks createdAt + retention-days < now.
@@ -770,7 +770,7 @@ func (qc *QueryClient) AllPolicyTraces(ctx context.Context, args AllPolicyTraces
 
 func AllPolicyTracesBuild(args AllPolicyTracesArgs) string {
 	_ = args
-	return "allPolicyTraces({})"
+	return "query allPolicyTraces()"
 }
 
 // AllSafetyClassifications -- Returns every v1:safety:classification row. Used by the retention sweep (mirrors allPolicyTraces); future cockpit Command Safety view will layer more targeted queries on top.
@@ -787,7 +787,7 @@ func (qc *QueryClient) AllSafetyClassifications(ctx context.Context, args AllSaf
 
 func AllSafetyClassificationsBuild(args AllSafetyClassificationsArgs) string {
 	_ = args
-	return "allSafetyClassifications({})"
+	return "query allSafetyClassifications()"
 }
 
 // ApprovalQueue -- The approval queue: validated requests awaiting owner approval. Owner only (forgeApprover).
@@ -804,7 +804,7 @@ func (qc *QueryClient) ApprovalQueue(ctx context.Context, args ApprovalQueueArgs
 
 func ApprovalQueueBuild(args ApprovalQueueArgs) string {
 	_ = args
-	return "approvalQueue({})"
+	return "query approvalQueue()"
 }
 
 // ApprovalRequestById -- Returns a single v1:safety:approvalRequest by id. Backs the cockpit drill-down view (follow-up in memql-cockpit) and the `resolveApprovalRequest` read-modify-write path.
@@ -822,10 +822,10 @@ func (qc *QueryClient) ApprovalRequestById(ctx context.Context, args ApprovalReq
 
 func ApprovalRequestByIdBuild(args ApprovalRequestByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("approvalRequestById({")
+	b.WriteString("query approvalRequestById(")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -844,10 +844,10 @@ func (qc *QueryClient) AssistantAgentForUser(ctx context.Context, args Assistant
 
 func AssistantAgentForUserBuild(args AssistantAgentForUserArgs) string {
 	var b strings.Builder
-	b.WriteString("assistantAgentForUser({")
+	b.WriteString("query assistantAgentForUser(")
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -867,15 +867,15 @@ func (qc *QueryClient) AttachmentById(ctx context.Context, args AttachmentByIdAr
 
 func AttachmentByIdBuild(args AttachmentByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("attachmentById({")
+	b.WriteString("query attachmentById(")
 	b.WriteString("attachmentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
-	if b.Len() > 16 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -894,10 +894,10 @@ func (qc *QueryClient) AudioOverridesForSpace(ctx context.Context, args AudioOve
 
 func AudioOverridesForSpaceBuild(args AudioOverridesForSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("audioOverridesForSpace({")
+	b.WriteString("query audioOverridesForSpace(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -916,10 +916,10 @@ func (qc *QueryClient) AuditEventsByActor(ctx context.Context, args AuditEventsB
 
 func AuditEventsByActorBuild(args AuditEventsByActorArgs) string {
 	var b strings.Builder
-	b.WriteString("auditEventsByActor({")
+	b.WriteString("query auditEventsByActor(")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -938,10 +938,10 @@ func (qc *QueryClient) AuditEventsByTarget(ctx context.Context, args AuditEvents
 
 func AuditEventsByTargetBuild(args AuditEventsByTargetArgs) string {
 	var b strings.Builder
-	b.WriteString("auditEventsByTarget({")
+	b.WriteString("query auditEventsByTarget(")
 	b.WriteString("targetId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -960,10 +960,10 @@ func (qc *QueryClient) AuthCodeByCodeHash(ctx context.Context, args AuthCodeByCo
 
 func AuthCodeByCodeHashBuild(args AuthCodeByCodeHashArgs) string {
 	var b strings.Builder
-	b.WriteString("authCodeByCodeHash({")
+	b.WriteString("query authCodeByCodeHash(")
 	b.WriteString("codeHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.CodeHash))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -982,10 +982,10 @@ func (qc *QueryClient) AuthSessionByPreviousRefreshTokenHash(ctx context.Context
 
 func AuthSessionByPreviousRefreshTokenHashBuild(args AuthSessionByPreviousRefreshTokenHashArgs) string {
 	var b strings.Builder
-	b.WriteString("authSessionByPreviousRefreshTokenHash({")
+	b.WriteString("query authSessionByPreviousRefreshTokenHash(")
 	b.WriteString("previousRefreshTokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.PreviousRefreshTokenHash))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1004,10 +1004,10 @@ func (qc *QueryClient) AuthSessionByRefreshTokenHash(ctx context.Context, args A
 
 func AuthSessionByRefreshTokenHashBuild(args AuthSessionByRefreshTokenHashArgs) string {
 	var b strings.Builder
-	b.WriteString("authSessionByRefreshTokenHash({")
+	b.WriteString("query authSessionByRefreshTokenHash(")
 	b.WriteString("refreshTokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.RefreshTokenHash))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1026,10 +1026,10 @@ func (qc *QueryClient) AuthSessionByTokenHash(ctx context.Context, args AuthSess
 
 func AuthSessionByTokenHashBuild(args AuthSessionByTokenHashArgs) string {
 	var b strings.Builder
-	b.WriteString("authSessionByTokenHash({")
+	b.WriteString("query authSessionByTokenHash(")
 	b.WriteString("tokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1048,10 +1048,10 @@ func (qc *QueryClient) AuthSessionsForSubject(ctx context.Context, args AuthSess
 
 func AuthSessionsForSubjectBuild(args AuthSessionsForSubjectArgs) string {
 	var b strings.Builder
-	b.WriteString("authSessionsForSubject({")
+	b.WriteString("query authSessionsForSubject(")
 	b.WriteString("subject: ")
 	b.WriteString(fmt.Sprintf("%q", args.Subject))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1070,10 +1070,10 @@ func (qc *QueryClient) AuthoringBundleById(ctx context.Context, args AuthoringBu
 
 func AuthoringBundleByIdBuild(args AuthoringBundleByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("authoringBundleById({")
+	b.WriteString("query authoringBundleById(")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1092,10 +1092,10 @@ func (qc *QueryClient) AuthoringBundleForPlan(ctx context.Context, args Authorin
 
 func AuthoringBundleForPlanBuild(args AuthoringBundleForPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("authoringBundleForPlan({")
+	b.WriteString("query authoringBundleForPlan(")
 	b.WriteString("sourcePlanId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SourcePlanId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1114,10 +1114,10 @@ func (qc *QueryClient) AuthoringBundleForResponsibility(ctx context.Context, arg
 
 func AuthoringBundleForResponsibilityBuild(args AuthoringBundleForResponsibilityArgs) string {
 	var b strings.Builder
-	b.WriteString("authoringBundleForResponsibility({")
+	b.WriteString("query authoringBundleForResponsibility(")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1135,7 +1135,7 @@ func (qc *QueryClient) AuthoringBundlesForOwner(ctx context.Context, args Author
 
 func AuthoringBundlesForOwnerBuild(args AuthoringBundlesForOwnerArgs) string {
 	_ = args
-	return "authoringBundlesForOwner({})"
+	return "query authoringBundlesForOwner()"
 }
 
 // AuthoringConstructsForBundle -- All authored constructs belonging to a bundle, scoped to the caller. Backs the gate runners (compile/bind the whole closure) + the runtime register/unregister path.
@@ -1153,10 +1153,10 @@ func (qc *QueryClient) AuthoringConstructsForBundle(ctx context.Context, args Au
 
 func AuthoringConstructsForBundleBuild(args AuthoringConstructsForBundleArgs) string {
 	var b strings.Builder
-	b.WriteString("authoringConstructsForBundle({")
+	b.WriteString("query authoringConstructsForBundle(")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1175,10 +1175,10 @@ func (qc *QueryClient) AvatarPersonaById(ctx context.Context, args AvatarPersona
 
 func AvatarPersonaByIdBuild(args AvatarPersonaByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("avatarPersonaById({")
+	b.WriteString("query avatarPersonaById(")
 	b.WriteString("avatarPersonaId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AvatarPersonaId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1199,12 +1199,12 @@ func (qc *QueryClient) AvatarPersonas(ctx context.Context, args AvatarPersonasAr
 
 func AvatarPersonasBuild(args AvatarPersonasArgs) string {
 	var b strings.Builder
-	b.WriteString("avatarPersonas({")
+	b.WriteString("query avatarPersonas(")
 	if args.Vendor != "" {
 		b.WriteString("vendor: ")
 		b.WriteString(fmt.Sprintf("%q", args.Vendor))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1222,7 +1222,7 @@ func (qc *QueryClient) AwaitingFeedbackPlansPastTimeout(ctx context.Context, arg
 
 func AwaitingFeedbackPlansPastTimeoutBuild(args AwaitingFeedbackPlansPastTimeoutArgs) string {
 	_ = args
-	return "awaitingFeedbackPlansPastTimeout({})"
+	return "query awaitingFeedbackPlansPastTimeout()"
 }
 
 // CalendarEventById -- Get a single calendar event by node id. Self-scoped: the ownerUserId==actor.userId predicate guarantees a caller can only fetch their own events. Backs the calendar tool's update/delete pre-read and the event detail view.
@@ -1240,10 +1240,10 @@ func (qc *QueryClient) CalendarEventById(ctx context.Context, args CalendarEvent
 
 func CalendarEventByIdBuild(args CalendarEventByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("calendarEventById({")
+	b.WriteString("query calendarEventById(")
 	b.WriteString("eventId: ")
 	b.WriteString(fmt.Sprintf("%q", args.EventId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1262,10 +1262,10 @@ func (qc *QueryClient) CallsByNumber(ctx context.Context, args CallsByNumberArgs
 
 func CallsByNumberBuild(args CallsByNumberArgs) string {
 	var b strings.Builder
-	b.WriteString("callsByNumber({")
+	b.WriteString("query callsByNumber(")
 	b.WriteString("e164: ")
 	b.WriteString(fmt.Sprintf("%q", args.E164))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1284,10 +1284,10 @@ func (qc *QueryClient) CallsByPartition(ctx context.Context, args CallsByPartiti
 
 func CallsByPartitionBuild(args CallsByPartitionArgs) string {
 	var b strings.Builder
-	b.WriteString("callsByPartition({")
+	b.WriteString("query callsByPartition(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1306,10 +1306,10 @@ func (qc *QueryClient) CapabilitiesForResourceType(ctx context.Context, args Cap
 
 func CapabilitiesForResourceTypeBuild(args CapabilitiesForResourceTypeArgs) string {
 	var b strings.Builder
-	b.WriteString("capabilitiesForResourceType({")
+	b.WriteString("query capabilitiesForResourceType(")
 	b.WriteString("resourceType: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResourceType))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1328,10 +1328,10 @@ func (qc *QueryClient) CapabilitiesForRole(ctx context.Context, args Capabilitie
 
 func CapabilitiesForRoleBuild(args CapabilitiesForRoleArgs) string {
 	var b strings.Builder
-	b.WriteString("capabilitiesForRole({")
+	b.WriteString("query capabilitiesForRole(")
 	b.WriteString("roleSlug: ")
 	b.WriteString(fmt.Sprintf("%q", args.RoleSlug))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1352,20 +1352,20 @@ func (qc *QueryClient) CapabilityGrant(ctx context.Context, args CapabilityGrant
 
 func CapabilityGrantBuild(args CapabilityGrantArgs) string {
 	var b strings.Builder
-	b.WriteString("capabilityGrant({")
+	b.WriteString("query capabilityGrant(")
 	b.WriteString("roleSlug: ")
 	b.WriteString(fmt.Sprintf("%q", args.RoleSlug))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("verb: ")
 	b.WriteString(fmt.Sprintf("%q", args.Verb))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("resourceType: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResourceType))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1383,7 +1383,7 @@ func (qc *QueryClient) CataloguedConstructsForOwner(ctx context.Context, args Ca
 
 func CataloguedConstructsForOwnerBuild(args CataloguedConstructsForOwnerArgs) string {
 	_ = args
-	return "cataloguedConstructsForOwner({})"
+	return "query cataloguedConstructsForOwner()"
 }
 
 // ClusterNodeTypes -- Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...)
@@ -1400,7 +1400,7 @@ func (qc *QueryClient) ClusterNodeTypes(ctx context.Context, args ClusterNodeTyp
 
 func ClusterNodeTypesBuild(args ClusterNodeTypesArgs) string {
 	_ = args
-	return "clusterNodeTypes({})"
+	return "query clusterNodeTypes()"
 }
 
 // ClusterNodes -- Returns all cluster node rows (CLI dedupes to latest per id)
@@ -1417,7 +1417,7 @@ func (qc *QueryClient) ClusterNodes(ctx context.Context, args ClusterNodesArgs) 
 
 func ClusterNodesBuild(args ClusterNodesArgs) string {
 	_ = args
-	return "clusterNodes({})"
+	return "query clusterNodes()"
 }
 
 // ClusterSettingsCurrent -- Latest singleton cluster-settings row, pinned to id=cluster.
@@ -1434,7 +1434,7 @@ func (qc *QueryClient) ClusterSettingsCurrent(ctx context.Context, args ClusterS
 
 func ClusterSettingsCurrentBuild(args ClusterSettingsCurrentArgs) string {
 	_ = args
-	return "clusterSettingsCurrent({})"
+	return "query clusterSettingsCurrent()"
 }
 
 // ClusterSpawnEvents -- Returns all cluster spawn events
@@ -1451,7 +1451,7 @@ func (qc *QueryClient) ClusterSpawnEvents(ctx context.Context, args ClusterSpawn
 
 func ClusterSpawnEventsBuild(args ClusterSpawnEventsArgs) string {
 	_ = args
-	return "clusterSpawnEvents({})"
+	return "query clusterSpawnEvents()"
 }
 
 // ConsentOptOut -- Opt-out rows for an external number (newest first). Read in the outbound call path to block calls to opted-out numbers (TCPA). Not owner-gated: the enforcement check runs in the agent/call context, not an admin one.
@@ -1469,10 +1469,10 @@ func (qc *QueryClient) ConsentOptOut(ctx context.Context, args ConsentOptOutArgs
 
 func ConsentOptOutBuild(args ConsentOptOutArgs) string {
 	var b strings.Builder
-	b.WriteString("consentOptOut({")
+	b.WriteString("query consentOptOut(")
 	b.WriteString("phoneNumber: ")
 	b.WriteString(fmt.Sprintf("%q", args.PhoneNumber))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1490,7 +1490,7 @@ func (qc *QueryClient) CurrentUser(ctx context.Context, args CurrentUserArgs) (*
 
 func CurrentUserBuild(args CurrentUserArgs) string {
 	_ = args
-	return "currentUser({})"
+	return "query currentUser()"
 }
 
 // DelegationsByIdentity -- Get all delegations (active and revoked) for a given identity ID
@@ -1508,10 +1508,10 @@ func (qc *QueryClient) DelegationsByIdentity(ctx context.Context, args Delegatio
 
 func DelegationsByIdentityBuild(args DelegationsByIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("delegationsByIdentity({")
+	b.WriteString("query delegationsByIdentity(")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1530,10 +1530,10 @@ func (qc *QueryClient) DependencyEdgesForBundle(ctx context.Context, args Depend
 
 func DependencyEdgesForBundleBuild(args DependencyEdgesForBundleArgs) string {
 	var b strings.Builder
-	b.WriteString("dependencyEdgesForBundle({")
+	b.WriteString("query dependencyEdgesForBundle(")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1551,7 +1551,7 @@ func (qc *QueryClient) DependencyEdgesForOwner(ctx context.Context, args Depende
 
 func DependencyEdgesForOwnerBuild(args DependencyEdgesForOwnerArgs) string {
 	_ = args
-	return "dependencyEdgesForOwner({})"
+	return "query dependencyEdgesForOwner()"
 }
 
 // DependentsOfConstruct -- IMPACT ANALYSIS (#957): every edge that depends ON a given construct, scoped to the caller. The dependents to re-validate before changing a shared / cataloged construct. The caller joins bundleId -> v1:authoring:bundle to filter to ACTIVE dependents.
@@ -1570,15 +1570,15 @@ func (qc *QueryClient) DependentsOfConstruct(ctx context.Context, args Dependent
 
 func DependentsOfConstructBuild(args DependentsOfConstructArgs) string {
 	var b strings.Builder
-	b.WriteString("dependentsOfConstruct({")
+	b.WriteString("query dependentsOfConstruct(")
 	b.WriteString("toName: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToName))
-	if b.Len() > 23 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToKind))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1597,10 +1597,10 @@ func (qc *QueryClient) DeploymentById(ctx context.Context, args DeploymentByIdAr
 
 func DeploymentByIdBuild(args DeploymentByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("deploymentById({")
+	b.WriteString("query deploymentById(")
 	b.WriteString("deploymentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1619,10 +1619,10 @@ func (qc *QueryClient) DeploymentsForCluster(ctx context.Context, args Deploymen
 
 func DeploymentsForClusterBuild(args DeploymentsForClusterArgs) string {
 	var b strings.Builder
-	b.WriteString("deploymentsForCluster({")
+	b.WriteString("query deploymentsForCluster(")
 	b.WriteString("clusterId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ClusterId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1643,20 +1643,20 @@ func (qc *QueryClient) DetectConflicts(ctx context.Context, args DetectConflicts
 
 func DetectConflictsBuild(args DetectConflictsArgs) string {
 	var b strings.Builder
-	b.WriteString("detectConflicts({")
+	b.WriteString("query detectConflicts(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("naturalKeyValue: ")
 	b.WriteString(fmt.Sprintf("%q", args.NaturalKeyValue))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("recordType: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordType))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1675,10 +1675,10 @@ func (qc *QueryClient) DocumentChunksForDomain(ctx context.Context, args Documen
 
 func DocumentChunksForDomainBuild(args DocumentChunksForDomainArgs) string {
 	var b strings.Builder
-	b.WriteString("documentChunksForDomain({")
+	b.WriteString("query documentChunksForDomain(")
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1697,10 +1697,10 @@ func (qc *QueryClient) DocumentVersionById(ctx context.Context, args DocumentVer
 
 func DocumentVersionByIdBuild(args DocumentVersionByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("documentVersionById({")
+	b.WriteString("query documentVersionById(")
 	b.WriteString("versionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.VersionId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1719,10 +1719,10 @@ func (qc *QueryClient) DocumentVersions(ctx context.Context, args DocumentVersio
 
 func DocumentVersionsBuild(args DocumentVersionsArgs) string {
 	var b strings.Builder
-	b.WriteString("documentVersions({")
+	b.WriteString("query documentVersions(")
 	b.WriteString("documentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1741,10 +1741,10 @@ func (qc *QueryClient) DocumentVersionsForOwner(ctx context.Context, args Docume
 
 func DocumentVersionsForOwnerBuild(args DocumentVersionsForOwnerArgs) string {
 	var b strings.Builder
-	b.WriteString("documentVersionsForOwner({")
+	b.WriteString("query documentVersionsForOwner(")
 	b.WriteString("documentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1764,10 +1764,10 @@ func (qc *QueryClient) DueResponsibilities(ctx context.Context, args DueResponsi
 
 func DueResponsibilitiesBuild(args DueResponsibilitiesArgs) string {
 	var b strings.Builder
-	b.WriteString("dueResponsibilities({")
+	b.WriteString("query dueResponsibilities(")
 	b.WriteString("trigger: ")
 	b.WriteString(fmt.Sprintf("%q", args.Trigger))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1785,7 +1785,7 @@ func (qc *QueryClient) DueTrainAgentRetryPlans(ctx context.Context, args DueTrai
 
 func DueTrainAgentRetryPlansBuild(args DueTrainAgentRetryPlansArgs) string {
 	_ = args
-	return "dueTrainAgentRetryPlans({})"
+	return "query dueTrainAgentRetryPlans()"
 }
 
 // EventsByDay -- List the authenticated caller's events that start on a given day, bounded by the caller-supplied [dayStart, dayEnd] instants (computed in the user's timezone client-side). Self-scoped via actor.userId. Backs the calendar tool's day view and 'what's on my schedule today' agent queries.
@@ -1806,15 +1806,15 @@ func (qc *QueryClient) EventsByDay(ctx context.Context, args EventsByDayArgs) (*
 
 func EventsByDayBuild(args EventsByDayArgs) string {
 	var b strings.Builder
-	b.WriteString("eventsByDay({")
+	b.WriteString("query eventsByDay(")
 	b.WriteString("dayStart: ")
 	b.WriteString(fmt.Sprintf("%q", args.DayStart))
-	if b.Len() > 13 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("dayEnd: ")
 	b.WriteString(fmt.Sprintf("%q", args.DayEnd))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1832,7 +1832,7 @@ func (qc *QueryClient) ExistingCluster(ctx context.Context, args ExistingCluster
 
 func ExistingClusterBuild(args ExistingClusterArgs) string {
 	_ = args
-	return "existingCluster({})"
+	return "query existingCluster()"
 }
 
 // ExpiredActiveDelegations -- Active delegations whose expiresAt is before the supplied cutoff.
@@ -1850,10 +1850,10 @@ func (qc *QueryClient) ExpiredActiveDelegations(ctx context.Context, args Expire
 
 func ExpiredActiveDelegationsBuild(args ExpiredActiveDelegationsArgs) string {
 	var b strings.Builder
-	b.WriteString("expiredActiveDelegations({")
+	b.WriteString("query expiredActiveDelegations(")
 	b.WriteString("now: ")
 	b.WriteString(fmt.Sprintf("%q", args.Now))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1871,7 +1871,7 @@ func (qc *QueryClient) ExpiredAuditEvents(ctx context.Context, args ExpiredAudit
 
 func ExpiredAuditEventsBuild(args ExpiredAuditEventsArgs) string {
 	_ = args
-	return "expiredAuditEvents({})"
+	return "query expiredAuditEvents()"
 }
 
 // ExpiredConsumedAuthCodes -- CONSUMED auth codes whose expiresAt is before the supplied cutoff. Both predicates are load-bearing: the name says `Consumed`, so the consumedAt gate (memql#1714) keeps the result set to spent-then-expired codes and never sweeps an unspent-but-expired code that a redemption is still racing against.
@@ -1889,10 +1889,10 @@ func (qc *QueryClient) ExpiredConsumedAuthCodes(ctx context.Context, args Expire
 
 func ExpiredConsumedAuthCodesBuild(args ExpiredConsumedAuthCodesArgs) string {
 	var b strings.Builder
-	b.WriteString("expiredConsumedAuthCodes({")
+	b.WriteString("query expiredConsumedAuthCodes(")
 	b.WriteString("now: ")
 	b.WriteString(fmt.Sprintf("%q", args.Now))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1911,10 +1911,10 @@ func (qc *QueryClient) ExpiredMagicLinkRequests(ctx context.Context, args Expire
 
 func ExpiredMagicLinkRequestsBuild(args ExpiredMagicLinkRequestsArgs) string {
 	var b strings.Builder
-	b.WriteString("expiredMagicLinkRequests({")
+	b.WriteString("query expiredMagicLinkRequests(")
 	b.WriteString("now: ")
 	b.WriteString(fmt.Sprintf("%q", args.Now))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1932,7 +1932,7 @@ func (qc *QueryClient) ExpiredPendingAccessRequests(ctx context.Context, args Ex
 
 func ExpiredPendingAccessRequestsBuild(args ExpiredPendingAccessRequestsArgs) string {
 	_ = args
-	return "expiredPendingAccessRequests({})"
+	return "query expiredPendingAccessRequests()"
 }
 
 // ExpiredWorkerInvocations -- List worker invocation rows for retention pruning. Caller filters by age.
@@ -1949,7 +1949,7 @@ func (qc *QueryClient) ExpiredWorkerInvocations(ctx context.Context, args Expire
 
 func ExpiredWorkerInvocationsBuild(args ExpiredWorkerInvocationsArgs) string {
 	_ = args
-	return "expiredWorkerInvocations({})"
+	return "query expiredWorkerInvocations()"
 }
 
 // FeedbackAnnouncementForPlan -- Check if the assistant already posted the awaitingFeedback announcement for a Plan (dedup behind the cross-replica announce gate, #1406).
@@ -1967,10 +1967,10 @@ func (qc *QueryClient) FeedbackAnnouncementForPlan(ctx context.Context, args Fee
 
 func FeedbackAnnouncementForPlanBuild(args FeedbackAnnouncementForPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("feedbackAnnouncementForPlan({")
+	b.WriteString("query feedbackAnnouncementForPlan(")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1990,10 +1990,10 @@ func (qc *QueryClient) FindEvents(ctx context.Context, args FindEventsArgs) (*Re
 
 func FindEventsBuild(args FindEventsArgs) string {
 	var b strings.Builder
-	b.WriteString("findEvents({")
+	b.WriteString("query findEvents(")
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2012,10 +2012,10 @@ func (qc *QueryClient) GeneratedOutputById(ctx context.Context, args GeneratedOu
 
 func GeneratedOutputByIdBuild(args GeneratedOutputByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("generatedOutputById({")
+	b.WriteString("query generatedOutputById(")
 	b.WriteString("outputId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OutputId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2034,10 +2034,10 @@ func (qc *QueryClient) GeneratedOutputsForPlan(ctx context.Context, args Generat
 
 func GeneratedOutputsForPlanBuild(args GeneratedOutputsForPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("generatedOutputsForPlan({")
+	b.WriteString("query generatedOutputsForPlan(")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2056,10 +2056,10 @@ func (qc *QueryClient) GlobalVariable(ctx context.Context, args GlobalVariableAr
 
 func GlobalVariableBuild(args GlobalVariableArgs) string {
 	var b strings.Builder
-	b.WriteString("globalVariable({")
+	b.WriteString("query globalVariable(")
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2078,10 +2078,10 @@ func (qc *QueryClient) GlobalVariables(ctx context.Context, args GlobalVariables
 
 func GlobalVariablesBuild(args GlobalVariablesArgs) string {
 	var b strings.Builder
-	b.WriteString("globalVariables({")
+	b.WriteString("query globalVariables(")
 	b.WriteString("names: ")
 	b.WriteString(renderMemQLValue(args.Names))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2101,15 +2101,15 @@ func (qc *QueryClient) GreetingUtterance(ctx context.Context, args GreetingUtter
 
 func GreetingUtteranceBuild(args GreetingUtteranceArgs) string {
 	var b strings.Builder
-	b.WriteString("greetingUtterance({")
+	b.WriteString("query greetingUtterance(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 19 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2128,10 +2128,10 @@ func (qc *QueryClient) GroupGAForSpace(ctx context.Context, args GroupGAForSpace
 
 func GroupGAForSpaceBuild(args GroupGAForSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("groupGAForSpace({")
+	b.WriteString("query groupGAForSpace(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2151,15 +2151,15 @@ func (qc *QueryClient) HasAIResponseForReply(ctx context.Context, args HasAIResp
 
 func HasAIResponseForReplyBuild(args HasAIResponseForReplyArgs) string {
 	var b strings.Builder
-	b.WriteString("hasAIResponseForReply({")
+	b.WriteString("query hasAIResponseForReply(")
 	b.WriteString("replyToId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ReplyToId))
-	if b.Len() > 23 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2178,10 +2178,10 @@ func (qc *QueryClient) HistoricalPlanMetrics(ctx context.Context, args Historica
 
 func HistoricalPlanMetricsBuild(args HistoricalPlanMetricsArgs) string {
 	var b strings.Builder
-	b.WriteString("historicalPlanMetrics({")
+	b.WriteString("query historicalPlanMetrics(")
 	b.WriteString("planKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanKind))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2200,10 +2200,10 @@ func (qc *QueryClient) InvitationById(ctx context.Context, args InvitationByIdAr
 
 func InvitationByIdBuild(args InvitationByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("invitationById({")
+	b.WriteString("query invitationById(")
 	b.WriteString("invitationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.InvitationId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2222,10 +2222,10 @@ func (qc *QueryClient) InvitationByPreviousTokenHash(ctx context.Context, args I
 
 func InvitationByPreviousTokenHashBuild(args InvitationByPreviousTokenHashArgs) string {
 	var b strings.Builder
-	b.WriteString("invitationByPreviousTokenHash({")
+	b.WriteString("query invitationByPreviousTokenHash(")
 	b.WriteString("tokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2244,10 +2244,10 @@ func (qc *QueryClient) InvitationByTokenHash(ctx context.Context, args Invitatio
 
 func InvitationByTokenHashBuild(args InvitationByTokenHashArgs) string {
 	var b strings.Builder
-	b.WriteString("invitationByTokenHash({")
+	b.WriteString("query invitationByTokenHash(")
 	b.WriteString("tokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2266,10 +2266,10 @@ func (qc *QueryClient) InvocationsForPlan(ctx context.Context, args InvocationsF
 
 func InvocationsForPlanBuild(args InvocationsForPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("invocationsForPlan({")
+	b.WriteString("query invocationsForPlan(")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2288,10 +2288,10 @@ func (qc *QueryClient) InvocationsForUser(ctx context.Context, args InvocationsF
 
 func InvocationsForUserBuild(args InvocationsForUserArgs) string {
 	var b strings.Builder
-	b.WriteString("invocationsForUser({")
+	b.WriteString("query invocationsForUser(")
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2310,10 +2310,10 @@ func (qc *QueryClient) LibraryArtifactById(ctx context.Context, args LibraryArti
 
 func LibraryArtifactByIdBuild(args LibraryArtifactByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("libraryArtifactById({")
+	b.WriteString("query libraryArtifactById(")
 	b.WriteString("artifactId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ArtifactId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2331,7 +2331,7 @@ func (qc *QueryClient) LibraryArtifacts(ctx context.Context, args LibraryArtifac
 
 func LibraryArtifactsBuild(args LibraryArtifactsArgs) string {
 	_ = args
-	return "libraryArtifacts({})"
+	return "query libraryArtifacts()"
 }
 
 // LibraryArtifactsByKind -- List the caller's Library rows of one kind (document / generated_output / note / todo / calendar_event / memory / live_source) -- backs the kind facet filter. Owned: ownerUserId==actor.userId gates the row set; payload.kind narrows to the selected kind.
@@ -2349,10 +2349,10 @@ func (qc *QueryClient) LibraryArtifactsByKind(ctx context.Context, args LibraryA
 
 func LibraryArtifactsByKindBuild(args LibraryArtifactsByKindArgs) string {
 	var b strings.Builder
-	b.WriteString("libraryArtifactsByKind({")
+	b.WriteString("query libraryArtifactsByKind(")
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2371,10 +2371,10 @@ func (qc *QueryClient) LibraryArtifactsByLens(ctx context.Context, args LibraryA
 
 func LibraryArtifactsByLensBuild(args LibraryArtifactsByLensArgs) string {
 	var b strings.Builder
-	b.WriteString("libraryArtifactsByLens({")
+	b.WriteString("query libraryArtifactsByLens(")
 	b.WriteString("lens: ")
 	b.WriteString(fmt.Sprintf("%q", args.Lens))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2392,7 +2392,7 @@ func (qc *QueryClient) LibraryWorkspaceLiveSources(ctx context.Context, args Lib
 
 func LibraryWorkspaceLiveSourcesBuild(args LibraryWorkspaceLiveSourcesArgs) string {
 	_ = args
-	return "libraryWorkspaceLiveSources({})"
+	return "query libraryWorkspaceLiveSources()"
 }
 
 // MagicLinkRequestByTokenHash -- Returns the magic-link request whose tokenHash matches the argument. Zero or one result.
@@ -2410,10 +2410,10 @@ func (qc *QueryClient) MagicLinkRequestByTokenHash(ctx context.Context, args Mag
 
 func MagicLinkRequestByTokenHashBuild(args MagicLinkRequestByTokenHashArgs) string {
 	var b strings.Builder
-	b.WriteString("magicLinkRequestByTokenHash({")
+	b.WriteString("query magicLinkRequestByTokenHash(")
 	b.WriteString("tokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2432,10 +2432,10 @@ func (qc *QueryClient) MemoryById(ctx context.Context, args MemoryByIdArgs) (*Re
 
 func MemoryByIdBuild(args MemoryByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("memoryById({")
+	b.WriteString("query memoryById(")
 	b.WriteString("memoryId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2454,10 +2454,10 @@ func (qc *QueryClient) MissingCapabilitiesByStatus(ctx context.Context, args Mis
 
 func MissingCapabilitiesByStatusBuild(args MissingCapabilitiesByStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("missingCapabilitiesByStatus({")
+	b.WriteString("query missingCapabilitiesByStatus(")
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2477,15 +2477,15 @@ func (qc *QueryClient) MissingCapabilityByKindAndName(ctx context.Context, args 
 
 func MissingCapabilityByKindAndNameBuild(args MissingCapabilityByKindAndNameArgs) string {
 	var b strings.Builder
-	b.WriteString("missingCapabilityByKindAndName({")
+	b.WriteString("query missingCapabilityByKindAndName(")
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 32 {
+	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("capability: ")
 	b.WriteString(fmt.Sprintf("%q", args.Capability))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2503,7 +2503,7 @@ func (qc *QueryClient) MyRequests(ctx context.Context, args MyRequestsArgs) (*Re
 
 func MyRequestsBuild(args MyRequestsArgs) string {
 	_ = args
-	return "myRequests({})"
+	return "query myRequests()"
 }
 
 // NodeSpecsForDeployment -- Latest-per-(deploymentId, nodeType) deploymentNodeSpec rows for one deploymentId -- the deployment's current per-node-type spec set (version / replicas / imageDigest). asOf latest collapses the append-only spec stream to current state per node type. Engine-as-spine resolution of an empty version is the consumer's job. Epic 2 / #2094.
@@ -2521,10 +2521,10 @@ func (qc *QueryClient) NodeSpecsForDeployment(ctx context.Context, args NodeSpec
 
 func NodeSpecsForDeploymentBuild(args NodeSpecsForDeploymentArgs) string {
 	var b strings.Builder
-	b.WriteString("nodeSpecsForDeployment({")
+	b.WriteString("query nodeSpecsForDeployment(")
 	b.WriteString("deploymentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2542,7 +2542,7 @@ func (qc *QueryClient) NodeTokenIdentities(ctx context.Context, args NodeTokenId
 
 func NodeTokenIdentitiesBuild(args NodeTokenIdentitiesArgs) string {
 	_ = args
-	return "nodeTokenIdentities({})"
+	return "query nodeTokenIdentities()"
 }
 
 // NodeTokenIdentityByBinding -- Lookup a node_token identity by its (nodeType, nodeId) binding. memql#343.
@@ -2561,15 +2561,15 @@ func (qc *QueryClient) NodeTokenIdentityByBinding(ctx context.Context, args Node
 
 func NodeTokenIdentityByBindingBuild(args NodeTokenIdentityByBindingArgs) string {
 	var b strings.Builder
-	b.WriteString("nodeTokenIdentityByBinding({")
+	b.WriteString("query nodeTokenIdentityByBinding(")
 	b.WriteString("nodeType: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeType))
-	if b.Len() > 28 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2588,10 +2588,10 @@ func (qc *QueryClient) NodeTokenIdentityById(ctx context.Context, args NodeToken
 
 func NodeTokenIdentityByIdBuild(args NodeTokenIdentityByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("nodeTokenIdentityById({")
+	b.WriteString("query nodeTokenIdentityById(")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2610,10 +2610,10 @@ func (qc *QueryClient) NodesForDeployment(ctx context.Context, args NodesForDepl
 
 func NodesForDeploymentBuild(args NodesForDeploymentArgs) string {
 	var b strings.Builder
-	b.WriteString("nodesForDeployment({")
+	b.WriteString("query nodesForDeployment(")
 	b.WriteString("deploymentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2632,10 +2632,10 @@ func (qc *QueryClient) NodesNotInDeployment(ctx context.Context, args NodesNotIn
 
 func NodesNotInDeploymentBuild(args NodesNotInDeploymentArgs) string {
 	var b strings.Builder
-	b.WriteString("nodesNotInDeployment({")
+	b.WriteString("query nodesNotInDeployment(")
 	b.WriteString("deploymentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2654,10 +2654,10 @@ func (qc *QueryClient) NoteById(ctx context.Context, args NoteByIdArgs) (*Result
 
 func NoteByIdBuild(args NoteByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("noteById({")
+	b.WriteString("query noteById(")
 	b.WriteString("noteId: ")
 	b.WriteString(fmt.Sprintf("%q", args.NoteId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2675,7 +2675,7 @@ func (qc *QueryClient) Notes(ctx context.Context, args NotesArgs) (*Result, erro
 
 func NotesBuild(args NotesArgs) string {
 	_ = args
-	return "notes({})"
+	return "query notes()"
 }
 
 // NotesByTag -- Search the caller's notes by tag. Owned: ownerUserId==actor.userId gates the row set server-side; the tag predicate narrows to notes carrying the given tag. Body substring matching is done client-side over this caller-scoped result so the search never leaks across users.
@@ -2693,10 +2693,10 @@ func (qc *QueryClient) NotesByTag(ctx context.Context, args NotesByTagArgs) (*Re
 
 func NotesByTagBuild(args NotesByTagArgs) string {
 	var b strings.Builder
-	b.WriteString("notesByTag({")
+	b.WriteString("query notesByTag(")
 	b.WriteString("tag: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tag))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2715,10 +2715,10 @@ func (qc *QueryClient) NumberByE164(ctx context.Context, args NumberByE164Args) 
 
 func NumberByE164Build(args NumberByE164Args) string {
 	var b strings.Builder
-	b.WriteString("numberByE164({")
+	b.WriteString("query numberByE164(")
 	b.WriteString("e164: ")
 	b.WriteString(fmt.Sprintf("%q", args.E164))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2737,10 +2737,10 @@ func (qc *QueryClient) NumbersByPartition(ctx context.Context, args NumbersByPar
 
 func NumbersByPartitionBuild(args NumbersByPartitionArgs) string {
 	var b strings.Builder
-	b.WriteString("numbersByPartition({")
+	b.WriteString("query numbersByPartition(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2759,10 +2759,10 @@ func (qc *QueryClient) OAuthClientByClientId(ctx context.Context, args OAuthClie
 
 func OAuthClientByClientIdBuild(args OAuthClientByClientIdArgs) string {
 	var b strings.Builder
-	b.WriteString("oAuthClientByClientId({")
+	b.WriteString("query oAuthClientByClientId(")
 	b.WriteString("clientId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ClientId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2781,10 +2781,10 @@ func (qc *QueryClient) OverrideById(ctx context.Context, args OverrideByIdArgs) 
 
 func OverrideByIdBuild(args OverrideByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("overrideById({")
+	b.WriteString("query overrideById(")
 	b.WriteString("overrideId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OverrideId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2803,10 +2803,10 @@ func (qc *QueryClient) OverridesForConstruct(ctx context.Context, args Overrides
 
 func OverridesForConstructBuild(args OverridesForConstructArgs) string {
 	var b strings.Builder
-	b.WriteString("overridesForConstruct({")
+	b.WriteString("query overridesForConstruct(")
 	b.WriteString("baseConstructId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BaseConstructId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2826,15 +2826,15 @@ func (qc *QueryClient) ParticipantByAgentSpace(ctx context.Context, args Partici
 
 func ParticipantByAgentSpaceBuild(args ParticipantByAgentSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("participantByAgentSpace({")
+	b.WriteString("query participantByAgentSpace(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 25 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2854,19 +2854,19 @@ func (qc *QueryClient) ParticipantSession(ctx context.Context, args ParticipantS
 
 func ParticipantSessionBuild(args ParticipantSessionArgs) string {
 	var b strings.Builder
-	b.WriteString("participantSession({")
+	b.WriteString("query participantSession(")
 	if args.PartitionId != "" {
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.ParticipantId != "" {
-		if b.Len() > 20 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2885,10 +2885,10 @@ func (qc *QueryClient) PatIdentitiesForUser(ctx context.Context, args PatIdentit
 
 func PatIdentitiesForUserBuild(args PatIdentitiesForUserArgs) string {
 	var b strings.Builder
-	b.WriteString("patIdentitiesForUser({")
+	b.WriteString("query patIdentitiesForUser(")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2907,10 +2907,10 @@ func (qc *QueryClient) PatIdentityById(ctx context.Context, args PatIdentityById
 
 func PatIdentityByIdBuild(args PatIdentityByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("patIdentityById({")
+	b.WriteString("query patIdentityById(")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2929,10 +2929,10 @@ func (qc *QueryClient) PatIdentityByKeyHash(ctx context.Context, args PatIdentit
 
 func PatIdentityByKeyHashBuild(args PatIdentityByKeyHashArgs) string {
 	var b strings.Builder
-	b.WriteString("patIdentityByKeyHash({")
+	b.WriteString("query patIdentityByKeyHash(")
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2950,7 +2950,7 @@ func (qc *QueryClient) PendingAccessRequests(ctx context.Context, args PendingAc
 
 func PendingAccessRequestsBuild(args PendingAccessRequestsArgs) string {
 	_ = args
-	return "pendingAccessRequests({})"
+	return "query pendingAccessRequests()"
 }
 
 // PlanById -- Single Plan by id.
@@ -2968,10 +2968,10 @@ func (qc *QueryClient) PlanById(ctx context.Context, args PlanByIdArgs) (*Result
 
 func PlanByIdBuild(args PlanByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("planById({")
+	b.WriteString("query planById(")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2990,10 +2990,10 @@ func (qc *QueryClient) PlansForResponsibility(ctx context.Context, args PlansFor
 
 func PlansForResponsibilityBuild(args PlansForResponsibilityArgs) string {
 	var b strings.Builder
-	b.WriteString("plansForResponsibility({")
+	b.WriteString("query plansForResponsibility(")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3012,10 +3012,10 @@ func (qc *QueryClient) PlansForSpace(ctx context.Context, args PlansForSpaceArgs
 
 func PlansForSpaceBuild(args PlansForSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("plansForSpace({")
+	b.WriteString("query plansForSpace(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3035,17 +3035,17 @@ func (qc *QueryClient) Policy(ctx context.Context, args PolicyArgs) (*Result, er
 
 func PolicyBuild(args PolicyArgs) string {
 	var b strings.Builder
-	b.WriteString("policy({")
+	b.WriteString("query policy(")
 	b.WriteString("targetRecordType: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetRecordType))
 	if args.PartitionId != "" {
-		if b.Len() > 8 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3064,10 +3064,10 @@ func (qc *QueryClient) PolicyTracesForPolicy(ctx context.Context, args PolicyTra
 
 func PolicyTracesForPolicyBuild(args PolicyTracesForPolicyArgs) string {
 	var b strings.Builder
-	b.WriteString("policyTracesForPolicy({")
+	b.WriteString("query policyTracesForPolicy(")
 	b.WriteString("policyName: ")
 	b.WriteString(fmt.Sprintf("%q", args.PolicyName))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3086,10 +3086,10 @@ func (qc *QueryClient) ProjectById(ctx context.Context, args ProjectByIdArgs) (*
 
 func ProjectByIdBuild(args ProjectByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("projectById({")
+	b.WriteString("query projectById(")
 	b.WriteString("projectId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ProjectId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3108,10 +3108,10 @@ func (qc *QueryClient) ProjectBySlug(ctx context.Context, args ProjectBySlugArgs
 
 func ProjectBySlugBuild(args ProjectBySlugArgs) string {
 	var b strings.Builder
-	b.WriteString("projectBySlug({")
+	b.WriteString("query projectBySlug(")
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3130,10 +3130,10 @@ func (qc *QueryClient) ProjectRequests(ctx context.Context, args ProjectRequests
 
 func ProjectRequestsBuild(args ProjectRequestsArgs) string {
 	var b strings.Builder
-	b.WriteString("projectRequests({")
+	b.WriteString("query projectRequests(")
 	b.WriteString("projectId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ProjectId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3151,7 +3151,7 @@ func (qc *QueryClient) ProvisionedWorkspaces(ctx context.Context, args Provision
 
 func ProvisionedWorkspacesBuild(args ProvisionedWorkspacesArgs) string {
 	_ = args
-	return "provisionedWorkspaces({})"
+	return "query provisionedWorkspaces()"
 }
 
 // RecentAuditEvents -- Recent audit events, optionally filtered by category. Powers the admin audit-log view.
@@ -3169,12 +3169,12 @@ func (qc *QueryClient) RecentAuditEvents(ctx context.Context, args RecentAuditEv
 
 func RecentAuditEventsBuild(args RecentAuditEventsArgs) string {
 	var b strings.Builder
-	b.WriteString("recentAuditEvents({")
+	b.WriteString("query recentAuditEvents(")
 	if args.Category != "" {
 		b.WriteString("category: ")
 		b.WriteString(fmt.Sprintf("%q", args.Category))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3196,33 +3196,33 @@ func (qc *QueryClient) RecordsByState(ctx context.Context, args RecordsByStateAr
 
 func RecordsByStateBuild(args RecordsByStateArgs) string {
 	var b strings.Builder
-	b.WriteString("recordsByState({")
+	b.WriteString("query recordsByState(")
 	if args.PartitionId != "" {
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.RecordType != "" {
-		if b.Len() > 16 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recordType: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecordType))
 	}
 	if args.ValidationState != "" {
-		if b.Len() > 16 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("validationState: ")
 		b.WriteString(fmt.Sprintf("%q", args.ValidationState))
 	}
 	if args.ImportSource != "" {
-		if b.Len() > 16 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("importSource: ")
 		b.WriteString(fmt.Sprintf("%q", args.ImportSource))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3241,10 +3241,10 @@ func (qc *QueryClient) RequestById(ctx context.Context, args RequestByIdArgs) (*
 
 func RequestByIdBuild(args RequestByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("requestById({")
+	b.WriteString("query requestById(")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3263,10 +3263,10 @@ func (qc *QueryClient) RequestEvents(ctx context.Context, args RequestEventsArgs
 
 func RequestEventsBuild(args RequestEventsArgs) string {
 	var b strings.Builder
-	b.WriteString("requestEvents({")
+	b.WriteString("query requestEvents(")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3285,10 +3285,10 @@ func (qc *QueryClient) ResolveValidOverride(ctx context.Context, args ResolveVal
 
 func ResolveValidOverrideBuild(args ResolveValidOverrideArgs) string {
 	var b strings.Builder
-	b.WriteString("resolveValidOverride({")
+	b.WriteString("query resolveValidOverride(")
 	b.WriteString("baseConstructId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BaseConstructId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3306,7 +3306,7 @@ func (qc *QueryClient) ResponsibilitiesForUser(ctx context.Context, args Respons
 
 func ResponsibilitiesForUserBuild(args ResponsibilitiesForUserArgs) string {
 	_ = args
-	return "responsibilitiesForUser({})"
+	return "query responsibilitiesForUser()"
 }
 
 // ResponsibilityById -- Single v1:planner:responsibility by id. Used by the intake dispatcher (#637) and the management UI's single-row refresh. Filters on id only -- mirrors planById; the owner-scoped list reads stay on responsibilitiesForUser.
@@ -3324,10 +3324,10 @@ func (qc *QueryClient) ResponsibilityById(ctx context.Context, args Responsibili
 
 func ResponsibilityByIdBuild(args ResponsibilityByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("responsibilityById({")
+	b.WriteString("query responsibilityById(")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3346,10 +3346,10 @@ func (qc *QueryClient) RoleBySlug(ctx context.Context, args RoleBySlugArgs) (*Re
 
 func RoleBySlugBuild(args RoleBySlugArgs) string {
 	var b strings.Builder
-	b.WriteString("roleBySlug({")
+	b.WriteString("query roleBySlug(")
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3368,12 +3368,12 @@ func (qc *QueryClient) RouterBudgets(ctx context.Context, args RouterBudgetsArgs
 
 func RouterBudgetsBuild(args RouterBudgetsArgs) string {
 	var b strings.Builder
-	b.WriteString("routerBudgets({")
+	b.WriteString("query routerBudgets(")
 	if args.Scope != "" {
 		b.WriteString("scope: ")
 		b.WriteString(fmt.Sprintf("%q", args.Scope))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3392,10 +3392,10 @@ func (qc *QueryClient) RunningPlansForUser(ctx context.Context, args RunningPlan
 
 func RunningPlansForUserBuild(args RunningPlansForUserArgs) string {
 	var b strings.Builder
-	b.WriteString("runningPlansForUser({")
+	b.WriteString("query runningPlansForUser(")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3413,7 +3413,7 @@ func (qc *QueryClient) RunningTrainAgentPlans(ctx context.Context, args RunningT
 
 func RunningTrainAgentPlansBuild(args RunningTrainAgentPlansArgs) string {
 	_ = args
-	return "runningTrainAgentPlans({})"
+	return "query runningTrainAgentPlans()"
 }
 
 // SearchUsers -- Search users, optionally gated by active status. Omit `active` to list every user; pass true to return only active users or false for only deactivated ones. Backs the searchUsers tool.
@@ -3432,12 +3432,12 @@ func (qc *QueryClient) SearchUsers(ctx context.Context, args SearchUsersArgs) (*
 
 func SearchUsersBuild(args SearchUsersArgs) string {
 	var b strings.Builder
-	b.WriteString("searchUsers({")
+	b.WriteString("query searchUsers(")
 	if args.ActiveSet {
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3456,10 +3456,10 @@ func (qc *QueryClient) SiParticipantForSpace(ctx context.Context, args SiPartici
 
 func SiParticipantForSpaceBuild(args SiParticipantForSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("siParticipantForSpace({")
+	b.WriteString("query siParticipantForSpace(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3478,10 +3478,10 @@ func (qc *QueryClient) SkillBySlug(ctx context.Context, args SkillBySlugArgs) (*
 
 func SkillBySlugBuild(args SkillBySlugArgs) string {
 	var b strings.Builder
-	b.WriteString("skillBySlug({")
+	b.WriteString("query skillBySlug(")
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3500,10 +3500,10 @@ func (qc *QueryClient) SkillChangeEventsForAgent(ctx context.Context, args Skill
 
 func SkillChangeEventsForAgentBuild(args SkillChangeEventsForAgentArgs) string {
 	var b strings.Builder
-	b.WriteString("skillChangeEventsForAgent({")
+	b.WriteString("query skillChangeEventsForAgent(")
 	b.WriteString("targetAgentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetAgentId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3522,10 +3522,10 @@ func (qc *QueryClient) SkillNeedsRefresh(ctx context.Context, args SkillNeedsRef
 
 func SkillNeedsRefreshBuild(args SkillNeedsRefreshArgs) string {
 	var b strings.Builder
-	b.WriteString("skillNeedsRefresh({")
+	b.WriteString("query skillNeedsRefresh(")
 	b.WriteString("staleDomainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.StaleDomainId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3545,17 +3545,17 @@ func (qc *QueryClient) SpaceMedia(ctx context.Context, args SpaceMediaArgs) (*Re
 
 func SpaceMediaBuild(args SpaceMediaArgs) string {
 	var b strings.Builder
-	b.WriteString("spaceMedia({")
+	b.WriteString("query spaceMedia(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if args.MediaType != "" {
-		if b.Len() > 12 {
+		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mediaType: ")
 		b.WriteString(fmt.Sprintf("%q", args.MediaType))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3574,10 +3574,10 @@ func (qc *QueryClient) SpaceParticipantPresence(ctx context.Context, args SpaceP
 
 func SpaceParticipantPresenceBuild(args SpaceParticipantPresenceArgs) string {
 	var b strings.Builder
-	b.WriteString("spaceParticipantPresence({")
+	b.WriteString("query spaceParticipantPresence(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3598,24 +3598,24 @@ func (qc *QueryClient) SpaceParticipants(ctx context.Context, args SpaceParticip
 
 func SpaceParticipantsBuild(args SpaceParticipantsArgs) string {
 	var b strings.Builder
-	b.WriteString("spaceParticipants({")
+	b.WriteString("query spaceParticipants(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if args.Status != "" {
-		if b.Len() > 19 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
 	if args.ParticipantType != "" {
-		if b.Len() > 19 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3636,24 +3636,24 @@ func (qc *QueryClient) SpaceUtterances(ctx context.Context, args SpaceUtterances
 
 func SpaceUtterancesBuild(args SpaceUtterancesArgs) string {
 	var b strings.Builder
-	b.WriteString("spaceUtterances({")
+	b.WriteString("query spaceUtterances(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if args.ParticipantId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	}
 	if args.UtteranceType != "" {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("utteranceType: ")
 		b.WriteString(fmt.Sprintf("%q", args.UtteranceType))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3673,12 +3673,12 @@ func (qc *QueryClient) StaleClusterNodes(ctx context.Context, args StaleClusterN
 
 func StaleClusterNodesBuild(args StaleClusterNodesArgs) string {
 	var b strings.Builder
-	b.WriteString("staleClusterNodes({")
+	b.WriteString("query staleClusterNodes(")
 	if args.OlderThan != "" {
 		b.WriteString("olderThan: ")
 		b.WriteString(fmt.Sprintf("%q", args.OlderThan))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3696,7 +3696,7 @@ func (qc *QueryClient) StrandedCandidatePlans(ctx context.Context, args Stranded
 
 func StrandedCandidatePlansBuild(args StrandedCandidatePlansArgs) string {
 	_ = args
-	return "strandedCandidatePlans({})"
+	return "query strandedCandidatePlans()"
 }
 
 // SupersededDeployments -- Latest-per-deploymentId deployment rows whose status is terminal-not-active (superseded / failed / rolled_back) -- the deployments whose still-registered nodes are orphans. Feeds the active-topology reaper (#1874). asOf latest -> current status per deployment.
@@ -3713,7 +3713,7 @@ func (qc *QueryClient) SupersededDeployments(ctx context.Context, args Supersede
 
 func SupersededDeploymentsBuild(args SupersededDeploymentsArgs) string {
 	_ = args
-	return "supersededDeployments({})"
+	return "query supersededDeployments()"
 }
 
 // SurfacesForOwner -- List the calling owner's active v1:actions:surface registry entries for the capability->surface resolver (Phase 2 #1737). Owned tier.
@@ -3730,7 +3730,7 @@ func (qc *QueryClient) SurfacesForOwner(ctx context.Context, args SurfacesForOwn
 
 func SurfacesForOwnerBuild(args SurfacesForOwnerArgs) string {
 	_ = args
-	return "surfacesForOwner({})"
+	return "query surfacesForOwner()"
 }
 
 // SystemActiveAuthoringBundles -- ADMIN/SYSTEM: every active authoring bundle across ALL owners (NOT owner-scoped). Cluster-owner gated. Backs the boot-time authored-runtime re-arm (#1039) that re-registers active bundles' automations after a restart.
@@ -3747,7 +3747,7 @@ func (qc *QueryClient) SystemActiveAuthoringBundles(ctx context.Context, args Sy
 
 func SystemActiveAuthoringBundlesBuild(args SystemActiveAuthoringBundlesArgs) string {
 	_ = args
-	return "systemActiveAuthoringBundles({})"
+	return "query systemActiveAuthoringBundles()"
 }
 
 // TaskStateById -- Latest persisted state for a Task (planner reads this on resume).
@@ -3765,10 +3765,10 @@ func (qc *QueryClient) TaskStateById(ctx context.Context, args TaskStateByIdArgs
 
 func TaskStateByIdBuild(args TaskStateByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("taskStateById({")
+	b.WriteString("query taskStateById(")
 	b.WriteString("taskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TaskId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3787,10 +3787,10 @@ func (qc *QueryClient) TasksForPlan(ctx context.Context, args TasksForPlanArgs) 
 
 func TasksForPlanBuild(args TasksForPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("tasksForPlan({")
+	b.WriteString("query tasksForPlan(")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3809,10 +3809,10 @@ func (qc *QueryClient) TodoById(ctx context.Context, args TodoByIdArgs) (*Result
 
 func TodoByIdBuild(args TodoByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("todoById({")
+	b.WriteString("query todoById(")
 	b.WriteString("todoId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TodoId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3832,12 +3832,12 @@ func (qc *QueryClient) Todos(ctx context.Context, args TodosArgs) (*Result, erro
 
 func TodosBuild(args TodosArgs) string {
 	var b strings.Builder
-	b.WriteString("todos({")
+	b.WriteString("query todos(")
 	if args.DoneSet {
 		b.WriteString("done: ")
 		b.WriteString(fmt.Sprintf("%v", args.Done))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3859,15 +3859,15 @@ func (qc *QueryClient) UpcomingEvents(ctx context.Context, args UpcomingEventsAr
 
 func UpcomingEventsBuild(args UpcomingEventsArgs) string {
 	var b strings.Builder
-	b.WriteString("upcomingEvents({")
+	b.WriteString("query upcomingEvents(")
 	b.WriteString("windowStart: ")
 	b.WriteString(fmt.Sprintf("%q", args.WindowStart))
-	if b.Len() > 16 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("windowEnd: ")
 	b.WriteString(fmt.Sprintf("%q", args.WindowEnd))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3887,19 +3887,19 @@ func (qc *QueryClient) UsableRecords(ctx context.Context, args UsableRecordsArgs
 
 func UsableRecordsBuild(args UsableRecordsArgs) string {
 	var b strings.Builder
-	b.WriteString("usableRecords({")
+	b.WriteString("query usableRecords(")
 	if args.PartitionId != "" {
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.RecordType != "" {
-		if b.Len() > 15 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recordType: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecordType))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3918,10 +3918,10 @@ func (qc *QueryClient) UserActiveSpace(ctx context.Context, args UserActiveSpace
 
 func UserActiveSpaceBuild(args UserActiveSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("userActiveSpace({")
+	b.WriteString("query userActiveSpace(")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3940,10 +3940,10 @@ func (qc *QueryClient) UserByEmail(ctx context.Context, args UserByEmailArgs) (*
 
 func UserByEmailBuild(args UserByEmailArgs) string {
 	var b strings.Builder
-	b.WriteString("userByEmail({")
+	b.WriteString("query userByEmail(")
 	b.WriteString("primaryEmail: ")
 	b.WriteString(fmt.Sprintf("%q", args.PrimaryEmail))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3962,10 +3962,10 @@ func (qc *QueryClient) UserById(ctx context.Context, args UserByIdArgs) (*Result
 
 func UserByIdBuild(args UserByIdArgs) string {
 	var b strings.Builder
-	b.WriteString("userById({")
+	b.WriteString("query userById(")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3983,7 +3983,7 @@ func (qc *QueryClient) UserCount(ctx context.Context, args UserCountArgs) (*Resu
 
 func UserCountBuild(args UserCountArgs) string {
 	_ = args
-	return "userCount({})"
+	return "query userCount()"
 }
 
 // UserDefaults -- Returns default configuration variables for user provisioning. Used by bootstrapUser automation.
@@ -4000,7 +4000,7 @@ func (qc *QueryClient) UserDefaults(ctx context.Context, args UserDefaultsArgs) 
 
 func UserDefaultsBuild(args UserDefaultsArgs) string {
 	_ = args
-	return "userDefaults({})"
+	return "query userDefaults()"
 }
 
 // UsersActiveInSpace -- Returns users whose activePartitionId == arg(partitionId). Active-human roster per the activity model (Phase 4).
@@ -4018,10 +4018,10 @@ func (qc *QueryClient) UsersActiveInSpace(ctx context.Context, args UsersActiveI
 
 func UsersActiveInSpaceBuild(args UsersActiveInSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("usersActiveInSpace({")
+	b.WriteString("query usersActiveInSpace(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4039,7 +4039,7 @@ func (qc *QueryClient) UsersInDeletionCooldown(ctx context.Context, args UsersIn
 
 func UsersInDeletionCooldownBuild(args UsersInDeletionCooldownArgs) string {
 	_ = args
-	return "usersInDeletionCooldown({})"
+	return "query usersInDeletionCooldown()"
 }
 
 // UsersScheduledForDeletion -- Active users whose deletionScheduledAt is set; cooldown enforcement happens in the automation per-row.
@@ -4056,7 +4056,7 @@ func (qc *QueryClient) UsersScheduledForDeletion(ctx context.Context, args Users
 
 func UsersScheduledForDeletionBuild(args UsersScheduledForDeletionArgs) string {
 	_ = args
-	return "usersScheduledForDeletion({})"
+	return "query usersScheduledForDeletion()"
 }
 
 // ValidationLog -- Returns validation state change history. Optional filters: recordId, partitionId, action
@@ -4076,26 +4076,26 @@ func (qc *QueryClient) ValidationLog(ctx context.Context, args ValidationLogArgs
 
 func ValidationLogBuild(args ValidationLogArgs) string {
 	var b strings.Builder
-	b.WriteString("validationLog({")
+	b.WriteString("query validationLog(")
 	if args.RecordId != "" {
 		b.WriteString("recordId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecordId))
 	}
 	if args.PartitionId != "" {
-		if b.Len() > 15 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.Action != "" {
-		if b.Len() > 15 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("action: ")
 		b.WriteString(fmt.Sprintf("%q", args.Action))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4113,7 +4113,7 @@ func (qc *QueryClient) ValidationQueue(ctx context.Context, args ValidationQueue
 
 func ValidationQueueBuild(args ValidationQueueArgs) string {
 	_ = args
-	return "validationQueue({})"
+	return "query validationQueue()"
 }
 
 // VideoOverridesForSpace -- Active video overrides for every agent in a space. Read by the voice-agent process at session start.
@@ -4131,10 +4131,10 @@ func (qc *QueryClient) VideoOverridesForSpace(ctx context.Context, args VideoOve
 
 func VideoOverridesForSpaceBuild(args VideoOverridesForSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("videoOverridesForSpace({")
+	b.WriteString("query videoOverridesForSpace(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4152,7 +4152,7 @@ func (qc *QueryClient) WaitingPlansForUser(ctx context.Context, args WaitingPlan
 
 func WaitingPlansForUserBuild(args WaitingPlansForUserArgs) string {
 	_ = args
-	return "waitingPlansForUser({})"
+	return "query waitingPlansForUser()"
 }
 
 // WorkerByIdentityId -- Look up the worker registration owned by an identity row.
@@ -4170,10 +4170,10 @@ func (qc *QueryClient) WorkerByIdentityId(ctx context.Context, args WorkerByIden
 
 func WorkerByIdentityIdBuild(args WorkerByIdentityIdArgs) string {
 	var b strings.Builder
-	b.WriteString("workerByIdentityId({")
+	b.WriteString("query workerByIdentityId(")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4192,10 +4192,10 @@ func (qc *QueryClient) WorkerPairingCodeByHash(ctx context.Context, args WorkerP
 
 func WorkerPairingCodeByHashBuild(args WorkerPairingCodeByHashArgs) string {
 	var b strings.Builder
-	b.WriteString("workerPairingCodeByHash({")
+	b.WriteString("query workerPairingCodeByHash(")
 	b.WriteString("codeHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.CodeHash))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4214,10 +4214,10 @@ func (qc *QueryClient) WorkerTokenByKeyHash(ctx context.Context, args WorkerToke
 
 func WorkerTokenByKeyHashBuild(args WorkerTokenByKeyHashArgs) string {
 	var b strings.Builder
-	b.WriteString("workerTokenByKeyHash({")
+	b.WriteString("query workerTokenByKeyHash(")
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4236,10 +4236,10 @@ func (qc *QueryClient) WorkerTokensForUser(ctx context.Context, args WorkerToken
 
 func WorkerTokensForUserBuild(args WorkerTokensForUserArgs) string {
 	var b strings.Builder
-	b.WriteString("workerTokensForUser({")
+	b.WriteString("query workerTokensForUser(")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4258,10 +4258,10 @@ func (qc *QueryClient) WorkersForUser(ctx context.Context, args WorkersForUserAr
 
 func WorkersForUserBuild(args WorkersForUserArgs) string {
 	var b strings.Builder
-	b.WriteString("workersForUser({")
+	b.WriteString("query workersForUser(")
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4280,9 +4280,9 @@ func (qc *QueryClient) WorkspaceForPlan(ctx context.Context, args WorkspaceForPl
 
 func WorkspaceForPlanBuild(args WorkspaceForPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("workspaceForPlan({")
+	b.WriteString("query workspaceForPlan(")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }

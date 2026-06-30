@@ -119,7 +119,7 @@ func TestEmitTSMethods_QueryWithArgs(t *testing.T) {
 		`parts.push("ownerId: " + renderMemQLValue(args.ownerId));`,
 		`if (args.limit !== undefined) parts.push("limit: " + renderMemQLValue(args.limit));`,
 		`if (args.includeArchived !== undefined) parts.push("includeArchived: " + renderMemQLValue(args.includeArchived));`,
-		`return "queryActiveSpaces({" + parts.join(", ") + "})";`,
+		`return "query queryActiveSpaces(" + parts.join(", ") + ")";`,
 		`declare module "./query.js" {`,
 		`queryActiveSpaces(args: QueryActiveSpacesArgs, opts?: QueryCallOptions): Promise<Result>;`,
 		`QueryClient.prototype.queryActiveSpaces = function`,
@@ -148,7 +148,7 @@ func TestEmitTSMethods_NoArgs(t *testing.T) {
 	wants := []string{
 		`export interface ActiveAgentRolesArgs {`,
 		`void args;`,
-		`return "activeAgentRoles({})";`,
+		`return "query activeAgentRoles()";`,
 		`activeAgentRoles(args?: ActiveAgentRolesArgs, opts?: QueryCallOptions): Promise<Result>;`,
 	}
 	for _, w := range wants {
@@ -375,7 +375,7 @@ logic logicProvisionBoard {
     event  object  @required
   }
   body {
-    return provisionBoard({ id: args.event.payload.id })
+    return builtin provisionBoard(id: args.event.payload.id)
   }
 }
 `)
@@ -526,11 +526,11 @@ query board queryCopresentBoard {
 // TestEmitGoMethods_SeparatorGuardUsesRealPrefixLength pins the
 // memql#1319 fix: the generated "did we already write a field"
 // separator guard must compare b.Len() against the length of the REAL
-// `<fnName>({` prefix, not a constant computed from a placeholder
+// `<kind> <fnName>(` prefix, not a constant computed from a placeholder
 // string. Pre-fix every builder emitted `if b.Len() > 17`, which is
 // always true for any function name longer than 15 chars -- so a call
 // omitting a LEADING optional field emitted a dangling comma right
-// after `({` and the engine rejected it with a parse error.
+// after the prefix and the engine rejected it with a parse error.
 func TestEmitGoMethods_SeparatorGuardUsesRealPrefixLength(t *testing.T) {
 	c := Construct{
 		Kind:    "mutation",
@@ -545,7 +545,7 @@ func TestEmitGoMethods_SeparatorGuardUsesRealPrefixLength(t *testing.T) {
 
 	out := string(emitMethods([]Construct{c}, "Mutation"))
 
-	wantGuard := fmt.Sprintf("if b.Len() > %d {", len("updateParticipantPresence({"))
+	wantGuard := fmt.Sprintf("if b.Len() > %d {", len("mutation updateParticipantPresence("))
 	if !strings.Contains(out, wantGuard) {
 		t.Errorf("emitted builder missing real-prefix-length guard %q\n--- output ---\n%s", wantGuard, out)
 	}

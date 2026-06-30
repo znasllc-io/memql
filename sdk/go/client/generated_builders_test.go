@@ -20,9 +20,13 @@ func mustParseCall(t *testing.T, call string) {
 // TestGeneratedBuilder_OmittedLeadingOptionalHasNoDanglingComma pins
 // memql#1319 against the REAL generated builder: omitting the leading
 // optional arg (PresenceId) of a long-named mutation must not emit a
-// dangling comma after `({`. Pre-fix the separator guard was the
-// hardcoded `b.Len() > 17`, always true for this 33-char function
-// name, producing `updateParticipantPresence({, ...})`.
+// dangling comma after the prefix `<kind> name(`. Pre-fix the separator
+// guard was the hardcoded `b.Len() > 17`, always true for this 33-char
+// function name, producing `... updateParticipantPresence(, ...)`.
+//
+// Story 9 (#2335): the builder now emits the kind-prefixed, named-args
+// invocation form `mutation updateParticipantPresence(participantId: ...)`,
+// not the legacy object-literal wrapper.
 func TestGeneratedBuilder_OmittedLeadingOptionalHasNoDanglingComma(t *testing.T) {
 	got := UpdateParticipantPresenceBuild(UpdateParticipantPresenceArgs{
 		// PresenceId intentionally omitted -- the leading optional field.
@@ -32,10 +36,10 @@ func TestGeneratedBuilder_OmittedLeadingOptionalHasNoDanglingComma(t *testing.T)
 		Label:         "probe",
 	})
 
-	if strings.Contains(got, "({,") {
+	if strings.Contains(got, "(,") {
 		t.Fatalf("dangling comma after prefix (memql#1319 regression): %s", got)
 	}
-	wantPrefix := `updateParticipantPresence({participantId: `
+	wantPrefix := `mutation updateParticipantPresence(participantId: `
 	if !strings.HasPrefix(got, wantPrefix) {
 		t.Fatalf("call = %q, want prefix %q", got, wantPrefix)
 	}
@@ -60,7 +64,7 @@ func TestGeneratedBuilder_NilObjectArgsAreOmitted(t *testing.T) {
 			t.Errorf("nil optional object %q must be omitted, got: %s", absent, got)
 		}
 	}
-	if strings.Contains(got, "({,") || strings.Contains(got, ", }") {
+	if strings.Contains(got, "(,") || strings.Contains(got, ", )") {
 		t.Fatalf("malformed separators: %s", got)
 	}
 	mustParseCall(t, got)

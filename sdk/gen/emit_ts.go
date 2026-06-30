@@ -76,16 +76,21 @@ func emitTSConstruct(buf *bytes.Buffer, c Construct, kindLabel, augModule string
 	fmt.Fprintf(buf, "}\n\n")
 
 	// Builder function -- composes the DSL call string from typed args.
+	//
+	// Story 9 (#2335): emits the kind-prefixed, named-args invocation form
+	// `<kind> name(arg: value, ...)` (empty = `<kind> name()`), NOT the legacy
+	// object-literal wrapper. Mirrors emit_go.go; the parser rejects the wrapper.
+	kind := strings.ToLower(kindLabel)
 	fmt.Fprintf(buf, "export function %s(args: %s): string {\n", builderName, argsTypeName)
 	if len(c.Args) == 0 {
 		fmt.Fprintf(buf, "  void args;\n")
-		fmt.Fprintf(buf, "  return %q;\n", c.Name+"({})")
+		fmt.Fprintf(buf, "  return %q;\n", kind+" "+c.Name+"()")
 	} else {
 		fmt.Fprintf(buf, "  const parts: string[] = [];\n")
 		for _, a := range c.Args {
 			emitTSArgComposer(buf, a)
 		}
-		fmt.Fprintf(buf, "  return %q + parts.join(\", \") + \"})\";\n", c.Name+"({")
+		fmt.Fprintf(buf, "  return %q + parts.join(\", \") + \")\";\n", kind+" "+c.Name+"(")
 	}
 	fmt.Fprintf(buf, "}\n\n")
 

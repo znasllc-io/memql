@@ -29,10 +29,10 @@ func (qc *QueryClient) ActivateAuthoringBundle(ctx context.Context, args Activat
 
 func ActivateAuthoringBundleBuild(args ActivateAuthoringBundleArgs) string {
 	var b strings.Builder
-	b.WriteString("activateAuthoringBundle({")
+	b.WriteString("mutation activateAuthoringBundle(")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -54,27 +54,27 @@ func (qc *QueryClient) AddAgentToSpace(ctx context.Context, args AddAgentToSpace
 
 func AddAgentToSpaceBuild(args AddAgentToSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("addAgentToSpace({")
+	b.WriteString("mutation addAgentToSpace(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
 	if args.CapabilityOverrides != nil {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capabilityOverrides: ")
 		b.WriteString(renderMemQLValue(args.CapabilityOverrides))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -98,41 +98,41 @@ func (qc *QueryClient) AddHarnessStep(ctx context.Context, args AddHarnessStepAr
 
 func AddHarnessStepBuild(args AddHarnessStepArgs) string {
 	var b strings.Builder
-	b.WriteString("addHarnessStep({")
+	b.WriteString("mutation addHarnessStep(")
 	if args.StepId != "" {
 		b.WriteString("stepId: ")
 		b.WriteString(fmt.Sprintf("%q", args.StepId))
 	}
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("idempotencyKey: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdempotencyKey))
 	if args.DependsOn != nil {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("dependsOn: ")
 		b.WriteString(renderMemQLValue(args.DependsOn))
 	}
 	if args.Input != nil {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("input: ")
 		b.WriteString(renderMemQLValue(args.Input))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -153,24 +153,24 @@ func (qc *QueryClient) AdvanceHarnessConsolidationCursor(ctx context.Context, ar
 
 func AdvanceHarnessConsolidationCursorBuild(args AdvanceHarnessConsolidationCursorArgs) string {
 	var b strings.Builder
-	b.WriteString("advanceHarnessConsolidationCursor({")
+	b.WriteString("mutation advanceHarnessConsolidationCursor(")
 	if args.CursorId != "" {
 		b.WriteString("cursorId: ")
 		b.WriteString(fmt.Sprintf("%q", args.CursorId))
 	}
-	if b.Len() > 35 {
+	if b.Len() > 43 {
 		b.WriteString(", ")
 	}
 	b.WriteString("watermark: ")
 	b.WriteString(fmt.Sprintf("%q", args.Watermark))
 	if args.EpisodesSeen != 0 {
-		if b.Len() > 35 {
+		if b.Len() > 43 {
 			b.WriteString(", ")
 		}
 		b.WriteString("episodesSeen: ")
 		b.WriteString(fmt.Sprintf("%v", args.EpisodesSeen))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -193,36 +193,36 @@ func (qc *QueryClient) AdvanceRequest(ctx context.Context, args AdvanceRequestAr
 
 func AdvanceRequestBuild(args AdvanceRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("advanceRequest({")
+	b.WriteString("mutation advanceRequest(")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
 	if args.ValidatedByUserId != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("validatedByUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ValidatedByUserId))
 	}
 	if args.ApprovedByUserId != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("approvedByUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ApprovedByUserId))
 	}
 	if args.Resolution != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("resolution: ")
 		b.WriteString(fmt.Sprintf("%q", args.Resolution))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -253,79 +253,79 @@ func (qc *QueryClient) AppendDocumentVersion(ctx context.Context, args AppendDoc
 
 func AppendDocumentVersionBuild(args AppendDocumentVersionArgs) string {
 	var b strings.Builder
-	b.WriteString("appendDocumentVersion({")
+	b.WriteString("mutation appendDocumentVersion(")
 	b.WriteString("versionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.VersionId))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("documentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("versionNumber: ")
 	b.WriteString(fmt.Sprintf("%v", args.VersionNumber))
 	if args.Content != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("content: ")
 		b.WriteString(fmt.Sprintf("%q", args.Content))
 	}
 	if args.AttachmentId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attachmentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
 	}
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("authorKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.AuthorKind))
 	if args.AuthorId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authorId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AuthorId))
 	}
 	if args.Note != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
 		b.WriteString(fmt.Sprintf("%q", args.Note))
 	}
 	if args.ParentVersionId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("parentVersionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParentVersionId))
 	}
 	if args.ProducedByPlanId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
 	}
 	if args.PartitionId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -358,80 +358,80 @@ func (qc *QueryClient) ApplyResponsibilityIntake(ctx context.Context, args Apply
 
 func ApplyResponsibilityIntakeBuild(args ApplyResponsibilityIntakeArgs) string {
 	var b strings.Builder
-	b.WriteString("applyResponsibilityIntake({")
+	b.WriteString("mutation applyResponsibilityIntake(")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
 	if args.Trigger != "" {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("trigger: ")
 		b.WriteString(fmt.Sprintf("%q", args.Trigger))
 	}
 	if args.Schedule != "" {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("schedule: ")
 		b.WriteString(fmt.Sprintf("%q", args.Schedule))
 	}
 	if args.Condition != nil {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("condition: ")
 		b.WriteString(renderMemQLValue(args.Condition))
 	}
 	if args.TargetKind != "" {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
 	}
 	if args.AssignedRoleSlug != "" {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
 	}
 	if args.SuccessCriteria != "" {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("successCriteria: ")
 		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
 	}
 	if args.NotifyHow != "" {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notifyHow: ")
 		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
 	}
 	if args.Status != "" {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
 	if args.IntakeStatus != "" {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("intakeStatus: ")
 		b.WriteString(fmt.Sprintf("%q", args.IntakeStatus))
 	}
 	if args.IntakeRequest != nil {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("intakeRequest: ")
 		b.WriteString(renderMemQLValue(args.IntakeRequest))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -453,27 +453,27 @@ func (qc *QueryClient) ApproveAccessRequest(ctx context.Context, args ApproveAcc
 
 func ApproveAccessRequestBuild(args ApproveAccessRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("approveAccessRequest({")
+	b.WriteString("mutation approveAccessRequest(")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reviewedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.ReviewedBy))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("invitationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.InvitationId))
 	if args.ReviewerNote != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reviewerNote: ")
 		b.WriteString(fmt.Sprintf("%q", args.ReviewerNote))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -492,10 +492,10 @@ func (qc *QueryClient) ApproveRequest(ctx context.Context, args ApproveRequestAr
 
 func ApproveRequestBuild(args ApproveRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("approveRequest({")
+	b.WriteString("mutation approveRequest(")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -518,29 +518,29 @@ func (qc *QueryClient) AssignResponsibility(ctx context.Context, args AssignResp
 
 func AssignResponsibilityBuild(args AssignResponsibilityArgs) string {
 	var b strings.Builder
-	b.WriteString("assignResponsibility({")
+	b.WriteString("mutation assignResponsibility(")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetKind))
 	if args.AssignedAgentId != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedAgentId))
 	}
 	if args.AssignedRoleSlug != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -560,15 +560,15 @@ func (qc *QueryClient) AttachPlanFeedback(ctx context.Context, args AttachPlanFe
 
 func AttachPlanFeedbackBuild(args AttachPlanFeedbackArgs) string {
 	var b strings.Builder
-	b.WriteString("attachPlanFeedback({")
+	b.WriteString("mutation attachPlanFeedback(")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("feedback: ")
 	b.WriteString(fmt.Sprintf("%q", args.Feedback))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -588,15 +588,15 @@ func (qc *QueryClient) AttachToRequest(ctx context.Context, args AttachToRequest
 
 func AttachToRequestBuild(args AttachToRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("attachToRequest({")
+	b.WriteString("mutation attachToRequest(")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("attachmentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -616,15 +616,15 @@ func (qc *QueryClient) BumpActionVersion(ctx context.Context, args BumpActionVer
 
 func BumpActionVersionBuild(args BumpActionVersionArgs) string {
 	var b strings.Builder
-	b.WriteString("bumpActionVersion({")
+	b.WriteString("mutation bumpActionVersion(")
 	b.WriteString("actionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ActionId))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("version: ")
 	b.WriteString(fmt.Sprintf("%v", args.Version))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -645,20 +645,20 @@ func (qc *QueryClient) BumpMissingCapabilitySighting(ctx context.Context, args B
 
 func BumpMissingCapabilitySightingBuild(args BumpMissingCapabilitySightingArgs) string {
 	var b strings.Builder
-	b.WriteString("bumpMissingCapabilitySighting({")
+	b.WriteString("mutation bumpMissingCapabilitySighting(")
 	b.WriteString("missingId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MissingId))
-	if b.Len() > 31 {
+	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("sightingCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.SightingCount))
-	if b.Len() > 31 {
+	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastSeenAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.LastSeenAt))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -678,15 +678,15 @@ func (qc *QueryClient) BumpPATLastUsedAt(ctx context.Context, args BumpPATLastUs
 
 func BumpPATLastUsedAtBuild(args BumpPATLastUsedAtArgs) string {
 	var b strings.Builder
-	b.WriteString("bumpPATLastUsedAt({")
+	b.WriteString("mutation bumpPATLastUsedAt(")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastUsedAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.LastUsedAt))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -705,10 +705,10 @@ func (qc *QueryClient) BumpUserDataExport(ctx context.Context, args BumpUserData
 
 func BumpUserDataExportBuild(args BumpUserDataExportArgs) string {
 	var b strings.Builder
-	b.WriteString("bumpUserDataExport({")
+	b.WriteString("mutation bumpUserDataExport(")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -728,15 +728,15 @@ func (qc *QueryClient) BumpUserRevocationEpoch(ctx context.Context, args BumpUse
 
 func BumpUserRevocationEpochBuild(args BumpUserRevocationEpochArgs) string {
 	var b strings.Builder
-	b.WriteString("bumpUserRevocationEpoch({")
+	b.WriteString("mutation bumpUserRevocationEpoch(")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newEpoch: ")
 	b.WriteString(fmt.Sprintf("%v", args.NewEpoch))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -755,10 +755,10 @@ func (qc *QueryClient) CancelScheduledDeletion(ctx context.Context, args CancelS
 
 func CancelScheduledDeletionBuild(args CancelScheduledDeletionArgs) string {
 	var b strings.Builder
-	b.WriteString("cancelScheduledDeletion({")
+	b.WriteString("mutation cancelScheduledDeletion(")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -780,25 +780,25 @@ func (qc *QueryClient) CatalogueConstruct(ctx context.Context, args CatalogueCon
 
 func CatalogueConstructBuild(args CatalogueConstructArgs) string {
 	var b strings.Builder
-	b.WriteString("catalogueConstruct({")
+	b.WriteString("mutation catalogueConstruct(")
 	b.WriteString("constructId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("catalogKey: ")
 	b.WriteString(fmt.Sprintf("%q", args.CatalogKey))
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("catalogMatchText: ")
 	b.WriteString(fmt.Sprintf("%q", args.CatalogMatchText))
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fromBundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.FromBundleId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -820,25 +820,25 @@ func (qc *QueryClient) CheckRecord(ctx context.Context, args CheckRecordArgs) (*
 
 func CheckRecordBuild(args CheckRecordArgs) string {
 	var b strings.Builder
-	b.WriteString("checkRecord({")
+	b.WriteString("mutation checkRecord(")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	if b.Len() > 13 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 13 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newCheckCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.NewCheckCount))
-	if b.Len() > 13 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newState: ")
 	b.WriteString(fmt.Sprintf("%q", args.NewState))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -861,25 +861,25 @@ func (qc *QueryClient) CloseCall(ctx context.Context, args CloseCallArgs) (*Resu
 
 func CloseCallBuild(args CloseCallArgs) string {
 	var b strings.Builder
-	b.WriteString("closeCall({")
+	b.WriteString("mutation closeCall(")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 11 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("durationSeconds: ")
 	b.WriteString(fmt.Sprintf("%v", args.DurationSeconds))
-	if b.Len() > 11 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("disposition: ")
 	b.WriteString(fmt.Sprintf("%q", args.Disposition))
-	if b.Len() > 11 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("costEstimate: ")
 	b.WriteString(fmt.Sprintf("%q", args.CostEstimate))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -899,17 +899,17 @@ func (qc *QueryClient) CompleteHarnessStep(ctx context.Context, args CompleteHar
 
 func CompleteHarnessStepBuild(args CompleteHarnessStepArgs) string {
 	var b strings.Builder
-	b.WriteString("completeHarnessStep({")
+	b.WriteString("mutation completeHarnessStep(")
 	b.WriteString("stepId: ")
 	b.WriteString(fmt.Sprintf("%q", args.StepId))
 	if args.Result != nil {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("result: ")
 		b.WriteString(renderMemQLValue(args.Result))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -929,15 +929,15 @@ func (qc *QueryClient) CompleteTodo(ctx context.Context, args CompleteTodoArgs) 
 
 func CompleteTodoBuild(args CompleteTodoArgs) string {
 	var b strings.Builder
-	b.WriteString("completeTodo({")
+	b.WriteString("mutation completeTodo(")
 	b.WriteString("todoId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TodoId))
-	if b.Len() > 14 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -960,36 +960,36 @@ func (qc *QueryClient) CompleteToolInvocation(ctx context.Context, args Complete
 
 func CompleteToolInvocationBuild(args CompleteToolInvocationArgs) string {
 	var b strings.Builder
-	b.WriteString("completeToolInvocation({")
+	b.WriteString("mutation completeToolInvocation(")
 	b.WriteString("taskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TaskId))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
 	if args.ToolResult != nil {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("toolResult: ")
 		b.WriteString(renderMemQLValue(args.ToolResult))
 	}
 	if args.ErrorMessage != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
 	if args.CompletedAt != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("completedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.CompletedAt))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1008,10 +1008,10 @@ func (qc *QueryClient) ConfirmAction(ctx context.Context, args ConfirmActionArgs
 
 func ConfirmActionBuild(args ConfirmActionArgs) string {
 	var b strings.Builder
-	b.WriteString("confirmAction({")
+	b.WriteString("mutation confirmAction(")
 	b.WriteString("actionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ActionId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1033,25 +1033,25 @@ func (qc *QueryClient) ConfirmRecord(ctx context.Context, args ConfirmRecordArgs
 
 func ConfirmRecordBuild(args ConfirmRecordArgs) string {
 	var b strings.Builder
-	b.WriteString("confirmRecord({")
+	b.WriteString("mutation confirmRecord(")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	if b.Len() > 15 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 15 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newConfirmCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.NewConfirmCount))
-	if b.Len() > 15 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newState: ")
 	b.WriteString(fmt.Sprintf("%q", args.NewState))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1071,17 +1071,17 @@ func (qc *QueryClient) ConsumeAuthCode(ctx context.Context, args ConsumeAuthCode
 
 func ConsumeAuthCodeBuild(args ConsumeAuthCodeArgs) string {
 	var b strings.Builder
-	b.WriteString("consumeAuthCode({")
+	b.WriteString("mutation consumeAuthCode(")
 	b.WriteString("codeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.CodeId))
 	if args.ConsumedFromIP != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("consumedFromIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.ConsumedFromIP))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1101,17 +1101,17 @@ func (qc *QueryClient) ConsumeMagicLinkRequest(ctx context.Context, args Consume
 
 func ConsumeMagicLinkRequestBuild(args ConsumeMagicLinkRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("consumeMagicLinkRequest({")
+	b.WriteString("mutation consumeMagicLinkRequest(")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
 	if args.ConsumedFromIP != "" {
-		if b.Len() > 25 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("consumedFromIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.ConsumedFromIP))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1137,57 +1137,57 @@ func (qc *QueryClient) CreateAccessRequest(ctx context.Context, args CreateAcces
 
 func CreateAccessRequestBuild(args CreateAccessRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("createAccessRequest({")
+	b.WriteString("mutation createAccessRequest(")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("email: ")
 	b.WriteString(fmt.Sprintf("%q", args.Email))
 	if args.Name != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("name: ")
 		b.WriteString(fmt.Sprintf("%q", args.Name))
 	}
 	if args.AdditionalContext != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("additionalContext: ")
 		b.WriteString(fmt.Sprintf("%q", args.AdditionalContext))
 	}
 	if args.RiskScore != 0 {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("riskScore: ")
 		b.WriteString(fmt.Sprintf("%v", args.RiskScore))
 	}
 	if args.RiskSignals != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("riskSignals: ")
 		b.WriteString(fmt.Sprintf("%q", args.RiskSignals))
 	}
 	if args.SourceIP != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceIP))
 	}
 	if args.UserAgent != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userAgent: ")
 		b.WriteString(fmt.Sprintf("%q", args.UserAgent))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1210,30 +1210,30 @@ func (qc *QueryClient) CreateAdHocPlan(ctx context.Context, args CreateAdHocPlan
 
 func CreateAdHocPlanBuild(args CreateAdHocPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("createAdHocPlan({")
+	b.WriteString("mutation createAdHocPlan(")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("goal: ")
 	b.WriteString(fmt.Sprintf("%q", args.Goal))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1272,136 +1272,136 @@ func (qc *QueryClient) CreateAgent(ctx context.Context, args CreateAgentArgs) (*
 
 func CreateAgentBuild(args CreateAgentArgs) string {
 	var b strings.Builder
-	b.WriteString("createAgent({")
+	b.WriteString("mutation createAgent(")
 	if args.AgentId != "" {
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.OwnerUserId != "" {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	}
-	if b.Len() > 13 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Description != "" {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.Personality != "" {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("personality: ")
 		b.WriteString(fmt.Sprintf("%q", args.Personality))
 	}
 	if args.Role != "" {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("role: ")
 		b.WriteString(fmt.Sprintf("%q", args.Role))
 	}
 	if args.RoleSlug != "" {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("roleSlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.RoleSlug))
 	}
 	if args.Kind != "" {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("kind: ")
 		b.WriteString(fmt.Sprintf("%q", args.Kind))
 	}
 	if args.Gender != "" {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("gender: ")
 		b.WriteString(fmt.Sprintf("%q", args.Gender))
 	}
 	if args.AudioControl != "" {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("audioControl: ")
 		b.WriteString(fmt.Sprintf("%q", args.AudioControl))
 	}
 	if args.VideoControl != "" {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("videoControl: ")
 		b.WriteString(fmt.Sprintf("%q", args.VideoControl))
 	}
 	if args.AvatarPersonaId != "" {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("avatarPersonaId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AvatarPersonaId))
 	}
 	if args.AvatarVendor != "" {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("avatarVendor: ")
 		b.WriteString(fmt.Sprintf("%q", args.AvatarVendor))
 	}
 	if args.Capabilities != nil {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capabilities: ")
 		b.WriteString(renderMemQLValue(args.Capabilities))
 	}
 	if args.Avatar != nil {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("avatar: ")
 		b.WriteString(renderMemQLValue(args.Avatar))
 	}
 	if args.ProviderConfig != nil {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("providerConfig: ")
 		b.WriteString(renderMemQLValue(args.ProviderConfig))
 	}
 	if args.TriggerBehavior != nil {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("triggerBehavior: ")
 		b.WriteString(renderMemQLValue(args.TriggerBehavior))
 	}
 	if args.ActiveSet {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
 	if args.DeletedSet {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("deleted: ")
 		b.WriteString(fmt.Sprintf("%v", args.Deleted))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1427,53 +1427,53 @@ func (qc *QueryClient) CreateAgentAuthorization(ctx context.Context, args Create
 
 func CreateAgentAuthorizationBuild(args CreateAgentAuthorizationArgs) string {
 	var b strings.Builder
-	b.WriteString("createAgentAuthorization({")
+	b.WriteString("mutation createAgentAuthorization(")
 	if args.AuthId != "" {
 		b.WriteString("authId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AuthId))
 	}
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanKind))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceScope: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceScope))
 	if args.TokenBudgetCap != 0 {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenBudgetCap: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenBudgetCap))
 	}
 	if args.ExpiresAt != "" {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	}
 	if args.ComputerUseScope != "" {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("computerUseScope: ")
 		b.WriteString(fmt.Sprintf("%q", args.ComputerUseScope))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1509,113 +1509,113 @@ func (qc *QueryClient) CreateAgentRole(ctx context.Context, args CreateAgentRole
 
 func CreateAgentRoleBuild(args CreateAgentRoleArgs) string {
 	var b strings.Builder
-	b.WriteString("createAgentRole({")
+	b.WriteString("mutation createAgentRole(")
 	if args.AgentRoleId != "" {
 		b.WriteString("agentRoleId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentRoleId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Description != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.Category != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("category: ")
 		b.WriteString(fmt.Sprintf("%q", args.Category))
 	}
 	if args.Tier != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tier: ")
 		b.WriteString(fmt.Sprintf("%q", args.Tier))
 	}
 	if args.LockedSkillIds != nil {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lockedSkillIds: ")
 		b.WriteString(renderMemQLValue(args.LockedSkillIds))
 	}
 	if args.DefaultSkillIds != nil {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("defaultSkillIds: ")
 		b.WriteString(renderMemQLValue(args.DefaultSkillIds))
 	}
 	if args.AvailableSkillIds != nil {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("availableSkillIds: ")
 		b.WriteString(renderMemQLValue(args.AvailableSkillIds))
 	}
 	if args.ForbiddenSkillIds != nil {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("forbiddenSkillIds: ")
 		b.WriteString(renderMemQLValue(args.ForbiddenSkillIds))
 	}
 	if args.MaxSkills != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("maxSkills: ")
 		b.WriteString(fmt.Sprintf("%v", args.MaxSkills))
 	}
 	if args.RecommendedPolicySlug != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recommendedPolicySlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecommendedPolicySlug))
 	}
 	if args.RecommendedGender != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recommendedGender: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecommendedGender))
 	}
 	if args.SystemPromptHints != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("systemPromptHints: ")
 		b.WriteString(fmt.Sprintf("%q", args.SystemPromptHints))
 	}
 	if args.ActiveSet {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
 	if args.PredefinedSet {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("predefined: ")
 		b.WriteString(fmt.Sprintf("%v", args.Predefined))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1644,74 +1644,74 @@ func (qc *QueryClient) CreateApprovalRequest(ctx context.Context, args CreateApp
 
 func CreateApprovalRequestBuild(args CreateApprovalRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("createApprovalRequest({")
+	b.WriteString("mutation createApprovalRequest(")
 	b.WriteString("correlationKey: ")
 	b.WriteString(fmt.Sprintf("%q", args.CorrelationKey))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("surface: ")
 	b.WriteString(fmt.Sprintf("%q", args.Surface))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
 	b.WriteString(fmt.Sprintf("%q", args.Action))
 	if args.ArgsRedacted != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("argsRedacted: ")
 		b.WriteString(fmt.Sprintf("%q", args.ArgsRedacted))
 	}
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.Categories != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("categories: ")
 		b.WriteString(fmt.Sprintf("%q", args.Categories))
 	}
 	if args.Reason != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
 	if args.ExpiresAt != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	}
 	if args.AgentId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.OwnerUserId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	}
 	if args.PlanId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1753,112 +1753,112 @@ func (qc *QueryClient) CreateArtifact(ctx context.Context, args CreateArtifactAr
 
 func CreateArtifactBuild(args CreateArtifactArgs) string {
 	var b strings.Builder
-	b.WriteString("createArtifact({")
+	b.WriteString("mutation createArtifact(")
 	b.WriteString("sourceConceptRef: ")
 	b.WriteString(fmt.Sprintf("%q", args.SourceConceptRef))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lens: ")
 	b.WriteString(fmt.Sprintf("%q", args.Lens))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
 	if args.Summary != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
 		b.WriteString(fmt.Sprintf("%q", args.Summary))
 	}
 	if args.Format != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("format: ")
 		b.WriteString(fmt.Sprintf("%q", args.Format))
 	}
 	if args.MimeType != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mimeType: ")
 		b.WriteString(fmt.Sprintf("%q", args.MimeType))
 	}
 	if args.LiveSet {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("live: ")
 		b.WriteString(fmt.Sprintf("%v", args.Live))
 	}
 	if args.Scope != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("scope: ")
 		b.WriteString(fmt.Sprintf("%q", args.Scope))
 	}
 	if args.PartitionId != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.AgentId != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.ProducedByPlanId != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
 	}
 	if args.ProducedByWorkerId != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByWorkerId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByWorkerId))
 	}
 	if args.ProducedByWorkerName != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByWorkerName: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByWorkerName))
 	}
 	if args.ValidationStatus != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("validationStatus: ")
 		b.WriteString(fmt.Sprintf("%q", args.ValidationStatus))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -1897,123 +1897,123 @@ func (qc *QueryClient) CreateAuditEvent(ctx context.Context, args CreateAuditEve
 
 func CreateAuditEventBuild(args CreateAuditEventArgs) string {
 	var b strings.Builder
-	b.WriteString("createAuditEvent({")
+	b.WriteString("mutation createAuditEvent(")
 	b.WriteString("eventId: ")
 	b.WriteString(fmt.Sprintf("%q", args.EventId))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("occurredAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.OccurredAt))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("category: ")
 	b.WriteString(fmt.Sprintf("%q", args.Category))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
 	b.WriteString(fmt.Sprintf("%q", args.Action))
 	if args.ActorUserId != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorUserId))
 	}
 	if args.ActorEmail != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorEmail: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorEmail))
 	}
 	if args.ActorRole != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorRole: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorRole))
 	}
 	if args.ActorIdentityId != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorIdentityId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorIdentityId))
 	}
 	if args.TargetType != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetType: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetType))
 	}
 	if args.TargetId != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetId: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetId))
 	}
 	if args.TargetEmail != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetEmail: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetEmail))
 	}
 	if args.Detail != nil {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("detail: ")
 		b.WriteString(renderMemQLValue(args.Detail))
 	}
 	if args.SourceIP != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceIP))
 	}
 	if args.UserAgent != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userAgent: ")
 		b.WriteString(fmt.Sprintf("%q", args.UserAgent))
 	}
 	if args.CorrelationId != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("correlationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.CorrelationId))
 	}
 	if args.Outcome != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("outcome: ")
 		b.WriteString(fmt.Sprintf("%q", args.Outcome))
 	}
 	if args.FailureReason != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("failureReason: ")
 		b.WriteString(fmt.Sprintf("%q", args.FailureReason))
 	}
 	if args.PrevEventHash != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("prevEventHash: ")
 		b.WriteString(fmt.Sprintf("%q", args.PrevEventHash))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2043,71 +2043,71 @@ func (qc *QueryClient) CreateAuthCode(ctx context.Context, args CreateAuthCodeAr
 
 func CreateAuthCodeBuild(args CreateAuthCodeArgs) string {
 	var b strings.Builder
-	b.WriteString("createAuthCode({")
+	b.WriteString("mutation createAuthCode(")
 	b.WriteString("codeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.CodeId))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("code: ")
 	b.WriteString(fmt.Sprintf("%q", args.Code))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("codeHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.CodeHash))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("clientId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ClientId))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("redirectURI: ")
 	b.WriteString(fmt.Sprintf("%q", args.RedirectURI))
 	if args.State != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("state: ")
 		b.WriteString(fmt.Sprintf("%q", args.State))
 	}
 	if args.CodeChallenge != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("codeChallenge: ")
 		b.WriteString(fmt.Sprintf("%q", args.CodeChallenge))
 	}
 	if args.CodeChallengeMethod != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("codeChallengeMethod: ")
 		b.WriteString(fmt.Sprintf("%q", args.CodeChallengeMethod))
 	}
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("magicLinkRequestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MagicLinkRequestId))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2134,51 +2134,51 @@ func (qc *QueryClient) CreateAuthSession(ctx context.Context, args CreateAuthSes
 
 func CreateAuthSessionBuild(args CreateAuthSessionArgs) string {
 	var b strings.Builder
-	b.WriteString("createAuthSession({")
+	b.WriteString("mutation createAuthSession(")
 	b.WriteString("sessionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SessionId))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("subject: ")
 	b.WriteString(fmt.Sprintf("%q", args.Subject))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
 	if args.UserId != "" {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UserId))
 	}
 	if args.IdentityId != "" {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("identityId: ")
 		b.WriteString(fmt.Sprintf("%q", args.IdentityId))
 	}
 	if args.ClientLabel != "" {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clientLabel: ")
 		b.WriteString(fmt.Sprintf("%q", args.ClientLabel))
 	}
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2204,57 +2204,57 @@ func (qc *QueryClient) CreateAuthoringBundle(ctx context.Context, args CreateAut
 
 func CreateAuthoringBundleBuild(args CreateAuthoringBundleArgs) string {
 	var b strings.Builder
-	b.WriteString("createAuthoringBundle({")
+	b.WriteString("mutation createAuthoringBundle(")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
 	if args.Summary != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
 		b.WriteString(fmt.Sprintf("%q", args.Summary))
 	}
 	if args.ResponsibilityId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("responsibilityId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
 	}
 	if args.SourcePlanId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourcePlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourcePlanId))
 	}
 	if args.Version != 0 {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
 		b.WriteString(fmt.Sprintf("%v", args.Version))
 	}
 	if args.SupersedesBundleId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("supersedesBundleId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SupersedesBundleId))
 	}
 	if args.ReusedConstructRefs != nil {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reusedConstructRefs: ")
 		b.WriteString(renderMemQLValue(args.ReusedConstructRefs))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2279,35 +2279,35 @@ func (qc *QueryClient) CreateAuthoringConstruct(ctx context.Context, args Create
 
 func CreateAuthoringConstructBuild(args CreateAuthoringConstructArgs) string {
 	var b strings.Builder
-	b.WriteString("createAuthoringConstruct({")
+	b.WriteString("mutation createAuthoringConstruct(")
 	b.WriteString("constructId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetNamespace: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetNamespace))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2334,53 +2334,53 @@ func (qc *QueryClient) CreateAvatarPersona(ctx context.Context, args CreateAvata
 
 func CreateAvatarPersonaBuild(args CreateAvatarPersonaArgs) string {
 	var b strings.Builder
-	b.WriteString("createAvatarPersona({")
+	b.WriteString("mutation createAvatarPersona(")
 	if args.AvatarPersonaId != "" {
 		b.WriteString("avatarPersonaId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AvatarPersonaId))
 	}
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("vendor: ")
 	b.WriteString(fmt.Sprintf("%q", args.Vendor))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("personaId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PersonaId))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("gender: ")
 	b.WriteString(fmt.Sprintf("%q", args.Gender))
 	if args.ImageRef != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("imageRef: ")
 		b.WriteString(fmt.Sprintf("%q", args.ImageRef))
 	}
 	if args.PreviewRef != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("previewRef: ")
 		b.WriteString(fmt.Sprintf("%q", args.PreviewRef))
 	}
 	if args.ActiveSet {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2407,55 +2407,55 @@ func (qc *QueryClient) CreateCalendarEvent(ctx context.Context, args CreateCalen
 
 func CreateCalendarEventBuild(args CreateCalendarEventArgs) string {
 	var b strings.Builder
-	b.WriteString("createCalendarEvent({")
+	b.WriteString("mutation createCalendarEvent(")
 	if args.EventId != "" {
 		b.WriteString("eventId: ")
 		b.WriteString(fmt.Sprintf("%q", args.EventId))
 	}
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("startsAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.StartsAt))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("endsAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.EndsAt))
 	if args.AllDaySet {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("allDay: ")
 		b.WriteString(fmt.Sprintf("%v", args.AllDay))
 	}
 	if args.Location != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("location: ")
 		b.WriteString(fmt.Sprintf("%q", args.Location))
 	}
 	if args.Notes != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notes: ")
 		b.WriteString(fmt.Sprintf("%q", args.Notes))
 	}
 	if args.Recurrence != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recurrence: ")
 		b.WriteString(fmt.Sprintf("%q", args.Recurrence))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2485,55 +2485,55 @@ func (qc *QueryClient) CreateCapability(ctx context.Context, args CreateCapabili
 
 func CreateCapabilityBuild(args CreateCapabilityArgs) string {
 	var b strings.Builder
-	b.WriteString("createCapability({")
+	b.WriteString("mutation createCapability(")
 	if args.CapabilityId != "" {
 		b.WriteString("capabilityId: ")
 		b.WriteString(fmt.Sprintf("%q", args.CapabilityId))
 	}
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("roleSlug: ")
 	b.WriteString(fmt.Sprintf("%q", args.RoleSlug))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("verb: ")
 	b.WriteString(fmt.Sprintf("%q", args.Verb))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("resourceType: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResourceType))
 	if args.Effect != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("effect: ")
 		b.WriteString(fmt.Sprintf("%q", args.Effect))
 	}
 	if args.Description != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.PredefinedSet {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("predefined: ")
 		b.WriteString(fmt.Sprintf("%v", args.Predefined))
 	}
 	if args.ActiveSet {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2560,57 +2560,57 @@ func (qc *QueryClient) CreateCluster(ctx context.Context, args CreateClusterArgs
 
 func CreateClusterBuild(args CreateClusterArgs) string {
 	var b strings.Builder
-	b.WriteString("createCluster({")
+	b.WriteString("mutation createCluster(")
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Region != "" {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("region: ")
 		b.WriteString(fmt.Sprintf("%q", args.Region))
 	}
-	if b.Len() > 15 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("environment: ")
 	b.WriteString(fmt.Sprintf("%q", args.Environment))
 	if args.Status != "" {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
 	if args.DatabaseId != "" {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("databaseId: ")
 		b.WriteString(fmt.Sprintf("%q", args.DatabaseId))
 	}
 	if args.IdentityProviderId != "" {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("identityProviderId: ")
 		b.WriteString(fmt.Sprintf("%q", args.IdentityProviderId))
 	}
 	if args.Version != "" {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
 		b.WriteString(fmt.Sprintf("%q", args.Version))
 	}
 	if args.Provider != "" {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provider: ")
 		b.WriteString(fmt.Sprintf("%q", args.Provider))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2657,181 +2657,181 @@ func (qc *QueryClient) CreateClusterSettings(ctx context.Context, args CreateClu
 
 func CreateClusterSettingsBuild(args CreateClusterSettingsArgs) string {
 	var b strings.Builder
-	b.WriteString("createClusterSettings({")
+	b.WriteString("mutation createClusterSettings(")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
 	if args.ClusterDomain != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clusterDomain: ")
 		b.WriteString(fmt.Sprintf("%q", args.ClusterDomain))
 	}
 	if args.BrandName != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandName: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandName))
 	}
 	if args.BrandPrimaryColor != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandPrimaryColor: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandPrimaryColor))
 	}
 	if args.BrandLogoDataURI != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandLogoDataURI: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandLogoDataURI))
 	}
 	if args.BrandIconDataURI != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandIconDataURI: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandIconDataURI))
 	}
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registrationMode: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegistrationMode))
 	if args.RegistrationDomains != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("registrationDomains: ")
 		b.WriteString(fmt.Sprintf("%q", args.RegistrationDomains))
 	}
 	if args.InternalDomains != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("internalDomains: ")
 		b.WriteString(fmt.Sprintf("%q", args.InternalDomains))
 	}
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("internalDefaultRole: ")
 	b.WriteString(fmt.Sprintf("%q", args.InternalDefaultRole))
 	if args.RegisteredClientsJSON != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("registeredClientsJSON: ")
 		b.WriteString(fmt.Sprintf("%q", args.RegisteredClientsJSON))
 	}
 	if args.AccessRequestNotifyEmails != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accessRequestNotifyEmails: ")
 		b.WriteString(fmt.Sprintf("%q", args.AccessRequestNotifyEmails))
 	}
 	if args.BootstrapEmail != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapEmail: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapEmail))
 	}
 	if args.BootstrapFirstName != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapFirstName: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapFirstName))
 	}
 	if args.BootstrapLastName != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapLastName: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapLastName))
 	}
 	if args.BootstrapPhone != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapPhone: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapPhone))
 	}
 	if args.BootstrapPrimaryRole != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapPrimaryRole: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapPrimaryRole))
 	}
 	if args.BootstrapGender != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapGender: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapGender))
 	}
 	if args.BootstrapBirthdate != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapBirthdate: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapBirthdate))
 	}
 	if args.BootstrappedAt != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrappedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
 	}
 	if args.AccessTokenTTLSeconds != 0 {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accessTokenTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.AccessTokenTTLSeconds))
 	}
 	if args.RefreshTokenTTLSeconds != 0 {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("refreshTokenTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.RefreshTokenTTLSeconds))
 	}
 	if args.MagicLinkTTLSeconds != 0 {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("magicLinkTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.MagicLinkTTLSeconds))
 	}
 	if args.InvitationTTLDays != 0 {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("invitationTTLDays: ")
 		b.WriteString(fmt.Sprintf("%v", args.InvitationTTLDays))
 	}
 	if args.RefreshCookieSameSite != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("refreshCookieSameSite: ")
 		b.WriteString(fmt.Sprintf("%q", args.RefreshCookieSameSite))
 	}
 	if args.AuthoredAutomationsEnabledSet {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authoredAutomationsEnabled: ")
 		b.WriteString(fmt.Sprintf("%v", args.AuthoredAutomationsEnabled))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2852,22 +2852,22 @@ func (qc *QueryClient) CreateDatabase(ctx context.Context, args CreateDatabaseAr
 
 func CreateDatabaseBuild(args CreateDatabaseArgs) string {
 	var b strings.Builder
-	b.WriteString("createDatabase({")
+	b.WriteString("mutation createDatabase(")
 	b.WriteString("host: ")
 	b.WriteString(fmt.Sprintf("%q", args.Host))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("dbName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DbName))
 	if args.SslMode != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sslMode: ")
 		b.WriteString(fmt.Sprintf("%q", args.SslMode))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2897,61 +2897,61 @@ func (qc *QueryClient) CreateDelegation(ctx context.Context, args CreateDelegati
 
 func CreateDelegationBuild(args CreateDelegationArgs) string {
 	var b strings.Builder
-	b.WriteString("createDelegation({")
+	b.WriteString("mutation createDelegation(")
 	if args.DelegationId != "" {
 		b.WriteString("delegationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.DelegationId))
 	}
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identitySubject: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentitySubject))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityType: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityType))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("roleCeiling: ")
 	b.WriteString(fmt.Sprintf("%q", args.RoleCeiling))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("scopes: ")
 	b.WriteString(renderMemQLValue(args.Scopes))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("createdBySubject: ")
 	b.WriteString(fmt.Sprintf("%q", args.CreatedBySubject))
 	if args.ExpiresAt != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	}
 	if args.Note != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
 		b.WriteString(fmt.Sprintf("%q", args.Note))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -2983,87 +2983,87 @@ func (qc *QueryClient) CreateDeployment(ctx context.Context, args CreateDeployme
 
 func CreateDeploymentBuild(args CreateDeploymentArgs) string {
 	var b strings.Builder
-	b.WriteString("createDeployment({")
+	b.WriteString("mutation createDeployment(")
 	b.WriteString("deploymentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
 	if args.Status != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
 	if args.Version != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
 		b.WriteString(fmt.Sprintf("%q", args.Version))
 	}
 	if args.ImageDigest != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("imageDigest: ")
 		b.WriteString(fmt.Sprintf("%q", args.ImageDigest))
 	}
 	if args.Provider != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provider: ")
 		b.WriteString(fmt.Sprintf("%q", args.Provider))
 	}
 	if args.Environment != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("environment: ")
 		b.WriteString(fmt.Sprintf("%q", args.Environment))
 	}
 	if args.Region != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("region: ")
 		b.WriteString(fmt.Sprintf("%q", args.Region))
 	}
 	if args.ClusterId != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clusterId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ClusterId))
 	}
 	if args.TriggeredBy != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("triggeredBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.TriggeredBy))
 	}
 	if args.Notes != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notes: ")
 		b.WriteString(fmt.Sprintf("%q", args.Notes))
 	}
 	if args.Changelog != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("changelog: ")
 		b.WriteString(fmt.Sprintf("%q", args.Changelog))
 	}
 	if args.PreviousDeploymentId != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("previousDeploymentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PreviousDeploymentId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3086,36 +3086,36 @@ func (qc *QueryClient) CreateDeploymentNodeSpec(ctx context.Context, args Create
 
 func CreateDeploymentNodeSpecBuild(args CreateDeploymentNodeSpecArgs) string {
 	var b strings.Builder
-	b.WriteString("createDeploymentNodeSpec({")
+	b.WriteString("mutation createDeploymentNodeSpec(")
 	b.WriteString("deploymentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeType))
 	if args.Version != "" {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
 		b.WriteString(fmt.Sprintf("%q", args.Version))
 	}
 	if args.Replicas != 0 {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("replicas: ")
 		b.WriteString(fmt.Sprintf("%v", args.Replicas))
 	}
 	if args.ImageDigest != "" {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("imageDigest: ")
 		b.WriteString(fmt.Sprintf("%q", args.ImageDigest))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3143,67 +3143,67 @@ func (qc *QueryClient) CreateDocumentChunk(ctx context.Context, args CreateDocum
 
 func CreateDocumentChunkBuild(args CreateDocumentChunkArgs) string {
 	var b strings.Builder
-	b.WriteString("createDocumentChunk({")
+	b.WriteString("mutation createDocumentChunk(")
 	b.WriteString("chunkId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ChunkId))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
 	if args.SourceRef != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceRef: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceRef))
 	}
 	if args.Seq != 0 {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("seq: ")
 		b.WriteString(fmt.Sprintf("%v", args.Seq))
 	}
 	if args.TokenCount != 0 {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenCount: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenCount))
 	}
 	if args.SourceUtteranceId != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceUtteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceUtteranceId))
 	}
 	if args.SourceAgentId != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceAgentId))
 	}
 	if args.SourceTopic != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceTopic: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceTopic))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3237,95 +3237,95 @@ func (qc *QueryClient) CreateGeneratedOutput(ctx context.Context, args CreateGen
 
 func CreateGeneratedOutputBuild(args CreateGeneratedOutputArgs) string {
 	var b strings.Builder
-	b.WriteString("createGeneratedOutput({")
+	b.WriteString("mutation createGeneratedOutput(")
 	b.WriteString("outputId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OutputId))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
 	if args.Summary != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
 		b.WriteString(fmt.Sprintf("%q", args.Summary))
 	}
 	if args.Body != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("body: ")
 		b.WriteString(fmt.Sprintf("%q", args.Body))
 	}
 	if args.AttachmentId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attachmentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
 	}
 	if args.Format != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("format: ")
 		b.WriteString(fmt.Sprintf("%q", args.Format))
 	}
 	if args.MimeType != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mimeType: ")
 		b.WriteString(fmt.Sprintf("%q", args.MimeType))
 	}
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
 	if args.PartitionId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.ProducedByPlanId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
 	}
 	if args.ProducedByAgentId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByAgentId))
 	}
 	if args.ProducedByWorkerId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByWorkerId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByWorkerId))
 	}
 	if args.ProducedByWorkerName != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByWorkerName: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByWorkerName))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3348,30 +3348,30 @@ func (qc *QueryClient) CreateGreetingUtterance(ctx context.Context, args CreateG
 
 func CreateGreetingUtteranceBuild(args CreateGreetingUtteranceArgs) string {
 	var b strings.Builder
-	b.WriteString("createGreetingUtterance({")
+	b.WriteString("mutation createGreetingUtterance(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("greetingKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.GreetingKind))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3392,24 +3392,24 @@ func (qc *QueryClient) CreateHarnessPlan(ctx context.Context, args CreateHarness
 
 func CreateHarnessPlanBuild(args CreateHarnessPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("createHarnessPlan({")
+	b.WriteString("mutation createHarnessPlan(")
 	if args.PlanId != "" {
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("goal: ")
 	b.WriteString(fmt.Sprintf("%q", args.Goal))
 	if args.Input != nil {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("input: ")
 		b.WriteString(renderMemQLValue(args.Input))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3434,37 +3434,37 @@ func (qc *QueryClient) CreateHarnessSemanticMemory(ctx context.Context, args Cre
 
 func CreateHarnessSemanticMemoryBuild(args CreateHarnessSemanticMemoryArgs) string {
 	var b strings.Builder
-	b.WriteString("createHarnessSemanticMemory({")
+	b.WriteString("mutation createHarnessSemanticMemory(")
 	if args.MemoryId != "" {
 		b.WriteString("memoryId: ")
 		b.WriteString(fmt.Sprintf("%q", args.MemoryId))
 	}
-	if b.Len() > 29 {
+	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 29 {
+	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("content: ")
 	b.WriteString(fmt.Sprintf("%q", args.Content))
-	if b.Len() > 29 {
+	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("sourceEpisodes: ")
 	b.WriteString(renderMemQLValue(args.SourceEpisodes))
-	if b.Len() > 29 {
+	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
 	b.WriteString(fmt.Sprintf("%q", args.Confidence))
-	if b.Len() > 29 {
+	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastReinforced: ")
 	b.WriteString(fmt.Sprintf("%q", args.LastReinforced))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3490,39 +3490,39 @@ func (qc *QueryClient) CreateIdentity(ctx context.Context, args CreateIdentityAr
 
 func CreateIdentityBuild(args CreateIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("createIdentity({")
+	b.WriteString("mutation createIdentity(")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityType: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityType))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("credentials: ")
 	b.WriteString(renderMemQLValue(args.Credentials))
 	if args.Label != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("label: ")
 		b.WriteString(fmt.Sprintf("%q", args.Label))
 	}
 	if args.UsableByAgentsSet {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("usableByAgents: ")
 		b.WriteString(fmt.Sprintf("%v", args.UsableByAgents))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3544,29 +3544,29 @@ func (qc *QueryClient) CreateIdentityProvider(ctx context.Context, args CreateId
 
 func CreateIdentityProviderBuild(args CreateIdentityProviderArgs) string {
 	var b strings.Builder
-	b.WriteString("createIdentityProvider({")
+	b.WriteString("mutation createIdentityProvider(")
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("issuerUrl: ")
 	b.WriteString(fmt.Sprintf("%q", args.IssuerUrl))
 	if args.ClientIdPrefix != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clientIdPrefix: ")
 		b.WriteString(fmt.Sprintf("%q", args.ClientIdPrefix))
 	}
 	if args.RedirectUrl != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("redirectUrl: ")
 		b.WriteString(fmt.Sprintf("%q", args.RedirectUrl))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3592,53 +3592,53 @@ func (qc *QueryClient) CreateMagicLinkRequest(ctx context.Context, args CreateMa
 
 func CreateMagicLinkRequestBuild(args CreateMagicLinkRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("createMagicLinkRequest({")
+	b.WriteString("mutation createMagicLinkRequest(")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("email: ")
 	b.WriteString(fmt.Sprintf("%q", args.Email))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	if args.SourceIP != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceIP))
 	}
 	if args.UserAgent != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userAgent: ")
 		b.WriteString(fmt.Sprintf("%q", args.UserAgent))
 	}
 	if args.OauthCtxJSON != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("oauthCtxJSON: ")
 		b.WriteString(fmt.Sprintf("%q", args.OauthCtxJSON))
 	}
 	if args.InvitationId != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("invitationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.InvitationId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3665,55 +3665,55 @@ func (qc *QueryClient) CreateMemory(ctx context.Context, args CreateMemoryArgs) 
 
 func CreateMemoryBuild(args CreateMemoryArgs) string {
 	var b strings.Builder
-	b.WriteString("createMemory({")
+	b.WriteString("mutation createMemory(")
 	b.WriteString("memoryId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
-	if b.Len() > 14 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
-	if b.Len() > 14 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("content: ")
 	b.WriteString(fmt.Sprintf("%q", args.Content))
 	if args.Summary != "" {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
 		b.WriteString(fmt.Sprintf("%q", args.Summary))
 	}
 	if args.Kind != "" {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("kind: ")
 		b.WriteString(fmt.Sprintf("%q", args.Kind))
 	}
 	if args.AgentId != "" {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.PartitionId != "" {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.SourceUtteranceId != "" {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceUtteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceUtteranceId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3742,80 +3742,80 @@ func (qc *QueryClient) CreateNode(ctx context.Context, args CreateNodeArgs) (*Re
 
 func CreateNodeBuild(args CreateNodeArgs) string {
 	var b strings.Builder
-	b.WriteString("createNode({")
+	b.WriteString("mutation createNode(")
 	if args.Id != "" {
 		b.WriteString("id: ")
 		b.WriteString(fmt.Sprintf("%q", args.Id))
 	}
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeType))
 	if args.Address != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("address: ")
 		b.WriteString(fmt.Sprintf("%q", args.Address))
 	}
 	if args.Health != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("health: ")
 		b.WriteString(fmt.Sprintf("%q", args.Health))
 	}
 	if args.LastSeen != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastSeen: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastSeen))
 	}
 	if args.Capabilities != nil {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capabilities: ")
 		b.WriteString(renderMemQLValue(args.Capabilities))
 	}
 	if args.Labels != nil {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("labels: ")
 		b.WriteString(renderMemQLValue(args.Labels))
 	}
 	if args.DeploymentId != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("deploymentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
 	}
 	if args.Provider != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provider: ")
 		b.WriteString(fmt.Sprintf("%q", args.Provider))
 	}
 	if args.Environment != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("environment: ")
 		b.WriteString(fmt.Sprintf("%q", args.Environment))
 	}
 	if args.Region != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("region: ")
 		b.WriteString(fmt.Sprintf("%q", args.Region))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3842,56 +3842,56 @@ func (qc *QueryClient) CreateNodeTokenIdentity(ctx context.Context, args CreateN
 
 func CreateNodeTokenIdentityBuild(args CreateNodeTokenIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("createNodeTokenIdentity({")
+	b.WriteString("mutation createNodeTokenIdentity(")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeId))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeType))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mintedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
 	if args.ExpiresAt != "" {
-		if b.Len() > 25 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	}
 	if args.BootstrappedAt != "" {
-		if b.Len() > 25 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrappedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
 	}
 	if args.BootstrappedFrom != "" {
-		if b.Len() > 25 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrappedFrom: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrappedFrom))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3913,29 +3913,29 @@ func (qc *QueryClient) CreateNote(ctx context.Context, args CreateNoteArgs) (*Re
 
 func CreateNoteBuild(args CreateNoteArgs) string {
 	var b strings.Builder
-	b.WriteString("createNote({")
+	b.WriteString("mutation createNote(")
 	b.WriteString("noteId: ")
 	b.WriteString(fmt.Sprintf("%q", args.NoteId))
 	if args.Title != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("title: ")
 		b.WriteString(fmt.Sprintf("%q", args.Title))
 	}
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("body: ")
 	b.WriteString(fmt.Sprintf("%q", args.Body))
 	if args.Tags != nil {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tags: ")
 		b.WriteString(renderMemQLValue(args.Tags))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -3960,48 +3960,48 @@ func (qc *QueryClient) CreateOAuthClient(ctx context.Context, args CreateOAuthCl
 
 func CreateOAuthClientBuild(args CreateOAuthClientArgs) string {
 	var b strings.Builder
-	b.WriteString("createOAuthClient({")
+	b.WriteString("mutation createOAuthClient(")
 	b.WriteString("clientId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ClientId))
 	if args.ClientName != "" {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clientName: ")
 		b.WriteString(fmt.Sprintf("%q", args.ClientName))
 	}
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("redirectURIsJSON: ")
 	b.WriteString(fmt.Sprintf("%q", args.RedirectURIsJSON))
 	if args.GrantTypes != "" {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("grantTypes: ")
 		b.WriteString(fmt.Sprintf("%q", args.GrantTypes))
 	}
 	if args.ResponseTypes != "" {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("responseTypes: ")
 		b.WriteString(fmt.Sprintf("%q", args.ResponseTypes))
 	}
 	if args.TokenEndpointAuthMethod != "" {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenEndpointAuthMethod: ")
 		b.WriteString(fmt.Sprintf("%q", args.TokenEndpointAuthMethod))
 	}
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registeredAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegisteredAt))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4025,32 +4025,32 @@ func (qc *QueryClient) CreatePATIdentity(ctx context.Context, args CreatePATIden
 
 func CreatePATIdentityBuild(args CreatePATIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("createPATIdentity({")
+	b.WriteString("mutation createPATIdentity(")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
 	b.WriteString(fmt.Sprintf("%q", args.Label))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
 	if args.UsableByAgentsSet {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("usableByAgents: ")
 		b.WriteString(fmt.Sprintf("%v", args.UsableByAgents))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4083,93 +4083,93 @@ func (qc *QueryClient) CreatePlan(ctx context.Context, args CreatePlanArgs) (*Re
 
 func CreatePlanBuild(args CreatePlanArgs) string {
 	var b strings.Builder
-	b.WriteString("createPlan({")
+	b.WriteString("mutation createPlan(")
 	if args.PlanId != "" {
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if args.ParentPlanId != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("parentPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParentPlanId))
 	}
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("goal: ")
 	b.WriteString(fmt.Sprintf("%q", args.Goal))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestedBy))
 	if args.TriggerSource != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("triggerSource: ")
 		b.WriteString(fmt.Sprintf("%q", args.TriggerSource))
 	}
 	if args.AuthorizedBy != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authorizedBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.AuthorizedBy))
 	}
 	if args.OwnerAgentId != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerAgentId))
 	}
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("input: ")
 	b.WriteString(renderMemQLValue(args.Input))
 	if args.RefinementContext != nil {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("refinementContext: ")
 		b.WriteString(renderMemQLValue(args.RefinementContext))
 	}
 	if args.TokenBudget != 0 {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenBudget: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenBudget))
 	}
 	if args.PauseExtendsDeadlineSet {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("pauseExtendsDeadline: ")
 		b.WriteString(fmt.Sprintf("%v", args.PauseExtendsDeadline))
 	}
 	if args.ChatAnchorMessageId != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("chatAnchorMessageId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ChatAnchorMessageId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4193,43 +4193,43 @@ func (qc *QueryClient) CreateProject(ctx context.Context, args CreateProjectArgs
 
 func CreateProjectBuild(args CreateProjectArgs) string {
 	var b strings.Builder
-	b.WriteString("createProject({")
+	b.WriteString("mutation createProject(")
 	if args.ProjectId != "" {
 		b.WriteString("projectId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProjectId))
 	}
-	if b.Len() > 15 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	if b.Len() > 15 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.TargetApp != "" {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetApp: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetApp))
 	}
 	if args.Repo != "" {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("repo: ")
 		b.WriteString(fmt.Sprintf("%q", args.Repo))
 	}
 	if args.Description != "" {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4259,75 +4259,75 @@ func (qc *QueryClient) CreateRecord(ctx context.Context, args CreateRecordArgs) 
 
 func CreateRecordBuild(args CreateRecordArgs) string {
 	var b strings.Builder
-	b.WriteString("createRecord({")
+	b.WriteString("mutation createRecord(")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	if b.Len() > 14 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 14 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("recordType: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordType))
-	if b.Len() > 14 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
 	b.WriteString(fmt.Sprintf("%q", args.Label))
-	if b.Len() > 14 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("data: ")
 	b.WriteString(renderMemQLValue(args.Data))
-	if b.Len() > 14 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("importSource: ")
 	b.WriteString(fmt.Sprintf("%q", args.ImportSource))
-	if b.Len() > 14 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("importedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.ImportedBy))
 	if args.NaturalKeyField != "" {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyField: ")
 		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyField))
 	}
 	if args.NaturalKeyValue != "" {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyValue: ")
 		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyValue))
 	}
 	if args.SourceAttachmentId != "" {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceAttachmentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceAttachmentId))
 	}
 	if args.Confidence != 0 {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("confidence: ")
 		b.WriteString(fmt.Sprintf("%v", args.Confidence))
 	}
 	if args.CreatedAt != "" {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("createdAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.CreatedAt))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4356,68 +4356,68 @@ func (qc *QueryClient) CreateRecordBatch(ctx context.Context, args CreateRecordB
 
 func CreateRecordBatchBuild(args CreateRecordBatchArgs) string {
 	var b strings.Builder
-	b.WriteString("createRecordBatch({")
+	b.WriteString("mutation createRecordBatch(")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("recordType: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordType))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
 	b.WriteString(fmt.Sprintf("%q", args.Label))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("data: ")
 	b.WriteString(renderMemQLValue(args.Data))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("importSource: ")
 	b.WriteString(fmt.Sprintf("%q", args.ImportSource))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("importedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.ImportedBy))
 	if args.SourceAttachmentId != "" {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceAttachmentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceAttachmentId))
 	}
 	if args.NaturalKeyField != "" {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyField: ")
 		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyField))
 	}
 	if args.NaturalKeyValue != "" {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyValue: ")
 		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyValue))
 	}
 	if args.Confidence != 0 {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("confidence: ")
 		b.WriteString(fmt.Sprintf("%v", args.Confidence))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4442,48 +4442,48 @@ func (qc *QueryClient) CreateRequest(ctx context.Context, args CreateRequestArgs
 
 func CreateRequestBuild(args CreateRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("createRequest({")
+	b.WriteString("mutation createRequest(")
 	if args.RequestId != "" {
 		b.WriteString("requestId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RequestId))
 	}
-	if b.Len() > 15 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("projectId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ProjectId))
 	if args.RequestType != "" {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requestType: ")
 		b.WriteString(fmt.Sprintf("%q", args.RequestType))
 	}
-	if b.Len() > 15 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
-	if b.Len() > 15 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("body: ")
 	b.WriteString(fmt.Sprintf("%q", args.Body))
 	if args.AttachmentIds != nil {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attachmentIds: ")
 		b.WriteString(renderMemQLValue(args.AttachmentIds))
 	}
 	if args.Priority != "" {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("priority: ")
 		b.WriteString(fmt.Sprintf("%q", args.Priority))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4516,85 +4516,85 @@ func (qc *QueryClient) CreateResponsibility(ctx context.Context, args CreateResp
 
 func CreateResponsibilityBuild(args CreateResponsibilityArgs) string {
 	var b strings.Builder
-	b.WriteString("createResponsibility({")
+	b.WriteString("mutation createResponsibility(")
 	if args.ResponsibilityId != "" {
 		b.WriteString("responsibilityId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
 	}
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("statement: ")
 	b.WriteString(fmt.Sprintf("%q", args.Statement))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("trigger: ")
 	b.WriteString(fmt.Sprintf("%q", args.Trigger))
 	if args.Schedule != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("schedule: ")
 		b.WriteString(fmt.Sprintf("%q", args.Schedule))
 	}
 	if args.Condition != nil {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("condition: ")
 		b.WriteString(renderMemQLValue(args.Condition))
 	}
 	if args.TargetKind != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
 	}
 	if args.AssignedAgentId != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedAgentId))
 	}
 	if args.AssignedRoleSlug != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
 	}
 	if args.SuccessCriteria != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("successCriteria: ")
 		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
 	}
 	if args.NotifyHow != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notifyHow: ")
 		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
 	}
 	if args.ScopePartitionId != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("scopePartitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ScopePartitionId))
 	}
 	if args.EnabledSet {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("enabled: ")
 		b.WriteString(fmt.Sprintf("%v", args.Enabled))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4621,48 +4621,48 @@ func (qc *QueryClient) CreateRole(ctx context.Context, args CreateRoleArgs) (*Re
 
 func CreateRoleBuild(args CreateRoleArgs) string {
 	var b strings.Builder
-	b.WriteString("createRole({")
+	b.WriteString("mutation createRole(")
 	if args.RoleId != "" {
 		b.WriteString("roleId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RoleId))
 	}
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("rank: ")
 	b.WriteString(fmt.Sprintf("%v", args.Rank))
 	if args.Description != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.PredefinedSet {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("predefined: ")
 		b.WriteString(fmt.Sprintf("%v", args.Predefined))
 	}
 	if args.ActiveSet {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4687,42 +4687,42 @@ func (qc *QueryClient) CreateScopeElevationPlan(ctx context.Context, args Create
 
 func CreateScopeElevationPlanBuild(args CreateScopeElevationPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("createScopeElevationPlan({")
+	b.WriteString("mutation createScopeElevationPlan(")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	if args.PartitionId != "" {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("intent: ")
 	b.WriteString(fmt.Sprintf("%q", args.Intent))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("summary: ")
 	b.WriteString(fmt.Sprintf("%q", args.Summary))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestedScope: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestedScope))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4749,58 +4749,58 @@ func (qc *QueryClient) CreateSemanticTask(ctx context.Context, args CreateSemant
 
 func CreateSemanticTaskBuild(args CreateSemanticTaskArgs) string {
 	var b strings.Builder
-	b.WriteString("createSemanticTask({")
+	b.WriteString("mutation createSemanticTask(")
 	b.WriteString("taskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TaskId))
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("seq: ")
 	b.WriteString(fmt.Sprintf("%v", args.Seq))
 	if args.LogicalStepId != "" {
-		if b.Len() > 20 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("logicalStepId: ")
 		b.WriteString(fmt.Sprintf("%q", args.LogicalStepId))
 	}
 	if args.AttemptNumber != 0 {
-		if b.Len() > 20 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attemptNumber: ")
 		b.WriteString(fmt.Sprintf("%v", args.AttemptNumber))
 	}
 	if args.Phase != "" {
-		if b.Len() > 20 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("phase: ")
 		b.WriteString(fmt.Sprintf("%q", args.Phase))
 	}
 	if args.DependsOn != nil {
-		if b.Len() > 20 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("dependsOn: ")
 		b.WriteString(renderMemQLValue(args.DependsOn))
 	}
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("input: ")
 	b.WriteString(renderMemQLValue(args.Input))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4824,43 +4824,43 @@ func (qc *QueryClient) CreateSessionForParticipant(ctx context.Context, args Cre
 
 func CreateSessionForParticipantBuild(args CreateSessionForParticipantArgs) string {
 	var b strings.Builder
-	b.WriteString("createSessionForParticipant({")
+	b.WriteString("mutation createSessionForParticipant(")
 	if args.SessionId != "" {
 		b.WriteString("sessionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SessionId))
 	}
-	if b.Len() > 29 {
+	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 29 {
+	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	if args.HumanInput != nil {
-		if b.Len() > 29 {
+		if b.Len() > 37 {
 			b.WriteString(", ")
 		}
 		b.WriteString("humanInput: ")
 		b.WriteString(renderMemQLValue(args.HumanInput))
 	}
 	if args.AiOutput != nil {
-		if b.Len() > 29 {
+		if b.Len() > 37 {
 			b.WriteString(", ")
 		}
 		b.WriteString("aiOutput: ")
 		b.WriteString(renderMemQLValue(args.AiOutput))
 	}
 	if args.Streams != nil {
-		if b.Len() > 29 {
+		if b.Len() > 37 {
 			b.WriteString(", ")
 		}
 		b.WriteString("streams: ")
 		b.WriteString(renderMemQLValue(args.Streams))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4892,83 +4892,83 @@ func (qc *QueryClient) CreateSkill(ctx context.Context, args CreateSkillArgs) (*
 
 func CreateSkillBuild(args CreateSkillArgs) string {
 	var b strings.Builder
-	b.WriteString("createSkill({")
+	b.WriteString("mutation createSkill(")
 	if args.SkillId != "" {
 		b.WriteString("skillId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SkillId))
 	}
-	if b.Len() > 13 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	if b.Len() > 13 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Description != "" {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.Category != "" {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("category: ")
 		b.WriteString(fmt.Sprintf("%q", args.Category))
 	}
 	if args.Tags != nil {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tags: ")
 		b.WriteString(renderMemQLValue(args.Tags))
 	}
 	if args.DomainIds != nil {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("domainIds: ")
 		b.WriteString(renderMemQLValue(args.DomainIds))
 	}
 	if args.ToolSlugs != nil {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("toolSlugs: ")
 		b.WriteString(renderMemQLValue(args.ToolSlugs))
 	}
 	if args.LiveSourceIds != nil {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("liveSourceIds: ")
 		b.WriteString(renderMemQLValue(args.LiveSourceIds))
 	}
-	if b.Len() > 13 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.PredefinedSet {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("predefined: ")
 		b.WriteString(fmt.Sprintf("%v", args.Predefined))
 	}
 	if args.ActiveSet {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -4995,62 +4995,62 @@ func (qc *QueryClient) CreateSkillChangeEvent(ctx context.Context, args CreateSk
 
 func CreateSkillChangeEventBuild(args CreateSkillChangeEventArgs) string {
 	var b strings.Builder
-	b.WriteString("createSkillChangeEvent({")
+	b.WriteString("mutation createSkillChangeEvent(")
 	b.WriteString("skillChangeEventId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SkillChangeEventId))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetAgentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetAgentId))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("skillId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SkillId))
 	if args.ChangeKind != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("changeKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.ChangeKind))
 	}
 	if args.Before != nil {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("before: ")
 		b.WriteString(renderMemQLValue(args.Before))
 	}
 	if args.After != nil {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("after: ")
 		b.WriteString(renderMemQLValue(args.After))
 	}
 	if args.ActorAgentId != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorAgentId))
 	}
 	if args.ActorUserId != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorUserId))
 	}
 	if args.PlanId != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -5074,41 +5074,41 @@ func (qc *QueryClient) CreateSpawnEvent(ctx context.Context, args CreateSpawnEve
 
 func CreateSpawnEventBuild(args CreateSpawnEventArgs) string {
 	var b strings.Builder
-	b.WriteString("createSpawnEvent({")
+	b.WriteString("mutation createSpawnEvent(")
 	b.WriteString("nodeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeId))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeType))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
 	b.WriteString(fmt.Sprintf("%q", args.Action))
 	if args.InitiatorId != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("initiatorId: ")
 		b.WriteString(fmt.Sprintf("%q", args.InitiatorId))
 	}
 	if args.Reason != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
 	if args.Metadata != nil {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("metadata: ")
 		b.WriteString(renderMemQLValue(args.Metadata))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -5136,60 +5136,60 @@ func (qc *QueryClient) CreateTask(ctx context.Context, args CreateTaskArgs) (*Re
 
 func CreateTaskBuild(args CreateTaskArgs) string {
 	var b strings.Builder
-	b.WriteString("createTask({")
+	b.WriteString("mutation createTask(")
 	if args.TaskId != "" {
 		b.WriteString("taskId: ")
 		b.WriteString(fmt.Sprintf("%q", args.TaskId))
 	}
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	if args.Category != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("category: ")
 		b.WriteString(fmt.Sprintf("%q", args.Category))
 	}
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("seq: ")
 	b.WriteString(fmt.Sprintf("%v", args.Seq))
 	if args.Phase != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("phase: ")
 		b.WriteString(fmt.Sprintf("%q", args.Phase))
 	}
 	if args.ExecutionSurface != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("executionSurface: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExecutionSurface))
 	}
 	if args.ExecutorBackend != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("executorBackend: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExecutorBackend))
 	}
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("input: ")
 	b.WriteString(renderMemQLValue(args.Input))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -5213,34 +5213,34 @@ func (qc *QueryClient) CreateTodo(ctx context.Context, args CreateTodoArgs) (*Re
 
 func CreateTodoBuild(args CreateTodoArgs) string {
 	var b strings.Builder
-	b.WriteString("createTodo({")
+	b.WriteString("mutation createTodo(")
 	b.WriteString("todoId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TodoId))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("dueAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.DueAt))
 	if args.Priority != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("priority: ")
 		b.WriteString(fmt.Sprintf("%q", args.Priority))
 	}
 	if args.SourceResponsibilityId != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceResponsibilityId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceResponsibilityId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -5264,37 +5264,37 @@ func (qc *QueryClient) CreateToolInvocationTask(ctx context.Context, args Create
 
 func CreateToolInvocationTaskBuild(args CreateToolInvocationTaskArgs) string {
 	var b strings.Builder
-	b.WriteString("createToolInvocationTask({")
+	b.WriteString("mutation createToolInvocationTask(")
 	b.WriteString("taskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TaskId))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("parentTaskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParentTaskId))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toolName: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToolName))
 	if args.ToolArgs != nil {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("toolArgs: ")
 		b.WriteString(renderMemQLValue(args.ToolArgs))
 	}
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("seq: ")
 	b.WriteString(fmt.Sprintf("%v", args.Seq))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -5319,41 +5319,41 @@ func (qc *QueryClient) CreateUser(ctx context.Context, args CreateUserArgs) (*Re
 
 func CreateUserBuild(args CreateUserArgs) string {
 	var b strings.Builder
-	b.WriteString("createUser({")
+	b.WriteString("mutation createUser(")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("primaryEmail: ")
 	b.WriteString(fmt.Sprintf("%q", args.PrimaryEmail))
 	if args.Role != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("role: ")
 		b.WriteString(fmt.Sprintf("%q", args.Role))
 	}
 	if args.GroupIds != nil {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("groupIds: ")
 		b.WriteString(renderMemQLValue(args.GroupIds))
 	}
 	if args.Preferences != nil {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("preferences: ")
 		b.WriteString(renderMemQLValue(args.Preferences))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -5385,88 +5385,88 @@ func (qc *QueryClient) CreateUserOnFirstLogin(ctx context.Context, args CreateUs
 
 func CreateUserOnFirstLoginBuild(args CreateUserOnFirstLoginArgs) string {
 	var b strings.Builder
-	b.WriteString("createUserOnFirstLogin({")
+	b.WriteString("mutation createUserOnFirstLogin(")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
 	if args.FirstName != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("firstName: ")
 		b.WriteString(fmt.Sprintf("%q", args.FirstName))
 	}
 	if args.LastName != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastName: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastName))
 	}
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("primaryEmail: ")
 	b.WriteString(fmt.Sprintf("%q", args.PrimaryEmail))
 	if args.Phone != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("phone: ")
 		b.WriteString(fmt.Sprintf("%q", args.Phone))
 	}
 	if args.PrimaryRole != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("primaryRole: ")
 		b.WriteString(fmt.Sprintf("%q", args.PrimaryRole))
 	}
 	if args.Gender != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("gender: ")
 		b.WriteString(fmt.Sprintf("%q", args.Gender))
 	}
 	if args.Birthdate != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("birthdate: ")
 		b.WriteString(fmt.Sprintf("%q", args.Birthdate))
 	}
 	if args.Role != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("role: ")
 		b.WriteString(fmt.Sprintf("%q", args.Role))
 	}
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("internal: ")
 	b.WriteString(fmt.Sprintf("%v", args.Internal))
 	if args.GroupIds != nil {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("groupIds: ")
 		b.WriteString(renderMemQLValue(args.GroupIds))
 	}
 	if args.Preferences != nil {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("preferences: ")
 		b.WriteString(renderMemQLValue(args.Preferences))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -5491,44 +5491,44 @@ func (qc *QueryClient) CreateVoiceAgentTokenIdentity(ctx context.Context, args C
 
 func CreateVoiceAgentTokenIdentityBuild(args CreateVoiceAgentTokenIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("createVoiceAgentTokenIdentity({")
+	b.WriteString("mutation createVoiceAgentTokenIdentity(")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 31 {
+	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 31 {
+	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("instanceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.InstanceId))
-	if b.Len() > 31 {
+	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if b.Len() > 31 {
+	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mintedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
 	if args.ExpiresAt != "" {
-		if b.Len() > 31 {
+		if b.Len() > 39 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	}
 	if args.Label != "" {
-		if b.Len() > 31 {
+		if b.Len() > 39 {
 			b.WriteString(", ")
 		}
 		b.WriteString("label: ")
 		b.WriteString(fmt.Sprintf("%q", args.Label))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -5567,136 +5567,136 @@ func (qc *QueryClient) CreateWorkerInvocation(ctx context.Context, args CreateWo
 
 func CreateWorkerInvocationBuild(args CreateWorkerInvocationArgs) string {
 	var b strings.Builder
-	b.WriteString("createWorkerInvocation({")
+	b.WriteString("mutation createWorkerInvocation(")
 	b.WriteString("invocationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.InvocationId))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("workerId: ")
 	b.WriteString(fmt.Sprintf("%q", args.WorkerId))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	if args.PlanId != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
 	if args.TaskId != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("taskId: ")
 		b.WriteString(fmt.Sprintf("%q", args.TaskId))
 	}
 	if args.CorrelationId != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("correlationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.CorrelationId))
 	}
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tool: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tool))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
 	b.WriteString(fmt.Sprintf("%q", args.Action))
 	if args.ArgsRedacted != nil {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("argsRedacted: ")
 		b.WriteString(renderMemQLValue(args.ArgsRedacted))
 	}
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("startedAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.StartedAt))
 	if args.CompletedAt != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("completedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.CompletedAt))
 	}
 	if args.DurationMs != 0 {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("durationMs: ")
 		b.WriteString(fmt.Sprintf("%v", args.DurationMs))
 	}
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("outcome: ")
 	b.WriteString(fmt.Sprintf("%q", args.Outcome))
 	if args.ExitCode != 0 {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("exitCode: ")
 		b.WriteString(fmt.Sprintf("%v", args.ExitCode))
 	}
 	if args.Signal != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("signal: ")
 		b.WriteString(fmt.Sprintf("%q", args.Signal))
 	}
 	if args.ErrorCode != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorCode: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorCode))
 	}
 	if args.ErrorMessage != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
 	if args.BytesIn != 0 {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bytesIn: ")
 		b.WriteString(fmt.Sprintf("%v", args.BytesIn))
 	}
 	if args.BytesOut != 0 {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bytesOut: ")
 		b.WriteString(fmt.Sprintf("%v", args.BytesOut))
 	}
 	if args.OutputPreview != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("outputPreview: ")
 		b.WriteString(fmt.Sprintf("%q", args.OutputPreview))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -5720,37 +5720,37 @@ func (qc *QueryClient) CreateWorkerPairingCode(ctx context.Context, args CreateW
 
 func CreateWorkerPairingCodeBuild(args CreateWorkerPairingCodeArgs) string {
 	var b strings.Builder
-	b.WriteString("createWorkerPairingCode({")
+	b.WriteString("mutation createWorkerPairingCode(")
 	b.WriteString("pairingId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PairingId))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("codeHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.CodeHash))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("clusterURL: ")
 	b.WriteString(fmt.Sprintf("%q", args.ClusterURL))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	if args.SourceIP != "" {
-		if b.Len() > 25 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceIP))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -5783,96 +5783,96 @@ func (qc *QueryClient) CreateWorkerRegistration(ctx context.Context, args Create
 
 func CreateWorkerRegistrationBuild(args CreateWorkerRegistrationArgs) string {
 	var b strings.Builder
-	b.WriteString("createWorkerRegistration({")
+	b.WriteString("mutation createWorkerRegistration(")
 	b.WriteString("registrationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegistrationId))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("capabilities: ")
 	b.WriteString(renderMemQLValue(args.Capabilities))
 	if args.CapabilityDescriptor != nil {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capabilityDescriptor: ")
 		b.WriteString(renderMemQLValue(args.CapabilityDescriptor))
 	}
 	if args.Labels != nil {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("labels: ")
 		b.WriteString(renderMemQLValue(args.Labels))
 	}
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("concurrency: ")
 	b.WriteString(renderMemQLValue(args.Concurrency))
 	if args.PlatformInfo != nil {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("platformInfo: ")
 		b.WriteString(renderMemQLValue(args.PlatformInfo))
 	}
 	if args.Permissions != nil {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("permissions: ")
 		b.WriteString(renderMemQLValue(args.Permissions))
 	}
 	if args.Version != "" {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
 		b.WriteString(fmt.Sprintf("%q", args.Version))
 	}
 	if args.BuildTag != "" {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("buildTag: ")
 		b.WriteString(fmt.Sprintf("%q", args.BuildTag))
 	}
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registeredAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegisteredAt))
 	if args.LastSeenAt != "" {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastSeenAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastSeenAt))
 	}
 	if args.LastConnectedFromIP != "" {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastConnectedFromIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastConnectedFromIP))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -5898,51 +5898,51 @@ func (qc *QueryClient) CreateWorkerTokenIdentity(ctx context.Context, args Creat
 
 func CreateWorkerTokenIdentityBuild(args CreateWorkerTokenIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("createWorkerTokenIdentity({")
+	b.WriteString("mutation createWorkerTokenIdentity(")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 27 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 27 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 27 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if b.Len() > 27 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registeredBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegisteredBy))
 	if args.CapabilitiesAdvertised != nil {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capabilitiesAdvertised: ")
 		b.WriteString(renderMemQLValue(args.CapabilitiesAdvertised))
 	}
 	if args.LabelsAdvertised != nil {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("labelsAdvertised: ")
 		b.WriteString(renderMemQLValue(args.LabelsAdvertised))
 	}
 	if args.ExpiresAt != "" {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -5962,15 +5962,15 @@ func (qc *QueryClient) DecayAction(ctx context.Context, args DecayActionArgs) (*
 
 func DecayActionBuild(args DecayActionArgs) string {
 	var b strings.Builder
-	b.WriteString("decayAction({")
+	b.WriteString("mutation decayAction(")
 	b.WriteString("actionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ActionId))
-	if b.Len() > 13 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reliability: ")
 	b.WriteString(fmt.Sprintf("%q", args.Reliability))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -5990,15 +5990,15 @@ func (qc *QueryClient) DecayHarnessSemanticMemory(ctx context.Context, args Deca
 
 func DecayHarnessSemanticMemoryBuild(args DecayHarnessSemanticMemoryArgs) string {
 	var b strings.Builder
-	b.WriteString("decayHarnessSemanticMemory({")
+	b.WriteString("mutation decayHarnessSemanticMemory(")
 	b.WriteString("memoryId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
-	if b.Len() > 28 {
+	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
 	b.WriteString(fmt.Sprintf("%q", args.Confidence))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -6017,10 +6017,10 @@ func (qc *QueryClient) DeleteAgent(ctx context.Context, args DeleteAgentArgs) (*
 
 func DeleteAgentBuild(args DeleteAgentArgs) string {
 	var b strings.Builder
-	b.WriteString("deleteAgent({")
+	b.WriteString("mutation deleteAgent(")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -6039,10 +6039,10 @@ func (qc *QueryClient) DeleteCalendarEvent(ctx context.Context, args DeleteCalen
 
 func DeleteCalendarEventBuild(args DeleteCalendarEventArgs) string {
 	var b strings.Builder
-	b.WriteString("deleteCalendarEvent({")
+	b.WriteString("mutation deleteCalendarEvent(")
 	b.WriteString("eventId: ")
 	b.WriteString(fmt.Sprintf("%q", args.EventId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -6061,10 +6061,10 @@ func (qc *QueryClient) DeleteRecord(ctx context.Context, args DeleteRecordArgs) 
 
 func DeleteRecordBuild(args DeleteRecordArgs) string {
 	var b strings.Builder
-	b.WriteString("deleteRecord({")
+	b.WriteString("mutation deleteRecord(")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -6083,10 +6083,10 @@ func (qc *QueryClient) DeleteUserHard(ctx context.Context, args DeleteUserHardAr
 
 func DeleteUserHardBuild(args DeleteUserHardArgs) string {
 	var b strings.Builder
-	b.WriteString("deleteUserHard({")
+	b.WriteString("mutation deleteUserHard(")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -6105,10 +6105,10 @@ func (qc *QueryClient) DeprecateAction(ctx context.Context, args DeprecateAction
 
 func DeprecateActionBuild(args DeprecateActionArgs) string {
 	var b strings.Builder
-	b.WriteString("deprecateAction({")
+	b.WriteString("mutation deprecateAction(")
 	b.WriteString("actionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ActionId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -6134,55 +6134,55 @@ func (qc *QueryClient) EmitClientToolRequest(ctx context.Context, args EmitClien
 
 func EmitClientToolRequestBuild(args EmitClientToolRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("emitClientToolRequest({")
+	b.WriteString("mutation emitClientToolRequest(")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("callId: ")
 	b.WriteString(fmt.Sprintf("%q", args.CallId))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toolName: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToolName))
 	if args.ArgumentsJSON != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("argumentsJSON: ")
 		b.WriteString(fmt.Sprintf("%q", args.ArgumentsJSON))
 	}
 	if args.PartitionId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.ParticipantId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	}
 	if args.AgentId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.ExpiresAt != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -6207,43 +6207,43 @@ func (qc *QueryClient) EmitClientToolResponse(ctx context.Context, args EmitClie
 
 func EmitClientToolResponseBuild(args EmitClientToolResponseArgs) string {
 	var b strings.Builder
-	b.WriteString("emitClientToolResponse({")
+	b.WriteString("mutation emitClientToolResponse(")
 	b.WriteString("responseId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponseId))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("callId: ")
 	b.WriteString(fmt.Sprintf("%q", args.CallId))
 	if args.ContentJSON != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("contentJSON: ")
 		b.WriteString(fmt.Sprintf("%q", args.ContentJSON))
 	}
 	if args.IsErrorSet {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("isError: ")
 		b.WriteString(fmt.Sprintf("%v", args.IsError))
 	}
 	if args.ErrorMessage != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
 	if args.PartitionId != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -6268,40 +6268,40 @@ func (qc *QueryClient) EmitTextChunk(ctx context.Context, args EmitTextChunkArgs
 
 func EmitTextChunkBuild(args EmitTextChunkArgs) string {
 	var b strings.Builder
-	b.WriteString("emitTextChunk({")
+	b.WriteString("mutation emitTextChunk(")
 	b.WriteString("chunkId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ChunkId))
-	if b.Len() > 15 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 15 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	if b.Len() > 15 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("replyId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ReplyId))
-	if b.Len() > 15 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
-	if b.Len() > 15 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("index: ")
 	b.WriteString(fmt.Sprintf("%v", args.Index))
-	if b.Len() > 15 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("done: ")
 	b.WriteString(fmt.Sprintf("%v", args.Done))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -6320,10 +6320,10 @@ func (qc *QueryClient) ExpireAccessRequest(ctx context.Context, args ExpireAcces
 
 func ExpireAccessRequestBuild(args ExpireAccessRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("expireAccessRequest({")
+	b.WriteString("mutation expireAccessRequest(")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -6343,17 +6343,17 @@ func (qc *QueryClient) FailHarnessStep(ctx context.Context, args FailHarnessStep
 
 func FailHarnessStepBuild(args FailHarnessStepArgs) string {
 	var b strings.Builder
-	b.WriteString("failHarnessStep({")
+	b.WriteString("mutation failHarnessStep(")
 	b.WriteString("stepId: ")
 	b.WriteString(fmt.Sprintf("%q", args.StepId))
 	if args.ErrorMessage != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -6382,64 +6382,64 @@ func (qc *QueryClient) FoldResponsibilityIntakeAnswers(ctx context.Context, args
 
 func FoldResponsibilityIntakeAnswersBuild(args FoldResponsibilityIntakeAnswersArgs) string {
 	var b strings.Builder
-	b.WriteString("foldResponsibilityIntakeAnswers({")
+	b.WriteString("mutation foldResponsibilityIntakeAnswers(")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
-	if b.Len() > 33 {
+	if b.Len() > 41 {
 		b.WriteString(", ")
 	}
 	b.WriteString("intakeResponse: ")
 	b.WriteString(renderMemQLValue(args.IntakeResponse))
 	if args.Trigger != "" {
-		if b.Len() > 33 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("trigger: ")
 		b.WriteString(fmt.Sprintf("%q", args.Trigger))
 	}
 	if args.Schedule != "" {
-		if b.Len() > 33 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("schedule: ")
 		b.WriteString(fmt.Sprintf("%q", args.Schedule))
 	}
 	if args.Condition != nil {
-		if b.Len() > 33 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("condition: ")
 		b.WriteString(renderMemQLValue(args.Condition))
 	}
 	if args.TargetKind != "" {
-		if b.Len() > 33 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
 	}
 	if args.AssignedRoleSlug != "" {
-		if b.Len() > 33 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
 	}
 	if args.SuccessCriteria != "" {
-		if b.Len() > 33 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("successCriteria: ")
 		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
 	}
 	if args.NotifyHow != "" {
-		if b.Len() > 33 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notifyHow: ")
 		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -6473,101 +6473,101 @@ func (qc *QueryClient) InsertOutputScreening(ctx context.Context, args InsertOut
 
 func InsertOutputScreeningBuild(args InsertOutputScreeningArgs) string {
 	var b strings.Builder
-	b.WriteString("insertOutputScreening({")
+	b.WriteString("mutation insertOutputScreening(")
 	b.WriteString("contentType: ")
 	b.WriteString(fmt.Sprintf("%q", args.ContentType))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("contentLength: ")
 	b.WriteString(fmt.Sprintf("%q", args.ContentLength))
 	if args.RedactedSample != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("redactedSample: ")
 		b.WriteString(fmt.Sprintf("%q", args.RedactedSample))
 	}
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.Categories != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("categories: ")
 		b.WriteString(fmt.Sprintf("%q", args.Categories))
 	}
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("verdict: ")
 	b.WriteString(fmt.Sprintf("%q", args.Verdict))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("screener: ")
 	b.WriteString(fmt.Sprintf("%q", args.Screener))
 	if args.RuleId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ruleId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RuleId))
 	}
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
 	b.WriteString(fmt.Sprintf("%q", args.Confidence))
 	if args.Reason != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("latencyMs: ")
 	b.WriteString(fmt.Sprintf("%q", args.LatencyMs))
 	if args.AgentId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.OwnerUserId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	}
 	if args.PlanId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
 	if args.CorrelationId != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("correlationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.CorrelationId))
 	}
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mode: ")
 	b.WriteString(fmt.Sprintf("%q", args.Mode))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -6595,63 +6595,63 @@ func (qc *QueryClient) InsertPolicyTrace(ctx context.Context, args InsertPolicyT
 
 func InsertPolicyTraceBuild(args InsertPolicyTraceArgs) string {
 	var b strings.Builder
-	b.WriteString("insertPolicyTrace({")
+	b.WriteString("mutation insertPolicyTrace(")
 	b.WriteString("policyName: ")
 	b.WriteString(fmt.Sprintf("%q", args.PolicyName))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.ActorUserId != "" {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorUserId))
 	}
 	if args.ActorRole != "" {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorRole: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorRole))
 	}
 	if args.CallerPartition != "" {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("callerPartition: ")
 		b.WriteString(fmt.Sprintf("%q", args.CallerPartition))
 	}
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("argsHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.ArgsHash))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("resultJson: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResultJson))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("traceJson: ")
 	b.WriteString(fmt.Sprintf("%q", args.TraceJson))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("durationMs: ")
 	b.WriteString(fmt.Sprintf("%v", args.DurationMs))
 	if args.Error != "" {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("error: ")
 		b.WriteString(fmt.Sprintf("%q", args.Error))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -6685,101 +6685,101 @@ func (qc *QueryClient) InsertSafetyClassification(ctx context.Context, args Inse
 
 func InsertSafetyClassificationBuild(args InsertSafetyClassificationArgs) string {
 	var b strings.Builder
-	b.WriteString("insertSafetyClassification({")
+	b.WriteString("mutation insertSafetyClassification(")
 	b.WriteString("surface: ")
 	b.WriteString(fmt.Sprintf("%q", args.Surface))
-	if b.Len() > 28 {
+	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
 	b.WriteString(fmt.Sprintf("%q", args.Action))
 	if args.ArgsRedacted != "" {
-		if b.Len() > 28 {
+		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("argsRedacted: ")
 		b.WriteString(fmt.Sprintf("%q", args.ArgsRedacted))
 	}
-	if b.Len() > 28 {
+	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.Categories != "" {
-		if b.Len() > 28 {
+		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("categories: ")
 		b.WriteString(fmt.Sprintf("%q", args.Categories))
 	}
-	if b.Len() > 28 {
+	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("decision: ")
 	b.WriteString(fmt.Sprintf("%q", args.Decision))
-	if b.Len() > 28 {
+	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
 	if args.RuleId != "" {
-		if b.Len() > 28 {
+		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ruleId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RuleId))
 	}
-	if b.Len() > 28 {
+	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
 	b.WriteString(fmt.Sprintf("%q", args.Confidence))
 	if args.Reason != "" {
-		if b.Len() > 28 {
+		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
-	if b.Len() > 28 {
+	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("latencyMs: ")
 	b.WriteString(fmt.Sprintf("%q", args.LatencyMs))
 	if args.AgentId != "" {
-		if b.Len() > 28 {
+		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.OwnerUserId != "" {
-		if b.Len() > 28 {
+		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	}
 	if args.PlanId != "" {
-		if b.Len() > 28 {
+		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
 	if args.CorrelationId != "" {
-		if b.Len() > 28 {
+		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("correlationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.CorrelationId))
 	}
-	if b.Len() > 28 {
+	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mode: ")
 	b.WriteString(fmt.Sprintf("%q", args.Mode))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -6808,62 +6808,62 @@ func (qc *QueryClient) JoinSpaceAsAI(ctx context.Context, args JoinSpaceAsAIArgs
 
 func JoinSpaceAsAIBuild(args JoinSpaceAsAIArgs) string {
 	var b strings.Builder
-	b.WriteString("joinSpaceAsAI({")
+	b.WriteString("mutation joinSpaceAsAI(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 15 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 15 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
 	if args.Status != "" {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
 	if args.JoinedAt != "" {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("joinedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.JoinedAt))
 	}
 	if args.CapabilityOverrides != nil {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capabilityOverrides: ")
 		b.WriteString(renderMemQLValue(args.CapabilityOverrides))
 	}
 	if args.HiddenSet {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("hidden: ")
 		b.WriteString(fmt.Sprintf("%v", args.Hidden))
 	}
 	if args.ForUserId != "" {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("forUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ForUserId))
 	}
 	if args.IsGroupGASet {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("isGroupGA: ")
 		b.WriteString(fmt.Sprintf("%v", args.IsGroupGA))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -6887,41 +6887,41 @@ func (qc *QueryClient) JoinSpaceAsHuman(ctx context.Context, args JoinSpaceAsHum
 
 func JoinSpaceAsHumanBuild(args JoinSpaceAsHumanArgs) string {
 	var b strings.Builder
-	b.WriteString("joinSpaceAsHuman({")
+	b.WriteString("mutation joinSpaceAsHuman(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
 	if args.Status != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
 	if args.JoinedAt != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("joinedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.JoinedAt))
 	}
 	if args.CapabilityOverrides != nil {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capabilityOverrides: ")
 		b.WriteString(renderMemQLValue(args.CapabilityOverrides))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -6941,15 +6941,15 @@ func (qc *QueryClient) LeaveSpace(ctx context.Context, args LeaveSpaceArgs) (*Re
 
 func LeaveSpaceBuild(args LeaveSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("leaveSpace({")
+	b.WriteString("mutation leaveSpace(")
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -6977,65 +6977,65 @@ func (qc *QueryClient) LogMissingCapability(ctx context.Context, args LogMissing
 
 func LogMissingCapabilityBuild(args LogMissingCapabilityArgs) string {
 	var b strings.Builder
-	b.WriteString("logMissingCapability({")
+	b.WriteString("mutation logMissingCapability(")
 	b.WriteString("missingId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MissingId))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("capability: ")
 	b.WriteString(fmt.Sprintf("%q", args.Capability))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("description: ")
 	b.WriteString(fmt.Sprintf("%q", args.Description))
 	if args.RequestedFromPlanId != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requestedFromPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RequestedFromPlanId))
 	}
 	if args.RequestedByAgentId != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requestedByAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RequestedByAgentId))
 	}
 	if args.PartitionId != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.PartitionScope != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionScope: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionScope))
 	}
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("firstSeenAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.FirstSeenAt))
 	if args.ExampleGoal != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("exampleGoal: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExampleGoal))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -7057,29 +7057,29 @@ func (qc *QueryClient) MarkChunkSuperseded(ctx context.Context, args MarkChunkSu
 
 func MarkChunkSupersededBuild(args MarkChunkSupersededArgs) string {
 	var b strings.Builder
-	b.WriteString("markChunkSuperseded({")
+	b.WriteString("mutation markChunkSuperseded(")
 	b.WriteString("chunkId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ChunkId))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("supersededAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.SupersededAt))
 	if args.Reason != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
 	if args.SupersededReason != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("supersededReason: ")
 		b.WriteString(fmt.Sprintf("%q", args.SupersededReason))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -7098,10 +7098,10 @@ func (qc *QueryClient) MarkResponsibilityIntakePending(ctx context.Context, args
 
 func MarkResponsibilityIntakePendingBuild(args MarkResponsibilityIntakePendingArgs) string {
 	var b strings.Builder
-	b.WriteString("markResponsibilityIntakePending({")
+	b.WriteString("mutation markResponsibilityIntakePending(")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -7135,109 +7135,109 @@ func (qc *QueryClient) MintAction(ctx context.Context, args MintActionArgs) (*Re
 
 func MintActionBuild(args MintActionArgs) string {
 	var b strings.Builder
-	b.WriteString("mintAction({")
+	b.WriteString("mutation mintAction(")
 	if args.ActionId != "" {
 		b.WriteString("actionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActionId))
 	}
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("intent: ")
 	b.WriteString(fmt.Sprintf("%q", args.Intent))
 	if args.Capability != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capability: ")
 		b.WriteString(fmt.Sprintf("%q", args.Capability))
 	}
 	if args.SideEffectClass != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sideEffectClass: ")
 		b.WriteString(fmt.Sprintf("%q", args.SideEffectClass))
 	}
 	if args.Status != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("inputFingerprint: ")
 	b.WriteString(fmt.Sprintf("%q", args.InputFingerprint))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("calls: ")
 	b.WriteString(renderMemQLValue(args.Calls))
 	if args.ResourceEdges != nil {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("resourceEdges: ")
 		b.WriteString(renderMemQLValue(args.ResourceEdges))
 	}
 	if args.ParamBindings != nil {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("paramBindings: ")
 		b.WriteString(renderMemQLValue(args.ParamBindings))
 	}
 	if args.TemplateFingerprint != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("templateFingerprint: ")
 		b.WriteString(fmt.Sprintf("%q", args.TemplateFingerprint))
 	}
 	if args.RecordedResult != nil {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recordedResult: ")
 		b.WriteString(renderMemQLValue(args.RecordedResult))
 	}
 	if args.ResultFingerprint != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("resultFingerprint: ")
 		b.WriteString(fmt.Sprintf("%q", args.ResultFingerprint))
 	}
 	if args.RecordedSurface != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recordedSurface: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecordedSurface))
 	}
 	if args.ProvenancePlanId != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provenancePlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProvenancePlanId))
 	}
 	if args.ProvenanceStepId != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provenanceStepId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProvenanceStepId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -7267,83 +7267,83 @@ func (qc *QueryClient) MintSkill(ctx context.Context, args MintSkillArgs) (*Resu
 
 func MintSkillBuild(args MintSkillArgs) string {
 	var b strings.Builder
-	b.WriteString("mintSkill({")
+	b.WriteString("mutation mintSkill(")
 	if args.SkillId != "" {
 		b.WriteString("skillId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SkillId))
 	}
-	if b.Len() > 11 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	if b.Len() > 11 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Description != "" {
-		if b.Len() > 11 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.Category != "" {
-		if b.Len() > 11 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("category: ")
 		b.WriteString(fmt.Sprintf("%q", args.Category))
 	}
 	if args.Tags != nil {
-		if b.Len() > 11 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tags: ")
 		b.WriteString(renderMemQLValue(args.Tags))
 	}
 	if args.DomainIds != nil {
-		if b.Len() > 11 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("domainIds: ")
 		b.WriteString(renderMemQLValue(args.DomainIds))
 	}
 	if args.ToolSlugs != nil {
-		if b.Len() > 11 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("toolSlugs: ")
 		b.WriteString(renderMemQLValue(args.ToolSlugs))
 	}
 	if args.LiveSourceIds != nil {
-		if b.Len() > 11 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("liveSourceIds: ")
 		b.WriteString(renderMemQLValue(args.LiveSourceIds))
 	}
-	if b.Len() > 11 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.OriginatingPlanId != "" {
-		if b.Len() > 11 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("originatingPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OriginatingPlanId))
 	}
 	if args.MintedByAgentId != "" {
-		if b.Len() > 11 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mintedByAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.MintedByAgentId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -7367,45 +7367,45 @@ func (qc *QueryClient) PersistTaskState(ctx context.Context, args PersistTaskSta
 
 func PersistTaskStateBuild(args PersistTaskStateArgs) string {
 	var b strings.Builder
-	b.WriteString("persistTaskState({")
+	b.WriteString("mutation persistTaskState(")
 	if args.StateId != "" {
 		b.WriteString("stateId: ")
 		b.WriteString(fmt.Sprintf("%q", args.StateId))
 	}
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("taskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TaskId))
 	if args.WorkingMemory != nil {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("workingMemory: ")
 		b.WriteString(renderMemQLValue(args.WorkingMemory))
 	}
 	if args.ReasoningChain != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reasoningChain: ")
 		b.WriteString(fmt.Sprintf("%q", args.ReasoningChain))
 	}
 	if args.ToolCallHistory != nil {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("toolCallHistory: ")
 		b.WriteString(renderMemQLValue(args.ToolCallHistory))
 	}
 	if args.PendingSubPlanIds != nil {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("pendingSubPlanIds: ")
 		b.WriteString(renderMemQLValue(args.PendingSubPlanIds))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -7431,46 +7431,46 @@ func (qc *QueryClient) ProposeOverride(ctx context.Context, args ProposeOverride
 
 func ProposeOverrideBuild(args ProposeOverrideArgs) string {
 	var b strings.Builder
-	b.WriteString("proposeOverride({")
+	b.WriteString("mutation proposeOverride(")
 	b.WriteString("overrideId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OverrideId))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("baseConstructId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BaseConstructId))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("overrideData: ")
 	b.WriteString(renderMemQLValue(args.OverrideData))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("version: ")
 	b.WriteString(fmt.Sprintf("%v", args.Version))
 	if args.BlastRadius != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("blastRadius: ")
 		b.WriteString(fmt.Sprintf("%q", args.BlastRadius))
 	}
 	if args.Reason != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
 	if args.SourcePreconditionId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourcePreconditionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourcePreconditionId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -7492,20 +7492,20 @@ func (qc *QueryClient) ProvisionWorkspace(ctx context.Context, args ProvisionWor
 
 func ProvisionWorkspaceBuild(args ProvisionWorkspaceArgs) string {
 	var b strings.Builder
-	b.WriteString("provisionWorkspace({")
+	b.WriteString("mutation provisionWorkspace(")
 	b.WriteString("workspaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("storageRoot: ")
 	b.WriteString(fmt.Sprintf("%q", args.StorageRoot))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -7524,10 +7524,10 @@ func (qc *QueryClient) PruneHarnessSemanticMemory(ctx context.Context, args Prun
 
 func PruneHarnessSemanticMemoryBuild(args PruneHarnessSemanticMemoryArgs) string {
 	var b strings.Builder
-	b.WriteString("pruneHarnessSemanticMemory({")
+	b.WriteString("mutation pruneHarnessSemanticMemory(")
 	b.WriteString("memoryId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -7546,10 +7546,10 @@ func (qc *QueryClient) ReadyHarnessStep(ctx context.Context, args ReadyHarnessSt
 
 func ReadyHarnessStepBuild(args ReadyHarnessStepArgs) string {
 	var b strings.Builder
-	b.WriteString("readyHarnessStep({")
+	b.WriteString("mutation readyHarnessStep(")
 	b.WriteString("stepId: ")
 	b.WriteString(fmt.Sprintf("%q", args.StepId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -7573,41 +7573,41 @@ func (qc *QueryClient) RecordActionCandidate(ctx context.Context, args RecordAct
 
 func RecordActionCandidateBuild(args RecordActionCandidateArgs) string {
 	var b strings.Builder
-	b.WriteString("recordActionCandidate({")
+	b.WriteString("mutation recordActionCandidate(")
 	if args.CandidateId != "" {
 		b.WriteString("candidateId: ")
 		b.WriteString(fmt.Sprintf("%q", args.CandidateId))
 	}
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("stepId: ")
 	b.WriteString(fmt.Sprintf("%q", args.StepId))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("calls: ")
 	b.WriteString(renderMemQLValue(args.Calls))
 	if args.ResourceEdges != nil {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("resourceEdges: ")
 		b.WriteString(renderMemQLValue(args.ResourceEdges))
 	}
 	if args.CallCount != 0 {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("callCount: ")
 		b.WriteString(fmt.Sprintf("%v", args.CallCount))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -7630,27 +7630,27 @@ func (qc *QueryClient) RecordBundleDryRun(ctx context.Context, args RecordBundle
 
 func RecordBundleDryRunBuild(args RecordBundleDryRunArgs) string {
 	var b strings.Builder
-	b.WriteString("recordBundleDryRun({")
+	b.WriteString("mutation recordBundleDryRun(")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("dryRunReport: ")
 	b.WriteString(renderMemQLValue(args.DryRunReport))
 	if args.FailureReason != "" {
-		if b.Len() > 20 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("failureReason: ")
 		b.WriteString(fmt.Sprintf("%q", args.FailureReason))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -7673,27 +7673,27 @@ func (qc *QueryClient) RecordBundleValidation(ctx context.Context, args RecordBu
 
 func RecordBundleValidationBuild(args RecordBundleValidationArgs) string {
 	var b strings.Builder
-	b.WriteString("recordBundleValidation({")
+	b.WriteString("mutation recordBundleValidation(")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("validationReport: ")
 	b.WriteString(renderMemQLValue(args.ValidationReport))
 	if args.FailureReason != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("failureReason: ")
 		b.WriteString(fmt.Sprintf("%q", args.FailureReason))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -7724,70 +7724,70 @@ func (qc *QueryClient) RecordCall(ctx context.Context, args RecordCallArgs) (*Re
 
 func RecordCallBuild(args RecordCallArgs) string {
 	var b strings.Builder
-	b.WriteString("recordCall({")
+	b.WriteString("mutation recordCall(")
 	b.WriteString("direction: ")
 	b.WriteString(fmt.Sprintf("%q", args.Direction))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fromE164: ")
 	b.WriteString(fmt.Sprintf("%q", args.FromE164))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toE164: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToE164))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("room: ")
 	b.WriteString(fmt.Sprintf("%q", args.Room))
 	if args.Carrier != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("carrier: ")
 		b.WriteString(fmt.Sprintf("%q", args.Carrier))
 	}
 	if args.ProviderCallId != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("providerCallId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProviderCallId))
 	}
 	if args.AgentId != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.DurationSeconds != 0 {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("durationSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.DurationSeconds))
 	}
 	if args.Disposition != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("disposition: ")
 		b.WriteString(fmt.Sprintf("%q", args.Disposition))
 	}
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("costEstimate: ")
 	b.WriteString(fmt.Sprintf("%q", args.CostEstimate))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -7815,40 +7815,40 @@ func (qc *QueryClient) RecordDependencyEdge(ctx context.Context, args RecordDepe
 
 func RecordDependencyEdgeBuild(args RecordDependencyEdgeArgs) string {
 	var b strings.Builder
-	b.WriteString("recordDependencyEdge({")
+	b.WriteString("mutation recordDependencyEdge(")
 	b.WriteString("edgeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.EdgeId))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fromConstruct: ")
 	b.WriteString(fmt.Sprintf("%q", args.FromConstruct))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fromKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.FromKind))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toName: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToName))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToKind))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toSource: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToSource))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -7873,41 +7873,41 @@ func (qc *QueryClient) RecordHarnessObservation(ctx context.Context, args Record
 
 func RecordHarnessObservationBuild(args RecordHarnessObservationArgs) string {
 	var b strings.Builder
-	b.WriteString("recordHarnessObservation({")
+	b.WriteString("mutation recordHarnessObservation(")
 	if args.ObservationId != "" {
 		b.WriteString("observationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ObservationId))
 	}
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("stepId: ")
 	b.WriteString(fmt.Sprintf("%q", args.StepId))
 	if args.PlanId != "" {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("content: ")
 	b.WriteString(fmt.Sprintf("%q", args.Content))
 	if args.Data != nil {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("data: ")
 		b.WriteString(renderMemQLValue(args.Data))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -7927,15 +7927,15 @@ func (qc *QueryClient) RecordLegalAcceptance(ctx context.Context, args RecordLeg
 
 func RecordLegalAcceptanceBuild(args RecordLegalAcceptanceArgs) string {
 	var b strings.Builder
-	b.WriteString("recordLegalAcceptance({")
+	b.WriteString("mutation recordLegalAcceptance(")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("legalAcceptance: ")
 	b.WriteString(renderMemQLValue(args.LegalAcceptance))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -7956,22 +7956,22 @@ func (qc *QueryClient) RecordMentoredEvent(ctx context.Context, args RecordMento
 
 func RecordMentoredEventBuild(args RecordMentoredEventArgs) string {
 	var b strings.Builder
-	b.WriteString("recordMentoredEvent({")
+	b.WriteString("mutation recordMentoredEvent(")
 	if args.EventId != "" {
 		b.WriteString("eventId: ")
 		b.WriteString(fmt.Sprintf("%q", args.EventId))
 	}
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("note: ")
 	b.WriteString(fmt.Sprintf("%q", args.Note))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -7998,46 +7998,46 @@ func (qc *QueryClient) RecordNumber(ctx context.Context, args RecordNumberArgs) 
 
 func RecordNumberBuild(args RecordNumberArgs) string {
 	var b strings.Builder
-	b.WriteString("recordNumber({")
+	b.WriteString("mutation recordNumber(")
 	b.WriteString("e164: ")
 	b.WriteString(fmt.Sprintf("%q", args.E164))
-	if b.Len() > 14 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("carrier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Carrier))
-	if b.Len() > 14 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	if args.Purpose != "" {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("purpose: ")
 		b.WriteString(fmt.Sprintf("%q", args.Purpose))
 	}
 	if args.ProviderId != "" {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("providerId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProviderId))
 	}
 	if args.NumberType != "" {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("numberType: ")
 		b.WriteString(fmt.Sprintf("%q", args.NumberType))
 	}
-	if b.Len() > 14 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("monthlyCost: ")
 	b.WriteString(fmt.Sprintf("%q", args.MonthlyCost))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8058,24 +8058,24 @@ func (qc *QueryClient) RecordPlannerInvocation(ctx context.Context, args RecordP
 
 func RecordPlannerInvocationBuild(args RecordPlannerInvocationArgs) string {
 	var b strings.Builder
-	b.WriteString("recordPlannerInvocation({")
+	b.WriteString("mutation recordPlannerInvocation(")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	if args.TokenSpent != 0 {
-		if b.Len() > 25 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenSpent: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenSpent))
 	}
 	if args.Metrics != nil {
-		if b.Len() > 25 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("metrics: ")
 		b.WriteString(renderMemQLValue(args.Metrics))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8099,43 +8099,43 @@ func (qc *QueryClient) RecordRequestEvent(ctx context.Context, args RecordReques
 
 func RecordRequestEventBuild(args RecordRequestEventArgs) string {
 	var b strings.Builder
-	b.WriteString("recordRequestEvent({")
+	b.WriteString("mutation recordRequestEvent(")
 	if args.EventId != "" {
 		b.WriteString("eventId: ")
 		b.WriteString(fmt.Sprintf("%q", args.EventId))
 	}
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
 	if args.FromStatus != "" {
-		if b.Len() > 20 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("fromStatus: ")
 		b.WriteString(fmt.Sprintf("%q", args.FromStatus))
 	}
 	if args.ToStatus != "" {
-		if b.Len() > 20 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("toStatus: ")
 		b.WriteString(fmt.Sprintf("%q", args.ToStatus))
 	}
 	if args.Note != "" {
-		if b.Len() > 20 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
 		b.WriteString(fmt.Sprintf("%q", args.Note))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8155,15 +8155,15 @@ func (qc *QueryClient) RecordResponsibilityEvaluation(ctx context.Context, args 
 
 func RecordResponsibilityEvaluationBuild(args RecordResponsibilityEvaluationArgs) string {
 	var b strings.Builder
-	b.WriteString("recordResponsibilityEvaluation({")
+	b.WriteString("mutation recordResponsibilityEvaluation(")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
-	if b.Len() > 32 {
+	if b.Len() > 40 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastResult: ")
 	b.WriteString(fmt.Sprintf("%q", args.LastResult))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8210,163 +8210,163 @@ func (qc *QueryClient) RecordRouterCall(ctx context.Context, args RecordRouterCa
 
 func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 	var b strings.Builder
-	b.WriteString("recordRouterCall({")
+	b.WriteString("mutation recordRouterCall(")
 	b.WriteString("callId: ")
 	b.WriteString(fmt.Sprintf("%q", args.CallId))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
 	if args.AgentId != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.UserId != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UserId))
 	}
 	if args.PromptName != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("promptName: ")
 		b.WriteString(fmt.Sprintf("%q", args.PromptName))
 	}
 	if args.PolicyName != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("policyName: ")
 		b.WriteString(fmt.Sprintf("%q", args.PolicyName))
 	}
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("vendor: ")
 	b.WriteString(fmt.Sprintf("%q", args.Vendor))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("model: ")
 	b.WriteString(fmt.Sprintf("%q", args.Model))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("providerName: ")
 	b.WriteString(fmt.Sprintf("%q", args.ProviderName))
 	if args.InputTokens != 0 {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("inputTokens: ")
 		b.WriteString(fmt.Sprintf("%v", args.InputTokens))
 	}
 	if args.OutputTokens != 0 {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("outputTokens: ")
 		b.WriteString(fmt.Sprintf("%v", args.OutputTokens))
 	}
 	if args.CachedInputTokens != 0 {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("cachedInputTokens: ")
 		b.WriteString(fmt.Sprintf("%v", args.CachedInputTokens))
 	}
 	if args.TokensEstimatedSet {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokensEstimated: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokensEstimated))
 	}
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("inputCost: ")
 	b.WriteString(fmt.Sprintf("%q", args.InputCost))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("outputCost: ")
 	b.WriteString(fmt.Sprintf("%q", args.OutputCost))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("cachedInputCost: ")
 	b.WriteString(fmt.Sprintf("%q", args.CachedInputCost))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("totalCost: ")
 	b.WriteString(fmt.Sprintf("%q", args.TotalCost))
 	if args.PricingConfiguredSet {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("pricingConfigured: ")
 		b.WriteString(fmt.Sprintf("%v", args.PricingConfigured))
 	}
 	if args.TimeToFirstTokenMs != 0 {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("timeToFirstTokenMs: ")
 		b.WriteString(fmt.Sprintf("%v", args.TimeToFirstTokenMs))
 	}
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("totalDurationMs: ")
 	b.WriteString(fmt.Sprintf("%v", args.TotalDurationMs))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tokensPerSec: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokensPerSec))
 	if args.StreamingSet {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("streaming: ")
 		b.WriteString(fmt.Sprintf("%v", args.Streaming))
 	}
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("outcome: ")
 	b.WriteString(fmt.Sprintf("%q", args.Outcome))
 	if args.ErrorCategory != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorCategory: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorCategory))
 	}
 	if args.ErrorMessage != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
 	if args.FallbackFromModel != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("fallbackFromModel: ")
 		b.WriteString(fmt.Sprintf("%q", args.FallbackFromModel))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8391,43 +8391,43 @@ func (qc *QueryClient) RecordTrunk(ctx context.Context, args RecordTrunkArgs) (*
 
 func RecordTrunkBuild(args RecordTrunkArgs) string {
 	var b strings.Builder
-	b.WriteString("recordTrunk({")
+	b.WriteString("mutation recordTrunk(")
 	b.WriteString("carrier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Carrier))
-	if b.Len() > 13 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("direction: ")
 	b.WriteString(fmt.Sprintf("%q", args.Direction))
 	if args.Name != "" {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("name: ")
 		b.WriteString(fmt.Sprintf("%q", args.Name))
 	}
 	if args.LivekitTrunkId != "" {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("livekitTrunkId: ")
 		b.WriteString(fmt.Sprintf("%q", args.LivekitTrunkId))
 	}
 	if args.SipEdgeUri != "" {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sipEdgeUri: ")
 		b.WriteString(fmt.Sprintf("%q", args.SipEdgeUri))
 	}
 	if args.SecretRef != "" {
-		if b.Len() > 13 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("secretRef: ")
 		b.WriteString(fmt.Sprintf("%q", args.SecretRef))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8449,27 +8449,27 @@ func (qc *QueryClient) RedeemWorkerPairingCode(ctx context.Context, args RedeemW
 
 func RedeemWorkerPairingCodeBuild(args RedeemWorkerPairingCodeArgs) string {
 	var b strings.Builder
-	b.WriteString("redeemWorkerPairingCode({")
+	b.WriteString("mutation redeemWorkerPairingCode(")
 	b.WriteString("pairingId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PairingId))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("redeemedAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.RedeemedAt))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("redeemedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.RedeemedBy))
 	if args.RedeemedFromIP != "" {
-		if b.Len() > 25 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("redeemedFromIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.RedeemedFromIP))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8499,79 +8499,79 @@ func (qc *QueryClient) RefreshWorkerRegistration(ctx context.Context, args Refre
 
 func RefreshWorkerRegistrationBuild(args RefreshWorkerRegistrationArgs) string {
 	var b strings.Builder
-	b.WriteString("refreshWorkerRegistration({")
+	b.WriteString("mutation refreshWorkerRegistration(")
 	b.WriteString("registrationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegistrationId))
-	if b.Len() > 27 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 27 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("capabilities: ")
 	b.WriteString(renderMemQLValue(args.Capabilities))
 	if args.CapabilityDescriptor != nil {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capabilityDescriptor: ")
 		b.WriteString(renderMemQLValue(args.CapabilityDescriptor))
 	}
 	if args.Labels != nil {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("labels: ")
 		b.WriteString(renderMemQLValue(args.Labels))
 	}
-	if b.Len() > 27 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("concurrency: ")
 	b.WriteString(renderMemQLValue(args.Concurrency))
 	if args.PlatformInfo != nil {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("platformInfo: ")
 		b.WriteString(renderMemQLValue(args.PlatformInfo))
 	}
 	if args.Permissions != nil {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("permissions: ")
 		b.WriteString(renderMemQLValue(args.Permissions))
 	}
 	if args.Version != "" {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
 		b.WriteString(fmt.Sprintf("%q", args.Version))
 	}
 	if args.BuildTag != "" {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("buildTag: ")
 		b.WriteString(fmt.Sprintf("%q", args.BuildTag))
 	}
-	if b.Len() > 27 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastSeenAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.LastSeenAt))
 	if args.LastConnectedFromIP != "" {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastConnectedFromIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastConnectedFromIP))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8595,41 +8595,41 @@ func (qc *QueryClient) RegisterSurface(ctx context.Context, args RegisterSurface
 
 func RegisterSurfaceBuild(args RegisterSurfaceArgs) string {
 	var b strings.Builder
-	b.WriteString("registerSurface({")
+	b.WriteString("mutation registerSurface(")
 	if args.SurfaceId != "" {
 		b.WriteString("surfaceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SurfaceId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
 	if args.MachineId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("machineId: ")
 		b.WriteString(fmt.Sprintf("%q", args.MachineId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("capabilities: ")
 	b.WriteString(renderMemQLValue(args.Capabilities))
 	if args.Priority != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("priority: ")
 		b.WriteString(fmt.Sprintf("%v", args.Priority))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8650,20 +8650,20 @@ func (qc *QueryClient) ReinforceAction(ctx context.Context, args ReinforceAction
 
 func ReinforceActionBuild(args ReinforceActionArgs) string {
 	var b strings.Builder
-	b.WriteString("reinforceAction({")
+	b.WriteString("mutation reinforceAction(")
 	b.WriteString("actionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ActionId))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reliability: ")
 	b.WriteString(fmt.Sprintf("%q", args.Reliability))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reinforceCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.ReinforceCount))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8685,25 +8685,25 @@ func (qc *QueryClient) ReinforceHarnessSemanticMemory(ctx context.Context, args 
 
 func ReinforceHarnessSemanticMemoryBuild(args ReinforceHarnessSemanticMemoryArgs) string {
 	var b strings.Builder
-	b.WriteString("reinforceHarnessSemanticMemory({")
+	b.WriteString("mutation reinforceHarnessSemanticMemory(")
 	b.WriteString("memoryId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
-	if b.Len() > 32 {
+	if b.Len() > 40 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
 	b.WriteString(fmt.Sprintf("%q", args.Confidence))
-	if b.Len() > 32 {
+	if b.Len() > 40 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reinforceCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.ReinforceCount))
-	if b.Len() > 32 {
+	if b.Len() > 40 {
 		b.WriteString(", ")
 	}
 	b.WriteString("sourceEpisodes: ")
 	b.WriteString(renderMemQLValue(args.SourceEpisodes))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8724,22 +8724,22 @@ func (qc *QueryClient) RejectAccessRequest(ctx context.Context, args RejectAcces
 
 func RejectAccessRequestBuild(args RejectAccessRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("rejectAccessRequest({")
+	b.WriteString("mutation rejectAccessRequest(")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reviewedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.ReviewedBy))
 	if args.ReviewerNote != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reviewerNote: ")
 		b.WriteString(fmt.Sprintf("%q", args.ReviewerNote))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8759,17 +8759,17 @@ func (qc *QueryClient) RejectOverride(ctx context.Context, args RejectOverrideAr
 
 func RejectOverrideBuild(args RejectOverrideArgs) string {
 	var b strings.Builder
-	b.WriteString("rejectOverride({")
+	b.WriteString("mutation rejectOverride(")
 	b.WriteString("overrideId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OverrideId))
 	if args.RejectionReason != "" {
-		if b.Len() > 16 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("rejectionReason: ")
 		b.WriteString(fmt.Sprintf("%q", args.RejectionReason))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8791,15 +8791,15 @@ func (qc *QueryClient) ReleaseWorkspace(ctx context.Context, args ReleaseWorkspa
 
 func ReleaseWorkspaceBuild(args ReleaseWorkspaceArgs) string {
 	var b strings.Builder
-	b.WriteString("releaseWorkspace({")
+	b.WriteString("mutation releaseWorkspace(")
 	b.WriteString("workspaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reason: ")
 	b.WriteString(fmt.Sprintf("%q", args.Reason))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8819,15 +8819,15 @@ func (qc *QueryClient) RemoveAgentFromSpace(ctx context.Context, args RemoveAgen
 
 func RemoveAgentFromSpaceBuild(args RemoveAgentFromSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("removeAgentFromSpace({")
+	b.WriteString("mutation removeAgentFromSpace(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8847,15 +8847,15 @@ func (qc *QueryClient) RequestChanges(ctx context.Context, args RequestChangesAr
 
 func RequestChangesBuild(args RequestChangesArgs) string {
 	var b strings.Builder
-	b.WriteString("requestChanges({")
+	b.WriteString("mutation requestChanges(")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("resolution: ")
 	b.WriteString(fmt.Sprintf("%q", args.Resolution))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8875,15 +8875,15 @@ func (qc *QueryClient) RequestPlanFeedback(ctx context.Context, args RequestPlan
 
 func RequestPlanFeedbackBuild(args RequestPlanFeedbackArgs) string {
 	var b strings.Builder
-	b.WriteString("requestPlanFeedback({")
+	b.WriteString("mutation requestPlanFeedback(")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("feedbackRequest: ")
 	b.WriteString(renderMemQLValue(args.FeedbackRequest))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8905,27 +8905,27 @@ func (qc *QueryClient) ResolveApprovalRequest(ctx context.Context, args ResolveA
 
 func ResolveApprovalRequestBuild(args ResolveApprovalRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("resolveApprovalRequest({")
+	b.WriteString("mutation resolveApprovalRequest(")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("decidedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.DecidedBy))
 	if args.DecisionReason != "" {
-		if b.Len() > 24 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("decisionReason: ")
 		b.WriteString(fmt.Sprintf("%q", args.DecisionReason))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8944,10 +8944,10 @@ func (qc *QueryClient) RetireAuthoringBundle(ctx context.Context, args RetireAut
 
 func RetireAuthoringBundleBuild(args RetireAuthoringBundleArgs) string {
 	var b strings.Builder
-	b.WriteString("retireAuthoringBundle({")
+	b.WriteString("mutation retireAuthoringBundle(")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -8969,25 +8969,25 @@ func (qc *QueryClient) RevertRecord(ctx context.Context, args RevertRecordArgs) 
 
 func RevertRecordBuild(args RevertRecordArgs) string {
 	var b strings.Builder
-	b.WriteString("revertRecord({")
+	b.WriteString("mutation revertRecord(")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	if b.Len() > 14 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toState: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToState))
-	if b.Len() > 14 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("checkCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.CheckCount))
-	if b.Len() > 14 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confirmCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.ConfirmCount))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9006,10 +9006,10 @@ func (qc *QueryClient) RevokeAgentAuthorization(ctx context.Context, args Revoke
 
 func RevokeAgentAuthorizationBuild(args RevokeAgentAuthorizationArgs) string {
 	var b strings.Builder
-	b.WriteString("revokeAgentAuthorization({")
+	b.WriteString("mutation revokeAgentAuthorization(")
 	b.WriteString("authId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AuthId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9030,15 +9030,15 @@ func (qc *QueryClient) RevokeAuthSession(ctx context.Context, args RevokeAuthSes
 
 func RevokeAuthSessionBuild(args RevokeAuthSessionArgs) string {
 	var b strings.Builder
-	b.WriteString("revokeAuthSession({")
+	b.WriteString("mutation revokeAuthSession(")
 	b.WriteString("sessionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SessionId))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("revokedReason: ")
 	b.WriteString(fmt.Sprintf("%q", args.RevokedReason))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9059,24 +9059,24 @@ func (qc *QueryClient) RevokeDelegation(ctx context.Context, args RevokeDelegati
 
 func RevokeDelegationBuild(args RevokeDelegationArgs) string {
 	var b strings.Builder
-	b.WriteString("revokeDelegation({")
+	b.WriteString("mutation revokeDelegation(")
 	b.WriteString("delegationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DelegationId))
 	if args.RevokedBySubject != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("revokedBySubject: ")
 		b.WriteString(fmt.Sprintf("%q", args.RevokedBySubject))
 	}
 	if args.RevokedAt != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("revokedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.RevokedAt))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9095,10 +9095,10 @@ func (qc *QueryClient) RevokeNodeTokenIdentity(ctx context.Context, args RevokeN
 
 func RevokeNodeTokenIdentityBuild(args RevokeNodeTokenIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("revokeNodeTokenIdentity({")
+	b.WriteString("mutation revokeNodeTokenIdentity(")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9117,10 +9117,10 @@ func (qc *QueryClient) RevokePATIdentity(ctx context.Context, args RevokePATIden
 
 func RevokePATIdentityBuild(args RevokePATIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("revokePATIdentity({")
+	b.WriteString("mutation revokePATIdentity(")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9142,29 +9142,29 @@ func (qc *QueryClient) RevokeWorker(ctx context.Context, args RevokeWorkerArgs) 
 
 func RevokeWorkerBuild(args RevokeWorkerArgs) string {
 	var b strings.Builder
-	b.WriteString("revokeWorker({")
+	b.WriteString("mutation revokeWorker(")
 	b.WriteString("registrationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegistrationId))
-	if b.Len() > 14 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("revokedAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.RevokedAt))
 	if args.RevokedBy != "" {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("revokedBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.RevokedBy))
 	}
 	if args.RevokeReason != "" {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("revokeReason: ")
 		b.WriteString(fmt.Sprintf("%q", args.RevokeReason))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9183,10 +9183,10 @@ func (qc *QueryClient) RevokeWorkerTokenIdentity(ctx context.Context, args Revok
 
 func RevokeWorkerTokenIdentityBuild(args RevokeWorkerTokenIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("revokeWorkerTokenIdentity({")
+	b.WriteString("mutation revokeWorkerTokenIdentity(")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9208,25 +9208,25 @@ func (qc *QueryClient) RotateAuthSession(ctx context.Context, args RotateAuthSes
 
 func RotateAuthSessionBuild(args RotateAuthSessionArgs) string {
 	var b strings.Builder
-	b.WriteString("rotateAuthSession({")
+	b.WriteString("mutation rotateAuthSession(")
 	b.WriteString("sessionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SessionId))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newRefreshTokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.NewRefreshTokenHash))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("previousRefreshTokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.PreviousRefreshTokenHash))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newExpiresAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.NewExpiresAt))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9245,10 +9245,10 @@ func (qc *QueryClient) ScheduleAccountDeletion(ctx context.Context, args Schedul
 
 func ScheduleAccountDeletionBuild(args ScheduleAccountDeletionArgs) string {
 	var b strings.Builder
-	b.WriteString("scheduleAccountDeletion({")
+	b.WriteString("mutation scheduleAccountDeletion(")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9274,55 +9274,55 @@ func (qc *QueryClient) SendActionUtterance(ctx context.Context, args SendActionU
 
 func SendActionUtteranceBuild(args SendActionUtteranceArgs) string {
 	var b strings.Builder
-	b.WriteString("sendActionUtterance({")
+	b.WriteString("mutation sendActionUtterance(")
 	if args.UtteranceId != "" {
 		b.WriteString("utteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
 	}
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	if args.ParticipantType != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
 	}
 	if args.ReplyToId != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("replyToId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ReplyToId))
 	}
 	if args.Source != nil {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("source: ")
 		b.WriteString(renderMemQLValue(args.Source))
 	}
 	if args.CreatedAt != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("createdAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.CreatedAt))
 	}
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
 	b.WriteString(renderMemQLValue(args.Action))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9353,85 +9353,85 @@ func (qc *QueryClient) SendRealtimeTranscriptUtterance(ctx context.Context, args
 
 func SendRealtimeTranscriptUtteranceBuild(args SendRealtimeTranscriptUtteranceArgs) string {
 	var b strings.Builder
-	b.WriteString("sendRealtimeTranscriptUtterance({")
+	b.WriteString("mutation sendRealtimeTranscriptUtterance(")
 	if args.UtteranceId != "" {
 		b.WriteString("utteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
 	}
 	if args.IdempotencyKey != "" {
-		if b.Len() > 33 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("idempotencyKey: ")
 		b.WriteString(fmt.Sprintf("%q", args.IdempotencyKey))
 	}
 	if args.CreatedAt != "" {
-		if b.Len() > 33 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("createdAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.CreatedAt))
 	}
-	if b.Len() > 33 {
+	if b.Len() > 41 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 33 {
+	if b.Len() > 41 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	if args.ParticipantType != "" {
-		if b.Len() > 33 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
 	}
 	if args.Text != "" {
-		if b.Len() > 33 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("text: ")
 		b.WriteString(fmt.Sprintf("%q", args.Text))
 	}
 	if args.AudioId != "" {
-		if b.Len() > 33 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("audioId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AudioId))
 	}
 	if args.VideoId != "" {
-		if b.Len() > 33 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("videoId: ")
 		b.WriteString(fmt.Sprintf("%q", args.VideoId))
 	}
 	if args.Duration != 0 {
-		if b.Len() > 33 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("duration: ")
 		b.WriteString(fmt.Sprintf("%v", args.Duration))
 	}
 	if args.Timestamps != nil {
-		if b.Len() > 33 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("timestamps: ")
 		b.WriteString(renderMemQLValue(args.Timestamps))
 	}
 	if args.Source != nil {
-		if b.Len() > 33 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("source: ")
 		b.WriteString(renderMemQLValue(args.Source))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9459,71 +9459,71 @@ func (qc *QueryClient) SendSpeechUtterance(ctx context.Context, args SendSpeechU
 
 func SendSpeechUtteranceBuild(args SendSpeechUtteranceArgs) string {
 	var b strings.Builder
-	b.WriteString("sendSpeechUtterance({")
+	b.WriteString("mutation sendSpeechUtterance(")
 	if args.UtteranceId != "" {
 		b.WriteString("utteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
 	}
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	if args.ParticipantType != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
 	}
 	if args.Text != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("text: ")
 		b.WriteString(fmt.Sprintf("%q", args.Text))
 	}
 	if args.AudioId != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("audioId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AudioId))
 	}
 	if args.VideoId != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("videoId: ")
 		b.WriteString(fmt.Sprintf("%q", args.VideoId))
 	}
 	if args.Duration != 0 {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("duration: ")
 		b.WriteString(fmt.Sprintf("%v", args.Duration))
 	}
 	if args.Timestamps != nil {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("timestamps: ")
 		b.WriteString(renderMemQLValue(args.Timestamps))
 	}
 	if args.Source != nil {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("source: ")
 		b.WriteString(renderMemQLValue(args.Source))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9549,55 +9549,55 @@ func (qc *QueryClient) SendTextUtterance(ctx context.Context, args SendTextUtter
 
 func SendTextUtteranceBuild(args SendTextUtteranceArgs) string {
 	var b strings.Builder
-	b.WriteString("sendTextUtterance({")
+	b.WriteString("mutation sendTextUtterance(")
 	if args.UtteranceId != "" {
 		b.WriteString("utteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
 	}
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	if args.ParticipantType != "" {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
 	}
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
 	if args.ReplyToId != "" {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("replyToId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ReplyToId))
 	}
 	if args.Source != nil {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("source: ")
 		b.WriteString(renderMemQLValue(args.Source))
 	}
 	if args.Citations != nil {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("citations: ")
 		b.WriteString(renderMemQLValue(args.Citations))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9622,36 +9622,36 @@ func (qc *QueryClient) SetAccountEntitlement(ctx context.Context, args SetAccoun
 
 func SetAccountEntitlementBuild(args SetAccountEntitlementArgs) string {
 	var b strings.Builder
-	b.WriteString("setAccountEntitlement({")
+	b.WriteString("mutation setAccountEntitlement(")
 	b.WriteString("accountId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AccountId))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.MaxConcurrentTasks != 0 {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("maxConcurrentTasks: ")
 		b.WriteString(fmt.Sprintf("%v", args.MaxConcurrentTasks))
 	}
 	if args.AccountKind != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accountKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.AccountKind))
 	}
 	if args.Note != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
 		b.WriteString(fmt.Sprintf("%q", args.Note))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9675,34 +9675,34 @@ func (qc *QueryClient) SetAgentAudioOverride(ctx context.Context, args SetAgentA
 
 func SetAgentAudioOverrideBuild(args SetAgentAudioOverrideArgs) string {
 	var b strings.Builder
-	b.WriteString("setAgentAudioOverride({")
+	b.WriteString("mutation setAgentAudioOverride(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mode: ")
 	b.WriteString(fmt.Sprintf("%q", args.Mode))
 	if args.SetBy != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("setBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.SetBy))
 	}
 	if args.ActiveSet {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9726,34 +9726,34 @@ func (qc *QueryClient) SetAgentVideoOverride(ctx context.Context, args SetAgentV
 
 func SetAgentVideoOverrideBuild(args SetAgentVideoOverrideArgs) string {
 	var b strings.Builder
-	b.WriteString("setAgentVideoOverride({")
+	b.WriteString("mutation setAgentVideoOverride(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mode: ")
 	b.WriteString(fmt.Sprintf("%q", args.Mode))
 	if args.SetBy != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("setBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.SetBy))
 	}
 	if args.ActiveSet {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9772,10 +9772,10 @@ func (qc *QueryClient) SetAuthoredAutomationsEnabled(ctx context.Context, args S
 
 func SetAuthoredAutomationsEnabledBuild(args SetAuthoredAutomationsEnabledArgs) string {
 	var b strings.Builder
-	b.WriteString("setAuthoredAutomationsEnabled({")
+	b.WriteString("mutation setAuthoredAutomationsEnabled(")
 	b.WriteString("enabled: ")
 	b.WriteString(fmt.Sprintf("%v", args.Enabled))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9797,22 +9797,22 @@ func (qc *QueryClient) SetAuthoringBundleStatus(ctx context.Context, args SetAut
 
 func SetAuthoringBundleStatusBuild(args SetAuthoringBundleStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("setAuthoringBundleStatus({")
+	b.WriteString("mutation setAuthoringBundleStatus(")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
 	if args.FailureReason != "" {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("failureReason: ")
 		b.WriteString(fmt.Sprintf("%q", args.FailureReason))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9839,53 +9839,53 @@ func (qc *QueryClient) SetBudget(ctx context.Context, args SetBudgetArgs) (*Resu
 
 func SetBudgetBuild(args SetBudgetArgs) string {
 	var b strings.Builder
-	b.WriteString("setBudget({")
+	b.WriteString("mutation setBudget(")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 11 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("scope: ")
 	b.WriteString(fmt.Sprintf("%q", args.Scope))
 	if args.ScopeId != "" {
-		if b.Len() > 11 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("scopeId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ScopeId))
 	}
-	if b.Len() > 11 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("periodType: ")
 	b.WriteString(fmt.Sprintf("%q", args.PeriodType))
-	if b.Len() > 11 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("limitUSD: ")
 	b.WriteString(fmt.Sprintf("%q", args.LimitUSD))
 	if args.AlertThresholdPct != 0 {
-		if b.Len() > 11 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("alertThresholdPct: ")
 		b.WriteString(fmt.Sprintf("%v", args.AlertThresholdPct))
 	}
 	if args.ResetAt != "" {
-		if b.Len() > 11 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("resetAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ResetAt))
 	}
 	if args.ActiveSet {
-		if b.Len() > 11 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9909,34 +9909,34 @@ func (qc *QueryClient) SetConsent(ctx context.Context, args SetConsentArgs) (*Re
 
 func SetConsentBuild(args SetConsentArgs) string {
 	var b strings.Builder
-	b.WriteString("setConsent({")
+	b.WriteString("mutation setConsent(")
 	b.WriteString("phoneNumber: ")
 	b.WriteString(fmt.Sprintf("%q", args.PhoneNumber))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
 	if args.Reason != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
 	if args.Source != "" {
-		if b.Len() > 12 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("source: ")
 		b.WriteString(fmt.Sprintf("%q", args.Source))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9956,15 +9956,15 @@ func (qc *QueryClient) SetConstructCompiledForm(ctx context.Context, args SetCon
 
 func SetConstructCompiledFormBuild(args SetConstructCompiledFormArgs) string {
 	var b strings.Builder
-	b.WriteString("setConstructCompiledForm({")
+	b.WriteString("mutation setConstructCompiledForm(")
 	b.WriteString("constructId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("compiledForm: ")
 	b.WriteString(renderMemQLValue(args.CompiledForm))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -9985,15 +9985,15 @@ func (qc *QueryClient) SetConstructStatus(ctx context.Context, args SetConstruct
 
 func SetConstructStatusBuild(args SetConstructStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("setConstructStatus({")
+	b.WriteString("mutation setConstructStatus(")
 	b.WriteString("constructId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10020,53 +10020,53 @@ func (qc *QueryClient) SetGlobalSecret(ctx context.Context, args SetGlobalSecret
 
 func SetGlobalSecretBuild(args SetGlobalSecretArgs) string {
 	var b strings.Builder
-	b.WriteString("setGlobalSecret({")
+	b.WriteString("mutation setGlobalSecret(")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("encryptedValue: ")
 	b.WriteString(fmt.Sprintf("%q", args.EncryptedValue))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fingerprint: ")
 	b.WriteString(fmt.Sprintf("%q", args.Fingerprint))
 	if args.Kind != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("kind: ")
 		b.WriteString(fmt.Sprintf("%q", args.Kind))
 	}
 	if args.Description != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.AddedBy != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("addedBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.AddedBy))
 	}
 	if args.ActiveSet {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10090,34 +10090,34 @@ func (qc *QueryClient) SetGlobalVariable(ctx context.Context, args SetGlobalVari
 
 func SetGlobalVariableBuild(args SetGlobalVariableArgs) string {
 	var b strings.Builder
-	b.WriteString("setGlobalVariable({")
+	b.WriteString("mutation setGlobalVariable(")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 19 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("value: ")
 	b.WriteString(fmt.Sprintf("%q", args.Value))
 	if args.Description != "" {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.ActiveSet {
-		if b.Len() > 19 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10140,29 +10140,29 @@ func (qc *QueryClient) SetNumberE911(ctx context.Context, args SetNumberE911Args
 
 func SetNumberE911Build(args SetNumberE911Args) string {
 	var b strings.Builder
-	b.WriteString("setNumberE911({")
+	b.WriteString("mutation setNumberE911(")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 15 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("e911Registered: ")
 	b.WriteString(fmt.Sprintf("%v", args.E911Registered))
 	if args.E911AddressId != "" {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("e911AddressId: ")
 		b.WriteString(fmt.Sprintf("%q", args.E911AddressId))
 	}
 	if args.CallerIdVerifiedSet {
-		if b.Len() > 15 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("callerIdVerified: ")
 		b.WriteString(fmt.Sprintf("%v", args.CallerIdVerified))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10189,53 +10189,53 @@ func (qc *QueryClient) SetPartitionSecret(ctx context.Context, args SetPartition
 
 func SetPartitionSecretBuild(args SetPartitionSecretArgs) string {
 	var b strings.Builder
-	b.WriteString("setPartitionSecret({")
+	b.WriteString("mutation setPartitionSecret(")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("encryptedValue: ")
 	b.WriteString(fmt.Sprintf("%q", args.EncryptedValue))
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fingerprint: ")
 	b.WriteString(fmt.Sprintf("%q", args.Fingerprint))
 	if args.Kind != "" {
-		if b.Len() > 20 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("kind: ")
 		b.WriteString(fmt.Sprintf("%q", args.Kind))
 	}
 	if args.Description != "" {
-		if b.Len() > 20 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.AddedBy != "" {
-		if b.Len() > 20 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("addedBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.AddedBy))
 	}
 	if args.ActiveSet {
-		if b.Len() > 20 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10259,34 +10259,34 @@ func (qc *QueryClient) SetPartitionVariable(ctx context.Context, args SetPartiti
 
 func SetPartitionVariableBuild(args SetPartitionVariableArgs) string {
 	var b strings.Builder
-	b.WriteString("setPartitionVariable({")
+	b.WriteString("mutation setPartitionVariable(")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("value: ")
 	b.WriteString(fmt.Sprintf("%q", args.Value))
 	if args.Description != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.ActiveSet {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10312,50 +10312,50 @@ func (qc *QueryClient) SetPolicy(ctx context.Context, args SetPolicyArgs) (*Resu
 
 func SetPolicyBuild(args SetPolicyArgs) string {
 	var b strings.Builder
-	b.WriteString("setPolicy({")
+	b.WriteString("mutation setPolicy(")
 	b.WriteString("policyId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PolicyId))
-	if b.Len() > 11 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetRecordType: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetRecordType))
 	if args.PartitionId != "" {
-		if b.Len() > 11 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.RequiredChecks != 0 {
-		if b.Len() > 11 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requiredChecks: ")
 		b.WriteString(fmt.Sprintf("%v", args.RequiredChecks))
 	}
 	if args.RequiredConfirmations != 0 {
-		if b.Len() > 11 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requiredConfirmations: ")
 		b.WriteString(fmt.Sprintf("%v", args.RequiredConfirmations))
 	}
 	if args.CheckedDataUsableSet {
-		if b.Len() > 11 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("checkedDataUsable: ")
 		b.WriteString(fmt.Sprintf("%v", args.CheckedDataUsable))
 	}
 	if args.RevertMinRole != "" {
-		if b.Len() > 11 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("revertMinRole: ")
 		b.WriteString(fmt.Sprintf("%q", args.RevertMinRole))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10376,15 +10376,15 @@ func (qc *QueryClient) SetResponsibilityStatus(ctx context.Context, args SetResp
 
 func SetResponsibilityStatusBuild(args SetResponsibilityStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("setResponsibilityStatus({")
+	b.WriteString("mutation setResponsibilityStatus(")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10404,15 +10404,15 @@ func (qc *QueryClient) SetSurfaceAvailability(ctx context.Context, args SetSurfa
 
 func SetSurfaceAvailabilityBuild(args SetSurfaceAvailabilityArgs) string {
 	var b strings.Builder
-	b.WriteString("setSurfaceAvailability({")
+	b.WriteString("mutation setSurfaceAvailability(")
 	b.WriteString("surfaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SurfaceId))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("available: ")
 	b.WriteString(fmt.Sprintf("%v", args.Available))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10433,24 +10433,24 @@ func (qc *QueryClient) SetUserActiveSpace(ctx context.Context, args SetUserActiv
 
 func SetUserActiveSpaceBuild(args SetUserActiveSpaceArgs) string {
 	var b strings.Builder
-	b.WriteString("setUserActiveSpace({")
+	b.WriteString("mutation setUserActiveSpace(")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
 	if args.PartitionId != "" {
-		if b.Len() > 20 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.ActivePartitionId != "" {
-		if b.Len() > 20 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("activePartitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActivePartitionId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10469,10 +10469,10 @@ func (qc *QueryClient) SoftDeleteWorkerInvocation(ctx context.Context, args Soft
 
 func SoftDeleteWorkerInvocationBuild(args SoftDeleteWorkerInvocationArgs) string {
 	var b strings.Builder
-	b.WriteString("softDeleteWorkerInvocation({")
+	b.WriteString("mutation softDeleteWorkerInvocation(")
 	b.WriteString("invocationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.InvocationId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10494,25 +10494,25 @@ func (qc *QueryClient) StampNodeTokenBootstrap(ctx context.Context, args StampNo
 
 func StampNodeTokenBootstrapBuild(args StampNodeTokenBootstrapArgs) string {
 	var b strings.Builder
-	b.WriteString("stampNodeTokenBootstrap({")
+	b.WriteString("mutation stampNodeTokenBootstrap(")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bootstrappedAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bootstrappedFrom: ")
 	b.WriteString(fmt.Sprintf("%q", args.BootstrappedFrom))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10532,17 +10532,17 @@ func (qc *QueryClient) StartHarnessStep(ctx context.Context, args StartHarnessSt
 
 func StartHarnessStepBuild(args StartHarnessStepArgs) string {
 	var b strings.Builder
-	b.WriteString("startHarnessStep({")
+	b.WriteString("mutation startHarnessStep(")
 	b.WriteString("stepId: ")
 	b.WriteString(fmt.Sprintf("%q", args.StepId))
 	if args.AssignedAgent != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedAgent: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedAgent))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10561,10 +10561,10 @@ func (qc *QueryClient) StartPlan(ctx context.Context, args StartPlanArgs) (*Resu
 
 func StartPlanBuild(args StartPlanArgs) string {
 	var b strings.Builder
-	b.WriteString("startPlan({")
+	b.WriteString("mutation startPlan(")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10584,15 +10584,15 @@ func (qc *QueryClient) ToggleComputerUseEnabled(ctx context.Context, args Toggle
 
 func ToggleComputerUseEnabledBuild(args ToggleComputerUseEnabledArgs) string {
 	var b strings.Builder
-	b.WriteString("toggleComputerUseEnabled({")
+	b.WriteString("mutation toggleComputerUseEnabled(")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("enabled: ")
 	b.WriteString(fmt.Sprintf("%v", args.Enabled))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10612,15 +10612,15 @@ func (qc *QueryClient) TouchSession(ctx context.Context, args TouchSessionArgs) 
 
 func TouchSessionBuild(args TouchSessionArgs) string {
 	var b strings.Builder
-	b.WriteString("touchSession({")
+	b.WriteString("mutation touchSession(")
 	b.WriteString("sessionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SessionId))
-	if b.Len() > 14 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10639,10 +10639,10 @@ func (qc *QueryClient) TouchWorkspace(ctx context.Context, args TouchWorkspaceAr
 
 func TouchWorkspaceBuild(args TouchWorkspaceArgs) string {
 	var b strings.Builder
-	b.WriteString("touchWorkspace({")
+	b.WriteString("mutation touchWorkspace(")
 	b.WriteString("workspaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10662,15 +10662,15 @@ func (qc *QueryClient) UpdateAgent(ctx context.Context, args UpdateAgentArgs) (*
 
 func UpdateAgentBuild(args UpdateAgentArgs) string {
 	var b strings.Builder
-	b.WriteString("updateAgent({")
+	b.WriteString("mutation updateAgent(")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 13 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10690,15 +10690,15 @@ func (qc *QueryClient) UpdateAgentAuthScope(ctx context.Context, args UpdateAgen
 
 func UpdateAgentAuthScopeBuild(args UpdateAgentAuthScopeArgs) string {
 	var b strings.Builder
-	b.WriteString("updateAgentAuthScope({")
+	b.WriteString("mutation updateAgentAuthScope(")
 	b.WriteString("authorizationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AuthorizationId))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("computerUseScope: ")
 	b.WriteString(fmt.Sprintf("%q", args.ComputerUseScope))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10718,15 +10718,15 @@ func (qc *QueryClient) UpdateAgentAuthorization(ctx context.Context, args Update
 
 func UpdateAgentAuthorizationBuild(args UpdateAgentAuthorizationArgs) string {
 	var b strings.Builder
-	b.WriteString("updateAgentAuthorization({")
+	b.WriteString("mutation updateAgentAuthorization(")
 	b.WriteString("authId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AuthId))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10746,15 +10746,15 @@ func (qc *QueryClient) UpdateCalendarEvent(ctx context.Context, args UpdateCalen
 
 func UpdateCalendarEventBuild(args UpdateCalendarEventArgs) string {
 	var b strings.Builder
-	b.WriteString("updateCalendarEvent({")
+	b.WriteString("mutation updateCalendarEvent(")
 	b.WriteString("eventId: ")
 	b.WriteString(fmt.Sprintf("%q", args.EventId))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10801,181 +10801,181 @@ func (qc *QueryClient) UpdateClusterSettings(ctx context.Context, args UpdateClu
 
 func UpdateClusterSettingsBuild(args UpdateClusterSettingsArgs) string {
 	var b strings.Builder
-	b.WriteString("updateClusterSettings({")
+	b.WriteString("mutation updateClusterSettings(")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
 	if args.ClusterDomain != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clusterDomain: ")
 		b.WriteString(fmt.Sprintf("%q", args.ClusterDomain))
 	}
 	if args.BrandName != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandName: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandName))
 	}
 	if args.BrandPrimaryColor != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandPrimaryColor: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandPrimaryColor))
 	}
 	if args.BrandLogoDataURI != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandLogoDataURI: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandLogoDataURI))
 	}
 	if args.BrandIconDataURI != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandIconDataURI: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandIconDataURI))
 	}
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registrationMode: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegistrationMode))
 	if args.RegistrationDomains != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("registrationDomains: ")
 		b.WriteString(fmt.Sprintf("%q", args.RegistrationDomains))
 	}
 	if args.InternalDomains != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("internalDomains: ")
 		b.WriteString(fmt.Sprintf("%q", args.InternalDomains))
 	}
-	if b.Len() > 23 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("internalDefaultRole: ")
 	b.WriteString(fmt.Sprintf("%q", args.InternalDefaultRole))
 	if args.RegisteredClientsJSON != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("registeredClientsJSON: ")
 		b.WriteString(fmt.Sprintf("%q", args.RegisteredClientsJSON))
 	}
 	if args.AccessRequestNotifyEmails != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accessRequestNotifyEmails: ")
 		b.WriteString(fmt.Sprintf("%q", args.AccessRequestNotifyEmails))
 	}
 	if args.BootstrapEmail != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapEmail: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapEmail))
 	}
 	if args.BootstrapFirstName != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapFirstName: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapFirstName))
 	}
 	if args.BootstrapLastName != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapLastName: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapLastName))
 	}
 	if args.BootstrapPhone != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapPhone: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapPhone))
 	}
 	if args.BootstrapPrimaryRole != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapPrimaryRole: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapPrimaryRole))
 	}
 	if args.BootstrapGender != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapGender: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapGender))
 	}
 	if args.BootstrapBirthdate != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapBirthdate: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapBirthdate))
 	}
 	if args.BootstrappedAt != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrappedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
 	}
 	if args.AccessTokenTTLSeconds != 0 {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accessTokenTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.AccessTokenTTLSeconds))
 	}
 	if args.RefreshTokenTTLSeconds != 0 {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("refreshTokenTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.RefreshTokenTTLSeconds))
 	}
 	if args.MagicLinkTTLSeconds != 0 {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("magicLinkTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.MagicLinkTTLSeconds))
 	}
 	if args.InvitationTTLDays != 0 {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("invitationTTLDays: ")
 		b.WriteString(fmt.Sprintf("%v", args.InvitationTTLDays))
 	}
 	if args.RefreshCookieSameSite != "" {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("refreshCookieSameSite: ")
 		b.WriteString(fmt.Sprintf("%q", args.RefreshCookieSameSite))
 	}
 	if args.AuthoredAutomationsEnabledSet {
-		if b.Len() > 23 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authoredAutomationsEnabled: ")
 		b.WriteString(fmt.Sprintf("%v", args.AuthoredAutomationsEnabled))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -10998,36 +10998,36 @@ func (qc *QueryClient) UpdateDeploymentNodeSpec(ctx context.Context, args Update
 
 func UpdateDeploymentNodeSpecBuild(args UpdateDeploymentNodeSpecArgs) string {
 	var b strings.Builder
-	b.WriteString("updateDeploymentNodeSpec({")
+	b.WriteString("mutation updateDeploymentNodeSpec(")
 	b.WriteString("deploymentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
-	if b.Len() > 26 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeType))
 	if args.Version != "" {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
 		b.WriteString(fmt.Sprintf("%q", args.Version))
 	}
 	if args.Replicas != 0 {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("replicas: ")
 		b.WriteString(fmt.Sprintf("%v", args.Replicas))
 	}
 	if args.ImageDigest != "" {
-		if b.Len() > 26 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("imageDigest: ")
 		b.WriteString(fmt.Sprintf("%q", args.ImageDigest))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -11048,15 +11048,15 @@ func (qc *QueryClient) UpdateDeploymentStatus(ctx context.Context, args UpdateDe
 
 func UpdateDeploymentStatusBuild(args UpdateDeploymentStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("updateDeploymentStatus({")
+	b.WriteString("mutation updateDeploymentStatus(")
 	b.WriteString("deploymentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
-	if b.Len() > 24 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -11088,81 +11088,81 @@ func (qc *QueryClient) UpdateGeneratedOutputContent(ctx context.Context, args Up
 
 func UpdateGeneratedOutputContentBuild(args UpdateGeneratedOutputContentArgs) string {
 	var b strings.Builder
-	b.WriteString("updateGeneratedOutputContent({")
+	b.WriteString("mutation updateGeneratedOutputContent(")
 	b.WriteString("outputId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OutputId))
-	if b.Len() > 30 {
+	if b.Len() > 38 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 30 {
+	if b.Len() > 38 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
 	if args.Summary != "" {
-		if b.Len() > 30 {
+		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
 		b.WriteString(fmt.Sprintf("%q", args.Summary))
 	}
 	if args.Body != "" {
-		if b.Len() > 30 {
+		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("body: ")
 		b.WriteString(fmt.Sprintf("%q", args.Body))
 	}
 	if args.AttachmentId != "" {
-		if b.Len() > 30 {
+		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attachmentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
 	}
 	if args.Format != "" {
-		if b.Len() > 30 {
+		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("format: ")
 		b.WriteString(fmt.Sprintf("%q", args.Format))
 	}
 	if args.MimeType != "" {
-		if b.Len() > 30 {
+		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mimeType: ")
 		b.WriteString(fmt.Sprintf("%q", args.MimeType))
 	}
-	if b.Len() > 30 {
+	if b.Len() > 38 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
 	if args.PartitionId != "" {
-		if b.Len() > 30 {
+		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.ProducedByPlanId != "" {
-		if b.Len() > 30 {
+		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
 	}
 	if args.ProducedByAgentId != "" {
-		if b.Len() > 30 {
+		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByAgentId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -11182,15 +11182,15 @@ func (qc *QueryClient) UpdateIdentity(ctx context.Context, args UpdateIdentityAr
 
 func UpdateIdentityBuild(args UpdateIdentityArgs) string {
 	var b strings.Builder
-	b.WriteString("updateIdentity({")
+	b.WriteString("mutation updateIdentity(")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 16 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -11211,22 +11211,22 @@ func (qc *QueryClient) UpdateMissingCapabilityStatus(ctx context.Context, args U
 
 func UpdateMissingCapabilityStatusBuild(args UpdateMissingCapabilityStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("updateMissingCapabilityStatus({")
+	b.WriteString("mutation updateMissingCapabilityStatus(")
 	b.WriteString("missingId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MissingId))
-	if b.Len() > 31 {
+	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
 	if args.Resolution != "" {
-		if b.Len() > 31 {
+		if b.Len() > 39 {
 			b.WriteString(", ")
 		}
 		b.WriteString("resolution: ")
 		b.WriteString(fmt.Sprintf("%q", args.Resolution))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -11247,20 +11247,20 @@ func (qc *QueryClient) UpdateNodeHealth(ctx context.Context, args UpdateNodeHeal
 
 func UpdateNodeHealthBuild(args UpdateNodeHealthArgs) string {
 	var b strings.Builder
-	b.WriteString("updateNodeHealth({")
+	b.WriteString("mutation updateNodeHealth(")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("health: ")
 	b.WriteString(fmt.Sprintf("%q", args.Health))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastSeen: ")
 	b.WriteString(fmt.Sprintf("%q", args.LastSeen))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -11280,15 +11280,15 @@ func (qc *QueryClient) UpdateNote(ctx context.Context, args UpdateNoteArgs) (*Re
 
 func UpdateNoteBuild(args UpdateNoteArgs) string {
 	var b strings.Builder
-	b.WriteString("updateNote({")
+	b.WriteString("mutation updateNote(")
 	b.WriteString("noteId: ")
 	b.WriteString(fmt.Sprintf("%q", args.NoteId))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -11309,15 +11309,15 @@ func (qc *QueryClient) UpdateNumberStatus(ctx context.Context, args UpdateNumber
 
 func UpdateNumberStatusBuild(args UpdateNumberStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("updateNumberStatus({")
+	b.WriteString("mutation updateNumberStatus(")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 20 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -11347,74 +11347,74 @@ func (qc *QueryClient) UpdateParticipantPresence(ctx context.Context, args Updat
 
 func UpdateParticipantPresenceBuild(args UpdateParticipantPresenceArgs) string {
 	var b strings.Builder
-	b.WriteString("updateParticipantPresence({")
+	b.WriteString("mutation updateParticipantPresence(")
 	if args.PresenceId != "" {
 		b.WriteString("presenceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PresenceId))
 	}
-	if b.Len() > 27 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	if b.Len() > 27 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 27 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("state: ")
 	b.WriteString(fmt.Sprintf("%q", args.State))
-	if b.Len() > 27 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
 	b.WriteString(fmt.Sprintf("%q", args.Label))
 	if args.Reason != "" {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
 	if args.SinceAt != "" {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sinceAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.SinceAt))
 	}
 	if args.LastUpdatedAt != "" {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastUpdatedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastUpdatedAt))
 	}
 	if args.LastUtteranceId != "" {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastUtteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastUtteranceId))
 	}
 	if args.LastError != "" {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastError: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastError))
 	}
 	if args.Intent != nil {
-		if b.Len() > 27 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("intent: ")
 		b.WriteString(renderMemQLValue(args.Intent))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -11434,15 +11434,15 @@ func (qc *QueryClient) UpdateParticipantStatus(ctx context.Context, args UpdateP
 
 func UpdateParticipantStatusBuild(args UpdateParticipantStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("updateParticipantStatus({")
+	b.WriteString("mutation updateParticipantStatus(")
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	if b.Len() > 25 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -11481,148 +11481,148 @@ func (qc *QueryClient) UpdatePlanStatus(ctx context.Context, args UpdatePlanStat
 
 func UpdatePlanStatusBuild(args UpdatePlanStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("updatePlanStatus({")
+	b.WriteString("mutation updatePlanStatus(")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
 	if args.OwnerAgentId != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerAgentId))
 	}
 	if args.Output != nil {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("output: ")
 		b.WriteString(renderMemQLValue(args.Output))
 	}
 	if args.ErrorMessage != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
 	if args.StartedAt != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("startedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.StartedAt))
 	}
 	if args.CompletedAt != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("completedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.CompletedAt))
 	}
 	if args.CancelledBy != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("cancelledBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.CancelledBy))
 	}
 	if args.PausedAt != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("pausedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.PausedAt))
 	}
 	if args.TotalPausedMs != 0 {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("totalPausedMs: ")
 		b.WriteString(fmt.Sprintf("%v", args.TotalPausedMs))
 	}
 	if args.FeedbackRequest != nil {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("feedbackRequest: ")
 		b.WriteString(renderMemQLValue(args.FeedbackRequest))
 	}
 	if args.FeedbackResponse != nil {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("feedbackResponse: ")
 		b.WriteString(renderMemQLValue(args.FeedbackResponse))
 	}
 	if args.FeedbackReason != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("feedbackReason: ")
 		b.WriteString(fmt.Sprintf("%q", args.FeedbackReason))
 	}
 	if args.RecommendationCardId != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recommendationCardId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecommendationCardId))
 	}
 	if args.Phases != nil {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("phases: ")
 		b.WriteString(renderMemQLValue(args.Phases))
 	}
 	if args.Estimate != nil {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("estimate: ")
 		b.WriteString(renderMemQLValue(args.Estimate))
 	}
 	if args.EstimatedAt != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("estimatedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.EstimatedAt))
 	}
 	if args.TokenSpent != 0 {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenSpent: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenSpent))
 	}
 	if args.TokenAllocatedToChildren != 0 {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenAllocatedToChildren: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenAllocatedToChildren))
 	}
 	if args.Metrics != nil {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("metrics: ")
 		b.WriteString(renderMemQLValue(args.Metrics))
 	}
 	if args.ComputerUseScope != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("computerUseScope: ")
 		b.WriteString(fmt.Sprintf("%q", args.ComputerUseScope))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -11646,45 +11646,45 @@ func (qc *QueryClient) UpdateRecord(ctx context.Context, args UpdateRecordArgs) 
 
 func UpdateRecordBuild(args UpdateRecordArgs) string {
 	var b strings.Builder
-	b.WriteString("updateRecord({")
+	b.WriteString("mutation updateRecord(")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
 	if args.Data != nil {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("data: ")
 		b.WriteString(renderMemQLValue(args.Data))
 	}
 	if args.Label != "" {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("label: ")
 		b.WriteString(fmt.Sprintf("%q", args.Label))
 	}
 	if args.NaturalKeyField != "" {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyField: ")
 		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyField))
 	}
 	if args.NaturalKeyValue != "" {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyValue: ")
 		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyValue))
 	}
 	if args.Confidence != 0 {
-		if b.Len() > 14 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("confidence: ")
 		b.WriteString(fmt.Sprintf("%v", args.Confidence))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -11717,87 +11717,87 @@ func (qc *QueryClient) UpdateResponsibility(ctx context.Context, args UpdateResp
 
 func UpdateResponsibilityBuild(args UpdateResponsibilityArgs) string {
 	var b strings.Builder
-	b.WriteString("updateResponsibility({")
+	b.WriteString("mutation updateResponsibility(")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
 	if args.Statement != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("statement: ")
 		b.WriteString(fmt.Sprintf("%q", args.Statement))
 	}
 	if args.Trigger != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("trigger: ")
 		b.WriteString(fmt.Sprintf("%q", args.Trigger))
 	}
 	if args.Schedule != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("schedule: ")
 		b.WriteString(fmt.Sprintf("%q", args.Schedule))
 	}
 	if args.Condition != nil {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("condition: ")
 		b.WriteString(renderMemQLValue(args.Condition))
 	}
 	if args.TargetKind != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
 	}
 	if args.AssignedAgentId != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedAgentId))
 	}
 	if args.AssignedRoleSlug != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
 	}
 	if args.SuccessCriteria != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("successCriteria: ")
 		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
 	}
 	if args.NotifyHow != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notifyHow: ")
 		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
 	}
 	if args.ScopePartitionId != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("scopePartitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ScopePartitionId))
 	}
 	if args.EnabledSet {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("enabled: ")
 		b.WriteString(fmt.Sprintf("%v", args.Enabled))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -11817,15 +11817,15 @@ func (qc *QueryClient) UpdateSessionDevices(ctx context.Context, args UpdateSess
 
 func UpdateSessionDevicesBuild(args UpdateSessionDevicesArgs) string {
 	var b strings.Builder
-	b.WriteString("updateSessionDevices({")
+	b.WriteString("mutation updateSessionDevices(")
 	b.WriteString("sessionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SessionId))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -11845,15 +11845,15 @@ func (qc *QueryClient) UpdateSessionStreams(ctx context.Context, args UpdateSess
 
 func UpdateSessionStreamsBuild(args UpdateSessionStreamsArgs) string {
 	var b strings.Builder
-	b.WriteString("updateSessionStreams({")
+	b.WriteString("mutation updateSessionStreams(")
 	b.WriteString("sessionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SessionId))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -11880,64 +11880,64 @@ func (qc *QueryClient) UpdateTaskStatus(ctx context.Context, args UpdateTaskStat
 
 func UpdateTaskStatusBuild(args UpdateTaskStatusArgs) string {
 	var b strings.Builder
-	b.WriteString("updateTaskStatus({")
+	b.WriteString("mutation updateTaskStatus(")
 	b.WriteString("taskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TaskId))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
 	if args.Output != nil {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("output: ")
 		b.WriteString(renderMemQLValue(args.Output))
 	}
 	if args.ErrorMessage != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
 	if args.StartedAt != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("startedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.StartedAt))
 	}
 	if args.CompletedAt != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("completedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.CompletedAt))
 	}
 	if args.ParkedAt != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("parkedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParkedAt))
 	}
 	if args.ParkedAtCheckpoint != "" {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("parkedAtCheckpoint: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParkedAtCheckpoint))
 	}
 	if args.Metrics != nil {
-		if b.Len() > 18 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("metrics: ")
 		b.WriteString(renderMemQLValue(args.Metrics))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -11957,15 +11957,15 @@ func (qc *QueryClient) UpdateTodo(ctx context.Context, args UpdateTodoArgs) (*Re
 
 func UpdateTodoBuild(args UpdateTodoArgs) string {
 	var b strings.Builder
-	b.WriteString("updateTodo({")
+	b.WriteString("mutation updateTodo(")
 	b.WriteString("todoId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TodoId))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -11985,15 +11985,15 @@ func (qc *QueryClient) UpdateUser(ctx context.Context, args UpdateUserArgs) (*Re
 
 func UpdateUserBuild(args UpdateUserArgs) string {
 	var b strings.Builder
-	b.WriteString("updateUser({")
+	b.WriteString("mutation updateUser(")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 12 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -12014,22 +12014,22 @@ func (qc *QueryClient) UpdateWorkerLastSeen(ctx context.Context, args UpdateWork
 
 func UpdateWorkerLastSeenBuild(args UpdateWorkerLastSeenArgs) string {
 	var b strings.Builder
-	b.WriteString("updateWorkerLastSeen({")
+	b.WriteString("mutation updateWorkerLastSeen(")
 	b.WriteString("registrationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegistrationId))
-	if b.Len() > 22 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastSeenAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.LastSeenAt))
 	if args.LastConnectedFromIP != "" {
-		if b.Len() > 22 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastConnectedFromIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastConnectedFromIP))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -12049,15 +12049,15 @@ func (qc *QueryClient) ValidateOverride(ctx context.Context, args ValidateOverri
 
 func ValidateOverrideBuild(args ValidateOverrideArgs) string {
 	var b strings.Builder
-	b.WriteString("validateOverride({")
+	b.WriteString("mutation validateOverride(")
 	b.WriteString("overrideId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OverrideId))
-	if b.Len() > 18 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("version: ")
 	b.WriteString(fmt.Sprintf("%v", args.Version))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -12076,10 +12076,10 @@ func (qc *QueryClient) ValidateRequest(ctx context.Context, args ValidateRequest
 
 func ValidateRequestBuild(args ValidateRequestArgs) string {
 	var b strings.Builder
-	b.WriteString("validateRequest({")
+	b.WriteString("mutation validateRequest(")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -12104,45 +12104,45 @@ func (qc *QueryClient) WriteKnowledgeChunk(ctx context.Context, args WriteKnowle
 
 func WriteKnowledgeChunkBuild(args WriteKnowledgeChunkArgs) string {
 	var b strings.Builder
-	b.WriteString("writeKnowledgeChunk({")
+	b.WriteString("mutation writeKnowledgeChunk(")
 	b.WriteString("chunkId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ChunkId))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
-	if b.Len() > 21 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("sourceRef: ")
 	b.WriteString(fmt.Sprintf("%q", args.SourceRef))
 	if args.Seq != 0 {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("seq: ")
 		b.WriteString(fmt.Sprintf("%v", args.Seq))
 	}
 	if args.TokenCount != 0 {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenCount: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenCount))
 	}
 	if args.SourceTopic != "" {
-		if b.Len() > 21 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceTopic: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceTopic))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }

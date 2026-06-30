@@ -39,8 +39,8 @@ func TestQueryAllPlansPage_RoundTrip(t *testing.T) {
 	if q == nil {
 		t.Fatalf("expected ExecuteQueryMsg payload, got %+v", sent.GetPayload())
 	}
-	if q.GetQuery() != "allPlans({})" {
-		t.Errorf("query: want %q, got %q (must stay on the named-primitive surface)", "allPlans({})", q.GetQuery())
+	if q.GetQuery() != "query allPlans()" {
+		t.Errorf("query: want %q, got %q (must stay on the named-primitive surface)", "query allPlans()", q.GetQuery())
 	}
 	if q.GetCursor() != "cursor-from-page-1" {
 		t.Errorf("cursor: want %q, got %q (inbound cursor must ride the request)", "cursor-from-page-1", q.GetCursor())

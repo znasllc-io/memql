@@ -65,12 +65,19 @@ func emitConstruct(buf *bytes.Buffer, c Construct, kindLabel string) {
 
 	// Builder function -- composes the DSL call string from typed args.
 	// Lives next to the method for traceability + testability.
+	//
+	// Story 9 (#2335): emits the kind-prefixed, named-args invocation form
+	// `<kind> name(arg: value, ...)` (empty = `<kind> name()`), NOT the legacy
+	// object-literal wrapper `name({arg: value})`. The kind is the lowercased
+	// construct label (query / mutation / logic / builtin) -- the parser now
+	// rejects the legacy wrapper, so this MUST emit the new form.
+	kind := strings.ToLower(kindLabel)
 	fmt.Fprintf(buf, "func %sBuild(args %s) string {\n", exportedName, argsTypeName)
 	if len(c.Args) == 0 {
-		fmt.Fprintf(buf, "\t_ = args\n\treturn %q\n", c.Name+"({})")
+		fmt.Fprintf(buf, "\t_ = args\n\treturn %q\n", kind+" "+c.Name+"()")
 	} else {
 		fmt.Fprintf(buf, "\tvar b strings.Builder\n")
-		prefix := c.Name + "({"
+		prefix := kind + " " + c.Name + "("
 		fmt.Fprintf(buf, "\tb.WriteString(%q)\n", prefix)
 		first := true
 		for _, a := range c.Args {
@@ -79,7 +86,7 @@ func emitConstruct(buf *bytes.Buffer, c Construct, kindLabel string) {
 				first = false
 			}
 		}
-		fmt.Fprintf(buf, "\tb.WriteString(\"})\")\n")
+		fmt.Fprintf(buf, "\tb.WriteString(\")\")\n")
 		fmt.Fprintf(buf, "\treturn b.String()\n")
 	}
 	fmt.Fprintf(buf, "}\n\n")
