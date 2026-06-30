@@ -1,5 +1,5 @@
 // =============================================================================
-// MemQL Action Reference
+// MemQL Action Reference (simplified -- construct-invocation ADR Decision 3)
 // =============================================================================
 //
 // This file is the source of truth for the `action` syntax. It is NOT loaded
@@ -21,78 +21,39 @@
 // fingerprint-verified token-free -- the foundation the action library and the
 // deployment bundle are built on.
 //
-// An authored action is DECLARATIVE, not procedural: it names a capability,
-// declares its input `params`, and renders an `argTemplate` from those params.
-// At run time an automation step `action("name@1") { args { ... } }` binds the
-// step args to the action's params, renders the argTemplate, and invokes the
-// single capability on the resolved surface. There is no body, no control flow,
-// and no graph access -- that is what keeps an action atomic and replayable.
-//
-// ----------------------------------------------------------------------------
-// Call-graph contract (ADR §2 table) -- enforced by the call-graph validator (I7)
-// ----------------------------------------------------------------------------
-//
-//   Construct | May call                                  | May NOT
-//   ----------|-------------------------------------------|--------------------
-//   action    | exactly ONE external capability on a      | call logic / query /
-//             | resolved surface (shell.* / fs.* /        | mutation / automation;
-//             | http.* / integration.* / mcp.*)           | touch the graph; carry
-//             |                                           | a @trigger; >1 capability
-//
-// The action rules (one external capability; no calls into logic / query /
-// mutation / automation; no graph access) are enforced by the I7 call-graph
-// validator alongside the capability vocabulary. An action cannot self-persist
-// its result -- it returns a value and the NEXT automation step is a mutation
-// that writes it (the decide -> act -> persist rhythm; ADR §2.3).
-//
 // =============================================================================
-//   1. Action-level annotations
+//   1. The simplified shape -- args + a single capability call
 // =============================================================================
 //
-// Every annotation goes above the `action` keyword.
+// An action is reduced to an `args { ... }` block plus a SINGLE
+// `capability <verb>(...)` call (construct-invocation ADR Decision 3). There is
+// NO `body { }` and no `return` -- the body IS the one capability call. The
+// bare verb resolves through the file-top `use capabilities.<path>.{ verb }`
+// import to a full dotted capability name.
 //
-//   @description("text")   Human-readable description.                 optional
-//   @kind("primitive")     Action kind. PRIMITIVE = one capability call
-//                          rendered from params (the only kind today). The
-//                          composite kind from the action-library draft is
-//                          retired -- a "composite" is just an automation that
-//                          has been promoted into the library (ADR §2.2).   @kind("primitive")
-//   @sideEffect("read"|"write"|"exec")
-//                          Coarse risk class carried on the action for
-//                          authoring + the surface-aware trust gate. The
-//                          AUTHORITATIVE sideEffectClass lives on the
-//                          CAPABILITY (ADR §7) so it cannot be spoofed by an
-//                          authored or generated action; the I7 capability
-//                          vocabulary reconciles the two.                  optional
-//   @enabled / @disabled   Lifecycle flag (shared across constructs). @enabled
-//                          is the explicit-on default; @disabled skips the
-//                          action at load.                                optional
+//   @description("...")    Human-readable description. KEPT -- it is the
+//                          planner's retrieval embedding source. The retired
+//                          `intent` text merges into it.
+//   args { <name> <type> [@required] [@description("...")] ... }
+//                          The action's input schema (same grammar as every
+//                          other construct's args block).
+//   capability <verb>(<key>: <value>, ...)
+//                          The single external capability. Each value is a
+//                          LITERAL or an `args.<x>` reference -- never a call
+//                          into another construct (an action is atomic).
 //
-// NOTE: an action never carries a @trigger -- reactivity is automations-only
-// (ADR §2.4). An action is reached by an automation step, never by an event.
-//
-// =============================================================================
-//   2. Anatomy -- capability + intent + params + argTemplate
-// =============================================================================
-//
-// An action body has four parts, all flat (no procedural statements):
-//
-//   capability "<namespace>.<verb>"   The single external capability this
-//                                     action performs. Required. One per
-//                                     action -- the validator rejects a second.
-//   intent "<text>"                   Natural-language description of what the
-//                                     action does -- the future embedding
-//                                     source for planner retrieval. Required.
-//   params { <name> <type> [@required] [@description("...")] ... }
-//                                     The action's input schema. Field syntax
-//                                     mirrors every other construct's args.
-//   argTemplate { <key>: "<template>" ... }
-//                                     The concrete capability arguments,
-//                                     rendered from params. A "$params.<name>"
-//                                     reference is substituted with the bound
-//                                     param value before the capability runs.
-//
-// Compliant example -- the deployment bundle's clone primitive (ADR §4):
+// Compliant example -- the deployment bundle's clone primitive:
+
+use capabilities.shell.{ script }
+
+@description("Check out a git repository at a specific ref on the deploy runner, so a build runs against a pinned version.")
+action cloneRepoAtVersion {
+  args {
+    workdir string @required @description("Absolute path of the repository working tree on the surface.")
+    ref     string @required @description("Git ref (branch, tag, or SHA) to check out.")
+  }
+  capability script(script: "deploy.cloneRepo", workdir: args.workdir, ref: args.ref)
+}
 
 // A `shell.*` action runs a NAMED capability script (the I14 contract, #2221),
 // NOT an arbitrary command string. The reserved `script` arg names the
@@ -103,136 +64,118 @@
 // shell, no `sh -c`), and parses the one JSON envelope it writes to stdout.
 // This is injection-safe by construction -- an author/event value can only pick
 // an allowlisted script and travels as data, never as a command line. (The raw
-// `shell.exec` + `cmd:` rendered-command form is RETIRED for exactly that
-// reason -- it was a command-injection sink.)
-
-@kind("primitive")
-@sideEffect("exec")
-@description("Check out a git repository at a specific ref on the deploy runner.")
-action cloneRepoAtVersion {
-  capability "shell.script"
-  intent "Clone/checkout a repository working tree at the requested ref so a build runs against a pinned version."
-  params {
-    workdir string @required @description("Absolute path of the repository working tree on the surface.")
-    ref     string @required @description("Git ref (branch, tag, or SHA) to check out.")
-  }
-  argTemplate {
-    script:  "deploy.cloneRepo"
-    workdir: "$params.workdir"
-    ref:     "$params.ref"
-  }
-}
+// `shell.exec` + interpolated-command form is RETIRED for exactly that reason
+// -- it was a command-injection sink.)
 
 // =============================================================================
-//   3. Other capability namespaces -- fs / http / integration
+//   2. Other capability namespaces -- fs / integration
 // =============================================================================
 //
 // The capability namespace selects the backend; the shape is identical.
 //
-// 3a. A filesystem read (sideEffect read):
+// 2a. A filesystem read (the capability's @sideEffect class = read):
 
-@kind("primitive")
-@sideEffect("read")
-@description("Read a file from the surface filesystem.")
+use capabilities.fs.{ readFile }
+
+@description("Read a deployment manifest off the surface so a later step can inspect it.")
 action readManifest {
-  capability "fs.readFile"
-  intent "Read a deployment manifest off the surface so a later step can inspect it."
-  params {
+  args {
     path string @required @description("Absolute path to read.")
   }
-  argTemplate {
-    path: "$params.path"
-  }
+  capability readFile(path: args.path)
 }
 
-// 3b. An integration-backed action. A SIDE-EFFECTING integration (e.g. tag a
+// 2b. An integration-backed action. A SIDE-EFFECTING integration (e.g. tag a
 //     release, post to Slack) is reachable ONLY through an action -- its
 //     capability resolves to integration.* instead of shell.*/fs.* (ADR §3).
-//     A read-only integration stays a builtin callable from queries/logic.
+//     A read-only integration stays a builtin callable from queries/logic. The
+//     authoritative side-effect class lives on the CAPABILITY declaration
+//     (dsl/capabilities/capabilities.memql), never on the action.
 
-@kind("primitive")
-@sideEffect("write")
-@description("Tag a GitHub release for a shipped version.")
-action tagRelease {
-  capability "integration.github.tagRelease"
-  intent "Cut a git tag + release on GitHub for the version that just deployed."
-  params {
+use capabilities.integration.github.{ tagRelease }
+
+@description("Cut a git tag + release on GitHub for the version that just deployed.")
+action tagReleaseExample {
+  args {
     repo    string @required @description("owner/name of the repository.")
     version string @required @description("Semver tag to create, e.g. 0.12.0.")
   }
-  argTemplate {
-    repo: "$params.repo"
-    tag:  "$params.version"
-  }
+  capability tagRelease(repo: args.repo, tag: args.version)
 }
 
 // =============================================================================
-//   4. Calling an action -- the automation step (ADR §7)
+//   3. Calling an action -- the automation step (ADR Decision 1+2)
 // =============================================================================
 //
-// An action is invoked from an automation step by its pinned-by-default
-// reference "name@version". Step args bind to the action's params; omitting
-// `on surface(...)` defers surface selection to the resolver:
+// An action is invoked from an automation step in the kind-prefixed invocation
+// form `action <name>(<colon-args>)`. The action resolves by NAME (no
+// `@version` suffix). Step args bind to the action's `args`:
 //
 //   use deployment.actions.{ cloneRepoAtVersion }
 //
 //   automation deployEngine @trigger(event="deploy.requested.staging") {
 //     step clone {
-//       action("cloneRepoAtVersion@1") {
-//         args { workdir: "/work/memql", ref: event.payload.ref }
-//       }
+//       action cloneRepoAtVersion(workdir: "/work/memql", ref: event.payload.ref)
 //     }
 //     // ... next step is a mutation that records the result (decide->act->persist)
 //   }
 //
 // An identical input replays token-free: binding the same args renders the
-// same argTemplate, the capability runs on the default surface, and the
-// result fingerprint (component/harness/actionreplay.Fingerprint) reproduces.
-// A mismatch is what the surface-aware trust ladder escalates on (later phase).
+// same capability arguments, the capability runs on the default surface, and
+// the result fingerprint (component/harness/actionreplay.Fingerprint)
+// reproduces. A mismatch is what the surface-aware trust ladder escalates on.
+//
+// =============================================================================
+//   4. Dropped legacy surfaces (rejected with migration-pointing errors)
+// =============================================================================
+//
+//   @kind          composites are automations now; primitives need no marker.
+//   @sideEffect    moved onto the CAPABILITY declaration (unspoofable, ADR §7).
+//   @reliability   machine-managed runtime state, not source.
+//   intent         merged into @description.
+//   params         renamed to args.
+//   argTemplate    replaced by the typed capability <verb>(...) call;
+//   $params.X      the string-template form is retired.
+//   capability "<verb>"   the stringly form is retired -- write `capability
+//                         <verb>(...)` and import the verb.
+//   body { }       an action has no procedural body (ADR Decision 5).
 //
 // =============================================================================
 //   5. NON-COMPLIANT examples (rejected by the I7 call-graph validator)
 // =============================================================================
 //
-// 5a. An action that calls into another construct. An action is atomic: it may
-//     not call a logic / query / mutation / automation.
+// 5a. An action that computes/calls another construct. An action is atomic: a
+//     capability arg may not be a logic / query / mutation call.
 //
-//   // INVALID: action calls a logic (must be a single external capability).
+//   // INVALID: a capability arg calls a logic.
 //   action deployBad {
-//     capability "shell.exec"
-//     intent "..."
-//     params { ref string @required }
-//     argTemplate { cmd: nextSemver(args.ref) }   // <- calls logic: rejected
+//     args { ref string @required }
+//     capability script(cmd: nextSemver(args.ref))   // <- calls logic: rejected
 //   }
 //
-// 5b. An action that touches the graph. Graph writes stay mutations; an action
-//     never reaches MemQL.
+// 5b. An action that touches the graph. Graph writes stay mutations.
 //
 //   // INVALID: an action may not perform a graph write -- that is a mutation.
 //   action recordBad {
-//     capability "shell.exec"
-//     intent "..."
-//     params { id string @required }
-//     argTemplate { cmd: "createDeployment({ id: $params.id })" }  // <- graph write: rejected
+//     args { id string @required }
+//     capability script(script: "x")
+//     insert { id: args.id }                          // <- graph write: rejected
 //   }
 //
-// 5c. An action declaring more than one capability. Exactly one external
-//     capability per action (ADR §2.3); compose multiples in an automation.
+// 5c. An action declaring more than one capability call.
 //
-//   // INVALID: two capabilities in one action.
+//   // INVALID: two capability calls in one action.
 //   action twoThingsBad {
-//     capability "shell.exec"
-//     capability "fs.writeFile"   // <- second capability: rejected
-//     intent "..."
-//     params { }
-//     argTemplate { }
+//     args { }
+//     capability script(script: "x")
+//     capability writeFile(path: "y")                 // <- second capability: rejected
 //   }
 //
 // 5d. An action carrying a trigger. Reactivity is automations-only (ADR §2.4).
 //
 //   // INVALID: only automations may carry @trigger.
-//   @trigger(event="deploy.requested")   // <- rejected on an action
-//   action onDeployBad { capability "shell.exec" intent "..." params {} argTemplate {} }
+//   @trigger(event="deploy.requested")                // <- rejected on an action
+//   action onDeployBad { args { } capability script(script: "x") }
 //
 // See `_automation.memql` for the construct that orchestrates actions, and
 // `_logic.memql` for the pure-decision construct an action's inputs come from.
