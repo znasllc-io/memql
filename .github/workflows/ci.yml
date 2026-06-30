@@ -356,6 +356,61 @@ jobs:
       - name: mcp conformance suite (regression gate, seeded test DB)
         run: go test -count=1 -timeout=300s -v ./test/conformance/...
 
+  # DB-seeded suite for the `*_db_test.go` packages (memql#2342). These
+  # tests are NeedsDB: they self-skip when no Postgres is reachable, so they
+  # NEVER ran in CI before -- only `test/conformance` was seeded -- and
+  # silently rotted (referencing constructs that later migrations renamed).
+  # This lane mirrors the conformance job's seeded-DB setup and runs the
+  # remaining DB-gated suites so that whole class of test can't rot unseen
+  # again. Keep this list in sync with the packages that carry `*_db_test.go`
+  # files (component/memql, component/automations/steps, examples/referencepack).
+  db-tests:
+    name: db-tests
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
+    runs-on: ubuntu-latest
+    services:
+      # Same image the dev cluster + cluster-e2e + conformance use; bundles
+      # TimescaleDB + pgvector so the memory-nodes migrations (hypertable +
+      # vector) apply.
+      postgres:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_USER: memql
+          POSTGRES_PASSWORD: memql_dev
+          POSTGRES_DB: memql
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U memql"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      MEMQL_DATABASE_DSN: postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.4'
+          cache: true
+      # Create the extensions the migrations expect (mirrors docker/init-db.sql,
+      # which a service container can't mount). The suite migrates the rest.
+      - name: create required Postgres extensions
+        run: |
+          for i in $(seq 1 30); do
+            PGPASSWORD=memql_dev pg_isready -h localhost -U memql && break
+            echo "waiting for postgres ($i)"; sleep 2
+          done
+          PGPASSWORD=memql_dev psql -h localhost -U memql -d memql -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+          CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+          CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+          CREATE EXTENSION IF NOT EXISTS vector;
+          SQL
+      - name: db-gated suites (seeded test DB)
+        run: go test -count=1 -timeout=300s ./component/memql/... ./component/automations/steps/... ./examples/referencepack/...
+
   # Aggregator -- the SINGLE required status check for branch protection.
   # It always runs (even when every lane is path-skipped) and fails only if
   # a lane it depends on actually failed or was cancelled; a `skipped` lane
@@ -371,6 +426,7 @@ jobs:
       - build-node-tags
       - sdk-ts-typecheck
       - conformance
+      - db-tests
     runs-on: ubuntu-latest
     steps:
       - name: verify required lanes succeeded or were skipped

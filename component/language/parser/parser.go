@@ -4751,16 +4751,25 @@ func (p *Parser) parseConditionalFilter() (ExpressionNode, error) {
 }
 
 // membershipCollectionField recognises the RHS of `<scalar> in <collection>`
-// when the collection is a `payload.<field>` row collection. It consumes the
-// token and returns the dotted field path. A list-literal or any other RHS is
-// left for parseValue (the OpIn scalar-in-list form). #976.
+// when the collection is a row collection field -- either the legacy explicit
+// `payload.<field>` form or, since the bare-payload rewrite (#2294), a bare
+// row field (e.g. `args.tag in tags`). It consumes the token and returns the
+// field path. A list-literal RHS (`kind in ["a", "b"]`) is not a
+// TokenIdentifier, so it falls through to parseValue (the OpIn scalar-in-list
+// form). A dotted scalar accessor RHS (`args.`/`ctx.`/`actor.`/`config.`) is a
+// scalar, never a collection, so it also falls through. #976 / #2342.
 func membershipCollectionField(p *Parser) (string, bool) {
-	if p.check(TokenIdentifier) && strings.HasPrefix(p.current.Literal, "payload.") {
-		collection := p.current.Literal
-		p.advance()
-		return collection, true
+	if !p.check(TokenIdentifier) {
+		return "", false
 	}
-	return "", false
+	lit := p.current.Literal
+	for _, scalarPrefix := range []string{"args.", "ctx.", "actor.", "config."} {
+		if strings.HasPrefix(lit, scalarPrefix) {
+			return "", false
+		}
+	}
+	p.advance()
+	return lit, true
 }
 
 // scalarMembershipValue converts the bare LHS scalar of `<scalar> in

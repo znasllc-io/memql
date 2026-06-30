@@ -8,10 +8,13 @@ package referencepack_test
 // registries with no DB), this stands up the genuine runtime and proves the
 // two pack-specific links of the chain:
 //
-//   PROOF 1 -- the real createSpace mutation publishes the core lifecycle event
-//     the pack's automation is bound to (graph.node.created.v1:cognition:space).
+//   PROOF 1 -- the real createNote mutation publishes the core lifecycle event
+//     the pack's automation is bound to (graph.node.created.v1:notes:note).
 //     The scheduler's startup log additionally shows the pack automation
-//     (referencePackGreetOnSpaceCreate) subscribing to exactly that topic.
+//     (referencePackGreetOnNoteCreate) subscribing to exactly that topic.
+//     (The pack originally hooked v1:cognition:space; that concept moved to
+//     the CoPresent pack in #2038, so this retargets to the still-core
+//     v1:notes:note whose createNote stamps ownerUserId. #2342)
 //   PROOF 2 -- the engine dispatches the pack's builtin
 //     (referencePackComposeGreeting -- the SAME step the automation runs) to the
 //     pack's Go capability composeGreeting, producing the real greeting node.
@@ -86,7 +89,7 @@ func (s *spyProvider) Capabilities() []memql.IntegrationCapability {
 	return caps
 }
 
-func TestLiveE2E_ReferencePackAutomationFiresOnSpaceCreate(t *testing.T) {
+func TestLiveE2E_ReferencePackAutomationFiresOnNoteCreate(t *testing.T) {
 	dsn := os.Getenv("MEMQL_DATABASE_DSN")
 	if dsn == "" {
 		dsn = e2eDSN
@@ -175,42 +178,42 @@ func TestLiveE2E_ReferencePackAutomationFiresOnSpaceCreate(t *testing.T) {
 		}
 	})
 
-	// Act as the cluster owner so createSpace's per-row authz clears.
+	// Act as the cluster owner so createNote's per-row authz clears.
 	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: e2eOwner, Role: auth.RoleOwner})
 	ctx = auth.ContextWithToken(ctx, &auth.TokenInfo{Subject: e2eOwner})
 
-	// Create a REAL v1:cognition:space via the actual mutation. The insert
-	// stamps ownerUserId: actor.userId, which the automation greets.
-	spaceID := fmt.Sprintf("v1:cognition:space:refpack-e2e-%d", time.Now().UnixNano())
-	pid, _ := json.Marshal(spaceID)
-	nm, _ := json.Marshal("RefPack E2E Space")
+	// Create a REAL v1:notes:note via the actual core mutation. createNote's
+	// insert stamps ownerUserId: actor.userId, which the automation greets.
+	noteID := fmt.Sprintf("v1:notes:note:refpack-e2e-%d", time.Now().UnixNano())
+	nid, _ := json.Marshal(noteID)
+	body, _ := json.Marshal("RefPack E2E note body")
 	// Kind-prefixed, named-args call form (#2335).
-	call := "mutation mutationCreateSpace(partitionId: " + string(pid) + ", name: " + string(nm) + ")"
+	call := "mutation createNote(noteId: " + string(nid) + ", body: " + string(body) + ")"
 	if _, err := eng.Execute(ctx, call); err != nil {
-		t.Fatalf("createSpace mutation failed: %v", err)
+		t.Fatalf("createNote mutation failed: %v", err)
 	}
 
-	// PROOF 1 -- the real createSpace mutation published the core lifecycle event
-	// the pack's automation is bound to. Confirm graph.node.created.v1:cognition:space
+	// PROOF 1 -- the real createNote mutation published the core lifecycle event
+	// the pack's automation is bound to. Confirm graph.node.created.v1:notes:note
 	// actually flowed on the engine's bus.
-	sawSpaceCreated := false
+	sawNoteCreated := false
 	deadline := time.After(3 * time.Second)
 drain:
 	for {
 		select {
 		case tp := <-seenTopics:
-			if tp == "graph.node.created.v1:cognition:space" {
-				sawSpaceCreated = true
+			if tp == "graph.node.created.v1:notes:note" {
+				sawNoteCreated = true
 				break drain
 			}
 		case <-deadline:
 			break drain
 		}
 	}
-	if !sawSpaceCreated {
-		t.Fatalf("createSpace did not publish graph.node.created.v1:cognition:space on the engine bus")
+	if !sawNoteCreated {
+		t.Fatalf("createNote did not publish graph.node.created.v1:notes:note on the engine bus")
 	}
-	t.Logf("PROOF 1 OK: createSpace(%s) published graph.node.created.v1:cognition:space (the event the pack automation subscribes to)", spaceID)
+	t.Logf("PROOF 1 OK: createNote(%s) published graph.node.created.v1:notes:note (the event the pack automation subscribes to)", noteID)
 
 	// PROOF 2 -- the engine dispatches the pack's builtin to the pack's Go
 	// capability for real. This is the same step the automation runs
