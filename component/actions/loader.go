@@ -15,24 +15,27 @@ import (
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-// DeclToAction converts a parsed *ast.ActionDecl into a runtime Action.
-// Authored actions are version 1 today (pin-by-default; the verified-upgrade
-// lifecycle lands later). @disabled drops the action's Enabled flag.
-func DeclToAction(d *ast.ActionDecl, origin string) (*Action, error) {
+// DeclToAction converts a parsed *ast.ActionDecl into a runtime Action
+// (construct-invocation ADR Decision 3, Story 4 / memql#2328). The action body
+// is exactly one `capability <verb>(...)` call; capImports maps each imported
+// verb (declared at file-top via `use capabilities.<path>.{ <verb> }`) to its
+// full dotted capability name, so the bare `verb` resolves to `shell.script` /
+// `integration.github.tagRelease` / etc. Authored actions are version 1 today
+// (pin-by-default; the verified-upgrade lifecycle lands later). @disabled drops
+// the action's Enabled flag.
+func DeclToAction(d *ast.ActionDecl, origin string, capImports map[string]string) (*Action, error) {
 	if d == nil {
 		return nil, fmt.Errorf("actions: nil action decl")
 	}
 	a := &Action{
-		Name:       d.Name,
-		Version:    1,
-		Capability: d.Capability,
-		Intent:     d.Intent,
-		Kind:       "primitive",
-		Enabled:    true,
-		Origin:     origin,
+		Name:    d.Name,
+		Version: 1,
+		Kind:    "primitive",
+		Enabled: true,
+		Origin:  origin,
 	}
-	if a.Capability == "" {
-		return nil, fmt.Errorf("action %q (%s) has no capability", d.Name, origin)
+	if d.Capability == "" {
+		return nil, fmt.Errorf("action %q (%s) has no capability call", d.Name, origin)
 	}
 
 	for _, attr := range d.Attributes {
@@ -40,14 +43,6 @@ func DeclToAction(d *ast.ActionDecl, origin string) (*Action, error) {
 			continue
 		}
 		switch attr.Name {
-		case "kind":
-			if s, ok := attr.Value.(string); ok && s != "" {
-				a.Kind = s
-			}
-		case "sideEffect":
-			if s, ok := attr.Value.(string); ok {
-				a.SideEffect = s
-			}
 		case "description":
 			if s, ok := attr.Value.(string); ok {
 				a.Description = s
@@ -59,58 +54,124 @@ func DeclToAction(d *ast.ActionDecl, origin string) (*Action, error) {
 		}
 	}
 
-	if a.Kind != "primitive" {
-		return nil, fmt.Errorf("action %q (%s): only @kind(\"primitive\") authored actions are supported, got %q", d.Name, origin, a.Kind)
+	// Resolve the bare capability verb to its full dotted name via the file's
+	// capability imports. An action body may call only its one imported
+	// capability, so the bare verb resolves unambiguously (ADR Decision 3). An
+	// already-dotted verb (defensive: a future inline form) is taken as-is.
+	full := d.Capability
+	if !strings.Contains(full, ".") {
+		resolved, ok := capImports[d.Capability]
+		if !ok {
+			return nil, fmt.Errorf("action %q (%s): capability verb %q is not imported -- add `use capabilities.<path>.{ %s }` so the bare verb resolves to a full dotted capability name", d.Name, origin, d.Capability, d.Capability)
+		}
+		full = resolved
 	}
+	a.Capability = full
 
-	// The capability's namespace must be in the vocabulary (ADR §2.3).
+	// The capability's namespace must be in the vocabulary (ADR Decision 4).
 	if !capability.ValidNamespace(a.Capability) {
 		return nil, fmt.Errorf("action %q (%s): capability %q is not in the namespace vocabulary -- one of fs.* / shell.* / http.* / integration.* / mcp.*", d.Name, origin, a.Capability)
 	}
-	// The AUTHORITATIVE sideEffectClass lives on the CAPABILITY, not the action
-	// (ADR §7): an authored or generated action cannot spoof its risk class. A
-	// declared @sideEffect that disagrees with the capability's class is
-	// rejected; an omitted @sideEffect is derived from the capability.
+	// The AUTHORITATIVE sideEffectClass lives on the CAPABILITY (ADR §7 /
+	// Decision 3): an action carries no @sideEffect; its risk class is derived
+	// from the capability it invokes.
 	if class, known := capability.CapabilityClass(a.Capability); known {
-		if a.SideEffect == "" {
-			a.SideEffect = class
-		} else if a.SideEffect != class {
-			return nil, fmt.Errorf("action %q (%s): declared @sideEffect %q does not match capability %q class %q -- the authoritative class lives on the capability (ADR §7); fix @sideEffect or the capability", d.Name, origin, a.SideEffect, a.Capability, class)
-		}
+		a.SideEffect = class
 	}
 
-	for _, f := range d.Params {
-		if f == nil {
-			continue
-		}
-		p := Param{Name: f.Name, Type: f.Type, Required: f.Required}
-		for _, attr := range f.Attributes {
-			if attr != nil && attr.Name == "description" {
-				if s, ok := attr.Value.(string); ok {
-					p.Description = s
-				}
+	// Params come from the `args { ... }` block (the file-top args grammar).
+	if d.Args != nil {
+		for _, f := range d.Args.Fields {
+			if f == nil {
+				continue
 			}
+			typ := f.Type
+			if typ == "array" && f.Items != nil {
+				typ = "[]" + f.Items.Type
+			}
+			a.Params = append(a.Params, Param{Name: f.Name, Type: typ, Required: !f.Optional})
 		}
-		a.Params = append(a.Params, p)
 	}
 
-	for _, e := range d.ArgTemplate {
-		if e == nil {
+	// CallArgs lower the single capability call's named args. An action is
+	// DECLARATIVE: each arg value is a literal or an `args.<path>` reference --
+	// never another construct call (the I7 action-no-calls rule). An args
+	// reference whose head is not a declared arg is a loud load error.
+	for _, ca := range d.CallArgs {
+		if ca == nil {
 			continue
 		}
-		a.ArgTemplate = append(a.ArgTemplate, ArgEntry{Key: e.Key, Template: e.Template})
+		out := CallArg{Key: ca.Key}
+		switch v := ca.Value.(type) {
+		case *ast.ArgRefExpr:
+			head := v.Path
+			if i := strings.IndexByte(head, '.'); i >= 0 {
+				head = head[:i]
+			}
+			if !a.hasParam(head) {
+				return nil, fmt.Errorf("action %q (%s): capability arg %q references args.%s, but %q is not a declared arg", d.Name, origin, ca.Key, v.Path, head)
+			}
+			out.ArgPath = v.Path
+		case *ast.LiteralExpr:
+			out.Literal = v.Value
+		default:
+			return nil, fmt.Errorf("action %q (%s): capability arg %q must be a literal or an `args.<x>` reference -- an action is a single external capability and may not compute or call other constructs (ADR Decision 3); got %T", d.Name, origin, ca.Key, ca.Value)
+		}
+		a.CallArgs = append(a.CallArgs, out)
 	}
 	return a, nil
 }
 
+// hasParam reports whether the action declares an arg by this name.
+func (a *Action) hasParam(name string) bool {
+	for _, p := range a.Params {
+		if p.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// capabilityImportRe matches a file-top `use capabilities.<path>.{ v1, v2 }`
+// import. Group 1 is the dotted namespace path after "capabilities."; group 2
+// is the comma-separated verb list. The brace body may span lines.
+var capabilityImportRe = regexp.MustCompile(`(?m)^[ \t]*use[ \t]+capabilities\.([A-Za-z_][A-Za-z0-9_.]*)\.\{([^}]*)\}`)
+
+// parseCapabilityImports builds a verb -> full-dotted-capability-name map from a
+// source's `use capabilities.<path>.{ verb }` imports. A verb imported from two
+// different namespaces in the same file is a loud error (ambiguous resolution).
+func parseCapabilityImports(content string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, m := range capabilityImportRe.FindAllStringSubmatch(content, -1) {
+		nsPath := m[1]
+		for _, raw := range strings.Split(m[2], ",") {
+			verb := strings.TrimSpace(raw)
+			if verb == "" {
+				continue
+			}
+			full := nsPath + "." + verb
+			if existing, dup := out[verb]; dup && existing != full {
+				return nil, fmt.Errorf("capability verb %q is imported from two namespaces (%s and %s) in the same file -- the action body's bare verb would be ambiguous", verb, existing, full)
+			}
+			out[verb] = full
+		}
+	}
+	return out, nil
+}
+
 // LoadSource extracts every top-level `action NAME { ... }` block from a
 // single .memql source, parses each in isolation, and builds the Actions.
-// A slice that fails to parse/convert is returned as an error (load-time
-// failures should be loud).
+// Capability verbs in each action body resolve against the file's `use
+// capabilities.*` imports. A slice that fails to parse/convert is returned as
+// an error (load-time failures should be loud).
 func LoadSource(content, path string) ([]*Action, error) {
 	slices := extractActionSlices(content)
 	if len(slices) == 0 {
 		return nil, nil
+	}
+	capImports, err := parseCapabilityImports(content)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	out := make([]*Action, 0, len(slices))
 	for _, sl := range slices {
@@ -119,7 +180,7 @@ func LoadSource(content, path string) ([]*Action, error) {
 			return nil, fmt.Errorf("%s: action %q: %w", path, sl.name, err)
 		}
 		origin := path + ":" + sl.name
-		a, err := DeclToAction(decl, origin)
+		a, err := DeclToAction(decl, origin, capImports)
 		if err != nil {
 			return nil, err
 		}

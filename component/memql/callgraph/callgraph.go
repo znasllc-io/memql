@@ -62,9 +62,11 @@ var (
 	// marker (construct-invocation ADR Decision 5). Requires the `{` so a
 	// declarative field merely *named* body is never matched.
 	bodyBlockRE = regexp.MustCompile(`(?m)^[ \t]*body[ \t]*\{`)
-	// A capability declaration inside an action body:
-	// `capability "<namespace>.<verb>"` at statement position.
-	capabilityRE = regexp.MustCompile(`(?m)^[ \t]*capability[ \t]+"([^"]*)"`)
+	// The single capability call inside a simplified action body (ADR
+	// Decision 3): `capability <verb>(...)` at statement position. The verb
+	// is a bare identifier resolved to a full dotted capability via the file's
+	// `use capabilities.*` imports.
+	capabilityCallRE = regexp.MustCompile(`(?m)^[ \t]*capability[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\(`)
 	// File-top use import: `use a.b.c.{ x, y }`. The brace body may span
 	// lines; `[^}]*` (with default dot) crosses newlines.
 	useRE = regexp.MustCompile(`(?m)^[ \t]*use[ \t]+([A-Za-z_][A-Za-z0-9_.]*)\.\{([^}]*)\}`)
@@ -135,11 +137,42 @@ func UseKinds(source string) map[string]string {
 		if len(parts) < 2 {
 			continue
 		}
+		// `use capabilities.<path>.{ verb }` imports a capability verb (ADR
+		// Decision 4): tag it kind "capability" so a capability call inside an
+		// action body is not mistaken for a construct call.
 		kind := singular(parts[len(parts)-1])
+		if parts[0] == "capabilities" {
+			kind = "capability"
+		}
 		for _, raw := range strings.Split(m[2], ",") {
 			name := strings.TrimSpace(raw)
 			if name != "" {
 				out[name] = kind
+			}
+		}
+	}
+	return out
+}
+
+// capabilityNamespaces builds a verb -> namespace map from a source's
+// `use capabilities.<namespace>.<...>.{ verb }` imports. The namespace is the
+// first path segment after "capabilities" (e.g. "shell" for
+// `capabilities.shell`, "integration" for `capabilities.integration.github`).
+// Used to validate the namespace of an action's single capability call against
+// the closed vocabulary. A verb whose import is not in `text` is absent (the
+// loader enforces resolution loudly; the structural pass stays best-effort).
+func capabilityNamespaces(source string) map[string]string {
+	out := map[string]string{}
+	for _, m := range useRE.FindAllStringSubmatch(source, -1) {
+		parts := strings.Split(m[1], ".")
+		if len(parts) < 2 || parts[0] != "capabilities" {
+			continue
+		}
+		ns := parts[1]
+		for _, raw := range strings.Split(m[2], ",") {
+			verb := strings.TrimSpace(raw)
+			if verb != "" {
+				out[verb] = ns
 			}
 		}
 	}
@@ -240,29 +273,31 @@ func ConstructFindings(kind, name, text string, useKinds map[string]string, side
 		}
 	case "action":
 		// An action performs EXACTLY ONE external capability call on a surface
-		// and NEVER touches the MemQL graph or any other construct (ADR §2.3).
-		caps := capabilityRE.FindAllStringSubmatch(text, -1)
+		// and NEVER touches the MemQL graph or any other construct (ADR
+		// Decision 3): `capability <verb>(...)`, the verb resolved to a full
+		// dotted capability via the file's `use capabilities.*` imports.
+		caps := capabilityCallRE.FindAllStringSubmatch(text, -1)
 		switch len(caps) {
 		case 0:
-			add("action-one-capability", "declares no external capability -- an action performs exactly one (ADR §2.3)")
+			add("action-one-capability", "declares no external capability call -- an action body is exactly one `capability <verb>(...)` call (ADR Decision 3)")
 		case 1:
-			// The single capability's namespace must be in the vocabulary.
-			capName := caps[0][1]
-			ns := capName
-			if i := strings.IndexByte(capName, '.'); i >= 0 {
-				ns = capName[:i]
-			}
-			if !validCapabilityNamespaces[ns] {
-				add("action-capability-namespace", fmt.Sprintf("capability %q is not in the namespace vocabulary -- one of fs.* / shell.* / http.* / integration.* / mcp.* (ADR §2.3)", capName))
+			// The capability verb must resolve (via the file's capability
+			// imports) to a namespace in the closed vocabulary. When the import
+			// is not visible in this construct's text the structural pass skips
+			// the check -- the loader enforces resolution loudly.
+			verb := caps[0][1]
+			if ns, known := capabilityNamespaces(text)[verb]; known && !validCapabilityNamespaces[ns] {
+				add("action-capability-namespace", fmt.Sprintf("capability %q resolves to namespace %q, not in the vocabulary -- one of fs.* / shell.* / http.* / integration.* / mcp.* (ADR Decision 4)", verb, ns))
 			}
 		default:
-			add("action-one-capability", fmt.Sprintf("declares %d capabilities -- an action performs exactly one (ADR §2.3); compose multiples in an automation", len(caps)))
+			add("action-one-capability", fmt.Sprintf("declares %d capability calls -- an action performs exactly one (ADR Decision 3); compose multiples in an automation", len(caps)))
 		}
-		// An action may not invoke any other DSL construct.
+		// An action may not invoke any other DSL construct (the capability verb
+		// itself is tagged kind "capability", so it is permitted here).
 		for cn, ck := range calls {
 			switch ck {
 			case "logic", "query", "mutation", "automation", "action":
-				add("action-no-calls", fmt.Sprintf("calls %s %q -- an action is a single external capability and may not invoke other constructs (ADR §2.3)", ck, cn))
+				add("action-no-calls", fmt.Sprintf("calls %s %q -- an action is a single external capability and may not invoke other constructs (ADR Decision 3)", ck, cn))
 			}
 		}
 		// An action never reaches the graph: graph writes are mutations.

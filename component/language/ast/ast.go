@@ -1497,55 +1497,51 @@ type PromptDecl struct {
 
 func (*PromptDecl) node() {}
 
-// ActionDecl is the shared-frontend AST node for a struct-form authored
-// `action` declaration (memql#2218, behavioral-constructs ADR section 2.3):
+// ActionDecl is the shared-frontend AST node for the SIMPLIFIED struct-form
+// authored `action` declaration (construct-invocation ADR Decision 3, Story 4
+// / memql#2328, epic #2322):
 //
-//	@kind("primitive") @sideEffect("exec")
+//	use capabilities.shell.{ script }
+//	@description("Check out the memQL repo at a specific version.")
 //	action cloneRepoAtVersion {
-//	  capability "shell.exec"
-//	  intent "..."
-//	  params { workdir string @required; ref string @required }
-//	  argTemplate { cmd: "git -C $params.workdir checkout $params.ref" }
+//	  args { workdir string @required; ref string @required }
+//	  capability script(script: "deploy.cloneRepo", workdir: args.workdir, ref: args.ref)
 //	}
 //
-// An authored action is DECLARATIVE (no procedural body): it names exactly
-// one external `Capability`, a natural-language `Intent`, an input schema
-// (`Params`), and an `ArgTemplate` that renders the concrete capability
-// arguments from those params (a "$params.<name>" reference is substituted
-// with the bound value at run time). It NEVER touches the MemQL graph.
+// The action is reduced to an `args` block + a SINGLE `capability <verb>(...)`
+// call (ADR Decision 3). The legacy surfaces were dropped: `@kind`,
+// `@sideEffect` (the authoritative class lives on the CAPABILITY now, Story 5),
+// `@reliability`, `intent` (merged into `@description`), `params` (renamed to
+// `args`), and `argTemplate` / `$params.X` (replaced by the typed capability
+// call). There is NO `body { }` and no `return`: an action body is exactly the
+// one capability call. The bare verb (`script`) resolves through the file-top
+// `use capabilities.<path>.{ verb }` import to a full dotted capability name
+// (`shell.script`).
 //
-// The action lives in its own registry (component/actions), not the engine's
-// tool/prompt kinds: it is invoked from an automation `action("name@1")` step
-// and replayed token-free (fingerprint-verified) on identical input. The I7
-// call-graph validator enforces the one-external-capability / no-graph rules.
+// An authored action is DECLARATIVE: it names exactly one external capability,
+// declares its input schema (`Args`), and binds the capability's call args from
+// those inputs (`CapabilityArgs`). It NEVER touches the MemQL graph. The action
+// lives in its own registry (component/actions); it is invoked from an
+// automation `action <name>(...)` step. The I7 call-graph validator enforces
+// the one-external-capability / no-graph rules.
 type ActionDecl struct {
-	Name        string         // action name (the slice/reference name)
-	Attributes  []*Attribute   // action-level annotations (@kind, @sideEffect, @description, @enabled/@disabled)
-	Capability  string         // the single external capability verb (shell.exec, fs.readFile, integration.github.tagRelease, ...)
-	Intent      string         // natural-language description of what the action does
-	Params      []*ActionField // input schema (the params block)
-	ArgTemplate []*ActionArg   // ordered capability-argument templates (the argTemplate block)
-	Path        string         // source path, for errors/diagnostics
+	Name       string           // action name (the slice/reference name)
+	Attributes []*Attribute     // action-level annotations (@description, @enabled/@disabled)
+	Args       *ArgsSchema      // input schema (the `args { ... }` block); nil when omitted
+	Capability string           // the bare imported capability verb the single body call names (e.g. "script", "tagRelease"); resolved to a full dotted name by the loader via the file's capability imports
+	CallArgs   []*ActionCallArg // the capability call's named args (key -> value expression), in source order
+	Path       string           // source path, for errors/diagnostics
 }
 
 func (*ActionDecl) node() {}
 
-// ActionField is a single parameter declaration inside an ActionDecl
-// `params { ... }` block. Mirrors PromptField/BuiltinField so the
-// per-field grammar stays uniform across struct-form declarations.
-type ActionField struct {
-	Name       string
-	Type       string       // e.g. "string", "object", "[]string"
-	Required   bool         // from @required
-	Attributes []*Attribute // any other field-level annotations (@description, @enum, @default)
-}
-
-// ActionArg is one `key: "template"` entry inside an ActionDecl
-// `argTemplate { ... }` block. Key is the capability argument name;
-// Template is the raw template string rendered from params at run time.
-type ActionArg struct {
-	Key      string
-	Template string
+// ActionCallArg is one named argument of the single `capability <verb>(...)`
+// call in an action body: `Key` is the capability-argument name and `Value`
+// is its bound value expression (a string/number/bool LiteralExpr, or an
+// ArgRefExpr referencing `args.<path>`). Order is source order.
+type ActionCallArg struct {
+	Key   string
+	Value ExpressionNode
 }
 
 // CapabilityDecl is the shared-frontend AST node for a top-level

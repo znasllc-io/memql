@@ -11,17 +11,13 @@ import (
 // deployActionSrc is an authored deploy-pack primitive (the shape I8 lands):
 // a single control capability rendered from params. It is loaded with a
 // deployment-pack origin so it inherits the cockpit/runner policy default.
-const deployActionSrc = `@kind("primitive")
-@sideEffect("write")
+const deployActionSrc = `use capabilities.integration.argocd.{ sync }
+@description("sync an argocd application")
 action syncArgoApp {
-  capability "integration.argocd.sync"
-  intent "sync an argocd application"
-  params {
+  args {
     app string @required
   }
-  argTemplate {
-    application: "$params.app"
-  }
+  capability sync(application: args.app)
 }`
 
 // deployRegistry loads an action under a deployment-pack origin so
@@ -72,7 +68,7 @@ func TestAuthoredActionExplicitSurfaceWins(t *testing.T) {
 		Action: &automations.ActionStepConfig{
 			Ref:     "cloneRepoAtVersion@1",
 			Args:    map[string]any{"workdir": "/w", "ref": "v1"},
-			Surface: actions.CockpitRunnerSurface, // shell.exec is served by cockpit/runner
+			Surface: actions.CockpitRunnerSurface, // shell.script is served by cockpit/runner
 		},
 	}
 	res, err := exec.Execute(context.Background(), step, &Context{})

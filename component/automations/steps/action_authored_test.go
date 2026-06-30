@@ -30,18 +30,14 @@ func (f *fakeDispatcher) Invoke(_ context.Context, capability string, args map[s
 	return map[string]any{"capability": capability, "args": args}, nil
 }
 
-const authoredCloneSrc = `@kind("primitive")
-@sideEffect("exec")
+const authoredCloneSrc = `use capabilities.shell.{ script }
+@description("checkout a repo at a ref")
 action cloneRepoAtVersion {
-  capability "shell.exec"
-  intent "checkout a repo at a ref"
-  params {
+  args {
     workdir string @required
     ref     string @required
   }
-  argTemplate {
-    cmd: "git -C $params.workdir checkout $params.ref"
-  }
+  capability script(script: "deploy.cloneRepo", workdir: args.workdir, ref: args.ref)
 }`
 
 func authoredRegistry(t *testing.T, src string) *actions.Registry {
@@ -93,7 +89,7 @@ func TestAuthoredActionRunsViaStep(t *testing.T) {
 	if out["authored"] != true {
 		t.Errorf("expected authored=true, got %#v", out["authored"])
 	}
-	if out["capability"] != "shell.exec" {
+	if out["capability"] != "shell.script" {
 		t.Errorf("capability = %#v", out["capability"])
 	}
 	if out["resultFingerprint"] == "" || out["resultFingerprint"] == nil {
@@ -103,8 +99,17 @@ func TestAuthoredActionRunsViaStep(t *testing.T) {
 	if len(fake.calls) != 1 {
 		t.Fatalf("expected 1 capability call, got %d", len(fake.calls))
 	}
-	if got := fake.calls[0].args["cmd"]; got != "git -C /work/memql checkout v1.2.3" {
-		t.Errorf("rendered cmd = %#v", got)
+	// The capability call's args are rendered from the action's bound inputs:
+	// the literal `script` selector + the args.X references passed verbatim.
+	gotArgs := fake.calls[0].args
+	if gotArgs["script"] != "deploy.cloneRepo" {
+		t.Errorf("rendered script = %#v", gotArgs["script"])
+	}
+	if gotArgs["workdir"] != "/work/memql" {
+		t.Errorf("rendered workdir = %#v", gotArgs["workdir"])
+	}
+	if gotArgs["ref"] != "v1.2.3" {
+		t.Errorf("rendered ref = %#v", gotArgs["ref"])
 	}
 }
 

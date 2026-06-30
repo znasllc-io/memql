@@ -1438,6 +1438,38 @@ func translateActionStepCall(rest string) (string, error) {
 		return "action " + rest[:closeIdx+1], nil
 	}
 
+	// Kind-prefixed invocation form (construct-invocation ADR Decision 1+2,
+	// Story 4 / memql#2328): `action <name>(<colon-args>) [on surface("x")]`.
+	// The action resolves by NAME now (no `@version` suffix); the colon-named
+	// args become the action config's `args: { ... }` object.
+	if rest[0] != '(' && rest[0] != '"' {
+		name, after := splitLeadingIdent(rest)
+		if name == "" {
+			return "", fmt.Errorf("action step: expected `<name>(...)` or `(\"id@ver\")` after `action`, got %q", parallelSnippet(rest))
+		}
+		after = strings.TrimLeft(after, " \t\n\r")
+		if after == "" || after[0] != '(' {
+			return "", fmt.Errorf("action step: expected `(` after action name %q", name)
+		}
+		pc := findMatchingCloseParen(after, 0)
+		if pc < 0 {
+			return "", fmt.Errorf("action step: missing closing `)` after the action args")
+		}
+		inner := strings.TrimSpace(after[1:pc])
+		after = strings.TrimLeft(after[pc+1:], " \t\n\r")
+
+		argsClause := ""
+		if inner != "" {
+			argsClause = ", args: { " + inner + " }"
+		}
+
+		surfaceClause, serr := parseTrailingOnSurface(after)
+		if serr != nil {
+			return "", serr
+		}
+		return `action { ref: "` + name + `"` + argsClause + surfaceClause + " }", nil
+	}
+
 	// Authoring form: `action("ref@1") { args { ... } } [on surface("x")]`.
 	if rest[0] != '(' {
 		return "", fmt.Errorf("action step: expected `(\"id@ver\")` after `action`, got %q", parallelSnippet(rest))
@@ -1483,36 +1515,47 @@ func translateActionStepCall(rest string) (string, error) {
 		}
 	}
 
-	surfaceClause := ""
-	if rest != "" {
-		kw, afterKw := splitLeadingIdent(rest)
-		if kw != "on" {
-			return "", fmt.Errorf("action step: unexpected trailing text after the action body: %q", parallelSnippet(rest))
-		}
-		afterKw = strings.TrimLeft(afterKw, " \t\n\r")
-		sw, afterSw := splitLeadingIdent(afterKw)
-		if sw != "surface" {
-			return "", fmt.Errorf("action step: expected `surface(\"...\")` after `on`, got %q", parallelSnippet(afterKw))
-		}
-		afterSw = strings.TrimLeft(afterSw, " \t\n\r")
-		if afterSw == "" || afterSw[0] != '(' {
-			return "", fmt.Errorf("action step: expected `(` after `surface`")
-		}
-		pc := findMatchingCloseParen(afterSw, 0)
-		if pc < 0 {
-			return "", fmt.Errorf("action step: missing closing `)` after surface")
-		}
-		s := strings.TrimSpace(afterSw[1:pc])
-		if tail := strings.TrimSpace(afterSw[pc+1:]); tail != "" {
-			return "", fmt.Errorf("action step: unexpected trailing text after `on surface(...)`: %q", parallelSnippet(tail))
-		}
-		if s == "" {
-			return "", fmt.Errorf("action step: empty surface in `on surface(...)`")
-		}
-		surfaceClause = ", surface: " + s
+	surfaceClause, serr := parseTrailingOnSurface(rest)
+	if serr != nil {
+		return "", serr
 	}
 
 	return "action { ref: " + ref + argsClause + surfaceClause + " }", nil
+}
+
+// parseTrailingOnSurface parses an optional `on surface("x")` suffix on an
+// action step, returning the `, surface: "x"` config clause (or "" when rest is
+// empty). Any other trailing text is an error.
+func parseTrailingOnSurface(rest string) (string, error) {
+	rest = strings.TrimLeft(rest, " \t\n\r")
+	if rest == "" {
+		return "", nil
+	}
+	kw, afterKw := splitLeadingIdent(rest)
+	if kw != "on" {
+		return "", fmt.Errorf("action step: unexpected trailing text after the action body: %q", parallelSnippet(rest))
+	}
+	afterKw = strings.TrimLeft(afterKw, " \t\n\r")
+	sw, afterSw := splitLeadingIdent(afterKw)
+	if sw != "surface" {
+		return "", fmt.Errorf("action step: expected `surface(\"...\")` after `on`, got %q", parallelSnippet(afterKw))
+	}
+	afterSw = strings.TrimLeft(afterSw, " \t\n\r")
+	if afterSw == "" || afterSw[0] != '(' {
+		return "", fmt.Errorf("action step: expected `(` after `surface`")
+	}
+	pc := findMatchingCloseParen(afterSw, 0)
+	if pc < 0 {
+		return "", fmt.Errorf("action step: missing closing `)` after surface")
+	}
+	s := strings.TrimSpace(afterSw[1:pc])
+	if tail := strings.TrimSpace(afterSw[pc+1:]); tail != "" {
+		return "", fmt.Errorf("action step: unexpected trailing text after `on surface(...)`: %q", parallelSnippet(tail))
+	}
+	if s == "" {
+		return "", fmt.Errorf("action step: empty surface in `on surface(...)`")
+	}
+	return ", surface: " + s, nil
 }
 
 // translateSwitchStepCall handles the authored switch step body (epic #2212,
@@ -1638,27 +1681,127 @@ func parseForEachInnerCalls(inner string) ([]string, error) {
 		if pos >= len(inner) {
 			break
 		}
-		braceRel := strings.IndexByte(inner[pos:], '{')
-		if braceRel < 0 {
-			return nil, fmt.Errorf("forEach step: inner call %q must have a `{ ... }` body", parallelSnippet(inner[pos:]))
+		end, err := innerCallSpanEnd(inner, pos)
+		if err != nil {
+			return nil, fmt.Errorf("forEach step: %w", err)
 		}
-		braceIdx := pos + braceRel
-		closeIdx := findMatchingCloseBrace(inner, braceIdx)
-		if closeIdx < 0 {
-			return nil, fmt.Errorf("forEach step: inner call missing closing brace")
-		}
-		callSrc := strings.TrimSpace(inner[pos : closeIdx+1])
+		callSrc := strings.TrimSpace(inner[pos:end])
 		call, err := translateStepCall(callSrc)
 		if err != nil {
 			return nil, fmt.Errorf("forEach step: %w", err)
 		}
 		out = append(out, call)
-		pos = closeIdx + 1
+		pos = end
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("forEach step: the loop body has no calls")
 	}
 	return out, nil
+}
+
+// innerCallSpanEnd returns the exclusive end index of the single call statement
+// beginning at start in inner. It handles every inner-call shape a forEach /
+// switch-case body hosts:
+//
+//   - brace-bodied: `<kind> <name> { ... }`, bare `<name> { ... }`,
+//     `if <cond> { <call> }` -- the call ends at the matching `}` of its body.
+//   - kind-prefixed paren call (construct-invocation ADR, Story 4):
+//     `action <name>(...)`, `mutation <name>(...)`, bare `<name>(...)` -- the
+//     call ends at the matching `)`, then greedily absorbs a trailing
+//     `{ ... }` (the legacy `action("ref") { args }` body) and/or an
+//     `on surface("x")` clause.
+func innerCallSpanEnd(inner string, start int) (int, error) {
+	s := inner[start:]
+	first, rest := splitLeadingIdent(s)
+	if first == "" {
+		return 0, fmt.Errorf("expected a call at %q", parallelSnippet(s))
+	}
+
+	// `if <cond> { <call> }` is always brace-bodied.
+	if first == "if" {
+		return braceBodyEnd(inner, start)
+	}
+
+	// Locate the opener that follows the leading head (a kind keyword + name,
+	// a bare name, or `action` immediately followed by `(`).
+	rest = strings.TrimLeft(rest, " \t\n\r")
+	// A kind-prefixed or bare name may sit between the leading ident and the
+	// opener: `action <name>(`, `mutation <name>(`, `<name> {`. Consume one
+	// optional identifier so the opener check lands on `(` or `{`.
+	if rest != "" && isIdentStart(rest[0]) {
+		_, after := splitLeadingIdent(rest)
+		rest = strings.TrimLeft(after, " \t\n\r")
+	}
+
+	if rest == "" {
+		return 0, fmt.Errorf("inner call %q must have a `(...)` or `{ ... }` body", parallelSnippet(s))
+	}
+	switch rest[0] {
+	case '{':
+		return braceBodyEnd(inner, start)
+	case '(':
+		return parenCallEnd(inner, start)
+	default:
+		return 0, fmt.Errorf("inner call %q must have a `(...)` or `{ ... }` body", parallelSnippet(s))
+	}
+}
+
+// braceBodyEnd spans a brace-bodied call: from start to the matching `}` of its
+// first `{`.
+func braceBodyEnd(inner string, start int) (int, error) {
+	braceRel := strings.IndexByte(inner[start:], '{')
+	if braceRel < 0 {
+		return 0, fmt.Errorf("inner call %q must have a `{ ... }` body", parallelSnippet(inner[start:]))
+	}
+	closeIdx := findMatchingCloseBrace(inner, start+braceRel)
+	if closeIdx < 0 {
+		return 0, fmt.Errorf("inner call missing closing brace")
+	}
+	return closeIdx + 1, nil
+}
+
+// parenCallEnd spans a paren-call: from start to the matching `)` of its first
+// `(`, greedily absorbing a trailing `{ ... }` body and/or `on surface(...)`.
+func parenCallEnd(inner string, start int) (int, error) {
+	parenRel := strings.IndexByte(inner[start:], '(')
+	if parenRel < 0 {
+		return 0, fmt.Errorf("inner call %q missing `(`", parallelSnippet(inner[start:]))
+	}
+	closeRel := findMatchingCloseParen(inner[start:], parenRel)
+	if closeRel < 0 {
+		return 0, fmt.Errorf("inner call missing closing `)`")
+	}
+	end := start + closeRel + 1
+
+	// Greedily absorb a trailing `{ ... }` body (legacy `action("ref") { args }`).
+	probe := skipParallelInsignificant(inner, end)
+	if probe < len(inner) && inner[probe] == '{' {
+		closeIdx := findMatchingCloseBrace(inner, probe)
+		if closeIdx < 0 {
+			return 0, fmt.Errorf("inner call missing closing brace for its body")
+		}
+		end = closeIdx + 1
+		probe = skipParallelInsignificant(inner, end)
+	}
+	// Greedily absorb a trailing `on surface("x")` clause.
+	if probe < len(inner) {
+		kw, _ := splitLeadingIdent(inner[probe:])
+		if kw == "on" {
+			surfParenRel := strings.IndexByte(inner[probe:], '(')
+			if surfParenRel >= 0 {
+				pc := findMatchingCloseParen(inner[probe:], surfParenRel)
+				if pc >= 0 {
+					end = probe + pc + 1
+				}
+			}
+		}
+	}
+	return end, nil
+}
+
+// isIdentStart reports whether c can begin an identifier.
+func isIdentStart(c byte) bool {
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_'
 }
 
 // indexWord returns the byte index of the first whole-word occurrence of

@@ -138,8 +138,7 @@ type (
 	PromptDecl              = ast.PromptDecl
 	PromptField             = ast.PromptField
 	ActionDecl              = ast.ActionDecl
-	ActionField             = ast.ActionField
-	ActionArg               = ast.ActionArg
+	ActionCallArg           = ast.ActionCallArg
 	CapabilityDecl          = ast.CapabilityDecl
 	PolicyDecl              = ast.PolicyDecl
 	SeedDecl                = ast.SeedDecl
