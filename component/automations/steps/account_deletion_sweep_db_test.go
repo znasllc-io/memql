@@ -8,6 +8,8 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -114,11 +116,21 @@ func TestAccountDeletionSweep_HardDeletesExpiredUser_DBAcceptance(t *testing.T) 
 	}
 	call := func(name string, args map[string]any) *memql.ExecuteResult {
 		t.Helper()
-		body, err := json.Marshal(args)
-		if err != nil {
-			t.Fatalf("marshal args for %s: %v", name, err)
+		keys := make([]string, 0, len(args))
+		for k := range args {
+			keys = append(keys, k)
 		}
-		return exec(name + "(" + string(body) + ")")
+		sort.Strings(keys)
+		parts := make([]string, 0, len(args))
+		for _, k := range keys {
+			vb, err := json.Marshal(args[k])
+			if err != nil {
+				t.Fatalf("marshal arg %s for %s: %v", k, name, err)
+			}
+			parts = append(parts, k+": "+string(vb))
+		}
+		// Kind-prefixed, named-args call form (#2335).
+		return exec("mutation " + name + "(" + strings.Join(parts, ", ") + ")")
 	}
 
 	// Seed: an active user scheduled for deletion 60 days ago. The default

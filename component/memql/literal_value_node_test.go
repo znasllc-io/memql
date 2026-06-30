@@ -178,10 +178,10 @@ logic consolidateMemory {
 	require.NoError(t, err, "the logic shape must parse")
 	require.NoError(t, eng.Functions().Upsert(fn))
 
-	args, err := json.Marshal(map[string]any{"event": map[string]any{"topic": "node.created"}})
+	event, err := json.Marshal(map[string]any{"topic": "node.created"})
 	require.NoError(t, err)
 
-	res, err := eng.Execute(ctx, "consolidateMemory("+string(args)+")")
+	res, err := eng.Execute(ctx, "logic consolidateMemory(event: "+string(event)+")")
 	require.NoError(t, err, "consolidateMemory must run to completion (memql#1705 regression -- was 'unsupported expression node *memql.LiteralValueNode')")
 	require.NotNil(t, res)
 	require.Equal(t, "node.created", res.OutputPayload(), "the logic must return the bound args.event.topic value")
