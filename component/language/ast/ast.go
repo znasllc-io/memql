@@ -1548,6 +1548,45 @@ type ActionArg struct {
 	Template string
 }
 
+// CapabilityDecl is the shared-frontend AST node for a top-level
+// `capability` declaration (construct-invocation ADR Decision 4, Story
+// 5 / memql#2325, epic #2322):
+//
+//	@sideEffect("write")
+//	@description("Create a git tag + GitHub release for a version.")
+//	capability integration.github.tagRelease {
+//	  args { repo string @required; tag string @required }
+//	}
+//
+// A capability is declared like a typed, side-effect-classified builtin
+// with NO body -- it is SURFACE-BACKED: the implementation is supplied
+// by the runtime surface (fs / shell / http / integration / mcp), not
+// the DSL. Its Name is namespaced/dotted (`integration.github.tagRelease`,
+// `fs.readFile`, `shell.script`, `http.get`, `mcp.<tool>`).
+//
+// The `@sideEffect("read"|"write"|"exec")` annotation -- the UNSPOOFABLE
+// side-effect classification -- lives HERE (ADR §7): an authored or
+// planner-generated action cannot spoof its risk class, because the
+// authoritative class is declared on the capability the action invokes.
+// `@description(...)` documents the verb and is the planner embedding
+// source.
+//
+// Args is the optional input schema (`args { name type @required ... }`),
+// reusing the same args-block grammar action/builtin/file-top use. It is
+// nil when the capability declares no args block.
+//
+// This node is purely a DECLARATION: the invocation grammar
+// (`capability NAME(args)` call sites) and the action rewrite that
+// consumes it land in later stories (2 + 4).
+type CapabilityDecl struct {
+	Name       string       // dotted/namespaced capability verb (e.g. "integration.github.tagRelease")
+	Attributes []*Attribute // capability-level annotations (@sideEffect, @description, @enabled/@disabled)
+	Args       *ArgsSchema  // input schema from the `args { ... }` block; nil when omitted
+	Path       string       // source path, for errors/diagnostics
+}
+
+func (*CapabilityDecl) node() {}
+
 // PromptField is a single field declaration inside a PromptDecl
 // body. Mirrors BuiltinField (memql#318) so the per-construct
 // playbook for langparser-native struct declarations stays uniform.

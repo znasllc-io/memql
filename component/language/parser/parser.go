@@ -260,6 +260,29 @@ func ParseActionDecl(source string) (*ActionDecl, error) {
 	return action, nil
 }
 
+// ParseCapabilityDecl tokenises the given source and parses it as a
+// single top-level `capability` declaration (construct-invocation ADR
+// Decision 4, Story 5 / memql#2325). Convenience wrapper around
+// ParseFile for the capability loader's per-slice flow. Mirrors
+// ParseActionDecl on the error surface.
+func ParseCapabilityDecl(source string) (*CapabilityDecl, error) {
+	file, err := ParseFile(source)
+	if err != nil {
+		return nil, err
+	}
+	if len(file.Definitions) == 0 {
+		return nil, fmt.Errorf("no capability declaration found")
+	}
+	if len(file.Definitions) > 1 {
+		return nil, fmt.Errorf("expected one capability declaration, got %d definitions", len(file.Definitions))
+	}
+	capDecl, ok := file.Definitions[0].(*CapabilityDecl)
+	if !ok {
+		return nil, fmt.Errorf("expected capability declaration, got %T", file.Definitions[0])
+	}
+	return capDecl, nil
+}
+
 // ParseFile parses a file containing multiple definitions.
 func (p *Parser) parseFile() (*File, error) {
 	file := &File{
@@ -495,17 +518,18 @@ func (p *Parser) parseUseDeclaration() (*UseDeclaration, error) {
 // `spec` and `trait` share parseSpecDecl (trait=true); both are listed
 // so the keyword set is complete.
 var topLevelDeclParsers = map[string]func(p *Parser, attributes []*Attribute) (Node, error){
-	"concept":  func(p *Parser, a []*Attribute) (Node, error) { return p.parseConceptDecl(a) },
-	"shape":    func(p *Parser, a []*Attribute) (Node, error) { return p.parseShapeDecl(a) },
-	"provider": func(p *Parser, a []*Attribute) (Node, error) { return p.parseProviderDecl(a) },
-	"builtin":  func(p *Parser, a []*Attribute) (Node, error) { return p.parseBuiltinDecl(a) },
-	"tool":     func(p *Parser, a []*Attribute) (Node, error) { return p.parseToolDecl(a) },
-	"prompt":   func(p *Parser, a []*Attribute) (Node, error) { return p.parsePromptDecl(a) },
-	"policy":   func(p *Parser, a []*Attribute) (Node, error) { return p.parsePolicyDecl(a) },
-	"spec":     func(p *Parser, a []*Attribute) (Node, error) { return p.parseSpecDecl(a, false) },
-	"trait":    func(p *Parser, a []*Attribute) (Node, error) { return p.parseSpecDecl(a, true) },
-	"seed":     func(p *Parser, a []*Attribute) (Node, error) { return p.parseSeedDecl(a) },
-	"action":   func(p *Parser, a []*Attribute) (Node, error) { return p.parseActionDecl(a) },
+	"concept":    func(p *Parser, a []*Attribute) (Node, error) { return p.parseConceptDecl(a) },
+	"shape":      func(p *Parser, a []*Attribute) (Node, error) { return p.parseShapeDecl(a) },
+	"provider":   func(p *Parser, a []*Attribute) (Node, error) { return p.parseProviderDecl(a) },
+	"builtin":    func(p *Parser, a []*Attribute) (Node, error) { return p.parseBuiltinDecl(a) },
+	"tool":       func(p *Parser, a []*Attribute) (Node, error) { return p.parseToolDecl(a) },
+	"prompt":     func(p *Parser, a []*Attribute) (Node, error) { return p.parsePromptDecl(a) },
+	"policy":     func(p *Parser, a []*Attribute) (Node, error) { return p.parsePolicyDecl(a) },
+	"spec":       func(p *Parser, a []*Attribute) (Node, error) { return p.parseSpecDecl(a, false) },
+	"trait":      func(p *Parser, a []*Attribute) (Node, error) { return p.parseSpecDecl(a, true) },
+	"seed":       func(p *Parser, a []*Attribute) (Node, error) { return p.parseSeedDecl(a) },
+	"action":     func(p *Parser, a []*Attribute) (Node, error) { return p.parseActionDecl(a) },
+	"capability": func(p *Parser, a []*Attribute) (Node, error) { return p.parseCapabilityDecl(a) },
 }
 
 // TopLevelDeclKeywords is the sorted set of contextual keywords that
@@ -2079,6 +2103,80 @@ func (p *Parser) parseActionDecl(attrs []*Attribute) (*ActionDecl, error) {
 	}
 	if !sawIntent {
 		return nil, newParseErrorf(&p.current, "action %q is missing an 'intent'", decl.Name)
+	}
+	return decl, nil
+}
+
+// parseCapabilityDecl parses a top-level `capability` declaration
+// (construct-invocation ADR Decision 4, Story 5 / memql#2325):
+//
+//	@sideEffect("write")
+//	@description("Create a git tag + GitHub release for a version.")
+//	capability integration.github.tagRelease {
+//	  args { repo string @required; tag string @required }
+//	}
+//
+// A capability is declared like a typed, side-effect-classified builtin
+// with NO body (surface-backed). Its name is namespaced/dotted (the
+// lexer emits the dotted path as one identifier token). The optional
+// `args { ... }` block reuses the file-top args-block grammar. A `body`
+// block (or any non-`args` key) is rejected: a capability is surface-
+// backed and never procedural. Namespace-vocabulary validation
+// (fs/shell/http/integration/mcp) is a loader concern, not the parser's
+// -- the parser stays purely syntactic and only requires a dotted name.
+//
+// Additive only (this story): the invocation grammar (`capability
+// NAME(args)` call sites) and the action rewrite land in later stories.
+func (p *Parser) parseCapabilityDecl(attrs []*Attribute) (*CapabilityDecl, error) {
+	if !p.check(TokenIdentifier) || p.current.Literal != "capability" {
+		return nil, newParseErrorf(&p.current, "expected 'capability' keyword, got %q", p.current.Literal)
+	}
+	p.advance()
+
+	if !p.check(TokenIdentifier) {
+		return nil, newParseErrorf(&p.current, "expected capability name after 'capability', got %q", p.current.Literal)
+	}
+	name := p.current.Literal
+	if !strings.Contains(name, ".") {
+		return nil, newParseErrorf(&p.current,
+			"capability name %q must be namespaced/dotted (fs.* / shell.* / http.* / integration.* / mcp.*), e.g. `integration.github.tagRelease`", name)
+	}
+	decl := &CapabilityDecl{Name: name, Attributes: attrs}
+	p.advance()
+
+	if err := p.expect(TokenBraceOpen); err != nil {
+		return nil, err
+	}
+
+	sawArgs := false
+	for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
+		if !p.check(TokenIdentifier) {
+			return nil, newParseErrorf(&p.current,
+				"unexpected token %q in capability %q body -- only an `args { ... }` block is allowed (a capability is surface-backed and has NO body)", p.current.Literal, decl.Name)
+		}
+		switch p.current.Literal {
+		case "args":
+			if sawArgs {
+				return nil, newParseErrorf(&p.current, "capability %q declares 'args' more than once", decl.Name)
+			}
+			// parseFileTopArgsBlock consumes the `args` keyword + block.
+			argsDef, err := p.parseFileTopArgsBlock()
+			if err != nil {
+				return nil, err
+			}
+			decl.Args = argsDef
+			sawArgs = true
+		case "body":
+			return nil, newParseErrorf(&p.current,
+				"capability %q must not declare a `body` block -- a capability is surface-backed (the body is supplied by the runtime surface, not the DSL)", decl.Name)
+		default:
+			return nil, newParseErrorf(&p.current,
+				"unknown key %q in capability %q body -- only an `args { ... }` block is allowed", p.current.Literal, decl.Name)
+		}
+	}
+
+	if err := p.expect(TokenBraceClose); err != nil {
+		return nil, err
 	}
 	return decl, nil
 }

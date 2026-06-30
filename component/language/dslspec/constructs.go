@@ -75,6 +75,15 @@ func constructs() []Construct {
 			BodyBlocks:         []string{"params", "argTemplate"},
 		},
 		{
+			Keyword:            "capability",
+			Category:           CategoryDeclarative,
+			Doc:                "Surface-backed external capability verb (construct-invocation ADR Decision 4): declared like a typed, side-effect-classified builtin with NO body. Namespaced/dotted name (fs.* / shell.* / http.* / integration.* / mcp.*). @sideEffect(\"read\"|\"write\"|\"exec\") -- the UNSPOOFABLE risk class -- lives HERE, not on the action that invokes it (ADR §7). Imported at the verb level (`use capabilities.<ns>.{ verb }`) and called via `capability verb(args)`. Body: an optional args{} input schema.",
+			AnnotationReceiver: "Capability",
+			RegistryBacked:     true,
+			ConceptInSignature: false,
+			BodyBlocks:         []string{"args"},
+		},
+		{
 			Keyword:            "spec",
 			Category:           CategoryPredicate,
 			Doc:                "Atomic boolean predicate. Row-specs (payload.X / intrinsics) compile to SQL; context-specs (actor.X) evaluate in-process. Mixing both is rejected.",
