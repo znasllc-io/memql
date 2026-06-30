@@ -196,7 +196,7 @@ func (c *CognitionIntegration) emitTextChunk(ctx context.Context, partitionId, p
 		doneStr = "true"
 	}
 
-	query := fmt.Sprintf(`emitTextChunk({
+	query := fmt.Sprintf(`mutation emitTextChunk(
 		chunkId: %s,
 		partitionId: %s,
 		participantId: %s,
@@ -204,7 +204,7 @@ func (c *CognitionIntegration) emitTextChunk(ctx context.Context, partitionId, p
 		text: %s,
 		index: %d,
 		done: %s
-	})`,
+	)`,
 		escapeJSONString(chunkId),
 		escapeJSONString(partitionId),
 		escapeJSONString(participantId),

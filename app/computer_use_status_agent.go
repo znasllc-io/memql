@@ -121,7 +121,7 @@ func standingComputerUseScope(ctx context.Context, engine *memqlengine.MemQLEngi
 	if engine == nil || strings.TrimSpace(ownerUserId) == "" {
 		return ""
 	}
-	q := fmt.Sprintf(`agentAuthorizationsForUser({userId:%q})`, ownerUserId)
+	q := fmt.Sprintf(`query agentAuthorizationsForUser(userId:%q)`, ownerUserId)
 	res, err := engine.Execute(ctx, q)
 	if err != nil {
 		if logger != nil {
@@ -188,7 +188,7 @@ func resolveAgentOwner(ctx context.Context, engine *memqlengine.MemQLEngine, age
 	if engine == nil || strings.TrimSpace(agentId) == "" {
 		return "", nil
 	}
-	q := fmt.Sprintf(`agentOwner({agentId:%q})`, agentId)
+	q := fmt.Sprintf(`query agentOwner(agentId:%q)`, agentId)
 	res, err := engine.Execute(ctx, q)
 	if err != nil {
 		return "", err
@@ -238,7 +238,7 @@ func userHasConfiguredWorker(ctx context.Context, engine *memqlengine.MemQLEngin
 	if engine == nil || strings.TrimSpace(ownerUserId) == "" {
 		return false, nil
 	}
-	q := fmt.Sprintf(`workersForUser({ownerUserId:%q})`, ownerUserId)
+	q := fmt.Sprintf(`query workersForUser(ownerUserId:%q)`, ownerUserId)
 	res, err := engine.Execute(ctx, q)
 	if err != nil {
 		return false, err

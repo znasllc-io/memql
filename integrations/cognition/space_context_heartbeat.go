@@ -62,7 +62,7 @@ func (c *CognitionIntegration) recomputeAllSpacesContext(ctx context.Context) er
 	// downstream extractDataFromResult call returns the same
 	// `[]any` of `{"id": "<id>"}` maps so the iteration below is
 	// unchanged. Unblocks #250 (legacy parser deletion).
-	result, err := c.engine.Execute(ctx, `queryActivePartitionIds({})`)
+	result, err := c.engine.Execute(ctx, `query queryActivePartitionIds()`)
 	if err != nil {
 		return err
 	}

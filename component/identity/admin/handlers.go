@@ -790,27 +790,27 @@ func (s *AdminServer) persistSettings(ctx context.Context, in identity.ClusterSe
 			clusterDomain = row.ClusterDomain
 		}
 	}
-	q := fmt.Sprintf(`updateClusterSettings({`+
-		`"id":"cluster",`+
-		`"clusterDomain":%q,`+
-		`"brandName":%q,`+
-		`"brandPrimaryColor":%q,`+
-		`"brandLogoDataURI":%q,`+
-		`"brandIconDataURI":%q,`+
-		`"registrationMode":%q,`+
-		`"registrationDomains":%q,`+
-		`"internalDomains":%q,`+
-		`"internalDefaultRole":%q,`+
-		`"registeredClientsJSON":%q,`+
-		`"accessRequestNotifyEmails":%q,`+
-		`"bootstrapEmail":%q,`+
-		`"bootstrappedAt":%q,`+
-		`"accessTokenTTLSeconds":%d,`+
-		`"refreshTokenTTLSeconds":%d,`+
-		`"magicLinkTTLSeconds":%d,`+
-		`"invitationTTLDays":%d,`+
-		`"refreshCookieSameSite":%q`+
-		`})`,
+	q := fmt.Sprintf(`mutation updateClusterSettings(`+
+		`id: "cluster",`+
+		`clusterDomain: %q,`+
+		`brandName: %q,`+
+		`brandPrimaryColor: %q,`+
+		`brandLogoDataURI: %q,`+
+		`brandIconDataURI: %q,`+
+		`registrationMode: %q,`+
+		`registrationDomains: %q,`+
+		`internalDomains: %q,`+
+		`internalDefaultRole: %q,`+
+		`registeredClientsJSON: %q,`+
+		`accessRequestNotifyEmails: %q,`+
+		`bootstrapEmail: %q,`+
+		`bootstrappedAt: %q,`+
+		`accessTokenTTLSeconds: %d,`+
+		`refreshTokenTTLSeconds: %d,`+
+		`magicLinkTTLSeconds: %d,`+
+		`invitationTTLDays: %d,`+
+		`refreshCookieSameSite: %q`+
+		`)`,
 		clusterDomain,
 		in.BrandName,
 		in.BrandPrimaryColor,
@@ -889,7 +889,7 @@ func (s *AdminServer) queryUsers(ctx context.Context, q string) ([]userView, err
 	needle := strings.ToLower(strings.TrimSpace(q))
 	cursor := ""
 	for i := 0; i < maxUserPageWalk; i++ {
-		res, err := s.Engine.Execute(memqlengine.ContextWithCursor(ctx, cursor), `activeUsers({})`)
+		res, err := s.Engine.Execute(memqlengine.ContextWithCursor(ctx, cursor), `query activeUsers()`)
 		if err != nil {
 			return nil, err
 		}
@@ -923,7 +923,7 @@ func (s *AdminServer) queryUsers(ctx context.Context, q string) ([]userView, err
 const maxUserPageWalk = 1000
 
 func (s *AdminServer) userById(ctx context.Context, userId string) (*userView, error) {
-	q := fmt.Sprintf(`userById({userId: %q})`, userId)
+	q := fmt.Sprintf(`query userById(userId: %q)`, userId)
 	res, err := s.Engine.Execute(ctx, q)
 	if err != nil {
 		return nil, err
@@ -965,7 +965,7 @@ func (s *AdminServer) updateUser(ctx context.Context, u *userView) error {
 	if err != nil {
 		return err
 	}
-	q := fmt.Sprintf(`updateUser({userId: %q, payload: %s})`, u.ID, string(payloadJSON))
+	q := fmt.Sprintf(`mutation updateUser(userId: %q, payload: %s)`, u.ID, string(payloadJSON))
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("admin: update user: %w", err)
 	}
@@ -989,9 +989,9 @@ type auditView struct {
 }
 
 func (s *AdminServer) queryRecentAudit(ctx context.Context, category string, limit int) ([]auditView, error) {
-	q := `recentAuditEvents({})`
+	q := `query recentAuditEvents()`
 	if category != "" {
-		q = fmt.Sprintf(`recentAuditEvents({category: %q})`, category)
+		q = fmt.Sprintf(`query recentAuditEvents(category: %q)`, category)
 	}
 	res, err := s.Engine.Execute(ctx, q)
 	if err != nil {

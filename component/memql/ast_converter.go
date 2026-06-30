@@ -1024,6 +1024,13 @@ func normalizeSpecCallsToReferences(expr ExpressionNode) (ExpressionNode, error)
 		}, nil
 	case *FunctionCallExpression:
 		name := strings.TrimSpace(node.Name)
+		// Story 9 (#2335): reject the legacy stringly call form
+		// `spec("name")` / `trait("name")`. The predicate form is the bare
+		// kind-prefixed reference `spec <name>` / `trait <name>` (no quotes,
+		// no parens), which the parser already lowers to a SpecReferenceExpr.
+		if name == "spec" || name == "trait" {
+			return nil, fmt.Errorf("the %s(\"name\") call form is removed; use the predicate form `%s <name>` (no quotes, no parens)", name, name)
+		}
 		if len(node.Args) > 0 {
 			return nil, fmt.Errorf("spec reference %q must not accept arguments", name)
 		}

@@ -411,7 +411,7 @@ func (i *Integration) handleRequestUserFeedback(ctx context.Context, args map[st
 	mutationCtx := withUserActor(ctx, ownerUserId)
 
 	q := fmt.Sprintf(
-		`requestPlanFeedback({planId:%q, feedbackRequest:%s})`,
+		`mutation requestPlanFeedback(planId:%q, feedbackRequest:%s)`,
 		planId, string(fbReqJSON),
 	)
 	if _, err := i.engine.Execute(mutationCtx, q); err != nil {
@@ -505,7 +505,7 @@ func (i *Integration) handleProduceArtifact(ctx context.Context, args map[string
 	mutationCtx := withUserActor(ctx, ownerUserId)
 	var qb strings.Builder
 	fmt.Fprintf(&qb,
-		`createPlan({planId: %q, partitionId: %q, kind: %q, goal: %q, requestedBy: %q, triggerSource: "user.implicit", authorizedBy: %q, input: %s`,
+		`mutation createPlan(planId: %q, partitionId: %q, kind: %q, goal: %q, requestedBy: %q, triggerSource: "user.implicit", authorizedBy: %q, input: %s`,
 		planId, partitionId, produceArtifactKind, goal, ownerUserId, ownerUserId, string(inputJSON),
 	)
 	if agentId != "" {
@@ -513,7 +513,7 @@ func (i *Integration) handleProduceArtifact(ctx context.Context, args map[string
 		// (no planner-agent decompose loop -- memql#816).
 		fmt.Fprintf(&qb, `, ownerAgentId: %q`, agentId)
 	}
-	qb.WriteString(`})`)
+	qb.WriteString(`)`)
 	if _, err := i.engine.Execute(mutationCtx, qb.String()); err != nil {
 		return nil, fmt.Errorf("produceArtifact: createPlan failed: %w", err)
 	}
@@ -597,7 +597,7 @@ func (i *Integration) createInvocationPlan(ctx context.Context, def *memql.Agent
 	}
 
 	query := fmt.Sprintf(
-		`createPlan({planId: %q, partitionId: %q, kind: %q, goal: %q, requestedBy: %q, triggerSource: "agent.dsl", authorizedBy: %q, input: %s})`,
+		`mutation createPlan(planId: %q, partitionId: %q, kind: %q, goal: %q, requestedBy: %q, triggerSource: "agent.dsl", authorizedBy: %q, input: %s)`,
 		planId, partitionId, agentInvocationKind, prompt, systemActorId, systemActorId, string(inputJSON),
 	)
 	if _, err := i.engine.Execute(ctx, query); err != nil {

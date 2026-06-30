@@ -37,7 +37,7 @@ automation pruneStaleNodes {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// The decide step keeps the assignment shape.
-	if !strings.Contains(out, "decide := findStaleNodes({ event: event })") {
+	if !strings.Contains(out, "decide := findStaleNodes(event: event)") {
 		t.Fatalf("decide step did not rewrite to an assignment; got:\n%s", out)
 	}
 	// The forEach step lowers to a top-level for-range loop, with the
@@ -45,7 +45,7 @@ automation pruneStaleNodes {
 	if !strings.Contains(out, "for item := range decide.result {") {
 		t.Fatalf("forEach step did not rewrite to a for-range loop; got:\n%s", out)
 	}
-	if !strings.Contains(out, `prune_do1 := updateNodeHealth({ id: item.id, health: "stopped" })`) {
+	if !strings.Contains(out, `prune_do1 := updateNodeHealth(id: item.id, health: "stopped")`) {
 		t.Fatalf("forEach inner call must be renamed + assigned a synthesized name; got:\n%s", out)
 	}
 	// The forEach loop must NOT be emitted as a `prune := ...` assignment.
@@ -70,7 +70,7 @@ func TestNormaliseAutomationSource_ForRangeStep(t *testing.T) {
 	if !strings.Contains(out, "for item := range decide.result {") {
 		t.Fatalf("for-range step did not rewrite; got:\n%s", out)
 	}
-	if !strings.Contains(out, "prune_do1 := retire({ id: item.id })") {
+	if !strings.Contains(out, "prune_do1 := retire(id: item.id)") {
 		t.Fatalf("for-range inner call must be renamed; got:\n%s", out)
 	}
 }
@@ -89,7 +89,7 @@ func TestNormaliseAutomationSource_ForEachStep_ItemVarPassthrough(t *testing.T) 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out, "prune_do1 := retire({ id: item.id })") {
+	if !strings.Contains(out, "prune_do1 := retire(id: item.id)") {
 		t.Fatalf("item-var passthrough must work; got:\n%s", out)
 	}
 }
@@ -109,10 +109,10 @@ func TestNormaliseAutomationSource_ForEachStep_MultipleInnerCalls(t *testing.T) 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out, "prune_do1 := retire({ id: item.id })") {
+	if !strings.Contains(out, "prune_do1 := retire(id: item.id)") {
 		t.Fatalf("first inner call missing; got:\n%s", out)
 	}
-	if !strings.Contains(out, "prune_do2 := audit({ nodeId: item.id })") {
+	if !strings.Contains(out, "prune_do2 := audit(nodeId: item.id)") {
 		t.Fatalf("second inner call missing; got:\n%s", out)
 	}
 }

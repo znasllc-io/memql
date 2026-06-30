@@ -1257,7 +1257,7 @@ func (r *Replier) promoteCanvasOutput(ctx context.Context, turnCtx turnContext, 
 
 	mutationCtx := withUserActor(ctx, ownerUserId)
 	var b strings.Builder
-	fmt.Fprintf(&b, `createGeneratedOutput({outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q`,
+	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q`,
 		outputId, ownerUserId, title, body, "agent_generated")
 	if summary != "" {
 		fmt.Fprintf(&b, `, summary:%q`, summary)
@@ -1271,7 +1271,7 @@ func (r *Replier) promoteCanvasOutput(ctx context.Context, turnCtx turnContext, 
 	if turnCtx.PartitionId != "" {
 		fmt.Fprintf(&b, `, partitionId:%q`, turnCtx.PartitionId)
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 
 	if _, err := r.engine.Execute(mutationCtx, b.String()); err != nil {
 		r.logger.Warn("agent streaming: generatedOutput promotion failed",

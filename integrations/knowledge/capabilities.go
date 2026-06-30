@@ -362,7 +362,7 @@ func (i *Integration) ingestHandler(ctx context.Context, args map[string]any, _ 
 		}
 
 		insertQuery := fmt.Sprintf(
-			`createDocumentChunk({chunkId: %s, domainId: %s, text: %s, source: %s, sourceRef: %s, seq: %d, tokenCount: %d})`,
+			`mutation createDocumentChunk(chunkId: %s, domainId: %s, text: %s, source: %s, sourceRef: %s, seq: %d, tokenCount: %d)`,
 			quoteString(chunkId),
 			quoteString(domainId),
 			quoteString(chunkText),

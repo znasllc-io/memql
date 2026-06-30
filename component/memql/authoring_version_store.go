@@ -65,7 +65,7 @@ func (s *engineImpactStore) ActiveDependentBundleIds(ctx context.Context, owner,
 	// Filter to ACTIVE bundles.
 	active := make([]string, 0, len(ordered))
 	for _, id := range ordered {
-		bres, err := s.engine.Execute(ctx, fmt.Sprintf(`authoringBundleById({"bundleId":%q})`, id))
+		bres, err := s.engine.Execute(ctx, fmt.Sprintf(`query authoringBundleById(bundleId:%q)`, id))
 		if err != nil {
 			return nil, err
 		}
@@ -89,7 +89,7 @@ func (s *engineImpactStore) ActiveDependentBundleIds(ctx context.Context, owner,
 
 // ConstructsAsSandbox loads a bundle's member constructs as SandboxConstructs.
 func (s *engineImpactStore) ConstructsAsSandbox(ctx context.Context, bundleId string) ([]SandboxConstruct, error) {
-	res, err := s.engine.Execute(ctx, fmt.Sprintf(`authoringConstructsForBundle({"bundleId":%q})`, bundleId))
+	res, err := s.engine.Execute(ctx, fmt.Sprintf(`query authoringConstructsForBundle(bundleId:%q)`, bundleId))
 	if err != nil {
 		return nil, err
 	}

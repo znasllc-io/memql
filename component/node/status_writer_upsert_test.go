@@ -113,10 +113,10 @@ func TestBuildCreateNodeHealthCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.HasPrefix(got, "createNode({") {
+	if !strings.HasPrefix(got, "createNode(") {
 		t.Errorf("expected createNode call, got %q", got)
 	}
-	for _, needle := range []string{`"id":"n4"`, `"nodeType":"planner"`, `"health":"offline"`} {
+	for _, needle := range []string{`id: "n4"`, `nodeType: "planner"`, `health: "offline"`} {
 		if !strings.Contains(got, needle) {
 			t.Errorf("expected %s in %q", needle, got)
 		}

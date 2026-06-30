@@ -434,7 +434,7 @@ func (c *CognitionIntegration) getSpaceInfoCached(ctx context.Context, partition
 		// children B + D which required the #294 directive
 		// wiring). Downstream spaceFull-shape extraction is
 		// unchanged. Unblocks #250.
-		query := fmt.Sprintf(`querySpaceMeta({partitionId: %s})`, escapeJSONString(partitionId))
+		query := fmt.Sprintf(`query querySpaceMeta(partitionId: %s)`, escapeJSONString(partitionId))
 		result, err := c.engine.Execute(ctx, query)
 		if err != nil {
 			return spaceInfo{}, nil
@@ -523,7 +523,7 @@ func (c *CognitionIntegration) getAttachmentsForPrompt(ctx context.Context, part
 	if c == nil || c.engine == nil {
 		return nil
 	}
-	query := fmt.Sprintf(`querySpaceAttachments({partitionId: %s, status: "ready"})`,
+	query := fmt.Sprintf(`query querySpaceAttachments(partitionId: %s, status: "ready")`,
 		escapeJSONString(partitionId))
 
 	result, err := c.engine.Execute(ctx, query)

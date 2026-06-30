@@ -27,10 +27,10 @@ func (qc *QueryClient) AccessRequestExpirySweep(ctx context.Context, args Access
 
 func AccessRequestExpirySweepBuild(args AccessRequestExpirySweepArgs) string {
 	var b strings.Builder
-	b.WriteString("accessRequestExpirySweep({")
+	b.WriteString("logic accessRequestExpirySweep(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -47,10 +47,10 @@ func (qc *QueryClient) AccessRequestExpiryWindow(ctx context.Context, args Acces
 
 func AccessRequestExpiryWindowBuild(args AccessRequestExpiryWindowArgs) string {
 	var b strings.Builder
-	b.WriteString("accessRequestExpiryWindow({")
+	b.WriteString("logic accessRequestExpiryWindow(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -67,10 +67,10 @@ func (qc *QueryClient) AccountDeletionReminder25Days(ctx context.Context, args A
 
 func AccountDeletionReminder25DaysBuild(args AccountDeletionReminder25DaysArgs) string {
 	var b strings.Builder
-	b.WriteString("accountDeletionReminder25Days({")
+	b.WriteString("logic accountDeletionReminder25Days(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -87,10 +87,10 @@ func (qc *QueryClient) AccountDeletionReminder7Days(ctx context.Context, args Ac
 
 func AccountDeletionReminder7DaysBuild(args AccountDeletionReminder7DaysArgs) string {
 	var b strings.Builder
-	b.WriteString("accountDeletionReminder7Days({")
+	b.WriteString("logic accountDeletionReminder7Days(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -107,10 +107,10 @@ func (qc *QueryClient) AccountDeletionSweep(ctx context.Context, args AccountDel
 
 func AccountDeletionSweepBuild(args AccountDeletionSweepArgs) string {
 	var b strings.Builder
-	b.WriteString("accountDeletionSweep({")
+	b.WriteString("logic accountDeletionSweep(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -127,10 +127,10 @@ func (qc *QueryClient) AccountDeletionWindow(ctx context.Context, args AccountDe
 
 func AccountDeletionWindowBuild(args AccountDeletionWindowArgs) string {
 	var b strings.Builder
-	b.WriteString("accountDeletionWindow({")
+	b.WriteString("logic accountDeletionWindow(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -147,10 +147,10 @@ func (qc *QueryClient) AuditEventRetentionSweep(ctx context.Context, args AuditE
 
 func AuditEventRetentionSweepBuild(args AuditEventRetentionSweepArgs) string {
 	var b strings.Builder
-	b.WriteString("auditEventRetentionSweep({")
+	b.WriteString("logic auditEventRetentionSweep(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -167,10 +167,10 @@ func (qc *QueryClient) BootstrapCluster(ctx context.Context, args BootstrapClust
 
 func BootstrapClusterBuild(args BootstrapClusterArgs) string {
 	var b strings.Builder
-	b.WriteString("bootstrapCluster({")
+	b.WriteString("logic bootstrapCluster(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -187,10 +187,10 @@ func (qc *QueryClient) BootstrapSession(ctx context.Context, args BootstrapSessi
 
 func BootstrapSessionBuild(args BootstrapSessionArgs) string {
 	var b strings.Builder
-	b.WriteString("bootstrapSession({")
+	b.WriteString("logic bootstrapSession(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -207,10 +207,10 @@ func (qc *QueryClient) ConflictDetection(ctx context.Context, args ConflictDetec
 
 func ConflictDetectionBuild(args ConflictDetectionArgs) string {
 	var b strings.Builder
-	b.WriteString("conflictDetection({")
+	b.WriteString("logic conflictDetection(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -227,10 +227,10 @@ func (qc *QueryClient) ConsolidateMemory(ctx context.Context, args ConsolidateMe
 
 func ConsolidateMemoryBuild(args ConsolidateMemoryArgs) string {
 	var b strings.Builder
-	b.WriteString("consolidateMemory({")
+	b.WriteString("logic consolidateMemory(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -247,10 +247,10 @@ func (qc *QueryClient) DeployGateGreen(ctx context.Context, args DeployGateGreen
 
 func DeployGateGreenBuild(args DeployGateGreenArgs) string {
 	var b strings.Builder
-	b.WriteString("deployGateGreen({")
+	b.WriteString("logic deployGateGreen(")
 	b.WriteString("gate: ")
 	b.WriteString(renderMemQLValue(args.Gate))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -267,10 +267,10 @@ func (qc *QueryClient) DeployOutcomeLabel(ctx context.Context, args DeployOutcom
 
 func DeployOutcomeLabelBuild(args DeployOutcomeLabelArgs) string {
 	var b strings.Builder
-	b.WriteString("deployOutcomeLabel({")
+	b.WriteString("logic deployOutcomeLabel(")
 	b.WriteString("gate: ")
 	b.WriteString(renderMemQLValue(args.Gate))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -286,7 +286,7 @@ func (qc *QueryClient) DeploymentForwardAllowed(ctx context.Context, args Deploy
 
 func DeploymentForwardAllowedBuild(args DeploymentForwardAllowedArgs) string {
 	_ = args
-	return "deploymentForwardAllowed({})"
+	return "logic deploymentForwardAllowed()"
 }
 
 // DeploymentRollbackAllowed -- Pure rollback role gate, mirroring spec requiresOwner (#1876): true ONLY when the actor holds the owner role. Rollback is owner-only -- not even admin may roll back.
@@ -301,7 +301,7 @@ func (qc *QueryClient) DeploymentRollbackAllowed(ctx context.Context, args Deplo
 
 func DeploymentRollbackAllowedBuild(args DeploymentRollbackAllowedArgs) string {
 	_ = args
-	return "deploymentRollbackAllowed({})"
+	return "logic deploymentRollbackAllowed()"
 }
 
 // EngineNodeTypes -- Canonical ENGINE node-type list the deploy bundle builds + places: identity, cognition, voice, agent, planner, workbench, mcp, voice-agent. No bff/copresent (carrier/product layer, shipped by their own repos).
@@ -316,7 +316,7 @@ func (qc *QueryClient) EngineNodeTypes(ctx context.Context, args EngineNodeTypes
 
 func EngineNodeTypesBuild(args EngineNodeTypesArgs) string {
 	_ = args
-	return "engineNodeTypes({})"
+	return "logic engineNodeTypes()"
 }
 
 // GenerateResponse -- Decides + generates the AI reply for a cognition.response.requested event: returns the reply text (empty when a response already exists -- idempotency via hasAIResponseForReply). The generateResponse automation performs the gated sendTextUtterance insert + presence bump from this text.
@@ -332,10 +332,10 @@ func (qc *QueryClient) GenerateResponse(ctx context.Context, args GenerateRespon
 
 func GenerateResponseBuild(args GenerateResponseArgs) string {
 	var b strings.Builder
-	b.WriteString("generateResponse({")
+	b.WriteString("logic generateResponse(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -352,10 +352,10 @@ func (qc *QueryClient) GovernanceCanCreatePrincipal(ctx context.Context, args Go
 
 func GovernanceCanCreatePrincipalBuild(args GovernanceCanCreatePrincipalArgs) string {
 	var b strings.Builder
-	b.WriteString("governanceCanCreatePrincipal({")
+	b.WriteString("logic governanceCanCreatePrincipal(")
 	b.WriteString("newRoleSlug: ")
 	b.WriteString(fmt.Sprintf("%q", args.NewRoleSlug))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -374,20 +374,20 @@ func (qc *QueryClient) GovernanceCanManagePrincipal(ctx context.Context, args Go
 
 func GovernanceCanManagePrincipalBuild(args GovernanceCanManagePrincipalArgs) string {
 	var b strings.Builder
-	b.WriteString("governanceCanManagePrincipal({")
+	b.WriteString("logic governanceCanManagePrincipal(")
 	b.WriteString("targetUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetUserId))
-	if b.Len() > 30 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetRoleSlug: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetRoleSlug))
-	if b.Len() > 30 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("verb: ")
 	b.WriteString(fmt.Sprintf("%q", args.Verb))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -404,10 +404,10 @@ func (qc *QueryClient) KillSwitchSuspendsRunningPlans(ctx context.Context, args 
 
 func KillSwitchSuspendsRunningPlansBuild(args KillSwitchSuspendsRunningPlansArgs) string {
 	var b strings.Builder
-	b.WriteString("killSwitchSuspendsRunningPlans({")
+	b.WriteString("logic killSwitchSuspendsRunningPlans(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -424,10 +424,10 @@ func (qc *QueryClient) MagicLinkExpirySweep(ctx context.Context, args MagicLinkE
 
 func MagicLinkExpirySweepBuild(args MagicLinkExpirySweepArgs) string {
 	var b strings.Builder
-	b.WriteString("magicLinkExpirySweep({")
+	b.WriteString("logic magicLinkExpirySweep(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -445,17 +445,17 @@ func (qc *QueryClient) NextDeploymentVersion(ctx context.Context, args NextDeplo
 
 func NextDeploymentVersionBuild(args NextDeploymentVersionArgs) string {
 	var b strings.Builder
-	b.WriteString("nextDeploymentVersion({")
+	b.WriteString("logic nextDeploymentVersion(")
 	b.WriteString("current: ")
 	b.WriteString(fmt.Sprintf("%q", args.Current))
 	if args.Bump != "" {
-		if b.Len() > 23 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bump: ")
 		b.WriteString(fmt.Sprintf("%q", args.Bump))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -472,10 +472,10 @@ func (qc *QueryClient) OnDelegationCreated(ctx context.Context, args OnDelegatio
 
 func OnDelegationCreatedBuild(args OnDelegationCreatedArgs) string {
 	var b strings.Builder
-	b.WriteString("onDelegationCreated({")
+	b.WriteString("logic onDelegationCreated(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -492,10 +492,10 @@ func (qc *QueryClient) PruneStaleClusterNodes(ctx context.Context, args PruneSta
 
 func PruneStaleClusterNodesBuild(args PruneStaleClusterNodesArgs) string {
 	var b strings.Builder
-	b.WriteString("pruneStaleClusterNodes({")
+	b.WriteString("logic pruneStaleClusterNodes(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -512,10 +512,10 @@ func (qc *QueryClient) PurgeExpiredOutputScreenings(ctx context.Context, args Pu
 
 func PurgeExpiredOutputScreeningsBuild(args PurgeExpiredOutputScreeningsArgs) string {
 	var b strings.Builder
-	b.WriteString("purgeExpiredOutputScreenings({")
+	b.WriteString("logic purgeExpiredOutputScreenings(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -532,10 +532,10 @@ func (qc *QueryClient) PurgeExpiredPolicyTraces(ctx context.Context, args PurgeE
 
 func PurgeExpiredPolicyTracesBuild(args PurgeExpiredPolicyTracesArgs) string {
 	var b strings.Builder
-	b.WriteString("purgeExpiredPolicyTraces({")
+	b.WriteString("logic purgeExpiredPolicyTraces(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -552,10 +552,10 @@ func (qc *QueryClient) PurgeExpiredSafetyClassifications(ctx context.Context, ar
 
 func PurgeExpiredSafetyClassificationsBuild(args PurgeExpiredSafetyClassificationsArgs) string {
 	var b strings.Builder
-	b.WriteString("purgeExpiredSafetyClassifications({")
+	b.WriteString("logic purgeExpiredSafetyClassifications(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -572,10 +572,10 @@ func (qc *QueryClient) ReleaseWorkspaceOnPlanTerminal(ctx context.Context, args 
 
 func ReleaseWorkspaceOnPlanTerminalBuild(args ReleaseWorkspaceOnPlanTerminalArgs) string {
 	var b strings.Builder
-	b.WriteString("releaseWorkspaceOnPlanTerminal({")
+	b.WriteString("logic releaseWorkspaceOnPlanTerminal(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -592,10 +592,10 @@ func (qc *QueryClient) RevokeExpiredDelegations(ctx context.Context, args Revoke
 
 func RevokeExpiredDelegationsBuild(args RevokeExpiredDelegationsArgs) string {
 	var b strings.Builder
-	b.WriteString("revokeExpiredDelegations({")
+	b.WriteString("logic revokeExpiredDelegations(")
 	b.WriteString("now: ")
 	b.WriteString(fmt.Sprintf("%q", args.Now))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -612,10 +612,10 @@ func (qc *QueryClient) VoiceMigrationOnSecondHuman(ctx context.Context, args Voi
 
 func VoiceMigrationOnSecondHumanBuild(args VoiceMigrationOnSecondHumanArgs) string {
 	var b strings.Builder
-	b.WriteString("voiceMigrationOnSecondHuman({")
+	b.WriteString("logic voiceMigrationOnSecondHuman(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -632,10 +632,10 @@ func (qc *QueryClient) WorkerInvocationRetentionSweep(ctx context.Context, args 
 
 func WorkerInvocationRetentionSweepBuild(args WorkerInvocationRetentionSweepArgs) string {
 	var b strings.Builder
-	b.WriteString("workerInvocationRetentionSweep({")
+	b.WriteString("logic workerInvocationRetentionSweep(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -652,9 +652,9 @@ func (qc *QueryClient) WorkerInvocationRetentionWindow(ctx context.Context, args
 
 func WorkerInvocationRetentionWindowBuild(args WorkerInvocationRetentionWindowArgs) string {
 	var b strings.Builder
-	b.WriteString("workerInvocationRetentionWindow({")
+	b.WriteString("logic workerInvocationRetentionWindow(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }

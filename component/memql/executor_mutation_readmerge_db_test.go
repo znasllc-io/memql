@@ -8,6 +8,8 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -67,14 +69,24 @@ func readMergeTestEngine(t *testing.T) (*MemQLEngine, *bun.DB, context.Context) 
 	return eng, db, ctx
 }
 
-// runMutation invokes a named mutation the same way status_writer does: a
-// JSON object literal is valid MemQL call-arg syntax. Returns the stored
-// (canonical) id of the written row.
+// runMutation invokes a named mutation in the kind-prefixed, named-args call
+// form (`mutation <name>(k: v, ...)`, #2335): each arg value is JSON-encoded
+// (valid MemQL for literals/objects/arrays) and the keys are sorted for a
+// deterministic call string. Returns the stored (canonical) id of the row.
 func runMutation(t *testing.T, ctx context.Context, eng *MemQLEngine, name string, args map[string]any) string {
 	t.Helper()
-	body, err := json.Marshal(args)
-	require.NoError(t, err)
-	res, err := eng.Execute(ctx, name+"("+string(body)+")")
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(args))
+	for _, k := range keys {
+		vb, err := json.Marshal(args[k])
+		require.NoError(t, err)
+		parts = append(parts, k+": "+string(vb))
+	}
+	res, err := eng.Execute(ctx, "mutation "+name+"("+strings.Join(parts, ", ")+")")
 	require.NoError(t, err, "mutation %s must succeed with the minimal arg set (memql#1628)", name)
 	require.NotNil(t, res)
 	require.NotNil(t, res.Bundle)

@@ -401,7 +401,7 @@ func (m *SeedMaterializer) resolveAvatarPersonaByName(ctx context.Context, name 
 	if m.engine == nil {
 		return "", "", false
 	}
-	result, err := m.engine.Execute(systemActorContext(ctx), `avatarPersonas({})`)
+	result, err := m.engine.Execute(systemActorContext(ctx), `query avatarPersonas()`)
 	if err != nil {
 		if m.engine.Logger != nil {
 			m.engine.Logger.Warn("seed materializer: avatarPersonas failed resolving dev default avatar",
@@ -667,7 +667,7 @@ func deterministicPerUserSeedId(def *SeedDefinition, userId string) string {
 // found in context".
 func (m *SeedMaterializer) invokeCreateMutation(ctx context.Context, conceptName string, args map[string]any) error {
 	mutationName := "create" + ucFirst(conceptName)
-	rendered, err := renderArgsObject(args)
+	rendered, err := renderArgsCallList(args)
 	if err != nil {
 		return fmt.Errorf("render args: %w", err)
 	}
@@ -749,6 +749,18 @@ func isTransientDBSurge(err error) bool {
 //
 // Keys are emitted in sorted order so failure-mode logs are stable
 // across runs (helpful when diffing a failed materialization).
+// renderArgsCallList renders the named-args invocation body `k: v, ...`
+// (Story 9 / #2335): renderArgsObject without the outer object braces, since
+// the kind-prefixed call form `name(k: v, ...)` drops the legacy `{...}`
+// wrapper (which the parser now rejects). Empty args render "" -> `name()`.
+func renderArgsCallList(args map[string]any) (string, error) {
+	obj, err := renderArgsObject(args)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(obj, "{"), "}"), nil
+}
+
 func renderArgsObject(args map[string]any) (string, error) {
 	var b strings.Builder
 	b.WriteByte('{')
@@ -839,7 +851,7 @@ func seedNames(defs []*SeedDefinition) []string {
 // empty actor produces a "no actor found in context" failure even
 // for read paths that touch global concepts.
 func (m *SeedMaterializer) listUserIds(ctx context.Context) ([]string, error) {
-	result, err := m.engine.Execute(systemActorContext(ctx), `activeUsers({})`)
+	result, err := m.engine.Execute(systemActorContext(ctx), `query activeUsers()`)
 	if err != nil {
 		return nil, fmt.Errorf("activeUsers: %w", err)
 	}

@@ -114,12 +114,15 @@ func (e *FunctionExecutor) Execute(ctx context.Context, step *automations.Step, 
 }
 
 func renderFunctionArgs(args map[string]any) string {
-	// Single positional object argument {"0": {...}} must be rendered as {key: value}
-	// because the MemQL query executor expects functionName({key: value}) syntax.
-	// Rendering as 0={...} produces an invalid query that the lexer rejects.
+	// Single positional object argument {"0": {...}} is rendered as the
+	// named-args invocation body `key: value, ...` (Story 9 / #2335: the
+	// kind-prefixed call form `functionName(key: value)` drops the legacy
+	// `{...}` wrapper, which the parser now rejects). renderMemQLValue(obj)
+	// emits the bare-key object `{key: value}`; strip the outer braces.
 	if len(args) == 1 {
 		if obj, ok := args["0"].(map[string]any); ok {
-			return renderMemQLValue(obj)
+			rendered := renderMemQLValue(obj)
+			return strings.TrimSuffix(strings.TrimPrefix(rendered, "{"), "}")
 		}
 	}
 

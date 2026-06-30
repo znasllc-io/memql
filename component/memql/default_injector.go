@@ -250,7 +250,7 @@ func (s *engineInjectStore) insertSecretDefault(ctx context.Context, c genesis.I
 // platform set* mutation under the synthetic system actor, with the
 // shared DB-surge retry.
 func (s *engineInjectStore) runSetMutation(ctx context.Context, mutationName string, args map[string]any) error {
-	rendered, err := renderArgsObject(args)
+	rendered, err := renderArgsCallList(args)
 	if err != nil {
 		return fmt.Errorf("render args: %w", err)
 	}

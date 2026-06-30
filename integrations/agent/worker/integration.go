@@ -133,7 +133,7 @@ func (i *Integration) planPartitionId(ctx context.Context, planId string) string
 	if i.engine == nil || strings.TrimSpace(planId) == "" {
 		return ""
 	}
-	res, err := i.engine.Execute(ctx, fmt.Sprintf(`planById({"planId":%q})`, planId))
+	res, err := i.engine.Execute(ctx, fmt.Sprintf(`query planById(planId:%q)`, planId))
 	if err != nil || res == nil || res.Bundle == nil || len(res.Bundle.Nodes) == 0 {
 		return ""
 	}
@@ -180,7 +180,7 @@ func (i *Integration) uploadWorkerAttachment(ctx context.Context, planId, filePa
 
 	attachmentId := partitionId + ":" + det
 	call := fmt.Sprintf(
-		`mutationCreateAttachment({attachmentId:%q, partitionId:%q, fileName:%q, mimeType:%q, fileSize:%d, blobUrl:%q, status:%q, uploadedBy:%q})`,
+		`mutation mutationCreateAttachment(attachmentId:%q, partitionId:%q, fileName:%q, mimeType:%q, fileSize:%d, blobUrl:%q, status:%q, uploadedBy:%q)`,
 		attachmentId, partitionId, fileName, mimeType, len(data), blobUrl, "ready", ownerUserId)
 	if _, err := i.engine.Execute(ctx, call); err != nil {
 		if i.logger != nil {
@@ -409,7 +409,7 @@ func (i *Integration) promoteWorkerOutput(ctx context.Context, req Request) {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, `createGeneratedOutput({outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q, format:%q`,
+	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q, format:%q`,
 		outputId, ownerUserId, title, body, "computer_use", format)
 	if req.AgentId != "" {
 		fmt.Fprintf(&b, `, producedByAgentId:%q`, req.AgentId)
@@ -429,7 +429,7 @@ func (i *Integration) promoteWorkerOutput(ctx context.Context, req Request) {
 	if attachmentId != "" {
 		fmt.Fprintf(&b, `, attachmentId:%q, mimeType:%q`, attachmentId, workerMimeType(title))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 
 	if _, err := i.engine.Execute(mutationCtx, b.String()); err != nil {
 		if i.logger != nil {
@@ -617,7 +617,7 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 
 	planId := fmt.Sprintf("scope-elevation-%d", time.Now().UnixNano())
 	q := fmt.Sprintf(
-		`createScopeElevationPlan({planId:%q, agentId:%q, ownerUserId:%q, partitionId:%q, intent:%q, summary:%q, requestedScope:%q})`,
+		`mutation createScopeElevationPlan(planId:%q, agentId:%q, ownerUserId:%q, partitionId:%q, intent:%q, summary:%q, requestedScope:%q)`,
 		planId, agentId, ownerUserId, partitionId, intent, summary, scope,
 	)
 	if _, err := i.engine.Execute(mutationCtx, q); err != nil {
@@ -654,7 +654,7 @@ func workerHasConfigured(ctx context.Context, engine *memql.MemQLEngine, ownerUs
 	if engine == nil || strings.TrimSpace(ownerUserId) == "" {
 		return false, nil
 	}
-	q := fmt.Sprintf(`workersForUser({ownerUserId:%q})`, ownerUserId)
+	q := fmt.Sprintf(`query workersForUser(ownerUserId:%q)`, ownerUserId)
 	res, err := engine.Execute(ctx, q)
 	if err != nil {
 		return false, err

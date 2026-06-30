@@ -132,7 +132,7 @@ func TestHandleProduceArtifact_NormalContextMintsExactlyOnePlan(t *testing.T) {
 	if len(eng.calls) != 1 {
 		t.Fatalf("expected EXACTLY ONE engine Execute (createPlan), got %d: %v", len(eng.calls), eng.calls)
 	}
-	if !strings.HasPrefix(eng.calls[0], "createPlan(") {
+	if !strings.HasPrefix(eng.calls[0], "mutation createPlan(") {
 		t.Fatalf("the single write must be createPlan, got: %q", eng.calls[0])
 	}
 	if !strings.Contains(eng.calls[0], `kind: "produceArtifact"`) {

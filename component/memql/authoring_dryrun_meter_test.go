@@ -27,10 +27,10 @@ const dryRunMeteredAutomation = `@enabled
 @description("Sandbox: read-heavy automation")
 automation sandboxReadHeavy {
   step search {
-    webSearch({ query: "memql dry run sandbox" })
+    webSearch(query: "memql dry run sandbox")
   }
   step fetch {
-    fetchUrl({ url: "https://example.com/doc" })
+    fetchUrl(url: "https://example.com/doc")
   }
 }`
 

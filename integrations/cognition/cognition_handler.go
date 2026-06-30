@@ -2143,7 +2143,7 @@ func (c *CognitionIntegration) findActiveHumanParticipants(ctx context.Context, 
 // findParticipantsByType is the shared implementation behind the AI / human
 // participant lookups. participantType should be "si" or "human".
 func (c *CognitionIntegration) findParticipantsByType(ctx context.Context, partitionId, participantType string) ([]*participantPayload, error) {
-	query := fmt.Sprintf(`spaceParticipants({partitionId: "%s", participantType: "%s", status: "active"})`, partitionId, participantType)
+	query := fmt.Sprintf(`query spaceParticipants(partitionId: "%s", participantType: "%s", status: "active")`, partitionId, participantType)
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("execute query: %w", err)
@@ -2267,7 +2267,7 @@ func (c *CognitionIntegration) allHumansMuted(ctx context.Context, partitionId s
 	if c == nil || c.engine == nil || strings.TrimSpace(partitionId) == "" {
 		return false
 	}
-	q := fmt.Sprintf(`queryUserMicStatesForSpace({partitionId: %q})`, partitionId)
+	q := fmt.Sprintf(`query queryUserMicStatesForSpace(partitionId: %q)`, partitionId)
 	res, err := c.engine.Execute(ctx, q)
 	if err != nil {
 		c.Logger.Debug("cognition: mic state lookup failed (non-fatal)", "error", err, "partitionId", partitionId)
@@ -2344,7 +2344,7 @@ func (c *CognitionIntegration) lookupAudioOverride(ctx context.Context, partitio
 	if c == nil || c.engine == nil || strings.TrimSpace(partitionId) == "" || strings.TrimSpace(agentId) == "" {
 		return ""
 	}
-	q := fmt.Sprintf(`audioOverridesForSpace({partitionId: %q})`, partitionId)
+	q := fmt.Sprintf(`query audioOverridesForSpace(partitionId: %q)`, partitionId)
 	res, err := c.engine.Execute(ctx, q)
 	if err != nil {
 		c.Logger.Debug("cognition: audio override lookup failed (non-fatal)", "error", err, "partitionId", partitionId)

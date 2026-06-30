@@ -210,7 +210,7 @@ func (s *streamSession) relayClientToolToBrowser(
 	// repeated emits upsert rather than stack. agentId is audit-only; the voice
 	// agent attributes via the acting agent on context.
 	agentId := memqlengine.ActingAgentIdFromContext(ctx)
-	mutation := fmt.Sprintf(`emitClientToolRequest({
+	mutation := fmt.Sprintf(`mutation emitClientToolRequest(
 		requestId: %s,
 		callId: %s,
 		toolName: %s,
@@ -219,7 +219,7 @@ func (s *streamSession) relayClientToolToBrowser(
 		participantId: %s,
 		agentId: %s,
 		expiresAt: %s
-	})`,
+	)`,
 		escapeGraphJSONString(callId),
 		escapeGraphJSONString(callId),
 		escapeGraphJSONString(toolName),

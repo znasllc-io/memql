@@ -529,7 +529,7 @@ func contextWithSystemActor(ctx context.Context) context.Context {
 // Returns the participant with its node ID populated (needed for creating utterances).
 // Delegates to the aiParticipantForSpace MemQL query function.
 func (c *CognitionIntegration) findAIParticipant(ctx context.Context, partitionId string) (*participantPayload, error) {
-	query := fmt.Sprintf(`siParticipantForSpace({partitionId: %s})`, escapeJSONString(partitionId))
+	query := fmt.Sprintf(`query siParticipantForSpace(partitionId: %s)`, escapeJSONString(partitionId))
 
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
@@ -579,7 +579,7 @@ func (c *CognitionIntegration) findParticipantById(ctx context.Context, partitio
 // getAgent retrieves an agent by ID.
 // Delegates to the agentById MemQL query function.
 func (c *CognitionIntegration) getAgent(ctx context.Context, id string) (*agentPayload, error) {
-	query := fmt.Sprintf(`agentById({agentId: %s})`, escapeJSONString(id))
+	query := fmt.Sprintf(`query agentById(agentId: %s)`, escapeJSONString(id))
 
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
@@ -1267,7 +1267,7 @@ func (c *CognitionIntegration) hasAIResponseForReply(ctx context.Context, partit
 	if strings.TrimSpace(partitionId) == "" || strings.TrimSpace(siParticipantId) == "" || strings.TrimSpace(replyToId) == "" {
 		return false
 	}
-	query := fmt.Sprintf(`hasAIResponseForReply({replyToId: %s, participantId: %s})`,
+	query := fmt.Sprintf(`query hasAIResponseForReply(replyToId: %s, participantId: %s)`,
 		escapeJSONString(replyToId), escapeJSONString(siParticipantId),
 	)
 	result, err := c.engine.Execute(ctx, query)
@@ -1315,7 +1315,7 @@ func (c *CognitionIntegration) getParticipantsForPrompt(ctx context.Context, par
 		return nil, fmt.Errorf("partitionId is empty")
 	}
 
-	query := fmt.Sprintf(`spaceParticipants({partitionId: "%s"})`, partitionId)
+	query := fmt.Sprintf(`query spaceParticipants(partitionId: "%s")`, partitionId)
 
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {

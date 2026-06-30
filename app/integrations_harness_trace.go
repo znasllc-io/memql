@@ -89,7 +89,7 @@ func (a *App) recordActionCandidate(ctx context.Context, step harness.StepView, 
 	}
 
 	q := fmt.Sprintf(
-		`recordActionCandidate({planId:%q, stepId:%q, calls:%s, resourceEdges:%s, callCount:%d})`,
+		`mutation recordActionCandidate(planId:%q, stepId:%q, calls:%s, resourceEdges:%s, callCount:%d)`,
 		step.PlanID, step.ID, string(callsJSON), string(edgesJSON), len(trace.Calls),
 	)
 	adapter := &CognitionEngineAdapter{Engine: a.engine}

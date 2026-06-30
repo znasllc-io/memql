@@ -70,7 +70,7 @@ func (r *EntitlementResolver) Resolve(ctx context.Context, accountId string) Ent
 		return unlimited
 	}
 
-	q := fmt.Sprintf(`accountEntitlement({accountId:%q})`, accountId)
+	q := fmt.Sprintf(`query accountEntitlement(accountId:%q)`, accountId)
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Warn("entitlement resolve: query failed; defaulting to unlimited",

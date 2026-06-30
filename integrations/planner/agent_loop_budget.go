@@ -189,7 +189,7 @@ func (l *PlannerAgentLoop) recordPlannerInvocation(ctx context.Context, plan map
 		metricsJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`recordPlannerInvocation({planId:%q, tokenSpent:%d, metrics:%s})`,
+		`mutation recordPlannerInvocation(planId:%q, tokenSpent:%d, metrics:%s)`,
 		planId, newSpent, string(metricsJSON),
 	)
 	if _, err := l.engine.Execute(systemActorContext(ctx), q); err != nil {

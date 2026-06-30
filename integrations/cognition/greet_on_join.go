@@ -333,7 +333,7 @@ func (c *CognitionIntegration) runGreetingTurn(partitionId, participantId, agent
 	// The AI display name is already carried by the participant row
 	// referenced via participantId; consumers derive it from there.
 	mutation := fmt.Sprintf(
-		`createGreetingUtterance({partitionId: %s, participantId: %s, agentId: %s, text: %s, greetingKind: "agentGreeting"})`,
+		`mutation createGreetingUtterance(partitionId: %s, participantId: %s, agentId: %s, text: %s, greetingKind: "agentGreeting")`,
 		escapeJSONString(partitionId),
 		escapeJSONString(participantId),
 		escapeJSONString(agentId),
@@ -381,7 +381,7 @@ func (c *CognitionIntegration) greetingExists(ctx context.Context, partitionId, 
 	if c == nil || c.engine == nil {
 		return false
 	}
-	query := fmt.Sprintf(`greetingUtterance({partitionId: %s, agentId: %s})`,
+	query := fmt.Sprintf(`query greetingUtterance(partitionId: %s, agentId: %s)`,
 		escapeJSONString(partitionId), escapeJSONString(agentId))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil || result == nil {
@@ -417,7 +417,7 @@ func (c *CognitionIntegration) greetSuppressed(ctx context.Context, partitionId 
 	if c == nil || c.engine == nil {
 		return false
 	}
-	query := fmt.Sprintf(`queryActiveGreetSuppression({partitionId: %s, now: %s})`,
+	query := fmt.Sprintf(`query queryActiveGreetSuppression(partitionId: %s, now: %s)`,
 		escapeJSONString(partitionId), escapeJSONString(time.Now().UTC().Format(time.RFC3339)))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil || result == nil {

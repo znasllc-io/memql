@@ -192,6 +192,109 @@ func callNames(text string, useKinds map[string]string) map[string]string {
 	return out
 }
 
+// kindPrefixedInvocationKinds are the construct kinds that MUST carry their
+// kind keyword at the call site (construct-invocation ADR Decision 1 / #2335):
+// `<kind> name(args)`. spec / trait are predicate references (a bare name with
+// no parens in a filter; exempt), shape / concept are signature-bound (never
+// called), and a capability call is `capability <verb>(...)` validated by the
+// action case -- so none of those are listed here.
+var kindPrefixedInvocationKinds = map[string]bool{
+	"query":      true,
+	"mutation":   true,
+	"logic":      true,
+	"action":     true,
+	"builtin":    true,
+	"automation": true,
+}
+
+func isCallgraphIdentByte(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
+// missingKindPrefixCalls returns the imported construct names invoked as a bare
+// `name(` -- WITHOUT the kind keyword that the kind-prefixed invocation form
+// requires -- keyed to their kind. A call written `<kind> name(` is correctly
+// prefixed and never reported; a dotted/method call `x.name(` is not a construct
+// invocation and is skipped. Only names whose useKinds kind is in
+// kindPrefixedInvocationKinds are checked, so ambient language builtins
+// (coalesce / concat / where / ...), bare predicate refs in a filter, and
+// capability calls never produce a finding.
+// stripLiteralsAndComments blanks the CONTENTS of double-quoted string literals
+// and `//` line comments (replacing each interior byte with a space, preserving
+// length + offsets) so a call-shaped token mentioned in prose -- an
+// `@description("... staleClusterNodes({...}) ...")` string or a `//` comment --
+// is never mistaken for a real call site.
+func stripLiteralsAndComments(text string) string {
+	b := []byte(text)
+	inStr, inComment := false, false
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		switch {
+		case inComment:
+			if c == '\n' {
+				inComment = false
+			} else {
+				b[i] = ' '
+			}
+		case inStr:
+			if c == '\\' && i+1 < len(b) {
+				b[i] = ' '
+				b[i+1] = ' '
+				i++
+			} else if c == '"' {
+				inStr = false
+			} else {
+				b[i] = ' '
+			}
+		case c == '"':
+			inStr = true
+		case c == '/' && i+1 < len(b) && b[i+1] == '/':
+			inComment = true
+			b[i] = ' '
+		}
+	}
+	return string(b)
+}
+
+func missingKindPrefixCalls(text string, useKinds map[string]string) map[string]string {
+	text = stripLiteralsAndComments(text)
+	out := map[string]string{}
+	for _, idx := range callRE.FindAllStringSubmatchIndex(text, -1) {
+		nameStart, nameEnd := idx[2], idx[3]
+		name := text[nameStart:nameEnd]
+		kind, ok := useKinds[name]
+		if !ok || !kindPrefixedInvocationKinds[kind] {
+			continue
+		}
+		// `x.name(` is a method/dotted access, not a construct call.
+		if nameStart > 0 && text[nameStart-1] == '.' {
+			continue
+		}
+		// Walk back over whitespace to the preceding word.
+		j := nameStart
+		for j > 0 {
+			c := text[j-1]
+			if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+				j--
+				continue
+			}
+			break
+		}
+		k := j
+		for k > 0 && isCallgraphIdentByte(text[k-1]) {
+			k--
+		}
+		prevWord := text[k:j]
+		// Correctly kind-prefixed `<kind> name(` -- the preceding word IS the
+		// construct's kind keyword (and there was real whitespace between them).
+		if j < nameStart && prevWord == kind {
+			continue
+		}
+		out[name] = kind
+	}
+	return out
+}
+
 // ConstructFindings analyses a single authored construct against the §2
 // contract. text is the construct's full authored text (its annotations + body
 // is sufficient; a leading `use` block is harmless). useKinds maps every
@@ -228,6 +331,17 @@ func ConstructFindings(kind, name, text string, useKinds map[string]string, side
 	}
 
 	calls := callNames(text, useKinds)
+
+	// Rule: kind-prefixed invocation (construct-invocation ADR Decision 1 /
+	// #2335). A call to an imported construct of an invocation kind
+	// (query / mutation / logic / action / builtin / automation) MUST carry its
+	// kind keyword at the call site -- `<kind> name(...)`. A bare `name(...)` is
+	// flagged. Bare predicate refs in a filter (spec / trait, no parens) and
+	// ambient language builtins are never reported (they are not invocation
+	// kinds / not in useKinds).
+	for cn, ck := range missingKindPrefixCalls(text, useKinds) {
+		add("missing-kind-prefix", fmt.Sprintf("calls %s %q without its kind prefix -- write `%s %s(...)` (construct-invocation ADR Decision 1)", ck, cn, ck, cn))
+	}
 
 	switch kind {
 	case "logic":

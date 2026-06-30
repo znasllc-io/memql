@@ -32,7 +32,7 @@ func (s *EngineStore) UserPreferences(ctx context.Context, userId string) (Prefe
 	if strings.TrimSpace(userId) == "" {
 		return Preferences{ComputerUseEnabled: true}, nil
 	}
-	query := fmt.Sprintf(`userById({"userId":%q})`, userId)
+	query := fmt.Sprintf(`query userById(userId:%q)`, userId)
 	res, err := s.Engine.Execute(ctx, query)
 	if err != nil {
 		return Preferences{ComputerUseEnabled: true}, fmt.Errorf("user lookup: %w", err)
@@ -78,7 +78,7 @@ func (s *EngineStore) AgentAuthorization(ctx context.Context, agentId, ownerUser
 	if strings.TrimSpace(agentId) == "" || strings.TrimSpace(ownerUserId) == "" {
 		return nil, nil
 	}
-	query := fmt.Sprintf(`agentAuthorizationsForUser({userId:%q})`, ownerUserId)
+	query := fmt.Sprintf(`query agentAuthorizationsForUser(userId:%q)`, ownerUserId)
 	res, err := s.Engine.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("agent authorization lookup: %w", err)
@@ -134,7 +134,7 @@ func (s *EngineStore) PlanScope(ctx context.Context, planId string) (string, err
 		return "", nil
 	}
 	// Re-uses the existing planFull query.
-	query := fmt.Sprintf(`planById({"planId":%q})`, planId)
+	query := fmt.Sprintf(`query planById(planId:%q)`, planId)
 	res, err := s.Engine.Execute(ctx, query)
 	if err != nil {
 		return "", fmt.Errorf("plan lookup: %w", err)

@@ -143,7 +143,7 @@ func (l *PlannerAgentLoop) findCatalogOverlap(ctx context.Context, d plannerDeci
 		return "", 0, nil
 	}
 
-	res, err := l.engine.Execute(systemActorContext(ctx), `activeSkillsFull({})`)
+	res, err := l.engine.Execute(systemActorContext(ctx), `query activeSkillsFull()`)
 	if err != nil {
 		return "", 0, fmt.Errorf("activeSkillsFull: %w", err)
 	}
@@ -183,7 +183,7 @@ func (l *PlannerAgentLoop) checkMintAuthority(ctx context.Context, ownerAgentId,
 	if ownerAgentId == "" {
 		return false, "plan has no ownerAgentId; cannot resolve planner grant", nil
 	}
-	call := fmt.Sprintf(`agentAuthorizationsForUser({userId:%q})`, requestedBy)
+	call := fmt.Sprintf(`query agentAuthorizationsForUser(userId:%q)`, requestedBy)
 	res, err := l.engine.Execute(systemActorContext(ctx), call)
 	if err != nil {
 		return false, "", fmt.Errorf("agentAuthorizationsForUser: %w", err)

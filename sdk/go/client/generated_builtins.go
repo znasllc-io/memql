@@ -36,66 +36,66 @@ func (qc *QueryClient) EditDocument(ctx context.Context, args EditDocumentArgs) 
 
 func EditDocumentBuild(args EditDocumentArgs) string {
 	var b strings.Builder
-	b.WriteString("editDocument({")
+	b.WriteString("builtin editDocument(")
 	b.WriteString("documentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
 	if args.Content != "" {
-		if b.Len() > 14 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("content: ")
 		b.WriteString(fmt.Sprintf("%q", args.Content))
 	}
 	if args.AttachmentId != "" {
-		if b.Len() > 14 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attachmentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
 	}
 	if args.Note != "" {
-		if b.Len() > 14 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
 		b.WriteString(fmt.Sprintf("%q", args.Note))
 	}
 	if args.AuthorKind != "" {
-		if b.Len() > 14 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authorKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.AuthorKind))
 	}
 	if args.AuthorId != "" {
-		if b.Len() > 14 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authorId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AuthorId))
 	}
 	if args.ExpectedVersion != 0 {
-		if b.Len() > 14 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expectedVersion: ")
 		b.WriteString(fmt.Sprintf("%v", args.ExpectedVersion))
 	}
 	if args.ProducedByPlanId != "" {
-		if b.Len() > 14 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
 	}
 	if args.PartitionId != "" {
-		if b.Len() > 14 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -112,10 +112,10 @@ func (qc *QueryClient) HarnessTrace(ctx context.Context, args HarnessTraceArgs) 
 
 func HarnessTraceBuild(args HarnessTraceArgs) string {
 	var b strings.Builder
-	b.WriteString("harnessTrace({")
+	b.WriteString("builtin harnessTrace(")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -135,27 +135,27 @@ func (qc *QueryClient) KnowledgeAugmentDomainAnalyze(ctx context.Context, args K
 
 func KnowledgeAugmentDomainAnalyzeBuild(args KnowledgeAugmentDomainAnalyzeArgs) string {
 	var b strings.Builder
-	b.WriteString("knowledgeAugmentDomainAnalyze({")
+	b.WriteString("builtin knowledgeAugmentDomainAnalyze(")
 	b.WriteString("userQuestion: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserQuestion))
-	if b.Len() > 31 {
+	if b.Len() > 38 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentResponse: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentResponse))
-	if b.Len() > 31 {
+	if b.Len() > 38 {
 		b.WriteString(", ")
 	}
 	b.WriteString("domains: ")
 	b.WriteString(renderMemQLValue(args.Domains))
 	if args.Retrieved != nil {
-		if b.Len() > 31 {
+		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("retrieved: ")
 		b.WriteString(renderMemQLValue(args.Retrieved))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -177,39 +177,39 @@ func (qc *QueryClient) KnowledgeAugmentDomainGenerate(ctx context.Context, args 
 
 func KnowledgeAugmentDomainGenerateBuild(args KnowledgeAugmentDomainGenerateArgs) string {
 	var b strings.Builder
-	b.WriteString("knowledgeAugmentDomainGenerate({")
+	b.WriteString("builtin knowledgeAugmentDomainGenerate(")
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	if b.Len() > 32 {
+	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("topic: ")
 	b.WriteString(fmt.Sprintf("%q", args.Topic))
 	if args.SourceUtteranceId != "" {
-		if b.Len() > 32 {
+		if b.Len() > 39 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceUtteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceUtteranceId))
 	}
 	if args.SourceAgentId != "" {
-		if b.Len() > 32 {
+		if b.Len() > 39 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceAgentId))
 	}
-	if b.Len() > 32 {
+	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	if b.Len() > 32 {
+	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestedBy))
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -229,31 +229,31 @@ func (qc *QueryClient) Recall(ctx context.Context, args RecallArgs) (*Result, er
 
 func RecallBuild(args RecallArgs) string {
 	var b strings.Builder
-	b.WriteString("recall({")
+	b.WriteString("builtin recall(")
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
 	if args.Concept != "" {
-		if b.Len() > 8 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("concept: ")
 		b.WriteString(fmt.Sprintf("%q", args.Concept))
 	}
 	if args.K != 0 {
-		if b.Len() > 8 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("k: ")
 		b.WriteString(fmt.Sprintf("%v", args.K))
 	}
 	if args.Provider != "" {
-		if b.Len() > 8 {
+		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provider: ")
 		b.WriteString(fmt.Sprintf("%q", args.Provider))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -272,22 +272,22 @@ func (qc *QueryClient) RestoreDocumentVersion(ctx context.Context, args RestoreD
 
 func RestoreDocumentVersionBuild(args RestoreDocumentVersionArgs) string {
 	var b strings.Builder
-	b.WriteString("restoreDocumentVersion({")
+	b.WriteString("builtin restoreDocumentVersion(")
 	b.WriteString("documentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
-	if b.Len() > 24 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("versionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.VersionId))
 	if args.AuthorId != "" {
-		if b.Len() > 24 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authorId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AuthorId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -306,24 +306,24 @@ func (qc *QueryClient) SearchActions(ctx context.Context, args SearchActionsArgs
 
 func SearchActionsBuild(args SearchActionsArgs) string {
 	var b strings.Builder
-	b.WriteString("searchActions({")
+	b.WriteString("builtin searchActions(")
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
 	if args.K != 0 {
-		if b.Len() > 15 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("k: ")
 		b.WriteString(fmt.Sprintf("%v", args.K))
 	}
 	if args.Provider != "" {
-		if b.Len() > 15 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provider: ")
 		b.WriteString(fmt.Sprintf("%q", args.Provider))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -345,45 +345,45 @@ func (qc *QueryClient) TrainAgent(ctx context.Context, args TrainAgentArgs) (*Re
 
 func TrainAgentBuild(args TrainAgentArgs) string {
 	var b strings.Builder
-	b.WriteString("trainAgent({")
+	b.WriteString("builtin trainAgent(")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	if args.Domains != nil {
-		if b.Len() > 12 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("domains: ")
 		b.WriteString(renderMemQLValue(args.Domains))
 	}
 	if args.Tools != nil {
-		if b.Len() > 12 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tools: ")
 		b.WriteString(renderMemQLValue(args.Tools))
 	}
 	if args.Provider != "" {
-		if b.Len() > 12 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provider: ")
 		b.WriteString(fmt.Sprintf("%q", args.Provider))
 	}
 	if args.PartitionId != "" {
-		if b.Len() > 12 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
 	}
 	if args.RequestedBy != "" {
-		if b.Len() > 12 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requestedBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.RequestedBy))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -404,35 +404,35 @@ func (qc *QueryClient) TrainAgentRetryStep(ctx context.Context, args TrainAgentR
 
 func TrainAgentRetryStepBuild(args TrainAgentRetryStepArgs) string {
 	var b strings.Builder
-	b.WriteString("trainAgentRetryStep({")
+	b.WriteString("builtin trainAgentRetryStep(")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 21 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("step: ")
 	b.WriteString(fmt.Sprintf("%q", args.Step))
 	if args.Provider != "" {
-		if b.Len() > 21 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provider: ")
 		b.WriteString(fmt.Sprintf("%q", args.Provider))
 	}
 	if args.RetryPlanId != "" {
-		if b.Len() > 21 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("retryPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RetryPlanId))
 	}
 	if args.OriginalPlanId != "" {
-		if b.Len() > 21 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("originalPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OriginalPlanId))
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }

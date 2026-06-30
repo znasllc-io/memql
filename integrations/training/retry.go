@@ -119,7 +119,7 @@ func (i *Integration) enqueueRetryPlan(
 	})
 
 	createQ := fmt.Sprintf(
-		`createPlan({"planId": %s, "partitionId": %s, "kind": "trainAgentRetryStep", "goal": %s, "requestedBy": %s, "triggerSource": "system", "input": %s})`,
+		`mutation createPlan(planId: %s, partitionId: %s, kind: "trainAgentRetryStep", goal: %s, requestedBy: %s, triggerSource: "system", input: %s)`,
 		quoteString(planId),
 		quoteString(partitionId),
 		quoteString(goal),
@@ -280,7 +280,7 @@ func (i *Integration) pollRetries(ctx context.Context) {
 	if i.engine == nil {
 		return
 	}
-	res, err := i.engine.Execute(ctx, "dueTrainAgentRetryPlans({})")
+	res, err := i.engine.Execute(ctx, "query dueTrainAgentRetryPlans()")
 	if err != nil {
 		i.Logger.Debug("training.pollRetries: query failed (likely engine not ready yet)", "err", err)
 		return
@@ -372,7 +372,7 @@ func (i *Integration) processRetryPlan(ctx context.Context, planId string, paylo
 	// node doesn't double-execute) -- best-effort.
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, _ = i.engine.Execute(ctx, fmt.Sprintf(
-		`updatePlanStatus({"planId": %s, "status": "running", "startedAt": %s})`,
+		`mutation updatePlanStatus(planId: %s, status: "running", startedAt: %s)`,
 		quoteString(planId), quoteString(now),
 	))
 
@@ -398,7 +398,7 @@ func (i *Integration) processRetryPlan(ctx context.Context, planId string, paylo
 			"originalPlanId": originalPlanId,
 		})
 		_, _ = i.engine.Execute(ctx, fmt.Sprintf(
-			`updatePlanStatus({"planId": %s, "status": "succeeded", "output": %s, "completedAt": %s})`,
+			`mutation updatePlanStatus(planId: %s, status: "succeeded", output: %s, completedAt: %s)`,
 			quoteString(planId), successOutput, quoteString(completedAt),
 		))
 		i.emitRetryCompletedCard(ctx, planId, originalPlanId, partitionId, requestedBy, agentId, step, attempt)
@@ -415,7 +415,7 @@ func (i *Integration) processRetryPlan(ctx context.Context, planId string, paylo
 		failedAt := time.Now().UTC().Format(time.RFC3339)
 		errMsg := fmt.Sprintf("attempt %d/%d failed: %v", nextAttempt, retryMaxAttempts, runErr)
 		_, _ = i.engine.Execute(ctx, fmt.Sprintf(
-			`updatePlanStatus({"planId": %s, "status": "failed", "errorMessage": %s, "completedAt": %s})`,
+			`mutation updatePlanStatus(planId: %s, status: "failed", errorMessage: %s, completedAt: %s)`,
 			quoteString(planId), quoteString(errMsg), quoteString(failedAt),
 		))
 		i.emitRetryFailedCard(ctx, planId, originalPlanId, partitionId, requestedBy, agentId, step, retryMaxAttempts, errMsg)
@@ -443,7 +443,7 @@ func (i *Integration) processRetryPlan(ctx context.Context, planId string, paylo
 	// status-update mutation above set it to running; this brings
 	// it back to queued for the next poll window.
 	_, _ = i.engine.Execute(ctx, fmt.Sprintf(
-		`createPlan({"planId": %s, "partitionId": %s, "kind": "trainAgentRetryStep", "goal": %s, "requestedBy": %s, "triggerSource": "system", "input": %s})`,
+		`mutation createPlan(planId: %s, partitionId: %s, kind: "trainAgentRetryStep", goal: %s, requestedBy: %s, triggerSource: "system", input: %s)`,
 		quoteString(planId),
 		quoteString(partitionId),
 		quoteString(fmt.Sprintf("Retry training step (%s) -- attempt %d/%d", humanStep(step), nextAttempt+1, retryMaxAttempts)),
@@ -482,7 +482,7 @@ func (i *Integration) emitRetryCompletedCard(
 	stateId := retryPlanId + ":completed"
 	actorJSON := fmt.Sprintf(`{"kind": "user", "userId": %s}`, quoteString(requestedBy))
 	if _, err := i.engine.Execute(ctx, fmt.Sprintf(
-		`mutationCreateCanvasState({"stateId": %s, "space": %s, "kind": "card", "data": %s, "visibility": "private", "forUserId": %s, "actor": %s, "importance": "ambient"})`,
+		`mutation mutationCreateCanvasState(stateId: %s, space: %s, kind: "card", data: %s, visibility: "private", forUserId: %s, actor: %s, importance: "ambient")`,
 		quoteString(stateId),
 		quoteString(partitionId),
 		cardData,
@@ -522,7 +522,7 @@ func (i *Integration) emitRetryFailedCard(
 	stateId := retryPlanId + ":failed"
 	actorJSON := fmt.Sprintf(`{"kind": "user", "userId": %s}`, quoteString(requestedBy))
 	if _, err := i.engine.Execute(ctx, fmt.Sprintf(
-		`mutationCreateCanvasState({"stateId": %s, "space": %s, "kind": "card", "data": %s, "visibility": "private", "forUserId": %s, "actor": %s, "importance": "notify"})`,
+		`mutation mutationCreateCanvasState(stateId: %s, space: %s, kind: "card", data: %s, visibility: "private", forUserId: %s, actor: %s, importance: "notify")`,
 		quoteString(stateId),
 		quoteString(partitionId),
 		cardData,

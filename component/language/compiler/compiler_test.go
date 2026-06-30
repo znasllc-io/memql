@@ -931,7 +931,7 @@ use common.builtins.{ ensureDailySpaceForUser }
 logic logicEnsureDailySpaceOnAuthSession {
   args { event object @required }
   body {
-    ensured := ensureDailySpaceForUser({ userId: coalesce(args.event.payload.userId, args.event.payload.subject) })
+    ensured := ensureDailySpaceForUser(userId: coalesce(args.event.payload.userId, args.event.payload.subject))
     return ensured
   }
 }`
@@ -981,8 +981,7 @@ logic logicEnsureDailySpaceOnAuthSession {
 		t.Fatalf("step 0 is not the ensureDailySpaceForUser function step: %#v", steps[0])
 	}
 	argsMap, _ := fn["args"].(map[string]any)
-	obj, _ := argsMap["0"].(map[string]any)
-	userIdExpr, _ := obj["userId"].(string)
+	userIdExpr, _ := argsMap["userId"].(string)
 	// The function-step arg carries the $args form the resolver understands
 	// (resolveArgValueRef -> evaluateCoalesce skips the empty userId and
 	// falls through to subject), NOT the engine-unresolvable arg("...") form.

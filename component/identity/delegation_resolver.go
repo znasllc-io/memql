@@ -196,7 +196,7 @@ type delegationRow struct {
 }
 
 func (r *EngineDelegationResolver) lookupActiveBySubject(ctx context.Context, subject string) ([]*delegationRow, error) {
-	query := fmt.Sprintf(`activeDelegationsByIdentitySubject({identitySubject: %q})`, subject)
+	query := fmt.Sprintf(`query activeDelegationsByIdentitySubject(identitySubject: %q)`, subject)
 	result, err := r.Engine.Execute(ctx, query)
 	if err != nil {
 		return nil, err
@@ -230,7 +230,7 @@ func (r *EngineDelegationResolver) lookupUserByIdentityId(ctx context.Context, i
 	if identityId == "" {
 		return nil, nil
 	}
-	idQuery := fmt.Sprintf(`queryIdentityById({identityId: %q})`, identityId)
+	idQuery := fmt.Sprintf(`query queryIdentityById(identityId: %q)`, identityId)
 	result, err := r.Engine.Execute(ctx, idQuery)
 	if err != nil {
 		return nil, fmt.Errorf("identity lookup: %w", err)

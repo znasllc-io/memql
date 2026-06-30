@@ -90,7 +90,7 @@ func TestHandleVoiceAgentRealtimeSpeaking_RoundTrip(t *testing.T) {
 	// it -- a raw DB insert is not seen by siParticipantForSpace's
 	// partition-scoped read.
 	joinQ := fmt.Sprintf(
-		`joinSpaceAsAI({partitionId: %q, agentId: %q, displayName: "Sofia", forUserId: "v1:identity:user:owner-1421"})`,
+		`joinSpaceAsAI(partitionId: %q, agentId: %q, displayName: "Sofia", forUserId: "v1:identity:user:owner-1421")`,
 		partitionId, agentId)
 	_, err = eng.Execute(ctx, joinQ)
 	require.NoError(t, err, "seed AI participant via joinSpaceAsAI")
@@ -113,7 +113,7 @@ func TestHandleVoiceAgentRealtimeSpeaking_RoundTrip(t *testing.T) {
 	// Read the GA's presence state via the same space-scoped query the
 	// frontend's useParticipantPresence uses (latest-wins by participantId).
 	readPresenceState := func() string {
-		q := fmt.Sprintf(`spaceParticipantPresence({partitionId: %q})`, partitionId)
+		q := fmt.Sprintf(`spaceParticipantPresence(partitionId: %q)`, partitionId)
 		res, qerr := eng.Execute(ctx, q)
 		if qerr != nil {
 			return ""

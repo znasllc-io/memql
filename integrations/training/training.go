@@ -333,7 +333,7 @@ func (i *Integration) trainAgentHandler(
 		seededHere := false
 		seedFailed := ""
 		if needsSeed || needsRefresh {
-			seedQuery := fmt.Sprintf(`seedDomainContent({domainId: %s})`, quoteString(domainId))
+			seedQuery := fmt.Sprintf(`builtin seedDomainContent(domainId: %s)`, quoteString(domainId))
 			if _, seedErr := i.engine.Execute(ctx, seedQuery); seedErr != nil {
 				i.Logger.Warn("training.trainAgent: just-in-time seed failed",
 					"agentId", agentId, "domainId", domainId, "err", seedErr)
@@ -529,7 +529,7 @@ func (i *Integration) trainAgentHandler(
 			roleSlug, _ = agent["role"].(string)
 		}
 		bridgeQuery := fmt.Sprintf(
-			`ensureKnowledgeBridge({roleSlug: %s, domainIds: %s})`,
+			`builtin ensureKnowledgeBridge(roleSlug: %s, domainIds: %s)`,
 			quoteString(roleSlug),
 			mustJSONSlice(newDomains),
 		)
@@ -731,7 +731,7 @@ func (i *Integration) readAgent(
 ) (map[string]any, []string, []string, error) {
 	res, err := i.engine.Execute(
 		ctx,
-		fmt.Sprintf(`agentById({agentId: %s})`, quoteString(agentId)),
+		fmt.Sprintf(`query agentById(agentId: %s)`, quoteString(agentId)),
 	)
 	if err != nil {
 		return nil, nil, nil, err
@@ -768,7 +768,7 @@ func (i *Integration) writeAgent(ctx context.Context, agentId string, payload ma
 		return fmt.Errorf("marshal agent payload: %w", err)
 	}
 	query := fmt.Sprintf(
-		`updateAgent({agentId: %s, payload: %s})`,
+		`mutation updateAgent(agentId: %s, payload: %s)`,
 		quoteString(agentId),
 		string(payloadJSON),
 	)
@@ -858,7 +858,7 @@ func (i *Integration) fetchDomainLabels(
 	if len(domainIds) == 0 {
 		return out, nil
 	}
-	res, err := i.engine.Execute(ctx, `queryListKnowledgeDomains({})`)
+	res, err := i.engine.Execute(ctx, `query queryListKnowledgeDomains()`)
 	if err != nil {
 		return out, err
 	}
@@ -1321,7 +1321,7 @@ func (i *Integration) backfillStampIfMissing(ctx context.Context, domainId strin
 	canonicalId := partition + ":v1:knowledge:knowledgeDomain:" + domainId
 	res, err := i.engine.Execute(
 		ctx,
-		fmt.Sprintf(`queryKnowledgeDomainById({domainId: %s})`, quoteString(canonicalId)),
+		fmt.Sprintf(`query queryKnowledgeDomainById(domainId: %s)`, quoteString(canonicalId)),
 	)
 	if err != nil || res == nil || res.Bundle == nil || len(res.Bundle.Nodes) == 0 {
 		return
@@ -1346,7 +1346,7 @@ func (i *Integration) backfillStampIfMissing(ctx context.Context, domainId strin
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	stampQuery := fmt.Sprintf(
-		`mutationMarkKnowledgeDomainSeeded({domainId: %s, lastSeededAt: %s, seederRecipeVersion: %s})`,
+		`mutation mutationMarkKnowledgeDomainSeeded(domainId: %s, lastSeededAt: %s, seederRecipeVersion: %s)`,
 		quoteString(domainId),
 		quoteString(now),
 		quoteString(currentSeederRecipeVersion),
@@ -1382,7 +1382,7 @@ func (i *Integration) domainNeedsRefresh(ctx context.Context, domainId string) (
 	canonicalId := partition + ":v1:knowledge:knowledgeDomain:" + domainId
 	res, err := i.engine.Execute(
 		ctx,
-		fmt.Sprintf(`queryKnowledgeDomainById({domainId: %s})`, quoteString(canonicalId)),
+		fmt.Sprintf(`query queryKnowledgeDomainById(domainId: %s)`, quoteString(canonicalId)),
 	)
 	if err != nil || res == nil || res.Bundle == nil || len(res.Bundle.Nodes) == 0 {
 		return false, ""

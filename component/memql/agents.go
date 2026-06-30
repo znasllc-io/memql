@@ -183,7 +183,7 @@ func (r *AgentRegistry) LoadFromRows(ctx context.Context, engine *MemQLEngine, l
 	// syntax -- node() requires a JSON object argument. Going
 	// through the named query also gets shape resolution + trait
 	// filtering for free.
-	result, err := engine.Execute(ctx, `allAgents({})`)
+	result, err := engine.Execute(ctx, `query allAgents()`)
 	if err != nil {
 		return 0, fmt.Errorf("allAgents: %w", err)
 	}

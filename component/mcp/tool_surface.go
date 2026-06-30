@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/memql"
@@ -425,10 +426,12 @@ func runNamedConstruct(ctx context.Context, eng Engine, kind string, args map[st
 	return textResult(string(payload))
 }
 
-// namedCallQuery builds a `name(<json-args>)` invocation -- the same json-
-// encoded function-call form the engine uses for tool function handlers
+// namedCallQuery builds a `name(k: v, ...)` invocation -- the named-args
+// invocation form the engine uses for tool function handlers
 // (component/memql buildFunctionCallQuery), so the engine's parser handles
-// escaping of the JSON-encoded values.
+// escaping of the JSON-encoded values. Story 9 (#2335): emits named args, not
+// the legacy object-literal wrapper `name({...})` (rejected by the parser).
+// Keys sorted for a deterministic call string.
 func namedCallQuery(name string, args map[string]any) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -437,11 +440,28 @@ func namedCallQuery(name string, args map[string]any) (string, error) {
 	if len(args) == 0 {
 		return name + "()", nil
 	}
-	b, err := json.Marshal(args)
-	if err != nil {
-		return "", fmt.Errorf("args encode: %w", err)
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
 	}
-	return name + "(" + string(b) + ")", nil
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString(name)
+	b.WriteByte('(')
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		v, err := json.Marshal(args[k])
+		if err != nil {
+			return "", fmt.Errorf("args encode: %w", err)
+		}
+		b.WriteString(k)
+		b.WriteString(": ")
+		b.Write(v)
+	}
+	b.WriteByte(')')
+	return b.String(), nil
 }
 
 // handleInlineQuery implements the Tier-3 `query` op (design §3 Tier 3): both

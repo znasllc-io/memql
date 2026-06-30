@@ -334,8 +334,8 @@ func TestRefreshCron_SpawnRefreshPlanCallShape(t *testing.T) {
 	q := exec[0]
 	for _, want := range []string{
 		"createPlan",
-		`"kind": "trainSpecialist"`,
-		`"triggerSource": "system"`,
+		`kind: "trainSpecialist"`,
+		`triggerSource: "system"`,
 		`"mode":"refresh"`,
 		"physics_qm",
 	} {

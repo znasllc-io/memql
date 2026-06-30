@@ -266,7 +266,7 @@ func (p *Provider) recordBack(ctx context.Context, args map[string]any, _ int) (
 	var effects []string
 
 	if status := argString(args, "status"); status != "" {
-		call := fmt.Sprintf("updateDeploymentStatus({deploymentId: %q, status: %q})", deploymentID, status)
+		call := fmt.Sprintf("mutation updateDeploymentStatus(deploymentId: %q, status: %q)", deploymentID, status)
 		if _, err := p.engine.Execute(ctx, call); err != nil {
 			return nil, fmt.Errorf("deploypack.recordBack: updateDeploymentStatus: %w", err)
 		}
@@ -286,7 +286,7 @@ func (p *Provider) recordBack(ctx context.Context, args map[string]any, _ int) (
 			replicas = int(r)
 		}
 		call := fmt.Sprintf(
-			"createDeploymentNodeSpec({deploymentId: %q, nodeType: %q, version: %q, replicas: %d, imageDigest: %q})",
+			"mutation createDeploymentNodeSpec(deploymentId: %q, nodeType: %q, version: %q, replicas: %d, imageDigest: %q)",
 			deploymentID, nodeType, version, replicas, imageDigest,
 		)
 		if _, err := p.engine.Execute(ctx, call); err != nil {

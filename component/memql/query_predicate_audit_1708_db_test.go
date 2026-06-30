@@ -72,11 +72,11 @@ func TestQueryAvatarPersonas_VendorOptionalNotHardcoded(t *testing.T) {
 		"inactive persona MUST be excluded (isActiveRecord), got %v", all)
 
 	// Optional vendor scoping still works: vendor=simli excludes anam.
-	simliOnly := queryIds(t, ctx, eng, `avatarPersonas({"vendor":"simli"})`)
+	simliOnly := queryIds(t, ctx, eng, `avatarPersonas(vendor:"simli")`)
 	require.True(t, contains(simliOnly, simliID), "vendor=simli MUST include the simli persona, got %v", simliOnly)
 	require.False(t, contains(simliOnly, anamID), "vendor=simli MUST exclude the anam persona, got %v", simliOnly)
 
-	anamOnly := queryIds(t, ctx, eng, `avatarPersonas({"vendor":"anam"})`)
+	anamOnly := queryIds(t, ctx, eng, `avatarPersonas(vendor:"anam")`)
 	require.True(t, contains(anamOnly, anamID), "vendor=anam MUST include the anam persona, got %v", anamOnly)
 	require.False(t, contains(anamOnly, simliID), "vendor=anam MUST exclude the simli persona, got %v", anamOnly)
 }
@@ -136,7 +136,7 @@ func TestQueryExpiredConsumedAuthCodes_OnlyConsumed(t *testing.T) {
 	// Spend exactly one of the two expired codes.
 	runMutation(t, ctx, eng, "consumeAuthCode", map[string]any{"codeId": consumedID})
 
-	got := queryIds(t, ctx, eng, `expiredConsumedAuthCodes({"now":"2026-06-18T00:00:00Z"})`)
+	got := queryIds(t, ctx, eng, `expiredConsumedAuthCodes(now:"2026-06-18T00:00:00Z")`)
 	require.True(t, contains(got, consumedID),
 		"an expired AND consumed auth code MUST be returned (#1714), got %v", got)
 	require.False(t, contains(got, unconsumedID),

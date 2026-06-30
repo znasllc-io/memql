@@ -20,7 +20,7 @@ import (
 //	}
 //
 // emitting `layer0 := parallel { wait: ..., failFast: ..., branches: [ sales
-// := automationFetchSales({...}) support := ... ] }`, which parseGoStyleStep
+// := automationFetchSales(...) support := ... ] }`, which parseGoStyleStep
 // parses into StepTypeParallel. This is the grammar the phased-authoring
 // headline synthesizer emits for a multi-phase topo layer (restoring the
 // #1164 within-layer concurrency removed in PR #1367).
@@ -43,7 +43,7 @@ automation gather {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out, `layer0 := parallel { wait: "all", failFast: true, branches: [ sales := automationFetchSales({ }) support := automationFetchSupport({ }) ] }`) {
+	if !strings.Contains(out, `layer0 := parallel { wait: "all", failFast: true, branches: [ sales := automationFetchSales() support := automationFetchSupport() ] }`) {
 		t.Fatalf("parallel step did not rewrite to the procedural parallel assignment; got:\n%s", out)
 	}
 }
@@ -90,7 +90,7 @@ func TestNormaliseAutomationSource_ParallelStep_KeyOrderAndGatedBranch(t *testin
 	if !strings.Contains(out, `parallel { wait: "any", failFast: true, branches: [`) {
 		t.Fatalf("config keys must be accepted in any order; got:\n%s", out)
 	}
-	if !strings.Contains(out, `a := if steps.prep.status == "success" { automationFetchA({ }) }`) {
+	if !strings.Contains(out, `a := if steps.prep.status == "success" { automationFetchA() }`) {
 		t.Fatalf("gated branch must keep its if wrapper; got:\n%s", out)
 	}
 }
@@ -119,7 +119,7 @@ func TestNormaliseAutomationSource_ParallelStep_NestedParallel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nested parallel must rewrite: %v", err)
 	}
-	if !strings.Contains(out, `inner := parallel { wait: "all", failFast: false, branches: [ x := automationFetchX({ }) y := automationFetchY({ }) ] }`) {
+	if !strings.Contains(out, `inner := parallel { wait: "all", failFast: false, branches: [ x := automationFetchX() y := automationFetchY() ] }`) {
 		t.Fatalf("nested parallel branch must rewrite recursively; got:\n%s", out)
 	}
 }

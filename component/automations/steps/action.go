@@ -228,9 +228,9 @@ func (e *ActionExecutor) replayActionRef(ctx context.Context, stepCtx *Context, 
 
 	var query string
 	if ref.Floating {
-		query = fmt.Sprintf(`actionById({actionId:%q})`, ref.ID)
+		query = fmt.Sprintf(`query actionById(actionId:%q)`, ref.ID)
 	} else {
-		query = fmt.Sprintf(`actionByIdAndVersion({actionId:%q, version:%d})`, ref.ID, ref.Version)
+		query = fmt.Sprintf(`query actionByIdAndVersion(actionId:%q, version:%d)`, ref.ID, ref.Version)
 	}
 	payload, ok := resolveActionPayload(ctx, stepCtx, query)
 	if !ok {

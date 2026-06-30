@@ -172,7 +172,7 @@ func (s *Stamper) finalizeAdHocWrapper(ctx context.Context, pc PlanContext, exec
 
 	if pc.SemanticTaskId != "" {
 		tq := fmt.Sprintf(
-			`updateTaskStatus({"taskId": %q, "status": %q, "completedAt": %q})`,
+			`mutation updateTaskStatus(taskId: %q, status: %q, completedAt: %q)`,
 			pc.SemanticTaskId, status, ts,
 		)
 		if _, err := s.Engine.Execute(ctx, tq); err != nil {
@@ -182,7 +182,7 @@ func (s *Stamper) finalizeAdHocWrapper(ctx context.Context, pc PlanContext, exec
 	}
 	if pc.PlanId != "" {
 		pq := fmt.Sprintf(
-			`updatePlanStatus({"planId": %q, "status": %q, "completedAt": %q})`,
+			`mutation updatePlanStatus(planId: %q, status: %q, completedAt: %q)`,
 			pc.PlanId, status, ts,
 		)
 		if _, err := s.Engine.Execute(ctx, pq); err != nil {
@@ -225,7 +225,7 @@ func (s *Stamper) createAdHocPlan(ctx context.Context, pc PlanContext) (string, 
 	planId := id.NewShortId()
 	goal := fmt.Sprintf("Ad-hoc tool actions by agent %s", pc.AgentId)
 	q := fmt.Sprintf(
-		`createAdHocPlan({"planId": %q, "partitionId": %q, "agentId": %q, "ownerUserId": %q, "goal": %q})`,
+		`mutation createAdHocPlan(planId: %q, partitionId: %q, agentId: %q, ownerUserId: %q, goal: %q)`,
 		planId, pc.PartitionId, pc.AgentId, pc.OwnerUserId, goal,
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
@@ -241,7 +241,7 @@ func (s *Stamper) createAdHocPlan(ctx context.Context, pc PlanContext) (string, 
 func (s *Stamper) createSemanticWrapper(ctx context.Context, pc PlanContext) (string, error) {
 	taskId := id.NewShortId()
 	q := fmt.Sprintf(
-		`createSemanticTask({"taskId": %q, "planId": %q, "kind": "callTool", "seq": 0, "logicalStepId": %q, "attemptNumber": 1, "agentId": %q, "input": {"adHoc": true}})`,
+		`mutation createSemanticTask(taskId: %q, planId: %q, kind: "callTool", seq: 0, logicalStepId: %q, attemptNumber: 1, agentId: %q, input: {"adHoc": true})`,
 		taskId, pc.PlanId, taskId, pc.AgentId,
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
@@ -262,7 +262,7 @@ func (s *Stamper) stampPre(ctx context.Context, pc PlanContext, taskId, toolName
 		}
 	}
 	q := fmt.Sprintf(
-		`createToolInvocationTask({"taskId": %q, "planId": %q, "parentTaskId": %q, "toolName": %q, "toolArgs": %s, "seq": 0})`,
+		`mutation createToolInvocationTask(taskId: %q, planId: %q, parentTaskId: %q, toolName: %q, toolArgs: %s, seq: 0)`,
 		taskId, pc.PlanId, pc.SemanticTaskId, toolName, argsJSON,
 	)
 	_, err := s.Engine.Execute(ctx, q)
@@ -276,7 +276,7 @@ func (s *Stamper) stampPost(ctx context.Context, taskId, result string, execErr 
 	completedAtStr := completedAt.UTC().Format(time.RFC3339)
 	if execErr != nil {
 		q := fmt.Sprintf(
-			`completeToolInvocation({"taskId": %q, "status": "failed", "errorMessage": %q, "completedAt": %q})`,
+			`mutation completeToolInvocation(taskId: %q, status: "failed", errorMessage: %q, completedAt: %q)`,
 			taskId, execErr.Error(), completedAtStr,
 		)
 		_, err := s.Engine.Execute(ctx, q)
@@ -290,7 +290,7 @@ func (s *Stamper) stampPost(ctx context.Context, taskId, result string, execErr 
 		resultJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`completeToolInvocation({"taskId": %q, "status": "succeeded", "toolResult": %s, "completedAt": %q})`,
+		`mutation completeToolInvocation(taskId: %q, status: "succeeded", toolResult: %s, completedAt: %q)`,
 		taskId, string(resultJSON), completedAtStr,
 	)
 	_, err = s.Engine.Execute(ctx, q)

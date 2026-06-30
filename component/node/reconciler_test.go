@@ -26,14 +26,14 @@ type fakeReconcileEngine struct {
 
 func (f *fakeReconcileEngine) Execute(_ context.Context, q string) (*memqlengine.ExecuteResult, error) {
 	switch {
-	case strings.HasPrefix(q, "staleClusterNodes"):
+	case strings.Contains(q, "staleClusterNodes"):
 		if f.failNodes {
 			return nil, errors.New("node load boom")
 		}
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: f.nodes}}, nil
-	case strings.HasPrefix(q, "supersededDeployments"):
+	case strings.Contains(q, "supersededDeployments"):
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: f.deps}}, nil
-	case strings.HasPrefix(q, "updateNodeHealth"):
+	case strings.Contains(q, "updateNodeHealth"):
 		f.mutations = append(f.mutations, q)
 		return &memqlengine.ExecuteResult{}, nil
 	}
@@ -45,11 +45,11 @@ func (f *fakeReconcileEngine) retiredIDs(t *testing.T) []string {
 	t.Helper()
 	var ids []string
 	for _, m := range f.mutations {
-		if !strings.Contains(m, `"stopped"`) && !strings.Contains(m, `"health":"stopped"`) {
+		if !strings.Contains(m, `"stopped"`) && !strings.Contains(m, `health: "stopped"`) {
 			t.Fatalf("mutation is not a stopped transition: %s", m)
 		}
-		// Pull the "id":"<x>" value out of the JSON arg for assertion.
-		const key = `"id":"`
+		// Pull the id: "<x>" value out of the named-args call for assertion.
+		const key = `id: "`
 		i := strings.Index(m, key)
 		if i < 0 {
 			t.Fatalf("mutation has no id: %s", m)

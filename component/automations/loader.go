@@ -163,7 +163,6 @@ func (l *Loader) LoadAll() ([]*Automation, error) {
 		return nil, fmt.Errorf("walking embedded fs for .json: %w", err)
 	}
 
-
 	if l.logger != nil {
 		l.logger.Info("automations loaded",
 			"count", len(automations),
@@ -326,7 +325,7 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 		return nil, fmt.Errorf("invalid .memql syntax: '$steps.' is not allowed (use bare step references like 'stepId.result.X')")
 	}
 	if inlineStepBlockPattern.MatchString(source) {
-		return nil, fmt.Errorf("inline step blocks are no longer supported in .memql automations; use function-call syntax such as query({...}), mutation({...}), shape({...}), publishEvent({...}), or webhook({...})")
+		return nil, fmt.Errorf("inline step blocks are no longer supported in .memql automations; use kind-prefixed named-args call syntax such as query name(k: v), mutation name(k: v), builtin publishEvent(k: v), or webhook name(k: v)")
 	}
 
 	// Enforce architectural layering: reject direct query() and mutation() calls
@@ -337,9 +336,9 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 			"  - For mutations: see mutations/v1/ directory\n\n" +
 			"Examples:\n" +
 			"  Instead of: query({ query: \"concept==v1:agents:agent; ...\" })\n" +
-			"  Use: activeAgents({ tier: \"pro\" })\n\n" +
+			"  Use: query activeAgents(tier: \"pro\")\n\n" +
 			"  Instead of: mutation({ concept: \"v1:cognition:space\", ... })\n" +
-			"  Use: mutationCreateSpace({ name: \"My Space\", ... })")
+			"  Use: mutation mutationCreateSpace(name: \"My Space\")")
 	}
 
 	// Extract + strip first-class precondition blocks (Epic 4 / memql#2139)

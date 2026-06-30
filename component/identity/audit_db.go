@@ -57,7 +57,7 @@ func (s *EngineAuditSink) WriteAuditEvent(ctx context.Context, ev AuditEvent) er
 	// the wire payload and avoid passing empty strings through the
 	// mutation's args block.
 	var b strings.Builder
-	b.WriteString(`createAuditEvent({`)
+	b.WriteString(`mutation createAuditEvent(`)
 	writeKVString(&b, "eventId", eventId, true)
 	writeKVString(&b, "occurredAt", ev.OccurredAt.UTC().Format(time.RFC3339Nano), false)
 	writeKVString(&b, "category", string(ev.Category), false)
@@ -78,10 +78,10 @@ func (s *EngineAuditSink) WriteAuditEvent(ctx context.Context, ev AuditEvent) er
 	if detailJSON != "" {
 		// detail is an object, not a string. The DSL accepts the JSON
 		// literal inline.
-		b.WriteString(`,"detail":`)
+		b.WriteString(`,detail: `)
 		b.WriteString(detailJSON)
 	}
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.audit: execute createAuditEvent: %w", err)
@@ -118,15 +118,15 @@ func escapeMemQLString(s string) string {
 	return string(out)
 }
 
-// writeKVString writes a JSON-style `"key":"value"` pair. first=true
-// suppresses the leading comma.
+// writeKVString writes a named-arg `key: "value"` pair (#2335: the
+// kind-prefixed invocation form uses bare identifier keys, not the legacy
+// object-literal `"key":"value"`). first=true suppresses the leading comma.
 func writeKVString(b *strings.Builder, key, value string, first bool) {
 	if !first {
 		b.WriteByte(',')
 	}
-	b.WriteByte('"')
 	b.WriteString(key)
-	b.WriteString(`":"`)
+	b.WriteString(`: "`)
 	b.WriteString(escapeMemQLString(value))
 	b.WriteByte('"')
 }
@@ -139,15 +139,14 @@ func writeKVStringOpt(b *strings.Builder, key, value string) {
 	writeKVString(b, key, value, false)
 }
 
-// writeKVInt writes a JSON-style `"key":<int>` pair (no quotes around
-// the value). Mirrors writeKVString for numeric concept fields.
+// writeKVInt writes a named-arg `key: <int>` pair (#2335: bare identifier
+// key). Mirrors writeKVString for numeric concept fields.
 func writeKVInt(b *strings.Builder, key string, value int, first bool) {
 	if !first {
 		b.WriteByte(',')
 	}
-	b.WriteByte('"')
 	b.WriteString(key)
-	b.WriteString(`":`)
+	b.WriteString(`: `)
 	b.WriteString(strconv.Itoa(value))
 }
 

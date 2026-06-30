@@ -30,13 +30,13 @@ logic revokeExpiredDelegations {
     now string @required
   }
   body {
-    expiredDelegations := expiredActiveDelegations({ now: args.now })
+    expiredDelegations := expiredActiveDelegations( now: args.now )
     for item := range expiredDelegations.nodes() {
-      revokeStep := revokeDelegation({
+      revokeStep := revokeDelegation(
         delegationId: item.id,
         revokedBySubject: "system:expiry",
         revokedAt: args.now
-      })
+      )
     }
     return expiredDelegations.count()
   }
@@ -204,10 +204,10 @@ logic logicSample {
     event object @required
   }
   body {
-    planId := someQuery({ id: args.event.id })
+    planId := someQuery( id: args.event.id )
     if planId != "" {
-      workspaces := someQuery({ planId: planId })
-      teardown := someMutation({ planId: planId })
+      workspaces := someQuery( planId: planId )
+      teardown := someMutation( planId: planId )
     }
     return planId
   }
@@ -270,15 +270,15 @@ logic logicSample {
     event object @required
   }
   body {
-    planId := someQuery({ id: args.event.id })
+    planId := someQuery( id: args.event.id )
     if planId != "" {
-      workspaces := workspaceForPlan({ planId: planId })
+      workspaces := workspaceForPlan( planId: planId )
       for item := range workspaces.nodes() {
         flip := if item.payload.status == "provisioned" {
-          someMutation({ id: item.id })
+          someMutation( id: item.id )
         }
       }
-      teardown := workbenchTeardownDirectory({ planId: planId })
+      teardown := workbenchTeardownDirectory( planId: planId )
     }
     return planId
   }
@@ -334,9 +334,9 @@ logic logicSample {
   }
   body {
     if flag.enabled == true {
-      enabled := someQuery({})
+      enabled := someQuery()
     } else {
-      disabled := someOtherQuery({})
+      disabled := someOtherQuery()
     }
     return "done"
   }
@@ -407,10 +407,10 @@ logic logicSample {
     event object @required
   }
   body {
-    workspaces := queryFoo({ planId: "x" })
+    workspaces := queryFoo( planId: "x" )
     for item := range workspaces.nodes() {
       flip := if item.payload.status == "provisioned" {
-        mutationBar({ id: item.id, reason: "x" })
+        mutationBar( id: item.id, reason: "x" )
       }
     }
     return workspaces.count()
@@ -452,9 +452,9 @@ logic logicSample {
     now string @required
   }
   body {
-    rows := someQuery({ now: args.now })
+    rows := someQuery( now: args.now )
     for item := range rows.nodes() {
-      tick := someMutation({ id: item.id })
+      tick := someMutation( id: item.id )
     }
     return rows.count()
   }

@@ -247,7 +247,7 @@ func (s *engineRearmStore) LoadConstructsForOwner(ctx context.Context, owner, bu
 		UserId: owner,
 		Role:   auth.RoleWriter,
 	})
-	q := fmt.Sprintf(`authoringConstructsForBundle({"bundleId":%q})`, bundleId)
+	q := fmt.Sprintf(`query authoringConstructsForBundle(bundleId:%q)`, bundleId)
 	res, err := s.engine.Execute(authorCtx, q)
 	if err != nil {
 		return nil, err

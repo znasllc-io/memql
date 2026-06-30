@@ -35,7 +35,7 @@ func (r *Replier) loadResumeContext(ctx context.Context, taskId string) (string,
 	if taskId == "" || r.engine == nil {
 		return "", false
 	}
-	q := fmt.Sprintf(`taskStateById({taskId:%q})`, taskId)
+	q := fmt.Sprintf(`query taskStateById(taskId:%q)`, taskId)
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Debug("agent background: resume taskState lookup failed",

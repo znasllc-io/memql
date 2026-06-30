@@ -162,7 +162,7 @@ func (i *Integration) writeCallRecord(ctx context.Context, c openCall, dispositi
 // including the per-call cost estimate. Pure + unit-testable.
 func callRecordMutation(c openCall, durationSeconds int, disposition string, costEstimate float64) string {
 	return fmt.Sprintf(
-		`recordCall({direction: %q, fromE164: %q, toE164: %q, partitionId: %q, room: %q, carrier: %q, agentId: %q, durationSeconds: %d, disposition: %q, costEstimate: %g})`,
+		`mutation recordCall(direction: %q, fromE164: %q, toE164: %q, partitionId: %q, room: %q, carrier: %q, agentId: %q, durationSeconds: %d, disposition: %q, costEstimate: %g)`,
 		c.direction, c.fromE164, c.toE164, c.partitionID, c.room, "", c.agentID, durationSeconds, disposition, costEstimate,
 	)
 }

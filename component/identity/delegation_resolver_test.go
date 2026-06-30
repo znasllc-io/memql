@@ -44,7 +44,7 @@ func (f *fakeEngine) Execute(ctx context.Context, q string) (*memqlengine.Execut
 	matchers := f.matchers
 	f.mu.Unlock()
 	for _, m := range matchers {
-		if strings.HasPrefix(q, m.prefix) {
+		if strings.Contains(q, m.prefix) {
 			return m.handler()
 		}
 	}

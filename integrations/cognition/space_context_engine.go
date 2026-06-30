@@ -149,7 +149,7 @@ func (c *CognitionIntegration) getLatestSpaceContextSnapshot(ctx context.Context
 	// comparison path. Downstream extractDataFromResult sees the
 	// same `{"snapshot": <map>}` shape so the type-switch below is
 	// unchanged. Closes sub-epic #286; unblocks #250.
-	query := fmt.Sprintf(`queryLatestSpaceContextSnapshot({partitionId: %s})`, escapeJSONString(partitionId))
+	query := fmt.Sprintf(`query queryLatestSpaceContextSnapshot(partitionId: %s)`, escapeJSONString(partitionId))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		return nil, err
@@ -305,7 +305,7 @@ func (c *CognitionIntegration) computeSpaceContextSnapshot(ctx context.Context, 
 func (c *CognitionIntegration) loadParticipantsForContext(ctx context.Context, partitionId string) ([]map[string]any, error) {
 	// escapeJSONString (json.Marshal) supplies the quotes, so no literal
 	// quote remains in the format string (go/unsafe-quoting).
-	query := fmt.Sprintf(`spaceParticipants({partitionId: %s})`, escapeJSONString(partitionId))
+	query := fmt.Sprintf(`query spaceParticipants(partitionId: %s)`, escapeJSONString(partitionId))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		return nil, err

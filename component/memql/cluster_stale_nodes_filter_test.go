@@ -45,7 +45,7 @@ func TestQueryStaleClusterNodes_OlderThanPushdown(t *testing.T) {
 	eng := loadedStaleNodesEngine(t)
 
 	const cutoff = "2020-01-01T00:00:00Z"
-	plan, err := eng.Parse(`staleClusterNodes({olderThan: "` + cutoff + `"})`)
+	plan, err := eng.Parse(`staleClusterNodes(olderThan: "` + cutoff + `")`)
 	require.NoError(t, err)
 	require.NotNil(t, plan.Root)
 
@@ -70,7 +70,7 @@ func TestQueryStaleClusterNodes_OlderThanPushdown(t *testing.T) {
 func TestQueryStaleClusterNodes_NoOlderThan_DropsGuard(t *testing.T) {
 	eng := loadedStaleNodesEngine(t)
 
-	plan, err := eng.Parse(`staleClusterNodes({})`)
+	plan, err := eng.Parse(`staleClusterNodes()`)
 	require.NoError(t, err)
 	require.NotNil(t, plan.Root)
 

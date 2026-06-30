@@ -43,7 +43,7 @@ automation registerNode {
 		t.Fatalf("expected procedural automation rewrite; got %q", terseOut)
 	}
 	if !strings.Contains(terseOut, "logic registerNode { event: event }") &&
-		!strings.Contains(terseOut, "registerNode({ event: event })") {
+		!strings.Contains(terseOut, "registerNode(event: event)") {
 		t.Fatalf("expected the single logic step to forward event; got %q", terseOut)
 	}
 }

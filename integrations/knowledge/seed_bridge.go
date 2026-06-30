@@ -197,7 +197,7 @@ func (i *Integration) EnsureBridgeForAgent(
 
 	// Stamp the bridge metadata row.
 	createQuery := fmt.Sprintf(
-		`mutationCreateKnowledgeBridge({bridgeId: %s, roleSlug: %s, domainIds: %s, combinationKey: %s, chunkCount: %d, recipeVersion: %s, generatedAt: %s})`,
+		`mutation mutationCreateKnowledgeBridge(bridgeId: %s, roleSlug: %s, domainIds: %s, combinationKey: %s, chunkCount: %d, recipeVersion: %s, generatedAt: %s)`,
 		quoteString(bridgeId),
 		quoteString(roleSlug),
 		jsonArrayFromCleanedIds(domainIds),
@@ -223,7 +223,7 @@ func (i *Integration) EnsureBridgeForAgent(
 // bridgeExists returns true if a knowledgeBridge row with the
 // given id already exists in the active partition.
 func (i *Integration) bridgeExists(ctx context.Context, bridgeId string) (bool, error) {
-	q := fmt.Sprintf(`queryKnowledgeBridgeById({bridgeId: %s})`, quoteString(bridgeId))
+	q := fmt.Sprintf(`query queryKnowledgeBridgeById(bridgeId: %s)`, quoteString(bridgeId))
 	res, err := i.engine.Execute(ctx, q)
 	if err != nil {
 		return false, err
@@ -272,7 +272,7 @@ func (i *Integration) resolveBridgeInputs(
 			continue
 		}
 		// Fallback: query DB (user-created domain).
-		q := fmt.Sprintf(`queryKnowledgeDomainById({domainId: %s})`, quoteString(did))
+		q := fmt.Sprintf(`query queryKnowledgeDomainById(domainId: %s)`, quoteString(did))
 		res, err := i.engine.Execute(ctx, q)
 		if err != nil || res == nil || res.Bundle == nil || len(res.Bundle.Nodes) == 0 {
 			continue

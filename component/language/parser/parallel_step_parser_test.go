@@ -52,7 +52,7 @@ func parseAutomationErr_t(t *testing.T, src string) error {
 func TestParser_ParallelStep(t *testing.T) {
 	src := `
 func (Automation) gather(_ any) {
-  layer0 := parallel { wait: "any", failFast: true, branches: [ a := automationFetchA({ }) b := automationFetchB({ }) ] }
+  layer0 := parallel { wait: "any", failFast: true, branches: [ a := automationFetchA() b := automationFetchB() ] }
 }`
 	steps := parseAutomationSteps_t(t, src)
 	if len(steps) != 1 {
@@ -86,7 +86,7 @@ func (Automation) gather(_ any) {
 func TestParser_ParallelStep_Defaults(t *testing.T) {
 	src := `
 func (Automation) gather(_ any) {
-  layer0 := parallel { branches: [ a := automationFetchA({ }) ] }
+  layer0 := parallel { branches: [ a := automationFetchA() ] }
 }`
 	steps := parseAutomationSteps_t(t, src)
 	cfg := steps[0].Config.(*ParallelStepConfig)
@@ -100,7 +100,7 @@ func (Automation) gather(_ any) {
 func TestParser_ParallelStep_Gated(t *testing.T) {
 	src := `
 func (Automation) gather(_ any) {
-  layer1 := if steps.prep.status == "success" { parallel { branches: [ a := automationFetchA({ }) b := automationFetchB({ }) ] } }
+  layer1 := if steps.prep.status == "success" { parallel { branches: [ a := automationFetchA() b := automationFetchB() ] } }
 }`
 	steps := parseAutomationSteps_t(t, src)
 	step := steps[0]
@@ -120,7 +120,7 @@ func (Automation) gather(_ any) {
 func TestParser_ParallelStep_GatedBranch(t *testing.T) {
 	src := `
 func (Automation) gather(_ any) {
-  layer0 := parallel { branches: [ a := if steps.prep.status == "success" { automationFetchA({ }) } b := automationFetchB({ }) ] }
+  layer0 := parallel { branches: [ a := if steps.prep.status == "success" { automationFetchA() } b := automationFetchB() ] }
 }`
 	steps := parseAutomationSteps_t(t, src)
 	cfg := steps[0].Config.(*ParallelStepConfig)
@@ -141,7 +141,7 @@ func (Automation) gather(_ any) {
 func TestParser_ParallelStep_Nested(t *testing.T) {
 	src := `
 func (Automation) gather(_ any) {
-  layer0 := parallel { branches: [ inner := parallel { branches: [ x := automationFetchX({ }) ] } z := automationFetchZ({ }) ] }
+  layer0 := parallel { branches: [ inner := parallel { branches: [ x := automationFetchX() ] } z := automationFetchZ() ] }
 }`
 	steps := parseAutomationSteps_t(t, src)
 	cfg := steps[0].Config.(*ParallelStepConfig)
@@ -175,17 +175,17 @@ func TestParser_ParallelStep_Diagnostics(t *testing.T) {
 		},
 		{
 			name:    "bad wait value",
-			stmt:    `layer0 := parallel { wait: "sometimes", branches: [ a := automationFetchA({ }) ] }`,
+			stmt:    `layer0 := parallel { wait: "sometimes", branches: [ a := automationFetchA() ] }`,
 			wantErr: `invalid wait value "sometimes"`,
 		},
 		{
 			name:    "duplicate branch ids",
-			stmt:    `layer0 := parallel { branches: [ a := automationFetchA({ }) a := automationFetchB({ }) ] }`,
+			stmt:    `layer0 := parallel { branches: [ a := automationFetchA() a := automationFetchB() ] }`,
 			wantErr: `duplicate branch id "a"`,
 		},
 		{
 			name:    "unknown key",
-			stmt:    `layer0 := parallel { retries: 3, branches: [ a := automationFetchA({ }) ] }`,
+			stmt:    `layer0 := parallel { retries: 3, branches: [ a := automationFetchA() ] }`,
 			wantErr: `unknown key "retries"`,
 		},
 	}

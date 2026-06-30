@@ -261,7 +261,7 @@ func (c *CognitionIntegration) findAwaitingFeedbackPlanForSpace(ctx context.Cont
 	if c == nil || c.engine == nil || strings.TrimSpace(partitionId) == "" {
 		return nil
 	}
-	query := fmt.Sprintf(`plansForSpace({partitionId: "%s"})`, partitionId)
+	query := fmt.Sprintf(`query plansForSpace(partitionId: "%s")`, partitionId)
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		c.Logger.Debug("cognition: plansForSpace failed for feedback routing",
@@ -337,7 +337,7 @@ func (c *CognitionIntegration) attachPlanFeedback(ctx context.Context, planId, f
 	if strings.TrimSpace(planId) == "" {
 		return fmt.Errorf("planId is empty")
 	}
-	query := fmt.Sprintf(`attachPlanFeedback({planId: %s, feedback: %s})`,
+	query := fmt.Sprintf(`mutation attachPlanFeedback(planId: %s, feedback: %s)`,
 		escapeJSONString(planId), escapeJSONString(feedback))
 	if _, err := c.engine.Execute(ctx, query); err != nil {
 		return fmt.Errorf("execute attachPlanFeedback: %w", err)
@@ -369,7 +369,7 @@ func (c *CognitionIntegration) queryHasFeedbackAnnouncement(ctx context.Context,
 	if c == nil || c.engine == nil || strings.TrimSpace(planId) == "" {
 		return false
 	}
-	query := fmt.Sprintf(`feedbackAnnouncementForPlan({planId: %s})`, escapeJSONString(planId))
+	query := fmt.Sprintf(`query feedbackAnnouncementForPlan(planId: %s)`, escapeJSONString(planId))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		return false

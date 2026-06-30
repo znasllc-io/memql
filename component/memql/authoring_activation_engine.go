@@ -259,7 +259,7 @@ type engineActivationStore struct {
 }
 
 func (s *engineActivationStore) LoadBundle(ctx context.Context, bundleId string) (AuthoringBundleRow, error) {
-	q := fmt.Sprintf(`authoringBundleById({"bundleId":%q})`, bundleId)
+	q := fmt.Sprintf(`query authoringBundleById(bundleId:%q)`, bundleId)
 	res, err := s.engine.Execute(ctx, q)
 	if err != nil {
 		return AuthoringBundleRow{}, err
@@ -276,7 +276,7 @@ func (s *engineActivationStore) LoadBundle(ctx context.Context, bundleId string)
 }
 
 func (s *engineActivationStore) LoadConstructs(ctx context.Context, bundleId string) ([]AuthoringConstructRow, error) {
-	q := fmt.Sprintf(`authoringConstructsForBundle({"bundleId":%q})`, bundleId)
+	q := fmt.Sprintf(`query authoringConstructsForBundle(bundleId:%q)`, bundleId)
 	res, err := s.engine.Execute(ctx, q)
 	if err != nil {
 		return nil, err
@@ -300,12 +300,12 @@ func (s *engineActivationStore) LoadConstructs(ctx context.Context, bundleId str
 }
 
 func (s *engineActivationStore) SetBundleActive(ctx context.Context, bundleId string) error {
-	_, err := s.engine.Execute(ctx, fmt.Sprintf(`activateAuthoringBundle({"bundleId":%q})`, bundleId))
+	_, err := s.engine.Execute(ctx, fmt.Sprintf(`mutation activateAuthoringBundle(bundleId:%q)`, bundleId))
 	return err
 }
 
 func (s *engineActivationStore) SetBundleRetired(ctx context.Context, bundleId string) error {
-	_, err := s.engine.Execute(ctx, fmt.Sprintf(`retireAuthoringBundle({"bundleId":%q})`, bundleId))
+	_, err := s.engine.Execute(ctx, fmt.Sprintf(`mutation retireAuthoringBundle(bundleId:%q)`, bundleId))
 	return err
 }
 

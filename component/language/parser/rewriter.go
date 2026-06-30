@@ -2099,12 +2099,19 @@ func finishCall(name, rest string) (string, error) {
 		if closeRel < 0 {
 			return "", fmt.Errorf("call %q: missing closing brace", name)
 		}
-		args := rest[:closeRel+1]
 		tail := strings.TrimSpace(rest[closeRel+1:])
 		if tail != "" {
 			return "", fmt.Errorf("call %q: unexpected trailing text after args block: %q", name, tail)
 		}
-		return name + "(" + args + ")", nil
+		// Story 9 (#2335): emit the named-args invocation form `name(k: v, ...)`,
+		// NOT the legacy object-literal wrapper `name({ k: v })` -- the parser now
+		// rejects the wrapper. Strip the outer braces of the terse step block;
+		// nested object VALUES keep their braces. Empty block lowers to `name()`.
+		inner := strings.TrimSpace(rest[1:closeRel])
+		if inner == "" {
+			return name + "()", nil
+		}
+		return name + "(" + inner + ")", nil
 	default:
 		return "", fmt.Errorf("call %q: expected `(` or `{` after name, got %q", name, rest[:1])
 	}

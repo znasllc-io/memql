@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -639,11 +640,33 @@ func buildFunctionCallQuery(name string, args map[string]any) (string, error) {
 		return name + "()", nil
 	}
 
-	b, err := json.Marshal(args)
-	if err != nil {
-		return "", fmt.Errorf("function args json encode failed: %w", err)
+	// Story 9 (#2335): emit the named-args invocation form `name(k: v, ...)`,
+	// not the legacy object-literal wrapper `name({...})` (now rejected by the
+	// parser). Keys sorted for a deterministic call string; values JSON-encoded
+	// so the engine parser handles escaping. flattenPositionalArgs normalises
+	// both forms downstream, so this is behavior-preserving.
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
 	}
-	return fmt.Sprintf("%s(%s)", name, string(b)), nil
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString(name)
+	b.WriteByte('(')
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		v, err := json.Marshal(args[k])
+		if err != nil {
+			return "", fmt.Errorf("function args json encode failed: %w", err)
+		}
+		b.WriteString(k)
+		b.WriteString(": ")
+		b.Write(v)
+	}
+	b.WriteByte(')')
+	return b.String(), nil
 }
 
 // substituteArgsInQuery replaces $args.<key> references with raw

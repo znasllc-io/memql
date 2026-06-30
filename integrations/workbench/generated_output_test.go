@@ -125,7 +125,7 @@ func TestPromoteWorkbenchOutput_ResolvesPlanOwner(t *testing.T) {
 	if len(ce.queries) != 1 {
 		t.Fatalf("expected exactly one planById call, got %d: %v", len(ce.queries), ce.queries)
 	}
-	if !strings.HasPrefix(ce.queries[0], "planById(") {
+	if !strings.HasPrefix(ce.queries[0], "query planById(") {
 		t.Errorf("expected planById, got %q", ce.queries[0])
 	}
 	if !strings.Contains(ce.queries[0], "plan-1") {
@@ -231,7 +231,7 @@ func TestUploadAttachmentBytes_HappyPath(t *testing.T) {
 		t.Errorf("uploader not invoked with the bytes: calls=%d bytes=%d", up.calls, up.lastBytes)
 	}
 	// A mutationCreateAttachment must have been issued carrying the id + URL.
-	if len(ce.queries) != 1 || !strings.HasPrefix(ce.queries[0], "mutationCreateAttachment(") {
+	if len(ce.queries) != 1 || !strings.HasPrefix(ce.queries[0], "mutation mutationCreateAttachment(") {
 		t.Fatalf("expected mutationCreateAttachment, got %v", ce.queries)
 	}
 	if !strings.Contains(ce.queries[0], attID) || !strings.Contains(ce.queries[0], "gs://test-bucket/obj") {

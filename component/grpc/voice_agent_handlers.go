@@ -344,7 +344,7 @@ func resolveGroupGAAgentIdVia(ctx context.Context, engine voiceParticipantResolv
 		return ""
 	}
 	canonicalSpaceJSON, _ := json.Marshal(canonicalSpace)
-	query := fmt.Sprintf(`groupGAForSpace({partitionId: %s})`, string(canonicalSpaceJSON))
+	query := fmt.Sprintf(`query groupGAForSpace(partitionId: %s)`, string(canonicalSpaceJSON))
 	result, err := engine.Execute(ctx, query)
 	if err != nil || result == nil {
 		if logger != nil {
@@ -447,7 +447,7 @@ func resolveChannelOverrideMode(s *streamSession, partitionId, agentId, channel 
 	// Marshal partitionId so an embedded double quote cannot break out of the DSL
 	// string literal.
 	partitionIdJSON, _ := json.Marshal(partitionId)
-	overrideQuery := fmt.Sprintf(`%s({partitionId: %s})`, queryName, string(partitionIdJSON))
+	overrideQuery := fmt.Sprintf(`query %s(partitionId: %s)`, queryName, string(partitionIdJSON))
 	result, err := s.service.engine.Execute(ctx, overrideQuery)
 	if err != nil {
 		return "", false
@@ -493,7 +493,7 @@ type agentRecordFields struct {
 // escaped literal token, dropped straight into the named-query arg.
 func queryAgentByIdQuery(agentId string) string {
 	agentIdJSON, _ := json.Marshal(agentId)
-	return fmt.Sprintf(`agentById({agentId: %s})`, string(agentIdJSON))
+	return fmt.Sprintf(`query agentById(agentId: %s)`, string(agentIdJSON))
 }
 
 // resolveAgentSessionRecord loads the GA's persona identity + channel-control
@@ -588,7 +588,7 @@ func resolveVoiceSpaceContextVia(ctx context.Context, engine voiceParticipantRes
 
 	// Space name + goal statement off the space row (spaceFull projects name +
 	// goal).
-	if result, err := engine.Execute(ctx, fmt.Sprintf(`querySpaceMeta({partitionId: %s})`, string(spaceJSON))); err == nil && result != nil {
+	if result, err := engine.Execute(ctx, fmt.Sprintf(`query querySpaceMeta(partitionId: %s)`, string(spaceJSON))); err == nil && result != nil {
 		payload := result.OutputPayload()
 		out.name, _ = extractFirstAgentField(payload, "name")
 		out.purpose = extractSpaceGoalStatement(payload)
@@ -596,7 +596,7 @@ func resolveVoiceSpaceContextVia(ctx context.Context, engine voiceParticipantRes
 
 	// Human participant display names. Reuse the existing spaceParticipants
 	// path the speaker-attribution fallback uses.
-	if result, err := engine.Execute(ctx, fmt.Sprintf(`spaceParticipants({partitionId: %s, participantType: "human", status: "active"})`, string(spaceJSON))); err == nil && result != nil {
+	if result, err := engine.Execute(ctx, fmt.Sprintf(`query spaceParticipants(partitionId: %s, participantType: "human", status: "active")`, string(spaceJSON))); err == nil && result != nil {
 		out.participantNames = extractParticipantNames(result.OutputPayload())
 	}
 
@@ -626,7 +626,7 @@ func resolveVoiceSpaceOwnerVia(ctx context.Context, engine voiceParticipantResol
 		canonicalSpace = partitionId
 	}
 	spaceJSON, _ := json.Marshal(canonicalSpace)
-	result, err := engine.Execute(ctx, fmt.Sprintf(`querySpaceMeta({partitionId: %s})`, string(spaceJSON)))
+	result, err := engine.Execute(ctx, fmt.Sprintf(`query querySpaceMeta(partitionId: %s)`, string(spaceJSON)))
 	if err != nil || result == nil {
 		return ""
 	}
@@ -753,7 +753,7 @@ func resolveAgentAvatarPersona(s *streamSession, agentId, requestedVendor string
 	if strings.HasPrefix(stampedId, voiceAvatarPersonaCatalogPrefix) {
 		catalogIdJSON, _ := json.Marshal(stampedId)
 		raw, err := s.service.engine.Execute(ctx,
-			fmt.Sprintf(`avatarPersonaById({avatarPersonaId: %s})`, string(catalogIdJSON)))
+			fmt.Sprintf(`query avatarPersonaById(avatarPersonaId: %s)`, string(catalogIdJSON)))
 		if err != nil {
 			if s.logger != nil {
 				s.logger.Warn("voice-agent avatar persona: catalog hydrate failed -- audio-only",
@@ -770,7 +770,7 @@ func resolveAgentAvatarPersona(s *streamSession, agentId, requestedVendor string
 	}
 
 	// 3. Catalog default for unstamped (or vendor-mismatched) agents.
-	raw, err := s.service.engine.Execute(ctx, `avatarPersonas({})`)
+	raw, err := s.service.engine.Execute(ctx, `query avatarPersonas()`)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("voice-agent avatar persona: catalog default lookup failed -- audio-only",
@@ -1910,7 +1910,7 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 		partitionIdJSON, _ := json.Marshal(partitionId)
 		speakerIdJSON, _ := json.Marshal(speakerId)
 		inputMethodJSON, _ := json.Marshal(inputMethod)
-		query := fmt.Sprintf(`sendTextUtterance({utteranceId: %s, partitionId: %s, participantId: %s, text: %s, source: {inputMethod: %s, pipeline: "voice-agent"}})`,
+		query := fmt.Sprintf(`mutation sendTextUtterance(utteranceId: %s, partitionId: %s, participantId: %s, text: %s, source: {inputMethod: %s, pipeline: "voice-agent"})`,
 			string(utteranceIdJSON), string(partitionIdJSON), string(speakerIdJSON), string(textJSON), string(inputMethodJSON))
 
 		ctx := contextWithVoiceAgentActor(context.Background())
@@ -2445,7 +2445,7 @@ func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlCl
 		partitionIdJSON, _ := json.Marshal(partitionId)
 		participantIdJSON, _ := json.Marshal(participantId)
 		query := fmt.Sprintf(
-			`sendTextUtterance({utteranceId: %s, partitionId: %s, participantId: %s, participantType: "si", text: %s%s, source: %s%s})`,
+			`mutation sendTextUtterance(utteranceId: %s, partitionId: %s, participantId: %s, participantType: "si", text: %s%s, source: %s%s)`,
 			string(utteranceIdJSON), string(partitionIdJSON), string(participantIdJSON),
 			string(textJSON), replyToClause, string(sourceJSON), citationsClause,
 		)
@@ -2486,7 +2486,7 @@ func (s *streamSession) resolveAIParticipantId(ctx context.Context, partitionId 
 		return ""
 	}
 	spaceJSON, _ := json.Marshal(partitionId)
-	query := fmt.Sprintf(`siParticipantForSpace({partitionId: %s})`, string(spaceJSON))
+	query := fmt.Sprintf(`query siParticipantForSpace(partitionId: %s)`, string(spaceJSON))
 	result, err := s.service.engine.Execute(ctx, query)
 	if err != nil {
 		if s.logger != nil {
@@ -2729,7 +2729,7 @@ func resolveSingleActiveHumanParticipantId(ctx context.Context, engine voicePart
 	// JSON-marshal the interpolated id so an embedded double quote cannot
 	// break out of the DSL string literal.
 	spaceJSON, _ := json.Marshal(canonicalSpace)
-	query := fmt.Sprintf(`spaceParticipants({partitionId: %s, participantType: "human", status: "active"})`, string(spaceJSON))
+	query := fmt.Sprintf(`query spaceParticipants(partitionId: %s, participantType: "human", status: "active")`, string(spaceJSON))
 	result, err := engine.Execute(ctx, query)
 	if err != nil {
 		return "", fmt.Errorf("query active human participants: %w", err)

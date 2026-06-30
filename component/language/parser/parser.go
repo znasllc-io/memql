@@ -5298,6 +5298,21 @@ func (p *Parser) parseFunctionCall(name string) (ExpressionNode, error) {
 		return nil, err
 	}
 
+	// Story 9 (#2335): reject the legacy object-literal argument wrapper
+	// `name({...})` / `name({})`. The kind-prefixed invocation form passes
+	// named args directly in the parens (`name(k: v, ...)`, empty = `name()`).
+	// A single positional argument that is an object literal IS the removed
+	// wrapper; colon-named / `=`-named args, bare positional primitive args,
+	// and nested object VALUES (`payload: { ... }`) all stay valid because
+	// they never produce a lone positional object here.
+	if len(args) == 0 && len(argList) == 1 {
+		if _, isObjectLiteral := argList[0].(map[string]any); isObjectLiteral {
+			return nil, newParseErrorf(&p.current,
+				"object-literal call args are removed; pass named args directly: %s(k: v, ...), empty = %s() (was: %s({...}))",
+				name, name, name)
+		}
+	}
+
 	// If we have positional args, add them to the map
 	for i, arg := range argList {
 		args[strconv.Itoa(i)] = arg

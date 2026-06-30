@@ -266,7 +266,7 @@ func NewEnginePlanWriter(exec Executor) *EnginePlanWriter {
 // createHarnessPlan.
 func (w *EnginePlanWriter) CreatePlan(ctx context.Context, planID, goal string, input map[string]any) error {
 	q := fmt.Sprintf(
-		`createHarnessPlan({planId:%q, goal:%q, input:%s})`,
+		`mutation createHarnessPlan(planId:%q, goal:%q, input:%s)`,
 		planID, goal, mustJSON(input),
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
@@ -279,7 +279,7 @@ func (w *EnginePlanWriter) CreatePlan(ctx context.Context, planID, goal string, 
 // addHarnessStep, carrying its dependsOn DAG in-edges.
 func (w *EnginePlanWriter) AddStep(ctx context.Context, step NewStep) error {
 	q := fmt.Sprintf(
-		`addHarnessStep({stepId:%q, planId:%q, title:%q, idempotencyKey:%q, dependsOn:%s, input:%s})`,
+		`mutation addHarnessStep(stepId:%q, planId:%q, title:%q, idempotencyKey:%q, dependsOn:%s, input:%s)`,
 		step.ID, step.PlanID, step.Title, step.IdempotencyKey,
 		mustJSONSlice(step.DependsOn), mustJSON(step.Input),
 	)
@@ -326,7 +326,7 @@ func (w *EnginePlanWriter) AssignAgent(ctx context.Context, step NewStep, agentI
 // recordHarnessObservation.
 func (w *EnginePlanWriter) RecordDecision(ctx context.Context, obs Observation) error {
 	q := fmt.Sprintf(
-		`recordHarnessObservation({stepId:%q, planId:%q, kind:%q, content:%q, data:%s})`,
+		`mutation recordHarnessObservation(stepId:%q, planId:%q, kind:%q, content:%q, data:%s)`,
 		obs.StepID, obs.PlanID, obs.Kind, obs.Content, mustJSON(obs.Data),
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
@@ -376,7 +376,7 @@ func (f *EngineAgentFactory) CreateAgent(ctx context.Context, spec ComposedAgent
 		"originatingPlanId": originatingPlanID,
 	}
 	q := fmt.Sprintf(
-		`createAgent({agentId:%q, ownerUserId:%q, name:%q, description:%q, personality:%q, role:%q, roleSlug:%q, kind:%q, capabilities:%s})`,
+		`mutation createAgent(agentId:%q, ownerUserId:%q, name:%q, description:%q, personality:%q, role:%q, roleSlug:%q, kind:%q, capabilities:%s)`,
 		agentID, ownerUserID, spec.Name, spec.Description, spec.SystemPrompt,
 		"specialist", spec.RoleSlug, "specialist", capabilitiesJSON,
 	)
@@ -391,7 +391,7 @@ func (f *EngineAgentFactory) CreateAgent(ctx context.Context, spec ComposedAgent
 		"tools":            spec.Tools,
 	}
 	if _, err := f.exec.Execute(ctx, fmt.Sprintf(
-		`updateAgent({agentId:%q, payload:%s})`, agentID, mustJSONAny(upd),
+		`mutation updateAgent(agentId:%q, payload:%s)`, agentID, mustJSONAny(upd),
 	)); err != nil {
 		// Non-fatal: the agent exists; lineage/capability stamping is best
 		// effort. The roster falls back to keywords for the capability text.
@@ -410,7 +410,7 @@ func (f *EngineAgentFactory) UpgradeAgent(ctx context.Context, agentID string, n
 		"tools":            newTools,
 	}
 	q := fmt.Sprintf(
-		`updateAgent({agentId:%q, payload:%s})`, agentID, mustJSONAny(upd),
+		`mutation updateAgent(agentId:%q, payload:%s)`, agentID, mustJSONAny(upd),
 	)
 	if _, err := f.exec.Execute(ctx, q); err != nil {
 		return fmt.Errorf("upgrade agent %q: %w", agentID, err)

@@ -138,7 +138,7 @@ func buildOutputMutationQuery(args map[string]any) string {
 	}
 	sort.Strings(keys)
 	var b strings.Builder
-	b.WriteString("insertOutputScreening({")
+	b.WriteString("mutation insertOutputScreening(")
 	for i, k := range keys {
 		if i > 0 {
 			b.WriteString(", ")
@@ -148,6 +148,6 @@ func buildOutputMutationQuery(args map[string]any) string {
 		v, _ := json.Marshal(args[k])
 		b.Write(v)
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }

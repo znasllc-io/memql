@@ -61,7 +61,7 @@ func runObjectLiteralReturn(t *testing.T, e *Env) {
 	src := `logic objLitReturnProbe {
   args { event object @required }
   body {
-    found := participantSession({ participantId: args.event.payload.id })
+    found := query participantSession(participantId: args.event.payload.id)
     return { wasEmpty: found.empty(), pid: args.event.payload.id, lit: "constant" }
   }
 }`

@@ -48,6 +48,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -307,7 +309,7 @@ func (d *ResponsibilityIntakeDispatcher) invokeIntake(ctx context.Context, state
 // --- loaders --------------------------------------------------------------
 
 func (d *ResponsibilityIntakeDispatcher) loadResponsibility(ctx context.Context, id string) (map[string]any, error) {
-	q := fmt.Sprintf(`responsibilityById({responsibilityId:%q})`, id)
+	q := fmt.Sprintf(`query responsibilityById(responsibilityId:%q)`, id)
 	res, err := d.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
@@ -322,7 +324,7 @@ func (d *ResponsibilityIntakeDispatcher) loadResponsibility(ctx context.Context,
 // --- mutations ------------------------------------------------------------
 
 func (d *ResponsibilityIntakeDispatcher) markPending(ctx context.Context, id string) error {
-	q := fmt.Sprintf(`markResponsibilityIntakePending({responsibilityId:%q})`, id)
+	q := fmt.Sprintf(`mutation markResponsibilityIntakePending(responsibilityId:%q)`, id)
 	_, err := d.engine.Execute(systemActorContext(ctx), q)
 	return err
 }
@@ -557,14 +559,35 @@ func buildAnswerList(row map[string]any) []map[string]any {
 }
 
 // encodeArgs renders a MemQL named-argument object literal from a Go map.
-// The DSL accepts JSON-shaped object literals as the single positional
-// argument to a mutation/query; json.Marshal produces exactly that. Mirrors
-// the inline fmt-built arg strings elsewhere in this package, but handles
-// nested objects (condition / intakeRequest) without manual quoting.
+// encodeArgs renders a mutation/query argument map as the named-args
+// invocation body `k: v, ...` (Story 9 / #2335: NOT the legacy object-literal
+// wrapper `{...}` -- the parser rejects it). It is always used as the FULL
+// argument list of a `name(<encodeArgs(args)>)` call, so the braces are
+// dropped; nested object VALUES keep their JSON braces via json.Marshal. Keys
+// sorted for a deterministic call string. Empty map renders "" -> `name()`.
 func encodeArgs(args map[string]any) string {
-	b, err := json.Marshal(args)
-	if err != nil || string(b) == "null" {
-		return "{}"
+	if len(args) == 0 {
+		return ""
 	}
-	return string(b)
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	first := true
+	for _, k := range keys {
+		v, err := json.Marshal(args[k])
+		if err != nil {
+			continue
+		}
+		if !first {
+			b.WriteString(", ")
+		}
+		first = false
+		b.WriteString(k)
+		b.WriteString(": ")
+		b.Write(v)
+	}
+	return b.String()
 }

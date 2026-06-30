@@ -220,7 +220,7 @@ type roleSnapshot struct {
 // match/extend dedupe targets for a user goal. The schema default
 // is "user" so legacy rows pre-dating the kind field are kept.
 func (i *Integration) loadExistingAgents(ctx context.Context, ownerUserId string) []agentSnapshot {
-	query := fmt.Sprintf(`activeAgentsForUser({ownerUserId: %q})`, ownerUserId)
+	query := fmt.Sprintf(`query activeAgentsForUser(ownerUserId: %q)`, ownerUserId)
 	raw, err := i.engine.Execute(ctx, query)
 	if err != nil || raw == nil {
 		return nil
@@ -349,7 +349,7 @@ func (i *Integration) extendAgent(ctx context.Context, ownerUserId string, exist
 	if err != nil {
 		return agentSnapshot{}, fmt.Errorf("marshal update payload: %w", err)
 	}
-	query := fmt.Sprintf(`updateAgent({agentId: %q, payload: %s})`, target.Id, string(payloadJSON))
+	query := fmt.Sprintf(`mutation updateAgent(agentId: %q, payload: %s)`, target.Id, string(payloadJSON))
 	if _, err := i.engine.Execute(ctx, query); err != nil {
 		return agentSnapshot{}, fmt.Errorf("execute updateAgent: %w", err)
 	}
