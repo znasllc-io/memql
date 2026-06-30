@@ -76,7 +76,7 @@ spec participant isAIParticipant {
 // A caller predicate binds an @actor shape (the only gateway to the auth
 // envelope) and reads the projected key BARE. The engine classifies it as
 // a context-spec: it evaluates in-process against the auth envelope, not
-// pushed to SQL. Invoke it via spec("name") for caller-based checks.
+// pushed to SQL. Invoke it via the `spec <name>` predicate form for caller-based checks.
 //
 //     @actor
 //     shape actorEnvelope { actor.userId; actor.role; actor.isClusterOwner }
@@ -149,12 +149,12 @@ trait statusIsActive {
 //
 //   @actor shape binding
 //     -> CONTEXT-SPEC. Evaluates in-process against the auth envelope.
-//        Invoked via spec("name").
+//        Invoked via the `spec <name>` predicate form.
 //
 // The old "mixed body" rejection is obsolete: one binding = one surface,
 // so a body can no longer mix row + caller references by construction. To
 // predicate on BOTH row and caller data, compose a row-spec (in the query
-// filter) with a context-spec (via spec("name")) at the call site.
+// filter) with a context-spec (via `spec <name>`) at the call site.
 
 // =============================================================================
 //   7. Access legality (the whole contract in one table)
@@ -201,7 +201,7 @@ spec agent richPredicate {
 //           shape  participantFull
 //         }
 //
-//   - Via spec("name"): a caller-context boolean check. A context-spec
+//   - Via `spec <name>`: a caller-context boolean check. A context-spec
 //     (an @actor-shape binding) is the canonical in-process gate (e.g. the
 //     per-row-authz admin gate). The decision-policy tier that once hosted
 //     these in a `policy` body is retired (#984); the live `policy`

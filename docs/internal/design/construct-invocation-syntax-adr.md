@@ -214,5 +214,22 @@ Stories under epic [#2322](https://github.com/znasllc-io/memql/issues/2322):
 ADR (1) -> parser kind-prefixed invocation + named args + spec predicate (2) ->
 capability declaration + imports (5) -> body-rule enforcement (6) -> tree-wide
 migration (3) -> simplified action (4) -> reference skeletons + construct matrix
-(7). Story 8 (catalog + resolver) is deferred. On completion,
-`CONSTRUCT_INVOCATION_SYNTAX_HANDOFF.md` is deleted.
+(7). On completion, `CONSTRUCT_INVOCATION_SYNTAX_HANDOFF.md` is deleted.
+
+**Deferred / split-out follow-ups.** Two pieces are tracked as their own issues
+rather than blocking the epic:
+
+- **Reject the legacy forms** ([#2335](https://github.com/znasllc-io/memql/issues/2335)).
+  The parser currently accepts BOTH the new kind-prefixed/named-args forms AND
+  the legacy `name({...})` / `spec("...")` forms (additive). The `.memql` tree is
+  fully migrated (Story 3), but *rejecting* the legacy object-literal form also
+  requires migrating ~300 hand-written Go DSL-builder sites + a 208-site
+  generated SDK that build DSL programmatically and re-parse it at runtime --
+  larger and riskier than the DSL tree, so it is split out. Until #2335 lands,
+  the parser stays additive and the "empty = `()` / legacy rejected" DoD item is
+  carried there (it also adds the semantic "construct call must carry its kind
+  prefix" cross-ref check).
+- **Capability catalog + surface resolver** ([#2330](https://github.com/znasllc-io/memql/issues/2330),
+  the original Story 8). The full `fs.*`/`shell.*`/`http.*`/`integration.*`/`mcp.*`
+  vocabulary and the capability->surface coverage/resolver. Capability-arg
+  type-checking stays lenient until this lands.
