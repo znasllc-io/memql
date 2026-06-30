@@ -10,17 +10,17 @@ logic purgeExpiredSafetyClassifications {
     event object @required
   }
   body {
-    allRows := allSafetyClassifications({})
-    retentionDays := globalVariable({ name: "MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS" })
+    allRows := query allSafetyClassifications()
+    retentionDays := query globalVariable( name: "MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS" )
 
-    emitObservation := publishEvent({
+    emitObservation := publishEvent(
       topic: "safety.classification.retention.observed",
       payload: {
         candidateCount: allRows.count(),
         retentionDays: coalesce(retentionDays.first().payload.value, "90"),
         timestamp: now
       }
-    })
+    )
 
     return allRows.count()
   }
@@ -33,17 +33,17 @@ logic purgeExpiredOutputScreenings {
     event object @required
   }
   body {
-    allRows := allOutputScreenings({})
-    retentionDays := globalVariable({ name: "MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS" })
+    allRows := query allOutputScreenings()
+    retentionDays := query globalVariable( name: "MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS" )
 
-    emitObservation := publishEvent({
+    emitObservation := publishEvent(
       topic: "safety.outputScreening.retention.observed",
       payload: {
         candidateCount: allRows.count(),
         retentionDays: coalesce(retentionDays.first().payload.value, "90"),
         timestamp: now
       }
-    })
+    )
 
     return allRows.count()
   }

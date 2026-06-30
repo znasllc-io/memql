@@ -40,38 +40,38 @@ use cluster.mutations.{ createCluster, createDatabase, createIdentityProvider, c
 @description("Bootstrap cluster, database, and identity provider records on first startup")
 automation bootstrapCluster {
   step decide {
-    logic bootstrapCluster {
+    logic bootstrapCluster (
       event: event
-    }
+    )
   }
   step database {
     if steps.decide.result == true {
-      createDatabase {
+      mutation createDatabase (
         host:    coalesce(event.payload.database.host, "localhost"),
         dbName:  coalesce(event.payload.database.dbName, "memql"),
         sslMode: coalesce(event.payload.database.sslMode, "disable")
-      }
+      )
     }
   }
   step identityProvider {
     if steps.decide.result == true && exists(payload.identityProvider) {
-      createIdentityProvider {
+      mutation createIdentityProvider (
         name:           coalesce(event.payload.identityProvider.name, "memql-identity"),
         issuerUrl:      coalesce(event.payload.identityProvider.issuerUrl, ""),
         clientIdPrefix: coalesce(event.payload.identityProvider.clientIdPrefix, ""),
         redirectUrl:    coalesce(event.payload.identityProvider.redirectUrl, "")
-      }
+      )
     }
   }
   step cluster {
     if steps.decide.result == true {
-      createCluster {
+      mutation createCluster (
         name:        "development",
         environment: "development",
         region:      "local",
         provider:    coalesce(event.payload.provider, ""),
         version:     coalesce(event.payload.node.version, "")
-      }
+      )
     }
   }
 }
@@ -89,12 +89,12 @@ automation bootstrapCluster {
 @description("Record node shutdown in the database")
 automation deregisterNode {
   step persist {
-    createSpawnEvent {
+    mutation createSpawnEvent (
       nodeId:   coalesce(event.payload.node.id, ""),
       nodeType: coalesce(event.payload.node.type, ""),
       action:   "stopped",
       reason:   "system.shutdown"
-    }
+    )
   }
 }
 
@@ -114,7 +114,7 @@ automation deregisterNode {
 @description("Register this node in the database on startup")
 automation registerNode {
   step node {
-    createNode {
+    mutation createNode (
       id:           coalesce(event.payload.node.id, ""),
       nodeType:     coalesce(event.payload.node.type, ""),
       address:      coalesce(event.payload.node.address, ""),
@@ -122,15 +122,15 @@ automation registerNode {
       provider:     coalesce(event.payload.provider, ""),
       environment:  coalesce(event.payload.environment, ""),
       region:       coalesce(event.payload.region, "")
-    }
+    )
   }
   step spawn {
-    createSpawnEvent {
+    mutation createSpawnEvent (
       nodeId:   coalesce(event.payload.node.id, ""),
       nodeType: coalesce(event.payload.node.type, ""),
       action:   "spawned",
       reason:   "system.startup"
-    }
+    )
   }
 }
 
@@ -151,9 +151,9 @@ automation registerNode {
 @description("Every 10 min: mark departed cluster nodes (lastSeen older than MEMQL_NODE_STALE_PRUNE_MINUTES, default 30) as health='stopped'.")
 automation pruneStaleClusterNodes {
   step decide {
-    logic pruneStaleClusterNodes {
+    logic pruneStaleClusterNodes (
       event: event
-    }
+    )
   }
   step prune {
     forEach node in decide.result {

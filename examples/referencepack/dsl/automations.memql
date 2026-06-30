@@ -39,6 +39,6 @@ automation referencePackGreetOnSpaceCreate {
     description: "The created space must carry the owner id the greeting targets."
   }
   step greet {
-    referencePackComposeGreeting { userName: event.payload.ownerUserId }
+    builtin referencePackComposeGreeting ( userName: event.payload.ownerUserId )
   }
 }

@@ -9,7 +9,7 @@
 // from the auth context.
 
 @enabled
-@handler(type="query", query="todos({done: $args.done})")
+@handler(type="query", query="query todos(done: $args.done)")
 @executionTime("fast")
 @description("List the caller's to-dos. Optional done filter narrows to open (false) or completed (true) items; omit it to list all. Read-only.")
 @mcp
@@ -31,7 +31,7 @@ tool todosCreate {
 }
 
 @enabled
-@handler(type="query", query="completeTodo({todoId: \"$args.todoId\", payload: $args.payload})")
+@handler(type="query", query="mutation completeTodo(todoId: \"$args.todoId\", payload: $args.payload)")
 @executionTime("fast")
 @description("Mark a to-do complete (or re-open it). Pass the full updated payload with the done flag set; build it from the current row (via todosList) and flip done. Owned: ownership is re-enforced server-side.")
 @mcp
@@ -41,7 +41,7 @@ tool todosComplete {
 }
 
 @enabled
-@handler(type="query", query="updateTodo({todoId: \"$args.todoId\", payload: $args.payload})")
+@handler(type="query", query="mutation updateTodo(todoId: \"$args.todoId\", payload: $args.payload)")
 @executionTime("fast")
 @description("Update a to-do's fields (title / dueAt / priority). Pass the full merged payload built from the current row plus the changed fields. Owned: ownership is re-enforced server-side.")
 @mcp

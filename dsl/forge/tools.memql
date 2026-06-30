@@ -35,7 +35,7 @@ tool forgeRegisterProject {
 }
 
 @enabled
-@handler(type="query", query="activeProjects({})")
+@handler(type="query", query="query activeProjects()")
 @executionTime("fast")
 @description("List the active forge projects. Use this to resolve a projectId before submitting a request.")
 @allowedRoles("owner", "admin", "developer", "writer", "reader")
@@ -43,7 +43,7 @@ tool forgeRegisterProject {
 tool forgeActiveProjects {}
 
 @enabled
-@handler(type="query", query="projectBySlug({slug: \"$args.slug\"})")
+@handler(type="query", query="query projectBySlug(slug: \"$args.slug\")")
 @executionTime("fast")
 @description("Resolve a forge project by its human-readable slug (e.g. 'memql', 'copresent-acme') to the full project row including its id. Use this when the caller says a project name in natural language so you can obtain the projectId for subsequent requests. Slugs are unique within the caller's partition (tenant), so this always returns at most one project.")
 @allowedRoles("owner", "admin", "developer", "writer", "reader")
@@ -70,7 +70,7 @@ tool forgeSubmitRequest {
 }
 
 @enabled
-@handler(type="query", query="myRequests({})")
+@handler(type="query", query="query myRequests()")
 @executionTime("fast")
 @description("List the caller's own submitted requests, newest first.")
 @allowedRoles("owner", "admin", "developer", "writer", "reader")
@@ -78,7 +78,7 @@ tool forgeSubmitRequest {
 tool forgeMyRequests {}
 
 @enabled
-@handler(type="query", query="requestById({requestId: \"$args.requestId\"})")
+@handler(type="query", query="query requestById(requestId: \"$args.requestId\")")
 @executionTime("fast")
 @description("Get a single forge request by id (full detail).")
 @allowedRoles("owner", "admin", "developer", "writer", "reader")
@@ -88,7 +88,7 @@ tool forgeRequestById {
 }
 
 @enabled
-@handler(type="query", query="requestEvents({requestId: \"$args.requestId\"})")
+@handler(type="query", query="query requestEvents(requestId: \"$args.requestId\")")
 @executionTime("fast")
 @description("Get the full lifecycle/audit trail for a request (submitted, routed, validated, approved, ...), newest first.")
 @allowedRoles("owner", "admin", "developer", "writer")
@@ -100,7 +100,7 @@ tool forgeRequestHistory {
 // ----- developer/owner queues + transitions -----
 
 @enabled
-@handler(type="query", query="validationQueue({})")
+@handler(type="query", query="query validationQueue()")
 @executionTime("fast")
 @description("List requests awaiting first-line developer validation. Developer/owner only -- returns empty for others.")
 @allowedRoles("owner", "admin", "developer", "writer")
@@ -118,7 +118,7 @@ tool forgeValidateRequest {
 }
 
 @enabled
-@handler(type="query", query="approvalQueue({})")
+@handler(type="query", query="query approvalQueue()")
 @executionTime("fast")
 @description("List validated requests awaiting owner approval. Owner only -- returns empty for others.")
 @allowedRoles("owner", "admin", "developer", "writer")

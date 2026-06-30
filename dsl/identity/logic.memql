@@ -37,7 +37,7 @@ logic accessRequestExpirySweep {
     event object @required
   }
   body {
-  pending := expiredPendingAccessRequests({})
+  pending := query expiredPendingAccessRequests()
   return pending.nodes()
   }
 }
@@ -69,11 +69,11 @@ logic accountDeletionReminder25Days {
     event object @required
   }
   body {
-  candidates := usersInDeletionCooldown({})
+  candidates := query usersInDeletionCooldown()
 
   for item := range candidates.nodes() {
     emitReminder := if addDuration(item.payload.deletionScheduledAt, "P25D") < now && addDuration(item.payload.deletionScheduledAt, "P26D") >= now {
-      publishEvent({
+      publishEvent(
         topic: "identity.deletion.reminder",
         payload: {
           userId: item.id,
@@ -83,7 +83,7 @@ logic accountDeletionReminder25Days {
           subject: "Final notice: your <BRAND_NAME> account will be deleted in 5 days",
           timestamp: now
         }
-      })
+      )
     }
   }
 
@@ -129,13 +129,13 @@ logic accountDeletionReminder7Days {
     event object @required
   }
   body {
-  candidates := usersInDeletionCooldown({})
+  candidates := query usersInDeletionCooldown()
 
   for item := range candidates.nodes() {
     // Window: deletionScheduledAt is between 7 and 8 days ago.
     // Equivalent: scheduledAt + P7D < now AND scheduledAt + P8D >= now.
     emitReminder := if addDuration(item.payload.deletionScheduledAt, "P7D") < now && addDuration(item.payload.deletionScheduledAt, "P8D") >= now {
-      publishEvent({
+      publishEvent(
         topic: "identity.deletion.reminder",
         payload: {
           userId: item.id,
@@ -145,7 +145,7 @@ logic accountDeletionReminder7Days {
           subject: "Your <BRAND_NAME> account will be permanently deleted soon",
           timestamp: now
         }
-      })
+      )
     }
   }
 
@@ -197,7 +197,7 @@ logic accountDeletionSweep {
     event object @required
   }
   body {
-  candidates := usersScheduledForDeletion({})
+  candidates := query usersScheduledForDeletion()
 
   // Auth-session revocation gap (intentional): the user concept holds
   // user.id, but authSessionsForSubject is keyed on the JWT
@@ -251,21 +251,21 @@ logic auditEventRetentionSweep {
     event object @required
   }
   body {
-  allEvents := expiredAuditEvents({})
-  retentionDays := globalVariable({ name: "MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS" })
+  allEvents := query expiredAuditEvents()
+  retentionDays := query globalVariable( name: "MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS" )
 
   // Count how many rows would be deleted under the configured
   // retention. The publishEvent emits one observation per cron
   // tick so the operator can see the candidate-row count over time.
   // No per-row state change today -- see header note.
-  emitObservation := publishEvent({
+  emitObservation := publishEvent(
     topic: "identity.audit.retention.observed",
     payload: {
       candidateCount: allEvents.count(),
       retentionDays: coalesce(retentionDays.first().payload.value, "365"),
       timestamp: now
     }
-  })
+  )
 
   return allEvents.count()
   }
@@ -306,7 +306,7 @@ logic magicLinkExpirySweep {
     event object @required
   }
   body {
-  return expiredMagicLinkRequests({ now: now })
+  return query expiredMagicLinkRequests( now: now )
   }
 }
 
@@ -321,7 +321,7 @@ logic onDelegationCreated {
     event object @required
   }
   body {
-  emitEvent := publishEvent({
+  emitEvent := publishEvent(
     topic: "delegation.created",
     payload: {
       delegationId: args.event.node.id,
@@ -334,7 +334,7 @@ logic onDelegationCreated {
       args.event.node.payload.createdBySubject,
       timestamp: now
     }
-  })
+  )
   return emitEvent
   }
 }
@@ -360,7 +360,7 @@ logic revokeExpiredDelegations {
     now string @required
   }
   body {
-    return expiredActiveDelegations({ now: args.now })
+    return query expiredActiveDelegations( now: args.now )
   }
 }
 
@@ -374,7 +374,7 @@ logic accessRequestExpiryWindow {
     event object @required
   }
   body {
-  return globalVariable({ name: "IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS" })
+  return query globalVariable( name: "IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS" )
   }
 }
 
@@ -388,6 +388,6 @@ logic accountDeletionWindow {
     event object @required
   }
   body {
-  return globalVariable({ name: "MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS" })
+  return query globalVariable( name: "MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS" )
   }
 }

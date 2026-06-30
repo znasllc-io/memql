@@ -12,6 +12,6 @@ logic releaseWorkspaceOnPlanTerminal {
     event object @required
   }
   body {
-    return workspaceForPlan({ planId: coalesce(args.event.node.id, "") })
+    return query workspaceForPlan( planId: coalesce(args.event.node.id, "") )
   }
 }

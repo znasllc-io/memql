@@ -65,7 +65,7 @@ logic bootstrapSession {
   // args.event.payload.participantType = "human" or "si" (flattened from node payload)
 
   // Check if session already exists for this participant; decide create-or-not.
-  checkExistingSession := participantSession({ participantId: args.event.payload.id })
+  checkExistingSession := query participantSession( participantId: args.event.payload.id )
 
   return checkExistingSession.empty()
   }
@@ -102,10 +102,10 @@ logic generateResponse {
   //   promptData        - Pre-assembled prompt data (assistant, space, participants, history, etc.)
 
   // Check idempotency -- skip if we already responded to this utterance.
-  existingResponse := hasAIResponseForReply({
+  existingResponse := query hasAIResponseForReply(
     replyToId: args.event.payload.utteranceId,
     participantId: args.event.payload.siParticipantId
-  })
+  )
 
   // Generate the AI response via the prompt template (only when not already answered).
   aiResponse := if existingResponse.empty() {
@@ -167,7 +167,7 @@ logic voiceMigrationOnSecondHuman {
     event object @required
   }
   body {
-  active := usersActiveInSpace({ partitionId: args.event.payload.activePartitionId })
+  active := query usersActiveInSpace( partitionId: args.event.payload.activePartitionId )
 
   // The plan calls for exactly the 1-to-2 transition. The query returns
   // all currently-active users in the space; act when there are exactly
@@ -175,7 +175,7 @@ logic voiceMigrationOnSecondHuman {
   // space; 3+ = already migrated; 0 wouldn't appear here because the
   // event filter required a non-empty activePartitionId on the writer).
   publishGroupCard := if active.count() == 2 {
-    mutationCreateCanvasState({
+    mutation mutationCreateCanvasState(
       stateId: concat("voice-migrated-public-", hash(args.event.payload.activePartitionId)),
       space: args.event.payload.activePartitionId,
       kind: "card",
@@ -186,11 +186,11 @@ logic voiceMigrationOnSecondHuman {
       visibility: "public",
       actor: { kind: "system" },
       importance: "notify"
-    })
+    )
   }
 
   publishPrivateCard := if active.count() == 2 {
-    mutationCreateCanvasState({
+    mutation mutationCreateCanvasState(
       stateId: concat("voice-migrated-private-", hash(concat(
         args.event.payload.activePartitionId, ":", args.event.payload.id
       ))),
@@ -204,7 +204,7 @@ logic voiceMigrationOnSecondHuman {
       forUserId: args.event.payload.id,
       actor: { kind: "system" },
       importance: "ambient"
-    })
+    )
   }
 
   return publishPrivateCard

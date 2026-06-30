@@ -11,6 +11,6 @@ use data.logic.{ conflictDetection }
 @description("Detects conflicts between new data records and existing confirmed records. Emits events for UI conflict resolution -- never auto-resolves.")
 automation conflictDetection {
   step run {
-    logic conflictDetection { event: event }
+    logic conflictDetection ( event: event )
   }
 }

@@ -32,7 +32,7 @@ use library.mutations.{ createArtifact }
 @description("On generated-output creation, promote the new v1:library:generatedOutput into the Library as an artifact index row (lens=artifact, kind=generated_output). #2235.")
 automation indexGeneratedOutputOnCreate {
   step persist {
-    createArtifact {
+    mutation createArtifact (
       sourceConceptRef:     event.payload.id,
       ownerUserId:          event.payload.ownerUserId,
       lens:                 "artifact",
@@ -48,7 +48,7 @@ automation indexGeneratedOutputOnCreate {
       producedByPlanId:     coalesce(event.payload.producedByPlanId, ""),
       producedByWorkerId:   coalesce(event.payload.producedByWorkerId, ""),
       producedByWorkerName: coalesce(event.payload.producedByWorkerName, "")
-    }
+    )
   }
 }
 
@@ -57,7 +57,7 @@ automation indexGeneratedOutputOnCreate {
 @description("On note creation, promote it into the Library Records lens (lens=record, kind=note, source=agent_generated). #2235.")
 automation indexNoteOnCreate {
   step persist {
-    createArtifact {
+    mutation createArtifact (
       sourceConceptRef: event.payload.id,
       ownerUserId:      event.payload.ownerUserId,
       lens:             "record",
@@ -66,7 +66,7 @@ automation indexNoteOnCreate {
       title:            coalesce(event.payload.title, "Untitled note"),
       summary:          coalesce(event.payload.body, ""),
       live:             false
-    }
+    )
   }
 }
 
@@ -75,7 +75,7 @@ automation indexNoteOnCreate {
 @description("On to-do creation, promote it into the Library Records lens (lens=record, kind=todo, source=agent_generated). #2235.")
 automation indexTodoOnCreate {
   step persist {
-    createArtifact {
+    mutation createArtifact (
       sourceConceptRef: event.payload.id,
       ownerUserId:      event.payload.ownerUserId,
       lens:             "record",
@@ -83,7 +83,7 @@ automation indexTodoOnCreate {
       source:           "agent_generated",
       title:            coalesce(event.payload.title, "Untitled to-do"),
       live:             false
-    }
+    )
   }
 }
 
@@ -92,7 +92,7 @@ automation indexTodoOnCreate {
 @description("On calendar-event creation, promote it into the Library Records lens (lens=record, kind=calendar_event, source=agent_generated). #2235.")
 automation indexCalendarEventOnCreate {
   step persist {
-    createArtifact {
+    mutation createArtifact (
       sourceConceptRef: event.payload.id,
       ownerUserId:      event.payload.ownerUserId,
       lens:             "record",
@@ -100,7 +100,7 @@ automation indexCalendarEventOnCreate {
       source:           "agent_generated",
       title:            coalesce(event.payload.title, "Untitled event"),
       live:             false
-    }
+    )
   }
 }
 
@@ -109,7 +109,7 @@ automation indexCalendarEventOnCreate {
 @description("On memory creation, promote it into the Library Records lens (lens=record, kind=memory, source=agent_generated). #2235.")
 automation indexMemoryOnCreate {
   step persist {
-    createArtifact {
+    mutation createArtifact (
       sourceConceptRef: event.payload.id,
       ownerUserId:      event.payload.ownerUserId,
       lens:             "record",
@@ -120,6 +120,6 @@ automation indexMemoryOnCreate {
       agentId:          coalesce(event.payload.agentId, ""),
       partitionId:      coalesce(event.payload.partitionId, ""),
       live:             false
-    }
+    )
   }
 }

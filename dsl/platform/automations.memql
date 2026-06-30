@@ -22,6 +22,6 @@ use platform.logic.{ purgeExpiredPolicyTraces }
 @description("Daily 02:30 UTC sweep: identifies policy traces past MEMQL_POLICYTRACE_RETENTION_DAYS. Observation-only until MemQL gains row-removal support.")
 automation purgeExpiredPolicyTraces {
   step run {
-    logic purgeExpiredPolicyTraces { event: event }
+    logic purgeExpiredPolicyTraces ( event: event )
   }
 }

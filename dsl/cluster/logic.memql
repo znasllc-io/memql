@@ -33,7 +33,7 @@ logic bootstrapCluster {
     event object @required
   }
   body {
-  existing := existingCluster()
+  existing := query existingCluster()
   return existing.empty() && args.event.payload.node.type == "bff"
   }
 }
@@ -103,8 +103,8 @@ logic pruneStaleClusterNodes {
     event object @required
   }
   body {
-  windowMinutes := globalVariable({ name: "MEMQL_NODE_STALE_PRUNE_MINUTES" })
-  stale := staleClusterNodes({ olderThan: addDuration(now, concat("PT-", coalesce(windowMinutes.first().payload.value, "30"), "M")) })
+  windowMinutes := query globalVariable( name: "MEMQL_NODE_STALE_PRUNE_MINUTES" )
+  stale := query staleClusterNodes( olderThan: addDuration(now, concat("PT-", coalesce(windowMinutes.first().payload.value, "30"), "M")) )
   return stale.nodes()
   }
 }

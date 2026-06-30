@@ -4,7 +4,7 @@
 // files cover the other construct kinds.
 
 @enabled
-@handler(type="query", query="help({\"name\": \"$args.name\"})")
+@handler(type="query", query="builtin help(name: \"$args.name\")")
 @executionTime("fast")
 @description("Get detailed usage guidance for a MemQL named function (docs, args schema, and key calling rules)")
 @mcp
@@ -28,7 +28,7 @@ tool describeFunction {
 // added an inner `paginate 50` while this wrapper was still here. One paginate,
 // driven by the caller's limit.
 @enabled
-@handler(type="query", query="paginate(searchUsers({active: $args.active}), $args.limit)")
+@handler(type="query", query="paginate(query searchUsers(active: $args.active), $args.limit)")
 @executionTime("fast")
 @description("Search for users")
 @mcp

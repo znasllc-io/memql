@@ -16,7 +16,7 @@ use workbench.builtins.{ workbenchTeardownDirectory }
 @description("When a Plan transitions to a terminal status (succeeded / failed / cancelled), release the associated workbench workspace if one exists and tear down its on-disk directory. decide (pure) returns the plan's workspaces; apply releases each still-provisioned one (gated on terminal status); teardown removes the directory tree on terminal status even when no concept row exists (the MVP integration provisions in-memory + on-disk without writing the row).")
 automation releaseWorkspaceOnPlanTerminal {
   step decide {
-    logic releaseWorkspaceOnPlanTerminal { event: event }
+    logic releaseWorkspaceOnPlanTerminal ( event: event )
   }
   step apply {
     forEach item in decide.nodes() {
@@ -30,9 +30,9 @@ automation releaseWorkspaceOnPlanTerminal {
   }
   step teardown {
     if exists(event.node.id) && (event.node.payload.status == "succeeded" || event.node.payload.status == "failed" || event.node.payload.status == "cancelled") {
-      workbenchTeardownDirectory {
+      builtin workbenchTeardownDirectory (
         planId: event.node.id
-      }
+      )
     }
   }
 }

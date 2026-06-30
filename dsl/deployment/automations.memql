@@ -147,17 +147,17 @@ use deployment.mutations.{ createDeployment, updateDeploymentStatus }
 @description("Deploy the memQL ENGINE cluster to an environment (development | staging | production) on the cockpit/runner surface. Sequences clone -> build -> place (env switch) -> gate -> success/failure finish, recording the deployment lifecycle. Engine mesh ONLY -- no bff/copresent.")
 automation deployEngineCluster {
   step authorize {
-    logic deploymentForwardAllowed { event: event }
+    logic deploymentForwardAllowed ( event: event )
   }
   step record {
-    createDeployment {
+    mutation createDeployment (
       deploymentId: event.payload.deploymentId,
       environment:  event.payload.environment,
       version:      event.payload.version,
       triggeredBy:  event.payload.triggeredBy,
       status:       "in_progress",
       previousDeploymentId: event.payload.previousDeploymentId
-    }
+    )
   }
   step clone {
     action("cloneRepoAtVersion@1") {
@@ -197,7 +197,7 @@ automation deployEngineCluster {
     }
   }
   step outcome {
-    logic deployOutcomeLabel { gate: gate.result }
+    logic deployOutcomeLabel ( gate: gate.result )
   }
   step finalize {
     switch outcome.result {

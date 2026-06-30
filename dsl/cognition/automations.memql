@@ -21,19 +21,19 @@ use cognition.mutations.{ createSessionForParticipant, sendTextUtterance }
 @description("Auto-creates a session when a participant joins a space")
 automation bootstrapSession {
   step decide {
-    logic bootstrapSession { event: event }
+    logic bootstrapSession ( event: event )
   }
   step createSession {
     if steps.decide.result == true {
-      createSessionForParticipant {
+      mutation createSessionForParticipant (
         participantId: coalesce(event.payload.id, ""),
         partitionId:   coalesce(event.payload.partitionId, "")
-      }
+      )
     }
   }
   step emitSessionCreated {
     if steps.decide.result == true {
-      publishEvent({
+      publishEvent(
         topic: "session.created",
         payload: {
           sessionId:     coalesce(event.payload.id, ""),
@@ -41,7 +41,7 @@ automation bootstrapSession {
           partitionId:   coalesce(event.payload.partitionId, ""),
           timestamp:     now
         }
-      })
+      )
     }
   }
 }
@@ -66,26 +66,26 @@ automation bootstrapSession {
 @description("Generate and insert AI response for an utterance")
 automation generateResponse {
   step decide {
-    logic generateResponse { event: event }
+    logic generateResponse ( event: event )
   }
   step insert {
     if steps.decide.result != "" {
-      sendTextUtterance {
+      mutation sendTextUtterance (
         partitionId:   coalesce(event.payload.partitionId, ""),
         participantId: coalesce(event.payload.siParticipantId, ""),
         text:          steps.decide.result,
         replyToId:     coalesce(event.payload.utteranceId, ""),
         source:        { inputMethod: "si", agentId: coalesce(event.payload.agentId, "") }
-      }
+      )
     }
   }
   step presence {
     if steps.decide.result != "" {
-      cognitionTrackPresence({
+      builtin cognitionTrackPresence(
         participantId: coalesce(event.payload.siParticipantId, ""),
         partitionId:   coalesce(event.payload.partitionId, ""),
         state:         "idle"
-      })
+      )
     }
   }
 }
@@ -138,6 +138,6 @@ automation generateResponse {
 @description("On second-active-human-in-space, emit the Phase 7 voice-migration canvas-card pair (public group card + private operator card per existing user).")
 automation voiceMigrationOnSecondHuman {
   step run {
-    logic voiceMigrationOnSecondHuman { event: event }
+    logic voiceMigrationOnSecondHuman ( event: event )
   }
 }

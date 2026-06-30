@@ -9,7 +9,7 @@
 // server-stamped from the auth context.
 
 @enabled
-@handler(type="query", query="notes({})")
+@handler(type="query", query="query notes()")
 @executionTime("fast")
 @description("List the caller's notes (id, title, body, tags, updatedAt). Read-only; owned -- only the caller's own notes are returned.")
 @mcp
@@ -30,7 +30,7 @@ tool notesCreate {
 }
 
 @enabled
-@handler(type="query", query="updateNote({noteId: \"$args.noteId\", payload: $args.payload})")
+@handler(type="query", query="mutation updateNote(noteId: \"$args.noteId\", payload: $args.payload)")
 @executionTime("fast")
 @description("Update a note's fields (title / body / tags). Pass the full merged payload built from the current note (via notesList or notesSearch) plus the changed fields. Owned: ownership is re-enforced server-side and updatedAt is re-stamped.")
 @mcp
@@ -40,7 +40,7 @@ tool notesUpdate {
 }
 
 @enabled
-@handler(type="query", query="notesByTag({tag: \"$args.tag\"})")
+@handler(type="query", query="query notesByTag(tag: \"$args.tag\")")
 @executionTime("fast")
 @description("Search the caller's notes by tag -- returns every note carrying the given tag. Owned: only the caller's own notes are searched. Read-only. To find notes by body text, list / tag-search first and substring-match the bodies in your reasoning.")
 @mcp

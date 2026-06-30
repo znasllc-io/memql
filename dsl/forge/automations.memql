@@ -42,44 +42,44 @@ use forge.mutations.{ advanceRequest, recordRequestEvent }
 automation routeRequest {
   step persistOwner {
     if event.payload.submitterRole == "owner" {
-      advanceRequest {
+      mutation advanceRequest (
         requestId: event.payload.id,
         status: "queued",
         approvedByUserId: event.payload.submitterUserId
-      }
+      )
     }
   }
   step persistAdmin {
     if event.payload.submitterRole == "admin" {
-      advanceRequest {
+      mutation advanceRequest (
         requestId: event.payload.id,
         status: "needs_approval"
-      }
+      )
     }
   }
   step persistWriter {
     if event.payload.submitterRole == "writer" {
-      advanceRequest {
+      mutation advanceRequest (
         requestId: event.payload.id,
         status: "needs_approval"
-      }
+      )
     }
   }
   step persistReader {
     if event.payload.submitterRole == "reader" {
-      advanceRequest {
+      mutation advanceRequest (
         requestId: event.payload.id,
         status: "needs_validation"
-      }
+      )
     }
   }
   step persistRouted {
-    recordRequestEvent {
+    mutation recordRequestEvent (
       requestId: event.payload.id,
       kind: "routed",
       fromStatus: "submitted",
       note: "routed by submitter role"
-    }
+    )
   }
 }
 
@@ -89,42 +89,42 @@ automation routeRequest {
 automation recordTransition {
   step persistValidated {
     if event.payload.status == "needs_approval" {
-      recordRequestEvent {
+      mutation recordRequestEvent (
         requestId: event.payload.id,
         kind: "validated",
         fromStatus: event.payload.oldStatus,
         toStatus: event.payload.status
-      }
+      )
     }
   }
   step persistApproved {
     if event.payload.status == "queued" {
-      recordRequestEvent {
+      mutation recordRequestEvent (
         requestId: event.payload.id,
         kind: "approved",
         fromStatus: event.payload.oldStatus,
         toStatus: event.payload.status
-      }
+      )
     }
   }
   step persistChangesRequested {
     if event.payload.status == "changes_requested" {
-      recordRequestEvent {
+      mutation recordRequestEvent (
         requestId: event.payload.id,
         kind: "changes_requested",
         fromStatus: event.payload.oldStatus,
         toStatus: event.payload.status
-      }
+      )
     }
   }
   step persistRejected {
     if event.payload.status == "rejected" {
-      recordRequestEvent {
+      mutation recordRequestEvent (
         requestId: event.payload.id,
         kind: "rejected",
         fromStatus: event.payload.oldStatus,
         toStatus: event.payload.status
-      }
+      )
     }
   }
 }
