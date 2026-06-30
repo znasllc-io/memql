@@ -289,7 +289,7 @@ func (d *AuthoringCaptureDispatcher) runCapture(ctx context.Context, planId, kin
 // Plan (idempotency), or "" if none. Read under ownerActorContext so the
 // owner-scoped query filter resolves to the task owner.
 func (d *AuthoringCaptureDispatcher) existingBundleForPlan(ctx context.Context, ownerUserId, planId string) (string, error) {
-	q := fmt.Sprintf(`authoringBundleForPlan({sourcePlanId:%q})`, planId)
+	q := fmt.Sprintf(`query authoringBundleForPlan(sourcePlanId:%q)`, planId)
 	res, err := d.engine.Execute(ownerActorContext(ctx, ownerUserId), q)
 	if err != nil {
 		return "", err

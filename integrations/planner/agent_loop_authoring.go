@@ -357,7 +357,7 @@ func (l *PlannerAgentLoop) loadCatalog(ctx context.Context, ownerUserId string) 
 	// (the same owner-impersonation context the reactive loop uses) which
 	// carries an AccessContext whose UserId is the owner -- so actor.userId in
 	// the query filter resolves to the owner. The query takes no args.
-	res, err := l.engine.Execute(ownerActorContext(ctx, ownerUserId), `cataloguedConstructsForOwner({})`)
+	res, err := l.engine.Execute(ownerActorContext(ctx, ownerUserId), `query cataloguedConstructsForOwner()`)
 	if err != nil {
 		return nil, err
 	}

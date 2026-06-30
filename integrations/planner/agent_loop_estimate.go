@@ -244,7 +244,7 @@ func (l *PlannerAgentLoop) parkForBudgetApproval(ctx context.Context, planId, me
 		fbReqJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`updatePlanStatus({planId:%q, status:"awaitingFeedback", feedbackReason:"budget_approval_required", feedbackRequest:%s})`,
+		`mutation updatePlanStatus(planId:%q, status:"awaitingFeedback", feedbackReason:"budget_approval_required", feedbackRequest:%s)`,
 		planId, string(fbReqJSON),
 	)
 	_, err = l.engine.Execute(systemActorContext(ctx), q)

@@ -3,14 +3,14 @@
 // The real chunk-embedding path (#645 -- lazy embedding for semantic
 // retrieval of chunks). Two DSL-callable capabilities live here:
 //
-//   integration.knowledge.embedChunk       -- embed ONE chunk by id.
-//   integration.knowledge.embedDomainItems -- embed every unembedded
-//                                             validated chunk for a
-//                                             domain (optionally scoped
-//                                             to one Document) and drive
-//                                             the parent Document's
-//                                             embeddingStatus none ->
-//                                             partial -> complete.
+//	integration.knowledge.embedChunk       -- embed ONE chunk by id.
+//	integration.knowledge.embedDomainItems -- embed every unembedded
+//	                                          validated chunk for a
+//	                                          domain (optionally scoped
+//	                                          to one Document) and drive
+//	                                          the parent Document's
+//	                                          embeddingStatus none ->
+//	                                          partial -> complete.
 //
 // Both materialize embeddings into the SAME node_vectors table the
 // seed / ingest / training paths use (vector_field='content', keyed by
@@ -404,7 +404,7 @@ func (i *Integration) rollupDocumentEmbeddingStatus(ctx context.Context, partiti
 		return fmt.Errorf("engine not configured for document rollup")
 	}
 	q := fmt.Sprintf(
-		`mutationUpdateDocumentEmbeddingStatus({documentId: %s, embeddingStatus: %s, embeddedItemCount: %d})`,
+		`mutation mutationUpdateDocumentEmbeddingStatus(documentId: %s, embeddingStatus: %s, embeddedItemCount: %d)`,
 		quoteString(documentId),
 		quoteString(status),
 		embedded,

@@ -20,7 +20,7 @@ logic doFoo {
     x string @required
   }
   body {
-    result := queryFoo({ y: args.x })
+    result := queryFoo(y: args.x)
     return result
   }
 }`
@@ -34,7 +34,7 @@ logic doFoo {
 	if !strings.Contains(out, "args {") {
 		t.Fatalf("expected file-top args block in rewrite; got %q", out)
 	}
-	if !strings.Contains(out, "queryFoo({ y: args.x })") {
+	if !strings.Contains(out, "queryFoo(y: args.x)") {
 		t.Fatalf("expected body to carry args.x untranslated; got %q", out)
 	}
 	if strings.Contains(out, "ctx.x") {
@@ -44,7 +44,7 @@ logic doFoo {
 
 // Automation struct form rewrites to `func (Automation) NAME(_ any)`
 // with one `:=` assignment per step. Step bodies of the form
-// `name { args }` translate to `name({ args })`. `event` and
+// `name { args }` translate to `name(args)`. `event` and
 // `event.X` references in step args pass through verbatim -- the
 // runtime function-step args resolver recognises them as runtime
 // references and resolves them via the evaluator's `event` binding.
@@ -73,7 +73,7 @@ automation autoJoinAI {
 	if strings.Contains(out, "(ctx any)") {
 		t.Fatalf("rewriter must not emit `ctx any` parameter; got %q", out)
 	}
-	if !strings.Contains(out, "joinAgents := logicJoinAgents({ partitionId: event.node.id })") {
+	if !strings.Contains(out, "joinAgents := logicJoinAgents(partitionId: event.node.id)") {
 		t.Fatalf("step did not rewrite to assignment + verbatim event ref; got %q", out)
 	}
 	if strings.Contains(out, "ctx.input") {
@@ -200,7 +200,7 @@ automation ensureDailySpaceOnAuthSession {
 	}
 	// Post-C6 (memql#2036) a `logic <name>` step resolves by bare name -- no
 	// prefix promotion -- so the rewritten call uses the bare construct name.
-	if !strings.Contains(out, "run := ensureDailySpaceOnAuthSession({ event: event })") {
+	if !strings.Contains(out, "run := ensureDailySpaceOnAuthSession(event: event)") {
 		t.Fatalf("expected `{ event: event }` verbatim; got %q", out)
 	}
 	if strings.Contains(out, "ctx.input") {

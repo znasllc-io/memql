@@ -479,7 +479,7 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, `createGeneratedOutput({outputId:%q, ownerUserId:%q, title:%q, source:%q, format:%q`,
+	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%q, ownerUserId:%q, title:%q, source:%q, format:%q`,
 		outputId, ownerUserId, title, "workbench_generated", format)
 	if attachmentId != "" {
 		// File-backed: the bytes ARE the deliverable, so reference the
@@ -516,7 +516,7 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 	if partitionId != "" {
 		fmt.Fprintf(&b, `, partitionId:%q`, partitionId)
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 
 	if _, err := i.engine.Execute(mutationCtx, b.String()); err != nil {
 		if i.logger != nil {
@@ -642,7 +642,7 @@ func (i *Integration) uploadAttachmentBytes(ctx context.Context, planId, relPath
 
 	attachmentId = partitionId + ":" + det
 	var b strings.Builder
-	fmt.Fprintf(&b, `mutationCreateAttachment({attachmentId:%q, partitionId:%q, fileName:%q, mimeType:%q, fileSize:%d, blobUrl:%q, status:%q, uploadedBy:%q})`,
+	fmt.Fprintf(&b, `mutation mutationCreateAttachment(attachmentId:%q, partitionId:%q, fileName:%q, mimeType:%q, fileSize:%d, blobUrl:%q, status:%q, uploadedBy:%q)`,
 		attachmentId, partitionId, fileName, mimeType, len(data), blobUrl, "ready", ownerUserId)
 	if _, err := i.engine.Execute(ctx, b.String()); err != nil {
 		if i.logger != nil {
@@ -722,7 +722,7 @@ func (i *Integration) resolvePlanOwner(ctx context.Context, planId string) (owne
 	if i.engine == nil {
 		return "", ""
 	}
-	res, err := i.engine.Execute(ctx, fmt.Sprintf(`planById({planId:%q})`, planId))
+	res, err := i.engine.Execute(ctx, fmt.Sprintf(`query planById(planId:%q)`, planId))
 	if err != nil || res == nil {
 		return "", ""
 	}

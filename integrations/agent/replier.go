@@ -531,7 +531,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// rather than "agent silently feels familiar without grounds."
 	if agentId := strings.TrimSpace(msg.AgentId); agentId != "" {
 		if _, alreadySet := data["agentIsKnownToUser"]; !alreadySet {
-			query := fmt.Sprintf(`agentInteractionCount({agentId: %s})`, jsonString(agentId))
+			query := fmt.Sprintf(`query agentInteractionCount(agentId: %s)`, jsonString(agentId))
 			if result, err := r.engine.Execute(ctx, query); err == nil {
 				// agentInteractionCount uses shape() so the
 				// row count lives under the adapter's "data" axis.
@@ -805,7 +805,7 @@ func (r *Replier) resolveOwnerForAgent(ctx context.Context, agentId string) stri
 	if agentId == "" || r.engine == nil {
 		return ""
 	}
-	q := fmt.Sprintf(`agentOwner({agentId:%q})`, agentId)
+	q := fmt.Sprintf(`query agentOwner(agentId:%q)`, agentId)
 	result, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Debug("agentReply: resolveOwnerForAgent query failed",
@@ -873,7 +873,7 @@ func (r *Replier) recentPlanOutcomesForSpace(ctx context.Context, partitionId st
 	if partitionId == "" || r.engine == nil {
 		return nil
 	}
-	q := fmt.Sprintf(`plansForSpace({partitionId:%q})`, partitionId)
+	q := fmt.Sprintf(`query plansForSpace(partitionId:%q)`, partitionId)
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Debug("agentReply: recentPlanOutcomesForSpace query failed",
@@ -980,7 +980,7 @@ func (r *Replier) fillActingAgentIfEmpty(ctx context.Context, msg *memqlv1.Agent
 	if agentId == "" {
 		return
 	}
-	q := fmt.Sprintf(`agentById({agentId:%q})`, agentId)
+	q := fmt.Sprintf(`query agentById(agentId:%q)`, agentId)
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Debug("agentReply: fillActingAgentIfEmpty query failed",
@@ -1193,7 +1193,7 @@ func countAdapterRows(result any) int {
 // couldn't load; etiquette is a quality nudge, not a hard gate.
 func (r *Replier) loadAssistantEtiquette(ctx context.Context) string {
 	const variableName = "MEMQL_ASSISTANT_ETIQUETTE"
-	query := fmt.Sprintf(`globalVariable({name: "%s"})`, variableName)
+	query := fmt.Sprintf(`query globalVariable(name: "%s")`, variableName)
 	result, err := r.engine.Execute(ctx, query)
 	if err != nil {
 		r.logger.Debug("agentReply: etiquette load failed",
@@ -2180,7 +2180,7 @@ func (r *Replier) lookupDomainCached(
 	}
 	res, err := r.engine.Execute(
 		ctx,
-		fmt.Sprintf(`queryKnowledgeDomainById({domainId: %s})`, jsonString(domainId)),
+		fmt.Sprintf(`query queryKnowledgeDomainById(domainId: %s)`, jsonString(domainId)),
 	)
 	if err != nil {
 		cache[domainId] = nil

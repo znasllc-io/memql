@@ -198,7 +198,7 @@ func (s *Sink) classifyActive(rows []map[string]any) (approvedId, pendingId, den
 // engine's Execute returns []any of maps with a "payload" sub-map +
 // "id" top-level; we flatten into one map per row carrying both.
 func (s *Sink) queryActive(ctx context.Context, key string) ([]map[string]any, error) {
-	query := fmt.Sprintf(`activeApprovalsByCorrelationKey({correlationKey: %q})`, key)
+	query := fmt.Sprintf(`query activeApprovalsByCorrelationKey(correlationKey: %q)`, key)
 	res, err := s.engine.Execute(ctx, query)
 	if err != nil {
 		return nil, err
@@ -295,7 +295,9 @@ func buildMutationCall(name string, args map[string]any) string {
 	sort.Strings(keys)
 	var b strings.Builder
 	b.WriteString(name)
-	b.WriteString("({")
+	// Story 9 (#2335): named-args invocation form `name(k: v, ...)`, not the
+	// legacy object-literal wrapper `name({...})` (rejected by the parser).
+	b.WriteString("(")
 	for i, k := range keys {
 		if i > 0 {
 			b.WriteString(", ")
@@ -305,7 +307,7 @@ func buildMutationCall(name string, args map[string]any) string {
 		v, _ := json.Marshal(args[k])
 		b.Write(v)
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }
 

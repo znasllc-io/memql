@@ -126,7 +126,7 @@ func (i *Integration) beginPlan(
 
 	// 1. Create Plan(queued).
 	createPlanQ := fmt.Sprintf(
-		`createPlan({"planId": %s, "partitionId": %s, "kind": "trainAgent", "goal": %s, "requestedBy": %s, "triggerSource": "user.explicit", "input": %s})`,
+		`mutation createPlan(planId: %s, partitionId: %s, kind: "trainAgent", goal: %s, requestedBy: %s, triggerSource: "user.explicit", input: %s)`,
 		quoteString(planId),
 		quoteString(partitionId),
 		quoteString(goal),
@@ -141,7 +141,7 @@ func (i *Integration) beginPlan(
 	// 2. Stamp the heuristic estimate so the canvas card has it on
 	//    first render. Best-effort; the estimate is nice-to-have.
 	if _, err := i.engine.Execute(ctx, fmt.Sprintf(
-		`updatePlanStatus({"planId": %s, "status": "queued", "estimate": %s, "estimatedAt": %s})`,
+		`mutation updatePlanStatus(planId: %s, status: "queued", estimate: %s, estimatedAt: %s)`,
 		quoteString(planId),
 		estimateBlock,
 		quoteString(now.Format(time.RFC3339)),
@@ -162,7 +162,7 @@ func (i *Integration) beginPlan(
 	)
 	createdActor := fmt.Sprintf(`{"kind": "user", "userId": %s}`, quoteString(requestedBy))
 	if _, err := i.engine.Execute(ctx, fmt.Sprintf(
-		`mutationCreateCanvasState({"stateId": %s, "space": %s, "kind": "card", "data": %s, "visibility": "private", "forUserId": %s, "actor": %s, "importance": "ambient"})`,
+		`mutation mutationCreateCanvasState(stateId: %s, space: %s, kind: "card", data: %s, visibility: "private", forUserId: %s, actor: %s, importance: "ambient")`,
 		quoteString(createdStateId),
 		quoteString(partitionId),
 		createdCardData,
@@ -181,7 +181,7 @@ func (i *Integration) beginPlan(
 	}
 	for idx := 0; idx < 3; idx++ {
 		if _, err := i.engine.Execute(ctx, fmt.Sprintf(
-			`createTask({"taskId": %s, "planId": %s, "kind": %s, "seq": %d, "input": %s})`,
+			`mutation createTask(taskId: %s, planId: %s, kind: %s, seq: %d, input: %s)`,
 			quoteString(taskIds[idx]),
 			quoteString(planId),
 			quoteString(taskKinds[idx]),
@@ -195,7 +195,7 @@ func (i *Integration) beginPlan(
 	// 5. Plan -> running (with startedAt). The handler is about to
 	//    do the actual work; surface it on the Tasks page right away.
 	if _, err := i.engine.Execute(ctx, fmt.Sprintf(
-		`updatePlanStatus({"planId": %s, "status": "running", "startedAt": %s})`,
+		`mutation updatePlanStatus(planId: %s, status: "running", startedAt: %s)`,
 		quoteString(planId),
 		quoteString(now.Format(time.RFC3339)),
 	)); err != nil {
@@ -223,7 +223,7 @@ func (l *planLifecycle) markTaskRunning(ctx context.Context, idx int) {
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := l.integ.engine.Execute(ctx, fmt.Sprintf(
-		`updateTaskStatus({"taskId": %s, "status": "running", "startedAt": %s})`,
+		`mutation updateTaskStatus(taskId: %s, status: "running", startedAt: %s)`,
 		quoteString(l.taskIds[idx]),
 		quoteString(now),
 	)); err != nil {
@@ -246,7 +246,7 @@ func (l *planLifecycle) markTaskSucceeded(ctx context.Context, idx int, output m
 		outputJSON = mustJSON(output)
 	}
 	if _, err := l.integ.engine.Execute(ctx, fmt.Sprintf(
-		`updateTaskStatus({"taskId": %s, "status": "succeeded", "output": %s, "completedAt": %s})`,
+		`mutation updateTaskStatus(taskId: %s, status: "succeeded", output: %s, completedAt: %s)`,
 		quoteString(l.taskIds[idx]),
 		outputJSON,
 		quoteString(now),
@@ -268,7 +268,7 @@ func (l *planLifecycle) markTaskFailed(ctx context.Context, idx int, errMsg stri
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := l.integ.engine.Execute(ctx, fmt.Sprintf(
-		`updateTaskStatus({"taskId": %s, "status": "failed", "errorMessage": %s, "completedAt": %s})`,
+		`mutation updateTaskStatus(taskId: %s, status: "failed", errorMessage: %s, completedAt: %s)`,
 		quoteString(l.taskIds[idx]),
 		quoteString(errMsg),
 		quoteString(now),
@@ -296,7 +296,7 @@ func (l *planLifecycle) completePlan(
 		outputJSON = mustJSON(summary)
 	}
 	if _, err := l.integ.engine.Execute(ctx, fmt.Sprintf(
-		`updatePlanStatus({"planId": %s, "status": "succeeded", "output": %s, "completedAt": %s})`,
+		`mutation updatePlanStatus(planId: %s, status: "succeeded", output: %s, completedAt: %s)`,
 		quoteString(l.planId),
 		outputJSON,
 		quoteString(now),
@@ -344,7 +344,7 @@ func (l *planLifecycle) completePlan(
 	// importance: notify -- the user explicitly clicked Train and
 	// walked away; the bell ping is exactly what they're waiting for.
 	if _, err := l.integ.engine.Execute(ctx, fmt.Sprintf(
-		`mutationCreateCanvasState({"stateId": %s, "space": %s, "kind": "card", "data": %s, "visibility": "private", "forUserId": %s, "actor": %s, "importance": "notify"})`,
+		`mutation mutationCreateCanvasState(stateId: %s, space: %s, kind: "card", data: %s, visibility: "private", forUserId: %s, actor: %s, importance: "notify")`,
 		quoteString(stateId),
 		quoteString(l.partitionId),
 		cardJSON,
@@ -365,7 +365,7 @@ func (l *planLifecycle) failPlan(ctx context.Context, errMsg string) {
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := l.integ.engine.Execute(ctx, fmt.Sprintf(
-		`updatePlanStatus({"planId": %s, "status": "failed", "errorMessage": %s, "completedAt": %s})`,
+		`mutation updatePlanStatus(planId: %s, status: "failed", errorMessage: %s, completedAt: %s)`,
 		quoteString(l.planId),
 		quoteString(errMsg),
 		quoteString(now),

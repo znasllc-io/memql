@@ -31,7 +31,7 @@ func (f *registerFakeEngine) Execute(_ context.Context, q string) (*memqlengine.
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	switch {
-	case strings.HasPrefix(q, "createOAuthClient("):
+	case strings.HasPrefix(q, "mutation createOAuthClient("):
 		clientId := extractField(q, "clientId")
 		uris := extractField(q, "redirectURIsJSON")
 		f.created[clientId] = &memqlv1.MemoryNode{
@@ -42,7 +42,7 @@ func (f *registerFakeEngine) Execute(_ context.Context, q string) (*memqlengine.
 			}},
 		}
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
-	case strings.HasPrefix(q, "oAuthClientByClientId("):
+	case strings.HasPrefix(q, "query oAuthClientByClientId("):
 		clientId := extractField(q, "clientId")
 		if n, ok := f.created[clientId]; ok {
 			return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{n}}}, nil

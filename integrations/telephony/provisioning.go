@@ -172,7 +172,7 @@ func (i *Integration) recordNumber(ctx context.Context, num Number, partitionID,
 		return
 	}
 	q := fmt.Sprintf(
-		`recordNumber({e164: %q, carrier: %q, partitionId: %q, purpose: %q, providerId: %q, numberType: %q, monthlyCost: %s})`,
+		`mutation recordNumber(e164: %q, carrier: %q, partitionId: %q, purpose: %q, providerId: %q, numberType: %q, monthlyCost: %s)`,
 		num.E164, i.carrier.Name(), partitionID, purpose, num.ProviderID, string(orType(num.Type)), strconv.FormatFloat(num.MonthlyCost, 'f', -1, 64),
 	)
 	if _, err := eng.Execute(ctx, q); err != nil && i.logger != nil {

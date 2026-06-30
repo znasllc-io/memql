@@ -252,7 +252,7 @@ func (d *EmbedDomainItemsDispatcher) embedDomain(ctx context.Context, domainId, 
 // --- context loaders ------------------------------------------------------
 
 func (d *EmbedDomainItemsDispatcher) loadPlan(ctx context.Context, planId string) (map[string]any, error) {
-	q := fmt.Sprintf(`planById({planId:%q})`, planId)
+	q := fmt.Sprintf(`query planById(planId:%q)`, planId)
 	res, err := d.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
@@ -268,7 +268,7 @@ func (d *EmbedDomainItemsDispatcher) loadPlan(ctx context.Context, planId string
 
 func (d *EmbedDomainItemsDispatcher) markRunning(ctx context.Context, planId string) error {
 	q := fmt.Sprintf(
-		`updatePlanStatus({planId:%q, status:"running", startedAt:%q})`,
+		`mutation updatePlanStatus(planId:%q, status:"running", startedAt:%q)`,
 		planId, time.Now().UTC().Format(time.RFC3339),
 	)
 	_, err := d.engine.Execute(systemActorContext(ctx), q)
@@ -281,7 +281,7 @@ func (d *EmbedDomainItemsDispatcher) markSucceeded(ctx context.Context, planId s
 		outputJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`updatePlanStatus({planId:%q, status:"succeeded", output:%s, completedAt:%q})`,
+		`mutation updatePlanStatus(planId:%q, status:"succeeded", output:%s, completedAt:%q)`,
 		planId, string(outputJSON), time.Now().UTC().Format(time.RFC3339),
 	)
 	_, err = d.engine.Execute(systemActorContext(ctx), q)
@@ -290,7 +290,7 @@ func (d *EmbedDomainItemsDispatcher) markSucceeded(ctx context.Context, planId s
 
 func (d *EmbedDomainItemsDispatcher) markFailed(ctx context.Context, planId, errorMessage string) error {
 	q := fmt.Sprintf(
-		`updatePlanStatus({planId:%q, status:"failed", errorMessage:%q, completedAt:%q})`,
+		`mutation updatePlanStatus(planId:%q, status:"failed", errorMessage:%q, completedAt:%q)`,
 		planId, errorMessage, time.Now().UTC().Format(time.RFC3339),
 	)
 	_, err := d.engine.Execute(systemActorContext(ctx), q)

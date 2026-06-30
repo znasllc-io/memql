@@ -153,7 +153,7 @@ func buildMutationQuery(args map[string]any) string {
 	}
 	sort.Strings(keys)
 	var b strings.Builder
-	b.WriteString("insertSafetyClassification({")
+	b.WriteString("mutation insertSafetyClassification(")
 	for i, k := range keys {
 		if i > 0 {
 			b.WriteString(", ")
@@ -163,6 +163,6 @@ func buildMutationQuery(args map[string]any) string {
 		v, _ := json.Marshal(args[k])
 		b.Write(v)
 	}
-	b.WriteString("})")
+	b.WriteString(")")
 	return b.String()
 }

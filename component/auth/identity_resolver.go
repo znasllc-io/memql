@@ -65,7 +65,7 @@ func (r *IdentityResolver) LoadFromClaims(ctx context.Context, claims map[string
 	}
 	userId := subject
 
-	userQuery := fmt.Sprintf(`userById({"userId": %s})`, quoteJSON(userId))
+	userQuery := fmt.Sprintf(`query userById(userId: %s)`, quoteJSON(userId))
 	user, err := r.Engine.ExecuteShaped(ctx, userQuery)
 	if err != nil {
 		return nil, fmt.Errorf("userById: %w", err)

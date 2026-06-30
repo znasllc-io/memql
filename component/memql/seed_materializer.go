@@ -401,7 +401,7 @@ func (m *SeedMaterializer) resolveAvatarPersonaByName(ctx context.Context, name 
 	if m.engine == nil {
 		return "", "", false
 	}
-	result, err := m.engine.Execute(systemActorContext(ctx), `avatarPersonas({})`)
+	result, err := m.engine.Execute(systemActorContext(ctx), `query avatarPersonas()`)
 	if err != nil {
 		if m.engine.Logger != nil {
 			m.engine.Logger.Warn("seed materializer: avatarPersonas failed resolving dev default avatar",
@@ -839,7 +839,7 @@ func seedNames(defs []*SeedDefinition) []string {
 // empty actor produces a "no actor found in context" failure even
 // for read paths that touch global concepts.
 func (m *SeedMaterializer) listUserIds(ctx context.Context) ([]string, error) {
-	result, err := m.engine.Execute(systemActorContext(ctx), `activeUsers({})`)
+	result, err := m.engine.Execute(systemActorContext(ctx), `query activeUsers()`)
 	if err != nil {
 		return nil, fmt.Errorf("activeUsers: %w", err)
 	}

@@ -125,7 +125,7 @@ func lookupInvitationByTokenHash(ctx context.Context, engine *memqlengine.MemQLE
 	if strings.TrimSpace(tokenHash) == "" {
 		return nil, fmt.Errorf("tokenHash required")
 	}
-	query := fmt.Sprintf(`invitationByTokenHash({tokenHash: "%s"})`, tokenHash)
+	query := fmt.Sprintf(`query invitationByTokenHash(tokenHash: "%s")`, tokenHash)
 	result, err := engine.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query guest invitation: %w", err)
@@ -202,7 +202,7 @@ func listPendingGuestInvitationsForEmail(ctx context.Context, engine *memqlengin
 	// spaceInvitations is shape-projected via invitationFull, which
 	// exposes the fields we need to re-kick the record preserving its
 	// guest context.
-	query := fmt.Sprintf(`querySpaceInvitations({partitionId: %q})`, partitionId)
+	query := fmt.Sprintf(`query querySpaceInvitations(partitionId: %q)`, partitionId)
 	result, err := engine.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query space invitations: %w", err)
@@ -549,7 +549,7 @@ func lookupInvitationByPreviousTokenHash(ctx context.Context, engine *memqlengin
 	if strings.TrimSpace(tokenHash) == "" {
 		return nil, fmt.Errorf("tokenHash required")
 	}
-	query := fmt.Sprintf(`invitationByPreviousTokenHash({tokenHash: "%s"})`, tokenHash)
+	query := fmt.Sprintf(`query invitationByPreviousTokenHash(tokenHash: "%s")`, tokenHash)
 	result, err := engine.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query invitation by previousTokenHash: %w", err)
@@ -741,7 +741,7 @@ func lookupInvitationById(ctx context.Context, engine *memqlengine.MemQLEngine, 
 	if strings.TrimSpace(invitationId) == "" {
 		return nil, fmt.Errorf("invitationId required")
 	}
-	q := fmt.Sprintf(`invitationById({invitationId: %q})`, invitationId)
+	q := fmt.Sprintf(`query invitationById(invitationId: %q)`, invitationId)
 	result, err := engine.Execute(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("lookup by id: %w", err)

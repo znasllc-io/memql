@@ -280,7 +280,7 @@ func (d *TrainSpecialistDispatcher) runTrainer(ctx context.Context, planId strin
 // --- context loaders ------------------------------------------------------
 
 func (d *TrainSpecialistDispatcher) loadPlan(ctx context.Context, planId string) (map[string]any, error) {
-	q := fmt.Sprintf(`planById({planId:%q})`, planId)
+	q := fmt.Sprintf(`query planById(planId:%q)`, planId)
 	res, err := d.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
@@ -299,7 +299,7 @@ func (d *TrainSpecialistDispatcher) loadSpecialist(ctx context.Context, speciali
 	if specialistId == "" {
 		return map[string]any{}
 	}
-	q := fmt.Sprintf(`agentById({agentId:%q})`, specialistId)
+	q := fmt.Sprintf(`query agentById(agentId:%q)`, specialistId)
 	res, err := d.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		d.logger.Warn("trainSpecialist dispatcher: loadSpecialist failed",
@@ -317,7 +317,7 @@ func (d *TrainSpecialistDispatcher) loadSpecialist(ctx context.Context, speciali
 // text-truncated) for the Trainer's refresh decision. Best-effort: a
 // query failure yields an empty corpus, which the prompt tolerates.
 func (d *TrainSpecialistDispatcher) loadExistingCorpus(ctx context.Context, domainId string) []map[string]any {
-	q := fmt.Sprintf(`documentChunksForDomain({domainId:%q})`, domainId)
+	q := fmt.Sprintf(`query documentChunksForDomain(domainId:%q)`, domainId)
 	res, err := d.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		d.logger.Warn("trainSpecialist dispatcher: loadExistingCorpus failed",
@@ -352,7 +352,7 @@ func (d *TrainSpecialistDispatcher) loadExistingCorpus(ctx context.Context, doma
 
 func (d *TrainSpecialistDispatcher) markRunning(ctx context.Context, planId string) error {
 	q := fmt.Sprintf(
-		`updatePlanStatus({planId:%q, status:"running", startedAt:%q})`,
+		`mutation updatePlanStatus(planId:%q, status:"running", startedAt:%q)`,
 		planId, time.Now().UTC().Format(time.RFC3339),
 	)
 	_, err := d.engine.Execute(systemActorContext(ctx), q)
@@ -365,7 +365,7 @@ func (d *TrainSpecialistDispatcher) markSucceeded(ctx context.Context, planId st
 		outputJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`updatePlanStatus({planId:%q, status:"succeeded", output:%s, completedAt:%q})`,
+		`mutation updatePlanStatus(planId:%q, status:"succeeded", output:%s, completedAt:%q)`,
 		planId, string(outputJSON), time.Now().UTC().Format(time.RFC3339),
 	)
 	_, err = d.engine.Execute(systemActorContext(ctx), q)
@@ -374,7 +374,7 @@ func (d *TrainSpecialistDispatcher) markSucceeded(ctx context.Context, planId st
 
 func (d *TrainSpecialistDispatcher) markFailed(ctx context.Context, planId, errorMessage string) error {
 	q := fmt.Sprintf(
-		`updatePlanStatus({planId:%q, status:"failed", errorMessage:%q, completedAt:%q})`,
+		`mutation updatePlanStatus(planId:%q, status:"failed", errorMessage:%q, completedAt:%q)`,
 		planId, errorMessage, time.Now().UTC().Format(time.RFC3339),
 	)
 	_, err := d.engine.Execute(systemActorContext(ctx), q)
@@ -385,7 +385,7 @@ func (d *TrainSpecialistDispatcher) markFailed(ctx context.Context, planId, erro
 // after a successful refresh run. Best-effort.
 func (d *TrainSpecialistDispatcher) resetStaleAfterRefresh(ctx context.Context, domainId string) {
 	q := fmt.Sprintf(
-		`mutationResetStaleAfterRefresh({domainId:%q, lastSeededAt:%q})`,
+		`mutation mutationResetStaleAfterRefresh(domainId:%q, lastSeededAt:%q)`,
 		domainId, time.Now().UTC().Format(time.RFC3339),
 	)
 	if _, err := d.engine.Execute(systemActorContext(ctx), q); err != nil {

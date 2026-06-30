@@ -281,7 +281,7 @@ func (i *Integration) runSeederForDomain(ctx context.Context, d StandardDomain, 
 func (i *Integration) stampDomainSeeded(ctx context.Context, domainId, recipeVersion string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	q := fmt.Sprintf(
-		`mutationMarkKnowledgeDomainSeeded({domainId: %s, lastSeededAt: %s, seederRecipeVersion: %s})`,
+		`mutation mutationMarkKnowledgeDomainSeeded(domainId: %s, lastSeededAt: %s, seederRecipeVersion: %s)`,
 		quoteString(domainId),
 		quoteString(now),
 		quoteString(recipeVersion),
@@ -459,7 +459,7 @@ func (i *Integration) storeSeedChunk(
 	enrichedBody := fmt.Sprintf("<!--seed:%s-->\n\n## %s\n\n%s", string(metadataJSON), cleanTitle, c.Body)
 
 	insertQuery := fmt.Sprintf(
-		`createDocumentChunk({chunkId: %s, domainId: %s, text: %s, source: %s, sourceRef: %s, seq: %d, tokenCount: %d})`,
+		`mutation createDocumentChunk(chunkId: %s, domainId: %s, text: %s, source: %s, sourceRef: %s, seq: %d, tokenCount: %d)`,
 		quoteString(chunkId),
 		quoteString(d.ID),
 		quoteString(enrichedBody),

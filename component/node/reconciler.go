@@ -408,7 +408,7 @@ func (r *TopologyReconciler) retire(ctx context.Context, n reconcileNode, reason
 // candidate set the prune walks. One query serves both the orphan + liveness
 // passes.
 func (r *TopologyReconciler) loadNonStoppedNodes(ctx context.Context) ([]reconcileNode, error) {
-	result, err := r.engine.Execute(ctx, "staleClusterNodes({})")
+	result, err := r.engine.Execute(ctx, "query staleClusterNodes()")
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +446,7 @@ func (r *TopologyReconciler) loadNonStoppedNodes(ctx context.Context) ([]reconci
 // pass + the prune still run), never a wrong retirement.
 func (r *TopologyReconciler) loadSupersededDeploymentIds(ctx context.Context) map[string]struct{} {
 	ids := map[string]struct{}{}
-	result, err := r.engine.Execute(ctx, "supersededDeployments({})")
+	result, err := r.engine.Execute(ctx, "query supersededDeployments()")
 	if err != nil {
 		r.warn("topology reconciler: superseded-deployment load failed; skipping orphan pass this tick", "error", err)
 		return ids

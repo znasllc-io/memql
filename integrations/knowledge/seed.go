@@ -1829,7 +1829,7 @@ func (i *Integration) seedStandardDomainsHandler(ctx context.Context, args map[s
 		// mirror for cheap inverse lookups, but the inversion isn't
 		// required for correctness.
 		insertQuery := fmt.Sprintf(
-			`mutationCreateKnowledgeDomain({domainId: %s, name: %s, description: %s, category: %s, relevantForRoles: %s, requiredByToolSlugs: %s, active: true, tier: %s, source: %s, predefined: true})`,
+			`mutation mutationCreateKnowledgeDomain(domainId: %s, name: %s, description: %s, category: %s, relevantForRoles: %s, requiredByToolSlugs: %s, active: true, tier: %s, source: %s, predefined: true)`,
 			quoteString(d.ID),
 			quoteString(d.Name),
 			quoteString(d.Description),

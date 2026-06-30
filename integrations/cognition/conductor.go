@@ -741,7 +741,7 @@ func (c *CognitionIntegration) queryAgentIsKnownToUser(ctx context.Context, agen
 	if agentId == "" {
 		return false
 	}
-	query := fmt.Sprintf(`agentInteractionCount({agentId: "%s"})`, agentId)
+	query := fmt.Sprintf(`query agentInteractionCount(agentId: "%s")`, agentId)
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		if c.Logger != nil {

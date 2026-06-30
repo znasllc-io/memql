@@ -54,7 +54,7 @@ import (
 // id-only projection of active v1:cognition:space rows (dsl/cognition/queries.memql)
 // -- a real cognition-concept read that also exercises the BFF->cognition fan.
 // TestDefaultGateQueryParses pins that this stays parseable.
-const defaultGateQuery = "queryActivePartitionIds({})"
+const defaultGateQuery = "query queryActivePartitionIds()"
 
 func main() {
 	addr := flag.String("addr", "bff:50051", "node gRPC address (host:port) to run the authenticated query against")

@@ -25,7 +25,7 @@ func (c *CognitionIntegration) getSpaceContextForPrompt(ctx context.Context, par
 	// directives. Downstream extractDataFromResult sees the same
 	// spaceContextFull-shaped result so the type-switch below is
 	// unchanged. Unblocks #250.
-	query := fmt.Sprintf(`queryLatestSpaceContextForSpace({partitionId: %s})`, escapeJSONString(partitionId))
+	query := fmt.Sprintf(`query queryLatestSpaceContextForSpace(partitionId: %s)`, escapeJSONString(partitionId))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		return nil

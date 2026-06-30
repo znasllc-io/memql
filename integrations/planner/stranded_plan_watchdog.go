@@ -241,7 +241,7 @@ func (w *StrandedPlanWatchdog) pollOnce(ctx context.Context) {
 	if w.engine == nil || w.agentLoop == nil {
 		return
 	}
-	res, err := w.engine.Execute(systemActorContext(ctx), `strandedCandidatePlans({})`)
+	res, err := w.engine.Execute(systemActorContext(ctx), `query strandedCandidatePlans()`)
 	if err != nil {
 		w.logger.Debug("planner stranded-plan watchdog: query failed (engine likely not ready)", "error", err)
 		return

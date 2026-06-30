@@ -177,7 +177,7 @@ func (r *LiveSettingsReader) read(ctx context.Context) (*ClusterSettingsRow, err
 	if r == nil || r.Engine == nil {
 		return nil, nil
 	}
-	res, err := r.Engine.Execute(ctx, `clusterSettingsCurrent({})`)
+	res, err := r.Engine.Execute(ctx, `query clusterSettingsCurrent()`)
 	if err != nil {
 		return nil, err
 	}

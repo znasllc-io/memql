@@ -163,7 +163,6 @@ func (l *Loader) LoadAll() ([]*Automation, error) {
 		return nil, fmt.Errorf("walking embedded fs for .json: %w", err)
 	}
 
-
 	if l.logger != nil {
 		l.logger.Info("automations loaded",
 			"count", len(automations),
@@ -337,9 +336,9 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 			"  - For mutations: see mutations/v1/ directory\n\n" +
 			"Examples:\n" +
 			"  Instead of: query({ query: \"concept==v1:agents:agent; ...\" })\n" +
-			"  Use: activeAgents({ tier: \"pro\" })\n\n" +
+			"  Use: query activeAgents(tier: \"pro\")\n\n" +
 			"  Instead of: mutation({ concept: \"v1:cognition:space\", ... })\n" +
-			"  Use: mutationCreateSpace({ name: \"My Space\", ... })")
+			"  Use: mutation mutationCreateSpace(name: \"My Space\")")
 	}
 
 	// Extract + strip first-class precondition blocks (Epic 4 / memql#2139)

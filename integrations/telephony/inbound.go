@@ -111,7 +111,7 @@ func (i *Integration) handleProvisionInbound(ctx context.Context, args map[strin
 	}
 	if eng, err := i.requireEngine(); err == nil {
 		q := fmt.Sprintf(
-			`recordTrunk({carrier: %q, direction: "inbound", name: %q, livekitTrunkId: %q, sipEdgeUri: %q, secretRef: "telephony-secrets"})`,
+			`mutation recordTrunk(carrier: %q, direction: "inbound", name: %q, livekitTrunkId: %q, sipEdgeUri: %q, secretRef: "telephony-secrets")`,
 			carrier.Name(), inboundTrunkName, trunkID, i.sipEdgeURI,
 		)
 		if _, err := eng.Execute(ctx, q); err != nil && i.logger != nil {

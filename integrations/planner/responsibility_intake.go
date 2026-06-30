@@ -307,7 +307,7 @@ func (d *ResponsibilityIntakeDispatcher) invokeIntake(ctx context.Context, state
 // --- loaders --------------------------------------------------------------
 
 func (d *ResponsibilityIntakeDispatcher) loadResponsibility(ctx context.Context, id string) (map[string]any, error) {
-	q := fmt.Sprintf(`responsibilityById({responsibilityId:%q})`, id)
+	q := fmt.Sprintf(`query responsibilityById(responsibilityId:%q)`, id)
 	res, err := d.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
@@ -322,7 +322,7 @@ func (d *ResponsibilityIntakeDispatcher) loadResponsibility(ctx context.Context,
 // --- mutations ------------------------------------------------------------
 
 func (d *ResponsibilityIntakeDispatcher) markPending(ctx context.Context, id string) error {
-	q := fmt.Sprintf(`markResponsibilityIntakePending({responsibilityId:%q})`, id)
+	q := fmt.Sprintf(`mutation markResponsibilityIntakePending(responsibilityId:%q)`, id)
 	_, err := d.engine.Execute(systemActorContext(ctx), q)
 	return err
 }

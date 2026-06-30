@@ -228,7 +228,7 @@ func NewEngineWriter(exec Executor) *EngineWriter {
 // reconcile already claimed it -> claimed=false, no error surfaced.
 func (w *EngineWriter) ClaimStep(ctx context.Context, _ string, stepID string, _ int) (bool, error) {
 	q := fmt.Sprintf(
-		`startHarnessStep({stepId:%q, assignedAgent:%q})`,
+		`mutation startHarnessStep(stepId:%q, assignedAgent:%q)`,
 		stepID, systemActorId,
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
@@ -254,7 +254,7 @@ func (w *EngineWriter) StartStep(_ context.Context, _ string) error { return nil
 // routes through validateHarnessStepTransition (the same guard the named
 // transition mutations hit), so no field re-assertion is needed.
 func (w *EngineWriter) MarkStepReady(ctx context.Context, step StepView) error {
-	q := fmt.Sprintf(`readyHarnessStep({stepId:%q})`, step.ID)
+	q := fmt.Sprintf(`mutation readyHarnessStep(stepId:%q)`, step.ID)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
 		return fmt.Errorf("mark step %q ready: %w", step.ID, err)
 	}
@@ -265,7 +265,7 @@ func (w *EngineWriter) MarkStepReady(ctx context.Context, step StepView) error {
 func (w *EngineWriter) CompleteStep(ctx context.Context, stepID string, result map[string]any) error {
 	resultJSON := mustJSON(result)
 	q := fmt.Sprintf(
-		`completeHarnessStep({stepId:%q, result:%s})`,
+		`mutation completeHarnessStep(stepId:%q, result:%s)`,
 		stepID, resultJSON,
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
@@ -277,7 +277,7 @@ func (w *EngineWriter) CompleteStep(ctx context.Context, stepID string, result m
 // FailStep marks a running step failed (running -> failed).
 func (w *EngineWriter) FailStep(ctx context.Context, stepID, errorMessage string) error {
 	q := fmt.Sprintf(
-		`failHarnessStep({stepId:%q, errorMessage:%q})`,
+		`mutation failHarnessStep(stepId:%q, errorMessage:%q)`,
 		stepID, errorMessage,
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
@@ -291,7 +291,7 @@ func (w *EngineWriter) FailStep(ctx context.Context, stepID, errorMessage string
 func (w *EngineWriter) RecordObservation(ctx context.Context, obs Observation) error {
 	dataJSON := mustJSON(obs.Data)
 	q := fmt.Sprintf(
-		`recordHarnessObservation({stepId:%q, planId:%q, kind:%q, content:%q, data:%s})`,
+		`mutation recordHarnessObservation(stepId:%q, planId:%q, kind:%q, content:%q, data:%s)`,
 		obs.StepID, obs.PlanID, obs.Kind, obs.Content, dataJSON,
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {

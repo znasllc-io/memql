@@ -220,7 +220,7 @@ func (l *PlannerAgentLoop) parkForPhaseCheckpoint(ctx context.Context, plan map[
 		fbReqJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`updatePlanStatus({planId:%q, status:"awaitingFeedback", feedbackReason:"phase_checkpoint", feedbackRequest:%s, metrics:%s})`,
+		`mutation updatePlanStatus(planId:%q, status:"awaitingFeedback", feedbackReason:"phase_checkpoint", feedbackRequest:%s, metrics:%s)`,
 		planId, string(fbReqJSON), string(metricsJSON),
 	)
 	_, err = l.engine.Execute(systemActorContext(ctx), q)

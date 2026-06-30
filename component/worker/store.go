@@ -185,7 +185,7 @@ func (s *EngineStore) WorkerByIdentityId(ctx context.Context, identityId string)
 	if s == nil || s.Engine == nil {
 		return nil, nil
 	}
-	query := fmt.Sprintf(`workerByIdentityId({"identityId":%q})`, identityId)
+	query := fmt.Sprintf(`query workerByIdentityId(identityId:%q)`, identityId)
 	nodes, err := s.executeAndExtract(ctx, query)
 	if err != nil {
 		return nil, err
@@ -204,7 +204,7 @@ func (s *EngineStore) WorkersForUser(ctx context.Context, ownerUserId string) ([
 	if s == nil || s.Engine == nil {
 		return nil, nil
 	}
-	query := fmt.Sprintf(`workersForUser({"ownerUserId":%q})`, ownerUserId)
+	query := fmt.Sprintf(`query workersForUser(ownerUserId:%q)`, ownerUserId)
 	nodes, err := s.executeAndExtract(ctx, query)
 	if err != nil {
 		return nil, err

@@ -427,7 +427,7 @@ func (s *enginePromoteStore) CreatePromoteBundle(ctx context.Context, bundleId, 
 	}
 	// createAuthoringBundle inserts status "draft"; transition it to
 	// active so the boot re-hydration's system-active enumeration picks it up.
-	if _, err := s.engine.Execute(ctx, fmt.Sprintf(`activateAuthoringBundle({"bundleId":%q})`, bundleId)); err != nil {
+	if _, err := s.engine.Execute(ctx, fmt.Sprintf(`mutation activateAuthoringBundle(bundleId:%q)`, bundleId)); err != nil {
 		return err
 	}
 	return nil
@@ -496,7 +496,7 @@ func (s *enginePromoteRehydrateStore) LoadPromotedBundles(ctx context.Context) (
 
 func (s *enginePromoteRehydrateStore) LoadConstructsForBundle(ctx context.Context, owner, bundleId string) ([]AuthoringConstructRow, error) {
 	authorCtx := auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: owner, Role: auth.RoleWriter})
-	q := fmt.Sprintf(`authoringConstructsForBundle({"bundleId":%q})`, bundleId)
+	q := fmt.Sprintf(`query authoringConstructsForBundle(bundleId:%q)`, bundleId)
 	res, err := s.engine.Execute(authorCtx, q)
 	if err != nil {
 		return nil, err

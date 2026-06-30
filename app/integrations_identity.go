@@ -618,7 +618,7 @@ func (l *patUserLookup) UserById(ctx context.Context, userId string) (*pat.UserS
 		return nil, nil
 	}
 	res, err := l.store.Engine.Execute(ctx,
-		`userById({userId: "`+escapeMemQLArg(userId)+`"})`)
+		`query userById(userId: "`+escapeMemQLArg(userId)+`")`)
 	if err != nil {
 		return nil, err
 	}

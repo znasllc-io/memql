@@ -168,7 +168,7 @@ func (l *PlannerAgentLoop) parkForSpecialistApproval(ctx context.Context, plan m
 		fbReqJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`updatePlanStatus({planId:%q, status:"awaitingFeedback", feedbackReason:"specialist_approval_required", feedbackRequest:%s})`,
+		`mutation updatePlanStatus(planId:%q, status:"awaitingFeedback", feedbackReason:"specialist_approval_required", feedbackRequest:%s)`,
 		planId, string(fbReqJSON),
 	)
 	if _, err = l.engine.Execute(systemActorContext(ctx), q); err != nil {

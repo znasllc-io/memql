@@ -94,7 +94,7 @@ func LookupAuthSessionByTokenHash(ctx context.Context, engine *memqlengine.MemQL
 	if strings.TrimSpace(tokenHash) == "" {
 		return nil, fmt.Errorf("tokenHash required")
 	}
-	query := fmt.Sprintf(`authSessionByTokenHash({tokenHash: "%s"})`, tokenHash)
+	query := fmt.Sprintf(`query authSessionByTokenHash(tokenHash: "%s")`, tokenHash)
 	result, err := engine.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query auth session: %w", err)
@@ -118,7 +118,7 @@ func listAuthSessionsForSubject(ctx context.Context, engine *memqlengine.MemQLEn
 	if strings.TrimSpace(subject) == "" {
 		return nil, fmt.Errorf("subject required")
 	}
-	query := fmt.Sprintf(`authSessionsForSubject({subject: %q})`, subject)
+	query := fmt.Sprintf(`query authSessionsForSubject(subject: %q)`, subject)
 	result, err := engine.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query auth sessions for subject: %w", err)

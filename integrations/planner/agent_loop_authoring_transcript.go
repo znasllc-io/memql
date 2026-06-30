@@ -135,7 +135,7 @@ func (d *AuthoringCaptureDispatcher) runCaptureTranscript(ctx context.Context, p
 // loadToolCalls reads the plan's succeeded toolInvocation tasks (the literal
 // calls the agent made) in seq order.
 func (d *AuthoringCaptureDispatcher) loadToolCalls(ctx context.Context, planId string) ([]toolCall, error) {
-	q := fmt.Sprintf(`tasksForPlan({planId:%q})`, planId)
+	q := fmt.Sprintf(`query tasksForPlan(planId:%q)`, planId)
 	res, err := d.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err

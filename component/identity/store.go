@@ -125,7 +125,7 @@ func (s *Store) CreateMagicLinkRequest(
 	sourceIP, userAgent, oauthCtxJSON, invitationId string,
 ) error {
 	var b strings.Builder
-	b.WriteString(`createMagicLinkRequest({`)
+	b.WriteString(`mutation createMagicLinkRequest(`)
 	writeKVString(&b, "requestId", requestId, true)
 	writeKVString(&b, "email", email, false)
 	writeKVString(&b, "tokenHash", tokenHash, false)
@@ -134,7 +134,7 @@ func (s *Store) CreateMagicLinkRequest(
 	writeKVString(&b, "userAgent", userAgent, false)
 	writeKVString(&b, "oauthCtxJSON", oauthCtxJSON, false)
 	writeKVString(&b, "invitationId", invitationId, false)
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: create magic link: %w", err)
 	}
@@ -144,10 +144,10 @@ func (s *Store) CreateMagicLinkRequest(
 // ConsumeMagicLinkRequest stamps consumedAt on a magic-link row.
 func (s *Store) ConsumeMagicLinkRequest(ctx context.Context, requestId, consumedFromIP string) error {
 	var b strings.Builder
-	b.WriteString(`consumeMagicLinkRequest({`)
+	b.WriteString(`mutation consumeMagicLinkRequest(`)
 	writeKVString(&b, "requestId", requestId, true)
 	writeKVString(&b, "consumedFromIP", consumedFromIP, false)
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: consume magic link: %w", err)
 	}
@@ -157,7 +157,7 @@ func (s *Store) ConsumeMagicLinkRequest(ctx context.Context, requestId, consumed
 // LookupMagicLinkByTokenHash returns the row matching the given hash,
 // or nil if none exists.
 func (s *Store) LookupMagicLinkByTokenHash(ctx context.Context, tokenHash string) (*MagicLinkRow, error) {
-	query := fmt.Sprintf(`magicLinkRequestByTokenHash({tokenHash: "%s"})`, escapeMemQLString(tokenHash))
+	query := fmt.Sprintf(`query magicLinkRequestByTokenHash(tokenHash: "%s")`, escapeMemQLString(tokenHash))
 	nodes, err := s.executeAndExtract(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: lookup magic link: %w", err)
@@ -195,16 +195,16 @@ func (s *Store) CreateAccessRequest(
 	riskScore int, riskSignals, sourceIP, userAgent string,
 ) error {
 	var b strings.Builder
-	b.WriteString(`createAccessRequest({`)
+	b.WriteString(`mutation createAccessRequest(`)
 	writeKVString(&b, "requestId", requestId, true)
 	writeKVString(&b, "email", email, false)
 	writeKVString(&b, "name", name, false)
 	writeKVString(&b, "additionalContext", additionalContext, false)
-	fmt.Fprintf(&b, `,"riskScore":%d`, riskScore)
+	fmt.Fprintf(&b, `,riskScore: %d`, riskScore)
 	writeKVString(&b, "riskSignals", riskSignals, false)
 	writeKVString(&b, "sourceIP", sourceIP, false)
 	writeKVString(&b, "userAgent", userAgent, false)
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: create access request: %w", err)
 	}
@@ -223,7 +223,7 @@ func (s *Store) CreateAuthCode(
 	userId, identityId, magicLinkRequestId, expiresAt string,
 ) error {
 	var b strings.Builder
-	b.WriteString(`createAuthCode({`)
+	b.WriteString(`mutation createAuthCode(`)
 	writeKVString(&b, "codeId", codeId, true)
 	writeKVString(&b, "code", code, false)
 	writeKVString(&b, "codeHash", codeHash, false)
@@ -236,7 +236,7 @@ func (s *Store) CreateAuthCode(
 	writeKVString(&b, "identityId", identityId, false)
 	writeKVString(&b, "magicLinkRequestId", magicLinkRequestId, false)
 	writeKVString(&b, "expiresAt", expiresAt, false)
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: create auth code: %w", err)
 	}
@@ -246,10 +246,10 @@ func (s *Store) CreateAuthCode(
 // ConsumeAuthCode stamps consumedAt on an auth-code row.
 func (s *Store) ConsumeAuthCode(ctx context.Context, codeId, consumedFromIP string) error {
 	var b strings.Builder
-	b.WriteString(`consumeAuthCode({`)
+	b.WriteString(`mutation consumeAuthCode(`)
 	writeKVString(&b, "codeId", codeId, true)
 	writeKVString(&b, "consumedFromIP", consumedFromIP, false)
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: consume auth code: %w", err)
 	}
@@ -259,7 +259,7 @@ func (s *Store) ConsumeAuthCode(ctx context.Context, codeId, consumedFromIP stri
 // LookupAuthCodeByCodeHash returns the row matching the given code
 // hash, or nil if none exists.
 func (s *Store) LookupAuthCodeByCodeHash(ctx context.Context, codeHash string) (*AuthCodeRow, error) {
-	query := fmt.Sprintf(`authCodeByCodeHash({codeHash: "%s"})`, escapeMemQLString(codeHash))
+	query := fmt.Sprintf(`query authCodeByCodeHash(codeHash: "%s")`, escapeMemQLString(codeHash))
 	nodes, err := s.executeAndExtract(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: lookup auth code: %w", err)
@@ -312,7 +312,7 @@ func (s *Store) CreateOAuthClient(
 		return fmt.Errorf("identity.store: marshal redirect_uris: %w", err)
 	}
 	var b strings.Builder
-	b.WriteString(`createOAuthClient({`)
+	b.WriteString(`mutation createOAuthClient(`)
 	writeKVString(&b, "clientId", clientId, true)
 	writeKVString(&b, "clientName", clientName, false)
 	writeKVString(&b, "redirectURIsJSON", string(uriJSON), false)
@@ -320,7 +320,7 @@ func (s *Store) CreateOAuthClient(
 	writeKVString(&b, "responseTypes", responseTypes, false)
 	writeKVString(&b, "tokenEndpointAuthMethod", tokenEndpointAuthMethod, false)
 	writeKVString(&b, "registeredAt", registeredAt, false)
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: create oauth client: %w", err)
 	}
@@ -331,7 +331,7 @@ func (s *Store) CreateOAuthClient(
 // client row matching clientId, or nil if none exists. The stored
 // redirectURIsJSON array is unmarshaled back into RedirectURIs.
 func (s *Store) LookupOAuthClientByClientId(ctx context.Context, clientId string) (*OAuthClientRow, error) {
-	query := fmt.Sprintf(`oAuthClientByClientId({clientId: "%s"})`, escapeMemQLString(clientId))
+	query := fmt.Sprintf(`query oAuthClientByClientId(clientId: "%s")`, escapeMemQLString(clientId))
 	nodes, err := s.executeAndExtract(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: lookup oauth client: %w", err)
@@ -373,7 +373,7 @@ func (s *Store) LookupUserById(ctx context.Context, userId string) (*UserRow, er
 	if strings.TrimSpace(userId) == "" {
 		return nil, nil
 	}
-	query := fmt.Sprintf(`userById({userId: %s})`, dslJSONString(userId))
+	query := fmt.Sprintf(`query userById(userId: %s)`, dslJSONString(userId))
 	nodes, err := s.executeAndExtract(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: lookup user by id: %w", err)
@@ -398,7 +398,7 @@ func dslJSONString(s string) string {
 }
 
 func (s *Store) LookupUserByEmail(ctx context.Context, email string) (*UserRow, error) {
-	query := fmt.Sprintf(`userByEmail({primaryEmail: %s})`, dslJSONString(email))
+	query := fmt.Sprintf(`query userByEmail(primaryEmail: %s)`, dslJSONString(email))
 	nodes, err := s.executeAndExtract(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: lookup user by email: %w", err)
@@ -434,10 +434,10 @@ func (s *Store) BumpUserRevocationEpoch(ctx context.Context, userId string) (int
 	}
 	next := user.RevocationEpoch + 1
 	var b strings.Builder
-	b.WriteString(`bumpUserRevocationEpoch({`)
+	b.WriteString(`mutation bumpUserRevocationEpoch(`)
 	writeKVString(&b, "userId", userId, true)
 	writeKVInt(&b, "newEpoch", int(next), false)
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return 0, fmt.Errorf("identity.store: bump revocation epoch: %w", err)
 	}
@@ -512,7 +512,7 @@ func (s *Store) CreateUserOnFirstLogin(
 		role = "reader"
 	}
 	var b strings.Builder
-	b.WriteString(`createUserOnFirstLogin({`)
+	b.WriteString(`mutation createUserOnFirstLogin(`)
 	writeKVString(&b, "userId", userId, true)
 	writeKVString(&b, "displayName", displayName, false)
 	writeKVString(&b, "firstName", seed.FirstName, false)
@@ -524,11 +524,11 @@ func (s *Store) CreateUserOnFirstLogin(
 	writeKVString(&b, "birthdate", seed.Birthdate, false)
 	writeKVString(&b, "role", role, false)
 	if internal {
-		b.WriteString(`,"internal":true`)
+		b.WriteString(`,internal: true`)
 	} else {
-		b.WriteString(`,"internal":false`)
+		b.WriteString(`,internal: false`)
 	}
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: create user on first login: %w", err)
 	}
@@ -540,15 +540,15 @@ func (s *Store) CreateUserOnFirstLogin(
 func (s *Store) CreateIdentityMagicLink(ctx context.Context, identityId, userId, label string) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	var b strings.Builder
-	b.WriteString(`createIdentity({`)
+	b.WriteString(`mutation createIdentity(`)
 	writeKVString(&b, "identityId", identityId, true)
 	writeKVString(&b, "userId", userId, false)
 	writeKVString(&b, "identityType", "magic_link", false)
 	// credentials is an object literal, not a string. Inline JSON.
-	fmt.Fprintf(&b, `,"credentials":{"verifiedAt":"%s","lastLinkSentAt":"%s"}`,
+	fmt.Fprintf(&b, `,credentials: {"verifiedAt":"%s","lastLinkSentAt":"%s"}`,
 		escapeMemQLString(now), escapeMemQLString(now))
 	writeKVString(&b, "label", label, false)
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: create magic_link identity: %w", err)
 	}
@@ -569,7 +569,7 @@ func (s *Store) CreateIdentityVoiceAgentToken(
 	identityId, userId, instanceId, keyHash, mintedBy, expiresAt, label string,
 ) error {
 	var b strings.Builder
-	b.WriteString(`createVoiceAgentTokenIdentity({`)
+	b.WriteString(`mutation createVoiceAgentTokenIdentity(`)
 	writeKVString(&b, "identityId", identityId, true)
 	writeKVString(&b, "userId", userId, false)
 	writeKVString(&b, "instanceId", instanceId, false)
@@ -577,7 +577,7 @@ func (s *Store) CreateIdentityVoiceAgentToken(
 	writeKVString(&b, "mintedBy", mintedBy, false)
 	writeKVString(&b, "expiresAt", expiresAt, false)
 	writeKVString(&b, "label", label, false)
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: create voice_agent_token identity: %w", err)
 	}
@@ -618,10 +618,10 @@ func (s *Store) LookupNodeTokenIdentityByBinding(
 	b NodeTokenBinding,
 ) (*NodeTokenLookup, error) {
 	var sb strings.Builder
-	sb.WriteString(`nodeTokenIdentityByBinding({`)
+	sb.WriteString(`query nodeTokenIdentityByBinding(`)
 	writeKVString(&sb, "nodeType", b.NodeType, true)
 	writeKVString(&sb, "nodeId", b.NodeId, false)
-	sb.WriteString(`})`)
+	sb.WriteString(`)`)
 	result, err := s.Engine.Execute(ctx, sb.String())
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: lookup node_token identity: %w", err)
@@ -662,7 +662,7 @@ func (s *Store) CreateNodeTokenIdentity(
 	expiresAt, bootstrappedAt, bootstrappedFrom string,
 ) error {
 	var b strings.Builder
-	b.WriteString(`createNodeTokenIdentity({`)
+	b.WriteString(`mutation createNodeTokenIdentity(`)
 	writeKVString(&b, "identityId", identityId, true)
 	writeKVString(&b, "userId", userId, false)
 	writeKVString(&b, "nodeId", nodeId, false)
@@ -672,7 +672,7 @@ func (s *Store) CreateNodeTokenIdentity(
 	writeKVString(&b, "expiresAt", expiresAt, false)
 	writeKVString(&b, "bootstrappedAt", bootstrappedAt, false)
 	writeKVString(&b, "bootstrappedFrom", bootstrappedFrom, false)
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: create node_token identity: %w", err)
 	}
@@ -691,7 +691,7 @@ func (s *Store) StampNodeTokenBootstrap(
 	expiresAt, bootstrappedAt, bootstrappedFrom string,
 ) error {
 	var b strings.Builder
-	b.WriteString(`stampNodeTokenBootstrap({`)
+	b.WriteString(`mutation stampNodeTokenBootstrap(`)
 	writeKVString(&b, "identityId", identityId, true)
 	writeKVString(&b, "userId", userId, false)
 	writeKVString(&b, "nodeId", nodeId, false)
@@ -701,7 +701,7 @@ func (s *Store) StampNodeTokenBootstrap(
 	writeKVString(&b, "expiresAt", expiresAt, false)
 	writeKVString(&b, "bootstrappedAt", bootstrappedAt, false)
 	writeKVString(&b, "bootstrappedFrom", bootstrappedFrom, false)
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: stamp node_token bootstrap audit: %w", err)
 	}
@@ -741,7 +741,7 @@ type NodeTokenRow struct {
 // rows explicitly rather than ghosting them. Backs the
 // `/admin/tokens` Node-tokens section per memql#350.
 func (s *Store) ListNodeTokenIdentities(ctx context.Context) ([]NodeTokenRow, error) {
-	nodes, err := s.executeAndExtract(ctx, `nodeTokenIdentities({})`)
+	nodes, err := s.executeAndExtract(ctx, `query nodeTokenIdentities()`)
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: list node_token identities: %w", err)
 	}
@@ -767,7 +767,7 @@ func (s *Store) LookupNodeTokenIdentityById(ctx context.Context, identityId stri
 	if strings.TrimSpace(identityId) == "" {
 		return nil, nil
 	}
-	q := fmt.Sprintf(`nodeTokenIdentityById({identityId: "%s"})`, escapeMemQLString(identityId))
+	q := fmt.Sprintf(`query nodeTokenIdentityById(identityId: "%s")`, escapeMemQLString(identityId))
 	nodes, err := s.executeAndExtract(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: lookup node_token identity %q: %w", identityId, err)
@@ -793,7 +793,7 @@ func (s *Store) RevokeNodeTokenIdentity(ctx context.Context, identityId string) 
 		return fmt.Errorf("identity.store: revoke node_token: row %q not found", identityId)
 	}
 	var b strings.Builder
-	b.WriteString(`revokeNodeTokenIdentity({`)
+	b.WriteString(`mutation revokeNodeTokenIdentity(`)
 	writeKVString(&b, "identityId", row.ID, true)
 	writeKVString(&b, "userId", row.UserId, false)
 	writeKVString(&b, "nodeId", row.NodeId, false)
@@ -804,7 +804,7 @@ func (s *Store) RevokeNodeTokenIdentity(ctx context.Context, identityId string) 
 	writeKVString(&b, "lastConnectAt", row.LastConnectAt, false)
 	writeKVString(&b, "bootstrappedAt", row.BootstrappedAt, false)
 	writeKVString(&b, "bootstrappedFrom", row.BootstrappedFrom, false)
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: revoke node_token %q: %w", identityId, err)
 	}
@@ -884,7 +884,7 @@ func (s *Store) CreateAuthSession(
 	clientLabel, expiresAt string,
 ) error {
 	var b strings.Builder
-	b.WriteString(`createAuthSession({`)
+	b.WriteString(`mutation createAuthSession(`)
 	writeKVString(&b, "sessionId", sessionId, true)
 	writeKVString(&b, "subject", subject, false)
 	writeKVString(&b, "tokenHash", tokenHash, false)
@@ -893,7 +893,7 @@ func (s *Store) CreateAuthSession(
 	writeKVString(&b, "identityId", identityId, false)
 	writeKVString(&b, "clientLabel", clientLabel, false)
 	writeKVString(&b, "expiresAt", expiresAt, false)
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: create auth session: %w", err)
 	}
@@ -904,14 +904,14 @@ func (s *Store) CreateAuthSession(
 // given access-token hash, or nil if none exists. Used by the auth
 // middleware on every authenticated request.
 func (s *Store) LookupAuthSessionByTokenHash(ctx context.Context, tokenHash string) (*AuthSessionRow, error) {
-	query := fmt.Sprintf(`authSessionByTokenHash({tokenHash: "%s"})`, escapeMemQLString(tokenHash))
+	query := fmt.Sprintf(`query authSessionByTokenHash(tokenHash: "%s")`, escapeMemQLString(tokenHash))
 	return s.lookupAuthSession(ctx, query)
 }
 
 // LookupAuthSessionByRefreshTokenHash returns the session row whose
 // refreshTokenHash matches, or nil. Used by the /auth/refresh handler.
 func (s *Store) LookupAuthSessionByRefreshTokenHash(ctx context.Context, refreshTokenHash string) (*AuthSessionRow, error) {
-	query := fmt.Sprintf(`authSessionByRefreshTokenHash({refreshTokenHash: "%s"})`, escapeMemQLString(refreshTokenHash))
+	query := fmt.Sprintf(`query authSessionByRefreshTokenHash(refreshTokenHash: "%s")`, escapeMemQLString(refreshTokenHash))
 	return s.lookupAuthSession(ctx, query)
 }
 
@@ -923,7 +923,7 @@ func (s *Store) LookupAuthSessionByRefreshTokenHash(ctx context.Context, refresh
 // completed the rotation but the browser never received the new
 // cookie.
 func (s *Store) LookupAuthSessionByPreviousRefreshTokenHash(ctx context.Context, previousRefreshTokenHash string) (*AuthSessionRow, error) {
-	query := fmt.Sprintf(`authSessionByPreviousRefreshTokenHash({previousRefreshTokenHash: "%s"})`, escapeMemQLString(previousRefreshTokenHash))
+	query := fmt.Sprintf(`query authSessionByPreviousRefreshTokenHash(previousRefreshTokenHash: "%s")`, escapeMemQLString(previousRefreshTokenHash))
 	return s.lookupAuthSession(ctx, query)
 }
 
@@ -968,12 +968,12 @@ func (s *Store) lookupAuthSession(ctx context.Context, query string) (*AuthSessi
 // grace window, covering the "client aborted mid-response" case.
 func (s *Store) RotateAuthSession(ctx context.Context, sessionId, newRefreshTokenHash, previousRefreshTokenHash, newExpiresAt string) error {
 	var b strings.Builder
-	b.WriteString(`rotateAuthSession({`)
+	b.WriteString(`mutation rotateAuthSession(`)
 	writeKVString(&b, "sessionId", sessionId, true)
 	writeKVString(&b, "newRefreshTokenHash", newRefreshTokenHash, false)
 	writeKVString(&b, "previousRefreshTokenHash", previousRefreshTokenHash, false)
 	writeKVString(&b, "newExpiresAt", newExpiresAt, false)
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: rotate auth session: %w", err)
 	}
@@ -988,7 +988,7 @@ func (s *Store) RevokeAuthSession(
 	sessionId, subject, tokenHash, source, expiresAt, reason, userId string,
 ) error {
 	var b strings.Builder
-	b.WriteString(`revokeAuthSession({`)
+	b.WriteString(`mutation revokeAuthSession(`)
 	writeKVString(&b, "sessionId", sessionId, true)
 	writeKVString(&b, "subject", subject, false)
 	writeKVString(&b, "tokenHash", tokenHash, false)
@@ -996,7 +996,7 @@ func (s *Store) RevokeAuthSession(
 	writeKVString(&b, "expiresAt", expiresAt, false)
 	writeKVString(&b, "revokedReason", reason, false)
 	writeKVString(&b, "userId", userId, false)
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: revoke auth session: %w", err)
 	}
@@ -1014,7 +1014,7 @@ func (s *Store) RevokeAuthSession(
 // full row set and the count is a Go-side len. Cheap on a small
 // user base.
 func (s *Store) CountActiveUsers(ctx context.Context) (int, error) {
-	nodes, err := s.executeAndExtract(ctx, `activeUsers({})`)
+	nodes, err := s.executeAndExtract(ctx, `query activeUsers()`)
 	if err != nil {
 		return 0, fmt.Errorf("identity.store: count active users: %w", err)
 	}
@@ -1056,7 +1056,7 @@ func (s *Store) IsClusterBootstrapped(ctx context.Context) bool {
 // (memql#1864) uses this so a transient DB error at boot is treated as
 // "unknown -> do not send" rather than "unclaimed -> send".
 func (s *Store) IsClusterBootstrappedE(ctx context.Context) (bool, error) {
-	nodes, err := s.executeAndExtract(ctx, `clusterSettingsCurrent({})`)
+	nodes, err := s.executeAndExtract(ctx, `query clusterSettingsCurrent()`)
 	if err != nil {
 		return false, fmt.Errorf("identity.store: is cluster bootstrapped: %w", err)
 	}
@@ -1085,7 +1085,7 @@ func (s *Store) IsClusterBootstrappedE(ctx context.Context) (bool, error) {
 // not be silently swallowed into "no owner", so the caller can
 // fail-safe (do not send) rather than re-spam the owner.
 func (s *Store) HasOwnerUser(ctx context.Context) (bool, error) {
-	nodes, err := s.executeAndExtract(ctx, `activeUsers({role: "owner"})`)
+	nodes, err := s.executeAndExtract(ctx, `query activeUsers(role: "owner")`)
 	if err != nil {
 		return false, fmt.Errorf("identity.store: has owner user: %w", err)
 	}
@@ -1357,7 +1357,7 @@ type ClusterSettingsRow struct {
 // time-series semantics keep the latest version effective.
 func (s *Store) PersistClusterSettings(ctx context.Context, in ClusterSettingsRow) error {
 	var b strings.Builder
-	b.WriteString(`createClusterSettings({`)
+	b.WriteString(`mutation createClusterSettings(`)
 	writeKVString(&b, "id", "cluster", true)
 	writeKVString(&b, "clusterDomain", in.ClusterDomain, false)
 	writeKVString(&b, "brandName", in.BrandName, false)
@@ -1383,7 +1383,7 @@ func (s *Store) PersistClusterSettings(ctx context.Context, in ClusterSettingsRo
 	writeKVInt(&b, "magicLinkTTLSeconds", in.MagicLinkTTLSeconds, false)
 	writeKVInt(&b, "invitationTTLDays", in.InvitationTTLDays, false)
 	writeKVString(&b, "refreshCookieSameSite", in.RefreshCookieSameSite, false)
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: persist cluster settings: %w", err)
 	}
@@ -1396,7 +1396,7 @@ func (s *Store) PersistClusterSettings(ctx context.Context, in ClusterSettingsRo
 // by the magic-link verifier to copy fields forward when stamping
 // bootstrappedAt on bootstrap-link consumption.
 func (s *Store) ReadClusterSettings(ctx context.Context) (*ClusterSettingsRow, error) {
-	nodes, err := s.executeAndExtract(ctx, `clusterSettingsCurrent({})`)
+	nodes, err := s.executeAndExtract(ctx, `query clusterSettingsCurrent()`)
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: read cluster settings: %w", err)
 	}
@@ -1449,7 +1449,7 @@ func (s *Store) StampClusterBootstrapped(ctx context.Context) error {
 	}
 	row.BootstrappedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	var b strings.Builder
-	b.WriteString(`updateClusterSettings({`)
+	b.WriteString(`mutation updateClusterSettings(`)
 	writeKVString(&b, "id", "cluster", true)
 	writeKVString(&b, "clusterDomain", row.ClusterDomain, false)
 	writeKVString(&b, "brandName", row.BrandName, false)
@@ -1470,7 +1470,7 @@ func (s *Store) StampClusterBootstrapped(ctx context.Context) error {
 	writeKVString(&b, "bootstrapGender", row.BootstrapGender, false)
 	writeKVString(&b, "bootstrapBirthdate", row.BootstrapBirthdate, false)
 	writeKVString(&b, "bootstrappedAt", row.BootstrappedAt, false)
-	b.WriteString(`})`)
+	b.WriteString(`)`)
 	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("identity.store: stamp bootstrapped: %w", err)
 	}

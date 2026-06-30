@@ -386,7 +386,7 @@ type appendArgs struct {
 
 func (i *Integration) appendVersion(ctx context.Context, a appendArgs) error {
 	q := fmt.Sprintf(
-		`appendDocumentVersion({versionId: %q, documentId: %q, ownerUserId: %q, versionNumber: %d, content: %q, attachmentId: %q, authorKind: %q, authorId: %q, note: %q, parentVersionId: %q, producedByPlanId: %q, partitionId: %q})`,
+		`mutation appendDocumentVersion(versionId: %q, documentId: %q, ownerUserId: %q, versionNumber: %d, content: %q, attachmentId: %q, authorKind: %q, authorId: %q, note: %q, parentVersionId: %q, producedByPlanId: %q, partitionId: %q)`,
 		a.versionId, a.documentId, a.ownerUserId, a.versionNumber, a.content, a.attachmentId,
 		a.authorKind, a.authorId, a.note, a.parentVersionId, a.producedByPlanId, a.partitionId,
 	)
@@ -403,7 +403,7 @@ func (i *Integration) updateBackingContent(ctx context.Context, doc map[string]a
 	}
 	format := stringField(doc, "format")
 	q := fmt.Sprintf(
-		`updateGeneratedOutputContent({outputId: %q, ownerUserId: %q, title: %q, summary: %q, body: %q, attachmentId: %q, format: %q, mimeType: %q, source: %q, partitionId: %q, producedByPlanId: %q, producedByAgentId: %q})`,
+		`mutation updateGeneratedOutputContent(outputId: %q, ownerUserId: %q, title: %q, summary: %q, body: %q, attachmentId: %q, format: %q, mimeType: %q, source: %q, partitionId: %q, producedByPlanId: %q, producedByAgentId: %q)`,
 		stringField(doc, "id"),
 		stringField(doc, "ownerUserId"),
 		stringField(doc, "title"),
@@ -437,7 +437,7 @@ func (i *Integration) touchArtifact(ctx context.Context, doc map[string]any) {
 		source = "agent_generated"
 	}
 	q := fmt.Sprintf(
-		`createArtifact({sourceConceptRef: %q, ownerUserId: %q, lens: "artifact", kind: "generated_output", source: %q, title: %q, summary: %q, format: %q, mimeType: %q, partitionId: %q, producedByPlanId: %q})`,
+		`mutation createArtifact(sourceConceptRef: %q, ownerUserId: %q, lens: "artifact", kind: "generated_output", source: %q, title: %q, summary: %q, format: %q, mimeType: %q, partitionId: %q, producedByPlanId: %q)`,
 		sourceRef,
 		stringField(doc, "ownerUserId"),
 		source,
@@ -455,7 +455,7 @@ func (i *Integration) touchArtifact(ctx context.Context, doc map[string]any) {
 // system actor for the lookup (the row may be needed before the owner
 // is known); the actual edit writes run under the owner actor.
 func (i *Integration) loadGeneratedOutput(ctx context.Context, documentId string) (map[string]any, error) {
-	q := fmt.Sprintf(`generatedOutputById({outputId: %q})`, documentId)
+	q := fmt.Sprintf(`query generatedOutputById(outputId: %q)`, documentId)
 	raw, err := i.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
@@ -470,7 +470,7 @@ func (i *Integration) loadGeneratedOutput(ctx context.Context, documentId string
 // versionHistory returns every retained version of the document under
 // the owner actor.
 func (i *Integration) versionHistory(ctx context.Context, documentId string) ([]map[string]any, error) {
-	q := fmt.Sprintf(`documentVersionsForOwner({documentId: %q})`, documentId)
+	q := fmt.Sprintf(`query documentVersionsForOwner(documentId: %q)`, documentId)
 	raw, err := i.engine.Execute(ctx, q)
 	if err != nil {
 		return nil, err

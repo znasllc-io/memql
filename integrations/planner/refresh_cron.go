@@ -176,7 +176,7 @@ func (c *RefreshCron) pollOnce(ctx context.Context) {
 	if c.engine == nil {
 		return
 	}
-	res, err := c.engine.Execute(systemActorContext(ctx), `queryDueRefreshDomains({})`)
+	res, err := c.engine.Execute(systemActorContext(ctx), `query queryDueRefreshDomains()`)
 	if err != nil {
 		if c.logger != nil {
 			c.logger.Debug("planner refresh cron: query failed (engine likely not ready)", "error", err)
@@ -330,7 +330,7 @@ func (c *RefreshCron) spawnRefreshPlan(ctx context.Context, row map[string]any) 
 	// when wired -- createPlan's arg surface doesn't carry mode,
 	// so we don't pass it. The dispatcher branches on input.mode.
 	call := fmt.Sprintf(
-		`createPlan({"planId": %q, "partitionId": %q, "kind": "trainSpecialist", "goal": %q, "requestedBy": %q, "triggerSource": "system", "input": %s})`,
+		`mutation createPlan(planId: %q, partitionId: %q, kind: "trainSpecialist", goal: %q, requestedBy: %q, triggerSource: "system", input: %s)`,
 		planId, refreshSystemPartitionId, goal, requestedBy, inputJSON,
 	)
 	_, err := c.engine.Execute(systemActorContext(ctx), call)

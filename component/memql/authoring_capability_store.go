@@ -44,7 +44,7 @@ func (s *engineCapabilityStore) LoadEnvelope(ctx context.Context, ownerUserId st
 	env := AuthoredEnvelope{OwnerUserId: ownerUserId}
 
 	// Kill switch: v1:identity:user.preferences.computerUseEnabled.
-	userRes, err := s.engine.Execute(ctx, fmt.Sprintf(`userById({"userId":%q})`, ownerUserId))
+	userRes, err := s.engine.Execute(ctx, fmt.Sprintf(`query userById(userId:%q)`, ownerUserId))
 	if err != nil {
 		return env, fmt.Errorf("query user: %w", err)
 	}
@@ -57,7 +57,7 @@ func (s *engineCapabilityStore) LoadEnvelope(ctx context.Context, ownerUserId st
 	}
 
 	// Standing scope: the broadest active computerUseScope the author granted.
-	authRes, err := s.engine.Execute(ctx, fmt.Sprintf(`agentAuthorizationsForUser({"userId":%q})`, ownerUserId))
+	authRes, err := s.engine.Execute(ctx, fmt.Sprintf(`query agentAuthorizationsForUser(userId:%q)`, ownerUserId))
 	if err != nil {
 		return env, fmt.Errorf("query authorizations: %w", err)
 	}
