@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/actions"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
@@ -355,6 +356,22 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// `filter` / SQL pushdown, not an in-memory scan. Mirrors the dead-logic
 	// lint's warning severity; load is unaffected.
 	warnInMemoryCollectionScans(e.Logger, functionRegistry.Snapshot())
+
+	// Capability catalog + authored-action validation (construct-invocation
+	// epic #2322, Story 8 / memql#2330). The DSL `capability` declarations are
+	// reconciled against the Go vocabulary registry (every declared
+	// capability's @sideEffect must equal the authoritative
+	// capability.CapabilityClass, and its dotted name must be in the closed
+	// surface-backed set), and every authored `action` is loaded under STRICT
+	// arg-typing (each capability call's args validated against the declared
+	// capability schema). A reconciliation or strict-typing failure crashes the
+	// cluster at bootstrap, so surface it here as a hard load-time error.
+	if err := actions.DefaultCatalogError(); err != nil {
+		return fmt.Errorf("capability catalog reconciliation failed: %w", err)
+	}
+	if err := actions.DefaultLoadError(); err != nil {
+		return fmt.Errorf("authored action load (strict capability arg-typing) failed: %w", err)
+	}
 
 	// Log boot validation summary
 	e.logBootValidationSummary(functionRegistry, shapeRegistry, specRegistry, providerRegistry)
