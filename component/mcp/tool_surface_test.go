@@ -205,8 +205,8 @@ func TestCallMCPTool_RunQueryBuildsInvocation(t *testing.T) {
 	if isErr, _ := res["isError"].(bool); isErr {
 		t.Fatalf("run_query unexpected error: %v", res)
 	}
-	if !strings.HasPrefix(eng.query, "activeSpaces(") || !strings.Contains(eng.query, `"limit":5`) {
-		t.Errorf("run_query built %q, want activeSpaces({\"limit\":5})", eng.query)
+	if !strings.HasPrefix(eng.query, "activeSpaces(") || !strings.Contains(eng.query, `limit: 5`) {
+		t.Errorf("run_query built %q, want activeSpaces(limit: 5)", eng.query)
 	}
 	if eng.roleSeen != "reader" {
 		t.Errorf("run_query acting role = %q, want reader", eng.roleSeen)
@@ -252,8 +252,8 @@ func TestNamedCallQuery(t *testing.T) {
 		t.Errorf("no args = %q, want foo()", q)
 	}
 	q, err := namedCallQuery("foo", map[string]any{"a": "b"})
-	if err != nil || q != `foo({"a":"b"})` {
-		t.Errorf("with args = %q (err %v), want foo({\"a\":\"b\"})", q, err)
+	if err != nil || q != `foo(a: "b")` {
+		t.Errorf("with args = %q (err %v), want foo(a: \"b\")", q, err)
 	}
 	if _, err := namedCallQuery("", nil); err == nil {
 		t.Error("empty name should error")
@@ -285,7 +285,7 @@ func TestListMCPTools_CuratedAllowlist(t *testing.T) {
 	// (e.g. an infra/admin tool, #1597) is dropped. Meta-tools still present.
 	t.Run("allowlist when any tagged", func(t *testing.T) {
 		eng := &fakeEngine{reg: &fakeRegistry{tools: []*memql.Tool{
-			mcpTool("notesCreate"),         // curated -> shown
+			mcpTool("notesCreate"),           // curated -> shown
 			tool("clusterSweep", nil, false), // untagged infra -> hidden
 		}}}
 		names := toolNames(listMCPTools(eng, "assistant", TierSealed))

@@ -42,7 +42,7 @@ func TestOutputRecordEmitsExpectedQueryShape(t *testing.T) {
 		t.Fatalf("expected 1 query, got %d", len(qs))
 	}
 	q := qs[0]
-	if !strings.HasPrefix(q, "insertOutputScreening({") || !strings.HasSuffix(q, "})") {
+	if !strings.HasPrefix(q, "mutation insertOutputScreening(") || !strings.HasSuffix(q, ")") {
 		t.Errorf("query wrapper malformed: %q", q)
 	}
 	for _, frag := range []string{

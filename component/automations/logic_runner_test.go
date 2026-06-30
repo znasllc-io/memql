@@ -93,8 +93,8 @@ logic doStuff {
     partitionId  string  @required
   }
   body {
-    first := queryFoo({ partitionId: args.partitionId })
-    second := queryBar({ id: first.first().id })
+    first := queryFoo( partitionId: args.partitionId )
+    second := queryBar( id: first.first().id )
     return coalesce(second.first(), first.first())
   }
 }`
@@ -161,9 +161,9 @@ logic provisionThing {
     name  string  @required
   }
   body {
-    existing := queryThing({ name: args.name })
+    existing := queryThing( name: args.name )
     created := if existing.empty() {
-      mutationCreateThing({ name: args.name })
+      mutationCreateThing( name: args.name )
     }
     return coalesce(created, existing.first())
   }
@@ -317,9 +317,9 @@ logic logicSweep {
     now string @required
   }
   body {
-    rows := queryFoo({ now: args.now })
+    rows := queryFoo( now: args.now )
     for item := range rows.nodes() {
-      tick := mutationBar({ id: item.id })
+      tick := mutationBar( id: item.id )
     }
     return rows.count()
   }
@@ -459,8 +459,8 @@ func TestLogicRunner_TryEvaluateReturnLocally_FallsThrough(t *testing.T) {
 		expr string
 	}{
 		{"compound coalesce", `coalesce(rows.first(), "fallback")`},
-		{"mutation call", `mutationCreateThing({name: "x"})`},
-		{"builtin call", `ensureDailySpaceForCaller({})`},
+		{"mutation call", `mutationCreateThing(name: "x")`},
+		{"builtin call", `ensureDailySpaceForCaller()`},
 		{"unknown step", `notARealStep.count()`},
 		{"bare unknown identifier", `notARealStep`},
 		{"single-segment call", `someFunc()`},
@@ -761,7 +761,7 @@ func TestLogicRunner_EvaluateLocalExpr_ScalarLiterals(t *testing.T) {
 // TestLogicRunner_EvaluateLocalExpr_PreservesNonLiterals pins that the
 // memql#1090 literal short-circuit does NOT swallow genuine queries,
 // function calls, or other non-literal returns. A real concept query
-// (`return queryFoo({...})`) and a top-level mutation / builtin call
+// (`return queryFoo(...)`) and a top-level mutation / builtin call
 // must report handled=false from the literal+step-ref+positional-builtin
 // resolver so the LogicRunner falls back to engine.Execute and the query
 // actually runs. Bare step refs / step-method calls / coalesce stay on
@@ -773,9 +773,9 @@ func TestLogicRunner_EvaluateLocalExpr_PreservesNonLiterals(t *testing.T) {
 		name string
 		expr string
 	}{
-		{"genuine concept query", `queryActiveSpaces({ownerUserId: "u1"})`},
-		{"top-level mutation call", `mutationCreateThing({name: "x"})`},
-		{"non-positional builtin call", `ensureDailySpaceForCaller({})`},
+		{"genuine concept query", `queryActiveSpaces(ownerUserId: "u1")`},
+		{"top-level mutation call", `mutationCreateThing(name: "x")`},
+		{"non-positional builtin call", `ensureDailySpaceForCaller()`},
 		{"identifier that looks numeric-ish but isnt a literal", `v1abc`},
 		{"comparison filter", `payload.status=="active"`},
 	}
@@ -821,7 +821,7 @@ func TestTryEvaluateLiteralLocally_StrictMatching(t *testing.T) {
 		"someStep",
 		"rows.count()",
 		"coalesce(a, b)",
-		`queryFoo({id: "x"})`,
+		`queryFoo(id: "x")`,
 		"payload.active==true",
 		`"unterminated`,
 		"v1:cluster:node",
@@ -839,7 +839,7 @@ func TestTryEvaluateLiteralLocally_StrictMatching(t *testing.T) {
 //
 //	logic logicSeedKnowledgeDomains {
 //	  body {
-//	    seed := knowledgeSeedStandardDomains({})
+//	    seed := knowledgeSeedStandardDomains()
 //	    return 1
 //	  }
 //	}
@@ -858,7 +858,7 @@ logic logicSeedKnowledgeDomains {
     event object @required
   }
   body {
-    seed := knowledgeSeedStandardDomains({})
+    seed := knowledgeSeedStandardDomains()
     return 1
   }
 }
@@ -992,9 +992,9 @@ func (r *emptyQueryStepRegistry) Execute(_ context.Context, step *Step, _ *StepC
 //
 //	logic logicSeedWelcomeCurriculum {
 //	  body {
-//	    existing := queryCurriculumBySlug({ slug: "copresent.welcome.v1" })
-//	    insertCurriculum := if existing.empty() { mutationCreateCurriculum({...}) }
-//	    insertGreeting    := if existing.empty() { mutationCreateSegment({...}) }
+//	    existing := queryCurriculumBySlug( slug: "copresent.welcome.v1" )
+//	    insertCurriculum := if existing.empty() { mutationCreateCurriculum(...) }
+//	    insertGreeting    := if existing.empty() { mutationCreateSegment(...) }
 //	    return 1
 //	  }
 //	}
@@ -1016,24 +1016,24 @@ logic logicSeedWelcomeCurriculum {
     event object @required
   }
   body {
-    existing := queryCurriculumBySlug({ slug: "copresent.welcome.v1" })
+    existing := queryCurriculumBySlug( slug: "copresent.welcome.v1" )
     insertCurriculum := if existing.empty() {
-      mutationCreateCurriculum({
+      mutationCreateCurriculum(
         curriculumId: "v1:curriculum:curriculum:copresent-welcome-v1",
         slug: "copresent.welcome.v1",
         name: "Welcome to CoPresent",
         version: 1,
         active: true
-      })
+      )
     }
     insertGreeting := if existing.empty() {
-      mutationCreateSegment({
+      mutationCreateSegment(
         segmentId: "v1:curriculum:segment:copresent-welcome-v1-greeting",
         curriculumId: "v1:curriculum:curriculum:copresent-welcome-v1",
         slug: "greeting",
         recommendedSteps: "[{\"name\":\"uiHighlight\",\"arguments\":{\"target\":null}}]",
         orderHint: 1
-      })
+      )
     }
     return 1
   }

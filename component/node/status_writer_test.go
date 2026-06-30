@@ -43,15 +43,15 @@ func TestBuildUpdateNodeHealthCall_MinimalFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.HasPrefix(got, "updateNodeHealth({") {
+	if !strings.HasPrefix(got, "updateNodeHealth(") {
 		t.Errorf("expected mutation call prefix, got %q", got)
 	}
 	for _, needle := range []string{
-		`"id":"cognition-abc"`,
-		`"nodeType":"cognition"`,
-		`"address":"cognition.local:50052"`,
-		`"health":"degraded"`,
-		`"lastSeen":"2026-04-13T12:00:00Z"`,
+		`id: "cognition-abc"`,
+		`nodeType: "cognition"`,
+		`address: "cognition.local:50052"`,
+		`health: "degraded"`,
+		`lastSeen: "2026-04-13T12:00:00Z"`,
 	} {
 		if !strings.Contains(got, needle) {
 			t.Errorf("expected %s in mutation call, got %q", needle, got)
@@ -112,10 +112,10 @@ func TestNodeStatusWriter_EmitsMutationOnHandle(t *testing.T) {
 	for time.Now().Before(deadline) {
 		if qs := exec.snapshot(); len(qs) > 0 {
 			q := qs[0]
-			if !strings.Contains(q, `"id":"agent-42"`) {
+			if !strings.Contains(q, `id: "agent-42"`) {
 				t.Errorf("expected id in query, got %q", q)
 			}
-			if !strings.Contains(q, `"health":"offline"`) {
+			if !strings.Contains(q, `health: "offline"`) {
 				t.Errorf("expected health=offline, got %q", q)
 			}
 			return

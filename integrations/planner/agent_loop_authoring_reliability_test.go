@@ -146,7 +146,7 @@ func TestRunCapture_FlattensMultiPhaseDesign(t *testing.T) {
 	exec, _, _ := ce.snapshot()
 	autos := 0
 	for _, q := range exec {
-		if strings.Contains(q, "createAuthoringConstruct") && strings.Contains(q, `"kind":"automation"`) {
+		if strings.Contains(q, "createAuthoringConstruct") && strings.Contains(q, `kind: "automation"`) {
 			autos++
 		}
 	}

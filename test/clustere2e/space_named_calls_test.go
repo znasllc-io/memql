@@ -14,19 +14,19 @@ package clustere2e
 
 import "fmt"
 
-// buildMutationCreateSpace renders a `mutationCreateSpace({...})` call string.
+// buildMutationCreateSpace renders a `mutationCreateSpace(...)` call string.
 // status is emitted only when non-empty (mirroring the old generated builder's
 // conditional omission of optional fields).
 func buildMutationCreateSpace(partitionID, name, status string) string {
 	if status == "" {
-		return fmt.Sprintf("mutationCreateSpace({partitionId: %q, name: %q})", partitionID, name)
+		return fmt.Sprintf("mutationCreateSpace(partitionId: %q, name: %q)", partitionID, name)
 	}
-	return fmt.Sprintf("mutationCreateSpace({partitionId: %q, name: %q, status: %q})", partitionID, name, status)
+	return fmt.Sprintf("mutationCreateSpace(partitionId: %q, name: %q, status: %q)", partitionID, name, status)
 }
 
-// buildQueryActiveSpaces renders the `queryActiveSpaces({})` call string. The
+// buildQueryActiveSpaces renders the `queryActiveSpaces()` call string. The
 // query is self-scoped (ownerUserId==actor.userId) and declares its sort +
 // paginate directives in the DSL, so the call carries no args.
 func buildQueryActiveSpaces() string {
-	return "queryActiveSpaces({})"
+	return "queryActiveSpaces()"
 }

@@ -51,6 +51,11 @@ func parseCall(q string) (name string, args map[string]any) {
 	args = map[string]any{}
 	if i := strings.IndexByte(q, '('); i > 0 {
 		name = strings.TrimSpace(q[:i])
+		// Strip any leading kind prefix (`query `/`mutation `) so the
+		// bare construct name keys the switch below.
+		if fields := strings.Fields(name); len(fields) > 0 {
+			name = fields[len(fields)-1]
+		}
 	}
 	for _, m := range argRe.FindAllStringSubmatch(q, -1) {
 		key := m[1]

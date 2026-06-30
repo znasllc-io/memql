@@ -67,11 +67,11 @@ func TestHasOperator_NotesByTag(t *testing.T) {
 
 	// The headline #1674 assertion: a tag-membership query returns the
 	// matching row (before the fix this errored / returned nothing).
-	work := queryIds(t, ctx, eng, `notesByTag({"tag":"urgent"})`)
+	work := queryIds(t, ctx, eng, `notesByTag(tag:"urgent")`)
 	require.True(t, contains(work, alpha), "note tagged 'urgent' must be returned (#1674), got %v", work)
 	require.False(t, contains(work, beta), "note NOT tagged 'urgent' must be excluded, got %v", work)
 
-	personal := queryIds(t, ctx, eng, `notesByTag({"tag":"personal"})`)
+	personal := queryIds(t, ctx, eng, `notesByTag(tag:"personal")`)
 	require.True(t, contains(personal, beta), "note tagged 'personal' must be returned, got %v", personal)
 	require.False(t, contains(personal, alpha), "alpha must be excluded from 'personal', got %v", personal)
 }
@@ -128,7 +128,7 @@ func TestWorkerInvocations_SoftDeletedExcluded(t *testing.T) {
 	// Soft-delete one of them.
 	runMutation(t, ctx, eng, "softDeleteWorkerInvocation", map[string]any{"invocationId": deadID})
 
-	forPlan := queryIds(t, ctx, eng, fmt.Sprintf(`invocationsForPlan({"planId":%q})`, planID))
+	forPlan := queryIds(t, ctx, eng, fmt.Sprintf(`invocationsForPlan(planId:%q)`, planID))
 	require.True(t, contains(forPlan, liveID), "live invocation must be returned, got %v", forPlan)
 	require.False(t, contains(forPlan, deadID), "soft-deleted invocation must be excluded from invocationsForPlan (#1685), got %v", forPlan)
 

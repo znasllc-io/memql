@@ -11,13 +11,13 @@ import (
 // The corpus is derived from a literature search of those sites:
 //
 //   - 121 of 123 sites go through SDK builders that produce
-//     `funcName({k: v, ...})` invocations (Mutation/Query/Builtin/
+//     `funcName(k: v, ...)` invocations (Mutation/Query/Builtin/
 //     Logic). MutationProvisionWorkspaceBuild is a representative
 //     mutation, dueTrainAgentRetryPlans is representative of a
 //     no-arg query, trainAgent is a builtin with mixed arg types.
 //   - 2 of 123 sites pass hand-written string literals:
 //     "concept==v1:cluster:node" (filter) and
-//     "dueTrainAgentRetryPlans({})" (already covered).
+//     "dueTrainAgentRetryPlans()" (already covered).
 //   - The filter form joined by `;` (AND) shows up in
 //     hand-written admin queries via `BrowseConcept`.
 //   - actor./args./payload. accessors flow through the
@@ -35,12 +35,12 @@ var representativeRuntimeQueries = []struct {
 	{"compound filter joined by &&", `concept==v1:cluster:node && payload.name=="bff"`},
 	{"actor accessor in RHS", `id==actor.userId`},
 	{"args accessor in RHS", `payload.partitionId==args.partitionId`},
-	{"no-arg query invocation", `dueTrainAgentRetryPlans({})`},
-	{"single-arg mutation invocation", `createRecord({recordId: "v1:data:record:abc"})`},
+	{"no-arg query invocation", `dueTrainAgentRetryPlans()`},
+	{"single-arg mutation invocation", `createRecord(recordId: "v1:data:record:abc")`},
 	{"mixed-arg builtin invocation",
-		`trainAgent({agentId: "v1:agents:agent:abc", domains: ["x", "y"], tools: []})`},
+		`trainAgent(agentId: "v1:agents:agent:abc", domains: ["x", "y"], tools: [])`},
 	// Bare-parens no-arg invocation -- some integrations write
-	// `queryFoo()` instead of `queryFoo({})`. Found at
+	// `queryFoo()` instead of `queryFoo()`. Found at
 	// integrations/agents/factory.go:238 (activeAgentRoles()).
 	{"bare-parens no-arg invocation", `activeAgentRoles()`},
 	// Modern single-paren directive calls -- the langparser now
@@ -107,7 +107,7 @@ var shapeFallsBackToMemqlQueries = []struct {
 	{"shape array template", `shape(concept==v1:conversation;id=="conv-1",[node("id"),children(node("id")),"done"])`},
 	// Nested-object template with relationships (the
 	// execute-differently failure mode):
-	{"shape nested relations template", `shape(concept==v1:conversation;id=="conv-1",{"conversation":node("payload.title","id"),"messages":children({"id":node("id"),"author":createdBy(node("payload.name"))})})`},
+	{"shape nested relations template", `shape(concept==v1:conversation;id=="conv-1",{"conversation":node("payload.title","id"),"messages":children(id:node("id"),author:createdBy(node("payload.name")))})`},
 }
 
 // selectFallsBackToMemqlQueries covers select() runtime usages.
@@ -348,7 +348,7 @@ func TestLangparserPathDirectivesNotFlagged(t *testing.T) {
 		// + shape grammar gaps.
 		`asOf(concept==v1:cluster:node, latest)`,
 		`withDepth(concept==v1:cluster:node, 2)`,
-		`mutationPaginateFoo({id: "x"})`,
+		`mutationPaginateFoo(id: "x")`,
 		`payload.shape=="cylinder"`,
 		// Identifiers and function-call args that contain the
 		// substring `in` must NOT trip the in-operator detector

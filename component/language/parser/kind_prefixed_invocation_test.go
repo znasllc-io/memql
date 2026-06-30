@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -212,29 +213,55 @@ func TestRegression_CollectionMethodCallUndisturbed(t *testing.T) {
 }
 
 func TestRegression_LegacyObjectLiteralPositionalArg(t *testing.T) {
-	// `name({...})` — the legacy object-literal positional form must still
-	// parse (drops into Args["0"] as the object value).
-	expr := mustParseExpr(t, `createNode({ id: "x" })`)
+	// Story 9 (#2335): the legacy object-literal positional wrapper
+	// `name({...})` is REMOVED. The parser rejects it with a migration error
+	// pointing to the named-args form `name(k: v, ...)`.
+	_, err := ParseExpression(`createNode({ id: "x" })`)
+	if err == nil {
+		t.Fatalf("expected parse error for legacy object-literal wrapper, got nil")
+	}
+	if !strings.Contains(err.Error(), "object-literal call args are removed") {
+		t.Errorf("error = %q, want it to mention the object-literal removal", err.Error())
+	}
+}
+
+func TestRegression_EmptyObjectLiteralWrapperRejected(t *testing.T) {
+	// Story 9 (#2335): the empty wrapper `name({})` is rejected too -- empty
+	// arg lists are written `name()`.
+	_, err := ParseExpression(`createNode({})`)
+	if err == nil {
+		t.Fatalf("expected parse error for `name({})`, got nil")
+	}
+	if !strings.Contains(err.Error(), "object-literal call args are removed") {
+		t.Errorf("error = %q, want the object-literal removal message", err.Error())
+	}
+}
+
+func TestKindPrefixedNamedArgsStillParse(t *testing.T) {
+	// The replacement form parses: kind-prefixed, named args, no wrapper.
+	expr := mustParseExpr(t, `mutation createNode(id: "x")`)
 	fc, ok := expr.(*FunctionCallExpr)
 	if !ok {
 		t.Fatalf("expected *FunctionCallExpr, got %T", expr)
 	}
-	if len(fc.Args) != 1 {
-		t.Fatalf("Args = %v, want one positional object arg", fc.Args)
+	if fc.Kind != "mutation" || fc.Name != "createNode" {
+		t.Fatalf("got Kind=%q Name=%q, want mutation/createNode", fc.Kind, fc.Name)
 	}
-	obj, ok := fc.Args["0"].(map[string]any)
-	if !ok {
-		t.Fatalf("Args[0] = %T, want map[string]any", fc.Args["0"])
+	if fc.Args["id"] != "x" {
+		t.Errorf("Args[id] = %v, want x", fc.Args["id"])
 	}
-	if obj["id"] != "x" {
-		t.Errorf("Args[0].id = %v, want x", obj["id"])
+	if _, err := ParseExpression(`query allNodes()`); err != nil {
+		t.Errorf("empty named-args form must parse: %v", err)
 	}
 }
 
 func TestRegression_LegacySpecStringCall(t *testing.T) {
-	// `spec("name")` — legacy stringly call form still parses as a function
-	// call (rejection deferred to Story 3). It must NOT be mistaken for the
-	// `spec <name>` predicate form.
+	// `spec("name")` — the legacy stringly call form. At the language-parser
+	// level it still lowers to a FunctionCallExpr named "spec" (the object-
+	// literal flip does not catch a string arg); the engine-side converter
+	// (normalizeSpecCallsToReferences, #2335) is where it is rejected with a
+	// migration error pointing to the `spec <name>` predicate form. It must NOT
+	// be mistaken for the `spec <name>` predicate form at parse time.
 	expr := mustParseExpr(t, `spec("requiresOwner")`)
 	fc, ok := expr.(*FunctionCallExpr)
 	if !ok {

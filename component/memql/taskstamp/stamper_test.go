@@ -77,10 +77,10 @@ func TestStamper_AdHoc_FinalizesWrapper(t *testing.T) {
 		t.Fatalf("ad-hoc path must create the synthetic Plan + semantic task; queries=%v", fe.queries)
 	}
 	// ...and FINALIZED (both to succeeded) so it can't sit running.
-	if !fe.has("updatePlanStatus", `"status": "succeeded"`) {
+	if !fe.has("updatePlanStatus", `status: "succeeded"`) {
 		t.Errorf("synthetic adHocAction Plan must be finalized succeeded; queries=%v", fe.queries)
 	}
-	if !fe.has("updateTaskStatus", `"status": "succeeded"`) {
+	if !fe.has("updateTaskStatus", `status: "succeeded"`) {
 		t.Errorf("synthetic callTool task must be finalized succeeded; queries=%v", fe.queries)
 	}
 }
@@ -96,7 +96,7 @@ func TestStamper_AdHoc_ToolError_FinalizesFailed(t *testing.T) {
 	if err == nil {
 		t.Fatal("tool error must propagate")
 	}
-	if !fe.has("updatePlanStatus", `"status": "failed"`) {
+	if !fe.has("updatePlanStatus", `status: "failed"`) {
 		t.Errorf("tool error must finalize the wrapper failed; queries=%v", fe.queries)
 	}
 }

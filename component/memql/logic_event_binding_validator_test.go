@@ -32,7 +32,7 @@ func TestLogicEventBinding_RejectsUsedButUndeclaredEvent(t *testing.T) {
 	src := `@description("reads the event but never declares it")
 logic logicUsesEventNoDecl {
   body {
-    return ensureDailySpaceForUser({ userId: args.event.payload.id })
+    return ensureDailySpaceForUser( userId: args.event.payload.id )
   }
 }`
 	_, err := tryParseNewFunctionSyntax("logicUsesEventNoDecl", "logic", src, "test.memql", eventBindingRegistry())
@@ -47,7 +47,7 @@ func TestLogicEventBinding_RejectsBareEventRefWithoutDecl(t *testing.T) {
 	src := `@description("bare event.* form, still undeclared")
 logic logicBareEventNoDecl {
   body {
-    return ensureDailySpaceForUser({ userId: event.payload.id })
+    return ensureDailySpaceForUser( userId: event.payload.id )
   }
 }`
 	_, err := tryParseNewFunctionSyntax("logicBareEventNoDecl", "logic", src, "test.memql", eventBindingRegistry())
@@ -64,7 +64,7 @@ logic logicUsesEventDecl {
     event object @required
   }
   body {
-    return ensureDailySpaceForUser({ userId: args.event.payload.id })
+    return ensureDailySpaceForUser( userId: args.event.payload.id )
   }
 }`
 	_, err := tryParseNewFunctionSyntax("logicUsesEventDecl", "logic", src, "test.memql", eventBindingRegistry())
@@ -93,7 +93,7 @@ func TestLogicEventBinding_AcceptsNoEventAtAll(t *testing.T) {
 	src := `@description("interactive logic: no event involved")
 logic logicNoEventAtAll {
   body {
-    return ensureDailySpaceForCaller({})
+    return ensureDailySpaceForCaller()
   }
 }`
 	_, err := tryParseNewFunctionSyntax("logicNoEventAtAll", "logic", src, "test.memql", eventBindingRegistry())

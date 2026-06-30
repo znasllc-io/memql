@@ -204,8 +204,8 @@ func TestPromotedFunction_DispatchedByName(t *testing.T) {
 	if isError(res) {
 		t.Fatalf("promoted query call should succeed, got %v", res)
 	}
-	if !strings.HasPrefix(eng.query, "mySpaces(") || !strings.Contains(eng.query, `"limit":3`) {
-		t.Errorf("promoted query built %q, want mySpaces({\"limit\":3})", eng.query)
+	if !strings.HasPrefix(eng.query, "mySpaces(") || !strings.Contains(eng.query, `limit: 3`) {
+		t.Errorf("promoted query built %q, want mySpaces(limit: 3)", eng.query)
 	}
 	if eng.authoredOwner != "owner-1" {
 		t.Errorf("promoted query should run under the session owner, got %q", eng.authoredOwner)

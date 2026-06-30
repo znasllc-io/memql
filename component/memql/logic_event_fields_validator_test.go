@@ -43,7 +43,7 @@ func TestValidateLogicEventFields_AcceptsDeclared(t *testing.T) {
 logic logicOk {
   args { event object @required }
   body {
-    return noop({ a: args.event.payload.partitionId, b: args.event.payload.siParticipantId })
+    return noop(a: args.event.payload.partitionId, b: args.event.payload.siParticipantId)
   }
 }`
 	fd, raw := parseLogicForTest(t, src, "logicOk")
@@ -58,7 +58,7 @@ func TestValidateLogicEventFields_RejectsUnknown(t *testing.T) {
 logic logicBad {
   args { event object @required }
   body {
-    return noop({ a: args.event.payload.partitionId, b: args.event.payload.typooo })
+    return noop(a: args.event.payload.partitionId, b: args.event.payload.typooo)
   }
 }`
 	fd, raw := parseLogicForTest(t, src, "logicBad")
@@ -77,7 +77,7 @@ func TestValidateLogicEventFields_OptOutWhenNoAnnotation(t *testing.T) {
 logic logicUnannotated {
   args { event object @required }
   body {
-    return noop({ a: args.event.payload.anythingGoes })
+    return noop(a: args.event.payload.anythingGoes)
   }
 }`
 	fd, raw := parseLogicForTest(t, src, "logicUnannotated")
@@ -95,7 +95,7 @@ logic logicNested {
   args { event object @required }
   body {
     // historical: args.event.payload.removedField was dropped
-    return noop({ t: args.event.payload.node.type })
+    return noop(t: args.event.payload.node.type)
   }
 }`
 	fd, raw := parseLogicForTest(t, src, "logicNested")
@@ -110,7 +110,7 @@ func TestValidateLogicEventFields_PayloadPrefixedDeclaration(t *testing.T) {
 @eventField("payload.partitionId")
 logic logicPrefixed {
   args { event object @required }
-  body { return noop({ a: args.event.payload.partitionId }) }
+  body { return noop(a: args.event.payload.partitionId) }
 }`
 	fd, raw := parseLogicForTest(t, src, "logicPrefixed")
 	if err := validateLogicEventFields(raw, fd); err != nil {
@@ -120,10 +120,10 @@ logic logicPrefixed {
 
 func TestNormalizeEventFieldHead(t *testing.T) {
 	cases := map[string]string{
-		"partitionId":          "partitionId",
-		"payload.partitionId":  "partitionId",
-		"payload.node.type": "node",
-		"  partitionId  ":      "partitionId",
+		"partitionId":         "partitionId",
+		"payload.partitionId": "partitionId",
+		"payload.node.type":   "node",
+		"  partitionId  ":     "partitionId",
 	}
 	for in, want := range cases {
 		if got := normalizeEventFieldHead(in); got != want {

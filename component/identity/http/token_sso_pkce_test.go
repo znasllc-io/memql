@@ -49,7 +49,7 @@ type ssoTokenFakeEngine struct {
 
 func (f *ssoTokenFakeEngine) Execute(_ context.Context, q string) (*memqlengine.ExecuteResult, error) {
 	switch {
-	case strings.HasPrefix(q, "oAuthClientByClientId("):
+	case strings.Contains(q, "oAuthClientByClientId("):
 		node := &memqlv1.MemoryNode{
 			Id: ssoDCRClientId,
 			Payload: &structpb.Struct{Fields: map[string]*structpb.Value{
@@ -59,7 +59,7 @@ func (f *ssoTokenFakeEngine) Execute(_ context.Context, q string) (*memqlengine.
 		}
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{node}}}, nil
 
-	case strings.HasPrefix(q, "authCodeByCodeHash("):
+	case strings.Contains(q, "authCodeByCodeHash("):
 		presented := extractField(q, "codeHash")
 		if presented != f.codeHash {
 			return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
@@ -79,7 +79,7 @@ func (f *ssoTokenFakeEngine) Execute(_ context.Context, q string) (*memqlengine.
 		node := &memqlv1.MemoryNode{Id: "v1:identity:authCode:sso1", Payload: &structpb.Struct{Fields: fields}}
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{node}}}, nil
 
-	case strings.HasPrefix(q, "userById("):
+	case strings.Contains(q, "userById("):
 		node := &memqlv1.MemoryNode{
 			Id: "v1:identity:user:owner1",
 			Payload: &structpb.Struct{Fields: map[string]*structpb.Value{

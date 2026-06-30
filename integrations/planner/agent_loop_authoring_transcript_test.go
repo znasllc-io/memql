@@ -20,11 +20,14 @@ func TestRenderTranscriptAutomation_VerbatimCalls(t *testing.T) {
 	if !strings.Contains(src, "automation reproduceP1 {") {
 		t.Fatalf("missing automation header:\n%s", src)
 	}
-	if !strings.Contains(src, `produceArtifact({"goal":"A markdown file titled X"})`) {
-		t.Errorf("first call not rendered verbatim:\n%s", src)
+	// Story 9 (#2335): rendered in the named-args invocation form
+	// `name(k: v, ...)`, not the legacy object-literal wrapper. Nested object
+	// VALUES keep their JSON braces (keys sorted by json.Marshal).
+	if !strings.Contains(src, `produceArtifact(goal: "A markdown file titled X")`) {
+		t.Errorf("first call not rendered as named args:\n%s", src)
 	}
-	if !strings.Contains(src, `workbenchHost({"args":{"path":"x.md","content":"# X"}})`) {
-		t.Errorf("second call not rendered verbatim:\n%s", src)
+	if !strings.Contains(src, `workbenchHost(args: {"content":"# X","path":"x.md"})`) {
+		t.Errorf("second call not rendered as named args:\n%s", src)
 	}
 	// Order preserved: call0 before call1.
 	if strings.Index(src, "step call0") > strings.Index(src, "step call1") {
@@ -84,18 +87,18 @@ func TestRunCaptureTranscript_PersistsLiteralCalls(t *testing.T) {
 
 	_, _, _ = fe.snapshot()
 	exec, _, _ := fe.snapshot()
-	if !anyCallContainsAll(exec, "createAuthoringBundle", `"sourcePlanId":"p-tr"`) {
+	if !anyCallContainsAll(exec, "createAuthoringBundle", `sourcePlanId: "p-tr"`) {
 		t.Errorf("must persist a bundle stamped with the source plan; exec=%v", exec)
 	}
 	// One automation construct, source = the verbatim workbenchHost call.
-	if !anyCallContainsAll(exec, "createAuthoringConstruct", `"kind":"automation"`, "workbenchHost") {
+	if !anyCallContainsAll(exec, "createAuthoringConstruct", `kind: "automation"`, "workbenchHost") {
 		t.Errorf("construct must carry the verbatim workbenchHost call; exec=%v", exec)
 	}
 	// The failed tool + the semantic row must NOT appear in the transcript.
 	if anyCallContainsAll(exec, "createAuthoringConstruct", "brokenTool") {
 		t.Errorf("a failed tool call must not be transcribed; exec=%v", exec)
 	}
-	if !anyCallContainsAll(exec, "recordBundleValidation", `"status":"validated"`, `"transcript":true`) {
+	if !anyCallContainsAll(exec, "recordBundleValidation", `status: "validated"`, `"transcript":true`) {
 		t.Errorf("transcript bundle must be marked validated+transcript; exec=%v", exec)
 	}
 }
@@ -169,7 +172,7 @@ func TestRunCaptureTranscript_Gate1ReRunnable(t *testing.T) {
 				t.Fatalf("Gate-1 compile was not invoked on the rendered transcript")
 			}
 			exec, _, _ := ce.snapshot()
-			if !anyCallContainsAll(exec, "recordBundleValidation", `"status":"validated"`, `"transcript":true`, `"gate1":"ran"`, tc.wantReRun) {
+			if !anyCallContainsAll(exec, "recordBundleValidation", `status: "validated"`, `"transcript":true`, `"gate1":"ran"`, tc.wantReRun) {
 				t.Errorf("validation must record the gate1 verdict %s; exec=%v", tc.wantReRun, exec)
 			}
 		})

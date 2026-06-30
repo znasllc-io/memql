@@ -69,11 +69,11 @@ func nonClusterOwnerCtx(userId string) context.Context {
 // statusIsActive half of systemActiveAuthoringBundles' filter.
 func seedActiveAuthoringBundle(t *testing.T, ctx context.Context, eng *MemQLEngine, bundleId string) {
 	t.Helper()
-	create := fmt.Sprintf(`createAuthoringBundle({"bundleId":%q,"title":%q})`, bundleId, "actor-postfilter #1659 guard")
+	create := fmt.Sprintf(`createAuthoringBundle(bundleId:%q,title:%q)`, bundleId, "actor-postfilter #1659 guard")
 	if _, err := eng.Execute(ctx, create); err != nil {
 		t.Fatalf("create bundle: %v", err)
 	}
-	activate := fmt.Sprintf(`activateAuthoringBundle({"bundleId":%q})`, bundleId)
+	activate := fmt.Sprintf(`activateAuthoringBundle(bundleId:%q)`, bundleId)
 	if _, err := eng.Execute(ctx, activate); err != nil {
 		t.Fatalf("activate bundle: %v", err)
 	}

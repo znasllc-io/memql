@@ -119,16 +119,16 @@ func TestRunCapture_CleanPath(t *testing.T) {
 	if n := countContains(exec, "createAuthoringBundle"); n != 1 {
 		t.Fatalf("want exactly 1 create-bundle, got %d (exec=%v)", n, exec)
 	}
-	if !anyCallContainsAll(exec, `createAuthoringBundle`, `"sourcePlanId":"p-capture"`) {
+	if !anyCallContainsAll(exec, `createAuthoringBundle`, `sourcePlanId: "p-capture"`) {
 		t.Fatalf("create-bundle must stamp sourcePlanId; exec=%v", exec)
 	}
 	if n := countContains(exec, "createAuthoringConstruct"); n != 2 {
 		t.Fatalf("want 2 construct rows (automation + spec), got %d", n)
 	}
-	if !anyCallContainsAll(exec, "recordBundleValidation", `"status":"validated"`) {
+	if !anyCallContainsAll(exec, "recordBundleValidation", `status: "validated"`) {
 		t.Fatalf("clean Gate-1 must record status=validated; exec=%v", exec)
 	}
-	if !anyCallContainsAll(exec, "recordBundleDryRun", `"status":"dryRunPassed"`) {
+	if !anyCallContainsAll(exec, "recordBundleDryRun", `status: "dryRunPassed"`) {
 		t.Fatalf("clean Gate-2 must record status=dryRunPassed; exec=%v", exec)
 	}
 	if got := ce.dryRunCalls(); got != 1 {
@@ -154,7 +154,7 @@ func TestRunCapture_Gate1FailMarksFailedNoDryRun(t *testing.T) {
 	}
 
 	exec, _, _ := ce.snapshot()
-	if !anyCallContainsAll(exec, "recordBundleValidation", `"status":"failed"`) {
+	if !anyCallContainsAll(exec, "recordBundleValidation", `status: "failed"`) {
 		t.Fatalf("unclean Gate-1 must record status=failed; exec=%v", exec)
 	}
 	if countContains(exec, "recordBundleDryRun") != 0 {
@@ -239,7 +239,7 @@ func TestHandlePlanUpdated_DispatchesOnSucceededTask(t *testing.T) {
 		return countContains(exec, "createAuthoringBundle") == 1
 	})
 	exec, _, _ := ce.snapshot()
-	if !anyCallContainsAll(exec, "createAuthoringBundle", `"sourcePlanId":"plan-async"`) {
+	if !anyCallContainsAll(exec, "createAuthoringBundle", `sourcePlanId: "plan-async"`) {
 		t.Fatalf("async capture must stamp sourcePlanId; exec=%v", exec)
 	}
 }

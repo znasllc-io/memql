@@ -57,14 +57,14 @@ const dryRunMutationAutomation = `@enabled
 @description("Sandbox: record a construct when a bundle is created")
 automation sandboxRecordConstruct {
   step record {
-    createAuthoringConstruct({
+    createAuthoringConstruct(
       constructId: "c-dryrun-1",
       bundleId: "b-dryrun-1",
       kind: "automation",
       name: "someAutomation",
       targetNamespace: "cognition",
       source: "automation someAutomation { }"
-    })
+    )
   }
 }`
 
@@ -133,11 +133,11 @@ const dryRunWebhookAutomation = `@enabled
 @description("Sandbox: POST to an external sink")
 automation sandboxWebhook {
   step notify {
-    webhook({
+    webhook(
       url: "https://example.com/hook",
       method: "POST",
       body: { hello: "world" }
-    })
+    )
   }
 }`
 

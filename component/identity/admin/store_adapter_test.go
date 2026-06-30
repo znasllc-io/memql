@@ -33,7 +33,7 @@ type clusterSettingsFakeEngine struct {
 
 func (f *clusterSettingsFakeEngine) Execute(_ context.Context, q string) (*memqlengine.ExecuteResult, error) {
 	f.queries = append(f.queries, q)
-	if strings.HasPrefix(q, "clusterSettingsCurrent(") {
+	if strings.Contains(q, "clusterSettingsCurrent(") {
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: f.nodes}}, nil
 	}
 	return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
@@ -74,7 +74,7 @@ func TestLiveSettingsReaderSnapshotPicksCanonicalRow(t *testing.T) {
 		t.Fatal("no queries issued; reader may have short-circuited before calling the engine")
 	}
 	for _, q := range eng.queries {
-		if !strings.HasPrefix(q, "clusterSettingsCurrent(") {
+		if !strings.Contains(q, "clusterSettingsCurrent(") {
 			t.Errorf("unexpected query %q; expected clusterSettingsCurrent", q)
 		}
 	}

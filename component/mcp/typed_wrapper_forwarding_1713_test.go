@@ -28,7 +28,7 @@ func TestTypedWrapperForwardsAllArgs(t *testing.T) {
 	if !strings.HasPrefix(eng.query, "libraryArtifactById(") {
 		t.Fatalf("typed wrapper did not route to the named-construct executor; query=%q", eng.query)
 	}
-	if !strings.Contains(eng.query, `"artifactId":"abc"`) {
+	if !strings.Contains(eng.query, `artifactId: "abc"`) {
 		t.Fatalf("ARG DROPPED: artifactId missing from the forwarded invocation %q", eng.query)
 	}
 }

@@ -84,10 +84,10 @@ func TestLogicRunner_EmitStepPublishesToEngineBus(t *testing.T) {
 
 	src := `logic emitOnly {
   body {
-    emitDone := publishEvent({
+    emitDone := publishEvent(
       topic: "si.auto-joined",
       payload: { ok: "yes" }
-    })
+    )
     return emitDone
   }
 }`

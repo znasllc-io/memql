@@ -47,7 +47,7 @@ type dcrFakeEngine struct {
 }
 
 func (f *dcrFakeEngine) Execute(_ context.Context, q string) (*memqlengine.ExecuteResult, error) {
-	if strings.HasPrefix(q, "oAuthClientByClientId(") {
+	if strings.Contains(q, "oAuthClientByClientId(") {
 		node := &memqlv1.MemoryNode{
 			Id: f.clientId,
 			Payload: &structpb.Struct{Fields: map[string]*structpb.Value{

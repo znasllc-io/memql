@@ -28,7 +28,7 @@ type resolverFakeEngine struct {
 }
 
 func (f *resolverFakeEngine) Execute(_ context.Context, q string) (*memqlengine.ExecuteResult, error) {
-	if strings.HasPrefix(q, "oAuthClientByClientId(") {
+	if strings.Contains(q, "oAuthClientByClientId(") {
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: f.nodes}}, nil
 	}
 	return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil

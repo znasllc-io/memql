@@ -30,9 +30,9 @@ func (s *stubEngine) Execute(_ context.Context, query string) (any, error) {
 	s.calls = append(s.calls, query)
 	s.mu.Unlock()
 	switch {
-	case strings.HasPrefix(query, "activeApprovalsByCorrelationKey"):
+	case strings.Contains(query, "activeApprovalsByCorrelationKey"):
 		return s.queryRes, s.queryErr
-	case strings.HasPrefix(query, "createApprovalRequest"):
+	case strings.Contains(query, "createApprovalRequest"):
 		return s.mutRes, s.mutErr
 	}
 	return nil, errors.New("stubEngine: unexpected query: " + query)
