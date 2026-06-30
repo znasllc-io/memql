@@ -29,8 +29,8 @@ use cluster.queries.{ existingCluster }
 logic registerBad {
   args { event object @required }
   body {
-    existing := existingCluster()
-    node := createNode({ id: args.event.payload.id })
+    existing := query existingCluster()
+    node := mutation createNode(id: args.event.payload.id)
     return node
   }
 }`
@@ -66,7 +66,7 @@ func TestMutationCallingMutationIsFlagged(t *testing.T) {
 use cluster.mutations.{ createSpawnEvent }
 mutation node createNodeBad {
   args { id string @required }
-  insert { id: args.id, ev: createSpawnEvent({ nodeId: args.id }) }
+  insert { id: args.id, ev: mutation createSpawnEvent(nodeId: args.id) }
 }`
 	fs := CheckFile("dsl/cluster/mutations.memql", src, nil)
 	if !has(fs, "mutation-single-write") {
@@ -92,7 +92,7 @@ func TestSideEffectingBuiltinInQueryIsFlagged(t *testing.T) {
 	src := `use cluster.builtins.{ tagRelease }
 query node q {
   args { x string }
-  body { return tagRelease({ ref: args.x }) }
+  body { return builtin tagRelease(ref: args.x) }
 }`
 	classifier := func(name string) bool { return name == "tagRelease" }
 	fs := CheckFile("dsl/cluster/queries.memql", src, classifier)
@@ -113,8 +113,8 @@ use common.builtins.{ serviceVersion }
 logic decide {
   args { event object @required }
   body {
-    existing := existingCluster()
-    v := serviceVersion({})
+    existing := query existingCluster()
+    v := builtin serviceVersion()
     return coalesce(existing.first(), v)
   }
 }`
@@ -145,7 +145,7 @@ logic clean {
   body { return 1 }
 }
 logic dirty {
-  body { return createNode({ id: "x" }) }
+  body { return mutation createNode(id: "x") }
 }`
 	fs := CheckFile("dsl/cluster/logic.memql", src, nil)
 	if len(fs) != 1 || fs[0].Construct != "dirty" {
