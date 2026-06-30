@@ -40,6 +40,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -476,11 +477,27 @@ func handshake(stream memqlv1.MemqlService_StreamClient) error {
 }
 
 func runMutation(stream memqlv1.MemqlService_StreamClient, mutationName string, args map[string]any, _ string) error {
-	argsJSON, err := json.Marshal(args)
-	if err != nil {
-		return fmt.Errorf("marshal args: %w", err)
+	// Story 9 (#2335): named-args invocation form `name(k: v, ...)`, not the
+	// legacy object-literal wrapper `name({...})` (rejected by the parser).
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
 	}
-	query := fmt.Sprintf("%s(%s)", mutationName, string(argsJSON))
+	sort.Strings(keys)
+	var argsBuf strings.Builder
+	for i, k := range keys {
+		if i > 0 {
+			argsBuf.WriteString(", ")
+		}
+		v, err := json.Marshal(args[k])
+		if err != nil {
+			return fmt.Errorf("marshal arg %q: %w", k, err)
+		}
+		argsBuf.WriteString(k)
+		argsBuf.WriteString(": ")
+		argsBuf.Write(v)
+	}
+	query := fmt.Sprintf("%s(%s)", mutationName, argsBuf.String())
 	msgId := id.NewShortId()
 	msg := &memqlv1.MemqlClientMessage{
 		MessageId: msgId,

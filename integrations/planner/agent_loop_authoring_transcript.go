@@ -177,11 +177,13 @@ func renderTranscriptAutomation(name, goal string, calls []toolCall) string {
 	fmt.Fprintf(&b, "@description(%q)\n", truncate(desc, 200))
 	fmt.Fprintf(&b, "automation %s {\n", name)
 	for i, c := range calls {
-		args := strings.TrimSpace(c.Args)
-		if args == "" {
-			args = "{}"
-		}
-		fmt.Fprintf(&b, "  step call%d {\n    %s(%s)\n  }\n", i, c.Name, args)
+		// Story 9 (#2335): emit the named-args invocation form `name(k: v, ...)`,
+		// not the legacy object-literal wrapper `name({...})`. c.Args is the raw
+		// recorded JSON args object; lower it to named args (nested values keep
+		// their JSON braces). Unparseable / empty args render `name()`.
+		var argsMap map[string]any
+		_ = json.Unmarshal([]byte(strings.TrimSpace(c.Args)), &argsMap)
+		fmt.Fprintf(&b, "  step call%d {\n    %s(%s)\n  }\n", i, c.Name, encodeArgs(argsMap))
 	}
 	b.WriteString("}\n")
 	return b.String()

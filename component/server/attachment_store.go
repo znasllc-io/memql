@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/memql"
@@ -182,16 +183,35 @@ func queryResultHasRow(v any) bool {
 	return false
 }
 
-// dslCall renders a MemQL function call `fn({...})` whose argument object
-// is produced entirely by json.Marshal. Marshalling the whole map (rather
-// than concatenating per-field literals) guarantees every caller-supplied
-// value -- an attachment id, space id, file name, etc. -- is fully escaped
-// for the JSON object it lands in, so a value containing a double quote can
-// never break out of its enclosing literal (CodeQL go/unsafe-quoting).
+// dslCall renders a MemQL function call `fn(k: v, ...)` in the named-args
+// invocation form (Story 9 / #2335: NOT the legacy object-literal wrapper
+// `fn({...})`, which the parser now rejects). Each value is JSON-encoded so a
+// value containing a double quote can never break out of its enclosing literal
+// (CodeQL go/unsafe-quoting); keys sorted for a deterministic call string.
 func dslCall(fn string, args map[string]any) (string, error) {
-	b, err := json.Marshal(args)
-	if err != nil {
-		return "", fmt.Errorf("marshal %s args: %w", fn, err)
+	if len(args) == 0 {
+		return fn + "()", nil
 	}
-	return fn + "(" + string(b) + ")", nil
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString(fn)
+	b.WriteByte('(')
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		v, err := json.Marshal(args[k])
+		if err != nil {
+			return "", fmt.Errorf("marshal %s arg %q: %w", fn, k, err)
+		}
+		b.WriteString(k)
+		b.WriteString(": ")
+		b.Write(v)
+	}
+	b.WriteByte(')')
+	return b.String(), nil
 }

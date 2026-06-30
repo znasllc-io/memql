@@ -667,7 +667,7 @@ func deterministicPerUserSeedId(def *SeedDefinition, userId string) string {
 // found in context".
 func (m *SeedMaterializer) invokeCreateMutation(ctx context.Context, conceptName string, args map[string]any) error {
 	mutationName := "create" + ucFirst(conceptName)
-	rendered, err := renderArgsObject(args)
+	rendered, err := renderArgsCallList(args)
 	if err != nil {
 		return fmt.Errorf("render args: %w", err)
 	}
@@ -749,6 +749,18 @@ func isTransientDBSurge(err error) bool {
 //
 // Keys are emitted in sorted order so failure-mode logs are stable
 // across runs (helpful when diffing a failed materialization).
+// renderArgsCallList renders the named-args invocation body `k: v, ...`
+// (Story 9 / #2335): renderArgsObject without the outer object braces, since
+// the kind-prefixed call form `name(k: v, ...)` drops the legacy `{...}`
+// wrapper (which the parser now rejects). Empty args render "" -> `name()`.
+func renderArgsCallList(args map[string]any) (string, error) {
+	obj, err := renderArgsObject(args)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(obj, "{"), "}"), nil
+}
+
 func renderArgsObject(args map[string]any) (string, error) {
 	var b strings.Builder
 	b.WriteByte('{')

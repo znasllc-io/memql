@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -261,15 +262,38 @@ func buildUpdateNodeHealthCall(nodeId, nodeType, address, health, lastSeenISO st
 		"lastSeen": lastSeenISO,
 	}
 
-	// Serialize as JSON for safe escaping of values that may contain
-	// quotes or special chars. MemQL mutation function args accept a JSON
-	// object literal as the positional argument (same syntax the engine
-	// parses for other mutation calls).
-	body, err := json.Marshal(args)
+	rendered, err := renderNodeMutationArgs(args)
 	if err != nil {
 		return "", err
 	}
-	return "updateNodeHealth(" + string(body) + ")", nil
+	return "updateNodeHealth(" + rendered + ")", nil
+}
+
+// renderNodeMutationArgs renders a string-valued arg map as the named-args
+// invocation body `k: "v", ...` (Story 9 / #2335: the kind-prefixed call form
+// `name(k: "v")` drops the legacy object-literal `{...}` wrapper, which the
+// parser now rejects). Each value is JSON-encoded for safe escaping; keys
+// sorted for a deterministic call string.
+func renderNodeMutationArgs(args map[string]string) (string, error) {
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		v, err := json.Marshal(args[k])
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(k)
+		b.WriteString(": ")
+		b.Write(v)
+	}
+	return b.String(), nil
 }
 
 // buildCreateNodeHealthCall formats the insert fallback (#1755): when the
@@ -295,9 +319,9 @@ func buildCreateNodeHealthCall(nodeId, nodeType, address, health, lastSeenISO st
 		"health":   health,
 		"lastSeen": lastSeenISO,
 	}
-	body, err := json.Marshal(args)
+	rendered, err := renderNodeMutationArgs(args)
 	if err != nil {
 		return "", err
 	}
-	return "createNode(" + string(body) + ")", nil
+	return "createNode(" + rendered + ")", nil
 }

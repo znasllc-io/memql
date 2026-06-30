@@ -192,24 +192,18 @@ func (l *PlannerAgentLoop) gatePlanApprovalIfNeeded(ctx context.Context, planId 
 // from a map via json.Marshal rather than hand-concatenating the object
 // literal.
 //
-// A bare `tokenBudget:%d` field (unquoted key, bare numeric value, no
-// space) is mis-lexed by the engine DSL: the lexer folds the colon into
-// the identifier, so `{tokenBudget:300000}` tokenizes as a single
-// identifier `tokenBudget:300000` with no value -- the parser then fails
-// with `expected ':' or '=' after object key, got "}"` (#1108).
-// json.Marshal emits a quoted key (`"tokenBudget":300000`); the closing
-// quote terminates the identifier scan, so the object is always
-// well-formed regardless of the budget value.
+// Story 9 (#2335): emits the named-args invocation form
+// `updatePlanStatus(planId: "...", status: "planning", tokenBudget: N)`, not
+// the legacy object-literal wrapper `updatePlanStatus({...})` (rejected by the
+// parser). encodeArgs renders bare identifier keys + a space after the colon
+// and JSON-encoded values, so the `#1108` colon-folding lexer hazard the old
+// quoted-key JSON guarded against does not arise.
 func buildStampTokenBudgetQuery(planId string, budget int) (string, error) {
-	argsJSON, err := json.Marshal(map[string]any{
+	return fmt.Sprintf(`updatePlanStatus(%s)`, encodeArgs(map[string]any{
 		"planId":      planId,
 		"status":      "planning",
 		"tokenBudget": budget,
-	})
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf(`updatePlanStatus(%s)`, string(argsJSON)), nil
+	})), nil
 }
 
 // stampPlanTokenBudget sets Plan.tokenBudget (best-effort).

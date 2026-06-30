@@ -325,7 +325,7 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 		return nil, fmt.Errorf("invalid .memql syntax: '$steps.' is not allowed (use bare step references like 'stepId.result.X')")
 	}
 	if inlineStepBlockPattern.MatchString(source) {
-		return nil, fmt.Errorf("inline step blocks are no longer supported in .memql automations; use function-call syntax such as query({...}), mutation({...}), shape({...}), publishEvent({...}), or webhook({...})")
+		return nil, fmt.Errorf("inline step blocks are no longer supported in .memql automations; use kind-prefixed named-args call syntax such as query name(k: v), mutation name(k: v), builtin publishEvent(k: v), or webhook name(k: v)")
 	}
 
 	// Enforce architectural layering: reject direct query() and mutation() calls
