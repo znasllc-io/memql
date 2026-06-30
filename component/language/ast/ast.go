@@ -227,6 +227,17 @@ func (*ShapeExpr) expressionNode() {}
 type FunctionCallExpr struct {
 	Name string
 	Args map[string]any
+
+	// Kind is the construct-kind prefix when the call was written in the
+	// kind-prefixed invocation form `<kind> <name>(args)` (Story 2 / #2324):
+	// one of "logic", "query", "mutation", "action", "capability", "builtin",
+	// "automation". Empty means a bare/unprefixed call (a language primitive or
+	// a legacy unprefixed construct call). Downstream semantic resolution keys
+	// off Name, so Kind is purely additive metadata — it makes the CQS nature
+	// of a call site syntactically visible (a `mutation`/`capability` keyword
+	// inside a `logic` body is a contract violation a later callgraph check can
+	// read) without changing resolution behaviour.
+	Kind string
 }
 
 func (*FunctionCallExpr) node()           {}
@@ -281,6 +292,13 @@ func (*BuiltinFunctionExpr) expressionNode() {}
 // SpecReferenceExpr references a named specification.
 type SpecReferenceExpr struct {
 	Name string
+
+	// Trait is set when the predicate was written in the kind-prefixed
+	// `trait <name>` form rather than `spec <name>` (Story 2 / #2324). It is
+	// additive metadata distinguishing a deliberately-unbound trait predicate
+	// from a signature-bound spec at the call site; resolution still keys off
+	// Name. Empty/false for bare predicate references and `spec <name>`.
+	Trait bool
 }
 
 func (*SpecReferenceExpr) node()           {}
