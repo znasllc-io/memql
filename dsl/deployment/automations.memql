@@ -160,41 +160,29 @@ automation deployEngineCluster {
     )
   }
   step clone {
-    action("cloneRepoAtVersion@1") {
-      args { workdir: event.payload.workdir, ref: event.payload.ref }
-    }
+    action cloneRepoAtVersion(workdir: event.payload.workdir, ref: event.payload.ref)
   }
   step build {
     forEach nt in event.payload.engineNodeTypes {
-      action("buildEngineImage@1") {
-        args { nodeType: nt, version: event.payload.version, workdir: event.payload.workdir }
-      }
+      action buildEngineImage(nodeType: nt, version: event.payload.version, workdir: event.payload.workdir)
     }
   }
   step importDevImages {
     forEach nt in event.payload.engineNodeTypes where event.payload.environment == "development" {
-      action("importImageToK3d@1") {
-        args { nodeType: nt, cluster: "memql", version: event.payload.version }
-      }
+      action importImageToK3d(nodeType: nt, cluster: "memql", version: event.payload.version)
     }
   }
   step place {
     switch event.payload.environment {
       case "development" { }
       default {
-        action("pinOverlayDigests@1") {
-          args { overlayPath: event.payload.overlayPath, digests: event.payload.digests }
-        }
-        action("argoSync@1") {
-          args { app: "memql", revision: event.payload.ref }
-        }
+        action pinOverlayDigests(overlayPath: event.payload.overlayPath, digests: event.payload.digests)
+        action argoSync(app: "memql", revision: event.payload.ref)
       }
     }
   }
   step gate {
-    action("runDeployGate@1") {
-      args { env: event.payload.environment, workdir: event.payload.workdir }
-    }
+    action runDeployGate(env: event.payload.environment, workdir: event.payload.workdir)
   }
   step outcome {
     logic deployOutcomeLabel ( gate: gate.result )
@@ -203,18 +191,12 @@ automation deployEngineCluster {
     switch outcome.result {
       case "succeeded" {
         updateDeploymentStatus { deploymentId: event.payload.deploymentId, status: "succeeded" }
-        action("notifyDeploy@1") {
-          args { env: event.payload.environment, status: "succeeded", deploymentId: event.payload.deploymentId }
-        }
+        action notifyDeploy(env: event.payload.environment, status: "succeeded", deploymentId: event.payload.deploymentId)
       }
       default {
-        action("revertOverlay@1") {
-          args { overlayPath: event.payload.overlayPath, toDeploymentId: event.payload.previousDeploymentId }
-        }
+        action revertOverlay(overlayPath: event.payload.overlayPath, toDeploymentId: event.payload.previousDeploymentId)
         updateDeploymentStatus { deploymentId: event.payload.deploymentId, status: "failed" }
-        action("notifyDeploy@1") {
-          args { env: event.payload.environment, status: "failed", deploymentId: event.payload.deploymentId }
-        }
+        action notifyDeploy(env: event.payload.environment, status: "failed", deploymentId: event.payload.deploymentId)
       }
     }
   }
