@@ -1487,7 +1487,16 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 	// typed AST nodes rather than generic FunctionCallExpr. At step-
 	// assignment position we normalise those to FunctionCallExpr so
 	// the compiler pipeline treats them uniformly.
-	if p.check(TokenIdentifier) && p.peekAhead(1).Type == TokenParenOpen {
+	// A function-call RHS is `foo(...)` OR the kind-prefixed invocation form
+	// `query foo(...)` / `mutation foo(...)` / `builtin foo(...)` (Story 3 /
+	// #2326): a kind keyword followed by an identifier and `(`. Both parse via
+	// parseExpression -> parseIdentifierExpression into a *FunctionCallExpr; the
+	// kind keyword is NOT a step type here (an inline `query { ... }` step is
+	// `query` followed by `{`, not by an identifier).
+	bareCallRHS := p.check(TokenIdentifier) && p.peekAhead(1).Type == TokenParenOpen
+	kindPrefixedCallRHS := p.check(TokenIdentifier) && isInvocationKindKeyword(p.current.Literal) &&
+		p.peekAhead(1).Type == TokenIdentifier && p.peekAhead(2).Type == TokenParenOpen
+	if bareCallRHS || kindPrefixedCallRHS {
 		rhsStart := p.current.Pos
 		expr, err := p.parseExpression()
 		if err != nil {
