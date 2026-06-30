@@ -68,9 +68,9 @@ capability shell.script { }
 //     use capabilities.integration.github.{ tagRelease }
 //     use capabilities.fs.{ readFile }
 //
-// and invoked via the call form (invocation grammar lands in Story 2):
+// and invoked via the kind-prefixed call form (Story 2):
 //
-//     capability tagRelease({ repo: args.repo, tag: args.tag })
+//     capability tagRelease(repo: args.repo, tag: args.tag)
 //
 // The action rewrite (Story 4) is what binds a capability call into an
 // authored `action`. This story is purely the DECLARATION + import + the

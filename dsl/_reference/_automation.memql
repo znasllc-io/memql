@@ -58,7 +58,7 @@
 // =============================================================================
 //
 // Most automations existed only to make a `logic` reactive: their whole body
-// was `step run { logic X { event: event } }`. The terse form expresses that
+// was `step run { logic X(event: event) }`. The terse form expresses that
 // in one line WITHOUT hiding the reactive surface (it stays greppable):
 //
 //     automation NAME @trigger(event="...") => logic logicName
@@ -89,7 +89,7 @@
 @description("Register this node in the database on startup (longhand single-step form).")
 automation registerNodeLonghand {
   step run {
-    logic registerNode { event: event }
+    logic registerNode(event: event)
   }
 }
 
@@ -102,12 +102,12 @@ automation registerNodeLonghand {
 // `cockpit/runner` surface; the env `switch` stays in ONE automation.
 //
 // Step vocabulary an automation may use:
-//   step NAME { logic L { ... } }          -- decide (pure)
-//   step NAME { query Q { ... } }          -- read
-//   step NAME { mutation M { ... } }       -- persist (one write per step)
-//   step NAME { action("act@1") { args { ... } } on surface(<expr>) }
+//   step NAME { logic L(...) }              -- decide (pure)
+//   step NAME { query Q(...) }              -- read
+//   step NAME { mutation M(...) }           -- persist (one write per step)
+//   step NAME { action act(...) on surface(<expr>) }
 //                                          -- touch the world (external capability)
-//   step NAME { automation Sub { ... } }   -- compose a sub-automation
+//   step NAME { automation Sub(...) }       -- compose a sub-automation
 //   forEach x in <list> { ... }            -- loop / fan one step over a list
 //   switch <expr> { case "v" { ... } default { ... } }   -- branch
 //   parallel { ... }                       -- fan-out concurrently
@@ -123,43 +123,43 @@ automation registerNodeLonghand {
 //   @trigger(event="deploy.requested", concept="v1:cluster:deployment")
 //   @description("Deploy the memQL ENGINE cluster to an environment. No bff/copresent.")
 //   automation deployEngineCluster {
-//     step authorize { logic requireForwardDeploy { event: event } }   // requiresDeveloperOrAbove
-//     step record    { mutation createDeployment {                     // ONE write
+//     step authorize { logic requireForwardDeploy(event: event) }   // requiresDeveloperOrAbove
+//     step record    { mutation createDeployment(                   // ONE write
 //                        deploymentId: event.payload.deploymentId,
 //                        environment:  event.payload.environment,
-//                        triggeredBy:  event.actor.id } }
-//     step clone     { action("cloneRepoAtVersion@1") {
-//                        args { workdir: event.payload.workdir, ref: event.payload.ref } }
+//                        triggeredBy:  event.actor.id) }
+//     step clone     { action cloneRepoAtVersion(
+//                        workdir: event.payload.workdir, ref: event.payload.ref)
 //                      on surface("cockpit/runner") }
 //     step build     { forEach nodeType in logic engineNodeTypes() {
-//                        action("buildEngineImage@1") {
-//                          args { nodeType: nodeType, version: event.payload.version,
-//                                 workdir: event.payload.workdir } } } }
+//                        action buildEngineImage(
+//                          nodeType: nodeType, version: event.payload.version,
+//                          workdir: event.payload.workdir) } }
 //     step place {
 //       switch event.payload.environment {
 //         case "development" {
 //           forEach nodeType in logic engineNodeTypes() {
-//             action("importImageToK3d@1") { args { nodeType: nodeType, cluster: "memql" } } }
+//             action importImageToK3d(nodeType: nodeType, cluster: "memql") }
 //         }
 //         default {  // staging | production -> GitOps (deploys = merges)
-//           action("pinOverlayDigests@1") {
-//             args { overlayPath: logic overlayPathForEnv({ env: event.payload.environment }),
-//                    digests: $steps.build.result } }
-//           action("argoSync@1") { args { app: "memql", revision: event.payload.ref } }
+//           action pinOverlayDigests(
+//             overlayPath: logic overlayPathForEnv(env: event.payload.environment),
+//             digests: $steps.build.result)
+//           action argoSync(app: "memql", revision: event.payload.ref)
 //         }
 //       }
 //     }
-//     step gate { action("runDeployGate@1") {
-//                   args { env: event.payload.environment, workdir: event.payload.workdir } } }
+//     step gate { action runDeployGate(
+//                   env: event.payload.environment, workdir: event.payload.workdir) }
 //     step finish {
-//       on success when logic deployGatePassed({ gate: $steps.gate.result }) {
-//         mutation updateDeploymentStatus { deploymentId: event.payload.deploymentId, status: "succeeded" }
-//         action("notifyDeploy@1") { args { env: event.payload.environment, status: "succeeded" } }
+//       on success when logic deployGatePassed(gate: $steps.gate.result) {
+//         mutation updateDeploymentStatus(deploymentId: event.payload.deploymentId, status: "succeeded")
+//         action notifyDeploy(env: event.payload.environment, status: "succeeded")
 //       }
 //       on failure {
-//         action("revertOverlay@1") { args { overlayPath: logic overlayPathForEnv({ env: event.payload.environment }) } }
-//         mutation updateDeploymentStatus { deploymentId: event.payload.deploymentId, status: "failed" }
-//         action("notifyDeploy@1") { args { env: event.payload.environment, status: "failed" } }
+//         action revertOverlay(overlayPath: logic overlayPathForEnv(env: event.payload.environment))
+//         mutation updateDeploymentStatus(deploymentId: event.payload.deploymentId, status: "failed")
+//         action notifyDeploy(env: event.payload.environment, status: "failed")
 //       }
 //     }
 //   }

@@ -253,7 +253,8 @@ decisions above. Published as durable reference by story
 | `query` | Read the graph (CQRS read) | `query <Concept> <name>` | rows | `filter` (+specs/traits), `shape`, `sort`, `paginate`, `asOf` | no | reads (SQL, time-travel) | pure read | yes (`...queries`) |
 | `mutation` | **One** atomic graph write (CQRS write) | `mutate <Concept> <name>` | written row | one write; read-modify-write own aggregate; ambient builtins; bare `now` | no | writes one aggregate | side-effect: graph write | yes (`...mutations`) |
 | `logic` | Pure decision + composition | `logic <name>` | a value | queries, logic, ambient ops, **collection lambdas**, `use core.{...}` | no | via queries only | **pure** (no writes/actions/triggers) | yes (`...logic`) |
-| `action` | **One external** capability on a surface | `action <name>` `@kind` `@sideEffect` + `capability` | capability result | one capability / `integration.*` on a surface | no | never (external only) | side-effect: external | yes (library) |
+| `action` | **One external** capability on a surface | `action <name>` + `args {}` + single `capability <verb>(...)` call | capability result | exactly one imported `capability` | no | never (external only) | side-effect: external (class read from the capability) | yes (library) |
+| `capability` | Surface-backed external operation (fs/shell/http/integration/mcp) | `capability <dotted.name> { args {} }` + `@sideEffect` (no body) | capability result | -- (Go/surface impl) | no | never (external only) | side-effect: declared `@sideEffect` | yes (`capabilities.<path>`) |
 | `automation` | The **only** reactive + composing construct | `automation <name>` `@trigger(...)` / terse `=> logic` | -- | logic, query, mutation, action, sub-automation; `switch`/`forEach`(+collection lambdas)/`parallel` | **YES (only here)** | via its steps | orchestration | yes (`...automations`) |
 | `builtin` | Go-backed capability | `builtin <name>` `@executor("integration.*")` | value | (Go impl) | no | depends | read-only->query/logic; side-effecting->**action-only** | yes (`common.builtins` / `core`) |
 | `tool` | External (AI/MCP) invocation surface | `tool <name>` `@handler(query\|function\|webhook)` `@mcp` | wrapped result | wraps a query / logic / webhook | no (invoked) | via wrapped | governed surface | yes (`...tools`) |
@@ -268,6 +269,19 @@ reserved engine identifiers (`now`, `actor`, `partition`, `config`, `trace`).
 **Ambient-but-imported from `core` (future):** `uuid` / random -- a
 nondeterministic primitive that is not an alias of a reserved identifier. Empty
 today.
+
+**Invocation form (call site).** The *Signature / binding* column above is the
+**declaration** form. Every construct is **invoked** with its kind prefix --
+`<kind> <name>(<named args>)`: `query existingCluster()`,
+`mutation createNode(id: args.node.id)`, `logic deployGatePassed(gate: ...)`,
+`builtin serviceVersion()`, `action tagRelease(...)`, `capability script(...)`,
+`spec requiresOwner` / `trait isActiveRecord` (predicate form, no parens). Args
+are passed by name in the parens (colon-separated) with empty = `()` (never
+`({})`); the language itself (operators, collection lambdas, control flow) stays
+**bare**. This makes the CQS nature of each call syntactically visible. `body { }`
+is the procedural marker: **mandatory on `logic`, forbidden on every other
+construct**. The full rules live in the
+[construct-invocation & action syntax ADR](./construct-invocation-syntax-adr.md).
 
 ## 4. Worked examples (target syntax)
 
@@ -293,7 +307,7 @@ logic logicIsStale {
 // FUTURE (when a real core member lands): a genuinely-new nondeterministic
 // primitive that is NOT an alias of a reserved name is imported, e.g.
 //   use core.builtins.{ uuid }
-//   logic logicNewId { body { return uuid() } }
+//   logic logicNewId { body { return builtin uuid() } }
 ```
 
 Collection lambdas in logic + `forEach`, rejected in a spec:

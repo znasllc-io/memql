@@ -115,9 +115,9 @@ logic engineNodeTypes {
 //   logic overlayPathForEnv {
 //     args { env string @required @enum("development", "staging", "production") }
 //     body {
-//       // chosen := if args.env == "development" { localOverlay() } else { envOverlay({ env: args.env }) }
+//       // chosen := if args.env == "development" { builtin localOverlay() } else { builtin envOverlay(env: args.env) }
 //       // return chosen
-//       return overlayPathFor({ env: args.env })   // read-only builtin does the mapping
+//       return builtin overlayPathFor(env: args.env)   // read-only builtin does the mapping
 //     }
 //   }
 
@@ -139,16 +139,16 @@ logic engineNodeTypes {
 //   logic bootstrapDecision {
 //     args { event object @required }
 //     body {
-//       existing := existingCluster()                       // query (read)
-//       version  := serviceVersion({})                      // read-only builtin
+//       existing := query existingCluster()                 // query (read)
+//       version  := builtin serviceVersion()                // read-only builtin
 //       needsBootstrap := existing.empty() && args.event.payload.node.type == "bff"
 //       return { needsBootstrap: needsBootstrap, version: version }
 //     }
 //   }
 //
 // The automation that consumes this decision is where the WRITE happens:
-//   step decide { logic bootstrapDecision { event: event } }
-//   step record { mutation createCluster { ... } }   // <- one mutation, one write
+//   step decide { logic bootstrapDecision(event: event) }
+//   step record { mutation createCluster(...) }   // <- one mutation, one write
 //
 // =============================================================================
 //   5. NON-COMPLIANT examples (rejected by the I2 call-graph validator)
@@ -161,7 +161,7 @@ logic engineNodeTypes {
 //   logic registerNodeBad {
 //     args { event object @required }
 //     body {
-//       node := createNode({ id: args.event.payload.node.id })  // <- WRITE: rejected
+//       node := mutation createNode(id: args.event.payload.node.id)  // <- WRITE: rejected
 //       return node
 //     }
 //   }
@@ -173,7 +173,7 @@ logic engineNodeTypes {
 //   logic deployBad {
 //     args { ref string @required }
 //     body {
-//       return action("cloneRepoAtVersion@1") { args { ref: args.ref } }  // <- rejected
+//       return action cloneRepoAtVersion(ref: args.ref)  // <- rejected
 //     }
 //   }
 //
