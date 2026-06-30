@@ -58,6 +58,10 @@ var (
 	writeBlockRE = regexp.MustCompile(`(?m)^\s*(insert|update)\s*\{`)
 	// A trigger annotation (the reactive surface).
 	triggerRE = regexp.MustCompile(`@trigger\b`)
+	// A `body { }` block opener at statement position -- the procedural
+	// marker (construct-invocation ADR Decision 5). Requires the `{` so a
+	// declarative field merely *named* body is never matched.
+	bodyBlockRE = regexp.MustCompile(`(?m)^[ \t]*body[ \t]*\{`)
 	// A capability declaration inside an action body:
 	// `capability "<namespace>.<verb>"` at statement position.
 	capabilityRE = regexp.MustCompile(`(?m)^[ \t]*capability[ \t]+"([^"]*)"`)
@@ -65,6 +69,20 @@ var (
 	// lines; `[^}]*` (with default dot) crosses newlines.
 	useRE = regexp.MustCompile(`(?m)^[ \t]*use[ \t]+([A-Za-z_][A-Za-z0-9_.]*)\.\{([^}]*)\}`)
 )
+
+// bodyRuleProceduralKinds is the set of non-logic constructs whose top-level
+// `body {` opener is unambiguously the procedural marker (and thus a body-rule
+// violation, ADR Decision 5) rather than a declarative object field. Declarative
+// constructs (concept/shape/prompt/provider/tool/builtin/seed/policy) are
+// intentionally absent: they may carry a nested object field named `body`.
+var bodyRuleProceduralKinds = map[string]bool{
+	"query":      true,
+	"mutation":   true,
+	"action":     true,
+	"automation": true,
+	"spec":       true,
+	"trait":      true,
+}
 
 // validCapabilityNamespaces is the closed action-capability vocabulary
 // (ADR §2.3). The authoritative per-verb sideEffectClass registry lives in
@@ -157,6 +175,23 @@ func ConstructFindings(kind, name, text string, useKinds map[string]string, side
 	// Rule: trigger monopoly. Only automations may carry @trigger.
 	if kind != "automation" && triggerRE.MatchString(text) {
 		add("trigger-monopoly", "carries @trigger -- only automations are reactive (ADR §2.4); express reactivity as a triggered automation")
+	}
+
+	// Rule: body { } (construct-invocation ADR Decision 5). The procedural
+	// `body { }` marker is MANDATORY on logic and FORBIDDEN on every other
+	// construct. Mirrors the parser's enforcement so the whole-tree CI gate
+	// + the authoring-sandbox cross-reference pass flag the same violation.
+	// The forbidden arm is scoped to the procedural/behavioral kinds whose
+	// `body {` opener is unambiguously the marker; a *declarative* construct
+	// (concept/shape/...) may legitimately carry a nested object field named
+	// `body`, so those are not flagged here.
+	hasBody := bodyBlockRE.MatchString(text)
+	if kind == "logic" {
+		if !hasBody {
+			add("body-rule", "must wrap its procedural code in a `body { }` block (mandatory on logic; ADR Decision 5)")
+		}
+	} else if bodyRuleProceduralKinds[kind] && hasBody {
+		add("body-rule", fmt.Sprintf("declares a `body { }` block -- forbidden on %s; `body { }` is the procedural marker reserved for logic (ADR Decision 5)", kind))
 	}
 
 	calls := callNames(text, useKinds)
