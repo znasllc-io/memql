@@ -1264,6 +1264,22 @@ func (p *Parser) parseGoStyleAutomationBody(name string) (*AutomationDef, error)
 	}
 
 	for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
+		// ADR Decision 5 (body rule): `body { }` is the procedural marker
+		// reserved for `logic`. A struct-form logic has its `body { }`
+		// wrapper inlined by the rewriter (emitLogic) before it reaches
+		// this shared parser, so a literal `body {` opener arriving here
+		// is always a violation -- a non-logic construct (an automation)
+		// wrongly wrapping its steps, or a logic with a stray nested body.
+		if p.check(TokenIdentifier) && p.current.Literal == "body" && p.peekAhead(1).Type == TokenBraceOpen {
+			if p.currentFuncType == FunctionTypeLogic {
+				// Defensive: a rewritten logic should never carry a `body {`
+				// token here (emitLogic already unwrapped + inlined it). A
+				// stray one means a duplicated/nested `body { }` block.
+				return nil, newParseErrorf(&p.current, "logic %q has a stray nested `body { }` block -- a logic wraps its procedural code in exactly one `body { }` (ADR Decision 5)", name)
+			}
+			return nil, newParseErrorf(&p.current, "%s", bodyRuleForbiddenMessage("automation", name))
+		}
+
 		// Check for return statement
 		if p.check(TokenKeywordReturn) {
 			p.advance()

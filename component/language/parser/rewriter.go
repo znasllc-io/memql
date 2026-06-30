@@ -467,6 +467,11 @@ type structQueryBody struct {
 const UnboundedPaginateWindow = 1000000
 
 func emitQuery(name, conceptId, body, preamble string) (string, error) {
+	// ADR Decision 5: `body { }` is reserved for logic; a query is
+	// declarative clauses, never a procedural body block.
+	if err := rejectNonLogicBodyBlock("query", name, body); err != nil {
+		return "", err
+	}
 	parsed, err := parseStructQueryBody(body)
 	if err != nil {
 		return "", err
@@ -660,6 +665,12 @@ type structMutationBody struct {
 }
 
 func emitMutation(name, conceptId, body, _preamble string) (string, error) {
+	// ADR Decision 5: `body { }` is reserved for logic; a mutation is a
+	// declarative `insert { ... }` / `update { ... }` block, never a
+	// procedural body block.
+	if err := rejectNonLogicBodyBlock("mutation", name, body); err != nil {
+		return "", err
+	}
 	parsed, err := parseStructMutationBody(body)
 	if err != nil {
 		return "", err
@@ -937,7 +948,9 @@ func emitLogic(name, _conceptId, body, _preamble string) (string, error) {
 
 	loc := logicBodyBlockHeader.FindStringIndex(body)
 	if loc == nil {
-		return "", fmt.Errorf("logic body must contain a `body { ... }` block")
+		// ADR Decision 5: `body { }` is mandatory on logic (always, even
+		// one-liners). Its absence is a hard parse error.
+		return "", fmt.Errorf("logic %q must wrap its procedural code in a `body { }` block (mandatory on logic; ADR Decision 5)", name)
 	}
 	openOffset := strings.LastIndex(body[loc[0]:loc[1]], "{")
 	open := loc[0] + openOffset
@@ -1064,6 +1077,13 @@ type automationStep struct {
 }
 
 func emitAutomation(name, _conceptId, body, _preamble string) (string, error) {
+	// ADR Decision 5: `body { }` is reserved for logic; an automation is a
+	// sequence of `step ...` blocks, never a procedural body block. Catch a
+	// wrapping `body { ... }` before parseAutomationSteps silently reaches
+	// through it to the nested steps.
+	if err := rejectNonLogicBodyBlock("automation", name, body); err != nil {
+		return "", err
+	}
 	steps, err := parseAutomationSteps(body)
 	if err != nil {
 		return "", err

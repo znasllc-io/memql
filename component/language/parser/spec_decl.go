@@ -75,6 +75,14 @@ func (p *Parser) parseSpecDecl(attrs []*ast.Attribute, isTrait bool) (*ast.SpecD
 		return nil, err
 	}
 
+	// ADR Decision 5: `body { }` is the procedural marker reserved for
+	// `logic`; a spec/trait is a bare `return <expr>`, never a body block.
+	// Catch a wrongly-added `body { ... }` here with a body-rule-pointing
+	// error before the generic "must be a return" message.
+	if p.check(TokenIdentifier) && p.current.Literal == "body" && p.peekAhead(1).Type == TokenBraceOpen {
+		return nil, newParseErrorf(&p.current, "%s", bodyRuleForbiddenMessage(keyword, decl.Name))
+	}
+
 	// The body MUST be a single `return <boolean expression>`. The old
 	// bare-expression form is rejected with a migration-pointing error.
 	if !p.check(TokenKeywordReturn) {
