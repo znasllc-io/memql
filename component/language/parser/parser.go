@@ -4866,10 +4866,69 @@ func (p *Parser) parseComparison() (ExpressionNode, error) {
 	}, nil
 }
 
+// invocationKindKeywords is the set of construct-kind prefixes recognised in
+// the kind-prefixed invocation form `<kind> <name>(args)` (Story 2 / #2324).
+// These all take parens + args; the predicate kinds (spec / trait) are handled
+// separately. Language primitives (coalesce / where / select / if / for /
+// return / concat / addDuration / date extractors / ...) are deliberately
+// absent — they stay bare and never carry a kind prefix.
+var invocationKindKeywords = map[string]bool{
+	"logic":      true,
+	"query":      true,
+	"mutation":   true,
+	"action":     true,
+	"capability": true,
+	"builtin":    true,
+	"automation": true,
+}
+
+// isInvocationKindKeyword reports whether name is a construct-kind prefix that
+// introduces a kind-prefixed call (`mutation createNode(...)`).
+func isInvocationKindKeyword(name string) bool {
+	return invocationKindKeywords[name]
+}
+
 // parseIdentifierExpression parses function calls, field references, or comparisons.
 func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 	name := p.current.Literal
 	p.advance()
+
+	// Story 2 (#2324): kind-prefixed construct invocation `<kind> <name>(args)`.
+	// When a kind keyword is immediately followed by `identifier (` we consume
+	// the prefix and parse the inner call exactly as before, tagging the
+	// resulting FunctionCallExpr with the kind. This is ADDITIVE and
+	// backward-compatible: a bare `createNode(...)` (no prefix) never matches
+	// (the kind word itself would have to be followed by another identifier and
+	// a paren), and language primitives are not in the kind set, so they stay
+	// bare. The old-form rejection lands later with the tree migration
+	// (Story 3 / #2326); here both forms parse.
+	if isInvocationKindKeyword(name) && p.check(TokenIdentifier) && p.peekAhead(1).Type == TokenParenOpen {
+		innerName := p.current.Literal
+		p.advance() // consume the construct name; p.current is now '('
+		call, err := p.parseFunctionCall(innerName)
+		if err != nil {
+			return nil, err
+		}
+		if fc, ok := call.(*FunctionCallExpr); ok {
+			fc.Kind = name
+		}
+		// Mirror the bare-call path: accept post-call dotted access.
+		return p.consumePostCallDotAccess(call)
+	}
+
+	// Story 2 (#2324): spec/trait predicate form `spec <name>` / `trait <name>`
+	// — the kind-prefixed replacement for the stringly `spec("name")` call.
+	// Produces a SpecReferenceExpr (Trait flag set for the trait form). The
+	// trigger requires `spec`/`trait` immediately followed by an identifier that
+	// is NOT itself a call (`spec foo(` is not this form). Bare predicate refs
+	// in filters (`filter active && isActiveRecord`) already produce a
+	// SpecReferenceExpr and are unaffected; the legacy `spec("name")` call form
+	// still routes through the paren path below (rejection deferred to Story 3).
+	if (name == "spec" || name == "trait") && p.check(TokenIdentifier) && p.peekAhead(1).Type != TokenParenOpen {
+		predName := p.current.Literal
+		p.advance() // consume the predicate name
+		return &SpecReferenceExpr{Name: predName, Trait: name == "trait"}, nil
+	}
 
 	// Check for function call
 	if p.check(TokenParenOpen) {
@@ -5118,6 +5177,22 @@ func (p *Parser) parseFunctionCall(name string) (ExpressionNode, error) {
 			argName := p.current.Literal
 			p.advance() // consume name
 			p.advance() // consume '='
+			val, err := p.parseValue()
+			if err != nil {
+				return nil, err
+			}
+			args[argName] = val
+		} else if p.check(TokenIdentifier) && p.peekAhead(1).Type == TokenColon {
+			// Story 2 (#2324): colon-named argument directly in the parens
+			// (`mutation createNode(id: args.node.id, nodeType: args.node.type)`)
+			// — the kind-prefixed replacement for the object-literal wrapper.
+			// Additive: applies uniformly to kind-prefixed and bare calls, and
+			// the `=` named form + object-literal positional form above/below
+			// are untouched. Nested object values still parse via parseValue
+			// (`payload: { ... }`).
+			argName := p.current.Literal
+			p.advance() // consume name
+			p.advance() // consume ':'
 			val, err := p.parseValue()
 			if err != nil {
 				return nil, err
