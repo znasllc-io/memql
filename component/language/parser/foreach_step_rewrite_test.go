@@ -160,7 +160,7 @@ func TestNormaliseAutomationSource_ForEachStep_Errors(t *testing.T) {
 		{
 			name:    "inner call without brace body",
 			body:    `forEach node in decide.result { node }`,
-			wantErr: "must have a `{ ... }` body",
+			wantErr: "must have a `(...)` or `{ ... }` body",
 		},
 		{
 			name:    "empty where filter",

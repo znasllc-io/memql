@@ -2025,23 +2025,24 @@ func (p *Parser) parsePromptField() (*PromptField, error) {
 	return field, nil
 }
 
-// parseActionDecl parses a struct-form authored action declaration
-// (memql#2218, behavioral-constructs ADR §2.3):
+// parseActionDecl parses the SIMPLIFIED struct-form authored action declaration
+// (construct-invocation ADR Decision 3, Story 4 / memql#2328):
 //
+//	use capabilities.shell.{ script }
+//	@description("...")
 //	action <name> {
-//	  capability "<verb>"
-//	  intent "<text>"
-//	  params { <field> <type> [@required] ... }
-//	  argTemplate { <key>: "<template>" ... }
+//	  args { <field> <type> [@required] ... }
+//	  capability <verb>(<key>: <expr>, ...)
 //	}
 //
-// The body keys may appear in any order; each appears at most once
-// (a second `capability`/`intent` is a parse error -- the single-
-// external-capability rule is also re-checked by the I7 validator).
-// An action is DECLARATIVE: it has no procedural body, never reads
-// args/returns, and never touches the graph. Action-level annotations
-// (@kind / @sideEffect / @description / @enabled / @disabled) are
-// captured by parseDefinition and attached to the decl.
+// The body is an `args` block (reusing the file-top args-block grammar) plus a
+// SINGLE `capability <verb>(...)` call -- no `body { }`, no `return`. The bare
+// verb resolves through the file's `use capabilities.<path>.{ verb }` import to
+// a full dotted capability name at load time (component/actions). The legacy
+// action surfaces are REJECTED with migration-pointing errors: the annotations
+// `@kind` / `@sideEffect` / `@reliability` (captured into attrs by
+// parseDefinition) and the body keys `capability "string"` / `intent` /
+// `params` / `argTemplate`.
 func (p *Parser) parseActionDecl(attrs []*Attribute) (*ActionDecl, error) {
 	if !p.check(TokenIdentifier) || p.current.Literal != "action" {
 		return nil, newParseErrorf(&p.current, "expected 'action' keyword, got %q", p.current.Literal)
@@ -2054,68 +2055,88 @@ func (p *Parser) parseActionDecl(attrs []*Attribute) (*ActionDecl, error) {
 	decl := &ActionDecl{Name: p.current.Literal, Attributes: attrs}
 	p.advance()
 
+	// Reject the retired action-level annotations (ADR Decision 3 table).
+	for _, attr := range attrs {
+		if attr == nil {
+			continue
+		}
+		switch attr.Name {
+		case "kind":
+			return nil, newParseErrorf(&p.current,
+				"action %q: @kind is retired (construct-invocation ADR Decision 3) -- composites are automations now and primitives need no marker; remove it", decl.Name)
+		case "sideEffect":
+			return nil, newParseErrorf(&p.current,
+				"action %q: @sideEffect is retired on actions (ADR Decision 3) -- the authoritative side-effect class lives on the CAPABILITY declaration now (Story 5); remove it from the action", decl.Name)
+		case "reliability":
+			return nil, newParseErrorf(&p.current,
+				"action %q: @reliability is retired (ADR Decision 3) -- reliability is machine-managed runtime state, not source; remove it", decl.Name)
+		}
+	}
+
 	if err := p.expect(TokenBraceOpen); err != nil {
 		return nil, err
 	}
 
+	sawArgs := false
 	sawCapability := false
-	sawIntent := false
-	sawParams := false
-	sawArgTemplate := false
 
 	for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
 		if !p.check(TokenIdentifier) {
 			return nil, newParseErrorf(&p.current,
-				"unexpected token %q in action %q body -- expected 'capability', 'intent', 'params', or 'argTemplate'", p.current.Literal, decl.Name)
+				"unexpected token %q in action %q body -- expected an `args { ... }` block and a single `capability <verb>(...)` call", p.current.Literal, decl.Name)
 		}
 		key := p.current.Literal
-		p.advance()
 
 		switch key {
+		case "args":
+			if sawArgs {
+				return nil, newParseErrorf(&p.current, "action %q declares 'args' more than once", decl.Name)
+			}
+			// parseFileTopArgsBlock consumes the `args` keyword + block.
+			argsDef, err := p.parseFileTopArgsBlock()
+			if err != nil {
+				return nil, err
+			}
+			decl.Args = argsDef
+			sawArgs = true
 		case "capability":
 			if sawCapability {
 				return nil, newParseErrorf(&p.current,
-					"action %q declares more than one capability -- an action performs exactly one external capability (ADR §2.3)", decl.Name)
+					"action %q declares more than one capability -- an action performs exactly one external capability (ADR Decision 3)", decl.Name)
 			}
-			if !p.check(TokenString) {
-				return nil, newParseErrorf(&p.current, "expected string after 'capability' in action %q, got %q", decl.Name, p.current.Literal)
+			// Legacy form `capability "<verb>"` (a string after the keyword) is retired.
+			if p.peekAhead(1).Type == TokenString {
+				return nil, newParseErrorf(&p.current,
+					"action %q: the `capability \"<verb>\"` + `argTemplate` form is retired (ADR Decision 3) -- write the body as a single typed call `capability <verb>(<arg>: args.<x>, ...)` and import the verb via `use capabilities.<path>.{ <verb> }`", decl.Name)
 			}
-			decl.Capability = p.current.Literal
-			p.advance()
+			// New form: parse `capability <verb>(<args>)` as a kind-prefixed call expression.
+			expr, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			fc, ok := expr.(*FunctionCallExpr)
+			if !ok || fc.Kind != "capability" {
+				return nil, newParseErrorf(&p.current,
+					"action %q: the body must be a single `capability <verb>(...)` call", decl.Name)
+			}
+			decl.Capability = fc.Name
+			decl.CallArgs = lowerActionCallArgs(fc.Args)
 			sawCapability = true
 		case "intent":
-			if sawIntent {
-				return nil, newParseErrorf(&p.current, "action %q declares 'intent' more than once", decl.Name)
-			}
-			if !p.check(TokenString) {
-				return nil, newParseErrorf(&p.current, "expected string after 'intent' in action %q, got %q", decl.Name, p.current.Literal)
-			}
-			decl.Intent = p.current.Literal
-			p.advance()
-			sawIntent = true
+			return nil, newParseErrorf(&p.current,
+				"action %q: `intent` is retired (ADR Decision 3) -- its content merges into `@description(...)`, the planner's retrieval embedding source", decl.Name)
 		case "params":
-			if sawParams {
-				return nil, newParseErrorf(&p.current, "action %q declares 'params' more than once", decl.Name)
-			}
-			fields, err := p.parseActionParamsBlock(decl.Name)
-			if err != nil {
-				return nil, err
-			}
-			decl.Params = fields
-			sawParams = true
+			return nil, newParseErrorf(&p.current,
+				"action %q: `params` is renamed to `args` (ADR Decision 3) -- use an `args { ... }` block", decl.Name)
 		case "argTemplate":
-			if sawArgTemplate {
-				return nil, newParseErrorf(&p.current, "action %q declares 'argTemplate' more than once", decl.Name)
-			}
-			args, err := p.parseActionArgTemplateBlock(decl.Name)
-			if err != nil {
-				return nil, err
-			}
-			decl.ArgTemplate = args
-			sawArgTemplate = true
+			return nil, newParseErrorf(&p.current,
+				"action %q: `argTemplate` (and `$params.X` templating) is retired (ADR Decision 3) -- pass the capability's arguments directly in the `capability <verb>(<arg>: args.<x>, ...)` call", decl.Name)
+		case "body":
+			return nil, newParseErrorf(&p.current,
+				"action %q: an action has NO `body { }` (ADR Decision 5) -- its body is exactly the single `capability <verb>(...)` call", decl.Name)
 		default:
 			return nil, newParseErrorf(&p.current,
-				"unknown key %q in action %q body -- expected 'capability', 'intent', 'params', or 'argTemplate'", key, decl.Name)
+				"unknown key %q in action %q body -- expected an `args { ... }` block and a single `capability <verb>(...)` call", key, decl.Name)
 		}
 	}
 
@@ -2124,12 +2145,39 @@ func (p *Parser) parseActionDecl(attrs []*Attribute) (*ActionDecl, error) {
 	}
 
 	if !sawCapability {
-		return nil, newParseErrorf(&p.current, "action %q is missing a 'capability'", decl.Name)
-	}
-	if !sawIntent {
-		return nil, newParseErrorf(&p.current, "action %q is missing an 'intent'", decl.Name)
+		return nil, newParseErrorf(&p.current,
+			"action %q is missing its `capability <verb>(...)` call -- an action body is exactly one external capability call (ADR Decision 3)", decl.Name)
 	}
 	return decl, nil
+}
+
+// lowerActionCallArgs converts a parsed capability-call argument map (key ->
+// value-expression) into the ordered ActionCallArg slice the AST carries. The
+// FunctionCallExpr arg map is unordered, so the slice is sorted by key for a
+// deterministic result (the runtime renders into a map, so order is cosmetic).
+func lowerActionCallArgs(args map[string]any) []*ActionCallArg {
+	if len(args) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]*ActionCallArg, 0, len(keys))
+	for _, k := range keys {
+		ca := &ActionCallArg{Key: k}
+		// parseValue yields AST nodes for references (args.X -> *ArgRefExpr) but
+		// RAW Go values for literals (a string / int64 / bool). Wrap the latter
+		// in a LiteralExpr so the AST carries a uniform ExpressionNode.
+		if expr, ok := args[k].(ExpressionNode); ok {
+			ca.Value = expr
+		} else {
+			ca.Value = &LiteralExpr{Value: args[k]}
+		}
+		out = append(out, ca)
+	}
+	return out
 }
 
 // parseCapabilityDecl parses a top-level `capability` declaration
@@ -2209,97 +2257,6 @@ func (p *Parser) parseCapabilityDecl(attrs []*Attribute) (*CapabilityDecl, error
 // parseActionParamsBlock parses the `params { <field> <type> [@ann ...] ... }`
 // block of an action. Per-field grammar mirrors parsePromptField /
 // parseBuiltinField (the shared struct-form field surface).
-func (p *Parser) parseActionParamsBlock(actionName string) ([]*ActionField, error) {
-	if err := p.expect(TokenBraceOpen); err != nil {
-		return nil, err
-	}
-	var fields []*ActionField
-	for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
-		// Tolerate separators between fields.
-		if p.check(TokenSemicolon) || p.check(TokenComma) {
-			p.advance()
-			continue
-		}
-		if !p.check(TokenIdentifier) {
-			return nil, newParseErrorf(&p.current, "expected param name in action %q, got %q", actionName, p.current.Literal)
-		}
-		field := &ActionField{Name: p.current.Literal}
-		p.advance()
-
-		// Type: optional `[]` prefix + ident.
-		if p.check(TokenBracketOpen) {
-			p.advance()
-			if err := p.expect(TokenBracketClose); err != nil {
-				return nil, err
-			}
-			field.Type = "[]"
-		}
-		if !p.check(TokenIdentifier) {
-			return nil, newParseErrorf(&p.current, "expected type for param %q in action %q, got %q", field.Name, actionName, p.current.Literal)
-		}
-		field.Type += p.current.Literal
-		p.advance()
-
-		for p.check(TokenAt) {
-			attr, err := p.parseAttribute()
-			if err != nil {
-				return nil, err
-			}
-			if attr == nil {
-				continue
-			}
-			if attr.Name == "required" {
-				field.Required = true
-			}
-			field.Attributes = append(field.Attributes, attr)
-		}
-		fields = append(fields, field)
-	}
-	if err := p.expect(TokenBraceClose); err != nil {
-		return nil, err
-	}
-	return fields, nil
-}
-
-// parseActionArgTemplateBlock parses the `argTemplate { <key>: "<template>" ... }`
-// block of an action: an ordered list of capability-argument templates.
-// Each value is a string literal; "$params.<name>" references are
-// substituted at run time (component/actions render). Keys are unique.
-func (p *Parser) parseActionArgTemplateBlock(actionName string) ([]*ActionArg, error) {
-	if err := p.expect(TokenBraceOpen); err != nil {
-		return nil, err
-	}
-	seen := map[string]bool{}
-	var args []*ActionArg
-	for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
-		if p.check(TokenSemicolon) || p.check(TokenComma) {
-			p.advance()
-			continue
-		}
-		if !p.check(TokenIdentifier) {
-			return nil, newParseErrorf(&p.current, "expected argTemplate key in action %q, got %q", actionName, p.current.Literal)
-		}
-		key := p.current.Literal
-		p.advance()
-		if seen[key] {
-			return nil, newParseErrorf(&p.current, "duplicate argTemplate key %q in action %q", key, actionName)
-		}
-		if err := p.expect(TokenColon); err != nil {
-			return nil, err
-		}
-		if !p.check(TokenString) {
-			return nil, newParseErrorf(&p.current, "expected string value for argTemplate key %q in action %q, got %q", key, actionName, p.current.Literal)
-		}
-		args = append(args, &ActionArg{Key: key, Template: p.current.Literal})
-		seen[key] = true
-		p.advance()
-	}
-	if err := p.expect(TokenBraceClose); err != nil {
-		return nil, err
-	}
-	return args, nil
-}
-
 // peekNextIdent returns the literal of the token immediately
 // following p.current, or "" if it's not an identifier. Used by
 // parsePromptDecl to look one step ahead at the name following an

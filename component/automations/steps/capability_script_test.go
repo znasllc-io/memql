@@ -207,9 +207,11 @@ func TestDeployActionsLoadAndValidate(t *testing.T) {
 			continue
 		}
 		var scriptID string
-		for _, e := range a.ArgTemplate {
+		for _, e := range a.CallArgs {
 			if e.Key == "script" {
-				scriptID = strings.Trim(e.Template, `"`)
+				if s, ok := e.Literal.(string); ok {
+					scriptID = s
+				}
 			}
 		}
 		if scriptID == "" {

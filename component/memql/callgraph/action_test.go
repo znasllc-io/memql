@@ -2,21 +2,17 @@ package callgraph
 
 import "testing"
 
-// A conformant action -- one external capability, no construct calls, no graph
-// write, no trigger -- is clean.
+// A conformant action -- one external capability call, no construct calls, no
+// graph write, no trigger -- is clean (construct-invocation ADR Decision 3).
 func TestConformantActionIsClean(t *testing.T) {
-	src := `@kind("primitive")
-@sideEffect("exec")
+	src := `use capabilities.shell.{ script }
+@description("Clone a repo working tree at the requested ref.")
 action cloneRepoAtVersion {
-  capability "shell.exec"
-  intent "Clone a repo working tree at the requested ref."
-  params {
+  args {
     workdir string @required
     ref     string @required
   }
-  argTemplate {
-    cmd: "git -C $params.workdir checkout $params.ref"
-  }
+  capability script(script: "deploy.cloneRepo", workdir: args.workdir, ref: args.ref)
 }`
 	if fs := CheckFile("dsl/deployment/actions.memql", src, nil); len(fs) != 0 {
 		t.Fatalf("conformant action must be clean; got %v", rules(fs))
@@ -27,12 +23,10 @@ action cloneRepoAtVersion {
 // a single external capability and may not invoke other constructs).
 func TestActionCallingLogicIsFlagged(t *testing.T) {
 	src := `use deployment.logic.{ nextSemver }
-@sideEffect("exec")
+use capabilities.shell.{ script }
 action deployBad {
-  capability "shell.exec"
-  intent "..."
-  params { ref string @required }
-  argTemplate { cmd: nextSemver(args.ref) }
+  args { ref string @required }
+  capability script(cmd: nextSemver(args.ref))
 }`
 	fs := CheckFile("dsl/deployment/actions.memql", src, nil)
 	if !has(fs, "action-no-calls") {
@@ -44,11 +38,10 @@ action deployBad {
 // mutation either).
 func TestActionCallingMutationIsFlagged(t *testing.T) {
 	src := `use cluster.mutations.{ createDeployment }
+use capabilities.shell.{ script }
 action recordBad {
-  capability "shell.exec"
-  intent "..."
-  params { id string @required }
-  argTemplate { cmd: createDeployment(args.id) }
+  args { id string @required }
+  capability script(cmd: createDeployment(id: args.id))
 }`
 	fs := CheckFile("dsl/deployment/actions.memql", src, nil)
 	if !has(fs, "action-no-calls") {
@@ -56,15 +49,15 @@ action recordBad {
 	}
 }
 
-// I7 acceptance: an action declaring more than one capability produces a
+// I7 acceptance: an action declaring more than one capability call produces a
 // finding (exactly one external capability per action).
 func TestActionWithTwoCapabilitiesIsFlagged(t *testing.T) {
-	src := `action twoThingsBad {
-  capability "shell.exec"
-  capability "fs.writeFile"
-  intent "..."
-  params {}
-  argTemplate {}
+	src := `use capabilities.shell.{ script }
+use capabilities.fs.{ writeFile }
+action twoThingsBad {
+  args { }
+  capability script(script: "x")
+  capability writeFile(path: "y")
 }`
 	fs := CheckFile("dsl/deployment/actions.memql", src, nil)
 	if !has(fs, "action-one-capability") {
@@ -75,10 +68,10 @@ func TestActionWithTwoCapabilitiesIsFlagged(t *testing.T) {
 // I7 acceptance: an action that performs a graph write block is flagged (graph
 // writes are mutations; an action never reaches the graph).
 func TestActionTouchingGraphIsFlagged(t *testing.T) {
-	src := `action writeBad {
-  capability "shell.exec"
-  intent "..."
-  params { id string @required }
+	src := `use capabilities.shell.{ script }
+action writeBad {
+  args { id string @required }
+  capability script(script: "x")
   insert { id: args.id }
 }`
 	fs := CheckFile("dsl/deployment/actions.memql", src, nil)
@@ -90,12 +83,11 @@ func TestActionTouchingGraphIsFlagged(t *testing.T) {
 // An action carrying a @trigger is flagged -- reactivity is automations-only
 // (the shared trigger-monopoly rule, ADR §2.4).
 func TestTriggeredActionIsFlagged(t *testing.T) {
-	src := `@trigger(event="deploy.requested")
+	src := `use capabilities.shell.{ script }
+@trigger(event="deploy.requested")
 action onDeployBad {
-  capability "shell.exec"
-  intent "..."
-  params {}
-  argTemplate {}
+  args { }
+  capability script(script: "x")
 }`
 	fs := CheckFile("dsl/deployment/actions.memql", src, nil)
 	if !has(fs, "trigger-monopoly") {
@@ -103,13 +95,13 @@ action onDeployBad {
 	}
 }
 
-// An action whose capability is outside the namespace vocabulary is flagged.
+// An action whose capability resolves to a namespace outside the vocabulary is
+// flagged.
 func TestActionWithUnknownNamespaceIsFlagged(t *testing.T) {
-	src := `action weirdBad {
-  capability "weird.doThing"
-  intent "..."
-  params {}
-  argTemplate {}
+	src := `use capabilities.weird.{ doThing }
+action weirdBad {
+  args { }
+  capability doThing(x: "y")
 }`
 	fs := CheckFile("dsl/deployment/actions.memql", src, nil)
 	if !has(fs, "action-capability-namespace") {
@@ -119,12 +111,11 @@ func TestActionWithUnknownNamespaceIsFlagged(t *testing.T) {
 
 // The tree walker recognises actions.memql files as the action kind.
 func TestActionsFileIsAnalysed(t *testing.T) {
-	src := `action a {
-  capability "shell.exec"
-  capability "shell.exec"
-  intent "..."
-  params {}
-  argTemplate {}
+	src := `use capabilities.shell.{ script }
+action a {
+  args { }
+  capability script(script: "x")
+  capability script(script: "y")
 }`
 	if fs := CheckFile("dsl/deployment/actions.memql", src, nil); !has(fs, "action-one-capability") {
 		t.Fatalf("expected actions.memql to be analysed as the action kind; got %v", rules(fs))

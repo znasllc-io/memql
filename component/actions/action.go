@@ -30,27 +30,30 @@ type Param struct {
 	Description string
 }
 
-// ArgEntry is one rendered capability argument (an argTemplate entry):
-// Key is the capability argument name, Template is the raw template string
-// ("$params.<name>" references are substituted from bound params at render).
-type ArgEntry struct {
-	Key      string
-	Template string
+// CallArg is one named argument of an action's single `capability <verb>(...)`
+// call (construct-invocation ADR Decision 3, Story 4). Key is the capability
+// argument name. Exactly one of:
+//   - ArgPath set: bind from the action's input args (`args.<ArgPath>`); the
+//     bound value is passed through verbatim (type-preserving).
+//   - Literal set (ArgPath == ""): a constant value written in the call.
+type CallArg struct {
+	Key     string
+	ArgPath string // non-empty => bind from args.<ArgPath>
+	Literal any    // used when ArgPath == ""
 }
 
 // Action is a loaded, registered authored action.
 type Action struct {
 	Name        string // declaration name; the reference name in "name@version"
 	Version     int    // authored actions are version 1 today (pin-by-default)
-	Capability  string // the single external capability verb
-	Intent      string // natural-language description (future embedding source)
+	Capability  string // the single external capability verb, full dotted (shell.script, fs.readFile, integration.github.tagRelease, ...)
 	Kind        string // "primitive" (the only authored kind today)
-	SideEffect  string // "read" | "write" | "exec" | "" (from @sideEffect; authoritative class lives on the capability, ADR §7)
+	SideEffect  string // "read" | "write" | "exec" | "" (authoritative class lives on the capability, ADR §7)
 	Params      []Param
-	ArgTemplate []ArgEntry
-	Description string // from @description
-	Enabled     bool   // @disabled -> false; default true
-	Origin      string // source path:name, for diagnostics
+	CallArgs    []CallArg // the capability call's bound arguments (replaces the retired argTemplate/$params form)
+	Description string    // from @description
+	Enabled     bool      // @disabled -> false; default true
+	Origin      string    // source path:name, for diagnostics
 }
 
 // paramByName returns the declared param of the given name, or false.
