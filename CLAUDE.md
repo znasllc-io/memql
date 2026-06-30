@@ -1836,8 +1836,17 @@ side too: `cursorTweenMs`, `takeoverMode` (clean / dim),
 Mutations: `createSpace`, `archiveSpace`, `saveSpace`,
 `restoreSpace`, `deleteSpaceNow`, `createDailySpace`. Queries:
 `activeSpaces`, `savedSpaces`, `archivedSpaces`,
-`expiredArchivedSpaces`, `allArchivedSpacesAcrossUsers`. All in
-`dsl/cognition/mutations.memql` and `dsl/cognition/queries.memql`.
+`expiredArchivedSpaces`, `allArchivedSpacesAcrossUsers`.
+
+**Location (post-#2038):** the `space` concept and ALL of these
+mutations + queries moved OUT of engine core into the CoPresent pack
+(`memql-bff-copresent/dsl/copresent/{mutations,queries}.memql`),
+id-preserving (ids stay `v1:cognition:space*`; names unchanged). The
+pure engine no longer loads the `space` concept, so engine-repo tests
+cannot exercise them -- that coverage lives in the pack repo. The core
+participant/session/utterance mutations that stayed (joinSpaceAsHuman,
+leaveSpace, addAgentToSpace, ...) remain in
+`dsl/cognition/mutations.memql`.
 
 ### Invitations (Identity Primitive)
 

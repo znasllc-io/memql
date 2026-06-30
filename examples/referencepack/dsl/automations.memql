@@ -1,16 +1,22 @@
 // automations.memql -- the referencepack reference pack.
 //
 // One automation that HOOKS A CORE SERVICE EVENT: it triggers on the
-// creation of a core `v1:cognition:space` row -- a node owned by a core
-// memQL domain, not by this pack. This is the "automation hooking a core
-// service" half of the pack acceptance: a pack reacts to a core concept's
-// lifecycle event without the core knowing the pack exists.
+// creation of a core `v1:notes:note` row -- a node owned by a core memQL
+// domain, not by this pack. This is the "automation hooking a core service"
+// half of the pack acceptance: a pack reacts to a core concept's lifecycle
+// event without the core knowing the pack exists.
+//
+// (Originally hooked `v1:cognition:space`, but the space concept + its
+// lifecycle mutations moved out of engine core into the CoPresent pack in
+// #2038. `v1:notes:note` is a still-core concept whose `createNote` mutation
+// stamps `ownerUserId: actor.userId`, so it demonstrates the exact same
+// pack-hooks-a-core-event seam against a concept the engine still owns. #2342)
 //
 // The step calls the pack's own builtin (referencePackComposeGreeting),
 // so the automation also exercises the pack's Go capability. We greet the
-// new space's owner. `event` is the triggering node bound as the
-// automation arg; `event.payload.ownerUserId` is the space owner stamped
-// by the core create mutation.
+// new note's owner. `event` is the triggering node bound as the automation
+// arg; `event.payload.ownerUserId` is the owner stamped by the core create
+// mutation.
 //
 // NOTE: this is a demonstration of the wiring, not a production behavior
 // -- the reference pack is never linked into a production binary (it has
@@ -20,15 +26,15 @@
 use referencepack.builtins.{ referencePackComposeGreeting }
 
 @enabled
-@trigger(event="node.created", concept="v1:cognition:space", partition="*")
-@description("On creation of a core space, compose a greeting for the space owner via the pack's integration capability. Demonstrates a pack automation hooking a core service event.")
-automation referencePackGreetOnSpaceCreate {
+@trigger(event="node.created", concept="v1:notes:note", partition="*")
+@description("On creation of a core note, compose a greeting for the note owner via the pack's integration capability. Demonstrates a pack automation hooking a core service event.")
+automation referencePackGreetOnNoteCreate {
   // FIRST-CLASS PRECONDITION (Epic 4 / memql#2139). A deterministic check
   // that must hold before the steps run. On a miss the harness aborts the
   // run cleanly and emits healing.precondition.missed -- the clean self-
   // healing repair trigger AND the cross-machine portability signal. Here
   // the asserted literal is the owner id stamped by the core create
-  // mutation: a space created without an ownerUserId (a portability /
+  // mutation: a note created without an ownerUserId (a portability /
   // wiring drift on some other machine) MISSES this precondition, and the
   // repair loop is handed a structured signal naming the construct, the
   // failed check, and the asserted literal -- rather than the step
@@ -36,7 +42,7 @@ automation referencePackGreetOnSpaceCreate {
   precondition ownerPresent {
     check: exists(event.payload.ownerUserId)
     literal: ownerUserId
-    description: "The created space must carry the owner id the greeting targets."
+    description: "The created note must carry the owner id the greeting targets."
   }
   step greet {
     builtin referencePackComposeGreeting ( userName: event.payload.ownerUserId )

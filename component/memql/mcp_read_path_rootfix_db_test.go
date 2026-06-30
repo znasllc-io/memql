@@ -76,33 +76,16 @@ func TestHasOperator_NotesByTag(t *testing.T) {
 	require.False(t, contains(personal, alpha), "alpha must be excluded from 'personal', got %v", personal)
 }
 
-// --- #1675: saved / archived space lists ------------------------------------
-
-func TestSpaceLists_SavedAndArchivedReturned(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
-	ctx := clusterOwnerCtx("u-spaces-1675")
-	sfx := uniqueSuffix("space")
-
-	savedID := fmt.Sprintf("v1:cognition:space:saved-%s", sfx)
-	archivedID := fmt.Sprintf("v1:cognition:space:archived-%s", sfx)
-
-	// Saved + archived rows carry active=false; the queries must still find
-	// them (they gate on status + not-deleted, NOT active==true).
-	runMutation(t, ctx, eng, "mutationSaveSpace", map[string]any{
-		"partitionId": savedID,
-		"payload":     map[string]any{"name": "Saved one", "status": "saved", "active": false},
-	})
-	runMutation(t, ctx, eng, "mutationArchiveSpace", map[string]any{
-		"partitionId": archivedID,
-		"payload":     map[string]any{"name": "Archived one", "status": "archived", "active": false},
-	})
-
-	saved := queryIds(t, ctx, eng, "querySavedSpaces()")
-	require.True(t, contains(saved, savedID), "querySavedSpaces must return the saved space (#1675), got %v", saved)
-
-	archived := queryIds(t, ctx, eng, "queryArchivedSpaces()")
-	require.True(t, contains(archived, archivedID), "queryArchivedSpaces must return the archived space (#1675), got %v", archived)
-}
+// NOTE (#2342): TestSpaceLists_SavedAndArchivedReturned lived here and covered
+// #1675 (saved/archived space lists gate on status + not-deleted, NOT
+// active==true). The entire space lifecycle -- the `space` concept, the
+// save/archive mutations, and the saved/archived queries -- moved OUT of the
+// engine core into the CoPresent pack (memql-bff-copresent/dsl/copresent) in
+// #2038, so this engine-repo test referenced constructs that no longer load
+// here and could never pass. The behavioural coverage belongs in the pack
+// repo; it is re-homed there (follow-up: memql#2344). Removed rather
+// than rewritten because no engine-core concept carries the same
+// saved/archived status-gated list shape to retarget it against.
 
 // --- #1685: soft-deleted worker invocations excluded ------------------------
 

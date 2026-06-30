@@ -34,6 +34,38 @@ func TestInScalarInCollectionField(t *testing.T) {
 	}
 }
 
+// TestInScalarInBareCollectionField locks in the #2342 fix: after the
+// bare-payload rewrite (#2294) the canonical membership RHS is a BARE row
+// field (`args.tag in tags`), not `payload.tags`. It must desugar to the same
+// array-contains (`tags has args.tag`) AST as the explicit-payload and
+// reversed-has forms -- otherwise the scalar arg stays stuck on the LHS and
+// the filter fails to compile ("field args.tag is not supported").
+func TestInScalarInBareCollectionField(t *testing.T) {
+	got := parseFilterExpr(t, `args.tag in tags`)
+	want := parseFilterExpr(t, `tags has args.tag`)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("`in` over a bare collection field should desugar to the `has` AST\n got:  %#v\n want: %#v", got, want)
+	}
+	cmp, ok := got.(*ComparisonExpr)
+	if !ok || cmp.Operator != OpHas || cmp.Field.Raw != "tags" {
+		t.Fatalf("expected OpHas over bare `tags`, got %#v", got)
+	}
+}
+
+// TestInScalarInScalarAccessor keeps a dotted scalar-accessor RHS
+// (`args.`/`ctx.`/`actor.`/`config.`) off the membership-collection path -- it
+// is a scalar, never a collection, so it stays a plain OpIn value.
+func TestInScalarInScalarAccessor(t *testing.T) {
+	expr := parseFilterExpr(t, `args.x in actor.groupIds`)
+	cmp, ok := expr.(*ComparisonExpr)
+	if !ok {
+		t.Fatalf("expected *ComparisonExpr, got %T", expr)
+	}
+	if cmp.Operator != OpIn {
+		t.Fatalf("expected scalar-accessor RHS to stay OpIn, got %v", cmp.Operator)
+	}
+}
+
 // TestInScalarInListLiteral keeps the list-literal membership form on OpIn.
 func TestInScalarInListLiteral(t *testing.T) {
 	expr := parseFilterExpr(t, `payload.kind in ["meeting", "reminder"]`)
