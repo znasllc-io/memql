@@ -30,3 +30,37 @@ capability fs.readFile {
     path string @required
   }
 }
+
+@sideEffect("write")
+@description("Write a file to the local filesystem surface.")
+capability fs.writeFile {
+  args {
+    path    string @required
+    content string @required
+  }
+}
+
+// shell.* are PERMISSIVE / open-arg capabilities. `shell.script` runs an
+// ALLOWLISTED named capability script (the I14 contract, #2221) selected by its
+// reserved `script` arg; every other arg is a structured param forwarded to the
+// script as data (never a `sh -c` string). The full typed catalog + the strict
+// capability->surface resolver are deferred to Story 8 (#2330), so the arg
+// schema below is intentionally LENIENT: only the clearly-required selector is
+// marked @required, and extra/loose args a script consumes are tolerated rather
+// than hard-failed. This keeps a generic shell capability authorable today
+// without enumerating every script's argument surface.
+@sideEffect("exec")
+@description("Run an allowlisted named capability script on the runner surface, passing structured params as data.")
+capability shell.script {
+  args {
+    script string @required
+  }
+}
+
+@sideEffect("exec")
+@description("Run a shell command on the runner surface.")
+capability shell.exec {
+  args {
+    cmd string @required
+  }
+}
