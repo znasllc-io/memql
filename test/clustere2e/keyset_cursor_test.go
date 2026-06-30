@@ -89,7 +89,7 @@ func TestKeysetCursorCrossNode(t *testing.T) {
 	sent := make([]string, 0, total) // in send order (oldest first)
 	for i := 0; i < total; i++ {
 		uid := "v1:cognition:utterance:" + id.NewShortId()
-		if _, err := qcA.MutationSendTextUtterance(ctx, memqlclient.MutationSendTextUtteranceArgs{
+		if _, err := qcA.SendTextUtterance(ctx, memqlclient.SendTextUtteranceArgs{
 			UtteranceId:     uid,
 			PartitionId:         spaceID,
 			ParticipantId:   participantID,

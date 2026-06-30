@@ -153,7 +153,7 @@ func newSpaceWithHuman(ctx context.Context, t *testing.T, conn *memqlclient.Conn
 	if _, err := qc.ExecuteNamed(ctx, "mutationCreateSpace", buildMutationCreateSpace(spaceID, "clustere2e delivery probe", "active")); err != nil {
 		t.Fatalf("create space: %v", err)
 	}
-	if _, err := qc.MutationJoinSpaceAsHuman(ctx, memqlclient.MutationJoinSpaceAsHumanArgs{
+	if _, err := qc.JoinSpaceAsHuman(ctx, memqlclient.JoinSpaceAsHumanArgs{
 		PartitionId: spaceID,
 		UserId:      userID,
 		DisplayName: "clustere2e probe",
@@ -162,7 +162,7 @@ func newSpaceWithHuman(ctx context.Context, t *testing.T, conn *memqlclient.Conn
 		t.Fatalf("join space as human: %v", err)
 	}
 	// Read back the server-assigned participant id.
-	res, err := qc.QuerySpaceParticipants(ctx, memqlclient.QuerySpaceParticipantsArgs{
+	res, err := qc.SpaceParticipants(ctx, memqlclient.SpaceParticipantsArgs{
 		PartitionId:     spaceID,
 		ParticipantType: "human",
 	})
@@ -212,7 +212,7 @@ func rowID(row memqlclient.Row) string {
 func openSpaceOnConn(ctx context.Context, t *testing.T, conn *memqlclient.Connection, spaceID, userID string) {
 	t.Helper()
 	qc := memqlclient.NewQueryClient(conn.Dispatcher())
-	if _, err := qc.MutationJoinSpaceAsHuman(ctx, memqlclient.MutationJoinSpaceAsHumanArgs{
+	if _, err := qc.JoinSpaceAsHuman(ctx, memqlclient.JoinSpaceAsHumanArgs{
 		PartitionId: spaceID,
 		UserId:      userID,
 		DisplayName: "clustere2e probe",
@@ -302,7 +302,7 @@ func TestClusterCrossReplicaDelivery(t *testing.T) {
 	// Produce exactly one utterance from conns[0].
 	utteranceID := "v1:cognition:utterance:" + id.NewShortId()
 	qc := memqlclient.NewQueryClient(producer.Dispatcher())
-	if _, err := qc.MutationSendTextUtterance(ctx, memqlclient.MutationSendTextUtteranceArgs{
+	if _, err := qc.SendTextUtterance(ctx, memqlclient.SendTextUtteranceArgs{
 		UtteranceId:     utteranceID,
 		PartitionId:     spaceID,
 		ParticipantId:   participantID,

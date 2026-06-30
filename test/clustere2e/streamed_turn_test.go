@@ -147,7 +147,7 @@ func TestClusterStreamedTurn(t *testing.T) {
 			who = "B(mid-stream switch)"
 		}
 		cid := chunkID(runID, seq)
-		if _, err := qc.MutationSendTextUtterance(ctx, memqlclient.MutationSendTextUtteranceArgs{
+		if _, err := qc.SendTextUtterance(ctx, memqlclient.SendTextUtteranceArgs{
 			UtteranceId:     cid,
 			PartitionId:         spaceID,
 			ParticipantId:   participantID,

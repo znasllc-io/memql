@@ -84,7 +84,7 @@ func TestTextChunkCrossReplicaDelivery(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	for i, c := range conns {
 		qc := memqlclient.NewQueryClient(c.Dispatcher())
-		if _, err := qc.MutationUpdateParticipantPresence(ctx, memqlclient.MutationUpdateParticipantPresenceArgs{
+		if _, err := qc.UpdateParticipantPresence(ctx, memqlclient.UpdateParticipantPresenceArgs{
 			PresenceId:    "presence-" + id.NewShortId(),
 			PartitionId:   spaceID,
 			ParticipantId: participantID,
@@ -109,7 +109,7 @@ func TestTextChunkCrossReplicaDelivery(t *testing.T) {
 	chunkShort := fmt.Sprintf("%s-0", id.NewShortId())
 	wantChunkID := "v1:cognition:text:chunk:text-chunk-" + chunkShort
 	qc := memqlclient.NewQueryClient(producer.Dispatcher())
-	if _, err := qc.MutationEmitTextChunk(ctx, memqlclient.MutationEmitTextChunkArgs{
+	if _, err := qc.EmitTextChunk(ctx, memqlclient.EmitTextChunkArgs{
 		ChunkId:       chunkShort,
 		PartitionId:   spaceID,
 		ParticipantId: participantID,
