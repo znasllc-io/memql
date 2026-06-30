@@ -101,7 +101,7 @@ func TestNamedQueryPaginationCrossNode(t *testing.T) {
 		sent := make([]string, 0, total) // oldest-first send order.
 		for i := 0; i < total; i++ {
 			uid := "v1:cognition:utterance:" + id.NewShortId()
-			if _, err := qcA.MutationSendTextUtterance(ctx, memqlclient.MutationSendTextUtteranceArgs{
+			if _, err := qcA.SendTextUtterance(ctx, memqlclient.SendTextUtteranceArgs{
 				UtteranceId:     uid,
 				PartitionId:     spaceID,
 				ParticipantId:   participantID,
@@ -117,7 +117,7 @@ func TestNamedQueryPaginationCrossNode(t *testing.T) {
 		// The SDK *Build helper emits the exact authored named-query call string;
 		// the sort+paginate directives are baked into the query DEFINITION, so the
 		// cursor rides ExecuteQueryMsg.cursor and we never pass a page size.
-		query := memqlclient.QuerySpaceUtterancesBuild(memqlclient.QuerySpaceUtterancesArgs{
+		query := memqlclient.SpaceUtterancesBuild(memqlclient.SpaceUtterancesArgs{
 			PartitionId: spaceID,
 		})
 

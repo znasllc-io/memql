@@ -44,7 +44,7 @@ func TestPresenceDrivenDelivery(t *testing.T) {
 		qc := memqlclient.NewQueryClient(c.Dispatcher())
 		// PresenceId must be a bare slug (no colons) -- participantID is the
 		// canonical id, so mint a fresh short id per connection instead.
-		if _, err := qc.MutationUpdateParticipantPresence(ctx, memqlclient.MutationUpdateParticipantPresenceArgs{
+		if _, err := qc.UpdateParticipantPresence(ctx, memqlclient.UpdateParticipantPresenceArgs{
 			PresenceId:    "presence-" + id.NewShortId(),
 			PartitionId:       spaceID,
 			ParticipantId: participantID,
@@ -66,7 +66,7 @@ func TestPresenceDrivenDelivery(t *testing.T) {
 
 	utteranceID := "v1:cognition:utterance:" + id.NewShortId()
 	qc := memqlclient.NewQueryClient(producer.Dispatcher())
-	if _, err := qc.MutationSendTextUtterance(ctx, memqlclient.MutationSendTextUtteranceArgs{
+	if _, err := qc.SendTextUtterance(ctx, memqlclient.SendTextUtteranceArgs{
 		UtteranceId:     utteranceID,
 		PartitionId:         spaceID,
 		ParticipantId:   participantID,

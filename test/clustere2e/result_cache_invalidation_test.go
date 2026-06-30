@@ -66,7 +66,7 @@ func TestResultCacheInvalidation_CrossReplica(t *testing.T) {
 
 	sendUtterance := func(text string) string {
 		uid := "v1:cognition:utterance:" + id.NewShortId()
-		if _, err := qcA.MutationSendTextUtterance(ctx, memqlclient.MutationSendTextUtteranceArgs{
+		if _, err := qcA.SendTextUtterance(ctx, memqlclient.SendTextUtteranceArgs{
 			UtteranceId:     uid,
 			PartitionId:     spaceID,
 			ParticipantId:   participantID,
@@ -87,7 +87,7 @@ func TestResultCacheInvalidation_CrossReplica(t *testing.T) {
 	}
 
 	utteranceCount := func(qc *memqlclient.QueryClient) int {
-		res, err := qc.QuerySpaceUtterances(ctx, memqlclient.QuerySpaceUtterancesArgs{PartitionId: spaceID})
+		res, err := qc.SpaceUtterances(ctx, memqlclient.SpaceUtterancesArgs{PartitionId: spaceID})
 		if err != nil {
 			t.Fatalf("spaceUtterances: %v", err)
 		}
@@ -119,7 +119,7 @@ func TestResultCacheInvalidation_CrossReplica(t *testing.T) {
 	// invalidation). We poll only up to a few seconds -- far under the 30s TTL.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		res, err := qcB.QuerySpaceUtterances(ctx, memqlclient.QuerySpaceUtterancesArgs{PartitionId: spaceID})
+		res, err := qcB.SpaceUtterances(ctx, memqlclient.SpaceUtterancesArgs{PartitionId: spaceID})
 		if err != nil {
 			t.Fatalf("post-write spaceUtterances: %v", err)
 		}
