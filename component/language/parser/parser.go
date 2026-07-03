@@ -5037,7 +5037,7 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 	if isInvocationKindKeyword(name) && p.check(TokenIdentifier) && p.peekAhead(1).Type == TokenParenOpen {
 		innerName := p.current.Literal
 		p.advance() // consume the construct name; p.current is now '('
-		call, err := p.parseFunctionCall(innerName)
+		call, err := p.parseFunctionCallWithKind(innerName, name)
 		if err != nil {
 			return nil, err
 		}
@@ -5254,6 +5254,25 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 
 // parseFunctionCall parses a function call: name(args).
 func (p *Parser) parseFunctionCall(name string) (ExpressionNode, error) {
+	return p.parseFunctionCallWithKind(name, "")
+}
+
+// parseFunctionCallWithKind is parseFunctionCall with the invocation kind
+// prefix threaded through (empty for bare calls). On KIND-PREFIXED construct
+// calls two G3/#2365 (+ S8 hole 2, #2395) rules apply inside the arg loop:
+//
+//   - PUNNING (ADR event-payload-binding Decision 5): a bare simple
+//     identifier in argument position is sugar for `name: name` --
+//     `action f(environment)` == `action f(environment: environment)`.
+//     The punned value is produced by the same parseValue path as the
+//     explicit named form, so downstream resolution is identical.
+//   - POSITIONAL REJECTION: any other positional argument (literal, dotted
+//     path, expression) on a construct call is an error -- construct calls
+//     are named-args-only (#2322); positionals were previously accepted
+//     silently as keys "0"/"1". Primitive builtins (bare calls, kind == "")
+//     legitimately take positional args and are untouched. A lone
+//     object-literal still routes to the Story 9 wrapper-specific error.
+func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, error) {
 	p.advance() // consume '('
 
 	lname := strings.ToLower(name)
@@ -5357,7 +5376,27 @@ func (p *Parser) parseFunctionCall(name string) (ExpressionNode, error) {
 				return nil, err
 			}
 			args[argName] = val
+		} else if kind != "" && p.check(TokenIdentifier) && !strings.Contains(p.current.Literal, ".") &&
+			(p.peekAhead(1).Type == TokenComma || p.peekAhead(1).Type == TokenParenClose) {
+			// G3 (#2365): punning -- bare simple identifier == `name: name`.
+			// Dotted paths (args.workdir) do not pun (no single name); they
+			// fall through to the positional rejection below with a hint.
+			argName := p.current.Literal
+			val, err := p.parseValue()
+			if err != nil {
+				return nil, err
+			}
+			args[argName] = val
 		} else {
+			if kind != "" && !p.check(TokenBraceOpen) {
+				// S8 hole 2 (#2395): positional args on a construct call were
+				// silently accepted as keys "0"/"1". Construct calls are
+				// named-args-only. (A lone `{...}` falls through so the
+				// Story 9 object-literal error keeps its specific hint.)
+				return nil, newParseErrorf(&p.current,
+					"positional args are removed on construct calls; name the argument: %s %s(k: v, ...) -- a bare identifier puns to its own name (%s(x) == %s(x: x))",
+					kind, name, name, name)
+			}
 			// Positional argument
 			val, err := p.parseValue()
 			if err != nil {

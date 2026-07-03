@@ -343,9 +343,9 @@ func TestRetiredOperators_ParserAcceptsToTreeScanGate(t *testing.T) {
 
 // ===========================================================================
 // SILENT-ACCEPTANCE HOLES surfaced by this suite (memql#2383). HOLE 1 is
-// CLOSED by memql#2395 (active test below); HOLE 2 remains open, deferred to
-// the G3 punning story (#2365) because a bare identifier in arg position is
-// becoming punning syntax -- rejection semantics must be decided together.
+// CLOSED by memql#2395; HOLE 2 is CLOSED by the G3 punning story (#2365) --
+// bare identifiers pun, all other positionals on construct calls reject.
+// Both active tests below.
 // ===========================================================================
 
 // HOLE 1 -- CLOSED (memql#2395): shape / builtin / prompt / spec / trait /
@@ -388,8 +388,45 @@ func TestHOLE_UnknownAnnotationSilentlyAccepted(t *testing.T) {
 // accepted (mapped to keys "0", "1", ...). Bare positional args are legitimate
 // for primitive builtins (coalesce(a, b)), so a fix must scope the rejection to
 // kind-prefixed CONSTRUCT calls only.
+// CLOSED by G3 (#2365): construct calls are named-args-only; a bare simple
+// identifier is PUNNING (`f(x)` == `f(x: x)`); any other positional is
+// rejected with a migration hint. Primitive builtins (bare calls) keep
+// positional args.
 func TestHOLE_PositionalArgsOnKindPrefixedCall(t *testing.T) {
-	t.Skip("HOLE (memql#2383 report): a kind-prefixed construct call with positional args (e.g. `mutation createNode(\"x\", 1)`) is silently accepted and the positionals are mapped to keys \"0\"/\"1\". Primitive builtins legitimately take positional args, so a fix must scope rejection to construct calls. DEFERRED to the G3 punning story (memql#2365): bare-identifier args become punning there, so the rejection carve-out is decided with it. Un-skip when #2365 lands.")
+	// Positional literals on a construct call: rejected.
+	_, err := ParseExpression(`mutation createNode("x", 1)`)
+	if err == nil {
+		t.Fatal("positional args on a construct call must be rejected")
+	}
+	if !strings.Contains(err.Error(), "positional args are removed on construct calls") {
+		t.Errorf("error should carry the migration hint, got: %v", err)
+	}
+
+	// Dotted path positional: rejected (does not pun -- no single name).
+	if _, err := ParseExpression(`mutation createNode(args.node.id)`); err == nil {
+		t.Fatal("dotted positional on a construct call must be rejected")
+	}
+
+	// PUNNING: a bare simple identifier is `name: name`.
+	node, err := ParseExpression(`mutation createNode(id, nodeType: "agent")`)
+	if err != nil {
+		t.Fatalf("punned construct call should parse: %v", err)
+	}
+	call, ok := node.(*FunctionCallExpr)
+	if !ok {
+		t.Fatalf("expected FunctionCallExpr, got %T", node)
+	}
+	if _, present := call.Args["id"]; !present {
+		t.Fatalf("pun should bind under its own name; args = %v", call.Args)
+	}
+	if call.Args["nodeType"] != "agent" {
+		t.Errorf("mixed named arg mangled: %v", call.Args["nodeType"])
+	}
+
+	// Primitive builtins keep positional args (bare call, no kind prefix).
+	if _, err := ParseExpression(`coalesce(a, "fallback")`); err != nil {
+		t.Fatalf("primitive builtin positional args must stay valid: %v", err)
+	}
 }
 
 // LAYER NOTE (not a hole): `spec("name")` / `trait("name")` parse clean at the
