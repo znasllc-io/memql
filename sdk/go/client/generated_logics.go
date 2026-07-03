@@ -14,7 +14,7 @@ var (
 	_ = strings.Builder{}
 )
 
-// AccessRequestExpirySweep -- Pure decide for the access-request expiry sweep: returns every pending access request candidate. The expiry-var read, the per-row window gate (createdAt + P{N}D < now), and the expire write live in the accessRequestExpirySweep automation's window + forEach steps (#2235; date-window gate evaluated correctly since #2256/#2254).
+// AccessRequestExpirySweep -- Pure decide for the access-request expiry sweep (#2369, cluster pruneStaleClusterNodes pattern): reads IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, and returns expiredPendingAccessRequests({createdBefore: cutoff}).nodes() -- the pending rows past the window, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's forEach is unconditional.
 type AccessRequestExpirySweepArgs struct {
 	Event map[string]any
 }
@@ -28,26 +28,6 @@ func (qc *QueryClient) AccessRequestExpirySweep(ctx context.Context, args Access
 func AccessRequestExpirySweepBuild(args AccessRequestExpirySweepArgs) string {
 	var b strings.Builder
 	b.WriteString("logic accessRequestExpirySweep(")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString(")")
-	return b.String()
-}
-
-// AccessRequestExpiryWindow -- Pure read: returns the IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS global variable row for the accessRequestExpirySweep automation's per-row window gate (#2235).
-type AccessRequestExpiryWindowArgs struct {
-	Event map[string]any
-}
-
-// AccessRequestExpiryWindow calls the engine logic accessRequestExpiryWindow.
-func (qc *QueryClient) AccessRequestExpiryWindow(ctx context.Context, args AccessRequestExpiryWindowArgs) (*Result, error) {
-	call := AccessRequestExpiryWindowBuild(args)
-	return qc.executeNamed(ctx, "accessRequestExpiryWindow", call)
-}
-
-func AccessRequestExpiryWindowBuild(args AccessRequestExpiryWindowArgs) string {
-	var b strings.Builder
-	b.WriteString("logic accessRequestExpiryWindow(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString(")")
@@ -94,7 +74,7 @@ func AccountDeletionReminder7DaysBuild(args AccountDeletionReminder7DaysArgs) st
 	return b.String()
 }
 
-// AccountDeletionSweep -- Pure decide for the account-deletion sweep: returns every user scheduled for deletion. The cooldown-var read, the per-row window gate (deletionScheduledAt + P{N}D < now), and the deleteUserHard write live in the accountDeletionSweep automation's window + forEach steps (#2235; date-window gate evaluated correctly since #2256/#2254). Audit-event rows, invitations the user issued, and access-request rows are intentionally retained for the trail.
+// AccountDeletionSweep -- Pure decide for the account-deletion sweep (#2369, cluster pattern): reads MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS (default 30), computes cutoff = now - cooldown via addDuration with a negative ISO duration, and returns usersScheduledForDeletion({scheduledBefore: cutoff}).nodes() -- users whose cooldown has elapsed, filtered by QUERY PUSHDOWN; the automation's forEach hard-deletes each unconditionally. Audit-event rows, invitations the user issued, and access-request rows are intentionally retained for the trail.
 type AccountDeletionSweepArgs struct {
 	Event map[string]any
 }
@@ -108,26 +88,6 @@ func (qc *QueryClient) AccountDeletionSweep(ctx context.Context, args AccountDel
 func AccountDeletionSweepBuild(args AccountDeletionSweepArgs) string {
 	var b strings.Builder
 	b.WriteString("logic accountDeletionSweep(")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString(")")
-	return b.String()
-}
-
-// AccountDeletionWindow -- Pure read: returns the MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS global variable row for the accountDeletionSweep automation's per-row window gate (#2235).
-type AccountDeletionWindowArgs struct {
-	Event map[string]any
-}
-
-// AccountDeletionWindow calls the engine logic accountDeletionWindow.
-func (qc *QueryClient) AccountDeletionWindow(ctx context.Context, args AccountDeletionWindowArgs) (*Result, error) {
-	call := AccountDeletionWindowBuild(args)
-	return qc.executeNamed(ctx, "accountDeletionWindow", call)
-}
-
-func AccountDeletionWindowBuild(args AccountDeletionWindowArgs) string {
-	var b strings.Builder
-	b.WriteString("logic accountDeletionWindow(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString(")")
@@ -665,7 +625,7 @@ func VoiceMigrationOnSecondHumanBuild(args VoiceMigrationOnSecondHumanArgs) stri
 	return b.String()
 }
 
-// WorkerInvocationRetentionSweep -- Pure decide for the worker-invocation retention sweep: returns every soft-deletable candidate row. The retention-var read, the per-row window gate (createdAt + P{N}D < now), and the soft-delete write live in the workerInvocationRetentionSweep automation's window + forEach steps (#2235; the date-window gate is evaluated correctly by the condition evaluator since #2256/#2254).
+// WorkerInvocationRetentionSweep -- Pure decide for the worker-invocation retention sweep (#2369, cluster pruneStaleClusterNodes pattern): reads WORKER_INVOCATION_RETENTION_DAYS (default 90), computes cutoff = now - window via addDuration with a negative ISO duration, and returns expiredWorkerInvocations({createdBefore: cutoff}).nodes() -- rows past retention, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's forEach soft-deletes each unconditionally.
 type WorkerInvocationRetentionSweepArgs struct {
 	Event map[string]any
 }
@@ -679,26 +639,6 @@ func (qc *QueryClient) WorkerInvocationRetentionSweep(ctx context.Context, args 
 func WorkerInvocationRetentionSweepBuild(args WorkerInvocationRetentionSweepArgs) string {
 	var b strings.Builder
 	b.WriteString("logic workerInvocationRetentionSweep(")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString(")")
-	return b.String()
-}
-
-// WorkerInvocationRetentionWindow -- Pure read: returns the WORKER_INVOCATION_RETENTION_DAYS global variable row for the workerInvocationRetentionSweep automation's per-row window gate (#2235).
-type WorkerInvocationRetentionWindowArgs struct {
-	Event map[string]any
-}
-
-// WorkerInvocationRetentionWindow calls the engine logic workerInvocationRetentionWindow.
-func (qc *QueryClient) WorkerInvocationRetentionWindow(ctx context.Context, args WorkerInvocationRetentionWindowArgs) (*Result, error) {
-	call := WorkerInvocationRetentionWindowBuild(args)
-	return qc.executeNamed(ctx, "workerInvocationRetentionWindow", call)
-}
-
-func WorkerInvocationRetentionWindowBuild(args WorkerInvocationRetentionWindowArgs) string {
-	var b strings.Builder
-	b.WriteString("logic workerInvocationRetentionWindow(")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString(")")

@@ -8,9 +8,12 @@ use worker.concepts.{ invocation, registration }
 
 @enabled
 @unbounded("expired worker-invocation retention sweep -- an internal sweep that must see all")
-@description("List worker invocation rows for retention pruning. Caller filters by age.")
+@description("List worker invocation rows for retention pruning. When createdBefore is supplied, restricts to rows created strictly before it -- the retention sweep's logic computes the cutoff (now - WORKER_INVOCATION_RETENTION_DAYS) and pushes it down (#2369).")
 query invocation expiredWorkerInvocations {
-  filter  action!="" && isNotDeleted
+  args {
+    createdBefore  string  @description("Optional RFC3339 cutoff; when set, only rows whose createdAt is strictly before it are returned.")
+  }
+  filter  action!="" && isNotDeleted && when(args.createdBefore) { createdAt<args.createdBefore }
   shape   workerInvocationFull
 }
 
