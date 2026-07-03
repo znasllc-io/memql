@@ -30,7 +30,7 @@ import (
 // skipped -- one bad slice should not blank-out the rest of the tree,
 // but the skip is surfaced loudly so a malformed spec/trait can't rot
 // silently (memql#2356).
-func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry) (int, error) {
+func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry, report ...*LoadReport) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("spec registry is nil")
 	}
@@ -44,6 +44,8 @@ func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry) (int, error) 
 		return specDeclToSpec(decl, origin)
 	}
 
+	rep := firstReport(report)
+	sink := newBaseloaderSink()
 	specs, err := baseloader.LoadOne[Spec](
 		logger,
 		"memql.unifiedSpecLoader",
@@ -52,10 +54,13 @@ func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry) (int, error) 
 		extractAdapter,
 		parse,
 		registry.add,
+		sink,
 	)
+	rep.FoldSink("specs", specs, sink)
 	if err != nil {
 		return specs, err
 	}
+	sink = newBaseloaderSink()
 	traits, err := baseloader.LoadOne[Spec](
 		logger,
 		"memql.unifiedSpecLoader",
@@ -64,6 +69,8 @@ func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry) (int, error) 
 		extractAdapter,
 		parse,
 		registry.add,
+		sink,
 	)
+	rep.FoldSink("specs", traits, sink)
 	return specs + traits, err
 }

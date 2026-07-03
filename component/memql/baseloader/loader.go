@@ -76,6 +76,10 @@ type Slice struct {
 //	extract    -- supplied by the caller (ExtractKeywordSlices)
 //	parse      -- per-construct parser
 //	register   -- registry.Upsert / .Add / .set / etc.
+//	sinks      -- optional trailing *Report; each skip is recorded on the
+//	              first non-nil sink so a caller can build a LoadReport for
+//	              strict boot (memql#2357). Callers that don't want a
+//	              report pass none, which keeps the WARN-only S1 behaviour.
 func LoadOne[T any](
 	logger *slog.Logger,
 	component string,
@@ -84,6 +88,7 @@ func LoadOne[T any](
 	extract func(content, keyword string) []Slice,
 	parse func(origin string, raw []byte) (*T, error),
 	register func(item *T) error,
+	sinks ...*Report,
 ) (int, error) {
 	if extract == nil {
 		return 0, fmt.Errorf("baseloader: extract fn is nil")
@@ -94,6 +99,7 @@ func LoadOne[T any](
 	if register == nil {
 		return 0, fmt.Errorf("baseloader: register fn is nil")
 	}
+	sink := firstSink(sinks)
 
 	total := 0
 	for _, raw := range files {
@@ -105,6 +111,7 @@ func LoadOne[T any](
 					logger.Warn(component+": parse failed",
 						"file", raw.Path, keyword, slice.Name, "error", err)
 				}
+				sink.Add(Skip{Component: component, Keyword: keyword, Name: slice.Name, File: raw.Path, Phase: "parse", Err: err.Error()})
 				continue
 			}
 			if err := register(item); err != nil {
@@ -112,6 +119,7 @@ func LoadOne[T any](
 					logger.Warn(component+": register failed",
 						"file", raw.Path, keyword, slice.Name, "error", err)
 				}
+				sink.Add(Skip{Component: component, Keyword: keyword, Name: slice.Name, File: raw.Path, Phase: "register", Err: err.Error()})
 				continue
 			}
 			total++
@@ -135,6 +143,7 @@ func LoadMany[T any](
 	extract func(content, keyword string) []Slice,
 	parse func(origin string, raw []byte) ([]*T, error),
 	register func(item *T) error,
+	sinks ...*Report,
 ) (int, error) {
 	if extract == nil {
 		return 0, fmt.Errorf("baseloader: extract fn is nil")
@@ -145,6 +154,7 @@ func LoadMany[T any](
 	if register == nil {
 		return 0, fmt.Errorf("baseloader: register fn is nil")
 	}
+	sink := firstSink(sinks)
 
 	total := 0
 	for _, raw := range files {
@@ -156,6 +166,7 @@ func LoadMany[T any](
 					logger.Warn(component+": parse failed",
 						"file", raw.Path, keyword, slice.Name, "error", err)
 				}
+				sink.Add(Skip{Component: component, Keyword: keyword, Name: slice.Name, File: raw.Path, Phase: "parse", Err: err.Error()})
 				continue
 			}
 			for _, item := range items {
@@ -164,6 +175,7 @@ func LoadMany[T any](
 						logger.Warn(component+": register failed",
 							"file", raw.Path, keyword, slice.Name, "error", err)
 					}
+					sink.Add(Skip{Component: component, Keyword: keyword, Name: slice.Name, File: raw.Path, Phase: "register", Err: err.Error()})
 					continue
 				}
 				total++

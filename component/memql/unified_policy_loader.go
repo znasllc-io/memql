@@ -34,10 +34,11 @@ import (
 // policyDeclToPolicyConfig converter. The hand-rolled parser is
 // unreferenced from production after this child; tests in
 // policy_parser_test.go still exercise it pending #329's cleanup PR.
-func LoadUnifiedPolicies(logger *slog.Logger, registry *PolicyRegistry) (int, error) {
+func LoadUnifiedPolicies(logger *slog.Logger, registry *PolicyRegistry, report ...*LoadReport) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("policy registry is nil")
 	}
+	rep := firstReport(report)
 	total := 0
 	for _, raw := range baseloader.ReadAll(logger) {
 		for _, slice := range ExtractKeywordSlices(raw.Content, "policy") {
@@ -47,6 +48,7 @@ func LoadUnifiedPolicies(logger *slog.Logger, registry *PolicyRegistry) (int, er
 					logger.Warn("unified policy loader: parse failed",
 						"file", raw.Path, "policy", slice.Name, "error", err)
 				}
+				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedPolicyLoader", Keyword: "policy", Name: slice.Name, File: raw.Path, Phase: "parse", Err: err.Error()})
 				continue
 			}
 			cfg, err := policyDeclToPolicyConfig(decl)
@@ -55,6 +57,7 @@ func LoadUnifiedPolicies(logger *slog.Logger, registry *PolicyRegistry) (int, er
 					logger.Warn("unified policy loader: convert failed",
 						"file", raw.Path, "policy", slice.Name, "error", err)
 				}
+				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedPolicyLoader", Keyword: "policy", Name: slice.Name, File: raw.Path, Phase: "convert", Err: err.Error()})
 				continue
 			}
 			cfg.Name = slice.Name
@@ -73,6 +76,7 @@ func LoadUnifiedPolicies(logger *slog.Logger, registry *PolicyRegistry) (int, er
 			total++
 		}
 	}
+	rep.AddRegistered("policies", total)
 	if logger != nil {
 		logger.Info("unified policy loader: registered routing policies",
 			"component", "memql.unifiedPolicyLoader", "count", total)

@@ -20,6 +20,14 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	e.tools = nil
 	e.aiRuntime = nil
 
+	// Fresh structured load report for this Init pass (epic #2351 / S2,
+	// memql#2357). Every unified loader below accumulates its skipped[]
+	// constructs into it; the S5 uniqueness gate folds in duplicates; the
+	// strict-boot check consults it before the tail summary log. Rebuilt
+	// per Init so tests that re-Init never leak a stale problem set.
+	report := newLoadReport()
+	e.loadReport = report
+
 	if concepts == nil {
 		return fmt.Errorf("concept registry is required")
 	}
@@ -159,7 +167,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// in the new tree (none today) get registered exclusively via
 	// this loader. When the legacy tree is retired (Pass 3), the
 	// loadEmbeddedFunctions call above goes away.
-	if _, _, ulErr := LoadUnifiedFunctions(e.Logger, functionRegistry, e.concepts); ulErr != nil {
+	if _, _, ulErr := LoadUnifiedFunctions(e.Logger, functionRegistry, e.concepts, report); ulErr != nil {
 		e.Logger.Warn("unified function loader returned an error; legacy loader covers the gap",
 			"component", "memql.engine",
 			"error", ulErr)
@@ -178,7 +186,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 
 	// Pass 2 of the DSL restructure: overlay shapes from the new
 	// domain-first tree.
-	if _, ulErr := LoadUnifiedShapes(e.Logger, shapeRegistry); ulErr != nil {
+	if _, ulErr := LoadUnifiedShapes(e.Logger, shapeRegistry, report); ulErr != nil {
 		e.Logger.Warn("unified shape loader returned an error; legacy covers gap",
 			"component", "memql.engine", "error", ulErr)
 	}
@@ -194,7 +202,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// Specs / traits use the SpecRegistry; the unified function
 	// loader does NOT handle them. Without this call the registry
 	// stays empty + every executor lookup misses.
-	if _, ulErr := LoadUnifiedSpecs(e.Logger, specRegistry); ulErr != nil {
+	if _, ulErr := LoadUnifiedSpecs(e.Logger, specRegistry, report); ulErr != nil {
 		e.Logger.Warn("unified spec loader returned an error",
 			"component", "memql.engine", "error", ulErr)
 	}
@@ -213,7 +221,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// Pass 2: overlay builtins from the new tree (struct-form
 	// `builtin NAME { ... }` blocks). Builtins are functions
 	// internally so they merge into the FunctionRegistry.
-	if _, ulErr := LoadUnifiedBuiltins(e.Logger, functionRegistry); ulErr != nil {
+	if _, ulErr := LoadUnifiedBuiltins(e.Logger, functionRegistry, report); ulErr != nil {
 		e.Logger.Warn("unified builtin loader returned an error; legacy covers gap",
 			"component", "memql.engine", "error", ulErr)
 	}
@@ -225,7 +233,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	}
 
 	// Pass 2: overlay tools from the new tree.
-	if _, ulErr := LoadUnifiedTools(e.Logger, toolRegistry); ulErr != nil {
+	if _, ulErr := LoadUnifiedTools(e.Logger, toolRegistry, report); ulErr != nil {
 		e.Logger.Warn("unified tool loader returned an error; legacy covers gap",
 			"component", "memql.engine", "error", ulErr)
 	}
@@ -253,7 +261,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// .tmpl sidecars in dsl/<domain>/prompts/ are picked up.
 	// Reuse the same partials the legacy loader built.
 	if partials, pErr := loadPartials(); pErr == nil && partials != nil {
-		if _, ulErr := LoadUnifiedPrompts(e.Logger, promptRegistry, partials); ulErr != nil {
+		if _, ulErr := LoadUnifiedPrompts(e.Logger, promptRegistry, partials, report); ulErr != nil {
 			e.Logger.Warn("unified prompt loader returned an error; legacy covers gap",
 				"component", "memql.engine", "error", ulErr)
 		}
@@ -276,7 +284,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// engine startup + on v1:identity:user create events to materialize
 	// rows into v1:agents:agent and friends.
 	seedRegistry := NewSeedRegistry()
-	if _, slErr := LoadUnifiedSeeds(e.Logger, seedRegistry); slErr != nil {
+	if _, slErr := LoadUnifiedSeeds(e.Logger, seedRegistry, report); slErr != nil {
 		e.Logger.Warn("unified seed loader returned an error",
 			"component", "memql.engine", "error", slErr)
 	}
@@ -305,7 +313,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// has one file per vendor with the base + all models in one
 	// place; each `provider NAME { ... }` block becomes a registry
 	// entry.
-	if _, ulErr := LoadUnifiedProviders(e.Logger, providerRegistry); ulErr != nil {
+	if _, ulErr := LoadUnifiedProviders(e.Logger, providerRegistry, report); ulErr != nil {
 		e.Logger.Warn("unified provider loader returned an error; legacy covers gap",
 			"component", "memql.engine", "error", ulErr)
 	}
@@ -313,7 +321,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	if err != nil {
 		return err
 	}
-	if _, ulErr := LoadUnifiedPolicies(e.Logger, policyRegistry); ulErr != nil {
+	if _, ulErr := LoadUnifiedPolicies(e.Logger, policyRegistry, report); ulErr != nil {
 		e.Logger.Warn("unified policy loader returned an error; legacy stub covers gap",
 			"component", "memql.engine", "error", ulErr)
 	}
@@ -374,36 +382,64 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 		return fmt.Errorf("authored action load (strict capability arg-typing) failed: %w", err)
 	}
 
-	// Load-time per-kind uniqueness gate (epic #2351 / S5, memql#2360).
-	// Surface silent last-wins registration collisions LOUDLY. Two authored
-	// constructs that land in the SAME runtime registry -- query / mutation /
-	// logic / builtin -> FunctionRegistry, spec / trait -> SpecRegistry,
-	// shapes / tools / prompts / providers / policies / seeds / automations /
-	// actions -> their own -- with the same bare name silently overwrite one
-	// another by load order (Upsert never checks; Add drops the loser at
-	// Debug). This walks the same merged tree the loaders register from
-	// (embedded core + every RegisterTree'd pack, each file once), so on a
-	// carrier node the check spans core + the copresent pack. Detection +
-	// ERROR visibility only; strict fail-boot rides in with the S2 LoadReport
-	// (#2357). The conformance tests keep the tree at zero.
-	if e.Logger != nil {
-		if dups := DetectDuplicateConstructs(baseloader.ReadAll(e.Logger)); len(dups) > 0 {
-			for _, d := range dups {
-				e.Logger.Error("duplicate DSL construct registration (silent last-wins)",
-					"component", "memql.engine",
-					"group", d.Group,
-					"name", d.Name,
-					"origins", strings.Join(d.Origins, " | "),
-					"count", len(d.Origins))
-			}
-			e.Logger.Error("DSL uniqueness gate: duplicate construct name(s) detected across core + packs",
+	// Load-time per-kind uniqueness gate (epic #2351 / S5, memql#2360),
+	// folded into the S2 LoadReport. Two authored constructs that land in
+	// the SAME runtime registry -- query / mutation / logic / builtin ->
+	// FunctionRegistry, spec / trait -> SpecRegistry, shapes / tools /
+	// prompts / providers / policies / seeds / automations / actions ->
+	// their own -- with the same bare name silently overwrite one another
+	// by load order (Upsert never checks; Add drops the loser). This walks
+	// the same merged tree the loaders register from (embedded core + every
+	// RegisterTree'd pack, each file once), so on a carrier node the check
+	// spans core + the copresent pack. S5 gave this ERROR visibility; S2
+	// makes it a strict-boot signal (below) alongside the skipped
+	// constructs each loader recorded on the report.
+	dups := DetectDuplicateConstructs(baseloader.ReadAll(e.Logger))
+	report.SetDuplicates(dups)
+	if e.Logger != nil && len(dups) > 0 {
+		for _, d := range dups {
+			e.Logger.Error("duplicate DSL construct registration (silent last-wins)",
 				"component", "memql.engine",
-				"duplicateCount", len(dups))
+				"group", d.Group,
+				"name", d.Name,
+				"origins", strings.Join(d.Origins, " | "),
+				"count", len(d.Origins))
+		}
+		e.Logger.Error("DSL uniqueness gate: duplicate construct name(s) detected across core + packs",
+			"component", "memql.engine",
+			"duplicateCount", len(dups))
+	}
+
+	// Strict DSL boot (epic #2351 / S2, memql#2357). A skipped in-tree
+	// construct (any unified loader's parse/register drop) or a same-
+	// registry duplicate means the embedded core tree or a registered pack
+	// HALF-loaded. A half-loaded pack is worse than one that fails: a
+	// multi-node fleet boots green with arbitrary construct subsets (the
+	// copresent-rot mechanism, bff#153). Refuse to boot so the failure is
+	// loud + uniform instead of silent + per-node. MEMQL_DSL_ALLOW_SKIPS is
+	// the operator break-glass. NB: durably-promoted authored bundles are
+	// NOT gated here -- their stored source can rot when the grammar moves
+	// and must not brick a fleet, so the boot re-hydration path quarantines
+	// them (ERROR + report entry) rather than failing boot.
+	if report.HasProblems() {
+		if !dslAllowSkips() {
+			return fmt.Errorf("strict DSL boot refused: %d problem(s) loading the embedded tree + registered packs (%d skipped construct(s), %d duplicate(s)); set %s=1 to boot anyway (operator break-glass).\n%s",
+				report.ProblemCount(), len(report.Skipped), len(report.Duplicates), allowSkipsEnvVar, report.Detail())
+		}
+		if e.Logger != nil {
+			e.Logger.Error("MEMQL_DSL_ALLOW_SKIPS set: booting despite DSL load problems (operator break-glass)",
+				"component", "memql.engine",
+				"problems", report.ProblemCount(),
+				"skipped", len(report.Skipped),
+				"duplicates", len(report.Duplicates),
+				"detail", report.Detail())
 		}
 	}
 
-	// Log boot validation summary
+	// Log boot validation summary + the structured load-report summary
+	// (one healthy line, or ERROR + per-problem detail on skips/dups).
 	e.logBootValidationSummary(functionRegistry, shapeRegistry, specRegistry, providerRegistry)
+	report.logSummary(e.Logger)
 
 	e.initialized = true
 

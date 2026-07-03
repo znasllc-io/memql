@@ -47,11 +47,12 @@ func extractAdapter(content, keyword string) []baseloader.Slice {
 // hand-rolled parser is unreferenced from production code after this
 // child; tests in shape_parser_test.go still exercise it pending the
 // final deletion in #306 child D (#310).
-func LoadUnifiedShapes(logger *slog.Logger, registry *ShapeRegistry) (int, error) {
+func LoadUnifiedShapes(logger *slog.Logger, registry *ShapeRegistry, report ...*LoadReport) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("shape registry is nil")
 	}
-	return baseloader.LoadOne[ShapeDefinition](
+	sink := newBaseloaderSink()
+	n, err := baseloader.LoadOne[ShapeDefinition](
 		logger,
 		"memql.unifiedShapeLoader",
 		"shape",
@@ -70,7 +71,10 @@ func LoadUnifiedShapes(logger *slog.Logger, registry *ShapeRegistry) (int, error
 			return shape, nil
 		},
 		registry.Upsert,
+		sink,
 	)
+	firstReport(report).FoldSink("shapes", n, sink)
+	return n, err
 }
 
 // LoadUnifiedProviders walks the new tree, parses every `provider
@@ -99,10 +103,11 @@ func LoadUnifiedShapes(logger *slog.Logger, registry *ShapeRegistry) (int, error
 // @base providers (vendor-level entries with no concrete model, used
 // only for @extends inheritance) are registered with Available=false
 // on purpose: they're metadata, not callable.
-func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int, error) {
+func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry, report ...*LoadReport) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("provider registry is nil")
 	}
+	rep := firstReport(report)
 
 	// Two-pass load. Pass 1 registers every @base provider so the
 	// inheritance lookup in pass 2 can find them regardless of file
@@ -125,6 +130,7 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 					logger.Warn("memql.unifiedProviderLoader: parse failed",
 						"file", raw.Path, "provider", slice.Name, "error", err)
 				}
+				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedProviderLoader", Keyword: "provider", Name: slice.Name, File: raw.Path, Phase: "parse", Err: err.Error()})
 				continue
 			}
 			cfg, err := providerDeclToProviderConfig(decl)
@@ -133,6 +139,7 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 					logger.Warn("memql.unifiedProviderLoader: convert failed",
 						"file", raw.Path, "provider", slice.Name, "error", err)
 				}
+				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedProviderLoader", Keyword: "provider", Name: slice.Name, File: raw.Path, Phase: "convert", Err: err.Error()})
 				continue
 			}
 			if cfg == nil {
@@ -143,6 +150,7 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 	}
 
 	total := registerParsedProviders(logger, registry, all)
+	rep.AddRegistered("providers", total)
 	if logger != nil {
 		logger.Info("memql.unifiedProviderLoader: registered",
 			"keyword", "provider", "count", total)
@@ -277,11 +285,12 @@ func registerParsedProviders(logger *slog.Logger, registry *ProviderRegistry, al
 // converter. The hand-rolled parser is unreferenced from production
 // code after this child; tests in tool_parser_test.go still
 // exercise it pending the final deletion in #306 child D (#310).
-func LoadUnifiedTools(logger *slog.Logger, registry *ToolRegistry) (int, error) {
+func LoadUnifiedTools(logger *slog.Logger, registry *ToolRegistry, report ...*LoadReport) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("tool registry is nil")
 	}
-	return baseloader.LoadMany[Tool](
+	sink := newBaseloaderSink()
+	n, err := baseloader.LoadMany[Tool](
 		logger,
 		"memql.unifiedToolLoader",
 		"tool",
@@ -295,7 +304,10 @@ func LoadUnifiedTools(logger *slog.Logger, registry *ToolRegistry) (int, error) 
 			return toolDeclToTool(decl, origin)
 		},
 		registry.Upsert,
+		sink,
 	)
+	firstReport(report).FoldSink("tools", n, sink)
+	return n, err
 }
 
 // LoadUnifiedBuiltins walks the new tree, parses every `builtin NAME
@@ -309,11 +321,12 @@ func LoadUnifiedTools(logger *slog.Logger, registry *ToolRegistry) (int, error) 
 // unreferenced from production after this child; tests in
 // builtin_parser_test.go still exercise it pending the final deletion
 // in #306 child D (#310).
-func LoadUnifiedBuiltins(logger *slog.Logger, registry *FunctionRegistry) (int, error) {
+func LoadUnifiedBuiltins(logger *slog.Logger, registry *FunctionRegistry, report ...*LoadReport) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("function registry is nil")
 	}
-	return baseloader.LoadOne[Function](
+	sink := newBaseloaderSink()
+	n, err := baseloader.LoadOne[Function](
 		logger,
 		"memql.unifiedBuiltinLoader",
 		"builtin",
@@ -327,7 +340,10 @@ func LoadUnifiedBuiltins(logger *slog.Logger, registry *FunctionRegistry) (int, 
 			return builtinDeclToFunction(decl, origin)
 		},
 		registry.Upsert,
+		sink,
 	)
+	firstReport(report).FoldSink("functions", n, sink)
+	return n, err
 }
 
 // LoadUnifiedPrompts walks the new tree, extracts every `prompt NAME
@@ -347,10 +363,11 @@ func LoadUnifiedBuiltins(logger *slog.Logger, registry *FunctionRegistry) (int, 
 // (template resolution + schema compilation) needs the raw file's
 // directory path to resolve sidecar templates. Kept inline for that
 // reason.
-func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials *template.Template) (int, error) {
+func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials *template.Template, report ...*LoadReport) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("prompt registry is nil")
 	}
+	rep := firstReport(report)
 	tree := memqldsl.Tree()
 	total := 0
 	for _, raw := range baseloader.ReadAll(logger) {
@@ -362,6 +379,7 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 					logger.Warn("memql.unifiedPromptLoader: parse failed",
 						"file", raw.Path, "prompt", slice.Name, "error", err)
 				}
+				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedPromptLoader", Keyword: "prompt", Name: slice.Name, File: raw.Path, Phase: "parse", Err: err.Error()})
 				continue
 			}
 			decl, err := promptDeclToPromptDecl(astDecl, origin)
@@ -370,6 +388,7 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 					logger.Warn("memql.unifiedPromptLoader: convert failed",
 						"file", raw.Path, "prompt", slice.Name, "error", err)
 				}
+				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedPromptLoader", Keyword: "prompt", Name: slice.Name, File: raw.Path, Phase: "convert", Err: err.Error()})
 				continue
 			}
 			source, err := resolveUnifiedPromptTemplate(decl, raw.Path, tree)
@@ -378,6 +397,7 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 					logger.Warn("memql.unifiedPromptLoader: template resolve failed",
 						"file", raw.Path, "prompt", slice.Name, "error", err)
 				}
+				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedPromptLoader", Keyword: "prompt", Name: slice.Name, File: raw.Path, Phase: "template", Err: err.Error()})
 				continue
 			}
 			tmpl, err := template.Must(partials.Clone()).New(decl.name).Parse(source)
@@ -386,6 +406,7 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 					logger.Warn("memql.unifiedPromptLoader: template parse failed",
 						"prompt", slice.Name, "error", err)
 				}
+				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedPromptLoader", Keyword: "prompt", Name: slice.Name, File: raw.Path, Phase: "template", Err: err.Error()})
 				continue
 			}
 			var compiledSchema *jsonschema.Schema
@@ -412,6 +433,7 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 			total++
 		}
 	}
+	rep.AddRegistered("prompts", total)
 	if logger != nil {
 		logger.Info("memql.unifiedPromptLoader: registered",
 			"component", "memql.unifiedPromptLoader", "count", total)
@@ -534,10 +556,11 @@ func extractFileTopPreamble(source string) string {
 // declared), mirroring the agent loader's behavior. The materializer
 // passes the body through to the row insert without further sidecar
 // handling.
-func LoadUnifiedSeeds(logger *slog.Logger, registry *SeedRegistry) (int, error) {
+func LoadUnifiedSeeds(logger *slog.Logger, registry *SeedRegistry, report ...*LoadReport) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("seed registry is nil")
 	}
+	rep := firstReport(report)
 	tree := memqldsl.Tree()
 	total := 0
 	for _, raw := range baseloader.ReadAll(logger) {
@@ -558,6 +581,7 @@ func LoadUnifiedSeeds(logger *slog.Logger, registry *SeedRegistry) (int, error) 
 					logger.Warn("memql.unifiedSeedLoader: parse failed",
 						"file", raw.Path, "seed", slice.Name, "error", err)
 				}
+				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedSeedLoader", Keyword: "seed", Name: slice.Name, File: raw.Path, Phase: "parse", Err: err.Error()})
 				continue
 			}
 			decl, err := seedDeclASTToInternal(astDecl)
@@ -566,6 +590,7 @@ func LoadUnifiedSeeds(logger *slog.Logger, registry *SeedRegistry) (int, error) 
 					logger.Warn("memql.unifiedSeedLoader: convert failed",
 						"file", raw.Path, "seed", slice.Name, "error", err)
 				}
+				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedSeedLoader", Keyword: "seed", Name: slice.Name, File: raw.Path, Phase: "convert", Err: err.Error()})
 				continue
 			}
 			def, err := compileSeedDecl(decl)
@@ -574,6 +599,7 @@ func LoadUnifiedSeeds(logger *slog.Logger, registry *SeedRegistry) (int, error) 
 					logger.Warn("memql.unifiedSeedLoader: compile failed",
 						"file", raw.Path, "seed", slice.Name, "error", err)
 				}
+				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedSeedLoader", Keyword: "seed", Name: slice.Name, File: raw.Path, Phase: "compile", Err: err.Error()})
 				continue
 			}
 			def.Origin = origin
@@ -593,6 +619,7 @@ func LoadUnifiedSeeds(logger *slog.Logger, registry *SeedRegistry) (int, error) 
 								"file", raw.Path, "seed", slice.Name, "templateFile", def.TemplateFile,
 								"resolvedTo", tmplPath, "error", rErr)
 						}
+						rep.AddSkip(baseloader.Skip{Component: "memql.unifiedSeedLoader", Keyword: "seed", Name: slice.Name, File: raw.Path, Phase: "template", Err: rErr.Error()})
 						continue
 					}
 					source := strings.TrimSpace(string(data))
@@ -601,6 +628,7 @@ func LoadUnifiedSeeds(logger *slog.Logger, registry *SeedRegistry) (int, error) 
 							logger.Warn("memql.unifiedSeedLoader: templateFile is empty",
 								"file", raw.Path, "seed", slice.Name, "templateFile", tmplPath)
 						}
+						rep.AddSkip(baseloader.Skip{Component: "memql.unifiedSeedLoader", Keyword: "seed", Name: slice.Name, File: raw.Path, Phase: "template", Err: "templateFile is empty: " + tmplPath})
 						continue
 					}
 					// Inject systemPrompt at the body's top level so
@@ -616,11 +644,13 @@ func LoadUnifiedSeeds(logger *slog.Logger, registry *SeedRegistry) (int, error) 
 					logger.Warn("memql.unifiedSeedLoader: registry upsert failed",
 						"file", raw.Path, "seed", slice.Name, "error", err)
 				}
+				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedSeedLoader", Keyword: "seed", Name: slice.Name, File: raw.Path, Phase: "register", Err: err.Error()})
 				continue
 			}
 			total++
 		}
 	}
+	rep.AddRegistered("seeds", total)
 	if logger != nil {
 		logger.Info("memql.unifiedSeedLoader: registered",
 			"component", "memql.unifiedSeedLoader", "count", total)
