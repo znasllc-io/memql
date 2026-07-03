@@ -9,19 +9,18 @@ use planner.mutations.{ updatePlanStatus }
 
 @enabled
 @trigger(event="node.updated", concept="v1:identity:user", partition="*")
-@description("Suspend the user's worker-using plans when computerUseEnabled flips false. decide (pure) returns the running plans; the forEach apply gates each on computerUseEnabled==false AND the plan having a computerUseScope, then transitions it to awaitingFeedback.")
+@filter(event.node.payload.preferences.computerUseEnabled == false)
+@description("Suspend the user's worker-using plans when computerUseEnabled flips false. The TRIGGER RELEVANCE check (kill switch engaged) lives on @filter; the plan-classification policy (has a computerUseScope) is pushed down into runningPlansForUser by the decide logic; the forEach transitions each returned plan unconditionally (#2370).")
 automation killSwitchSuspendsRunningPlans {
   step decide {
     logic killSwitchSuspendsRunningPlans ( event: event )
   }
   step apply {
     forEach item in decide.nodes() {
-      if exists(item.payload.computerUseScope) && event.node.payload.preferences.computerUseEnabled == false {
-        updatePlanStatus {
-          planId: item.id,
-          status: "awaitingFeedback",
-          feedbackReason: "kill_switch_engaged"
-        }
+      updatePlanStatus {
+        planId: item.id,
+        status: "awaitingFeedback",
+        feedbackReason: "kill_switch_engaged"
       }
     }
   }

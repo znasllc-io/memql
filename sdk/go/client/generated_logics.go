@@ -439,6 +439,26 @@ func OnDelegationCreatedBuild(args OnDelegationCreatedArgs) string {
 	return b.String()
 }
 
+// PlanIsTerminal -- PURE terminal-status decision table for v1:planner:plan (#2370): returns true when the status is one of the terminal set (succeeded / failed / cancelled), false otherwise. THE single owner of that vocabulary -- the releaseWorkspaceOnPlanTerminal automation gates its release + teardown steps on this scalar instead of restating the ||-chain inline (v1:planner:plan has 9 statuses; inline copies drift).
+type PlanIsTerminalArgs struct {
+	Status any
+}
+
+// PlanIsTerminal calls the engine logic planIsTerminal.
+func (qc *QueryClient) PlanIsTerminal(ctx context.Context, args PlanIsTerminalArgs) (*Result, error) {
+	call := PlanIsTerminalBuild(args)
+	return qc.executeNamed(ctx, "planIsTerminal", call)
+}
+
+func PlanIsTerminalBuild(args PlanIsTerminalArgs) string {
+	var b strings.Builder
+	b.WriteString("logic planIsTerminal(")
+	b.WriteString("status: ")
+	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(")")
+	return b.String()
+}
+
 // PruneStaleClusterNodes -- Decides which departed cluster nodes to retire (ADR S2.1 pure logic, #2235). Reads MEMQL_NODE_STALE_PRUNE_MINUTES (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, and returns staleClusterNodes({olderThan: cutoff}).nodes() -- the LATEST non-stopped rows whose lastSeen is past the window (the olderThan arg pushes a payload.lastSeen<cutoff predicate onto the query, #1642). The calling automation appends the terminal health='stopped' row per returned node via a forEach updateNodeHealth step.
 type PruneStaleClusterNodesArgs struct {
 	Event map[string]any

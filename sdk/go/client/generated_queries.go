@@ -3397,7 +3397,10 @@ func RouterBudgetsBuild(args RouterBudgetsArgs) string {
 //
 // Bound concept: plan.
 type RunningPlansForUserArgs struct {
-	UserId string
+	// When true, restricts to plans carrying a computerUseScope -- the kill-switch sweep's plan-classification policy, pushed down (#2370).
+	WithComputerUseScope    bool
+	WithComputerUseScopeSet bool // set true to send withComputerUseScope; required because zero-value bool is ambiguous
+	UserId                  string
 }
 
 // RunningPlansForUser calls the engine query runningPlansForUser.
@@ -3409,6 +3412,13 @@ func (qc *QueryClient) RunningPlansForUser(ctx context.Context, args RunningPlan
 func RunningPlansForUserBuild(args RunningPlansForUserArgs) string {
 	var b strings.Builder
 	b.WriteString("query runningPlansForUser(")
+	if args.WithComputerUseScopeSet {
+		b.WriteString("withComputerUseScope: ")
+		b.WriteString(fmt.Sprintf("%v", args.WithComputerUseScope))
+	}
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
 	b.WriteString(")")

@@ -80,9 +80,10 @@ query invocation invocationsForUser {
 @description("List a user's running plans.")
 query plan runningPlansForUser {
   args {
+    withComputerUseScope  boolean  @description("When true, restricts to plans carrying a computerUseScope -- the kill-switch sweep's plan-classification policy, pushed down (#2370).")
     userId  string  @required
   }
-  filter  requestedBy==args.userId && statusIsRunning
+  filter  requestedBy==args.userId && statusIsRunning && when(args.withComputerUseScope) { computerUseScope!=null }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
