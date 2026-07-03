@@ -22,11 +22,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "k3d.importImage" "Import a built engine node image into the local k3d cluster."
-cap_spec_param "nodeType" "engine node type whose image to import" "MEMQL_DEPLOY_NODE_TYPE"
-cap_spec_param "cluster"  "target k3d cluster name"                "MEMQL_K3D_CLUSTER"
-cap_spec_param "version"  "image version tag to import"            "MEMQL_DEPLOY_VERSION"
-cap_spec_param "dryRun"   "report the intended import without performing it" "MEMQL_DEPLOY_DRY_RUN"
-
+cap_spec_param "nodeType" "engine node type whose image to import"
+cap_spec_param "cluster"  "target k3d cluster name"
+cap_spec_param "version"  "image version tag to import"
+cap_spec_param "dryRun"   "report the intended import without performing it"
 function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"

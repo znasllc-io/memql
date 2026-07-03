@@ -27,10 +27,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "deploy.cloneRepo" "Check out a repository working tree at a pinned ref."
-cap_spec_param "workdir" "absolute path of the repository working tree"        "MEMQL_DEPLOY_WORKDIR"
-cap_spec_param "ref"     "git ref (branch, tag, or SHA) to check out"          "MEMQL_DEPLOY_REF"
-cap_spec_param "dryRun"  "report the intended checkout without performing it"  "MEMQL_DEPLOY_DRY_RUN"
-
+cap_spec_param "workdir" "absolute path of the repository working tree"
+cap_spec_param "ref"     "git ref (branch, tag, or SHA) to check out"
+cap_spec_param "dryRun"  "report the intended checkout without performing it"
 function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"

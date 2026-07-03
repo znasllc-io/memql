@@ -28,10 +28,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "deploy.gate" "Run the post-deploy gate and report a structured pass/fail result."
-cap_spec_param "env"     "target environment (development/staging/production)" "MEMQL_DEPLOY_ENV"
-cap_spec_param "workdir" "absolute path of the checked-out repository"         "MEMQL_DEPLOY_WORKDIR"
-cap_spec_param "dryRun"  "no-op gate that reports passed=true"                 "MEMQL_DEPLOY_DRY_RUN"
-
+cap_spec_param "env"     "target environment (development/staging/production)"
+cap_spec_param "workdir" "absolute path of the checked-out repository"
+cap_spec_param "dryRun"  "no-op gate that reports passed=true"
 function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"

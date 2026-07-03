@@ -30,9 +30,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "k3d.status" "Print local k3d cluster status and mesh litmus."
-cap_spec_param "cluster"   "k3d cluster name" "MEMQL_K3D_CLUSTER"
-cap_spec_param "namespace" "k8s namespace"    "MEMQL_K3D_NAMESPACE"
-
+cap_spec_param "cluster"   "k3d cluster name"
+cap_spec_param "namespace" "k8s namespace"
 #=============================================================================
 # CONFIGURATION
 #=============================================================================

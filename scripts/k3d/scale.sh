@@ -37,10 +37,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "k3d.scale" "Scale all memQL app Deployments to a target replica count."
-cap_spec_param "replicas"  "replica count per Deployment" "N"
-cap_spec_param "cluster"   "k3d cluster name"             "MEMQL_K3D_CLUSTER"
-cap_spec_param "namespace" "k8s namespace"                "MEMQL_K3D_NAMESPACE"
-
+cap_spec_param "replicas"  "replica count per Deployment"
+cap_spec_param "cluster"   "k3d cluster name"
+cap_spec_param "namespace" "k8s namespace"
 #=============================================================================
 # CONFIGURATION
 #=============================================================================

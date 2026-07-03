@@ -23,8 +23,8 @@
 #   source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/capability.sh"
 #
 #   cap_init "k3d.down" "Tear down the local k3d cluster."
-#   cap_spec_param "cluster" "k3d cluster name" "MEMQL_K3D_CLUSTER"
-#   cap_spec_param "purge"   "also purge the kubeconfig context (flag)" ""
+#   cap_spec_param "cluster" "k3d cluster name"
+#   cap_spec_param "purge"   "also purge the kubeconfig context (flag)"
 #
 #   function main() {
 #     cap_handle_meta "$@"          # --help / --print-spec short-circuit
@@ -57,7 +57,7 @@ _CAP_SUMMARY=""         # one-line human summary
 _CAP_EMITTED=0          # 1 once a result envelope has been written
 _CAP_CHANGED=false      # idempotency signal: did this run mutate anything
 _CAP_RESULT_FIELDS=()   # accumulated "key":<json-value> pairs for result{}
-_CAP_SPEC_PARAMS=()     # "name|description|envvar" for --print-spec
+_CAP_SPEC_PARAMS=()     # "name|description" for --print-spec
 _CAP_STDIN_JSON=""      # raw stdin JSON (captured lazily on first cap_param)
 _CAP_STDIN_READ=0
 
@@ -73,10 +73,14 @@ function cap_init() {
     trap '_cap_on_exit' EXIT
 }
 
-# cap_spec_param <name> <description> [envvar]
+# cap_spec_param <name> <description>
 # Documents a parameter for --print-spec / --help. Purely declarative.
+# NOTE (#2378): there is NO env tier -- cap_param resolves flag > stdin JSON >
+# default only, per the capability-script contract ("no decisions inside"; a
+# script passes an env-resolved value as the DEFAULT if it wants one). The
+# spec/help formerly advertised per-param env vars that were never read.
 function cap_spec_param() {
-    _CAP_SPEC_PARAMS+=("${1}|${2:-}|${3:-}")
+    _CAP_SPEC_PARAMS+=("${1}|${2:-}")
 }
 
 #=============================================================================
@@ -316,11 +320,10 @@ function _cap_print_spec() {
     local params="" entry first=1
     for entry in "${_CAP_SPEC_PARAMS[@]:-}"; do
         [[ -z "$entry" ]] && continue
-        local name="${entry%%|*}" rest="${entry#*|}"
-        local desc="${rest%%|*}" env="${rest#*|}"
+        local name="${entry%%|*}" desc="${entry#*|}"
         [[ "$first" == "1" ]] || params+=","
         first=0
-        params+="{\"name\":\"$(cap_json_escape "$name")\",\"description\":\"$(cap_json_escape "$desc")\",\"env\":\"$(cap_json_escape "$env")\"}"
+        params+="{\"name\":\"$(cap_json_escape "$name")\",\"description\":\"$(cap_json_escape "$desc")\"}"
     done
     printf '{"capability":"%s","summary":"%s","params":[%s]}\n' \
         "$(cap_json_escape "$_CAP_NAME")" "$(cap_json_escape "$_CAP_SUMMARY")" "$params"
@@ -334,13 +337,8 @@ function _cap_print_help() {
     local entry
     for entry in "${_CAP_SPEC_PARAMS[@]:-}"; do
         [[ -z "$entry" ]] && continue
-        local name="${entry%%|*}" rest="${entry#*|}"
-        local desc="${rest%%|*}" env="${rest#*|}"
-        if [[ -n "$env" ]]; then
-            printf '  --%-22s %s (env: %s)\n' "$name" "$desc" "$env"
-        else
-            printf '  --%-22s %s\n' "$name" "$desc"
-        fi
+        local name="${entry%%|*}" desc="${entry#*|}"
+        printf '  --%-22s %s\n' "$name" "$desc"
     done
     printf '\nMeta:\n'
     printf '  --print-spec           emit the JSON capability descriptor\n'

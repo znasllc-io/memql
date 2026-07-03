@@ -157,7 +157,7 @@ Key helpers (full reference in the file header):
 | helper                          | purpose                                                   |
 |---------------------------------|-----------------------------------------------------------|
 | `cap_init <id> <summary>`       | declare the capability + install the result-guarantee trap |
-| `cap_spec_param <n> <d> [env]`  | document a param for `--print-spec` / `--help`            |
+| `cap_spec_param <n> <d>`        | document a param for `--print-spec` / `--help`            |
 | `cap_handle_meta "$@"`          | handle `--help` / `--print-spec` and exit                 |
 | `cap_parse_flags "$@"`          | parse `--k=v` / `--k` into `CAP_ARG_*`; reject unknowns    |
 | `cap_param <name> [default]`    | resolve a param (flag > stdin JSON > default)             |
@@ -182,9 +182,14 @@ surface registry (I13) and the action executor use it to discover params:
 
 ```json
 { "capability": "k3d.down", "summary": "Tear down the local k3d cluster.",
-  "params": [ {"name":"cluster","description":"k3d cluster name","env":"MEMQL_K3D_CLUSTER"},
-              {"name":"purge","description":"also purge the kubeconfig context (flag)","env":""} ] }
+  "params": [ {"name":"cluster","description":"k3d cluster name"},
+              {"name":"purge","description":"also purge the kubeconfig context (flag)"} ] }
 ```
+
+The descriptor carries NO per-param `env` field (#2378): `cap_param` resolves
+flag > stdin JSON > default only. A script that wants an env-tuned value passes
+it as the DEFAULT (`cap_param name "${MEMQL_X:-fallback}"`), which keeps the
+caller-visible contract purely parametric.
 
 ## How the action executor drives a capability
 

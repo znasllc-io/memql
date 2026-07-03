@@ -43,8 +43,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "k3d.seedSecrets" "Seed the k8s Secrets that the local k3d overlay requires."
-cap_spec_param "namespace" "k8s namespace to seed into" "MEMQL_K3D_NAMESPACE"
-
+cap_spec_param "namespace" "k8s namespace to seed into"
 #=============================================================================
 # CONFIGURATION
 #=============================================================================

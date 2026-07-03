@@ -23,11 +23,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "deploy.notify" "Post a deploy status notification."
-cap_spec_param "env"          "target environment the deploy ran against"   "MEMQL_DEPLOY_ENV"
-cap_spec_param "status"       "deploy outcome (succeeded/failed)"           "MEMQL_DEPLOY_STATUS"
-cap_spec_param "deploymentId" "deployment id the notification refers to"    "MEMQL_DEPLOY_ID"
-cap_spec_param "dryRun"       "log only; do not POST to a webhook"          "MEMQL_DEPLOY_DRY_RUN"
-
+cap_spec_param "env"          "target environment the deploy ran against"
+cap_spec_param "status"       "deploy outcome (succeeded/failed)"
+cap_spec_param "deploymentId" "deployment id the notification refers to"
+cap_spec_param "dryRun"       "log only; do not POST to a webhook"
 function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"
