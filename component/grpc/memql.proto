@@ -1185,6 +1185,15 @@ message AuthoringDiagnostic {
   bool ok = 3;
   bool skipped = 4;
   string error = 5;  // compile/bind failure or skip reason; empty on success
+  // Optional 1-based authored-source position of the failing token, expressed
+  // in BUNDLE-FILE coordinates (the source the author submitted, before the
+  // sandbox slices + lowers it). All four are ZERO when a reliable position
+  // could not be computed -- a wrong position is never emitted, so consumers
+  // MUST treat 0 as "no position" (never line 0 / column 0). #2375.
+  int32 line = 6;
+  int32 column = 7;
+  int32 end_line = 8;    // 0 when the failure has no end anchor
+  int32 end_column = 9;  // 0 when the failure has no end anchor
 }
 
 // AuthoringConstruct names one construct that a session-define registered.

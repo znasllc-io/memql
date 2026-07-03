@@ -68,6 +68,11 @@ type SessionDefineResult struct {
 func SplitBundleSource(source string) []SandboxConstruct {
 	var out []SandboxConstruct
 	seen := make(map[string]bool)
+	// The shared file-top `use ...{ ... }` import preamble the function / action /
+	// capability slicers prepend onto every slice they emit. Recomputed here so
+	// bundleAnchorFor can strip it back off and locate each construct's BODY
+	// verbatim in the bundle for authored-position mapping (#2375).
+	usePreamble := extractUseDeclarations(source)
 	add := func(kind, name, src string) {
 		name = strings.TrimSpace(name)
 		if name == "" || strings.TrimSpace(src) == "" {
@@ -78,7 +83,14 @@ func SplitBundleSource(source string) []SandboxConstruct {
 			return
 		}
 		seen[key] = true
-		out = append(out, SandboxConstruct{Name: name, Kind: kind, Source: src})
+		bundleLine, preambleLines := bundleAnchorFor(source, src, usePreamble)
+		out = append(out, SandboxConstruct{
+			Name:                name,
+			Kind:                kind,
+			Source:              src,
+			BundleLine:          bundleLine,
+			BundlePreambleLines: preambleLines,
+		})
 	}
 
 	// Concepts: each concept block (preamble + body) is its own slice; its name
