@@ -119,6 +119,7 @@ automation deployEngineCluster {
     digests              object   @description("Map nodeType -> image@sha256 the overlay is pinned to (staging/production; resolved by the build server -- HARD RULE: staging/prod images build on GitHub). Unused on the development path.")
     previousDeploymentId string   @description("The deployment to roll back to on a failed staging/production deploy (revertOverlay).")
     triggeredBy          string   @description("Actor/system id stamped on the record. Successor: event.actor.id (G4, #2366) -- migrates in #2381.")
+    dryRun               boolean  @description("When true (THE DEFAULT, including when omitted) every capability action reports its intended work without performing it; the cockpit's deploy --apply sets false. One documented switch, threaded to every action (#2378).")
   }
 
   step authorize {
@@ -135,29 +136,29 @@ automation deployEngineCluster {
     )
   }
   step clone {
-    action cloneRepoAtVersion(workdir, ref: ref)
+    action cloneRepoAtVersion(workdir, ref: ref, dryRun)
   }
   step build {
     forEach nt in engineNodeTypes {
-      action buildEngineImage(nodeType: nt, version: version, workdir)
+      action buildEngineImage(nodeType: nt, version: version, workdir, dryRun)
     }
   }
   step importDevImages {
     forEach nt in engineNodeTypes where environment == "development" {
-      action importImageToK3d(nodeType: nt, cluster: "memql", version)
+      action importImageToK3d(nodeType: nt, cluster: "memql", version, dryRun)
     }
   }
   step place {
     switch environment {
       case "development" { }
       default {
-        action pinOverlayDigests(overlayPath, digests: digests)
-        action argoSync(app: "memql", revision: ref)
+        action pinOverlayDigests(overlayPath, digests: digests, dryRun)
+        action argoSync(app: "memql", revision: ref, dryRun)
       }
     }
   }
   step gate {
-    action runDeployGate(env: environment, workdir: workdir)
+    action runDeployGate(env: environment, workdir: workdir, dryRun)
   }
   step outcome {
     logic deployOutcomeLabel ( gate: gate.result )
@@ -166,12 +167,12 @@ automation deployEngineCluster {
     switch outcome.result {
       case "succeeded" {
         updateDeploymentStatus { deploymentId: deploymentId, status: "succeeded" }
-        action notifyDeploy(env: environment, status: "succeeded", deploymentId)
+        action notifyDeploy(env: environment, status: "succeeded", deploymentId, dryRun)
       }
       default {
-        action revertOverlay(overlayPath, toDeploymentId: previousDeploymentId)
+        action revertOverlay(overlayPath, toDeploymentId: previousDeploymentId, dryRun)
         updateDeploymentStatus { deploymentId: deploymentId, status: "failed" }
-        action notifyDeploy(env: environment, status: "failed", deploymentId)
+        action notifyDeploy(env: environment, status: "failed", deploymentId, dryRun)
       }
     }
   }

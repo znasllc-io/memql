@@ -77,8 +77,8 @@ source "${SCRIPT_DIR}/../lib/engine_build_args.sh"
 cap_init "k3d.dev" "Build node image(s) locally, import into k3d, and restart Deployments."
 cap_spec_param "node"       "node type(s) to rebuild, comma-separated (default: all app nodes)" ""
 cap_spec_param "pull-infra" "pull + import infra images (flag)"                                 ""
-cap_spec_param "cluster"    "k3d cluster name"                                                  "MEMQL_K3D_CLUSTER"
-cap_spec_param "namespace"  "k8s namespace"                                                     "MEMQL_K3D_NAMESPACE"
+cap_spec_param "cluster"    "k3d cluster name"
+cap_spec_param "namespace"  "k8s namespace"
 cap_spec_param "no-wait"    "skip rollout status wait (flag)"                                   ""
 
 #=============================================================================

@@ -23,10 +23,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "overlay.pinDigests" "Pin a kustomize overlay to resolved image digests."
-cap_spec_param "overlayPath" "path to the environment overlay"                 "MEMQL_DEPLOY_OVERLAY"
+cap_spec_param "overlayPath" "path to the environment overlay"
 cap_spec_param "digests"     "JSON map of node type -> image@sha256 digest"    ""
-cap_spec_param "dryRun"      "report the intended pins without editing"        "MEMQL_DEPLOY_DRY_RUN"
-
+cap_spec_param "dryRun"      "report the intended pins without editing"
 function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"

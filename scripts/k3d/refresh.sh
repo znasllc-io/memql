@@ -46,12 +46,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "k3d.refresh" "Nuke and repave the local k3d + ArgoCD cluster, then rebuild engine images."
-cap_spec_param "cluster"   "k3d cluster name"                             "CLUSTER"
-cap_spec_param "namespace" "k8s namespace"                                "NAMESPACE"
-cap_spec_param "revision"  "git revision for the ArgoCD Application"      "REVISION"
-cap_spec_param "servers"   "k3d server node count"                        "SERVERS"
-cap_spec_param "agents"    "k3d agent node count"                         "AGENTS"
-
+cap_spec_param "cluster"   "k3d cluster name"
+cap_spec_param "namespace" "k8s namespace"
+cap_spec_param "revision"  "git revision for the ArgoCD Application"
+cap_spec_param "servers"   "k3d server node count"
+cap_spec_param "agents"    "k3d agent node count"
 #=============================================================================
 # CONFIGURATION (env-resolved defaults; cap_param flags/stdin override in main)
 #=============================================================================

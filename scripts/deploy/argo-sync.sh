@@ -22,10 +22,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "argocd.sync" "Trigger an ArgoCD application sync to a target revision."
-cap_spec_param "app"      "ArgoCD application name"                       "MEMQL_ARGOCD_APP"
-cap_spec_param "revision" "git revision (tag/SHA) to sync to"             "MEMQL_DEPLOY_REF"
-cap_spec_param "dryRun"   "report the intended sync without performing it" "MEMQL_DEPLOY_DRY_RUN"
-
+cap_spec_param "app"      "ArgoCD application name"
+cap_spec_param "revision" "git revision (tag/SHA) to sync to"
+cap_spec_param "dryRun"   "report the intended sync without performing it"
 function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"

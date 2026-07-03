@@ -29,9 +29,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "k3d.down" "Tear down the local k3d cluster."
-cap_spec_param "cluster" "k3d cluster name"                          "MEMQL_K3D_CLUSTER"
-cap_spec_param "purge"   "also remove the kubeconfig context (flag)" "PURGE"
-
+cap_spec_param "cluster" "k3d cluster name"
+cap_spec_param "purge"   "also remove the kubeconfig context (flag)"
 #=============================================================================
 # PREREQUISITE CHECKS
 #=============================================================================

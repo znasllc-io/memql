@@ -24,10 +24,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "overlay.revert" "Revert an environment overlay to a prior deployment's digests."
-cap_spec_param "overlayPath"    "path to the environment overlay to revert"     "MEMQL_DEPLOY_OVERLAY"
-cap_spec_param "toDeploymentId" "deployment id whose pinned digests to restore" "MEMQL_DEPLOY_REVERT_TO"
-cap_spec_param "dryRun"         "report the intended revert without editing"    "MEMQL_DEPLOY_DRY_RUN"
-
+cap_spec_param "overlayPath"    "path to the environment overlay to revert"
+cap_spec_param "toDeploymentId" "deployment id whose pinned digests to restore"
+cap_spec_param "dryRun"         "report the intended revert without editing"
 function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"
