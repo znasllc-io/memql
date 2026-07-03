@@ -33,7 +33,7 @@ func TestBuildNonEmpty(t *testing.T) {
 // lockstep (the #2124 drift test additionally cross-checks the parser).
 func TestConstructsCoverLiveGrammar(t *testing.T) {
 	want := map[string]bool{
-		"concept": true, "query": true, "mutation": true, "logic": true,
+		"concept": true, "query": true, "mutate": true, "logic": true,
 		"automation": true, "spec": true, "trait": true, "shape": true,
 		"tool": true, "prompt": true, "provider": true, "builtin": true,
 		"policy": true, "seed": true, "use": true, "action": true,
@@ -146,7 +146,7 @@ func TestAnnotationsAreProjectionOfRegistry(t *testing.T) {
 }
 
 // TestImportSuggestionRulePresent guards the owner-requested behaviour: after
-// `mutation`/`query` the spec must mark that a concept is expected and an
+// `mutate`/`query` the spec must mark that a concept is expected and an
 // import should be offered when none is in scope.
 func TestImportSuggestionRulePresent(t *testing.T) {
 	s := Build()
@@ -193,7 +193,7 @@ func TestJSONRoundTrips(t *testing.T) {
 	if len(back.Constructs) != len(s.Constructs) {
 		t.Errorf("construct count changed across round-trip: %d != %d", len(back.Constructs), len(s.Constructs))
 	}
-	if c := back.ConstructByKeyword("mutation"); c == nil || !c.ConceptInSignature {
-		t.Error("mutation construct did not survive round-trip with ConceptInSignature")
+	if c := back.ConstructByKeyword("mutate"); c == nil || !c.ConceptInSignature {
+		t.Error("mutate construct did not survive round-trip with ConceptInSignature")
 	}
 }

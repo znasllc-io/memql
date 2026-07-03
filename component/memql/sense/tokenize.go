@@ -54,7 +54,7 @@ func mapTokenType(pt parser.Token) Token {
 		parser.TokenKeywordNil, parser.TokenKeywordRetry, parser.TokenKeywordWhen,
 		parser.TokenKeywordAs, parser.TokenKeywordWhere, parser.TokenKeywordUse,
 		parser.TokenKeywordConcept,
-		parser.TokenKeywordIn, parser.TokenKeywordHas, parser.TokenKeywordNot,
+		parser.TokenKeywordIn, parser.TokenKeywordNot,
 		parser.TokenKeywordQuery, parser.TokenKeywordMutation,
 		parser.TokenKeywordAutomation, parser.TokenKeywordSpec,
 		parser.TokenKeywordTool, parser.TokenKeywordBuiltin:
@@ -81,9 +81,20 @@ func mapTokenType(pt parser.Token) Token {
 		tokenType = "punctuation"
 
 	case parser.TokenIdentifier:
-		if strings.Contains(pt.Literal, ":") {
+		switch {
+		case strings.Contains(pt.Literal, ":"):
 			tokenType = "concept"
-		} else {
+		case constructKeywords[pt.Literal]:
+			// Lowercase construct keywords (query / mutate / logic / action /
+			// capability / shape / concept / ...) lex as identifiers -- the core
+			// lexer only keywords the capitalized receiver forms (Query /
+			// Mutation / ...). Color them at the Sense layer, sourced from
+			// dslspec (constructKeywords) so a future grammar epic inherits
+			// coloring. Accepted trade-off: an identifier (e.g. a field name)
+			// that happens to share a construct keyword's spelling over-colors;
+			// scoping by position would need a parser inside the tokenizer.
+			tokenType = "keyword"
+		default:
 			tokenType = "identifier"
 		}
 

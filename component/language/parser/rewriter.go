@@ -359,7 +359,11 @@ type structFormStep struct {
 // `args { ... }` block.
 var structFormSteps = []structFormStep{
 	{"query", LooksLikeStructQuery, NormaliseQuerySource},
-	{"mutation", LooksLikeStructMutation, NormaliseMutationSource},
+	// The author keyword is `mutate` (mutationStructHeader matches `mutate`,
+	// C1/memql#2041); `mutation` is the invocation-step prefix only. The step
+	// name IS the author-facing keyword StructFormKeywords reports, so it must
+	// be `mutate` -- the #2124 drift test pins dslspec's construct keyword to it.
+	{"mutate", LooksLikeStructMutation, NormaliseMutationSource},
 	{"logic", LooksLikeStructLogic, NormaliseLogicSource},
 	// Terse single-step automation lowering (memql#2215) MUST run before
 	// the struct-form automation stage: it expands `automation NAME
@@ -374,7 +378,7 @@ var structFormSteps = []structFormStep{
 
 // StructFormKeywords is the set of author-facing construct keywords the
 // struct-form rewriter recognises and expands to the internal func
-// form, in declaration order: query / mutation / logic / automation.
+// form, in declaration order: query / mutate / logic / automation.
 // It is the single source the #2124 drift test compares dslspec's
 // "function" category constructs against. Derived from structFormSteps
 // (excluding the non-construct "file-top args" stage) so the list
@@ -397,7 +401,7 @@ var StructFormKeywords = func() []string {
 }()
 
 // NormaliseAll runs every struct-form rewriter in sequence: query,
-// mutation, logic, automation, file-top args. Each stage is a no-op
+// mutate, logic, automation, file-top args. Each stage is a no-op
 // when the source doesn't match its detector. Errors from any
 // stage are wrapped with the stage name and returned immediately.
 func NormaliseAll(source string) (string, error) {
@@ -686,7 +690,7 @@ func emitMutation(name, conceptId, body, _preamble string) (string, error) {
 			expected = conceptId[idx+1:]
 		}
 		if parsed.writeTarget != expected {
-			return "", fmt.Errorf("%s target %q does not match the concept binding %q -- drop the restated concept and write the bare `%s { ... }` (the target comes from the `mutation %s <name>` signature)", parsed.writeKind, parsed.writeTarget, expected, parsed.writeKind, expected)
+			return "", fmt.Errorf("%s target %q does not match the concept binding %q -- drop the restated concept and write the bare `%s { ... }` (the target comes from the `mutate %s <name>` signature)", parsed.writeKind, parsed.writeTarget, expected, parsed.writeKind, expected)
 		}
 	}
 

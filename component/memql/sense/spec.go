@@ -45,8 +45,9 @@ func specBuiltinFunctions() map[string]BuiltinDef {
 }
 
 // specConstructItems returns one completion item per author-facing top-level
-// construct keyword (concept / query / mutation / logic / automation / spec /
-// trait / shape / tool / prompt / provider / builtin / policy / seed / use),
+// construct keyword (concept / query / mutate / logic / automation / action /
+// capability / spec / trait / shape / tool / prompt / provider / builtin /
+// policy / seed / use),
 // filtered by prefix. This is the spec-driven replacement for the stale
 // hand-coded `func / use / concept` list completeTopLevel used to offer.
 func specConstructItems(prefix string) []CompletionItem {
@@ -69,7 +70,7 @@ func specConstructItems(prefix string) []CompletionItem {
 }
 
 // specConceptSignatureKeywords returns the set of construct keywords whose
-// signature binds a concept right after the keyword (`mutation <Concept>
+// signature binds a concept right after the keyword (`mutate <Concept>
 // <name>`, `query ...`, `seed ...`, `shape ...`). Derived from the spec's
 // ConceptInSignature flag so it can never drift from the grammar -- the #2124
 // drift test pins the spec to the parser/rewriter. Used by context.go to
@@ -102,7 +103,7 @@ func specNextRule(context string) *dslspec.NextRule {
 // afterShapeKeyword). Returns "" for keywords with no such rule.
 func specConstructConceptContextLabel(keyword string) string {
 	switch keyword {
-	case "mutation":
+	case "mutate":
 		return "afterMutationKeyword"
 	case "query":
 		return "afterQueryKeyword"
@@ -148,6 +149,27 @@ func specKeywordNames() []string {
 	}
 	for _, kw := range dslSpec.Keywords {
 		add(kw.Name)
+	}
+	return out
+}
+
+// constructKeywords is the set of author-facing top-level construct keywords
+// (concept / query / mutate / logic / automation / action / capability / spec /
+// trait / shape / tool / prompt / provider / builtin / policy / seed / use),
+// sourced from the DSL spec. The Sense tokenizer colors these as `keyword`
+// semantic tokens: the LOWERCASE construct keywords lex as plain identifiers in
+// the core lexer (it only keywords the capitalized receiver forms), so without
+// this they render uncolored. Sourcing the set from dslspec means a construct a
+// future grammar epic adds inherits coloring automatically -- the #2124 drift
+// test pins the spec to the parser, so the set can never fall behind.
+var constructKeywords = specConstructKeywordSet()
+
+// specConstructKeywordSet projects dslSpec.Constructs into a membership set of
+// their leading keywords. See constructKeywords for how the tokenizer uses it.
+func specConstructKeywordSet() map[string]bool {
+	out := make(map[string]bool, len(dslSpec.Constructs))
+	for _, c := range dslSpec.Constructs {
+		out[c.Keyword] = true
 	}
 	return out
 }

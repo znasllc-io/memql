@@ -49,10 +49,11 @@ func (s *Service) completeTopLevel(prefix string) []CompletionItem {
 	})
 
 	// Top-level construct keywords, projected from the DSL spec: concept,
-	// query, mutation, logic, automation, spec, trait, shape, tool, prompt,
-	// provider, builtin, policy, seed, use. This replaces the stale
-	// hand-coded `func / use / concept` set -- so typing `mut` now offers
-	// `mutation`, etc. (#2122 / #2123).
+	// query, mutate, logic, automation, action, capability, spec, trait, shape,
+	// tool, prompt, provider, builtin, policy, seed, use. This replaces the
+	// stale hand-coded `func / use / concept` set -- so typing `mut` now offers
+	// `mutate` (the declaration keyword; `mutation` is invocation-only), etc.
+	// (#2122 / #2123).
 	items = append(items, specConstructItems(prefix)...)
 
 	return items

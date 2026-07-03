@@ -52,7 +52,7 @@ func specConstructKeywords() map[string]bool {
 // union of the live parser surfaces:
 //
 //   - parser.StructFormKeywords -- the struct-form rewriter's recognised
-//     constructs (query / mutation / logic / automation), derived from
+//     constructs (query / mutate / logic / automation), derived from
 //     the rewriter's own structFormSteps chain.
 //   - parser.TopLevelDeclKeywords -- the parser's top-level dispatch
 //     keywords (concept / shape / provider / builtin / tool / prompt /
@@ -270,6 +270,61 @@ func TestRetiredFormsStayGone(t *testing.T) {
 	if !sawHasToken {
 		t.Log("NOTE: parser no longer lexes `has` as TokenKeywordHas -- the dslspec retirement assertion " +
 			"above is now also enforceable as a parse error; consider tightening TestRetiredFormsStayGone")
+	}
+}
+
+// TestConstructDocsRejectRetiredForms (E2 / memql#2373) pins the CONTENT of
+// each construct's Doc + BodyBlocks -- not just the keyword set -- against the
+// grammar the parser retired in the construct-invocation epic (#2322). The
+// keyword-set drift test (TestConstructsMatchParserGrammar) caught a construct
+// appearing/disappearing, but NOT a stale Doc that keeps teaching a shape the
+// parser now rejects (the `action` intent/params{}/argTemplate{} body, the
+// `action("name@1")` invocation, `mutation <Concept>` as a declaration). Sense
+// hover/completion reads these Docs verbatim, so a stale Doc silently offers a
+// form the parser rejects. This test is the content pin: it FAILS if a retired
+// form reappears in any construct Doc/BodyBlocks, so the next grammar epic
+// cannot leave dslspec's prose behind.
+func TestConstructDocsRejectRetiredForms(t *testing.T) {
+	// Retired authoring forms that must never reappear in a construct's Doc or
+	// BodyBlocks. Each names the epic that retired it so a failure self-explains.
+	retired := []struct{ needle, why string }{
+		{"argTemplate", "action's retired argTemplate{} block -- replaced by the typed `capability <verb>(...)` call (construct-invocation ADR, memql#2322)"},
+		{"$params", "action's retired $params.X string interpolation (memql#2322)"},
+		{`action("`, `retired versioned action invocation action("name@1") -- an action is invoked 'action <name>(args...)' now (memql#2322/#2328)`},
+		{"func (", "retired procedural receiver-function form -- the struct form is the only author surface"},
+		{"mutation <", "`mutation` is the invocation-step prefix; the declaration keyword is `mutate` (rewriter.go mutationStructHeader, memql#2041)"},
+	}
+	for _, c := range Build().Constructs {
+		hay := c.Doc + "\x00" + strings.Join(c.BodyBlocks, "\x00")
+		for _, r := range retired {
+			if strings.Contains(hay, r.needle) {
+				t.Errorf("DRIFT: construct %q Doc/BodyBlocks contains retired form %q -- %s", c.Keyword, r.needle, r.why)
+			}
+		}
+	}
+
+	// The `action` construct: its body is `args { }` + a single capability
+	// call (construct-invocation ADR Decision 3), so BodyBlocks is exactly
+	// {args} -- the retired params/argTemplate blocks must be gone -- and the
+	// Doc must describe the capability call.
+	if a := Build().ConstructByKeyword("action"); a != nil {
+		if len(a.BodyBlocks) != 1 || a.BodyBlocks[0] != "args" {
+			t.Errorf("DRIFT: action BodyBlocks = %v, want [args] (params/argTemplate retired, memql#2322)", a.BodyBlocks)
+		}
+		if !strings.Contains(a.Doc, "capability") {
+			t.Errorf("DRIFT: action Doc must describe the single `capability <verb>(...)` call; got %q", a.Doc)
+		}
+	} else {
+		t.Error("DRIFT: dslspec is missing the `action` construct")
+	}
+
+	// The write-function declaration keyword is `mutate`, not the retired
+	// `mutation` noun (which is the invocation-step prefix only, memql#2041).
+	if Build().ConstructByKeyword("mutation") != nil {
+		t.Error("DRIFT: dslspec still lists a `mutation` construct -- the declaration keyword is `mutate` (memql#2041); `mutation` is the invocation-step prefix only")
+	}
+	if Build().ConstructByKeyword("mutate") == nil {
+		t.Error("DRIFT: dslspec is missing the `mutate` construct (the write-function declaration keyword)")
 	}
 }
 

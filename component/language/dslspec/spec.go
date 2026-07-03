@@ -254,7 +254,7 @@ func receiverKeyToConstructKeywords(receiverKey string) []string {
 	case "Query":
 		return []string{"query"}
 	case "Mutation":
-		return []string{"mutation"}
+		return []string{"mutate"}
 	case "Logic":
 		return []string{"logic"}
 	case "Automation":

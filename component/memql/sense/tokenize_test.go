@@ -1,6 +1,7 @@
 package sense
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -121,5 +122,105 @@ func TestTokenize_NumberEnd(t *testing.T) {
 	}
 	if tokens[0].Range.End.Column != 3 {
 		t.Errorf("End.Column = %d, want 3 (one past last digit)", tokens[0].Range.End.Column)
+	}
+}
+
+// firstTokenType returns the Type of the first token whose Literal matches, or
+// "" if none. Helper for the construct-keyword highlighting tests.
+func firstTokenType(tokens []Token, literal string) string {
+	for _, tk := range tokens {
+		if tk.Literal == literal {
+			return tk.Type
+		}
+	}
+	return ""
+}
+
+// TestTokenize_ConstructKeywordsColored is the E5 (memql#2376) pin: lowercase
+// construct keywords lex as identifiers in the core lexer (which only keywords
+// the capitalized receiver forms), but the Sense tokenizer must render them as
+// `keyword` semantic tokens -- sourced from dslspec so a future grammar epic
+// inherits coloring. Strings / annotations / concept-ids / plain identifiers
+// are unaffected.
+func TestTokenize_ConstructKeywordsColored(t *testing.T) {
+	svc := &Service{}
+
+	// A deployment-bundle-shaped snippet: an action declaration whose body is a
+	// single capability call, with an annotation, a bound-concept mutate decl,
+	// and string args.
+	src := "@description(\"cut a release\")\n" +
+		"action tagRelease {\n" +
+		"  capability script(script: \"deploy.tag\")\n" +
+		"}\n" +
+		"mutate space recordDeploy { insert { id: \"x\" } }"
+	tokens := svc.Tokenize(src)
+
+	// Construct keywords render as `keyword`.
+	for _, kw := range []string{"action", "capability", "mutate"} {
+		if got := firstTokenType(tokens, kw); got != "keyword" {
+			t.Errorf("construct keyword %q rendered as %q, want keyword", kw, got)
+		}
+	}
+
+	// Non-keyword identifiers (the action name, the capability verb, an arg key)
+	// stay identifiers -- the highlighter colors the keyword set, not everything.
+	for _, id := range []string{"tagRelease", "script", "recordDeploy"} {
+		if got := firstTokenType(tokens, id); got != "identifier" {
+			t.Errorf("identifier %q rendered as %q, want identifier", id, got)
+		}
+	}
+
+	// The annotation `@` and the string literal keep their own types -- the
+	// construct-keyword coloring only touches the TokenIdentifier path.
+	hasType := func(typ string) bool {
+		for _, tk := range tokens {
+			if tk.Type == typ {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasType("annotation") {
+		t.Errorf("expected an annotation token for `@description`; got none")
+	}
+	if got := firstTokenType(tokens, "cut a release"); got != "string" {
+		t.Errorf("string literal rendered as %q, want string", got)
+	}
+}
+
+// TestTokenize_RetiredHasNotKeyword pins the E2 (memql#2373) `has` de-keywording
+// at the tokenize layer: the core lexer still emits TokenKeywordHas for the
+// retired `has` word, but the Sense tokenizer no longer maps it to `keyword`
+// (membership is `in` only, #971). It falls through to `identifier`.
+func TestTokenize_RetiredHasNotKeyword(t *testing.T) {
+	svc := &Service{}
+	tokens := svc.Tokenize("a has b")
+	if got := firstTokenType(tokens, "has"); got == "keyword" {
+		t.Errorf("`has` rendered as keyword; it is retired and must not be a keyword token (#971)")
+	}
+	// The live membership operator `in` is still a keyword.
+	inTokens := svc.Tokenize("a in b")
+	if got := firstTokenType(inTokens, "in"); got != "keyword" {
+		t.Errorf("`in` rendered as %q, want keyword (the live membership operator)", got)
+	}
+}
+
+// TestKeywordDocsFreeOfRetiredForms (E2 / memql#2373) pins the KeywordDocs
+// purge: the retired procedural `func` receiver keyword and the `has` membership
+// operator must not reappear as documented keywords, and no surviving doc may
+// teach a retired form (the `use v1:domain:concept` Form-A import, or `has`).
+func TestKeywordDocsFreeOfRetiredForms(t *testing.T) {
+	for _, retired := range []string{"func", "has"} {
+		if _, ok := KeywordDocs[retired]; ok {
+			t.Errorf("KeywordDocs still documents retired keyword %q -- purge it (memql#2373)", retired)
+		}
+	}
+	for kw, doc := range KeywordDocs {
+		if strings.Contains(doc, "use v1:") {
+			t.Errorf("KeywordDocs[%q] teaches the retired Form-A import `use v1:domain:concept`: %q", kw, doc)
+		}
+		if strings.Contains(doc, "not has") || strings.Contains(doc, "has \"") {
+			t.Errorf("KeywordDocs[%q] references the retired `has` operator: %q", kw, doc)
+		}
 	}
 }
