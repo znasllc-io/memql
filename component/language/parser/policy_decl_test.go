@@ -93,21 +93,22 @@ policy minimal { }`
 	}
 }
 
-// TestParsePolicyDecl_TolratesUnknownAttribute locks the
-// hand-rolled parser's drain-and-skip default branch -- an unknown
-// @-annotation doesn't error so future tuning knobs don't require
-// a parser update before they can ship.
-func TestParsePolicyDecl_TolratesUnknownAttribute(t *testing.T) {
+// TestParsePolicyDecl_RejectsUnknownAttribute locks the memql#2395
+// HOLE-1 fix: an unknown @-annotation is REJECTED against the canonical
+// annotations.ByReceiver registry (the previous drain-and-skip tolerance
+// silently swallowed typos like @primry; a future tuning knob ships by
+// adding it to the registry first, which is the single source of truth).
+func TestParsePolicyDecl_RejectsUnknownAttribute(t *testing.T) {
 	source := `@primary("p")
 @futureKnob("ignored")
 policy tolerant { }`
 
-	got, err := ParsePolicyDecl(source)
-	if err != nil {
-		t.Fatalf("ParsePolicyDecl: %v", err)
+	_, err := ParsePolicyDecl(source)
+	if err == nil {
+		t.Fatal("ParsePolicyDecl accepted an unknown annotation @futureKnob (registry gate missing)")
 	}
-	if got.Primary != "p" {
-		t.Errorf("Primary = %q, want p", got.Primary)
+	if !strings.Contains(err.Error(), "unknown annotation @futureKnob") {
+		t.Errorf("error should name the unknown annotation, got: %v", err)
 	}
 }
 

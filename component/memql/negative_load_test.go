@@ -154,27 +154,43 @@ func TestNegativeLoad_DuplicateNamesWarnSkip(t *testing.T) {
 }
 
 // ===========================================================================
-// KNOWN SILENT-ACCEPTANCE HOLES (surfaced by this suite, NOT fixed in S7).
-// Reported to the coordinator on memql#2383 for triage into a fail-loud
-// sub-story of epic #2351.
+// SILENT-ACCEPTANCE HOLES surfaced by this suite (memql#2383). HOLES 3 + 4
+// are CLOSED by memql#2395 (active tests below); HOLE 2 (positional args on
+// construct calls) lives in negative_grammar_test.go, deferred to #2365.
 // ===========================================================================
 
-// HOLE 3: two `insert { ... }` blocks in one mutation load CLEAN through
-// dslimports.Load. docs/public/language/authoring-rules.md Rule #1 states this
-// is "a parse-time error", but the lint pipeline (NormaliseAll + ParseFileSource)
-// does not catch it -- the second write is only rejected deeper, at engine
-// mutation-template registration, which the lint gate never reaches.
+// HOLE 3 -- CLOSED (memql#2395): the rewriter's write-block scan now rejects
+// a repeated `insert { ... }` / `update { ... }` block (it previously took the
+// FIRST match and silently ignored the rest), so the one-write rule
+// (authoring-rules Rule #1) is enforced at the rewriter -- which both the lint
+// pipeline (dslimports.Load / memqllint) and engine load run through.
 func TestHOLE_TwoWritesPerMutationNotCaughtAtLint(t *testing.T) {
-	t.Skip("HOLE (memql#2383 report): two insert{} blocks in one mutation load clean through dslimports.Load; the one-write rule (authoring-rules #1) is only enforced at engine mutation-template registration, not the lint gate. Move the enforcement earlier (rewriter/parse) so `memqllint` catches it, then un-skip.")
-
-	// Documented behavior today (would pass if asserted): loads clean.
-	//   const twoWrite = "use cognition.concepts.{ space }\nmutate space m {\n  args { x string @required }\n  insert { name: args.x }\n  insert { name: args.x }\n}\n"
-	//   require err == nil  // <-- the hole
+	cases := map[string]string{
+		"two-inserts": "use cognition.concepts.{ space }\nmutate space m {\n  args { x string @required }\n  insert { name: args.x }\n  insert { name: args.x }\n}\n",
+		"two-updates": "use cognition.concepts.{ space }\nmutate space m {\n  args { x string @required }\n  update { id: args.x\n    name: args.x }\n  update { id: args.x\n    name: args.x }\n}\n",
+	}
+	for label, src := range cases {
+		t.Run(label, func(t *testing.T) {
+			err := loadMemFS("x/mutations.memql", src)
+			if err == nil {
+				t.Fatalf("%s: two write blocks in one mutation loaded clean (one-write rule not enforced at lint)", label)
+			}
+			if !strings.Contains(err.Error(), "exactly one") {
+				t.Errorf("%s: diagnostic should state the exactly-one rule, got:\n  %v", label, err)
+			}
+		})
+	}
 }
 
-// HOLE 4: a policy with a non-empty body (`policy p { garbage tokens }`) loads
-// CLEAN. Live policies are empty-bodied provider-selection records; the policy
-// parser ignores body content instead of rejecting a non-empty body.
+// HOLE 4 -- CLOSED (memql#2395): a policy with a non-empty body is rejected
+// (policies are empty-bodied provider-selection records; the parser previously
+// walked over body content and silently ignored it).
 func TestHOLE_PolicyGarbageBodyAccepted(t *testing.T) {
-	t.Skip("HOLE (memql#2383 report): a policy with a non-empty body (`policy p { garbage tokens here }`) loads clean -- the policy parser ignores body content. Reject a non-empty policy body (policies are empty-bodied provider-selection records), then un-skip.")
+	err := loadMemFS("x/policies.memql", "@primary(\"x\")\npolicy p {\n  garbage tokens here\n}\n")
+	if err == nil {
+		t.Fatal("policy with a non-empty body loaded clean (body content silently ignored)")
+	}
+	if !strings.Contains(err.Error(), "non-empty body") {
+		t.Errorf("diagnostic should name the non-empty-body rule, got:\n  %v", err)
+	}
 }

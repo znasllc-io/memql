@@ -751,7 +751,15 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 		// Bare form (canonical): `<keyword> { ... }`. Target derived from
 		// the signature; name is left empty to signal "derive".
 		bare := regexp.MustCompile(`(^|[\n\r])[ \t]*` + keyword + `[ \t]*\{`)
-		if loc := bare.FindStringIndex(body); loc != nil {
+		locs := bare.FindAllStringIndex(body, -1)
+		// One write per mutation (authoring-rules rule 1). A second block of
+		// the same keyword was previously first-match-ignored (memql#2395
+		// HOLE 3) -- reject it at the rewriter so lint + load both catch it.
+		if len(locs) > 1 {
+			return "", "", false, fmt.Errorf("mutation body must contain exactly one `%s { ... }` block -- found %d (one write per mutation, authoring-rules rule 1)", keyword, len(locs))
+		}
+		if len(locs) == 1 {
+			loc := locs[0]
 			open := loc[0] + strings.Index(body[loc[0]:loc[1]], "{")
 			close := findMatchingCloseBrace(body, open)
 			if close < 0 {

@@ -16,9 +16,10 @@ import (
 //
 //	policy <name> { }
 //
-// The body is reserved for future per-vendor tuning knobs; today
-// every policy carries an empty body and the parser tolerates
-// unknown content inside the braces.
+// The body MUST be empty: a policy is an empty-bodied
+// provider-selection record; all configuration lives in the leading
+// annotations. Non-empty bodies are rejected (memql#2395 HOLE 4 --
+// they were previously walked over and silently ignored).
 //
 // All semantic configuration lives in the leading attribute set:
 // @description, @primary, @fallback (repeatable), @maxLatencyMs,
@@ -38,7 +39,8 @@ func (p *Parser) parsePolicyDecl(attrs []*ast.Attribute) (*ast.PolicyDecl, error
 	p.advance()
 
 	// Translate the leading attribute set into typed PolicyDecl
-	// fields. Unknown attributes are tolerated -- matches the
+	// fields. Unknown attributes are rejected against the canonical
+	// registry (validateDeclAnnotations below) -- matches the
 	// hand-rolled parser's drain-and-skip default branch.
 	for _, attr := range attrs {
 		if attr == nil {
@@ -68,27 +70,27 @@ func (p *Parser) parsePolicyDecl(attrs []*ast.Attribute) (*ast.PolicyDecl, error
 		}
 	}
 
-	// Body: an empty `{ }`. Reserved for future use; tolerate
-	// arbitrary content inside the braces by walking to the matching
-	// close.
+	if err := p.validateDeclAnnotations("Policy", "policy", decl.Name, attrs); err != nil {
+		return nil, err
+	}
+
+	// Body: MUST be an empty `{ }`. A policy is an empty-bodied
+	// provider-selection record; configuration lives in the leading
+	// annotations. Content inside the braces was previously walked over
+	// and silently ignored (memql#2395 HOLE 4) -- now rejected.
 	if err := p.expect(TokenBraceOpen); err != nil {
 		return nil, err
 	}
-	depth := 1
-	for !p.check(TokenEOF) && depth > 0 {
-		switch {
-		case p.check(TokenBraceOpen):
-			depth++
-		case p.check(TokenBraceClose):
-			depth--
-			if depth == 0 {
-				p.advance()
-				return decl, nil
-			}
-		}
-		p.advance()
+	if p.check(TokenEOF) {
+		return nil, newParseErrorf(&p.current, "policy %q: unexpected EOF before closing '}'", decl.Name)
 	}
-	return nil, newParseErrorf(&p.current, "policy %q: unexpected EOF before closing '}'", decl.Name)
+	if !p.check(TokenBraceClose) {
+		return nil, newParseErrorf(&p.current,
+			"policy %q: non-empty body -- a policy is an empty-bodied provider-selection record; configuration lives in the leading annotations (@primary / @fallback / @maxLatencyMs / @maxTimeToFirstTokenMs / @preferredRole)",
+			decl.Name)
+	}
+	p.advance()
+	return decl, nil
 }
 
 // attrIntValue pulls a single integer value off an annotation. The

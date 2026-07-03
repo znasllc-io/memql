@@ -1784,6 +1784,10 @@ func (p *Parser) parseShapeDecl(attrs []*Attribute) (*ShapeDecl, error) {
 		decl.Name = first
 	}
 
+	if err := p.validateDeclAnnotations("Shape", "shape", decl.Name, attrs); err != nil {
+		return nil, err
+	}
+
 	if err := p.expect(TokenBraceOpen); err != nil {
 		return nil, err
 	}
@@ -1847,6 +1851,10 @@ func (p *Parser) parseBuiltinDecl(attrs []*Attribute) (*BuiltinDecl, error) {
 		Attributes: attrs,
 	}
 	p.advance()
+
+	if err := p.validateDeclAnnotations("Builtin", "builtin", decl.Name, attrs); err != nil {
+		return nil, err
+	}
 
 	if err := p.expect(TokenBraceOpen); err != nil {
 		return nil, err
@@ -1962,6 +1970,10 @@ func (p *Parser) parsePromptDecl(attrs []*Attribute) (*PromptDecl, error) {
 		Attributes: attrs,
 	}
 	p.advance()
+
+	if err := p.validateDeclAnnotations("Prompt", "prompt", decl.Name, attrs); err != nil {
+		return nil, err
+	}
 
 	if err := p.expect(TokenBraceOpen); err != nil {
 		return nil, err
