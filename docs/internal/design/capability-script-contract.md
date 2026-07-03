@@ -40,8 +40,11 @@ the executor can drive it and record its result without scraping human prose.
 
 4. **Structured params in.** Inputs arrive, in precedence order:
    `--name=value` flags  >  a JSON object on **stdin** (opt-in via
-   `--params-stdin`)  >  environment variables  >  documented defaults.
-   The executor prefers stdin JSON; humans prefer flags/env. There are no
+   `--params-stdin`)  >  documented defaults. `cap_param` reads **no**
+   environment tier of its own; a script conventionally computes its
+   default from an env var (`cap_param name "${ENV:-fallback}"`), so env
+   feeds the default slot rather than being a separate tier. The executor
+   prefers stdin JSON; humans prefer flags/env. There are no
    positional arguments.
 
 5. **Structured result out.** On **stdout**, the script emits **exactly one**

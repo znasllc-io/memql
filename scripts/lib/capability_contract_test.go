@@ -265,3 +265,98 @@ func rel(t *testing.T, p string) string {
 	}
 	return r
 }
+
+// TestCapParamPrecedence locks cap_param's resolution order to what the contract
+// (and capability.sh / capability-script-contract.md) advertise:
+//
+//	--flag=value  >  stdin JSON (opt-in via --params-stdin)  >  default
+//
+// Critically it asserts there is NO environment tier: a plain env var named like
+// the param is ignored, and resolution falls through to the default. This is the
+// claim znasllc-io/memql#2382 corrected in the docs; the test keeps doc == code.
+func TestCapParamPrecedence(t *testing.T) {
+	root := repoRoot(t)
+	lib := filepath.Join(root, "scripts", "lib", "capability.sh")
+	if _, err := os.Stat(lib); err != nil {
+		t.Fatalf("capability.sh not found at %s: %v", lib, err)
+	}
+
+	// Harness sources the library and prints the resolved value of `foo` so the
+	// test can assert precedence. It never calls cap_ok, so the EXIT trap stays
+	// quiet on a clean (exit 0) run.
+	harness := filepath.Join(t.TempDir(), "capparam_harness.sh")
+	body := "#!/usr/bin/env bash\n" +
+		"set -euo pipefail\n" +
+		"source \"" + lib + "\"\n" +
+		"cap_init \"test.capParamPrecedence\" \"cap_param precedence harness\"\n" +
+		"cap_parse_flags \"$@\"\n" +
+		"printf 'RESULT=%s\\n' \"$(cap_param foo defval)\"\n"
+	if err := os.WriteFile(harness, []byte(body), 0o755); err != nil {
+		t.Fatalf("write harness: %v", err)
+	}
+
+	cases := []struct {
+		name  string
+		args  []string
+		stdin string
+		env   []string // extra KEY=VAL entries appended to the process env
+		want  string
+	}{
+		{
+			name:  "flag beats stdin and default",
+			args:  []string{"--params-stdin", "--foo=flagval"},
+			stdin: `{"foo":"stdinval"}`,
+			want:  "flagval",
+		},
+		{
+			name:  "stdin beats default",
+			args:  []string{"--params-stdin"},
+			stdin: `{"foo":"stdinval"}`,
+			want:  "stdinval",
+		},
+		{
+			name: "default when neither flag nor stdin",
+			want: "defval",
+		},
+		{
+			// The corrected claim: cap_param has NO env tier. A plain env var
+			// named like the param must not be consulted -- resolution falls
+			// through to the default.
+			name: "no env tier -- env var named like the param is ignored",
+			env:  []string{"FOO=envval", "CAP_ARG_FOO_SHOULD_NOT_MATTER=x"},
+			want: "defval",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command("bash", append([]string{harness}, tc.args...)...)
+			cmd.Env = append(os.Environ(), tc.env...)
+			if tc.stdin != "" {
+				cmd.Stdin = strings.NewReader(tc.stdin)
+			} else {
+				cmd.Stdin = nil // closed stdin
+			}
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("harness failed: %v\noutput:\n%s", err, out)
+			}
+			got := parseResult(string(out))
+			if got != tc.want {
+				t.Errorf("cap_param resolved %q, want %q\noutput:\n%s", got, tc.want, out)
+			}
+		})
+	}
+}
+
+// parseResult extracts the value printed after the last "RESULT=" marker.
+func parseResult(out string) string {
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(lines[i]), "RESULT="); ok {
+			return v
+		}
+	}
+	return ""
+}

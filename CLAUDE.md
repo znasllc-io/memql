@@ -2151,7 +2151,8 @@ invokes it. These scripts adopt the **capability-script contract**
   destructive confirmation is an explicit `--confirm=<phrase>` param,
   never a blocking prompt;
 - **structured params in** -- `--flag=value` > stdin JSON
-  (`--params-stdin`) > env > documented defaults; no positional args;
+  (`--params-stdin`) > documented defaults (cap_param has no env tier;
+  a script passes an env-resolved value as the default); no positional args;
 - **structured result out** -- exactly one JSON envelope on **stdout**,
   all human logs on **stderr**;
 - **honest, stable exit codes** (0 ok; 2 bad param; 3 refused; 4

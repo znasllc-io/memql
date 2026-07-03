@@ -187,7 +187,11 @@ function _cap_on_exit() {
 }
 
 #=============================================================================
-# PARAMETERS -- precedence: --flag=value  >  stdin JSON  >  environment
+# PARAMETERS -- cap_param precedence: --flag=value  >  stdin JSON  >  default
+#               (cap_param reads no environment tier of its own; a script passes
+#               an env-resolved value AS the default -- e.g.
+#               cap_param cluster "${MEMQL_K3D_CLUSTER:-memql}" -- so env feeds
+#               the default slot, it is not a separate tier)
 #=============================================================================
 
 # _cap_load_stdin -- captures stdin JSON once. Reading stdin is OPT-IN (the
@@ -326,7 +330,7 @@ function _cap_print_spec() {
 function _cap_print_help() {
     printf 'Capability: %s\n' "$_CAP_NAME"
     printf '  %s\n\n' "$_CAP_SUMMARY"
-    printf 'Parameters (precedence: --flag=value > stdin JSON > env):\n'
+    printf 'Parameters (precedence: --flag=value > stdin JSON > default):\n'
     local entry
     for entry in "${_CAP_SPEC_PARAMS[@]:-}"; do
         [[ -z "$entry" ]] && continue
