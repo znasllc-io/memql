@@ -56,6 +56,15 @@ var forgeEventKindContract = map[string]string{
 // status->kind writes live in the automation persist steps (the routeRequest /
 // recordTransition logics are now pure projections). The test binary runs in
 // the package directory, so the bundle is two levels up.
+func readForgeLogic(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile("../../dsl/forge/logic.memql")
+	if err != nil {
+		t.Fatalf("read dsl/forge/logic.memql: %v", err)
+	}
+	return string(b)
+}
+
 func readForgeAutomations(t *testing.T) string {
 	t.Helper()
 	b, err := os.ReadFile("../../dsl/forge/automations.memql")
@@ -81,22 +90,35 @@ func TestForgeRoutingContractMatchesGuard(t *testing.T) {
 	}
 }
 
-// TestForgeRoutingContractMatchesDSL asserts the authored routeRequest
-// actually encodes the role -> status map this test pins. Catches an edit to
-// the DSL that changes routing without updating the contract (and vice versa).
+// TestForgeRoutingContractMatchesDSL asserts the role -> status map this test
+// pins lives in the PURE requestRouteStatus logic (P1 #2368: the vocabulary
+// moved out of the automation's orchestration into dsl/forge/logic.memql).
+// Catches an edit that changes routing without updating the contract (and
+// vice versa).
 func TestForgeRoutingContractMatchesDSL(t *testing.T) {
-	src := readForgeAutomations(t)
+	src := readForgeLogic(t)
 	for role, target := range forgeRoutingContract {
-		// The role guard is an event-bound condition step:
-		// `if event.payload.submitterRole == "<role>" { advanceRequest { ... } }`.
-		needRole := `submitterRole == "` + role + `"`
+		if role == "reader" {
+			// reader is the decision table's ELSE arm: any non-owner,
+			// non-privileged role routes to needs_validation. No per-role
+			// guard exists by design; the target value must.
+			if !strings.Contains(src, `"`+target+`"`) {
+				t.Errorf("requestRouteStatus logic missing else-arm status %q", target)
+			}
+			continue
+		}
+		needRole := `role == "` + role + `"`
 		if !strings.Contains(src, needRole) {
-			t.Errorf("routeRequest automation missing role guard %q", needRole)
+			t.Errorf("requestRouteStatus logic missing role predicate %q", needRole)
 		}
-		needStatus := `status: "` + target + `"`
-		if !strings.Contains(src, needStatus) {
-			t.Errorf("routeRequest automation missing routed status %q (for role %s)", needStatus, role)
+		if !strings.Contains(src, `"`+target+`"`) {
+			t.Errorf("requestRouteStatus logic missing routed status %q (for role %s)", target, role)
 		}
+	}
+	// The automation stamps the approver ONLY in the owner fast-track case.
+	autoSrc := readForgeAutomations(t)
+	if !strings.Contains(autoSrc, `case "queued"`) || !strings.Contains(autoSrc, "approvedByUserId: submitterUserId") {
+		t.Error("routeRequest automation must stamp approvedByUserId in the queued (owner) switch case")
 	}
 }
 
@@ -104,17 +126,18 @@ func TestForgeRoutingContractMatchesDSL(t *testing.T) {
 // whitelisted toStatus to the expected requestEvent kind, so the audit trail
 // stays complete and correctly labelled.
 func TestForgeEventKindContractMatchesDSL(t *testing.T) {
-	src := readForgeAutomations(t)
+	src := readForgeLogic(t)
 	for status, kind := range forgeEventKindContract {
-		// The per-status guard is an event-bound condition step:
-		// `if event.payload.status == "<status>" { recordRequestEvent { ... } }`.
-		needStatus := `status == "` + status + `"`
-		needKind := `kind: "` + kind + `"`
+		// P1 #2368: the status -> kind vocabulary lives in the PURE
+		// transitionEventKind logic (dsl/forge/logic.memql); the automation
+		// just switches on decide.result and persists.
+		needStatus := `st == "` + status + `"`
+		needKind := `"` + kind + `"`
 		if !strings.Contains(src, needStatus) {
-			t.Errorf("recordTransition automation missing guard %q", needStatus)
+			t.Errorf("transitionEventKind logic missing predicate %q", needStatus)
 		}
 		if !strings.Contains(src, needKind) {
-			t.Errorf("recordTransition automation missing event kind %q (for status %s)", needKind, status)
+			t.Errorf("transitionEventKind logic missing event kind %q (for status %s)", needKind, status)
 		}
 	}
 }

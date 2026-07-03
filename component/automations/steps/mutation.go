@@ -564,8 +564,25 @@ func (e *MutationExecutor) evaluateCond(evaluator *automations.Evaluator, expr s
 		return nil, fmt.Errorf("cond() requires exactly 3 arguments: cond(predicate, thenValue, elseValue), got %d", len(args))
 	}
 
-	// Evaluate the predicate
+	// Evaluate the predicate. A COMPARISON predicate (`role == "admin"`,
+	// `x != y`, connectives) must go through the full condition evaluator --
+	// treating it as a value made every comparison-predicate a non-empty
+	// LITERAL STRING, i.e. always truthy, silently picking the then-branch
+	// (S9 #2407 / P1 #2368 fallout).
 	condArg := strings.TrimSpace(args[0])
+	if strings.Contains(condArg, "==") || strings.Contains(condArg, "!=") ||
+		strings.Contains(condArg, "&&") || strings.Contains(condArg, "||") ||
+		strings.Contains(condArg, "<") || strings.Contains(condArg, ">") {
+		ok, cerr := evaluator.EvaluateCondition(condArg)
+		if cerr != nil {
+			return nil, fmt.Errorf("evaluating cond() predicate: %w", cerr)
+		}
+		branch := strings.TrimSpace(args[2])
+		if ok {
+			branch = strings.TrimSpace(args[1])
+		}
+		return e.evaluateValue(evaluator, branch)
+	}
 	condVal, err := e.evaluateValue(evaluator, condArg)
 	if err != nil {
 		return nil, fmt.Errorf("evaluating cond() predicate: %w", err)
