@@ -1922,6 +1922,8 @@ func ExpiredMagicLinkRequestsBuild(args ExpiredMagicLinkRequestsArgs) string {
 //
 // Bound concept: accessRequest.
 type ExpiredPendingAccessRequestsArgs struct {
+	// Optional RFC3339 cutoff; when set, only pending requests created strictly before it are returned. The expiry sweep's logic computes it (now - IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS) and pushes it down (#2369).
+	CreatedBefore string
 }
 
 // ExpiredPendingAccessRequests calls the engine query expiredPendingAccessRequests.
@@ -1931,14 +1933,22 @@ func (qc *QueryClient) ExpiredPendingAccessRequests(ctx context.Context, args Ex
 }
 
 func ExpiredPendingAccessRequestsBuild(args ExpiredPendingAccessRequestsArgs) string {
-	_ = args
-	return "query expiredPendingAccessRequests()"
+	var b strings.Builder
+	b.WriteString("query expiredPendingAccessRequests(")
+	if args.CreatedBefore != "" {
+		b.WriteString("createdBefore: ")
+		b.WriteString(fmt.Sprintf("%q", args.CreatedBefore))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
-// ExpiredWorkerInvocations -- List worker invocation rows for retention pruning. Caller filters by age.
+// ExpiredWorkerInvocations -- List worker invocation rows for retention pruning. When createdBefore is supplied, restricts to rows created strictly before it -- the retention sweep's logic computes the cutoff (now - WORKER_INVOCATION_RETENTION_DAYS) and pushes it down (#2369).
 //
 // Bound concept: invocation.
 type ExpiredWorkerInvocationsArgs struct {
+	// Optional RFC3339 cutoff; when set, only rows whose createdAt is strictly before it are returned.
+	CreatedBefore string
 }
 
 // ExpiredWorkerInvocations calls the engine query expiredWorkerInvocations.
@@ -1948,8 +1958,14 @@ func (qc *QueryClient) ExpiredWorkerInvocations(ctx context.Context, args Expire
 }
 
 func ExpiredWorkerInvocationsBuild(args ExpiredWorkerInvocationsArgs) string {
-	_ = args
-	return "query expiredWorkerInvocations()"
+	var b strings.Builder
+	b.WriteString("query expiredWorkerInvocations(")
+	if args.CreatedBefore != "" {
+		b.WriteString("createdBefore: ")
+		b.WriteString(fmt.Sprintf("%q", args.CreatedBefore))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // FeedbackAnnouncementForPlan -- Check if the assistant already posted the awaitingFeedback announcement for a Plan (dedup behind the cross-replica announce gate, #1406).
@@ -4042,10 +4058,12 @@ func UsersInDeletionCooldownBuild(args UsersInDeletionCooldownArgs) string {
 	return "query usersInDeletionCooldown()"
 }
 
-// UsersScheduledForDeletion -- Active users whose deletionScheduledAt is set; cooldown enforcement happens in the automation per-row.
+// UsersScheduledForDeletion -- Active users whose deletionScheduledAt is set. When scheduledBefore is supplied, restricts to rows whose deletionScheduledAt is strictly before it -- the deletion sweep's logic computes the cutoff (now - MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS) and pushes it down (#2369).
 //
 // Bound concept: user.
 type UsersScheduledForDeletionArgs struct {
+	// Optional RFC3339 cutoff; when set, only rows whose deletionScheduledAt is strictly before it are returned.
+	ScheduledBefore string
 }
 
 // UsersScheduledForDeletion calls the engine query usersScheduledForDeletion.
@@ -4055,8 +4073,14 @@ func (qc *QueryClient) UsersScheduledForDeletion(ctx context.Context, args Users
 }
 
 func UsersScheduledForDeletionBuild(args UsersScheduledForDeletionArgs) string {
-	_ = args
-	return "query usersScheduledForDeletion()"
+	var b strings.Builder
+	b.WriteString("query usersScheduledForDeletion(")
+	if args.ScheduledBefore != "" {
+		b.WriteString("scheduledBefore: ")
+		b.WriteString(fmt.Sprintf("%q", args.ScheduledBefore))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // ValidationLog -- Returns validation state change history. Optional filters: recordId, partitionId, action

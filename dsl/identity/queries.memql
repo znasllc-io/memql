@@ -595,12 +595,13 @@ query delegation expiredActiveDelegations {
 // iterates the result and per-row tests
 // `addDuration(item.auditEvent.occurredAt, "P{N}D") < now` to
 // decide whether the row is past
-// MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. Same MemQL-parser limitation
-// as expiredPendingAccessRequests: filter expressions can't
-// inline addDuration() and addDuration accepts only positive
-// durations, so per-row windowing in the automation is the only
-// path until either the planner accepts addDuration in filters or
-// concept rows pre-stamp an effective-deadline field.
+// MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. NOTE (#2369): the old claim
+// that "per-row windowing in the automation is the only path" is
+// FALSE -- the filter restriction is on function calls, not arg-cutoff
+// comparisons, and addDuration takes negative ISO durations (the
+// cluster stale-node prune has shipped that shape since #1642). The
+// clean pattern is cutoff-in-logic + a when(args.cutoff) filter here,
+// as expiredPendingAccessRequests now does.
 //
 // Note: as of writing, MemQL has no row-removal mutation -- the AST
 // defines only Insert and Update. The retention sweep can soft-mark
@@ -723,7 +724,10 @@ query magicLinkRequest expiredMagicLinkRequests {
 @description("Pending access requests; the expiry sweep iterates these and per-row checks createdAt + expiry-days < now.")
 @unbounded("expired pending access-request sweep -- an internal sweep that must see all")
 query accessRequest expiredPendingAccessRequests {
-  filter  statusIsPending
+  args {
+    createdBefore  string  @description("Optional RFC3339 cutoff; when set, only pending requests created strictly before it are returned. The expiry sweep's logic computes it (now - IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS) and pushes it down (#2369).")
+  }
+  filter  statusIsPending && when(args.createdBefore) { createdAt<args.createdBefore }
   shape   accessRequestFull
 }
 
@@ -1238,10 +1242,13 @@ query user usersInDeletionCooldown {
 //
 
 @enabled
-@description("Active users whose deletionScheduledAt is set; cooldown enforcement happens in the automation per-row.")
+@description("Active users whose deletionScheduledAt is set. When scheduledBefore is supplied, restricts to rows whose deletionScheduledAt is strictly before it -- the deletion sweep's logic computes the cutoff (now - MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS) and pushes it down (#2369).")
 @unbounded("scheduled-deletion sweep -- an internal sweep that must see all")
 query user usersScheduledForDeletion {
-  filter  isActiveRecord && isDeletionScheduled
+  args {
+    scheduledBefore  string  @description("Optional RFC3339 cutoff; when set, only rows whose deletionScheduledAt is strictly before it are returned.")
+  }
+  filter  isActiveRecord && isDeletionScheduled && when(args.scheduledBefore) { deletionScheduledAt<args.scheduledBefore }
   shape   userFull
 }
 

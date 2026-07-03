@@ -3,25 +3,20 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use identity.logic.{ accessRequestExpirySweep, accessRequestExpiryWindow, accountDeletionReminder25Days, accountDeletionReminder7Days, accountDeletionSweep, accountDeletionWindow, auditEventRetentionSweep, magicLinkExpirySweep, onDelegationCreated, revokeExpiredDelegations }
+use identity.logic.{ accessRequestExpirySweep, accountDeletionReminder25Days, accountDeletionReminder7Days, accountDeletionSweep, auditEventRetentionSweep, magicLinkExpirySweep, onDelegationCreated, revokeExpiredDelegations }
 use identity.mutations.{ consumeMagicLinkRequest, deleteUserHard, expireAccessRequest, revokeDelegation }
 
 @enabled
 @trigger(schedule="0 0 4 * * *")
 @description("Daily 04:00 UTC sweep: expire pending access requests older than IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS. decide (pure) returns the pending candidates; window reads the expiry var; the forEach apply gates each row on createdAt + P{N}D < now (#2256/#2254 evaluator fix) and stamps status=expired.")
 automation accessRequestExpirySweep {
-  step window {
-    logic accessRequestExpiryWindow ( event: event )
-  }
   step decide {
     logic accessRequestExpirySweep ( event: event )
   }
   step apply {
     forEach item in decide.result {
-      if addDuration(item.createdAt, concat("P", coalesce(window.first().payload.value, "30"), "D")) < now {
-        expireAccessRequest {
-          requestId: item.id
-        }
+      expireAccessRequest {
+        requestId: item.id
       }
     }
   }
@@ -140,18 +135,13 @@ automation accountDeletionReminder7Days {
 @trigger(schedule="0 0 3 * * *")
 @description("Daily 03:00 UTC sweep: hard-delete users past MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS. decide (pure) returns users scheduled for deletion; window reads the cooldown var; the forEach apply gates each row on deletionScheduledAt + P{N}D < now (#2256/#2254 evaluator fix) and hard-deletes via deleteUserHard. Auth-session revocation is the documented gap noted in the decide logic.")
 automation accountDeletionSweep {
-  step window {
-    logic accountDeletionWindow ( event: event )
-  }
   step decide {
     logic accountDeletionSweep ( event: event )
   }
   step apply {
     forEach item in decide.result {
-      if addDuration(item.payload.deletionScheduledAt, concat("P", coalesce(window.first().payload.value, "30"), "D")) < now {
-        deleteUserHard {
-          userId: item.id
-        }
+      deleteUserHard {
+        userId: item.id
       }
     }
   }

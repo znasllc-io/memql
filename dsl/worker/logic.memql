@@ -48,29 +48,16 @@ logic killSwitchSuspendsRunningPlans {
 //     the duration math into the query (no `>` operator on
 //     datetime). Per-row gating uses
 //       addDuration(item.createdAt, "P{retention}D") < now
-@description("Pure decide for the worker-invocation retention sweep: returns every soft-deletable candidate row. The retention-var read, the per-row window gate (createdAt + P{N}D < now), and the soft-delete write live in the workerInvocationRetentionSweep automation's window + forEach steps (#2235; the date-window gate is evaluated correctly by the condition evaluator since #2256/#2254).")
+@description("Pure decide for the worker-invocation retention sweep (#2369, cluster pruneStaleClusterNodes pattern): reads WORKER_INVOCATION_RETENTION_DAYS (default 90), computes cutoff = now - window via addDuration with a negative ISO duration, and returns expiredWorkerInvocations({createdBefore: cutoff}).nodes() -- rows past retention, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's forEach soft-deletes each unconditionally.")
 logic workerInvocationRetentionSweep {
   args {
     event object @required
   }
   body {
-  candidates := query expiredWorkerInvocations()
+  windowDays := query globalVariable( name: "WORKER_INVOCATION_RETENTION_DAYS" )
+  candidates := query expiredWorkerInvocations( createdBefore: addDuration(now, concat("P-", coalesce(windowDays.first().payload.value, "90"), "D")) )
   return candidates.nodes()
   }
 }
 
 
-// workerInvocationRetentionWindow -- pure read of the retention window
-// global variable for the workerInvocationRetentionSweep automation's
-// per-row date gate (#2235). Returns the v1:platform:globalVariable row so
-// the automation reads window.first().payload.value in its forEach `if`.
-@enabled
-@description("Pure read: returns the WORKER_INVOCATION_RETENTION_DAYS global variable row for the workerInvocationRetentionSweep automation's per-row window gate (#2235).")
-logic workerInvocationRetentionWindow {
-  args {
-    event object @required
-  }
-  body {
-  return query globalVariable( name: "WORKER_INVOCATION_RETENTION_DAYS" )
-  }
-}

@@ -31,13 +31,14 @@
 use identity.queries.{ expiredActiveDelegations, expiredAuditEvents, expiredMagicLinkRequests, expiredPendingAccessRequests, usersInDeletionCooldown, usersScheduledForDeletion }
 use platform.queries.{ globalVariable }
 
-@description("Pure decide for the access-request expiry sweep: returns every pending access request candidate. The expiry-var read, the per-row window gate (createdAt + P{N}D < now), and the expire write live in the accessRequestExpirySweep automation's window + forEach steps (#2235; date-window gate evaluated correctly since #2256/#2254).")
+@description("Pure decide for the access-request expiry sweep (#2369, cluster pruneStaleClusterNodes pattern): reads IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, and returns expiredPendingAccessRequests({createdBefore: cutoff}).nodes() -- the pending rows past the window, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's forEach is unconditional.")
 logic accessRequestExpirySweep {
   args {
     event object @required
   }
   body {
-  pending := query expiredPendingAccessRequests()
+  windowDays := query globalVariable( name: "IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS" )
+  pending := query expiredPendingAccessRequests( createdBefore: addDuration(now, concat("P-", coalesce(windowDays.first().payload.value, "30"), "D")) )
   return pending.nodes()
   }
 }
@@ -191,13 +192,14 @@ logic accountDeletionReminder7Days {
 //       addDuration(item.payload.deletionScheduledAt, "P{cooldown}D") < now
 //   - There's no batch-update path; we revoke sessions one row at a
 //     time inside the loop.
-@description("Pure decide for the account-deletion sweep: returns every user scheduled for deletion. The cooldown-var read, the per-row window gate (deletionScheduledAt + P{N}D < now), and the deleteUserHard write live in the accountDeletionSweep automation's window + forEach steps (#2235; date-window gate evaluated correctly since #2256/#2254). Audit-event rows, invitations the user issued, and access-request rows are intentionally retained for the trail.")
+@description("Pure decide for the account-deletion sweep (#2369, cluster pattern): reads MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS (default 30), computes cutoff = now - cooldown via addDuration with a negative ISO duration, and returns usersScheduledForDeletion({scheduledBefore: cutoff}).nodes() -- users whose cooldown has elapsed, filtered by QUERY PUSHDOWN; the automation's forEach hard-deletes each unconditionally. Audit-event rows, invitations the user issued, and access-request rows are intentionally retained for the trail.")
 logic accountDeletionSweep {
   args {
     event object @required
   }
   body {
-  candidates := query usersScheduledForDeletion()
+  cooldownDays := query globalVariable( name: "MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS" )
+  candidates := query usersScheduledForDeletion( scheduledBefore: addDuration(now, concat("P-", coalesce(cooldownDays.first().payload.value, "30"), "D")) )
 
   // Auth-session revocation gap (intentional): the user concept holds
   // user.id, but authSessionsForSubject is keyed on the JWT
@@ -364,30 +366,4 @@ logic revokeExpiredDelegations {
   }
 }
 
-// accessRequestExpiryWindow -- pure read of the access-request expiry window
-// global variable for the accessRequestExpirySweep automation's per-row date
-// gate (#2235). Returns the v1:platform:globalVariable row.
-@enabled
-@description("Pure read: returns the IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS global variable row for the accessRequestExpirySweep automation's per-row window gate (#2235).")
-logic accessRequestExpiryWindow {
-  args {
-    event object @required
-  }
-  body {
-  return query globalVariable( name: "IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS" )
-  }
-}
 
-// accountDeletionWindow -- pure read of the deletion-cooldown window global
-// variable for the accountDeletionSweep automation's per-row date gate
-// (#2235). Returns the v1:platform:globalVariable row.
-@enabled
-@description("Pure read: returns the MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS global variable row for the accountDeletionSweep automation's per-row window gate (#2235).")
-logic accountDeletionWindow {
-  args {
-    event object @required
-  }
-  body {
-  return query globalVariable( name: "MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS" )
-  }
-}
