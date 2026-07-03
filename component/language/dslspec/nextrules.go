@@ -8,7 +8,7 @@ package dslspec
 // "fieldName", "importPath", "operator", "specRef", "shapeRef", plus any
 // concrete literal.
 //
-// The owner's canonical example -- "I typed `mutation`, so suggest a concept;
+// The owner's canonical example -- "I typed `mutate`, so suggest a concept;
 // and if no concept is in file scope, offer to `use`/import one" -- is the
 // AfterMutationKeyword / AfterQueryKeyword rules with
 // SuggestImportWhenMissing set.
@@ -17,12 +17,12 @@ func nextRules() []NextRule {
 		{
 			Context: "topLevel",
 			Expect:  []string{"annotation", "construct"},
-			Doc:     "At top of file (or between declarations): an @annotation block or a construct keyword (concept, query, mutation, logic, automation, spec, trait, shape, tool, prompt, provider, builtin, policy, seed) or a `use` import.",
+			Doc:     "At top of file (or between declarations): an @annotation block or a construct keyword (concept, query, mutate, logic, automation, action, capability, spec, trait, shape, tool, prompt, provider, builtin, policy, seed) or a `use` import.",
 		},
 		{
 			Context:                  "afterMutationKeyword",
 			Expect:                   []string{"concept"},
-			Doc:                      "After `mutation`: the bound concept name (`mutation <Concept> <name>`). Suggest concepts in file scope.",
+			Doc:                      "After `mutate`: the bound concept name (`mutate <Concept> <name>`). Suggest concepts in file scope.",
 			SuggestImportWhenMissing: true,
 		},
 		{

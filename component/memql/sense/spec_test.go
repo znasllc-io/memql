@@ -13,9 +13,9 @@ func TestCompleteTopLevelOffersLiveConstructs(t *testing.T) {
 		labels[it.Label] = true
 	}
 	for _, kw := range []string{
-		"concept", "query", "mutation", "logic", "automation", "spec",
-		"trait", "shape", "tool", "prompt", "provider", "builtin", "policy",
-		"seed", "use",
+		"concept", "query", "mutate", "logic", "automation", "action",
+		"capability", "spec", "trait", "shape", "tool", "prompt", "provider",
+		"builtin", "policy", "seed", "use",
 	} {
 		if !labels[kw] {
 			t.Errorf("completeTopLevel missing live construct %q", kw)
@@ -30,7 +30,7 @@ func TestCompleteTopLevelOffersLiveConstructs(t *testing.T) {
 }
 
 // TestCompleteTopLevelPrefixFilter confirms prefix filtering still applies --
-// typing `mut` offers `mutation` and nothing unrelated.
+// typing `mut` offers `mutate` (the declaration keyword) and nothing unrelated.
 func TestCompleteTopLevelPrefixFilter(t *testing.T) {
 	s := New(nil)
 	got := map[string]bool{}
@@ -39,8 +39,8 @@ func TestCompleteTopLevelPrefixFilter(t *testing.T) {
 			got[it.Label] = true
 		}
 	}
-	if !got["mutation"] {
-		t.Error("prefix `mut` should offer `mutation`")
+	if !got["mutate"] {
+		t.Error("prefix `mut` should offer `mutate`")
 	}
 	if got["query"] || got["concept"] {
 		t.Error("prefix `mut` should not offer non-matching constructs")
@@ -54,7 +54,7 @@ func TestKeywordsProjectedFromSpec(t *testing.T) {
 	for _, k := range Keywords {
 		kw[k] = true
 	}
-	for _, want := range []string{"mutation", "logic", "trait", "use", "in"} {
+	for _, want := range []string{"mutate", "logic", "trait", "use", "in"} {
 		if !kw[want] {
 			t.Errorf("Keywords missing %q", want)
 		}

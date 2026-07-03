@@ -39,9 +39,9 @@ func constructs() []Construct {
 			BodyBlocks:         []string{"args", "filter", "shape"},
 		},
 		{
-			Keyword:            "mutation",
+			Keyword:            "mutate",
 			Category:           CategoryFunction,
-			Doc:                "Write function on a bound concept: exactly one insert{} OR update{} block. Struct form `mutation <Concept> <name>`.",
+			Doc:                "Write function on a bound concept: declared `mutate <Concept> <name>` with exactly one insert{} OR update{} block. (`mutate` is the declaration keyword -- rewriter.go mutationStructHeader / memql#2041; `mutation` is the invocation-step prefix only.)",
 			AnnotationReceiver: "Mutation",
 			RegistryBacked:     true,
 			ConceptInSignature: true,
@@ -68,11 +68,11 @@ func constructs() []Construct {
 		{
 			Keyword:            "action",
 			Category:           CategoryDeclarative,
-			Doc:                "Authored external-side-effect primitive (behavioral-constructs ADR §2.3): performs exactly ONE external capability (shell.* / fs.* / http.* / integration.* / mcp.*) on a surface and never touches the graph. Declarative body: capability + intent + params{} + argTemplate{}. Invoked from an automation `action(\"name@1\")` step; replays token-free (fingerprint-verified) on identical input.",
+			Doc:                "Authored external-side-effect primitive (behavioral-constructs ADR §2.3, construct-invocation ADR Decision 3): performs exactly ONE external capability (shell.* / fs.* / http.* / integration.* / mcp.*) on a surface and never touches the graph. Body is an `args { }` schema plus a SINGLE `capability <verb>(...)` call -- no body{}, no return; the @sideEffect class lives on the capability, not the action. Invoked from an automation as `action <name>(args...)`; replays token-free (fingerprint-verified) on identical input.",
 			AnnotationReceiver: "Action",
 			RegistryBacked:     true,
 			ConceptInSignature: false,
-			BodyBlocks:         []string{"params", "argTemplate"},
+			BodyBlocks:         []string{"args"},
 		},
 		{
 			Keyword:            "capability",

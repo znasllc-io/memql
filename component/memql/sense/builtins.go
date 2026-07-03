@@ -55,9 +55,14 @@ var AnnotationsByReceiver = annotations.ByReceiver
 // (component/language/annotations, #991) under its historic name.
 var AnnotationDocs = annotations.Docs
 
-// KeywordDocs maps keywords to documentation strings.
+// KeywordDocs maps control-flow / clause keywords to documentation strings.
+// It is the fallback doc source for the reserved words the DSL spec does not
+// model; the retired forms have been purged so hover never teaches grammar the
+// parser rejects (E2 / memql#2373): the procedural `func (Receiver)` receiver
+// form (the struct form is the only author surface), the `has` membership
+// operator (retired for `in`, #971), and the `use v1:domain:concept` import
+// (Form A -- retired for `use <domain>.<construct>.{ names }`).
 var KeywordDocs = map[string]string{
-	"func":     "Declare a function with a receiver type: func (ReceiverType) name(args) { ... }",
 	"for":      "Loop over a range: for item := range collection { ... }",
 	"range":    "Used with for to iterate: for item := range collection",
 	"if":       "Conditional execution: if condition { ... } else { ... }",
@@ -70,14 +75,13 @@ var KeywordDocs = map[string]string{
 	"return":   "Return a value from a function.",
 	"nil":      "The nil value (absence of a value).",
 	"retry":    "Retry an expression N times: retry(3) expression",
-	"when":     "Guard clause in automation steps.",
+	"when":     "Arg-conditional guard: when(args.x) { <expr> } -- the guarded block is dropped when args.x is absent.",
 	"as":       "Alias in forEach iteration: for item as alias",
 	"where":    "Filter in forEach: for item := range collection where condition",
-	"use":      "Import a concept: use v1:domain:concept",
+	"use":      "File-top import: use <domain>.<construct>.{ names } (e.g. use cognition.concepts.{ space }).",
 	"concept":  "Define a concept schema: concept Name { ... }",
-	"in":       "Membership test: value in collection",
-	"has":      "Property existence test: object has \"field\"",
-	"not":      "Negation: not in, not has",
+	"in":       "Membership test: value in collection (the single membership operator; `has` is retired, #971).",
+	"not":      "Negation (e.g. `not in`).",
 }
 
 // FieldTypes lists the field types the editor offers in concept / args /
