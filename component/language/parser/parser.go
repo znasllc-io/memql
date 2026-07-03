@@ -6892,11 +6892,39 @@ func (p *Parser) parseContainsFunction() (ExpressionNode, error) {
 	return &ContainsExpr{Target: target, Substring: substr}, nil
 }
 
-// parseExpressionArg parses a single expression argument (stopping at comma or paren).
+// parseExpressionArg parses a single expression argument (stopping at comma or
+// paren). Beyond a bare primary it accepts ONE infix comparison (S9, #2407) --
+// `cond(role == "admin", ...)` / `cond(x != y, ...)` -- which previously
+// failed with "requires three arguments" the first time a comparison-predicate
+// cond EXECUTED (load-time lowering never runs this path, so the deploy-pack
+// lifecycle logics carried the latent break). Connectives (&& / || / !) stay
+// rejected here: nest cond() or put the compound condition on an `if` step.
 func (p *Parser) parseExpressionArg() (ExpressionNode, error) {
-	// For simple cases, just use parsePrimary
-	// This handles identifiers, strings, numbers, function calls
-	return p.parsePrimary()
+	left, err := p.parsePrimary()
+	if err != nil {
+		return nil, err
+	}
+	if p.check(TokenOperator) {
+		switch p.current.Literal {
+		case "==":
+			p.advance()
+			right, rerr := p.parsePrimary()
+			if rerr != nil {
+				return nil, rerr
+			}
+			return &EqExpr{Left: left, Right: right}, nil
+		case "!=":
+			p.advance()
+			right, rerr := p.parsePrimary()
+			if rerr != nil {
+				return nil, rerr
+			}
+			return &NotExpr{Target: &EqExpr{Left: left, Right: right}}, nil
+		case "&&", "||":
+			return nil, newParseErrorf(&p.current, "expression args accept a single comparison, not connectives -- nest cond() or move the compound condition to an `if` step (#2407)")
+		}
+	}
+	return left, nil
 }
 
 // consumePostCallDotAccess wraps call with DotAccessExpr nodes if the

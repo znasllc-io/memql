@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,6 +52,34 @@ func (e *FunctionExecutor) Execute(ctx context.Context, step *automations.Step, 
 			"step", step.ID,
 			"function", funcName,
 		)
+	}
+
+	// Expression builtins (cond / coalesce / concat / field / ...) are not
+	// engine-registered functions -- a logic step whose RHS is such a call
+	// (`isPrivileged := cond(role == "admin", ...)`, the deploy-pack /
+	// decide-logic shape) evaluates in the shared arg-time evaluator, which
+	// owns those builtins and the step/args resolution tiers. Sending it to
+	// engine.Execute failed with `function "cond" not found` the first time
+	// one EXECUTED (S9 #2407; load-time lowering never runs this path).
+	// The query is rebuilt from the RAW stored args (source-ish text:
+	// predicates, quoted literals, nested calls) -- pre-resolving them via
+	// resolveArgsRefs both evaluated nested builtins out of order and
+	// re-quoted already-quoted literals.
+	if isExpressionBuiltinName(funcName) {
+		query := funcName + "(" + joinRawPositionalArgs(step.Function.Args) + ")"
+		val, everr := sharedArgEvaluator.evaluateValue(stepCtx.Evaluator, query)
+		if everr != nil {
+			result.Status = "failed"
+			result.Error = fmt.Sprintf("function %q evaluation failed: %v", funcName, everr)
+			result.CompletedAt = time.Now()
+			result.Duration = result.CompletedAt.Sub(result.StartedAt)
+			return result, fmt.Errorf("function %q evaluation failed: %w", funcName, everr)
+		}
+		result.Status = "success"
+		result.Result = val
+		result.CompletedAt = time.Now()
+		result.Duration = result.CompletedAt.Sub(result.StartedAt)
+		return result, nil
 	}
 
 	// Execute the function as a query (functions are called with parentheses)
@@ -113,6 +142,35 @@ func (e *FunctionExecutor) Execute(ctx context.Context, step *automations.Step, 
 	return result, nil
 }
 
+// joinRawPositionalArgs joins a positional ({"0","1",...}) arg map back into
+// the builtin call's argument list VERBATIM: string args are stored as
+// source-ish text (predicates like `role == "admin"`, quoted literals,
+// nested calls) and must not be re-quoted or pre-evaluated -- the builtin's
+// own evaluator resolves them in order.
+func joinRawPositionalArgs(args map[string]any) string {
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		a, aerr := strconv.Atoi(keys[i])
+		b, berr := strconv.Atoi(keys[j])
+		if aerr != nil || berr != nil {
+			return keys[i] < keys[j]
+		}
+		return a < b
+	})
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if str, ok := args[key].(string); ok {
+			parts = append(parts, str)
+			continue
+		}
+		parts = append(parts, renderMemQLValue(args[key]))
+	}
+	return strings.Join(parts, ", ")
+}
+
 func renderFunctionArgs(args map[string]any) string {
 	// Single positional object argument {"0": {...}} is rendered as the
 	// named-args invocation body `key: value, ...` (Story 9 / #2335: the
@@ -127,16 +185,53 @@ func renderFunctionArgs(args map[string]any) string {
 	}
 
 	keys := make([]string, 0, len(args))
+	allNumeric := true
 	for k := range args {
 		keys = append(keys, k)
+		if _, err := strconv.Atoi(k); err != nil {
+			allNumeric = false
+		}
 	}
-	sort.Strings(keys)
 
+	// Positional storage round-trips positionally (S9/#2407, the #2367
+	// class one layer deeper): a builtin call in a logic step -- e.g.
+	// cond(role == "admin", ...) -- compiles to numeric keys {"0","1","2"};
+	// rendering those as named `0=<value>` args produced an unparseable
+	// query the first time such a step EXECUTED.
+	if allNumeric && len(keys) > 0 {
+		sort.Slice(keys, func(i, j int) bool {
+			a, _ := strconv.Atoi(keys[i])
+			b, _ := strconv.Atoi(keys[j])
+			return a < b
+		})
+		parts := make([]string, 0, len(keys))
+		for _, key := range keys {
+			parts = append(parts, renderPositionalArg(args[key]))
+		}
+		return strings.Join(parts, ", ")
+	}
+
+	sort.Strings(keys)
 	parts := make([]string, 0, len(keys))
 	for _, key := range keys {
 		parts = append(parts, fmt.Sprintf("%s=%s", key, renderMemQLValue(args[key])))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// renderPositionalArg renders one positional builtin arg. An expression
+// string (a comparison or nested call the parser stored verbatim) must pass
+// through UNQUOTED so the re-parse sees the expression, not a string literal;
+// everything else renders exactly like a named arg value.
+func renderPositionalArg(v any) string {
+	if s, ok := v.(string); ok {
+		t := strings.TrimSpace(s)
+		if strings.Contains(t, "==") || strings.Contains(t, "!=") ||
+			(strings.Contains(t, "(") && strings.HasSuffix(t, ")")) {
+			return t
+		}
+	}
+	return renderMemQLValue(v)
 }
 
 func renderMemQLValue(value any) string {
@@ -297,6 +392,12 @@ func isRuntimeReference(value string) bool {
 	return strings.HasPrefix(value, "$") ||
 		value == "event" ||
 		strings.HasPrefix(value, "event.") ||
+		// `steps.` is a reserved root, so no word literal can collide. The
+		// infix `.result.` check below only caught reads INTO a step result
+		// (`steps.decide.result.x`); a TERMINAL scalar read
+		// (`steps.decide.result`, the decide->switch->persist shape) fell
+		// through and landed as literal text in the write (#2368).
+		strings.HasPrefix(value, "steps.") ||
 		value == "item" ||
 		strings.HasPrefix(value, "item.") ||
 		value == "index" ||
@@ -614,4 +715,15 @@ func splitConcatArgs(s string) []string {
 		args = append(args, current.String())
 	}
 	return args
+}
+
+// isExpressionBuiltinName reports whether name is one of the expression
+// builtins in nestedBuiltinPrefixes (which are stored as "name(" prefixes).
+func isExpressionBuiltinName(name string) bool {
+	for _, prefix := range nestedBuiltinPrefixes {
+		if name+"(" == prefix {
+			return true
+		}
+	}
+	return false
 }

@@ -367,18 +367,28 @@ func (e *Evaluator) ResolveBareArg(name string) (any, bool) {
 	return e.resolveBareForArgsAutomation(name)
 }
 
-// ResolveArgsPath resolves a dotted path whose HEAD resolves through the G2
-// tiers (e.g. `node.id` where `node` is an args field carrying an object).
-// A resolvable head with a missing tail yields (nil, true) so coalesce
-// defaults apply -- never the literal path text.
+// ResolveArgsPath resolves a dotted path whose HEAD is an ARGS FIELD carrying
+// an object (e.g. `node.id` from cluster registerNode). A declared head with
+// a missing tail yields (nil, true) so coalesce defaults apply -- never the
+// literal path text. Heads that are NOT args fields return (_, false) so the
+// legacy resolvers keep owning them: in particular `decide.result` (a STEP
+// head) must fall through to the strict bare-path resolver, which knows the
+// `.result` segment is already unwrapped -- routing it through this walker
+// silently nil'd every step-rooted read in args-block automations (#2368
+// conformance fallout).
 func (e *Evaluator) ResolveArgsPath(path string) (any, bool) {
-	if _, gated := e.custom["args"].(map[string]any); !gated {
+	bound, gated := e.custom["args"].(map[string]any)
+	if !gated {
 		return nil, false
 	}
 	head, rest, _ := strings.Cut(path, ".")
-	root, ok := e.resolveBareForArgsAutomation(head)
-	if !ok {
+	declared, _ := e.custom["argsDeclared"].(map[string]bool)
+	if !declared[head] {
 		return nil, false
+	}
+	root, ok := bound[head]
+	if !ok {
+		return nil, true // declared-but-absent: nil, coalesce defaults apply
 	}
 	cur := root
 	for rest != "" {

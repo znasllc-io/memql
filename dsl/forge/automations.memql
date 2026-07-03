@@ -7,38 +7,27 @@
 // audit event. recordTransition -- fires on node.updated and appends one
 // v1:forge:requestEvent per recognised status transition.
 //
-// #2235 (logic-purity burn-down): both automations are EVENT-BOUND multi-step
-// blocks -- there is NO `decide` logic. Each persist step binds its mutation
-// args DIRECTLY from the triggering event payload (the node.created /
-// node.updated envelope's payload IS the request row, so the request id is
-// event.payload.id), mirroring the proven cluster registerNode / deregisterNode
-// pattern. This deliberately avoids reading a prior logic step's object result:
-// a logic step's result is the raw (Bundle-wrapped) engine envelope, so
-// field(decide.result, "x") resolves to nil and silently sends the mutation
-// all-missing args ("required argument requestId is missing") -- the failure on
-// the seeded-DB conformance gate (#1840 / #1847 / #1859).
-//
-// Authoring note (#2235): inside a step, use the bare `<mutation>{ ... }` call
-// form -- the `mutate <name>{` keyword form collides with the struct-form
-// mutation-DEFINITION rewriter (NormaliseMutationSource matches the header
-// anywhere in the file).
-//
-// The routeRequest developer transition is split into two single-equality steps
-// (persistAdmin + persistWriter) rather than one `submitterRole == "admin" ||
-// == "writer"` step, sidestepping the condition evaluator's compound-operator
-// quirks (#2256 / #2257) -- simple `==` on a present string is the proven-green
-// shape.
+// P1 (#2368, epic #2353): both automations are DECIDE -> SWITCH -> PERSIST --
+// the deployment-bundle reference shape. The role/status POLICY lives in the
+// two pure logics (dsl/forge/logic.memql: requestRouteStatus /
+// transitionEventKind); each automation's decide step calls its logic with
+// typed event args (G5 bare fields, punned) and a switch on decide.result
+// dispatches the single persist. The former shape -- one if-gated persist step
+// per role/status value, policy inline in orchestration -- predated the
+// decide->persist read fixes (#2271 / #2274) and is retired; the callgraph
+// condition-vocabulary rule (P4, #2371) keeps it from coming back.
 //
 // Loop safety: routeRequest's advanceRequest is an update on the SAME
 // v1:forge:request, which fires node.updated -- consumed only by recordTransition,
 // which writes v1:forge:requestEvent (a DIFFERENT concept) and so never re-fires
 // node.updated on v1:forge:request. No cycle.
 
+use forge.logic.{ requestRouteStatus, transitionEventKind }
 use forge.mutations.{ advanceRequest, recordRequestEvent }
 
 @enabled
 @trigger(event="node.created", concept="v1:forge:request", partition="*")
-@description("On submission of a v1:forge:request, route it to its next approval-pipeline state by the submitter's role (owner fast-track -> queued / developer -> needs_approval / non-developer -> needs_validation) and record a 'routed' audit event. Event-bound persist steps bind args from event.payload (#2235).")
+@description("On submission of a v1:forge:request, route it to its next approval-pipeline state by the submitter's role (owner fast-track -> queued / developer -> needs_approval / non-developer -> needs_validation) and record a 'routed' audit event. Decide -> switch -> persist: the role->status policy lives in logic requestRouteStatus; approvedByUserId is stamped ONLY in the queued (owner fast-track) case. P1 #2368.")
 automation routeRequest {
   args {
     id any
@@ -46,37 +35,24 @@ automation routeRequest {
     submitterUserId any
   }
 
-  step persistOwner {
-    if submitterRole == "owner" {
-      mutation advanceRequest (
-        requestId: id,
-        status: "queued",
-        approvedByUserId: submitterUserId
-      )
-    }
+  step decide {
+    logic requestRouteStatus ( submitterRole )
   }
-  step persistAdmin {
-    if submitterRole == "admin" {
-      mutation advanceRequest (
-        requestId: id,
-        status: "needs_approval"
-      )
-    }
-  }
-  step persistWriter {
-    if submitterRole == "writer" {
-      mutation advanceRequest (
-        requestId: id,
-        status: "needs_approval"
-      )
-    }
-  }
-  step persistReader {
-    if submitterRole == "reader" {
-      mutation advanceRequest (
-        requestId: id,
-        status: "needs_validation"
-      )
+  step advance {
+    switch steps.decide.result {
+      case "queued" {
+        mutation advanceRequest (
+          requestId: id,
+          status: "queued",
+          approvedByUserId: submitterUserId
+        )
+      }
+      default {
+        mutation advanceRequest (
+          requestId: id,
+          status: steps.decide.result
+        )
+      }
     }
   }
   step persistRouted {
@@ -91,7 +67,7 @@ automation routeRequest {
 
 @enabled
 @trigger(event="node.updated", concept="v1:forge:request", partition="*")
-@description("On every v1:forge:request status transition (validate / approve / changes-requested / reject), append exactly one v1:forge:requestEvent with the derived kind, fromStatus (event.payload.oldStatus), and toStatus (event.payload.status). Silently skips updates that do not change status or land on an unrecognised status. No loop risk: the recorder writes a requestEvent (a different concept) so it cannot re-fire this automation. Event-bound persist steps bind args from event.payload (#2235).")
+@description("On every v1:forge:request status transition (validate / approve / changes-requested / reject), append exactly one v1:forge:requestEvent with the derived kind, fromStatus, and toStatus. The status->kind vocabulary lives in logic transitionEventKind, which returns empty -- record NOTHING -- for an unrecognised status and for updates that do not change status (the oldStatus == status skip the former shape claimed but never checked). No loop risk: the recorder writes a requestEvent (a different concept) so it cannot re-fire this automation. P1 #2368.")
 automation recordTransition {
   args {
     id any
@@ -99,44 +75,20 @@ automation recordTransition {
     status any
   }
 
-  step persistValidated {
-    if status == "needs_approval" {
-      mutation recordRequestEvent (
-        requestId: id,
-        kind: "validated",
-        fromStatus: oldStatus,
-        toStatus: status
-      )
-    }
+  step decide {
+    logic transitionEventKind ( status, oldStatus )
   }
-  step persistApproved {
-    if status == "queued" {
-      mutation recordRequestEvent (
-        requestId: id,
-        kind: "approved",
-        fromStatus: oldStatus,
-        toStatus: status
-      )
-    }
-  }
-  step persistChangesRequested {
-    if status == "changes_requested" {
-      mutation recordRequestEvent (
-        requestId: id,
-        kind: "changes_requested",
-        fromStatus: oldStatus,
-        toStatus: status
-      )
-    }
-  }
-  step persistRejected {
-    if status == "rejected" {
-      mutation recordRequestEvent (
-        requestId: id,
-        kind: "rejected",
-        fromStatus: oldStatus,
-        toStatus: status
-      )
+  step persist {
+    switch steps.decide.result {
+      case "" { }
+      default {
+        mutation recordRequestEvent (
+          requestId: id,
+          kind: steps.decide.result,
+          fromStatus: oldStatus,
+          toStatus: status
+        )
+      }
     }
   }
 }

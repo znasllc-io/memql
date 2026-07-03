@@ -2,19 +2,19 @@
 //
 // Orchestration logic for the `forge` namespace.
 //
-// This namespace now has ZERO logic functions -- every forge tool handler and
-// request transition is expressed as a pure single-writer mutation or an
-// event-bound automation persist step (#2235 burn-down, #2240):
+// This namespace carries exactly TWO logic functions -- the pure request-
+// pipeline decision tables below (P1, #2368). Everything else remains a pure
+// single-writer mutation or an event-bound automation step (#2235, #2240):
 //
-//   - routeRequest / recordTransition (RETIRED, #2235): the role-based router
+//   - routeRequest / recordTransition history: the original role-based router
 //     and per-transition audit recorder were impure logics (graph writes
-//     inline, ADR section 2.1). Their behavior now lives in the routeRequest /
-//     recordTransition automations as event-bound mutation steps that bind args
-//     straight from the node.created / node.updated event payload (the proven
-//     cluster registerNode / deregisterNode pattern). A logic step's result is
-//     the raw Bundle-wrapped engine envelope, so a decide->persist
-//     field(decide.result, ...) read resolves to nil ("required argument
-//     missing") -- event-bound binding is the working form. See automations.memql.
+//     inline, ADR section 2.1) and were retired to event-bound mutation steps
+//     in #2235 -- at a time when a decide->persist read of a logic's object
+//     result resolved to nil (the Bundle-wrap bug). That bug class is FIXED
+//     (#2271 read side, #2274/PR#2280 object-literal returns), so P1 (#2368)
+//     re-extracted the POLICY from those automations into the two PURE decide
+//     logics below; the automations now decide -> switch -> persist, the
+//     deployment-bundle reference shape. Role/status vocabulary lives ONLY here.
 //
 //   - recordMentoring (RETIRED, #2235): the 'mentored'-event write was a 2.1
 //     single-writer violation (a logic that wrote inline). It is replaced by the
@@ -29,3 +29,34 @@
 //     to the stored array natively (component/memql/executor_mutation.go
 //     appendPayloadFields), so no read-merge-append logic wrapper is needed. The
 //     forgeAttachToRequest tool targets the mutation directly.
+
+@enabled
+@description("PURE routing decision table for a newly submitted v1:forge:request: submitter role -> the next approval-pipeline status. owner fast-tracks to queued (pre-approved); admin/writer to needs_approval; anyone else (reader) to needs_validation. Returns the status string only -- the automation switches on it and stamps approvedByUserId solely in the queued (owner) case. No graph reads or writes (ADR section 2.1). P1 #2368.")
+logic requestRouteStatus {
+  args {
+    submitterRole any
+  }
+  body {
+    role := coalesce(args.submitterRole, "")
+    isPrivileged := cond(role == "admin", true, cond(role == "writer", true, false))
+    status := cond(role == "owner", "queued", cond(isPrivileged == true, "needs_approval", "needs_validation"))
+    return status
+  }
+}
+
+@enabled
+@description("PURE audit-vocabulary decision table for a v1:forge:request status transition: new status -> the v1:forge:requestEvent kind (needs_approval -> validated, queued -> approved, changes_requested / rejected pass through). Returns \"\" -- meaning SKIP, record nothing -- for an unrecognised status AND for an update whose status did not change (oldStatus == status), which the automation's former shape claimed but never checked. No graph reads or writes. P1 #2368.")
+logic transitionEventKind {
+  args {
+    status any
+    oldStatus any
+  }
+  body {
+    st := coalesce(args.status, "")
+    old := coalesce(args.oldStatus, "")
+    lateKind := cond(st == "changes_requested", "changes_requested", cond(st == "rejected", "rejected", ""))
+    mappedKind := cond(st == "needs_approval", "validated", cond(st == "queued", "approved", lateKind))
+    kind := cond(old == st, "", mappedKind)
+    return kind
+  }
+}
