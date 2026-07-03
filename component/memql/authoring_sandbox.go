@@ -30,6 +30,7 @@ package memql
 import (
 	"fmt"
 
+	"github.com/znasllc-io/memql/component/actions"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
@@ -66,15 +67,20 @@ type SandboxReport struct {
 }
 
 // sandboxSupportedKinds is the set this pass compiles. Kept as a map so the
-// caller (and tests) can introspect coverage.
+// caller (and tests) can introspect coverage. automation compiles through the
+// registered automations hook (nil in an automations-free binary -> skipped);
+// action + capability compile through the #2212 loaders.
 var sandboxSupportedKinds = map[string]bool{
-	"concept":  true,
-	"query":    true,
-	"mutation": true,
-	"logic":    true,
-	"spec":     true,
-	"trait":    true,
-	"shape":    true,
+	"concept":    true,
+	"query":      true,
+	"mutation":   true,
+	"logic":      true,
+	"spec":       true,
+	"trait":      true,
+	"shape":      true,
+	"automation": true,
+	"action":     true,
+	"capability": true,
 }
 
 // SandboxCompileBundle compiles + binds each candidate construct in
@@ -303,12 +309,54 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 			}
 		}
 
+	case "action":
+		// Authored actions compile through the SAME loader the bootstrap uses
+		// (component/actions.LoadSource): slice -> ParseActionDecl -> DeclToAction,
+		// which resolves the action's single bare capability verb against its
+		// file-top `use capabilities.*` imports (prepended into the slice by the
+		// bundle splitter), reconciles the capability against the Go vocabulary,
+		// and strictly type-checks the call args against the catalog schema (I8
+		// #2222, Story 8 #2330). Any of those failures is a real Gate-1 rejection.
+		acts, err := actions.LoadSource(c.Source, origin)
+		if err != nil {
+			return fail(d, fmt.Sprintf("%s: %v", origin, err))
+		}
+		if len(acts) == 0 {
+			return fail(d, fmt.Sprintf("%s: no action declaration found in source", origin))
+		}
+		actualName = acts[0].Name
+
+	case "capability":
+		// Authored capabilities compile through component/actions.LoadCapabilitySource:
+		// ParseCapabilityDecl -> reconcileCapability, which enforces the ADR §7
+		// unspoofable-risk-class contract -- the dotted name MUST resolve to a
+		// verb in the Go closed vocabulary and @sideEffect MUST equal that verb's
+		// authoritative class. A bundle cannot declare a capability outside the
+		// surface-backed set, so an invented capability fails Gate-1 loudly.
+		caps, err := actions.LoadCapabilitySource(c.Source, origin)
+		if err != nil {
+			return fail(d, fmt.Sprintf("%s: %v", origin, err))
+		}
+		if len(caps) == 0 {
+			return fail(d, fmt.Sprintf("%s: no capability declaration found in source", origin))
+		}
+		actualName = caps[0].Name
+
+	case unrecognizedConstructKind:
+		// A top-level region the bundle splitter could not classify into an
+		// authorable construct kind (SplitBundleSource fail-loud backstop, E1
+		// #2372). Hard failure -- NEVER a silent pass. c.Name carries the header
+		// line excerpt.
+		return fail(d, fmt.Sprintf("%s: unrecognized construct %q -- the bundle splitter cannot classify this region into an authorable construct kind (concept / query / mutation / logic / spec / trait / shape / automation / action / capability); prompt / provider / tool / builtin / policy / seed authoring is not supported in a bundle", origin, c.Name))
+
 	default:
-		// Not yet handled by this pass (prompt / policy / provider /
-		// builtin). Reported, not silently passed.
+		// A kind with no compile path in this pass (a stray prompt / policy /
+		// provider / builtin construct fed directly as a SandboxConstruct).
+		// Reported as skipped, not silently passed. (Bundle SOURCES route
+		// these through the unrecognized backstop above, which hard-fails.)
 		d.OK = false
 		d.Skipped = true
-		d.Error = fmt.Sprintf("kind %q is not yet compiled by the sandbox (follow-up #956)", c.Kind)
+		d.Error = fmt.Sprintf("kind %q is not compiled by the sandbox", c.Kind)
 		return d
 	}
 

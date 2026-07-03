@@ -135,9 +135,25 @@ func (e *MemQLEngine) promoteBundleDurableWithStore(ctx context.Context, store p
 		return result, err
 	}
 
-	// Promote each PLAIN construct (the function family + spec/trait). Concepts
-	// and shapes register as session metadata but are not durably promotable
-	// here -- skip them, exactly as the durable-promote kind gate does.
+	// Promote each PLAIN construct (the function family + spec/trait) into the
+	// shared registry. The other recognized kinds are NOT durably promoted by
+	// THIS path, by deliberate design (E1 #2372):
+	//
+	//   - concept / shape register as session metadata only;
+	//   - automation / action / capability are the world-touching deployment
+	//     kinds. Their LIVE activation (an automation's scheduler trigger
+	//     registration + boot re-arm) is the separate owner-gated Gate-3 path
+	//     (ActivateApprovedBundle, authoring_activation_engine.go), which owns
+	//     the scheduler RegisterHook + the reviewable dryRunPassed lifecycle.
+	//     Forking scheduler wiring into this plain-construct fast-path would
+	//     double-register automations, so they are intentionally left to that
+	//     path here.
+	//
+	// Crucially this is NOT a silent drop: the validation above sliced + Gate-1
+	// compiled EVERY kind (including automation/action/capability), so each
+	// appears in result.Diagnostics with its OK/skip status -- a broken
+	// automation in the bundle fails the whole promote loudly rather than being
+	// ignored while the plain constructs promote (the pre-E1 silent-skip bug).
 	for _, c := range SplitBundleSource(bundleSource) {
 		if !isDurablePromotableKind(c.Kind) {
 			continue

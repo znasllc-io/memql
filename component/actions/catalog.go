@@ -251,6 +251,34 @@ func LoadCatalogFromFS(tree fs.FS) (*CapabilityCatalog, error) {
 	return cat, nil
 }
 
+// LoadCapabilitySource extracts every top-level `capability NAME { ... }`
+// declaration from a single .memql source, parses each in isolation, and
+// RECONCILES it against the Go vocabulary -- the dotted name must resolve to a
+// verb in the Go closed vocabulary and its @sideEffect must equal that verb's
+// authoritative class (the same reconciliation LoadCatalogFromFS performs on the
+// whole tree). It is the per-source counterpart of the action loader's
+// LoadSource, used by the authoring Gate-1 sandbox to compile a single authored
+// capability construct. A slice that fails to parse or reconcile is a loud error.
+func LoadCapabilitySource(content, path string) ([]*CapabilityInfo, error) {
+	slices := extractCapabilityDeclSlices(content)
+	if len(slices) == 0 {
+		return nil, nil
+	}
+	out := make([]*CapabilityInfo, 0, len(slices))
+	for _, slice := range slices {
+		decl, err := languageParser.ParseCapabilityDecl(slice)
+		if err != nil {
+			return nil, fmt.Errorf("%s: capability: %w", path, err)
+		}
+		info, cerr := reconcileCapability(decl, path)
+		if cerr != nil {
+			return nil, cerr
+		}
+		out = append(out, info)
+	}
+	return out, nil
+}
+
 var (
 	defaultCatalogOnce sync.Once
 	defaultCatalog     *CapabilityCatalog
