@@ -84,8 +84,11 @@ func mapTokenType(pt parser.Token) Token {
 		switch {
 		case strings.Contains(pt.Literal, ":"):
 			tokenType = "concept"
-		case constructKeywords[pt.Literal]:
+		case constructKeywords[pt.Literal] || invocationKindKeywords[pt.Literal]:
 			// Lowercase construct keywords (query / mutate / logic / action /
+			// ...) AND invocation kind prefixes (notably `mutation`, whose
+			// declaration keyword is `mutate` -- E6, memql#2392) lex as
+			// identifiers.
 			// capability / shape / concept / ...) lex as identifiers -- the core
 			// lexer only keywords the capitalized receiver forms (Query /
 			// Mutation / ...). Color them at the Sense layer, sourced from

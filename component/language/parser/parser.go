@@ -4994,6 +4994,19 @@ func isInvocationKindKeyword(name string) bool {
 	return invocationKindKeywords[name]
 }
 
+// InvocationKindKeywords returns the invocation-kind prefix set (sorted) for
+// consumers outside the parser -- notably Sense tokenize, which colors these
+// prefixes as keywords (E6, memql#2392). Deriving from the same map keeps the
+// two surfaces drift-proof by construction.
+func InvocationKindKeywords() []string {
+	out := make([]string, 0, len(invocationKindKeywords))
+	for k := range invocationKindKeywords {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // parseIdentifierExpression parses function calls, field references, or comparisons.
 func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 	name := p.current.Literal
