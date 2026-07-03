@@ -490,11 +490,9 @@ func (s *Scheduler) subscribeToEventTrigger(automation *Automation) error {
 		// Optionally evaluate filter condition
 		if a.Trigger.Filter != "" {
 			evaluator := NewEvaluator()
-			eventMap := map[string]any{
-				"topic":   event.Topic,
-				"kind":    event.Kind.String(),
-				"payload": event.Payload,
-			}
+			// Shared envelope builder so @filter sees the same event shape
+			// as step bodies (incl. event.actor / event.timestamp, G4).
+			eventMap := buildEventEnvelope(&event, "", "")
 			evaluator.SetCustom("event", eventMap)
 			// The @filter evaluates with the validated `args` binding
 			// available (ADR Decision 2) alongside the existing event root;

@@ -139,10 +139,17 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 		if meta.priorStatus != "" {
 			eventPayload["oldStatus"] = meta.priorStatus
 		}
-		e.publishEvent(
+		// G4 (memql#2366): stamp the acting identity on the envelope (and
+		// mirror it into the payload for parity with the .created shape).
+		updateActor, _ := mutationActor(ctx)
+		if updateActor != "" {
+			eventPayload["actor"] = updateActor
+		}
+		e.publishEventWithActor(
 			events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, meta.conceptName),
 			events.KindNodeUpdated,
 			eventPayload,
+			updateActor,
 		)
 		// 5.6 (memql#1970): the update() path's underlying executeWrite
 		// already emitted a cache.invalidate for the row's concept (every
@@ -759,10 +766,11 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// Keep full payload for reference (nested access still works)
 	eventPayload["payload"] = payloadMap
 
-	e.publishEvent(
+	e.publishEventWithActor(
 		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptMeta.Name),
 		events.KindNodeCreated,
 		eventPayload,
+		actor,
 	)
 	// 5.6 (memql#1970): also emit the dedicated cache-invalidation event
 	// on its own broadcast channel. ONLY the result-cache evictor

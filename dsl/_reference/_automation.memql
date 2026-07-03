@@ -120,11 +120,15 @@ automation registerNodeLonghand {
 // The invoke-by-reference path validates its params against the SAME contract.
 //
 // Reading the fields inside the body:
-//   - G1 (now):  `args.<field>` -- the validated map is exposed as `args`.
-//   - G2 (#2364, NOT YET): bare `<field>` reads (resolution + shadowing).
+//   - `args.<field>` -- the validated map is exposed as `args` (G1).
+//   - bare `<field>` -- resolves loop-var > step name > args field; a typo'd
+//     or shadowed name is a LOAD ERROR, never a silent nil (G2, #2364).
 //   - G3 (#2365, NOT YET): named-arg PUNNING -- `action f(environment)` as
-//     sugar for `action f(environment: args.environment)`.
-// Until G2/G3 land, write the explicit `args.<field>` form shown below.
+//     sugar for `action f(environment: environment)`.
+// Envelope intrinsics stay prefixed: `event.topic`, `event.kind`,
+// `event.timestamp` (RFC3339 occurrence time; distinct from `now`), and
+// `event.actor.id` (the acting identity, present when the emitter stamped
+// it -- graph CDC events do; check with exists(event.actor)).
 
 @enabled
 @trigger(event="deploy.requested", concept="v1:cluster:deployment", partition="*")
@@ -149,9 +153,11 @@ automation deployWithArgs {
 // `cockpit/runner` surface; the env `switch` stays in ONE automation.
 //
 // NOTE: the `event.payload.X` reads below predate the typed args contract
-// (§3a). With an `args { }` block declared, those become `args.X` today (G1),
-// bare `X` once G2 (#2364) lands, and punned `f(X)` once G3 (#2365) lands.
-// `event.actor.id` is the envelope actor -- populated by G4 (#2366), not yet.
+// (§3a). With an `args { }` block declared, those become `args.X` (G1) or
+// bare `X` (G2, #2364), and punned `f(X)` once G3 (#2365) lands.
+// `event.actor.id` is the envelope actor (G4, #2366): populated on graph CDC
+// events (.created / .updated) from the mutation's acting identity; absent
+// when an emitter carries no actor -- guard with exists(event.actor).
 //
 // Step vocabulary an automation may use:
 //   step NAME { logic L(...) }              -- decide (pure)
