@@ -468,6 +468,25 @@ func (s *Scheduler) subscribeToEventTrigger(automation *Automation) error {
 	pattern := automation.Trigger.Event
 
 	unsub := s.eventBus.Subscribe(pattern, func(event events.Event) {
+		// Fire-time args validation (event-payload-binding ADR Decision 2,
+		// memql#2363). When the automation declares an `args { }` contract,
+		// bind + validate event.payload BEFORE the @filter and before any
+		// step. A violation refuses the fire loudly (Warn + skip counter) and
+		// never reaches the filter or the executor. Automations without an
+		// args block bind nothing here -- behaviour is unchanged.
+		bound, extras, argErr := bindEventArgs(a, &event)
+		if argErr != nil {
+			refuseFireForArgs(s.logger, a.Name, event.Topic, argErr)
+			return
+		}
+		if len(extras) > 0 {
+			s.logDebug("event trigger: undeclared payload fields ignored (tolerant-reader)",
+				"automation", a.Name,
+				"topic", event.Topic,
+				"extraFields", extras,
+			)
+		}
+
 		// Optionally evaluate filter condition
 		if a.Trigger.Filter != "" {
 			evaluator := NewEvaluator()
@@ -477,6 +496,12 @@ func (s *Scheduler) subscribeToEventTrigger(automation *Automation) error {
 				"payload": event.Payload,
 			}
 			evaluator.SetCustom("event", eventMap)
+			// The @filter evaluates with the validated `args` binding
+			// available (ADR Decision 2) alongside the existing event root;
+			// validation has already run above.
+			if bound != nil {
+				evaluator.SetCustom("args", bound)
+			}
 			evaluator.SetCustom("ctx", map[string]any{
 				"input":  eventMap,
 				"output": nil,

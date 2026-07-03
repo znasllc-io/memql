@@ -93,6 +93,15 @@ type Automation struct {
 	// OnError is an optional step to run if the automation fails.
 	OnError *Step `json:"onError,omitempty"`
 
+	// Args is the automation's declared input contract -- the `args { }`
+	// block (event-payload-binding ADR Decision 1, memql#2363). When
+	// non-nil, the trigger/invoke-by-reference path binds event.payload into
+	// these fields and validates them (fire-time validation, Decision 2)
+	// BEFORE any step runs; the validated map is exposed to the evaluator as
+	// `args`. Nil = untyped event.payload access (backward compatible with
+	// every automation that has not yet declared a contract).
+	Args *ArgsSchema `json:"args,omitempty"`
+
 	// Enabled controls whether this automation is active. Defaults to true.
 	Enabled *bool `json:"enabled,omitempty"`
 
@@ -116,16 +125,44 @@ type TriggerConfig struct {
 	Filter string `json:"filter,omitempty"`
 }
 
+// ArgsSchema is an automation's declared input contract -- the `args { }`
+// block lowered by the compiler (event-payload-binding ADR Decision 1). It
+// mirrors the field grammar logic/query already use.
+type ArgsSchema struct {
+	// Fields declares the expected input fields and their types.
+	Fields []*ArgsField `json:"fields,omitempty"`
+
+	// AdditionalProperties controls whether payload keys the schema does not
+	// declare are rejected. nil (the default) is tolerant-reader: unknown
+	// payload fields are simply not bound (ADR Decision 2).
+	AdditionalProperties *bool `json:"additionalProperties,omitempty"`
+}
+
 // ArgsField defines a single field's type assertion.
 type ArgsField struct {
 	// Name is the field name (e.g., "subject", "email")
 	Name string `json:"name"`
 
-	// Type is the expected type: "string", "number", "bool", "object", "array", "any"
+	// Type is the expected type: "string", "number", "int"/"integer",
+	// "bool"/"boolean", "object", "array", "any".
 	Type string `json:"type"`
 
 	// Optional indicates if the field can be missing (false means required)
 	Optional bool `json:"optional,omitempty"`
+
+	// Enum restricts the value to a fixed set (@enum on the args field).
+	Enum []any `json:"enum,omitempty"`
+
+	// MaxLength caps a string field's rune count (@maxLength). Zero =
+	// unbounded. Enforced on string-typed fields only.
+	MaxLength int `json:"maxLength,omitempty"`
+
+	// Pattern is a regex a string field must match (@pattern). Empty = no
+	// constraint. Enforced on string-typed fields only.
+	Pattern string `json:"pattern,omitempty"`
+
+	// Items defines the element schema for array-typed fields.
+	Items *ArgsField `json:"items,omitempty"`
 
 	// Nested contains nested field assertions for object types
 	Nested []*ArgsField `json:"nested,omitempty"`

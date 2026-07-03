@@ -1061,10 +1061,70 @@ func LooksLikeTerseAutomation(source string) bool {
 // "forward event when the logic takes args, empty otherwise" contract
 // holds without the rewriter needing cross-file arg visibility.
 func NormaliseTerseAutomationSource(source string) (string, error) {
+	// The terse form declares NO args block of its own (event-payload-binding
+	// ADR Decision 6): it forwards the event payload to the target logic's
+	// `event` arg. A file-top `args { ... }` block preceding a terse
+	// automation would otherwise silently attach to the lowered longhand form
+	// -- reject it with a graduate-to-full-form hint instead.
+	if err := rejectTerseAutomationArgsBlock(source); err != nil {
+		return "", err
+	}
 	return terseAutomationHeader.ReplaceAllString(
 		source,
 		"${1}${3}\n${1}automation ${2} {\n${1}  step run {\n${1}    logic ${4} { event: event }\n${1}  }\n${1}}",
 	), nil
+}
+
+// rejectTerseAutomationArgsBlock reports an error when a file-top
+// `args { ... }` block is immediately followed by a terse automation
+// declaration (`automation NAME @trigger(...) => logic X`). The terse form
+// takes no args block (event-payload-binding ADR Decision 6); an author who
+// wants typed inputs must graduate to the full `automation NAME { args { ... }
+// step ... }` form. Only the terse construct is rejected -- an args block
+// preceding a full-form automation (or any other construct) is legal and
+// binds normally.
+func rejectTerseAutomationArgsBlock(source string) error {
+	for _, loc := range fileTopArgsHeader.FindAllStringIndex(source, -1) {
+		openIdx := strings.IndexByte(source[loc[0]:], '{')
+		if openIdx < 0 {
+			continue
+		}
+		openIdx += loc[0]
+		closeIdx := findMatchingCloseBrace(source, openIdx)
+		if closeIdx < 0 {
+			// Malformed args block -- the parser surfaces the real error.
+			continue
+		}
+		if terseAutomationFollows(source[closeIdx+1:]) {
+			return fmt.Errorf("a terse automation (`=> logic ...`) must not be preceded by an `args { ... }` block -- the terse form forwards the event payload to the target logic and declares no args of its own; graduate to the full form `automation NAME { args { ... } step <name> { ... } }` to declare typed inputs (event-payload-binding ADR Decision 6)")
+		}
+	}
+	return nil
+}
+
+// terseAutomationFollows reports whether the next construct in `rest` (after
+// skipping blank lines, `//` comments, and `@`-annotation lines that belong to
+// the following construct) is a terse automation declaration.
+func terseAutomationFollows(rest string) bool {
+	for {
+		rest = strings.TrimLeft(rest, " \t\r\n")
+		if rest == "" {
+			return false
+		}
+		if strings.HasPrefix(rest, "//") || strings.HasPrefix(rest, "@") {
+			nl := strings.IndexByte(rest, '\n')
+			if nl < 0 {
+				return false
+			}
+			rest = rest[nl+1:]
+			continue
+		}
+		firstLine := rest
+		if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
+			firstLine = rest[:nl]
+		}
+		return terseAutomationHeader.MatchString(firstLine)
+	}
 }
 
 // automationStep is the parsed shape of a single step.
@@ -1088,6 +1148,18 @@ func emitAutomation(name, _conceptId, body, _preamble string) (string, error) {
 	if err := rejectNonLogicBodyBlock("automation", name, body); err != nil {
 		return "", err
 	}
+	// G1 (event-payload-binding ADR Decision 1, memql#2363): an automation
+	// MAY declare a typed input contract via an `args { ... }` block, exactly
+	// like logic/query. Hoist it to the file-top position so the parser
+	// attaches it to the automation's FunctionDef.ArgsSchema; the
+	// scheduler/executor then bind event.payload -> args with fire-time
+	// validation (Decision 2). parseAutomationSteps only scans for
+	// `step`/`forEach`/`switch`/`parallel` headers, so leaving the args block
+	// in `body` is harmless -- it never registers as a step.
+	argsText, err := extractArgsBlock(body)
+	if err != nil {
+		return "", err
+	}
 	steps, err := parseAutomationSteps(body)
 	if err != nil {
 		return "", err
@@ -1096,7 +1168,7 @@ func emitAutomation(name, _conceptId, body, _preamble string) (string, error) {
 		return "", fmt.Errorf("at least one `step` is required")
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("func (Automation) %s(_ any) {\n", name))
+	emitFuncHeader(&sb, "Automation", name, argsText, "")
 	for _, s := range steps {
 		sb.WriteString("  ")
 		if s.raw {
