@@ -1246,6 +1246,58 @@ and instrumentation.
 
 ---
 
+## 24. Changing the grammar requires negative-syntax cases
+
+**Rule.** Any change to the DSL grammar, a construct parser, or the
+load pipeline -- a new construct kind, a new/removed annotation, a new
+or retired operator, a changed body / signature / args rule, a new
+invocation form -- MUST land with **negative-syntax cases** proving the
+malformed or now-illegal forms FAIL loud. "Fail loud" means one of: a
+parse error, a `memqllint` / `dslimports.Load` diagnostic, or a
+WARN-level load skip. Silent acceptance is never acceptable -- a typo,
+a stale annotation, or a retired operator must produce an error that
+names the construct and (where the pipeline supports one) a position.
+
+**Where the cases go** (the systematic negative-syntax conformance
+suite, epic #2351 / memql#2383):
+
+- `component/language/parser/negative_grammar_test.go` -- parser /
+  expression-level rejections (malformed bodies via the `Parse<Kind>Decl`
+  entry points, body-rule + signature-arity violations, unknown
+  annotations, invocation-site errors, trailing tokens, word logical
+  operators). This package cannot import `component/language/compiler`
+  (import cycle), so rewriter-family kinds (query / mutate / logic /
+  automation) are exercised via `NormaliseAll` + `ParseFile`.
+- `component/memql/negative_load_test.go` -- load / lint-level and
+  slicer-level rejections driven through `dslimports.Load` (the same
+  path `cmd/memqllint` and engine startup take): a malformed body per
+  construct kind, unbalanced braces, a typo'd top-level keyword, a
+  construct nested at the wrong depth, and duplicate names (caught as a
+  WARN-level runtime-loader skip).
+
+Both files need no database and run as part of the standard
+`go test ./...` CI job. If a change reveals a NEW silent-acceptance hole
+the change itself does not close, pin it as an explicit `t.Skip` case
+marked `HOLE` (with an issue pointer) so the gap is tracked and visible
+rather than forgotten.
+
+**Why it bites you.** The 2026-07-03 syntax audit (epic #2351) found
+every hole in this class *empirically* -- garbage spec / shape bodies
+loading silently, unknown kind prefixes dropping calls, trailing tokens
+accepted -- because no test ever asked "does this malformed input
+error?". A grammar change with only positive ("this valid form parses")
+tests re-opens exactly that gap: the happy path stays green while a typo
+becomes a silent semantic change. The negative suite is the standing
+question "does bad input fail?" -- keep it answering "yes" for every
+kind you touch.
+
+**Enforcement.** The two suites above are the gate; a construct kind or
+operator added without a matching negative case is the defect this rule
+targets. See also [#22](#22-tree-wide-conformance-gates-dslconformance_testgo)
+for the complementary tree-wide gates that scan the live `.memql` tree.
+
+---
+
 ## How to add a new entry
 
 When you discover a new gotcha:
