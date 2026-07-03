@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use router.concepts.{ budget, call }
+use router.concepts.{ budget }
 
 @row
 @description("Full projection of a v1:router:budget record. The current-period spend is computed client-side by summing v1:router:call rows within the period window -- not stored on the row itself.")
@@ -18,36 +18,4 @@ shape budget budgetFull {
   alertSent
   resetAt
   active
-}
-
-@row
-@description("Comprehensive projection of v1:router:call for the AI Router dashboard -- attribution, provider, token counts, cost, latency, outcome.")
-shape call callFull {
-  row.id
-  row.createdAt
-  requestId
-  agentId
-  userId
-  promptName
-  policyName
-  vendor
-  model
-  providerName
-  inputTokens
-  outputTokens
-  cachedInputTokens
-  tokensEstimated
-  inputCost
-  outputCost
-  cachedInputCost
-  totalCost
-  pricingConfigured
-  timeToFirstTokenMs
-  totalDurationMs
-  tokensPerSec
-  streaming
-  outcome
-  errorCategory
-  errorMessage
-  fallbackFromModel
 }
