@@ -298,6 +298,63 @@ func attributeFlagPresent(attrs []*parser.Attribute, name string) bool {
 	return false
 }
 
+// compileArgsSchemaJSON lowers a parsed automation `args { }` block to the
+// JSON shape the automations runtime (component/automations.ArgsSchema)
+// unmarshals. Only the fields G1 (memql#2363) binds/validates against are
+// emitted: name / type / optional / enum / maxLength / pattern / items /
+// nested. `@default` never reaches here (the parser rejects it per #991) and
+// `@description` carries no runtime slot, so neither is emitted.
+func compileArgsSchemaJSON(schema *parser.ArgsSchema) map[string]any {
+	if schema == nil {
+		return nil
+	}
+	fields := make([]map[string]any, 0, len(schema.Fields))
+	for _, f := range schema.Fields {
+		if f == nil || strings.TrimSpace(f.Name) == "" {
+			continue
+		}
+		fields = append(fields, compileArgsFieldJSON(f))
+	}
+	out := map[string]any{"fields": fields}
+	if schema.AdditionalProperties != nil {
+		out["additionalProperties"] = *schema.AdditionalProperties
+	}
+	return out
+}
+
+// compileArgsFieldJSON lowers a single args-block field (and any array-item /
+// object-nested sub-schema) to its runtime JSON map.
+func compileArgsFieldJSON(f *parser.ArgsField) map[string]any {
+	fld := map[string]any{
+		"name":     f.Name,
+		"type":     f.Type,
+		"optional": f.Optional,
+	}
+	if len(f.Enum) > 0 {
+		fld["enum"] = append([]any(nil), f.Enum...)
+	}
+	if f.MaxLength > 0 {
+		fld["maxLength"] = f.MaxLength
+	}
+	if strings.TrimSpace(f.Pattern) != "" {
+		fld["pattern"] = f.Pattern
+	}
+	if f.Items != nil {
+		fld["items"] = compileArgsFieldJSON(f.Items)
+	}
+	if len(f.Nested) > 0 {
+		nested := make([]map[string]any, 0, len(f.Nested))
+		for _, n := range f.Nested {
+			if n == nil || strings.TrimSpace(n.Name) == "" {
+				continue
+			}
+			nested = append(nested, compileArgsFieldJSON(n))
+		}
+		fld["nested"] = nested
+	}
+	return fld
+}
+
 func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput, error) {
 	automation, ok := def.Body.(*parser.AutomationDef)
 	if !ok {
@@ -324,6 +381,16 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 			trigger["filter"] = automation.Trigger.Filter
 		}
 		output["trigger"] = trigger
+	}
+
+	// Args contract (event-payload-binding ADR Decision 1, memql#2363): the
+	// automation's typed input schema, hoisted onto the FunctionDef by the
+	// struct-form rewriter. When present, the scheduler/executor bind
+	// event.payload -> args with fire-time validation (Decision 2) before any
+	// step runs. Emitting it here carries the schema through to the runtime
+	// Automation.Args, mirroring how logic/query surface their args schema.
+	if def.ArgsSchema != nil && len(def.ArgsSchema.Fields) > 0 {
+		output["args"] = compileArgsSchemaJSON(def.ArgsSchema)
 	}
 
 	// Input (if defined)

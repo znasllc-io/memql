@@ -66,9 +66,21 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 		// block form so the slice extractor below (which keys off `automation
 		// NAME {`) discovers them. compileMemQL re-runs the rewriter, so this is
 		// idempotent for already-longhand sources.
-		if lowered, lerr := languageParser.NormaliseTerseAutomationSource(source); lerr == nil {
-			source = lowered
+		//
+		// A non-nil error is a hard authoring violation (G1 / memql#2363: a
+		// file-top `args { }` block preceding a terse automation, which the
+		// terse form forbids). Previously terse lowering could never error, so
+		// the error path is new -- surface it loudly and skip the file rather
+		// than silently loading the un-lowered (and thus un-discovered) source.
+		lowered, lerr := languageParser.NormaliseTerseAutomationSource(source)
+		if lerr != nil {
+			if l.logger != nil {
+				l.logger.Warn("unified automation loader: terse lowering rejected",
+					"component", ComponentName, "path", path, "error", lerr)
+			}
+			return nil
 		}
+		source = lowered
 		for _, slice := range extractAutomationSlices(source) {
 			origin := "unified:" + path + ":" + slice.Name
 			automation, compileErr := l.compileMemQL(slice.Source, origin)

@@ -369,6 +369,40 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 		"error":  "",
 	})
 
+	// Fire-time args validation (event-payload-binding ADR Decision 2,
+	// memql#2363). This is the universal entry gate for every trigger mode:
+	// the event-bus path already validated in the scheduler (before its
+	// @filter), but the invoke-by-reference (TriggerAutomationWithArgs) and
+	// http-trigger (TriggerAutomationWithEvent) paths reach here directly.
+	// Re-validating is idempotent for the event path and is the single point
+	// of enforcement for the others. A violation REFUSES the run -- no steps
+	// execute -- and the validated map is exposed to the step evaluator as
+	// `args` (bodies in G1 may read `args.X`). Automations without an args
+	// block bind nothing and behave exactly as before.
+	boundArgs, extraArgs, argErr := bindEventArgs(automation, triggeringEvent)
+	if argErr != nil {
+		topic := trigger
+		if triggeringEvent != nil {
+			topic = triggeringEvent.Topic
+		}
+		refuseFireForArgs(e.logger, automation.Name, topic, argErr)
+		exec.Status = "skipped"
+		exec.Error = fmt.Sprintf("args contract violation: %v", argErr)
+		exec.CompletedAt = time.Now()
+		exec.Duration = exec.CompletedAt.Sub(exec.StartedAt)
+		return exec, nil
+	}
+	if len(extraArgs) > 0 && e.logger != nil {
+		e.logger.Debug("automation: undeclared payload fields ignored (tolerant-reader)",
+			"component", ComponentName,
+			"automation", automation.Name,
+			"extraFields", extraArgs,
+		)
+	}
+	if boundArgs != nil {
+		evaluator.SetCustom("args", boundArgs)
+	}
+
 	if e.logger != nil {
 		e.logger.Info("starting automation execution",
 			"component", ComponentName,
