@@ -116,7 +116,8 @@ These are the as-built bindings from the Editor panel (`cli/dsledit/`):
 | `↑` / `↓` | DOMAINS / FILES: move the selection. SOURCE: move the hover cursor line |
 | `←` / `→` | SOURCE: move the hover cursor column |
 | `H` | SOURCE: request Sense hover at the cursor (shows the overlay) |
-| `Esc` | SOURCE: close the hover overlay |
+| `C` | FILES / SOURCE: copy the selected pack file into a bundle -- prompts for a bundle name (existing reuses, new creates; filename collisions auto-suffix), then opens the copy in authoring mode |
+| `Esc` | SOURCE: close the hover overlay, or cancel the bundle-name prompt |
 | `PgUp` / `PgDn` / `Home` / `End` | SOURCE: scroll the viewport |
 
 ---
