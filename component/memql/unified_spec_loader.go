@@ -26,8 +26,10 @@ import (
 // found across `<domain>/specs.memql` and `<domain>/traits.memql`.
 //
 // Returns (specCount + traitCount, error). Errors from individual
-// slices are logged at debug + skipped -- one bad slice should not
-// blank-out the rest of the tree.
+// slices are logged at WARN (via the shared baseloader pipeline) +
+// skipped -- one bad slice should not blank-out the rest of the tree,
+// but the skip is surfaced loudly so a malformed spec/trait can't rot
+// silently (memql#2356).
 func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("spec registry is nil")

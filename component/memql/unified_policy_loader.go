@@ -44,7 +44,7 @@ func LoadUnifiedPolicies(logger *slog.Logger, registry *PolicyRegistry) (int, er
 			decl, err := languageParser.ParsePolicyDecl(slice.Source)
 			if err != nil {
 				if logger != nil {
-					logger.Debug("unified policy loader: parse failed",
+					logger.Warn("unified policy loader: parse failed",
 						"file", raw.Path, "policy", slice.Name, "error", err)
 				}
 				continue
@@ -52,7 +52,7 @@ func LoadUnifiedPolicies(logger *slog.Logger, registry *PolicyRegistry) (int, er
 			cfg, err := policyDeclToPolicyConfig(decl)
 			if err != nil {
 				if logger != nil {
-					logger.Debug("unified policy loader: convert failed",
+					logger.Warn("unified policy loader: convert failed",
 						"file", raw.Path, "policy", slice.Name, "error", err)
 				}
 				continue

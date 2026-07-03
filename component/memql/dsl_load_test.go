@@ -228,11 +228,29 @@ func (h *captureHandler) skipLike() []capturedRecord {
 		// "expression-only" / "single-statement form" / similar
 		// don't indicate a skipped slice, only a fallback path -- so
 		// the matcher requires one of these load-skipping verbs.
+		//
+		// memql#2356 raised the per-construct parse/convert/register
+		// failures in baseloader + the unified spec/kinds/policy loaders
+		// from Debug to Warn. Those emit the trailing-verb shapes
+		// "<loader>: parse failed" / "convert failed" / "register
+		// failed" / "compile failed", so the matcher recognises them
+		// explicitly -- a malformed spec/trait/shape/builtin/prompt/
+		// provider/policy now trips this gate instead of hiding at Debug.
+		//
+		// NOT matched on purpose: the provider loader's environment-
+		// dependent "auth resolution failed; registered as unavailable"
+		// and "provider client construction failed; registered as
+		// unavailable" -- those register a degraded-but-present provider
+		// (missing API key in the test env), not a dropped construct.
 		if strings.Contains(msg, "skip") ||
 			strings.Contains(msg, "failed to parse") ||
 			strings.Contains(msg, "failed to compile") ||
 			strings.Contains(msg, "failed to build") ||
 			strings.Contains(msg, "function skipped") ||
+			strings.Contains(msg, "parse failed") ||
+			strings.Contains(msg, "convert failed") ||
+			strings.Contains(msg, "register failed") ||
+			strings.Contains(msg, "compile failed") ||
 			strings.Contains(msg, "upsert failed") ||
 			strings.Contains(msg, "rejected") {
 			out = append(out, rec)

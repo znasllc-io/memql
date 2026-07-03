@@ -122,7 +122,7 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 			decl, err := languageParser.ParseProviderDecl(slice.Source)
 			if err != nil {
 				if logger != nil {
-					logger.Debug("memql.unifiedProviderLoader: parse failed",
+					logger.Warn("memql.unifiedProviderLoader: parse failed",
 						"file", raw.Path, "provider", slice.Name, "error", err)
 				}
 				continue
@@ -130,7 +130,7 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 			cfg, err := providerDeclToProviderConfig(decl)
 			if err != nil {
 				if logger != nil {
-					logger.Debug("memql.unifiedProviderLoader: convert failed",
+					logger.Warn("memql.unifiedProviderLoader: convert failed",
 						"file", raw.Path, "provider", slice.Name, "error", err)
 				}
 				continue
@@ -359,7 +359,7 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 			astDecl, err := languageParser.ParsePromptDecl(slice.Source)
 			if err != nil {
 				if logger != nil {
-					logger.Debug("memql.unifiedPromptLoader: parse failed",
+					logger.Warn("memql.unifiedPromptLoader: parse failed",
 						"file", raw.Path, "prompt", slice.Name, "error", err)
 				}
 				continue
@@ -367,7 +367,7 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 			decl, err := promptDeclToPromptDecl(astDecl, origin)
 			if err != nil {
 				if logger != nil {
-					logger.Debug("memql.unifiedPromptLoader: convert failed",
+					logger.Warn("memql.unifiedPromptLoader: convert failed",
 						"file", raw.Path, "prompt", slice.Name, "error", err)
 				}
 				continue

@@ -233,29 +233,59 @@ logic logicValid {
 	}
 }
 
-// TestLoad_NonProceduralOnlyFileLoadsCleanly locks the fallback
-// path that #293's narrowing deliberately preserves: a file whose
-// only top-level content is a non-procedural construct (shape,
-// provider, builtin, prompt, tool, policy, seed, spec, trait)
-// strips down to comments + imports, ParseFileSource returns
-// ErrEmptyInput, and Load accepts the imports-only projection
-// without a diagnostic. The dedicated runtime loaders
-// (shape_loader.go, spec_loader.go, ...) parse the bodies
-// separately.
-func TestLoad_NonProceduralOnlyFileLoadsCleanly(t *testing.T) {
+// TestLoad_NonProceduralFileParsesNatively locks the post-#2356
+// behavior: a file whose top-level content is a non-procedural
+// construct (shape / spec / trait / builtin / prompt / seed) is no
+// longer stripped before parsing -- it flows through the same native
+// decl parsers the generic parser dispatches from topLevelDeclParsers,
+// so a VALID body loads clean AND its body has actually been parsed
+// (not skipped). Every consolidated DSL file in the tree leads with a
+// `use` / `import` / `@` line, which is what routes the generic
+// parser into parseFile; these fixtures mirror that shape.
+func TestLoad_NonProceduralFileParsesNatively(t *testing.T) {
 	cases := map[string]string{
-		"shapes.memql":   `shape foo {` + "\n  payload.bar\n}\n",
-		"shapesCB.memql": `shape workspace workspaceFull {` + "\n  row.id\n}\n",
-		"specs.memql":    `spec activeRowTrait specIsActive {` + "\n  return active==true\n}\n",
-		"traits.memql":   `trait isActiveRecord {` + "\n  return active==true\n}\n",
-		"seeds.memql":    `seed agent assistant {` + "\n  name: \"Assistant\"\n}\n",
+		// annotation-led (the dominant authoring shape)
+		"shapes.memql": "@row\n@description(\"ok\")\nshape spaceCard {\n  row.id\n}\n",
+		"specs.memql":  "@enabled\n@description(\"ok\")\nspec activeRowTrait specIsActive {\n  return active==true\n}\n",
+		"traits.memql": "@enabled\n@description(\"ok\")\ntrait isActiveRecord {\n  return active==true\n}\n",
+		// import-led, annotation-free construct
+		"traitsCB.memql": "use common.traits.{ activeRowTrait }\n\ntrait isActiveRecord {\n  return active==true\n}\n",
 	}
 	for filename, body := range cases {
 		t.Run(filename, func(t *testing.T) {
 			root := fstest.MapFS{filename: {Data: []byte(body)}}
 			_, err := Load(root)
 			if err != nil {
-				t.Errorf("Load(%s) returned diagnostic for a stripped-clean file: %v", filename, err)
+				t.Errorf("Load(%s) returned a diagnostic for a valid non-procedural file: %v", filename, err)
+			}
+		})
+	}
+}
+
+// TestLoad_MalformedNonProceduralBodySurfaces is the memql#2356
+// regression guard: a garbage-body spec / trait / shape / builtin /
+// prompt is now PARSED by the lint pipeline (no longer stripped away
+// pre-parse), so a broken body surfaces as a Load diagnostic instead
+// of vanishing silently. Empirically, before #2356 every one of these
+// produced ZERO diagnostics because StripNonProceduralBlocks removed
+// the body before the parser ever saw it.
+func TestLoad_MalformedNonProceduralBodySurfaces(t *testing.T) {
+	cases := map[string]string{
+		// The exact garbage-spec body from the epic #2351 audit.
+		"specs.memql":    "@enabled\n@description(\"bad\")\nspec activeRowTrait specBad {\n  return status ==== \"x\" &&&& true\n}\n",
+		"traits.memql":   "@enabled\n@description(\"bad\")\ntrait badTrait {\n  return active ==== true\n}\n",
+		"shapes.memql":   "@row\n@description(\"bad\")\nshape shapeBad {\n  row.id\n  this is not @@@ valid {{{\n}\n",
+		"builtins.memql": "@enabled\n@executor(\"integration.x.y\")\nbuiltin badBuiltin {\n  arg string @@@ !!! broken\n}\n",
+	}
+	for filename, body := range cases {
+		t.Run(filename, func(t *testing.T) {
+			root := fstest.MapFS{filename: {Data: []byte(body)}}
+			_, err := Load(root)
+			if err == nil {
+				t.Fatalf("Load(%s) returned no diagnostic for a malformed non-procedural body; the strip regressed and the body is being swallowed again", filename)
+			}
+			if !strings.Contains(err.Error(), filename) {
+				t.Errorf("Load(%s) diagnostic did not mention the offending file: %v", filename, err)
 			}
 		})
 	}

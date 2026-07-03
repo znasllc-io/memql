@@ -1,6 +1,6 @@
 // Telephony writes -- persist provisioned numbers, SIP trunks, and call
 // records. Invoked by the telephony integration (provisioning, inbound
-// dispatch, outbound place_call) and the call lifecycle. Records bind to a
+// dispatch, outbound placeCall) and the call lifecycle. Records bind to a
 // partition, never a space (Amendment A).
 
 use telephony.concepts.{ number, trunk, call, consent }

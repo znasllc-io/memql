@@ -395,6 +395,10 @@ builtin routerListModels { }
 @description("List all routing policies loaded from policies/v1/*.memql. Feeds the CoPresent /router/policies page.")
 builtin routerListPolicies { }
 
+// ---- queries/v1/common/builtin/builtinRouterSetApiKey.memql ----
+
+@executor("integration.router.setApiKey")
+@description("Encrypt a plaintext vendor API key and persist it as a partition secret (BYOK). Returns the inserted secret row id. Feeds the CoPresent /router/settings page.")
 builtin routerSetApiKey {
   vendor        string  @required
   plaintextKey  string  @required
