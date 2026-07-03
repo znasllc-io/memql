@@ -65,8 +65,11 @@ type Slice struct {
 // for keyword via extract, parses each via parse, and registers each
 // non-error result via register. Returns the count of registrations
 // that succeeded. Per-slice errors (parse or register) are logged at
-// debug and skipped; the loader pushes through to keep loader-init
-// resilient against a single bad file.
+// WARN and skipped; the loader pushes through to keep loader-init
+// resilient against a single bad file, but a WARN means a construct
+// silently dropped out of the registry -- surfaced loudly so
+// production logs, the memql#2356 load-clean gate, and operators all
+// see the drop instead of it hiding at Debug.
 //
 //	component  -- log scope ("memql.unifiedShapeLoader" etc.)
 //	keyword    -- the construct keyword passed to extract
@@ -99,14 +102,14 @@ func LoadOne[T any](
 			item, err := parse(origin, []byte(slice.Source))
 			if err != nil {
 				if logger != nil {
-					logger.Debug(component+": parse failed",
+					logger.Warn(component+": parse failed",
 						"file", raw.Path, keyword, slice.Name, "error", err)
 				}
 				continue
 			}
 			if err := register(item); err != nil {
 				if logger != nil {
-					logger.Debug(component+": register failed",
+					logger.Warn(component+": register failed",
 						"file", raw.Path, keyword, slice.Name, "error", err)
 				}
 				continue
@@ -150,7 +153,7 @@ func LoadMany[T any](
 			items, err := parse(origin, []byte(slice.Source))
 			if err != nil {
 				if logger != nil {
-					logger.Debug(component+": parse failed",
+					logger.Warn(component+": parse failed",
 						"file", raw.Path, keyword, slice.Name, "error", err)
 				}
 				continue
@@ -158,7 +161,7 @@ func LoadMany[T any](
 			for _, item := range items {
 				if err := register(item); err != nil {
 					if logger != nil {
-						logger.Debug(component+": register failed",
+						logger.Warn(component+": register failed",
 							"file", raw.Path, keyword, slice.Name, "error", err)
 					}
 					continue

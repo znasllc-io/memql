@@ -28,35 +28,34 @@ import (
 // The stripped construct kinds still get loaded -- by their
 // dedicated loaders walking the same FS in parallel.
 
-// nonProceduralHeaders lists every top-level construct keyword the
-// generic parser doesn't understand. Each kind has its own dedicated
-// runtime loader (shape_loader.go, spec_loader.go, seed_loader.go,
-// ...) that reads these blocks directly off the same source files,
-// so the generic parser doesn't need to understand them -- it just
-// needs to step over them cleanly. Adding more is a one-line
-// extension; the stripping logic is keyword-agnostic.
+// nonProceduralHeaders lists top-level construct keywords the generic
+// parser cannot ingest natively and must therefore step over. It is
+// EMPTY today: every author-facing construct keyword now has a native
+// decl parser registered in parser.go's topLevelDeclParsers dispatch
+// table (concept / shape / provider / builtin / tool / prompt / policy
+// / spec / trait / seed / action / capability), so ParseFileSource can
+// parse a consolidated file end-to-end without any block being removed.
 //
-// memql#293 added seed / spec / trait to this list. Pre-#293 the
-// dslimports.Load fallback silently swallowed any parse error,
-// including the "unexpected token 'seed'" / "'spec'" / "'trait'"
-// failures these omissions produced. With the fallback narrowed to
-// only swallow ErrEmptyInput, these declarations have to actually
-// strip cleanly.
-var nonProceduralHeaders = []string{
-	// `provider`, `tool`, `policy` left out: parseProviderDecl /
-	// parseToolDecl / parsePolicyDecl handle them natively
-	// (sub-epic #309 children #316 / #317, sub-epic #329 child #333).
-	//
-	// `seed`, `spec`, `trait` STAY in this list even though their
-	// dedicated loaders parse them via the native parseSeedDecl /
-	// parseSpecDecl entry points. The strip path keeps the general
-	// dslimports.Load flow happy when a file contains nothing but
-	// these constructs and reaches the bare ParseFileSource path
-	// (which would otherwise try to parse `seed agent <name> {`
-	// as a top-level expression and fail).
-	"shape", "builtin", "prompt",
-	"seed", "spec", "trait",
-}
+// History: the strip step existed while shape / builtin / prompt /
+// seed / spec / trait lacked generic-parser support and had only their
+// dedicated runtime loaders (shape_loader.go, spec_loader.go, ...).
+// Stripping their bodies let the generic parser skip past them so a
+// file mixing procedural + non-procedural constructs still parsed. That
+// also blinded the memqllint / dslimports lint gate to malformed
+// bodies in those kinds -- a garbage-body spec / shape produced ZERO
+// diagnostics because the strip removed the broken source before the
+// parser ever saw it (memql#2356 / epic #2351). provider / tool /
+// policy were removed from this list earlier (sub-epic #309 children
+// #316 / #317, sub-epic #329 child #333) once their native parsers
+// landed; #2356 removes the final six now that the same is true of
+// them, so the lint gate parses every kind through its real parser and
+// surfaces broken bodies as diagnostics.
+//
+// The slice is retained (empty) so the strip machinery degrades to a
+// guarded no-op rather than being deleted outright: if a future
+// construct kind ever needs to be stepped over before it has a native
+// parser, adding its keyword here re-arms the strip in one line.
+var nonProceduralHeaders = []string{}
 
 // nonProceduralRe matches `<keyword> [<Concept>] NAME {` at column 0
 // (including leading whitespace). Two header shapes are supported:
@@ -91,11 +90,21 @@ var nonProceduralHeaders = []string{
 // the keyword as an unrecognized top-level token -- a class of
 // failure dslimports.Load was silently swallowing pre-#293. See the
 // fallback in dslimports.go for the matching swallow-narrowing.
-var nonProceduralRe = regexp.MustCompile(
-	`(?m)^[ \t]*(` +
-		strings.Join(nonProceduralHeaders, "|") +
-		`)[ \t]+(?:[A-Za-z_][A-Za-z0-9_-]*[ \t]+)?([A-Za-z_][A-Za-z0-9_-]*)[ \t]*\{`,
-)
+//
+// When nonProceduralHeaders is empty the alternation would collapse to
+// `()` and match every line, so the regex is left nil and the strip
+// functions short-circuit to no-ops. Re-populating the header list
+// re-arms it automatically.
+var nonProceduralRe = func() *regexp.Regexp {
+	if len(nonProceduralHeaders) == 0 {
+		return nil
+	}
+	return regexp.MustCompile(
+		`(?m)^[ \t]*(` +
+			strings.Join(nonProceduralHeaders, "|") +
+			`)[ \t]+(?:[A-Za-z_][A-Za-z0-9_-]*[ \t]+)?([A-Za-z_][A-Za-z0-9_-]*)[ \t]*\{`,
+	)
+}()
 
 // StripNonProceduralBlocks finds every struct-form construct
 // declaration that's not procedural (`func (X) name`) and removes
@@ -113,6 +122,9 @@ var nonProceduralRe = regexp.MustCompile(
 // Pass-through if the source contains none of the targeted
 // constructs.
 func StripNonProceduralBlocks(source string) string {
+	if nonProceduralRe == nil {
+		return source
+	}
 	matches := nonProceduralRe.FindAllStringSubmatchIndex(source, -1)
 	if len(matches) == 0 {
 		return source
@@ -165,5 +177,8 @@ func StripNonProceduralBlocks(source string) string {
 // LooksLikeNonProcedural reports whether the source contains any
 // stripable non-procedural struct-form construct.
 func LooksLikeNonProcedural(source string) bool {
+	if nonProceduralRe == nil {
+		return false
+	}
 	return nonProceduralRe.MatchString(source)
 }
