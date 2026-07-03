@@ -173,12 +173,15 @@ func TestLibraryIndexersCoalesceNullableOptionalFields(t *testing.T) {
 		want       string
 		rawBad     string
 	}{
+		// Post-G5 (#2367) the indexers read their typed args bare -- the
+		// coalesce guard is unchanged, only the read form migrated from
+		// event.payload.X to the bare field.
 		// indexNoteOnCreate
-		{"indexNoteOnCreate", "summary", `summary:          coalesce(event.payload.body`, `summary:          event.payload.body`},
+		{"indexNoteOnCreate", "summary", `summary:          coalesce(body`, `summary:          body`},
 		// indexMemoryOnCreate (the indexer failing live on 0.9.67)
-		{"indexMemoryOnCreate", "summary", `summary:          coalesce(event.payload.summary`, `summary:          event.payload.summary`},
-		{"indexMemoryOnCreate", "agentId", `agentId:          coalesce(event.payload.agentId`, `agentId:          event.payload.agentId`},
-		{"indexMemoryOnCreate", "partitionId", `partitionId:      coalesce(event.payload.partitionId`, `partitionId:      event.payload.partitionId`},
+		{"indexMemoryOnCreate", "summary", `summary:          coalesce(summary`, `summary:          summary`},
+		{"indexMemoryOnCreate", "agentId", `agentId:          coalesce(agentId`, `agentId:          agentId`},
+		{"indexMemoryOnCreate", "partitionId", `partitionId:      coalesce(partitionId`, `partitionId:      partitionId`},
 	}
 
 	for _, tc := range cases {

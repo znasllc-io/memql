@@ -31,23 +31,38 @@ use library.mutations.{ createArtifact }
 @trigger(event="node.created", concept="v1:library:generatedOutput", partition="*")
 @description("On generated-output creation, promote the new v1:library:generatedOutput into the Library as an artifact index row (lens=artifact, kind=generated_output). #2235.")
 automation indexGeneratedOutputOnCreate {
+  args {
+    format any
+    id any
+    mimeType any
+    ownerUserId any
+    partitionId any
+    producedByAgentId any
+    producedByPlanId any
+    producedByWorkerId any
+    producedByWorkerName any
+    source any
+    summary any
+    title any
+  }
+
   step persist {
     mutation createArtifact (
-      sourceConceptRef:     event.payload.id,
-      ownerUserId:          event.payload.ownerUserId,
+      sourceConceptRef:     id,
+      ownerUserId:          ownerUserId,
       lens:                 "artifact",
       kind:                 "generated_output",
-      source:               event.payload.source,
-      title:                event.payload.title,
-      summary:              coalesce(event.payload.summary, ""),
-      format:               event.payload.format,
-      mimeType:             coalesce(event.payload.mimeType, ""),
+      source,
+      title:                title,
+      summary:              coalesce(summary, ""),
+      format,
+      mimeType:             coalesce(mimeType, ""),
       live:                 false,
-      partitionId:          coalesce(event.payload.partitionId, ""),
-      agentId:              coalesce(event.payload.producedByAgentId, ""),
-      producedByPlanId:     coalesce(event.payload.producedByPlanId, ""),
-      producedByWorkerId:   coalesce(event.payload.producedByWorkerId, ""),
-      producedByWorkerName: coalesce(event.payload.producedByWorkerName, "")
+      partitionId:          coalesce(partitionId, ""),
+      agentId:              coalesce(producedByAgentId, ""),
+      producedByPlanId:     coalesce(producedByPlanId, ""),
+      producedByWorkerId:   coalesce(producedByWorkerId, ""),
+      producedByWorkerName: coalesce(producedByWorkerName, "")
     )
   }
 }
@@ -56,15 +71,22 @@ automation indexGeneratedOutputOnCreate {
 @trigger(event="node.created", concept="v1:notes:note", partition="*")
 @description("On note creation, promote it into the Library Records lens (lens=record, kind=note, source=agent_generated). #2235.")
 automation indexNoteOnCreate {
+  args {
+    body any
+    id any
+    ownerUserId any
+    title any
+  }
+
   step persist {
     mutation createArtifact (
-      sourceConceptRef: event.payload.id,
-      ownerUserId:      event.payload.ownerUserId,
+      sourceConceptRef: id,
+      ownerUserId:      ownerUserId,
       lens:             "record",
       kind:             "note",
       source:           "agent_generated",
-      title:            coalesce(event.payload.title, "Untitled note"),
-      summary:          coalesce(event.payload.body, ""),
+      title:            coalesce(title, "Untitled note"),
+      summary:          coalesce(body, ""),
       live:             false
     )
   }
@@ -74,14 +96,20 @@ automation indexNoteOnCreate {
 @trigger(event="node.created", concept="v1:todos:todo", partition="*")
 @description("On to-do creation, promote it into the Library Records lens (lens=record, kind=todo, source=agent_generated). #2235.")
 automation indexTodoOnCreate {
+  args {
+    id any
+    ownerUserId any
+    title any
+  }
+
   step persist {
     mutation createArtifact (
-      sourceConceptRef: event.payload.id,
-      ownerUserId:      event.payload.ownerUserId,
+      sourceConceptRef: id,
+      ownerUserId:      ownerUserId,
       lens:             "record",
       kind:             "todo",
       source:           "agent_generated",
-      title:            coalesce(event.payload.title, "Untitled to-do"),
+      title:            coalesce(title, "Untitled to-do"),
       live:             false
     )
   }
@@ -91,14 +119,20 @@ automation indexTodoOnCreate {
 @trigger(event="node.created", concept="v1:calendar:calendarEvent", partition="*")
 @description("On calendar-event creation, promote it into the Library Records lens (lens=record, kind=calendar_event, source=agent_generated). #2235.")
 automation indexCalendarEventOnCreate {
+  args {
+    id any
+    ownerUserId any
+    title any
+  }
+
   step persist {
     mutation createArtifact (
-      sourceConceptRef: event.payload.id,
-      ownerUserId:      event.payload.ownerUserId,
+      sourceConceptRef: id,
+      ownerUserId:      ownerUserId,
       lens:             "record",
       kind:             "calendar_event",
       source:           "agent_generated",
-      title:            coalesce(event.payload.title, "Untitled event"),
+      title:            coalesce(title, "Untitled event"),
       live:             false
     )
   }
@@ -108,17 +142,26 @@ automation indexCalendarEventOnCreate {
 @trigger(event="node.created", concept="v1:library:memory", partition="*")
 @description("On memory creation, promote it into the Library Records lens (lens=record, kind=memory, source=agent_generated). #2235.")
 automation indexMemoryOnCreate {
+  args {
+    agentId any
+    id any
+    ownerUserId any
+    partitionId any
+    summary any
+    title any
+  }
+
   step persist {
     mutation createArtifact (
-      sourceConceptRef: event.payload.id,
-      ownerUserId:      event.payload.ownerUserId,
+      sourceConceptRef: id,
+      ownerUserId:      ownerUserId,
       lens:             "record",
       kind:             "memory",
       source:           "agent_generated",
-      title:            event.payload.title,
-      summary:          coalesce(event.payload.summary, ""),
-      agentId:          coalesce(event.payload.agentId, ""),
-      partitionId:      coalesce(event.payload.partitionId, ""),
+      title,
+      summary:          coalesce(summary, ""),
+      agentId:          coalesce(agentId, ""),
+      partitionId:      coalesce(partitionId, ""),
       live:             false
     )
   }

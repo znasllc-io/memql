@@ -2687,7 +2687,15 @@ func (p *Parser) parseForRangeStep() (*StepDef, error) {
 		p.advance()
 		filterParts := []string{}
 		for !p.check(TokenEOF) && !p.check(TokenBraceOpen) {
-			filterParts = append(filterParts, p.current.Literal)
+			lit := p.current.Literal
+			// Token literals are UNQUOTED content; re-quote strings so the
+			// reconstructed filter keeps `x == "development"` intact --
+			// otherwise the literal leaks as a bare identifier (flagged by
+			// the G2 checker and ambiguous for the evaluator). #2367.
+			if p.check(TokenString) {
+				lit = strconv.Quote(lit)
+			}
+			filterParts = append(filterParts, lit)
 			p.advance()
 		}
 		filter = strings.Join(filterParts, " ")
@@ -6235,6 +6243,20 @@ func (p *Parser) parseObject() (map[string]any, error) {
 			p.advance()
 		} else if p.check(TokenOperator) && p.current.Literal == "=" {
 			p.advance()
+		} else if p.check(TokenComma) || p.check(TokenBraceClose) {
+			// G3 (#2365) punning in object-literal position: a bare simple
+			// identifier is `key: key`. This is the path automation STEP
+			// calls lower through (the rewriter turns `logic X(k: v, j)`
+			// into an object form), so punning must parse here exactly as
+			// in parseFunctionCallWithKind. The value is the identifier's
+			// own literal -- identical to what parseValue returns for the
+			// named form `j: j` -- and resolves at runtime via the G2 bare
+			// rules. Dotted keys never reach here (they fail the key check).
+			obj[key] = key
+			if p.check(TokenComma) {
+				p.advance()
+			}
+			continue
 		} else {
 			return nil, newParseErrorf(&p.current, "expected ':' or '=' after object key, got %q", p.current.Literal)
 		}

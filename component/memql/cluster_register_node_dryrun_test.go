@@ -71,21 +71,28 @@ const registerNodeAutomation = `@enabled
 @trigger(event="system.startup")
 @description("Register this node in the database on startup")
 automation registerNode {
-  step node {
+  args {
+    deploymentId any
+    environment any
+    node any
+    provider any
+    region any
+  }
+  step record {
     createNode {
-      id:           coalesce(event.payload.node.id, ""),
-      nodeType:     coalesce(event.payload.node.type, ""),
-      address:      coalesce(event.payload.node.address, ""),
-      deploymentId: coalesce(event.payload.deploymentId, ""),
-      provider:     coalesce(event.payload.provider, ""),
-      environment:  coalesce(event.payload.environment, ""),
-      region:       coalesce(event.payload.region, "")
+      id:           coalesce(node.id, ""),
+      nodeType:     coalesce(node.type, ""),
+      address:      coalesce(node.address, ""),
+      deploymentId: coalesce(deploymentId, ""),
+      provider:     coalesce(provider, ""),
+      environment:  coalesce(environment, ""),
+      region:       coalesce(region, "")
     }
   }
   step spawn {
     createSpawnEvent {
-      nodeId:   coalesce(event.payload.node.id, ""),
-      nodeType: coalesce(event.payload.node.type, ""),
+      nodeId:   coalesce(node.id, ""),
+      nodeType: coalesce(node.type, ""),
       action:   "spawned",
       reason:   "system.startup"
     }

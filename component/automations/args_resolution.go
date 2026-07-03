@@ -274,19 +274,15 @@ func checkArgMapIdentifiers(a *Automation, where string, m map[string]any, field
 	return nil
 }
 
+// checkValueIdentifiers is deliberately a NO-OP for string leaves: parseValue
+// strips quotes from string values at parse time, so a literal
+// `reason: "system.shutdown"` and a dotted reference arrive as IDENTICAL
+// strings -- static identifier validation on values is unsound. The runtime
+// resolves value strings ref-first (loop var / step / args field, G2) with
+// the literal as fallback, exactly as before. Strict typo rejection holds on
+// the surfaces where every token IS an expression: step conditions, forEach
+// source/filter (filters keep their quotes since #2367), and switch subjects.
 func checkValueIdentifiers(a *Automation, where string, v any, fields, stepIDs, loopVars map[string]bool) error {
-	switch tv := v.(type) {
-	case string:
-		return checkExprIdentifiers(a, where, tv, fields, stepIDs, loopVars)
-	case map[string]any:
-		return checkArgMapIdentifiers(a, where, tv, fields, stepIDs, loopVars)
-	case []any:
-		for _, item := range tv {
-			if err := checkValueIdentifiers(a, where, item, fields, stepIDs, loopVars); err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 
@@ -319,4 +315,44 @@ func checkExprIdentifiers(a *Automation, where, expr string, fields, stepIDs, lo
 		return fmt.Errorf("automation %q: unknown bare identifier %q in %s -- not a reserved name, loop variable, step name, or args field. Declare it in the args { } block, or reference it explicitly (args.X / steps.X / event.payload.X)", a.Name, head, where)
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// G5 (memql#2367): retired event.payload reads -- source-level scan
+// ---------------------------------------------------------------------------
+
+// eventPayloadReadPattern matches a live `event.payload.<field>` (or the
+// `$event.payload.<field>` dollar form) read in authored automation source.
+var eventPayloadReadPattern = regexp.MustCompile(`[$]?\bevent\.payload\.[A-Za-z_]`)
+
+// scrubSourceForPayloadScan blanks string literals and line comments so the
+// retirement scan never fires on prose (@description text, header comments).
+func scrubSourceForPayloadScan(s string) string {
+	var out strings.Builder
+	i := 0
+	for i < len(s) {
+		switch {
+		case s[i] == '"':
+			j := i + 1
+			for j < len(s) && (s[j] != '"' || s[j-1] == '\\') {
+				j++
+			}
+			if j < len(s) {
+				j++
+			}
+			out.WriteString(strings.Repeat(" ", j-i))
+			i = j
+		case strings.HasPrefix(s[i:], "//"):
+			j := strings.IndexByte(s[i:], '\n')
+			if j < 0 {
+				j = len(s) - i
+			}
+			out.WriteString(strings.Repeat(" ", j))
+			i += j
+		default:
+			out.WriteByte(s[i])
+			i++
+		}
+	}
+	return out.String()
 }
