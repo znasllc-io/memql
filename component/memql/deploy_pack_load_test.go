@@ -67,30 +67,22 @@ func TestDeployPackBuiltinsLoad(t *testing.T) {
 //   - the CORE cross-namespace mutation `updateDeploymentStatus` the port
 //     transitions through resolves.
 //
-// STRICT-BOOT INTERACTION (epic #2351 / S2, memql#2357): strict boot revealed
-// that the pack's two lifecycle LOGIC constructs (driveDeploymentInProgress /
-// recordReconciledState) do NOT parse under the current logic-step grammar --
-// their bodies use bare scalar (`status := coalesce(...)`) and bare boolean
-// (`isAzure := provider == ...`) `:=` steps, a form the step parser rejects
-// (each `:=` step RHS must be a function call, an `if cond { call }`, or a
-// collection chain). Those two constructs were ALWAYS silently skipped at load;
-// this test previously passed green because it only ever asserted on the
-// builtins + the core mutation, never on the logic -- the exact silent-drop /
-// false-green class epic #2351 exists to kill. Strict boot now surfaces the
-// drop loudly. Fixing the deploy-pack logic's authoring is a follow-up outside
-// S2's scope (it's an example-pack grammar-fit fix, not a LoadReport change);
-// until then this test boots via the MEMQL_DSL_ALLOW_SKIPS break-glass and
-// ASSERTS that the load report names both skipped logic constructs -- a
-// positive demonstration of exactly the break-glass + report S2 introduces.
+// STRICT-BOOT HISTORY (epic #2351 / S2 #2357, fixed by #2400): strict boot
+// revealed that the pack's two lifecycle LOGIC constructs had NEVER parsed
+// (bare-expression `:=` steps the logic-step grammar rejects) -- silently
+// skipped for their entire life while this test stayed green by asserting
+// only on builtins. #2400 rewrote both logics to the current grammar (call /
+// if-cond-call steps; graph writes moved out to the automations' gated
+// mutation steps per the behavioral-constructs ADR) and this test now runs
+// STRICT: full Init with zero skips, and the logics themselves must register.
 //
 // Mounted from disk (not via a Go import of examples/deploypack, which would be
 // an import cycle) so it exercises the real pack artifacts.
 func TestDeployPackLifecycleAutomationLoads(t *testing.T) {
-	// Break-glass: the pack's lifecycle logic has a pre-existing parse gap
-	// (see the doc comment) that strict boot now surfaces. Boot anyway so we
-	// can still verify the builtins + core-mutation import resolve, and assert
-	// the report captured the skips.
-	t.Setenv(allowSkipsEnvVar, "1")
+	// STRICT (no break-glass, #2400): the lifecycle logics were rewritten to
+	// the current logic-step grammar (call / if-cond-call step forms; writes
+	// moved out to the automations' gated mutation steps), so the pack must
+	// now survive strict boot with ZERO skips.
 
 	packDSL := filepath.Join("..", "..", "examples", "deploypack", "dsl")
 	entries, err := os.ReadDir(packDSL)
@@ -128,38 +120,29 @@ func TestDeployPackLifecycleAutomationLoads(t *testing.T) {
 	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	if err := eng.Init(registry); err != nil {
 		t.Fatalf("engine.Init over the core tree + mounted deploy pack failed "+
-			"(with the break-glass set, so this is NOT the strict-boot refusal): %v", err)
+			"under STRICT boot -- a pack construct stopped parsing: %v", err)
 	}
 
 	// The pack's effect builtins the lifecycle logic fires must be registered
 	// as functions after Init, and so must the core cross-namespace mutation.
 	fns := eng.Functions()
 	for _, name := range []string{
-		"deployRunPromote",       // the azure effect the lifecycle logic fires
-		"updateDeploymentStatus", // the core mutation it transitions through
+		"deployRunPromote",          // the azure effect the lifecycle logic fires
+		"updateDeploymentStatus",    // the core mutation the automations persist through
+		"driveDeploymentInProgress", // the lifecycle logic itself (#2400: never parsed before)
+		"recordReconciledState",     // the record-back logic (#2400: never parsed before)
 	} {
 		if !fns.Has(name) {
 			t.Errorf("expected %q to be registered after Init over the mounted deploy pack", name)
 		}
 	}
 
-	// Positive S2 assertion: strict boot must have RECORDED the two lifecycle
-	// logic constructs that fail to parse -- named, with their file + error --
-	// rather than dropping them silently. This is the silent-drop the epic
-	// targets, now visible in the structured report.
+	// Strict-boot invariant (#2400): the load report carries ZERO skips for
+	// the mounted pack -- the pre-#2400 silent-drop class stays dead.
 	if eng.loadReport == nil {
 		t.Fatal("engine.loadReport should be set after Init")
 	}
-	for _, name := range []string{"driveDeploymentInProgress", "recordReconciledState"} {
-		found := false
-		for _, s := range eng.loadReport.Skipped {
-			if s.Name == name {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("expected the load report to name the skipped logic %q; report skips: %+v", name, eng.loadReport.Skipped)
-		}
+	if len(eng.loadReport.Skipped) != 0 {
+		t.Errorf("expected zero skipped constructs under strict boot; report skips: %+v", eng.loadReport.Skipped)
 	}
 }

@@ -1,93 +1,84 @@
 // logic.memql -- the deploy pack (examples/deploypack), Epic 2 / #2096 (E2.3).
 //
-// Imperative body for the deploy-lifecycle automation. Mirrors deploy.go's
+// Imperative bodies for the deploy-lifecycle automations. Mirrors deploy.go's
 // Deploy(): read the deployment's new state off the CDC event, and for the
-// azure provider in the in_progress state, fire the promote effect and
-// transition the record to its terminal status (succeeded | failed).
+// azure provider in the in_progress state, fire the promote effect. The
+// TERMINAL TRANSITION is persisted by the automation's gated mutation steps
+// (decide -> act -> persist), not in here -- logic performs no graph writes
+// (behavioral-constructs ADR section 2.1). Rewritten for #2400 after strict
+// boot (#2357) surfaced that the original bodies never parsed.
+//
+// Grammar note (#2400): every `:=` step RHS is a CALL, an `if cond { call }`,
+// or a collection chain -- the only forms the logic-step grammar accepts. The
+// original bodies used bare scalar/boolean expression assignments and were
+// silently skipped at load for their entire life; branching values are built
+// with cond(...) calls instead. cond() arguments accept only SIMPLE
+// predicates (no && / || / ! -- the arg parser rejects connectives), so
+// multi-clause decisions nest conds, compound conditions live on the
+// `if cond { call }` steps (whose evaluator supports the full boolean
+// grammar), and collection-chain reads (result.First().payload.x) are
+// extracted into their own coalesce() steps first -- cond predicates only
+// take simple identifier comparisons.
 //
 // Env mapping (production -> prod) is done inside the deployRunPromote Go
 // handler via deploycontrol.ConsoleEnvFor -- the SAME mapping the Go driver
 // uses -- so this logic passes the deployment.environment enum straight
 // through and the mapping lives in exactly one place.
-//
-// Outcome handling without `else` (the DSL if-expression has no else branch):
-// deployRunPromote returns success in-band (it does NOT error on a promote
-// failure, only on misconfiguration), so two guarded transitions cover the
-// branch -- one fires when success==true, the other when success!=true --
-// exactly deploy.go's runErr -> transitionStatusForErr(succeeded|failed).
 
 use deploypack.builtins.{ deployRunPromote, deployObserveReconciledState, deployRecordBack }
-use deployment.mutations.{ updateDeploymentStatus }
 
-@description("On every v1:cluster:deployment update: when the new status is in_progress AND the provider is azure (or empty -> azure default) AND a version + deploymentId are present, fire deployRunPromote (passing the environment enum; the handler maps it to the promote.sh env) and transition the deployment to its terminal status. A FORWARD deploy lands in succeeded; a ROLLBACK record (one carrying previousDeploymentId) lands in rolled_back -- matching deploy.go's RollbackDeployment terminal exactly (#2115 parity). A promote failure lands in failed either way. Acts only on the in_progress edge; other status updates are ignored. The event-driven port of deploy.go's apply+transition. Epic 2 / #2096.")
+@description("On every v1:cluster:deployment update: when the new status is in_progress AND the provider is azure (or empty -> azure default) AND a version + deploymentId are present, fire deployRunPromote (passing the environment enum; the handler maps it to the promote.sh env) and return { deploymentId, outcome } where outcome is succeeded (forward deploy, clean promote), rolled_back (rollback record -- one carrying previousDeploymentId -- clean promote, matching deploy.go's RollbackDeployment terminal, #2115 parity), failed (promote reported failure in-band), or empty (not our edge; nothing fired). The automation persists the transition. Epic 2 / #2096; rewritten for #2400.")
 logic driveDeploymentInProgress {
   args {
     event object @required
   }
   body {
-    status := coalesce(args.event.node.payload.status, "")
-    provider := coalesce(args.event.node.payload.provider, "")
-    deploymentId := coalesce(args.event.node.payload.deploymentId, "")
-    version := coalesce(args.event.node.payload.version, "")
-    environment := coalesce(args.event.node.payload.environment, "")
-    previousDeploymentId := coalesce(args.event.node.payload.previousDeploymentId, "")
-    isAzure := provider == "azure" || provider == ""
-    isRollback := previousDeploymentId != ""
-
-    result := if status == "in_progress" && isAzure && version != "" && deploymentId != "" {
-      deployRunPromote({ version: version, env: environment })
+    status := coalesce(args.event.payload.status, "")
+    provider := coalesce(args.event.payload.provider, "")
+    deploymentId := coalesce(args.event.payload.deploymentId, "")
+    version := coalesce(args.event.payload.version, "")
+    environment := coalesce(args.event.payload.environment, "")
+    previousDeploymentId := coalesce(args.event.payload.previousDeploymentId, "")
+    isAzure := cond(provider == "azure", true, cond(provider == "", true, false))
+    result := if status == "in_progress" && isAzure == true && version != "" && deploymentId != "" {
+      deployRunPromote(version: version, env: environment)
     }
-    promoted := !result.Empty() && result.First().payload.success == true
-
-    // Terminal status mirrors deploy.go exactly: a forward deploy -> succeeded,
-    // a rollback record (previousDeploymentId set) -> rolled_back, a promote
-    // failure -> failed (#2115). The DSL if-expression has no else, so each
-    // mutually-exclusive outcome is its own guarded transition.
-    succeeded := if promoted && !isRollback {
-      updateDeploymentStatus({ deploymentId: deploymentId, status: "succeeded" })
-    }
-    rolledBack := if promoted && isRollback {
-      updateDeploymentStatus({ deploymentId: deploymentId, status: "rolled_back" })
-    }
-    failed := if !result.Empty() && result.First().payload.success != true {
-      updateDeploymentStatus({ deploymentId: deploymentId, status: "failed" })
-    }
-    return deploymentId
+    firedProbe := coalesce(result.First().payload.effect, "")
+    successVal := coalesce(result.First().payload.success, false)
+    fired := cond(firedProbe == "", false, true)
+    promoted := cond(fired == true, cond(successVal == true, true, false), false)
+    isRollback := cond(previousDeploymentId == "", false, true)
+    outcome := cond(promoted == true, cond(isRollback == true, "rolled_back", "succeeded"), cond(fired == true, "failed", ""))
+    return { deploymentId: deploymentId, outcome: outcome }
   }
 }
 
 // ---- logic/deploypack/recordReconciledState ----
 
-@description("Model A record-back loop (#2097): when a v1:cluster:deployment reaches succeeded (the promote completed), observe the ArgoCD-reconciled state and record it back into the deployment concept. On a clean reconciliation (synced && healthy) it appends the observed per-node spec via deployRecordBack (createDeploymentNodeSpec -- a DIFFERENT concept, so it does NOT re-trigger this v1:cluster:deployment automation). When ArgoCD reports the app is NOT synced/healthy, it appends a corrective failed transition (which moves status off succeeded, self-terminating). The committed overlay stays the source of truth; the data layer mirrors observed state. Multi-node safe: the per-node append is idempotent (asOf latest collapses) and the succeeded->terminal guards prevent a re-trigger loop. Epic 2 / #2097.")
+@description("Model A record-back loop (#2097): when a v1:cluster:deployment reaches succeeded (the promote completed), observe the ArgoCD-reconciled state. On a clean reconciliation (synced && healthy) append the observed per-node spec via deployRecordBack (createDeploymentNodeSpec -- a DIFFERENT concept, so it does NOT re-trigger the v1:cluster:deployment automations) and return verdict=recorded. When ArgoCD reports NOT synced/healthy, return verdict=correct so the automation appends the corrective failed transition (which moves status off succeeded, self-terminating). The committed overlay stays the source of truth; the data layer mirrors observed state. Epic 2 / #2097; rewritten for #2400.")
 logic recordReconciledState {
   args {
     event object @required
   }
   body {
-    status := coalesce(args.event.node.payload.status, "")
-    provider := coalesce(args.event.node.payload.provider, "")
-    deploymentId := coalesce(args.event.node.payload.deploymentId, "")
-    version := coalesce(args.event.node.payload.version, "")
-    imageDigest := coalesce(args.event.node.payload.imageDigest, "")
-    isAzure := provider == "azure" || provider == ""
-
-    observation := if status == "succeeded" && isAzure && deploymentId != "" {
-      deployObserveReconciledState({ app: "" })
+    status := coalesce(args.event.payload.status, "")
+    provider := coalesce(args.event.payload.provider, "")
+    deploymentId := coalesce(args.event.payload.deploymentId, "")
+    version := coalesce(args.event.payload.version, "")
+    imageDigest := coalesce(args.event.payload.imageDigest, "")
+    isAzure := cond(provider == "azure", true, cond(provider == "", true, false))
+    observation := if status == "succeeded" && isAzure == true && deploymentId != "" {
+      deployObserveReconciledState(app: "")
     }
-    reconciled := !observation.Empty() && observation.First().payload.synced == true && observation.First().payload.healthy == true
-
-    recorded := if reconciled {
-      deployRecordBack({
-        deploymentId: deploymentId,
-        nodeType: "bff",
-        version: version,
-        replicas: 2,
-        imageDigest: imageDigest
-      })
+    obsProbe := coalesce(observation.First().payload.effect, "")
+    syncedVal := coalesce(observation.First().payload.synced, false)
+    healthyVal := coalesce(observation.First().payload.healthy, false)
+    observed := cond(obsProbe == "", false, true)
+    reconciled := cond(syncedVal == true, cond(healthyVal == true, true, false), false)
+    recorded := if reconciled == true {
+      deployRecordBack(deploymentId: deploymentId, nodeType: "bff", version: version, replicas: 2, imageDigest: imageDigest)
     }
-    corrected := if !observation.Empty() && reconciled != true {
-      updateDeploymentStatus({ deploymentId: deploymentId, status: "failed" })
-    }
-    return deploymentId
+    verdict := cond(reconciled == true, "recorded", cond(observed == true, "correct", ""))
+    return { deploymentId: deploymentId, verdict: verdict }
   }
 }

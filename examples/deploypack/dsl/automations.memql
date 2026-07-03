@@ -19,15 +19,36 @@
 // provider. ADDITIVE: the Go orchestrator is NOT removed here (that is E2.5);
 // these automations only load when the deploy pack is mounted (build tag
 // `deploypack`), so they never fire in a default binary.
+//
+// SHAPE (#2400): decide -> act -> persist. The logic step decides AND fires the
+// pack effect builtins, returning a flat outcome object; the gated mutation
+// steps below persist the transition (logic performs no graph writes, per the
+// behavioral-constructs ADR). Step calls use the kind-prefixed named-args form.
 
 use deploypack.logic.{ driveDeploymentInProgress, recordReconciledState }
+use deployment.mutations.{ updateDeploymentStatus }
 
 @enabled
 @trigger(event="graph.node.updated.v1:cluster:deployment")
-@description("Event-driven port of deploy.go's apply+transition: when a v1:cluster:deployment enters in_progress for the azure provider, fire the deployRunPromote effect (the live azure deploy via promote.sh + Argo Rollout) and transition the record to succeeded on a clean promote or failed on a reported failure. Epic 2 / #2096.")
+@description("Event-driven port of deploy.go's apply+transition: when a v1:cluster:deployment enters in_progress for the azure provider, fire the deployRunPromote effect (the live azure deploy via promote.sh + Argo Rollout) and persist the terminal transition the logic decided -- succeeded (forward), rolled_back (rollback record), or failed. Epic 2 / #2096; decide->persist shape per #2400.")
 automation driveDeploymentInProgress {
   step run {
-    logic driveDeploymentInProgress { event: event }
+    logic driveDeploymentInProgress(event: event)
+  }
+  step succeeded {
+    if steps.run.result.outcome == "succeeded" {
+      mutation updateDeploymentStatus(deploymentId: steps.run.result.deploymentId, status: "succeeded")
+    }
+  }
+  step rolledBack {
+    if steps.run.result.outcome == "rolled_back" {
+      mutation updateDeploymentStatus(deploymentId: steps.run.result.deploymentId, status: "rolled_back")
+    }
+  }
+  step failed {
+    if steps.run.result.outcome == "failed" {
+      mutation updateDeploymentStatus(deploymentId: steps.run.result.deploymentId, status: "failed")
+    }
   }
 }
 
@@ -35,9 +56,14 @@ automation driveDeploymentInProgress {
 
 @enabled
 @trigger(event="graph.node.updated.v1:cluster:deployment")
-@description("Model A record-back loop (#2097): when a v1:cluster:deployment reaches succeeded (the promote completed), observe the ArgoCD-reconciled state and append it back into the deployment concept -- the per-node readiness via createDeploymentNodeSpec and, only when ArgoCD reports NOT synced/healthy, a corrective transition. The committed overlay stays the source of truth; the data layer mirrors the observed state. Multi-node safe: the append is idempotent and the guard keeps it from re-triggering itself. Epic 2 / #2097.")
+@description("Model A record-back loop (#2097): when a v1:cluster:deployment reaches succeeded (the promote completed), observe the ArgoCD-reconciled state; the logic appends the per-node readiness via deployRecordBack on a clean reconciliation, and this automation persists the corrective failed transition when ArgoCD reports NOT synced/healthy (self-terminating -- the correction moves status off succeeded). Epic 2 / #2097; decide->persist shape per #2400.")
 automation recordReconciledState {
   step run {
-    logic recordReconciledState { event: event }
+    logic recordReconciledState(event: event)
+  }
+  step correct {
+    if steps.run.result.verdict == "correct" {
+      mutation updateDeploymentStatus(deploymentId: steps.run.result.deploymentId, status: "failed")
+    }
   }
 }
