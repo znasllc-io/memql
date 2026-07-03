@@ -140,7 +140,26 @@ func (p *Parser) Parse() (Node, error) {
 	}
 
 	// Otherwise, parse as an expression (for direct query execution)
-	return p.parseExpression()
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+
+	// Story S3 (#2358): require EOF after the top-level expression parse so
+	// trailing garbage (`active == true bogus trailing tokens`) surfaces as an
+	// error instead of being silently dropped. This mirrors the tail check the
+	// ParseExpression() package function has always had, and is scoped to this
+	// method's expression fall-through: every Parse() caller that feeds a full
+	// .memql file takes one of the parseFile() branches above and never reaches
+	// here. The #2358 caller survey confirmed no caller relies on the dropped
+	// tail (the file-oriented callers already reject any non-*File result).
+	for p.check(TokenSemicolon) {
+		p.advance()
+	}
+	if !p.check(TokenEOF) {
+		return nil, newParseErrorf(&p.current, "unexpected token %q after expression -- a single expression must consume all of its input", p.current.Literal)
+	}
+	return expr, nil
 }
 
 // ParseFile tokenises the given source and parses it as a full .memql
@@ -550,16 +569,6 @@ var TopLevelDeclKeywords = func() []string {
 	return out
 }()
 
-// topLevelDeclKeywordList renders TopLevelDeclKeywords as a quoted,
-// comma-separated list for the parseDefinition unexpected-token error.
-func topLevelDeclKeywordList() string {
-	quoted := make([]string, len(TopLevelDeclKeywords))
-	for i, kw := range TopLevelDeclKeywords {
-		quoted[i] = "'" + kw + "'"
-	}
-	return strings.Join(quoted, ", ")
-}
-
 // parseDefinition parses a single definition (function).
 // Supports @attribute Python-style decorators before func declarations.
 func (p *Parser) parseDefinition() (Node, error) {
@@ -608,7 +617,15 @@ func (p *Parser) parseDefinition() (Node, error) {
 			attributes = nil
 		}
 	default:
-		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func' or one of %s", p.current.Literal, topLevelDeclKeywordList())
+		// Story S3 (#2358): the expected-keyword hint now lists the FULL
+		// author-facing set -- `func` + every contextual declaration keyword +
+		// the rewriter-handled query/mutate/logic/automation family (previously
+		// omitted, so a typo'd `query` got a hint list that didn't contain
+		// `query`). A Levenshtein did-you-mean points at the nearest keyword
+		// (`quer` -> `query`, `conept` -> `concept`).
+		hint := topLevelKeywordHintKeywords()
+		return nil, newParseErrorf(&p.current, "unexpected token %q, expected a top-level declaration keyword -- one of %s%s",
+			p.current.Literal, renderKeywordList(hint), didYouMean(p.current.Literal, hint))
 	}
 
 	if err != nil {
@@ -4980,6 +4997,7 @@ func isInvocationKindKeyword(name string) bool {
 // parseIdentifierExpression parses function calls, field references, or comparisons.
 func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 	name := p.current.Literal
+	nameTok := p.current // retained for a precise error position on the leading word
 	p.advance()
 
 	// Story 2 (#2324): kind-prefixed construct invocation `<kind> <name>(args)`.
@@ -5017,6 +5035,33 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 		predName := p.current.Literal
 		p.advance() // consume the predicate name
 		return &SpecReferenceExpr{Name: predName, Trait: name == "trait"}, nil
+	}
+
+	// Story S3 (#2358): a bare `<ident> <ident>(` whose LEADING identifier is
+	// NOT a known invocation kind is a mistyped kind-prefixed call -- the
+	// classic `mutate` (mutation *declaration* verb) written in *call*
+	// position where the *invocation* noun `mutation` belongs. Historically
+	// the leading word lowered to a bare SpecReferenceExpr and the entire
+	// `<ident>(...)` call was silently DROPPED (`mutate createNode(id:"x")`
+	// parsed as SpecReferenceExpr{Name:"mutate"}, err=nil). Reject it with a
+	// Levenshtein nearest-kind hint so a typo can no longer become a silent
+	// semantic change.
+	//
+	// Delimitation -- this fires ONLY on the exact `identifier identifier (`
+	// shape and cannot swallow any valid form:
+	//   - a real invocation kind (`mutation createNode(`) already returned above;
+	//   - the `spec <name>` / `trait <name>` predicate form has NO following
+	//     paren (peekAhead(1) != '('), so it returned above / falls through;
+	//   - top-level declaration headers use braces, not parens
+	//     (`query participant qFoo {` -- peekAhead(1) is an identifier, not '(');
+	//   - a bare call (`createNode(`) has '(' immediately after the first word,
+	//     so p.current is '(' here, not an identifier;
+	//   - collection lambdas / dotted calls (`args.members.where(`) arrive as a
+	//     single fused identifier followed by '(', never ident-ident.
+	if p.check(TokenIdentifier) && p.peekAhead(1).Type == TokenParenOpen {
+		return nil, newParseErrorf(&nameTok,
+			"%q is not a construct-invocation kind, so the call %s(...) would be silently dropped -- a kind-prefixed call must lead with one of %s%s",
+			name, p.current.Literal, renderKeywordList(invocationKindKeywordList()), didYouMean(name, kindSuggestionCandidates()))
 	}
 
 	// Check for function call
