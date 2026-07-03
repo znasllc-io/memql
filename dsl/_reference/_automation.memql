@@ -123,8 +123,9 @@ automation registerNodeLonghand {
 //   - `args.<field>` -- the validated map is exposed as `args` (G1).
 //   - bare `<field>` -- resolves loop-var > step name > args field; a typo'd
 //     or shadowed name is a LOAD ERROR, never a silent nil (G2, #2364).
-//   - G3 (#2365, NOT YET): named-arg PUNNING -- `action f(environment)` as
-//     sugar for `action f(environment: environment)`.
+//   - punned `f(environment)` == `f(environment: environment)` -- a bare
+//     simple identifier in a construct-call arg position (G3, #2365); any
+//     other positional argument on a construct call is rejected.
 // Envelope intrinsics stay prefixed: `event.topic`, `event.kind`,
 // `event.timestamp` (RFC3339 occurrence time; distinct from `now`), and
 // `event.actor.id` (the acting identity, present when the emitter stamped
@@ -152,9 +153,9 @@ automation deployWithArgs {
 // Phase 3). Engine mesh ONLY -- no bff/copresent. Actions default to the
 // `cockpit/runner` surface; the env `switch` stays in ONE automation.
 //
-// NOTE: the `event.payload.X` reads below predate the typed args contract
-// (§3a). With an `args { }` block declared, those become `args.X` (G1) or
-// bare `X` (G2, #2364), and punned `f(X)` once G3 (#2365) lands.
+// NOTE (G5, #2367): `event.payload.X` reads are RETIRED in automation
+// bodies -- declare the field in the `args { }` block and read it bare
+// (or as `args.X`); the migrator is scripts/migrations/event_payload_args.
 // `event.actor.id` is the envelope actor (G4, #2366): populated on graph CDC
 // events (.created / .updated) from the mutation's acting identity; absent
 // when an emitter carries no actor -- guard with exists(event.actor).
@@ -183,41 +184,40 @@ automation deployWithArgs {
 //   automation deployEngineCluster {
 //     step authorize { logic requireForwardDeploy(event: event) }   // requiresDeveloperOrAbove
 //     step record    { mutation createDeployment(                   // ONE write
-//                        deploymentId: event.payload.deploymentId,
-//                        environment:  event.payload.environment,
+//                        deploymentId,          // punned (G3)
+//                        environment,           // punned (G3)
 //                        triggeredBy:  event.actor.id) }
 //     step clone     { action cloneRepoAtVersion(
-//                        workdir: event.payload.workdir, ref: event.payload.ref)
+//                        workdir, ref)          // punned (G3)
 //                      on surface("cockpit/runner") }
 //     step build     { forEach nodeType in logic engineNodeTypes() {
 //                        action buildEngineImage(
-//                          nodeType: nodeType, version: event.payload.version,
-//                          workdir: event.payload.workdir) } }
+//                          nodeType, version, workdir) } }  // punned
 //     step place {
-//       switch event.payload.environment {
+//       switch environment {
 //         case "development" {
 //           forEach nodeType in logic engineNodeTypes() {
 //             action importImageToK3d(nodeType: nodeType, cluster: "memql") }
 //         }
 //         default {  // staging | production -> GitOps (deploys = merges)
 //           action pinOverlayDigests(
-//             overlayPath: logic overlayPathForEnv(env: event.payload.environment),
+//             overlayPath: logic overlayPathForEnv(env: environment),
 //             digests: $steps.build.result)
-//           action argoSync(app: "memql", revision: event.payload.ref)
+//           action argoSync(app: "memql", revision: ref)
 //         }
 //       }
 //     }
 //     step gate { action runDeployGate(
-//                   env: event.payload.environment, workdir: event.payload.workdir) }
+//                   env: environment, workdir) }
 //     step finish {
 //       on success when logic deployGatePassed(gate: $steps.gate.result) {
-//         mutation updateDeploymentStatus(deploymentId: event.payload.deploymentId, status: "succeeded")
-//         action notifyDeploy(env: event.payload.environment, status: "succeeded")
+//         mutation updateDeploymentStatus(deploymentId,          // punned (G3) status: "succeeded")
+//         action notifyDeploy(env: environment, status: "succeeded")
 //       }
 //       on failure {
-//         action revertOverlay(overlayPath: logic overlayPathForEnv(env: event.payload.environment))
-//         mutation updateDeploymentStatus(deploymentId: event.payload.deploymentId, status: "failed")
-//         action notifyDeploy(env: event.payload.environment, status: "failed")
+//         action revertOverlay(overlayPath: logic overlayPathForEnv(env: environment))
+//         mutation updateDeploymentStatus(deploymentId,          // punned (G3) status: "failed")
+//         action notifyDeploy(env: environment, status: "failed")
 //       }
 //     }
 //   }

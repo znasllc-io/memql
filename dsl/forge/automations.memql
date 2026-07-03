@@ -40,42 +40,48 @@ use forge.mutations.{ advanceRequest, recordRequestEvent }
 @trigger(event="node.created", concept="v1:forge:request", partition="*")
 @description("On submission of a v1:forge:request, route it to its next approval-pipeline state by the submitter's role (owner fast-track -> queued / developer -> needs_approval / non-developer -> needs_validation) and record a 'routed' audit event. Event-bound persist steps bind args from event.payload (#2235).")
 automation routeRequest {
+  args {
+    id any
+    submitterRole any
+    submitterUserId any
+  }
+
   step persistOwner {
-    if event.payload.submitterRole == "owner" {
+    if submitterRole == "owner" {
       mutation advanceRequest (
-        requestId: event.payload.id,
+        requestId: id,
         status: "queued",
-        approvedByUserId: event.payload.submitterUserId
+        approvedByUserId: submitterUserId
       )
     }
   }
   step persistAdmin {
-    if event.payload.submitterRole == "admin" {
+    if submitterRole == "admin" {
       mutation advanceRequest (
-        requestId: event.payload.id,
+        requestId: id,
         status: "needs_approval"
       )
     }
   }
   step persistWriter {
-    if event.payload.submitterRole == "writer" {
+    if submitterRole == "writer" {
       mutation advanceRequest (
-        requestId: event.payload.id,
+        requestId: id,
         status: "needs_approval"
       )
     }
   }
   step persistReader {
-    if event.payload.submitterRole == "reader" {
+    if submitterRole == "reader" {
       mutation advanceRequest (
-        requestId: event.payload.id,
+        requestId: id,
         status: "needs_validation"
       )
     }
   }
   step persistRouted {
     mutation recordRequestEvent (
-      requestId: event.payload.id,
+      requestId: id,
       kind: "routed",
       fromStatus: "submitted",
       note: "routed by submitter role"
@@ -87,43 +93,49 @@ automation routeRequest {
 @trigger(event="node.updated", concept="v1:forge:request", partition="*")
 @description("On every v1:forge:request status transition (validate / approve / changes-requested / reject), append exactly one v1:forge:requestEvent with the derived kind, fromStatus (event.payload.oldStatus), and toStatus (event.payload.status). Silently skips updates that do not change status or land on an unrecognised status. No loop risk: the recorder writes a requestEvent (a different concept) so it cannot re-fire this automation. Event-bound persist steps bind args from event.payload (#2235).")
 automation recordTransition {
+  args {
+    id any
+    oldStatus any
+    status any
+  }
+
   step persistValidated {
-    if event.payload.status == "needs_approval" {
+    if status == "needs_approval" {
       mutation recordRequestEvent (
-        requestId: event.payload.id,
+        requestId: id,
         kind: "validated",
-        fromStatus: event.payload.oldStatus,
-        toStatus: event.payload.status
+        fromStatus: oldStatus,
+        toStatus: status
       )
     }
   }
   step persistApproved {
-    if event.payload.status == "queued" {
+    if status == "queued" {
       mutation recordRequestEvent (
-        requestId: event.payload.id,
+        requestId: id,
         kind: "approved",
-        fromStatus: event.payload.oldStatus,
-        toStatus: event.payload.status
+        fromStatus: oldStatus,
+        toStatus: status
       )
     }
   }
   step persistChangesRequested {
-    if event.payload.status == "changes_requested" {
+    if status == "changes_requested" {
       mutation recordRequestEvent (
-        requestId: event.payload.id,
+        requestId: id,
         kind: "changes_requested",
-        fromStatus: event.payload.oldStatus,
-        toStatus: event.payload.status
+        fromStatus: oldStatus,
+        toStatus: status
       )
     }
   }
   step persistRejected {
-    if event.payload.status == "rejected" {
+    if status == "rejected" {
       mutation recordRequestEvent (
-        requestId: event.payload.id,
+        requestId: id,
         kind: "rejected",
-        fromStatus: event.payload.oldStatus,
-        toStatus: event.payload.status
+        fromStatus: oldStatus,
+        toStatus: status
       )
     }
   }

@@ -274,19 +274,15 @@ func checkArgMapIdentifiers(a *Automation, where string, m map[string]any, field
 	return nil
 }
 
+// checkValueIdentifiers is deliberately a NO-OP for string leaves: parseValue
+// strips quotes from string values at parse time, so a literal
+// `reason: "system.shutdown"` and a dotted reference arrive as IDENTICAL
+// strings -- static identifier validation on values is unsound. The runtime
+// resolves value strings ref-first (loop var / step / args field, G2) with
+// the literal as fallback, exactly as before. Strict typo rejection holds on
+// the surfaces where every token IS an expression: step conditions, forEach
+// source/filter (filters keep their quotes since #2367), and switch subjects.
 func checkValueIdentifiers(a *Automation, where string, v any, fields, stepIDs, loopVars map[string]bool) error {
-	switch tv := v.(type) {
-	case string:
-		return checkExprIdentifiers(a, where, tv, fields, stepIDs, loopVars)
-	case map[string]any:
-		return checkArgMapIdentifiers(a, where, tv, fields, stepIDs, loopVars)
-	case []any:
-		for _, item := range tv {
-			if err := checkValueIdentifiers(a, where, item, fields, stepIDs, loopVars); err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 
@@ -319,4 +315,80 @@ func checkExprIdentifiers(a *Automation, where, expr string, fields, stepIDs, lo
 		return fmt.Errorf("automation %q: unknown bare identifier %q in %s -- not a reserved name, loop variable, step name, or args field. Declare it in the args { } block, or reference it explicitly (args.X / steps.X / event.payload.X)", a.Name, head, where)
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// G5 (memql#2367): retired event.payload reads -- source-level scan
+// ---------------------------------------------------------------------------
+
+// eventPayloadReadPattern matches a live `event.payload.<field>` (or the
+// `$event.payload.<field>` dollar form) read in authored automation source.
+var eventPayloadReadPattern = regexp.MustCompile(`[$]?\bevent\.payload\.[A-Za-z_]`)
+
+// scrubSourceForPayloadScan blanks string literals and line comments so the
+// retirement scan never fires on prose (@description text, header comments).
+func scrubSourceForPayloadScan(s string) string {
+	var out strings.Builder
+	i := 0
+	for i < len(s) {
+		switch {
+		case s[i] == '"':
+			j := i + 1
+			for j < len(s) && (s[j] != '"' || s[j-1] == '\\') {
+				j++
+			}
+			if j < len(s) {
+				j++
+			}
+			out.WriteString(strings.Repeat(" ", j-i))
+			i = j
+		case strings.HasPrefix(s[i:], "//"):
+			j := strings.IndexByte(s[i:], '\n')
+			if j < 0 {
+				j = len(s) - i
+			}
+			out.WriteString(strings.Repeat(" ", j))
+			i += j
+		default:
+			out.WriteByte(s[i])
+			i++
+		}
+	}
+	return out.String()
+}
+
+// ResolveBareArg exposes the G2 bare-resolution tiers (loop var -> step ->
+// args field, declared-absent -> nil) to the arg-time evaluators in the steps
+// package (G5, #2367): without it a bare/punned args-field VALUE falls through
+// to the literal-name fallback -- `coalesce(source, "uploaded")` returned the
+// string "source". Gated on the args binding; args-less automations get
+// (nil, false) and keep prior behavior.
+func (e *Evaluator) ResolveBareArg(name string) (any, bool) {
+	return e.resolveBareForArgsAutomation(name)
+}
+
+// ResolveArgsPath resolves a dotted path whose HEAD resolves through the G2
+// tiers (e.g. `node.id` where `node` is an args field carrying an object).
+// A resolvable head with a missing tail yields (nil, true) so coalesce
+// defaults apply -- never the literal path text.
+func (e *Evaluator) ResolveArgsPath(path string) (any, bool) {
+	if _, gated := e.custom["args"].(map[string]any); !gated {
+		return nil, false
+	}
+	head, rest, _ := strings.Cut(path, ".")
+	root, ok := e.resolveBareForArgsAutomation(head)
+	if !ok {
+		return nil, false
+	}
+	cur := root
+	for rest != "" {
+		var seg string
+		seg, rest, _ = strings.Cut(rest, ".")
+		m, isMap := cur.(map[string]any)
+		if !isMap {
+			return nil, true
+		}
+		cur = m[seg]
+	}
+	return cur, true
 }

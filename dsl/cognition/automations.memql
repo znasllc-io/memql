@@ -20,14 +20,19 @@ use cognition.mutations.{ createSessionForParticipant, sendTextUtterance }
 @trigger(event="node.created", concept="v1:cognition:participant", partition="*")
 @description("Auto-creates a session when a participant joins a space")
 automation bootstrapSession {
+  args {
+    id any
+    partitionId any
+  }
+
   step decide {
-    logic bootstrapSession ( event: event )
+    logic bootstrapSession ( event )
   }
   step createSession {
     if steps.decide.result == true {
       mutation createSessionForParticipant (
-        participantId: coalesce(event.payload.id, ""),
-        partitionId:   coalesce(event.payload.partitionId, "")
+        participantId: coalesce(id, ""),
+        partitionId:   coalesce(partitionId, "")
       )
     }
   }
@@ -36,9 +41,9 @@ automation bootstrapSession {
       publishEvent(
         topic: "session.created",
         payload: {
-          sessionId:     coalesce(event.payload.id, ""),
-          participantId: coalesce(event.payload.id, ""),
-          partitionId:   coalesce(event.payload.partitionId, ""),
+          sessionId:     coalesce(id, ""),
+          participantId: coalesce(id, ""),
+          partitionId:   coalesce(partitionId, ""),
           timestamp:     now
         }
       )
@@ -65,25 +70,32 @@ automation bootstrapSession {
 @trigger(event="cognition.response.requested")
 @description("Generate and insert AI response for an utterance")
 automation generateResponse {
+  args {
+    agentId any
+    partitionId any
+    siParticipantId any
+    utteranceId any
+  }
+
   step decide {
-    logic generateResponse ( event: event )
+    logic generateResponse ( event )
   }
   step insert {
     if steps.decide.result != "" {
       mutation sendTextUtterance (
-        partitionId:   coalesce(event.payload.partitionId, ""),
-        participantId: coalesce(event.payload.siParticipantId, ""),
+        partitionId:   coalesce(partitionId, ""),
+        participantId: coalesce(siParticipantId, ""),
         text:          steps.decide.result,
-        replyToId:     coalesce(event.payload.utteranceId, ""),
-        source:        { inputMethod: "si", agentId: coalesce(event.payload.agentId, "") }
+        replyToId:     coalesce(utteranceId, ""),
+        source:        { inputMethod: "si", agentId: coalesce(agentId, "") }
       )
     }
   }
   step presence {
     if steps.decide.result != "" {
       builtin cognitionTrackPresence(
-        participantId: coalesce(event.payload.siParticipantId, ""),
-        partitionId:   coalesce(event.payload.partitionId, ""),
+        participantId: coalesce(siParticipantId, ""),
+        partitionId:   coalesce(partitionId, ""),
         state:         "idle"
       )
     }

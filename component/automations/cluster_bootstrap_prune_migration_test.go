@@ -41,27 +41,33 @@ const bootstrapClusterAutomation = `@enabled
 @trigger(event="system.startup")
 @description("Bootstrap cluster, database, and identity provider records on first startup")
 automation bootstrapCluster {
+  args {
+    database any
+    identityProvider any
+    node any
+    provider any
+  }
   step decide {
     logic bootstrapCluster {
       event: event
     }
   }
-  step database {
+  step databaseRecord {
     if steps.decide.result == true {
       createDatabase {
-        host:    coalesce(event.payload.database.host, "localhost"),
-        dbName:  coalesce(event.payload.database.dbName, "memql"),
-        sslMode: coalesce(event.payload.database.sslMode, "disable")
+        host:    coalesce(database.host, "localhost"),
+        dbName:  coalesce(database.dbName, "memql"),
+        sslMode: coalesce(database.sslMode, "disable")
       }
     }
   }
-  step identityProvider {
+  step idpRecord {
     if steps.decide.result == true && exists(payload.identityProvider) {
       createIdentityProvider {
-        name:           coalesce(event.payload.identityProvider.name, "memql-identity"),
-        issuerUrl:      coalesce(event.payload.identityProvider.issuerUrl, ""),
-        clientIdPrefix: coalesce(event.payload.identityProvider.clientIdPrefix, ""),
-        redirectUrl:    coalesce(event.payload.identityProvider.redirectUrl, "")
+        name:           coalesce(identityProvider.name, "memql-identity"),
+        issuerUrl:      coalesce(identityProvider.issuerUrl, ""),
+        clientIdPrefix: coalesce(identityProvider.clientIdPrefix, ""),
+        redirectUrl:    coalesce(identityProvider.redirectUrl, "")
       }
     }
   }
@@ -71,8 +77,8 @@ automation bootstrapCluster {
         name:        "development",
         environment: "development",
         region:      "local",
-        provider:    coalesce(event.payload.provider, ""),
-        version:     coalesce(event.payload.node.version, "")
+        provider:    coalesce(provider, ""),
+        version:     coalesce(node.version, "")
       }
     }
   }
@@ -134,8 +140,8 @@ func TestBootstrapCluster_CompilesToDecideThenGatedCreates(t *testing.T) {
 	cases := []struct {
 		step, mutation, condition string
 	}{
-		{"database", "createDatabase", "steps.decide.result == true"},
-		{"identityProvider", "createIdentityProvider", "steps.decide.result == true && exists(payload.identityProvider)"},
+		{"databaseRecord", "createDatabase", "steps.decide.result == true"},
+		{"idpRecord", "createIdentityProvider", "steps.decide.result == true && exists(payload.identityProvider)"},
 		{"cluster", "createCluster", "steps.decide.result == true"},
 	}
 	for _, tc := range cases {

@@ -415,6 +415,16 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 		return nil, err
 	}
 
+	// G5 (memql#2367, ADR Decision 6): `event.payload.X` reads are RETIRED
+	// in automation bodies -- the payload binds to the args { } contract and
+	// is read bare (or as args.X). Rejected at the SOURCE level (comments and
+	// string literals scrubbed) so authored DSL cannot regress; programmatic
+	// Step construction and logic bodies (args.event.payload.X, a logic-arg
+	// read) are different surfaces and unaffected.
+	if eventPayloadReadPattern.MatchString(scrubSourceForPayloadScan(source)) {
+		return nil, fmt.Errorf("automation %q: event.payload.<field> reads are retired (G5, epic #2352) -- declare the field in the args { } block and read it bare. Migrate with: go run ./scripts/migrations/event_payload_args -write <dsl-root>", automation.Name)
+	}
+
 	// Validate trigger for potential misconfigurations
 	l.validateTrigger(&automation)
 

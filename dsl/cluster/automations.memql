@@ -39,27 +39,36 @@ use cluster.mutations.{ createCluster, createDatabase, createIdentityProvider, c
 @trigger(event="system.startup")
 @description("Bootstrap cluster, database, and identity provider records on first startup")
 automation bootstrapCluster {
+  args {
+    database any
+    identityProvider any
+    node any
+    provider any
+  }
+
   step decide {
     logic bootstrapCluster (
-      event: event
+      event
     )
   }
-  step database {
+  // Steps renamed (was database / identityProvider): G2 shadowing rule vs the
+  // synthesized args fields of the same names (#2364/#2367).
+  step databaseRecord {
     if steps.decide.result == true {
       mutation createDatabase (
-        host:    coalesce(event.payload.database.host, "localhost"),
-        dbName:  coalesce(event.payload.database.dbName, "memql"),
-        sslMode: coalesce(event.payload.database.sslMode, "disable")
+        host:    coalesce(database.host, "localhost"),
+        dbName:  coalesce(database.dbName, "memql"),
+        sslMode: coalesce(database.sslMode, "disable")
       )
     }
   }
-  step identityProvider {
+  step idpRecord {
     if steps.decide.result == true && exists(payload.identityProvider) {
       mutation createIdentityProvider (
-        name:           coalesce(event.payload.identityProvider.name, "memql-identity"),
-        issuerUrl:      coalesce(event.payload.identityProvider.issuerUrl, ""),
-        clientIdPrefix: coalesce(event.payload.identityProvider.clientIdPrefix, ""),
-        redirectUrl:    coalesce(event.payload.identityProvider.redirectUrl, "")
+        name:           coalesce(identityProvider.name, "memql-identity"),
+        issuerUrl:      coalesce(identityProvider.issuerUrl, ""),
+        clientIdPrefix: coalesce(identityProvider.clientIdPrefix, ""),
+        redirectUrl:    coalesce(identityProvider.redirectUrl, "")
       )
     }
   }
@@ -69,8 +78,8 @@ automation bootstrapCluster {
         name:        "development",
         environment: "development",
         region:      "local",
-        provider:    coalesce(event.payload.provider, ""),
-        version:     coalesce(event.payload.node.version, "")
+        provider:    coalesce(provider, ""),
+        version:     coalesce(node.version, "")
       )
     }
   }
@@ -88,10 +97,14 @@ automation bootstrapCluster {
 @trigger(event="system.shutdown")
 @description("Record node shutdown in the database")
 automation deregisterNode {
+  args {
+    node any
+  }
+
   step persist {
     mutation createSpawnEvent (
-      nodeId:   coalesce(event.payload.node.id, ""),
-      nodeType: coalesce(event.payload.node.type, ""),
+      nodeId:   coalesce(node.id, ""),
+      nodeType: coalesce(node.type, ""),
       action:   "stopped",
       reason:   "system.shutdown"
     )
@@ -113,21 +126,31 @@ automation deregisterNode {
 @trigger(event="system.startup")
 @description("Register this node in the database on startup")
 automation registerNode {
-  step node {
+  args {
+    deploymentId any
+    environment any
+    node any
+    provider any
+    region any
+  }
+
+  // Step renamed record (was node): the G2 shadowing rule (#2364) forbids a
+  // step id colliding with the args field of the same name.
+  step record {
     mutation createNode (
-      id:           coalesce(event.payload.node.id, ""),
-      nodeType:     coalesce(event.payload.node.type, ""),
-      address:      coalesce(event.payload.node.address, ""),
-      deploymentId: coalesce(event.payload.deploymentId, ""),
-      provider:     coalesce(event.payload.provider, ""),
-      environment:  coalesce(event.payload.environment, ""),
-      region:       coalesce(event.payload.region, "")
+      id:           coalesce(node.id, ""),
+      nodeType:     coalesce(node.type, ""),
+      address:      coalesce(node.address, ""),
+      deploymentId: coalesce(deploymentId, ""),
+      provider:     coalesce(provider, ""),
+      environment:  coalesce(environment, ""),
+      region:       coalesce(region, "")
     )
   }
   step spawn {
     mutation createSpawnEvent (
-      nodeId:   coalesce(event.payload.node.id, ""),
-      nodeType: coalesce(event.payload.node.type, ""),
+      nodeId:   coalesce(node.id, ""),
+      nodeType: coalesce(node.type, ""),
       action:   "spawned",
       reason:   "system.startup"
     )

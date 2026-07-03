@@ -237,7 +237,8 @@ func TestValidateArgsResolution_LoopVarScoped(t *testing.T) {
 				Do: []*Step{{ID: "per", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "f"}}},
 			}},
 			{ID: "after", Type: StepTypeFunction,
-				Function: &FunctionStepConfig{Name: "f", Args: map[string]any{"x": "nt"}}},
+				Condition: `nt == "voice"`, // loop var referenced outside its forEach
+				Function:  &FunctionStepConfig{Name: "f"}},
 		},
 	}
 	err := validateArgsResolution(a)
@@ -271,14 +272,15 @@ func TestValidateArgsResolution_ArgsLessExempt(t *testing.T) {
 const g2E2ESource = `@trigger(event="deploy.requested", concept="v1:cluster:deployment")
 automation g2BareFieldsDeploy {
   args {
-    environment string @required
-    workdir     string @required
+    environment     string   @required
+    workdir         string   @required
+    engineNodeTypes []string @required
   }
   step gate {
     logic deployGateGreen { environment: environment, workdir: workdir }
   }
   step fan {
-    forEach nt in event.payload.engineNodeTypes {
+    forEach nt in engineNodeTypes {
       logic buildOne { nodeType: nt, workdir: workdir }
     }
   }
@@ -290,19 +292,82 @@ func TestCompileMemQL_BareArgsFieldsAccepted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compileMemQL rejected valid bare args fields: %v", err)
 	}
-	if auto.Args == nil || len(auto.Args.Fields) != 2 {
+	if auto.Args == nil || len(auto.Args.Fields) != 3 {
 		t.Fatalf("args schema not attached as expected")
 	}
 }
 
 func TestCompileMemQL_TypoedBareFieldRejected(t *testing.T) {
 	loader := NewLoader(LoaderOptions{})
-	src := strings.Replace(g2E2ESource, "workdir: workdir }\n  }\n  step fan", "workdir: workdirr }\n  }\n  step fan", 1)
+	// Typos in CONDITIONS are strictly rejected (a condition token is always
+	// an expression). Single-bare-word VALUES are pun-or-literal by design --
+	// lowering strips quotes, so `status: "x"` and a bare ref are identical
+	// strings and the runtime resolves ref-first, literal-fallback (see
+	// checkValueIdentifiers).
+	src := strings.Replace(g2E2ESource,
+		"logic deployGateGreen { environment: environment, workdir: workdir }",
+		"if enviroment == \"development\" {\n      logic deployGateGreen { environment: environment, workdir: workdir }\n    }", 1)
 	if src == g2E2ESource {
 		t.Fatal("test setup: replacement did not apply")
 	}
 	_, err := loader.compileMemQL(src, "test:g2Typo")
-	if err == nil || !strings.Contains(err.Error(), `unknown bare identifier "workdirr"`) {
-		t.Fatalf("typo'd bare field must fail compile with the unknown-identifier error, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), `unknown bare identifier "enviroment"`) {
+		t.Fatalf("typo'd bare field in a condition must fail compile, got: %v", err)
+	}
+}
+
+// G5 (#2367): event.payload reads are retired in automation bodies -- the
+// compile path rejects them with the migration hint; prose in comments and
+// @description strings never trips the scan.
+func TestCompileMemQL_EventPayloadReadRetired(t *testing.T) {
+	loader := NewLoader(LoaderOptions{})
+	src := `@trigger(event="deploy.requested", concept="v1:cluster:deployment")
+automation legacyReader {
+  step run {
+    logic doThing(deploymentId: event.payload.deploymentId)
+  }
+}`
+	_, err := loader.compileMemQL(src, "test:legacyReader")
+	if err == nil || !strings.Contains(err.Error(), "event.payload.<field> reads are retired") {
+		t.Fatalf("event.payload read must be rejected with the migration hint, got: %v", err)
+	}
+
+	// Prose mentions are fine: comment + @description string.
+	prose := `// reads event.payload.id historically
+@trigger(event="deploy.requested", concept="v1:cluster:deployment")
+@description("binds args from event.payload.status transitions")
+automation proseOnly {
+  args {
+    deploymentId any
+  }
+  step run {
+    logic doThing(deploymentId)
+  }
+}`
+	if _, err := loader.compileMemQL(prose, "test:proseOnly"); err != nil {
+		t.Fatalf("prose-only event.payload mentions must not trip the retirement scan: %v", err)
+	}
+}
+
+// G5 fallout fixes (#2367, caught by the DB-gated conformance suite in CI):
+
+// ResolveArgsPath walks a dotted path whose head is an args field; a missing
+// tail yields (nil, true) so coalesce defaults apply.
+func TestResolveArgsPath(t *testing.T) {
+	e := g2Evaluator(map[string]any{"node": map[string]any{"id": "n1"}}, map[string]bool{"node": true})
+	v, ok := e.ResolveArgsPath("node.id")
+	if !ok || v != "n1" {
+		t.Fatalf("node.id = (%v,%v), want (n1,true)", v, ok)
+	}
+	v, ok = e.ResolveArgsPath("node.missing.deep")
+	if !ok || v != nil {
+		t.Fatalf("missing tail = (%v,%v), want (nil,true)", v, ok)
+	}
+	if _, ok := e.ResolveArgsPath("unknown.id"); ok {
+		t.Fatal("unknown head must not resolve")
+	}
+	argsLess := NewEvaluator()
+	if _, ok := argsLess.ResolveArgsPath("node.id"); ok {
+		t.Fatal("args-less evaluator must not resolve paths")
 	}
 }
