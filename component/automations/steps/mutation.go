@@ -350,6 +350,18 @@ func (e *MutationExecutor) evaluateValue(evaluator *automations.Evaluator, value
 			if result, ok := evaluator.StepResultValue(v); ok {
 				return result, nil
 			}
+			// G2/G5 (#2364/#2367): bare args-field values (incl. G3 puns)
+			// resolve to the bound value; declared-but-absent -> nil so
+			// coalesce defaults apply. Args-less automations unaffected.
+			if result, ok := evaluator.ResolveBareArg(v); ok {
+				return result, nil
+			}
+		} else if strings.Contains(v, ".") && !strings.ContainsAny(v, " \t(){}[]\"=<>!&|,") {
+			// Dotted path whose head is an args field (`node.id`) -- same
+			// tier, walked into the bound object. (#2367)
+			if result, ok := evaluator.ResolveArgsPath(v); ok {
+				return result, nil
+			}
 		}
 		// Resolve embedded $ references (e.g. "lead-$event.payload.id").
 		// This intentionally does not attempt to type-coerce; it returns a string.

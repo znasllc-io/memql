@@ -348,3 +348,26 @@ automation proseOnly {
 		t.Fatalf("prose-only event.payload mentions must not trip the retirement scan: %v", err)
 	}
 }
+
+// G5 fallout fixes (#2367, caught by the DB-gated conformance suite in CI):
+
+// ResolveArgsPath walks a dotted path whose head is an args field; a missing
+// tail yields (nil, true) so coalesce defaults apply.
+func TestResolveArgsPath(t *testing.T) {
+	e := g2Evaluator(map[string]any{"node": map[string]any{"id": "n1"}}, map[string]bool{"node": true})
+	v, ok := e.ResolveArgsPath("node.id")
+	if !ok || v != "n1" {
+		t.Fatalf("node.id = (%v,%v), want (n1,true)", v, ok)
+	}
+	v, ok = e.ResolveArgsPath("node.missing.deep")
+	if !ok || v != nil {
+		t.Fatalf("missing tail = (%v,%v), want (nil,true)", v, ok)
+	}
+	if _, ok := e.ResolveArgsPath("unknown.id"); ok {
+		t.Fatal("unknown head must not resolve")
+	}
+	argsLess := NewEvaluator()
+	if _, ok := argsLess.ResolveArgsPath("node.id"); ok {
+		t.Fatal("args-less evaluator must not resolve paths")
+	}
+}

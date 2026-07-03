@@ -356,3 +356,39 @@ func scrubSourceForPayloadScan(s string) string {
 	}
 	return out.String()
 }
+
+// ResolveBareArg exposes the G2 bare-resolution tiers (loop var -> step ->
+// args field, declared-absent -> nil) to the arg-time evaluators in the steps
+// package (G5, #2367): without it a bare/punned args-field VALUE falls through
+// to the literal-name fallback -- `coalesce(source, "uploaded")` returned the
+// string "source". Gated on the args binding; args-less automations get
+// (nil, false) and keep prior behavior.
+func (e *Evaluator) ResolveBareArg(name string) (any, bool) {
+	return e.resolveBareForArgsAutomation(name)
+}
+
+// ResolveArgsPath resolves a dotted path whose HEAD resolves through the G2
+// tiers (e.g. `node.id` where `node` is an args field carrying an object).
+// A resolvable head with a missing tail yields (nil, true) so coalesce
+// defaults apply -- never the literal path text.
+func (e *Evaluator) ResolveArgsPath(path string) (any, bool) {
+	if _, gated := e.custom["args"].(map[string]any); !gated {
+		return nil, false
+	}
+	head, rest, _ := strings.Cut(path, ".")
+	root, ok := e.resolveBareForArgsAutomation(head)
+	if !ok {
+		return nil, false
+	}
+	cur := root
+	for rest != "" {
+		var seg string
+		seg, rest, _ = strings.Cut(rest, ".")
+		m, isMap := cur.(map[string]any)
+		if !isMap {
+			return nil, true
+		}
+		cur = m[seg]
+	}
+	return cur, true
+}

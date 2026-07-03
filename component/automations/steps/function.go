@@ -381,6 +381,16 @@ func resolveArgValueRef(v any, evaluator *automations.Evaluator) (any, error) {
 			if resolved, ok := evaluator.StepResultValue(val); ok {
 				return resolved, nil
 			}
+			// G2/G5 (#2364/#2367): bare args-field values (incl. G3 puns)
+			// resolve before rendering, so the query string carries the
+			// bound VALUE (properly quoted), never the field's own name.
+			if resolved, ok := evaluator.ResolveBareArg(val); ok {
+				return resolved, nil
+			}
+		} else if evaluator != nil && strings.Contains(val, ".") && !strings.ContainsAny(val, " \t(){}[]\"=<>!&|,") {
+			if resolved, ok := evaluator.ResolveArgsPath(val); ok {
+				return resolved, nil
+			}
 		}
 		// concat() has its own arg-time evaluator that recurses into
 		// nested builtins. Kept separate because evaluateArgConcat was

@@ -1309,7 +1309,7 @@ func translateStepCall(body string) (string, error) {
 		if first == "automation" {
 			name = first + strings.ToUpper(bare[:1]) + bare[1:]
 		}
-		return finishCall(name, strings.TrimLeft(after, " \t\n\r"))
+		return finishCallKinded(name, strings.TrimLeft(after, " \t\n\r"), true)
 	}
 
 	return finishCall(first, strings.TrimLeft(rest, " \t\n\r"))
@@ -2172,11 +2172,34 @@ func kindPrefix(name string) bool {
 }
 
 func finishCall(name, rest string) (string, error) {
+	return finishCallKinded(name, rest, false)
+}
+
+// finishCallKinded is finishCall with construct-call awareness: when the
+// authored step carried a kind prefix (`logic X(...)`), bare-identifier args
+// are PUNNED textually (`event` -> `event: event`, G3/#2365) during lowering.
+// The lowering strips the kind before the generic call parser runs, so the
+// parser's own kind-gated pun branch can never fire on this path -- without
+// the textual expansion a punned arg lowered to a POSITIONAL "0" key and the
+// runtime rebuilt a broken query (#2367 conformance fallout). Bare calls
+// (primitive builtins) are untouched: their positional args are legitimate.
+func finishCallKinded(name, rest string, construct bool) (string, error) {
 	if rest == "" {
 		return name + "()", nil
 	}
 	switch rest[0] {
 	case '(':
+		if construct {
+			closeRel := findMatchingCloseParen(rest, 0)
+			if closeRel < 0 {
+				return "", fmt.Errorf("call %q: missing closing paren", name)
+			}
+			tail := strings.TrimSpace(rest[closeRel+1:])
+			if tail != "" {
+				return "", fmt.Errorf("call %q: unexpected trailing text after args: %q", name, tail)
+			}
+			return name + "(" + expandPunnedArgs(rest[1:closeRel]) + ")", nil
+		}
 		return name + rest, nil
 	case '{':
 		closeRel := findMatchingCloseBrace(rest, 0)
@@ -2195,10 +2218,57 @@ func finishCall(name, rest string) (string, error) {
 		if inner == "" {
 			return name + "()", nil
 		}
+		if construct {
+			inner = expandPunnedArgs(inner)
+		}
 		return name + "(" + inner + ")", nil
 	default:
 		return "", fmt.Errorf("call %q: expected `(` or `{` after name, got %q", name, rest[:1])
 	}
+}
+
+// expandPunnedArgs rewrites each TOP-LEVEL bare-identifier argument to its
+// named form (`x` -> `x: x`). Depth-aware over parens/braces/brackets and
+// quote-aware, so nested calls, object values, and string contents are never
+// split or rewritten.
+func expandPunnedArgs(argsText string) string {
+	parts := splitTopLevelArgs(argsText)
+	for i, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if bareIdentOnly.MatchString(trimmed) {
+			parts[i] = strings.Replace(part, trimmed, trimmed+": "+trimmed, 1)
+		}
+	}
+	return strings.Join(parts, ",")
+}
+
+var bareIdentOnly = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// splitTopLevelArgs splits on commas at depth zero, respecting quotes.
+func splitTopLevelArgs(s string) []string {
+	var parts []string
+	depth, start := 0, 0
+	inStr := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case inStr:
+			if c == '"' && s[i-1] != '\\' {
+				inStr = false
+			}
+		case c == '"':
+			inStr = true
+		case c == '(' || c == '{' || c == '[':
+			depth++
+		case c == ')' || c == '}' || c == ']':
+			depth--
+		case c == ',' && depth == 0:
+			parts = append(parts, s[start:i])
+			start = i + 1
+		}
+	}
+	parts = append(parts, s[start:])
+	return parts
 }
 
 // =============================================================================
