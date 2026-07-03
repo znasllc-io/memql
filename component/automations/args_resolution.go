@@ -1,0 +1,322 @@
+package automations
+
+// args_resolution.go implements G2 of the event-payload-binding epic
+// (memql#2352, story #2364; ADR docs/internal/design/event-payload-binding-adr.md
+// Decision 3): bare-field reads inside automations that declare an
+// `args { }` block, plus the load-time rules that keep them unambiguous.
+//
+// Runtime -- for an args-block automation, a BARE identifier in a step arg,
+// condition, switch subject, or forEach source/filter resolves in tier
+// order: loop variable in scope -> recorded step result -> args field.
+// A declared-but-absent optional field resolves to nil (never to the
+// identifier's own text -- the literal-string fallback is the silent-wrong-
+// value class this story kills). Automations WITHOUT an args block keep
+// their exact prior behavior: every new path is gated on the `args`
+// binding G1 seeds, so the existing tree is untouched.
+//
+// Load time -- validateArgsResolution rejects, for args-block automations
+// only:
+//   - an args field shadowing a reserved engine name;
+//   - a step id or forEach loop variable shadowing an args field;
+//   - a bare identifier in an authored expression that is not a reserved
+//     name, loop variable in scope, step name, or args field (a typo'd
+//     field would otherwise be a runtime nil/literal).
+// Explicit `args.X` remains valid everywhere as the disambiguator.
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+)
+
+// reservedAutomationRoots are the engine-provided bare roots an automation
+// expression may reference. An args field may not shadow any of these
+// (mirrors the reserved-name rule for function args). The set is the ADR
+// Decision 3 reserved list plus the evaluator's long-standing ambient roots
+// (conditionRootSegment) and the `payload.X` filter shorthand.
+var reservedAutomationRoots = map[string]bool{
+	// ADR Decision 3 reserved names.
+	"now": true, "actor": true, "partition": true, "config": true,
+	"trace": true, "event": true, "args": true, "steps": true,
+	// Evaluator ambient roots + shorthands (conditionRootSegment,
+	// EvaluateFilterValue).
+	"timestamp": true, "ctx": true, "input": true, "item": true,
+	"var": true, "systemVar": true, "secret": true, "systemSecret": true,
+	"automation": true, "payload": true, "error": true,
+}
+
+// bareExprLiterals are tokens that look like identifiers but are literal /
+// operator vocabulary in the evaluator's expression dialect -- never
+// resolution candidates.
+var bareExprLiterals = map[string]bool{
+	"true": true, "false": true, "null": true, "nil": true,
+	"and": true, "or": true, "not": true, "in": true,
+	"exists": true, "len": true, "cond": true, "coalesce": true, "concat": true,
+}
+
+// resolveBareForArgsAutomation implements the runtime tier order for a bare
+// identifier inside an args-block automation:
+//
+//	loop variable -> step result -> args field (bound, or declared -> nil).
+//
+// Returns (nil, false) when the automation carries no args binding, so
+// args-less automations keep their exact prior behavior (G2 is additive).
+func (e *Evaluator) resolveBareForArgsAutomation(name string) (any, bool) {
+	boundArgs, gated := e.custom["args"].(map[string]any)
+	if !gated {
+		return nil, false
+	}
+	// Tier 2: loop variable in scope (tier 1, reserved names, never reaches
+	// the bare-identifier fallback -- they resolve via their existing forms).
+	if name == e.itemName && e.item != nil {
+		return e.item, true
+	}
+	// Tier 3: recorded step result.
+	if v, ok := e.StepResultValue(name); ok {
+		return v, true
+	}
+	// Tier 4: args field. A declared-but-absent optional field is nil --
+	// never the literal fallback.
+	if v, ok := boundArgs[name]; ok {
+		return v, true
+	}
+	if declared, ok := e.custom["argsDeclared"].(map[string]bool); ok && declared[name] {
+		return nil, true
+	}
+	return nil, false
+}
+
+// declaredArgsSet projects an automation's args-field names for the
+// evaluator seed (SetCustom("argsDeclared", ...)) so optional declared
+// fields resolve to nil instead of the literal fallback.
+func declaredArgsSet(a *Automation) map[string]bool {
+	if a == nil || a.Args == nil || len(a.Args.Fields) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(a.Args.Fields))
+	for _, f := range a.Args.Fields {
+		set[f.Name] = true
+	}
+	return set
+}
+
+// ---------------------------------------------------------------------------
+// Load-time validation
+// ---------------------------------------------------------------------------
+
+// bareTokenPattern matches identifier-ish tokens (with optional dotted
+// tails) in the evaluator's expression dialect. Quoted strings and
+// $-prefixed references are stripped/skipped before matching.
+var bareTokenPattern = regexp.MustCompile(`[$]?[A-Za-z_][A-Za-z0-9_.]*[(]?`)
+
+// quotedSegmentPattern strips single- and double-quoted string literals so
+// their content never yields candidate tokens.
+var quotedSegmentPattern = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'`)
+
+// validateArgsResolution enforces the ADR Decision 3 load-time rules on an
+// args-block automation. Automations without an args block are exempt --
+// their bare-identifier semantics (including the literal-string fallback)
+// are unchanged, so the existing tree cannot regress.
+func validateArgsResolution(a *Automation) error {
+	fields := declaredArgsSet(a)
+	if fields == nil {
+		return nil
+	}
+
+	// Rule 1: an args field may not shadow a reserved engine name.
+	for name := range fields {
+		if reservedAutomationRoots[name] {
+			return fmt.Errorf("automation %q: args field %q shadows a reserved engine name -- rename the field (reserved: now, actor, partition, config, trace, event, args, steps, ...)", a.Name, name)
+		}
+	}
+
+	// Rules 2+3 walk the step tree with loop-variable scope.
+	stepIDs := map[string]bool{}
+	collectStepIDs(a.Steps, stepIDs)
+
+	// Rule 2: a step id may not shadow an args field.
+	for id := range stepIDs {
+		if fields[id] {
+			return fmt.Errorf("automation %q: step %q shadows the args field of the same name -- rename one of them (bare %q must resolve unambiguously; explicit args.%s always works)", a.Name, id, id, id)
+		}
+	}
+
+	return walkStepsForResolution(a, a.Steps, fields, stepIDs, map[string]bool{})
+}
+
+func collectStepIDs(steps []*Step, into map[string]bool) {
+	for _, s := range steps {
+		if s == nil {
+			continue
+		}
+		if s.ID != "" {
+			into[s.ID] = true
+		}
+		if s.ForEach != nil {
+			collectStepIDs(s.ForEach.Do, into)
+		}
+		if s.Parallel != nil {
+			collectStepIDs(s.Parallel.Branches, into)
+		}
+		if s.Switch != nil {
+			for _, c := range s.Switch.Cases {
+				collectStepIDs(caseSteps(c), into)
+			}
+			collectStepIDs(caseSteps(s.Switch.Default), into)
+		}
+	}
+}
+
+func caseSteps(c *SwitchCase) []*Step {
+	if c == nil {
+		return nil
+	}
+	if c.Step != nil {
+		return append(append([]*Step(nil), c.Steps...), c.Step)
+	}
+	return c.Steps
+}
+
+// walkStepsForResolution validates loop-var shadowing plus every authored
+// expression surface (condition, forEach source/filter, switch subject,
+// function/action/automation step args, brace-form mutation payloads).
+// Query strings are deliberately EXCLUDED: bare identifiers there are the
+// bound concept's payload properties (SQL pushdown), a different namespace.
+func walkStepsForResolution(a *Automation, steps []*Step, fields, stepIDs, loopVars map[string]bool) error {
+	for _, s := range steps {
+		if s == nil {
+			continue
+		}
+		if err := checkExprIdentifiers(a, "condition of step "+s.ID, s.Condition, fields, stepIDs, loopVars); err != nil {
+			return err
+		}
+		if s.Function != nil {
+			if err := checkArgMapIdentifiers(a, "args of step "+s.ID, s.Function.Args, fields, stepIDs, loopVars); err != nil {
+				return err
+			}
+		}
+		if s.Action != nil {
+			if err := checkArgMapIdentifiers(a, "args of action step "+s.ID, s.Action.Args, fields, stepIDs, loopVars); err != nil {
+				return err
+			}
+		}
+		if s.Automation != nil {
+			if err := checkArgMapIdentifiers(a, "args of sub-automation step "+s.ID, s.Automation.Args, fields, stepIDs, loopVars); err != nil {
+				return err
+			}
+		}
+		if s.Mutation != nil {
+			if err := checkArgMapIdentifiers(a, "payload of mutation step "+s.ID, s.Mutation.Payload, fields, stepIDs, loopVars); err != nil {
+				return err
+			}
+			if err := checkExprIdentifiers(a, "id of mutation step "+s.ID, s.Mutation.ID, fields, stepIDs, loopVars); err != nil {
+				return err
+			}
+		}
+		if s.ForEach != nil {
+			loopVar := s.ForEach.As
+			if loopVar == "" {
+				loopVar = "item"
+			}
+			if fields[loopVar] {
+				return fmt.Errorf("automation %q: forEach loop variable %q (step %q) shadows the args field of the same name -- rename one of them", a.Name, loopVar, s.ID)
+			}
+			if err := checkExprIdentifiers(a, "forEach source of step "+s.ID, s.ForEach.Source, fields, stepIDs, loopVars); err != nil {
+				return err
+			}
+			inner := cloneSet(loopVars)
+			inner[loopVar] = true
+			if err := checkExprIdentifiers(a, "forEach filter of step "+s.ID, s.ForEach.Filter, fields, stepIDs, inner); err != nil {
+				return err
+			}
+			if err := walkStepsForResolution(a, s.ForEach.Do, fields, stepIDs, inner); err != nil {
+				return err
+			}
+		}
+		if s.Parallel != nil {
+			if err := walkStepsForResolution(a, s.Parallel.Branches, fields, stepIDs, loopVars); err != nil {
+				return err
+			}
+		}
+		if s.Switch != nil {
+			if err := checkExprIdentifiers(a, "switch subject of step "+s.ID, s.Switch.Expression, fields, stepIDs, loopVars); err != nil {
+				return err
+			}
+			for _, c := range s.Switch.Cases {
+				if err := walkStepsForResolution(a, caseSteps(c), fields, stepIDs, loopVars); err != nil {
+					return err
+				}
+			}
+			if err := walkStepsForResolution(a, caseSteps(s.Switch.Default), fields, stepIDs, loopVars); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func cloneSet(in map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(in)+1)
+	for k := range in {
+		out[k] = true
+	}
+	return out
+}
+
+// checkArgMapIdentifiers recurses string leaves of an authored arg/payload
+// map (nested maps + slices included).
+func checkArgMapIdentifiers(a *Automation, where string, m map[string]any, fields, stepIDs, loopVars map[string]bool) error {
+	for _, v := range m {
+		if err := checkValueIdentifiers(a, where, v, fields, stepIDs, loopVars); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkValueIdentifiers(a *Automation, where string, v any, fields, stepIDs, loopVars map[string]bool) error {
+	switch tv := v.(type) {
+	case string:
+		return checkExprIdentifiers(a, where, tv, fields, stepIDs, loopVars)
+	case map[string]any:
+		return checkArgMapIdentifiers(a, where, tv, fields, stepIDs, loopVars)
+	case []any:
+		for _, item := range tv {
+			if err := checkValueIdentifiers(a, where, item, fields, stepIDs, loopVars); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// checkExprIdentifiers rejects a bare identifier that resolves to nothing:
+// not reserved, not a loop variable in scope, not a step name, not an args
+// field. Only the HEAD segment of a dotted path is classified; call names
+// (identifier immediately followed by '(') and $-references are skipped.
+func checkExprIdentifiers(a *Automation, where, expr string, fields, stepIDs, loopVars map[string]bool) error {
+	if strings.TrimSpace(expr) == "" {
+		return nil
+	}
+	scrubbed := quotedSegmentPattern.ReplaceAllString(expr, `""`)
+	for _, tok := range bareTokenPattern.FindAllString(scrubbed, -1) {
+		if strings.HasPrefix(tok, "$") {
+			continue // $-reference: the evaluator's explicit form
+		}
+		if strings.HasSuffix(tok, "(") {
+			continue // call name (builtin/operator), not a value read
+		}
+		head := tok
+		if i := strings.IndexByte(head, '.'); i >= 0 {
+			head = head[:i]
+		}
+		if head == "" || bareExprLiterals[head] || reservedAutomationRoots[head] {
+			continue
+		}
+		if loopVars[head] || stepIDs[head] || fields[head] {
+			continue
+		}
+		return fmt.Errorf("automation %q: unknown bare identifier %q in %s -- not a reserved name, loop variable, step name, or args field. Declare it in the args { } block, or reference it explicitly (args.X / steps.X / event.payload.X)", a.Name, head, where)
+	}
+	return nil
+}

@@ -401,6 +401,9 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 	}
 	if boundArgs != nil {
 		evaluator.SetCustom("args", boundArgs)
+		// G2 (memql#2364): the declared-field set lets a declared-but-absent
+		// optional field resolve bare to nil instead of the literal fallback.
+		evaluator.SetCustom("argsDeclared", declaredArgsSet(automation))
 	}
 
 	if e.logger != nil {

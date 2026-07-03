@@ -511,6 +511,14 @@ func (e *Evaluator) EvaluateValue(expr string) (any, error) {
 		if result, ok := e.StepResultValue(expr); ok {
 			return result, nil
 		}
+		// G2 (memql#2364): in an args-block automation a bare identifier
+		// resolves loop-var -> step -> args field (declared-but-absent ->
+		// nil) instead of falling through to the literal-string fallback.
+		// Gated on the args binding G1 seeds, so args-less automations and
+		// logic bodies keep prior behavior.
+		if v, ok := e.resolveBareForArgsAutomation(expr); ok {
+			return v, nil
+		}
 	}
 
 	// Otherwise treat as string with possible embedded expressions
@@ -819,6 +827,12 @@ func (e *Evaluator) EvaluateFilterValue(expr string) (any, error) {
 			if val, err := e.resolvePath("steps." + expr + ".result"); err == nil {
 				return val, nil
 			}
+		}
+		// G2 (memql#2364): bare args-field / loop-var operand in an
+		// args-block automation's condition or filter. Gated on the G1 args
+		// binding; args-less behavior (literal fall-through) is unchanged.
+		if v, ok := e.resolveBareForArgsAutomation(expr); ok {
+			return v, nil
 		}
 	}
 
