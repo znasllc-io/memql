@@ -7,6 +7,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/actions"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql/baseloader"
 )
 
 func (e *MemQLEngine) Init(concepts concept.Registry) error {
@@ -371,6 +372,34 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	}
 	if err := actions.DefaultLoadError(); err != nil {
 		return fmt.Errorf("authored action load (strict capability arg-typing) failed: %w", err)
+	}
+
+	// Load-time per-kind uniqueness gate (epic #2351 / S5, memql#2360).
+	// Surface silent last-wins registration collisions LOUDLY. Two authored
+	// constructs that land in the SAME runtime registry -- query / mutation /
+	// logic / builtin -> FunctionRegistry, spec / trait -> SpecRegistry,
+	// shapes / tools / prompts / providers / policies / seeds / automations /
+	// actions -> their own -- with the same bare name silently overwrite one
+	// another by load order (Upsert never checks; Add drops the loser at
+	// Debug). This walks the same merged tree the loaders register from
+	// (embedded core + every RegisterTree'd pack, each file once), so on a
+	// carrier node the check spans core + the copresent pack. Detection +
+	// ERROR visibility only; strict fail-boot rides in with the S2 LoadReport
+	// (#2357). The conformance tests keep the tree at zero.
+	if e.Logger != nil {
+		if dups := DetectDuplicateConstructs(baseloader.ReadAll(e.Logger)); len(dups) > 0 {
+			for _, d := range dups {
+				e.Logger.Error("duplicate DSL construct registration (silent last-wins)",
+					"component", "memql.engine",
+					"group", d.Group,
+					"name", d.Name,
+					"origins", strings.Join(d.Origins, " | "),
+					"count", len(d.Origins))
+			}
+			e.Logger.Error("DSL uniqueness gate: duplicate construct name(s) detected across core + packs",
+				"component", "memql.engine",
+				"duplicateCount", len(dups))
+		}
 	}
 
 	// Log boot validation summary
