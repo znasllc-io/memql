@@ -55,10 +55,16 @@ type SessionDefineResult struct {
 
 // SplitBundleSource slices a `.memql` bundle string into the (kind, name,
 // source) constructs the sandbox + authored runtime operate on. It reuses the
-// per-kind slicers the bootstrap loaders use: concept blocks, the function
-// family (query / mutation / logic / spec / trait / automation), and the
-// struct-form `shape`. Duplicate (kind, name) slices collapse to the first --
-// the sandbox separately hard-fails genuine in-bundle duplicates.
+// per-kind slicers the bootstrap loaders use, covering EVERY authorable kind so
+// a deployment-style bundle (concept + query/mutation/logic + spec/trait/shape +
+// automation + action + capability) is fully classified. Duplicate (kind, name)
+// slices collapse to the first -- the sandbox separately hard-fails genuine
+// in-bundle duplicates.
+//
+// FAIL-LOUD (epic #2354 E1 / #2351): any remaining top-level `<keyword> ... {`
+// region the splitter cannot classify (prompt / provider / tool / builtin /
+// policy / seed, or garbage) is emitted as an "unrecognized construct" that the
+// sandbox hard-fails -- NEVER silently dropped.
 func SplitBundleSource(source string) []SandboxConstruct {
 	var out []SandboxConstruct
 	seen := make(map[string]bool)
@@ -82,8 +88,10 @@ func SplitBundleSource(source string) []SandboxConstruct {
 			add("concept", decls[0].Name, slice)
 		}
 	}
-	// Function family: query / mutation / logic / automation. The slice carries
-	// its own kind (derived from the source keyword).
+	// Function family: query / mutation / logic. The slice carries its own kind
+	// (derived from the source keyword). ExtractFunctionSlices deliberately
+	// excludes automations (the function-parse pipeline has no automation case),
+	// so they are sliced separately below.
 	for _, s := range ExtractFunctionSlices(source) {
 		add(string(s.Kind), s.Name, s.Source)
 	}
@@ -93,6 +101,27 @@ func SplitBundleSource(source string) []SandboxConstruct {
 		for _, s := range ExtractKeywordSlices(source, kind) {
 			add(kind, s.Name, s.Source)
 		}
+	}
+	// Automations (event-triggered orchestration) -- sliced by the dedicated
+	// automation extractor. The Gate-1 sandbox compiles them through the
+	// registered automations hook (authoring_sandbox_automation.go).
+	for _, s := range ExtractAutomationSlices(source) {
+		add(string(s.Kind), s.Name, s.Source)
+	}
+	// Actions (world-touching capability calls) + capabilities (the typed,
+	// side-effect-classified vocabulary) -- the deployment-bundle kinds. Each
+	// action slice inherits the file-top `use capabilities.*` imports so the
+	// sandbox resolves its bare capability verb.
+	for _, s := range extractActionBundleSlices(source) {
+		add("action", s.Name, s.Source)
+	}
+	for _, s := range extractCapabilityBundleSlices(source) {
+		add("capability", s.Name, s.Source)
+	}
+	// Fail-loud backstop: surface every unclassifiable top-level region as an
+	// explicit "unrecognized construct" so nothing is silently dropped.
+	for _, c := range detectUnrecognizedConstructs(source) {
+		add(c.Kind, c.Name, c.Source)
 	}
 	return out
 }
@@ -170,10 +199,20 @@ func AuthorSessionBundle(reg *AuthoredRuntimeRegistry, owner, bundleSource strin
 			}
 			compiled = spec
 		default:
-			// concept / shape register as resolvable metadata. The function
+			// concept / shape / automation / action / capability register as
+			// resolvable session METADATA only (Compiled=nil). The function
 			// family is executable-by-name and authored specs/traits are
 			// resolvable inside authored query filters via the session spec
-			// overlay (#1559); concept/shape carry no runtime overlay yet.
+			// overlay (#1559).
+			//
+			// The world-touching kinds are deliberately INERT in session scope
+			// (E1 #2372): a session-defined automation gets NO scheduler trigger
+			// subscription, an action gets NO executor wiring, a capability gets
+			// NO catalog registration -- so defining them on a stream validates
+			// they compile + bind WITHOUT going live on the shared cluster. Live
+			// activation of an authored automation (scheduler registration +
+			// boot re-arm) is the separate owner-gated Gate-3 path
+			// (ActivateApprovedBundle), never a stream-scoped define.
 			compiled = nil
 		}
 
