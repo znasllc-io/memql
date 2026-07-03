@@ -342,27 +342,46 @@ func TestRetiredOperators_ParserAcceptsToTreeScanGate(t *testing.T) {
 }
 
 // ===========================================================================
-// KNOWN SILENT-ACCEPTANCE HOLES (surfaced by this suite, NOT fixed in S7).
-//
-// Per the S7 charter these are pinned as explicit skips + reported to the
-// coordinator (memql#2383) rather than fixed here -- fixing a fail-loud gap is
-// a production change that belongs to its own sub-story of epic #2351.
+// SILENT-ACCEPTANCE HOLES surfaced by this suite (memql#2383). HOLE 1 is
+// CLOSED by memql#2395 (active test below); HOLE 2 remains open, deferred to
+// the G3 punning story (#2365) because a bare identifier in arg position is
+// becoming punning syntax -- rejection semantics must be decided together.
 // ===========================================================================
 
-// HOLE 1: shape / builtin / prompt / spec / policy silently ACCEPT an unknown
-// annotation. tool / provider / seed reject (see the active test above); the
-// 2026-07-03 audit (Part 3) flagged builtin + prompt specifically. There is no
-// single annotation registry, so recognition is split and these five kinds have
-// no unknown-annotation gate.
+// HOLE 1 -- CLOSED (memql#2395): shape / builtin / prompt / spec / trait /
+// policy now reject an unknown annotation against the canonical
+// annotations.ByReceiver registry (validateDeclAnnotations), matching the
+// tool / provider / seed behavior pinned by the active test above.
 func TestHOLE_UnknownAnnotationSilentlyAccepted(t *testing.T) {
-	t.Skip("HOLE (memql#2383 report): shape/builtin/prompt/spec/policy silently accept an unknown annotation (e.g. @bogusAnno). tool/provider/seed already reject. Needs a fail-loud sub-story of epic #2351 (single annotation registry). Un-skip + assert rejection once fixed.")
+	cases := []struct {
+		kind, src, want string
+		parse           func(string) error
+	}{
+		{"shape", "@bogusAnno\n@row\nshape s {\n  row.id\n}\n", "unknown annotation @bogusAnno",
+			func(s string) error { _, e := ParseShapeDecl(s); return e }},
+		{"builtin", "@bogusAnno\n@executor(\"integration.x.y\")\nbuiltin b {\n  a string\n}\n", "unknown annotation @bogusAnno",
+			func(s string) error { _, e := ParseBuiltinDecl(s); return e }},
+		{"prompt", "@bogusAnno\n@templateFile(\"x.tmpl\")\nprompt pr {\n  a string\n}\n", "unknown annotation @bogusAnno",
+			func(s string) error { _, e := ParsePromptDecl(s); return e }},
+		{"spec", "@bogusAnno\n@enabled\nspec someShape sp {\n  return active == true\n}\n", "unknown annotation @bogusAnno",
+			func(s string) error { _, e := ParseSpecDecl(s); return e }},
+		{"trait", "@bogusAnno\n@enabled\ntrait tr {\n  return active == true\n}\n", "unknown annotation @bogusAnno",
+			func(s string) error { _, e := ParseSpecDecl(s); return e }},
+		{"policy", "@bogusAnno\n@primary(\"x\")\npolicy p { }\n", "unknown annotation @bogusAnno",
+			func(s string) error { _, e := ParsePolicyDecl(s); return e }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.kind, func(t *testing.T) {
+			assertParseErr(t, tc.kind+" unknown annotation", tc.parse(tc.src), tc.want)
+		})
+	}
 
-	// The intended assertions once the hole is closed:
-	//   assertParseErr(t, "shape @bogusAnno",   mustErr(ParseShapeDecl(...)),   "unknown annotation @bogusAnno")
-	//   assertParseErr(t, "builtin @bogusAnno", mustErr(ParseBuiltinDecl(...)), "unknown annotation @bogusAnno")
-	//   assertParseErr(t, "prompt @bogusAnno",  mustErr(ParsePromptDecl(...)),  "unknown annotation @bogusAnno")
-	//   assertParseErr(t, "spec @bogusAnno",    mustErr(ParseSpecDecl(...)),    "unknown annotation @bogusAnno")
-	//   assertParseErr(t, "policy @bogusAnno",  mustErr(ParsePolicyDecl(...)),  "unknown annotation @bogusAnno")
+	// Message quality: a typo'd annotation gets a did-you-mean against the
+	// kind's registry set (suggest.go, the #2358 helper).
+	t.Run("did-you-mean", func(t *testing.T) {
+		_, err := ParseShapeDecl("@descripton(\"x\")\n@row\nshape s {\n  row.id\n}\n")
+		assertParseErr(t, "shape @descripton", err, "did you mean 'description'?")
+	})
 }
 
 // HOLE 2: positional args on a kind-prefixed construct call are silently
@@ -370,7 +389,7 @@ func TestHOLE_UnknownAnnotationSilentlyAccepted(t *testing.T) {
 // for primitive builtins (coalesce(a, b)), so a fix must scope the rejection to
 // kind-prefixed CONSTRUCT calls only.
 func TestHOLE_PositionalArgsOnKindPrefixedCall(t *testing.T) {
-	t.Skip("HOLE (memql#2383 report): a kind-prefixed construct call with positional args (e.g. `mutation createNode(\"x\", 1)`) is silently accepted and the positionals are mapped to keys \"0\"/\"1\". Primitive builtins legitimately take positional args, so a fix must scope rejection to construct calls. Un-skip once decided.")
+	t.Skip("HOLE (memql#2383 report): a kind-prefixed construct call with positional args (e.g. `mutation createNode(\"x\", 1)`) is silently accepted and the positionals are mapped to keys \"0\"/\"1\". Primitive builtins legitimately take positional args, so a fix must scope rejection to construct calls. DEFERRED to the G3 punning story (memql#2365): bare-identifier args become punning there, so the rejection carve-out is decided with it. Un-skip when #2365 lands.")
 }
 
 // LAYER NOTE (not a hole): `spec("name")` / `trait("name")` parse clean at the
