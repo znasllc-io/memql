@@ -579,6 +579,26 @@ func ReleaseWorkspaceOnPlanTerminalBuild(args ReleaseWorkspaceOnPlanTerminalArgs
 	return b.String()
 }
 
+// RequestRouteStatus -- PURE routing decision table for a newly submitted v1:forge:request: submitter role -> the next approval-pipeline status. owner fast-tracks to queued (pre-approved); admin/writer to needs_approval; anyone else (reader) to needs_validation. Returns the status string only -- the automation switches on it and stamps approvedByUserId solely in the queued (owner) case. No graph reads or writes (ADR section 2.1). P1 #2368.
+type RequestRouteStatusArgs struct {
+	SubmitterRole any
+}
+
+// RequestRouteStatus calls the engine logic requestRouteStatus.
+func (qc *QueryClient) RequestRouteStatus(ctx context.Context, args RequestRouteStatusArgs) (*Result, error) {
+	call := RequestRouteStatusBuild(args)
+	return qc.executeNamed(ctx, "requestRouteStatus", call)
+}
+
+func RequestRouteStatusBuild(args RequestRouteStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("logic requestRouteStatus(")
+	b.WriteString("submitterRole: ")
+	b.WriteString(fmt.Sprintf("%q", args.SubmitterRole))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RevokeExpiredDelegations -- Find every expired active delegation and soft-revoke it with `system:expiry` as the revoker. Returns the count processed.
 type RevokeExpiredDelegationsArgs struct {
 	Now string
@@ -595,6 +615,32 @@ func RevokeExpiredDelegationsBuild(args RevokeExpiredDelegationsArgs) string {
 	b.WriteString("logic revokeExpiredDelegations(")
 	b.WriteString("now: ")
 	b.WriteString(fmt.Sprintf("%q", args.Now))
+	b.WriteString(")")
+	return b.String()
+}
+
+// TransitionEventKind -- PURE audit-vocabulary decision table for a v1:forge:request status transition: new status -> the v1:forge:requestEvent kind (needs_approval -> validated, queued -> approved, changes_requested / rejected pass through). Returns \"\" -- meaning SKIP, record nothing -- for an unrecognised status AND for an update whose status did not change (oldStatus == status), which the automation's former shape claimed but never checked. No graph reads or writes. P1 #2368.
+type TransitionEventKindArgs struct {
+	Status    any
+	OldStatus any
+}
+
+// TransitionEventKind calls the engine logic transitionEventKind.
+func (qc *QueryClient) TransitionEventKind(ctx context.Context, args TransitionEventKindArgs) (*Result, error) {
+	call := TransitionEventKindBuild(args)
+	return qc.executeNamed(ctx, "transitionEventKind", call)
+}
+
+func TransitionEventKindBuild(args TransitionEventKindArgs) string {
+	var b strings.Builder
+	b.WriteString("logic transitionEventKind(")
+	b.WriteString("status: ")
+	b.WriteString(fmt.Sprintf("%q", args.Status))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("oldStatus: ")
+	b.WriteString(fmt.Sprintf("%q", args.OldStatus))
 	b.WriteString(")")
 	return b.String()
 }
