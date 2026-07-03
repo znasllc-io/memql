@@ -21,6 +21,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
+# shellcheck source=../lib/engine_build_args.sh
+source "${SCRIPT_DIR}/../lib/engine_build_args.sh"
 
 cap_init "deploy.buildImage" "Build a single engine node image at a version."
 cap_spec_param "nodeType" "engine node type (identity/cognition/voice/agent/...)" "MEMQL_DEPLOY_NODE_TYPE"
@@ -46,8 +48,16 @@ function main() {
     cap_result_set version  "$version"
     cap_result_set image    "$image"
 
+    # Per-node build args (memql#2379): BUILD_TAGS selects the node-type
+    # binary; voice needs CGO + the voice-runtime stage. Shared mapping with
+    # scripts/k3d/dev.sh via scripts/lib/engine_build_args.sh -- without it
+    # every node type built as the bff-default binary.
+    engine_build_args_for_node "$nodeType"
+    cap_result_set buildTags "$nodeType"
+    cap_result_set target "$ENGINE_BUILD_TARGET"
+
     if [[ "$dry" != "false" ]]; then
-        cap_info "[dry-run] would build ${image} from ${workdir}"
+        cap_info "[dry-run] would build ${image} from ${workdir} (BUILD_TAGS=${nodeType}, target=${ENGINE_BUILD_TARGET})"
         cap_result_set_raw dryRun true
         cap_ok
     fi
@@ -55,8 +65,8 @@ function main() {
     if ! command -v docker &>/dev/null; then
         cap_fail 4 "docker is not installed on the runner"
     fi
-    cap_info "Building ${image} from ${workdir}..."
-    ( cd "$workdir" && docker build -t "$image" . ) >&2 || cap_fail 5 "docker build of ${image} failed"
+    cap_info "Building ${image} from ${workdir} (BUILD_TAGS=${nodeType}, target=${ENGINE_BUILD_TARGET})..."
+    ( cd "$workdir" && docker build "${ENGINE_BUILD_ARGS[@]}" --target "${ENGINE_BUILD_TARGET}" -t "$image" . ) >&2 || cap_fail 5 "docker build of ${image} failed"
     cap_changed
     cap_result_set_raw dryRun false
     cap_ok
