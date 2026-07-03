@@ -501,6 +501,9 @@ func (s *Scheduler) subscribeToEventTrigger(automation *Automation) error {
 			// validation has already run above.
 			if bound != nil {
 				evaluator.SetCustom("args", bound)
+				// G2 (memql#2364): see executor.go -- declared set enables
+				// bare nil-resolution for absent optional fields in @filter.
+				evaluator.SetCustom("argsDeclared", declaredArgsSet(a))
 			}
 			evaluator.SetCustom("ctx", map[string]any{
 				"input":  eventMap,

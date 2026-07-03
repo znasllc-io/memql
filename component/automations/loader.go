@@ -407,6 +407,14 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 		return nil, fmt.Errorf("invalid steps: %w", err)
 	}
 
+	// G2 (memql#2364, ADR Decision 3): for args-block automations, reject
+	// shadowing and unresolvable bare identifiers at compile time -- both the
+	// tree loader and the authoring-sandbox hook flow through here, so
+	// authored bundles get the same gate. Args-less automations are exempt.
+	if err := validateArgsResolution(&automation); err != nil {
+		return nil, err
+	}
+
 	// Validate trigger for potential misconfigurations
 	l.validateTrigger(&automation)
 

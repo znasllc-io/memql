@@ -1,6 +1,7 @@
 package sense
 
 import (
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -22,6 +23,10 @@ func (s *Service) Complete(source string, line, col int, filePath string) []Comp
 		items = s.completeReceiver(ctx.Prefix)
 	case ContextFuncBody:
 		items = s.completeFuncBody(ctx.Prefix)
+		// G2 (memql#2364): inside an automation body that declares an
+		// `args { }` block, offer the declared field names -- they resolve
+		// bare per ADR Decision 3.
+		items = append(items, automationArgsFieldCompletions(source, line, ctx.Prefix)...)
 	case ContextConceptFilter:
 		items = s.completeConceptFilter(ctx.Prefix)
 	case ContextUseDeclaration:
@@ -448,4 +453,63 @@ func annotationTakesArgs(name string) bool {
 	default:
 		return false
 	}
+}
+
+// automationArgsFieldCompletions returns the enclosing automation's declared
+// args-field names when the cursor sits inside an `automation NAME { ... }`
+// block that carries an `args { ... }` block (G2, memql#2364 / ADR Decision
+// 3: those fields resolve bare in step args, conditions, switch subjects and
+// forEach expressions). Pure source-level scan -- no registry needed.
+func automationArgsFieldCompletions(source string, line int, prefix string) []CompletionItem {
+	lines := strings.Split(source, "\n")
+	if line < 1 || line > len(lines) {
+		return nil
+	}
+	headerPat := regexp.MustCompile(`^\s*automation\s+[A-Za-z_][A-Za-z0-9_]*\s*\{`)
+	fieldPat := regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s+\S`)
+
+	var items []CompletionItem
+	depth, inAutomation, inArgs, argsDepthAt, autoStart := 0, false, false, 0, -1
+	var fields []string
+	for i, ln := range lines {
+		opens := strings.Count(ln, "{")
+		closes := strings.Count(ln, "}")
+		if !inAutomation && headerPat.MatchString(ln) {
+			inAutomation, autoStart, depth = true, i+1, 0
+			fields = nil
+		}
+		if inAutomation {
+			if inArgs {
+				if trimmed := strings.TrimSpace(ln); trimmed != "" && !strings.HasPrefix(trimmed, "//") && !strings.Contains(ln, "args") {
+					if m := fieldPat.FindStringSubmatch(ln); m != nil {
+						fields = append(fields, m[1])
+					}
+				}
+				if depth+opens-closes < argsDepthAt {
+					inArgs = false
+				}
+			} else if regexp.MustCompile(`^\s*args\s*\{`).MatchString(ln) {
+				inArgs = true
+				argsDepthAt = depth + opens
+			}
+			depth += opens - closes
+			if depth <= 0 && i+1 > autoStart {
+				// automation block closed; if the cursor was inside, emit.
+				if line >= autoStart && line <= i+1 {
+					for _, f := range fields {
+						if strings.HasPrefix(f, prefix) {
+							items = append(items, CompletionItem{
+								Label: f, Kind: "variable", Detail: "args field",
+								Documentation: "Declared in this automation's args { } block; resolves bare (ADR event-payload-binding Decision 3).",
+								InsertText:    f, SortPriority: 2,
+							})
+						}
+					}
+					return items
+				}
+				inAutomation, inArgs = false, false
+			}
+		}
+	}
+	return items
 }
