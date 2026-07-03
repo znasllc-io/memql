@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/dslspec"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 // spec.go projects the single source-of-truth DSL spec
@@ -170,6 +171,24 @@ func specConstructKeywordSet() map[string]bool {
 	out := make(map[string]bool, len(dslSpec.Constructs))
 	for _, c := range dslSpec.Constructs {
 		out[c.Keyword] = true
+	}
+	return out
+}
+
+// invocationKindKeywords is the kind-prefixed INVOCATION set (`mutation
+// createDeployment(...)` in an automation step; `query x(...)` in a logic
+// body), sourced directly from the parser's authoritative set so the two
+// surfaces cannot drift (E6, memql#2392). Mostly overlaps the declaration
+// keywords -- the net-new spelling is `mutation`, whose declaration keyword
+// is `mutate` -- but sourcing the whole set keeps future kinds colored
+// automatically.
+var invocationKindKeywords = invocationKindKeywordSet()
+
+func invocationKindKeywordSet() map[string]bool {
+	names := parser.InvocationKindKeywords()
+	out := make(map[string]bool, len(names))
+	for _, n := range names {
+		out[n] = true
 	}
 	return out
 }

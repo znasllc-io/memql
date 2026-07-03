@@ -224,3 +224,32 @@ func TestKeywordDocsFreeOfRetiredForms(t *testing.T) {
 		}
 	}
 }
+
+// E6 (memql#2392): invocation kind prefixes color as keywords -- notably
+// `mutation`, whose DECLARATION keyword is `mutate` (so it is absent from the
+// dslspec construct set). The set is sourced from the parser's authoritative
+// invocationKindKeywords via parser.InvocationKindKeywords(), drift-proof by
+// construction; this test pins the wiring end-to-end.
+func TestTokenize_InvocationKindPrefixesAreKeywords(t *testing.T) {
+	src := `automation deploy {
+  step record {
+    mutation createDeployment(deploymentId: x)
+  }
+  step decide {
+    logic deployGateGreen(environment: y)
+  }
+}`
+	s := New(nil)
+	tokens := s.Tokenize(src)
+	want := map[string]bool{"mutation": false, "logic": false, "automation": false}
+	for _, tok := range tokens {
+		if _, ok := want[tok.Literal]; ok && tok.Type == "keyword" {
+			want[tok.Literal] = true
+		}
+	}
+	for kw, seen := range want {
+		if !seen {
+			t.Errorf("invocation/declaration keyword %q did not tokenize as keyword", kw)
+		}
+	}
+}
