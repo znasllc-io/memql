@@ -7874,12 +7874,21 @@ func (x *ReadPackFileResult) GetFound() bool {
 // form of memql.SandboxDiagnostic. `skipped` constructs (a kind this pass does
 // not yet compile) report ok=false, skipped=true and do NOT fail the bundle.
 type AuthoringDiagnostic struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Kind          string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
-	Ok            bool                   `protobuf:"varint,3,opt,name=ok,proto3" json:"ok,omitempty"`
-	Skipped       bool                   `protobuf:"varint,4,opt,name=skipped,proto3" json:"skipped,omitempty"`
-	Error         string                 `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"` // compile/bind failure or skip reason; empty on success
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Name    string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Kind    string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
+	Ok      bool                   `protobuf:"varint,3,opt,name=ok,proto3" json:"ok,omitempty"`
+	Skipped bool                   `protobuf:"varint,4,opt,name=skipped,proto3" json:"skipped,omitempty"`
+	Error   string                 `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"` // compile/bind failure or skip reason; empty on success
+	// Optional 1-based authored-source position of the failing token, expressed
+	// in BUNDLE-FILE coordinates (the source the author submitted, before the
+	// sandbox slices + lowers it). All four are ZERO when a reliable position
+	// could not be computed -- a wrong position is never emitted, so consumers
+	// MUST treat 0 as "no position" (never line 0 / column 0). #2375.
+	Line          int32 `protobuf:"varint,6,opt,name=line,proto3" json:"line,omitempty"`
+	Column        int32 `protobuf:"varint,7,opt,name=column,proto3" json:"column,omitempty"`
+	EndLine       int32 `protobuf:"varint,8,opt,name=end_line,json=endLine,proto3" json:"end_line,omitempty"`       // 0 when the failure has no end anchor
+	EndColumn     int32 `protobuf:"varint,9,opt,name=end_column,json=endColumn,proto3" json:"end_column,omitempty"` // 0 when the failure has no end anchor
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7947,6 +7956,34 @@ func (x *AuthoringDiagnostic) GetError() string {
 		return x.Error
 	}
 	return ""
+}
+
+func (x *AuthoringDiagnostic) GetLine() int32 {
+	if x != nil {
+		return x.Line
+	}
+	return 0
+}
+
+func (x *AuthoringDiagnostic) GetColumn() int32 {
+	if x != nil {
+		return x.Column
+	}
+	return 0
+}
+
+func (x *AuthoringDiagnostic) GetEndLine() int32 {
+	if x != nil {
+		return x.EndLine
+	}
+	return 0
+}
+
+func (x *AuthoringDiagnostic) GetEndColumn() int32 {
+	if x != nil {
+		return x.EndColumn
+	}
+	return 0
 }
 
 // AuthoringConstruct names one construct that a session-define registered.
@@ -14760,13 +14797,18 @@ const file_memql_proto_rawDesc = "" +
 	"\x04path\x18\x03 \x01(\tR\x04path\x12\x16\n" +
 	"\x06source\x18\x04 \x01(\tR\x06source\x12\x16\n" +
 	"\x06origin\x18\x05 \x01(\tR\x06origin\x12\x14\n" +
-	"\x05found\x18\x06 \x01(\bR\x05found\"}\n" +
+	"\x05found\x18\x06 \x01(\bR\x05found\"\xe3\x01\n" +
 	"\x13AuthoringDiagnostic\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x0e\n" +
 	"\x02ok\x18\x03 \x01(\bR\x02ok\x12\x18\n" +
 	"\askipped\x18\x04 \x01(\bR\askipped\x12\x14\n" +
-	"\x05error\x18\x05 \x01(\tR\x05error\"<\n" +
+	"\x05error\x18\x05 \x01(\tR\x05error\x12\x12\n" +
+	"\x04line\x18\x06 \x01(\x05R\x04line\x12\x16\n" +
+	"\x06column\x18\a \x01(\x05R\x06column\x12\x19\n" +
+	"\bend_line\x18\b \x01(\x05R\aendLine\x12\x1d\n" +
+	"\n" +
+	"end_column\x18\t \x01(\x05R\tendColumn\"<\n" +
 	"\x12AuthoringConstruct\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\"U\n" +

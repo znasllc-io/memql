@@ -42,6 +42,24 @@ type SandboxConstruct struct {
 	Name   string `json:"name"`
 	Kind   string `json:"kind"`
 	Source string `json:"source"`
+
+	// BundleLine + BundlePreambleLines are the position-mapping breadcrumbs the
+	// bundle splitter (SplitBundleSource) stamps so a Gate-1 parse error can be
+	// anchored back to the AUTHORED bundle-file line (#2375). They are internal
+	// bookkeeping, never serialized, and left zero on the planner/DB-row path
+	// (a construct row carries no bundle offset) -- a zero BundleLine simply
+	// omits the diagnostic position rather than emitting a wrong one.
+	//
+	//   - BundleLine: the 1-based bundle line where this construct's BODY (the
+	//     non-prepended part of Source) begins. 0 when the body could not be
+	//     located verbatim in the bundle (e.g. a terse-lowered automation).
+	//   - BundlePreambleLines: the number of leading lines the splitter
+	//     PREPENDED onto Source (the shared `use ...{ ... }` import preamble the
+	//     function / action / capability slicers inherit). 0 when nothing was
+	//     prepended. A slice line at or below this count sits in the shared
+	//     preamble, not the construct body, so its position is omitted.
+	BundleLine          int `json:"-"`
+	BundlePreambleLines int `json:"-"`
 }
 
 // SandboxDiagnostic is the per-construct compile-and-bind result.
@@ -57,6 +75,17 @@ type SandboxDiagnostic struct {
 	// Error carries the compile/bind failure (or the skip reason), with the
 	// origin + line info the underlying parser produced.
 	Error string `json:"error,omitempty"`
+	// Line / Column / EndLine / EndColumn are the OPTIONAL 1-based authored
+	// position of the failing token in BUNDLE-FILE coordinates (#2375). They
+	// are populated ONLY when the failure carries a recoverable parser position
+	// AND that position maps reliably back through the slice + lowering to the
+	// authored bundle line; otherwise they stay zero. A consumer MUST treat 0
+	// as "no position" -- the sandbox never emits a wrong line rather than an
+	// absent one. End* are zero when the failure has no end anchor.
+	Line      int `json:"line,omitempty"`
+	Column    int `json:"column,omitempty"`
+	EndLine   int `json:"endLine,omitempty"`
+	EndColumn int `json:"endColumn,omitempty"`
 }
 
 // SandboxReport is the bundle-level Gate 1 result.
@@ -251,7 +280,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		}
 		actualName = slice.Name
 		if _, err := dispatchPerConstructParser(slice, origin, concepts); err != nil {
-			return fail(d, err.Error())
+			return attachPos(fail(d, err.Error()), c, err)
 		}
 
 	case "spec", "trait":
@@ -262,7 +291,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		// validates them separately.
 		decl, err := languageParser.ParseSpecDecl(stripUseDeclarations(c.Source))
 		if err != nil {
-			return fail(d, fmt.Sprintf("%s: %v", origin, err))
+			return attachPos(fail(d, fmt.Sprintf("%s: %v", origin, err)), c, err)
 		}
 		actualName = decl.Name
 		if _, err := specDeclToSpec(decl, origin); err != nil {
@@ -272,7 +301,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 	case "shape":
 		decl, err := languageParser.ParseShapeDecl(stripUseDeclarations(c.Source))
 		if err != nil {
-			return fail(d, fmt.Sprintf("%s: %v", origin, err))
+			return attachPos(fail(d, fmt.Sprintf("%s: %v", origin, err)), c, err)
 		}
 		actualName = decl.Name
 		if _, err := shapeDeclToShapeDefinition(decl, origin); err != nil {
@@ -296,7 +325,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		}
 		res, err := compile(c.Source, origin, concepts)
 		if err != nil {
-			return fail(d, fmt.Sprintf("%s: %v", origin, err))
+			return attachPos(fail(d, fmt.Sprintf("%s: %v", origin, err)), c, err)
 		}
 		actualName = res.Name
 		// Event-trigger pattern must name a REAL concept (#956 follow-up
@@ -319,7 +348,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		// #2222, Story 8 #2330). Any of those failures is a real Gate-1 rejection.
 		acts, err := actions.LoadSource(c.Source, origin)
 		if err != nil {
-			return fail(d, fmt.Sprintf("%s: %v", origin, err))
+			return attachPos(fail(d, fmt.Sprintf("%s: %v", origin, err)), c, err)
 		}
 		if len(acts) == 0 {
 			return fail(d, fmt.Sprintf("%s: no action declaration found in source", origin))
@@ -335,7 +364,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		// surface-backed set, so an invented capability fails Gate-1 loudly.
 		caps, err := actions.LoadCapabilitySource(c.Source, origin)
 		if err != nil {
-			return fail(d, fmt.Sprintf("%s: %v", origin, err))
+			return attachPos(fail(d, fmt.Sprintf("%s: %v", origin, err)), c, err)
 		}
 		if len(caps) == 0 {
 			return fail(d, fmt.Sprintf("%s: no capability declaration found in source", origin))
@@ -374,5 +403,16 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 func fail(d SandboxDiagnostic, msg string) SandboxDiagnostic {
 	d.OK = false
 	d.Error = msg
+	return d
+}
+
+// attachPos layers the authored bundle-file position onto an already-failed
+// diagnostic when err carries a recoverable, reliably mappable parser position
+// (#2375). It is a no-op (leaves the position zero) when err is not a parser
+// error or the position cannot be mapped back to the authored bundle line, so
+// it is safe to wrap every parse-error site unconditionally.
+func attachPos(d SandboxDiagnostic, c SandboxConstruct, err error) SandboxDiagnostic {
+	pos := resolveAuthoredPosition(c, err)
+	d.Line, d.Column, d.EndLine, d.EndColumn = pos.Line, pos.Column, pos.EndLine, pos.EndColumn
 	return d
 }

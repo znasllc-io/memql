@@ -278,11 +278,15 @@ func authoringDiagnosticsToProto(diags []memqlengine.SandboxDiagnostic) []*memql
 	out := make([]*memqlv1.AuthoringDiagnostic, 0, len(diags))
 	for _, d := range diags {
 		out = append(out, &memqlv1.AuthoringDiagnostic{
-			Name:    d.Name,
-			Kind:    d.Kind,
-			Ok:      d.OK,
-			Skipped: d.Skipped,
-			Error:   d.Error,
+			Name:      d.Name,
+			Kind:      d.Kind,
+			Ok:        d.OK,
+			Skipped:   d.Skipped,
+			Error:     d.Error,
+			Line:      int32(d.Line),
+			Column:    int32(d.Column),
+			EndLine:   int32(d.EndLine),
+			EndColumn: int32(d.EndColumn),
 		})
 	}
 	return out

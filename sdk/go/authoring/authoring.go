@@ -63,6 +63,14 @@ type Diagnostic struct {
 	OK      bool
 	Skipped bool
 	Error   string
+	// Line / Column / EndLine / EndColumn are the OPTIONAL 1-based authored
+	// position of the failing token in bundle-file coordinates (#2375). All
+	// zero when no reliable position was computed -- treat 0 as absent, never
+	// as line 0. End* are zero when the failure has no end anchor.
+	Line      int
+	Column    int
+	EndLine   int
+	EndColumn int
 }
 
 // Construct names one construct that a session-define registered (now callable
@@ -257,11 +265,15 @@ func protoDiagnostics(in []*memqlv1.AuthoringDiagnostic) []Diagnostic {
 	out := make([]Diagnostic, 0, len(in))
 	for _, d := range in {
 		out = append(out, Diagnostic{
-			Name:    d.GetName(),
-			Kind:    d.GetKind(),
-			OK:      d.GetOk(),
-			Skipped: d.GetSkipped(),
-			Error:   d.GetError(),
+			Name:      d.GetName(),
+			Kind:      d.GetKind(),
+			OK:        d.GetOk(),
+			Skipped:   d.GetSkipped(),
+			Error:     d.GetError(),
+			Line:      int(d.GetLine()),
+			Column:    int(d.GetColumn()),
+			EndLine:   int(d.GetEndLine()),
+			EndColumn: int(d.GetEndColumn()),
 		})
 	}
 	return out
