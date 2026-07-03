@@ -262,11 +262,24 @@ func (e *Executor) Execute(ctx context.Context, automation *Automation, triggere
 // (`triggeredBy`) so logic bodies can branch on it if needed.
 func buildEventEnvelope(triggeringEvent *events.Event, triggeredBy, trigger string) map[string]any {
 	if triggeringEvent != nil {
-		return map[string]any{
+		envelope := map[string]any{
 			"topic":   triggeringEvent.Topic,
 			"kind":    triggeringEvent.Kind.String(),
 			"payload": triggeringEvent.Payload,
 		}
+		// G4 (memql#2366 / ADR Decision 4): expose the acting identity and
+		// the event's occurrence time on the envelope. `event.actor` is only
+		// present when the emitter stamped Metadata["actor"] -- an absent
+		// actor stays ABSENT (no empty map), so exists(event.actor) checks
+		// stay honest. `event.timestamp` (RFC3339) is distinct from the
+		// reserved `now` captured at eval start.
+		if actorId := triggeringEvent.Metadata["actor"]; actorId != "" {
+			envelope["actor"] = map[string]any{"id": actorId}
+		}
+		if !triggeringEvent.Timestamp.IsZero() {
+			envelope["timestamp"] = triggeringEvent.Timestamp.UTC().Format(time.RFC3339)
+		}
+		return envelope
 	}
 	return map[string]any{
 		"topic":   trigger,
@@ -906,11 +919,7 @@ func (e *Executor) handleAutomationError(ctx context.Context, automation *Automa
 		evaluator.SetCustom("error", err.Error())
 		evaluator.SetCustom("timestamp", time.Now().UTC().Format(time.RFC3339))
 		if triggeringEvent != nil {
-			eventMap := map[string]any{
-				"topic":   triggeringEvent.Topic,
-				"kind":    triggeringEvent.Kind.String(),
-				"payload": triggeringEvent.Payload,
-			}
+			eventMap := buildEventEnvelope(triggeringEvent, "", "")
 			evaluator.SetCustom("event", eventMap)
 			evaluator.SetCustom("ctx", map[string]any{
 				"input":  eventMap,

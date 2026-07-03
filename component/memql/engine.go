@@ -372,6 +372,22 @@ func (e *MemQLEngine) publishEvent(topic string, kind events.Kind, payload map[s
 	e.eventBus.Publish(event)
 }
 
+// publishEventWithActor is publishEvent plus the acting identity stamped on
+// the event envelope's Metadata (G4, memql#2366 / event-payload-binding ADR
+// Decision 4). Automations read it as `event.actor.id`; emitters no longer
+// need to hand-stamp a `triggeredBy` field into payloads for the envelope's
+// benefit. Empty actorId degrades to a plain publishEvent.
+func (e *MemQLEngine) publishEventWithActor(topic string, kind events.Kind, payload map[string]any, actorId string) {
+	if e.eventBus == nil {
+		return
+	}
+	event := events.NewEvent(topic, kind, payload)
+	if actorId != "" {
+		event = event.WithMetadata("actor", actorId)
+	}
+	e.eventBus.Publish(event)
+}
+
 // publishCacheInvalidate emits the dedicated cache-invalidation event
 // (epic 5, issue 5.6 / memql#1970) for a written concept on the
 // separate cache.invalidate.<concept> channel. ONLY the result-cache
