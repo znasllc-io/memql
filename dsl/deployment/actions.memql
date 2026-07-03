@@ -30,8 +30,9 @@
 // select a NAMED capability script (the I14 contract, #2221) by its `script`
 // arg; the action executor's capability-script runner (component/automations/
 // steps/capability_script.go) maps that id to an ALLOWLISTED scripts/* path,
-// runs it with the rendered args as a JSON object on stdin (never a `sh -c`
-// string), and parses the one JSON envelope it writes to stdout. This is
+// runs it with each rendered arg passed as its own `--name=value` argv element
+// and stdin closed (never a JSON-on-stdin blob and never a `sh -c` string), and
+// parses the one JSON envelope it writes to stdout. This is
 // injection-safe by construction: an author/event value can only pick an
 // allowlisted script and travels as data, never as a command line. The
 // integration-backed action (tagRelease) resolves to an engine tool instead --
