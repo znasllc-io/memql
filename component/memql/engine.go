@@ -75,6 +75,14 @@ type MemQLEngine struct {
 	// the prior promotion while a name a SEALED core construct owns is still
 	// refused (core-first). Zero-value sync.Map is ready to use.
 	promotedAuthored sync.Map
+	// loadReport is the structured account of the DSL load pass built by
+	// Init (epic #2351 / S2, memql#2357): every unified loader's skipped
+	// constructs + the S5 uniqueness-gate duplicates. Init refuses to boot
+	// the embedded core tree + registered packs when it has problems,
+	// unless MEMQL_DSL_ALLOW_SKIPS is set. The post-Init durable-bundle
+	// re-hydration path also records quarantines here (they do NOT fail
+	// boot). Fresh per Init; nil before the first Init.
+	loadReport *LoadReport
 }
 
 // #250: the useLegacyMemqlParser field + UseLangparserRuntime

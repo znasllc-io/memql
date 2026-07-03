@@ -393,6 +393,13 @@ variables:
     optional: true
     description: "Repository root the deploy-control executor is anchored at; defaults to the process working directory."
 
+  - name: MEMQL_DSL_ALLOW_SKIPS
+    component: engine
+    scope: node
+    default: "false"
+    optional: true
+    description: "Operator break-glass for strict DSL boot (memql#2357). When truthy, engine.Init boots even if a unified loader skipped an in-tree construct or the uniqueness gate found a duplicate registration, instead of refusing to boot; the load report is still ERROR-logged. Leave unset (strict) in normal operation -- a skipped construct means the embedded tree or a pack half-loaded."
+
   - name: MEMQL_ENVIRONMENT
     component: engine
     scope: node
@@ -859,7 +866,16 @@ variables:
     component: telephony
     scope: node
     optional: true
-    description: "LiveKit SIP edge URI used to bridge telephony calls into rooms."
+    description: >-
+      LiveKit SIP edge URI the carrier routes inbound DIDs to. Self-host plane
+      (staging/prod): the in-cluster livekit/sip edge (e.g.
+      sip:livekit-sip:5060). Cloud plane (local dev, #2186): UNSET/EMPTY --
+      LiveKit Cloud is the edge, the Telnyx Connection
+      (MEMQL_TELEPHONY_TELNYX_CONNECTION_ID) is pre-provisioned to point at the
+      Cloud SIP URI, and the inbound trunk + dispatch rule are created via the
+      LiveKit API by configureInboundNumber. carrier.ConfigureInbound only
+      requires the connection id, so an empty value is correct on the Cloud
+      path (it is recorded on the trunk row for documentation only)."
 
   - name: MEMQL_TELEPHONY_TELNYX_BASE_URL
     component: telephony

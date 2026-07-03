@@ -50,10 +50,11 @@ var constructAnnotationAllowLists = map[languageParser.FunctionType]map[string]b
 // for observability. Errors from individual function parses are
 // logged + skipped (best-effort registration; legacy loader covers
 // any gaps).
-func LoadUnifiedFunctions(logger *slog.Logger, registry *FunctionRegistry, conceptRegistry memoryNodes.Registry) (int, map[languageParser.FunctionType]int, error) {
+func LoadUnifiedFunctions(logger *slog.Logger, registry *FunctionRegistry, conceptRegistry memoryNodes.Registry, report ...*LoadReport) (int, map[languageParser.FunctionType]int, error) {
 	if registry == nil {
 		return 0, nil, fmt.Errorf("function registry is nil")
 	}
+	rep := firstReport(report)
 
 	counts := make(map[languageParser.FunctionType]int)
 	total := 0
@@ -75,6 +76,7 @@ func LoadUnifiedFunctions(logger *slog.Logger, registry *FunctionRegistry, conce
 						"kind", slice.Kind,
 						"error", parseErr)
 				}
+				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedFunctionLoader", Keyword: string(slice.Kind), Name: slice.Name, File: raw.Path, Phase: "parse", Err: parseErr.Error()})
 				continue
 			}
 			if fn == nil {
@@ -89,6 +91,7 @@ func LoadUnifiedFunctions(logger *slog.Logger, registry *FunctionRegistry, conce
 						"function", slice.Name,
 						"error", upsertErr)
 				}
+				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedFunctionLoader", Keyword: string(slice.Kind), Name: slice.Name, File: raw.Path, Phase: "register", Err: upsertErr.Error()})
 				continue
 			}
 
@@ -96,6 +99,7 @@ func LoadUnifiedFunctions(logger *slog.Logger, registry *FunctionRegistry, conce
 			total++
 		}
 	}
+	rep.AddRegistered("functions", total)
 
 	if logger != nil {
 		logger.Info("unified function loader: registered functions",

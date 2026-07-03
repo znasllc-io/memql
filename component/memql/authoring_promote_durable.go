@@ -387,7 +387,25 @@ func withRehydratePromote(fn func(ctx context.Context, row AuthoringConstructRow
 // back into its compiled *Function / *Spec and registers it into the shared
 // registry via PromoteAuthoredConstruct (core-first, never-shadow). It is the
 // non-automation counterpart to registerBundleConstructs.
-func (e *MemQLEngine) recompileAndPromoteRow(ctx context.Context, row AuthoringConstructRow) error {
+func (e *MemQLEngine) recompileAndPromoteRow(ctx context.Context, row AuthoringConstructRow) (err error) {
+	// Durable-bundle re-hydration posture (epic #2351 / S2, memql#2357): a
+	// STORED authored construct whose source no longer recompiles is
+	// QUARANTINED, not fatal. Stored rows can rot when the grammar moves (a
+	// construct authored under an older grammar, a since-deleted concept
+	// dependency); failing boot on a rotted stored row would let one bad
+	// row brick a whole fleet -- the opposite of the strict-boot posture
+	// for IN-TREE constructs, which must all load. So on any recompile /
+	// promote failure we ERROR-log the construct + record a quarantine
+	// entry on the engine's load report and let the walk continue. The
+	// grammar-version stamp (#2361) will let a future engine recognise
+	// which stored rows predate a grammar move. This defer covers BOTH the
+	// boot walk and the live authoring-promote propagation path, which both
+	// funnel here.
+	defer func() {
+		if err != nil {
+			e.quarantineRehydratedConstruct(row, err)
+		}
+	}()
 	sc := SandboxConstruct{Name: row.Name, Kind: row.Kind, Source: row.Source}
 	c := &AuthoredConstruct{
 		OwnerUserId: row.OwnerUserId,
@@ -418,6 +436,36 @@ func (e *MemQLEngine) recompileAndPromoteRow(ctx context.Context, row AuthoringC
 		return fmt.Errorf("re-hydration of %s constructs is not supported", row.Kind)
 	}
 	return e.PromoteAuthoredConstruct(ctx, c)
+}
+
+// quarantineRehydratedConstruct records a durable-bundle re-hydration
+// failure (epic #2351 / S2, memql#2357): it ERROR-logs the construct that
+// could not be recompiled + registered from its STORED source and appends
+// a QuarantinedConstruct to the engine's load report. It deliberately does
+// NOT fail boot -- a rotted stored authored row must not brick a fleet the
+// way an in-tree construct drop does. Callable from the boot walk and the
+// live authoring-promote propagation subscriber; the report append is
+// mutex-guarded for the concurrent-propagation case.
+func (e *MemQLEngine) quarantineRehydratedConstruct(row AuthoringConstructRow, cause error) {
+	if e == nil || cause == nil {
+		return
+	}
+	if e.Logger != nil {
+		e.Logger.Error("durable authored construct quarantined at re-hydration (stored source failed to recompile; not re-registered, boot continues)",
+			"component", "memql.engine",
+			"kind", row.Kind,
+			"name", row.Name,
+			"bundleId", row.BundleId,
+			"owner", row.OwnerUserId,
+			"error", cause)
+	}
+	e.loadReport.AddQuarantine(QuarantinedConstruct{
+		Kind:     row.Kind,
+		Name:     row.Name,
+		BundleId: row.BundleId,
+		Owner:    row.OwnerUserId,
+		Err:      cause.Error(),
+	})
 }
 
 // --- production stores over a live engine ---
