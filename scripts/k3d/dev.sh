@@ -71,6 +71,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
+# shellcheck source=../lib/engine_build_args.sh
+source "${SCRIPT_DIR}/../lib/engine_build_args.sh"
 
 cap_init "k3d.dev" "Build node image(s) locally, import into k3d, and restart Deployments."
 cap_spec_param "node"       "node type(s) to rebuild, comma-separated (default: all app nodes)" ""
@@ -221,23 +223,18 @@ function build_engine_node() {
 
     section "Building engine image: ${node} -> ${image}"
 
-    # BUILD_TAGS selects which node-type binary the builder stage compiles
-    # (go build -tags <node>) -- mirrors scripts/deploy/aks-deploy.sh. The
-    # engine Dockerfile has two runtime stages: the default distroless
-    # `runtime` for CGO-free nodes (identity, mcp) and `voice-runtime`
-    # (debian + libopus) for voice, which needs CGO for LibOpus.
-    local build_args=(--build-arg "BUILD_TAGS=${node}")
-    local target="runtime"
+    # nodeType -> build-args mapping shared with the deploy.buildImage
+    # capability backend (scripts/lib/engine_build_args.sh, memql#2379) so
+    # the two local build paths cannot drift.
+    engine_build_args_for_node "$node"
     if [[ "$node" == "voice" ]]; then
-        build_args+=(--build-arg CGO_ENABLED=1)
-        target="voice-runtime"
         warn "voice node requires libopus headers -- building from repo Dockerfile."
         warn "If the build fails with 'opus.h not found', see docs/public/build/build-tags.md."
     fi
 
     docker build \
-        "${build_args[@]}" \
-        --target "${target}" \
+        "${ENGINE_BUILD_ARGS[@]}" \
+        --target "${ENGINE_BUILD_TARGET}" \
         --tag "${image}" \
         --file "${REPO_ROOT}/Dockerfile" \
         "${REPO_ROOT}" >&2
