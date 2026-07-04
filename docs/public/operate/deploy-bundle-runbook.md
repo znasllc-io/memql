@@ -100,9 +100,9 @@ The cockpit also emits an AUDIT line per invocation.
 - A mid-flight ACTION failure aborts the automation before finalize, so
   the timeline strands at `in_progress` (no terminal write). Re-running
   appends a fresh deploymentId.
-- voice / voice-agent fail fast locally when the LiveKit env has never
-  been provisioned in the cluster (tracked separately); scale them to 0
-  or provision the voice lane before expecting a green gate that
-  includes them.
+- voice / voice-agent are GATED on LiveKit Cloud credentials locally
+  (memql#2416): `make up` / `make secrets` scales them to 0 with a loud
+  warning when `LIVEKIT_*` is not exported, and enables them when it is
+  -- so a green gate never depends on an unprovisioned voice lane.
 - `make deploy ARGS='--input {...}'` mangles JSON quoting; invoke the
   cockpit binary directly when passing structured input.

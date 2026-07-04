@@ -367,6 +367,22 @@ function print_summary() {
 # ENTRY POINT
 #=============================================================================
 
+
+# gate_voice_lane_post_sync re-runs the voice-lane gate once the ArgoCD app
+# has created the Deployments (seed-secrets runs BEFORE the app applies, so
+# its gate is a no-op on a fresh cluster). Bounded wait; best-effort.
+function gate_voice_lane_post_sync() {
+    local waited=0
+    while ! kubectl get deploy voice -n "$NAMESPACE" &>/dev/null; do
+        sleep 5; waited=$((waited + 5))
+        if [ "$waited" -ge 120 ]; then
+            info "voice deployment not present after ${waited}s; voice-lane gating deferred to 'make secrets'."
+            return 0
+        fi
+    done
+    bash "${SCRIPT_DIR}/seed-secrets.sh" --namespace="$NAMESPACE" --gate-voice-lane-only >&2 || true
+}
+
 function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"
@@ -400,6 +416,7 @@ function main() {
     fi
 
     apply_argocd_app
+    gate_voice_lane_post_sync
     print_summary
 
     cap_result_set     cluster        "$CLUSTER_NAME"

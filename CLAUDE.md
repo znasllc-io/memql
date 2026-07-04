@@ -671,9 +671,16 @@ Make targets:
   identity pod via `kubectl exec`).
 
 Deployment: the `voice` Deployment runs the `memql-voice` image (the
-`voice-runtime` CGO stage) with the `voice-agent` subcommand; in the local
-k3d cluster it comes up from `deploy/k8s/base` alongside the LiveKit
-Deployment (`deploy/k8s/base/livekit.yaml`).
+`voice-runtime` CGO stage) with the `voice-agent` subcommand. LOCALLY the
+voice lane uses a **LiveKit Cloud** project (Epic #2184; the local overlay
+removes the self-hosted livekit-server), and the lane is GATED on the
+operator's credentials (memql#2416): without `LIVEKIT_URL` /
+`LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` in the environment at `make up` /
+`make secrets`, voice + voice-agent scale to 0 with a loud warning (the
+binaries fail-fast on the missing env by design, so running them without
+creds is a guaranteed crash-loop). Export the creds and re-run
+`make secrets` to enable. Staging/prod stay self-hosted
+(`deploy/k8s/base/livekit.yaml`) via ESO/Key Vault.
 
 `integrations/openai/` on the Go side also serves the `/memql/audio`
 WebSocket path for voice-first creation modals. The earlier Python voice-agent (LiveKit Agents 1.5)
