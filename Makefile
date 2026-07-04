@@ -194,6 +194,11 @@ db:
 ## cockpit break-glass path -- `make deploy` is the imperative cockpit-delegated
 ## path (I16, #2227). `make up` stays a cluster-bootstrap launcher so the local
 ## inner loop never depends on the owner-gated cockpit deploy.
+## Downstream product stacks reuse this target with their own overrides
+## (see docs/public/operate/downstream-stacks.md): CARRIER_REPO +
+## CARRIER_NODES [+ CARRIER_CONTEXT] build a subset of node images from the
+## product repo's Dockerfile; APP_NAME + OVERLAY_PATH + REPO_URL register
+## the product's own ArgoCD Application.
 ##   make up                       # current branch as targetRevision
 ##   make up REVISION=main         # pin to main
 ##   make up SERVERS=2 AGENTS=1   # multi-node (see E0.5 / #2067)
@@ -204,6 +209,15 @@ up:
 		$${REVISION:+--revision=$${REVISION}} \
 		$${SERVERS:+--servers=$${SERVERS}} \
 		$${AGENTS:+--agents=$${AGENTS}} \
+		$${REPO_URL:+--repo-url="$${REPO_URL}"} \
+		$${APP_NAME:+--app-name="$${APP_NAME}"} \
+		$${OVERLAY_PATH:+--overlay-path="$${OVERLAY_PATH}"} \
+		$${EXTRA_PORTS:+--extra-ports="$${EXTRA_PORTS}"} \
+		$${APP_PROJECT:+--app-project="$${APP_PROJECT}"} \
+		$${PROJECT_MANIFEST:+--project-manifest="$${PROJECT_MANIFEST}"} \
+		$${CARRIER_REPO:+--carrier-repo="$${CARRIER_REPO}"} \
+		$${CARRIER_NODES:+--carrier-nodes="$${CARRIER_NODES}"} \
+		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"} \
 		$${NO_SECRETS:+--no-secrets}
 
 ## Clean-slate local environment: nuke + repave. Tears down the cluster
@@ -218,7 +232,16 @@ up-refresh:
 		$${NAMESPACE:+--namespace=$${NAMESPACE}} \
 		$${REVISION:+--revision=$${REVISION}} \
 		$${SERVERS:+--servers=$${SERVERS}} \
-		$${AGENTS:+--agents=$${AGENTS}}
+		$${AGENTS:+--agents=$${AGENTS}} \
+		$${REPO_URL:+--repo-url="$${REPO_URL}"} \
+		$${APP_NAME:+--app-name="$${APP_NAME}"} \
+		$${OVERLAY_PATH:+--overlay-path="$${OVERLAY_PATH}"} \
+		$${EXTRA_PORTS:+--extra-ports="$${EXTRA_PORTS}"} \
+		$${APP_PROJECT:+--app-project="$${APP_PROJECT}"} \
+		$${PROJECT_MANIFEST:+--project-manifest="$${PROJECT_MANIFEST}"} \
+		$${CARRIER_REPO:+--carrier-repo="$${CARRIER_REPO}"} \
+		$${CARRIER_NODES:+--carrier-nodes="$${CARRIER_NODES}"} \
+		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"}
 
 ## Tear down the local k3d cluster.
 ## Pass PURGE=1 to also remove the kubeconfig context.
@@ -235,16 +258,21 @@ secrets:
 
 ## Inner-loop dev: rebuild image(s), import into k3d, restart Deployment(s).
 ## No direct-apply bypass -- ArgoCD owns the manifests; only pods restart.
-##   make dev                    # rebuild + restart all app node types
-##   make dev NODE=bff           # one node type
-##   make dev NODE=bff,cognition # comma-separated list
-##   make dev PULL_INFRA=1      # pull + re-import infra images
+## Downstream product stacks pass CARRIER_REPO + CARRIER_NODES to build a
+## subset of node images from the product repo's Dockerfile instead.
+##   make dev                          # rebuild + restart all app node types
+##   make dev NODE=cognition           # one node type
+##   make dev NODE=mcp,cognition       # comma-separated list
+##   make dev PULL_INFRA=1            # pull + re-import infra images
 dev:
 	@bash scripts/k3d/dev.sh \
 		$${NODE:+--node=$${NODE}} \
 		$${PULL_INFRA:+--pull-infra} \
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
 		$${NAMESPACE:+--namespace=$${NAMESPACE}} \
+		$${CARRIER_REPO:+--carrier-repo="$${CARRIER_REPO}"} \
+		$${CARRIER_NODES:+--carrier-nodes="$${CARRIER_NODES}"} \
+		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"} \
 		$${NO_WAIT:+--no-wait}
 
 ## Print k3d cluster status + mesh litmus (unique MEMQL_NODE_ID per pod).
@@ -252,7 +280,8 @@ dev:
 status:
 	@bash scripts/k3d/status.sh \
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
-		$${NAMESPACE:+--namespace=$${NAMESPACE}}
+		$${NAMESPACE:+--namespace=$${NAMESPACE}} \
+		$${APP_NAME:+--app-name="$${APP_NAME}"}
 
 ## Scale all app Deployments to N replicas. Use N=2 for cross-node mesh
 ## testing (E0.5); N=1 to reset to single-node default.

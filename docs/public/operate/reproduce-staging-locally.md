@@ -26,7 +26,7 @@ cross-node mesh bugs reproduces locally instead of only on staging.
 | Orchestrator | ArgoCD (k3d) | ArgoCD (AKS) | identical |
 | Manifests | `deploy/k8s/overlays/local/` | `deploy/k8s/overlays/staging/` | same base, env config differs |
 | Node-type split | identity / voice / mcp / bff / cognition / agent / planner / workbench / voice-agent | same | identical |
-| Build model | engine (`Dockerfile`) for identity/voice/mcp; carrier (`memql-bff-copresent/Dockerfile`) for bff/cognition/agent/planner/workbench | same | identical |
+| Build model | engine (`Dockerfile`) for ALL node types (`memql-<type>:local`); product stacks overlay carrier builds via the carrier hook | carrier builds for product node types (product repo's pipeline) | engine-only here; see [downstream-stacks.md](downstream-stacks.md) |
 | Replicas per mesh node (default) | **1** (scale to 2 with `make scale N=2`) | **2** | equivalent |
 | Per-replica node id | `fieldRef: metadata.name` (downward API, same as staging) | `fieldRef: metadata.name` | **identical** |
 | `MEMQL_NODE_ID` uniqueness | enforced by fieldRef -- unique per pod | enforced by fieldRef | identical |
@@ -47,8 +47,11 @@ cross-node mesh bugs reproduces locally instead of only on staging.
 - **kubectl** -- `brew install kubectl`.
 - **git** -- the cluster's ArgoCD Application points at the current git branch;
   you must push your branch before ArgoCD can sync it.
-- The `memql-bff-copresent` sibling repo checked out at `../memql-bff-copresent`
-  (for `make dev` carrier builds).
+
+No product sibling repo is required: the engine cluster builds every node
+image from this repo's Dockerfile. Product stacks bring their own carrier
+builds via the carrier hook (see
+[downstream-stacks.md](downstream-stacks.md)).
 
 No genesis env file is required for `make up`; dev secrets are hardcoded
 in `scripts/k3d/seed-secrets.sh` (Azurite well-known key, `memql_dev` Postgres
@@ -115,7 +118,7 @@ Access the engine gRPC head: `localhost:50051` (after the port-forward above)
 The workflow after a code change:
 
 ```bash
-# Rebuild ALL nodes (engine + carrier) and restart pods:
+# Rebuild ALL nodes and restart pods:
 make dev
 
 # Rebuild a single node type (faster):
@@ -130,7 +133,7 @@ make dev PULL_INFRA=1
 
 `make dev` does:
 
-1. `docker build` the node image (engine or carrier Dockerfile as appropriate).
+1. `docker build` the node image from this repo's Dockerfile (`BUILD_TAGS=<type>`); a downstream product stack overrides a subset via the carrier hook.
 2. `k3d image import` -- loads the image into the cluster's containerd.
 3. `kubectl rollout restart deployment/<node>` -- triggers a pod roll so
    the new image is used. ArgoCD's `ignoreDifferences` does not cover
@@ -185,7 +188,7 @@ with its justification.
 
 - **Service set:** identity / voice / mcp / bff / cognition / agent / planner /
   workbench / voice-agent.
-- **Build source per node** (carrier vs engine -- the #1053 enforced rule).
+- **Build source per node** (engine-built here; carrier-built within a product stack -- the #1053 rule, revised).
 - **`fieldRef: metadata.name`** for `MEMQL_NODE_ID` on every Deployment in
   `deploy/k8s/base/` -- identical to staging.
 - **ArgoCD `ignoreDifferences`** on `/spec/replicas` -- identical to staging.
