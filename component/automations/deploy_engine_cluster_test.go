@@ -168,9 +168,38 @@ func TestDeployEngineClusterCompiles(t *testing.T) {
 		t.Error("finalize failure case must call updateDeploymentStatus")
 	}
 	failRefs := actionRefs(failSteps)
-	if !hasPrefix(failRefs, "revertOverlay") || !hasPrefix(failRefs, "notifyDeploy") {
-		t.Errorf("finalize failure case must revert the overlay + notify, got action refs %v", failRefs)
+	if !hasPrefix(failRefs, "notifyDeploy") {
+		t.Errorf("finalize failure case must notify, got action refs %v", failRefs)
 	}
+
+	// The overlay revert moved OUT of the failure case into its own
+	// decide -> switch -> act tail (#2380): rollbackTarget (pure logic;
+	// empty = no rollback -- a passed gate or the development path with no
+	// previousDeploymentId) then a switch that fires revertOverlay only in
+	// the non-empty case.
+	rbt := stepByID(auto.Steps, "rollbackTarget")
+	if rbt == nil || rbt.Function == nil || rbt.Function.Name != "deployRollbackTarget" {
+		t.Fatal("rollbackTarget step must decide via logic deployRollbackTarget")
+	}
+	rb := stepByID(auto.Steps, "switch_steps.rollbackTarget.result")
+	if rb == nil || rb.Switch == nil {
+		t.Fatal("rollback must switch on steps.rollbackTarget.result")
+	}
+	if _, ok := rb.Switch.Cases[""]; !ok {
+		t.Error("rollback switch must carry the empty (no-rollback) case")
+	}
+	if rb.Switch.Default == nil || !hasPrefix(actionRefs(rb.Switch.Default.Steps), "revertOverlay") {
+		t.Error("rollback switch default must revert the overlay")
+	}
+}
+
+func stepByID(steps []*automations.Step, id string) *automations.Step {
+	for _, s := range steps {
+		if s.ID == id {
+			return s
+		}
+	}
+	return nil
 }
 
 func readDeploymentAutomations(t *testing.T) string {

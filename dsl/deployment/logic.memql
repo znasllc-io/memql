@@ -60,11 +60,21 @@ logic nextDeploymentVersion {
 // reader stay read-only. Reads actor.role (the resolved auth context,
 // available in every body). The deploy automation calls this before kicking
 // off a deploy; an out-of-role caller's request is dropped.
+//
+// SHAPE NOTE (#2380): both gates use the multi-step decide form (steps +
+// cond + return of a step ref) -- the LogicRunner-executed shape proven at
+// runtime. The single-statement `return a == b || ...` form compiles to a
+// query-path expression that SCANS (it died on the engine's bookkeeping
+// rows at the first live deploy); until that engine path evaluates
+// in-process, author role gates in this shape.
 @enabled
 @description("Pure forward-deploy role gate, mirroring spec requiresDeveloperOrAbove (#1876): true when the actor holds developer, admin, or owner. Writer/reader are read-only.")
 logic deploymentForwardAllowed {
   body {
-    return actor.role == "developer" || actor.role == "admin" || actor.role == "owner"
+    role := coalesce(actor.role, "")
+    isElevated := cond(role == "admin", true, cond(role == "owner", true, false))
+    allowed := cond(role == "developer", true, isElevated)
+    return allowed
   }
 }
 
@@ -76,7 +86,24 @@ logic deploymentForwardAllowed {
 @description("Pure rollback role gate, mirroring spec requiresOwner (#1876): true ONLY when the actor holds the owner role. Rollback is owner-only -- not even admin may roll back.")
 logic deploymentRollbackAllowed {
   body {
-    return actor.role == "owner"
+    role := coalesce(actor.role, "")
+    allowed := cond(role == "owner", true, false)
+    return allowed
+  }
+}
+
+@enabled
+@description("PURE rollback-target decision (#2380): returns the deployment id to roll back to when the gate FAILED and a previousDeploymentId is present; returns empty -- meaning NO rollback -- on a passed gate or when no rollback target was supplied (the development path). The automation switches on this scalar and fires revertOverlay only in the non-empty case (decide -> switch -> act).")
+logic deployRollbackTarget {
+  args {
+    passed any
+    previousDeploymentId any
+  }
+  body {
+    prev := coalesce(args.previousDeploymentId, "")
+    ok := coalesce(args.passed, false)
+    target := cond(ok == true, "", prev)
+    return target
   }
 }
 
@@ -120,9 +147,11 @@ logic engineNodeTypes {
 @description("Map the deploy-gate result to the terminal deployment status label: \"succeeded\" when the gate passed, else \"failed\" (fail-closed, mirroring deployGateGreen). The deploy automation's finalize step switches on this.")
 logic deployOutcomeLabel {
   args {
-    gate object @required
+    passed any @description("The gate capability's result.passed boolean; absent/false -> failed. The automation passes the LEAF (steps.gate.result.result.passed -- the action envelope nests the script's result under result), not the envelope object (#2380).")
   }
   body {
-    return cond(coalesce(args.gate.passed, false), "succeeded", "failed")
+    ok := coalesce(args.passed, false)
+    outcome := cond(ok == true, "succeeded", "failed")
+    return outcome
   }
 }

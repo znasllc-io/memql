@@ -64,7 +64,7 @@
 //                     pinOverlayDigests + argoSync } }     placement -- GitOps)
 //   gate            action runDeployGate                 (act: post-deploy gate)
 //   outcome         logic deployOutcomeLabel             (decide: succeeded/failed)
-//   finalize        switch outcome.result {              (persist + act + persist)
+//   finalize        switch steps.outcome.result {              (persist + act + persist)
 //                     succeeded { updateDeploymentStatus succeeded; notifyDeploy }
 //                     default   { revertOverlay; updateDeploymentStatus failed;
 //                                 notifyDeploy } }
@@ -101,7 +101,7 @@
 // backends and records the full lifecycle; staging/production are authored +
 // dry-runnable and go live once the build-server + ArgoCD wiring is exercised.
 
-use deployment.logic.{ deploymentForwardAllowed, deployOutcomeLabel }
+use deployment.logic.{ deploymentForwardAllowed, deployOutcomeLabel, deployRollbackTarget }
 use deployment.mutations.{ createDeployment, updateDeploymentStatus }
 
 @enabled
@@ -161,18 +161,28 @@ automation deployEngineCluster {
     action runDeployGate(env: environment, workdir: workdir, dryRun)
   }
   step outcome {
-    logic deployOutcomeLabel ( gate: gate.result )
+    logic deployOutcomeLabel ( passed: steps.gate.result.result.result.passed )
   }
   step finalize {
-    switch outcome.result {
+    switch steps.outcome.result {
       case "succeeded" {
         updateDeploymentStatus { deploymentId: deploymentId, status: "succeeded" }
         action notifyDeploy(env: environment, status: "succeeded", deploymentId, dryRun)
       }
       default {
-        action revertOverlay(overlayPath, toDeploymentId: previousDeploymentId, dryRun)
         updateDeploymentStatus { deploymentId: deploymentId, status: "failed" }
         action notifyDeploy(env: environment, status: "failed", deploymentId, dryRun)
+      }
+    }
+  }
+  step rollbackTarget {
+    logic deployRollbackTarget ( passed: steps.gate.result.result.result.passed, previousDeploymentId )
+  }
+  step rollback {
+    switch steps.rollbackTarget.result {
+      case "" { }
+      default {
+        action revertOverlay(overlayPath, toDeploymentId: steps.rollbackTarget.result, dryRun)
       }
     }
   }

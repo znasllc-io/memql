@@ -208,7 +208,7 @@ func TestLogicRunner_SeedsCallerArgsEverywhere(t *testing.T) {
 		},
 		"partitionId": "space-abc",
 	}
-	evaluator := r.newEvaluatorForLogic(args)
+	evaluator := r.newEvaluatorForLogic(context.Background(), args)
 
 	// `args` custom variable
 	val, err := evaluator.EvaluateValue(`$args.partitionId`)
@@ -252,7 +252,7 @@ func TestLogicRunner_EventBindingIsFirstClass(t *testing.T) {
 			"payload": map[string]any{"activePartitionId": "space-xyz", "id": "user-2"},
 		},
 	}
-	ev := r.newEvaluatorForLogic(args)
+	ev := r.newEvaluatorForLogic(context.Background(), args)
 
 	for _, expr := range []string{
 		`$args.event.payload.activePartitionId`, // author-facing form in the live logics
@@ -276,7 +276,7 @@ func TestLogicRunner_EventBindingIsFirstClass(t *testing.T) {
 // had no root to walk.
 func TestLogicRunner_EventBindingSeededWhenAbsent(t *testing.T) {
 	r := NewLogicRunner(nil, nil, nil)
-	ev := r.newEvaluatorForLogic(map[string]any{"partitionId": "space-abc"})
+	ev := r.newEvaluatorForLogic(context.Background(), map[string]any{"partitionId": "space-abc"})
 
 	// The envelope itself is a well-formed object (not nil).
 	envelope, err := ev.EvaluateValue(`$event`)

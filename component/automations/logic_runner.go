@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/component/auth"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -86,7 +87,7 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 		return nil, err
 	}
 
-	evaluator := r.newEvaluatorForLogic(args)
+	evaluator := r.newEvaluatorForLogic(ctx, args)
 	stepCtx := &StepContext{
 		Logger:    r.logger,
 		Engine:    r.engine,
@@ -941,7 +942,7 @@ func (r *LogicRunner) compileBodyToAutomation(fnName string, body *languageParse
 // (validateLogicEventBinding) guarantees every event-reading logic
 // DECLARES `event` as a required input, so the real path always carries
 // a concrete event; the fallback is purely defensive.
-func (r *LogicRunner) newEvaluatorForLogic(args map[string]any) *Evaluator {
+func (r *LogicRunner) newEvaluatorForLogic(ctx context.Context, args map[string]any) *Evaluator {
 	evaluator := NewEvaluator()
 	if args == nil {
 		args = map[string]any{}
@@ -954,6 +955,19 @@ func (r *LogicRunner) newEvaluatorForLogic(args map[string]any) *Evaluator {
 		"error":  "",
 	})
 	evaluator.SetCustom("event", logicEventBinding(args))
+	// actor.* is an ambient every body may read (the argument-resolution
+	// contract); the runner's step evaluator must bind it from the caller's
+	// auth context or a logic step like `role := coalesce(actor.role, "")`
+	// silently resolves to the literal path text (#2380, the deploy role
+	// gates). Absent auth leaves actor unbound -- reads resolve nil.
+	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
+		evaluator.SetCustom("actor", map[string]any{
+			"userId":         ac.UserId,
+			"role":           string(ac.Role),
+			"identityId":     ac.IdentityId,
+			"isClusterOwner": ac.Role == auth.RoleOwner,
+		})
+	}
 	if r.logger != nil {
 		evaluator.SetLogger(r.logger)
 	}
