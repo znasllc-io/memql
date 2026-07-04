@@ -43,6 +43,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "k3d.seedSecrets" "Seed the k8s Secrets that the local k3d overlay requires."
+cap_spec_param "gate-voice-lane-only" "only re-run the voice-lane gate (scale voice/voice-agent per LiveKit config)"
 cap_spec_param "namespace" "k8s namespace to seed into"
 #=============================================================================
 # CONFIGURATION
@@ -205,6 +206,41 @@ function seed_memql_secrets() {
 # LIVEKIT SECRETS
 #=============================================================================
 
+# gate_voice_lane scales the voice lane to match the LiveKit configuration
+# (memql#2416): the local dev loop uses a LiveKit Cloud project (Epic #2184;
+# no self-hosted livekit locally), and the voice / voice-agent binaries
+# FAIL-FAST on the missing env (Epic 7 -- by design). Running them without
+# credentials is therefore a guaranteed crash-loop, which read as a broken
+# deploy at the D4 first live deploy. Without creds the lane is disabled
+# LOUDLY (replicas=0 + a warn naming the re-enable path); with creds it is
+# enabled. ArgoCD ignores /spec/replicas, so the scale sticks.
+function gate_voice_lane() {
+    local lk_url="${LIVEKIT_URL:-${MEMQL_POLYPHON_LIVEKIT_URL:-}}"
+    local lk_key="${LIVEKIT_API_KEY:-${MEMQL_POLYPHON_LIVEKIT_API_KEY:-}}"
+    local lk_secret="${LIVEKIT_API_SECRET:-${MEMQL_POLYPHON_LIVEKIT_API_SECRET:-}}"
+    local replicas=1
+    if [ -z "$lk_url" ] || [ -z "$lk_key" ] || [ -z "$lk_secret" ]; then
+        replicas=0
+    fi
+    local scaled_any=""
+    for d in voice voice-agent; do
+        if kubectl get deploy "$d" -n "$NAMESPACE" &>/dev/null; then
+            kubectl scale deploy "$d" -n "$NAMESPACE" --replicas="$replicas" >&2 || true
+            scaled_any=1
+        fi
+    done
+    if [ -z "$scaled_any" ]; then
+        info "voice lane: deployments not present yet; gating happens on the next 'make secrets' (or scale manually)."
+        return 0
+    fi
+    if [ "$replicas" -eq 0 ]; then
+        warn "voice lane DISABLED (replicas=0): no LiveKit Cloud credentials in the environment."
+        warn "  To enable: export LIVEKIT_URL/LIVEKIT_API_KEY/LIVEKIT_API_SECRET, then 'make secrets'."
+    else
+        info "voice lane enabled (LiveKit Cloud credentials present)."
+    fi
+}
+
 function seed_livekit_secrets() {
     # LOCAL DEV -> LIVEKIT CLOUD (Epic #2184 / #2186).
     #
@@ -284,6 +320,15 @@ function main() {
     NAMESPACE="$(cap_param namespace "$NAMESPACE")"
     cap_require namespace "$NAMESPACE"
 
+    # --gate-voice-lane-only: re-run just the voice-lane gate (memql#2416).
+    # up.sh calls this AFTER the ArgoCD app has created the Deployments,
+    # since the full seeding pass runs before they exist.
+    if [ -n "$(cap_flag gate-voice-lane-only)" ]; then
+        gate_voice_lane
+        cap_result_set_raw voiceLaneGated true
+        cap_ok
+    fi
+
     # Genesis source for the result envelope (computed here -- the resolver
     # runs in a $(...) subshell and cannot mutate this global).
     if [ -n "${MEMQL_GENESIS_B64:-}" ]; then
@@ -299,6 +344,7 @@ function main() {
     seed_db_creds
     seed_memql_secrets
     seed_livekit_secrets
+    gate_voice_lane
     seed_telephony_secrets
 
     info "All local secrets seeded. The k3d cluster can now start the memQL stack."
