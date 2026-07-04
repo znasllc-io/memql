@@ -52,6 +52,27 @@ function main() {
         cap_ok
     fi
 
+    if [[ "$env" == "development" ]]; then
+        # Development gate target (#2380): the k3d mesh litmus. Selecting the
+        # health-check backend BY the env param is mechanical dispatch (the
+        # promote.sh env-mapping class), not a policy decision; the litmus
+        # itself is the k3d.status capability script (deployments + per-pod
+        # unique MEMQL_NODE_ID -- the `make status` check).
+        litmus_script="${workdir%/}/scripts/k3d/status.sh"
+        if [[ ! -f "$litmus_script" ]]; then
+            cap_fail 5 "development gate litmus not found at ${litmus_script}"
+        fi
+        cap_info "Running development gate (k3d mesh litmus)..."
+        litmus_json="$(bash "$litmus_script" 2> >(cat >&2) || true)"
+        if printf '%s' "$litmus_json" | grep -q '"meshHealthy": *true'; then
+            cap_result_set_raw passed true
+        else
+            cap_result_set_raw passed false
+        fi
+        cap_result_set_raw dryRun false
+        cap_ok
+    fi
+
     gate="${workdir%/}/scripts/deploy/post-deploy-gate.sh"
     if [[ ! -x "$gate" && ! -f "$gate" ]]; then
         cap_fail 5 "post-deploy gate not found at ${gate}"
