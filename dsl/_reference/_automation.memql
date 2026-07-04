@@ -160,6 +160,20 @@ automation deployWithArgs {
 // events (.created / .updated) from the mutation's acting identity; absent
 // when an emitter carries no actor -- guard with exists(event.actor).
 //
+// CONDITION VOCABULARY (P4, #2371 -- enforced by the callgraph validator +
+// the whole-tree contract test + the authoring sandbox at define time).
+// A condition (if gate / forEach where / @filter) may use:
+//   - step-result comparisons: steps.<decide>.result == <value>
+//   - presence guards: exists(<ref>)
+//   - SINGLE-value fan-out equality: <field> == "<one literal>"
+//   - boolean fields / == true / == false
+// FINDINGS (policy in orchestration -- move it to a pure decide logic or a
+// query pushdown):
+//   - a same-field string-literal ||-vocabulary (x == "a" || x == "b")
+//   - date math / defaults in conditions (addDuration / coalesce / concat)
+// Switch SUBJECTS are exempt: switching on a decided value IS the sanctioned
+// fan-out shape.
+//
 // Step vocabulary an automation may use:
 //   step NAME { logic L(...) }              -- decide (pure)
 //   step NAME { query Q(...) }              -- read
