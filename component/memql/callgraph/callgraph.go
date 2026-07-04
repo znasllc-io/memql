@@ -418,6 +418,92 @@ func ConstructFindings(kind, name, text string, useKinds map[string]string, side
 		if writeBlockRE.MatchString(text) {
 			add("action-no-graph", "contains a graph write block -- an action never touches the MemQL graph (ADR §2.3); persist via a following mutation step")
 		}
+	case "automation":
+		// Automations orchestrate; they do not DECIDE (P4, memql#2371).
+		// Conditions (if gates, forEach where clauses, @filter) may gate on
+		// step results, presence, and single-value fan-out equality -- but
+		// POLICY in a condition is a finding: a same-field string-literal
+		// ||-vocabulary (role/status sets), date-math or default-injecting
+		// builtins (addDuration / coalesce / concat), each of which belongs
+		// in a pure decide logic (or a query pushdown / @filter relevance
+		// check). This is the rule whose ABSENCE let 13 policy sites
+		// accumulate invisibly after the #2235 burn-down.
+		for _, cond := range automationConditions(text) {
+			if m := conditionBuiltinRE.FindStringSubmatch(cond); m != nil {
+				add("automation-condition-builtin", fmt.Sprintf("condition %q calls %s() -- date math / defaults are POLICY; compute the decision in a pure logic (or push a cutoff into the query) and gate on steps.<decide>.result (P4, #2371)", snippet(cond), m[1]))
+			}
+			if field, ok := literalVocabularyField(cond); ok {
+				add("automation-condition-vocabulary", fmt.Sprintf("condition %q compares %q against multiple string literals -- a value VOCABULARY is policy; own it in one pure decide logic and switch on its result (P4, #2371)", snippet(cond), field))
+			}
+		}
 	}
 	return out
 }
+
+// ---------------------------------------------------------------------------
+// Automation condition vocabulary (P4, memql#2371)
+// ---------------------------------------------------------------------------
+
+var (
+	// if-step gates: `if <cond> {` at a step position (never matches the
+	// construct headers -- automations have no top-level if).
+	automationIfRE = regexp.MustCompile(`(?m)^\s*if\s+(.+?)\s*\{\s*$`)
+	// forEach where clauses: `forEach x in <src> where <cond> {`.
+	automationWhereRE = regexp.MustCompile(`(?m)forEach\s+\w+\s+in\s+.+?\s+where\s+(.+?)\s*\{\s*$`)
+	// trigger relevance filters: `@filter(<cond>)`.
+	automationFilterRE = regexp.MustCompile(`@filter\(([^)]*)\)`)
+
+	// Policy smells inside a condition. exists() is the sanctioned presence
+	// guard and is deliberately NOT in this list.
+	conditionBuiltinRE = regexp.MustCompile(`\b(addDuration|coalesce|concat)\s*\(`)
+	// Every `<ident> == "<literal>"` atom in a condition; two on the SAME
+	// identifier joined by || form a vocabulary (checked in Go -- RE2 has no
+	// backreferences).
+	conditionEqualityAtomRE = regexp.MustCompile(`([A-Za-z_][\w.]*)\s*==\s*"[^"]*"`)
+)
+
+// literalVocabularyField reports the field name when cond compares the SAME
+// identifier against 2+ string literals under || -- the role/status
+// vocabulary shape (`x == "a" || x == "b"`). &&-joined equalities on one
+// field are contradictory, not a vocabulary, so || presence is required.
+func literalVocabularyField(cond string) (string, bool) {
+	if !strings.Contains(cond, "||") {
+		return "", false
+	}
+	seen := map[string]int{}
+	for _, m := range conditionEqualityAtomRE.FindAllStringSubmatch(cond, -1) {
+		seen[m[1]]++
+		if seen[m[1]] >= 2 {
+			return m[1], true
+		}
+	}
+	return "", false
+}
+
+// automationConditions extracts every condition surface from an automation's
+// source: if-step gates, forEach where clauses, and the @filter annotation.
+// Switch SUBJECTS are exempt -- switching on a decided value is the sanctioned
+// fan-out shape.
+func automationConditions(text string) []string {
+	var out []string
+	for _, m := range automationIfRE.FindAllStringSubmatch(text, -1) {
+		out = append(out, m[1])
+	}
+	for _, m := range automationWhereRE.FindAllStringSubmatch(text, -1) {
+		out = append(out, m[1])
+	}
+	for _, m := range automationFilterRE.FindAllStringSubmatch(text, -1) {
+		out = append(out, m[1])
+	}
+	return out
+}
+
+// snippet truncates a condition for the finding message.
+func snippet(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 80 {
+		return s[:77] + "..."
+	}
+	return s
+}
+
