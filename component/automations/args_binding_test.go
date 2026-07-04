@@ -271,3 +271,11 @@ func TestFireRefusalCounter(t *testing.T) {
 func capturingLogger(buf *bytes.Buffer) *slog.Logger {
 	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 }
+
+// #2380: a Go emitter passes typed slices; the array contract must admit
+// []string (the cockpit deploy command's engineNodeTypes default).
+func TestArgTypeMatches_TypedStringSlice(t *testing.T) {
+	if !argTypeMatches([]string{"identity", "mcp"}, "array") {
+		t.Fatal("[]string must satisfy the array contract")
+	}
+}

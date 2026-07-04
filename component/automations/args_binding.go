@@ -164,7 +164,10 @@ func argTypeMatches(value any, typ string) bool {
 		return ok
 	case "array":
 		switch value.(type) {
-		case []any, []map[string]any:
+		case []any, []map[string]any, []string:
+			// []string: a Go emitter (the cockpit deploy command's
+			// engineNodeTypes default) marshals typed slices; the contract
+			// means "an array", not "an []any" (#2380 first live deploy).
 			return true
 		}
 		return false
