@@ -166,7 +166,7 @@ user-chosen partition name.
   "automationOrigin": "unified:deploypack/automations.memql:deployStaging",
   "executionId": "exec-abc123",
   "preconditionId": "digestPinned",
-  "check": "exists(event.payload.imageDigest)",
+  "check": "exists(args.imageDigest)",
   "literal": "imageDigest",
   "preconditionDescription": "the deploy needs a pinned image digest",
   "triggerTopic": "graph.node.updated.v1:cluster:deployment",

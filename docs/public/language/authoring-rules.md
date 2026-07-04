@@ -709,25 +709,33 @@ shorthand: `name` projects as `name`, exactly like
 
 ## 17. Automation step-args shorthand: bare dotted path infers the key
 
-**Rule.** Inside an automation step's function-call args, a bare
-dotted path like `event.payload.spaceId` or
-`registerNode.result.node.id` with no `key:` prefix infers the
-key from the path's **terminal segment**.
+**Rule (updated for G5, memql#2367 + Story 9, #2335).** An automation
+declares a typed `args { }` contract; the trigger binds the event payload
+to it (loud refusal on a violated contract) and step bodies read the
+fields BARE -- `event.payload.<field>` reads are retired and rejected
+with a migration hint, and the legacy `name({ ... })` object-literal call
+wrapper is rejected at parse time. A bare simple identifier in a
+construct-call arg position is PUNNED (`f(spaceId)` ==
+`f(spaceId: spaceId)`, G3 #2365); step results read via
+`steps.<name>.result`.
 
 ```memql
-// Verbose -- still valid, still works.
-mutationSendTextUtterance({
-  spaceId:       event.payload.spaceId,
-  participantId: event.payload.siParticipantId,
-  text:          siResponse
-})
-
-// Shorthand -- terminal segments become the keys.
-mutationSendTextUtterance({
-  event.payload.spaceId,
-  participantId: event.payload.siParticipantId,  // different key name
-  text:          siResponse                        // wrapped value
-})
+automation sendGreeting {
+  args {
+    spaceId          string @required
+    siParticipantId  string @required
+  }
+  step decide {
+    logic composeGreeting ( spaceId )              // punned
+  }
+  step send {
+    mutation sendTextUtterance (
+      spaceId,                                     // punned bare field
+      participantId: siParticipantId,              // renamed key
+      text:          steps.decide.result           // step-result read
+    )
+  }
+}
 ```
 
 **Constraints.**

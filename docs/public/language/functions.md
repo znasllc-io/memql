@@ -422,18 +422,19 @@ automation deployStaging {
     description: "Only drive the staging deploy spine in staging."
   }
   precondition digestPinned {
-    check: exists(event.payload.imageDigest)
+    check: exists(args.imageDigest)
     literal: imageDigest
   }
   step run {
-    logic driveDeploy { event: event }
+    logic driveDeploy ( event )
   }
 }
 ```
 
 The `check` expression uses the same grammar as `Step.Condition` and
 trigger `@filter` (`$event.*`, `$config.*`, `$var.*`, `exists(...)`,
-comparisons, `&&` / `||` / `!`). Prefer `exists(event.payload.X)` over
+comparisons, `&&` / `||` / `!`). Prefer `exists(args.X)` (the G5 typed
+contract binds the payload to the automation's args) over
 `X != ""` — the condition evaluator treats a present-but-empty value as
 "not exists", so `exists(...)` is the reliable presence check.
 
