@@ -55,7 +55,16 @@ function main() {
     fi
     cap_info "Fetching and checking out ${ref} in ${workdir}..."
     git -C "$workdir" fetch --all --tags >&2 || cap_fail 5 "git fetch failed in ${workdir}"
-    git -C "$workdir" checkout "$ref" >&2     || cap_fail 5 "git checkout ${ref} failed in ${workdir}"
+    # A BRANCH ref must land on the freshly-fetched remote tip: a plain
+    # `git checkout main` on an already-checked-out main is a no-op, so the
+    # workdir silently deployed a STALE tree (#2380). -B resets the local
+    # branch to origin/<ref> when the remote branch exists; tags/SHAs keep
+    # the plain checkout.
+    if git -C "$workdir" show-ref --verify --quiet "refs/remotes/origin/${ref}"; then
+        git -C "$workdir" checkout -B "$ref" "origin/${ref}" >&2 || cap_fail 5 "git checkout ${ref} failed in ${workdir}"
+    else
+        git -C "$workdir" checkout "$ref" >&2 || cap_fail 5 "git checkout ${ref} failed in ${workdir}"
+    fi
     cap_changed
     cap_result_set_raw dryRun false
     cap_ok
