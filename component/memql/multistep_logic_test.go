@@ -27,15 +27,15 @@ func TestMultiStepLogicReturnParsing(t *testing.T) {
 @description("repro of revokeExpiredDelegations shape")
 logic revokeExpiredDelegations {
   args {
-    now string @required
+    asOf string @required
   }
   body {
-    expiredDelegations := expiredActiveDelegations( now: args.now )
+    expiredDelegations := expiredActiveDelegations( asOf: args.asOf )
     for item := range expiredDelegations.nodes() {
       revokeStep := revokeDelegation(
         delegationId: item.id,
         revokedBySubject: "system:expiry",
-        revokedAt: args.now
+        revokedAt: args.asOf
       )
     }
     return expiredDelegations.count()
@@ -449,10 +449,10 @@ func TestMultiStepLogicReturnSurvivesCompileRoundTrip(t *testing.T) {
 @description("repro of the round-trip")
 logic logicSample {
   args {
-    now string @required
+    asOf string @required
   }
   body {
-    rows := someQuery( now: args.now )
+    rows := someQuery( asOf: args.asOf )
     for item := range rows.nodes() {
       tick := someMutation( id: item.id )
     }

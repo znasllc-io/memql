@@ -1057,37 +1057,9 @@ func extractLogicReturnExpression(auto *languageParser.AutomationDef) (languageP
 	return nil, fmt.Errorf("logic body has no trailing `return <expr>` terminator")
 }
 
-// validateFunctions validates all parsed functions for correctness.
-// Checks for valid expressions and detects circular dependencies.
-func validateFunctions(functions map[string]*Function) error {
-	// Build dependency graph
-	deps := make(map[string][]string)
-	for name, fn := range functions {
-		refs := collectFunctionReferences(fn.Expr)
-		deps[name] = refs
-	}
-
-	// Check for circular dependencies
-	if cycle := detectFunctionCycle(deps); cycle != nil {
-		return fmt.Errorf("circular function dependency detected: %s", strings.Join(cycle, " -> "))
-	}
-
-	// Validate that referenced functions exist
-	for name, refs := range deps {
-		for _, ref := range refs {
-			if _, ok := functions[ref]; !ok {
-				return fmt.Errorf("function %q references unknown function %q", name, ref)
-			}
-		}
-	}
-
-	// Story 4 (#2302 / ADR §2.2): collection lambda bodies must be pure.
-	if err := enforceLambdaPurity(functions); err != nil {
-		return err
-	}
-
-	return nil
-}
+// validateFunctions (cycle + unknown-reference validation) was dead code with
+// zero call sites and was DELETED (S6, memql#2361): the strict-boot posture
+// (#2357) + the callgraph contract gates cover the classes it targeted.
 
 // collectFunctionReferences finds all FunctionCallExpression nodes in an expression tree.
 func collectFunctionReferences(expr ExpressionNode) []string {

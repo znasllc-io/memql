@@ -1839,7 +1839,8 @@ func ExistingClusterBuild(args ExistingClusterArgs) string {
 //
 // Bound concept: delegation.
 type ExpiredActiveDelegationsArgs struct {
-	Now string
+	// RFC3339 evaluation instant the caller passes (usually the ambient now). Renamed from `now` -- args fields may not shadow reserved engine names (S6 #2361).
+	AsOf string
 }
 
 // ExpiredActiveDelegations calls the engine query expiredActiveDelegations.
@@ -1851,8 +1852,8 @@ func (qc *QueryClient) ExpiredActiveDelegations(ctx context.Context, args Expire
 func ExpiredActiveDelegationsBuild(args ExpiredActiveDelegationsArgs) string {
 	var b strings.Builder
 	b.WriteString("query expiredActiveDelegations(")
-	b.WriteString("now: ")
-	b.WriteString(fmt.Sprintf("%q", args.Now))
+	b.WriteString("asOf: ")
+	b.WriteString(fmt.Sprintf("%q", args.AsOf))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1878,7 +1879,8 @@ func ExpiredAuditEventsBuild(args ExpiredAuditEventsArgs) string {
 //
 // Bound concept: authCode.
 type ExpiredConsumedAuthCodesArgs struct {
-	Now string
+	// RFC3339 evaluation instant the caller passes (usually the ambient now). Renamed from `now` -- args fields may not shadow reserved engine names (S6 #2361).
+	AsOf string
 }
 
 // ExpiredConsumedAuthCodes calls the engine query expiredConsumedAuthCodes.
@@ -1890,8 +1892,8 @@ func (qc *QueryClient) ExpiredConsumedAuthCodes(ctx context.Context, args Expire
 func ExpiredConsumedAuthCodesBuild(args ExpiredConsumedAuthCodesArgs) string {
 	var b strings.Builder
 	b.WriteString("query expiredConsumedAuthCodes(")
-	b.WriteString("now: ")
-	b.WriteString(fmt.Sprintf("%q", args.Now))
+	b.WriteString("asOf: ")
+	b.WriteString(fmt.Sprintf("%q", args.AsOf))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1900,7 +1902,8 @@ func ExpiredConsumedAuthCodesBuild(args ExpiredConsumedAuthCodesArgs) string {
 //
 // Bound concept: magicLinkRequest.
 type ExpiredMagicLinkRequestsArgs struct {
-	Now string
+	// RFC3339 evaluation instant the caller passes (usually the ambient now). Renamed from `now` -- args fields may not shadow reserved engine names (S6 #2361).
+	AsOf string
 }
 
 // ExpiredMagicLinkRequests calls the engine query expiredMagicLinkRequests.
@@ -1912,8 +1915,8 @@ func (qc *QueryClient) ExpiredMagicLinkRequests(ctx context.Context, args Expire
 func ExpiredMagicLinkRequestsBuild(args ExpiredMagicLinkRequestsArgs) string {
 	var b strings.Builder
 	b.WriteString("query expiredMagicLinkRequests(")
-	b.WriteString("now: ")
-	b.WriteString(fmt.Sprintf("%q", args.Now))
+	b.WriteString("asOf: ")
+	b.WriteString(fmt.Sprintf("%q", args.AsOf))
 	b.WriteString(")")
 	return b.String()
 }

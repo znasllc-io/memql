@@ -2269,6 +2269,7 @@ type CreateAuthoringConstructArgs struct {
 	Name            string
 	TargetNamespace string
 	Source          string
+	GrammarVersion  string
 }
 
 // CreateAuthoringConstruct calls the engine mutation createAuthoringConstruct.
@@ -2307,6 +2308,13 @@ func CreateAuthoringConstructBuild(args CreateAuthoringConstructArgs) string {
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
+	if args.GrammarVersion != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("grammarVersion: ")
+		b.WriteString(fmt.Sprintf("%q", args.GrammarVersion))
+	}
 	b.WriteString(")")
 	return b.String()
 }

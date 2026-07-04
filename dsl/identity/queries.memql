@@ -580,9 +580,9 @@ query delegation delegationsByIdentity {
 @unbounded("expired-delegation reaper sweep -- an internal sweep that must see all")
 query delegation expiredActiveDelegations {
   args {
-    now  string  @required
+    asOf  string  @required @description("RFC3339 evaluation instant the caller passes (usually the ambient now). Renamed from `now` -- args fields may not shadow reserved engine names (S6 #2361).")
   }
-  filter  isActiveRecord && expiresAt<args.now
+  filter  isActiveRecord && expiresAt<args.asOf
   shape   delegationFull
 }
 
@@ -652,9 +652,9 @@ query auditEvent expiredAuditEvents {
 @unbounded("expired consumed auth-code GC sweep -- an internal sweep that must see all")
 query authCode expiredConsumedAuthCodes {
   args {
-    now  string  @required
+    asOf  string  @required @description("RFC3339 evaluation instant the caller passes (usually the ambient now). Renamed from `now` -- args fields may not shadow reserved engine names (S6 #2361).")
   }
-  filter  expiresAt<args.now && consumedAt!=""
+  filter  expiresAt<args.asOf && consumedAt!=""
   shape   authCodeFull
 }
 
@@ -687,9 +687,9 @@ query authCode expiredConsumedAuthCodes {
 @unbounded("expired magic-link GC sweep -- an internal sweep that must see all")
 query magicLinkRequest expiredMagicLinkRequests {
   args {
-    now  string  @required
+    asOf  string  @required @description("RFC3339 evaluation instant the caller passes (usually the ambient now). Renamed from `now` -- args fields may not shadow reserved engine names (S6 #2361).")
   }
-  filter  expiresAt<args.now
+  filter  expiresAt<args.asOf
   shape   magicLinkRequestFull
 }
 

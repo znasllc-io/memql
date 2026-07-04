@@ -83,6 +83,9 @@ type AuthoringConstructRow struct {
 	// demoted construct never re-registers after a restart.
 	Status     string `json:"status"`
 	Catalogued bool   `json:"catalogued"`
+	// GrammarVersion is the engine grammar epoch the source was authored
+	// under (parser.GrammarVersion, S6 #2361). Empty on legacy rows.
+	GrammarVersion string `json:"grammarVersion"`
 }
 
 // BundleApprovalArtifact is the Gate-3 review surface a user approves against:

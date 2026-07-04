@@ -35,6 +35,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -406,6 +407,15 @@ func (e *MemQLEngine) recompileAndPromoteRow(ctx context.Context, row AuthoringC
 			e.quarantineRehydratedConstruct(row, err)
 		}
 	}()
+	// S6 (#2361): a MISMATCHED grammar stamp is the actionable signal this
+	// row predates a grammar move -- quarantine with the migration command
+	// named instead of whatever downstream parse error the stale source
+	// would produce. Legacy rows without a stamp proceed (the recompile
+	// decides); a row stamped with the CURRENT grammar also proceeds.
+	if row.GrammarVersion != "" && row.GrammarVersion != languageParser.GrammarVersion {
+		return fmt.Errorf("authored construct %s %q was authored under grammar %q; this engine runs %q -- run `memqlmigrate --rewrite` for the intervening grammar epics against the bundle source and re-promote (S6, memql#2361)",
+			row.Kind, row.Name, row.GrammarVersion, languageParser.GrammarVersion)
+	}
 	sc := SandboxConstruct{Name: row.Name, Kind: row.Kind, Source: row.Source}
 	c := &AuthoredConstruct{
 		OwnerUserId: row.OwnerUserId,
@@ -505,6 +515,9 @@ func (s *enginePromoteStore) CreatePromoteConstruct(ctx context.Context, constru
 		"name":            name,
 		"targetNamespace": targetNamespace,
 		"source":          source,
+		// S6 (#2361): stamp the grammar epoch the source was authored
+		// under, so a future engine can tell a rotted row from a stale one.
+		"grammarVersion": languageParser.GrammarVersion,
 	})
 	if err != nil {
 		return err

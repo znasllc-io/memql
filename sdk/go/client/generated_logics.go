@@ -608,7 +608,7 @@ func RequestRouteStatusBuild(args RequestRouteStatusArgs) string {
 
 // RevokeExpiredDelegations -- Find every expired active delegation and soft-revoke it with `system:expiry` as the revoker. Returns the count processed.
 type RevokeExpiredDelegationsArgs struct {
-	Now string
+	AsOf string
 }
 
 // RevokeExpiredDelegations calls the engine logic revokeExpiredDelegations.
@@ -620,8 +620,8 @@ func (qc *QueryClient) RevokeExpiredDelegations(ctx context.Context, args Revoke
 func RevokeExpiredDelegationsBuild(args RevokeExpiredDelegationsArgs) string {
 	var b strings.Builder
 	b.WriteString("logic revokeExpiredDelegations(")
-	b.WriteString("now: ")
-	b.WriteString(fmt.Sprintf("%q", args.Now))
+	b.WriteString("asOf: ")
+	b.WriteString(fmt.Sprintf("%q", args.AsOf))
 	b.WriteString(")")
 	return b.String()
 }

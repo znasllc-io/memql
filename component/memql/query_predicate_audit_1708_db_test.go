@@ -136,7 +136,7 @@ func TestQueryExpiredConsumedAuthCodes_OnlyConsumed(t *testing.T) {
 	// Spend exactly one of the two expired codes.
 	runMutation(t, ctx, eng, "consumeAuthCode", map[string]any{"codeId": consumedID})
 
-	got := queryIds(t, ctx, eng, `expiredConsumedAuthCodes(now:"2026-06-18T00:00:00Z")`)
+	got := queryIds(t, ctx, eng, `expiredConsumedAuthCodes(asOf:"2026-06-18T00:00:00Z")`)
 	require.True(t, contains(got, consumedID),
 		"an expired AND consumed auth code MUST be returned (#1714), got %v", got)
 	require.False(t, contains(got, unconsumedID),
