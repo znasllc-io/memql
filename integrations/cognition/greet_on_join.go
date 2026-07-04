@@ -417,7 +417,12 @@ func (c *CognitionIntegration) greetSuppressed(ctx context.Context, partitionId 
 	if c == nil || c.engine == nil {
 		return false
 	}
-	query := fmt.Sprintf(`query queryActiveGreetSuppression(partitionId: %s, now: %s)`,
+	// The pack query is named activeGreetSuppression -- the previous
+	// queryActiveGreetSuppression name never existed, so this read failed
+	// closed silently and copresent#252's suppression never suppressed
+	// (found unbreaking the reserved-args rename, memql#2361). The arg is
+	// asOf post-rename (args fields may not shadow `now`).
+	query := fmt.Sprintf(`query activeGreetSuppression(partitionId: %s, asOf: %s)`,
 		escapeJSONString(partitionId), escapeJSONString(time.Now().UTC().Format(time.RFC3339)))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil || result == nil {
