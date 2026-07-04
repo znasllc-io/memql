@@ -87,12 +87,16 @@ tags). The `bff` carrier (`memql-bff-copresent`) and `copresent` SPA are built
 > *backend* now, also reused by `make release-staging`), so the build/apply/gate
 > mechanics described below are what the bundle ultimately runs.
 >
-> **Binary resolution + owner-gating.** `scripts/deploy/cockpit.sh` resolves the
-> cockpit binary (`COCKPIT_BIN` > on `PATH` > built from the sibling
-> `../memql-cockpit` via `make cockpit`). The cockpit's in-process engine carries
-> no database yet, so a live `make deploy` reports `BLOCKED (owner-gated): …` and
-> changes nothing until the I13 runner surface + a live engine DB land
-> (memql#2220/#2228); `DRY_RUN=1` is a clean no-op resolve. The forward-deploy
+> **Binary resolution + the dry-run ladder.** `scripts/deploy/cockpit.sh`
+> resolves the cockpit binary (`COCKPIT_BIN` > on `PATH` > built from the
+> sibling `../memql-cockpit` via `make cockpit`). The cockpit's embedded
+> engine boots DB-BACKED when `MEMQL_DATABASE_DSN` is set (memql#2377), so
+> the deployment timeline persists for real; `DRY_RUN=1` stops at
+> resolution, the default EXECUTES with every capability script reporting,
+> and `APPLY=1` performs the work (memql#2378). The full end-to-end path --
+> proven live on the development environment 2026-07-04 (memql#2380) -- is
+> documented step-by-step in
+> [deploy-bundle-runbook.md](deploy-bundle-runbook.md). The forward-deploy
 > role gate is deny-by-default — pass `ROLE=developer` (or set
 > `MEMQL_COCKPIT_ROLE`) for an authorized caller. There is NO fallback to the old
 > direct-script path; the cockpit IS the break-glass path. The GitOps release
