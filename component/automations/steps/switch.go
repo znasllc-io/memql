@@ -3,6 +3,7 @@ package steps
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
@@ -31,8 +32,16 @@ func (e *SwitchExecutor) Execute(ctx context.Context, step *automations.Step, st
 
 	switchCfg := step.Switch
 
-	// Evaluate the switch expression
-	exprValue, err := stepCtx.Evaluator.EvaluateValue(switchCfg.Expression)
+	// Evaluate the switch expression. A runtime-reference subject (the
+	// canonical `switch steps.<decide>.result` fan-out) must be $-prefixed
+	// for EvaluateValue to RESOLVE it -- un-prefixed it echoed back as its
+	// own literal text, so every steps.-rooted switch silently took the
+	// default branch (#2380; forge's "queued" case never fired).
+	subject := switchCfg.Expression
+	if isRuntimeReference(subject) && !strings.HasPrefix(subject, "$") {
+		subject = "$" + subject
+	}
+	exprValue, err := stepCtx.Evaluator.EvaluateValue(subject)
 	if err != nil {
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("failed to evaluate expression: %v", err)

@@ -216,7 +216,8 @@ func DeployGateGreenBuild(args DeployGateGreenArgs) string {
 
 // DeployOutcomeLabel -- Map the deploy-gate result to the terminal deployment status label: \"succeeded\" when the gate passed, else \"failed\" (fail-closed, mirroring deployGateGreen). The deploy automation's finalize step switches on this.
 type DeployOutcomeLabelArgs struct {
-	Gate map[string]any
+	// The gate capability's result.passed boolean; absent/false -> failed. The automation passes the LEAF (steps.gate.result.result.passed -- the action envelope nests the script's result under result), not the envelope object (#2380).
+	Passed any
 }
 
 // DeployOutcomeLabel calls the engine logic deployOutcomeLabel.
@@ -228,8 +229,34 @@ func (qc *QueryClient) DeployOutcomeLabel(ctx context.Context, args DeployOutcom
 func DeployOutcomeLabelBuild(args DeployOutcomeLabelArgs) string {
 	var b strings.Builder
 	b.WriteString("logic deployOutcomeLabel(")
-	b.WriteString("gate: ")
-	b.WriteString(renderMemQLValue(args.Gate))
+	b.WriteString("passed: ")
+	b.WriteString(fmt.Sprintf("%q", args.Passed))
+	b.WriteString(")")
+	return b.String()
+}
+
+// DeployRollbackTarget -- PURE rollback-target decision (#2380): returns the deployment id to roll back to when the gate FAILED and a previousDeploymentId is present; returns empty -- meaning NO rollback -- on a passed gate or when no rollback target was supplied (the development path). The automation switches on this scalar and fires revertOverlay only in the non-empty case (decide -> switch -> act).
+type DeployRollbackTargetArgs struct {
+	Passed               any
+	PreviousDeploymentId any
+}
+
+// DeployRollbackTarget calls the engine logic deployRollbackTarget.
+func (qc *QueryClient) DeployRollbackTarget(ctx context.Context, args DeployRollbackTargetArgs) (*Result, error) {
+	call := DeployRollbackTargetBuild(args)
+	return qc.executeNamed(ctx, "deployRollbackTarget", call)
+}
+
+func DeployRollbackTargetBuild(args DeployRollbackTargetArgs) string {
+	var b strings.Builder
+	b.WriteString("logic deployRollbackTarget(")
+	b.WriteString("passed: ")
+	b.WriteString(fmt.Sprintf("%q", args.Passed))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("previousDeploymentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PreviousDeploymentId))
 	b.WriteString(")")
 	return b.String()
 }
