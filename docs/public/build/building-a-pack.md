@@ -237,7 +237,7 @@ handler. This is how a pack surfaces a capability into an agent's tool loop.
 event**: `@trigger(event="node.created", concept="v1:cognition:space", ...)`.
 When the core engine creates a `space` row, this pack-owned automation fires --
 the core has no knowledge of the pack. Its step calls the pack's own builtin via
-a bare call (`referencePackComposeGreeting { userName: event.payload.ownerUserId }`),
+a kind-prefixed call (`builtin referencePackComposeGreeting ( userName: ownerUserId )` -- the owner bound via the automation's typed `args { }` contract, G5 #2367),
 so it also exercises the pack's Go capability. The automation pulls the builtin
 into scope with a file-top `use referencepack.builtins.{ referencePackComposeGreeting }`
 import -- the standard cross-file dependency mechanism.

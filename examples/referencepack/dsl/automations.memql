@@ -14,9 +14,9 @@
 //
 // The step calls the pack's own builtin (referencePackComposeGreeting),
 // so the automation also exercises the pack's Go capability. We greet the
-// new note's owner. `event` is the triggering node bound as the automation
-// arg; `event.payload.ownerUserId` is the owner stamped by the core create
-// mutation.
+// new note's owner. The event payload binds to the automation's typed
+// `args { }` contract (G5, memql#2367): `ownerUserId` is the owner stamped
+// by the core create mutation, read as a bare field.
 //
 // NOTE: this is a demonstration of the wiring, not a production behavior
 // -- the reference pack is never linked into a production binary (it has
@@ -29,6 +29,10 @@ use referencepack.builtins.{ referencePackComposeGreeting }
 @trigger(event="node.created", concept="v1:notes:note", partition="*")
 @description("On creation of a core note, compose a greeting for the note owner via the pack's integration capability. Demonstrates a pack automation hooking a core service event.")
 automation referencePackGreetOnNoteCreate {
+  args {
+    ownerUserId any @description("The note owner the greeting targets, bound from the created note's payload (G5 typed contract).")
+  }
+
   // FIRST-CLASS PRECONDITION (Epic 4 / memql#2139). A deterministic check
   // that must hold before the steps run. On a miss the harness aborts the
   // run cleanly and emits healing.precondition.missed -- the clean self-
@@ -40,11 +44,11 @@ automation referencePackGreetOnNoteCreate {
   // failed check, and the asserted literal -- rather than the step
   // silently greeting a blank user.
   precondition ownerPresent {
-    check: exists(event.payload.ownerUserId)
+    check: exists(args.ownerUserId)
     literal: ownerUserId
     description: "The created note must carry the owner id the greeting targets."
   }
   step greet {
-    builtin referencePackComposeGreeting ( userName: event.payload.ownerUserId )
+    builtin referencePackComposeGreeting ( userName: ownerUserId )
   }
 }
