@@ -59,6 +59,15 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 		return nil, newParseErrorf(&p.current, "expected field name in args block, got %q", p.current.Literal)
 	}
 	name := p.current.Literal
+	// Reserved engine names (S6, memql#2361 -- implementing the documented
+	// rejection): `now`, `actor`, `partition`, `config`, and `trace` are
+	// ambient top-level identifiers every body may read; an args field of
+	// the same name would make resolution ambiguous. Rejected at parse
+	// time. (`event` is additionally reserved for AUTOMATION args by the
+	// G2 load-time shadow check.)
+	if reservedArgsNames[name] {
+		return nil, newParseErrorf(&p.current, "args field %q collides with a reserved engine name (now / actor / partition / config / trace) -- rename the field", name)
+	}
 	p.advance()
 
 	// Accept either a bare type (`object`, `string`, ...) or an array
@@ -220,4 +229,10 @@ func formatArgsBlock(def *ArgsSchema) string {
 	}
 	b.WriteString("}\n")
 	return b.String()
+}
+
+// reservedArgsNames are the ambient top-level identifiers an args field may
+// not shadow (the argument-resolution contract, docs + CLAUDE.md).
+var reservedArgsNames = map[string]bool{
+	"now": true, "actor": true, "partition": true, "config": true, "trace": true,
 }

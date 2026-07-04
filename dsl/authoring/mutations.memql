@@ -47,6 +47,7 @@ mutate construct createAuthoringConstruct {
     name             string  @required
     targetNamespace  string  @required
     source           string  @required
+    grammarVersion   string
   }
   insert {
     id: args.constructId
@@ -56,6 +57,7 @@ mutate construct createAuthoringConstruct {
     args.name
     args.targetNamespace
     args.source
+    args.grammarVersion
     status: "draft"
   }
 }

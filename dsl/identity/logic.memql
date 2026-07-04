@@ -308,7 +308,7 @@ logic magicLinkExpirySweep {
     event object @required
   }
   body {
-  return query expiredMagicLinkRequests( now: now )
+  return query expiredMagicLinkRequests( asOf: now )
   }
 }
 
@@ -359,10 +359,10 @@ logic onDelegationCreated {
 @description("Find every expired active delegation and soft-revoke it with `system:expiry` as the revoker. Returns the count processed.")
 logic revokeExpiredDelegations {
   args {
-    now string @required
+    asOf string @required
   }
   body {
-    return query expiredActiveDelegations( now: args.now )
+    return query expiredActiveDelegations( asOf: args.asOf )
   }
 }
 

@@ -1311,3 +1311,39 @@ When you discover a new gotcha:
 If a rule starts feeling like architecture (rather than a trap),
 promote it to `docs/public/concepts/architecture.md` or `docs/public/language/memql.md` and leave
 a stub here pointing to it.
+
+## Grammar versioning + the migration channel (S6, memql#2361)
+
+The engine grammar has an explicit epoch: `parser.GrammarVersion`
+(`component/language/parser/grammar_version.go`), printable via
+`memqlmigrate --grammar-version`. It is stamped into:
+
+- **authored-construct rows** (`v1:authoring:construct.grammarVersion`) at
+  promote time -- re-hydration on a NEWER engine quarantines a mismatched
+  row with an error naming the migration command, instead of the stale
+  source degrading into an arbitrary parse warning;
+- **release lockfiles** (`releases/<ver>.yaml` `grammarVersion:`), so a
+  pack or deploy consumer can detect which grammar a release's DSL was
+  authored under.
+
+**The migration channel is the codemod-per-epic pattern.** Every grammar
+epic (a change that retires or reshapes an authored form) MUST:
+
+1. bump `parser.GrammarVersion` (the pinned keyword-fingerprint test
+   forces this when the invocation surface changes);
+2. ship a `memqlmigrate --rewrite=<epic>` mode that mechanically migrates
+   authored source (precedents: `scripts/migrations/construct_invocation/`,
+   `scripts/migrations/event_payload_args/`);
+3. reject the retired form at parse time with a hint naming that command.
+
+A stale pack or bundle is therefore always detectable (version stamp),
+diagnosable (rejection-with-hint), and mechanically fixable (the rewrite
+mode) -- never a silent soft-skip.
+
+## Reserved args-field names
+
+`now`, `actor`, `partition`, `config`, and `trace` are ambient top-level
+identifiers every body may read; an `args { }` field of the same name is
+REJECTED at parse time (rename it -- e.g. `asOf` for a caller-passed
+evaluation instant). `event` is additionally reserved for AUTOMATION args
+by the load-time shadow check (G2, memql#2364).

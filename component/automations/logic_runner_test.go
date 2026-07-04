@@ -314,10 +314,10 @@ func TestLogicRunner_PreservesReturnStep(t *testing.T) {
 @description("repro")
 logic logicSweep {
   args {
-    now string @required
+    asOf string @required
   }
   body {
-    rows := queryFoo( now: args.now )
+    rows := queryFoo( now: args.asOf )
     for item := range rows.nodes() {
       tick := mutationBar( id: item.id )
     }

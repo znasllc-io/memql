@@ -33,6 +33,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"io"
 	"os"
 	"path/filepath"
@@ -62,6 +63,14 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) error {
+	// --grammar-version prints the engine's grammar epoch + keyword
+	// fingerprint (S6, memql#2361) -- the value stamped into authored rows
+	// and release lockfiles, and the identity of the migration channel.
+	if len(args) == 1 && args[0] == "--grammar-version" {
+		fmt.Fprintf(stdout, "%s (fingerprint %s)\n", languageParser.GrammarVersion, languageParser.GrammarFingerprint())
+		return nil
+	}
+
 	o, paths, err := parseFlags(args, stderr)
 	if err != nil {
 		return err

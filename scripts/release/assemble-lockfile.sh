@@ -77,6 +77,10 @@ function write_lockfile() {
         echo "validatedAt: \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\""
         echo "gate: \"$GATE\""
         echo "engineVersion: \"$ENGINE_VERSION\""
+        # S6 (#2361): the grammar epoch this release's DSL was authored
+        # under -- lets a future engine or pack consumer detect a grammar
+        # mismatch and name the memqlmigrate rewrite chain.
+        echo "grammarVersion: \"$(go run ./cmd/memqlmigrate --grammar-version 2>/dev/null | cut -d' ' -f1)\""
         echo "components:"
         local comp d
         for comp in $COMPONENTS; do

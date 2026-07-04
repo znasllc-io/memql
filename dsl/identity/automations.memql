@@ -200,7 +200,7 @@ automation auditEventRetentionSweep {
 @description("Soft-revoke expired delegations every 5 minutes. The query + revoke loop is in revokeExpiredDelegations.")
 automation expireDelegations {
   step decide {
-    logic revokeExpiredDelegations ( now: now )
+    logic revokeExpiredDelegations ( asOf: now )
   }
   step apply {
     forEach item in decide.nodes() {
