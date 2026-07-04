@@ -615,6 +615,7 @@ deploy:
 		$${ROLE:+--role=$$ROLE} \
 		$${ACTOR:+--actor=$$ACTOR} \
 		$${DRY_RUN:+--dry-run} \
+		$${APPLY:+--apply} \
 		$(ARGS)
 
 ## Roll the memQL mesh back to a previous good release (deployment-v2 Phase 1,
