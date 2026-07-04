@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
 #
-# scripts/k3d/refresh.sh
+# scripts/k3d/bringup.sh
 # ======================
 #
-# Capability: k3d.refresh -- one-command clean-slate local environment: nuke
-# and repave the k3d + ArgoCD cluster, then rebuild the engine images so the
-# mesh actually comes up. This is the old-muscle-memory `make refresh` -- the
-# recovery path when the in-cluster DB or ArgoCD state has drifted and a
-# from-scratch boot is faster than untangling it.
+# Capability: k3d.bringup -- one-command fully-running local environment:
+# bootstrap the k3d + ArgoCD cluster, build + import the engine images, and
+# wait for the mesh to become Available. This is `make up`. With --clean it
+# nukes the cluster first (wiping the in-cluster DB by construction) before
+# repaving -- that is `make up-refresh`, the recovery path when the DB or
+# ArgoCD state has drifted and a from-scratch boot is faster than untangling
+# it.
 #
-# Steps (in order):
-#   1. down --purge   -- tear down the k3d cluster. This destroys the
-#                        in-cluster Postgres, so the DB is wiped by
-#                        construction (a fresh DB every refresh).
-#   2. up             -- recreate cluster + ArgoCD + seed secrets + register
-#                        the memql-local Application.
+# Steps (in order; step 1 only with --clean):
+#   1. down --purge   -- tear down the k3d cluster. Destroys the in-cluster
+#                        Postgres, so the DB is wiped by construction.
+#   2. up             -- create/converge cluster + ArgoCD + seed secrets +
+#                        register the memql-local Application.
 #   3. wait           -- block until ArgoCD has created the app Deployments,
 #                        so the rebuild step has something to restart.
 #   4. dev            -- build engine (+ carrier) images and `k3d image
@@ -22,14 +23,15 @@
 #                        ImagePullBackOff (local images are tag `local`,
 #                        imagePullPolicy IfNotPresent).
 #   5. wait healthy   -- block until every Deployment reports Available, then
-#                        reuse `up`'s status summary.
+#                        print the status summary.
 #
 # Idempotent: running it twice back-to-back yields the same healthy state
 # (down is a no-op on an absent cluster; up/dev are themselves idempotent).
 #
-# Honors the same env overrides as `up`: CLUSTER, SERVERS, AGENTS, REVISION
-# (plus NAMESPACE). The ArgoCD Application tracks the current git branch, so
-# push your branch before refreshing (ArgoCD cannot read local-only branches).
+# Honors the same env overrides as the underlying scripts: CLUSTER, SERVERS,
+# AGENTS, REVISION (plus NAMESPACE). The ArgoCD Application tracks the current
+# git branch, so push your branch before bringing up (ArgoCD cannot read
+# local-only branches).
 #
 # This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
 # JSON result envelope on stdout, human logs on stderr, honest exit codes.
@@ -45,12 +47,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
-cap_init "k3d.refresh" "Nuke and repave the local k3d + ArgoCD cluster, then rebuild engine images."
-cap_spec_param "cluster"   "k3d cluster name"
-cap_spec_param "namespace" "k8s namespace"
-cap_spec_param "revision"  "git revision for the ArgoCD Application"
-cap_spec_param "servers"   "k3d server node count"
-cap_spec_param "agents"    "k3d agent node count"
+cap_init "k3d.bringup" "Bring the local k3d + ArgoCD cluster fully up: bootstrap, build + import engine images, wait healthy. --clean nukes first."
+cap_spec_param "cluster"    "k3d cluster name"
+cap_spec_param "namespace"  "k8s namespace"
+cap_spec_param "revision"   "git revision for the ArgoCD Application"
+cap_spec_param "servers"    "k3d server node count"
+cap_spec_param "agents"     "k3d agent node count"
+cap_spec_param "clean"      "tear down the cluster first (clean slate, fresh DB) (flag)"
+cap_spec_param "no-secrets" "skip secret seeding (flag)"
 #=============================================================================
 # CONFIGURATION (env-resolved defaults; cap_param flags/stdin override in main)
 #=============================================================================
@@ -60,12 +64,20 @@ NAMESPACE="${NAMESPACE:-${MEMQL_K3D_NAMESPACE:-memql}}"
 SERVERS="${SERVERS:-}"
 AGENTS="${AGENTS:-}"
 REVISION="${REVISION:-}"
+CLEAN=""
+NO_SECRETS=""
 HEALTHY=false
+
+# Step labels, set in main() once --clean is known (5 steps clean, 4 fresh).
+STEP_UP=""
+STEP_WAIT=""
+STEP_DEV=""
+STEP_HEALTHY=""
 
 # How long to wait for ArgoCD to create the app Deployments after `up`, and
 # how long to wait for them to become Available after the image rebuild.
-CREATE_TIMEOUT="${MEMQL_REFRESH_CREATE_TIMEOUT:-180}"
-HEALTHY_TIMEOUT="${MEMQL_REFRESH_HEALTHY_TIMEOUT:-300}"
+CREATE_TIMEOUT="${MEMQL_BRINGUP_CREATE_TIMEOUT:-180}"
+HEALTHY_TIMEOUT="${MEMQL_BRINGUP_HEALTHY_TIMEOUT:-300}"
 
 #=============================================================================
 # OUTPUT HELPERS
@@ -85,12 +97,12 @@ function section() {
 }
 
 #=============================================================================
-# STEP 1 -- TEAR DOWN (purge)
+# STEP 1 -- TEAR DOWN (clean slate only, purge)
 #=============================================================================
 
 function nuke() {
-    section "refresh 1/5: tearing down cluster '${CLUSTER_NAME}' (purge)"
-    PURGE=1 bash "${SCRIPT_DIR}/down.sh" --cluster="${CLUSTER_NAME}" --purge >&2
+    section "bringup 1/5: tearing down cluster '${CLUSTER_NAME}' (clean slate, purge)"
+    bash "${SCRIPT_DIR}/down.sh" --cluster="${CLUSTER_NAME}" --purge >&2
 }
 
 #=============================================================================
@@ -98,13 +110,14 @@ function nuke() {
 #=============================================================================
 
 function bringup() {
-    section "refresh 2/5: recreating cluster + ArgoCD + secrets"
+    section "bringup ${STEP_UP}: creating cluster + ArgoCD + secrets"
     bash "${SCRIPT_DIR}/up.sh" \
         --cluster="${CLUSTER_NAME}" \
         --namespace="${NAMESPACE}" \
         ${REVISION:+--revision="${REVISION}"} \
         ${SERVERS:+--servers="${SERVERS}"} \
-        ${AGENTS:+--agents="${AGENTS}"} >&2
+        ${AGENTS:+--agents="${AGENTS}"} \
+        ${NO_SECRETS:+--no-secrets} >&2
 }
 
 #=============================================================================
@@ -117,7 +130,7 @@ function bringup() {
 # before rebuilding. We don't hardcode the node set (it changes as the local
 # overlay evolves) -- any app Deployment appearing means the sync is underway.
 function wait_for_deployments_created() {
-    section "refresh 3/5: waiting for ArgoCD to create the app Deployments"
+    section "bringup ${STEP_WAIT}: waiting for ArgoCD to create the app Deployments"
 
     local deadline=$((SECONDS + CREATE_TIMEOUT))
     while [ "${SECONDS}" -lt "${deadline}" ]; do
@@ -142,7 +155,7 @@ function wait_for_deployments_created() {
 #=============================================================================
 
 function rebuild_images() {
-    section "refresh 4/5: building + importing engine images (make dev)"
+    section "bringup ${STEP_DEV}: building + importing engine images (make dev)"
     # No --node filter: rebuild every app node so nothing sits in
     # ImagePullBackOff. dev.sh restarts each Deployment and waits for its
     # rollout; it skips a Deployment that doesn't exist yet.
@@ -156,7 +169,7 @@ function rebuild_images() {
 #=============================================================================
 
 function wait_for_healthy() {
-    section "refresh 5/5: waiting for the mesh to become Available"
+    section "bringup ${STEP_HEALTHY}: waiting for the mesh to become Available"
 
     if kubectl wait --for=condition=Available deploy --all \
         -n "${NAMESPACE}" \
@@ -169,7 +182,7 @@ function wait_for_healthy() {
         HEALTHY=false
     fi
 
-    info "Refresh complete. Cluster state:"
+    info "Bring-up complete. Cluster state:"
     kubectl get deploy -n "${NAMESPACE}" >&2 2>/dev/null || true
     info "Mesh litmus:    make status"
     info "Inner loop:     make dev [NODE=<type>]"
@@ -193,14 +206,24 @@ function main() {
     REVISION="$(cap_param revision "$REVISION")"
     SERVERS="$(cap_param servers "$SERVERS")"
     AGENTS="$(cap_param agents "$AGENTS")"
+    CLEAN="$(cap_flag clean)"
+    NO_SECRETS="$(cap_flag no-secrets)"
     cap_require cluster "$CLUSTER_NAME"
     cap_require namespace "$NAMESPACE"
 
-    info "memQL local refresh (clean-slate)"
+    if [[ -n "$CLEAN" ]]; then
+        info "memQL local bring-up (clean slate)"
+        STEP_UP="2/5"; STEP_WAIT="3/5"; STEP_DEV="4/5"; STEP_HEALTHY="5/5"
+    else
+        info "memQL local bring-up (fresh)"
+        STEP_UP="1/4"; STEP_WAIT="2/4"; STEP_DEV="3/4"; STEP_HEALTHY="4/4"
+    fi
     info "Cluster:   ${CLUSTER_NAME}"
     info "Namespace: ${NAMESPACE}"
 
-    nuke
+    if [[ -n "$CLEAN" ]]; then
+        nuke
+    fi
     bringup
     wait_for_deployments_created
     rebuild_images
@@ -211,6 +234,7 @@ function main() {
     cap_result_set     namespace "$NAMESPACE"
     cap_result_set_raw servers "$(raw_int_or_null "$SERVERS")"
     cap_result_set_raw agents  "$(raw_int_or_null "$AGENTS")"
+    cap_result_set_raw cleaned "$([[ -n "$CLEAN" ]] && printf 'true' || printf 'false')"
     cap_result_set_raw rebuilt true
     cap_result_set_raw healthy "$HEALTHY"
     cap_ok

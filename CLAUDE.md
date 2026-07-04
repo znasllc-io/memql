@@ -12,10 +12,10 @@
 ```bash
 # --- k3d + ArgoCD (NEW primary local run path, E0 / #2061) ---
 # Prerequisites: docker, k3d, kubectl (brew install k3d kubectl)
-make up          # create cluster + install ArgoCD + seed secrets
+make up          # fresh bring-up: cluster + ArgoCD + secrets + images, wait healthy
 make dev         # inner-loop: rebuild images -> import -> restart pods
 make status      # mesh litmus (unique MEMQL_NODE_ID per pod)
-make refresh     # clean slate: nuke + repave (fresh DB), rebuild, wait healthy
+make up-refresh  # clean slate: nuke + repave (fresh DB), then the same bring-up
 make down        # tear down
 
 # Multi-node mesh testing (2 replicas per Deployment -- staging parity):
@@ -264,9 +264,9 @@ frontend coordination.
 
 | Task | Command | Description |
 |------|---------|-------------|
-| **Bootstrap k3d cluster** | `make up` | Create cluster + install ArgoCD + seed secrets (memql#2061 / Epic 0) |
+| **Bootstrap k3d cluster** | `make up` | Fresh bring-up: cluster + ArgoCD + secrets + images, wait healthy (memql#2061 / Epic 0) |
 | **Inner-loop rebuild** | `make dev [NODE=<type>]` | Build image -> k3d import -> kubectl rollout restart |
-| **Clean slate (nuke + repave)** | `make refresh` | Tear down + recreate cluster (fresh DB), rebuild images, wait healthy |
+| **Clean slate (nuke + repave)** | `make up-refresh` | Tear down + recreate cluster (fresh DB), rebuild images, wait healthy |
 | **Cluster litmus** | `make status` | Verify unique MEMQL_NODE_ID per pod (mesh parity check) |
 | **Multi-node scaling** | `make scale N=2` | 2 replicas per Deployment for cross-node mesh testing |
 | **Re-seed secrets** | `make secrets` | Idempotent; use after cluster recreate |

@@ -171,9 +171,10 @@ db:
 # Prerequisites: docker, k3d, kubectl (brew install k3d kubectl)
 #
 # Quick start:
-#   make up        # create cluster + install ArgoCD + seed secrets
-#   make down      # tear down cluster
-#   make secrets   # (re-)seed k8s Secrets in a running cluster
+#   make up          # fresh bring-up: cluster + ArgoCD + secrets + images, wait healthy
+#   make up-refresh  # clean slate: nuke + repave (fresh DB), then the same bring-up
+#   make down        # tear down cluster
+#   make secrets     # (re-)seed k8s Secrets in a running cluster
 #
 # Optional env overrides:
 #   MEMQL_K3D_CLUSTER          cluster name (default: memql)
@@ -181,11 +182,12 @@ db:
 #   MEMQL_K3D_SERVERS          k3d server count (default: 1)
 #   MEMQL_K3D_AGENTS           k3d agent count (default: 0)
 
-.PHONY: up down refresh secrets dev status scale
+.PHONY: up up-refresh down secrets dev status scale
 
-## Bootstrap the local k3d cluster: create cluster, install ArgoCD
-## (pinned v2.13.3, same as staging), apply the memql-local Application,
-## and seed k8s Secrets. ArgoCD will sync the local overlay.
+## Fresh bring-up of the local k3d cluster, end to end: create cluster,
+## install ArgoCD (pinned v2.13.3, same as staging), apply the memql-local
+## Application, seed k8s Secrets, build + import the engine images, and wait
+## for the mesh to become Available. Idempotent -- safe on an existing cluster.
 ##
 ## This is the GitOps path: the local engine "deploy" IS the ArgoCD sync of the
 ## local overlay (the primary deploy path, same as staging). It is NOT the
@@ -196,12 +198,27 @@ db:
 ##   make up REVISION=main         # pin to main
 ##   make up SERVERS=2 AGENTS=1   # multi-node (see E0.5 / #2067)
 up:
-	@bash scripts/k3d/up.sh \
+	@bash scripts/k3d/bringup.sh \
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
+		$${NAMESPACE:+--namespace=$${NAMESPACE}} \
 		$${REVISION:+--revision=$${REVISION}} \
 		$${SERVERS:+--servers=$${SERVERS}} \
 		$${AGENTS:+--agents=$${AGENTS}} \
 		$${NO_SECRETS:+--no-secrets}
+
+## Clean-slate local environment: nuke + repave. Tears down the cluster
+## (wiping the in-cluster DB by construction), then runs the same bring-up
+## as 'make up' (cluster + ArgoCD + secrets + images, wait healthy).
+## Idempotent. Honors the same overrides as 'make up'.
+##   make up-refresh                      # full nuke + rebuild
+##   make up-refresh SERVERS=2 AGENTS=1   # multi-node clean slate
+up-refresh:
+	@bash scripts/k3d/bringup.sh --clean \
+		$${CLUSTER:+--cluster=$${CLUSTER}} \
+		$${NAMESPACE:+--namespace=$${NAMESPACE}} \
+		$${REVISION:+--revision=$${REVISION}} \
+		$${SERVERS:+--servers=$${SERVERS}} \
+		$${AGENTS:+--agents=$${AGENTS}}
 
 ## Tear down the local k3d cluster.
 ## Pass PURGE=1 to also remove the kubeconfig context.
@@ -209,20 +226,6 @@ down:
 	@bash scripts/k3d/down.sh \
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
 		$${PURGE:+--purge}
-
-## Clean-slate local environment: nuke + repave. Tears down the cluster
-## (wiping the in-cluster DB by construction), recreates it with ArgoCD +
-## secrets, rebuilds + imports the engine images, and waits for the mesh to
-## be Available. Idempotent. Honors the same overrides as 'make up'.
-##   make refresh                      # full nuke + rebuild
-##   make refresh SERVERS=2 AGENTS=1   # multi-node clean slate
-refresh:
-	@bash scripts/k3d/refresh.sh \
-		$${CLUSTER:+--cluster=$${CLUSTER}} \
-		$${NAMESPACE:+--namespace=$${NAMESPACE}} \
-		$${REVISION:+--revision=$${REVISION}} \
-		$${SERVERS:+--servers=$${SERVERS}} \
-		$${AGENTS:+--agents=$${AGENTS}}
 
 ## (Re-)seed the k8s Secrets in a running k3d cluster. Safe to re-run.
 ## Required after 'make up NO_SECRETS=1' or if secrets drift.
@@ -775,10 +778,10 @@ help:
 	@echo "memQL Makefile — v$(VERSION)"
 	@echo ""
 	@echo "LOCAL (k3d + ArgoCD cluster -- the blessed local topology, #2061)"
-	@echo "  make up                        Boot k3d + ArgoCD + the local overlay (single-node default)"
+	@echo "  make up                        Fresh bring-up: k3d + ArgoCD + secrets + images, wait healthy (single-node default)"
 	@echo "  make up SERVERS=2 AGENTS=1     Multi-node cluster (for cross-node mesh testing)"
 	@echo "  make dev [NODE=<type>]         Inner loop: rebuild image -> k3d import -> rollout restart"
-	@echo "  make refresh                   Clean slate: nuke + repave (fresh DB + ArgoCD), rebuild images, wait healthy"
+	@echo "  make up-refresh                Clean slate: nuke + repave (fresh DB + ArgoCD), then the same bring-up"
 	@echo "  make status                    Show per-pod MEMQL_NODE_IDs (mesh parity litmus) + ArgoCD sync"
 	@echo "  make scale N=2                 Scale every app Deployment to N replicas (2 = staging parity)"
 	@echo "  make secrets                   (Re-)seed the k8s Secrets in a running cluster"

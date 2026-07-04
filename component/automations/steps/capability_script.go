@@ -63,7 +63,7 @@ var capabilityScriptAllowlist = map[string]string{
 	"k3d.up":          "scripts/k3d/up.sh",
 	"k3d.down":        "scripts/k3d/down.sh",
 	"k3d.dev":         "scripts/k3d/dev.sh",
-	"k3d.refresh":     "scripts/k3d/refresh.sh",
+	"k3d.bringup":     "scripts/k3d/bringup.sh",
 	"k3d.scale":       "scripts/k3d/scale.sh",
 	"k3d.status":      "scripts/k3d/status.sh",
 	"k3d.seedSecrets": "scripts/k3d/seed-secrets.sh",
