@@ -63,9 +63,13 @@ make up
 # Multi-node (2 servers + 1 agent, for cross-node mesh testing):
 make up SERVERS=2 AGENTS=1
 make scale N=2
+
+# Clean slate (nuke + repave -- wipes the in-cluster DB by construction):
+make up-refresh
 ```
 
-`make up` does the following in order:
+`make up` is the full fresh bring-up (`scripts/k3d/bringup.sh`); it does the
+following in order:
 
 1. Creates a k3d cluster (default name `memql`).
 2. Installs ArgoCD v2.13.3 (same version as staging) via
@@ -76,6 +80,13 @@ make scale N=2
    `deploy/k8s/overlays/local` on the current git branch.
 5. Waits for ArgoCD to sync and pods to become Ready (configurable via
    `MEMQL_K3D_ARGOCD_TIMEOUT`, default 300s).
+6. Builds + imports the engine images (same as `make dev`) so no pod sits in
+   ImagePullBackOff, then waits for every Deployment to become Available.
+
+`make up-refresh` runs the same bring-up preceded by a purge teardown
+(`make down PURGE=1`), so the in-cluster Postgres is wiped and the
+environment repaves from scratch. It is idempotent and honors the same
+`SERVERS`/`AGENTS`/`REVISION` overrides as `make up`.
 
 ## Port-forward reference
 
