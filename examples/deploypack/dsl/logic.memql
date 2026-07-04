@@ -8,17 +8,20 @@
 // (behavioral-constructs ADR section 2.1). Rewritten for #2400 after strict
 // boot (#2357) surfaced that the original bodies never parsed.
 //
-// Grammar note (#2400): every `:=` step RHS is a CALL, an `if cond { call }`,
-// or a collection chain -- the only forms the logic-step grammar accepts. The
-// original bodies used bare scalar/boolean expression assignments and were
-// silently skipped at load for their entire life; branching values are built
-// with cond(...) calls instead. cond() arguments accept only SIMPLE
-// predicates (no && / || / ! -- the arg parser rejects connectives), so
-// multi-clause decisions nest conds, compound conditions live on the
-// `if cond { call }` steps (whose evaluator supports the full boolean
-// grammar), and collection-chain reads (result.First().payload.x) are
-// extracted into their own coalesce() steps first -- cond predicates only
-// take simple identifier comparisons.
+// Grammar note (#2400, updated #2407/#2410): every `:=` step RHS is a CALL,
+// an `if cond { call }`, or a collection chain -- the only forms the
+// logic-step grammar accepts. The original bodies used bare scalar/boolean
+// expression assignments and were silently skipped at load for their entire
+// life; branching values are built with cond(...) calls instead. Since
+// #2410, cond() predicates accept a single infix comparison (`x == "y"`,
+// `!=`) and COMPARISON/CONNECTIVE predicates evaluate through the full
+// condition evaluator at runtime; the expression-arg parser still rejects
+// connectives with a hint (nest cond() or move the compound condition to an
+// `if` step). Prefer the intermediate-step form (`ok := coalesce(...)` then
+// `cond(ok == true, ...)`) -- call-LHS comparisons inside cond() are not
+// parseable in expression contexts. Collection-chain reads
+// (result.First().payload.x) are still extracted into their own coalesce()
+// steps first.
 //
 // Env mapping (production -> prod) is done inside the deployRunPromote Go
 // handler via deploycontrol.ConsoleEnvFor -- the SAME mapping the Go driver
