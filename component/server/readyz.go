@@ -10,7 +10,7 @@ import (
 // ReadinessCheck is a named server-side invariant asserted by GET /readyz.
 // Checks are registered at bootstrap (see app wiring) and run on every probe.
 // A check returns a non-nil error when the invariant is violated; /readyz then
-// reports 503 so a deploy gate (scripts/deploy/staging-smoke-test.sh, deep
+// reports 503 so a deploy gate (the product pack's staging smoke test, deep
 // profile) can prove critical state -- e.g. required schema presence -- WITHOUT
 // database credentials (the staging DB is firewalled to in-cluster egress).
 // This closes the gap that let #624 ship a broken schema behind a green deploy

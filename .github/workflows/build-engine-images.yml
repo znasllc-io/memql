@@ -10,8 +10,8 @@ name: build-engine-images
 # carrier nodes (cognition/agent/planner/workbench + the bff) are built by C4
 # in the memql-bff-copresent repo; the SPA by C5 in copresent.
 #
-# Tag scheme mirrors the operator (scripts/deploy/aks-deploy.sh build_one):
-# memql-<node>:<version>, release tags immutable. The lockfile-assembly step
+# Tag scheme: memql-<node>:<version>, release tags immutable (mirrors the
+# downstream product pack's deploy build path). The lockfile-assembly step
 # (C6, #1511) resolves each component's @sha256 digest from ACR by this tag, so
 # this workflow only needs to push the tag (digests are also surfaced in the run
 # summary for visibility).

@@ -412,7 +412,7 @@ proto-gen-check:
 # Docker image targets
 # ---------------------------------------------------------------------------
 
-.PHONY: release publish-releases
+.PHONY: release
 
 ## Cut an immutable release image memql:<VERSION> from VERSION + the short
 ## git SHA (znasllc-io/memql#493, epic #491). memQL is the upstream module;
@@ -432,23 +432,6 @@ release:
 		$${ACR:+--acr=$$ACR} \
 		$${PUSH:+--push} \
 		$${ALLOW_OVERWRITE:+--allow-overwrite} \
-		$${DRY_RUN:+--dry-run} \
-		$(ARGS)
-
-## Publish GitHub Releases for stack versions from the release lockfiles
-## (znasllc-io/memql#1097). Idempotent -- existing Releases are skipped.
-## The memql Releases are also published automatically by CI on push
-## (.github/workflows/publish-releases.yml); the component Releases
-## (bff-copresent, copresent) need `az` + a cross-org token, so run this
-## from the primary checkout after a release.
-##   make publish-releases                       # memql + components (all)
-##   make publish-releases REPO=memql            # memql only
-##   make publish-releases REPO=components        # bff-copresent + copresent
-##   make publish-releases DRY_RUN=1              # plan only
-publish-releases:
-	@bash scripts/release/publish-releases.sh \
-		$${REPO:+--repo=$$REPO} \
-		$${VERSION:+--version=$$VERSION} \
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
@@ -500,37 +483,8 @@ install-deps:
 	@bash scripts/dev/install-deps.sh
 
 # ---------------------------------------------------------------------------
-# Azure deployment (staging foundation -- epic #491)
+# Deploy gates (engine ops)
 # ---------------------------------------------------------------------------
-# Idempotent bootstrap that installs/verifies + authenticates the
-# toolchain (az + containerapp ext, gh, tiger, docker, jq, psql) and
-# creates/converges the core Azure resources (resource group, shared
-# Basic ACR, per-env Key Vault, Container Apps environment) plus loads
-# secrets into the Key Vault. Re-runnable -- the second consecutive run
-# is a no-op. Implementation lives in .claude/scripts/deploy-setup.sh
-# per the function-based-shell-script convention (CLAUDE.md). Per #492,
-# this target lives under .claude/scripts/ rather than scripts/ because
-# it's the deploy-tier bootstrap defined by the Skills+Scripts
-# architecture, not a dev-loop helper.
-
-.PHONY: deploy-setup
-
-## Bootstrap the Azure deployment foundation for ENV (staging|production,
-## default staging). Idempotent: installs/verifies the toolchain and
-## creates-or-converges the resource group, shared Basic ACR, per-env
-## Key Vault, and Container Apps environment, then loads secrets into the
-## Key Vault. Pass DRY_RUN=1 to print the plan without mutating, or
-## ARGS=... to forward extra flags (e.g. --secrets-file=...). Run with
-## `--help` semantics via ARGS=--help.
-##   make deploy-setup                          # staging
-##   make deploy-setup DRY_RUN=1                # staging, plan only
-##   make deploy-setup ENV=production DRY_RUN=1
-##   make deploy-setup ARGS=--secrets-file=~/.memql/deploy.staging.env
-deploy-setup:
-	@bash .claude/scripts/deploy-setup.sh \
-		--env=$${ENV:-staging} \
-		$${DRY_RUN:+--dry-run} \
-		$(ARGS)
 
 .PHONY: conn-headroom-check
 
@@ -544,62 +498,6 @@ conn-headroom-check:
 	@bash scripts/deploy/conn-headroom-check.sh
 
 # ===========================================================================
-# PROVISION -- one-time Azure infrastructure bootstrap (idempotent)
-# ===========================================================================
-
-.PHONY: db-provision blob-provision livekit-provision
-
-## Provision (create-or-verify) a dedicated Azure Storage account + blob
-## container for ENV and print the connection string for inclusion in the
-## genesis envelope (znasllc-io/memql#807, epic #805). Idempotent: re-running
-## detects the existing account and container and prints the current conn string.
-## Implementation lives in scripts/deploy/blob-provision.sh per the
-## function-based shell-script convention (CLAUDE.md).
-## NOTE: requires `az login`. Prints MEMQL_AZURE_STORAGE_CONNECTION_STRING for
-## manual placement into ~/Downloads/<env>.genesis.env (not wired to Key Vault
-## directly -- see docs/deploy/blob-provision.md for the full runbook).
-##   make blob-provision                          # staging
-##   make blob-provision DRY_RUN=1                # staging, plan only
-##   make blob-provision ENV=production DRY_RUN=1
-blob-provision:
-	@bash scripts/deploy/blob-provision.sh \
-		--env=$${ENV:-staging} \
-		$${DRY_RUN:+--dry-run} \
-		$(ARGS)
-
-## Provision the managed Tiger Cloud DB (Timescale Community + pgvector)
-## for ENV in Azure East US and wire its DSN into the per-env Key Vault
-## (znasllc-io/memql#494, epic #491). Idempotent: re-running detects the
-## existing service and only rewrites the DSN secret when it rotated.
-## Implementation lives in scripts/deploy/tiger-provision.sh per the
-## function-based shell-script convention (CLAUDE.md).
-##   make db-provision                          # staging
-##   make db-provision DRY_RUN=1                # staging, plan only
-##   make db-provision ENV=production DRY_RUN=1
-db-provision:
-	@bash scripts/deploy/tiger-provision.sh \
-		--env=$${ENV:-staging} \
-		$${DRY_RUN:+--dry-run} \
-		$(ARGS)
-
-## Provision the self-hosted LiveKit shared-secret pair into the per-env Key
-## Vault (znasllc-io/memql#1043). The committed ExternalSecret then syncs the
-## livekit-secrets k8s Secret. Idempotent: re-runs REUSE the existing pair;
-## --rotate generates a fresh one. Implementation lives in
-## scripts/deploy/livekit-provision.sh per the function-based shell convention.
-## NOTE: requires `az login`. DNS (livekit.<env>.copresent.ai) is a manual
-## registrar step -- see docs/deploy/livekit-provision.md.
-##   make livekit-provision                       # staging
-##   make livekit-provision DRY_RUN=1             # staging, plan only
-##   make livekit-provision ARGS=--rotate         # rotate the key/secret
-##   make livekit-provision ENV=production DRY_RUN=1
-livekit-provision:
-	@bash scripts/deploy/livekit-provision.sh \
-		--env=$${ENV:-staging} \
-		$${DRY_RUN:+--dry-run} \
-		$(ARGS)
-
-# ===========================================================================
 # BREAK-GLASS -- imperative deploy. ArgoCD OWNS local + staging (deploys =
 # merges; selfHeal reverts out-of-band kubectl applies), so these targets are
 # the escape hatch for when Argo is unavailable, plus the prod path until prod
@@ -611,7 +509,7 @@ livekit-provision:
 #   docs/public/operate/deployment-strategy.md.
 # ===========================================================================
 
-.PHONY: deploy deploy-rollback
+.PHONY: deploy
 
 ## BREAK-GLASS imperative deploy -- DELEGATES TO THE COCKPIT (I16, epic
 ## znasllc-io/memql#2212/#2227). `make` is a thin launcher now: it shells into
@@ -649,144 +547,6 @@ deploy:
 		$${DRY_RUN:+--dry-run} \
 		$${APPLY:+--apply} \
 		$(ARGS)
-
-## Roll the memQL mesh back to a previous good release (deployment-v2 Phase 1,
-## znasllc-io/memql#699). Rollback is a GIT REVERT of the digest-pinned overlay
-## deploy/k8s/overlays/<env>, then reconcile -- NOT `kubectl rollout undo` (which
-## reverted to the manifest tag, #684). Does NOT touch the managed Tiger Cloud
-## DB. Impl in scripts/deploy/aks-rollback.sh.
-##   make deploy-rollback ARGS=--list             # recent overlay changes
-##   make deploy-rollback ARGS=--to=<commit>      # print git revert + reconcile
-##   make deploy-rollback ARGS="--to=<commit> --apply"  # also re-converge
-##   make deploy-rollback DRY_RUN=1               # plan only
-deploy-rollback:
-	@bash scripts/deploy/aks-rollback.sh \
-		--env=$${ENV:-staging} \
-		$${DRY_RUN:+--dry-run} \
-		$(ARGS)
-
-.PHONY: deploy-aks
-
-## Apply the AKS Kubernetes manifests for the memQL node mesh
-## (deploy/k8s/) to the current kubectl context (epic
-## znasllc-io/memql#522 -- pivot from ACA). Applies the namespace then
-## kustomize-applies the 7 node Deployments + Services. Idempotent. The
-## `memql-secrets` Secret is a one-time prerequisite (real values, created
-## out-of-band -- see deploy/k8s/secret.example.yaml); this target warns if
-## it is absent. NO database is deployed -- nodes use managed Tiger Cloud.
-## Impl lives in scripts/deploy/aks-apply.sh per the function-based
-## shell-script convention (CLAUDE.md).
-##   make deploy-aks                    # ENV=staging, apply to current context
-##   make deploy-aks ENV=staging DRY_RUN=1   # server-side dry-run, no changes
-deploy-aks:
-	@bash scripts/deploy/aks-apply.sh \
-		--env=$${ENV:-staging} \
-		$${DRY_RUN:+--dry-run} \
-		$(ARGS)
-
-.PHONY: deploy-autoscaler
-
-## Converge the AKS staging nodepool to the cluster-autoscaler sizing codified
-## for #614 (DEPLOYMENT_STRATEGY.md §9): min 2 / max 5 on nodepool1 (B2s) so a
-## rolling-update surge gets headroom automatically and scales back after.
-## Idempotent. OWNER-GATED: enabling the autoscaler on shared cluster infra is
-## a persistent cost decision -- run with DRY_RUN=1 to print the plan; drop it
-## only to apply the live change. Impl in scripts/deploy/aks-autoscaler.sh.
-##   make deploy-autoscaler DRY_RUN=1     # print the plan, change nothing
-##   make deploy-autoscaler ARGS=--show   # read current autoscaler state
-##   make deploy-autoscaler               # APPLY the codified sizing (owner-gated)
-deploy-autoscaler:
-	@bash scripts/deploy/aks-autoscaler.sh \
-		--env=$${ENV:-staging} \
-		$${DRY_RUN:+--dry-run} \
-		$(ARGS)
-
-# ===========================================================================
-# OPERATOR RUNBOOKS -- staging release / reset / smoke (idempotent, fail-loud)
-# ===========================================================================
-
-.PHONY: release-staging reset-staging
-
-## ONE idempotent operator command to take staging to a VALIDATED release, or to
-## RECOVER a release that went green-on-drift but is actually broken
-## (znasllc-io/memql#1524, epic #1518). Full mode pre-flights the shared identity
-## signing seed (#1515), then delegates to aks-deploy.sh -- build + push, apply
-## the digest-pinned overlay identity-first, drift-assert, PROMOTE the bff
-## Rollout (#1520), run the FUNCTIONAL post-deploy gate (#1519: bff promoted +
-## JWKS coherent + BFF->agent auth), smoke the front door, record validated.
-## VERIFY=1 is the 2026-06-16 RECOVERY as one command: skip build/apply and run
-## ONLY the bff promote + functional gate + smoke against what is already live
-## (heals a stuck/unpromoted, JWKS-incoherent release). Re-runnable + fail-loud.
-## Impl in scripts/deploy/staging-release.sh.
-##   make release-staging VERSION=0.9.61                 # full: build -> apply -> promote -> gate -> smoke
-##   make release-staging VERSION=0.9.61 DRY_RUN=1       # full plan, no changes
-##   make release-staging VERIFY=1                       # RECOVER a stuck/false-green release (promote+gate+smoke)
-##   make release-staging SKIP_BUILD=1 VERSION=0.9.61    # roll already-pushed tags, then gate
-release-staging:
-	@bash scripts/deploy/staging-release.sh \
-		--env=$${ENV:-staging} \
-		$${VERSION:+--version=$$VERSION} \
-		$${VERIFY:+--verify} \
-		$${SKIP_BUILD:+--skip-build} \
-		$${NO_SMOKE:+--no-smoke} \
-		$${NO_GATE:+--no-gate} \
-		$${DRY_RUN:+--dry-run} \
-		$(ARGS)
-
-## ONE idempotent operator command to RESET staging to a fresh, FULLY-USABLE
-## state (znasllc-io/memql#1524): the auth-coherent DB wipe (#1500/#1522) plus a
-## post-reset FUNCTIONAL verification (#1519) so a "fresh start" comes up with
-## login working, JWKS coherent, and the mesh reconnected -- never the
-## half-broken auth state that needed a manual reseal + mesh roll on 2026-06-16.
-## DESTRUCTIVE + staging-only + context-guarded; the underlying wipe asks you to
-## type 'reset staging' unless ARGS=--yes. Impl in scripts/deploy/staging-reset.sh.
-##   make reset-staging DRY_RUN=1        # preview the reset + verify plan
-##   make reset-staging                  # wipe staging, then verify usable
-##   make reset-staging ARGS=--yes       # wipe non-interactively, then verify
-reset-staging:
-	@bash scripts/deploy/staging-reset.sh \
-		--env=$${ENV:-staging} \
-		$${DRY_RUN:+--dry-run} \
-		$(ARGS)
-
-.PHONY: staging-db-reset
-
-## DESTRUCTIVE, MANUAL staging DB reset (znasllc-io/memql#1500), AUTH-COHERENT
-## (znasllc-io/memql#1522): wipe the staging database back to a fresh EMPTY
-## schema, for when many app iterations have left stale data behind and you want
-## to start clean. NEVER part of a deploy -- it runs ONLY when you invoke it and
-## confirm. Staging-only (refuses prod) + a kube-context guard + an interactive
-## typed confirmation; the wipe runs as a one-shot in-cluster Job and the schema
-## is rebuilt by the existing `memql migrate` Job. Auth stays coherent (#1522):
-## it pre-flights the shared identity signing seed (#1515) and REFUSES if it is
-## absent, brings identity up BEFORE the mesh so node tokens re-mint cleanly
-## (#1521), and verifies JWKS is served afterward -- no manual reseal / mesh roll.
-## The owner re-registers via magic-link afterward. Impl in
-## scripts/deploy/staging-db-reset.sh.
-##   make staging-db-reset DRY_RUN=1     # preview the plan, change nothing
-##   make staging-db-reset               # wipe staging (asks you to type 'reset staging')
-##   make staging-db-reset ARGS=--yes    # skip the prompt (still env/context guarded)
-staging-db-reset:
-	@bash scripts/deploy/staging-db-reset.sh \
-		--env=$${ENV:-staging} \
-		$${DRY_RUN:+--dry-run} \
-		$(ARGS)
-
-.PHONY: smoke-staging
-
-## Repeatable end-to-end smoke test against the LIVE staging front door
-## (znasllc-io/memql#535): TLS+DNS, identity health + JWKS (direct and via
-## the app same-origin proxy), the magic-link login surface, the BFF
-## /memql/ws upgrade, and the /memql/audio voice route. Baseline is
-## read-only (no email, no auth). Opt-in DEEP checks: SMOKE_EMAIL issues a
-## real magic link; MEMQL_SMOKE_TOKEN runs an authenticated query + the
-## cross-node AI forward. Impl in scripts/deploy/staging-smoke-test.sh.
-##   make smoke-staging                                  # baseline
-##   make smoke-staging APP_HOST=app.copresent.ai        # smoke prod
-##   make smoke-staging SMOKE_EMAIL=me@example.com        # + magic link
-##   make smoke-staging MEMQL_SMOKE_TOKEN=mql_pat_xxx     # + live query
-smoke-staging:
-	@bash scripts/deploy/staging-smoke-test.sh $(ARGS)
 
 # ---------------------------------------------------------------------------
 # Utility targets
@@ -852,30 +612,14 @@ help:
 	@echo "  make install-deps              Install + verify build tools (protoc, plugins, go, docker, k3d, kubectl)"
 	@echo "  make genesis-seal ENV_FILE=... Seal a plaintext .env into ~/.memql/genesis.znas"
 	@echo ""
-	@echo "PROVISION (one-time Azure infra bootstrap, idempotent; ENV=staging|production)"
-	@echo "  make deploy-setup [DRY_RUN=1]  Azure + toolchain bootstrap (resource group, ACR, Key Vault, ACA env)"
-	@echo "  make db-provision [DRY_RUN=1]  Provision Tiger Cloud DB + wire DSN to Key Vault"
-	@echo "  make blob-provision [DRY_RUN=1] Provision Azure Storage account + container; print conn string (#807)"
-	@echo "  make livekit-provision [DRY_RUN=1] Provision self-hosted LiveKit secret pair into Key Vault"
-	@echo ""
-	@echo "OPERATOR RUNBOOKS (staging)"
-	@echo "  make release-staging VERSION=X.Y.Z  Build -> apply digest-pinned overlay -> promote -> functional gate -> smoke"
-	@echo "  make release-staging VERIFY=1       Recover a stuck/false-green release (promote + gate + smoke only)"
-	@echo "  make reset-staging                  Wipe staging to a fresh, auth-coherent, verified-usable state"
-	@echo "  make staging-db-reset               Destructive manual staging DB wipe (typed confirmation)"
-	@echo "  make smoke-staging                  End-to-end smoke test against the live staging front door"
-	@echo ""
 	@echo "DEPLOY -- the normal way:"
 	@echo "  STAGING is GitOps: bump the image digest in deploy/k8s/overlays/staging and"
 	@echo "  merge to main -> ArgoCD reconciles. Rollback = 'git revert' the overlay."
-	@echo "  (release-staging above wraps build+digest-pin+promote+gate for you.)"
+	@echo "  (The product bff/SPA deploy + release estate now lives in the pack repo.)"
 	@echo ""
 	@echo "BREAK-GLASS (imperative deploy -- ArgoCD owns staging; use only when Argo is unavailable, or for prod until #2207)"
-	@echo "  make deploy ENV=production VERSION=X.Y.Z  Imperative prod roll-out (build + push + apply + smoke)"
+	@echo "  make deploy ENV=production VERSION=X.Y.Z  Imperative roll-out (delegates to the cockpit)"
 	@echo "  make deploy [DRY_RUN=1]                    Imperative apply (escape hatch; NOT the staging norm)"
-	@echo "  make deploy-aks [DRY_RUN=1]                Apply-only manifests primitive (no build)"
-	@echo "  make deploy-rollback ARGS=--list           git-revert-based overlay rollback"
-	@echo "  make deploy-autoscaler [DRY_RUN=1]         Converge AKS nodepool autoscaler sizing (owner-gated)"
 	@echo ""
 	@echo "UTILITY"
 	@echo "  make clean        Remove build artifacts"

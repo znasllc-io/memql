@@ -142,9 +142,10 @@ jobs:
       #   - agent      -> integrations/agent/worker (scope / safety-descriptor
       #                   / list-workers / generated-output tables). Covered
       #                   HERE; CGO-free, so it rides the warm go-checks cache.
-      #   - clustere2e -> test/clustere2e. Covered by its own workflow
-      #                   (cluster-e2e.yml), which provisions the parity
-      #                   cluster the suite needs -- NOT runnable here.
+      #   - clustere2e -> test/clustere2e. Covered by the parity-cluster e2e
+      #                   workflow (now owned by the downstream product pack),
+      #                   which provisions the parity cluster the suite needs
+      #                   -- NOT runnable here.
       #   - voice      -> no tagged *_test.go files; the untagged
       #                   integrations/voice/agent tests run in the step above,
       #                   and the build-voice (CGO) job below already runs
@@ -316,7 +317,7 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
     runs-on: ubuntu-latest
     services:
-      # Same image the dev cluster + cluster-e2e use; bundles TimescaleDB +
+      # Same image the dev cluster uses; bundles TimescaleDB +
       # pgvector so the memory-nodes migrations (hypertable + vector) apply.
       postgres:
         image: timescale/timescaledb:latest-pg16
@@ -370,7 +371,7 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
     runs-on: ubuntu-latest
     services:
-      # Same image the dev cluster + cluster-e2e + conformance use; bundles
+      # Same image the dev cluster + conformance use; bundles
       # TimescaleDB + pgvector so the memory-nodes migrations (hypertable +
       # vector) apply.
       postgres:

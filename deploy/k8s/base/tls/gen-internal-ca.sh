@@ -28,8 +28,12 @@ set -eo pipefail
 NAMESPACE="${NAMESPACE:-memql}"
 CA_DAYS="${CA_DAYS:-3650}"
 CERT_DAYS="${CERT_DAYS:-825}"
-# SANs the identity cert must answer to: in-cluster DNS + the public issuer.
-IDENTITY_SANS="${IDENTITY_SANS:-DNS:identity,DNS:identity.${NAMESPACE},DNS:identity.${NAMESPACE}.svc,DNS:identity.${NAMESPACE}.svc.cluster.local,DNS:identity.staging.copresent.ai}"
+# SANs the identity cert must answer to. The engine default is product-neutral
+# (in-cluster DNS only). A downstream product stack that fronts identity at a
+# public host MUST inject its own public SAN by exporting IDENTITY_SANS with the
+# in-cluster names PLUS its host, e.g.:
+#   IDENTITY_SANS="DNS:identity,DNS:identity.${NAMESPACE},DNS:identity.${NAMESPACE}.svc,DNS:identity.${NAMESPACE}.svc.cluster.local,DNS:identity.<product-host>"
+IDENTITY_SANS="${IDENTITY_SANS:-DNS:identity,DNS:identity.${NAMESPACE},DNS:identity.${NAMESPACE}.svc,DNS:identity.${NAMESPACE}.svc.cluster.local}"
 
 #=============================================================================
 # FUNCTIONS

@@ -17,9 +17,9 @@
 #       Compare the digests the overlay pins against the digests actually
 #       running in the cluster (pod imageID). Any divergence = out-of-band
 #       mutation, which v2 forbids (the overlay, reconciled, is authoritative).
-#       Used by aks-deploy.sh's post-apply guard and by a scheduled job; once
-#       Argo CD is live (Phase 2) its OutOfSync status is the continuous
-#       equivalent.
+#       Used by the deploy pack's post-apply guard and by a scheduled drift
+#       job; once Argo CD is live (Phase 2) its OutOfSync status is the
+#       continuous equivalent.
 #
 # Per the repo + global Skills+Scripts convention (CLAUDE.md): function-based,
 # one responsibility per function, main() at the bottom. set -uo pipefail.
