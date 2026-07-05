@@ -1,8 +1,11 @@
 # Strategic merge patch: override staging-specific URLs on the identity Deployment
 # for local k3d development (#2065).
 #
-# Identity serves its web UI and JWKS at localhost:8085 (via k3d port-forward).
-# The CORS + OAuth redirect rules must match the local copresent URL.
+# Identity serves its web UI and JWKS on the owner's local wildcard domain
+# (identity.local.znas.io resolves to 127.0.0.1 via public DNS, reaching the
+# k3d LB on :8085) so locally-surfaced URLs (magic links, JWKS, console
+# output) carry the domain form instead of raw localhost. Plain localhost
+# stays admitted for CORS/redirects so both address forms work.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -14,19 +17,21 @@ spec:
       containers:
         - name: identity
           env:
-            # Local identity URL: http (no TLS) via localhost port-forward.
+            # Local identity URL: http (no TLS), domain form via the public
+            # 127.0.0.1 wildcard (identity.local.znas.io -> k3d LB :8085).
             - name: MEMQL_IDENTITY_BASE_URL
-              value: "http://localhost:8085"
+              value: "http://identity.local.znas.io:8085"
             - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-              value: "http://localhost:8085"
+              value: "http://identity.local.znas.io:8085"
             - name: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN
-              value: "localhost"
-            # Allow both the copresent SPA (port 8080) and direct localhost.
+              value: "local.znas.io"
+            # Admit the SPA on both address forms (domain + localhost) plus
+            # the dev API server.
             - name: MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS
-              value: "http://localhost:8080,http://localhost:3000"
-            # OAuth redirect: localhost SPA + cockpit (unchanged).
+              value: "http://app.local.znas.io:8080,http://localhost:8080,http://localhost:3000"
+            # OAuth redirect: SPA on both address forms + cockpit (unchanged).
             - name: MEMQL_IDENTITY_REGISTERED_CLIENTS
-              value: '[{"clientId":"app","redirectURIs":["http://localhost:8080/auth/callback","http://localhost:3000/auth/callback"]},{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]}]'
+              value: '[{"clientId":"app","redirectURIs":["http://app.local.znas.io:8080/auth/callback","http://localhost:8080/auth/callback","http://localhost:3000/auth/callback"]},{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]}]'
             # Run migrations on identity startup -- local Postgres starts empty
             # (Tiger Cloud staging has a pre-existing schema; local does not).
             - name: MEMORY_NODES_DATABASE_MIGRATE_ON_START
