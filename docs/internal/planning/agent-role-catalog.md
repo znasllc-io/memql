@@ -14,7 +14,7 @@ owner: znas
   + concept + lock semantics).
 - **Phase 2 partial** on `feature/agent-factory` (tools-agent-only
   enforcement, server-side lock validator, async `agent()` contract,
-  factory tool + structured-output prompt). The cockpit / CoPresent
+  factory tool + structured-output prompt). The cockpit / product
   UI for the locked-vs-default-vs-available split and the end-to-end
   async dispatch of `agentInvocation` Plans are the remaining gaps.
 
@@ -56,7 +56,7 @@ What is NOT in Phase 1:
 - The GA-driven auto-create flow (the agent factory that consumes the
   catalog when no fitting specialist exists).
 - Server-side lock enforcement in `mutationUpdateAgent`.
-- The cockpit / CoPresent UI surfaces that render locked vs default
+- The cockpit / product UI surfaces that render locked vs default
   vs available with the right affordances.
 - The "expand the agent's knowledge / capabilities" flow that
   enforces the same locks on add-ons.
@@ -148,7 +148,7 @@ fallback for partial updates) and checks:
 pattern applies).
 
 The validator runs on every write path -- the cockpit edit modal,
-the CoPresent edit modal, the factory tool's `extend` path,
+the product's edit modal, the factory tool's `extend` path,
 mutations issued by automations. There is no "force override" flag
 at this layer: a locked id is locked. Adding new locked ids to the
 role catalog at seed time has the effect of growing every existing
@@ -195,9 +195,9 @@ walks the materialized `agentRole` rows and updates each
 `knowledgeDomain` row's `lockedForRoles`. Not populated by the seeder
 in Phase 1; enforcement reads from the role row directly.
 
-### 3. Cockpit + CoPresent UI affordances
+### 3. Cockpit + product UI affordances
 
-The agent-creation modal (CoPresent's `CreateAgentModal`) and the
+The agent-creation modal (the product's `CreateAgentModal`) and the
 Training panel render the locked / default / available split:
 
 - **Locked** rows: greyed out with a lock icon. Hovering says
@@ -226,7 +226,7 @@ to agents directly. The flow is always:
    to `agent.capabilities.domains`).
 4. Locked ids stay locked; everything else can be added.
 
-The CoPresent UI's "manual edit" path stays available for power
+The product UI's "manual edit" path stays available for power
 users but routes through the same validator, so the locks apply
 regardless of entry surface.
 
@@ -280,9 +280,9 @@ in role_seed.go).
 | `dsl/agents/prompts.memql` + templates | + `roleSuggest` prompt, + agent factory prompt |
 | `dsl/agents/automations.memql` | + `enforceRoleLocksOnAgentWrite` |
 | `component/memql/` mutation validator | + lock-enforcement validator path |
-| `memql-bff-copresent/dsl/copresent/mutations.memql` | wire createAgent through createAgentFromRole |
+| the product pack's mutations file (carrier repo) | wire createAgent through createAgentFromRole |
 | `memql-cockpit/cli/cluster/architecture.go` | + role catalog drill-down (parallel to arch model) |
-| (CoPresent repo, not in this workspace) | CreateAgentModal + Training panel UI surfaces |
+| (product frontend repo, not in this workspace) | CreateAgentModal + Training panel UI surfaces |
 | `dsl/agents/roles/` | continue expanding the catalog as gaps surface; one seed per role, grouped by category |
 
 ---

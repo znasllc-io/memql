@@ -34,7 +34,7 @@ follow-up; this spike says exactly which numbers only live testing can settle.
 
 The Python agent (its `main.py`) built a LiveKit
 `AgentSession` and handed it a VAD, an STT, an LLM, and a TTS. The framework
-then runs, for free, the orchestration loop that copresent's voice product
+then runs, for free, the orchestration loop that the product's voice surface
 depends on:
 
 - gates audio frames through Silero VAD (`main.py:163-164`,
@@ -58,7 +58,7 @@ externally-driven (conductor) "speak now" trigger and clean barge-in?
 The conductor-gate posture is not optional context -- it is the defining
 constraint. Epic #440 already established (see
 `docs/internal/design/voice-432-conductor-response-gate.md`) that **memQL's conductor decides
-WHEN the assistant speaks**, not raw VAD. A copresent polyphon room is up to 5
+WHEN the assistant speaks**, not raw VAD. A multi-human polyphon room is up to 5
 humans + 1 assistant; humans talk to each other constantly. The Python agent
 runs in exactly this gated posture today: the realtime executor is built with
 `turn_detection=None` (`main.py:242-247`) and the assistant speaks only when

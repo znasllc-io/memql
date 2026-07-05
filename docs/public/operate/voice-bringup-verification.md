@@ -83,8 +83,9 @@ The smoke check confirms the agent is healthy + authenticated.
 End-to-end voice quality and latency still need a human in the
 loop:
 
-1. Open CoPresent (via the copresent SPA port-forward,
-   `kubectl port-forward -n memql svc/copresent 8080:8080`).
+1. Open the frontend SPA (built and deployed from its own repo -- the
+   engine's local overlay does not include it; any client that drives
+   the `PolyphonRoomTokenMsg` room-join path works).
 2. Create or join a space; the BFF's `PolyphonRoomTokenMsg`
    handler dispatches the voice-agent into the room as the
    General Assistant participant.

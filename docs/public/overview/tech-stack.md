@@ -65,7 +65,7 @@ This document establishes the **opinionated technologies and practices** for mem
 |-----------|-----------|----------|
 | **Database** | PostgreSQL + TimescaleDB | Pod in the local k3d cluster |
 | **Service** | memQL node pods | k3d cluster, reconciled by ArgoCD from `deploy/k8s/overlays/local` |
-| **Access** | kubectl port-forwards (bff gRPC :50051, identity :8085, copresent SPA :8080, livekit :7880, postgres :5432) | localhost |
+| **Access** | kubectl port-forwards (mcp gRPC :50051, identity :8085, postgres :5432) | localhost |
 | **Data** | Ephemeral | Recreated by `make down && make up` |
 
 **Commands:**
@@ -77,7 +77,7 @@ make up
 make dev [NODE=<type>]
 
 # View logs
-kubectl logs -n memql deploy/bff -f
+kubectl logs -n memql deploy/mcp -f
 
 # Access database (via the postgres port-forward; make db opens psql)
 psql postgres://memql:memql_dev@localhost:5432/memql
@@ -95,7 +95,7 @@ psql postgres://memql:memql_dev@localhost:5432/memql
 |-----------|-----------|----------|
 | **Database** | TimescaleDB Cloud (Tiger Cloud) | Managed Tiger Cloud instance |
 | **Service** | memQL | Azure Kubernetes Service (cluster `aks-memql-staging`, namespace `memql`) |
-| **URL** | HTTPS | https://app.staging.copresent.ai, https://identity.staging.copresent.ai |
+| **URL** | HTTPS | https://app.staging.example.com, https://identity.staging.example.com |
 | **Data** | Persistent | Managed by Tiger Cloud |
 
 **Commands:**
@@ -104,10 +104,10 @@ psql postgres://memql:memql_dev@localhost:5432/memql
 make deploy VERSION=X
 
 # View logs
-kubectl logs -n memql deployment/bff -f
+kubectl logs -n memql deployment/cognition -f
 ```
 
-See [DEPLOYMENT_STRATEGY.md](../operate/deployment-strategy.md) for the full deploy
+See DEPLOYMENT_STRATEGY.md (see the product pack repo's docs/operate/deployment-strategy.md) for the full deploy
 flow and topology.
 
 **Developer Access:** [x] All developers
@@ -177,7 +177,7 @@ for the operator-side narrative.
 3. Make code changes
 4. Rebuild + reload the changed node: `make dev [NODE=<type>]`
 5. Test locally: `go test ./...`
-6. View logs: `kubectl logs -n memql deploy/bff -f`
+6. View logs: `kubectl logs -n memql deploy/mcp -f`
 7. Commit (directly to `main` for focused changes; feature branch + PR when review is useful)
 
 **Best Practices:**
@@ -307,14 +307,14 @@ memQL/
 make up                 # Start local k3d cluster (ArgoCD + local overlay + secrets)
 make dev [NODE=<type>]  # Rebuild + reload a node after a code change
 make down               # Tear down the cluster
-kubectl logs -n memql deploy/bff -f                             # View logs
+kubectl logs -n memql deploy/mcp -f                             # View logs
 psql postgres://memql:memql_dev@localhost:5432/memql            # PostgreSQL shell (via make db)
 
 # Testing
 go test ./...                    # Run Go test suite
 
 # Deployment (Azure AKS) -- see docs/public/operate/deployment-strategy.md
-make deploy VERSION=X            # Deploy to staging (scripts/deploy/aks-deploy.sh)
+make deploy VERSION=X            # Deploy to staging (cockpit break-glass, scripts/deploy/cockpit.sh)
 
 # Dev secrets workflow
 make bootstrap                                   # Generate .env.local with master key + bootstrap envelope
@@ -324,7 +324,7 @@ make secrets-list                                # Diff manifest vs yaml vs runn
 
 # AKS
 kubectl get pods -n memql                                   # List pods
-kubectl logs -n memql deployment/bff -f                     # View logs
+kubectl logs -n memql deployment/cognition -f               # View logs
 kubectl get deployments -n memql                            # Deployment status (staging)
 ```
 
@@ -378,8 +378,8 @@ for the full design.
 2. **Stage by explicit path** (`git add <file>`) -- never `git add -A` /
    `.`. Multiple Claude sessions may share a worktree.
 3. **Pre-release; no backwards-compat shims.** When a contract changes,
-   fix both memQL and the consumer (typically CoPresent) at once and
-   delete what's no longer needed.
+   fix both memQL and the consumer (typically the downstream product)
+   at once and delete what's no longer needed.
 4. **Commit messages:** Clear, imperative mood. Subject under ~70
    chars. Body explains the why.
 5. **Co-authoring:** Include AI contributions

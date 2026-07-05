@@ -124,12 +124,12 @@ observable version for free — not as "an exercise for the reader."
 
 ## Why "it's real"
 
-The strongest proof that this is a harness and not a slide deck:
-Visionarys is building **CoPresent** — a multi-agent, voice + canvas
-product — on memQL right now, on the path to release. The breakers, the
-budgets, the memory consolidation, the cross-node tool relay described
-above exist because a shipping product needs them. memQL is the
-extracted, open-source harness underneath.
+The strongest proof that this is a harness and not a slide deck: a
+multi-agent, voice + canvas product is being built on memQL right now,
+on the path to release. The breakers, the budgets, the memory
+consolidation, the cross-node tool relay described above exist because
+a shipping product needs them. memQL is the extracted, open-source
+harness underneath.
 
 > Next: [memQL vs. other harnesses](vs-other-harnesses.md) — an honest
 > comparison with the Go and Python field.

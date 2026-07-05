@@ -7,7 +7,7 @@ telephony on top of it. Built from the analysis in
 **Epics**
 1. [SI → AI rename](01-epic-si-to-ai-rename.md)
 2. [Platform / plugin architecture](02-epic-platform-plugin.md)
-3. [Decouple CoPresent from core](03-epic-decouple-copresent.md)
+3. [Decouple the product from core](03-epic-decouple-the product.md)
 4. [Telephony into core](04-epic-telephony.md)
 
 ---
@@ -21,14 +21,14 @@ telephony on top of it. Built from the analysis in
 - **`partition` is the canonical tenant/scope primitive** — it already exists
   (`v1:platform:partitionSecret`/`partitionVariable`,
   `ResolvePartitionFromContext`). We do **not** invent a new partition concept;
-  we adopt the existing one. `space` is a CoPresent concept scoped *by* a
+  we adopt the existing one. `space` is a the product concept scoped *by* a
   partition.
 - **Services stay core; packs are product.** cognition, voice, voice-agent,
   planner, agent are core services (the `mcp` node already builds engine-only
-  with no CoPresent DSL — proof the split works). A "client" is a plugin repo:
+  with no the product DSL — proof the split works). A "client" is a plugin repo:
   build-tag-gated Go (`RegisterPlugin`) + embedded `.memql` tree
   (`RegisterTree`) + routing rules.
-- **Telephony attaches to a generic partition/room, never to a CoPresent
+- **Telephony attaches to a generic partition/room, never to a the product
   `space`.**
 
 ---
@@ -46,7 +46,7 @@ Epic 1 (rename)  ──► G1 ──►  Epic 2 (plugin)  ──► G2 ──►
 - **G2 — partition foundation landed.** Epic 2 issues 2.1 (contract) + 2.2
   (partition adoption) merged. Unblocks Epic 3's core re-pointing.
 - **G3 — core decoupled.** Epic 3 complete: core builds engine-only with zero
-  CoPresent references; CoPresent pack loads in a CoPresent cluster. Unblocks
+  the product references; the product pack loads in a the product cluster. Unblocks
   Epic 4.
 
 ---
@@ -64,7 +64,7 @@ Each epic is a separate working session. Within an epic, issues tagged
 | **S4** | 4 — telephony | **G3** | — |
 
 Maximum concurrency: after **G1**, S2 (plugin) and S3-prep (inventory + moving
-pure-CoPresent concepts that don't touch partition) run **together**. S3's
+pure-the product concepts that don't touch partition) run **together**. S3's
 heavy `spaceId → partitionId` re-pointing waits on **G2** from S2. S4 waits on
 **G3**.
 
@@ -74,9 +74,9 @@ heavy `spaceId → partitionId` re-pointing waits on **G2** from S2. S4 waits on
 
 | Epic | Primary repo(s) |
 |---|---|
-| 1 — rename | `memql` (core), `memql-bff-copresent`, `memql-cockpit`, `copresent` (frontend gen) |
+| 1 — rename | `memql` (core), `the product carrier repo`, `memql-cockpit`, `the product` (frontend gen) |
 | 2 — plugin | `memql` |
-| 3 — decouple | `memql` (extract from), `memql-bff-copresent` (move into) |
+| 3 — decouple | `memql` (extract from), `the product carrier repo` (move into) |
 | 4 — telephony | `memql` |
 
 ---

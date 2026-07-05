@@ -9,7 +9,7 @@ owner: znas
 
 # Self-hosted LiveKit (staging/prod) — provisioning runbook
 
-LiveKit powers CoPresent's realtime voice/video. We **self-host** the
+LiveKit powers the product's realtime voice/video. We **self-host** the
 open-source `livekit-server` (Apache-2.0) in the AKS cluster — there is **no
 LiveKit Cloud and no third-party credential**. The "API key/secret" is a
 self-chosen shared-secret pair: `livekit-server` validates tokens signed with
@@ -22,11 +22,13 @@ Tracking issue: znasllc-io/memql#1043.
 - `deploy/k8s/base/livekit.yaml` — `livekit-server` Deployment + ConfigMap, a
   ClusterIP **signaling** Service (`:7880`), a **LoadBalancer** RTC Service
   (UDP `7882` + TCP `7881`, mixed-protocol, `externalTrafficPolicy: Local`,
-  `use_external_ip`), and an Ingress for `wss://livekit.<env>.copresent.ai`.
+  `use_external_ip`), and an Ingress for `wss://livekit.<env>.example.com`
+  (your signaling host).
 - `deploy/k8s/base/externalsecret-livekit.yaml` — ESO reconciles the
   `livekit-secrets` k8s Secret from Key Vault (declarative; mirrors
   `memql-secrets`).
-- `bff.yaml` / `voice.yaml` — `MEMQL_POLYPHON_LIVEKIT_URL` + `_PUBLIC_URL` (non-secret)
+- `voice.yaml` (and the product pack's `bff` manifest) —
+  `MEMQL_POLYPHON_LIVEKIT_URL` + `_PUBLIC_URL` (non-secret)
   and `_API_KEY` / `_API_SECRET` (from `livekit-secrets`).
 - The staging overlay digest-pins `livekit/livekit-server`.
 
@@ -62,7 +64,7 @@ Add an A record for the **signaling** host pointing at the ingress-nginx
 LoadBalancer IP:
 
 ```
-livekit.staging.copresent.ai  ->  <ingress-nginx EXTERNAL-IP>
+livekit.staging.example.com  ->  <ingress-nginx EXTERNAL-IP>
 ```
 
 (`kubectl get svc ingress-nginx-controller -n ingress-nginx` for the IP.) The
@@ -94,7 +96,7 @@ networks.
 ## Verify end-to-end
 
 - BFF logs `polyphon: local room provider enabled (LiveKit token generation)`.
-- Mic toggle in CoPresent mints a room token (no "provider not configured").
+- Mic toggle in the product frontend mints a room token (no "provider not configured").
 - Browser joins the LiveKit room; the General Assistant participates once the
   voice-agent is wired with `LIVEKIT_URL` / `_API_KEY` / `_API_SECRET` +
   `MEMQL_OPENAI_API_KEY`.

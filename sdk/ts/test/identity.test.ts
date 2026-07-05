@@ -105,7 +105,7 @@ test("sendGuestInvite -- happy path returns invitationId + success", async () =>
     spaceName: "Brainstorm",
     inviterName: "Alice",
     email: "guest@example.com",
-    joinUrlBase: "https://app.copresent.ai",
+    joinUrlBase: "https://app.example.com",
     expiresInMinutes: 15,
   });
   const sent = mock.lastSent() as unknown as {
@@ -134,7 +134,7 @@ test("sendGuestInvite -- typed errorCode rides the result (no throw)", async () 
     spaceName: "Brainstorm",
     inviterName: "Alice",
     email: "bad-email",
-    joinUrlBase: "https://app.copresent.ai",
+    joinUrlBase: "https://app.example.com",
   });
   mock.reply({
     sendGuestInviteResult: {

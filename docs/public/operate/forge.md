@@ -20,7 +20,7 @@ operating system:
 - **Forge** — the workshop: the DSL bundle (`dsl/forge/`) that defines the
   concepts, approval pipeline, role model, MCP tool surface, and automations.
 
-Forge sits on top of the apps it develops (memql, copresent, client builds). It
+Forge sits on top of the apps it develops (memql, product frontends, client builds). It
 is not part of the core engine; it is a plugged-in namespace that can serve
 multiple projects from one tenant.
 
@@ -37,7 +37,7 @@ ownership.
 ### project (`v1:forge:project`)
 
 A unit of work context forge operates against. One project row per app or
-codebase (e.g. `memql`, `copresent-acme`). Requests reference a `projectId`,
+codebase (e.g. `memql`, `exampleapp-acme`). Requests reference a `projectId`,
 so the same forge bundle serves multiple apps without baking any one in.
 
 Key fields: `slug` (stable short id), `name`, `targetApp`, `repo`,

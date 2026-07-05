@@ -20,7 +20,7 @@ script: [`scripts/dedupe-peruser-seeds/README.md`](../../../../scripts/dedupe-pe
   name and gender).
 - `queryActiveAgents` / `queryActiveAgentsForUser` returns multiple
   rows with the same `(ownerUserId, role)` pair.
-- The Roster / Team tab on copresent or the cockpit's equivalent
+- The Roster / Team tab on the product frontend or the cockpit's equivalent
   surface lists more rows than the user has ever created.
 
 ## Affected environments

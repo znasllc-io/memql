@@ -2,7 +2,7 @@
 // methods are NOT here by design -- each product BFF generates them
 // from its DSL and layers them onto QueryClient (via `declare module`
 // + prototype augmentation) in the product SDK, e.g.
-// @visionarys-io/copresent-sdk, which re-exports this core.
+// the per-product SDK package, which re-exports this core.
 
 export { Connection, type ConnectOptions, type ConnectionAuth } from "./connection.js";
 export { Dispatcher, type DispatcherOptions } from "./dispatcher.js";

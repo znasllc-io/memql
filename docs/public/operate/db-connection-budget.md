@@ -87,7 +87,8 @@ replicas or a pooler.
   its pool on exit and stamps `application_name=memql-migrate`, memql#1933).
 - **Blue-green drain window** (child E, memql#1780): the bff Rollout's
   `scaleDownDelaySeconds` was cut 3600→300 so a promotion stops holding a full
-  extra bff color (pods + pools) for an hour. See `deploy/rollouts/README.md`.
+  extra bff color (pods + pools) for an hour. See the product carrier repo's
+  `deploy/rollouts/README.md`.
 
 ## Graceful deploy runbook (staging/prod)
 

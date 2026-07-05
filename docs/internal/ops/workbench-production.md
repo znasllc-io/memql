@@ -240,7 +240,7 @@ Items deliberately deferred; revisit at production cutover:
 - **Audit telemetry.** No `v1:worker:invocation` equivalent for
   workbench calls yet. Decide whether high-volume telemetry is needed
   for the sandboxed path.
-- **Frontend visibility.** The cockpit and CoPresent UIs do not
+- **Frontend visibility.** The cockpit and the product frontend do not
   surface workbench contents. Add a Plan-level "Workbench outputs"
   panel when there is user demand. (Workspaces are agent-private by
   design; surfacing is optional.)

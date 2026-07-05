@@ -21,7 +21,6 @@ integrations/
 ├── audio/       resample.go, wav.go    # PCM16 sample-rate conversion
 ├── cognition/                          # routing + conductor + client-tool relay
 ├── agent/                              # AI tool-loop + replier + suggest
-├── copresent/   routing.go             # CoPresent-specific event routing rules
 ├── database/    capabilities.go        # healthCheck, stats
 ├── email/                              # Microsoft Graph / SMTP / Log senders
 ├── embedding/                          # vector embedding capabilities
@@ -46,8 +45,8 @@ memQL has two registration paths for integration providers:
    (Logger, Engine, BunDB getter, VisionProvider,
    EmbeddingProviderByName, partition / variable resolvers). This is
    the preferred path. Anchor the plug-in by adding a blank import to
-   `app/plugins_core.go` (core integrations) or
-   `app/plugins_copresent.go` (CoPresent-specific integrations).
+   `app/plugins_core.go` (core integrations); product-specific
+   integrations anchor from their pack repo.
    Build-tag-gate the anchor file if the integration only runs on
    certain node types.
 
@@ -59,7 +58,7 @@ memQL has two registration paths for integration providers:
 Routing + concept-ownership rules are also plug-in-registerable:
 `node.RegisterRoutingRule(...)` and
 `node.RegisterConceptOwnership(prefix, nodeType)` from `init()`. See
-`integrations/copresent/routing.go` for an example.
+the product pack's routing registration file for an example.
 
 ## IntegrationProvider contract
 

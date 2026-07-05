@@ -70,8 +70,8 @@ the start. Subsequent registrations use the configured defaults.
 `v1:identity:invitation` is an identity primitive used by two
 flows:
 
-- **Guest invites** (CoPresent): a space owner sends a guest a
-  link via `SendGuestInviteMsg`. Guests authenticate with
+- **Guest invites** (driven by the product frontend): a space owner
+  sends a guest a link via `SendGuestInviteMsg`. Guests authenticate with
   `Authorization: Guest <token>` (the gRPC stream interceptor's
   guest-aware path).
 - **User invitations** (admin / waitlist mode): an admin issues a

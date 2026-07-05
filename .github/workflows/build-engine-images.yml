@@ -8,7 +8,7 @@ name: build-engine-images
 # subject is `repo:znasllc-io/memql:ref:refs/heads/main`, so this MUST run on
 # main -- hence workflow_dispatch (which runs on the default branch). The
 # carrier nodes (cognition/agent/planner/workbench + the bff) are built by C4
-# in the memql-bff-copresent repo; the SPA by C5 in copresent.
+# in the product carrier repo; the SPA by its own build workflow.
 #
 # Tag scheme: memql-<node>:<version>, release tags immutable (mirrors the
 # downstream product pack's deploy build path). The lockfile-assembly step
@@ -53,7 +53,7 @@ jobs:
           - node: voice
             cgo: "1"
             target: voice-runtime
-          # mcp: engine-built (no CoPresent DSL), CGO-free -- same shape as
+          # mcp: engine-built (no product DSL), CGO-free -- same shape as
           # identity. Remote MCP node (memql#1554); CI gap fixed in #1581.
           - node: mcp
             cgo: "0"

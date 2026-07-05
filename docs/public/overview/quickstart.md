@@ -17,22 +17,10 @@ owner: znas
 - **Docker** installed and running (k3d runs Kubernetes inside Docker)
 - **k3d + kubectl** (`brew install k3d kubectl`)
 - **Go 1.26.1+** (for building the node images locally)
-- **GitHub Packages access** for the CoPresent SPA image build.
-  The SPA image `npm install`s two private SDK packages
-  (`@visionarys-io/copresent-sdk`, `@znasllc-io/memql-sdk-core`) from
-  GitHub Packages, so the build needs a token:
 
-  ```bash
-  # a GitHub token with read:packages, SSO-authorized for BOTH the
-  # znasllc-io and visionarys-io orgs. A classic PAT works, or reuse
-  # your gh login if it has the scope:
-  export MEMQL_PACKAGES_TOKEN=$(gh auth token)
-  ```
-
-  Export it before `make up` / `make dev` so the SPA image build can
-  resolve those packages (the backend nodes come up regardless). Full
-  details + how to mint the token: `docs/sdk-dependency.md` in the
-  CoPresent repo.
+The engine's local overlay is engine-only: a downstream product's SPA
+and its carrier image are built and deployed from their own repos, not
+from this one.
 
 ---
 
@@ -58,12 +46,12 @@ make up SERVERS=2 AGENTS=1
 make scale N=2
 ```
 
-This brings up Postgres + TimescaleDB, the
-bff/cognition/agent/planner/voice/workbench mesh nodes, identity, the
-copresent SPA, and LiveKit -- each pod carrying a unique `MEMQL_NODE_ID`
-via `fieldRef: metadata.name`, exactly as in staging. The 2-replica
-topology is the only one that reproduces cluster-only bugs (cross-node
-delivery, replica fan-out, node lifecycle).
+This brings up Postgres + TimescaleDB, identity, mcp, and the
+cognition/agent/planner/voice/workbench mesh nodes -- each pod carrying
+a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name`, exactly as in
+staging. The 2-replica topology is the only one that reproduces
+cluster-only bugs (cross-node delivery, replica fan-out, node
+lifecycle).
 
 > Runbook + port-forward reference:
 > [docs/public/operate/reproduce-staging-locally.md](../operate/reproduce-staging-locally.md).
@@ -85,7 +73,7 @@ bootstrap-envelope-vs-concept-storage breakdown.
 ### 3. Watch logs
 
 ```bash
-kubectl logs -n memql deploy/bff -f
+kubectl logs -n memql deploy/mcp -f
 ```
 
 ---
@@ -114,11 +102,14 @@ k3d world -- each service is reached with its own port-forward:
 
 | Service | Port-forward | Notes |
 |---------|--------------|-------|
-| **App SPA** | `svc/copresent 8080:8080` | Built bundle (needs `MEMQL_PACKAGES_TOKEN` at image-build time) |
 | **Identity service** | `svc/identity 8085:8085` | Magic-link auth, OAuth, JWKS, /admin, /pair/* |
-| **BFF (gRPC)** | `svc/bff 50051:50051` | gRPC for cockpit / SDKs; HTTP/WS browser bridge |
-| **LiveKit** | `svc/livekit 7880:7880` | Voice/video transport |
+| **Engine gRPC head (mcp)** | `svc/mcp 50051:50051` | gRPC for cockpit / SDKs |
 | **PostgreSQL** | `svc/postgres 5432:5432` | `make db` opens a psql shell |
+
+A downstream product's SPA and bff carrier are not part of the engine
+overlay; they ship from their own repos. The local voice lane rides a
+LiveKit Cloud project (Epic #2184), so there is no in-cluster LiveKit
+Service to forward.
 
 **Database credentials:** `memql / memql_dev` on database `memql`.
 
@@ -199,7 +190,7 @@ first time.
 
 ```bash
 make dev                  # rebuild + import + roll all app nodes
-make dev NODE=bff         # rebuild + roll a single node (faster)
+make dev NODE=cognition   # rebuild + roll a single node (faster)
 ```
 
 Each node runs a build-tagged binary (`-tags voice`, `-tags cognition`,
@@ -217,7 +208,7 @@ node architecture.
 The Cockpit ships from its own repo,
 [`github.com/znasllc-io/memql-cockpit`](https://github.com/znasllc-io/memql-cockpit);
 build and product docs live there. It connects to this cluster over
-gRPC (`bff.<domain>`).
+gRPC (locally via the `mcp` port-forward, `svc/mcp 50051:50051`).
 
 ---
 
@@ -236,7 +227,7 @@ gRPC (`bff.<domain>`).
 ### Port already in use
 
 ```bash
-lsof -i :50051  # BFF gRPC port-forward
+lsof -i :50051  # engine gRPC (mcp) port-forward
 lsof -i :8085   # identity port-forward
 lsof -i :5432   # PostgreSQL port-forward
 ```
@@ -245,7 +236,7 @@ lsof -i :5432   # PostgreSQL port-forward
 
 ```bash
 kubectl get pods -n memql                                            # are pods Running?
-kubectl logs -n memql deploy/bff -f                                  # check node logs
+kubectl logs -n memql deploy/mcp -f                                  # check node logs
 ```
 
 ### Database connection errors
@@ -257,7 +248,7 @@ psql postgres://memql:memql_dev@localhost:5432/memql   # needs the postgres port
 
 ### Concepts not loading
 
-If `bff` logs say "no concepts loaded" or refuse to start, check for
+If a node's logs say "no concepts loaded" or the node refuses to start, check for
 schema-validation errors: a concept declaring a reserved payload field
 (`createdBy`, `partition`, `id`, ...) bricks the whole loader. See
 [memql-authoring-rules.md #19](../language/authoring-rules.md#19-reserved-intrinsics-do-not-redeclare-id--createdby--createdat--partition).
@@ -266,8 +257,9 @@ schema-validation errors: a concept declaring a reserved payload field
 
 ## Tips
 
-- The local k3d cluster runs voice via the in-cluster LiveKit Deployment
-  (`deploy/k8s/base/livekit.yaml`); the in-app voice path works locally,
-  while avatar VIDEO remains staging-only.
+- The local k3d cluster runs voice against a LiveKit Cloud project
+  (Epic #2184); export `LIVEKIT_URL` / `LIVEKIT_API_KEY` /
+  `LIVEKIT_API_SECRET` before `make up` to enable the lane. Avatar
+  VIDEO remains staging-only.
 - For ad-hoc DB inspection use `make db` (opens a psql shell over the
   postgres port-forward), or point any client at the forwarded `:5432`.

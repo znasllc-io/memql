@@ -81,7 +81,7 @@ a pack. A pack extends cognition's *behavior* without editing it:
 | (internal, not a pack hook) Cross-node turn dispatch | Go iface wired by `app/` | `integrations/cognition/agent_forward.go:21` `AgentForwarder`, installed via `SetAgentForwarder` | n/a -- first-party transport |
 
 **Verdict (cognition): event/automation + routing + DSL prompts are
-sufficient.** Every product behavior CoPresent injects (who answers,
+sufficient.** Every behavior the product pack injects (who answers,
 how, when a plan spawns, what an agent can do) is expressible as a
 graph write + an automation + a prompt/agent record. No synchronous
 in-process pack hook is missing.

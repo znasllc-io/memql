@@ -93,7 +93,7 @@ in-house identity service:
 
 ### Overview
 
-Groups represent organizational units inside CoPresent. They
+Groups represent organizational units inside the product. They
 provide scoped access control:
 - Users belong to one or more groups
 - Agents are assigned to groups
@@ -110,7 +110,7 @@ Groups are stored as `v1:identity:group` concepts with:
 
 ### Group Membership
 
-Group membership is managed manually from the CoPresent Settings
+Group membership is managed manually from the product's Settings
 panel today. A future SCIM-style sync job can populate `externalId`
 + `sourceRef` and own its own rows without disturbing manual ones.
 

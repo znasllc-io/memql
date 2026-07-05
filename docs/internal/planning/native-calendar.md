@@ -216,8 +216,8 @@ Shared calendars inherit partition access. No separate
 **Per-event privacy escape valve.** An event on a shared calendar
 can set `visibility = private`. Private events are visible only to
 the organizer and explicit attendees, even when the calendar itself
-is shared. Mirrors how `v1:copresent:canvasState` already handles
-per-row privacy.
+is shared. Mirrors how the product pack's `canvasState` concept already
+handles per-row privacy.
 
 Granular delegation use cases (Alice can read but Bob can read+write
 this one calendar) are real but rare; build the dedicated ACL concept
@@ -233,7 +233,7 @@ sufficient.
   `docs/internal/planning/roadmap.md` for the separate concept tree (likely
   `v1:agenda:*`).
 - **Bidirectional sync.** Mirrors are read-only in v1.
-- **Calendar UI placement.** Where Calendar lives in the CoPresent
+- **Calendar UI placement.** Where Calendar lives in the product
   app header (new top-level tile vs nested) is a UX brainstorm, not
   a memQL question.
 - **Slack / Notion / Gmail / Drive sync.** Each is Phase 2 of the
@@ -255,7 +255,7 @@ Real questions but downstream of v1 ship:
 - **Calendar <-> Space optional reference.** A space representing a
   meeting could carry an optional `calendarEventId`. One nullable
   foreign key on `v1:cognition:space`; doesn't change calendar's
-  design. Decide when CoPresent's meeting-space flow lands.
+  design. Decide when the product's meeting-space flow lands.
 - **Time-zone handling.** All `startAt` / `endAt` stored UTC; display
   tz from `v1:identity:user.preferences.timezone`. Worth a smoke
   test that the agent tool respects user tz when interpreting
@@ -288,5 +288,5 @@ Rough sequence:
 6. **External mirror sync (one-way).** First connector likely web
    fetch (for ICS endpoints) -- or punt sync entirely until real
    demand and ship the native surface first.
-7. **End-to-end smoke through CoPresent.** Verify create / list /
-   findFreeTime / cancel / respondToInvite paths.
+7. **End-to-end smoke through the product frontend.** Verify create /
+   list / findFreeTime / cancel / respondToInvite paths.

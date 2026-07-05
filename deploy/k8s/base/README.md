@@ -31,7 +31,6 @@ topology, only the dial-target value differs per environment.
 
 | Node | Image | NodeService port | NODE_ADDRESS | PARENT | WORKER_PEERS |
 |------|-------|------------------|--------------|--------|--------------|
-| bff | memql-bff-copresent:0.9.0 | 50058 | bff:50058 | -- | voice=voice:50059,agent=agent:50055,cognition=cognition:50054,planner=planner:50056,workbench=workbench:50060 |
 | cognition | memql:0.9.0 | 50054 | cognition:50054 | bff-active:50058 | agent=agent:50055 |
 | voice | memql:0.9.0 | 50059 | voice:50059 | bff-active:50058 | -- |
 | agent | memql:0.9.0 | 50055 | agent:50055 | bff-active:50058 | workbench=workbench:50060 |
@@ -42,14 +41,12 @@ topology, only the dial-target value differs per environment.
 Every ClusterIP Service exposes the node's NodeService port (5005x) + `8085`
 (http) + `50051` (grpc). `bff` also gets a `LoadBalancer` Service
 (`bff-external`) on 8085 -- the external entry point (maps to
-`app.copresent.ai` later).
+the product front door later).
 
 ## Multi-replica HA ([#551](https://github.com/znasllc-io/memql/issues/551))
 
-**`copresent` (the frontend) runs 2 replicas + a PodDisruptionBudget.** It's
-a stateless SPA/proxy server — no memQL engine, no automation scheduler, no
-mesh — so it scales freely, and the PDB keeps ≥1 serving through node drains
-/ upgrades / rollouts. (`identity` HA is handled separately via its
+**The product frontend + bff manifests moved to the product pack repo**
+(P3, #2429); this base is engine-only. (identity multi-replica rides the
 env-provided signing key, [#550](https://github.com/znasllc-io/memql/issues/550).)
 
 **The engine node-types `cognition`, `voice`, `agent`, `planner`,
@@ -71,11 +68,11 @@ automations could double-fire; both paths are now cluster-singleton:
    `duplicatesPrevented` means events do reach multiple replicas (and we're
    correctly collapsing them); `claimErrors > 0` flags any unguarded window.
 
-**`bff` stays single-replica** until the CoPresent **carrier**
-(`memql-bff-copresent`, sibling repo) re-pins memQL ≥ the version carrying
-these guards — its image doesn't include them yet. **`identity`** HA is
-[#550](https://github.com/znasllc-io/memql/issues/550); **`copresent`** (the
-stateless SPA) is in [#551](https://github.com/znasllc-io/memql/issues/551).
+**The product `bff` replica policy** is the product pack repo's concern
+(its carrier must pin a memQL version carrying these guards before going
+multi-replica). **`identity`** HA is
+[#550](https://github.com/znasllc-io/memql/issues/550); the product SPA's
+replica story is in [#551](https://github.com/znasllc-io/memql/issues/551).
 
 > **Deploy note:** the `replicas: 2` bump is only safe with an image that
 > contains the guards (≥ the #561 version) and after the
@@ -229,7 +226,7 @@ entry (not just pod health) with the repeatable smoke test
 make smoke-staging                                # baseline, read-only
 make smoke-staging SMOKE_EMAIL=me@example.com     # + issue a real magic link
 make smoke-staging MEMQL_SMOKE_TOKEN=mql_pat_xxx  # + run a live authenticated query
-make smoke-staging APP_HOST=app.copresent.ai IDENTITY_HOST=identity.copresent.ai  # smoke prod
+make smoke-staging APP_HOST=<prod app host> IDENTITY_HOST=<prod identity host>  # smoke prod (target lives in the pack now)
 ```
 
 It checks, in order: TLS + DNS for both public hosts (valid Let's Encrypt

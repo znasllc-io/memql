@@ -312,7 +312,10 @@ func SeedRoleCatalog() []SeedRole {
 			},
 			Tools: []string{
 				"workbenchHost",
-				"computer_use_headless",
+				// The hyphenated capability slug (see worker_caps.go); the
+				// prior underscore form never matched the registry and
+				// passed through unexpanded (latent since the slug split).
+				"computer-use-headless",
 			},
 			Keywords: []string{
 				"operate", "run", "execute", "deploy", "configure", "install",

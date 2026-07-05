@@ -26,8 +26,7 @@ back automatically.
 | `bootstrap/` | The one-time Argo CD install (pinned upstream v2.13.3) + `argocd` namespace. NOT GitOps-managed (chicken/egg). |
 | `apps/project.yaml` | `AppProject memql` — restricts the reconciler to THIS repo + the `memql`/`argocd` namespaces. |
 | `apps/root.yaml` | App-of-apps: renders everything under `apps/`, so adding an app is a PR. |
-| `apps/memql.yaml` | The mesh + CoPresent Application; source = `deploy/k8s/overlays/staging`. |
-| `apps/memql-prod.yaml` | The PROD mesh + CoPresent Application; source = `deploy/k8s/overlays/prod`. **Manual-sync** (#2207). |
+| (moved) | The full-stack staging/prod/rollouts Applications moved to the product pack repo at the P3 cutover (#2429); this dir keeps the AppProject + local bootstrap. |
 
 ## Bootstrap (one-time, per cluster)
 
@@ -65,7 +64,7 @@ tag→digest. It is protected by the #615 graceful drain (`maxUnavailable=0` +
 SIGTERM drain) and the live autoscaler (#614), but **watch it**:
 
 ```bash
-# Hold a sustained authenticated WS client against app.staging.copresent.ai here
+# Hold a sustained authenticated WS client against the product front door here
 # (the zero-dropped-streams check) BEFORE triggering the sync.
 argocd app sync memql            # or: kubectl -n argocd patch app memql --type merge -p '{"operation":{"sync":{}}}'
 argocd app wait memql --health

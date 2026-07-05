@@ -236,8 +236,8 @@ spot-rejection writes to.
 
 ## UX surfaces
 
-UI work lives on the CoPresent side (separate brainstorm when we get
-there). For planning purposes:
+UI work lives on the product-frontend side (separate brainstorm when we
+get there). For planning purposes:
 
 1. **Citation spot-rejection chip.** Thumbs-down on the citation chip
    in chat fires a mutation that drops chunk validation and inserts a
@@ -269,7 +269,7 @@ Real questions but downstream of v1 ship:
 
 - **Test-query result rendering.** The confirmation panel needs a UI
   surface to render rows (SQL/memql kinds) and bodies (REST/GraphQL).
-  Small CoPresent-side component.
+  Small product-frontend component.
 - **Spot-rejection volume threshold.** A Document with many
   spot-rejections should at some point auto-de-validate. What is
   "many"? Defer until we see real data.
@@ -299,11 +299,11 @@ Rough sequence; not committed to specific commits yet.
    the `configHash` recompute on edit, and the agent-read filter that
    excludes `status != confirmed` sources.
 5. **Spot-rejection.** `mutationRejectChunk` + `validationEvent`
-   insert. Frontend chip is a CoPresent ticket.
+   insert. Frontend chip is a product-frontend ticket.
 6. **Web fetch + Postgres connectors.** Self-registering plug-ins
    under `integrations/liveknowledge/connectors/` (or whatever the
    connector-kind layout looks like at that point).
 7. **Cold-start prompt directive.** Update `agentReply.tmpl`; verify
    with an end-to-end smoke test.
-8. **End-to-end smoke through CoPresent.** Verify retrieval +
+8. **End-to-end smoke through the product frontend.** Verify retrieval +
    spot-rejection + binding confirmation paths.

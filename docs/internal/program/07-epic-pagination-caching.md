@@ -13,7 +13,7 @@ Stop "pulling the universe." Make pagination the sane default for list queries
 and actually turn on the caching that's already built but dormant. **Session:
 S5. Starts at G1. Produces no gate other epics depend on.**
 
-**Repos:** `memql` (engine + DSL), `memql-bff-copresent`, `copresent`
+**Repos:** `memql` (engine + DSL), the product carrier repo, the product SPA repo
 (frontend), the identity portal, `memql-cockpit`.
 **Prior art (build on, do NOT restart):**
 `docs/internal/planning/cache-audit-phase-0.md`,

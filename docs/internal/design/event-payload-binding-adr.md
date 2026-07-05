@@ -178,7 +178,7 @@ Per the pre-release no-shim policy, once the tree migrates
   is unchanged: it forwards the payload as the target logic's `event` arg and
   declares no args block of its own. A terse automation that wants typed inputs
   graduates to the full form.
-- The copresent pack migrates in the same window (coordinated pack PR, as in
+- The product pack migrates in the same window (coordinated pack PR, as in
   bff#153).
 
 ## Consequences

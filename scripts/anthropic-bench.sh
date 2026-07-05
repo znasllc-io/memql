@@ -126,7 +126,7 @@ function build_body() {
             # Approximates the agent node's prompt shape: long system
             # prompt + injected RAG context + tools + a UI walkthrough goal.
             sys_prompt=$(cat <<'SP'
-You are an AI assistant driving the CoPresent app on the users behalf
+You are an AI assistant driving the product app on the users behalf
 via a takeover ("Control Session"). You have UI primitives:
 uiRequestControl, uiClick, uiType, uiSelect, uiHighlight, uiNarrate,
 uiAskUser, uiPointerTo, uiReadState, uiWaitFor, uiRetry, uiReleaseControl.
@@ -150,7 +150,7 @@ Walkthrough mode hard rules (violating these = failure):
 11. BRING THE SECTION INTO VIEW BEFORE NARRATING ABOUT IT.
 12. CHECK BEFORE YOU ACT. Every toggle chip carries aria-pressed.
 
-OPERATOR MODE: You have the CoPresent Control capability. You drive
+OPERATOR MODE: You have the UI-takeover capability. You drive
 the UI DIRECTLY -- start a Control Session yourself via uiRequestControl
 and drive the flow with the operator primitives.
 

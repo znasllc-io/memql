@@ -224,7 +224,8 @@ kubectl -n memql create secret generic deploy-gate-jwt \
 ```
 
 The identity-side `deploy-gate-jwt-mint` `CronJob`
-(`deploy/rollouts/deploy-gate-jwt.yaml`) re-mints the fallback every 45m with a
+(`deploy-gate-jwt.yaml`, in the product carrier repo's rollouts tree since
+the product deploy estate moved out of this repo) re-mints the fallback every 45m with a
 wide **6h** TTL, so a missed/failed mint can't strand the gate before the next
 run. The token never lives in git and never leaves the cluster.
 

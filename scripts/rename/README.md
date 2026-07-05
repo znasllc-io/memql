@@ -23,7 +23,7 @@ refuses any match that would touch a protected span.
 python3 scripts/rename/si_to_ai.py --root . --group go-internal
 
 # Dry-run everything applicable:
-python3 scripts/rename/si_to_ai.py --root ../copresent
+python3 scripts/rename/si_to_ai.py --root ../<frontend-repo>
 
 # Apply:
 python3 scripts/rename/si_to_ai.py --root . --group proto --apply

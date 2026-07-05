@@ -85,7 +85,7 @@ If you need to construct an ID from outside the model package, call the construc
 
 Each module's root may carry an `arch.yaml` declaring its service identity, descriptions, and explicit cross-service edges that the import graph can't see (gRPC peers, queue handoffs, etc.). Schema lives in `extract/archyaml.go`; a missing file is fine -- the loader defaults to the directory base name and `./...` roots.
 
-memql, memql-bff-copresent, and memql-cockpit each have one at their root. Editing them is the canonical way to change the cockpit's L1/L2 labels and to declare deployment/runtime edges.
+memql, the product carrier repo, and memql-cockpit each have one at their root. Editing them is the canonical way to change the cockpit's L1/L2 labels and to declare deployment/runtime edges.
 
 ---
 

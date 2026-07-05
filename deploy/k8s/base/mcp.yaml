@@ -1,7 +1,7 @@
 # MCP node -- remote Model Context Protocol head (epic memql#1550, child C).
 #
-# Engine-built (BUILD_TAGS=mcp, no CoPresent DSL -- it exposes the memQL engine
-# tool surface, not the CoPresent product DSL). It stands up the standard base
+# Engine-built (BUILD_TAGS=mcp, no product DSL -- it exposes the memQL engine
+# tool surface, not a product pack's DSL). It stands up the standard base
 # surface every node has (MemqlService gRPC + the :8085 HTTP /healthz//readyz/
 # /livez server) PLUS the MCP Streamable HTTP protocol head on :8090
 # (POST/GET/DELETE /mcp), selected by MEMQL_MCP_TRANSPORT=http.
@@ -33,7 +33,7 @@
 #
 # No DB migrations (identity owns the one-time migration). No mesh parent: like
 # identity, the head runs its own in-process engine against the shared DB and
-# does not dial a parent (engine node, no cross-node CoPresent forwarding).
+# does not dial a parent (engine node, no cross-node product forwarding).
 apiVersion: apps/v1
 kind: Deployment
 metadata:

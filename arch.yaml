@@ -29,8 +29,9 @@ description: |
 # calls, queue-mediated handoffs). Auto-derived imports are merged
 # in, so this list only needs the connections that don't show up via
 # `import` alone.
-depends_on:
-  - memql-bff-copresent
+depends_on: []
+  # Downstream product carriers depend on THIS module (not vice versa);
+  # their edges live in their own arch.yaml files.
 
 # Entrypoint functions the (forthcoming) sequence-diagram extractor
 # should walk forward from. Annotated for context only today; once

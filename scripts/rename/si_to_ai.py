@@ -16,7 +16,7 @@ Usage:
   si_to_ai.py --root ../memql --group go-internal
 
   # Dry-run everything applicable to a repo:
-  si_to_ai.py --root ../copresent
+  si_to_ai.py --root ../<frontend-repo>
 
   # Apply (writes files):
   si_to_ai.py --root ../memql --group proto --apply

@@ -57,7 +57,7 @@ queue (Tier 3) regardless.
 These are the reasons this is a spike, not a drop-in:
 
 1. **`go.work` multi-module workspace.** `go.work` uses `./memql`,
-   `./memql-cockpit`, `./memql-bff-copresent`. Bazel/Bzlmod resolves Go
+   `./memql-cockpit`, and the product carrier repo. Bazel/Bzlmod resolves Go
    deps via `go.mod` per module + `use_repo(go_deps, ...)`. The spike
    should scope to the `memql` module first (the bulk of CI), not all
    three at once.

@@ -13,7 +13,7 @@ owner: znas
 **Author:** Platform/Staff (ZNAS LLC)
 **Date:** 2026-06-02
 **Supersedes:** the imperative `scripts/deploy/aks-deploy.sh` flow (kept until Phase 3 cuts over)
-**Scope:** memQL engine mesh (6 node-types) + the CoPresent carrier (`memql-bff-copresent`) + the CoPresent SPA, on AKS `aks-memql-staging`, proven in staging ahead of a prod cutover.
+**Scope:** memQL engine mesh (6 node-types) + the downstream product carrier + the product SPA, on AKS `aks-memql-staging`, proven in staging ahead of a prod cutover.
 
 ---
 
@@ -103,8 +103,8 @@ blue/green BFF code (**#616/#675**, merged).
 | Component | Repo | Build |
 |---|---|---|
 | `memql-identity`, `memql-agent`, `memql-cognition`, `memql-planner`, `memql-voice`, `memql-workbench` | `znasllc-io/memql` | per-node `BUILD_TAGS` off the root `Dockerfile` (voice is the CGO exception) |
-| `memql-bff-copresent` (carrier) | `visionarys-io/memql-bff-copresent` | built against a pinned engine version |
-| `copresent` (SPA) | `visionarys-io/copresent` | `docker buildx` with `node_auth_token` + `VITE_*` bootstrap args |
+| the product carrier (bff) | the product org's carrier repo | built against a pinned engine version |
+| the product SPA | the product org's SPA repo | `docker buildx` with `node_auth_token` + `VITE_*` bootstrap args |
 
 A **release** is the set of 8 digests that were validated together. The lockfile
 (§5) is the atomic unit; promotion moves a lockfile, never a tag.
@@ -243,8 +243,8 @@ components:
   memql-planner:    { repo: memql,            digest: sha256:... }
   memql-voice:      { repo: memql,            digest: sha256:... }
   memql-workbench:  { repo: memql,            digest: sha256:... }
-  memql-bff-copresent: { repo: bff,  digest: sha256:..., builtAgainstEngine: 0.10.0 }
-  copresent:        { repo: copresent, digest: sha256:..., builtAgainstEngine: 0.10.0 }
+  product-carrier:  { repo: carrier,  digest: sha256:..., builtAgainstEngine: 0.10.0 }
+  product-spa:      { repo: spa,      digest: sha256:..., builtAgainstEngine: 0.10.0 }
 ```
 
 - **Assembly:** each repo's CI publishes its digest; an assembly workflow opens

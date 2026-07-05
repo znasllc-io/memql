@@ -37,8 +37,8 @@ A cluster runs:
 
 CLI clients (`memql-cockpit`, custom tooling) authenticate against
 the identity binary directly using `mql_pat_<...>` PATs. Browser
-clients (CoPresent, the identity web app itself) authenticate via
-magic link, then carry the resulting access JWT to bff/voice/etc.
+clients (the product SPA, the identity web app itself) authenticate
+via magic link, then carry the resulting access JWT to bff/voice/etc.
 
 ### Browser-side routing of identity XHR
 
@@ -55,9 +55,8 @@ intermittently with "TypeError: Load failed" / "Could not connect
 to the server" -- HTTP/2 connection coalescing biting on
 cookie-bound XHR-with-credentials. Routing the four XHR endpoints
 through the SPA's own origin sidesteps the entire class of
-issues. The dev cluster's nginx template
-(`docker/nginx/templates/default.conf.template`) has explicit
-`location =` blocks for each path; production setups should
+issues. A front-door nginx should carry explicit `location =`
+blocks for each of the four paths; production setups should
 mirror the same routing.
 
 ## Required environment variables
@@ -246,7 +245,8 @@ secret.
 
 ### Staging DB reset stays auth-coherent (#1522)
 
-`make staging-db-reset` (`scripts/deploy/staging-db-reset.sh`) wipes the
+The staging DB reset (`staging-db-reset.sh`, owned by the product pack's
+deploy estate since the deploy/release tooling moved there) wipes the
 staging database back to an empty schema. A DB wipe used to leave auth
 HALF-BROKEN: every `v1:identity:authSession` row and every mesh
 node-token grant lives in the DB, so the wipe invalidated them all, and
@@ -269,9 +269,9 @@ NOT have to do anything by hand afterward:
 The reset brings **identity up FIRST** (waited Available) so the JWKS
 issuer is serving before any mesh node bootstraps, then restores the rest
 of the workloads. Finally it **verifies** identity is Available and
-probes the in-cluster JWKS document. Confirm end-to-end with
-`make smoke-staging` (checks JWKS + the login surface over the public
-front door). No manual reseal or mesh roll is required.
+probes the in-cluster JWKS document. Confirm end-to-end with the
+pack's staging smoke target (checks JWKS + the login surface over the
+public front door). No manual reseal or mesh roll is required.
 
 ## Dev quick-start
 

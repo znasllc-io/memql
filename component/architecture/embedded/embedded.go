@@ -34,7 +34,11 @@ import (
 	"github.com/znasllc-io/memql/component/architecture/model"
 )
 
-//go:generate go run ../../../cmd/memql-arch --root ../../../.. --out topology.model.json --calls
+// The model root is THIS repo (engine-only): the engine binary must not
+// embed sibling product repos' topology (engine/product decoupling,
+// memql#2428). A product pack contributes its own model to the cockpit's
+// drill-down via its own arch pass -- see memql#2432.
+//go:generate go run ../../../cmd/memql-arch --root ../../.. --out topology.model.json --calls
 
 //go:embed topology.model.json
 var ModelJSON []byte

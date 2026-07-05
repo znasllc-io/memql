@@ -92,5 +92,5 @@ safety. These are validated at startup against the loaded concept registry.
 
 `GET /api/concepts` returns all registered concepts with version, domain, entity,
 description, and type metadata. Also includes available base topics and system topics.
-Client SDKs and consumer-side codegen (e.g. the CoPresent frontend) build their typed
+Client SDKs and consumer-side codegen (e.g. a product frontend) build their typed
 concept catalogs from this endpoint.

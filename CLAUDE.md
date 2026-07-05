@@ -134,7 +134,7 @@ memQL/
 - [Node Identifier Conventions](docs/public/concepts/identifiers.md) -- canonical id format, who composes it, anti-patterns
 - [MemQL Authoring Rules & Gotchas](docs/public/language/authoring-rules.md) -- read before writing `.memql` files
 - [LLM cost control (defense in depth)](docs/public/ai/llm-cost-control.md) -- the layered guardrails (kill-switch, rate ceiling, automation budget, loop caps) that make a runaway spend loop structurally impossible; every `MEMQL_LLM_*` / budget env var + how to repro safely. Read before touching `ai_guard.go`, an LLM loop, or an automation that drives model calls.
-- [Tool ↔ Knowledge Domain Pattern](docs/public/concepts/tool-knowledge-domain-pattern.md) -- when a capability has operational knowledge (CoPresent Control, Computer Use, etc.), put it in a knowledge domain that the tool requires, not in the agent prompt template. Read before adding capability-bundled documentation.
+- [Tool ↔ Knowledge Domain Pattern](docs/public/concepts/tool-knowledge-domain-pattern.md) -- when a capability has operational knowledge (UI takeover, Computer Use, etc.), put it in a knowledge domain that the tool requires, not in the agent prompt template. Read before adding capability-bundled documentation.
 
 **Tooling:**
 - **memql-cockpit** -- terminal-native IDE and operations console (display name "memQL Cockpit"). Lives in its own repo at `github.com/znasllc-io/memql-cockpit`; consult that repo's CLAUDE.md and Makefile.
@@ -207,9 +207,9 @@ Where a container image is built depends ONLY on where it runs:
   machine. This spans ALL repos in the project:
   - `memql` -> `.github/workflows/build-engine-images.yml` (engine:
     identity / voice / mcp)
-  - `memql-bff-copresent` -> `build-carrier-images.yml` (carrier-base + bff +
-    cognition / agent / planner / workbench)
-  - `copresent` (the frontend/SPA) -> `build-spa-image.yml`
+  - the product carrier repo -> its `build-carrier-images.yml` (carrier-base
+    + bff + cognition / agent / planner / workbench)
+  - the product SPA repo -> its `build-spa-image.yml`
   Each is `workflow_dispatch` on `main` with a `version` input; tags are
   immutable; the build server is the source of truth for deployable images
   (reproducible, native linux/amd64, provenance, no dev-laptop drift).
@@ -220,7 +220,7 @@ superseded by the build server. A release = dispatch the three build
 workflows at one engine ref -> assemble `releases/<ver>.yaml`
 (`scripts/release/assemble-lockfile.sh`, digests resolved from ACR by tag) ->
 pin `deploy/k8s/overlays/<env>` -> merge -> ArgoCD reconciles. See
-[docs/public/operate/deployment-strategy.md](docs/public/operate/deployment-strategy.md).
+the product pack repo's docs/operate/deployment-strategy.md.
 
 ---
 
@@ -230,7 +230,7 @@ memQL uses a single long-lived branch: `main`. Core engine, wire
 protocol, and product-specific DSL (concepts, queries, mutations,
 shapes, automations, tools, prompts under `dsl/cognition/concepts.memql`,
 `dsl/cognition/tools/`, etc.) all live here. A separate
-`bff/copresent` branch was retired on 2026-04-20 once the dual-branch
+product-pack branch was retired on 2026-04-20 once the dual-branch
 overhead stopped paying for itself.
 
 **Rules of engagement:**
@@ -240,7 +240,7 @@ overhead stopped paying for itself.
    main is fine.
 2. **Pre-release -- no backwards-compat shims or deprecation windows.**
    When a contract changes, fix both memQL and the consumer (typically
-   CoPresent) at once and delete what is no longer needed. Do not add
+   the product pack/SPA) at once and delete what is no longer needed. Do not add
    legacy adapters, fallback code paths, or "keep working while we
    migrate" layers.
 3. **Stage files by explicit path** (`git add <file>`) -- never
@@ -432,7 +432,7 @@ carrier-built set MUST be identical in every environment (local, staging,
 prod).
 
 **Build tag reference:** [docs/public/build/build-tags.md](docs/public/build/build-tags.md)
-**Local cluster (staging parity -- THE blessed local topology, memql#2061 / Epic 0):** `make up` (k3d + ArgoCD + the local overlay at `deploy/k8s/overlays/local` + seeded secrets); `make dev [NODE=<type>]` rebuilds an image, imports it into k3d, and rolls the Deployment after Go/MemQL source edits; `make down` tears it down. The cluster mirrors staging along the **mesh-delivery path** (memql#1212) by running the same k8s manifests and ArgoCD reconciliation as AKS: scale to 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench) with `make up SERVERS=2` + `make scale N=2`, each pod carrying a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name` exactly as in staging. The cluster is reached via kubectl port-forwards (identity `:8085`, livekit `:7880`, postgres `:5432`; the engine gRPC head is the `mcp` node on demand: `kubectl port-forward -n memql svc/mcp 50051:50051`) -- there is no nginx front door or `*.local.znas.io` subdomain. The CoPresent SPA and the `bff` carrier are NOT part of the engine repo's local overlay (#2204); they are built from their own sibling repos. `make status` prints the per-pod node ids (parity litmus). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle. See the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
+**Local cluster (staging parity -- THE blessed local topology, memql#2061 / Epic 0):** `make up` (k3d + ArgoCD + the local overlay at `deploy/k8s/overlays/local` + seeded secrets); `make dev [NODE=<type>]` rebuilds an image, imports it into k3d, and rolls the Deployment after Go/MemQL source edits; `make down` tears it down. The cluster mirrors staging along the **mesh-delivery path** (memql#1212) by running the same k8s manifests and ArgoCD reconciliation as AKS: scale to 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench) with `make up SERVERS=2` + `make scale N=2`, each pod carrying a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name` exactly as in staging. The cluster is reached via kubectl port-forwards (identity `:8085`, livekit `:7880`, postgres `:5432`; the engine gRPC head is the `mcp` node on demand: `kubectl port-forward -n memql svc/mcp 50051:50051`) -- there is no nginx front door or `*.local.znas.io` subdomain. The product SPA and the `bff` carrier are NOT part of the engine repo's local overlay (#2204); they layer on from their own repos via the downstream-stack contract. `make status` prints the per-pod node ids (parity litmus). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle. See the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
 **Previous Compose-based local stack -- RETIRED (memql#2068 / #2088):** the old cluster compose file, the single-node `full.yml`, and the `nemoclaw` overlay are fully removed. The k3d + ArgoCD cluster above is the only supported local run path; a single-node stack structurally cannot reproduce the resilient-mesh class of bugs.
 
 #### Client-tool relay (agent → browser, across nodes)
@@ -457,7 +457,7 @@ this via the graph event bus:
    `AgentForwarder.ForwardContinuation` so the agent's
    service-scoped waiter fires and the parked tool loop returns.
 
-Shipped; the relay lives in `integrations/cognition/client_tool_relay.go`. The three consumer bridges on the CoPresent side (`OperatorClientToolBridge`, `ClientToolRelayBridge`, `DelegateTakeoverBridge`) are mounted on `DashboardPage` and ride the same protocol.
+Shipped; the relay lives in `integrations/cognition/client_tool_relay.go`. The product SPA mounts its consumer bridges (operator client-tool, relay, delegate-takeover) on its main page and rides the same protocol.
 
 ### Component Bus (Channel-Based Communication)
 
@@ -563,7 +563,7 @@ stream `MemqlService.Stream`:
 - `AiSpeechMsg` / `AiSpeechResult` -- text-to-speech
 - `AiTranscribeMsg` / `AiTranscribeResult` -- speech-to-text (batch)
 - `AiTranscribeStreamStart` / `Chunk` / `End` -> `AiTranscribeStreamDelta` / `Complete` -- real-time streaming transcription
-- `AiSuggestMsg` / `AiSuggestResult` -- carries `domain` ∈ {spaces, spaceTitle, agents, groups, groupDescription, agentCardSummary, spaceCardSummary, groupCardSummary, knowledge}. `spaceTitle` is the lightweight purpose -> title path used by Create Space; `groupDescription` is its mirror (name -> one-line description) used by Create Group. The rich `spaces` / `agents` / `groups` domains return full payloads (description + suggested members + roles). The three `*CardSummary` domains generate the LLM body that lands on the agent / space / group canvas-creation cards. `knowledge` powers the CoPresent KnowledgeModal's domain picker.
+- `AiSuggestMsg` / `AiSuggestResult` -- carries `domain` ∈ {spaces, spaceTitle, agents, groups, groupDescription, agentCardSummary, spaceCardSummary, groupCardSummary, knowledge}. `spaceTitle` is the lightweight purpose -> title path used by Create Space; `groupDescription` is its mirror (name -> one-line description) used by Create Group. The rich `spaces` / `agents` / `groups` domains return full payloads (description + suggested members + roles). The three `*CardSummary` domains generate the LLM body that lands on the agent / space / group canvas-creation cards. `knowledge` powers the product SPA's knowledge-domain picker.
 
 Cross-node proxying (BFF -> Voice, BFF -> Agent, etc.) rides
 `AiForwardRequest` / `AiForwardResponse` on `NodeService.Stream`.
@@ -693,7 +693,7 @@ baritone / ...) on `providerConfig.voice.voiceId`, plus a
 and provider-agnostic; the cognition handler resolves canonical ->
 provider voice id at TTS-publish time via the active
 `MEMQL_POLYPHON_VOICE_PROVIDER`. Voice is auto-assigned at agent creation
-(see CreateAgentModal on the CoPresent side) and never edited by
+(the product SPA's create-agent modal) and never edited by
 the user. Two DSL builtins expose the catalog: `voicePickForGender`
 + `voiceResolve`. The General Assistant is hardcoded to canonical
 "alto" (female); specialists pick from whichever voices are still
@@ -763,7 +763,7 @@ same Postgres advisory-lock gate as the utterance dispatch path
 (`tryDispatch`) but keyed on (space, agent) under a distinct lock
 class -- so in a 2-replica deployment exactly one replica posts the
 greeting instead of both. The greeting directive is "familiar" by
-default for ALL agents -- every agent in CoPresent is one the user
+default for ALL agents -- every agent in the product is one the user
 created and named themselves, so the directive forbids the
 "Hi, I'm X" opener across the board.
 
@@ -865,7 +865,7 @@ work is the Workbench, documented in the next section.
   dedicated user via `policy.shell.run_as_user`. Prometheus
   metrics endpoint at `127.0.0.1:9100/metrics` (loopback-only,
   no auth).
-- **Frontend:** `?panel=workers` in copresent shows the
+- **Frontend:** `?panel=workers` in the product SPA shows the
   WorkersListPanel; the floating ComputerUseKillSwitch widget in
   the session chrome flips `computerUseEnabled`.
 - **Install:** `scripts/install/install-{mac,linux}.sh` install
@@ -896,7 +896,7 @@ production cutover).
   directory tree.
 - **Tools:** `workbenchHost` (discriminated by `action`: exec /
   fs_read / fs_write / fs_list / fs_stat / http_fetch). Lives in
-  `dsl/copresent/tools.memql`; the wire path goes through the
+  the pack's tools file; the wire path goes through the
   `workbenchDispatchHost` builtin in `dsl/workbench/builtins.memql`
   to `integration.workbench.dispatchHost`.
 - **Per-Plan workspace:** filesystem state lives under
@@ -925,7 +925,7 @@ production cutover).
     `MEMQL_WORKER_PEERS=workbench=<addr>` for the dialer. See
     `docs/internal/ops/workbench-production.md`.
 - **Routing preference:** the agent's prompt template
-  (`dsl/copresent/prompts/agentReply.tmpl`) and the workbench
+  (the pack's agent-reply template) and the workbench
   knowledge domain (5 chunks in
   `integrations/knowledge/seed.go`) instruct the agent to prefer
   workbench over computer-use whenever both are available, and
@@ -1211,7 +1211,7 @@ SQL or evaluate against the auth envelope.
 > the `EvaluatePolicyMsg` + `EvaluatePolicyResult` proto messages (oneof
 > 70 / 110, now `reserved`) / the TS `evaluatePolicy` helper are gone.
 > Verified end-to-end: zero `func (Policy)` constructs in the tree and
-> zero `EvaluatePolicy` callers across copresent, the bff, cockpit, and
+> zero `EvaluatePolicy` callers across the product SPA, the bff, cockpit, and
 > the SDK.
 
 ## Key Concepts
@@ -1695,7 +1695,7 @@ Routing + concept ownership are also plug-in-registerable:
 `node.RegisterRoutingRule(...)` for event routing patterns,
 `node.RegisterConceptOwnership(prefix, nodeType)` for which node type
 handles queries against a given concept prefix. Both called from
-`init()` (see `integrations/copresent/routing.go` for an example).
+`init()` (see the product pack's routing registration file for an example).
 
 ### MemQL Sense (Language Intelligence)
 Language service for .memql files, exposed via gRPC on `MemqlService.Stream`:
@@ -1729,7 +1729,7 @@ See [docs/internal/design/auto-generated-diagrams.md](docs/internal/design/auto-
 
 ### Identity Concepts
 Auth + access metadata (dsl/identity/concepts.memql; infrastructure metadata every node loads. `@scope` was retired in #56 -- these no longer carry a scope annotation)
-- `v1:identity:user` -- the person; cluster-wide role (owner / admin / writer / reader); preferences (theme, archive retention, daily-space toggle, voice mode, CoPresent Control settings)
+- `v1:identity:user` -- the person; cluster-wide role (owner / admin / writer / reader); preferences (theme, archive retention, daily-space toggle, voice mode, UI-takeover settings)
 - `v1:identity:identity` -- a credential set owned by a user (magic-link verified email, oauth token, api key/PAT, service account, worker token)
 - `v1:identity:authSession` -- per-token session record (used for revocation)
 - `v1:identity:magiclink` -- single-use magic-link credential (token-hashed)
@@ -1757,103 +1757,16 @@ See [docs/public/operate/auth/access-model.md](docs/public/operate/auth/access-m
 
 ## Feature Notes
 
-### Canvas state (v1)
+### Canvas + Spaces (product-pack features)
 
-The CoPresent canvas (the center surface of every space) is now a
-per-space immutable timeline of `v1:copresent:canvasState` rows. The
-mutable-scene protocol that lived here previously (with the
-`v1:copresent:canvas`, `v1:copresent:canvas:element`,
-`v1:copresent:exhibit`, and `v1:copresent:scene:update` concepts and
-their `presentExhibit` / `dismissExhibit` / `updateScene` mutations)
-has been deleted -- those concepts had zero producers and zero
-consumers and the new model picked one concept over four.
-
-Schema highlights (the `v1:copresent:canvasState` concept body):
-
-- `space` -- target `v1:cognition:space.id` (every viewer of that
-  space gets the row, subject to visibility filtering).
-- `kind` -- `card` | `document` | `dataview` | `graph`. Picks the
-  frontend renderer.
-- `data` -- per-kind shape (named `data` to avoid collision with
-  the reserved `payload` intrinsic; gotcha #19).
-- `visibility` -- `public` (every space participant) | `private`
-  (only `forUserId`; always the space owner under v1 permission
-  rules).
-- `actor` -- `{kind: "agent"|"user"|"system", ...}`. Drives the
-  frontend's CanvasAuthorBadge.
-- `importance` -- `notify` (pings the canvas bell) | `ambient` (lands
-  silently on the timeline). Cognition is the post-hoc authority and
-  can promote / coalesce.
-
-Two paths write canvasState rows:
-
-1. **Tool path** (agent presentations, public visibility): the
-   `canvas.publish` tool. Invoked by agents from inside their tool
-   loop with `kind` + `data` + optional `importance` / `note`.
-2. **Frontend direct mutation path** (owner-private welcome cards):
-   the `createCanvasState` mutation. The CoPresent
-   frontend calls this at the end of every create-modal flow --
-   agent.created (AgentsListPanel), group.created (SettingsListPanel),
-   and space.created (useCreateAndJoinSpace). All three use the same
-   mutation and row shape; the only reason they live on the frontend
-   instead of in automations is that they need to stamp the bare-form
-   space id (matching what `setActiveSpace` leaves behind) and -- for
-   agent / group -- they need active-space context the graph event
-   doesn't carry.
-
-Queries: `canvasStatesForSpace` (public), `privateCanvasStatesForViewer`
-(per-viewer private). Two queries because the memql query parser
-doesn't have an OR operator yet; the frontend merges the streams.
-Shape: `canvasStateFull`.
-
-Full design rationale (frontend + backend): copresent's
-`docs/canvas/v1-plan.md`.
-
-### Spaces (three-state lifecycle + daily spaces)
-
-`v1:cognition:space` carries `status` ∈ {active, saved, archived,
-scheduled} and a `kind` ∈ {regular, daily}.
-
-- **active** -- working space, default state.
-- **saved** -- user manually preserved. Never auto-deletes.
-- **archived** -- hidden from the active list. `archivedAt` +
-  `expiresAt` are stamped at archive time
-  (`archivedAt + User.preferences.archiveRetentionDays`); the
-  `purgeExpiredArchivedSpaces` cron (daily 02:00 UTC) hard-deletes
-  rows whose `expiresAt < now`. The query is a plain expiresAt
-  comparison -- no per-row user lookup at sweep time. Bumping
-  `archiveRetentionDays` from 30 to 60 rescues currently-archived
-  rows because the cron reads expiresAt that was stamped under the
-  current preference.
-- **scheduled** -- future-dated meeting. Untouched by the purge.
-
-`kind=daily` is a per-user singleton provisioned client-side
-(`useDailySpace` on CoPresent), keyed by `(userHash, dailyDateKey)`
-where dateKey is computed in the user's local timezone. Daily spaces
-are private, pinned at the top of the active list, and rolled over
-each day per `User.preferences.dailySpaceRolloverAction`
-(`archive` default, or `save`).
-
-`User.preferences` carries the lifecycle controls: `timezone` (IANA
-name), `archiveRetentionDays` (30 default, 60 picker), and
-`dailySpaceEnabled` toggle. CoPresent Control settings persist server-
-side too: `cursorTweenMs`, `takeoverMode` (clean / dim),
-`interactivePace` (quick / steady / deliberate).
-
-Mutations: `createSpace`, `archiveSpace`, `saveSpace`,
-`restoreSpace`, `deleteSpaceNow`, `createDailySpace`. Queries:
-`activeSpaces`, `savedSpaces`, `archivedSpaces`,
-`expiredArchivedSpaces`, `allArchivedSpacesAcrossUsers`.
-
-**Location (post-#2038):** the `space` concept and ALL of these
-mutations + queries moved OUT of engine core into the CoPresent pack
-(`memql-bff-copresent/dsl/copresent/{mutations,queries}.memql`),
-id-preserving (ids stay `v1:cognition:space*`; names unchanged). The
-pure engine no longer loads the `space` concept, so engine-repo tests
-cannot exercise them -- that coverage lives in the pack repo. The core
-participant/session/utterance mutations that stayed (joinSpaceAsHuman,
-leaveSpace, addAgentToSpace, ...) remain in
-`dsl/cognition/mutations.memql`.
+The canvas timeline (the pack's `canvasState` concept) and the space
+lifecycle (three-state + daily spaces) are PRODUCT features: their
+concepts, mutations, queries, and frontend behavior are owned by the
+product pack and documented in the pack repo's CLAUDE.md. Engine-side,
+only the core participant/session/utterance machinery remains
+(`dsl/cognition/mutations.memql`: joinSpaceAsHuman, leaveSpace,
+addAgentToSpace, ...); pack rows ride the chat-reply delivery substrate
+via `node.RegisterChatReplyConcept`.
 
 ### Invitations (Identity Primitive)
 
@@ -1943,7 +1856,7 @@ Plus expanded existing concepts: `v1:common:knowledgeDomain`
 gains scope (workspace + private per Q21) + ownerId;
 `v1:common:documentChunk` gains documentId + validationStatus.
 
-**Frontend surfaces** (in copresent):
+**Frontend surfaces** (in the product SPA):
 
 - Right-panel views: `?panel=knowledge` (KnowledgeListPanel),
   `?panel=tasks` (TasksListPanel). Header nav has 5 tiles now:

@@ -416,7 +416,7 @@ proto-gen-check:
 
 ## Cut an immutable release image memql:<VERSION> from VERSION + the short
 ## git SHA (znasllc-io/memql#493, epic #491). memQL is the upstream module;
-## the single number CoPresent pins (deploy/backend-version, copresent#140)
+## the single number the product SPA pins (its deploy/backend-version, frontend#140)
 ## is this image tag, not a go.mod require. The X.Y.Z tag is write-once:
 ## pushing over an existing tag is refused without --allow-overwrite.
 ## Implementation lives in scripts/release/release.sh per the function-based

@@ -558,7 +558,7 @@ dsl/common/traits.memql         trait traitIsActiveRecord { ... }
 dsl/cognition/logic.memql       logic logicAutoJoinSI { ... }
 ```
 
-**Why it bites you.** Callers (CoPresent frontend, automations, Go
+**Why it bites you.** Callers (the product frontend, automations, Go
 integration code) name functions as a string. A mixed convention means
 every caller has to guess whether to add a prefix. Pre-rename, the
 frontend hit runtime "function not found" errors because half the

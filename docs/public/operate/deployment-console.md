@@ -27,7 +27,7 @@ bottom and are not duplicated here.
 
 | Surface | Where | Use it when |
 |---------|-------|-------------|
-| **Identity portal -- Deployments** | `https://identity.<env>.copresent.ai/admin/deployments` | You want a full-screen, point-and-click view with confirm dialogs; you are already in the admin portal (users / sessions / audit / JWKS). |
+| **Identity portal -- Deployments** | `https://identity.<env>.example.com/admin/deployments` (your identity host) | You want a full-screen, point-and-click view with confirm dialogs; you are already in the admin portal (users / sessions / audit / JWKS). |
 | **Cockpit Topology** | memQL Cockpit, cluster/Topology view | You are already in the terminal-native ops console watching node health + observability overlays and want deployment state and controls inline. |
 
 Both surfaces call the same owner/admin-gated **deploy-control API**
@@ -61,7 +61,8 @@ toggle (portal) or the per-env rows (cockpit).
 - **Version + digests** -- the deployed release version and the
   per-component image `@sha256:` digests for the 8 components, read
   from the committed env overlay (`deploy/k8s/overlays/<env>`) and the
-  matching release lockfile (`releases/<version>.yaml`:
+  matching release lockfile (`releases/<version>.yaml` in the deploy repo
+  -- the product carrier checkout, `MEMQL_DEPLOY_REPO_ROOT`:
   `engineVersion` / `validatedAt` / `gate`).
 - **Argo CD** -- the `memql` Application's sync status (Synced /
   OutOfSync), health (Healthy / Progressing / Degraded), last sync, and
@@ -138,10 +139,11 @@ are owned by the deployment-v2 runbooks:
 
 - Argo CD break-glass (suspend / resume auto-sync):
   [`deploy/argocd/README.md`](../../../deploy/argocd/README.md)
-- Rollouts promote / abort / watch reference:
-  [`deploy/rollouts/README.md`](../../../deploy/rollouts/README.md)
-- Release lockfile + promotion mechanics:
-  [`releases/README.md`](../../../releases/README.md)
+- Rollouts promote / abort / watch reference: the product carrier repo's
+  `deploy/rollouts/README.md` (pack-owned since the product deploy estate
+  moved out of this repo)
+- Release lockfile + promotion mechanics: the product carrier repo's
+  `releases/README.md`
 - Disaster recovery:
   [`docs/internal/ops/dr-runbook.md`](../../internal/ops/dr-runbook.md)
 

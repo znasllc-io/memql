@@ -327,8 +327,8 @@ the Python voice-agent's `main.py::entrypoint` did, but in Go:
 ### 3c. Where the agent process joins the room
 
 In the **cluster** topology this is the **Voice node** (per the
-CoPresent `CLAUDE.md` cluster map: "BFF forwards to Voice node, which
-runs the streaming STT provider"). The Voice node hosts the
+downstream product repo's `CLAUDE.md` cluster map: "BFF forwards to
+Voice node, which runs the streaming STT provider"). The Voice node hosts the
 `RoomAgent`; it joins the LiveKit room whose name memQL already
 computes as `polyphon-<spaceId>` (`localroom.go`). The trigger is the
 existing `VoiceAgentSessionStart` path -- today it acks the Python

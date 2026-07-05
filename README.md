@@ -323,7 +323,7 @@ memQL runs on Azure Kubernetes Service (AKS). Deploy to staging with
 `make deploy VERSION=X` (`scripts/deploy/aks-deploy.sh`); production
 promotes a validated version.
 
-See [docs/public/operate/deployment-strategy.md](docs/public/operate/deployment-strategy.md) for deploy/topology
+See the product pack repo's docs/operate/deployment-strategy.md for deploy/topology
 (cluster `aks-memql-staging`, ACR `acrmemql.azurecr.io`, Tiger Cloud DB,
 the migration + smoke gates, and the staging → prod promotion flow).
 

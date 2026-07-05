@@ -27,7 +27,7 @@ The framework treats the diagram as a **compiled artifact**: same lifecycle as t
 
 ```
 +--------------------+
-| Go source          | <-- workspace: memql, memql-bff-copresent, memql-cockpit
+| Go source          | <-- workspace: memql, the product pack repo, memql-cockpit
 | arch.yaml per repo |
 +---------+----------+
           | go generate / memql-arch

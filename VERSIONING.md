@@ -44,14 +44,14 @@ The version of a memQL build is the **git tag** it was cut from
 - A release is cut by tagging `main` (`git tag vX.Y.Z`), then
   `make release VERSION=X.Y.Z ...` builds the immutable
   `memql:X.Y.Z` image from that commit. See
-  [docs/public/operate/deployment-strategy.md](docs/public/operate/deployment-strategy.md#release--versioning-semver-tag---immutable-image).
+  docs/public/operate/deployment-strategy.md (see the product pack repo's docs/operate/deployment-strategy.md).
 
 ## Pre-1.0 rules (today)
 
 While we are below `1.0.0`:
 
 - **Minor bumps may change contracts.** A wire/API change lands in
-  memQL and its consumer (typically the CoPresent BFF carrier) at the
+  memQL and its consumer (typically the product's BFF carrier) at the
   same time. No backwards-compat shims, no deprecation windows — fix
   both ends and delete what is no longer needed (see the branch
   workflow notes in [CLAUDE.md](CLAUDE.md)).

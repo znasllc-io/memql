@@ -265,7 +265,7 @@ The MemQL parser (`component/language/parser/parser.go`) is strict: unknown rece
 
 `component/memql/ai_prompts.go` uses Go's `text/template` with an empty `FuncMap` — no custom functions, no dangerous primitives like `call`/`env`. Templates themselves are operator-controlled (in `dsl/**/prompts/`); user data is passed as values, not template syntax. A malicious `.tmpl` loaded via `MEMQL_DSL_PATH` could exfiltrate fields from the data object, but `MEMQL_DSL_PATH` is operator-controlled (see §7.2).
 
-The **BFF-side** prompt templates have their own injection surface (LLM data flowing into user-facing prompts); that's handled in `memql-bff-copresent` #15 and the `[[BEGIN UNTRUSTED * ]]` framing.
+The **BFF-side** prompt templates have their own injection surface (LLM data flowing into user-facing prompts); that's handled in the product carrier repo (its #15) and the `[[BEGIN UNTRUSTED * ]]` framing.
 
 ### 7.4 Path traversal — closed
 

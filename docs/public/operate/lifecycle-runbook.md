@@ -174,10 +174,12 @@ The contract (epic #1259's whole point):
 
 ## 5. Parity-CI gate (green-before-staging-deploy)
 
-`.github/workflows/cluster-e2e.yml` boots the 2-replica **staging-parity**
-cluster and runs the cross-replica delivery gate (`make cluster-e2e` →
+The parity-CI workflow (owned by the product carrier repo, since the parity
+cluster carrier-builds the product images) boots the 2-replica
+**staging-parity** cluster and runs the cross-replica delivery gate. The
+harness itself is engine-side: `make cluster-e2e` →
 `scripts/test/cluster-e2e.sh` → `test/clustere2e`, build-tagged `clustere2e`,
-#1261). The gate asserts the #1259 invariant on two shapes:
+#1261. The gate asserts the #1259 invariant on two shapes:
 
 - **Single-event delivery** (`TestClusterCrossReplicaDelivery`): an utterance
   produced on one bff replica reaches a subscriber anchored on **every** bff
@@ -197,23 +199,23 @@ observable without a live LLM.
 **It gates the DEPLOY path, not the PR merge queue.** A full-cluster boot (~16
 containers, a cold-cache multi-image build, a 10m health wait) is heavy and
 flakier than a unit lane; a required check on `pull_request` would let one slow
-boot wedge the merge queue. So the workflow runs on the **staging-deploy trigger**
-(a `releases/**` lockfile landing on `main`) and on `workflow_dispatch`, and its
-result is the green-before-staging-deploy signal — **not** a branch-protection
-required check on PRs (`ci-required` in `ci.yml` stays the only required PR
-check).
+boot wedge the merge queue. So the workflow runs on the **staging-deploy
+trigger** (a release lockfile landing on the carrier repo's `main`) and on
+`workflow_dispatch`, and its result is the green-before-staging-deploy signal
+— **not** a branch-protection required check on PRs (`ci-required` in `ci.yml`
+stays the only required PR check in this repo).
 
 ### Owner prerequisite — secrets
 
-The parity cluster builds the carrier (`memql-bff-copresent`) and the `copresent`
-SPA from their **private sibling repos**, so the gate needs two
-owner-provisioned secrets. Until they exist, the gate **skips cleanly** (a
-visible `secrets present?` → skip) and never spuriously blocks:
+The parity cluster builds the carrier and the product SPA from their
+**private sibling repos**, so the gate needs two owner-provisioned secrets.
+Until they exist, the gate **skips cleanly** (a visible `secrets present?` →
+skip) and never spuriously blocks:
 
 | Secret | Scope | Used for |
 |---|---|---|
-| `SIBLING_CHECKOUT_TOKEN` | read on `copresent` + `memql-bff-copresent` | `actions/checkout` of the two private siblings into the workspace. |
-| `MEMQL_PACKAGES_TOKEN` | `read:packages` (both scopes) | the copresent SPA image build (the `node_auth_token` compose build secret). |
+| `SIBLING_CHECKOUT_TOKEN` | read on the two product sibling repos | `actions/checkout` of the two private siblings into the workspace. |
+| `MEMQL_PACKAGES_TOKEN` | `read:packages` (both scopes) | the product SPA image build (the `node_auth_token` compose build secret). |
 
 ---
 

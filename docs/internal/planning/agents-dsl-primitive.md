@@ -24,7 +24,7 @@ Today memQL has eleven DSL primitives — `concept`, `query`, `mutation`,
 `spec` — declared in `.memql` files and loaded by the engine at startup.
 **Agents are not among them.** The `v1:agents:agent` concept (canonical
 since PR #3's namespace cleanup) holds rich agent state, but every agent
-today is created either via the CoPresent UI or by hand-written
+today is created either via the product UI or by hand-written
 provisioning automations (`provisionGeneralAssistantOnUserCreate`).
 
 This adds a twelfth primitive: `agent`. Each `.memql` agent file declares
@@ -276,12 +276,12 @@ own focused work after Phases 0-5 landed:
   `integrations/agent/streaming.go`.
 - **Retire `provisionGeneralAssistantOnUserCreate`.** The automation
   is referenced by stale comments in this branch but the actual
-  declaration lives on the CoPresent BFF branch. Retire it from THAT
-  branch once row materialization is in place here.
-- **CoPresent UI tools as DSL constructs.** The strawman GA tool
+  declaration lives in the product carrier repo. Retire it from THAT
+  repo once row materialization is in place here.
+- **Product UI tools as DSL constructs.** The strawman GA tool
   list (uiClick, uiNarrate, uiDescribe, respondToUser) requires
-  CoPresent-side `tool` DSL constructs that don't exist in memql core
-  today. When CoPresent grows DSL-declared UI tools, wire them onto
+  pack-side `tool` DSL constructs that don't exist in memql core
+  today. When the product pack grows DSL-declared UI tools, wire them onto
   the GA's `capabilities.tools` (cross-ref will validate cleanly).
 
 ## Verification (per phase)

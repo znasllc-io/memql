@@ -68,7 +68,7 @@ var engineHelpers = map[string]bool{
 }
 
 // crossPackKinds resolves construct names that are CALLED in this repo's tree
-// but DECLARED in a sibling pack (e.g. the CoPresent product DSL mounted at
+// but DECLARED in a sibling pack (e.g. a product DSL tree mounted at
 // runtime via RegisterTree), so they carry no local declaration. mutationCreate
 // CanvasState is the lone such call (dsl/cognition/logic.memql), a product
 // canvasState mutation.
