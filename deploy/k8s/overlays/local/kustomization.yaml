@@ -49,6 +49,7 @@ namespace: memql
 
 resources:
   - front-door.yaml
+  - identity-external.yaml
   - ../../base
   # Local-only infrastructure (absent in base/staging/prod)
   - postgres.yaml
