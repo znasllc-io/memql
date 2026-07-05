@@ -201,7 +201,7 @@ func (Query) noop(_ any) (any, error) { return nil, nil }
 // TestLoad_OrphanLogicFragmentSurfaces locks the #293 fix: a file
 // with a malformed `logic NAME { event: event }` token at file
 // level (the leftover-from-restructure-by-construct shape that
-// triggered memql-bff-copresent#55) must produce a diagnostic
+// triggered bff#55) must produce a diagnostic
 // rather than load silently. Pre-#293 the dslimports.Load
 // fallback unconditionally swallowed any parse error from
 // ParseFileSource so this class of structural noise escaped to

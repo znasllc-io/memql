@@ -1216,13 +1216,13 @@ type ArgsField struct {
 	// MaxLength caps a string's rune count. Zero means unbounded.
 	// Applies to string-typed fields only -- validator rejects the
 	// arg if rune count exceeds the cap. Drives the
-	// memql-bff-copresent#27 free-text caps.
+	// carrier#27 free-text caps.
 	MaxLength int
 	// Pattern is a regex string a value must match. Empty means
 	// no pattern constraint. Applies to string-typed fields only;
 	// the pattern is compiled at load time so an invalid regex
 	// fails loud during DSL parsing, not at validation time.
-	// Drives the memql-bff-copresent#28 ID-format enforcement.
+	// Drives the carrier#28 ID-format enforcement.
 	Pattern string
 	// AdditionalProperties controls whether unknown fields are allowed for object values.
 	AdditionalProperties *bool

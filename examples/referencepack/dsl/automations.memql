@@ -7,7 +7,7 @@
 // event without the core knowing the pack exists.
 //
 // (Originally hooked `v1:cognition:space`, but the space concept + its
-// lifecycle mutations moved out of engine core into the CoPresent pack in
+// lifecycle mutations moved out of engine core into the product pack in
 // #2038. `v1:notes:note` is a still-core concept whose `createNote` mutation
 // stamps `ownerUserId: actor.userId`, so it demonstrates the exact same
 // pack-hooks-a-core-event seam against a concept the engine still owns. #2342)

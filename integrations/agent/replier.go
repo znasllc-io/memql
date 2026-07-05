@@ -416,13 +416,13 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// up-front retrieval puts app-knowledge in its prompt.
 	//
 	// Server-side contract: if the agent has an operator capability
-	// (copresent-takeover / copresent-guide, i.e. operatorEnabled==true),
-	// ALWAYS include `copresent-ui` in the
-	// retrieval domain set -- regardless of what's in the agent's
-	// stored capabilities.domains. The agent can't drive the UI
+	// (a takeover / guide slug, i.e. operatorEnabled==true),
+	// ALWAYS include the registered AppProfile's operator UI knowledge
+	// domains in the retrieval domain set -- regardless of what's in the
+	// agent's stored capabilities.domains. The agent can't drive the UI
 	// competently without app knowledge, and forgetting to tick the
 	// UI domain in the picker shouldn't silently break walkthroughs.
-	// This mirrors the frontend auto-union in CreateAgentModal.
+	// This mirrors the frontend's auto-union in its agent-creation modal.
 	// retrievedChunks captures what RAG returned for this turn so the
 	// streaming-tool-loop's TurnResult can carry it back through to
 	// AgentGenerateTurnComplete -- the frontend "Show details" expander
@@ -463,7 +463,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	if wa, _ := data["workbenchAvailable"].(bool); wa {
 		domains = ensureDomain(domains, "workbench")
 	}
-	// recent-chat auto-attach mirrors the copresent-ui /
+	// recent-chat auto-attach mirrors the operator-UI /
 	// computer-use pattern: tool requires domain, domain doesn't require
 	// tool. Phase 5 of the chat-architecture plan -- every agent that
 	// is dispatching for a non-empty partitionId is acting as a space
@@ -1758,15 +1758,15 @@ func extractReplyText(result any) string {
 
 // toolNamesFromAssistant extracts the flat list of tool names from the
 // prompt data's "assistant.tools" array, expanding capability slugs
-// (like "copresent-takeover" / "copresent-guide") into concrete tool
-// names before returning. Returns nil when absent.
+// (like the product pack's takeover / guide operator slugs) into concrete
+// tool names before returning. Returns nil when absent.
 //
 // Architecture note (2026-04-22): the System-agent-as-singleton-callback
 // pattern was retired. Any agent whose capabilities include an operator
-// slug (copresent-takeover / copresent-guide) drives the UI directly via
+// slug (takeover / guide) drives the UI directly via
 // the operator primitives -- no delegation hop through a special "System"
 // role. The `delegateTakeover` hand-off tool + handler were removed with
-// the CoPresent Control v2 split (copresent#187): the GA holds both
+// the operator-control v2 split (frontend#187): the GA holds both
 // operator bundles directly, so there is nothing to delegate.
 //
 // Also stamps `operatorEnabled: true` on the prompt data map when the
@@ -1940,9 +1940,9 @@ func citeNothing(_ map[string]any, _ string) string {
 }
 
 // appStructureDomainIds is the set of well-known operator/UI knowledge
-// domain ids whose chunks live in a system-owned partition (e.g.
-// `copresent-ui`) separate from the `default` tenant partition where
-// the knowledgeDomain row lives. Reconstructing the canonical id from
+// domain ids whose chunks live in a system-owned partition (e.g. a
+// pack's operator UI domain) separate from the `default` tenant partition
+// where the knowledgeDomain row lives. Reconstructing the canonical id from
 // the CHUNK's partition would point at the wrong partition for the
 // domain row, so the lookup would miss and we'd fall back to a wrong
 // "your knowledge" citation. Short-circuiting these directly to the
@@ -2046,12 +2046,12 @@ func (r *Replier) enrichChunksForRender(ctx context.Context, chunks []map[string
 		//    v1:knowledge:knowledgeBridge instead of knowledgeDomain;
 		//    the lookup would always miss. Source: crossDomainBridge.
 		//
-		// 2. App-structure domain (currently just "copresent-ui")
-		//    seeds its chunks into the `copresent-ui` partition by
-		//    design (system-owned, isolated from tenant data), but
-		//    the knowledgeDomain row itself lives in `default`. The
-		//    canonical-id reconstruction picks up "copresent-ui" as
-		//    the partition, which has no knowledgeDomain row,
+		// 2. App-structure domains (e.g. the product pack's operator
+		//    UI domain) seed their chunks into a partition named after
+		//    the domain id by design (system-owned, isolated from
+		//    tenant data), but the knowledgeDomain row itself lives in
+		//    `default`. The canonical-id reconstruction picks up that
+		//    domain-id partition, which has no knowledgeDomain row,
 		//    triggering domain-lookup-missed warnings on every
 		//    operator turn. Short-circuit + stamp appStructure
 		//    directly so operator citations stay quiet (they're

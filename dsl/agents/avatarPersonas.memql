@@ -2,7 +2,7 @@
 //
 // Operator-curated avatar persona catalog. The SeedMaterializer turns
 // each row into a v1:agents:avatarPersona the Create-Assistant picker
-// lists (copresent#239); the agent's avatarVendor/avatarPersonaId point
+// lists (frontend#239); the agent's avatarVendor/avatarPersonaId point
 // at the chosen entry and the voice-agent resolves it at session start
 // (integrations/avatarvendor/dispatch.go resolveSimliPlan -> Simli faceId,
 // authenticated by MEMQL_SIMLI_API_KEY).
@@ -11,7 +11,7 @@
 // client-audio session hard-caps at ~26-27s -- escalation memql#1236), so
 // the product catalog is exclusively CUSTOM Simli avatars we generate from
 // our own operator images. avatarPersonas ALSO hard-filters
-// vendor=="simli", so only Simli entries can ever surface in copresent.
+// vendor=="simli", so only Simli entries can ever surface in the product.
 // The Anam stock personas (Mia / Liv / Gabriel / Finn) were removed here.
 //
 // HAND-CURATED, and growing as we generate avatars in Simli. personaId is
@@ -19,7 +19,7 @@
 // when adding a persona. (The Anam-era cmd/avatar-mint generator was retired
 // in memql#1242 -- the catalog is hand-curated seeds now.)
 //
-// Source images are served by copresent at /avatars/<name>.png. We have
+// Source images are served by the product SPA at /avatars/<name>.png. We have
 // three operator images: female_0 (live below as Sofia) plus two MALE
 // images whose Simli faces are not yet generated -- add their seeds here
 // once minted.
@@ -40,7 +40,7 @@ seed avatarPersona sofia {
   previewRef: "/avatars/female_0.png"
 }
 
-// Pending (operator images exist in copresent /avatars; Simli faces not yet
+// Pending (operator images exist in the product SPA's /avatars; Simli faces not yet
 // generated): the two male images. Add
 //   seed avatarPersona <name> { vendor: "simli" personaId: "<faceId>" ... }
 // here once their faceIds are minted in Simli.

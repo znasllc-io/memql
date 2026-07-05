@@ -27,7 +27,7 @@ import (
 //  3. node.RegisterRoutingRule(rule) -- cross-node event routing.
 //
 // Runtime (non-compiled) pack loading is explicitly out of scope: packs
-// stay embedded via build tags, like memql-bff-copresent today.
+// stay embedded via build tags, like the carrier repo's pack today.
 //
 // This file owns the namespace-ownership half of pack load-time
 // validation. The contract-version half lives in component/memql.

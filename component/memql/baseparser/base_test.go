@@ -389,7 +389,7 @@ func TestReadIdentWithHyphens(t *testing.T) {
 	}{
 		{"graphic-designer", "graphic-designer", ""},
 		{"music-theory-teacher { ... }", "music-theory-teacher", " { ... }"},
-		{"copresent-voice-agents,", "copresent-voice-agents", ","},
+		{"exampleapp-voice-agents,", "exampleapp-voice-agents", ","},
 		// Plain identifier still works.
 		{"assistant", "assistant", ""},
 		// Underscore + digit mid-name accepted (same as ReadWord).

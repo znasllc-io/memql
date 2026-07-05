@@ -393,7 +393,7 @@ func (i *Integration) promoteWorkerOutput(ctx context.Context, req Request) {
 	// binary-unsafe fs_read. Falls back to a worker-local pointer row when the
 	// content isn't recoverable agent-side (e.g. a binary write) or no GCS
 	// uploader is configured -- in that case the Library still names the origin
-	// machine (memql#789) and the copresent UI shows "lives on <machine>".
+	// machine (memql#789) and the frontend shows "lives on <machine>".
 	content := asString(req.Args["content"])
 	partitionId := i.planPartitionId(mutationCtx, req.PlanId)
 	var attachmentId string

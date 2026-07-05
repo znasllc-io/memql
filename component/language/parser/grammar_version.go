@@ -3,7 +3,7 @@ package parser
 // Grammar-version stamp (S6, memql#2361). Nothing previously recorded which
 // grammar a .memql file, pack, or authored-bundle row was written against, so
 // a construct authored under an older grammar degraded to a boot Warn/Debug
-// instead of a detectable, actionable mismatch (the copresent pack rotted
+// instead of a detectable, actionable mismatch (the product pack rotted
 // exactly this way, bff#153).
 //
 // GrammarVersion is bumped ON EVERY GRAMMAR EPIC -- a change that retires or

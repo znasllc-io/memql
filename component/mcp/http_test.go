@@ -250,8 +250,8 @@ func TestDispatch(t *testing.T) {
 // Metadata document is served UNAUTHENTICATED (200, not 401) and is populated
 // from the configured PublicURL / AuthServerURL.
 func TestHTTPProtectedResourceMetadata(t *testing.T) {
-	const publicURL = "https://mcp.staging.copresent.ai"
-	const authServer = "https://identity.staging.copresent.ai"
+	const publicURL = "https://mcp.staging.example.com"
+	const authServer = "https://identity.staging.example.com"
 	h := newTestHandlerCfg(t, HTTPConfig{
 		BaseConfig:    Config{Tier: TierAuthoring},
 		PublicURL:     publicURL,
@@ -289,7 +289,7 @@ func TestHTTPProtectedResourceMetadata(t *testing.T) {
 // /mcp returns 401 whose WWW-Authenticate header carries the RFC 9728
 // resource_metadata hint pointing at the Protected Resource Metadata URL.
 func TestHTTPUnauthorizedWWWAuthenticate(t *testing.T) {
-	const publicURL = "https://mcp.staging.copresent.ai"
+	const publicURL = "https://mcp.staging.example.com"
 	// Use a stub middleware that exercises the production unauthorizedHandler so
 	// the WWW-Authenticate wiring is tested without a live JWKS verifier.
 	stub := func(next http.Handler) http.Handler {

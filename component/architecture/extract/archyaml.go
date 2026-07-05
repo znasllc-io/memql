@@ -27,7 +27,7 @@ const ArchYAMLFilename = "arch.yaml"
 //	excludes:
 //	  - "./component/legacy/..."
 //	depends_on:
-//	  - bff-copresent       # explicit cross-service edges; auto-derived imports are merged in
+//	  - bff                 # explicit cross-service edges; auto-derived imports are merged in
 //	entrypoints:
 //	  - func: "main.main"   # used by the sequence-diagram extractor (later milestone)
 //	    label: "boot"

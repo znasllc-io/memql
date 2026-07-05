@@ -27,9 +27,9 @@ seed agentRole music-theory-teacher {
 
 // Single-identifier form (legacy, Form A use clause).
 use agents.skill
-seed copresent-voice-agents {
-  id:   "copresent-voice-agents"
-  slug: "copresent-voice-agents"
+seed exampleapp-voice-agents {
+  id:   "exampleapp-voice-agents"
+  slug: "exampleapp-voice-agents"
 }
 
 // Sanity: a plain non-hyphenated seed still extracts.
@@ -42,7 +42,7 @@ seed agentRole assistant {
 	wantNames := []string{
 		"graphic-designer",
 		"music-theory-teacher",
-		"copresent-voice-agents",
+		"exampleapp-voice-agents",
 		"assistant",
 	}
 	if len(slices) != len(wantNames) {

@@ -73,7 +73,7 @@ func TestEvaluateCondition_ExistsPresentField(t *testing.T) {
 }
 
 // exists() must compose with && (normalised to the AND separator) and with a
-// leading ! NOT, the two ways the copresent filters actually use it
+// leading ! NOT, the two ways the product pack's filters actually use it
 // (cascadeSupersession is `payload.validationStatus=="validated" &&
 // exists(payload.supersedesDocumentId)`).
 func TestEvaluateCondition_ExistsComposition(t *testing.T) {

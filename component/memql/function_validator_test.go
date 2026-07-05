@@ -76,7 +76,7 @@ func TestValidateFunctionArgs_RichSchemas(t *testing.T) {
 // TestValidateFunctionArgs_MaxLength pins the @maxLength contract --
 // strings longer than the cap reject; equal-or-under accept; non-
 // string types are ignored (the cap only makes sense for strings).
-// Drives memql-bff-copresent#27 free-text caps.
+// Drives bff#27 free-text caps.
 func TestValidateFunctionArgs_MaxLength(t *testing.T) {
 	v := &functionValidator{}
 	fn := &Function{
@@ -116,7 +116,7 @@ func TestValidateFunctionArgs_MaxLength(t *testing.T) {
 
 // TestValidateFunctionArgs_Pattern pins the @pattern contract --
 // strings matching the compiled regex accept; non-matching reject;
-// nil patternRegex is a no-op. Drives memql-bff-copresent#28 ID
+// nil patternRegex is a no-op. Drives bff#28 ID
 // format enforcement.
 func TestValidateFunctionArgs_Pattern(t *testing.T) {
 	v := &functionValidator{}

@@ -992,7 +992,7 @@ func (r *emptyQueryStepRegistry) Execute(_ context.Context, step *Step, _ *StepC
 //
 //	logic logicSeedWelcomeCurriculum {
 //	  body {
-//	    existing := queryCurriculumBySlug( slug: "copresent.welcome.v1" )
+//	    existing := queryCurriculumBySlug( slug: "..." )
 //	    insertCurriculum := if existing.empty() { mutationCreateCurriculum(...) }
 //	    insertGreeting    := if existing.empty() { mutationCreateSegment(...) }
 //	    return 1
@@ -1016,20 +1016,20 @@ logic logicSeedWelcomeCurriculum {
     event object @required
   }
   body {
-    existing := queryCurriculumBySlug( slug: "copresent.welcome.v1" )
+    existing := queryCurriculumBySlug( slug: "exampleapp.welcome.v1" )
     insertCurriculum := if existing.empty() {
       mutationCreateCurriculum(
-        curriculumId: "v1:curriculum:curriculum:copresent-welcome-v1",
-        slug: "copresent.welcome.v1",
-        name: "Welcome to CoPresent",
+        curriculumId: "v1:curriculum:curriculum:exampleapp-welcome-v1",
+        slug: "exampleapp.welcome.v1",
+        name: "Welcome to ExampleApp",
         version: 1,
         active: true
       )
     }
     insertGreeting := if existing.empty() {
       mutationCreateSegment(
-        segmentId: "v1:curriculum:segment:copresent-welcome-v1-greeting",
-        curriculumId: "v1:curriculum:curriculum:copresent-welcome-v1",
+        segmentId: "v1:curriculum:segment:exampleapp-welcome-v1-greeting",
+        curriculumId: "v1:curriculum:curriculum:exampleapp-welcome-v1",
         slug: "greeting",
         recommendedSteps: "[{\"name\":\"uiHighlight\",\"arguments\":{\"target\":null}}]",
         orderHint: 1

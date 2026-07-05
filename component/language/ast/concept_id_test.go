@@ -19,7 +19,7 @@ func TestValidateAssemblyInputs_HappyPaths(t *testing.T) {
 	}{
 		{sv(1, 0, 0), "cognition", "participant"},
 		{sv(1, 0, 0), "common", "agent"},
-		{sv(1, 0, 0), "copresent", "canvasState"},
+		{sv(1, 0, 0), "exampleapp", "canvasState"},
 		{sv(1, 2, 3), "identity", "auditEvent"},
 		{sv(1, 0, 0), "cluster", "nodeType"},
 		{sv(2, 0, 0), "future", "thing"},
@@ -76,7 +76,7 @@ func TestValidateAssemblyInputs_AcceptsColonNamespace(t *testing.T) {
 	for _, ns := range []string{
 		"cognition:client:tool",
 		"cognition:participant",
-		"copresent:unmet:capability",
+		"exampleapp:unmet:capability",
 	} {
 		if err := ValidateAssemblyInputs(sv(1, 0, 0), ns, "request"); err != nil {
 			t.Errorf("ValidateAssemblyInputs for namespace=%q: unexpected error %v", ns, err)
@@ -92,7 +92,7 @@ func TestAssembleConceptId_ColonNamespace(t *testing.T) {
 	}{
 		{"cognition:client:tool", "request", "v1:cognition:client:tool:request"},
 		{"cognition:participant", "presence", "v1:cognition:participant:presence"},
-		{"copresent:unmet", "capability", "v1:copresent:unmet:capability"},
+		{"exampleapp:unmet", "capability", "v1:exampleapp:unmet:capability"},
 	}
 	for _, c := range cases {
 		got := AssembleConceptId(sv(1, 0, 0), c.ns, c.name)
@@ -123,7 +123,7 @@ func TestAssembleConceptId(t *testing.T) {
 		want      string
 	}{
 		{sv(1, 0, 0), "cognition", "participant", "v1:cognition:participant"},
-		{sv(1, 5, 3), "copresent", "canvasState", "v1:copresent:canvasState"},
+		{sv(1, 5, 3), "exampleapp", "canvasState", "v1:exampleapp:canvasState"},
 		{sv(2, 0, 0), "future", "thing", "v2:future:thing"},
 	}
 	for _, c := range cases {

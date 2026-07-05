@@ -12,10 +12,10 @@ import (
 // on to backfill todos/notes/calendar without disturbing the operator
 // suite a user's assistant already carries.
 func TestUnionPreservingOrder_MergesMissingCanonical(t *testing.T) {
-	existing := []string{"copresent-takeover", "copresent-ui", "workbench-baseline"}
+	existing := []string{"exampleapp-takeover", "exampleapp-ui", "workbench-baseline"}
 	canonical := []string{
-		"copresent-takeover", "copresent-guide", "copresent-ui",
-		"copresent-canvas", "workbench-baseline", "operator-computer-use",
+		"exampleapp-takeover", "exampleapp-guide", "exampleapp-ui",
+		"exampleapp-canvas", "workbench-baseline", "operator-computer-use",
 		"delegation-baseline", "todos", "notes", "calendar",
 	}
 
@@ -27,7 +27,7 @@ func TestUnionPreservingOrder_MergesMissingCanonical(t *testing.T) {
 	}
 	// Only the missing canonical ids are reported as added.
 	wantAdded := []string{
-		"copresent-guide", "copresent-canvas", "operator-computer-use",
+		"exampleapp-guide", "exampleapp-canvas", "operator-computer-use",
 		"delegation-baseline", "todos", "notes", "calendar",
 	}
 	if !reflect.DeepEqual(added, wantAdded) {
@@ -64,7 +64,7 @@ func TestUnionPreservingOrder_Idempotent(t *testing.T) {
 // user (or planner) attached that is NOT in the canonical set survives
 // the merge -- the reconcile is additive, never a clobber.
 func TestUnionPreservingOrder_PreservesUserAddedSkills(t *testing.T) {
-	existing := []string{"copresent-ui", "user-custom-specialty", "todos"}
+	existing := []string{"exampleapp-ui", "user-custom-specialty", "todos"}
 	canonical := []string{"todos", "notes", "calendar"}
 
 	merged, added := unionPreservingOrder(existing, canonical)
@@ -170,8 +170,8 @@ func TestCanonicalAssistantSkillIds_ReadsSeed(t *testing.T) {
 	caps.fields["skillIds"] = seedValue{
 		kind: seedStringArray,
 		stringsV: []string{
-			"copresent-takeover", "copresent-guide", "copresent-ui",
-			"copresent-canvas", "workbench-baseline", "operator-computer-use",
+			"exampleapp-takeover", "exampleapp-guide", "exampleapp-ui",
+			"exampleapp-canvas", "workbench-baseline", "operator-computer-use",
 			"delegation-baseline", "todos", "notes", "calendar",
 		},
 	}
@@ -235,10 +235,10 @@ func TestReconcileCapsTransform_PreservesSiblingFlags(t *testing.T) {
 		"tools":        []any{},
 		"domains":      []any{},
 		"keywords":     []any{},
-		"skillIds":     []any{"copresent-ui", "workbench-baseline"},
+		"skillIds":     []any{"exampleapp-ui", "workbench-baseline"},
 	}
 	canonical := []string{
-		"copresent-ui", "workbench-baseline", "todos", "notes", "calendar",
+		"exampleapp-ui", "workbench-baseline", "todos", "notes", "calendar",
 	}
 
 	// --- the exact transform from reconcileAssistantSkills ---
@@ -265,7 +265,7 @@ func TestReconcileCapsTransform_PreservesSiblingFlags(t *testing.T) {
 	}
 	// skillIds carries the merged set.
 	gotSkills := stringSliceFromAny(newCaps["skillIds"])
-	if !reflect.DeepEqual(gotSkills, []string{"copresent-ui", "workbench-baseline", "todos", "notes", "calendar"}) {
+	if !reflect.DeepEqual(gotSkills, []string{"exampleapp-ui", "workbench-baseline", "todos", "notes", "calendar"}) {
 		t.Errorf("merged skillIds = %v", gotSkills)
 	}
 	// The original caps map is untouched (defensive copy).

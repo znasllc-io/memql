@@ -272,7 +272,7 @@ func (r *spaceContextParseResolver) CanonicalizeIdValue(ctx context.Context, val
 }
 
 func (r *spaceContextParseResolver) Execute(_ context.Context, query string) (*memqlengine.ExecuteResult, error) {
-	// querySpaceMeta moved to the CoPresent pack in B2 (#2038) alongside the
+	// querySpaceMeta moved to the product pack in B2 (#2038) alongside the
 	// `space` concept, so the pure (no-pack) engine under test can no longer
 	// parse it -- the carrier engine that runs this resolver in production
 	// (bff / cognition, both carrier-built) loads the pack and resolves it.

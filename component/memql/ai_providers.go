@@ -1775,8 +1775,8 @@ func (p *openAIStreamProvider) CallChatStreamWithTools(ctx context.Context, mess
 		req.Tools = openAITools
 		req.ToolChoice = "auto"
 		// Let the model emit multiple sequential tool calls in one
-		// response. Critical for multi-step takeovers (e.g. a CoPresent
-		// Operator session = request + navigate + click + click +
+		// response. Critical for multi-step takeovers (e.g. a frontend
+		// UI-operator session = request + navigate + click + click +
 		// release) where forcing one-per-response burns through the
 		// streaming tool-loop iteration budget and the agent stalls
 		// mid-sequence. The server-side loop executes parallel calls

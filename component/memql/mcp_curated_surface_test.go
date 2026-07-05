@@ -28,9 +28,9 @@ func TestMCPCuratedToolSurface(t *testing.T) {
 		// #1597 decision to exclude it. Function/arg introspection materially
 		// improves MCP-client usability, so it is intentionally @mcp-tagged.
 		"describeFunction",
-		// recentChat (the space-chat lens, #1684) moved to the CoPresent pack
-		// (dsl/copresent/tools.memql) in #1976 -- it binds the chat integration's
-		// recentChat builtin, a CoPresent product capability. It is no longer in
+		// recentChat (the space-chat lens, #1684) moved to the product pack
+		// (the pack's tools.memql) in #1976 -- it binds the chat integration's
+		// recentChat builtin, a product capability. It is no longer in
 		// the engine-only core surface this test loads; the carrier build (pack
 		// registered) re-adds it to the curated MCP surface. The pack's own
 		// operator_tools_load_test covers its @mcp tag.

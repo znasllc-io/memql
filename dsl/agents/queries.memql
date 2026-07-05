@@ -2,8 +2,8 @@
 //
 // Agent-namespace queries -- the platform's canonical surface for
 // reading v1:agents:agent + v1:agents:agentAuthorization rows. Every
-// BFF reads through these queries (Cockpit's Agents tab, CoPresent's
-// agent panel, the Planner's dedupe lookup) so adding a new BFF means
+// BFF reads through these queries (Cockpit's Agents tab, the product
+// SPA's agent panel, the Planner's dedupe lookup) so adding a new BFF means
 // "wire it up to call allAgents" -- not "re-implement the agent
 // list query."
 
@@ -254,7 +254,7 @@ query skillChangeEvent skillChangeEventsForAgent {
 }
 
 @enabled
-@description("List active avatar personas in the operator catalog (memql#609). Backs the Create-Assistant persona picker (copresent#239); the SPA filters to the user's selected gender client-side over this small catalog. `vendor` is an OPTIONAL filter -- omit it to list every active persona across vendors; pass vendor=\"simli\" to scope to custom Simli avatars (memql#1708: the predicate was a hardcoded vendor==simli that silently dropped every other vendor's personas from the list, even though by-id reads returned them). Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql.")
+@description("List active avatar personas in the operator catalog (memql#609). Backs the Create-Assistant persona picker (frontend#239); the SPA filters to the user's selected gender client-side over this small catalog. `vendor` is an OPTIONAL filter -- omit it to list every active persona across vendors; pass vendor=\"simli\" to scope to custom Simli avatars (memql#1708: the predicate was a hardcoded vendor==simli that silently dropped every other vendor's personas from the list, even though by-id reads returned them). Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql.")
 @unbounded("avatar persona catalog -- a small bounded set consumed whole")
 query avatarPersona avatarPersonas {
   args {

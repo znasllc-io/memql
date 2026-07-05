@@ -28,7 +28,7 @@
 //       surfacing renders it.
 //
 // Folding answers back: once the user answers the parked questions
-// (the CoPresent intake card calls foldResponsibilityIntakeAnswers
+// (the frontend's intake card calls foldResponsibilityIntakeAnswers
 // directly, OR a follow-up updated-event arrives with intakeResponse set
 // and intakeStatus still 'awaitingAnswers'), the dispatcher re-runs the
 // prompt with the answers folded in and writes the final field set + flips

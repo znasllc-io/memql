@@ -11,5 +11,5 @@
 // Historical:
 //   provisionPlannerAgentOnUserCreate -- replaced by plannerAgent.memql
 //   provisionTrainerAgentOnUserCreate -- replaced by trainerAgent.memql
-//   (provisionAssistantOnUserCreate lived in copresent and is
+//   (provisionAssistantOnUserCreate lived in the product pack and is
 //    deleted there in the companion commit.)

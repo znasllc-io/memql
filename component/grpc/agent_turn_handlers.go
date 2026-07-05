@@ -208,7 +208,7 @@ func (s *streamSession) handleAgentGenerateTurn(envelope *memqlv1.MemqlClientMes
 			// ClientToolCall envelope emitted by this turn (e.g.
 			// uiRequestControl, uiClick) carries it. The frontend
 			// reads ClientToolCall.AgentId to attribute the
-			// CoPresent Control Widget transcript to the actual
+			// remote-control widget's transcript to the actual
 			// driving agent (e.g. "Briar") instead of a generic label.
 			ctx = memqlengine.WithActingAgentId(ctx, id)
 		}

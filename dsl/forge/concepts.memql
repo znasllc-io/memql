@@ -8,9 +8,9 @@
 // Forge is agnostic: one `request` spine serves bugs, features, and (later)
 // HR flows (time off, check-in) -- discriminated by `type`, routed by the
 // submitter's role. It sits ON TOP of the apps it develops (memql,
-// memql-cockpit, copresent, future clients) -- it is a CORE memQL platform
+// memql-cockpit, client apps, future clients) -- it is a CORE memQL platform
 // capability (partition-scoped team-ops backbone, product-agnostic, reused by
-// any cluster), NOT a CoPresent product surface.
+// any cluster), NOT a surface of any one downstream product.
 //
 // Scope/authz (first slice):
 //   - These concepts are PARTITION-scoped (no @scope) -- team-shared within a
@@ -52,19 +52,19 @@
 
 // ---------------------------------------------------------------------------
 // project -- a unit of work context forge operates against. Lets the SAME
-// bundle serve memql, copresent-for-clientA, copresent-for-clientB, etc.
+// bundle serve memql, clientA's app, clientB's app, etc.
 // without baking any one app in. (A project is a row, not a partition: one
 // tenant/company can run many projects; cross-CLIENT isolation is the
 // partition boundary above this.)
 // ---------------------------------------------------------------------------
 @version("1.0.0")
 @namespace("forge")
-@description("A project/codebase forge develops against (e.g. memql, copresent for a given client). Requests are scoped to a project so one agnostic bundle serves many apps. Partition-scoped: team-shared within the tenant.")
+@description("A project/codebase forge develops against (e.g. memql, or a given client's app). Requests are scoped to a project so one agnostic bundle serves many apps. Partition-scoped: team-shared within the tenant.")
 @displayCard(primary="name", secondary="targetApp", tertiary="status", status="status")
 concept project {
-  slug         string  @required  @description("Stable short id, e.g. 'memql', 'copresent-acme'. Unique within the partition.")
+  slug         string  @required  @description("Stable short id, e.g. 'memql', 'acme-app'. Unique within the partition.")
   name         string  @required  @description("Human-readable project name.")
-  targetApp    string  @description("Which app this project develops (memql / memql-cockpit / copresent / ...).")
+  targetApp    string  @description("Which app this project develops (memql / memql-cockpit / a client app / ...).")
   repo         string  @description("Git repository URL or path.")
   description  string  @description("What this project is.")
   status       enum("active", "archived")  @required  @default("active")  @description("active = accepting requests; archived = read-only history.")

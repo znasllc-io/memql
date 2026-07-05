@@ -50,9 +50,9 @@ type ResolveRequest struct {
 	// AgentId, UserId, PromptName are attribution fields written
 	// straight to the v1:router:call row. Leave empty when a given
 	// dimension doesn't apply (e.g. AgentId is empty for a suggest
-	// call). (Epic 3 3.2 #1899: the CoPresent space-attribution field
+	// call). (Epic 3 3.2 #1899: the product's space-attribution field
 	// was dropped -- the tenant scope is Partition; per-space AI-cost
-	// attribution is a CoPresent-pack concern.)
+	// attribution is a product-pack concern.)
 	AgentId    string
 	UserId     string
 	PromptName string

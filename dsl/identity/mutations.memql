@@ -484,7 +484,7 @@ mutate oauthClient createOAuthClient {
 // =================
 //
 // Persists a v1:identity:authSession row at the moment a bearer token is
-// minted -- either by the BFF /auth/exchange handler (CoPresent SPA) or
+// minted -- either by the BFF /auth/exchange handler (the product SPA) or
 // the /auth/callback handler (browser admin UI cookie). Future requests
 // that present the same token are matched against this row by tokenHash;
 // a revokedAt stamp on the row makes the middleware reject the token even
@@ -936,7 +936,7 @@ mutate user createUserOnFirstLogin {
 // ========================
 //
 // Persists a v1:identity:workerPairingCode row at the moment the
-// CoPresent Settings -> Computer Use card mints a code. The plain
+// frontend's Settings -> Computer Use card mints a code. The plain
 // XXXX-XXXX code is shown to the user ONCE and never persisted
 // server-side -- only its SHA-256 hash lands here, keyed for
 // lookup at gRPC stream open time (Authorization: Pair <code>).
@@ -1768,7 +1768,7 @@ mutate identity updateIdentity {
 // because they don't load the user's directory fields (firstName,
 // lastName, phone, primaryRole, gender, birthdate, etc.). Under the
 // old insert() semantics, every theme toggle wiped those fields and
-// dropped the user back to the CoPresent ProfileCompletenessGuard's
+// dropped the user back to the frontend ProfileCompletenessGuard's
 // "Account Setup Required" wall.
 //
 // update() does a SHALLOW merge: top-level fields in the partial

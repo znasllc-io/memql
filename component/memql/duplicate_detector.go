@@ -40,12 +40,12 @@ package memql
 // both Upsert into the FunctionRegistry, so both live in the "functions"
 // group. An `automation x` and a `logic x` do NOT collide (different
 // registries) and are correctly kept in different groups -- this is a
-// real, intentional pattern in the copresent pack (an automation that
+// real, intentional pattern in the product pack (an automation that
 // invokes a same-named logic).
 //
 // This is detection + ERROR visibility only. Strict fail-boot rides in
 // with S2's LoadReport (#2357); the conformance tests
-// (duplicate_detector_test.go here + the copresent pack-load gate) are
+// (duplicate_detector_test.go here + the carrier repo's pack-load gate) are
 // what keep the tree at zero duplicates in CI today.
 
 import (
@@ -102,7 +102,7 @@ var structFormKeywordGroups = map[string]string{
 // DetectDuplicateConstructsInTree is the zero-argument convenience for
 // the live merged tree: it reads dsl.Tree() (embedded core + every
 // RegisterTree'd pack) and runs the detector. Callers in consumer repos
-// (e.g. the copresent pack-load gate) use this so they don't have to
+// (e.g. the carrier repo's pack-load gate) use this so they don't have to
 // import the baseloader package to get the file list.
 func DetectDuplicateConstructsInTree() []DuplicateConstruct {
 	return DetectDuplicateConstructs(baseloader.ReadAll(nil))

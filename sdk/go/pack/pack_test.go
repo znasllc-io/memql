@@ -75,7 +75,7 @@ func TestListDomains(t *testing.T) {
 				ListPackDomainsResult: &memqlv1.ListPackDomainsResult{
 					Domains: []*memqlv1.PackDomain{
 						{Name: "cognition", Origin: "embedded", FileCount: 7},
-						{Name: "copresent", Origin: "pack:copresent", FileCount: 3},
+						{Name: "exampleapp", Origin: "pack:exampleapp", FileCount: 3},
 					},
 				},
 			},
@@ -94,7 +94,7 @@ func TestListDomains(t *testing.T) {
 	if domains[0].Name != "cognition" || domains[0].Origin != "embedded" || domains[0].FileCount != 7 {
 		t.Errorf("domain[0] mismatch: %+v", domains[0])
 	}
-	if domains[1].Origin != "pack:copresent" {
+	if domains[1].Origin != "pack:exampleapp" {
 		t.Errorf("expected pack origin, got %q", domains[1].Origin)
 	}
 }

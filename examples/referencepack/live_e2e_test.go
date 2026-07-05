@@ -13,7 +13,7 @@ package referencepack_test
 //     The scheduler's startup log additionally shows the pack automation
 //     (referencePackGreetOnNoteCreate) subscribing to exactly that topic.
 //     (The pack originally hooked v1:cognition:space; that concept moved to
-//     the CoPresent pack in #2038, so this retargets to the still-core
+//     the product pack in #2038, so this retargets to the still-core
 //     v1:notes:note whose createNote stamps ownerUserId. #2342)
 //   PROOF 2 -- the engine dispatches the pack's builtin
 //     (referencePackComposeGreeting -- the SAME step the automation runs) to the

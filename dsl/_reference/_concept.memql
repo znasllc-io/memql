@@ -158,8 +158,8 @@ concept nestedNs {
 //             its canonical namespace, period. Product code reads the
 //             canonical row directly. Examples: the agent concept after
 //             the 2026-05 namespace cleanup -- no product-specific extension
-//             fields existed, so v1:copresent:agent was retired and
-//             v1:agents:agent became the only home.
+//             fields existed, so the product-namespaced agent concept was
+//             retired and v1:agents:agent became the only home.
 //
 // Corollary: when in doubt, default to "object in the canonical namespace."
 // A future reference concept can always be added later without migrating

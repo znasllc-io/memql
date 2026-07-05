@@ -109,7 +109,7 @@ func TestGateSpecialistAction_MultiStepProceeds(t *testing.T) {
 
 // TestGateSpecialistAction_PublishesApprovalCard is memql#852 Gap 1: a
 // gated action whose Plan has a partitionId must, in addition to parking,
-// publish the plan.specialistApprovalRequested canvas card the copresent
+// publish the plan.specialistApprovalRequested canvas card the frontend's
 // SpecialistApprovalCard renders. The card carries the planId + action so
 // the frontend heading + approve flow target the right Plan.
 func TestGateSpecialistAction_PublishesApprovalCard(t *testing.T) {

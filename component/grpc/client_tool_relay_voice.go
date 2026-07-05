@@ -21,8 +21,8 @@ import (
 // have NO browser of their own on the calling stream -- chiefly the voice
 // agent (#1420).
 //
-// The realtime voice model drives UI-control tools (uiClick / uiType /
-// copresent_control, all ClientExecution=true). The voice agent runs them by
+// The realtime voice model drives UI-control tools (uiClick / uiType / the
+// pack's product-control tool, all ClientExecution=true). The voice agent runs them by
 // sending a CallToolMsg on its locked VoiceAgent* gRPC stream; handleCallTool
 // lands here. The PROBLEM the relay fixes: executeClientTool emits the
 // ClientToolCall back on the CALLING stream (the voice-agent process), which

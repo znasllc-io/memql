@@ -57,8 +57,8 @@ const DefaultStartupReadyTimeout = 30 * time.Second
 // app package supplies when omitted -- the only required fields in
 // practice are Logger, Version, and Overrides.
 //
-// Carrier-binary callers (memql/main.go + future
-// memql-bff-copresent/main.go) populate Logger via
+// Carrier-binary callers (memql/main.go + the carrier repo's
+// main.go) populate Logger via
 // mustCreateServiceLogger (binary-side helper) + Version via the
 // binary's resolveServiceVersion. Subcommand dispatch + the genesis
 // .env override stay caller-side because they're binary-specific +
@@ -152,7 +152,7 @@ type RunConfig struct {
 // Run is the canonical lifecycle entry point for a memql carrier
 // binary. Bundles Build + Start + EmitSystemStartup + WaitForSignal
 // + EmitSystemShutdown + Stop into a single call so consumers
-// (memql/main.go, memql-bff-copresent/main.go) don't need to
+// (memql/main.go, the carrier repo's main.go) don't need to
 // duplicate the 30+ lines of orchestration.
 //
 // Returns nothing; failures during build call cfg.Overrides.FatalWithLogger
@@ -163,7 +163,7 @@ type RunConfig struct {
 // completes.
 //
 // memql#356: extracted from memql/main.go's main() body so the
-// memql-bff-copresent carrier binary can share the same lifecycle
+// carrier repo's binary can share the same lifecycle
 // without duplicating ~30 LOC. Pre-extraction shape preserved
 // bit-exactly so the bff binary's runtime behaviour is identical.
 func Run(cfg RunConfig) {

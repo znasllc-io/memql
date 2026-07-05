@@ -11,7 +11,7 @@ import (
 // (deployment-v2 Phase 4, znasllc-io/memql#702).
 //
 // The components map is keyed by the short component name (no acr
-// prefix); the two cross-repo entries (memql-bff-copresent + copresent)
+// prefix); the two cross-repo entries (the carrier + the product SPA)
 // additionally carry builtAgainstEngine, which the coherence gate
 // requires to equal EngineVersion.
 type Lockfile struct {
@@ -36,7 +36,7 @@ type LockfileComponent struct {
 	// Digest is the pinned "sha256:<64hex>" image authority.
 	Digest string
 	// BuiltAgainstEngine is set only on the cross-repo components
-	// (memql-bff-copresent + copresent); must equal EngineVersion.
+	// (the carrier + the product SPA); must equal EngineVersion.
 	BuiltAgainstEngine string
 }
 

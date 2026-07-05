@@ -98,7 +98,7 @@ concept spawnEvent {
 
 // The trainingResult concept -- the ephemeral per-run summary node returned by
 // the trainAgent + trainAgentRetryStep capability handlers -- MOVED to the
-// CoPresent product pack (memql-bff-copresent/dsl/copresent/concepts.memql)
+// product pack (the carrier repo's pack concepts file)
 // alongside the training integration it belongs to (P2 engine/product
 // decouple). The concept id is UNCHANGED (v1:cluster:trainingResult -- it
 // retains @namespace("cluster"), since the id is assembled from the

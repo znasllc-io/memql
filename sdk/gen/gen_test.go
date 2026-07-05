@@ -173,7 +173,7 @@ func TestEmitTSMethods_Empty(t *testing.T) {
 // package), the generated TS imports QueryClient/types from that single
 // package specifier and augments via `declare module "<pkg>"` -- never
 // the in-package relative "./query.js" form. This is what lets a
-// separate package (e.g. @visionarys-io/copresent-sdk) merge its
+// separate package (e.g. a product pack's own SDK package) merge its
 // generated methods onto the published @znasllc-io/memql-sdk-core
 // QueryClient.
 func TestEmitTSMethods_ImportFromPackage(t *testing.T) {
@@ -232,8 +232,8 @@ func TestTSType_MapsDSLToTSPrimitives(t *testing.T) {
 // path is exercised the moment a real BFF root is composed in.
 func TestCollectConstructs_DescriptionAtFileStart(t *testing.T) {
 	root := t.TempDir()
-	writeFixture(t, root, "board.memql", `@description("Copresent board view")
-query board queryCopresentBoard {
+	writeFixture(t, root, "board.memql", `@description("ExampleApp board view")
+query board queryExampleappBoard {
   args {
     boardId  string  @required
   }
@@ -248,8 +248,8 @@ query board queryCopresentBoard {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 construct, got %d: %+v", len(got), got)
 	}
-	if got[0].Description != "Copresent board view" {
-		t.Errorf("Description = %q, want \"Copresent board view\"", got[0].Description)
+	if got[0].Description != "ExampleApp board view" {
+		t.Errorf("Description = %q, want \"ExampleApp board view\"", got[0].Description)
 	}
 }
 
@@ -356,12 +356,12 @@ mutate space mutationCreateSpace {
 }
 `)
 
-	// BFF root: one query + one logic. The BFF query (queryCopresentBoard)
-	// sorts BEFORE the core queries, proving the merge re-sorts across
-	// roots rather than appending.
-	writeFixture(t, bff, "copresent/board.memql", `
-@description("Copresent board view")
-query board queryCopresentBoard {
+	// BFF root: one query + one logic. The BFF root's query name
+	// sorts against the core query names, proving the merge re-sorts
+	// across roots rather than appending.
+	writeFixture(t, bff, "exampleapp/board.memql", `
+@description("ExampleApp board view")
+query board queryExampleappBoard {
   args {
     boardId  string  @required
   }
@@ -369,7 +369,7 @@ query board queryCopresentBoard {
   shape   boardCard
 }
 
-@description("Provision a copresent board")
+@description("Provision an exampleapp board")
 logic logicProvisionBoard {
   args {
     event  object  @required
@@ -392,7 +392,7 @@ logic logicProvisionBoard {
 		{"mutation", "mutationCreateSpace"},
 		{"query", "queryActiveSpaces"},
 		{"query", "queryArchivedSpaces"},
-		{"query", "queryCopresentBoard"},
+		{"query", "queryExampleappBoard"},
 	}
 	if len(merged) != len(wantOrder) {
 		t.Fatalf("merged count = %d, want %d: %+v", len(merged), len(wantOrder), merged)
@@ -439,7 +439,7 @@ query space querySpaces {
 }
 `)
 	// Same construct name in the BFF root -- collision.
-	writeFixture(t, bff, "copresent/spaces.memql", `
+	writeFixture(t, bff, "exampleapp/spaces.memql", `
 @description("BFF list spaces")
 query space querySpaces {
   args {
@@ -481,9 +481,9 @@ query space queryActiveSpaces {
   shape   spaceCard
 }
 `)
-	writeFixture(t, bff, "copresent/board.memql", `
-@description("Copresent board view")
-query board queryCopresentBoard {
+	writeFixture(t, bff, "exampleapp/board.memql", `
+@description("ExampleApp board view")
+query board queryExampleappBoard {
   args {
     boardId  string  @required
   }
@@ -515,7 +515,7 @@ query board queryCopresentBoard {
 	body := string(queries)
 	for _, want := range []string{
 		"func (qc *QueryClient) QueryActiveSpaces(",
-		"func (qc *QueryClient) QueryCopresentBoard(",
+		"func (qc *QueryClient) QueryExampleappBoard(",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("merged Go output missing %q", want)

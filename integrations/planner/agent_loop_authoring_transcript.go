@@ -16,7 +16,7 @@ package planner
 // render them as a MemQL automation -- one step per call. No LLM: it's
 // transcription, not generation. Reliable, free, and it is genuinely "the MemQL
 // that ran", which is exactly what the task surface (#1162 cockpit / #1187
-// copresent) should show.
+// frontend) should show.
 //
 // The rendered automation is stored as the same v1:authoring:bundle +
 // v1:authoring:construct the viewers already read (linked by sourcePlanId), so

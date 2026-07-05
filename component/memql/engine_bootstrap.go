@@ -391,7 +391,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// by load order (Upsert never checks; Add drops the loser). This walks
 	// the same merged tree the loaders register from (embedded core + every
 	// RegisterTree'd pack, each file once), so on a carrier node the check
-	// spans core + the copresent pack. S5 gave this ERROR visibility; S2
+	// spans core + the product pack. S5 gave this ERROR visibility; S2
 	// makes it a strict-boot signal (below) alongside the skipped
 	// constructs each loader recorded on the report.
 	dups := DetectDuplicateConstructs(baseloader.ReadAll(e.Logger))
@@ -415,7 +415,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// registry duplicate means the embedded core tree or a registered pack
 	// HALF-loaded. A half-loaded pack is worse than one that fails: a
 	// multi-node fleet boots green with arbitrary construct subsets (the
-	// copresent-rot mechanism, bff#153). Refuse to boot so the failure is
+	// pack-rot mechanism, bff#153). Refuse to boot so the failure is
 	// loud + uniform instead of silent + per-node. MEMQL_DSL_ALLOW_SKIPS is
 	// the operator break-glass. NB: durably-promoted authored bundles are
 	// NOT gated here -- their stored source can rot when the grammar moves

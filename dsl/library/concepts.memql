@@ -5,7 +5,7 @@
 // generated outputs (workbench / computer-use / agent), and the
 // structured records the assistant manages (notes, to-dos, calendar
 // events, memories) plus live-data sources. See the Library epic
-// (copresent#296).
+// (frontend#296).
 //
 // `artifact` is the LOCKED design choice (memql#693): a single thin
 // INDEX row that points at an underlying source concept and carries

@@ -15,8 +15,8 @@ import (
 // component/grpc/ai_handlers.go) used to carry a hardcoded `switch domain`
 // listing every suggest surface, with the per-domain prompt/schema/post-process
 // helpers imported directly from component/server/sihttp + integrations/agent.
-// That coupled engine-only core to CoPresent product suggest surfaces (space /
-// agent / group / card-summary / guide), violating the zero-CoPresent-refs core
+// That coupled engine-only core to product suggest surfaces (space /
+// agent / group / card-summary / guide), violating the zero-product-refs core
 // goal (G3).
 //
 // This file replaces the switch with a registry, mirroring RegisterPlugin (in
@@ -34,9 +34,9 @@ import (
 // the stable engine package it already depends on for RegisterPlugin -- it does
 // NOT have to pull in the heavy gRPC server package.
 //
-// The 9 CoPresent product domains (spaces, spaceTitle, agents, groups,
+// The 9 product domains (spaces, spaceTitle, agents, groups,
 // groupDescription, agentCardSummary, spaceCardSummary, groupCardSummary,
-// guide) register from the pack (memql-bff-copresent) under the `copresent`
+// guide) register from the pack (the carrier repo) under the pack's
 // build tag; only `knowledge` stays core-registered (knowledge is core per epic
 // 3.1, see suggest_knowledge.go). Engine-only core builds (mcp/identity/voice)
 // drop the pack and therefore carry only the knowledge domain -- exactly the G3
@@ -148,7 +148,7 @@ var (
 // RegisterSuggestDomain registers a suggest-domain handler under its wire
 // `domain` string from an init() function. Build tags on the calling file
 // control which binaries include the registration, so product suggest surfaces
-// (the CoPresent space/agent/group/card-summary/guide domains in the pack) can
+// (the pack's space/agent/group/card-summary/guide domains) can
 // self-register without editing core handleAiSuggest. Core registers only
 // `knowledge` (knowledge is core). A duplicate registration for the same domain
 // panics at init -- it signals two packages claiming the same wire domain,

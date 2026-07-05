@@ -66,7 +66,7 @@ func TestTryCompileCombinedFilter_MixedRowAndActorOr(t *testing.T) {
 }
 
 // TestCanvasStateTwoQueryCollapse proves the representative workaround named in
-// the issue collapses to one query: the CoPresent canvasState public/private
+// the issue collapses to one query: the product pack's canvasState public/private
 // merge -- two queries today purely because the filter parser had no OR --
 // becomes a single
 //

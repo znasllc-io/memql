@@ -9,8 +9,8 @@ import (
 )
 
 // userActorContext builds a context that carries a plain user-role
-// TokenInfo. Mirrors what a CoPresent CreateAgentModal call lands on
-// the engine with: subject is the user id, role is "user" (NOT
+// TokenInfo. Mirrors what the frontend's agent-creation-modal call
+// lands on the engine with: subject is the user id, role is "user" (NOT
 // "system"), and the actor string the engine extracts from it does
 // not begin with "system:".
 func userActorContext() (context.Context, string) {

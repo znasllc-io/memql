@@ -39,7 +39,8 @@ import (
 // didn't specify one. Short by design -- guests are expected to
 // click through the email within a few minutes; expired invitations
 // get swept by the `expireGuestInvitations` automation
-// (automations/v1/copresent/) and removed from the pending list.
+// (in the product pack's automations file) and removed from the
+// pending list.
 const guestInviteDefaultTTL = 5 * time.Minute
 
 // Hard upper bound on any caller-specified TTL. Scheduled / far-

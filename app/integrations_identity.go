@@ -270,7 +270,7 @@ func (a *App) integrationsIdentity() {
 	// SSO mint adapter. Lets redirectIfAuthenticated short-circuit
 	// `/login?return_to=<registered-client>` for users who already
 	// have a memql_admin cookie -- one click straight from the
-	// CoPresent AuthPortal to the SPA callback, no re-typing the
+	// product's auth portal to the SPA callback, no re-typing the
 	// email. Lives here because the web package can't reach the
 	// store directly.
 	webSrv.SetMintSSOAuthCode(func(ctx context.Context, in identityweb.MintSSOAuthCodeInput) (identityweb.MintSSOAuthCodeResult, error) {
@@ -291,8 +291,8 @@ func (a *App) integrationsIdentity() {
 			// reached via an OAuth 2.1 /authorize flow (e.g. the claude.ai
 			// MCP connector). The client's /oauth/token exchange presents
 			// the matching code_verifier, which /oauth/token validates
-			// against this stored challenge. Empty on the legacy CoPresent
-			// SPA SSO path (no PKCE) -- mints a non-PKCE code as before
+			// against this stored challenge. Empty on the legacy
+			// product-SPA SSO path (no PKCE) -- mints a non-PKCE code as before
 			// (#1556; previously always empty, #1570).
 			in.CodeChallenge, in.CodeChallengeMethod,
 			in.UserId,

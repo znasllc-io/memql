@@ -10,7 +10,7 @@ import (
 
 // realtimeMirrorAllowlist is the low-risk read-tool set whose DIRECT-path
 // (browser) CallTool invocations we mirror into a structured awareness
-// breadcrumb (copresent#158). It mirrors the relay bridge's
+// breadcrumb (frontend#158). It mirrors the relay bridge's
 // `lowRiskToolAllowlist` in integrations/voice/agent/mcp_tool_bridge.go --
 // kept as a small local copy because component/grpc must not depend on the
 // voice-agent integration package. Both case styles are listed because the
@@ -51,7 +51,7 @@ func flattenToolResultContent(content []*memqlv1.ToolResultContent) string {
 // mirrorRealtimeToolCall emits a structured voiceTrace breadcrumb for a
 // model-driven low-risk read-tool call on the DIRECT browser path, matching
 // the relay's NewLogMirrorSink so the two voice paths have the same
-// cognition-awareness footprint (copresent#158).
+// cognition-awareness footprint (frontend#158).
 //
 // It is a no-op when:
 //   - this is a voice-agent stream (the relay self-mirrors in-process, so a

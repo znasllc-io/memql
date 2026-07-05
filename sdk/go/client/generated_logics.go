@@ -291,7 +291,7 @@ func DeploymentRollbackAllowedBuild(args DeploymentRollbackAllowedArgs) string {
 	return "logic deploymentRollbackAllowed()"
 }
 
-// EngineNodeTypes -- Canonical ENGINE node-type list the deploy bundle builds + places: identity, cognition, voice, agent, planner, workbench, mcp, voice-agent. No bff/copresent (carrier/product layer, shipped by their own repos).
+// EngineNodeTypes -- Canonical ENGINE node-type list the deploy bundle builds + places: identity, cognition, voice, agent, planner, workbench, mcp, voice-agent. No bff or product-carrier nodes (carrier/product layer, shipped by their own repos).
 type EngineNodeTypesArgs struct {
 }
 

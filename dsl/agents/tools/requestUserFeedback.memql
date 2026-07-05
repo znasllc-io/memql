@@ -40,10 +40,10 @@
 // bootstrap context.
 //
 // The GENERIC plan.awaitingFeedback canvas-card producer that renders
-// the feedback_required variant lives in the BFF
-// (memql-bff-copresent/dsl/copresent/) and is delivered in the
-// follow-up BFF wave; only the scope_elevation_required variant has a
-// producer today. This tool is the memql-side half.
+// the feedback_required variant lives in the BFF (the carrier repo's
+// product pack DSL tree) and is delivered in the follow-up BFF wave;
+// only the scope_elevation_required variant has a producer today.
+// This tool is the memql-side half.
 //
 // allowedRoles: assistant. Specialists never speak to humans, so they
 // surface a "needsMore" via askSpecialist and the assistant raises the

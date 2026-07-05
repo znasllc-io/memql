@@ -17,18 +17,18 @@ import (
 	_ "github.com/znasllc-io/memql/integrations/agents"
 	_ "github.com/znasllc-io/memql/integrations/auth"
 	_ "github.com/znasllc-io/memql/integrations/azureblob"
-	// Epic 3 (memql#1902): avatardirect, chat, dailyspace are CoPresent
-	// product integrations -- moved to the pack (memql-bff-copresent), which
+	// Epic 3 (memql#1902): avatardirect, chat, dailyspace are product
+	// integrations -- moved to the product pack (the carrier repo), which
 	// blank-imports them so carrier nodes register them. Engine-only core
 	// builds (mcp/identity/voice) no longer compile them. avatarvendor STAYS
 	// here (shared vendor-REST core the voice-agent imports).
 	//
-	// training (the per-agent "Train" pipeline) is likewise a CoPresent
-	// product integration -- moved to the pack, which blank-imports it so
+	// training (the per-agent "Train" pipeline) is likewise a product
+	// integration -- moved to the pack, which blank-imports it so
 	// carrier nodes run its memql.RegisterPlugin("training") registration.
 	// Engine-only core no longer compiles it.
-	_ "github.com/znasllc-io/memql/integrations/database"
 	_ "github.com/znasllc-io/memql/integrations/actionsearch"
+	_ "github.com/znasllc-io/memql/integrations/database"
 	_ "github.com/znasllc-io/memql/integrations/deployversion"
 	_ "github.com/znasllc-io/memql/integrations/email"
 	_ "github.com/znasllc-io/memql/integrations/embedding"
@@ -43,9 +43,9 @@ import (
 	_ "github.com/znasllc-io/memql/integrations/rbac"
 	_ "github.com/znasllc-io/memql/integrations/router"
 	_ "github.com/znasllc-io/memql/integrations/similarity"
-	_ "github.com/znasllc-io/memql/integrations/timeutil"
 	_ "github.com/znasllc-io/memql/integrations/telephony"
 	_ "github.com/znasllc-io/memql/integrations/telephony/telnyx"
+	_ "github.com/znasllc-io/memql/integrations/timeutil"
 	_ "github.com/znasllc-io/memql/integrations/voice"
 	_ "github.com/znasllc-io/memql/integrations/workbench"
 )

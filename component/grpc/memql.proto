@@ -226,7 +226,7 @@ message MemqlClientMessage {
     // native realtime path (#1421). The realtime executor (gpt-realtime)
     // speaks directly and never routes through the cognition reply path, so
     // nobody writes the GA participant's presence state=responding while it
-    // speaks and the CoPresent orb's speaking animation never plays. The
+    // speaks and the frontend orb's speaking animation never plays. The
     // voice-agent emits speaking=true on the FIRST output audio frame of a
     // response and speaking=false on response.done; the server resolves the
     // GA's SI participant and writes presence responding/idle through the
@@ -689,7 +689,7 @@ message ToolDefinition {
   // When true, the tool is executed by the connected client (not the
   // backend). The agent loop will emit a ClientToolCall envelope and
   // await the matching ClientToolResult instead of running the tool
-  // locally. Used by the CoPresent Operator primitive (ui.*, space.*,
+  // locally. Used by the product's Operator primitive (ui.*, space.*,
   // agent.updateSelf) where the tool affects the browser UI.
   bool client_execution = 4;
   // Optional scopes the tool requires (e.g. "read", "navigate",
@@ -1128,7 +1128,7 @@ message ListPackDomainsResult {
 }
 
 message PackDomain {
-  string name = 1;        // top-level namespace (e.g. "cognition", "copresent")
+  string name = 1;        // top-level namespace (e.g. "cognition", or a pack-supplied namespace)
   string origin = 2;      // "embedded" | "pack:<domain>"
   int32 file_count = 3;   // recursive count of browsable files under the domain
 }
@@ -1728,7 +1728,7 @@ message SendGuestInviteMsg {
   string guest_name = 6;       // optional suggested display name
   // Absolute base URL the frontend serves /join/<token> from. The
   // backend appends /join/<token> to build the link that goes in the
-  // email. Example: "https://app.copresent.ai".
+  // email. Example: "https://app.example.com".
   string join_url_base = 7;
   // How long the invitation is valid for, in minutes. When unset or
   // <= 0 the backend falls back to the default TTL (currently 5 min).
@@ -2234,7 +2234,7 @@ message VoiceAgentSpeak {
 // reply_id is the caller-minted utterance id. It MUST be the same id
 // the voice-agent used to key any in-flight streaming UI state so the
 // committed utterance shares the chat panel's streaming `replyId`
-// contract (see copresent useCopresentChat -- the synthetic in-flight
+// contract (see the frontend's chat hook -- the synthetic in-flight
 // Utterance keyed by replyId swaps in-place when the committed row
 // lands). When empty the server mints one.
 //
@@ -2271,7 +2271,7 @@ message VoiceAgentRealtimeOutputAck {
 }
 
 // VoiceAgentRealtimeSpeaking signals the GA participant's speaking state for
-// the native realtime voice path so the CoPresent orb animates while the
+// the native realtime voice path so the frontend orb animates while the
 // assistant speaks (#1421). On turnModeNative the realtime model (gpt-realtime)
 // authors + speaks the reply directly: cognition resets the GA's presence to
 // idle at gate-publish (it no longer authors the reply), and the only output

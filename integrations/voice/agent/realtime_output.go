@@ -16,7 +16,7 @@ package agent
 // grounding (CitationResolver), and sending VoiceAgentRealtimeOutput to the
 // existing handler (handleVoiceAgentRealtimeOutput), which inserts an AI
 // utterance whose wire shape is byte-for-byte identical to a text/cascade reply
-// (copresent#135 already renders this shape).
+// (frontend#135 already renders this shape).
 //
 // It is pure Go and CGO-free: it depends only on the gRPC Client seam and the
 // pure CitationResolver, so the capture -> wire-shape mapping is unit-tested in
@@ -102,12 +102,12 @@ func (f *RealtimeOutputForwarder) Forward(ctx context.Context, text, replyToID s
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentRealtimeOutput{
 			VoiceAgentRealtimeOutput: &memqlv1.VoiceAgentRealtimeOutput{
-				PartitionId:   f.spaceID,
-				GaAgentId: f.gaAgentID,
-				ReplyId:   replyID,
-				Text:      body,
-				ReplyToId: strings.TrimSpace(replyToID),
-				Citations: citations,
+				PartitionId: f.spaceID,
+				GaAgentId:   f.gaAgentID,
+				ReplyId:     replyID,
+				Text:        body,
+				ReplyToId:   strings.TrimSpace(replyToID),
+				Citations:   citations,
 			},
 		},
 	}

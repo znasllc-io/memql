@@ -40,7 +40,7 @@ const (
 // behavior change. Deployment-agnostic: the persona id is resolved from the
 // catalog at materialization time, never hardcoded (the minted ids vary per
 // vendor account). `make dev-refresh` exports this so the avatar "just works"
-// after login. See copresent#237.
+// after login. See frontend#237.
 const devDefaultAvatarPersonaEnv = "MEMQL_DEV_DEFAULT_AVATAR_PERSONA"
 
 // seedMaterializerActor is the synthetic actor every materializer

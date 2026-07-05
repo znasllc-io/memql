@@ -40,8 +40,8 @@ func extractMintRows(res any) []map[string]any {
 //     see the new catalog row and can dispatch via the standard
 //     extendSpecialist path.
 //
-//     3b. Out-of-envelope: write a v1:copresent:canvasState row of
-//     kind='card' / data.variant='mintSkillApprovalRequested',
+//     3b. Out-of-envelope: write a row of the pack's canvas-state
+//     concept, kind='card' / data.variant='mintSkillApprovalRequested',
 //     then transition the Plan to awaitingFeedback with
 //     feedbackReason='mint_skill_approval_required'. The next turn
 //     resumes once the user clicks Approve / Approve-and-allow /
@@ -250,9 +250,9 @@ func (l *PlannerAgentLoop) executeMintSkill(ctx context.Context, d plannerDecisi
 	return skillId, nil
 }
 
-// writeMintApprovalCard inserts a v1:copresent:canvasState row of
-// kind='card' carrying data.variant='mintSkillApprovalRequested'.
-// The frontend renderer (CoPresent consumer issue) reads variant +
+// writeMintApprovalCard inserts a row of the pack's canvas-state
+// concept, kind='card' carrying data.variant='mintSkillApprovalRequested'.
+// The frontend renderer (the frontend repo's consumer issue) reads variant +
 // data fields and surfaces Approve / Approve-and-allow / Reject
 // buttons. We attach the card to the Plan's space so the user sees
 // it inline with the conversation that triggered the mint request.

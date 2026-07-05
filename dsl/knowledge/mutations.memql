@@ -12,7 +12,7 @@ use knowledge.concepts.{ documentChunk }
 // breakdown of an attachment.
 
 @enabled
-@description("Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the CoPresent UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceUtteranceId / sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.")
+@description("Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the product UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceUtteranceId / sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.")
 mutate documentChunk createDocumentChunk {
   args {
     chunkId            string  @required
@@ -75,7 +75,7 @@ mutate documentChunk createDocumentChunk {
 // writeKnowledgeChunk -- the Trainer Agent's chunk-write path
 // (Q3 / Q9). Backs the writeKnowledgeChunk tool the Trainer Agent calls
 // during a trainSpecialist Plan. Distinct from createDocumentChunk
-// (the general chunk-write path used by the seeder / bridge / CoPresent
+// (the general chunk-write path used by the seeder / bridge / UI-corpus
 // ingest) only in that it hard-stamps source="trainerAgent",
 // validationStatus="validated" (Trainer output ships as canonical, the
 // same way seeded content does), and requires sourceRef -- the Trainer's

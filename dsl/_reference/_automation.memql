@@ -150,7 +150,7 @@ automation deployWithArgs {
 // =============================================================================
 //
 // The deployment bundle's shape (illustrative; the real bundle lands in
-// Phase 3). Engine mesh ONLY -- no bff/copresent. Actions default to the
+// Phase 3). Engine mesh ONLY -- no bff / product nodes. Actions default to the
 // `cockpit/runner` surface; the env `switch` stays in ONE automation.
 //
 // NOTE (G5, #2367): `event.payload.X` reads are RETIRED in automation
@@ -194,7 +194,7 @@ automation deployWithArgs {
 //
 //   @enabled
 //   @trigger(event="deploy.requested", concept="v1:cluster:deployment")
-//   @description("Deploy the memQL ENGINE cluster to an environment. No bff/copresent.")
+//   @description("Deploy the memQL ENGINE cluster to an environment. No bff / product nodes.")
 //   automation deployEngineCluster {
 //     step authorize { logic requireForwardDeploy(event: event) }   // requiresDeveloperOrAbove
 //     step record    { mutation createDeployment(                   // ONE write

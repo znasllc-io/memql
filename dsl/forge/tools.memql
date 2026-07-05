@@ -22,14 +22,14 @@
 @enabled
 @handler(type="function", name="createProject")
 @executionTime("fast")
-@description("Register a project forge develops against (e.g. memql, copresent for a client). Pass a fresh unique projectId. Use this once per app/codebase; requests reference projectId.")
+@description("Register a project forge develops against (e.g. memql, or a client's app). Pass a fresh unique projectId. Use this once per app/codebase; requests reference projectId.")
 @allowedRoles("owner", "admin", "developer", "writer")
 @mcp
 tool forgeRegisterProject {
   projectId    string  @required @description("Fresh unique id for the project, e.g. a UUID. The caller mints it so it can reference the row immediately.")
-  slug         string  @required @description("Stable short id, e.g. 'memql' or 'copresent-acme'.")
+  slug         string  @required @description("Stable short id, e.g. 'memql' or 'acme-app'.")
   name         string  @required @description("Human-readable project name.")
-  targetApp    string  @description("Which app this develops: memql / memql-cockpit / copresent / ...")
+  targetApp    string  @description("Which app this develops: memql / memql-cockpit / a client app / ...")
   repo         string  @description("Git repository URL or path.")
   description  string  @description("What the project is.")
 }
@@ -45,11 +45,11 @@ tool forgeActiveProjects {}
 @enabled
 @handler(type="query", query="query projectBySlug(slug: \"$args.slug\")")
 @executionTime("fast")
-@description("Resolve a forge project by its human-readable slug (e.g. 'memql', 'copresent-acme') to the full project row including its id. Use this when the caller says a project name in natural language so you can obtain the projectId for subsequent requests. Slugs are unique within the caller's partition (tenant), so this always returns at most one project.")
+@description("Resolve a forge project by its human-readable slug (e.g. 'memql', 'acme-app') to the full project row including its id. Use this when the caller says a project name in natural language so you can obtain the projectId for subsequent requests. Slugs are unique within the caller's partition (tenant), so this always returns at most one project.")
 @allowedRoles("owner", "admin", "developer", "writer", "reader")
 @mcp
 tool forgeResolveProject {
-  slug  string  @required  @description("The stable short slug of the project, e.g. 'memql' or 'copresent-acme'.")
+  slug  string  @required  @description("The stable short slug of the project, e.g. 'memql' or 'acme-app'.")
 }
 
 // ----- submit + browse (open to all team members) -----

@@ -96,7 +96,7 @@ logic deployGatePassed {
 //
 // When the decision is one expression, the body is a single `return`. A logic
 // may return a constant -- e.g. the canonical engine node-type set the
-// deployment bundle iterates over. Engine mesh ONLY (no bff/copresent).
+// deployment bundle iterates over. Engine mesh ONLY (no bff / product nodes).
 
 @description("The engine cluster node types the deployment bundle manages.")
 logic engineNodeTypes {

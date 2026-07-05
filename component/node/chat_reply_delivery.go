@@ -138,7 +138,7 @@ const (
 
 // Space-interest concept ids (memql#1316): graph events that signal "a client
 // on THIS replica opened space X" without being chat-reply payload themselves.
-// On every space open the CoPresent client joins the space (participant row,
+// On every space open the frontend client joins the space (participant row,
 // first open only -- idempotent content-addressed id) and creates a session row
 // (EVERY open, fresh sessionId), and heartbeats the session while the space
 // stays open (touchSession). Both concepts carry a required partitionId.

@@ -43,7 +43,7 @@ func TestRealtimeTools_ExposesFullSurface(t *testing.T) {
 	tools := []*memqlv1.ToolDefinition{
 		td("webSearch", false, "read"),
 		td("knowledgeLookup", false),
-		td("copresent_control", false, "control"),
+		td("exampleapp_control", false, "control"),
 		td("computerUse", false, "computer_use"),
 		td("uiClick", true), // client_execution; nil transport -> not relay-capable -> withheld
 		td("mutationCreateSpace", false, "create"),
@@ -59,13 +59,13 @@ func TestRealtimeTools_ExposesFullSurface(t *testing.T) {
 		assert.Equal(t, "function", tool.Type)
 		assert.NotEmpty(t, tool.Parameters, "parameters carry the input schema")
 	}
-	for _, name := range []string{"webSearch", "knowledgeLookup", "copresent_control", "computerUse", "mutationCreateSpace", "someFutureTool"} {
+	for _, name := range []string{"webSearch", "knowledgeLookup", "exampleapp_control", "computerUse", "mutationCreateSpace", "someFutureTool"} {
 		assert.True(t, exposed[name], "expected %s exposed", name)
 	}
 	assert.False(t, exposed["uiClick"], "client-executed tool withheld with no relay path")
 
 	assert.ElementsMatch(t,
-		[]string{"webSearch", "knowledgeLookup", "copresent_control", "computerUse", "mutationCreateSpace", "someFutureTool"},
+		[]string{"webSearch", "knowledgeLookup", "exampleapp_control", "computerUse", "mutationCreateSpace", "someFutureTool"},
 		b.ExposedToolNames())
 	assert.ElementsMatch(t, []string{"uiClick"}, b.DeniedToolNames())
 }
@@ -78,9 +78,9 @@ func TestRealtimeTools_ExposesFullSurface(t *testing.T) {
 func TestRealtimeTools_ExposesClientToolsWhenRelayCapable(t *testing.T) {
 	tools := []*memqlv1.ToolDefinition{
 		td("webSearch", false, "read"),
-		td("uiClick", true),          // client_execution -> exposed via relay
-		td("uiType", true),           // client_execution -> exposed via relay
-		td("copresent_control", false, "control"),
+		td("uiClick", true), // client_execution -> exposed via relay
+		td("uiType", true),  // client_execution -> exposed via relay
+		td("exampleapp_control", false, "control"),
 	}
 	// A non-nil transport makes the bridge relay-capable by default.
 	transport := func(_ context.Context, _ string, _ map[string]any) (string, bool, error) {
@@ -96,9 +96,9 @@ func TestRealtimeTools_ExposesClientToolsWhenRelayCapable(t *testing.T) {
 	assert.True(t, exposed["uiClick"], "client tool exposed when relay-capable (#1420)")
 	assert.True(t, exposed["uiType"], "client tool exposed when relay-capable (#1420)")
 	assert.True(t, exposed["webSearch"], "server tool still exposed")
-	assert.True(t, exposed["copresent_control"], "server tool still exposed")
+	assert.True(t, exposed["exampleapp_control"], "server tool still exposed")
 	assert.ElementsMatch(t,
-		[]string{"webSearch", "uiClick", "uiType", "copresent_control"},
+		[]string{"webSearch", "uiClick", "uiType", "exampleapp_control"},
 		b.ExposedToolNames())
 	assert.Empty(t, b.DeniedToolNames(), "nothing denied when relay-capable")
 

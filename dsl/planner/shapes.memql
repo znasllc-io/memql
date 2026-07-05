@@ -1,11 +1,11 @@
 // shapes.memql
 //
-// Shapes for the planner domain. Moved here from
-// memql-bff-copresent/dsl/copresent/shapes.memql on 2026-05-17 as
+// Shapes for the planner domain. Moved here from the product pack's
+// shapes file (in the carrier repo) on 2026-05-17 as
 // part of the "all plan / task DSL belongs in core" cleanup -- the
 // planner is a node type (build tag planner, see app/integrations_planner_init.go)
 // and its data shapes have to be uniformly available on every binary
-// that loads concepts, not just on the copresent BFF.
+// that loads concepts, not just on the carrier-built BFF.
 
 use planner.concepts.{ plan, task, taskState, responsibility }
 

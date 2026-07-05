@@ -1,7 +1,7 @@
 // queries.memql
 //
-// Planner-namespace queries. Moved here from
-// memql-bff-copresent/dsl/copresent/queries.memql on 2026-05-17 as
+// Planner-namespace queries. Moved here from the product pack's
+// queries file (in the carrier repo) on 2026-05-17 as
 // part of the "all plan / task DSL belongs in core" cleanup -- the
 // planner is a core node type (see app/integrations_planner_init.go,
 // built with -tags planner) and its read surface has to be uniformly
@@ -166,7 +166,7 @@ query plan plansForSpace {
 
 // ---- Per-account task-queue reads (epic memql#902 / #909) ----
 //
-// The CoPresent Tasks UX shows the caller their active vs waiting Plans and
+// The frontend's Tasks UX shows the caller their active vs waiting Plans and
 // each waiting Plan's queue position. These two owned-tier reads are its data
 // source: payload.requestedBy==actor.userId binds the caller server-side so a
 // caller only ever sees their own account's Plans (the account == the user in

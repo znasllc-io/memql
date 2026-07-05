@@ -16,7 +16,7 @@ package agent
 // adding enforcement.
 //
 // Client-executed tools (ClientExecution=true, the browser-UI drive surface --
-// uiClick / uiType / copresent_control) are now ALSO exposed, gated on a
+// uiClick / uiType / the product pack's control tool) are now ALSO exposed, gated on a
 // relay-capable transport (#1420). The browser that runs them lives on a
 // different stream/node than the voice-agent process, so they cannot execute on
 // the calling session directly; instead the engine routes a voice-agent
@@ -89,7 +89,7 @@ type ToolCallTransport func(ctx context.Context, name string, arguments map[stri
 // a plain value so it is trivially serializable and inspectable in tests.
 // Mirrors the dict mcp_tool_bridge.py::CognitionMirror.record_call emits.
 type MirrorRecord struct {
-	PartitionID       string
+	PartitionID   string
 	AgentID       string
 	ToolName      string
 	ArgumentsJSON string
@@ -273,7 +273,7 @@ func (b *McpToolBridge) recordMirror(ctx context.Context, name string, args map[
 		argsJSON = "{}"
 	}
 	record := MirrorRecord{
-		PartitionID:       b.spaceID,
+		PartitionID:   b.spaceID,
 		AgentID:       b.agentID,
 		ToolName:      name,
 		ArgumentsJSON: argsJSON,

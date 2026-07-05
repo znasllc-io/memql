@@ -101,7 +101,7 @@ func voiceFromBody(body map[string]any) any {
 func TestCreateClientSecret_VoiceBakedIntoMintBody(t *testing.T) {
 	// The requested voice must reach OpenAI in the ephemeral-session config
 	// (session.audio.output.voice) so the minted session actually speaks in it
-	// -- not just be echoed back in `config` (copresent#274).
+	// -- not just be echoed back in `config` (frontend#274).
 	var gotBody map[string]any
 	i := newTestIntegration(t, func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)

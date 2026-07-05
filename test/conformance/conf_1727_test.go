@@ -105,7 +105,7 @@ func runEventDryRunBinding(t *testing.T, e *Env) {
 		logic string
 		event map[string]any
 	}{
-		// (logicAutoJoinAI moved to the CoPresent pack with the space concept
+		// (logicAutoJoinAI moved to the product pack with the space concept
 		// in #2038/B2; the remaining cognition/data logics keep this coverage.)
 		{"voiceMigrationOnSecondHuman", map[string]any{
 			"id": "user-1727", "activePartitionId": "space-1727",
@@ -114,7 +114,7 @@ func runEventDryRunBinding(t *testing.T, e *Env) {
 			"partitionId": "space-1727", "utteranceId": "utt-1727", "siParticipantId": "part-1727",
 			"agentId": "agent-1727", "promptTemplateId": "cognitionReply", "promptData": map[string]any{},
 		}},
-		// (logicEnsureDailySpaceOnAuthSession moved to the CoPresent pack in
+		// (logicEnsureDailySpaceOnAuthSession moved to the product pack in
 		// #1976; the remaining cognition/data logics keep this coverage.)
 		{"conflictDetection", map[string]any{
 			"id": "rec-1727", "partitionId": "space-1727", "recordType": "contact",

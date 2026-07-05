@@ -1182,7 +1182,7 @@ func AvatarPersonaByIdBuild(args AvatarPersonaByIdArgs) string {
 	return b.String()
 }
 
-// AvatarPersonas -- List active avatar personas in the operator catalog (memql#609). Backs the Create-Assistant persona picker (copresent#239); the SPA filters to the user's selected gender client-side over this small catalog. `vendor` is an OPTIONAL filter -- omit it to list every active persona across vendors; pass vendor=\"simli\" to scope to custom Simli avatars (memql#1708: the predicate was a hardcoded vendor==simli that silently dropped every other vendor's personas from the list, even though by-id reads returned them). Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql.
+// AvatarPersonas -- List active avatar personas in the operator catalog (memql#609). Backs the Create-Assistant persona picker (frontend#239); the SPA filters to the user's selected gender client-side over this small catalog. `vendor` is an OPTIONAL filter -- omit it to list every active persona across vendors; pass vendor=\"simli\" to scope to custom Simli avatars (memql#1708: the predicate was a hardcoded vendor==simli that silently dropped every other vendor's personas from the list, even though by-id reads returned them). Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql.
 //
 // Bound concept: avatarPersona.
 type AvatarPersonasArgs struct {
@@ -3095,7 +3095,7 @@ func ProjectByIdBuild(args ProjectByIdArgs) string {
 	return b.String()
 }
 
-// ProjectBySlug -- Resolve a v1:forge:project by its stable slug (e.g. 'memql', 'copresent-acme'). Claude uses this to go from a human-supplied name to a projectId before submitting a request or filtering requests. Returns at most one row because slugs are unique within a partition.
+// ProjectBySlug -- Resolve a v1:forge:project by its stable slug (e.g. 'memql', 'acme-app'). Claude uses this to go from a human-supplied name to a projectId before submitting a request or filtering requests. Returns at most one row because slugs are unique within a partition.
 //
 // Bound concept: project.
 type ProjectBySlugArgs struct {
@@ -3524,7 +3524,7 @@ func SkillNeedsRefreshBuild(args SkillNeedsRefreshArgs) string {
 	return b.String()
 }
 
-// SpaceMedia -- Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view (visionarys-io/copresent src/hooks/useCopresent.ts).
+// SpaceMedia -- Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view.
 //
 // Bound concept: media.
 type SpaceMediaArgs struct {

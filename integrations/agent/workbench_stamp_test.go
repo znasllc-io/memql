@@ -50,7 +50,7 @@ func TestInjectAgentContext_WorkbenchHostNoPlanIdWhenContextEmpty(t *testing.T) 
 // TestInjectAgentContext_CanvasPublishStampsDataPlanId is the memql#1207 guard.
 // The published canvasState document card must carry producedByPlanId inside
 // its `data` object so the frontend DocumentCard can synthesize a "View task"
-// deep-link (copresent#393). canvasPublish has no top-level planId in its
+// deep-link (frontend#393). canvasPublish has no top-level planId in its
 // schema; the provenance rides inside the card data, so the runtime stamps it
 // there server-side.
 func TestInjectAgentContext_CanvasPublishStampsDataPlanId(t *testing.T) {
@@ -60,9 +60,9 @@ func TestInjectAgentContext_CanvasPublishStampsDataPlanId(t *testing.T) {
 		"data": data,
 	}
 	tc := turnContext{
-		AgentId: "v1:agents:agent:abc",
+		AgentId:     "v1:agents:agent:abc",
 		PartitionId: "v1:cognition:space:s1",
-		PlanId:  "v1:planner:plan:p1",
+		PlanId:      "v1:planner:plan:p1",
 	}
 
 	injectAgentContext("canvasPublish", args, tc)

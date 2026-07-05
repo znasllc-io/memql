@@ -26,8 +26,8 @@ var (
 
 // RegisterRoutingRule adds a routing rule from an init() function. Build
 // tags on the caller control which binaries include the registration, so
-// product code (e.g. integrations/copresent/) can declare its own concept
-// patterns without editing the core node package. Order matches
+// product code (e.g. a pack's integrations package) can declare its own
+// concept patterns without editing the core node package. Order matches
 // registration order; block rules still evaluate first across the
 // combined set (built-in + registered).
 func RegisterRoutingRule(rule RoutingRule) {

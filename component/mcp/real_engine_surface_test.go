@@ -123,8 +123,8 @@ func TestRealEngineExposesResourcesAndPrompts(t *testing.T) {
 // is the #1596/#1646 gate.
 //
 // recentChat (the space-chat lens, #1684) was in this surface until #1976
-// moved it to the CoPresent pack (dsl/copresent/tools.memql) -- it binds the
-// chat integration's recentChat builtin, a CoPresent product capability, so
+// moved it to the product pack (the pack's tools file) -- it binds the
+// chat integration's recentChat builtin, a product capability, so
 // it is no longer in the engine-only core surface loadedEngine builds. The
 // carrier build (pack registered) re-adds it; the pack covers its @mcp tag.
 func TestRealEngineCuratedToolSurface(t *testing.T) {

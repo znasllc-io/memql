@@ -31,7 +31,7 @@ type GraphConfig struct {
 	ClientId     string // Entra app registration's application (client) ID
 	ClientSecret string // Raw client secret value (never log)
 	SenderAddr   string // Full mailbox address the app sends as, e.g. "no-reply@znas.io"
-	FromName     string // Friendly display name, e.g. "CoPresent"
+	FromName     string // Friendly display name, e.g. "Example App"
 }
 
 // GraphSender implements Sender against Microsoft Graph sendMail.

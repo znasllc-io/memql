@@ -10,7 +10,7 @@ import (
 
 // applyDevDefaultAvatarPersona is the dev-only hook that stamps a default
 // avatar persona onto the per-user Assistant at first materialization
-// (copresent#237). These pin the gating: only the `assistant` seed, only when
+// (frontend#237). These pin the gating: only the `assistant` seed, only when
 // the env is set, never overriding an explicit persona, and a graceful no-op
 // when the catalog can't be reached (nil engine).
 
@@ -101,7 +101,7 @@ func TestRenderArgsObject_NestedBlocks(t *testing.T) {
 		"capabilities": map[string]any{
 			"avatar":  true,
 			"claw":    false,
-			"domains": []any{"general", "copresent-ui"},
+			"domains": []any{"general", "exampleapp-ui"},
 			"tools":   []any{},
 		},
 		"providerConfig": map[string]any{
@@ -121,7 +121,7 @@ func TestRenderArgsObject_NestedBlocks(t *testing.T) {
 	mustContain(t, got, `capabilities: {`)
 	mustContain(t, got, `avatar: true`)
 	mustContain(t, got, `claw: false`)
-	mustContain(t, got, `domains: ["general", "copresent-ui"]`)
+	mustContain(t, got, `domains: ["general", "exampleapp-ui"]`)
 	mustContain(t, got, `tools: []`)
 	mustContain(t, got, `providerConfig: {`)
 	mustContain(t, got, `llm: {`)

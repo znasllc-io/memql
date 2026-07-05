@@ -13,7 +13,7 @@ import (
 // an empty registry -- allSeedDomains() then returns only the engine catalog.
 //
 // This exists so the engine carries zero product-specific seed data. A
-// product pack (e.g. the CoPresent UI domain + its corpus) registers its
+// product pack (e.g. the product's UI domain + its corpus) registers its
 // domains from its own knowledge_seed.go at init() time.
 
 // SeedCorpusEntry is one document-chunk source in a seed corpus. The pair

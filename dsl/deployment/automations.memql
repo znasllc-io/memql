@@ -106,12 +106,12 @@ use deployment.mutations.{ createDeployment, updateDeploymentStatus }
 
 @enabled
 @trigger(event="deploy.requested", concept="v1:cluster:deployment", partition="*")
-@description("Deploy the memQL ENGINE cluster to an environment (development | staging | production) on the cockpit/runner surface. Sequences clone -> build -> place (env switch) -> gate -> success/failure finish, recording the deployment lifecycle. Engine mesh ONLY -- no bff/copresent.")
+@description("Deploy the memQL ENGINE cluster to an environment (development | staging | production) on the cockpit/runner surface. Sequences clone -> build -> place (env switch) -> gate -> success/failure finish, recording the deployment lifecycle. Engine mesh ONLY -- no bff or product-carrier nodes.")
 automation deployEngineCluster {
   args {
     deploymentId         string   @required @description("The v1:cluster:deployment timeline id; createDeployment uses it as the concept id so every status transition appends to one timeline (#1872).")
     environment          string   @required @enum("development", "staging", "production") @description("THE single switch dimension -- one coherent flow differing only by this value (owner decision: env switch in ONE automation).")
-    engineNodeTypes      []string @required @description("The ENGINE node types to (re)build + place. The emitter fills it from the canonical logic engineNodeTypes -- all eight by default, or a subset for a single-node redeploy. Engine mesh ONLY: no bff/copresent.")
+    engineNodeTypes      []string @required @description("The ENGINE node types to (re)build + place. The emitter fills it from the canonical logic engineNodeTypes -- all eight by default, or a subset for a single-node redeploy. Engine mesh ONLY: no bff or product-carrier nodes.")
     ref                  string   @required @description("Git ref (tag/branch/SHA) to check out + sync.")
     version              string   @required @description("Version tag to build/stamp, e.g. 0.12.0.")
     workdir              string   @required @description("Absolute path of the checked-out tree on the deploy runner.")

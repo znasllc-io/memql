@@ -28,7 +28,7 @@
 //     pack never auto-loads there.
 //
 // A production pack would instead put its init() behind its product build tag
-// (e.g. //go:build copresent) and anchor the package via a blank import in the
+// (e.g. //go:build myproduct) and anchor the package via a blank import in the
 // app bootstrap. See docs/public/build/building-a-pack.md.
 package referencepack
 

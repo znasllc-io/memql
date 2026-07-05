@@ -17,8 +17,8 @@ query participant activeHumanParticipants {
 }
 
 // queryLatestSpaceContextForSpace + queryLatestSpaceContextSnapshot
-// were extracted to the CoPresent pack
-// (memql-bff-copresent/dsl/copresent/queries.memql) by Epic 3
+// were extracted to the product pack
+// (the carrier repo's pack queries file) by Epic 3
 // (3.3b-i, memql#1991) along with the v1:cognition:space:context
 // concept (ids preserved).
 
@@ -113,7 +113,7 @@ query utterance agentInteractionCount {
 //   Array of space records via the spaceFull shape (includes archivedAt).
 //
 // NOTE: archived spaces carry active=false (mutationArchiveSpace /
-// copresentMutations.archiveSpace set it), so this query does NOT apply
+// the frontend's archiveSpace wrapper set it), so this query does NOT apply
 // isActiveRecord -- that would exclude every archived row. It gates
 // on status=='archived' and excludes hard-delete tombstones via
 // isNotDeleted.
@@ -137,8 +137,8 @@ query audioOverride audioOverridesForSpace {
   shape   audioOverrideFull
 }
 
-// queryActiveGreetSuppression was extracted to the CoPresent pack
-// (memql-bff-copresent/dsl/copresent/queries.memql) by Epic 3
+// queryActiveGreetSuppression was extracted to the product pack
+// (the carrier repo's pack queries file) by Epic 3
 // (3.3b-i, memql#1991) along with the v1:cognition:greetSuppression
 // concept (ids preserved).
 
@@ -152,7 +152,7 @@ query audioOverride audioOverridesForSpace {
 // to sweep stale archives.
 //
 // expiresAt is stamped onto each archived row by the frontend
-// (copresentMutations.archiveSpace) as `archivedAt + retentionDays`,
+// (its archiveSpace mutation wrapper) as `archivedAt + retentionDays`,
 // using the user's CURRENT archiveRetentionDays preference. When the
 // user bumps retention 30->60, the SettingsListPanel handler
 // re-stamps every currently-archived space's expiresAt so the bump
@@ -419,8 +419,8 @@ query participant siParticipantForSpace {
   shape   participantFull
 }
 
-// querySpaceContext was extracted to the CoPresent pack
-// (memql-bff-copresent/dsl/copresent/queries.memql) by Epic 3
+// querySpaceContext was extracted to the product pack
+// (the carrier repo's pack queries file) by Epic 3
 // (3.3b-i, memql#1991) along with the v1:cognition:space:context
 // concept (ids preserved).
 
@@ -486,8 +486,8 @@ query utterance spaceUtterances {
   shape    utteranceFull
 }
 
-// queryUserMicStatesForSpace was extracted to the CoPresent pack
-// (memql-bff-copresent/dsl/copresent/queries.memql) by Epic 3
+// queryUserMicStatesForSpace was extracted to the product pack
+// (the carrier repo's pack queries file) by Epic 3
 // (3.3b-i, memql#1991) along with the v1:cognition:micState concept
 // (ids preserved).
 
@@ -508,8 +508,8 @@ query videoOverride videoOverridesForSpace {
   shape   videoOverrideFull
 }
 
-// querySpacePrivateUtterancesForViewer was extracted to the CoPresent
-// pack (memql-bff-copresent/dsl/copresent/queries.memql) by Epic 3
+// querySpacePrivateUtterancesForViewer was extracted to the product
+// pack (the carrier repo's pack queries file) by Epic 3
 // (3.3b-i, memql#1991) along with the v1:cognition:privateUtterance
 // concept (ids preserved).
 

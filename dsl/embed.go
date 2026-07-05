@@ -12,9 +12,8 @@
 // memql#356: Tree() also overlays plugin-registered DSL subtrees
 // (see RegisterTree below) so external Go modules can contribute
 // additional domains without modifying this package's `go:embed`
-// list. The CoPresent BFF
-// (github.com/visionarys-io/memql-bff-copresent) consumes this
-// extension point to mount its `copresent/` domain at boot.
+// list. The product BFF (the carrier repo) consumes this
+// extension point to mount its pack domain at boot.
 package dsl
 
 import (
@@ -32,7 +31,7 @@ import (
 // default behavior would skip them at the embed step entirely).
 //
 // Epic 3 (memql#1901): the `guide` + `curriculum` domains were extracted to
-// the CoPresent pack (memql-bff-copresent/dsl/{guide,curriculum}); core no
+// the product pack (the carrier repo's dsl/{guide,curriculum}); core no
 // longer embeds them. Carrier-built nodes get them via the pack's
 // RegisterTree; engine-only core builds omit them (ids preserved: v1:guide:*
 // / v1:curriculum:*).
@@ -42,7 +41,7 @@ var embedFS embed.FS
 
 // pluginTrees holds the additional DSL subtrees registered by external
 // Go modules via RegisterTree. Each entry maps a domain name (the
-// top-level directory inside the merged tree -- e.g. "copresent") to
+// top-level directory inside the merged tree -- e.g. "mypack") to
 // the FS rooted at the domain's contents (the consumer's embed.FS
 // containing `concepts.memql, queries.memql, prompts/`, etc).
 //
@@ -59,18 +58,18 @@ var (
 // hooks in product-specific Go packages that the bff binary blank-
 // imports.
 //
-// Example, in memql-bff-copresent's integrations/copresent package:
+// Example, in a product pack's integrations package:
 //
 //	//go:embed all:*.memql all:prompts
-//	var copresentFS embed.FS
+//	var packFS embed.FS
 //
 //	func init() {
-//	    memqldsl.RegisterTree("copresent", copresentFS)
+//	    memqldsl.RegisterTree("mypack", packFS)
 //	}
 //
 // After registration, every DSL loader that walks dsl.Tree() sees
-// the copresent files under `copresent/` alongside the embedded
-// domains. The CoPresent SDK's generated queries / mutations resolve
+// the pack's files under `mypack/` alongside the embedded
+// domains. The pack SDK's generated queries / mutations resolve
 // against the live engine the same way agents/, cluster/, cognition/
 // do today.
 //
@@ -269,10 +268,10 @@ func (l *layeredFS) ReadDir(name string) ([]fs.DirEntry, error) {
 	return fs.ReadDir(l.base, name)
 }
 
-// splitFirst returns the first path segment + the rest. "copresent"
-// -> ("copresent", ""). "copresent/queries.memql" -> ("copresent",
-// "queries.memql"). "copresent/prompts/agentReply.tmpl" ->
-// ("copresent", "prompts/agentReply.tmpl").
+// splitFirst returns the first path segment + the rest. "mypack"
+// -> ("mypack", ""). "mypack/queries.memql" -> ("mypack",
+// "queries.memql"). "mypack/prompts/reply.tmpl" ->
+// ("mypack", "prompts/reply.tmpl").
 func splitFirst(name string) (head, tail string) {
 	idx := strings.IndexByte(name, '/')
 	if idx < 0 {

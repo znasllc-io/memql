@@ -79,7 +79,7 @@ shape videoOverride videoOverrideFull {
 }
 
 // privateUtteranceFull + misrouteFeedbackFull were extracted to the
-// CoPresent pack (memql-bff-copresent/dsl/copresent/shapes.memql) by
+// product pack (the carrier repo's pack shapes file) by
 // Epic 3 (3.3b-i, memql#1991) along with their concepts (ids preserved).
 
 @row

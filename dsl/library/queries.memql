@@ -59,8 +59,8 @@ query artifact libraryArtifactsByKind {
 }
 
 // queryLibraryArtifactsBySpace (the per-space Library facet) moved to the
-// CoPresent pack (memql-bff-copresent/dsl/copresent/queries.memql) in Epic 3
-// 3.6 (memql#1903): the per-space filter is a CoPresent-product surface. The
+// product pack (the pack's queries file) in Epic 3
+// 3.6 (memql#1903): the per-space filter is a product surface. The
 // artifact concept + its optional partitionId facet field stay here (the
 // provenance/version spine); the broader partitionId-facet-field decoupling rides
 // with the space concept split (3.3, #1900).

@@ -6,7 +6,7 @@
 // no changes to callers.
 //
 // Telephony is CORE and product-agnostic: numbers and calls bind to a
-// generic partition (memql.PartitionScope), never to a CoPresent space.
+// generic partition (memql.PartitionScope), never to a product space.
 package telephony
 
 import (

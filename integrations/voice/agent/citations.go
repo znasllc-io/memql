@@ -14,7 +14,7 @@ package agent
 // resolver scans the transcript for verbatim occurrences of the injected
 // grounding phrases and emits one citation per domain hit -- the exact
 // {domainId, matchedPhrase} shape handleVoiceAgentRealtimeOutput persists and
-// the frontend's splitTextAtCitations renderer (copresent#135) wraps in chips.
+// the frontend's splitTextAtCitations renderer (frontend#135) wraps in chips.
 //
 // Strict no-op when ungrounded. An empty grounding context yields zero
 // citations, so an ungrounded realtime reply lands byte-for-byte identical to

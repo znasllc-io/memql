@@ -619,7 +619,7 @@ func (c *CognitionIntegration) consultConductor(
 	}
 
 	c.logPlanTrace(planTrace{
-		PartitionId:       utterance.ScopeId,
+		PartitionId:   utterance.ScopeId,
 		UtteranceId:   utterance.ID,
 		UtteranceText: utterance.Text,
 		Plan:          plan,
@@ -639,7 +639,7 @@ func (c *CognitionIntegration) consultConductor(
 // at INFO with structured slog Attrs; the full raw JSON is logged at
 // DEBUG so high-volume environments can opt out.
 type planTrace struct {
-	PartitionId       string
+	PartitionId   string
 	UtteranceId   string
 	UtteranceText string
 	Plan          ConductorPlan
@@ -1043,9 +1043,9 @@ func (l candidateLookup) resolveId(rawId, contextText, role string) (string, boo
 			return pid, true
 		}
 		// Substring-match fallback. Catches the case where the LLM
-		// stripped a known prefix (e.g., "si-default:v1:copresent:
-		// agent:") and emitted only the unique suffix portion of the
-		// participant id. We accept the match only when EXACTLY one
+		// stripped a known prefix (the partition + concept segments,
+		// e.g. "si-default:v1:...:agent:") and emitted only the unique
+		// suffix portion of the participant id. We accept the match only when EXACTLY one
 		// participant id contains (or is contained by) the LLM-
 		// emitted id -- ambiguous matches are dropped.
 		const minSubstrLen = 12 // avoid matching tiny fragments

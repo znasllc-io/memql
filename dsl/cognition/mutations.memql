@@ -58,9 +58,9 @@ mutate participant addAgentToSpace {
 // node id collides, so it's effectively a no-op upsert.
 //
 // LIFECYCLE OWNER -- server-driven (rewritten 2026-05-18):
-// The dailyspace integration (CoPresent pack: integrations/dailyspace/
-// in memql-bff-copresent) owns provisioning + rollover. Three pack
-// automations (dsl/copresent/automations.memql) call its
+// The dailyspace integration (product pack: integrations/dailyspace/
+// in the carrier repo) owns provisioning + rollover. Three pack
+// automations (the pack's automations file) call its
 // ensureDailySpaceForUser capability:
 //
 //   provisionDailySpaceOnUserCreate -- fires on every new
@@ -228,7 +228,7 @@ mutate session createSessionForParticipant {
 // so the row disappears from every list.
 //
 // Same generic-upsert shape as the other space-lifecycle mutations.
-// The frontend's copresentMutations.ts wrapper composes the payload
+// The frontend's mutation-wrapper module composes the payload
 // (typically: keep name + ids, set deleted=true / active=false /
 // status="archived").
 
@@ -534,7 +534,7 @@ mutate participant removeAgentFromSpace {
 //
 // Same generic-upsert shape as the other space-lifecycle mutations
 // (archiveSpace / saveSpace / deleteSpaceNow). The frontend's
-// copresentMutations.ts wrappers compose the per-state payload.
+// mutation wrappers compose the per-state payload.
 
 // ---- mutations/v1/cognition/saveSpace.memql ----
 
@@ -551,7 +551,7 @@ mutate participant removeAgentFromSpace {
 //
 // Pattern matches mutationArchiveSpace / mutationRestoreSpace /
 // mutationDeleteSpaceNow -- they're all generic full-payload upserts;
-// the frontend (copresentMutations.ts wrappers) owns the per-state
+// the frontend (its mutation-wrapper module) owns the per-state
 // payload composition.
 
 // ---- mutations/v1/cognition/sendActionUtterance.memql ----
@@ -803,8 +803,8 @@ mutate audioOverride setAgentAudioOverride {
   }
 }
 
-// mutationSuppressGreetOnJoin was extracted to the CoPresent pack
-// (memql-bff-copresent/dsl/copresent/mutations.memql) by Epic 3
+// mutationSuppressGreetOnJoin was extracted to the product pack
+// (the carrier repo's pack mutations file) by Epic 3
 // (3.3b-i, memql#1991) along with the v1:cognition:greetSuppression
 // concept (ids preserved).
 
@@ -859,8 +859,8 @@ mutate videoOverride setAgentVideoOverride {
   }
 }
 
-// mutationSetUserMicState was extracted to the CoPresent pack
-// (memql-bff-copresent/dsl/copresent/mutations.memql) by Epic 3
+// mutationSetUserMicState was extracted to the product pack
+// (the carrier repo's pack mutations file) by Epic 3
 // (3.3b-i, memql#1991) along with the v1:cognition:micState concept
 // (ids preserved).
 
@@ -1001,8 +1001,8 @@ mutate session updateSessionStreams {
 
 // mutationSendPrivateUtterance, mutationMovePrivateToGroup,
 // mutationMoveGroupToPrivate, and mutationRecordMisrouteFeedback were
-// extracted to the CoPresent pack
-// (memql-bff-copresent/dsl/copresent/mutations.memql) by Epic 3
+// extracted to the product pack
+// (the carrier repo's pack mutations file) by Epic 3
 // (3.3b-i, memql#1991) along with the v1:cognition:privateUtterance +
 // v1:cognition:misrouteFeedback concepts (ids preserved). The two
 // "move" mutations touch BOTH privateUtterance (moving) AND utterance

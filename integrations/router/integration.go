@@ -1,5 +1,5 @@
 // Package router exposes BYOK credential + budget admin capabilities
-// to the memQL DSL so the CoPresent /router/settings page can add,
+// to the memQL DSL so the frontend's /router/settings page can add,
 // rotate, and delete API keys and budgets without the plaintext ever
 // being persisted. Plaintext keys arrive through this integration's
 // capabilities; they leave encrypted via `component/secret.Encrypt`

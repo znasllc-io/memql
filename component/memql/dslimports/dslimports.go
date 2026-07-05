@@ -122,7 +122,7 @@ func Load(root fs.FS) (*Tree, error) {
 			// surface as diagnostics so the lint gate catches them;
 			// the prior unconditional swallow let three hours of
 			// real bugs through this session (orphan logic-line
-			// fragments in memql-bff-copresent#55, broken
+			// fragments in bff#55, broken
 			// autoJoinAI hash lookup that became memql#276 / #273
 			// Layer 1).
 			//

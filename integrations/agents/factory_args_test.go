@@ -111,7 +111,7 @@ func TestBuildCreateAgentArgs_SkillUnion(t *testing.T) {
 	decision := factoryDecision{
 		Action:   "create",
 		RoleSlug: "engineering",
-		SkillIds: []string{"copresent-ui", "go-backend-engineering"}, // overlap with locked
+		SkillIds: []string{"exampleapp-ui", "go-backend-engineering"}, // overlap with locked
 	}
 
 	args := buildCreateAgentArgs("a1", "u1", decision, role, "")
@@ -128,7 +128,7 @@ func TestBuildCreateAgentArgs_SkillUnion(t *testing.T) {
 		"workbench-baseline":     true,
 		"go-backend-engineering": true,
 		"engineering-baseline":   true,
-		"copresent-ui":           true,
+		"exampleapp-ui":          true,
 	}
 	if len(skillIds) != len(want) {
 		t.Errorf("skillIds count: got %d want %d (got=%v)", len(skillIds), len(want), skillIds)

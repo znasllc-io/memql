@@ -100,7 +100,7 @@ type RealtimeExecutor struct {
 
 	// speakingSender emits the GA's speaking-state presence signal (#1421):
 	// VoiceAgentRealtimeSpeaking{speaking:true} on the first output audio frame
-	// of a response, {speaking:false} on response.done, so the CoPresent orb
+	// of a response, {speaking:false} on response.done, so the frontend's orb
 	// animates while the assistant speaks on the native realtime path. The
 	// server writes the presence row (handleVoiceAgentRealtimeSpeaking) -- the
 	// executor only OBSERVES the output stream, where the deltas land. Defaults
@@ -241,11 +241,11 @@ func NewRealtimeExecutor(
 		sink:           sink,
 		persona:        persona,
 		speakingSender: client,
-		roster:       newParticipantRoster(),
-		logger:       logger,
-		ctx:          ctx,
-		cancel:       cancel,
-		transcriptCh: make(chan transcriptJob, transcriptQueueDepth),
+		roster:         newParticipantRoster(),
+		logger:         logger,
+		ctx:            ctx,
+		cancel:         cancel,
+		transcriptCh:   make(chan transcriptJob, transcriptQueueDepth),
 
 		// #1430 async tool-call defaults; ConfigureToolCalls overrides.
 		toolKick:          make(chan struct{}, 1),
@@ -536,7 +536,7 @@ func (e *RealtimeExecutor) forwardPartial(speakerIdentity, text string) {
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentPartialTranscript{
 			VoiceAgentPartialTranscript: &memqlv1.VoiceAgentPartialTranscript{
-				PartitionId:       e.cfg.PartitionID,
+				PartitionId:   e.cfg.PartitionID,
 				SpeakerUserId: e.resolveSpeaker(speakerIdentity),
 				PartialText:   text,
 				Sequence:      seq,
@@ -602,7 +602,7 @@ func (e *RealtimeExecutor) getLastSpeaker() string {
 // being discarded (#1403).
 func (e *RealtimeExecutor) forwardFinal(speakerIdentity, text string, nativeAuthored bool) {
 	sendFinalTranscript(e.ctx, e.client, e.logger, "realtime", &memqlv1.VoiceAgentFinalTranscript{
-		PartitionId:        e.cfg.PartitionID,
+		PartitionId:    e.cfg.PartitionID,
 		SpeakerUserId:  e.resolveSpeaker(speakerIdentity),
 		FinalText:      text,
 		NativeAuthored: nativeAuthored,
@@ -645,7 +645,7 @@ func (e *RealtimeExecutor) runTurn(speakerIdentity, utterance string) {
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentTurnRequest{
 			VoiceAgentTurnRequest: &memqlv1.VoiceAgentTurnRequest{
-				PartitionId:       e.cfg.PartitionID,
+				PartitionId:   e.cfg.PartitionID,
 				SpeakerUserId: e.resolveSpeaker(speakerIdentity),
 				UtteranceText: utterance,
 				GaAgentId:     e.cfg.GaAgentID,
@@ -870,7 +870,7 @@ func (e *RealtimeExecutor) drainAudioOut() {
 			isFirstFrame := e.firstAudioPending.CompareAndSwap(true, false)
 			if isFirstFrame {
 				// #1421: the assistant just became audible -- signal the GA's
-				// speaking-state presence so the CoPresent orb animates. The
+				// speaking-state presence so the frontend orb animates. The
 				// server writes presence state=responding; response.done writes
 				// idle. This is the only writer of responding on the native
 				// realtime path (cognition reset it to idle at gate-publish).
@@ -1241,9 +1241,9 @@ func (e *RealtimeExecutor) emitSpeaking(speaking bool) {
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentRealtimeSpeaking{
 			VoiceAgentRealtimeSpeaking: &memqlv1.VoiceAgentRealtimeSpeaking{
-				PartitionId:   e.cfg.PartitionID,
-				GaAgentId: e.cfg.GaAgentID,
-				Speaking:  speaking,
+				PartitionId: e.cfg.PartitionID,
+				GaAgentId:   e.cfg.GaAgentID,
+				Speaking:    speaking,
 			},
 		},
 	}

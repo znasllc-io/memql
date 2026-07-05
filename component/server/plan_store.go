@@ -49,8 +49,9 @@ type CreatePlanForAttachmentParams struct {
 }
 
 // EnginePlanStore implements PlanStore via the MemQL DSL mutations
-// declared in mutations/v1/copresent/{create,update}{Plan,Task} and
-// createCanvasState. Concept-agnostic; the DSL owns the row shapes.
+// declared in the product pack's mutations file
+// ({create,update}{Plan,Task} and createCanvasState).
+// Concept-agnostic; the DSL owns the row shapes.
 type EnginePlanStore struct {
 	engine MemQLExecutor
 }

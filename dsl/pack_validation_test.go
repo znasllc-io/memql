@@ -15,7 +15,7 @@ import (
 // registered.
 func TestValidatePackDomain(t *testing.T) {
 	core := []string{"cognition", "common", "providers"}
-	existing := []string{"copresent", "acmepack"}
+	existing := []string{"exampleapp", "acmepack"}
 
 	t.Run("fresh unique domain accepted", func(t *testing.T) {
 		require.NoError(t, dsl.ValidatePackDomain("widgets", core, existing))
@@ -29,10 +29,10 @@ func TestValidatePackDomain(t *testing.T) {
 	})
 
 	t.Run("duplicate plugin domain rejected", func(t *testing.T) {
-		err := dsl.ValidatePackDomain("copresent", core, existing)
+		err := dsl.ValidatePackDomain("exampleapp", core, existing)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "already registered")
-		assert.Contains(t, err.Error(), "copresent")
+		assert.Contains(t, err.Error(), "exampleapp")
 	})
 
 	t.Run("empty domain rejected", func(t *testing.T) {

@@ -693,7 +693,7 @@ StreamLoop:
 		}
 
 		// WHEEL_CONTESTED is a terminal signal from the browser bridge:
-		// another space's agent already owns the CoPresent Control
+		// another space's agent already owns the frontend's UI-control
 		// widget and any further UI tool calls we make will be dropped.
 		// Break the loop immediately rather than let the model retry
 		// uiRequestControl in a hopeful spin -- the browser has already
@@ -704,7 +704,7 @@ StreamLoop:
 		// We emit a short user-facing text reply explaining the
 		// situation so the agent's stream isn't silent, then exit.
 		if wheelContested {
-			msg := "I can't start right now -- another agent is already driving the CoPresent Control widget. Close that session (Take back control) and ask me again."
+			msg := "I can't start right now -- another agent is already driving the UI-control session. Close that session (Take back control) and ask me again."
 			// Only emit the message if the model didn't already say
 			// something sensible in this iteration; otherwise we'd
 			// double-speak. The model often replies with explanation
@@ -966,7 +966,7 @@ func needsIterationSeparator(b *strings.Builder) bool {
 	return true
 }
 
-// wheelContestedMarker is the substring the CoPresent Control bridge
+// wheelContestedMarker is the substring the frontend's UI-control bridge
 // stamps on error responses when a tool call arrives for a space that
 // doesn't own the Control Session. The streaming tool loop looks for
 // this marker and breaks out immediately instead of letting the model
@@ -1054,7 +1054,7 @@ func parseToolArgs(raw string) map[string]any {
 //
 // Per-tool routing matters because the field names diverge across
 // tools: requestComputerUseScope expects `partitionId`; canvasPublish
-// expects `space` (matches the v1:copresent:canvasState concept's
+// expects `space` (matches the pack's canvas-state concept's
 // `space` column name); workerHost / workerComputer / workerStatus
 // don't need space at all. canvasPublish doesn't expose `agentId`
 // or `ownerUserId` at the top level -- the runtime agentId rides
@@ -1099,7 +1099,7 @@ type agentContextStamp struct {
 	// turnContext carries a plan id (memql#1207). canvasPublish's
 	// document card carries title/body/links in `data`; the frontend
 	// DocumentCard synthesizes a "View task" deep-link FROM
-	// data.producedByPlanId (copresent#393), but only when present.
+	// data.producedByPlanId (frontend#393), but only when present.
 	// The agent knows the plan id authoritatively (post-approval
 	// execution turns); the LLM never does, so we stamp it server-side
 	// in the publish path. Distinct from the flat StampPlanId
@@ -1198,7 +1198,7 @@ func injectAgentContext(toolName string, args map[string]any, ctx turnContext) {
 		// Stamp producedByPlanId onto the nested card `data` object so
 		// the published canvasState document card carries the plan
 		// provenance the frontend DocumentCard turns into a "View task"
-		// deep-link (memql#1207 / copresent#393). The card data is the
+		// deep-link (memql#1207 / frontend#393). The card data is the
 		// LLM-supplied `data` map; create it if the model omitted one so
 		// the stamp always lands. Always overwrite -- the runtime
 		// turn-context plan id is the source of truth.

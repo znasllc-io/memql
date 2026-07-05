@@ -696,7 +696,7 @@ func extractParticipantNames(payload any) []string {
 }
 
 // voiceAvatarPersonaCatalogPrefix is the canonical id prefix of the operator
-// avatar-persona catalog rows (v1:agents:avatarPersona). The CoPresent
+// avatar-persona catalog rows (v1:agents:avatarPersona). The frontend's
 // PersonaPicker stamps agents with the CATALOG ROW ID, not the vendor-issued
 // face/persona id, so a stamped value carrying this prefix must be hydrated
 // through the catalog before it reaches the avatar vendor client (#1336).
@@ -2509,7 +2509,7 @@ func (s *streamSession) resolveAIParticipantId(ctx context.Context, partitionId 
 }
 
 // handleVoiceAgentRealtimeSpeaking writes the GA participant's speaking-state
-// presence for the native realtime voice path (#1421) so the CoPresent orb
+// presence for the native realtime voice path (#1421) so the frontend orb
 // animates while the assistant speaks.
 //
 // On turnModeNative the realtime model authors + speaks the reply directly:

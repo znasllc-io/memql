@@ -87,8 +87,8 @@ func ActingAgentRoleFromContext(ctx context.Context) string {
 // agent's id (e.g. "default:v1:agents:agent:<short-id>"). Used by
 // the gRPC stream session to stamp ClientToolCall.AgentId so the
 // frontend can attribute UI takeover sessions to the actual driving
-// agent (e.g. show "Briar" in the CoPresent Control Widget transcript
-// instead of a generic "Agent" label).
+// agent (e.g. show "Briar" in the frontend's takeover-control-widget
+// transcript instead of a generic "Agent" label).
 func WithActingAgentId(ctx context.Context, agentId string) context.Context {
 	agentId = trimString(agentId)
 	if agentId == "" {

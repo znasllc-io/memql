@@ -43,7 +43,7 @@ shape documentChunk documentChunkFull {
 //   - integrations/agent/replier.go citation registry (reads source)
 //   - integrations/training/training.go domainNeedsRefresh (reads
 //     lastSeededAt, seederRecipeVersion, refreshCadenceDays)
-//   - copresent useKnowledgeDomains hook (surfaces source,
+//   - the frontend's useKnowledgeDomains hook (surfaces source,
 //     refreshCadenceDays, lastSeededAt to the Knowledge panel)
 // Without these in the projection, downstream consumers silently
 // get empty values and fall back to defaults that mask the real
@@ -126,14 +126,14 @@ shape actorEnvelope {
 // ---- shapes/v1/common/mediaFull.memql ----
 
 // Full projection of v1:common:media for the SPA's `useMedia(partitionId,
-// filters)` hook (visionarys-io/copresent src/hooks/useCopresent.ts).
+// filters)` hook (frontend repo, src/hooks).
 // Surface mirrors the SPA's Media interface so the generated SDK
 // hands back rows with no client-side shape adapters needed.
 //
-// memql-bff-copresent#44 (audit) + memql#191.
+// carrier#44 (audit) + memql#191.
 
 @row
-@description("Full projection of a v1:common:media row -- every payload field used by the CoPresent SPA's Media interface, plus the row intrinsics the frontend reads for ordering and ids.")
+@description("Full projection of a v1:common:media row -- every payload field used by the product SPA's Media interface, plus the row intrinsics the frontend reads for ordering and ids.")
 shape media mediaFull {
   row.id
   partitionId
