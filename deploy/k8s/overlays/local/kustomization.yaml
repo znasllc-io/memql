@@ -449,7 +449,8 @@ patches:
     target:
       kind: Deployment
       name: identity
-  # Worker nodes: override MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER to localhost.
+  # Worker nodes: override MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER to the local
+  # identity issuer (must be byte-identical to identity's BASE_URL above).
   # Using JSON 6902 `add` (with merge semantics for existing keys in env) is
   # not directly supported, so we use a strategic-merge patch as inline YAML.
   # The env entries below use the strategic merge key (env.name) to replace
@@ -470,7 +471,7 @@ patches:
               - name: cognition
                 env:
                   - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    value: "http://localhost:8085"
+                    value: "http://identity.local.znas.io:8085"
   - target:
       kind: Deployment
       name: voice
@@ -487,7 +488,7 @@ patches:
               - name: voice
                 env:
                   - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    value: "http://localhost:8085"
+                    value: "http://identity.local.znas.io:8085"
   - target:
       kind: Deployment
       name: agent
@@ -504,7 +505,7 @@ patches:
               - name: agent
                 env:
                   - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    value: "http://localhost:8085"
+                    value: "http://identity.local.znas.io:8085"
   - target:
       kind: Deployment
       name: planner
@@ -521,7 +522,7 @@ patches:
               - name: planner
                 env:
                   - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    value: "http://localhost:8085"
+                    value: "http://identity.local.znas.io:8085"
   - target:
       kind: Deployment
       name: workbench
@@ -538,7 +539,7 @@ patches:
               - name: workbench
                 env:
                   - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    value: "http://localhost:8085"
+                    value: "http://identity.local.znas.io:8085"
   - target:
       kind: Deployment
       name: mcp
@@ -555,7 +556,7 @@ patches:
               - name: mcp
                 env:
                   - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    value: "http://localhost:8085"
+                    value: "http://identity.local.znas.io:8085"
   - target:
       kind: Deployment
       name: voice-agent
@@ -572,7 +573,7 @@ patches:
               - name: voice-agent
                 env:
                   - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    value: "http://localhost:8085"
+                    value: "http://identity.local.znas.io:8085"
   # Override the Postgres pool bounds (base is tuned for Tiger Cloud limits;
   # local in-cluster Postgres can handle larger pools).
   - path: patches/db-pool-local.yaml
