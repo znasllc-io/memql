@@ -216,6 +216,23 @@ function create_cluster() {
         --wait \
         --timeout "120s" >&2
 
+    # Allow Ingress backends of type ExternalName in the k3s-bundled traefik
+    # (off by default): the local front door routes a product's host-side
+    # dev server (e.g. its SPA on host.k3d.internal) through the same
+    # TLS-terminating ingress as the in-cluster services.
+    kubectl apply -f - >&2 <<'HELMCFG'
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    providers:
+      kubernetesIngress:
+        allowExternalNameServices: true
+HELMCFG
+
     info "Cluster '${CLUSTER_NAME}' created."
     CLUSTER_CREATED=true
     cap_changed
