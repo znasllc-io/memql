@@ -192,6 +192,11 @@ function create_cluster() {
     # gRPC head or frontend) via --extra-ports=host:container,... -- k3d LB
     # ports are fixed at cluster-create time, so they must be declared here.
     local port_args=(
+        # Front door: the in-cluster ingress (traefik, bundled with k3s)
+        # terminates TLS on 443 and routes by hostname -- same shape as the
+        # cloud ingress. 80 is kept for redirects.
+        --port "443:443@loadbalancer"
+        --port "80:80@loadbalancer"
         --port "8085:8085@loadbalancer"
         --port "7880:7880@loadbalancer"
         --port "5432:5432@loadbalancer"
@@ -412,10 +417,10 @@ function print_summary() {
         echo "  Application:    ${APP_NAME} (${TARGET_REVISION} -> ${OVERLAY_PATH})"
         echo "  Namespace:      ${NAMESPACE}"
         echo ""
-        echo "  Entry points (via k3d LoadBalancer; *.local.znas.io resolves to 127.0.0.1):"
-        echo "    http://identity.local.znas.io:8085   identity"
-        echo "    ws://localhost:7880                  livekit"
-        echo "    localhost:5432                       postgres (debug)"
+        echo "  Entry points (front door on 443; *.local.znas.io resolves to 127.0.0.1):"
+        echo "    https://identity.local.znas.io   identity (web UI + JWKS)"
+        echo "    ws://localhost:7880              livekit"
+        echo "    localhost:5432                   postgres (debug)"
         echo ""
         echo "  Engine gRPC head (mcp), on demand:"
         echo "    kubectl port-forward -n ${NAMESPACE} svc/mcp 50051:50051"

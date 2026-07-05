@@ -127,6 +127,34 @@ function resolve_master_key() {
     echo "local-dev-placeholder-not-for-production"
 }
 
+
+#=============================================================================
+# FRONT-DOOR TLS (local-znas-tls -- browser-trusted wildcard for the ingress)
+#=============================================================================
+
+# The local front door (traefik ingress on 443, see the local overlay's
+# front-door manifests) terminates TLS with a browser-trusted wildcard cert
+# for the operator's local domain. Default: the mkcert-issued
+# *.local.znas.io pair at docker/nginx/certs/dev.{crt,key} (mkcert's CA is
+# in the operator's trust store). Override via MEMQL_LOCAL_TLS_CERT /
+# MEMQL_LOCAL_TLS_KEY. Skip-with-warning when absent -- the cluster still
+# works via the port-mapped entry points.
+function seed_front_door_tls() {
+    local cert="${MEMQL_LOCAL_TLS_CERT:-${REPO_ROOT}/docker/nginx/certs/dev.crt}"
+    local key="${MEMQL_LOCAL_TLS_KEY:-${REPO_ROOT}/docker/nginx/certs/dev.key}"
+    if [ ! -f "$cert" ] || [ ! -f "$key" ]; then
+        warn "front-door TLS cert/key not found (${cert}); skipping local-znas-tls."
+        warn "  https://*.local.znas.io will not serve until seeded (set"
+        warn "  MEMQL_LOCAL_TLS_CERT/MEMQL_LOCAL_TLS_KEY and re-run 'make secrets')."
+        return 0
+    fi
+    info "seeding local-znas-tls (front-door TLS for the local ingress)..."
+    kubectl create secret tls local-znas-tls \
+        --namespace "${NAMESPACE}" \
+        --cert="$cert" --key="$key" \
+        --dry-run=client -o yaml | kubectl apply -f - >&2
+}
+
 #=============================================================================
 # INTERNAL TLS CA (identity-tls + memql-ca)
 #=============================================================================
@@ -341,6 +369,7 @@ function main() {
 
     check_prerequisites
     seed_internal_ca
+    seed_front_door_tls
     seed_db_creds
     seed_memql_secrets
     seed_livekit_secrets
