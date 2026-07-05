@@ -315,12 +315,12 @@ func (p *PlannerIntegration) admitNextForAccount(ctx context.Context, account st
 }
 
 // The produceArtifact completion card (the "Deliverable ready -> Open in
-// Library" notify card) is emitted from the CoPresent carrier side, NOT
-// here. mutationCreateCanvasState + v1:copresent:canvasState are
-// copresent-only constructs the planner core build doesn't load, so the
+// Library" notify card) is emitted from the product carrier side, NOT
+// here. mutationCreateCanvasState + the pack's canvas-state concept are
+// pack-only constructs the planner core build doesn't load, so the
 // old planner-side notifier failed at runtime with `function
 // "mutationCreateCanvasState" not found`. The card now lands via the
-// emitProduceArtifactDoneCanvasCard automation in the copresent DSL,
+// emitProduceArtifactDoneCanvasCard automation in the product pack's DSL,
 // which fires on the same v1:planner:plan succeeded transition on a
 // carrier node (memql#940).
 

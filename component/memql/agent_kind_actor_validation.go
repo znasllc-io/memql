@@ -29,7 +29,7 @@ const (
 //     `kind="specialist"` when auto-provisioning a specialist for a Plan's
 //     capability gap (integrations/agents/factory.go:buildCreateAgentArgs).
 //
-// User-actor callers -- the CoPresent CreateAgentModal flow in
+// User-actor callers -- the frontend's agent-creation-modal flow in
 // particular -- may only land `kind="assistant"` (or omit the field;
 // createAgent's default coalesces to "assistant"). Without
 // this gate, a user actor could craft a raw insert or pass

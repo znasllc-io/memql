@@ -23,7 +23,7 @@ type GuestInviteParams struct {
 	GuestName   string    // Optional suggested name; may be empty
 	InviterName string    // Display name of the inviter
 	SpaceName   string    // Display name of the space
-	JoinURL     string    // Full join link, e.g. https://app.copresent.ai/join/<token>
+	JoinURL     string    // Full join link, e.g. https://app.example.com/join/<token>
 	ExpiresAt   time.Time // Absolute expiration
 	Resend      bool      // true when this is a resend (token was just rotated)
 }

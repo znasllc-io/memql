@@ -63,8 +63,8 @@ type SMTPConfig struct {
 	Port     string // e.g. "587"
 	Username string
 	Password string
-	FromAddr string // e.g. "no-reply@copresent.ai"
-	FromName string // e.g. "CoPresent"
+	FromAddr string // e.g. "no-reply@example.com"
+	FromName string // e.g. "Example App"
 }
 
 // SMTPSender sends via plain SMTP over STARTTLS. Use this when the

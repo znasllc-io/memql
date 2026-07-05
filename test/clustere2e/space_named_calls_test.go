@@ -1,10 +1,10 @@
 //go:build clustere2e
 
 // space_named_calls_test.go provides raw named-call string builders for the
-// CoPresent `space` query/mutation surface.
+// product pack's `space` query/mutation surface.
 //
 // `space` and its queries/mutations (mutationCreateSpace, queryActiveSpaces,
-// ...) moved OUT of the memql engine core into the CoPresent carrier pack in
+// ...) moved OUT of the memql engine core into the product carrier pack in
 // memql#2038 (epic #2031), so the engine's generated Go SDK no longer emits
 // MutationCreateSpaceBuild / QueryActiveSpacesBuild. The cluster-e2e suite runs
 // against the CARRIER cluster (the k3d local overlay, deploy/k8s/overlays/local),

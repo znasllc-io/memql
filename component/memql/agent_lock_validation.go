@@ -39,7 +39,7 @@ const (
 //
 //   - Rejected writes return a typed error message naming the role,
 //     the kind of lock violated, and the specific missing ids. The
-//     caller (the cockpit, CoPresent, a tool extending an agent)
+//     caller (the cockpit, the product SPA, a tool extending an agent)
 //     gets enough context to fix the payload.
 //
 // The guard runs on every agents:agent write -- inserts AND updates --

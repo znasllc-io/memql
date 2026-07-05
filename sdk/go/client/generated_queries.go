@@ -1182,7 +1182,7 @@ func AvatarPersonaByIdBuild(args AvatarPersonaByIdArgs) string {
 	return b.String()
 }
 
-// AvatarPersonas -- List active avatar personas in the operator catalog (memql#609). Backs the Create-Assistant persona picker (copresent#239); the SPA filters to the user's selected gender client-side over this small catalog. `vendor` is an OPTIONAL filter -- omit it to list every active persona across vendors; pass vendor=\"simli\" to scope to custom Simli avatars (memql#1708: the predicate was a hardcoded vendor==simli that silently dropped every other vendor's personas from the list, even though by-id reads returned them). Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql.
+// AvatarPersonas -- List active avatar personas in the operator catalog (memql#609). Backs the Create-Assistant persona picker (frontend#239); the SPA filters to the user's selected gender client-side over this small catalog. `vendor` is an OPTIONAL filter -- omit it to list every active persona across vendors; pass vendor=\"simli\" to scope to custom Simli avatars (memql#1708: the predicate was a hardcoded vendor==simli that silently dropped every other vendor's personas from the list, even though by-id reads returned them). Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql.
 //
 // Bound concept: avatarPersona.
 type AvatarPersonasArgs struct {
@@ -1748,7 +1748,7 @@ func DocumentVersionsForOwnerBuild(args DocumentVersionsForOwnerArgs) string {
 	return b.String()
 }
 
-// DueResponsibilities -- The caller's active + enabled responsibilities of a given trigger archetype (recurring or reactive) -- the candidate set the reactive-loop evaluator (epic #632) checks for due-ness. Owned tier (ownerUserId == actor.userId). Cron-due / condition-match filtering happens Go-side (no OR operator + no cron arithmetic in the filter), mirroring dueTrainAgentRetryPlans.
+// DueResponsibilities -- The caller's active + enabled responsibilities of a given trigger archetype (recurring or reactive) -- the candidate set the reactive-loop evaluator (epic #632) checks for due-ness. Owned tier (ownerUserId == actor.userId). Cron-due / condition-match filtering happens Go-side (no OR operator + no cron arithmetic in the filter), mirroring queryDueRefreshDomains.
 //
 // Bound concept: responsibility.
 type DueResponsibilitiesArgs struct {
@@ -1769,23 +1769,6 @@ func DueResponsibilitiesBuild(args DueResponsibilitiesArgs) string {
 	b.WriteString(fmt.Sprintf("%q", args.Trigger))
 	b.WriteString(")")
 	return b.String()
-}
-
-// DueTrainAgentRetryPlans -- All queued trainAgentRetryStep Plans. The training poll loop filters by input.nextAttemptAt in Go.
-//
-// Bound concept: plan.
-type DueTrainAgentRetryPlansArgs struct {
-}
-
-// DueTrainAgentRetryPlans calls the engine query dueTrainAgentRetryPlans.
-func (qc *QueryClient) DueTrainAgentRetryPlans(ctx context.Context, args DueTrainAgentRetryPlansArgs) (*Result, error) {
-	call := DueTrainAgentRetryPlansBuild(args)
-	return qc.executeNamed(ctx, "dueTrainAgentRetryPlans", call)
-}
-
-func DueTrainAgentRetryPlansBuild(args DueTrainAgentRetryPlansArgs) string {
-	_ = args
-	return "query dueTrainAgentRetryPlans()"
 }
 
 // EventsByDay -- List the authenticated caller's events that start on a given day, bounded by the caller-supplied [dayStart, dayEnd] instants (computed in the user's timezone client-side). Self-scoped via actor.userId. Backs the calendar tool's day view and 'what's on my schedule today' agent queries.
@@ -3112,7 +3095,7 @@ func ProjectByIdBuild(args ProjectByIdArgs) string {
 	return b.String()
 }
 
-// ProjectBySlug -- Resolve a v1:forge:project by its stable slug (e.g. 'memql', 'copresent-acme'). Claude uses this to go from a human-supplied name to a projectId before submitting a request or filtering requests. Returns at most one row because slugs are unique within a partition.
+// ProjectBySlug -- Resolve a v1:forge:project by its stable slug (e.g. 'memql', 'acme-app'). Claude uses this to go from a human-supplied name to a projectId before submitting a request or filtering requests. Returns at most one row because slugs are unique within a partition.
 //
 // Bound concept: project.
 type ProjectBySlugArgs struct {
@@ -3428,23 +3411,6 @@ func RunningPlansForUserBuild(args RunningPlansForUserArgs) string {
 	return b.String()
 }
 
-// RunningTrainAgentPlans -- All currently-running trainAgent Plans across the tenant. Backs the Training Studio's per-agent in-flight lock; frontend filters by plan.input.agentId.
-//
-// Bound concept: plan.
-type RunningTrainAgentPlansArgs struct {
-}
-
-// RunningTrainAgentPlans calls the engine query runningTrainAgentPlans.
-func (qc *QueryClient) RunningTrainAgentPlans(ctx context.Context, args RunningTrainAgentPlansArgs) (*Result, error) {
-	call := RunningTrainAgentPlansBuild(args)
-	return qc.executeNamed(ctx, "runningTrainAgentPlans", call)
-}
-
-func RunningTrainAgentPlansBuild(args RunningTrainAgentPlansArgs) string {
-	_ = args
-	return "query runningTrainAgentPlans()"
-}
-
 // SearchUsers -- Search users, optionally gated by active status. Omit `active` to list every user; pass true to return only active users or false for only deactivated ones. Backs the searchUsers tool.
 //
 // Bound concept: user.
@@ -3558,7 +3524,7 @@ func SkillNeedsRefreshBuild(args SkillNeedsRefreshArgs) string {
 	return b.String()
 }
 
-// SpaceMedia -- Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view (visionarys-io/copresent src/hooks/useCopresent.ts).
+// SpaceMedia -- Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view.
 //
 // Bound concept: media.
 type SpaceMediaArgs struct {

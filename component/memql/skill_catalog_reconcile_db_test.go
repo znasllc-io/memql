@@ -21,16 +21,16 @@ import (
 // reproduction + fix guard for memql#1459.
 //
 // It boots a REAL embedded-DSL engine against a REAL Postgres (the same
-// New + Init path app.Run runs), mounts a CoPresent-flavored skill the
-// exact way the carrier (memql-bff-copresent) does -- via
+// New + Init path app.Run runs), mounts a product-pack-flavored skill the
+// exact way the carrier repo does -- via
 // dsl.RegisterTree("<domain>", overlayFS) at boot, which is how the
-// copresent-takeover / -guide / -ui / -canvas skills reach the engine --
+// pack's takeover / guide / ui / canvas skills reach the engine --
 // and then drives the full staging failure mode:
 //
 //	agent.capabilities.skillIds -> ResolveSkills (a v1:agents:skill ROW
-//	lookup) -> ExpandCapabilitySlugs (copresent-takeover -> uiClick/uiType/...)
+//	lookup) -> ExpandCapabilitySlugs (the takeover slug -> uiClick/uiType/...)
 //
-// The bug (#1459): on staging the v1:agents:skill rows for the copresent
+// The bug (#1459): on staging the v1:agents:skill rows for the pack's
 // skills were ABSENT, so ResolveSkills resolved them to NOTHING and the
 // realtime voice model got zero UI primitives. NO MOCKS: the #1455 test
 // passed only because it hand-fed a canned skill->tool map; here the tool
@@ -64,11 +64,25 @@ func reconcileTestDB(t *testing.T) *bun.DB {
 	return db
 }
 
-// carrierSkillOverlay mirrors the carrier's dsl/copresent/skills.memql
-// shape for one operator skill: a global `seed skill` whose toolSlugs
-// carry the "copresent-takeover" capability slug that ExpandCapabilitySlugs
-// fans out to the operator primitives. Mounted via RegisterTree exactly as
-// the carrier mounts its copresent domain.
+// carrierSkillOverlay mirrors the shape of the carrier repo's pack
+// skills.memql for one operator skill: a global `seed skill` whose toolSlugs
+// carry the takeover capability slug (see the fixture body) that
+// ExpandCapabilitySlugs fans out to the operator primitives. Mounted via
+// RegisterTree exactly as the carrier mounts its pack domain.
+
+// registerExampleOperatorSlug installs the synthetic capability slug the
+// overlay fixtures carry in toolSlugs. Pre-decoupling the fixtures used the
+// product slug that the engine's static map expanded; post-decoupling
+// product bundles register from the pack, so the engine mechanism test
+// registers its own neutral bundle -- the same seam a product uses.
+func registerExampleOperatorSlug(t *testing.T) {
+	t.Helper()
+	RegisterCapabilitySlug("exampleapp-takeover",
+		[]string{"uiClick", "uiType", "uiNavigate"},
+		CapabilityTagOperator)
+	t.Cleanup(func() { UnregisterCapabilitySlug("exampleapp-takeover") })
+}
+
 func carrierSkillOverlay(slug string) fstest.MapFS {
 	body := `use agents.concepts.{ skill }
 
@@ -77,9 +91,9 @@ seed skill ` + slug + ` {
   name:          "Reconcile Probe Takeover"
   description:   "carrier-overlay operator skill for the #1459 reconcile guard"
   category:      "product"
-  tags:          ["copresent", "operator"]
-  domainIds:     ["copresent-ui"]
-  toolSlugs:     ["copresent-takeover"]
+  tags:          ["exampleapp", "operator"]
+  domainIds:     ["exampleapp-ui"]
+  toolSlugs:     ["exampleapp-takeover"]
   liveSourceIds: []
   tier:          "A"
   predefined:    true
@@ -89,6 +103,7 @@ seed skill ` + slug + ` {
 }
 
 func TestSeedMaterializer_CarrierOverlaySkillRowsResolve(t *testing.T) {
+	registerExampleOperatorSlug(t)
 	const slug = "reconcile-probe-takeover"
 	const domain = "reconcileprobe"
 	rowId := conceptAgentsSkill + ":" + slug
@@ -159,7 +174,7 @@ func TestSeedMaterializer_CarrierOverlaySkillRowsResolve(t *testing.T) {
 	}
 
 	// After the fix the full chain resolves: ResolveSkills returns the
-	// toolSlug, and ExpandCapabilitySlugs fans copresent-takeover out to
+	// toolSlug, and ExpandCapabilitySlugs fans the takeover slug out to
 	// the operator primitives (uiClick / uiType / ...).
 	fixedBundle, err := eng.ResolveSkills(ctx, []string{slug})
 	if err != nil {
@@ -204,9 +219,9 @@ seed skill ` + slug + ` {
   name:          "Stale Reconcile Probe Takeover"
   description:   "carrier-overlay operator skill for the #1462 stale-heal guard"
   category:      "product"
-  tags:          ["copresent", "operator"]
-  domainIds:     ["copresent-ui"]
-  toolSlugs:     ["copresent-takeover"]
+  tags:          ["exampleapp", "operator"]
+  domainIds:     ["exampleapp-ui"]
+  toolSlugs:     ["exampleapp-takeover"]
   liveSourceIds: []
   tier:          "A"
   predefined:    true
@@ -220,12 +235,12 @@ seed skill ` + slug + ` {
 //
 // #1460's reconcile only backfilled MISSING rows. But the staging failure
 // for voice-driven Takeover (#1462) was NOT a missing row -- the
-// copresent-takeover row EXISTED (reconcile reported alreadyOK), yet the
+// takeover skill row EXISTED (reconcile reported alreadyOK), yet the
 // realtime voice scope still resolved zero UI tools (exposed_count=19, all
 // core). Root cause: a row materialized under an EARLIER seed shape (the
-// pre-#187 copresent-control era, or a half-written empty-toolSlugs row)
+// pre-#187 control-slug era, or a half-written empty-toolSlugs row)
 // stays present-by-id, so the create-only reconcile skipped it and
-// ResolveSkills read the STALE/empty toolSlugs -- copresent-takeover never
+// ResolveSkills read the STALE/empty toolSlugs -- the takeover slug never
 // reached ExpandCapabilitySlugs, so the model got no operator primitives.
 //
 // This test plants a stale row (toolSlugs EMPTY -- the worst case),
@@ -237,6 +252,7 @@ seed skill ` + slug + ` {
 //
 // Postgres-gated (skips with no DB), like the #1459 guard above.
 func TestSeedMaterializer_StaleCarrierSkillRowHeals(t *testing.T) {
+	registerExampleOperatorSlug(t)
 	const slug = "stale-heal-probe-takeover"
 	const domain = "stalehealprobe"
 	rowId := conceptAgentsSkill + ":" + slug
@@ -278,7 +294,7 @@ func TestSeedMaterializer_StaleCarrierSkillRowHeals(t *testing.T) {
 		"tier":       "A",
 		"category":   "product",
 		"toolSlugs":  []any{}, // the bug state: empty
-		"domainIds":  []any{"copresent-ui"},
+		"domainIds":  []any{"exampleapp-ui"},
 		"predefined": true,
 	}); err != nil {
 		t.Fatalf("plant stale row: %v", err)

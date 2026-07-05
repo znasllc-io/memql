@@ -80,7 +80,7 @@ func TestHasOperator_NotesByTag(t *testing.T) {
 // #1675 (saved/archived space lists gate on status + not-deleted, NOT
 // active==true). The entire space lifecycle -- the `space` concept, the
 // save/archive mutations, and the saved/archived queries -- moved OUT of the
-// engine core into the CoPresent pack (memql-bff-copresent/dsl/copresent) in
+// engine core into the product pack (the carrier repo's DSL tree) in
 // #2038, so this engine-repo test referenced constructs that no longer load
 // here and could never pass. The behavioural coverage belongs in the pack
 // repo; it is re-homed there (follow-up: memql#2344). Removed rather

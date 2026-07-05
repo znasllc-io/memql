@@ -314,14 +314,14 @@ builtin knowledgeIngest {
 // builtinKnowledgeSeedStandardDomains - Startup Seeder
 // =====================================================
 //
-// Seed the shipped knowledge-domain catalog and the CoPresent UI corpus.
+// Seed the shipped knowledge-domain catalog and registered seed corpora.
 // Invoked from the seedKnowledgeDomains automation at system.startup.
 // Idempotent: skips domains that already exist.
 
 @enabled
 @executor("integration.knowledge.seedStandardDomains")
 @args(profile="object")
-@description("Seed standard knowledge domains and CoPresent UI corpus on startup. Idempotent.")
+@description("Seed standard knowledge domains and registered seed corpora on startup. Idempotent.")
 builtin knowledgeSeedStandardDomains {
   forceIngest  bool
 }
@@ -386,19 +386,19 @@ builtin previewInsert {
 // ---- queries/v1/common/builtin/builtinRouterListModels.memql ----
 
 @executor("integration.router.listModels")
-@description("List every AI provider registered at engine startup with its vendor, model id, pricing, and availability. Feeds the CoPresent /router/catalog page.")
+@description("List every AI provider registered at engine startup with its vendor, model id, pricing, and availability. Feeds the frontend's /router/catalog page.")
 builtin routerListModels { }
 
 // ---- queries/v1/common/builtin/builtinRouterListPolicies.memql ----
 
 @executor("integration.router.listPolicies")
-@description("List all routing policies loaded from policies/v1/*.memql. Feeds the CoPresent /router/policies page.")
+@description("List all routing policies loaded from policies/v1/*.memql. Feeds the frontend's /router/policies page.")
 builtin routerListPolicies { }
 
 // ---- queries/v1/common/builtin/builtinRouterSetApiKey.memql ----
 
 @executor("integration.router.setApiKey")
-@description("Encrypt a plaintext vendor API key and persist it as a partition secret (BYOK). Returns the inserted secret row id. Feeds the CoPresent /router/settings page.")
+@description("Encrypt a plaintext vendor API key and persist it as a partition secret (BYOK). Returns the inserted secret row id. Feeds the frontend's /router/settings page.")
 builtin routerSetApiKey {
   vendor        string  @required
   plaintextKey  string  @required
@@ -641,117 +641,6 @@ builtin sttTranscribe {
 @executor("tools")
 @description("Returns MCP-compatible tool definitions with name, description, and inputSchema. Use help(name) for handler details.")
 builtin tools {
-}
-
-// ---- queries/v1/common/builtin/builtinTrainAgent.memql ----
-
-// builtinTrainAgent - Per-agent training pipeline (Plan-bracketed)
-// =================================================================
-//
-// First-class DSL operator for the CoPresent Training panel's "Train"
-// button. Bracketed by a Plan + Task lifecycle so the user gets:
-//
-//   1. A `plan.created` canvas card the moment they hit Train, with
-//      a heuristic time estimate so they can see something is
-//      happening (no more "I clicked Train and nothing happened").
-//   2. Three Task records under the Plan -- one per pipeline step
-//      (capabilities + chunk pre-warm, identity vector, distilled
-//      system prompt) -- visible on the Tasks page for live progress.
-//   3. A `training.completed` canvas card on plan success
-//      (importance: notify, so the bell pings) summarising what
-//      changed. Title carries the agent name; body carries the
-//      chunk / vector / prompt counts.
-//
-// Pipeline steps inside the Plan:
-//
-//   A. Update agent.capabilities.domains + .tools to match the user's
-//      staged sets. For every NEW domain, eagerly embed any chunks
-//      attached to that domain that aren't yet in node_vectors -- the
-//      agent's first chat is fast + accurate because the index is
-//      primed instead of lazy-firing on first search.
-//   B. Compute + persist a per-agent identity embedding (vector of
-//      name + role + personality + capability labels) keyed to the
-//      agent's id. Lets the planner / router do similarity-based
-//      agent selection in milliseconds.
-//   C. One LLM call that distills the agent's profile into a tuned
-//      system prompt cached on agent.systemPrompt -- runtime quality
-//      + latency win at chat time, paid for once at training time.
-//
-// B + C are best-effort; if either fails, A's writes are still
-// durable and the corresponding Task transitions to 'failed' while
-// the Plan still completes 'succeeded' (the user's edit landed).
-//
-// Frontend invocation:
-//
-//   client.executeQueryAsync({
-//     query: 'trainAgent({
-//       agentId: "<id>",
-//       domains: [...],
-//       tools: [...],
-//       partitionId: "<space>",       // for Plan + canvas-card scope
-//       requestedBy: "<user>"     // for actor + ownership
-//     })'
-//   })
-//
-// partitionId / requestedBy are optional -- when omitted the handler
-// runs the pipeline without a Plan record (back-compat, lets DSL
-// callers from automations / tests skip the bookkeeping). The
-// CoPresent Training studio always passes both.
-//
-// Returns a synthetic v1:training:result node whose payload carries
-// the same summary the lifecycle cards already render -- frontend
-// reads it for the in-card toast confirmation.
-
-@enabled
-@executor("integration.training.trainAgent")
-@sdk
-@args(profile="object", additionalProperties="true")
-@description("Train an agent: replace capabilities.domains + .tools, eager-embed chunks, refresh identity vector, distill system prompt. Bracketed by a Plan + 3 Tasks for canvas + Tasks-page visibility.")
-builtin trainAgent {
-  agentId      string  @required
-  domains      array
-  tools        array
-  provider     string
-  partitionId      string
-  requestedBy  string
-}
-
-// ---- queries/v1/common/builtin/builtinTrainAgentRetryStep.memql ----
-
-// builtinTrainAgentRetryStep - Background retry of one training step
-// =====================================================================
-//
-// Re-runs ONE step of the training pipeline (Step B identity vector
-// OR Step C distilled prompt) for an agent whose original training
-// run failed that step. Invoked two ways:
-//
-//   1. The training integration's background poll loop calls it
-//      directly when it picks up a queued trainAgentRetryStep Plan
-//      whose input.nextAttemptAt is past (see
-//      dueTrainAgentRetryPlans).
-//
-//   2. The frontend's "Retry now" button on the training.completed
-//      card can call it directly to skip the backoff window and
-//      retry immediately.
-//
-// Returns the same single-row v1:training:result-shaped node the
-// main trainAgent capability returns, populated with just the
-// fields relevant to the retried step (`identityVectorWrote` for
-// step="identityVector"; `systemPromptWrote` for step="distillPrompt").
-// The caller (poll loop OR frontend) inspects it to decide whether
-// to mark the parent retry-Plan succeeded / re-queued.
-
-@enabled
-@executor("integration.training.trainAgentRetryStep")
-@sdk
-@args(profile="object", additionalProperties="true")
-@description("Re-run a single failed training step (Step B identity vector OR Step C distilled prompt) for an agent. Used by the background retry poll loop and the frontend Retry button.")
-builtin trainAgentRetryStep {
-  agentId         string  @required
-  step            string  @required
-  provider        string
-  retryPlanId     string
-  originalPlanId  string
 }
 
 // ---- queries/v1/common/builtin/builtinValidate.memql ----

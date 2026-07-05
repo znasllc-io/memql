@@ -196,8 +196,8 @@ func rowID(row memqlclient.Row) string {
 }
 
 // openSpaceOnConn performs the client-side "open this space" sequence on one
-// connection, mirroring what the CoPresent SPA does on space open
-// (useCopresent.joinAsHuman): an idempotent join-as-human write. The insert is
+// connection, mirroring what the product SPA does on space open
+// (its join-as-human hook): an idempotent join-as-human write. The insert is
 // content-addressed on (space, user) -- a repeat join versions the SAME
 // participant row -- and executes on the engine of WHICHEVER bff replica owns
 // this connection, landing there as a LOCAL graph event: the space-interest

@@ -4,7 +4,7 @@ import "testing"
 
 // presenceRecordId must return a bare shortId so the engine's
 // Concept.validateShortId accepts the insert. Regression guard for
-// memql#392 / copresent#114 -- before this fix, the function returned
+// memql#392 / frontend#114 -- before this fix, the function returned
 // the colon-bearing participant id verbatim, which failed
 // validateShortId and made every upsert silently no-op.
 func TestPresenceRecordId(t *testing.T) {

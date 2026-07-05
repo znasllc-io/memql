@@ -813,7 +813,7 @@ func (c *CognitionIntegration) recordHandoffOutcome(session *polyphon.PolyphonSe
 }
 
 // emitUnmetCapability publishes a cognition.capability.unmet event. The
-// downstream consumer is a copresent automation that writes a
+// downstream consumer is a product-pack automation that writes a
 // v1:cognition:unmetCapability row (the guardrail health rollup reads
 // those rows). Fire-and-forget: we never block the routing path on the
 // event bus.
@@ -847,7 +847,7 @@ func (c *CognitionIntegration) emitUnmetCapability(
 	}
 
 	payload := map[string]any{
-		"partitionId":         strings.TrimSpace(utterance.ScopeId),
+		"partitionId":     strings.TrimSpace(utterance.ScopeId),
 		"utteranceId":     strings.TrimSpace(utterance.ID),
 		"utterance":       strings.TrimSpace(utterance.Text),
 		"speakerName":     strings.TrimSpace(utterance.SpeakerName),
@@ -931,8 +931,8 @@ func (c *CognitionIntegration) emitUnmetCapability(
 }
 
 // topicCapabilityUnmet is the event topic for "no agent can fulfil this
-// utterance well enough." Downstream automations under
-// automations/v1/copresent/ subscribe to this topic and write
+// utterance well enough." Downstream automations in the product pack's
+// automations file subscribe to this topic and write
 // v1:cognition:unmetCapability rows.
 const topicCapabilityUnmet = "cognition.capability.unmet"
 

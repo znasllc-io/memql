@@ -20,7 +20,7 @@ type MemQLExecutor interface {
 // EngineAttachmentStore writes attachment rows by calling the DSL mutation
 // `mutationCreateAttachment`. The mutation owns the concept choice; this
 // store is concept-agnostic and simply plumbs the upload metadata
-// through. Product DSL (mutations/v1/copresent/, etc.) defines the
+// through. Product DSL (the pack's mutations file) defines the
 // mutation and the concept it targets.
 type EngineAttachmentStore struct {
 	engine MemQLExecutor

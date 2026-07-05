@@ -155,7 +155,7 @@ templ AdminSettings(data AdminSettingsData) {
 				<h2>Registered OAuth clients</h2>
 				<div class="form-row">
 					<label for="registered_clients_json">Clients JSON</label>
-					<textarea id="registered_clients_json" name="registered_clients_json" rows="5" placeholder={ `[{"clientId":"copresent","redirectURIs":["https://app.copresent.ai/auth/callback"]}]` }>{ data.Form.RegisteredClientsJSON }</textarea>
+					<textarea id="registered_clients_json" name="registered_clients_json" rows="5" placeholder={ `[{"clientId":"my-spa","redirectURIs":["https://app.example.com/auth/callback"]}]` }>{ data.Form.RegisteredClientsJSON }</textarea>
 					<span class="help">{ "JSON array of {clientId, redirectURIs}. Edit carefully — bad JSON breaks new logins." }</span>
 				</div>
 				<hr/>
@@ -194,7 +194,7 @@ templ AdminSettings(data AdminSettingsData) {
 						<option value="lax" selected?={ data.Form.RefreshCookieSameSite == "lax" }>Lax (same-site self-hosted)</option>
 						<option value="none" selected?={ data.Form.RefreshCookieSameSite == "none" }>None (cross-site SaaS)</option>
 					</select>
-					<span class="help">Lax suits app.acme.com + identity.acme.com (single eTLD+1) and avoids Safari ITP. None is needed when the SPA + identity live on different eTLD+1s (app.copresent.ai + auth.znasllc.io). Effective: { data.Form.EffectiveSameSiteLabel }</span>
+					<span class="help">Lax suits app.acme.com + identity.acme.com (single eTLD+1) and avoids Safari ITP. None is needed when the SPA + identity live on different eTLD+1s (app.example.com + id.example-auth.io). Effective: { data.Form.EffectiveSameSiteLabel }</span>
 				</div>
 				<button type="submit" class="btn btn-primary" data-pending-label="Saving...">Save settings</button>
 			</form>

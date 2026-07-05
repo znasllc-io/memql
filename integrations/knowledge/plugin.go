@@ -9,7 +9,7 @@ import (
 
 // init self-registers the knowledge integration as an always-on plug-in.
 // The DSL capabilities (ingest, lookup) are used by the agent builder's
-// domain picker, by seed automations that populate copresent-ui docs on
+// domain picker, by seed automations that populate seed-domain docs on
 // startup, and by the agent replier's up-front operator-turn retrieval step.
 //
 // Like the embedding integration, DB access is wired via a lazy getter

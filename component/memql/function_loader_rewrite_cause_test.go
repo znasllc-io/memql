@@ -18,17 +18,17 @@ import (
 // Before the fix the rewrite error was swallowed in tryParseNewFunctionSyntax
 // and the un-normalised struct source fell through to the legacy parser,
 // which rejected the leading `mutation` keyword with a misleading token
-// complaint. The CoPresent overlay's mutations.memql tripped exactly this:
+// complaint. The product pack's mutations.memql tripped exactly this:
 // ~22 slices were skipped at load with "unexpected token mutation", masking
 // that the bodies used the retired `insert canvasState { ... }` shape.
 func TestNamedInsertFormSurfacesRewriteCause(t *testing.T) {
 	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{
-		"v1:copresent:canvasState": {Name: "v1:copresent:canvasState"},
+		"v1:exampleapp:canvasState": {Name: "v1:exampleapp:canvasState"},
 	})
 
 	// Named-write form -- retired (#988). The bare `insert { ... }` form is
 	// canonical; restating the concept after `insert` must be rejected.
-	src := `use copresent.concepts.{ canvasState }
+	src := `use exampleapp.concepts.{ canvasState }
 
 mutate canvasState mutationCreateCanvasState {
   args {
@@ -43,7 +43,7 @@ mutate canvasState mutationCreateCanvasState {
 
 	_, err := tryParseNewFunctionSyntax(
 		"mutationCreateCanvasState", "mutation",
-		src, "copresent/mutations.memql", registry,
+		src, "exampleapp/mutations.memql", registry,
 	)
 	require.Error(t, err, "named-write form must fail to load")
 
@@ -62,10 +62,10 @@ mutate canvasState mutationCreateCanvasState {
 // the named form again".
 func TestBareInsertFormLoadsClean(t *testing.T) {
 	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{
-		"v1:copresent:canvasState": {Name: "v1:copresent:canvasState"},
+		"v1:exampleapp:canvasState": {Name: "v1:exampleapp:canvasState"},
 	})
 
-	src := `use copresent.concepts.{ canvasState }
+	src := `use exampleapp.concepts.{ canvasState }
 
 mutate canvasState mutationCreateCanvasState {
   args {
@@ -80,9 +80,9 @@ mutate canvasState mutationCreateCanvasState {
 
 	fn, err := tryParseNewFunctionSyntax(
 		"mutationCreateCanvasState", "mutation",
-		src, "copresent/mutations.memql", registry,
+		src, "exampleapp/mutations.memql", registry,
 	)
 	require.NoError(t, err, "bare insert form must load clean")
 	require.NotNil(t, fn.MutationTemplate)
-	require.Equal(t, "v1:copresent:canvasState", fn.MutationTemplate.Concept)
+	require.Equal(t, "v1:exampleapp:canvasState", fn.MutationTemplate.Concept)
 }

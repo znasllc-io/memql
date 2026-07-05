@@ -330,8 +330,8 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 		))
 		// produceArtifact completion card (memql#792 / #940): the
 		// "Deliverable ready -> Open in Library" notify card now emits from
-		// the CoPresent carrier (the emitProduceArtifactDoneCanvasCard
-		// automation), not here. mutationCreateCanvasState is copresent-only
+		// the product carrier (the emitProduceArtifactDoneCanvasCard
+		// automation), not here. mutationCreateCanvasState is pack-only
 		// and the planner core build can't load it, so the old planner-side
 		// subscriber failed at runtime with "function not found".
 		// Admit-next-on-slot-free (epic memql#902 / #905). When a Plan

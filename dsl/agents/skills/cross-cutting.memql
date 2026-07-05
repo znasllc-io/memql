@@ -36,7 +36,7 @@ seed skill web-research {
   predefined:    true
 }
 
-@description("Customer-support operations: ticket triage, response drafting against the customer-relations history, escalation handoffs, audit-trail mindfulness. Pairs naturally with copresent-ui when the user runs support out of CoPresent.")
+@description("Customer-support operations: ticket triage, response drafting against the customer-relations history, escalation handoffs, audit-trail mindfulness. Pairs naturally with a product's UI knowledge baseline when the user runs support inside the product.")
 seed skill customer-support-ops {
   slug:          "customer-support-ops"
   name:          "Customer Support Ops"

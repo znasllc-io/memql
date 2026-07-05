@@ -17,8 +17,8 @@ import (
 // component/server/sihttp/knowledge_suggest.go so the structured-output output
 // is byte-equivalent to the pre-extraction switch.
 //
-// The 9 CoPresent product suggest domains live in the pack
-// (memql-bff-copresent) and register under the `copresent` build tag.
+// The 9 product suggest domains live in the pack (the carrier repo)
+// and register under the pack's build tag.
 
 func init() {
 	RegisterSuggestDomain("knowledge", buildKnowledgeSuggest)
@@ -47,7 +47,7 @@ func buildKnowledgeSuggest(ctx SuggestContext) (SuggestPlan, error) {
 }
 
 // extractKnowledgeExistingDomains extracts existing knowledge domain
-// descriptors from a suggest payload map. The CoPresent KnowledgeModal passes
+// descriptors from a suggest payload map. The frontend's knowledge modal passes
 // the workspace's existing domains under "existingDomains" so the model can
 // avoid name collisions and pick a category consistent with how related domains
 // are categorised.
@@ -79,8 +79,8 @@ func extractKnowledgeExistingDomains(payload map[string]any) []knowledgeExisting
 
 // knowledgeSuggestSchemaJSON is the JSON Schema enforced on knowledge domain
 // suggestion output. Mirrors the fields buildKnowledgeSuggestMessages asks the
-// model for. Drives the describe-phase + AI-suggest flow on the CoPresent
-// KnowledgeModal.
+// model for. Drives the describe-phase + AI-suggest flow on the frontend's
+// knowledge modal.
 //
 // Fields:
 //   - name        : short title for the domain (1-4 words). Becomes the row

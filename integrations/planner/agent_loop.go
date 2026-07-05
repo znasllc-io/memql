@@ -874,7 +874,7 @@ func (l *PlannerAgentLoop) assignOwnerAgent(ctx context.Context, planId, agentId
 
 // loadPlan resolves a Plan by id via the planById DSL function.
 // The function lives in core's dsl/planner/queries.memql (moved there
-// from copresent on 2026-05-17). Earlier versions of this method used
+// from the product pack on 2026-05-17). Earlier versions of this method used
 // a `from(v1:planner:plan) ?.id==X` syntax that the engine doesn't
 // support -- the engine's only entry point for reading a concept is
 // a named query function, not an inline `from()` clause.

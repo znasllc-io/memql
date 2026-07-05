@@ -1073,7 +1073,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// agents doesn't fit that definition, so a Sofia asked to
 	// "create an agent for ops" gets toolsNeeded=false (correctly,
 	// by the prompt's lights) and stripping her tools breaks the
-	// whole CoPresent Control flow. The right place to keep agents
+	// whole UI-control (Operator) flow. The right place to keep agents
 	// from tool-spamming greetings is the agent-side prompt's
 	// tool-use decision tree (the operatorEnabled-gated branch
 	// near the top of agentReply.tmpl), not a hard Go-side gate.

@@ -1237,7 +1237,7 @@ func CreateAdHocPlanBuild(args CreateAdHocPlanArgs) string {
 	return b.String()
 }
 
-// CreateAgent -- Create a new AI agent template. The `kind` arg defaults to `assistant` -- the safe value for the CoPresent CreateAgentModal flow. The SeedMaterializer (running under the `system:seedMaterializer` actor) passes `kind: \"system\"` when materializing platform agents (MemQL Planner / MemQL Trainer). The planner integration (running under the `system:planner` actor; memql#399) passes `kind: \"specialist\"` when auto-provisioning a specialist for a Plan's capability gap. User-actor calls that try to pass `kind in (\"system\", \"specialist\
+// CreateAgent -- Create a new AI agent template. The `kind` arg defaults to `assistant` -- the safe value for the frontend's create-agent modal flow. The SeedMaterializer (running under the `system:seedMaterializer` actor) passes `kind: \"system\"` when materializing platform agents (MemQL Planner / MemQL Trainer). The planner integration (running under the `system:planner` actor; memql#399) passes `kind: \"specialist\"` when auto-provisioning a specialist for a Plan's capability gap. User-actor calls that try to pass `kind in (\"system\", \"specialist\
 //
 // Bound concept: agent.
 type CreateAgentArgs struct {
@@ -3127,7 +3127,7 @@ func CreateDeploymentNodeSpecBuild(args CreateDeploymentNodeSpecArgs) string {
 	return b.String()
 }
 
-// CreateDocumentChunk -- Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the CoPresent UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceUtteranceId / sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.
+// CreateDocumentChunk -- Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the product UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceUtteranceId / sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.
 //
 // Bound concept: documentChunk.
 type CreateDocumentChunkArgs struct {
@@ -4734,7 +4734,7 @@ func CreateScopeElevationPlanBuild(args CreateScopeElevationPlanArgs) string {
 	return b.String()
 }
 
-// CreateSemanticTask -- Create a semantic Task -- the Planner-decision unit. Differs from createTask (in bff-copresent) by carrying the new category/logicalStepId/attemptNumber fields explicitly. Used by the Planner Agent at decomposition time and by the taskstamp Stamper to materialize the parent semantic Task for ad-hoc tool calls.
+// CreateSemanticTask -- Create a semantic Task -- the Planner-decision unit. Differs from createTask (in the product pack) by carrying the new category/logicalStepId/attemptNumber fields explicitly. Used by the Planner Agent at decomposition time and by the taskstamp Stamper to materialize the parent semantic Task for ad-hoc tool calls.
 //
 // Bound concept: task.
 type CreateSemanticTaskArgs struct {
@@ -10710,7 +10710,7 @@ func UpdateAgentAuthScopeBuild(args UpdateAgentAuthScopeArgs) string {
 	return b.String()
 }
 
-// UpdateAgentAuthorization -- Partial update of a v1:agents:agentAuthorization row. Mirrors updateAgent semantics: only the fields passed in `payload` change; everything else inherits from the prior row. Backs the canvas mintSkillApprovalRequested card's 'Approve & always allow this tier' action (memql-bff-copresent#38, memql#169) -- the SPA reads the current skillTierAllowlist, appends the approved tier, and writes the whole array back as `{skillTierAllowlist: [...]}`. Per the agentAuthorization concept's revocation contract this is an OWNED write: only the granting user (the row's payload.userId) may update their own authorization grant.
+// UpdateAgentAuthorization -- Partial update of a v1:agents:agentAuthorization row. Mirrors updateAgent semantics: only the fields passed in `payload` change; everything else inherits from the prior row. Backs the canvas mintSkillApprovalRequested card's 'Approve & always allow this tier' action (pack#38, memql#169) -- the SPA reads the current skillTierAllowlist, appends the approved tier, and writes the whole array back as `{skillTierAllowlist: [...]}`. Per the agentAuthorization concept's revocation contract this is an OWNED write: only the granting user (the row's payload.userId) may update their own authorization grant.
 //
 // Bound concept: agentAuthorization.
 type UpdateAgentAuthorizationArgs struct {

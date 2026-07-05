@@ -15,7 +15,9 @@
 #   1. down --purge   -- tear down the k3d cluster. Destroys the in-cluster
 #                        Postgres, so the DB is wiped by construction.
 #   2. up             -- create/converge cluster + ArgoCD + seed secrets +
-#                        register the memql-local Application.
+#                        register the ArgoCD Application (default memql-local;
+#                        downstream repos pass --app-name/--overlay-path/
+#                        --repo-url to register their own).
 #   3. wait           -- block until ArgoCD has created the app Deployments,
 #                        so the rebuild step has something to restart.
 #   4. dev            -- build engine (+ carrier) images and `k3d image
@@ -48,13 +50,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "k3d.bringup" "Bring the local k3d + ArgoCD cluster fully up: bootstrap, build + import engine images, wait healthy. --clean nukes first."
-cap_spec_param "cluster"    "k3d cluster name"
-cap_spec_param "namespace"  "k8s namespace"
-cap_spec_param "revision"   "git revision for the ArgoCD Application"
-cap_spec_param "servers"    "k3d server node count"
-cap_spec_param "agents"     "k3d agent node count"
-cap_spec_param "clean"      "tear down the cluster first (clean slate, fresh DB) (flag)"
-cap_spec_param "no-secrets" "skip secret seeding (flag)"
+cap_spec_param "cluster"         "k3d cluster name"
+cap_spec_param "namespace"       "k8s namespace"
+cap_spec_param "revision"        "git revision for the ArgoCD Application"
+cap_spec_param "servers"         "k3d server node count"
+cap_spec_param "agents"          "k3d agent node count"
+cap_spec_param "clean"           "tear down the cluster first (clean slate, fresh DB) (flag)"
+cap_spec_param "no-secrets"      "skip secret seeding (flag)"
+cap_spec_param "repo-url"        "git repo URL for the ArgoCD Application (downstream repos pass their own)"
+cap_spec_param "app-name"        "ArgoCD Application name (downstream repos pass their own)"
+cap_spec_param "overlay-path"    "kustomize overlay path within the repo"
+cap_spec_param "extra-ports"     "additional host:container loadbalancer port mappings, comma-separated"
+cap_spec_param "app-project"     "ArgoCD AppProject the Application belongs to"
+cap_spec_param "project-manifest" "path to the AppProject manifest to apply (downstream repos pass their own)"
+cap_spec_param "carrier-repo"    "downstream carrier repo whose Dockerfile builds the carrier nodes"
+cap_spec_param "carrier-nodes"   "node types built from the carrier Dockerfile, comma-separated"
+cap_spec_param "carrier-context" "docker build context for carrier builds"
 #=============================================================================
 # CONFIGURATION (env-resolved defaults; cap_param flags/stdin override in main)
 #=============================================================================
@@ -66,6 +77,15 @@ AGENTS="${AGENTS:-}"
 REVISION="${REVISION:-}"
 CLEAN=""
 NO_SECRETS=""
+REPO_URL=""
+APP_NAME=""
+OVERLAY_PATH=""
+EXTRA_PORTS=""
+APP_PROJECT=""
+PROJECT_MANIFEST=""
+CARRIER_REPO=""
+CARRIER_NODES=""
+CARRIER_CONTEXT=""
 HEALTHY=false
 
 # Step labels, set in main() once --clean is known (5 steps clean, 4 fresh).
@@ -117,6 +137,12 @@ function bringup() {
         ${REVISION:+--revision="${REVISION}"} \
         ${SERVERS:+--servers="${SERVERS}"} \
         ${AGENTS:+--agents="${AGENTS}"} \
+        ${REPO_URL:+--repo-url="${REPO_URL}"} \
+        ${APP_NAME:+--app-name="${APP_NAME}"} \
+        ${OVERLAY_PATH:+--overlay-path="${OVERLAY_PATH}"} \
+        ${EXTRA_PORTS:+--extra-ports="${EXTRA_PORTS}"} \
+        ${APP_PROJECT:+--app-project="${APP_PROJECT}"} \
+        ${PROJECT_MANIFEST:+--project-manifest="${PROJECT_MANIFEST}"} \
         ${NO_SECRETS:+--no-secrets} >&2
 }
 
@@ -161,7 +187,10 @@ function rebuild_images() {
     # rollout; it skips a Deployment that doesn't exist yet.
     bash "${SCRIPT_DIR}/dev.sh" \
         --cluster="${CLUSTER_NAME}" \
-        --namespace="${NAMESPACE}" >&2
+        --namespace="${NAMESPACE}" \
+        ${CARRIER_REPO:+--carrier-repo="${CARRIER_REPO}"} \
+        ${CARRIER_NODES:+--carrier-nodes="${CARRIER_NODES}"} \
+        ${CARRIER_CONTEXT:+--carrier-context="${CARRIER_CONTEXT}"} >&2
 }
 
 #=============================================================================
@@ -208,6 +237,15 @@ function main() {
     AGENTS="$(cap_param agents "$AGENTS")"
     CLEAN="$(cap_flag clean)"
     NO_SECRETS="$(cap_flag no-secrets)"
+    REPO_URL="$(cap_param repo-url "${MEMQL_K3D_REPO_URL:-}")"
+    APP_NAME="$(cap_param app-name "${MEMQL_K3D_APP_NAME:-}")"
+    OVERLAY_PATH="$(cap_param overlay-path "${MEMQL_K3D_OVERLAY_PATH:-}")"
+    EXTRA_PORTS="$(cap_param extra-ports "${MEMQL_K3D_EXTRA_PORTS:-}")"
+    APP_PROJECT="$(cap_param app-project "${MEMQL_K3D_APP_PROJECT:-}")"
+    PROJECT_MANIFEST="$(cap_param project-manifest "${MEMQL_K3D_PROJECT_MANIFEST:-}")"
+    CARRIER_REPO="$(cap_param carrier-repo "${MEMQL_CARRIER_REPO:-}")"
+    CARRIER_NODES="$(cap_param carrier-nodes "${MEMQL_CARRIER_NODES:-}")"
+    CARRIER_CONTEXT="$(cap_param carrier-context "${MEMQL_CARRIER_CONTEXT:-}")"
     cap_require cluster "$CLUSTER_NAME"
     cap_require namespace "$NAMESPACE"
 

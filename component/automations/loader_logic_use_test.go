@@ -53,20 +53,20 @@ func TestDryRunCompileResolvesLogicConstructUseImports(t *testing.T) {
 	// branch the bug lived in.
 	wantAutomations := map[string]bool{
 		// v1:library:logic family (Index*). indexDocumentOnCreate +
-		// indexLiveSourceOnCreate moved to the CoPresent pack in B3 (#2039) with
+		// indexLiveSourceOnCreate moved to the product pack in B3 (#2039) with
 		// the knowledge document/liveSource concepts; the remaining library
 		// `.logic.{ }` importers still exercise the branch.
 		"indexGeneratedOutputOnCreate": false,
-		"indexNoteOnCreate": false, "indexTodoOnCreate": false,
+		"indexNoteOnCreate":            false, "indexTodoOnCreate": false,
 		"indexCalendarEventOnCreate": false, "indexMemoryOnCreate": false,
 		// v1:cognition:logic family (session). The daily-space automations
 		// (ensureDailySpaceOnAuthSession / provisionDailySpaceOnUserCreate /
-		// rolloverDailySpace) moved to the CoPresent pack in #1976, and
+		// rolloverDailySpace) moved to the product pack in #1976, and
 		// autoJoinAI / purgeExpiredArchivedSpaces moved in B2 (#2038) with the
 		// `space` concept; the remaining cognition `.logic.{ }` importers still
 		// exercise the branch.
-		"bootstrapSession": false,
-		"generateResponse": false,
+		"bootstrapSession":            false,
+		"generateResponse":            false,
 		"voiceMigrationOnSecondHuman": false,
 		// the remaining per-namespace logic concepts
 		"consolidateMemory": false, "conflictDetection": false,

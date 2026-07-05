@@ -264,7 +264,7 @@ func AdminUsersDetail(data AdminUsersDetailData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</td></tr></table></div><div class=\"card card-full\"><h2 class=\"card-title\">Profile</h2><p class=\"card-subtitle\">CoPresent blocks access at the \"Account Setup Required\" wall until every required field below is set. Fill these in on behalf of the user before they hit the app.</p><form method=\"POST\" action=\"/admin/users/profile\" data-submit-once class=\"profile-form\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</td></tr></table></div><div class=\"card card-full\"><h2 class=\"card-title\">Profile</h2><p class=\"card-subtitle\">The product SPA blocks access at its account-setup wall until every required field below is set. Fill these in on behalf of the user before they hit the app.</p><form method=\"POST\" action=\"/admin/users/profile\" data-submit-once class=\"profile-form\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -326,7 +326,7 @@ func AdminUsersDetail(data AdminUsersDetailData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" placeholder=\"e.g. Alex\"> <span class=\"help\">Given name. Flows to the JWT as <code>given_name</code> and into the user's CoPresent profile.</span></div><div class=\"form-row\"><label for=\"last_name\">Last name ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" placeholder=\"e.g. Alex\"> <span class=\"help\">Given name. Flows to the JWT as <code>given_name</code> and into the user's app profile.</span></div><div class=\"form-row\"><label for=\"last_name\">Last name ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

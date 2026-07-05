@@ -83,7 +83,7 @@ concept participant {
   displayName  string  @required  @description("Display name shown in the UI.")
   forUserId  string  @description("v1:identity:user.id this AI participant belongs to (which human's team is this agent on?). Required on every AI participant inserted by the agent-roster mutations -- humans bring their own agents into their own private team chat, never each other's. Empty for human participants. The engine pre-insert guard enforces non-empty forUserId on AI participants and validates it matches the authenticated caller (non-elevated callers cannot land an agent on someone else's team). Used by the per-user-per-space 3-cap and by Phase 6's discussion-mode dispatch loop to find the per-user agent set.")
   isGroupGA  bool  @default(false)  @description("True only on the owner's Assistant when it sits in the space's group context. The owner's GA is the only AI in group chat; specialists stay in per-user team chats. The participant guard rejects status='left' inserts on isGroupGA=true rows from non-elevated callers, so the GA cannot be removed from the group via the Roster tab. Set by the autoJoinAI automation on space creation (Phase 1.5) and never via the agent-roster mutations.")
-  isGuest  bool  @default(false)  @description("Whether this participant joined via a guest invite (external, no CoPresent account).")
+  isGuest  bool  @default(false)  @description("Whether this participant joined via a guest invite (external, no user account of their own).")
   joinedAt  datetime  @description("When the participant joined the space.")
   leftAt  datetime  @description("When the participant left the space.")
   participantType  enum("human", "si")  @required  @description("Whether this is a human or AI participant. Guests use \"human\" with isGuest=true and userId empty.")
@@ -236,8 +236,8 @@ concept videoOverride {
 
 // videoOverride concept above. The product-specific cognition concepts
 // (space:context, micState, privateUtterance, misrouteFeedback,
-// greetSuppression) were extracted to the CoPresent pack
-// (memql-bff-copresent/dsl/copresent/concepts.memql) by Epic 3
+// greetSuppression) were extracted to the product pack
+// (the carrier repo's pack concepts file) by Epic 3
 // (3.3b-i, memql#1991). Ids are preserved (v1:cognition:*) -- the
 // pack keeps @namespace("cognition") on the moved concepts; only the
 // file location changed.

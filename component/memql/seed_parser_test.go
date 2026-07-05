@@ -296,15 +296,15 @@ seed agentRole music-theory-teacher {
 			src: `
 use agents.skill
 
-@description("Copresent canvas skill.")
-seed copresent-canvas {
-  id:    "copresent-canvas"
-  slug:  "copresent-canvas"
-  name:  "Copresent Canvas"
+@description("ExampleApp canvas skill.")
+seed exampleapp-canvas {
+  id:    "exampleapp-canvas"
+  slug:  "exampleapp-canvas"
+  name:  "ExampleApp Canvas"
   tier:  "A"
 }
 `,
-			want: "copresent-canvas",
+			want: "exampleapp-canvas",
 		},
 	}
 

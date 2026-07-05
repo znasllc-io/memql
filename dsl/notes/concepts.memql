@@ -2,7 +2,8 @@
 //
 // A `note` is a user-owned freeform note: an optional title, a body,
 // and tags. This is the STANDALONE notebook concept -- distinct from
-// copresent's canvasState.note field, which stays a per-card caption.
+// the product pack's canvas-state `note` field, which stays a
+// per-card caption.
 // Notes are a source-of-truth productivity primitive the assistant
 // manages on the user's behalf (via the `notes` skill).
 //
@@ -16,7 +17,7 @@ use identity.concepts.{ user }
 @version("1.0.0")
 @namespace("notes")
 @displayCard(primary="title", secondary="body", tertiary="updatedAt")
-@description("A user-owned standalone note: an optional title, a body, and tags, plus an updatedAt watermark. The standalone notebook concept -- distinct from copresent's canvasState.note caption field. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write and every read gates on ownerUserId==actor.userId.")
+@description("A user-owned standalone note: an optional title, a body, and tags, plus an updatedAt watermark. The standalone notebook concept -- distinct from the product pack's canvas-state note caption field. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write and every read gates on ownerUserId==actor.userId.")
 concept note {
   ownerUserId  string    @required  @description("v1:identity:user.id that owns this note. Stamped from actor.userId at create time; re-stamped from actor.userId on every update so ownership can never be reassigned by a caller. The load-bearing per-row authz key.")
   title        string    @description("Optional short title / heading for the note. Absence is allowed -- a note can be body-only. The primary display field when present.")

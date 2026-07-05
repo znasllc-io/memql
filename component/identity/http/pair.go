@@ -62,7 +62,7 @@ func (s *Server) requireSecureRequest(w http.ResponseWriter, r *http.Request) bo
 }
 
 // PairCreateRequest is the JSON body for POST /pair/codes. Authenticated
-// callers (CoPresent's Connect Computer modal) supply their cluster
+// callers (the product's Connect Computer modal) supply their cluster
 // URL + an optional owner override (admin-only). The server stamps
 // expiresAt and the owner user id.
 type PairCreateRequest struct {
@@ -72,7 +72,7 @@ type PairCreateRequest struct {
 }
 
 // PairCreateResponse mirrors the previous gRPC reply shape so the
-// CoPresent UI can show the same plain-code + expiry surface.
+// product UI can show the same plain-code + expiry surface.
 type PairCreateResponse struct {
 	Success     bool   `json:"success"`
 	PlainCode   string `json:"plainCode,omitempty"`
@@ -365,7 +365,7 @@ func (s *Server) requireBearer(w http.ResponseWriter, r *http.Request) (*identit
 //     Production deployments set this to the agent's public dial
 //     address (e.g. agent.acme.com:443).
 //  2. identity.DeriveGRPCEndpoint(storedURL) -- maps the URL stamped
-//     on the pairing row (CoPresent's `window.location.origin`) to
+//     on the pairing row (the product SPA's `window.location.origin`) to
 //     a host:port using the same logic the discovery doc uses.
 //  3. Fall back to the stored URL verbatim.
 func resolveWorkerDialEndpoint(storedURL string) string {

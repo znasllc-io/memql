@@ -84,7 +84,7 @@ func TestMirrorRealtimeToolCall_EmitsForDirectLowRiskTool(t *testing.T) {
 
 func TestMirrorRealtimeToolCall_SkipsVoiceAgentStream(t *testing.T) {
 	// A voice-agent stream self-mirrors in-process; mirroring here would double-log.
-	sess, buf := newCapturingSession(t, "v1:copresent:space:abc")
+	sess, buf := newCapturingSession(t, "v1:exampleapp:space:abc")
 	sess.mirrorRealtimeToolCall("assistant", "knowledgeLookup", mustStruct(t, map[string]any{"q": "hi"}), "r", false)
 	if buf.Len() != 0 {
 		t.Errorf("expected no breadcrumb for a voice-agent stream, got: %s", buf.String())

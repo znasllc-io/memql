@@ -50,8 +50,8 @@ import (
 
 const (
 	// Pattern that cognition subscribes to for browser-originated tool
-	// results. Path mirrors the other copresent concept event patterns
-	// so the events.Bus treats this identically.
+	// results. Path mirrors the product pack's other concept event
+	// patterns so the events.Bus treats this identically.
 	eventPatternClientToolResponse = "graph.node.created.v1:cognition:client:tool:response"
 
 	// Default lifetime of a pending client-tool call when the call itself

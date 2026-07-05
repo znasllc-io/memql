@@ -22,7 +22,7 @@
 //	similarTo({
 //	  text:    "<free-form query>",
 //	  concept: "v1:knowledge:documentChunk",
-//	  domains: ["copresent-ui"],   // optional
+//	  domains: ["product-ui"],     // optional
 //	  limit:   5,                   // default 5
 //	  provider: "embedding3Small"   // default
 //	})

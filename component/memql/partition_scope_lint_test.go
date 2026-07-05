@@ -11,7 +11,7 @@ import (
 
 // TestNoNewPartitionIdInCore guards the partition-adoption boundary (issue 2.2):
 // `partition` is the canonical tenant scope, so core must not grow NEW
-// dependencies on `partitionId` (a CoPresent product notion). The 51 files that
+// dependencies on `partitionId` (a downstream-product notion). The 51 files that
 // reference it today are grandfathered in testdata/spaceid_core_baseline.txt
 // and get re-pointed onto `partition` by Epic 3.2; this test fails the moment
 // a core .go file OUTSIDE that baseline introduces `partitionId`.

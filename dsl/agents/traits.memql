@@ -2,7 +2,7 @@
 //
 // Agent-namespace traits -- concept-specific data/state predicates for
 // v1:agents:agent rows. The three kind filters here are the
-// SPA-side read surface for epic copresent#121 (Phase 2): the
+// SPA-side read surface for epic frontend#121 (Phase 2): the
 // Agents panel filters its list to `kind=assistant`, the planner
 // trace viewer surfaces specialists per Plan via `kind=specialist`,
 // and the system bucket is filtered OUT of every user-facing
@@ -22,7 +22,7 @@
 // other two.
 
 @enabled
-@description("Matches v1:agents:agent rows where payload.kind == 'assistant' -- user-facing conversational agents (the per-user General Assistant; the only kind the CoPresent CreateAgentModal mints).")
+@description("Matches v1:agents:agent rows where payload.kind == 'assistant' -- user-facing conversational agents (the per-user General Assistant; the only kind the frontend's create-agent modal mints).")
 trait agentKindAssistant {
   return kind == "assistant"
 }

@@ -15,23 +15,24 @@ import (
 // ROOT CAUSE (confirmed): `workbenchHost` -- the tool produceArtifact REQUIRES
 // to write its deliverable to the per-Plan workbench -- is NOT defined in this
 // engine repo's embedded DSL tree. It is a CARRIER tool, living in
-// memql-bff-copresent's `dsl/copresent/tools.memql`, and is mounted on the
-// agent node at boot via `dsl.RegisterTree("copresent", carrierFS)` (the agent
-// node is carrier-built per CLAUDE.md's "carrier-built vs engine-built" rule).
+// the carrier repo's pack tools file, and is mounted on the
+// agent node at boot via `dsl.RegisterTree("<pack-domain>", carrierFS)` (the
+// agent node is carrier-built per CLAUDE.md's "carrier-built vs engine-built"
+// rule).
 // So `workbenchHost` only lands in the resolved registry on a carrier build;
 // the runaway's "toolsForToolCallingFiltered: tool not in registry" was the
 // agent node failing to resolve it.
 //
 // This test reproduces the carrier mount path EXACTLY -- RegisterTree a
-// copresent overlay carrying a workbenchHost-shaped tool, then run the same
+// pack-style overlay carrying a workbenchHost-shaped tool, then run the same
 // LoadUnifiedTools the agent node runs -- and asserts workbenchHost resolves in
 // the registry. It guards against any loader-skip / parse-drift regression that
 // would silently drop the deliverable surface again (the loader logs+skips
 // unparseable tool slices, so a future syntax change to the carrier tool could
 // regress without this guard).
 func TestWorkbenchHostRegistersFromCarrierTree(t *testing.T) {
-	// A workbenchHost tool slice shaped like the carrier's
-	// dsl/copresent/tools.memql definition (discriminated by `action`).
+	// A workbenchHost tool slice shaped like the carrier's pack tools
+	// file definition (discriminated by `action`).
 	const workbenchHostTool = `@enabled
 @handler(type="builtin", builtin="workbenchDispatchHost")
 @description("Run headless work in the per-Plan workbench sandbox: exec, fs_read, fs_write, fs_list, fs_stat, http_fetch.")
@@ -46,9 +47,9 @@ tool workbenchHost {
 		"tools.memql": {Data: []byte(workbenchHostTool)},
 	}
 	// Use a unique domain so the global plugin registry can't be contaminated
-	// by (or contaminate) a parallel test. The real boot path uses "copresent";
-	// the loader walks every mounted domain identically, so domain name does
-	// not affect tool resolution.
+	// by (or contaminate) a parallel test. The real boot path uses the pack's
+	// domain name; the loader walks every mounted domain identically, so
+	// domain name does not affect tool resolution.
 	const domain = "carrierconformance1133"
 	memqldsl.RegisterTree(domain, overlay)
 	t.Cleanup(func() {
@@ -60,7 +61,7 @@ tool workbenchHost {
 	})
 
 	// Sanity: the overlay is reachable through the layered Tree() exactly the
-	// way the carrier's copresent/ domain is.
+	// way the carrier's pack domain is.
 	if _, err := fs.ReadFile(memqldsl.Tree(), domain+"/tools.memql"); err != nil {
 		t.Fatalf("overlay tools.memql not reachable via dsl.Tree(): %v", err)
 	}
@@ -84,7 +85,7 @@ tool workbenchHost {
 		t.Fatalf("resolved tool name = %q, want workbenchHost", tool.Name)
 	}
 	if len(tool.InputSchema) == 0 {
-		t.Fatalf("workbenchHost resolved with an empty InputSchema -- the tool "+
+		t.Fatalf("workbenchHost resolved with an empty InputSchema -- the tool " +
 			"loop's toolsForToolCallingFiltered would emit a useless definition")
 	}
 }

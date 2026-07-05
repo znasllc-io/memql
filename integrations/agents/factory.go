@@ -177,7 +177,7 @@ type agentSnapshot struct {
 	Id           string
 	Name         string
 	RoleSlug     string
-	Kind         string // "assistant" | "specialist" | "system" (memql#398) -- read from agent.kind so loadExistingAgents can filter platform infrastructure (Kind=="system") out of the dedupe candidate pool. Planner-created specialists carry Kind=="specialist" (memql#399); user-created agents via CoPresent CreateAgentModal carry Kind=="assistant".
+	Kind         string // "assistant" | "specialist" | "system" (memql#398) -- read from agent.kind so loadExistingAgents can filter platform infrastructure (Kind=="system") out of the dedupe candidate pool. Planner-created specialists carry Kind=="specialist" (memql#399); user-created agents via the frontend's agent-creation modal carry Kind=="assistant".
 	SkillIds     []string
 	Domains      []string // resolved union across SkillIds
 	Tools        []string // resolved union across SkillIds

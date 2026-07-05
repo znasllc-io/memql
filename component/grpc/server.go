@@ -1689,13 +1689,13 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 	}
 	result, execErr := s.executeTool(ctx, s.service.engine, tool, args)
 	if execErr != nil {
-		// Mirror the failed call too, matching the relay bridge (copresent#158).
+		// Mirror the failed call too, matching the relay bridge (frontend#158).
 		s.mirrorRealtimeToolCall(callerRole, tool.Name, args, execErr.Error(), true)
 		return s.sendCallToolResult(envelope.GetMessageId(), requestId, nil, true, execErr.Error())
 	}
 
 	// Awareness breadcrumb for the direct browser path's low-risk read tools
-	// (copresent#158). No-op for voice-agent streams + non-allowlisted tools.
+	// (frontend#158). No-op for voice-agent streams + non-allowlisted tools.
 	s.mirrorRealtimeToolCall(callerRole, tool.Name, args, flattenToolResultContent(result), false)
 	return s.sendCallToolResult(envelope.GetMessageId(), requestId, result, false, "")
 }
@@ -1996,8 +1996,8 @@ func (s *streamSession) InvokeClientTool(
 func synthesiseTimeoutResult(toolName string, timeout time.Duration) *memqlengine.ToolCallResult {
 	// Match the shape ordinary success responses use so the agent's
 	// tool-result parser reads this as just another JSON payload
-	// ("type":"json", text=JSON.stringify(data)). See
-	// copresent/src/lib/operator/clientToolHost.ts toToolResultContent.
+	// ("type":"json", text=JSON.stringify(data)). See the frontend's
+	// operator clientToolHost.ts toToolResultContent.
 	if toolName == "uiAskUser" {
 		return &memqlengine.ToolCallResult{
 			Content: []memqlengine.ToolResultContent{{

@@ -408,28 +408,28 @@ local repro is the 2-replica parity cluster (`make up SERVERS=2` +
 class. See
 [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
 
-#### Node image source: carrier-built vs engine-built (#1053) -- ENFORCED RULE
+#### Node image source: engine-built by default; carrier-built per product stack (#1053, revised)
 
-A node that executes **CoPresent DSL** (the `agentReply` prompt, copresent
-tools/concepts -- consumed by the agent/cognition/planner integrations) MUST be
-**carrier-built**: compiled from `memql-bff-copresent/Dockerfile` with
-`BUILD_TAGS=<type>` and the workspace parent as build context, so the CoPresent
-DSL subtree is mounted at compile time via `RegisterTree`. The pure-engine
-`memql-<type>` image (this repo's `Dockerfile`) does NOT carry the CoPresent DSL
-and will fail with `unknown prompt template "agentReply"`.
+The ENGINE repo's local cluster (`make up` / `make dev` here) builds EVERY
+app node type -- identity, voice, mcp, cognition, agent, planner, workbench
+-- from THIS repo's Dockerfile (`BUILD_TAGS=<type>`), tagged
+`memql-<type>:local`. The engine cluster runs engine DSL only; no product
+code is involved.
 
-| Node | Build source |
-|------|--------------|
-| **bff, cognition, agent, planner, workbench** | **carrier** (`memql-bff-copresent/Dockerfile` + `BUILD_TAGS=<type>`, CGO=0) |
-| **voice** | engine voice-runtime (CGO; transport/forwarding only, no CoPresent refs) |
-| **identity** | engine (auth service, no CoPresent refs) |
-
-This MUST be identical in every environment -- local k3d cluster
-(`deploy/k8s/overlays/local`), staging, prod, and client deploys. The build
-pipeline enforces it: `scripts/deploy/aks-deploy.sh` (`CARRIER_NODE_TYPES`)
-carrier-builds the set; `make dev` builds the same carrier nodes locally and
-imports them into k3d. The pure-engine `memql-<type>` images are only for a
-memQL-standalone (no CoPresent) deployment.
+A node that executes a PRODUCT's DSL (prompt templates, product
+tools/concepts consumed by the agent/cognition/planner integrations) must be
+**carrier-built** in that product's stack: compiled from the product carrier
+repo's Dockerfile with `BUILD_TAGS=<type>` and the workspace parent as build
+context, so the product DSL subtree is mounted at compile time via
+`RegisterTree`. A pure-engine image does not carry product DSL and will fail
+on product prompt templates. Product stacks layer those builds over the
+engine tooling via the generic carrier hook (`CARRIER_REPO` /
+`CARRIER_NODES` / `CARRIER_CONTEXT` -- see
+[docs/public/operate/downstream-stacks.md](docs/public/operate/downstream-stacks.md));
+which node types a given product carrier-builds is that product repo's
+decision, declared in ITS Makefile. Within one product's stack the
+carrier-built set MUST be identical in every environment (local, staging,
+prod).
 
 **Build tag reference:** [docs/public/build/build-tags.md](docs/public/build/build-tags.md)
 **Local cluster (staging parity -- THE blessed local topology, memql#2061 / Epic 0):** `make up` (k3d + ArgoCD + the local overlay at `deploy/k8s/overlays/local` + seeded secrets); `make dev [NODE=<type>]` rebuilds an image, imports it into k3d, and rolls the Deployment after Go/MemQL source edits; `make down` tears it down. The cluster mirrors staging along the **mesh-delivery path** (memql#1212) by running the same k8s manifests and ArgoCD reconciliation as AKS: scale to 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench) with `make up SERVERS=2` + `make scale N=2`, each pod carrying a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name` exactly as in staging. The cluster is reached via kubectl port-forwards (identity `:8085`, livekit `:7880`, postgres `:5432`; the engine gRPC head is the `mcp` node on demand: `kubectl port-forward -n memql svc/mcp 50051:50051`) -- there is no nginx front door or `*.local.znas.io` subdomain. The CoPresent SPA and the `bff` carrier are NOT part of the engine repo's local overlay (#2204); they are built from their own sibling repos. `make status` prints the per-pod node ids (parity litmus). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle. See the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).

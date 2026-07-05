@@ -591,7 +591,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// proposed capabilities. The role catalog is the source of truth
 	// for "what an agent of role X must always have"; this guard
 	// makes that contract load-bearing on every write path (cockpit
-	// edit, CoPresent edit, GA-driven extend, automation). See
+	// edit, frontend edit, GA-driven extend, automation). See
 	// agent_lock_validation.go.
 	//
 	// Agent-kind actor-scope guard: rejects user-actor writes that

@@ -5,7 +5,7 @@ import "strings"
 // TelephonyRoomPrefix marks a LiveKit room as a telephony (PSTN) room. The
 // voice-agent dispatcher serves these the same way it serves product rooms, so
 // the existing realtime agent answers phone calls. Telephony is core: the room
-// is scoped by a generic partition, never a CoPresent space (Amendment A).
+// is scoped by a generic partition, never a product space (Amendment A).
 const TelephonyRoomPrefix = "tel-"
 
 // RoomPrefixForPartition is the per-partition room prefix handed to a LiveKit

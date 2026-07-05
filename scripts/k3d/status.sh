@@ -32,12 +32,14 @@ source "${SCRIPT_DIR}/../lib/capability.sh"
 cap_init "k3d.status" "Print local k3d cluster status and mesh litmus."
 cap_spec_param "cluster"   "k3d cluster name"
 cap_spec_param "namespace" "k8s namespace"
+cap_spec_param "app-name"  "ArgoCD Application name to report on"
 #=============================================================================
 # CONFIGURATION
 #=============================================================================
 
 CLUSTER_NAME="${MEMQL_K3D_CLUSTER:-memql}"
 NAMESPACE="${MEMQL_K3D_NAMESPACE:-memql}"
+APP_NAME="${MEMQL_K3D_APP_NAME:-memql-local}"
 
 # Litmus accumulators (populated by check_node_ids).
 PODS_TOTAL=0
@@ -93,17 +95,17 @@ function check_argocd() {
         return 0
     fi
 
-    if kubectl get application memql-local -n argocd &>/dev/null; then
-        kubectl get application memql-local -n argocd \
+    if kubectl get application "${APP_NAME}" -n argocd &>/dev/null; then
+        kubectl get application "${APP_NAME}" -n argocd \
             -o custom-columns=\
 "NAME:.metadata.name,\
 SYNC:.status.sync.status,\
 HEALTH:.status.health.status,\
 REVISION:.status.sync.revision" 2>/dev/null >&2 || \
-        kubectl get application memql-local -n argocd 2>/dev/null >&2
+        kubectl get application "${APP_NAME}" -n argocd 2>/dev/null >&2
     else
         {
-            echo "  STATUS: memql-local Application not found."
+            echo "  STATUS: ${APP_NAME} Application not found."
             echo "  Run:    make up"
         } >&2
     fi
@@ -225,6 +227,7 @@ function main() {
 
     CLUSTER_NAME="$(cap_param cluster "$CLUSTER_NAME")"
     NAMESPACE="$(cap_param namespace "$NAMESPACE")"
+    APP_NAME="$(cap_param app-name "$APP_NAME")"
 
     check_cluster
     check_argocd

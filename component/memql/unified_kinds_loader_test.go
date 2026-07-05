@@ -78,10 +78,12 @@ func TestUnifiedLoadersCoverNewTree(t *testing.T) {
 			"dropped from per-seed slices -- see LoadUnifiedSeeds + fileTopUseClauseRe.", n)
 	}
 
-	// At least one of the platform agent seeds must be present so
-	// the seed migration's contract (per-user GA / Planner /
-	// Trainer rows materialize at startup) doesn't silently break.
-	for _, name := range []string{"assistant", "plannerAgent", "trainerAgent"} {
+	// The platform agent seeds must be present so the seed migration's
+	// contract (Planner / Trainer rows materialize at startup) doesn't
+	// silently break. The per-user `assistant` seed is product content
+	// and lives in the product pack tree (its equivalent pin lives in
+	// the pack's seed tests).
+	for _, name := range []string{"plannerAgent", "trainerAgent"} {
 		if _, ok := seedReg.Get(name); !ok {
 			t.Errorf("seed registry missing platform seed %q", name)
 		}

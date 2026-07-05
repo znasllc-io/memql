@@ -25,10 +25,10 @@
 #   7880  -> livekit
 #   5432  -> postgres (optional debug access)
 #
-# The engine repo runs the engine mesh only -- the CoPresent SPA (:8080) and
-# the bff carrier gRPC head (:50051) belong to their own sibling repos and are
-# deleted from the local overlay (#2204). The local engine gRPC head is the
-# `mcp` node; reach it on demand with:
+# The engine repo runs the engine mesh only -- product frontends and carrier
+# gRPC heads belong to their own repos, which reuse this script with their own
+# --app-name/--overlay-path/--repo-url (#2204). The local engine gRPC head is
+# the `mcp` node; reach it on demand with:
 #   kubectl port-forward -n memql svc/mcp 50051:50051
 #
 # This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
@@ -59,6 +59,11 @@ cap_spec_param "repo-url"       "git repo URL for the ArgoCD Application"
 cap_spec_param "servers"        "number of k3d server nodes"
 cap_spec_param "agents"         "number of k3d agent nodes"
 cap_spec_param "argocd-timeout" "ArgoCD readiness timeout (seconds)"
+cap_spec_param "app-name"       "ArgoCD Application name"
+cap_spec_param "overlay-path"   "kustomize overlay path within the repo"
+cap_spec_param "extra-ports"    "additional host:container loadbalancer port mappings, comma-separated"
+cap_spec_param "app-project"    "ArgoCD AppProject the Application belongs to"
+cap_spec_param "project-manifest" "path to the AppProject manifest to apply (downstream repos pass their own)"
 cap_spec_param "no-secrets"     "skip secret seeding (flag)"                        ""
 
 #=============================================================================
@@ -75,7 +80,11 @@ ARGOCD_NAMESPACE="argocd"
 # The Application's targetRevision: defaults to the current git branch.
 TARGET_REVISION="${MEMQL_K3D_TARGET_REVISION:-$(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")}"
 REPO_URL="${MEMQL_K3D_REPO_URL:-https://github.com/znasllc-io/memql.git}"
-OVERLAY_PATH="deploy/k8s/overlays/local"
+OVERLAY_PATH="${MEMQL_K3D_OVERLAY_PATH:-deploy/k8s/overlays/local}"
+APP_NAME="${MEMQL_K3D_APP_NAME:-memql-local}"
+EXTRA_PORTS="${MEMQL_K3D_EXTRA_PORTS:-}"
+APP_PROJECT="${MEMQL_K3D_APP_PROJECT:-memql}"
+PROJECT_MANIFEST="${MEMQL_K3D_PROJECT_MANIFEST:-}"
 
 # k3d cluster config
 K3D_SERVERS="${MEMQL_K3D_SERVERS:-1}"
@@ -173,18 +182,32 @@ function create_cluster() {
 
     info "Creating cluster with ${K3D_SERVERS} server(s) and ${K3D_AGENTS} agent(s)..."
 
-    # Port-forward table (engine mesh only -- no SPA, no bff carrier; #2204):
+    # Port-forward table (engine mesh only; #2204):
     #   8085:8085  identity HTTP
     #   7880:7880  livekit WebSocket
     #   5432:5432  postgres (debug)
     # The mcp gRPC head (:50051) is reached on demand via
     # `kubectl port-forward -n memql svc/mcp 50051:50051`.
+    # Downstream stacks add their own LoadBalancer mappings (e.g. a product
+    # gRPC head or frontend) via --extra-ports=host:container,... -- k3d LB
+    # ports are fixed at cluster-create time, so they must be declared here.
+    local port_args=(
+        --port "8085:8085@loadbalancer"
+        --port "7880:7880@loadbalancer"
+        --port "5432:5432@loadbalancer"
+    )
+    if [ -n "${EXTRA_PORTS}" ]; then
+        local extra
+        IFS=',' read -ra extra <<< "${EXTRA_PORTS}"
+        for p in "${extra[@]}"; do
+            port_args+=(--port "${p}@loadbalancer")
+        done
+    fi
+
     k3d cluster create "${CLUSTER_NAME}" \
         --servers "${K3D_SERVERS}" \
         --agents "${K3D_AGENTS}" \
-        --port "8085:8085@loadbalancer" \
-        --port "7880:7880@loadbalancer" \
-        --port "5432:5432@loadbalancer" \
+        "${port_args[@]}" \
         --wait \
         --timeout "120s" >&2
 
@@ -256,18 +279,62 @@ function wait_for_argocd() {
 }
 
 #=============================================================================
+# ARGOCD REPOSITORY CREDENTIAL (private downstream repos)
+#=============================================================================
+
+# The engine repo is public, so its Application syncs anonymously. A
+# downstream stack whose Application tracks a PRIVATE repo must give ArgoCD
+# a repository credential. To keep tokens out of argv (visible in ps), the
+# credential is env-only:
+#   MEMQL_K3D_REPO_TOKEN     -- token/password for REPO_URL (e.g. a GitHub
+#                               fine-grained PAT, or `gh auth token`)
+#   MEMQL_K3D_REPO_USERNAME  -- username (default x-access-token, correct
+#                               for GitHub token auth)
+# When the token env is present, an argocd repository Secret named
+# <app-name>-repo is applied idempotently for REPO_URL.
+function seed_repo_credential() {
+    if [ -z "${MEMQL_K3D_REPO_TOKEN:-}" ]; then
+        return 0
+    fi
+
+    section "Seeding ArgoCD repository credential for ${REPO_URL}"
+
+    # The manifest travels via stdin (heredoc), never argv, so the token is
+    # not visible in `ps`.
+    kubectl apply -f - >&2 <<YAML
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ${APP_NAME}-repo
+  namespace: ${ARGOCD_NAMESPACE}
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  type: git
+  url: ${REPO_URL}
+  username: ${MEMQL_K3D_REPO_USERNAME:-x-access-token}
+  password: ${MEMQL_K3D_REPO_TOKEN}
+YAML
+
+    info "Repository credential '${APP_NAME}-repo' applied."
+}
+
+#=============================================================================
 # ARGOCD APPLICATION
 #=============================================================================
 
 function apply_argocd_app() {
-    section "Registering memQL Application in ArgoCD"
+    section "Registering Application '${APP_NAME}' in ArgoCD"
 
     info "Target revision: ${TARGET_REVISION}"
     info "Repo URL:        ${REPO_URL}"
     info "Overlay path:    ${OVERLAY_PATH}"
 
-    # Apply the memql AppProject first (required before the Application).
-    kubectl apply -f "${REPO_ROOT}/deploy/argocd/apps/project.yaml" >&2
+    # Apply the AppProject first (required before the Application). The
+    # engine's memql AppProject restricts sourceRepos to the engine repo, so
+    # a downstream stack tracking its own repo supplies its own AppProject
+    # manifest via --project-manifest and names it via --app-project.
+    kubectl apply -f "${PROJECT_MANIFEST:-${REPO_ROOT}/deploy/argocd/apps/project.yaml}" >&2
 
     # Generate and apply the local Application manifest.
     # We template the targetRevision so it follows the current branch.
@@ -275,7 +342,7 @@ function apply_argocd_app() {
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: memql-local
+  name: ${APP_NAME}
   namespace: ${ARGOCD_NAMESPACE}
   finalizers:
     - resources-finalizer.argocd.argoproj.io
@@ -283,7 +350,7 @@ metadata:
     # Record which branch/revision this Application was bootstrapped against.
     memql.io/bootstrap-revision: "${TARGET_REVISION}"
 spec:
-  project: memql
+  project: ${APP_PROJECT}
   source:
     repoURL: ${REPO_URL}
     targetRevision: ${TARGET_REVISION}
@@ -307,7 +374,7 @@ spec:
         - /spec/replicas
 YAML
 
-    info "Application 'memql-local' registered."
+    info "Application '${APP_NAME}' registered."
     info "ArgoCD will begin syncing from ${REPO_URL}@${TARGET_REVISION}."
     info "Note: if this is a new branch, ensure it is pushed to GitHub before"
     info "      ArgoCD fetches it (ArgoCD cannot access local filesystem branches)."
@@ -342,7 +409,7 @@ function print_summary() {
         echo ""
         echo "  Cluster:        k3d-${CLUSTER_NAME}"
         echo "  ArgoCD version: ${ARGOCD_VERSION}"
-        echo "  Application:    memql-local (${TARGET_REVISION} -> ${OVERLAY_PATH})"
+        echo "  Application:    ${APP_NAME} (${TARGET_REVISION} -> ${OVERLAY_PATH})"
         echo "  Namespace:      ${NAMESPACE}"
         echo ""
         echo "  Port-forwards (via k3d LoadBalancer):"
@@ -394,11 +461,31 @@ function main() {
     K3D_SERVERS="$(cap_param servers "${MEMQL_K3D_SERVERS:-1}")"
     K3D_AGENTS="$(cap_param agents "${MEMQL_K3D_AGENTS:-0}")"
     ARGOCD_TIMEOUT="$(cap_param argocd-timeout "${MEMQL_K3D_ARGOCD_TIMEOUT:-300}")"
+    APP_NAME="$(cap_param app-name "${APP_NAME}")"
+    OVERLAY_PATH="$(cap_param overlay-path "${OVERLAY_PATH}")"
+    EXTRA_PORTS="$(cap_param extra-ports "${EXTRA_PORTS}")"
+    APP_PROJECT="$(cap_param app-project "${APP_PROJECT}")"
+    PROJECT_MANIFEST="$(cap_param project-manifest "${PROJECT_MANIFEST}")"
     local skip_secrets
     skip_secrets="$(cap_flag no-secrets)"
 
     cap_require cluster "$CLUSTER_NAME"
     cap_require namespace "$NAMESPACE"
+
+    # Downstream-stack guards: a non-default repo URL means a product
+    # Application, whose revision cannot default to THIS checkout's branch
+    # (the engine repo's branch is meaningless in the product repo), and a
+    # non-default AppProject needs its manifest supplied.
+    local default_repo_url="https://github.com/znasllc-io/memql.git"
+    if [ "${REPO_URL}" != "${default_repo_url}" ] && [ -z "$(cap_flag revision)" ] && [ -z "${MEMQL_K3D_TARGET_REVISION:-}" ]; then
+        cap_fail 2 "--repo-url targets a non-engine repo; pass --revision (the branch of THAT repo) explicitly"
+    fi
+    if [ "${APP_PROJECT}" != "memql" ] && [ -z "${PROJECT_MANIFEST}" ]; then
+        cap_fail 2 "--app-project=${APP_PROJECT} requires --project-manifest (the engine's AppProject only allowlists the engine repo)"
+    fi
+    if [ -n "${PROJECT_MANIFEST}" ] && [ ! -f "${PROJECT_MANIFEST}" ]; then
+        cap_fail 4 "project manifest not found at ${PROJECT_MANIFEST}"
+    fi
 
     info "memQL k3d bootstrap"
     info "Cluster:   ${CLUSTER_NAME}"
@@ -415,6 +502,7 @@ function main() {
         info "Skipping secret seeding (--no-secrets)."
     fi
 
+    seed_repo_credential
     apply_argocd_app
     gate_voice_lane_post_sync
     print_summary

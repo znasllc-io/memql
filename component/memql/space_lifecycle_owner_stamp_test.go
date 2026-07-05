@@ -18,11 +18,11 @@ import (
 //
 // Without the stamp, the v1:cognition:space concept's
 // `ownerUserId @required` enforcement rejects the mutation when a
-// caller (like the CoPresent SPA before the workaround in
-// visionarys-io/copresent#120) omits ownerUserId, and the failure
+// caller (like the product SPA before the workaround in
+// frontend#120) omits ownerUserId, and the failure
 // rides back through the gRPC stream as a thrown error -- in the
 // worst case silently swallowed by an SDK hook (precedent:
-// memql#392 / visionarys-io/copresent#114).
+// memql#392 / frontend#114).
 //
 // The test renders each mutation against a synthesised actor and
 // asserts ownerUserId == actor.userId on the resulting payload, even

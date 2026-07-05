@@ -118,6 +118,10 @@ The build tags decide which node-type binaries include the registration.
 | `RegisterTree(domain, fs.FS)` | `dsl` | an embedded `.memql` subtree, mounted under `domain/` in the unified DSL tree |
 | `RegisterRoutingRule(rule)` | `component/node` | a cross-node event routing rule (required for any event that must cross a node boundary) |
 | `RegisterReadinessCheck(name, check)` | `component/server` | a readiness probe contributing to `/readyz` |
+| `RegisterSeedDomain(reg)` | `integrations/knowledge` | a product knowledge domain + optional seed corpus folded into the startup catalog seeder |
+| `RegisterAppProfile(profile)` | `component/memql` | the product app profile injected on operator turns + its operator knowledge domains |
+| `RegisterChatReplyConcept(c)` | `component/node` | a product concept whose events ride the chat-reply delivery substrate (+ optional space-key payload field) |
+| `RegisterCapabilitySlug(slug, tools, tags...)` | `component/memql` | a capability slug -> concrete tool-name bundle for agent tool expansion (tag `operator` drives the replier's operator fence) |
 
 Minimal shape:
 

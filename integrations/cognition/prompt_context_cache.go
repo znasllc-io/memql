@@ -518,7 +518,7 @@ func (c *CognitionIntegration) getAttachmentsForPromptCached(ctx context.Context
 // getAttachmentsForPrompt returns ready attachments for the space as a
 // slice of summary-only maps for inclusion in the AI prompt context.
 // Dispatches through the querySpaceAttachments MemQL function so
-// cognition Go code stays free of direct copresent concept references.
+// cognition Go code stays free of direct product-pack concept references.
 func (c *CognitionIntegration) getAttachmentsForPrompt(ctx context.Context, partitionId string) []map[string]any {
 	if c == nil || c.engine == nil {
 		return nil

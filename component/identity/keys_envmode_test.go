@@ -76,7 +76,7 @@ func TestNewKeyManagerFromSeed_BadInput(t *testing.T) {
 func TestConfigValidate_SigningKeySatisfiesAtRest(t *testing.T) {
 	base := Config{
 		Enabled:             true,
-		BaseURL:             "https://identity.staging.copresent.ai",
+		BaseURL:             "https://identity.example.com",
 		RegistrationMode:    RegistrationModeOpen,
 		InternalDefaultRole: "writer",
 		RiskThreshold:       50,

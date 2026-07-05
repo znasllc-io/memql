@@ -207,7 +207,7 @@ func (s *AdminServer) handleUsersDetail(w http.ResponseWriter, r *http.Request) 
 // handleEditUserProfile lets the admin set / update the user's
 // directory-style profile fields (display name, phone, primaryRole,
 // gender, birthdate). All but display_name are optional, but the
-// CoPresent ProfileCompletenessGuard demands all four of phone +
+// product's ProfileCompletenessGuard demands all four of phone +
 // primaryRole + gender + birthdate before the user can use the
 // app -- so leaving any blank means the user stays gated.
 func (s *AdminServer) handleEditUserProfile(w http.ResponseWriter, r *http.Request) {

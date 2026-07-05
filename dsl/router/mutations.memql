@@ -72,7 +72,7 @@ mutate call recordRouterCall {
 // =========
 //
 // Upserts a spend cap for the current partition or a specific agent.
-// Called from the CoPresent /router/settings page.
+// Called from the frontend's /router/settings page.
 
 @enabled
 @description("Create or update a budget cap. Scope 'partition' covers all agents; scope 'agent' targets one v1:agents:agent by scopeId.")

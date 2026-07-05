@@ -107,28 +107,39 @@ func (r *realParseResolver) ResolveSkills(_ context.Context, skillIds []string) 
 // operator suite), the exact list a 0.9.48 staging assistant carries.
 var assistantSkillIds = []string{
 	"todos", "notes", "calendar",
-	"copresent-takeover", "copresent-guide", "copresent-ui", "copresent-canvas",
+	"testproduct-takeover", "testproduct-guide", "testproduct-ui", "testproduct-canvas",
 	"workbench-baseline", "operator-computer-use", "delegation-baseline",
 }
 
-// catalogSkillTools mirrors the embedded skill catalog's toolSlugs for the
-// assistant skills (dsl/todos/skills.memql, dsl/notes/skills.memql,
-// dsl/agents/skills/calendar.memql, etc.). copresent-takeover/guide carry the
-// `copresent-takeover` slug, which ExpandCapabilitySlugs fans out to the 16
-// operator primitives (uiClick/uiType/...). This is the mapping the real
-// ResolveSkills returns off the seeded catalog; Part B (PG) verifies it against
-// the live catalog.
+// catalogSkillTools mirrors a skill catalog's toolSlugs for the assistant
+// skills (dsl/todos/skills.memql, dsl/notes/skills.memql,
+// dsl/agents/skills/calendar.memql, etc.). testproduct-takeover/guide carry
+// the `testproduct-operator` capability slug -- a SYNTHETIC bundle this test
+// registers via memql.RegisterCapabilitySlug (the same seam a product pack
+// uses; the product-valued fan-out coverage lives in the pack repo) -- which
+// ExpandCapabilitySlugs fans out to operator-style primitives (uiClick/...).
 var catalogSkillTools = map[string][]string{
 	"todos":                 {"todosList", "todosCreate", "todosComplete", "todosUpdate"},
 	"notes":                 {"notesList", "notesCreate", "notesUpdate", "notesSearch"},
 	"calendar":              {"calendarList", "calendarFind", "calendarCreate", "calendarUpdate", "calendarDelete"},
-	"copresent-takeover":    {"copresent-takeover"}, // expands to operator primitives via ExpandCapabilitySlugs
-	"copresent-guide":       {"copresent-guide"},
-	"copresent-ui":          {"similarTo"},
-	"copresent-canvas":      {"canvasPublish"},
+	"testproduct-takeover":  {"testproduct-operator"}, // expands via the test-registered capability slug
+	"testproduct-guide":     {"testproduct-operator"},
+	"testproduct-ui":        {"similarTo"},
+	"testproduct-canvas":    {"canvasPublish"},
 	"workbench-baseline":    {"workbench-use"}, // expands to workbench tools
 	"operator-computer-use": {"workerComputer", "workerStatus", "requestComputerUseScope", "canvasPublish"},
 	"delegation-baseline":   {"dispatchAgent"},
+}
+
+// registerTestOperatorBundle installs the synthetic operator capability slug
+// for the duration of a test -- the engine mechanism under test is
+// slug-agnostic; the real product bundles register from the product pack.
+func registerTestOperatorBundle(t *testing.T) {
+	t.Helper()
+	memqlengine.RegisterCapabilitySlug("testproduct-operator",
+		[]string{"uiClick", "uiType", "uiNavigate", "uiReadState"},
+		memqlengine.CapabilityTagOperator)
+	t.Cleanup(func() { memqlengine.UnregisterCapabilitySlug("testproduct-operator") })
 }
 
 func assistantAgentBundle(agentId string) *memqlv1.GraphBundle {
@@ -162,6 +173,7 @@ func assistantAgentBundle(agentId string) *memqlv1.GraphBundle {
 //     ~30 tools (neither 517 nor 0), and persona name="Sofia"/role populate.
 func TestVoiceAgentToolScopeRealEngine_ParsesAndResolves(t *testing.T) {
 	const realId = "v1:agents:agent:assistant-1c65cb0c"
+	registerTestOperatorBundle(t)
 	eng := newRealDSLEngine(t)
 	ctx := context.Background()
 
@@ -190,7 +202,7 @@ func TestVoiceAgentToolScopeRealEngine_ParsesAndResolves(t *testing.T) {
 	// primitives -- a genuinely scoped set, not the unscoped registry.
 	for _, want := range []string{
 		"todosCreate", "notesCreate", "calendarList",
-		"uiClick", "uiType", // copresent-takeover operator fan-out
+		"uiClick", "uiType", // testproduct-operator slug fan-out
 	} {
 		assert.Contains(t, set, want, "scoped tool set must contain %q", want)
 	}
@@ -260,7 +272,7 @@ func (r *spaceContextParseResolver) CanonicalizeIdValue(ctx context.Context, val
 }
 
 func (r *spaceContextParseResolver) Execute(_ context.Context, query string) (*memqlengine.ExecuteResult, error) {
-	// querySpaceMeta moved to the CoPresent pack in B2 (#2038) alongside the
+	// querySpaceMeta moved to the product pack in B2 (#2038) alongside the
 	// `space` concept, so the pure (no-pack) engine under test can no longer
 	// parse it -- the carrier engine that runs this resolver in production
 	// (bff / cognition, both carrier-built) loads the pack and resolves it.

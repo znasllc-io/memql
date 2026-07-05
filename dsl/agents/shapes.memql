@@ -157,7 +157,7 @@ shape skillChangeEvent skillChangeEventFull {
 }
 
 @row
-@description("Avatar persona catalog projection (memql#609). Backs the Create-Assistant persona picker (copresent#239) and the agent-display hydration of a stamped avatarPersonaId. Carries the vendor + vendor-issued personaId the voice-agent resolves at session start.")
+@description("Avatar persona catalog projection (memql#609). Backs the Create-Assistant persona picker (frontend#239) and the agent-display hydration of a stamped avatarPersonaId. Carries the vendor + vendor-issued personaId the voice-agent resolves at session start.")
 shape avatarPersona avatarPersonaFull {
   row.id
   vendor

@@ -3,13 +3,13 @@
 // Agent-namespace mutations -- the platform's canonical write surface
 // for v1:agents:agent + v1:agents:agentAuthorization + v1:agents:agentRole.
 // Every BFF and every internal seeder writes through these;
-// product-specific mutations (e.g. CoPresent's space-join flow) layer
-// on top, never re-implement the row write.
+// product-specific mutations (e.g. the product pack's space-join flow)
+// layer on top, never re-implement the row write.
 
 use agents.concepts.{ agent, agentAuthorization, agentRole, avatarPersona }
 
 @enabled
-@description("Create a new AI agent template. The `kind` arg defaults to `assistant` -- the safe value for the CoPresent CreateAgentModal flow. The SeedMaterializer (running under the `system:seedMaterializer` actor) passes `kind: \"system\"` when materializing platform agents (MemQL Planner / MemQL Trainer). The planner integration (running under the `system:planner` actor; memql#399) passes `kind: \"specialist\"` when auto-provisioning a specialist for a Plan's capability gap. User-actor calls that try to pass `kind in (\"system\", \"specialist\")` are rejected pre-insert by an engine-level actor-scope guard (component/memql/agent_kind_actor_validation.go, memql#403); the mutation surface itself stays permissive on `kind` so the seed + planner paths can keep writing their values with the rejection one layer up.")
+@description("Create a new AI agent template. The `kind` arg defaults to `assistant` -- the safe value for the frontend's create-agent modal flow. The SeedMaterializer (running under the `system:seedMaterializer` actor) passes `kind: \"system\"` when materializing platform agents (MemQL Planner / MemQL Trainer). The planner integration (running under the `system:planner` actor; memql#399) passes `kind: \"specialist\"` when auto-provisioning a specialist for a Plan's capability gap. User-actor calls that try to pass `kind in (\"system\", \"specialist\")` are rejected pre-insert by an engine-level actor-scope guard (component/memql/agent_kind_actor_validation.go, memql#403); the mutation surface itself stays permissive on `kind` so the seed + planner paths can keep writing their values with the rejection one layer up.")
 mutate agent createAgent {
   args {
     agentId          string
@@ -120,7 +120,7 @@ mutate agent updateAgent {
 }
 
 @enabled
-@description("Partial update of a v1:agents:agentAuthorization row. Mirrors updateAgent semantics: only the fields passed in `payload` change; everything else inherits from the prior row. Backs the canvas mintSkillApprovalRequested card's 'Approve & always allow this tier' action (memql-bff-copresent#38, memql#169) -- the SPA reads the current skillTierAllowlist, appends the approved tier, and writes the whole array back as `{skillTierAllowlist: [...]}`. Per the agentAuthorization concept's revocation contract this is an OWNED write: only the granting user (the row's payload.userId) may update their own authorization grant.")
+@description("Partial update of a v1:agents:agentAuthorization row. Mirrors updateAgent semantics: only the fields passed in `payload` change; everything else inherits from the prior row. Backs the canvas mintSkillApprovalRequested card's 'Approve & always allow this tier' action (pack#38, memql#169) -- the SPA reads the current skillTierAllowlist, appends the approved tier, and writes the whole array back as `{skillTierAllowlist: [...]}`. Per the agentAuthorization concept's revocation contract this is an OWNED write: only the granting user (the row's payload.userId) may update their own authorization grant.")
 mutate agentAuthorization updateAgentAuthorization {
   args {
     authId   string  @required

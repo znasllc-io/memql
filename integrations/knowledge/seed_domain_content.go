@@ -178,7 +178,7 @@ func (i *Integration) seedAllDomainContentHandler(ctx context.Context, args map[
 	skipped := 0
 	failed := 0
 
-	for _, d := range standardDomains {
+	for _, d := range allSeedDomains() {
 		tier := effectiveTier(d)
 		if tierFilter != "" && tier != strings.ToUpper(strings.TrimSpace(tierFilter)) {
 			skipped++
@@ -444,8 +444,8 @@ func (i *Integration) storeSeedChunk(
 	// Sanitize the title before indexing so role markers / markdown
 	// headers in seed content don't ride into the retrieval pool.
 	// Defense-in-depth on top of the prompt-render-time framing
-	// (bff-copresent PR #25); see SanitizeChunkTitle's doc-comment
-	// for the full rule set and bff-copresent#29 for the rationale.
+	// (pack PR #25); see SanitizeChunkTitle's doc-comment
+	// for the full rule set and pack#29 for the rationale.
 	cleanTitle := SanitizeChunkTitle(c.Title)
 	metadata := map[string]any{
 		"seedSource":    seedSource,
@@ -501,7 +501,7 @@ func seedChunkId(recipeVersion, domainId string, chunkIndex int) string {
 // `ingest` capability).
 func (i *Integration) lookupSeededDomain(_ context.Context, domainId string) (StandardDomain, error) {
 	domainId = strings.TrimSpace(domainId)
-	for _, d := range standardDomains {
+	for _, d := range allSeedDomains() {
 		if d.ID == domainId {
 			d.Tier = effectiveTier(d)
 			return d, nil

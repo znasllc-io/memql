@@ -16,7 +16,7 @@ import (
 // (numbers, trunks, calls) through the engine.
 //
 // Telephony is core and product-agnostic: calls and numbers bind to a generic
-// partition, never a CoPresent space (Amendment A).
+// partition, never a product space (Amendment A).
 type Integration struct {
 	logger  *slog.Logger
 	engine  memql.IntegrationEngineAccess

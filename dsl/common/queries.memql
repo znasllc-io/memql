@@ -34,8 +34,8 @@ query attachment attachmentById {
 
 // spaceMedia -- list v1:common:media rows attached to a space.
 //
-// Surfaced for the CoPresent SPA's `useMedia(partitionId, filters)` hook
-// (visionarys-io/copresent src/hooks/useCopresent.ts:1359). The hook
+// Surfaced for the product SPA's `useMedia(partitionId, filters)` hook
+// (frontend repo, src/hooks). The hook
 // returns Media[] for the space's audio / video / image / document
 // attachments. SPA callers may pass an optional mediaType filter --
 // the arg-conditional `?.payload.mediaType` predicate fires only
@@ -45,10 +45,10 @@ query attachment attachmentById {
 // isolation prevents cross-tenant leakage. Matches the pattern of
 // the sibling `spaceUtterances` in dsl/cognition/queries.memql.
 //
-// memql-bff-copresent#44 (audit) + memql#191.
+// carrier#44 (audit) + memql#191.
 
 @enabled
-@description("Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view (visionarys-io/copresent src/hooks/useCopresent.ts).")
+@description("Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view.")
 query media spaceMedia {
   args {
     partitionId    string  @required @pattern("^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]{1,128}$")

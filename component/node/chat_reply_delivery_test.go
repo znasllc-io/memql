@@ -535,8 +535,10 @@ func TestChatReplySelfEchoSuppressed(t *testing.T) {
 }
 
 // TestChatReplyTopicGate documents which topics the chat-reply migration owns:
-// utterance / presence / canvasState (created+updated). Everything else stays
-// on the mesh forward (scope boundary: RPC=#1265, streaming=#1266).
+// utterance / presence / textChunk / clientToolRequest (created+updated).
+// Pack-registered concepts join via RegisterChatReplyConcept (covered by the
+// registry tests below). Everything else stays on the mesh forward (scope
+// boundary: RPC=#1265, streaming=#1266).
 //
 // The concept ids are pinned as LITERALS here on purpose: the constants held a
 // wrong presence id (v1:cognition:presence, a concept that does not exist) from
@@ -547,24 +549,20 @@ func TestChatReplyTopicGate(t *testing.T) {
 		"utterance":         "v1:cognition:utterance",
 		"presence":          "v1:cognition:participant:presence",
 		"textChunk":         "v1:cognition:text:chunk",
-		"canvasState":       "v1:copresent:canvasState",
 		"clientToolRequest": "v1:cognition:client:tool:request",
 	}
 	if conceptUtterance != literals["utterance"] ||
 		conceptPresence != literals["presence"] ||
 		conceptTextChunk != literals["textChunk"] ||
-		conceptCanvasState != literals["canvasState"] ||
 		conceptClientToolRequest != literals["clientToolRequest"] {
-		t.Fatalf("chat-reply concept ids drifted from the DSL: got %q/%q/%q/%q/%q",
-			conceptUtterance, conceptPresence, conceptTextChunk, conceptCanvasState, conceptClientToolRequest)
+		t.Fatalf("chat-reply concept ids drifted from the DSL: got %q/%q/%q/%q",
+			conceptUtterance, conceptPresence, conceptTextChunk, conceptClientToolRequest)
 	}
 	on := []string{
 		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptUtterance),
 		events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, conceptUtterance),
 		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptPresence),
 		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptTextChunk),
-		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptCanvasState),
-		events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, conceptCanvasState),
 		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptClientToolRequest),
 		events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, conceptClientToolRequest),
 	}
@@ -691,9 +689,10 @@ func TestSpaceInterestIgnoresRemoteEvents(t *testing.T) {
 	}
 }
 
-// TestResolveSpaceKey covers the payload shapes the three chat-reply concepts
-// carry: utterance/presence flatten partitionId; canvasState flattens space; both
-// also work from the nested payload map.
+// TestResolveSpaceKey covers the payload shapes the core chat-reply concepts
+// carry: utterance/presence flatten partitionId; a field a pack has NOT
+// registered resolves nothing in a pure-engine binary (the registered-field
+// path is covered by the registry tests). Nested payload maps also work.
 func TestResolveSpaceKey(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -702,7 +701,7 @@ func TestResolveSpaceKey(t *testing.T) {
 		ok      bool
 	}{
 		{"utterance partitionId", map[string]any{"partitionId": "s1"}, "space:s1", true},
-		{"canvas space", map[string]any{"space": "s2"}, "space:s2", true},
+		{"unregistered field", map[string]any{"unregisteredField": "s2"}, "", false},
 		{"nested payload", map[string]any{"payload": map[string]any{"partitionId": "s3"}}, "space:s3", true},
 		{"no space", map[string]any{"foo": "bar"}, "", false},
 		{"empty string", map[string]any{"partitionId": ""}, "", false},

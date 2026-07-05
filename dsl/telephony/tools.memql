@@ -1,7 +1,7 @@
 // Agent-facing telephony tools. Exposed to the realtime voice agent through
 // the existing tool bridge; assigning them to an agent is owner config (the
 // agent needs the telephony skill). Calls attach to a partition-scoped room,
-// never a CoPresent space (Amendment A).
+// never a product space (Amendment A).
 //
 // These tools were authored with snake_case names (place_call, ...) that
 // FAILED tool-registry validation (names must be camelCase), so they never

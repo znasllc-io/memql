@@ -4,15 +4,15 @@
 // tag planner; see app/integrations_planner_init.go). Its write
 // surface is owned here so every binary that loads concepts can
 // resolve the full plan / task / taskState mutation API regardless of
-// which product layer (copresent or otherwise) is wired in on top.
+// which product layer (if any) is wired in on top.
 //
 // History: createPlan / createTask / updatePlanStatus
 // / updateTaskStatus / persistTaskState /
 // createScopeElevationPlan were originally authored in
-// memql-bff-copresent/dsl/copresent/mutations.memql. They moved
+// the product pack's mutations file (in the carrier repo). They moved
 // here on 2026-05-17 because the BFF binary the cockpit connects to
-// can't be guaranteed to have copresent in its DSL graph -- and the
-// Planner tab's allPlans / createPlan calls were
+// can't be guaranteed to have the product pack in its DSL graph -- and
+// the Planner tab's allPlans / createPlan calls were
 // failing with "function not found" as a result.
 
 use planner.concepts.{ plan, task, taskState, responsibility }
@@ -46,7 +46,7 @@ mutate plan createAdHocPlan {
 }
 
 @enabled
-@description("Create a semantic Task -- the Planner-decision unit. Differs from createTask (in bff-copresent) by carrying the new category/logicalStepId/attemptNumber fields explicitly. Used by the Planner Agent at decomposition time and by the taskstamp Stamper to materialize the parent semantic Task for ad-hoc tool calls.")
+@description("Create a semantic Task -- the Planner-decision unit. Differs from createTask (in the product pack) by carrying the new category/logicalStepId/attemptNumber fields explicitly. Used by the Planner Agent at decomposition time and by the taskstamp Stamper to materialize the parent semantic Task for ad-hoc tool calls.")
 mutate task createSemanticTask {
   args {
     taskId          string  @required
@@ -128,13 +128,14 @@ mutate task completeToolInvocation {
 }
 
 // -----------------------------------------------------------------------------
-// Plan / Task mutations moved from copresent on 2026-05-17.
+// Plan / Task mutations moved from the product pack on 2026-05-17.
 //
-// These were originally authored in memql-bff-copresent/dsl/copresent/
-// mutations.memql but the planner is a core node type (build tag
+// These were originally authored in the product pack's mutations file
+// (in the carrier repo) but the planner is a core node type (build tag
 // planner, see app/integrations_planner_init.go); its write surface
 // has to be uniformly available on every binary that loads
-// concepts, not gated behind copresent being in the import graph.
+// concepts, not gated behind the product pack being in the import
+// graph.
 // The user-cockpit's Planner tab calls these directly, and reproducing
 // the "function not found" gating message every 3 seconds was the
 // concrete symptom that surfaced the layering bug.
@@ -312,8 +313,8 @@ mutate plan createScopeElevationPlan {
 // with the persisted TaskState + feedbackResponse in context.
 //
 // The plan.awaitingFeedback canvas-card producer for the
-// feedback_required variant lives in the BFF
-// (memql-bff-copresent/dsl/copresent/) and ships in the follow-up BFF
+// feedback_required variant lives in the BFF (the product pack tree
+// in the carrier repo) and ships in the follow-up BFF
 // wave; only the scope_elevation_required producer exists today.
 
 @enabled
@@ -344,7 +345,7 @@ mutate plan requestPlanFeedback {
 // "answer the question the agent asked" path.
 //
 // Designed to be cleanly callable by BOTH surfaces in the epic:
-//   - the needs-feedback canvas card's free-text input (copresent #1406-card),
+//   - the needs-feedback canvas card's free-text input (frontend #1406-card),
 //     frontend -> WS -> engine;
 //   - the assistant-mediated chat path (cognition #1406), which classifies
 //     a user's answering utterance and routes it here via engine.Execute.

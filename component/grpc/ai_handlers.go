@@ -380,10 +380,10 @@ func (s *streamSession) handleAiSuggest(envelope *memqlv1.MemqlClientMessage, ms
 	// Look up the registered handler for this domain BEFORE spawning the
 	// goroutine so an unsupported domain returns the same typed
 	// InvalidArgument error synchronously. The suggest-domain surface is
-	// extension-point driven (memql#1959): the 9 CoPresent product domains
-	// register from the pack under the `copresent` build tag, `knowledge`
+	// extension-point driven (memql#1959): the 9 product suggest domains
+	// register from the pack under its build tag, `knowledge`
 	// registers from core. Engine-only core builds carry only the core
-	// domains -- which is exactly the zero-CoPresent-refs G3 goal.
+	// domains -- which is exactly the zero-product-refs G3 goal.
 	handler := memqlengine.LookupSuggestDomain(domain)
 	if handler == nil {
 		return s.sendQueryError(requestId, correlate, codes.InvalidArgument,

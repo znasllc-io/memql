@@ -40,7 +40,7 @@ const (
 // behavior change. Deployment-agnostic: the persona id is resolved from the
 // catalog at materialization time, never hardcoded (the minted ids vary per
 // vendor account). `make dev-refresh` exports this so the avatar "just works"
-// after login. See copresent#237.
+// after login. See frontend#237.
 const devDefaultAvatarPersonaEnv = "MEMQL_DEV_DEFAULT_AVATAR_PERSONA"
 
 // seedMaterializerActor is the synthetic actor every materializer
@@ -242,14 +242,14 @@ func (m *SeedMaterializer) Start(ctx context.Context) error {
 
 	// Skill catalog reconcile (#1459). The global pass above already
 	// materializes every registered `seed skill` -- including the
-	// carrier-RegisterTree'd CoPresent skills (copresent-takeover /
-	// -guide / -ui / -canvas) on a carrier node, since LoadUnifiedSeeds
-	// walks the overlay-inclusive dsl.Tree(). But a per-row materialize
-	// failure in the global pass is logged-and-continued and never
-	// re-verified, which is how staging ended up with the Assistant's
-	// capabilities.skillIds referencing copresent skills whose
-	// v1:agents:skill ROWS were absent -- ResolveSkills then silently
-	// dropped them and the realtime voice model got zero UI primitives.
+	// carrier-RegisterTree'd product-pack skills on a carrier node,
+	// since LoadUnifiedSeeds walks the overlay-inclusive dsl.Tree().
+	// But a per-row materialize failure in the global pass is
+	// logged-and-continued and never re-verified, which is how staging
+	// ended up with the Assistant's capabilities.skillIds referencing
+	// pack skills whose v1:agents:skill ROWS were absent --
+	// ResolveSkills then silently dropped them and the realtime voice
+	// model got zero UI primitives.
 	// This pass re-asserts that every registered skill seed has a row,
 	// creating only the MISSING ones (idempotent, create-only). Runs
 	// BEFORE the assistant reconcile so the catalog rows the assistant's

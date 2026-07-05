@@ -152,7 +152,7 @@ var approveDeclineOptions = []map[string]any{
 // feedbackRequest, then publishes the matching
 // plan.specialistApprovalRequested canvas card so the frontend's
 // SpecialistApprovalCard renders an Approve/Decline surface
-// (copresent#362). The card publish is best-effort: a failure logs but
+// (frontend#362). The card publish is best-effort: a failure logs but
 // does not undo the park -- the operator still gets the bare
 // feedbackReason prompt.
 func (l *PlannerAgentLoop) parkForSpecialistApproval(ctx context.Context, plan map[string]any, action, message string) error {
@@ -181,9 +181,9 @@ func (l *PlannerAgentLoop) parkForSpecialistApproval(ctx context.Context, plan m
 	return nil
 }
 
-// writeSpecialistApprovalCard inserts a v1:copresent:canvasState row of
-// kind='card' carrying data.variant='plan.specialistApprovalRequested'.
-// The frontend renderer (copresent SpecialistApprovalCard.tsx, #362)
+// writeSpecialistApprovalCard inserts a row of the pack's canvas-state
+// concept, kind='card' carrying data.variant='plan.specialistApprovalRequested'.
+// The frontend renderer (SpecialistApprovalCard.tsx, frontend#362)
 // reads variant + planId + action + goal + message and surfaces
 // Approve / Decline buttons; Approve read-merges
 // metrics.specialistApproved and resumes the Plan to running. We attach

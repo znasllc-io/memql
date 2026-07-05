@@ -13,7 +13,7 @@ func TestAllowsRedirectURI_LoopbackAnyPort(t *testing.T) {
 				},
 			},
 			{
-				ClientId: "copresent",
+				ClientId: "app",
 				RedirectURIs: []string{
 					"http://localhost:8080/auth/callback",
 				},
@@ -53,13 +53,13 @@ func TestAllowsRedirectURI_LoopbackAnyPort(t *testing.T) {
 		},
 		{
 			name:     "non-loopback host -- exact match required",
-			clientId: "copresent",
+			clientId: "app",
 			uri:      "http://localhost:8080/auth/callback",
 			want:     true,
 		},
 		{
 			name:     "non-loopback wrong port -- exact match required, no flex",
-			clientId: "copresent",
+			clientId: "app",
 			uri:      "http://localhost:9090/auth/callback",
 			want:     false,
 		},

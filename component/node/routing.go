@@ -26,8 +26,8 @@ var (
 
 // RegisterRoutingRule adds a routing rule from an init() function. Build
 // tags on the caller control which binaries include the registration, so
-// product code (e.g. integrations/copresent/) can declare its own concept
-// patterns without editing the core node package. Order matches
+// product code (e.g. a pack's integrations package) can declare its own
+// concept patterns without editing the core node package. Order matches
 // registration order; block rules still evaluate first across the
 // combined set (built-in + registered).
 func RegisterRoutingRule(rule RoutingRule) {
@@ -59,6 +59,17 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.deleted.v1:cluster:*", TargetType: ""},
 		{Pattern: "graph.node.created.v1:cognition:*", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:cognition:*", TargetType: ""},
+		// Per-user provisioning fan-out: v1:identity:user rows are written
+		// by the identity node, but their consumers live on OTHER node
+		// types -- the seed materializer's per-user runtime hook
+		// (component/memql/seed_materializer.go) materializes pack-declared
+		// perUser seeds only on carrier nodes that mount the pack tree, and
+		// pack automations (e.g. daily-space provisioning) trigger on the
+		// same event. Every consumer is content-addressed / create-only
+		// (multi-fire safe by contract), so the event broadcasts. Without
+		// this rule, per-user provisioning on signup is dead in cluster
+		// mode: the event never leaves the identity node.
+		{Pattern: "graph.node.created.v1:identity:user", TargetType: ""},
 		// Result-cache invalidation forwarding (epic 5, issue 5.6 /
 		// memql#1970). ONE broadcast rule forwards the dedicated
 		// cache-invalidation channel to every node type. Every graph write

@@ -14,7 +14,7 @@ import (
 
 // participantPerUserAgentCap is the per-(user, space) maximum number of
 // active AI participants. Under the one-assistant space model
-// (copresent #124) a space carries EXACTLY ONE assistant -- the owner's
+// (frontend #124) a space carries EXACTLY ONE assistant -- the owner's
 // active one, auto-joined by autoJoinAI. Specialists and system agents
 // never participate in spaces, so the per-user AI cap is 1. This is the
 // Go-side enforcement of the declarative space.maxAgents=1 default.
@@ -210,7 +210,7 @@ func (e *MemQLEngine) countActiveAIParticipantsForUser(ctx context.Context, part
 }
 
 // validateHumanParticipantCap enforces the space's maxHumans cap at
-// human-join time. Under the one-assistant model (copresent #124) a
+// human-join time. Under the one-assistant model (frontend #124) a
 // space holds 1+ humans (max 5 by default) plus exactly one assistant;
 // this is the human side of that invariant. Only active inserts grow
 // the count (a 'left'/'idle' insert never does). Idempotent re-joins

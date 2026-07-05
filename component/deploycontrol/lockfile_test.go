@@ -25,12 +25,12 @@ components:
   memql-workbench:
     repo: znasllc-io/memql
     digest: sha256:45dd55a955351eb569b337802bec91706cb8929293c2407d31ee9903e0a887c0
-  memql-bff-copresent:
-    repo: visionarys-io/memql-bff-copresent
+  memql-examplepack:
+    repo: example-org/memql-examplepack
     digest: sha256:c3e3dd89fe052842e13d563731ec9b5a4d0d46f8f5416aae6c47122ffa86fa0a
     builtAgainstEngine: "0.9.9"
-  copresent:
-    repo: visionarys-io/copresent
+  exampleapp:
+    repo: example-org/exampleapp
     digest: sha256:dcca35c767456c744491fa205c60b723a715ca261c00450326efddcf8ba8f25d
     builtAgainstEngine: "0.9.9"
 `
@@ -76,7 +76,7 @@ func TestParseLockfileCrossRepoCoherence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseLockfile: %v", err)
 	}
-	for _, name := range []string{"memql-bff-copresent", "copresent"} {
+	for _, name := range []string{"memql-examplepack", "exampleapp"} {
 		c, ok := lf.Components[name]
 		if !ok {
 			t.Fatalf("missing cross-repo component %q", name)

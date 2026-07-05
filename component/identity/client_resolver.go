@@ -10,7 +10,7 @@ import (
 // The identity service admits OAuth clients from two sources:
 //
 //  1. The static MEMQL_IDENTITY_REGISTERED_CLIENTS slice (Config.RegisteredClients) --
-//     operator-pinned relying parties (e.g. CoPresent).
+//     operator-pinned relying parties (e.g. the product SPA).
 //  2. DB-backed v1:identity:oauthClient rows minted at POST /register
 //     (RFC 7591 dynamic client registration) -- claude.ai / Claude Desktop's
 //     "add custom connector" self-registers a public client_id it can't

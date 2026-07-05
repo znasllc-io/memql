@@ -20,7 +20,7 @@
 //
 //     requests(A) ∩ requests(B) = ∅    for distinct projectIds A, B
 //
-//   Claude resolves a human-supplied slug ("memql", "copresent-acme") to a
+//   Claude resolves a human-supplied slug ("memql", "acme-app") to a
 //   projectId via projectBySlug, then passes that id to
 //   projectRequests, forgeSubmitRequest, etc. The slug is stable and
 //   human-readable; the id is the row-stable FK. The two-step resolution
@@ -80,7 +80,7 @@ query project activeProjects {
 
 @enabled
 @unbounded("forge project by unique slug -- bounded to a single row")
-@description("Resolve a v1:forge:project by its stable slug (e.g. 'memql', 'copresent-acme'). Claude uses this to go from a human-supplied name to a projectId before submitting a request or filtering requests. Returns at most one row because slugs are unique within a partition.")
+@description("Resolve a v1:forge:project by its stable slug (e.g. 'memql', 'acme-app'). Claude uses this to go from a human-supplied name to a projectId before submitting a request or filtering requests. Returns at most one row because slugs are unique within a partition.")
 query project projectBySlug {
   args {
     slug  string  @required

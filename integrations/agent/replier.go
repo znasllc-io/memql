@@ -339,26 +339,30 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// resolves the non-streaming tool surface). prepareTurn only builds
 	// the routerReq + the rest of the shared state. (memql#896)
 
-	// If operator-enabled, inject the CoPresent AppProfile so the
-	// agent has navigation + glossary context baked into its prompt.
-	// Non-fatal -- if the profile is missing the template skips its
-	// block and the agent falls back to uiDescribe for discovery.
+	// If operator-enabled, inject the product pack's registered app
+	// profile (memql.RegisterAppProfile) so the agent has navigation +
+	// glossary context baked into its prompt. Non-fatal -- with no
+	// registered profile (pure-engine binary) or missing content the
+	// template skips its block and the agent falls back to uiDescribe
+	// for discovery.
 	if op, _ := data["operatorEnabled"].(bool); op {
 		if _, already := data["appProfile"]; !already {
 			profStart := time.Now()
-			profile := memql.LoadAppProfileByName("copresent")
-			profileBytes := len(profile)
-			if profile != "" {
-				data["appProfile"] = profile
+			prof, profile, registered := memql.LoadActiveAppProfile()
+			if registered {
+				if profile != "" {
+					data["appProfile"] = profile
+				}
+				r.logger.Info("agentReply: stage",
+					"stage", "appProfile",
+					"profile", prof.Name,
+					"elapsed_ms", time.Since(profStart).Milliseconds(),
+					"elapsed_from_turn_ms", time.Since(turnStart).Milliseconds(),
+					"bytes", len(profile),
+					"found", profile != "",
+					"requestId", msg.RequestId,
+				)
 			}
-			r.logger.Info("agentReply: stage",
-				"stage", "appProfile",
-				"elapsed_ms", time.Since(profStart).Milliseconds(),
-				"elapsed_from_turn_ms", time.Since(turnStart).Milliseconds(),
-				"bytes", profileBytes,
-				"found", profile != "",
-				"requestId", msg.RequestId,
-			)
 		}
 	}
 
@@ -412,13 +416,13 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// up-front retrieval puts app-knowledge in its prompt.
 	//
 	// Server-side contract: if the agent has an operator capability
-	// (copresent-takeover / copresent-guide, i.e. operatorEnabled==true),
-	// ALWAYS include `copresent-ui` in the
-	// retrieval domain set -- regardless of what's in the agent's
-	// stored capabilities.domains. The agent can't drive the UI
+	// (a takeover / guide slug, i.e. operatorEnabled==true),
+	// ALWAYS include the registered AppProfile's operator UI knowledge
+	// domains in the retrieval domain set -- regardless of what's in the
+	// agent's stored capabilities.domains. The agent can't drive the UI
 	// competently without app knowledge, and forgetting to tick the
 	// UI domain in the picker shouldn't silently break walkthroughs.
-	// This mirrors the frontend auto-union in CreateAgentModal.
+	// This mirrors the frontend's auto-union in its agent-creation modal.
 	// retrievedChunks captures what RAG returned for this turn so the
 	// streaming-tool-loop's TurnResult can carry it back through to
 	// AgentGenerateTurnComplete -- the frontend "Show details" expander
@@ -429,9 +433,13 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	var retrievedChunks []RetrievedChunk
 	domains := domainsFromAssistant(data)
 	if op, _ := data["operatorEnabled"].(bool); op {
-		domains = ensureDomain(domains, "copresent-ui")
+		if prof, ok := memql.ActiveAppProfile(); ok {
+			for _, d := range prof.OperatorDomainIds {
+				domains = ensureDomain(domains, d)
+			}
+		}
 	}
-	// Computer Use mirrors the copresent-ui auto-injection. The
+	// Computer Use mirrors the operator-domain auto-injection. The
 	// computer-use knowledge domain is the operational manual for
 	// the capability -- scope tiers, per-task approval flow,
 	// post-approval execution, plan-outcome semantics, "things you
@@ -455,7 +463,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	if wa, _ := data["workbenchAvailable"].(bool); wa {
 		domains = ensureDomain(domains, "workbench")
 	}
-	// recent-chat auto-attach mirrors the copresent-ui /
+	// recent-chat auto-attach mirrors the operator-UI /
 	// computer-use pattern: tool requires domain, domain doesn't require
 	// tool. Phase 5 of the chat-architecture plan -- every agent that
 	// is dispatching for a non-empty partitionId is acting as a space
@@ -1750,15 +1758,15 @@ func extractReplyText(result any) string {
 
 // toolNamesFromAssistant extracts the flat list of tool names from the
 // prompt data's "assistant.tools" array, expanding capability slugs
-// (like "copresent-takeover" / "copresent-guide") into concrete tool
-// names before returning. Returns nil when absent.
+// (like the product pack's takeover / guide operator slugs) into concrete
+// tool names before returning. Returns nil when absent.
 //
 // Architecture note (2026-04-22): the System-agent-as-singleton-callback
 // pattern was retired. Any agent whose capabilities include an operator
-// slug (copresent-takeover / copresent-guide) drives the UI directly via
+// slug (takeover / guide) drives the UI directly via
 // the operator primitives -- no delegation hop through a special "System"
 // role. The `delegateTakeover` hand-off tool + handler were removed with
-// the CoPresent Control v2 split (copresent#187): the GA holds both
+// the operator-control v2 split (frontend#187): the GA holds both
 // operator bundles directly, so there is nothing to delegate.
 //
 // Also stamps `operatorEnabled: true` on the prompt data map when the
@@ -1783,11 +1791,11 @@ func toolNamesFromAssistant(data map[string]any) []string {
 		}
 	}
 
-	// Expand capability slugs (copresent-takeover / copresent-guide ->
-	// uiClick / uiType / …) into concrete tool names the dispatcher can
-	// resolve. Concrete
-	// names passed through unchanged; unknown slugs pass through so the
-	// tool-loop's own filter can produce a clear "unknown tool" error.
+	// Expand capability slugs (registered via memql.RegisterCapabilitySlug
+	// by the engine and by the product pack) into concrete tool names the
+	// dispatcher can resolve. Concrete names pass through unchanged;
+	// unknown slugs pass through so the tool-loop's own filter can produce
+	// a clear "unknown tool" error.
 	expanded := memql.ExpandCapabilitySlugs(raw)
 
 	// Overwrite assistant.tools in the prompt data with the expanded
@@ -1800,7 +1808,7 @@ func toolNamesFromAssistant(data map[string]any) []string {
 
 	// Gate the Operator scope fence on the expanded list, not the
 	// raw slug list. Set a bool the template can branch on.
-	if memql.HasOperatorCapability(expanded) {
+	if memql.HasCapabilityTag(expanded, memql.CapabilityTagOperator) {
 		data["operatorEnabled"] = true
 	}
 
@@ -1932,9 +1940,9 @@ func citeNothing(_ map[string]any, _ string) string {
 }
 
 // appStructureDomainIds is the set of well-known operator/UI knowledge
-// domain ids whose chunks live in a system-owned partition (e.g.
-// `copresent-ui`) separate from the `default` tenant partition where
-// the knowledgeDomain row lives. Reconstructing the canonical id from
+// domain ids whose chunks live in a system-owned partition (e.g. a
+// pack's operator UI domain) separate from the `default` tenant partition
+// where the knowledgeDomain row lives. Reconstructing the canonical id from
 // the CHUNK's partition would point at the wrong partition for the
 // domain row, so the lookup would miss and we'd fall back to a wrong
 // "your knowledge" citation. Short-circuiting these directly to the
@@ -1944,19 +1952,26 @@ func citeNothing(_ map[string]any, _ string) string {
 //
 // Lives as a small Go set rather than a domain-row attribute so the
 // short-circuit happens BEFORE the lookup. If the catalog grows more
-// system-owned domains, add them here. Future cleanup: collapse this
-// set with the seedKnowledgeDomains automation's special-cases (it
-// also hardcodes `copresent-ui` for `source = "appStructure"` at
-// insert time -- see integrations/knowledge/seed.go).
+// engine-owned domains, add them here; a product pack's operator domains
+// (e.g. its UI map) classify via the registered AppProfile instead.
 var appStructureDomainIds = map[string]bool{
-	"copresent-ui": true,
 	"computer-use": true,
 	"workbench":    true,
 	"recent-chat":  true,
 }
 
 func isAppStructureDomain(domainId string) bool {
-	return appStructureDomainIds[domainId]
+	if appStructureDomainIds[domainId] {
+		return true
+	}
+	if prof, ok := memql.ActiveAppProfile(); ok {
+		for _, d := range prof.OperatorDomainIds {
+			if d == domainId {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // domainDisplayName extracts the user-facing name from a domain row,
@@ -2031,12 +2046,12 @@ func (r *Replier) enrichChunksForRender(ctx context.Context, chunks []map[string
 		//    v1:knowledge:knowledgeBridge instead of knowledgeDomain;
 		//    the lookup would always miss. Source: crossDomainBridge.
 		//
-		// 2. App-structure domain (currently just "copresent-ui")
-		//    seeds its chunks into the `copresent-ui` partition by
-		//    design (system-owned, isolated from tenant data), but
-		//    the knowledgeDomain row itself lives in `default`. The
-		//    canonical-id reconstruction picks up "copresent-ui" as
-		//    the partition, which has no knowledgeDomain row,
+		// 2. App-structure domains (e.g. the product pack's operator
+		//    UI domain) seed their chunks into a partition named after
+		//    the domain id by design (system-owned, isolated from
+		//    tenant data), but the knowledgeDomain row itself lives in
+		//    `default`. The canonical-id reconstruction picks up that
+		//    domain-id partition, which has no knowledgeDomain row,
 		//    triggering domain-lookup-missed warnings on every
 		//    operator turn. Short-circuit + stamp appStructure
 		//    directly so operator citations stay quiet (they're

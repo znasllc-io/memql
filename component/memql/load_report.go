@@ -16,7 +16,7 @@ package memql
 //     break-glass MEMQL_DSL_ALLOW_SKIPS.
 //
 // A half-loaded pack is worse than one that fails: a multi-node fleet
-// boots green with arbitrary construct subsets (the copresent-rot
+// boots green with arbitrary construct subsets (the product-pack-rot
 // mechanism, bff#153). Strict boot turns that silent, per-node drift
 // into a loud, uniform boot failure.
 //

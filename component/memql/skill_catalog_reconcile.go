@@ -18,17 +18,16 @@ import (
 // The startup sweep (SeedMaterializer.Start) already materializes every
 // global seed -- including skills -- by walking m.registry. That registry
 // is overlay-inclusive: carrier-`RegisterTree`'d DSL subtrees (the
-// CoPresent BFF's dsl/copresent/skills.memql, mounted via
-// dsl.RegisterTree("copresent", ...)) flow through LoadUnifiedSeeds into
+// product pack's skills file, mounted via
+// dsl.RegisterTree) flow through LoadUnifiedSeeds into
 // the SAME registry, so on a carrier node the global pass DOES attempt to
-// write the copresent-takeover / copresent-guide / copresent-ui /
-// copresent-canvas rows. (This is provable in-process; see
+// write the pack-declared skill rows. (This is provable in-process; see
 // TestSeedMaterializer_CarrierOverlaySkillRowsResolve.)
 //
 // The staging gap #1459 documents is a DATA gap, not a code-path gap: the
 // per-agent voice scope read (resolveAgentToolSlugsVia -> ResolveSkills)
 // resolves the Assistant's capabilities.skillIds (which include the
-// copresent skills) against v1:agents:skill ROWS -- and on staging those
+// pack-declared skills) against v1:agents:skill ROWS -- and on staging those
 // rows were absent, so ResolveSkills silently dropped them
 // ("unknown skill id (skipped)") and the realtime model got zero operator
 // primitives (uiClick/uiType/...). The assistant-skillId reconcile (#1443)
@@ -74,15 +73,15 @@ type SkillCatalogReconcileReport struct {
 // Idempotent: a row that already matches is left untouched.
 //
 // Why divergence-healing and not just missing-row backfill (#1462):
-// the carrier capability-slug skills (copresent-takeover et al., whose
-// toolSlugs are their OWN slug, fanned out by ExpandCapabilitySlugs)
-// shipped under an earlier shape on staging -- copresent-takeover was
-// once copresent-control with toolSlugs ["copresent-control"] before
-// the split (memql-bff-copresent #187 / memql#376). A row materialized
+// the carrier capability-slug skills (the pack's takeover skill et al.,
+// whose toolSlugs are their OWN slug, fanned out by ExpandCapabilitySlugs)
+// shipped under an earlier shape on staging -- the takeover skill was
+// once a single control skill whose toolSlugs carried the old slug before
+// the split (carrier#187 / memql#376). A row materialized
 // under the old shape (or half-written with empty toolSlugs) still
 // EXISTS by id, so the original missing-only reconcile reported it as
 // alreadyOK and never rewrote it -- ResolveSkills then read the stale /
-// empty toolSlugs, copresent-takeover never reached ExpandCapabilitySlugs,
+// empty toolSlugs, the takeover skill never reached ExpandCapabilitySlugs,
 // and the realtime voice scope resolved zero UI primitives (the #1462
 // staging symptom: exposed_count=19, all core skills). Comparing the
 // persisted lists against the registered seed self-heals that on the

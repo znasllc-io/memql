@@ -11,8 +11,8 @@ import (
 // TestNoDuplicateConstructs is the load-time uniqueness gate for the
 // embedded core tree (epic #2351 / S5, memql#2360): no two authored
 // constructs that land in the same runtime registry may share a name.
-// The copresent pack's cross-repo half of this gate lives in the bff
-// repo's copresent_tree_load_test.go (it boots engine + pack).
+// The product pack's cross-repo half of this gate lives in the carrier
+// repo's pack tree-load test (it boots engine + pack).
 func TestNoDuplicateConstructs(t *testing.T) {
 	dups := DetectDuplicateConstructs(baseloader.ReadAll(nil))
 	if len(dups) == 0 {

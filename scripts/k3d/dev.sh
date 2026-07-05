@@ -26,19 +26,25 @@
 # annotation value is not part of the desired manifest. (selfHeal ignores
 # pod restarts.)
 #
-# Supported node types and their Docker build context
-# ---------------------------------------------------
-#   ENGINE nodes (built from THIS repo's Dockerfile, --target <type>):
-#     identity    engine identity binary (no CoPresent DSL)
-#     voice       engine voice binary    (CGO, requires libopus)
-#     mcp         engine mcp binary      (no CoPresent DSL)
+# Node images and the carrier override
+# ------------------------------------
+# By default every app node type builds from THIS repo's Dockerfile
+# (--build-arg BUILD_TAGS=<type>) and is tagged memql-<type>:local:
+#     identity  voice  mcp  cognition  agent  planner  workbench
 #
-#   CARRIER nodes (built from memql-bff-copresent/Dockerfile, BUILD_TAGS=<type>):
-#     bff         carrier bff
-#     cognition   carrier cognition
-#     agent       carrier agent
-#     planner     carrier planner
-#     workbench   carrier workbench
+# A downstream product repo that ships its own DSL/integrations on top of
+# the engine (a "carrier" image) reuses this script and overrides a subset
+# of node types via the carrier hook:
+#     --carrier-repo=PATH      the carrier repo (its Dockerfile is used)
+#     --carrier-nodes=a,b,c    node types built from the carrier Dockerfile
+#     --carrier-context=PATH   docker build context (default: the carrier
+#                              repo's parent directory, i.e. the workspace
+#                              root, so the carrier Dockerfile can mount
+#                              both source trees at compile time)
+# Carrier builds pass --build-arg BUILD_TAGS=<type> and tag the image
+# memql-<type>:local -- the SAME name the overlay pins -- so overriding a
+# node is transparent to the manifests. The engine repo itself never sets
+# these; they exist for downstream repos' Makefiles.
 #
 #   LOCAL infra (pulled from public registries, not rebuilt here):
 #     postgres    timescale/timescaledb -- pull + import
@@ -49,8 +55,8 @@
 # Usage
 # -----
 #   make dev                          # rebuild + restart all app nodes
-#   make dev NODE=bff                 # rebuild + restart one node
-#   make dev NODE=bff,cognition       # comma-separated list
+#   make dev NODE=cognition           # rebuild + restart one node
+#   make dev NODE=mcp,cognition       # comma-separated list
 #   make dev PULL_INFRA=1            # pull + re-import infra images
 #
 # This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
@@ -75,11 +81,14 @@ source "${SCRIPT_DIR}/../lib/capability.sh"
 source "${SCRIPT_DIR}/../lib/engine_build_args.sh"
 
 cap_init "k3d.dev" "Build node image(s) locally, import into k3d, and restart Deployments."
-cap_spec_param "node"       "node type(s) to rebuild, comma-separated (default: all app nodes)" ""
-cap_spec_param "pull-infra" "pull + import infra images (flag)"                                 ""
-cap_spec_param "cluster"    "k3d cluster name"
-cap_spec_param "namespace"  "k8s namespace"
-cap_spec_param "no-wait"    "skip rollout status wait (flag)"                                   ""
+cap_spec_param "node"            "node type(s) to rebuild, comma-separated (default: all app nodes)" ""
+cap_spec_param "pull-infra"      "pull + import infra images (flag)"                                 ""
+cap_spec_param "cluster"         "k3d cluster name"
+cap_spec_param "namespace"       "k8s namespace"
+cap_spec_param "no-wait"         "skip rollout status wait (flag)"                                   ""
+cap_spec_param "carrier-repo"    "downstream carrier repo whose Dockerfile builds the carrier nodes" ""
+cap_spec_param "carrier-nodes"   "node types built from the carrier Dockerfile, comma-separated"     ""
+cap_spec_param "carrier-context" "docker build context for carrier builds (default: carrier repo's parent)" ""
 
 #=============================================================================
 # CONFIGURATION
@@ -91,17 +100,18 @@ CLUSTER_NAME="${MEMQL_K3D_CLUSTER:-memql}"
 NAMESPACE="${MEMQL_K3D_NAMESPACE:-memql}"
 LOCAL_TAG="local"
 
-# The bff-copresent sibling repo is expected one directory up (workspace layout).
-BFF_REPO="${MEMQL_BFF_COPRESENT_REPO:-${REPO_ROOT}/../memql-bff-copresent}"
+# App node types buildable from this repo's Dockerfile. The default `make dev`
+# set matches the Deployments in deploy/k8s/overlays/local.
+DEFAULT_APP_NODES=(identity voice mcp cognition agent planner workbench)
 
-# Engine node types (built from this repo's Dockerfile)
-ENGINE_NODES=(identity voice mcp)
+# Every node type this script can address (superset: node types a downstream
+# carrier overlay may add, e.g. bff, are valid targets too).
+VALID_NODES=(identity voice mcp bff cognition agent planner workbench)
 
-# Carrier node types (built from memql-bff-copresent/Dockerfile)
-CARRIER_NODES=(bff cognition agent planner workbench)
-
-# All app node types
-ALL_APP_NODES=("${ENGINE_NODES[@]}" "${CARRIER_NODES[@]}")
+# Carrier override (resolved from params in main; empty = engine-only).
+CARRIER_REPO=""
+CARRIER_CONTEXT=""
+CARRIER_NODES=()
 
 # Infra images (pull from upstream, import into k3d)
 INFRA_IMAGES=(
@@ -163,9 +173,9 @@ function check_prerequisites() {
 # NODE TYPE CLASSIFICATION
 #=============================================================================
 
-function is_engine_node() {
+function is_valid_node() {
     local node="$1"
-    for n in "${ENGINE_NODES[@]}"; do
+    for n in "${VALID_NODES[@]}"; do
         [[ "$n" == "$node" ]] && return 0
     done
     return 1
@@ -173,47 +183,34 @@ function is_engine_node() {
 
 function is_carrier_node() {
     local node="$1"
-    for n in "${CARRIER_NODES[@]}"; do
+    for n in "${CARRIER_NODES[@]+"${CARRIER_NODES[@]}"}"; do
         [[ "$n" == "$node" ]] && return 0
     done
     return 1
 }
 
 function deployment_name_for_node() {
-    # Map node type to k8s Deployment name (matches base/ manifest names).
+    # Node type == k8s Deployment name (matches base/ manifest names).
     local node="$1"
-    case "$node" in
-        identity)   echo "identity" ;;
-        voice)      echo "voice" ;;
-        mcp)        echo "mcp" ;;
-        bff)        echo "bff" ;;
-        cognition)  echo "cognition" ;;
-        agent)      echo "agent" ;;
-        planner)    echo "planner" ;;
-        workbench)  echo "workbench" ;;
-        *)
-            cap_fail 2 "unknown node type: $node"
-            ;;
-    esac
+    if ! is_valid_node "$node"; then
+        cap_fail 2 "unknown node type: $node"
+    fi
+    echo "$node"
 }
 
 function image_name_for_node() {
     # Map node type to the in-cluster image ref the local overlay's pods
-    # pull. These MUST match the `newName`s in
-    # deploy/k8s/overlays/local/kustomization.yaml's `images:` block --
-    # k3d imports under exactly this name so the kubelet resolves it
-    # locally instead of trying to pull from a registry. The bff node's
-    # image is named memql-bff-copresent (carrier); every other node is
-    # memql-<node>.
+    # pull. These MUST match the `newName`s in the local overlay's
+    # `images:` block -- k3d imports under exactly this name so the
+    # kubelet resolves it locally instead of trying to pull from a
+    # registry. Uniform for engine and carrier builds, so a carrier
+    # override is transparent to the manifests.
     local node="$1"
-    case "$node" in
-        bff) echo "memql-bff-copresent:${LOCAL_TAG}" ;;
-        *)   echo "memql-${node}:${LOCAL_TAG}" ;;
-    esac
+    echo "memql-${node}:${LOCAL_TAG}"
 }
 
 #=============================================================================
-# BUILD ENGINE IMAGE (identity / voice / mcp)
+# BUILD ENGINE IMAGE (from this repo's Dockerfile)
 #=============================================================================
 
 function build_engine_node() {
@@ -243,7 +240,7 @@ function build_engine_node() {
 }
 
 #=============================================================================
-# BUILD CARRIER IMAGE (bff / cognition / agent / planner / workbench)
+# BUILD CARRIER IMAGE (from the downstream carrier repo's Dockerfile)
 #=============================================================================
 
 function build_carrier_node() {
@@ -253,26 +250,20 @@ function build_carrier_node() {
 
     section "Building carrier image: ${node} -> ${image}"
 
-    if [ ! -d "${BFF_REPO}" ]; then
-        error "memql-bff-copresent repo not found at ${BFF_REPO}."
-        error "Carrier nodes (bff/cognition/agent/planner/workbench) require the"
-        error "sibling checkout at the workspace level. Clone it first:"
-        error "  git clone git@github.com:znasllc-io/memql-bff-copresent.git ${BFF_REPO}"
-        error "Or set MEMQL_BFF_COPRESENT_REPO to its location."
-        cap_fail 4 "memql-bff-copresent repo not found at ${BFF_REPO}"
+    if [ ! -d "${CARRIER_REPO}" ]; then
+        error "Carrier repo not found at ${CARRIER_REPO}."
+        error "Carrier node builds (--carrier-nodes=${CARRIER_NODES[*]}) need the"
+        error "carrier repo checked out. Pass --carrier-repo=<path> or set"
+        error "MEMQL_CARRIER_REPO to its location."
+        cap_fail 4 "carrier repo not found at ${CARRIER_REPO}"
     fi
-
-    # The carrier Dockerfile expects the workspace root as the build context
-    # so it can mount the memql + memql-bff-copresent trees at compile time.
-    local workspace_root
-    workspace_root="$(cd "${BFF_REPO}/.." && pwd)"
 
     docker build \
         --build-arg BUILD_TAGS="${node}" \
         --build-arg CGO_ENABLED=0 \
         --tag "${image}" \
-        --file "${BFF_REPO}/Dockerfile" \
-        "${workspace_root}" >&2
+        --file "${CARRIER_REPO}/Dockerfile" \
+        "${CARRIER_CONTEXT}" >&2
 
     info "Built ${image}."
 }
@@ -298,6 +289,11 @@ function restart_deployment() {
     local deployment
     deployment="$(deployment_name_for_node "$node")"
 
+    if ! kubectl get deployment "${deployment}" -n "${NAMESPACE}" &>/dev/null; then
+        info "Deployment '${deployment}' not present in namespace '${NAMESPACE}' -- image imported; skipping restart."
+        return 0
+    fi
+
     info "Rolling restart of Deployment '${deployment}' in namespace '${NAMESPACE}'..."
     kubectl rollout restart deployment/"${deployment}" -n "${NAMESPACE}" >&2
     info "Restart initiated. Watch: kubectl rollout status deployment/${deployment} -n ${NAMESPACE}"
@@ -310,20 +306,18 @@ function restart_deployment() {
 function process_node() {
     local node="$1"
 
-    if is_engine_node "$node"; then
-        build_engine_node "$node"
-        import_image "$(image_name_for_node "$node")"
-        restart_deployment "$node"
-    elif is_carrier_node "$node"; then
-        build_carrier_node "$node"
-        import_image "$(image_name_for_node "$node")"
-        restart_deployment "$node"
-    else
-        error "Unknown node type: '${node}'. Valid values:"
-        error "  Engine nodes:  ${ENGINE_NODES[*]}"
-        error "  Carrier nodes: ${CARRIER_NODES[*]}"
+    if ! is_valid_node "$node"; then
+        error "Unknown node type: '${node}'. Valid values: ${VALID_NODES[*]}"
         cap_fail 2 "unknown node type: ${node}"
     fi
+
+    if is_carrier_node "$node"; then
+        build_carrier_node "$node"
+    else
+        build_engine_node "$node"
+    fi
+    import_image "$(image_name_for_node "$node")"
+    restart_deployment "$node"
 
     REBUILT_COUNT=$((REBUILT_COUNT + 1))
     RESTARTED=true
@@ -381,22 +375,53 @@ function main() {
 
     CLUSTER_NAME="$(cap_param cluster "${MEMQL_K3D_CLUSTER:-memql}")"
     NAMESPACE="$(cap_param namespace "${MEMQL_K3D_NAMESPACE:-memql}")"
-    local nodes_arg pull_infra wait_flag
+    local nodes_arg pull_infra wait_flag carrier_nodes_arg
     nodes_arg="$(cap_param node "")"
     pull_infra="$(cap_flag pull-infra)"
     wait_flag="$(cap_flag no-wait)"
+    CARRIER_REPO="$(cap_param carrier-repo "${MEMQL_CARRIER_REPO:-}")"
+    carrier_nodes_arg="$(cap_param carrier-nodes "${MEMQL_CARRIER_NODES:-}")"
+    CARRIER_CONTEXT="$(cap_param carrier-context "${MEMQL_CARRIER_CONTEXT:-}")"
 
     cap_require cluster "$CLUSTER_NAME"
     cap_require namespace "$NAMESPACE"
 
+    if [ -n "${carrier_nodes_arg}" ]; then
+        IFS=',' read -ra CARRIER_NODES <<< "${carrier_nodes_arg}"
+        if [ -z "${CARRIER_REPO}" ]; then
+            cap_fail 2 "--carrier-nodes requires --carrier-repo (or MEMQL_CARRIER_REPO)"
+        fi
+        # Validate the carrier repo up front (before the default-context cd
+        # below, which would otherwise abort raw under set -e) so a typo'd or
+        # not-yet-cloned path fails honestly as a missing prerequisite.
+        if [ ! -d "${CARRIER_REPO}" ]; then
+            error "Carrier repo not found at ${CARRIER_REPO}."
+            error "Pass --carrier-repo=<path> or set MEMQL_CARRIER_REPO to its location."
+            cap_fail 4 "carrier repo not found at ${CARRIER_REPO}"
+        fi
+        # Default carrier build context: the carrier repo's parent (workspace
+        # root), so its Dockerfile can mount both source trees.
+        if [ -z "${CARRIER_CONTEXT}" ]; then
+            CARRIER_CONTEXT="$(cd "${CARRIER_REPO}/.." && pwd)"
+        fi
+    fi
+
     check_prerequisites
 
-    # Resolve node list.
+    # Resolve node list: explicit --node wins; otherwise all default app
+    # nodes plus any carrier-only node types the override adds (e.g. bff).
     local nodes_to_build=()
     if [ -n "${nodes_arg}" ]; then
         IFS=',' read -ra nodes_to_build <<< "${nodes_arg}"
     else
-        nodes_to_build=("${ALL_APP_NODES[@]}")
+        nodes_to_build=("${DEFAULT_APP_NODES[@]}")
+        for cn in "${CARRIER_NODES[@]+"${CARRIER_NODES[@]}"}"; do
+            local seen=false
+            for n in "${nodes_to_build[@]}"; do
+                [[ "$n" == "$cn" ]] && seen=true && break
+            done
+            [[ "$seen" == false ]] && nodes_to_build+=("$cn")
+        done
     fi
 
     if [ -n "${pull_infra}" ]; then
@@ -405,6 +430,9 @@ function main() {
 
     if [ ${#nodes_to_build[@]} -gt 0 ]; then
         info "Nodes to build: ${nodes_to_build[*]}"
+        if [ ${#CARRIER_NODES[@]} -gt 0 ]; then
+            info "Carrier override: ${CARRIER_NODES[*]} (from ${CARRIER_REPO})"
+        fi
         for node in "${nodes_to_build[@]}"; do
             process_node "$node"
         done
@@ -416,8 +444,7 @@ function main() {
 
     section "Done"
     info "Cluster '${CLUSTER_NAME}' is running the latest local build."
-    info "ArgoCD app status: kubectl get app memql-local -n argocd"
-    info "Pod status:        kubectl get pods -n ${NAMESPACE}"
+    info "Pod status: kubectl get pods -n ${NAMESPACE}"
 
     cap_result_set     cluster     "$CLUSTER_NAME"
     cap_result_set     namespace   "$NAMESPACE"

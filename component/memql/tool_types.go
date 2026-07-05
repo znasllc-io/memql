@@ -36,7 +36,7 @@ type Tool struct {
 	// ClientExecution, when true, tells the server to emit a
 	// ClientToolCall envelope on the stream and await a matching
 	// ClientToolResult instead of executing the handler locally. Used
-	// by tools that affect browser UI (CoPresent Operator primitives).
+	// by tools that affect browser UI (the pack's operator primitives).
 	ClientExecution bool `json:"clientExecution,omitempty"`
 
 	// MCPExposed, when true, opts this tool into the curated MCP

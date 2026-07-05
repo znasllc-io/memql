@@ -36,8 +36,8 @@ import (
 
 // PackDomain is one browsable namespace in the unified DSL tree.
 type PackDomain struct {
-	// Name is the top-level namespace directory (e.g. "cognition",
-	// "copresent").
+	// Name is the top-level namespace directory (e.g. "cognition", or
+	// a pack-registered domain name).
 	Name string
 	// Origin is "embedded" for a core baked-in domain or "pack:<name>"
 	// for a RegisterTree'd plugin domain.

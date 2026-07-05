@@ -1483,7 +1483,7 @@ type MemqlClientMessage_VoiceAgentRealtimeSpeaking struct {
 	// native realtime path (#1421). The realtime executor (gpt-realtime)
 	// speaks directly and never routes through the cognition reply path, so
 	// nobody writes the GA participant's presence state=responding while it
-	// speaks and the CoPresent orb's speaking animation never plays. The
+	// speaks and the frontend orb's speaking animation never plays. The
 	// voice-agent emits speaking=true on the FIRST output audio frame of a
 	// response and speaking=false on response.done; the server resolves the
 	// GA's SI participant and writes presence responding/idle through the
@@ -4088,7 +4088,7 @@ type ToolDefinition struct {
 	// When true, the tool is executed by the connected client (not the
 	// backend). The agent loop will emit a ClientToolCall envelope and
 	// await the matching ClientToolResult instead of running the tool
-	// locally. Used by the CoPresent Operator primitive (ui.*, space.*,
+	// locally. Used by the product's Operator primitive (ui.*, space.*,
 	// agent.updateSelf) where the tool affects the browser UI.
 	ClientExecution bool `protobuf:"varint,4,opt,name=client_execution,json=clientExecution,proto3" json:"client_execution,omitempty"`
 	// Optional scopes the tool requires (e.g. "read", "navigate",
@@ -7502,7 +7502,7 @@ func (x *ListPackDomainsResult) GetDomains() []*PackDomain {
 
 type PackDomain struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                             // top-level namespace (e.g. "cognition", "copresent")
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                             // top-level namespace (e.g. "cognition", or a pack-supplied namespace)
 	Origin        string                 `protobuf:"bytes,2,opt,name=origin,proto3" json:"origin,omitempty"`                         // "embedded" | "pack:<domain>"
 	FileCount     int32                  `protobuf:"varint,3,opt,name=file_count,json=fileCount,proto3" json:"file_count,omitempty"` // recursive count of browsable files under the domain
 	unknownFields protoimpl.UnknownFields
@@ -11149,7 +11149,7 @@ type SendGuestInviteMsg struct {
 	GuestName   string                 `protobuf:"bytes,6,opt,name=guest_name,json=guestName,proto3" json:"guest_name,omitempty"`       // optional suggested display name
 	// Absolute base URL the frontend serves /join/<token> from. The
 	// backend appends /join/<token> to build the link that goes in the
-	// email. Example: "https://app.copresent.ai".
+	// email. Example: "https://app.example.com".
 	JoinUrlBase string `protobuf:"bytes,7,opt,name=join_url_base,json=joinUrlBase,proto3" json:"join_url_base,omitempty"`
 	// How long the invitation is valid for, in minutes. When unset or
 	// <= 0 the backend falls back to the default TTL (currently 5 min).
@@ -13585,7 +13585,7 @@ func (x *VoiceAgentSpeak) GetText() string {
 // reply_id is the caller-minted utterance id. It MUST be the same id
 // the voice-agent used to key any in-flight streaming UI state so the
 // committed utterance shares the chat panel's streaming `replyId`
-// contract (see copresent useCopresentChat -- the synthetic in-flight
+// contract (see the frontend's chat hook -- the synthetic in-flight
 // Utterance keyed by replyId swaps in-place when the committed row
 // lands). When empty the server mints one.
 //
@@ -13772,7 +13772,7 @@ func (x *VoiceAgentRealtimeOutputAck) GetErrorMessage() string {
 }
 
 // VoiceAgentRealtimeSpeaking signals the GA participant's speaking state for
-// the native realtime voice path so the CoPresent orb animates while the
+// the native realtime voice path so the frontend orb animates while the
 // assistant speaks (#1421). On turnModeNative the realtime model (gpt-realtime)
 // authors + speaks the reply directly: cognition resets the GA's presence to
 // idle at gate-publish (it no longer authors the reply), and the only output

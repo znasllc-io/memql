@@ -12,7 +12,7 @@ func TestSuggestInteractivity(t *testing.T) {
 		{"walk me through agent creation", "walk me through creating an agent", "conversational"},
 		{"teach me", "teach me how to set up my profile", "conversational"},
 		{"show me how", "show me how to invite a guest", "conversational"},
-		{"explain how", "explain how spaces work in CoPresent", "conversational"},
+		{"explain how", "explain how spaces work in ExampleApp", "conversational"},
 		{"guide me", "guide me through onboarding", "conversational"},
 		{"help me set up", "help me set up my notification preferences", "conversational"},
 		{"step by step", "delete the agent step by step", "conversational"},
@@ -25,7 +25,7 @@ func TestSuggestInteractivity(t *testing.T) {
 		{"switch to dark mode", "switch to dark mode", "minimal"},
 		{"delete agent", "delete the agent named Test", "minimal"},
 		{"open spaces menu", "open the Spaces menu", "minimal"},
-		{"show me the version", "show me the CoPresent version", "minimal"}, // info-intent reads as minimal
+		{"show me the version", "show me the ExampleApp version", "minimal"}, // info-intent reads as minimal
 		{"navigate to settings", "navigate to settings", "minimal"},
 		{"please prefix", "please change the theme to dark", "minimal"},
 

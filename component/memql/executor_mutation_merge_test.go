@@ -14,7 +14,7 @@ import (
 // that writes `preferences: { computerUseEnabled: ... }` replaces the
 // ENTIRE stored preferences object -- wiping theme, timezone,
 // archiveRetentionDays, dailySpaceEnabled, voice mode, and the
-// CoPresent Control settings on every kill-switch flip. The
+// frontend's UI-control settings on every kill-switch flip. The
 // @mergeFields("preferences") annotation opts that one field into an
 // engine-side deep-merge so sibling keys survive.
 
@@ -225,7 +225,7 @@ mutate user mutationCreateUserBad {
 // carry @mergeFields("preferences"). Without it, flipping the
 // computer-use kill switch wipes every other User.preferences key
 // (theme, timezone, archiveRetentionDays, dailySpaceEnabled, voice
-// mode, CoPresent Control settings).
+// mode, UI-control settings).
 func TestToggleComputerUseEnabled_DSLCarriesMergeFields(t *testing.T) {
 	if _, err := LoadUnifiedConcepts(nil); err != nil {
 		t.Fatalf("LoadUnifiedConcepts: %v", err)

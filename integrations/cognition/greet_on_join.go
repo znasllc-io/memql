@@ -259,7 +259,7 @@ func (c *CognitionIntegration) runGreetingTurn(partitionId, participantId, agent
 	}
 
 	// Skip entirely if a first-run walkthrough / guide has armed suppression
-	// for this space (copresent#252). Checked AFTER the initialGreetingDelay
+	// for this space (frontend#252). Checked AFTER the initialGreetingDelay
 	// sleep so a suppression the frontend armed during that window is seen --
 	// the guided intake is taking over the conversation, so an opening greeting
 	// on top of it is wasteful + noisy.
@@ -285,7 +285,7 @@ func (c *CognitionIntegration) runGreetingTurn(partitionId, participantId, agent
 	// no canned text.
 	//
 	// "Familiar greeting" framing -- applies to ALL agents, no
-	// per-agent toggle. Every agent in CoPresent is one the user
+	// per-agent toggle. Every agent in the product is one the user
 	// created and named themselves; they're never strangers
 	// meeting the user for the first time. A "Hi, I'm Vera"
 	// opener every time Vera joins a new space reads as
@@ -408,7 +408,7 @@ func (c *CognitionIntegration) greetingExists(ctx context.Context, partitionId, 
 }
 
 // greetSuppressed reports whether a non-expired greet-on-join suppression
-// exists for the space (copresent#252). The frontend arms one (via
+// exists for the space (frontend#252). The frontend arms one (via
 // mutationSuppressGreetOnJoin) while a first-run walkthrough / guide is
 // starting, so the opening greeting + its LLM call don't fire over the guided
 // intake that's taking over the conversation. Best-effort: a query error
@@ -419,7 +419,7 @@ func (c *CognitionIntegration) greetSuppressed(ctx context.Context, partitionId 
 	}
 	// The pack query is named activeGreetSuppression -- the previous
 	// queryActiveGreetSuppression name never existed, so this read failed
-	// closed silently and copresent#252's suppression never suppressed
+	// closed silently and frontend#252's suppression never suppressed
 	// (found unbreaking the reserved-args rename, memql#2361). The arg is
 	// asOf post-rename (args fields may not shadow `now`).
 	query := fmt.Sprintf(`query activeGreetSuppression(partitionId: %s, asOf: %s)`,

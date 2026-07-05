@@ -172,8 +172,9 @@ func LoadUnifiedConcepts(logger *slog.Logger) (int, error) {
 }
 
 // firstPathSegment returns the leading path component of a unified-tree
-// path ("cognition/concepts.memql" -> "cognition", "copresent/concepts.memql"
-// -> "copresent"). This is the namespace directory, which matches the first
+// path ("cognition/concepts.memql" -> "cognition"; a registered pack
+// overlay's "<domain>/concepts.memql" -> "<domain>"). This is the namespace
+// directory, which matches the first
 // segment of a `use <dir>.concepts.{ ... }` import's dotted path.
 func firstPathSegment(p string) string {
 	if i := strings.IndexByte(p, '/'); i >= 0 {
@@ -186,7 +187,7 @@ func firstPathSegment(p string) string {
 // written as a `use`-imported bare concept name (#1067) into its canonical
 // id, in place on the decl, BEFORE the concept is built. A target already in
 // canonical form (contains ':') is left untouched -- the engine resolves both
-// forms so the memql and copresent trees can migrate independently; the
+// forms so the engine and pack trees can migrate independently; the
 // authored form is pinned to the bare-name form by each repo's conformance
 // test. An unresolved bare name is logged with a migration hint and left as
 // written (engine bootstrap then warns that the target concept is unknown).

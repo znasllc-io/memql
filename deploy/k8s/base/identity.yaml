@@ -116,7 +116,10 @@ spec:
             - { name: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN, value: "staging.copresent.ai" }
             # CORS + OAuth redirect for the SPA at app.staging.copresent.ai.
             - { name: MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS, value: "https://app.staging.copresent.ai" }
-            - { name: MEMQL_IDENTITY_REGISTERED_CLIENTS, value: '[{"clientId":"app","redirectURIs":["https://app.staging.copresent.ai/auth/callback"]},{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]}]' }
+            # Only the product-neutral cockpit client (engine tooling) lives in
+            # base. The product SPA's OAuth client is registered per-environment
+            # via the identity-product-config overlay patch (staging / prod).
+            - { name: MEMQL_IDENTITY_REGISTERED_CLIENTS, value: '[{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]}]' }
             - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
             - { name: MEMQL_IDENTITY_ENABLED, value: "true" }
             # Migrations run ONCE, here. Every other node has this false.

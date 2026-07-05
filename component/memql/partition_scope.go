@@ -11,7 +11,7 @@ const DefaultPartition = "default"
 //
 // This is the single sanctioned way for core (engine + services) to scope
 // work to a tenant. `partition` is the canonical tenant/scope primitive;
-// product notions like CoPresent's `partitionId` are NOT scope keys -- a `space`
+// product-level notions like `partitionId` are NOT scope keys -- a `space`
 // is scoped *by* a partition, never the other way around. New core code must
 // scope through this helper (or the engine's ResolvePartitionFromContext,
 // which additionally honors the engine default), never by threading a

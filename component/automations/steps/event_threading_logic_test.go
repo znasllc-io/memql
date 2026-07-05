@@ -125,10 +125,10 @@ func TestEventContextThreadsIntoNestedSteps(t *testing.T) {
 			wantValues: []string{"utt-1", "p-1"},
 		},
 		// (logicAutoJoinAI -- the node.created->ownerUserId event-threading
-		// fixture -- moved to the CoPresent pack in B2 (#2038) alongside the
+		// fixture -- moved to the product pack in B2 (#2038) alongside the
 		// `space` concept; the pack's own load tests cover the moved logic.)
 		// (logicEnsureDailySpaceOnAuthSession -- the coalesce-in-step-body
-		// event-threading fixture, memql#1065 -- moved to the CoPresent pack in
+		// event-threading fixture, memql#1065 -- moved to the product pack in
 		// #1976; the remaining core logics keep this coverage. The pack's
 		// own load tests cover the moved logic.)
 	}

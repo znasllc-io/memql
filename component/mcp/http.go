@@ -102,7 +102,7 @@ type HTTPConfig struct {
 	IdleTTL time.Duration
 
 	// PublicURL is this resource's public base URL (e.g.
-	// https://mcp.staging.copresent.ai) -- the `resource` identifier advertised
+	// https://mcp.staging.example.com) -- the `resource` identifier advertised
 	// in the RFC 9728 Protected Resource Metadata document and in the
 	// WWW-Authenticate `resource_metadata` hint on a 401. Empty -> the resource
 	// is derived per-request from the inbound scheme+Host and no
@@ -110,7 +110,7 @@ type HTTPConfig struct {
 	PublicURL string
 
 	// AuthServerURL is the public identity issuer (e.g.
-	// https://identity.staging.copresent.ai) advertised as the
+	// https://identity.staging.example.com) advertised as the
 	// authorization_servers entry in the Protected Resource Metadata. Empty ->
 	// the authorization_servers field is omitted.
 	AuthServerURL string

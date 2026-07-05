@@ -208,8 +208,8 @@ func (c *CognitionIntegration) forwardTurnToAgent(
 
 	// Pass the agent's canonical id (NOT name) so client_tool_relay
 	// stamps the right value on `v1:cognition:client:tool:request.agentId`.
-	// The browser reads this field to attribute the CoPresent Control
-	// Widget transcript to the actual driving agent (e.g. Briar) via
+	// The browser reads this field to attribute the frontend's UI-control
+	// widget transcript to the actual driving agent (e.g. Briar) via
 	// `agents.find(a => a.id === ...)` -- agent.Name doesn't match
 	// because the agents list keys on the canonical full id.
 	relayAgentId := strings.TrimSpace(agent.ID)

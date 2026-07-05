@@ -8,7 +8,7 @@
 // PURPOSE:
 // On space creation, auto-join the CREATOR's currently-active
 // assistant into the space. Under the one-assistant model
-// (copresent #124) this is the ONLY AI participant a space ever
+// (frontend#124) this is the ONLY AI participant a space ever
 // carries -- there are no specialists and no agent picker.
 //
 // BEHAVIOR BY DESIGN:

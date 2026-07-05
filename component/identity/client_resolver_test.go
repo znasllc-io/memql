@@ -36,18 +36,18 @@ func (f *resolverFakeEngine) Execute(_ context.Context, q string) (*memqlengine.
 
 func TestResolveClient_StaticFirst(t *testing.T) {
 	cfg := Config{RegisteredClients: []RegisteredClient{
-		{ClientId: "copresent", RedirectURIs: []string{"https://app.copresent.ai/auth/callback"}},
+		{ClientId: "app", RedirectURIs: []string{"https://app.example.com/auth/callback"}},
 	}}
 
 	// Static-only resolution (store == nil) must still work.
-	got := ResolveClient(context.Background(), cfg, nil, "copresent")
-	if got == nil || got.ClientId != "copresent" {
-		t.Fatalf("ResolveClient(static, nil store) = %+v, want copresent", got)
+	got := ResolveClient(context.Background(), cfg, nil, "app")
+	if got == nil || got.ClientId != "app" {
+		t.Fatalf("ResolveClient(static, nil store) = %+v, want app", got)
 	}
-	if !ClientAllowsRedirectURI(context.Background(), cfg, nil, "copresent", "https://app.copresent.ai/auth/callback") {
+	if !ClientAllowsRedirectURI(context.Background(), cfg, nil, "app", "https://app.example.com/auth/callback") {
 		t.Fatalf("ClientAllowsRedirectURI should accept the registered static redirect")
 	}
-	if ClientAllowsRedirectURI(context.Background(), cfg, nil, "copresent", "https://evil.example/cb") {
+	if ClientAllowsRedirectURI(context.Background(), cfg, nil, "app", "https://evil.example/cb") {
 		t.Fatalf("ClientAllowsRedirectURI should reject an unregistered redirect")
 	}
 }

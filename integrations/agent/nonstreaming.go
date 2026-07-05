@@ -567,7 +567,7 @@ BackgroundLoop:
 		}
 
 		if wheelContested {
-			// Background turns rarely drive the CoPresent Control widget,
+			// Background turns rarely drive the frontend's UI-control widget,
 			// but a worker/UI tool can still hit a contested wheel. Break
 			// rather than spin retrying a widget that has stopped obeying.
 			r.logger.Info("agent background: wheel contested -- breaking loop", "iter", iter)

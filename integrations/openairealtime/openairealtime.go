@@ -1,7 +1,7 @@
 // Package openairealtime exposes OpenAI Realtime ephemeral client-secret
 // minting to the MemQL DSL, so the browser can open a DIRECT
-// browser<->OpenAI Realtime WebRTC session (the v2 voice path; see
-// copresent docs/openai_agents_sdk/realtime-v2-direct-webrtc-handoff.md)
+// browser<->OpenAI Realtime WebRTC session (the v2 voice path; see the
+// frontend repo's docs/openai_agents_sdk/realtime-v2-direct-webrtc-handoff.md)
 // WITHOUT ever seeing the standing OpenAI API key.
 //
 // Capability (callable as a builtin from .memql files / executeNamed):
@@ -16,7 +16,7 @@
 // documented in component/memql/ai_providers.go.
 //
 // This mirrors the integrations/avatardirect pattern -- the established way
-// CoPresent mints a third-party browser session credential server-side
+// the product mints a third-party browser session credential server-side
 // instead of through a frontend-tier Express route (gRPC-first; see the
 // #147 architecture spike).
 package openairealtime
@@ -130,7 +130,7 @@ func (i *Integration) handleCreateClientSecret(ctx context.Context, args map[str
 	i.logger.Info("openairealtime.createClientSecret: minted ephemeral key", "model", model, "valueLen", len(secret.value))
 
 	// Shape matches the browser hook's MemqlRealtimeSessionResponse
-	// (copresent src/hooks/useAgentsSdk.ts): { value, expiresAt, config }.
+	// (the frontend's src/hooks/useAgentsSdk.ts): { value, expiresAt, config }.
 	out := map[string]any{
 		"value":     secret.value,
 		"expiresAt": secret.expiresAt,
@@ -159,9 +159,10 @@ type clientSecret struct {
 // The requested voice is baked into the ephemeral session here (GA shape:
 // session.audio.output.voice) so the minted session actually speaks in that
 // voice -- the realtime voice can only be set before the first audio output,
-// so a caller that wants a different voice (e.g. CoPresent's intake switching
-// to a male/female voice on the identity answer, copresent#274) re-mints with
-// the new voice and reconnects, rather than trying to mutate a live session.
+// so a caller that wants a different voice (e.g. the frontend's intake
+// switching to a male/female voice on the identity answer, frontend#274)
+// re-mints with the new voice and reconnects, rather than trying to mutate a
+// live session.
 func (i *Integration) mint(ctx context.Context, apiKey, model, voice string) (*clientSecret, error) {
 	session := map[string]any{
 		"type":  "realtime",
