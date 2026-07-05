@@ -192,6 +192,11 @@ function create_cluster() {
     # gRPC head or frontend) via --extra-ports=host:container,... -- k3d LB
     # ports are fixed at cluster-create time, so they must be declared here.
     local port_args=(
+        # Front door: the in-cluster ingress (traefik, bundled with k3s)
+        # terminates TLS on 443 and routes by hostname -- same shape as the
+        # cloud ingress. 80 is kept for redirects.
+        --port "443:443@loadbalancer"
+        --port "80:80@loadbalancer"
         --port "8085:8085@loadbalancer"
         --port "7880:7880@loadbalancer"
         --port "5432:5432@loadbalancer"
@@ -210,6 +215,23 @@ function create_cluster() {
         "${port_args[@]}" \
         --wait \
         --timeout "120s" >&2
+
+    # Allow Ingress backends of type ExternalName in the k3s-bundled traefik
+    # (off by default): the local front door routes a product's host-side
+    # dev server (e.g. its SPA on host.k3d.internal) through the same
+    # TLS-terminating ingress as the in-cluster services.
+    kubectl apply -f - >&2 <<'HELMCFG'
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    providers:
+      kubernetesIngress:
+        allowExternalNameServices: true
+HELMCFG
 
     info "Cluster '${CLUSTER_NAME}' created."
     CLUSTER_CREATED=true
@@ -412,10 +434,10 @@ function print_summary() {
         echo "  Application:    ${APP_NAME} (${TARGET_REVISION} -> ${OVERLAY_PATH})"
         echo "  Namespace:      ${NAMESPACE}"
         echo ""
-        echo "  Port-forwards (via k3d LoadBalancer):"
-        echo "    http://localhost:8085   identity"
-        echo "    ws://localhost:7880     livekit"
-        echo "    localhost:5432          postgres (debug)"
+        echo "  Entry points (front door on 443; *.local.znas.io resolves to 127.0.0.1):"
+        echo "    https://identity.local.znas.io   identity (web UI + JWKS)"
+        echo "    ws://localhost:7880              livekit"
+        echo "    localhost:5432                   postgres (debug)"
         echo ""
         echo "  Engine gRPC head (mcp), on demand:"
         echo "    kubectl port-forward -n ${NAMESPACE} svc/mcp 50051:50051"

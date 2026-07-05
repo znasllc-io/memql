@@ -91,8 +91,8 @@ func ExpandCapabilitySlugs(raw []string) []string {
 	}
 	capMu.RLock()
 	defer capMu.RUnlock()
-	seen := make(map[string]struct{}, len(raw)*2)
-	out := make([]string, 0, len(raw)*2)
+	seen := make(map[string]struct{}, len(raw))
+	out := make([]string, 0, len(raw))
 	add := func(name string) {
 		if name == "" {
 			return
