@@ -69,6 +69,20 @@ func reconcileTestDB(t *testing.T) *bun.DB {
 // carry the takeover capability slug (see the fixture body) that
 // ExpandCapabilitySlugs fans out to the operator primitives. Mounted via
 // RegisterTree exactly as the carrier mounts its pack domain.
+
+// registerExampleOperatorSlug installs the synthetic capability slug the
+// overlay fixtures carry in toolSlugs. Pre-decoupling the fixtures used the
+// product slug that the engine's static map expanded; post-decoupling
+// product bundles register from the pack, so the engine mechanism test
+// registers its own neutral bundle -- the same seam a product uses.
+func registerExampleOperatorSlug(t *testing.T) {
+	t.Helper()
+	RegisterCapabilitySlug("exampleapp-takeover",
+		[]string{"uiClick", "uiType", "uiNavigate"},
+		CapabilityTagOperator)
+	t.Cleanup(func() { UnregisterCapabilitySlug("exampleapp-takeover") })
+}
+
 func carrierSkillOverlay(slug string) fstest.MapFS {
 	body := `use agents.concepts.{ skill }
 
@@ -89,6 +103,7 @@ seed skill ` + slug + ` {
 }
 
 func TestSeedMaterializer_CarrierOverlaySkillRowsResolve(t *testing.T) {
+	registerExampleOperatorSlug(t)
 	const slug = "reconcile-probe-takeover"
 	const domain = "reconcileprobe"
 	rowId := conceptAgentsSkill + ":" + slug
@@ -237,6 +252,7 @@ seed skill ` + slug + ` {
 //
 // Postgres-gated (skips with no DB), like the #1459 guard above.
 func TestSeedMaterializer_StaleCarrierSkillRowHeals(t *testing.T) {
+	registerExampleOperatorSlug(t)
 	const slug = "stale-heal-probe-takeover"
 	const domain = "stalehealprobe"
 	rowId := conceptAgentsSkill + ":" + slug
