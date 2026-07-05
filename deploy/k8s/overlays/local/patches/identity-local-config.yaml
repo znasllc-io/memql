@@ -2,7 +2,7 @@
 # for local k3d development (#2065).
 #
 # Identity serves its web UI and JWKS at localhost:8085 (via k3d port-forward).
-# The CORS + OAuth redirect rules must match the local copresent URL.
+# The CORS + OAuth redirect rules must match the local product SPA URL.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,7 +21,7 @@ spec:
               value: "http://localhost:8085"
             - name: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN
               value: "localhost"
-            # Allow both the copresent SPA (port 8080) and direct localhost.
+            # Allow both the product SPA (port 8080) and direct localhost.
             - name: MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS
               value: "http://localhost:8080,http://localhost:3000"
             # OAuth redirect: localhost SPA + cockpit (unchanged).

@@ -98,7 +98,8 @@ spec:
             # public internet; the in-cluster ws://livekit:7880 is unreachable
             # for it (the avatar would never join/publish). Same public URL the
             # BFF hands browsers (MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL).
-            - { name: LIVEKIT_PUBLIC_URL, value: "wss://livekit.staging.copresent.ai" }
+            # Deployment-specific placeholder; a product stack's overlay patches the real host.
+            - { name: LIVEKIT_PUBLIC_URL, value: "wss://livekit.staging.example.com" }
             # Per-pod instance id for the self-bootstrapped voice_agent JWT.
             - { name: MEMQL_VOICE_AGENT_INSTANCE_ID, valueFrom: { fieldRef: { fieldPath: metadata.name } } }
             # Self-bootstrap: VOICE_AGENT_TOKEN empty -> mint via the genesis
@@ -106,7 +107,8 @@ spec:
             - { name: VOICE_AGENT_TOKEN, value: "" }
             - { name: MEMQL_IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
             - { name: MEMQL_IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
-            - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.copresent.ai" }
+            # Deployment-specific placeholder; a product stack's overlay patches the real host.
+            - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.example.com" }
             # Trust the internal cluster CA when calling https://identity:8085.
             - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }
             - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }

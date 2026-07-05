@@ -339,7 +339,8 @@ patches:
   # ---------------------------------------------------------------------------
   # Local environment config (staging URLs -> localhost)
   # All engine nodes carry MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER pointing at the
-  # staging identity host (identity.staging.copresent.ai). This must match
+  # staging identity host (a deployment-specific placeholder in the engine base;
+  # a product stack's overlay patches the real host). This must match
   # what identity ISSUES in JWTs (MEMQL_IDENTITY_BASE_URL). Locally we set
   # MEMQL_IDENTITY_BASE_URL=http://localhost:8085, so all verifiers must also expect
   # http://localhost:8085. Each node patched individually (strategic merge).
