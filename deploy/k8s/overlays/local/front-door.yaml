@@ -1,0 +1,38 @@
+# Local front door (mirrors the cloud ingress topology): the k3s-bundled
+# traefik terminates TLS on 443 with the operator's browser-trusted wildcard
+# (local-znas-tls, seeded by seed-secrets.sh) and routes by hostname --
+# https://identity.local.znas.io with no ports, exactly like the deployed
+# environments' ingress. The identity backend serves TLS in-cluster with the
+# internal CA (identity-tls), so traefik proxies https with verification
+# skipped (the internal CA is not in traefik's trust store; the hop stays
+# inside the cluster network).
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: internal-ca-skip-verify
+  namespace: memql
+spec:
+  insecureSkipVerify: true
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: identity-front-door
+  namespace: memql
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts: ["identity.local.znas.io"]
+      secretName: local-znas-tls
+  rules:
+    - host: identity.local.znas.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: identity
+                port:
+                  number: 8085

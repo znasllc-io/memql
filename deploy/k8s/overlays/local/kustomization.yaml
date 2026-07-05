@@ -48,6 +48,7 @@ kind: Kustomization
 namespace: memql
 
 resources:
+  - front-door.yaml
   - identity-external.yaml
   - ../../base
   # Local-only infrastructure (absent in base/staging/prod)
@@ -58,6 +59,20 @@ resources:
 # Remove cloud-only resources
 # ---------------------------------------------------------------------------
 patches:
+
+  # Front door backend wiring: identity serves TLS in-cluster (internal CA),
+  # so traefik must proxy https and skip verification (ServersTransport in
+  # front-door.yaml). These are SERVICE-level traefik annotations.
+  - target: { kind: Service, name: identity }
+    patch: |
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: identity
+        namespace: memql
+        annotations:
+          traefik.ingress.kubernetes.io/service.serversscheme: https
+          traefik.ingress.kubernetes.io/service.serverstransport: memql-internal-ca-skip-verify@kubernetescrd
   # ExternalSecret resources require External Secrets Operator + Azure Key Vault.
   # Not available locally; the corresponding secrets are created directly via
   # `make secrets` in the local bootstrap (#2065).
@@ -472,7 +487,7 @@ patches:
               - name: cognition
                 env:
                   - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    value: "http://identity.local.znas.io:8085"
+                    value: "https://identity.local.znas.io"
   - target:
       kind: Deployment
       name: voice
@@ -489,7 +504,7 @@ patches:
               - name: voice
                 env:
                   - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    value: "http://identity.local.znas.io:8085"
+                    value: "https://identity.local.znas.io"
   - target:
       kind: Deployment
       name: agent
@@ -506,7 +521,7 @@ patches:
               - name: agent
                 env:
                   - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    value: "http://identity.local.znas.io:8085"
+                    value: "https://identity.local.znas.io"
   - target:
       kind: Deployment
       name: planner
@@ -523,7 +538,7 @@ patches:
               - name: planner
                 env:
                   - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    value: "http://identity.local.znas.io:8085"
+                    value: "https://identity.local.znas.io"
   - target:
       kind: Deployment
       name: workbench
@@ -540,7 +555,7 @@ patches:
               - name: workbench
                 env:
                   - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    value: "http://identity.local.znas.io:8085"
+                    value: "https://identity.local.znas.io"
   - target:
       kind: Deployment
       name: mcp
@@ -557,7 +572,7 @@ patches:
               - name: mcp
                 env:
                   - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    value: "http://identity.local.znas.io:8085"
+                    value: "https://identity.local.znas.io"
   - target:
       kind: Deployment
       name: voice-agent
@@ -574,7 +589,7 @@ patches:
               - name: voice-agent
                 env:
                   - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    value: "http://identity.local.znas.io:8085"
+                    value: "https://identity.local.znas.io"
   # Override the Postgres pool bounds (base is tuned for Tiger Cloud limits;
   # local in-cluster Postgres can handle larger pools).
   - path: patches/db-pool-local.yaml
