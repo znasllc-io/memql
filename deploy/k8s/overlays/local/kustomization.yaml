@@ -48,6 +48,7 @@ kind: Kustomization
 namespace: memql
 
 resources:
+  - identity-external.yaml
   - ../../base
   # Local-only infrastructure (absent in base/staging/prod)
   - postgres.yaml
