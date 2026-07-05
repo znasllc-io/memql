@@ -9,9 +9,12 @@ import (
 )
 
 // TestPlannerPlanQueriesBindConcept guards memql#759: the planner
-// plan-queries (dueTrainAgentRetryPlans / runningTrainAgentPlans /
-// plansForSpace / allPlans) are each declared `query plan <name>`
-// and must bind to v1:planner:plan. The bare trailing segment "plan" is
+// plan-queries (plansForSpace / allPlans) are each declared
+// `query plan <name>` and must bind to v1:planner:plan. (The
+// dueTrainAgentRetryPlans / runningTrainAgentPlans plan-queries that
+// used to exercise this moved to the CoPresent product pack with the
+// training integration; the pack's tree-load gate covers them there.)
+// The bare trailing segment "plan" is
 // ambiguous (v1:planner:plan AND v1:harness:plan both end ":plan"), so the
 // binding has to disambiguate via the file's `use planner.concepts.{ plan }`
 // import. A regression leaves BoundConcept empty and every call fails the
@@ -29,8 +32,6 @@ func TestPlannerPlanQueriesBindConcept(t *testing.T) {
 	}
 
 	for _, name := range []string{
-		"dueTrainAgentRetryPlans",
-		"runningTrainAgentPlans",
 		"plansForSpace",
 		"allPlans",
 	} {

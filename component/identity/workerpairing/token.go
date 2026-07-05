@@ -1,12 +1,12 @@
 // Package workerpairing implements short-lived pairing codes for
-// the computer-use enrollment flow. CoPresent's Settings -> Computer
+// the computer-use enrollment flow. The product's Settings -> Computer
 // Use card mints a code (XXXX-XXXX, 8 chars from Crockford's Base32)
 // and the user pastes it into `memql-cockpit-gui worker pair <code>`
 // on their machine. The cockpit redeems the code via a gRPC stream
 // authenticated with `Authorization: Pair <code>`, and gets back a
 // plain `mql_wkr_<...>` worker token + cluster URL.
 //
-// The plain code is shown to the user ONCE in the CoPresent UI;
+// The plain code is shown to the user ONCE in the product UI;
 // only its SHA-256 hash lives in the database. Single-use, ~10
 // minute TTL.
 package workerpairing

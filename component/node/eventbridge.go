@@ -46,7 +46,7 @@ type EventBridge struct {
 	wiring      *bus.Wiring
 
 	// suppressInboundChatReply, when true, drops the INBOUND mesh copy of the
-	// chat-reply topics (utterance / presence / canvasState) before it is
+	// chat-reply topics (utterance / presence / pack-registered) before it is
 	// published onto THIS node's local bus. Set only on the bff (via
 	// SuppressInboundChatReply from app/cluster.go) once ChatReplyDelivery is
 	// wired: on the bff the browser must receive those topics EXACTLY ONCE, and

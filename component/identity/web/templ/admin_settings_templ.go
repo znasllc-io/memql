@@ -333,9 +333,9 @@ func AdminSettings(data AdminSettingsData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var12 string
-			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(`[{"clientId":"copresent","redirectURIs":["https://app.copresent.ai/auth/callback"]}]`)
+			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(`[{"clientId":"my-spa","redirectURIs":["https://app.example.com/auth/callback"]}]`)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_settings.templ`, Line: 158, Col: 184}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_settings.templ`, Line: 158, Col: 180}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 			if templ_7745c5c3_Err != nil {
@@ -348,7 +348,7 @@ func AdminSettings(data AdminSettingsData) templ.Component {
 			var templ_7745c5c3_Var13 string
 			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(data.Form.RegisteredClientsJSON)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_settings.templ`, Line: 158, Col: 220}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_settings.templ`, Line: 158, Col: 216}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 			if templ_7745c5c3_Err != nil {
@@ -501,14 +501,14 @@ func AdminSettings(data AdminSettingsData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, ">None (cross-site SaaS)</option></select> <span class=\"help\">Lax suits app.acme.com + identity.acme.com (single eTLD+1) and avoids Safari ITP. None is needed when the SPA + identity live on different eTLD+1s (app.copresent.ai + auth.znasllc.io). Effective: ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, ">None (cross-site SaaS)</option></select> <span class=\"help\">Lax suits app.acme.com + identity.acme.com (single eTLD+1) and avoids Safari ITP. None is needed when the SPA + identity live on different eTLD+1s (app.example.com + id.example-auth.io). Effective: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var23 string
 			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(data.Form.EffectiveSameSiteLabel)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_settings.templ`, Line: 197, Col: 254}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_settings.templ`, Line: 197, Col: 256}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 			if templ_7745c5c3_Err != nil {

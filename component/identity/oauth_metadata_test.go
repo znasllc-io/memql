@@ -8,7 +8,7 @@ import (
 )
 
 func TestOAuthServerMetadataHandler(t *testing.T) {
-	const base = "https://identity.staging.copresent.ai"
+	const base = "https://identity.example.com"
 	h := OAuthServerMetadataHandler(Config{BaseURL: base})
 
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil)
@@ -51,7 +51,7 @@ func TestOAuthServerMetadataHandler(t *testing.T) {
 // TestOAuthServerMetadataHandler_TrailingSlash asserts a BaseURL with a
 // trailing slash does not produce double slashes in the derived absolute URLs.
 func TestOAuthServerMetadataHandler_TrailingSlash(t *testing.T) {
-	h := OAuthServerMetadataHandler(Config{BaseURL: "https://identity.staging.copresent.ai/"})
+	h := OAuthServerMetadataHandler(Config{BaseURL: "https://identity.example.com/"})
 
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil)
 	rec := httptest.NewRecorder()
@@ -66,7 +66,7 @@ func TestOAuthServerMetadataHandler_TrailingSlash(t *testing.T) {
 		t.Fatalf("body not JSON: %v", err)
 	}
 
-	const wantBase = "https://identity.staging.copresent.ai"
+	const wantBase = "https://identity.example.com"
 	for name, got := range map[string]string{
 		"authorization_endpoint": doc.AuthorizationEndpoint,
 		"token_endpoint":         doc.TokenEndpoint,

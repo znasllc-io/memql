@@ -17,7 +17,8 @@
 //   - Polls strandedCandidatePlans (status in [planning, queued]).
 //   - Applies the precise "older than the strand threshold" check Go-side
 //     (the MemQL comparison evaluator can't do createdAt-vs-now()
-//     arithmetic; cf. dueTrainAgentRetryPlans).
+//     arithmetic; cf. the CoPresent pack's dueTrainAgentRetryPlans, which
+//     uses the same Go-side filtering after its move out of engine core).
 //   - Skips the kinds the agent loop never owns (trainSpecialist /
 //     embedDomainItems / adHocAction / scopeElevation / agentInvocation):
 //     those have their own dispatchers, and re-driving them through

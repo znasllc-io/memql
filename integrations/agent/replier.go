@@ -339,26 +339,30 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// resolves the non-streaming tool surface). prepareTurn only builds
 	// the routerReq + the rest of the shared state. (memql#896)
 
-	// If operator-enabled, inject the CoPresent AppProfile so the
-	// agent has navigation + glossary context baked into its prompt.
-	// Non-fatal -- if the profile is missing the template skips its
-	// block and the agent falls back to uiDescribe for discovery.
+	// If operator-enabled, inject the product pack's registered app
+	// profile (memql.RegisterAppProfile) so the agent has navigation +
+	// glossary context baked into its prompt. Non-fatal -- with no
+	// registered profile (pure-engine binary) or missing content the
+	// template skips its block and the agent falls back to uiDescribe
+	// for discovery.
 	if op, _ := data["operatorEnabled"].(bool); op {
 		if _, already := data["appProfile"]; !already {
 			profStart := time.Now()
-			profile := memql.LoadAppProfileByName("copresent")
-			profileBytes := len(profile)
-			if profile != "" {
-				data["appProfile"] = profile
+			prof, profile, registered := memql.LoadActiveAppProfile()
+			if registered {
+				if profile != "" {
+					data["appProfile"] = profile
+				}
+				r.logger.Info("agentReply: stage",
+					"stage", "appProfile",
+					"profile", prof.Name,
+					"elapsed_ms", time.Since(profStart).Milliseconds(),
+					"elapsed_from_turn_ms", time.Since(turnStart).Milliseconds(),
+					"bytes", len(profile),
+					"found", profile != "",
+					"requestId", msg.RequestId,
+				)
 			}
-			r.logger.Info("agentReply: stage",
-				"stage", "appProfile",
-				"elapsed_ms", time.Since(profStart).Milliseconds(),
-				"elapsed_from_turn_ms", time.Since(turnStart).Milliseconds(),
-				"bytes", profileBytes,
-				"found", profile != "",
-				"requestId", msg.RequestId,
-			)
 		}
 	}
 
@@ -429,9 +433,13 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	var retrievedChunks []RetrievedChunk
 	domains := domainsFromAssistant(data)
 	if op, _ := data["operatorEnabled"].(bool); op {
-		domains = ensureDomain(domains, "copresent-ui")
+		if prof, ok := memql.ActiveAppProfile(); ok {
+			for _, d := range prof.OperatorDomainIds {
+				domains = ensureDomain(domains, d)
+			}
+		}
 	}
-	// Computer Use mirrors the copresent-ui auto-injection. The
+	// Computer Use mirrors the operator-domain auto-injection. The
 	// computer-use knowledge domain is the operational manual for
 	// the capability -- scope tiers, per-task approval flow,
 	// post-approval execution, plan-outcome semantics, "things you
@@ -1783,11 +1791,11 @@ func toolNamesFromAssistant(data map[string]any) []string {
 		}
 	}
 
-	// Expand capability slugs (copresent-takeover / copresent-guide ->
-	// uiClick / uiType / …) into concrete tool names the dispatcher can
-	// resolve. Concrete
-	// names passed through unchanged; unknown slugs pass through so the
-	// tool-loop's own filter can produce a clear "unknown tool" error.
+	// Expand capability slugs (registered via memql.RegisterCapabilitySlug
+	// by the engine and by the product pack) into concrete tool names the
+	// dispatcher can resolve. Concrete names pass through unchanged;
+	// unknown slugs pass through so the tool-loop's own filter can produce
+	// a clear "unknown tool" error.
 	expanded := memql.ExpandCapabilitySlugs(raw)
 
 	// Overwrite assistant.tools in the prompt data with the expanded
@@ -1800,7 +1808,7 @@ func toolNamesFromAssistant(data map[string]any) []string {
 
 	// Gate the Operator scope fence on the expanded list, not the
 	// raw slug list. Set a bool the template can branch on.
-	if memql.HasOperatorCapability(expanded) {
+	if memql.HasCapabilityTag(expanded, memql.CapabilityTagOperator) {
 		data["operatorEnabled"] = true
 	}
 
@@ -1944,19 +1952,26 @@ func citeNothing(_ map[string]any, _ string) string {
 //
 // Lives as a small Go set rather than a domain-row attribute so the
 // short-circuit happens BEFORE the lookup. If the catalog grows more
-// system-owned domains, add them here. Future cleanup: collapse this
-// set with the seedKnowledgeDomains automation's special-cases (it
-// also hardcodes `copresent-ui` for `source = "appStructure"` at
-// insert time -- see integrations/knowledge/seed.go).
+// engine-owned domains, add them here; a product pack's operator domains
+// (e.g. its UI map) classify via the registered AppProfile instead.
 var appStructureDomainIds = map[string]bool{
-	"copresent-ui": true,
 	"computer-use": true,
 	"workbench":    true,
 	"recent-chat":  true,
 }
 
 func isAppStructureDomain(domainId string) bool {
-	return appStructureDomainIds[domainId]
+	if appStructureDomainIds[domainId] {
+		return true
+	}
+	if prof, ok := memql.ActiveAppProfile(); ok {
+		for _, d := range prof.OperatorDomainIds {
+			if d == domainId {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // domainDisplayName extracts the user-facing name from a domain row,

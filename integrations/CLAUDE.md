@@ -89,11 +89,16 @@ integrations/
 ├── openai/           # Polyphon ASR/TTS via OpenAI (Realtime transcription + /v1/audio/speech)
 ├── router/           # AI router ledger
 ├── similarity/       # pgvector similarTo() builtin
-├── stt/              # Speech-to-text (batch transcribe capability + streaming session)
-└── training/         # Per-agent train pipeline (identity embedding + distilled system prompt + just-in-time knowledge seeding)
+└── stt/              # Speech-to-text (batch transcribe capability + streaming session)
 
 # NemoClaw is invoked via webhook tools (claw coding-agent tool surface,
 # defined alongside the agent tool definitions), not a Go integration here.
+#
+# training/ (the per-agent "Train" pipeline: identity embedding + distilled
+# system prompt + just-in-time knowledge seeding) is a CoPresent product
+# integration -- it MOVED to the pack (memql-bff-copresent/integrations/training)
+# and self-registers via memql.RegisterPlugin("training"). Engine-only core no
+# longer carries it.
 ```
 
 ---

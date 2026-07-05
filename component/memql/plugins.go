@@ -14,7 +14,9 @@ import (
 // extension surface a pack compiles against: the PluginContext fields, the
 // PluginFactory signature, and the registration primitives (RegisterPlugin
 // here, dsl.RegisterTree, node.RegisterRoutingRule,
-// server.RegisterReadinessCheck).
+// server.RegisterReadinessCheck, knowledge.RegisterSeedDomain,
+// RegisterAppProfile + RegisterCapabilitySlug here,
+// node.RegisterChatReplyConcept).
 //
 // Bump this ONLY on a BREAKING change to that surface (a removed/renamed
 // PluginContext field, a changed PluginFactory signature, a changed

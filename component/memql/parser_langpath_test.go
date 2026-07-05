@@ -13,11 +13,11 @@ import (
 //   - 121 of 123 sites go through SDK builders that produce
 //     `funcName(k: v, ...)` invocations (Mutation/Query/Builtin/
 //     Logic). MutationProvisionWorkspaceBuild is a representative
-//     mutation, dueTrainAgentRetryPlans is representative of a
-//     no-arg query, trainAgent is a builtin with mixed arg types.
+//     mutation, allPlans is representative of a
+//     no-arg query, similarTo is a builtin with mixed arg types.
 //   - 2 of 123 sites pass hand-written string literals:
 //     "concept==v1:cluster:node" (filter) and
-//     "dueTrainAgentRetryPlans()" (already covered).
+//     "allPlans()" (already covered).
 //   - The filter form joined by `;` (AND) shows up in
 //     hand-written admin queries via `BrowseConcept`.
 //   - actor./args./payload. accessors flow through the
@@ -35,10 +35,10 @@ var representativeRuntimeQueries = []struct {
 	{"compound filter joined by &&", `concept==v1:cluster:node && payload.name=="bff"`},
 	{"actor accessor in RHS", `id==actor.userId`},
 	{"args accessor in RHS", `payload.partitionId==args.partitionId`},
-	{"no-arg query invocation", `dueTrainAgentRetryPlans()`},
+	{"no-arg query invocation", `allPlans()`},
 	{"single-arg mutation invocation", `createRecord(recordId: "v1:data:record:abc")`},
 	{"mixed-arg builtin invocation",
-		`trainAgent(agentId: "v1:agents:agent:abc", domains: ["x", "y"], tools: [])`},
+		`similarTo(text: "quantum", concept: "v1:knowledge:documentChunk", domains: ["physics", "chemistry"])`},
 	// Bare-parens no-arg invocation -- some integrations write
 	// `queryFoo()` instead of `queryFoo()`. Found at
 	// integrations/agents/factory.go:238 (activeAgentRoles()).

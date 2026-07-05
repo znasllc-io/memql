@@ -1280,8 +1280,8 @@ func resolveAgentToolSlugsVia(ctx context.Context, engine voiceParticipantResolv
 		return nil, "", false
 	}
 	// bundle.ToolSlugs is the resolved tool surface; scopeSetFromSlugs applies
-	// ExpandCapabilitySlugs for any operator fan-out (copresent-takeover ->
-	// uiClick/uiType/...).
+	// ExpandCapabilitySlugs for any capability-slug fan-out (registered by
+	// the engine and the product pack via RegisterCapabilitySlug).
 	return bundle.ToolSlugs, role, true
 }
 

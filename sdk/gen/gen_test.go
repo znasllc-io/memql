@@ -260,13 +260,13 @@ query board queryCopresentBoard {
 func TestCollectConstructs_BuiltinSDKGating(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "builtins.memql", `@enabled
-@executor("integration.training.trainAgent")
+@executor("integration.reporting.buildReport")
 @sdk
-@description("Train an agent.")
-builtin trainAgent {
-  agentId  string  @required
-  domains  array
-  tools    array
+@description("Build a report.")
+builtin buildReport {
+  reportId  string  @required
+  sections  array
+  columns   array
 }
 
 @enabled
@@ -287,17 +287,17 @@ builtin authCheckPermission {
 	if c.Kind != "builtin" {
 		t.Errorf("Kind = %q, want \"builtin\"", c.Kind)
 	}
-	if c.Name != "trainAgent" {
-		t.Errorf("Name = %q, want \"trainAgent\"", c.Name)
+	if c.Name != "buildReport" {
+		t.Errorf("Name = %q, want \"buildReport\"", c.Name)
 	}
 	if len(c.Args) != 3 {
 		t.Fatalf("expected 3 args parsed from the builtin body, got %d: %+v", len(c.Args), c.Args)
 	}
-	if c.Args[0].Name != "agentId" || !c.Args[0].Required {
-		t.Errorf("Args[0] = %+v, want agentId @required", c.Args[0])
+	if c.Args[0].Name != "reportId" || !c.Args[0].Required {
+		t.Errorf("Args[0] = %+v, want reportId @required", c.Args[0])
 	}
-	if c.Args[1].Name != "domains" || c.Args[1].Type != "array" {
-		t.Errorf("Args[1] = %+v, want domains array", c.Args[1])
+	if c.Args[1].Name != "sections" || c.Args[1].Type != "array" {
+		t.Errorf("Args[1] = %+v, want sections array", c.Args[1])
 	}
 }
 

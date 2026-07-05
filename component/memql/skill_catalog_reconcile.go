@@ -18,11 +18,10 @@ import (
 // The startup sweep (SeedMaterializer.Start) already materializes every
 // global seed -- including skills -- by walking m.registry. That registry
 // is overlay-inclusive: carrier-`RegisterTree`'d DSL subtrees (the
-// CoPresent BFF's dsl/copresent/skills.memql, mounted via
-// dsl.RegisterTree("copresent", ...)) flow through LoadUnifiedSeeds into
+// product pack's skills file, mounted via
+// dsl.RegisterTree) flow through LoadUnifiedSeeds into
 // the SAME registry, so on a carrier node the global pass DOES attempt to
-// write the copresent-takeover / copresent-guide / copresent-ui /
-// copresent-canvas rows. (This is provable in-process; see
+// write the pack-declared skill rows. (This is provable in-process; see
 // TestSeedMaterializer_CarrierOverlaySkillRowsResolve.)
 //
 // The staging gap #1459 documents is a DATA gap, not a code-path gap: the

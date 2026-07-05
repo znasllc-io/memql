@@ -226,7 +226,7 @@ type BootstrapConfig struct {
 	OwnerEmail string
 
 	// OwnerFirstName + OwnerLastName seed the owner's profile so
-	// CoPresent's "Welcome, Jose" header reads correctly without a
+	// the product's "Welcome, Jose" header reads correctly without a
 	// follow-up edit. Env stamping pulls double duty: also baked
 	// into the JWT given_name / family_name claims.
 	// Env: MEMQL_IDENTITY_BOOTSTRAP_OWNER_FIRST_NAME
@@ -236,7 +236,7 @@ type BootstrapConfig struct {
 
 	// OwnerPhone, OwnerPrimaryRole, OwnerGender, OwnerBirthdate
 	// are optional profile fields the wizard captures alongside
-	// the required ones. The CoPresent ProfileCompletenessGuard
+	// the required ones. The product's ProfileCompletenessGuard
 	// looks for these; pre-filling them at bootstrap means the
 	// owner skips straight into the app.
 	// Env: IDENTITY_BOOTSTRAP_OWNER_{PHONE,PRIMARY_ROLE,GENDER,BIRTHDATE}
@@ -465,7 +465,7 @@ type Config struct {
 	// wildcards). Loaded as a JSON array from the env var.
 	// Env: MEMQL_IDENTITY_REGISTERED_CLIENTS
 	// Example:
-	//   [{"clientId":"copresent","redirectURIs":["https://app.copresent.ai/auth/callback"]}]
+	//   [{"clientId":"app","redirectURIs":["https://app.example.com/auth/callback"]}]
 	RegisteredClients []RegisteredClient
 
 	// OAuthDCREnabled gates the RFC 7591 dynamic client registration

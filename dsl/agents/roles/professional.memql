@@ -7,36 +7,6 @@
 
 use agents.concepts.{ agentRole }
 
-// Construct name is `assistantRole` (not `assistant`) to avoid a
-// seed-registry name collision with the per-user `seed agent assistant`
-// (agents/assistant.memql) -- the registry keys by name across concepts.
-// The role's identity is its `slug` ("assistant"), which is unchanged,
-// so all roleSlug references are preserved.
-@description("The designated fallback when no specialist fits. Owns operator-facing UI-driving tools and routes work to other agents when appropriate.")
-seed agentRole assistantRole {
-  slug:                  "assistant"
-  name:                  "Assistant"
-  category:              "professional"
-  tier:                  "A"
-  lockedSkillIds:        ["workbench-baseline", "copresent-ui", "operator-computer-use"]
-  defaultSkillIds:       []
-  availableSkillIds:     []
-  forbiddenSkillIds:     []
-  // maxSkills holds the Assistant's full baseline set. The per-user
-  // `seed agent assistant` (agents/assistant.memql) ships 10 canonical
-  // skillIds -- the operator suite + execution baselines + the
-  // todos/notes/calendar personal-productivity skills (memql#1443) --
-  // and the lock validator (component/memql/agent_lock_validation.go)
-  // enforces this cap on EVERY v1:agents:agent write (the create-only
-  // seed AND the boot-time skillId reconcile), with no system-actor
-  // exemption. The prior value (2) was below even the pre-#1443 set,
-  // so it would have rejected the seed create / reconcile. 12 = 10
-  // canonical + 2 headroom for owner-added specialization.
-  maxSkills:             12
-  recommendedPolicySlug: "balancedChat"
-  predefined:            true
-}
-
 @description("Bookkeeping, financial reporting, tax fundamentals, budget cycles, and variance analysis at the corporate level.")
 seed agentRole accounting-finance {
   slug:                  "accounting-finance"

@@ -3,11 +3,13 @@ package memql
 import "testing"
 
 // allCapabilityTools returns a membership set with every tool from every
-// capability slug present.
+// registered capability slug present.
 func allCapabilityTools() map[string]bool {
 	all := map[string]bool{}
-	for _, tools := range capabilitySlugs {
-		for _, n := range tools {
+	capMu.RLock()
+	defer capMu.RUnlock()
+	for _, bundle := range capabilitySlugs {
+		for _, n := range bundle.tools {
 			all[n] = true
 		}
 	}

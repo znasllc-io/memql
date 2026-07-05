@@ -159,6 +159,11 @@ var integrationClass = map[string]string{
 	"slack.post":        ClassWrite,
 
 	// --- exec: runs/dispatches an external process or invocation ---
+	// Integration capability ids below may be PROVIDED by a product pack
+	// (e.g. training.*) -- their safety classification stays engine-side
+	// on purpose: the gate must classify without depending on pack code,
+	// and an entry for an absent integration is inert (same rationale as
+	// the ADR worked examples above).
 	"workbench.dispatchHost":       ClassExec,
 	"agentworker.dispatchHost":     ClassExec,
 	"agentworker.dispatchComputer": ClassExec,

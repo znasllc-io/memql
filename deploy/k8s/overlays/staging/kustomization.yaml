@@ -50,6 +50,13 @@ patches:
   # MEMQL_DEPLOY_AUTOMATION_DRIVEN flag, so the deploy pack is always anchored
   # on the identity binary and Deploy/RollbackDeployment always kick off the
   # lifecycle automations. No env patch is needed here anymore.
+  # Product SPA OAuth client: base carries only the product-neutral cockpit
+  # client; this overlay registers the staging product client. Byte-identical
+  # to the pre-move base value (cockpit loopback entry preserved).
+  - path: patches/identity-product-config.yaml
+    target:
+      kind: Deployment
+      name: identity
 
 images:
   - name: acrmemql.azurecr.io/memql-identity

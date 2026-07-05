@@ -13,7 +13,7 @@ import (
 // Served at /.well-known/memql-config.json. Stable JSON shape; new
 // fields are additive.
 //
-// Operators that want to point CoPresent at a different gRPC
+// Operators that want to point the product SPA at a different gRPC
 // endpoint than the identity origin set MEMQL_DISCOVERY_GRPC_ENDPOINT
 // (or fall through to MEMQL_IDENTITY_BASE_URL's host as a sensible
 // default).
@@ -67,7 +67,7 @@ func DiscoveryHandler(cfg Config, envLookup func(string) string) http.Handler {
 //  1. MEMQL_DISCOVERY_GRPC_ENDPOINT explicit env override -- always
 //     trusted, used verbatim. This is the production posture: the
 //     operator knows the public dial address (e.g.
-//     bff.copresent.acme.com:443) and writes it into the env on the
+//     bff.app.example.com:443) and writes it into the env on the
 //     identity binary.
 //  2. Default: hostFromURL(identityURL) + a scheme-appropriate port.
 //     HTTPS deployments default to 443 (gRPC over TLS, single ALB
@@ -75,7 +75,7 @@ func DiscoveryHandler(cfg Config, envLookup func(string) string) http.Handler {
 //     bff gRPC dial port; the k3d cluster port-forwards bff:50051).
 //
 // Exported so the worker-pairing redeem handler can translate the
-// HTTP origin CoPresent passes (`window.location.origin`) into a
+// HTTP origin the product SPA passes (`window.location.origin`) into a
 // dial address the cockpit can actually grpc.NewClient against.
 //
 // Note: MEMQL_GRPC_ADDRESS is INTENTIONALLY ignored. That env var
@@ -108,7 +108,7 @@ func deriveGRPCEndpoint(identityURL string, env func(string) string) string {
 // deriveClientId picks the client id the cockpit should use. Order:
 //  1. MEMQL_DISCOVERY_CLIENT_ID explicit override.
 //  2. The first registered client's clientId. Operators register
-//     the cockpit alongside the CoPresent SPA via
+//     the cockpit alongside the product SPA via
 //     MEMQL_IDENTITY_REGISTERED_CLIENTS.
 //  3. Empty -- cockpit will refuse to use the discovery shortcut
 //     and prompt for explicit flags.

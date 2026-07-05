@@ -28,6 +28,30 @@ func TestEvaluateRouting_BlockRules(t *testing.T) {
 	}
 }
 
+// TestEvaluateRouting_UserCreatedBroadcast pins the per-user provisioning
+// fan-out: v1:identity:user creation is written on the identity node while
+// its consumers (the seed materializer's perUser runtime hook, pack
+// provisioning automations) live on carrier nodes. Losing this rule kills
+// signup provisioning in cluster mode silently -- the event just never
+// leaves identity.
+func TestEvaluateRouting_UserCreatedBroadcast(t *testing.T) {
+	d := evaluateRouting(defaultRoutingRules(), "graph.node.created.v1:identity:user")
+	if !d.Forward || d.TargetType != "" {
+		t.Fatalf("graph.node.created.v1:identity:user must broadcast to all node types, got forward=%v target=%q", d.Forward, d.TargetType)
+	}
+	// Updates and other identity concepts are NOT forwarded by this rule
+	// (auth sessions, magic links etc. stay local to their writer).
+	for _, topic := range []string{
+		"graph.node.updated.v1:identity:user",
+		"graph.node.created.v1:identity:authSession",
+		"graph.node.created.v1:identity:magiclink",
+	} {
+		if d := evaluateRouting(defaultRoutingRules(), topic); d.Forward {
+			t.Fatalf("topic %q must not be forwarded by the user-created rule", topic)
+		}
+	}
+}
+
 func TestEvaluateRouting_ForwardRules(t *testing.T) {
 	rules := defaultRoutingRules()
 

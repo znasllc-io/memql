@@ -254,12 +254,13 @@ func (i *Integration) resolveBridgeInputs(
 		cleaned = append(cleaned, d)
 	}
 	sort.Strings(cleaned)
+	catalog := allSeedDomains()
 	for _, did := range cleaned {
-		// Fast path: standardDomains catalog (in-memory).
+		// Fast path: the shipped catalog + pack-registered domains (in-memory).
 		var found *StandardDomain
-		for j := range standardDomains {
-			if standardDomains[j].ID == did {
-				found = &standardDomains[j]
+		for j := range catalog {
+			if catalog[j].ID == did {
+				found = &catalog[j]
 				break
 			}
 		}

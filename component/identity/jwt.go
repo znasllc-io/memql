@@ -20,7 +20,7 @@ import (
 //	sub          v1:identity:user.id (canonical user identifier)
 //	email        the user's primary email at time of issue
 //	name         display name (best-effort)
-//	given_name   first name (OIDC-style claim) — the CoPresent profile
+//	given_name   first name (OIDC-style claim) — the product profile
 //	             shows this as "First name". Empty when the user row
 //	             doesn't carry it yet.
 //	family_name  last name (OIDC-style claim) — same lifecycle as

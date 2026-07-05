@@ -70,7 +70,7 @@ templ AdminUsersDetail(data AdminUsersDetailData) {
 		<div class="card card-full">
 			<h2 class="card-title">Profile</h2>
 			<p class="card-subtitle">
-				CoPresent blocks access at the "Account Setup Required" wall
+				The product SPA blocks access at its account-setup wall
 				until every required field below is set. Fill these in on
 				behalf of the user before they hit the app.
 			</p>
@@ -87,7 +87,7 @@ templ AdminUsersDetail(data AdminUsersDetailData) {
 						}
 					</label>
 					<input id="first_name" name="first_name" type="text" maxlength="80" autocomplete="given-name" value={ data.User.FirstName } placeholder="e.g. Alex"/>
-					<span class="help">Given name. Flows to the JWT as <code>given_name</code> and into the user's CoPresent profile.</span>
+					<span class="help">Given name. Flows to the JWT as <code>given_name</code> and into the user's app profile.</span>
 				</div>
 				<div class="form-row">
 					<label for="last_name">

@@ -39,7 +39,7 @@ type MintSSOAuthCodeInput struct {
 	// claude.ai MCP connector). The adapter MUST persist these onto the
 	// minted auth-code row so the client's /oauth/token exchange --
 	// which presents the matching code_verifier -- validates against a
-	// PKCE-bound code. Empty for the legacy CoPresent SPA SSO path
+	// PKCE-bound code. Empty for the legacy product SPA SSO path
 	// (no PKCE), which keeps minting a non-PKCE code exactly as before.
 	CodeChallenge       string
 	CodeChallengeMethod string
@@ -109,7 +109,7 @@ func (s *Server) sessionClaims(r *http.Request) *identity.AccessTokenClaims {
 //     for THAT client + redirect to <return_to>?code=...&state=...
 //     so the relying-party SPA exchanges it via /oauth/token. The
 //     user never sees the email-entry form -- one click from
-//     "AuthPortal" to "signed in to copresent".
+//     "AuthPortal" to "signed in to the product SPA".
 //  4. Session + return_to that doesn't match any registered client
 //     -> wrapped handler runs (form renders). The relying party
 //     isn't trusted for SSO; user must confirm via the email round
@@ -130,7 +130,7 @@ func (s *Server) redirectIfAuthenticated(target string, next http.HandlerFunc) h
 			return
 		}
 		// Pull OAuth context off the URL: client_id + redirect_uri
-		// are the canonical params SPAs send (CoPresent +
+		// are the canonical params SPAs send (the product SPA +
 		// any other relying party). return_to is kept for legacy
 		// callers that stuffed the redirect URI in there.
 		q := r.URL.Query()
@@ -142,7 +142,7 @@ func (s *Server) redirectIfAuthenticated(target string, next http.HandlerFunc) h
 		// When present (PKCE-required client, e.g. the claude.ai MCP
 		// connector hitting GET /authorize), it MUST be bound onto the
 		// SSO-minted auth code so the /oauth/token exchange validates.
-		// Absent on the legacy CoPresent SPA SSO path (/login?return_to=).
+		// Absent on the legacy product SPA SSO path (/login?return_to=).
 		urlCodeChallenge := strings.TrimSpace(q.Get("code_challenge"))
 		urlCodeChallengeMethod := strings.TrimSpace(q.Get("code_challenge_method"))
 
@@ -172,7 +172,7 @@ func (s *Server) redirectIfAuthenticated(target string, next http.HandlerFunc) h
 			SourceIP:    clientIP(r),
 			UserAgent:   r.Header.Get("User-Agent"),
 			// Bind PKCE when the /authorize flow supplied a challenge.
-			// Empty for the CoPresent SPA SSO path (unchanged).
+			// Empty for the product SPA SSO path (unchanged).
 			CodeChallenge:       urlCodeChallenge,
 			CodeChallengeMethod: urlCodeChallengeMethod,
 		})

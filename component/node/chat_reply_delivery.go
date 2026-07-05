@@ -14,8 +14,8 @@ import (
 )
 
 // ChatReplyDelivery routes the chat-reply delivery path (utterance / presence /
-// text-chunk / canvasState events that must reach the bff replica owning a
-// user's WebSocket)
+// text-chunk events -- plus any pack-registered concept -- that must reach the
+// bff replica owning a user's WebSocket)
 // through the durable DeliverySubstrate (memql#1264, Phase 1 of epic
 // memql#1259). It is the first path cut over to the substrate; the generic
 // ad-hoc mesh forwards (#1232 outbox, #1245 skip) stay in place for the
@@ -85,8 +85,10 @@ const (
 
 // Chat-reply concept ids whose graph.node.created/updated events must reach the
 // WS-owning bff replica. Confirmed against the code: utterance + presence +
-// textChunk carry a partitionId field; canvasState carries a space field (see
-// resolveSpaceKey).
+// textChunk carry a partitionId field (see resolveSpaceKey). Product packs add
+// their own concepts to this gate via RegisterChatReplyConcept
+// (chat_reply_registry.go), optionally declaring an extra space-key payload
+// field.
 //
 // NOTE the presence id: the concept is declared under
 // @namespace("cognition:participant") (dsl/cognition/concepts.memql), so its
@@ -131,7 +133,6 @@ const (
 	conceptUtterance         = "v1:cognition:utterance"
 	conceptPresence          = "v1:cognition:participant:presence"
 	conceptTextChunk         = "v1:cognition:text:chunk"
-	conceptCanvasState       = "v1:copresent:canvasState"
 	conceptClientToolRequest = "v1:cognition:client:tool:request"
 )
 
@@ -411,17 +412,18 @@ func (d *ChatReplyDelivery) warn(msg string, args ...any) {
 
 // isChatReplyTopic reports whether a topic is a graph event that must reach the
 // bff replica owning a user's WebSocket: the chat-reply stream (created/updated
-// for utterance / presence / textChunk / canvasState) plus the cross-node
-// client-tool relay REQUEST leg (created/updated for clientToolRequest, #1846).
-// Deleted events are not part of the stream the browser renders/dispatches.
+// for utterance / presence / textChunk) plus the cross-node client-tool relay
+// REQUEST leg (created/updated for clientToolRequest, #1846), plus any concept
+// a product pack registered via RegisterChatReplyConcept. Deleted events are
+// not part of the stream the browser renders/dispatches.
 func isChatReplyTopic(topic string) bool {
-	for _, concept := range []string{conceptUtterance, conceptPresence, conceptTextChunk, conceptCanvasState, conceptClientToolRequest} {
+	for _, concept := range []string{conceptUtterance, conceptPresence, conceptTextChunk, conceptClientToolRequest} {
 		if topic == events.BuildTopicWithConcept(events.TopicGraphNodeCreated, concept) ||
 			topic == events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, concept) {
 			return true
 		}
 	}
-	return false
+	return isRegisteredChatReplyTopic(topic)
 }
 
 // isSpaceInterestTopic reports whether a topic is a space-interest graph event
@@ -440,17 +442,19 @@ func isSpaceInterestTopic(topic string) bool {
 
 // resolveSpaceKey extracts the logical delivery key (space:<partitionId>) from a
 // chat-reply event payload. The graph emitter flattens the node's fields onto
-// the event payload, so the space id is a top-level field: utterance + presence
-// use "partitionId", canvasState uses "space". We also fall back to the nested
-// "payload" map for robustness.
+// the event payload, so the space id is a top-level field: the core concepts
+// use "partitionId"; a pack-registered concept may declare its own field via
+// RegisterChatReplyConcept (checked after partitionId). We also fall back to
+// the nested "payload" map for robustness.
 func resolveSpaceKey(payload map[string]any) (RoutingKey, bool) {
-	for _, field := range []string{"partitionId", "space"} {
+	fields := resolveKeyFields()
+	for _, field := range fields {
 		if v := stringField(payload, field); v != "" {
 			return RoutingKey{Kind: "space", ID: v}, true
 		}
 	}
 	if nested, ok := payload["payload"].(map[string]any); ok {
-		for _, field := range []string{"partitionId", "space"} {
+		for _, field := range fields {
 			if v := stringField(nested, field); v != "" {
 				return RoutingKey{Kind: "space", ID: v}, true
 			}

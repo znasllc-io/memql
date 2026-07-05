@@ -77,12 +77,12 @@ var whitespaceCollapse = regexp.MustCompile(`\s+`)
 //     well-formed.
 //
 // This is defense-in-depth ON TOP OF the prompt-render-time
-// [[BEGIN UNTRUSTED RETRIEVED KNOWLEDGE]] framing (bff-copresent
+// [[BEGIN UNTRUSTED RETRIEVED KNOWLEDGE]] framing (pack
 // PR #25). The framing is the primary defense; sanitization
 // reduces the obvious attack surface so a poisoned title doesn't
 // even sit in the retrieval pool to nudge the model.
 //
-// Surfaced by bff-copresent#29 (Wave 4 prompt-injection audit).
+// Surfaced by pack#29 (Wave 4 prompt-injection audit).
 func SanitizeChunkTitle(raw string) string {
 	if raw == "" {
 		return ""

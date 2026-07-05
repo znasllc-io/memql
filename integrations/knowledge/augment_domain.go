@@ -394,8 +394,8 @@ func (i *Integration) storeAugmentChunk(
 	// Sanitize the title before indexing so role markers / markdown
 	// headers in user-supplied content don't ride into the retrieval
 	// pool. Defense-in-depth on top of the prompt-render-time
-	// framing (bff-copresent PR #25); see SanitizeChunkTitle's
-	// doc-comment for the full rule set and bff-copresent#29 for
+	// framing (pack PR #25); see SanitizeChunkTitle's
+	// doc-comment for the full rule set and pack#29 for
 	// the rationale.
 	cleanTitle := SanitizeChunkTitle(c.Title)
 	metadata := map[string]any{

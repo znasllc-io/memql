@@ -69,8 +69,8 @@ query plan awaitingFeedbackPlansPastTimeout {
 //
 // Broad-by-design: the precise "older than N minutes AND not yet
 // claimed by the agent loop" check runs Go-side in the watchdog
-// (StrandedPlanWatchdog.pollOnce), mirroring queryDueRefreshDomains /
-// dueTrainAgentRetryPlans -- the MemQL comparison evaluator
+// (StrandedPlanWatchdog.pollOnce), mirroring queryDueRefreshDomains
+// -- the MemQL comparison evaluator
 // doesn't accept now as a comparison RHS for createdAt arithmetic
 // (component/memql/executor.go), and the candidate set is small
 // (planning/queued is a transient window). status membership uses the
@@ -80,33 +80,6 @@ query plan awaitingFeedbackPlansPastTimeout {
 @unbounded("stranded-plan recovery sweep -- an internal sweep that must see all")
 query plan strandedCandidatePlans {
   filter  status in ["planning", "queued"]
-  shape   planFull
-}
-
-// dueTrainAgentRetryPlans
-// ============================
-//
-// Returns ALL queued trainAgentRetryStep Plans. The training
-// integration's poll loop filters them in Go by
-// input.nextAttemptAt < time.Now() before running each one.
-//
-// (We can't push the time filter into the query: memQL's comparison
-// evaluator doesn't accept now as a literal RHS -- TimestampExprFunc
-// is unsupported in normalizeScalarValue. See
-// component/memql/executor.go:1456. Keeping the filter in Go is
-// fine because there are at most a handful of queued retry-Plans
-// at a time -- the backoff schedule (5min / 30min / 2h) bounds the
-// queue size to one row per failed step per training run, none of
-// which is read-bound.)
-//
-// The poll loop wakes every 60s; this query result is therefore
-// at most a one-row-per-failed-training-step set.
-
-@enabled
-@description("All queued trainAgentRetryStep Plans. The training poll loop filters by input.nextAttemptAt in Go.")
-@unbounded("due train-agent-retry cron sweep -- an internal sweep that must see all")
-query plan dueTrainAgentRetryPlans {
-  filter  kind=="trainAgentRetryStep" && status=="queued"
   shape   planFull
 }
 
@@ -188,36 +161,6 @@ query plan plansForSpace {
   // struct-query paginate directive only accepts an integer literal.
   sort     "createdAt", "desc"
   paginate 50
-  shape   planFull
-}
-
-// runningTrainAgentPlans
-// ===========================
-//
-// Returns every Plan currently in `running` for kind `trainAgent`.
-// Backs the Training Studio's "this agent is being trained right
-// now" lock: the frontend filters the result by the agent slot's
-// id (extracted from `plan.input.agentId` on each row) and
-// disables Studio interactions when a match is found.
-//
-// Why no agentId filter on the server: memQL queries don't yet
-// support nested-object paths like `plan.input.agentId` in the
-// where clause -- the bound list of in-flight training Plans is
-// at most a handful (one per concurrent training run across the
-// tenant), so client-side filtering by agent is cheap.
-//
-// trainAgent's lifecycle is queued (millisecond window in
-// beginPlan) -> running (the bulk of the ~90s pipeline) -> one of
-// {succeeded, failed, cancelled}. We filter only on `running`
-// because (a) the queued window is too short to matter for the
-// lock, and (b) memQL has no OR operator so a single status
-// filter is the cleanest path.
-
-@enabled
-@description("All currently-running trainAgent Plans across the tenant. Backs the Training Studio's per-agent in-flight lock; frontend filters by plan.input.agentId.")
-@unbounded("running train-agent plans -- a small bounded in-flight set consumed whole by the dispatch sweep")
-query plan runningTrainAgentPlans {
-  filter  kind=="trainAgent" && statusIsRunning
   shape   planFull
 }
 
@@ -356,14 +299,14 @@ query responsibility activeResponsibilities {
 // So this query returns the bounded candidate set (active + enabled +
 // trigger in {recurring, reactive}) and the Go evaluator does the
 // cron-due check (recurring) and the condition-match check (reactive)
-// per row -- mirroring dueTrainAgentRetryPlans, which returns
-// queued retry-Plans and filters by nextAttemptAt in Go.
+// per row -- mirroring queryDueRefreshDomains, which returns a bounded
+// candidate set and does the due-ness math Go-side.
 //
 // Two passes because there's no OR: the evaluator calls this once per
 // trigger value. trigger is a required arg so the caller picks the
 // archetype; the recurring + reactive results are merged Go-side.
 @enabled
-@description("The caller's active + enabled responsibilities of a given trigger archetype (recurring or reactive) -- the candidate set the reactive-loop evaluator (epic #632) checks for due-ness. Owned tier (ownerUserId == actor.userId). Cron-due / condition-match filtering happens Go-side (no OR operator + no cron arithmetic in the filter), mirroring dueTrainAgentRetryPlans.")
+@description("The caller's active + enabled responsibilities of a given trigger archetype (recurring or reactive) -- the candidate set the reactive-loop evaluator (epic #632) checks for due-ness. Owned tier (ownerUserId == actor.userId). Cron-due / condition-match filtering happens Go-side (no OR operator + no cron arithmetic in the filter), mirroring queryDueRefreshDomains.")
 @unbounded("responsibilities due for a trigger -- an internal scheduler sweep that must see all due")
 query responsibility dueResponsibilities {
   args {

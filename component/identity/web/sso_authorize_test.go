@@ -220,11 +220,11 @@ func TestAuthorize_SignedInUser_NoMintAdapterFallsThrough(t *testing.T) {
 	}
 }
 
-// TestSSO_CoPresentPathNoPKCEUnchanged guards the legacy CoPresent SPA SSO
+// TestSSO_RegisteredClientPathNoPKCEUnchanged guards the legacy registered-client SSO
 // path: a signed-in /login?client_id=...&redirect_uri=... WITHOUT a
 // code_challenge must still mint a (non-PKCE) code -- CodeChallenge stays
-// empty, behaviour unchanged. (CoPresent registered as a static client.)
-func TestSSO_CoPresentPathNoPKCEUnchanged(t *testing.T) {
+// empty, behaviour unchanged. (The product SPA registered as a static client.)
+func TestSSO_RegisteredClientPathNoPKCEUnchanged(t *testing.T) {
 	dir := t.TempDir()
 	km, err := identity.NewKeyManager(dir, "")
 	if err != nil {
@@ -239,7 +239,7 @@ func TestSSO_CoPresentPathNoPKCEUnchanged(t *testing.T) {
 		JWTAudience: "memql",
 		KeyDir:      dir,
 		RegisteredClients: []identity.RegisteredClient{
-			{ClientId: "copresent", RedirectURIs: []string{"https://app.copresent.ai/auth/callback"}},
+			{ClientId: "app", RedirectURIs: []string{"https://app.example.com/auth/callback"}},
 		},
 	}
 	iss, err := identity.NewJWTIssuer(km, cfg)
@@ -259,11 +259,11 @@ func TestSSO_CoPresentPathNoPKCEUnchanged(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/login?"+url.Values{
-		"client_id":    {"copresent"},
-		"redirect_uri": {"https://app.copresent.ai/auth/callback"},
+		"client_id":    {"app"},
+		"redirect_uri": {"https://app.example.com/auth/callback"},
 		"state":        {"cp-state"},
 	}.Encode(), nil)
-	tok, _, err := iss.IssueAccessToken(identity.IssueInput{UserId: "v1:identity:user:cp1", Email: "u@copresent.ai", Role: "writer"}, time.Now().UTC())
+	tok, _, err := iss.IssueAccessToken(identity.IssueInput{UserId: "v1:identity:user:cp1", Email: "u@example.com", Role: "writer"}, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}
@@ -272,15 +272,15 @@ func TestSSO_CoPresentPathNoPKCEUnchanged(t *testing.T) {
 	wrapped(rec, req)
 
 	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("status = %d, want 303 (CoPresent SSO); body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("status = %d, want 303 (registered-client SSO); body=%s", rec.Code, rec.Body.String())
 	}
 	loc := rec.Header().Get("Location")
-	if !strings.HasPrefix(loc, "https://app.copresent.ai/auth/callback") {
-		t.Errorf("CoPresent SSO redirect = %q, want the registered callback", loc)
+	if !strings.HasPrefix(loc, "https://app.example.com/auth/callback") {
+		t.Errorf("registered-client SSO redirect = %q, want the registered callback", loc)
 	}
 	// No code_challenge on the URL -> the minted code stays non-PKCE,
 	// exactly as before this change.
 	if captured.CodeChallenge != "" {
-		t.Errorf("CoPresent SSO must not bind a PKCE challenge; got %q", captured.CodeChallenge)
+		t.Errorf("registered-client SSO must not bind a PKCE challenge; got %q", captured.CodeChallenge)
 	}
 }

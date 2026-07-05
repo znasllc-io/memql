@@ -219,7 +219,7 @@ func clearRefreshCookie(w http.ResponseWriter, baseURL, sameSiteOverride string)
 //     - "none": the cookie rides on every cross-site request as
 //     long as Secure is set. Required for true cross-site
 //     deployments where the SPA and identity service live under
-//     different eTLD+1s (app.copresent.ai + auth.znasllc.io).
+//     different eTLD+1s (app.example.com + auth.example.net).
 //     Browsers (especially Safari) treat the cookie as
 //     third-party and apply ITP / cross-site-tracking rules.
 //

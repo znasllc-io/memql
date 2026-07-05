@@ -101,10 +101,10 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "seedStandardDomains",
-			Description: "Seed the shipped knowledge-domain catalog and the initial CoPresent UI corpus. Idempotent: skips domains that already exist and chunk sources that were previously ingested.",
+			Description: "Seed the shipped knowledge-domain catalog plus any pack-registered seed domains and their corpora. Idempotent: skips domains that already exist and chunk sources that were previously ingested.",
 			Handler:     i.seedStandardDomainsHandler,
 			ArgsSchema: map[string]string{
-				"forceIngest": "bool (optional) - if true, re-ingest the CoPresent UI corpus even if chunks already exist (new-content bump rewrites vectors via ON CONFLICT).",
+				"forceIngest": "bool (optional) - if true, re-ingest all registered seed corpora even if chunks already exist (new-content bump rewrites vectors via ON CONFLICT).",
 			},
 		},
 		{

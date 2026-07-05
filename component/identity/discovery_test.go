@@ -12,8 +12,8 @@ func TestHostFromURL_StripsPort(t *testing.T) {
 		in, want string
 	}{
 		{"http://localhost:8081", "localhost"},
-		{"https://copresent.acme.com", "copresent.acme.com"},
-		{"https://copresent.acme.com:8443/path", "copresent.acme.com"},
+		{"https://app.acme.com", "app.acme.com"},
+		{"https://app.acme.com:8443/path", "app.acme.com"},
 		{"localhost", "localhost"},
 		{"localhost:8081", "localhost"},
 		{"", ""},
@@ -38,9 +38,9 @@ func TestDeriveGRPCEndpoint_Defaults(t *testing.T) {
 	}{
 		{
 			name: "https default to :443",
-			url:  "https://copresent.acme.com",
+			url:  "https://app.acme.com",
 			env:  emptyEnv,
-			want: "copresent.acme.com:443",
+			want: "app.acme.com:443",
 		},
 		{
 			name: "http localhost default to :50050",
@@ -50,14 +50,14 @@ func TestDeriveGRPCEndpoint_Defaults(t *testing.T) {
 		},
 		{
 			name: "explicit override wins",
-			url:  "https://copresent.acme.com",
+			url:  "https://app.acme.com",
 			env: func(k string) string {
 				if k == "MEMQL_DISCOVERY_GRPC_ENDPOINT" {
-					return "bff.copresent.acme.com:8443"
+					return "bff.app.acme.com:8443"
 				}
 				return ""
 			},
-			want: "bff.copresent.acme.com:8443",
+			want: "bff.app.acme.com:8443",
 		},
 		{
 			name: "MEMQL_GRPC_ADDRESS is intentionally NOT consulted",
@@ -85,7 +85,7 @@ func TestDiscoveryHandler_DevDefaults(t *testing.T) {
 	cfg := Config{
 		BaseURL: "http://localhost:8081",
 		RegisteredClients: []RegisteredClient{
-			{ClientId: "copresent", RedirectURIs: []string{"http://localhost:8080/auth/callback"}},
+			{ClientId: "app", RedirectURIs: []string{"http://localhost:8080/auth/callback"}},
 			{ClientId: "cockpit", RedirectURIs: []string{"http://127.0.0.1/cockpit/callback"}},
 		},
 	}

@@ -12,6 +12,17 @@ namespace: memql
 resources:
   - ../../base
 
+patches:
+  # Product SPA OAuth client: base carries only the product-neutral cockpit
+  # client; this overlay registers the prod product client. Prod is a placeholder
+  # kept coherent with staging, so this is byte-identical to the value the
+  # placeholder resolved to before the client was moved out of base (cockpit
+  # loopback entry preserved).
+  - path: patches/identity-product-config.yaml
+    target:
+      kind: Deployment
+      name: identity
+
 images:
   - name: acrmemql.azurecr.io/memql-identity
     digest: sha256:06cea2b58d662fee2c6b49bddbbd5c3cabda4de2234853cd6cb9233e6079d254
