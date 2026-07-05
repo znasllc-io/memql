@@ -51,7 +51,7 @@ and the punch list of rules we have to lock down before we ship.
 ```mermaid
 flowchart TB
   subgraph clients["Clients"]
-    grpc["gRPC clients<br/>(memql-cockpit, copresent)"]
+    grpc["gRPC clients<br/>(memql-cockpit, the product SPA)"]
     ws["Browser WS bridge<br/>(/memql/ws → MemqlService.Stream)"]
     cli["CLI tools<br/>(memql-cockpit lint)"]
   end

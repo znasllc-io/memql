@@ -26,7 +26,7 @@
 #   - node_vectors rows for those same ids (so retrieval works
 #     after the import without re-embedding).
 #
-# Skipped: appStructure (CoPresent UI corpus regenerates from
+# Skipped: appStructure (product UI corpora regenerate from
 # in-binary text on startup) + fileUpload (user-uploaded chunks
 # regenerate from the source file the user re-uploads).
 #

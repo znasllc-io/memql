@@ -32,14 +32,17 @@
 # locally.  This overlay removes them with $patch: delete:
 #   - ExternalSecret (livekit-secrets, telephony-secrets) -- needs ESO + Key Vault
 #   - CronJob (conn-monitor) -- Tiger Cloud connection monitor; irrelevant locally
-#   - public-entry.yaml resources (ClusterIssuer + Ingresses) -- cert-manager/
-#     ingress-nginx on AKS.  Local ingress is handled separately in this overlay.
 #   - livekit Ingress -- local livekit is accessed via k3d port-forward.
 #
+# The product public-entry ingresses + ClusterIssuer and the product bff/SPA
+# workloads no longer live in the engine base (they moved to the downstream
+# product pack), so this overlay no longer needs delete-patches for them.
+#
 # DRIFT-CHECK
-# The CI drift-check (deploy-drift.yml) enforces @sha256 pinning for every
-# overlay.  That gate is skipped for the `local` overlay by design -- local
-# images use mutable tags; see scripts/deploy/drift-check.sh.
+# The CI drift-check (the scheduled drift job, now owned by the downstream
+# product pack) enforces @sha256 pinning for every overlay.  That gate is
+# skipped for the `local` overlay by design -- local images use mutable tags;
+# the engine keeps the underlying scripts/deploy/drift-check.sh backend.
 #
 # See deploy/k8s/README.md for the full overlay taxonomy.
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -105,63 +108,6 @@ patches:
       kind: CronJob
       metadata:
         name: conn-monitor
-  # public-entry.yaml: Let's Encrypt ClusterIssuer + AKS Ingresses.
-  # Local traffic is served via k3d port-forward or a simple traefik
-  # ingress configured in the bootstrap (#2063/#2065).
-  - target:
-      kind: ClusterIssuer
-      name: letsencrypt-prod
-    patch: |
-      $patch: delete
-      apiVersion: cert-manager.io/v1
-      kind: ClusterIssuer
-      metadata:
-        name: letsencrypt-prod
-  - target:
-      kind: Ingress
-      name: staging-identity
-    patch: |
-      $patch: delete
-      apiVersion: networking.k8s.io/v1
-      kind: Ingress
-      metadata:
-        name: staging-identity
-  - target:
-      kind: Ingress
-      name: app-main
-    patch: |
-      $patch: delete
-      apiVersion: networking.k8s.io/v1
-      kind: Ingress
-      metadata:
-        name: app-main
-  - target:
-      kind: Ingress
-      name: app-identity-proxy
-    patch: |
-      $patch: delete
-      apiVersion: networking.k8s.io/v1
-      kind: Ingress
-      metadata:
-        name: app-identity-proxy
-  - target:
-      kind: Ingress
-      name: staging-mcp
-    patch: |
-      $patch: delete
-      apiVersion: networking.k8s.io/v1
-      kind: Ingress
-      metadata:
-        name: staging-mcp
-  - target:
-      kind: Ingress
-      name: staging-bff-grpc
-    patch: |
-      $patch: delete
-      apiVersion: networking.k8s.io/v1
-      kind: Ingress
-      metadata:
-        name: staging-bff-grpc
   # livekit Ingress (in livekit.yaml) -- requires ingress-nginx + cert-manager
   # on AKS.  Locally livekit is reached via k3d port-forward (#2065).
   - target:
@@ -243,58 +189,12 @@ patches:
       apiVersion: v1
       kind: Service
       metadata: { name: livekit-redis }
-  # ---------------------------------------------------------------------------
-  # CoPresent (SPA + bff carrier) -- NOT part of the engine repo (#2204)
-  # ---------------------------------------------------------------------------
-  # The `copresent` SPA and the `bff` (memql-bff-copresent carrier) are built
-  # and version-pinned from their OWN sibling repos, not from this engine repo,
-  # so they cannot be built by the local inner loop (`make dev`) and have no
-  # business coming up on `make up`. They live in base/ because staging/prod
-  # legitimately run them; the engine's local overlay deletes them. Remove the
-  # bff Deployment + its two Services (cluster `bff` + `bff-external`
-  # LoadBalancer) and the copresent Deployment + Service + PodDisruptionBudget.
-  # The matching public-entry Ingresses are already deleted above.
-  - target: { kind: Deployment, name: bff }
-    patch: |
-      $patch: delete
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata: { name: bff }
-  - target: { kind: Service, name: bff }
-    patch: |
-      $patch: delete
-      apiVersion: v1
-      kind: Service
-      metadata: { name: bff }
-  - target: { kind: Service, name: bff-external }
-    patch: |
-      $patch: delete
-      apiVersion: v1
-      kind: Service
-      metadata: { name: bff-external }
-  - target: { kind: Deployment, name: copresent }
-    patch: |
-      $patch: delete
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata: { name: copresent }
-  - target: { kind: Service, name: copresent }
-    patch: |
-      $patch: delete
-      apiVersion: v1
-      kind: Service
-      metadata: { name: copresent }
-  - target: { kind: PodDisruptionBudget, name: copresent }
-    patch: |
-      $patch: delete
-      apiVersion: policy/v1
-      kind: PodDisruptionBudget
-      metadata: { name: copresent }
+  # NOTE: the product SPA and `bff` carrier workloads (Deployments,
+  # Services, PodDisruptionBudget) are no longer in the engine base -- they moved
+  # to the downstream product pack -- so this overlay no longer deletes them.
   # Repoint the LiveKit URL env at the cloud project (secret-sourced). The
   # `value: null` strategic-merge directive deletes the base's hard-coded
-  # ws://livekit:7880 so valueFrom is the only source. (bff is deleted from the
-  # local overlay -- see the CoPresent delete block above -- so it carries no
-  # local LiveKit repoint.)
+  # ws://livekit:7880 so valueFrom is the only source.
   - target: { kind: Deployment, name: voice-agent }
     patch: |
       apiVersion: apps/v1
@@ -455,7 +355,8 @@ patches:
   # ---------------------------------------------------------------------------
   # Local environment config (staging URLs -> localhost)
   # All engine nodes carry MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER pointing at the
-  # staging identity host (identity.staging.copresent.ai). This must match
+  # staging identity host (a deployment-specific placeholder in the engine base;
+  # a product stack's overlay patches the real host). This must match
   # what identity ISSUES in JWTs (MEMQL_IDENTITY_BASE_URL). Locally we set
   # MEMQL_IDENTITY_BASE_URL=http://localhost:8085, so all verifiers must also expect
   # http://localhost:8085. Each node patched individually (strategic merge).

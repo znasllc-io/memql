@@ -32,8 +32,8 @@ func engineBuildWorkflow(t *testing.T) string {
 func TestEngineBuildWorkflowInvariants(t *testing.T) {
 	wf := engineBuildWorkflow(t)
 
-	// Builds BOTH engine images -- the components C3 owns in the 8-image
-	// lockfile (assemble-lockfile.sh: memql-identity + memql-voice).
+	// Builds BOTH engine images the engine-image build owns
+	// (memql-identity + memql-voice).
 	for _, node := range []string{"identity", "voice"} {
 		if !strings.Contains(wf, "node: "+node) {
 			t.Errorf("workflow must build the %q engine node", node)

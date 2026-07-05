@@ -1,8 +1,8 @@
 {
   "_about": "Curated allowlist/denylist for the spaceId -> partitionId core re-point (epic memql#2031, issue #2033 / B1). Reuses the si_to_ai.py engine via --rules.",
   "_modes": "token = full identifier boundary both sides; infix = appears anywhere inside an identifier (for the camelCase suffix forms like voiceAgentSpaceId / GetSpaceId / activeSpaceId). The denylist + overlap-refusal protect namespace/workspace compounds that happen to contain the substring 'spaceId'.",
-  "_scope": "CORE memql repo only. Do NOT run against the memql-bff-copresent pack or copresent frontend with the same rules blindly -- the frontend/pack runs are coordinated separately in B1's wire-sweep siblings.",
-  "_caveat": "This is an IDENTIFIER rename. Where a core row models CoPresent room-membership (participant.spaceId, utterance.spaceId, audioOverride...), the field NAME becomes partitionId while the VALUE is still a v1:cognition:space id until the scoping value is re-pointed / the concept moves to the pack (B2). Flagged for owner review on the PR.",
+  "_scope": "CORE memql repo only. Do NOT run against the product pack or frontend repos with the same rules blindly -- those runs are coordinated separately in B1's wire-sweep siblings.",
+  "_caveat": "This is an IDENTIFIER rename. Where a core row models product room-membership (participant.spaceId, utterance.spaceId, audioOverride...), the field NAME becomes partitionId while the VALUE is still a v1:cognition:space id until the scoping value is re-pointed / the concept moves to the pack (B2). Flagged for owner review on the PR.",
   "denylist": [
     "namespaceId",
     "NamespaceId",

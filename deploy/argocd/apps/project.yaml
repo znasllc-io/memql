@@ -10,7 +10,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  description: memQL mesh + CoPresent on AKS (digest-pinned overlays)
+  description: memQL engine mesh on AKS (digest-pinned overlays)
   sourceRepos:
     - https://github.com/znasllc-io/memql.git
   destinations:

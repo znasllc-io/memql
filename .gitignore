@@ -25,7 +25,7 @@ go.work
 go.work.sum
 
 # Local repo-split staging area. Each subdirectory (.split/memql,
-# .split/memql-cockpit, .split/memql-bff-copresent) holds a candidate
+# .split/memql-cockpit, .split/<carrier-repo>) holds a candidate
 # repo layout while the monorepo is being carved up. Never committed
 # to the core repo; once a candidate is validated, it gets pushed to
 # its own remote and the staging copy is discarded.

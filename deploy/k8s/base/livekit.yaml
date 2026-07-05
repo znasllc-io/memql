@@ -11,8 +11,9 @@
 #   - Media (WebRTC):  browser <-> livekit-rtc LoadBalancer (UDP 7882 + TCP 7881).
 #     use_external_ip=true so LiveKit advertises the LB's public IP via ICE.
 #
-# DNS (owner action): A record livekit.staging.copresent.ai -> ingress LB
-# 57.162.162.149 (signaling). Media rides the livekit-rtc LB's own public IP,
+# DNS (owner action): A record for the signaling host (a deployment-specific
+# placeholder in this base; a product stack's overlay patches the real host) ->
+# ingress LB 57.162.162.149 (signaling). Media rides the livekit-rtc LB's own public IP,
 # advertised by ICE — no DNS needed for it.
 ---
 apiVersion: v1
@@ -153,7 +154,10 @@ spec:
     - { name: rtc-udp, port: 7882, targetPort: 7882, protocol: UDP }
     - { name: rtc-tcp, port: 7881, targetPort: 7881, protocol: TCP }
 ---
-# wss://livekit.staging.copresent.ai -> livekit:7880 (WebSocket signaling).
+# wss signaling host -> livekit:7880 (WebSocket signaling). The host + TLS
+# secret name are deployment-specific placeholders; a product stack's overlay
+# patches the real host + its cert secret (the LIVE cluster's TLS secret name
+# comes from that restoring patch).
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -166,10 +170,10 @@ metadata:
 spec:
   ingressClassName: nginx
   tls:
-    - hosts: [livekit.staging.copresent.ai]
-      secretName: livekit-staging-copresent-tls
+    - hosts: [livekit.staging.example.com]
+      secretName: livekit-staging-tls
   rules:
-    - host: livekit.staging.copresent.ai
+    - host: livekit.staging.example.com
       http:
         paths:
           - { path: /, pathType: Prefix, backend: { service: { name: livekit, port: { number: 7880 } } } }

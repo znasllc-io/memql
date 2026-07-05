@@ -22,14 +22,14 @@ This epic file records the **two amendments** required because telephony
 landed on the decoupled, renamed core. The original 8 dependency-ordered
 issue drafts were realized as #2010–#2017.
 
-## Amendment A — attach to a partition/room, NOT a CoPresent `space`
+## Amendment A — attach to a partition/room, NOT a the product `space`
 The original drafts referenced `polyphon-<spaceId>` rooms. After Epic 3, core
 has no `space`. Telephony is **core**, so:
 - Inbound dispatch maps a DID → a generic **partition/room**, resolved via
   `v1:telephony:number.partitionId` (not `spaceId`).
 - Outbound `place_call` attaches the SIP participant to a partition-scoped room.
-- The CoPresent product may *layer* its `space` on top (a space maps to a
-  partition), but that binding lives in the CoPresent pack, never in the
+- The the product product may *layer* its `space` on top (a space maps to a
+  partition), but that binding lives in the product pack, never in the
   telephony core.
 
 Update issues #2 (`v1:telephony:{number,trunk,call}` → `partitionId`), #4
@@ -46,7 +46,7 @@ controls live in [`docs/public/operate/telephony.md`](../../public/operate/telep
 
 ## Why last
 Depends on **G3**: a clean, partition-based core so telephony binds to the
-generic primitive and inherits none of the CoPresent coupling.
+generic primitive and inherits none of the product coupling.
 
 ---
 

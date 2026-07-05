@@ -37,7 +37,7 @@
 //
 // CROSS-CLIENT:
 //
-// The cleanup is at the DB layer, so both copresent and memql-cockpit
+// The cleanup is at the DB layer, so both the product SPA and memql-cockpit
 // inherit the post-state automatically. No client-side change needed.
 //
 // SAFETY:

@@ -64,8 +64,8 @@ execute pass.
 
 ## Cross-client impact
 
-Migrations touch the memql data plane, so any client (copresent,
-memql-cockpit, future clients) inherits the post-state
+Migrations touch the memql data plane, so any client (the product
+frontend, memql-cockpit, future clients) inherits the post-state
 automatically. No client-side change is needed — that's a
 deliberate property of the data-plane-first design.
 

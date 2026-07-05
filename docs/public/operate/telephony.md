@@ -16,7 +16,7 @@ a room on demand (outbound), and the existing voice agent answers via the
 OpenAI Realtime path. No Twilio.
 
 Telephony is **core and product-agnostic**. Calls and numbers bind to a
-generic [partition](../concepts/partition-scoping.md), never to a CoPresent
+generic [partition](../concepts/partition-scoping.md), never to a product
 `space`. A product may map its own scope onto a partition in its pack; the
 telephony core only ever sees `partitionId`.
 

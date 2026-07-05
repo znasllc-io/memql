@@ -10,9 +10,9 @@ It is consumed two ways:
 - **Directly**, for the wire-level primitives below.
 - **As the base of a product SDK.** Each backend-for-frontend (BFF)
   generates typed query/mutation/logic methods from its DSL and layers
-  them onto `QueryClient`, then re-exports this core. The CoPresent web
-  app, for example, depends on `@visionarys-io/copresent-sdk`, which is
-  this core plus the generated CoPresent surface.
+  them onto `QueryClient`, then re-exports this core. A product web app
+  depends on its product SDK package, which is this core plus that
+  product's generated surface.
 
 The typed concept methods are **not** in this package by design -- they
 live in the per-product SDK so the core stays identical for every
@@ -136,7 +136,7 @@ All five accept `{ signal }` for cancellation and throw on
 mints a short-lived LiveKit room token for joining a space's voice
 room. `dialAudio` opens a SEPARATE WebSocket to `/memql/audio` for
 the older streaming-STT + streaming-TTS protocol used by the
-CoPresent SPA. The audio client stamps the same `bearer_token` /
+product SPA. The audio client stamps the same `bearer_token` /
 `guest_token` / `worker_token` query string on the URL the main
 Connection uses.
 
@@ -154,7 +154,7 @@ liveKitRoom.connect(t.livekitUrl, t.token);
 
 // Audio WS -- streaming STT.
 const audio = await dialAudio({
-  endpoint: "wss://app.copresent.ai/memql/audio",
+  endpoint: "wss://app.example.com/memql/audio",
   auth: { bearer: jwt },
 });
 const stt = audio.transcribe({
@@ -204,7 +204,7 @@ const invite = await sendGuestInvite(conn.dispatcher, {
   spaceName: "Brainstorm",
   inviterName: "Alice",
   email: "guest@example.com",
-  joinUrlBase: "https://app.copresent.ai",
+  joinUrlBase: "https://app.the product.ai",
   expiresInMinutes: 15,
 });
 

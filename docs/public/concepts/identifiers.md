@@ -11,7 +11,7 @@ owner: znas
 
 **Status:** authoritative reference
 **Audience:** engineers writing Go code, MemQL DSL, or any consumer
-of memQL events / queries (including the CoPresent frontend).
+of memQL events / queries (including the product frontend).
 
 This doc covers the format of memQL node ids, how they're composed,
 who composes them, and which helpers to use. Read this once and the
@@ -212,10 +212,10 @@ These are the band-aids this doc exists to prevent:
   `integrations/knowledge/augment_domain.go` for the migration
   shape -- those still hand-roll and should move to the helper.
 
-The CoPresent frontend has a `stripConceptPrefix` helper for the
+The product frontend has a `stripConceptPrefix` helper for the
 remaining legitimate cases (extracting a short id for a
-short-channel-key, debug labels, etc.) -- see
-`copresent/src/lib/memql/idUtils.ts`. Use it sparingly and never
+short-channel-key, debug labels, etc.) -- see the frontend's
+`src/lib/memql/idUtils.ts`. Use it sparingly and never
 for matching ids that are supposed to come from canonical sources.
 
 ---

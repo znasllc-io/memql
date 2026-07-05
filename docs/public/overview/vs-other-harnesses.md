@@ -80,6 +80,6 @@ Choose memQL when the **hard parts are the point**:
   not buried in glue.
 
 And the standing proof that those are solved problems and not roadmap
-items: memQL runs **CoPresent** today. See
+items: memQL runs a **full production product** today. See
 [Why memQL Is a Harness, Not a Library](why-memql-harness.md) for the
 code behind each claim.

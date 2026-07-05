@@ -1,5 +1,5 @@
 // QueryClient is the base dispatch surface for query / mutation /
-// logic calls. The product SDK (e.g. @visionarys-io/copresent-sdk)
+// logic calls. The per-product SDK package
 // generates typed methods from its DSL and layers them onto this
 // class via `declare module` + prototype augmentation; consumers call
 // those typed methods, never raw DSL strings (the named-primitive

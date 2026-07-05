@@ -9,9 +9,9 @@ gate, outcome, finalize, rollback -- runs as automation steps, and the
 of evidence.
 
 Scope: engine mesh ONLY (identity / cognition / voice / agent / planner /
-workbench / mcp / voice-agent). The CoPresent product stack (bff +
-carriers + SPA) deploys via the release / promote.sh track -- see
-[deployment-strategy.md](deployment-strategy.md).
+workbench / mcp / voice-agent). A downstream product stack (carrier bff +
+SPA) deploys from its own repo's release track -- see
+[downstream-stacks.md](downstream-stacks.md).
 
 ## Prerequisites
 

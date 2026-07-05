@@ -1,7 +1,7 @@
 # MCP node -- remote Model Context Protocol head (epic memql#1550, child C).
 #
-# Engine-built (BUILD_TAGS=mcp, no CoPresent DSL -- it exposes the memQL engine
-# tool surface, not the CoPresent product DSL). It stands up the standard base
+# Engine-built (BUILD_TAGS=mcp, no product DSL -- it exposes the memQL engine
+# tool surface, not a product pack's DSL). It stands up the standard base
 # surface every node has (MemqlService gRPC + the :8085 HTTP /healthz//readyz/
 # /livez server) PLUS the MCP Streamable HTTP protocol head on :8090
 # (POST/GET/DELETE /mcp), selected by MEMQL_MCP_TRANSPORT=http.
@@ -26,14 +26,14 @@
 # request (POST calls + the GET SSE channel) carries it back to that pod. With
 # stickiness in place we run >1 replica for availability.
 #
-# TLS: the public-entry ingress (mcp.staging.copresent.ai) terminates TLS and
+# TLS: the public-entry ingress (the product MCP host) terminates TLS and
 # forwards plain HTTP to :8090, so this node serves the head over plain HTTP
 # internally (unlike identity, which serves its own internal TLS). It still
 # mounts memql-ca so the verifier can call https://identity:8085 for JWKS.
 #
 # No DB migrations (identity owns the one-time migration). No mesh parent: like
 # identity, the head runs its own in-process engine against the shared DB and
-# does not dial a parent (engine node, no cross-node CoPresent forwarding).
+# does not dial a parent (engine node, no cross-node product forwarding).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -119,7 +119,8 @@ spec:
             # advertised in /.well-known/oauth-protected-resource + the 401
             # WWW-Authenticate resource_metadata hint. AuthServerURL falls back
             # to MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER set below.
-            - { name: MEMQL_MCP_PUBLIC_URL, value: "https://mcp.staging.copresent.ai" }
+            # Deployment-specific placeholder; a product stack's overlay patches the real host.
+            - { name: MEMQL_MCP_PUBLIC_URL, value: "https://mcp.staging.example.com" }
             # Capability tier (Gate A). authoring = named tools + session-scoped
             # define; role gate (Gate B) still applies on top. Owner-confirmed.
             - { name: MEMQL_MCP_MODE, value: "authoring" }
@@ -129,7 +130,8 @@ spec:
             # --- identity verifier (bearer-JWT auth for /mcp) ---
             - { name: MEMQL_IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
             - { name: MEMQL_IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
-            - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.copresent.ai" }
+            # Deployment-specific placeholder; a product stack's overlay patches the real host.
+            - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.example.com" }
             - { name: MEMQL_IDENTITY_ENABLED, value: "false" }
             # Internal TLS: trust the cluster CA when calling https://identity:8085.
             - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }
@@ -177,5 +179,5 @@ spec:
     - { name: node, port: 50060, targetPort: 50060 }
     - { name: http, port: 8085, targetPort: 8085 }
     - { name: grpc, port: 50051, targetPort: 50051 }
-    # The public ingress (mcp.staging.copresent.ai) targets this port.
+    # The public ingress (the product MCP host) targets this port.
     - { name: mcp, port: 8090, targetPort: 8090 }

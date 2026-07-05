@@ -119,11 +119,10 @@ The handler is generic: it resolves a registered handler for the request
 `domain` via `memql.RegisterSuggestDomain` / `LookupSuggestDomain`
 (`component/memql/suggest_registry.go`) and runs the shared structured-output
 path. The `knowledge` domain registers from core
-(`component/memql/suggest_knowledge.go`); the CoPresent product domains
+(`component/memql/suggest_knowledge.go`); the product domains
 (spaces / spaceTitle / agents / groups / groupDescription / *CardSummary /
-guide) register from the pack (`memql-bff-copresent/integrations/copresent/
-suggest`, build-tag `copresent`), so engine-only core carries no product
-suggest helpers (memql#1959)
+guide) register from the product pack's suggest package, so engine-only
+core carries no product suggest helpers (memql#1959)
 
 ### fileprocessor/ - **File Processing**
 **Purpose:** Extract content from uploaded files

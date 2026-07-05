@@ -36,10 +36,10 @@ Pick the installer for your OS. Both ship under `scripts/install/`.
 ### macOS
 
 ```bash
-curl -fsSL https://app.copresent.ai/admin/workers/install/install-mac.sh | \
+curl -fsSL https://app.example.com/admin/workers/install/install-mac.sh | \
   bash -s -- \
     --token mql_wkr_xxxxxxxxxxxx \
-    --cluster https://app.copresent.ai \
+    --cluster https://app.example.com \
     --gui
 ```
 
@@ -80,10 +80,10 @@ scripts piping the wizard's output don't break.
 ### Linux
 
 ```bash
-curl -fsSL https://app.copresent.ai/admin/workers/install/install-linux.sh | \
+curl -fsSL https://app.example.com/admin/workers/install/install-linux.sh | \
   bash -s -- \
     --token mql_wkr_xxxxxxxxxxxx \
-    --cluster https://app.copresent.ai \
+    --cluster https://app.example.com \
     --gui
 ```
 
@@ -99,7 +99,7 @@ get GUI as well.
 `~/.memql/worker.yaml`:
 
 ```yaml
-cluster_url: https://app.copresent.ai
+cluster_url: https://app.example.com
 token: mql_wkr_<your token>
 name: jose-mac-mini
 labels:
@@ -177,7 +177,7 @@ Three independent gates run **before** every dispatch:
    is rejected with `denied_by_scope`.
 3. **Layer 3 — kill switch.**
    `User.preferences.computerUseEnabled` (default true).
-   Floating widget in CoPresent's space chrome flips it. When
+   Floating widget in the frontend's space chrome flips it. When
    false, every dispatch is rejected with `kill_switch_engaged`
    and the `killSwitchSuspendsRunningPlans` automation
    transitions running plans to `awaitingFeedback`.
@@ -301,7 +301,7 @@ All seven phases shipped:
 - [x] Phase 2 — Cockpit `worker` subcommand
 - [x] Phase 3 — Headless tool dispatch + policy engine
 - [x] Phase 4 — GUI build variant + RobotGo-backed `workerComputer.*`
-- [x] Phase 5 — Copresent integration (WorkersListPanel + AddWorkerModal + kill-switch widget)
+- [x] Phase 5 — Frontend integration (WorkersListPanel + AddWorkerModal + kill-switch widget)
 - [x] Phase 6 — Install scripts + service templates
 - [x] Phase 7 — Hardening:
   - Drain + `RotationRequest` envelope

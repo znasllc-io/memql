@@ -93,5 +93,5 @@ and defensive filtering of non-perUser rows.
 
 ## Cross-client impact
 
-The cleanup is at the DB layer, so both copresent and memql-cockpit
+The cleanup is at the DB layer, so both the product SPA and memql-cockpit
 inherit the post-state automatically. No client-side change needed.

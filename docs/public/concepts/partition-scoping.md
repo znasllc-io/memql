@@ -11,7 +11,7 @@ owner: znas
 
 `partition` is memQL's **canonical tenant/scope primitive**. When core code
 (the engine and the core services) needs to scope work to a tenant, it scopes
-by **partition** -- never by a product notion like CoPresent's `spaceId`.
+by **partition** -- never by a product notion like a pack's `spaceId`.
 
 This page is the reference for the partition-scoping API and the rule that
 keeps core product-agnostic. It pairs with the [Plugin SDK](../build/plugin-sdk.md),
@@ -65,13 +65,14 @@ scope from a product id.**
 
 ## Worked example: mapping a product concept (`space`) onto a partition
 
-CoPresent's `space` (`v1:cognition:space`) is a **product concept scoped *by* a
-partition** -- it is not itself a scope key. The mapping is one-directional:
+A product pack's `space` (`v1:cognition:space`) is a **product concept scoped
+*by* a partition** -- it is not itself a scope key. The mapping is
+one-directional:
 
 ```
 request  --carries-->  partition P   (the tenant scope)
                           |
-                          +--  space S1   (a CoPresent space within tenant P)
+                          +--  space S1   (a product space within tenant P)
                           +--  space S2
                           +--  agents, knowledge, ... (all within P)
 ```
@@ -89,7 +90,7 @@ scope := memql.PartitionScope(ctx)        // any core package
 scope := engine.ResolvePartitionFromContext(ctx)
 ```
 
-The `space` still exists -- a pack (CoPresent) owns it and may filter its own
+The `space` still exists -- the product pack owns it and may filter its own
 rows by `spaceId` *within* the active partition. What changes is that **core
 stops treating `spaceId` as the scope**: the tenant boundary is the partition,
 and a space is one of many things that live inside it.

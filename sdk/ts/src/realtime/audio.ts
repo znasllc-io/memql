@@ -1,7 +1,7 @@
 // Browser-side client for the `/memql/audio` WebSocket path. This
 // is a SEPARATE transport from `/memql/ws` -- a simpler streaming-
 // STT + streaming-TTS protocol that predates the gRPC stream and
-// is still used by the CoPresent SPA for the per-space "speak to
+// is still used by the the product SPA for the per-space "speak to
 // add an utterance" affordance and for live agent TTS playback.
 //
 // Auth: same `bearer_token` / `guest_token` / `worker_token` query

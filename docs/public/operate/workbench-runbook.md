@@ -107,9 +107,9 @@ prevent this).
 
 ## 5. Routing preference
 
-The agent's prompt template (`dsl/copresent/prompts/agentReply.tmpl`)
-and the `workbench` knowledge domain (5 chunks in
-`integrations/knowledge/seed.go`) instruct the agent to:
+The agent's reply prompt template (`agentReply.tmpl`, shipped in the
+product pack's prompts tree) and the `workbench` knowledge domain (5
+chunks in `integrations/knowledge/seed.go`) instruct the agent to:
 
 - Reach for the workbench FIRST for any headless task.
 - Reach for computer-use ONLY when the workbench cannot do the
@@ -174,10 +174,10 @@ Idempotent: a Plan that never provisioned a workspace is a no-op.
 |--------------------------------------------------------|---------|
 | `component/memql/operator_caps.go`                     | Slug expansion (`workbench_use` -> `workbenchHost` + `canvasPublish`) |
 | `dsl/workbench/`                                       | Concept + mutations + queries + shapes + automation + logic + builtins |
-| `dsl/copresent/tools.memql`                            | `tool workbenchHost { ... }` definition |
+| the product pack's `tools.memql`                       | `tool workbenchHost { ... }` definition (pack-owned) |
 | `integrations/workbench/`                              | Go integration: Manager, dispatch handlers, forward router/handler |
 | `integrations/knowledge/seed.go`                       | `workbench` knowledge domain + seed corpus |
-| `dsl/copresent/prompts/agentReply.tmpl`                | `{{if .workbenchAvailable}}` capability block |
+| the product pack's `agentReply.tmpl`                   | `{{if .workbenchAvailable}}` capability block (pack-owned) |
 | `integrations/agent/replier.go`                        | `workbenchAvailable` data injection + domain auto-attach |
 | `dsl/agents/roles/*.memql`                             | `workbench_use` in every role's `lockedToolSlugs` |
 | `dsl/agents/prompts/agentFactoryAnalyze.tmpl`          | Factory rules for granting workbench / computer-use |

@@ -23,7 +23,7 @@ lists on `v1:agents:agent.capabilities` (`domains[]`, `tools[]`,
 engine, the cockpit role manager, and the planner-driven
 `extendSpecialist` / `createSpecialist` flows each reason across
 those surfaces independently. The same conceptual "bundle"
-(`copresent-ui knowledge + UI-driving tools`) lives in three
+(`product-ui knowledge + UI-driving tools`) lives in three
 different shapes; keeping them aligned has been ad-hoc.
 
 A **skill** is the single bundling unit the platform reasons about
@@ -48,10 +48,10 @@ Validation: load-time `skill.tier >= max(tier across domainIds[])`.
 | Engineering | `memql-dsl-author` | A | `software-development`, `eng-software-architecture` (*see prerequisite*) | -- |
 | Engineering | `grpc-services` | A | `api-design`, `software-development` | -- |
 | Engineering | `cockpit-cli-dev` | A | `software-development`, `eng-software-architecture` | -- |
-| Product (CoPresent) | `copresent-ui` | A | `copresent-ui`, `frontend-development` | -- |
-| Product (CoPresent) | `copresent-api` | A | `copresent-ui`, `api-design` | -- |
-| Product (CoPresent) | `copresent-canvas` | A | `copresent-ui` | -- |
-| Product (CoPresent) | `copresent-voice-agents` | A | `copresent-ui` (*see prerequisite*) | -- |
+| Product (pack-owned) | `product-ui` | A | `product-ui`, `frontend-development` | -- |
+| Product (pack-owned) | `product-api` | A | `product-ui`, `api-design` | -- |
+| Product (pack-owned) | `product-canvas` | A | `product-ui` | -- |
+| Product (pack-owned) | `product-voice-agents` | A | `product-ui` (*see prerequisite*) | -- |
 | Cross-cutting | `knowledge-ingestion` | A | `research-methodology` (*see prerequisite*) | -- |
 | Cross-cutting | `web-research` | A | `research-methodology`, `user-research` | -- |
 | Cross-cutting | `customer-support-ops` | A | `customer-relations` | -- |
@@ -90,7 +90,7 @@ follow-up PR knows what to land:
 | Skill | Missing domain | Current stand-in | Why it matters |
 |---|---|---|---|
 | `memql-dsl-author` | `memql-dsl-authoring` | `software-development` | The DSL has rules + gotchas (struct form, import model, trait filters) that a generic engineering domain doesn't cover. |
-| `copresent-voice-agents` | `voice-audio-pipeline` | `copresent-ui` | LiveKit, the voice-agent worker, the STT/LLM/TTS/avatar chain, the audio + video override family. |
+| `product-voice-agents` | `voice-audio-pipeline` | `product-ui` | LiveKit, the voice-agent worker, the STT/LLM/TTS/avatar chain, the audio + video override family. |
 | `knowledge-ingestion` | `knowledge-pipeline` | `research-methodology` | Document validation lifecycle, supersession, per-format item concepts. |
 
 Phase 2's `dsl/agents/skills/*.memql` update swaps these placeholder

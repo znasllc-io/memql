@@ -3,8 +3,8 @@
 // #1817 connection-exhaustion spike). Function-based bash per the
 // Skills+Scripts architecture; these run from `go test ./...` so CI catches a
 // gate regression without a live cluster. Same `package deploy` as the other
-// script tests. The script needs python3 + PyYAML (same dep as
-// coherence-check.sh); cases skip when that's unavailable.
+// script tests. The script needs python3 + PyYAML; cases skip when that's
+// unavailable.
 package deploy
 
 import (

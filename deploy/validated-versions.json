@@ -1,4 +1,0 @@
-{
-  "_schema": "SUPERSEDED by releases/<version>.yaml (deployment-v2 Phase 4, memql#702) -- the digest-pinned release lockfile + scripts/release/ (assemble + coherence-check + promote) are now the promotion authority. Kept only as a historical record of the pre-v2 ledger. Original intent: a version appended ONLY after a green DEEP staging smoke gate; prod promoted only listed versions by recorded per-engine digests.",
-  "validated": []
-}

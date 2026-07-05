@@ -526,7 +526,7 @@ actions.
 (reuse `semanticMemory` consolidation), `(sideEffectClass, surface)`-scaled
 suggest+confirm promotion, and the hybrid compile-into-bundle on confirm.
 *Touches:* consolidation loop (#586 sibling), `tool_surface.go` (promote path),
-cockpit/CoPresent confirm UI.
+cockpit / product-frontend confirm UI.
 *Exit:* actions auto-promote when safe; real-machine side effects gate on a human.
 
 ### Phase 5 — Version pinning + upgrade migration

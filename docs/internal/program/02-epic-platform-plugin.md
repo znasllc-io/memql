@@ -22,7 +22,7 @@ as the canonical tenant scope. **Session: S2. Starts at G1. Produces G2.**
   events to node types), `RegisterReadinessCheck`, gRPC service registration.
 - `partition` primitive: `v1:platform:partitionSecret`/`partitionVariable`,
   reserved `_system` global scope, partition→global fallback.
-- The `mcp` node already builds engine-only (no CoPresent DSL) — proof packs
+- The `mcp` node already builds engine-only (no the product DSL) — proof packs
   are optional.
 
 ---
@@ -37,11 +37,11 @@ surface, add a contract version constant + compatibility check at load.
 version; loader rejects packs built against an incompatible contract version.
 
 ## Issue 2.2 — Adopt `partition` as the canonical tenant scope [foundation] (produces G2 with 2.1)
-**Problem:** Core leaks `spaceId` (a CoPresent notion) as a scope key; the real
+**Problem:** Core leaks `spaceId` (a the product notion) as a scope key; the real
 primitive is `partition`.
 **Approach:** Make `ResolvePartitionFromContext` / `partitionId` the single
 sanctioned scoping mechanism for core. Add helpers + docs. Define how a product
-concept (CoPresent's `space`) **maps onto** a partition. Do **not** yet rewrite
+concept (the product's `space`) **maps onto** a partition. Do **not** yet rewrite
 the leaked call sites — that's Epic 3.2; here we make the target real and
 documented.
 **Acceptance:** A documented partition-scoping API exists; a worked example
@@ -50,7 +50,7 @@ shows a product concept mapping to a partition; lint/guidance flags new
 
 ## Issue 2.3 — Extension-point audit for cognition/voice/planner [G:2.1]
 **Problem:** Need to confirm packs can inject behavior into core services.
-**Approach:** Trace how CoPresent extends today (event/automation triggers like
+**Approach:** Trace how the product extends today (event/automation triggers like
 `@trigger(event="graph.node.created.*.v1:cognition:utterance")` + routing
 rules). Decide whether event/automation + routing is sufficient, or whether a
 few **explicit in-process hook interfaces** (a plugin implements; the service
@@ -64,7 +64,7 @@ hook interfaces implemented + covered by an example.
 `RegisterTree` (`.memql`) + routing rules. Add load-time validation
 (namespace ownership, no collisions with core, contract version). **Runtime
 (non-compiled) pack loading is explicitly out of scope** — packs stay embedded
-via build tags, like `memql-bff-copresent` today.
+via build tags, like `the product carrier repo` today.
 **Acceptance:** Pack load validates namespace ownership + contract version and
 fails loudly on collision.
 

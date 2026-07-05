@@ -120,7 +120,7 @@ and was left in place:
   `LIVEKIT_PUBLIC_URL`, `LIVEKIT_PORT`, `SIP_LK_API_KEY`,
   `SIP_LK_API_SECRET`, `TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`,
   `TELNYX_OUTBOUND_PROFILE_ID`.
-- **CoPresent frontend (SPA) container** (`copresent.yaml`, a
+- **Product frontend (SPA) container** (its own manifest, a
   separate image/runtime -- removing these would break the
   frontend): `APP_PORT`, `FRONTEND_PORT`, `NODE_ENV`,
   `CORS_ALLOWED_ORIGIN`, `NODE_AUTH_TOKEN`, `VITE_IDENTITY_BASE_URL`,

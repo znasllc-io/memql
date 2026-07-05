@@ -1,32 +1,15 @@
-# Staging overlay -> 0.11.2: uniform FULL-STACK cut. All 9 images pinned
-# at 0.11.2 (engineVersion 0.11.2). This release rolls up two boot fixes
-# found while rolling 0.11.0 onto staging, where the live memql-secrets +
-# genesis envelope still carry the pre-Epic-7.3 LEGACY env names:
-#   - carrier main.go was missing genesis.ApplyLegacyEnvAliases, so every
-#     carrier node fail-fast'd on MEMQL_DATABASE_DSN
-#     (visionarys-io/memql-bff-copresent#144).
-#   - the subcommand env loader was missing the same shim, so the
-#     voice-agent subcommand fail-fast'd on MEMQL_OPENAI_API_KEY (#2177;
-#     also repairs the #691 deploy-gate service_account mint path).
-# Engine images (identity/mcp/voice) carry the subcommand fix at 0.11.2;
-# the carriers carry the main.go fix (same digests as the 0.11.1 rebuild,
-# re-tagged 0.11.2); the SPA is unchanged. See releases/0.11.2.yaml.
+# Staging overlay -- ENGINE-ONLY (decoupling P3). This overlay pins the seven
+# engine mesh node images (identity/cognition/voice/agent/planner/workbench/mcp)
+# plus the self-hosted media plane (livekit/sip/redis), each by @sha256: digest.
 #
-# Staging overlay history -> 0.11.0: FULL-STACK cut bringing staging current with
-# main (the 115 commits since the 0.10.0 cut -- authoring promote/demote
-# durability, the deploy-as-a-pack automation path + #2115 parity, the
-# cockpit Editor/Sense + Clusters work, the env-config registry / Epic 7
-# MEMQL_<COMPONENT>_ rename, telephony, MCP OAuth, and the voice hardening
-# wave). All 9 engine+carrier+SPA images rebuilt on the GitHub BUILD SERVER
-# (OIDC->ACR) at engineVersion 0.11.0 (build-engine-images + build-carrier-
-# images dispatched at version=0.11.0; the CoPresent SPA is unchanged so its
-# 0.10.0 digest is carried forward). Digests hand-applied in-place from
-# releases/0.11.0.yaml (not promote.sh, which clobbers the livekit/sip/redis
-# pins + the NODE_IP patch). NO DB reset: every schema change since 0.10.0 is
-# ADDITIVE (deploymentNodeSpec, healedOverride, rbac concepts, env-var aliases
-# shimmed at boot), so existing rows still satisfy the new queries.
-# Tracking: #2026 (release), #2115 (the identity automation-driven cutover
-# flag below stays on).
+# The product bff carrier + product SPA image pins, and the product OAuth
+# client registration, moved to the downstream product pack's overlay -- the
+# pack's ArgoCD Application reconciles those alongside this engine surface. This
+# overlay is the engine's standalone deploy surface; base carries only the
+# product-neutral cockpit OAuth client.
+#
+# Digests are cut on the GitHub build server (OIDC->ACR) and pinned here; the
+# engine keeps no on-disk release lockfiles (those moved to the pack too).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -50,19 +33,10 @@ patches:
   # MEMQL_DEPLOY_AUTOMATION_DRIVEN flag, so the deploy pack is always anchored
   # on the identity binary and Deploy/RollbackDeployment always kick off the
   # lifecycle automations. No env patch is needed here anymore.
-  # Product SPA OAuth client: base carries only the product-neutral cockpit
-  # client; this overlay registers the staging product client. Byte-identical
-  # to the pre-move base value (cockpit loopback entry preserved).
-  - path: patches/identity-product-config.yaml
-    target:
-      kind: Deployment
-      name: identity
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
     digest: sha256:9a408bde0804474316b6e13323e987483368919c27f72cc0e9cf4710b3a420e0
-  - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:8095085e20c73b38a36c7a01a52c8d6777a4bff733e90e4c94f1c6209b80506d
   - name: acrmemql.azurecr.io/memql-cognition
     digest: sha256:d6a49703dc71b429a8539373288a8b6352c329ffaa0d64c4383ee839447f91eb
   - name: acrmemql.azurecr.io/memql-voice
@@ -77,9 +51,6 @@ images:
   # build server (#1581 wired it into build-engine-images + the release tooling).
   - name: acrmemql.azurecr.io/memql-mcp
     digest: sha256:8cd301fe1b84a8eb977d9b1a07bb566c2fad5e81c97afaf7bb37a2ca9aad1cd4
-  # CoPresent SPA -- unchanged since 0.10.0, digest carried forward.
-  - name: acrmemql.azurecr.io/copresent
-    digest: sha256:68c6c465472d15cb6cd55ecf2a68912adf51820ae995f3889d76d4f2573f9227
   - name: livekit/livekit-server
     newName: livekit/livekit-server
     digest: sha256:2c6869d2d5ff6c9c0166f47be1c92dad6928bfecfa5e4060a6ece48db8accfa3

@@ -27,18 +27,18 @@ and the parallel plan: [`00-master-plan.md`](00-master-plan.md).
 
 ```
 We are running a 4-epic platformization program on the znasllc-io/memql
-codebase (plus memql-bff-copresent, memql-cockpit, and the copresent frontend).
+codebase (plus the product carrier repo, memql-cockpit, and the product frontend).
 Authoritative plan: memql/docs/internal/program/00-master-plan.md, with one
 file per epic (01–04), the current-state map (05), and these prompts (06).
 
 Epics and order: (1) AI→AI rename → (2) platform/plugin → (3) decouple
-CoPresent → (4) telephony. Gates: G1 = rename landed; G2 = partition foundation
+the product → (4) telephony. Gates: G1 = rename landed; G2 = partition foundation
 landed; G3 = core decoupled (engine-only build green).
 
 Locked decisions: AI→AI rename runs first and includes wire/proto names in one
 coordinated breaking sweep; `partition` is the canonical tenant scope (already
 exists — do NOT invent one); services stay core, packs are product; telephony
-attaches to a partition/room, never a CoPresent `space`.
+attaches to a partition/room, never a the product `space`.
 
 Run each epic as a separate session using the per-epic prompts in 06. Within an
 epic, issues tagged [P] run in parallel; [G:x] waits on gate/issue x. Create
@@ -53,8 +53,8 @@ work as specified.
 ```
 You own Epic 1 (AI→AI rename) of the memql platformization program. Read, in
 order: memql/docs/internal/program/00-master-plan.md and 01-epic-si-to-ai-
-rename.md. Work the repos: znasllc-io/memql, memql-bff-copresent, memql-cockpit,
-and the copresent frontend.
+rename.md. Work the repos: znasllc-io/memql, the product carrier repo, memql-cockpit,
+and the product frontend.
 
 Goal: rename "SI / synthetic intelligence" → "AI" across DSL, Go, wire/proto,
 and frontend in ONE coordinated sweep, including the breaking proto names.
@@ -90,7 +90,7 @@ RegisterTree + routing rules) as a versioned Plugin SDK, and adopt the EXISTING
 `partition` primitive (v1:platform:partition*, ResolvePartitionFromContext) as
 the canonical tenant scope. Do NOT invent a new partition concept. Do NOT
 implement runtime (non-compiled) pack loading — packs stay embedded via build
-tags, like memql-bff-copresent.
+tags, like the product carrier repo.
 
 Steps: create issues 2.1–2.5. Land 2.1 (contract/version) and 2.2 (partition
 adoption + mapping docs + new-spaceId lint) FIRST — when both merge, announce
@@ -101,29 +101,29 @@ audit for cognition/voice/planner) [P] 2.4 (pack model/validation), then 2.5
 
 ---
 
-## SESSION S3 — Epic 3: Decouple CoPresent  (prep at G1, core work at G2 · produces G3)
+## SESSION S3 — Epic 3: Decouple the product  (prep at G1, core work at G2 · produces G3)
 
 ```
-You own Epic 3 (decouple CoPresent from core) of the memql program. PREP may
+You own Epic 3 (decouple the product from core) of the memql program. PREP may
 start once G1 is open; the core re-pointing (3.2) must wait for G2. Read:
-memql/docs/internal/program/00-master-plan.md, 03-epic-decouple-copresent.md,
+memql/docs/internal/program/00-master-plan.md, 03-epic-decouple-the product.md,
 and 05-current-state-map.md. Repos: znasllc-io/memql (extract from),
-memql-bff-copresent (move into).
+the product carrier repo (move into).
 
-Goal: move ALL CoPresent concepts/logic/integrations out of core into the
-CoPresent pack, and re-point core services off spaceId onto the generic
-`partition`. End state: core service nodes build engine-only (zero CoPresent
+Goal: move ALL the product concepts/logic/integrations out of core into the
+the product pack, and re-point core services off spaceId onto the generic
+`partition`. End state: core service nodes build engine-only (zero the product
 refs), like the mcp node does today.
 
 Steps: create issues 3.1–3.7. After G1: freeze the move-list (3.1) and start the
 pure moves that don't need partition — knowledge/guide/curriculum DSL (3.4),
-CoPresent Go integrations avatar*/dailyspace/chat/knowledge (3.5), split-cases
+the product Go integrations avatar*/dailyspace/chat/knowledge (3.5), split-cases
 (3.6) — in parallel. After G2: re-point core spaceId→partitionId (3.2), then
 split cognition extracting space/micState/privateUtterance/misrouteFeedback/
 greetSuppression to the pack while keeping the engine concepts (3.3).
 
-Finish with 3.7: build core with NO CoPresent pack and confirm zero CoPresent
-symbols, then build a CoPresent cluster (core + pack) and pass an end-to-end
+Finish with 3.7: build core with NO the product pack and confirm zero the product
+symbols, then build a the product cluster (core + pack) and pass an end-to-end
 space + knowledge flow. When green, announce G3 OPEN. Session S4 is waiting.
 ```
 
@@ -142,7 +142,7 @@ agnostic CarrierProvider abstraction (Telnyx first), driven by the OpenAI
 Realtime voice path. No Twilio.
 
 Two amendments vs the original drafts: (A) attach calls to a generic
-partition/room, NEVER a CoPresent `space` — v1:telephony:* carry partitionId;
+partition/room, NEVER a the product `space` — v1:telephony:* carry partitionId;
 inbound DID→partition routing; outbound place_call to a partition-scoped room.
 (B) use post-rename AI vocabulary (ai(), *AIProvider) — no si-named identifiers.
 

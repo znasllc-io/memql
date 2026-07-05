@@ -10,11 +10,11 @@ owner: znas
 # Knowledge-domain seeder
 
 **Status:** Pipeline shipped (not yet run against the catalog). Expansion + first seed run pending API spend approval.
-**Related:** [llm-driven-decisions.md](./llm-driven-decisions.md) (uses the same caching infra), `integrations/knowledge/seed.go` (existing domain definitions + the `copresent_ui` corpus this seeder generalises from).
+**Related:** [llm-driven-decisions.md](./llm-driven-decisions.md) (uses the same caching infra), `integrations/knowledge/seed.go` (existing domain definitions; the pack-owned product-UI corpus is what this seeder generalises from).
 
 ## What this is
 
-The catalog ships ~250 knowledge domains as concept rows but only one (`copresent_ui`) has actual retrievable content. This adds a pipeline that LLM-generates seed chunks for the other domains so an agent assigned to, say, `quantum_mechanics` actually has retrievable specialist context to ground its answers, not just a label slapped on a general LLM.
+The catalog ships ~250 knowledge domains as concept rows but only one (the pack-owned product-UI domain) has actual retrievable content. This adds a pipeline that LLM-generates seed chunks for the other domains so an agent assigned to, say, `quantum_mechanics` actually has retrievable specialist context to ground its answers, not just a label slapped on a general LLM.
 
 Three principles:
 

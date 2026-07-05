@@ -238,7 +238,7 @@ the contract, but anything an `action` resolves to MUST.
 ## Scope note (engine cluster)
 
 The north-star bundle drives the **engine mesh only** (identity, cognition,
-voice, agent, planner, workbench, mcp, voice-agent — no `bff`, no `copresent`).
+voice, agent, planner, workbench, mcp, voice-agent — no `bff`, no product SPA).
 The local engine path (`scripts/k3d/*`) is the reference implementation of this
 contract. Staging/prod Azure/ArgoCD scripts (`scripts/deploy/*`) converge here
 via the Makefile/ArgoCD refactor track; this contract governs them as they are

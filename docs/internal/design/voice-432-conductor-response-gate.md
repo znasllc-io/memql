@@ -49,7 +49,7 @@ Both assume a **1:1 conversation**: there is exactly one "user", and any time
 that user stops, the assistant should answer. The model owns the decision of
 *when* to speak.
 
-In a copresent polyphon room that assumption is wrong. A room is **up to 5
+In a multi-human polyphon room that assumption is wrong. A room is **up to 5
 humans + 1 assistant** (the owner's single active assistant; see epic #440
 non-goals). Humans talk to *each other* constantly. With default VAD the
 assistant would barge in every time any human pauses -- on side chatter, on a

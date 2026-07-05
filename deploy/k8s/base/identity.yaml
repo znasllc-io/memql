@@ -111,11 +111,13 @@ spec:
             - { name: MEMQL_IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
             - { name: MEMQL_IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
             # Public identity host = the JWT issuer (staging convention: identity.<domain>).
-            - { name: MEMQL_IDENTITY_BASE_URL, value: "https://identity.staging.copresent.ai" }
-            - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.copresent.ai" }
-            - { name: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN, value: "staging.copresent.ai" }
-            # CORS + OAuth redirect for the SPA at app.staging.copresent.ai.
-            - { name: MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS, value: "https://app.staging.copresent.ai" }
+            # Deployment-specific placeholders; a product stack's overlay patches the
+            # real hosts. Unpatched, JWKS/issuer checks fail loudly (intended).
+            - { name: MEMQL_IDENTITY_BASE_URL, value: "https://identity.staging.example.com" }
+            - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.example.com" }
+            - { name: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN, value: "staging.example.com" }
+            # CORS + OAuth redirect for the product SPA host (deployment-specific placeholder).
+            - { name: MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS, value: "https://app.staging.example.com" }
             # Only the product-neutral cockpit client (engine tooling) lives in
             # base. The product SPA's OAuth client is registered per-environment
             # via the identity-product-config overlay patch (staging / prod).

@@ -164,7 +164,7 @@ func TestPushRequiresRegistry(t *testing.T) {
 // TestStandaloneBuildResolves is the CI-style guard for issue #493's
 // core requirement: a release build with GOWORK=off (no workspace)
 // must resolve every dependency from go.mod/go.sum alone. memQL is
-// the upstream module -- it does NOT import the CoPresent BFF in
+// the upstream module -- it does NOT import any product carrier in
 // source (the BFF imports memQL and mounts its DSL via
 // dsl.RegisterTree), so there is nothing BFF-shaped to resolve here;
 // the test simply proves the standalone graph is self-contained so a

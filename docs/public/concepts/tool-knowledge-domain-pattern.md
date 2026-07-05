@@ -9,22 +9,22 @@ owner: znas
 
 # Tool ↔ Knowledge Domain Pattern
 
-**Status:** Established. Pattern shipped 2026-04-x with `copresent_ui`;
-extended 2026-05-08 to `computer_use`; further extended 2026-05-17
-to the `workbench` domain (the sandboxed first-choice headless
-surface).
+**Status:** Established. Pattern shipped 2026-04-x with the product
+pack's operator-UI domain; extended 2026-05-08 to `computer-use`;
+further extended 2026-05-17 to the `workbench` domain (the sandboxed
+first-choice headless surface).
 
 ## Problem
 
-Capabilities (CoPresent Control, Computer Use, future skills like
+Capabilities (operator UI control, Computer Use, future skills like
 voice-pipeline orchestration, claw, etc.) all carry sizeable
 operational knowledge: which tool surfaces exist, when to reach for
 each, how the per-task approval gate works, how to recover from
 failure modes, what to never do.
 
 The naive place to put that knowledge is the agent's prompt template
-(the `agentReply` prompt's `.tmpl`, shipped in the CoPresent DSL
-overlay as `copresent/prompts/agentReply.tmpl`). That doesn't scale:
+(the `agentReply` prompt's `.tmpl`, shipped in the product pack's
+DSL overlay). That doesn't scale:
 
 - Templates become long and capability-laden — every new skill adds
   a section, every operational nuance is template prose.
@@ -74,8 +74,8 @@ capability `<cap>`:
 
 2. **Seed corpus**
    `integrations/knowledge/seed.go` — declare a
-   `<cap>SeedCorpus []struct{SourceRef, Text string}` near the
-   existing `copresentUISeedCorpus`. Each entry is one chunk; rules:
+   `<cap>SeedCorpus []SeedCorpusEntry` (SourceRef + Text) near the
+   existing `computerUseSeedCorpus`. Each entry is one chunk; rules:
 
    - Lead with the topic anchor in the first sentence — it's what
      the embedding picks up most strongly.
@@ -107,17 +107,22 @@ capability `<cap>`:
 
    The `<capabilityFlag>` is the per-turn template-data key the
    capability already injects (e.g. `computerUseStatus`,
-   `operatorEnabled`). Mirror what `copresent_ui` does for
-   `operatorEnabled`.
+   `operatorEnabled`). Mirror what the `computer-use` domain does
+   for `computerUseStatus`. (A product pack's operator-UI domains
+   take a different path: the pack registers them on
+   `AppProfile.OperatorDomainIds` and they are force-attached
+   whenever `operatorEnabled` is truthy.)
 
    Also add the new domain to `appStructureDomainIds` near the
    bottom of the file — that registry tells the citation pipeline
    to treat the chunks as operator/internal documentation (not
    audibly cited as "your X training" in agent replies).
+   Engine-owned domains only; a pack's operator domains classify
+   via the registered `AppProfile` instead.
 
 4. **Strip prompt template**
-   the `agentReply` prompt template (`copresent/prompts/agentReply.tmpl`
-   in the CoPresent DSL overlay) — keep ONLY the per-turn-dynamic
+   the `agentReply` prompt template (in the product pack's DSL
+   overlay) — keep ONLY the per-turn-dynamic
    capability block:
 
    - The capability gate (`{{if .computerUseStatus}}` etc.)
@@ -180,9 +185,9 @@ training, where they can be tuned per agent and per workspace.
 
 | Capability slug              | Domain id        | Seed corpus var               | Auto-attach signal in replier.go      |
 |------------------------------|------------------|-------------------------------|----------------------------------------|
-| `copresent_control`          | `copresent_ui`   | `copresentUISeedCorpus`       | `operatorEnabled` truthy                |
-| `computer_use_*` (split)     | `computer_use`   | `computerUseSeedCorpus`       | `computerUseStatus` non-empty           |
-| `workbench_use`              | `workbench`      | `workbenchSeedCorpus`         | `workbenchAvailable` truthy (i.e. agent's expanded tool list carries `workbenchHost`) |
+| operator UI control (pack-registered) | the pack's operator-UI domain(s), via `AppProfile.OperatorDomainIds` | lives in the product pack | `operatorEnabled` truthy |
+| `computer-use-*` (split)     | `computer-use`   | `computerUseSeedCorpus`       | `computerUseStatus` non-empty           |
+| `workbench-use`              | `workbench`      | `workbenchSeedCorpus`         | `workbenchAvailable` truthy (i.e. agent's expanded tool list carries `workbenchHost`) |
 
 ## Why it works
 
@@ -194,7 +199,7 @@ training, where they can be tuned per agent and per workspace.
   new id, old version purged on next re-ingest).
 - **RAG does the right work.** Only chunks relevant to the user's
   current message land in the prompt. A "what's the weather?" turn
-  doesn't pay for `computer_use` / `workbench` knowledge tokens; an "open Mail
+  doesn't pay for `computer-use` / `workbench` knowledge tokens; an "open Mail
   and ..." turn does.
 - **Per-agent overrides have a clean home.** Training pipeline
   attaches private domains; the standard seed isn't touched.

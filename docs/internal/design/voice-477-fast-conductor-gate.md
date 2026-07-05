@@ -426,7 +426,7 @@ The gate adds essentially zero latency and zero decisions in 1-on-1: it is
 
 ### 6.2 Why the gate is a fast traffic-cop for multi-party
 
-A polyphon room is up to 5 humans + up to 3 AI agents (per copresent's space
+A polyphon room is up to 5 humans + up to 3 AI agents (per the product's space
 architecture). Here the heuristic ladder *is* the traffic cop:
 
 - direct address routes to the named agent (section 3.1).

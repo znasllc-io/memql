@@ -50,7 +50,7 @@ Key fields:
 - `internal` -- true when registration matched
   `MEMQL_IDENTITY_INTERNAL_DOMAINS`
 - `preferences` -- theme, language, notifications, archive
-  retention, voice mode, CoPresent Control settings
+  retention, voice mode, and product-specific control settings
 - `active`, `suspendedAt`, `suspendedReason`, `lastSeenAt`
 - `legalAcceptance[]` -- append-only history of ToS / Privacy
   acceptances

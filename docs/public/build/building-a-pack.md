@@ -11,8 +11,8 @@ owner: znas
 
 A **pack** is the unit of product-specific extension in memQL: a bundle of Go
 integration code plus an embedded `.memql` DSL subtree that drops into the
-engine and runs alongside the core domains. The in-tree CoPresent pack
-(`memql-bff-copresent`) is the production reference consumer; this guide walks
+engine and runs alongside the core domains. A production carrier repo (the
+product pack) is the production reference consumer; this guide walks
 you through building one from scratch, using the minimal **reference pack** at
 [`examples/referencepack/`](../../../examples/referencepack) as the worked
 example.
@@ -152,7 +152,7 @@ A pack must run **only** in the binaries that should carry it. The mechanism is
 Go build tags on the file that holds the pack's `init()`:
 
 ```go
-//go:build copresent
+//go:build mypack
 
 package mypack
 
@@ -164,7 +164,7 @@ func init() {
 The `init()` runs only when the binary is built with that tag, and the package
 is anchored into the binary via a blank import in the app bootstrap. A node type
 built without the tag never links the registration, so the pack never loads
-there. This is exactly how `memql-bff-copresent` gates its `copresent` domain to
+there. This is exactly how a production carrier repo gates its product domain to
 the carrier-built node types. See [Build Tags](build-tags.md).
 
 **Keeping a pack out of production entirely.** The reference pack demonstrates
@@ -189,7 +189,7 @@ but that **no production binary ever loads**. The trick is twofold:
    This is the *real* build-tag-gated auto-register pattern a production pack
    uses -- but the `referencepack` tag is never set in any production build, so
    the `init()` never runs and the pack never auto-loads. Swap `referencepack`
-   for your product tag (`copresent`, etc.) and you have a production pack.
+   for your product tag and you have a production pack.
 
 The takeaway: **put the pack's `init()` in a build-tag-gated file**, never in
 the always-compiled package body. That single rule decides where a pack loads.

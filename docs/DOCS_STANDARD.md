@@ -1,6 +1,6 @@
 # Documentation Standard
 
-**Status:** stable · **Applies to:** `memql` (canonical), and — lighter — `copresent`, `memql-cockpit`, `memql-bff-copresent`.
+**Status:** stable · **Applies to:** `memql` (canonical), and — lighter — `memql-cockpit` and the product repos (the frontend SPA and the product pack).
 
 This is the single rulebook for where documentation lives, how it is
 tagged, and how it reaches **memql.io**. It exists because docs had

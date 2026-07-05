@@ -6,15 +6,15 @@
 # Cut an IMMUTABLE memQL release image for the Azure deployment
 # foundation (znasllc-io/memql#493, epic #491).
 #
-# memQL is the UPSTREAM module: the CoPresent BFF
-# (github.com/visionarys-io/memql-bff-copresent) imports memQL's
+# memQL is the UPSTREAM module: the product carrier
+# repo imports memQL's
 # `app`, `server`, `genesis`, ... packages and mounts its own DSL
 # subtree via dsl.RegisterTree (see dsl/embed.go). memQL therefore
 # does NOT import the BFF in source -- the dependency points the
-# other way. The "single number CoPresent pins" (epic #491,
-# copresent#140) is a memQL *image tag*, not a go.mod require:
+# other way. The "single number the product SPA pins" (epic #491,
+# frontend#140) is a memQL *image tag*, not a go.mod require:
 #
-#     memql:X.Y.Z   <-- CoPresent's deploy/backend-version file
+#     memql:X.Y.Z   <-- the frontend's deploy/backend-version file
 #
 # This script produces that image. Given VERSION (semver, e.g.
 # 2.4.0) and the current short git SHA it builds, from the repo's
@@ -27,7 +27,7 @@
 # traceable back to a commit. The X.Y.Z tag is treated as
 # write-once: pushing over an existing tag is refused unless
 # --allow-overwrite is given, which is what makes the tag a
-# trustworthy pin for CoPresent.
+# trustworthy pin for the product.
 #
 # Per the repo + global Skills+Scripts convention (CLAUDE.md): pure
 # function-based structure -- one function per responsibility, with
@@ -58,7 +58,7 @@ function show_help() {
 Usage: scripts/release/release.sh [options]
 
 Cut an immutable memql:X.Y.Z image (VERSION + short git SHA) that
-CoPresent pins via its deploy/backend-version file (copresent#140).
+the product pins via its deploy/backend-version file (the product#140).
 
 Options:
     --version=X.Y.Z     Semver to tag the image with. Default: the
@@ -201,7 +201,7 @@ function print_plan() {
 function ensure_tag_immutable() {
     # Only meaningful when pushing to a real registry. Refuse to clobber
     # an existing X.Y.Z tag unless explicitly allowed -- that is what
-    # makes the tag a trustworthy pin for CoPresent (copresent#140).
+    # makes the tag a trustworthy pin for the product (the product#140).
     if [[ "$PUSH" != true || -z "$REGISTRY" || "$ALLOW_OVERWRITE" == true ]]; then
         return 0
     fi
@@ -249,7 +249,7 @@ function print_result() {
     else
         echo "Release image ready: $IMAGE_REF (revision ${SHORT_SHA})"
         if [[ "$PUSH" == true ]]; then
-            echo "Pushed. CoPresent pins this via deploy/backend-version=${VERSION} (copresent#140)."
+            echo "Pushed. the product pins this via deploy/backend-version=${VERSION} (the product#140)."
         else
             echo "Local only. Re-run with --push (and a registry) to publish."
         fi

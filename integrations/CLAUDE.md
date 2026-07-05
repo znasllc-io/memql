@@ -77,7 +77,6 @@ integrations/
 ├── avatarvendor/     # CGO-free Anam/Simli avatar-vendor REST + dispatch core (shared by voice-agent + direct/Guide avatar)
 ├── auth/             # resolveUser, checkPermission
 ├── cognition/        # Routing+conductor, Polyphon scoring, client-tool relay
-├── copresent/        # CoPresent product event-routing rules
 ├── database/         # healthCheck, stats
 ├── email/            # Microsoft Graph / SMTP / Log senders -- sendEmail
 ├── embedding/        # Vendor-neutral text-embedding capability
@@ -95,10 +94,10 @@ integrations/
 # defined alongside the agent tool definitions), not a Go integration here.
 #
 # training/ (the per-agent "Train" pipeline: identity embedding + distilled
-# system prompt + just-in-time knowledge seeding) is a CoPresent product
-# integration -- it MOVED to the pack (memql-bff-copresent/integrations/training)
-# and self-registers via memql.RegisterPlugin("training"). Engine-only core no
-# longer carries it.
+# system prompt + just-in-time knowledge seeding) is a product
+# integration -- it MOVED to the pack (the product carrier repo's
+# integrations/training) and self-registers via
+# memql.RegisterPlugin("training"). Engine-only core no longer carries it.
 ```
 
 ---
@@ -153,7 +152,7 @@ the SPA finishes its modal-dismiss + route transition + first
 paint before the utterance lands), 4s minimum gap between
 consecutive greetings (so multi-`greetOnJoin` rooms don't fire a
 chorus). The greeting directive is "familiar" for ALL agents --
-every agent in CoPresent is one the user created and named, so
+every agent in the product is one the user created and named, so
 "Hi, I'm X" openers are forbidden across the board (no per-agent
 flag; the rule lives in the directive instruction text).
 
@@ -303,10 +302,10 @@ all live there.
 **AiSuggest domains (memql#1959).** `AiSuggestMsg` dispatch is generic in
 core (`component/grpc/ai_handlers.go` + the `memql.RegisterSuggestDomain`
 registry in `component/memql/suggest_registry.go`). `knowledge` registers
-from core; the CoPresent product domains (spaces / spaceTitle / agents /
+from core; the product domains (spaces / spaceTitle / agents /
 groups / groupDescription / agentCardSummary / spaceCardSummary /
 groupCardSummary) register from the pack
-(`memql-bff-copresent/integrations/copresent/suggest`, build-tag `copresent`).
+(the product carrier repo's suggest integration, behind its product build tag).
 `spaceTitle` / `groupDescription` are lightweight single-field generations
 (create-modal blur handlers); the richer `spaces` / `agents` / `groups`
 return full payloads; the `*CardSummary` domains generate canvas-card bodies;
@@ -322,7 +321,7 @@ memQL's integration system has two registration paths:
    `PluginContext`. Good for integrations whose dependencies fit
    the common surface (Logger, Engine, BunDB, VisionProvider,
    EmbeddingProviderByName, partition/variable resolvers). Use this
-   for any product-specific integration (e.g. integrations/copresent/)
+   for any product-specific integration (registered from its pack repo)
    that doesn't need deps outside `PluginContext`.
 2. **Explicit `app/` wiring** -- reserved for first-party integrations
    that need deps outside `PluginContext` (cognition, agent, stt).
@@ -386,8 +385,8 @@ Return `(nil, nil)` from the factory to opt out at runtime (e.g., a
 feature that needs configuration the environment didn't supply).
 
 **4. Anchor the package** so its `init()` runs. Add a blank import
-to `app/plugins_core.go` for core integrations, or
-`app/plugins_copresent.go` for CoPresent-specific integrations.
+to `app/plugins_core.go` for core integrations; a product-specific
+integration anchors from its pack repo instead.
 Build-tag-gate the anchor file if the plug-in should only run on
 certain node types.
 

@@ -11,7 +11,7 @@ owner: znas
 
 **Audience:** engineers running memQL locally or operating it in lab/prod.
 **Last updated:** 2026-04-25 (post env-var refactor; Phase 8 complete)
-**Companion doc:** `docs/public/operate/env-vars.md` in the CoPresent repo covers the frontend side.
+**Companion doc:** the product frontend repo's env-vars doc covers the frontend side.
 
 ---
 
@@ -455,12 +455,12 @@ Stored in `v1:platform:globalVariable`.
 | `MEMQL_EMAIL_SENDER`                | none                                 | Sender address for transactional mail (e.g. `no-reply@znas.io`). Legacy name `MAIL_SENDER` still accepted.                             |
 | `MEMQL_EMAIL_FROM_NAME`             | `memQL`                              | Display name in the From header. Legacy name `MAIL_FROM_NAME` still accepted.                                                          |
 
-### Variables consumed by the CoPresent frontend
+### Variables consumed by the product frontend
 
 These aren't in the manifest yet -- operators add them via
 `make variable-set` -- but they're documented here because they live
-in `v1:platform:globalVariable` and are read by the CoPresent runtime
-config layer (`src/lib/publicConfig.tsx`):
+in `v1:platform:globalVariable` and are read by the product
+frontend's runtime config layer (its publicConfig whitelist):
 
 | Name                            | Typical value          | Consumer                                                                       |
 |---------------------------------|------------------------|--------------------------------------------------------------------------------|
@@ -478,9 +478,8 @@ config layer (`src/lib/publicConfig.tsx`):
 | `MEMQL_DEFAULT_USER_LANGUAGE`   | `en-US`                | Same.                                                                          |
 
 The exact name on the memQL side has to match the entry in the
-publicConfig whitelist
-(`src/lib/publicConfig.tsx` in the CoPresent repo)
-exactly. To add a new one: add it to the whitelist, then
+frontend's publicConfig whitelist exactly. To add a new one: add it
+to the whitelist, then
 `make variable-set NAME=... VALUE=... SCOPE=global`.
 
 ### Per-tenant overrides
@@ -602,8 +601,10 @@ Both are bootstrap envelope vars -- they have to be in the env
 before the gRPC server starts.
 
 `deploy/k8s/overlays/local` (over `deploy/k8s/base`) has full worked
-examples -- the staging-parity mesh (bff + cognition + agent + planner +
-voice + workbench), identity, the copresent SPA, and LiveKit.
+examples -- the engine mesh (mcp + cognition + agent + planner +
+voice + workbench + voice-agent), identity, and the local infra
+(Postgres + Azurite). The product `bff` head and SPA live in the
+downstream product pack's overlay, not here.
 
 ---
 

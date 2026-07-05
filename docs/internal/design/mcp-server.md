@@ -39,7 +39,7 @@ The workspace contains four git repos with a clear division of labor:
   (`app/build_bff.go`, `app/build_voice.go`, `app/build_default.go`, …).
   The Makefile cuts one binary per tag (`-tags bff -o memql-bff`,
   `-tags voice -o memql-voice`, etc. — see `Makefile:46,54,58,62,66,70,88`).
-- **`memql-bff-copresent`** — a *carrier*: a separate repo that pins the
+- **the product carrier repo** — a *carrier*: a separate repo that pins the
   engine (`require github.com/znasllc-io/memql v0.9.0` plus a local
   `replace => ../memql` for dev) and compiles client-specific DSL +
   `RegisterPlugin()` Go code together with the engine into one deployable BFF
@@ -65,7 +65,7 @@ that *speaks the MCP wire protocol to external clients*. That is a new
 the same category as the gRPC server, the WebSocket browser bridge, and the
 voice realtime bridge, all of which live in `memql`.
 
-A generic MCP server is **not** client-specific (unlike the Copresent BFF) and
+A generic MCP server is **not** client-specific (unlike the product BFF) and
 **not** an external consumer (unlike the cockpit). Splitting it into its own
 repo would force it to pin a frozen engine version and reach back through the
 SDK for a tool surface that already lives natively in the engine — taking on
@@ -83,10 +83,10 @@ Concretely:
   role targets.
 
 **Client-specific corollary.** If a deployment needs to expose *one client's*
-tools over MCP (e.g. Copresent's tools to Claude Desktop), the `mcp` transport
-still lives in `memql`; a carrier like `memql-bff-copresent` simply compiles
+tools over MCP (e.g. a product's tools to Claude Desktop), the `mcp` transport
+still lives in `memql`; the product's carrier repo simply compiles
 that transport together with its client plugins — exactly as the BFF compiles
-the engine with the Copresent DSL today. The implementation stays in `memql`
+the engine with the product DSL today. The implementation stays in `memql`
 either way.
 
 ---

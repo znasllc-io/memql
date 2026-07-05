@@ -17,7 +17,7 @@ via a full-payload mutation (all of them today).
 
 ## What happened
 
-On 2026-04-19 a CoPresent agent named Lyra silently lost her
+On 2026-04-19 a production agent named Lyra silently lost her
 `role` field. The failure surfaced as "tool `uiReadState` is not
 allowed for caller role `""`" — the Operator tools are scoped to
 `general_assistant`, her record got rewritten with role missing, so
@@ -123,7 +123,7 @@ version instead of overwriting the whole record.
 **Status quo:**
 
 ```memql
-// mutations/v1/copresent/updateAgent.memql
+// the product pack's updateAgent mutation
 func (Mutation) mutationUpdateAgent(args any) error {
   return insert({
     id: args.agentId,
@@ -232,7 +232,7 @@ For B:
 - Should the lint also walk the TypeScript `AgentPayload` /
   `Agent` types to verify the frontend consumes every shape field?
   Probably useful but cross-repo tooling adds complexity. Could be a
-  `codegen:concepts` extension on the copresent side instead.
+  `codegen:concepts` extension on the product-frontend side instead.
 - Does memQL's query-projection engine already expose "which shape was
   used for this query" at query time? If so, the dispatch layer could
   emit a warning when a partial shape is used for a write path ("you

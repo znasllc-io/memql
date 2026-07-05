@@ -25,7 +25,7 @@ cross-node mesh bugs reproduces locally instead of only on staging.
 |---|---|---|---|
 | Orchestrator | ArgoCD (k3d) | ArgoCD (AKS) | identical |
 | Manifests | `deploy/k8s/overlays/local/` | `deploy/k8s/overlays/staging/` | same base, env config differs |
-| Node-type split | identity / voice / mcp / bff / cognition / agent / planner / workbench / voice-agent | same | identical |
+| Node-type split | identity / voice / mcp / cognition / agent / planner / workbench / voice-agent | same | identical (the product `bff` head is pack-owned, #2204) |
 | Build model | engine (`Dockerfile`) for ALL node types (`memql-<type>:local`); product stacks overlay carrier builds via the carrier hook | carrier builds for product node types (product repo's pipeline) | engine-only here; see [downstream-stacks.md](downstream-stacks.md) |
 | Replicas per mesh node (default) | **1** (scale to 2 with `make scale N=2`) | **2** | equivalent |
 | Per-replica node id | `fieldRef: metadata.name` (downward API, same as staging) | `fieldRef: metadata.name` | **identical** |
@@ -101,7 +101,7 @@ After `make up`, these local ports are forwarded from the k3d cluster:
 | `7880` | livekit (WebSocket) |
 | `5432` | Postgres (direct) |
 
-The CoPresent SPA (`:8080`) and the `bff` carrier gRPC head (`:50051`) are NOT
+The product SPA (`:8080`) and the `bff` carrier gRPC head (`:50051`) are NOT
 part of the engine repo's local overlay (#2204) -- they are built and pinned
 from their own sibling repos. The local engine gRPC head is the `mcp` node,
 reached on demand:
@@ -186,8 +186,9 @@ with its justification.
 
 ### Invariants -- MUST stay identical
 
-- **Service set:** identity / voice / mcp / bff / cognition / agent / planner /
-  workbench / voice-agent.
+- **Service set:** identity / voice / mcp / cognition / agent / planner /
+  workbench / voice-agent (the product `bff` head and SPA are pack-owned,
+  #2204).
 - **Build source per node** (engine-built here; carrier-built within a product stack -- the #1053 rule, revised).
 - **`fieldRef: metadata.name`** for `MEMQL_NODE_ID` on every Deployment in
   `deploy/k8s/base/` -- identical to staging.
@@ -249,6 +250,6 @@ because:
 There is no nginx front door, no `*.local.znas.io` subdomains, and no mkcert
 TLS in this world -- the cluster is reached via kubectl port-forwards
 (identity `:8085`, postgres `:5432`, and the `mcp` engine gRPC head `:50051`
-on demand; the CoPresent SPA + bff carrier are engine-external and absent
+on demand; the product SPA + bff carrier are engine-external and absent
 locally, #2204; the voice/media plane is LiveKit Cloud, reached outbound --
 no local port-forward).

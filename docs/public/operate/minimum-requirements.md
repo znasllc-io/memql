@@ -105,12 +105,15 @@ set in the **Tiger console → Common parameters** (not the CLI/SQL).
   (`aks-memql-staging`); any conformant cluster should work, but AKS is the
   exercised path. See [Infrastructure](infrastructure.md).
 - **No database pod** — the DB is the managed Tiger service above.
-- The mesh node-types (each a `Deployment`, 2 replicas for HA except bff which
-  is an Argo **Rollout**): `identity`, `bff`, `cognition`, `voice`, `agent`,
-  `planner`, `workbench`, `mcp`, plus the `copresent` SPA, `livekit`, and the
-  `voice-agent`. Manifests: `deploy/k8s/base`.
+- The engine mesh node-types (each a `Deployment`, 2 replicas for HA):
+  `identity`, `cognition`, `voice`, `agent`, `planner`, `workbench`, `mcp`,
+  plus `livekit` and the `voice-agent`. Manifests: `deploy/k8s/base`. A
+  downstream product stack layers its own workloads (the carrier `bff`
+  Rollout, the product SPA) from its own repo's overlay -- see
+  [Downstream product stacks](downstream-stacks.md).
 - Rough small-staging footprint: ~4 × 2-vCPU nodes. Right-size per workload.
-- **Argo CD + Argo Rollouts** for GitOps + the bff blue-green cutover.
+- **Argo CD** for GitOps (+ **Argo Rollouts** when a downstream stack runs a
+  blue-green carrier; the controller install lives in `deploy/rollouts/install`).
 
 ---
 
@@ -139,17 +142,17 @@ Every DB-connecting pod mounts the `memql-secrets` Secret via `envFrom`. The
 ## 4. Images — built on the build server, never a laptop
 
 Deployable images are built on **GitHub Actions → OIDC → ACR `acrmemql`**, never
-hand-built locally (local Docker is dev-only). A release builds three repos at
-one engine ref and assembles a digest-pinned lockfile:
+hand-built locally (local Docker is dev-only):
 
-- `memql` → engine images (`identity`, `voice`, `mcp`).
-- `memql-bff-copresent` → the **carrier** images (`bff`, `cognition`, `agent`,
-  `planner`, `workbench`) — these MUST be carrier-built (they carry the
-  CoPresent DSL; a pure-engine image fails with `unknown prompt template`).
-- `copresent` → the SPA.
+- `memql` (this repo) → the engine images (`.github/workflows/build-engine-images.yml`).
+- The product carrier repo → the **carrier** images (`bff`, `cognition`,
+  `agent`, `planner`, `workbench`) — these MUST be carrier-built (they carry
+  the product DSL; a pure-engine image fails with `unknown prompt template`).
+- The product frontend repo → the SPA image.
 
-See [Deployment Strategy](deployment-strategy.md) for the full release →
-lockfile → promote → reconcile flow.
+The carrier + SPA build workflows, the digest-pinned release lockfiles, and
+the promote flow are owned by the product carrier repo; see
+[Downstream product stacks](downstream-stacks.md) for the contract.
 
 ---
 
@@ -172,7 +175,7 @@ lockfile → promote → reconcile flow.
   When changing a connection-config secret, cut the secret over **before** the
   sync scales pods up; bring **identity up first**. See
   [DB connection budget](db-connection-budget.md) and
-  [Deployment Strategy](deployment-strategy.md).
+  Deployment Strategy (see the product pack repo's docs/operate/deployment-strategy.md).
 
 ---
 
@@ -191,7 +194,7 @@ lockfile → promote → reconcile flow.
 
 - [DB connection budget & graceful deploy](db-connection-budget.md) — the budget formula, pooler split, monitor + gate.
 - [Database Setup](database-setup.md) — Tiger CLI, service management.
-- [Deployment Strategy](deployment-strategy.md) — release/lockfile/promote/GitOps.
+- Deployment Strategy (see the product pack repo's docs/operate/deployment-strategy.md) — release/lockfile/promote/GitOps.
 - [Infrastructure](infrastructure.md) — the AKS cluster.
 - [Environment Variables](env-vars.md) — the full env surface.
 - [Reproduce staging locally](reproduce-staging-locally.md) — the local dev cluster.

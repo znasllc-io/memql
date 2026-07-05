@@ -11,7 +11,9 @@
 # (dsl/deployment/logic.memql), which the deploy automation (I10) branches
 # success/rollback on. dryRun (default true) returns passed=true for a no-op
 # target so a local replay exercises the success branch; an apply run delegates
-# to scripts/deploy/post-deploy-gate.sh when present.
+# to ${workdir}/scripts/deploy/post-deploy-gate.sh -- which post-decouple is the
+# downstream product pack checkout, not this engine tree -- and fails cleanly
+# (exit 5) when that gate is absent from the workdir.
 #
 # NOTE: this capability REPORTS the gate outcome; the decision (auto-promote vs
 # rollback) lives in DSL logic, not here (contract rule 7).
@@ -54,8 +56,8 @@ function main() {
 
     if [[ "$env" == "development" ]]; then
         # Development gate target (#2380): the k3d mesh litmus. Selecting the
-        # health-check backend BY the env param is mechanical dispatch (the
-        # promote.sh env-mapping class), not a policy decision; the litmus
+        # health-check backend BY the env param is mechanical dispatch (a
+        # mechanical env-mapping, not a policy decision); the litmus
         # itself is the k3d.status capability script (deployments + per-pod
         # unique MEMQL_NODE_ID -- the `make status` check).
         litmus_script="${workdir%/}/scripts/k3d/status.sh"

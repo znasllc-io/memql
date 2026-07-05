@@ -162,8 +162,9 @@ function seed_front_door_tls() {
 function seed_internal_ca() {
     # The identity node serves its HTTP surface over TLS (the node-bootstrap
     # handler rejects plaintext) and every other node mounts the CA to trust
-    # it -- see deploy/k8s/base/*.yaml (secretName: memql-ca) and the cloud
-    # equivalent in scripts/deploy/aks-deploy.sh step 2a. Without these two
+    # it -- see deploy/k8s/base/*.yaml (secretName: memql-ca); the cloud
+    # equivalent is seeded by the downstream product pack's deploy path.
+    # Without these two
     # secrets every node that mounts memql-ca stalls in ContainerCreating with
     # a FailedMount, so the local bootstrap must generate them too. The
     # generator is idempotent (kubectl apply), so re-running make up / make

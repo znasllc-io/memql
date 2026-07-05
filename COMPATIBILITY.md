@@ -2,7 +2,7 @@
 
 This is the **hub document** for how the memQL platform repos fit
 together at a given point in time. memQL is the upstream engine, so
-this doc lives here; the other repos link to it.
+this doc lives here; downstream repos link to it.
 
 It answers one question: **given a version of one repo, what versions
 of the others does it work with?** The answer is a **pin chain**, not
@@ -10,14 +10,21 @@ a single global version number — repos version independently
 (see [VERSIONING.md](VERSIONING.md)) and coherence is maintained by
 explicit pins rather than lockstep.
 
-## The repos
+## The repo shape
+
+Every product built on memQL follows the same constellation (see
+[docs/public/operate/downstream-stacks.md](docs/public/operate/downstream-stacks.md)):
 
 | Repo | Role |
 |---|---|
-| `znasllc-io/memql` (this repo) | The engine + node-type binaries (bff / voice / cognition / agent / planner) and the wire protocol. **Upstream.** |
-| `visionarys-io/memql-bff-copresent` | The **CoPresent BFF carrier**. Imports memQL's Go packages and mounts the `copresent/` DSL subtree into the engine. Built into the deployable backend image. |
-| `visionarys-io/copresent` | The **product / frontend** — the CoPresent SPA and its deploy config. |
+| `znasllc-io/memql` (this repo) | The engine + node-type binaries (bff / voice / cognition / agent / planner / workbench / mcp / identity) and the wire protocol. **Upstream.** |
+| the product's **carrier** repo | Imports memQL's Go packages, registers its DSL subtree + product integrations through the plugin-SDK seams, and builds the deployable backend (carrier) images. Owns the product's deploy/release estate. |
+| the product's **frontend** repo | The SPA and its client-side deploy config. |
 | `znasllc-io/memql-cockpit` | The **CLI / ops console** (display name "memQL Cockpit"), and the worker run-mode binary. A gRPC client of memQL. |
+
+The concrete repo names, versions, and pin values for a given product
+live in that product's carrier repo (its VERSIONING/COMPATIBILITY
+docs), not here.
 
 ## The pin chain
 
@@ -25,29 +32,27 @@ The dependency graph points **downward toward memQL**, and so does the
 pinning:
 
 ```
-  copresent  (product / frontend)
+  product frontend
       │  deploy/backend-version pins ──►
       ▼
-  memql-bff-copresent  (BFF carrier)
+  product carrier  (BFF carrier)
       │  go.mod require + image built from ──►
       ▼
   memql  (engine + protocol)          ◄── memql-cockpit declares the
                                           min memQL / protocol it speaks
 ```
 
-1. **copresent → memql-bff-copresent.** CoPresent's
-   `deploy/backend-version` file pins the **carrier** version it
-   deploys against (visionarys-io/copresent#140). This is the one
-   number the product team bumps to move to a newer backend.
+1. **frontend → carrier.** The frontend's `deploy/backend-version`
+   file pins the **carrier** version it deploys against. This is the
+   one number the product team bumps to move to a newer backend.
 
-2. **memql-bff-copresent → memql.** The carrier imports memQL's Go
-   packages (`app`, `server`, `genesis`, `core/...`) and mounts its
-   own DSL subtree via `dsl.RegisterTree`. It pins the memQL version
-   it builds against (memql-bff-copresent#79) and bakes it into the
-   immutable backend image. Because the import graph is
-   **carrier → memQL** (never the reverse), memQL carries no require on
-   the carrier — see
-   [docs/public/operate/deployment-strategy.md](docs/public/operate/deployment-strategy.md#dependency-direction-why-memql-carries-no-bff-require).
+2. **carrier → memql.** The carrier imports memQL's Go packages
+   (`app`, `server`, `genesis`, `core/...`) and mounts its own DSL
+   subtree via `dsl.RegisterTree`. It pins the memQL version it
+   builds against and bakes it into the immutable backend image.
+   Because the import graph is **carrier → memQL** (never the
+   reverse), memQL carries no require on any carrier — see the product
+   pack repo's docs/operate/deployment-strategy.md.
 
 3. **memql-cockpit → memql (declared minimum).** Cockpit is a gRPC
    client, not part of the backend image, so it is not in the build
@@ -60,12 +65,12 @@ pinning:
 
 ### How a deploy resolves
 
-A running CoPresent deployment is fully determined by walking the
+A running product deployment is fully determined by walking the
 chain once:
 
 ```
-  copresent @ deploy/backend-version = carrier vA.B.C
-        └─► memql-bff-copresent vA.B.C  (built against memql vX.Y.Z)
+  frontend @ deploy/backend-version = carrier vA.B.C
+        └─► product carrier vA.B.C  (built against memql vX.Y.Z)
                   └─► memql vX.Y.Z  (immutable memql:X.Y.Z image)
 ```
 
@@ -77,16 +82,16 @@ makes each link in the chain a trustworthy pin.
 ## The platform train
 
 Repos version **independently** by default — memQL may be at `0.14`
-while the carrier is at `0.11` and Cockpit at `0.10`. The pins above
+while a carrier is at `0.11` and Cockpit at `0.10`. The pins above
 keep any deployed combination coherent without forcing the numbers to
 match.
 
 The **exception** is the `1.0.0` cut at the invite-only beta
 (~Aug 2026). At the beta, all platform repos are tagged `1.0.0`
 **together as a coordinated train** — a single coherent
-"first real users" release across memql, memql-bff-copresent,
-copresent, and memql-cockpit. After the train departs, repos resume
-**independent semver** and the pin chain again does the work of
+"first real users" release across the engine, the product's carrier +
+frontend repos, and memql-cockpit. After the train departs, repos
+resume **independent semver** and the pin chain again does the work of
 keeping combinations coherent.
 
 So:

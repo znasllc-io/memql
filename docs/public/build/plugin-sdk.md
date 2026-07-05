@@ -11,7 +11,8 @@ owner: znas
 
 A **pack** extends memQL with product-specific behavior: Go integrations plus a
 `.memql` DSL bundle, compiled into a node-type binary via build tags. The
-in-tree CoPresent pack (`memql-bff-copresent`) is the reference consumer.
+product pack (the carrier repo, a sibling of this one) is the reference
+consumer.
 
 This page is the **contract reference** for the Go surface a pack targets -- the
 `PluginContext` it receives, the `PluginFactory` it implements, the
@@ -126,7 +127,7 @@ The build tags decide which node-type binaries include the registration.
 Minimal shape:
 
 ```go
-//go:build copresent
+//go:build mypack
 
 package mypack
 
@@ -187,7 +188,7 @@ DSL tree). The core domain set is read from the embedded tree's top-level
 directories, so it stays in lockstep with the `//go:embed` directive.
 
 > **Out of scope by design.** Runtime (non-compiled) pack loading is not
-> supported -- packs stay embedded via build tags, like `memql-bff-copresent`
+> supported -- packs stay embedded via build tags, like the product pack
 > today. Validation runs at startup against the compiled-in set; there is no
 > dynamic-load path to validate.
 

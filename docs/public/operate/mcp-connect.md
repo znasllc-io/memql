@@ -27,8 +27,8 @@ this page is about connecting.
 
 ## Connect Claude Code to staging (remote HTTP)
 
-Staging serves the MCP head at `https://mcp.staging.copresent.ai/mcp` at the
-`authoring` capability tier.
+Staging serves the MCP head at `https://mcp.staging.example.com/mcp` (your
+MCP host) at the `authoring` capability tier.
 
 ### 1. Mint a bearer token
 
@@ -60,7 +60,7 @@ to every tool on top of the tier.
 
 ```bash
 claude mcp add --transport http memql-staging \
-  https://mcp.staging.copresent.ai/mcp \
+  https://mcp.staging.example.com/mcp \
   --header "Authorization: Bearer <token from step 1>"
 ```
 
@@ -81,7 +81,7 @@ Build the engine-node binary and let the MCP host run it as a subprocess. stdio
 is the default transport, so no transport env is needed:
 
 ```bash
-GOWORK=off make mcp            # -> bin/memql-mcp (engine node, no CoPresent DSL)
+GOWORK=off make mcp            # -> bin/memql-mcp (engine node, no product DSL)
 
 # Register it with Claude Code as a local subprocess. The binary runs the full
 # engine, so it needs the engine env (DB DSN + genesis) the same way any node

@@ -382,7 +382,7 @@ psql "$(gcloud secrets versions access latest --secret='MEMORY_NODES_DATABASE_DS
 
 ## [NOTE] See Also
 
-- [DEPLOYMENT_STRATEGY.md](deployment-strategy.md) - Deployment procedures
+- DEPLOYMENT_STRATEGY.md (see the product pack repo's docs/operate/deployment-strategy.md) - Deployment procedures
 - [Tiger Cloud CLI Docs](https://docs.timescale.com/use-timescale/latest/services/cli/)
 - Tiger Cloud Dashboard: https://console.cloud.timescale.com/
 

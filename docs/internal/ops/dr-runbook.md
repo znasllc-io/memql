@@ -9,7 +9,7 @@ owner: znas
 
 # Disaster recovery runbook (deployment-v2 Phase 5, #703)
 
-Rehearsed recovery for the memQL + CoPresent stack on AKS. Three independent
+Rehearsed recovery for the memQL + product stack on AKS. Three independent
 recovery domains — **deploy/config**, **secrets**, **database** — each with a
 rehearsal you can run on staging without risk.
 

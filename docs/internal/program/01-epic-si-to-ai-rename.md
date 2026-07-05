@@ -13,7 +13,7 @@ Rename "SI / synthetic intelligence" to "AI" across DSL, Go, wire/proto, and
 frontend, in one coordinated sweep. **Runs first** (before decoupling).
 **Session: S1. Gate produced: G1.**
 
-**Repos:** `memql`, `memql-bff-copresent`, `memql-cockpit`, `copresent`.
+**Repos:** `memql`, `the product carrier repo`, `memql-cockpit`, `the product`.
 
 ## Centerpiece
 The author-facing DSL construct is `si("promptName", args)` — the blocking
@@ -65,14 +65,14 @@ dependents regenerate against the new contract.
 **Acceptance:** Protos regenerate cleanly; all nodes compile against new
 contract; a cross-node smoke test passes.
 
-## Issue 1.5 — Propagate rename to CoPresent BFF pack [G:1.4]
-**Scope:** `si()` → `ai()` in `memql-bff-copresent/dsl/copresent/*.memql`;
+## Issue 1.5 — Propagate rename to the product BFF pack [G:1.4]
+**Scope:** `si()` → `ai()` in `the product carrier repo/the pack's DSL tree/*.memql`;
 SI-named generated Go/args (`MutationJoinSpaceAsSIArgs`, `LogicAutoJoinSIArgs`,
 `buildQueryHasSIResponseForReply`, etc.); regenerate against the new wire.
 **Acceptance:** BFF builds + tests green against renamed core/wire.
 
 ## Issue 1.6 — Propagate rename to frontend [G:1.4] [P with 1.5]
-**Scope:** `copresent` SPA: regenerate TS from the new protos; rename app
+**Scope:** `the product` SPA: regenerate TS from the new protos; rename app
 identifiers (`isSITyping`, etc.). **Do not touch `SIP*` or `TS*` AST names.**
 **Acceptance:** Frontend type-checks + builds against the regenerated gRPC TS.
 
