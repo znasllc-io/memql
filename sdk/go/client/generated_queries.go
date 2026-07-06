@@ -16,7 +16,7 @@ var (
 
 // AccessRequestById -- Returns the access request with the given id. Zero or one result.
 //
-// Bound concept: accessRequest.
+// Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["accessRequestById"] in generated_concepts.go).
 type AccessRequestByIdArgs struct {
 	RequestId string
 }
@@ -38,7 +38,7 @@ func AccessRequestByIdBuild(args AccessRequestByIdArgs) string {
 
 // AccountEntitlement -- The account's task-concurrency entitlement row (zero or one current row). Backs the admission controller (#904) and Tasks UX (#909). Filters on accountId only; classifies as 'other' in the per-row-authz audit. No-row => unlimited is enforced in the Go resolver.
 //
-// Bound concept: accountEntitlement.
+// Bound concept: v1:identity:accountEntitlement (machine-readable: BoundConcepts["accountEntitlement"] in generated_concepts.go).
 type AccountEntitlementArgs struct {
 	AccountId string
 }
@@ -60,7 +60,7 @@ func AccountEntitlementBuild(args AccountEntitlementArgs) string {
 
 // ActionById -- Resolve a floating v1:actions:action reference by id (latest version) for the calling owner -- floating-ref resolution (#1758). Owned tier.
 //
-// Bound concept: action.
+// Bound concept: v1:actions:action (machine-readable: BoundConcepts["actionById"] in generated_concepts.go).
 type ActionByIdArgs struct {
 	ActionId string
 }
@@ -82,7 +82,7 @@ func ActionByIdBuild(args ActionByIdArgs) string {
 
 // ActionByIdAndVersion -- Resolve a pinned v1:actions:action reference (id + version) for the calling owner -- pin-by-default resolution (Phase 5 #1740). Owned tier.
 //
-// Bound concept: action.
+// Bound concept: v1:actions:action (machine-readable: BoundConcepts["actionByIdAndVersion"] in generated_concepts.go).
 type ActionByIdAndVersionArgs struct {
 	ActionId string
 	Version  int
@@ -110,7 +110,7 @@ func ActionByIdAndVersionBuild(args ActionByIdAndVersionArgs) string {
 
 // ActionByInputFingerprint -- Resolve an active v1:actions:action by inputFingerprint for the calling owner -- the literal-replay lookup (Phase 1 #1736).
 //
-// Bound concept: action.
+// Bound concept: v1:actions:action (machine-readable: BoundConcepts["actionByInputFingerprint"] in generated_concepts.go).
 type ActionByInputFingerprintArgs struct {
 	InputFingerprint string
 }
@@ -132,7 +132,7 @@ func ActionByInputFingerprintBuild(args ActionByInputFingerprintArgs) string {
 
 // ActionByTemplateFingerprint -- Resolve an active v1:actions:action by templateFingerprint (input structure) for the calling owner -- the parameterized-replay lookup (Phase 3 #1738). Owned tier.
 //
-// Bound concept: action.
+// Bound concept: v1:actions:action (machine-readable: BoundConcepts["actionByTemplateFingerprint"] in generated_concepts.go).
 type ActionByTemplateFingerprintArgs struct {
 	TemplateFingerprint string
 }
@@ -154,7 +154,7 @@ func ActionByTemplateFingerprintBuild(args ActionByTemplateFingerprintArgs) stri
 
 // ActionCandidatesForPlan -- List v1:actions:candidate traces captured for a plan, newest-first by createdAt (owned tier). #1735.
 //
-// Bound concept: candidate.
+// Bound concept: v1:actions:candidate (machine-readable: BoundConcepts["actionCandidatesForPlan"] in generated_concepts.go).
 type ActionCandidatesForPlanArgs struct {
 	PlanId string
 }
@@ -176,7 +176,7 @@ func ActionCandidatesForPlanBuild(args ActionCandidatesForPlanArgs) string {
 
 // ActionsPendingConfirm -- List the calling owner's candidate v1:actions:action rows awaiting confirmation (real-machine side effects gate on a human, Phase 4 #1739). Owned tier.
 //
-// Bound concept: action.
+// Bound concept: v1:actions:action (machine-readable: BoundConcepts["actionsPendingConfirm"] in generated_concepts.go).
 type ActionsPendingConfirmArgs struct {
 }
 
@@ -193,7 +193,7 @@ func ActionsPendingConfirmBuild(args ActionsPendingConfirmArgs) string {
 
 // ActiveActionsForOwner -- List the calling owner's active v1:actions:action rows for the consolidation decay/deprecate sweep (Phase 4 #1739). Owned tier.
 //
-// Bound concept: action.
+// Bound concept: v1:actions:action (machine-readable: BoundConcepts["activeActionsForOwner"] in generated_concepts.go).
 type ActiveActionsForOwnerArgs struct {
 }
 
@@ -210,7 +210,7 @@ func ActiveActionsForOwnerBuild(args ActiveActionsForOwnerArgs) string {
 
 // ActiveAgentRoles -- List every active agentRole row. Backs the role picker on the cockpit's agent-creation surface and on the role-management view. predefined rows render with a lock icon; user-created rows are fully editable.
 //
-// Bound concept: agentRole.
+// Bound concept: v1:agents:agentRole (machine-readable: BoundConcepts["activeAgentRoles"] in generated_concepts.go).
 type ActiveAgentRolesArgs struct {
 }
 
@@ -227,7 +227,7 @@ func ActiveAgentRolesBuild(args ActiveAgentRolesArgs) string {
 
 // ActiveAgents -- Returns available AI agent templates. Optional filter: groupId
 //
-// Bound concept: agent.
+// Bound concept: v1:agents:agent (machine-readable: BoundConcepts["activeAgents"] in generated_concepts.go).
 type ActiveAgentsArgs struct {
 	GroupId string
 }
@@ -251,7 +251,7 @@ func ActiveAgentsBuild(args ActiveAgentsArgs) string {
 
 // ActiveAgentsForUser -- Per Q10 layered dedupe Layer 1: list every active agent owned by a user (any roleSlug, any space scope). The Planner Agent's createSpecialist decision feeds this list into the similarity check before proposing a new agent. Platform-infrastructure agents (payload.kind=='system' -- MemQL Planner, MemQL Trainer) are returned by this query and filtered out structurally by loadExistingAgents in integrations/agents/factory.go before they enter the dedupe candidate pool; the filter lives one layer up rather than in the query so the same query can serve other callers that legitimately need system rows.
 //
-// Bound concept: agent.
+// Bound concept: v1:agents:agent (machine-readable: BoundConcepts["activeAgentsForUser"] in generated_concepts.go).
 type ActiveAgentsForUserArgs struct {
 	OwnerUserId string
 }
@@ -273,7 +273,7 @@ func ActiveAgentsForUserBuild(args ActiveAgentsForUserArgs) string {
 
 // ActiveApprovalsByCorrelationKey -- Returns active (pending OR approved) v1:safety:approvalRequest rows for a given correlationKey. The DSL-backed ApprovalSink calls this BEFORE creating a new pending row -- if an `approved` non-expired row exists, the Gate bypasses with proceed=true; if a `pending` row exists, the sink reuses its id rather than creating a duplicate (idempotency). `expired` and `denied` rows are excluded -- the bypass check should treat them as nonexistent so a subsequent retry creates a fresh pending row.
 //
-// Bound concept: approvalRequest.
+// Bound concept: v1:safety:approvalRequest (machine-readable: BoundConcepts["activeApprovalsByCorrelationKey"] in generated_concepts.go).
 type ActiveApprovalsByCorrelationKeyArgs struct {
 	CorrelationKey string
 }
@@ -295,7 +295,7 @@ func ActiveApprovalsByCorrelationKeyBuild(args ActiveApprovalsByCorrelationKeyAr
 
 // ActiveAuthoringBundles -- The caller's currently-active bundles. Backs the authored-construct runtime loader (#959) -- the set of authored automations to register on boot / on change.
 //
-// Bound concept: bundle.
+// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["activeAuthoringBundles"] in generated_concepts.go).
 type ActiveAuthoringBundlesArgs struct {
 }
 
@@ -312,7 +312,7 @@ func ActiveAuthoringBundlesBuild(args ActiveAuthoringBundlesArgs) string {
 
 // ActiveCapabilities -- List every active capability row across all roles -- the whole RBAC grant catalog. Backs the cockpit RBAC view and is the bulk read the E1.6 enforcement resolver warms its per-node decision cache from. Small admin/seed-defined registry consumed whole.
 //
-// Bound concept: capability.
+// Bound concept: v1:rbac:capability (machine-readable: BoundConcepts["activeCapabilities"] in generated_concepts.go).
 type ActiveCapabilitiesArgs struct {
 }
 
@@ -329,7 +329,7 @@ func ActiveCapabilitiesBuild(args ActiveCapabilitiesArgs) string {
 
 // ActiveDelegationsByIdentitySubject -- Get all active delegations whose identitySubject matches the argument. Used by the per-request DelegationResolver on the auth hot path. See memql#112.
 //
-// Bound concept: delegation.
+// Bound concept: v1:identity:delegation (machine-readable: BoundConcepts["activeDelegationsByIdentitySubject"] in generated_concepts.go).
 type ActiveDelegationsByIdentitySubjectArgs struct {
 	IdentitySubject string
 }
@@ -351,7 +351,7 @@ func ActiveDelegationsByIdentitySubjectBuild(args ActiveDelegationsByIdentitySub
 
 // ActiveDelegationsForAgent -- Get all active delegations for a given agent ID
 //
-// Bound concept: delegation.
+// Bound concept: v1:identity:delegation (machine-readable: BoundConcepts["activeDelegationsForAgent"] in generated_concepts.go).
 type ActiveDelegationsForAgentArgs struct {
 	AgentId string
 }
@@ -373,7 +373,7 @@ func ActiveDelegationsForAgentBuild(args ActiveDelegationsForAgentArgs) string {
 
 // ActiveHumanParticipants -- Get active human participants in a space
 //
-// Bound concept: participant.
+// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["activeHumanParticipants"] in generated_concepts.go).
 type ActiveHumanParticipantsArgs struct {
 	PartitionId string
 }
@@ -395,7 +395,7 @@ func ActiveHumanParticipantsBuild(args ActiveHumanParticipantsArgs) string {
 
 // ActivePlansForUser -- The caller's currently-RUNNING Plans -- the account's active tasks occupying concurrency slots (epic memql#902 / #909). Owned tier: payload.requestedBy==actor.userId binds server-side so a caller only sees their own. The active count is the result length; pair with accountEntitlement for the cap and waitingPlansForUser for the queue.
 //
-// Bound concept: plan.
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["activePlansForUser"] in generated_concepts.go).
 type ActivePlansForUserArgs struct {
 }
 
@@ -412,7 +412,7 @@ func ActivePlansForUserBuild(args ActivePlansForUserArgs) string {
 
 // ActiveProjects -- List active v1:forge:project rows.
 //
-// Bound concept: project.
+// Bound concept: v1:forge:project (machine-readable: BoundConcepts["activeProjects"] in generated_concepts.go).
 type ActiveProjectsArgs struct {
 }
 
@@ -429,7 +429,7 @@ func ActiveProjectsBuild(args ActiveProjectsArgs) string {
 
 // ActiveResponsibilities -- The caller's active + enabled responsibilities -- the live working set. Owned tier (ownerUserId == actor.userId). status filtered via statusIsActive; enabled==true drops soft-disabled rows.
 //
-// Bound concept: responsibility.
+// Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["activeResponsibilities"] in generated_concepts.go).
 type ActiveResponsibilitiesArgs struct {
 }
 
@@ -446,7 +446,7 @@ func ActiveResponsibilitiesBuild(args ActiveResponsibilitiesArgs) string {
 
 // ActiveResponsibilitiesAcrossUsers -- Every active + enabled responsibility in the partition, regardless of owner -- the cross-user sweep the reactive-loop heartbeat (epic #632) walks each tick. Cron-sweep-helper shape (no owner filter; classifies as 'other' like queryAllArchivedSpacesAcrossUsers). The planner poller reads this under the system actor, then impersonates each row's ownerUserId for the owned-tier per-user writes.
 //
-// Bound concept: responsibility.
+// Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["activeResponsibilitiesAcrossUsers"] in generated_concepts.go).
 type ActiveResponsibilitiesAcrossUsersArgs struct {
 }
 
@@ -463,7 +463,7 @@ func ActiveResponsibilitiesAcrossUsersBuild(args ActiveResponsibilitiesAcrossUse
 
 // ActiveRoles -- List every active role in the catalog -- the base roles plus any custom roles. Backs the cockpit RBAC view's role list and the rank picker the E1.4 custom-role creation flow uses to choose a slot. Higher rank == more privileged. Small registry consumed whole.
 //
-// Bound concept: role.
+// Bound concept: v1:rbac:role (machine-readable: BoundConcepts["activeRoles"] in generated_concepts.go).
 type ActiveRolesArgs struct {
 }
 
@@ -480,7 +480,7 @@ func ActiveRolesBuild(args ActiveRolesArgs) string {
 
 // ActiveSkills -- List every active skill catalog row -- summary projection. Backs the Skills picker on the role-edit surface (cockpit#124) and the Planner Agent's candidate scan when deciding which skill bundle to attach in extendSpecialist. Predefined rows render with a lock icon; user-created rows are fully editable.
 //
-// Bound concept: skill.
+// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["activeSkills"] in generated_concepts.go).
 type ActiveSkillsArgs struct {
 }
 
@@ -497,7 +497,7 @@ func ActiveSkillsBuild(args ActiveSkillsArgs) string {
 
 // ActiveSkillsFull -- List every active skill catalog row with its full bundle composition (domainIds + toolSlugs + liveSourceIds). Heavier projection than activeSkills; use this when a caller needs to resolve agent capabilities by unioning skill bundles in-process (cockpit#124's Agents view does this on every detail render). The catalog is small (25 rows in Phase 2; growth tracked via the Phase 3 mintSkill roadmap) so the single-shot full-list query is cheaper than N skillBySlug round-trips.
 //
-// Bound concept: skill.
+// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["activeSkillsFull"] in generated_concepts.go).
 type ActiveSkillsFullArgs struct {
 }
 
@@ -514,7 +514,7 @@ func ActiveSkillsFullBuild(args ActiveSkillsFullArgs) string {
 
 // ActiveUsers -- Active users in the cluster, optionally filtered by role or group membership. Both args are optional -- omit them to list all active users (the identity admin portal's user-list view).
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["activeUsers"] in generated_concepts.go).
 type ActiveUsersArgs struct {
 	Role    string
 	GroupId string
@@ -546,7 +546,7 @@ func ActiveUsersBuild(args ActiveUsersArgs) string {
 
 // AgentAuthorizationsForUser -- All active standing authorizations granted by a user, across all agents and plan kinds.
 //
-// Bound concept: agentAuthorization.
+// Bound concept: v1:agents:agentAuthorization (machine-readable: BoundConcepts["agentAuthorizationsForUser"] in generated_concepts.go).
 type AgentAuthorizationsForUserArgs struct {
 	UserId string
 }
@@ -568,7 +568,7 @@ func AgentAuthorizationsForUserBuild(args AgentAuthorizationsForUserArgs) string
 
 // AgentById -- Get an agent by ID with full configuration.
 //
-// Bound concept: agent.
+// Bound concept: v1:agents:agent (machine-readable: BoundConcepts["agentById"] in generated_concepts.go).
 type AgentByIdArgs struct {
 	AgentId string
 }
@@ -590,7 +590,7 @@ func AgentByIdBuild(args AgentByIdArgs) string {
 
 // AgentInteractionCount -- Count utterances by an agent across ALL spaces in the current partition. Drives the agentIsKnownToUser signal.
 //
-// Bound concept: utterance.
+// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["agentInteractionCount"] in generated_concepts.go).
 type AgentInteractionCountArgs struct {
 	AgentId string
 }
@@ -612,7 +612,7 @@ func AgentInteractionCountBuild(args AgentInteractionCountArgs) string {
 
 // AgentOwner -- Resolve an agent's owning-user (ownerUserId / createdBy) by id.
 //
-// Bound concept: agent.
+// Bound concept: v1:agents:agent (machine-readable: BoundConcepts["agentOwner"] in generated_concepts.go).
 type AgentOwnerArgs struct {
 	AgentId string
 }
@@ -634,7 +634,7 @@ func AgentOwnerBuild(args AgentOwnerArgs) string {
 
 // AgentRoleBySlug -- Resolve a single agentRole row by its slug. Used by the role catalog seeder (idempotency check) and by the agent-creation path (look up the locked + default sets when materializing a new agent for the slug).
 //
-// Bound concept: agentRole.
+// Bound concept: v1:agents:agentRole (machine-readable: BoundConcepts["agentRoleBySlug"] in generated_concepts.go).
 type AgentRoleBySlugArgs struct {
 	Slug string
 }
@@ -656,7 +656,7 @@ func AgentRoleBySlugBuild(args AgentRoleBySlugArgs) string {
 
 // AgentRoleSlugsInUse -- Returns the roleSlug values currently occupied by non-deleted agents in this partition. Used by the create-agent UI to filter out already-taken roles.
 //
-// Bound concept: agent.
+// Bound concept: v1:agents:agent (machine-readable: BoundConcepts["agentRoleSlugsInUse"] in generated_concepts.go).
 type AgentRoleSlugsInUseArgs struct {
 }
 
@@ -673,7 +673,7 @@ func AgentRoleSlugsInUseBuild(args AgentRoleSlugsInUseArgs) string {
 
 // AllAgents -- Returns all AI agent templates regardless of active status.
 //
-// Bound concept: agent.
+// Bound concept: v1:agents:agent (machine-readable: BoundConcepts["allAgents"] in generated_concepts.go).
 type AllAgentsArgs struct {
 }
 
@@ -690,7 +690,7 @@ func AllAgentsBuild(args AllAgentsArgs) string {
 
 // AllDocumentChunkDomains -- Returns the parent domainId for every chunk in the active partition. Frontend groups + counts to render per-domain chunk counts in the Knowledge panel.
 //
-// Bound concept: documentChunk.
+// Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["allDocumentChunkDomains"] in generated_concepts.go).
 type AllDocumentChunkDomainsArgs struct {
 }
 
@@ -707,7 +707,7 @@ func AllDocumentChunkDomainsBuild(args AllDocumentChunkDomainsArgs) string {
 
 // AllNumbers -- ADMIN: every provisioned DID across all partitions, newest first. Cluster-owner gated. Backs the cockpit numbers view.
 //
-// Bound concept: number.
+// Bound concept: v1:telephony:number (machine-readable: BoundConcepts["allNumbers"] in generated_concepts.go).
 type AllNumbersArgs struct {
 }
 
@@ -724,7 +724,7 @@ func AllNumbersBuild(args AllNumbersArgs) string {
 
 // AllOutputScreenings -- Returns every v1:safety:outputScreening row. Used by the retention sweep (mirrors allSafetyClassifications); future cockpit prompt-injection dashboard will layer more targeted queries on top.
 //
-// Bound concept: outputScreening.
+// Bound concept: v1:safety:outputScreening (machine-readable: BoundConcepts["allOutputScreenings"] in generated_concepts.go).
 type AllOutputScreeningsArgs struct {
 }
 
@@ -741,7 +741,7 @@ func AllOutputScreeningsBuild(args AllOutputScreeningsArgs) string {
 
 // AllPlans -- Every Plan. Backs the global Tasks panel; the frontend pins current-space rows to the top of each lifecycle group.
 //
-// Bound concept: plan.
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["allPlans"] in generated_concepts.go).
 type AllPlansArgs struct {
 }
 
@@ -758,7 +758,7 @@ func AllPlansBuild(args AllPlansArgs) string {
 
 // AllPolicyTraces -- All persisted policy traces; the retention sweep iterates and per-row checks createdAt + retention-days < now.
 //
-// Bound concept: policyTrace.
+// Bound concept: v1:platform:policyTrace (machine-readable: BoundConcepts["allPolicyTraces"] in generated_concepts.go).
 type AllPolicyTracesArgs struct {
 }
 
@@ -775,7 +775,7 @@ func AllPolicyTracesBuild(args AllPolicyTracesArgs) string {
 
 // AllSafetyClassifications -- Returns every v1:safety:classification row. Used by the retention sweep (mirrors allPolicyTraces); future cockpit Command Safety view will layer more targeted queries on top.
 //
-// Bound concept: classification.
+// Bound concept: v1:safety:classification (machine-readable: BoundConcepts["allSafetyClassifications"] in generated_concepts.go).
 type AllSafetyClassificationsArgs struct {
 }
 
@@ -792,7 +792,7 @@ func AllSafetyClassificationsBuild(args AllSafetyClassificationsArgs) string {
 
 // ApprovalQueue -- The approval queue: validated requests awaiting owner approval. Owner only (forgeApprover).
 //
-// Bound concept: request.
+// Bound concept: v1:forge:request (machine-readable: BoundConcepts["approvalQueue"] in generated_concepts.go).
 type ApprovalQueueArgs struct {
 }
 
@@ -809,7 +809,7 @@ func ApprovalQueueBuild(args ApprovalQueueArgs) string {
 
 // ApprovalRequestById -- Returns a single v1:safety:approvalRequest by id. Backs the cockpit drill-down view (follow-up in memql-cockpit) and the `resolveApprovalRequest` read-modify-write path.
 //
-// Bound concept: approvalRequest.
+// Bound concept: v1:safety:approvalRequest (machine-readable: BoundConcepts["approvalRequestById"] in generated_concepts.go).
 type ApprovalRequestByIdArgs struct {
 	Id string
 }
@@ -831,7 +831,7 @@ func ApprovalRequestByIdBuild(args ApprovalRequestByIdArgs) string {
 
 // AssistantAgentForUser -- Resolve the active General Assistant agent owned by a user. Returns 0 or 1 rows. Used by autoJoinAI to derive a canonical agent id consistent across all callers of mutationCreateDailySpace -- the space row's ownerUserId is the same regardless of who triggered the mutation, while args.event.payload.actor (createdBy) varies. memql#273.
 //
-// Bound concept: agent.
+// Bound concept: v1:agents:agent (machine-readable: BoundConcepts["assistantAgentForUser"] in generated_concepts.go).
 type AssistantAgentForUserArgs struct {
 	OwnerUserId string
 }
@@ -853,7 +853,7 @@ func AssistantAgentForUserBuild(args AssistantAgentForUserArgs) string {
 
 // AttachmentById -- Fetch a single v1:common:attachment row by id within a space. Backs the attachment download endpoint (GET /spaces/{partitionId}/attachments/{attachmentId}); the handler gates on space ownership first.
 //
-// Bound concept: attachment.
+// Bound concept: v1:common:attachment (machine-readable: BoundConcepts["attachmentById"] in generated_concepts.go).
 type AttachmentByIdArgs struct {
 	AttachmentId string
 	PartitionId  string
@@ -881,7 +881,7 @@ func AttachmentByIdBuild(args AttachmentByIdArgs) string {
 
 // AudioOverridesForSpace -- Active audio overrides for every agent in a space. Read by the cognition handler before TTS forwarding.
 //
-// Bound concept: audioOverride.
+// Bound concept: v1:cognition:audioOverride (machine-readable: BoundConcepts["audioOverridesForSpace"] in generated_concepts.go).
 type AudioOverridesForSpaceArgs struct {
 	PartitionId string
 }
@@ -903,7 +903,7 @@ func AudioOverridesForSpaceBuild(args AudioOverridesForSpaceArgs) string {
 
 // AuditEventsByActor -- Audit events where actorUserId equals the supplied userId. Pair with auditEventsByTarget for full per-user history (no OR operator in the filter grammar yet).
 //
-// Bound concept: auditEvent.
+// Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["auditEventsByActor"] in generated_concepts.go).
 type AuditEventsByActorArgs struct {
 	UserId string
 }
@@ -925,7 +925,7 @@ func AuditEventsByActorBuild(args AuditEventsByActorArgs) string {
 
 // AuditEventsByTarget -- Audit events where targetId equals the supplied targetId. Pair with auditEventsByActor for full per-user history (no OR operator in the filter grammar yet).
 //
-// Bound concept: auditEvent.
+// Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["auditEventsByTarget"] in generated_concepts.go).
 type AuditEventsByTargetArgs struct {
 	TargetId string
 }
@@ -947,7 +947,7 @@ func AuditEventsByTargetBuild(args AuditEventsByTargetArgs) string {
 
 // AuthCodeByCodeHash -- Returns the auth code whose codeHash matches the argument. Zero or one result.
 //
-// Bound concept: authCode.
+// Bound concept: v1:identity:authCode (machine-readable: BoundConcepts["authCodeByCodeHash"] in generated_concepts.go).
 type AuthCodeByCodeHashArgs struct {
 	CodeHash string
 }
@@ -969,7 +969,7 @@ func AuthCodeByCodeHashBuild(args AuthCodeByCodeHashArgs) string {
 
 // AuthSessionByPreviousRefreshTokenHash -- Returns the auth session whose previousRefreshTokenHash matches the argument. Used by the rotator's grace-window fallback. Zero or one result.
 //
-// Bound concept: authSession.
+// Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["authSessionByPreviousRefreshTokenHash"] in generated_concepts.go).
 type AuthSessionByPreviousRefreshTokenHashArgs struct {
 	PreviousRefreshTokenHash string
 }
@@ -991,7 +991,7 @@ func AuthSessionByPreviousRefreshTokenHashBuild(args AuthSessionByPreviousRefres
 
 // AuthSessionByRefreshTokenHash -- Returns the auth session whose refreshTokenHash matches the argument. Zero or one result.
 //
-// Bound concept: authSession.
+// Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["authSessionByRefreshTokenHash"] in generated_concepts.go).
 type AuthSessionByRefreshTokenHashArgs struct {
 	RefreshTokenHash string
 }
@@ -1013,7 +1013,7 @@ func AuthSessionByRefreshTokenHashBuild(args AuthSessionByRefreshTokenHashArgs) 
 
 // AuthSessionByTokenHash -- Returns the auth session whose tokenHash matches the argument. Zero or one result.
 //
-// Bound concept: authSession.
+// Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["authSessionByTokenHash"] in generated_concepts.go).
 type AuthSessionByTokenHashArgs struct {
 	TokenHash string
 }
@@ -1035,7 +1035,7 @@ func AuthSessionByTokenHashBuild(args AuthSessionByTokenHashArgs) string {
 
 // AuthSessionsForSubject -- Returns every auth-session row owned by the given JWT subject. Latest version per row, including revoked rows.
 //
-// Bound concept: authSession.
+// Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["authSessionsForSubject"] in generated_concepts.go).
 type AuthSessionsForSubjectArgs struct {
 	Subject string
 }
@@ -1057,7 +1057,7 @@ func AuthSessionsForSubjectBuild(args AuthSessionsForSubjectArgs) string {
 
 // AuthoringBundleById -- One authoring bundle by id, scoped to the caller. Backs the gate runners + the approval (Gate 3) artifact view.
 //
-// Bound concept: bundle.
+// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["authoringBundleById"] in generated_concepts.go).
 type AuthoringBundleByIdArgs struct {
 	BundleId string
 }
@@ -1079,7 +1079,7 @@ func AuthoringBundleByIdBuild(args AuthoringBundleByIdArgs) string {
 
 // AuthoringBundleForPlan -- The bundle post-hoc captured from a given Plan (everyday-task capture path, #1161), scoped to the caller. Lets the capture orchestrator skip re-authoring a task it already captured (idempotency on a re-delivered terminal Plan event) and backs the per-task view/edit/export surface (#1162).
 //
-// Bound concept: bundle.
+// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["authoringBundleForPlan"] in generated_concepts.go).
 type AuthoringBundleForPlanArgs struct {
 	SourcePlanId string
 }
@@ -1101,7 +1101,7 @@ func AuthoringBundleForPlanBuild(args AuthoringBundleForPlanArgs) string {
 
 // AuthoringBundleForResponsibility -- The bundle compiled from a given Responsibility, scoped to the caller. Lets the planner find the existing artifact when a Responsibility is edited (to supersede rather than duplicate).
 //
-// Bound concept: bundle.
+// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["authoringBundleForResponsibility"] in generated_concepts.go).
 type AuthoringBundleForResponsibilityArgs struct {
 	ResponsibilityId string
 }
@@ -1123,7 +1123,7 @@ func AuthoringBundleForResponsibilityBuild(args AuthoringBundleForResponsibility
 
 // AuthoringBundlesForOwner -- All authoring bundles owned by the caller, newest first. Backs the 'my authored capabilities' management list.
 //
-// Bound concept: bundle.
+// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["authoringBundlesForOwner"] in generated_concepts.go).
 type AuthoringBundlesForOwnerArgs struct {
 }
 
@@ -1140,7 +1140,7 @@ func AuthoringBundlesForOwnerBuild(args AuthoringBundlesForOwnerArgs) string {
 
 // AuthoringConstructsForBundle -- All authored constructs belonging to a bundle, scoped to the caller. Backs the gate runners (compile/bind the whole closure) + the runtime register/unregister path.
 //
-// Bound concept: construct.
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["authoringConstructsForBundle"] in generated_concepts.go).
 type AuthoringConstructsForBundleArgs struct {
 	BundleId string
 }
@@ -1162,7 +1162,7 @@ func AuthoringConstructsForBundleBuild(args AuthoringConstructsForBundleArgs) st
 
 // AvatarPersonaById -- Resolve a single avatar persona by id. Hydrates an agent's stamped avatarPersonaId for display and resolves the vendor + vendor-issued personaId.
 //
-// Bound concept: avatarPersona.
+// Bound concept: v1:agents:avatarPersona (machine-readable: BoundConcepts["avatarPersonaById"] in generated_concepts.go).
 type AvatarPersonaByIdArgs struct {
 	AvatarPersonaId string
 }
@@ -1184,7 +1184,7 @@ func AvatarPersonaByIdBuild(args AvatarPersonaByIdArgs) string {
 
 // AvatarPersonas -- List active avatar personas in the operator catalog (memql#609). Backs the Create-Assistant persona picker (frontend#239); the SPA filters to the user's selected gender client-side over this small catalog. `vendor` is an OPTIONAL filter -- omit it to list every active persona across vendors; pass vendor=\"simli\" to scope to custom Simli avatars (memql#1708: the predicate was a hardcoded vendor==simli that silently dropped every other vendor's personas from the list, even though by-id reads returned them). Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql.
 //
-// Bound concept: avatarPersona.
+// Bound concept: v1:agents:avatarPersona (machine-readable: BoundConcepts["avatarPersonas"] in generated_concepts.go).
 type AvatarPersonasArgs struct {
 	// Optional vendor filter. Omit to list every active persona; pass to scope to one vendor.
 	// Enum: anam | simli
@@ -1210,7 +1210,7 @@ func AvatarPersonasBuild(args AvatarPersonasArgs) string {
 
 // AwaitingFeedbackPlansPastTimeout -- Plans in awaitingFeedback whose feedbackRequest.timeoutAt is in the past. Backs feedbackTimeoutAutoPause.
 //
-// Bound concept: plan.
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["awaitingFeedbackPlansPastTimeout"] in generated_concepts.go).
 type AwaitingFeedbackPlansPastTimeoutArgs struct {
 }
 
@@ -1227,7 +1227,7 @@ func AwaitingFeedbackPlansPastTimeoutBuild(args AwaitingFeedbackPlansPastTimeout
 
 // CalendarEventById -- Get a single calendar event by node id. Self-scoped: the ownerUserId==actor.userId predicate guarantees a caller can only fetch their own events. Backs the calendar tool's update/delete pre-read and the event detail view.
 //
-// Bound concept: calendarEvent.
+// Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["calendarEventById"] in generated_concepts.go).
 type CalendarEventByIdArgs struct {
 	EventId string
 }
@@ -1249,7 +1249,7 @@ func CalendarEventByIdBuild(args CalendarEventByIdArgs) string {
 
 // CallsByNumber -- ADMIN: call records that touched a specific DID (as caller or callee), newest first. Cluster-owner gated.
 //
-// Bound concept: call.
+// Bound concept: v1:telephony:call (machine-readable: BoundConcepts["callsByNumber"] in generated_concepts.go).
 type CallsByNumberArgs struct {
 	E164 string
 }
@@ -1271,7 +1271,7 @@ func CallsByNumberBuild(args CallsByNumberArgs) string {
 
 // CallsByPartition -- ADMIN: call records for a partition, newest first. Cluster-owner gated. Powers billing + observability.
 //
-// Bound concept: call.
+// Bound concept: v1:telephony:call (machine-readable: BoundConcepts["callsByPartition"] in generated_concepts.go).
 type CallsByPartitionArgs struct {
 	PartitionId string
 }
@@ -1293,7 +1293,7 @@ func CallsByPartitionBuild(args CallsByPartitionArgs) string {
 
 // CapabilitiesForResourceType -- List every active capability across all roles for a single resource type -- e.g. 'who can do anything to a principal?'. Backs the cockpit's per-resource RBAC audit view and lets E1.3 governance reason about all principal-targeting grants in one read. Bounded to the (small) set of grants naming that resource type.
 //
-// Bound concept: capability.
+// Bound concept: v1:rbac:capability (machine-readable: BoundConcepts["capabilitiesForResourceType"] in generated_concepts.go).
 type CapabilitiesForResourceTypeArgs struct {
 	ResourceType string
 }
@@ -1315,7 +1315,7 @@ func CapabilitiesForResourceTypeBuild(args CapabilitiesForResourceTypeArgs) stri
 
 // CapabilitiesForRole -- List the active capability grants for a single role, by its slug. The per-role grant set whose union IS the role's effective authorization. E1.6's resolver calls this (or reads it out of the warmed activeCapabilities cache) to answer 'does role R hold an allow for (verb,resourceType) with no overriding deny?'. roleSlug is a plain string FK into the role catalog (E1.2, memql#2070).
 //
-// Bound concept: capability.
+// Bound concept: v1:rbac:capability (machine-readable: BoundConcepts["capabilitiesForRole"] in generated_concepts.go).
 type CapabilitiesForRoleArgs struct {
 	RoleSlug string
 }
@@ -1337,7 +1337,7 @@ func CapabilitiesForRoleBuild(args CapabilitiesForRoleArgs) string {
 
 // CapabilityGrant -- Resolve the active capability rows for a single (role, verb, resourceType) triple. The precise lookup an enforcement decision needs: if it returns an allow row and no deny row, the role is granted that verb on that resource type. Returns a (usually tiny) row set rather than a single row because a role may legally carry both an allow and an overriding deny for the same triple -- the resolver inspects effect to decide.
 //
-// Bound concept: capability.
+// Bound concept: v1:rbac:capability (machine-readable: BoundConcepts["capabilityGrant"] in generated_concepts.go).
 type CapabilityGrantArgs struct {
 	RoleSlug     string
 	Verb         string
@@ -1371,7 +1371,7 @@ func CapabilityGrantBuild(args CapabilityGrantArgs) string {
 
 // CataloguedConstructsForOwner -- The caller's cataloged (reusable) constructs. Backs the compose-first matcher (#957): the planner searches these before authoring a net-new dependency.
 //
-// Bound concept: construct.
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["cataloguedConstructsForOwner"] in generated_concepts.go).
 type CataloguedConstructsForOwnerArgs struct {
 }
 
@@ -1388,7 +1388,7 @@ func CataloguedConstructsForOwnerBuild(args CataloguedConstructsForOwnerArgs) st
 
 // ClusterNodeTypes -- Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...)
 //
-// Bound concept: nodeType.
+// Bound concept: v1:cluster:nodeType (machine-readable: BoundConcepts["clusterNodeTypes"] in generated_concepts.go).
 type ClusterNodeTypesArgs struct {
 }
 
@@ -1405,7 +1405,7 @@ func ClusterNodeTypesBuild(args ClusterNodeTypesArgs) string {
 
 // ClusterNodes -- Returns all cluster node rows (CLI dedupes to latest per id)
 //
-// Bound concept: node.
+// Bound concept: v1:cluster:node (machine-readable: BoundConcepts["clusterNodes"] in generated_concepts.go).
 type ClusterNodesArgs struct {
 }
 
@@ -1422,7 +1422,7 @@ func ClusterNodesBuild(args ClusterNodesArgs) string {
 
 // ClusterSettingsCurrent -- Latest singleton cluster-settings row, pinned to id=cluster.
 //
-// Bound concept: clusterSettings.
+// Bound concept: v1:identity:clusterSettings (machine-readable: BoundConcepts["clusterSettingsCurrent"] in generated_concepts.go).
 type ClusterSettingsCurrentArgs struct {
 }
 
@@ -1439,7 +1439,7 @@ func ClusterSettingsCurrentBuild(args ClusterSettingsCurrentArgs) string {
 
 // ClusterSpawnEvents -- Returns all cluster spawn events
 //
-// Bound concept: spawnEvent.
+// Bound concept: v1:cluster:spawnEvent (machine-readable: BoundConcepts["clusterSpawnEvents"] in generated_concepts.go).
 type ClusterSpawnEventsArgs struct {
 }
 
@@ -1456,7 +1456,7 @@ func ClusterSpawnEventsBuild(args ClusterSpawnEventsArgs) string {
 
 // ConsentOptOut -- Opt-out rows for an external number (newest first). Read in the outbound call path to block calls to opted-out numbers (TCPA). Not owner-gated: the enforcement check runs in the agent/call context, not an admin one.
 //
-// Bound concept: consent.
+// Bound concept: v1:telephony:consent (machine-readable: BoundConcepts["consentOptOut"] in generated_concepts.go).
 type ConsentOptOutArgs struct {
 	PhoneNumber string
 }
@@ -1478,7 +1478,7 @@ func ConsentOptOutBuild(args ConsentOptOutArgs) string {
 
 // CurrentUser -- Get the authenticated caller's own user record. Self-scoped via actor.userId (no args) -- the caller cannot read another user's row.
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["currentUser"] in generated_concepts.go).
 type CurrentUserArgs struct {
 }
 
@@ -1495,7 +1495,7 @@ func CurrentUserBuild(args CurrentUserArgs) string {
 
 // DelegationsByIdentity -- Get all delegations (active and revoked) for a given identity ID
 //
-// Bound concept: delegation.
+// Bound concept: v1:identity:delegation (machine-readable: BoundConcepts["delegationsByIdentity"] in generated_concepts.go).
 type DelegationsByIdentityArgs struct {
 	IdentityId string
 }
@@ -1517,7 +1517,7 @@ func DelegationsByIdentityBuild(args DelegationsByIdentityArgs) string {
 
 // DependencyEdgesForBundle -- All dependency edges declared by a bundle (what it depends on), scoped to the caller. Backs dependency-closure inspection for a bundle.
 //
-// Bound concept: dependencyEdge.
+// Bound concept: v1:authoring:dependencyEdge (machine-readable: BoundConcepts["dependencyEdgesForBundle"] in generated_concepts.go).
 type DependencyEdgesForBundleArgs struct {
 	BundleId string
 }
@@ -1539,7 +1539,7 @@ func DependencyEdgesForBundleBuild(args DependencyEdgesForBundleArgs) string {
 
 // DependencyEdgesForOwner -- Every dependency edge owned by the caller. Backs a full dependency-graph view.
 //
-// Bound concept: dependencyEdge.
+// Bound concept: v1:authoring:dependencyEdge (machine-readable: BoundConcepts["dependencyEdgesForOwner"] in generated_concepts.go).
 type DependencyEdgesForOwnerArgs struct {
 }
 
@@ -1556,7 +1556,7 @@ func DependencyEdgesForOwnerBuild(args DependencyEdgesForOwnerArgs) string {
 
 // DependentsOfConstruct -- IMPACT ANALYSIS (#957): every edge that depends ON a given construct, scoped to the caller. The dependents to re-validate before changing a shared / cataloged construct. The caller joins bundleId -> v1:authoring:bundle to filter to ACTIVE dependents.
 //
-// Bound concept: dependencyEdge.
+// Bound concept: v1:authoring:dependencyEdge (machine-readable: BoundConcepts["dependentsOfConstruct"] in generated_concepts.go).
 type DependentsOfConstructArgs struct {
 	ToName string
 	ToKind string
@@ -1584,7 +1584,7 @@ func DependentsOfConstructBuild(args DependentsOfConstructArgs) string {
 
 // DeploymentById -- All status-transition rows for one deployment, by deploymentId, oldest-to-newest (full lifecycle history; reconstructable asOf any time). #1872.
 //
-// Bound concept: deployment.
+// Bound concept: v1:cluster:deployment (machine-readable: BoundConcepts["deploymentById"] in generated_concepts.go).
 type DeploymentByIdArgs struct {
 	DeploymentId string
 }
@@ -1606,7 +1606,7 @@ func DeploymentByIdBuild(args DeploymentByIdArgs) string {
 
 // DeploymentsForCluster -- Deployment history for a cluster: latest-per-deploymentId rows (asOf latest -> current status per deployment) filtered to a clusterId. Backs the cockpit Deployments history list (consumer sorts newest-first by createdAt). #1872.
 //
-// Bound concept: deployment.
+// Bound concept: v1:cluster:deployment (machine-readable: BoundConcepts["deploymentsForCluster"] in generated_concepts.go).
 type DeploymentsForClusterArgs struct {
 	ClusterId string
 }
@@ -1628,7 +1628,7 @@ func DeploymentsForClusterBuild(args DeploymentsForClusterArgs) string {
 
 // DetectConflicts -- Find confirmed records that may conflict with a new record by natural key + record type
 //
-// Bound concept: record.
+// Bound concept: v1:data:record (machine-readable: BoundConcepts["detectConflicts"] in generated_concepts.go).
 type DetectConflictsArgs struct {
 	PartitionId     string
 	NaturalKeyValue string
@@ -1662,7 +1662,7 @@ func DetectConflictsBuild(args DetectConflictsArgs) string {
 
 // DocumentChunksForDomain -- Every documentChunk attached to a knowledge domain, full shape. Consumed by the trainSpecialist dispatcher for the Trainer Agent's mode='refresh' existingCorpus (read-what's-there-now-to-decide-what-to-supersede).
 //
-// Bound concept: documentChunk.
+// Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["documentChunksForDomain"] in generated_concepts.go).
 type DocumentChunksForDomainArgs struct {
 	DomainId string
 }
@@ -1684,7 +1684,7 @@ func DocumentChunksForDomainBuild(args DocumentChunksForDomainArgs) string {
 
 // DocumentVersionById -- Fetch a single document version's FULL content (immutable body / attachment + provenance) by its version row id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard. Backs the 'open this version' viewer and the restore-source read (memql#1230).
 //
-// Bound concept: documentVersion.
+// Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["documentVersionById"] in generated_concepts.go).
 type DocumentVersionByIdArgs struct {
 	VersionId string
 }
@@ -1706,7 +1706,7 @@ func DocumentVersionByIdBuild(args DocumentVersionByIdArgs) string {
 
 // DocumentVersions -- List the append-only version history of a logical document (every retained version, summary projection -- versionNumber, authorKind, author, note, createdAt -- WITHOUT the full body). Owned: ownerUserId==actor.userId gates the row set; payload.documentId narrows to the one document. Backs the Library history drawer (memql#1230); the frontend orders by versionNumber. Each version is a distinct retained row, so no version is ever lost.
 //
-// Bound concept: documentVersion.
+// Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["documentVersions"] in generated_concepts.go).
 type DocumentVersionsArgs struct {
 	DocumentId string
 }
@@ -1728,7 +1728,7 @@ func DocumentVersionsBuild(args DocumentVersionsArgs) string {
 
 // DocumentVersionsForOwner -- Internal read for the edit/restore handlers: the full version history of a document (full projection) so the handler can compute the next versionNumber + the parentVersionId from the current latest. Owned: ownerUserId==actor.userId; the handler runs under a threaded owner actor. Mirrors documentVersions' filter with the full content shape.
 //
-// Bound concept: documentVersion.
+// Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["documentVersionsForOwner"] in generated_concepts.go).
 type DocumentVersionsForOwnerArgs struct {
 	DocumentId string
 }
@@ -1750,7 +1750,7 @@ func DocumentVersionsForOwnerBuild(args DocumentVersionsForOwnerArgs) string {
 
 // DueResponsibilities -- The caller's active + enabled responsibilities of a given trigger archetype (recurring or reactive) -- the candidate set the reactive-loop evaluator (epic #632) checks for due-ness. Owned tier (ownerUserId == actor.userId). Cron-due / condition-match filtering happens Go-side (no OR operator + no cron arithmetic in the filter), mirroring queryDueRefreshDomains.
 //
-// Bound concept: responsibility.
+// Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["dueResponsibilities"] in generated_concepts.go).
 type DueResponsibilitiesArgs struct {
 	// Enum: reactive | recurring
 	Trigger string
@@ -1773,7 +1773,7 @@ func DueResponsibilitiesBuild(args DueResponsibilitiesArgs) string {
 
 // EventsByDay -- List the authenticated caller's events that start on a given day, bounded by the caller-supplied [dayStart, dayEnd] instants (computed in the user's timezone client-side). Self-scoped via actor.userId. Backs the calendar tool's day view and 'what's on my schedule today' agent queries.
 //
-// Bound concept: calendarEvent.
+// Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["eventsByDay"] in generated_concepts.go).
 type EventsByDayArgs struct {
 	// Inclusive start-of-day instant in the user's timezone (e.g. 2026-06-01T00:00:00-07:00).
 	DayStart string
@@ -1803,7 +1803,7 @@ func EventsByDayBuild(args EventsByDayArgs) string {
 
 // ExistingCluster -- Returns the existing cluster record, if any
 //
-// Bound concept: cluster.
+// Bound concept: v1:cluster:cluster (machine-readable: BoundConcepts["existingCluster"] in generated_concepts.go).
 type ExistingClusterArgs struct {
 }
 
@@ -1820,7 +1820,7 @@ func ExistingClusterBuild(args ExistingClusterArgs) string {
 
 // ExpiredActiveDelegations -- Active delegations whose expiresAt is before the supplied cutoff.
 //
-// Bound concept: delegation.
+// Bound concept: v1:identity:delegation (machine-readable: BoundConcepts["expiredActiveDelegations"] in generated_concepts.go).
 type ExpiredActiveDelegationsArgs struct {
 	// RFC3339 evaluation instant the caller passes (usually the ambient now). Renamed from `now` -- args fields may not shadow reserved engine names (S6 #2361).
 	AsOf string
@@ -1843,7 +1843,7 @@ func ExpiredActiveDelegationsBuild(args ExpiredActiveDelegationsArgs) string {
 
 // ExpiredAuditEvents -- All audit events; the retention sweep iterates and per-row checks occurredAt + retention-days < now.
 //
-// Bound concept: auditEvent.
+// Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["expiredAuditEvents"] in generated_concepts.go).
 type ExpiredAuditEventsArgs struct {
 }
 
@@ -1860,7 +1860,7 @@ func ExpiredAuditEventsBuild(args ExpiredAuditEventsArgs) string {
 
 // ExpiredConsumedAuthCodes -- CONSUMED auth codes whose expiresAt is before the supplied cutoff. Both predicates are load-bearing: the name says `Consumed`, so the consumedAt gate (memql#1714) keeps the result set to spent-then-expired codes and never sweeps an unspent-but-expired code that a redemption is still racing against.
 //
-// Bound concept: authCode.
+// Bound concept: v1:identity:authCode (machine-readable: BoundConcepts["expiredConsumedAuthCodes"] in generated_concepts.go).
 type ExpiredConsumedAuthCodesArgs struct {
 	// RFC3339 evaluation instant the caller passes (usually the ambient now). Renamed from `now` -- args fields may not shadow reserved engine names (S6 #2361).
 	AsOf string
@@ -1883,7 +1883,7 @@ func ExpiredConsumedAuthCodesBuild(args ExpiredConsumedAuthCodesArgs) string {
 
 // ExpiredMagicLinkRequests -- Magic-link requests whose expiresAt is before the supplied cutoff.
 //
-// Bound concept: magicLinkRequest.
+// Bound concept: v1:identity:magicLinkRequest (machine-readable: BoundConcepts["expiredMagicLinkRequests"] in generated_concepts.go).
 type ExpiredMagicLinkRequestsArgs struct {
 	// RFC3339 evaluation instant the caller passes (usually the ambient now). Renamed from `now` -- args fields may not shadow reserved engine names (S6 #2361).
 	AsOf string
@@ -1906,7 +1906,7 @@ func ExpiredMagicLinkRequestsBuild(args ExpiredMagicLinkRequestsArgs) string {
 
 // ExpiredPendingAccessRequests -- Pending access requests; the expiry sweep iterates these and per-row checks createdAt + expiry-days < now.
 //
-// Bound concept: accessRequest.
+// Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["expiredPendingAccessRequests"] in generated_concepts.go).
 type ExpiredPendingAccessRequestsArgs struct {
 	// Optional RFC3339 cutoff; when set, only pending requests created strictly before it are returned. The expiry sweep's logic computes it (now - IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS) and pushes it down (#2369).
 	CreatedBefore string
@@ -1931,7 +1931,7 @@ func ExpiredPendingAccessRequestsBuild(args ExpiredPendingAccessRequestsArgs) st
 
 // ExpiredWorkerInvocations -- List worker invocation rows for retention pruning. When createdBefore is supplied, restricts to rows created strictly before it -- the retention sweep's logic computes the cutoff (now - WORKER_INVOCATION_RETENTION_DAYS) and pushes it down (#2369).
 //
-// Bound concept: invocation.
+// Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["expiredWorkerInvocations"] in generated_concepts.go).
 type ExpiredWorkerInvocationsArgs struct {
 	// Optional RFC3339 cutoff; when set, only rows whose createdAt is strictly before it are returned.
 	CreatedBefore string
@@ -1956,7 +1956,7 @@ func ExpiredWorkerInvocationsBuild(args ExpiredWorkerInvocationsArgs) string {
 
 // FeedbackAnnouncementForPlan -- Check if the assistant already posted the awaitingFeedback announcement for a Plan (dedup behind the cross-replica announce gate, #1406).
 //
-// Bound concept: utterance.
+// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["feedbackAnnouncementForPlan"] in generated_concepts.go).
 type FeedbackAnnouncementForPlanArgs struct {
 	PlanId string
 }
@@ -1978,7 +1978,7 @@ func FeedbackAnnouncementForPlanBuild(args FeedbackAnnouncementForPlanArgs) stri
 
 // FindEvents -- Find the caller's own events by exact title. Self-scoped via actor.userId. Backs the calendar tool's `find` action ('find my dentist appointment'); the agent passes the title it captured. Exact match keeps the predicate SQL-pushdownable -- substring / semantic search is a downstream concern (the agent can list a window via upcomingEvents and filter conversationally).
 //
-// Bound concept: calendarEvent.
+// Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["findEvents"] in generated_concepts.go).
 type FindEventsArgs struct {
 	// Exact event title to match against title.
 	Title string
@@ -2001,7 +2001,7 @@ func FindEventsBuild(args FindEventsArgs) string {
 
 // GeneratedOutputById -- Drill-in read: fetch a generated-output's full content (inline body or attachment ref) by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library viewer when opening a generated_output artifact resolved from its sourceConceptRef.
 //
-// Bound concept: generatedOutput.
+// Bound concept: v1:library:generatedOutput (machine-readable: BoundConcepts["generatedOutputById"] in generated_concepts.go).
 type GeneratedOutputByIdArgs struct {
 	OutputId string
 }
@@ -2023,7 +2023,7 @@ func GeneratedOutputByIdBuild(args GeneratedOutputByIdArgs) string {
 
 // GeneratedOutputsForPlan -- List the generated-output rows a Plan produced. Owned: ownerUserId==actor.userId. The planner reads this as the authoritative 'did the deliverable actually get written?' signal for a produceArtifact plan -- promoteWorkbenchOutput stamps producedByPlanId on the row when a workbench fs_write is promoted. The planner stamps the plan's owner as actor before calling, so the read stays inside the owned-row authz model. (memql#939)
 //
-// Bound concept: generatedOutput.
+// Bound concept: v1:library:generatedOutput (machine-readable: BoundConcepts["generatedOutputsForPlan"] in generated_concepts.go).
 type GeneratedOutputsForPlanArgs struct {
 	PlanId string
 }
@@ -2045,7 +2045,7 @@ func GeneratedOutputsForPlanBuild(args GeneratedOutputsForPlanArgs) string {
 
 // GlobalVariable -- Get a single instance-wide configuration variable by name (v1:platform:globalVariable)
 //
-// Bound concept: globalVariable.
+// Bound concept: v1:platform:globalVariable (machine-readable: BoundConcepts["globalVariable"] in generated_concepts.go).
 type GlobalVariableArgs struct {
 	Name string
 }
@@ -2067,7 +2067,7 @@ func GlobalVariableBuild(args GlobalVariableArgs) string {
 
 // GlobalVariables -- Get multiple instance-wide configuration variables by name list (v1:platform:globalVariable)
 //
-// Bound concept: globalVariable.
+// Bound concept: v1:platform:globalVariable (machine-readable: BoundConcepts["globalVariables"] in generated_concepts.go).
 type GlobalVariablesArgs struct {
 	Names []any
 }
@@ -2089,7 +2089,7 @@ func GlobalVariablesBuild(args GlobalVariablesArgs) string {
 
 // GreetingUtterance -- Check if a greeting utterance already exists for an agent in a space
 //
-// Bound concept: utterance.
+// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["greetingUtterance"] in generated_concepts.go).
 type GreetingUtteranceArgs struct {
 	PartitionId string
 	AgentId     string
@@ -2117,7 +2117,7 @@ func GreetingUtteranceBuild(args GreetingUtteranceArgs) string {
 
 // GroupGAForSpace -- Active AI (group GA) participant for a space. Callers must pass the canonical partitionId.
 //
-// Bound concept: participant.
+// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["groupGAForSpace"] in generated_concepts.go).
 type GroupGAForSpaceArgs struct {
 	PartitionId string
 }
@@ -2139,7 +2139,7 @@ func GroupGAForSpaceBuild(args GroupGAForSpaceArgs) string {
 
 // HasAIResponseForReply -- Check if an AI response already exists for a given utterance (idempotency check).
 //
-// Bound concept: utterance.
+// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["hasAIResponseForReply"] in generated_concepts.go).
 type HasAIResponseForReplyArgs struct {
 	ReplyToId     string
 	ParticipantId string
@@ -2167,7 +2167,7 @@ func HasAIResponseForReplyBuild(args HasAIResponseForReplyArgs) string {
 
 // HistoricalPlanMetrics -- Succeeded Plans of a kind, with metrics, for estimation bucket queries.
 //
-// Bound concept: plan.
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["historicalPlanMetrics"] in generated_concepts.go).
 type HistoricalPlanMetricsArgs struct {
 	PlanKind string
 }
@@ -2189,7 +2189,7 @@ func HistoricalPlanMetricsBuild(args HistoricalPlanMetricsArgs) string {
 
 // InvitationById -- Returns the invitation with the given id. Zero or one result.
 //
-// Bound concept: invitation.
+// Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["invitationById"] in generated_concepts.go).
 type InvitationByIdArgs struct {
 	InvitationId string
 }
@@ -2211,7 +2211,7 @@ func InvitationByIdBuild(args InvitationByIdArgs) string {
 
 // InvitationByPreviousTokenHash -- Returns the invitation whose previousTokenHash matches the argument. Used by the resolve handler to label rotated-out links as `superseded` rather than `invalid`. See memql#108.
 //
-// Bound concept: invitation.
+// Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["invitationByPreviousTokenHash"] in generated_concepts.go).
 type InvitationByPreviousTokenHashArgs struct {
 	TokenHash string
 }
@@ -2233,7 +2233,7 @@ func InvitationByPreviousTokenHashBuild(args InvitationByPreviousTokenHashArgs) 
 
 // InvitationByTokenHash -- Returns the invitation whose tokenHash matches the argument. Zero or one result.
 //
-// Bound concept: invitation.
+// Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["invitationByTokenHash"] in generated_concepts.go).
 type InvitationByTokenHashArgs struct {
 	TokenHash string
 }
@@ -2255,7 +2255,7 @@ func InvitationByTokenHashBuild(args InvitationByTokenHashArgs) string {
 
 // InvocationsForPlan -- List all worker invocations belonging to a Plan.
 //
-// Bound concept: invocation.
+// Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["invocationsForPlan"] in generated_concepts.go).
 type InvocationsForPlanArgs struct {
 	PlanId string
 }
@@ -2277,7 +2277,7 @@ func InvocationsForPlanBuild(args InvocationsForPlanArgs) string {
 
 // InvocationsForUser -- List worker invocations belonging to a user.
 //
-// Bound concept: invocation.
+// Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["invocationsForUser"] in generated_concepts.go).
 type InvocationsForUserArgs struct {
 	OwnerUserId string
 }
@@ -2299,7 +2299,7 @@ func InvocationsForUserBuild(args InvocationsForUserArgs) string {
 
 // LibraryArtifactById -- Fetch a single Library artifact index row by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content.
 //
-// Bound concept: artifact.
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactById"] in generated_concepts.go).
 type LibraryArtifactByIdArgs struct {
 	ArtifactId string
 }
@@ -2321,7 +2321,7 @@ func LibraryArtifactByIdBuild(args LibraryArtifactByIdArgs) string {
 
 // LibraryArtifacts -- List the caller's entire Library (artifacts + records). Owned: the row set is gated by ownerUserId==actor.userId server-side. The default Library read; the panel filters by lens / kind and searches client-side over this set, or calls the narrower facet queries below when a single facet dominates.
 //
-// Bound concept: artifact.
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifacts"] in generated_concepts.go).
 type LibraryArtifactsArgs struct {
 }
 
@@ -2338,7 +2338,7 @@ func LibraryArtifactsBuild(args LibraryArtifactsArgs) string {
 
 // LibraryArtifactsByKind -- List the caller's Library rows of one kind (document / generated_output / note / todo / calendar_event / memory / live_source) -- backs the kind facet filter. Owned: ownerUserId==actor.userId gates the row set; payload.kind narrows to the selected kind.
 //
-// Bound concept: artifact.
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsByKind"] in generated_concepts.go).
 type LibraryArtifactsByKindArgs struct {
 	Kind string
 }
@@ -2360,7 +2360,7 @@ func LibraryArtifactsByKindBuild(args LibraryArtifactsByKindArgs) string {
 
 // LibraryArtifactsByLens -- List the caller's Library rows for one lens (artifact | record) -- backs the Artifacts | Records toggle. Owned: ownerUserId==actor.userId gates the row set; payload.lens narrows to the selected lens.
 //
-// Bound concept: artifact.
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsByLens"] in generated_concepts.go).
 type LibraryArtifactsByLensArgs struct {
 	Lens string
 }
@@ -2382,7 +2382,7 @@ func LibraryArtifactsByLensBuild(args LibraryArtifactsByLensArgs) string {
 
 // LibraryWorkspaceLiveSources -- List the partition's workspace-scoped live sources for the Library Records lens. Non-owned by design: workspace liveSources have no single owner (empty ownerUserId), so this reads kind=live_source AND scope=workspace with no caller gate and the frontend merges it into the owned Records results. Private live sources are excluded here -- they surface through the owner-gated queries. See the @public justification above (#723).
 //
-// Bound concept: artifact.
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryWorkspaceLiveSources"] in generated_concepts.go).
 type LibraryWorkspaceLiveSourcesArgs struct {
 }
 
@@ -2399,7 +2399,7 @@ func LibraryWorkspaceLiveSourcesBuild(args LibraryWorkspaceLiveSourcesArgs) stri
 
 // MagicLinkRequestByTokenHash -- Returns the magic-link request whose tokenHash matches the argument. Zero or one result.
 //
-// Bound concept: magicLinkRequest.
+// Bound concept: v1:identity:magicLinkRequest (machine-readable: BoundConcepts["magicLinkRequestByTokenHash"] in generated_concepts.go).
 type MagicLinkRequestByTokenHashArgs struct {
 	TokenHash string
 }
@@ -2421,7 +2421,7 @@ func MagicLinkRequestByTokenHashBuild(args MagicLinkRequestByTokenHashArgs) stri
 
 // MemoryById -- Drill-in read: fetch a memory's full content by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library Records lens when opening a memory artifact resolved from its sourceConceptRef.
 //
-// Bound concept: memory.
+// Bound concept: v1:library:memory (machine-readable: BoundConcepts["memoryById"] in generated_concepts.go).
 type MemoryByIdArgs struct {
 	MemoryId string
 }
@@ -2443,7 +2443,7 @@ func MemoryByIdBuild(args MemoryByIdArgs) string {
 
 // MissingCapabilitiesByStatus -- Per Q7: list missingCapability rows by status, sorted by sightingCount desc. Backs the platform-roadmap prioritization view -- 'most-requested capabilities that the platform doesn't yet support'. Status filter: 'open' for active backlog, 'in_progress' / 'resolved' / 'wontfix' for the audit view.
 //
-// Bound concept: missingCapability.
+// Bound concept: v1:platform:missingCapability (machine-readable: BoundConcepts["missingCapabilitiesByStatus"] in generated_concepts.go).
 type MissingCapabilitiesByStatusArgs struct {
 	Status string
 }
@@ -2465,7 +2465,7 @@ func MissingCapabilitiesByStatusBuild(args MissingCapabilitiesByStatusArgs) stri
 
 // MissingCapabilityByKindAndName -- Per Q7: dedup lookup the Planner Agent runs before logging a new sighting. Returns the existing row (if any) for the (kind, capability) pair so the Planner can call bumpMissingCapabilitySighting instead of creating a duplicate row.
 //
-// Bound concept: missingCapability.
+// Bound concept: v1:platform:missingCapability (machine-readable: BoundConcepts["missingCapabilityByKindAndName"] in generated_concepts.go).
 type MissingCapabilityByKindAndNameArgs struct {
 	Kind       string
 	Capability string
@@ -2493,7 +2493,7 @@ func MissingCapabilityByKindAndNameBuild(args MissingCapabilityByKindAndNameArgs
 
 // MyRequests -- List the caller's own submitted requests, newest-first. Open to any team member.
 //
-// Bound concept: request.
+// Bound concept: v1:forge:request (machine-readable: BoundConcepts["myRequests"] in generated_concepts.go).
 type MyRequestsArgs struct {
 }
 
@@ -2510,7 +2510,7 @@ func MyRequestsBuild(args MyRequestsArgs) string {
 
 // NodeSpecsForDeployment -- Latest-per-(deploymentId, nodeType) deploymentNodeSpec rows for one deploymentId -- the deployment's current per-node-type spec set (version / replicas / imageDigest). asOf latest collapses the append-only spec stream to current state per node type. Engine-as-spine resolution of an empty version is the consumer's job. Epic 2 / #2094.
 //
-// Bound concept: deploymentNodeSpec.
+// Bound concept: v1:cluster:deploymentNodeSpec (machine-readable: BoundConcepts["nodeSpecsForDeployment"] in generated_concepts.go).
 type NodeSpecsForDeploymentArgs struct {
 	DeploymentId string
 }
@@ -2532,7 +2532,7 @@ func NodeSpecsForDeploymentBuild(args NodeSpecsForDeploymentArgs) string {
 
 // NodeTokenIdentities -- List every node_token identity across the cluster (active + inactive). memql#343.
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["nodeTokenIdentities"] in generated_concepts.go).
 type NodeTokenIdentitiesArgs struct {
 }
 
@@ -2549,7 +2549,7 @@ func NodeTokenIdentitiesBuild(args NodeTokenIdentitiesArgs) string {
 
 // NodeTokenIdentityByBinding -- Lookup a node_token identity by its (nodeType, nodeId) binding. memql#343.
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["nodeTokenIdentityByBinding"] in generated_concepts.go).
 type NodeTokenIdentityByBindingArgs struct {
 	NodeType string
 	NodeId   string
@@ -2577,7 +2577,7 @@ func NodeTokenIdentityByBindingBuild(args NodeTokenIdentityByBindingArgs) string
 
 // NodeTokenIdentityById -- Lookup a single node_token identity row by canonical id. Drives the admin revoke path. memql#350.
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["nodeTokenIdentityById"] in generated_concepts.go).
 type NodeTokenIdentityByIdArgs struct {
 	IdentityId string
 }
@@ -2599,7 +2599,7 @@ func NodeTokenIdentityByIdBuild(args NodeTokenIdentityByIdArgs) string {
 
 // NodesForDeployment -- Latest-per-id cluster node rows for one deploymentId -- the live topology of that deployment (#1873). asOf latest collapses the append-only node stream to current state per node.
 //
-// Bound concept: node.
+// Bound concept: v1:cluster:node (machine-readable: BoundConcepts["nodesForDeployment"] in generated_concepts.go).
 type NodesForDeploymentArgs struct {
 	DeploymentId string
 }
@@ -2621,7 +2621,7 @@ func NodesForDeploymentBuild(args NodesForDeploymentArgs) string {
 
 // NodesNotInDeployment -- Latest-per-id cluster nodes whose deploymentId != the supplied current deployment -- orphans from a previous deploy (feeds the reaper #1874 + cockpit orphan highlight). #1873.
 //
-// Bound concept: node.
+// Bound concept: v1:cluster:node (machine-readable: BoundConcepts["nodesNotInDeployment"] in generated_concepts.go).
 type NodesNotInDeploymentArgs struct {
 	DeploymentId string
 }
@@ -2643,7 +2643,7 @@ func NodesNotInDeploymentBuild(args NodesNotInDeploymentArgs) string {
 
 // NoteById -- Fetch a single note by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's note even with its id. Used by the update tool to confirm the row exists before re-inserting a new version.
 //
-// Bound concept: note.
+// Bound concept: v1:notes:note (machine-readable: BoundConcepts["noteById"] in generated_concepts.go).
 type NoteByIdArgs struct {
 	NoteId string
 }
@@ -2665,7 +2665,7 @@ func NoteByIdBuild(args NoteByIdArgs) string {
 
 // Notes -- List the caller's notes. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible.
 //
-// Bound concept: note.
+// Bound concept: v1:notes:note (machine-readable: BoundConcepts["notes"] in generated_concepts.go).
 type NotesArgs struct {
 }
 
@@ -2682,7 +2682,7 @@ func NotesBuild(args NotesArgs) string {
 
 // NotesByTag -- Search the caller's notes by tag. Owned: ownerUserId==actor.userId gates the row set server-side; the tag predicate narrows to notes carrying the given tag. Body substring matching is done client-side over this caller-scoped result so the search never leaks across users.
 //
-// Bound concept: note.
+// Bound concept: v1:notes:note (machine-readable: BoundConcepts["notesByTag"] in generated_concepts.go).
 type NotesByTagArgs struct {
 	Tag string
 }
@@ -2704,7 +2704,7 @@ func NotesByTagBuild(args NotesByTagArgs) string {
 
 // NumberByE164 -- Resolve an owned DID row by its E.164 (newest first). Used to set E911 / compliance state by number.
 //
-// Bound concept: number.
+// Bound concept: v1:telephony:number (machine-readable: BoundConcepts["numberByE164"] in generated_concepts.go).
 type NumberByE164Args struct {
 	E164 string
 }
@@ -2726,7 +2726,7 @@ func NumberByE164Build(args NumberByE164Args) string {
 
 // NumbersByPartition -- ADMIN: DIDs provisioned to a partition, newest first. Cluster-owner gated -- numbers are cluster infrastructure.
 //
-// Bound concept: number.
+// Bound concept: v1:telephony:number (machine-readable: BoundConcepts["numbersByPartition"] in generated_concepts.go).
 type NumbersByPartitionArgs struct {
 	PartitionId string
 }
@@ -2748,7 +2748,7 @@ func NumbersByPartitionBuild(args NumbersByPartitionArgs) string {
 
 // OAuthClientByClientId -- Returns the dynamically-registered OAuth client whose clientId matches the argument. Zero or one result.
 //
-// Bound concept: oauthClient.
+// Bound concept: v1:identity:oauthClient (machine-readable: BoundConcepts["oAuthClientByClientId"] in generated_concepts.go).
 type OAuthClientByClientIdArgs struct {
 	ClientId string
 }
@@ -2770,7 +2770,7 @@ func OAuthClientByClientIdBuild(args OAuthClientByClientIdArgs) string {
 
 // OverrideById -- Fetch a single healed override by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's override even with its id. Used by the validation flow (E4.5) to confirm the row before capturing the next version.
 //
-// Bound concept: healedOverride.
+// Bound concept: v1:healing:healedOverride (machine-readable: BoundConcepts["overrideById"] in generated_concepts.go).
 type OverrideByIdArgs struct {
 	OverrideId string
 }
@@ -2792,7 +2792,7 @@ func OverrideByIdBuild(args OverrideByIdArgs) string {
 
 // OverridesForConstruct -- List the caller's healed overrides for a base construct -- the full override history (every tier, valid + invalid, active + retired) for audit + the cockpit healed-pack view (E4.6). Owned: gated by ownerUserId==actor.userId. Newest version first.
 //
-// Bound concept: healedOverride.
+// Bound concept: v1:healing:healedOverride (machine-readable: BoundConcepts["overridesForConstruct"] in generated_concepts.go).
 type OverridesForConstructArgs struct {
 	BaseConstructId string
 }
@@ -2814,7 +2814,7 @@ func OverridesForConstructBuild(args OverridesForConstructArgs) string {
 
 // ParticipantByAgentSpace -- Check if an AI agent is already a participant in a space (excludes left status)
 //
-// Bound concept: participant.
+// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["participantByAgentSpace"] in generated_concepts.go).
 type ParticipantByAgentSpaceArgs struct {
 	PartitionId string
 	AgentId     string
@@ -2842,7 +2842,7 @@ func ParticipantByAgentSpaceBuild(args ParticipantByAgentSpaceArgs) string {
 
 // ParticipantSession -- Returns session state for participants in spaces. Optional filters: partitionId, participantId
 //
-// Bound concept: session.
+// Bound concept: v1:cognition:session (machine-readable: BoundConcepts["participantSession"] in generated_concepts.go).
 type ParticipantSessionArgs struct {
 	PartitionId   string
 	ParticipantId string
@@ -2874,7 +2874,7 @@ func ParticipantSessionBuild(args ParticipantSessionArgs) string {
 
 // PatIdentitiesForUser -- List PAT (api_key) identities owned by a user, in patSummary shape (no credentials).
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["patIdentitiesForUser"] in generated_concepts.go).
 type PatIdentitiesForUserArgs struct {
 	UserId string
 }
@@ -2896,7 +2896,7 @@ func PatIdentitiesForUserBuild(args PatIdentitiesForUserArgs) string {
 
 // PatIdentityById -- Lookup a PAT identity by id (full shape, includes keyHash). Server-side only -- never feed to UI.
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["patIdentityById"] in generated_concepts.go).
 type PatIdentityByIdArgs struct {
 	IdentityId string
 }
@@ -2918,7 +2918,7 @@ func PatIdentityByIdBuild(args PatIdentityByIdArgs) string {
 
 // PatIdentityByKeyHash -- Hot-path PAT lookup by keyHash for the gRPC interceptor. Returns active + inactive rows.
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["patIdentityByKeyHash"] in generated_concepts.go).
 type PatIdentityByKeyHashArgs struct {
 	KeyHash string
 }
@@ -2940,7 +2940,7 @@ func PatIdentityByKeyHashBuild(args PatIdentityByKeyHashArgs) string {
 
 // PendingAccessRequests -- Access requests with status=pending; backs the admin review queue.
 //
-// Bound concept: accessRequest.
+// Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["pendingAccessRequests"] in generated_concepts.go).
 type PendingAccessRequestsArgs struct {
 }
 
@@ -2957,7 +2957,7 @@ func PendingAccessRequestsBuild(args PendingAccessRequestsArgs) string {
 
 // PlanById -- Single Plan by id.
 //
-// Bound concept: plan.
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["planById"] in generated_concepts.go).
 type PlanByIdArgs struct {
 	PlanId string
 }
@@ -2979,7 +2979,7 @@ func PlanByIdBuild(args PlanByIdArgs) string {
 
 // PlansForResponsibility -- Every Plan the reactive loop spawned for a responsibility, matched on the input.responsibilityId back-pointer. Backs the C1 dedup guard (one live Plan per continuous responsibility). Terminal-vs-live filtering happens Go-side (no NOT/OR in MemQL filters).
 //
-// Bound concept: plan.
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["plansForResponsibility"] in generated_concepts.go).
 type PlansForResponsibilityArgs struct {
 	ResponsibilityId string
 }
@@ -3001,7 +3001,7 @@ func PlansForResponsibilityBuild(args PlansForResponsibilityArgs) string {
 
 // PlansForSpace -- All Plans in a space (Tasks page list). Frontend groups by status and applies the Done-window visual filter.
 //
-// Bound concept: plan.
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["plansForSpace"] in generated_concepts.go).
 type PlansForSpaceArgs struct {
 	PartitionId string
 }
@@ -3023,7 +3023,7 @@ func PlansForSpaceBuild(args PlansForSpaceArgs) string {
 
 // Policy -- Returns the validation policy for a record type. Space-specific policies take precedence over global.
 //
-// Bound concept: policy.
+// Bound concept: v1:data:policy (machine-readable: BoundConcepts["policy"] in generated_concepts.go).
 type PolicyArgs struct {
 	TargetRecordType string
 	PartitionId      string
@@ -3053,7 +3053,7 @@ func PolicyBuild(args PolicyArgs) string {
 
 // PolicyTracesForPolicy -- Recent persisted policy traces for the named policy, most-recent first.
 //
-// Bound concept: policyTrace.
+// Bound concept: v1:platform:policyTrace (machine-readable: BoundConcepts["policyTracesForPolicy"] in generated_concepts.go).
 type PolicyTracesForPolicyArgs struct {
 	PolicyName string
 }
@@ -3075,7 +3075,7 @@ func PolicyTracesForPolicyBuild(args PolicyTracesForPolicyArgs) string {
 
 // ProjectById -- Resolve a v1:forge:project by id.
 //
-// Bound concept: project.
+// Bound concept: v1:forge:project (machine-readable: BoundConcepts["projectById"] in generated_concepts.go).
 type ProjectByIdArgs struct {
 	ProjectId string
 }
@@ -3097,7 +3097,7 @@ func ProjectByIdBuild(args ProjectByIdArgs) string {
 
 // ProjectBySlug -- Resolve a v1:forge:project by its stable slug (e.g. 'memql', 'acme-app'). Claude uses this to go from a human-supplied name to a projectId before submitting a request or filtering requests. Returns at most one row because slugs are unique within a partition.
 //
-// Bound concept: project.
+// Bound concept: v1:forge:project (machine-readable: BoundConcepts["projectBySlug"] in generated_concepts.go).
 type ProjectBySlugArgs struct {
 	Slug string
 }
@@ -3119,7 +3119,7 @@ func ProjectBySlugBuild(args ProjectBySlugArgs) string {
 
 // ProjectRequests -- List requests by project, newest-first.
 //
-// Bound concept: request.
+// Bound concept: v1:forge:request (machine-readable: BoundConcepts["projectRequests"] in generated_concepts.go).
 type ProjectRequestsArgs struct {
 	ProjectId string
 }
@@ -3141,7 +3141,7 @@ func ProjectRequestsBuild(args ProjectRequestsArgs) string {
 
 // ProvisionedWorkspaces -- List provisioned workspaces for inventory / debugging. Filtered to status=provisioned so released rows don't clutter the view.
 //
-// Bound concept: workspace.
+// Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["provisionedWorkspaces"] in generated_concepts.go).
 type ProvisionedWorkspacesArgs struct {
 }
 
@@ -3158,7 +3158,7 @@ func ProvisionedWorkspacesBuild(args ProvisionedWorkspacesArgs) string {
 
 // RecentAuditEvents -- Recent audit events, optionally filtered by category. Powers the admin audit-log view.
 //
-// Bound concept: auditEvent.
+// Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["recentAuditEvents"] in generated_concepts.go).
 type RecentAuditEventsArgs struct {
 	Category string
 }
@@ -3182,7 +3182,7 @@ func RecentAuditEventsBuild(args RecentAuditEventsArgs) string {
 
 // RecordsByState -- Returns active data records. Optional filters: partitionId, recordType, validationState, importSource
 //
-// Bound concept: record.
+// Bound concept: v1:data:record (machine-readable: BoundConcepts["recordsByState"] in generated_concepts.go).
 type RecordsByStateArgs struct {
 	PartitionId     string
 	RecordType      string
@@ -3230,7 +3230,7 @@ func RecordsByStateBuild(args RecordsByStateArgs) string {
 
 // RequestById -- Resolve a single v1:forge:request by id (detail view).
 //
-// Bound concept: request.
+// Bound concept: v1:forge:request (machine-readable: BoundConcepts["requestById"] in generated_concepts.go).
 type RequestByIdArgs struct {
 	RequestId string
 }
@@ -3252,7 +3252,7 @@ func RequestByIdBuild(args RequestByIdArgs) string {
 
 // RequestEvents -- The full audit trail for a request, newest-first.
 //
-// Bound concept: requestEvent.
+// Bound concept: v1:forge:requestEvent (machine-readable: BoundConcepts["requestEvents"] in generated_concepts.go).
 type RequestEventsArgs struct {
 	RequestId string
 }
@@ -3274,7 +3274,7 @@ func RequestEventsBuild(args RequestEventsArgs) string {
 
 // ResolveValidOverride -- Resolve the winning VALID overlay override for a base construct -- the read half of the two-tier resolution (E4.2 / memql#2140). Returns the caller's newest valid, active overlay override for the given baseConstructId (highest version first, newest createdAt on a tie). An empty result means no valid override exists and the Go resolver falls back to the embedded base. Owned: gated by ownerUserId==actor.userId, and tier=overlay + valid + active so a base-tier or unvalidated or retired row can never win resolution.
 //
-// Bound concept: healedOverride.
+// Bound concept: v1:healing:healedOverride (machine-readable: BoundConcepts["resolveValidOverride"] in generated_concepts.go).
 type ResolveValidOverrideArgs struct {
 	BaseConstructId string
 }
@@ -3296,7 +3296,7 @@ func ResolveValidOverrideBuild(args ResolveValidOverrideArgs) string {
 
 // ResponsibilitiesForUser -- Every responsibility owned by the caller (all statuses + triggers). Backs the management surface. The ownerUserId predicate binds to actor.userId server-side so cross-user reads are impossible.
 //
-// Bound concept: responsibility.
+// Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["responsibilitiesForUser"] in generated_concepts.go).
 type ResponsibilitiesForUserArgs struct {
 }
 
@@ -3313,7 +3313,7 @@ func ResponsibilitiesForUserBuild(args ResponsibilitiesForUserArgs) string {
 
 // ResponsibilityById -- Single v1:planner:responsibility by id. Used by the intake dispatcher (#637) and the management UI's single-row refresh. Filters on id only -- mirrors planById; the owner-scoped list reads stay on responsibilitiesForUser.
 //
-// Bound concept: responsibility.
+// Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["responsibilityById"] in generated_concepts.go).
 type ResponsibilityByIdArgs struct {
 	ResponsibilityId string
 }
@@ -3335,7 +3335,7 @@ func ResponsibilityByIdBuild(args ResponsibilityByIdArgs) string {
 
 // RoleBySlug -- Resolve a single role by its stable slug. Used to look up a principal's role row (rank + grants) on the auth/enforcement path and by the E1.4 rank-bound check (a creator's own rank). roleSlug matches role.slug, not the node id.
 //
-// Bound concept: role.
+// Bound concept: v1:rbac:role (machine-readable: BoundConcepts["roleBySlug"] in generated_concepts.go).
 type RoleBySlugArgs struct {
 	Slug string
 }
@@ -3357,7 +3357,7 @@ func RoleBySlugBuild(args RoleBySlugArgs) string {
 
 // RouterBudgets -- Returns all active budget rows for the current partition.
 //
-// Bound concept: budget.
+// Bound concept: v1:router:budget (machine-readable: BoundConcepts["routerBudgets"] in generated_concepts.go).
 type RouterBudgetsArgs struct {
 	Scope string
 }
@@ -3381,7 +3381,7 @@ func RouterBudgetsBuild(args RouterBudgetsArgs) string {
 
 // RunningPlansForUser -- List a user's running plans.
 //
-// Bound concept: plan.
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["runningPlansForUser"] in generated_concepts.go).
 type RunningPlansForUserArgs struct {
 	// When true, restricts to plans carrying a computerUseScope -- the kill-switch sweep's plan-classification policy, pushed down (#2370).
 	WithComputerUseScope    bool
@@ -3413,7 +3413,7 @@ func RunningPlansForUserBuild(args RunningPlansForUserArgs) string {
 
 // SearchUsers -- Search users, optionally gated by active status. Omit `active` to list every user; pass true to return only active users or false for only deactivated ones. Backs the searchUsers tool.
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["searchUsers"] in generated_concepts.go).
 type SearchUsersArgs struct {
 	Active    bool
 	ActiveSet bool // set true to send active; required because zero-value bool is ambiguous
@@ -3438,7 +3438,7 @@ func SearchUsersBuild(args SearchUsersArgs) string {
 
 // SiParticipantForSpace -- Find the active AI participant in a space.
 //
-// Bound concept: participant.
+// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["siParticipantForSpace"] in generated_concepts.go).
 type SiParticipantForSpaceArgs struct {
 	PartitionId string
 }
@@ -3460,7 +3460,7 @@ func SiParticipantForSpaceBuild(args SiParticipantForSpaceArgs) string {
 
 // SkillBySlug -- Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it.
 //
-// Bound concept: skill.
+// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["skillBySlug"] in generated_concepts.go).
 type SkillBySlugArgs struct {
 	Slug string
 }
@@ -3482,7 +3482,7 @@ func SkillBySlugBuild(args SkillBySlugArgs) string {
 
 // SkillChangeEventsForAgent -- Phase 3 (memql#159 / cockpit#125): list v1:agents:skillChangeEvent rows for a target agent. Backs the cockpit planner trace viewer's per-agent skill-history surface -- the operator selects a Plan, sees its ownerAgentId, and this query feeds the timeline of every attach / reconfigure recorded against that agent (newest first). The skillChangeEvent rows are append-only, so this is just a filter + sort against the time-series.
 //
-// Bound concept: skillChangeEvent.
+// Bound concept: v1:agents:skillChangeEvent (machine-readable: BoundConcepts["skillChangeEventsForAgent"] in generated_concepts.go).
 type SkillChangeEventsForAgentArgs struct {
 	TargetAgentId string
 }
@@ -3504,7 +3504,7 @@ func SkillChangeEventsForAgentBuild(args SkillChangeEventsForAgentArgs) string {
 
 // SkillNeedsRefresh -- Per #157 (Phase 1 of the skills rollout): list active skills that bundle a caller-supplied knowledge domain id. The Planner Agent's Phase 2 refresh loop calls queryDueRefreshDomains first (already shipping), then fans out one call per stale domain id to discover 'which skills are downstream of this domain and want a re-attach run after the underlying knowledge refreshes complete'. Pure derivation -- no new state. Argument-as-scalar (rather than list intersection) mirrors activeAgents's per-group fanout pattern so the existing DSL push-down operator surface stays sufficient.
 //
-// Bound concept: skill.
+// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["skillNeedsRefresh"] in generated_concepts.go).
 type SkillNeedsRefreshArgs struct {
 	StaleDomainId string
 }
@@ -3526,7 +3526,7 @@ func SkillNeedsRefreshBuild(args SkillNeedsRefreshArgs) string {
 
 // SpaceMedia -- Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view.
 //
-// Bound concept: media.
+// Bound concept: v1:common:media (machine-readable: BoundConcepts["spaceMedia"] in generated_concepts.go).
 type SpaceMediaArgs struct {
 	PartitionId string
 	MediaType   string
@@ -3556,7 +3556,7 @@ func SpaceMediaBuild(args SpaceMediaArgs) string {
 
 // SpaceParticipantPresence -- Presence snapshots for every participant in a space (UI state: thinking / responding / waiting / ...). Space-scoped; the SPA dedupes latest-wins by participantId.
 //
-// Bound concept: presence.
+// Bound concept: v1:cognition:participant:presence (machine-readable: BoundConcepts["spaceParticipantPresence"] in generated_concepts.go).
 type SpaceParticipantPresenceArgs struct {
 	PartitionId string
 }
@@ -3578,7 +3578,7 @@ func SpaceParticipantPresenceBuild(args SpaceParticipantPresenceArgs) string {
 
 // SpaceParticipants -- Participants for a space, optionally narrowed by status or participantType. Used by the cognition handler + space-context engine.
 //
-// Bound concept: participant.
+// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["spaceParticipants"] in generated_concepts.go).
 type SpaceParticipantsArgs struct {
 	PartitionId     string
 	Status          string
@@ -3616,7 +3616,7 @@ func SpaceParticipantsBuild(args SpaceParticipantsArgs) string {
 
 // SpaceUtterances -- Returns utterances for the given space. Optional participantId / utteranceType args narrow the result further. Used by the cockpit Chat tab to populate the utterance pane and by the BFF for downstream consumers.
 //
-// Bound concept: utterance.
+// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["spaceUtterances"] in generated_concepts.go).
 type SpaceUtterancesArgs struct {
 	PartitionId   string
 	ParticipantId string
@@ -3654,7 +3654,7 @@ func SpaceUtterancesBuild(args SpaceUtterancesArgs) string {
 
 // StaleClusterNodes -- Latest-per-id cluster node rows whose health is not already 'stopped'. When olderThan is supplied, restricts to rows whose lastSeen is strictly before it (RFC3339 cutoff). Drives the stale-node prune cron.
 //
-// Bound concept: node.
+// Bound concept: v1:cluster:node (machine-readable: BoundConcepts["staleClusterNodes"] in generated_concepts.go).
 type StaleClusterNodesArgs struct {
 	// Optional RFC3339 cutoff; when set, only rows whose lastSeen is strictly before it are returned.
 	OlderThan string
@@ -3679,7 +3679,7 @@ func StaleClusterNodesBuild(args StaleClusterNodesArgs) string {
 
 // StrandedCandidatePlans -- Plans still in a pre-dispatch status (planning / queued). Backs the stranded-plan watchdog (memql#1389); the age + dedup check runs Go-side.
 //
-// Bound concept: plan.
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["strandedCandidatePlans"] in generated_concepts.go).
 type StrandedCandidatePlansArgs struct {
 }
 
@@ -3696,7 +3696,7 @@ func StrandedCandidatePlansBuild(args StrandedCandidatePlansArgs) string {
 
 // SupersededDeployments -- Latest-per-deploymentId deployment rows whose status is terminal-not-active (superseded / failed / rolled_back) -- the deployments whose still-registered nodes are orphans. Feeds the active-topology reaper (#1874). asOf latest -> current status per deployment.
 //
-// Bound concept: deployment.
+// Bound concept: v1:cluster:deployment (machine-readable: BoundConcepts["supersededDeployments"] in generated_concepts.go).
 type SupersededDeploymentsArgs struct {
 }
 
@@ -3713,7 +3713,7 @@ func SupersededDeploymentsBuild(args SupersededDeploymentsArgs) string {
 
 // SurfacesForOwner -- List the calling owner's active v1:actions:surface registry entries for the capability->surface resolver (Phase 2 #1737). Owned tier.
 //
-// Bound concept: surface.
+// Bound concept: v1:actions:surface (machine-readable: BoundConcepts["surfacesForOwner"] in generated_concepts.go).
 type SurfacesForOwnerArgs struct {
 }
 
@@ -3730,7 +3730,7 @@ func SurfacesForOwnerBuild(args SurfacesForOwnerArgs) string {
 
 // SystemActiveAuthoringBundles -- ADMIN/SYSTEM: every active authoring bundle across ALL owners (NOT owner-scoped). Cluster-owner gated. Backs the boot-time authored-runtime re-arm (#1039) that re-registers active bundles' automations after a restart.
 //
-// Bound concept: bundle.
+// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["systemActiveAuthoringBundles"] in generated_concepts.go).
 type SystemActiveAuthoringBundlesArgs struct {
 }
 
@@ -3747,7 +3747,7 @@ func SystemActiveAuthoringBundlesBuild(args SystemActiveAuthoringBundlesArgs) st
 
 // TaskStateById -- Latest persisted state for a Task (planner reads this on resume).
 //
-// Bound concept: taskState.
+// Bound concept: v1:planner:taskState (machine-readable: BoundConcepts["taskStateById"] in generated_concepts.go).
 type TaskStateByIdArgs struct {
 	TaskId string
 }
@@ -3769,7 +3769,7 @@ func TaskStateByIdBuild(args TaskStateByIdArgs) string {
 
 // TasksForPlan -- All Tasks for a Plan, in seq order.
 //
-// Bound concept: task.
+// Bound concept: v1:planner:task (machine-readable: BoundConcepts["tasksForPlan"] in generated_concepts.go).
 type TasksForPlanArgs struct {
 	PlanId string
 }
@@ -3791,7 +3791,7 @@ func TasksForPlanBuild(args TasksForPlanArgs) string {
 
 // TodoById -- Fetch a single to-do by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's to-do even with its id. Used by the complete / update tools to confirm the row exists before re-inserting a new version.
 //
-// Bound concept: todo.
+// Bound concept: v1:todos:todo (machine-readable: BoundConcepts["todoById"] in generated_concepts.go).
 type TodoByIdArgs struct {
 	TodoId string
 }
@@ -3813,7 +3813,7 @@ func TodoByIdBuild(args TodoByIdArgs) string {
 
 // Todos -- List the caller's to-dos. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible. Optional done filter narrows to open (done=false) or completed (done=true) items; omit it to return everything.
 //
-// Bound concept: todo.
+// Bound concept: v1:todos:todo (machine-readable: BoundConcepts["todos"] in generated_concepts.go).
 type TodosArgs struct {
 	Done    bool
 	DoneSet bool // set true to send done; required because zero-value bool is ambiguous
@@ -3838,7 +3838,7 @@ func TodosBuild(args TodosArgs) string {
 
 // UpcomingEvents -- List the authenticated caller's events whose start falls within a [windowStart, windowEnd] instant range, in start order. The reactive harness's reminder responsibilities read this for the 'remind me the day before X' condition (pass windowStart=now, windowEnd=now+lookahead). Self-scoped via actor.userId -- another user's events are never returned.
 //
-// Bound concept: calendarEvent.
+// Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["upcomingEvents"] in generated_concepts.go).
 type UpcomingEventsArgs struct {
 	// Inclusive lower bound on startsAt (typically `now`).
 	WindowStart string
@@ -3868,7 +3868,7 @@ func UpcomingEventsBuild(args UpcomingEventsArgs) string {
 
 // UsableRecords -- Returns usable data records (confirmed, or checked if policy allows)
 //
-// Bound concept: record.
+// Bound concept: v1:data:record (machine-readable: BoundConcepts["usableRecords"] in generated_concepts.go).
 type UsableRecordsArgs struct {
 	PartitionId string
 	RecordType  string
@@ -3900,7 +3900,7 @@ func UsableRecordsBuild(args UsableRecordsArgs) string {
 
 // UserActiveSpace -- Returns a user's current activePartitionId. Empty when the user is not focused on any space.
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["userActiveSpace"] in generated_concepts.go).
 type UserActiveSpaceArgs struct {
 	UserId string
 }
@@ -3922,7 +3922,7 @@ func UserActiveSpaceBuild(args UserActiveSpaceArgs) string {
 
 // UserByEmail -- Look up a user by primary email (the dedup key during bootstrap).
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["userByEmail"] in generated_concepts.go).
 type UserByEmailArgs struct {
 	PrimaryEmail string
 }
@@ -3944,7 +3944,7 @@ func UserByEmailBuild(args UserByEmailArgs) string {
 
 // UserById -- Get a user by id.
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["userById"] in generated_concepts.go).
 type UserByIdArgs struct {
 	UserId string
 }
@@ -3966,7 +3966,7 @@ func UserByIdBuild(args UserByIdArgs) string {
 
 // UserCount -- Count of active v1:identity:user rows. Returns a {count: N} aggregate.
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["userCount"] in generated_concepts.go).
 type UserCountArgs struct {
 }
 
@@ -3983,7 +3983,7 @@ func UserCountBuild(args UserCountArgs) string {
 
 // UserDefaults -- Returns default configuration variables for user provisioning. Used by bootstrapUser automation.
 //
-// Bound concept: globalVariable.
+// Bound concept: v1:platform:globalVariable (machine-readable: BoundConcepts["userDefaults"] in generated_concepts.go).
 type UserDefaultsArgs struct {
 }
 
@@ -4000,7 +4000,7 @@ func UserDefaultsBuild(args UserDefaultsArgs) string {
 
 // UsersActiveInSpace -- Returns users whose activePartitionId == arg(partitionId). Active-human roster per the activity model (Phase 4).
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["usersActiveInSpace"] in generated_concepts.go).
 type UsersActiveInSpaceArgs struct {
 	PartitionId string
 }
@@ -4022,7 +4022,7 @@ func UsersActiveInSpaceBuild(args UsersActiveInSpaceArgs) string {
 
 // UsersInDeletionCooldown -- Active users with a pending deletionScheduledAt; consumers per-row check cooldown windows via addDuration.
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["usersInDeletionCooldown"] in generated_concepts.go).
 type UsersInDeletionCooldownArgs struct {
 }
 
@@ -4039,7 +4039,7 @@ func UsersInDeletionCooldownBuild(args UsersInDeletionCooldownArgs) string {
 
 // UsersScheduledForDeletion -- Active users whose deletionScheduledAt is set. When scheduledBefore is supplied, restricts to rows whose deletionScheduledAt is strictly before it -- the deletion sweep's logic computes the cutoff (now - MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS) and pushes it down (#2369).
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["usersScheduledForDeletion"] in generated_concepts.go).
 type UsersScheduledForDeletionArgs struct {
 	// Optional RFC3339 cutoff; when set, only rows whose deletionScheduledAt is strictly before it are returned.
 	ScheduledBefore string
@@ -4064,7 +4064,7 @@ func UsersScheduledForDeletionBuild(args UsersScheduledForDeletionArgs) string {
 
 // ValidationLog -- Returns validation state change history. Optional filters: recordId, partitionId, action
 //
-// Bound concept: log.
+// Bound concept: v1:data:log (machine-readable: BoundConcepts["validationLog"] in generated_concepts.go).
 type ValidationLogArgs struct {
 	RecordId    string
 	PartitionId string
@@ -4104,7 +4104,7 @@ func ValidationLogBuild(args ValidationLogArgs) string {
 
 // ValidationQueue -- The validation queue: requests awaiting first-line developer validation. Developer/owner only (forgeDeveloper).
 //
-// Bound concept: request.
+// Bound concept: v1:forge:request (machine-readable: BoundConcepts["validationQueue"] in generated_concepts.go).
 type ValidationQueueArgs struct {
 }
 
@@ -4121,7 +4121,7 @@ func ValidationQueueBuild(args ValidationQueueArgs) string {
 
 // VideoOverridesForSpace -- Active video overrides for every agent in a space. Read by the voice-agent process at session start.
 //
-// Bound concept: videoOverride.
+// Bound concept: v1:cognition:videoOverride (machine-readable: BoundConcepts["videoOverridesForSpace"] in generated_concepts.go).
 type VideoOverridesForSpaceArgs struct {
 	PartitionId string
 }
@@ -4143,7 +4143,7 @@ func VideoOverridesForSpaceBuild(args VideoOverridesForSpaceArgs) string {
 
 // WaitingPlansForUser -- The caller's Plans parked in the per-account waiting queue (status=waitingForSlot) because the account is at its concurrency cap (epic memql#902 / #909). Owned tier (payload.requestedBy==actor.userId). FIFO order is by row.createdAt of the waitingForSlot version (carried in planFull); the frontend derives each Plan's queue position from that ascending order -- MemQL has no in-query window/rank function.
 //
-// Bound concept: plan.
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["waitingPlansForUser"] in generated_concepts.go).
 type WaitingPlansForUserArgs struct {
 }
 
@@ -4160,7 +4160,7 @@ func WaitingPlansForUserBuild(args WaitingPlansForUserArgs) string {
 
 // WorkerByIdentityId -- Look up the worker registration owned by an identity row.
 //
-// Bound concept: registration.
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["workerByIdentityId"] in generated_concepts.go).
 type WorkerByIdentityIdArgs struct {
 	IdentityId string
 }
@@ -4182,7 +4182,7 @@ func WorkerByIdentityIdBuild(args WorkerByIdentityIdArgs) string {
 
 // WorkerPairingCodeByHash -- Hot-path pairing-code lookup by codeHash for the Pair-aware gRPC interceptor.
 //
-// Bound concept: workerPairingCode.
+// Bound concept: v1:identity:workerPairingCode (machine-readable: BoundConcepts["workerPairingCodeByHash"] in generated_concepts.go).
 type WorkerPairingCodeByHashArgs struct {
 	CodeHash string
 }
@@ -4204,7 +4204,7 @@ func WorkerPairingCodeByHashBuild(args WorkerPairingCodeByHashArgs) string {
 
 // WorkerTokenByKeyHash -- Hot-path worker-token lookup by keyHash. Returns active + inactive rows.
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["workerTokenByKeyHash"] in generated_concepts.go).
 type WorkerTokenByKeyHashArgs struct {
 	KeyHash string
 }
@@ -4226,7 +4226,7 @@ func WorkerTokenByKeyHashBuild(args WorkerTokenByKeyHashArgs) string {
 
 // WorkerTokensForUser -- List worker-token identities owned by a user.
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["workerTokensForUser"] in generated_concepts.go).
 type WorkerTokensForUserArgs struct {
 	UserId string
 }
@@ -4248,7 +4248,7 @@ func WorkerTokensForUserBuild(args WorkerTokensForUserArgs) string {
 
 // WorkersForUser -- List all workers owned by a user.
 //
-// Bound concept: registration.
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["workersForUser"] in generated_concepts.go).
 type WorkersForUserArgs struct {
 	OwnerUserId string
 }
@@ -4270,7 +4270,7 @@ func WorkersForUserBuild(args WorkersForUserArgs) string {
 
 // WorkspaceForPlan -- Look up the workbench workspace row for a Plan. Returns empty when no workspace has been provisioned yet -- the integration uses this to decide whether to call provisionWorkspace on the first workbenchHost dispatch.
 //
-// Bound concept: workspace.
+// Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["workspaceForPlan"] in generated_concepts.go).
 type WorkspaceForPlanArgs struct {
 	PlanId string
 }
