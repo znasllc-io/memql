@@ -2115,7 +2115,7 @@ func GreetingUtteranceBuild(args GreetingUtteranceArgs) string {
 	return b.String()
 }
 
-// GroupGAForSpace -- Active AI (group GA) participant for a space. Callers must pass the canonical partitionId.
+// GroupGAForSpace -- Active AI (group GA) participant for a space. The partitionId arg is compared against the stored payload field, which holds the canonical v1:cognition:space id -- internal callers pass that form today; the arg flips to a bare space id with the #2441/#2443 cutover.
 //
 // Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["groupGAForSpace"] in generated_concepts.go).
 type GroupGAForSpaceArgs struct {
@@ -2575,7 +2575,7 @@ func NodeTokenIdentityByBindingBuild(args NodeTokenIdentityByBindingArgs) string
 	return b.String()
 }
 
-// NodeTokenIdentityById -- Lookup a single node_token identity row by canonical id. Drives the admin revoke path. memql#350.
+// NodeTokenIdentityById -- Lookup a single node_token identity row by id (bare shortId; the signature-bound filter resolves it server-side). Drives the admin revoke path. memql#350.
 //
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["nodeTokenIdentityById"] in generated_concepts.go).
 type NodeTokenIdentityByIdArgs struct {

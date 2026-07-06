@@ -1407,7 +1407,10 @@ query identity nodeTokenIdentities {
 // nodeTokenIdentityById
 // ==========================
 //
-// Lookup a single node_token identity row by its canonical id.
+// Lookup a single node_token identity row by id. The filter is an
+// id-intrinsic comparison on the signature-bound concept, so a BARE
+// shortId resolves server-side (resolveFullId); canonical also accepted
+// from internal callers.
 // Backs the /admin/tokens revoke flow (memql#350) -- the handler
 // resolves the form-submitted id to the live row, then issues the
 // whole-replace revokeNodeTokenIdentity restating every
@@ -1415,7 +1418,7 @@ query identity nodeTokenIdentities {
 
 @enabled
 @public
-@description("Lookup a single node_token identity row by canonical id. Drives the admin revoke path. memql#350.")
+@description("Lookup a single node_token identity row by id (bare shortId; the signature-bound filter resolves it server-side). Drives the admin revoke path. memql#350.")
 query identity nodeTokenIdentityById {
   args {
     identityId  string  @required

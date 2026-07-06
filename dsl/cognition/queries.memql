@@ -224,7 +224,7 @@ query utterance feedbackAnnouncementForPlan {
 }
 
 // Callers MUST pass the canonical partitionId
-// (`<partition>:v1:cognition:space:<slug>`). Using `canonicalId()`
+// (`v1:cognition:space:<slug>`). Using `canonicalId()`
 // inside this predicate triggers the executor's "unsupported
 // literal type *ast.CanonicalIdExpr" error path -- the SQL fast-
 // path doesn't pre-evaluate canonicalId() when the rest of the
@@ -241,7 +241,7 @@ query utterance feedbackAnnouncementForPlan {
 // + status is sufficient under v1 (each user has at most one
 // active AI participant per space; that's their GA).
 @enabled
-@description("Active AI (group GA) participant for a space. Callers must pass the canonical partitionId.")
+@description("Active AI (group GA) participant for a space. The partitionId arg is compared against the stored payload field, which holds the canonical v1:cognition:space id -- internal callers pass that form today; the arg flips to a bare space id with the #2441/#2443 cutover.")
 @unbounded("the GA/assistant participant for a space -- bounded to a single row")
 query participant groupGAForSpace {
   args {
