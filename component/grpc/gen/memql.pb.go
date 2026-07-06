@@ -11138,11 +11138,11 @@ func (x *AgentTurnError) GetCode() string {
 
 // SendGuestInviteMsg creates a guest invitation and emails the link
 // to the recipient. Caller must be an authenticated participant of
-// partition_id.
+// space_id.
 type SendGuestInviteMsg struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	RequestId   string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	PartitionId string                 `protobuf:"bytes,2,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"`
+	SpaceId     string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
 	SpaceName   string                 `protobuf:"bytes,3,opt,name=space_name,json=spaceName,proto3" json:"space_name,omitempty"`       // denormalized for the email body
 	InviterName string                 `protobuf:"bytes,4,opt,name=inviter_name,json=inviterName,proto3" json:"inviter_name,omitempty"` // denormalized for the email body
 	Email       string                 `protobuf:"bytes,5,opt,name=email,proto3" json:"email,omitempty"`                                // guest email address
@@ -11198,9 +11198,9 @@ func (x *SendGuestInviteMsg) GetRequestId() string {
 	return ""
 }
 
-func (x *SendGuestInviteMsg) GetPartitionId() string {
+func (x *SendGuestInviteMsg) GetSpaceId() string {
 	if x != nil {
-		return x.PartitionId
+		return x.SpaceId
 	}
 	return ""
 }
@@ -11252,7 +11252,7 @@ func (x *SendGuestInviteMsg) GetExpiresInMinutes() int32 {
 //
 //	"" (empty)        -- success
 //	"invalid_email"   -- email failed validation
-//	"forbidden"       -- caller is not a participant of partition_id
+//	"forbidden"       -- caller is not a participant of space_id
 //	"space_not_found"
 //	"email_failed"    -- persistence succeeded but delivery did not;
 //	                     invitation_id is set so the caller can retry
@@ -11400,7 +11400,7 @@ type ResolveGuestInviteResult struct {
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 	InvitationId  string                 `protobuf:"bytes,3,opt,name=invitation_id,json=invitationId,proto3" json:"invitation_id,omitempty"`
-	PartitionId   string                 `protobuf:"bytes,4,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"`
+	SpaceId       string                 `protobuf:"bytes,4,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
 	SpaceName     string                 `protobuf:"bytes,5,opt,name=space_name,json=spaceName,proto3" json:"space_name,omitempty"`
 	InviterName   string                 `protobuf:"bytes,6,opt,name=inviter_name,json=inviterName,proto3" json:"inviter_name,omitempty"`
 	InviteeEmail  string                 `protobuf:"bytes,7,opt,name=invitee_email,json=inviteeEmail,proto3" json:"invitee_email,omitempty"`
@@ -11462,9 +11462,9 @@ func (x *ResolveGuestInviteResult) GetInvitationId() string {
 	return ""
 }
 
-func (x *ResolveGuestInviteResult) GetPartitionId() string {
+func (x *ResolveGuestInviteResult) GetSpaceId() string {
 	if x != nil {
-		return x.PartitionId
+		return x.SpaceId
 	}
 	return ""
 }
@@ -11592,7 +11592,7 @@ type JoinSpaceAsGuestResult struct {
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	Success       bool                   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
 	ParticipantId string                 `protobuf:"bytes,3,opt,name=participant_id,json=participantId,proto3" json:"participant_id,omitempty"` // echoes the request value on success
-	PartitionId   string                 `protobuf:"bytes,4,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"`       // resolved from the guest claims
+	SpaceId       string                 `protobuf:"bytes,4,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`                   // resolved from the guest claims
 	ErrorCode     string                 `protobuf:"bytes,5,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
 	ErrorMessage  string                 `protobuf:"bytes,6,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -11650,9 +11650,9 @@ func (x *JoinSpaceAsGuestResult) GetParticipantId() string {
 	return ""
 }
 
-func (x *JoinSpaceAsGuestResult) GetPartitionId() string {
+func (x *JoinSpaceAsGuestResult) GetSpaceId() string {
 	if x != nil {
-		return x.PartitionId
+		return x.SpaceId
 	}
 	return ""
 }
@@ -12520,11 +12520,11 @@ func (x *RevokeWorkerTokenResult) GetErrorMessage() string {
 // this to bind the session to the space and look up the GA's
 // canonical voice, persona image, and audio/video control state.
 type VoiceAgentSessionStart struct {
-	state       protoimpl.MessageState `protogen:"open.v1"`
-	RequestId   string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	PartitionId string                 `protobuf:"bytes,2,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"` // v1:cognition:space.id
-	GaAgentId   string                 `protobuf:"bytes,3,opt,name=ga_agent_id,json=gaAgentId,proto3" json:"ga_agent_id,omitempty"`     // v1:agents:agent.id of the Assistant
-	RoomName    string                 `protobuf:"bytes,4,opt,name=room_name,json=roomName,proto3" json:"room_name,omitempty"`          // LiveKit room name
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	SpaceId   string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`         // v1:cognition:space.id
+	GaAgentId string                 `protobuf:"bytes,3,opt,name=ga_agent_id,json=gaAgentId,proto3" json:"ga_agent_id,omitempty"` // v1:agents:agent.id of the Assistant
+	RoomName  string                 `protobuf:"bytes,4,opt,name=room_name,json=roomName,proto3" json:"room_name,omitempty"`      // LiveKit room name
 	// Optional: identity hint for the avatar vendor. Currently
 	// 'anam' or 'simli'. Driven by MEMQL_AVATAR_VENDOR on the
 	// voice-agent side. Echoed for audit; memql does NOT switch
@@ -12571,9 +12571,9 @@ func (x *VoiceAgentSessionStart) GetRequestId() string {
 	return ""
 }
 
-func (x *VoiceAgentSessionStart) GetPartitionId() string {
+func (x *VoiceAgentSessionStart) GetSpaceId() string {
 	if x != nil {
-		return x.PartitionId
+		return x.SpaceId
 	}
 	return ""
 }
@@ -12785,10 +12785,10 @@ func (x *VoiceAgentSessionAck) GetParticipantNames() []string {
 // session-end audit event and tears down any per-session
 // in-memory state.
 type VoiceAgentSessionEnd struct {
-	state       protoimpl.MessageState `protogen:"open.v1"`
-	RequestId   string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	PartitionId string                 `protobuf:"bytes,2,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"`
-	RoomName    string                 `protobuf:"bytes,3,opt,name=room_name,json=roomName,proto3" json:"room_name,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	SpaceId   string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
+	RoomName  string                 `protobuf:"bytes,3,opt,name=room_name,json=roomName,proto3" json:"room_name,omitempty"`
 	// Optional reason: 'normal', 'error', 'inactivity'.
 	Reason        string `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -12832,9 +12832,9 @@ func (x *VoiceAgentSessionEnd) GetRequestId() string {
 	return ""
 }
 
-func (x *VoiceAgentSessionEnd) GetPartitionId() string {
+func (x *VoiceAgentSessionEnd) GetSpaceId() string {
 	if x != nil {
-		return x.PartitionId
+		return x.SpaceId
 	}
 	return ""
 }
@@ -12860,7 +12860,7 @@ func (x *VoiceAgentSessionEnd) GetReason() string {
 type VoiceAgentPartialTranscript struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	PartitionId   string                 `protobuf:"bytes,2,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"`
+	SpaceId       string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
 	SpeakerUserId string                 `protobuf:"bytes,3,opt,name=speaker_user_id,json=speakerUserId,proto3" json:"speaker_user_id,omitempty"` // v1:identity:user.id
 	PartialText   string                 `protobuf:"bytes,4,opt,name=partial_text,json=partialText,proto3" json:"partial_text,omitempty"`
 	// Monotonic per (space, user) so out-of-order events sort
@@ -12908,9 +12908,9 @@ func (x *VoiceAgentPartialTranscript) GetRequestId() string {
 	return ""
 }
 
-func (x *VoiceAgentPartialTranscript) GetPartitionId() string {
+func (x *VoiceAgentPartialTranscript) GetSpaceId() string {
 	if x != nil {
-		return x.PartitionId
+		return x.SpaceId
 	}
 	return ""
 }
@@ -13011,7 +13011,7 @@ func (x *VoiceAgentPartialAck) GetErrorMessage() string {
 type VoiceAgentFinalTranscript struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	PartitionId   string                 `protobuf:"bytes,2,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"`
+	SpaceId       string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
 	SpeakerUserId string                 `protobuf:"bytes,3,opt,name=speaker_user_id,json=speakerUserId,proto3" json:"speaker_user_id,omitempty"`
 	FinalText     string                 `protobuf:"bytes,4,opt,name=final_text,json=finalText,proto3" json:"final_text,omitempty"`
 	// Provider confidence, 0.0-1.0 (provider-dependent).
@@ -13066,9 +13066,9 @@ func (x *VoiceAgentFinalTranscript) GetRequestId() string {
 	return ""
 }
 
-func (x *VoiceAgentFinalTranscript) GetPartitionId() string {
+func (x *VoiceAgentFinalTranscript) GetSpaceId() string {
 	if x != nil {
-		return x.PartitionId
+		return x.SpaceId
 	}
 	return ""
 }
@@ -13114,9 +13114,9 @@ type VoiceAgentFinalAck struct {
 	Success   bool                   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
 	// Bare shortId of the inserted utterance (server-minted
 	// "utt-<nanos>-<hex>"; the stored row id is
-	// v1:cognition:utterance:<this>). NOTE: the sibling
-	// VoiceAgentTurnComplete.utterance_id currently carries the CANONICAL
-	// row id -- #2441 (bare-ids cutover) aligns both surfaces on bare.
+	// v1:cognition:utterance:<this>). Aligned with the sibling
+	// VoiceAgentTurnComplete.utterance_id, which #2441 (bare-ids cutover)
+	// stripped to bare -- both surfaces now carry the bare shortId.
 	UtteranceId   string `protobuf:"bytes,3,opt,name=utterance_id,json=utteranceId,proto3" json:"utterance_id,omitempty"`
 	Thread        string `protobuf:"bytes,4,opt,name=thread,proto3" json:"thread,omitempty"` // 'team' | 'group'
 	ErrorCode     string `protobuf:"bytes,5,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
@@ -13205,7 +13205,7 @@ func (x *VoiceAgentFinalAck) GetErrorMessage() string {
 type VoiceAgentTurnRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	PartitionId   string                 `protobuf:"bytes,2,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"`
+	SpaceId       string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
 	SpeakerUserId string                 `protobuf:"bytes,3,opt,name=speaker_user_id,json=speakerUserId,proto3" json:"speaker_user_id,omitempty"`
 	// Final transcript text. Same content as the most-recent
 	// VoiceAgentFinalTranscript; passed explicitly so the turn
@@ -13255,9 +13255,9 @@ func (x *VoiceAgentTurnRequest) GetRequestId() string {
 	return ""
 }
 
-func (x *VoiceAgentTurnRequest) GetPartitionId() string {
+func (x *VoiceAgentTurnRequest) GetSpaceId() string {
 	if x != nil {
-		return x.PartitionId
+		return x.SpaceId
 	}
 	return ""
 }
@@ -13505,7 +13505,7 @@ func (x *VoiceAgentTurnComplete) GetGrounding() string {
 type VoiceAgentSpeak struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	PartitionId   string                 `protobuf:"bytes,2,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"`
+	SpaceId       string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
 	GaAgentId     string                 `protobuf:"bytes,3,opt,name=ga_agent_id,json=gaAgentId,proto3" json:"ga_agent_id,omitempty"`
 	UtteranceId   string                 `protobuf:"bytes,4,opt,name=utterance_id,json=utteranceId,proto3" json:"utterance_id,omitempty"`
 	Text          string                 `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
@@ -13550,9 +13550,9 @@ func (x *VoiceAgentSpeak) GetRequestId() string {
 	return ""
 }
 
-func (x *VoiceAgentSpeak) GetPartitionId() string {
+func (x *VoiceAgentSpeak) GetSpaceId() string {
 	if x != nil {
-		return x.PartitionId
+		return x.SpaceId
 	}
 	return ""
 }
@@ -13601,10 +13601,10 @@ func (x *VoiceAgentSpeak) GetText() string {
 // byte-identical to a text/cascade reply and the frontend's existing
 // citation-chip renderer handles them with no special-casing.
 type VoiceAgentRealtimeOutput struct {
-	state       protoimpl.MessageState `protogen:"open.v1"`
-	RequestId   string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	PartitionId string                 `protobuf:"bytes,2,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"` // v1:cognition:space.id (bare slug ok)
-	GaAgentId   string                 `protobuf:"bytes,3,opt,name=ga_agent_id,json=gaAgentId,proto3" json:"ga_agent_id,omitempty"`     // v1:agents:agent.id of the speaking GA
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	SpaceId   string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`         // v1:cognition:space.id (bare slug ok)
+	GaAgentId string                 `protobuf:"bytes,3,opt,name=ga_agent_id,json=gaAgentId,proto3" json:"ga_agent_id,omitempty"` // v1:agents:agent.id of the speaking GA
 	// Caller-minted utterance id; doubles as the chat streaming replyId.
 	ReplyId string `protobuf:"bytes,4,opt,name=reply_id,json=replyId,proto3" json:"reply_id,omitempty"`
 	// The assistant's final spoken transcript for this turn.
@@ -13658,9 +13658,9 @@ func (x *VoiceAgentRealtimeOutput) GetRequestId() string {
 	return ""
 }
 
-func (x *VoiceAgentRealtimeOutput) GetPartitionId() string {
+func (x *VoiceAgentRealtimeOutput) GetSpaceId() string {
 	if x != nil {
-		return x.PartitionId
+		return x.SpaceId
 	}
 	return ""
 }
@@ -13800,10 +13800,10 @@ func (x *VoiceAgentRealtimeOutputAck) GetErrorMessage() string {
 // published and it engages), so it is not stomped; the response.done idle
 // closes the turn.
 type VoiceAgentRealtimeSpeaking struct {
-	state       protoimpl.MessageState `protogen:"open.v1"`
-	RequestId   string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	PartitionId string                 `protobuf:"bytes,2,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"` // v1:cognition:space.id (bare slug ok)
-	GaAgentId   string                 `protobuf:"bytes,3,opt,name=ga_agent_id,json=gaAgentId,proto3" json:"ga_agent_id,omitempty"`     // v1:agents:agent.id of the speaking GA
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	SpaceId   string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`         // v1:cognition:space.id (bare slug ok)
+	GaAgentId string                 `protobuf:"bytes,3,opt,name=ga_agent_id,json=gaAgentId,proto3" json:"ga_agent_id,omitempty"` // v1:agents:agent.id of the speaking GA
 	// true = the GA started speaking this response (write presence responding);
 	// false = the response is done (write presence idle).
 	Speaking      bool `protobuf:"varint,4,opt,name=speaking,proto3" json:"speaking,omitempty"`
@@ -13848,9 +13848,9 @@ func (x *VoiceAgentRealtimeSpeaking) GetRequestId() string {
 	return ""
 }
 
-func (x *VoiceAgentRealtimeSpeaking) GetPartitionId() string {
+func (x *VoiceAgentRealtimeSpeaking) GetSpaceId() string {
 	if x != nil {
-		return x.PartitionId
+		return x.SpaceId
 	}
 	return ""
 }
@@ -15082,11 +15082,11 @@ const file_memql_proto_rawDesc = "" +
 	"\x0eAgentTurnError\x12\x19\n" +
 	"\berror_id\x18\x01 \x01(\tR\aerrorId\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x12\n" +
-	"\x04code\x18\x03 \x01(\tR\x04code\"\x9f\x02\n" +
+	"\x04code\x18\x03 \x01(\tR\x04code\"\x97\x02\n" +
 	"\x12SendGuestInviteMsg\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
-	"\fpartition_id\x18\x02 \x01(\tR\vpartitionId\x12\x1d\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
+	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12\x1d\n" +
 	"\n" +
 	"space_name\x18\x03 \x01(\tR\tspaceName\x12!\n" +
 	"\finviter_name\x18\x04 \x01(\tR\vinviterName\x12\x14\n" +
@@ -15106,13 +15106,13 @@ const file_memql_proto_rawDesc = "" +
 	"\x15ResolveGuestInviteMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x14\n" +
-	"\x05token\x18\x02 \x01(\tR\x05token\"\x94\x03\n" +
+	"\x05token\x18\x02 \x01(\tR\x05token\"\x8c\x03\n" +
 	"\x18ResolveGuestInviteResult\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12#\n" +
-	"\rinvitation_id\x18\x03 \x01(\tR\finvitationId\x12!\n" +
-	"\fpartition_id\x18\x04 \x01(\tR\vpartitionId\x12\x1d\n" +
+	"\rinvitation_id\x18\x03 \x01(\tR\finvitationId\x12\x19\n" +
+	"\bspace_id\x18\x04 \x01(\tR\aspaceId\x12\x1d\n" +
 	"\n" +
 	"space_name\x18\x05 \x01(\tR\tspaceName\x12!\n" +
 	"\finviter_name\x18\x06 \x01(\tR\vinviterName\x12#\n" +
@@ -15126,13 +15126,13 @@ const file_memql_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12%\n" +
 	"\x0eparticipant_id\x18\x02 \x01(\tR\rparticipantId\x12!\n" +
-	"\fdisplay_name\x18\x03 \x01(\tR\vdisplayName\"\xdf\x01\n" +
+	"\fdisplay_name\x18\x03 \x01(\tR\vdisplayName\"\xd7\x01\n" +
 	"\x16JoinSpaceAsGuestResult\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess\x12%\n" +
-	"\x0eparticipant_id\x18\x03 \x01(\tR\rparticipantId\x12!\n" +
-	"\fpartition_id\x18\x04 \x01(\tR\vpartitionId\x12\x1d\n" +
+	"\x0eparticipant_id\x18\x03 \x01(\tR\rparticipantId\x12\x19\n" +
+	"\bspace_id\x18\x04 \x01(\tR\aspaceId\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x05 \x01(\tR\terrorCode\x12#\n" +
 	"\rerror_message\x18\x06 \x01(\tR\ferrorMessage\"Z\n" +
@@ -15214,11 +15214,11 @@ const file_memql_proto_rawDesc = "" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x03 \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"\xbc\x01\n" +
+	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"\xb4\x01\n" +
 	"\x16VoiceAgentSessionStart\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
-	"\fpartition_id\x18\x02 \x01(\tR\vpartitionId\x12\x1e\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
+	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12\x1e\n" +
 	"\vga_agent_id\x18\x03 \x01(\tR\tgaAgentId\x12\x1b\n" +
 	"\troom_name\x18\x04 \x01(\tR\broomName\x12#\n" +
 	"\ravatar_vendor\x18\x05 \x01(\tR\favatarVendor\"\xce\x04\n" +
@@ -15241,17 +15241,17 @@ const file_memql_proto_rawDesc = "" +
 	"\n" +
 	"space_name\x18\r \x01(\tR\tspaceName\x12#\n" +
 	"\rspace_purpose\x18\x0e \x01(\tR\fspacePurpose\x12+\n" +
-	"\x11participant_names\x18\x0f \x03(\tR\x10participantNames\"\x8d\x01\n" +
+	"\x11participant_names\x18\x0f \x03(\tR\x10participantNames\"\x85\x01\n" +
 	"\x14VoiceAgentSessionEnd\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
-	"\fpartition_id\x18\x02 \x01(\tR\vpartitionId\x12\x1b\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
+	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12\x1b\n" +
 	"\troom_name\x18\x03 \x01(\tR\broomName\x12\x16\n" +
-	"\x06reason\x18\x04 \x01(\tR\x06reason\"\xc6\x01\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\"\xbe\x01\n" +
 	"\x1bVoiceAgentPartialTranscript\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
-	"\fpartition_id\x18\x02 \x01(\tR\vpartitionId\x12&\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
+	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12&\n" +
 	"\x0fspeaker_user_id\x18\x03 \x01(\tR\rspeakerUserId\x12!\n" +
 	"\fpartial_text\x18\x04 \x01(\tR\vpartialText\x12\x1a\n" +
 	"\bsequence\x18\x05 \x01(\x03R\bsequence\"\x93\x01\n" +
@@ -15261,11 +15261,11 @@ const file_memql_proto_rawDesc = "" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x03 \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"\x8d\x02\n" +
+	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"\x85\x02\n" +
 	"\x19VoiceAgentFinalTranscript\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
-	"\fpartition_id\x18\x02 \x01(\tR\vpartitionId\x12&\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
+	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12&\n" +
 	"\x0fspeaker_user_id\x18\x03 \x01(\tR\rspeakerUserId\x12\x1d\n" +
 	"\n" +
 	"final_text\x18\x04 \x01(\tR\tfinalText\x12\x1e\n" +
@@ -15282,11 +15282,11 @@ const file_memql_proto_rawDesc = "" +
 	"\x06thread\x18\x04 \x01(\tR\x06thread\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x05 \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\x06 \x01(\tR\ferrorMessage\"\xfb\x02\n" +
+	"\rerror_message\x18\x06 \x01(\tR\ferrorMessage\"\xf3\x02\n" +
 	"\x15VoiceAgentTurnRequest\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
-	"\fpartition_id\x18\x02 \x01(\tR\vpartitionId\x12&\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
+	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12&\n" +
 	"\x0fspeaker_user_id\x18\x03 \x01(\tR\rspeakerUserId\x12%\n" +
 	"\x0eutterance_text\x18\x04 \x01(\tR\rutteranceText\x12\x1e\n" +
 	"\vga_agent_id\x18\x05 \x01(\tR\tgaAgentId\x12M\n" +
@@ -15314,18 +15314,18 @@ const file_memql_proto_rawDesc = "" +
 	"\x0edirective_mode\x18\b \x01(\tR\rdirectiveMode\x12\x18\n" +
 	"\abrevity\x18\t \x01(\tR\abrevity\x12\x1c\n" +
 	"\tgrounding\x18\n" +
-	" \x01(\tR\tgrounding\"\xaa\x01\n" +
+	" \x01(\tR\tgrounding\"\xa2\x01\n" +
 	"\x0fVoiceAgentSpeak\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
-	"\fpartition_id\x18\x02 \x01(\tR\vpartitionId\x12\x1e\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
+	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12\x1e\n" +
 	"\vga_agent_id\x18\x03 \x01(\tR\tgaAgentId\x12!\n" +
 	"\futterance_id\x18\x04 \x01(\tR\vutteranceId\x12\x12\n" +
-	"\x04text\x18\x05 \x01(\tR\x04text\"\x8e\x02\n" +
+	"\x04text\x18\x05 \x01(\tR\x04text\"\x86\x02\n" +
 	"\x18VoiceAgentRealtimeOutput\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
-	"\fpartition_id\x18\x02 \x01(\tR\vpartitionId\x12\x1e\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
+	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12\x1e\n" +
 	"\vga_agent_id\x18\x03 \x01(\tR\tgaAgentId\x12\x19\n" +
 	"\breply_id\x18\x04 \x01(\tR\areplyId\x12\x12\n" +
 	"\x04text\x18\x05 \x01(\tR\x04text\x12\x1e\n" +
@@ -15338,11 +15338,11 @@ const file_memql_proto_rawDesc = "" +
 	"\futterance_id\x18\x03 \x01(\tR\vutteranceId\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x04 \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\x05 \x01(\tR\ferrorMessage\"\x9a\x01\n" +
+	"\rerror_message\x18\x05 \x01(\tR\ferrorMessage\"\x92\x01\n" +
 	"\x1aVoiceAgentRealtimeSpeaking\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
-	"\fpartition_id\x18\x02 \x01(\tR\vpartitionId\x12\x1e\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
+	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12\x1e\n" +
 	"\vga_agent_id\x18\x03 \x01(\tR\tgaAgentId\x12\x1a\n" +
 	"\bspeaking\x18\x04 \x01(\bR\bspeaking\"2\n" +
 	"\rRotateAuthMsg\x12!\n" +

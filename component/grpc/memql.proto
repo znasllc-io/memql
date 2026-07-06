@@ -1718,10 +1718,10 @@ message AgentTurnError {
 
 // SendGuestInviteMsg creates a guest invitation and emails the link
 // to the recipient. Caller must be an authenticated participant of
-// partition_id.
+// space_id.
 message SendGuestInviteMsg {
   string request_id = 1;
-  string partition_id = 2;
+  string space_id = 2;
   string space_name = 3;       // denormalized for the email body
   string inviter_name = 4;     // denormalized for the email body
   string email = 5;            // guest email address
@@ -1742,7 +1742,7 @@ message SendGuestInviteMsg {
 // carries a short machine-readable tag on failure:
 //   "" (empty)        -- success
 //   "invalid_email"   -- email failed validation
-//   "forbidden"       -- caller is not a participant of partition_id
+//   "forbidden"       -- caller is not a participant of space_id
 //   "space_not_found"
 //   "email_failed"    -- persistence succeeded but delivery did not;
 //                        invitation_id is set so the caller can retry
@@ -1773,7 +1773,7 @@ message ResolveGuestInviteResult {
   string request_id = 1;
   string status = 2;
   string invitation_id = 3;
-  string partition_id = 4;
+  string space_id = 4;
   string space_name = 5;
   string inviter_name = 6;
   string invitee_email = 7;
@@ -1809,7 +1809,7 @@ message JoinSpaceAsGuestResult {
   string request_id = 1;
   bool success = 2;
   string participant_id = 3;        // echoes the request value on success
-  string partition_id = 4;              // resolved from the guest claims
+  string space_id = 4;              // resolved from the guest claims
   string error_code = 5;
   string error_message = 6;
 }
@@ -2008,7 +2008,7 @@ message RevokeWorkerTokenResult {
 // canonical voice, persona image, and audio/video control state.
 message VoiceAgentSessionStart {
   string request_id = 1;
-  string partition_id = 2;      // v1:cognition:space.id
+  string space_id = 2;      // v1:cognition:space.id
   string ga_agent_id = 3;   // v1:agents:agent.id of the Assistant
   string room_name = 4;     // LiveKit room name
   // Optional: identity hint for the avatar vendor. Currently
@@ -2067,7 +2067,7 @@ message VoiceAgentSessionAck {
 // in-memory state.
 message VoiceAgentSessionEnd {
   string request_id = 1;
-  string partition_id = 2;
+  string space_id = 2;
   string room_name = 3;
   // Optional reason: 'normal', 'error', 'inactivity'.
   string reason = 4;
@@ -2079,7 +2079,7 @@ message VoiceAgentSessionEnd {
 // No graph row inserted -- partials are event-only.
 message VoiceAgentPartialTranscript {
   string request_id = 1;
-  string partition_id = 2;
+  string space_id = 2;
   string speaker_user_id = 3;   // v1:identity:user.id
   string partial_text = 4;
   // Monotonic per (space, user) so out-of-order events sort
@@ -2101,7 +2101,7 @@ message VoiceAgentPartialAck {
 // only content + speaker context.
 message VoiceAgentFinalTranscript {
   string request_id = 1;
-  string partition_id = 2;
+  string space_id = 2;
   string speaker_user_id = 3;
   string final_text = 4;
   // Provider confidence, 0.0-1.0 (provider-dependent).
@@ -2122,9 +2122,9 @@ message VoiceAgentFinalAck {
   bool success = 2;
   // Bare shortId of the inserted utterance (server-minted
   // "utt-<nanos>-<hex>"; the stored row id is
-  // v1:cognition:utterance:<this>). NOTE: the sibling
-  // VoiceAgentTurnComplete.utterance_id currently carries the CANONICAL
-  // row id -- #2441 (bare-ids cutover) aligns both surfaces on bare.
+  // v1:cognition:utterance:<this>). Aligned with the sibling
+  // VoiceAgentTurnComplete.utterance_id, which #2441 (bare-ids cutover)
+  // stripped to bare -- both surfaces now carry the bare shortId.
   string utterance_id = 3;
   string thread = 4;         // 'team' | 'group'
   string error_code = 5;
@@ -2138,7 +2138,7 @@ message VoiceAgentFinalAck {
 // execute server-side; voice-agent only ever sees the prose.
 message VoiceAgentTurnRequest {
   string request_id = 1;
-  string partition_id = 2;
+  string space_id = 2;
   string speaker_user_id = 3;
   // Final transcript text. Same content as the most-recent
   // VoiceAgentFinalTranscript; passed explicitly so the turn
@@ -2221,7 +2221,7 @@ message VoiceAgentTurnComplete {
 // Fire-and-forget: no ack message. Voice-agent logs failures.
 message VoiceAgentSpeak {
   string request_id = 1;
-  string partition_id = 2;
+  string space_id = 2;
   string ga_agent_id = 3;
   string utterance_id = 4;
   string text = 5;
@@ -2251,7 +2251,7 @@ message VoiceAgentSpeak {
 // citation-chip renderer handles them with no special-casing.
 message VoiceAgentRealtimeOutput {
   string request_id = 1;
-  string partition_id = 2;        // v1:cognition:space.id (bare slug ok)
+  string space_id = 2;        // v1:cognition:space.id (bare slug ok)
   string ga_agent_id = 3;     // v1:agents:agent.id of the speaking GA
   // Caller-minted utterance id; doubles as the chat streaming replyId.
   string reply_id = 4;
@@ -2300,7 +2300,7 @@ message VoiceAgentRealtimeOutputAck {
 // closes the turn.
 message VoiceAgentRealtimeSpeaking {
   string request_id = 1;
-  string partition_id = 2;      // v1:cognition:space.id (bare slug ok)
+  string space_id = 2;      // v1:cognition:space.id (bare slug ok)
   string ga_agent_id = 3;   // v1:agents:agent.id of the speaking GA
   // true = the GA started speaking this response (write presence responding);
   // false = the response is done (write presence idle).

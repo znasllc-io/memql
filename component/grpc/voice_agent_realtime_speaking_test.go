@@ -136,7 +136,7 @@ func TestHandleVoiceAgentRealtimeSpeaking_RoundTrip(t *testing.T) {
 	// speaking=true -> responding (the orb animates).
 	require.NoError(t, sess.handleVoiceAgentRealtimeSpeaking(
 		&memqlv1.MemqlClientMessage{MessageId: "m1"},
-		&memqlv1.VoiceAgentRealtimeSpeaking{PartitionId: partitionId, GaAgentId: "v1:agents:agent:assistant-1421", Speaking: true},
+		&memqlv1.VoiceAgentRealtimeSpeaking{SpaceId: partitionId, GaAgentId: "v1:agents:agent:assistant-1421", Speaking: true},
 	))
 	require.Eventually(t, func() bool { return readPresenceState() == "responding" },
 		3*time.Second, 25*time.Millisecond, "first output audio writes presence state=responding")
@@ -144,7 +144,7 @@ func TestHandleVoiceAgentRealtimeSpeaking_RoundTrip(t *testing.T) {
 	// speaking=false -> idle (the orb stops).
 	require.NoError(t, sess.handleVoiceAgentRealtimeSpeaking(
 		&memqlv1.MemqlClientMessage{MessageId: "m2"},
-		&memqlv1.VoiceAgentRealtimeSpeaking{PartitionId: partitionId, GaAgentId: "v1:agents:agent:assistant-1421", Speaking: false},
+		&memqlv1.VoiceAgentRealtimeSpeaking{SpaceId: partitionId, GaAgentId: "v1:agents:agent:assistant-1421", Speaking: false},
 	))
 	require.Eventually(t, func() bool { return readPresenceState() == "idle" },
 		3*time.Second, 25*time.Millisecond, "response.done writes presence state=idle")
@@ -159,7 +159,7 @@ func TestHandleVoiceAgentRealtimeSpeaking_MissingFields(t *testing.T) {
 
 	require.NoError(t, sess.handleVoiceAgentRealtimeSpeaking(
 		&memqlv1.MemqlClientMessage{MessageId: "m1"},
-		&memqlv1.VoiceAgentRealtimeSpeaking{PartitionId: "", GaAgentId: "", Speaking: true},
+		&memqlv1.VoiceAgentRealtimeSpeaking{SpaceId: "", GaAgentId: "", Speaking: true},
 	))
 	require.NoError(t, sess.handleVoiceAgentRealtimeSpeaking(
 		&memqlv1.MemqlClientMessage{MessageId: "m2"}, nil,

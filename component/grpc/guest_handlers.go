@@ -310,6 +310,10 @@ func (s *streamSession) handleSendGuestInvite(envelope *memqlv1.MemqlClientMessa
 
 	sendResult := func(result *memqlv1.SendGuestInviteResult) error {
 		result.RequestId = requestId
+		// #2441 seam 5: bare-ify id reflections at the guest wire seam. The
+		// invitation is looked up via an in-process engine query, whose ids
+		// stay canonical; strip them here so the /join client sees bare.
+		result.InvitationId = memqlengine.BareShortId(result.InvitationId)
 		return s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
 			Payload: &memqlv1.MemqlServerMessage_SendGuestInviteResult{
 				SendGuestInviteResult: result,
@@ -317,7 +321,7 @@ func (s *streamSession) handleSendGuestInvite(envelope *memqlv1.MemqlClientMessa
 		})
 	}
 
-	partitionId := strings.TrimSpace(msg.GetPartitionId())
+	partitionId := strings.TrimSpace(msg.GetSpaceId())
 	emailAddr := strings.ToLower(strings.TrimSpace(msg.GetEmail()))
 	joinURLBase := strings.TrimRight(strings.TrimSpace(msg.GetJoinUrlBase()), "/")
 
@@ -454,6 +458,11 @@ func (s *streamSession) handleResolveGuestInvite(envelope *memqlv1.MemqlClientMe
 
 	send := func(result *memqlv1.ResolveGuestInviteResult) error {
 		result.RequestId = requestId
+		// #2441 seam 5: bare-ify id reflections (the resolve path reads the
+		// invitation via an in-process canonical query). The public /join
+		// landing page consumes bare ids.
+		result.InvitationId = memqlengine.BareShortId(result.InvitationId)
+		result.SpaceId = memqlengine.BareShortId(result.SpaceId)
 		return s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
 			Payload: &memqlv1.MemqlServerMessage_ResolveGuestInviteResult{
 				ResolveGuestInviteResult: result,
@@ -489,7 +498,7 @@ func (s *streamSession) handleResolveGuestInvite(envelope *memqlv1.MemqlClientMe
 		if previous != nil {
 			result := &memqlv1.ResolveGuestInviteResult{
 				InvitationId: previous.ID,
-				PartitionId:  previous.PartitionId,
+				SpaceId:      previous.PartitionId,
 				SpaceName:    previous.SpaceName,
 				InviterName:  previous.InviterName,
 				InviteeEmail: previous.InviteeEmail,
@@ -508,7 +517,7 @@ func (s *streamSession) handleResolveGuestInvite(envelope *memqlv1.MemqlClientMe
 	// Derive status from the record.
 	result := &memqlv1.ResolveGuestInviteResult{
 		InvitationId: summary.ID,
-		PartitionId:  summary.PartitionId,
+		SpaceId:      summary.PartitionId,
 		SpaceName:    summary.SpaceName,
 		InviterName:  summary.InviterName,
 		InviteeEmail: summary.InviteeEmail,
@@ -626,6 +635,9 @@ func (s *streamSession) handleJoinSpaceAsGuest(envelope *memqlv1.MemqlClientMess
 
 	send := func(result *memqlv1.JoinSpaceAsGuestResult) error {
 		result.RequestId = requestId
+		// #2441 seam 5: bare-ify id reflections at the guest join wire seam.
+		result.ParticipantId = memqlengine.BareShortId(result.ParticipantId)
+		result.SpaceId = memqlengine.BareShortId(result.SpaceId)
 		return s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
 			Payload: &memqlv1.MemqlServerMessage_JoinSpaceAsGuestResult{
 				JoinSpaceAsGuestResult: result,
@@ -726,7 +738,7 @@ func (s *streamSession) handleJoinSpaceAsGuest(envelope *memqlv1.MemqlClientMess
 	return send(&memqlv1.JoinSpaceAsGuestResult{
 		Success:       true,
 		ParticipantId: participantId,
-		PartitionId:   partitionId,
+		SpaceId:       partitionId,
 	})
 }
 

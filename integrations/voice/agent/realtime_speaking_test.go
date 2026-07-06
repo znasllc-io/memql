@@ -56,8 +56,8 @@ func newSpeakingExecutor(t *testing.T) (*RealtimeExecutor, *fakeSpeakingSender) 
 	rt := newFakeRealtimeSession()
 	sink := &recordingSink{}
 	e := NewRealtimeExecutor(context.Background(), CascadeConfig{
-		PartitionID:   "s1",
-		GaAgentID: "s1-ga",
+		PartitionID: "s1",
+		GaAgentID:   "s1-ga",
 	}, nil, rt, sink, SessionPersona{Instructions: "be helpful"}, nil)
 	t.Cleanup(e.Close)
 	sender := &fakeSpeakingSender{}
@@ -74,7 +74,7 @@ func TestEmitSpeaking_WireShape(t *testing.T) {
 
 	sig := sender.last()
 	require.NotNil(t, sig, "a speaking signal is emitted")
-	assert.Equal(t, "s1", sig.GetPartitionId())
+	assert.Equal(t, "s1", sig.GetSpaceId())
 	assert.Equal(t, "s1-ga", sig.GetGaAgentId())
 	assert.True(t, sig.GetSpeaking(), "first emit is responding")
 }
@@ -124,8 +124,8 @@ func TestRealtimeExecutor_SpeakingSignal_FirstAudioThenDone(t *testing.T) {
 	rt := newFakeRealtimeSession()
 	sink := &recordingSink{}
 	e := NewRealtimeExecutor(context.Background(), CascadeConfig{
-		PartitionID:   "s1",
-		GaAgentID: "s1-ga",
+		PartitionID: "s1",
+		GaAgentID:   "s1-ga",
 	}, nil, rt, sink, SessionPersona{Instructions: "be helpful"}, nil)
 	t.Cleanup(e.Close)
 	sender := &fakeSpeakingSender{}

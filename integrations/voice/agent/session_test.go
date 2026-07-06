@@ -94,7 +94,7 @@ func TestSession_Run_HandshakeAndEnd(t *testing.T) {
 	assert.NotNil(t, sent[0].GetVoiceAgentSessionStart())
 	last := sent[len(sent)-1]
 	require.NotNil(t, last.GetVoiceAgentSessionEnd())
-	assert.Equal(t, "space-42", last.GetVoiceAgentSessionEnd().GetPartitionId())
+	assert.Equal(t, "space-42", last.GetVoiceAgentSessionEnd().GetSpaceId())
 	assert.Equal(t, "normal", last.GetVoiceAgentSessionEnd().GetReason())
 }
 

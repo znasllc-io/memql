@@ -279,7 +279,7 @@ func (s *Session) start(ctx context.Context) (SessionAck, error) {
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentSessionStart{
 			VoiceAgentSessionStart: &memqlv1.VoiceAgentSessionStart{
-				PartitionId:  s.spaceID,
+				SpaceId:      s.spaceID,
 				GaAgentId:    s.gaAgentID,
 				RoomName:     s.roomName,
 				AvatarVendor: s.cfg.AvatarVendor,
@@ -338,9 +338,9 @@ func (s *Session) end(ctx context.Context, reason string) {
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentSessionEnd{
 			VoiceAgentSessionEnd: &memqlv1.VoiceAgentSessionEnd{
-				PartitionId: s.spaceID,
-				RoomName:    s.roomName,
-				Reason:      reason,
+				SpaceId:  s.spaceID,
+				RoomName: s.roomName,
+				Reason:   reason,
 			},
 		},
 	}

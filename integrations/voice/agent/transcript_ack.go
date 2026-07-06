@@ -41,11 +41,11 @@ func sendFinalTranscript(ctx context.Context, client *Client, logger *slog.Logge
 	if err != nil {
 		if logger != nil {
 			logger.Warn("voice-agent final transcript send failed",
-				"executor", executor, "partition_id", msg.GetPartitionId(), "err", err)
+				"executor", executor, "partition_id", msg.GetSpaceId(), "err", err)
 		}
 		return
 	}
-	go consumeFinalTranscriptReply(ctx, logger, executor, msg.GetPartitionId(), sendStart, replies, release)
+	go consumeFinalTranscriptReply(ctx, logger, executor, msg.GetSpaceId(), sendStart, replies, release)
 }
 
 // consumeFinalTranscriptReply awaits the server's reply to one final
