@@ -6,6 +6,7 @@ import type {
   ConceptInfoWire,
   EventPayload,
   GraphBundleWire,
+  GraphNodeActionWire,
   MyAccessResultPayload,
   QueryResultPayload,
   ResultMetaWire,
@@ -71,6 +72,11 @@ export interface Event {
   timestamp: Date | null;
   payload: Record<string, unknown> | null;
 }
+
+// GraphAction is a CDC verb a structured graph subscription filters on
+// (memql#2460). The server composes the bus topic from the concept +
+// actions, so the client never writes a topic string.
+export type GraphAction = "created" | "updated" | "deleted";
 
 // Row is the shape-flattened form every query / mutation returns. Keys
 // depend on the construct's bound shape; field-access helpers below
@@ -180,6 +186,16 @@ const subscriptionKindToWire: Record<SubscriptionKind, SubscriptionKindWire> = {
 
 export function subscriptionKindWire(k: SubscriptionKind): SubscriptionKindWire {
   return subscriptionKindToWire[k] ?? "SUBSCRIPTION_KIND_UNSPECIFIED";
+}
+
+const graphActionToWire: Record<GraphAction, GraphNodeActionWire> = {
+  created: "GRAPH_NODE_ACTION_CREATED",
+  updated: "GRAPH_NODE_ACTION_UPDATED",
+  deleted: "GRAPH_NODE_ACTION_DELETED",
+};
+
+export function graphActionWire(a: GraphAction): GraphNodeActionWire {
+  return graphActionToWire[a] ?? "GRAPH_NODE_ACTION_UNSPECIFIED";
 }
 
 const userRoleFromWire: Record<UserRoleWire, Role> = {

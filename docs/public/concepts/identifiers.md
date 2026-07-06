@@ -156,9 +156,11 @@ reject it.
 Because an outbound id is bare, it is only unique **within its concept**.
 Clients key a row by the pair `(concept, id)`, never by the id alone:
 
-- The concept comes from the subscription topic
-  (`graph.node.created.<concept>`), the row's own `concept` field, or the
-  construct's bound concept.
+- The concept comes from the row's own `concept` field (first-class on
+  every event payload), the structured graph subscription the client
+  opened (`concept` + `actions`, memql#2460 -- the client already knows
+  what it subscribed to), or the construct's bound concept. Clients never
+  parse it out of the `topic` string.
 - sdk-gen emits this metadata so a client never hardcodes it:
   `generated_concepts.ts` exports `Concepts`, `BoundConcepts`
   (construct -> concept), `CDCTopics` (`graph.node.<action>.<concept>`),
@@ -353,7 +355,7 @@ DSL -- the client surface has no id-composition to get wrong):
 |---|---|
 | Send an id to the engine | Send the **bare** shortId as-is. Never prepend `{concept}:` |
 | Compare two ids you received | Bare string equality **within the same concept** (`a === b`) |
-| Uniquely key a row | The pair `(concept, id)` -- concept from the topic / `concept` field / `BoundConcepts`, id bare |
+| Uniquely key a row | The pair `(concept, id)` -- concept from the event's `concept` field / the structured subscription / `BoundConcepts`, id bare |
 | Know a construct's or subscription's concept | Import `Concepts` / `BoundConcepts` / `CDCTopics` / `CDCFilters` from the generated SDK (`generated_concepts.ts`) |
 | Strip / parse / compose a canonical id | **Nothing.** There is no client id-composition. If you reach for it, the producer or your keying is wrong |
 

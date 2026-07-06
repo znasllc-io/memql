@@ -124,6 +124,39 @@ func NormalizePattern(pattern string) string {
 	return pattern
 }
 
+// GraphSubscriptionPatterns composes the bus topic pattern(s) for a
+// STRUCTURED graph subscription (memql#2460). The client sends a concept
+// TYPE id + a set of CDC action verbs; the server composes the topic so
+// the `graph.node.<action>.<concept>` grammar never appears on the client
+// wire.
+//
+//   - concept == ""  -> "#" (all concepts). A concept id carries no dots,
+//     so the whole trailing remainder is one logical segment.
+//   - len(actions) == 0 -> a single "graph.node.*.<concept>" pattern
+//     ("*" matches exactly the one action segment).
+//   - otherwise -> one "graph.node.<verb>.<concept>" pattern per verb
+//     (created/updated/deleted are disjoint, so the N patterns never
+//     double-match a single topic).
+//
+// The result is fed straight to bus Subscribe + Match; it is the
+// server-side equivalent of the retired client filter
+// "node.<action>.<concept>" that TopicPatternFromSubscriptionKind used to
+// prefix with "graph.".
+func GraphSubscriptionPatterns(concept string, actions []string) []string {
+	conceptSeg := strings.TrimSpace(concept)
+	if conceptSeg == "" {
+		conceptSeg = "#"
+	}
+	if len(actions) == 0 {
+		return []string{TopicGraphNode + ".*." + conceptSeg}
+	}
+	patterns := make([]string, 0, len(actions))
+	for _, action := range actions {
+		patterns = append(patterns, TopicGraphNode+"."+action+"."+conceptSeg)
+	}
+	return patterns
+}
+
 // BuildTopicWithConcept creates a topic string with an optional concept suffix.
 // Format: baseTopic.{concept}
 // Example: "graph.node.created.v1:cognition:participant"

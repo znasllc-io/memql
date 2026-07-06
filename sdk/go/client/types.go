@@ -122,6 +122,33 @@ func (k SubscriptionKind) toProto() memqlv1.SubscriptionKind {
 	}
 }
 
+// GraphAction is a CDC verb a structured graph subscription filters on
+// (memql#2460). It mirrors memqlv1.GraphNodeAction but stays inside the
+// SDK so callers don't import the proto enum.
+type GraphAction string
+
+const (
+	GraphActionCreated GraphAction = "created"
+	GraphActionUpdated GraphAction = "updated"
+	GraphActionDeleted GraphAction = "deleted"
+)
+
+// toProto converts an SDK GraphAction to its memqlv1 equivalent. An
+// unknown value maps to UNSPECIFIED, which the server rejects inside a
+// populated actions list.
+func (a GraphAction) toProto() memqlv1.GraphNodeAction {
+	switch a {
+	case GraphActionCreated:
+		return memqlv1.GraphNodeAction_GRAPH_NODE_ACTION_CREATED
+	case GraphActionUpdated:
+		return memqlv1.GraphNodeAction_GRAPH_NODE_ACTION_UPDATED
+	case GraphActionDeleted:
+		return memqlv1.GraphNodeAction_GRAPH_NODE_ACTION_DELETED
+	default:
+		return memqlv1.GraphNodeAction_GRAPH_NODE_ACTION_UNSPECIFIED
+	}
+}
+
 // =============================================================================
 // Event
 // =============================================================================

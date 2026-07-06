@@ -46,38 +46,41 @@ Events are organized into hierarchical topics using dot notation. Subscribers ca
 
 | Topic | Kind | Description |
 |-------|------|-------------|
-| `graph.node.created` | `NODE_CREATED` | Base topic for node creation |
-| `graph.node.created.{partition}.{concept}` | `NODE_CREATED` | Partition + concept-specific (e.g., `graph.node.created.acme.v1:cognition:participant`) |
-| `graph.node.deleted` | `NODE_DELETED` | Base topic for node deletion |
-| `graph.node.deleted.{partition}.{concept}` | `NODE_DELETED` | Partition + concept-specific deletion |
-| `graph.node.updated` | `NODE_UPDATED` | Base topic for node updates |
-| `graph.node.updated.{partition}.{concept}` | `NODE_UPDATED` | Partition + concept-specific updates |
+| `graph.node.created.{concept}` | `NODE_CREATED` | Concept-specific creation (e.g., `graph.node.created.v1:cognition:participant`) |
+| `graph.node.updated.{concept}` | `NODE_UPDATED` | Concept-specific update |
+| `graph.node.deleted.{concept}` | `NODE_DELETED` | Concept-specific deletion |
 
-Event topics include a partition segment between the base topic and the concept. The `*` wildcard matches any single partition in subscription patterns (e.g., `graph.node.created.*.v1:cognition:participant`).
+Graph CDC topics are exactly four segments: `graph.node.{action}.{concept}`.
+The concept id carries no dots (it is colon-delimited), so it occupies the
+single trailing segment. (The old `{partition}` segment between the action
+and the concept was retired in #56 -- topics are concept-keyed, not
+partition-keyed.)
 
-**System-level concepts and the `_system` partition.** System-level
-rows (cluster topology, partition registry, globally-scoped seeds, and
-similar infrastructure metadata) are stored in the reserved `_system`
-partition regardless of the request envelope. Their events therefore
-fire under topics like
-`graph.node.created._system.v1:cluster:node`. Subscribers that use a
-wildcard on the partition segment (e.g. `node.*.*.v1:cluster:node`)
-match these events without modification; subscribers that need to
-target only global events can use `graph.node.created._system.#`. The
-underscore prefix on `_system` is reserved and cannot be used as a
-user-chosen partition name.
+> **Composing these topics is the SERVER's job.** Clients do NOT write
+> topic strings. A structured graph subscription carries a `concept` +
+> a set of `actions`, and the engine composes the bus topic (memql#2460).
+> See [Client Subscriptions](#client-subscriptions) below. The topic
+> grammar in this table is documented for observability, not as a
+> client-authored wire string.
 
-**Payload for node events:**
+**Payload for node events:** the node's own `concept` (type id) and the
+`eventKind` (`node_created` / `node_updated` / `node_deleted`) are
+first-class fields -- a client matches on those, never by parsing the
+`topic` string.
 ```json
 {
-  "partition": "acme",
-  "nodeId": "v1:agents:agent:abc123",
+  "id": "abc123",
+  "nodeId": "abc123",
   "concept": "v1:agents:agent",
+  "eventKind": "node_created",
   "actor": "user@example.com",
   "nodeType": "object",
   "createdAt": "2026-03-24T10:30:00Z"
 }
 ```
+(Ids in the payload are **bare** on the client wire per the bare-ids
+contract; `concept` / `topic` / `eventKind` are concept-carrier keys and
+stay verbatim. See [Node Identifier Conventions](identifiers.md).)
 
 ### Query Events
 
@@ -228,8 +231,10 @@ Clients can subscribe to events by sending a `SubscribeMsg` over the bidirection
 message SubscribeMsg {
   string subscription_id = 1;
   SubscriptionKind kind = 2;
-  string filter = 3;
+  string filter = 3;                      // legacy free-text; NON-graph kinds only
   google.protobuf.Struct config = 4;
+  string concept = 5;                     // structured graph subscribe (memql#2460)
+  repeated GraphNodeAction actions = 6;   // structured graph subscribe
 }
 
 enum SubscriptionKind {
@@ -239,50 +244,66 @@ enum SubscriptionKind {
   SUBSCRIPTION_KIND_QUERY_SPEC = 300;
   SUBSCRIPTION_KIND_AI_STREAM = 400;
   SUBSCRIPTION_KIND_GRAPH_EVENTS = 500;
+  SUBSCRIPTION_KIND_DOMAIN_EVENTS = 550;
   SUBSCRIPTION_KIND_AUTOMATION_EVENTS = 600;
   SUBSCRIPTION_KIND_ALL = 700;
 }
+
+enum GraphNodeAction {
+  GRAPH_NODE_ACTION_UNSPECIFIED = 0;
+  GRAPH_NODE_ACTION_CREATED = 1;
+  GRAPH_NODE_ACTION_UPDATED = 2;
+  GRAPH_NODE_ACTION_DELETED = 3;
+}
 ```
 
-### Subscription Kinds
+### Graph subscriptions are STRUCTURED (memql#2460)
 
-| Kind | Value | Default Pattern |
-|------|-------|-----------------|
-| `SUBSCRIPTION_KIND_TELEMETRY` | 100 | `telemetry.#` |
-| `SUBSCRIPTION_KIND_MESSAGE` | 200 | `message.#` |
-| `SUBSCRIPTION_KIND_QUERY_SPEC` | 300 | `query.#` |
-| `SUBSCRIPTION_KIND_AI_STREAM` | 400 | `ai.#` |
-| `SUBSCRIPTION_KIND_GRAPH_EVENTS` | 500 | `graph.#` |
-| `SUBSCRIPTION_KIND_AUTOMATION_EVENTS` | 600 | `automation.#` |
-| `SUBSCRIPTION_KIND_ALL` | 700 | `#` (matches everything) |
+A graph subscription (`SUBSCRIPTION_KIND_GRAPH_EVENTS`) carries a
+`concept` + a set of `actions`, and the **server composes the bus
+topic**. The client never writes a `graph.node.<action>.<concept>`
+string, so the topic grammar is not part of the client wire contract --
+a future grammar change is no longer a wire change.
 
-### Filter Patterns
+- `concept` -- canonical concept TYPE id (e.g. `v1:cognition:utterance`).
+  A concept type is legitimately client-visible; import it from the
+  generated SDK (`Concepts.COGNITION_UTTERANCE`). **Empty = all concepts.**
+- `actions` -- the CDC verbs to receive. **Empty = all actions.**
 
-The `filter` field allows further refinement using glob patterns:
+The server composes one bus pattern per action (`graph.node.<verb>.<concept>`),
+using `#` for all-concepts and `*` for all-actions.
 
-- `*` - Matches exactly one segment
-- `#` - Matches zero or more segments
+**The legacy free-text `filter` is REJECTED for graph subscriptions** --
+sending it on a `GRAPH_EVENTS` subscribe returns a `subscription-error`.
+`filter` survives only for the non-graph kinds below.
 
-**Examples:**
+| Kind | Value | Subscribe surface | Default (empty) |
+|------|-------|-------------------|-----------------|
+| `SUBSCRIPTION_KIND_GRAPH_EVENTS` | 500 | **structured** (`concept` + `actions`) | all concepts, all actions |
+| `SUBSCRIPTION_KIND_TELEMETRY` | 100 | free-text `filter` | `telemetry.#` |
+| `SUBSCRIPTION_KIND_MESSAGE` | 200 | free-text `filter` | `message.#` |
+| `SUBSCRIPTION_KIND_QUERY_SPEC` | 300 | free-text `filter` | `query.#` |
+| `SUBSCRIPTION_KIND_AI_STREAM` | 400 | free-text `filter` | `ai.#` |
+| `SUBSCRIPTION_KIND_DOMAIN_EVENTS` | 550 | free-text `filter` | `#` |
+| `SUBSCRIPTION_KIND_AUTOMATION_EVENTS` | 600 | free-text `filter` | `automation.#` |
+| `SUBSCRIPTION_KIND_ALL` | 700 | (none) | `#` (matches everything) |
 
-| Pattern | Matches | Doesn't Match |
-|---------|---------|---------------|
-| `graph.node.*` | `graph.node.created`, `graph.node.deleted` | `graph.node.created.acme.v1:notes:note` |
-| `graph.node.created.*.v1:notes:note` | `graph.node.created.acme.v1:notes:note` | `graph.node.created` |
-| `graph.#` | All graph events | `si.completion.started` |
-| `*.*.created` | `graph.node.created` | `graph.node.created.acme.v1:notes:note` |
+Supplying the structured `concept`/`actions` on a non-graph kind is
+also rejected.
+
+**Free-text filter glob grammar** (non-graph kinds): `*` matches exactly
+one segment, `#` matches zero or more segments.
 
 ### Example: Subscribe to All Graph Events
 
 ```javascript
-// Via WebSocket
+// Via WebSocket -- empty concept + empty actions = every graph event.
 ws.send(JSON.stringify({
   message_id: "sub-1",
   payload: {
     subscribe: {
       subscription_id: "my-graph-sub",
-      kind: 500, // SUBSCRIPTION_KIND_GRAPH_EVENTS
-      filter: ""
+      kind: 500 // SUBSCRIPTION_KIND_GRAPH_EVENTS
     }
   }
 }));
@@ -291,18 +312,26 @@ ws.send(JSON.stringify({
 ### Example: Subscribe to Specific Concept Events
 
 ```javascript
-// Subscribe only to note-creation events (any partition)
+// Subscribe only to note creations. The SERVER composes the topic
+// graph.node.created.v1:notes:note; the client sends no topic string.
 ws.send(JSON.stringify({
   message_id: "sub-2",
   payload: {
     subscribe: {
       subscription_id: "note-events",
       kind: 500, // SUBSCRIPTION_KIND_GRAPH_EVENTS
-      filter: "node.created.*.v1:notes:note"  // Results in pattern: graph.node.created.*.v1:notes:note
+      concept: "v1:notes:note",
+      actions: ["GRAPH_NODE_ACTION_CREATED"]
     }
   }
 }));
 ```
+
+The SDKs wrap this: the TS core SDK exposes
+`SubscriptionManager.subscribeGraph(handler, { concept, actions })` and
+the Go SDK exposes `SubscriptionManager.SubscribeGraph(ctx, GraphSubscribeOptions{...})`.
+The legacy free-text `subscribe(pattern)` / `Subscribe(kind, filter)`
+paths remain for the non-graph kinds and reject `graph_events`.
 
 ### Example: Subscribe to Automation Events
 
