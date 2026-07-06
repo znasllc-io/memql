@@ -342,22 +342,25 @@ mutate chunk emitTextChunk {
 // Creates (or re-creates) a human participant record for a space.
 //
 // IDEMPOTENCY:
-// The participant id is content-addressed on (canonical partitionId,
-// canonical userId). Both args go through canonicalId() before
-// hashing, so the id is invariant whether the caller passes a bare
-// slug ("user-abc") or an already-canonical id
-// ("_system:v1:identity:user:user-abc"). Repeat joins land on the
-// SAME participant id; memQL stores them as time-series versions of
-// one logical row, and the latest-version dedup at query time keeps
-// the UI from rendering doubles.
+// The participant id is content-addressed on (partitionId as passed,
+// canonicalId(userId)). Only userId goes through canonicalId() before
+// hashing, so the id is invariant to userId's input shape (bare slug
+// "user-abc" vs canonical "v1:identity:user:user-abc"). partitionId is
+// NOT canonicalId()'d: it carries a v1:cognition:space id whose concept
+// is PACK-OWNED and unknown to the engine, so the caller must pass it in
+// one consistent shape (bare post-#2441). Repeat joins with the same
+// inputs land on the SAME participant id; memQL stores them as
+// time-series versions of one logical row, and the latest-version dedup
+// at query time keeps the UI from rendering doubles.
 //
-// The payload's partitionId and userId also get canonicalized at insert
-// time by the engine's @relationship auto-canon (see
-// MemQLEngine.canonicalizeRelationshipFields), so `payload.userId
-// == arg(...)` queries match consistently regardless of input
-// shape. The explicit canonicalId() calls below are still required
-// for the id derivation -- the id is computed BEFORE the payload is
-// canonicalized, so the engine's auto-canon doesn't see it.
+// On insert, ONLY payload.userId is canonicalized by the engine's
+// @relationship auto-canon (the → user relationship; see
+// MemQLEngine.canonicalizeRelationshipFields), so `payload.userId ==
+// arg(...)` matches regardless of input shape. payload.partitionId has
+// NO @relationship (its target space is pack-owned), so it is stored
+// exactly as the caller passes it -- NOT auto-canonicalized. This is
+// why A2's (#2441) egress bare-ification of space-id payload fields
+// keys on an explicit field-name set, not on relationship metadata.
 
 @enabled
 @description("Join a space as a human participant.")
