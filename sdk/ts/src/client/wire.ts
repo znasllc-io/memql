@@ -83,7 +83,7 @@ export interface AiTranscribeStreamEndPayload {
 
 export interface SendGuestInvitePayload {
   requestId: string;
-  partitionId: string;
+  spaceId: string;
   spaceName: string;
   inviterName: string;
   email: string;
@@ -398,7 +398,7 @@ export interface ResolveGuestInviteResultPayload {
   // "ok" | "invalid" | "expired" | "already_accepted" | "cancelled"
   status?: string;
   invitationId?: string;
-  partitionId?: string;
+  spaceId?: string;
   spaceName?: string;
   inviterName?: string;
   inviteeEmail?: string;
@@ -411,7 +411,7 @@ export interface JoinSpaceAsGuestResultPayload {
   requestId: string;
   success?: boolean;
   participantId?: string;
-  partitionId?: string;
+  spaceId?: string;
   errorCode?: string;
   errorMessage?: string;
 }
