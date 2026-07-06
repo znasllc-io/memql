@@ -232,6 +232,310 @@ func TestNoShortIdConceptPrefix(t *testing.T) {
 	}
 }
 
+// TestNoCanonicalPatternOnArgs asserts that no args-block field in the
+// ENGINE's embedded core tree carries a `@pattern("^v1:...")` -- a regex
+// anchored on the canonical `{concept}:{shortId}` id form. Such a pattern
+// FORCES the client to compose a canonical id just to call the construct,
+// which is exactly the coupling the bare-ids client contract (#2438) is
+// removing: canonicalization is server-side only, clients pass BARE ids.
+//
+// Scope (staged rollout -- #2438 workstream A): this gate runs against the
+// engine's embedded tree ONLY. In the `dsl` test package no product carrier
+// is registered, so Tree() is the pure engine tree. The carrier still ships
+// ~55 canonical arg patterns; those are removed in A3 (#2442) as part of the
+// carrier contract flip, at which point the same conformance (packs run it
+// via DSL registration) gates them too. Keeping A1 engine-scoped lets this
+// land ahead of the carrier sweep without a cross-repo lockstep.
+//
+// Detection is line-structure-only (no full parser): walk each .memql file,
+// track `args { ... }` spans by brace depth, and flag any line inside such a
+// span whose text carries `@pattern("^v1:` (optionally without the `^`
+// anchor). The one engine-tree occurrence today -- spaceMedia.partitionId in
+// dsl/common/queries.memql -- is EXEMPTED: its arg carries a v1:cognition:space
+// id, whose `space` concept is PACK-OWNED (absent from the engine tree), so the
+// engine cannot declare an @relationship to make a bare arg resolve; and
+// relaxing it to a bare-only pattern ahead of the SPA cutover (A4 #2443) would
+// reject the canonical ids the current SPA still sends. Its coordinated
+// relaxation rides A2's partition_id->space_id rename bundle (#2441).
+func TestNoCanonicalPatternOnArgs(t *testing.T) {
+	// canonicalArgPattern matches an args-field @pattern whose regex source is
+	// anchored on the canonical id form (`^v1:` or a bare `v1:` literal head).
+	canonicalArgPattern := regexp.MustCompile(`@pattern\("\^?v1:`)
+	// argsOpen matches the start of an `args { ... }` block (contextual
+	// keyword `args` immediately followed by `{`).
+	argsOpen := regexp.MustCompile(`\bargs\s*\{`)
+	// constructName captures the enclosing query/mutation/logic name so the
+	// exemption key is stable across line-number churn.
+	constructName := regexp.MustCompile(`^\s*(?:query|mutation|logic|seed)\s+(?:\w+\s+)?(\w+)\s*\{`)
+
+	// Exemptions keyed by `<file>::<construct>.<field>` -- line-number-free so
+	// edits above the field don't silently drop the exemption.
+	exemptions := map[string]string{
+		"common/queries.memql::spaceMedia.partitionId": "carries a v1:cognition:space id; `space` is pack-owned (not in the engine tree) so no @relationship can canonicalize a bare arg here, and a bare-only pattern would reject the canonical ids the current SPA sends. Rides A2's partition_id->space_id rename bundle (#2441) + A4 SPA cutover (#2443).",
+	}
+
+	type violation struct {
+		file  string
+		line  int
+		field string
+		text  string
+	}
+	var violations []violation
+
+	tree := Tree()
+	paths, err := dslfs.WalkMemqlFiles(tree)
+	if err != nil {
+		t.Fatalf("WalkMemqlFiles: %v", err)
+	}
+	for _, p := range paths {
+		if strings.HasPrefix(p, "_reference/") {
+			continue
+		}
+		file, openErr := tree.Open(p)
+		if openErr != nil {
+			t.Fatalf("open %s: %v", p, openErr)
+		}
+		raw, readErr := io.ReadAll(file)
+		file.Close()
+		if readErr != nil {
+			t.Fatalf("read %s: %v", p, readErr)
+		}
+
+		depth := 0
+		argsBaseDepth := -1 // -1 when not inside an args block
+		construct := ""
+		for lineno, line := range strings.Split(string(raw), "\n") {
+			code := stripLineComment(line)
+			if m := constructName.FindStringSubmatch(code); m != nil {
+				construct = m[1]
+			}
+			// Enter an args span (the depth recorded is the pre-brace depth so
+			// the matching close returns us to it).
+			if argsBaseDepth == -1 && argsOpen.MatchString(code) {
+				argsBaseDepth = depth
+			}
+			if argsBaseDepth != -1 && canonicalArgPattern.MatchString(code) {
+				field := "?"
+				if fm := regexp.MustCompile(`^\s*(\w+)`).FindStringSubmatch(code); fm != nil {
+					field = fm[1]
+				}
+				key := p + "::" + construct + "." + field
+				if _, ok := exemptions[key]; !ok {
+					violations = append(violations, violation{p, lineno + 1, field, strings.TrimSpace(line)})
+				}
+			}
+			depth += strings.Count(code, "{") - strings.Count(code, "}")
+			if argsBaseDepth != -1 && depth <= argsBaseDepth {
+				argsBaseDepth = -1
+			}
+		}
+	}
+
+	if len(violations) > 0 {
+		t.Errorf("found %d args field(s) with a canonical-id @pattern (#2438: clients pass BARE ids -- drop the pattern or relax it to a bare-slug form):", len(violations))
+		for _, v := range violations {
+			t.Errorf("  %s:%d  arg %q: %s", v.file, v.line, v.field, v.text)
+		}
+	}
+}
+
+// idBearingFieldExemptions lists concept payload fields that LOOK like a
+// node-id foreign key (a `*Id` name whose @description names a `v1:ns:concept`
+// row) but are deliberately NOT annotated with `@relationship`. Keyed by
+// `<namespace>/<concept>.<field>`; the value is the one-line justification.
+//
+// Why a field lands here (see TestIdBearingFieldsDeclareRelationship):
+//   - pack-owned-target: the target concept (space / client / knowledgeDomain /
+//     document) is NOT in the engine tree, so the engine cannot declare an
+//     @relationship to it. These flip in A2 (#2441, incl. the partition_id ->
+//     space_id rename) once the wire owns both id directions.
+//   - plain-fk-by-design: the field's own @description already declares it a
+//     "plain string FK, not a @relationship" -- typically part of a composite
+//     id (concat(deploymentId, ':', nodeType)) or a cross-concept grouping key
+//     the parent/contains/alias/equals relationship types don't model.
+//   - bare-by-contract-A0: fixed as a deliberate bare id in A0 (#2439).
+//   - bare-raw-sql-reader: a live raw-SQL reader compares payload->>'field'
+//     against a bare value; annotating (canonicalize-on-insert) would break it.
+//     Reconciled in A2 with the reader.
+//   - non-node-correlation-id: a random UUID / correlation id, not a node FK.
+//
+// This is the coverage map A2 (#2441) keys its outbound FK bare-ification on:
+// annotated fields = stored canonical (bare-ify on egress); exempted fields =
+// already bare / not a node id (leave alone) OR pending A2's coordinated flip.
+var idBearingFieldExemptions = map[string]string{
+	// --- pack-owned target: v1:cognition:space (rides A2 #2441 partition_id->space_id) ---
+	"cognition/audioOverride.partitionId":     "pack-owned-target v1:cognition:space; A2 #2441",
+	"cognition/videoOverride.partitionId":     "pack-owned-target v1:cognition:space; A2 #2441",
+	"identity/invitation.partitionId":         "pack-owned-target v1:cognition:space; A2 #2441",
+	"identity/user.activePartitionId":         "pack-owned-target v1:cognition:space; A2 #2441",
+	"library/artifact.partitionId":            "pack-owned-target v1:cognition:space; A2 #2441",
+	"library/generatedOutput.partitionId":     "pack-owned-target v1:cognition:space; A2 #2441",
+	"library/documentVersion.partitionId":     "pack-owned-target v1:cognition:space; A2 #2441",
+	"library/memory.partitionId":              "pack-owned-target v1:cognition:space; A2 #2441",
+	"planner/plan.partitionId":                "pack-owned-target v1:cognition:space; A2 #2441",
+	"planner/responsibility.scopePartitionId": "pack-owned-target v1:cognition:space; A2 #2441",
+	// --- pack-owned target: v1:knowledge:* (moved to pack in decoupling P2) ---
+	"knowledge/documentChunk.documentId": "pack-owned-target v1:knowledge:document; A2 #2441",
+	// --- bare-by-contract, fixed in A0 (#2439) ---
+	"knowledge/documentChunk.domainId":          "bare-by-contract-A0 (#2439); also pack-owned v1:knowledge:knowledgeDomain + bare raw-SQL readers",
+	"knowledge/documentChunk.sourceUtteranceId": "bare-by-contract-A0 (#2439); replier/augment store bare",
+	"knowledge/documentChunk.sourceAgentId":     "bare-by-contract-A0 (#2439); replier/augment store bare",
+	// --- plain string FK by design (own @description says so) ---
+	"deployment/deployment.clusterId":            "plain-fk-by-design (@description declares plain string FK)",
+	"deployment/deploymentNodeSpec.deploymentId": "plain-fk-by-design; part of composite id concat(deploymentId, ':', nodeType)",
+	"cluster/node.deploymentId":                  "plain-fk-by-design (@description declares plain string FK)",
+	"library/documentVersion.documentId":         "plain-fk-by-design; cross-concept content-history grouping key (@description declares NOT an @relationship)",
+	// --- non-node correlation ids (description mentions a concept but value is a random UUID) ---
+	"cognition/request.callId":        "non-node-correlation-id (UUID correlating a client tool call, not a node FK)",
+	"cognition/response.callId":       "non-node-correlation-id (UUID correlating a client tool call, not a node FK)",
+	"worker/invocation.correlationId": "non-node-correlation-id (random ID linking to an auditEvent row, not a canonicalizable FK)",
+	// --- non-node string key (looks like a v1:rbac:capability id but is a stable slug) ---
+	"healing/healedOverride.baseConstructId": "non-node string key (stable construct slug e.g. 'deployStaging', FK-by-slug like rbac.capability.roleSlug); read + matched BARE at component/memql/healing_base_immutable_validation.go:64",
+	// --- nested variant field: @relationship (top-level-only canonicalization) can't reach it ---
+	"identity/identity.nodeId": "nested under payload.credentials.node_token @variant (not a top-level payload key); canonicalizeRelationshipFields walks top-level fields only, so a concept-level @relationship(field=\"nodeId\") is a structural no-op",
+	// --- deliberate short-form storage by write-side normalization ---
+	"forge/requestEvent.requestId": "bare-by-contract (#1859): recordRequestEvent/recordMentoredEvent store shortId(args.requestId) so the audit trail unifies whether the caller passes a canonical (automation) or short (tool) id; an @relationship would re-canonicalize on insert and re-split the trail (conf_1859_test asserts zero events under the canonical id)",
+}
+
+// idBearingReferencesConcept detects the id-bearing-FK heuristic: a `v1:ns:concept`
+// row reference inside a field @description. Matches the enumeration used to build
+// the exemption table above.
+var idBearingReferencesConcept = regexp.MustCompile(`v1:[a-z][a-zA-Z]*:[a-zA-Z]`)
+
+// TestIdBearingFieldsDeclareRelationship asserts that every concept payload
+// field that LOOKS like a node-id foreign key -- a `*Id` name (case-sensitive
+// suffix; `*Ids` plurals are out of scope for this first pass) whose
+// @description names a `v1:ns:concept` row -- EITHER carries an
+// `@relationship(... field="<name>" ...)` annotation in its concept OR appears
+// in idBearingFieldExemptions with a justification.
+//
+// Why (epic #2438 / A1 #2440): @relationship metadata is what lets the engine
+// (1) canonicalize an inbound BARE id arg against the field's target concept
+// (canonicalizeRelationshipComparisons) and (2) know, for A2 (#2441), which
+// outbound payload fields to bare-ify at the wire seam. A `*Id` FK with neither
+// an annotation nor an exemption is an unclassified gap -- it silently won't
+// resolve bare inbound and A2 can't reason about its egress form.
+//
+// SEMANTICS WARNING for anyone MOVING a field from exempt -> annotated: adding
+// @relationship changes runtime behavior -- inserts canonicalize the value and
+// filters canonicalize the comparison RHS. Before annotating, confirm no
+// raw-SQL/Go reader compares that payload field against a BARE value (grep
+// `payload->>'<field>'` and `Payload["<field>"]`) and that the target concept
+// EXISTS in the engine tree (pack-owned targets can't resolve). When in doubt,
+// exempt with a note. See the A0 investigation + this PR's issue comment.
+//
+// Heuristic honesty: a `*Id` field whose @description omits the `v1:...` row
+// reference evades this gate. That is an accepted false-negative for the first
+// pass -- the description convention is near-universal in the tree, and the
+// alternative (a hand-maintained allowlist of every id field) is more brittle.
+func TestIdBearingFieldsDeclareRelationship(t *testing.T) {
+	type field struct {
+		file    string
+		line    int
+		ns      string
+		concept string
+		name    string
+	}
+	var flagged []field
+
+	tree := Tree()
+	paths, err := dslfs.WalkMemqlFiles(tree)
+	if err != nil {
+		t.Fatalf("WalkMemqlFiles: %v", err)
+	}
+	conceptStart := regexp.MustCompile(`^\s*concept\s+(\w+)\s*\{`)
+	fieldStart := regexp.MustCompile(`^\s+(\w+)\s+\S`)
+	relField := regexp.MustCompile(`@relationship\([^)]*field="(\w+)"`)
+	descBody := regexp.MustCompile(`@description\("(.*)"\)`)
+
+	exemptSeen := map[string]bool{}
+	for _, p := range paths {
+		if strings.HasPrefix(p, "_reference/") || !strings.HasSuffix(p, "concepts.memql") {
+			continue
+		}
+		ns := strings.SplitN(p, "/", 2)[0]
+		file, openErr := tree.Open(p)
+		if openErr != nil {
+			t.Fatalf("open %s: %v", p, openErr)
+		}
+		raw, readErr := io.ReadAll(file)
+		file.Close()
+		if readErr != nil {
+			t.Fatalf("read %s: %v", p, readErr)
+		}
+		lines := strings.Split(string(raw), "\n")
+		for i := 0; i < len(lines); i++ {
+			m := conceptStart.FindStringSubmatch(lines[i])
+			if m == nil {
+				continue
+			}
+			concept := m[1]
+			// Accumulate the whole concept block by brace matching.
+			depth := 0
+			started := false
+			var block []int // line indices in this block
+			j := i
+			for ; j < len(lines); j++ {
+				depth += strings.Count(stripLineComment(lines[j]), "{") - strings.Count(stripLineComment(lines[j]), "}")
+				if strings.Contains(lines[j], "{") {
+					started = true
+				}
+				block = append(block, j)
+				if started && depth == 0 {
+					break
+				}
+			}
+			// Set of fields declared with an @relationship in this concept.
+			annotated := map[string]bool{}
+			for _, li := range block {
+				for _, rm := range relField.FindAllStringSubmatch(lines[li], -1) {
+					annotated[rm[1]] = true
+				}
+			}
+			// Flag id-bearing fields lacking an annotation + not exempted.
+			for _, li := range block {
+				code := stripLineComment(lines[li])
+				fm := fieldStart.FindStringSubmatch(code)
+				if fm == nil {
+					continue
+				}
+				name := fm[1]
+				if name == "Id" || !strings.HasSuffix(name, "Id") || strings.HasSuffix(name, "Ids") {
+					continue
+				}
+				dm := descBody.FindStringSubmatch(lines[li])
+				if dm == nil || !idBearingReferencesConcept.MatchString(dm[1]) {
+					continue
+				}
+				key := ns + "/" + concept + "." + name
+				if annotated[name] {
+					continue
+				}
+				if _, ok := idBearingFieldExemptions[key]; ok {
+					exemptSeen[key] = true
+					continue
+				}
+				flagged = append(flagged, field{p, li + 1, ns, concept, name})
+			}
+			i = j
+		}
+	}
+
+	if len(flagged) > 0 {
+		t.Errorf("found %d id-bearing `*Id` field(s) that neither declare @relationship nor appear in idBearingFieldExemptions (#2440):", len(flagged))
+		for _, f := range flagged {
+			t.Errorf("  %s:%d  %s.%s -- annotate its concept with @relationship(field=%q, target=<concept>, ...) OR exempt with a reason", f.file, f.line, f.concept, f.name, f.name)
+		}
+	}
+	// Keep the exemption table honest: a stale entry (field annotated, renamed,
+	// or removed) should be pruned, not linger.
+	for key := range idBearingFieldExemptions {
+		if !exemptSeen[key] {
+			t.Errorf("stale idBearingFieldExemptions entry %q -- the field no longer matches the id-bearing heuristic (annotated / renamed / removed?); prune it", key)
+		}
+	}
+}
+
 // TestRelationshipTargetsUseImports pins memql#1067: a concept's
 // @relationship target must reference an imported concept by its bare name
 // (resolved through a file-top `use <ns>.concepts.{ name }` import, or from

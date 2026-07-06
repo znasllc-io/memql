@@ -16,6 +16,9 @@ concept cluster {
   identityProviderId  string  @description("Node ID of the v1:cluster:identityProvider record.")
   version           string  @description("memQL version running on this cluster.")
   provider          string  @description("Cloud provider / deploy target backing this cluster: 'docker-local' (local Docker) or 'azure' (AKS). Empty until stamped by the deploy driver (#1872).")
+
+  @relationship(type="owns", field="databaseId", target=database, direction="outgoing")
+  @relationship(type="owns", field="identityProviderId", target=identityProvider, direction="outgoing")
 }
 
 // ---- concepts/v1/cluster/database/concept.memql ----
@@ -34,6 +37,8 @@ concept database {
   status            enum("healthy", "degraded", "unreachable")  @default("healthy") @description("Current database health status.")
   sslMode           string  @description("SSL mode: 'disable', 'require', 'verify-full'.")
   clusterId         string  @description("Node ID of the parent v1:cluster:cluster record.")
+
+  @relationship(type="parent", field="clusterId", target=cluster, direction="outgoing")
 }
 
 // ---- concepts/v1/cluster/identityProvider/concept.memql ----
@@ -52,6 +57,8 @@ concept identityProvider {
   status            enum("connected", "degraded", "disconnected")  @default("connected") @description("Current connectivity status.")
   lastVerifiedAt    datetime  @description("Timestamp of last successful JWKS/metadata refresh.")
   clusterId         string  @description("Node ID of the parent v1:cluster:cluster record.")
+
+  @relationship(type="parent", field="clusterId", target=cluster, direction="outgoing")
 }
 
 @version("1.0.0")

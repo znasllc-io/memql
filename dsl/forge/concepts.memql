@@ -57,6 +57,8 @@
 // tenant/company can run many projects; cross-CLIENT isolation is the
 // partition boundary above this.)
 // ---------------------------------------------------------------------------
+use identity.concepts.{ user }
+
 @version("1.0.0")
 @namespace("forge")
 @description("A project/codebase forge develops against (e.g. memql, or a given client's app). Requests are scoped to a project so one agnostic bundle serves many apps. Partition-scoped: team-shared within the tenant.")
@@ -70,6 +72,8 @@ concept project {
   status       enum("active", "archived")  @required  @default("active")  @description("active = accepting requests; archived = read-only history.")
   createdByUserId  string  @description("v1:identity:user.id of whoever registered the project.")
   provenanceMutation  string  @description("Name of the mutation that produced this version (audit trail).")
+
+  @relationship(type="parent", field="createdByUserId", target=user, direction="outgoing")
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +100,11 @@ concept request {
   approvedByUserId   string  @description("v1:identity:user.id of the approver (owner). Set on the approved transition.")
   resolution     string  @description("Free-form outcome note when the request reaches a terminal state.")
   provenanceMutation  string  @description("Name of the mutation that produced this version (audit trail).")
+
+  @relationship(type="parent", field="projectId", target=project, direction="outgoing")
+  @relationship(type="parent", field="submitterUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="validatedByUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="approvedByUserId", target=user, direction="outgoing")
 }
 
 // ---------------------------------------------------------------------------
@@ -116,4 +125,6 @@ concept requestEvent {
   toStatus    string  @description("Request status after this event (for transitions).")
   note        string  @description("Free-form note: validation comment, rejection reason, mentoring summary, etc.")
   provenanceMutation  string  @description("Name of the mutation that produced this event (audit trail).")
+
+  @relationship(type="parent", field="actorUserId", target=user, direction="outgoing")
 }

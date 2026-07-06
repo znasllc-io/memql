@@ -13,6 +13,7 @@ import (
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/ast"
+	coreid "github.com/znasllc-io/memql/core/id"
 )
 
 // constantBoolExpression is an internal post-filter node carrying a
@@ -854,26 +855,48 @@ func compileIdComparison(op ComparisonOperator, value any, conceptContext string
 }
 
 // resolveFullId resolves a potentially short ID to a full storage ID.
-// If the ID already contains a colon, it's assumed to be a full ID and returned as-is.
-// If the ID doesn't contain a colon, the conceptContext must be provided to construct the full ID.
-// Returns an error if a short ID is provided without concept context.
-func resolveFullId(id string, conceptContext string) (string, error) {
-	if id == "" {
+// A bare (colon-free) value is composed against the query's bound
+// concept. A colon-bearing value must already BE a well-formed
+// canonical id under the bound concept -- #2440 hardening: a
+// wrong-concept id or a legacy prefixed form (e.g. the retired
+// "<partition>:v1:..." shape) errors LOUDLY instead of silently
+// matching zero rows. Mirrors the semantics of the engine's
+// canonicalizeIdValue (partition_context.go) structurally, without
+// needing the concept registry.
+func resolveFullId(rawId string, conceptContext string) (string, error) {
+	rawId = strings.TrimSpace(rawId)
+	if rawId == "" {
 		return "", fmt.Errorf("id cannot be empty")
 	}
 
-	// If ID already contains a colon, treat it as a full ID
-	if strings.Contains(id, ":") {
-		return id, nil
+	if strings.Contains(rawId, ":") {
+		gotConcept, shortId, err := coreid.ParseNodeId(rawId)
+		if err != nil {
+			return "", fmt.Errorf("malformed id %q in filter: %w", rawId, err)
+		}
+		// ParseNodeId tolerates (and drops) prefix segments before the
+		// version segment -- the retired partition-prefixed form. A
+		// stored id never carries such a prefix, so an exact-reassembly
+		// mismatch means the caller holds a legacy/malformed id that
+		// would silently match nothing.
+		if coreid.BuildNodeId(gotConcept, shortId) != rawId {
+			return "", fmt.Errorf("id %q is not a canonical {concept}:{shortId} id (legacy prefixed form?); pass the bare shortId or the canonical id", rawId)
+		}
+		// Wrong concept tag: the caller passed an id of a different
+		// concept than the one this filter is bound to.
+		if conceptContext != "" && gotConcept != "" && gotConcept != conceptContext {
+			return "", fmt.Errorf("id %q is under concept %q, expected %q (caller passed the wrong id type)", rawId, gotConcept, conceptContext)
+		}
+		return rawId, nil
 	}
 
 	// Short ID requires concept context to resolve
 	if conceptContext == "" {
-		return "", fmt.Errorf("short ID %q requires concept context; either use full ID (e.g., \"v1:concept:name:%s\") or include concept filter in query (e.g., concept==\"v1:your:concept\";id==\"%s\")", id, id, id)
+		return "", fmt.Errorf("short ID %q requires concept context; either use full ID (e.g., \"v1:concept:name:%s\") or include concept filter in query (e.g., concept==\"v1:your:concept\";id==\"%s\")", rawId, rawId, rawId)
 	}
 
 	// Construct full ID: concept:shortId
-	return conceptContext + ":" + id, nil
+	return conceptContext + ":" + rawId, nil
 }
 
 // resolveComparisonForExecution creates a copy of the comparison expression with any

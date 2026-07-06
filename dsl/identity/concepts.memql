@@ -4,6 +4,8 @@
 // files cover the other construct kinds.
 
 
+use agents.concepts.{ agent }
+
 @version("1.0.0")
 @namespace("identity")
 @description("Self-service access request placed on the waitlist queue. Created when an unknown email submits the registration form while MEMQL_IDENTITY_REGISTRATION_MODE=approval. Admins triage rows in the admin console: approval mints a v1:identity:invitation and emails a magic link; rejection stamps the reason and closes the row. Also auto-aged by the accessRequestExpirySweep cron once IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS has elapsed without a decision. Global scope so admins in any partition (typically owners of the cluster) can review the queue.")
@@ -166,6 +168,9 @@ concept delegation {
   revokedAt          datetime  @description("When this delegation was revoked.")
   revokedBySubject   string  @description("authenticated subject id of whoever revoked this delegation.")
   note               string  @description("Human-readable note about why this delegation was created.")
+
+  @relationship(type="parent", field="identityId", target=identity, direction="outgoing")
+  @relationship(type="interactsWith", field="agentId", target=agent, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -222,6 +227,8 @@ concept identity {
   label           string  @description("Human label shown in UIs, e.g. 'Work email', 'Personal Slack', 'Legacy integration key'. Optional, defaults to a generated summary of the credentials.")
   usableByAgents  bool    @default("false")  @description("Whether v1:identity:delegation can borrow this identity for agent work. Magic-link identities default false (agents shouldn't impersonate humans wholesale); OAuth identities for specific external apps default true (they exist precisely so agents can act against that app on the user's behalf).")
   lastUsedAt      datetime  @description("Per-credential last-use stamp. Useful for pruning stale OAuth tokens or unused API keys. User-level 'last seen' lives on v1:identity:user.lastSeenAt.")
+
+  @relationship(type="parent", field="userId", target=user, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -305,6 +312,8 @@ concept user {
   deletionScheduledAt datetime  @description("Set when the user requested account deletion. The accountDeletionSweep cron hard-deletes the row MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS later. Cleared by cancelScheduledDeletion if the user reverses the request during the cooldown.")
   dataExportLastAt datetime  @description("Timestamp of the most recent /me/export download. Drives rate-limiting per MEMQL_IDENTITY_DATA_EXPORT_RATE_LIMIT_HOURS.")
   revocationEpoch  int       @default("0")  @description("Monotonically-increasing per-user counter. Stamped into every JWT this user is issued; the verifier rejects any JWT whose revocation_epoch claim is below the user's current value. Bumping this field invalidates every token issued before the bump, on the next stream-open or periodic in-stream re-check (default ~5 minutes). Bulk-revoke / role-change / security-event tooling is the intended writer. See memql#106.")
+
+  @relationship(type="interactsWith", field="activeAssistantId", target=agent, direction="outgoing")
 }
 
 @version("1.0.0")

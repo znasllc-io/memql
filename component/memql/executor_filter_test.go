@@ -152,10 +152,34 @@ func TestResolveFullId(t *testing.T) {
 			expected:       "v1:examples:world:world-aurora",
 		},
 		{
-			name:           "full ID ignores concept context",
+			// #2440 hardening: a wrong-concept id errors loudly instead
+			// of silently matching zero rows.
+			name:           "full ID under a different concept than the filter's binding errors",
 			id:             "v1:examples:world:world-aurora",
 			conceptContext: "v1:other:concept",
+			wantErr:        true,
+			errContains:    "is under concept",
+		},
+		{
+			name:           "full ID matching the concept context returns as-is",
+			id:             "v1:examples:world:world-aurora",
+			conceptContext: "v1:examples:world",
 			expected:       "v1:examples:world:world-aurora",
+		},
+		{
+			// The retired partition-prefixed form (#56 phase 6) must not
+			// silently pass through to SQL where it matches nothing.
+			name:           "legacy partition-prefixed ID errors",
+			id:             "default:v1:examples:world:world-aurora",
+			conceptContext: "v1:examples:world",
+			wantErr:        true,
+			errContains:    "not a canonical",
+		},
+		{
+			name:           "compound canonical id with colon-bearing remainder is reassembly-stable",
+			id:             "v1:examples:world:a:b",
+			conceptContext: "v1:examples:world",
+			expected:       "v1:examples:world:a:b",
 		},
 		{
 			name:           "short ID with concept context resolves correctly",

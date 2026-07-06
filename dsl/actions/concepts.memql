@@ -20,6 +20,9 @@
 // from actor.userId by the recording mutation; the read path filters on
 // payload.ownerUserId == actor.userId.
 
+use harness.concepts.{ plan, step }
+use identity.concepts.{ user }
+
 @version("1.0.0")
 @namespace("actions")
 @description("A captured trace of the concrete capability sequence an LLM step performed, with value + resource provenance per call (#1735). Minted as status='candidate' on first run; a later phase graduates it into a library action. This is the foundation record of the action library (epic #1734) -- no replay yet.")
@@ -33,6 +36,10 @@ concept candidate {
   resourceEdges []object  @description("Resource-dependency edges: a later call reads a resource (path/handle) an earlier call referenced. Each entry: {fromCallIndex, toCallIndex, resource}. These become the world-group edges that pin coupled actions to one surface in Phase 2 (decision A).")
   callCount     int  @description("Number of captured calls (len(calls)). A convenience field for filtering trivial/empty traces.")
   provenanceMutation  string  @description("Name of the mutation that produced this candidate version (audit trail).")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="planId", target=plan, direction="outgoing")
+  @relationship(type="parent", field="stepId", target=step, direction="outgoing")
 }
 
 // action -- a reusable, replayable library entry (Phase 1, #1736).
@@ -84,6 +91,10 @@ concept action {
   provenancePlanId  string  @description("v1:harness:plan.id of the run that minted this action.")
   provenanceStepId  string  @description("v1:harness:step.id of the run that minted this action.")
   provenanceMutation  string  @description("Name of the mutation that produced this action version (audit trail).")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="interactsWith", field="provenancePlanId", target=plan, direction="outgoing")
+  @relationship(type="interactsWith", field="provenanceStepId", target=step, direction="outgoing")
 }
 
 // surface -- a registered execution backend the resolver binds to (Phase 2,
@@ -115,4 +126,6 @@ concept surface {
   status        enum("active", "retired")  @required  @default("active")  @description("Registry lifecycle. retired surfaces are kept (append-only) but excluded from resolution.")
   lastSeen      datetime  @description("Last availability heartbeat -- staleness signal for the resolver (full liveness model is an open question, #1742).")
   provenanceMutation  string  @description("Name of the mutation that produced this surface version (audit trail).")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }

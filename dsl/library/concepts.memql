@@ -23,6 +23,11 @@
 // another user's index rows.
 
 use identity.concepts.{ user }
+use agents.concepts.{ agent }
+use cognition.concepts.{ utterance }
+use common.concepts.{ attachment }
+use planner.concepts.{ plan }
+use worker.concepts.{ registration }
 
 @version("1.0.0")
 @namespace("library")
@@ -66,6 +71,9 @@ concept artifact {
   updatedAt        datetime  @description("RFC3339 watermark of the most recent change to the backing item, stamped on every index write. The default Library sort key (most-recent first).")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="interactsWith", field="agentId", target=agent, direction="outgoing")
+  @relationship(type="interactsWith", field="producedByPlanId", target=plan, direction="outgoing")
+  @relationship(type="interactsWith", field="producedByWorkerId", target=registration, direction="outgoing")
 }
 
 // ---- generatedOutput: the home concept for app-produced deliverables ----
@@ -104,6 +112,10 @@ concept generatedOutput {
   producedByWorkerName string  @description("Human-readable name of the producing worker machine, copied from the worker registration at production time. Empty unless producedByWorkerId is set.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="interactsWith", field="attachmentId", target=attachment, direction="outgoing")
+  @relationship(type="interactsWith", field="producedByPlanId", target=plan, direction="outgoing")
+  @relationship(type="interactsWith", field="producedByAgentId", target=agent, direction="outgoing")
+  @relationship(type="interactsWith", field="producedByWorkerId", target=registration, direction="outgoing")
 }
 
 // ---- documentVersion: append-only version history for a logical document ----
@@ -177,6 +189,9 @@ concept documentVersion {
   // insert block.
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="interactsWith", field="attachmentId", target=attachment, direction="outgoing")
+  @relationship(type="parent", field="authorId", target=user, direction="outgoing")
+  @relationship(type="interactsWith", field="producedByPlanId", target=plan, direction="outgoing")
 }
 
 // ---- memory: user-facing assistant (LLM) memory ----
@@ -205,4 +220,6 @@ concept memory {
   sourceUtteranceId string  @description("Optional back-reference to the v1:cognition:utterance that produced this memory -- provenance for 'where did the assistant learn this'.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="interactsWith", field="agentId", target=agent, direction="outgoing")
+  @relationship(type="interactsWith", field="sourceUtteranceId", target=utterance, direction="outgoing")
 }
