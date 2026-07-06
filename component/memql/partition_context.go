@@ -11,10 +11,11 @@ import (
 type partitionContextKey struct{}
 
 // ContextWithPartition returns a new context carrying the given partition.
-// Carried on the wire by the gRPC envelope; the engine no longer
-// derives storage scoping from it. Kept on the request ctx so legacy
-// log fields keep populating until envelope.partition is dropped in
-// #56 phase 8.
+// The `partition` wire field was removed in #56 (reserved in the proto),
+// so this value no longer originates from the envelope; the engine does
+// not derive storage scoping from it. Kept on the request ctx as the
+// partition-scope primitive (per-tenant config/secret resolution + log
+// fields). See docs/public/concepts/partition-scoping.md.
 func ContextWithPartition(ctx context.Context, partition string) context.Context {
 	return context.WithValue(ctx, partitionContextKey{}, partition)
 }

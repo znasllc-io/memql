@@ -35,7 +35,9 @@ A **partition** is a tenant scope key carried on the request context.
   `globalSecret` / `globalVariable`). It also tags event topics and log
   fields.
 - **`#56` retired partition's *data-plane* role** -- it no longer gates
-  per-row storage isolation, and `envelope.partition` is a no-op on the wire.
+  per-row storage isolation, and the `partition` wire field was removed
+  (`reserved "partition"` in `component/grpc/memql.proto`; the envelope
+  no longer carries it and nothing derives scope from it).
 
 The platformization program **re-establishes `partition` as the canonical
 tenant scope for core services**: the scope key core threads through context

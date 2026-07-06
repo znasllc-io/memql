@@ -1228,9 +1228,10 @@ predicate gates on actor.userId), **admin** (cluster-owner spec), or
 construct.
 
 The partition dimension that historically gated tenant isolation is
-retired in #56 (phases 1-7 of which are landed; phase 8 sweeps the
-remaining cross-repo wire stragglers). `envelope.partition` is still
-on the gRPC wire as a no-op until phase 8.
+retired in #56 (phases 1-7 landed; phase 8 sweeps the remaining
+cross-repo stragglers + the DSL `partition="*"` automation kwarg). The
+`partition` wire field is already removed (`reserved "partition"` in
+`component/grpc/memql.proto`); nothing derives scope from the envelope.
 
 ### Concepts
 Schemas for nodes (like tables in SQL).
