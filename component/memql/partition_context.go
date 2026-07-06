@@ -122,26 +122,11 @@ func (e *MemQLEngine) canonicalizeIdValue(ctx context.Context, value, conceptTyp
 
 // shortIdValue is the inverse of canonicalizeIdValue: it strips the
 // `<concept>:` prefix from a canonical node id and returns the trailing
-// bare short id. Idempotent -- a value with no version-tagged concept
-// prefix is returned unchanged (id.ParseNodeId treats it as an opaque
-// short id), so calling it on an already-bare value is a no-op. Empty
-// input yields empty output (no-op for missing/optional ids).
-//
-// Unlike canonicalizeIdValue it needs no engine state (no concept
-// registry, no partition) -- the split is purely structural on the id
-// string -- so it never errors. Backs the shortId() DSL builtin (#1859).
+// bare short id. Backs the shortId() DSL builtin (#1859). Delegates to
+// the exported BareShortId primitive (wire_bareids.go, #2441) so the
+// builtin and the wire-egress bare-ification share one implementation.
 func (e *MemQLEngine) shortIdValue(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	_, short, err := id.ParseNodeId(value)
-	if err != nil || short == "" {
-		// Malformed / unparseable: fall back to the input unchanged so a
-		// shortId() call never destroys an id it can't decompose.
-		return value
-	}
-	return short
+	return BareShortId(value)
 }
 
 // canonicalizeRelationshipFields walks a payload object and rewrites

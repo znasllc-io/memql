@@ -120,7 +120,13 @@ func extractVoiceGateDirective(e events.Event, partitionId, gaAgentId string) (v
 	if e.Payload == nil {
 		return voiceGateDirective{}, false
 	}
-	if !partitionIdMatches(asString(e.Payload, "partitionId"), partitionId) {
+	// #2441: normalize both sides through the shared BareShortId primitive
+	// (the bespoke dual-form partitionIdMatches/trailingSlug helper is
+	// gone). The event payload is read off the INTERNAL bus (canonical);
+	// the voice-agent passes the bare slug parsed off the LiveKit room
+	// name. Empty want never matches.
+	wantSpaceId := memqlengine.BareShortId(partitionId)
+	if wantSpaceId == "" || memqlengine.BareShortId(asString(e.Payload, "partitionId")) != wantSpaceId {
 		return voiceGateDirective{}, false
 	}
 	// gaAgentId match tolerant of canonical-vs-slug, same shape as the channel
@@ -152,7 +158,7 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
 	correlate := envelope.GetMessageId()
 
-	partitionId := strings.TrimSpace(msg.GetPartitionId())
+	partitionId := strings.TrimSpace(msg.GetSpaceId())
 	gaAgentId := strings.TrimSpace(msg.GetGaAgentId())
 	if partitionId == "" || gaAgentId == "" {
 		return s.sendQueryError(requestId, correlate, codes.InvalidArgument, "partitionId and gaAgentId are required")
@@ -1501,7 +1507,7 @@ func (s *streamSession) handleVoiceAgentSessionEnd(envelope *memqlv1.MemqlClient
 	if s.logger != nil {
 		s.logger.Info("voice-agent session end",
 			"request_id", requestId,
-			"partition_id", msg.GetPartitionId(),
+			"partition_id", msg.GetSpaceId(),
 			"room_name", msg.GetRoomName(),
 			"reason", msg.GetReason())
 	}
@@ -1730,7 +1736,7 @@ func (s *streamSession) startVoiceAgentSpeakSubscriber(partitionId, gaAgentId, i
 				Payload: &memqlv1.MemqlServerMessage_VoiceAgentSpeak{
 					VoiceAgentSpeak: &memqlv1.VoiceAgentSpeak{
 						RequestId:   requestId,
-						PartitionId: partitionId,
+						SpaceId:     partitionId,
 						GaAgentId:   gaAgentId,
 						UtteranceId: reply.utteranceId,
 						Text:        reply.text,
@@ -1776,7 +1782,7 @@ func (s *streamSession) handleVoiceAgentPartialTranscript(envelope *memqlv1.Memq
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
 	correlate := envelope.GetMessageId()
 
-	partitionId := strings.TrimSpace(msg.GetPartitionId())
+	partitionId := strings.TrimSpace(msg.GetSpaceId())
 	speakerId := strings.TrimSpace(msg.GetSpeakerUserId())
 	if partitionId == "" || speakerId == "" {
 		return s.sendQueryError(requestId, correlate, codes.InvalidArgument, "partitionId and speakerUserId are required")
@@ -1825,7 +1831,7 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 		return s.sendQueryError(requestId, correlate, codes.Unavailable, "engine not configured")
 	}
 
-	partitionId := strings.TrimSpace(msg.GetPartitionId())
+	partitionId := strings.TrimSpace(msg.GetSpaceId())
 	speakerId := strings.TrimSpace(msg.GetSpeakerUserId())
 	text := strings.TrimSpace(msg.GetFinalText())
 	if partitionId == "" || text == "" {
@@ -1979,7 +1985,7 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
 	correlate := envelope.GetMessageId()
 
-	partitionId := strings.TrimSpace(msg.GetPartitionId())
+	partitionId := strings.TrimSpace(msg.GetSpaceId())
 	gaAgentId := strings.TrimSpace(msg.GetGaAgentId())
 	utterance := strings.TrimSpace(msg.GetUtteranceText())
 	if partitionId == "" || gaAgentId == "" || utterance == "" {
@@ -2215,16 +2221,13 @@ func extractGAReplyFromEvent(e events.Event, partitionId, gaAgentId string) (voi
 		nodeFields = payload
 	}
 
-	// memql auto-canonicalizes relationship fields on insert, so the
-	// reply utterance's partitionId lands as
-	// `<partition>:v1:cognition:space:<slug>` while the voice-agent
-	// passes the bare slug. Compare on the trailing slug so either
-	// form matches.
-	nodePartitionId := asString(nodeFields, "partitionId")
-	if nodePartitionId == "" {
-		nodePartitionId = asString(nodeFields, "partitionId")
-	}
-	if !partitionIdMatches(nodePartitionId, partitionId) {
+	// #2441: normalize both sides through the shared BareShortId primitive.
+	// The reply utterance's partitionId is read off the INTERNAL graph
+	// event (canonical -- memql auto-canonicalizes relationship fields on
+	// insert); the voice-agent passes the bare slug. Empty want never
+	// matches.
+	wantSpaceId := memqlengine.BareShortId(partitionId)
+	if wantSpaceId == "" || memqlengine.BareShortId(asString(nodeFields, "partitionId")) != wantSpaceId {
 		return voiceAgentReply{}, false
 	}
 	// Match any AI-participant reply in the target space. Backend
@@ -2260,9 +2263,14 @@ func extractGAReplyFromEvent(e events.Event, partitionId, gaAgentId string) (voi
 	if text == "" {
 		return voiceAgentReply{}, false
 	}
-	utteranceId := asString(payload, "id")
+	// Bare shortId on the wire (#2441 seam 5): VoiceAgentTurnComplete
+	// carries this back to the voice-agent, aligning it with the sibling
+	// VoiceAgentFinalAck, which already returns a bare mint. The committed
+	// utterance's `id` is read canonical off the internal graph event and
+	// stripped here.
+	utteranceId := memqlengine.BareShortId(asString(payload, "id"))
 	if utteranceId == "" {
-		utteranceId = asString(nodeFields, "id")
+		utteranceId = memqlengine.BareShortId(asString(nodeFields, "id"))
 	}
 	return voiceAgentReply{text: text, utteranceId: utteranceId}, true
 }
@@ -2289,30 +2297,6 @@ func asString(src map[string]any, key string) string {
 		return s
 	}
 	return ""
-}
-
-// partitionIdMatches returns true when `nodeId` (read off a graph row) and
-// `wantId` (passed in by the voice-agent on the wire) point at the
-// same v1:cognition:space row, regardless of whether either side is
-// canonical (`<partition>:v1:cognition:space:<slug>`) or bare slug.
-// memql auto-canonicalizes relationship fields at insert time, but
-// the voice-agent passes the bare slug it parsed off the LiveKit
-// room name -- strict-string equality across the two forms misses.
-func partitionIdMatches(nodeId, wantId string) bool {
-	if nodeId == "" || wantId == "" {
-		return false
-	}
-	if nodeId == wantId {
-		return true
-	}
-	return trailingSlug(nodeId) == trailingSlug(wantId)
-}
-
-func trailingSlug(id string) string {
-	if i := strings.LastIndex(id, ":"); i != -1 {
-		return id[i+1:]
-	}
-	return id
 }
 
 // contextWithVoiceAgentActor stamps the service-actor identity for
@@ -2358,7 +2342,7 @@ func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlCl
 		return s.sendQueryError(requestId, correlate, codes.Unavailable, "engine not configured")
 	}
 
-	partitionId := strings.TrimSpace(msg.GetPartitionId())
+	partitionId := strings.TrimSpace(msg.GetSpaceId())
 	gaAgentId := strings.TrimSpace(msg.GetGaAgentId())
 	text := strings.TrimSpace(msg.GetText())
 	if partitionId == "" || gaAgentId == "" || text == "" {
@@ -2542,7 +2526,7 @@ func (s *streamSession) handleVoiceAgentRealtimeSpeaking(envelope *memqlv1.Memql
 		return nil
 	}
 
-	partitionId := strings.TrimSpace(msg.GetPartitionId())
+	partitionId := strings.TrimSpace(msg.GetSpaceId())
 	gaAgentId := strings.TrimSpace(msg.GetGaAgentId())
 	if partitionId == "" || gaAgentId == "" {
 		if s.logger != nil {

@@ -536,7 +536,7 @@ func (e *RealtimeExecutor) forwardPartial(speakerIdentity, text string) {
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentPartialTranscript{
 			VoiceAgentPartialTranscript: &memqlv1.VoiceAgentPartialTranscript{
-				PartitionId:   e.cfg.PartitionID,
+				SpaceId:       e.cfg.PartitionID,
 				SpeakerUserId: e.resolveSpeaker(speakerIdentity),
 				PartialText:   text,
 				Sequence:      seq,
@@ -602,7 +602,7 @@ func (e *RealtimeExecutor) getLastSpeaker() string {
 // being discarded (#1403).
 func (e *RealtimeExecutor) forwardFinal(speakerIdentity, text string, nativeAuthored bool) {
 	sendFinalTranscript(e.ctx, e.client, e.logger, "realtime", &memqlv1.VoiceAgentFinalTranscript{
-		PartitionId:    e.cfg.PartitionID,
+		SpaceId:        e.cfg.PartitionID,
 		SpeakerUserId:  e.resolveSpeaker(speakerIdentity),
 		FinalText:      text,
 		NativeAuthored: nativeAuthored,
@@ -645,7 +645,7 @@ func (e *RealtimeExecutor) runTurn(speakerIdentity, utterance string) {
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentTurnRequest{
 			VoiceAgentTurnRequest: &memqlv1.VoiceAgentTurnRequest{
-				PartitionId:   e.cfg.PartitionID,
+				SpaceId:       e.cfg.PartitionID,
 				SpeakerUserId: e.resolveSpeaker(speakerIdentity),
 				UtteranceText: utterance,
 				GaAgentId:     e.cfg.GaAgentID,
@@ -1241,9 +1241,9 @@ func (e *RealtimeExecutor) emitSpeaking(speaking bool) {
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentRealtimeSpeaking{
 			VoiceAgentRealtimeSpeaking: &memqlv1.VoiceAgentRealtimeSpeaking{
-				PartitionId: e.cfg.PartitionID,
-				GaAgentId:   e.cfg.GaAgentID,
-				Speaking:    speaking,
+				SpaceId:   e.cfg.PartitionID,
+				GaAgentId: e.cfg.GaAgentID,
+				Speaking:  speaking,
 			},
 		},
 	}

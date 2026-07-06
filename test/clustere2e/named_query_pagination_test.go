@@ -62,7 +62,8 @@ func assertNoDupNoGap(t *testing.T, got, wantNewestFirst []string) {
 		t.Fatalf("walk returned %d rows, want %d (gap or truncation across the replica hop)", len(got), len(wantNewestFirst))
 	}
 	for i, want := range wantNewestFirst {
-		if got[i] != want {
+		// #2441: query results now carry BARE ids; compare on the bare form.
+		if bareID(got[i]) != bareID(want) {
 			t.Fatalf("walk position %d = %s, want %s (gap/order break across the replica hop)", i, got[i], want)
 		}
 	}

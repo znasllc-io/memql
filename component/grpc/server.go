@@ -726,6 +726,16 @@ func (s *service) executeQuery(ctx context.Context, query string, clientId strin
 			return nil, status.Error(codes.Internal, "MemQL engine failed to serialize response")
 		}
 
+		// Bare-ify at the wire seam (#2441 seams 1+2). ToAPIResult stays
+		// canonical because it is also consumed IN-PROCESS (the identity
+		// stores, cached results, logic/automation steps). WireBareifyBundle
+		// clones before rewriting so the engine's internal/cached bundle is
+		// never mutated; WireBareifyData returns fresh values. Clients,
+		// SDKs, and the LLM tool loop see BARE shortIds; inbound bare args
+		// resolve server-side (A0/A1).
+		bundle = memqlengine.WireBareifyBundle(bundle)
+		data = memqlengine.WireBareifyData(data)
+
 		// Convert engine metadata to protobuf metadata
 		if meta := execResult.GetMeta(); meta != nil {
 			protoMeta = &memqlv1.ResultMeta{
@@ -878,10 +888,12 @@ func (s *streamSession) handleBusEvent(event events.Event) {
 		s.logger.Debug("handleBusEvent received", "topic", event.Topic, "kind", event.Kind.String())
 	}
 
-	payload := event.Payload
-	if payload == nil {
-		payload = make(map[string]any)
-	}
+	// Build a WIRE copy of the event payload. The internal event map stays
+	// canonical for in-process subscribers (automations, dispatch gates,
+	// cross-node substrate routing); only this copy is bare-ified for the
+	// client (#2441 seam 3). Deep-clone first so mutating the copy (adding
+	// wire fields + stripping ids) never touches the shared internal map.
+	payload := memqlengine.CloneEventPayloadForWire(event.Payload)
 
 	// Add standard event fields
 	payload["topic"] = event.Topic
@@ -891,6 +903,13 @@ func (s *streamSession) handleBusEvent(event events.Event) {
 	for k, v := range event.Metadata {
 		payload[k] = v
 	}
+
+	// Bare-ify id-position values (id / nodeId / createdBy / actor /
+	// replyId + every FK, plus the nested `payload` object). Applied after
+	// the standard fields + metadata are merged so an id-shaped metadata
+	// value is caught too; `topic` / `eventKind` are concept-carrier keys
+	// left verbatim.
+	memqlengine.BareifyEventPayload(payload)
 
 	structPayload, err := structpb.NewStruct(payload)
 	if err != nil {
@@ -1922,8 +1941,11 @@ func (s *streamSession) InvokeClientTool(
 	defer s.unregisterClientToolWaiter(callId)
 
 	call := &memqlv1.ClientToolCall{
-		CallId:        callId,
-		AgentId:       memqlengine.ActingAgentIdFromContext(ctx),
+		CallId: callId,
+		// Bare shortId: the client-tool call crosses to the browser (#2441
+		// seam 5). The agent binds it back into ClientToolResult verbatim;
+		// no server-side path compares it against a canonical id.
+		AgentId:       memqlengine.BareShortId(memqlengine.ActingAgentIdFromContext(ctx)),
 		ToolName:      toolName,
 		ArgumentsJson: argsJSON,
 		TimeoutMs:     clientToolTimeoutMs(toolName),

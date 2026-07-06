@@ -818,6 +818,12 @@ func executeResultToToolJSON(result *ExecuteResult) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// The LLM tool loop is a seam toward a foreign brain: bare-ify so the
+	// model sees + hands back BARE shortIds (inbound bare args resolve via
+	// A1). ToAPIResult itself stays canonical for in-process callers
+	// (#2441 seam 4).
+	bundle = WireBareifyBundle(bundle)
+	data = WireBareifyData(data)
 	output := map[string]any{}
 	if bundle != nil {
 		nodes := make([]map[string]any, 0, len(bundle.Nodes))
