@@ -50,7 +50,7 @@ the executor reads at SQL push-down time.
 
 | Field | Type | Stamped by | Notes |
 |-------|------|-----------|-------|
-| `id` | string | mutation execution | Canonical id format: `{partition}:{concept}:{contentHash}`. See [identifiers.md](../concepts/identifiers.md). |
+| `id` | string | mutation execution | Canonical id format: `{concept}:{shortId}` (the `{partition}:` prefix was retired in #56). Canonical internally; bare-ified toward clients. See [identifiers.md](../concepts/identifiers.md). |
 | `concept` | string | mutation execution | The concept id, e.g. `v1:cognition:participant`. |
 | `type` | string | concept declaration | Currently mirrors `concept`; reserved for future versioning differences. |
 | `createdAt` | datetime | mutation execution | RFC3339 timestamp at insert time. |

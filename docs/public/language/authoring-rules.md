@@ -355,14 +355,17 @@ explicitly (`insert { id: args.name, ... }`), the engine computes
 the storage id as:
 
 ```
-{partition}:{concept}:{id-segment}
+{concept}:{id-segment}
 ```
 
 Where:
-- `partition` = the resolved partition for the call
 - `concept` = the concept bound by the `mutation <Concept> <name>`
   signature
 - `id-segment` = the trimmed value of the `id:` field
+
+(The leading `{partition}:` segment was retired in #56 phase 6; ids
+are now a plain `{concept}:{shortId}`. See
+[identifiers.md](../concepts/identifiers.md).)
 
 If you omit `id:`, the engine derives a content hash from the 
 Same payload twice ⇒ same id ⇒ a new time-series row under that id.

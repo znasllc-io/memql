@@ -131,7 +131,7 @@ memQL/
 - [MemQL Language](docs/public/language/memql.md)
 - [Functions](docs/public/language/functions.md)
 - [Events](docs/public/concepts/events.md)
-- [Node Identifier Conventions](docs/public/concepts/identifiers.md) -- canonical id format, who composes it, anti-patterns
+- [Node Identifier Conventions](docs/public/concepts/identifiers.md) -- canonical `{concept}:{shortId}` internally vs the BARE-ids client contract at every wire seam (engine bare-ifies on egress, resolves bare args on inbound; clients never compose/parse/compare canonical ids), the `(concept, id)` keying rule, who composes ids, anti-patterns
 - [MemQL Authoring Rules & Gotchas](docs/public/language/authoring-rules.md) -- read before writing `.memql` files
 - [LLM cost control (defense in depth)](docs/public/ai/llm-cost-control.md) -- the layered guardrails (kill-switch, rate ceiling, automation budget, loop caps) that make a runaway spend loop structurally impossible; every `MEMQL_LLM_*` / budget env var + how to repro safely. Read before touching `ai_guard.go`, an LLM loop, or an automation that drives model calls.
 - [Tool ↔ Knowledge Domain Pattern](docs/public/concepts/tool-knowledge-domain-pattern.md) -- when a capability has operational knowledge (UI takeover, Computer Use, etc.), put it in a knowledge domain that the tool requires, not in the agent prompt template. Read before adding capability-bundled documentation.
