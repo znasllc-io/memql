@@ -11,8 +11,11 @@ import (
 	"github.com/znasllc-io/memql/component/harness"
 )
 
-// TestParsePlanID covers the required-arg validation: planId must be a
-// non-empty, non-whitespace string. The DB-bound assembly path is
+// TestParsePlanID covers required-arg validation AND the #2441
+// canonicalization: post-cutover the tool loop hands agents BARE plan
+// shortIds, so a bare arg is composed to the canonical v1:harness:plan
+// id the trace reader matches; a canonical arg passes through; a
+// wrong-concept id errors. The DB-bound assembly path is
 // integration-covered (the assembler itself is unit-tested in
 // component/harness); these are the pure paths this package adds.
 func TestParsePlanID(t *testing.T) {
@@ -22,8 +25,14 @@ func TestParsePlanID(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{"valid", map[string]any{"planId": "v1:harness:plan:abc"}, "v1:harness:plan:abc", false},
-		{"trims whitespace", map[string]any{"planId": "  v1:harness:plan:xyz  "}, "v1:harness:plan:xyz", false},
+		// Canonical arg -> passthrough (internal callers pass canonical).
+		{"canonical passthrough", map[string]any{"planId": "v1:harness:plan:abc"}, "v1:harness:plan:abc", false},
+		{"canonical trims whitespace", map[string]any{"planId": "  v1:harness:plan:xyz  "}, "v1:harness:plan:xyz", false},
+		// Bare shortId -> composed to canonical (#2441 client contract).
+		{"bare composes", map[string]any{"planId": "abc-123"}, "v1:harness:plan:abc-123", false},
+		{"bare trims + composes", map[string]any{"planId": "  plan-77  "}, "v1:harness:plan:plan-77", false},
+		// Wrong concept -> loud error, not a silent zero-row match.
+		{"wrong concept errors", map[string]any{"planId": "v1:agents:agent:abc"}, "", true},
 		{"missing", map[string]any{}, "", true},
 		{"empty string", map[string]any{"planId": ""}, "", true},
 		{"whitespace only", map[string]any{"planId": "   "}, "", true},
