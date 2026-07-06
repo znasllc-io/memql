@@ -17,6 +17,9 @@
 // (#956), catalog matching (#957), dry-run (#958), authored runtime
 // (#959), and planner authoring loop (#960) build on top of these rows.
 
+use identity.concepts.{ user }
+use planner.concepts.{ plan, responsibility }
+
 @version("1.0.0")
 @namespace("authoring")
 @description("An atomic, versioned unit of planner-authored DSL: one automation plus the dependency closure it needs (logic / shapes / specs / traits / policies / mutations / queries / prompts), compiled from a user Responsibility. The bundle is the unit of validation and activation -- the whole closure passes Gate 1 (isolated compile+bind), Gate 2 (tiered behavioral dry-run), and Gate 3 (user approval) together, then activates together into the sandboxed authored-construct runtime (#959). Never part of the core engine Init() path, so a malformed bundle can never brick the cluster. Member constructs are v1:authoring:construct rows pointing back via bundleId.")
@@ -36,6 +39,11 @@ concept bundle {
   failureReason       string  @description("Populated when status transitions to failed -- which gate failed and why (e.g. 'gate1: spec specX references unknown field payload.foo'). Cleared on a successful re-author.")
   activatedAt         datetime @description("When the bundle was approved + registered into the authored runtime (status -> active). Null until activated.")
   retiredAt           datetime @description("When the bundle was retired. Null unless status=retired.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="responsibilityId", target=responsibility, direction="outgoing")
+  @relationship(type="interactsWith", field="sourcePlanId", target=plan, direction="outgoing")
+  @relationship(type="interactsWith", field="supersedesBundleId", target=bundle, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -57,6 +65,10 @@ concept construct {
   catalogMatchText  string  @description("The name-independent semantic text (kind + @description intent + canonicalized body) that was embedded for the near-match retrieval tier (#957). Computed by CatalogMatchText at promotion time and stored alongside the embedding (the vector itself lives in node_vectors keyed by this construct's id, vector_field='content') so similarTo can rank close-but-not-identical constructs for a stated need, and a re-embed can backfill from it. Empty until catalogued.")
   catalogedAt       datetime @description("Provenance (#957): when this construct was promoted into the owner's reusable catalog (the post-activation catalog-write path). Null until catalogued. Together with ownerUserId (who) and catalogedFromBundleId (which activated bundle) this is the full reuse provenance later bundles inherit when they compose it.")
   catalogedFromBundleId string @description("Provenance (#957): the v1:authoring:bundle.id whose activation promoted this construct into the catalog. Normally the construct's own bundleId, but recorded explicitly so the provenance survives even after that bundle retires (a cataloged construct outlives a single bundle). Empty until catalogued.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="bundleId", target=bundle, direction="outgoing")
+  @relationship(type="interactsWith", field="catalogedFromBundleId", target=bundle, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -71,4 +83,7 @@ concept dependencyEdge {
   toName         string  @required @description("Name of the depended-on construct.")
   toKind         enum("automation", "logic", "shape", "spec", "trait", "policy", "mutation", "query", "prompt") @required @description("Kind of the depended-on construct.")
   toSource       enum("core", "catalog", "bundle") @required @description("Where the dependency resolves under the precedence core -> owner-catalog -> bundle-local. Edges to `catalog` are the ones impact analysis cares about when a shared construct changes.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="bundleId", target=bundle, direction="outgoing")
 }

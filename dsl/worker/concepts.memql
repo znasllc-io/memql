@@ -5,7 +5,7 @@
 
 use agents.concepts.{ agent }
 use identity.concepts.{ identity, user }
-use planner.concepts.{ plan }
+use planner.concepts.{ plan, task }
 
 @version("1.0.0")
 @namespace("worker")
@@ -37,6 +37,7 @@ concept invocation {
   @relationship(type="parent", field="workerId", target=registration, direction="outgoing")
   @relationship(type="parent", field="agentId", target=agent, direction="outgoing")
   @relationship(type="parent", field="planId", target=plan, direction="outgoing")
+  @relationship(type="parent", field="taskId", target=task, direction="outgoing")
 }
 
 @version("1.0.0")

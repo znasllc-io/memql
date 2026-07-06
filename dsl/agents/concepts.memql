@@ -7,7 +7,8 @@
 // providers) and dsl/worker/ which holds workers that EXECUTE on the
 // user's machine.
 
-use identity.concepts.{ user }
+use identity.concepts.{ identity, user }
+use planner.concepts.{ plan }
 
 @version("1.0.0")
 @namespace("agents")
@@ -98,6 +99,9 @@ concept agent {
   roleEmbedding      []float @description("Embedding of (role + roleSlug + description + the resolved domain union across capabilities.skillIds[]) used by the layered dedupe (Q10) similarity check. Recomputed on insert/update of any of those fields by the agentRoleEmbed automation. Empty for legacy agents until the backfill runs. Stored on the row rather than a sidecar concept for v1 simplicity; can be moved to v1:agents:agentEmbedding later if row width becomes a concern.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="interactsWith", field="identityId", target=identity, direction="outgoing")
+  @relationship(type="createdBy", field="originatingPlanId", target=plan, direction="outgoing")
+  @relationship(type="interactsWith", field="extendedFromAgentId", target=agent, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -116,6 +120,9 @@ concept agentAuthorization {
   active          bool @default("true") @description("Soft-revoke flag. User-revocable from the agent's settings at any time.")
   computerUseScope enum("", "observe", "interact", "full") @default("") @description("Standing computer_use authorization tier the user has granted this agent (Q9 layer 2). observe = read-only worker calls (screenshot, fs_read, fs_list, fs_stat, http_fetch GET, cursor/display/window-list). full = adds shell exec, fs_write, full HTTP, mouse + keyboard + window_focus. Empty string means computer_use is not authorized for this agent in this scope; dispatch rejects with denied_by_scope. Plans can declare a NARROWER scope at creation time but never wider. NOTE: the `interact` value is a retired tier kept in the enum for backward compatibility with rows written before the simplification; the read path treats it as `full`.")
   skillTierAllowlist []string @description("For action='mintSkill' grants (Phase 3 / memql#159): the v1:agents:skill tiers (A / B / C) the planner may mint at without per-mint approval. Default is implicitly ['A'] when the grant is created -- the planner integration injects that default at read time when the field is empty AND action='mintSkill'. B and C are riskier (safety-relevant + high-stakes regulated respectively) so they require explicit user opt-in via the 'Approve & always allow this tier' button on the mintSkillApprovalRequested canvas card. Empty / unused for non-mintSkill grants.")
+
+  @relationship(type="parent", field="agentId", target=agent, direction="outgoing")
+  @relationship(type="parent", field="userId", target=user, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -156,6 +163,9 @@ concept skill {
   active         bool    @default("true")  @description("Soft-deactivate flag. Inactive skills disappear from the picker but agents that already carry the skill keep functioning. Lets us retire a poorly-shaped catalog row without churning every agent that bound to it.")
   originatingPlanId string @description("Phase 3 (#159) provenance: the v1:planner:plan.id whose dispatch surfaced the need for this skill. Empty for predefined catalog rows. Stamped by mintSkill at attach time. Pairs with mintedByAgentId for the 'who/when/why' triad the Skills admin view + the trace viewer (cockpit#125) surface as 'Created by planner from Plan X'.")
   mintedByAgentId   string @description("Phase 3 (#159) provenance: the v1:agents:agent.id of the planner agent whose mintSkill action produced this row. Empty for predefined catalog rows. The trace viewer renders this alongside the planner trace tree so an operator can correlate a skill mint with the upstream LLM decision that triggered it.")
+
+  @relationship(type="interactsWith", field="originatingPlanId", target=plan, direction="outgoing")
+  @relationship(type="interactsWith", field="mintedByAgentId", target=agent, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -170,6 +180,12 @@ concept skillChangeEvent {
   actorAgentId    string  @description("v1:agents:agent.id of the agent that drove the change -- the Planner Agent for planner-driven attaches, empty for human-driven changes. Mutually distinguishable from actorUserId; exactly one of the two is set per event.")
   actorUserId     string  @description("v1:identity:user.id of the human that drove the change (cockpit Skills admin view, agent edit modal). Empty for planner-driven attaches.")
   planId          string  @description("v1:planner:plan.id of the Plan that the change happened under, if any. Lets the trace viewer surface 'attached during Plan X' attribution + group co-occurring attaches under the same Plan.")
+
+  @relationship(type="interactsWith", field="targetAgentId", target=agent, direction="outgoing")
+  @relationship(type="interactsWith", field="skillId", target=skill, direction="outgoing")
+  @relationship(type="interactsWith", field="actorAgentId", target=agent, direction="outgoing")
+  @relationship(type="parent", field="actorUserId", target=user, direction="outgoing")
+  @relationship(type="interactsWith", field="planId", target=plan, direction="outgoing")
 }
 
 @version("1.0.0")

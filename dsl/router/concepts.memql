@@ -3,6 +3,8 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use agents.concepts.{ agent }
+
 @version("1.0.0")
 @namespace("router")
 @description("Spend limit for a partition or a specific agent within a partition. The router checks the current-period spend against this cap before every AI call; over-budget calls are refused with a typed error that surfaces in the UI as a clear 'budget reached' state. Rolls over at periodType boundary (UTC day, week, or month).")
@@ -15,6 +17,8 @@ concept budget {
   alertSent        bool    @default("false")  @description("True when the threshold alert for the current period has been emitted. Reset to false on period rollover.")
   resetAt          datetime  @description("The next UTC moment the period rolls over. The router uses this to decide whether to reset alertSent.")
   active           bool    @default("true")  @description("When false the budget is ignored (calls proceed unchecked). Useful for temporary overrides during incident response.")
+
+  @relationship(type="interactsWith", field="scopeId", target=agent, direction="outgoing")
 }
 
 @version("1.0.0")

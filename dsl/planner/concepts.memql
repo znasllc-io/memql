@@ -2,6 +2,9 @@
 //
 // Concepts in the planner namespace.
 
+use agents.concepts.{ agent }
+use identity.concepts.{ user }
+
 @version("1.0.0")
 @namespace("planner")
 @description("A user-visible unit of work the planner orchestrates. Per the v1 brainstorm Q1 (Option D): Plan + Task model where Plans CAN nest via parentPlanId, Tasks always belong to one Plan and never recurse. Plans are the user mental anchor (the thing the user dropped a file for, asked a question about, or kicked off as a workflow); Tasks are the engineer-facing decomposition. Lifecycle covers queued / routing / running (with sub-states for paused / awaitingFeedback / needsAgent), succeeded / failed / cancelled. The planner emits Tasks per Q3's outline+per-phase incremental strategy: the Plan's `phases` array carries the coarse outline, Tasks emerge per phase with a phase tag.")
@@ -42,6 +45,8 @@ concept plan {
   computerUseScope    enum("", "observe", "interact", "full") @default("") @description("Per-Plan declared computer_use scope (Q9 layer 2 narrowing). When non-empty, the planner gates worker tool dispatch to actions within this scope. Must equal or be NARROWER than the agent's standing AgentAuthorization.computerUseScope; an attempt to widen elevates the Plan to awaitingFeedback with reason=scope_elevation_required. Empty = no worker calls allowed for this Plan. NOTE: the `interact` enum value is retired -- the read path treats it as `full`. New Plans should pick observe or full only.")
   feedbackReason      enum("", "feedback_required", "scope_elevation_required", "kill_switch_engaged", "retry_threshold_hit", "budget_approval_required", "specialist_approval_required") @default("") @description("Discriminator on the awaitingFeedback variant. Empty = legacy feedback (free-form question via feedbackRequest). scope_elevation_required = a worker tool call hit a scope wall; the canvas card shows the requested scope + Approve/Deny. kill_switch_engaged = the user flipped User.preferences.computerUseEnabled to false; the card shows a re-enable link. retry_threshold_hit = the Planner Agent gave up after Plan.retryThreshold consecutive failures at the same logicalStepId; the canvas card asks the user 'what should we try next?'. budget_approval_required = the up-front token/cost estimate for this Plan exceeded the approval threshold (epic #836 / #837 child); the Plan parked BEFORE any planner LLM call and the canvas card shows the estimate + Approve/Decline -- on Approve the frontend sets metrics.budgetApproved=true and resumes the Plan, on Decline it cancels. specialist_approval_required = the planner wanted to create/extend a specialist or spawn a training plan (expensive: Opus trainer + web fetches + embeddings) for work that isn't a clearly durable, reused capability (epic #836 / #842); the Plan parked and the card asks the user to approve creating the new capability -- on Approve the frontend sets metrics.specialistApproved=true and resumes, otherwise the planner completes with an existing agent. phase_checkpoint = a multi-phase plan finished a phase and the next phase is non-trivial (epic #836 / #840); the Plan parked at the phase boundary so the user can review progress + spend-so-far and approve continuing rather than the whole program firing at once -- on Approve the frontend resumes and the next phase activates.")
   chatAnchorMessageId string  @description("Per Q11: when this Plan was spawned from a chat message (user dropped a file or asked a Plan-worthy question), this is the message id the chat completion / awaiting-feedback subordinate line should anchor to.")
+
+  @relationship(type="interactsWith", field="ownerAgentId", target=agent, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -67,6 +72,9 @@ concept responsibility {
   intakeResponse    object  @description("The user's answers to intakeRequest, folded back by foldResponsibilityIntakeAnswers (issue #637): {answers:[{id, answer}], respondedAt}. Carried for audit; the dispatcher uses it to re-infer the final field set before flipping the row to active.")
   lastEvaluatedAt   datetime @description("Last time the evaluator/runner fired this responsibility (reactive: last condition check; recurring: last scheduled tick; standing: last review). Empty means it has never run. Set by recordResponsibilityEvaluation.")
   lastResult        string  @description("Headline of the most recent evaluation/run's result. UI surface for 'last output' widgets. Set by recordResponsibilityEvaluation.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="interactsWith", field="assignedAgentId", target=agent, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -99,6 +107,7 @@ concept task {
   parkedAtCheckpoint  string @description("Task-kind-specific resume marker. fileProcessor: 'between-pages'; llmAnalyze: 'between-calls'; runCommand: 'between-commands'. The agent's resume code path knows what each marker means.")
 
   @relationship(type="parent", field="parentTaskId", target=task, direction="outgoing")
+  @relationship(type="parent", field="planId", target=plan, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -110,4 +119,6 @@ concept taskState {
   reasoningChain    string  @description("The agent's internal 'what I'm doing and why' summary so it can pick up the thread on re-invocation.")
   toolCallHistory   []object @description("Replayable tool-call log: list of {toolName, args, result, error?} in order. Agent prompt either replays or uses as a 'what's been done so far' summary.")
   pendingSubPlanIds []string @description("Sub-Plan ids the agent was orchestrating when it parked. Resume waits on these to complete before continuing.")
+
+  @relationship(type="parent", field="taskId", target=task, direction="outgoing")
 }

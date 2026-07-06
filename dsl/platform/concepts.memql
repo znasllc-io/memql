@@ -3,6 +3,10 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use agents.concepts.{ agent }
+use identity.concepts.{ user }
+use planner.concepts.{ plan }
+
 @version("1.0.0")
 @namespace("platform")
 @description("Instance-wide encrypted secret. Lives in the reserved _system partition (via @scope(\"global\")). The cleartext value is NEVER stored -- only a NaCl secretbox ciphertext (base64(nonce||ct)) under MEMQL_MASTER_KEY and a short fingerprint for UI display. Used for instance-level API keys, OAuth client secrets, Azure/Graph credentials, etc. For per-tenant overrides (BYOK) use v1:platform:partitionSecret; the resolver falls back partition -> global automatically.")
@@ -84,6 +88,8 @@ concept policyTrace {
   traceJson    string    @required @description("Full PolicyTrace tree serialized as JSON (name / tier / args / result / durationMs / subcalls / breadcrumbs / error).")
   durationMs   float     @required @description("Wall-clock duration of the top-level evaluation in milliseconds.")
   error        string    @description("Error message captured when the evaluation aborted; empty on success.")
+
+  @relationship(type="parent", field="actorUserId", target=user, direction="outgoing")
 }
 
 // ---- concepts/v1/platform/missingCapability/concept.memql ----
@@ -105,4 +111,7 @@ concept missingCapability {
   status          enum("open", "in_progress", "resolved", "wontfix") @default("open") @description("Lifecycle. 'open' = logged, nothing done yet. 'in_progress' = the platform team is working on it (manually set). 'resolved' = the capability shipped; the Planner Agent's next sighting will recreate as a fresh row if it still doesn't work. 'wontfix' = explicit dismissal.")
   resolution      string  @description("Free-text note when status='resolved' or 'wontfix' explaining what shipped (or why we won't ship it).")
   exampleGoals    []string @description("List of Plan.goal strings that triggered this gap. Capped at the most recent N (engine policy); gives the prioritization view 'real users wanted X, Y, Z'.")
+
+  @relationship(type="interactsWith", field="requestedFromPlanId", target=plan, direction="outgoing")
+  @relationship(type="interactsWith", field="requestedByAgentId", target=agent, direction="outgoing")
 }
