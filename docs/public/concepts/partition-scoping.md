@@ -102,7 +102,7 @@ The actual re-pointing of the existing core call sites is **Epic 3.2** (issue
 
 ## Guardrail: no new `spaceId` in core
 
-A test ratchet -- `TestNoNewSpaceIdInCore` in
+A test ratchet -- `TestNoNewPartitionIdInCore` in
 `component/memql/partition_scope_lint_test.go` -- fails when a core `.go` file
 outside the grandfathered baseline
 (`component/memql/testdata/spaceid_core_baseline.txt`) introduces `spaceId`.
