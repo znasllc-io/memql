@@ -115,7 +115,7 @@ func TestResultCacheDefaultOn_CrossReplica(t *testing.T) {
 		}
 		found := false
 		for _, row := range res.Rows() {
-			if rowID(row) == newID {
+			if bareID(rowID(row)) == bareID(newID) { // #2441: bare wire ids
 				found = true
 				break
 			}

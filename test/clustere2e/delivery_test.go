@@ -325,7 +325,10 @@ func TestClusterCrossReplicaDelivery(t *testing.T) {
 			for i, ch := range chans {
 				select {
 				case uid := <-ch:
-					if uid == utteranceID {
+					// #2441: the wire now delivers BARE ids; compare on the
+					// bare form (idempotent -- also matches a pre-cutover
+					// canonical id).
+					if bareID(uid) == bareID(utteranceID) {
 						seen[i]++
 						drained = true
 					}

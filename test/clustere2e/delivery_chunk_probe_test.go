@@ -132,7 +132,7 @@ func TestTextChunkCrossReplicaDelivery(t *testing.T) {
 			for i, ch := range chans {
 				select {
 				case cid := <-ch:
-					if cid == wantChunkID {
+					if bareID(cid) == bareID(wantChunkID) { // #2441: bare wire ids
 						seen[i]++
 						drained = true
 					}

@@ -150,16 +150,27 @@ func TestSearchUsers_ActiveAndLimitApplied(t *testing.T) {
 		return out
 	}
 
+	// #2441: the tool JSON now carries BARE shortIds (the LLM tool-result
+	// seam). Assert on the bare form; the concept-qualified id never appears.
+	bare := func(fullID string) string {
+		if i := strings.LastIndex(fullID, ":"); i >= 0 {
+			return fullID[i+1:]
+		}
+		return fullID
+	}
+	shortA, shortB, shortInactive := bare(activeA), bare(activeB), bare(inactive)
+
 	// active=true must include the active users and exclude the deactivated one.
 	activeOut := callTool(map[string]any{"active": true, "limit": float64(50)})
-	require.Contains(t, activeOut, activeA, "active=true must include active user A (#1682)")
-	require.Contains(t, activeOut, activeB, "active=true must include active user B (#1682)")
-	require.NotContains(t, activeOut, inactive, "active=true must exclude the deactivated user (#1682)")
+	require.NotContains(t, activeOut, activeA, "tool JSON must carry BARE ids, not canonical (#2441)")
+	require.Contains(t, activeOut, shortA, "active=true must include active user A (#1682)")
+	require.Contains(t, activeOut, shortB, "active=true must include active user B (#1682)")
+	require.NotContains(t, activeOut, shortInactive, "active=true must exclude the deactivated user (#1682)")
 
 	// active=false must include the deactivated user and exclude the active ones.
 	inactiveOut := callTool(map[string]any{"active": false, "limit": float64(50)})
-	require.Contains(t, inactiveOut, inactive, "active=false must include the deactivated user (#1682)")
-	require.NotContains(t, inactiveOut, activeA, "active=false must exclude active user A (#1682)")
+	require.Contains(t, inactiveOut, shortInactive, "active=false must include the deactivated user (#1682)")
+	require.NotContains(t, inactiveOut, shortA, "active=false must exclude active user A (#1682)")
 
 	// limit=N caps the result count. Seed a few more active users so the cap bites.
 	for i := 0; i < 5; i++ {

@@ -91,7 +91,7 @@ func TestKeysetCursorCrossNode(t *testing.T) {
 		uid := "v1:cognition:utterance:" + id.NewShortId()
 		if _, err := qcA.SendTextUtterance(ctx, memqlclient.SendTextUtteranceArgs{
 			UtteranceId:     uid,
-			PartitionId:         spaceID,
+			PartitionId:     spaceID,
 			ParticipantId:   participantID,
 			ParticipantType: "human",
 			Text:            fmt.Sprintf("keyset cross-node probe %02d", i),
@@ -149,7 +149,8 @@ func TestKeysetCursorCrossNode(t *testing.T) {
 	}
 	gotWalk := append(append([]string{}, page1IDs...), page2IDs...)
 	for i, want := range wantNewestFirst[:2*pageSize] {
-		if gotWalk[i] != want {
+		// #2441: query results now carry BARE ids; compare on the bare form.
+		if bareID(gotWalk[i]) != bareID(want) {
 			t.Fatalf("cross-node walk position %d = %s, want %s (gap/order break across the replica hop)", i, gotWalk[i], want)
 		}
 	}

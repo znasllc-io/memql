@@ -125,7 +125,8 @@ func TestResultCacheInvalidation_CrossReplica(t *testing.T) {
 		}
 		found := false
 		for _, row := range res.Rows() {
-			if rowID(row) == newID {
+			// #2441: query results now carry BARE ids; compare bare forms.
+			if bareID(rowID(row)) == bareID(newID) {
 				found = true
 				break
 			}

@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	memqlclient "github.com/znasllc-io/memql/sdk/go/client"
 	"github.com/znasllc-io/memql/core/id"
+	memqlclient "github.com/znasllc-io/memql/sdk/go/client"
 )
 
 func TestPresenceDrivenDelivery(t *testing.T) {
@@ -46,7 +46,7 @@ func TestPresenceDrivenDelivery(t *testing.T) {
 		// canonical id, so mint a fresh short id per connection instead.
 		if _, err := qc.UpdateParticipantPresence(ctx, memqlclient.UpdateParticipantPresenceArgs{
 			PresenceId:    "presence-" + id.NewShortId(),
-			PartitionId:       spaceID,
+			PartitionId:   spaceID,
 			ParticipantId: participantID,
 			State:         "idle",
 			Label:         "probe",
@@ -68,7 +68,7 @@ func TestPresenceDrivenDelivery(t *testing.T) {
 	qc := memqlclient.NewQueryClient(producer.Dispatcher())
 	if _, err := qc.SendTextUtterance(ctx, memqlclient.SendTextUtteranceArgs{
 		UtteranceId:     utteranceID,
-		PartitionId:         spaceID,
+		PartitionId:     spaceID,
 		ParticipantId:   participantID,
 		ParticipantType: "human",
 		Text:            "presence-driven cross-replica probe",
@@ -87,7 +87,7 @@ func TestPresenceDrivenDelivery(t *testing.T) {
 			for i, ch := range chans {
 				select {
 				case uid := <-ch:
-					if uid == utteranceID {
+					if bareID(uid) == bareID(utteranceID) { // #2441: bare wire ids
 						seen[i]++
 						drained = true
 					}
