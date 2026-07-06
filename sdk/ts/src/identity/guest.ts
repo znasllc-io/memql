@@ -17,7 +17,7 @@ import { newShortId } from "../client/id.js";
 import { readServerPayload } from "../client/wire.js";
 
 export interface SendGuestInviteArgs {
-  partitionId: string;
+  spaceId: string;
   spaceName: string;
   inviterName: string;
   email: string;
@@ -41,7 +41,7 @@ export async function sendGuestInvite(
   args: SendGuestInviteArgs,
 ): Promise<SendGuestInviteResult> {
   if (!dispatcher) throw new Error("sendGuestInvite: dispatcher is required");
-  if (!args.partitionId) throw new Error("sendGuestInvite: partitionId is required");
+  if (!args.spaceId) throw new Error("sendGuestInvite: spaceId is required");
   if (!args.email) throw new Error("sendGuestInvite: email is required");
   if (!args.joinUrlBase) throw new Error("sendGuestInvite: joinUrlBase is required");
 
@@ -50,7 +50,7 @@ export async function sendGuestInvite(
     {
       sendGuestInvite: {
         requestId,
-        partitionId: args.partitionId,
+        spaceId: args.spaceId,
         spaceName: args.spaceName ?? "",
         inviterName: args.inviterName ?? "",
         email: args.email,
@@ -87,7 +87,7 @@ export type GuestInviteStatus =
 export interface ResolveGuestInviteResult {
   status: GuestInviteStatus;
   invitationId: string;
-  partitionId: string;
+  spaceId: string;
   spaceName: string;
   inviterName: string;
   inviteeEmail: string;
@@ -124,7 +124,7 @@ export async function resolveGuestInvite(
   return {
     status: (payload.value.status ?? "invalid") as GuestInviteStatus,
     invitationId: payload.value.invitationId ?? "",
-    partitionId: payload.value.partitionId ?? "",
+    spaceId: payload.value.spaceId ?? "",
     spaceName: payload.value.spaceName ?? "",
     inviterName: payload.value.inviterName ?? "",
     inviteeEmail: payload.value.inviteeEmail ?? "",
@@ -143,7 +143,7 @@ export interface JoinSpaceAsGuestArgs {
 export interface JoinSpaceAsGuestResult {
   success: boolean;
   participantId: string;
-  partitionId: string;
+  spaceId: string;
   errorCode: string;
   errorMessage: string;
 }
@@ -152,7 +152,7 @@ export interface JoinSpaceAsGuestResult {
 // the /join/<token> page once the guest confirms their display
 // name. The stream interceptor has already validated
 // "Authorization: Guest <token>" and stashed the invitation + space
-// in the request claims; the server resolves partitionId from those
+// in the request claims; the server resolves spaceId from those
 // claims and reflects it on the reply.
 export async function joinSpaceAsGuest(
   dispatcher: Dispatcher,
@@ -183,7 +183,7 @@ export async function joinSpaceAsGuest(
   return {
     success: payload.value.success === true,
     participantId: payload.value.participantId ?? "",
-    partitionId: payload.value.partitionId ?? "",
+    spaceId: payload.value.spaceId ?? "",
     errorCode: payload.value.errorCode ?? "",
     errorMessage: payload.value.errorMessage ?? "",
   };
