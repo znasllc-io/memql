@@ -135,9 +135,7 @@ func (i *Integration) embedDomainItemsHandler(ctx context.Context, args map[stri
 		return nil, fmt.Errorf("knowledge.embedDomainItems: embedding provider not configured")
 	}
 
-	partition := i.resolvePartition(ctx)
-
-	chunks, err := i.queryChunksForDomain(ctx, partition, domainId, documentId)
+	chunks, err := i.queryChunksForDomain(ctx, domainId, documentId)
 	if err != nil {
 		return nil, fmt.Errorf("knowledge.embedDomainItems: list chunks for domain %q: %w", domainId, err)
 	}
@@ -193,7 +191,7 @@ func (i *Integration) embedDomainItemsHandler(ctx context.Context, args map[stri
 		touchedDocuments[documentId] = struct{}{}
 	}
 	for docId := range touchedDocuments {
-		if err := i.rollupDocumentEmbeddingStatus(ctx, partition, docId); err != nil {
+		if err := i.rollupDocumentEmbeddingStatus(ctx, docId); err != nil {
 			i.Logger.Warn("knowledge.embedDomainItems: document rollup failed",
 				"documentId", docId, "err", err)
 			continue
@@ -275,15 +273,13 @@ func (i *Integration) loadChunk(ctx context.Context, chunkId string) (*chunkRow,
 // 'rejected'. DISTINCT ON keeps the latest version of each chunk id.
 func (i *Integration) queryChunksForDomain(
 	ctx context.Context,
-	partition string,
 	domainId string,
 	documentId string,
 ) ([]chunkRow, error) {
-	canonicalDomainId := fmt.Sprintf("%s:v1:knowledge:knowledgeDomain:%s", partition, domainId)
-
-	// The optional documentId filter is appended as an extra predicate.
-	// Parameters: $1 partition, $2 domainId, $3 canonicalDomainId,
-	// $4 documentId ("" = no document scope).
+	// chunk.payload.domainId is the BARE domain slug by contract (see
+	// docs/public/concepts/identifiers.md); documentId is a canonical
+	// v1:knowledge:document id (relationship fields canonicalize at
+	// insert). Parameters: $1 domainId, $2 documentId ("" = no scope).
 	rows, err := i.db().QueryContext(
 		ctx,
 		`SELECT DISTINCT ON (chunk.id)
@@ -292,13 +288,9 @@ func (i *Integration) queryChunksForDomain(
 		        COALESCE(chunk.payload->>'documentId', '') AS document_id,
 		        COALESCE(chunk.payload->>'validationStatus', '') AS validation_status
 		 FROM "MemoryNodes" chunk
-		 WHERE chunk.partition = $1
-		   AND chunk.concept = 'v1:knowledge:documentChunk'
-		   AND (
-		     chunk.payload->>'domainId' = $2
-		     OR chunk.payload->>'domainId' = $3
-		   )
-		   AND ($4 = '' OR chunk.payload->>'documentId' = $4)
+		 WHERE chunk.concept = 'v1:knowledge:documentChunk'
+		   AND chunk.payload->>'domainId' = $1
+		   AND ($2 = '' OR chunk.payload->>'documentId' = $2)
 		   AND COALESCE(chunk.payload->>'validationStatus', '') <> 'rejected'
 		   AND COALESCE((chunk.payload->>'superseded')::boolean, false) = false
 		   AND (
@@ -306,14 +298,13 @@ func (i *Integration) queryChunksForDomain(
 		     OR chunk.payload->>'documentId' = ''
 		     OR NOT EXISTS (
 		       SELECT 1 FROM "MemoryNodes" doc
-		       WHERE doc.partition = chunk.partition
-		         AND doc.concept = 'v1:knowledge:document'
+		       WHERE doc.concept = 'v1:knowledge:document'
 		         AND doc.id = chunk.payload->>'documentId'
 		         AND doc.payload->>'validationStatus' = 'rejected'
 		     )
 		   )
 		 ORDER BY chunk.id, chunk."createdAt" DESC`,
-		partition, domainId, canonicalDomainId, documentId,
+		domainId, documentId,
 	)
 	if err != nil {
 		return nil, err
@@ -363,7 +354,7 @@ func (i *Integration) hasVector(ctx context.Context, nodeId string) (bool, error
 // Counts run against node_vectors (the source of truth for "is this
 // retrievable") rather than a stored flag, so the rollup self-heals if a
 // vector was added or removed out of band.
-func (i *Integration) rollupDocumentEmbeddingStatus(ctx context.Context, partition, documentId string) error {
+func (i *Integration) rollupDocumentEmbeddingStatus(ctx context.Context, documentId string) error {
 	if documentId == "" {
 		return nil
 	}
@@ -376,15 +367,14 @@ func (i *Integration) rollupDocumentEmbeddingStatus(ctx context.Context, partiti
 		 FROM (
 		   SELECT DISTINCT ON (chunk.id) chunk.id
 		   FROM "MemoryNodes" chunk
-		   WHERE chunk.partition = $1
-		     AND chunk.concept = 'v1:knowledge:documentChunk'
-		     AND chunk.payload->>'documentId' = $2
+		   WHERE chunk.concept = 'v1:knowledge:documentChunk'
+		     AND chunk.payload->>'documentId' = $1
 		     AND COALESCE(chunk.payload->>'validationStatus', '') <> 'rejected'
 		   ORDER BY chunk.id, chunk."createdAt" DESC
 		 ) live_chunk
 		 LEFT JOIN node_vectors nv
 		   ON nv.id = live_chunk.id AND nv.vector_field = 'content'`,
-		partition, documentId,
+		documentId,
 	).Scan(&total, &embedded)
 	if err != nil {
 		return fmt.Errorf("count document chunks: %w", err)

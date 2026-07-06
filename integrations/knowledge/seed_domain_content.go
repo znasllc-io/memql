@@ -224,7 +224,7 @@ func (i *Integration) seedAllDomainContentHandler(ctx context.Context, args map[
 //     placeholder chunk only.
 //
 // On success, stamps lastSeededAt + seederRecipeVersion on the
-// domain row via mutationMarkKnowledgeDomainSeeded. The training
+// domain row via markKnowledgeDomainSeeded. The training
 // pipeline reads those fields to decide whether to re-seed a stale
 // domain on retrain (per docs/internal/planning/knowledge-seeder.md, Phase 2).
 //
@@ -274,14 +274,14 @@ func (i *Integration) runSeederForDomain(ctx context.Context, d StandardDomain, 
 	return written, nil
 }
 
-// stampDomainSeeded calls mutationMarkKnowledgeDomainSeeded to
+// stampDomainSeeded calls markKnowledgeDomainSeeded to
 // record that the domain just successfully seeded at the given
 // recipe version. Used by both runSeederForDomain (above) and
 // any future per-domain refresher.
 func (i *Integration) stampDomainSeeded(ctx context.Context, domainId, recipeVersion string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	q := fmt.Sprintf(
-		`mutation mutationMarkKnowledgeDomainSeeded(domainId: %s, lastSeededAt: %s, seederRecipeVersion: %s)`,
+		`mutation markKnowledgeDomainSeeded(domainId: %s, lastSeededAt: %s, seederRecipeVersion: %s)`,
 		quoteString(domainId),
 		quoteString(now),
 		quoteString(recipeVersion),
@@ -335,7 +335,6 @@ func (i *Integration) writeTierABChunks(ctx context.Context, d StandardDomain, t
 	if err != nil {
 		return 0, fmt.Errorf("resolve embedding provider %q: %w", defaultProvider, err)
 	}
-	partition := i.resolvePartition(ctx)
 
 	written := 0
 	chunkIndex := 0
@@ -343,7 +342,7 @@ func (i *Integration) writeTierABChunks(ctx context.Context, d StandardDomain, t
 	// Tier-B: prepend the disclaimer chunk at index 0 so it always
 	// retrieves with high similarity to safety-relevant queries.
 	if tier == "B" {
-		if err := i.storeSeedChunk(ctx, partition, d, recipeVersion, chunkIndex, seedChunk{
+		if err := i.storeSeedChunk(ctx, d, recipeVersion, chunkIndex, seedChunk{
 			Kind:     "principle",
 			Title:    "Disclaimer: general information only",
 			Body:     disclaimerChunkText,
@@ -363,7 +362,7 @@ func (i *Integration) writeTierABChunks(ctx context.Context, d StandardDomain, t
 		if c.Title == "" || c.Body == "" {
 			continue
 		}
-		if err := i.storeSeedChunk(ctx, partition, d, recipeVersion, chunkIndex, c, "llm-generated", "llmSeeded", provider); err != nil {
+		if err := i.storeSeedChunk(ctx, d, recipeVersion, chunkIndex, c, "llm-generated", "llmSeeded", provider); err != nil {
 			i.Logger.Warn("seedDomainContent: chunk write failed",
 				"domainId", d.ID, "title", c.Title, "err", err)
 			chunkIndex++
@@ -384,7 +383,6 @@ func (i *Integration) writeTierCPlaceholder(ctx context.Context, d StandardDomai
 	if err != nil {
 		return 0, fmt.Errorf("resolve embedding provider %q: %w", defaultProvider, err)
 	}
-	partition := i.resolvePartition(ctx)
 
 	chunk := seedChunk{
 		Kind:     "principle",
@@ -392,7 +390,7 @@ func (i *Integration) writeTierCPlaceholder(ctx context.Context, d StandardDomai
 		Body:     tierCPlaceholderText,
 		KeyTerms: []string{"placeholder", "specialist", "upload", "authoritative"},
 	}
-	if err := i.storeSeedChunk(ctx, partition, d, recipeVersion, 0, chunk, "tier-c-placeholder", "llmSeeded", provider); err != nil {
+	if err := i.storeSeedChunk(ctx, d, recipeVersion, 0, chunk, "tier-c-placeholder", "llmSeeded", provider); err != nil {
 		return 0, err
 	}
 	return 1, nil
@@ -405,7 +403,6 @@ func (i *Integration) writeTierCPlaceholder(ctx context.Context, d StandardDomai
 // re-validation").
 func (i *Integration) storeSeedChunk(
 	ctx context.Context,
-	partition string,
 	d StandardDomain,
 	recipeVersion string,
 	chunkIndex int,

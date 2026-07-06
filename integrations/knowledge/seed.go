@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // StandardDomain is a seed record for a knowledge domain shipped with
@@ -1629,7 +1630,7 @@ func (i *Integration) seedStandardDomainsHandler(ctx context.Context, args map[s
 		// mirror for cheap inverse lookups, but the inversion isn't
 		// required for correctness.
 		insertQuery := fmt.Sprintf(
-			`mutation mutationCreateKnowledgeDomain(domainId: %s, name: %s, description: %s, category: %s, relevantForRoles: %s, requiredByToolSlugs: %s, active: true, tier: %s, source: %s, predefined: true)`,
+			`mutation createKnowledgeDomain(domainId: %s, name: %s, description: %s, category: %s, relevantForRoles: %s, requiredByToolSlugs: %s, active: true, tier: %s, source: %s, predefined: true)`,
 			quoteString(d.ID),
 			quoteString(d.Name),
 			quoteString(d.Description),
@@ -1731,17 +1732,15 @@ func (i *Integration) domainExists(ctx context.Context, domainId string) bool {
 	if i.db() == nil {
 		return false
 	}
-	partition := i.resolvePartition(ctx)
 	var count int
 	sqlText := `
 		SELECT COUNT(1) FROM "MemoryNodes"
-		WHERE partition = $1
-		  AND concept = 'v1:knowledge:knowledgeDomain'
+		WHERE concept = 'v1:knowledge:knowledgeDomain'
 		  AND (payload->>'active' = 'true' OR payload->>'active' IS NULL)
-		  AND id LIKE $2
+		  AND id = $1
 	`
-	likePattern := "%:" + domainId
-	if err := i.db().QueryRowContext(ctx, sqlText, partition, likePattern).Scan(&count); err != nil {
+	canonicalId := id.BuildNodeId("v1:knowledge:knowledgeDomain", domainId)
+	if err := i.db().QueryRowContext(ctx, sqlText, canonicalId).Scan(&count); err != nil {
 		return false
 	}
 	return count > 0
@@ -1754,16 +1753,14 @@ func (i *Integration) chunkExistsForSource(ctx context.Context, domainId, source
 	if i.db() == nil {
 		return false
 	}
-	partition := i.resolvePartition(ctx)
 	var count int
 	sqlText := `
 		SELECT COUNT(1) FROM "MemoryNodes"
-		WHERE partition = $1
-		  AND concept = 'v1:knowledge:documentChunk'
-		  AND (payload->>'domainId') = $2
-		  AND (payload->>'sourceRef') = $3
+		WHERE concept = 'v1:knowledge:documentChunk'
+		  AND (payload->>'domainId') = $1
+		  AND (payload->>'sourceRef') = $2
 	`
-	if err := i.db().QueryRowContext(ctx, sqlText, partition, domainId, sourceRef).Scan(&count); err != nil {
+	if err := i.db().QueryRowContext(ctx, sqlText, domainId, sourceRef).Scan(&count); err != nil {
 		return false
 	}
 	return count > 0
@@ -1771,7 +1768,7 @@ func (i *Integration) chunkExistsForSource(ctx context.Context, domainId, source
 
 // purgeChunksForSource hard-deletes every v1:knowledge:documentChunk
 // row (and its node_vectors row) for a given (domain, sourceRef)
-// pair in the active partition. Called from the seed right before
+// pair. Called from the seed right before
 // a re-ingest when a text change is detected, so the new version is
 // the only live copy for its sourceRef. Direct SQL (not a DSL
 // mutation) because seeds run before automations are scheduled and
@@ -1813,22 +1810,21 @@ func (i *Integration) purgeChunksForSource(ctx context.Context, domainId, source
 // content while still allowing source-text edits to flow through: if
 // a seed corpus text changes, chunkIdFor produces a
 // different hash that won't match, and the chunk is ingested fresh.
-// Chunk ids are stored raw (NOT partition-prefixed) because the
-// createDocumentChunk mutation uses `id = args.chunkId`
-// directly -- see capabilities.go. So we match on exact equality.
+// chunkIdFor returns the BARE hash; the stored row id is the
+// concept-qualified form the engine composes at insert
+// (v1:knowledge:documentChunk:<hash>), so match on that.
 func (i *Integration) chunkExistsById(ctx context.Context, chunkId string) bool {
 	if i.db() == nil {
 		return false
 	}
-	partition := i.resolvePartition(ctx)
 	var count int
 	sqlText := `
 		SELECT COUNT(1) FROM "MemoryNodes"
-		WHERE partition = $1
-		  AND concept = 'v1:knowledge:documentChunk'
-		  AND id = $2
+		WHERE concept = 'v1:knowledge:documentChunk'
+		  AND id = $1
 	`
-	if err := i.db().QueryRowContext(ctx, sqlText, partition, chunkId).Scan(&count); err != nil {
+	canonicalId := id.BuildNodeId("v1:knowledge:documentChunk", chunkId)
+	if err := i.db().QueryRowContext(ctx, sqlText, canonicalId).Scan(&count); err != nil {
 		return false
 	}
 	return count > 0

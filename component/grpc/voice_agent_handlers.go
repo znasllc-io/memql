@@ -1843,7 +1843,7 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 	}
 
 	// Mint a flat slug -- speakerId is the canonical participant id
-	// (`<partition>:v1:cognition:participant:<slug>`) and embedding
+	// (`v1:cognition:participant:<slug>`) and embedding
 	// it would inject `:v1:cognition:participant:` into the
 	// utterance id, which memql's canonicalizer then parses out as
 	// the type tag, rejecting the AI response's `replyToId` insert

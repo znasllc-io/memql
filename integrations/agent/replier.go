@@ -1940,15 +1940,10 @@ func citeNothing(_ map[string]any, _ string) string {
 }
 
 // appStructureDomainIds is the set of well-known operator/UI knowledge
-// domain ids whose chunks live in a system-owned partition (e.g. a
-// pack's operator UI domain) separate from the `default` tenant partition
-// where the knowledgeDomain row lives. Reconstructing the canonical id from
-// the CHUNK's partition would point at the wrong partition for the
-// domain row, so the lookup would miss and we'd fall back to a wrong
-// "your knowledge" citation. Short-circuiting these directly to the
-// `appStructure` source produces the right empty citation (operators
-// don't audibly cite UI docs while driving the UI) without the
-// pointless query.
+// domain ids. Their chunks shape agent behavior but are never audibly
+// cited (operators don't cite UI docs while driving the UI), so
+// enrichChunksForRender short-circuits them straight to the
+// `appStructure` source instead of doing a pointless domain-row lookup.
 //
 // Lives as a small Go set rather than a domain-row attribute so the
 // short-circuit happens BEFORE the lookup. If the catalog grows more
@@ -2009,27 +2004,23 @@ func prettifyDomainId(id string) string {
 // the citation formatter, strips the seed envelope from the chunk
 // text, and returns chunks ready to render in the prompt template.
 //
-// Domain lookups happen ONCE per unique canonical domainId per turn
-// (small N -- retrieval limit is 5, so worst case is 5 distinct
-// domains per turn). Bridges (domainId starts with "bridge-") don't
-// have a knowledgeDomain row; they're handled with a synthetic-source
+// Domain lookups happen ONCE per unique domainId per turn (small N --
+// retrieval limit is 5, so worst case is 5 distinct domains per
+// turn). Bridges (domainId starts with "bridge-") don't have a
+// knowledgeDomain row; they're handled with a synthetic-source
 // assignment so the formatter still works.
 //
-// Canonical-id construction: chunk.payload.domainId is the BARE slug
-// (e.g. "customer-relations"). v1:knowledge:knowledgeDomain rows live at
-// canonical id `<partition>:v1:knowledge:knowledgeDomain:<slug>`, and
-// queryKnowledgeDomainById's `?.id == args.domainId` filter compares
-// against the FULL canonical form -- bare slugs never match. We
-// reconstruct the canonical id by extracting the partition prefix
-// from the chunk's own canonical id (which similarTo returns intact).
-// Same partition for chunk + domain since they're co-located.
+// chunk.payload.domainId is the BARE slug (e.g. "customer-relations").
+// The knowledgeDomainById query is signature-bound to the
+// knowledgeDomain concept, so its `id==args.domainId` filter resolves
+// a bare slug against the bound concept server-side (resolveFullId) --
+// callers pass the bare slug, no id composition here.
 func (r *Replier) enrichChunksForRender(ctx context.Context, chunks []map[string]any) []map[string]any {
 	domainCache := make(map[string]map[string]any)
 	out := make([]map[string]any, 0, len(chunks))
 	for _, chunk := range chunks {
 		domainId, _ := chunk["domainId"].(string)
 		sourceRef, _ := chunk["sourceRef"].(string)
-		chunkId, _ := chunk["chunkId"].(string)
 		text, _ := chunk["text"].(string)
 		sim, _ := chunk["similarity"].(float64)
 
@@ -2037,25 +2028,17 @@ func (r *Replier) enrichChunksForRender(ctx context.Context, chunks []map[string
 		cleanText := stripSeedEnvelope(text)
 
 		// Resolve the chunk's source. Two short-circuits before the
-		// general lookup, both for domain ids whose chunks live in
-		// a different partition than the knowledgeDomain row -- so
-		// reconstructing the canonical id from the chunk's partition
-		// would fail the lookup:
+		// general lookup:
 		//
 		// 1. Bridges (id prefix "bridge-") have their metadata on
 		//    v1:knowledge:knowledgeBridge instead of knowledgeDomain;
 		//    the lookup would always miss. Source: crossDomainBridge.
 		//
 		// 2. App-structure domains (e.g. the product pack's operator
-		//    UI domain) seed their chunks into a partition named after
-		//    the domain id by design (system-owned, isolated from
-		//    tenant data), but the knowledgeDomain row itself lives in
-		//    `default`. The canonical-id reconstruction picks up that
-		//    domain-id partition, which has no knowledgeDomain row,
-		//    triggering domain-lookup-missed warnings on every
-		//    operator turn. Short-circuit + stamp appStructure
-		//    directly so operator citations stay quiet (they're
-		//    intentionally empty per the appStructure formatter).
+		//    UI domain) intentionally produce NO audible citation
+		//    (operators don't cite UI docs while driving the UI), so
+		//    the domain-row lookup is pointless work -- stamp
+		//    appStructure directly.
 		var domain map[string]any
 		var source string
 		if strings.HasPrefix(domainId, "bridge-") {
@@ -2063,8 +2046,7 @@ func (r *Replier) enrichChunksForRender(ctx context.Context, chunks []map[string
 		} else if isAppStructureDomain(domainId) {
 			source = "appStructure"
 		} else {
-			canonicalDomainId := canonicalDomainIdFromChunkId(chunkId, domainId)
-			domain = r.lookupDomainCached(ctx, canonicalDomainId, domainCache)
+			domain = r.lookupDomainCached(ctx, domainId, domainCache)
 			if s, ok := domain["source"].(string); ok && s != "" {
 				source = s
 			} else {
@@ -2082,7 +2064,6 @@ func (r *Replier) enrichChunksForRender(ctx context.Context, chunks []map[string
 				if domain == nil && r.logger != nil {
 					r.logger.Warn("agentReply RAG: domain lookup missed",
 						"chunkDomainId", domainId,
-						"canonicalDomainId", canonicalDomainId,
 						"sourceRef", sourceRef,
 					)
 				}
@@ -2139,45 +2120,14 @@ func isLinkableSource(source string) bool {
 	}
 }
 
-// canonicalDomainIdFromChunkId reconstructs the canonical
-// knowledgeDomain id from a chunk's canonical id + the chunk's bare
-// domain slug.
-//
-//	chunkId = "default:v1:knowledge:documentChunk:seed-3767..."
-//	bareSlug = "customer-relations"
-//	-> "default:v1:knowledge:knowledgeDomain:customer-relations"
-//
-// We pull the partition (first segment) from the chunk id and join
-// with the knowledgeDomain concept prefix + slug. If the chunk id
-// doesn't parse, fall back to the bare slug -- the lookup will miss
-// and the citation will fall back to "your knowledge", which the
-// diagnostic log in enrichChunksForRender catches.
-func canonicalDomainIdFromChunkId(chunkId, bareSlug string) string {
-	if bareSlug == "" {
-		return ""
-	}
-	if chunkId == "" {
-		return bareSlug
-	}
-	// Partition is the segment up to the first ':'. We need the
-	// concept ('v1:knowledge:documentChunk') NOT to leak into the
-	// reconstructed id, so we split off just the partition piece.
-	colon := strings.Index(chunkId, ":")
-	if colon <= 0 {
-		return bareSlug
-	}
-	partition := chunkId[:colon]
-	return partition + ":v1:knowledge:knowledgeDomain:" + bareSlug
-}
-
 // lookupDomainCached fetches a knowledgeDomain row by id, memoising
 // the result for the duration of the turn so we don't re-query for
 // chunks that share the same domain.
 //
-// `domainId` is expected to be the FULL canonical id (e.g.
-// "default:v1:knowledge:knowledgeDomain:customer-relations"). Bare
-// slugs won't match the query's `?.id == args.domainId` filter --
-// see canonicalDomainIdFromChunkId for the reconstruction.
+// `domainId` is the BARE domain slug (e.g. "customer-relations").
+// The knowledgeDomainById query is signature-bound to the
+// knowledgeDomain concept, so the engine resolves the bare slug to
+// the canonical row id server-side; no composition happens here.
 //
 // Returns the FLATTENED row (id + payload merged) so the citation
 // formatter can read both `id` and payload-level fields like `name`
@@ -2195,7 +2145,7 @@ func (r *Replier) lookupDomainCached(
 	}
 	res, err := r.engine.Execute(
 		ctx,
-		fmt.Sprintf(`query queryKnowledgeDomainById(domainId: %s)`, jsonString(domainId)),
+		fmt.Sprintf(`query knowledgeDomainById(domainId: %s)`, jsonString(domainId)),
 	)
 	if err != nil {
 		cache[domainId] = nil

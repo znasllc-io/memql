@@ -23,6 +23,13 @@ func TestValidateShortId(t *testing.T) {
 		{"colon compound rejected", "v1:planner:plan", "proactive:d6ac657f:1781827518721614124", true},
 		{"foreign concept prefix rejected", "v1:planner:plan", "v1:agents:agent:abc", true},
 		{"with-no-concept colon rejected", "", "train:abc", true},
+		// The #2439 failing shape: concept-qualified but with a compound
+		// (colon-bearing) remainder. Previously passed shape (2).
+		{"qualified compound remainder rejected", "v1:planner:plan", "v1:planner:plan:abc:refine:ts9", true},
+		{"qualified empty remainder rejected", "v1:planner:plan", "v1:planner:plan:", true},
+		// Legacy partition-prefixed form (retired in #56 phase 6) does not
+		// start with the concept name, so it stays rejected.
+		{"partition-prefixed rejected", "v1:planner:plan", "default:v1:planner:plan:abc", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

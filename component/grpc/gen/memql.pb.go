@@ -13109,13 +13109,18 @@ func (x *VoiceAgentFinalTranscript) GetNativeAuthored() bool {
 }
 
 type VoiceAgentFinalAck struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Success       bool                   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
-	UtteranceId   string                 `protobuf:"bytes,3,opt,name=utterance_id,json=utteranceId,proto3" json:"utterance_id,omitempty"` // canonical row id of the inserted utterance
-	Thread        string                 `protobuf:"bytes,4,opt,name=thread,proto3" json:"thread,omitempty"`                              // 'team' | 'group'
-	ErrorCode     string                 `protobuf:"bytes,5,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
-	ErrorMessage  string                 `protobuf:"bytes,6,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Success   bool                   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
+	// Bare shortId of the inserted utterance (server-minted
+	// "utt-<nanos>-<hex>"; the stored row id is
+	// v1:cognition:utterance:<this>). NOTE: the sibling
+	// VoiceAgentTurnComplete.utterance_id currently carries the CANONICAL
+	// row id -- #2441 (bare-ids cutover) aligns both surfaces on bare.
+	UtteranceId   string `protobuf:"bytes,3,opt,name=utterance_id,json=utteranceId,proto3" json:"utterance_id,omitempty"`
+	Thread        string `protobuf:"bytes,4,opt,name=thread,proto3" json:"thread,omitempty"` // 'team' | 'group'
+	ErrorCode     string `protobuf:"bytes,5,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
+	ErrorMessage  string `protobuf:"bytes,6,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
