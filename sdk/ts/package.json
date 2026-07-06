@@ -1,6 +1,6 @@
 {
   "name": "@znasllc-io/memql-sdk-core",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Client-agnostic runtime core for the memQL web SDK: connection, dispatcher, query/subscription primitives, and voice. Per-product SDKs layer generated typed methods on top.",
   "type": "module",
   "main": "./dist/index.js",

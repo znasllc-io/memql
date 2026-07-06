@@ -7,7 +7,12 @@
 export { Connection, type ConnectOptions, type ConnectionAuth } from "./connection.js";
 export { Dispatcher, type DispatcherOptions } from "./dispatcher.js";
 export { QueryClient, type QueryCallOptions } from "./query.js";
-export { SubscriptionManager, type EventHandler, type SubscribeOptions } from "./subscriptions.js";
+export {
+  SubscriptionManager,
+  type EventHandler,
+  type GraphSubscribeOptions,
+  type SubscribeOptions,
+} from "./subscriptions.js";
 export {
   Result,
   rowArray,
@@ -18,6 +23,7 @@ export {
   type AccessSummary,
   type Concept,
   type Event,
+  type GraphAction,
   type Role,
   type Row,
   type SubscriptionKind,

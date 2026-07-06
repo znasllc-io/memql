@@ -495,8 +495,43 @@ message QueryErrorMsg {
 message SubscribeMsg {
   string subscription_id = 1;
   SubscriptionKind kind = 2;
+  // filter is the legacy free-text bus pattern. It is used for the
+  // NON-graph subscription kinds (telemetry / message / ai_stream /
+  // query_spec / domain / automation / all), which subscribe by a
+  // namespace-prefixed glob and have no concept dimension. It is
+  // REJECTED for SUBSCRIPTION_KIND_GRAPH_EVENTS -- graph subscriptions
+  // are structured (concept + actions) and the SERVER composes the
+  // bus topic, so the topic grammar never appears on the client wire
+  // (#2460).
   string filter = 3;
   google.protobuf.Struct config = 4;
+
+  // Structured graph subscription (kind == SUBSCRIPTION_KIND_GRAPH_EVENTS).
+  // The server composes the bus topic(s) from these fields, so a client
+  // never writes a `graph.node.<action>.<concept>` topic string.
+  //
+  // concept is a canonical concept TYPE id (e.g. "v1:cognition:utterance").
+  // A concept type is legitimately client-visible: it is a 3+-segment
+  // TYPE string, never a node id, so the wire bare-ifier's node-id
+  // recogniser leaves the `concept` carrier key untouched at every seam.
+  // Empty concept = all concepts. Must contain no `.` / whitespace /
+  // wildcard characters (those would corrupt the composed topic).
+  string concept = 5;
+  // actions is the set of CDC verbs to receive. Empty = all actions.
+  // GRAPH_NODE_ACTION_UNSPECIFIED is not permitted inside a populated
+  // list (use an empty list for "all").
+  repeated GraphNodeAction actions = 6;
+}
+
+// GraphNodeAction is the CDC verb of a graph.node.<action>.<concept>
+// topic. It is consumed only by structured graph subscriptions
+// (SubscribeMsg.actions); the server maps it to the topic's action
+// segment.
+enum GraphNodeAction {
+  GRAPH_NODE_ACTION_UNSPECIFIED = 0;
+  GRAPH_NODE_ACTION_CREATED = 1;
+  GRAPH_NODE_ACTION_UPDATED = 2;
+  GRAPH_NODE_ACTION_DELETED = 3;
 }
 
 message UnsubscribeMsg {

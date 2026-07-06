@@ -108,6 +108,23 @@ func FromProtoEventKind(k memqlv1.EventKind) Kind {
 	}
 }
 
+// GraphNodeActionVerb maps a proto GraphNodeAction to its CDC topic verb
+// ("created" / "updated" / "deleted"). UNSPECIFIED returns "" + false so
+// the caller can reject it inside a populated actions list (an empty list
+// is the "all actions" signal and is handled before this is called).
+func GraphNodeActionVerb(a memqlv1.GraphNodeAction) (string, bool) {
+	switch a {
+	case memqlv1.GraphNodeAction_GRAPH_NODE_ACTION_CREATED:
+		return "created", true
+	case memqlv1.GraphNodeAction_GRAPH_NODE_ACTION_UPDATED:
+		return "updated", true
+	case memqlv1.GraphNodeAction_GRAPH_NODE_ACTION_DELETED:
+		return "deleted", true
+	default:
+		return "", false
+	}
+}
+
 // TopicPatternFromSubscriptionKind returns a glob pattern for the given
 // subscription kind. The filter is prefixed with the kind's namespace
 // (telemetry., message., graph., ai., query., automation.) to produce the

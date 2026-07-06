@@ -196,6 +196,11 @@ func (k Kind) String() string {
 // Topic constants for common event topics.
 const (
 	// Graph node events
+	// TopicGraphNode is the base of the graph.node.<action>.<concept> CDC
+	// grammar; the per-action topics below append the action segment. The
+	// structured-subscribe composer (GraphSubscriptionPatterns) uses this
+	// base + a "*" action wildcard for "all actions".
+	TopicGraphNode        = "graph.node"
 	TopicGraphNodeCreated = "graph.node.created"
 	TopicGraphNodeDeleted = "graph.node.deleted"
 	TopicGraphNodeUpdated = "graph.node.updated"

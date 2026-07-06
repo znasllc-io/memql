@@ -203,8 +203,8 @@ func rowID(row memqlclient.Row) string {
 // this connection, landing there as a LOCAL graph event: the space-interest
 // signal that subscribes that replica to the space's durable stream
 // (memql#1316). A subscriber that skips this models a client that never opened
-// the space, which is not a supported delivery contract (SubscribeMsg carries
-// a topic pattern, not a space id).
+// the space, which is not a supported delivery contract (a graph SubscribeMsg
+// carries a concept + actions, not a space id).
 //
 // The SPA's every-open write is actually createSessionForParticipant
 // (callable from the Go SDK since memql#1319/#1321 were fixed); the join write
@@ -230,8 +230,11 @@ func subscribeUtterances(ctx context.Context, t *testing.T, conn *memqlclient.Co
 	// graph.node.created.# -- every node-created event; we filter to the
 	// utterance concept + our utterance id below. (A tighter server-side
 	// filter risks masking a drop behind a filter mismatch, so we subscribe
-	// broad and assert narrow.)
-	_, events, err := sm.Subscribe(ctx, memqlclient.SubscriptionKindGraphEvents, "node.created.#")
+	// broad and assert narrow.) Structured graph subscribe (#2460): empty
+	// concept = all concepts, actions = created only.
+	_, events, err := sm.SubscribeGraph(ctx, memqlclient.GraphSubscribeOptions{
+		Actions: []memqlclient.GraphAction{memqlclient.GraphActionCreated},
+	})
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}

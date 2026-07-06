@@ -39,7 +39,14 @@ export interface CancelRequestPayload {
 export interface SubscribePayload {
   subscriptionId: string;
   kind: SubscriptionKindWire;
+  // filter is the legacy free-text bus pattern, retained for the NON-graph
+  // subscription kinds. Graph subscriptions are structured (concept +
+  // actions) and the server rejects a filter for them (memql#2460).
   filter?: string;
+  // Structured graph subscription fields (kind == GRAPH_EVENTS). The server
+  // composes the bus topic from these.
+  concept?: string;
+  actions?: GraphNodeActionWire[];
 }
 
 export interface UnsubscribePayload {
@@ -538,6 +545,12 @@ export interface ResultMetaWire {
   serverId?: string;
   version?: string | number;
 }
+
+export type GraphNodeActionWire =
+  | "GRAPH_NODE_ACTION_UNSPECIFIED"
+  | "GRAPH_NODE_ACTION_CREATED"
+  | "GRAPH_NODE_ACTION_UPDATED"
+  | "GRAPH_NODE_ACTION_DELETED";
 
 export type SubscriptionKindWire =
   | "SUBSCRIPTION_KIND_UNSPECIFIED"

@@ -49,7 +49,11 @@ func subscribeTextChunks(ctx context.Context, t *testing.T, conn *memqlclient.Co
 	t.Helper()
 	sm := memqlclient.NewSubscriptionManager(conn.Dispatcher())
 	// Broad subscribe, narrow assert -- same rationale as subscribeUtterances.
-	_, events, err := sm.Subscribe(ctx, memqlclient.SubscriptionKindGraphEvents, "node.created.#")
+	// Structured graph subscribe (#2460): empty concept = all concepts,
+	// actions = created only.
+	_, events, err := sm.SubscribeGraph(ctx, memqlclient.GraphSubscribeOptions{
+		Actions: []memqlclient.GraphAction{memqlclient.GraphActionCreated},
+	})
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}

@@ -291,11 +291,10 @@ func TestWireBareIds_EngineRoundTrip(t *testing.T) {
 	//    handleBusEvent a canonical-shaped event (id/nodeId/FK + the chunk
 	//    replyId forward-ref). The wire copy must be fully bare; the internal
 	//    event map must stay canonical (clone safety).
-	s.subscriptions.Store("wire-sub", &subscriptionInfo{msg: &memqlv1.SubscribeMsg{
-		SubscriptionId: "wire-sub",
-		Kind:           memqlv1.SubscriptionKind_SUBSCRIPTION_KIND_GRAPH_EVENTS,
-		Filter:         "#",
-	}})
+	s.subscriptions.Store("wire-sub", &subscriptionInfo{
+		kind:     memqlv1.SubscriptionKind_SUBSCRIPTION_KIND_GRAPH_EVENTS,
+		patterns: []string{"graph.#"},
+	})
 	internalPayload := map[string]any{
 		"id":          agentId,
 		"nodeId":      agentId,

@@ -31,21 +31,67 @@ func NewSubscriptionManager(dispatcher *Dispatcher) *SubscriptionManager {
 	return sm
 }
 
-// Subscribe sends a SubscribeMsg and returns a channel for receiving
-// SDK-owned Event values. The caller drains the channel until it is
-// closed (by Unsubscribe or Stop). `kind` is the SDK-owned
-// SubscriptionKind; the proto enum stays inside the SDK.
+// Subscribe sends a SubscribeMsg for a NON-graph subscription kind and
+// returns a channel for receiving SDK-owned Event values. The caller
+// drains the channel until it is closed (by Unsubscribe or Stop). `kind`
+// is the SDK-owned SubscriptionKind; the proto enum stays inside the SDK.
+//
+// Graph subscriptions are STRUCTURED (memql#2460): the server composes the
+// bus topic from a concept + actions, so a free-text filter is no longer
+// accepted for SubscriptionKindGraphEvents. Passing it here is a client
+// error -- use SubscribeGraph instead.
 func (sm *SubscriptionManager) Subscribe(ctx context.Context, kind SubscriptionKind, filter string) (string, <-chan Event, error) {
+	if kind == SubscriptionKindGraphEvents {
+		return "", nil, fmt.Errorf("graph subscriptions are structured; use SubscribeGraph (concept + actions) instead of Subscribe with a free-text filter")
+	}
+	return sm.subscribe(ctx, &memqlv1.SubscribeMsg{
+		Kind:   kind.toProto(),
+		Filter: filter,
+	})
+}
+
+// GraphSubscribeOptions selects which graph CDC events a structured graph
+// subscription receives (memql#2460). Both fields are optional:
+//
+//   - Concept is a canonical concept TYPE id (e.g. "v1:cognition:utterance").
+//     Empty = all concepts.
+//   - Actions is the set of CDC verbs. Empty = all actions.
+//
+// The server composes the bus topic from these, so the client never writes
+// a `graph.node.<action>.<concept>` topic string.
+type GraphSubscribeOptions struct {
+	Concept string
+	Actions []GraphAction
+}
+
+// SubscribeGraph opens a STRUCTURED graph subscription and returns a
+// channel of SDK-owned Event values. It is the graph counterpart of
+// Subscribe: the server composes the bus topic from opts.Concept +
+// opts.Actions (memql#2460).
+func (sm *SubscriptionManager) SubscribeGraph(ctx context.Context, opts GraphSubscribeOptions) (string, <-chan Event, error) {
+	var actions []memqlv1.GraphNodeAction
+	if len(opts.Actions) > 0 {
+		actions = make([]memqlv1.GraphNodeAction, 0, len(opts.Actions))
+		for _, a := range opts.Actions {
+			actions = append(actions, a.toProto())
+		}
+	}
+	return sm.subscribe(ctx, &memqlv1.SubscribeMsg{
+		Kind:    memqlv1.SubscriptionKind_SUBSCRIPTION_KIND_GRAPH_EVENTS,
+		Concept: opts.Concept,
+		Actions: actions,
+	})
+}
+
+// subscribe stamps a fresh subscription id, sends the SubscribeMsg, and
+// registers the demux channel. Shared by Subscribe + SubscribeGraph.
+func (sm *SubscriptionManager) subscribe(ctx context.Context, sub *memqlv1.SubscribeMsg) (string, <-chan Event, error) {
+	_ = ctx
 	subId := id.NewShortId()
+	sub.SubscriptionId = subId
 
 	msg := &memqlv1.MemqlClientMessage{
-		Payload: &memqlv1.MemqlClientMessage_Subscribe{
-			Subscribe: &memqlv1.SubscribeMsg{
-				SubscriptionId: subId,
-				Kind:           kind.toProto(),
-				Filter:         filter,
-			},
-		},
+		Payload: &memqlv1.MemqlClientMessage_Subscribe{Subscribe: sub},
 	}
 
 	_, err := sm.dispatcher.Send(msg)

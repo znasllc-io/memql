@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -760,9 +761,15 @@ func (s *service) executeQuery(ctx context.Context, query string, clientId strin
 	}, nil
 }
 
-// subscriptionInfo holds subscription metadata.
+// subscriptionInfo holds subscription metadata. patterns are the bus
+// topic patterns this subscription matches, composed ONCE at subscribe
+// time (server-side, #2460): for graph subscriptions from the structured
+// concept+actions fields, for the other kinds from the legacy free-text
+// filter. handleBusEvent matches an incoming event's topic against these
+// stored patterns rather than re-deriving them per event.
 type subscriptionInfo struct {
-	msg *memqlv1.SubscribeMsg
+	kind     memqlv1.SubscriptionKind
+	patterns []string
 }
 
 type streamSession struct {
@@ -927,22 +934,31 @@ func (s *streamSession) handleBusEvent(event events.Event) {
 			return true
 		}
 		info, ok := value.(*subscriptionInfo)
-		if !ok || info == nil || info.msg == nil {
+		if !ok || info == nil || len(info.patterns) == 0 {
 			return true
 		}
 
-		// Check if this subscription matches the event topic
-		pattern := events.TopicPatternFromSubscriptionKind(info.msg.GetKind(), info.msg.GetFilter())
-		if !events.Match(pattern, event.Topic) {
+		// Check if this subscription matches the event topic. Patterns
+		// were composed once at subscribe time (server-side, #2460); a
+		// subscription may carry several disjoint patterns (one per CDC
+		// action), so any match delivers.
+		matched := ""
+		for _, pattern := range info.patterns {
+			if events.Match(pattern, event.Topic) {
+				matched = pattern
+				break
+			}
+		}
+		if matched == "" {
 			if s.logger != nil {
-				s.logger.Debug("subscription pattern mismatch", "subscriptionId", subscriptionId, "pattern", pattern, "topic", event.Topic)
+				s.logger.Debug("subscription pattern mismatch", "subscriptionId", subscriptionId, "patterns", info.patterns, "topic", event.Topic)
 			}
 			return true
 		}
 
 		matchCount++
 		if s.logger != nil {
-			s.logger.Debug("subscription matched, sending event", "subscriptionId", subscriptionId, "pattern", pattern, "topic", event.Topic)
+			s.logger.Debug("subscription matched, sending event", "subscriptionId", subscriptionId, "pattern", matched, "topic", event.Topic)
 		}
 
 		notification := &memqlv1.EventNotification{
@@ -1394,23 +1410,43 @@ func (s *streamSession) handleSubscribe(envelope *memqlv1.MemqlClientMessage, ms
 		})
 	}
 	if s.logger != nil {
-		s.logger.Info("handleSubscribe called", "filter", msg.GetFilter(), "kind", msg.GetKind().String())
+		s.logger.Info("handleSubscribe called", "kind", msg.GetKind().String(), "filter", msg.GetFilter(), "concept", msg.GetConcept())
 	}
+
+	// Compose the bus topic pattern(s) SERVER-SIDE (#2460). Graph
+	// subscriptions are structured (concept + actions); every other kind
+	// uses the legacy free-text filter. A malformed request is rejected
+	// loudly rather than silently subscribing to nothing.
+	patterns, err := composeSubscriptionPatterns(msg)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("subscription rejected", "kind", msg.GetKind().String(), "error", err)
+		}
+		return s.sendEventNotification(envelope.GetMessageId(), strings.TrimSpace(msg.GetSubscriptionId()), "subscription-error", map[string]any{
+			"status":  "error",
+			"message": err.Error(),
+		})
+	}
+
 	subscriptionId := strings.TrimSpace(msg.GetSubscriptionId())
 	if subscriptionId == "" {
 		subscriptionId = id.NewShortId()
 	}
 
-	// Store the subscription info for matching
+	// Store the subscription info for matching.
 	info := &subscriptionInfo{
-		msg: msg,
+		kind:     msg.GetKind(),
+		patterns: patterns,
 	}
 	s.subscriptions.Store(subscriptionId, info)
 
-	// Register with the event bus if available
+	// Register every composed pattern with the event bus. A graph
+	// subscription can carry several disjoint patterns (one per CDC
+	// action); each registers its own bus subscription funnelling into the
+	// shared eventChan, and the combined unsubscribe tears them all down.
 	if s.service.eventBus != nil {
-		pattern := events.TopicPatternFromSubscriptionKind(msg.GetKind(), msg.GetFilter())
-		unsubscribe := s.service.eventBus.Subscribe(pattern, func(event events.Event) {
+		unsubFns := make([]func(), 0, len(patterns))
+		forward := func(event events.Event) {
 			select {
 			case s.eventChan <- event:
 			default:
@@ -1422,26 +1458,85 @@ func (s *streamSession) handleSubscribe(envelope *memqlv1.MemqlClientMessage, ms
 					)
 				}
 			}
+		}
+		for _, pattern := range patterns {
+			unsubFns = append(unsubFns, s.service.eventBus.Subscribe(pattern, forward))
+		}
+		s.unsubscribers.Store(subscriptionId, func() {
+			for _, fn := range unsubFns {
+				if fn != nil {
+					fn()
+				}
+			}
 		})
-		s.unsubscribers.Store(subscriptionId, unsubscribe)
 
 		if s.logger != nil {
 			s.logger.Info("subscription registered with event bus",
 				"subscription_id", subscriptionId,
-				"pattern", pattern,
+				"patterns", patterns,
 				"kind", msg.GetKind().String(),
 			)
 		}
 	}
 
+	// structpb only encodes []any (not []string), so widen for the ack.
+	patternsAny := make([]any, len(patterns))
+	for i, p := range patterns {
+		patternsAny[i] = p
+	}
 	responsePayload := map[string]any{
 		"status":           "subscribed",
 		"subscriptionId":   subscriptionId,
 		"subscriptionKind": msg.GetKind().String(),
-		"filter":           msg.GetFilter(),
+		"patterns":         patternsAny,
 	}
 
 	return s.sendEventNotification(envelope.GetMessageId(), subscriptionId, "subscription-created", responsePayload)
+}
+
+// graphConceptPattern validates the client-supplied concept TYPE id on a
+// structured graph subscription: a version-prefixed, colon-delimited type
+// string carrying no dots / whitespace / wildcards (any of which would
+// corrupt the composed graph.node.<action>.<concept> topic). Empty concept
+// (all concepts) is handled by the caller and never reaches here.
+var graphConceptPattern = regexp.MustCompile(`^v[0-9]+:[a-z0-9]+:[a-zA-Z0-9_:]+$`)
+
+// composeSubscriptionPatterns turns a SubscribeMsg into the bus topic
+// pattern(s) the server registers, enforcing the #2460 wire contract:
+//
+//   - SUBSCRIPTION_KIND_GRAPH_EVENTS is STRUCTURED. The topic is composed
+//     from `concept` + `actions`; a non-empty legacy `filter` is rejected
+//     loudly (the topic grammar must not appear on the client wire).
+//   - Every other kind keeps the legacy free-text `filter`. Supplying the
+//     structured `concept`/`actions` on a non-graph kind is rejected.
+func composeSubscriptionPatterns(msg *memqlv1.SubscribeMsg) ([]string, error) {
+	kind := msg.GetKind()
+	concept := strings.TrimSpace(msg.GetConcept())
+	actions := msg.GetActions()
+
+	if kind == memqlv1.SubscriptionKind_SUBSCRIPTION_KIND_GRAPH_EVENTS {
+		if strings.TrimSpace(msg.GetFilter()) != "" {
+			return nil, fmt.Errorf("graph subscriptions are structured (concept + actions); the free-text `filter` field is not accepted for SUBSCRIPTION_KIND_GRAPH_EVENTS (#2460)")
+		}
+		if concept != "" && !graphConceptPattern.MatchString(concept) {
+			return nil, fmt.Errorf("invalid graph subscription concept %q: must be a canonical concept type id (e.g. \"v1:cognition:utterance\") with no dots or wildcards", concept)
+		}
+		verbs := make([]string, 0, len(actions))
+		for _, a := range actions {
+			verb, ok := events.GraphNodeActionVerb(a)
+			if !ok {
+				return nil, fmt.Errorf("invalid graph subscription action %q: use GRAPH_NODE_ACTION_{CREATED,UPDATED,DELETED} (an empty actions list means all actions)", a.String())
+			}
+			verbs = append(verbs, verb)
+		}
+		return events.GraphSubscriptionPatterns(concept, verbs), nil
+	}
+
+	// Non-graph kinds: the structured fields do not apply.
+	if concept != "" || len(actions) > 0 {
+		return nil, fmt.Errorf("the structured `concept`/`actions` fields are only valid for SUBSCRIPTION_KIND_GRAPH_EVENTS, not %s", kind.String())
+	}
+	return []string{events.TopicPatternFromSubscriptionKind(kind, msg.GetFilter())}, nil
 }
 
 func (s *streamSession) handleUnsubscribe(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.UnsubscribeMsg) error {
