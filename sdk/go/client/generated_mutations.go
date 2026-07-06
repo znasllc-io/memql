@@ -16,7 +16,7 @@ var (
 
 // ActivateAuthoringBundle -- Activate a bundle after Gate 3 approval: status -> active and activatedAt stamped. The authored-construct runtime (#959) registers the bundle's constructs on this transition; member constructs are flipped to active via setConstructStatus.
 //
-// Bound concept: bundle.
+// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["activateAuthoringBundle"] in generated_concepts.go).
 type ActivateAuthoringBundleArgs struct {
 	BundleId string
 }
@@ -38,7 +38,7 @@ func ActivateAuthoringBundleBuild(args ActivateAuthoringBundleArgs) string {
 
 // AddAgentToSpace -- Add the caller's agent to a space's roster. forUserId is server-stamped; per-user-per-space 3-cap and agent-ownership are enforced by the engine guard.
 //
-// Bound concept: participant.
+// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["addAgentToSpace"] in generated_concepts.go).
 type AddAgentToSpaceArgs struct {
 	PartitionId         string
 	AgentId             string
@@ -80,7 +80,7 @@ func AddAgentToSpaceBuild(args AddAgentToSpaceArgs) string {
 
 // AddHarnessStep -- Add a v1:harness:step to a plan, status='pending', attempt=0. ownerUserId is stamped from actor.userId (owned tier). Creating the step emits graph.node.created.*.v1:harness:step automatically on insert.
 //
-// Bound concept: step.
+// Bound concept: v1:harness:step (machine-readable: BoundConcepts["addHarnessStep"] in generated_concepts.go).
 type AddHarnessStepArgs struct {
 	StepId         string
 	PlanId         string
@@ -138,7 +138,7 @@ func AddHarnessStepBuild(args AddHarnessStepArgs) string {
 
 // AdvanceHarnessConsolidationCursor -- Advance the per-owner v1:harness:consolidationCursor watermark to the engine-computed max(createdAt) of the batch just consolidated -- the incremental-cost mechanism (next run reads only episodes newer than this). Upserts on a stable per-owner id so it creates the cursor on first run and advances it thereafter. episodesSeen takes the engine-computed running total. ownerUserId stamped from actor.userId (owned tier).
 //
-// Bound concept: consolidationCursor.
+// Bound concept: v1:harness:consolidationCursor (machine-readable: BoundConcepts["advanceHarnessConsolidationCursor"] in generated_concepts.go).
 type AdvanceHarnessConsolidationCursorArgs struct {
 	CursorId     string
 	Watermark    string
@@ -176,7 +176,7 @@ func AdvanceHarnessConsolidationCursorBuild(args AdvanceHarnessConsolidationCurs
 
 // AdvanceRequest -- Transition a v1:forge:request to a new status (the approval pipeline edges). update read-merges the prior row. The role guard belongs in an engine pre-insert hook (follow-up).
 //
-// Bound concept: request.
+// Bound concept: v1:forge:request (machine-readable: BoundConcepts["advanceRequest"] in generated_concepts.go).
 type AdvanceRequestArgs struct {
 	RequestId         string
 	Status            string
@@ -228,7 +228,7 @@ func AdvanceRequestBuild(args AdvanceRequestArgs) string {
 
 // AppendDocumentVersion -- Append an immutable document-version snapshot to a logical document's history. Handler-invoked (integration.library.editDocument / restoreDocumentVersion) -- ownerUserId is threaded from the backing document's owner, versionNumber + versionId are computed server-side from the current latest. Append-only: every call inserts a new immutable row; nothing is overwritten.
 //
-// Bound concept: documentVersion.
+// Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["appendDocumentVersion"] in generated_concepts.go).
 type AppendDocumentVersionArgs struct {
 	VersionId     string
 	DocumentId    string
@@ -331,7 +331,7 @@ func AppendDocumentVersionBuild(args AppendDocumentVersionArgs) string {
 
 // ApplyResponsibilityIntake -- Apply the responsibilityIntake result to a draft v1:planner:responsibility (issue #637). The dispatcher stamps the inferred field set (trigger / schedule / condition / targetKind / assignedRoleSlug / successCriteria / notifyHow) plus the intake outcome. When intake was CLEAR (no questions) the dispatcher passes status='active' + intakeStatus='clear' so the row goes straight live; when intake produced 1-2 questions it passes status='draft' + intakeStatus='awaitingAnswers' + intakeRequest so the row parks for the user (mirrors the Plan awaitingFeedback surfacing). Partial-update: only the supplied fields change. System write -- no ownerUserId re-stamp.
 //
-// Bound concept: responsibility.
+// Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["applyResponsibilityIntake"] in generated_concepts.go).
 type ApplyResponsibilityIntakeArgs struct {
 	ResponsibilityId string
 	// Enum: reactive | standing | recurring
@@ -437,7 +437,7 @@ func ApplyResponsibilityIntakeBuild(args ApplyResponsibilityIntakeArgs) string {
 
 // ApproveAccessRequest -- Approve an access request (status=approved, stamps reviewer + invitation).
 //
-// Bound concept: accessRequest.
+// Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["approveAccessRequest"] in generated_concepts.go).
 type ApproveAccessRequestArgs struct {
 	RequestId    string
 	ReviewedBy   string
@@ -479,7 +479,7 @@ func ApproveAccessRequestBuild(args ApproveAccessRequestArgs) string {
 
 // ApproveRequest -- Approve a v1:forge:request (owner action): set status 'queued' (ready to implement) and stamp approvedByUserId from actor.userId.
 //
-// Bound concept: request.
+// Bound concept: v1:forge:request (machine-readable: BoundConcepts["approveRequest"] in generated_concepts.go).
 type ApproveRequestArgs struct {
 	RequestId string
 }
@@ -501,7 +501,7 @@ func ApproveRequestBuild(args ApproveRequestArgs) string {
 
 // AssignResponsibility -- Persist a routing decision onto a v1:planner:responsibility (epic #632, C2): bind the resolved agent (assignedAgentId), optional role slug (assignedRoleSlug), and flip targetKind off 'unassigned' onto the concrete kind (assistant / specialist). Called by the reactive-loop router after agentFactoryAnalyze + createSpecialist/extendSpecialist mint or match an agent. Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier) so the router can only rewrite the row's own owner -- the poller impersonates the responsibility's owner in the AccessContext before calling, so this lands as an owned write.
 //
-// Bound concept: responsibility.
+// Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["assignResponsibility"] in generated_concepts.go).
 type AssignResponsibilityArgs struct {
 	ResponsibilityId string
 	// Enum: assistant | specialist
@@ -546,7 +546,7 @@ func AssignResponsibilityBuild(args AssignResponsibilityArgs) string {
 
 // AttachPlanFeedback -- Attach a user's free-text feedback to a Plan parked in awaitingFeedback and resume it (epic memql#1404 / #1405). Stamps feedbackResponse{response, respondedBy, respondedAt}, transitions awaitingFeedback -> running (fresh startedAt for a clean cross-replica resume claim), and clears feedbackReason/feedbackRequest so the request is consumed. The engine guard (validateFeedbackIntakeTransition) rejects the write unless the prior status is awaitingFeedback and the actor owns the Plan. The owning agent is re-invoked with the feedback in its resume context. Callable by the needs-feedback card AND the assistant chat path (#1406).
 //
-// Bound concept: plan.
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["attachPlanFeedback"] in generated_concepts.go).
 type AttachPlanFeedbackArgs struct {
 	PlanId   string
 	Feedback string
@@ -574,7 +574,7 @@ func AttachPlanFeedbackBuild(args AttachPlanFeedbackArgs) string {
 
 // AttachToRequest -- Attach ONE v1:common:attachment to a v1:forge:request by appending its id to attachmentIds (no clobbering of existing attachments). Backed by @appendFields -- the update executor appends to the stored array. update read-merges all other request fields.
 //
-// Bound concept: request.
+// Bound concept: v1:forge:request (machine-readable: BoundConcepts["attachToRequest"] in generated_concepts.go).
 type AttachToRequestArgs struct {
 	RequestId    string
 	AttachmentId string
@@ -602,7 +602,7 @@ func AttachToRequestBuild(args AttachToRequestArgs) string {
 
 // BumpActionVersion -- Bump a v1:actions:action monotonic version on edit (Phase 5 #1740; value computed engine-side). Pins stay on the prior version until the verified upgrade migration moves them.
 //
-// Bound concept: action.
+// Bound concept: v1:actions:action (machine-readable: BoundConcepts["bumpActionVersion"] in generated_concepts.go).
 type BumpActionVersionArgs struct {
 	ActionId string
 	Version  int
@@ -630,7 +630,7 @@ func BumpActionVersionBuild(args BumpActionVersionArgs) string {
 
 // BumpMissingCapabilitySighting -- Per Q7 missing-capability surface: a repeat sighting of an already-logged gap. Increments sightingCount and refreshes lastSeenAt. The Planner Agent calls this when it encounters a known gap; aggregated counts feed the platform-roadmap prioritization view.
 //
-// Bound concept: missingCapability.
+// Bound concept: v1:platform:missingCapability (machine-readable: BoundConcepts["bumpMissingCapabilitySighting"] in generated_concepts.go).
 type BumpMissingCapabilitySightingArgs struct {
 	MissingId     string
 	SightingCount int
@@ -664,7 +664,7 @@ func BumpMissingCapabilitySightingBuild(args BumpMissingCapabilitySightingArgs) 
 
 // BumpPATLastUsedAt -- Bump the lastUsedAt stamp on a PAT identity. Best-effort; callers must not fail the request on error. Read-merges the existing row so only lastUsedAt changes; identityType/credentials/label/active/usableByAgents inherit from the persisted row instead of being re-supplied (memql#1628).
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["bumpPATLastUsedAt"] in generated_concepts.go).
 type BumpPATLastUsedAtArgs struct {
 	IdentityId string
 	LastUsedAt string
@@ -692,7 +692,7 @@ func BumpPATLastUsedAtBuild(args BumpPATLastUsedAtArgs) string {
 
 // BumpUserDataExport -- Stamp dataExportLastAt = now after a successful /me/export download.
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["bumpUserDataExport"] in generated_concepts.go).
 type BumpUserDataExportArgs struct {
 	UserId string
 }
@@ -714,7 +714,7 @@ func BumpUserDataExportBuild(args BumpUserDataExportArgs) string {
 
 // BumpUserRevocationEpoch -- Stamp revocationEpoch on the user row. Bulk-revoke admin path for memql#106. Caller computes the +1 in Go.
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["bumpUserRevocationEpoch"] in generated_concepts.go).
 type BumpUserRevocationEpochArgs struct {
 	UserId   string
 	NewEpoch int
@@ -742,7 +742,7 @@ func BumpUserRevocationEpochBuild(args BumpUserRevocationEpochArgs) string {
 
 // CancelScheduledDeletion -- Cancel a scheduled account deletion (clears deletionScheduledAt).
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["cancelScheduledDeletion"] in generated_concepts.go).
 type CancelScheduledDeletionArgs struct {
 	UserId string
 }
@@ -764,7 +764,7 @@ func CancelScheduledDeletionBuild(args CancelScheduledDeletionArgs) string {
 
 // CatalogueConstruct -- Promote a construct into the owner's reusable catalog with provenance (#957): catalogued -> true, catalogKey set to the dedup signature, catalogMatchText set to the embedded near-match text, and the provenance pair (catalogedAt + catalogedFromBundleId) stamped so later bundles that compose it inherit where it came from. The embedding itself is written separately into node_vectors by the Go catalog-write path (PromoteConstructToCatalog). Called post-activation as the catalog-write path.
 //
-// Bound concept: construct.
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["catalogueConstruct"] in generated_concepts.go).
 type CatalogueConstructArgs struct {
 	ConstructId      string
 	CatalogKey       string
@@ -804,7 +804,7 @@ func CatalogueConstructBuild(args CatalogueConstructArgs) string {
 
 // CheckRecord -- Synthetically check a data record, updating check count and validation state
 //
-// Bound concept: record.
+// Bound concept: v1:data:record (machine-readable: BoundConcepts["checkRecord"] in generated_concepts.go).
 type CheckRecordArgs struct {
 	RecordId      string
 	IdentityId    string
@@ -844,7 +844,7 @@ func CheckRecordBuild(args CheckRecordArgs) string {
 
 // CloseCall -- Close a call record on disconnect: stamp end time, duration, disposition, and cost estimate.
 //
-// Bound concept: call.
+// Bound concept: v1:telephony:call (machine-readable: BoundConcepts["closeCall"] in generated_concepts.go).
 type CloseCallArgs struct {
 	Id              string
 	DurationSeconds int
@@ -885,7 +885,7 @@ func CloseCallBuild(args CloseCallArgs) string {
 
 // CompleteHarnessStep -- Record a running step's result (running -> done). done is terminal. The engine step guard rejects the transition when the prior status is not 'running'.
 //
-// Bound concept: step.
+// Bound concept: v1:harness:step (machine-readable: BoundConcepts["completeHarnessStep"] in generated_concepts.go).
 type CompleteHarnessStepArgs struct {
 	StepId string
 	Result map[string]any
@@ -915,7 +915,7 @@ func CompleteHarnessStepBuild(args CompleteHarnessStepArgs) string {
 
 // CompleteTodo -- Mark a to-do complete (or re-open it) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so the operation re-enforces ownership and can never transfer the row. The caller threads the full updated payload (with done flipped); the complete tool builds it from the current row + done=true.
 //
-// Bound concept: todo.
+// Bound concept: v1:todos:todo (machine-readable: BoundConcepts["completeTodo"] in generated_concepts.go).
 type CompleteTodoArgs struct {
 	TodoId  string
 	Payload map[string]any
@@ -943,7 +943,7 @@ func CompleteTodoBuild(args CompleteTodoArgs) string {
 
 // CompleteToolInvocation -- Update a toolInvocation Task to a terminal state with its result or error. Companion to createToolInvocationTask. Status MUST be 'succeeded' or 'failed' (the only terminal transitions a toolInvocation can take -- there is no 'paused' or 'cancelled' on a tool call). On succeeded: toolResult populated. On failed: errorMessage populated.
 //
-// Bound concept: task.
+// Bound concept: v1:planner:task (machine-readable: BoundConcepts["completeToolInvocation"] in generated_concepts.go).
 type CompleteToolInvocationArgs struct {
 	TaskId       string
 	Status       string
@@ -995,7 +995,7 @@ func CompleteToolInvocationBuild(args CompleteToolInvocationArgs) string {
 
 // ConfirmAction -- Confirm a candidate v1:actions:action, promoting it to active so it is offered for replay (Phase 4 #1739, the human gate for real-machine side effects).
 //
-// Bound concept: action.
+// Bound concept: v1:actions:action (machine-readable: BoundConcepts["confirmAction"] in generated_concepts.go).
 type ConfirmActionArgs struct {
 	ActionId string
 }
@@ -1017,7 +1017,7 @@ func ConfirmActionBuild(args ConfirmActionArgs) string {
 
 // ConfirmRecord -- Human confirm a data record, updating confirm count and validation state
 //
-// Bound concept: record.
+// Bound concept: v1:data:record (machine-readable: BoundConcepts["confirmRecord"] in generated_concepts.go).
 type ConfirmRecordArgs struct {
 	RecordId        string
 	IdentityId      string
@@ -1057,7 +1057,7 @@ func ConfirmRecordBuild(args ConfirmRecordArgs) string {
 
 // ConsumeAuthCode -- Mark an auth code consumed (stamps consumedAt = now).
 //
-// Bound concept: authCode.
+// Bound concept: v1:identity:authCode (machine-readable: BoundConcepts["consumeAuthCode"] in generated_concepts.go).
 type ConsumeAuthCodeArgs struct {
 	CodeId         string
 	ConsumedFromIP string
@@ -1087,7 +1087,7 @@ func ConsumeAuthCodeBuild(args ConsumeAuthCodeArgs) string {
 
 // ConsumeMagicLinkRequest -- Mark a magic-link request consumed (stamps consumedAt = now).
 //
-// Bound concept: magicLinkRequest.
+// Bound concept: v1:identity:magicLinkRequest (machine-readable: BoundConcepts["consumeMagicLinkRequest"] in generated_concepts.go).
 type ConsumeMagicLinkRequestArgs struct {
 	RequestId      string
 	ConsumedFromIP string
@@ -1117,7 +1117,7 @@ func ConsumeMagicLinkRequestBuild(args ConsumeMagicLinkRequestArgs) string {
 
 // CreateAccessRequest -- Create a self-service access request (waitlist row, status=pending).
 //
-// Bound concept: accessRequest.
+// Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["createAccessRequest"] in generated_concepts.go).
 type CreateAccessRequestArgs struct {
 	RequestId         string
 	Email             string
@@ -1193,7 +1193,7 @@ func CreateAccessRequestBuild(args CreateAccessRequestArgs) string {
 
 // CreateAdHocPlan -- Create a synthetic Plan that wraps an ad-hoc tool call made outside any user-initiated planning context. Per Q5: every tool call must produce a Task; Tasks must have a parent Plan; chat-driven tool calls (no user-facing Plan) get a synthetic Plan with kind='adHocAction' so the invariant holds. Status is set to running and completes immediately when the synthetic semantic Task wrapping the tool call resolves.
 //
-// Bound concept: plan.
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["createAdHocPlan"] in generated_concepts.go).
 type CreateAdHocPlanArgs struct {
 	PlanId      string
 	PartitionId string
@@ -1239,7 +1239,7 @@ func CreateAdHocPlanBuild(args CreateAdHocPlanArgs) string {
 
 // CreateAgent -- Create a new AI agent template. The `kind` arg defaults to `assistant` -- the safe value for the frontend's create-agent modal flow. The SeedMaterializer (running under the `system:seedMaterializer` actor) passes `kind: \"system\"` when materializing platform agents (MemQL Planner / MemQL Trainer). The planner integration (running under the `system:planner` actor; memql#399) passes `kind: \"specialist\"` when auto-provisioning a specialist for a Plan's capability gap. User-actor calls that try to pass `kind in (\"system\", \"specialist\
 //
-// Bound concept: agent.
+// Bound concept: v1:agents:agent (machine-readable: BoundConcepts["createAgent"] in generated_concepts.go).
 type CreateAgentArgs struct {
 	AgentId         string
 	OwnerUserId     string
@@ -1407,7 +1407,7 @@ func CreateAgentBuild(args CreateAgentArgs) string {
 
 // CreateAgentAuthorization -- Grant a standing authorization for an agent to trigger a plan kind without per-Plan approval.
 //
-// Bound concept: agentAuthorization.
+// Bound concept: v1:agents:agentAuthorization (machine-readable: BoundConcepts["createAgentAuthorization"] in generated_concepts.go).
 type CreateAgentAuthorizationArgs struct {
 	AuthId           string
 	AgentId          string
@@ -1479,7 +1479,7 @@ func CreateAgentAuthorizationBuild(args CreateAgentAuthorizationArgs) string {
 
 // CreateAgentRole -- Insert (or version) a v1:agents:agentRole catalog row. Called by the SeedMaterializer when it walks role seed declarations under dsl/agents/roles/ (the materializer stamps the seed body's `id` into `agentRoleId`); also callable directly when a user mints a custom (non-predefined) role from the UI. predefined=true marks the row as locked in the UI; user-created roles default to false and remain fully editable. Phase 2 cut (#158): the args surface collapses the seven flat lockedDomain / defaultDomain / availableDomain / lockedTool / defaultTool / forbiddenTool / lockedLiveKnowledge fields into the five skill-id fields the role catalog now carries plus a maxSkills cap. The mutation is partition-agnostic for global-scoped concepts -- the engine stamps every v1:agents:agentRole insert into the _system slot regardless of the envelope.
 //
-// Bound concept: agentRole.
+// Bound concept: v1:agents:agentRole (machine-readable: BoundConcepts["createAgentRole"] in generated_concepts.go).
 type CreateAgentRoleArgs struct {
 	AgentRoleId           string
 	Slug                  string
@@ -1621,7 +1621,7 @@ func CreateAgentRoleBuild(args CreateAgentRoleArgs) string {
 
 // CreateApprovalRequest -- Create one v1:safety:approvalRequest row in `pending` status. Called from component/safety/approval/sink.go when an Ask verdict fires in enforce mode AND no active row already exists for the descriptor's correlationKey. argsRedacted arrives pre-scrubbed (same semantics as classification.argsRedacted). expiresAt is the advisory TTL -- the sink computes it from MEMQL_SAFETY_APPROVAL_TTL_HOURS (default 24h) at create time.
 //
-// Bound concept: approvalRequest.
+// Bound concept: v1:safety:approvalRequest (machine-readable: BoundConcepts["createApprovalRequest"] in generated_concepts.go).
 type CreateApprovalRequestArgs struct {
 	CorrelationKey string
 	Surface        string
@@ -1717,7 +1717,7 @@ func CreateApprovalRequestBuild(args CreateApprovalRequestArgs) string {
 
 // CreateArtifact -- Insert (or re-version) a Library artifact index row for a backing source concept. System / automation-invoked: ownerUserId is threaded from the backing row's owner because promotion runs server-side on the owner's behalf. Idempotent -- the id is derived from sourceConceptRef so re-promoting the same source versions the same row. Not a user-facing tool; the Library is populated automatically.
 //
-// Bound concept: artifact.
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["createArtifact"] in generated_concepts.go).
 type CreateArtifactArgs struct {
 	SourceConceptRef string
 	OwnerUserId      string
@@ -1864,7 +1864,7 @@ func CreateArtifactBuild(args CreateArtifactArgs) string {
 
 // CreateAuditEvent -- Append a row to the append-only security audit log.
 //
-// Bound concept: auditEvent.
+// Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["createAuditEvent"] in generated_concepts.go).
 type CreateAuditEventArgs struct {
 	EventId    string
 	OccurredAt string
@@ -2019,7 +2019,7 @@ func CreateAuditEventBuild(args CreateAuditEventArgs) string {
 
 // CreateAuthCode -- Mint a one-time OAuth authorization code from a consumed magic link.
 //
-// Bound concept: authCode.
+// Bound concept: v1:identity:authCode (machine-readable: BoundConcepts["createAuthCode"] in generated_concepts.go).
 type CreateAuthCodeArgs struct {
 	CodeId              string
 	Code                string
@@ -2113,7 +2113,7 @@ func CreateAuthCodeBuild(args CreateAuthCodeArgs) string {
 
 // CreateAuthSession -- Create a bearer-token session record at issuance time.
 //
-// Bound concept: authSession.
+// Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["createAuthSession"] in generated_concepts.go).
 type CreateAuthSessionArgs struct {
 	SessionId string
 	Subject   string
@@ -2184,7 +2184,7 @@ func CreateAuthSessionBuild(args CreateAuthSessionArgs) string {
 
 // CreateAuthoringBundle -- Create a draft authoring bundle -- the atomic unit a Responsibility compiles into. ownerUserId is stamped from actor.userId. Members are added via createAuthoringConstruct; reused (composed) constructs are recorded on reusedConstructRefs.
 //
-// Bound concept: bundle.
+// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["createAuthoringBundle"] in generated_concepts.go).
 type CreateAuthoringBundleArgs struct {
 	BundleId            string
 	Title               string
@@ -2260,7 +2260,7 @@ func CreateAuthoringBundleBuild(args CreateAuthoringBundleArgs) string {
 
 // CreateAuthoringConstruct -- Create an authored construct (the .memql source for one automation / logic / shape / spec / trait / policy / mutation / query / prompt) as a member of a bundle. ownerUserId stamped from actor.userId; status starts draft and follows the bundle.
 //
-// Bound concept: construct.
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["createAuthoringConstruct"] in generated_concepts.go).
 type CreateAuthoringConstructArgs struct {
 	ConstructId string
 	BundleId    string
@@ -2321,7 +2321,7 @@ func CreateAuthoringConstructBuild(args CreateAuthoringConstructArgs) string {
 
 // CreateAvatarPersona -- Insert a v1:agents:avatarPersona catalog row (memql#609). Called by the SeedMaterializer when it walks the avatar-persona seed declarations under dsl/agents/avatarPersonas.memql -- the materializer stamps the seed body's `id` (the seed name) into `avatarPersonaId`. The seeds themselves are hand-curated in dsl/agents/avatarPersonas.memql (the vendor-issued faceId pasted in per persona). Global operator catalog: the engine stamps the insert into the _system slot regardless of the caller's partition, exactly like createAgentRole / createSkill.
 //
-// Bound concept: avatarPersona.
+// Bound concept: v1:agents:avatarPersona (machine-readable: BoundConcepts["createAvatarPersona"] in generated_concepts.go).
 type CreateAvatarPersonaArgs struct {
 	AvatarPersonaId string
 	Vendor          string
@@ -2394,7 +2394,7 @@ func CreateAvatarPersonaBuild(args CreateAvatarPersonaArgs) string {
 
 // CreateCalendarEvent -- Create a native calendar event owned by the authenticated caller. ownerUserId is stamped from actor.userId (caller-scoped write); createdAt + createdBy are engine-stamped row intrinsics (NOT payload fields -- declaring them is rejected as reserved, memql#1673); source defaults to 'native'. The reactive harness's reminder triggers pick the row up via upcomingEvents. Pass `eventId` to control the id (idempotent re-create), else the engine assigns one.
 //
-// Bound concept: calendarEvent.
+// Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["createCalendarEvent"] in generated_concepts.go).
 type CreateCalendarEventArgs struct {
 	EventId    string
 	Title      string
@@ -2469,7 +2469,7 @@ func CreateCalendarEventBuild(args CreateCalendarEventArgs) string {
 
 // CreateCapability -- Insert a v1:rbac:capability catalog row -- one (verb x resourceType) grant for a role. Called by the SeedMaterializer when it walks the capability seed declarations under dsl/rbac/*.memql (the materializer stamps the seed body's `id` into `capabilityId`). Also the write surface the E1.4 (memql#2074) rank-bounded custom-role authoring path layers on top of -- predefined defaults false there so the grant stays editable within the creator's rank bound; base-role seeds pass predefined=true to mark the row immutable at runtime (enforced by E1.2). Partition-agnostic: the engine stamps every v1:rbac:capability insert into the _system slot regardless of the envelope, exactly like createAgentRole / createSkill.
 //
-// Bound concept: capability.
+// Bound concept: v1:rbac:capability (machine-readable: BoundConcepts["createCapability"] in generated_concepts.go).
 type CreateCapabilityArgs struct {
 	CapabilityId string
 	RoleSlug     string
@@ -2547,7 +2547,7 @@ func CreateCapabilityBuild(args CreateCapabilityArgs) string {
 
 // CreateCluster -- Create the cluster record
 //
-// Bound concept: cluster.
+// Bound concept: v1:cluster:cluster (machine-readable: BoundConcepts["createCluster"] in generated_concepts.go).
 type CreateClusterArgs struct {
 	Name        string
 	Region      string
@@ -2624,7 +2624,7 @@ func CreateClusterBuild(args CreateClusterArgs) string {
 
 // CreateClusterSettings -- Persist (or refresh) the singleton cluster-settings row.
 //
-// Bound concept: clusterSettings.
+// Bound concept: v1:identity:clusterSettings (machine-readable: BoundConcepts["createClusterSettings"] in generated_concepts.go).
 type CreateClusterSettingsArgs struct {
 	Id                string
 	ClusterDomain     string
@@ -2845,7 +2845,7 @@ func CreateClusterSettingsBuild(args CreateClusterSettingsArgs) string {
 
 // CreateDatabase -- Register the cluster's database in the graph
 //
-// Bound concept: database.
+// Bound concept: v1:cluster:database (machine-readable: BoundConcepts["createDatabase"] in generated_concepts.go).
 type CreateDatabaseArgs struct {
 	Host    string
 	DbName  string
@@ -2881,7 +2881,7 @@ func CreateDatabaseBuild(args CreateDatabaseArgs) string {
 
 // CreateDelegation -- Create a new delegation granting an agent scoped authority on behalf of an identity.
 //
-// Bound concept: delegation.
+// Bound concept: v1:identity:delegation (machine-readable: BoundConcepts["createDelegation"] in generated_concepts.go).
 type CreateDelegationArgs struct {
 	DelegationId    string
 	IdentityId      string
@@ -2965,7 +2965,7 @@ func CreateDelegationBuild(args CreateDelegationArgs) string {
 
 // CreateDeployment -- Create a v1:cluster:deployment record at deploy start (status defaults to pending). Uses deploymentId as the concept id so status transitions append to one timeline. #1872.
 //
-// Bound concept: deployment.
+// Bound concept: v1:cluster:deployment (machine-readable: BoundConcepts["createDeployment"] in generated_concepts.go).
 type CreateDeploymentArgs struct {
 	DeploymentId string
 	// Enum: pending | in_progress | succeeded | failed | superseded | rolled_back
@@ -3077,7 +3077,7 @@ func CreateDeploymentBuild(args CreateDeploymentArgs) string {
 
 // CreateDeploymentNodeSpec -- Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. Uses concat(deploymentId, ':', nodeType) as the concept id so re-pins append to one timeline. Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.
 //
-// Bound concept: deploymentNodeSpec.
+// Bound concept: v1:cluster:deploymentNodeSpec (machine-readable: BoundConcepts["createDeploymentNodeSpec"] in generated_concepts.go).
 type CreateDeploymentNodeSpecArgs struct {
 	DeploymentId string
 	NodeType     string
@@ -3129,7 +3129,7 @@ func CreateDeploymentNodeSpecBuild(args CreateDeploymentNodeSpecArgs) string {
 
 // CreateDocumentChunk -- Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the product UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceUtteranceId / sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.
 //
-// Bound concept: documentChunk.
+// Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["createDocumentChunk"] in generated_concepts.go).
 type CreateDocumentChunkArgs struct {
 	ChunkId           string
 	DomainId          string
@@ -3217,7 +3217,7 @@ func CreateDocumentChunkBuild(args CreateDocumentChunkArgs) string {
 
 // CreateGeneratedOutput -- Create a generated-output row -- a deliverable PRODUCED through the app (workbench result, computer-use output, or standalone agent output). System / agent-invoked: ownerUserId is the producing user. indexGeneratedOutput folds the new row into the Library index automatically. body carries inline text outputs; attachmentId references file bytes for file-backed outputs.
 //
-// Bound concept: generatedOutput.
+// Bound concept: v1:library:generatedOutput (machine-readable: BoundConcepts["createGeneratedOutput"] in generated_concepts.go).
 type CreateGeneratedOutputArgs struct {
 	OutputId     string
 	OwnerUserId  string
@@ -3339,7 +3339,7 @@ func CreateGeneratedOutputBuild(args CreateGeneratedOutputArgs) string {
 
 // CreateGreetingUtterance -- Create a greeting utterance for an AI participant joining a space
 //
-// Bound concept: utterance.
+// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["createGreetingUtterance"] in generated_concepts.go).
 type CreateGreetingUtteranceArgs struct {
 	PartitionId   string
 	ParticipantId string
@@ -3385,7 +3385,7 @@ func CreateGreetingUtteranceBuild(args CreateGreetingUtteranceArgs) string {
 
 // CreateHarnessPlan -- Create a v1:harness:plan in status='open'. ownerUserId is stamped from actor.userId (owned tier). Single write path for plan creation.
 //
-// Bound concept: plan.
+// Bound concept: v1:harness:plan (machine-readable: BoundConcepts["createHarnessPlan"] in generated_concepts.go).
 type CreateHarnessPlanArgs struct {
 	PlanId string
 	Goal   string
@@ -3423,7 +3423,7 @@ func CreateHarnessPlanBuild(args CreateHarnessPlanArgs) string {
 
 // CreateHarnessSemanticMemory -- Create a v1:harness:semanticMemory -- a new distilled belief. ownerUserId stamped from actor.userId (owned tier). sourceEpisodes records provenance back to the episodic nodes it was distilled from. confidence/reinforceCount/lastReinforced seed the decay clock. content is the embedding source for similarTo dedup + recall (#585).
 //
-// Bound concept: semanticMemory.
+// Bound concept: v1:harness:semanticMemory (machine-readable: BoundConcepts["createHarnessSemanticMemory"] in generated_concepts.go).
 type CreateHarnessSemanticMemoryArgs struct {
 	MemoryId string
 	// Enum: fact | preference | outcome
@@ -3478,7 +3478,7 @@ func CreateHarnessSemanticMemoryBuild(args CreateHarnessSemanticMemoryArgs) stri
 
 // CreateIdentity -- Create a new identity (credential set owned by a user).
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createIdentity"] in generated_concepts.go).
 type CreateIdentityArgs struct {
 	IdentityId string
 	UserId     string
@@ -3536,7 +3536,7 @@ func CreateIdentityBuild(args CreateIdentityArgs) string {
 
 // CreateIdentityProvider -- Register the cluster's identity provider in the graph
 //
-// Bound concept: identityProvider.
+// Bound concept: v1:cluster:identityProvider (machine-readable: BoundConcepts["createIdentityProvider"] in generated_concepts.go).
 type CreateIdentityProviderArgs struct {
 	Name           string
 	IssuerUrl      string
@@ -3580,7 +3580,7 @@ func CreateIdentityProviderBuild(args CreateIdentityProviderArgs) string {
 
 // CreateMagicLinkRequest -- Create a magic-link request row at issuance time.
 //
-// Bound concept: magicLinkRequest.
+// Bound concept: v1:identity:magicLinkRequest (machine-readable: BoundConcepts["createMagicLinkRequest"] in generated_concepts.go).
 type CreateMagicLinkRequestArgs struct {
 	RequestId    string
 	Email        string
@@ -3652,7 +3652,7 @@ func CreateMagicLinkRequestBuild(args CreateMagicLinkRequestArgs) string {
 
 // CreateMemory -- Create a memory the assistant retains about the user. Owned: ownerUserId is stamped from actor.userId, so a memory can only ever be created for the acting user (or their delegated agent's bound user). indexMemory folds it into the Library Records lens automatically.
 //
-// Bound concept: memory.
+// Bound concept: v1:library:memory (machine-readable: BoundConcepts["createMemory"] in generated_concepts.go).
 type CreateMemoryArgs struct {
 	MemoryId string
 	Title    string
@@ -3727,7 +3727,7 @@ func CreateMemoryBuild(args CreateMemoryArgs) string {
 
 // CreateNode -- Register a node in the cluster
 //
-// Bound concept: node.
+// Bound concept: v1:cluster:node (machine-readable: BoundConcepts["createNode"] in generated_concepts.go).
 type CreateNodeArgs struct {
 	Id           string
 	NodeType     string
@@ -3829,7 +3829,7 @@ func CreateNodeBuild(args CreateNodeArgs) string {
 
 // CreateNodeTokenIdentity -- Create a node_token identity (machine credential for a cluster-internal node binary). Stores only the SHA-256 hex hash; the actual credential is a class=node JWT.
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createNodeTokenIdentity"] in generated_concepts.go).
 type CreateNodeTokenIdentityArgs struct {
 	IdentityId       string
 	UserId           string
@@ -3905,7 +3905,7 @@ func CreateNodeTokenIdentityBuild(args CreateNodeTokenIdentityArgs) string {
 
 // CreateNote -- Create a note for the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own notes. title and tags are optional; body is required. updatedAt is stamped to now.
 //
-// Bound concept: note.
+// Bound concept: v1:notes:note (machine-readable: BoundConcepts["createNote"] in generated_concepts.go).
 type CreateNoteArgs struct {
 	NoteId string
 	Title  string
@@ -3949,7 +3949,7 @@ func CreateNoteBuild(args CreateNoteArgs) string {
 
 // CreateOAuthClient -- Persist a dynamically-registered public OAuth client (RFC 7591).
 //
-// Bound concept: oauthClient.
+// Bound concept: v1:identity:oauthClient (machine-readable: BoundConcepts["createOAuthClient"] in generated_concepts.go).
 type CreateOAuthClientArgs struct {
 	ClientId                string
 	ClientName              string
@@ -4015,7 +4015,7 @@ func CreateOAuthClientBuild(args CreateOAuthClientArgs) string {
 
 // CreatePATIdentity -- Create a Personal Access Token identity (api_key) owned by a user. Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createPATIdentity"] in generated_concepts.go).
 type CreatePATIdentityArgs struct {
 	IdentityId        string
 	UserId            string
@@ -4064,7 +4064,7 @@ func CreatePATIdentityBuild(args CreatePATIdentityArgs) string {
 
 // CreatePlan -- Insert a v1:planner:plan row in status='queued'. Single write path for Plan creation across all trigger sources.
 //
-// Bound concept: plan.
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["createPlan"] in generated_concepts.go).
 type CreatePlanArgs struct {
 	PlanId                  string
 	PartitionId             string
@@ -4183,7 +4183,7 @@ func CreatePlanBuild(args CreatePlanArgs) string {
 
 // CreateProject -- Register a v1:forge:project. createdByUserId is stamped from actor.userId.
 //
-// Bound concept: project.
+// Bound concept: v1:forge:project (machine-readable: BoundConcepts["createProject"] in generated_concepts.go).
 type CreateProjectArgs struct {
 	ProjectId   string
 	Slug        string
@@ -4243,7 +4243,7 @@ func CreateProjectBuild(args CreateProjectArgs) string {
 
 // CreateRecord -- Create a data record in draft validation state awaiting check and confirmation
 //
-// Bound concept: record.
+// Bound concept: v1:data:record (machine-readable: BoundConcepts["createRecord"] in generated_concepts.go).
 type CreateRecordArgs struct {
 	RecordId           string
 	PartitionId        string
@@ -4341,7 +4341,7 @@ func CreateRecordBuild(args CreateRecordArgs) string {
 
 // CreateRecordBatch -- Create a single data record from a batch import in draft validation state (called once per record)
 //
-// Bound concept: record.
+// Bound concept: v1:data:record (machine-readable: BoundConcepts["createRecordBatch"] in generated_concepts.go).
 type CreateRecordBatchArgs struct {
 	RecordId           string
 	PartitionId        string
@@ -4431,7 +4431,7 @@ func CreateRecordBatchBuild(args CreateRecordBatchArgs) string {
 
 // CreateRequest -- Submit a v1:forge:request. submitterUserId + submitterRole are stamped server-side from actor (no spoofing). status lands 'submitted'; the routeRequest automation routes it by role.
 //
-// Bound concept: request.
+// Bound concept: v1:forge:request (machine-readable: BoundConcepts["createRequest"] in generated_concepts.go).
 type CreateRequestArgs struct {
 	RequestId     string
 	ProjectId     string
@@ -4497,7 +4497,7 @@ func CreateRequestBuild(args CreateRequestArgs) string {
 
 // CreateResponsibility -- Create a v1:planner:responsibility in status='draft'. ownerUserId is stamped from actor.userId (owned tier) so a caller cannot author a directive owned by someone else. trigger discriminates the archetype: recurring carries schedule, reactive carries condition, standing carries neither. Single write path for responsibility creation.
 //
-// Bound concept: responsibility.
+// Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["createResponsibility"] in generated_concepts.go).
 type CreateResponsibilityArgs struct {
 	ResponsibilityId string
 	Statement        string
@@ -4608,7 +4608,7 @@ func CreateResponsibilityBuild(args CreateResponsibilityArgs) string {
 
 // CreateRole -- Insert a v1:rbac:role catalog row -- a named, ranked capability bundle. Called by the SeedMaterializer when it walks the base-role seed declarations under dsl/rbac/seeds.memql (the materializer stamps the seed body's `id` into `roleId`). Also the write surface the E1.4 (memql#2072) rank-bounded custom-role authoring path layers on top of -- predefined defaults false there so the role stays editable within the creator's rank bound, and the creator's own rank caps the `rank` arg. Base-role seeds pass predefined=true to mark the row IMMUTABLE at runtime: the validateRbacRoleImmutable Go guard (E1.2) rejects any non-system-actor write to a predefined role, so a base role can never be redefined / re-ranked as data to escalate privilege. Partition-agnostic: the engine stamps every v1:rbac:role insert into the _system slot regardless of the envelope, exactly like createAgentRole / createCapability.
 //
-// Bound concept: role.
+// Bound concept: v1:rbac:role (machine-readable: BoundConcepts["createRole"] in generated_concepts.go).
 type CreateRoleArgs struct {
 	RoleId        string
 	Slug          string
@@ -4676,7 +4676,7 @@ func CreateRoleBuild(args CreateRoleArgs) string {
 
 // CreateScopeElevationPlan -- Insert a Plan in awaitingFeedback / scope_elevation_required for a pending computer_use task. The emitScopeElevationCanvasCard automation lands the canvas card; the user approves or denies via the card's buttons.
 //
-// Bound concept: plan.
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["createScopeElevationPlan"] in generated_concepts.go).
 type CreateScopeElevationPlanArgs struct {
 	PlanId         string
 	AgentId        string
@@ -4736,7 +4736,7 @@ func CreateScopeElevationPlanBuild(args CreateScopeElevationPlanArgs) string {
 
 // CreateSemanticTask -- Create a semantic Task -- the Planner-decision unit. Differs from createTask (in the product pack) by carrying the new category/logicalStepId/attemptNumber fields explicitly. Used by the Planner Agent at decomposition time and by the taskstamp Stamper to materialize the parent semantic Task for ad-hoc tool calls.
 //
-// Bound concept: task.
+// Bound concept: v1:planner:task (machine-readable: BoundConcepts["createSemanticTask"] in generated_concepts.go).
 type CreateSemanticTaskArgs struct {
 	TaskId        string
 	PlanId        string
@@ -4814,7 +4814,7 @@ func CreateSemanticTaskBuild(args CreateSemanticTaskArgs) string {
 
 // CreateSessionForParticipant -- Create a session record for a participant in a space.
 //
-// Bound concept: session.
+// Bound concept: v1:cognition:session (machine-readable: BoundConcepts["createSessionForParticipant"] in generated_concepts.go).
 type CreateSessionForParticipantArgs struct {
 	SessionId     string
 	PartitionId   string
@@ -4874,7 +4874,7 @@ func CreateSessionForParticipantBuild(args CreateSessionForParticipantArgs) stri
 
 // CreateSkill -- Materialize a v1:agents:skill catalog row from a `seed skill ...` declaration under dsl/agents/skills/*.memql. Matches the SeedMaterializer's `mutationCreate<Concept>` naming convention -- the materializer stamps the seed body's id into `skillId` and forwards every other seed body field as a same-named arg, so this mutation's arg surface mirrors the on-disk seed body 1:1. Sibling to `mintSkill`: same row shape, but the seed path is for the predefined catalog (predefined defaults true) and carries no originatingPlanId / mintedByAgentId provenance triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to materialize with `function \"createSkill\" not found`. The materializer convention itself lives in component/memql/seed_materializer.go.
 //
-// Bound concept: skill.
+// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["createSkill"] in generated_concepts.go).
 type CreateSkillArgs struct {
 	SkillId       string
 	Slug          string
@@ -4982,7 +4982,7 @@ func CreateSkillBuild(args CreateSkillArgs) string {
 
 // CreateSkillChangeEvent -- Append a v1:agents:skillChangeEvent row recording a skill attach / reconfigure on an agent. Phase 2 (#158) cut: every Planner Agent extendSpecialist / createSpecialist flow that lands a skill on an agent issues one of these per skill. Phase 3 also writes them from the cockpit Skills admin view when a human attaches a skill manually. Empty actorAgentId + actorUserId is allowed for system-driven attaches (the migration tool writes events with actorUserId='system:migration:phase2'). The caller is responsible for providing skillChangeEventId -- mint via the standard NewShortId / MustFromMap helpers caller-side.
 //
-// Bound concept: skillChangeEvent.
+// Bound concept: v1:agents:skillChangeEvent (machine-readable: BoundConcepts["createSkillChangeEvent"] in generated_concepts.go).
 type CreateSkillChangeEventArgs struct {
 	SkillChangeEventId string
 	TargetAgentId      string
@@ -5064,7 +5064,7 @@ func CreateSkillChangeEventBuild(args CreateSkillChangeEventArgs) string {
 
 // CreateSpawnEvent -- Record a node lifecycle event
 //
-// Bound concept: spawnEvent.
+// Bound concept: v1:cluster:spawnEvent (machine-readable: BoundConcepts["createSpawnEvent"] in generated_concepts.go).
 type CreateSpawnEventArgs struct {
 	NodeId      string
 	NodeType    string
@@ -5122,7 +5122,7 @@ func CreateSpawnEventBuild(args CreateSpawnEventArgs) string {
 
 // CreateTask -- Insert a v1:planner:task row in status='queued'. Single write path for Task creation, called by the planner during decomposition.
 //
-// Bound concept: task.
+// Bound concept: v1:planner:task (machine-readable: BoundConcepts["createTask"] in generated_concepts.go).
 type CreateTaskArgs struct {
 	TaskId string
 	PlanId string
@@ -5203,7 +5203,7 @@ func CreateTaskBuild(args CreateTaskArgs) string {
 
 // CreateTodo -- Create a to-do for the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own to-dos. sourceResponsibilityId is optional -- responsibilities pass it to attribute app-generated tasks; user-created to-dos leave it empty.
 //
-// Bound concept: todo.
+// Bound concept: v1:todos:todo (machine-readable: BoundConcepts["createTodo"] in generated_concepts.go).
 type CreateTodoArgs struct {
 	TodoId string
 	Title  string
@@ -5254,7 +5254,7 @@ func CreateTodoBuild(args CreateTodoArgs) string {
 
 // CreateToolInvocationTask -- Create a toolInvocation Task -- the engine-auto-stamped record of an agent tool call. Per Q5+Q6: every tool call by an executing agent produces one of these, parented to the semantic Task that was executing when the tool fired. The engine's tool-dispatch wrapper inserts this row at dispatch time then calls completeToolInvocation when the call returns. parentTaskId is required (a toolInvocation row must have a semantic parent); the engine enforces this invariant.
 //
-// Bound concept: task.
+// Bound concept: v1:planner:task (machine-readable: BoundConcepts["createToolInvocationTask"] in generated_concepts.go).
 type CreateToolInvocationTaskArgs struct {
 	TaskId       string
 	PlanId       string
@@ -5308,7 +5308,7 @@ func CreateToolInvocationTaskBuild(args CreateToolInvocationTaskArgs) string {
 
 // CreateUser -- Create a new user (person / synthetic principal).
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["createUser"] in generated_concepts.go).
 type CreateUserArgs struct {
 	UserId       string
 	DisplayName  string
@@ -5367,7 +5367,7 @@ func CreateUserBuild(args CreateUserArgs) string {
 
 // CreateUserOnFirstLogin -- Create a user record on first successful magic-link login.
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["createUserOnFirstLogin"] in generated_concepts.go).
 type CreateUserOnFirstLoginArgs struct {
 	UserId       string
 	DisplayName  string
@@ -5480,7 +5480,7 @@ func CreateUserOnFirstLoginBuild(args CreateUserOnFirstLoginArgs) string {
 
 // CreateVoiceAgentTokenIdentity -- Create a voice_agent_token identity (credential row for the Go voice-agent process). Plain JWT is returned by JWTIssuer.IssueVoiceAgentAccessToken; this row stores only the SHA-256 of an auxiliary random bearer for schema completeness + audit fingerprinting.
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createVoiceAgentTokenIdentity"] in generated_concepts.go).
 type CreateVoiceAgentTokenIdentityArgs struct {
 	IdentityId string
 	UserId     string
@@ -5542,7 +5542,7 @@ func CreateVoiceAgentTokenIdentityBuild(args CreateVoiceAgentTokenIdentityArgs) 
 
 // CreateWorkerInvocation -- Insert a worker tool-invocation telemetry row.
 //
-// Bound concept: invocation.
+// Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["createWorkerInvocation"] in generated_concepts.go).
 type CreateWorkerInvocationArgs struct {
 	InvocationId  string
 	OwnerUserId   string
@@ -5710,7 +5710,7 @@ func CreateWorkerInvocationBuild(args CreateWorkerInvocationArgs) string {
 
 // CreateWorkerPairingCode -- Persist a worker-pairing-code row at creation time.
 //
-// Bound concept: workerPairingCode.
+// Bound concept: v1:identity:workerPairingCode (machine-readable: BoundConcepts["createWorkerPairingCode"] in generated_concepts.go).
 type CreateWorkerPairingCodeArgs struct {
 	PairingId   string
 	OwnerUserId string
@@ -5764,7 +5764,7 @@ func CreateWorkerPairingCodeBuild(args CreateWorkerPairingCodeArgs) string {
 
 // CreateWorkerRegistration -- Create a worker registration row on first connect.
 //
-// Bound concept: registration.
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["createWorkerRegistration"] in generated_concepts.go).
 type CreateWorkerRegistrationArgs struct {
 	RegistrationId       string
 	OwnerUserId          string
@@ -5886,7 +5886,7 @@ func CreateWorkerRegistrationBuild(args CreateWorkerRegistrationArgs) string {
 
 // CreateWorkerTokenIdentity -- Create a worker_token identity (machine credential for a memql-cockpit-worker). Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createWorkerTokenIdentity"] in generated_concepts.go).
 type CreateWorkerTokenIdentityArgs struct {
 	IdentityId             string
 	UserId                 string
@@ -5956,7 +5956,7 @@ func CreateWorkerTokenIdentityBuild(args CreateWorkerTokenIdentityArgs) string {
 
 // DecayAction -- Set a v1:actions:action decayed reliability from the consolidation sweep (Phase 4 #1739; value computed engine-side).
 //
-// Bound concept: action.
+// Bound concept: v1:actions:action (machine-readable: BoundConcepts["decayAction"] in generated_concepts.go).
 type DecayActionArgs struct {
 	ActionId    string
 	Reliability any
@@ -5984,7 +5984,7 @@ func DecayActionBuild(args DecayActionArgs) string {
 
 // DecayHarnessSemanticMemory -- Decay an unreinforced v1:harness:semanticMemory: lower confidence to the engine-computed decayed value. lastReinforced is intentionally NOT reset (decay keeps measuring age from the last real reinforcement). ownerUserId re-stamped from actor.userId (owned tier). A belief that decays below the prune floor is then retired via pruneHarnessSemanticMemory.
 //
-// Bound concept: semanticMemory.
+// Bound concept: v1:harness:semanticMemory (machine-readable: BoundConcepts["decayHarnessSemanticMemory"] in generated_concepts.go).
 type DecayHarnessSemanticMemoryArgs struct {
 	MemoryId   string
 	Confidence any
@@ -6012,7 +6012,7 @@ func DecayHarnessSemanticMemoryBuild(args DecayHarnessSemanticMemoryArgs) string
 
 // DeleteAgent -- Soft-delete an agent (active:false, deleted:true). Read-merges the existing row so the caller only passes the agent id; every other required field (kind, name, ...) inherits from the persisted row instead of being re-supplied (memql#1628).
 //
-// Bound concept: agent.
+// Bound concept: v1:agents:agent (machine-readable: BoundConcepts["deleteAgent"] in generated_concepts.go).
 type DeleteAgentArgs struct {
 	AgentId string
 }
@@ -6034,7 +6034,7 @@ func DeleteAgentBuild(args DeleteAgentArgs) string {
 
 // DeleteCalendarEvent -- Soft-delete a calendarEvent by stamping deleted=true. The time-series row survives for history + so a future external-sync reconciler can propagate the deletion upstream; queries hide it via isNotDeleted. The calendar tool reads the row via the owner-scoped calendarEventById before calling this, so a caller can only delete their own events.
 //
-// Bound concept: calendarEvent.
+// Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["deleteCalendarEvent"] in generated_concepts.go).
 type DeleteCalendarEventArgs struct {
 	EventId string
 }
@@ -6056,7 +6056,7 @@ func DeleteCalendarEventBuild(args DeleteCalendarEventArgs) string {
 
 // DeleteRecord -- Soft-delete a data record (sets active=false)
 //
-// Bound concept: record.
+// Bound concept: v1:data:record (machine-readable: BoundConcepts["deleteRecord"] in generated_concepts.go).
 type DeleteRecordArgs struct {
 	RecordId string
 }
@@ -6078,7 +6078,7 @@ func DeleteRecordBuild(args DeleteRecordArgs) string {
 
 // DeleteUserHard -- Hard-delete (soft-delete + generic @pii scrub) a user after the deletion-cooldown sweep.
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["deleteUserHard"] in generated_concepts.go).
 type DeleteUserHardArgs struct {
 	UserId string
 }
@@ -6100,7 +6100,7 @@ func DeleteUserHardBuild(args DeleteUserHardArgs) string {
 
 // DeprecateAction -- Deprecate a v1:actions:action (reliability below floor or superseded), removing it from replay (Phase 4 #1739).
 //
-// Bound concept: action.
+// Bound concept: v1:actions:action (machine-readable: BoundConcepts["deprecateAction"] in generated_concepts.go).
 type DeprecateActionArgs struct {
 	ActionId string
 }
@@ -6122,7 +6122,7 @@ func DeprecateActionBuild(args DeprecateActionArgs) string {
 
 // EmitClientToolRequest -- Emit a client-tool request envelope for cross-node relay to a browser stream.
 //
-// Bound concept: request.
+// Bound concept: v1:cognition:client:tool:request (machine-readable: BoundConcepts["emitClientToolRequest"] in generated_concepts.go).
 type EmitClientToolRequestArgs struct {
 	RequestId     string
 	CallId        string
@@ -6196,7 +6196,7 @@ func EmitClientToolRequestBuild(args EmitClientToolRequestArgs) string {
 
 // EmitClientToolResponse -- Emit a client-tool response envelope fulfilling a pending clientToolRequest.
 //
-// Bound concept: response.
+// Bound concept: v1:cognition:client:tool:response (machine-readable: BoundConcepts["emitClientToolResponse"] in generated_concepts.go).
 type EmitClientToolResponseArgs struct {
 	ResponseId   string
 	CallId       string
@@ -6257,7 +6257,7 @@ func EmitClientToolResponseBuild(args EmitClientToolResponseArgs) string {
 
 // EmitTextChunk -- Emit a streaming text chunk during AI response generation.
 //
-// Bound concept: chunk.
+// Bound concept: v1:cognition:text:chunk (machine-readable: BoundConcepts["emitTextChunk"] in generated_concepts.go).
 type EmitTextChunkArgs struct {
 	ChunkId       string
 	PartitionId   string
@@ -6315,7 +6315,7 @@ func EmitTextChunkBuild(args EmitTextChunkArgs) string {
 
 // ExpireAccessRequest -- Expire a pending access request (status=expired).
 //
-// Bound concept: accessRequest.
+// Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["expireAccessRequest"] in generated_concepts.go).
 type ExpireAccessRequestArgs struct {
 	RequestId string
 }
@@ -6337,7 +6337,7 @@ func ExpireAccessRequestBuild(args ExpireAccessRequestArgs) string {
 
 // FailHarnessStep -- Mark a running step failed (running -> failed). Stamps errorMessage + completedAt. The engine step guard rejects the transition when the prior status is not 'running'. Retry (failed -> ready, attempt++) is a separate write.
 //
-// Bound concept: step.
+// Bound concept: v1:harness:step (machine-readable: BoundConcepts["failHarnessStep"] in generated_concepts.go).
 type FailHarnessStepArgs struct {
 	StepId       string
 	ErrorMessage string
@@ -6367,7 +6367,7 @@ func FailHarnessStepBuild(args FailHarnessStepArgs) string {
 
 // FoldResponsibilityIntakeAnswers -- Fold the user's answers to the intake clarifying questions back into a v1:planner:responsibility and re-stamp the re-inferred field set (issue #637). Called after the user answers the intakeRequest questions: the dispatcher re-runs responsibilityIntake with the answers folded in, then writes the final trigger / schedule / condition / targetKind / assignedRoleSlug / successCriteria / notifyHow, records intakeResponse for audit, sets intakeStatus='applied', and flips status='active'. System write -- no ownerUserId re-stamp.
 //
-// Bound concept: responsibility.
+// Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["foldResponsibilityIntakeAnswers"] in generated_concepts.go).
 type FoldResponsibilityIntakeAnswersArgs struct {
 	ResponsibilityId string
 	IntakeResponse   map[string]any
@@ -6453,7 +6453,7 @@ func FoldResponsibilityIntakeAnswersBuild(args FoldResponsibilityIntakeAnswersAr
 
 // InsertOutputScreening -- Insert one v1:safety:outputScreening row recording the OutputGate's verdict for a single piece of incoming content. Called from component/safety/recorder/output_persisting.go via the engine's mutation path; the args correspond 1:1 to the concept fields. redactedSample arrives already truncated + secret-scrubbed by the caller (cap 4 KiB).
 //
-// Bound concept: outputScreening.
+// Bound concept: v1:safety:outputScreening (machine-readable: BoundConcepts["insertOutputScreening"] in generated_concepts.go).
 type InsertOutputScreeningArgs struct {
 	ContentType    string
 	ContentLength  any
@@ -6581,7 +6581,7 @@ func InsertOutputScreeningBuild(args InsertOutputScreeningArgs) string {
 
 // InsertPolicyTrace -- Persist a single policy evaluation trace to v1:platform:policyTrace.
 //
-// Bound concept: policyTrace.
+// Bound concept: v1:platform:policyTrace (machine-readable: BoundConcepts["insertPolicyTrace"] in generated_concepts.go).
 type InsertPolicyTraceArgs struct {
 	PolicyName      string
 	Tier            string
@@ -6665,7 +6665,7 @@ func InsertPolicyTraceBuild(args InsertPolicyTraceArgs) string {
 
 // InsertSafetyClassification -- Insert one v1:safety:classification row recording the Gate's decision for a single proposed action. Called from component/safety/recorder/persisting.go via the engine's mutation path; the args correspond 1:1 to the concept fields. argsRedacted is scrubbed by the caller: Body + Args run through safety.RedactedPayload (TOKEN/SECRET/PASSWORD/Authorization fragments replaced with [REDACTED]); when the classifier flags `credential_access` the recorder additionally drops Command/URL/Paths to avoid persisting credential-bearing surface strings (the rule's reason is preserved). This mutation does not perform its own scrub pass.
 //
-// Bound concept: classification.
+// Bound concept: v1:safety:classification (machine-readable: BoundConcepts["insertSafetyClassification"] in generated_concepts.go).
 type InsertSafetyClassificationArgs struct {
 	Surface       string
 	Action        string
@@ -6793,7 +6793,7 @@ func InsertSafetyClassificationBuild(args InsertSafetyClassificationArgs) string
 
 // JoinSpaceAsAI -- Join a space as an AI participant. Uses canonicalized deterministic ID.
 //
-// Bound concept: participant.
+// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["joinSpaceAsAI"] in generated_concepts.go).
 type JoinSpaceAsAIArgs struct {
 	PartitionId         string
 	AgentId             string
@@ -6877,7 +6877,7 @@ func JoinSpaceAsAIBuild(args JoinSpaceAsAIArgs) string {
 
 // JoinSpaceAsHuman -- Join a space as a human participant.
 //
-// Bound concept: participant.
+// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["joinSpaceAsHuman"] in generated_concepts.go).
 type JoinSpaceAsHumanArgs struct {
 	PartitionId         string
 	UserId              string
@@ -6935,7 +6935,7 @@ func JoinSpaceAsHumanBuild(args JoinSpaceAsHumanArgs) string {
 
 // LeaveSpace -- Insert a new version of a participant record (typically used to mark the participant as left).
 //
-// Bound concept: participant.
+// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["leaveSpace"] in generated_concepts.go).
 type LeaveSpaceArgs struct {
 	ParticipantId string
 	Payload       map[string]any
@@ -6963,7 +6963,7 @@ func LeaveSpaceBuild(args LeaveSpaceArgs) string {
 
 // LogMissingCapability -- Per Q7 missing-capability surface: log a new gap the Planner Agent identified during a Plan. First sighting creates the row; repeat sightings (same (kind, capability)) call bumpMissingCapabilitySighting instead so the row stays unique-by-capability and sightingCount climbs. Status defaults to 'open'.
 //
-// Bound concept: missingCapability.
+// Bound concept: v1:platform:missingCapability (machine-readable: BoundConcepts["logMissingCapability"] in generated_concepts.go).
 type LogMissingCapabilityArgs struct {
 	MissingId           string
 	Kind                string
@@ -7049,7 +7049,7 @@ func LogMissingCapabilityBuild(args LogMissingCapabilityArgs) string {
 
 // MarkChunkSuperseded -- Flag an existing knowledge chunk as outdated. Called by the Trainer Agent's markChunkSuperseded tool during a mode='refresh' trainSpecialist Plan. Sets superseded=true + supersededAt + supersededReason; retrieval excludes superseded chunks. Partial update -- the chunk row is preserved for audit.
 //
-// Bound concept: documentChunk.
+// Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["markChunkSuperseded"] in generated_concepts.go).
 type MarkChunkSupersededArgs struct {
 	ChunkId          string
 	SupersededAt     string
@@ -7093,7 +7093,7 @@ func MarkChunkSupersededBuild(args MarkChunkSupersededArgs) string {
 
 // MarkResponsibilityIntakePending -- Mark a v1:planner:responsibility's intake as in-progress (issue #637). The intake dispatcher calls this when it claims a freshly-created draft so a created+updated double-fire (or a multi-node race) doesn't run the responsibilityIntake prompt twice -- intakeStatus flips ” -> 'pending'. System write (system:planner actor): no ownerUserId re-stamp, no user-scope reference, so it's engine-internal bookkeeping on a row the human already owns.
 //
-// Bound concept: responsibility.
+// Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["markResponsibilityIntakePending"] in generated_concepts.go).
 type MarkResponsibilityIntakePendingArgs struct {
 	ResponsibilityId string
 }
@@ -7115,7 +7115,7 @@ func MarkResponsibilityIntakePendingBuild(args MarkResponsibilityIntakePendingAr
 
 // MintAction -- Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1, #1736). ownerUserId stamped from actor.userId (owned tier). Stores the replayable capability calls keyed by inputFingerprint.
 //
-// Bound concept: action.
+// Bound concept: v1:actions:action (machine-readable: BoundConcepts["mintAction"] in generated_concepts.go).
 type MintActionArgs struct {
 	ActionId            string
 	Slug                string
@@ -7251,7 +7251,7 @@ func MintActionBuild(args MintActionArgs) string {
 
 // MintSkill -- Mint a new v1:agents:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId + mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check.
 //
-// Bound concept: skill.
+// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["mintSkill"] in generated_concepts.go).
 type MintSkillArgs struct {
 	SkillId           string
 	Slug              string
@@ -7357,7 +7357,7 @@ func MintSkillBuild(args MintSkillArgs) string {
 
 // PersistTaskState -- Persist a Task's working state for async parking + planner re-invocation. Called when a Task transitions to paused / awaitingFeedback.
 //
-// Bound concept: taskState.
+// Bound concept: v1:planner:taskState (machine-readable: BoundConcepts["persistTaskState"] in generated_concepts.go).
 type PersistTaskStateArgs struct {
 	StateId           string
 	TaskId            string
@@ -7419,7 +7419,7 @@ func PersistTaskStateBuild(args PersistTaskStateArgs) string {
 
 // ProposeOverride -- Propose a healed OVERLAY override for a base construct (E4.2 / memql#2140). Writes a tier=overlay row with valid=false -- the repair loop proposes the heal, but it is INVISIBLE to resolution until human validation (E4.5) flips valid=true. Owned: ownerUserId is stamped from actor.userId so a caller can only propose overrides for their own constructs. tier is fixed to overlay (a base row can only be materialized by a system actor); the validateHealingBaseImmutable guard rejects any attempt to write tier=base here.
 //
-// Bound concept: healedOverride.
+// Bound concept: v1:healing:healedOverride (machine-readable: BoundConcepts["proposeOverride"] in generated_concepts.go).
 type ProposeOverrideArgs struct {
 	OverrideId      string
 	BaseConstructId string
@@ -7484,7 +7484,7 @@ func ProposeOverrideBuild(args ProposeOverrideArgs) string {
 
 // ProvisionWorkspace -- Create the v1:workbench:workspace row for a Plan on first workbenchHost call. Storage root is supplied by the workbench integration which has already created the directory on disk.
 //
-// Bound concept: workspace.
+// Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["provisionWorkspace"] in generated_concepts.go).
 type ProvisionWorkspaceArgs struct {
 	// Synthesized id, typically `{planId}` since one workspace per Plan.
 	WorkspaceId string
@@ -7519,7 +7519,7 @@ func ProvisionWorkspaceBuild(args ProvisionWorkspaceArgs) string {
 
 // PruneHarnessSemanticMemory -- Prune a decayed v1:harness:semanticMemory: status -> 'pruned' (soft-delete; the append-only model has no row removal). Recall (#585) + consolidation dedup filter status=='active', so a pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from actor.userId (owned tier).
 //
-// Bound concept: semanticMemory.
+// Bound concept: v1:harness:semanticMemory (machine-readable: BoundConcepts["pruneHarnessSemanticMemory"] in generated_concepts.go).
 type PruneHarnessSemanticMemoryArgs struct {
 	MemoryId string
 }
@@ -7541,7 +7541,7 @@ func PruneHarnessSemanticMemoryBuild(args PruneHarnessSemanticMemoryArgs) string
 
 // ReadyHarnessStep -- Promote a step to ready (pending -> ready when dependsOn is satisfied, or blocked -> ready when the blocker finishes). Read-merges the prior row so owned-tier fields are preserved. The engine step guard validates the transition and rejects an illegal source status. Without this mutation the state machine is stuck at 'pending' (#1635).
 //
-// Bound concept: step.
+// Bound concept: v1:harness:step (machine-readable: BoundConcepts["readyHarnessStep"] in generated_concepts.go).
 type ReadyHarnessStepArgs struct {
 	StepId string
 }
@@ -7563,7 +7563,7 @@ func ReadyHarnessStepBuild(args ReadyHarnessStepArgs) string {
 
 // RecordActionCandidate -- Record a v1:actions:candidate trace (the captured capability sequence + value/resource provenance for one LLM step, #1735). ownerUserId is stamped from actor.userId (owned tier). status is always 'candidate' on insert.
 //
-// Bound concept: candidate.
+// Bound concept: v1:actions:candidate (machine-readable: BoundConcepts["recordActionCandidate"] in generated_concepts.go).
 type RecordActionCandidateArgs struct {
 	CandidateId   string
 	PlanId        string
@@ -7621,7 +7621,7 @@ func RecordActionCandidateBuild(args RecordActionCandidateArgs) string {
 
 // RecordBundleDryRun -- Record the Gate 2 (tiered behavioral dry-run, #958) result on a bundle and transition status. status is dryRunPassed on success or failed otherwise; dryRunReport carries the trace + side-effect manifest + cost estimate (the Gate 3 approval artifact).
 //
-// Bound concept: bundle.
+// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["recordBundleDryRun"] in generated_concepts.go).
 type RecordBundleDryRunArgs struct {
 	BundleId string
 	// Enum: dryRunPassed | failed
@@ -7664,7 +7664,7 @@ func RecordBundleDryRunBuild(args RecordBundleDryRunArgs) string {
 
 // RecordBundleValidation -- Record the Gate 1 (isolated compile+bind, #956) result on a bundle and transition status. status is validated on success or failed on a binding error; validationReport carries the structured diagnostics; failureReason carries the headline on failure. Re-stamps ownerUserId (keeps the row owned + satisfies per-row authz).
 //
-// Bound concept: bundle.
+// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["recordBundleValidation"] in generated_concepts.go).
 type RecordBundleValidationArgs struct {
 	BundleId string
 	// Enum: validated | failed
@@ -7707,7 +7707,7 @@ func RecordBundleValidationBuild(args RecordBundleValidationArgs) string {
 
 // RecordCall -- Write an append-only call record. A completed leg writes one row with the real duration + disposition; durationSeconds/disposition default to an in-progress row when omitted (Amendment A: bound to partition + partition-scoped room).
 //
-// Bound concept: call.
+// Bound concept: v1:telephony:call (machine-readable: BoundConcepts["recordCall"] in generated_concepts.go).
 type RecordCallArgs struct {
 	// Enum: inbound | outbound
 	Direction       string
@@ -7801,7 +7801,7 @@ func RecordCallBuild(args RecordCallArgs) string {
 
 // RecordDependencyEdge -- Record one dependency edge for a bundle's construct (#957). Written by the compile/bind pass once it resolves a construct's references. ownerUserId stamped from actor.userId.
 //
-// Bound concept: dependencyEdge.
+// Bound concept: v1:authoring:dependencyEdge (machine-readable: BoundConcepts["recordDependencyEdge"] in generated_concepts.go).
 type RecordDependencyEdgeArgs struct {
 	EdgeId        string
 	BundleId      string
@@ -7862,7 +7862,7 @@ func RecordDependencyEdgeBuild(args RecordDependencyEdgeArgs) string {
 
 // RecordHarnessObservation -- Append a v1:harness:observation for a step (tool_result / error / note / decision). ownerUserId stamped from actor.userId (owned tier). content is the embedding source for semantic recall (#585).
 //
-// Bound concept: observation.
+// Bound concept: v1:harness:observation (machine-readable: BoundConcepts["recordHarnessObservation"] in generated_concepts.go).
 type RecordHarnessObservationArgs struct {
 	ObservationId string
 	StepId        string
@@ -7921,7 +7921,7 @@ func RecordHarnessObservationBuild(args RecordHarnessObservationArgs) string {
 
 // RecordLegalAcceptance -- Replace a user's legalAcceptance array (caller must read-modify-write to append).
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["recordLegalAcceptance"] in generated_concepts.go).
 type RecordLegalAcceptanceArgs struct {
 	UserId          string
 	LegalAcceptance []map[string]any
@@ -7949,7 +7949,7 @@ func RecordLegalAcceptanceBuild(args RecordLegalAcceptanceArgs) string {
 
 // RecordMentoredEvent -- Append a 'mentored' v1:forge:requestEvent after a non-owner submitter was taught about the area they touched. Injects kind='mentored' and forwards eventId / requestId / note. actorUserId + actorRole stamped from actor; requestId normalized to short form (shortId(), #1859). The forgeRecordMentoring tool's direct single writer (replaces the recordMentoring logic -- #2235).
 //
-// Bound concept: requestEvent.
+// Bound concept: v1:forge:requestEvent (machine-readable: BoundConcepts["recordMentoredEvent"] in generated_concepts.go).
 type RecordMentoredEventArgs struct {
 	EventId   string
 	RequestId string
@@ -7985,7 +7985,7 @@ func RecordMentoredEventBuild(args RecordMentoredEventArgs) string {
 
 // RecordNumber -- Persist a provisioned DID. Called after a carrier BuyNumber succeeds.
 //
-// Bound concept: number.
+// Bound concept: v1:telephony:number (machine-readable: BoundConcepts["recordNumber"] in generated_concepts.go).
 type RecordNumberArgs struct {
 	E164        string
 	Carrier     string
@@ -8051,7 +8051,7 @@ func RecordNumberBuild(args RecordNumberArgs) string {
 
 // RecordPlannerInvocation -- Record a planner-agent LLM invocation against a Plan: advance metrics.llmCallCount + tokenSpent without changing status. Caller computes the new totals Go-side (the parser has no arithmetic).
 //
-// Bound concept: plan.
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["recordPlannerInvocation"] in generated_concepts.go).
 type RecordPlannerInvocationArgs struct {
 	PlanId     string
 	TokenSpent int
@@ -8089,7 +8089,7 @@ func RecordPlannerInvocationBuild(args RecordPlannerInvocationArgs) string {
 
 // RecordRequestEvent -- Append a v1:forge:requestEvent (the time-series audit trail). actorUserId + actorRole stamped from actor. requestId is normalized to the short id form (shortId()) so the trail keys consistently whether the caller passes a canonical node id (automation path) or a bare short id (tool path) -- #1859.
 //
-// Bound concept: requestEvent.
+// Bound concept: v1:forge:requestEvent (machine-readable: BoundConcepts["recordRequestEvent"] in generated_concepts.go).
 type RecordRequestEventArgs struct {
 	EventId    string
 	RequestId  string
@@ -8149,7 +8149,7 @@ func RecordRequestEventBuild(args RecordRequestEventArgs) string {
 
 // RecordResponsibilityEvaluation -- Record the outcome of an evaluation/run on a v1:planner:responsibility: stamp lastEvaluatedAt to now and lastResult to the run headline. Called by the reactive-loop evaluator (epic #632) after a reactive condition check, a recurring scheduled tick, or a standing review. ownerUserId re-stamped from actor.userId (owned tier).
 //
-// Bound concept: responsibility.
+// Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["recordResponsibilityEvaluation"] in generated_concepts.go).
 type RecordResponsibilityEvaluationArgs struct {
 	ResponsibilityId string
 	LastResult       string
@@ -8177,7 +8177,7 @@ func RecordResponsibilityEvaluationBuild(args RecordResponsibilityEvaluationArgs
 
 // RecordRouterCall -- Record a single AI call through the memQL AI Router. Writes one v1:router:call row per call for observability, usage reporting, and cost attribution.
 //
-// Bound concept: call.
+// Bound concept: v1:router:call (machine-readable: BoundConcepts["recordRouterCall"] in generated_concepts.go).
 type RecordRouterCallArgs struct {
 	CallId               string
 	RequestId            string
@@ -8380,7 +8380,7 @@ func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 
 // RecordTrunk -- Persist a LiveKit SIP trunk configuration. secretRef points at external-secrets, never a secret value.
 //
-// Bound concept: trunk.
+// Bound concept: v1:telephony:trunk (machine-readable: BoundConcepts["recordTrunk"] in generated_concepts.go).
 type RecordTrunkArgs struct {
 	Carrier string
 	// Enum: inbound | outbound | both
@@ -8441,7 +8441,7 @@ func RecordTrunkBuild(args RecordTrunkArgs) string {
 
 // RedeemWorkerPairingCode -- Stamp a pairing-code row redeemed.
 //
-// Bound concept: workerPairingCode.
+// Bound concept: v1:identity:workerPairingCode (machine-readable: BoundConcepts["redeemWorkerPairingCode"] in generated_concepts.go).
 type RedeemWorkerPairingCodeArgs struct {
 	PairingId      string
 	RedeemedAt     string
@@ -8483,7 +8483,7 @@ func RedeemWorkerPairingCodeBuild(args RedeemWorkerPairingCodeArgs) string {
 
 // RefreshWorkerRegistration -- Refresh registration-authoritative fields on worker reconnect.
 //
-// Bound concept: registration.
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["refreshWorkerRegistration"] in generated_concepts.go).
 type RefreshWorkerRegistrationArgs struct {
 	RegistrationId       string
 	Name                 string
@@ -8585,7 +8585,7 @@ func RefreshWorkerRegistrationBuild(args RefreshWorkerRegistrationArgs) string {
 
 // RegisterSurface -- Register a v1:actions:surface (workbench / computer-use:<machineId> / mcp:<server>) with its served capabilities + availability + failover priority. ownerUserId stamped from actor.userId (owned tier). #1737.
 //
-// Bound concept: surface.
+// Bound concept: v1:actions:surface (machine-readable: BoundConcepts["registerSurface"] in generated_concepts.go).
 type RegisterSurfaceArgs struct {
 	SurfaceId    string
 	Slug         string
@@ -8643,7 +8643,7 @@ func RegisterSurfaceBuild(args RegisterSurfaceArgs) string {
 
 // ReinforceAction -- Reinforce a v1:actions:action after a verified replay: set the engine-computed reliability + reinforceCount and reset the decay clock (Phase 1 #1736; surface-aware decay lands in Phase 4 #1739).
 //
-// Bound concept: action.
+// Bound concept: v1:actions:action (machine-readable: BoundConcepts["reinforceAction"] in generated_concepts.go).
 type ReinforceActionArgs struct {
 	ActionId       string
 	Reliability    any
@@ -8677,7 +8677,7 @@ func ReinforceActionBuild(args ReinforceActionArgs) string {
 
 // ReinforceHarnessSemanticMemory -- Reinforce an existing v1:harness:semanticMemory (dedup path): take the engine-computed bumped confidence + reinforceCount, reset lastReinforced to now, and replace sourceEpisodes with the merged/deduped provenance. No new belief row -- this is why re-running over the same episodes does not duplicate. ownerUserId re-stamped from actor.userId (owned tier).
 //
-// Bound concept: semanticMemory.
+// Bound concept: v1:harness:semanticMemory (machine-readable: BoundConcepts["reinforceHarnessSemanticMemory"] in generated_concepts.go).
 type ReinforceHarnessSemanticMemoryArgs struct {
 	MemoryId       string
 	Confidence     any
@@ -8717,7 +8717,7 @@ func ReinforceHarnessSemanticMemoryBuild(args ReinforceHarnessSemanticMemoryArgs
 
 // RejectAccessRequest -- Reject an access request (status=rejected, stamps reviewer + note).
 //
-// Bound concept: accessRequest.
+// Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["rejectAccessRequest"] in generated_concepts.go).
 type RejectAccessRequestArgs struct {
 	RequestId    string
 	ReviewedBy   string
@@ -8753,7 +8753,7 @@ func RejectAccessRequestBuild(args RejectAccessRequestArgs) string {
 
 // RejectOverride -- Reject a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and sets validationStatus=rejected (valid stays false, so the override is never resolution-eligible), stamping validatedBy=actor.userId + validatedAt + the rejectionReason. A rejected proposal is RECORDED for audit, not silently dropped. Owned: gated by ownerUserId==actor.userId in the update read-merge.
 //
-// Bound concept: healedOverride.
+// Bound concept: v1:healing:healedOverride (machine-readable: BoundConcepts["rejectOverride"] in generated_concepts.go).
 type RejectOverrideArgs struct {
 	OverrideId      string
 	RejectionReason string
@@ -8783,7 +8783,7 @@ func RejectOverrideBuild(args RejectOverrideArgs) string {
 
 // ReleaseWorkspace -- Mark a workbench workspace as released. Called from releaseWorkspaceOnPlanTerminal when the parent Plan reaches a terminal status. The actual on-disk teardown is the workbench integration's responsibility -- this mutation only flips the lifecycle bit.
 //
-// Bound concept: workspace.
+// Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["releaseWorkspace"] in generated_concepts.go).
 type ReleaseWorkspaceArgs struct {
 	WorkspaceId string
 	// Why the workspace was released. Drives the released-row audit trail.
@@ -8813,7 +8813,7 @@ func ReleaseWorkspaceBuild(args ReleaseWorkspaceArgs) string {
 
 // RemoveAgentFromSpace -- Remove the caller's agent from a space (status='left'). The engine guard enforces caller-owns-agent and rejects removal of the pinned owner GA.
 //
-// Bound concept: participant.
+// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["removeAgentFromSpace"] in generated_concepts.go).
 type RemoveAgentFromSpaceArgs struct {
 	PartitionId string
 	AgentId     string
@@ -8841,7 +8841,7 @@ func RemoveAgentFromSpaceBuild(args RemoveAgentFromSpaceArgs) string {
 
 // RequestChanges -- Send a v1:forge:request back for changes: set status 'changes_requested' with a reason.
 //
-// Bound concept: request.
+// Bound concept: v1:forge:request (machine-readable: BoundConcepts["requestChanges"] in generated_concepts.go).
 type RequestChangesArgs struct {
 	RequestId  string
 	Resolution string
@@ -8869,7 +8869,7 @@ func RequestChangesBuild(args RequestChangesArgs) string {
 
 // RequestPlanFeedback -- Transition an existing running Plan to awaitingFeedback / feedback_required with a feedbackRequest{question, kind, options?, timeoutAt}. Backs the requestUserFeedback agent tool. Partial-update via update() -- only status / feedbackReason / feedbackRequest change; required fields inherit from the prior row. The user's answer (feedbackResponse + status->running) resumes the Plan via the existing planner re-invocation path.
 //
-// Bound concept: plan.
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["requestPlanFeedback"] in generated_concepts.go).
 type RequestPlanFeedbackArgs struct {
 	PlanId          string
 	FeedbackRequest map[string]any
@@ -8897,7 +8897,7 @@ func RequestPlanFeedbackBuild(args RequestPlanFeedbackArgs) string {
 
 // ResolveApprovalRequest -- Resolve a pending v1:safety:approvalRequest. Sets status (`approved` or `denied`), decidedBy, decidedAt, and decisionReason. Called from the cockpit approval card (follow-up in memql-cockpit) or directly via CLI / mutation as the v0 workaround until the card lands. Does NOT re-check that status was `pending` -- the read-modify-write happens on the caller side (cockpit / CLI calls approvalRequestById first); v1 ships the simple shape.
 //
-// Bound concept: approvalRequest.
+// Bound concept: v1:safety:approvalRequest (machine-readable: BoundConcepts["resolveApprovalRequest"] in generated_concepts.go).
 type ResolveApprovalRequestArgs struct {
 	Id             string
 	Status         string
@@ -8939,7 +8939,7 @@ func ResolveApprovalRequestBuild(args ResolveApprovalRequestArgs) string {
 
 // RetireAuthoringBundle -- Retire a bundle: status -> retired and retiredAt stamped. Used when a new version supersedes it or the user removes the capability. The authored runtime (#959) unregisters its constructs on this transition.
 //
-// Bound concept: bundle.
+// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["retireAuthoringBundle"] in generated_concepts.go).
 type RetireAuthoringBundleArgs struct {
 	BundleId string
 }
@@ -8961,7 +8961,7 @@ func RetireAuthoringBundleBuild(args RetireAuthoringBundleArgs) string {
 
 // RevertRecord -- Revert a data record to a previous validation state with counter reset
 //
-// Bound concept: record.
+// Bound concept: v1:data:record (machine-readable: BoundConcepts["revertRecord"] in generated_concepts.go).
 type RevertRecordArgs struct {
 	RecordId     string
 	ToState      string
@@ -9001,7 +9001,7 @@ func RevertRecordBuild(args RevertRecordArgs) string {
 
 // RevokeAgentAuthorization -- Soft-revoke a standing authorization. User-revocable from the agent's settings at any time. Read-merges the existing row so the caller only passes the auth id; agentId/userId/planKind/spaceScope inherit from the persisted row (memql#1628).
 //
-// Bound concept: agentAuthorization.
+// Bound concept: v1:agents:agentAuthorization (machine-readable: BoundConcepts["revokeAgentAuthorization"] in generated_concepts.go).
 type RevokeAgentAuthorizationArgs struct {
 	AuthId string
 }
@@ -9023,7 +9023,7 @@ func RevokeAgentAuthorizationBuild(args RevokeAgentAuthorizationArgs) string {
 
 // RevokeAuthSession -- Mark a bearer-token session revoked. Read-merges the existing row so only revokedReason + revokedAt change; the discriminator fields (subject, tokenHash, source, expiresAt, userId) and the rotation bookkeeping inherit from the persisted row instead of being re-supplied (memql#1628).
 //
-// Bound concept: authSession.
+// Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["revokeAuthSession"] in generated_concepts.go).
 type RevokeAuthSessionArgs struct {
 	SessionId string
 	// Enum: user_action | all_sessions | admin
@@ -9052,7 +9052,7 @@ func RevokeAuthSessionBuild(args RevokeAuthSessionArgs) string {
 
 // RevokeDelegation -- Revoke a delegation: authoritatively flips active=false and stamps revokedAt/revokedBySubject regardless of caller input. Read-merges the persisted row so every other field is preserved (memql#1729).
 //
-// Bound concept: delegation.
+// Bound concept: v1:identity:delegation (machine-readable: BoundConcepts["revokeDelegation"] in generated_concepts.go).
 type RevokeDelegationArgs struct {
 	DelegationId     string
 	RevokedBySubject string
@@ -9090,7 +9090,7 @@ func RevokeDelegationBuild(args RevokeDelegationArgs) string {
 
 // RevokeNodeTokenIdentity -- Revoke a node_token identity by flipping active=false on the row. Read-merges the existing row so only `active` changes; the credentials block + every other field inherit from the persisted row instead of being re-supplied (memql#1628 -- replaces the old whole-replace restate-every-credentials-field pattern). memql#350.
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["revokeNodeTokenIdentity"] in generated_concepts.go).
 type RevokeNodeTokenIdentityArgs struct {
 	IdentityId string
 }
@@ -9112,7 +9112,7 @@ func RevokeNodeTokenIdentityBuild(args RevokeNodeTokenIdentityArgs) string {
 
 // RevokePATIdentity -- Soft-revoke a PAT identity (api_key) by flipping active=false. Read-merges the existing row so only `active` changes; identityType/credentials/label/usableByAgents inherit from the persisted row instead of being re-supplied (memql#1628).
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["revokePATIdentity"] in generated_concepts.go).
 type RevokePATIdentityArgs struct {
 	IdentityId string
 }
@@ -9134,7 +9134,7 @@ func RevokePATIdentityBuild(args RevokePATIdentityArgs) string {
 
 // RevokeWorker -- Revoke a worker registration.
 //
-// Bound concept: registration.
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["revokeWorker"] in generated_concepts.go).
 type RevokeWorkerArgs struct {
 	RegistrationId string
 	RevokedAt      string
@@ -9178,7 +9178,7 @@ func RevokeWorkerBuild(args RevokeWorkerArgs) string {
 
 // RevokeWorkerTokenIdentity -- Revoke (deactivate) a worker_token identity row.
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["revokeWorkerTokenIdentity"] in generated_concepts.go).
 type RevokeWorkerTokenIdentityArgs struct {
 	IdentityId string
 }
@@ -9200,7 +9200,7 @@ func RevokeWorkerTokenIdentityBuild(args RevokeWorkerTokenIdentityArgs) string {
 
 // RotateAuthSession -- Rotate refresh-token bookkeeping on a session after a successful refresh. Stores the old hash as previousRefreshTokenHash with a fresh previousRotatedAt timestamp so the rotator can accept that hash inside its grace window.
 //
-// Bound concept: authSession.
+// Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["rotateAuthSession"] in generated_concepts.go).
 type RotateAuthSessionArgs struct {
 	SessionId                string
 	NewRefreshTokenHash      string
@@ -9240,7 +9240,7 @@ func RotateAuthSessionBuild(args RotateAuthSessionArgs) string {
 
 // ScheduleAccountDeletion -- Schedule the user for hard-deletion after the cooldown.
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["scheduleAccountDeletion"] in generated_concepts.go).
 type ScheduleAccountDeletionArgs struct {
 	UserId string
 }
@@ -9262,7 +9262,7 @@ func ScheduleAccountDeletionBuild(args ScheduleAccountDeletionArgs) string {
 
 // SendActionUtterance -- Create an action utterance in a space.
 //
-// Bound concept: utterance.
+// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["sendActionUtterance"] in generated_concepts.go).
 type SendActionUtteranceArgs struct {
 	UtteranceId     string
 	PartitionId     string
@@ -9336,7 +9336,7 @@ func SendActionUtteranceBuild(args SendActionUtteranceArgs) string {
 
 // SendRealtimeTranscriptUtterance -- Create a transcript-only realtime voice utterance in a space.
 //
-// Bound concept: utterance.
+// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["sendRealtimeTranscriptUtterance"] in generated_concepts.go).
 type SendRealtimeTranscriptUtteranceArgs struct {
 	UtteranceId    string
 	IdempotencyKey string
@@ -9445,7 +9445,7 @@ func SendRealtimeTranscriptUtteranceBuild(args SendRealtimeTranscriptUtteranceAr
 
 // SendSpeechUtterance -- Create a speech utterance in a space.
 //
-// Bound concept: utterance.
+// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["sendSpeechUtterance"] in generated_concepts.go).
 type SendSpeechUtteranceArgs struct {
 	UtteranceId     string
 	PartitionId     string
@@ -9537,7 +9537,7 @@ func SendSpeechUtteranceBuild(args SendSpeechUtteranceArgs) string {
 
 // SendTextUtterance -- Create a text utterance in a space.
 //
-// Bound concept: utterance.
+// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["sendTextUtterance"] in generated_concepts.go).
 type SendTextUtteranceArgs struct {
 	UtteranceId     string
 	PartitionId     string
@@ -9611,7 +9611,7 @@ func SendTextUtteranceBuild(args SendTextUtteranceArgs) string {
 
 // SetAccountEntitlement -- Set (upsert) an account's task-concurrency entitlement (epic memql#902 / #903). Deterministic per-account id so each set appends a new version and the latest wins. Finite maxConcurrentTasks caps the account; <=0 or tier='enterprise' leaves it unlimited.
 //
-// Bound concept: accountEntitlement.
+// Bound concept: v1:identity:accountEntitlement (machine-readable: BoundConcepts["setAccountEntitlement"] in generated_concepts.go).
 type SetAccountEntitlementArgs struct {
 	AccountId string
 	// Enum: free | pro | team | enterprise
@@ -9665,7 +9665,7 @@ func SetAccountEntitlementBuild(args SetAccountEntitlementArgs) string {
 
 // SetAgentAudioOverride -- Set the per-session audio control mode for an agent in a space.
 //
-// Bound concept: audioOverride.
+// Bound concept: v1:cognition:audioOverride (machine-readable: BoundConcepts["setAgentAudioOverride"] in generated_concepts.go).
 type SetAgentAudioOverrideArgs struct {
 	PartitionId string
 	AgentId     string
@@ -9716,7 +9716,7 @@ func SetAgentAudioOverrideBuild(args SetAgentAudioOverrideArgs) string {
 
 // SetAgentVideoOverride -- Set the per-session video control mode for an agent in a space.
 //
-// Bound concept: videoOverride.
+// Bound concept: v1:cognition:videoOverride (machine-readable: BoundConcepts["setAgentVideoOverride"] in generated_concepts.go).
 type SetAgentVideoOverrideArgs struct {
 	PartitionId string
 	AgentId     string
@@ -9767,7 +9767,7 @@ func SetAgentVideoOverrideBuild(args SetAgentVideoOverrideArgs) string {
 
 // SetAuthoredAutomationsEnabled -- Flip the cluster-wide GLOBAL KILL SWITCH for planner-authored automations (epic memql#954, issue #961). Partial-update of the singleton cluster-settings row (id='cluster'): sets authoredAutomationsEnabled true (resume) or false (halt). false halts EVERY authored automation across the whole cluster -- the governance hard stop -- independent of any bundle status or per-user kill switch. Operator-only in practice (the admin settings surface calls it); the authored scheduler reads the flag through clusterSettingsCurrent on its global gate.
 //
-// Bound concept: clusterSettings.
+// Bound concept: v1:identity:clusterSettings (machine-readable: BoundConcepts["setAuthoredAutomationsEnabled"] in generated_concepts.go).
 type SetAuthoredAutomationsEnabledArgs struct {
 	Enabled bool
 }
@@ -9789,7 +9789,7 @@ func SetAuthoredAutomationsEnabledBuild(args SetAuthoredAutomationsEnabledArgs) 
 
 // SetAuthoringBundleStatus -- Generic lifecycle transition for the remaining bundle states: paused (circuit breaker / user hold), retired (superseded or removed), or failed. retiredAt is stamped by retireAuthoringBundle; this mutation handles pause/unpause + failed. failureReason optional.
 //
-// Bound concept: bundle.
+// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["setAuthoringBundleStatus"] in generated_concepts.go).
 type SetAuthoringBundleStatusArgs struct {
 	BundleId string
 	// Enum: draft | paused | active | failed
@@ -9826,7 +9826,7 @@ func SetAuthoringBundleStatusBuild(args SetAuthoringBundleStatusArgs) string {
 
 // SetBudget -- Create or update a budget cap. Scope 'partition' covers all agents; scope 'agent' targets one v1:agents:agent by scopeId.
 //
-// Bound concept: budget.
+// Bound concept: v1:router:budget (machine-readable: BoundConcepts["setBudget"] in generated_concepts.go).
 type SetBudgetArgs struct {
 	Id                string
 	Scope             string
@@ -9899,7 +9899,7 @@ func SetBudgetBuild(args SetBudgetArgs) string {
 
 // SetConsent -- Record TCPA consent / opt-out for an external number (append-only; newest wins).
 //
-// Bound concept: consent.
+// Bound concept: v1:telephony:consent (machine-readable: BoundConcepts["setConsent"] in generated_concepts.go).
 type SetConsentArgs struct {
 	PhoneNumber string
 	PartitionId string
@@ -9950,7 +9950,7 @@ func SetConsentBuild(args SetConsentArgs) string {
 
 // SetConstructCompiledForm -- Store the cached compiled form for a construct, produced by the Gate 1 compile+bind harness (#956), so activation doesn't re-parse.
 //
-// Bound concept: construct.
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["setConstructCompiledForm"] in generated_concepts.go).
 type SetConstructCompiledFormArgs struct {
 	ConstructId  string
 	CompiledForm map[string]any
@@ -9978,7 +9978,7 @@ func SetConstructCompiledFormBuild(args SetConstructCompiledFormArgs) string {
 
 // SetConstructStatus -- Set a construct's lifecycle status (draft / active / retired), following its parent bundle. The authored runtime flips constructs to active on bundle activation and retired on bundle retirement.
 //
-// Bound concept: construct.
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["setConstructStatus"] in generated_concepts.go).
 type SetConstructStatusArgs struct {
 	ConstructId string
 	// Enum: draft | active | retired
@@ -10007,7 +10007,7 @@ func SetConstructStatusBuild(args SetConstructStatusArgs) string {
 
 // SetGlobalSecret -- Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.
 //
-// Bound concept: globalSecret.
+// Bound concept: v1:platform:globalSecret (machine-readable: BoundConcepts["setGlobalSecret"] in generated_concepts.go).
 type SetGlobalSecretArgs struct {
 	Id             string
 	Name           string
@@ -10080,7 +10080,7 @@ func SetGlobalSecretBuild(args SetGlobalSecretArgs) string {
 
 // SetGlobalVariable -- Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable.
 //
-// Bound concept: globalVariable.
+// Bound concept: v1:platform:globalVariable (machine-readable: BoundConcepts["setGlobalVariable"] in generated_concepts.go).
 type SetGlobalVariableArgs struct {
 	Id          string
 	Name        string
@@ -10131,7 +10131,7 @@ func SetGlobalVariableBuild(args SetGlobalVariableArgs) string {
 
 // SetNumberE911 -- Set E911 / caller-ID verification state on an owned DID (by row id).
 //
-// Bound concept: number.
+// Bound concept: v1:telephony:number (machine-readable: BoundConcepts["setNumberE911"] in generated_concepts.go).
 type SetNumberE911Args struct {
 	Id                  string
 	E911Registered      bool
@@ -10176,7 +10176,7 @@ func SetNumberE911Build(args SetNumberE911Args) string {
 
 // SetPartitionSecret -- Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.
 //
-// Bound concept: partitionSecret.
+// Bound concept: v1:platform:partitionSecret (machine-readable: BoundConcepts["setPartitionSecret"] in generated_concepts.go).
 type SetPartitionSecretArgs struct {
 	Id             string
 	Name           string
@@ -10249,7 +10249,7 @@ func SetPartitionSecretBuild(args SetPartitionSecretArgs) string {
 
 // SetPartitionVariable -- Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable.
 //
-// Bound concept: partitionVariable.
+// Bound concept: v1:platform:partitionVariable (machine-readable: BoundConcepts["setPartitionVariable"] in generated_concepts.go).
 type SetPartitionVariableArgs struct {
 	Id          string
 	Name        string
@@ -10300,7 +10300,7 @@ func SetPartitionVariableBuild(args SetPartitionVariableArgs) string {
 
 // SetPolicy -- Create or update a validation policy for a record type
 //
-// Bound concept: policy.
+// Bound concept: v1:data:policy (machine-readable: BoundConcepts["setPolicy"] in generated_concepts.go).
 type SetPolicyArgs struct {
 	PolicyId              string
 	TargetRecordType      string
@@ -10369,7 +10369,7 @@ func SetPolicyBuild(args SetPolicyArgs) string {
 
 // SetResponsibilityStatus -- Transition a v1:planner:responsibility's lifecycle status (draft / active / paused / archived). Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier).
 //
-// Bound concept: responsibility.
+// Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["setResponsibilityStatus"] in generated_concepts.go).
 type SetResponsibilityStatusArgs struct {
 	ResponsibilityId string
 	// Enum: draft | active | paused | archived
@@ -10398,7 +10398,7 @@ func SetResponsibilityStatusBuild(args SetResponsibilityStatusArgs) string {
 
 // SetSurfaceAvailability -- Set a v1:actions:surface availability flag (the resolver's failover signal) and refresh its lastSeen heartbeat. #1737.
 //
-// Bound concept: surface.
+// Bound concept: v1:actions:surface (machine-readable: BoundConcepts["setSurfaceAvailability"] in generated_concepts.go).
 type SetSurfaceAvailabilityArgs struct {
 	SurfaceId string
 	Available bool
@@ -10426,7 +10426,7 @@ func SetSurfaceAvailabilityBuild(args SetSurfaceAvailabilityArgs) string {
 
 // SetUserActiveSpace -- Set or clear the caller's activePartitionId. Empty partitionId clears the pointer.
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["setUserActiveSpace"] in generated_concepts.go).
 type SetUserActiveSpaceArgs struct {
 	UserId            string
 	PartitionId       string
@@ -10464,7 +10464,7 @@ func SetUserActiveSpaceBuild(args SetUserActiveSpaceArgs) string {
 
 // SoftDeleteWorkerInvocation -- Soft-delete a worker invocation row past retention.
 //
-// Bound concept: invocation.
+// Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["softDeleteWorkerInvocation"] in generated_concepts.go).
 type SoftDeleteWorkerInvocationArgs struct {
 	InvocationId string
 }
@@ -10486,7 +10486,7 @@ func SoftDeleteWorkerInvocationBuild(args SoftDeleteWorkerInvocationArgs) string
 
 // StampNodeTokenBootstrap -- Update audit fields on a node_token identity row when the bootstrap handler issues a fresh JWT for it. memql#343. Read-merges the existing row and deep-merges credentials (@mergeFields) so only the rotating keyHash + bootstrappedAt/bootstrappedFrom change; nodeId/nodeType/mintedBy/expiresAt/lastConnectAt inherit from the persisted row instead of being re-supplied or wiped (memql#1628).
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["stampNodeTokenBootstrap"] in generated_concepts.go).
 type StampNodeTokenBootstrapArgs struct {
 	IdentityId       string
 	KeyHash          string
@@ -10526,7 +10526,7 @@ func StampNodeTokenBootstrapBuild(args StampNodeTokenBootstrapArgs) string {
 
 // StartHarnessStep -- Claim a ready step (ready -> running). Stamps assignedAgent + startedAt. The engine step guard rejects the transition when the prior status is not 'ready'.
 //
-// Bound concept: step.
+// Bound concept: v1:harness:step (machine-readable: BoundConcepts["startHarnessStep"] in generated_concepts.go).
 type StartHarnessStepArgs struct {
 	StepId        string
 	AssignedAgent string
@@ -10556,7 +10556,7 @@ func StartHarnessStepBuild(args StartHarnessStepArgs) string {
 
 // StartPlan -- Promote a Plan from queued (planning complete, tasks emitted) to running. Triggered by the user clicking Run in the cockpit Planner tab, or by an automation that auto-runs plans on the user's behalf.
 //
-// Bound concept: plan.
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["startPlan"] in generated_concepts.go).
 type StartPlanArgs struct {
 	PlanId string
 }
@@ -10578,7 +10578,7 @@ func StartPlanBuild(args StartPlanArgs) string {
 
 // ToggleComputerUseEnabled -- Set User.preferences.computerUseEnabled.
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["toggleComputerUseEnabled"] in generated_concepts.go).
 type ToggleComputerUseEnabledArgs struct {
 	UserId  string
 	Enabled bool
@@ -10606,7 +10606,7 @@ func ToggleComputerUseEnabledBuild(args ToggleComputerUseEnabledArgs) string {
 
 // TouchSession -- Update an auth-session record (typically a heartbeat to bump lastActivityAt). Read-merges the existing row (update()): only the fields in `payload` change; the @required discriminators (subject, tokenHash, source, expiresAt) and every other omitted field inherit from the persisted row instead of having to be re-supplied (memql#1628). The session row must already exist.
 //
-// Bound concept: authSession.
+// Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["touchSession"] in generated_concepts.go).
 type TouchSessionArgs struct {
 	SessionId string
 	Payload   map[string]any
@@ -10634,7 +10634,7 @@ func TouchSessionBuild(args TouchSessionArgs) string {
 
 // TouchWorkspace -- Bump lastUsedAt on a workbench workspace after a successful dispatch. Cheap; called per successful workbenchHost call.
 //
-// Bound concept: workspace.
+// Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["touchWorkspace"] in generated_concepts.go).
 type TouchWorkspaceArgs struct {
 	WorkspaceId string
 }
@@ -10656,7 +10656,7 @@ func TouchWorkspaceBuild(args TouchWorkspaceArgs) string {
 
 // UpdateAgent -- Partial update of a v1:agents:agent row. Only the fields you pass are changed; other fields inherit from the prior row.
 //
-// Bound concept: agent.
+// Bound concept: v1:agents:agent (machine-readable: BoundConcepts["updateAgent"] in generated_concepts.go).
 type UpdateAgentArgs struct {
 	AgentId string
 	Payload map[string]any
@@ -10684,7 +10684,7 @@ func UpdateAgentBuild(args UpdateAgentArgs) string {
 
 // UpdateAgentAuthScope -- Set computerUseScope on an agent authorization row.
 //
-// Bound concept: agentAuthorization.
+// Bound concept: v1:agents:agentAuthorization (machine-readable: BoundConcepts["updateAgentAuthScope"] in generated_concepts.go).
 type UpdateAgentAuthScopeArgs struct {
 	AuthorizationId  string
 	ComputerUseScope string
@@ -10712,7 +10712,7 @@ func UpdateAgentAuthScopeBuild(args UpdateAgentAuthScopeArgs) string {
 
 // UpdateAgentAuthorization -- Partial update of a v1:agents:agentAuthorization row. Mirrors updateAgent semantics: only the fields passed in `payload` change; everything else inherits from the prior row. Backs the canvas mintSkillApprovalRequested card's 'Approve & always allow this tier' action (pack#38, memql#169) -- the SPA reads the current skillTierAllowlist, appends the approved tier, and writes the whole array back as `{skillTierAllowlist: [...]}`. Per the agentAuthorization concept's revocation contract this is an OWNED write: only the granting user (the row's payload.userId) may update their own authorization grant.
 //
-// Bound concept: agentAuthorization.
+// Bound concept: v1:agents:agentAuthorization (machine-readable: BoundConcepts["updateAgentAuthorization"] in generated_concepts.go).
 type UpdateAgentAuthorizationArgs struct {
 	AuthId  string
 	Payload map[string]any
@@ -10740,7 +10740,7 @@ func UpdateAgentAuthorizationBuild(args UpdateAgentAuthorizationArgs) string {
 
 // UpdateCalendarEvent -- Partial update of a calendarEvent. Only the fields passed in `payload` change; everything else inherits from the prior row. Backs editing an event (reschedule, rename, change location / notes / recurrence). The calendar tool reads the row via the owner-scoped calendarEventById before calling this, so cross-user edits are impossible.
 //
-// Bound concept: calendarEvent.
+// Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["updateCalendarEvent"] in generated_concepts.go).
 type UpdateCalendarEventArgs struct {
 	EventId string
 	Payload map[string]any
@@ -10768,7 +10768,7 @@ func UpdateCalendarEventBuild(args UpdateCalendarEventArgs) string {
 
 // UpdateClusterSettings -- Update the singleton cluster-settings row from the admin UI. Read-merges the existing row (update()): only the fields the caller actually passes change; every omitted field -- internalDomains, brand*, TTLs, bootstrap*, etc. -- inherits from the persisted row instead of being wiped to its empty default (memql#1686). registrationMode + internalDefaultRole stay @required because the admin form always submits them.
 //
-// Bound concept: clusterSettings.
+// Bound concept: v1:identity:clusterSettings (machine-readable: BoundConcepts["updateClusterSettings"] in generated_concepts.go).
 type UpdateClusterSettingsArgs struct {
 	Id                string
 	ClusterDomain     string
@@ -10989,7 +10989,7 @@ func UpdateClusterSettingsBuild(args UpdateClusterSettingsArgs) string {
 
 // UpdateDeploymentNodeSpec -- Re-pin a v1:cluster:deploymentNodeSpec's version / replicas / imageDigest by (deploymentId, nodeType). Read-merge update: deploymentId + nodeType inherit, only the spec fields + updatedAt change. Append under the same composite concept id. Epic 2 / #2094.
 //
-// Bound concept: deploymentNodeSpec.
+// Bound concept: v1:cluster:deploymentNodeSpec (machine-readable: BoundConcepts["updateDeploymentNodeSpec"] in generated_concepts.go).
 type UpdateDeploymentNodeSpecArgs struct {
 	DeploymentId string
 	NodeType     string
@@ -11041,7 +11041,7 @@ func UpdateDeploymentNodeSpecBuild(args UpdateDeploymentNodeSpecArgs) string {
 
 // UpdateDeploymentStatus -- Transition a v1:cluster:deployment's status (pending -> in_progress -> succeeded|failed; succeeded -> superseded; any -> rolled_back). Read-merge update: only status + updatedAt change, deploy metadata inherits. #1872.
 //
-// Bound concept: deployment.
+// Bound concept: v1:cluster:deployment (machine-readable: BoundConcepts["updateDeploymentStatus"] in generated_concepts.go).
 type UpdateDeploymentStatusArgs struct {
 	DeploymentId string
 	// Enum: pending | in_progress | succeeded | failed | superseded | rolled_back
@@ -11070,7 +11070,7 @@ func UpdateDeploymentStatusBuild(args UpdateDeploymentStatusArgs) string {
 
 // UpdateGeneratedOutputContent -- Re-insert a generatedOutput row (same id, new version) carrying the latest edited content so the Library viewer + artifact index reflect the most recent document version. Append-only by (id, createdAt): a new node version, reads return the latest. Handler-invoked by integration.library.editDocument / restoreDocumentVersion; ownerUserId is threaded from the existing row.
 //
-// Bound concept: generatedOutput.
+// Bound concept: v1:library:generatedOutput (machine-readable: BoundConcepts["updateGeneratedOutputContent"] in generated_concepts.go).
 type UpdateGeneratedOutputContentArgs struct {
 	OutputId     string
 	OwnerUserId  string
@@ -11176,7 +11176,7 @@ func UpdateGeneratedOutputContentBuild(args UpdateGeneratedOutputContentArgs) st
 
 // UpdateIdentity -- Update an identity record. Read-merges the existing row (update()): only the fields in `payload` change; every omitted field (identityType discriminator, credentials, label, active, usableByAgents) inherits from the persisted row instead of being wiped (memql#1628 class). The row must already exist (use createIdentity to create).
 //
-// Bound concept: identity.
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["updateIdentity"] in generated_concepts.go).
 type UpdateIdentityArgs struct {
 	IdentityId string
 	Payload    map[string]any
@@ -11204,7 +11204,7 @@ func UpdateIdentityBuild(args UpdateIdentityArgs) string {
 
 // UpdateMissingCapabilityStatus -- Operator-driven status transition on a missingCapability row. Used by the platform team's backlog tooling to mark a gap as in_progress, resolved (with a note on what shipped), or wontfix.
 //
-// Bound concept: missingCapability.
+// Bound concept: v1:platform:missingCapability (machine-readable: BoundConcepts["updateMissingCapabilityStatus"] in generated_concepts.go).
 type UpdateMissingCapabilityStatusArgs struct {
 	MissingId  string
 	Status     string
@@ -11240,7 +11240,7 @@ func UpdateMissingCapabilityStatusBuild(args UpdateMissingCapabilityStatusArgs) 
 
 // UpdateNodeHealth -- Record a node health transition. Read-merges the existing v1:cluster:node row (created on startup by registerNode under the same NodeId) so only health + lastSeen change; nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to \"\" and reset capabilities/labels on every transition).
 //
-// Bound concept: node.
+// Bound concept: v1:cluster:node (machine-readable: BoundConcepts["updateNodeHealth"] in generated_concepts.go).
 type UpdateNodeHealthArgs struct {
 	Id       string
 	Health   string
@@ -11274,7 +11274,7 @@ func UpdateNodeHealthBuild(args UpdateNodeHealthArgs) string {
 
 // UpdateNote -- Update a note (title / body / tags) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so a caller can never reassign ownership; updatedAt is re-stamped to now. The caller threads the full merged payload built from the current row plus the changed fields.
 //
-// Bound concept: note.
+// Bound concept: v1:notes:note (machine-readable: BoundConcepts["updateNote"] in generated_concepts.go).
 type UpdateNoteArgs struct {
 	NoteId  string
 	Payload map[string]any
@@ -11302,7 +11302,7 @@ func UpdateNoteBuild(args UpdateNoteArgs) string {
 
 // UpdateNumberStatus -- Update a DID's lifecycle status (e.g. on release).
 //
-// Bound concept: number.
+// Bound concept: v1:telephony:number (machine-readable: BoundConcepts["updateNumberStatus"] in generated_concepts.go).
 type UpdateNumberStatusArgs struct {
 	Id string
 	// Enum: active | releasing | released
@@ -11331,7 +11331,7 @@ func UpdateNumberStatusBuild(args UpdateNumberStatusArgs) string {
 
 // UpdateParticipantPresence -- Upsert a participant presence snapshot for multi-client status consistency.
 //
-// Bound concept: presence.
+// Bound concept: v1:cognition:participant:presence (machine-readable: BoundConcepts["updateParticipantPresence"] in generated_concepts.go).
 type UpdateParticipantPresenceArgs struct {
 	PresenceId    string
 	ParticipantId string
@@ -11428,7 +11428,7 @@ func UpdateParticipantPresenceBuild(args UpdateParticipantPresenceArgs) string {
 
 // UpdateParticipantStatus -- Update a participant record (typically status). Read-merges the existing row (update()): only the fields in `payload` change; every omitted field inherits from the persisted row instead of being wiped (memql#1628 class). The participant row must already exist (created on join).
 //
-// Bound concept: participant.
+// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["updateParticipantStatus"] in generated_concepts.go).
 type UpdateParticipantStatusArgs struct {
 	ParticipantId string
 	Payload       map[string]any
@@ -11456,7 +11456,7 @@ func UpdateParticipantStatusBuild(args UpdateParticipantStatusArgs) string {
 
 // UpdatePlanStatus -- Update a Plan's status with the full v1 lifecycle field set (paused/awaitingFeedback/needsAgent + metrics + estimate + token spend). Partial-update via update() -- only the fields you pass are changed; required fields inherit from the prior row.
 //
-// Bound concept: plan.
+// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["updatePlanStatus"] in generated_concepts.go).
 type UpdatePlanStatusArgs struct {
 	PlanId                   string
 	Status                   string
@@ -11636,7 +11636,7 @@ func UpdatePlanStatusBuild(args UpdatePlanStatusArgs) string {
 
 // UpdateRecord -- Update a data record (resets validation state to draft)
 //
-// Bound concept: record.
+// Bound concept: v1:data:record (machine-readable: BoundConcepts["updateRecord"] in generated_concepts.go).
 type UpdateRecordArgs struct {
 	RecordId        string
 	Data            map[string]any
@@ -11698,7 +11698,7 @@ func UpdateRecordBuild(args UpdateRecordArgs) string {
 
 // UpdateResponsibility -- Update an existing v1:planner:responsibility's editable fields (statement / schedule / condition / target binding / scope / enabled). Partial-update via update() -- only the fields you pass change; required fields inherit from the prior row. ownerUserId re-stamped from actor.userId (owned tier) so a caller can only rewrite their own rows.
 //
-// Bound concept: responsibility.
+// Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["updateResponsibility"] in generated_concepts.go).
 type UpdateResponsibilityArgs struct {
 	ResponsibilityId string
 	Statement        string
@@ -11811,7 +11811,7 @@ func UpdateResponsibilityBuild(args UpdateResponsibilityArgs) string {
 
 // UpdateSessionDevices -- Update a session record's device state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.
 //
-// Bound concept: session.
+// Bound concept: v1:cognition:session (machine-readable: BoundConcepts["updateSessionDevices"] in generated_concepts.go).
 type UpdateSessionDevicesArgs struct {
 	SessionId string
 	Payload   map[string]any
@@ -11839,7 +11839,7 @@ func UpdateSessionDevicesBuild(args UpdateSessionDevicesArgs) string {
 
 // UpdateSessionStreams -- Update a session record's stream state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.
 //
-// Bound concept: session.
+// Bound concept: v1:cognition:session (machine-readable: BoundConcepts["updateSessionStreams"] in generated_concepts.go).
 type UpdateSessionStreamsArgs struct {
 	SessionId string
 	Payload   map[string]any
@@ -11867,7 +11867,7 @@ func UpdateSessionStreamsBuild(args UpdateSessionStreamsArgs) string {
 
 // UpdateTaskStatus -- Update a Task's status with optional output / error / lifecycle / metrics / parking fields. Partial-update via update() -- only the fields you pass change; required fields inherit from the prior row.
 //
-// Bound concept: task.
+// Bound concept: v1:planner:task (machine-readable: BoundConcepts["updateTaskStatus"] in generated_concepts.go).
 type UpdateTaskStatusArgs struct {
 	TaskId             string
 	Status             string
@@ -11951,7 +11951,7 @@ func UpdateTaskStatusBuild(args UpdateTaskStatusArgs) string {
 
 // UpdateTodo -- Update a to-do (title / dueAt / priority) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so a caller can never reassign ownership. The caller threads the full merged payload; the update tool builds it from the current row plus the changed fields.
 //
-// Bound concept: todo.
+// Bound concept: v1:todos:todo (machine-readable: BoundConcepts["updateTodo"] in generated_concepts.go).
 type UpdateTodoArgs struct {
 	TodoId  string
 	Payload map[string]any
@@ -11979,7 +11979,7 @@ func UpdateTodoBuild(args UpdateTodoArgs) string {
 
 // UpdateUser -- Partial update of a v1:identity:user row. Only the fields you pass are changed; other fields inherit from the prior row.
 //
-// Bound concept: user.
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["updateUser"] in generated_concepts.go).
 type UpdateUserArgs struct {
 	UserId  string
 	Payload map[string]any
@@ -12007,7 +12007,7 @@ func UpdateUserBuild(args UpdateUserArgs) string {
 
 // UpdateWorkerLastSeen -- Bump lastSeenAt + lastConnectedFromIP on a worker registration.
 //
-// Bound concept: registration.
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["updateWorkerLastSeen"] in generated_concepts.go).
 type UpdateWorkerLastSeenArgs struct {
 	RegistrationId      string
 	LastSeenAt          string
@@ -12043,7 +12043,7 @@ func UpdateWorkerLastSeenBuild(args UpdateWorkerLastSeenArgs) string {
 
 // ValidateOverride -- Validate (ACCEPT) a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and flips valid=false->true + validationStatus=proposed->validated, stamping validatedBy=actor.userId + validatedAt, and bumps version (capture-as-version). Blast-radius-scaled by role: the validateHealingValidationRankBound Go guard rejects the write unless the actor's role rank meets the override's blastRadius-required rank (personal->user, shared->admin, spine_adjacent->developer; owner always allowed). Once validated the override becomes resolution-eligible -- the two-tier resolver prefers it over base. Owned: gated by ownerUserId==actor.userId in the update read-merge.
 //
-// Bound concept: healedOverride.
+// Bound concept: v1:healing:healedOverride (machine-readable: BoundConcepts["validateOverride"] in generated_concepts.go).
 type ValidateOverrideArgs struct {
 	OverrideId string
 	Version    int
@@ -12071,7 +12071,7 @@ func ValidateOverrideBuild(args ValidateOverrideArgs) string {
 
 // ValidateRequest -- Validate a v1:forge:request (developer action): set status 'needs_approval' and stamp validatedByUserId from actor.userId.
 //
-// Bound concept: request.
+// Bound concept: v1:forge:request (machine-readable: BoundConcepts["validateRequest"] in generated_concepts.go).
 type ValidateRequestArgs struct {
 	RequestId string
 }
@@ -12093,7 +12093,7 @@ func ValidateRequestBuild(args ValidateRequestArgs) string {
 
 // WriteKnowledgeChunk -- Write a knowledge chunk distilled by the Trainer Agent during a trainSpecialist Plan. Hard-stamps source='trainerAgent' + validationStatus='validated'. sourceRef is REQUIRED (the Trainer's no-fabricated-citations invariant -- every chunk points at a real URL or named source). Lands as canonical, retrievable once embedded.
 //
-// Bound concept: documentChunk.
+// Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["writeKnowledgeChunk"] in generated_concepts.go).
 type WriteKnowledgeChunkArgs struct {
 	ChunkId     string
 	DomainId    string

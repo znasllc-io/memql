@@ -64,8 +64,10 @@ func emitTSConstruct(buf *bytes.Buffer, c Construct, kindLabel, augModule string
 	} else {
 		fmt.Fprintf(buf, "/** %s wraps the %s named %q. */\n", camelName, kindLabel, c.Name)
 	}
-	if c.Concept != "" {
-		fmt.Fprintf(buf, "// Bound concept: %s.\n", c.Concept)
+	if c.ConceptId != "" {
+		fmt.Fprintf(buf, "// Bound concept: %s (machine-readable: BoundConcepts[%q] in generated_concepts.ts).\n", c.ConceptId, c.Name)
+	} else if c.Concept != "" {
+		fmt.Fprintf(buf, "// Bound concept (unresolved short name): %s.\n", c.Concept)
 	}
 
 	// Args interface.

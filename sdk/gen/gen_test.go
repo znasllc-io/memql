@@ -93,6 +93,7 @@ func TestEmitTSMethods_QueryWithArgs(t *testing.T) {
 		Kind:        "query",
 		Name:        "queryActiveSpaces",
 		Concept:     "space",
+		ConceptId:   "v1:cognition:space",
 		Description: "List active spaces.",
 		Args: []ArgField{
 			{Name: "ownerId", Type: "string", Required: true, Description: "Filter by owner"},
@@ -109,7 +110,7 @@ func TestEmitTSMethods_QueryWithArgs(t *testing.T) {
 		`import type { Result } from "./types.js";`,
 		`import { renderMemQLValue } from "./memqlValue.js";`,
 		`/** List active spaces. */`,
-		`// Bound concept: space.`,
+		`// Bound concept: v1:cognition:space (machine-readable: BoundConcepts["queryActiveSpaces"] in generated_concepts.ts).`,
 		`export interface QueryActiveSpacesArgs {`,
 		`  /** Filter by owner */`,
 		`  ownerId: string;`,

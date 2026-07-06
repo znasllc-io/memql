@@ -87,11 +87,18 @@ var (
 type Construct struct {
 	Kind        string // "query" | "mutation" | "logic" | "builtin"
 	Name        string // function name as it appears in DSL + wire
-	Concept     string // signature-bound concept (queries / mutations only); empty for logic
+	Concept     string // signature-bound concept SHORT name (queries / mutations only); empty for logic
+	ConceptId   string // resolved canonical concept id (e.g. "v1:cognition:space"); empty when unresolved
 	Description string // from @description annotation
 	Args        []ArgField
 	ShapeName   string // for queries: the shape the result projects through
 	Origin      string // file:line for traceability in generated comments
+	// Dir + Imports are the resolution inputs captured at collection time:
+	// the construct file's namespace directory (for same-namespace binding)
+	// and its `use <dir>.concepts.{ name }` imports (short name -> dir). They
+	// feed resolveConceptId once the full cross-root concept index is built.
+	Dir     string
+	Imports map[string]string
 }
 
 // ArgField is one field in the construct's args block.
@@ -102,6 +109,7 @@ type ArgField struct {
 	Description string
 	Default     string
 	Enum        []string
+	Pattern     string // raw @pattern("...") regex source, if any (guarded against canonical-id anchors)
 }
 
 // Options configures a Generate run.
@@ -171,7 +179,26 @@ func Generate(opts Options) (*Result, error) {
 		return nil, fmt.Errorf("no constructs found under roots %v", opts.Roots)
 	}
 
+	// Resolve every construct's signature-bound concept short name to its
+	// canonical id against the merged cross-root concept index, so the
+	// generated metadata carries `v1:ns:concept` rather than the unresolved
+	// short name it was previously emitted as (a bare comment).
+	idx := buildConceptIndex(opts.Roots)
+	for i := range constructs {
+		constructs[i].ConceptId = resolveConceptId(constructs[i].Concept, constructs[i].Dir, constructs[i].Imports, idx)
+	}
+
+	// Belt-and-suspenders with the A1 conformance rule
+	// (dsl/conformance_test.go: TestNoCanonicalPatternOnArgs): a client-facing
+	// arg must never FORCE the caller to compose a canonical id via a
+	// `@pattern("^v1:...")`. Generation fails loudly if one slips through, so a
+	// canonical-id contract can't leak into the SDK surface.
+	if err := assertNoCanonicalArgPatterns(constructs); err != nil {
+		return nil, err
+	}
+
 	files := Emit(constructs, opts.GoOut, opts.TSOut, opts.TSImportFrom)
+	files = append(files, emitConceptFiles(constructs, conceptRegistry(idx), opts.GoOut, opts.TSOut, opts.TSImportFrom)...)
 
 	res := &Result{Files: files}
 
@@ -311,6 +338,13 @@ func CollectConstructs(root string) ([]Construct, error) {
 			return fmt.Errorf("read %s: %w", path, err)
 		}
 		src := string(raw)
+		// Resolution inputs, parsed once per file: the namespace directory
+		// (same-namespace binding) + the file's concept `use` imports
+		// (cross-namespace). Attached to every construct in this file so
+		// Generate can resolve the bound concept once the cross-root index
+		// is built.
+		fileDir := dirForPath(root, path)
+		fileImports := parseUseImports(src)
 		matches := constructHeader.FindAllStringSubmatchIndex(src, -1)
 		for _, m := range matches {
 			// m: [headStart, headEnd, kindStart, kindEnd, conceptStart, conceptEnd, nameStart, nameEnd]
@@ -354,6 +388,8 @@ func CollectConstructs(root string) ([]Construct, error) {
 				Args:        args,
 				ShapeName:   shapeRefFor(body),
 				Origin:      path,
+				Dir:         fileDir,
+				Imports:     fileImports,
 			}
 			out = append(out, c)
 		}
@@ -461,6 +497,9 @@ func parseFields(inner string) []ArgField {
 			for _, raw := range strings.Split(em[1], ",") {
 				af.Enum = append(af.Enum, strings.Trim(strings.TrimSpace(raw), `"`))
 			}
+		}
+		if pm := patternAnnotationRe.FindStringSubmatch(annotations); len(pm) > 1 {
+			af.Pattern = pm[1]
 		}
 		out = append(out, af)
 	}

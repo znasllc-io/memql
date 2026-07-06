@@ -45,8 +45,10 @@ func emitConstruct(buf *bytes.Buffer, c Construct, kindLabel string) {
 	} else {
 		fmt.Fprintf(buf, "// %s wraps the %s named %q.\n", exportedName, strings.ToLower(kindLabel), c.Name)
 	}
-	if c.Concept != "" {
-		fmt.Fprintf(buf, "//\n// Bound concept: %s.\n", c.Concept)
+	if c.ConceptId != "" {
+		fmt.Fprintf(buf, "//\n// Bound concept: %s (machine-readable: BoundConcepts[%q] in generated_concepts.go).\n", c.ConceptId, c.Name)
+	} else if c.Concept != "" {
+		fmt.Fprintf(buf, "//\n// Bound concept (unresolved short name): %s.\n", c.Concept)
 	}
 
 	// Args struct.
