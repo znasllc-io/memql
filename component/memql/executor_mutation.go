@@ -114,15 +114,15 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 	// can pick whichever signal fits their model.
 	if result != nil && result.Bundle != nil && len(result.Bundle.Nodes) > 0 {
 		updatedNode := result.Bundle.Nodes[0]
-		// Partition is used only for the event publish topic; the read
-		// itself no longer filters on partition post-#56 phase 3.
-		readPartition := e.partitionForConcept(ctx, meta.conceptName)
+		// #2441: the retired `partition` dimension no longer rides the event
+		// payload. It was dead data (storage stopped scoping on partition in
+		// #56 phase 3, and the publish topic is concept-keyed, not
+		// partition-keyed) that only ever surfaced on the client wire.
 		eventPayload := map[string]any{
-			"id":        updatedNode.Id,
-			"nodeId":    updatedNode.Id,
-			"concept":   meta.conceptName,
-			"nodeType":  updatedNode.Type,
-			"partition": readPartition,
+			"id":       updatedNode.Id,
+			"nodeId":   updatedNode.Id,
+			"concept":  meta.conceptName,
+			"nodeType": updatedNode.Type,
 		}
 		// Flatten payload fields onto the event for direct filter access --
 		// mirrors the executeWrite publish shape so subscribers can use the
