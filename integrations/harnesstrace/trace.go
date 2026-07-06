@@ -59,7 +59,14 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/harness"
 	"github.com/znasllc-io/memql/component/memql"
+	coreid "github.com/znasllc-io/memql/core/id"
 )
+
+// planConcept is the concept id every v1:harness:plan row is stored
+// under. The trace reader matches the CANONICAL stored id (`id = ?` on
+// the plan row and `payload->>'planId' = ?` on step/observation rows),
+// so a bare planId arg is composed to canonical form before the lookup.
+const planConcept = memorynodes.ConceptHarnessPlan
 
 // traceConcept is the synthetic concept stamped on the single returned
 // node. It is not a real graph concept (this builtin reads, never
@@ -147,12 +154,45 @@ func (i *Integration) traceHandler(ctx context.Context, args map[string]any, _ i
 	return []memorynodes.MemoryNode{node}, nil
 }
 
-// parsePlanID validates the required planId arg.
+// parsePlanID validates the required planId arg and canonicalizes it to
+// the plan concept. Post-#2441 the tool loop hands agents BARE plan
+// shortIds, so a bare arg is composed to `v1:planner:plan:<short>`
+// before the trace reader's canonical-id lookup; an internal caller
+// passing the already-canonical id is a no-op; an id under a DIFFERENT
+// concept is rejected loudly instead of silently matching zero rows.
 func parsePlanID(args map[string]any) (string, error) {
 	planID, _ := args["planId"].(string)
+	return canonicalizePlanID(planID)
+}
+
+// canonicalizePlanID normalizes a bare-or-canonical plan id to the
+// canonical `v1:planner:plan:<short>` form the trace reader matches.
+// Mirrors the engine's canonicalizeIdValue behavior for a fixed target
+// concept (no registry needed -- the target is known): bare composes,
+// canonical passes through, wrong-concept errors, empty errors.
+func canonicalizePlanID(planID string) (string, error) {
 	planID = strings.TrimSpace(planID)
 	if planID == "" {
 		return "", fmt.Errorf("harnessTrace.trace: planId is required")
+	}
+	// Bare shortId (no concept prefix): compose the canonical plan id.
+	// Stored shortIds are colon-free (A0), so a colon means the value is
+	// already concept-qualified.
+	if !strings.ContainsRune(planID, ':') {
+		return coreid.BuildNodeId(planConcept, planID), nil
+	}
+	// Already the plan concept -> pass through.
+	if strings.HasPrefix(planID, planConcept+":") {
+		return planID, nil
+	}
+	// Concept-qualified under a different concept -> caller passed the
+	// wrong id type.
+	gotConcept, _, err := coreid.ParseNodeId(planID)
+	if err != nil {
+		return "", fmt.Errorf("harnessTrace.trace: malformed planId %q: %w", planID, err)
+	}
+	if gotConcept != "" && gotConcept != planConcept {
+		return "", fmt.Errorf("harnessTrace.trace: planId %q is under concept %q, expected %q", planID, gotConcept, planConcept)
 	}
 	return planID, nil
 }
