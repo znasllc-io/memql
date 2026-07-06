@@ -44,7 +44,6 @@ type Integration struct {
 	engine            memql.IntegrationEngineAccess
 	dbGetter          func() *sql.DB
 	embeddingProvider func(name string) (memql.EmbeddingAIProvider, error)
-	partitionFunc     func(ctx context.Context) string
 }
 
 // New constructs a knowledge integration. Dependencies are wired by the
@@ -69,9 +68,6 @@ func (i *Integration) SetDBGetter(fn func() *sql.DB) { i.dbGetter = fn }
 func (i *Integration) SetEmbeddingProvider(fn func(name string) (memql.EmbeddingAIProvider, error)) {
 	i.embeddingProvider = fn
 }
-
-// SetPartitionFunc wires the request-scoped partition resolver.
-func (i *Integration) SetPartitionFunc(fn func(ctx context.Context) string) { i.partitionFunc = fn }
 
 // IntegrationName returns the stable identifier for this integration.
 func (i *Integration) IntegrationName() string { return "knowledge" }
@@ -413,15 +409,6 @@ func (i *Integration) db() *sql.DB {
 		return nil
 	}
 	return i.dbGetter()
-}
-
-func (i *Integration) resolvePartition(ctx context.Context) string {
-	if i.partitionFunc != nil {
-		if p := i.partitionFunc(ctx); p != "" {
-			return p
-		}
-	}
-	return "default"
 }
 
 // chunkIdFor derives a stable chunk id. Include the chunk text hash so

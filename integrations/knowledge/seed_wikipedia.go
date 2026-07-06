@@ -252,7 +252,6 @@ func (i *Integration) writeTierCWikipediaChunks(
 	if err != nil {
 		return 0, fmt.Errorf("resolve embedding provider %q: %w", defaultProvider, err)
 	}
-	partition := i.resolvePartition(ctx)
 
 	written := 0
 	chunkIndex := 0
@@ -297,7 +296,7 @@ func (i *Integration) writeTierCWikipediaChunks(
 				Body:     fmt.Sprintf("Source: Wikipedia article \"%s\" (%s; CC-BY-SA).\n\n%s", title, canonicalURL, chunkText),
 				KeyTerms: []string{"wikipedia", title, d.Name},
 			}
-			if err := i.storeSeedChunk(ctx, partition, d, recipeVersion, chunkIndex, chunk, seedSource, "llmSeeded", provider); err != nil {
+			if err := i.storeSeedChunk(ctx, d, recipeVersion, chunkIndex, chunk, seedSource, "llmSeeded", provider); err != nil {
 				i.Logger.Warn("knowledge.tierC.wikipedia: chunk write failed",
 					"domainId", d.ID, "article", articleName, "chunkIndex", chunkIndex, "err", err)
 				chunkIndex++

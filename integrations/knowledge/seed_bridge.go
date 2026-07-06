@@ -273,7 +273,7 @@ func (i *Integration) resolveBridgeInputs(
 			continue
 		}
 		// Fallback: query DB (user-created domain).
-		q := fmt.Sprintf(`query queryKnowledgeDomainById(domainId: %s)`, quoteString(did))
+		q := fmt.Sprintf(`query knowledgeDomainById(domainId: %s)`, quoteString(did))
 		res, err := i.engine.Execute(ctx, q)
 		if err != nil || res == nil || res.Bundle == nil || len(res.Bundle.Nodes) == 0 {
 			continue
@@ -355,7 +355,6 @@ func (i *Integration) generateBridgeContent(
 	if err != nil {
 		return 0, fmt.Errorf("resolve embedding provider %q: %w", defaultProvider, err)
 	}
-	partition := i.resolvePartition(ctx)
 
 	// Build a synthetic StandardDomain for the storeSeedChunk path so
 	// the chunk rows carry a sensible name + tier. We tier bridges as
@@ -374,7 +373,7 @@ func (i *Integration) generateBridgeContent(
 		if c.Title == "" || c.Body == "" {
 			continue
 		}
-		if err := i.storeSeedChunk(ctx, partition, bridgeAsDomain, bridgeRecipeVersion, idx, c, "llm-bridge", "crossDomainBridge", provider); err != nil {
+		if err := i.storeSeedChunk(ctx, bridgeAsDomain, bridgeRecipeVersion, idx, c, "llm-bridge", "crossDomainBridge", provider); err != nil {
 			i.Logger.Warn("knowledge.bridge: chunk write failed",
 				"bridgeId", bridgeId, "chunkIndex", idx, "err", err)
 			continue
@@ -406,7 +405,6 @@ func (i *Integration) ensureKnowledgeBridgeHandler(
 		"roleSlug":       roleSlug,
 		"combinationKey": CombinationKeyFor(domainIds),
 	})
-	_ = i.resolvePartition(ctx)
 	return []memorynodesNode{
 		{
 			ID:        fmt.Sprintf("knowledgeBridge-result:%d", time.Now().UnixNano()),

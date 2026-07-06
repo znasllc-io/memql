@@ -113,14 +113,11 @@ func FromProtoEventKind(k memqlv1.EventKind) Kind {
 // (telemetry., message., graph., ai., query., automation.) to produce the
 // canonical bus pattern.
 //
-// For graph events, callers must supply the partition segment in the filter
-// (e.g., "node.created.*.v1:cognition:text:chunk") because emitted topics
-// are 5-segment graph.node.{action}.{partition}.{concept}. See
-// BuildTopicWithPartitionAndConcept in pattern.go. The bus matcher requires
-// exact segment count, so a legacy 3-segment filter
-// ("node.created.v1:cognition:text:chunk") produces a pattern that never
-// matches any real event -- that's intentional: pre-release, callers are
-// expected to send the current format.
+// Graph topics are 4-segment graph.node.{action}.{concept} (the partition
+// segment was retired with #56; see BuildTopicWithConcept in pattern.go),
+// so a graph filter is e.g. "node.created.v1:cognition:text:chunk". The
+// bus matcher requires exact segment count, so a filter written against
+// the retired 5-segment partitioned format never matches any real event.
 func TopicPatternFromSubscriptionKind(kind memqlv1.SubscriptionKind, filter string) string {
 	filter = NormalizePattern(filter)
 

@@ -37,7 +37,6 @@ func init() {
 			return bunDB.DB
 		})
 		integ.SetEmbeddingProvider(pctx.EmbeddingProviderByName)
-		integ.SetPartitionFunc(pctx.ResolvePartitionFromContext)
 		return integ, nil
 	})
 }

@@ -292,7 +292,6 @@ func (i *Integration) augmentDomainGenerateHandler(ctx context.Context, args map
 		i.failAugmentPlan(ctx, planId, fmt.Sprintf("Embedding provider %q unavailable: %v", defaultProvider, err))
 		return nil, fmt.Errorf("resolve embedding provider %q: %w", defaultProvider, err)
 	}
-	partition := i.resolvePartition(ctx)
 
 	written := 0
 	for idx, c := range chunkPayload.Chunks {
@@ -301,7 +300,7 @@ func (i *Integration) augmentDomainGenerateHandler(ctx context.Context, args map
 		if c.Title == "" || c.Body == "" {
 			continue
 		}
-		if err := i.storeAugmentChunk(ctx, partition, domainId, topic, sourceUtteranceId, sourceAgentId, planId, idx, c, provider); err != nil {
+		if err := i.storeAugmentChunk(ctx, domainId, topic, sourceUtteranceId, sourceAgentId, planId, idx, c, provider); err != nil {
 			i.Logger.Warn("augmentDomainGenerate: chunk write failed",
 				"planId", planId, "domainId", domainId, "title", c.Title, "err", err)
 			continue
@@ -371,7 +370,6 @@ func (i *Integration) failAugmentPlan(ctx context.Context, planId, errMsg string
 // envelope as seedDomainContent so retrieval reads it identically.
 func (i *Integration) storeAugmentChunk(
 	ctx context.Context,
-	partition string,
 	domainId string,
 	topic string,
 	sourceUtteranceId string,
@@ -437,7 +435,7 @@ func (i *Integration) storeAugmentChunk(
 // + an empty description if the row is missing -- the prompt still
 // runs, just less context-rich.
 func (i *Integration) lookupDomainMeta(ctx context.Context, domainId string) (string, string, error) {
-	q := fmt.Sprintf(`query queryKnowledgeDomainById(domainId: %s)`, quoteString(domainId))
+	q := fmt.Sprintf(`query knowledgeDomainById(domainId: %s)`, quoteString(domainId))
 	res, err := i.engine.Execute(ctx, q)
 	if err != nil {
 		return domainId, "", fmt.Errorf("query knowledge domain: %w", err)

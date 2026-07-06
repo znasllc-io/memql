@@ -8,15 +8,18 @@ import "strings"
 // and every system-automation id generator must agree on.
 //
 // A colon-bearing compound string used as a "shortId" is the bug this
-// guards against: the storage layer's HasPartition() check would
-// misclassify the first colon-segment as a partition name and persist a
-// malformed id. See docs/public/concepts/identifiers.md ("Anti-patterns").
+// guards against: it breaks the canonical {concept}:{shortId} round-trip
+// through ParseNodeId and produces ids no reader can compare reliably.
+// See docs/public/concepts/identifiers.md ("Anti-patterns").
 //
 // Two legitimate shapes (conceptName may be "" to validate a bare id
 // with no concept context):
 //
 //  1. Bare shortId with no colons -- the engine prepends {concept}:.
-//  2. Concept-qualified: starts with conceptName+":".
+//  2. Concept-qualified: starts with conceptName+":", and the remainder
+//     after that prefix is itself a bare (colon-free) shortId. A
+//     colon-bearing remainder (e.g. "v1:planner:plan:<short>:refine:<ts>")
+//     is the compound-id bug class this guard exists for (#2439).
 //
 // Anything else is a caller bug. An empty (or whitespace-only) shortId
 // is treated as valid here -- it is handled downstream.
@@ -29,9 +32,12 @@ func ValidateShortId(conceptName, shortId string) error {
 	if !strings.ContainsRune(trimmed, ':') {
 		return nil
 	}
-	// Shape (2): concept-qualified.
+	// Shape (2): concept-qualified with a bare remainder.
 	if conceptName != "" && strings.HasPrefix(trimmed, conceptName+":") {
-		return nil
+		rest := strings.TrimPrefix(trimmed, conceptName+":")
+		if rest != "" && !strings.ContainsRune(rest, ':') {
+			return nil
+		}
 	}
 	return &InvalidShortIdError{ConceptName: conceptName, ShortId: trimmed}
 }

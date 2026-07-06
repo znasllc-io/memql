@@ -2120,7 +2120,12 @@ message VoiceAgentFinalTranscript {
 message VoiceAgentFinalAck {
   string request_id = 1;
   bool success = 2;
-  string utterance_id = 3;   // canonical row id of the inserted utterance
+  // Bare shortId of the inserted utterance (server-minted
+  // "utt-<nanos>-<hex>"; the stored row id is
+  // v1:cognition:utterance:<this>). NOTE: the sibling
+  // VoiceAgentTurnComplete.utterance_id currently carries the CANONICAL
+  // row id -- #2441 (bare-ids cutover) aligns both surfaces on bare.
+  string utterance_id = 3;
   string thread = 4;         // 'team' | 'group'
   string error_code = 5;
   string error_message = 6;
