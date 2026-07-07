@@ -37,7 +37,7 @@ cross-node mesh bugs reproduces locally instead of only on staging.
 | Secrets / keys | dev defaults (seeded by `make secrets`) | Key Vault via ESO | config only |
 | ExternalSecrets | deleted by `$patch: delete` in local overlay | present | config only |
 | LiveKit | **LiveKit Cloud** (outbound; no self-hosted livekit/sip/redis locally) | self-hosted `livekit-server` + `livekit/sip` | divergent -- justified (Epic #2184) |
-| Ingress | port-forwards from k3d (no ingress controller) | ingress-nginx | divergent -- justified |
+| Ingress | k3s-bundled traefik front door (`identity.local.znas.io`, mkcert TLS) + port-forwards for the gRPC heads | ingress-nginx | divergent -- traefik vs nginx |
 | Digest-pinning gate | skipped for `ENV=local` in drift-check.sh | enforced | divergent -- justified |
 
 ## Prerequisites
@@ -110,7 +110,9 @@ reached on demand:
 kubectl port-forward -n memql svc/mcp 50051:50051
 ```
 
-Access identity: `http://localhost:8085`
+Access identity: `https://identity.local.znas.io` (front-door TLS -- needs the
+seeded mkcert cert + a `*.local.znas.io` hosts entry) or `http://localhost:8085`
+(direct / fallback when the cert isn't seeded).
 Access the engine gRPC head: `localhost:50051` (after the port-forward above)
 
 ## Inner-loop dev
@@ -247,9 +249,15 @@ because:
 - `fieldRef: metadata.name` for `MEMQL_NODE_ID` is identical to staging.
 - The ArgoCD `ignoreDifferences` and selfHeal behavior matches staging exactly.
 
-There is no nginx front door, no `*.local.znas.io` subdomains, and no mkcert
-TLS in this world -- the cluster is reached via kubectl port-forwards
-(identity `:8085`, postgres `:5432`, and the `mcp` engine gRPC head `:50051`
-on demand; the product SPA + bff carrier are engine-external and absent
-locally, #2204; the voice/media plane is LiveKit Cloud, reached outbound --
-no local port-forward).
+There is no *nginx* front door locally, but the local overlay DOES ship a
+k3s-bundled **traefik** front door on 443 for `https://identity.local.znas.io`
+(`deploy/k8s/overlays/local/front-door.yaml`), terminating TLS with a
+browser-trusted mkcert `*.local.znas.io` wildcard (`local-znas-tls`, seeded by
+`make secrets` from `docker/nginx/certs/dev.{crt,key}` -- skip-with-warning if
+that pair is absent, in which case identity is reached via the port-mapped
+`:8085` instead). This mirrors the cloud ingress topology. The **gRPC** heads
+are still reached via kubectl port-forward -- identity is not exposed on gRPC
+externally, and the `mcp` engine gRPC head `:50051` is forwarded on demand.
+Postgres `:5432` is likewise port-forwarded; the product SPA + product `bff`
+carrier are engine-external and absent locally (#2204); the voice/media plane
+is LiveKit Cloud, reached outbound -- no local port-forward.
