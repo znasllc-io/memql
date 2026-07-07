@@ -204,7 +204,7 @@ with its justification.
 | # | Divergence | Local | Staging | Why acceptable |
 |---|---|---|---|---|
 | 1 | **Replicas (default)** | 1 per Deployment | 2 per Deployment | Resource-constrained laptops. Multi-node is opt-in via `make scale N=2`. The fieldRef mechanism is identical to staging so the multi-node path fully reproduces. |
-| 2 | **Ingress** | k3d port-forwards (no ingress controller) | ingress-nginx on AKS | Port-forwards are sufficient for local dev; installing nginx in k3d adds significant startup time for no functional gain. |
+| 2 | **Ingress** | k3s-bundled **traefik** front door for `identity.local.znas.io` (mkcert TLS); gRPC heads via port-forward | ingress-nginx on AKS | Same ingress *topology* as cloud (an HTTPS front door for identity); traefik ships with k3s so there's no extra install. gRPC heads (`mcp:50051`) stay on port-forward -- they're not fronted locally. |
 | 3 | **Digest-pinning gate** | skipped for `ENV=local` in `scripts/deploy/drift-check.sh` | enforced | Local images are built by `make dev` with a stable `:local` tag; they have no ACR digest. The gate exemption is tested by `TestDriftCheckRenderedLocalOverlaySkipsDigestGate`. |
 | 4 | **ExternalSecrets / Key Vault** | deleted by `$patch: delete` in local overlay | ESO syncs from Key Vault | Dev secrets are seeded directly by `make secrets`. |
 | 5 | **Connection pooler** | direct Postgres connection | Tiger Cloud managed PgBouncer | Single-node dev without a pool is safe; the hybrid-endpoint split used in staging can be reproduced by running PgBouncer as a separate pod if needed. |
