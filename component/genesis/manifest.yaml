@@ -756,12 +756,6 @@ variables:
     optional: true
     description: "Publicly reachable LiveKit URL advertised to clients for the Polyphon voice path."
 
-  - name: LIVEKIT_PUBLIC_URL
-    component: voice
-    scope: node
-    optional: true
-    description: "Publicly reachable (externally-dialable) LiveKit URL handed to the cloud avatar vendor + the voice-agent so their cloud engine can dial into the room (avatardirect.engageVendor / voice-agent config). Distinct from the internal LiveKit URL; unset locally means cloud-avatar video is unsupported (memql#1277)."
-
   - name: MEMQL_POLYPHON_LIVEKIT_URL
     component: voice
     scope: node
