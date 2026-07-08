@@ -189,9 +189,11 @@ patches:
       apiVersion: v1
       kind: Service
       metadata: { name: livekit-redis }
-  # NOTE: the product SPA and `bff` carrier workloads (Deployments,
-  # Services, PodDisruptionBudget) are no longer in the engine base -- they moved
-  # to the downstream product pack -- so this overlay no longer deletes them.
+  # NOTE: the product SPA and the product `bff` workloads (Deployments,
+  # Services, PodDisruptionBudget) are not in the engine base -- they live in the
+  # downstream product overlay (bff is a plain engine node running the product via
+  # the runtime dsl-bundle mount at MEMQL_DSL_PATH) -- so this overlay does not
+  # delete them.
   # Repoint the LiveKit URL env at the cloud project (secret-sourced). The
   # `value: null` strategic-merge directive deletes the base's hard-coded
   # ws://livekit:7880 so valueFrom is the only source.

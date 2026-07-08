@@ -10,9 +10,9 @@ owner: znas
 # Plugin SDK -- the pack extension contract
 
 A **pack** extends memQL with product-specific behavior: Go integrations plus a
-`.memql` DSL bundle, compiled into a node-type binary via build tags. The
-product pack (the carrier repo, a sibling of this one) is the reference
-consumer.
+`.memql` DSL bundle. The Go integrations compile into a node-type binary via
+build tags; the `.memql` domains load compiled-in or at runtime from disk (see
+Scope below). A product's DSL bundle plus its client is the reference consumer.
 
 This page is the **contract reference** for the Go surface a pack targets -- the
 `PluginContext` it receives, the `PluginFactory` it implements, the
@@ -21,11 +21,16 @@ checks at startup. For an end-to-end "build your first pack" walkthrough, see
 [Building a pack](building-a-pack.md) -- the developer guide, with the in-tree
 `examples/referencepack` reference pack as its worked example.
 
-> **Scope.** Packs are **compiled in via build tags** -- there is no runtime
-> (non-compiled) pack loading, by design. "Loading a pack" means linking its
-> Go package into a binary (so its `init()` registrations run) and embedding
-> its `.memql` tree. The contract below is the stable surface that linkage
-> targets.
+> **Scope.** A pack has two halves that load differently. **(a) The Go
+> integration** -- the `IntegrationProvider`, its `PluginFactory`, and the
+> registration primitives -- is **compiled in via build tags**: linking its Go
+> package into a binary runs its `init()` registrations. There is no runtime
+> (non-compiled) loading of the Go half, by design. **(b) The `.memql` DSL
+> domains** load either compiled-in (an embedded tree) or **at runtime from
+> disk** via `MEMQL_DSL_PATH`, where a product-agnostic engine image mounts a
+> product's DSL bundle at boot with `RegisterTree(domain, os.DirFS(...))` and
+> zero compiled-in product code. The contract below is the stable Go surface
+> that half (a) targets.
 
 ---
 
@@ -187,10 +192,13 @@ namespace-ownership check (the analogue of `CheckPluginContractCompat` for the
 DSL tree). The core domain set is read from the embedded tree's top-level
 directories, so it stays in lockstep with the `//go:embed` directive.
 
-> **Out of scope by design.** Runtime (non-compiled) pack loading is not
-> supported -- packs stay embedded via build tags, like the product pack
-> today. Validation runs at startup against the compiled-in set; there is no
-> dynamic-load path to validate.
+> **Go plugins stay build-tag-linked.** There is no runtime (non-compiled)
+> loading of the *Go* half -- an `IntegrationProvider` registers from `init()`
+> only when its package is linked in, and contract validation runs at startup
+> against that compiled-in set. The *DSL* half is different: `RegisterTree`
+> takes any `fs.FS`, so a product's `.memql` domains can be mounted at runtime
+> from disk (`os.DirFS` under `MEMQL_DSL_PATH`) as well as embedded -- and the
+> namespace-ownership validation below runs identically for either source.
 
 ---
 

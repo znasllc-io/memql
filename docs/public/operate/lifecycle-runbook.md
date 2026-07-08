@@ -16,7 +16,7 @@ maintenance trigger, the coordinated/ordered rollout driver, and the
 green-before-staging-deploy parity gate that gates every staging roll.
 
 This is the *lifecycle* companion to the cluster/secrets/promotion reference in
-[`deployment-strategy.md`](./deployment-strategy.md) (topology, `make deploy`,
+[`deploy-bundle-runbook.md`](./deploy-bundle-runbook.md) (topology, `make deploy`,
 genesis envelope, staging→prod promotion). Read that for *what* deploys; read
 this for *how a node enters and leaves rotation cleanly* during one.
 
@@ -63,7 +63,7 @@ Coupling liveness to `/healthz` was the #1115/#1117 restart-storm root cause; do
 
 On `SIGTERM` (the normal k8s rollout / scale-down signal) a node runs the
 graceful-drain sequence in `app/run.go` (#1269), bounded by two env vars on the
-carrier binary:
+node binary (the product-agnostic engine):
 
 | Env var | Default | What it bounds |
 |---|---|---|
@@ -153,7 +153,7 @@ scripts/cluster/rolling-drain.sh \
 The actual pod replacement is the orchestrator's job; this driver only **sequences
 the drains and gates on readiness between them**. Under k8s RollingUpdate the
 Deployment already does one-at-a-time replacement (identity stays HA via its PDB,
-[`deployment-strategy.md` §5](./deployment-strategy.md)); use this driver for the
+[`deploy-bundle-runbook.md`](./deploy-bundle-runbook.md)); use this driver for the
 on-demand / cross-type ordered case (e.g. drain workers before the hub).
 
 ### Blue-green / green-before-deploy expectation
@@ -167,19 +167,20 @@ The contract (epic #1259's whole point):
    ≥ N−1 replicas of every type serving throughout, and identity HA keeps auth
    up across the roll.
 3. Rollback is `git revert` of the digest overlay
-   ([`deployment-strategy.md` §8](./deployment-strategy.md)) — no imperative
+   ([`deploy-bundle-runbook.md`](./deploy-bundle-runbook.md)) — no imperative
    `kubectl set image`.
 
 ---
 
 ## 5. Parity-CI gate (green-before-staging-deploy)
 
-The parity-CI workflow (owned by the product carrier repo, since the parity
-cluster carrier-builds the product images) boots the 2-replica
-**staging-parity** cluster and runs the cross-replica delivery gate. The
-harness itself is engine-side: `make cluster-e2e` →
-`scripts/test/cluster-e2e.sh` → `test/clustere2e`, build-tagged `clustere2e`,
-#1261. The gate asserts the #1259 invariant on two shapes:
+The parity-CI workflow boots the 2-replica **staging-parity** cluster from
+product-agnostic engine images and runs the cross-replica delivery gate; the
+product DSL is delivered at runtime via the dsl-bundle component, not
+carrier-built from a sibling Go repo. The harness itself is engine-side:
+`make cluster-e2e` → `scripts/test/cluster-e2e.sh` → `test/clustere2e`,
+build-tagged `clustere2e`, #1261. The gate asserts the #1259 invariant on two
+shapes:
 
 - **Single-event delivery** (`TestClusterCrossReplicaDelivery`): an utterance
   produced on one bff replica reaches a subscriber anchored on **every** bff
@@ -200,21 +201,22 @@ observable without a live LLM.
 containers, a cold-cache multi-image build, a 10m health wait) is heavy and
 flakier than a unit lane; a required check on `pull_request` would let one slow
 boot wedge the merge queue. So the workflow runs on the **staging-deploy
-trigger** (a release lockfile landing on the carrier repo's `main`) and on
+trigger** (an overlay-digest bump landing in the deploy repo) and on
 `workflow_dispatch`, and its result is the green-before-staging-deploy signal
 — **not** a branch-protection required check on PRs (`ci-required` in `ci.yml`
 stays the only required PR check in this repo).
 
 ### Owner prerequisite — secrets
 
-The parity cluster builds the carrier and the product SPA from their
-**private sibling repos**, so the gate needs two owner-provisioned secrets.
-Until they exist, the gate **skips cleanly** (a visible `secrets present?` →
-skip) and never spuriously blocks:
+The parity cluster runs product-agnostic engine images (built in this repo, no
+carrier build), then layers the product's runtime DSL bundle and its client SPA
+from the product's **private repos**, so the gate needs two owner-provisioned
+secrets. Until they exist, the gate **skips cleanly** (a visible `secrets
+present?` → skip) and never spuriously blocks:
 
 | Secret | Scope | Used for |
 |---|---|---|
-| `SIBLING_CHECKOUT_TOKEN` | read on the two product sibling repos | `actions/checkout` of the two private siblings into the workspace. |
+| `SIBLING_CHECKOUT_TOKEN` | read on the product's bundle + client repos | `actions/checkout` of the product's private repos into the workspace. |
 | `MEMQL_PACKAGES_TOKEN` | `read:packages` (both scopes) | the product SPA image build (the `node_auth_token` compose build secret). |
 
 ---
@@ -228,13 +230,14 @@ PR (secrets + a live staging deploy):
    as repo/org Actions secrets. The `cluster-e2e` gate's `secrets present?` job
    then flips to running the parity boot.
 2. **Verify the gate is green** — run `cluster-e2e` via `workflow_dispatch` (or
-   land a release lockfile) and confirm the cross-replica delivery gate passes on
-   current `main` (it should, post-#1264).
+   bump the overlay digest pins) and confirm the cross-replica delivery gate
+   passes on current `main` (it should, post-#1264).
 3. **Flip it to a required deploy gate** — wire `cluster-e2e / gate` as a required
-   status on the deploy/promotion path (the release-lockfile/publish step), so a
+   status on the deploy/promotion path (the overlay-digest-pin/promote step), so a
    red parity gate blocks the staging roll. Keep it **off** the PR-merge-queue
    required set.
 4. **Final coherent staging roll** — cut + promote the whole-epic release per
-   [`deployment-strategy.md` §2/§6](./deployment-strategy.md) (`make deploy
-   VERSION=X`, deep smoke, lockfile, then promote), and verify the resilient-mesh
-   stack on staging (no drop / no dup across replicas; clean drains on the roll).
+   [`deploy-bundle-runbook.md`](./deploy-bundle-runbook.md) (`make deploy
+   VERSION=X`, deep smoke, pin the overlay's `{engine, bundle, client}` digests,
+   then promote), and verify the resilient-mesh stack on staging (no drop / no
+   dup across replicas; clean drains on the roll).

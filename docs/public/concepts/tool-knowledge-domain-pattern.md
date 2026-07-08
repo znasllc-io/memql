@@ -23,8 +23,8 @@ each, how the per-task approval gate works, how to recover from
 failure modes, what to never do.
 
 The naive place to put that knowledge is the agent's prompt template
-(the `agentReply` prompt's `.tmpl`, shipped in the product pack's
-DSL overlay). That doesn't scale:
+(the `agentReply` prompt's `.tmpl`, delivered in the product's runtime
+DSL bundle via `MEMQL_DSL_PATH`). That doesn't scale:
 
 - Templates become long and capability-laden — every new skill adds
   a section, every operational nuance is template prose.
@@ -108,21 +108,22 @@ capability `<cap>`:
    The `<capabilityFlag>` is the per-turn template-data key the
    capability already injects (e.g. `computerUseStatus`,
    `operatorEnabled`). Mirror what the `computer-use` domain does
-   for `computerUseStatus`. (A product pack's operator-UI domains
-   take a different path: the pack registers them on
-   `AppProfile.OperatorDomainIds` and they are force-attached
-   whenever `operatorEnabled` is truthy.)
+   for `computerUseStatus`. (Operator UI control is an engine-generic
+   capability now: its domains are engine-owned and force-attached the
+   same way whenever `operatorEnabled` is truthy. A product that ships
+   its own operator domains delivers them through its runtime DSL
+   bundle, not a compile-time `AppProfile` registration.)
 
    Also add the new domain to `appStructureDomainIds` near the
    bottom of the file — that registry tells the citation pipeline
    to treat the chunks as operator/internal documentation (not
    audibly cited as "your X training" in agent replies).
-   Engine-owned domains only; a pack's operator domains classify
-   via the registered `AppProfile` instead.
+   These are engine-owned domains; operator UI domains classify the
+   same way now that operator control is an engine-generic capability.
 
 4. **Strip prompt template**
-   the `agentReply` prompt template (in the product pack's DSL
-   overlay) — keep ONLY the per-turn-dynamic
+   the `agentReply` prompt template (in the product's runtime DSL
+   bundle) — keep ONLY the per-turn-dynamic
    capability block:
 
    - The capability gate (`{{if .computerUseStatus}}` etc.)
@@ -185,7 +186,7 @@ training, where they can be tuned per agent and per workspace.
 
 | Capability slug              | Domain id        | Seed corpus var               | Auto-attach signal in replier.go      |
 |------------------------------|------------------|-------------------------------|----------------------------------------|
-| operator UI control (pack-registered) | the pack's operator-UI domain(s), via `AppProfile.OperatorDomainIds` | lives in the product pack | `operatorEnabled` truthy |
+| operator UI control (engine-generic) | operator-UI domain(s) (engine-owned) | engine-owned seed | `operatorEnabled` truthy |
 | `computer-use-*` (split)     | `computer-use`   | `computerUseSeedCorpus`       | `computerUseStatus` non-empty           |
 | `workbench-use`              | `workbench`      | `workbenchSeedCorpus`         | `workbenchAvailable` truthy (i.e. agent's expanded tool list carries `workbenchHost`) |
 

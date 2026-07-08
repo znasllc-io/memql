@@ -204,23 +204,23 @@ Where a container image is built depends ONLY on where it runs:
   them into k3d via `make dev`. Fast, throwaway, never pushed to ACR.
 - **Deploys to STAGING or PRODUCTION** -- images MUST be built on the **GitHub
   build server** (GitHub Actions, OIDC -> ACR `acrmemql`), NOT on an operator
-  machine. This spans ALL repos in the project:
-  - `memql` -> `.github/workflows/build-engine-images.yml` (engine:
-    identity / voice / mcp)
-  - the product carrier repo -> its `build-carrier-images.yml` (carrier-base
-    + bff + cognition / agent / planner / workbench)
-  - the product SPA repo -> its `build-spa-image.yml`
+  machine. This spans the repos in the project:
+  - `memql` -> `.github/workflows/build-engine-images.yml` builds **every**
+    node type (identity / bff / cognition / agent / planner / voice /
+    workbench / mcp) as one set of **product-agnostic** engine images.
+  - the product's DSL-bundle repo -> a tiny **data-only bundle image** the
+    engine mounts at runtime via `MEMQL_DSL_PATH`.
+  - the product client repo -> its `build-spa-image.yml`.
   Each is `workflow_dispatch` on `main` with a `version` input; tags are
   immutable; the build server is the source of truth for deployable images
   (reproducible, native linux/amd64, provenance, no dev-laptop drift).
 
 Do NOT hand-build + push release images locally (`az acr build`,
 `make release`, `docker push`) for a staging/prod deploy -- that path is
-superseded by the build server. A release = dispatch the three build
-workflows at one engine ref -> assemble `releases/<ver>.yaml`
-(`scripts/release/assemble-lockfile.sh`, digests resolved from ACR by tag) ->
-pin `deploy/k8s/overlays/<env>` -> merge -> ArgoCD reconciles. See
-the product pack repo's docs/operate/deployment-strategy.md.
+superseded by the build server. A release is `{engine version, bundle digest,
+client digest}` pinned in **one overlay** (`deploy/k8s/overlays/<env>`): build
+the engine images, pin those three digests, merge -> ArgoCD reconciles. See
+[docs/public/operate/deploy-bundle-runbook.md](docs/public/operate/deploy-bundle-runbook.md).
 
 ---
 
@@ -445,7 +445,7 @@ optional `bff/` plugin module in the product repo. Full rationale + the
 migration sequence: [docs/internal/design/platform-consolidation.md](docs/internal/design/platform-consolidation.md).
 
 **Build tag reference:** [docs/public/build/build-tags.md](docs/public/build/build-tags.md)
-**Local cluster (staging parity -- THE blessed local topology, memql#2061 / Epic 0):** `make up` (k3d + ArgoCD + the local overlay at `deploy/k8s/overlays/local` + seeded secrets); `make dev [NODE=<type>]` rebuilds an image, imports it into k3d, and rolls the Deployment after Go/MemQL source edits; `make down` tears it down. The cluster mirrors staging along the **mesh-delivery path** (memql#1212) by running the same k8s manifests and ArgoCD reconciliation as AKS: scale to 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench) with `make up SERVERS=2` + `make scale N=2`, each pod carrying a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name` exactly as in staging. The cluster is reached via kubectl port-forwards (identity `:8085`, livekit `:7880`, postgres `:5432`; the engine gRPC head is the `mcp` node on demand: `kubectl port-forward -n memql svc/mcp 50051:50051`) -- there is no nginx front door or `*.local.znas.io` subdomain. The product SPA and the `bff` carrier are NOT part of the engine repo's local overlay (#2204); they layer on from their own repos via the downstream-stack contract. `make status` prints the per-pod node ids (parity litmus). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle. See the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
+**Local cluster (staging parity -- THE blessed local topology, memql#2061 / Epic 0):** `make up` (k3d + ArgoCD + the local overlay at `deploy/k8s/overlays/local` + seeded secrets); `make dev [NODE=<type>]` rebuilds an image, imports it into k3d, and rolls the Deployment after Go/MemQL source edits; `make down` tears it down. The cluster mirrors staging along the **mesh-delivery path** (memql#1212) by running the same k8s manifests and ArgoCD reconciliation as AKS: scale to 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench) with `make up SERVERS=2` + `make scale N=2`, each pod carrying a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name` exactly as in staging. The cluster is reached via kubectl port-forwards (identity `:8085`, livekit `:7880`, postgres `:5432`; the engine gRPC head is the `mcp` node on demand: `kubectl port-forward -n memql svc/mcp 50051:50051`) -- there is no nginx front door or `*.local.znas.io` subdomain. The product SPA and the product `bff` (a plain engine node fronting the product's runtime DSL bundle) are NOT part of the engine repo's local overlay (#2204); they layer on from the downstream product overlay via the downstream-stack contract. `make status` prints the per-pod node ids (parity litmus). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle. See the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
 **Previous Compose-based local stack -- RETIRED (memql#2068 / #2088):** the old cluster compose file, the single-node `full.yml`, and the `nemoclaw` overlay are fully removed. The k3d + ArgoCD cluster above is the only supported local run path; a single-node stack structurally cannot reproduce the resilient-mesh class of bugs.
 
 #### Client-tool relay (agent → browser, across nodes)
@@ -1018,7 +1018,8 @@ compiled-in product code** (platform-consolidation, #2472). When it is set,
 `dsl.MountRuntimeDomainsFromEnv` (called before the first tree walk) scans
 the root for product-domain sub-directories and registers each into the
 unified tree via `RegisterTree(domain, os.DirFS(<root>/<domain>))` — the same
-overlay a carrier uses at compile time (`dsl/embed.go`), sourced from disk.
+call the embedded tree uses (`dsl/embed.go`), sourced from disk instead of the
+embed FS.
 No-op when unset.
 
 Layout mirrors the embedded tree — one directory per product namespace:
@@ -1790,16 +1791,21 @@ See [docs/public/operate/auth/access-model.md](docs/public/operate/auth/access-m
 
 ## Feature Notes
 
-### Canvas + Spaces (product-pack features)
+### Canvas + Spaces
 
-The canvas timeline (the pack's `canvasState` concept) and the space
-lifecycle (three-state + daily spaces) are PRODUCT features: their
-concepts, mutations, queries, and frontend behavior are owned by the
-product pack and documented in the pack repo's CLAUDE.md. Engine-side,
-only the core participant/session/utterance machinery remains
+Under platform consolidation (#2472), the space lifecycle (three-state +
+daily spaces) is an **engine-generic feature** rather than product code:
+spaces are already a core, generic data model (Epic 3), and daily-space is
+one of the reusable-capability absorptions. The core
+participant/session/utterance machinery is engine-side
 (`dsl/cognition/mutations.memql`: joinSpaceAsHuman, leaveSpace,
-addAgentToSpace, ...); pack rows ride the chat-reply delivery substrate
-via `node.RegisterChatReplyConcept`.
+addAgentToSpace, ...).
+
+The canvas timeline (the `canvasState` concept) is still delivered as
+**product DSL** -- supplied at runtime through the product's DSL bundle
+(`MEMQL_DSL_PATH`); its physical absorption into the engine is mid-migration,
+so treat canvas as product-owned for now. Product rows ride the chat-reply
+delivery substrate via `node.RegisterChatReplyConcept`.
 
 ### Invitations (Identity Primitive)
 

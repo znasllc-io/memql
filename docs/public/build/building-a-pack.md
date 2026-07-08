@@ -10,10 +10,10 @@ owner: znas
 # Building a pack -- extend memQL with your own domain
 
 A **pack** is the unit of product-specific extension in memQL: a bundle of Go
-integration code plus an embedded `.memql` DSL subtree that drops into the
-engine and runs alongside the core domains. A production carrier repo (the
-product pack) is the production reference consumer; this guide walks
-you through building one from scratch, using the minimal **reference pack** at
+integration code plus a `.memql` DSL subtree that drops into the engine and
+runs alongside the core domains. A product's DSL bundle plus its client is the
+production reference consumer; this guide walks you through building one from
+scratch, using the minimal **reference pack** at
 [`examples/referencepack/`](../../../examples/referencepack) as the worked
 example.
 
@@ -22,10 +22,14 @@ If you want the bare contract reference instead of a walkthrough -- the exact
 primitives -- read [Plugin SDK](plugin-sdk.md). This guide assumes that page as
 background and shows how the pieces fit together.
 
-> **Scope.** Packs are **compiled in via build tags** -- there is no runtime
-> (non-compiled) pack loading, by design. "Loading a pack" means linking its Go
-> package into a binary so its `init()` registrations run, and embedding its
-> `.memql` tree. See [Build Tags](build-tags.md) for the node-type tag model.
+> **Scope.** A pack has two halves that load differently. The **Go integration**
+> is **compiled in via build tags** -- linking its package into a binary runs
+> its `init()` registrations, and there is no runtime loading of the Go half, by
+> design (see [Build Tags](build-tags.md)). The **`.memql` domains** load either
+> the same way (embedded, as the reference pack below does) or **at runtime from
+> disk** via `MEMQL_DSL_PATH` -- a product-agnostic engine image mounts a
+> product's DSL bundle at boot with `RegisterTree(domain, os.DirFS(...))`. This
+> guide embeds; the same `RegisterTree` call backs both paths.
 
 ---
 
@@ -164,8 +168,8 @@ func init() {
 The `init()` runs only when the binary is built with that tag, and the package
 is anchored into the binary via a blank import in the app bootstrap. A node type
 built without the tag never links the registration, so the pack never loads
-there. This is exactly how a production carrier repo gates its product domain to
-the carrier-built node types. See [Build Tags](build-tags.md).
+there. This is exactly how a product gates a compiled-in Go integration to the
+node types that should carry it. See [Build Tags](build-tags.md).
 
 **Keeping a pack out of production entirely.** The reference pack demonstrates
 the inverse: a pack that `go build ./...` compiles (so CI verifies it builds)

@@ -1,9 +1,12 @@
 # Placeholder overlay -- ENGINE-ONLY (decoupling P3). PROD IS A PLACEHOLDER:
 # there is no prod cluster / Argo CD app yet, so this overlay is declarative-only
 # (kept coherent with staging). It pins the seven engine mesh node images plus
-# the self-hosted media plane (livekit/sip/redis) by @sha256: digest. The product
-# bff carrier + product SPA pins and the product OAuth client registration moved
-# to the downstream product pack's overlay. When prod is stood up for real, set
+# the self-hosted media plane (livekit/sip/redis) by @sha256: digest. A product
+# runs on this surface via a downstream product overlay that adds the
+# deploy/k8s/components/dsl-bundle component and pins the {bundle digest, client
+# digest} alongside these engine digests; bff is a plain product-agnostic engine
+# node fronting that bundle, and the product OAuth client registration lives in
+# that product overlay too. When prod is stood up for real, set
 # prod-specific values (livekit NODE_IP = prod livekit-rtc LB IP, etc.) before
 # pointing an Argo CD app at it.
 apiVersion: kustomize.config.k8s.io/v1beta1

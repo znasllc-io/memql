@@ -29,9 +29,10 @@ its own; every load-bearing claim about the tree as it stands cites a real
 
 ## 1. Where it lives — decision
 
-### 1.1 The repo split is "generic engine vs. carrier", not "one repo per thing"
+### 1.1 The split is "generic engine vs. product DSL-bundle + client", not "one repo per thing"
 
-The workspace contains four git repos with a clear division of labor:
+The engine is the whole platform; a product is *data + a client*, not a fork
+of the engine. The division of labor:
 
 - **`memql`** — the engine. One Go codebase compiled into distinct *node
   roles* via build tags. Each role is a `build_*.go` + `transport_*.go` pair
@@ -39,19 +40,26 @@ The workspace contains four git repos with a clear division of labor:
   (`app/build_bff.go`, `app/build_voice.go`, `app/build_default.go`, …).
   The Makefile cuts one binary per tag (`-tags bff -o memql-bff`,
   `-tags voice -o memql-voice`, etc. — see `Makefile:46,54,58,62,66,70,88`).
-- **the product carrier repo** — a *carrier*: a separate repo that pins the
-  engine (`require github.com/znasllc-io/memql v0.9.0` plus a local
-  `replace => ../memql` for dev) and compiles client-specific DSL +
-  `RegisterPlugin()` Go code together with the engine into one deployable BFF
-  node image. Its README states it was "Lifted from `…/memql` … as part of
-  the monorepo carve-up." It exists separately because it is **client-specific**.
+  Every node type ships as a **product-agnostic image**; there is no
+  per-product node build.
+- **the product's DSL bundle** — a tiny *data-only* artifact: the product's
+  `.memql` tree, no Go. It is delivered to a plain engine node **at runtime**
+  via `MEMQL_DSL_PATH` — the `deploy/k8s/components/dsl-bundle` init-container
+  copies the bundle into a shared volume and `dsl.MountRuntimeDomainsFromEnv`
+  registers each domain via `RegisterTree(os.DirFS(...))` at boot. A "bff" for
+  a product is just a plain engine `bff` node fronting that bundle. The bundle
+  exists separately because it is **product-specific**, but it carries no
+  engine code and links nothing at compile time.
+- **the product's client** — the SPA, shipped from its own repo. Separate
+  because it is an **independent front-end consumer**.
 - **`memql-cockpit`** — the CLI: a separate repo that imports the engine as a
   module (`require github.com/znasllc-io/memql …`). Separate because it is an
   **independent external consumer**.
 
 The rule the codebase already follows: **generic transports and node roles
-live inside `memql`; a thing gets its own repo only when it is client-specific
-(the BFF) or an independent consumer (the cockpit).**
+live inside `memql` and ship product-agnostic; a thing lives outside the
+engine only when it is product-specific data (the DSL bundle), a product
+front-end (the client), or an independent consumer (the cockpit).**
 
 ### 1.2 An MCP server is a generic protocol head → it belongs in `memql`
 
@@ -65,11 +73,11 @@ that *speaks the MCP wire protocol to external clients*. That is a new
 the same category as the gRPC server, the WebSocket browser bridge, and the
 voice realtime bridge, all of which live in `memql`.
 
-A generic MCP server is **not** client-specific (unlike the product BFF) and
-**not** an external consumer (unlike the cockpit). Splitting it into its own
-repo would force it to pin a frozen engine version and reach back through the
-SDK for a tool surface that already lives natively in the engine — taking on
-the BFF's three-link pin-chain overhead for no isolation benefit.
+An MCP server is a **generic protocol head** — **not** product-specific data
+(unlike a product's DSL bundle) and **not** an external consumer (unlike the
+cockpit). Splitting it into its own repo would force it to pin a frozen engine
+version and reach back through the SDK for a tool surface that already lives
+natively in the engine — pure pin-chain overhead for no isolation benefit.
 
 **Decision: implement the MCP server as a new `mcp` node role inside `memql`.**
 
@@ -82,12 +90,12 @@ Concretely:
 - Makefile target: `-tags mcp -o $(BIN_DIR)/memql-mcp`, mirroring the existing
   role targets.
 
-**Client-specific corollary.** If a deployment needs to expose *one client's*
-tools over MCP (e.g. a product's tools to Claude Desktop), the `mcp` transport
-still lives in `memql`; the product's carrier repo simply compiles
-that transport together with its client plugins — exactly as the BFF compiles
-the engine with the product DSL today. The implementation stays in `memql`
-either way.
+**Product-specific corollary.** If a deployment needs to expose *one
+product's* tools over MCP (e.g. a product's tools to Claude Desktop), the
+`mcp` transport still lives in `memql`: a plain engine `mcp` node mounts that
+product's DSL bundle at `MEMQL_DSL_PATH` and reflects its tools — exactly as a
+`bff` node fronts the same bundle. No product Go, no carrier build; the
+implementation stays in `memql` either way.
 
 ---
 

@@ -95,9 +95,13 @@ integrations/
 #
 # training/ (the per-agent "Train" pipeline: identity embedding + distilled
 # system prompt + just-in-time knowledge seeding) is a product
-# integration -- it MOVED to the pack (the product carrier repo's
-# integrations/training) and self-registers via
-# memql.RegisterPlugin("training"). Engine-only core no longer carries it.
+# integration -- it lives in the product repo as a thin Go plugin module and
+# self-registers via memql.RegisterPlugin("training"), so engine-only core no
+# longer carries it. Under the consolidated platform (memql#2472) the engine
+# ships product-agnostic and product DSL rides in at runtime via
+# MEMQL_DSL_PATH; training is a still-shipped product-Go integration -- the
+# transitional exception, not yet absorbed into the engine or reduced to a
+# data-only bundle.
 ```
 
 ---
@@ -304,8 +308,11 @@ core (`component/grpc/ai_handlers.go` + the `memql.RegisterSuggestDomain`
 registry in `component/memql/suggest_registry.go`). `knowledge` registers
 from core; the product domains (spaces / spaceTitle / agents /
 groups / groupDescription / agentCardSummary / spaceCardSummary /
-groupCardSummary) register from the pack
-(the product carrier repo's suggest integration, behind its product build tag).
+groupCardSummary) register from the product's own suggest plugin (a thin Go
+module in the product repo). Under the consolidated platform (memql#2472) the
+engine ships product-agnostic and product DSL rides in at runtime via
+`MEMQL_DSL_PATH`; these Go-backed suggest handlers are a transitional
+product-repo plugin, pending engine-generic absorption or bundle delivery.
 `spaceTitle` / `groupDescription` are lightweight single-field generations
 (create-modal blur handlers); the richer `spaces` / `agents` / `groups`
 return full payloads; the `*CardSummary` domains generate canvas-card bodies;
