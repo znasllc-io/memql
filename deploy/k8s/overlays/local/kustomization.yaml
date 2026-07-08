@@ -507,6 +507,9 @@ patches:
 # NO @sha256 digest here -- that is intentional and exempted from CI gate.
 # ---------------------------------------------------------------------------
 images:
+  - name: acrmemql.azurecr.io/memql-bff
+    newName: memql-bff
+    newTag: local
   - name: acrmemql.azurecr.io/memql-identity
     newName: memql-identity
     newTag: local

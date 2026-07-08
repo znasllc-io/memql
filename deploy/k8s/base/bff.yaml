@@ -1,0 +1,146 @@
+# bff -- the product-agnostic engine BFF node (platform consolidation #2472,
+# Decision 5). This is the mesh ROOT + the backend-for-frontend / gRPC + WS edge
+# every client connects to. It carries NO product code and NO product DSL
+# bundle: it serves the engine's own surface (engine + cluster concepts), which
+# is exactly what a product-neutral client like the memQL Cockpit needs
+# (cockpit.<domain>). The bespoke cockpit-bff module (memql-cockpit#289) is
+# retired -- the Cockpit just connects to this bff.
+#
+# MULTIPLE BFFs PER CLUSTER: a product runs on the same mesh by adding its OWN
+# bff -- a copy of this Deployment named `bff-<product>` that (a) opts into the
+# deploy/k8s/components/dsl-bundle component (label memql/product-dsl=true) so
+# the product's DSL bundle mounts at MEMQL_DSL_PATH, and (b) exposes its own
+# Service `bff-<product>` its client connects to. Every bff is the same
+# product-agnostic engine image; they coexist as peers in the one mesh and all
+# forward to the shared cognition/agent/... nodes. This base `bff` is the
+# neutral one (cockpit + default mesh entry); it does not mount a bundle.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bff
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: bff
+    app.kubernetes.io/part-of: memql
+    memql/node-type: bff
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bff
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bff
+        app.kubernetes.io/part-of: memql
+        memql/node-type: bff
+    spec:
+      volumes:
+        - name: memql-ca
+          secret:
+            secretName: memql-ca
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: bff
+          image: acrmemql.azurecr.io/memql-bff:0.9.9
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
+          ports:
+            - { name: http, containerPort: 8085 }
+            - { name: grpc, containerPort: 50051 }
+            - { name: node, containerPort: 50058 }
+          envFrom:
+            - secretRef:
+                name: memql-secrets
+            - configMapRef:
+                name: memql-db-pool
+          env:
+            - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
+            - { name: SERVICE_NAME, value: "memQL" }
+            - { name: MEMQL_NODE_TYPE, value: "bff" }
+            - { name: MEMQL_NODE_ADDRESS, value: "bff:50058" }
+            # Unique per-pod mesh identity (#1042); overrides the shared genesis
+            # MEMQL_NODE_ID so PeerManager keys each bff pod distinctly.
+            - { name: MEMQL_NODE_ID, valueFrom: { fieldRef: { fieldPath: metadata.name } } }
+            - { name: MEMQL_DEPLOYMENT_ID, valueFrom: { fieldRef: { fieldPath: "metadata.labels['pod-template-hash']" } } }
+            - { name: MEMQL_NODE_SERVICE_ADDRESS, value: ":50058" }
+            # The bff is the mesh ROOT -- it does NOT dial a parent. Leaf nodes
+            # (cognition/agent/planner/workbench/voice) dial it at bff-active:50058.
+            - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
+            - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }
+            - { name: MEMQL_IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
+            - { name: MEMQL_IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
+            # Deployment-specific placeholder; a product overlay patches the real host.
+            - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.example.com" }
+            - { name: MEMQL_IDENTITY_ENABLED, value: "false" }
+            - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }
+            - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
+            - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
+            - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
+          volumeMounts:
+            - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }
+          startupProbe:
+            httpGet: { path: /healthz, port: 8085 }
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8085 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            # /livez is pure-liveness (never fails on a dep/drain, #1117) so a
+            # degraded bff is drained from the Service but not killed.
+            httpGet: { path: /livez, port: 8085 }
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 4
+---
+# Canonical bff Service -- clients (the Cockpit, SDKs, a product SPA) connect
+# here for gRPC (50051) + HTTP/WS (8085); mesh peers reach the node port (50058).
+apiVersion: v1
+kind: Service
+metadata:
+  name: bff
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: bff
+    app.kubernetes.io/part-of: memql
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: bff
+  ports:
+    - { name: http, port: 8085, targetPort: 8085 }
+    - { name: grpc, port: 50051, targetPort: 50051 }
+    - { name: node, port: 50058, targetPort: 50058 }
+---
+# bff-active -- the stable mesh-parent alias the leaf nodes dial
+# (MEMQL_PARENT_ADDRESS=bff-active:50058). In the product-agnostic base it
+# selects this plain bff; a product overlay that runs a blue/green Rollout
+# (#1399) repoints this Service at the color-active pods instead.
+apiVersion: v1
+kind: Service
+metadata:
+  name: bff-active
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: bff
+    app.kubernetes.io/part-of: memql
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: bff
+  ports:
+    - { name: node, port: 50058, targetPort: 50058 }
+    - { name: grpc, port: 50051, targetPort: 50051 }
