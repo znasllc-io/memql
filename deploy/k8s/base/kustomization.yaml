@@ -38,6 +38,10 @@ resources:
   # (znasllc-io/memql#1858).
   - db-pool-config.yaml
   - identity.yaml
+  # Product-agnostic BFF node: the mesh root + the gRPC/WS edge every client
+  # connects to (the Cockpit connects here; a product adds its own bff-<product>
+  # mounting its DSL bundle). Platform consolidation #2472 / Decision 5.
+  - bff.yaml
   - cognition.yaml
   - voice.yaml
   - agent.yaml

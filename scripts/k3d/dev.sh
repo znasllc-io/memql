@@ -102,7 +102,7 @@ LOCAL_TAG="local"
 
 # App node types buildable from this repo's Dockerfile. The default `make dev`
 # set matches the Deployments in deploy/k8s/overlays/local.
-DEFAULT_APP_NODES=(identity voice mcp cognition agent planner workbench)
+DEFAULT_APP_NODES=(identity bff voice mcp cognition agent planner workbench)
 
 # Every node type this script can address (superset: node types a downstream
 # carrier overlay may add, e.g. bff, are valid targets too).

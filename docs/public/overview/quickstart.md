@@ -48,7 +48,8 @@ make up SERVERS=2 AGENTS=1
 make scale N=2
 ```
 
-This brings up Postgres + TimescaleDB, identity, mcp, and the
+This brings up Postgres + TimescaleDB, identity, mcp, the product-neutral
+`bff` (client edge / mesh root), and the
 cognition/agent/planner/voice/workbench mesh nodes -- each pod carrying
 a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name`, exactly as in
 staging. The 2-replica topology is the only one that reproduces
@@ -105,7 +106,8 @@ k3d world -- each service is reached with its own port-forward:
 | Service | Port-forward | Notes |
 |---------|--------------|-------|
 | **Identity service** | `svc/identity 8085:8085` | Magic-link auth, OAuth, JWKS, /admin, /pair/* |
-| **Engine gRPC head (mcp)** | `svc/mcp 50051:50051` | gRPC for cockpit / SDKs |
+| **BFF (client edge)** | `svc/bff 50051:50051` | gRPC/WS for the Cockpit / SDKs / product clients |
+| **MCP head** | `svc/mcp 50051:50051` | the MCP-protocol node (on demand) |
 | **PostgreSQL** | `svc/postgres 5432:5432` | `make db` opens a psql shell |
 
 A downstream product's client SPA is not part of the engine overlay; it
@@ -211,7 +213,7 @@ node architecture.
 The Cockpit ships from its own repo,
 [`github.com/znasllc-io/memql-cockpit`](https://github.com/znasllc-io/memql-cockpit);
 build and product docs live there. It connects to this cluster over
-gRPC (locally via the `mcp` port-forward, `svc/mcp 50051:50051`).
+gRPC (locally via the `bff` port-forward, `svc/bff 50051:50051`).
 
 ---
 

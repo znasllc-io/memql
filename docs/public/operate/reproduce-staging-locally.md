@@ -105,11 +105,11 @@ After `make up`, these local ports are forwarded from the k3d cluster:
 The product SPA (`:8080`) and the product `bff` gRPC head (`:50051`) -- a
 plain engine `bff` node fronting the product's DSL bundle -- are NOT part of
 the engine repo's local overlay (#2204); they are wired from the product's own
-overlay (the client image + the `dsl-bundle` component). The local engine gRPC
-head is the `mcp` node, reached on demand:
+overlay (the client image + the `dsl-bundle` component). Clients (the Cockpit, SDKs) connect to the product-neutral `bff` node
+(the mesh root + client edge), reached on demand:
 
 ```bash
-kubectl port-forward -n memql svc/mcp 50051:50051
+kubectl port-forward -n memql svc/bff 50051:50051
 ```
 
 Access identity: `https://identity.local.znas.io` (front-door TLS -- needs the
