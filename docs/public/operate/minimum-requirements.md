@@ -108,12 +108,13 @@ set in the **Tiger console → Common parameters** (not the CLI/SQL).
 - The engine mesh node-types (each a `Deployment`, 2 replicas for HA):
   `identity`, `cognition`, `voice`, `agent`, `planner`, `workbench`, `mcp`,
   plus `livekit` and the `voice-agent`. Manifests: `deploy/k8s/base`. A
-  downstream product stack layers its own workloads (the carrier `bff`
-  Rollout, the product SPA) from its own repo's overlay -- see
+  product stack adds a `bff` -- a plain, product-agnostic engine node that
+  fronts the product's DSL bundle -- plus the product client (SPA), both
+  layered in from the product's own overlay -- see
   [Downstream product stacks](downstream-stacks.md).
 - Rough small-staging footprint: ~4 × 2-vCPU nodes. Right-size per workload.
-- **Argo CD** for GitOps (+ **Argo Rollouts** when a downstream stack runs a
-  blue-green carrier; the controller install lives in `deploy/rollouts/install`).
+- **Argo CD** for GitOps (+ **Argo Rollouts** when a product stack runs a
+  blue-green `bff`; the controller install lives in `deploy/rollouts/install`).
 
 ---
 
@@ -144,15 +145,24 @@ Every DB-connecting pod mounts the `memql-secrets` Secret via `envFrom`. The
 Deployable images are built on **GitHub Actions → OIDC → ACR `acrmemql`**, never
 hand-built locally (local Docker is dev-only):
 
-- `memql` (this repo) → the engine images (`.github/workflows/build-engine-images.yml`).
-- The product carrier repo → the **carrier** images (`bff`, `cognition`,
-  `agent`, `planner`, `workbench`) — these MUST be carrier-built (they carry
-  the product DSL; a pure-engine image fails with `unknown prompt template`).
-- The product frontend repo → the SPA image.
+- `memql` (this repo) → **every** node-type image — `identity`, `bff`,
+  `cognition`, `agent`, `planner`, `voice`, `workbench`, `mcp` — as a
+  **product-agnostic engine image**
+  (`.github/workflows/build-engine-images.yml`). There are no per-product node
+  images: a plain engine node runs a product's DSL at runtime, so it does
+  **not** need product code compiled in and does **not** fail on a product
+  prompt template — the DSL bundle supplies the prompts (next bullet).
+- The product → a tiny **data-only DSL bundle image** (just the `.memql` tree),
+  mounted at `MEMQL_DSL_PATH` by the `deploy/k8s/components/dsl-bundle`
+  init-container so every engine node loads the product's domains at boot.
+- The product frontend repo → the client (SPA) image.
 
-The carrier + SPA build workflows, the digest-pinned release lockfiles, and
-the promote flow are owned by the product carrier repo; see
-[Downstream product stacks](downstream-stacks.md) for the contract.
+So a product ships just **two** artifacts — a DSL bundle and a client — and
+rides the same product-agnostic engine images as everyone else. A release is
+`{engine version, bundle digest, client digest}` pinned in one per-env overlay
+(see **Deploy**, below) — there is no separate carrier build workflow or
+release lockfile. See [Downstream product stacks](downstream-stacks.md) for the
+contract.
 
 ---
 

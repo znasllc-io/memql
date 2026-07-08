@@ -41,7 +41,7 @@ The complete map of memQL documentation. Layout + rules:
 
 ### Operate (`operate/`)
 - **[Minimum Requirements (running beyond local)](docs/public/operate/minimum-requirements.md)** — what you need to run memQL outside the local dev cluster: Tiger Cloud (the only supported DB provider), the pooler/connection model, k8s, secrets, images, GitOps. Start here.
-- Deployment Strategy (see the product pack repo's docs/operate/deployment-strategy.md) · [Deployment Console](docs/public/operate/deployment-console.md) · [Infrastructure](docs/public/operate/infrastructure.md) · [Database Setup](docs/public/operate/database-setup.md) · [DB Connection Budget & Graceful Deploy](docs/public/operate/db-connection-budget.md)
+- [Deployment Console](docs/public/operate/deployment-console.md) · [Infrastructure](docs/public/operate/infrastructure.md) · [Database Setup](docs/public/operate/database-setup.md) · [DB Connection Budget & Graceful Deploy](docs/public/operate/db-connection-budget.md)
 - [Deploy-bundle runbook](docs/public/operate/deploy-bundle-runbook.md) -- deploying the engine mesh via deployEngineCluster from the cockpit (dry-run ladder, dev flow, staging digests, timeline evidence)
 - [Environment Variables](docs/public/operate/env-vars.md) · [LiveKit Provisioning](docs/public/operate/livekit-provision.md) · [Connect to the MCP server](docs/public/operate/mcp-connect.md)
 - [Telephony — PSTN calling](docs/public/operate/telephony.md) · [Telephony local-dev (LiveKit Cloud)](docs/public/operate/telephony-local-dev.md)
@@ -67,5 +67,5 @@ The complete map of memQL documentation. Layout + rules:
 ## Root governance
 
 - [README](README.md) · [CONTRIBUTING](CONTRIBUTING.md) · [SECURITY](SECURITY.md) · [CODE_OF_CONDUCT](CODE_OF_CONDUCT.md)
-- [VERSIONING](VERSIONING.md) — semver + docs-versioning policy · [COMPATIBILITY](COMPATIBILITY.md) — cross-repo pin chain
+- [VERSIONING](VERSIONING.md) — semver + docs-versioning policy · [COMPATIBILITY](COMPATIBILITY.md) — the single-overlay release pin ({engine, bundle, client} digests in one repo)
 - [docs/DOCS_STANDARD.md](docs/DOCS_STANDARD.md) — where docs live, front-matter, the repo→site pipeline.

@@ -2,14 +2,20 @@
 # engine mesh node images (identity/cognition/voice/agent/planner/workbench/mcp)
 # plus the self-hosted media plane (livekit/sip/redis), each by @sha256: digest.
 #
-# The product bff carrier + product SPA image pins, and the product OAuth
-# client registration, moved to the downstream product pack's overlay -- the
-# pack's ArgoCD Application reconciles those alongside this engine surface. This
-# overlay is the engine's standalone deploy surface; base carries only the
-# product-neutral cockpit OAuth client.
+# A product runs on this engine surface via a downstream product overlay that
+# adds the deploy/k8s/components/dsl-bundle component (a data-only DSL bundle
+# image, mounted at MEMQL_DSL_PATH by an init-container) and pins the {bundle
+# digest, client digest} alongside these engine image digests. bff is a plain
+# product-agnostic engine node fronting that bundle -- there is no bff carrier.
+# The product OAuth client registration lives in that product overlay too; this
+# overlay is the engine's standalone deploy surface, and base carries only the
+# product-neutral cockpit OAuth client. The pack's ArgoCD Application reconciles
+# the product surface alongside this engine surface.
 #
-# Digests are cut on the GitHub build server (OIDC->ACR) and pinned here; the
-# engine keeps no on-disk release lockfiles (those moved to the pack too).
+# Digests are cut on the GitHub build server (OIDC->ACR) and pinned here.
+# Release lockfiles are retired entirely: a release is captured by the digest
+# pins in the overlay (the engine legs here; a product overlay adds the
+# {bundle, client} legs), not by an on-disk lockfile.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

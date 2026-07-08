@@ -121,8 +121,13 @@ The handler is generic: it resolves a registered handler for the request
 path. The `knowledge` domain registers from core
 (`component/memql/suggest_knowledge.go`); the product domains
 (spaces / spaceTitle / agents / groups / groupDescription / *CardSummary /
-guide) register from the product pack's suggest package, so engine-only
-core carries no product suggest helpers (memql#1959)
+guide) register from the product's own suggest plugin — a thin Go module
+that self-registers via `RegisterSuggestDomain` from the product repo, so
+engine-only core carries no product suggest helpers (memql#1959). Under the
+consolidated platform (memql#2472) the engine ships product-agnostic and the
+product's DSL rides in at runtime via `MEMQL_DSL_PATH`; the product suggest
+handlers that still need Go remain a transitional product-repo plugin (not
+core), pending engine-generic absorption or bundle delivery.
 
 ### fileprocessor/ - **File Processing**
 **Purpose:** Extract content from uploaded files

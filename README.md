@@ -117,7 +117,7 @@ make deploy VERSION=X
 - **Database:** TimescaleDB Cloud (Tiger Cloud) - separate instance
 - **Service:** Azure Kubernetes Service (AKS)
 - **Access:** Senior/Lead developers only
-- **Deploy:** Promote a validated version (see docs/public/operate/deployment-strategy.md)
+- **Deploy:** Promote a validated version (see docs/public/operate/deploy-bundle-runbook.md)
 
 **Full details:** [docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md)
 
@@ -323,9 +323,10 @@ memQL runs on Azure Kubernetes Service (AKS). Deploy to staging with
 `make deploy VERSION=X` (`scripts/deploy/aks-deploy.sh`); production
 promotes a validated version.
 
-See the product pack repo's docs/operate/deployment-strategy.md for deploy/topology
-(cluster `aks-memql-staging`, ACR `acrmemql.azurecr.io`, Tiger Cloud DB,
-the migration + smoke gates, and the staging → prod promotion flow).
+See [docs/public/operate/deploy-bundle-runbook.md](docs/public/operate/deploy-bundle-runbook.md)
+for deploy/topology (cluster `aks-memql-staging`, ACR `acrmemql.azurecr.io`,
+Tiger Cloud DB, the migration + smoke gates, and the staging → prod
+promotion flow).
 
 ---
 

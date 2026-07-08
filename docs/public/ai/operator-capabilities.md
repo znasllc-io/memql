@@ -52,15 +52,16 @@ Two pressures:
 `capabilitySlugs` map in `component/memql/capability_registry.go` via
 `RegisterCapabilitySlug` at `init()` time.
 
-Product packs register additional slugs for their own tool surfaces
-(e.g. a UI-control bundle whose tools drive the product SPA) through
-the same registry -- `memql.RegisterCapabilitySlug(slug, tools,
-tags...)` from the pack's registration-anchor `init()`. A slug
-registered with the `operator` tag (`CapabilityTagOperator`) marks
-tools that let an agent drive a UI on the user's behalf; the agent
-replier keys its operator scope-fence and app-profile decisions on
-that tag via `HasCapabilityTag`. A pure-engine binary carries only
-the engine bundles above.
+Capability slugs are **engine-owned**. Reusable capability bundles that
+were once product-specific -- a UI-control bundle whose tools drive a
+client, chat, daily-space, avatar-direct -- are absorbed into the engine
+as **generic features**: they register from an engine bundle via
+`RegisterCapabilitySlug(slug, tools, tags...)` at `init()` time, the same
+path as the worker/workbench slugs above, and expand identically on every
+product-agnostic engine image. A slug registered with the `operator` tag
+(`CapabilityTagOperator`) marks tools that let an agent drive a UI on the
+user's behalf; the agent replier keys its operator scope-fence and
+app-profile decisions on that tag via `HasCapabilityTag`.
 
 ---
 
@@ -129,12 +130,12 @@ down with the Plan.
 
 Three places touch:
 
-1. Register the slug. An engine-owned bundle lives in
+1. Register the slug. Engine-owned bundles live in
    `component/memql/worker_caps.go` -- define the expansion list
    (`<Name>CapabilityNames`) and call `RegisterCapabilitySlug` from
-   `init()`. A pack-owned bundle calls
-   `memql.RegisterCapabilitySlug` from the pack's
-   registration-anchor `init()` instead.
+   `init()`. Slugs are engine-owned: a data-only runtime DSL bundle
+   carries no Go, so there is no per-product registration path -- a
+   reusable capability lives in the engine as a generic bundle here.
 2. `dsl/agents/skills/` -- if the new slug needs to be advertised
    through the skill catalog (`v1:agents:skill.toolSlugs`), update
    the skill definitions.
@@ -172,7 +173,7 @@ the agent concept.
 |------|--------|
 | Capability registry (expansion, tags, boot self-check) | `component/memql/capability_registry.go` |
 | Engine slug bundles | `component/memql/worker_caps.go` |
-| Tool definitions | engine tools under `dsl/agents/tools/`; the worker / workbench / UI-control tool bodies ship in the product pack's tools file |
+| Tool definitions | engine tools under `dsl/agents/tools/`; worker + workbench tool bodies in the engine `dsl/worker/` + `dsl/workbench/` namespaces; a product's UI-control tool bodies in its runtime DSL bundle's tools file |
 | Authorization model | `v1:agents:agentAuthorization`, `v1:identity:user.preferences` |
 | Operator runbook (computer use) | `docs/public/operate/workers-runbook.md` |
 | Workbench runbook | `docs/public/operate/workbench-runbook.md` |

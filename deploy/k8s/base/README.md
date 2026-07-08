@@ -43,11 +43,26 @@ Every ClusterIP Service exposes the node's NodeService port (5005x) + `8085`
 (`bff-external`) on 8085 -- the external entry point (maps to
 the product front door later).
 
+## Running a product on this engine
+
+This base is **product-agnostic**: every image in the table above is a plain
+engine node (`memql:<version>`, one per build tag) with zero compiled-in
+product code. A product runs on it by delivering its DSL at **runtime** -- a
+downstream product overlay adds the
+[`deploy/k8s/components/dsl-bundle`](../components/dsl-bundle) component, which
+runs a data-only DSL bundle image as an init-container that copies the product
+`.memql` tree into a shared volume the node reads at `MEMQL_DSL_PATH`. A `bff`
+is just a plain engine `bff` node fronting that bundle. A release is the
+`{engine version, bundle digest, client digest}` triple pinned in that one
+overlay -- there is no carrier repo and no release lockfile.
+
 ## Multi-replica HA ([#551](https://github.com/znasllc-io/memql/issues/551))
 
-**The product frontend + bff manifests moved to the product pack repo**
-(P3, #2429); this base is engine-only. (identity multi-replica rides the
-env-provided signing key, [#550](https://github.com/znasllc-io/memql/issues/550).)
+**The product frontend + bff manifests live in the downstream product overlay**
+(P3, #2429), not the engine base; a `bff` is a plain engine node fronting the
+product's runtime DSL bundle (see "Running a product on this engine" above).
+(identity multi-replica rides the env-provided signing key,
+[#550](https://github.com/znasllc-io/memql/issues/550).)
 
 **The engine node-types `cognition`, `voice`, `agent`, `planner`,
 `workbench` run 2 replicas + PDBs (#561).** Multi-replica was unsafe because
@@ -68,9 +83,10 @@ automations could double-fire; both paths are now cluster-singleton:
    `duplicatesPrevented` means events do reach multiple replicas (and we're
    correctly collapsing them); `claimErrors > 0` flags any unguarded window.
 
-**The product `bff` replica policy** is the product pack repo's concern
-(its carrier must pin a memQL version carrying these guards before going
-multi-replica). **`identity`** HA is
+**The product `bff` replica policy** is the product overlay's concern: before
+going multi-replica it must pin an engine image digest that carries these
+guards (>= the #561 version), expressed as the overlay digest -- not a
+carrier's compile-time memQL pin. **`identity`** HA is
 [#550](https://github.com/znasllc-io/memql/issues/550); the product SPA's
 replica story is in [#551](https://github.com/znasllc-io/memql/issues/551).
 

@@ -163,13 +163,13 @@ func TestPushRequiresRegistry(t *testing.T) {
 
 // TestStandaloneBuildResolves is the CI-style guard for issue #493's
 // core requirement: a release build with GOWORK=off (no workspace)
-// must resolve every dependency from go.mod/go.sum alone. memQL is
-// the upstream module -- it does NOT import any product carrier in
-// source (the BFF imports memQL and mounts its DSL via
-// dsl.RegisterTree), so there is nothing BFF-shaped to resolve here;
-// the test simply proves the standalone graph is self-contained so a
-// containerized release build (which runs without go.work) cannot
-// regress into needing the workspace.
+// must resolve every dependency from go.mod/go.sum alone. The engine
+// is product-agnostic -- it compiles in no product code, and product
+// DSL is mounted at RUNTIME via MEMQL_DSL_PATH (a data-only bundle),
+// not compile-linked from a carrier. So there is nothing product-shaped
+// to resolve here; the test simply proves the standalone graph is
+// self-contained so a containerized release build (which runs without
+// go.work) cannot regress into needing the workspace.
 func TestStandaloneBuildResolves(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping standalone build in -short mode")

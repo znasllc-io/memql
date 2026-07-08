@@ -9,6 +9,8 @@ owner: znas
 
 # Deployment v2 — GitOps + progressive delivery (RFC)
 
+**Superseded by:** platform-consolidation (#2472).
+
 **Status:** DRAFT — pending owner sign-off (epic znasllc-io/memql#697, Phase 0 #698)
 **Author:** Platform/Staff (ZNAS LLC)
 **Date:** 2026-06-02

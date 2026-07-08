@@ -18,10 +18,11 @@ from a UI instead of a terminal, for both **staging** and
 It is a **read + action surface** over the existing machinery. It does
 not reimplement any of it: Git stays the single source of truth, Argo
 CD reconciles each env to the digest-pinned overlay, Argo Rollouts
-drives progressive delivery, and the release lockfile pins every
-component by digest. This guide is the console-driven workflow; the
-underlying mechanics live in the deployment-v2 docs cross-linked at the
-bottom and are not duplicated here.
+drives progressive delivery, and a single env overlay pins the release
+as `{engine version, bundle digest, client digest}`. This guide is the
+console-driven workflow; the underlying mechanics live in the
+deployment-v2 docs cross-linked at the bottom and are not duplicated
+here.
 
 ## The two surfaces
 
@@ -59,11 +60,11 @@ Both surfaces show the same per-env state. Scope it with the env
 toggle (portal) or the per-env rows (cockpit).
 
 - **Version + digests** -- the deployed release version and the
-  per-component image `@sha256:` digests for the 8 components, read
-  from the committed env overlay (`deploy/k8s/overlays/<env>`) and the
-  matching release lockfile (`releases/<version>.yaml` in the deploy repo
-  -- the product carrier checkout, `MEMQL_DEPLOY_REPO_ROOT`:
-  `engineVersion` / `validatedAt` / `gate`).
+  per-component image `@sha256:` digests, read from the committed env
+  overlay (`deploy/k8s/overlays/<env>` under the deploy repo,
+  `MEMQL_DEPLOY_REPO_ROOT`). That one overlay pins the release directly
+  as `{engine version, bundle digest, client digest}` -- there is no
+  separate per-version lockfile.
 - **Argo CD** -- the `memql` Application's sync status (Synced /
   OutOfSync), health (Healthy / Progressing / Degraded), last sync, and
   drift (live-vs-desired). In the cockpit these are color-coded like
@@ -86,7 +87,7 @@ Git or the reconciler:
 | Action | What it does | Confirmation |
 |--------|--------------|--------------|
 | **Deploy to staging** | Runs the `promote.sh` digest-bump into the staging overlay for the chosen version; Argo CD then reconciles. | Version required. |
-| **Promote staging to prod** | Digest-copy of a validated lockfile into the prod overlay (`promote.sh` semantics) -- no rebuild. | **Type-to-confirm** (re-enter the exact version). |
+| **Promote staging to prod** | Digest-copy of the validated `{engine, bundle, client}` digests into the prod overlay (`promote.sh` semantics) -- no rebuild. | **Type-to-confirm** (re-enter the exact version). |
 | **Roll back** | `git revert` of the env overlay commit; Argo CD reconciles back to the prior digest set. | **Type-to-confirm** (re-enter the commit SHA, or `rollback`). |
 | **Rollout promote / abort** | `kubectl argo rollouts promote|abort` for a BFF/engine Rollout in the chosen env. | `abort` is **type-to-confirm**; `promote` is immediate. |
 
@@ -134,7 +135,7 @@ the fact: actor, env, target version / digest, and outcome.
 
 The console is the day-to-day path. Drop to the terminal for anything
 the console does not cover -- suspending Argo auto-sync, emergency
-direct `kubectl` changes, lockfile assembly, or DR. Those procedures
+direct `kubectl` changes, or DR. Those procedures
 are owned by the deployment-v2 runbooks:
 
 - Argo CD break-glass (suspend / resume auto-sync):
@@ -142,8 +143,8 @@ are owned by the deployment-v2 runbooks:
 - Rollouts promote / abort / watch reference: the product carrier repo's
   `deploy/rollouts/README.md` (pack-owned since the product deploy estate
   moved out of this repo)
-- Release lockfile + promotion mechanics: the product carrier repo's
-  `releases/README.md`
+- Overlay digest-pin + promotion mechanics:
+  [`deploy-bundle-runbook.md`](deploy-bundle-runbook.md)
 - Disaster recovery:
   [`docs/internal/ops/dr-runbook.md`](../../internal/ops/dr-runbook.md)
 

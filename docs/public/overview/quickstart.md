@@ -18,9 +18,11 @@ owner: znas
 - **k3d + kubectl** (`brew install k3d kubectl`)
 - **Go 1.26.1+** (for building the node images locally)
 
-The engine's local overlay is engine-only: a downstream product's SPA
-and its carrier image are built and deployed from their own repos, not
-from this one.
+The engine's local overlay is engine-only. A product runs on this
+engine by delivering its DSL at runtime: a tiny data-only bundle image,
+mounted via `MEMQL_DSL_PATH` by the `dsl-bundle` kustomize component, so
+the bff is a plain product-agnostic engine node. A downstream product's
+client SPA still builds and deploys from its own repo, not from this one.
 
 ---
 
@@ -106,10 +108,11 @@ k3d world -- each service is reached with its own port-forward:
 | **Engine gRPC head (mcp)** | `svc/mcp 50051:50051` | gRPC for cockpit / SDKs |
 | **PostgreSQL** | `svc/postgres 5432:5432` | `make db` opens a psql shell |
 
-A downstream product's SPA and bff carrier are not part of the engine
-overlay; they ship from their own repos. The local voice lane rides a
-LiveKit Cloud project (Epic #2184), so there is no in-cluster LiveKit
-Service to forward.
+A downstream product's client SPA is not part of the engine overlay; it
+ships from its own repo. A product's bff is a plain engine node fronting
+the product's runtime DSL bundle (`MEMQL_DSL_PATH`). The local voice lane
+rides a LiveKit Cloud project (Epic #2184), so there is no in-cluster
+LiveKit Service to forward.
 
 **Database credentials:** `memql / memql_dev` on database `memql`.
 

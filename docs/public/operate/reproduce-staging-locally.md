@@ -26,7 +26,7 @@ cross-node mesh bugs reproduces locally instead of only on staging.
 | Orchestrator | ArgoCD (k3d) | ArgoCD (AKS) | identical |
 | Manifests | `deploy/k8s/overlays/local/` | `deploy/k8s/overlays/staging/` | same base, env config differs |
 | Node-type split | identity / voice / mcp / cognition / agent / planner / workbench / voice-agent | same | identical (the product `bff` head is pack-owned, #2204) |
-| Build model | engine (`Dockerfile`) for ALL node types (`memql-<type>:local`); product stacks overlay carrier builds via the carrier hook | carrier builds for product node types (product repo's pipeline) | engine-only here; see [downstream-stacks.md](downstream-stacks.md) |
+| Build model | engine (`Dockerfile`) for ALL node types (`memql-<type>:local`), product-agnostic | same product-agnostic engine images | identical -- a product's DSL mounts at runtime via `MEMQL_DSL_PATH` (the `dsl-bundle` component), not a per-product image; see [downstream-stacks.md](downstream-stacks.md) |
 | Replicas per mesh node (default) | **1** (scale to 2 with `make scale N=2`) | **2** | equivalent |
 | Per-replica node id | `fieldRef: metadata.name` (downward API, same as staging) | `fieldRef: metadata.name` | **identical** |
 | `MEMQL_NODE_ID` uniqueness | enforced by fieldRef -- unique per pod | enforced by fieldRef | identical |
@@ -49,8 +49,9 @@ cross-node mesh bugs reproduces locally instead of only on staging.
   you must push your branch before ArgoCD can sync it.
 
 No product sibling repo is required: the engine cluster builds every node
-image from this repo's Dockerfile. Product stacks bring their own carrier
-builds via the carrier hook (see
+image from this repo's Dockerfile, product-agnostic. A product layers in at
+runtime by mounting its DSL bundle at `MEMQL_DSL_PATH` (the `dsl-bundle`
+component) -- there are no per-product node images (see
 [downstream-stacks.md](downstream-stacks.md)).
 
 No genesis env file is required for `make up`; dev secrets are hardcoded
@@ -101,10 +102,11 @@ After `make up`, these local ports are forwarded from the k3d cluster:
 | `7880` | livekit (WebSocket) |
 | `5432` | Postgres (direct) |
 
-The product SPA (`:8080`) and the `bff` carrier gRPC head (`:50051`) are NOT
-part of the engine repo's local overlay (#2204) -- they are built and pinned
-from their own sibling repos. The local engine gRPC head is the `mcp` node,
-reached on demand:
+The product SPA (`:8080`) and the product `bff` gRPC head (`:50051`) -- a
+plain engine `bff` node fronting the product's DSL bundle -- are NOT part of
+the engine repo's local overlay (#2204); they are wired from the product's own
+overlay (the client image + the `dsl-bundle` component). The local engine gRPC
+head is the `mcp` node, reached on demand:
 
 ```bash
 kubectl port-forward -n memql svc/mcp 50051:50051
@@ -135,7 +137,7 @@ make dev PULL_INFRA=1
 
 `make dev` does:
 
-1. `docker build` the node image from this repo's Dockerfile (`BUILD_TAGS=<type>`); a downstream product stack overrides a subset via the carrier hook.
+1. `docker build` the node image from this repo's Dockerfile (`BUILD_TAGS=<type>`), product-agnostic; a product delivers its DSL at runtime via `MEMQL_DSL_PATH` (the `dsl-bundle` component), not by rebuilding the image.
 2. `k3d image import` -- loads the image into the cluster's containerd.
 3. `kubectl rollout restart deployment/<node>` -- triggers a pod roll so
    the new image is used. ArgoCD's `ignoreDifferences` does not cover
@@ -191,7 +193,11 @@ with its justification.
 - **Service set:** identity / voice / mcp / cognition / agent / planner /
   workbench / voice-agent (the product `bff` head and SPA are pack-owned,
   #2204).
-- **Build source per node** (engine-built here; carrier-built within a product stack -- the #1053 rule, revised).
+- **Build source per node:** every node is the same **product-agnostic engine
+  image** (built here from this repo's Dockerfile; digest-pinned in staging) --
+  local and staging never diverge on build. Only the **DSL bundle** mounted at
+  runtime (`MEMQL_DSL_PATH`) differs per product (the #1053 rule, revised under
+  platform consolidation #2472).
 - **`fieldRef: metadata.name`** for `MEMQL_NODE_ID` on every Deployment in
   `deploy/k8s/base/` -- identical to staging.
 - **ArgoCD `ignoreDifferences`** on `/spec/replicas` -- identical to staging.
@@ -258,6 +264,7 @@ that pair is absent, in which case identity is reached via the port-mapped
 `:8085` instead). This mirrors the cloud ingress topology. The **gRPC** heads
 are still reached via kubectl port-forward -- identity is not exposed on gRPC
 externally, and the `mcp` engine gRPC head `:50051` is forwarded on demand.
-Postgres `:5432` is likewise port-forwarded; the product SPA + product `bff`
-carrier are engine-external and absent locally (#2204); the voice/media plane
-is LiveKit Cloud, reached outbound -- no local port-forward.
+Postgres `:5432` is likewise port-forwarded; the product SPA + the product
+`bff` (a plain engine node fronting the product's DSL bundle) are
+engine-external and absent locally (#2204); the voice/media plane is LiveKit
+Cloud, reached outbound -- no local port-forward.

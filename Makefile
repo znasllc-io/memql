@@ -195,10 +195,15 @@ db:
 ## path (I16, #2227). `make up` stays a cluster-bootstrap launcher so the local
 ## inner loop never depends on the owner-gated cockpit deploy.
 ## Downstream product stacks reuse this target with their own overrides
-## (see docs/public/operate/downstream-stacks.md): CARRIER_REPO +
-## CARRIER_NODES [+ CARRIER_CONTEXT] build a subset of node images from the
-## product repo's Dockerfile; APP_NAME + OVERLAY_PATH + REPO_URL register
-## the product's own ArgoCD Application.
+## (see docs/public/operate/downstream-stacks.md). In the common case a
+## product runs on the product-agnostic engine images and DELIVERS ITS
+## DSL AT RUNTIME: a data-only bundle image mounted via the
+## deploy/k8s/components/dsl-bundle init-container at MEMQL_DSL_PATH, with
+## APP_NAME + OVERLAY_PATH + REPO_URL registering the product's own ArgoCD
+## Application. The CARRIER_REPO + CARRIER_NODES [+ CARRIER_CONTEXT] hook
+## (build a subset of node images from a product carrier repo's Dockerfile)
+## is the LEGACY compile-time path, retiring with the platform consolidation
+## (#2472) -- prefer the runtime bundle for new stacks.
 ##   make up                       # current branch as targetRevision
 ##   make up REVISION=main         # pin to main
 ##   make up SERVERS=2 AGENTS=1   # multi-node (see E0.5 / #2067)
@@ -258,8 +263,11 @@ secrets:
 
 ## Inner-loop dev: rebuild image(s), import into k3d, restart Deployment(s).
 ## No direct-apply bypass -- ArgoCD owns the manifests; only pods restart.
-## Downstream product stacks pass CARRIER_REPO + CARRIER_NODES to build a
-## subset of node images from the product repo's Dockerfile instead.
+## Downstream product stacks run the product-agnostic engine images and
+## deliver their DSL at runtime via the dsl-bundle component (MEMQL_DSL_PATH);
+## the CARRIER_REPO + CARRIER_NODES hook (build a subset of node images from a
+## carrier repo's Dockerfile) is the LEGACY compile-time path, retiring with
+## #2472.
 ##   make dev                          # rebuild + restart all app node types
 ##   make dev NODE=cognition           # one node type
 ##   make dev NODE=mcp,cognition       # comma-separated list
@@ -414,11 +422,12 @@ proto-gen-check:
 
 .PHONY: release
 
-## Cut an immutable release image memql:<VERSION> from VERSION + the short
-## git SHA (znasllc-io/memql#493, epic #491). memQL is the upstream module;
-## the single number the product SPA pins (its deploy/backend-version, frontend#140)
-## is this image tag, not a go.mod require. The X.Y.Z tag is write-once:
-## pushing over an existing tag is refused without --allow-overwrite.
+## Cut an immutable engine release image memql:<VERSION> from VERSION + the
+## short git SHA (znasllc-io/memql#493, epic #491). The engine ships every node
+## type product-agnostic; this image tag is the engine-version leg of a
+## release's {engine version, bundle digest, client digest} triple, pinned in
+## one deploy overlay (not a standalone backend-version file). The X.Y.Z tag is
+## write-once: pushing over an existing tag is refused without --allow-overwrite.
 ## Implementation lives in scripts/release/release.sh per the function-based
 ## shell-script convention (CLAUDE.md).
 ##   make release                                   # local image, VERSION semver prefix

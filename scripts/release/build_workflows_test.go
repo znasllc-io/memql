@@ -1,9 +1,10 @@
 // Build-speed C3 (#1508, epic #1505): static guard over the engine image-build
-// workflow (.github/workflows/build-engine-images.yml). It builds the two
-// engine images (memql-identity, memql-voice) and pushes them to ACR via OIDC,
-// feeding the release lockfile (#1511). These string assertions keep the
-// workflow's invariants from silently regressing; the real build is exercised
-// by a workflow_dispatch on main.
+// workflow (.github/workflows/build-engine-images.yml). It builds the
+// product-agnostic engine images (memql-identity, memql-voice) and pushes them
+// to ACR via OIDC; the built engine digests pin directly into a release's
+// {engine, bundle, client} deploy overlay (no release lockfile). These string
+// assertions keep the workflow's invariants from silently regressing; the real
+// build is exercised by a workflow_dispatch on main.
 package release
 
 import (

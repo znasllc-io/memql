@@ -107,8 +107,8 @@ make deploy VERSION=X
 kubectl logs -n memql deployment/cognition -f
 ```
 
-See DEPLOYMENT_STRATEGY.md (see the product pack repo's docs/operate/deployment-strategy.md) for the full deploy
-flow and topology.
+See [docs/public/operate/deploy-bundle-runbook.md](../operate/deploy-bundle-runbook.md)
+for the full deploy flow and topology.
 
 **Developer Access:** [x] All developers
 
@@ -162,7 +162,7 @@ for the operator-side narrative.
 
 - AKS pulls images from ACR (`acrmemql.azurecr.io`)
 - Secrets managed via the genesis A2 sealed envelope + Azure Key Vault
-  (`kv-memql-<env>`); see DEPLOYMENT_STRATEGY.md
+  (`kv-memql-<env>`); see [docs/public/operate/deploy-bundle-runbook.md](../operate/deploy-bundle-runbook.md)
 - Environment variables injected at runtime
 
 ---
@@ -313,7 +313,7 @@ psql postgres://memql:memql_dev@localhost:5432/memql            # PostgreSQL she
 # Testing
 go test ./...                    # Run Go test suite
 
-# Deployment (Azure AKS) -- see docs/public/operate/deployment-strategy.md
+# Deployment (Azure AKS) -- see docs/public/operate/deploy-bundle-runbook.md
 make deploy VERSION=X            # Deploy to staging (cockpit break-glass, scripts/deploy/cockpit.sh)
 
 # Dev secrets workflow
@@ -354,7 +354,8 @@ for the full design.
   genesis A2 sealed envelope (`MEMQL_GENESIS_B64` in the `memql-secrets`
   Secret), backed up in Azure Key Vault (`kv-memql-<env>`). Per-node,
   non-secret config lives in the k8s manifest env. See
-  DEPLOYMENT_STRATEGY.md for the canonical add/rotate flow.
+  [docs/public/operate/deploy-bundle-runbook.md](../operate/deploy-bundle-runbook.md)
+  for the canonical add/rotate flow.
 - Everything else lives in memQL's `v1:platform:globalSecret` /
   `v1:platform:globalVariable` concepts
 - Never commit secrets to git
