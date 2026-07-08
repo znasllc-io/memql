@@ -408,28 +408,41 @@ local repro is the 2-replica parity cluster (`make up SERVERS=2` +
 class. See
 [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
 
-#### Node image source: engine-built by default; carrier-built per product stack (#1053, revised)
+#### Node image source: product-agnostic engine images + runtime DSL delivery (platform consolidation #2472)
 
-The ENGINE repo's local cluster (`make up` / `make dev` here) builds EVERY
-app node type -- identity, voice, mcp, cognition, agent, planner, workbench
--- from THIS repo's Dockerfile (`BUILD_TAGS=<type>`), tagged
-`memql-<type>:local`. The engine cluster runs engine DSL only; no product
-code is involved.
+**The engine is the whole platform.** Every node type -- identity, bff,
+cognition, agent, planner, voice, workbench, mcp -- ships as a
+**product-agnostic engine image** from THIS repo's Dockerfile
+(`BUILD_TAGS=<type>`). There are no per-product node images and no
+carrier-built nodes in the common case. Reusable capabilities (chat,
+daily-space, avatar, ...) live in the engine as **generic, DSL-configurable
+features**, never product code.
 
-A node that executes a PRODUCT's DSL (prompt templates, product
-tools/concepts consumed by the agent/cognition/planner integrations) must be
-**carrier-built** in that product's stack: compiled from the product carrier
-repo's Dockerfile with `BUILD_TAGS=<type>` and the workspace parent as build
-context, so the product DSL subtree is mounted at compile time via
-`RegisterTree`. A pure-engine image does not carry product DSL and will fail
-on product prompt templates. Product stacks layer those builds over the
-engine tooling via the generic carrier hook (`CARRIER_REPO` /
-`CARRIER_NODES` / `CARRIER_CONTEXT` -- see
-[docs/public/operate/downstream-stacks.md](docs/public/operate/downstream-stacks.md));
-which node types a given product carrier-builds is that product repo's
-decision, declared in ITS Makefile. Within one product's stack the
-carrier-built set MUST be identical in every environment (local, staging,
-prod).
+**Product DSL is delivered at runtime, not compiled in.** A product ships its
+DSL as a tiny data-only **bundle image**; the `dsl-bundle` kustomize component
+(`deploy/k8s/components/dsl-bundle`) runs it as an init-container that copies
+the `.memql` tree into a shared volume the node reads at `MEMQL_DSL_PATH`.
+`dsl.MountRuntimeDomainsFromEnv` (see the `MEMQL_DSL_PATH` section above)
+mounts each product domain via `RegisterTree` at boot, so a plain engine image
+runs any product's DSL with zero compiled-in product code. A "bff" is just a
+plain engine `bff` node fronting a product's bundle -- a deploy concern.
+
+Topology (one product-agnostic engine mesh; a product = a DSL bundle + a
+client; a release = `{engine version, bundle digest, client digest}`):
+
+```
+   product-agnostic engine images (memql, one public repo)
+   identity · bff · cognition · agent · planner · voice · workbench · mcp
+        ▲  mounts the product's DSL bundle at MEMQL_DSL_PATH
+        │  (data-only image → init-container → shared volume)
+   DSL bundle (product)     +     client (SPA)      ← the only per-product artifacts
+```
+
+The compile-time `RegisterTree` carrier model (a `<product>-carrier` Go repo
+building the mesh node images with the product DSL statically linked) is
+**superseded** by this. Genuinely-bespoke product Go (rare) becomes a thin
+optional `bff/` plugin module in the product repo. Full rationale + the
+migration sequence: [docs/internal/design/platform-consolidation.md](docs/internal/design/platform-consolidation.md).
 
 **Build tag reference:** [docs/public/build/build-tags.md](docs/public/build/build-tags.md)
 **Local cluster (staging parity -- THE blessed local topology, memql#2061 / Epic 0):** `make up` (k3d + ArgoCD + the local overlay at `deploy/k8s/overlays/local` + seeded secrets); `make dev [NODE=<type>]` rebuilds an image, imports it into k3d, and rolls the Deployment after Go/MemQL source edits; `make down` tears it down. The cluster mirrors staging along the **mesh-delivery path** (memql#1212) by running the same k8s manifests and ArgoCD reconciliation as AKS: scale to 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench) with `make up SERVERS=2` + `make scale N=2`, each pod carrying a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name` exactly as in staging. The cluster is reached via kubectl port-forwards (identity `:8085`, livekit `:7880`, postgres `:5432`; the engine gRPC head is the `mcp` node on demand: `kubectl port-forward -n memql svc/mcp 50051:50051`) -- there is no nginx front door or `*.local.znas.io` subdomain. The product SPA and the `bff` carrier are NOT part of the engine repo's local overlay (#2204); they layer on from their own repos via the downstream-stack contract. `make status` prints the per-pod node ids (parity litmus). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle. See the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
