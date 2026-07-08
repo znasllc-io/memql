@@ -9,6 +9,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/observe"
 	"github.com/znasllc-io/memql/component/server"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 
 	"github.com/uptrace/bun"
 )
@@ -21,6 +22,14 @@ func (a *App) databaseAndConcepts() {
 		a.fatal("failed to create database", "error", err)
 	}
 	a.db = mnd
+
+	// Mount any product DSL delivered at runtime via MEMQL_DSL_PATH (a bundle
+	// image's init-container populates that volume) BEFORE the first Tree()
+	// walk below. This is what lets a product-agnostic engine image run a
+	// product's DSL with no compiled-in product code (platform-consolidation,
+	// #2472). No-op when MEMQL_DSL_PATH is unset (every carrier/engine node
+	// that ships its DSL at compile time).
+	memqldsl.MountRuntimeDomainsFromEnv(a.Logger)
 
 	// Load concepts from the unified domain-first tree
 	// (dsl/<domain>/concepts.memql) into the global registry. This is

@@ -29,10 +29,10 @@ import (
 //                       reports this, since the overlay is resolved at
 //                       per-file read time.
 //
-// The functions take a dslfs.Overlay-style picker as an injected
-// dependency so this package stays free of the component/memql import
-// cycle (component/memql depends on dsl, not the reverse). The gRPC
-// handler passes the dslfs overlay in.
+// The functions take an origin-label picker as an injected dependency so
+// this package stays free of the component/memql import cycle
+// (component/memql depends on dsl, not the reverse). The gRPC handler passes
+// the dslfs origin helper in.
 
 // PackDomain is one browsable namespace in the unified DSL tree.
 type PackDomain struct {
