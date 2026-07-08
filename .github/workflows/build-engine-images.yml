@@ -1,14 +1,19 @@
 name: build-engine-images
 
-# Build-speed C3 (epic znasllc-io/memql#1505, #1508). Builds + pushes the two
-# ENGINE images (memql-identity, memql-voice) to ACR `acrmemql` on a release
-# cut, moving the build off the operator laptop onto native linux/amd64 CI.
+# Build-speed C3 (epic znasllc-io/memql#1505, #1508). Builds + pushes the
+# PRODUCT-AGNOSTIC ENGINE images to ACR `acrmemql` on a release cut, moving the
+# build off the operator laptop onto native linux/amd64 CI.
+#
+# Platform consolidation (#2472 Step 2 / #2484): the engine now ships EVERY node
+# type as a product-agnostic image -- identity, voice, mcp, and the mesh nodes
+# bff / cognition / agent / planner / workbench. Product DSL is delivered at
+# runtime via MEMQL_DSL_PATH (a bundle image's init-container -> shared volume),
+# so these nodes no longer need to be carrier-built. A product's own repo builds
+# only its tiny DSL-bundle image + its SPA.
 #
 # Auth: GitHub OIDC -> Azure (no long-lived secret). The federated credential
 # subject is `repo:znasllc-io/memql:ref:refs/heads/main`, so this MUST run on
-# main -- hence workflow_dispatch (which runs on the default branch). The
-# carrier nodes (cognition/agent/planner/workbench + the bff) are built by C4
-# in the product carrier repo; the SPA by its own build workflow.
+# main -- hence workflow_dispatch (which runs on the default branch).
 #
 # Tag scheme: memql-<node>:<version>, release tags immutable (mirrors the
 # downstream product pack's deploy build path). The lockfile-assembly step
@@ -56,6 +61,26 @@ jobs:
           # mcp: engine-built (no product DSL), CGO-free -- same shape as
           # identity. Remote MCP node (memql#1554); CI gap fixed in #1581.
           - node: mcp
+            cgo: "0"
+            target: ""
+          # Platform consolidation (#2472 Step 2): every node type now ships as
+          # a PRODUCT-AGNOSTIC engine image. Product DSL is delivered at runtime
+          # via MEMQL_DSL_PATH (dsl.MountRuntimeDomainsFromEnv, #2484), so these
+          # nodes no longer need to be carrier-built. CGO-free, default runtime
+          # stage -- same shape as identity/mcp.
+          - node: bff
+            cgo: "0"
+            target: ""
+          - node: cognition
+            cgo: "0"
+            target: ""
+          - node: agent
+            cgo: "0"
+            target: ""
+          - node: planner
+            cgo: "0"
+            target: ""
+          - node: workbench
             cgo: "0"
             target: ""
     steps:
