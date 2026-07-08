@@ -5,7 +5,7 @@ go 1.26.1
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.8.0
 	github.com/a-h/templ v0.3.1020
-	github.com/anthropics/anthropic-sdk-go v1.55.0
+	github.com/anthropics/anthropic-sdk-go v1.56.0
 	github.com/dgraph-io/ristretto v0.2.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
