@@ -9,6 +9,14 @@ owner: znas
 
 # Build Tags -- Node Type Binaries
 
+> **Platform consolidation (#2472):** build tags still select which node-type
+> binary compiles, but every node type now ships as a **product-agnostic**
+> image -- product DSL is delivered at **runtime** via `MEMQL_DSL_PATH`
+> (a bundle image + init-container), not compiled in. There are no
+> product-specific build tags and no carrier-built nodes in the common case.
+> See the topology in the engine `CLAUDE.md` and
+> [../../internal/design/platform-consolidation.md](../../internal/design/platform-consolidation.md).
+
 memQL uses Go build tags to compile separate binaries for each node type in the distributed cluster. Each binary includes only the code, integrations, and transport layers relevant to its purpose.
 
 ## Node Types

@@ -8,6 +8,18 @@ owner: platform
 
 # Downstream product stacks (the carrier contract)
 
+> **Superseded by platform consolidation (#2472).** The carrier contract
+> below (a `<product>-carrier` Go repo that compile-time-links the product DSL
+> and builds the mesh node images) is being replaced by the **runtime
+> DSL-bundle** model: the engine ships every node as a product-agnostic image
+> and loads product DSL at boot from `MEMQL_DSL_PATH`; a product is a DSL
+> bundle + a client, with no carrier repo and no product node-images. New
+> products stamp the DSL-first template (`memql-project`, default). This page
+> documents the carrier hook that remains valid only while an existing product
+> finishes migrating. See
+> [../../internal/design/platform-consolidation.md](../../internal/design/platform-consolidation.md)
+> and the topology in the engine `CLAUDE.md`.
+
 The memQL engine repo is **product-agnostic**: it builds, runs, and tests
 the engine mesh only, and it contains no product names. A product built on
 memQL is structured as a small constellation of repos consolidated by a
