@@ -1,0 +1,61 @@
+# Reusable kustomize Component: runtime product-DSL bundle delivery.
+#
+# Platform consolidation (#2472 Step 2 / #2484). A product-agnostic engine node
+# runs a product's DSL by mounting it at boot from MEMQL_DSL_PATH. This
+# component adds, to every Deployment labelled `memql/product-dsl: "true"`:
+#
+#   - an emptyDir volume `dsl-bundle`,
+#   - an init-container `dsl-bundle-copy` that copies the product's `.memql`
+#     tree out of the DSL-bundle image into that volume, and
+#   - a `MEMQL_DSL_PATH=/var/lib/memql/dsl` env + volumeMount on the engine
+#     container (index 0),
+#
+# so the plain engine image loads the product DSL with zero compiled-in
+# product code (dsl.MountRuntimeDomainsFromEnv).
+#
+# USAGE (in a product overlay):
+#   components:
+#     - ../../<engine>/deploy/k8s/components/dsl-bundle
+#   labels:                       # or a per-Deployment label patch
+#     - pairs: { memql/product-dsl: "true" }
+#       includeSelectors: false
+#   images:                       # pin the product's bundle image by digest
+#     - name: memql-dsl-bundle
+#       newName: acrmemql.azurecr.io/<product>-dsl-bundle
+#       digest: sha256:...
+#
+# The engine container is index 0 on every mesh node Deployment (bff /
+# cognition / agent / planner / workbench), so the patch is name-agnostic.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  - target:
+      kind: Deployment
+      labelSelector: memql/product-dsl=true
+    patch: |
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: dsl-bundle
+          emptyDir: {}
+      - op: add
+        path: /spec/template/spec/initContainers
+        value:
+          - name: dsl-bundle-copy
+            image: memql-dsl-bundle:latest
+            imagePullPolicy: IfNotPresent
+            command: ["sh", "-c", "cp -a /bundle/. /var/lib/memql/dsl/"]
+            volumeMounts:
+              - name: dsl-bundle
+                mountPath: /var/lib/memql/dsl
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts/-
+        value:
+          name: dsl-bundle
+          mountPath: /var/lib/memql/dsl
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: MEMQL_DSL_PATH
+          value: /var/lib/memql/dsl
