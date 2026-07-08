@@ -19,15 +19,19 @@ import (
 	_ "github.com/znasllc-io/memql/integrations/azureblob"
 	// Platform consolidation (#2472 Step 2/3, Decision 2): reusable
 	// capabilities are absorbed back into the engine as GENERIC,
-	// product-agnostic features. `chat` (the single-utterance-stream
-	// recentChat capability, operating on the core v1:cognition:utterance)
-	// is re-homed here from the product pack -- any product references
-	// integration.chat.recentChat with zero product Go. The remaining Epic-3
-	// (memql#1902) product integrations -- avatardirect, dailyspace, training
-	// -- are still pack-registered pending their own absorption PRs (#2485);
-	// avatarvendor STAYS here (shared vendor-REST core the voice-agent imports).
+	// product-agnostic features. Re-homed here from the product pack (each
+	// operates only on core concepts + engine packages, zero product Go):
+	//   - `chat`         -- recentChat over the core v1:cognition:utterance stream
+	//   - `dailyspace`   -- ensure/rollover a per-user daily space (v1:cognition:space)
+	//   - `avatardirect` -- direct cloud-avatar session (rides the shared avatarvendor)
+	// Any product references integration.<name>.* with zero product Go.
+	// `training` (per-agent train pipeline) is still pack-registered pending its
+	// own absorption PR (#2485) -- it references a product concept that must be
+	// de-coupled first. avatarvendor STAYS here (shared vendor-REST core).
 	_ "github.com/znasllc-io/memql/integrations/actionsearch"
+	_ "github.com/znasllc-io/memql/integrations/avatardirect"
 	_ "github.com/znasllc-io/memql/integrations/chat"
+	_ "github.com/znasllc-io/memql/integrations/dailyspace"
 	_ "github.com/znasllc-io/memql/integrations/database"
 	_ "github.com/znasllc-io/memql/integrations/deployversion"
 	_ "github.com/znasllc-io/memql/integrations/email"
