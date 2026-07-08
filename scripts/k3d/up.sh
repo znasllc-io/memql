@@ -25,11 +25,12 @@
 #   7880  -> livekit
 #   5432  -> postgres (optional debug access)
 #
-# The engine repo runs the engine mesh only -- product frontends and carrier
-# gRPC heads belong to their own repos, which reuse this script with their own
-# --app-name/--overlay-path/--repo-url (#2204). The local engine gRPC head is
-# the `mcp` node; reach it on demand with:
-#   kubectl port-forward -n memql svc/mcp 50051:50051
+# The engine repo runs the engine mesh only -- product frontends belong to their
+# own repos, which reuse this script with their own
+# --app-name/--overlay-path/--repo-url (#2204). Clients (the Cockpit, SDKs)
+# connect to the product-neutral `bff` node -- the client edge -- on demand with:
+#   kubectl port-forward -n memql svc/bff 50051:50051
+# (the `mcp` node is the MCP-protocol head; it also serves gRPC on :50051.)
 #
 # This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
 # JSON result envelope on stdout, human logs on stderr, honest exit codes.
@@ -186,8 +187,8 @@ function create_cluster() {
     #   8085:8085  identity HTTP
     #   7880:7880  livekit WebSocket
     #   5432:5432  postgres (debug)
-    # The mcp gRPC head (:50051) is reached on demand via
-    # `kubectl port-forward -n memql svc/mcp 50051:50051`.
+    # The bff client edge (:50051) is reached on demand via
+    # `kubectl port-forward -n memql svc/bff 50051:50051` (mcp also serves :50051).
     # Downstream stacks add their own LoadBalancer mappings (e.g. a product
     # gRPC head or frontend) via --extra-ports=host:container,... -- k3d LB
     # ports are fixed at cluster-create time, so they must be declared here.
@@ -439,8 +440,9 @@ function print_summary() {
         echo "    ws://localhost:7880              livekit"
         echo "    localhost:5432                   postgres (debug)"
         echo ""
-        echo "  Engine gRPC head (mcp), on demand:"
-        echo "    kubectl port-forward -n ${NAMESPACE} svc/mcp 50051:50051"
+        echo "  Client edge (Cockpit / SDKs), on demand:"
+        echo "    kubectl port-forward -n ${NAMESPACE} svc/bff 50051:50051"
+        echo "    (mcp is the MCP-protocol head; also serves gRPC on :50051)"
         echo ""
         echo "  Next steps:"
         echo "    1. Watch ArgoCD sync:  kubectl get apps -n argocd -w"
