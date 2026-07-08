@@ -24,6 +24,8 @@ var knownExternalRegistryNames = map[string]bool{
 	"LANG":                true,
 	"TZ":                  true,
 	"CI":                  true,
+	// LiveKit runtime-platform var (see cmd/envscan/scan.go `external`).
+	"LIVEKIT_PUBLIC_URL": true,
 }
 
 var knownExternalRegistryPrefixes = []string{"GITHUB_", "RUNNER_", "GO"}

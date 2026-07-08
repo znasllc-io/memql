@@ -49,6 +49,11 @@ var external = map[string]bool{
 	"LANG":                true,
 	"TZ":                  true,
 	"CI":                  true,
+	// LiveKit runtime-platform var (LiveKit's own convention, not memQL-owned
+	// config): the externally-dialable LiveKit URL that avatardirect + the
+	// voice-agent hand to the cloud media plane. The memQL-owned equivalent is
+	// MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL; this bare form is the third-party knob.
+	"LIVEKIT_PUBLIC_URL": true,
 }
 
 // externalPrefixes are key prefixes owned by the CI / build / Go
