@@ -997,22 +997,41 @@ The per-type Go packages still expose embedded FS variables, but
 loaders read through `Source()`, which routes through
 [`component/memql/dslfs`](component/memql/dslfs/dslfs.go).
 
-### `MEMQL_DSL_PATH` override
+### `MEMQL_DSL_PATH` — runtime product-DSL delivery
 
-When `MEMQL_DSL_PATH` is unset, the binary reads its baked-in embedded
-tree. When `MEMQL_DSL_PATH=/path/to/dsl-root` is set and the root
-contains a namespace sub-directory with the expected
-`<construct>s.memql` files (e.g. `<root>/cognition/queries.memql`),
-that tree reads from disk instead of the embedded copy. Per-namespace
-partial overrides are supported — missing-from-disk constructs fall
-back to embedded.
+`MEMQL_DSL_PATH` mounts **additional product-DSL domains from disk at
+boot**, so a **product-agnostic engine image runs a product's DSL with zero
+compiled-in product code** (platform-consolidation, #2472). When it is set,
+`dsl.MountRuntimeDomainsFromEnv` (called before the first tree walk) scans
+the root for product-domain sub-directories and registers each into the
+unified tree via `RegisterTree(domain, os.DirFS(<root>/<domain>))` — the same
+overlay a carrier uses at compile time (`dsl/embed.go`), sourced from disk.
+No-op when unset.
 
-Use cases:
-- Dev hacking — point at the in-tree `dsl/` so a restart picks up
-  edits without rebuilding the binary.
-- Per-deploy patches — overlay a small subset on top of an immutable
-  image.
-- Tests / fixtures — pin loaders to a fixture tree.
+Layout mirrors the embedded tree — one directory per product namespace:
+
+```
+$MEMQL_DSL_PATH/
+  <productDomain>/
+    concepts.memql  queries.memql  mutations.memql  tools.memql  ...
+    prompts/*.tmpl
+```
+
+Semantics:
+- **Adds new domains.** A directory whose name collides with a core embedded
+  domain (e.g. `cognition`) is skipped — the embedded tree owns that
+  namespace. `MEMQL_DSL_PATH` delivers *product* domains, it does not patch
+  core ones.
+- **Fail-loud.** The mounted tree loads through the same strict-boot gate as
+  the embedded tree: a malformed construct refuses boot (`MEMQL_DSL_ALLOW_SKIPS`
+  is the operator break-glass).
+- **Directories beginning with `_` / `.` are skipped** (soft-disable /
+  hidden), matching the walker convention.
+
+Delivery: a product ships its DSL as a tiny data-only bundle image; an
+init-container copies the `.memql` tree into a shared volume the node reads
+at `MEMQL_DSL_PATH` (see `deploy/k8s/base`). Also handy for dev hacking
+(point at an in-tree product `dsl/`) and test fixtures.
 
 ## DSL dependency tree
 
