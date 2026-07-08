@@ -215,7 +215,7 @@ function wait_for_healthy() {
     kubectl get deploy -n "${NAMESPACE}" >&2 2>/dev/null || true
     info "Mesh litmus:    make status"
     info "Inner loop:     make dev [NODE=<type>]"
-    info "Engine gRPC:    kubectl port-forward -n ${NAMESPACE} svc/mcp 50051:50051"
+    info "Client edge:    kubectl port-forward -n ${NAMESPACE} svc/bff 50051:50051  (Cockpit / SDKs; mcp is the MCP-protocol head)"
 }
 
 #=============================================================================
